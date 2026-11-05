@@ -5,13 +5,13 @@
 
   import { onMount } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { listRoutes } from '$lib/features/routes/api';
   import type { ApiKeySecret } from '$lib/features/access/api-keys/api';
   import { copyText } from '$lib/clipboard';
-  import NavIcon from '$lib/components/NavIcon.svelte';
-  import SecretDialog from '$lib/components/SecretDialog.svelte';
-  import { slidingIndicator } from '$lib/components/indicator';
+  import NavIcon from '$lib/shell/NavIcon.svelte';
+  import SecretDialog from '$lib/shell/SecretDialog.svelte';
+  import { slidingIndicator } from '$lib/shell/indicator';
   import {
     SDK_OPTIONS,
     sdkLabel,

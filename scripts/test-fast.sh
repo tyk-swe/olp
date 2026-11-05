@@ -4,6 +4,10 @@ cd "$(dirname "$0")/.."
 budget=60
 start=$(date +%s)
 go test -mod=readonly -vet=off -count=1 -timeout=60s \
+  ./cmd/olp \
+  ./internal/agents \
+  ./internal/agents/a2a \
+  ./internal/agents/publications \
   ./internal/secrets \
   ./internal/access \
   ./internal/billing \
@@ -15,10 +19,17 @@ go test -mod=readonly -vet=off -count=1 -timeout=60s \
   ./internal/operations/tokenization/estimate \
   ./internal/catalog \
   ./internal/limits \
-  ./internal/runtime \
+  ./internal/release \
   ./internal/routing \
   ./internal/guardrails \
   ./internal/signing \
+  ./internal/mcp \
+  ./internal/mcp/messages \
+  ./internal/mcp/sessions \
+  ./internal/mcp/accounting \
+  ./internal/mcp/upstream \
+  ./internal/mcp/registration \
+  ./internal/grants/personal \
   ./internal/gateway
 pnpm --dir console test --project unit --project svelte
 node --test scripts/check-docs.test.mjs scripts/check-release-version.test.mjs

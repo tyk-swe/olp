@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage, isEtagMismatch } from '$lib/api/http';
+  import { errorMessage, isEtagMismatch } from '$lib/management/http';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import {
     createPricingSource,
@@ -14,9 +14,9 @@
     type PricingSourceFormat,
     type PricingSourceRefresh,
     type PricingSourceSnapshot
-  } from '$lib/features/usage/api/pricingSources';
+  } from '$lib/features/usage/pricingSources';
   import { pricingKeys } from '$lib/features/usage/pricingKeys';
-  import type { PriceDraft } from '$lib/features/usage/api/pricing';
+  import type { PriceDraft } from '$lib/features/usage/pricing';
   import { formatDate } from '$lib/format';
   import {
     bundledCatalogHint,
@@ -25,7 +25,7 @@
     sourceFormatLabel
   } from '$lib/features/usage/pricingSourcePresentation';
 
-  import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
+  import { useMutationIntent } from '$lib/editing/mutationIntent.svelte';
 
   const createIntent = useMutationIntent();
   const publishIntent = useMutationIntent();

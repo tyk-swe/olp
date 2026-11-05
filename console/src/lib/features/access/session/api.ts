@@ -1,8 +1,8 @@
 import { confirmMFA } from '$lib/features/access/mfa/prompt.svelte';
-import type { components } from '$lib/api/schema';
+import type { components } from '$lib/management/schema';
 import { withAuthenticationDeadline } from './requestDeadline';
-import { apiClient } from '$lib/api/client';
-import { ApiProblem, ensureOk, unwrap } from '$lib/api/http';
+import { apiClient } from '$lib/management/client';
+import { ApiProblem, ensureOk, unwrap } from '$lib/management/http';
 import {
   isFixedRole,
   type FixedRole

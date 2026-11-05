@@ -12,7 +12,7 @@
     usageCompleteness,
     usageSeries,
     usageSummary
-  } from '$lib/features/usage/api/usage';
+  } from '$lib/features/usage/usage';
   import { getApiKey } from '$lib/features/access/api-keys/api';
   import {
     budgetStateNote,
@@ -22,9 +22,9 @@
   import CostCalculator from '$lib/features/usage/CostCalculator.svelte';
   import { presentEstimate } from '$lib/features/usage/estimatePresentation';
   import UsageCompletenessStatus from '$lib/features/usage/UsageCompletenessStatus.svelte';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { downloadBlob } from '$lib/download';
-  import { exportUsageCsv } from '$lib/features/usage/api/usage';
+  import { exportUsageCsv } from '$lib/features/usage/usage';
   import {
     formatBudget,
     formatCompact,
@@ -143,6 +143,11 @@
       Traffic, tokens, media units, and estimated costs with visible pricing and
       ingestion completeness.
     </p>
+    <nav class="page-tabs" aria-label="Usage reports">
+      <a aria-current="page" href={resolve('/usage')}>Usage overview</a><a
+        href={resolve('/usage/routing')}>Routing reports</a
+      >
+    </nav>
   </div>
   <button
     class="button button-secondary"

@@ -5,7 +5,7 @@
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import { onMount } from 'svelte';
-  import NavIcon from '$lib/components/NavIcon.svelte';
+  import NavIcon from '$lib/shell/NavIcon.svelte';
   import { setupProgress } from './setupProgress';
   import SetupChecklist from '$lib/features/overview/SetupChecklist.svelte';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
@@ -13,7 +13,7 @@
   import { copyText } from '$lib/clipboard';
   import { getOverview } from '$lib/features/overview/api';
   import { listRequests } from '$lib/features/usage/history/api';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { formatDate, statusLabel, statusTone } from '$lib/format';
 
   let { controlConnected = true }: { controlConnected?: boolean } = $props();

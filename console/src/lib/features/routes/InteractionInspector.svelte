@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { components } from '$lib/api/schema';
+  import type { components } from '$lib/management/schema';
   import { stateLabel } from '$lib/format';
 
   type Inspection = components['schemas']['InteractionInspection'];

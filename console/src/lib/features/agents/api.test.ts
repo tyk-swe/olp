@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { json, route, serve } from '$lib/api/test/transport';
-import { ApiProblem } from '$lib/api/http';
+import { json, route, serve } from '$lib/management/test/transport';
+import { ApiProblem } from '$lib/management/http';
 import * as api from './api';
 
 const id = '0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607';
@@ -360,5 +360,63 @@ describe('personal grant HTTP journey', () => {
     await expect(api.startMCPGrant('foreign', 'key')).rejects.toBeInstanceOf(
       ApiProblem
     );
+  });
+});
+
+it('resolves an unknown call with exact amounts, evidence and a stable retry identity', async () => {
+  const body = {
+    outcome: 'settled' as const,
+    evidence_digest: 'a'.repeat(64),
+    observed_cost: '0.123456789012',
+    observed_charge: '2.000000000001'
+  };
+  serve(async (request) => {
+    route(request, 'POST', `/api/v1/mcp-tool-calls/${id}/resolve`);
+    expect(request.headers.get('Idempotency-Key')).toBe('resolve-intent');
+    expect(await request.json()).toEqual(body);
+    return json({
+      id,
+      status: 'settled',
+      observed_cost: body.observed_cost,
+      observed_charge: body.observed_charge,
+      remaining_cost: '0',
+      remaining_charge: '0'
+    });
+  });
+  expect(await api.resolveToolCall(id, body, 'resolve-intent')).toMatchObject({
+    status: 'settled',
+    remaining_cost: '0',
+    observed_cost: body.observed_cost
+  });
+  serve(() =>
+    json(
+      { title: 'Evidence conflicts with the recorded resolution', status: 409 },
+      409
+    )
+  );
+  await expect(
+    api.resolveToolCall(id, body, 'resolve-intent')
+  ).rejects.toMatchObject({ problem: { status: 409 } });
+});
+
+it('fetches remote task state and cancels through the pinned task operations', async () => {
+  const responses = {
+    GET: { id, status: { state: 'working' } },
+    POST: { id, status: { state: 'canceled' } }
+  };
+  serve((request) => {
+    const cancel = request.method === 'POST';
+    route(
+      request,
+      cancel ? 'POST' : 'GET',
+      `/api/v1/a2a-tasks/${id}/${cancel ? 'cancel' : 'remote'}`
+    );
+    return json(cancel ? responses.POST : responses.GET);
+  });
+  expect(await api.getRemoteTask(id)).toEqual(responses.GET);
+  expect(await api.cancelRemoteTask(id)).toEqual(responses.POST);
+  serve(() => json({ title: 'Remote unavailable', status: 502 }, 502));
+  await expect(api.cancelRemoteTask(id)).rejects.toMatchObject({
+    problem: { status: 502 }
   });
 });

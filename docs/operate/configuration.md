@@ -8,7 +8,7 @@ administration clients use `OLP_MANAGEMENT_URL` and
 Server settings come from environment variables or command-line flags, and flags
 take precedence. Run `olp <subcommand> --help` for the flags accepted by the
 installed binary. The implementation in
-[`internal/config/config.go`](../../internal/config/config.go) is the source for
+[`cmd/olp/config.go`](../../cmd/olp/config.go) is the source for
 generated environment names and defaults.
 
 Credential secrets use mounted files. Database and Valkey URLs can be supplied

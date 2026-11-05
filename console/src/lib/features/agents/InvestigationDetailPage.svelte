@@ -1,7 +1,8 @@
 <script lang="ts">
+  import { formatDate } from '$lib/format';
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { getInvestigation } from './api';
   import { agentKeys } from './agentKeys';
 
@@ -17,36 +18,36 @@
 
 <svelte:head><title>Investigation · OpenLLMProxy</title></svelte:head>
 <a class="text-button" href={resolve('/investigations')}>All investigations</a>
-<header>
-  <p class="eyebrow">Gateway</p>
-  <h1>Investigation</h1>
-</header>
+<div class="page-header">
+  <div>
+    <p class="eyebrow">Agents</p>
+    <h1 class="page-title">Investigation</h1>
+  </div>
+</div>
 {#if investigation.error}
-  <p role="alert">{errorMessage(investigation.error)}</p>
+  <p class="inline-problem" role="alert">{errorMessage(investigation.error)}</p>
 {:else if investigation.isFetching}
-  <p>Loading investigation…</p>
+  <p class="inline-status" role="status">Loading investigation…</p>
 {:else if investigation.data}
   {@const item = investigation.data}
-  <dl>
+  <dl class="detail-list">
     <dt>Project</dt>
     <dd><code>{item.project_id}</code></dd>
     <dt>Saved</dt>
-    <dd>{new Date(item.created_at).toLocaleString()}</dd>
+    <dd>{formatDate(item.created_at)}</dd>
     <dt>Summary</dt>
     <dd class="summary">{item.summary}</dd>
   </dl>
-  <section aria-labelledby="filters-heading">
+  <section class="section" aria-labelledby="filters-heading">
     <h2 id="filters-heading">Filters</h2>
-    <dl>
+    <dl class="detail-list">
       <dt>From</dt>
       <dd>
-        {item.filters.from
-          ? new Date(item.filters.from).toLocaleString()
-          : 'Any'}
+        {item.filters.from ? formatDate(item.filters.from) : 'Any'}
       </dd>
       <dt>To</dt>
       <dd>
-        {item.filters.to ? new Date(item.filters.to).toLocaleString() : 'Any'}
+        {item.filters.to ? formatDate(item.filters.to) : 'Any'}
       </dd>
       <dt>Run</dt>
       <dd>
@@ -80,14 +81,14 @@
       <dd>{item.filters.tool ?? 'Any'}</dd>
     </dl>
   </section>
-  <section aria-labelledby="evidence-heading">
+  <section class="section" aria-labelledby="evidence-heading">
     <h2 id="evidence-heading">Evidence references</h2>
     <p>
       Evidence is accessed separately and may expire under its own retention
       policy.
     </p>
     {#if !item.evidence.length}
-      <p>No references saved.</p>
+      <p class="inline-status">No references saved.</p>
     {:else}
       <ul>
         {#each item.evidence as reference, index (index)}
@@ -129,24 +130,7 @@
 {/if}
 
 <style>
-  header,
-  section {
-    margin: 1rem 0;
-  }
-  dt {
-    font-weight: 600;
-    margin-top: 0.75rem;
-  }
-  dd {
-    margin: 0.25rem 0;
-  }
   .summary {
     white-space: pre-wrap;
-  }
-  code {
-    overflow-wrap: anywhere;
-  }
-  li {
-    margin: 0.5rem 0;
   }
 </style>

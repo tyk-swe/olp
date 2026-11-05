@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { formatDate } from '$lib/format';
+  import ScrollTable from '$lib/components/ScrollTable.svelte';
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import { writable } from 'svelte/store';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { listProjectMemberships } from '$lib/features/access/projects/api';
   import { projectKeys } from '$lib/features/access/projects/projectKeys';
   import { listRuns } from './api';
@@ -28,22 +30,25 @@
 </script>
 
 <svelte:head><title>Runs · OpenLLMProxy</title></svelte:head>
-<header>
-  <p class="eyebrow">Gateway</p>
-  <h1>Runs</h1>
-  <p>
-    Gateway-executed runs for your projects, with steps, approvals and linked
-    spans.
-  </p>
-</header>
+<div class="page-header">
+  <div>
+    <p class="eyebrow">Agents</p>
+    <h1 class="page-title">Runs</h1>
+    <p class="page-description">
+      Gateway-executed runs for your projects, with steps, approvals and linked
+      spans.
+    </p>
+  </div>
+</div>
 <form
+  class="filter-bar"
   onsubmit={(event) => {
     event.preventDefault();
     const project = new FormData(event.currentTarget).get('project');
     filters.set({ project: typeof project === 'string' ? project : '' });
   }}
 >
-  <label>
+  <label class="form-field">
     Project
     <select name="project">
       <option value="">All authorized projects</option>
@@ -52,22 +57,25 @@
       {/each}
     </select>
   </label>
-  <button type="submit">Filter</button>
+  <button class="button button-secondary" type="submit">Filter</button>
 </form>
 {#if projects.error}
-  <p role="alert">{errorMessage(projects.error)}</p>
+  <p class="inline-problem" role="alert">{errorMessage(projects.error)}</p>
 {/if}
 {#if runs.error}
-  <p role="alert">{errorMessage(runs.error)}</p>
+  <p class="inline-problem" role="alert">{errorMessage(runs.error)}</p>
 {:else if runs.isFetching}
-  <p>Loading runs…</p>
+  <div class="loading-state" role="status">Loading runs…</div>
 {:else if !runs.data?.items.length}
-  <p>No runs in this view.</p>
+  <div class="card empty-state">No runs in this view.</div>
 {:else}
-  <div class="records">
-    <table>
+  <ScrollTable label="Agent runs">
+    <table class="data-table">
       <thead
-        ><tr><th>Run</th><th>Project</th><th>API key</th><th>Started</th></tr
+        ><tr
+          ><th scope="col">Run</th><th scope="col">Project</th><th scope="col"
+            >API key</th
+          ><th scope="col">Started</th></tr
         ></thead
       >
       <tbody>
@@ -82,15 +90,16 @@
                 ?.name ?? run.project_id}</td
             >
             <td><code>{run.api_key_id}</code></td>
-            <td>{new Date(run.created_at).toLocaleString()}</td>
+            <td>{formatDate(run.created_at)}</td>
           </tr>
         {/each}
       </tbody>
     </table>
-  </div>
+  </ScrollTable>
 {/if}
-<nav aria-label="Run pages">
+<nav class="page-actions list-pager" aria-label="Run pages">
   <button
+    class="button button-secondary"
     type="button"
     disabled={!$filters.cursor || runs.isFetching}
     onclick={() =>
@@ -98,6 +107,7 @@
     >Newest</button
   >
   <button
+    class="button button-secondary"
     type="button"
     disabled={!!runs.error || !runs.data?.nextCursor || runs.isFetching}
     onclick={() =>
@@ -107,45 +117,9 @@
       }))}>Older</button
   >
   <button
+    class="button button-secondary"
     type="button"
     disabled={runs.isFetching}
     onclick={() => runs.refetch()}>Refresh</button
   >
 </nav>
-
-<style>
-  header,
-  form {
-    margin-bottom: 1rem;
-  }
-  form {
-    display: flex;
-    align-items: end;
-    flex-wrap: wrap;
-    gap: 1rem;
-  }
-  label {
-    display: grid;
-    gap: 0.25rem;
-  }
-  .records {
-    overflow-x: auto;
-  }
-  table {
-    width: 100%;
-    text-align: left;
-  }
-  td,
-  th {
-    padding: 0.75rem;
-    vertical-align: top;
-  }
-  code {
-    overflow-wrap: anywhere;
-  }
-  nav {
-    display: flex;
-    gap: 0.5rem;
-    margin-top: 1rem;
-  }
-</style>

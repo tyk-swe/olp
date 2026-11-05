@@ -20,7 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/sdk/plugin/abi"
+	"github.com/tyk-swe/olp/plugin/abi"
 )
 
 type credentialImportInput struct {

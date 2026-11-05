@@ -1,4 +1,4 @@
-import { gatewayFetch } from '$lib/api/gateway';
+import { gatewayFetch } from '$lib/management/gateway';
 import { validRouteSlug } from '$lib/routeIdentity';
 
 export const translationFormats = [

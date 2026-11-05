@@ -10,15 +10,15 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/agents"
+	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -32,18 +32,18 @@ type WorkflowTool = mcp.WorkflowTool
 const recoveryToolName = "olp_recover_context"
 
 type WorkflowApprovalStore interface {
-	Pause(context.Context, access.Authority, agents.WorkflowApprovalRequest, int) (string, error)
-	Continue(context.Context, access.Authority, string, json.RawMessage, map[string]json.RawMessage, int) (agents.WorkflowContinuation, error)
+	Pause(context.Context, access.Authority, runs.WorkflowApprovalRequest, int) (string, error)
+	Continue(context.Context, access.Authority, string, json.RawMessage, map[string]json.RawMessage, int) (runs.WorkflowContinuation, error)
 }
 
 type WorkflowToolRunner interface {
-	Resolve(context.Context, access.Authority, *runtime.Release, []string) ([]WorkflowTool, error)
+	Resolve(context.Context, access.Authority, *release.Release, []string) ([]WorkflowTool, error)
 	AuthorizeWorkflowTool(access.Authority, WorkflowTool) error
-	Call(context.Context, access.Authority, *runtime.Release, WorkflowTool, string, int, string, json.RawMessage) (json.RawMessage, error)
+	Call(context.Context, access.Authority, *release.Release, WorkflowTool, string, int, string, json.RawMessage) (json.RawMessage, error)
 }
 
 type WorkflowApprovedToolRunner interface {
-	CallApproved(context.Context, access.Authority, *runtime.Release, WorkflowTool, string, int, string, json.RawMessage, agents.WorkflowApproval) (json.RawMessage, error)
+	CallApproved(context.Context, access.Authority, *release.Release, WorkflowTool, string, int, string, json.RawMessage, runs.WorkflowApproval) (json.RawMessage, error)
 }
 
 type workflowCall struct {
@@ -62,7 +62,7 @@ type workflowCall struct {
 	transcript    json.RawMessage
 	resume        *workflowResumeState
 	resumeStart   int
-	approvals     []agents.WorkflowApproval
+	approvals     []runs.WorkflowApproval
 }
 
 func workflowBounds(route, key *limits.WorkflowBounds, request *wire.Request) (limits.WorkflowBounds, limits.WorkflowBounds, *wire.Request, *Error) {
@@ -157,7 +157,7 @@ func workflowDefinitions(family wire.Format, tools []WorkflowTool) (json.RawMess
 
 func (s *Server) workflowAuthority(ctx context.Context, x *call, route *routing.Route, toolsetID string) (*access.Authority, *Error) {
 	authority, err := s.reauthenticateSession(ctx, x, x.workflow.token)
-	if errors.Is(err, runtime.ErrStaleAuthority) {
+	if errors.Is(err, release.ErrStaleAuthority) {
 		return nil, serverError(http.StatusServiceUnavailable, "authority_unavailable", "Key authority is unavailable; retry shortly.")
 	}
 	if err != nil || authority == nil || authority.ID != x.authority.ID || authority.DelegationAgentID != x.authority.DelegationAgentID || authority.DelegationMemberID != x.authority.DelegationMemberID || authority.DelegationPairDigest != x.authority.DelegationPairDigest {

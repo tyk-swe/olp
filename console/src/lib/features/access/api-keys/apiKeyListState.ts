@@ -2,7 +2,7 @@ import {
   emptyCursorHistory,
   listState,
   type CursorHistory
-} from '$lib/lists/pagination';
+} from '$lib/listing/pagination';
 
 export type ApiKeyListState = CursorHistory & { createdBy?: string };
 

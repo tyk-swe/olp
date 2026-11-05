@@ -3,7 +3,7 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { listCatalog, getPublicCatalog } from './api';
   import { catalogKeys } from './catalogKeys';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
 
   let { publicProjectId = '' }: { publicProjectId?: string } = $props();
   const catalog = createQuery(() => ({

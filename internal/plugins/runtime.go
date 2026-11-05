@@ -1,6 +1,6 @@
 // Package plugins installs provider plugins and runs them confined.
 //
-// A plugin is a WebAssembly module that speaks the ABI in sdk/plugin/abi. OLP
+// A plugin is a WebAssembly module that speaks the ABI in plugin/abi. OLP
 // stores it by the SHA-256 digest of the module, and it can't be used until an
 // owner approves the origins its manifest declares. Runtime runs plugin code on
 // wazero within memory and time limits and grants it only a clock, randomness,
@@ -29,7 +29,7 @@ import (
 	"github.com/tetratelabs/wazero/experimental"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 
-	"github.com/tyk-swe/olp/sdk/plugin/abi"
+	"github.com/tyk-swe/olp/plugin/abi"
 )
 
 // Limits bound every instance of a plugin module.

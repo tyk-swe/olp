@@ -32,7 +32,7 @@ Report suspected vulnerabilities privately through the
 
 ## Management authorization
 
-The [management contract](../../openapi/management.json) declares every
+The [management contract](../../management/management.json) declares every
 operation's security requirement: the management operations a session or a
 management token needs, and whether it needs an installation-wide scope.
 `access.Route`, `Stream`, and `Public` mount each route with that requirement,

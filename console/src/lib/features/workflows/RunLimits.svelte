@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { components } from '$lib/api/schema';
+  import type { components } from '$lib/management/schema';
 
   type Limits = components['schemas']['WorkflowRunLimits'];
   type IntegerField = Exclude<keyof Limits, 'max_run_cost'>;

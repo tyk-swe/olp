@@ -1,4 +1,4 @@
-import type { components } from '$lib/api/schema';
+import type { components } from '$lib/management/schema';
 export type AttributionPolicy = components['schemas']['AttributionPolicy'];
 export type AttributionForm = {
   required: string;

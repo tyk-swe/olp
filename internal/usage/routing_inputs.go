@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"iter"
 	"math"
 	"math/big"
 	"time"
@@ -33,6 +34,7 @@ type Performance struct {
 	ObservedAt  time.Time `json:"observed_at"`
 }
 type RoutingInputs struct {
+	priceIndex  map[routingPriceKey][]*RoutingPrice
 	Prices      []RoutingPrice
 	Performance map[string]Performance
 	// Discounts are the multipliers in force now plus every scheduled one;
@@ -43,6 +45,54 @@ type RoutingInputs struct {
 	RateCards            []RoutingRateCard
 	ProjectOrganizations map[string]string
 	RefreshedAt          time.Time
+}
+
+type routingPriceKey struct {
+	kind, model, operation string
+}
+
+func indexRoutingPrices(prices []RoutingPrice) map[routingPriceKey][]*RoutingPrice {
+	if len(prices) < 2 {
+		return nil
+	}
+	index := make(map[routingPriceKey][]*RoutingPrice)
+	for n := range prices {
+		price := &prices[n]
+		key := routingPriceKey{price.ProviderKind, price.Model, price.Operation}
+		index[key] = append(index[key], price)
+	}
+	return index
+}
+
+func (i *RoutingInputs) pricesFor(key routingPriceKey) iter.Seq[*RoutingPrice] {
+	return func(yield func(*RoutingPrice) bool) {
+		if i.priceIndex != nil {
+			for _, price := range i.priceIndex[key] {
+				if !yield(price) {
+					return
+				}
+			}
+			return
+		}
+		for n := range i.Prices {
+			if !yield(&i.Prices[n]) {
+				return
+			}
+		}
+	}
+}
+
+func (p *RoutingPrice) scopePriority() int {
+	if p.ProviderID != nil && p.VendorID != nil {
+		return 3
+	}
+	if p.ProviderID != nil {
+		return 2
+	}
+	if p.VendorID != nil {
+		return 1
+	}
+	return 0
 }
 
 // RoutingDiscount is one multiplier the plan may pin on an attempt.
@@ -105,27 +155,21 @@ func (i *RoutingInputs) Price(kind, provider, vendor, model, operation string, n
 		return nil
 	}
 	var found *RoutingPrice
-	for index := range i.Prices {
-		v := &i.Prices[index]
+	for v := range i.pricesFor(routingPriceKey{kind, model, operation}) {
 		if v.ProviderKind != kind || v.Model != model || v.Operation != operation || v.EffectiveAt.After(now) || v.ProviderID != nil && *v.ProviderID != provider || v.VendorID != nil && *v.VendorID != vendor {
 			continue
 		}
-		p := *v
-		p.ScopePriority = 0
-		if p.VendorID != nil {
-			p.ScopePriority++
-		}
-		if p.ProviderID != nil {
-			p.ScopePriority += 2
-		}
-		if found == nil || p.ScopePriority > found.ScopePriority || p.ScopePriority == found.ScopePriority && (p.EffectiveAt.After(found.EffectiveAt) || p.EffectiveAt.Equal(found.EffectiveAt) && p.Revision > found.Revision) {
-			found = &p
+		if found == nil || v.scopePriority() > found.scopePriority() || v.scopePriority() == found.scopePriority() && (v.EffectiveAt.After(found.EffectiveAt) || v.EffectiveAt.Equal(found.EffectiveAt) && v.Revision > found.Revision) {
+			found = v
 		}
 	}
-	if found != nil {
-		found.ProviderID = &provider
+	if found == nil {
+		return nil
 	}
-	return found
+	pinned := *found
+	pinned.ProviderID = &provider
+	pinned.ScopePriority = found.scopePriority()
+	return &pinned
 }
 func (p *RoutingPrice) Scalar(operation string) *big.Rat {
 	if p == nil {
@@ -364,7 +408,8 @@ func LoadRoutingInputs(ctx context.Context, q access.Queryer, now time.Time) (*R
 	if err = loadRoutingRateCards(ctx, q, now, in); err != nil {
 		return nil, err
 	}
-	return in, rows.Err()
+	in.priceIndex = indexRoutingPrices(in.Prices)
+	return in, nil
 }
 
 // loadRoutingDiscounts reads the multipliers in force plus those scheduled

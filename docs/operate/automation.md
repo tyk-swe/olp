@@ -6,7 +6,7 @@ scoped management token. They do not load the server's database URLs, bootstrap
 token or encryption keys.
 
 CLI commands and management MCP tool schemas are generated from
-`openapi/management.json` by `make api`, so automation follows the same contract
+`management/management.json` by `make api`, so automation follows the same contract
 as the console and other API clients.
 
 ## Connect the CLI

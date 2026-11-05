@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { authLifecycle } from '$lib/features/access/session/lifecycle';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import {
     readSavedFilters,
     saveFilters,

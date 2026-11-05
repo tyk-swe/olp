@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { formatDate } from '$lib/format';
   import { useRole } from '../session/useRole.svelte';
   import {
@@ -11,7 +11,7 @@
     type IncreaseInput
   } from './api';
   import { limitsError, limitForm } from '../budgets/limitForm';
-  import { usePrincipalLifetime } from '$lib/forms/mutationIntent.svelte';
+  import { usePrincipalLifetime } from '$lib/editing/mutationIntent.svelte';
   import { budgetIncreaseKeys } from './budgetIncreaseKeys';
   const access = useRole();
   const client = useQueryClient();

@@ -8,16 +8,16 @@
     updateUser,
     type User
   } from '$lib/features/access/users/api';
-  import type { CursorPage } from '$lib/api/http';
-  import { errorMessage } from '$lib/api/http';
+  import type { CursorPage } from '$lib/management/http';
+  import { errorMessage } from '$lib/management/http';
   import {
     cursorPaginationProps,
     emptyCursorHistory
-  } from '$lib/lists/pagination';
+  } from '$lib/listing/pagination';
   import { FIXED_ROLES } from '$lib/features/access/session/authorization';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import CursorPagination from '$lib/components/CursorPagination.svelte';
-  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
+  import CursorPagination from '$lib/shell/CursorPagination.svelte';
+  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
   import { formatDate } from '$lib/format';
   import { updateMembers } from './bulk';
 
@@ -144,7 +144,7 @@
       await refreshUserViews();
       notice = active
         ? `${updated.display_name} can sign in again.`
-        : `${updated.display_name} was deactivated and existing sessions were revoked. Next: review API Keys for keys attributed to this member; installation-scoped keys are not automatically revoked.`;
+        : `${updated.display_name} was deactivated and existing sessions were revoked. Next: review API keys for keys attributed to this member; installation-scoped keys are not automatically revoked.`;
     });
   }
 </script>
@@ -306,7 +306,7 @@
               >{#if user.id === viewer?.id}<small>Your account</small
                 >{:else if canManage}<button
                   class="button button-secondary"
-                  class:danger-button={user.active}
+                  class:button-danger={user.active}
                   type="button"
                   onclick={() => changeActive(user)}
                   disabled={Boolean(busy)}
@@ -377,9 +377,6 @@
   }
   .role-select:hover:not(:disabled) {
     border-color: var(--border-strong);
-  }
-  .danger-button {
-    color: var(--danger);
   }
   @media (max-width: 64rem) {
     .role-guide {

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { parseJsonObject } from '$lib/forms/json';
+  import { parseJsonObject } from '$lib/editing/json';
   import { parseManualModelNames } from '$lib/features/providers/providerEditor';
   let {
     value = $bindable('{}'),

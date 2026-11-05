@@ -73,7 +73,7 @@
 <svelte:head><title>SCIM provisioning · OpenLLMProxy</title></svelte:head>
 <div class="page-header">
   <div>
-    <p class="eyebrow">Identity</p>
+    <p class="eyebrow">Access</p>
     <h1 class="page-title">SCIM provisioning</h1>
     <p class="page-description">
       Synchronize users and groups from your identity directory while preserving

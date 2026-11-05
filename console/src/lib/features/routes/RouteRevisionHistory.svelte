@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
+  import { useMutationIntent } from '$lib/editing/mutationIntent.svelte';
   import { routeKeys } from '$lib/features/routes/routeKeys';
 
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage as message } from '$lib/api/http';
+  import { errorMessage as message } from '$lib/management/http';
   import {
     diffRouteRevisions,
     listRouteRevisions,

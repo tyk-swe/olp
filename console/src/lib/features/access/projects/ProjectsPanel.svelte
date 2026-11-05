@@ -1,4 +1,8 @@
 <script lang="ts">
+  import ConfirmAction from '$lib/components/ConfirmAction.svelte';
+  import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import { deleteProject } from './api';
+  const access = useRole();
   import AggregateBudgetPanel from '../budgets/AggregateBudgetPanel.svelte';
   import ProjectLimitTemplatesPanel from './ProjectLimitTemplatesPanel.svelte';
   import ProjectAttributionBudgetsPanel from './ProjectAttributionBudgetsPanel.svelte';
@@ -6,7 +10,7 @@
   import ProjectAttributionPolicyPanel from './ProjectAttributionPolicyPanel.svelte';
   import ProjectEndUserPolicyPanel from './ProjectEndUserPolicyPanel.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage, isEtagMismatch } from '$lib/api/http';
+  import { errorMessage, isEtagMismatch } from '$lib/management/http';
   import {
     createProject,
     listAllProjectMembers,
@@ -23,14 +27,14 @@
   import { userKeys } from '$lib/features/access/users/userKeys';
   import { projectKeys } from '$lib/features/access/projects/projectKeys';
   import { formatDate } from '$lib/format';
-  import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import CursorPagination from '$lib/shell/CursorPagination.svelte';
   import {
     cursorPaginationProps,
     emptyCursorHistory,
     resetCursor
-  } from '$lib/lists/pagination';
+  } from '$lib/listing/pagination';
 
-  import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
+  import { useMutationIntent } from '$lib/editing/mutationIntent.svelte';
 
   const createIntent = useMutationIntent();
 
@@ -285,7 +289,20 @@
                   aria-controls="project-members"
                   onclick={() => select(project)}
                   >{selectedId === project.id ? 'Close' : 'Members'}</button
-                ></td
+                >
+                {#if access.allows('DELETE /api/v1/projects/{project_id}')}<ConfirmAction
+                    danger
+                    label="Delete project"
+                    description={`Delete ${project.name}. Projects with dependent resources cannot be deleted`}
+                    identity={`${project.id}:${project.etag}`}
+                    run={(requestId) => deleteProject(project, requestId)}
+                    done={async () => {
+                      if (selectedId === project.id) selectedId = '';
+                      await queryClient.invalidateQueries({
+                        queryKey: projectKeys.root
+                      });
+                    }}
+                  />{/if}</td
               >
             </tr>
           {/each}

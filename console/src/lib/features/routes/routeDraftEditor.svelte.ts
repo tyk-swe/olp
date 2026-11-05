@@ -4,12 +4,12 @@ import { routeKeys } from '$lib/features/routes/routeKeys';
 import { onDestroy, untrack } from 'svelte';
 import { SvelteSet } from 'svelte/reactivity';
 import { goto } from '$app/navigation';
-import { guardUnsavedChanges } from '$lib/forms/unsavedChanges';
-import { nativeObject, parseNativeJSON } from '$lib/json/nativeJson';
-import type { components } from '$lib/api/schema';
+import { guardUnsavedChanges } from '$lib/editing/unsavedChanges';
+import { nativeObject, parseNativeJSON } from '$lib/nativeJson';
+import type { components } from '$lib/management/schema';
 import { resolve } from '$app/paths';
 import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-import { errorMessage, isEtagMismatch } from '$lib/api/http';
+import { errorMessage, isEtagMismatch } from '$lib/management/http';
 import {
   beginReload,
   conflictNotice,
@@ -19,8 +19,9 @@ import {
   markSaved,
   reconcile,
   acceptRemote
-} from '$lib/forms/concurrentEdit';
+} from '$lib/editing/concurrentEdit';
 import {
+  listOperationDialects,
   activateRoute,
   createRouteDraft,
   deleteRouteDraft,
@@ -32,10 +33,14 @@ import {
   type RouteDraft,
   type RouteSimulation
 } from '$lib/features/routes/api';
-import { listProviderModelInventory } from '$lib/features/providers/api/models';
+import { listProviderModelInventory } from '$lib/features/providers/models';
 import { listPublications } from '$lib/features/agents/api';
 import { agentKeys } from '$lib/features/agents/agentKeys';
-import { inspectionDialects } from '$lib/features/routes/inspectionDialects';
+import {
+  discoveredOperations,
+  discoveredSurfaces,
+  inspectionDialects
+} from '$lib/features/routes/inspectionDialects';
 import { useRole } from '$lib/features/access/session/useRole.svelte';
 import { authLifecycle } from '$lib/features/access/session/lifecycle';
 import {
@@ -48,14 +53,13 @@ import {
   policyRulesFrom,
   routeEligibilityWarnings as findRouteEligibilityWarnings,
   routeLifecycleWarnings as findRouteLifecycleWarnings,
-  surfacesFor,
   toRouteModelOptions,
   validateRouteEditor,
   type EditablePolicyRule,
   type EditableTarget,
   type RouteBehavior
 } from '$lib/features/routes/routeEditor';
-import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
+import { useMutationIntent } from '$lib/editing/mutationIntent.svelte';
 
 const simulationNotice =
   'Deterministic attempt order calculated from the saved draft.';
@@ -78,6 +82,26 @@ export class RouteDraftEditorState {
   draft;
   providerModels;
   toolsets;
+  dialects = createQuery(() => ({
+    queryKey: routeKeys.dialects(),
+    queryFn: ({ signal }) => listOperationDialects(signal)
+  }));
+  operationOptions = $derived(
+    discoveredOperations(this.dialects.data?.items ?? [])
+  );
+  surfaces = $derived.by(() =>
+    discoveredSurfaces(
+      this.simulationOperation,
+      this.dialects.data?.items ?? []
+    )
+  );
+  inspectionDialects = $derived.by(() =>
+    inspectionDialects(
+      this.simulationOperation,
+      this.simulationSurface,
+      this.dialects.data?.items ?? []
+    )
+  );
   modelOptions = $derived.by(() =>
     toRouteModelOptions(this.providerModels.data ?? [])
   );
@@ -569,7 +593,7 @@ export class RouteDraftEditorState {
       if (!this.operations.includes(this.simulationOperation)) {
         this.simulationOperation = this.operations[0] ?? 'generation';
       }
-      const surfaces = surfacesFor(this.simulationOperation);
+      const surfaces = this.surfaces;
       if (!surfaces.includes(this.simulationSurface))
         this.simulationSurface = surfaces[0] ?? 'openai';
       const modes = modesFor(this.simulationOperation);
@@ -579,12 +603,7 @@ export class RouteDraftEditorState {
         this.simulationMode = 'unary';
       if (
         this.simulationDialect &&
-        !(
-          inspectionDialects(
-            this.simulationOperation,
-            this.simulationSurface
-          ) as string[]
-        ).includes(this.simulationDialect)
+        !(this.inspectionDialects as string[]).includes(this.simulationDialect)
       )
         this.simulationDialect = '';
     });

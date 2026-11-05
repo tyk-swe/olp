@@ -1,15 +1,18 @@
 # Architecture and gateway execution
 
 This guide maps OLP's feature ownership and explains how a request moves through
-the gateway. Production Go code lives under `internal/`, the public provider
-plugin SDK lives under `sdk/`, and `cmd/olp` starts the binary. The console
+the gateway. Production Go code lives under `internal/`, public packages live
+under capability-named top-level folders such as `plugin/`, `management/`,
+`inference/`, and `guardrails/`, and `cmd/olp` starts the binary. Folders are
+named for the module that owns the behavior, never for a layer, following
+[ADR 0004](../adr/0004-capability-named-folders.md). The console
 mirrors the same feature boundaries under `console/src/lib/features/`.
 PostgreSQL migrations live under `internal/database/migrations/`.
 
 | Area | Backend and console owner |
 | --- | --- |
 | Connections, certification and grants | `internal/providers/`, `internal/connectors/`, `internal/grants/`; console `providers/` |
-| Routes, publication and selection | `internal/routes/`, `internal/routing/`, `internal/runtime/`; console `routes/` |
+| Routes, publication and selection | `internal/routes/`, `internal/routing/`, `internal/release/`; console `routes/` |
 | Users, keys, identity, settings and policy | `internal/access/`, `internal/limits/`; console `access/` |
 | Admission, execution and retained resources | `internal/gateway/`, `internal/resources/`, `internal/media/`; console inference/media |
 | Code mode | `internal/codemode/`, `internal/codeadapter/`, `internal/codeclient/`, `internal/coderesearch/`, `resources/code_*.go`; console code mode |
@@ -17,8 +20,9 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Protocol and lifecycle contracts | `internal/protocols/`, `internal/mediacontract/`, `internal/durablecontract/`, `internal/realtimecontract/`, `internal/geminilifecycle/` |
 | Preparation and failure evidence | `internal/providerinvoke/`, `internal/upstream/` |
 | Accounting, pricing, billing and exports | `internal/usage/`, `internal/billing/`, `internal/export/`; console usage/observability |
-| Plugins and guardrails | `internal/plugins/`, `sdk/plugin/`, `internal/guardrails/`, `internal/contentpolicy/`; matching console features |
-| Promotion and process lifetime | `internal/configuration/`, `internal/config/`, `internal/process/`, `internal/database/` |
+| Plugins and guardrails | `internal/plugins/`, `plugin/`, `internal/guardrails/`, `internal/contentpolicy/`; matching console features |
+| MCP registration, tool execution and personal grants | `internal/mcp/`, `internal/grants/personal/`; console `plugins/`, `agents/` |
+| Promotion and process lifetime | `internal/promotion/` with its domain packages and `internal/promotion/serve/`, `cmd/olp/`, `internal/database/` |
 | Egress, secrets and telemetry | `internal/egress/`, `internal/secrets/`, `internal/observability/`, `internal/telemetry/` |
 
 ## Contracts and feature ownership
@@ -27,7 +31,7 @@ Feature packages own SQL, transactions, validation and audit provenance. Prefer
 concrete types and explicit dependencies; introduce interfaces at actual
 substitution boundaries. Package context supplies names instead of redundant
 provider- or protocol-specific aliases.
-`openapi/management.json` is the management source; `openapi/document.go` embeds
+`management/management.json` is the management source; `management/document.go` embeds
 it. `make api` generates Go/TypeScript types, console authorization requirements
 and safe SDK/CLI/MCP consumer metadata. Unsupported serializer shapes fail
 generation; integration tests enforce contract/handler parity.
@@ -42,6 +46,26 @@ validation. Direct and promoted provider edits share credential-boundary,
 certification-invalidation and staged-inventory operations. Unchanged slots retain
 enrollment lifetime; parent/collection ETags advance coherently. Installation
 serialization protects reauthorization, replay, publication and atomic audit.
+
+MCP follows the same feature ownership. `mcp/registration` owns registration
+validation, revisions, executable permissions, and publication. Direct writes and
+configuration promotion share preparation and persistence operations that return
+new values. `mcp/upstream` owns connections and catalog certification, using the
+same tool-schema compiler as routing snapshots.
+
+The `mcp` executor owns authorization, guardrails, reservation, dispatch, and
+settlement through constructor-injected dependencies. JSON, Streamable HTTP,
+legacy SSE, and workflow adapters translate explicit execution outcomes into
+their response contracts. `mcp/accounting` owns durable accounting and recovery,
+while `mcp/sessions` owns session identity, capacity, expiry, and Valkey persistence.
+`mcp/messages` supplies bounded JSON-RPC handling with raw request IDs to consumer,
+upstream, and management adapters. Management keeps its own authorization and
+administrative dispatch.
+
+`grants/personal` owns personal OAuth, Entra exchange, renewal, and delegated
+signing for MCP and agent calls. Configure-time validation remains with
+registration over the shared types in `grants/config`. See
+[ADR 0003](../adr/0003-mcp-module-seams.md).
 
 ## Runtime and immutable sources
 
@@ -446,13 +470,39 @@ stale versions cannot reduce holds. `usage.PersistDebitResultTx` joins existing
 observed-fact persistence with idempotent result settlement. Run totals and
 reservations are never additional usage charges.
 
-Pure `agentcontract` and `prompts` definitions are distinct from management in
-`agents` and executable operation codecs. Published contracts join immutable
-runtime snapshots; live authority independently checks keys, project/resource
-allowlists, retirement and pinned MCP eligibility. Runtime arguments, rendered
+Pure `agentcontract` and `prompts` definitions are distinct from execution and
+management. Published contracts join immutable runtime snapshots. Snapshot copies
+own their OAuth configuration and task bounds. Live authority independently checks
+keys, project/resource allowlists, retirement and pinned MCP eligibility. Runtime arguments, rendered
 prompts, transcripts and results are never persisted by these foundations.
 Prompt templates remain explicit operator configuration. New execution families
 stay disabled pending their own implementation and qualification.
+
+## Agent execution
+
+`internal/agents` owns the typed execution API and shared send lifecycle. Unary
+and streaming sends share authorization, credential resolution, admission,
+dispatch fencing and settlement. A task is settled before its public identifier
+is returned. Failures before dispatch refund admission. Uncertain acceptance after
+dispatch remains unknown and is never automatically resent.
+
+`agents/a2a` owns HTTP, JSON-RPC, SSE, pinned cards and the official SDK transports
+for A2A 0.3 and 1.0. It converts each incoming request once into canonical SDK
+types. Card validation and dispatch use the same resolved credential. Protocol
+adapters map execution failures to client responses and replace upstream task
+identifiers with public identifiers.
+
+`agents/tasks` owns task admission, persistence, settlement, callback capabilities
+and cancellation claims. `release` authenticates live owners and authorizes pinned
+callback resources through that capability API, without owning task SQL. Consumer
+requests, operator requests and the bounded background monitor share remote task
+operations while retaining their own authorization rules.
+
+`agents/publications` owns draft changes, immutable revisions, credentials and
+trust changes. Saving and publishing return new values. `agents/runs` owns run and
+step accounting, approvals and sealed workflow continuations, shared by agents,
+MCP and gateway execution. `agents/investigations` owns investigation evidence and
+management. Delegation views remain with delegation management in `release`.
 
 ## Diagnostics
 

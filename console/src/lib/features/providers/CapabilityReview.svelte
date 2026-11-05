@@ -1,15 +1,15 @@
 <script lang="ts">
-  import { guardUnsavedChanges } from '$lib/forms/unsavedChanges';
+  import { guardUnsavedChanges } from '$lib/editing/unsavedChanges';
   import {
     type CapabilityCertification,
     type CapabilityDeclaration,
     type ProviderModel
-  } from '$lib/features/providers/api/models';
+  } from '$lib/features/providers/models';
   import {
     capabilityLimitReached,
     MAX_REVIEWED_CAPABILITIES
   } from '$lib/features/providers/providerEditor';
-  import ConflictNotice from '$lib/components/ConflictNotice.svelte';
+  import ConflictNotice from '$lib/shell/ConflictNotice.svelte';
   import { stateLabel } from '$lib/format';
   import CapabilityEvidence from './CapabilityEvidence.svelte';
   import {
@@ -19,7 +19,7 @@
     markDirty,
     markSaved,
     reconcile
-  } from '$lib/forms/concurrentEdit';
+  } from '$lib/editing/concurrentEdit';
 
   let {
     model,

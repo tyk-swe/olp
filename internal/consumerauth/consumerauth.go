@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/release"
 )
 
 type Authenticator interface {
@@ -95,7 +95,7 @@ func Authenticate(auth Authenticator, r *http.Request, token, scope string, trus
 	}
 	authority, err := authenticate(auth, r, token, scope)
 	switch {
-	case errors.Is(err, runtime.ErrStaleAuthority):
+	case errors.Is(err, release.ErrStaleAuthority):
 		return access.Authority{}, &Failure{Status: http.StatusServiceUnavailable, Code: "authority_unavailable", Message: "Key authority is unavailable; retry shortly."}
 	case err != nil || authority == nil:
 		return access.Authority{}, &Failure{Status: http.StatusUnauthorized, Code: "invalid_api_key", Message: "Incorrect API key provided."}
@@ -116,7 +116,7 @@ func authenticate(auth Authenticator, r *http.Request, token, scope string) (*ac
 	if strings.HasPrefix(token, "olpt_") {
 		capability, ok := auth.(TaskCapabilityAuthenticator)
 		if !ok || (scope != "inference" && scope != "tools") {
-			return nil, runtime.ErrInvalidKey
+			return nil, release.ErrInvalidKey
 		}
 		return capability.AuthenticateTaskCapability(r.Context(), token)
 	}
@@ -125,7 +125,7 @@ func authenticate(auth Authenticator, r *http.Request, token, scope string) (*ac
 	}
 	delegation, ok := auth.(DelegationAuthenticator)
 	if !ok || (scope != "inference" && scope != "tools" && scope != "agents") {
-		return nil, runtime.ErrInvalidKey
+		return nil, release.ErrInvalidKey
 	}
 	return delegation.AuthenticateDelegation(r.Context(), token, strings.TrimSpace(r.Header.Get("X-OLP-Agent-Identity")))
 }

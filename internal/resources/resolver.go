@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -50,7 +50,7 @@ func (r *Resolver) Resolve(ctx context.Context, tx pgx.Tx, res *Resource, operat
 func (r *Resolver) resolve(ctx context.Context, query secrets.RowQuerier, res *Resource, operation string) (*routing.Provider, *routing.Route, *routing.Slot, error) {
 	providerRevision := routing.ProviderRevision{RevisionID: res.ProviderRevisionID}
 	err := query.QueryRow(ctx,
-		"SELECT r.provider_id::text,r.configuration,r.models,r.slots,r.name,p.state,p.project_id::text,"+runtime.PluginColumn+" FROM olp.provider_revisions r JOIN olp.providers p ON p.id=r.provider_id WHERE r.id=$1",
+		"SELECT r.provider_id::text,r.configuration,r.models,r.slots,r.name,p.state,p.project_id::text,"+release.PluginColumn+" FROM olp.provider_revisions r JOIN olp.providers p ON p.id=r.provider_id WHERE r.id=$1",
 		res.ProviderRevisionID).Scan(&providerRevision.ID, &providerRevision.Configuration, &providerRevision.Models, &providerRevision.Slots, &providerRevision.Name, &providerRevision.State, &providerRevision.ProjectID, &providerRevision.InstalledPlugin)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, nil, fmt.Errorf("provider revision %s: %w", res.ProviderRevisionID, ErrNoRows)

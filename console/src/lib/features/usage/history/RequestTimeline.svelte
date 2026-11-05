@@ -1,7 +1,7 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
 
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
 
   import {
     formatCost,

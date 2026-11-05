@@ -2,10 +2,10 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { writable } from 'svelte/store';
   import { pluginKeys } from './pluginKeys';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { formatBytes } from '$lib/format';
-  import ReauthenticateDialog from '$lib/components/ReauthenticateDialog.svelte';
-  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
+  import ReauthenticateDialog from '$lib/shell/ReauthenticateDialog.svelte';
+  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
   import {
     beginIdentityReauthentication,
     listOidcIdentities,

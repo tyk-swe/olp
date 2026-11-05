@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/protocols/sse"
-	"github.com/tyk-swe/olp/internal/testutil"
 )
 
 // This checks framing only. The provider codec tests own the canonical
@@ -36,7 +35,7 @@ func TestEventLimitCountsWireBytesAcrossFragmentation(t *testing.T) {
 			for width := 1; width <= len(wire); width++ {
 				for _, limit := range []int{len(withoutBOM) - 1, len(withoutBOM), len(withoutBOM) + 1} {
 					var frames []sse.Frame
-					err := sse.Decode(testutil.Fragmented([]byte(wire), width), limit, func(frame sse.Frame) error {
+					err := sse.Decode(Fragmented([]byte(wire), width), limit, func(frame sse.Frame) error {
 						frames = append(frames, frame)
 						return nil
 					})
@@ -56,7 +55,7 @@ func TestEventLimitCountsWireBytesAcrossFragmentation(t *testing.T) {
 func TestRawFramesPreserveLiteralFramingAndDataRanges(t *testing.T) {
 	wire := "\xef\xbb\xbf: before\r\nid: one\r\nretry: 0010\r\nx-vendor: yes\r\ndata: {\r\n: middle\r\ndata:\t\"model\" : \"native\"}\r\n\r\n: after\n"
 	for _, width := range []int{1, 2, 7, len(wire)} {
-		decoder := sse.NewRawDecoder(testutil.Fragmented([]byte(wire), width), 4096)
+		decoder := sse.NewRawDecoder(Fragmented([]byte(wire), width), 4096)
 		var output strings.Builder
 		for {
 			frame, err := decoder.Next()

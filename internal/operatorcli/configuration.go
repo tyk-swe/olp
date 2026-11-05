@@ -9,7 +9,7 @@ import (
 	"errors"
 
 	"github.com/tyk-swe/olp/internal/management/contract"
-	"github.com/tyk-swe/olp/sdk/management"
+	"github.com/tyk-swe/olp/management"
 )
 
 // SavedPlan contains portable, non-secret desired state and the destination

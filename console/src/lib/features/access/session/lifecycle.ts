@@ -12,7 +12,7 @@ import {
   isMutationRequest,
   isSessionValidationEndpoint
 } from '$lib/features/access/session/requestPolicy';
-import { ApiProblem, abortError, errorMessage } from '$lib/api/http';
+import { ApiProblem, abortError, errorMessage } from '$lib/management/http';
 import {
   sessionIsFresh,
   unauthorizedError

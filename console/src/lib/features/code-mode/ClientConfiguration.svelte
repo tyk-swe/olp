@@ -2,7 +2,7 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { untrack } from 'svelte';
   import { copyText } from '$lib/clipboard';
-  import SegmentedRadioGroup from '$lib/components/SegmentedRadioGroup.svelte';
+  import SegmentedRadioGroup from '$lib/shell/SegmentedRadioGroup.svelte';
   import LoadError from './LoadError.svelte';
   import type {
     CodeClient,
@@ -10,7 +10,7 @@
     CodeClientConfiguration,
     CodeClientSelection,
     CodeRoute
-  } from '$lib/api/code-mode';
+  } from '$lib/management/code-mode';
   import { codeKeys } from './codeKeys';
   import { adapterLabel, clientLabel } from './presentation';
 

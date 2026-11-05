@@ -2,7 +2,7 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { listExposureRoutes } from './api';
   import { catalogKeys } from './catalogKeys';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import ExposurePanel from './ExposurePanel.svelte';
   let open = $state(false);
   let selected = $state('');

@@ -1,4 +1,4 @@
-import type { CredentialSlot } from '$lib/features/providers/api/credentials';
+import type { CredentialSlot } from '$lib/features/providers/credentials';
 export type PaidTargetOption = {
   id: string;
   name: string;
@@ -10,8 +10,12 @@ import type {
   CodeBudget,
   CodePool,
   CodeRoute
-} from '$lib/api/code-mode';
-import { errorMessage, fieldIssues, isEtagMismatch } from '$lib/api/http';
+} from '$lib/management/code-mode';
+import {
+  errorMessage,
+  fieldIssues,
+  isEtagMismatch
+} from '$lib/management/http';
 import { formatInteger } from '$lib/format';
 
 /** The resource an editor creates, or updates when `current` is set. */

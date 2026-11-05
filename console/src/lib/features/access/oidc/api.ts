@@ -1,6 +1,6 @@
-import type { components } from '$lib/api/schema';
-import { apiClient } from '$lib/api/client';
-import { unwrap } from '$lib/api/http';
+import type { components } from '$lib/management/schema';
+import { apiClient } from '$lib/management/client';
+import { unwrap } from '$lib/management/http';
 
 type Schemas = components['schemas'];
 

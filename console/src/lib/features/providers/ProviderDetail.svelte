@@ -1,37 +1,40 @@
 <script lang="ts">
+  import ConfirmAction from '$lib/components/ConfirmAction.svelte';
+  import { goto } from '$app/navigation';
+  import { deleteProvider } from './providers';
   import ProviderBulkModels from './ProviderBulkModels.svelte';
   import ProviderCredentialPool from './ProviderCredentialPool.svelte';
-  import { focusErrorSummary } from '$lib/forms/focusError';
+  import { focusErrorSummary } from '$lib/editing/focusError';
   import { overviewKeys } from '$lib/features/overview/overviewKeys';
   import { providerKeys } from '$lib/features/providers/providerKeys';
 
-  import { guardUnsavedChanges } from '$lib/forms/unsavedChanges';
+  import { guardUnsavedChanges } from '$lib/editing/unsavedChanges';
   import { resolve } from '$app/paths';
   import {
     createQuery,
     keepPreviousData,
     useQueryClient
   } from '@tanstack/svelte-query';
-  import ConflictNotice from '$lib/components/ConflictNotice.svelte';
-  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
+  import ConflictNotice from '$lib/shell/ConflictNotice.svelte';
+  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
   import {
     errorMessage as providerDetailError,
     fieldIssues,
     isEtagMismatch,
     type FieldIssue
-  } from '$lib/api/http';
+  } from '$lib/management/http';
   import {
     updateProvider,
     type Provider
-  } from '$lib/features/providers/api/providers';
+  } from '$lib/features/providers/providers';
   import {
     listProviderModelPage,
     listProviderKinds,
     type ProviderModelPage
-  } from '$lib/features/providers/api/models';
-  import { emptyCursorHistory, resetCursor } from '$lib/lists/pagination';
+  } from '$lib/features/providers/models';
+  import { emptyCursorHistory, resetCursor } from '$lib/listing/pagination';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { usePrincipalLifetime } from '$lib/forms/mutationIntent.svelte';
+  import { usePrincipalLifetime } from '$lib/editing/mutationIntent.svelte';
   import {
     acceptRemote,
     conflictNotice,
@@ -40,7 +43,7 @@
     markDirty,
     markSaved,
     reconcile
-  } from '$lib/forms/concurrentEdit';
+  } from '$lib/editing/concurrentEdit';
   import ProviderConfigurationSection from '$lib/features/providers/ProviderConfigurationSection.svelte';
   import ProviderCredentialsSection from '$lib/features/providers/ProviderCredentialsSection.svelte';
   import BillingImportSection from '$lib/features/providers/BillingImportSection.svelte';
@@ -361,6 +364,20 @@
   </div>
 {:else}
   {@const current = snapshot.data?.provider}
+  {#if current.state === 'draft' && !current.active_revision && access.allows('DELETE /api/v1/providers/{provider_id}')}<ConfirmAction
+      danger
+      label="Delete unused provider"
+      description={`Delete ${current.name} and its draft credentials. Providers referenced by routes or history cannot be deleted`}
+      identity={`${current.id}:${current.etag}`}
+      disabled={Boolean(busy)}
+      run={(requestId) => deleteProvider(current, requestId)}
+      done={async () => {
+        await queryClient.invalidateQueries({
+          queryKey: providerKeys.summaries
+        });
+        await goto(resolve('/providers'));
+      }}
+    />{/if}
   {#key explicitReloadEpoch}
     {#if !canManage}<ReadOnlyNote>
         Your role can view this provider but not change, test, or activate it.

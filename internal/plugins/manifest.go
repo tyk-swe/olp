@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/sdk/plugin/abi"
+	"github.com/tyk-swe/olp/plugin/abi"
 )
 
 const maxManifestBytes = 64 << 10

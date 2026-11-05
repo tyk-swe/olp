@@ -6,51 +6,34 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"net/netip"
 	"slices"
-	"strconv"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/consumerauth"
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/grants/personal"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/mcpgrants"
-	"github.com/tyk-swe/olp/internal/mcpservers"
+	"github.com/tyk-swe/olp/internal/mcp/accounting"
+	"github.com/tyk-swe/olp/internal/mcp/sessions"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/workload"
 )
 
-var ErrUnpricedToolCall = errors.New("tool call has no price for an enforced budget ceiling")
+const (
+	defaultCallTimeout = 30 * time.Second
+	maxCallBodyBytes   = 1 << 20
+)
 
 type RateLimiter interface {
 	Reserve(ctx context.Context, request limits.Request) (*limits.Lease, error)
-}
-
-type PricingState string
-
-const (
-	PricingPriced   PricingState = "priced"
-	PricingFree     PricingState = "free"
-	PricingUnpriced PricingState = "unpriced"
-)
-
-func pricingStateFor(price *string) PricingState {
-	if price == nil {
-		return PricingUnpriced
-	}
-	if resolveAmountIsZero(*price) {
-		return PricingFree
-	}
-	return PricingPriced
 }
 
 func cloneUnitPrice(price *string) *string {
@@ -61,98 +44,18 @@ func cloneUnitPrice(price *string) *string {
 	return &out
 }
 
-type Status string
-
-const (
-	StatusDispatched       Status = "dispatched"
-	StatusSucceeded        Status = "succeeded"
-	StatusUpstreamError    Status = "upstream_error"
-	StatusOutcomeUnknown   Status = "outcome_unknown"
-	StatusSettled          Status = "settled"
-	StatusNotAccepted      Status = "not_accepted"
-	StatusRefusedUnpriced  Status = "refused_unpriced"
-	StatusGuardrailBlocked Status = "guardrail_blocked"
-
-	defaultCallTimeout = 30 * time.Second
-	maxCallBodyBytes   = 1 << 20
-)
-
 type Runtime interface {
+	consumerauth.TaskCapabilityAuthenticator
+	ReauthenticateDelegation(context.Context, string, string) (*access.Authority, error)
 	Authenticate(secret string) (*access.Authority, error)
-	Release() *runtime.Release
+	Release() *release.Release
 	AuthorizeAgentResource(a access.Authority, scope, id, revision, project string) error
 	AuthorizeMCPTool(a access.Authority, id, revision, project, server, serverRevision string) error
 }
 
-type ReserveInput struct {
-	Authority         access.Authority
-	Approval          *agents.WorkflowApproval
-	RunID             string
-	Ordinal           int
-	ToolsetID         string
-	ToolsetRevisionID string
-	ReleaseID         string
-	ToolAlias         string
-	InputDigest       string
-	CallDigest        string
-	UnitPrice         *string
-	ServerID          string
-	ServerRevisionID  string
-}
-
-type Reservation struct {
-	Approval             *agents.WorkflowApproval
-	Authority            access.Authority
-	DispatchID           string
-	ClaimID              string
-	RunID                string
-	StepID               string
-	AttemptID            string
-	APIKeyID             string
-	ProjectID            string
-	ToolsetID            string
-	ToolsetRevisionID    string
-	ToolAlias            string
-	InputDigest          string
-	CallDigest           string
-	AgentPrincipalID     string
-	MemberPrincipalID    string
-	DelegationPairDigest string
-	UnitPrice            *string
-	Currency             string
-}
-
-func (r *Reservation) amount() string {
-	if r == nil || r.UnitPrice == nil {
-		return "0"
-	}
-	return *r.UnitPrice
-}
-
-type AttemptEvidence struct {
-	IdentityDecisions  []IdentityDecision
-	ServerID           string
-	ServerRevisionID   string
-	Status             Status
-	IsError            bool
-	ResultDigest       string
-	StartedAt          time.Time
-	CompletedAt        time.Time
-	GuardrailDecisions []guardrails.Evidence
-}
-
-type Ledger interface {
-	Reserve(ctx context.Context, in ReserveInput) (ReserveResult, error)
-	MarkDispatched(ctx context.Context, reservation *Reservation, evidence AttemptEvidence) error
-	ReleaseUndispatched(ctx context.Context, reservation *Reservation) error
-	RefuseUndispatched(ctx context.Context, reservation *Reservation, evidence AttemptEvidence) error
-	MarkUnknown(ctx context.Context, reservation *Reservation, evidence AttemptEvidence) error
-	Settle(ctx context.Context, reservation *Reservation, evidence AttemptEvidence) error
-}
-
 type GuardrailEvaluation struct {
 	Authority access.Authority
-	Release   *runtime.Release
+	Release   *release.Release
 	Engine    *guardrails.Engine
 	RequestID string
 	Phase     string
@@ -160,49 +63,28 @@ type GuardrailEvaluation struct {
 	Masks     *guardrails.Masking
 }
 
-type Server struct {
-	Executables    *mcpservers.Executables
-	Grants         *mcpgrants.Store
-	Log            *slog.Logger
+type ServerOptions struct {
 	Runtime        Runtime
-	Egress         *egress.Policy
-	Ledger         Ledger
-	Limiter        RateLimiter
+	Executor       *Executor
 	Auth           *secrets.AuthKey
-	Sessions       *SessionStore
+	Grants         *personal.Store
+	Sessions       *sessions.Store
 	TrustedProxies []netip.Prefix
-	Credentials    func(ctx context.Context, credentialID string) ([]byte, error)
-	Guardrails     func(ctx context.Context, in GuardrailEvaluation) (guardrails.Result, error)
-	Now            func() time.Time
-
-	legacyStreams sync.Map
-
-	resultsMu sync.Mutex
-	results   map[string]retainedResult
 }
 
-func (s *Server) log() *slog.Logger {
-	if s.Log != nil {
-		return s.Log
-	}
-	return slog.Default()
+type Server struct {
+	runtime        Runtime
+	executor       *Executor
+	auth           *secrets.AuthKey
+	grants         *personal.Store
+	sessions       *sessions.Store
+	trustedProxies []netip.Prefix
+	legacyStreams  sync.Map
 }
 
-func (s *Server) finishLeases(ctx context.Context, leases []*limits.Lease, dispatched bool) {
-	for _, lease := range leases {
-		finish := lease.Refund
-		action := "refund"
-		if dispatched {
-			finish = lease.Release
-			action = "release"
-		}
-		if err := finish(context.WithoutCancel(ctx)); err != nil {
-			s.log().Warn("tool rate lease "+action+" failed, retrying once", "error", err)
-			if retryErr := finish(context.WithoutCancel(ctx)); retryErr != nil {
-				s.log().Warn("tool rate lease "+action+" failed after retry", "error", retryErr)
-			}
-		}
-	}
+func New(options ServerOptions) *Server {
+	return &Server{runtime: options.Runtime, executor: options.Executor, auth: options.Auth,
+		grants: options.Grants, sessions: options.Sessions, trustedProxies: slices.Clone(options.TrustedProxies)}
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
@@ -219,7 +101,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	}
 }
 
-func releaseIDFor(release *runtime.Release, snapshot *routing.Snapshot) string {
+func releaseIDFor(release *release.Release, snapshot *routing.Snapshot) string {
 	if canonicalUUID(release.ID) {
 		return release.ID
 	}
@@ -256,88 +138,11 @@ var (
 	errCallIDInvalid            = fail(http.StatusBadRequest, "invalid_call_id", "invalid_request_error", "Supply a caller call identifier of 1-256 bytes without control characters.")
 )
 
-func writeError(w http.ResponseWriter, err *apiError) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(err.status)
-	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": err.msg, "type": err.kind, "code": err.code}})
-}
-
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeOutcomeUnknown(w http.ResponseWriter, attemptID, dispatchID, message string) {
-	writeJSON(w, http.StatusBadGateway, map[string]any{
-		"attempt_id": attemptID, "dispatch_id": dispatchID, "status": StatusOutcomeUnknown,
-		"error": map[string]any{"message": message, "type": "api_error", "code": "outcome_unknown"},
-	})
-}
-
-var errGuardrailBlocked = fail(http.StatusBadRequest, "guardrail_blocked", "invalid_request_error", "The tool call could not satisfy the configured guardrails.")
-
-type toolCallError struct {
-	Message string `json:"message"`
-	Type    string `json:"type"`
-	Code    string `json:"code"`
-}
-
-type toolCallRefusal struct {
-	AttemptID  string        `json:"attempt_id"`
-	DispatchID string        `json:"dispatch_id"`
-	Status     Status        `json:"status"`
-	Error      toolCallError `json:"error"`
-}
-
-func writeGuardrailRefusal(w http.ResponseWriter, reservation *Reservation, refusal *apiError) {
-	writeJSON(w, refusal.status, toolCallRefusal{
-		AttemptID: reservation.AttemptID, DispatchID: reservation.DispatchID, Status: StatusGuardrailBlocked,
-		Error: toolCallError{Message: refusal.msg, Type: refusal.kind, Code: refusal.code},
-	})
-}
-
-func writeRepeat(w http.ResponseWriter, resolved resolvedToolset, tool routing.MCPToolsetTool, outcome execution) {
-	repeat := outcome.repeat
-	kind := repeatOutcome(repeat, outcome.repeatRetained)
-	if kind == repeatGuardrailBlocked {
-		writeGuardrailRefusal(w, &Reservation{AttemptID: repeat.AttemptID, DispatchID: repeat.DispatchID}, errGuardrailBlocked)
-		return
-	}
-	if kind == repeatRetainedResult {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"toolset_id": resolved.id, "toolset_revision_id": resolved.revisionID, "name": tool.Alias,
-			"content": outcome.repeatResult.Content, "structured_content": outcome.repeatResult.StructuredContent, "is_error": outcome.repeatResult.IsError,
-			"attempt_id": repeat.AttemptID, "dispatch_id": repeat.DispatchID,
-		})
-		return
-	}
-	code, message := repeatFailure(kind)
-	if kind == repeatOutcomeUnknown {
-		writeOutcomeUnknown(w, repeat.AttemptID, repeat.DispatchID, message)
-		return
-	}
-	writeJSON(w, http.StatusConflict, map[string]any{
-		"attempt_id": repeat.AttemptID, "dispatch_id": repeat.DispatchID, "status": repeat.Status,
-		"error": map[string]any{"message": message, "type": "invalid_request_error", "code": code},
-	})
-}
-
 func callIDFailure(callID *string) *apiError {
 	if callID == nil {
 		return errCallIDRequired
 	}
 	if !validCallID(*callID) {
-		return errCallIDInvalid
-	}
-	return nil
-}
-
-func executeCallIDFailure(callID string) *apiError {
-	if callID == "" {
-		return errCallIDRequired
-	}
-	if !validCallID(callID) {
 		return errCallIDInvalid
 	}
 	return nil
@@ -351,44 +156,34 @@ func canonicalUUID(raw string) bool {
 type delegatedSessionAuthenticator struct{ Runtime }
 
 func (a delegatedSessionAuthenticator) AuthenticateTaskCapability(ctx context.Context, token string) (*access.Authority, error) {
-	auth, ok := a.Runtime.(consumerauth.TaskCapabilityAuthenticator)
-	if !ok {
-		return nil, runtime.ErrInvalidKey
-	}
-	return auth.AuthenticateTaskCapability(ctx, token)
+	return a.Runtime.AuthenticateTaskCapability(ctx, token)
 }
 
 func (a delegatedSessionAuthenticator) AuthenticateDelegation(ctx context.Context, token, assertion string) (*access.Authority, error) {
-	auth, ok := a.Runtime.(interface {
-		ReauthenticateDelegation(context.Context, string, string) (*access.Authority, error)
-	})
-	if !ok {
-		return nil, runtime.ErrInvalidKey
-	}
-	return auth.ReauthenticateDelegation(ctx, token, assertion)
+	return a.Runtime.ReauthenticateDelegation(ctx, token, assertion)
 }
 
 func (s *Server) authenticate(r *http.Request) (access.Authority, *apiError) {
-	return s.authenticateWith(r, s.Runtime)
+	return s.authenticateWith(r, s.runtime)
 }
 
 func (s *Server) authenticateSession(r *http.Request) (access.Authority, *apiError) {
-	if s.Runtime == nil || (r.Header.Get("Mcp-Session-Id") == "" && r.URL.Query().Get("session_id") == "") {
+	if s.runtime == nil || (r.Header.Get("Mcp-Session-Id") == "" && r.URL.Query().Get("session_id") == "") {
 		return s.authenticate(r)
 	}
 	return s.reauthenticateSession(r)
 }
 
 func (s *Server) reauthenticateSession(r *http.Request) (access.Authority, *apiError) {
-	if s.Runtime == nil {
+	if s.runtime == nil {
 		return s.authenticate(r)
 	}
-	return s.authenticateWith(r, delegatedSessionAuthenticator{s.Runtime})
+	return s.authenticateWith(r, delegatedSessionAuthenticator{s.runtime})
 }
 
 func (s *Server) authenticateWith(r *http.Request, auth consumerauth.Authenticator) (access.Authority, *apiError) {
 	token, _ := consumerauth.Bearer(r.Header.Get("Authorization"))
-	authority, failure := consumerauth.Authenticate(auth, r, token, "tools", s.TrustedProxies, s.now())
+	authority, failure := consumerauth.Authenticate(auth, r, token, "tools", s.trustedProxies, time.Now())
 	if failure != nil {
 		kind := "api_error"
 		switch failure.Status {
@@ -415,7 +210,7 @@ func (s *Server) identifyEndUser(r *http.Request, authority access.Authority) (a
 		}
 		return authority, nil
 	}
-	digest, failure := consumerauth.HeaderEndUserDigest(s.Runtime, r, authority)
+	digest, failure := consumerauth.HeaderEndUserDigest(s.runtime, r, authority)
 	if failure != nil {
 		if failure.Status == http.StatusBadRequest {
 			return access.Authority{}, fail(failure.Status, failure.Code, "invalid_request_error", failure.Message)
@@ -452,6 +247,19 @@ const (
 	toolMissing
 )
 
+func toolLookupFailure(found toolLookup) *apiError {
+	switch found {
+	case toolFound:
+		return nil
+	case toolDrifted:
+		return errToolDefinitionChanged
+	case toolInvalidSchema:
+		return errToolSchemaInvalid
+	default:
+		return errToolNotFound
+	}
+}
+
 func (r resolvedToolset) lookup(alias string) (routing.MCPToolsetTool, toolLookup) {
 	if index := slices.IndexFunc(r.tools, func(tool routing.MCPToolsetTool) bool { return tool.Alias == alias }); index >= 0 {
 		return r.tools[index], toolFound
@@ -480,14 +288,14 @@ func (r resolvedToolset) listingFailure() *apiError {
 
 func (s *Server) driftScoped(authority access.Authority, resolved resolvedToolset) bool {
 	return len(resolved.drifted) > 0 && len(resolved.missing) == 0 &&
-		s.Runtime.AuthorizeMCPTool(authority, resolved.id, resolved.revisionID, *authority.ProjectID, "", "") == nil
+		s.runtime.AuthorizeMCPTool(authority, resolved.id, resolved.revisionID, *authority.ProjectID, "", "") == nil
 }
 
-func (s *Server) snapshot() (*runtime.Release, *routing.Snapshot, *apiError) {
-	if s.Runtime == nil {
+func (s *Server) snapshot() (*release.Release, *routing.Snapshot, *apiError) {
+	if s.runtime == nil {
 		return nil, nil, fail(http.StatusServiceUnavailable, "authority_unavailable", "api_error", "Tool serving is unavailable; retry shortly.")
 	}
-	release := s.Runtime.Release()
+	release := s.runtime.Release()
 	if release == nil || release.Snapshot == nil {
 		return nil, nil, fail(http.StatusServiceUnavailable, "authority_unavailable", "api_error", "Tool serving is unavailable; retry shortly.")
 	}
@@ -511,8 +319,8 @@ func (s *Server) resolveToolset(authority access.Authority, snapshot *routing.Sn
 	if !ok {
 		return resolvedToolset{}, errToolsetNotFound
 	}
-	if err := s.Runtime.AuthorizeAgentResource(authority, "tools", toolsetID, revisionID, *authority.ProjectID); err != nil {
-		if errors.Is(err, runtime.ErrStaleAuthority) {
+	if err := s.runtime.AuthorizeAgentResource(authority, "tools", toolsetID, revisionID, *authority.ProjectID); err != nil {
+		if errors.Is(err, release.ErrStaleAuthority) {
 			return resolvedToolset{}, fail(http.StatusServiceUnavailable, "authority_unavailable", "api_error", "Key authority is unavailable; retry shortly.")
 		}
 		resolution, ok := snapshot.MCPToolset(revisionID)
@@ -536,15 +344,15 @@ func (s *Server) resolveToolset(authority access.Authority, snapshot *routing.Sn
 }
 
 type listedTool struct {
-	ToolsetID         string          `json:"toolset_id"`
-	ToolsetRevisionID string          `json:"toolset_revision_id"`
-	Name              string          `json:"name"`
-	Description       string          `json:"description"`
-	InputSchema       json.RawMessage `json:"input_schema"`
-	UnitPrice         *string         `json:"unit_price"`
-	PricingState      PricingState    `json:"pricing_state"`
-	Limits            toolCallLimits  `json:"limits"`
-	BudgetRequired    bool            `json:"budget_required"`
+	ToolsetID         string                  `json:"toolset_id"`
+	ToolsetRevisionID string                  `json:"toolset_revision_id"`
+	Name              string                  `json:"name"`
+	Description       string                  `json:"description"`
+	InputSchema       json.RawMessage         `json:"input_schema"`
+	UnitPrice         *string                 `json:"unit_price"`
+	PricingState      accounting.PricingState `json:"pricing_state"`
+	Limits            toolCallLimits          `json:"limits"`
+	BudgetRequired    bool                    `json:"budget_required"`
 }
 
 func (s *Server) listTools(w http.ResponseWriter, r *http.Request) {
@@ -586,7 +394,7 @@ func (s *Server) listTools(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"tools": tools})
+	writeJSON(w, http.StatusOK, toolsResponse{Tools: tools})
 }
 
 type executionSelection struct {
@@ -624,16 +432,6 @@ func digestBytes(raw []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (s *Server) toolInputDigest(arguments json.RawMessage) string {
-	return hex.EncodeToString(s.Auth.Digest(secrets.ToolInputDigest, string(arguments)))
-}
-
-func (s *Server) release(reservation *Reservation) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_ = s.Ledger.ReleaseUndispatched(ctx, reservation)
-}
-
 func (s *Server) callTool(w http.ResponseWriter, r *http.Request) {
 	authority, failure := s.authenticate(r)
 	if failure != nil {
@@ -660,31 +458,13 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resolved, tool, arguments := prepared.resolved, prepared.tool, prepared.arguments
-	if s.Ledger == nil || s.Egress == nil || s.Auth == nil {
+	if !s.executor.available() {
 		writeError(w, errLedger)
 		return
 	}
 	releaseID := releaseIDFor(release, snapshot)
-	outcome := s.execute(r.Context(), executeInput{authority: authority, resolved: resolved, tool: tool, arguments: arguments, releaseID: releaseID, callID: *request.CallID, release: release, snapshot: snapshot})
-	switch {
-	case outcome.repeat != nil:
-		writeRepeat(w, resolved, tool, outcome)
-	case outcome.blocked != nil:
-		writeGuardrailRefusal(w, outcome.reservation, outcome.blocked)
-	case outcome.failure != nil:
-		if outcome.retryAfter > 0 {
-			w.Header().Set("Retry-After", strconv.FormatInt(int64((outcome.retryAfter+time.Second-1)/time.Second), 10))
-		}
-		writeError(w, outcome.failure)
-	case outcome.outcomeUnknown:
-		writeOutcomeUnknown(w, outcome.reservation.AttemptID, outcome.reservation.DispatchID, outcome.unknownMessage)
-	default:
-		writeJSON(w, http.StatusOK, map[string]any{
-			"toolset_id": resolved.id, "toolset_revision_id": resolved.revisionID, "name": tool.Alias,
-			"content": outcome.result.Content, "structured_content": outcome.result.StructuredContent, "is_error": outcome.result.IsError,
-			"attempt_id": outcome.reservation.AttemptID, "dispatch_id": outcome.reservation.DispatchID,
-		})
-	}
+	outcome := s.executor.Execute(r.Context(), CallRequest{Authority: authority, ToolsetID: resolved.id, ToolsetRevisionID: resolved.revisionID, Tool: tool, Arguments: arguments, ReleaseID: releaseID, CallID: *request.CallID, Release: release, Policies: snapshot})
+	writeExecution(w, resolved, tool, outcome)
 }
 
 func (s *Server) withAssertion(handler http.HandlerFunc) http.HandlerFunc {

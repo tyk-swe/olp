@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { ProviderProfile, ProviderProfilePlugin } from './api/profiles';
+import type {
+  ProviderProfile,
+  ProviderProfilePlugin
+} from './providerProfiles';
 import {
   declaresModels,
   dialectSurface,

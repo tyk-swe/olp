@@ -10,24 +10,24 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/consumerauth"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/release"
 )
 
 type delegationRuntime interface {
-	CreateDelegation(context.Context, access.Authority, access.Authority, runtime.DelegationBounds) (runtime.DelegationGrant, error)
+	CreateDelegation(context.Context, access.Authority, access.Authority, release.DelegationBounds) (release.DelegationGrant, error)
 	AuthenticateDelegation(context.Context, string, string) (*access.Authority, error)
 	ReauthenticateDelegation(context.Context, string, string) (*access.Authority, error)
 }
 
 type memberConsentRuntime interface {
-	ExchangeMemberConsent(context.Context, access.Authority, string, runtime.DelegationBounds) (runtime.DelegationGrant, error)
+	ExchangeMemberConsent(context.Context, access.Authority, string, release.DelegationBounds) (release.DelegationGrant, error)
 }
 
 func (s *Server) reauthenticateSession(ctx context.Context, x *call, token string) (*access.Authority, error) {
 	if x.authority.TaskCapability != nil {
 		auth, ok := s.Runtime.(consumerauth.TaskCapabilityAuthenticator)
 		if !ok {
-			return nil, runtime.ErrInvalidKey
+			return nil, release.ErrInvalidKey
 		}
 		return auth.AuthenticateTaskCapability(ctx, token)
 	}
@@ -36,7 +36,7 @@ func (s *Server) reauthenticateSession(ctx context.Context, x *call, token strin
 	}
 	delegate, ok := s.Runtime.(delegationRuntime)
 	if !ok {
-		return nil, runtime.ErrInvalidKey
+		return nil, release.ErrInvalidKey
 	}
 	return delegate.ReauthenticateDelegation(ctx, token, x.request.delegationAssertion)
 }
@@ -58,7 +58,7 @@ func (s *Server) createDelegation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, authenticationError("invalid_api_key", "Provide a workload identity."))
 		return
 	}
-	var bounds runtime.DelegationBounds
+	var bounds release.DelegationBounds
 	if err := access.DecodeUnique(r, &bounds, 16<<10); err != nil {
 		writeError(w, invalidRequest("invalid_request", "Provide bounded delegation scopes and resources.", nil))
 		return
@@ -91,7 +91,7 @@ func (s *Server) createDelegation(w http.ResponseWriter, r *http.Request) {
 	writeDelegationGrant(w, grant, err)
 }
 
-func delegationScope(bounds runtime.DelegationBounds) string {
+func delegationScope(bounds release.DelegationBounds) string {
 	if slices.Contains(bounds.Scopes, "tools") {
 		return "tools"
 	}
@@ -101,12 +101,12 @@ func delegationScope(bounds runtime.DelegationBounds) string {
 	return "inference"
 }
 
-func writeDelegationGrant(w http.ResponseWriter, grant runtime.DelegationGrant, err error) {
-	if errors.Is(err, runtime.ErrDelegationBounds) {
+func writeDelegationGrant(w http.ResponseWriter, grant release.DelegationGrant, err error) {
+	if errors.Is(err, release.ErrDelegationBounds) {
 		writeError(w, invalidRequest("invalid_request", "Provide bounded delegation scopes and resources.", nil))
 		return
 	}
-	if errors.Is(err, runtime.ErrInvalidKey) {
+	if errors.Is(err, release.ErrInvalidKey) {
 		writeError(w, authenticationError("invalid_api_key", "The member consent is invalid or expired."))
 		return
 	}

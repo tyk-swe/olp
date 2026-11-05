@@ -3,7 +3,7 @@
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
   import { createQuery } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { listProjectMemberships } from '$lib/features/access/projects/api';
   import { projectKeys } from '$lib/features/access/projects/projectKeys';
   import {
@@ -85,15 +85,19 @@
 
 <svelte:head><title>New investigation · OpenLLMProxy</title></svelte:head>
 <a class="text-button" href={resolve('/investigations')}>All investigations</a>
-<header>
-  <p class="eyebrow">Gateway</p>
-  <h1>New investigation</h1>
-  <p>
-    Save filters, references and your summary. Source payloads are not saved.
-  </p>
-</header>
-{#if projects.error}<p role="alert">{errorMessage(projects.error)}</p>{/if}
-{#if error}<p role="alert">{error}</p>{/if}
+<div class="page-header">
+  <div>
+    <p class="eyebrow">Agents</p>
+    <h1 class="page-title">New investigation</h1>
+    <p class="page-description">
+      Save filters, references and your summary. Source payloads are not saved.
+    </p>
+  </div>
+</div>
+{#if projects.error}<p class="inline-problem" role="alert">
+    {errorMessage(projects.error)}
+  </p>{/if}
+{#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
 <form onsubmit={save}>
   <label class="form-field"
     >Project
@@ -188,7 +192,9 @@
         onclick={addEvidence}>Add evidence</button
       >
     </div>
-    {#if evidenceError}<p role="alert">{evidenceError}</p>{/if}
+    {#if evidenceError}<p class="inline-problem" role="alert">
+        {evidenceError}
+      </p>{/if}
   </fieldset>
   <label class="form-field"
     >Summary <textarea name="summary" required maxlength="4096" rows="5"
@@ -203,31 +209,22 @@
 </form>
 
 <style>
-  header {
-    margin: 1rem 0;
-  }
-  form,
-  label {
-    display: grid;
-    gap: 0.5rem;
-  }
   form {
+    display: grid;
     gap: 1rem;
     max-width: 60rem;
+    margin-top: 1.5rem;
   }
   fieldset {
     padding: 1rem;
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-control);
   }
   .fields {
     display: flex;
     flex-wrap: wrap;
     align-items: end;
     gap: 1rem;
-  }
-  input,
-  select,
-  textarea {
-    max-width: 100%;
   }
   code {
     overflow-wrap: anywhere;

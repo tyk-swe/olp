@@ -1,11 +1,13 @@
 <script lang="ts">
+  import ScrollTable from '$lib/components/ScrollTable.svelte';
+  import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/forms/mutationIntent.svelte';
+  } from '$lib/editing/mutationIntent.svelte';
   import {
     getPublication,
     getRevision,
@@ -309,18 +311,20 @@
 </script>
 
 <svelte:head><title>Agent publications · OpenLLMProxy</title></svelte:head>
-<header>
-  <p class="eyebrow">Execution foundations</p>
-  <h1>Agent publications</h1>
-  <p>
-    Publish toolsets for authorized tool calls, and review project-owned agent
-    contracts and prompts.
-  </p>
-</header>
-<nav aria-label="Publication kind">
+<div class="page-header">
+  <div>
+    <p class="eyebrow">Agents</p>
+    <h1 class="page-title">Agent publications</h1>
+    <p class="page-description">
+      Publish toolsets for authorized tool calls, and review project-owned agent
+      contracts and prompts.
+    </p>
+  </div>
+</div>
+<nav class="page-tabs" aria-label="Publication kind">
   {#each ['toolsets', 'agents', 'prompts'] as value (value)}<button
       type="button"
-      class:active={kind === value}
+      aria-current={kind === value ? 'page' : undefined}
       disabled={busy}
       onclick={() => {
         abandon();
@@ -328,45 +332,57 @@
       }}>{value}</button
     >{/each}
 </nav>
-{#if error}<p role="alert" class="error">{error}</p>{/if}{#if notice}<p
+{#if error}<p class="inline-problem" role="alert">{error}</p>{/if}{#if notice}<p
+    class="success-message"
     role="status"
   >
     {notice}
   </p>{/if}
-{#if items.error}<p role="alert">{errorMessage(items.error)}</p>{/if}
-<section aria-label="Publications">
-  <button
-    type="button"
-    disabled={busy || !canManage || (kind === 'agents' && !canTrust)}
-    onclick={() => edit()}>New {kind.slice(0, -1)}</button
-  >
-  {#if items.isPending}<p>
+{#if items.error}<p class="inline-problem" role="alert">
+    {errorMessage(items.error)}
+  </p>{/if}
+<section class="section" aria-label="Publications">
+  <div class="page-actions">
+    <button
+      class="button button-primary"
+      type="button"
+      disabled={busy || !canManage || (kind === 'agents' && !canTrust)}
+      onclick={() => edit()}>New {kind.slice(0, -1)}</button
+    >
+  </div>
+  {#if items.isPending}<div class="loading-state" role="status">
       Loading publications…
-    </p>{:else if !items.data?.length}<p>No publications.</p>{:else}<table>
-      <thead
-        ><tr
-          ><th>Name</th><th>Project</th><th>Published revision</th><th
-            >Inspect</th
-          ></tr
-        ></thead
-      ><tbody
-        >{#each items.data ?? [] as item (item.id)}<tr
-            ><td>{item.name}</td><td
-              >{projects.data?.find((project) => project.id === item.project_id)
-                ?.name ?? item.project_id}</td
-            ><td><code>{item.revision_id ?? 'Draft only'}</code></td><td
-              ><button
-                type="button"
-                disabled={busy}
-                onclick={() => edit(item.id)}>Open</button
-              ></td
-            ></tr
-          >{/each}</tbody
-      >
-    </table>{/if}
+    </div>{:else if !items.data?.length}<div class="card empty-state">
+      No publications.
+    </div>{:else}<ScrollTable label="Publications">
+      <table class="data-table">
+        <thead
+          ><tr
+            ><th scope="col">Name</th><th scope="col">Project</th><th
+              scope="col">Published revision</th
+            ><th scope="col">Inspect</th></tr
+          ></thead
+        ><tbody
+          >{#each items.data ?? [] as item (item.id)}<tr
+              ><td>{item.name}</td><td
+                >{projects.data?.find(
+                  (project) => project.id === item.project_id
+                )?.name ?? item.project_id}</td
+              ><td><code>{item.revision_id ?? 'Draft only'}</code></td><td
+                ><button
+                  class="button button-secondary"
+                  type="button"
+                  disabled={busy}
+                  onclick={() => edit(item.id)}>Open</button
+                ></td
+              ></tr
+            >{/each}</tbody
+        >
+      </table>
+    </ScrollTable>{/if}
 </section>
 {#if editor}
-  <section aria-label="Publication editor">
+  <section class="card stack-card" aria-label="Publication editor">
     <h2>{current ? 'Review publication' : 'New draft'}</h2>
     <form
       onsubmit={(event) => {
@@ -375,9 +391,9 @@
       }}
     >
       <fieldset disabled={busy || !canManage}>
-        <label
+        <label class="form-field"
           >Name <input bind:value={form.name} maxlength="100" required /></label
-        ><label
+        ><label class="form-field"
           >Project <select
             aria-label="Project"
             bind:value={form.project}
@@ -396,7 +412,10 @@
           ></label
         >
         {#if kind === 'toolsets'}
-          <label
+          <a class="text-button" href={resolve('/mcp-servers')}
+            >Register or manage MCP servers</a
+          >
+          <label class="form-field"
             >Certified MCP server <select
               aria-label="Certified MCP server"
               bind:value={serverID}
@@ -413,6 +432,7 @@
             </p>
             <p>Catalog <code>{server.catalog.digest}</code></p>
             {#each server.catalog.tools as tool (tool.name)}<button
+                class="button button-secondary"
                 type="button"
                 onclick={() => addTool(tool.name)}
                 disabled={form.tools.length >= 128 ||
@@ -424,7 +444,7 @@
           <ul>
             {#each form.tools as tool (tool.alias)}<li>
                 {tool.name} <code>{tool.revision_id}</code>
-                <label>
+                <label class="form-field">
                   Execution classification
                   <select
                     aria-label={`Execution classification for ${tool.name}`}
@@ -437,6 +457,7 @@
                     <option value="approval_required">Approval required</option>
                   </select>
                 </label><button
+                  class="button button-secondary"
                   type="button"
                   onclick={() =>
                     (form.tools = form.tools.filter(
@@ -453,14 +474,14 @@
           {#if server && pricing}
             <fieldset>
               <legend>Tool pricing and limits</legend>
-              <label
+              <label class="form-field"
                 >Server unit price (blank unpriced, 0 free) <input
                   bind:value={pricing.unitPrice}
                   inputmode="decimal"
                 /></label
               >
               {#each server.catalog.tools as tool (tool.name)}
-                <label
+                <label class="form-field"
                   >{tool.name} unit price
                   <input
                     bind:value={pricing.toolPrices[tool.name]}
@@ -468,28 +489,29 @@
                   /></label
                 >
               {/each}
-              <label
+              <label class="form-field"
                 >Server calls per minute <input
                   bind:value={pricing.callsPerMinute}
                   inputmode="numeric"
                 /></label
-              ><label
+              ><label class="form-field"
                 >Server max concurrency <input
                   bind:value={pricing.maxConcurrency}
                   inputmode="numeric"
                 /></label
-              ><label
+              ><label class="form-field"
                 >Per-key calls per minute <input
                   bind:value={pricing.perKeyCallsPerMinute}
                   inputmode="numeric"
                 /></label
-              ><label
+              ><label class="form-field"
                 >Per-key max concurrency <input
                   bind:value={pricing.perKeyMaxConcurrency}
                   inputmode="numeric"
                 /></label
               >
               <button
+                class="button button-secondary"
                 type="button"
                 disabled={busy || !canPrice}
                 onclick={() => void savePricing()}>Save pricing</button
@@ -502,14 +524,14 @@
             </fieldset>
           {/if}
         {:else if kind === 'prompts'}
-          <label
+          <label class="form-field"
             >Prompt format <select bind:value={form.promptMode}>
               <option value="template">Single template</option>
               <option value="messages">Role-structured messages</option>
             </select></label
           >
           {#if form.promptMode === 'template'}
-            <label
+            <label class="form-field"
               >Template <textarea
                 bind:value={form.template}
                 maxlength="65536"
@@ -519,20 +541,21 @@
             {#each form.messages as message, index (index)}
               <fieldset>
                 <legend>Message {index + 1}</legend>
-                <label
+                <label class="form-field"
                   >Role <select bind:value={message.role}>
                     <option value="system">System</option>
                     <option value="user">User</option>
                     <option value="assistant">Assistant</option>
                   </select></label
                 >
-                <label
+                <label class="form-field"
                   >Content <textarea
                     bind:value={message.content}
                     maxlength="65536"
                     rows="4"></textarea></label
                 >
                 <button
+                  class="button button-secondary"
                   type="button"
                   disabled={form.messages.length <= 1}
                   onclick={() =>
@@ -543,6 +566,7 @@
               </fieldset>
             {/each}
             <button
+              class="button button-secondary"
               type="button"
               disabled={form.messages.length >= 256}
               onclick={() =>
@@ -552,26 +576,26 @@
                 ])}>Add message</button
             >
           {/if}
-          <label
+          <label class="form-field"
             >String variables (comma separated) <input
               bind:value={form.variables}
             /></label
           >
           <fieldset>
             <legend>Default generation parameters</legend>
-            <label
+            <label class="form-field"
               >Temperature <input
                 inputmode="decimal"
                 pattern="([01](\.[0-9]+)?|2(\.0+)?)"
                 bind:value={form.temperature}
               /></label
-            ><label
+            ><label class="form-field"
               >Top P <input
                 inputmode="decimal"
                 pattern="(0(\.[0-9]+)?|1(\.0+)?)"
                 bind:value={form.topP}
               /></label
-            ><label
+            ><label class="form-field"
               >Maximum output tokens <input
                 inputmode="numeric"
                 pattern="[1-9][0-9]*"
@@ -585,43 +609,43 @@
             not set a value.
           </p>
         {:else}
-          <label
+          <label class="form-field"
             >Protocol contract <select bind:value={form.protocol}
               ><option value="a2a-1.0.0">A2A 1.0.0</option><option
                 value="a2a-0.3.0">A2A 0.3.0</option
               ></select
             ></label
-          ><label
+          ><label class="form-field"
             >Approved endpoint <input
               type="url"
               bind:value={form.endpoint}
               required
               disabled={!canTrust}
             /></label
-          ><label
+          ><label class="form-field"
             >Reviewed agent-card SHA-256 <input
               bind:value={form.cardDigest}
               required
               disabled={!canTrust}
             /></label
-          ><label
+          ><label class="form-field"
             >Pricing revision UUID <input
               bind:value={form.pricingRevision}
               required
             /></label
-          ><label
+          ><label class="form-field"
             >Finite maximum cost <input
               bind:value={form.maxCost}
               required
             /></label
-          ><label
+          ><label class="form-field"
             >Price per message <input
               inputmode="decimal"
               bind:value={form.messagePrice}
             /></label
           >
           <p>Leave blank to disable sending, or enter 0 for free messages.</p>
-          <label
+          <label class="form-field"
             >Declared maximum remote work duration in seconds <input
               inputmode="numeric"
               pattern="[0-9]+"
@@ -632,7 +656,7 @@
             The agent must enforce this bound on its own work. Budgeted calls
             require a bound.
           </p>
-          <label
+          <label class="form-field"
             >Maximum task continuations <input
               inputmode="numeric"
               pattern="[0-9]+"
@@ -640,7 +664,7 @@
               placeholder="32"
             /></label
           >
-          <label
+          <label class="form-field"
             >Task deadline in seconds <input
               inputmode="numeric"
               pattern="[0-9]+"
@@ -651,20 +675,20 @@
           <p>
             Continuations are limited to 128 and the deadline to 3600 seconds.
           </p>
-          <label
+          <label class="form-field"
             >Pinned toolset revision UUIDs <textarea
               bind:value={form.toolsetRevisions}></textarea></label
-          ><label
+          ><label class="form-field"
             >Pinned route revision UUIDs <textarea
               bind:value={form.routeRevisions}></textarea></label
-          ><label
+          ><label class="form-field"
             >Replacement bearer credential <input
               type="password"
               autocomplete="new-password"
               bind:value={credential}
               disabled={!canTrust || form.oauthEnabled}
             /></label
-          ><label
+          ><label class="check-field"
             ><input
               type="checkbox"
               bind:checked={removeCredential}
@@ -673,7 +697,7 @@
           >
           <fieldset disabled={!canTrust}>
             <legend>Personal OAuth authorization</legend>
-            <label
+            <label class="check-field"
               ><input type="checkbox" bind:checked={form.oauthEnabled} /> Use OAuth
               grants</label
             >
@@ -683,19 +707,19 @@
                 a publicly readable agent card for publication and discovery.
                 Task requests use the caller's grant.
               </p>
-              <label
+              <label class="check-field"
                 ><input type="checkbox" bind:checked={form.oauthEntra} /> Use Entra
                 on-behalf-of</label
               >
               {#if form.oauthEntra}
-                <label
+                <label class="form-field"
                   >Workload issuer <input
                     type="url"
                     bind:value={form.oauthEntraIssuer}
                     required
                   /></label
                 >
-                <label
+                <label class="form-field"
                   >Replacement Entra client secret <input
                     type="password"
                     autocomplete="new-password"
@@ -707,36 +731,36 @@
                   issuer, client ID, or token endpoint.
                 </p>
               {/if}
-              <label
+              <label class="form-field"
                 >Client ID <input
                   bind:value={form.oauthClientID}
                   required
                 /></label
               >
-              <label
+              <label class="form-field"
                 >Audience <input
                   bind:value={form.oauthAudience}
                   required
                 /></label
               >
-              <label
+              <label class="form-field"
                 >Scopes <input bind:value={form.oauthScopes} required /></label
               >
-              {#if !form.oauthEntra}<label
+              {#if !form.oauthEntra}<label class="form-field"
                   >Authorization endpoint <input
                     type="url"
                     bind:value={form.oauthAuthorizationEndpoint}
                     required
                   /></label
                 >{/if}
-              <label
+              <label class="form-field"
                 >Token endpoint <input
                   type="url"
                   bind:value={form.oauthTokenEndpoint}
                   required
                 /></label
               >
-              {#if !form.oauthEntra}<label
+              {#if !form.oauthEntra}<label class="form-field"
                   >Device authorization endpoint <input
                     type="url"
                     bind:value={form.oauthDeviceEndpoint}
@@ -752,13 +776,16 @@
             Destination, card, and credential trust changes require installation
             access. Existing credentials are never displayed.
           </p>
-        {/if}<button type="submit">Save draft</button>
+        {/if}<button class="button button-primary" type="submit"
+          >Save draft</button
+        >
       </fieldset>
     </form>
     {#if current}<p>
         Current revision: <code>{current.revision_id ?? 'Not published'}</code>
       </p>
       <button
+        class="button button-secondary"
         type="button"
         disabled={busy ||
           !canManage ||
@@ -768,85 +795,72 @@
           removeCredential}
         onclick={() => write('publish')}>Publish saved draft</button
       >{#if unsaved}<p>Save edits before publishing.</p>{/if}
-      <label
+      <label class="form-field"
         >Revision UUID <input bind:value={revisionID} disabled={busy} /></label
-      ><button type="button" disabled={busy || !revisionID} onclick={inspect}
-        >Inspect immutable revision</button
+      ><button
+        class="button button-secondary"
+        type="button"
+        disabled={busy || !revisionID}
+        onclick={inspect}>Inspect immutable revision</button
       >
       {#if inspected}<p>
           Digest: <code>{inspected.digest}</code>; labels: {inspected.labels.join(
             ', '
           ) || 'none'}
         </p>
-        <pre>{JSON.stringify(inspected.definition, null, 2)}</pre>{/if}
+        <pre class="code-block">{JSON.stringify(
+            inspected.definition,
+            null,
+            2
+          )}</pre>{/if}
       {#if kind === 'prompts'}<button
+          class="button button-secondary"
           type="button"
           disabled={busy || !canManage || !revisionID || unsaved}
           onclick={() => write('staging')}>Set staging</button
         ><button
+          class="button button-secondary"
           type="button"
           disabled={busy || !canManage || !revisionID || unsaved}
           onclick={() => write('production')}>Set production</button
         >{/if}
-      <label
+      <label class="check-field"
         ><input
           type="checkbox"
           bind:checked={confirmRetire}
           disabled={busy || !canManage}
         /> Retire and revoke this publication</label
       ><button
+        class="button button-secondary"
         type="button"
         disabled={busy || !canManage || !confirmRetire}
         onclick={() => write('retire')}>Confirm retirement</button
       >
-    {/if}<button type="button" disabled={busy} onclick={abandon}>Close</button>
+    {/if}<button
+      class="button button-secondary"
+      type="button"
+      disabled={busy}
+      onclick={abandon}>Close</button
+    >
   </section>
 {/if}
 
 <style>
-  header,
-  section {
-    margin-bottom: 1.5rem;
+  .page-tabs button {
+    text-transform: capitalize;
   }
-  nav {
-    display: flex;
-    gap: 0.5rem;
-    margin-bottom: 1rem;
-  }
-  label {
-    display: block;
-    margin: 0.75rem 0;
-  }
-  input:not([type='checkbox']),
-  select,
-  textarea {
-    display: block;
-    width: min(100%, 42rem);
-  }
+  form,
   fieldset {
-    border: 0;
+    display: grid;
+    gap: 1rem;
+    min-width: 0;
+    margin: 0;
     padding: 0;
   }
-  table {
-    width: 100%;
-    text-align: left;
+  fieldset > .button {
+    justify-self: start;
   }
-  td,
-  th {
-    padding: 0.5rem;
-  }
-  code,
-  pre {
-    overflow-wrap: anywhere;
-    white-space: pre-wrap;
-  }
-  button {
-    margin: 0.25rem;
-  }
-  .error {
-    color: var(--danger, #b42318);
-  }
-  .active {
-    font-weight: 700;
+  .stack-card > .button + .button {
+    margin-top: -0.5rem;
   }
 </style>

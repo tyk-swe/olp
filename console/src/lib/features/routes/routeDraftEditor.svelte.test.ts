@@ -1,6 +1,9 @@
+import { templateFor } from '$lib/features/inference/playground/templates';
+import type { OperationDialect } from './inspectionDialects';
+import RoutePublishPanel from './RoutePublishPanel.svelte';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import { json, route, serve } from '$lib/api/test/transport';
+import { json, route, serve } from '$lib/management/test/transport';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import type { RouteActivation, RouteDraft, RouteSimulation } from './api';
 import { routeKeys } from './routeKeys';
@@ -68,7 +71,7 @@ const activation: RouteActivation = {
   runtime_generation: { id: 'generation-id', sequence: 4 }
 };
 
-function serveEditor() {
+function serveEditor(dialects: OperationDialect[] = []) {
   const load = vi.fn(() => json(draft));
   const replace = vi.fn(async (request: Request) => {
     route(request, 'PUT', `/api/v1/route-drafts/${draft.id}`);
@@ -101,6 +104,8 @@ function serveEditor() {
   serve(
     (request) => {
       const path = new URL(request.url).pathname;
+      if (path === '/api/v1/operation-dialects')
+        return json({ items: dialects });
       if (path === '/api/v1/provider-models') return json({ items: [] });
       if (path === `/api/v1/route-drafts/${draft.id}/activate`)
         return activate(request);
@@ -289,3 +294,77 @@ describe('route draft editor', () => {
     expect(simulate).toHaveBeenCalledOnce();
   });
 });
+
+it.each([
+  { key: 'legacy-completions', surface: 'openai', mode: 'streaming' },
+  { key: 'legacy-completions', surface: 'openai', mode: 'unary' },
+  { key: 'generation-multiturn', surface: 'openai', mode: 'streaming' },
+  { key: 'anthropic-messages', surface: 'anthropic', mode: 'streaming' },
+  { key: 'gemini-generate', surface: 'gemini', mode: 'streaming' },
+  { key: 'cohere-typed-embeddings', surface: 'native', mode: 'unary' }
+])(
+  'submits a compatible $mode simulation for $key',
+  async ({ key, surface, mode }) => {
+    const template = templateFor(key);
+    expect(template).toBeDefined();
+    if (!template) return;
+    const dialect = template.inspectDialect ?? template.nativeDialect ?? '';
+    const registered: OperationDialect[] = template.nativeDialect
+      ? [
+          {
+            id: dialect,
+            revision: '1',
+            operation: template.operation,
+            operation_revision: '1',
+            surface,
+            mode: 'unary',
+            label: template.label,
+            request_schema: {},
+            result_schema: {},
+            documentation: '',
+            evidence: ''
+          }
+        ]
+      : [];
+    const { load, simulate } = serveEditor(registered);
+    const current = { ...draft, operations: [template.operation] };
+    load.mockImplementation(() => json(current));
+    const state = await editor();
+    await vi.waitFor(() => expect(state.dialects.isSuccess).toBe(true));
+    state.simulationSurface = template.surface ?? 'openai';
+    state.simulationMode = mode;
+    const target = document.createElement('div');
+    const panel = mount(RoutePublishPanel, {
+      target,
+      props: { editor: state }
+    });
+    onTestFinished(() => unmount(panel));
+    flushSync();
+    const example = target.querySelector<HTMLSelectElement>(
+      '#simulation-example'
+    );
+    expect(example).not.toBeNull();
+    if (!example) return;
+    example.value = key;
+    example.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const result = { ...preview, operation: template.operation, surface, mode };
+    simulate.mockImplementationOnce(async () => json(result));
+    await state.simulate(current);
+    expect(simulate).toHaveBeenCalledOnce();
+    const submitted = await simulate.mock.calls[0][0].json();
+    expect(submitted).toMatchObject({
+      surface,
+      mode,
+      ...(dialect ? { dialect } : {}),
+      request: {
+        ...template.request,
+        ...('model' in template.request ? { model: current.slug } : {})
+      }
+    });
+    if (template.operation === 'generation' && surface !== 'gemini') {
+      expect(Boolean(submitted.request.stream)).toBe(mode === 'streaming');
+    }
+    expect(state.simulation).toEqual(result);
+  }
+);

@@ -1,7 +1,7 @@
-import { apiClient } from '$lib/api/client';
-import type { components } from '$lib/api/schema';
-import { ensureOk, unwrap, unwrapPage } from '$lib/api/http';
-import { collectCursorPages } from '$lib/api/pagination';
+import { apiClient } from '$lib/management/client';
+import type { components } from '$lib/management/schema';
+import { ensureOk, unwrap, unwrapPage } from '$lib/management/http';
+import { collectCursorPages } from '$lib/management/pagination';
 
 export type Kind = 'toolsets' | 'agents' | 'prompts';
 export type Publication = components['schemas']['AgentPublication'];
@@ -388,3 +388,58 @@ export async function pollMCPGrant(enrollmentID: string) {
     })
   );
 }
+
+export const createServer = async (
+  body: components['schemas']['CreateMCPServerRequest'],
+  requestId: string
+) =>
+  unwrap(
+    await apiClient.POST('/api/v1/mcp-servers', {
+      body,
+      params: { header: { 'Idempotency-Key': requestId } }
+    })
+  );
+export const retireServer = async (
+  server: Pick<MCPServer, 'id' | 'etag'>,
+  requestId: string
+) =>
+  ensureOk(
+    await apiClient.DELETE('/api/v1/mcp-servers/{server_id}', {
+      params: {
+        path: { server_id: server.id },
+        header: { 'If-Match': `"${server.etag}"`, 'Idempotency-Key': requestId }
+      }
+    })
+  );
+export const getToolCall = async (id: string) =>
+  unwrap(
+    await apiClient.GET('/api/v1/mcp-tool-calls/{call_id}', {
+      params: { path: { call_id: id } }
+    })
+  );
+export const resolveToolCall = async (
+  id: string,
+  body: components['schemas']['MCPToolCallResolveRequest'],
+  requestId: string
+) =>
+  unwrap(
+    await apiClient.POST('/api/v1/mcp-tool-calls/{call_id}/resolve', {
+      body,
+      params: {
+        path: { call_id: id },
+        header: { 'Idempotency-Key': requestId }
+      }
+    })
+  );
+export const getRemoteTask = async (id: string) =>
+  unwrap(
+    await apiClient.GET('/api/v1/a2a-tasks/{task_id}/remote', {
+      params: { path: { task_id: id } }
+    })
+  );
+export const cancelRemoteTask = async (id: string) =>
+  unwrap(
+    await apiClient.POST('/api/v1/a2a-tasks/{task_id}/cancel', {
+      params: { path: { task_id: id } }
+    })
+  );

@@ -285,7 +285,7 @@ role/scope and up to 100 project manager/viewer grants. Highest role/global gran
 and unioned project memberships apply; removing a group removes only inherited
 grants. Reconciliation revokes affected sessions and protects the last usable owner.
 
-The SCIM page under Access and `/api/v1/scim/groups/{scim_id}/mapping` edit policy under ETag.
+The SCIM provisioning page under Access and `/api/v1/scim/groups/{scim_id}/mapping` edit policy under ETag.
 Directory PUT omission preserves mappings; an explicit extension replaces them.
 Portable `scim_group_mappings` use names and destination project IDs. Missing
 groups are created empty; membership/IDs stay local. Omission preserves policy;
@@ -351,7 +351,7 @@ recovery error that does not confirm whether the address exists.
 
 ## Mutation and audit boundaries
 
-The [management contract](../../openapi/management.json) declares each operation's
+The [management contract](../../management/management.json) declares each operation's
 authority. Protected writes reauthorize inside feature transactions; access
 changes serialize ownership checks with the installation lock. Expensive hashing,
 discovery and verification run outside it.

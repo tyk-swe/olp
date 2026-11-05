@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/agents"
+	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/oif"
@@ -148,7 +148,7 @@ func (s *Server) callWorkflowTool(ctx context.Context, x *call, authority access
 		return s.recoverWorkflowContent(ctx, x, authority, call.ID, json.RawMessage(call.Arguments))
 	}
 	callID := fmt.Sprintf("%s:%d:%s", x.workflow.runID, identityOrdinal, call.ID)
-	index := slices.IndexFunc(x.workflow.approvals, func(approval agents.WorkflowApproval) bool { return approval.CallID == call.ID })
+	index := slices.IndexFunc(x.workflow.approvals, func(approval runs.WorkflowApproval) bool { return approval.CallID == call.ID })
 	if index < 0 {
 		return s.WorkflowTools.Call(ctx, authority, x.request.release, tool, x.workflow.runID, x.workflow.ordinal, callID, json.RawMessage(call.Arguments))
 	}
@@ -167,7 +167,7 @@ func (s *Server) pauseWorkflow(ctx context.Context, x *call, completion *wire.Co
 		}
 	}
 	type candidate struct {
-		request agents.WorkflowApprovalCall
+		request runs.WorkflowApprovalCall
 		call    workflowPauseCall
 	}
 	candidates := slices.Collect(func(yield func(candidate) bool) {
@@ -184,14 +184,14 @@ func (s *Server) pauseWorkflow(ctx context.Context, x *call, completion *wire.Co
 				return *tool.Definition.UnitPrice
 			}()
 			if !yield(candidate{
-				request: agents.WorkflowApprovalCall{CallID: call.ID, ToolsetID: tool.ToolsetID, ToolsetRevisionID: tool.RevisionID, ToolAlias: call.Name, Arguments: json.RawMessage(call.Arguments), MaxCost: maxCost},
+				request: runs.WorkflowApprovalCall{CallID: call.ID, ToolsetID: tool.ToolsetID, ToolsetRevisionID: tool.RevisionID, ToolAlias: call.Name, Arguments: json.RawMessage(call.Arguments), MaxCost: maxCost},
 				call:    workflowPauseCall{ID: call.ID, Name: call.Name, Arguments: json.RawMessage(call.Arguments), ServerLabel: tool.ToolsetID},
 			}) {
 				return
 			}
 		}
 	})
-	requests := slices.Collect(func(yield func(agents.WorkflowApprovalCall) bool) {
+	requests := slices.Collect(func(yield func(runs.WorkflowApprovalCall) bool) {
 		for _, candidate := range candidates {
 			if !yield(candidate.request) {
 				return
@@ -228,7 +228,7 @@ func (s *Server) pauseWorkflow(ctx context.Context, x *call, completion *wire.Co
 		return nil, serverError(503, "tool_approval_unavailable", "The approval could not be prepared.")
 	}
 	deadline, _ := ctx.Deadline()
-	token, err := store.Pause(ctx, x.authority, agents.WorkflowApprovalRequest{RunID: x.workflow.runID, RouteRevisionID: x.named().RevisionID, StartOrdinal: x.workflow.ordinal, Transcript: x.workflow.transcript, State: state, Calls: requests, ExpiresAt: deadline}, int(s.cfg.MaxBodyBytes))
+	token, err := store.Pause(ctx, x.authority, runs.WorkflowApprovalRequest{RunID: x.workflow.runID, RouteRevisionID: x.named().RevisionID, StartOrdinal: x.workflow.ordinal, Transcript: x.workflow.transcript, State: state, Calls: requests, ExpiresAt: deadline}, int(s.cfg.MaxBodyBytes))
 	if err != nil {
 		return nil, serverError(503, "tool_approval_unavailable", "The approval could not be prepared.")
 	}

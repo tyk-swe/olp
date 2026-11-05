@@ -18,7 +18,7 @@ import (
 	"golang.org/x/net/http/httpguts"
 
 	"github.com/tyk-swe/olp/internal/upstream"
-	"github.com/tyk-swe/olp/sdk/plugin/abi"
+	"github.com/tyk-swe/olp/plugin/abi"
 )
 
 // KindPlugin is the provider kind of providers whose profile a provider plugin

@@ -14,7 +14,7 @@
     targetUnavailable
   } from '$lib/features/routes/routeEditor';
   import type { RouteDraftEditorState } from '$lib/features/routes/routeDraftEditor.svelte';
-  import { lifecycleNotice } from '$lib/features/providers/models/lifecycle';
+  import { lifecycleNotice } from '$lib/features/providers/provider-models/lifecycle';
   import type { EditableTarget } from '$lib/features/routes/routeEditor';
   let { editor }: { editor: RouteDraftEditorState } = $props();
 
@@ -42,7 +42,7 @@
   </div>
   {#if !editor.modelOptions.length}<div class="empty-state compact">
       <p>
-        No enabled models are available. <a href={resolve('/models')}
+        No enabled models are available. <a href={resolve('/provider-models')}
           >Review model eligibility</a
         >.
       </p>

@@ -1,6 +1,6 @@
-import { apiClient } from '$lib/api/client';
-import { unwrap } from '$lib/api/http';
-import type { components } from '$lib/api/schema';
+import { apiClient } from '$lib/management/client';
+import { unwrap } from '$lib/management/http';
+import type { components } from '$lib/management/schema';
 export type Issuer = components['schemas']['WorkloadIssuer'];
 export type IssuerWrite = components['schemas']['WorkloadIssuerWrite'];
 export async function listIssuers(signal?: AbortSignal) {

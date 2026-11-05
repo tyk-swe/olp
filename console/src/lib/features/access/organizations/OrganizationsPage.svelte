@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
+  import { useMutationIntent } from '$lib/editing/mutationIntent.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { useRole } from '../session/useRole.svelte';
   import { projectKeys } from '../projects/projectKeys';
   import { organizationKeys } from './organizationKeys';
@@ -98,7 +98,7 @@
   }
 </script>
 
-<svelte:head><title>Organizations · OLP</title></svelte:head>
+<svelte:head><title>Organizations · OpenLLMProxy</title></svelte:head>
 <header>
   <h1>Organizations</h1>
   <p>

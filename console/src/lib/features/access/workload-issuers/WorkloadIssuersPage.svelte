@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { usePrincipalLifetime } from '$lib/forms/mutationIntent.svelte';
+  import { usePrincipalLifetime } from '$lib/editing/mutationIntent.svelte';
   import {
     listIssuers,
     saveIssuer,
@@ -175,7 +175,7 @@
   }
 </script>
 
-<svelte:head><title>Workload identity · OLP</title></svelte:head>
+<svelte:head><title>Workload identity · OpenLLMProxy</title></svelte:head>
 <section class="card">
   <h1>Workload identity</h1>
   <p>
@@ -205,7 +205,7 @@
               disabled={busy}
               onclick={() => open(value)}>Edit {value.name}</button
             >{#if editable && value.enabled}<button
-                class="button button-secondary danger-button"
+                class="button button-secondary button-danger"
                 disabled={busy}
                 onclick={() => disable(value)}>Disable {value.name}</button
               >{/if}

@@ -85,3 +85,15 @@ Evidence from controlled peers and repeatable client journeys for a stated revis
 
 **Live qualification**:
 Evidence from an authorized end-user workflow against a real upstream account, scoped to the recorded client version, platform, adapter, model, protocol and transport.
+
+### MCP tools
+
+**Tool catalog**:
+The pinned set of tool names, descriptions, and input schemas captured from one registered MCP server at certification. Calls run against this catalog, never against live upstream discovery. Its certification is distinct from provider Certification above.
+
+**Toolset**:
+A published selection of tools from registered MCP servers, pinned to certified catalogs, that a key allowlist can call.
+
+**Personal grant**:
+One person's OAuth authorization for a registered MCP server or agent, bound to its approved OAuth configuration and to the consenting key or end user. It is distinct from a provider grant, which authorizes the installation against a model provider.
+_Avoid_: User token

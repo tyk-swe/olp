@@ -1,10 +1,10 @@
-// Generates src/lib/api/requirements.ts from the management contract: every
+// Generates src/lib/management/requirements.ts from the management contract: every
 // operation's security requirement, as the server enforces it, so the console
 // offers an action only when the server would admit it.
 import { readFile, writeFile } from 'node:fs/promises';
 
 const contract = JSON.parse(
-  await readFile('../openapi/management.json', 'utf8')
+  await readFile('../management/management.json', 'utf8')
 );
 const methods = ['get', 'put', 'post', 'delete', 'patch'];
 const routes = [];
@@ -47,8 +47,8 @@ const body = routes
   )
   .join(',\n');
 await writeFile(
-  'src/lib/api/requirements.ts',
-  `// Generated from openapi/management.json by scripts/generate-requirements.mjs.
+  'src/lib/management/requirements.ts',
+  `// Generated from management/management.json by scripts/generate-requirements.mjs.
 // Regenerate with \`make api\`; never edit this file.
 import type { components } from './schema';
 

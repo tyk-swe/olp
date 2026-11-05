@@ -17,7 +17,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/release"
 )
 
 func PassthroughAccessError(err error) error {
@@ -230,7 +230,7 @@ func (s *Server) activateDraft(r *http.Request, _ access.Principal) (access.Repl
 	if err != nil {
 		return access.Reply{}, err
 	}
-	generation, err := runtime.Publish(r.Context(), tx, p.UserID())
+	generation, err := release.Publish(r.Context(), tx, p.UserID())
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -629,7 +629,7 @@ func (s *Server) retireRoute(r *http.Request, _ access.Principal) (access.Reply,
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.routes SET state='retired',retired_at=now(),retired_by=$2,etag=$3 WHERE id=$1", id, p.UserID(), etag); err != nil {
 		return access.Reply{}, err
 	}
-	generation, err := runtime.Publish(r.Context(), tx, p.UserID())
+	generation, err := release.Publish(r.Context(), tx, p.UserID())
 	if err != nil {
 		return access.Reply{}, err
 	}

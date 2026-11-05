@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { onMount } from 'svelte';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { formatDate } from '$lib/format';
   import { profileKeys } from '$lib/features/access/profile/profileKeys';
   import {
@@ -288,6 +288,6 @@
   }
   li span {
     display: block;
-    color: var(--text-muted);
+    color: var(--foreground-muted);
   }
 </style>

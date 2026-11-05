@@ -11,21 +11,21 @@
   import { policyError } from '../end-users/policy';
   import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
   const services = useServiceCapabilities();
-  import { focusFormError, focusErrorSummary } from '$lib/forms/focusError';
+  import { focusFormError, focusErrorSummary } from '$lib/editing/focusError';
   import { routeKeys } from '$lib/features/routes/routeKeys';
 
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import type { ApiKey } from '$lib/features/access/api-keys/api';
   import { listRoutes } from '$lib/features/routes/api';
-  import NavIcon from '$lib/components/NavIcon.svelte';
-  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
+  import NavIcon from '$lib/shell/NavIcon.svelte';
+  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
   import { formatBudget, formatDate, formatInteger } from '$lib/format';
   import {
     budgetStateNote,
     budgetWindowState
   } from '$lib/features/access/api-keys/budgetPresentation';
-  import { guardUnsavedChanges } from '$lib/forms/unsavedChanges';
+  import { guardUnsavedChanges } from '$lib/editing/unsavedChanges';
   import {
     admissionPriorities,
     validateApiKey
@@ -197,7 +197,7 @@
 
 <div class="page-header">
   <div>
-    <p class="eyebrow">Access · API Keys</p>
+    <p class="eyebrow">Access · API keys</p>
     <h1 class="page-title">
       {editing
         ? canManage

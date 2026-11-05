@@ -17,17 +17,17 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
 type Worker struct {
 	Store       *resources.Store
 	Resolver    *resources.Resolver
-	Credentials runtime.Credentials
+	Credentials release.Credentials
 	Auth        *connectors.Auth
 	Egress      *egress.Policy
 	Connections *egress.ConnectionClientCache

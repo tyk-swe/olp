@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 
@@ -26,6 +27,43 @@ func costPrice() *usage.RoutingPrice {
 	return &usage.RoutingPrice{Price: usage.Price{
 		InputPerMillion: costText("1"), OutputPerMillion: costText("10"),
 	}}
+}
+
+func TestWorkflowCostRejectsPartiallyDecodedModelFacts(t *testing.T) {
+	for _, tc := range []struct {
+		name, metadata, want string
+	}{
+		{"bounded", `{"context_length":100,"max_output_tokens":10}`, ""},
+		{"malformed parameter declaration", `{"context_length":100,"max_output_tokens":10,"supported_parameters":42}`, "run_cost_unbounded"},
+		{"missing", "", "run_cost_unbounded"},
+		{"null", "null", "run_cost_unbounded"},
+		{"over budget", `{"context_length":1000000,"max_output_tokens":1000000}`, "run_cost_limit"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			id := uuid.NewString()
+			snapshot := &routing.Snapshot{Generation: routing.Generation{ID: uuid.NewString()}, Providers: map[string]routing.Provider{
+				id: {ID: id, Name: "provider", Kind: "openai", RevisionID: id, Models: map[string]json.RawMessage{"model": json.RawMessage(tc.metadata)}},
+			}}
+			for _, compile := range []bool{false, true} {
+				if compile {
+					if err := snapshot.Compile(); err != nil {
+						t.Fatal(err)
+					}
+				}
+				x := &call{family: wire.Chat, historicalSnapshot: snapshot, workflow: &workflowCall{}, unary: &unaryCall{}, generation: generationCall{runLimits: limits.WorkflowBounds{MaxRunCost: new("1")}}}
+				err := x.workflowModelCost(routing.Attempt{ProviderID: id, UpstreamModel: "model", Price: costPrice()})
+				if tc.want == "" {
+					if err != nil {
+						t.Fatal(err)
+					}
+					continue
+				}
+				if err == nil || err.Code != tc.want {
+					t.Fatalf("workflow error %v, want %s", err, tc.want)
+				}
+			}
+		})
+	}
 }
 
 // costExecution is a request routed to the given attempts, each served by a

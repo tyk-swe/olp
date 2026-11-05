@@ -1,5 +1,5 @@
 import { validRouteSlug } from '$lib/routeIdentity';
-import type { components } from '$lib/api/schema';
+import type { components } from '$lib/management/schema';
 export type RouteGroups = components['schemas']['RouteGroups'];
 export type GroupForm = { id: string; name: string; routes: string }[];
 export const groupNames = (value: string) =>

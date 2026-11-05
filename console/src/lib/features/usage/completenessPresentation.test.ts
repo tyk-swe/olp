@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { UsageCompleteness } from './api/usage';
+import type { UsageCompleteness } from './usage';
 import { presentUsageCompleteness } from './completenessPresentation';
 
 const complete: UsageCompleteness = {

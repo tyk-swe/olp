@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const document = JSON.parse(readFileSync("openapi/inference.json", "utf8"));
+const document = JSON.parse(readFileSync("inference/inference.json", "utf8"));
 const a2a = document.paths["/a2a/{agent}"];
 const retainLegacyClientParameter = (parameter) =>
   parameter.name !== "A2A-Version";
@@ -34,7 +34,7 @@ try {
       "-package",
       "inference",
       "-o",
-      "sdk/inference/client.gen.go",
+      process.argv[2] ?? "inference/client.gen.go",
       path,
     ],
     { stdio: "inherit" },

@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { RouteDraftEditorState } from '$lib/features/routes/routeDraftEditor.svelte';
-  import type { components } from '$lib/api/schema';
-  import { errorMessage } from '$lib/api/http';
+  import type { components } from '$lib/management/schema';
+  import { errorMessage } from '$lib/management/http';
   import { listRoutes } from '$lib/features/routes/api';
   import { cacheStatistics, purgeCache } from './api';
 

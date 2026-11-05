@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { IncompleteJSON, type NativePath } from '$lib/json/nativeJson';
+  import { IncompleteJSON, type NativePath } from '$lib/nativeJson';
   import type { ConfigurationDraft } from './configurationDraft.svelte';
-  import type { FieldSchema } from './api/profiles';
+  import type { FieldSchema } from './providerProfiles';
   let {
     draft,
     path,

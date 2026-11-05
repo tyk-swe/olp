@@ -3,10 +3,10 @@
     nativeEntries,
     nativeObject,
     type NativePath
-  } from '$lib/json/nativeJson';
+  } from '$lib/nativeJson';
   import type { ConfigurationDraft } from './configurationDraft.svelte';
   import { operationFields } from './profiles';
-  import type { ProviderProfile } from './api/profiles';
+  import type { ProviderProfile } from './providerProfiles';
   import NativeMapEditor from './NativeMapEditor.svelte';
   let {
     draft,

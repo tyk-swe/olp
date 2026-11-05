@@ -3,53 +3,48 @@ package agentcontract
 import (
 	"fmt"
 	"slices"
+
+	"github.com/tyk-swe/olp/internal/prompts"
 )
 
-// NormalizeDraft gives persistence an owned value and emits empty collections
-// as arrays, including when a hand-written configuration omitted them.
-func NormalizeDraft(d Draft) Draft {
-	d = CloneRevision(Revision{Definition: d}).Definition
-	if d.Toolset != nil && d.Toolset.Tools == nil {
-		d.Toolset.Tools = []Tool{}
-	}
-	if d.Prompt != nil && d.Prompt.Variables == nil {
-		d.Prompt.Variables = []string{}
-	}
-	if d.Agent != nil {
-		if d.Agent.ToolsetRevisions == nil {
-			d.Agent.ToolsetRevisions = []string{}
-		}
-		if d.Agent.RouteRevisions == nil {
-			d.Agent.RouteRevisions = []string{}
-		}
-	}
-	return d
-}
-
+func NormalizeDraft(d Draft) Draft { return cloneDraft(d, true) }
 func CloneRevision(v Revision) Revision {
-	v.Labels = slices.Clone(v.Labels)
-	d := v.Definition
-	if d.Toolset != nil {
-		copy := *d.Toolset
-		copy.Tools = slices.Clone(copy.Tools)
-		d.Toolset = &copy
+	return Revision{ID: v.ID, PublicationID: v.PublicationID, Kind: v.Kind, ProjectID: v.ProjectID, Definition: cloneDraft(v.Definition, false), Digest: v.Digest, Current: v.Current, Labels: slices.Clone(v.Labels)}
+}
+func cloneDraft(d Draft, normalize bool) Draft {
+	return Draft{ProjectID: d.ProjectID, Name: d.Name, Toolset: cloneToolset(d.Toolset, normalize), Agent: cloneAgent(d.Agent, normalize), Prompt: clonePrompt(d.Prompt, normalize)}
+}
+func cloneToolset(value *Toolset, normalize bool) *Toolset {
+	if value == nil {
+		return nil
 	}
-	if d.Agent != nil {
-		copy := *d.Agent
-		copy.ToolsetRevisions = slices.Clone(copy.ToolsetRevisions)
-		copy.RouteRevisions = slices.Clone(copy.RouteRevisions)
-		if copy.CredentialID != nil {
-			id := *copy.CredentialID
-			copy.CredentialID = &id
-		}
-		d.Agent = &copy
+	return &Toolset{Tools: cloneSlice(value.Tools, normalize)}
+}
+func clonePrompt(value *prompts.Definition, normalize bool) *prompts.Definition {
+	if value == nil {
+		return nil
 	}
-	if d.Prompt != nil {
-		copy := d.Prompt.Clone()
-		d.Prompt = &copy
+	cloned := value.Clone()
+	return &prompts.Definition{Template: cloned.Template, Variables: cloneSlice(cloned.Variables, normalize), Messages: cloned.Messages, VariableSchema: cloned.VariableSchema, DefaultParameters: cloned.DefaultParameters}
+}
+func cloneAgent(value *Definition, normalize bool) *Definition {
+	if value == nil {
+		return nil
 	}
-	v.Definition = d
-	return v
+	return &Definition{Protocol: value.Protocol, Endpoint: value.Endpoint, CardDigest: value.CardDigest, OAuth: value.OAuth.Clone(), CredentialID: clonePointer(value.CredentialID), ToolsetRevisions: cloneSlice(value.ToolsetRevisions, normalize), RouteRevisions: cloneSlice(value.RouteRevisions, normalize), PricingRevisionID: value.PricingRevisionID, MaxCost: value.MaxCost, MessagePrice: value.MessagePrice, RemoteWorkBoundSeconds: clonePointer(value.RemoteWorkBoundSeconds), MaxTaskContinuations: clonePointer(value.MaxTaskContinuations), TaskDeadlineSeconds: clonePointer(value.TaskDeadlineSeconds)}
+}
+func clonePointer[T string | int](value *T) *T {
+	if value == nil {
+		return nil
+	}
+	copied := *value
+	return &copied
+}
+func cloneSlice[T any](values []T, normalize bool) []T {
+	if normalize {
+		return append([]T{}, values...)
+	}
+	return slices.Clone(values)
 }
 
 func ValidateRevisions(values []Revision) error {

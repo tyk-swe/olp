@@ -9,8 +9,8 @@ import (
 
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 func (a *codeAttempt) headers(source http.Header) http.Header {
@@ -45,7 +45,7 @@ func (s *Server) codeEndpoint(cfg routing.Configuration, path, query string) (st
 	return u.String(), nil
 }
 
-func (s *Server) codeClient(ctx context.Context, release *runtime.Release, cfg routing.Configuration, providerID string) (*http.Client, error) {
+func (s *Server) codeClient(ctx context.Context, release *release.Release, cfg routing.Configuration, providerID string) (*http.Client, error) {
 	var secret []byte
 	if network := cfg.Options.Network; network != nil && network.CredentialID != "" {
 		var err error

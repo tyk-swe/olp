@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/sdk/plugin/abi"
+	"github.com/tyk-swe/olp/plugin/abi"
 )
 
 // Adapter uses the plugin host's origin-restricted, redirect-free HTTP capability.

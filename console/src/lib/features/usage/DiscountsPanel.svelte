@@ -1,24 +1,24 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import CursorPagination from '$lib/components/CursorPagination.svelte';
-  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
+  import CursorPagination from '$lib/shell/CursorPagination.svelte';
+  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
   import {
     cursorPaginationProps,
     emptyCursorHistory
-  } from '$lib/lists/pagination';
-  import { errorMessage } from '$lib/api/http';
+  } from '$lib/listing/pagination';
+  import { errorMessage } from '$lib/management/http';
   import { formatDate } from '$lib/format';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
-  import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
-  import { listProviderKinds } from '$lib/features/providers/api/models';
-  import { listProviderVendors } from '$lib/features/providers/api/providers';
+  import { useMutationIntent } from '$lib/editing/mutationIntent.svelte';
+  import { listProviderKinds } from '$lib/features/providers/models';
+  import { listProviderVendors } from '$lib/features/providers/providers';
   import { providerKeys } from '$lib/features/providers/providerKeys';
   import {
     createDiscount,
     listDiscounts,
     type DiscountDraft
-  } from '$lib/features/usage/api/discounts';
+  } from '$lib/features/usage/discounts';
   import { discountKeys } from '$lib/features/usage/discountKeys';
 
   const createIntent = useMutationIntent();

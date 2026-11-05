@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
+  import { useMutationIntent } from '$lib/editing/mutationIntent.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import {
     listCodeAccounts,
@@ -10,15 +10,15 @@
     type CodeRoute,
     type CodeClientConfiguration,
     type CodeClientSelection
-  } from '$lib/api/code-mode';
-  import { collectCursorPages } from '$lib/api/pagination';
-  import { errorMessage } from '$lib/api/http';
+  } from '$lib/management/code-mode';
+  import { collectCursorPages } from '$lib/management/pagination';
+  import { errorMessage } from '$lib/management/http';
   import {
     emptyCursorHistory,
     cursorPaginationProps
-  } from '$lib/lists/pagination';
-  import CursorPagination from '$lib/components/CursorPagination.svelte';
-  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
+  } from '$lib/listing/pagination';
+  import CursorPagination from '$lib/shell/CursorPagination.svelte';
+  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
   import LoadError from './LoadError.svelte';
   import { formatDate } from '$lib/format';
   import { codeKeys } from './codeKeys';
@@ -29,8 +29,8 @@
     tokenCount,
     type CodeEditing
   } from './presentation';
-  import { listProviders } from '$lib/features/providers/api/providers';
-  import { listCredentialSlots } from '$lib/features/providers/api/credentials';
+  import { listProviders } from '$lib/features/providers/providers';
+  import { listCredentialSlots } from '$lib/features/providers/credentials';
   import ResourceEditor from './ResourceEditor.svelte';
   import RouteRevisions from './RouteRevisions.svelte';
   import ClientConfiguration from './ClientConfiguration.svelte';

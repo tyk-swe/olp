@@ -14,13 +14,13 @@ import (
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/plugins"
-	"github.com/tyk-swe/olp/internal/runtime"
-	"github.com/tyk-swe/olp/sdk/plugin/abi"
+	"github.com/tyk-swe/olp/internal/release"
+	"github.com/tyk-swe/olp/plugin/abi"
 )
 
 type CodeAuthorizer struct {
 	Pool        access.Queryer
-	Credentials runtime.Credentials
+	Credentials release.Credentials
 	Plugins     *plugins.Host
 }
 

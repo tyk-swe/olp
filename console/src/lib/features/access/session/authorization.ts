@@ -2,7 +2,7 @@ import {
   MANAGEMENT_REQUIREMENTS,
   type ManagementOperation,
   type ManagementRoute
-} from '$lib/api/requirements';
+} from '$lib/management/requirements';
 
 export const FIXED_ROLES = [
   'owner',

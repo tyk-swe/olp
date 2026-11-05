@@ -12,11 +12,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
-func LoadMounted(path string, policy *egress.Policy) (map[string]runtime.MountedProvider, error) {
+func LoadMounted(path string, policy *egress.Policy) (map[string]release.MountedProvider, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, errors.New("cannot read mounted connector configuration")
@@ -43,7 +43,7 @@ func LoadMounted(path string, policy *egress.Policy) (map[string]runtime.Mounted
 	if decoder.Decode(&document) != nil || decoder.Decode(new(any)) != io.EOF || len(document.Providers) > 2000 {
 		return nil, errors.New("invalid mounted connector configuration")
 	}
-	out := map[string]runtime.MountedProvider{}
+	out := map[string]release.MountedProvider{}
 	for _, entry := range document.Providers {
 		if _, err = uuid.Parse(entry.ProviderID); err != nil {
 			return nil, errors.New("invalid mounted provider identifier")
@@ -100,7 +100,7 @@ func LoadMounted(path string, policy *egress.Policy) (map[string]runtime.Mounted
 		if err = json.Unmarshal(data, &config); err != nil {
 			return nil, err
 		}
-		out[entry.ProviderID] = runtime.MountedProvider{Configuration: config, Credential: secret, NetworkCredential: networkSecret}
+		out[entry.ProviderID] = release.MountedProvider{Configuration: config, Credential: secret, NetworkCredential: networkSecret}
 	}
 	return out, nil
 }

@@ -7,7 +7,7 @@ CI or as release gates. Their evidence, pins, and reproduction commands
 remain in git history before commit `99234cb0`, scoped to the revisions
 that produced them.
 
-Pre-merge validation is now the fast safety net in
+Pre-merge validation is now the fast safety net and the small service suite in
 [testing](../../tests/README.md) plus formatting, vet, lint, type checks,
 contract generation, and a full build. Release qualification still builds
 the candidate image and runs the image mode and service smokes and the

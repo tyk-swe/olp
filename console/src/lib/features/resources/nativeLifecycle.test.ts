@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { apiClient } from '$lib/api/client';
-import { gatewayFetch } from '$lib/api/gateway';
+import { apiClient } from '$lib/management/client';
+import { gatewayFetch } from '$lib/management/gateway';
 import {
   listNativeEndpoints,
   nativeResourceByteLimit,
@@ -12,8 +12,8 @@ import {
 } from './nativeLifecycle';
 import { ResourceRequestError } from './lifecycle';
 
-vi.mock('$lib/api/client', () => ({ apiClient: { GET: vi.fn() } }));
-vi.mock('$lib/api/gateway', () => ({ gatewayFetch: vi.fn() }));
+vi.mock('$lib/management/client', () => ({ apiClient: { GET: vi.fn() } }));
+vi.mock('$lib/management/gateway', () => ({ gatewayFetch: vi.fn() }));
 
 const local = (kind: string, digit = '1') => `${kind}_${digit.repeat(32)}`;
 const endpoint: NativeEndpoint = {

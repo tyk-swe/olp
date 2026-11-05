@@ -17,7 +17,7 @@ import (
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/usage"
-	"github.com/tyk-swe/olp/sdk/plugin/abi"
+	"github.com/tyk-swe/olp/plugin/abi"
 )
 
 const (

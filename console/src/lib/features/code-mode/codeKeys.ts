@@ -1,4 +1,7 @@
-import type { CodeClientSelection, CodeFilters } from '$lib/api/code-mode';
+import type {
+  CodeClientSelection,
+  CodeFilters
+} from '$lib/management/code-mode';
 
 const root = ['code-mode'] as const;
 export const codeKeys = {

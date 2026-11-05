@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tyk-swe/olp/sdk/management"
+	"github.com/tyk-swe/olp/management"
 )
 
 func shellQuote(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }

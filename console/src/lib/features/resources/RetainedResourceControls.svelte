@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { usePrincipalLifetime } from '$lib/forms/mutationIntent.svelte';
+  import { usePrincipalLifetime } from '$lib/editing/mutationIntent.svelte';
   import {
     nativeObject,
     parseNativeJSON,
     stringifyNativeJSON
-  } from '$lib/json/nativeJson';
+  } from '$lib/nativeJson';
   import {
     requestRetainedReconciliation,
     submitRetainedEvidence,

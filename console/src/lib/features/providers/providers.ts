@@ -1,0 +1,200 @@
+import type { components } from '$lib/management/schema';
+import { apiClient } from '$lib/management/client';
+import { ApiProblem, ensureOk, unwrap, unwrapPage } from '$lib/management/http';
+import { PROVIDER_PAGE_SIZE } from '$lib/management/pageSizes';
+import { collectCursorPages } from '$lib/management/pagination';
+import { type CursorPage } from '$lib/management/http';
+
+type Schemas = components['schemas'];
+
+export type ProviderKind = Schemas['ProviderKind'];
+export type ProviderAuthMode = Schemas['ProviderAuthMode'];
+export type Provider = Schemas['ProviderDetailResponse'];
+export type ProviderSummary = Schemas['ProviderSummaryResponse'];
+
+export type CreateProviderInput = Schemas['CreateProviderRequest'];
+export type UpdateProviderInput = Schemas['UpdateProviderRequest'];
+export type ProviderProbe = Schemas['ProbeResponse'];
+/** The operation body and its committed provider version remain separate. */
+export type ProviderProbeReceipt = { result: ProviderProbe; etag: string };
+/** Reviewed connection facts for one known vendor, independent of protocol. */
+export type ProviderVendor = Schemas['Vendor'];
+
+export async function listProviderVendors(
+  signal?: AbortSignal
+): Promise<ProviderVendor[]> {
+  const response = await apiClient.GET('/api/v1/provider-vendors', { signal });
+  return unwrap(response);
+}
+
+export async function listProviders(
+  signal?: AbortSignal
+): Promise<ProviderSummary[]> {
+  return collectCursorPages((cursor) => listProviderPage(cursor, signal));
+}
+
+export async function listProviderPage(
+  cursor?: string,
+  signal?: AbortSignal,
+  search?: string
+): Promise<CursorPage<ProviderSummary>> {
+  const response = await apiClient.GET('/api/v1/providers', {
+    params: {
+      query: { limit: PROVIDER_PAGE_SIZE, cursor, search: search || undefined }
+    },
+    signal
+  });
+  return unwrapPage(response);
+}
+
+export async function getProvider(
+  id: string,
+  signal?: AbortSignal
+): Promise<Provider> {
+  const response = await apiClient.GET('/api/v1/providers/{provider_id}', {
+    params: { path: { provider_id: id } },
+    signal
+  });
+  return unwrap(response);
+}
+
+export async function createProvider(
+  input: CreateProviderInput,
+  requestId: string
+): Promise<string> {
+  const response = await apiClient.POST('/api/v1/providers', {
+    params: { header: { 'Idempotency-Key': requestId } },
+    body: input
+  });
+  return unwrap(response).id;
+}
+
+export async function updateProvider(
+  id: string,
+  etag: string,
+  input: UpdateProviderInput
+): Promise<Provider> {
+  const response = await apiClient.PATCH('/api/v1/providers/{provider_id}', {
+    params: { path: { provider_id: id }, header: { 'If-Match': etag } },
+    body: input
+  });
+  return unwrap(response);
+}
+
+export async function probeProvider(
+  provider: Provider
+): Promise<ProviderProbeReceipt> {
+  const response = await apiClient.POST(
+    '/api/v1/providers/{provider_id}/probe',
+    {
+      params: {
+        path: { provider_id: provider.id },
+        header: { 'If-Match': provider.etag }
+      }
+    }
+  );
+  const result = unwrap(response);
+  const etag = response.response.headers.get('ETag');
+  if (!etag?.trim())
+    throw new Error(
+      'The probe response has no provider version. Refresh before continuing.'
+    );
+  return { result, etag };
+}
+
+/** Manual inventory fallback for compatible endpoints without a model-list API. */
+
+export async function activateProvider(
+  provider: Pick<Provider, 'id' | 'etag'>,
+  requestId: string
+): Promise<number> {
+  const response = await apiClient.POST(
+    '/api/v1/providers/{provider_id}/activate',
+    {
+      params: {
+        path: { provider_id: provider.id },
+        header: {
+          'If-Match': provider.etag,
+          'Idempotency-Key': requestId
+        }
+      }
+    }
+  );
+  return unwrap(response).runtime_generation.sequence;
+}
+
+/**
+ * Stops the active revision from serving. The server refuses with 409 while a
+ * route still targets one of this provider's models, or an upstream media job
+ * is still live. Returns the runtime generation that no longer carries the
+ * provider.
+ */
+export async function disableProvider(
+  provider: Pick<Provider, 'id' | 'etag'>,
+  requestId: string
+): Promise<number | null> {
+  const response = await apiClient.POST(
+    '/api/v1/providers/{provider_id}/disable',
+    {
+      params: {
+        path: { provider_id: provider.id },
+        header: {
+          'If-Match': provider.etag,
+          'Idempotency-Key': requestId
+        }
+      }
+    }
+  );
+  return unwrap(response).runtime_generation?.sequence ?? null;
+}
+
+/** Moves a disabled provider back to an editable draft. */
+export async function restoreProviderAsDraft(
+  provider: Pick<Provider, 'id' | 'etag'>,
+  requestId: string
+): Promise<Provider> {
+  const response = await apiClient.POST(
+    '/api/v1/providers/{provider_id}/restore-as-draft',
+    {
+      params: {
+        path: { provider_id: provider.id },
+        header: {
+          'If-Match': provider.etag,
+          'Idempotency-Key': requestId
+        }
+      }
+    }
+  );
+  return unwrap(response);
+}
+
+/**
+ * The 409 the server raises for a resource that is still active or referenced.
+ * Several unrelated conflicts share the status — a replayed or in-flight
+ * `Idempotency-Key`, an unvalidated route — so the problem type, not the
+ * status, is what identifies this one.
+ */
+const PROVIDER_IN_USE_TYPE =
+  'https://openllmproxy.dev/problems/configuration_resource_in_use';
+
+/** True for the 409 the server returns when a resource is still referenced. */
+export function isProviderInUse(error: unknown): boolean {
+  return (
+    error instanceof ApiProblem &&
+    error.problem.status === 409 &&
+    error.problem.type === PROVIDER_IN_USE_TYPE
+  );
+}
+
+export const deleteProvider = async (
+  value: { id: string; etag: string },
+  requestId: string
+) =>
+  ensureOk(
+    await apiClient.DELETE('/api/v1/providers/{provider_id}', {
+      params: {
+        path: { provider_id: value.id },
+        header: { 'If-Match': `"${value.etag}"`, 'Idempotency-Key': requestId }
+      }
+    })
+  );

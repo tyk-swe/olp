@@ -7,13 +7,13 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/release"
 )
 
 // answerResearchPing answers only a validated upstream liveness request, under
 // the stream's existing admission. Reauthorization fences revocations and
 // generation changes without reserving another concurrency slot for the stream.
-func (s *Server) answerResearchPing(r *http.Request, release *runtime.Release, route codemode.Route, service string, authority access.Authority, attempt *researchAttempt, session string, reply []byte) error {
+func (s *Server) answerResearchPing(r *http.Request, release *release.Release, route codemode.Route, service string, authority access.Authority, attempt *researchAttempt, session string, reply []byte) error {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	fresh, account, err := s.researchAuthority(r.WithContext(ctx), route, service, authority)

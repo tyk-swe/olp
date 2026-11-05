@@ -2,11 +2,11 @@
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/forms/mutationIntent.svelte';
+  } from '$lib/editing/mutationIntent.svelte';
   import { parseExternalReference } from '$lib/features/providers/externalReference';
   import { resolve } from '$app/paths';
-  import { parseNativeJSON, stringifyNativeJSON } from '$lib/json/nativeJson';
-  import { ApiProblem, errorMessage } from '$lib/api/http';
+  import { parseNativeJSON, stringifyNativeJSON } from '$lib/nativeJson';
+  import { ApiProblem, errorMessage } from '$lib/management/http';
   import { copyText } from '$lib/clipboard';
   import { downloadBlob } from '$lib/download';
   import {

@@ -15,7 +15,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -141,7 +141,7 @@ func probeTargets(snapshot *routing.Snapshot) []probeTarget {
 // planning and execution, so it is gated, priced and recorded like any
 // attempt, and accounted to the installation as a probe. It reports false
 // when no attempt reached the provider, which says nothing about its health.
-func (s *Server) probe(ctx context.Context, release *runtime.Release, target probeTarget) (limits.ProbeResult, bool) {
+func (s *Server) probe(ctx context.Context, release *release.Release, target probeTarget) (limits.ProbeResult, bool) {
 	shape := probeRequests[target.operation]
 	if target.operation == operationGeneration {
 		provider := release.Snapshot.Providers[target.provider]

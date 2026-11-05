@@ -7,13 +7,13 @@
     listSessionPage,
     revokeSession
   } from '$lib/features/access/sessions/api';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { authLifecycle } from '$lib/features/access/session/lifecycle';
   import {
     cursorPaginationProps,
     emptyCursorHistory
-  } from '$lib/lists/pagination';
-  import CursorPagination from '$lib/components/CursorPagination.svelte';
+  } from '$lib/listing/pagination';
+  import CursorPagination from '$lib/shell/CursorPagination.svelte';
   import { formatDate } from '$lib/format';
 
   const pagination = $state(emptyCursorHistory());

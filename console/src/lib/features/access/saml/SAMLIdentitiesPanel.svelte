@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { page } from '$app/state';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { authLifecycle } from '../session/lifecycle';
   import { profileKeys } from '../profile/profileKeys';
   import {

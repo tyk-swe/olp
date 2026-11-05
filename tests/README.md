@@ -1,12 +1,20 @@
 # Behavioral validation
 
-Pre-merge validation is one fast safety net. After `make setup`, run
-`make test-fast`. The net is the explicit allowlist in
+Pre-merge validation is one fast safety net and one small service suite. After
+`make setup`, run `make test-fast`. The net is the explicit allowlist in
 `scripts/test-fast.sh`, and the script fails when the run takes longer than
-60 seconds of wall time. `make check` and `make check-fast` run formatting,
-vet, lint, console types and formatting checks, contract generation where
-applicable, and this same net. CI runs those gates as separate jobs and runs
-the net in the `test-fast` job.
+60 seconds of wall time. `make check` runs contract freshness, Go formatting,
+vet and lint, console formatting, types and lint, then this same net. CI uses
+the same focused checks in separate jobs and runs the net in the `test-fast` job.
+The [service suite](#service-suite) needs Docker and runs in the `test-service`
+job.
+
+`make check-contracts` generates temporary outputs and compares all tracked
+management, guardrail and inference artifacts with the working tree. It accepts
+correct uncommitted generated changes and reports stale or missing files with
+an instruction to run `make api`. `make check-console` regenerates ignored
+console types before validating them. Checks may write ignored caches and build
+metadata, but they do not rewrite tracked files.
 
 The net needs no containers, services, network, or provider accounts. Go
 packages run with `-count=1`, so cached results never hide budget growth.
@@ -19,7 +27,9 @@ generated API types, which CI creates with
 The Go allowlist covers authorization derivation and its golden file,
 secret sealing and signing, billing and usage math, protocol translation,
 token estimation against its oracle fixtures, catalog validation, limits,
-route planning, guardrail detection, and a reduced gateway slice for
+route planning, agent dispatch and continuation ownership, both A2A wire versions,
+publication isolation, guardrail detection, MCP registration validation, tool
+pricing and resolution, grant binding, and a reduced gateway slice for
 credential redaction, cost reservation, cache replay, and guardrail wiring.
 The gateway slice is the files `gateway_test.go`,
 `caller_credentials_test.go`, `cache_test.go`,
@@ -33,13 +43,31 @@ Everything else was subtracted for speed, including the service and process
 integration suites, browser journeys, client and code-CLI qualification,
 SDK smoke suites, benchmark scenarios and harness, live-provider checks,
 component tests, race and ratchet targets, and the tests of that machinery.
-Those areas now have no automated behavioral signal. In particular, nothing
-in the net exercises PostgreSQL or Valkey behavior, cross-project isolation
-at the service layer, backup and restore, browser rendering, or real client
-and provider compatibility. The deleted suites remain available in git
-history before commit `99234cb0`. Release image qualification still runs
-the image mode and service smokes and the vulnerability scan through
+Apart from what the service suite restores, those areas have no automated
+behavioral signal. In particular, nothing exercises backup and restore, browser
+rendering, or real client and provider compatibility. The deleted suites remain
+available in git history before commit `99234cb0`. Release image qualification
+still runs the image mode and service smokes and the vulnerability scan through
 `scripts/qualify-image.sh`.
+
+## Service suite
+
+`make test-service` runs `tests/service` behind the `service` build tag. It
+starts disposable PostgreSQL and Valkey containers, builds the real `olp`
+binary, and drives it over HTTP, so requests cross the same composition a
+deployment runs. Each test gets its own database and process.
+
+The suite covers what the net cannot reach without a database: migrations
+applying concurrently and refusing changed history, the process running under
+the restricted runtime role, every secured management read answering without a
+server error, cross-project isolation of those reads, and one request travelling
+from route publication to durable usage.
+
+`scripts/test-service.sh` fails when the tests take longer than its budget. The
+budget and admission rules match the net: a test enters only when the suite
+still fits with headroom, or when it displaces a weaker test, and the change
+states the timed result. Add a service test only for behavior that needs a real
+database or Valkey, and keep everything else in the net.
 
 ## Test rules
 
@@ -69,11 +97,14 @@ deleted. No signal beats false signal.
 
 ## Focused runs
 
+Use `make check-go`, `make check-console`, or `make check-contracts` for focused
+static validation. Helm, dependency and release checks run separately in CI.
+
 Run one allowlisted package or file directly while iterating, for example
 `go test -count=1 ./internal/gateway` or
 `pnpm --dir console test --project unit src/lib/features/usage/priceEntry.test.ts`.
-Focused `.only` tests must never land. `make test-fast` is the only test
-target, and it always runs the whole net.
+Focused `.only` tests must never land. `make test-fast` and `make test-service`
+are the only test targets, and each always runs its whole suite.
 
 Authorization changes surface as diffs to
 `internal/access/testdata/authorization.golden.json`, which records the

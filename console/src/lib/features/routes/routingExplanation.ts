@@ -1,4 +1,4 @@
-import type { components } from '$lib/api/schema';
+import type { components } from '$lib/management/schema';
 import { formatInteger } from '$lib/format';
 
 type Schemas = components['schemas'];

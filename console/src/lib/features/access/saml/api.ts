@@ -1,6 +1,6 @@
-import { apiClient } from '$lib/api/client';
-import { ensureOk, unwrap } from '$lib/api/http';
-import type { components } from '$lib/api/schema';
+import { apiClient } from '$lib/management/client';
+import { ensureOk, unwrap } from '$lib/management/http';
+import type { components } from '$lib/management/schema';
 export type SAMLConfiguration = components['schemas']['SAMLConfiguration'];
 export type SAMLWrite = components['schemas']['SAMLConfigurationWrite'];
 export async function getSAML(signal?: AbortSignal) {

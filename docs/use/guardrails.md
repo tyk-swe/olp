@@ -254,8 +254,10 @@ visibility and the key's limits:
 
 A successful evaluation returns `{blocked, segments, decisions}`, including
 `blocked: true` for a policy refusal. The operation is recorded as `guardrail`.
-The [OpenAPI contract](../../openapi/guardrails.json) and generated Go and TypeScript
-clients live under [sdk/guardrails](../../sdk/guardrails).
+The [OpenAPI contract](../../guardrails/guardrails.json) and generated Go and TypeScript
+clients live under [guardrails](../../guardrails). The Go client imports as
+`github.com/tyk-swe/olp/guardrails`, which replaces the old
+`github.com/tyk-swe/olp/sdk/guardrails` path with no alias left behind.
 
 Evidence contains only identifiers, revisions, phase, action, outcome,
 categories and latency. Request and attempt history, telemetry and the
@@ -313,3 +315,10 @@ Uninspectable native/background/stateful/Files/Batch/realtime surfaces refuse
 Evidence stores rule ID/phase/action/outcome only, never matched text, offsets,
 patterns, replacements or bodies. This bounded text filter is not a universal
 safety or prompt-injection guarantee.
+
+
+## Credential and attachment maintenance
+
+The console Credentials tab and `GET /api/v1/guardrail-credentials` expose credential metadata without secret material. Read a credential through `GET /api/v1/guardrail-credentials/{credential_id}` to obtain its ETag. Deleting an unused credential requires that ETag and an idempotency key. Deletion returns `409 guardrail_credential_in_use` while any retained definition revision references the credential, including network authentication references.
+
+Credential replacement creates a new credential and new definition and policy revisions. Activating a policy does not change existing attachments. Use `PUT /api/v1/guardrail-attachments/{attachment_id}` with a replacement `policy_revision_id`, the attachment ETag and an idempotency key to switch the pinned revision atomically. Scope and position remain unchanged, and a failed publication leaves the original attachment intact. Attachment listings include the owning policy and its currently active revision for comparison.

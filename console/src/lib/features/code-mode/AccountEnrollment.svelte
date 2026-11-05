@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import { importSubscriptionCredentials } from '$lib/features/providers/api/grants';
+  import { importSubscriptionCredentials } from '$lib/features/providers/grants';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { getProvider } from '$lib/features/providers/api/providers';
-  import { listProviderKinds } from '$lib/features/providers/api/models';
+  import { getProvider } from '$lib/features/providers/providers';
+  import { listProviderKinds } from '$lib/features/providers/models';
   import { providerKeys } from '$lib/features/providers/providerKeys';
   import { requiresGrant } from '$lib/features/providers/providerEditor';
   import { GrantEnrollmentState } from '$lib/features/providers/grantEnrollment.svelte';

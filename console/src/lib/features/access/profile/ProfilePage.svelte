@@ -10,10 +10,10 @@
   import { replaceState } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage, isEtagMismatch } from '$lib/api/http';
+  import { errorMessage, isEtagMismatch } from '$lib/management/http';
   import { beginOidcLink } from '$lib/features/access/oidc/api';
-  import ConflictNotice from '$lib/components/ConflictNotice.svelte';
-  import ReauthenticateDialog from '$lib/components/ReauthenticateDialog.svelte';
+  import ConflictNotice from '$lib/shell/ConflictNotice.svelte';
+  import ReauthenticateDialog from '$lib/shell/ReauthenticateDialog.svelte';
   import {
     acceptRemote,
     beginReload,
@@ -23,7 +23,7 @@
     markDirty,
     markSaved,
     reconcile
-  } from '$lib/forms/concurrentEdit';
+  } from '$lib/editing/concurrentEdit';
   import {
     beginIdentityReauthentication,
     changePassword,

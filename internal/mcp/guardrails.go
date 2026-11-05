@@ -5,14 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
-	"net/http"
 	"slices"
 	"strconv"
 
 	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/mcpservers"
+	"github.com/tyk-swe/olp/internal/mcp/accounting"
+	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/oif"
 )
+
+type ToolPolicies interface {
+	ToolGuardrailEngine(string, string) *guardrails.Engine
+}
 
 type toolGuardrailState struct {
 	engine    *guardrails.Engine
@@ -20,19 +24,19 @@ type toolGuardrailState struct {
 	decisions []guardrails.Evidence
 }
 
-func guardrailRefusal(err error) *apiError {
-	var refusal *guardrails.Error
-	if errors.As(err, &refusal) {
-		return fail(refusal.Status, refusal.Code, "invalid_request_error", "The tool call could not satisfy the configured guardrails.")
+func guardrailRefusal(err error) *Failure {
+	var policyFailure *guardrails.Error
+	if errors.As(err, &policyFailure) {
+		return &Failure{Code: policyFailure.Code, Message: "The tool call could not satisfy the configured guardrails.", Guardrail: policyFailure}
 	}
-	return fail(http.StatusInternalServerError, "guardrail_unavailable", "api_error", "The guardrail could not be evaluated.")
+	return refusal("guardrail_unavailable", "The guardrail could not be evaluated.")
 }
 
-func (s *Server) toolGuardrails(in executeInput) *toolGuardrailState {
-	if in.snapshot == nil {
+func (s *Executor) toolGuardrails(in CallRequest) *toolGuardrailState {
+	if in.Policies == nil {
 		return nil
 	}
-	engine := in.snapshot.ToolGuardrailEngine(in.resolved.id, in.authority.ID)
+	engine := in.Policies.ToolGuardrailEngine(in.ToolsetID, in.Authority.ID)
 	if engine == nil {
 		return nil
 	}
@@ -46,24 +50,24 @@ func stateDecisions(state *toolGuardrailState) []guardrails.Evidence {
 	return slices.Clone(state.decisions)
 }
 
-func (s *Server) evaluateToolPhase(ctx context.Context, in executeInput, reservation *Reservation, state *toolGuardrailState, phase string, segments []guardrails.Segment) (guardrails.Result, error) {
-	if s.Guardrails == nil {
+func (s *Executor) evaluateToolPhase(ctx context.Context, in CallRequest, reservation *accounting.Reservation, state *toolGuardrailState, phase string, segments []guardrails.Segment) (guardrails.Result, error) {
+	if s.guardrails == nil {
 		return state.engine.Unavailable(phase)
 	}
-	return s.Guardrails(ctx, GuardrailEvaluation{
-		Authority: in.authority, Release: in.release, Engine: state.engine,
+	return s.guardrails(ctx, GuardrailEvaluation{
+		Authority: in.Authority, Release: in.Release, Engine: state.engine,
 		RequestID: reservation.AttemptID, Phase: phase, Segments: segments, Masks: state.masks,
 	})
 }
 
-func (s *Server) refuseGuardedCall(ctx context.Context, in executeInput, reservation *Reservation, state *toolGuardrailState) {
+func (s *Executor) refuseGuardedCall(ctx context.Context, in CallRequest, reservation *accounting.Reservation, state *toolGuardrailState) {
 	now := s.now()
-	evidence := AttemptEvidence{IdentityDecisions: toolIdentityDecisions(in.tool, nil),
-		ServerID: in.tool.ServerID, ServerRevisionID: in.tool.ServerRevisionID,
-		Status: StatusGuardrailBlocked, StartedAt: now, CompletedAt: now,
+	evidence := accounting.AttemptEvidence{IdentityDecisions: toolIdentityDecisions(in.Tool, nil),
+		ServerID: in.Tool.ServerID, ServerRevisionID: in.Tool.ServerRevisionID,
+		Status: accounting.StatusGuardrailBlocked, StartedAt: now, CompletedAt: now,
 		GuardrailDecisions: stateDecisions(state),
 	}
-	if err := s.Ledger.RefuseUndispatched(context.WithoutCancel(ctx), reservation, evidence); err != nil {
+	if err := s.ledger.RefuseUndispatched(context.WithoutCancel(ctx), reservation, evidence); err != nil {
 		s.release(reservation)
 	}
 }
@@ -80,9 +84,9 @@ func unsupportedToolPhases(engine *guardrails.Engine, phases []string) ([]guardr
 	return slices.Concat(result.Decisions, next), failure
 }
 
-func (s *Server) guardArguments(ctx context.Context, in executeInput, reservation *Reservation, state *toolGuardrailState) (json.RawMessage, *toolGuardrailState, *apiError) {
+func (s *Executor) guardArguments(ctx context.Context, in CallRequest, reservation *accounting.Reservation, state *toolGuardrailState) (json.RawMessage, *toolGuardrailState, *Failure) {
 	if state == nil {
-		return in.arguments, nil, nil
+		return in.Arguments, nil, nil
 	}
 	unavailable, failure := unsupportedToolPhases(state.engine, []string{guardrails.InputParallel, guardrails.OutputStream})
 	if failure != nil {
@@ -90,12 +94,12 @@ func (s *Server) guardArguments(ctx context.Context, in executeInput, reservatio
 		s.refuseGuardedCall(ctx, in, reservation, refused)
 		return nil, refused, guardrailRefusal(failure)
 	}
-	document, parseErr := oif.ParseJSON(in.arguments, oif.Limits{MaxBytes: maxCallBodyBytes})
+	document, parseErr := oif.ParseJSON(in.Arguments, oif.Limits{MaxBytes: maxCallBodyBytes})
 	if parseErr != nil {
 		s.refuseGuardedCall(ctx, in, reservation, state)
-		return nil, state, errGuardrailBlocked
+		return nil, state, failureGuardrailBlocked
 	}
-	surface := guardrails.ToolJSONSurface(document, in.tool.Alias, false)
+	surface := guardrails.ToolJSONSurface(document, in.Tool.Alias, false)
 	result, err := s.evaluateToolPhase(ctx, in, reservation, state, guardrails.Input, surface.Segments())
 	guarded := &toolGuardrailState{engine: state.engine, masks: state.masks, decisions: slices.Concat(unavailable, result.Decisions)}
 	if err != nil {
@@ -103,17 +107,17 @@ func (s *Server) guardArguments(ctx context.Context, in executeInput, reservatio
 		return nil, guarded, guardrailRefusal(err)
 	}
 	if !result.Changed {
-		return in.arguments, guarded, nil
+		return in.Arguments, guarded, nil
 	}
 	applied, applyErr := surface.Apply(result.Segments)
 	if applyErr != nil {
 		s.refuseGuardedCall(ctx, in, reservation, guarded)
-		return nil, guarded, errGuardrailBlocked
+		return nil, guarded, failureGuardrailBlocked
 	}
 	transformed := json.RawMessage(applied.Bytes())
-	if len(transformed) > maxCallBodyBytes || in.tool.ValidateArguments(transformed) != nil {
+	if len(transformed) > maxCallBodyBytes || in.Tool.ValidateArguments(transformed) != nil {
 		s.refuseGuardedCall(ctx, in, reservation, guarded)
-		return nil, guarded, errGuardrailBlocked
+		return nil, guarded, failureGuardrailBlocked
 	}
 	return transformed, guarded, nil
 }
@@ -124,18 +128,18 @@ type toolResultSurface struct {
 	opaque     bool
 }
 
-func projectToolResult(in executeInput, result mcpservers.ToolResult) (toolResultSurface, error) {
+func projectToolResult(in CallRequest, result upstream.ToolResult) (toolResultSurface, error) {
 	content := slices.Collect(func(yield func(guardrails.Segment) bool) {
 		for index, block := range result.Content {
 			if block.Type == "text" && !yield(guardrails.Segment{
 				ID: "content" + strconv.Itoa(index), Kind: "tool_result",
-				ToolName: in.tool.Alias, Untrusted: true, Text: block.Text,
+				ToolName: in.Tool.Alias, Untrusted: true, Text: block.Text,
 			}) {
 				return
 			}
 		}
 	})
-	opaque := slices.ContainsFunc(result.Content, func(block mcpservers.ToolContent) bool { return block.Type != "text" })
+	opaque := slices.ContainsFunc(result.Content, func(block upstream.ToolContent) bool { return block.Type != "text" })
 	if len(result.StructuredContent) == 0 || string(result.StructuredContent) == "null" {
 		return toolResultSurface{segments: content, opaque: opaque}, nil
 	}
@@ -143,11 +147,11 @@ func projectToolResult(in executeInput, result mcpservers.ToolResult) (toolResul
 	if err != nil {
 		return toolResultSurface{}, guardrails.ErrSurface
 	}
-	structured := guardrails.ToolJSONSurface(document, in.tool.Alias, true)
+	structured := guardrails.ToolJSONSurface(document, in.Tool.Alias, true)
 	return toolResultSurface{segments: slices.Concat(content, structured.Segments()), structured: structured, opaque: opaque}, nil
 }
 
-func applyToolResult(result mcpservers.ToolResult, surface toolResultSurface, segments []guardrails.Segment) (mcpservers.ToolResult, error) {
+func applyToolResult(result upstream.ToolResult, surface toolResultSurface, segments []guardrails.Segment) (upstream.ToolResult, error) {
 	texts := maps.Collect(func(yield func(string, string) bool) {
 		for _, segment := range segments {
 			if !yield(segment.ID, segment.Text) {
@@ -164,7 +168,7 @@ func applyToolResult(result mcpservers.ToolResult, surface toolResultSurface, se
 			return result, guardrails.ErrSurface
 		}
 	}
-	content := slices.Collect(func(yield func(mcpservers.ToolContent) bool) {
+	content := slices.Collect(func(yield func(upstream.ToolContent) bool) {
 		for index, block := range result.Content {
 			if block.Type != "text" {
 				if !yield(block) {
@@ -172,22 +176,22 @@ func applyToolResult(result mcpservers.ToolResult, surface toolResultSurface, se
 				}
 				continue
 			}
-			if !yield(mcpservers.ToolContent{Type: block.Type, Text: texts["content"+strconv.Itoa(index)], Data: block.Data, MimeType: block.MimeType}) {
+			if !yield(upstream.ToolContent{Type: block.Type, Text: texts["content"+strconv.Itoa(index)], Data: block.Data, MimeType: block.MimeType}) {
 				return
 			}
 		}
 	})
 	if surface.structured == nil {
-		return mcpservers.ToolResult{Content: content, StructuredContent: result.StructuredContent, IsError: result.IsError}, nil
+		return upstream.ToolResult{Content: content, StructuredContent: result.StructuredContent, IsError: result.IsError}, nil
 	}
 	document, err := surface.structured.Apply(segments)
 	if err != nil {
 		return result, err
 	}
-	return mcpservers.ToolResult{Content: content, StructuredContent: document.Bytes(), IsError: result.IsError}, nil
+	return upstream.ToolResult{Content: content, StructuredContent: document.Bytes(), IsError: result.IsError}, nil
 }
 
-func (s *Server) guardResult(ctx context.Context, in executeInput, reservation *Reservation, state *toolGuardrailState, result mcpservers.ToolResult) (mcpservers.ToolResult, []guardrails.Evidence, error) {
+func (s *Executor) guardResult(ctx context.Context, in CallRequest, reservation *accounting.Reservation, state *toolGuardrailState, result upstream.ToolResult) (upstream.ToolResult, []guardrails.Evidence, error) {
 	if state == nil {
 		return result, nil, nil
 	}

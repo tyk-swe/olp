@@ -5,7 +5,7 @@ import {
   limitsError,
   type LimitForm
 } from '../budgets/limitForm';
-import type { components } from '$lib/api/schema';
+import type { components } from '$lib/management/schema';
 
 export type EndUserPolicy = components['schemas']['EndUserPolicy'];
 export type PolicyForm = {

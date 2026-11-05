@@ -1,10 +1,10 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { listRoutes } from '$lib/features/routes/api';
   import { routeKeys } from '$lib/features/routes/routeKeys';
-  import { usePrincipalLifetime } from '$lib/forms/mutationIntent.svelte';
-  import { nativeObject, parseNativeJSON } from '$lib/json/nativeJson';
+  import { usePrincipalLifetime } from '$lib/editing/mutationIntent.svelte';
+  import { nativeObject, parseNativeJSON } from '$lib/nativeJson';
   import { ResourceRequestError } from './lifecycle';
   import {
     listNativeEndpoints,

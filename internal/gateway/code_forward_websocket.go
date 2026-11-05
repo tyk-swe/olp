@@ -18,7 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/release"
 )
 
 type codeMessage struct {
@@ -66,7 +66,7 @@ type codeWebSocketHandshake struct {
 	target     string
 }
 
-func (s *Server) prepareCodeWebSocket(r *http.Request, release *runtime.Release, route codemode.Route, authority access.Authority, ingress codeIngress) (codeWebSocketHandshake, error) {
+func (s *Server) prepareCodeWebSocket(r *http.Request, release *release.Release, route codemode.Route, authority access.Authority, ingress codeIngress) (codeWebSocketHandshake, error) {
 	var handshake codeWebSocketHandshake
 	identity, err := codeConnectionIdentity(ingress, r.Header)
 	if err != nil {
@@ -129,7 +129,7 @@ func (s *Server) prepareCodeWebSocket(r *http.Request, release *runtime.Release,
 	return handshake, nil
 }
 
-func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *runtime.Release, route codemode.Route, authority access.Authority, ingress codeIngress) {
+func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *release.Release, route codemode.Route, authority access.Authority, ingress codeIngress) {
 	keyID, digest := authority.ID, authority.EndUserDigest
 	reject := func(err error) { s.codeRefuse(w, r, route, keyID, digest, err) }
 	if r.Header.Get("Sec-Websocket-Protocol") != "" {

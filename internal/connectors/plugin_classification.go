@@ -8,7 +8,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/vendors"
-	"github.com/tyk-swe/olp/sdk/plugin/abi"
+	"github.com/tyk-swe/olp/plugin/abi"
 )
 
 // declaredClasses maps the failure classes a plugin profile declares to the

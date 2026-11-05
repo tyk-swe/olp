@@ -2,6 +2,8 @@ package routing
 
 import (
 	"encoding/json"
+	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -13,11 +15,12 @@ func ptr[T any](v T) *T { return &v }
 
 func planningFixture() (Snapshot, string, []string) {
 	ids := []string{uuid.NewString(), uuid.NewString(), uuid.NewString()}
-	s := Snapshot{Providers: map[string]Provider{}, Routes: map[string]Route{}}
-	route := Route{Slug: "team-model", RoutingID: uuid.NewString(), OverallTimeout: 3000, MaxAttempts: 3, Operations: []string{"generation"}}
+	s := Snapshot{Generation: Generation{ID: uuid.NewString()}, Providers: map[string]Provider{}, Routes: map[string]Route{}}
+	routeID := uuid.NewString()
+	route := Route{ID: routeID, Slug: "team-model", RoutingID: routeID, OverallTimeout: 3000, MaxAttempts: 3, Operations: []string{"generation"}, Fidelity: RouteFidelity{Mode: FidelityTransformed}}
 	for i, id := range ids {
 		target := uuid.NewString()
-		s.Providers[id] = Provider{ID: id, Kind: "openai", VendorID: "openai", Enabled: true, RevisionID: uuid.NewString(), Capabilities: []Capability{{Model: "wire-model", Operation: "generation", Surface: "openai", Mode: "unary"}}}
+		s.Providers[id] = Provider{ID: id, Name: id, Kind: "openai", VendorID: "openai", Enabled: true, RevisionID: uuid.NewString(), Capabilities: []Capability{{Model: "wire-model", Operation: "generation", Surface: "openai", Mode: "unary"}}}
 		route.Targets = append(route.Targets, Target{ID: target, RoutingID: target, ProviderID: id, ProviderModel: "wire-model", Weight: int64(i + 1), Timeout: 1000})
 	}
 	s.Routes[route.Slug] = route
@@ -31,6 +34,9 @@ func TestPoliciesIntersectUnknownFactsAndPublishedLimits(t *testing.T) {
 	p.Models = map[string]json.RawMessage{"wire-model": metadata}
 	s.Providers[p.ID] = p
 	s.InstallationPolicy = &Policy{Constraints: Preferences{Regions: []string{"eu"}, RequireZeroDataRetention: ptr(true), RequireParameters: ptr(true)}}
+	if err := s.Compile(); err != nil {
+		t.Fatal(err)
+	}
 	plan, e := Select(&s, slug, "generation", "openai", "unary", []byte("seed"), Options{Parameters: Listed([]string{"temperature"}), Now: now})
 	if e != nil || len(plan.Attempts) != 1 || plan.Attempts[0].ProviderID != ids[0] {
 		t.Fatalf("facts: %+v %v", plan, e)
@@ -49,6 +55,66 @@ func TestPoliciesIntersectUnknownFactsAndPublishedLimits(t *testing.T) {
 	for _, payload := range []string{`{"deadline":9000}`, `{"only":["anything"]}`, `{"max_price":{"input_per_million":"1e9"}}`, `{"allowed_strategies":["price"]}`, `{"strategy":"price"} {}`, `null`} {
 		if _, e = ParsePreferences([]byte(payload)); e == nil {
 			t.Fatalf("accepted invalid controls %s", payload)
+		}
+	}
+}
+
+func TestModelFactsFollowSnapshotRecompilation(t *testing.T) {
+	snapshot, slug, ids := planningFixture()
+	provider := snapshot.Providers[ids[0]]
+	provider.Models = map[string]json.RawMessage{"wire-model": json.RawMessage(`{"context_length":2048,"max_output_tokens":1024,"supported_parameters":["response_format"]}`)}
+	snapshot.Providers[ids[0]] = provider
+	options := Options{Now: time.Unix(1700000000, 0), Preferences: &Preferences{Only: []string{"provider:" + ids[0]}}, TokenDemand: &TokenDemand{EstimatedInputTokens: 512}}
+	before, err := Select(&snapshot, slug, "generation", "openai", "unary", []byte("seed"), options)
+	if err != nil || len(before.Attempts) != 1 {
+		t.Fatalf("initial plan %+v, error %v", before, err)
+	}
+	digest, err := snapshot.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	capabilityRoute := snapshot.Routes[slug]
+	capabilityRoute.Targets = capabilityRoute.Targets[:1]
+	capabilities := EffectiveCapabilities(&snapshot, capabilityRoute)
+	if err := snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := Select(&snapshot, slug, "generation", "openai", "unary", []byte("seed"), options)
+	if err != nil || !reflect.DeepEqual(before, compiled) {
+		t.Fatalf("compilation changed planning: %+v, error %v", compiled, err)
+	}
+	if got, err := snapshot.Digest(); err != nil || got != digest {
+		t.Fatalf("compilation changed snapshot digest: %s, error %v", got, err)
+	}
+	if got := EffectiveCapabilities(&snapshot, capabilityRoute); !reflect.DeepEqual(got, capabilities) {
+		t.Fatalf("compilation changed capabilities: %+v", got)
+	}
+	clone := snapshot.Clone()
+	clone.Providers[ids[0]].Models["wire-model"] = json.RawMessage(`{"context_length":256,"supported_parameters":[]}`)
+	for _, compile := range []bool{false, true} {
+		if compile {
+			if err := clone.Compile(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		changed, err := Select(clone, slug, "generation", "openai", "unary", []byte("seed"), options)
+		decision := slices.IndexFunc(changed.Decisions, func(d Decision) bool { return d.ProviderID == ids[0] })
+		if err != nil || len(changed.Attempts) != 0 || decision < 0 || changed.Decisions[decision].Reason == nil || *changed.Decisions[decision].Reason != "context_length_exceeded" {
+			t.Fatalf("new model limit was ignored: %+v, error %v", changed, err)
+		}
+		facts, valid := clone.Providers[ids[0]].Metadata("wire-model")
+		if !valid || facts.SupportedParameters == nil || len(*facts.SupportedParameters) != 0 {
+			t.Fatal("new model parameter declaration was ignored")
+		}
+	}
+	clone.Providers[ids[0]].Models["wire-model"] = provider.Models["wire-model"]
+	if err := clone.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	for _, current := range []*Snapshot{&snapshot, clone} {
+		plan, err := Select(current, slug, "generation", "openai", "unary", []byte("seed"), options)
+		if err != nil || !reflect.DeepEqual(plan, before) {
+			t.Fatalf("model facts leaked between snapshots or remained stale: %+v, error %v", plan, err)
 		}
 	}
 }

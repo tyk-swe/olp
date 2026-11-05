@@ -15,8 +15,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routeidentity"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
@@ -336,7 +336,7 @@ func (s *Server) slotList(ctx context.Context, q access.Queryer, current *record
 			credentialIDs = append(credentialIDs, *id)
 		}
 	}
-	generations, err := runtime.ReadGrantGenerations(ctx, q, credentialIDs)
+	generations, err := release.ReadGrantGenerations(ctx, q, credentialIDs)
 	if err != nil {
 		return access.Reply{}, err
 	}

@@ -10,10 +10,10 @@
     type AuthenticationCapabilities
   } from '$lib/features/access/session/api';
   import { oidcFailureMessage } from '$lib/features/access/login/oidcFailure';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { authLifecycle } from '$lib/features/access/session/lifecycle';
   import { relativeReturnTo } from '$lib/features/access/session/relativeReturnTo';
-  import SetupFrame from '$lib/components/SetupFrame.svelte';
+  import SetupFrame from '$lib/shell/SetupFrame.svelte';
 
   let email = $state('');
   let password = $state('');

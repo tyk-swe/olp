@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
 
   let {
     error,

@@ -1,4 +1,4 @@
-import { snapshotNativeJSON, stringifyNativeJSON } from '$lib/json/nativeJson';
+import { snapshotNativeJSON, stringifyNativeJSON } from '$lib/nativeJson';
 import { networkCredentialPath } from './configurationDraft.svelte';
 import { overviewKeys } from '$lib/features/overview/overviewKeys';
 import { providerKeys } from '$lib/features/providers/providerKeys';
@@ -11,8 +11,8 @@ import {
   fieldIssues,
   isEtagMismatch,
   type FieldIssue
-} from '$lib/api/http';
-import { emptyCursorHistory, resetCursor } from '$lib/lists/pagination';
+} from '$lib/management/http';
+import { emptyCursorHistory, resetCursor } from '$lib/listing/pagination';
 import {
   getProvider,
   activateProvider,
@@ -21,7 +21,7 @@ import {
   updateProvider,
   type Provider,
   type ProviderProbe
-} from '$lib/features/providers/api/providers';
+} from '$lib/features/providers/providers';
 import {
   certifyProviderModel,
   declareProviderModels,
@@ -32,15 +32,15 @@ import {
   setProviderModel,
   type CapabilityDeclaration,
   type CapabilityCertification
-} from '$lib/features/providers/api/models';
+} from '$lib/features/providers/models';
 import {
   listProviderCredentials,
   rotateProviderCredential,
   type ProviderCredential
-} from '$lib/features/providers/api/credentials';
-import type { ProviderProfile } from '$lib/features/providers/api/profiles';
-import type { ProviderVendor } from '$lib/features/providers/api/providers';
-import type { GrantEnrollment } from './api/grants';
+} from '$lib/features/providers/credentials';
+import type { ProviderProfile } from '$lib/features/providers/providerProfiles';
+import type { ProviderVendor } from '$lib/features/providers/providers';
+import type { GrantEnrollment } from './grants';
 import { GrantEnrollmentState } from './grantEnrollment.svelte';
 import {
   authOptionsFor,
@@ -58,7 +58,7 @@ import { useRole } from '$lib/features/access/session/useRole.svelte';
 import {
   useMutationIntent,
   usePrincipalLifetime
-} from '$lib/forms/mutationIntent.svelte';
+} from '$lib/editing/mutationIntent.svelte';
 
 /** Reports whether the credential version with the id is a live grant
  * enrolled through the plugin build with the digest, which a provider pinning

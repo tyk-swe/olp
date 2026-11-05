@@ -1,11 +1,11 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
-  import { listCodeRevisions } from '$lib/api/code-mode';
+  import { listCodeRevisions } from '$lib/management/code-mode';
   import {
     emptyCursorHistory,
     cursorPaginationProps
-  } from '$lib/lists/pagination';
-  import CursorPagination from '$lib/components/CursorPagination.svelte';
+  } from '$lib/listing/pagination';
+  import CursorPagination from '$lib/shell/CursorPagination.svelte';
   import LoadError from './LoadError.svelte';
   import { formatDate } from '$lib/format';
   import { codeKeys } from './codeKeys';

@@ -1,4 +1,4 @@
-import type { ManagementRoute } from '$lib/api/requirements';
+import type { ManagementRoute } from '$lib/management/requirements';
 import {
   allows,
   can,

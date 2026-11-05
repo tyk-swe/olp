@@ -2,9 +2,9 @@
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/forms/mutationIntent.svelte';
+  } from '$lib/editing/mutationIntent.svelte';
   import { createQuery } from '@tanstack/svelte-query';
-  import type { Provider } from './api/providers';
+  import type { Provider } from './providers';
   import { providerKeys } from './providerKeys';
   import {
     networkCredentialPath,
@@ -15,9 +15,9 @@
     createNetworkCredential,
     listNetworkCredentials,
     revokeNetworkCredential
-  } from './api/profiles';
+  } from './providerProfiles';
   import { formatDate } from '$lib/format';
-  import { parseNativeJSON, nativeObject } from '$lib/json/nativeJson';
+  import { parseNativeJSON, nativeObject } from '$lib/nativeJson';
 
   const createNetworkCredentialIntent = useMutationIntent();
   const revokeNetworkCredentialIntent = useMutationIntent();

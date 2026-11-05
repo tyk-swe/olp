@@ -3,14 +3,14 @@
   import { SvelteMap } from 'svelte/reactivity';
   import { formatCost } from '$lib/format';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { getReconciliation } from '$lib/features/usage/api/reconciliation';
+  import { getReconciliation } from '$lib/features/usage/reconciliation';
   import { usageKeys } from '$lib/features/usage/usageKeys';
-  import { listProviders } from '$lib/features/providers/api/providers';
+  import { listProviders } from '$lib/features/providers/providers';
   import { providerKeys } from '$lib/features/providers/providerKeys';
   import type {
     ReconciliationItem,
     ReconciliationTotals
-  } from '$lib/features/usage/api/reconciliation';
+  } from '$lib/features/usage/reconciliation';
 
   let { start, end }: { start: string; end: string } = $props();
 

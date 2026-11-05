@@ -146,7 +146,8 @@ func cloneSlot(s Slot) Slot {
 	s.Supply = cloneSupply(s.Supply)
 	return s
 }
-func cloneProvider(p Provider) Provider {
+func cloneProvider(provider Provider) Provider {
+	p := provider
 	// Config.Clone owns nested defaults, bindings, model documents and networking.
 	c := p.Connector().Clone()
 	p.Network = c.Network
@@ -160,6 +161,7 @@ func cloneProvider(p Provider) Provider {
 	p.PluginOptions = c.PluginOptions
 	p.CredentialHeaders = c.CredentialHeaders
 	p.Models = c.Models
+	p.metadata = nil
 	p.ActiveCredential = copyPointer(p.ActiveCredential)
 	p.Capabilities = slices.Clone(p.Capabilities)
 	p.ParameterDefaults = cloneValues(p.ParameterDefaults)

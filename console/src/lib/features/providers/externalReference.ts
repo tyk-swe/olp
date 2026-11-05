@@ -1,4 +1,4 @@
-import type { ExternalCredentialReference } from './api/credentials';
+import type { ExternalCredentialReference } from './credentials';
 
 export function parseExternalReference(
   value: string

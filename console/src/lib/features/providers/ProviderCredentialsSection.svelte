@@ -2,22 +2,22 @@
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/forms/mutationIntent.svelte';
+  } from '$lib/editing/mutationIntent.svelte';
 
   import ExternalReferenceEditor from './ExternalReferenceEditor.svelte';
   import { parseExternalReference } from './externalReference';
   import { providerKeys } from '$lib/features/providers/providerKeys';
 
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/api/http';
-  import { type Provider } from '$lib/features/providers/api/providers';
+  import { errorMessage } from '$lib/management/http';
+  import { type Provider } from '$lib/features/providers/providers';
   import {
     listProviderCredentials,
     revokeProviderCredential,
     rotateProviderCredential,
     type ProviderCredential
-  } from '$lib/features/providers/api/credentials';
-  import { type ProviderKindCapability } from '$lib/features/providers/api/models';
+  } from '$lib/features/providers/credentials';
+  import { type ProviderKindCapability } from '$lib/features/providers/models';
   import { formatDate } from '$lib/format';
   import {
     DISABLED_EDIT_NOTE,

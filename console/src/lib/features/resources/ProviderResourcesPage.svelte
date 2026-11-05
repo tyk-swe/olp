@@ -1,16 +1,16 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
-  import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import CursorPagination from '$lib/shell/CursorPagination.svelte';
   import {
     listProviderResources,
     type ProviderResourceFilters
   } from '$lib/features/resources/api';
   import { resourceKeys } from '$lib/features/resources/resourceKeys';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import {
     cursorPaginationProps,
     emptyCursorHistory
-  } from '$lib/lists/pagination';
+  } from '$lib/listing/pagination';
   import { formatDate } from '$lib/format';
   import AgentResources from './AgentResources.svelte';
   import RetrievalBindings from './RetrievalBindings.svelte';
@@ -97,12 +97,12 @@
   }
 </script>
 
-<svelte:head><title>Provider Resources · OpenLLMProxy</title></svelte:head>
+<svelte:head><title>Provider resources · OpenLLMProxy</title></svelte:head>
 
 <div class="page-header">
   <div>
     <p class="eyebrow">Operations</p>
-    <h1 class="page-title">Provider Resources</h1>
+    <h1 class="page-title">Provider resources</h1>
     <p class="page-description">
       Inspect resource ownership and settlement, or manage resources with an
       inference API key.

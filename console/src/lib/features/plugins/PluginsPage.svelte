@@ -1,8 +1,8 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage, isEtagMismatch } from '$lib/api/http';
+  import { errorMessage, isEtagMismatch } from '$lib/management/http';
   import { formatBytes, formatDate } from '$lib/format';
-  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
+  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { pluginKeys } from '$lib/features/plugins/pluginKeys';
   import UnconfinedPlugins from '$lib/features/plugins/UnconfinedPlugins.svelte';
@@ -343,7 +343,7 @@
                 >Review and approve</button
               >{/if}
             <button
-              class="button button-secondary danger-button"
+              class="button button-secondary button-danger"
               type="button"
               disabled={Boolean(busy)}
               onclick={() => uninstall(plugin)}
@@ -497,9 +497,6 @@
     flex-wrap: wrap;
     justify-content: flex-end;
     gap: 0.65rem;
-  }
-  .danger-button {
-    color: var(--danger);
   }
   @media (max-width: 64rem) {
     .install-panel,

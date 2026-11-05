@@ -17,7 +17,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/codexauth"
-	"github.com/tyk-swe/olp/sdk/plugin/abi"
+	"github.com/tyk-swe/olp/plugin/abi"
 )
 
 // A code account's connection is a plugin provider that authenticates with a

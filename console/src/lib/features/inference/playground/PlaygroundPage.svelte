@@ -3,8 +3,8 @@
   import RoutingDecisions from '$lib/features/routes/RoutingDecisions.svelte';
   import { decisionRows } from '$lib/features/routes/routingExplanation';
   import { inspectionDialects } from '$lib/features/routes/inspectionDialects';
-  import SegmentedRadioGroup from '$lib/components/SegmentedRadioGroup.svelte';
-  import { errorMessage } from '$lib/api/http';
+  import SegmentedRadioGroup from '$lib/shell/SegmentedRadioGroup.svelte';
+  import { errorMessage } from '$lib/management/http';
   import { formatInteger } from '$lib/format';
   import RealtimeTrace from './RealtimeTrace.svelte';
   import OperationResult from './OperationResult.svelte';

@@ -1,10 +1,10 @@
 import { getProviderResourceContracts } from './api';
-import { gatewayFetch } from '$lib/api/gateway';
+import { gatewayFetch } from '$lib/management/gateway';
 import {
   nativeObject,
   parseNativeJSON,
   stringifyNativeJSON
-} from '$lib/json/nativeJson';
+} from '$lib/nativeJson';
 import { agentSubmissionFingerprint, ResourceRequestError } from './lifecycle';
 
 export type NativeEndpoint = {

@@ -12,7 +12,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
-	"github.com/tyk-swe/olp/sdk/plugin/abi"
+	"github.com/tyk-swe/olp/plugin/abi"
 )
 
 // A plugin profile's envelope and rewrites change the dialect's bodies around

@@ -7,7 +7,7 @@
   import MembersPanel from '$lib/features/access/users/MembersPanel.svelte';
   import ManagementTokensPanel from '$lib/features/access/tokens/ManagementTokensPanel.svelte';
   import ProjectsPanel from '$lib/features/access/projects/ProjectsPanel.svelte';
-  import { slidingIndicator } from '$lib/components/indicator';
+  import { slidingIndicator } from '$lib/shell/indicator';
 
   type Tab =
     | 'members'
@@ -37,12 +37,12 @@
   let tab = $state<Tab>('members');
 </script>
 
-<svelte:head><title>Access · OpenLLMProxy</title></svelte:head>
+<svelte:head><title>Members · OpenLLMProxy</title></svelte:head>
 
 <div class="page-header">
   <div>
-    <p class="eyebrow">Identity</p>
-    <h1 class="page-title">Access</h1>
+    <p class="eyebrow">Access</p>
+    <h1 class="page-title">Members</h1>
     <p class="page-description">
       Manage installation members, fixed roles, invitations, sessions, and the
       linked identity providers.

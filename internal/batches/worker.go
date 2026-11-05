@@ -14,9 +14,9 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -44,7 +44,7 @@ type Worker struct {
 	Store        *Store
 	Resources    *resources.Store
 	Resolver     *resources.Resolver
-	Credentials  runtime.Credentials
+	Credentials  release.Credentials
 	Keys         *secrets.KeyRing
 	Installation string
 	DigestKey    *secrets.AuthKey

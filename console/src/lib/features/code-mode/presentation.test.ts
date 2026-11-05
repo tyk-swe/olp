@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { CodeAttempt } from '$lib/api/code-mode';
-import { ApiProblem } from '$lib/api/http';
+import type { CodeAttempt } from '$lib/management/code-mode';
+import { ApiProblem } from '$lib/management/http';
 import {
   adapterLabel,
   clientLabel,

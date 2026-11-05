@@ -4,18 +4,17 @@
   import RoutePassthroughEditor from './RoutePassthroughEditor.svelte';
   import ContentPolicyEditor from './ContentPolicyEditor.svelte';
   import RoutingPolicyEditor from './RoutingPolicyEditor.svelte';
-  import { focusErrorSummary, focusFormError } from '$lib/forms/focusError';
+  import { focusErrorSummary, focusFormError } from '$lib/editing/focusError';
   import RouteTargets from '$lib/features/routes/RouteTargets.svelte';
   import RouteResilienceEditor from './RouteResilienceEditor.svelte';
   import RouteCacheEditor from '$lib/features/caching/RouteCacheEditor.svelte';
   import RoutePublishPanel from '$lib/features/routes/RoutePublishPanel.svelte';
   import RouteSimulation from '$lib/features/routes/RouteSimulation.svelte';
   import { resolve } from '$app/paths';
-  import { errorMessage } from '$lib/api/http';
-  import ConflictNotice from '$lib/components/ConflictNotice.svelte';
-  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
+  import { errorMessage } from '$lib/management/http';
+  import ConflictNotice from '$lib/shell/ConflictNotice.svelte';
+  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
   import { formatDate } from '$lib/format';
-  import { operationOptions } from '$lib/features/routes/routeEditor';
   import { RouteDraftEditorState } from '$lib/features/routes/routeDraftEditor.svelte';
   import ProjectScopeField from '$lib/features/access/projects/ProjectScopeField.svelte';
   let {
@@ -62,7 +61,7 @@
     >{#if editor.canManage && editor.resourceId && editor.draft.data}
       {@const draft = editor.draft.data}
       <button
-        class="button button-secondary danger-button"
+        class="button button-secondary button-danger"
         type="button"
         onclick={() => editor.remove(draft)}
         disabled={Boolean(editor.busy)}>Delete draft</button
@@ -160,7 +159,7 @@
             </div>{/if}
           <fieldset class="form-field full operations">
             <legend>Supported operations</legend
-            >{#each operationOptions as option (option[0])}<label
+            >{#each editor.operationOptions as option (option[0])}<label
                 ><input
                   type="checkbox"
                   checked={editor.operations.includes(option[0])}
@@ -292,9 +291,6 @@
     color: var(--foreground-muted);
   }
 
-  .danger-button {
-    color: var(--danger);
-  }
   code {
     font-family: var(--font-mono);
     font-size: var(--text-caption);

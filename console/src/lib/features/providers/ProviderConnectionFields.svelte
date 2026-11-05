@@ -1,9 +1,9 @@
 <script lang="ts" generics="Values extends ProviderEditValues">
   import { createQuery } from '@tanstack/svelte-query';
-  import { listProviderProfiles } from './api/profiles';
+  import { listProviderProfiles } from './providerProfiles';
   import { providerKeys } from './providerKeys';
-  import type { ProviderKindCapability } from './api/models';
-  import { nativeObject, type NativeValue } from '$lib/json/nativeJson';
+  import type { ProviderKindCapability } from './models';
+  import { nativeObject, type NativeValue } from '$lib/nativeJson';
   import {
     authOptionsFor,
     hasApiVersion,

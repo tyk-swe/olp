@@ -12,7 +12,7 @@
     type CodeAccount,
     type CodePool,
     type CodePoolWrite
-  } from '$lib/api/code-mode';
+  } from '$lib/management/code-mode';
   import { adapterLabel } from './presentation';
 
   import {

@@ -41,7 +41,7 @@ console/playwright.config.ts
 console/playwright-report
 console/test-results
 console/tests
-console/src/lib/api/schema.d.ts
+console/src/lib/management/schema.d.ts
 deploy/helm
 deploy/secrets
 docs

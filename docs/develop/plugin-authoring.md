@@ -2,14 +2,37 @@
 
 A [provider plugin](../use/plugins.md) supplies authentication and hosting around
 one of OLP's built-in provider dialects. This guide explains how to write one
-with the Go SDK at `github.com/tyk-swe/olp/sdk/plugin` and documents the ABI that
+with the Go SDK at `github.com/tyk-swe/olp/plugin` and documents the ABI that
 the SDK implements. Start from the complete reference plugin in
-[`sdk/plugin/reference`](../../sdk/plugin/reference/main.go).
+[`plugin/reference`](../../plugin/reference/main.go).
 
 Plugins build with the Go version in OLP's `go.mod`. During 0.x the plugin ABI
 carries no compatibility promise: build a plugin with the SDK from the OLP
 version that will run it, because OLP refuses a module built for another ABI
 version at install.
+
+## Import paths
+
+Public packages live under capability-named top-level folders. Code written
+against the old layer buckets updates its imports with this table, and no
+compatibility aliases remain at the old paths.
+
+| Old import path | New import path |
+| --- | --- |
+| `github.com/tyk-swe/olp/sdk/plugin` | `github.com/tyk-swe/olp/plugin` |
+| `github.com/tyk-swe/olp/sdk/plugin/abi` | `github.com/tyk-swe/olp/plugin/abi` |
+| `github.com/tyk-swe/olp/sdk/management` | `github.com/tyk-swe/olp/management` |
+| `github.com/tyk-swe/olp/sdk/guardrails` | `github.com/tyk-swe/olp/guardrails` |
+| `github.com/tyk-swe/olp/sdk/inference` | `github.com/tyk-swe/olp/inference` |
+| `github.com/tyk-swe/olp/openapi` | `github.com/tyk-swe/olp/management` and `github.com/tyk-swe/olp/guardrails` |
+
+The contract sources moved next to their generated clients. The management
+contract now lives at `management/management.json`, the inference contract
+at `inference/inference.json`, and the guardrails contract at
+`guardrails/guardrails.json`. The first-party plugin programs moved next to
+the adapter module each one serves, so the program that used to build from
+`plugins/claude` now builds from `internal/claudeauth/claude`, and the
+coding plan programs build from folders under `internal/codeplans`.
 
 ## A minimal plugin
 
@@ -19,7 +42,7 @@ has an empty `main`:
 ```go
 package main
 
-import "github.com/tyk-swe/olp/sdk/plugin"
+import "github.com/tyk-swe/olp/plugin"
 
 type acme struct{}
 
@@ -55,16 +78,16 @@ refuses. Install the result from the console's Plugins page.
 
 ## Templates
 
-Three templates in [`sdk/plugin/templates`](../../sdk/plugin/templates) cover the
+Three templates in [`plugin/templates`](../../plugin/templates) cover the
 authentication schemes a profile's hosting cannot express by itself. Each is a
 complete plugin with tests, imports only the SDK, and builds to a module OLP
 installs, which CI checks:
 
 | Template | Authenticates with | Uses |
 | --- | --- | --- |
-| [`oauth-client-credentials`](../../sdk/plugin/templates/oauth-client-credentials) | Access tokens the OAuth 2.0 client credentials grant issues, refreshed by running the grant again | A grant with a pasted secret, `Fetch` |
-| [`signed-request`](../../sdk/plugin/templates/signed-request) | An HMAC signature of each request, so the secret never travels | A static credential, the signing hook |
-| [`token-exchange`](../../sdk/plugin/templates/token-exchange) | Bearer tokens exchanged for an API key (RFC 8693, or an IAM service's variant) | A grant with a pasted secret, `Fetch` |
+| [`oauth-client-credentials`](../../plugin/templates/oauth-client-credentials) | Access tokens the OAuth 2.0 client credentials grant issues, refreshed by running the grant again | A grant with a pasted secret, `Fetch` |
+| [`signed-request`](../../plugin/templates/signed-request) | An HMAC signature of each request, so the secret never travels | A static credential, the signing hook |
+| [`token-exchange`](../../plugin/templates/token-exchange) | Bearer tokens exchanged for an API key (RFC 8693, or an IAM service's variant) | A grant with a pasted secret, `Fetch` |
 
 Copy a template outside the repository, replace its upstream constants and
 names, and follow its README. Build with
@@ -503,7 +526,7 @@ carries traffic without implementing `Carrier` reports no manifest.
 ## ABI reference
 
 The ABI is defined in package
-[`sdk/plugin/abi`](../../sdk/plugin/abi/abi.go), which OLP and the SDK share. The
+[`plugin/abi`](../../plugin/abi/abi.go), which OLP and the SDK share. The
 SDK implements all of it; this section is for authors of other SDKs. A confined
 plugin exchanges its [messages](#messages) through a WebAssembly
 [module](#module)'s exports, and an unconfined plugin through the

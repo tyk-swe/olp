@@ -6,9 +6,9 @@
       "name": "codex",
       "description": "Codex device enrollment for OLP code-mode. Enrollment does not qualify inference.",
       "maintainer": "OpenLLMProxy",
-      "documentation_url": "https://github.com/tyk-swe/olp/blob/main/plugins/codex/README.md",
+      "documentation_url": "https://github.com/tyk-swe/olp/blob/main/internal/codexauth/codex/README.md",
       "repository": "https://github.com/tyk-swe/olp",
-      "path": "plugins/codex",
+      "path": "internal/codexauth/codex",
       "releases": [
         {
           "version": "0.1.0",
@@ -31,9 +31,9 @@
       "name": "kimi-code",
       "description": "Kimi Code API-key enrollment for OLP code-mode. Enrollment does not qualify inference.",
       "maintainer": "OpenLLMProxy",
-      "documentation_url": "https://github.com/tyk-swe/olp/blob/main/plugins/kimi-code/README.md",
+      "documentation_url": "https://github.com/tyk-swe/olp/blob/main/internal/codeplans/kimi-code/README.md",
       "repository": "https://github.com/tyk-swe/olp",
-      "path": "plugins/kimi-code",
+      "path": "internal/codeplans/kimi-code",
       "releases": [
         {
           "version": "0.1.0",
@@ -59,9 +59,9 @@
       "name": "minimax-plan",
       "description": "MiniMax M Plan API-key enrollment for OLP code-mode. Enrollment does not qualify inference.",
       "maintainer": "OpenLLMProxy",
-      "documentation_url": "https://github.com/tyk-swe/olp/blob/main/plugins/minimax-plan/README.md",
+      "documentation_url": "https://github.com/tyk-swe/olp/blob/main/internal/codeplans/minimax-plan/README.md",
       "repository": "https://github.com/tyk-swe/olp",
-      "path": "plugins/minimax-plan",
+      "path": "internal/codeplans/minimax-plan",
       "releases": [
         {
           "version": "0.1.0",
@@ -87,9 +87,9 @@
       "name": "opencode-go",
       "description": "OpenCode Go API-key enrollment for OLP code-mode. Enrollment does not qualify inference.",
       "maintainer": "OpenLLMProxy",
-      "documentation_url": "https://github.com/tyk-swe/olp/blob/main/plugins/opencode-go/README.md",
+      "documentation_url": "https://github.com/tyk-swe/olp/blob/main/internal/codeplans/opencode-go/README.md",
       "repository": "https://github.com/tyk-swe/olp",
-      "path": "plugins/opencode-go",
+      "path": "internal/codeplans/opencode-go",
       "releases": [
         {
           "version": "0.1.0",
@@ -111,9 +111,9 @@
       "name": "qwen-token-plan",
       "description": "Alibaba Model Studio Token Plan Team Edition API-key enrollment for OLP code-mode. Enrollment does not qualify inference.",
       "maintainer": "OpenLLMProxy",
-      "documentation_url": "https://github.com/tyk-swe/olp/blob/main/plugins/qwen-token-plan/README.md",
+      "documentation_url": "https://github.com/tyk-swe/olp/blob/main/internal/codeplans/qwen-token-plan/README.md",
       "repository": "https://github.com/tyk-swe/olp",
-      "path": "plugins/qwen-token-plan",
+      "path": "internal/codeplans/qwen-token-plan",
       "releases": [
         {
           "version": "0.1.0",
@@ -139,9 +139,9 @@
       "name": "zai-coding",
       "description": "Z.ai GLM Coding Plan API-key enrollment for OLP code-mode. Enrollment does not qualify inference.",
       "maintainer": "OpenLLMProxy",
-      "documentation_url": "https://github.com/tyk-swe/olp/blob/main/plugins/zai-coding/README.md",
+      "documentation_url": "https://github.com/tyk-swe/olp/blob/main/internal/codeplans/zai-coding/README.md",
       "repository": "https://github.com/tyk-swe/olp",
-      "path": "plugins/zai-coding",
+      "path": "internal/codeplans/zai-coding",
       "releases": [
         {
           "version": "0.1.0",

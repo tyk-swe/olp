@@ -18,8 +18,8 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routeidentity"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -212,7 +212,7 @@ func (s *Server) simulateDraft(r *http.Request, p access.Principal) (access.Repl
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	snapshot, err := runtime.ReadSnapshot(r.Context(), tx)
+	snapshot, err := release.ReadSnapshot(r.Context(), tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -355,7 +355,7 @@ func (s *Server) simulateRouting(r *http.Request, p access.Principal) (access.Re
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	snapshot, err := runtime.ReadSnapshot(r.Context(), tx)
+	snapshot, err := release.ReadSnapshot(r.Context(), tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -479,7 +479,7 @@ func routeCredentialEligibility(ctx context.Context, q access.Queryer, snapshot 
 			}
 		}
 	}
-	ineligible, err := runtime.ReadIneligible(ctx, q, ids)
+	ineligible, err := release.ReadIneligible(ctx, q, ids)
 	if err != nil {
 		return nil, err
 	}

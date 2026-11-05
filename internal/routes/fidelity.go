@@ -12,7 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/release"
 )
 
 // normalizedFidelity stores every draft with an explicit mode. Omission, null
@@ -56,7 +56,7 @@ func compileDraftExecution(ctx context.Context, tx pgx.Tx, d *draft) error {
 	if !fidelity.Strict() && !route.IsPassthrough() {
 		return nil
 	}
-	snapshot, err := runtime.ReadSnapshot(ctx, tx)
+	snapshot, err := release.ReadSnapshot(ctx, tx)
 	if err != nil {
 		return err
 	}

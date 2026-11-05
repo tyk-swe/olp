@@ -5,6 +5,8 @@ const publication = <T extends Kind | 'projects' | 'servers'>(kind: T) =>
   [...publications, kind] as const;
 
 export const agentKeys = {
+  server: (id: string) => [...publication('servers'), id] as const,
+  call: (id: string) => ['mcp-tool-call', id] as const,
   grants: () => ['mcp-grants'] as const,
   publications,
   publication,
@@ -27,6 +29,10 @@ export const agentKeys = {
   task: (taskID: string) => ['a2a-task', taskID] as const,
   delegations: (project: string, cursor?: string, delegationID?: string) =>
     ['agent-delegations', project, cursor ?? '', delegationID ?? ''] as const,
+  allToolCalls: ['mcp-tool-calls'] as const,
   toolCalls: (project: string, key: string, cursor?: string) =>
-    ['mcp-tool-calls', project, key, cursor ?? ''] as const
+    ['mcp-tool-calls', project, key, cursor ?? ''] as const,
+  allExposures: ['execution-debits'] as const,
+  exposures: (key: string, cursor?: string) =>
+    ['execution-debits', key, cursor ?? ''] as const
 };

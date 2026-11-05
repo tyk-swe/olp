@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/sdk/plugin/abi"
+	"github.com/tyk-swe/olp/plugin/abi"
 )
 
 type CredentialImport struct {

@@ -9,7 +9,7 @@
     type CodeBudget,
     type CodeRoute,
     type CodeBudgetWrite
-  } from '$lib/api/code-mode';
+  } from '$lib/management/code-mode';
   import { tokenLimit } from './presentation';
 
   import {

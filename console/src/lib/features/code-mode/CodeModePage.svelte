@@ -4,7 +4,7 @@
     CodeClientConfiguration,
     CodeClientSelection,
     CodeRoute
-  } from '$lib/api/code-mode';
+  } from '$lib/management/code-mode';
   import { listProjectMemberships } from '$lib/features/access/projects/api';
   import { projectKeys } from '$lib/features/access/projects/projectKeys';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
@@ -12,7 +12,7 @@
   import {
     confirmDiscardChanges,
     guardUnsavedChanges
-  } from '$lib/forms/unsavedChanges';
+  } from '$lib/editing/unsavedChanges';
   import CodeManagement from './CodeManagement.svelte';
   import CodeDiagnostics from './CodeDiagnostics.svelte';
   import {

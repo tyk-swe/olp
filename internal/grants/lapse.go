@@ -10,7 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
-	"github.com/tyk-swe/olp/sdk/plugin/abi"
+	"github.com/tyk-swe/olp/plugin/abi"
 )
 
 // workerAgent is the user agent family of what a worker records in audit,

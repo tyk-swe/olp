@@ -1,9 +1,11 @@
 package routing
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/agentcontract"
+	grantconfig "github.com/tyk-swe/olp/internal/grants/config"
 	"github.com/tyk-swe/olp/internal/prompts"
 )
 
@@ -24,5 +26,35 @@ func TestAgentSnapshotCloneAndDigest(t *testing.T) {
 	got, err := copy.Digest()
 	if err != nil || got == want {
 		t.Fatal("publication mutation did not change serving digest", err)
+	}
+}
+
+func TestAgentSnapshotCloneOwnsCredentialsAndTaskPolicy(t *testing.T) {
+	credential, bound, continuations, deadline := "credential", 30, 8, 120
+	definition := agentcontract.Draft{Name: "assistant", Agent: &agentcontract.Definition{CredentialID: &credential, OAuth: &grantconfig.OAuth{ClientID: "client", Scopes: []string{"read"}, EntraOBO: &grantconfig.EntraOBO{Issuer: "issuer"}}, RemoteWorkBoundSeconds: &bound, MaxTaskContinuations: &continuations, TaskDeadlineSeconds: &deadline}}
+	original := &Snapshot{AgentPublications: []agentcontract.Revision{{Definition: definition}}}
+	before, err := original.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cloned := original.Clone()
+	agent := cloned.AgentPublications[0].Definition.Agent
+	*agent.CredentialID = "different"
+	agent.OAuth.Scopes[0] = "write"
+	agent.OAuth.EntraOBO.Issuer = "other"
+	*agent.RemoteWorkBoundSeconds = 60
+	*agent.MaxTaskContinuations = 16
+	*agent.TaskDeadlineSeconds = 240
+	after, err := original.Digest()
+	if err != nil || before != after {
+		t.Fatal("changing a cloned publication changed the serving snapshot", err)
+	}
+	changed, err := cloned.Digest()
+	if err != nil || changed == before {
+		t.Fatal("changed publication policy did not affect its own digest", err)
+	}
+	normalized := agentcontract.NormalizeDraft(definition)
+	if !reflect.DeepEqual(normalized.Agent.OAuth, definition.Agent.OAuth) {
+		t.Fatal("normalization changed OAuth policy")
 	}
 }

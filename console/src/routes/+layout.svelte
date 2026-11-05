@@ -2,7 +2,7 @@
   import { QueryClient, QueryClientProvider } from '@tanstack/svelte-query';
   import { onDestroy, onMount } from 'svelte';
   import { authLifecycle } from '$lib/features/access/session/lifecycle';
-  import { retryQuery } from '$lib/api/http';
+  import { retryQuery } from '$lib/management/http';
   import '../app.css';
   import MFAConfirmationHost from '$lib/features/access/mfa/MFAConfirmationHost.svelte';
 

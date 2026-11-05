@@ -2,8 +2,8 @@
   import { resolve } from '$app/paths';
   import type { CreateQueryResult } from '@tanstack/svelte-query';
   import type { Readiness } from '$lib/features/runtime/health/api';
-  import { errorMessage } from '$lib/api/http';
-  import type { UsageCompleteness } from '$lib/features/usage/api/usage';
+  import { errorMessage } from '$lib/management/http';
+  import type { UsageCompleteness } from '$lib/features/usage/usage';
   import { formatDate, formatInteger, stateLabel } from '$lib/format';
   import { healthTone } from '$lib/features/runtime/health/presentation';
   import { spoolUsage } from '$lib/features/runtime/health/spool';

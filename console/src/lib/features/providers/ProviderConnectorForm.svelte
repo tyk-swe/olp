@@ -5,13 +5,13 @@
   import ProviderConnectionFields from './ProviderConnectionFields.svelte';
   import PluginProfileField from './PluginProfileField.svelte';
   import ProjectScopeField from '$lib/features/access/projects/ProjectScopeField.svelte';
-  import NavIcon from '$lib/components/NavIcon.svelte';
+  import NavIcon from '$lib/shell/NavIcon.svelte';
   import { stateLabel } from '$lib/format';
-  import type { FieldIssue } from '$lib/api/http';
-  import { listProviderVendors } from '$lib/features/providers/api/providers';
-  import { listProviderProfiles } from '$lib/features/providers/api/profiles';
+  import type { FieldIssue } from '$lib/management/http';
+  import { listProviderVendors } from '$lib/features/providers/providers';
+  import { listProviderProfiles } from '$lib/features/providers/providerProfiles';
   import { providerKeys } from '$lib/features/providers/providerKeys';
-  import type { ProviderKindCapability } from '$lib/features/providers/api/models';
+  import type { ProviderKindCapability } from '$lib/features/providers/models';
   import {
     emptyProviderOptions,
     probeModelPrompt,

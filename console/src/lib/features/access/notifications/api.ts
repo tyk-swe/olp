@@ -1,7 +1,12 @@
-import type { components } from '$lib/api/schema';
-import { apiClient } from '$lib/api/client';
-import { type CursorPage, unwrap, unwrapPage } from '$lib/api/http';
-import { collectCursorPages } from '$lib/api/pagination';
+import type { components } from '$lib/management/schema';
+import { apiClient } from '$lib/management/client';
+import {
+  type CursorPage,
+  ensureOk,
+  unwrap,
+  unwrapPage
+} from '$lib/management/http';
+import { collectCursorPages } from '$lib/management/pagination';
 
 type Schemas = components['schemas'];
 
@@ -124,3 +129,41 @@ export async function listNotificationDeliveries(
     return unwrapPage(response);
   });
 }
+
+export const deleteNotificationDestination = async (
+  value: { id: string; etag: string },
+  requestId: string
+) =>
+  ensureOk(
+    await apiClient.DELETE(
+      '/api/v1/notifications/destinations/{notification_destination_id}',
+      {
+        params: {
+          path: { notification_destination_id: value.id },
+          header: {
+            'If-Match': `"${value.etag}"`,
+            'Idempotency-Key': requestId
+          }
+        }
+      }
+    )
+  );
+
+export const deleteNotificationRule = async (
+  value: { id: string; etag: string },
+  requestId: string
+) =>
+  ensureOk(
+    await apiClient.DELETE(
+      '/api/v1/notifications/rules/{notification_rule_id}',
+      {
+        params: {
+          path: { notification_rule_id: value.id },
+          header: {
+            'If-Match': `"${value.etag}"`,
+            'Idempotency-Key': requestId
+          }
+        }
+      }
+    )
+  );

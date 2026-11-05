@@ -8,8 +8,8 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/runtime"
 
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/surface"
@@ -91,7 +91,7 @@ func (s *Server) registerNative(mux *http.ServeMux) {
 		}
 	}
 }
-func (s *Server) nativeModel(ctx context.Context, release *runtime.Release, authority access.Authority, route routing.Route, surface string) map[string]any {
+func (s *Server) nativeModel(ctx context.Context, release *release.Release, authority access.Authority, route routing.Route, surface string) map[string]any {
 	capabilities := s.modelCapabilities(ctx, release, authority, route, surface)
 	if surface == "anthropic" {
 		return map[string]any{"id": route.Slug, "type": "model", "display_name": route.Slug, "created_at": route.PublishedAt.UTC().Format("2006-01-02T15:04:05Z"), "capabilities": capabilities}

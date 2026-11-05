@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -23,8 +22,8 @@ func (x *call) workflowModelCost(attempt routing.Attempt) *Error {
 	if !ok {
 		return workflowUnboundedCost()
 	}
-	var metadata routing.ModelMetadata
-	if err := json.Unmarshal(provider.Models[attempt.UpstreamModel], &metadata); err != nil || metadata.ContextLength == nil || *metadata.ContextLength < 1 {
+	metadata, valid := provider.Metadata(attempt.UpstreamModel)
+	if !valid || metadata.ContextLength == nil || *metadata.ContextLength < 1 {
 		return workflowUnboundedCost()
 	}
 	var output *int64

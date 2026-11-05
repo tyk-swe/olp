@@ -6,7 +6,7 @@
   import RequestResults from '$lib/features/usage/history/RequestResults.svelte';
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
-  import { applyListSearch } from '$lib/lists/urlSync.svelte';
+  import { applyListSearch } from '$lib/listing/urlSync.svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { getRequest, listRequests } from '$lib/features/usage/history/api';
   import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
@@ -81,7 +81,7 @@
   <div>
     <p class="eyebrow">Operations</p>
     <h1 class="page-title">
-      {requestId ? 'Request timeline' : 'Request Explorer'}
+      {requestId ? 'Request timeline' : 'Requests'}
     </h1>
     <p class="page-description">
       {requestId

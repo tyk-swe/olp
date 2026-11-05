@@ -1,6 +1,8 @@
 <script lang="ts">
+  import ConfirmAction from '$lib/components/ConfirmAction.svelte';
+  import { deleteNotificationDestination, deleteNotificationRule } from './api';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { holds } from '$lib/features/access/session/authorization';
   import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
@@ -36,7 +38,7 @@
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/forms/mutationIntent.svelte';
+  } from '$lib/editing/mutationIntent.svelte';
 
   const destinationIntent = useMutationIntent();
   const ruleIntent = useMutationIntent();
@@ -922,7 +924,20 @@
                       type="button"
                       onclick={() => toggleDestination(destination)}
                       >{destination.enabled ? 'Disable' : 'Enable'}</button
-                    ></td
+                    >
+                    {#if access.allows('DELETE /api/v1/notifications/destinations/{notification_destination_id}')}<ConfirmAction
+                        danger
+                        label="Delete destination"
+                        description={`Delete ${destination.name}. Referenced resources cannot be deleted`}
+                        identity={`${destination.id}:${destination.etag}`}
+                        run={(requestId) =>
+                          deleteNotificationDestination(destination, requestId)}
+                        done={async () => {
+                          await queryClient.invalidateQueries({
+                            queryKey: notificationKeys.root
+                          });
+                        }}
+                      />{/if}</td
                   >{/if}</tr
               >
             {/if}
@@ -1197,7 +1212,20 @@
                       type="button"
                       onclick={() => toggleRule(rule)}
                       >{rule.enabled ? 'Disable' : 'Enable'}</button
-                    ></td
+                    >
+                    {#if access.allows('DELETE /api/v1/notifications/rules/{notification_rule_id}')}<ConfirmAction
+                        danger
+                        label="Delete rule"
+                        description={`Delete ${rule.name}. Referenced resources cannot be deleted`}
+                        identity={`${rule.id}:${rule.etag}`}
+                        run={(requestId) =>
+                          deleteNotificationRule(rule, requestId)}
+                        done={async () => {
+                          await queryClient.invalidateQueries({
+                            queryKey: notificationKeys.root
+                          });
+                        }}
+                      />{/if}</td
                   >{/if}</tr
               >
             {/if}

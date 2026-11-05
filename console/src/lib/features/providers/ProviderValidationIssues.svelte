@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { FieldIssue } from '$lib/api/http';
+  import type { FieldIssue } from '$lib/management/http';
   import { stateLabel } from '$lib/format';
 
   // The API rejects a provider field with prose and a machine-readable code.

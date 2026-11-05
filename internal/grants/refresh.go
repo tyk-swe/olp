@@ -19,10 +19,10 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/plugins"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
-	"github.com/tyk-swe/olp/sdk/plugin/abi"
+	"github.com/tyk-swe/olp/plugin/abi"
 )
 
 const (
@@ -313,7 +313,7 @@ func (r *Refresher) client(ctx context.Context, conn *pgx.Conn, g *dueGrant) (*h
 	var secret []byte
 	if network != nil && network.CredentialID != "" {
 		var err error
-		if secret, err = runtime.ReadNetworkSecret(ctx, conn, r.Keys, r.Installation, g.providerID, network.CredentialID); err != nil {
+		if secret, err = release.ReadNetworkSecret(ctx, conn, r.Keys, r.Installation, g.providerID, network.CredentialID); err != nil {
 			return nil, fmt.Errorf("the provider's network credential is unavailable: %w", err)
 		}
 	}

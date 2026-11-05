@@ -1,9 +1,11 @@
 <script lang="ts">
+  import { formatDate, stateLabel } from '$lib/format';
+  import ScrollTable from '$lib/components/ScrollTable.svelte';
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
   import { createQuery } from '@tanstack/svelte-query';
   import { writable } from 'svelte/store';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { getRun, listRunSpans } from './api';
   import { agentKeys } from './agentKeys';
@@ -37,21 +39,25 @@
   }));
   const spanStatus = ['Unset', 'OK', 'Error'];
   function spanTime(nanos: string): string {
-    return new Date(Number(BigInt(nanos) / 1_000_000n)).toLocaleString();
+    return formatDate(
+      new Date(Number(BigInt(nanos) / 1_000_000n)).toISOString()
+    );
   }
 </script>
 
 <svelte:head><title>Run · OpenLLMProxy</title></svelte:head>
-<a href={resolve('/runs')}>All runs</a>
-<header>
-  <p class="eyebrow">Gateway</p>
-  <h1>Run</h1>
-  <p><code>{runID}</code></p>
-</header>
+<a class="text-button" href={resolve('/runs')}>All runs</a>
+<div class="page-header">
+  <div>
+    <p class="eyebrow">Agents</p>
+    <h1 class="page-title">Run</h1>
+    <p class="page-description"><code>{runID}</code></p>
+  </div>
+</div>
 {#if run.error}
-  <p role="alert">{errorMessage(run.error)}</p>
+  <p class="inline-problem" role="alert">{errorMessage(run.error)}</p>
 {:else if run.isFetching}
-  <p>Loading run…</p>
+  <p class="inline-status" role="status">Loading run…</p>
 {:else if run.data}
   {#if access.allows('POST /api/v1/investigations')}
     <p>
@@ -62,7 +68,7 @@
       >
     </p>
   {/if}
-  <dl>
+  <dl class="detail-list">
     <dt>Project</dt>
     <dd><code>{run.data.project_id}</code></dd>
     <dt>API key</dt>
@@ -72,18 +78,20 @@
     <dt>Publication revision</dt>
     <dd><code>{run.data.revision_id ?? 'None'}</code></dd>
     <dt>Started</dt>
-    <dd>{new Date(run.data.created_at).toLocaleString()}</dd>
+    <dd>{formatDate(run.data.created_at)}</dd>
   </dl>
   {#if selectedSpanID}
-    <section aria-labelledby="selected-span">
+    <section class="section" aria-labelledby="selected-span">
       <h2 id="selected-span">Selected span</h2>
       {#if selectedSpan.error}
-        <p role="alert">{errorMessage(selectedSpan.error)}</p>
+        <p class="inline-problem" role="alert">
+          {errorMessage(selectedSpan.error)}
+        </p>
       {:else if selectedSpan.isFetching}
-        <p>Loading selected span…</p>
+        <p class="inline-status" role="status">Loading selected span…</p>
       {:else if selectedSpan.data?.items.length}
         {@const span = selectedSpan.data.items[0]}
-        <dl>
+        <dl class="detail-list">
           <dt>Evidence ID</dt>
           <dd><code>{span.id}</code></dd>
           <dt>Trace ID</dt>
@@ -94,7 +102,7 @@
           <dd><code>{span.attempt_id ?? 'Run only'}</code></dd>
           <dt>Category / status</dt>
           <dd>
-            {span.category.replaceAll('_', ' ')} / {spanStatus[span.status]}
+            {stateLabel(span.category)} / {spanStatus[span.status]}
           </dd>
           <dt>Started</dt>
           <dd>{spanTime(span.started_nanos)}</dd>
@@ -117,22 +125,24 @@
       <p>The referenced step is no longer available in this run.</p>
     {/if}
   {/if}
-  <section aria-labelledby="steps">
+  <section class="section" aria-labelledby="steps">
     <h2 id="steps">Steps and attempts</h2>
     <p>
       Observed amounts are accounted usage. Unresolved exposure remains reserved
       and is not a charge.
     </p>
     {#if !run.data.steps.length}
-      <p>No steps recorded.</p>
+      <p class="inline-status">No steps recorded.</p>
     {:else}
-      <div class="records">
-        <table>
+      <ScrollTable label="Run steps and attempts">
+        <table class="data-table">
           <thead
             ><tr
-              ><th>Step / tool</th><th>Attempt</th><th>State / outcome</th><th
-                >Observed cost / charge</th
-              ><th>Unresolved cost / charge</th><th>Started</th></tr
+              ><th scope="col">Step / tool</th><th scope="col">Attempt</th><th
+                scope="col">State / outcome</th
+              ><th scope="col">Observed cost / charge</th><th scope="col"
+                >Unresolved cost / charge</th
+              ><th scope="col">Started</th></tr
             ></thead
           >
           <tbody>
@@ -149,10 +159,8 @@
                 >
                 <td><code>{step.dispatch_id}</code></td>
                 <td
-                  >{step.state.replaceAll('_', ' ')}{#if step.tool_status}<br
-                    />Tool: {step.tool_status.replaceAll(
-                      '_',
-                      ' '
+                  >{stateLabel(step.state)}{#if step.tool_status}<br />Tool: {stateLabel(
+                      step.tool_status
                     )}{step.tool_is_error
                       ? ' (tool error)'
                       : ''}{/if}{#if step.bound_violation}<br />Bound exceeded{/if}</td
@@ -174,35 +182,36 @@
                     {step.currency}
                   {/if}
                 </td>
-                <td>{new Date(step.created_at).toLocaleString()}</td>
+                <td>{formatDate(step.created_at)}</td>
               </tr>
             {/each}
           </tbody>
         </table>
-      </div>
+      </ScrollTable>
     {/if}
   </section>
-  <section aria-labelledby="approvals">
+  <section class="section" aria-labelledby="approvals">
     <h2 id="approvals">Approvals</h2>
     {#if !run.data.approvals.length}
-      <p>No approvals recorded.</p>
+      <p class="inline-status">No approvals recorded.</p>
     {:else}
-      <div class="records">
-        <table>
+      <ScrollTable label="Run approvals">
+        <table class="data-table">
           <thead
             ><tr
-              ><th>Approval</th><th>Expires</th><th>Consumed</th><th>Attempt</th
-              ></tr
+              ><th scope="col">Approval</th><th scope="col">Expires</th><th
+                scope="col">Consumed</th
+              ><th scope="col">Attempt</th></tr
             ></thead
           >
           <tbody>
             {#each run.data.approvals as approval (approval.id)}
               <tr>
                 <td><code>{approval.id}</code></td>
-                <td>{new Date(approval.expires_at).toLocaleString()}</td>
+                <td>{formatDate(approval.expires_at)}</td>
                 <td
                   >{approval.consumed_at
-                    ? new Date(approval.consumed_at).toLocaleString()
+                    ? formatDate(approval.consumed_at)
                     : 'Not consumed'}</td
                 >
                 <td><code>{approval.dispatch_id ?? 'None'}</code></td>
@@ -210,24 +219,25 @@
             {/each}
           </tbody>
         </table>
-      </div>
+      </ScrollTable>
     {/if}
   </section>
-  <section aria-labelledby="spans">
+  <section class="section" aria-labelledby="spans">
     <h2 id="spans">Linked spans</h2>
     {#if spans.error}
-      <p role="alert">{errorMessage(spans.error)}</p>
+      <p class="inline-problem" role="alert">{errorMessage(spans.error)}</p>
     {:else if spans.isFetching}
-      <p>Loading spans…</p>
+      <p class="inline-status" role="status">Loading spans…</p>
     {:else if !spans.data?.items.length}
-      <p>No linked spans recorded.</p>
+      <p class="inline-status">No linked spans recorded.</p>
     {:else}
-      <div class="records">
-        <table>
+      <ScrollTable label="Linked spans">
+        <table class="data-table">
           <thead
             ><tr
-              ><th>Trace / span</th><th>Attempt</th><th>Category / status</th
-              ><th>Started</th><th>Ended</th></tr
+              ><th scope="col">Trace / span</th><th scope="col">Attempt</th><th
+                scope="col">Category / status</th
+              ><th scope="col">Started</th><th scope="col">Ended</th></tr
             ></thead
           >
           <tbody>
@@ -239,32 +249,31 @@
                     <code>{span.parent_span_id}</code>{/if}</td
                 >
                 <td><code>{span.attempt_id ?? 'Run only'}</code></td>
-                <td
-                  >{span.category.replaceAll('_', ' ')} / {spanStatus[
-                    span.status
-                  ]}</td
-                >
+                <td>{stateLabel(span.category)} / {spanStatus[span.status]}</td>
                 <td>{spanTime(span.started_nanos)}</td>
                 <td>{spanTime(span.ended_nanos)}</td>
               </tr>
             {/each}
           </tbody>
         </table>
-      </div>
+      </ScrollTable>
     {/if}
-    <nav aria-label="Span pages">
+    <nav class="page-actions list-pager" aria-label="Span pages">
       <button
+        class="button button-secondary"
         type="button"
         disabled={!$cursor || spans.isFetching}
         onclick={() => cursor.set(undefined)}>Newest</button
       >
       <button
+        class="button button-secondary"
         type="button"
         disabled={!!spans.error || !spans.data?.nextCursor || spans.isFetching}
         onclick={() => cursor.set(spans.data?.nextCursor ?? undefined)}
         >Older</button
       >
       <button
+        class="button button-secondary"
         type="button"
         disabled={spans.isFetching}
         onclick={() => spans.refetch()}>Refresh</button
@@ -274,39 +283,7 @@
 {/if}
 
 <style>
-  header,
-  section {
-    margin: 1rem 0;
-  }
-  dl {
-    display: grid;
-    grid-template-columns: max-content minmax(0, 1fr);
-    gap: 0.5rem 1rem;
-  }
-  dd {
-    margin: 0;
-  }
-  .records {
-    overflow-x: auto;
-  }
-  table {
-    width: 100%;
-    text-align: left;
-  }
   .selected-evidence {
     background: var(--accent-soft);
-  }
-  td,
-  th {
-    padding: 0.75rem;
-    vertical-align: top;
-  }
-  code {
-    overflow-wrap: anywhere;
-  }
-  nav {
-    display: flex;
-    gap: 0.5rem;
-    margin-top: 1rem;
   }
 </style>
