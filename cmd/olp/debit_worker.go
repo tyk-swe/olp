@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -19,20 +20,13 @@ func runDebitReconciliation(ctx context.Context, pool *pgxpool.Pool, limiter *li
 	timer := time.NewTicker(time.Minute)
 	defer timer.Stop()
 	for {
-		pass, cancel := context.WithTimeout(ctx, 45*time.Second)
-		var err error
-		if limiter == nil {
-			_, err = store.RecoverPrepared(pass, 256)
-		} else {
-			err = store.ReconcileDebits(pass)
-		}
-		if err == nil {
-			_, err = toolLedger.RecoverOrphanedDispatches(pass, time.Now().Add(-accounting.OrphanDispatchAge), 256)
-		}
-		if err == nil {
-			_, err = toolLedger.ExpireCallIdentities(pass, 256)
-		}
+		pass, cancel := context.WithTimeout(ctx, 40*time.Second)
+		reconcileErr := reconcileDebitPass(pass, store, toolLedger)
 		cancel()
+		expiry, expiryCancel := context.WithTimeout(ctx, 5*time.Second)
+		_, expiryErr := toolLedger.DrainExpiredCallIdentities(expiry, 256)
+		expiryCancel()
+		err := errors.Join(reconcileErr, expiryErr)
 		outcome := usage.OutcomeSuccess
 		if err != nil {
 			outcome = usage.OutcomeFailure
@@ -49,6 +43,18 @@ func runDebitReconciliation(ctx context.Context, pool *pgxpool.Pool, limiter *li
 		case <-timer.C:
 		}
 	}
+}
+
+func reconcileDebitPass(ctx context.Context, store *limits.DebitStore, toolLedger *accounting.DurableLedger) error {
+	if store.Limiter == nil {
+		if _, err := store.RecoverPrepared(ctx, 256); err != nil {
+			return err
+		}
+	} else if err := store.ReconcileDebits(ctx); err != nil {
+		return err
+	}
+	_, err := toolLedger.RecoverOrphanedDispatches(ctx, time.Now().Add(-accounting.OrphanDispatchAge), 256)
+	return err
 }
 
 func recoverWorkflowModels(ctx context.Context, store *limits.DebitStore, log *slog.Logger) {

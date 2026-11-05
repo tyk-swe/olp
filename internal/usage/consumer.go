@@ -384,24 +384,14 @@ func (r *consumerRun) settleNew(ctx context.Context, ownPendingStart *string,
 	return false
 }
 
-// processEntries settles one page of deliveries. The events of the page are
-// persisted together in one transaction, so a page costs one commit rather than
-// one per event. If any of them fails, that transaction is abandoned and every
-// delivery is settled on its own, which isolates the one that failed.
 func (r *consumerRun) processEntries(ctx context.Context, entries []StreamEntry) entrySummary {
 	var summary entrySummary
-	persisted := r.persistPage(ctx, entries)
-	for index, entry := range entries {
+	for _, entry := range entries {
 		if ctx.Err() != nil {
 			summary.stopped = true
 			break
 		}
-		var completed, duplicate, retry bool
-		if persisted != nil && persisted[index] != nil {
-			completed, duplicate, retry = r.settle(ctx, entry.ID, *persisted[index])
-		} else {
-			completed, duplicate, retry = r.processEntry(ctx, entry)
-		}
+		completed, duplicate, retry := r.processEntry(ctx, entry)
 		switch {
 		case retry:
 			summary.retry = true
@@ -413,60 +403,6 @@ func (r *consumerRun) processEntries(ctx context.Context, entries []StreamEntry)
 		}
 	}
 	return summary
-}
-
-// persistPage persists every valid event of a page in one transaction and
-// returns the result of each by its position, or nil if any of them failed and
-// nothing was committed. Entries that are not valid events are left to
-// processEntry, which records them as gaps.
-func (r *consumerRun) persistPage(ctx context.Context, entries []StreamEntry) []*Persisted {
-	events := make([]*Event, len(entries))
-	valid := false
-	for index, entry := range entries {
-		if entry.DeletedPendingID != "" || entry.Payload == nil {
-			continue
-		}
-		if event, err := Decode(entry.Payload); err == nil {
-			if _, err = Validate(event); err == nil {
-				events[index] = event
-				valid = true
-			}
-		}
-	}
-	if !valid {
-		return nil
-	}
-	results, err := persistEvents(ctx, r.pool, events, entries)
-	if err != nil {
-		if ctx.Err() == nil {
-			r.log.Warn("request metadata page will be persisted one event at a time", "error", err)
-		}
-		return nil
-	}
-	return results
-}
-
-func persistEvents(ctx context.Context, pool *pgxpool.Pool, events []*Event, entries []StreamEntry) ([]*Persisted, error) {
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("persist request metadata page: %w", err)
-	}
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-	results := make([]*Persisted, len(events))
-	for index, event := range events {
-		if event == nil {
-			continue
-		}
-		result, err := PersistEventTx(ctx, tx, event, entries[index].Payload)
-		if err != nil {
-			return nil, fmt.Errorf("stream id %s: %w", entries[index].ID, err)
-		}
-		results[index] = &result
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("persist request metadata page: %w", err)
-	}
-	return results, nil
 }
 
 func (r *consumerRun) reportActivity(ctx context.Context, summary entrySummary, recovered bool) {

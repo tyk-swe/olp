@@ -34,6 +34,7 @@ type Filters struct {
 	AttributionValue *string
 	AllProjects      bool
 	AllowedProjects  []string
+	providerIDs      []string
 }
 
 // Coverage says how much of the requested range the totals actually describe.
@@ -104,10 +105,12 @@ type Summary struct {
 	Complete          bool           `json:"complete"`
 }
 
-// Completeness is the summary with the priced share made explicit, for the
-// console's completeness panel.
 type Completeness struct {
-	Totals
+	RequestCount      int64          `json:"request_count"`
+	UnpricedCount     int64          `json:"unpriced_count"`
+	IncompleteCount   int64          `json:"incomplete_count"`
+	EstimatedCost     *string        `json:"estimated_cost"`
+	Currency          *string        `json:"currency"`
 	PricedCount       int64          `json:"priced_count"`
 	GapEvents         int64          `json:"request_metadata_gap_events"`
 	UncertainGapCount int64          `json:"uncertain_request_metadata_gap_count"`
@@ -257,6 +260,9 @@ func (f Filters) dimensions(q *filterQuery) {
 	if f.ProviderID != nil {
 		q.pushBind(" AND provider_id = ", *f.ProviderID)
 	}
+	if len(f.providerIDs) > 0 {
+		q.push(" AND provider_id = ANY(" + q.bind(f.providerIDs) + "::uuid[])")
+	}
 	if f.Model != nil {
 		q.pushBind(" AND upstream_model = ", *f.Model)
 	}
@@ -284,7 +290,7 @@ const estimatePaired = "usage_observed AND input_tokens IS NOT NULL AND estimate
 // filtered on the exact range; retained hourly rows are included only where a
 // whole bucket lies inside it, so no aggregate is ever cut in half.
 func (f Filters) usageRows(q *filterQuery, scope countScope) {
-	q.push("WITH usage_rows AS (SELECT observed_at, route_slug, provider_id, upstream_model," +
+	q.push("WITH live_facts AS (SELECT attempt_id, observed_at, route_slug, provider_id, upstream_model," +
 		" api_key_id, operation, surface, attribution, end_user_digest, model_family, estimate_provenance," +
 		" CASE WHEN " + scope.count + " THEN 1 ELSE 0 END::bigint AS request_count," +
 		" COALESCE(input_tokens, 0)::numeric AS input_tokens," +
@@ -311,7 +317,6 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 		" commitment_weight::numeric AS commitment_weight," +
 		" commitment_amount::numeric AS commitment_amount," +
 		" commitment_period," +
-		" da.allocated_cost AS durable_allocation," +
 		" CASE WHEN commitment_period IS NOT NULL THEN date_trunc(commitment_period, observed_at AT TIME ZONE 'UTC')" +
 		" END AS commitment_bucket," +
 		// Reconciliation attributes spend only to operator-cost rows: caller
@@ -326,11 +331,29 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 		" THEN 1 ELSE 0 END::bigint AS reconcil_incomplete_attempts," +
 		" CASE WHEN NOT response_cache AND charge_status <> 'not_billable' AND (caller_credential OR budget_exempt)" +
 		" THEN 1 ELSE 0 END::bigint AS reconcil_caller_attempts" +
-		" FROM olp.attempt_usage_facts LEFT JOIN (SELECT u.attempt_id,COALESCE(a.allocated_cost,0) allocated_cost FROM olp.commitment_usage u JOIN olp.commitment_periods cp ON cp.id=u.period_id AND NOT cp.legacy LEFT JOIN olp.commitment_allocations a ON a.attempt_id=u.attempt_id) da USING (attempt_id) WHERE true")
+		" FROM olp.attempt_usage_facts WHERE true")
 	q.pushBind(" AND observed_at >= ", f.Start)
 	q.pushBind(" AND observed_at < ", f.End)
 	f.dimensions(q)
-	q.push(" UNION ALL SELECT bucket AS observed_at, route_slug, provider_id, upstream_model," +
+	q.push("), live_commitments AS (" +
+		" SELECT u.attempt_id, u.period_id FROM live_facts f" +
+		" JOIN olp.commitment_usage u USING (attempt_id)" +
+		" JOIN olp.commitment_periods p ON p.id = u.period_id AND NOT p.legacy" +
+		"), durable_periods AS (SELECT DISTINCT period_id FROM live_commitments)," +
+		" durable_weights AS (SELECT u.attempt_id, u.weight, p.amount," +
+		" SUM(u.weight) OVER (PARTITION BY u.period_id) AS total_weight," +
+		" SUM(u.weight) OVER (PARTITION BY u.period_id ORDER BY u.observed_at, u.attempt_id ROWS UNBOUNDED PRECEDING) AS running_weight" +
+		" FROM durable_periods d JOIN olp.commitment_usage u ON u.period_id = d.period_id" +
+		" JOIN olp.commitment_periods p ON p.id = u.period_id WHERE u.eligible" +
+		"), durable_allocations AS (SELECT c.attempt_id," +
+		" CASE WHEN w.total_weight > 0 THEN" +
+		" round(w.amount * w.running_weight / w.total_weight, 12) -" +
+		" round(w.amount * (w.running_weight - w.weight) / w.total_weight, 12)" +
+		" ELSE 0 END AS allocated_cost" +
+		" FROM live_commitments c LEFT JOIN durable_weights w USING (attempt_id)" +
+		"), usage_rows AS (SELECT f.*, da.allocated_cost AS durable_allocation" +
+		" FROM live_facts f LEFT JOIN durable_allocations da USING (attempt_id)")
+	q.push(" UNION ALL SELECT NULL::uuid, bucket AS observed_at, route_slug, provider_id, upstream_model," +
 		" api_key_id, operation, surface, attribution, end_user_digest, model_family, estimate_provenance, " +
 		scope.hourlyCount + ", input_tokens, output_tokens," +
 		" cached_input_tokens, cache_write_input_tokens, cache_write_5m_input_tokens," +
@@ -340,7 +363,7 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 		" training_tokens,storage_byte_seconds,cache_token_seconds,container_sessions,media_units, estimated_cost, charge, uncharged_attempt_count, " + scope.hourlyUnpriced + ", " +
 		scope.hourlyIncomplete + ", currency::text AS currency, estimated_input_tokens," +
 		" estimate_reported_input_tokens, estimate_attempt_count, commitment_weight," +
-		" commitment_amount, commitment_period, olp.commitment_hourly_allocation(attempt_usage_hourly)," +
+		" commitment_amount, commitment_period," +
 		" CASE WHEN commitment_period IS NOT NULL THEN date_trunc(commitment_period, bucket AT TIME ZONE 'UTC')" +
 		" END, budget_exempt, false," +
 		// Hourly rows keep only request-grain counts beyond unpriced attempts:
@@ -350,7 +373,8 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 		" unpriced_attempt_count, provider_incomplete_count," +
 		// An hourly row cannot tell caller-paid from budget-exempt, so the
 		// excluded count for rolled-up hours is the exempt request count.
-		" CASE WHEN budget_exempt THEN provider_request_count - provider_cache_hit_count ELSE 0 END::bigint" +
+		" CASE WHEN budget_exempt THEN provider_request_count - provider_cache_hit_count ELSE 0 END::bigint," +
+		" olp.commitment_hourly_allocation(attempt_usage_hourly)" +
 		" FROM olp.attempt_usage_hourly WHERE true")
 	q.pushBind(" AND bucket >= ", ceilHour(f.Start))
 	q.pushBind(" AND bucket + interval '1 hour' <= ", f.End)
@@ -362,7 +386,7 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 	// select it — and the amount is the one the bucket's latest row recorded.
 	q.push(", commitment_periods AS (" +
 		" SELECT DISTINCT provider_id, commitment_period, commitment_bucket FROM usage_rows" +
-		" WHERE commitment_period IS NOT NULL)")
+		" WHERE commitment_period IS NOT NULL AND durable_allocation IS NULL)")
 	q.push(", commitment_shares AS (" +
 		" SELECT p.provider_id, p.commitment_period, p.commitment_bucket, w.period_weight, w.latest_amount" +
 		" FROM commitment_periods p" +
@@ -373,7 +397,7 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 		" AS allocated_commitment" +
 		" FROM usage_rows" +
 		" LEFT JOIN commitment_shares shares" +
-		"   ON shares.provider_id = usage_rows.provider_id" +
+		"   ON usage_rows.durable_allocation IS NULL AND shares.provider_id = usage_rows.provider_id" +
 		"  AND shares.commitment_period = usage_rows.commitment_period" +
 		"  AND shares.commitment_bucket = usage_rows.commitment_bucket)")
 }
@@ -407,7 +431,7 @@ const totalsColumns = "COALESCE(SUM(request_count), 0)::bigint," +
 	" SUM(charge)::text," +
 	" COALESCE(SUM(uncharged_attempt_count), 0)::bigint," +
 	" COALESCE(SUM(training_tokens),0)::text,COALESCE(SUM(storage_byte_seconds),0)::text,COALESCE(SUM(cache_token_seconds),0)::text," +
-	" olp.container_session_string_totals(jsonb_agg(container_sessions))"
+	" olp.container_session_string_totals(jsonb_agg(container_sessions) FILTER (WHERE container_sessions IS NOT NULL AND container_sessions <> '{}'::jsonb))"
 
 // scanTargets lists the destinations for totalsColumns in its column order.
 func (t *Totals) scanTargets() []any {
@@ -439,7 +463,7 @@ func ReadSummary(ctx context.Context, q access.Queryer, f Filters, now time.Time
 	if err := q.QueryRow(ctx, query.sql(), query.args...).Scan(summary.Totals.scanTargets()...); err != nil {
 		return Summary{}, fmt.Errorf("read usage summary: %w", err)
 	}
-	if !summary.Totals.valid() {
+	if !summary.Totals.valid() || summary.UnpricedCount > summary.RequestCount {
 		return Summary{}, errInvalidUsageCount
 	}
 	gapEvents, uncertain, err := readGapEvidence(ctx, q, f)
@@ -461,24 +485,55 @@ func ReadSummary(ctx context.Context, q access.Queryer, f Filters, now time.Time
 	return summary, nil
 }
 
-// ReadCompleteness is the summary with the priced request count derived, so the
-// console can show what share of a range is accounted for.
 func ReadCompleteness(ctx context.Context, q access.Queryer, f Filters, now time.Time) (Completeness, error) {
-	summary, err := ReadSummary(ctx, q, f, now)
+	if err := f.Validate(); err != nil {
+		return Completeness{}, err
+	}
+	scope := scopeFor(f)
+	var query filterQuery
+	query.push("WITH completeness_rows AS (SELECT" +
+		" CASE WHEN " + scope.count + " THEN 1 ELSE 0 END::bigint AS request_count," +
+		" CASE WHEN " + scope.unpriced + " THEN 1 ELSE 0 END::bigint AS unpriced_count," +
+		" CASE WHEN " + scope.incomplete + " THEN 1 ELSE 0 END::bigint AS incomplete_count," +
+		" estimated_cost, currency::text AS currency FROM olp.attempt_usage_facts WHERE true")
+	query.pushBind(" AND observed_at >= ", f.Start)
+	query.pushBind(" AND observed_at < ", f.End)
+	f.dimensions(&query)
+	query.push(" UNION ALL SELECT " + scope.hourlyCount + ", " + scope.hourlyUnpriced + ", " +
+		scope.hourlyIncomplete + ", estimated_cost, currency::text FROM olp.attempt_usage_hourly WHERE true")
+	query.pushBind(" AND bucket >= ", ceilHour(f.Start))
+	query.pushBind(" AND bucket + interval '1 hour' <= ", f.End)
+	f.dimensions(&query)
+	query.push(") SELECT COALESCE(SUM(request_count), 0)::bigint," +
+		" COALESCE(SUM(unpriced_count), 0)::bigint, COALESCE(SUM(incomplete_count), 0)::bigint," +
+		" SUM(estimated_cost)::text, COALESCE(MAX(btrim(currency))," +
+		" (SELECT btrim(currency) FROM olp.pricing_currency WHERE singleton)) FROM completeness_rows")
+	var report Completeness
+	if err := q.QueryRow(ctx, query.sql(), query.args...).Scan(&report.RequestCount, &report.UnpricedCount,
+		&report.IncompleteCount, &report.EstimatedCost, &report.Currency); err != nil {
+		return Completeness{}, fmt.Errorf("read usage completeness: %w", err)
+	}
+	if report.RequestCount < 0 || report.UnpricedCount < 0 || report.IncompleteCount < 0 || report.UnpricedCount > report.RequestCount {
+		return Completeness{}, errInvalidUsageCount
+	}
+	gapEvents, uncertain, err := readGapEvidence(ctx, q, f)
 	if err != nil {
 		return Completeness{}, err
 	}
-	if summary.UnpricedCount > summary.RequestCount {
-		return Completeness{}, errInvalidUsageCount
+	coverage, err := readCoverage(ctx, q, f)
+	if err != nil {
+		return Completeness{}, err
+	}
+	consumer, err := ReadConsumerStatus(ctx, q, now)
+	if err != nil {
+		return Completeness{}, err
 	}
 	return Completeness{
-		Totals:            summary.Totals,
-		PricedCount:       summary.RequestCount - summary.UnpricedCount,
-		GapEvents:         summary.GapEvents,
-		UncertainGapCount: summary.UncertainGapCount,
-		Coverage:          summary.Coverage,
-		Consumer:          summary.Consumer,
-		Complete:          summary.Complete,
+		RequestCount: report.RequestCount, UnpricedCount: report.UnpricedCount, IncompleteCount: report.IncompleteCount,
+		EstimatedCost: report.EstimatedCost, Currency: report.Currency, PricedCount: report.RequestCount - report.UnpricedCount,
+		GapEvents: gapEvents, UncertainGapCount: uncertain, Coverage: coverage, Consumer: consumer,
+		Complete: report.UnpricedCount == 0 && report.IncompleteCount == 0 &&
+			gapEvents == 0 && uncertain == 0 && coverage.RangeComplete && consumer.Complete(),
 	}, nil
 }
 
