@@ -63,7 +63,7 @@ func (s *DebitStore) RecoverOrphanedWorkflowModels(ctx context.Context, limit in
 	tag, err := tx.Exec(ctx, `WITH expired AS (
 		SELECT d.id FROM olp.execution_debits d
 		JOIN olp.workflow_model_leases l ON l.dispatch_id=d.id AND l.claim_id=d.claim_id
-		WHERE d.kind='model' AND d.state='dispatched' AND l.expires_at<=clock_timestamp()
+		WHERE d.closed_at IS NULL AND d.kind='model' AND d.state='dispatched' AND l.expires_at<=statement_timestamp()
 		ORDER BY l.expires_at,d.id FOR UPDATE OF d,l SKIP LOCKED LIMIT $1
 	) UPDATE olp.execution_debits d SET state='outcome_unknown'
 		FROM expired WHERE d.id=expired.id AND d.state='dispatched'`, limit)

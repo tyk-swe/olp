@@ -73,32 +73,31 @@ func captureRates(ctx context.Context, q access.Queryer) (map[string]string, err
 		attributed, invoiced decimal.Decimal
 	}
 	byProvider := map[string]*agg{}
-	for _, id := range providerIDs {
-		byProvider[id] = &agg{invoiced: decimal.Zero, attributed: decimal.Zero}
-	}
-	invoicedRows, err := q.Query(ctx, `SELECT provider_id::text,sum(amount)::text,string_agg(DISTINCT btrim(currency),',')
+	invoicedRows, err := q.Query(ctx, `SELECT provider_id::text,sum(amount)::text
 		FROM olp.provider_invoiced_costs
 		WHERE provider_id=ANY($1::uuid[]) AND day>=$2::date AND day<$3::date
-		GROUP BY provider_id`, providerIDs, start.Format(dayFormat), end.Format(dayFormat))
+		GROUP BY provider_id
+		HAVING sum(amount) <> 0 AND string_agg(DISTINCT btrim(currency),',') = $4`,
+		providerIDs, start.Format(dayFormat), end.Format(dayFormat), pricingCurrency)
 	if err != nil {
 		return nil, err
 	}
 	defer invoicedRows.Close()
-	mismatch := map[string]bool{}
+	var eligibleProviders []string
 	for invoicedRows.Next() {
-		var provider, amount, currencies string
-		if err := invoicedRows.Scan(&provider, &amount, &currencies); err != nil {
+		var provider, amount string
+		if err := invoicedRows.Scan(&provider, &amount); err != nil {
 			return nil, err
 		}
 		if v, err := decimal.NewFromString(amount); err == nil {
-			byProvider[provider].invoiced = v
+			byProvider[provider] = &agg{invoiced: v, attributed: decimal.Zero}
+			eligibleProviders = append(eligibleProviders, provider)
 		}
-		mismatch[provider] = currencies != pricingCurrency
 	}
 	if err := invoicedRows.Err(); err != nil {
 		return nil, err
 	}
-	spend, err := usage.ReconciliationSpend(ctx, q, start, end, providerIDs)
+	spend, err := usage.ReconciliationSpend(ctx, q, start, end, eligibleProviders)
 	if err != nil {
 		return nil, err
 	}
@@ -110,9 +109,6 @@ func captureRates(ctx context.Context, q access.Queryer) (map[string]string, err
 	}
 	rates := map[string]string{}
 	for provider, a := range byProvider {
-		if a.invoiced.IsZero() || mismatch[provider] {
-			continue
-		}
 		rates[provider] = a.attributed.Div(a.invoiced).Round(6).String()
 	}
 	return rates, nil
