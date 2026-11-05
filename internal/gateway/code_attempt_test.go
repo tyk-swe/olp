@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -27,9 +29,12 @@ type recordedCooldown struct {
 }
 
 type fakeCodeLedger struct {
-	health      []codemode.HealthObservation
-	cooldowns   []recordedCooldown
-	cooldownErr error
+	health        []codemode.HealthObservation
+	cooldowns     []recordedCooldown
+	outcomes      []codemode.Outcome
+	settlements   []codemode.Usage
+	confirmations int
+	cooldownErr   error
 }
 
 func (f *fakeCodeLedger) Models(context.Context, codemode.Route, string) (codeclient.Offers, error) {
@@ -43,6 +48,7 @@ func (f *fakeCodeLedger) BindConnection(context.Context, codemode.Route, string,
 }
 func (f *fakeCodeLedger) MarkDispatched(context.Context, string) error { return nil }
 func (f *fakeCodeLedger) ConfirmNonexecution(context.Context, string, int) error {
+	f.confirmations++
 	return nil
 }
 func (f *fakeCodeLedger) ObserveCooldown(context.Context, string, time.Time) error { return nil }
@@ -53,8 +59,11 @@ func (f *fakeCodeLedger) ObserveCooldownClass(_ context.Context, account, model 
 	f.cooldowns = append(f.cooldowns, recordedCooldown{account: account, model: model, classification: classification})
 	return nil
 }
-func (f *fakeCodeLedger) Settle(context.Context, string, codemode.Usage) error { return nil }
-func (f *fakeCodeLedger) Abort(context.Context, string) error                  { return nil }
+func (f *fakeCodeLedger) Settle(_ context.Context, _ string, usage codemode.Usage) error {
+	f.settlements = append(f.settlements, usage)
+	return nil
+}
+func (f *fakeCodeLedger) Abort(context.Context, string) error { return nil }
 func (f *fakeCodeLedger) ObserveHealth(_ context.Context, _ string, observation codemode.HealthObservation) error {
 	f.health = append(f.health, observation)
 	return nil
@@ -66,7 +75,8 @@ func (f *fakeCodeLedger) ObserveAllowanceCharge(context.Context, string, json.Ra
 	return nil
 }
 func (f *fakeCodeLedger) ObserveReference(context.Context, string, string) error { return nil }
-func (f *fakeCodeLedger) ObserveOutcome(context.Context, string, codemode.Outcome) error {
+func (f *fakeCodeLedger) ObserveOutcome(_ context.Context, _ string, outcome codemode.Outcome) error {
+	f.outcomes = append(f.outcomes, outcome)
 	return nil
 }
 func (f *fakeCodeLedger) RecordRefusal(context.Context, codemode.Route, string, string, string) error {
@@ -112,8 +122,41 @@ func TestCodeAttemptUnaryCapacity429WritesOnlyModelCooldown(t *testing.T) {
 		t.Fatalf("cooldowns = %+v, want one model cooldown", ledger.cooldowns)
 	}
 	got := ledger.cooldowns[0]
-	if got.account != "account" || got.model != "public-model" || got.classification.Class != codeadapter.CooldownCapacity || got.classification.Scope != codeadapter.ScopeModel || !got.classification.RetryAt.Equal(now.Add(120*time.Second)) {
+	if got.account != "account" || got.model != "gpt-model" || got.classification.Class != codeadapter.CooldownCapacity || got.classification.Scope != codeadapter.ScopeModel || !got.classification.RetryAt.Equal(now.Add(120*time.Second)) {
 		t.Fatalf("cooldown = %+v", got)
+	}
+}
+
+func TestCodeAttemptRecoveryRecordsQuotaCooldown(t *testing.T) {
+	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name        string
+		cooldownErr error
+	}{
+		{name: "records cooldown"},
+		{name: "does not replay when cooldown storage fails", cooldownErr: errors.New("unavailable")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ledger := &fakeCodeLedger{cooldownErr: tc.cooldownErr}
+			attempt := codexAttempt(t, ledger, now)
+			attempt.permit.InitialRecovery = true
+			attempt.dispatched = true
+			response := &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"type":"usage_limit_reached","resets_in_seconds":600}}`))}
+			attempt.response(t.Context(), response.StatusCode, response.Header)
+			recovery, err := attempt.recover(t.Context(), response, codemode.Route{InitialRecoveryAttempts: 1}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.cooldownErr != nil {
+				if recovery != nil || len(ledger.health) != 1 {
+					t.Fatalf("failed cooldown write = recovery %+v, health %+v", recovery, ledger.health)
+				}
+				return
+			}
+			if recovery == nil || len(ledger.cooldowns) != 1 || ledger.cooldowns[0].classification.Class != codeadapter.CooldownQuota || ledger.cooldowns[0].classification.Scope != codeadapter.ScopeCredential || !ledger.cooldowns[0].classification.RetryAt.Equal(now.Add(10*time.Minute)) || len(ledger.health) != 0 {
+				t.Fatalf("recovery = %+v, cooldowns %+v, health %+v", recovery, ledger.cooldowns, ledger.health)
+			}
+		})
 	}
 }
 
@@ -377,6 +420,33 @@ func TestCodeAttemptMiniMaxDeclaredFoldingWritesModelEntitlementCooldown(t *test
 	got := ledger.cooldowns[0]
 	if got.account != "account" || got.classification.Class != codeadapter.CooldownEntitlement || got.classification.Scope != codeadapter.ScopeModel || got.classification.Envelope != "minimax_2061" || got.classification.NotExecuted || !got.classification.RetryAt.Equal(now.Add(time.Minute)) {
 		t.Fatalf("cooldown = %+v", got)
+	}
+}
+
+func TestCodeAttemptMiniMaxStandaloneErrorCoolsOnlyTargetModel(t *testing.T) {
+	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	for _, path := range []string{"v1/chat/completions", "v1/messages"} {
+		for _, alias := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/alias=%t", path, alias), func(t *testing.T) {
+				ledger := &fakeCodeLedger{}
+				attempt := minimaxAttempt(t, ledger, now, path)
+				attempt.dispatched = true
+				if alias {
+					attempt.publicModel = "public-model"
+				}
+				body := `{"base_resp":{"status_code":2061,"status_msg":"your current token plan not support model"}}`
+				response := &http.Response{StatusCode: 429, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}
+				attempt.response(t.Context(), response.StatusCode, response.Header)
+				attempt.copyResponse(t.Context(), httptest.NewRecorder(), response)
+				attempt.finish(t.Context())
+				if len(ledger.cooldowns) != 1 || ledger.cooldowns[0].model != "MiniMax-M3" || ledger.cooldowns[0].classification.Class != codeadapter.CooldownEntitlement || ledger.cooldowns[0].classification.Scope != codeadapter.ScopeModel || len(ledger.health) != 0 {
+					t.Fatalf("cooldowns = %+v, health = %+v", ledger.cooldowns, ledger.health)
+				}
+				if len(ledger.outcomes) != 1 || ledger.outcomes[0].Origin != "upstream" || ledger.outcomes[0].Kind != "rejected" || len(ledger.settlements) != 1 || ledger.settlements[0].Total != nil || ledger.confirmations != 0 {
+					t.Fatalf("outcomes = %+v, settlements = %+v, confirmations = %d", ledger.outcomes, ledger.settlements, ledger.confirmations)
+				}
+			})
+		}
 	}
 }
 

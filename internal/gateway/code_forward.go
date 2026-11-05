@@ -303,7 +303,7 @@ func (a *codeAttempt) copyResponse(ctx context.Context, w http.ResponseWriter, r
 					if streaming {
 						events.Write(decoded)
 					} else {
-						a.observe(a.observer.Unary(decoded))
+						a.observeUnary(decoded)
 					}
 				}
 			}

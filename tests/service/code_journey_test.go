@@ -17,6 +17,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codeallowance"
+	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -617,7 +618,7 @@ func seedCooldownJourney(t *testing.T, pool *pgxpool.Pool) cooldownJourney {
 	if err != nil {
 		t.Fatal(err)
 	}
-	connections := `{"` + provider + `":{"kind":"plugin","auth_mode":"grant","profile_id":"codex-subscription"}}`
+	connections := `{"` + provider + `":{"kind":"plugin","auth_mode":"grant","profile_id":"codex-subscription","profile_revision":"` + strings.Repeat("0", 64) + `"}}`
 	statements := []struct {
 		sql  string
 		args []any
@@ -625,8 +626,8 @@ func seedCooldownJourney(t *testing.T, pool *pgxpool.Pool) cooldownJourney {
 		{`INSERT INTO olp.users(id, email, display_name, role, etag) VALUES($1, 'cooldown@example.invalid', 'Journey', 'owner', $2)`, []any{user, uuid.NewString()}},
 		{`INSERT INTO olp.projects(id, name, etag, created_by) VALUES($1, 'cooldown-journey', $2, $3)`, []any{project, uuid.NewString(), user}},
 		{`INSERT INTO olp.providers(id, project_id, name, kind, state, configuration, etag, slots_etag, created_by) VALUES($1, $2, 'cooldown-journey', 'plugin', 'active', '{}', $3, $4, $5)`, []any{provider, project, uuid.NewString(), uuid.NewString(), user}},
-		{`INSERT INTO olp.provider_credentials(id, provider_id, version, principal, plugin_digest, grant_facts) VALUES($1, $2, 1, 'first-principal', repeat('0',64), '{}')`, []any{firstCredential, provider}},
-		{`INSERT INTO olp.provider_credentials(id, provider_id, version, principal, plugin_digest, grant_facts) VALUES($1, $2, 2, 'second-principal', repeat('0',64), '{}')`, []any{secondCredential, provider}},
+		{`INSERT INTO olp.provider_credentials(id, provider_id, version, principal, plugin_digest, grant_facts,profile_id) VALUES($1, $2, 1, 'first-principal', repeat('0',64), '{}','codex-subscription')`, []any{firstCredential, provider}},
+		{`INSERT INTO olp.provider_credentials(id, provider_id, version, principal, plugin_digest, grant_facts,profile_id) VALUES($1, $2, 2, 'second-principal', repeat('0',64), '{}','codex-subscription')`, []any{secondCredential, provider}},
 		{`INSERT INTO olp.provider_grants(credential_id) VALUES($1)`, []any{firstCredential}},
 		{`INSERT INTO olp.provider_grants(credential_id) VALUES($1)`, []any{secondCredential}},
 		{`INSERT INTO olp.code_accounts(id, project_id, provider_id, credential_id, principal, name, models, etag, created_by) VALUES($1, $2, $3, $4, 'first-principal', 'first', '["model","other"]', $5, $6)`, []any{first, project, provider, firstCredential, uuid.NewString(), user}},
@@ -716,6 +717,157 @@ func TestCodeCooldownClassesScopeSelectionNeverShortenAndNameRefusalRecovery(t *
 	}
 	if modelUnavailable != nil {
 		t.Fatalf("model scope cooldown mirrored to account health: %s until %s", modelHealth, modelUnavailable)
+	}
+}
+
+func TestCodeModelCooldownFollowsAliasTarget(t *testing.T) {
+	pool, _ := newDatabase(t)
+	if err := database.Migrate(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+	journey := seedCooldownJourney(t, pool)
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, journey.second); err != nil {
+		t.Fatal(err)
+	}
+	observed := time.Now().UTC().Truncate(time.Second)
+	reset := observed.Add(time.Hour)
+	if err := journey.store.ObserveCooldownClass(t.Context(), journey.first, "model", codeadapter.Classification{Class: codeadapter.CooldownCapacity, Scope: codeadapter.ScopeModel, RetryAt: reset}, observed); err != nil {
+		t.Fatal(err)
+	}
+	route := journey.route
+	route.ModelRewriting = true
+	route.Aliases = map[string]string{"first-alias": "model", "second-alias": "model"}
+	document, err := json.Marshal(route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_route_revisions SET document=$2 WHERE id=$1`, route.RevisionID, document); err != nil {
+		t.Fatal(err)
+	}
+	for _, alias := range []string{"first-alias", "second-alias"} {
+		_, err := journey.store.Admit(t.Context(), resources.CodeAdmission{Route: route, APIKeyID: journey.key, Operation: codemode.Operation{Name: "responses", Model: alias, Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{journey.provider}})
+		var refusal *codemode.Refusal
+		if !errors.As(err, &refusal) || refusal.Code != "code_account_unavailable" || refusal.RetryAt == nil || !refusal.RetryAt.Equal(reset) {
+			t.Fatalf("cooled target via %s = %v (%+v), want refusal until %s", alias, err, refusal, reset)
+		}
+	}
+	checkCatalog := func(want []string) {
+		t.Helper()
+		offers, err := resources.CodeOffers(t.Context(), pool, route.RevisionID, journey.key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		models := slices.Sorted(func(yield func(string) bool) {
+			for _, model := range codeclient.Catalog(route, offers) {
+				if !yield(model.ID) {
+					return
+				}
+			}
+		})
+		if !slices.Equal(models, want) {
+			t.Fatalf("offered models = %v, want %v", models, want)
+		}
+	}
+	checkCatalog([]string{"other"})
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=true WHERE id=$1`, journey.second); err != nil {
+		t.Fatal(err)
+	}
+	checkCatalog([]string{"first-alias", "model", "other", "second-alias"})
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, journey.second); err != nil {
+		t.Fatal(err)
+	}
+	republished := route
+	republished.RevisionID = uuid.NewString()
+	republished.Revision = 2
+	republished.Aliases = map[string]string{"first-alias": "other", "second-alias": "model"}
+	republishedDocument, err := json.Marshal(republished)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.code_route_revisions(id,route_id,revision,document,connections,created_by) SELECT $1,route_id,2,$2,connections,created_by FROM olp.code_route_revisions WHERE id=$3`, republished.RevisionID, republishedDocument, route.RevisionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_routes SET latest_revision_id=$2 WHERE id=$1`, route.ID, republished.RevisionID); err != nil {
+		t.Fatal(err)
+	}
+	permit, err := journey.store.Admit(t.Context(), resources.CodeAdmission{Route: republished, APIKeyID: journey.key, Operation: codemode.Operation{Name: "responses", Model: "first-alias", Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{journey.provider}})
+	if err != nil || permit.Account.ID != journey.first || permit.Attempt.Model != "other" {
+		t.Fatalf("same alias with a different target = %+v, %v", permit, err)
+	}
+}
+
+func TestCodeRecoveryRecordsActualDestinationSelection(t *testing.T) {
+	pool, _ := newDatabase(t)
+	if err := database.Migrate(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+	journey := seedCooldownJourney(t, pool)
+	third, credential := uuid.NewString(), uuid.NewString()
+	statements := []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO olp.provider_credentials(id,provider_id,version,principal,plugin_digest,grant_facts,profile_id) VALUES($1,$2,3,'third-principal',repeat('0',64),'{}','codex-subscription')`, []any{credential, journey.provider}},
+		{`INSERT INTO olp.provider_grants(credential_id) VALUES($1)`, []any{credential}},
+		{`INSERT INTO olp.code_accounts(id,project_id,provider_id,credential_id,principal,name,models,etag,created_by,enabled) SELECT $1,project_id,provider_id,$2,'third-principal','third',models,$3,created_by,false FROM olp.code_accounts WHERE id=$4`, []any{third, credential, uuid.NewString(), journey.first}},
+		{`INSERT INTO olp.code_pool_accounts(pool_id,account_id,weight) VALUES($1,$2,1)`, []any{journey.route.PoolID, third}},
+		{`UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, []any{journey.second}},
+	}
+	for _, statement := range statements {
+		if _, err := pool.Exec(t.Context(), statement.sql, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	journey.route.InitialRecoveryAttempts = 1
+	journey.route.ModelRewriting = true
+	journey.route.ModelPools = map[string][]string{"model": {"model", "other"}}
+	document, err := json.Marshal(journey.route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_route_revisions SET document=$2 WHERE id=$1`, journey.route.RevisionID, document); err != nil {
+		t.Fatal(err)
+	}
+	admission := journey.admission("model", "recovery-decision")
+	admission.InitialRecovery = true
+	first, err := journey.store.Admit(t.Context(), admission)
+	if err != nil || first.Account.ID != journey.first {
+		t.Fatalf("initial admission = %+v, %v", first, err)
+	}
+	now := time.Now().UTC()
+	status := 429
+	if err := journey.store.MarkDispatched(t.Context(), first.Attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := journey.store.ObserveOutcome(t.Context(), first.Attempt.ID, codemode.Outcome{Origin: "upstream", Kind: "rejected", UpstreamStatus: &status, ObservedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := journey.store.ConfirmNonexecution(t.Context(), first.Attempt.ID, status); err != nil {
+		t.Fatal(err)
+	}
+	zero := int64(0)
+	if err := journey.store.Settle(t.Context(), first.Attempt.ID, codemode.Usage{Total: &zero}); err != nil {
+		t.Fatal(err)
+	}
+	if err := journey.store.ObserveCooldownClass(t.Context(), journey.first, "", codeadapter.Classification{Class: codeadapter.CooldownQuota, Scope: codeadapter.ScopeCredential, RetryAt: now.Add(time.Hour)}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=true WHERE id=ANY($1::uuid[])`, []string{journey.second, third}); err != nil {
+		t.Fatal(err)
+	}
+	for _, account := range []string{journey.second, third} {
+		if err := journey.store.ObserveCooldownClass(t.Context(), account, "model", codeadapter.Classification{Class: codeadapter.CooldownCapacity, Scope: codeadapter.ScopeModel, RetryAt: now.Add(time.Hour)}, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	admission.Recovery = &resources.CodeRecovery{From: first.Attempt.ID, Envelope: "codex_usage_limit_reached", Number: 1}
+	recovered, err := journey.store.Admit(t.Context(), admission)
+	if err != nil || recovered.Attempt.Model != "other" {
+		t.Fatalf("model-pool recovery = %+v, %v", recovered, err)
+	}
+	decision := codeDecisionForAttempt(t, pool, recovered.Attempt.ID)
+	if decision.Reason != codemode.DecisionChosen || decision.ChosenAccountID != recovered.Account.ID || decision.Band != nil || decision.RecoveryEnvelope == nil || *decision.RecoveryEnvelope != "codex_usage_limit_reached" || decision.RecoveryOrdinal == nil || *decision.RecoveryOrdinal != 1 || len(decision.Skipped) != 1 || decision.Skipped[0].Class != codemode.SkipWeight || decision.Skipped[0].AccountID == recovered.Account.ID {
+		t.Fatalf("recovery decision = %+v", decision)
 	}
 }
 

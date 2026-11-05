@@ -206,6 +206,6 @@ func (a *codeAttempt) translatedCompletion(response *http.Response, model string
 	if err != nil || len(body) > codewire.MaxBody {
 		return nil, codemode.Refuse(502, "code_upstream_invalid")
 	}
-	a.observe(a.observer.Unary(body))
+	a.observeUnary(body)
 	return protocols.Decode(wire.Responses, family, body, model, "")
 }

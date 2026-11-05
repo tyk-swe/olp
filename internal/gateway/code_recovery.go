@@ -42,9 +42,24 @@ func (a *codeAttempt) recover(ctx context.Context, response *http.Response, rout
 	rejection = codeadapter.RejectionWithCycleReset(rejection, a.permit.Account.CycleAnchor, a.server.now().UTC())
 	zero := int64(0)
 	a.usage, a.terminal = codemode.Usage{Total: &zero}, true
+	recorded := func() bool {
+		if rejection.Class != upstream.RateLimit {
+			return true
+		}
+		_, ok := a.observeCooldownClass(codemode.Observation{Status: response.StatusCode, RejectionBody: body, RetryAfter: response.Header.Values("Retry-After")})
+		if ok {
+			a.pendingHealth = nil
+		}
+		return ok
+	}()
 	a.finish(ctx)
-	if err := a.server.CodeLedger.ObserveCooldown(ctx, a.permit.Account.ID, rejection.RetryAt); err != nil {
+	if !recorded {
 		return nil, nil
+	}
+	if rejection.Class == upstream.Credential {
+		if err := a.server.CodeLedger.ObserveCooldown(ctx, a.permit.Account.ID, rejection.RetryAt); err != nil {
+			return nil, nil
+		}
 	}
 	if !a.permit.InitialRecovery {
 		return nil, codemode.Refuse(409, "code_recovery_unsafe")

@@ -308,14 +308,16 @@ func (s *CodeStore) admit(ctx context.Context, admission CodeAdmission, connecti
 	if err != nil {
 		return out, err
 	}
-	decisionSelection := selection
-	if rootSelection != nil && reason == codemode.DecisionChosen && rootSelection.account.ID == selection.account.ID {
-		decisionSelection = *rootSelection
-	}
-	if recoverySelection != nil && recoverySelection.assessment != nil && recoverySelection.account.ID == selection.account.ID {
-		decisionSelection = *recoverySelection
-	}
-	if err = recordCodeDecision(ctx, tx, in, out.Binding, &out.Attempt.ID, decisionSelection, reason); err != nil {
+	decisionSelection, decisionReason := func() (codeSelection, codemode.DecisionReason) {
+		if recoverySelection != nil && recoverySelection.account.ID == selection.account.ID {
+			return *recoverySelection, codemode.DecisionChosen
+		}
+		if rootSelection != nil && reason == codemode.DecisionChosen && rootSelection.account.ID == selection.account.ID {
+			return *rootSelection, reason
+		}
+		return selection, reason
+	}()
+	if err = recordCodeDecision(ctx, tx, in, out.Binding, &out.Attempt.ID, decisionSelection, decisionReason); err != nil {
 		return out, err
 	}
 	if err = limits.ReserveCodeTokens(ctx, tx, out.Attempt, in.Bound); err != nil {
@@ -602,7 +604,7 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root stri
 			AND coalesce(array_position($6::text[],t.id::text)<array_position($6::text[],a.id::text),true)
 			AND (`+codeadapter.SQL("v.connections->(t.provider_id::text)")+` IS NOT DISTINCT FROM f.adapter
 				OR EXISTS(SELECT 1 FROM olp.code_pins p WHERE p.root_id=nullif($8,'')::uuid AND p.account_id=t.id AND p.adapter IS NOT DISTINCT FROM f.adapter)))`,
-		in.Route.PoolID, in.Route.ProjectID, requiredJSON, id, in.Providers, tree, in.Route.RevisionID, root, codeRecoveryExclusion(in.Recovery), in.Operation.PublicModel(), effectiveOrdering, family)
+		in.Route.PoolID, in.Route.ProjectID, requiredJSON, id, in.Providers, tree, in.Route.RevisionID, root, codeRecoveryExclusion(in.Recovery), in.Operation.Model, effectiveOrdering, family)
 	if err != nil {
 		return none, err
 	}

@@ -200,6 +200,17 @@ func (a *codeAttempt) dispatch(ctx context.Context) error {
 	return nil
 }
 
+func (a *codeAttempt) observeUnary(body []byte) {
+	observation := a.observer.Unary(body)
+	if a.status >= 400 && len(observation.RejectionBody) == 0 {
+		a.observe(codemode.Observation{RejectionBody: codewire.RejectionBody(body)})
+	}
+	a.observe(observation)
+	if a.status >= 400 {
+		a.terminal = true
+	}
+}
+
 func (a *codeAttempt) observe(o codemode.Observation) {
 	if o.ResponseID != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -382,7 +393,7 @@ func (a *codeAttempt) observeCooldownClass(o codemode.Observation) (codeadapter.
 	classification = codeadapter.WithCycleReset(classification, a.permit.Account.CycleAnchor, now)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	err := a.server.CodeLedger.ObserveCooldownClass(ctx, a.permit.Account.ID, a.publicModel, classification, now)
+	err := a.server.CodeLedger.ObserveCooldownClass(ctx, a.permit.Account.ID, a.model, classification, now)
 	return classification, err == nil
 }
 
