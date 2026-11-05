@@ -139,7 +139,7 @@ var errAllowanceReadUnqualified = errors.New("allowance read is not qualified fo
 
 func qualifiedForActiveRead(configuration routing.Configuration) bool {
 	signal, ok := codeadapter.AllowanceSignalForProfile(configuration.Kind, configuration.AuthMode, configuration.ProfileID)
-	return ok && signal.QualifiedForActiveRead()
+	return ok && signal.ActiveQualified
 }
 
 func (r *Reader) read(ctx context.Context, entry DueAccount) (bool, error) {

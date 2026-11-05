@@ -1,6 +1,7 @@
 package codeallowance
 
 import (
+	"slices"
 	"strconv"
 	"time"
 
@@ -25,35 +26,46 @@ func ParseUsage(body []byte, now time.Time) (codemode.Allowance, bool) {
 	if text, ok := plan.Text(); !ok || text == "" {
 		return codemode.Allowance{}, false
 	}
-	allowance := codemode.Allowance{ObservedAt: now}
 	windows, ok := rateLimitWindows(root, "codex", now)
 	if !ok {
 		return codemode.Allowance{}, false
 	}
-	allowance.Windows = append(allowance.Windows, windows...)
 	credits, ok := usageCredits(root, now)
 	if !ok {
 		return codemode.Allowance{}, false
 	}
-	allowance.Credits = credits
 	additional, present, valid := member(root, "additional_rate_limits")
 	if !valid {
 		return codemode.Allowance{}, false
 	}
-	if present && additional.Kind() != oif.Null {
-		if additional.Kind() != oif.Array {
-			return codemode.Allowance{}, false
-		}
+	if present && additional.Kind() != oif.Null && additional.Kind() != oif.Array {
+		return codemode.Allowance{}, false
+	}
+	type parsedWindows struct {
+		windows []codemode.AllowanceWindow
+		valid   bool
+	}
+	additionalResults := slices.Collect(func(yield func(parsedWindows) bool) {
 		for _, entry := range additional.Elements() {
 			entryWindows, usable, entryOK := additionalWindows(entry, now)
-			if !entryOK {
-				return codemode.Allowance{}, false
-			}
-			if usable {
-				allowance.Windows = append(allowance.Windows, entryWindows...)
+			if (!entryOK || usable) && !yield(parsedWindows{windows: entryWindows, valid: entryOK}) {
+				return
 			}
 		}
+	})
+	if slices.ContainsFunc(additionalResults, func(result parsedWindows) bool { return !result.valid }) {
+		return codemode.Allowance{}, false
 	}
+	extra := slices.Collect(func(yield func(codemode.AllowanceWindow) bool) {
+		for _, result := range additionalResults {
+			for _, window := range result.windows {
+				if !yield(window) {
+					return
+				}
+			}
+		}
+	})
+	allowance := codemode.Allowance{ObservedAt: now, Windows: slices.Concat(windows, extra), Credits: credits}
 	allowance.Normalize()
 	if len(allowance.Windows) == 0 && allowance.Credits == nil || allowance.Validate() != nil {
 		return codemode.Allowance{}, false

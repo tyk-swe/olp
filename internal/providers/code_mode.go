@@ -67,7 +67,7 @@ func (s *Server) requestCodeAllowanceRead(r *http.Request, _ access.Principal) (
 		return access.Commit(r, tx, *replayed)
 	}
 	signal, signalKnown := codeadapter.AllowanceSignalForProfile(value(profileKind), value(profileAuthMode), value(profileID))
-	if !signalKnown || !signal.QualifiedForActiveRead() {
+	if !signalKnown || !signal.ActiveQualified {
 		return access.Reply{}, access.Invalid("adapter", "Only accounts with a proven allowance signal support an active allowance read.")
 	}
 	if _, err = tx.Exec(r.Context(), `UPDATE olp.code_accounts SET allowance_read_requested_at=now() WHERE id=$1`, id); err != nil {

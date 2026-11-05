@@ -600,7 +600,7 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root stri
 			AND coalesce(array_position($6::text[],t.id::text)<array_position($6::text[],a.id::text),true)
 			AND (`+codeadapter.SQL("v.connections->(t.provider_id::text)")+` IS NOT DISTINCT FROM f.adapter
 				OR EXISTS(SELECT 1 FROM olp.code_pins p WHERE p.root_id=nullif($8,'')::uuid AND p.account_id=t.id AND p.adapter IS NOT DISTINCT FROM f.adapter)))`,
-		in.Route.PoolID, in.Route.ProjectID, requiredJSON, id, in.Providers, tree, in.Route.RevisionID, root, codeRecoveryExclusion(in.Recovery), in.Operation.PublicModel(), in.Route.AllowanceOrdering)
+		in.Route.PoolID, in.Route.ProjectID, requiredJSON, id, in.Providers, tree, in.Route.RevisionID, root, codeRecoveryExclusion(in.Recovery), in.Operation.PublicModel(), bandOrdered)
 	if err != nil {
 		return none, err
 	}
@@ -623,10 +623,13 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root stri
 	if err != nil {
 		return none, err
 	}
-	outcomes := make([]codemode.Candidate, 0, len(candidates))
-	for _, candidate := range candidates {
-		outcomes = append(outcomes, candidate.outcome)
-	}
+	outcomes := slices.Collect(func(yield func(codemode.Candidate) bool) {
+		for _, candidate := range candidates {
+			if !yield(candidate.outcome) {
+				return
+			}
+		}
+	})
 	chosen, ok := codemode.ChooseCandidate(outcomes)
 	if !ok || !chosen.Eligible() {
 		if len(candidates) == 0 {
@@ -634,6 +637,9 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root stri
 		}
 		deadlines := slices.Collect(func(yield func(*time.Time) bool) {
 			for _, candidate := range candidates {
+				if candidate.outcome.Position != chosen.Position {
+					continue
+				}
 				if (candidate.account.Health == "unavailable" || candidate.account.Health == "quota_limited") && candidate.account.UnavailableUntil == nil {
 					if !yield(nil) {
 						return

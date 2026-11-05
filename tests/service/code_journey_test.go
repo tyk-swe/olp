@@ -363,6 +363,29 @@ func TestCodeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T) {
 	if decision = codeDecisionForAttempt(t, pool, pinned.Attempt.ID); decision.Reason != codemode.DecisionPin || decision.Band != nil || decision.Evidence != nil || decision.EvidenceObservedAt != nil {
 		t.Fatalf("pinned decision = %+v", decision)
 	}
+	for _, tc := range []struct {
+		name      string
+		allowance codemode.Allowance
+		retryAt   *time.Time
+	}{
+		{"exhausted window", codemode.Allowance{Windows: []codemode.AllowanceWindow{{LimitID: "codex", Window: "primary", Unit: codemode.AllowanceUnitPercent, Evidence: codemode.AllowanceEvidencePassive, UsedPercent: 100, RemainingPercent: 0, ResetsAt: &reset, ObservedAt: base}}, ObservedAt: base}, &reset},
+		{"stale resetless count", codemode.Allowance{RemainingTokens: new(int64(0)), ObservedAt: base.Add(-time.Hour)}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			document, err := json.Marshal(tc.allowance)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1`, low, document); err != nil {
+				t.Fatal(err)
+			}
+			_, err = store.Admit(t.Context(), resources.CodeAdmission{Route: bySlug["band-on"], APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: "band-conv-0"}}, Providers: []string{provider}})
+			var refusal *codemode.Refusal
+			if !errors.As(err, &refusal) || refusal.Code != "code_account_unavailable" || (tc.retryAt == nil && refusal.RetryAt != nil) || (tc.retryAt != nil && (refusal.RetryAt == nil || !refusal.RetryAt.Equal(*tc.retryAt))) {
+				t.Fatalf("pinned admission = %v (%+v), want refusal with retry at %v", err, refusal, tc.retryAt)
+			}
+		})
+	}
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=(id=$1)`, healthy); err != nil {
 		t.Fatal(err)
 	}
@@ -689,6 +712,53 @@ func TestCodeCooldownClassesScopeSelectionNeverShortenAndNameRefusalRecovery(t *
 	}
 	if modelUnavailable != nil {
 		t.Fatalf("model scope cooldown mirrored to account health: %s until %s", modelHealth, modelUnavailable)
+	}
+}
+
+func TestCodeTreeRefusalUsesPreferredAccountRecovery(t *testing.T) {
+	pool, _ := newDatabase(t)
+	if err := database.Migrate(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+	journey := seedCooldownJourney(t, pool)
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, journey.second); err != nil {
+		t.Fatal(err)
+	}
+	root, err := journey.store.Admit(t.Context(), journey.admission("model", "tree-recovery"))
+	if err != nil || root.Account.ID != journey.first {
+		t.Fatalf("root admission = %+v, %v", root, err)
+	}
+	provider, credential, alternative := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	statements := []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO olp.providers(id,project_id,name,kind,state,configuration,etag,slots_etag,created_by) SELECT $1,project_id,'tree-alternative','plugin','active','{}',$2,$3,created_by FROM olp.code_accounts WHERE id=$4`, []any{provider, uuid.NewString(), uuid.NewString(), journey.first}},
+		{`INSERT INTO olp.provider_credentials(id,provider_id,version,principal,plugin_digest,grant_facts) VALUES($1,$2,1,'alternative',repeat('0',64),'{}')`, []any{credential, provider}},
+		{`INSERT INTO olp.provider_grants(credential_id) VALUES($1)`, []any{credential}},
+		{`INSERT INTO olp.code_accounts(id,project_id,provider_id,credential_id,principal,name,models,etag,created_by) SELECT $1,project_id,$2,$3,'alternative','alternative','["other"]',$4,created_by FROM olp.code_accounts WHERE id=$5`, []any{alternative, provider, credential, uuid.NewString(), journey.first}},
+		{`INSERT INTO olp.code_pool_accounts(pool_id,account_id,weight) VALUES($1,$2,1)`, []any{journey.route.PoolID, alternative}},
+		{`UPDATE olp.code_route_revisions SET connections=jsonb_set(connections,ARRAY[$2::text],$3::jsonb,true) WHERE id=$1`, []any{journey.route.RevisionID, provider, `{"kind":"plugin","auth_mode":"grant","profile_id":"zai-coding-plan"}`}},
+	}
+	for _, statement := range statements {
+		if _, err := pool.Exec(t.Context(), statement.sql, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base := time.Now().UTC().Truncate(time.Second)
+	preferredRetry := base.Add(30 * time.Minute)
+	for _, observation := range []struct {
+		account string
+		retryAt time.Time
+	}{{journey.first, preferredRetry}, {alternative, base.Add(5 * time.Minute)}} {
+		if err := journey.store.ObserveCooldownClass(t.Context(), observation.account, "other", codeadapter.Classification{Class: codeadapter.CooldownRate, Scope: codeadapter.ScopeModel, RetryAt: observation.retryAt}, base); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err = journey.store.Admit(t.Context(), resources.CodeAdmission{Route: journey.route, APIKeyID: journey.key, Operation: codemode.Operation{Name: "responses", Model: "other", Identity: codemode.Identity{Conversation: "tree-recovery"}}, Providers: []string{journey.provider, provider}})
+	var refusal *codemode.Refusal
+	if !errors.As(err, &refusal) || refusal.RetryAt == nil || !refusal.RetryAt.Equal(preferredRetry) {
+		t.Fatalf("tree refusal = %v (%+v), want preferred account recovery at %s", err, refusal, preferredRetry)
 	}
 }
 

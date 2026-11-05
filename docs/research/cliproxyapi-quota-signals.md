@@ -280,7 +280,3 @@ A stronger Go ordering would need operator supplied plan and billing anchor meta
 None of these signals widens replay by itself. A documented quota code proves why an upstream says it refused a request, while OLP recovery also needs a complete pre output rejection, portable input, settled earlier attempts, and the published recovery policy. Sources are the [OLP code mode guide](../use/code-mode.md) and [ADR 0002 on state aware code account recovery](../adr/0002-state-aware-code-account-recovery.md)
 
 Extending [`InitialRejection`](../../internal/codeadapter/recovery.go#L18-L44) beyond Codex is therefore new adapter proof, not a CLIProxyAPI port. Each added envelope needs controlled fixtures for the exact HTTP shape and live qualification before it can move a conversation, and streamed or ambiguous failures stay on the original account with their usage uncertainty intact
-
-
-
-

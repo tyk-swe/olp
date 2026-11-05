@@ -116,6 +116,20 @@ func checkPassed(record runRecord, name string) bool {
 	})
 }
 
+func liveReliability(records []runRecord) bool {
+	return !slices.ContainsFunc(liveLanes(), func(spec liveLane) bool {
+		return !slices.ContainsFunc(records, func(record runRecord) bool {
+			return record.Adapter == spec.adapter && record.Profile == spec.profile && record.Client == spec.client.name &&
+				strings.TrimSpace(record.ClientVersion) != "" && record.Platform == runtime.GOOS+"/"+runtime.GOARCH &&
+				record.Model != "" && record.Model == strings.TrimSpace(os.Getenv(spec.modelEnv)) &&
+				record.Protocol == spec.protocol && record.Transport == "http" &&
+				record.Evidence == "live" && record.Result == "pass" && record.ClientExecuted &&
+				checkPassed(record, "inference") && checkPassed(record, "bands") && checkPassed(record, "cooldown") &&
+				checkPassed(record, "failover") && (spec.adapter != "codex" || checkPassed(record, "allowance"))
+		})
+	})
+}
+
 func deriveClaims(records []runRecord) claimsSummary {
 	claims := claimsSummary{Type: "claims", Evidence: "live", ResetAwareOrdering: []string{}, LiveInference: []string{}, CooldownEvidence: []string{}, FailoverEvidence: []string{}}
 	for _, record := range records {
@@ -238,6 +252,70 @@ func TestLiveClaimsDerivation(t *testing.T) {
 	}
 	if !slices.Equal(full.CooldownEvidence, []string{"codex/codex-subscription"}) || !slices.Equal(full.FailoverEvidence, []string{"zai_coding/zai-coding-plan"}) {
 		t.Fatalf("evidence claims = %+v", full)
+	}
+}
+
+func TestLiveReliabilityRequiresClientAndBehaviorEvidence(t *testing.T) {
+	specs := liveLanes()
+	for _, spec := range specs {
+		t.Setenv(spec.modelEnv, "synthetic-model")
+	}
+	records := func(missingLane, missing string) []runRecord {
+		return slices.Collect(func(yield func(runRecord) bool) {
+			for _, spec := range specs {
+				if spec.id() == missingLane && missing == "lane" {
+					continue
+				}
+				check := func(name string) runCheck {
+					if spec.id() == missingLane && missing == name {
+						return runCheck{Name: name, Result: "no_signal"}
+					}
+					return runCheck{Name: name, Result: "pass"}
+				}
+				evidence := func() string {
+					if spec.id() == missingLane && missing == "live" {
+						return "fixture"
+					}
+					return "live"
+				}()
+				scope := func(field, value string) string {
+					if spec.id() == missingLane && missing == field {
+						return ""
+					}
+					if spec.id() == missingLane && missing == "wrong "+field {
+						return "wrong"
+					}
+					return value
+				}
+				if !yield(runRecord{
+					Client: scope("client name", spec.client.name), ClientVersion: scope("version", "1.0"),
+					Platform: scope("platform", runtime.GOOS+"/"+runtime.GOARCH), Adapter: scope("adapter", spec.adapter),
+					Profile: scope("profile", spec.profile), Model: scope("model", "synthetic-model"),
+					Protocol: scope("protocol", spec.protocol), Transport: scope("transport", "http"),
+					Result: "pass", Evidence: evidence, ClientExecuted: spec.id() != missingLane || missing != "client",
+					Checks: []runCheck{check("inference"), check("allowance"), check("bands"), check("cooldown"), check("failover")},
+				}) {
+					return
+				}
+			}
+		})
+	}
+	if !liveReliability(records("", "")) {
+		t.Fatal("qualified live client journeys must pass the reliability gate")
+	}
+	for _, missing := range []string{"lane", "client", "live", "inference", "allowance", "bands", "cooldown", "failover"} {
+		t.Run(missing, func(t *testing.T) {
+			if liveReliability(records(specs[0].id(), missing)) {
+				t.Fatalf("missing %s must not pass the reliability gate", missing)
+			}
+		})
+	}
+	for _, missing := range []string{"client", "bands", "cooldown", "failover", "version", "platform", "wrong platform", "adapter", "wrong adapter", "profile", "wrong profile", "client name", "wrong client name", "model", "wrong model", "protocol", "wrong protocol", "transport", "wrong transport"} {
+		t.Run("other lane "+missing, func(t *testing.T) {
+			if liveReliability(records(specs[1].id(), missing)) {
+				t.Fatalf("missing %s in another lane must not pass the reliability gate", missing)
+			}
+		})
 	}
 }
 

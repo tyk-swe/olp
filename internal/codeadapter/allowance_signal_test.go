@@ -19,7 +19,7 @@ func TestAllowanceSignalMarksMiniMaxProfilesUnqualified(t *testing.T) {
 		if !ok || signal.Signal != codeadapter.AllowanceSignalRemainsUnqualified {
 			t.Fatalf("profile %q signal = %+v ok=%v, want unqualified", profile, signal, ok)
 		}
-		if signal.QualifiedForActiveRead() {
+		if signal.ActiveQualified {
 			t.Fatalf("profile %q must not qualify for an active allowance read", profile)
 		}
 	}
@@ -27,11 +27,11 @@ func TestAllowanceSignalMarksMiniMaxProfilesUnqualified(t *testing.T) {
 
 func TestAllowanceSignalNamesCodexProvenAndOthersUnproven(t *testing.T) {
 	codex, ok := codeadapter.AllowanceSignalForProfile("plugin", "grant", codexauth.ProfileID)
-	if !ok || codex.Signal != codeadapter.AllowanceSignalProven || codex.QualifiedForActiveRead() {
+	if !ok || codex.Signal != codeadapter.AllowanceSignalProven || codex.ActiveQualified {
 		t.Fatalf("codex signal = %+v ok=%v, want passive proven and active unqualified", codex, ok)
 	}
 	glm, ok := codeadapter.AllowanceSignalForProfile("plugin", "grant", codeplans.ZAIProfile)
-	if !ok || glm.Signal != codeadapter.AllowanceSignalNone || glm.QualifiedForActiveRead() {
+	if !ok || glm.Signal != codeadapter.AllowanceSignalNone || glm.ActiveQualified {
 		t.Fatalf("glm signal = %+v ok=%v, want none and unqualified", glm, ok)
 	}
 	if _, ok := codeadapter.AllowanceSignalForProfile("plugin", "grant", "unknown-profile"); ok {

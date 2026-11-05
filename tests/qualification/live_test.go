@@ -355,6 +355,9 @@ func TestCodeModeLiveQualificationLanes(t *testing.T) {
 			}
 		}
 		writer.emitClaims(t, deriveClaims(records))
+		if !liveReliability(records) {
+			t.Error("live reliability requires scoped client journeys with inference, bands, cooldown and failover evidence, plus Codex allowance evidence")
+		}
 	}()
 	complete := func(record runRecord) {
 		emitted[record.Adapter+"/"+record.Profile] = true

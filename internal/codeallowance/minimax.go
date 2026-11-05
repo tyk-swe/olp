@@ -115,39 +115,45 @@ func remainsRowTypesValid(element oif.Value) bool {
 }
 
 func selectCodingBucket(elements []oif.Value, accountModels []string) (oif.Value, bool) {
-	candidates := []oif.Value{}
-	names := []string{}
-	for _, element := range elements {
-		if element.Kind() != oif.Object {
-			return oif.Value{}, false
-		}
-		nameValue, present, valid := member(element, "model_name")
-		if !valid || !present {
-			return oif.Value{}, false
-		}
-		name, isText := nameValue.Text()
-		if !isText {
-			return oif.Value{}, false
-		}
-		if name == "general" || name == "MiniMax-M*" || strings.HasPrefix(name, "MiniMax-M") && slices.Contains(accountModels, name) {
-			candidates = append(candidates, element)
-			names = append(names, name)
-		}
+	type namedBucket struct {
+		value oif.Value
+		name  string
+		valid bool
 	}
+	rows := slices.Collect(func(yield func(namedBucket) bool) {
+		for _, element := range elements {
+			nameValue, present, valid := member(element, "model_name")
+			name, isText := nameValue.Text()
+			if !yield(namedBucket{value: element, name: name, valid: present && valid && isText}) {
+				return
+			}
+		}
+	})
+	if slices.ContainsFunc(rows, func(row namedBucket) bool { return !row.valid }) {
+		return oif.Value{}, false
+	}
+	candidates := slices.Collect(func(yield func(namedBucket) bool) {
+		for _, row := range rows {
+			if (row.name == "general" || row.name == "MiniMax-M*" || strings.HasPrefix(row.name, "MiniMax-M") && slices.Contains(accountModels, row.name)) && !yield(row) {
+				return
+			}
+		}
+	})
 	if len(candidates) == 1 {
-		return candidates[0], true
+		return candidates[0].value, true
 	}
 	if len(candidates) == 0 {
 		return oif.Value{}, false
 	}
-	exact := []oif.Value{}
-	for index, candidate := range candidates {
-		if slices.Contains(accountModels, names[index]) {
-			exact = append(exact, candidate)
+	exact := slices.Collect(func(yield func(namedBucket) bool) {
+		for _, candidate := range candidates {
+			if slices.Contains(accountModels, candidate.name) && !yield(candidate) {
+				return
+			}
 		}
-	}
+	})
 	if len(exact) == 1 {
-		return exact[0], true
+		return exact[0].value, true
 	}
 	return oif.Value{}, false
 }

@@ -176,8 +176,14 @@ cooldown evidence, and failover evidence from this run. Reset aware
 ordering needs a passing lane with passing allowance and band checks.
 No adapter can earn that claim until a model-to-limit mapping is qualified. When lanes
 are missing or red the matching lists are empty, and an empty list
-means no claim. The script exits non-zero and prints every lane that
-is not green whenever any required lane is missing or red. The live
+means no claim. The full reliability gate requires every live lane to
+execute its client, record its scope, and pass inference, band ordering,
+cooldown, and failover checks. The Codex lane also needs its allowance
+check. The current live lanes send protocol requests without executing
+the clients, and no model-to-limit mapping is qualified, so the full
+gate cannot pass yet. The report still preserves the scoped partial
+observations. The script exits non-zero whenever this evidence is
+missing or a required lane is red. The live
 report goes to `OLP_QUALIFY_LIVE_REPORT`, the harness refuses a live
 report path that matches the fixture report path, and the script fails
 if fixture evidence appears in the live report. Fixture evidence is

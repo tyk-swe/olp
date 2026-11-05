@@ -22,10 +22,6 @@ type AllowanceSignalInfo struct {
 	ActiveQualified bool
 }
 
-func (info AllowanceSignalInfo) QualifiedForActiveRead() bool {
-	return info.ActiveQualified
-}
-
 var allowanceSignals = map[string]AllowanceSignalInfo{
 	codexauth.ProfileID:        {Signal: AllowanceSignalProven},
 	codeplans.MiniMaxProfile:   {Signal: AllowanceSignalRemainsUnqualified, Reason: "live-qualification-pending"},
@@ -43,15 +39,15 @@ func (v Vendor) AllowanceSignal(profileID string) AllowanceSignalInfo {
 }
 
 func QualifiedProfileIDs() []string {
-	qualified := make([]string, 0, 1)
-	for _, vendor := range vendors {
-		for _, profile := range vendor.profiles {
-			if vendor.AllowanceSignal(profile).QualifiedForActiveRead() {
-				qualified = append(qualified, profile)
+	return slices.Collect(func(yield func(string) bool) {
+		for _, vendor := range vendors {
+			for _, profile := range vendor.profiles {
+				if vendor.AllowanceSignal(profile).ActiveQualified && !yield(profile) {
+					return
+				}
 			}
 		}
-	}
-	return qualified
+	})
 }
 
 func SQLAllowanceSignal(config string) string {
