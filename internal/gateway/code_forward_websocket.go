@@ -340,15 +340,28 @@ func forwardCodeHandshakeRejection(ctx context.Context, w http.ResponseWriter, a
 	}
 	w.WriteHeader(response.StatusCode)
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
-	body, readErr := io.ReadAll(io.LimitReader(response.Body, codewire.MaxBody+1))
-	_, _ = w.Write(body)
-	_, _ = io.Copy(w, response.Body)
-	if readErr == nil && response.StatusCode >= 400 {
-		attempt.observeEncodedUnary(body, response.Header.Get("Content-Encoding"))
+	writer := flushingHandshakeWriter{w}
+	body, readErr := io.ReadAll(io.TeeReader(io.LimitReader(response.Body, codewire.MaxBody+1), writer))
+	if readErr == nil {
+		if _, err := io.Copy(writer, response.Body); err == nil && response.StatusCode >= 400 {
+			attempt.observeEncodedUnary(body, response.Header.Get("Content-Encoding"))
+		}
 	}
 	for name, values := range codewire.ForwardTrailers(response.Trailer, response.Header, false) {
 		w.Header()[http.TrailerPrefix+name] = values
 	}
+}
+
+type flushingHandshakeWriter struct {
+	http.ResponseWriter
+}
+
+func (w flushingHandshakeWriter) Write(body []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(body)
+	if err == nil {
+		_ = http.NewResponseController(w.ResponseWriter).Flush()
+	}
+	return n, err
 }
 
 type codeHandshakeTransport struct {

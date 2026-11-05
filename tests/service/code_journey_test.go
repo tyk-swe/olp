@@ -720,6 +720,53 @@ func TestCodeCooldownClassesScopeSelectionNeverShortenAndNameRefusalRecovery(t *
 	}
 }
 
+func TestCodeModelLessConnectionChecksEveryModelCooldown(t *testing.T) {
+	pool, _ := newDatabase(t)
+	if err := database.Migrate(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+	journey := seedCooldownJourney(t, pool)
+	providers := []string{journey.provider}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, journey.second); err != nil {
+		t.Fatal(err)
+	}
+	pinned, err := journey.store.BindConnection(t.Context(), journey.route, journey.key, codemode.Identity{Conversation: "pinned-model-less"}, "", providers)
+	if err != nil || pinned.Account.ID != journey.first {
+		t.Fatalf("initial pinned connection = %+v, %v", pinned, err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=true WHERE id=$1`, journey.second); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	late := now.Add(20 * time.Minute)
+	if err := journey.store.ObserveCooldownClass(t.Context(), journey.first, "other", codeadapter.Classification{Class: codeadapter.CooldownCapacity, Scope: codeadapter.ScopeModel, RetryAt: late}, now); err != nil {
+		t.Fatal(err)
+	}
+	bound, err := journey.store.BindConnection(t.Context(), journey.route, journey.key, codemode.Identity{Conversation: "new-model-less"}, "", providers)
+	if err != nil || bound.Account.ID != journey.second {
+		t.Fatalf("model-less connection = %+v, %v, want account %s", bound, err, journey.second)
+	}
+	decisions := codeConnectionDecisions(t, pool, bound.Binding.RootID)
+	if len(decisions) != 1 || len(decisions[0].Skipped) != 1 || decisions[0].Skipped[0].AccountID != journey.first || decisions[0].Skipped[0].Class != codemode.SkipCooldown {
+		t.Fatalf("model-less selection = %+v", decisions)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, journey.second); err != nil {
+		t.Fatal(err)
+	}
+	hinted, err := journey.store.BindConnection(t.Context(), journey.route, journey.key, codemode.Identity{Conversation: "hinted-model"}, "model", providers)
+	if err != nil || hinted.Account.ID != journey.first {
+		t.Fatalf("hinted connection = %+v, %v", hinted, err)
+	}
+	if err := journey.store.ObserveCooldownClass(t.Context(), journey.first, "model", codeadapter.Classification{Class: codeadapter.CooldownCapacity, Scope: codeadapter.ScopeModel, RetryAt: now.Add(10 * time.Minute)}, now); err != nil {
+		t.Fatal(err)
+	}
+	_, err = journey.store.BindConnection(t.Context(), journey.route, journey.key, codemode.Identity{Conversation: "pinned-model-less"}, "", providers)
+	var refusal *codemode.Refusal
+	if !errors.As(err, &refusal) || refusal.Code != "code_account_unavailable" || refusal.RetryAt == nil || !refusal.RetryAt.Equal(late) {
+		t.Fatalf("pinned refusal = %v (%+v), want retry at %s", err, refusal, late)
+	}
+}
+
 func TestCodeModelCooldownFollowsAliasTarget(t *testing.T) {
 	pool, _ := newDatabase(t)
 	if err := database.Migrate(t.Context(), pool); err != nil {

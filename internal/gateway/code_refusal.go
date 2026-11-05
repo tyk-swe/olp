@@ -21,6 +21,10 @@ func codeRefusal(err error) *codemode.Refusal {
 // codeWriteError writes a refusal in the envelope of the request's surface:
 // Anthropic's for a route's Messages paths, OpenAI's otherwise.
 func codeWriteError(w http.ResponseWriter, r *http.Request, err error) {
+	writeSurfaceError(w, codeError(r, err), requestSurface(r))
+}
+
+func codeError(r *http.Request, err error) *Error {
 	refusal := codeRefusal(err)
 	surface, kind := requestSurface(r), "code_mode_error"
 	if surface == "anthropic" {
@@ -33,7 +37,7 @@ func codeWriteError(w http.ResponseWriter, r *http.Request, err error) {
 			kind = "permission_error"
 		}
 	}
-	writeSurfaceError(w, &Error{Status: refusal.Status, Code: refusal.Code, Type: kind, Message: codeRefusalMessage(refusal.Code), RetryAfter: refusal.RetryAfter(time.Now())}, surface)
+	return &Error{Status: refusal.Status, Code: refusal.Code, Type: kind, Message: codeRefusalMessage(refusal.Code), RetryAfter: refusal.RetryAfter(time.Now())}
 }
 
 func (s *Server) codeRefuse(w http.ResponseWriter, r *http.Request, route codemode.Route, keyID, digest string, err error) {

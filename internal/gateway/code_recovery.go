@@ -18,7 +18,31 @@ type codeRejectionBody struct {
 	io.Closer
 }
 
-func (a *codeAttempt) recover(ctx context.Context, response *http.Response, route codemode.Route, previous *resources.CodeRecovery) (*resources.CodeRecovery, error) {
+func readTranslatedRejection(ctx context.Context, body io.ReadCloser, limit int64) ([]byte, error) {
+	type readResult struct {
+		body []byte
+		err  error
+	}
+	result := make(chan readResult, 1)
+	go func() {
+		data, err := io.ReadAll(io.LimitReader(body, limit))
+		result <- readResult{body: data, err: err}
+	}()
+	timer := time.NewTimer(250 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case received := <-result:
+		return received.body, received.err
+	case <-timer.C:
+		_ = body.Close()
+		return nil, context.DeadlineExceeded
+	case <-ctx.Done():
+		_ = body.Close()
+		return nil, ctx.Err()
+	}
+}
+
+func (a *codeAttempt) recover(ctx context.Context, response *http.Response, route codemode.Route, previous *resources.CodeRecovery, translated bool) (*resources.CodeRecovery, error) {
 	if a.paid != nil {
 		return nil, nil
 	}
@@ -26,7 +50,12 @@ func (a *codeAttempt) recover(ctx context.Context, response *http.Response, rout
 	if route.InitialRecoveryAttempts < 1 || response.StatusCode != 401 && response.StatusCode != 429 || ctx.Err() != nil {
 		return nil, nil
 	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, (64<<10)+1))
+	body, err := func() ([]byte, error) {
+		if translated {
+			return readTranslatedRejection(ctx, response.Body, (64<<10)+1)
+		}
+		return io.ReadAll(io.LimitReader(response.Body, (64<<10)+1))
+	}()
 	response.Body = codeRejectionBody{Reader: io.MultiReader(bytes.NewReader(body), response.Body), Closer: response.Body}
 	if err != nil || len(body) > 64<<10 {
 		return nil, nil
