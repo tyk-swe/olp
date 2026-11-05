@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
@@ -111,8 +110,7 @@ func (in CodeAccountInput) validate() error {
 		return access.Invalid("models", err.Error())
 	}
 	if in.CycleAnchor != nil {
-		parsed, err := time.Parse(time.DateOnly, *in.CycleAnchor)
-		if err != nil || parsed.Format(time.DateOnly) != *in.CycleAnchor {
+		if _, ok := codemode.ParseCycleAnchor(*in.CycleAnchor); !ok {
 			return access.Invalid("cycle_anchor", "Use a calendar date as the subscription cycle anchor.")
 		}
 	}

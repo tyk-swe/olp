@@ -268,17 +268,26 @@ func TestCodeAttemptQwenQuotaCooldownUsesCycleAnchorReset(t *testing.T) {
 	}
 }
 
-func TestCodeAttemptQwenQuotaCooldownVendorRetryAfterBeatsAnchor(t *testing.T) {
-	// Source: https://www.alibabacloud.com/help/en/model-studio/token-plan-team-faq (fetched 2026-11-05), 429 insufficient_quota.
+func TestCodeAttemptQwenQuotaCooldownShortVendorRetryAfterDoesNotShortenAnchorReset(t *testing.T) {
+	// Source: https://www.alibabacloud.com/help/en/model-studio/token-plan-team-faq (fetched 2026-11-05), 429 insufficient_quota resets next subscription month, so a shorter vendor Retry-After never shortens the monthly reset.
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
 	anchor := "2026-01-15"
+	want := time.Date(2026, 11, 15, 0, 0, 0, 0, time.UTC)
 	ledger := &fakeCodeLedger{}
 	attempt := qwenAttempt(t, ledger, now, &anchor)
 	attempt.response(t.Context(), 429, http.Header{"Retry-After": {"3600"}})
 	attempt.observe(attempt.observer.Unary([]byte(`{"error":{"code":"insufficient_quota","message":"Your token-plan quota has been exhausted."}}`)))
 	attempt.finish(t.Context())
-	if len(ledger.cooldowns) != 1 || !ledger.cooldowns[0].classification.RetryAt.Equal(now.Add(time.Hour)) {
-		t.Fatalf("cooldowns = %+v, want vendor retry-after", ledger.cooldowns)
+	if len(ledger.cooldowns) != 1 || !ledger.cooldowns[0].classification.RetryAt.Equal(want) {
+		t.Fatalf("cooldowns = %+v, want anchor reset %s over one hour retry-after", ledger.cooldowns, want)
+	}
+	longLedger := &fakeCodeLedger{}
+	longAttempt := qwenAttempt(t, longLedger, now, &anchor)
+	longAttempt.response(t.Context(), 429, http.Header{"Retry-After": {"2592000"}})
+	longAttempt.observe(longAttempt.observer.Unary([]byte(`{"error":{"code":"insufficient_quota","message":"Your token-plan quota has been exhausted."}}`)))
+	longAttempt.finish(t.Context())
+	if len(longLedger.cooldowns) != 1 || !longLedger.cooldowns[0].classification.RetryAt.Equal(now.Add(30*24*time.Hour)) {
+		t.Fatalf("cooldowns = %+v, want later vendor retry-after over anchor reset", longLedger.cooldowns)
 	}
 }
 

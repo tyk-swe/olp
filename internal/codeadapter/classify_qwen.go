@@ -6,14 +6,15 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/upstream"
 )
 
+const QwenQuotaEnvelope = "qwen_insufficient_quota"
+
 const (
-	qwenQuotaEnvelope = "qwen_insufficient_quota"
-	qwenRateEnvelope  = "qwen_requests_rate_limit_exceeded"
-	qwenQuotaMessage  = "Your token-plan quota has been exhausted."
-	qwenRatePrefix    = "Requests rate limit exceeded"
+	qwenRateEnvelope = "qwen_requests_rate_limit_exceeded"
+	qwenQuotaMessage = "Your token-plan quota has been exhausted."
+	qwenRateCode     = "Throttling.RateQuota"
+	qwenRatePrefix   = "Requests rate limit exceeded"
 )
 
 func classifyQwen(status int, body []byte, headers http.Header, now time.Time) (Classification, bool) {
@@ -25,10 +26,10 @@ func classifyQwen(status int, body []byte, headers http.Header, now time.Time) (
 		return Classification{}, false
 	}
 	if code == "insufficient_quota" && message == qwenQuotaMessage {
-		return Classification{Class: CooldownQuota, Scope: ScopeCredential, RetryAt: qwenRetryAt(headers, now), Envelope: qwenQuotaEnvelope, NotExecuted: true}, true
+		return Classification{Class: CooldownQuota, Scope: ScopeCredential, RetryAt: retryAtFrom(time.Time{}, false, headers, now), Envelope: QwenQuotaEnvelope, NotExecuted: true}, true
 	}
-	if strings.HasPrefix(message, qwenRatePrefix) {
-		return Classification{Class: CooldownRate, Scope: ScopeCredential, RetryAt: qwenRetryAt(headers, now), Envelope: qwenRateEnvelope}, true
+	if code == qwenRateCode && strings.HasPrefix(message, qwenRatePrefix) {
+		return Classification{Class: CooldownRate, Scope: ScopeCredential, RetryAt: retryAtFrom(time.Time{}, false, headers, now), Envelope: qwenRateEnvelope}, true
 	}
 	return Classification{}, false
 }
@@ -38,19 +39,22 @@ func qwenEnvelope(body []byte) (string, string, bool) {
 	if err != nil || document.Root().Kind() != oif.Object {
 		return "", "", false
 	}
-	code, codeOK := qwenText(document, "/error/code")
-	message, messageOK := qwenText(document, "/error/message")
-	if !messageOK {
-		code, codeOK = qwenText(document, "/code")
-		message, messageOK = qwenText(document, "/message")
-	}
+	code, message, messageOK := qwenCodeMessage(document)
 	if !messageOK || message == "" {
 		return "", "", false
 	}
-	if !codeOK {
-		code = ""
-	}
 	return code, message, true
+}
+
+func qwenCodeMessage(document oif.Document) (string, string, bool) {
+	message, messageOK := qwenText(document, "/error/message")
+	if messageOK {
+		code, _ := qwenText(document, "/error/code")
+		return code, message, true
+	}
+	code, _ := qwenText(document, "/code")
+	topMessage, topOK := qwenText(document, "/message")
+	return code, topMessage, topOK
 }
 
 func qwenText(document oif.Document, pointer string) (string, bool) {
@@ -59,14 +63,4 @@ func qwenText(document oif.Document, pointer string) (string, bool) {
 		return "", false
 	}
 	return value.Text()
-}
-
-func qwenRetryAt(headers http.Header, now time.Time) time.Time {
-	retryAt := now.Add(time.Minute)
-	if values := headers.Values("Retry-After"); len(values) == 1 {
-		if delay, valid := upstream.ParseRetryAfter(values[0], now); valid && now.Add(delay).After(retryAt) {
-			return now.Add(delay)
-		}
-	}
-	return retryAt
 }

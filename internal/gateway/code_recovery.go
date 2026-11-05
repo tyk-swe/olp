@@ -39,7 +39,7 @@ func (a *codeAttempt) recover(ctx context.Context, response *http.Response, rout
 	if err := a.server.CodeLedger.ConfirmNonexecution(ctx, a.permit.Attempt.ID, response.StatusCode); err != nil {
 		return nil, nil
 	}
-	rejection.RetryAt = a.qwenQuotaRetryAt(rejection.Envelope, rejection.RetryAt, response.Header, a.server.now().UTC())
+	rejection.RetryAt = a.qwenQuotaRetryAt(rejection.Envelope, rejection.RetryAt, a.server.now().UTC())
 	zero := int64(0)
 	a.usage, a.terminal = codemode.Usage{Total: &zero}, true
 	a.finish(ctx)

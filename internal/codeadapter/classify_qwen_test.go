@@ -79,6 +79,10 @@ func TestClassifyQwenCodingPlanAllocatedQuotaNeverClassifies(t *testing.T) {
 		"weekly allocated quota":                []byte(`{"error":{"code":"Throttling.AllocationQuota","message":"Your weekly allocated quota has been exhausted. It will reset next week."}}`),
 		"monthly allocated quota":               []byte(`{"error":{"code":"Throttling.AllocationQuota","message":"Your monthly allocated quota has been exhausted. It will reset next month."}}`),
 		"free tier only":                        []byte(`{"error":{"code":"AllocationQuota.FreeTierOnly","message":"The free tier of the model has been exhausted."}}`),
+		"rate message without code":             []byte(`{"error":{"message":"Requests rate limit exceeded, please try again later."}}`),
+		"rate message with quota code":          []byte(`{"error":{"code":"insufficient_quota","message":"Requests rate limit exceeded, please try again later."}}`),
+		"rate message with allocation code":     []byte(`{"error":{"code":"Throttling.AllocationQuota","message":"Requests rate limit exceeded, please try again later."}}`),
+		"rate message native without code":      []byte(`{"message":"Requests rate limit exceeded, please try again later.","request_id":"649b2bbc-c541-9e16-9845-db7fe4fe5b2d"}`),
 		"quota code on wrong status":            []byte(`{"error":{"code":"insufficient_quota","message":"Your token-plan quota has been exhausted."}}`),
 	} {
 		status := 429
