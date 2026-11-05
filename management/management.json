@@ -16077,15 +16077,19 @@
       },
       "CodeDecision": {
         "additionalProperties": false,
-        "description": "Content-free account selection record for one admitted attempt. Names the chosen account, why it served, the freshest allowance evidence kind behind it, and the class reason each other candidate was skipped. No prompt, response, header or credential content is retained.",
+        "description": "Content-free account selection record for one admitted attempt or one WebSocket connection bind. Names the chosen account, why it served, the freshest allowance evidence kind behind it, and the class reason each other candidate was skipped. No prompt, response, header or credential content is retained.",
         "properties": {
           "id": {
             "format": "uuid",
             "type": "string"
           },
           "attempt_id": {
+            "description": "Attempt this decision admitted. Null for connection decisions, which bind a WebSocket connection to the tree account without admitting an attempt.",
             "format": "uuid",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "project_id": {
             "format": "uuid",
@@ -16183,7 +16187,8 @@
                 "class"
               ],
               "type": "object"
-            }
+            },
+            "description": "Candidates evaluated alongside the chosen account that did not serve, each with the class reason it lost. Covers the evaluated candidate set only. Accounts excluded earlier by model, path or tree-adapter SQL filters are not listed."
           },
           "recovery_envelope": {
             "type": [

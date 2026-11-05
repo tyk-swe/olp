@@ -126,6 +126,11 @@ func TestCodeDecisionsMigrationKeepsRecordsContentFree(t *testing.T) {
 	if _, err := pool.Exec(t.Context(), insert, uuid.NewString(), attempt, project, route, revision, key, binding, binding, account, "pin", nil, nil, nil, "[]", nil, nil); err == nil {
 		t.Fatal("second decision for one attempt accepted")
 	}
+	for range 2 {
+		if _, err := pool.Exec(t.Context(), insert, uuid.NewString(), nil, project, route, revision, key, binding, binding, account, "connection", nil, nil, nil, "[]", nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
 	rejected := []struct {
 		name string
 		tail []any

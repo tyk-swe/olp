@@ -1,6 +1,6 @@
 CREATE TABLE olp.code_decisions (
     id uuid PRIMARY KEY,
-    attempt_id uuid NOT NULL UNIQUE REFERENCES olp.code_attempts,
+    attempt_id uuid REFERENCES olp.code_attempts,
     project_id uuid NOT NULL REFERENCES olp.projects,
     route_id uuid NOT NULL REFERENCES olp.code_routes,
     route_revision_id uuid NOT NULL REFERENCES olp.code_route_revisions,
@@ -18,4 +18,5 @@ CREATE TABLE olp.code_decisions (
     created_at timestamptz NOT NULL DEFAULT now(),
     CHECK ((evidence IS NULL) = (evidence_observed_at IS NULL))
 );
+CREATE UNIQUE INDEX code_decisions_attempt ON olp.code_decisions(attempt_id) WHERE attempt_id IS NOT NULL;
 CREATE INDEX code_decisions_project ON olp.code_decisions(project_id,id);

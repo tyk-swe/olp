@@ -10,7 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 )
 
-func recordCodeDecision(ctx context.Context, tx pgx.Tx, in CodeAdmission, binding codemode.Binding, attempt codemode.Attempt, selection codeSelection, reason codemode.DecisionReason) error {
+func recordCodeDecision(ctx context.Context, tx pgx.Tx, in CodeAdmission, binding codemode.Binding, attemptID *string, selection codeSelection, reason codemode.DecisionReason) error {
 	chosen, ok := selection.chosen()
 	if !ok {
 		return fmt.Errorf("code decision chosen account missing from candidates")
@@ -18,7 +18,7 @@ func recordCodeDecision(ctx context.Context, tx pgx.Tx, in CodeAdmission, bindin
 	evidence, observedAt := codemode.FreshestEvidence(selection.account.Allowance)
 	decision := codemode.Decision{
 		ID:                 access.NewID(),
-		AttemptID:          attempt.ID,
+		AttemptID:          attemptID,
 		ProjectID:          in.Route.ProjectID,
 		RouteID:            in.Route.ID,
 		RouteRevisionID:    in.Route.RevisionID,

@@ -282,6 +282,15 @@ func (s *CodeStore) admit(ctx context.Context, admission CodeAdmission, connecti
 		if _, err := tx.Exec(ctx, `UPDATE olp.code_bindings SET socket_bound=true WHERE id=$1 AND NOT socket_bound`, out.Binding.RootID); err != nil {
 			return out, err
 		}
+		if reason == codemode.DecisionConnection {
+			decisionSelection := selection
+			if rootSelection != nil && rootSelection.account.ID == selection.account.ID {
+				decisionSelection = *rootSelection
+			}
+			if err = recordCodeDecision(ctx, tx, in, out.Binding, nil, decisionSelection, reason); err != nil {
+				return out, err
+			}
+		}
 		return out, tx.Commit(ctx)
 	}
 	out.InitialRecovery = in.InitialRecovery && out.Binding.ParentID == nil && in.Operation.Identity.Parent == "" && in.PreviousResponse == "" && in.Route.InitialRecoveryAttempts > 0
@@ -302,7 +311,7 @@ func (s *CodeStore) admit(ctx context.Context, admission CodeAdmission, connecti
 	if rootSelection != nil && reason == codemode.DecisionChosen && rootSelection.account.ID == selection.account.ID {
 		decisionSelection = *rootSelection
 	}
-	if err = recordCodeDecision(ctx, tx, in, out.Binding, out.Attempt, decisionSelection, reason); err != nil {
+	if err = recordCodeDecision(ctx, tx, in, out.Binding, &out.Attempt.ID, decisionSelection, reason); err != nil {
 		return out, err
 	}
 	if err = limits.ReserveCodeTokens(ctx, tx, out.Attempt, in.Bound); err != nil {

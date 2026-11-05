@@ -1,6 +1,7 @@
 package codemode_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -104,19 +105,37 @@ func TestFreshestEvidenceUsesLatestWindowAndStaysAbsentWithoutAllowance(t *testi
 
 func TestDecisionValidateRejectsContentFreeInvariantBreaks(t *testing.T) {
 	valid := codemode.Decision{
-		AttemptID: "attempt", ChosenAccountID: "chosen", Reason: codemode.DecisionChosen,
+		AttemptID: new("attempt"), ChosenAccountID: "chosen", Reason: codemode.DecisionChosen,
 		Skipped: []codemode.SkippedAccount{{AccountID: "other", Class: codemode.SkipWeight}},
 	}
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("valid decision rejected: %v", err)
 	}
+	connection := codemode.Decision{ChosenAccountID: "chosen", Reason: codemode.DecisionConnection}
+	if err := connection.Validate(); err != nil {
+		t.Fatalf("connection decision without attempt rejected: %v", err)
+	}
+	recovered := codemode.Decision{
+		AttemptID: new("attempt"), ChosenAccountID: "chosen", Reason: codemode.DecisionChosen,
+		RecoveryEnvelope: new("codex_usage_limit_reached"), RecoveryOrdinal: new(1),
+	}
+	if err := recovered.Validate(); err != nil {
+		t.Fatalf("recovery decision rejected: %v", err)
+	}
 	cases := map[string]codemode.Decision{
-		"unknown reason":    {AttemptID: "attempt", ChosenAccountID: "chosen", Reason: "guessed"},
-		"unknown class":     {AttemptID: "attempt", ChosenAccountID: "chosen", Reason: codemode.DecisionChosen, Skipped: []codemode.SkippedAccount{{AccountID: "other", Class: "prompt_body"}}},
-		"chosen also skip":  {AttemptID: "attempt", ChosenAccountID: "chosen", Reason: codemode.DecisionPin, Skipped: []codemode.SkippedAccount{{AccountID: "chosen", Class: codemode.SkipTree}}},
-		"duplicate skip":    {AttemptID: "attempt", ChosenAccountID: "chosen", Reason: codemode.DecisionChosen, Skipped: []codemode.SkippedAccount{{AccountID: "other", Class: codemode.SkipTree}, {AccountID: "other", Class: codemode.SkipWeight}}},
-		"evidence unpinned": {AttemptID: "attempt", ChosenAccountID: "chosen", Reason: codemode.DecisionChosen, Evidence: new(codemode.AllowanceEvidencePassive)},
-		"bad ordinal":       {AttemptID: "attempt", ChosenAccountID: "chosen", Reason: codemode.DecisionChosen, RecoveryOrdinal: new(0)},
+		"unknown reason":              {AttemptID: new("attempt"), ChosenAccountID: "chosen", Reason: "guessed"},
+		"unknown class":               {AttemptID: new("attempt"), ChosenAccountID: "chosen", Reason: codemode.DecisionChosen, Skipped: []codemode.SkippedAccount{{AccountID: "other", Class: "prompt_body"}}},
+		"chosen also skip":            {AttemptID: new("attempt"), ChosenAccountID: "chosen", Reason: codemode.DecisionPin, Skipped: []codemode.SkippedAccount{{AccountID: "chosen", Class: codemode.SkipTree}}},
+		"duplicate skip":              {AttemptID: new("attempt"), ChosenAccountID: "chosen", Reason: codemode.DecisionChosen, Skipped: []codemode.SkippedAccount{{AccountID: "other", Class: codemode.SkipTree}, {AccountID: "other", Class: codemode.SkipWeight}}},
+		"evidence unpinned":           {AttemptID: new("attempt"), ChosenAccountID: "chosen", Reason: codemode.DecisionChosen, Evidence: new(codemode.AllowanceEvidencePassive)},
+		"bad ordinal":                 {AttemptID: new("attempt"), ChosenAccountID: "chosen", Reason: codemode.DecisionChosen, RecoveryOrdinal: new(0)},
+		"chosen without attempt":      {ChosenAccountID: "chosen", Reason: codemode.DecisionChosen},
+		"pin without attempt":         {ChosenAccountID: "chosen", Reason: codemode.DecisionPin},
+		"connection with attempt":     {AttemptID: new("attempt"), ChosenAccountID: "chosen", Reason: codemode.DecisionConnection},
+		"envelope uppercase":          {AttemptID: new("attempt"), ChosenAccountID: "chosen", Reason: codemode.DecisionChosen, RecoveryEnvelope: new("Codex_usage_limit_reached")},
+		"envelope free text":          {AttemptID: new("attempt"), ChosenAccountID: "chosen", Reason: codemode.DecisionChosen, RecoveryEnvelope: new("raw error body")},
+		"envelope leading underscore": {AttemptID: new("attempt"), ChosenAccountID: "chosen", Reason: codemode.DecisionChosen, RecoveryEnvelope: new("_usage_limit_reached")},
+		"envelope too long":           {AttemptID: new("attempt"), ChosenAccountID: "chosen", Reason: codemode.DecisionChosen, RecoveryEnvelope: new(strings.Repeat("a", 101))},
 	}
 	for name, decision := range cases {
 		if err := decision.Validate(); err == nil {

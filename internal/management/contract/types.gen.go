@@ -9109,10 +9109,12 @@ type CodeCredits struct {
 	Unlimited  bool                      `json:"unlimited"`
 }
 
-// CodeDecision Content-free account selection record for one admitted attempt. Names the chosen account, why it served, the freshest allowance evidence kind behind it, and the class reason each other candidate was skipped. No prompt, response, header or credential content is retained.
+// CodeDecision Content-free account selection record for one admitted attempt or one WebSocket connection bind. Names the chosen account, why it served, the freshest allowance evidence kind behind it, and the class reason each other candidate was skipped. No prompt, response, header or credential content is retained.
 type CodeDecision struct {
-	ApiKeyId  openapi_types.UUID `json:"api_key_id"`
-	AttemptId openapi_types.UUID `json:"attempt_id"`
+	ApiKeyId openapi_types.UUID `json:"api_key_id"`
+
+	// AttemptId Attempt this decision admitted. Null for connection decisions, which bind a WebSocket connection to the tree account without admitting an attempt.
+	AttemptId nullable.Nullable[openapi_types.UUID] `json:"attempt_id"`
 
 	// Band Allowance band of the chosen account when allowance ordering recorded one. Null until banding is enabled for a route.
 	Band            nullable.Nullable[CodeDecisionBand] `json:"band"`
@@ -9135,7 +9137,9 @@ type CodeDecision struct {
 	RootId           openapi_types.UUID        `json:"root_id"`
 	RouteId          openapi_types.UUID        `json:"route_id"`
 	RouteRevisionId  openapi_types.UUID        `json:"route_revision_id"`
-	Skipped          []struct {
+
+	// Skipped Candidates evaluated alongside the chosen account that did not serve, each with the class reason it lost. Covers the evaluated candidate set only. Accounts excluded earlier by model, path or tree-adapter SQL filters are not listed.
+	Skipped []struct {
 		AccountId openapi_types.UUID `json:"account_id"`
 
 		// Class Why the candidate did not serve: cooldown means a live health cooldown, unavailable means reported allowance exhaustion, tree means an earlier account of the conversation tree served, weight means the weighted score picked another account of the same tier, and band means a lower allowance band under allowance ordering.

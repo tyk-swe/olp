@@ -4,9 +4,12 @@ import (
 	"cmp"
 	"fmt"
 	"math"
+	"regexp"
 	"slices"
 	"time"
 )
+
+var recoveryEnvelopePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_]{0,99}$`)
 
 type DecisionReason string
 
@@ -100,7 +103,7 @@ func FreshestEvidence(allowance *Allowance) (*AllowanceEvidence, *time.Time) {
 
 type Decision struct {
 	ID                 string             `json:"id"`
-	AttemptID          string             `json:"attempt_id"`
+	AttemptID          *string            `json:"attempt_id"`
 	ProjectID          string             `json:"project_id"`
 	RouteID            string             `json:"route_id"`
 	RouteRevisionID    string             `json:"route_revision_id"`
@@ -119,11 +122,18 @@ type Decision struct {
 }
 
 func (d Decision) Validate() error {
-	if d.AttemptID == "" || d.ChosenAccountID == "" {
+	if d.ChosenAccountID == "" {
 		return fmt.Errorf("invalid code decision")
 	}
 	if !slices.Contains([]DecisionReason{DecisionChosen, DecisionPin, DecisionConnection}, d.Reason) {
 		return fmt.Errorf("invalid code decision reason")
+	}
+	if d.Reason == DecisionConnection {
+		if d.AttemptID != nil {
+			return fmt.Errorf("invalid code decision attempt")
+		}
+	} else if d.AttemptID == nil || *d.AttemptID == "" {
+		return fmt.Errorf("invalid code decision attempt")
 	}
 	if d.Band != nil && !slices.Contains([]string{"healthy", "unknown", "low", "exhausted"}, *d.Band) {
 		return fmt.Errorf("invalid code decision band")
@@ -143,7 +153,7 @@ func (d Decision) Validate() error {
 	if d.RecoveryOrdinal != nil && (*d.RecoveryOrdinal < 1 || *d.RecoveryOrdinal > math.MaxInt32) {
 		return fmt.Errorf("invalid code decision recovery ordinal")
 	}
-	if d.RecoveryEnvelope != nil && (*d.RecoveryEnvelope == "" || len(*d.RecoveryEnvelope) > 100) {
+	if d.RecoveryEnvelope != nil && !recoveryEnvelopePattern.MatchString(*d.RecoveryEnvelope) {
 		return fmt.Errorf("invalid code decision recovery envelope")
 	}
 	return nil

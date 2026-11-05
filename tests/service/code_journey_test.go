@@ -86,6 +86,65 @@ func TestCodeAdmissionRecordsChosenAndPinnedDecisions(t *testing.T) {
 	if pinned.Reason != codemode.DecisionPin || pinned.ChosenAccountID != healthy || len(pinned.Skipped) != 0 {
 		t.Fatalf("pinned decision = %+v", pinned)
 	}
+	bound, err := store.BindConnection(t.Context(), route, key, codemode.Identity{Conversation: "connection-conversation"}, "model", []string{provider})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bound.Account.ID != healthy {
+		t.Fatalf("connection bound to %s, want the available account %s", bound.Account.ID, healthy)
+	}
+	connection := codeConnectionDecisions(t, pool, bound.Binding.RootID)
+	if len(connection) != 1 || connection[0].AttemptID != nil || connection[0].Reason != codemode.DecisionConnection ||
+		connection[0].ChosenAccountID != healthy || connection[0].BindingID != bound.Binding.ID || connection[0].RootID != bound.Binding.RootID ||
+		connection[0].Evidence == nil || *connection[0].Evidence != codemode.AllowanceEvidencePassive ||
+		len(connection[0].Skipped) != 1 || connection[0].Skipped[0].AccountID != cooling || connection[0].Skipped[0].Class != codemode.SkipCooldown {
+		t.Fatalf("connection decision = %+v", connection)
+	}
+	rebound, err := store.BindConnection(t.Context(), route, key, codemode.Identity{Conversation: "connection-conversation"}, "model", []string{provider})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rebound.Binding.RootID != bound.Binding.RootID || rebound.Account.ID != healthy {
+		t.Fatalf("reconnected permit = %+v", rebound)
+	}
+	recordedConnections := codeConnectionDecisions(t, pool, bound.Binding.RootID)
+	emptySkipped := 0
+	for _, recorded := range recordedConnections {
+		if recorded.AttemptID != nil || recorded.Reason != codemode.DecisionConnection || recorded.ChosenAccountID != healthy {
+			t.Fatalf("connection decisions = %+v", recordedConnections)
+		}
+		if len(recorded.Skipped) == 0 {
+			emptySkipped++
+		}
+	}
+	if len(recordedConnections) != 2 || emptySkipped != 1 {
+		t.Fatalf("connection decisions = %+v", recordedConnections)
+	}
+}
+
+func codeConnectionDecisions(t *testing.T, pool *pgxpool.Pool, rootID string) []codemode.Decision {
+	t.Helper()
+	rows, err := pool.Query(t.Context(), `SELECT to_jsonb(x) FROM olp.code_decisions x WHERE x.root_id=$1 AND x.reason='connection' AND x.attempt_id IS NULL ORDER BY x.created_at,x.id`, rootID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	decisions := []codemode.Decision{}
+	for rows.Next() {
+		var document []byte
+		if err := rows.Scan(&document); err != nil {
+			t.Fatal(err)
+		}
+		var decision codemode.Decision
+		if err := json.Unmarshal(document, &decision); err != nil {
+			t.Fatal(err)
+		}
+		decisions = append(decisions, decision)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return decisions
 }
 
 func codeDecisionForAttempt(t *testing.T, pool *pgxpool.Pool, attemptID string) codemode.Decision {

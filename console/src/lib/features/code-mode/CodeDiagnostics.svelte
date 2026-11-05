@@ -102,7 +102,11 @@
   }));
   const decisionByAttempt = $derived(
     new Map(
-      (decisions.data ?? []).map((decision) => [decision.attempt_id, decision])
+      (decisions.data ?? []).flatMap((decision) =>
+        decision.attempt_id === null
+          ? []
+          : [[decision.attempt_id, decision] as const]
+      )
     )
   );
   const refusals = createQuery(() => ({
