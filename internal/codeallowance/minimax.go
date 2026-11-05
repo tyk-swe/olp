@@ -34,6 +34,11 @@ func ParseRemains(body []byte, accountModels []string, now time.Time) (codemode.
 	if !valid || !present || remains.Kind() != oif.Array {
 		return codemode.Allowance{}, false
 	}
+	for _, element := range remains.Elements() {
+		if !remainsRowTypesValid(element) {
+			return codemode.Allowance{}, false
+		}
+	}
 	bucket, ok := selectCodingBucket(remains.Elements(), accountModels)
 	if !ok {
 		return codemode.Allowance{}, false
@@ -69,6 +74,46 @@ func remainsBaseOK(root oif.Value) bool {
 	return messageValid && (!messagePresent || message.Kind() == oif.String)
 }
 
+var remainsRequiredIntFields = []string{
+	"start_time", "end_time", "remains_time",
+	"current_interval_total_count", "current_interval_usage_count",
+	"current_weekly_total_count", "current_weekly_usage_count",
+	"weekly_start_time", "weekly_end_time", "weekly_remains_time",
+}
+
+func remainsRowTypesValid(element oif.Value) bool {
+	if element.Kind() != oif.Object {
+		return false
+	}
+	for _, name := range remainsRequiredIntFields {
+		if _, ok := requiredInt64(element, name); !ok {
+			return false
+		}
+	}
+	for _, name := range []string{"current_interval_status", "current_weekly_status", "weekly_boost_permille"} {
+		if _, _, valid := optionalInt64(element, name); !valid {
+			return false
+		}
+	}
+	for _, name := range []string{"current_interval_remaining_percent", "current_weekly_remaining_percent"} {
+		value, present, valid := member(element, name)
+		if !valid {
+			return false
+		}
+		if !present {
+			continue
+		}
+		if value.Kind() != oif.Number {
+			return false
+		}
+		parsed, err := strconv.ParseFloat(value.Raw(), 64)
+		if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
+			return false
+		}
+	}
+	return true
+}
+
 func selectCodingBucket(elements []oif.Value, accountModels []string) (oif.Value, bool) {
 	candidates := []oif.Value{}
 	names := []string{}
@@ -84,7 +129,7 @@ func selectCodingBucket(elements []oif.Value, accountModels []string) (oif.Value
 		if !isText {
 			return oif.Value{}, false
 		}
-		if name == "general" || strings.HasPrefix(name, "MiniMax-M") {
+		if name == "general" || name == "MiniMax-M*" || strings.HasPrefix(name, "MiniMax-M") && slices.Contains(accountModels, name) {
 			candidates = append(candidates, element)
 			names = append(names, name)
 		}
@@ -118,12 +163,7 @@ type remainsWindowInput struct {
 
 func remainsWindows(bucket oif.Value, now time.Time) ([]codemode.AllowanceWindow, bool) {
 	required := map[string]int64{}
-	for _, name := range []string{
-		"start_time", "end_time", "remains_time",
-		"current_interval_total_count", "current_interval_usage_count",
-		"current_weekly_total_count", "current_weekly_usage_count",
-		"weekly_start_time", "weekly_end_time", "weekly_remains_time",
-	} {
+	for _, name := range remainsRequiredIntFields {
 		value, ok := requiredInt64(bucket, name)
 		if !ok || value < 0 {
 			return nil, false
@@ -140,10 +180,6 @@ func remainsWindows(bucket oif.Value, now time.Time) ([]codemode.AllowanceWindow
 	weekly, ok := remainsWindowInputFor(bucket, "weekly", required["weekly_start_time"], required["weekly_end_time"], "current_weekly_remaining_percent", "current_weekly_status")
 	if !ok {
 		return nil, false
-	}
-	if required["current_interval_total_count"] == 0 && required["current_weekly_total_count"] == 0 &&
-		interval.statusFound && interval.status == 3 && weekly.statusFound && weekly.status == 3 {
-		return nil, true
 	}
 	windows := []codemode.AllowanceWindow{}
 	for _, input := range []remainsWindowInput{interval, weekly} {
@@ -174,9 +210,6 @@ func remainsWindowInputFor(bucket oif.Value, name string, start, end int64, perc
 }
 
 func remainsWindow(input remainsWindowInput, now time.Time) (codemode.AllowanceWindow, bool, bool) {
-	if input.statusFound && input.status == 3 {
-		return codemode.AllowanceWindow{}, false, true
-	}
 	remaining, found := func() (float64, bool) {
 		if input.statusFound && input.status == 2 {
 			return 0, true
@@ -203,23 +236,6 @@ func remainsWindow(input remainsWindowInput, now time.Time) (codemode.AllowanceW
 		return codemode.AllowanceWindow{}, false, false
 	}
 	return window, true, true
-}
-
-func requiredInt64(object oif.Value, name string) (int64, bool) {
-	value, present, valid := optionalInt64(object, name)
-	return value, valid && present
-}
-
-func optionalInt64(object oif.Value, name string) (int64, bool, bool) {
-	value, present, valid := member(object, name)
-	if !valid || !present {
-		return 0, present, valid
-	}
-	if value.Kind() != oif.Number {
-		return 0, true, false
-	}
-	parsed, err := strconv.ParseInt(value.Raw(), 10, 64)
-	return parsed, true, err == nil
 }
 
 func optionalPercent(object oif.Value, name string) (float64, bool, bool) {

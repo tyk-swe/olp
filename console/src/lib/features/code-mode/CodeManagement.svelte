@@ -317,7 +317,13 @@
               <dd>{extraUsageLabel(account.extra_usage_enabled)}</dd>
             {/if}
             <dt>Ordering signal</dt>
-            <dd>{orderingSignalLabel(account.allowance_signal, true)}</dd>
+            <dd>
+              {orderingSignalLabel(
+                account.allowance_signal,
+                true,
+                account.adapter
+              )}
+            </dd>
             <dt>Account / principal</dt>
             <dd>{account.id} / {account.principal}</dd>
             <dt>Eligibility</dt>

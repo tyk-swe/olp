@@ -202,13 +202,14 @@ func TestPassFailureOnlyWhenDueCannotBeRead(t *testing.T) {
 	}
 }
 
+// Source: MiniMax-AI/cli@38aba5f endpoints.ts, fetched 2026-11-05.
 func TestPassWritesActiveAllowanceFromMiniMaxRemains(t *testing.T) {
 	for _, tc := range []struct {
 		profile string
 		url     string
 	}{
-		{codeplans.MiniMaxProfile, codeallowance.RemainsURL},
-		{codeplans.MiniMaxCNProfile, codeallowance.RemainsURLCN},
+		{codeplans.MiniMaxProfile, "https://api.minimax.io/v1/token_plan/remains"},
+		{codeplans.MiniMaxCNProfile, "https://api.minimax.cn/v1/token_plan/remains"},
 	} {
 		due := codeallowance.DueAccount{
 			Account: codemode.Account{

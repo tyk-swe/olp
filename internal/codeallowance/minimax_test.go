@@ -195,17 +195,59 @@ func TestParseRemainsRejectsMalformed(t *testing.T) {
 	}
 }
 
-func TestParseRemainsUnselectedBucketFieldsDoNotSinkSelection(t *testing.T) {
-	brokenOther := `{"model_name":"speech-hd","current_interval_total_count":"not-a-count"}`
-	allowance, ok := codeallowance.ParseRemains([]byte(minimaxBody(brokenOther, minimaxBucket("general", ""))), nil, usageNow)
-	if !ok || len(allowance.Windows) != 2 {
-		t.Fatalf("only the selected bucket is validated past model_name, got %+v ok %v", allowance, ok)
+func TestParseRemainsMalformedRowAnywhereWritesNothing(t *testing.T) {
+	brokenType := fmt.Sprintf(`{"model_name":"speech-hd","start_time":%d,"end_time":%d,"remains_time":1,"current_interval_total_count":"not-a-count","current_interval_usage_count":0,"current_weekly_total_count":0,"current_weekly_usage_count":0,"weekly_start_time":%d,"weekly_end_time":%d,"weekly_remains_time":1}`,
+		remainsStart, remainsEnd, remainsStart, remainsWeeklyEnd)
+	if allowance, ok := codeallowance.ParseRemains([]byte(minimaxBody(brokenType, minimaxBucket("general", ""))), nil, usageNow); ok {
+		t.Fatalf("a malformed required field on an unselected row must write nothing, got %+v", allowance)
+	}
+	brokenMissing := `{"model_name":"speech-hd"}`
+	if allowance, ok := codeallowance.ParseRemains([]byte(minimaxBody(brokenMissing, minimaxBucket("general", ""))), nil, usageNow); ok {
+		t.Fatalf("a row missing required numeric fields must write nothing, got %+v", allowance)
+	}
+	brokenPercent := fmt.Sprintf(`{"model_name":"speech-hd","start_time":%d,"end_time":%d,"remains_time":1,"current_interval_total_count":1,"current_interval_usage_count":0,"current_interval_remaining_percent":"80","current_weekly_total_count":0,"current_weekly_usage_count":0,"weekly_start_time":%d,"weekly_end_time":%d,"weekly_remains_time":1}`,
+		remainsStart, remainsEnd, remainsStart, remainsWeeklyEnd)
+	if allowance, ok := codeallowance.ParseRemains([]byte(minimaxBody(brokenPercent, minimaxBucket("general", ""))), nil, usageNow); ok {
+		t.Fatalf("a mistyped percent on an unselected row must write nothing, got %+v", allowance)
 	}
 }
 
-func TestRemainsURLsAreTheApprovedTokenPlanEndpoints(t *testing.T) {
-	if codeallowance.RemainsURL != "https://api.minimax.io/v1/token_plan/remains" ||
-		codeallowance.RemainsURLCN != "https://api.minimax.cn/v1/token_plan/remains" {
-		t.Fatalf("remains URLs = %q %q", codeallowance.RemainsURL, codeallowance.RemainsURLCN)
+func TestParseRemainsStatus3UsesValidServerPercent(t *testing.T) {
+	unlimited := fmt.Sprintf(`{"model_name":"general","start_time":%d,"end_time":%d,"remains_time":1,`+
+		`"current_interval_total_count":0,"current_interval_usage_count":0,"current_interval_remaining_percent":80,"current_interval_status":3,`+
+		`"current_weekly_total_count":0,"current_weekly_usage_count":0,"current_weekly_remaining_percent":60,"current_weekly_status":3,`+
+		`"weekly_start_time":%d,"weekly_end_time":%d,"weekly_remains_time":1}`,
+		remainsStart, remainsEnd, remainsStart, remainsWeeklyEnd)
+	allowance, ok := codeallowance.ParseRemains([]byte(minimaxBody(unlimited)), nil, usageNow)
+	if !ok {
+		t.Fatal("status 3 with a valid server percent must use that percent")
+	}
+	if primary := window(t, allowance, "minimax", "primary"); primary.RemainingPercent != 80 {
+		t.Fatalf("primary = %+v", primary)
+	}
+	if weekly := window(t, allowance, "minimax", "weekly"); weekly.RemainingPercent != 60 {
+		t.Fatalf("weekly = %+v", weekly)
+	}
+}
+
+func TestParseRemainsSelectionNarrowsToEvidence(t *testing.T) {
+	if allowance, ok := codeallowance.ParseRemains([]byte(minimaxBody(minimaxBucket("MiniMax-M9", ""))), nil, usageNow); ok {
+		t.Fatalf("an arbitrary MiniMax-M prefix name must not qualify on prefix alone, got %+v", allowance)
+	}
+	allowance, ok := codeallowance.ParseRemains([]byte(minimaxBody(minimaxBucket("MiniMax-M9", ""))), []string{"MiniMax-M9"}, usageNow)
+	if !ok {
+		t.Fatal("an exact account model starting with MiniMax-M must qualify")
+	}
+	if primary := window(t, allowance, "minimax", "primary"); primary.RemainingPercent != 80 {
+		t.Fatalf("primary = %+v", primary)
+	}
+	if allowance, ok := codeallowance.ParseRemains([]byte(minimaxBody(minimaxBucket("speech-hd", ""))), []string{"speech-hd"}, usageNow); ok {
+		t.Fatalf("an exact account model that is not MiniMax-M must not qualify, got %+v", allowance)
+	}
+	if _, ok := codeallowance.ParseRemains([]byte(minimaxBody(minimaxBucket("MiniMax-M*", ""))), nil, usageNow); !ok {
+		t.Fatal("the literal MiniMax-M* bucket must qualify")
+	}
+	if _, ok := codeallowance.ParseRemains([]byte(minimaxBody(minimaxBucket("general", ""))), nil, usageNow); !ok {
+		t.Fatal("the general bucket must qualify")
 	}
 }

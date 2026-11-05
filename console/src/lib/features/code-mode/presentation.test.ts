@@ -451,6 +451,12 @@ describe('code ordering signals', () => {
     expect(orderingSignalLabel('proven', true)).toBe(
       'Allowance bands from passive and active windows, fixture-proven only'
     );
+    expect(orderingSignalLabel('proven', true, 'codex')).toBe(
+      'Allowance bands from passive and active windows, fixture-proven only'
+    );
+    expect(orderingSignalLabel('proven', true, 'minimax_plan')).toBe(
+      'Allowance bands from active remains, fixture-proven only'
+    );
     for (const signal of ['none', 'remains-unqualified']) {
       expect(orderingSignalLabel(signal, true)).toBe(
         'Weights plus cooldown, no qualified allowance signal'
