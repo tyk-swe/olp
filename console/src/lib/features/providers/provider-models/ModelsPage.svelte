@@ -152,7 +152,7 @@
 <div class="page-header">
   <div>
     <p class="eyebrow">Gateway</p>
-    <h1 class="page-title">Model inventory</h1>
+    <h1 class="page-title">Models</h1>
     <p class="page-description">
       Route eligibility comes from certified provider, model, operation,
       surface, and mode tuples.
@@ -349,7 +349,7 @@
       pagination,
       models.isPlaceholderData ? null : models.data?.nextCursor
     )}
-    label="Model inventory pages"
+    label="Model pages"
   />{/if}
 
 <aside class="policy-note" aria-label="Capability policy">

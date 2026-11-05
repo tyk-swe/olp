@@ -37,12 +37,12 @@
   let tab = $state<Tab>('members');
 </script>
 
-<svelte:head><title>Access · OpenLLMProxy</title></svelte:head>
+<svelte:head><title>Members · OpenLLMProxy</title></svelte:head>
 
 <div class="page-header">
   <div>
-    <p class="eyebrow">Identity</p>
-    <h1 class="page-title">Access</h1>
+    <p class="eyebrow">Access</p>
+    <h1 class="page-title">Members</h1>
     <p class="page-description">
       Manage installation members, fixed roles, invitations, sessions, and the
       linked identity providers.

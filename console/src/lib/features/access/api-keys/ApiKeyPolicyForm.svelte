@@ -197,7 +197,7 @@
 
 <div class="page-header">
   <div>
-    <p class="eyebrow">Access · API Keys</p>
+    <p class="eyebrow">Access · API keys</p>
     <h1 class="page-title">
       {editing
         ? canManage

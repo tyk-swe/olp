@@ -142,7 +142,7 @@
   }
 </script>
 
-<svelte:head><title>API Keys · OpenLLMProxy</title></svelte:head>
+<svelte:head><title>API keys · OpenLLMProxy</title></svelte:head>
 
 {#if secret}
   <ApiKeySecretDialog

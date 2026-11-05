@@ -81,7 +81,7 @@
   <div>
     <p class="eyebrow">Operations</p>
     <h1 class="page-title">
-      {requestId ? 'Request timeline' : 'Request Explorer'}
+      {requestId ? 'Request timeline' : 'Requests'}
     </h1>
     <p class="page-description">
       {requestId

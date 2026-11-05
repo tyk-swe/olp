@@ -45,7 +45,7 @@
   }
 
   onMount(() => {
-    const desktop = window.matchMedia('(min-width: 62.001rem)');
+    const desktop = window.matchMedia('(min-width: 74.001rem)');
     const resize = () => {
       if (desktop.matches && mobileNavigation?.open) {
         closeNavigation();
@@ -540,7 +540,7 @@
     display: grid;
   }
 
-  @media (max-width: 62rem) {
+  @media (max-width: 74rem) {
     .topbar {
       padding: 0 1rem;
     }
