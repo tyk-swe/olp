@@ -15,6 +15,8 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+const pollingBucketLimit = 31
+
 // get fetches one page and decodes it into out. Request bodies, response
 // bodies and credentials never reach errors: failures report only the
 // content-free code the import row stores.
@@ -77,16 +79,25 @@ func fetchPolling(ctx context.Context, in *fetchInput, emit func(periodDays) err
 	if err := json.Unmarshal(in.row.Scope, &scope); err != nil {
 		return failFetch("response", err)
 	}
-	today := time.Now().UTC().Truncate(24 * time.Hour)
+	today := in.importer.now().UTC().Truncate(24 * time.Hour)
 	start, end, err := window(in.row.ImportedThrough, today)
 	if err != nil {
 		return err
 	}
-	days, err := report(ctx, client, in.cfg.Endpoint, in.key, scope, start, end)
-	if err != nil {
-		return err
+	for from := start; from.Before(end); from = from.AddDate(0, 0, pollingBucketLimit) {
+		through := from.AddDate(0, 0, pollingBucketLimit)
+		if end.Before(through) {
+			through = end
+		}
+		days, err := report(ctx, client, in.cfg.Endpoint, in.key, scope, from, through)
+		if err != nil {
+			return err
+		}
+		if err := emit(periodDays{days: days}); err != nil {
+			return err
+		}
 	}
-	return emit(periodDays{days: days})
+	return nil
 }
 
 // decimalValue parses an exact decimal from a JSON raw message holding either

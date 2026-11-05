@@ -3,11 +3,14 @@ package billing
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -119,6 +122,110 @@ func TestPollingImportStillRefreshesTheLastWeek(t *testing.T) {
 	}
 	if want := today.AddDate(0, 0, -7); !start.Equal(want) || !end.Equal(today) {
 		t.Fatalf("window is %s to %s, want %s to %s", start, end, want, today)
+	}
+}
+
+func TestPollingBackfillCheckpointsAndResumesBeyondPageBudget(t *testing.T) {
+	today := time.Date(2030, 6, 1, 0, 0, 0, 0, time.UTC)
+	first := today.AddDate(0, 0, -621)
+	for _, source := range []string{SourceOpenAI, SourceAnthropic} {
+		t.Run(source, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				q := r.URL.Query()
+				parseDay := func(unixKey, dateKey string) (time.Time, error) {
+					if source == SourceAnthropic {
+						return time.Parse(time.RFC3339, q.Get(dateKey))
+					}
+					unix, err := strconv.ParseInt(q.Get(unixKey), 10, 64)
+					return time.Unix(unix, 0).UTC(), err
+				}
+				start, startErr := parseDay("start_time", "starting_at")
+				end, endErr := parseDay("end_time", "ending_at")
+				limit, limitErr := strconv.Atoi(q.Get("limit"))
+				if startErr != nil || endErr != nil || limitErr != nil || limit < 1 {
+					t.Error("invalid report window or limit")
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				offset := 0
+				if page := q.Get("page"); page != "" {
+					parsed, err := strconv.Atoi(page)
+					if err != nil {
+						t.Error(err)
+						w.WriteHeader(http.StatusBadRequest)
+						return
+					}
+					offset = parsed
+				}
+				type bucket struct {
+					StartTime  int64      `json:"start_time"`
+					StartingAt string     `json:"starting_at"`
+					Results    []struct{} `json:"results"`
+				}
+				var data []bucket
+				for n := 0; n < limit && start.AddDate(0, 0, offset+n).Before(end); n++ {
+					day := start.AddDate(0, 0, offset+n)
+					data = append(data, bucket{StartTime: day.Unix(), StartingAt: day.Format(time.RFC3339), Results: []struct{}{}})
+				}
+				more := start.AddDate(0, 0, offset+len(data)).Before(end)
+				if err := json.NewEncoder(w).Encode(struct {
+					Data     []bucket `json:"data"`
+					HasMore  bool     `json:"has_more"`
+					NextPage string   `json:"next_page"`
+				}{data, more, strconv.Itoa(offset + len(data))}); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer server.Close()
+			policy := egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+			importer := &Importer{Egress: &policy, Now: func() time.Time { return today }}
+			adapter, ok := lookupSource(source)
+			if !ok {
+				t.Fatal("source missing")
+			}
+			run := func(ctx context.Context, through string, emit func(periodDays) error) error {
+				return adapter.fetch(ctx, &fetchInput{
+					importer: importer,
+					row:      &importRow{ProviderID: "00000000-0000-0000-0000-000000000001", Source: source, Scope: json.RawMessage(`{}`), ImportedThrough: &through},
+					cfg:      &providerConfig{Endpoint: &server.URL},
+					key:      []byte(pollingKey),
+				}, emit)
+			}
+			saved := reportAccumulator{}
+			checkpoint := first.Format(dayFormat)
+			save := func(period periodDays) error {
+				if len(period.days) == 0 {
+					t.Fatal("report emitted no covered days")
+				}
+				maps.Copy(saved, period.days)
+				covered := slices.Sorted(maps.Keys(period.days))
+				checkpoint = covered[len(covered)-1]
+				return nil
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			err := run(ctx, checkpoint, func(period periodDays) error {
+				if err := save(period); err != nil {
+					return err
+				}
+				cancel()
+				return nil
+			})
+			if !errors.Is(err, context.Canceled) || checkpoint <= first.Format(dayFormat) || checkpoint >= today.AddDate(0, 0, -1).Format(dayFormat) {
+				t.Fatalf("interrupted backfill saved through %s with error %v", checkpoint, err)
+			}
+			if err := run(context.Background(), checkpoint, save); err != nil {
+				t.Fatalf("resuming backfill: %v", err)
+			}
+			for day := first; day.Before(today); day = day.AddDate(0, 0, 1) {
+				if _, ok := saved[day.Format(dayFormat)]; !ok {
+					t.Fatalf("backfill skipped %s", day.Format(dayFormat))
+				}
+			}
+			if checkpoint != today.AddDate(0, 0, -1).Format(dayFormat) {
+				t.Fatalf("backfill ended at %s", checkpoint)
+			}
+		})
 	}
 }
 
