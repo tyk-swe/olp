@@ -8808,6 +8808,12 @@ type CodeAccount struct {
 	Adapter   nullable.Nullable[CodeAccountAdapter] `json:"adapter"`
 	Allowance nullable.Nullable[CodeAllowance]      `json:"allowance"`
 
+	// AllowanceReadAt When the worker last completed an active allowance read for this account, whether or not the provider response was usable.
+	AllowanceReadAt nullable.Nullable[time.Time] `json:"allowance_read_at,omitempty"`
+
+	// AllowanceReadRequestedAt When an operator last requested an active allowance read. The worker clears it once that read completes.
+	AllowanceReadRequestedAt nullable.Nullable[time.Time] `json:"allowance_read_requested_at,omitempty"`
+
 	// Cooldowns Live failure class cooldowns for this account. A null model cools the whole credential.
 	Cooldowns    *[]CodeAccountCooldown `json:"cooldowns,omitempty"`
 	CredentialId openapi_types.UUID     `json:"credential_id"`
@@ -17667,6 +17673,11 @@ type CreateCodeAccountParams struct {
 // ReplaceCodeAccountParams defines parameters for ReplaceCodeAccount.
 type ReplaceCodeAccountParams struct {
 	IfMatch string `json:"If-Match"`
+}
+
+// RequestCodeAccountAllowanceReadParams defines parameters for RequestCodeAccountAllowanceRead.
+type RequestCodeAccountAllowanceReadParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
 // ListCodeAttemptsParams defines parameters for ListCodeAttempts.

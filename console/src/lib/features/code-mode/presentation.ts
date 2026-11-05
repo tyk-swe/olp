@@ -127,7 +127,13 @@ export function orderingSignalLabel(
   if (!allowanceOrdering) return 'Weights plus cooldown';
   if (adapter !== 'codex')
     return 'Weights plus cooldown, no proven allowance signal';
-  return 'Allowance bands from proven passive windows';
+  return 'Allowance bands from proven passive and active windows';
+}
+
+export function canRequestAllowanceRead(
+  adapter: string | null | undefined
+): boolean {
+  return adapter === 'codex';
 }
 
 export function nativeModels(value: string): string[] {

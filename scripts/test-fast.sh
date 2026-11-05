@@ -34,7 +34,8 @@ go test -mod=readonly -vet=off -count=1 -timeout=60s \
   ./internal/codemode \
   ./internal/codeadapter \
   ./internal/codewire \
-  ./internal/codexwire
+  ./internal/codexwire \
+  ./internal/codeallowance
 pnpm --dir console test --project unit --project svelte
 node --test scripts/check-docs.test.mjs scripts/check-release-version.test.mjs
 elapsed=$(( $(date +%s) - start ))

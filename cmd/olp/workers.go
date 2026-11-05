@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/billing"
 	"github.com/tyk-swe/olp/internal/catalog"
+	"github.com/tyk-swe/olp/internal/codeallowance"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/egress"
@@ -19,6 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/plugins"
+	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedworker"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -68,6 +70,12 @@ func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Clie
 	// Grant refresh needs only PostgreSQL and the providers' network paths.
 	refresher := &grants.Refresher{Pool: pool, Keys: keys, Installation: installation, Plugins: pluginHost, Egress: policy, Log: log}
 	wg.Go(func() { refresher.Run(ctx) })
+	allowanceReader := &codeallowance.Reader{
+		Pool: pool, Store: &resources.CodeStore{Pool: pool},
+		Authorizer: &providers.CodeAuthorizer{Pool: pool, Credentials: mediaService.Credentials, Plugins: pluginHost},
+		Client:     policy.Client(30 * time.Second), Log: log,
+	}
+	wg.Go(func() { allowanceReader.Run(ctx) })
 	if exporter != nil {
 		wg.Go(func() { exporter.Run(ctx) })
 	}

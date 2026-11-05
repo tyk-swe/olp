@@ -6,6 +6,7 @@ import {
   allowanceChargeSummary,
   allowanceEvidenceLabel,
   allowanceWindowSummary,
+  canRequestAllowanceRead,
   clientLabel,
   cooldownClassLabel,
   cooldownSummary,
@@ -385,9 +386,9 @@ describe('code account decisions', () => {
 });
 
 describe('code ordering signals', () => {
-  it('names only codex as a proven passive allowance signal', () => {
+  it('names only codex as a proven passive and active allowance signal', () => {
     expect(orderingSignalLabel('codex', true)).toBe(
-      'Allowance bands from proven passive windows'
+      'Allowance bands from proven passive and active windows'
     );
     for (const adapter of [
       'zai_coding',
@@ -405,6 +406,13 @@ describe('code ordering signals', () => {
     expect(orderingSignalLabel(null, true)).toBe(
       'Weights plus cooldown, no proven allowance signal'
     );
+  });
+
+  it('offers the active allowance read only for codex accounts', () => {
+    expect(canRequestAllowanceRead('codex')).toBe(true);
+    expect(canRequestAllowanceRead('zai_coding')).toBe(false);
+    expect(canRequestAllowanceRead(null)).toBe(false);
+    expect(canRequestAllowanceRead(undefined)).toBe(false);
   });
 
   it('keeps every adapter on weights plus cooldown while ordering is off', () => {

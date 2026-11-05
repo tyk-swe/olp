@@ -16,6 +16,7 @@ func (s *Server) registerCodeMode(mux *http.ServeMux) {
 	s.Access.Route(mux, "GET /api/v1/code/accounts", s.codeAccounts)
 	s.Access.Route(mux, "POST /api/v1/code/accounts", s.writeCodeAccount)
 	s.Access.Route(mux, "PUT /api/v1/code/accounts/{id}", s.writeCodeAccount)
+	s.Access.Route(mux, "POST /api/v1/code/accounts/{id}/allowance-reads", s.requestCodeAllowanceRead)
 }
 
 var codeAccountJSON = `SELECT jsonb_build_object('id',x.id,'project_id',x.project_id,'provider_id',x.provider_id,'credential_id',x.credential_id,'principal',x.principal,'name',x.name,'enabled',x.enabled,'models',x.models,'etag',x.etag,'health',x.health,'health_observed_at',x.health_observed_at,'unavailable_until',x.unavailable_until,
@@ -26,12 +27,61 @@ var codeAccountJSON = `SELECT jsonb_build_object('id',x.id,'project_id',x.projec
 		AND c.provider_id=x.provider_id AND c.principal=x.principal AND c.profile_id='` + codeplans.ZAIProfile + `'
 		AND c.revoked_at IS NULL AND g.lapsed_at IS NULL AND g.expires_at IS NULL AND g.refresh_token_id IS NULL
 		AND p.configuration->>'kind'='plugin' AND p.configuration->>'auth_mode'='grant' AND p.configuration->>'profile_id'=c.profile_id,false),
-	'allowance',x.allowance,'eligible',coalesce(x.enabled AND p.state<>'disabled' AND olp.code_account_available(x) AND c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now()),false),
+	'allowance',x.allowance,'allowance_read_requested_at',x.allowance_read_requested_at,'allowance_read_at',x.allowance_read_at,'eligible',coalesce(x.enabled AND p.state<>'disabled' AND olp.code_account_available(x) AND c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now()),false),
 	'grant_state',CASE WHEN c.revoked_at IS NOT NULL THEN 'revoked' WHEN g.lapsed_at IS NOT NULL THEN 'lapsed' WHEN g.expires_at<=now() THEN 'expired' ELSE 'current' END)
 	FROM olp.code_accounts x JOIN olp.providers p ON p.id=x.provider_id JOIN olp.provider_credentials c ON c.id=x.credential_id JOIN olp.provider_grants g ON g.credential_id=c.id`
 
 func (s *Server) codeAccounts(r *http.Request, p access.Principal) (access.Reply, error) {
 	return s.Access.CodeList(r, p, codeAccountJSON)
+}
+
+func (s *Server) requestCodeAllowanceRead(r *http.Request, _ access.Principal) (access.Reply, error) {
+	id, err := access.IDParam(r, "id")
+	if err != nil {
+		return access.Reply{}, err
+	}
+	tx, err := s.Access.Begin(r)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	defer tx.Rollback(r.Context())
+	p, err := s.Access.Reauthorize(r, tx)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	var project string
+	var adapter *string
+	if err = tx.QueryRow(r.Context(), `SELECT a.project_id::text,`+codeadapter.SQL("p.configuration")+` FROM olp.code_accounts a JOIN olp.providers p ON p.id=a.provider_id WHERE a.id=$1`, id).Scan(&project, &adapter); err != nil {
+		return access.Reply{}, err
+	}
+	if err = p.Project(&project, access.Change); err != nil {
+		return access.Reply{}, err
+	}
+	claim, replayed, err := s.Access.Replay(r, tx, p, id)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if replayed != nil {
+		return access.Commit(r, tx, *replayed)
+	}
+	if adapter == nil || *adapter != string(codemode.AdapterCodex) {
+		return access.Reply{}, access.Invalid("adapter", "Only Codex accounts support an active allowance read.")
+	}
+	if _, err = tx.Exec(r.Context(), `UPDATE olp.code_accounts SET allowance_read_requested_at=now() WHERE id=$1`, id); err != nil {
+		return access.Reply{}, err
+	}
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "code_account.allowance_read", "code_account", id, "success"); err != nil {
+		return access.Reply{}, err
+	}
+	var body json.RawMessage
+	if err = tx.QueryRow(r.Context(), codeAccountJSON+` WHERE x.id=$1`, id).Scan(&body); err != nil {
+		return access.Reply{}, err
+	}
+	out := access.OK(body)
+	if err = s.Access.CompleteReplay(r, tx, claim, out); err != nil {
+		return access.Reply{}, err
+	}
+	return access.Commit(r, tx, out)
 }
 
 type CodeAccountInput struct {

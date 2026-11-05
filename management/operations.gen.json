@@ -38116,6 +38116,65 @@
     }
   },
   {
+    "name": "request_code_account_allowance_read",
+    "group": "code-mode",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/code/accounts/{id}/allowance-reads",
+    "description": "request code account allowance read",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id"
+          ]
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "idempotency_key"
+      ]
+    }
+  },
+  {
     "name": "resolve_mcp_tool_call",
     "group": "mcp-servers",
     "method": "POST",

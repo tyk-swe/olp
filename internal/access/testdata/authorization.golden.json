@@ -274,6 +274,7 @@
     "POST /api/v1/budget-increases": "YYYYYY--YYY-",
     "POST /api/v1/cache/purge": "YYYY----YYYY",
     "POST /api/v1/code/accounts": "YYYY----YYYY",
+    "POST /api/v1/code/accounts/{id}/allowance-reads": "YYYY----YYYY",
     "POST /api/v1/code/bindings/{id}/retire": "YYYY----YYYY",
     "POST /api/v1/code/budgets": "YYYY----YYYY",
     "POST /api/v1/code/pools": "YYYY----YYYY",

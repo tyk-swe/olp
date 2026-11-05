@@ -556,9 +556,9 @@
     model ranks accounts known healthy above unknown above known low from fresh
     proven observations, where low means at most ten percent remaining on the
     tightest reported window and stale evidence counts as unknown. Only proven
-    signals order, and Codex passive windows are the proven signal today, so
-    other subscriptions stay on weights plus cooldown. The weighted score picks
-    inside the best band. Established pins never move.
+    signals order, and Codex passive and active windows are the proven signal
+    today, so other subscriptions stay on weights plus cooldown. The weighted
+    score picks inside the best band. Established pins never move.
   </p>
   <label class="choice"
     ><input

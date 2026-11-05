@@ -298,6 +298,22 @@ export async function listCodeRevisions(
   );
 }
 
+export async function requestCodeAccountAllowanceRead(
+  account: Pick<CodeAccount, 'id'>,
+  requestId: string
+) {
+  if (!requestId)
+    throw new Error('An allowance read requires a stable request ID.');
+  return unwrap(
+    await apiClient.POST('/api/v1/code/accounts/{id}/allowance-reads', {
+      params: {
+        path: { id: account.id },
+        header: { 'Idempotency-Key': requestId }
+      }
+    })
+  );
+}
+
 export async function retireCodeBinding(id: string, requestId: string) {
   ensureOk(
     await apiClient.POST('/api/v1/code/bindings/{id}/retire', {
