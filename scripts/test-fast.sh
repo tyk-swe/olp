@@ -30,7 +30,9 @@ go test -mod=readonly -vet=off -count=1 -timeout=60s \
   ./internal/mcp/upstream \
   ./internal/mcp/registration \
   ./internal/grants/personal \
-  ./internal/gateway
+  ./internal/gateway \
+  ./internal/codemode \
+  ./internal/codexwire
 pnpm --dir console test --project unit --project svelte
 node --test scripts/check-docs.test.mjs scripts/check-release-version.test.mjs
 elapsed=$(( $(date +%s) - start ))

@@ -985,18 +985,69 @@ func (e CodeAccountResearchServices) Valid() bool {
 	}
 }
 
+// Defines values for CodeAllowanceWindowEvidence.
+const (
+	CodeAllowanceWindowEvidenceActive  CodeAllowanceWindowEvidence = "active"
+	CodeAllowanceWindowEvidencePassive CodeAllowanceWindowEvidence = "passive"
+)
+
+// Valid indicates whether the value is a known member of the CodeAllowanceWindowEvidence enum.
+func (e CodeAllowanceWindowEvidence) Valid() bool {
+	switch e {
+	case CodeAllowanceWindowEvidenceActive:
+		return true
+	case CodeAllowanceWindowEvidencePassive:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeAllowanceWindowUnit.
+const (
+	Cents   CodeAllowanceWindowUnit = "cents"
+	Count   CodeAllowanceWindowUnit = "count"
+	Credits CodeAllowanceWindowUnit = "credits"
+	Percent CodeAllowanceWindowUnit = "percent"
+)
+
+// Valid indicates whether the value is a known member of the CodeAllowanceWindowUnit enum.
+func (e CodeAllowanceWindowUnit) Valid() bool {
+	switch e {
+	case Cents:
+		return true
+	case Count:
+		return true
+	case Credits:
+		return true
+	case Percent:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CodeAllowanceWindowWindow.
 const (
+	FiveHour  CodeAllowanceWindowWindow = "five_hour"
+	Monthly   CodeAllowanceWindowWindow = "monthly"
 	Primary   CodeAllowanceWindowWindow = "primary"
 	Secondary CodeAllowanceWindowWindow = "secondary"
+	Weekly    CodeAllowanceWindowWindow = "weekly"
 )
 
 // Valid indicates whether the value is a known member of the CodeAllowanceWindowWindow enum.
 func (e CodeAllowanceWindowWindow) Valid() bool {
 	switch e {
+	case FiveHour:
+		return true
+	case Monthly:
+		return true
 	case Primary:
 		return true
 	case Secondary:
+		return true
+	case Weekly:
 		return true
 	default:
 		return false
@@ -8711,14 +8762,31 @@ type CodeAllowance struct {
 
 // CodeAllowanceWindow defines model for CodeAllowanceWindow.
 type CodeAllowanceWindow struct {
-	LimitId          string                       `json:"limit_id"`
-	ObservedAt       time.Time                    `json:"observed_at"`
-	RemainingPercent float32                      `json:"remaining_percent"`
-	ResetsAt         nullable.Nullable[time.Time] `json:"resets_at"`
-	UsedPercent      float32                      `json:"used_percent"`
-	Window           CodeAllowanceWindowWindow    `json:"window"`
-	WindowMinutes    nullable.Nullable[int64]     `json:"window_minutes"`
+	// Evidence How the observation was learned: passive from a forwarded response, or active from a provider usage read.
+	Evidence         CodeAllowanceWindowEvidence `json:"evidence"`
+	LimitId          string                      `json:"limit_id"`
+	ObservedAt       time.Time                   `json:"observed_at"`
+	RemainingPercent float32                     `json:"remaining_percent"`
+
+	// RemainingValue Remaining amount in the vendor unit for non-percent windows. Null when the provider did not report it.
+	RemainingValue nullable.Nullable[float32]   `json:"remaining_value"`
+	ResetsAt       nullable.Nullable[time.Time] `json:"resets_at"`
+
+	// Unit Vendor unit of the reported values. Percent windows report used and remaining percentages; other units report used and remaining values in that unit.
+	Unit        CodeAllowanceWindowUnit `json:"unit"`
+	UsedPercent float32                 `json:"used_percent"`
+
+	// UsedValue Used amount in the vendor unit for non-percent windows. Null when the provider did not report it.
+	UsedValue     nullable.Nullable[float32] `json:"used_value"`
+	Window        CodeAllowanceWindowWindow  `json:"window"`
+	WindowMinutes nullable.Nullable[int64]   `json:"window_minutes"`
 }
+
+// CodeAllowanceWindowEvidence How the observation was learned: passive from a forwarded response, or active from a provider usage read.
+type CodeAllowanceWindowEvidence string
+
+// CodeAllowanceWindowUnit Vendor unit of the reported values. Percent windows report used and remaining percentages; other units report used and remaining values in that unit.
+type CodeAllowanceWindowUnit string
 
 // CodeAllowanceWindowWindow defines model for CodeAllowanceWindow.Window.
 type CodeAllowanceWindowWindow string

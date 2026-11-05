@@ -3,6 +3,8 @@ import type { CodeAttempt } from '$lib/management/code-mode';
 import { ApiProblem } from '$lib/management/http';
 import {
   adapterLabel,
+  allowanceEvidenceLabel,
+  allowanceWindowSummary,
   clientLabel,
   mutationError,
   nativeModels,
@@ -281,5 +283,61 @@ describe('code diagnostics', () => {
 
   it.each([null, undefined])('explains missing failure detail %s', (error) => {
     expect(mutationError(error)).toContain('control API');
+  });
+});
+
+describe('allowance window presentation', () => {
+  const percentWindow = {
+    limit_id: 'codex',
+    window: 'primary' as const,
+    unit: 'percent' as const,
+    evidence: 'passive' as const,
+    used_percent: 25,
+    remaining_percent: 75,
+    used_value: null,
+    remaining_value: null,
+    window_minutes: 300,
+    resets_at: '2026-11-05T15:00:00Z',
+    observed_at: '2026-11-05T10:00:00Z'
+  };
+
+  it('shows percent windows as percentages', () => {
+    expect(allowanceWindowSummary(percentWindow)).toBe(
+      '25% used · 75% remaining'
+    );
+  });
+
+  it('shows non-percent windows in the vendor unit', () => {
+    expect(
+      allowanceWindowSummary({
+        ...percentWindow,
+        window: 'monthly',
+        unit: 'cents',
+        evidence: 'active',
+        used_percent: 0,
+        remaining_percent: 0,
+        used_value: 120,
+        remaining_value: 880
+      })
+    ).toBe('120 cents used · 880 cents remaining');
+  });
+
+  it('shows unknown rather than zero for unreported values', () => {
+    expect(
+      allowanceWindowSummary({
+        ...percentWindow,
+        window: 'weekly',
+        unit: 'count',
+        used_percent: 0,
+        remaining_percent: 0,
+        used_value: null,
+        remaining_value: null
+      })
+    ).toBe('Unknown used · Unknown remaining');
+  });
+
+  it('labels the evidence kind', () => {
+    expect(allowanceEvidenceLabel('passive')).toBe('Passive observation');
+    expect(allowanceEvidenceLabel('active')).toBe('Active read');
   });
 });

@@ -133,7 +133,7 @@ func allowanceWindow(id, kind, usedText, minutesText, resetText string, now time
 	if err != nil || math.IsNaN(used) || math.IsInf(used, 0) || used < 0 || used > 1<<53-1 {
 		return nil
 	}
-	w := &codemode.AllowanceWindow{LimitID: id, Window: kind, UsedPercent: used, RemainingPercent: max(0, 100-used), ObservedAt: now}
+	w := &codemode.AllowanceWindow{LimitID: id, Window: kind, Unit: codemode.AllowanceUnitPercent, Evidence: codemode.AllowanceEvidencePassive, UsedPercent: used, RemainingPercent: max(0, 100-used), ObservedAt: now}
 	if minutes, err := strconv.ParseInt(minutesText, 10, 64); err == nil && minutes >= 0 && minutes <= 1<<53-1 {
 		w.WindowMinutes = &minutes
 	}
