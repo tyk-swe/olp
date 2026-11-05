@@ -43,9 +43,10 @@ Everything else was subtracted for speed, including the service and process
 integration suites, browser journeys, client and code-CLI qualification,
 SDK smoke suites, benchmark scenarios and harness, live-provider checks,
 component tests, race and ratchet targets, and the tests of that machinery.
-Apart from what the service suite restores, those areas have no automated
-behavioral signal. In particular, nothing exercises backup and restore, browser
-rendering, or real client and provider compatibility. The deleted suites remain
+Apart from what the service suite and the qualification lanes restore, those
+areas have no automated behavioral signal. In particular, nothing exercises
+backup and restore, browser rendering, or real client and provider
+compatibility. The deleted suites remain
 available in git history before commit `99234cb0`. Release image qualification
 still runs the image mode and service smokes and the vulnerability scan through
 `scripts/qualify-image.sh`.
@@ -69,6 +70,24 @@ still fits with headroom, or when it displaces a weaker test, and the change
 states the timed result. Add a service test only for behavior that needs a real
 database or Valkey, and keep everything else in the net.
 
+## Qualification lanes
+
+`make qualify-code` is a third test target. It runs `tests/qualification`
+behind the `qualification` build tag through `scripts/qualification.sh`, in
+disposable Docker containers, as a release gate rather than pre-merge
+validation. It sits outside the fast and service allowlists as the one stated
+exception to the defect rule below, and it carries no wall-time budget. The
+release workflow runs it before a release can be promoted. What the lanes
+establish is recorded in
+[qualification](../docs/develop/qualification.md#code-mode-qualification).
+
+The lanes are also the one stated exception to the rule that a test fails only
+when project code changes. Each lane records the version of an installed
+third-party client binary as an environment fact, and a lane whose client
+binary is missing reports `no_signal` and fails the run. It never reports a
+pass. The clients are not executed, so no lane result is evidence about a
+client.
+
 ## Test rules
 
 A test asserts behavior, never structure or implementation. It must fail
@@ -91,9 +110,10 @@ Admission to the net is budgeted. A new test or package enters
 `scripts/test-fast.sh` only when the whole net still fits the 60 second
 budget with headroom, or when it displaces a weaker test already in the
 net. State the timed result in the change that admits it. A test file that
-exists outside the allowlist is a defect, because nothing runs it. A
-shallow test that cannot fail gets rewritten as a behavior test or
-deleted. No signal beats false signal.
+exists outside the allowlist is a defect, because nothing runs it. The
+qualification lanes are the stated exception, because `make qualify-code` and
+the release workflow run them. A shallow test that cannot fail gets rewritten
+as a behavior test or deleted. No signal beats false signal.
 
 ## Focused runs
 
@@ -103,8 +123,9 @@ static validation. Helm, dependency and release checks run separately in CI.
 Run one allowlisted package or file directly while iterating, for example
 `go test -count=1 ./internal/gateway` or
 `pnpm --dir console test --project unit src/lib/features/usage/priceEntry.test.ts`.
-Focused `.only` tests must never land. `make test-fast` and `make test-service`
-are the only test targets, and each always runs its whole suite.
+Focused `.only` tests must never land. `make test-fast`, `make test-service`,
+and `make qualify-code` are the only test targets, and each always runs its
+whole suite.
 
 Authorization changes surface as diffs to
 `internal/access/testdata/authorization.golden.json`, which records the

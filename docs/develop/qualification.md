@@ -52,31 +52,45 @@ allowlists in [testing](../../tests/README.md). Restoring them changed
 neither allowlist, so the pre-merge budgets carry no timed result for
 this suite.
 
-Each lane publishes a code route onto a scripted upstream and drives one
-client journey end to end over HTTP. Codex uses `responses`, Claude Code
-uses `v1/messages`, and OpenCode uses `v1/chat/completions`. The driver
-is a protocol fixture that speaks each client path against the real
-binary. Subscription adapters pin their vendor hosts in code, so a
-scripted upstream cannot stand in for them, and the fixture routes
-therefore serve their models through published metered targets. The
-lanes qualify the code route journeys on current behavior. They do not
-qualify subscription accounts, and fixture evidence must never be
-presented as live acceptance of a client, an adapter, or a vendor
-service.
+Each lane seeds one subscription code account, publishes a code route
+onto it, and drives one client journey end to end over HTTP against the
+real binary. Codex uses `responses` through the `codex` adapter, Claude
+Code uses `v1/messages` through the `zai_coding` coding-plan adapter,
+and OpenCode uses `v1/chat/completions` through `opencode_go`. The
+driver is a protocol fixture that speaks each client path. The account,
+its credential and grant, and its plugin provider are seeded directly in
+the database, because grant enrollment needs a real vendor account. The
+frozen connection keeps the adapter's own vendor address, as production
+requires. Its network options route through a fixture CONNECT proxy
+that terminates TLS for the vendor hostnames under a test CA and serves
+the scripted vendor, which pins the upstream paths and credential
+headers each adapter must produce. A regression in an adapter's
+endpoint, credential placement, or profile therefore fails its lane.
+The run needs outbound DNS for the vendor hostnames, because egress
+resolves the destination before it tunnels through the proxy. Fixture
+evidence must never be presented as live acceptance of a client, an
+adapter, or a vendor service.
 
 Every lane writes one run record as a JSON line, to
-`OLP_QUALIFY_REPORT` when set and to stdout otherwise. A record carries
-client, client version, platform, adapter, model, protocol, transport,
-result, and evidence, where evidence is always `fixture` in this suite.
-The client version comes from the installed client binary. A lane whose
-client binary is unavailable reports `no_signal` and fails the run. It
-never reports a pass.
+`OLP_QUALIFY_REPORT` when set and to stdout otherwise, and
+`scripts/qualification.sh` prints the report before it cleans up, pass
+or fail. A record carries client, client version, platform, adapter,
+model, protocol, transport, result, and evidence, where evidence is
+always `fixture` in this suite. The adapter is the domain adapter the
+lane exercises. The record also carries `driver` as
+`protocol-fixture` and `client_executed` as `false`. The client version
+comes from the installed client binary and is an environment fact, not
+a qualification of that client. A lane whose client binary is
+unavailable reports `no_signal` and fails the run, and a lane whose
+setup fails also reports `no_signal`. A lane never reports a pass it
+did not earn.
 
-Fleet process suites and coding-plan subscription adapter journeys
-still do not run. Generated client configuration and protocol
-translation keep partial signal through the allowlisted unit tests.
-Behavior against real coding clients and subscription services has no
-automated coverage.
+The release workflow installs the latest Codex, Claude Code, and
+OpenCode clients from npm and runs `make qualify-code` as a gate on
+promotion. Fleet process suites still do not run. Generated client
+configuration and protocol translation keep partial signal through the
+allowlisted unit tests. Behavior against real coding clients and
+subscription services has no automated coverage.
 
 ### Latest official clients
 

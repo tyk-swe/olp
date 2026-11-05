@@ -3,51 +3,71 @@
 package qualification_test
 
 import (
+	"bufio"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
+	"math/big"
+	"net"
 	"net/http"
-	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 )
 
 const (
-	vendorSecret       = "vendor-secret"
 	vendorModel        = "fixture-model"
 	vendorAnswer       = "hello from the fixture vendor"
 	vendorInputTokens  = 4
 	vendorOutputTokens = 6
+	codexAccountID     = "acct-qualify"
+	codexUserID        = "user-qualify"
+	zaiKey             = "qualify-zai-coding-plan-key-1"
+	openCodeGoKey      = "qualify-opencode-go-key-1"
 )
 
-func newVendor(t *testing.T) *httptest.Server {
-	t.Helper()
+type vendorRequest struct {
+	Model  string `json:"model"`
+	Stream bool   `json:"stream"`
+}
+
+func refuseVendor(w http.ResponseWriter, status int, body string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = io.WriteString(w, body)
+}
+
+func decodeVendor(w http.ResponseWriter, r *http.Request, errBody string) (vendorRequest, bool) {
+	var request vendorRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Model != vendorModel {
+		refuseVendor(w, http.StatusNotFound, errBody)
+		return vendorRequest{}, false
+	}
+	return request, true
+}
+
+func bearer(r *http.Request) string {
+	return r.Header.Get("Authorization")
+}
+
+func newVendorMux(codexToken string) *http.ServeMux {
 	mux := http.NewServeMux()
-	authorized := func(r *http.Request) bool {
-		return r.Header.Get("Authorization") == "Bearer "+vendorSecret || r.Header.Get("X-Api-Key") == vendorSecret
-	}
-	refuse := func(w http.ResponseWriter) {
-		http.Error(w, `{"error":{"message":"bad key","type":"invalid_request_error","code":"invalid_api_key"}}`, http.StatusUnauthorized)
-	}
-	mux.HandleFunc("GET /v1/models", func(w http.ResponseWriter, r *http.Request) {
-		if !authorized(r) {
-			refuse(w)
+	openAIError := `{"error":{"message":"unknown model","type":"invalid_request_error","code":"model_not_found"}}`
+	badKey := `{"error":{"message":"bad key","type":"invalid_request_error","code":"invalid_api_key"}}`
+	mux.HandleFunc("POST /zen/go/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+		if bearer(r) != "Bearer "+openCodeGoKey {
+			refuseVendor(w, http.StatusUnauthorized, badKey)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"object":"list","data":[{"id":"`+vendorModel+`","object":"model","type":"model","created_at":"2024-01-01T00:00:00Z","display_name":"Fixture"}]}`)
-	})
-	mux.HandleFunc("POST /v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
-		if !authorized(r) {
-			refuse(w)
-			return
-		}
-		var request struct {
-			Model  string `json:"model"`
-			Stream bool   `json:"stream"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Model != vendorModel {
-			http.Error(w, `{"error":{"message":"unknown model","type":"invalid_request_error","code":"model_not_found"}}`, http.StatusNotFound)
+		request, ok := decodeVendor(w, r, openAIError)
+		if !ok {
 			return
 		}
 		usage := fmt.Sprintf(`{"prompt_tokens":%d,"completion_tokens":%d,"total_tokens":%d}`, vendorInputTokens, vendorOutputTokens, vendorInputTokens+vendorOutputTokens)
@@ -61,17 +81,13 @@ func newVendor(t *testing.T) *httptest.Server {
 		_, _ = fmt.Fprintf(w, "data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":%q,\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":%s}\n\n", vendorModel, usage)
 		_, _ = io.WriteString(w, "data: [DONE]\n\n")
 	})
-	mux.HandleFunc("POST /v1/responses", func(w http.ResponseWriter, r *http.Request) {
-		if !authorized(r) {
-			refuse(w)
+	mux.HandleFunc("POST /backend-api/codex/responses", func(w http.ResponseWriter, r *http.Request) {
+		if bearer(r) != "Bearer "+codexToken || r.Header.Get("Chatgpt-Account-Id") != codexAccountID {
+			refuseVendor(w, http.StatusUnauthorized, badKey)
 			return
 		}
-		var request struct {
-			Model  string `json:"model"`
-			Stream bool   `json:"stream"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Model != vendorModel {
-			http.Error(w, `{"error":{"message":"unknown model","type":"invalid_request_error","code":"model_not_found"}}`, http.StatusNotFound)
+		request, ok := decodeVendor(w, r, openAIError)
+		if !ok {
 			return
 		}
 		response := map[string]any{
@@ -90,17 +106,13 @@ func newVendor(t *testing.T) *httptest.Server {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = fmt.Fprintf(w, "event: response.created\ndata: %s\n\nevent: response.output_text.delta\ndata: %s\n\nevent: response.completed\ndata: %s\n\n", created, delta, terminal)
 	})
-	mux.HandleFunc("POST /v1/messages", func(w http.ResponseWriter, r *http.Request) {
-		if !authorized(r) {
-			refuse(w)
+	mux.HandleFunc("POST /api/anthropic/v1/messages", func(w http.ResponseWriter, r *http.Request) {
+		if bearer(r) != "Bearer "+zaiKey {
+			refuseVendor(w, http.StatusUnauthorized, `{"type":"error","error":{"type":"authentication_error","message":"bad key"}}`)
 			return
 		}
-		var request struct {
-			Model  string `json:"model"`
-			Stream bool   `json:"stream"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Model != vendorModel {
-			http.Error(w, `{"type":"error","error":{"type":"not_found_error","message":"unknown model"}}`, http.StatusNotFound)
+		request, ok := decodeVendor(w, r, `{"type":"error","error":{"type":"not_found_error","message":"unknown model"}}`)
+		if !ok {
 			return
 		}
 		if !request.Stream {
@@ -116,78 +128,118 @@ func newVendor(t *testing.T) *httptest.Server {
 		_, _ = fmt.Fprintf(w, "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":%d}}\n\n", vendorOutputTokens)
 		_, _ = io.WriteString(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
 	})
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-	return server
+	return mux
 }
 
-func (s *service) activeProvider(owner *caller, name, endpoint, projectID, kind, profileID, surface string) map[string]any {
-	s.t.Helper()
-	configuration := map[string]any{"kind": kind, "auth_mode": "api_key", "endpoint": endpoint + "/v1"}
-	if profileID != "" {
-		configuration["profile_id"] = profileID
-		configuration["profile_revision"] = "1"
+type vendorProxy struct {
+	url   string
+	roots string
+}
+
+type notifyConn struct {
+	net.Conn
+	done chan struct{}
+	once sync.Once
+}
+
+func (c *notifyConn) Close() error {
+	c.once.Do(func() { close(c.done) })
+	return c.Conn.Close()
+}
+
+type singleConnListener struct {
+	conn *notifyConn
+	used bool
+}
+
+func (l *singleConnListener) Accept() (net.Conn, error) {
+	if !l.used {
+		l.used = true
+		return l.conn, nil
 	}
-	provider := s.want(owner, "POST", "/api/v1/providers", map[string]any{
-		"name":          name,
-		"configuration": configuration,
-		"credential":    vendorSecret,
-		"model":         vendorModel,
-		"project_id":    projectID,
-	}, idempotent(), http.StatusCreated)
-	path := "/api/v1/providers/" + provider["id"].(string)
-	probe := s.want(owner, "POST", path+"/probe", nil, etag(provider), http.StatusOK)
-	if probe["succeeded"] != true {
-		s.t.Fatalf("probe failed: %v", probe)
+	<-l.conn.done
+	return nil, net.ErrClosed
+}
+
+func (l *singleConnListener) Close() error   { return nil }
+func (l *singleConnListener) Addr() net.Addr { return l.conn.LocalAddr() }
+
+func newVendorProxy(t *testing.T, handler http.Handler) vendorProxy {
+	t.Helper()
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
 	}
-	models := s.want(owner, "GET", path+"/models", nil, nil, http.StatusOK)["items"].([]any)
-	modelID := ""
-	for _, item := range models {
-		model := item.(map[string]any)
-		if model["upstream_model"] == vendorModel {
-			modelID = model["id"].(string)
+	caTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "qualification fixture ca"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour),
+		IsCA: true, KeyUsage: x509.KeyUsageCertSign, BasicConstraintsValid: true,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caCert, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}))
+	certificates := map[string]tls.Certificate{}
+	for i, host := range []string{"chatgpt.com", "api.z.ai", "opencode.ai"} {
+		leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			t.Fatal(err)
 		}
+		leaf := &x509.Certificate{
+			SerialNumber: big.NewInt(int64(i + 2)), Subject: pkix.Name{CommonName: host}, DNSNames: []string{host},
+			NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour),
+			KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		}
+		der, err := x509.CreateCertificate(rand.Reader, leaf, caCert, &leafKey.PublicKey, caKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		certificates[host] = tls.Certificate{Certificate: [][]byte{der}, PrivateKey: leafKey}
 	}
-	if modelID == "" {
-		s.t.Fatalf("probe did not discover %s: %v", vendorModel, models)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
 	}
-	detail := s.want(owner, "GET", path, nil, nil, http.StatusOK)
-	detail = s.want(owner, "PATCH", path+"/models/"+modelID, map[string]any{
-		"enabled": true,
-		"capabilities": []any{
-			map[string]any{"operation": "generation", "surface": surface, "mode": "unary"},
-			map[string]any{"operation": "generation", "surface": surface, "mode": "streaming"},
+	t.Cleanup(func() { _ = listener.Close() })
+	tlsConfig := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		NextProtos: []string{"http/1.1"},
+		GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+			certificate, ok := certificates[hello.ServerName]
+			if !ok {
+				return nil, fmt.Errorf("no fixture certificate for %q", hello.ServerName)
+			}
+			return &certificate, nil
 		},
-	}, etag(detail), http.StatusOK)
-	certified := s.want(owner, "POST", path+"/models/"+modelID+"/certify", nil, etag(detail), http.StatusOK)
-	if certified["status"] != "certified" {
-		s.t.Fatalf("certification failed: %v", certified)
 	}
-	detail = s.want(owner, "GET", path, nil, nil, http.StatusOK)
-	s.want(owner, "POST", path+"/activate", nil, idempotent(etag(detail)), http.StatusOK)
-	return provider
-}
-
-func (s *service) providerSlot(owner *caller, provider map[string]any) string {
-	s.t.Helper()
-	slots := s.want(owner, "GET", "/api/v1/providers/"+provider["id"].(string)+"/credential-slots", nil, nil, http.StatusOK)["items"].([]any)
-	for _, item := range slots {
-		slot := item.(map[string]any)
-		if slot["enabled"] == true && slot["credential_version_id"] != nil {
-			return slot["id"].(string)
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func(conn net.Conn) {
+				defer conn.Close()
+				reader := bufio.NewReader(conn)
+				request, err := http.ReadRequest(reader)
+				if err != nil || request.Method != http.MethodConnect {
+					return
+				}
+				if _, err := io.WriteString(conn, "HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
+					return
+				}
+				secured := tls.Server(conn, tlsConfig)
+				if err := secured.Handshake(); err != nil {
+					return
+				}
+				_ = http.Serve(&singleConnListener{conn: &notifyConn{Conn: secured, done: make(chan struct{})}}, handler)
+			}(conn)
 		}
-	}
-	s.t.Fatalf("provider has no enabled credential slot: %v", slots)
-	return ""
-}
-
-func (s *service) priceModel(owner *caller, provider map[string]any, kind string) {
-	s.t.Helper()
-	s.want(owner, "POST", "/api/v1/pricing/revisions", map[string]any{
-		"effective_at": time.Now().Add(-time.Hour).UTC().Format(time.RFC3339),
-		"prices": []any{map[string]any{
-			"provider_kind": kind, "provider_id": provider["id"], "model": vendorModel, "operation": "generation",
-			"currency": "USD", "input_per_million": "1", "output_per_million": "1",
-		}},
-	}, idempotent(), http.StatusCreated)
+	}()
+	return vendorProxy{url: "http://" + listener.Addr().String(), roots: roots}
 }

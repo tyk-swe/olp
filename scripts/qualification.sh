@@ -24,7 +24,11 @@ export OLP_TEST_DATABASE_URL="postgres://olp:olp-local@$postgres/olp?sslmode=dis
 export OLP_TEST_VALKEY_URL="redis://:olp-local@$valkey/0"
 export OLP_QUALIFY_REPORT="$scratch/qualification.jsonl"
 start=$(date +%s)
-go test -mod=readonly -tags qualification -count=1 -timeout=300s -v ./tests/qualification
+status=0
+go test -mod=readonly -tags qualification -count=1 -timeout=300s -v ./tests/qualification || status=$?
 elapsed=$(( $(date +%s) - start ))
 printf 'qualification lanes: %ss\n' "$elapsed"
-cat "$OLP_QUALIFY_REPORT"
+if [[ -f "$OLP_QUALIFY_REPORT" ]]; then
+  cat "$OLP_QUALIFY_REPORT"
+fi
+exit "$status"

@@ -80,6 +80,7 @@ func newDatabase(t *testing.T) (*pgxpool.Pool, string) {
 type environment struct {
 	values    map[string]string
 	bootstrap string
+	master    string
 }
 
 func newEnvironment(t *testing.T, databaseURL string) environment {
@@ -99,14 +100,16 @@ func newEnvironment(t *testing.T, databaseURL string) environment {
 		return hex.EncodeToString(append(id[:], other[:]...))
 	}
 	bootstrap := secret()
+	master := `{"active_version":1,"keys":[{"version":1,"key":"` + secret() + `"}]}`
 	return environment{
 		bootstrap: bootstrap,
+		master:    master,
 		values: map[string]string{
 			"OLP_DATABASE_URL":                     databaseURL,
 			"OLP_VALKEY_URL":                       required(t, "OLP_TEST_VALKEY_URL"),
 			"OLP_AUTH_HMAC_KEY_FILE":               write("auth.key", secret()),
 			"OLP_BOOTSTRAP_TOKEN_FILE":             write("bootstrap.token", bootstrap),
-			"OLP_MASTER_KEY_FILE":                  write("master.json", `{"active_version":1,"keys":[{"version":1,"key":"`+secret()+`"}]}`),
+			"OLP_MASTER_KEY_FILE":                  write("master.json", master),
 			"OLP_CONSOLE_DIR":                      dir,
 			"OLP_MEDIA_SPOOL_DIR":                  filepath.Join(dir, "spool"),
 			"OLP_PROVIDER_EGRESS_ALLOW_CIDRS":      "127.0.0.0/8",
@@ -334,21 +337,6 @@ func (s *service) owner() *caller {
 	owner := &caller{name: "owner"}
 	s.want(owner, "POST", "/api/v1/setup", map[string]any{"email": "owner@example.com", "display_name": "Owner", "password": accessPassword, "installation_name": "Qualification"}, map[string]string{"X-OLP-Setup-Token": s.env.bootstrap}, http.StatusCreated)
 	return owner
-}
-
-func (s *service) eventually(what string, limit time.Duration, check func() (bool, string)) {
-	s.t.Helper()
-	deadline := time.Now().Add(limit)
-	last := ""
-	for time.Now().Before(deadline) {
-		done, detail := check()
-		if done {
-			return
-		}
-		last = detail
-		time.Sleep(50 * time.Millisecond)
-	}
-	s.t.Fatalf("%s did not happen within %s: %s", what, limit, last)
 }
 
 func describe(status int, raw []byte) string { return fmt.Sprintf("status %d: %s", status, raw) }
