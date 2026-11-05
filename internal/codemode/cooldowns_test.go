@@ -57,11 +57,11 @@ func TestBlockingDeadlineIgnoresNonBlockingEarlierResets(t *testing.T) {
 	low.Window = "five_hour"
 	allowance := bandAllowance(exhausted, healthy, low)
 	cooldownRetry := bandNow.Add(30 * time.Minute)
-	deadline := codemode.BlockingDeadline(bandNow, &unavailable, &cooldownRetry, allowance)
+	deadline := codemode.BlockingDeadline(bandNow, &unavailable, &cooldownRetry, allowance, false, "")
 	if deadline == nil || !deadline.Equal(late) {
 		t.Fatalf("BlockingDeadline = %v, want %v", deadline, late)
 	}
-	other := codemode.BlockingDeadline(bandNow, nil, &middle, bandAllowance(percentWindow(80, &early, bandNow)))
+	other := codemode.BlockingDeadline(bandNow, nil, &middle, bandAllowance(percentWindow(80, &early, bandNow)), false, "")
 	if other == nil || !other.Equal(middle) {
 		t.Fatalf("BlockingDeadline(other) = %v, want %v", other, middle)
 	}
@@ -78,15 +78,15 @@ func TestExhaustedResetsOnlyFreshExhaustedWindows(t *testing.T) {
 	stale.Window = "secondary"
 	allowance := bandAllowance(percentWindow(0, &future, bandNow), percentWindow(5, &early, bandNow), stale)
 	allowance.Windows[1].Window = "five_hour"
-	resets := codemode.ExhaustedResets(allowance, bandNow)
+	resets := codemode.ExhaustedResets(allowance, bandNow, false, "")
 	if len(resets) != 1 || resets[0] == nil || !resets[0].Equal(future) {
 		t.Fatalf("ExhaustedResets = %v, want only %v", resets, future)
 	}
-	if got := codemode.BlockingDeadline(bandNow, nil, nil, bandAllowance(percentWindow(80, &early, bandNow))); got != nil {
+	if got := codemode.BlockingDeadline(bandNow, nil, nil, bandAllowance(percentWindow(80, &early, bandNow)), false, ""); got != nil {
 		t.Fatalf("healthy-only deadline = %v, want nil", got)
 	}
 	past := bandNow.Add(-time.Hour)
-	if got := codemode.BlockingDeadline(bandNow, &past, &past, nil); got != nil {
+	if got := codemode.BlockingDeadline(bandNow, &past, &past, nil, false, ""); got != nil {
 		t.Fatalf("past-only deadline = %v, want nil", got)
 	}
 }

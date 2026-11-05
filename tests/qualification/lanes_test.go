@@ -233,10 +233,6 @@ func (s *service) seedSubscription(project, ownerID string, spec laneSeed, proxy
 	return providerID, credentialID
 }
 
-// seedSubscriptionE inserts the provider, credential, and grant rows grant
-// enrollment would store for spec. A nil network leaves the connection on
-// the adapter's own vendor address with ordinary egress, as production
-// requires; the fixture lanes pass the fixture proxy instead.
 func (s *service) seedSubscriptionE(project, ownerID string, spec laneSeed, network *egress.ConnectionOptions) (providerID, credentialID string, err error) {
 	vendor, ok := codeadapter.ForConnection("plugin", "grant", spec.profile)
 	if !ok {

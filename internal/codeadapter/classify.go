@@ -22,10 +22,6 @@ const (
 	CooldownConcurrency = codemode.CooldownConcurrency
 )
 
-func CooldownClasses() [5]CooldownClass {
-	return codemode.CooldownClasses()
-}
-
 type CooldownScope string
 
 const (
@@ -89,7 +85,7 @@ func retryAtFrom(reset time.Time, hasReset bool, headers http.Header, now time.T
 		return reset
 	}
 	if values := headers.Values("Retry-After"); len(values) == 1 {
-		if delay, valid := upstream.ParseRetryAfter(values[0], now); valid && delay > 0 {
+		if delay, valid := upstream.ParseRetryAfter(values[0], now); valid {
 			return now.Add(delay)
 		}
 	}

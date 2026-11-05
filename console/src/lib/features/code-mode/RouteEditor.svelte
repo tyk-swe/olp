@@ -552,14 +552,10 @@
     Order new conversations by allowance bands
   </label>
   <p>
-    Off by default. After publication, pinning a new conversation root or a new
-    model ranks accounts known healthy above unknown above known low from fresh
-    qualified observations, where low means at most ten percent remaining on the
-    tightest reported window and stale evidence counts as unknown. Only
-    qualified signals order, and Codex passive and active windows are the
-    qualified signal today, fixture-proven only, so other subscriptions stay on
-    weights plus cooldown. The weighted score picks inside the best band.
-    Established pins never move.
+    Off by default. No requested model has a qualified mapping to an allowance
+    limit family yet, so all bands are unknown and new conversations use weights
+    plus cooldown. Published revisions retain this policy and established pins
+    never move.
   </p>
   <label class="choice"
     ><input

@@ -32,13 +32,12 @@ profile only when the matching live lane in
 and its claims summary names that pair. Until then the console and this
 guide keep the no proven signal wording for that pair.
 
-Reset-aware band ordering uses fresh passive Codex allowance windows for
-new conversation roots. Active Codex reads and both MiniMax M Plan remains
-reads are held pending live qualification. Existing active observations do not
-influence admission or ordering. Codex additional model-specific limit names do
-not affect unrelated models; OLP does not yet map those names to requested
-models. Other coding-plan adapters use weights plus cooldown without a
-qualified allowance signal.
+No requested model currently has a qualified mapping to an allowance limit
+family, so band assessments remain unknown and selection uses weights and
+cooldowns. Codex inference responses can supply passive observations, but OLP
+does not assume which models they cover. Active Codex reads and both MiniMax M
+Plan remains reads are held pending live qualification. Existing active
+observations do not influence admission or ordering.
 
 GLM, Kimi, Qwen and MiniMax quota envelopes can set a cooldown, but they do
 not establish that inference did not execute and cannot authorize replay.
@@ -918,8 +917,10 @@ Primary and secondary windows are retained independently for each metered limit.
 Token and request counts also retain their own observation and reset times.
 Credits remain separate from those windows and from local budgets. Partial
 observations preserve other dimensions, and stale observations cannot replace
-newer ones. With allowance ordering enabled, stale window observations do not
-block admission or influence bands. With ordering disabled, passive exhaustion
+newer ones. An observation stays fresh until its reported future reset, or for
+at most fifteen minutes when there is no future reset. With allowance ordering
+enabled, unmapped window observations do not block admission or influence bands,
+and stale counts do not block admission. With ordering disabled, passive exhaustion
 retains its established admission behavior until its supported reset, including
 when that reset is unknown. Passing a retry
 or reset time permits another attempt once all eligibility checks pass, while

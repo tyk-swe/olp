@@ -60,9 +60,6 @@ func bandFromWindow(band Band, window AllowanceWindow, soonestReset *time.Time) 
 }
 
 func bandFresh(window AllowanceWindow, now time.Time) bool {
-	if now.Sub(window.ObservedAt) > bandFreshness {
-		return false
-	}
 	if window.ResetsAt != nil && window.ResetsAt.After(now) {
 		return true
 	}

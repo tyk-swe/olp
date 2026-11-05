@@ -8835,7 +8835,7 @@ type CodeAccount struct {
 	// AllowanceReadRequestedAt When an operator last requested an active allowance read. The worker clears it once that read completes.
 	AllowanceReadRequestedAt nullable.Nullable[time.Time] `json:"allowance_read_requested_at,omitempty"`
 
-	// AllowanceSignal Allowance signal qualification of the account's provider profile. Proven passive signals may order new conversation roots. Active reads require separate live qualification. Remains-unqualified names a signal that has not completed qualification. None means the profile has no qualified allowance signal.
+	// AllowanceSignal Allowance signal qualification of the account's provider profile. Passive signals may be recorded, but no requested-model-to-limit mapping is qualified for ordering. Active reads require separate live qualification. Remains-unqualified names a signal that has not completed qualification. None means the profile has no qualified allowance signal.
 	AllowanceSignal CodeAccountAllowanceSignal `json:"allowance_signal"`
 
 	// AllowanceSignalReason Why the allowance signal is not qualified, or null when no reason is recorded.
@@ -8880,7 +8880,7 @@ type CodeAccount struct {
 // CodeAccountAdapter The subscription family of the account's provider profile: Codex, Claude, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.
 type CodeAccountAdapter string
 
-// CodeAccountAllowanceSignal Allowance signal qualification of the account's provider profile. Proven passive signals may order new conversation roots. Active reads require separate live qualification. Remains-unqualified names a signal that has not completed qualification. None means the profile has no qualified allowance signal.
+// CodeAccountAllowanceSignal Allowance signal qualification of the account's provider profile. Passive signals may be recorded, but no requested-model-to-limit mapping is qualified for ordering. Active reads require separate live qualification. Remains-unqualified names a signal that has not completed qualification. None means the profile has no qualified allowance signal.
 type CodeAccountAllowanceSignal string
 
 // CodeAccountGrantState Grant authority is independent of serving health and allowance. A rejected refresh lapses the grant and requires enrollment again.
@@ -9400,7 +9400,7 @@ type CodeRoute struct {
 	// Aliases Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized.
 	Aliases *map[string]string `json:"aliases,omitempty"`
 
-	// AllowanceOrdering Orders new conversation roots by proven allowance bands, healthy above unknown above low, with the weighted score inside a band, including proven-recovery repinning before first execution. Off by default, only proven allowance signals order, and established pins never move. Published revisions pin this policy.
+	// AllowanceOrdering Enables allowance-band ordering for new conversation roots. No requested-model-to-limit mapping is qualified today, so bands remain unknown and selection uses weights and cooldowns. Off by default. Established pins never move, and published revisions pin this policy.
 	AllowanceOrdering *bool `json:"allowance_ordering,omitempty"`
 
 	// ChatToAntigravity Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow.
@@ -9464,7 +9464,7 @@ type CodeRouteWrite struct {
 	// Aliases Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized.
 	Aliases *map[string]string `json:"aliases,omitempty"`
 
-	// AllowanceOrdering Orders new conversation roots by proven allowance bands, healthy above unknown above low, with the weighted score inside a band, including proven-recovery repinning before first execution. Off by default, only proven allowance signals order, and established pins never move. Published revisions pin this policy.
+	// AllowanceOrdering Enables allowance-band ordering for new conversation roots. No requested-model-to-limit mapping is qualified today, so bands remain unknown and selection uses weights and cooldowns. Off by default. Established pins never move, and published revisions pin this policy.
 	AllowanceOrdering *bool `json:"allowance_ordering,omitempty"`
 
 	// ChatToAntigravity Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow.
@@ -9707,7 +9707,7 @@ type ConfigurationCodeRoutePolicy struct {
 	// Aliases Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized.
 	Aliases *map[string]string `json:"aliases,omitempty"`
 
-	// AllowanceOrdering Orders new conversation roots by proven allowance bands, healthy above unknown above low, with the weighted score inside a band, including proven-recovery repinning before first execution. Off by default, only proven allowance signals order, and established pins never move. Published revisions pin this policy.
+	// AllowanceOrdering Enables allowance-band ordering for new conversation roots. No requested-model-to-limit mapping is qualified today, so bands remain unknown and selection uses weights and cooldowns. Off by default. Established pins never move, and published revisions pin this policy.
 	AllowanceOrdering *bool `json:"allowance_ordering,omitempty"`
 
 	// ChatToAntigravity Explicit opt-in for chat translation through the Antigravity adapter.

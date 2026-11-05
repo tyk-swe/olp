@@ -32,7 +32,7 @@ func CodeOffers(ctx context.Context, db access.Queryer, revision string, keys ..
  SELECT a.* FROM olp.code_pool_accounts pa JOIN olp.code_accounts a ON a.id=pa.account_id
  JOIN olp.provider_credentials c ON c.id=a.credential_id JOIN olp.provider_grants g ON g.credential_id=c.id JOIN olp.providers p ON p.id=a.provider_id
  WHERE pa.pool_id=(v.document->>'pool_id')::uuid AND v.connections ? a.provider_id::text
- AND a.project_id=(v.document->>'project_id')::uuid AND a.enabled AND olp.code_account_available(a,coalesce((v.document->>'allowance_ordering')::boolean,false),CASE WHEN `+codeadapter.SQL("(v.connections->(a.provider_id::text))")+`='codex' THEN 'codex' ELSE '' END)
+ AND a.project_id=(v.document->>'project_id')::uuid AND a.enabled AND olp.code_account_available(a,coalesce((v.document->>'allowance_ordering')::boolean,false),'')
  AND p.state<>'disabled' AND p.project_id=a.project_id
  AND c.plugin_digest=v.connections->(a.provider_id::text)->>'profile_revision' AND c.profile_id=v.connections->(a.provider_id::text)->>'profile_id'
  AND c.provider_id=a.provider_id AND c.principal=a.principal AND c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())

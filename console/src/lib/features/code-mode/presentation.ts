@@ -159,16 +159,6 @@ export function allowanceEvidenceLabel(
   return evidence === 'active' ? 'Active read' : 'Passive observation';
 }
 
-export function orderingSignalLabel(
-  signal: string | null | undefined,
-  allowanceOrdering: boolean
-): string {
-  if (!allowanceOrdering) return 'Weights plus cooldown';
-  if (signal !== 'proven')
-    return 'Weights plus cooldown, no qualified allowance signal';
-  return 'Allowance bands from passive windows, fixture-proven only';
-}
-
 export function nextMonthlyReset(
   anchor: string | null | undefined,
   now: Date

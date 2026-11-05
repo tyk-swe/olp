@@ -86,7 +86,8 @@ func TestClassifyKimiRetryAtUsesOnlySingleValidRetryAfterElseMinute(t *testing.T
 		{"single retry-after", http.Header{"Retry-After": {"300"}}, now.Add(300 * time.Second)},
 		{"multiple retry-after values ignored", http.Header{"Retry-After": {"300", "600"}}, now.Add(time.Minute)},
 		{"invalid retry-after ignored", http.Header{"Retry-After": {"soon"}}, now.Add(time.Minute)},
-		{"zero retry-after ignored", http.Header{"Retry-After": {"0"}}, now.Add(time.Minute)},
+		{"zero retry-after", http.Header{"Retry-After": {"0"}}, now},
+		{"past retry-after", http.Header{"Retry-After": {now.Add(-time.Minute).Format(http.TimeFormat)}}, now},
 		{"no retry-after", http.Header{}, now.Add(time.Minute)},
 	}
 	for _, tc := range cases {

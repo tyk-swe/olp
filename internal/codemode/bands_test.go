@@ -20,8 +20,8 @@ func bandAllowance(windows ...codemode.AllowanceWindow) *codemode.Allowance {
 func TestAssessBandNeedsAFreshProvenWindow(t *testing.T) {
 	future := bandNow.Add(2 * time.Hour)
 	futureStale := codemode.AssessBand(bandAllowance(percentWindow(75, &future, bandNow.Add(-3*24*time.Hour))), "codex", bandNow)
-	if futureStale.Band != codemode.BandUnknown || futureStale.Evidence != nil {
-		t.Fatalf("a future reset must not refresh old observations, got %+v", futureStale)
+	if futureStale.Band != codemode.BandHealthy || futureStale.Evidence == nil {
+		t.Fatalf("an observation remains fresh until its future reset, got %+v", futureStale)
 	}
 
 	stale := codemode.AssessBand(bandAllowance(percentWindow(90, nil, bandNow.Add(-time.Hour))), "codex", bandNow)

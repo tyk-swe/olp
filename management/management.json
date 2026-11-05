@@ -15687,7 +15687,7 @@
             ]
           },
           "allowance_signal": {
-            "description": "Allowance signal qualification of the account's provider profile. Proven passive signals may order new conversation roots. Active reads require separate live qualification. Remains-unqualified names a signal that has not completed qualification. None means the profile has no qualified allowance signal.",
+            "description": "Allowance signal qualification of the account's provider profile. Passive signals may be recorded, but no requested-model-to-limit mapping is qualified for ordering. Active reads require separate live qualification. Remains-unqualified names a signal that has not completed qualification. None means the profile has no qualified allowance signal.",
             "enum": [
               "proven",
               "none",
@@ -17271,7 +17271,7 @@
           },
           "allowance_ordering": {
             "type": "boolean",
-            "description": "Orders new conversation roots by proven allowance bands, healthy above unknown above low, with the weighted score inside a band, including proven-recovery repinning before first execution. Off by default, only proven allowance signals order, and established pins never move. Published revisions pin this policy."
+            "description": "Enables allowance-band ordering for new conversation roots. No requested-model-to-limit mapping is qualified today, so bands remain unknown and selection uses weights and cooldowns. Off by default. Established pins never move, and published revisions pin this policy."
           }
         },
         "required": [
@@ -17431,7 +17431,7 @@
           },
           "allowance_ordering": {
             "type": "boolean",
-            "description": "Orders new conversation roots by proven allowance bands, healthy above unknown above low, with the weighted score inside a band, including proven-recovery repinning before first execution. Off by default, only proven allowance signals order, and established pins never move. Published revisions pin this policy."
+            "description": "Enables allowance-band ordering for new conversation roots. No requested-model-to-limit mapping is qualified today, so bands remain unknown and selection uses weights and cooldowns. Off by default. Established pins never move, and published revisions pin this policy."
           }
         },
         "required": [
@@ -31947,7 +31947,7 @@
           },
           "allowance_ordering": {
             "type": "boolean",
-            "description": "Orders new conversation roots by proven allowance bands, healthy above unknown above low, with the weighted score inside a band, including proven-recovery repinning before first execution. Off by default, only proven allowance signals order, and established pins never move. Published revisions pin this policy."
+            "description": "Enables allowance-band ordering for new conversation roots. No requested-model-to-limit mapping is qualified today, so bands remain unknown and selection uses weights and cooldowns. Off by default. Established pins never move, and published revisions pin this policy."
           }
         },
         "required": [

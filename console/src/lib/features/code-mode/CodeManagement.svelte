@@ -30,7 +30,6 @@
     extraUsageLabel,
     showsExtraUsage,
     nextMonthlyReset,
-    orderingSignalLabel,
     servingHealthLabel,
     mutationError,
     tokenCount,
@@ -279,9 +278,7 @@
               <dd>{extraUsageLabel(account.extra_usage_enabled)}</dd>
             {/if}
             <dt>Ordering signal</dt>
-            <dd>
-              {orderingSignalLabel(account.allowance_signal, true)}
-            </dd>
+            <dd>Weights plus cooldown, no qualified model-to-limit mapping</dd>
             <dt>Account / principal</dt>
             <dd>{account.id} / {account.principal}</dd>
             <dt>Eligibility</dt>

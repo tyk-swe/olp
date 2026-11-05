@@ -95,9 +95,7 @@ const (
 	// TaskBillingImport imports provider invoices and reports its liveness.
 	TaskBillingImport Task = "billing_import"
 	// TaskFocusExport delivers the daily FOCUS datasets to csv_gzip sinks.
-	TaskFocusExport Task = "focus_export"
-	// TaskCodeAllowanceRead reads Codex subscription usage into allowance
-	// observations on a bounded per-account interval.
+	TaskFocusExport       Task = "focus_export"
 	TaskCodeAllowanceRead Task = "code_allowance_read"
 )
 

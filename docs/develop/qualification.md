@@ -162,7 +162,8 @@ reads remain disabled pending live qualification.
 Other adapters record `no_signal` for allowance in stage one. The band
 check needs the second Codex account and passes only when a selection
 decision carries allowance evidence. Without the second account it
-records `no_signal`. The cooldown and failover checks pass only on
+records `no_signal`. No requested-model-to-limit mapping is qualified today,
+so decisions do not yet carry band evidence. The cooldown and failover checks pass only on
 evidence the lane actually observed in diagnostics. The lane induces
 neither exhaustion nor rejection, so both normally record `no_signal`,
 and that record withholds the matching claim instead of passing it. A
@@ -172,8 +173,8 @@ allowance check passes.
 The last report line is a claims summary. It names the adapter and
 profile pairs allowed to claim reset aware ordering, live inference,
 cooldown evidence, and failover evidence from this run. Reset aware
-ordering needs a passing lane with passing allowance and band checks,
-so Codex is the only adapter that can earn it in stage one. When lanes
+ordering needs a passing lane with passing allowance and band checks.
+No adapter can earn that claim until a model-to-limit mapping is qualified. When lanes
 are missing or red the matching lists are empty, and an empty list
 means no claim. The script exits non-zero and prints every lane that
 is not green whenever any required lane is missing or red. The live

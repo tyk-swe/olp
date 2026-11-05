@@ -19,7 +19,6 @@ import {
   mutationError,
   nativeModels,
   nextMonthlyReset,
-  orderingSignalLabel,
   recoveryReasonLabel,
   refusalAdvice,
   reservationLabel,
@@ -442,30 +441,6 @@ describe('extra usage presentation', () => {
     expect(providerProfilePending(true, 'provider-1', true)).toBe(false);
     expect(providerProfilePending(true, '', false)).toBe(false);
     expect(providerProfilePending(false, 'provider-1', false)).toBe(false);
-  });
-});
-
-describe('code ordering signals', () => {
-  it('names only proven bands, as fixture-proven only and never live-proven', () => {
-    expect(orderingSignalLabel('proven', true)).toBe(
-      'Allowance bands from passive windows, fixture-proven only'
-    );
-    for (const signal of ['none', 'remains-unqualified']) {
-      expect(orderingSignalLabel(signal, true)).toBe(
-        'Weights plus cooldown, no qualified allowance signal'
-      );
-    }
-    expect(orderingSignalLabel(null, true)).toBe(
-      'Weights plus cooldown, no qualified allowance signal'
-    );
-    expect(orderingSignalLabel(undefined, true)).toBe(
-      'Weights plus cooldown, no qualified allowance signal'
-    );
-  });
-
-  it('keeps every signal on weights plus cooldown while ordering is off', () => {
-    expect(orderingSignalLabel('proven', false)).toBe('Weights plus cooldown');
-    expect(orderingSignalLabel('none', false)).toBe('Weights plus cooldown');
   });
 });
 
