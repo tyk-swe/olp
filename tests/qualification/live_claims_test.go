@@ -184,6 +184,7 @@ func (l liveLane) seedSpec(secret string, now time.Time) (laneSeed, error) {
 }
 
 func TestLiveRecordsNeverContainSecrets(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	sentinel := "sentinel-live-secret-value-1234567890"
 	lane := liveLanes()[1]
 	t.Setenv(lane.keyEnv, sentinel)

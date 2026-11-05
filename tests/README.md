@@ -88,11 +88,10 @@ establish is recorded in
 [qualification](../docs/develop/qualification.md#code-mode-qualification).
 
 The lanes are also the one stated exception to the rule that a test fails only
-when project code changes. Each lane records the version of an installed
-third-party client binary as an environment fact, and a lane whose client
-binary is missing reports `no_signal` and fails the run. It never reports a
-pass. The clients are not executed, so no lane result is evidence about a
-client.
+when project code changes. Each fixture lane runs an installed third-party
+client in an isolated network namespace against the scripted upstream and
+records the client version. A missing or failing client reports `no_signal`
+and fails the run. Fixture results do not establish live vendor behavior.
 
 ## Test rules
 

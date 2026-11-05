@@ -28,8 +28,24 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
+      - name: Install fixture sandbox
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install --no-install-recommends -y apparmor bubblewrap
+          if ! bwrap --unshare-net --unshare-pid --ro-bind / / /usr/bin/true; then
+            printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile olp-qualification-bwrap /usr/bin/bwrap flags=(unconfined) {\n  userns,\n}\n' > "$RUNNER_TEMP/olp-qualification-bwrap"
+            sudo apparmor_parser -r "$RUNNER_TEMP/olp-qualification-bwrap"
+          fi
+          bwrap --unshare-net --unshare-pid --ro-bind / / /usr/bin/true
       - name: Install latest coding clients
-        run: npm install --global @openai/codex@latest @anthropic-ai/claude-code@latest opencode-ai@latest
+        run: |
+          npm install --global --ignore-scripts @openai/codex@latest @anthropic-ai/claude-code@latest opencode-ai@latest
+          npm_root=$(npm root --global)
+          mkdir -p "$RUNNER_TEMP/qualification-clients"
+          ln -s "$npm_root/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex" "$RUNNER_TEMP/qualification-clients/codex"
+          ln -s "$npm_root/@anthropic-ai/claude-code/node_modules/@anthropic-ai/claude-code-linux-x64/claude" "$RUNNER_TEMP/qualification-clients/claude"
+          ln -s "$npm_root/opencode-ai/node_modules/opencode-linux-x64/bin/opencode" "$RUNNER_TEMP/qualification-clients/opencode"
+          printf '%s\n' "$RUNNER_TEMP/qualification-clients" >> "$GITHUB_PATH"
       - run: make qualify-code
   qualify-code-live:
     if: vars.OLP_LIVE_QUALIFICATION == 'required'

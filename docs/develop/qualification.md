@@ -57,7 +57,7 @@ onto it, and drives one client journey end to end over HTTP against the
 real binary. Codex uses `responses` through the `codex` adapter, Claude
 Code uses `v1/messages` through the `zai_coding` coding-plan adapter,
 and OpenCode uses `v1/chat/completions` through `opencode_go`. The
-driver is a protocol fixture that speaks each client path. The account,
+driver runs each installed client in isolation. The account,
 its credential and grant, and its plugin provider are seeded directly in
 the database, because grant enrollment needs a real vendor account. The
 frozen connection keeps the adapter's own vendor address, as production
@@ -77,21 +77,33 @@ Every lane writes one run record as a JSON line, to
 or fail. A record carries client, client version, platform, adapter,
 profile, model, protocol, transport, result, and evidence, where
 evidence is always `fixture` in this suite. The adapter is the domain adapter the
-lane exercises. The record also carries `driver` as
-`protocol-fixture` and `client_executed` as `false`. The client version
-comes from the installed client binary and is an environment fact, not
-a qualification of that client. A lane whose client binary is
-unavailable reports `no_signal` and fails the run, and a lane whose
-setup fails also reports `no_signal`. A lane never reports a pass it
-did not earn.
+lane exercises. The record also carries `driver` as `client-fixture` and
+`client_executed` as `true` when the journey starts the client. A lane
+whose client binary is unavailable or whose journey fails reports
+`no_signal` and fails the run.
+
+The fixture gate needs Linux, Python 3, Bubblewrap, Docker, and native
+Codex, Claude Code, and OpenCode executables on `PATH`. Bubblewrap must be
+able to create network and PID namespaces. npm installs wrapper scripts,
+so expose the platform package binaries on `PATH` when using npm. The
+release workflow sets up these prerequisites on Linux amd64. Each version
+probe and journey runs in an isolated network namespace with a temporary
+home and a cleared environment. A Unix socket connects the namespace only
+to the local OLP server, and the upstream proxy serves scripted responses.
+
+The Codex streaming fixture uses the event and message fields defined by
+the OpenAI SDK for [output item events](https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_output_item_added_event.py),
+[content part events](https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_content_part_added_event.py),
+[text delta events](https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_text_delta_event.py),
+and [output messages](https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_output_message.py).
 
 The release workflow installs the latest Codex, Claude Code, and
 OpenCode clients from npm and runs `make qualify-code` as a gate on
 promotion. Fleet process suites still do not run. Generated client
 configuration and protocol translation keep partial signal through the
-allowlisted unit tests. Behavior against real coding clients and
-subscription services is covered only by the live lanes below, and only
-where a lane has actually run green.
+allowlisted unit tests. Behavior against real subscription services is
+covered only by the live lanes below, and only where a lane has actually
+run green.
 
 ### Live lanes
 
@@ -194,14 +206,15 @@ change to the guard in the same change.
 
 ### Latest official clients
 
-The fixture lanes record the version of each installed official client
-but do not execute it. The live lanes do the same, so neither suite
-qualifies the client program itself. Client version pins that remain
-in user documentation describe configuration that was written against
-those clients, not a live qualification result. Requalifying a client
-against a real account still means running it by hand against a local
-gateway and recording the client version, platform, adapter, profile,
-model, protocol, and transport with the result.
+The fixture lanes execute each installed official client and record its
+version against scripted upstreams. The live lanes record client versions
+but send the live requests through protocol fixtures, so they do not
+qualify the client program itself against a real account. Client version
+pins in user documentation describe configuration written against those
+clients, not a live qualification result. Requalifying a client against a
+real account still means running it by hand against a local gateway and
+recording the client version, platform, adapter, profile, model, protocol,
+and transport with the result.
 
 ## Historical qualification
 

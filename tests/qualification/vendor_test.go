@@ -90,9 +90,10 @@ func newVendorMux(codexToken string) *http.ServeMux {
 		if !ok {
 			return
 		}
+		message := map[string]any{"id": "msg_fixture", "type": "message", "role": "assistant", "status": "completed", "content": []any{map[string]any{"type": "output_text", "text": vendorAnswer, "annotations": []any{}}}}
 		response := map[string]any{
 			"id": "resp_fixture", "object": "response", "created_at": 1, "model": vendorModel, "status": "completed", "error": nil, "incomplete_details": nil,
-			"output": []any{map[string]any{"id": "msg_fixture", "type": "message", "role": "assistant", "status": "completed", "content": []any{map[string]any{"type": "output_text", "text": vendorAnswer, "annotations": []any{}}}}},
+			"output": []any{message},
 			"usage":  map[string]int{"input_tokens": vendorInputTokens, "output_tokens": vendorOutputTokens, "total_tokens": vendorInputTokens + vendorOutputTokens},
 		}
 		if !request.Stream {
@@ -100,11 +101,14 @@ func newVendorMux(codexToken string) *http.ServeMux {
 			_ = json.NewEncoder(w).Encode(response)
 			return
 		}
-		created, _ := json.Marshal(map[string]any{"type": "response.created", "response": map[string]any{"id": "resp_fixture", "object": "response", "created_at": 1, "model": vendorModel, "status": "in_progress", "error": nil, "incomplete_details": nil, "output": []any{}, "usage": nil}})
-		delta, _ := json.Marshal(map[string]any{"type": "response.output_text.delta", "item_id": "msg_fixture", "output_index": 0, "content_index": 0, "delta": vendorAnswer})
-		terminal, _ := json.Marshal(map[string]any{"type": "response.completed", "response": response})
+		created, _ := json.Marshal(map[string]any{"type": "response.created", "sequence_number": 0, "response": map[string]any{"id": "resp_fixture", "object": "response", "created_at": 1, "model": vendorModel, "status": "in_progress", "error": nil, "incomplete_details": nil, "output": []any{}, "usage": nil}})
+		added, _ := json.Marshal(map[string]any{"type": "response.output_item.added", "sequence_number": 1, "output_index": 0, "item": map[string]any{"id": "msg_fixture", "type": "message", "role": "assistant", "status": "in_progress", "content": []any{}}})
+		part, _ := json.Marshal(map[string]any{"type": "response.content_part.added", "sequence_number": 2, "item_id": "msg_fixture", "output_index": 0, "content_index": 0, "part": map[string]any{"type": "output_text", "text": "", "annotations": []any{}}})
+		delta, _ := json.Marshal(map[string]any{"type": "response.output_text.delta", "sequence_number": 3, "item_id": "msg_fixture", "output_index": 0, "content_index": 0, "delta": vendorAnswer, "logprobs": []any{}})
+		item, _ := json.Marshal(map[string]any{"type": "response.output_item.done", "sequence_number": 4, "output_index": 0, "item": message})
+		terminal, _ := json.Marshal(map[string]any{"type": "response.completed", "sequence_number": 5, "response": response})
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = fmt.Fprintf(w, "event: response.created\ndata: %s\n\nevent: response.output_text.delta\ndata: %s\n\nevent: response.completed\ndata: %s\n\n", created, delta, terminal)
+		_, _ = fmt.Fprintf(w, "event: response.created\ndata: %s\n\nevent: response.output_item.added\ndata: %s\n\nevent: response.content_part.added\ndata: %s\n\nevent: response.output_text.delta\ndata: %s\n\nevent: response.output_item.done\ndata: %s\n\nevent: response.completed\ndata: %s\n\n", created, added, part, delta, item, terminal)
 	})
 	mux.HandleFunc("POST /api/anthropic/v1/messages", func(w http.ResponseWriter, r *http.Request) {
 		if bearer(r) != "Bearer "+zaiKey {
