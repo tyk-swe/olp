@@ -24,6 +24,8 @@
   import { codeKeys } from './codeKeys';
   import {
     adapterLabel,
+    allowanceEvidenceLabel,
+    allowanceWindowSummary,
     servingHealthLabel,
     mutationError,
     tokenCount,
@@ -315,14 +317,17 @@
                 {#if account.allowance.windows?.length}
                   {#each account.allowance.windows as window (window.limit_id + ':' + window.window)}
                     <p>
-                      {window.limit_id} / {window.window}: {window.used_percent}%
-                      used · {window.remaining_percent}% remaining<br />
+                      {window.limit_id} / {window.window}: {allowanceWindowSummary(
+                        window
+                      )}<br />
                       Window: {window.window_minutes == null
                         ? 'Unknown'
                         : window.window_minutes + ' minutes'} · Reset {window.resets_at
                         ? formatDate(window.resets_at)
                         : 'Unknown'}<br />
-                      Observed {formatDate(window.observed_at)}
+                      {allowanceEvidenceLabel(window.evidence)} · Observed {formatDate(
+                        window.observed_at
+                      )}
                     </p>
                   {/each}
                 {:else}Percent: {account.allowance.remaining_percent == null

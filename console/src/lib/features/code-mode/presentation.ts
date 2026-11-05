@@ -6,6 +6,7 @@ export type PaidTargetOption = {
 };
 import type {
   CodeAccount,
+  CodeAllowanceWindow,
   CodeAttempt,
   CodeBudget,
   CodePool,
@@ -63,6 +64,27 @@ export function clientLabel(client: string): string {
 
 export function tokenCount(value: number | null | undefined): string {
   return value == null ? 'Unknown' : formatInteger(value);
+}
+
+export function allowanceWindowSummary(window: CodeAllowanceWindow): string {
+  if (window.unit === 'percent') {
+    return `${window.used_percent}% used · ${window.remaining_percent}% remaining`;
+  }
+  const used =
+    window.used_value == null
+      ? 'Unknown'
+      : `${window.used_value} ${window.unit}`;
+  const remaining =
+    window.remaining_value == null
+      ? 'Unknown'
+      : `${window.remaining_value} ${window.unit}`;
+  return `${used} used · ${remaining} remaining`;
+}
+
+export function allowanceEvidenceLabel(
+  evidence: CodeAllowanceWindow['evidence']
+): string {
+  return evidence === 'active' ? 'Active read' : 'Passive observation';
 }
 
 export function nativeModels(value: string): string[] {
