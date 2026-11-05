@@ -172,7 +172,7 @@ export function orderingSignalLabel(
 export function canRequestAllowanceRead(
   adapter: string | null | undefined
 ): boolean {
-  return adapter === 'codex';
+  return adapter === 'codex' || adapter === 'minimax_plan';
 }
 
 export function nextMonthlyReset(

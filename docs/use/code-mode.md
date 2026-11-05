@@ -32,15 +32,17 @@ profile only when the matching live lane in
 and its claims summary names that pair. Until then the console and this
 guide keep the no proven signal wording for that pair.
 
-Reset aware band ordering exists only for Codex in this stage, from its
-passive and active allowance windows. Both window sources are fixture
-proven only, and they stay live unproven until the Codex live lane runs
-green with its allowance and band checks passing. The GLM Coding Plan
-on `zai-coding-plan` and `bigmodel-coding-plan`, MiniMax M Plan on
-`minimax-plan` and `minimax-plan-cn`, Kimi Code on `kimi-code` and
-`kimi-code-cn`, Qwen Token Plan on `qwen-token-plan` and
-`qwen-token-plan-cn`, and OpenCode Go on `opencode-go` all order on
-weights plus cooldown, with no qualified allowance signal.
+Reset aware band ordering exists for Codex and for MiniMax M Plan in
+this stage. Codex orders from its passive and active allowance
+windows, and MiniMax orders from the active windows of its token plan
+remains read on `minimax-plan` and `minimax-plan-cn`. Both sources are
+fixture proven only, and they stay live unproven until the matching
+live lane runs green with its allowance and band checks passing. The
+GLM Coding Plan on `zai-coding-plan` and `bigmodel-coding-plan`, Kimi
+Code on `kimi-code` and `kimi-code-cn`, Qwen Token Plan on
+`qwen-token-plan` and `qwen-token-plan-cn`, and OpenCode Go on
+`opencode-go` all order on weights plus cooldown, with no qualified
+allowance signal.
 
 Replay after a proven nonexecution rejection is fixture proven for the
 GLM Coding Plan on both profiles and for the Qwen Token Plan on both
@@ -52,12 +54,11 @@ assumptions documented under portable conversation recovery. OpenCode
 Go has no qualified replay proof in this stage, and its reported
 allowance charge stays an observation, never an ordering input.
 
-MiniMax remains unqualified on both profiles. OLP reads no remains
-response for `minimax-plan` or `minimax-plan-cn` until the remains
-schema is pinned from real keys per profile, and both profiles keep
-weights plus cooldown ordering. Cooldown classes and failover behavior
-claim live evidence only for the pairs a green live run summary names.
-No adapter or profile claims live proven inference, ordering, cooldown,
+The MiniMax remains read is qualified from the vendor client schema
+on both profiles, and it stays fixture proven only until a live lane
+names the pair. Cooldown classes and failover behavior claim live
+evidence only for the pairs a green live run summary names. No
+adapter or profile claims live proven inference, ordering, cooldown,
 or failover from fixture evidence alone.
 
 ## Adapters and clients
@@ -910,13 +911,15 @@ block subsequent budgeted admission. Historical unknown usage prevents falsely
 enabling a hard guarantee.
 
 Provider-reported allowance is separate metadata with observation and reset
-times. Only Codex reports allowance OLP reads. OpenCode Go and coding-plan
-accounts show none, and their health comes from response status alone. MiniMax
-M Plan ordering on both the global and mainland China profiles runs on weights
-plus cooldown until the remains schema is pinned from real keys on both
-profiles, and OLP makes no remains read before then. The documented remains
-endpoint is `GET https://www.minimax.io/v1/token_plan/remains`, and OLP does
-not call it until that schema is pinned per profile from real keys. For
+times. Codex and MiniMax M Plan report allowance OLP reads, and the
+other coding-plan accounts show none, with health from response
+status alone. For MiniMax token plan accounts, OLP reads
+`GET https://api.minimax.io/v1/token_plan/remains` on the global
+profile and `GET https://api.minimax.cn/v1/token_plan/remains` on the
+mainland China profile. The read maps only the server remaining
+percents of one coding bucket, plus an exhausted status as zero
+remaining, and it writes nothing when the response does not match
+the pinned vendor client schema. For
 responses that mark an account unavailable or quota-limited, OLP honors a
 single valid Retry-After header as unsigned seconds or an HTTP date. Zero
 seconds and past dates permit an immediate retry when other eligibility checks

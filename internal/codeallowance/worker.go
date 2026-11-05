@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -171,6 +172,9 @@ func (r *Reader) fetchForAdapter(ctx context.Context, adapter codemode.Adapter, 
 	case codemode.AdapterCodex:
 		allowance, parsed := r.fetchCodex(ctx, entry, now)
 		return allowance, parsed, nil
+	case codemode.AdapterMiniMaxPlan:
+		allowance, parsed := r.fetchMiniMax(ctx, entry, now)
+		return allowance, parsed, nil
 	default:
 		return codemode.Allowance{}, false, fmt.Errorf("%w: %s", errAllowanceReadUnqualified, adapter)
 	}
@@ -205,6 +209,59 @@ func (r *Reader) fetchCodex(ctx context.Context, entry DueAccount, now time.Time
 	allowance, ok := ParseUsage(body, now)
 	if !ok {
 		r.Log.Warn("code allowance read response did not match the pinned usage schema", "account_id", entry.Account.ID)
+		return codemode.Allowance{}, false
+	}
+	return allowance, true
+}
+
+func remainsURL(profileID string) (string, bool) {
+	switch profileID {
+	case codeplans.MiniMaxProfile:
+		return RemainsURL, true
+	case codeplans.MiniMaxCNProfile:
+		return RemainsURLCN, true
+	default:
+		return "", false
+	}
+}
+
+func (r *Reader) fetchMiniMax(ctx context.Context, entry DueAccount, now time.Time) (codemode.Allowance, bool) {
+	url, ok := remainsURL(entry.Configuration.ProfileID)
+	if !ok {
+		return codemode.Allowance{}, false
+	}
+	auth, err := r.Authorizer.AuthorizeCode(ctx, entry.Configuration, entry.Account, codemode.Dispatch{
+		Adapter: codemode.AdapterMiniMaxPlan, Protocol: codemode.ProtocolMessages, ClientPath: "v1/messages",
+	})
+	if err != nil {
+		r.Log.Warn("code allowance read authorization unavailable", "account_id", entry.Account.ID, "error", err)
+		return codemode.Allowance{}, false
+	}
+	if auth.Headers.Get("Authorization") == "" {
+		r.Log.Warn("code allowance read authorization has no bearer credential for the remains endpoint", "account_id", entry.Account.ID)
+		return codemode.Allowance{}, false
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		r.Log.Warn("code allowance read request could not be built", "account_id", entry.Account.ID, "error", err)
+		return codemode.Allowance{}, false
+	}
+	request.Header = auth.Headers.Clone()
+	request.Header.Set("Accept", "application/json")
+	response, err := r.Client.Do(request)
+	if err != nil {
+		r.Log.Warn("code allowance read failed", "account_id", entry.Account.ID, "error", err)
+		return codemode.Allowance{}, false
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxUsageBytes+1))
+	if err != nil || response.StatusCode != http.StatusOK || len(body) > maxUsageBytes {
+		r.Log.Warn("code allowance read returned no usable remains", "account_id", entry.Account.ID, "status", response.StatusCode)
+		return codemode.Allowance{}, false
+	}
+	allowance, parsed := ParseRemains(body, entry.Account.Models, now)
+	if !parsed {
+		r.Log.Warn("code allowance read response did not match the pinned remains schema", "account_id", entry.Account.ID)
 		return codemode.Allowance{}, false
 	}
 	return allowance, true
