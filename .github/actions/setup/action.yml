@@ -7,6 +7,9 @@ inputs:
   go-cache-suffix:
     description: Distinguish jobs that build different Go artifacts.
     default: ""
+  go-cache-restore-suffix:
+    description: Prefer artifacts from the same job before the shared cache.
+    default: ""
 outputs:
   go-cache-key:
     description: The Go build cache key for this toolchain and runner image.
@@ -28,11 +31,17 @@ runs:
         GO_VERSION: ${{ steps.go.outputs.go-version }}
         GO_SUM: ${{ hashFiles('**/go.sum') }}
         GO_CACHE_SUFFIX: ${{ inputs.go-cache-suffix }}
+        GO_CACHE_RESTORE_SUFFIX: ${{ inputs.go-cache-restore-suffix }}
       run: |
         prefix="go-$ImageOS-$RUNNER_ARCH-$GO_VERSION-"
         {
-          echo "prefix=$prefix"
           echo "key=$prefix$ImageVersion-$GO_SUM$GO_CACHE_SUFFIX"
+          echo "restore-keys<<EOF"
+          if [[ -n "$GO_CACHE_RESTORE_SUFFIX" ]]; then
+            echo "$prefix$ImageVersion-$GO_SUM$GO_CACHE_RESTORE_SUFFIX"
+          fi
+          echo "$prefix"
+          echo "EOF"
         } >> "$GITHUB_OUTPUT"
     - id: go-build-cache
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -42,7 +51,7 @@ runs:
           ~/.cache/go-build
           ~/.cache/staticcheck
         key: ${{ steps.go-cache.outputs.key }}
-        restore-keys: ${{ steps.go-cache.outputs.prefix }}
+        restore-keys: ${{ steps.go-cache.outputs.restore-keys }}
     - shell: bash
       run: go mod download
     - if: inputs.node-modules == 'true'

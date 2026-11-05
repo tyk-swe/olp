@@ -26,11 +26,16 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 )
 
-func TestCodeAdmissionRecordsChosenAndPinnedDecisions(t *testing.T) {
+func TestCodeDecisionJourneys(t *testing.T) {
 	pool, _ := newDatabase(t)
 	if err := database.Migrate(t.Context(), pool); err != nil {
 		t.Fatal(err)
 	}
+	t.Run("chosen and pinned", func(t *testing.T) { codeAdmissionRecordsChosenAndPinnedDecisions(t, pool) })
+	t.Run("allowance ordering", func(t *testing.T) { codeBandOrderingOrdersNewRootsAndNeverMovesPins(t, pool) })
+}
+
+func codeAdmissionRecordsChosenAndPinnedDecisions(t *testing.T, pool *pgxpool.Pool) {
 	user, project, provider := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	healthyCredential, coolingCredential := uuid.NewString(), uuid.NewString()
 	healthy, cooling := uuid.NewString(), uuid.NewString()
@@ -171,11 +176,7 @@ func bandAllowanceJSON(t *testing.T, remaining float64, resetsAt *time.Time, obs
 	return document
 }
 
-func TestCodeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T) {
-	pool, _ := newDatabase(t)
-	if err := database.Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
+func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool.Pool) {
 	user, project, provider := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	key := "11111111-1111-4111-8111-111111111111"
 	healthy := "a1111111-1111-4111-8111-111111111111"
@@ -653,11 +654,20 @@ func (j cooldownJourney) admission(model, conversation string) resources.CodeAdm
 	return resources.CodeAdmission{Route: j.route, APIKeyID: j.key, Operation: codemode.Operation{Name: "responses", Model: model, Identity: codemode.Identity{Conversation: conversation}}, Providers: []string{j.provider}}
 }
 
-func TestCodeCooldownClassesScopeSelectionNeverShortenAndNameRefusalRecovery(t *testing.T) {
+func TestCodeCooldownJourneys(t *testing.T) {
 	pool, _ := newDatabase(t)
 	if err := database.Migrate(t.Context(), pool); err != nil {
 		t.Fatal(err)
 	}
+	t.Run("classes and recovery", func(t *testing.T) { codeCooldownClassesScopeSelectionNeverShortenAndNameRefusalRecovery(t, pool) })
+	t.Run("model-less cooldowns", func(t *testing.T) { codeModelLessConnectionChecksEveryModelCooldown(t, pool) })
+	t.Run("model hints", func(t *testing.T) { codeModelLessConnectionRequiresUsefulModelHint(t, pool) })
+	t.Run("alias targets", func(t *testing.T) { codeModelCooldownFollowsAliasTarget(t, pool) })
+	t.Run("recovery selection", func(t *testing.T) { codeRecoveryRecordsActualDestinationSelection(t, pool) })
+	t.Run("tree recovery", func(t *testing.T) { codeTreeRefusalUsesPreferredAccountRecovery(t, pool) })
+}
+
+func codeCooldownClassesScopeSelectionNeverShortenAndNameRefusalRecovery(t *testing.T, pool *pgxpool.Pool) {
 	journey := seedCooldownJourney(t, pool)
 	base := time.Now().UTC().Truncate(time.Second)
 	modelRetry := base.Add(30 * time.Minute)
@@ -720,11 +730,7 @@ func TestCodeCooldownClassesScopeSelectionNeverShortenAndNameRefusalRecovery(t *
 	}
 }
 
-func TestCodeModelLessConnectionChecksEveryModelCooldown(t *testing.T) {
-	pool, _ := newDatabase(t)
-	if err := database.Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
+func codeModelLessConnectionChecksEveryModelCooldown(t *testing.T, pool *pgxpool.Pool) {
 	journey := seedCooldownJourney(t, pool)
 	providers := []string{journey.provider}
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, journey.second); err != nil {
@@ -795,11 +801,7 @@ func TestCodeModelLessConnectionChecksEveryModelCooldown(t *testing.T) {
 	}
 }
 
-func TestCodeModelLessConnectionRequiresUsefulModelHint(t *testing.T) {
-	pool, _ := newDatabase(t)
-	if err := database.Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
+func codeModelLessConnectionRequiresUsefulModelHint(t *testing.T, pool *pgxpool.Pool) {
 	for _, tc := range []struct {
 		name        string
 		credential  bool
@@ -862,11 +864,7 @@ func TestCodeModelLessConnectionRequiresUsefulModelHint(t *testing.T) {
 	}
 }
 
-func TestCodeModelCooldownFollowsAliasTarget(t *testing.T) {
-	pool, _ := newDatabase(t)
-	if err := database.Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
+func codeModelCooldownFollowsAliasTarget(t *testing.T, pool *pgxpool.Pool) {
 	journey := seedCooldownJourney(t, pool)
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, journey.second); err != nil {
 		t.Fatal(err)
@@ -1005,11 +1003,7 @@ func TestCodeCatalogReachesPaidModelPoolFallback(t *testing.T) {
 	}
 }
 
-func TestCodeRecoveryRecordsActualDestinationSelection(t *testing.T) {
-	pool, _ := newDatabase(t)
-	if err := database.Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
+func codeRecoveryRecordsActualDestinationSelection(t *testing.T, pool *pgxpool.Pool) {
 	journey := seedCooldownJourney(t, pool)
 	third, credential := uuid.NewString(), uuid.NewString()
 	statements := []struct {
@@ -1080,11 +1074,7 @@ func TestCodeRecoveryRecordsActualDestinationSelection(t *testing.T) {
 	}
 }
 
-func TestCodeTreeRefusalUsesPreferredAccountRecovery(t *testing.T) {
-	pool, _ := newDatabase(t)
-	if err := database.Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
+func codeTreeRefusalUsesPreferredAccountRecovery(t *testing.T, pool *pgxpool.Pool) {
 	journey := seedCooldownJourney(t, pool)
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, journey.second); err != nil {
 		t.Fatal(err)
@@ -1127,11 +1117,16 @@ func TestCodeTreeRefusalUsesPreferredAccountRecovery(t *testing.T) {
 	}
 }
 
-func TestCodeActiveAllowanceDoesNotAffectBands(t *testing.T) {
+func TestCodeActiveAllowanceJourneys(t *testing.T) {
 	pool, _ := newDatabase(t)
 	if err := database.Migrate(t.Context(), pool); err != nil {
 		t.Fatal(err)
 	}
+	t.Run("Codex", func(t *testing.T) { codeActiveAllowanceDoesNotAffectBands(t, pool) })
+	t.Run("MiniMax", func(t *testing.T) { codeMiniMaxActiveRemainsDoesNotAffectBands(t, pool) })
+}
+
+func codeActiveAllowanceDoesNotAffectBands(t *testing.T, pool *pgxpool.Pool) {
 	user, project, provider := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	active, unknown := uuid.NewString(), uuid.NewString()
 	key, poolID, routeID, revisionID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
@@ -1254,11 +1249,7 @@ func TestCodeActiveAllowanceDoesNotAffectBands(t *testing.T) {
 
 }
 
-func TestCodeMiniMaxActiveRemainsDoesNotAffectBands(t *testing.T) {
-	pool, _ := newDatabase(t)
-	if err := database.Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
+func codeMiniMaxActiveRemainsDoesNotAffectBands(t *testing.T, pool *pgxpool.Pool) {
 	user, project, provider := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	active, unknown := uuid.NewString(), uuid.NewString()
 	key, poolID, routeID, revisionID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
