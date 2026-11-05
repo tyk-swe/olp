@@ -66,6 +66,7 @@ func (w *Worker) Pass(ctx context.Context) error {
 		return err
 	}
 	sem := make(chan struct{}, 4)
+	results := make(chan error, len(claims))
 	var wg sync.WaitGroup
 	for _, claim := range claims {
 		wg.Go(func() {
@@ -101,11 +102,23 @@ func (w *Worker) Pass(ctx context.Context) error {
 			<-done
 			finish, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			defer stop()
-			_ = w.Store.FinishRetainedClaim(finish, claim, class)
+			finishErr := w.Store.FinishRetainedClaim(finish, claim, class)
+			if class != "" {
+				results <- errors.Join(errors.New(class), finishErr)
+				return
+			}
+			results <- finishErr
 		})
 	}
 	wg.Wait()
-	return nil
+	close(results)
+	var failures []error
+	for result := range results {
+		if result != nil {
+			failures = append(failures, result)
+		}
+	}
+	return errors.Join(failures...)
 }
 func (w *Worker) poll(ctx context.Context, c resources.RetainedClaim) string {
 	closed, err := w.Store.CloseUndispatchedRetained(ctx, c)

@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,14 +16,66 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
+	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/retainedworker"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
+
+func testRetainedSettlementPollFailure(t *testing.T, fixture usageFixture) {
+	t.Helper()
+	pool := fixture.pool
+	store := resources.New(pool)
+	resource, err := store.Put(t.Context(), &resources.Resource{
+		Kind: "fine_tuning_job", APIKeyID: fixture.keyID, RouteSlug: "retained-health",
+		ProviderID: fixture.providerID, ProviderRevisionID: uuid.NewString(),
+		RouteRevisionID: uuid.NewString(), SlotID: uuid.NewString(), TargetID: uuid.NewString(),
+		UpstreamID: "fixture-job", State: "running",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.retained_settlements
+		(resource_id,operation,templates,token_consuming) VALUES($1,'fine_tuning','{}',false)`, resource.UUID); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	worker := retainedworker.Worker{Store: store, Resolver: resources.NewResolver(pool), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	go func() {
+		defer close(done)
+		worker.Run(ctx)
+	}()
+	defer func() { cancel(); <-done }()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		var failures, successes, resourceFailures int64
+		var lastError string
+		var lastSuccess *time.Time
+		err := pool.QueryRow(t.Context(), `SELECT h.failures_total,h.successes_total,h.last_success_at,s.failures,s.last_error
+			FROM olp.worker_task_health h CROSS JOIN olp.retained_settlements s
+			WHERE h.task='retained_settlement' AND s.resource_id=$1`, resource.UUID).
+			Scan(&failures, &successes, &lastSuccess, &resourceFailures, &lastError)
+		if err == nil {
+			t.Logf("resource failures=%d error=%s worker failures=%d successes=%d has success=%t", resourceFailures, lastError, failures, successes, lastSuccess != nil)
+			if resourceFailures != 1 || lastError != "credential_or_pin_unavailable" || failures != 1 {
+				t.Fatal("failed retained settlement was reported as a successful worker pass")
+			}
+			return
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			t.Fatal(err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("retained worker did not checkpoint its first pass")
+}
 
 // TestPublishedRouteServesAndSettlesUsage takes one request from publication
 // through the gateway to durable usage, across the Valkey stream and the
@@ -354,6 +407,7 @@ func TestCleanupPreservesRetainedAndActiveEvidence(t *testing.T) {
 	t.Run("anchor retention", func(t *testing.T) { testAnchorRetention(t, fixture) })
 	t.Run("identity expiry", func(t *testing.T) { testIdentityExpiry(t, fixture) })
 	t.Run("workflow recovery", func(t *testing.T) { testWorkflowRecovery(t, fixture) })
+	t.Run("retained settlement failure", func(t *testing.T) { testRetainedSettlementPollFailure(t, fixture) })
 }
 
 func testAnchorRetention(t *testing.T, fixture usageFixture) {
