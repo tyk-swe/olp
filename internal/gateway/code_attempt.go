@@ -354,6 +354,17 @@ func (a *codeAttempt) flushPendingHealth(ctx context.Context) {
 	a.observeHealth(ctx, pending)
 }
 
+func (a *codeAttempt) qwenQuotaRetryAt(envelope string, retryAt time.Time, now time.Time) time.Time {
+	if envelope != codeadapter.QwenQuotaEnvelope || a.permit.Account.CycleAnchor == nil {
+		return retryAt
+	}
+	reset, ok := codemode.NextMonthlyReset(*a.permit.Account.CycleAnchor, now)
+	if !ok || !reset.After(retryAt) {
+		return retryAt
+	}
+	return reset
+}
+
 func (a *codeAttempt) observeCooldownClass(o codemode.Observation) (codeadapter.Classification, bool) {
 	if a.paid != nil || len(o.RejectionBody) == 0 || a.permit.Account.ID == "" {
 		return codeadapter.Classification{}, false
@@ -379,6 +390,7 @@ func (a *codeAttempt) observeCooldownClass(o codemode.Observation) (codeadapter.
 		a.pendingHealth = nil
 		return classification, true
 	}
+	classification.RetryAt = a.qwenQuotaRetryAt(classification.Envelope, classification.RetryAt, now)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	err := a.server.CodeLedger.ObserveCooldownClass(ctx, a.permit.Account.ID, a.model, classification, now)

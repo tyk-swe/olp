@@ -85,6 +85,7 @@ type Account struct {
 	GrantState       string     `json:"grant_state"`
 	Allowance        *Allowance `json:"allowance"`
 	Cooldowns        []Cooldown `json:"cooldowns"`
+	CycleAnchor      *string    `json:"cycle_anchor"`
 
 	AllowanceReadRequestedAt *time.Time `json:"allowance_read_requested_at"`
 	AllowanceReadAt          *time.Time `json:"allowance_read_at"`

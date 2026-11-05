@@ -228,6 +228,82 @@ func TestCodeAttemptGLMProvenQuotaRecoversAndAmbiguousDoesNot(t *testing.T) {
 	}
 }
 
+func qwenAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time, anchor *string) *codeAttempt {
+	t.Helper()
+	vendor, ok := codeadapter.Lookup(codemode.AdapterQwenTokenPlan)
+	if !ok {
+		t.Fatal("qwen vendor missing")
+	}
+	endpoint, ok := vendor.Endpoint("v1/messages")
+	if !ok {
+		t.Fatal("qwen messages endpoint missing")
+	}
+	server := &Server{CodeLedger: ledger, now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	return &codeAttempt{
+		server:   server,
+		permit:   resources.CodePermit{InitialRecovery: true, Account: codemode.Account{ID: "account", CycleAnchor: anchor}, Attempt: codemode.Attempt{ID: "attempt"}},
+		config:   routing.Configuration{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.QwenTokenPlanProfile},
+		endpoint: endpoint,
+		observer: codeObserver(endpoint),
+		model:    "qwen-model",
+	}
+}
+
+func TestCodeAttemptQwenQuotaCooldownUsesCycleAnchorReset(t *testing.T) {
+	// Source: https://www.alibabacloud.com/help/en/model-studio/token-plan-team-faq (fetched 2026-11-05), 429 insufficient_quota resets next subscription month.
+	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	anchor := "2026-01-15"
+	ledger := &fakeCodeLedger{}
+	attempt := qwenAttempt(t, ledger, now, &anchor)
+	attempt.response(t.Context(), 429, http.Header{})
+	attempt.observe(attempt.observer.Unary([]byte(`{"error":{"code":"insufficient_quota","message":"Your token-plan quota has been exhausted."}}`)))
+	attempt.finish(t.Context())
+	if len(ledger.cooldowns) != 1 {
+		t.Fatalf("cooldowns = %+v, want one credential cooldown", ledger.cooldowns)
+	}
+	got := ledger.cooldowns[0]
+	want := time.Date(2026, 11, 15, 0, 0, 0, 0, time.UTC)
+	if got.classification.Envelope != "qwen_insufficient_quota" || got.classification.Class != codeadapter.CooldownQuota || !got.classification.RetryAt.Equal(want) {
+		t.Fatalf("cooldown = %+v, want retry at %s", got, want)
+	}
+}
+
+func TestCodeAttemptQwenQuotaCooldownShortVendorRetryAfterDoesNotShortenAnchorReset(t *testing.T) {
+	// Source: https://www.alibabacloud.com/help/en/model-studio/token-plan-team-faq (fetched 2026-11-05), 429 insufficient_quota resets next subscription month, so a shorter vendor Retry-After never shortens the monthly reset.
+	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	anchor := "2026-01-15"
+	want := time.Date(2026, 11, 15, 0, 0, 0, 0, time.UTC)
+	ledger := &fakeCodeLedger{}
+	attempt := qwenAttempt(t, ledger, now, &anchor)
+	attempt.response(t.Context(), 429, http.Header{"Retry-After": {"3600"}})
+	attempt.observe(attempt.observer.Unary([]byte(`{"error":{"code":"insufficient_quota","message":"Your token-plan quota has been exhausted."}}`)))
+	attempt.finish(t.Context())
+	if len(ledger.cooldowns) != 1 || !ledger.cooldowns[0].classification.RetryAt.Equal(want) {
+		t.Fatalf("cooldowns = %+v, want anchor reset %s over one hour retry-after", ledger.cooldowns, want)
+	}
+	longLedger := &fakeCodeLedger{}
+	longAttempt := qwenAttempt(t, longLedger, now, &anchor)
+	longAttempt.response(t.Context(), 429, http.Header{"Retry-After": {"2592000"}})
+	longAttempt.observe(longAttempt.observer.Unary([]byte(`{"error":{"code":"insufficient_quota","message":"Your token-plan quota has been exhausted."}}`)))
+	longAttempt.finish(t.Context())
+	if len(longLedger.cooldowns) != 1 || !longLedger.cooldowns[0].classification.RetryAt.Equal(now.Add(30*24*time.Hour)) {
+		t.Fatalf("cooldowns = %+v, want later vendor retry-after over anchor reset", longLedger.cooldowns)
+	}
+}
+
+func TestCodeAttemptQwenQuotaCooldownWithoutAnchorKeepsFallback(t *testing.T) {
+	// Source: https://www.alibabacloud.com/help/en/model-studio/token-plan-team-faq (fetched 2026-11-05), 429 insufficient_quota.
+	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	ledger := &fakeCodeLedger{}
+	attempt := qwenAttempt(t, ledger, now, nil)
+	attempt.response(t.Context(), 429, http.Header{})
+	attempt.observe(attempt.observer.Unary([]byte(`{"error":{"code":"insufficient_quota","message":"Your token-plan quota has been exhausted."}}`)))
+	attempt.finish(t.Context())
+	if len(ledger.cooldowns) != 1 || !ledger.cooldowns[0].classification.RetryAt.Equal(now.Add(time.Minute)) {
+		t.Fatalf("cooldowns = %+v, want one minute fallback without anchor", ledger.cooldowns)
+	}
+}
+
 func minimaxAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time, path string) *codeAttempt {
 	t.Helper()
 	vendor, ok := codeadapter.Lookup(codemode.AdapterMiniMaxPlan)

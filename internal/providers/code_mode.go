@@ -19,7 +19,7 @@ func (s *Server) registerCodeMode(mux *http.ServeMux) {
 	s.Access.Route(mux, "POST /api/v1/code/accounts/{id}/allowance-reads", s.requestCodeAllowanceRead)
 }
 
-var codeAccountJSON = `SELECT jsonb_build_object('id',x.id,'project_id',x.project_id,'provider_id',x.provider_id,'credential_id',x.credential_id,'principal',x.principal,'name',x.name,'enabled',x.enabled,'models',x.models,'etag',x.etag,'health',x.health,'health_observed_at',x.health_observed_at,'unavailable_until',x.unavailable_until,
+var codeAccountJSON = `SELECT jsonb_build_object('id',x.id,'project_id',x.project_id,'provider_id',x.provider_id,'credential_id',x.credential_id,'principal',x.principal,'name',x.name,'enabled',x.enabled,'models',x.models,'etag',x.etag,'health',x.health,'health_observed_at',x.health_observed_at,'unavailable_until',x.unavailable_until,'cycle_anchor',x.cycle_anchor,
 	'cooldowns',coalesce((SELECT jsonb_agg(jsonb_build_object('class',cd.class,'model',cd.model,'retry_at',cd.retry_at) ORDER BY cd.retry_at,cd.class,cd.model) FROM olp.code_account_cooldowns cd WHERE cd.account_id=x.id AND cd.retry_at>now()),'[]'::jsonb),
 	'adapter',` + codeadapter.SQL("p.configuration") + `,
 	'research_services',CASE WHEN c.profile_id='` + codeplans.ZAIProfile + `' AND p.configuration->>'profile_id'=c.profile_id THEN '["search","reader","zread"]'::jsonb ELSE '[]'::jsonb END,
@@ -91,6 +91,7 @@ type CodeAccountInput struct {
 	Name         string   `json:"name"`
 	Enabled      bool     `json:"enabled"`
 	Models       []string `json:"models"`
+	CycleAnchor  *string  `json:"cycle_anchor,omitempty"`
 }
 
 func (s *Server) writeCodeAccount(r *http.Request, _ access.Principal) (access.Reply, error) {
@@ -116,13 +117,17 @@ func SaveCodeAccount(ctx context.Context, tx pgx.Tx, p access.Principal, id, eta
 		return nil, err
 	}
 	var principal string
-	err := tx.QueryRow(ctx, `SELECT c.principal FROM olp.provider_credentials c JOIN olp.providers p ON p.id=c.provider_id JOIN olp.provider_grants g ON g.credential_id=c.id
-			WHERE p.id=$1 AND p.project_id=$2 AND c.id=$3 AND (NOT $4 OR (c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())))`, in.ProviderID, in.ProjectID, in.CredentialID, in.Enabled).Scan(&principal)
+	var profileID *string
+	err := tx.QueryRow(ctx, `SELECT c.principal,p.configuration->>'profile_id' FROM olp.provider_credentials c JOIN olp.providers p ON p.id=c.provider_id JOIN olp.provider_grants g ON g.credential_id=c.id
+			WHERE p.id=$1 AND p.project_id=$2 AND c.id=$3 AND (NOT $4 OR (c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())))`, in.ProviderID, in.ProjectID, in.CredentialID, in.Enabled).Scan(&principal, &profileID)
 	if err != nil {
 		return nil, err
 	}
 	if principal == "" {
 		return nil, access.Invalid("credential_id", "Enrollment must establish an upstream principal.")
+	}
+	if in.CycleAnchor != nil && (profileID == nil || *profileID != codeplans.QwenTokenPlanProfile && *profileID != codeplans.QwenTokenPlanCNProfile) {
+		return nil, access.Invalid("cycle_anchor", "A cycle anchor applies only to Qwen Token Plan accounts.")
 	}
 	if existing {
 		var oldPrincipal, oldProvider string
@@ -134,11 +139,11 @@ func SaveCodeAccount(ctx context.Context, tx pgx.Tx, p access.Principal, id, eta
 		}
 	}
 	models, _ := json.Marshal(in.Models)
-	_, err = tx.Exec(ctx, `INSERT INTO olp.code_accounts(id,project_id,provider_id,credential_id,principal,name,enabled,models,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-			ON CONFLICT(id) DO UPDATE SET credential_id=excluded.credential_id,name=excluded.name,enabled=excluded.enabled,models=excluded.models,etag=excluded.etag,
+	_, err = tx.Exec(ctx, `INSERT INTO olp.code_accounts(id,project_id,provider_id,credential_id,principal,name,enabled,models,etag,created_by,cycle_anchor) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+			ON CONFLICT(id) DO UPDATE SET credential_id=excluded.credential_id,name=excluded.name,enabled=excluded.enabled,models=excluded.models,etag=excluded.etag,cycle_anchor=excluded.cycle_anchor,
 			health=CASE WHEN code_accounts.credential_id<>excluded.credential_id THEN 'unknown' ELSE code_accounts.health END,
 			health_observed_at=CASE WHEN code_accounts.credential_id<>excluded.credential_id THEN NULL ELSE code_accounts.health_observed_at END,
-			unavailable_until=CASE WHEN code_accounts.credential_id<>excluded.credential_id THEN NULL ELSE code_accounts.unavailable_until END`, id, in.ProjectID, in.ProviderID, in.CredentialID, principal, in.Name, in.Enabled, models, etag, p.UserID())
+			unavailable_until=CASE WHEN code_accounts.credential_id<>excluded.credential_id THEN NULL ELSE code_accounts.unavailable_until END`, id, in.ProjectID, in.ProviderID, in.CredentialID, principal, in.Name, in.Enabled, models, etag, p.UserID(), in.CycleAnchor)
 	if err != nil {
 		return nil, err
 	}
@@ -154,6 +159,11 @@ func (in CodeAccountInput) validate() error {
 	if err := codemode.ValidateModels(in.Models); err != nil {
 		return access.Invalid("models", err.Error())
 	}
+	if in.CycleAnchor != nil {
+		if _, ok := codemode.ParseCycleAnchor(*in.CycleAnchor); !ok {
+			return access.Invalid("cycle_anchor", "Use a calendar date as the subscription cycle anchor.")
+		}
+	}
 	return nil
 }
 
@@ -162,7 +172,7 @@ func (in CodeAccountInput) Validated() (CodeAccountInput, error) {
 	if err != nil {
 		return CodeAccountInput{}, err
 	}
-	canonical := CodeAccountInput{ProjectID: ids[0], ProviderID: ids[1], CredentialID: ids[2], Name: in.Name, Enabled: in.Enabled, Models: in.Models}
+	canonical := CodeAccountInput{ProjectID: ids[0], ProviderID: ids[1], CredentialID: ids[2], Name: in.Name, Enabled: in.Enabled, Models: in.Models, CycleAnchor: in.CycleAnchor}
 	return canonical, canonical.validate()
 }
 
