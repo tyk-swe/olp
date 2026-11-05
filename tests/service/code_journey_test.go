@@ -457,6 +457,37 @@ func TestCodeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T) {
 			t.Fatalf("%s refusal = %+v, want retry at %s", tc.slug, err, tc.reset)
 		}
 	}
+	for _, tc := range []struct {
+		name      string
+		allowance codemode.Allowance
+		retryAt   time.Time
+	}{
+		{"token freshness", codemode.Allowance{RemainingTokens: new(int64(0)), TokenObservation: &codemode.CountObservation{ObservedAt: observed}, ObservedAt: observed}, observed.Add(15 * time.Minute)},
+		{"request freshness", codemode.Allowance{RemainingRequests: new(int64(0)), RequestObservation: &codemode.CountObservation{ObservedAt: observed}, ObservedAt: observed}, observed.Add(15 * time.Minute)},
+		{"legacy freshness", codemode.Allowance{RemainingTokens: new(int64(0)), ObservedAt: observed}, observed.Add(15 * time.Minute)},
+		{"latest freshness", codemode.Allowance{RemainingTokens: new(int64(0)), TokenObservation: &codemode.CountObservation{ObservedAt: observed.Add(-time.Minute)}, RemainingRequests: new(int64(0)), RequestObservation: &codemode.CountObservation{ObservedAt: observed}, ObservedAt: observed}, observed.Add(15 * time.Minute)},
+		{"later vendor reset", codemode.Allowance{RemainingTokens: new(int64(0)), TokenObservation: &codemode.CountObservation{ObservedAt: observed}, RemainingRequests: new(int64(0)), RequestObservation: &codemode.CountObservation{ObservedAt: observed, ResetsAt: &countReset}, ObservedAt: observed}, countReset},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			document, err := json.Marshal(tc.allowance)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1`, healthy, document); err != nil {
+				t.Fatal(err)
+			}
+			for _, policy := range []struct {
+				slug    string
+				retryAt *time.Time
+			}{{"band-on", &tc.retryAt}, {"band-off", nil}} {
+				_, err := store.Admit(t.Context(), resources.CodeAdmission{Route: bySlug[policy.slug], APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{provider}})
+				var refusal *codemode.Refusal
+				if !errors.As(err, &refusal) || (policy.retryAt == nil && refusal.RetryAt != nil) || (policy.retryAt != nil && (refusal.RetryAt == nil || !refusal.RetryAt.Equal(*policy.retryAt))) {
+					t.Fatalf("%s refusal = %+v, want retry at %v", policy.slug, err, policy.retryAt)
+				}
+			}
+		})
+	}
 	if err := store.ObserveCooldownClass(t.Context(), healthy, "model", codeadapter.Classification{Class: codeadapter.CooldownRate, Scope: codeadapter.ScopeModel, RetryAt: countReset, Envelope: "fixture_rate"}, observed); err != nil {
 		t.Fatal(err)
 	}

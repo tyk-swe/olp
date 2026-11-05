@@ -632,20 +632,25 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root stri
 		if len(candidates) == 0 {
 			return none, codemode.Refuse(503, "code_account_unavailable")
 		}
-		deadlines := make([]*time.Time, 0, len(candidates))
-		for _, candidate := range candidates {
-			if (candidate.account.Health == "unavailable" || candidate.account.Health == "quota_limited") && candidate.account.UnavailableUntil == nil {
-				deadlines = append(deadlines, nil)
-				continue
-			}
-			unavailableUntil := func() *time.Time {
-				if candidate.account.Health == "unavailable" || candidate.account.Health == "quota_limited" {
-					return candidate.account.UnavailableUntil
+		deadlines := slices.Collect(func(yield func(*time.Time) bool) {
+			for _, candidate := range candidates {
+				if (candidate.account.Health == "unavailable" || candidate.account.Health == "quota_limited") && candidate.account.UnavailableUntil == nil {
+					if !yield(nil) {
+						return
+					}
+					continue
 				}
-				return nil
-			}()
-			deadlines = append(deadlines, codemode.BlockingDeadline(now, unavailableUntil, candidate.cooldownRetry, candidate.account.Allowance, bandOrdered, ""))
-		}
+				unavailableUntil := func() *time.Time {
+					if candidate.account.Health == "unavailable" || candidate.account.Health == "quota_limited" {
+						return candidate.account.UnavailableUntil
+					}
+					return nil
+				}()
+				if !yield(codemode.BlockingDeadline(now, unavailableUntil, candidate.cooldownRetry, candidate.account.Allowance, bandOrdered, "")) {
+					return
+				}
+			}
+		})
 		return none, &codemode.Refusal{Status: 503, Code: "code_account_unavailable", RetryAt: codemode.EarliestRecovery(now, deadlines...)}
 	}
 	index := slices.IndexFunc(candidates, func(candidate codeCandidate) bool {

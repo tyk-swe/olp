@@ -59,34 +59,44 @@ func ExhaustedResets(allowance *Allowance, now time.Time, bandOrdered bool, fami
 	if allowance == nil {
 		return nil
 	}
-	resets := make([]*time.Time, 0, len(allowance.Windows)+3)
-	for _, window := range allowance.Windows {
-		if window.EffectiveEvidence() == AllowanceEvidencePassive && (!bandOrdered || family != "" && window.LimitID == family) &&
-			(window.EffectiveUnit() == AllowanceUnitPercent && window.RemainingPercent == 0 ||
-				slices.Contains([]AllowanceUnit{AllowanceUnitCount, AllowanceUnitCredits, AllowanceUnitCents}, window.EffectiveUnit()) && window.RemainingValue != nil && *window.RemainingValue == 0) &&
-			observationBlocks(window.ResetsAt, window.ObservedAt, bandOrdered, now) {
-			resets = append(resets, window.ResetsAt)
+	return slices.Collect(func(yield func(*time.Time) bool) {
+		for _, window := range allowance.Windows {
+			if window.EffectiveEvidence() == AllowanceEvidencePassive && (!bandOrdered || family != "" && window.LimitID == family) &&
+				(window.EffectiveUnit() == AllowanceUnitPercent && window.RemainingPercent == 0 ||
+					slices.Contains([]AllowanceUnit{AllowanceUnitCount, AllowanceUnitCredits, AllowanceUnitCents}, window.EffectiveUnit()) && window.RemainingValue != nil && *window.RemainingValue == 0) &&
+				observationBlocks(window.ResetsAt, window.ObservedAt, bandOrdered, now) && !yield(window.ResetsAt) {
+				return
+			}
 		}
-	}
-	if allowance.RemainingPercent != nil && *allowance.RemainingPercent == 0 && (!bandOrdered || family == "codex") &&
-		observationBlocks(allowance.ResetsAt, allowance.ObservedAt, bandOrdered, now) && !slices.ContainsFunc(allowance.Windows, func(window AllowanceWindow) bool {
-		return window.LimitID == "codex" && window.Window == allowancePrimary
-	}) {
-		resets = append(resets, allowance.ResetsAt)
-	}
-	for _, count := range []struct {
-		remaining   *int64
-		observation *CountObservation
-	}{{allowance.RemainingTokens, allowance.TokenObservation}, {allowance.RemainingRequests, allowance.RequestObservation}} {
-		if count.remaining == nil || *count.remaining != 0 {
-			continue
+		if allowance.RemainingPercent != nil && *allowance.RemainingPercent == 0 && (!bandOrdered || family == "codex") &&
+			observationBlocks(allowance.ResetsAt, allowance.ObservedAt, bandOrdered, now) && !slices.ContainsFunc(allowance.Windows, func(window AllowanceWindow) bool {
+			return window.LimitID == "codex" && window.Window == allowancePrimary
+		}) && !yield(allowance.ResetsAt) {
+			return
 		}
-		observation := allowanceCountObservation(count.remaining, count.observation, *allowance)
-		if observationBlocks(observation.ResetsAt, observation.ObservedAt, bandOrdered, now) {
-			resets = append(resets, observation.ResetsAt)
+		for _, count := range []struct {
+			remaining   *int64
+			observation *CountObservation
+		}{{allowance.RemainingTokens, allowance.TokenObservation}, {allowance.RemainingRequests, allowance.RequestObservation}} {
+			if count.remaining == nil || *count.remaining != 0 {
+				continue
+			}
+			observation := allowanceCountObservation(count.remaining, count.observation, *allowance)
+			if !observationBlocks(observation.ResetsAt, observation.ObservedAt, bandOrdered, now) {
+				continue
+			}
+			if bandOrdered && observation.ResetsAt == nil {
+				expiresAt := observation.ObservedAt.Add(bandFreshness)
+				if !yield(&expiresAt) {
+					return
+				}
+				continue
+			}
+			if !yield(observation.ResetsAt) {
+				return
+			}
 		}
-	}
-	return resets
+	})
 }
 
 func observationBlocks(reset *time.Time, observedAt time.Time, bandOrdered bool, now time.Time) bool {
@@ -101,9 +111,7 @@ func BlockingDeadline(now time.Time, unavailableUntil, cooldownRetryAt *time.Tim
 	if slices.Contains(resets, nil) {
 		return nil
 	}
-	deadlines := []*time.Time{unavailableUntil, cooldownRetryAt}
-	deadlines = append(deadlines, resets...)
-	return LatestDeadline(now, deadlines...)
+	return LatestDeadline(now, slices.Concat([]*time.Time{unavailableUntil, cooldownRetryAt}, resets)...)
 }
 
 func (r *Refusal) RetryAfter(now time.Time) time.Duration {
