@@ -363,6 +363,23 @@ func TestCodeAttemptMiniMaxChatAmbiguous2062WritesShortRateCooldownOnly(t *testi
 	}
 }
 
+func TestCodeAttemptMiniMaxDeclaredFoldingWritesModelEntitlementCooldown(t *testing.T) {
+	// Sources: MiniMax-AI/cli@38aba5f (fetched 2026-11-05), src/errors/api.ts ApiErrorBody and mapApiError folding base_resp.status_code before error.code, and https://platform.minimax.io/docs/api-reference/errorcode (fetched 2026-11-05), codes 2061 and 2056.
+	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	ledger := &fakeCodeLedger{}
+	attempt := minimaxAttempt(t, ledger, now, "v1/chat/completions")
+	attempt.response(t.Context(), 429, http.Header{})
+	attempt.observe(attempt.observer.Unary([]byte(`{"base_resp":{"status_code":2061,"status_msg":"your current token plan not support model"},"error":{"message":"usage limit exceeded","type":"rate_limit_error","code":2056,"http_code":"429"}}`)))
+	attempt.finish(t.Context())
+	if len(ledger.cooldowns) != 1 {
+		t.Fatalf("cooldowns = %+v, want one model cooldown", ledger.cooldowns)
+	}
+	got := ledger.cooldowns[0]
+	if got.account != "account" || got.classification.Class != codeadapter.CooldownEntitlement || got.classification.Scope != codeadapter.ScopeModel || got.classification.Envelope != "minimax_2061" || got.classification.NotExecuted || !got.classification.RetryAt.Equal(now.Add(time.Minute)) {
+		t.Fatalf("cooldown = %+v", got)
+	}
+}
+
 func TestCodeAttemptMiniMaxUsageAndAmbiguousDoNotRecover(t *testing.T) {
 	// Sources: https://platform.minimax.io/docs/api-reference/errorcode (fetched 2026-11-05), codes 2056 and 2062, and https://platform.minimax.io/docs/api-reference/speech-to-text (fetched 2026-11-05), which documents the OaiError envelope only for speech-to-text. It is not proven for chat/messages inference, so replay waits for live envelope qualification and neither shape replays today
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
