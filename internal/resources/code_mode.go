@@ -451,14 +451,44 @@ func (s *CodeStore) bind(ctx context.Context, tx pgx.Tx, in CodeAdmission) (code
 		selection, err := codeAccount(ctx, tx, in, "", "", nil, in.Route.AllowanceOrdering)
 		if err != nil {
 			if refusal, ok := errors.AsType[*codemode.Refusal](err); ok && refusal.Code == "code_account_unavailable" && in.Operation.Name == "connect" && len(in.Route.Models) > 1 {
-				for _, model := range in.Route.Models {
-					hinted := in.withOperation(codemode.Operation{Name: "connect_model", Model: model, Identity: in.Operation.Identity})
-					_, hintErr := codeAccount(ctx, tx, hinted, "", "", nil, in.Route.AllowanceOrdering)
-					if hintErr == nil {
+				type hintResult struct {
+					selection codeSelection
+					err       error
+				}
+				hints := slices.Collect(func(yield func(hintResult) bool) {
+					for _, model := range in.Route.Models {
+						hinted := in.withOperation(codemode.Operation{Name: "connect_model", Model: model, Identity: in.Operation.Identity})
+						candidate, hintErr := codeAccount(ctx, tx, hinted, "", "", nil, in.Route.AllowanceOrdering)
+						if !yield(hintResult{selection: candidate, err: hintErr}) || hintErr == nil {
+							return
+						}
+						if _, ok := errors.AsType[*codemode.Refusal](hintErr); !ok {
+							return
+						}
+					}
+				})
+				for _, hint := range hints {
+					if hint.err == nil {
 						return b, nil, codemode.Refuse(400, "code_connection_model_required")
 					}
-					if _, ok := errors.AsType[*codemode.Refusal](hintErr); !ok {
-						return b, nil, hintErr
+					if _, ok := errors.AsType[*codemode.Refusal](hint.err); !ok {
+						return b, nil, hint.err
+					}
+				}
+				if len(selection.candidates) == 0 {
+					deadlines := slices.Collect(func(yield func(*time.Time) bool) {
+						for _, hint := range hints {
+							if len(hint.selection.candidates) == 0 {
+								continue
+							}
+							refusal, _ := errors.AsType[*codemode.Refusal](hint.err)
+							if !yield(refusal.RetryAt) {
+								return
+							}
+						}
+					})
+					if len(deadlines) > 0 {
+						return b, nil, &codemode.Refusal{Status: 400, Code: "code_connection_model_required", RetryAt: codemode.EarliestRecovery(time.Now(), deadlines...)}
 					}
 				}
 			}
@@ -679,7 +709,7 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root stri
 				}
 			}
 		})
-		return none, &codemode.Refusal{Status: 503, Code: "code_account_unavailable", RetryAt: codemode.EarliestRecovery(now, deadlines...)}
+		return codeSelection{candidates: outcomes}, &codemode.Refusal{Status: 503, Code: "code_account_unavailable", RetryAt: codemode.EarliestRecovery(now, deadlines...)}
 	}
 	index := slices.IndexFunc(candidates, func(candidate codeCandidate) bool {
 		return candidate.account.ID == chosen.AccountID

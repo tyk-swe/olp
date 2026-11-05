@@ -34,6 +34,25 @@ type recordedCooldown struct {
 	classification codeadapter.Classification
 }
 
+func TestCodeModelHintRefusalExplainsRetry(t *testing.T) {
+	deadline := time.Now().Add(time.Minute)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	codeWriteError(recorder, request, &codemode.Refusal{Status: http.StatusBadRequest, Code: "code_connection_model_required", RetryAt: &deadline})
+	var body struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != http.StatusBadRequest || recorder.Header().Get("Retry-After") == "" || body.Error.Code != "code_connection_model_required" || !strings.Contains(body.Error.Message, "X-OLP-Code-Model") || !strings.Contains(body.Error.Message, "Retry-After") {
+		t.Fatalf("model hint refusal = %d, %v, %s", recorder.Code, recorder.Header(), recorder.Body.String())
+	}
+}
+
 type notifyingResponseWriter struct {
 	*httptest.ResponseRecorder
 	written chan struct{}

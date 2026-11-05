@@ -58,6 +58,8 @@ func codeRefusalMessage(code string) string {
 		return "Continue on the original account when available, or start a new conversation with full context and no response references, reasoning signatures or socket state"
 	case "code_parent_unresolved":
 		return "Establish the parent conversation first, or start a new conversation with full context and no response reference"
+	case "code_connection_model_required":
+		return "Set X-OLP-Code-Model to a route model before connecting. If Retry-After is present, at least one model-hinted connection may be available after that delay"
 	case "code_response_account_conflict":
 		return "Continue on the account that produced the response, or start a new conversation with full context and no response reference"
 	case "code_translation_unsupported_semantics":

@@ -613,7 +613,7 @@ func seedCooldownJourney(t *testing.T, pool *pgxpool.Pool) cooldownJourney {
 	firstCredential, secondCredential := uuid.NewString(), uuid.NewString()
 	first, second := uuid.NewString(), uuid.NewString()
 	key, poolID, routeID, revisionID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
-	route := codemode.Route{ID: routeID, ProjectID: project, Slug: "cooldown-journey", PoolID: poolID, Models: []string{"model", "other"}, Enabled: true, RevisionID: revisionID, Revision: 1, ETag: uuid.NewString()}
+	route := codemode.Route{ID: routeID, ProjectID: project, Slug: "cooldown-" + routeID, PoolID: poolID, Models: []string{"model", "other"}, Enabled: true, RevisionID: revisionID, Revision: 1, ETag: uuid.NewString()}
 	document, err := json.Marshal(route)
 	if err != nil {
 		t.Fatal(err)
@@ -623,21 +623,21 @@ func seedCooldownJourney(t *testing.T, pool *pgxpool.Pool) cooldownJourney {
 		sql  string
 		args []any
 	}{
-		{`INSERT INTO olp.users(id, email, display_name, role, etag) VALUES($1, 'cooldown@example.invalid', 'Journey', 'owner', $2)`, []any{user, uuid.NewString()}},
-		{`INSERT INTO olp.projects(id, name, etag, created_by) VALUES($1, 'cooldown-journey', $2, $3)`, []any{project, uuid.NewString(), user}},
-		{`INSERT INTO olp.providers(id, project_id, name, kind, state, configuration, etag, slots_etag, created_by) VALUES($1, $2, 'cooldown-journey', 'plugin', 'active', '{}', $3, $4, $5)`, []any{provider, project, uuid.NewString(), uuid.NewString(), user}},
+		{`INSERT INTO olp.users(id, email, display_name, role, etag) VALUES($1, $2, 'Journey', 'owner', $3)`, []any{user, user + "@example.invalid", uuid.NewString()}},
+		{`INSERT INTO olp.projects(id, name, etag, created_by) VALUES($1, $2, $3, $4)`, []any{project, "cooldown-" + project, uuid.NewString(), user}},
+		{`INSERT INTO olp.providers(id, project_id, name, kind, state, configuration, etag, slots_etag, created_by) VALUES($1, $2, $3, 'plugin', 'active', '{}', $4, $5, $6)`, []any{provider, project, "cooldown-" + provider, uuid.NewString(), uuid.NewString(), user}},
 		{`INSERT INTO olp.provider_credentials(id, provider_id, version, principal, plugin_digest, grant_facts,profile_id) VALUES($1, $2, 1, 'first-principal', repeat('0',64), '{}','codex-subscription')`, []any{firstCredential, provider}},
 		{`INSERT INTO olp.provider_credentials(id, provider_id, version, principal, plugin_digest, grant_facts,profile_id) VALUES($1, $2, 2, 'second-principal', repeat('0',64), '{}','codex-subscription')`, []any{secondCredential, provider}},
 		{`INSERT INTO olp.provider_grants(credential_id) VALUES($1)`, []any{firstCredential}},
 		{`INSERT INTO olp.provider_grants(credential_id) VALUES($1)`, []any{secondCredential}},
 		{`INSERT INTO olp.code_accounts(id, project_id, provider_id, credential_id, principal, name, models, etag, created_by) VALUES($1, $2, $3, $4, 'first-principal', 'first', '["model","other"]', $5, $6)`, []any{first, project, provider, firstCredential, uuid.NewString(), user}},
 		{`INSERT INTO olp.code_accounts(id, project_id, provider_id, credential_id, principal, name, models, etag, created_by) VALUES($1, $2, $3, $4, 'second-principal', 'second', '["model","other"]', $5, $6)`, []any{second, project, provider, secondCredential, uuid.NewString(), user}},
-		{`INSERT INTO olp.api_keys(id, lookup_id, digest, name, created_by, policy, etag, project_id) VALUES($1, 'cooldown-lookup', '\x00', 'journey', $2, '{"scopes":["inference"]}', $3, $4)`, []any{key, user, uuid.NewString(), project}},
+		{`INSERT INTO olp.api_keys(id, lookup_id, digest, name, created_by, policy, etag, project_id) VALUES($1, $2, '\x00', 'journey', $3, '{"scopes":["inference"]}', $4, $5)`, []any{key, "cooldown-" + key, user, uuid.NewString(), project}},
 		{`INSERT INTO olp.code_pools(id, project_id, name, kind, etag, created_by) VALUES($1, $2, 'cooldown-journey', 'shared', $3, $4)`, []any{poolID, project, uuid.NewString(), user}},
 		{`INSERT INTO olp.code_pool_accounts(pool_id, account_id, weight) VALUES($1, $2, 1)`, []any{poolID, first}},
 		{`INSERT INTO olp.code_pool_accounts(pool_id, account_id, weight) VALUES($1, $2, 1)`, []any{poolID, second}},
 		{`INSERT INTO olp.code_pool_keys(pool_id, api_key_id) VALUES($1, $2)`, []any{poolID, key}},
-		{`INSERT INTO olp.code_routes(id, project_id, slug, draft, etag, created_by) VALUES($1, $2, 'cooldown-journey', '{}', $3, $4)`, []any{routeID, project, uuid.NewString(), user}},
+		{`INSERT INTO olp.code_routes(id, project_id, slug, draft, etag, created_by) VALUES($1, $2, $3, '{}', $4, $5)`, []any{routeID, project, route.Slug, uuid.NewString(), user}},
 		{`INSERT INTO olp.code_route_revisions(id, route_id, revision, document, connections, created_by) VALUES($1, $2, 1, $3, $4, $5)`, []any{revisionID, routeID, document, connections, user}},
 		{`UPDATE olp.code_routes SET latest_revision_id=$2 WHERE id=$1`, []any{routeID, revisionID}},
 	}
@@ -796,23 +796,27 @@ func TestCodeModelLessConnectionChecksEveryModelCooldown(t *testing.T) {
 }
 
 func TestCodeModelLessConnectionRequiresUsefulModelHint(t *testing.T) {
+	pool, _ := newDatabase(t)
+	if err := database.Migrate(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		name        string
 		credential  bool
 		splitModels bool
 		disjoint    bool
+		disabled    bool
 		wantCode    string
 	}{
 		{name: "credential cooldown", credential: true, wantCode: "code_account_unavailable"},
 		{name: "different model cooldowns", splitModels: true, wantCode: "code_connection_model_required"},
 		{name: "disjoint capabilities", disjoint: true, wantCode: "code_connection_model_required"},
+		{name: "disjoint capabilities cooling", credential: true, disjoint: true, wantCode: "code_connection_model_required"},
+		{name: "no usable accounts", disabled: true, wantCode: "code_account_unavailable"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			pool, _ := newDatabase(t)
-			if err := database.Migrate(t.Context(), pool); err != nil {
-				t.Fatal(err)
-			}
 			journey := seedCooldownJourney(t, pool)
+			accounts := []string{journey.first, journey.second}
 			now := time.Now().UTC().Truncate(time.Second)
 			if tc.credential {
 				for i, account := range []string{journey.first, journey.second} {
@@ -829,12 +833,18 @@ func TestCodeModelLessConnectionRequiresUsefulModelHint(t *testing.T) {
 				}
 			}
 			if tc.disjoint {
-				if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET models=CASE WHEN id=$1 THEN '["model"]'::jsonb ELSE '["other"]'::jsonb END WHERE id=ANY($2::uuid[])`, journey.first, []string{journey.first, journey.second}); err != nil {
+				if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET models=CASE WHEN id=$1 THEN '["model"]'::jsonb ELSE '["other"]'::jsonb END WHERE id=ANY($2::uuid[])`, journey.first, accounts); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.disabled {
+				if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=false WHERE id=ANY($1::uuid[])`, accounts); err != nil {
 					t.Fatal(err)
 				}
 			}
 			providers := []string{journey.provider}
-			_, err := journey.store.BindConnection(t.Context(), journey.route, journey.key, codemode.Identity{Conversation: "model-less"}, "", providers)
+			conversation := uuid.NewString()
+			_, err := journey.store.BindConnection(t.Context(), journey.route, journey.key, codemode.Identity{Conversation: "model-less-" + conversation}, "", providers)
 			var refusal *codemode.Refusal
 			if !errors.As(err, &refusal) || refusal.Code != tc.wantCode {
 				t.Fatalf("model-less refusal = %v (%+v), want %s", err, refusal, tc.wantCode)
@@ -843,8 +853,8 @@ func TestCodeModelLessConnectionRequiresUsefulModelHint(t *testing.T) {
 				t.Fatalf("credential retry = %+v, want %s", refusal.RetryAt, now.Add(10*time.Minute))
 			}
 			for _, model := range journey.route.Models {
-				_, err := journey.store.BindConnection(t.Context(), journey.route, journey.key, codemode.Identity{Conversation: "hinted-" + model}, model, providers)
-				if tc.credential && err == nil || !tc.credential && err != nil {
+				_, err := journey.store.BindConnection(t.Context(), journey.route, journey.key, codemode.Identity{Conversation: "hinted-" + model + "-" + conversation}, model, providers)
+				if (tc.credential || tc.disabled) && err == nil || !tc.credential && !tc.disabled && err != nil {
 					t.Errorf("hinted connection for %s = %v", model, err)
 				}
 			}
