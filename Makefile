@@ -10,11 +10,11 @@ AIR_VERSION := v1.67.4
 SIGNED_DOCUMENTS = internal/catalog/catalog.json internal/pluginindex/index.json
 GOFMT_PATHS = \
 	cmd guardrails inference internal management plugin \
-	tests/fidelity tests/fixtures/*.go tests/fixtures/fidelity tests/service
+	tests/fidelity tests/fixtures/*.go tests/fixtures/fidelity tests/qualification tests/service
 
 .PHONY: \
 	help setup dev dev-stop dev-reset check check-go check-console check-contracts lint fmt-check vet \
-	test-fast test-service \
+	test-fast test-service qualify-code \
 	api build build-go catalog catalog-sign fmt
 
 help:
@@ -67,6 +67,9 @@ test-fast: ## Run the fast safety net inside its 60 second budget
 
 test-service: ## Run the database-backed service suite in disposable containers
 	./scripts/test-service.sh
+
+qualify-code: ## Run the code mode fixture qualification lanes in disposable containers
+	./scripts/qualification.sh
 
 fmt-check:
 	@bad="$$(gofmt -l $(GOFMT_PATHS))"; test -z "$$bad" || { printf '%s\n' "$$bad"; exit 1; }
