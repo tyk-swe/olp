@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -127,9 +128,14 @@ func (r *Reader) Pass(ctx context.Context) (usage.Outcome, bool) {
 	return usage.OutcomeSuccess, progress
 }
 
+func qualifiedForActiveRead(configuration routing.Configuration) bool {
+	signal, ok := codeadapter.AllowanceSignalForProfile(configuration.Kind, configuration.AuthMode, configuration.ProfileID)
+	return ok && signal.QualifiedForActiveRead()
+}
+
 func (r *Reader) read(ctx context.Context, entry DueAccount) (bool, error) {
 	now := r.now()
-	if !Due(entry.Account, now) {
+	if !Due(entry.Account, now) || !qualifiedForActiveRead(entry.Configuration) {
 		return false, nil
 	}
 	step, cancel := context.WithTimeout(ctx, readTimeout)

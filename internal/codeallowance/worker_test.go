@@ -12,6 +12,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/codeallowance"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -68,10 +69,13 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func dueAccount() codeallowance.DueAccount {
-	return codeallowance.DueAccount{Account: codemode.Account{
-		ID: "account-1", ProjectID: "project", ProviderID: "provider", CredentialID: "credential",
-		Principal: "principal", Enabled: true,
-	}}
+	return codeallowance.DueAccount{
+		Account: codemode.Account{
+			ID: "account-1", ProjectID: "project", ProviderID: "provider", CredentialID: "credential",
+			Principal: "principal", Enabled: true,
+		},
+		Configuration: routing.Configuration{Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID},
+	}
 }
 
 func reader(store *fakeStore, authorizer *fakeAuthorizer, locker fakeLocker, transport http.RoundTripper) *codeallowance.Reader {
