@@ -272,7 +272,7 @@
             <dt>Subscription</dt>
             <dd><span class="badge">{adapterLabel(account.adapter)}</span></dd>
             <dt>Ordering signal</dt>
-            <dd>{orderingSignalLabel(account.adapter)}</dd>
+            <dd>{orderingSignalLabel(account.adapter, true)}</dd>
             <dt>Account / principal</dt>
             <dd>{account.id} / {account.principal}</dd>
             <dt>Eligibility</dt>

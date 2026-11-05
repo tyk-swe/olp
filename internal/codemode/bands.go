@@ -1,6 +1,7 @@
 package codemode
 
 import (
+	"cmp"
 	"slices"
 	"time"
 )
@@ -30,29 +31,32 @@ func AssessBand(allowance *Allowance, now time.Time) BandAssessment {
 	if allowance == nil {
 		return BandAssessment{Band: BandUnknown}
 	}
-	fresh := slices.DeleteFunc(slices.Clone(allowanceWindows(*allowance)), func(window AllowanceWindow) bool {
-		return !bandWindow(window) || !bandFresh(window, now)
+	windows := allowanceWindows(*allowance)
+	if exhausted := slices.IndexFunc(windows, func(window AllowanceWindow) bool {
+		return bandFresh(window, now) && bandExhausted(window)
+	}); exhausted >= 0 {
+		return bandFromWindow(BandExhausted, windows[exhausted])
+	}
+	fresh := slices.DeleteFunc(slices.Clone(windows), func(window AllowanceWindow) bool {
+		return window.EffectiveUnit() != AllowanceUnitPercent || !bandFresh(window, now)
 	})
 	if len(fresh) == 0 {
 		return BandAssessment{Band: BandUnknown}
 	}
-	latest := slices.MaxFunc(fresh, func(left, right AllowanceWindow) int {
-		return left.ObservedAt.Compare(right.ObservedAt)
+	tightest := slices.MinFunc(fresh, func(left, right AllowanceWindow) int {
+		return cmp.Compare(left.RemainingPercent, right.RemainingPercent)
 	})
-	evidence := latest.EffectiveEvidence()
-	assessment := BandAssessment{Band: BandHealthy, Evidence: &evidence, ObservedAt: &latest.ObservedAt}
-	if slices.ContainsFunc(fresh, bandExhausted) {
-		return BandAssessment{Band: BandExhausted, Evidence: assessment.Evidence, ObservedAt: assessment.ObservedAt}
+	if tightest.RemainingPercent > bandLowRemaining {
+		return bandFromWindow(BandHealthy, tightest)
 	}
-	tightest, known := bandTightest(fresh)
-	if !known || tightest > bandLowRemaining {
-		return assessment
-	}
-	return BandAssessment{Band: BandLow, Evidence: assessment.Evidence, ObservedAt: assessment.ObservedAt, SoonestReset: bandSoonestReset(fresh, now)}
+	assessment := bandFromWindow(BandLow, tightest)
+	assessment.SoonestReset = bandSoonestReset(fresh, now)
+	return assessment
 }
 
-func bandWindow(window AllowanceWindow) bool {
-	return window.EffectiveUnit() == AllowanceUnitPercent || window.EffectiveUnit() == AllowanceUnitCount
+func bandFromWindow(band Band, window AllowanceWindow) BandAssessment {
+	evidence := window.EffectiveEvidence()
+	return BandAssessment{Band: band, Evidence: &evidence, ObservedAt: &window.ObservedAt}
 }
 
 func bandFresh(window AllowanceWindow, now time.Time) bool {
@@ -66,45 +70,26 @@ func bandFresh(window AllowanceWindow, now time.Time) bool {
 }
 
 func bandExhausted(window AllowanceWindow) bool {
-	if window.EffectiveUnit() == AllowanceUnitPercent {
+	switch window.EffectiveUnit() {
+	case AllowanceUnitPercent:
 		return window.RemainingPercent == 0
+	case AllowanceUnitCount:
+		return window.RemainingValue != nil && *window.RemainingValue == 0
+	default:
+		return false
 	}
-	return window.RemainingValue != nil && *window.RemainingValue == 0
-}
-
-func bandRemaining(window AllowanceWindow) (float64, bool) {
-	if window.EffectiveUnit() == AllowanceUnitPercent {
-		return window.RemainingPercent, true
-	}
-	if window.UsedValue == nil || window.RemainingValue == nil || *window.UsedValue+*window.RemainingValue <= 0 {
-		return 0, false
-	}
-	return *window.RemainingValue / (*window.UsedValue + *window.RemainingValue) * 100, true
-}
-
-func bandTightest(fresh []AllowanceWindow) (float64, bool) {
-	tightest, known := 0.0, false
-	for _, window := range fresh {
-		remaining, ok := bandRemaining(window)
-		if ok && (!known || remaining < tightest) {
-			tightest, known = remaining, true
-		}
-	}
-	return tightest, known
 }
 
 func bandSoonestReset(fresh []AllowanceWindow, now time.Time) *time.Time {
-	var soonest *time.Time
-	for _, window := range fresh {
-		remaining, ok := bandRemaining(window)
-		if !ok || remaining > bandLowRemaining || window.ResetsAt == nil || !window.ResetsAt.After(now) {
-			continue
-		}
-		if soonest == nil || window.ResetsAt.Before(*soonest) {
-			soonest = window.ResetsAt
-		}
+	lows := slices.DeleteFunc(slices.Clone(fresh), func(window AllowanceWindow) bool {
+		return window.RemainingPercent > bandLowRemaining || window.ResetsAt == nil || !window.ResetsAt.After(now)
+	})
+	if len(lows) == 0 {
+		return nil
 	}
-	return soonest
+	return slices.MinFunc(lows, func(left, right AllowanceWindow) int {
+		return left.ResetsAt.Compare(*right.ResetsAt)
+	}).ResetsAt
 }
 
 func bandRank(band Band) int {

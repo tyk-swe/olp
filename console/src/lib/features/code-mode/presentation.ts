@@ -122,14 +122,12 @@ export function allowanceEvidenceLabel(
 
 export function orderingSignalLabel(
   adapter: string | null | undefined,
-  allowanceOrdering?: boolean
+  allowanceOrdering: boolean
 ): string {
-  if (allowanceOrdering === false) return 'Weights plus cooldown';
+  if (!allowanceOrdering) return 'Weights plus cooldown';
   if (adapter !== 'codex')
     return 'Weights plus cooldown, no proven allowance signal';
-  return allowanceOrdering
-    ? 'Allowance bands from proven passive windows'
-    : 'Proven passive allowance windows';
+  return 'Allowance bands from proven passive windows';
 }
 
 export function nativeModels(value: string): string[] {

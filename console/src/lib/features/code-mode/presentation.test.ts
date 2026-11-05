@@ -386,9 +386,6 @@ describe('code account decisions', () => {
 
 describe('code ordering signals', () => {
   it('names only codex as a proven passive allowance signal', () => {
-    expect(orderingSignalLabel('codex')).toBe(
-      'Proven passive allowance windows'
-    );
     expect(orderingSignalLabel('codex', true)).toBe(
       'Allowance bands from proven passive windows'
     );

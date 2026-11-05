@@ -53,49 +53,52 @@ func codeRecoverySource(ctx context.Context, tx pgx.Tx, in CodeAdmission) (codeR
 	return codeRecoveryOwner{root: root, account: account, principal: principal}, nil
 }
 
-func recoverCodeBinding(ctx context.Context, tx pgx.Tx, in CodeAdmission) error {
+func recoverCodeBinding(ctx context.Context, tx pgx.Tx, in CodeAdmission) (*codeSelection, error) {
 	source, err := codeRecoverySource(ctx, tx, in)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	root, account, principal := source.root, source.account, source.principal
 	if in.Recovery.AccountID != "" {
 		if in.Recovery.AccountID != account || in.Recovery.GrantGeneration < 1 {
-			return codemode.Refuse(409, "code_recovery_unsafe")
+			return nil, codemode.Refuse(409, "code_recovery_unsafe")
 		}
 		var current bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.code_accounts a JOIN olp.provider_grants g ON g.credential_id=a.credential_id WHERE a.id=$1 AND a.principal=$2 AND a.credential_id=$3 AND g.generation>$4 AND g.lapsed_at IS NULL)`, account, principal, in.Recovery.CredentialID, in.Recovery.GrantGeneration).Scan(&current); err != nil || !current {
-			return codemode.Refuse(409, "code_recovery_unsafe")
+			return nil, codemode.Refuse(409, "code_recovery_unsafe")
 		}
 		updated, err := tx.Exec(ctx, `UPDATE olp.code_accounts SET health='healthy',unavailable_until=NULL WHERE id=$1 AND health='unavailable' AND unavailable_until<=$2`, account, in.Recovery.RejectedUntil)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if updated.RowsAffected() != 1 {
-			return codemode.Refuse(503, "code_account_unavailable")
+			return nil, codemode.Refuse(503, "code_account_unavailable")
 		}
-		return nil
+		return nil, nil
 	}
 	pins, pinsErr := codePins(ctx, tx, root)
 	if pinsErr != nil {
-		return pinsErr
+		return nil, pinsErr
 	}
 	operations, modelErr := in.Route.RecoveryModels(in.Operation, pins)
 	if modelErr != nil {
-		return modelErr
+		return nil, modelErr
 	}
-	operation, destination, destinationErr := codeRecoveryDestination(ctx, tx, in, operations)
+	operation, selection, destinationErr := codeRecoveryDestination(ctx, tx, in, operations)
 	if destinationErr != nil {
-		return destinationErr
+		return nil, destinationErr
 	}
+	destination := selection.account
 	if destination.ID == account {
-		return codemode.Refuse(409, "code_recovery_unsafe")
+		return nil, codemode.Refuse(409, "code_recovery_unsafe")
 	}
 	if _, err := tx.Exec(ctx, `UPDATE olp.code_bindings SET account_id=$2,principal=$3 WHERE id=$1`, root, destination.ID, destination.Principal); err != nil {
-		return err
+		return nil, err
 	}
-	_, pinErr := tx.Exec(ctx, `UPDATE olp.code_pins SET account_id=$2,principal=$3,target_model=$6,adapter=`+codeadapter.SQL("v.connections->($4::text)")+` FROM olp.code_route_revisions v WHERE root_id=$1 AND v.id=$5`, root, destination.ID, destination.Principal, destination.ProviderID, in.Route.RevisionID, operation.Model)
-	return pinErr
+	if _, pinErr := tx.Exec(ctx, `UPDATE olp.code_pins SET account_id=$2,principal=$3,target_model=$6,adapter=`+codeadapter.SQL("v.connections->($4::text)")+` FROM olp.code_route_revisions v WHERE root_id=$1 AND v.id=$5`, root, destination.ID, destination.Principal, destination.ProviderID, in.Route.RevisionID, operation.Model); pinErr != nil {
+		return nil, pinErr
+	}
+	return &selection, nil
 }
 
 func (s *CodeStore) ConfirmNonexecution(ctx context.Context, attempt string, status int) error {
@@ -118,23 +121,23 @@ func (s *CodeStore) ObserveCooldown(ctx context.Context, account string, until t
 	return err
 }
 
-func codeRecoveryDestination(ctx context.Context, tx pgx.Tx, in CodeAdmission, operations []codemode.Operation) (codemode.Operation, codemode.Account, error) {
+func codeRecoveryDestination(ctx context.Context, tx pgx.Tx, in CodeAdmission, operations []codemode.Operation) (codemode.Operation, codeSelection, error) {
 	var retryAts []*time.Time
 	for _, operation := range operations {
 		selected := in.withOperation(operation)
 		var authority access.Authority
 		if err := codeAuthority(ctx, tx, selected, &authority); err != nil {
-			return codemode.Operation{}, codemode.Account{}, err
+			return codemode.Operation{}, codeSelection{}, err
 		}
-		selection, err := codeAccount(ctx, tx, selected, "", "", nil, false)
+		selection, err := codeAccount(ctx, tx, selected, "", "", nil, selected.Route.AllowanceOrdering)
 		if err == nil {
-			return operation, selection.account, nil
+			return operation, selection, nil
 		}
 		var refusal *codemode.Refusal
 		if !errors.As(err, &refusal) || refusal.Code != "code_account_unavailable" {
-			return codemode.Operation{}, codemode.Account{}, err
+			return codemode.Operation{}, codeSelection{}, err
 		}
 		retryAts = append(retryAts, refusal.RetryAt)
 	}
-	return codemode.Operation{}, codemode.Account{}, &codemode.Refusal{Status: 503, Code: "code_account_unavailable", RetryAt: codemode.EarliestRecovery(time.Now().UTC(), retryAts...)}
+	return codemode.Operation{}, codeSelection{}, &codemode.Refusal{Status: 503, Code: "code_account_unavailable", RetryAt: codemode.EarliestRecovery(time.Now().UTC(), retryAts...)}
 }

@@ -99,16 +99,52 @@ func TestAssessBandExhaustedFromPercentAndCountWindows(t *testing.T) {
 		t.Fatalf("stale zero count must not exhaust, got %+v", got)
 	}
 	lowCount := codemode.AllowanceWindow{LimitID: "codex", Window: "monthly", Unit: codemode.AllowanceUnitCount, Evidence: codemode.AllowanceEvidencePassive, UsedValue: new(float64(95)), RemainingValue: new(float64(5)), ResetsAt: &future, ObservedAt: bandNow}
-	if got := codemode.AssessBand(bandAllowance(lowCount), bandNow); got.Band != codemode.BandLow {
-		t.Fatalf("five of one hundred counts remaining must be low, got %+v", got)
+	if got := codemode.AssessBand(bandAllowance(lowCount), bandNow); got.Band != codemode.BandUnknown || got.Evidence != nil || got.ObservedAt != nil {
+		t.Fatalf("count windows never derive a low fraction, got %+v", got)
 	}
 	spareCount := codemode.AllowanceWindow{LimitID: "codex", Window: "monthly", Unit: codemode.AllowanceUnitCount, Evidence: codemode.AllowanceEvidencePassive, RemainingValue: new(float64(5)), ResetsAt: &future, ObservedAt: bandNow}
-	if got := codemode.AssessBand(bandAllowance(spareCount), bandNow); got.Band != codemode.BandHealthy {
-		t.Fatalf("fresh count without a derivable fraction must be healthy, got %+v", got)
+	if got := codemode.AssessBand(bandAllowance(spareCount), bandNow); got.Band != codemode.BandUnknown || got.Evidence != nil {
+		t.Fatalf("fresh count alone never proves healthy, got %+v", got)
+	}
+	if got := codemode.AssessBand(bandAllowance(count), bandNow); got.Band != codemode.BandExhausted {
+		t.Fatalf("zero count alone must be exhausted, got %+v", got)
 	}
 	credits := codemode.AllowanceWindow{LimitID: "codex", Window: "monthly", Unit: codemode.AllowanceUnitCredits, Evidence: codemode.AllowanceEvidencePassive, RemainingValue: new(float64(0)), ResetsAt: &future, ObservedAt: bandNow}
 	if got := codemode.AssessBand(bandAllowance(credits), bandNow); got.Band != codemode.BandUnknown {
 		t.Fatalf("credits never place an account in a band, got %+v", got)
+	}
+	cents := codemode.AllowanceWindow{LimitID: "codex", Window: "monthly", Unit: codemode.AllowanceUnitCents, Evidence: codemode.AllowanceEvidencePassive, RemainingValue: new(float64(0)), ResetsAt: &future, ObservedAt: bandNow}
+	if got := codemode.AssessBand(bandAllowance(percentWindow(75, &future, bandNow), cents), bandNow); got.Band != codemode.BandHealthy {
+		t.Fatalf("cents never place an account in a band, got %+v", got)
+	}
+}
+
+func TestAssessBandEvidenceComesFromDeterminingWindow(t *testing.T) {
+	future := bandNow.Add(time.Hour)
+	earlier := bandNow.Add(-10 * time.Minute)
+
+	secondary := percentWindow(8, &future, earlier)
+	secondary.Window = "secondary"
+	secondary.Evidence = codemode.AllowanceEvidenceActive
+	low := codemode.AssessBand(bandAllowance(percentWindow(75, &future, bandNow), secondary), bandNow)
+	if low.Band != codemode.BandLow || low.Evidence == nil || *low.Evidence != codemode.AllowanceEvidenceActive || low.ObservedAt == nil || !low.ObservedAt.Equal(earlier) {
+		t.Fatalf("low evidence must come from the tightest window, got %+v", low)
+	}
+
+	tighterHealthy := percentWindow(50, &future, earlier)
+	tighterHealthy.Window = "secondary"
+	tighterHealthy.Evidence = codemode.AllowanceEvidenceActive
+	healthy := codemode.AssessBand(bandAllowance(percentWindow(75, &future, bandNow), tighterHealthy), bandNow)
+	if healthy.Band != codemode.BandHealthy || healthy.Evidence == nil || *healthy.Evidence != codemode.AllowanceEvidenceActive || healthy.ObservedAt == nil || !healthy.ObservedAt.Equal(earlier) {
+		t.Fatalf("healthy evidence must come from the tightest window, got %+v", healthy)
+	}
+
+	freshPercent := percentWindow(75, &future, bandNow)
+	freshPercent.Evidence = codemode.AllowanceEvidenceActive
+	count := codemode.AllowanceWindow{LimitID: "codex", Window: "monthly", Unit: codemode.AllowanceUnitCount, Evidence: codemode.AllowanceEvidencePassive, RemainingValue: new(float64(0)), ResetsAt: &future, ObservedAt: earlier}
+	exhausted := codemode.AssessBand(bandAllowance(freshPercent, count), bandNow)
+	if exhausted.Band != codemode.BandExhausted || exhausted.Evidence == nil || *exhausted.Evidence != codemode.AllowanceEvidencePassive || exhausted.ObservedAt == nil || !exhausted.ObservedAt.Equal(earlier) {
+		t.Fatalf("exhausted evidence must come from the exhausted window, got %+v", exhausted)
 	}
 }
 
