@@ -36,14 +36,11 @@ func fetchOpenAI(ctx context.Context, client *http.Client, endpoint *string, key
 	if err != nil {
 		return nil, err
 	}
-	// 1d buckets cap the window's bucket count at 31, well under the 180
-	// per page, so one page per window covers the whole window in practice;
-	// has_more paging still iterates for larger ranges.
 	q := url.Values{}
 	q.Set("start_time", strconv.FormatInt(start.Unix(), 10))
 	q.Set("end_time", strconv.FormatInt(end.Unix(), 10))
 	q.Set("bucket_width", "1d")
-	q.Set("limit", "180")
+	q.Set("limit", strconv.Itoa(pollingBucketLimit))
 	for _, item := range []string{"line_item"} {
 		q.Add("group_by[]", item)
 	}

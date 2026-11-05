@@ -132,7 +132,7 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 		x.spendCaps(hold.budgets, attempt)
 	}
 	x.facts = append(x.facts, fact)
-	s.health.record(provider.ID, fact)
+	s.health.record(provider.ID, fact, hold.probed)
 	// A reply that lands just before the route deadline must still bind or
 	// retire its job: persistence gets its own bound, independent of the
 	// spent dispatch deadline.
@@ -592,7 +592,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *media.JobRec
 			acceptance: upstream.Evidence{Reached: failure.Dispatched, Status: failure.Status}.Acceptance(),
 		}
 		fact.recordEvidence(f.billingUncertain())
-		s.health.record(record.ProviderID, fact)
+		s.health.record(record.ProviderID, fact, false)
 		atr.Finish(fact.Class, fact.Status)
 		return nil, f, fact
 	}
@@ -645,7 +645,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *media.JobRec
 	fact.Usage = mediaUsage(request, result)
 	fact.Committed = true
 	fact.recordEvidence(false)
-	s.health.record(record.ProviderID, fact)
+	s.health.record(record.ProviderID, fact, false)
 	if u := fact.Usage; u != nil {
 		atr.RecordUsage(&u.InputTokens, &u.OutputTokens, u.CachedInputTokens, u.MediaUnits)
 	}

@@ -448,6 +448,43 @@ func errorCode(t *testing.T, body map[string]any) string {
 
 // Connection drops mid-stream without a completion marker.
 
+func TestHalfOpenProbeIsReleasedOnlyByItsOwnCompletion(t *testing.T) {
+	const provider = "provider"
+	for _, test := range []struct {
+		name       string
+		probeClass string
+		wantOpen   bool
+	}{
+		{"success closes the circuit", classSuccess, false},
+		{"failure reopens the circuit", "upstream_server", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			clock := time.Date(2026, time.March, 10, 12, 0, 0, 0, time.UTC)
+			health := newHealthTracker(func() time.Time { return clock })
+			for range circuitFailures {
+				health.record(provider, AttemptFact{Class: "upstream_server"}, false)
+			}
+			if !health.open(provider) {
+				t.Fatal("repeated failures did not open the circuit")
+			}
+			clock = clock.Add(circuitOpenFor)
+			if probed, granted := health.claim(provider); !probed || !granted {
+				t.Fatalf("recovering circuit refused its probe: probed=%v granted=%v", probed, granted)
+			}
+			for _, unrelated := range []string{"rate_limit", "upstream_server"} {
+				health.record(provider, AttemptFact{Class: unrelated}, false)
+				if _, granted := health.claim(provider); granted {
+					t.Fatalf("in-flight %s completion admitted a second probe", unrelated)
+				}
+			}
+			health.record(provider, AttemptFact{Class: test.probeClass}, true)
+			if open := health.open(provider); open != test.wantOpen {
+				t.Fatalf("open after probe = %v, want %v", open, test.wantOpen)
+			}
+		})
+	}
+}
+
 func TestModelsFilteredByKey(t *testing.T) {
 	h := newHarness(t, Config{})
 	list := func(key, path string) (int, map[string]any) {
