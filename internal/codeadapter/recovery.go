@@ -17,7 +17,7 @@ type Rejection struct {
 }
 
 func (v Vendor) InitialRejection(endpoint Endpoint, status int, body []byte, headers http.Header, now time.Time) (Rejection, bool) {
-	classified := v.Adapter == codemode.AdapterZAICoding || v.Adapter == codemode.AdapterQwenTokenPlan || (v.Adapter == codemode.AdapterCodex && endpoint.Observation == ObserveCodex)
+	classified := v.Adapter == codemode.AdapterZAICoding || v.Adapter == codemode.AdapterKimiCode || v.Adapter == codemode.AdapterQwenTokenPlan || (v.Adapter == codemode.AdapterCodex && endpoint.Observation == ObserveCodex)
 	if status == 429 && classified {
 		classification, ok := v.Classify(endpoint, status, body, headers, now)
 		if !ok || !classification.NotExecuted {
