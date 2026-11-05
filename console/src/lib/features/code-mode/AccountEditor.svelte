@@ -13,7 +13,13 @@
     type CodeAccount,
     type CodeAccountWrite
   } from '$lib/management/code-mode';
-  import { nativeModels } from './presentation';
+  import {
+    extraUsageAdapterFor,
+    extraUsageValue,
+    nativeModels,
+    providerProfilePending,
+    showsExtraUsage
+  } from './presentation';
   import AccountEnrollment from './AccountEnrollment.svelte';
 
   import {
@@ -37,6 +43,11 @@
   let models = $state(initial?.models.join('\n') ?? '');
   let cycleAnchor = $state(initial?.cycle_anchor ?? '');
   let enabled = $state(initial?.enabled ?? true);
+  let extraUsage = $state(
+    initial?.extra_usage_enabled == null
+      ? ''
+      : String(initial.extra_usage_enabled)
+  );
   let enrolling = $state(false);
 
   const providers = createQuery(() => ({
@@ -53,6 +64,16 @@
     queryFn: ({ signal }) => getProvider(providerId, signal),
     enabled: !!providerId
   }));
+  const profilePending = $derived(
+    providerProfilePending(!initial, providerId, provider.data !== undefined)
+  );
+  const extraUsageAdapter = $derived(
+    extraUsageAdapterFor(
+      initial?.adapter,
+      !initial,
+      provider.data?.configuration.profile_id
+    )
+  );
   const qwenTokenPlan = $derived(
     initial?.adapter === 'qwen_token_plan' ||
       provider.data?.configuration.profile_id === 'qwen-token-plan' ||
@@ -64,7 +85,7 @@
     onDraftChange: (dirty) => onDraftChange(dirty),
     onSaved: () => onSaved(),
     onCancel: () => onCancel(),
-    blocked: () => enrolling,
+    blocked: () => enrolling || profilePending,
     build: (): CodeAccountWrite => ({
       project_id: projectId,
       name,
@@ -72,7 +93,12 @@
       credential_id: credentialId,
       models: nativeModels(models),
       cycle_anchor: qwenTokenPlan && cycleAnchor ? cycleAnchor : null,
-      enabled
+      enabled,
+      extra_usage_enabled: extraUsageValue(
+        extraUsageAdapter,
+        extraUsage,
+        initial?.extra_usage_enabled
+      )
     }),
     persist: (input, requestId) => saveCodeAccount(input, current, requestId)
   });
@@ -98,7 +124,7 @@
   {allowed}
   {submission}
   referenceError={providers.error || credentials.error}
-  {enrolling}
+  enrolling={enrolling || profilePending}
   {enrollment}
 >
   <label for="code-name">Name</label><input
@@ -174,4 +200,17 @@
   <label class="choice"
     ><input type="checkbox" bind:checked={enabled} />Enabled</label
   >
+  {#if showsExtraUsage(extraUsageAdapter)}
+    <label for="code-extra-usage">Extra Usage</label>
+    <select id="code-extra-usage" bind:value={extraUsage}>
+      <option value="">Not recorded</option>
+      <option value="true">On</option>
+      <option value="false">Off</option>
+    </select>
+    <p>
+      Extra Usage is a paid fallback beyond the plan quota. Record the member
+      setting for this Kimi account so paid use is never read as spare included
+      allowance
+    </p>
+  {/if}
 </ResourceEditorForm>

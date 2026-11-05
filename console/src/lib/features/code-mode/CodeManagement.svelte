@@ -30,6 +30,8 @@
     allowanceWindowSummary,
     canRequestAllowanceRead,
     cooldownSummary,
+    extraUsageLabel,
+    showsExtraUsage,
     nextMonthlyReset,
     orderingSignalLabel,
     servingHealthLabel,
@@ -310,6 +312,10 @@
           <dl>
             <dt>Subscription</dt>
             <dd><span class="badge">{adapterLabel(account.adapter)}</span></dd>
+            {#if showsExtraUsage(account.adapter)}
+              <dt>Extra Usage</dt>
+              <dd>{extraUsageLabel(account.extra_usage_enabled)}</dd>
+            {/if}
             <dt>Ordering signal</dt>
             <dd>{orderingSignalLabel(account.adapter, true)}</dd>
             <dt>Account / principal</dt>

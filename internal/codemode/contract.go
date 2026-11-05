@@ -69,24 +69,24 @@ func (r *Refusal) Error() string           { return r.Code }
 func Refuse(status int, code string) error { return &Refusal{Status: status, Code: code} }
 
 type Account struct {
-	ID               string     `json:"id"`
-	ProjectID        string     `json:"project_id"`
-	ProviderID       string     `json:"provider_id"`
-	CredentialID     string     `json:"credential_id"`
-	Principal        string     `json:"principal"`
-	Name             string     `json:"name"`
-	Enabled          bool       `json:"enabled"`
-	Models           []string   `json:"models"`
-	ETag             string     `json:"etag"`
-	Health           string     `json:"health"`
-	HealthObservedAt *time.Time `json:"health_observed_at"`
-	UnavailableUntil *time.Time `json:"unavailable_until"`
-	Eligible         bool       `json:"eligible"`
-	GrantState       string     `json:"grant_state"`
-	Allowance        *Allowance `json:"allowance"`
-	Cooldowns        []Cooldown `json:"cooldowns"`
-	CycleAnchor      *string    `json:"cycle_anchor"`
-
+	ID                       string     `json:"id"`
+	ProjectID                string     `json:"project_id"`
+	ProviderID               string     `json:"provider_id"`
+	CredentialID             string     `json:"credential_id"`
+	Principal                string     `json:"principal"`
+	Name                     string     `json:"name"`
+	Enabled                  bool       `json:"enabled"`
+	Models                   []string   `json:"models"`
+	ExtraUsageEnabled        *bool      `json:"extra_usage_enabled"`
+	ETag                     string     `json:"etag"`
+	Health                   string     `json:"health"`
+	HealthObservedAt         *time.Time `json:"health_observed_at"`
+	UnavailableUntil         *time.Time `json:"unavailable_until"`
+	Eligible                 bool       `json:"eligible"`
+	GrantState               string     `json:"grant_state"`
+	Allowance                *Allowance `json:"allowance"`
+	Cooldowns                []Cooldown `json:"cooldowns"`
+	CycleAnchor              *string    `json:"cycle_anchor"`
 	AllowanceReadRequestedAt *time.Time `json:"allowance_read_requested_at"`
 	AllowanceReadAt          *time.Time `json:"allowance_read_at"`
 }
