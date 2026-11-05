@@ -129,18 +129,25 @@ func TestClassifyKimiShortOutcomesStayApartAndNeverReplay(t *testing.T) {
 }
 
 func TestClassifyKimiNearMissMessagesAndShapesStayUnclassified(t *testing.T) {
-	// Source: https://www.kimi.com/code/docs/en/kimi-code/error-reference.html (fetched 2026-11-05); only the complete documented message matches.
+	// Sources: https://www.kimi.com/code/docs/en/kimi-code/error-reference.html (fetched 2026-11-05), only the complete documented message matches a quota outcome, and MoonshotAI/kimi-code@df90d90 (fetched 2026-11-05), whose rate codes classify a near miss carrying them as plain rate and never as quota
 	vendor, chat, _ := kimiVendor(t)
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
 	for name, body := range map[string][]byte{
 		"truncated quota message":          kimiChatBody("You've reached your 5-hour usage limit."),
 		"quota message with trailing text": kimiChatBody(kimiQuotaFiveHour + " Please wait."),
 		"overload prefix only":             kimiChatBody("The engine is currently overloaded"),
-		"numeric message":                  []byte(`{"error":{"message":429}}`),
-		"missing message":                  []byte(`{"error":{"type":"rate_limit_error"}}`),
-		"extra root member":                []byte(`{"error":{"message":"` + kimiQuotaFiveHour + `"},"extra":1}`),
-		"wrapped in another root member":   []byte(`{"result":{"error":{"message":"` + kimiQuotaFiveHour + `"}}}`),
-		"anthropic shape with wrong type":  []byte(`{"type":"message","error":{"message":"` + kimiQuotaFiveHour + `"}}`),
+	} {
+		got, ok := vendor.Classify(chat, 429, body, http.Header{}, now)
+		if !ok || got.Class != codeadapter.CooldownRate || got.Scope != codeadapter.ScopeCredential || got.Envelope != "kimi_rate_limit_exceeded" || got.NotExecuted {
+			t.Fatalf("Classify(%s) = %+v, %v, want structured rate and never quota", name, got, ok)
+		}
+	}
+	for name, body := range map[string][]byte{
+		"numeric message":                 []byte(`{"error":{"message":429}}`),
+		"missing message":                 []byte(`{"error":{"type":"rate_limit_error"}}`),
+		"extra root member":               []byte(`{"error":{"message":"` + kimiQuotaFiveHour + `"},"extra":1}`),
+		"wrapped in another root member":  []byte(`{"result":{"error":{"message":"` + kimiQuotaFiveHour + `"}}}`),
+		"anthropic shape with wrong type": []byte(`{"type":"message","error":{"message":"` + kimiQuotaFiveHour + `"}}`),
 	} {
 		if got, ok := vendor.Classify(chat, 429, body, http.Header{}, now); ok {
 			t.Fatalf("Classify(%s) = %+v, want unclassified", name, got)
@@ -185,6 +192,28 @@ func TestClassifyKimiStructuredQuotaCodesAreProvenNotExecuted(t *testing.T) {
 	}
 }
 
+func TestClassifyKimiStructuredQuotaProofIsBoundToEndpointProtocol(t *testing.T) {
+	// Source: MoonshotAI/kimi-code@df90d90 (fetched 2026-11-05), the OpenAI decoder reads the chat error code and type while the Anthropic decoder reads only the nested messages error type, so each envelope proves non execution only on its own endpoint protocol and a crossed envelope keeps at most its cooldown without replay
+	vendor, chat, messages := kimiVendor(t)
+	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	for name, attempt := range map[string]struct {
+		endpoint codeadapter.Endpoint
+		body     []byte
+		envelope string
+	}{
+		"chat envelope on messages endpoint": {messages, []byte(`{"error":{"message":"quota exceeded","type":"rate_limit_error","code":"exceeded_current_quota_error"}}`), "kimi_exceeded_current_quota_error"},
+		"messages envelope on chat endpoint": {chat, []byte(`{"type":"error","error":{"type":"insufficient_quota","message":"quota exceeded"}}`), "kimi_insufficient_quota"},
+	} {
+		got, ok := vendor.Classify(attempt.endpoint, 429, attempt.body, http.Header{}, now)
+		if !ok || got.Class != codeadapter.CooldownQuota || got.Envelope != attempt.envelope || got.NotExecuted {
+			t.Fatalf("Classify(%s) = %+v, %v, want quota cooldown without proof", name, got, ok)
+		}
+		if rejection, ok := vendor.InitialRejection(attempt.endpoint, 429, attempt.body, http.Header{}, now); ok {
+			t.Fatalf("InitialRejection(%s) = %+v, want no replay across endpoints", name, rejection)
+		}
+	}
+}
+
 func TestKimiInitialRejectionOnlyForStructuredQuotaCodes(t *testing.T) {
 	// Sources: MoonshotAI/kimi-code@df90d90 (fetched 2026-11-05), structured code only and message wording refused, and https://www.kimi.com/code/docs/en/kimi-code/error-reference.html (fetched 2026-11-05), exact HTTP 429 quota messages, so message-only quota keeps its cooldown but never replays and any member outside the pinned decoder sets kills the proof
 	vendor, chat, messages := kimiVendor(t)
@@ -205,15 +234,24 @@ func TestKimiInitialRejectionOnlyForStructuredQuotaCodes(t *testing.T) {
 		}
 	}
 	for name, body := range map[string][]byte{
-		"chat extra param member":    []byte(`{"error":{"message":"quota exceeded","type":"exceeded_current_quota_error","code":"exceeded_current_quota_error","param":null}}`),
-		"chat extra root member":     []byte(`{"error":{"message":"quota exceeded","code":"exceeded_current_quota_error"},"extra":1}`),
-		"chat numeric code":          []byte(`{"error":{"message":"quota exceeded","code":429}}`),
-		"chat missing message":       []byte(`{"error":{"code":"exceeded_current_quota_error","type":"exceeded_current_quota_error"}}`),
-		"messages extra error code":  []byte(`{"type":"error","error":{"type":"exceeded_current_quota_error","message":"quota exceeded","code":"exceeded_current_quota_error"}}`),
-		"messages extra root member": []byte(`{"type":"error","error":{"type":"exceeded_current_quota_error","message":"quota exceeded"},"request_id":"r"}`),
-		"messages code not type":     []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"quota exceeded"}}`),
-		"engine overloaded message":  kimiChatBody(kimiEngineOverloaded),
+		"chat extra param member":          []byte(`{"error":{"message":"quota exceeded","type":"exceeded_current_quota_error","code":"exceeded_current_quota_error","param":null}}`),
+		"chat string extra error member":   []byte(`{"error":{"message":"quota exceeded","code":"exceeded_current_quota_error","param":"model"}}`),
+		"chat extra root member":           []byte(`{"error":{"message":"quota exceeded","code":"exceeded_current_quota_error"},"extra":1}`),
+		"chat duplicate root error member": []byte(`{"error":{"message":"quota exceeded","code":"exceeded_current_quota_error"},"error":{"message":"quota exceeded","code":"exceeded_current_quota_error"}}`),
+		"chat duplicate inner code member": []byte(`{"error":{"message":"quota exceeded","code":"exceeded_current_quota_error","code":"exceeded_current_quota_error"}}`),
+		"chat duplicate inner message":     []byte(`{"error":{"message":"quota exceeded","message":"quota exceeded","code":"exceeded_current_quota_error"}}`),
+		"messages duplicate root type":     []byte(`{"type":"error","type":"error","error":{"type":"exceeded_current_quota_error","message":"quota exceeded"}}`),
+		"messages duplicate inner type":    []byte(`{"type":"error","error":{"type":"exceeded_current_quota_error","type":"exceeded_current_quota_error","message":"quota exceeded"}}`),
+		"chat numeric code":                []byte(`{"error":{"message":"quota exceeded","code":429}}`),
+		"chat missing message":             []byte(`{"error":{"code":"exceeded_current_quota_error","type":"exceeded_current_quota_error"}}`),
+		"messages extra error code":        []byte(`{"type":"error","error":{"type":"exceeded_current_quota_error","message":"quota exceeded","code":"exceeded_current_quota_error"}}`),
+		"messages extra root member":       []byte(`{"type":"error","error":{"type":"exceeded_current_quota_error","message":"quota exceeded"},"request_id":"r"}`),
+		"messages code not type":           []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"quota exceeded"}}`),
+		"engine overloaded message":        kimiChatBody(kimiEngineOverloaded),
 	} {
+		if got, ok := vendor.Classify(chat, 429, body, http.Header{}, now); ok && got.NotExecuted {
+			t.Fatalf("Classify(%s) = %+v, want no NotExecuted proof", name, got)
+		}
 		if rejection, ok := vendor.InitialRejection(chat, 429, body, http.Header{}, now); ok {
 			t.Fatalf("InitialRejection(%s) = %+v, want unproven", name, rejection)
 		}
@@ -223,22 +261,30 @@ func TestKimiInitialRejectionOnlyForStructuredQuotaCodes(t *testing.T) {
 	}
 }
 
-func TestClassifyKimiStructuredOverloadAndRateCodesAreNeverQuota(t *testing.T) {
-	// Source: MoonshotAI/kimi-code@df90d90 (fetched 2026-11-05), only exceeded_current_quota_error and insufficient_quota are quota codes, so structured overload and rate codes with unmatched wording never become quota and never replay
+func TestClassifyKimiStructuredOverloadAndRateCodesAreCapacityAndRateNeverQuota(t *testing.T) {
+	// Source: MoonshotAI/kimi-code@df90d90 (fetched 2026-11-05), the base decoders check structured codes ahead of status and wording so overloaded_error and engine_overloaded_error land overloaded and rate_limit_exceeded, rate_limit_reached_error and rate_limit_error land rate_limit, and only exceeded_current_quota_error and insufficient_quota are quota codes
 	vendor, chat, messages := kimiVendor(t)
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
 	for name, attempt := range map[string]struct {
 		endpoint codeadapter.Endpoint
 		body     []byte
+		class    codeadapter.CooldownClass
+		scope    codeadapter.CooldownScope
+		envelope string
 	}{
-		"chat overloaded_error":        {chat, []byte(`{"error":{"message":"overloaded","type":"overloaded_error","code":"overloaded_error"}}`)},
-		"chat engine_overloaded_error": {chat, []byte(`{"error":{"message":"overloaded","code":"engine_overloaded_error"}}`)},
-		"chat rate_limit_error":        {chat, []byte(`{"error":{"message":"slow down","type":"rate_limit_error","code":"rate_limit_exceeded"}}`)},
-		"messages overloaded_error":    {messages, []byte(`{"type":"error","error":{"type":"overloaded_error","message":"overloaded"}}`)},
-		"messages rate_limit_error":    {messages, []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}`)},
+		"chat overloaded_error":                     {chat, []byte(`{"error":{"message":"overloaded","type":"overloaded_error","code":"overloaded_error"}}`), codeadapter.CooldownCapacity, codeadapter.ScopeModel, "kimi_overloaded_error"},
+		"chat engine_overloaded_error code":         {chat, []byte(`{"error":{"message":"overloaded","code":"engine_overloaded_error"}}`), codeadapter.CooldownCapacity, codeadapter.ScopeModel, "kimi_engine_overloaded_error"},
+		"chat overloaded type with rate code":       {chat, []byte(`{"error":{"message":"overloaded","type":"engine_overloaded_error","code":"rate_limit_exceeded"}}`), codeadapter.CooldownCapacity, codeadapter.ScopeModel, "kimi_engine_overloaded_error"},
+		"chat quota message with overload code":     {chat, []byte(`{"error":{"message":"` + kimiQuotaFiveHour + `","type":"rate_limit_error","code":"engine_overloaded_error"}}`), codeadapter.CooldownCapacity, codeadapter.ScopeModel, "kimi_engine_overloaded_error"},
+		"chat rate_limit_exceeded code":             {chat, []byte(`{"error":{"message":"slow down","type":"rate_limit_error","code":"rate_limit_exceeded"}}`), codeadapter.CooldownRate, codeadapter.ScopeCredential, "kimi_rate_limit_exceeded"},
+		"chat rate_limit_reached_error type":        {chat, []byte(`{"error":{"message":"slow down","type":"rate_limit_reached_error"}}`), codeadapter.CooldownRate, codeadapter.ScopeCredential, "kimi_rate_limit_reached_error"},
+		"messages overloaded_error":                 {messages, []byte(`{"type":"error","error":{"type":"overloaded_error","message":"overloaded"}}`), codeadapter.CooldownCapacity, codeadapter.ScopeModel, "kimi_overloaded_error"},
+		"messages quota message with overload type": {messages, []byte(`{"type":"error","error":{"type":"overloaded_error","message":"` + kimiQuotaFiveHour + `"}}`), codeadapter.CooldownCapacity, codeadapter.ScopeModel, "kimi_overloaded_error"},
+		"messages rate_limit_error":                 {messages, []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}`), codeadapter.CooldownRate, codeadapter.ScopeCredential, "kimi_rate_limit_error"},
 	} {
-		if got, ok := vendor.Classify(attempt.endpoint, 429, attempt.body, http.Header{}, now); ok {
-			t.Fatalf("Classify(%s) = %+v, want unclassified and never quota", name, got)
+		got, ok := vendor.Classify(attempt.endpoint, 429, attempt.body, http.Header{}, now)
+		if !ok || got.Class != attempt.class || got.Class == codeadapter.CooldownQuota || got.Scope != attempt.scope || got.Envelope != attempt.envelope || !got.RetryAt.Equal(now.Add(time.Minute)) || got.NotExecuted {
+			t.Fatalf("Classify(%s) = %+v, %v", name, got, ok)
 		}
 		if rejection, ok := vendor.InitialRejection(attempt.endpoint, 429, attempt.body, http.Header{}, now); ok {
 			t.Fatalf("InitialRejection(%s) = %+v, want unproven", name, rejection)

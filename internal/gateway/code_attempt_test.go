@@ -386,32 +386,31 @@ func kimiAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time, path strin
 }
 
 func TestCodeAttemptKimiStructuredQuotaRecoversAndMessageOnlyDoesNot(t *testing.T) {
-	// Sources: MoonshotAI/kimi-code@df90d90 (fetched 2026-11-05), classifyKimiQuotaError keys on the structured code at HTTP 429 and refuses message wording, and https://www.kimi.com/code/docs/en/kimi-code/error-reference.html (fetched 2026-11-05) for the exact quota message used in the message-only case
+	// Sources: MoonshotAI/kimi-code@df90d90 (fetched 2026-11-05), classifyKimiQuotaError keys on the structured code at HTTP 429 and refuses message wording while each base decoder reads only its own protocol envelope, and https://www.kimi.com/code/docs/en/kimi-code/error-reference.html (fetched 2026-11-05) for the exact quota message used in the message-only case
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
 	route := codemode.Route{InitialRecoveryAttempts: 1}
-	proven := kimiAttempt(t, &fakeCodeLedger{}, now, "v1/chat/completions")
-	response := &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"quota exceeded","type":"rate_limit_error","code":"exceeded_current_quota_error"}}`))}
-	recovery, err := proven.recover(t.Context(), response, route, nil)
-	if err != nil || recovery == nil || recovery.Envelope != "kimi_exceeded_current_quota_error" || recovery.Number != 1 || recovery.From != "attempt" {
-		t.Fatalf("recover(structured chat) = %+v, %v", recovery, err)
-	}
-	provenMessages := kimiAttempt(t, &fakeCodeLedger{}, now, "v1/messages")
-	response = &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"type":"error","error":{"type":"insufficient_quota","message":"quota exceeded"}}`))}
-	recovery, err = provenMessages.recover(t.Context(), response, route, nil)
-	if err != nil || recovery == nil || recovery.Envelope != "kimi_insufficient_quota" || recovery.Number != 1 || recovery.From != "attempt" {
-		t.Fatalf("recover(structured messages) = %+v, %v", recovery, err)
-	}
-	messageOnly := kimiAttempt(t, &fakeCodeLedger{}, now, "v1/chat/completions")
-	response = &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"You've reached your 5-hour usage limit. Your quota will reset when the current 5-hour window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota","type":"rate_limit_error","code":"rate_limit_exceeded"}}`))}
-	recovery, err = messageOnly.recover(t.Context(), response, route, nil)
-	if err != nil || recovery != nil {
-		t.Fatalf("recover(message-only) = %+v, %v, want no replay", recovery, err)
-	}
-	extra := kimiAttempt(t, &fakeCodeLedger{}, now, "v1/chat/completions")
-	response = &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"quota exceeded","code":"exceeded_current_quota_error","param":null}}`))}
-	recovery, err = extra.recover(t.Context(), response, route, nil)
-	if err != nil || recovery != nil {
-		t.Fatalf("recover(extra member) = %+v, %v, want no replay", recovery, err)
+	for name, tc := range map[string]struct {
+		path, body, envelope string
+	}{
+		"structured chat":                    {"v1/chat/completions", `{"error":{"message":"quota exceeded","type":"rate_limit_error","code":"exceeded_current_quota_error"}}`, "kimi_exceeded_current_quota_error"},
+		"structured messages":                {"v1/messages", `{"type":"error","error":{"type":"insufficient_quota","message":"quota exceeded"}}`, "kimi_insufficient_quota"},
+		"chat envelope on messages endpoint": {"v1/messages", `{"error":{"message":"quota exceeded","type":"rate_limit_error","code":"exceeded_current_quota_error"}}`, ""},
+		"messages envelope on chat endpoint": {"v1/chat/completions", `{"type":"error","error":{"type":"insufficient_quota","message":"quota exceeded"}}`, ""},
+		"message-only":                       {"v1/chat/completions", `{"error":{"message":"You've reached your 5-hour usage limit. Your quota will reset when the current 5-hour window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota","type":"rate_limit_error","code":"rate_limit_exceeded"}}`, ""},
+		"extra member":                       {"v1/chat/completions", `{"error":{"message":"quota exceeded","code":"exceeded_current_quota_error","param":null}}`, ""},
+	} {
+		attempt := kimiAttempt(t, &fakeCodeLedger{}, now, tc.path)
+		response := &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(tc.body))}
+		recovery, err := attempt.recover(t.Context(), response, route, nil)
+		if tc.envelope == "" {
+			if err != nil || recovery != nil {
+				t.Fatalf("recover(%s) = %+v, %v, want no replay", name, recovery, err)
+			}
+			continue
+		}
+		if err != nil || recovery == nil || recovery.Envelope != tc.envelope || recovery.Number != 1 || recovery.From != "attempt" {
+			t.Fatalf("recover(%s) = %+v, %v", name, recovery, err)
+		}
 	}
 }
 

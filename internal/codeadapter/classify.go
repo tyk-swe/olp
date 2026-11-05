@@ -49,7 +49,7 @@ func (v Vendor) Classify(endpoint Endpoint, status int, body []byte, headers htt
 	case codemode.AdapterZAICoding:
 		return classifyGLM(status, body, headers, now)
 	case codemode.AdapterKimiCode:
-		return classifyKimi(status, body, headers, now)
+		return classifyKimi(endpoint, status, body, headers, now)
 	case codemode.AdapterQwenTokenPlan:
 		return classifyQwen(status, body, headers, now)
 	case codemode.AdapterMiniMaxPlan:

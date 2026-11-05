@@ -2,8 +2,10 @@ package codeadapter
 
 import (
 	"net/http"
+	"slices"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/oif"
 )
 
@@ -43,136 +45,137 @@ var kimiOutcomes = map[string]kimiOutcome{
 	},
 }
 
-var kimiQuotaCodes = map[string]string{
-	"exceeded_current_quota_error": "kimi_exceeded_current_quota_error",
-	"insufficient_quota":           "kimi_insufficient_quota",
-}
+var (
+	kimiQuotaCodes    = []string{"exceeded_current_quota_error", "insufficient_quota"}
+	kimiOverloadCodes = []string{"overloaded_error", "engine_overloaded_error"}
+	kimiRateCodes     = []string{"rate_limit_exceeded", "rate_limit_reached_error", "rate_limit_error"}
+)
 
-func classifyKimi(status int, body []byte, headers http.Header, now time.Time) (Classification, bool) {
+func classifyKimi(endpoint Endpoint, status int, body []byte, headers http.Header, now time.Time) (Classification, bool) {
 	if status != 429 {
 		return Classification{}, false
 	}
-	if envelope, ok := kimiStructuredQuota(body); ok {
-		return Classification{Class: CooldownQuota, Scope: ScopeCredential, RetryAt: retryAtFrom(time.Time{}, false, headers, now), Envelope: envelope, NotExecuted: true}, true
-	}
-	message, ok := kimiEnvelope(body)
+	envelope, ok := extractKimiEnvelope(body)
 	if !ok {
 		return Classification{}, false
 	}
-	outcome, ok := kimiOutcomes[message]
-	if !ok {
-		return Classification{}, false
+	retryAt := retryAtFrom(time.Time{}, false, headers, now)
+	fields, structured := envelope.structuredFields()
+	if structured {
+		if code, ok := kimiFieldCode(fields, kimiQuotaCodes); ok {
+			return Classification{Class: CooldownQuota, Scope: ScopeCredential, RetryAt: retryAt, Envelope: "kimi_" + code, NotExecuted: envelope.matchesEndpoint(endpoint)}, true
+		}
+		if code, ok := kimiFieldCode(fields, kimiOverloadCodes); ok {
+			return Classification{Class: CooldownCapacity, Scope: ScopeModel, RetryAt: retryAt, Envelope: "kimi_" + code}, true
+		}
 	}
-	return Classification{Class: outcome.class, Scope: outcome.scope, RetryAt: retryAtFrom(time.Time{}, false, headers, now), Envelope: outcome.envelope}, true
+	if message, ok := envelope.message(); ok {
+		if outcome, ok := kimiOutcomes[message]; ok {
+			return Classification{Class: outcome.class, Scope: outcome.scope, RetryAt: retryAt, Envelope: outcome.envelope}, true
+		}
+	}
+	if structured {
+		if code, ok := kimiFieldCode(fields, kimiRateCodes); ok {
+			return Classification{Class: CooldownRate, Scope: ScopeCredential, RetryAt: retryAt, Envelope: "kimi_" + code}, true
+		}
+	}
+	return Classification{}, false
 }
 
-func kimiStructuredQuota(body []byte) (string, bool) {
+func kimiFieldCode(fields map[string]string, codes []string) (string, bool) {
+	for _, name := range []string{"code", "type"} {
+		if slices.Contains(codes, fields[name]) {
+			return fields[name], true
+		}
+	}
+	return "", false
+}
+
+type kimiEnvelope struct {
+	isMessagesEnvelope bool
+	members            []oif.Member
+}
+
+func extractKimiEnvelope(body []byte) (kimiEnvelope, bool) {
 	document, err := oif.ParseJSON(body, oif.Limits{MaxBytes: 64 << 10})
 	if err != nil || document.Root().Kind() != oif.Object {
-		return "", false
+		return kimiEnvelope{}, false
 	}
 	root := document.Root().Members()
+	if len(root) != 1 && len(root) != 2 {
+		return kimiEnvelope{}, false
+	}
+	seen := map[string]bool{}
 	var failure oif.Value
-	messages := false
-	switch len(root) {
-	case 1:
-		if root[0].Name != "error" {
-			return "", false
+	var haveFailure bool
+	for _, member := range root {
+		if seen[member.Name] {
+			return kimiEnvelope{}, false
 		}
-		failure = root[0].Value
-	case 2:
-		seen := map[string]bool{}
-		for _, member := range root {
-			if seen[member.Name] {
-				return "", false
+		seen[member.Name] = true
+		switch member.Name {
+		case "error":
+			failure, haveFailure = member.Value, true
+		case "type":
+			if len(root) != 2 {
+				return kimiEnvelope{}, false
 			}
-			seen[member.Name] = true
-			switch member.Name {
-			case "type":
-				if text, ok := member.Value.Text(); !ok || text != "error" {
-					return "", false
-				}
-			case "error":
-				failure = member.Value
-			default:
-				return "", false
+			if text, ok := member.Value.Text(); !ok || text != "error" {
+				return kimiEnvelope{}, false
 			}
+		default:
+			return kimiEnvelope{}, false
 		}
-		messages = true
-	default:
-		return "", false
 	}
-	if failure.Kind() != oif.Object {
-		return "", false
+	if !haveFailure || failure.Kind() != oif.Object {
+		return kimiEnvelope{}, false
 	}
+	return kimiEnvelope{isMessagesEnvelope: len(root) == 2, members: failure.Members()}, true
+}
+
+func (e kimiEnvelope) matchesEndpoint(endpoint Endpoint) bool {
+	if e.isMessagesEnvelope {
+		return endpoint.Protocol == codemode.ProtocolMessages
+	}
+	return endpoint.Protocol == codemode.ProtocolChat
+}
+
+func (e kimiEnvelope) structuredFields() (map[string]string, bool) {
 	fields := map[string]string{}
-	for _, member := range failure.Members() {
+	for _, member := range e.members {
 		if _, dup := fields[member.Name]; dup {
-			return "", false
+			return nil, false
 		}
 		text, ok := member.Value.Text()
 		if !ok {
-			return "", false
+			return nil, false
 		}
 		fields[member.Name] = text
 	}
 	if fields["message"] == "" {
-		return "", false
+		return nil, false
 	}
-	if messages {
+	if e.isMessagesEnvelope {
 		if len(fields) != 2 {
-			return "", false
+			return nil, false
 		}
-		envelope, ok := kimiQuotaCodes[fields["type"]]
-		return envelope, ok
+		if _, ok := fields["type"]; !ok {
+			return nil, false
+		}
+		return fields, true
 	}
 	for name := range fields {
 		if name != "code" && name != "type" && name != "message" {
-			return "", false
+			return nil, false
 		}
 	}
-	if envelope, ok := kimiQuotaCodes[fields["code"]]; ok {
-		return envelope, true
-	}
-	envelope, ok := kimiQuotaCodes[fields["type"]]
-	return envelope, ok
+	return fields, true
 }
 
-func kimiEnvelope(body []byte) (string, bool) {
-	document, err := oif.ParseJSON(body, oif.Limits{MaxBytes: 64 << 10})
-	if err != nil || document.Root().Kind() != oif.Object {
-		return "", false
-	}
-	root := document.Root().Members()
-	var failure oif.Value
-	switch len(root) {
-	case 1:
-		if root[0].Name != "error" {
-			return "", false
-		}
-		failure = root[0].Value
-	case 2:
-		for _, member := range root {
-			switch member.Name {
-			case "type":
-				if text, ok := member.Value.Text(); !ok || text != "error" {
-					return "", false
-				}
-			case "error":
-				failure = member.Value
-			default:
-				return "", false
-			}
-		}
-	default:
-		return "", false
-	}
-	if failure.Kind() != oif.Object {
-		return "", false
-	}
+func (e kimiEnvelope) message() (string, bool) {
 	var message string
 	var found bool
-	for _, member := range failure.Members() {
+	for _, member := range e.members {
 		if member.Name != "message" {
 			continue
 		}
