@@ -91,6 +91,13 @@ func TestServiceRunsUnderRuntimeRole(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer restricted.Close(context.Background())
+	if _, err = restricted.Exec(t.Context(), "SELECT olp.dirty_commitment(date_trunc('day', now()), date_trunc('day', now()) + interval '1 day')"); err != nil {
+		t.Fatalf("the runtime role cannot mark commitment usage for export: %v", err)
+	}
+	var dirtyDays int
+	if err = restricted.QueryRow(t.Context(), "SELECT count(*) FROM olp.focus_dirty_days").Scan(&dirtyDays); err != nil || dirtyDays != 1 {
+		t.Fatalf("commitment export days = %d, want 1: %v", dirtyDays, err)
+	}
 	if _, err = restricted.Exec(t.Context(), "DELETE FROM olp.migrations"); err == nil {
 		t.Fatal("the runtime role can rewrite migration history")
 	}
