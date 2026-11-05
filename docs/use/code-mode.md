@@ -877,7 +877,9 @@ times. Only Codex reports allowance OLP reads. OpenCode Go and coding-plan
 accounts show none, and their health comes from response status alone. MiniMax
 M Plan ordering on both the global and mainland China profiles runs on weights
 plus cooldown until the remains schema is pinned from real keys on both
-profiles, and OLP makes no remains read before then. For
+profiles, and OLP makes no remains read before then. The documented remains
+endpoint is `GET https://www.minimax.io/v1/token_plan/remains`, and OLP does
+not call it until that schema is pinned per profile from real keys. For
 responses that mark an account unavailable or quota-limited, OLP honors a
 single valid Retry-After header as unsigned seconds or an HTTP date. Zero
 seconds and past dates permit an immediate retry when other eligibility checks

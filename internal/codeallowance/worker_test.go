@@ -12,6 +12,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/codeallowance"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -198,5 +199,40 @@ func TestPassFailureOnlyWhenDueCannotBeRead(t *testing.T) {
 	outcome, progress := reader(store, &fakeAuthorizer{}, fakeLocker{}, nil).Pass(t.Context())
 	if outcome != usage.OutcomeFailure || progress {
 		t.Fatalf("pass = %v, progress %v", outcome, progress)
+	}
+}
+
+func TestPassNeverReadsAnUnqualifiedMiniMaxAccount(t *testing.T) {
+	for _, profile := range []string{codeplans.MiniMaxProfile, codeplans.MiniMaxCNProfile} {
+		assertPassSkipsProfile(t, profile)
+	}
+}
+
+func TestPassDispatchesOnlyCodexToTheUsageRead(t *testing.T) {
+	for _, profile := range []string{codeplans.MiniMaxProfile, codeplans.MiniMaxCNProfile, codeplans.ZAIProfile, codeplans.KimiProfile, codeplans.QwenTokenPlanProfile, codeplans.OpenCodeGoProfile, "unknown-profile"} {
+		assertPassSkipsProfile(t, profile)
+	}
+}
+
+func assertPassSkipsProfile(t *testing.T, profile string) {
+	t.Helper()
+	due := codeallowance.DueAccount{
+		Account: codemode.Account{
+			ID: "account-1", ProjectID: "project", ProviderID: "provider", CredentialID: "credential",
+			Principal: "principal", Enabled: true,
+		},
+		Configuration: routing.Configuration{Kind: "plugin", AuthMode: "grant", ProfileID: profile},
+	}
+	store := &fakeStore{due: []codeallowance.DueAccount{due}}
+	authorizer := &fakeAuthorizer{}
+	calls := 0
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		t.Errorf("profile %q must not call %s", profile, r.URL)
+		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(validUsage))}, nil
+	})
+	outcome, progress := reader(store, authorizer, fakeLocker{}, transport).Pass(t.Context())
+	if outcome != usage.OutcomeSuccess || progress || calls != 0 || authorizer.calls != 0 || len(store.observed) != 0 || len(store.completed) != 0 {
+		t.Fatalf("profile %q: outcome %v progress %v calls %d auth %d observed %d completed %v, want a silent skip with no network call", profile, outcome, progress, calls, authorizer.calls, len(store.observed), store.completed)
 	}
 }

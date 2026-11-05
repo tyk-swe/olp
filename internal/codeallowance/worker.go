@@ -2,6 +2,8 @@ package codeallowance
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -128,6 +130,8 @@ func (r *Reader) Pass(ctx context.Context) (usage.Outcome, bool) {
 	return usage.OutcomeSuccess, progress
 }
 
+var errAllowanceReadUnqualified = errors.New("allowance read is not qualified for this adapter")
+
 func qualifiedForActiveRead(configuration routing.Configuration) bool {
 	signal, ok := codeadapter.AllowanceSignalForProfile(configuration.Kind, configuration.AuthMode, configuration.ProfileID)
 	return ok && signal.QualifiedForActiveRead()
@@ -138,9 +142,19 @@ func (r *Reader) read(ctx context.Context, entry DueAccount) (bool, error) {
 	if !Due(entry.Account, now) || !qualifiedForActiveRead(entry.Configuration) {
 		return false, nil
 	}
+	vendor, ok := codeadapter.ForConnection(entry.Configuration.Kind, entry.Configuration.AuthMode, entry.Configuration.ProfileID)
+	if !ok {
+		return false, nil
+	}
 	step, cancel := context.WithTimeout(ctx, readTimeout)
 	defer cancel()
-	allowance, parsed := r.fetch(step, entry, now)
+	allowance, parsed, err := r.fetchForAdapter(step, vendor.Adapter, entry, now)
+	if errors.Is(err, errAllowanceReadUnqualified) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
 	if parsed {
 		if err := r.Store.ObserveAllowance(ctx, entry.Account.ID, allowance); err != nil {
 			return false, err
@@ -152,7 +166,17 @@ func (r *Reader) read(ctx context.Context, entry DueAccount) (bool, error) {
 	return parsed, nil
 }
 
-func (r *Reader) fetch(ctx context.Context, entry DueAccount, now time.Time) (codemode.Allowance, bool) {
+func (r *Reader) fetchForAdapter(ctx context.Context, adapter codemode.Adapter, entry DueAccount, now time.Time) (codemode.Allowance, bool, error) {
+	switch adapter {
+	case codemode.AdapterCodex:
+		allowance, parsed := r.fetchCodex(ctx, entry, now)
+		return allowance, parsed, nil
+	default:
+		return codemode.Allowance{}, false, fmt.Errorf("%w: %s", errAllowanceReadUnqualified, adapter)
+	}
+}
+
+func (r *Reader) fetchCodex(ctx context.Context, entry DueAccount, now time.Time) (codemode.Allowance, bool) {
 	auth, err := r.Authorizer.AuthorizeCode(ctx, entry.Configuration, entry.Account, codemode.Dispatch{
 		Adapter: codemode.AdapterCodex, Protocol: codemode.ProtocolResponses, ClientPath: "responses",
 	})

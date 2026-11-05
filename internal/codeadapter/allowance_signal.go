@@ -1,6 +1,11 @@
 package codeadapter
 
-import "github.com/tyk-swe/olp/internal/codemode"
+import (
+	"slices"
+
+	"github.com/tyk-swe/olp/internal/codeplans"
+	"github.com/tyk-swe/olp/internal/codexauth"
+)
 
 type AllowanceSignal string
 
@@ -19,13 +24,17 @@ func (info AllowanceSignalInfo) QualifiedForActiveRead() bool {
 	return info.Signal == AllowanceSignalProven
 }
 
-var allowanceSignals = map[codemode.Adapter]AllowanceSignalInfo{
-	codemode.AdapterCodex:       {Signal: AllowanceSignalProven},
-	codemode.AdapterMiniMaxPlan: {Signal: AllowanceSignalRemainsUnqualified, Reason: "schema-unpinned"},
+var allowanceSignals = map[string]AllowanceSignalInfo{
+	codexauth.ProfileID:        {Signal: AllowanceSignalProven},
+	codeplans.MiniMaxProfile:   {Signal: AllowanceSignalRemainsUnqualified, Reason: "schema-unpinned"},
+	codeplans.MiniMaxCNProfile: {Signal: AllowanceSignalRemainsUnqualified, Reason: "schema-unpinned"},
 }
 
-func (v Vendor) AllowanceSignal() AllowanceSignalInfo {
-	if info, ok := allowanceSignals[v.Adapter]; ok {
+func (v Vendor) AllowanceSignal(profileID string) AllowanceSignalInfo {
+	if !slices.Contains(v.profiles, profileID) {
+		return AllowanceSignalInfo{Signal: AllowanceSignalNone}
+	}
+	if info, ok := allowanceSignals[profileID]; ok {
 		return info
 	}
 	return AllowanceSignalInfo{Signal: AllowanceSignalNone}
@@ -36,5 +45,5 @@ func AllowanceSignalForProfile(kind, authMode, profileID string) (AllowanceSigna
 	if !ok {
 		return AllowanceSignalInfo{}, false
 	}
-	return vendor.AllowanceSignal(), true
+	return vendor.AllowanceSignal(profileID), true
 }
