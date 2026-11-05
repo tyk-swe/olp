@@ -239,9 +239,7 @@ func (x *call) responseHeaders(h http.Header, streamed bool) {
 	surface, state := x.clientSurface(), x.lease.RateState()
 	reset := x.lease.RateReset()
 	if x.cacheRateLease != nil {
-		requestState := x.cacheRateLease.RateState()
-		state.RequestLimit = requestState.RequestLimit
-		state.RequestRemaining = requestState.RequestRemaining
+		state = withCacheRequestAllowance(state, x.cacheRateLease.RateState())
 		if !state.LimitsTokens() {
 			reset = x.cacheRateLease.RateReset()
 		}
@@ -258,6 +256,18 @@ func (x *call) responseHeaders(h http.Header, streamed bool) {
 		text = list.metadata(text, x, streamed)
 	}
 	list.apply(h, text)
+}
+
+// withCacheRequestAllowance reports the request counts a cache-aware admission
+// reserved separately. The window end follows them when no token lease states one.
+func withCacheRequestAllowance(state, requests limits.RateState) limits.RateState {
+	merged := state
+	merged.RequestLimit = requests.RequestLimit
+	merged.RequestRemaining = requests.RequestRemaining
+	if !state.LimitsTokens() {
+		merged.ResetAt = requests.ResetAt
+	}
+	return merged
 }
 
 // setRateLimitHeaders adds the allowance a rejection reports. The reservation

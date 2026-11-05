@@ -34,10 +34,7 @@ func ReconciliationSpend(ctx context.Context, q access.Queryer, start, end time.
 	if len(providers) == 0 {
 		return nil, nil
 	}
-	// The report is provider-scoped, not consumer-project scoped, so the
-	// project filters stay open and provider selection happens in the outer
-	// query.
-	f := Filters{Start: start, End: end, AllProjects: true}
+	f := Filters{Start: start, End: end, AllProjects: true, providerIDs: providers}
 	if err := f.Validate(); err != nil {
 		return nil, err
 	}
@@ -50,7 +47,7 @@ func ReconciliationSpend(ctx context.Context, q access.Queryer, start, end time.
 		" COALESCE(SUM(reconcil_unpriced_attempts) FILTER (WHERE NOT budget_exempt AND NOT caller_credential),0)::bigint," +
 		" COALESCE(SUM(reconcil_incomplete_attempts) FILTER (WHERE NOT budget_exempt AND NOT caller_credential),0)::bigint," +
 		" COALESCE(SUM(reconcil_caller_attempts),0)::bigint" +
-		" FROM report_rows WHERE provider_id = ANY(" + query.bind(providers) + "::uuid[])" +
+		" FROM report_rows" +
 		" GROUP BY provider_id, to_char(observed_at AT TIME ZONE 'UTC','YYYY-MM-DD')" +
 		" ORDER BY provider_id, 2")
 	rows, err := q.Query(ctx, query.sql(), query.args...)

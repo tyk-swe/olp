@@ -91,7 +91,7 @@ func RunMaintenance(ctx context.Context, pool *pgxpool.Pool, now time.Time) (Mai
 	if report.RollupRows, report.UsageRows, err = rollUpAttemptUsage(ctx, conn, windows.usage); err != nil {
 		return MaintenanceReport{}, err
 	}
-	if err = purgeOrphanedAnchors(ctx, conn, windows.request); err != nil {
+	if err = purgeOrphanedAnchors(ctx, conn, historyCutoff.UTC().Truncate(time.Hour)); err != nil {
 		return MaintenanceReport{}, err
 	}
 	if report.AuditRows, err = purgeExpiredAudit(ctx, conn, windows.audit); err != nil {

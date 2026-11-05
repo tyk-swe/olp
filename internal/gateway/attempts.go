@@ -198,7 +198,7 @@ route:
 					x.spendCaps(gate.hold.budgets, attempt)
 				}
 				x.facts = append(x.facts, fact)
-				s.health.record(provider.ID, fact)
+				s.health.record(provider.ID, fact, gate.hold.probed)
 				if x.workflow != nil && failure == nil {
 					settlementErr := s.settleWorkflowModelAttempt(ctx, x, fact)
 					leaseErr := finishLease()

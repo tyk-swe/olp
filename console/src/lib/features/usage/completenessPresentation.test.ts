@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { UsageCompleteness } from './usage';
-import { presentUsageCompleteness } from './completenessPresentation';
+import {
+  completenessFromSummary,
+  presentUsageCompleteness
+} from './completenessPresentation';
 
 const complete: UsageCompleteness = {
   complete: true,
@@ -25,6 +28,36 @@ const complete: UsageCompleteness = {
 const incomplete = { ...complete, complete: false };
 
 describe('usage completeness presentation', () => {
+  it('derives priced requests from summary and keeps its health evidence', () => {
+    const summary = {
+      ...complete,
+      request_count: 9,
+      unpriced_count: 3,
+      incomplete_count: 2,
+      estimated_cost: '1.23',
+      currency: 'USD',
+      complete: false,
+      request_metadata_consumer: {
+        ...complete.request_metadata_consumer,
+        state: 'backlogged' as const,
+        pending_events: 1
+      }
+    };
+    const completeness = completenessFromSummary(summary);
+    const view = presentUsageCompleteness(completeness);
+
+    expect(completeness.priced_count).toBe(6);
+    expect(completeness.estimated_cost).toBe(summary.estimated_cost);
+    expect(completeness.currency).toBe(summary.currency);
+    expect(view).toMatchObject({
+      kind: 'warning',
+      title: 'Request metadata persistence backlog detected',
+      detail: expect.stringContaining(
+        '2 incomplete requests · 6 priced and 3 unpriced requests'
+      )
+    });
+  });
+
   it('reports complete only when the range is exact and every request is priced', () => {
     expect(presentUsageCompleteness(complete)).toEqual({ kind: 'complete' });
     expect(

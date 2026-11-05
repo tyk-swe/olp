@@ -13,10 +13,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -112,6 +114,36 @@ func enableTestCache(t *testing.T, h *harness) (*harness, *cacheMemory) {
 	})
 	return h, m
 }
+
+func TestCacheAdmissionReportsARealAnthropicResetTime(t *testing.T) {
+	requestWindowEnd := time.Date(2026, time.March, 10, 12, 1, 0, 0, time.UTC)
+	tokenWindowEnd := requestWindowEnd.Add(time.Minute)
+	requests := limits.RateState{RequestLimit: 10, RequestRemaining: 9, ResetAt: requestWindowEnd}
+	for _, test := range []struct {
+		name   string
+		tokens limits.RateState
+		want   time.Time
+	}{
+		{"no token lease", limits.RateState{}, requestWindowEnd},
+		{"token lease", limits.RateState{TokenLimit: 100, TokenRemaining: 50, ResetAt: tokenWindowEnd}, tokenWindowEnd},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var (
+				buf  headerBuffer
+				list headerList
+			)
+			headers := http.Header{}
+			list.apply(headers, list.rate(buf[:0], "anthropic", withCacheRequestAllowance(test.tokens, requests), 0))
+			if got := headers.Get(headerAnthropicLimitRequests); got != "10" {
+				t.Fatalf("request limit header = %q", got)
+			}
+			if got := headers.Get(headerAnthropicResetRequests); got != test.want.Format(time.RFC3339) {
+				t.Fatalf("request reset header = %q, want %s", got, test.want.Format(time.RFC3339))
+			}
+		})
+	}
+}
+
 func TestResponseCacheUnaryReplayControlsAndOutage(t *testing.T) {
 	h, m := cacheHarness(t)
 	h.rt.mu.Lock()

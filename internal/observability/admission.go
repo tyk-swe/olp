@@ -53,12 +53,20 @@ func (p *Pool) permit(state int32) *Permit {
 // Release returns a slot. It pairs strictly with a successful Acquire. While
 // requests wait in the queue the slot passes to one of them instead.
 func (p *Pool) Release() {
-	if q := p.queue; q != nil && q.waiting.Load() > 0 && q.handoff() {
-		return
+	q := p.queue
+	for {
+		if q != nil && q.waiting.Load() > 0 && q.handoff() {
+			return
+		}
+		// Uncount before freeing, so Admitted never overstates the held slots.
+		p.admitted.Add(-1)
+		<-p.sem
+		// A waiter that joined after the check above may have found the slot
+		// still held. Retake the slot and hand it over so that waiter wakes.
+		if q == nil || q.waiting.Load() == 0 || !p.tryAcquire() {
+			return
+		}
 	}
-	// Uncount before freeing, so Admitted never overstates the held slots.
-	p.admitted.Add(-1)
-	<-p.sem
 }
 
 // Capacity is the configured slot count.

@@ -1,5 +1,14 @@
 import type { UsageCompleteness } from '$lib/features/usage/usage';
 
+export function completenessFromSummary(
+  summary: Omit<UsageCompleteness, 'priced_count'>
+): UsageCompleteness {
+  return {
+    ...summary,
+    priced_count: summary.request_count - summary.unpriced_count
+  };
+}
+
 export type UsageCompletenessPresentation =
   | { kind: 'complete' }
   | {

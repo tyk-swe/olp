@@ -118,7 +118,7 @@ func (s *Server) settlePinHold(ctx context.Context, x *call, hold *dispatchHold,
 	}
 	hold.probed = false
 	if x.dispatched && len(x.facts) > 0 {
-		s.health.record(hold.provider, x.facts[len(x.facts)-1])
+		s.health.record(hold.provider, x.facts[len(x.facts)-1], true)
 		return
 	}
 	s.health.releaseProbe(hold.provider)

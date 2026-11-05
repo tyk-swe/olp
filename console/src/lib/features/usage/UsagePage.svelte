@@ -9,7 +9,6 @@
   import { createQuery } from '@tanstack/svelte-query';
   import {
     usageBreakdown,
-    usageCompleteness,
     usageSeries,
     usageSummary
   } from '$lib/features/usage/usage';
@@ -21,6 +20,7 @@
   import UsageChart from '$lib/features/usage/UsageChart.svelte';
   import CostCalculator from '$lib/features/usage/CostCalculator.svelte';
   import { presentEstimate } from '$lib/features/usage/estimatePresentation';
+  import { completenessFromSummary } from '$lib/features/usage/completenessPresentation';
   import UsageCompletenessStatus from '$lib/features/usage/UsageCompletenessStatus.svelte';
   import { errorMessage } from '$lib/management/http';
   import { downloadBlob } from '$lib/download';
@@ -69,23 +69,21 @@
       queryKey: usageKeys.report(JSON.stringify(snapshot)),
       enabled: !urlProblem,
       queryFn: async ({ signal }) => {
-        const [summary, series, breakdown, completeness, apiKey] =
-          await Promise.all([
-            usageSummary(snapshot.filters),
-            usageSeries(snapshot.filters, snapshot.granularity),
-            usageBreakdown(snapshot.filters, snapshot.dimension),
-            usageCompleteness(snapshot.filters),
-            // The key only adds its budget; a key that can't be read, such
-            // as a removed one, leaves the report itself intact.
-            snapshot.filters.api_key_id
-              ? getApiKey(snapshot.filters.api_key_id, signal).catch(() => null)
-              : Promise.resolve(null)
-          ]);
+        const [summary, series, breakdown, apiKey] = await Promise.all([
+          usageSummary(snapshot.filters),
+          usageSeries(snapshot.filters, snapshot.granularity),
+          usageBreakdown(snapshot.filters, snapshot.dimension),
+          // The key only adds its budget; a key that can't be read, such
+          // as a removed one, leaves the report itself intact.
+          snapshot.filters.api_key_id
+            ? getApiKey(snapshot.filters.api_key_id, signal).catch(() => null)
+            : Promise.resolve(null)
+        ]);
         return {
           summary,
           points: series.items,
           breakdown: breakdown.items,
-          completeness,
+          completeness: completenessFromSummary(summary),
           apiKey
         };
       }

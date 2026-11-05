@@ -104,7 +104,7 @@ func (c *httpConnection) exchange(ctx context.Context, protocol string, id int, 
 		line := scanner.Text()
 		if line == "" {
 			if len(data) != 0 {
-				if _, matchErr := matchingResult(data, id); matchErr == nil {
+				if _, matched := matchingReply(data, id); matched {
 					return data, nil
 				}
 				c.observeNotification(data)

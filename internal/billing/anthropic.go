@@ -41,7 +41,7 @@ func fetchAnthropic(ctx context.Context, client *http.Client, endpoint *string, 
 	q.Set("bucket_width", "1d")
 	q.Add("group_by[]", "description")
 	q.Add("group_by[]", "workspace_id")
-	q.Set("limit", strconv.Itoa(31))
+	q.Set("limit", strconv.Itoa(pollingBucketLimit))
 	workspaces := map[string]bool{}
 	for _, id := range scope.WorkspaceIDs {
 		workspaces[id] = true

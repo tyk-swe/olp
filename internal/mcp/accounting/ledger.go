@@ -312,13 +312,31 @@ func (l *DurableLedger) RecoverOrphanedDispatches(ctx context.Context, staleBefo
 
 func (l *DurableLedger) ExpireCallIdentities(ctx context.Context, limit int) (int, error) {
 	if limit <= 0 {
-		limit = 256
+		return l.ExpireCallIdentities(ctx, 256)
 	}
-	tag, err := l.pool.Exec(ctx, `DELETE FROM olp.mcp_call_identities WHERE ctid IN (SELECT ctid FROM olp.mcp_call_identities WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT $1)`, limit)
+	tag, err := l.pool.Exec(ctx, `WITH expired AS (
+		SELECT ctid FROM olp.mcp_call_identities
+		WHERE expires_at<=statement_timestamp() ORDER BY expires_at LIMIT $1 FOR UPDATE SKIP LOCKED
+	) DELETE FROM olp.mcp_call_identities identity USING expired WHERE identity.ctid=expired.ctid`, limit)
 	if err != nil {
 		return 0, err
 	}
 	return int(tag.RowsAffected()), nil
+}
+
+func (l *DurableLedger) DrainExpiredCallIdentities(ctx context.Context, batchSize int) (int, error) {
+	if batchSize <= 0 {
+		return l.DrainExpiredCallIdentities(ctx, 256)
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	deleted, err := l.ExpireCallIdentities(ctx, batchSize)
+	if err != nil || deleted < batchSize {
+		return deleted, err
+	}
+	remaining, drainErr := l.DrainExpiredCallIdentities(ctx, batchSize)
+	return deleted + remaining, drainErr
 }
 
 func (l *DurableLedger) ReleaseUndispatched(ctx context.Context, reservation *Reservation) error {

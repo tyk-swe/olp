@@ -109,14 +109,16 @@ func cooldownDuration(d time.Duration) time.Duration {
 	return min(d, maxCooldown)
 }
 
-// record folds one attempt into the circuit and the health window.
-func (h *healthTracker) record(providerID string, fact AttemptFact) {
+// record folds one attempt into the circuit and the health window. probe says
+// the attempt holds the half-open probe, which only its own completion releases.
+func (h *healthTracker) record(providerID string, fact AttemptFact, probe bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	now := h.now()
 	p := h.provider(providerID)
-	wasProbe := p.probing
-	p.probing = false
+	if probe {
+		p.probing = false
+	}
 	p.last = now
 	minute := now.Unix() / 60
 	b := p.buckets[minute]
@@ -174,7 +176,7 @@ func (h *healthTracker) record(providerID string, fact AttemptFact) {
 	default:
 		return
 	}
-	if wasProbe {
+	if probe {
 		p.openUntil = now.Add(circuitOpenFor)
 		p.failures = 0
 		h.publish(providerID, p.openUntil)
