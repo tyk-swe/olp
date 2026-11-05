@@ -6,14 +6,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/promotion"
+	codepromotion "github.com/tyk-swe/olp/internal/promotion/code"
+	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/resources"
 )
 
@@ -532,5 +537,103 @@ func TestCodeCooldownClassesScopeSelectionNeverShortenAndNameRefusalRecovery(t *
 	}
 	if modelUnavailable != nil {
 		t.Fatalf("model scope cooldown mirrored to account health: %s until %s", modelHealth, modelUnavailable)
+	}
+}
+
+func TestCodeAccountExtraUsageRoundTripsAndRefusesNonKimiAccounts(t *testing.T) {
+	pool, _ := newDatabase(t)
+	if err := database.Migrate(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+	user, project := uuid.NewString(), uuid.NewString()
+	kimiProvider, codexProvider := uuid.NewString(), uuid.NewString()
+	kimiCredential, codexCredential := uuid.NewString(), uuid.NewString()
+	kimiAccount, codexAccount := uuid.NewString(), uuid.NewString()
+	statements := []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO olp.users(id, email, display_name, role, etag) VALUES($1, 'extra-usage@example.invalid', 'Journey', 'owner', $2)`, []any{user, uuid.NewString()}},
+		{`INSERT INTO olp.projects(id, name, etag, created_by) VALUES($1, 'extra-usage-journey', $2, $3)`, []any{project, uuid.NewString(), user}},
+		{`INSERT INTO olp.providers(id, project_id, name, kind, state, configuration, etag, slots_etag, created_by) VALUES($1, $2, 'extra-usage-kimi', 'plugin', 'active', '{"kind":"plugin","auth_mode":"grant","profile_id":"kimi-code"}', $3, $4, $5)`, []any{kimiProvider, project, uuid.NewString(), uuid.NewString(), user}},
+		{`INSERT INTO olp.providers(id, project_id, name, kind, state, configuration, etag, slots_etag, created_by) VALUES($1, $2, 'extra-usage-codex', 'plugin', 'active', '{"kind":"plugin","auth_mode":"grant","profile_id":"codex-subscription"}', $3, $4, $5)`, []any{codexProvider, project, uuid.NewString(), uuid.NewString(), user}},
+		{`INSERT INTO olp.provider_credentials(id, provider_id, version, principal, plugin_digest, grant_facts) VALUES($1, $2, 1, 'kimi-principal', repeat('0',64), '{}')`, []any{kimiCredential, kimiProvider}},
+		{`INSERT INTO olp.provider_credentials(id, provider_id, version, principal, plugin_digest, grant_facts) VALUES($1, $2, 1, 'codex-principal', repeat('0',64), '{}')`, []any{codexCredential, codexProvider}},
+		{`INSERT INTO olp.provider_grants(credential_id) VALUES($1)`, []any{kimiCredential}},
+		{`INSERT INTO olp.provider_grants(credential_id) VALUES($1)`, []any{codexCredential}},
+	}
+	for _, statement := range statements {
+		if _, err := pool.Exec(t.Context(), statement.sql, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	operator := access.Principal{User: access.User{ID: user}, AllProjects: true}
+	enabled, disabled := true, false
+	save := func(id string, input providers.CodeAccountInput, existing bool) (map[string]any, error) {
+		t.Helper()
+		tx, err := pool.Begin(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(t.Context())
+		body, err := providers.SaveCodeAccount(t.Context(), tx, operator, id, access.NewID(), input, existing)
+		if err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		var account map[string]any
+		if err := json.Unmarshal(body, &account); err != nil {
+			t.Fatal(err)
+		}
+		return account, nil
+	}
+	kimiInput := providers.CodeAccountInput{ProjectID: project, ProviderID: kimiProvider, CredentialID: kimiCredential, Name: "kimi", Enabled: true, Models: []string{"model"}, ExtraUsageEnabled: &enabled}
+	created, err := save(kimiAccount, kimiInput, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created["adapter"] != "kimi_code" || created["extra_usage_enabled"] != true {
+		t.Fatalf("created kimi account = %v, want extra_usage_enabled true in the management projection", created)
+	}
+	kimiInput.ExtraUsageEnabled = &disabled
+	updated, err := save(kimiAccount, kimiInput, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated["extra_usage_enabled"] != false {
+		t.Fatalf("updated kimi account = %v, want extra_usage_enabled false", updated)
+	}
+	kimiInput.ExtraUsageEnabled = nil
+	cleared, err := save(kimiAccount, kimiInput, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value, present := cleared["extra_usage_enabled"]; !present || value != nil {
+		t.Fatalf("cleared kimi account = %v, want extra_usage_enabled present and null (not recorded)", cleared)
+	}
+	codexInput := providers.CodeAccountInput{ProjectID: project, ProviderID: codexProvider, CredentialID: codexCredential, Name: "codex", Enabled: true, Models: []string{"model"}, ExtraUsageEnabled: &enabled}
+	if _, err := save(codexAccount, codexInput, false); err == nil {
+		t.Fatal("extra usage on a Codex account saved, want a refusal")
+	}
+	var storedAccounts int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.code_accounts WHERE id=$1`, codexAccount).Scan(&storedAccounts); err != nil {
+		t.Fatal(err)
+	}
+	if storedAccounts != 0 {
+		t.Fatal("refused non-Kimi account was stored")
+	}
+	kimiInput.ExtraUsageEnabled = &enabled
+	if _, err := save(kimiAccount, kimiInput, true); err != nil {
+		t.Fatal(err)
+	}
+	exported, err := codepromotion.ExportCode(t.Context(), pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := slices.IndexFunc(exported.Accounts, func(entry promotion.CodeAccountEntry) bool { return entry.ID == kimiAccount })
+	if index < 0 || exported.Accounts[index].ExtraUsageEnabled == nil || !*exported.Accounts[index].ExtraUsageEnabled {
+		t.Fatalf("exported accounts = %+v, want the kimi account carrying extra usage on", exported.Accounts)
 	}
 }

@@ -8815,6 +8815,9 @@ type CodeAccount struct {
 	Enabled      bool                   `json:"enabled"`
 	Etag         openapi_types.UUID     `json:"etag"`
 
+	// ExtraUsageEnabled Whether the member Extra Usage paid fallback setting is on for a Kimi Code account, recorded by the operator at enrollment. Null means not recorded. It is never spare included allowance.
+	ExtraUsageEnabled nullable.Nullable[bool] `json:"extra_usage_enabled"`
+
 	// GrantState Grant authority is independent of serving health and allowance. A rejected refresh lapses the grant and requires enrollment again.
 	GrantState CodeAccountGrantState `json:"grant_state"`
 	Health     CodeAccountHealth     `json:"health"`
@@ -8872,10 +8875,13 @@ type CodeAccountList struct {
 type CodeAccountWrite struct {
 	CredentialId openapi_types.UUID `json:"credential_id"`
 	Enabled      bool               `json:"enabled"`
-	Models       []string           `json:"models"`
-	Name         string             `json:"name"`
-	ProjectId    openapi_types.UUID `json:"project_id"`
-	ProviderId   openapi_types.UUID `json:"provider_id"`
+
+	// ExtraUsageEnabled Whether the member Extra Usage paid fallback setting is on for a Kimi Code account, recorded by the operator at enrollment. Null means not recorded. It is never spare included allowance and is refused for other adapters.
+	ExtraUsageEnabled nullable.Nullable[bool] `json:"extra_usage_enabled,omitempty"`
+	Models            []string                `json:"models"`
+	Name              string                  `json:"name"`
+	ProjectId         openapi_types.UUID      `json:"project_id"`
+	ProviderId        openapi_types.UUID      `json:"provider_id"`
 }
 
 // CodeAllowance Provider-reported subscription metadata. Unknown values remain null and never become local hard budgets or billed spend.
@@ -9574,13 +9580,16 @@ type ConfigurationCode struct {
 
 // ConfigurationCodeAccount defines model for ConfigurationCodeAccount.
 type ConfigurationCodeAccount struct {
-	CredentialRef string             `json:"credential_ref"`
-	Enabled       bool               `json:"enabled"`
-	Id            openapi_types.UUID `json:"id"`
-	Models        []string           `json:"models"`
-	Name          string             `json:"name"`
-	Project       string             `json:"project"`
-	Provider      string             `json:"provider"`
+	CredentialRef string `json:"credential_ref"`
+	Enabled       bool   `json:"enabled"`
+
+	// ExtraUsageEnabled Whether the member Extra Usage paid fallback setting is on for a Kimi Code account. Null means not recorded.
+	ExtraUsageEnabled nullable.Nullable[bool] `json:"extra_usage_enabled,omitempty"`
+	Id                openapi_types.UUID      `json:"id"`
+	Models            []string                `json:"models"`
+	Name              string                  `json:"name"`
+	Project           string                  `json:"project"`
+	Provider          string                  `json:"provider"`
 }
 
 // ConfigurationCodeBindings defines model for ConfigurationCodeBindings.

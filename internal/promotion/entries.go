@@ -49,13 +49,14 @@ type CodeBindings struct {
 }
 
 type CodeAccountEntry struct {
-	ID            string   `json:"id"`
-	Project       string   `json:"project"`
-	Provider      string   `json:"provider"`
-	CredentialRef string   `json:"credential_ref"`
-	Name          string   `json:"name"`
-	Enabled       bool     `json:"enabled"`
-	Models        []string `json:"models"`
+	ID                string   `json:"id"`
+	Project           string   `json:"project"`
+	Provider          string   `json:"provider"`
+	CredentialRef     string   `json:"credential_ref"`
+	Name              string   `json:"name"`
+	Enabled           bool     `json:"enabled"`
+	Models            []string `json:"models"`
+	ExtraUsageEnabled *bool    `json:"extra_usage_enabled"`
 }
 
 type CodePoolEntry struct {

@@ -2,7 +2,10 @@
   import { untrack } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
-  import { listProviders } from '$lib/features/providers/providers';
+  import {
+    getProvider,
+    listProviders
+  } from '$lib/features/providers/providers';
   import { listProviderCredentials } from '$lib/features/providers/credentials';
   import { providerKeys } from '$lib/features/providers/providerKeys';
   import {
@@ -10,7 +13,7 @@
     type CodeAccount,
     type CodeAccountWrite
   } from '$lib/management/code-mode';
-  import { nativeModels } from './presentation';
+  import { nativeModels, showsExtraUsage } from './presentation';
   import AccountEnrollment from './AccountEnrollment.svelte';
 
   import {
@@ -33,6 +36,11 @@
   let credentialId = $state(initial?.credential_id ?? '');
   let models = $state(initial?.models.join('\n') ?? '');
   let enabled = $state(initial?.enabled ?? true);
+  let extraUsage = $state(
+    initial?.extra_usage_enabled == null
+      ? ''
+      : String(initial.extra_usage_enabled)
+  );
   let enrolling = $state(false);
 
   const providers = createQuery(() => ({
@@ -44,6 +52,20 @@
     queryFn: ({ signal }) => listProviderCredentials(providerId, signal),
     enabled: !!providerId
   }));
+  const provider = createQuery(() => ({
+    queryKey: providerKeys.detail(providerId),
+    queryFn: ({ signal }) => getProvider(providerId, signal),
+    enabled: !!providerId && !initial
+  }));
+  const extraUsageAdapter = $derived(
+    initial
+      ? initial.adapter
+      : ['kimi-code', 'kimi-code-cn'].includes(
+            provider.data?.configuration.profile_id ?? ''
+          )
+        ? 'kimi_code'
+        : null
+  );
   const submission = useResourceSubmission({
     allowed: () => allowed,
     creating: () => !current,
@@ -57,7 +79,12 @@
       provider_id: providerId,
       credential_id: credentialId,
       models: nativeModels(models),
-      enabled
+      enabled,
+      extra_usage_enabled: showsExtraUsage(extraUsageAdapter)
+        ? extraUsage === ''
+          ? null
+          : extraUsage === 'true'
+        : (initial?.extra_usage_enabled ?? null)
     }),
     persist: (input, requestId) => saveCodeAccount(input, current, requestId)
   });
@@ -148,4 +175,17 @@
   <label class="choice"
     ><input type="checkbox" bind:checked={enabled} />Enabled</label
   >
+  {#if showsExtraUsage(extraUsageAdapter)}
+    <label for="code-extra-usage">Extra Usage</label>
+    <select id="code-extra-usage" bind:value={extraUsage}>
+      <option value="">Not recorded</option>
+      <option value="true">On</option>
+      <option value="false">Off</option>
+    </select>
+    <p>
+      Extra Usage is a paid fallback beyond the plan quota. Record the member
+      setting for this Kimi account so paid use is never read as spare included
+      allowance
+    </p>
+  {/if}
 </ResourceEditorForm>

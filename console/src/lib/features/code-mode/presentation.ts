@@ -42,6 +42,15 @@ export function adapterLabel(adapter: string | null | undefined): string {
   return adapter ? (adapterLabels[adapter] ?? adapter) : 'No adapter';
 }
 
+export function showsExtraUsage(adapter: string | null | undefined): boolean {
+  return adapter === 'kimi_code';
+}
+
+export function extraUsageLabel(value: boolean | null | undefined): string {
+  if (value == null) return 'Not recorded';
+  return value ? 'On, paid fallback beyond included quota' : 'Off';
+}
+
 const servingHealthLabels: Record<CodeAccount['health'], string> = {
   unknown: 'Unknown',
   healthy: 'Healthy',

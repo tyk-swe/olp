@@ -5141,6 +5141,13 @@
             "enabled": {
               "type": "boolean"
             },
+            "extra_usage_enabled": {
+              "description": "Whether the member Extra Usage paid fallback setting is on for a Kimi Code account. Null means not recorded.",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
             "models": {
               "items": {
                 "maxLength": 200,
@@ -7322,6 +7329,13 @@
             },
             "enabled": {
               "type": "boolean"
+            },
+            "extra_usage_enabled": {
+              "description": "Whether the member Extra Usage paid fallback setting is on for a Kimi Code account, recorded by the operator at enrollment. Null means not recorded. It is never spare included allowance and is refused for other adapters.",
+              "type": [
+                "boolean",
+                "null"
+              ]
             },
             "models": {
               "items": {
@@ -30987,6 +31001,13 @@
             "enabled": {
               "type": "boolean"
             },
+            "extra_usage_enabled": {
+              "description": "Whether the member Extra Usage paid fallback setting is on for a Kimi Code account. Null means not recorded.",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
             "models": {
               "items": {
                 "maxLength": 200,
@@ -36080,6 +36101,13 @@
             },
             "enabled": {
               "type": "boolean"
+            },
+            "extra_usage_enabled": {
+              "description": "Whether the member Extra Usage paid fallback setting is on for a Kimi Code account, recorded by the operator at enrollment. Null means not recorded. It is never spare included allowance and is refused for other adapters.",
+              "type": [
+                "boolean",
+                "null"
+              ]
             },
             "models": {
               "items": {

@@ -10,6 +10,8 @@ import {
   cooldownClassLabel,
   cooldownSummary,
   decisionReasonLabel,
+  extraUsageLabel,
+  showsExtraUsage,
   skipClassLabel,
   mutationError,
   nativeModels,
@@ -381,6 +383,35 @@ describe('code account decisions', () => {
     expect(skipClassLabel('tree')).toBe('tree account served');
     expect(skipClassLabel('weight')).toBe('weighted score');
     expect(skipClassLabel('band')).toBe('lower allowance band');
+  });
+});
+
+describe('extra usage presentation', () => {
+  it('shows the setting only for Kimi Code accounts', () => {
+    expect(showsExtraUsage('kimi_code')).toBe(true);
+    for (const adapter of [
+      'codex',
+      'zai_coding',
+      'minimax_plan',
+      'qwen_token_plan',
+      'opencode_go',
+      'claude',
+      'antigravity',
+      null,
+      undefined,
+      ''
+    ]) {
+      expect(showsExtraUsage(adapter)).toBe(false);
+    }
+  });
+
+  it('keeps an unrecorded setting distinct from off and never reads paid fallback as spare allowance', () => {
+    expect(extraUsageLabel(null)).toBe('Not recorded');
+    expect(extraUsageLabel(undefined)).toBe('Not recorded');
+    expect(extraUsageLabel(false)).toBe('Off');
+    const on = extraUsageLabel(true);
+    expect(on).toContain('paid fallback');
+    expect(on).not.toMatch(/spare|remaining/i);
   });
 });
 
