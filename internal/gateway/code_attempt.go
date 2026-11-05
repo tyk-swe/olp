@@ -44,6 +44,7 @@ type codeAttempt struct {
 	publicModel        string
 	status             int
 	responseHeaders    http.Header
+	pendingHealth      *codemode.HealthObservation
 }
 
 func (s *Server) prepareCode(r *http.Request, release *release.Release, route codemode.Route, observation codemode.Request, ingress codeIngress, transport codeadapter.Transport, recovery *resources.CodeRecovery, body []byte) (*codeAttempt, error) {
@@ -202,9 +203,16 @@ func (a *codeAttempt) observe(o codemode.Observation) {
 		_ = a.server.CodeLedger.ObserveReference(ctx, a.permit.Attempt.ID, o.ResponseID)
 		cancel()
 	}
-	classified := a.observeCooldownClass(o)
+	classification, classified := a.observeCooldownClass(o)
+	switch {
+	case classified && classification.Scope == codeadapter.ScopeModel:
+		a.pendingHealth = nil
+	case len(o.RejectionBody) > 0:
+		a.flushPendingHealth(context.Background())
+	}
 	if o.Status != 0 && !classified {
 		a.response(context.Background(), o.Status, http.Header{"Retry-After": o.RetryAfter})
+		a.flushPendingHealth(context.Background())
 	}
 	if o.Allowance != nil {
 		a.observeAllowance(context.Background(), *o.Allowance)
@@ -233,6 +241,7 @@ func (a *codeAttempt) finish(ctx context.Context) {
 		return
 	}
 	a.finished = true
+	a.flushPendingHealth(ctx)
 	if !a.dispatched {
 		a.outcome(ctx, codemode.Outcome{Origin: "gateway", Kind: "rejected"})
 	} else if !a.terminal {
@@ -321,13 +330,22 @@ func (a *codeAttempt) observeHealth(ctx context.Context, observation codemode.He
 	_ = a.server.CodeLedger.ObserveHealth(ctx, a.permit.Account.ID, observation)
 }
 
-func (a *codeAttempt) observeCooldownClass(o codemode.Observation) bool {
+func (a *codeAttempt) flushPendingHealth(ctx context.Context) {
+	if a.pendingHealth == nil {
+		return
+	}
+	pending := *a.pendingHealth
+	a.pendingHealth = nil
+	a.observeHealth(ctx, pending)
+}
+
+func (a *codeAttempt) observeCooldownClass(o codemode.Observation) (codeadapter.Classification, bool) {
 	if a.paid != nil || len(o.RejectionBody) == 0 || a.permit.Account.ID == "" {
-		return false
+		return codeadapter.Classification{}, false
 	}
 	adapter, ok := codeadapter.ForConnection(a.config.Kind, a.config.AuthMode, a.config.ProfileID)
 	if !ok {
-		return false
+		return codeadapter.Classification{}, false
 	}
 	status := o.Status
 	if status == 0 {
@@ -340,12 +358,12 @@ func (a *codeAttempt) observeCooldownClass(o codemode.Observation) bool {
 	now := a.server.now().UTC()
 	classification, ok := adapter.Classify(a.endpoint, status, o.RejectionBody, headers, now)
 	if !ok {
-		return false
+		return codeadapter.Classification{}, false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	_ = a.server.CodeLedger.ObserveCooldownClass(ctx, a.permit.Account.ID, a.model, classification, now)
-	return true
+	err := a.server.CodeLedger.ObserveCooldownClass(ctx, a.permit.Account.ID, a.model, classification, now)
+	return classification, err == nil
 }
 
 func (a *codeAttempt) response(ctx context.Context, status int, headers http.Header) {
@@ -384,7 +402,8 @@ func (a *codeAttempt) response(ctx context.Context, status int, headers http.Hea
 			at := now.Add(delay)
 			return &at
 		}()
-		a.observeHealth(ctx, codemode.HealthObservation{Status: health, ObservedAt: now, RetryAt: retryAt})
+		a.flushPendingHealth(ctx)
+		a.pendingHealth = &codemode.HealthObservation{Status: health, ObservedAt: now, RetryAt: retryAt}
 	}
 	if a.endpoint.Observation != codeadapter.ObserveCodex {
 		return

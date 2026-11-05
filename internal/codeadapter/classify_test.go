@@ -49,6 +49,8 @@ func TestClassifyCodexUsageLimitFallsBackToResetsInSecondsThenRetryAfterThenMinu
 		{"multiple retry-after values ignored", `{"error":{"type":"usage_limit_reached"}}`, http.Header{"Retry-After": {"300", "600"}}, now.Add(time.Minute)},
 		{"minute fallback", `{"error":{"type":"usage_limit_reached"}}`, http.Header{}, now.Add(time.Minute)},
 		{"past reset ignored", `{"error":{"type":"usage_limit_reached","resets_at":` + itoa(now.Add(-time.Hour).Unix()) + `}}`, http.Header{}, now.Add(time.Minute)},
+		{"resets_in_seconds beyond 32 bits ignored", `{"error":{"type":"usage_limit_reached","resets_in_seconds":4294967296}}`, http.Header{}, now.Add(time.Minute)},
+		{"resets_at at year 10000 kept", `{"error":{"type":"usage_limit_reached","resets_at":253402300800}}`, http.Header{}, time.Unix(253402300800, 0).UTC()},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

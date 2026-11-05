@@ -168,6 +168,7 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 		connection.response(r.Context(), response.StatusCode, response.Header)
 	}
 	if err != nil {
+		connection.flushPendingHealth(r.Context())
 		if !forwarded {
 			reject(codemode.Refuse(502, "code_upstream_unavailable"))
 		}

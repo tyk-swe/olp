@@ -98,11 +98,11 @@ func rejectionRetryAt(document oif.Document, headers http.Header, now time.Time)
 		}
 	}
 	reset, _ := document.Lookup("/error/resets_at")
-	if seconds, err := strconv.ParseInt(reset.Raw(), 10, 64); err == nil && seconds > 0 && seconds < 253402300800 {
+	if seconds, err := strconv.ParseInt(reset.Raw(), 10, 64); err == nil {
 		candidates = append(candidates, time.Unix(seconds, 0).UTC())
 	}
 	delay, _ := document.Lookup("/error/resets_in_seconds")
-	if seconds, err := strconv.ParseInt(delay.Raw(), 10, 64); err == nil && seconds > 0 {
+	if seconds, err := strconv.ParseInt(delay.Raw(), 10, 32); err == nil && seconds > 0 {
 		candidates = append(candidates, now.Add(time.Duration(seconds)*time.Second))
 	}
 	return slices.MaxFunc(candidates, time.Time.Compare)

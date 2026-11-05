@@ -119,21 +119,22 @@ func (s *CodeStore) ObserveCooldown(ctx context.Context, account string, until t
 }
 
 func codeRecoveryDestination(ctx context.Context, tx pgx.Tx, in CodeAdmission, operations []codemode.Operation) (codemode.Operation, codemode.Account, error) {
-	if len(operations) == 0 {
-		return codemode.Operation{}, codemode.Account{}, codemode.Refuse(503, "code_account_unavailable")
+	var retryAts []*time.Time
+	for _, operation := range operations {
+		selected := in.withOperation(operation)
+		var authority access.Authority
+		if err := codeAuthority(ctx, tx, selected, &authority); err != nil {
+			return codemode.Operation{}, codemode.Account{}, err
+		}
+		selection, err := codeAccount(ctx, tx, selected, "", "", nil)
+		if err == nil {
+			return operation, selection.account, nil
+		}
+		var refusal *codemode.Refusal
+		if !errors.As(err, &refusal) || refusal.Code != "code_account_unavailable" {
+			return codemode.Operation{}, codemode.Account{}, err
+		}
+		retryAts = append(retryAts, refusal.RetryAt)
 	}
-	selected := in.withOperation(operations[0])
-	var authority access.Authority
-	if err := codeAuthority(ctx, tx, selected, &authority); err != nil {
-		return codemode.Operation{}, codemode.Account{}, err
-	}
-	selection, err := codeAccount(ctx, tx, selected, "", "", nil)
-	if err == nil {
-		return operations[0], selection.account, nil
-	}
-	var refusal *codemode.Refusal
-	if !errors.As(err, &refusal) || refusal.Code != "code_account_unavailable" {
-		return codemode.Operation{}, codemode.Account{}, err
-	}
-	return codeRecoveryDestination(ctx, tx, in, operations[1:])
+	return codemode.Operation{}, codemode.Account{}, &codemode.Refusal{Status: 503, Code: "code_account_unavailable", RetryAt: codemode.EarliestRecovery(time.Now().UTC(), retryAts...)}
 }
