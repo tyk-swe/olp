@@ -126,22 +126,22 @@ func (e A2ATaskToolCallbackPricingState) Valid() bool {
 
 // Defines values for AdmissionPriority.
 const (
-	Critical AdmissionPriority = "critical"
-	High     AdmissionPriority = "high"
-	Low      AdmissionPriority = "low"
-	Normal   AdmissionPriority = "normal"
+	AdmissionPriorityCritical AdmissionPriority = "critical"
+	AdmissionPriorityHigh     AdmissionPriority = "high"
+	AdmissionPriorityLow      AdmissionPriority = "low"
+	AdmissionPriorityNormal   AdmissionPriority = "normal"
 )
 
 // Valid indicates whether the value is a known member of the AdmissionPriority enum.
 func (e AdmissionPriority) Valid() bool {
 	switch e {
-	case Critical:
+	case AdmissionPriorityCritical:
 		return true
-	case High:
+	case AdmissionPriorityHigh:
 		return true
-	case Low:
+	case AdmissionPriorityLow:
 		return true
-	case Normal:
+	case AdmissionPriorityNormal:
 		return true
 	default:
 		return false
@@ -1330,6 +1330,102 @@ func (e CodeConfigurationFileFormat) Valid() bool {
 	case CodeConfigurationFileFormatShell:
 		return true
 	case CodeConfigurationFileFormatToml:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeDecisionBand.
+const (
+	CodeDecisionBandExhausted   CodeDecisionBand = "exhausted"
+	CodeDecisionBandHealthy     CodeDecisionBand = "healthy"
+	CodeDecisionBandLessThannil CodeDecisionBand = "<nil>"
+	CodeDecisionBandLow         CodeDecisionBand = "low"
+	CodeDecisionBandUnknown     CodeDecisionBand = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the CodeDecisionBand enum.
+func (e CodeDecisionBand) Valid() bool {
+	switch e {
+	case CodeDecisionBandExhausted:
+		return true
+	case CodeDecisionBandHealthy:
+		return true
+	case CodeDecisionBandLessThannil:
+		return true
+	case CodeDecisionBandLow:
+		return true
+	case CodeDecisionBandUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeDecisionEvidence.
+const (
+	CodeDecisionEvidenceActive      CodeDecisionEvidence = "active"
+	CodeDecisionEvidenceLessThannil CodeDecisionEvidence = "<nil>"
+	CodeDecisionEvidencePassive     CodeDecisionEvidence = "passive"
+)
+
+// Valid indicates whether the value is a known member of the CodeDecisionEvidence enum.
+func (e CodeDecisionEvidence) Valid() bool {
+	switch e {
+	case CodeDecisionEvidenceActive:
+		return true
+	case CodeDecisionEvidenceLessThannil:
+		return true
+	case CodeDecisionEvidencePassive:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeDecisionReason.
+const (
+	Chosen     CodeDecisionReason = "chosen"
+	Connection CodeDecisionReason = "connection"
+	Pin        CodeDecisionReason = "pin"
+)
+
+// Valid indicates whether the value is a known member of the CodeDecisionReason enum.
+func (e CodeDecisionReason) Valid() bool {
+	switch e {
+	case Chosen:
+		return true
+	case Connection:
+		return true
+	case Pin:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeDecisionSkippedClass.
+const (
+	CodeDecisionSkippedClassBand        CodeDecisionSkippedClass = "band"
+	CodeDecisionSkippedClassCooldown    CodeDecisionSkippedClass = "cooldown"
+	CodeDecisionSkippedClassTree        CodeDecisionSkippedClass = "tree"
+	CodeDecisionSkippedClassUnavailable CodeDecisionSkippedClass = "unavailable"
+	CodeDecisionSkippedClassWeight      CodeDecisionSkippedClass = "weight"
+)
+
+// Valid indicates whether the value is a known member of the CodeDecisionSkippedClass enum.
+func (e CodeDecisionSkippedClass) Valid() bool {
+	switch e {
+	case CodeDecisionSkippedClassBand:
+		return true
+	case CodeDecisionSkippedClassCooldown:
+		return true
+	case CodeDecisionSkippedClassTree:
+		return true
+	case CodeDecisionSkippedClassUnavailable:
+		return true
+	case CodeDecisionSkippedClassWeight:
 		return true
 	default:
 		return false
@@ -3114,25 +3210,25 @@ func (e ExternalCredentialReferenceStore) Valid() bool {
 
 // Defines values for FallbackCondition.
 const (
-	Budget        FallbackCondition = "budget"
-	ContentFilter FallbackCondition = "content_filter"
-	ContextWindow FallbackCondition = "context_window"
-	Exhausted     FallbackCondition = "exhausted"
-	RateLimit     FallbackCondition = "rate_limit"
+	FallbackConditionBudget        FallbackCondition = "budget"
+	FallbackConditionContentFilter FallbackCondition = "content_filter"
+	FallbackConditionContextWindow FallbackCondition = "context_window"
+	FallbackConditionExhausted     FallbackCondition = "exhausted"
+	FallbackConditionRateLimit     FallbackCondition = "rate_limit"
 )
 
 // Valid indicates whether the value is a known member of the FallbackCondition enum.
 func (e FallbackCondition) Valid() bool {
 	switch e {
-	case Budget:
+	case FallbackConditionBudget:
 		return true
-	case ContentFilter:
+	case FallbackConditionContentFilter:
 		return true
-	case ContextWindow:
+	case FallbackConditionContextWindow:
 		return true
-	case Exhausted:
+	case FallbackConditionExhausted:
 		return true
-	case RateLimit:
+	case FallbackConditionRateLimit:
 		return true
 	default:
 		return false
@@ -9011,6 +9107,58 @@ type CodeCredits struct {
 	HasCredits bool                      `json:"has_credits"`
 	ObservedAt time.Time                 `json:"observed_at"`
 	Unlimited  bool                      `json:"unlimited"`
+}
+
+// CodeDecision Content-free account selection record for one admitted attempt. Names the chosen account, why it served, the freshest allowance evidence kind behind it, and the class reason each other candidate was skipped. No prompt, response, header or credential content is retained.
+type CodeDecision struct {
+	ApiKeyId  openapi_types.UUID `json:"api_key_id"`
+	AttemptId openapi_types.UUID `json:"attempt_id"`
+
+	// Band Allowance band of the chosen account when allowance ordering recorded one. Null until banding is enabled for a route.
+	Band            nullable.Nullable[CodeDecisionBand] `json:"band"`
+	BindingId       openapi_types.UUID                  `json:"binding_id"`
+	ChosenAccountId openapi_types.UUID                  `json:"chosen_account_id"`
+	CreatedAt       time.Time                           `json:"created_at"`
+
+	// Evidence Kind of the chosen account freshest allowance window at admission. Null when the account had no allowance observation.
+	Evidence           nullable.Nullable[CodeDecisionEvidence] `json:"evidence"`
+	EvidenceObservedAt nullable.Nullable[time.Time]            `json:"evidence_observed_at"`
+	Id                 openapi_types.UUID                      `json:"id"`
+	ProjectId          openapi_types.UUID                      `json:"project_id"`
+
+	// Reason Chosen means weighted selection picked the account for a new pin, pin means an established conversation pin served without re-running selection, and connection means the tree connection account served.
+	Reason CodeDecisionReason `json:"reason"`
+
+	// RecoveryEnvelope Proven not-executed rejection envelope this admission recovered from. Null when the admission was not a recovery.
+	RecoveryEnvelope nullable.Nullable[string] `json:"recovery_envelope"`
+	RecoveryOrdinal  nullable.Nullable[int32]  `json:"recovery_ordinal"`
+	RootId           openapi_types.UUID        `json:"root_id"`
+	RouteId          openapi_types.UUID        `json:"route_id"`
+	RouteRevisionId  openapi_types.UUID        `json:"route_revision_id"`
+	Skipped          []struct {
+		AccountId openapi_types.UUID `json:"account_id"`
+
+		// Class Why the candidate did not serve: cooldown means a live health cooldown, unavailable means reported allowance exhaustion, tree means an earlier account of the conversation tree served, weight means the weighted score picked another account of the same tier, and band means a lower allowance band under allowance ordering.
+		Class CodeDecisionSkippedClass `json:"class"`
+	} `json:"skipped"`
+}
+
+// CodeDecisionBand Allowance band of the chosen account when allowance ordering recorded one. Null until banding is enabled for a route.
+type CodeDecisionBand string
+
+// CodeDecisionEvidence Kind of the chosen account freshest allowance window at admission. Null when the account had no allowance observation.
+type CodeDecisionEvidence string
+
+// CodeDecisionReason Chosen means weighted selection picked the account for a new pin, pin means an established conversation pin served without re-running selection, and connection means the tree connection account served.
+type CodeDecisionReason string
+
+// CodeDecisionSkippedClass Why the candidate did not serve: cooldown means a live health cooldown, unavailable means reported allowance exhaustion, tree means an earlier account of the conversation tree served, weight means the weighted score picked another account of the same tier, and band means a lower allowance band under allowance ordering.
+type CodeDecisionSkippedClass string
+
+// CodeDecisionList defines model for CodeDecisionList.
+type CodeDecisionList struct {
+	Items      []CodeDecision            `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
 // CodeModel A published model currently reachable through eligible accounts in the route pool.
@@ -17510,6 +17658,22 @@ type CreateCodeBudgetParams struct {
 // ReplaceCodeBudgetParams defines parameters for ReplaceCodeBudget.
 type ReplaceCodeBudgetParams struct {
 	IfMatch string `json:"If-Match"`
+}
+
+// ListCodeDecisionsParams defines parameters for ListCodeDecisions.
+type ListCodeDecisionsParams struct {
+	Cursor    *string             `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit     *int32              `form:"limit,omitempty" json:"limit,omitempty"`
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+	RouteId   *openapi_types.UUID `form:"route_id,omitempty" json:"route_id,omitempty"`
+	ApiKeyId  *openapi_types.UUID `form:"api_key_id,omitempty" json:"api_key_id,omitempty"`
+
+	// AccountId Select decisions that chose this account.
+	AccountId *openapi_types.UUID `form:"account_id,omitempty" json:"account_id,omitempty"`
+	BindingId *openapi_types.UUID `form:"binding_id,omitempty" json:"binding_id,omitempty"`
+
+	// AttemptId Select the decision recorded for a single attempt within current project visibility. Other filters still apply.
+	AttemptId *openapi_types.UUID `form:"attempt_id,omitempty" json:"attempt_id,omitempty"`
 }
 
 // ListCodePoolsParams defines parameters for ListCodePools.

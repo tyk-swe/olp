@@ -13,8 +13,9 @@ import (
 )
 
 type Rejection struct {
-	Class   upstream.Class
-	RetryAt time.Time
+	Class    upstream.Class
+	Envelope string
+	RetryAt  time.Time
 }
 
 func (v Vendor) InitialRejection(endpoint Endpoint, status int, body []byte, headers http.Header, now time.Time) (Rejection, bool) {
@@ -41,5 +42,9 @@ func (v Vendor) InitialRejection(endpoint Endpoint, status int, body []byte, hea
 	delay, _ := document.Lookup("/error/resets_in_seconds")
 	delaySeconds, _ := strconv.ParseInt(delay.Raw(), 10, 32)
 	retryAt := slices.MaxFunc([]time.Time{now.Add(time.Minute), now.Add(upstream.RetryAfter(headers.Get("Retry-After"), now)), time.Unix(resetSeconds, 0), now.Add(time.Duration(delaySeconds) * time.Second)}, time.Time.Compare)
-	return Rejection{Class: outcome.Class, RetryAt: retryAt}, true
+	envelope := "codex_usage_limit_reached"
+	if status == 401 {
+		envelope = "codex_invalid_api_key"
+	}
+	return Rejection{Class: outcome.Class, Envelope: envelope, RetryAt: retryAt}, true
 }

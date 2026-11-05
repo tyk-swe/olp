@@ -9,6 +9,7 @@ import type {
   CodeAllowanceWindow,
   CodeAttempt,
   CodeBudget,
+  CodeDecision,
   CodePool,
   CodeRoute
 } from '$lib/management/code-mode';
@@ -150,6 +151,30 @@ export function usageCertaintyLabel(attempt: CodeAttempt): string {
     return 'Confirmed zero consumption';
   if (attempt.reported_tokens !== null) return 'Reported total';
   return 'Unknown consumption';
+}
+
+const decisionReasonLabels: Record<CodeDecision['reason'], string> = {
+  chosen: 'Weighted selection',
+  pin: 'Conversation pin',
+  connection: 'Tree connection account'
+};
+
+export function decisionReasonLabel(reason: CodeDecision['reason']): string {
+  return decisionReasonLabels[reason];
+}
+
+type CodeSkipClass = CodeDecision['skipped'][number]['class'];
+
+const skipClassLabels: Record<CodeSkipClass, string> = {
+  cooldown: 'in cooldown',
+  band: 'lower allowance band',
+  weight: 'weighted score',
+  tree: 'tree account served',
+  unavailable: 'allowance exhausted'
+};
+
+export function skipClassLabel(skipClass: CodeSkipClass): string {
+  return skipClassLabels[skipClass];
 }
 
 export function recoveryReasonLabel(attempt: CodeAttempt): string {

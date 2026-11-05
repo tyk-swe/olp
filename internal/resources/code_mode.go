@@ -1,7 +1,6 @@
 package resources
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -59,6 +58,7 @@ func (s *CodeStore) ObserveAllowance(ctx context.Context, account string, allowa
 
 type CodeRecovery struct {
 	From            string
+	Envelope        string
 	AccountID       string
 	CredentialID    string
 	GrantGeneration int64
@@ -216,7 +216,8 @@ func (s *CodeStore) admit(ctx context.Context, admission CodeAdmission, connecti
 			return out, err
 		}
 	}
-	out.Binding, err = s.bind(ctx, tx, referenced)
+	var rootSelection *codeSelection
+	out.Binding, rootSelection, err = s.bind(ctx, tx, referenced)
 	if err != nil {
 		return out, err
 	}
@@ -237,20 +238,27 @@ func (s *CodeStore) admit(ctx context.Context, admission CodeAdmission, connecti
 			return out, err
 		}
 	}
+	reason := codemode.DecisionChosen
+	var selection codeSelection
 	switch pinned := slices.IndexFunc(pins, func(p codemode.Pin) bool { return p.Model == in.Operation.PublicModel() }); {
 	case pinned >= 0:
 		// A republish can give two of the tree's accounts one adapter, so
 		// the pinned account is checked against the earlier ones.
+		reason = codemode.DecisionPin
 		out.Pin = pins[pinned]
 		tree, _ := codeTree(out.Binding, pins)
-		out.Account, err = codeAccount(ctx, tx, in, out.Pin.AccountID, out.Binding.RootID, tree)
+		selection, err = codeAccount(ctx, tx, in, out.Pin.AccountID, out.Binding.RootID, tree)
+		out.Account = selection.account
 	case connection:
 		// A connection serves on the tree's own account until its model is
 		// pinned; each generation it carries admits its own model.
+		reason = codemode.DecisionConnection
 		out.Pin = codemode.Pin{AccountID: out.Binding.AccountID, Principal: out.Binding.Principal}
-		out.Account, err = codeAccount(ctx, tx, in, out.Pin.AccountID, "", nil)
+		selection, err = codeAccount(ctx, tx, in, out.Pin.AccountID, "", nil)
+		out.Account = selection.account
 	default:
-		out.Pin, out.Account, err = codePin(ctx, tx, in, out.Binding, pins)
+		out.Pin, selection, err = codePin(ctx, tx, in, out.Binding, pins)
+		out.Account = selection.account
 	}
 	if err != nil {
 		return out, err
@@ -288,6 +296,13 @@ func (s *CodeStore) admit(ctx context.Context, admission CodeAdmission, connecti
 	err = tx.QueryRow(ctx, `INSERT INTO olp.code_attempts(id,project_id,route_id,api_key_id,binding_id,account_id,operation,model,state,reserved_tokens,bound_evidence,route_revision_id,end_user_digest,attribution,initial_recovery,recovery_from,requested_model)
 		VALUES($1,$2,$3,$4,$5,$6,$7,$8,'prepared',$9,$10,$11,$12,$13,$14,$15,$16) RETURNING created_at`, out.Attempt.ID, in.Route.ProjectID, in.Route.ID, in.APIKeyID, out.Binding.ID, out.Account.ID, in.Operation.Name, in.Operation.Model, out.Attempt.ReservedTokens, out.Attempt.BoundEvidence, in.Route.RevisionID, in.EndUserDigest, attribution.JSON(in.Attribution), out.InitialRecovery, codeRecoveryFrom(in.Recovery), in.Operation.PublicModel()).Scan(&out.Attempt.CreatedAt)
 	if err != nil {
+		return out, err
+	}
+	decisionSelection := selection
+	if rootSelection != nil && reason == codemode.DecisionChosen && rootSelection.account.ID == selection.account.ID {
+		decisionSelection = *rootSelection
+	}
+	if err = recordCodeDecision(ctx, tx, in, out.Binding, out.Attempt, decisionSelection, reason); err != nil {
 		return out, err
 	}
 	if err = limits.ReserveCodeTokens(ctx, tx, out.Attempt, in.Bound); err != nil {
@@ -381,55 +396,57 @@ func codeAuthorityDocument(ctx context.Context, tx pgx.Tx, in CodeAdmission, a *
 	return current, nil
 }
 
-func (s *CodeStore) bind(ctx context.Context, tx pgx.Tx, in CodeAdmission) (codemode.Binding, error) {
+func (s *CodeStore) bind(ctx context.Context, tx pgx.Tx, in CodeAdmission) (codemode.Binding, *codeSelection, error) {
 	identity := in.Operation.Identity
 	b, err := codeConversation(ctx, tx, in, identity.Conversation)
 	if err == nil {
 		if err = liveCodeTree(ctx, tx, b); err != nil {
-			return b, err
+			return b, nil, err
 		}
 		if identity.Parent != "" {
 			var parent string
 			if err = tx.QueryRow(ctx, `SELECT conversation FROM olp.code_bindings WHERE id=$1`, b.ParentID).Scan(&parent); err != nil || parent != identity.Parent {
-				return b, codemode.Refuse(409, "code_parent_conflict")
+				return b, nil, codemode.Refuse(409, "code_parent_conflict")
 			}
 		}
-		return b, nil
+		return b, nil, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return b, err
+		return b, nil, err
 	}
 	b = codemode.Binding{ID: access.NewID(), ProjectID: in.Route.ProjectID, RouteID: in.Route.ID, APIKeyID: in.APIKeyID, Conversation: identity.Conversation}
 	b.RootID = b.ID
+	var root *codeSelection
 	if identity.Parent != "" {
 		parent, err := codeConversation(ctx, tx, in, identity.Parent)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return b, codemode.Refuse(409, "code_parent_unresolved")
+			return b, nil, codemode.Refuse(409, "code_parent_unresolved")
 		}
 		if err != nil {
-			return b, err
+			return b, nil, err
 		}
 		if err = liveCodeTree(ctx, tx, parent); err != nil {
-			return b, err
+			return b, nil, err
 		}
 		b.ParentID = &parent.ID
 		b.RootID = parent.RootID
 		b.AccountID = parent.AccountID
 		b.Principal = parent.Principal
 	} else {
-		account, err := codeAccount(ctx, tx, in, "", "", nil)
+		selection, err := codeAccount(ctx, tx, in, "", "", nil)
 		if err != nil {
 			if refusal, ok := errors.AsType[*codemode.Refusal](err); ok && refusal.Code == "code_account_unavailable" && in.Operation.Name == "connect" && len(in.Route.Models) > 1 {
-				return b, codemode.Refuse(400, "code_connection_model_required")
+				return b, nil, codemode.Refuse(400, "code_connection_model_required")
 			}
-			return b, err
+			return b, nil, err
 		}
-		b.AccountID = account.ID
-		b.Principal = account.Principal
+		root = &selection
+		b.AccountID = selection.account.ID
+		b.Principal = selection.account.Principal
 	}
 	err = tx.QueryRow(ctx, `INSERT INTO olp.code_bindings(id,project_id,route_id,api_key_id,conversation,parent_id,root_id,account_id,principal,socket_bound)
 		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING created_at`, b.ID, b.ProjectID, b.RouteID, b.APIKeyID, b.Conversation, b.ParentID, b.RootID, b.AccountID, b.Principal, in.Operation.Name == "connect" || in.Operation.Name == "connect_model").Scan(&b.CreatedAt)
-	return b, err
+	return b, root, err
 }
 
 func codeConversation(ctx context.Context, tx pgx.Tx, in CodeAdmission, conversation string) (codemode.Binding, error) {
@@ -482,12 +499,13 @@ func codeTree(b codemode.Binding, pins []codemode.Pin) ([]string, map[string]str
 // else to another account the tree uses, else to the first available account
 // of an adapter the tree does not use yet. Nothing fails over: a tree account
 // that cools refuses a new model it serves as it refuses its pinned ones.
-func codePin(ctx context.Context, tx pgx.Tx, in CodeAdmission, b codemode.Binding, pins []codemode.Pin) (codemode.Pin, codemode.Account, error) {
+func codePin(ctx context.Context, tx pgx.Tx, in CodeAdmission, b codemode.Binding, pins []codemode.Pin) (codemode.Pin, codeSelection, error) {
 	tree, principals := codeTree(b, pins)
-	account, err := codeAccount(ctx, tx, in, "", b.RootID, tree)
+	selection, err := codeAccount(ctx, tx, in, "", b.RootID, tree)
 	if err != nil {
-		return codemode.Pin{}, account, err
+		return codemode.Pin{}, selection, err
 	}
+	account := selection.account
 	pin := codemode.Pin{Model: in.Operation.PublicModel(), TargetModel: in.Operation.Model, AccountID: account.ID, Principal: account.Principal}
 	if principal, ok := principals[account.ID]; ok {
 		pin.Principal = principal
@@ -495,14 +513,27 @@ func codePin(ctx context.Context, tx pgx.Tx, in CodeAdmission, b codemode.Bindin
 	err = tx.QueryRow(ctx, `INSERT INTO olp.code_pins(root_id,model,account_id,principal,adapter,target_model)
 		SELECT $1,$2,$3,$4,`+codeadapter.SQL("v.connections->($5::text)")+`,$7 FROM olp.code_route_revisions v WHERE v.id=$6 RETURNING created_at`,
 		b.RootID, pin.Model, pin.AccountID, pin.Principal, account.ProviderID, in.Route.RevisionID, pin.TargetModel).Scan(&pin.CreatedAt)
-	return pin, account, err
+	return pin, selection, err
 }
 
 type codeCandidate struct {
-	account   codemode.Account
-	available bool
-	position  int
-	score     float64
+	account codemode.Account
+	outcome codemode.Candidate
+}
+
+type codeSelection struct {
+	account    codemode.Account
+	candidates []codemode.Candidate
+}
+
+func (s codeSelection) chosen() (codemode.Candidate, bool) {
+	index := slices.IndexFunc(s.candidates, func(candidate codemode.Candidate) bool {
+		return candidate.AccountID == s.account.ID
+	})
+	if index < 0 {
+		return codemode.Candidate{}, false
+	}
+	return s.candidates[index], true
 }
 
 // codeAccount selects the pool account that serves an admission: an eligible
@@ -513,11 +544,11 @@ type codeCandidate struct {
 // earlier one has its adapter, now or as the root's pins recorded it, since a
 // republish can change or drop an account's connection; a selected account
 // that is unavailable refuses the admission.
-func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root string, tree []string) (codemode.Account, error) {
+func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root string, tree []string) (codeSelection, error) {
+	var none codeSelection
 	if _, paid := in.Route.PaidTargets[in.Operation.Model]; paid {
-		return codemode.Account{}, codemode.Refuse(503, "code_account_unavailable")
+		return none, codemode.Refuse(503, "code_account_unavailable")
 	}
-	var a codemode.Account
 	required := []string{in.Operation.Model}
 	if in.Operation.Name == "connect" {
 		required = in.Route.Models
@@ -527,13 +558,13 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root stri
 	}
 	requiredJSON, err := json.Marshal(required)
 	if err != nil {
-		return a, err
+		return none, err
 	}
 	routeID, err := uuid.Parse(in.Route.ID)
 	if err != nil {
-		return a, err
+		return none, err
 	}
-	rows, err := tx.Query(ctx, `SELECT a.id::text,a.project_id::text,a.provider_id::text,a.credential_id::text,a.principal,a.models,a.name,a.enabled,a.etag::text,a.health,a.allowance,olp.code_account_available(a),coalesce(array_position($6::text[],a.id::text),2147483647),pa.weight
+	rows, err := tx.Query(ctx, `SELECT a.id::text,a.project_id::text,a.provider_id::text,a.credential_id::text,a.principal,a.models,a.name,a.enabled,a.etag::text,a.health,a.allowance,olp.code_account_available(a),(a.health IN ('unavailable','quota_limited') AND NOT coalesce(a.unavailable_until<=now(),false)),coalesce(array_position($6::text[],a.id::text),2147483647),pa.weight
 		FROM olp.code_accounts a JOIN olp.code_pool_accounts pa ON pa.account_id=a.id
 		JOIN olp.provider_credentials c ON c.id=a.credential_id JOIN olp.provider_grants g ON g.credential_id=c.id JOIN olp.providers p ON p.id=a.provider_id
 		JOIN olp.code_route_revisions v ON v.id=$7 CROSS JOIN LATERAL (SELECT `+codeadapter.SQL("v.connections->(a.provider_id::text)")+` adapter) f
@@ -547,45 +578,36 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root stri
 				OR EXISTS(SELECT 1 FROM olp.code_pins p WHERE p.root_id=nullif($8,'')::uuid AND p.account_id=t.id AND p.adapter IS NOT DISTINCT FROM f.adapter)))`,
 		in.Route.PoolID, in.Route.ProjectID, requiredJSON, id, in.Providers, tree, in.Route.RevisionID, root, codeRecoveryExclusion(in.Recovery))
 	if err != nil {
-		return a, err
+		return none, err
 	}
 	candidates, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (codeCandidate, error) {
 		var candidate codeCandidate
 		var weight int64
-		if err := row.Scan(&candidate.account.ID, &candidate.account.ProjectID, &candidate.account.ProviderID, &candidate.account.CredentialID, &candidate.account.Principal, &candidate.account.Models, &candidate.account.Name, &candidate.account.Enabled, &candidate.account.ETag, &candidate.account.Health, &candidate.account.Allowance, &candidate.available, &candidate.position, &weight); err != nil {
+		if err := row.Scan(&candidate.account.ID, &candidate.account.ProjectID, &candidate.account.ProviderID, &candidate.account.CredentialID, &candidate.account.Principal, &candidate.account.Models, &candidate.account.Name, &candidate.account.Enabled, &candidate.account.ETag, &candidate.account.Health, &candidate.account.Allowance, &candidate.outcome.Available, &candidate.outcome.Cooldown, &candidate.outcome.Position, &weight); err != nil {
 			return candidate, err
 		}
 		accountID, err := uuid.Parse(candidate.account.ID)
 		if err != nil {
 			return candidate, err
 		}
-		return codeCandidate{account: candidate.account, available: candidate.available, position: candidate.position, score: routing.Score(routeID, accountID, weight, in.Operation.Name, "code", in.Operation.Model, []byte(in.APIKeyID+":"+in.Operation.Identity.Conversation))}, nil
+		outcome := codemode.Candidate{AccountID: candidate.account.ID, Available: candidate.outcome.Available, Cooldown: candidate.outcome.Cooldown, Position: candidate.outcome.Position, Score: routing.Score(routeID, accountID, weight, in.Operation.Name, "code", in.Operation.Model, []byte(in.APIKeyID+":"+in.Operation.Identity.Conversation))}
+		return codeCandidate{account: candidate.account, outcome: outcome}, nil
 	})
 	if err != nil {
-		return a, err
+		return none, err
 	}
-	if len(candidates) == 0 {
-		return a, codemode.Refuse(503, "code_account_unavailable")
+	outcomes := make([]codemode.Candidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		outcomes = append(outcomes, candidate.outcome)
 	}
-	chosen := slices.MaxFunc(candidates, func(left, right codeCandidate) int {
-		if left.position != right.position {
-			return cmp.Compare(right.position, left.position)
-		}
-		if left.available != right.available {
-			if left.available {
-				return 1
-			}
-			return -1
-		}
-		if left.score != right.score {
-			return cmp.Compare(left.score, right.score)
-		}
-		return cmp.Compare(right.account.ID, left.account.ID)
+	chosen, ok := codemode.ChooseCandidate(outcomes)
+	if !ok || !chosen.Available {
+		return none, codemode.Refuse(503, "code_account_unavailable")
+	}
+	index := slices.IndexFunc(candidates, func(candidate codeCandidate) bool {
+		return candidate.account.ID == chosen.AccountID
 	})
-	if !chosen.available {
-		return a, codemode.Refuse(503, "code_account_unavailable")
-	}
-	return chosen.account, nil
+	return codeSelection{account: candidates[index].account, candidates: outcomes}, nil
 }
 
 // MarkDispatched is the irreversible pre-send transition. Network ambiguity

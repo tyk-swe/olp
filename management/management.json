@@ -16075,6 +16075,180 @@
         ],
         "type": "object"
       },
+      "CodeDecision": {
+        "additionalProperties": false,
+        "description": "Content-free account selection record for one admitted attempt. Names the chosen account, why it served, the freshest allowance evidence kind behind it, and the class reason each other candidate was skipped. No prompt, response, header or credential content is retained.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "attempt_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "project_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "route_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "route_revision_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "api_key_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "binding_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "root_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "chosen_account_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "chosen",
+              "pin",
+              "connection"
+            ],
+            "type": "string",
+            "description": "Chosen means weighted selection picked the account for a new pin, pin means an established conversation pin served without re-running selection, and connection means the tree connection account served."
+          },
+          "band": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "healthy",
+              "unknown",
+              "low",
+              "exhausted",
+              null
+            ],
+            "description": "Allowance band of the chosen account when allowance ordering recorded one. Null until banding is enabled for a route."
+          },
+          "evidence": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "passive",
+              "active",
+              null
+            ],
+            "description": "Kind of the chosen account freshest allowance window at admission. Null when the account had no allowance observation."
+          },
+          "evidence_observed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "skipped": {
+            "type": "array",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "account_id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "class": {
+                  "enum": [
+                    "cooldown",
+                    "band",
+                    "weight",
+                    "tree",
+                    "unavailable"
+                  ],
+                  "type": "string",
+                  "description": "Why the candidate did not serve: cooldown means a live health cooldown, unavailable means reported allowance exhaustion, tree means an earlier account of the conversation tree served, weight means the weighted score picked another account of the same tier, and band means a lower allowance band under allowance ordering."
+                }
+              },
+              "required": [
+                "account_id",
+                "class"
+              ],
+              "type": "object"
+            }
+          },
+          "recovery_envelope": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-z0-9][a-z0-9_]{0,99}$",
+            "description": "Proven not-executed rejection envelope this admission recovered from. Null when the admission was not a recovery."
+          },
+          "recovery_ordinal": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 1
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "attempt_id",
+          "project_id",
+          "route_id",
+          "route_revision_id",
+          "api_key_id",
+          "binding_id",
+          "root_id",
+          "chosen_account_id",
+          "reason",
+          "band",
+          "evidence",
+          "evidence_observed_at",
+          "skipped",
+          "recovery_envelope",
+          "recovery_ordinal",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "CodeDecisionList": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CodeDecision"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
       "CodeBinding": {
         "additionalProperties": false,
         "description": "Persistent per-key conversation tree identity. Retiring any member retires the whole tree; retirement never permits re-binding to another account. Account and principal are the tree's first account, which later models prefer; pins name the account each model is served from.",
@@ -47481,6 +47655,205 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CodeAttemptList"
+                }
+              }
+            },
+            "description": "Code-mode management result"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request refused without inference"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request refused without inference"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request refused without inference"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request refused without inference"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request refused without inference"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request refused without inference"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request refused without inference"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request refused without inference"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request refused without inference"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "code-mode"
+        ]
+      }
+    },
+    "/api/v1/code/decisions": {
+      "get": {
+        "operationId": "list_code_decisions",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "route_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "api_key_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Select decisions that chose this account."
+          },
+          {
+            "name": "binding_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "attempt_id",
+            "in": "query",
+            "required": false,
+            "description": "Select the decision recorded for a single attempt within current project visibility. Other filters still apply.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodeDecisionList"
                 }
               }
             },

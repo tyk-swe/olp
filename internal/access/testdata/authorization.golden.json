@@ -79,6 +79,7 @@
     "GET /api/v1/code/attempts": "YYYYYYYYYYYY",
     "GET /api/v1/code/bindings": "YYYYYYYYYYYY",
     "GET /api/v1/code/budgets": "YYYYYYYYYYYY",
+    "GET /api/v1/code/decisions": "YYYYYYYYYYYY",
     "GET /api/v1/code/pools": "YYYYYYYYYYYY",
     "GET /api/v1/code/refusals": "YYYYYYYYYYYY",
     "GET /api/v1/code/routes": "YYYYYYYYYYYY",

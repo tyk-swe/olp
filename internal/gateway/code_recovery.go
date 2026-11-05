@@ -52,9 +52,9 @@ func (a *codeAttempt) recover(ctx context.Context, response *http.Response, rout
 		return nil, nil
 	}
 	if rejection.Class == upstream.Credential && a.auth.CredentialID != "" && a.auth.GrantGeneration > 0 && a.refreshed(ctx, adapter) {
-		return &resources.CodeRecovery{From: a.permit.Attempt.ID, Number: ordinal, AccountID: a.permit.Account.ID, CredentialID: a.auth.CredentialID, GrantGeneration: a.auth.GrantGeneration, RejectedUntil: rejection.RetryAt}, nil
+		return &resources.CodeRecovery{From: a.permit.Attempt.ID, Envelope: rejection.Envelope, Number: ordinal, AccountID: a.permit.Account.ID, CredentialID: a.auth.CredentialID, GrantGeneration: a.auth.GrantGeneration, RejectedUntil: rejection.RetryAt}, nil
 	}
-	return &resources.CodeRecovery{From: a.permit.Attempt.ID, Number: ordinal}, nil
+	return &resources.CodeRecovery{From: a.permit.Attempt.ID, Envelope: rejection.Envelope, Number: ordinal}, nil
 }
 
 func (a *codeAttempt) refreshed(ctx context.Context, adapter codeadapter.Vendor) bool {

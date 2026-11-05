@@ -14,6 +14,7 @@ export type CodeBudget = Schemas['CodeBudget'];
 export type CodeBudgetWrite = Schemas['CodeBudgetWrite'];
 export type CodeBinding = Schemas['CodeBinding'];
 export type CodeAttempt = Schemas['CodeAttempt'];
+export type CodeDecision = Schemas['CodeDecision'];
 export type CodeClientConfiguration = Schemas['CodeClientConfiguration'];
 
 export type CodeClient = CodeClientConfiguration['client'];
@@ -224,6 +225,18 @@ export async function listCodeAttempts(
 ) {
   return unwrapPage(
     await apiClient.GET('/api/v1/code/attempts', {
+      params: { query: { limit: 50, ...filters } },
+      signal
+    })
+  );
+}
+
+export async function listCodeDecisions(
+  filters: CodeFilters = {},
+  signal?: AbortSignal
+) {
+  return unwrapPage(
+    await apiClient.GET('/api/v1/code/decisions', {
       params: { query: { limit: 50, ...filters } },
       signal
     })

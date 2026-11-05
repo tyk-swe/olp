@@ -127,9 +127,9 @@ func codeRecoveryDestination(ctx context.Context, tx pgx.Tx, in CodeAdmission, o
 	if err := codeAuthority(ctx, tx, selected, &authority); err != nil {
 		return codemode.Operation{}, codemode.Account{}, err
 	}
-	account, err := codeAccount(ctx, tx, selected, "", "", nil)
+	selection, err := codeAccount(ctx, tx, selected, "", "", nil)
 	if err == nil {
-		return operations[0], account, nil
+		return operations[0], selection.account, nil
 	}
 	var refusal *codemode.Refusal
 	if !errors.As(err, &refusal) || refusal.Code != "code_account_unavailable" {

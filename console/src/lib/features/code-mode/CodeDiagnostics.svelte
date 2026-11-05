@@ -5,6 +5,7 @@
     listCodeBindings,
     listCodeAttempts,
     listCodeAccounts,
+    listCodeDecisions,
     listCodeRefusals,
     listCodeTokenWindows,
     retireCodeBinding,
@@ -23,11 +24,14 @@
   import { formatDate } from '$lib/format';
   import { codeKeys } from './codeKeys';
   import {
+    allowanceEvidenceLabel,
+    decisionReasonLabel,
     mutationError,
     refusalAdvice,
     reservationLabel,
     recoveryReasonLabel,
     servingHealthLabel,
+    skipClassLabel,
     tokenCount,
     usageCertaintyLabel,
     utcWindowStart
@@ -87,6 +91,20 @@
       attempts.data?.items.some((attempt) => attempt.account_id !== null) ===
         true
   }));
+  const decisionFilters = $derived({ ...applied, project_id: projectId });
+  const decisions = createQuery(() => ({
+    queryKey: codeKeys.collection('decisions', decisionFilters),
+    queryFn: ({ signal }) =>
+      collectCursorPages((cursor) =>
+        listCodeDecisions({ ...decisionFilters, cursor }, signal)
+      ),
+    enabled: kind === 'attempts'
+  }));
+  const decisionByAttempt = $derived(
+    new Map(
+      (decisions.data ?? []).map((decision) => [decision.attempt_id, decision])
+    )
+  );
   const refusals = createQuery(() => ({
     queryKey: codeKeys.collection('refusals', filters),
     queryFn: ({ signal }) => listCodeRefusals(filters, signal),
@@ -151,6 +169,7 @@
   async function refresh() {
     await Promise.all([
       selected.refetch(),
+      ...(kind === 'attempts' ? [decisions.refetch()] : []),
       ...(kind === 'attempts' &&
       attempts.data?.items.some((attempt) => attempt.account_id !== null)
         ? [accounts.refetch()]
@@ -402,9 +421,44 @@
               {accounts.isPending ? 'Loading current account' : 'Unknown'}
             {/if}
             <p>
-              Admission-time eligibility was not retained. Current eligibility
-              does not explain historical selection or grant permission to retry
+              Current eligibility does not explain historical selection or grant
+              permission to retry. The account decision below records the
+              admission-time selection
             </p>
+          </dd>
+          <dt>Account decision</dt>
+          <dd>
+            {#if attempt.paid_provider_id}
+              Paid target, account selection does not apply
+            {:else}
+              {@const decision = decisionByAttempt.get(attempt.id)}
+              {#if decision}
+                {decisionReasonLabel(decision.reason)} · chosen {decision.chosen_account_id}
+                {#if decision.evidence}
+                  · {allowanceEvidenceLabel(decision.evidence)} observed {decision.evidence_observed_at
+                    ? formatDate(decision.evidence_observed_at)
+                    : 'Unknown'}
+                {/if}
+                {#if decision.band}· band {decision.band}{/if}
+                {#if decision.recovery_envelope}
+                  · recovery {decision.recovery_envelope} #{decision.recovery_ordinal}
+                {/if}
+                {#if decision.skipped.length}
+                  <p>
+                    Skipped {decision.skipped
+                      .map(
+                        (skipped) =>
+                          `${skipped.account_id} (${skipClassLabel(skipped.class)})`
+                      )
+                      .join(', ')}
+                  </p>
+                {/if}
+              {:else}
+                {decisions.isPending
+                  ? 'Loading account decision'
+                  : 'No decision recorded for this attempt'}
+              {/if}
+            {/if}
           </dd>
           <dt>Recorded recovery evidence</dt>
           <dd>

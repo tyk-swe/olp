@@ -8,8 +8,14 @@ import (
 
 func (s *Server) registerCodeMode(mux *http.ServeMux) {
 	s.Access.Route(mux, "GET /api/v1/code/attempts", s.codeAttempts)
+	s.Access.Route(mux, "GET /api/v1/code/decisions", s.codeDecisions)
 	s.Access.Route(mux, "GET /api/v1/code/refusals", s.codeRefusals)
 	s.Access.Route(mux, "GET /api/v1/code/token-windows", s.codeTokenWindows)
+}
+func (s *Server) codeDecisions(r *http.Request, p access.Principal) (access.Reply, error) {
+	return s.Access.CodeList(r, p, `SELECT to_jsonb(x) FROM olp.code_decisions x`,
+		access.CodeMatch{Field: "account_id", SQL: `x.chosen_account_id=$%[1]d::uuid`},
+		access.CodeMatch{Field: "attempt_id", SQL: `x.attempt_id=$%[1]d::uuid`})
 }
 func (s *Server) codeAttempts(r *http.Request, p access.Principal) (access.Reply, error) {
 	return s.Access.CodeUsageList(r, p, `SELECT jsonb_build_object(

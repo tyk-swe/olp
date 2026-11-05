@@ -6,6 +6,8 @@ import {
   allowanceEvidenceLabel,
   allowanceWindowSummary,
   clientLabel,
+  decisionReasonLabel,
+  skipClassLabel,
   mutationError,
   nativeModels,
   recoveryReasonLabel,
@@ -339,5 +341,21 @@ describe('allowance window presentation', () => {
   it('labels the evidence kind', () => {
     expect(allowanceEvidenceLabel('passive')).toBe('Passive observation');
     expect(allowanceEvidenceLabel('active')).toBe('Active read');
+  });
+});
+
+describe('code account decisions', () => {
+  it('labels why the chosen account served', () => {
+    expect(decisionReasonLabel('chosen')).toBe('Weighted selection');
+    expect(decisionReasonLabel('pin')).toBe('Conversation pin');
+    expect(decisionReasonLabel('connection')).toBe('Tree connection account');
+  });
+
+  it('labels every skip class', () => {
+    expect(skipClassLabel('cooldown')).toBe('in cooldown');
+    expect(skipClassLabel('unavailable')).toBe('allowance exhausted');
+    expect(skipClassLabel('tree')).toBe('tree account served');
+    expect(skipClassLabel('weight')).toBe('weighted score');
+    expect(skipClassLabel('band')).toBe('lower allowance band');
   });
 });

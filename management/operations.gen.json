@@ -21690,6 +21690,118 @@
     }
   },
   {
+    "name": "list_code_decisions",
+    "group": "code-mode",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/code/decisions",
+    "description": "list code decisions",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      },
+      {
+        "name": "project_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "route_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "api_key_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "account_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "binding_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "attempt_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "project_id": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "route_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "api_key_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "account_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "binding_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "attempt_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "list_code_pools",
     "group": "code-mode",
     "method": "GET",
