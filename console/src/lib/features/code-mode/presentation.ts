@@ -51,6 +51,36 @@ export function extraUsageLabel(value: boolean | null | undefined): string {
   return value ? 'On, paid fallback beyond included quota' : 'Off';
 }
 
+export function extraUsageAdapterFor(
+  initialAdapter: string | null | undefined,
+  creating: boolean,
+  profileId: string | null | undefined
+): string | null {
+  if (!creating) return initialAdapter ?? null;
+  if (profileId === 'kimi-code' || profileId === 'kimi-code-cn') {
+    return 'kimi_code';
+  }
+  return null;
+}
+
+export function extraUsageValue(
+  adapter: string | null | undefined,
+  selected: string,
+  recorded: boolean | null | undefined
+): boolean | null {
+  if (!showsExtraUsage(adapter)) return recorded ?? null;
+  if (selected === '') return null;
+  return selected === 'true';
+}
+
+export function providerProfilePending(
+  creating: boolean,
+  providerId: string,
+  providerLoaded: boolean
+): boolean {
+  return creating && providerId !== '' && !providerLoaded;
+}
+
 const servingHealthLabels: Record<CodeAccount['health'], string> = {
   unknown: 'Unknown',
   healthy: 'Healthy',

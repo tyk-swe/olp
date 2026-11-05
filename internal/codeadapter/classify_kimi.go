@@ -5,34 +5,32 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/upstream"
 )
 
 type kimiOutcome struct {
 	envelope string
 	class    CooldownClass
 	scope    CooldownScope
-	quota    bool
 }
 
 var kimiOutcomes = map[string]kimiOutcome{
 	"You've reached your 5-hour usage limit. Your quota will reset when the current 5-hour window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota": {
-		envelope: "kimi_quota_five_hour", class: CooldownQuota, scope: ScopeCredential, quota: true,
+		envelope: "kimi_quota_five_hour", class: CooldownQuota, scope: ScopeCredential,
 	},
 	"You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota": {
-		envelope: "kimi_quota_weekly", class: CooldownQuota, scope: ScopeCredential, quota: true,
+		envelope: "kimi_quota_weekly", class: CooldownQuota, scope: ScopeCredential,
 	},
 	"You've reached your monthly usage limit for this billing cycle. Your quota will be refreshed in the next cycle. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota": {
-		envelope: "kimi_quota_monthly", class: CooldownQuota, scope: ScopeCredential, quota: true,
+		envelope: "kimi_quota_monthly", class: CooldownQuota, scope: ScopeCredential,
 	},
 	"Your credit balance is insufficient. To continue, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota": {
-		envelope: "kimi_credit_insufficient", class: CooldownQuota, scope: ScopeCredential, quota: true,
+		envelope: "kimi_credit_insufficient", class: CooldownQuota, scope: ScopeCredential,
 	},
 	"Your organization's Extra Usage balance has run out. Please contact your organization admin to add more Extra Usage.": {
-		envelope: "kimi_org_extra_usage_exhausted", class: CooldownQuota, scope: ScopeCredential, quota: true,
+		envelope: "kimi_org_extra_usage_exhausted", class: CooldownQuota, scope: ScopeCredential,
 	},
 	"You've reached the Extra Usage limit set for your account by your organization. Please contact your organization admin to increase your limit.": {
-		envelope: "kimi_org_extra_usage_limit", class: CooldownQuota, scope: ScopeCredential, quota: true,
+		envelope: "kimi_org_extra_usage_limit", class: CooldownQuota, scope: ScopeCredential,
 	},
 	"You've reached your concurrent request limit. Please wait for your ongoing requests to finish and try again.": {
 		envelope: "kimi_concurrent_limit", class: CooldownConcurrency, scope: ScopeCredential,
@@ -57,7 +55,7 @@ func classifyKimi(status int, body []byte, headers http.Header, now time.Time) (
 	if !ok {
 		return Classification{}, false
 	}
-	return Classification{Class: outcome.class, Scope: outcome.scope, RetryAt: kimiRetryAt(headers, now), Envelope: outcome.envelope, NotExecuted: outcome.quota}, true
+	return Classification{Class: outcome.class, Scope: outcome.scope, RetryAt: retryAtFrom(time.Time{}, false, headers, now), Envelope: outcome.envelope}, true
 }
 
 func kimiEnvelope(body []byte) (string, bool) {
@@ -111,13 +109,4 @@ func kimiEnvelope(body []byte) (string, bool) {
 		return "", false
 	}
 	return message, true
-}
-
-func kimiRetryAt(headers http.Header, now time.Time) time.Time {
-	if values := headers.Values("Retry-After"); len(values) == 1 {
-		if delay, valid := upstream.ParseRetryAfter(values[0], now); valid && delay > 0 {
-			return now.Add(delay)
-		}
-	}
-	return now.Add(time.Minute)
 }

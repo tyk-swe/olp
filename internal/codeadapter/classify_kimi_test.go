@@ -7,7 +7,6 @@ import (
 
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/upstream"
 )
 
 func kimiVendor(t *testing.T) (codeadapter.Vendor, codeadapter.Endpoint, codeadapter.Endpoint) {
@@ -47,11 +46,8 @@ const (
 	kimiEngineOverloaded   = "The engine is currently overloaded, please try again later"
 )
 
-func TestClassifyKimiQuotaMessagesAreCredentialQuotaProvenNotExecuted(t *testing.T) {
-	// Source: https://www.kimi.com/code/docs/en/kimi-code/error-reference.html (fetched 2026-11-05), exact HTTP 429 messages.
-	// Envelope shapes are the unary error documents internal/codewire surfaces as a rejection body on this
-	// adapter's endpoints: OpenAI-style {"error":{...,"message":...}} on chat (chat.go) and Anthropic
-	// {"type":"error","error":{...,"message":...}} on messages (messages.go).
+func TestClassifyKimiQuotaMessagesAreCredentialQuotaHeldPendingQualification(t *testing.T) {
+	// Source: https://www.kimi.com/code/docs/en/kimi-code/error-reference.html (fetched 2026-11-05), exact HTTP 429 messages. That vendor doc proves the messages and HTTP 429 only. It does not prove the inference error envelope, so the fixture envelopes stay unproven until live qualification, quota keeps its cooldown class, and NotExecuted stays false
 	vendor, chat, messages := kimiVendor(t)
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
 	cases := []struct{ message, envelope string }{
@@ -71,7 +67,7 @@ func TestClassifyKimiQuotaMessagesAreCredentialQuotaProvenNotExecuted(t *testing
 			"messages": {messages, kimiMessagesBody(tc.message)},
 		} {
 			got, ok := vendor.Classify(attempt.endpoint, 429, attempt.body, http.Header{}, now)
-			if !ok || got.Class != codeadapter.CooldownQuota || got.Scope != codeadapter.ScopeCredential || !got.RetryAt.Equal(now.Add(time.Minute)) || got.Envelope != tc.envelope || !got.NotExecuted || got.SuppressFallback {
+			if !ok || got.Class != codeadapter.CooldownQuota || got.Scope != codeadapter.ScopeCredential || !got.RetryAt.Equal(now.Add(time.Minute)) || got.Envelope != tc.envelope || got.NotExecuted || got.SuppressFallback {
 				t.Fatalf("Classify(%s, %s) = %+v, %v", tc.envelope, name, got, ok)
 			}
 		}
@@ -161,8 +157,8 @@ func TestClassifyKimiNearMissMessagesAndShapesStayUnclassified(t *testing.T) {
 	}
 }
 
-func TestKimiInitialRejectionOnlyForProvenQuotaMessages(t *testing.T) {
-	// Source: https://www.kimi.com/code/docs/en/kimi-code/error-reference.html (fetched 2026-11-05); quota messages are pre-generation HTTP 429 rejections in the complete unary body gateway recover() hands over.
+func TestKimiInitialRejectionHeldUntilEnvelopeQualified(t *testing.T) {
+	// Source: https://www.kimi.com/code/docs/en/kimi-code/error-reference.html (fetched 2026-11-05), exact HTTP 429 messages. That vendor doc proves the messages and HTTP 429 only, not the inference error envelope, so replay waits for live envelope qualification and no Kimi shape replays today, quota or ambiguous
 	vendor, chat, messages := kimiVendor(t)
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
 	for name, attempt := range map[string]struct {
@@ -172,9 +168,8 @@ func TestKimiInitialRejectionOnlyForProvenQuotaMessages(t *testing.T) {
 		"chat":     {chat, kimiChatBody(kimiQuotaFiveHour)},
 		"messages": {messages, kimiMessagesBody(kimiQuotaFiveHour)},
 	} {
-		rejection, ok := vendor.InitialRejection(attempt.endpoint, 429, attempt.body, http.Header{"Retry-After": {"300"}}, now)
-		if !ok || rejection.Class != upstream.RateLimit || rejection.Envelope != "kimi_quota_five_hour" || !rejection.RetryAt.Equal(now.Add(300*time.Second)) {
-			t.Fatalf("InitialRejection(%s) = %+v, %v", name, rejection, ok)
+		if rejection, ok := vendor.InitialRejection(attempt.endpoint, 429, attempt.body, http.Header{"Retry-After": {"300"}}, now); ok {
+			t.Fatalf("InitialRejection(%s) = %+v, want held pending live envelope qualification", name, rejection)
 		}
 	}
 	for name, body := range map[string][]byte{

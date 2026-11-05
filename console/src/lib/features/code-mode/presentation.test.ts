@@ -10,7 +10,10 @@ import {
   cooldownClassLabel,
   cooldownSummary,
   decisionReasonLabel,
+  extraUsageAdapterFor,
   extraUsageLabel,
+  extraUsageValue,
+  providerProfilePending,
   showsExtraUsage,
   skipClassLabel,
   mutationError,
@@ -413,6 +416,32 @@ describe('extra usage presentation', () => {
     const on = extraUsageLabel(true);
     expect(on).toContain('paid fallback');
     expect(on).not.toMatch(/spare|remaining/i);
+  });
+
+  it('derives the create-flow adapter from the provider profile only', () => {
+    expect(extraUsageAdapterFor(null, true, 'kimi-code')).toBe('kimi_code');
+    expect(extraUsageAdapterFor(null, true, 'kimi-code-cn')).toBe('kimi_code');
+    expect(extraUsageAdapterFor(null, true, 'qwen-token-plan')).toBeNull();
+    expect(extraUsageAdapterFor(null, true, undefined)).toBeNull();
+    expect(extraUsageAdapterFor('kimi_code', false, undefined)).toBe(
+      'kimi_code'
+    );
+    expect(extraUsageAdapterFor('codex', false, 'kimi-code')).toBe('codex');
+  });
+
+  it('submits the selected value for Kimi and the recorded value otherwise', () => {
+    expect(extraUsageValue('kimi_code', '', true)).toBeNull();
+    expect(extraUsageValue('kimi_code', 'true', null)).toBe(true);
+    expect(extraUsageValue('kimi_code', 'false', null)).toBe(false);
+    expect(extraUsageValue('codex', 'true', false)).toBe(false);
+    expect(extraUsageValue(null, '', undefined)).toBeNull();
+  });
+
+  it('holds a create save while the selected provider profile is not loaded', () => {
+    expect(providerProfilePending(true, 'provider-1', false)).toBe(true);
+    expect(providerProfilePending(true, 'provider-1', true)).toBe(false);
+    expect(providerProfilePending(true, '', false)).toBe(false);
+    expect(providerProfilePending(false, 'provider-1', false)).toBe(false);
   });
 });
 

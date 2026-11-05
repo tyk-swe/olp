@@ -13,7 +13,13 @@
     type CodeAccount,
     type CodeAccountWrite
   } from '$lib/management/code-mode';
-  import { nativeModels, showsExtraUsage } from './presentation';
+  import {
+    extraUsageAdapterFor,
+    extraUsageValue,
+    nativeModels,
+    providerProfilePending,
+    showsExtraUsage
+  } from './presentation';
   import AccountEnrollment from './AccountEnrollment.svelte';
 
   import {
@@ -58,14 +64,15 @@
     queryFn: ({ signal }) => getProvider(providerId, signal),
     enabled: !!providerId
   }));
+  const profilePending = $derived(
+    providerProfilePending(!initial, providerId, provider.data !== undefined)
+  );
   const extraUsageAdapter = $derived(
-    initial
-      ? initial.adapter
-      : ['kimi-code', 'kimi-code-cn'].includes(
-            provider.data?.configuration.profile_id ?? ''
-          )
-        ? 'kimi_code'
-        : null
+    extraUsageAdapterFor(
+      initial?.adapter,
+      !initial,
+      provider.data?.configuration.profile_id
+    )
   );
   const qwenTokenPlan = $derived(
     initial?.adapter === 'qwen_token_plan' ||
@@ -78,7 +85,7 @@
     onDraftChange: (dirty) => onDraftChange(dirty),
     onSaved: () => onSaved(),
     onCancel: () => onCancel(),
-    blocked: () => enrolling,
+    blocked: () => enrolling || profilePending,
     build: (): CodeAccountWrite => ({
       project_id: projectId,
       name,
@@ -87,11 +94,11 @@
       models: nativeModels(models),
       cycle_anchor: qwenTokenPlan && cycleAnchor ? cycleAnchor : null,
       enabled,
-      extra_usage_enabled: showsExtraUsage(extraUsageAdapter)
-        ? extraUsage === ''
-          ? null
-          : extraUsage === 'true'
-        : (initial?.extra_usage_enabled ?? null)
+      extra_usage_enabled: extraUsageValue(
+        extraUsageAdapter,
+        extraUsage,
+        initial?.extra_usage_enabled
+      )
     }),
     persist: (input, requestId) => saveCodeAccount(input, current, requestId)
   });
@@ -117,7 +124,7 @@
   {allowed}
   {submission}
   referenceError={providers.error || credentials.error}
-  {enrolling}
+  enrolling={enrolling || profilePending}
   {enrollment}
 >
   <label for="code-name">Name</label><input
