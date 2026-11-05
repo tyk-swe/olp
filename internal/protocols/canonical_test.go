@@ -8,6 +8,54 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
+func TestChatImageDetailSurvivesResponsesTranslation(t *testing.T) {
+	for _, detail := range []string{"low", "high", "original", "auto", ""} {
+		t.Run(detail, func(t *testing.T) {
+			image := Object{"url": raw("https://example.test/image.png")}
+			if detail != "" {
+				image["detail"] = raw(detail)
+			}
+			body := raw(Object{"model": raw("route"), "messages": raw([]Object{{"role": raw("user"), "content": raw([]Object{{"type": raw("image_url"), "image_url": raw(image)}})}})})
+			request, err := Parse(wire.Chat, body, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, _, err := EncodeTarget(request, wire.Responses, "openai", "openai", "native-model", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var target struct {
+				Input []struct {
+					Content []struct {
+						Type     string
+						ImageURL string `json:"image_url"`
+						Detail   *string
+					}
+				}
+			}
+			if err := json.Unmarshal(encoded, &target); err != nil {
+				t.Fatal(err)
+			}
+			if len(target.Input) != 1 || len(target.Input[0].Content) != 1 {
+				t.Fatalf("image input changed %s", encoded)
+			}
+			part := target.Input[0].Content[0]
+			if part.Type != "input_image" || part.ImageURL != str(image["url"]) {
+				t.Fatalf("image input changed %s", encoded)
+			}
+			if detail == "" {
+				if part.Detail != nil {
+					t.Fatalf("absent image detail replaced %s", encoded)
+				}
+				return
+			}
+			if part.Detail == nil || *part.Detail != detail {
+				t.Fatalf("image detail %q lost in %s", detail, encoded)
+			}
+		})
+	}
+}
+
 // Gemini's own schema dialect spells types in capitals, and the Google SDKs
 // emit it for a function's parameters. A provider that reads JSON Schema needs
 // the standard names, and nothing else in the schema may change, the order of
