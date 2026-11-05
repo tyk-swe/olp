@@ -796,6 +796,73 @@ func TestCodeModelCooldownFollowsAliasTarget(t *testing.T) {
 	}
 }
 
+func TestCodeCatalogReachesPaidModelPoolFallback(t *testing.T) {
+	route := codemode.Route{
+		Enabled: true, RevisionID: "revision", Slug: "route", Models: []string{"native-a", "native-b"},
+		ModelRewriting: true, Aliases: map[string]string{"pool": "native-a"},
+		ModelPools:        map[string][]string{"pool": {"native-a", "native-b"}},
+		PaidParticipation: true, InitialRecoveryAttempts: 1,
+		PaidFallbackTargets: map[string]codemode.PaidTarget{"native-b": {}},
+	}
+	offers := codeclient.Offers{{PaidProtocol: codemode.ProtocolResponses, PaidStreaming: true, Models: []string{"native-b"}}}
+	fallback, err := route.PaidFallbackModel(codemode.Operation{Model: "pool"}, nil)
+	if err != nil || fallback == nil || fallback.Model != "native-b" {
+		t.Fatalf("paid fallback = %+v, error = %v", fallback, err)
+	}
+	pool := func(route codemode.Route, offers codeclient.Offers) *codemode.Model {
+		models := codeclient.Catalog(route, offers)
+		index := slices.IndexFunc(models, func(model codemode.Model) bool { return model.ID == "pool" })
+		if index < 0 {
+			return nil
+		}
+		return &models[index]
+	}
+	model := pool(route, offers)
+	if model == nil || !model.Paid || !slices.Contains(model.Clients, codeadapter.ClientCodex) || len(model.Capabilities) != 1 || model.Capabilities[0].Protocol != codemode.ProtocolResponses {
+		t.Fatalf("pool catalog entry = %+v", model)
+	}
+	configuration, err := codeclient.Generate(route, offers, codeclient.Request{GatewayURL: "http://localhost:4000", Client: codeadapter.ClientCodex, Model: "pool"})
+	if err != nil || configuration.Model != "pool" || !slices.Contains(configuration.PaidModels, "pool") || !strings.Contains(configuration.Configuration, "supports_websockets = false") {
+		t.Fatalf("client configuration = %+v, error = %v", configuration, err)
+	}
+	missing := pool(route, nil)
+	if missing != nil {
+		t.Fatalf("unavailable paid target advertised: %+v", missing)
+	}
+	withoutRecovery := route
+	withoutRecovery.InitialRecoveryAttempts = 0
+	if model := pool(withoutRecovery, offers); model != nil {
+		t.Fatalf("disabled fallback advertised: %+v", model)
+	}
+	withoutPool := route
+	withoutPool.ModelPools = nil
+	if model := pool(withoutPool, offers); model != nil {
+		t.Fatalf("unreachable alternate advertised: %+v", model)
+	}
+	earlierFallback := route
+	earlierFallback.PaidFallbackTargets = map[string]codemode.PaidTarget{"native-a": {}, "native-b": {}}
+	if model := pool(earlierFallback, offers); model != nil {
+		t.Fatalf("unselected alternate advertised: %+v", model)
+	}
+	messageOffers := codeclient.Offers{{PaidProtocol: codemode.ProtocolMessages, PaidStreaming: true, Models: []string{"native-b"}}}
+	messageModel := pool(route, messageOffers)
+	if messageModel == nil || slices.Contains(messageModel.Clients, codeadapter.ClientCodex) || !slices.Contains(messageModel.Clients, codeadapter.ClientClaudeCode) {
+		t.Fatalf("messages paid fallback = %+v", messageModel)
+	}
+	if _, err := codeclient.Generate(route, messageOffers, codeclient.Request{GatewayURL: "http://localhost:4000", Client: codeadapter.ClientCodex, Model: "pool"}); err == nil {
+		t.Fatal("unsupported client accepted for paid fallback")
+	}
+	withoutStreaming := codeclient.Offers{{PaidProtocol: codemode.ProtocolResponses, Models: []string{"native-b"}}}
+	if model := pool(route, withoutStreaming); model == nil || len(model.Clients) != 0 {
+		t.Fatalf("non-streaming paid fallback clients = %+v", model)
+	}
+	withSubscription := slices.Concat(offers, codeclient.Offers{{Adapter: codemode.AdapterCodex, Models: []string{"native-a"}}})
+	configuration, err = codeclient.Generate(route, withSubscription, codeclient.Request{GatewayURL: "http://localhost:4000", Client: codeadapter.ClientCodex, Model: "pool"})
+	if err != nil || !strings.Contains(configuration.Configuration, "supports_websockets = true") {
+		t.Fatalf("subscription client configuration = %+v, error = %v", configuration, err)
+	}
+}
+
 func TestCodeRecoveryRecordsActualDestinationSelection(t *testing.T) {
 	pool, _ := newDatabase(t)
 	if err := database.Migrate(t.Context(), pool); err != nil {

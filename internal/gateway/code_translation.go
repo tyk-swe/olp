@@ -169,6 +169,10 @@ func codeTextContent(parent oif.Value, key string) bool {
 
 func (a *codeAttempt) translateResponse(ctx context.Context, w http.ResponseWriter, r *http.Request, response *http.Response, model string, stream bool, family wire.Format, includeUsage bool) {
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		body, err := io.ReadAll(io.LimitReader(response.Body, codewire.MaxBody+1))
+		if err == nil {
+			a.observeEncodedUnary(body, response.Header.Get("Content-Encoding"))
+		}
 		codeWriteError(w, r, codemode.Refuse(response.StatusCode, "code_upstream_rejected"))
 		return
 	}

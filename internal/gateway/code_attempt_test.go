@@ -1,6 +1,8 @@
 package gateway
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,11 +15,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
+	"github.com/tyk-swe/olp/internal/codewire"
 	"github.com/tyk-swe/olp/internal/codexauth"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -26,6 +31,111 @@ type recordedCooldown struct {
 	account        string
 	model          string
 	classification codeadapter.Classification
+}
+
+func TestWebSocketHandshakeRejectionPreservesBodyAndQuota(t *testing.T) {
+	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	for _, compressed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("compressed=%t", compressed), func(t *testing.T) {
+			body := []byte(`{"error":{"type":"usage_limit_reached","resets_in_seconds":600}}`)
+			header := http.Header{"Retry-After": {"60"}}
+			if compressed {
+				var encoded bytes.Buffer
+				compressor := gzip.NewWriter(&encoded)
+				if _, err := compressor.Write(body); err != nil {
+					t.Fatal(err)
+				}
+				if err := compressor.Close(); err != nil {
+					t.Fatal(err)
+				}
+				body = encoded.Bytes()
+				header.Set("Content-Encoding", "gzip")
+			}
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				for name, values := range header {
+					w.Header()[name] = values
+				}
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write(body)
+			}))
+			defer upstream.Close()
+			ledger := &fakeCodeLedger{}
+			attempt := codexAttempt(t, ledger, now)
+			attempt.permit.Attempt.ID = ""
+			writer := httptest.NewRecorder()
+			base := http.DefaultTransport.(*http.Transport).Clone()
+			base.DisableCompression = true
+			defer base.CloseIdleConnections()
+			transport := &codeHandshakeTransport{base: base, reject: func(response *http.Response) { forwardCodeHandshakeRejection(t.Context(), writer, attempt, response) }}
+			_, response, err := websocket.Dial(t.Context(), upstream.URL, &websocket.DialOptions{HTTPClient: &http.Client{Transport: transport}})
+			if err == nil || response == nil {
+				t.Fatalf("dial response = %+v, error = %v", response, err)
+			}
+			attempt.flushPendingHealth(t.Context())
+			if writer.Code != http.StatusTooManyRequests || !bytes.Equal(writer.Body.Bytes(), body) || writer.Header().Get("Content-Encoding") != header.Get("Content-Encoding") {
+				t.Fatalf("forwarded response = %d %v, body differs: %t", writer.Code, writer.Header(), !bytes.Equal(writer.Body.Bytes(), body))
+			}
+			if len(ledger.cooldowns) != 1 || ledger.cooldowns[0].classification.Class != codeadapter.CooldownQuota || ledger.cooldowns[0].classification.Scope != codeadapter.ScopeCredential || !ledger.cooldowns[0].classification.RetryAt.Equal(now.Add(10*time.Minute)) {
+				t.Fatalf("cooldowns = %+v, health = %+v", ledger.cooldowns, ledger.health)
+			}
+			if len(ledger.settlements) != 0 || ledger.confirmations != 0 {
+				t.Fatalf("settlements = %+v, confirmations = %d", ledger.settlements, ledger.confirmations)
+			}
+		})
+	}
+}
+
+func TestWebSocketHandshakeRejectionForwardsOversizedBody(t *testing.T) {
+	body := bytes.Repeat([]byte("x"), codewire.MaxBody+1)
+	ledger := &fakeCodeLedger{}
+	attempt := codexAttempt(t, ledger, time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC))
+	attempt.permit.Attempt.ID = ""
+	writer := httptest.NewRecorder()
+	forwardCodeHandshakeRejection(t.Context(), writer, attempt, &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(bytes.NewReader(body))})
+	if writer.Code != 429 || !bytes.Equal(writer.Body.Bytes(), body) || len(ledger.cooldowns) != 0 {
+		t.Fatalf("forwarded status = %d, body length = %d, cooldowns = %+v", writer.Code, writer.Body.Len(), ledger.cooldowns)
+	}
+}
+
+func TestTranslatedRejectionRecordsModelCooldown(t *testing.T) {
+	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	for _, family := range []wire.Format{wire.Chat, wire.Anthropic} {
+		for _, compressed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/compressed=%t", family, compressed), func(t *testing.T) {
+				ledger := &fakeCodeLedger{}
+				attempt := codexAttempt(t, ledger, now)
+				attempt.dispatched = true
+				body := []byte(`{"error":{"type":"rate_limit_error","code":"model_at_capacity"}}`)
+				header := http.Header{"Retry-After": {"120"}}
+				if compressed {
+					var encoded bytes.Buffer
+					compressor := gzip.NewWriter(&encoded)
+					if _, err := compressor.Write(body); err != nil {
+						t.Fatal(err)
+					}
+					if err := compressor.Close(); err != nil {
+						t.Fatal(err)
+					}
+					body = encoded.Bytes()
+					header.Set("Content-Encoding", "gzip")
+				}
+				response := &http.Response{StatusCode: 429, Header: header, Body: io.NopCloser(bytes.NewReader(body))}
+				attempt.response(t.Context(), response.StatusCode, response.Header)
+				writer := httptest.NewRecorder()
+				attempt.translateResponse(t.Context(), writer, httptest.NewRequest(http.MethodPost, "/", nil), response, "public-model", false, family, false)
+				attempt.finish(t.Context())
+				if writer.Code != 429 || !strings.Contains(writer.Body.String(), "code_upstream_rejected") {
+					t.Fatalf("response = %d %s", writer.Code, writer.Body.String())
+				}
+				if len(ledger.cooldowns) != 1 || ledger.cooldowns[0].model != "gpt-model" || ledger.cooldowns[0].classification.Class != codeadapter.CooldownCapacity || !ledger.cooldowns[0].classification.RetryAt.Equal(now.Add(2*time.Minute)) || len(ledger.health) != 0 {
+					t.Fatalf("cooldowns = %+v, health = %+v", ledger.cooldowns, ledger.health)
+				}
+				if len(ledger.outcomes) != 1 || ledger.outcomes[0].Kind != "rejected" || len(ledger.settlements) != 1 || ledger.settlements[0].Total != nil || ledger.confirmations != 0 {
+					t.Fatalf("outcomes = %+v, settlements = %+v, confirmations = %d", ledger.outcomes, ledger.settlements, ledger.confirmations)
+				}
+			})
+		}
+	}
 }
 
 type fakeCodeLedger struct {

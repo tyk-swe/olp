@@ -211,6 +211,13 @@ func (a *codeAttempt) observeUnary(body []byte) {
 	}
 }
 
+func (a *codeAttempt) observeEncodedUnary(body []byte, encoding string) {
+	decoded, err := codewire.Decode(body, encoding, codewire.MaxBody)
+	if err == nil {
+		a.observeUnary(decoded)
+	}
+}
+
 func (a *codeAttempt) observe(o codemode.Observation) {
 	if o.ResponseID != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

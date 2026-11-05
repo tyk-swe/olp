@@ -150,21 +150,12 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 	forwarded := false
 	httpClient.Transport = &codeHandshakeTransport{base: httpClient.Transport, reject: func(response *http.Response) {
 		forwarded = true
-		maps.Copy(w.Header(), codewire.ForwardHeaders(response.Header, false))
-		for name := range codewire.ForwardTrailers(response.Trailer, response.Header, false) {
-			w.Header().Add("Trailer", name)
-		}
-		w.WriteHeader(response.StatusCode)
-		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
-		_, _ = io.Copy(w, response.Body)
-		for name, values := range codewire.ForwardTrailers(response.Trailer, response.Header, false) {
-			w.Header()[http.TrailerPrefix+name] = values
-		}
+		forwardCodeHandshakeRejection(r.Context(), w, connection, response)
 	}}
 	dialCtx, dialCancel := context.WithTimeout(r.Context(), 30*time.Second)
 	upstream, response, err := websocket.Dial(dialCtx, target, &websocket.DialOptions{HTTPClient: httpClient, HTTPHeader: headers, CompressionMode: websocket.CompressionDisabled})
 	dialCancel()
-	if response != nil {
+	if response != nil && !forwarded {
 		connection.response(r.Context(), response.StatusCode, response.Header)
 	}
 	if err != nil {
@@ -338,6 +329,25 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 				generationDone = nil
 			}
 		}
+	}
+}
+
+func forwardCodeHandshakeRejection(ctx context.Context, w http.ResponseWriter, attempt *codeAttempt, response *http.Response) {
+	attempt.response(ctx, response.StatusCode, response.Header)
+	maps.Copy(w.Header(), codewire.ForwardHeaders(response.Header, false))
+	for name := range codewire.ForwardTrailers(response.Trailer, response.Header, false) {
+		w.Header().Add("Trailer", name)
+	}
+	w.WriteHeader(response.StatusCode)
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+	body, readErr := io.ReadAll(io.LimitReader(response.Body, codewire.MaxBody+1))
+	_, _ = w.Write(body)
+	_, _ = io.Copy(w, response.Body)
+	if readErr == nil && response.StatusCode >= 400 {
+		attempt.observeEncodedUnary(body, response.Header.Get("Content-Encoding"))
+	}
+	for name, values := range codewire.ForwardTrailers(response.Trailer, response.Header, false) {
+		w.Header()[http.TrailerPrefix+name] = values
 	}
 }
 
