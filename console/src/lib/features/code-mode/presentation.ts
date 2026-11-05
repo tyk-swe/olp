@@ -120,6 +120,16 @@ export function allowanceEvidenceLabel(
   return evidence === 'active' ? 'Active read' : 'Passive observation';
 }
 
+export function orderingSignalLabel(
+  adapter: string | null | undefined,
+  allowanceOrdering: boolean
+): string {
+  if (!allowanceOrdering) return 'Weights plus cooldown';
+  if (adapter !== 'codex')
+    return 'Weights plus cooldown, no proven allowance signal';
+  return 'Allowance bands from proven passive windows';
+}
+
 export function nativeModels(value: string): string[] {
   const models = value.split(/[\s,]+/).filter(Boolean);
   if (

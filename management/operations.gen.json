@@ -5358,6 +5358,10 @@
             "chat_to_codex": {
               "type": "boolean",
               "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
+            },
+            "allowance_ordering": {
+              "type": "boolean",
+              "description": "Orders new conversation roots and new model pins by proven allowance bands, healthy above unknown above low, with the weighted score inside a band. Off by default, only proven allowance signals order, and established pins never move. Published revisions pin this policy."
             }
           },
           "required": [
@@ -7725,6 +7729,10 @@
             "chat_to_codex": {
               "type": "boolean",
               "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
+            },
+            "allowance_ordering": {
+              "type": "boolean",
+              "description": "Orders new conversation roots and new model pins by proven allowance bands, healthy above unknown above low, with the weighted score inside a band. Off by default, only proven allowance signals order, and established pins never move. Published revisions pin this policy."
             }
           },
           "required": [
@@ -31196,6 +31204,10 @@
             "chat_to_codex": {
               "type": "boolean",
               "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
+            },
+            "allowance_ordering": {
+              "type": "boolean",
+              "description": "Orders new conversation roots and new model pins by proven allowance bands, healthy above unknown above low, with the weighted score inside a band. Off by default, only proven allowance signals order, and established pins never move. Published revisions pin this policy."
             }
           },
           "required": [
@@ -36535,6 +36547,10 @@
             "chat_to_codex": {
               "type": "boolean",
               "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
+            },
+            "allowance_ordering": {
+              "type": "boolean",
+              "description": "Orders new conversation roots and new model pins by proven allowance bands, healthy above unknown above low, with the weighted score inside a band. Off by default, only proven allowance signals order, and established pins never move. Published revisions pin this policy."
             }
           },
           "required": [

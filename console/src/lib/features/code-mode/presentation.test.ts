@@ -13,6 +13,7 @@ import {
   skipClassLabel,
   mutationError,
   nativeModels,
+  orderingSignalLabel,
   recoveryReasonLabel,
   refusalAdvice,
   reservationLabel,
@@ -380,6 +381,37 @@ describe('code account decisions', () => {
     expect(skipClassLabel('tree')).toBe('tree account served');
     expect(skipClassLabel('weight')).toBe('weighted score');
     expect(skipClassLabel('band')).toBe('lower allowance band');
+  });
+});
+
+describe('code ordering signals', () => {
+  it('names only codex as a proven passive allowance signal', () => {
+    expect(orderingSignalLabel('codex', true)).toBe(
+      'Allowance bands from proven passive windows'
+    );
+    for (const adapter of [
+      'zai_coding',
+      'minimax_plan',
+      'kimi_code',
+      'qwen_token_plan',
+      'opencode_go',
+      'claude',
+      'antigravity'
+    ]) {
+      expect(orderingSignalLabel(adapter, true)).toBe(
+        'Weights plus cooldown, no proven allowance signal'
+      );
+    }
+    expect(orderingSignalLabel(null, true)).toBe(
+      'Weights plus cooldown, no proven allowance signal'
+    );
+  });
+
+  it('keeps every adapter on weights plus cooldown while ordering is off', () => {
+    expect(orderingSignalLabel('codex', false)).toBe('Weights plus cooldown');
+    expect(orderingSignalLabel('zai_coding', false)).toBe(
+      'Weights plus cooldown'
+    );
   });
 });
 

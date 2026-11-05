@@ -42,6 +42,11 @@
               ? 'enabled. Codex subscription requests with no nonblank Originator receive Originator=codex_cli_rs. Explicit identity headers and prompts are preserved. This may violate provider terms and risk account suspension.'
               : 'disabled. Identity headers and prompts are preserved.'}
           </p>
+          <p>
+            Allowance ordering {revision.route.allowance_ordering
+              ? 'enabled. New conversation roots and new model pins rank known healthy above unknown above known low from fresh proven observations, with the weighted score inside the best band. Established pins never move.'
+              : 'disabled. New conversation roots are picked by weights plus cooldown. Enable it in the draft and publish to order by proven allowance bands.'}
+          </p>
           <code>{revision.id}</code>
         </li>{:else}<li>No published revisions.</li>{/each}
     </ul>

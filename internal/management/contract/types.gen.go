@@ -9352,6 +9352,9 @@ type CodeRoute struct {
 	// Aliases Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized.
 	Aliases *map[string]string `json:"aliases,omitempty"`
 
+	// AllowanceOrdering Orders new conversation roots and new model pins by proven allowance bands, healthy above unknown above low, with the weighted score inside a band. Off by default, only proven allowance signals order, and established pins never move. Published revisions pin this policy.
+	AllowanceOrdering *bool `json:"allowance_ordering,omitempty"`
+
 	// ChatToAntigravity Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow.
 	ChatToAntigravity *bool `json:"chat_to_antigravity,omitempty"`
 
@@ -9412,6 +9415,9 @@ type CodeRouteList struct {
 type CodeRouteWrite struct {
 	// Aliases Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized.
 	Aliases *map[string]string `json:"aliases,omitempty"`
+
+	// AllowanceOrdering Orders new conversation roots and new model pins by proven allowance bands, healthy above unknown above low, with the weighted score inside a band. Off by default, only proven allowance signals order, and established pins never move. Published revisions pin this policy.
+	AllowanceOrdering *bool `json:"allowance_ordering,omitempty"`
 
 	// ChatToAntigravity Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow.
 	ChatToAntigravity *bool `json:"chat_to_antigravity,omitempty"`
@@ -9648,6 +9654,9 @@ type ConfigurationCodeRoute struct {
 type ConfigurationCodeRoutePolicy struct {
 	// Aliases Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized.
 	Aliases *map[string]string `json:"aliases,omitempty"`
+
+	// AllowanceOrdering Orders new conversation roots and new model pins by proven allowance bands, healthy above unknown above low, with the weighted score inside a band. Off by default, only proven allowance signals order, and established pins never move. Published revisions pin this policy.
+	AllowanceOrdering *bool `json:"allowance_ordering,omitempty"`
 
 	// ChatToAntigravity Explicit opt-in for chat translation through the Antigravity adapter.
 	ChatToAntigravity *bool `json:"chat_to_antigravity,omitempty"`

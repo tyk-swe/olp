@@ -94,6 +94,7 @@ type CodeRoutePolicy struct {
 	Aliases                 map[string]string         `json:"aliases"`
 	ChatToCodex             bool                      `json:"chat_to_codex,omitempty"`
 	MessagesToCodex         bool                      `json:"messages_to_codex"`
+	AllowanceOrdering       bool                      `json:"allowance_ordering,omitempty"`
 	Tools                   *codemode.ResearchTools   `json:"tools"`
 	MaxBodyBytes            *int64                    `json:"max_body_bytes"`
 }

@@ -211,8 +211,9 @@ func (s *CodeStore) admit(ctx context.Context, admission CodeAdmission, connecti
 	if err != nil {
 		return out, err
 	}
+	var recoverySelection *codeSelection
 	if referenced.Recovery != nil {
-		if err = recoverCodeBinding(ctx, tx, referenced); err != nil {
+		if recoverySelection, err = recoverCodeBinding(ctx, tx, referenced); err != nil {
 			return out, err
 		}
 	}
@@ -247,17 +248,17 @@ func (s *CodeStore) admit(ctx context.Context, admission CodeAdmission, connecti
 		reason = codemode.DecisionPin
 		out.Pin = pins[pinned]
 		tree, _ := codeTree(out.Binding, pins)
-		selection, err = codeAccount(ctx, tx, in, out.Pin.AccountID, out.Binding.RootID, tree)
+		selection, err = codeAccount(ctx, tx, in, out.Pin.AccountID, out.Binding.RootID, tree, false)
 		out.Account = selection.account
 	case connection:
 		// A connection serves on the tree's own account until its model is
 		// pinned; each generation it carries admits its own model.
 		reason = codemode.DecisionConnection
 		out.Pin = codemode.Pin{AccountID: out.Binding.AccountID, Principal: out.Binding.Principal}
-		selection, err = codeAccount(ctx, tx, in, out.Pin.AccountID, "", nil)
+		selection, err = codeAccount(ctx, tx, in, out.Pin.AccountID, "", nil, false)
 		out.Account = selection.account
 	default:
-		out.Pin, selection, err = codePin(ctx, tx, in, out.Binding, pins)
+		out.Pin, selection, err = codePin(ctx, tx, in, out.Binding, pins, in.Route.AllowanceOrdering && rootSelection != nil)
 		out.Account = selection.account
 	}
 	if err != nil {
@@ -310,6 +311,9 @@ func (s *CodeStore) admit(ctx context.Context, admission CodeAdmission, connecti
 	decisionSelection := selection
 	if rootSelection != nil && reason == codemode.DecisionChosen && rootSelection.account.ID == selection.account.ID {
 		decisionSelection = *rootSelection
+	}
+	if recoverySelection != nil && recoverySelection.assessment != nil && recoverySelection.account.ID == selection.account.ID {
+		decisionSelection = *recoverySelection
 	}
 	if err = recordCodeDecision(ctx, tx, in, out.Binding, &out.Attempt.ID, decisionSelection, reason); err != nil {
 		return out, err
@@ -442,7 +446,7 @@ func (s *CodeStore) bind(ctx context.Context, tx pgx.Tx, in CodeAdmission) (code
 		b.AccountID = parent.AccountID
 		b.Principal = parent.Principal
 	} else {
-		selection, err := codeAccount(ctx, tx, in, "", "", nil)
+		selection, err := codeAccount(ctx, tx, in, "", "", nil, in.Route.AllowanceOrdering)
 		if err != nil {
 			if refusal, ok := errors.AsType[*codemode.Refusal](err); ok && refusal.Code == "code_account_unavailable" && in.Operation.Name == "connect" && len(in.Route.Models) > 1 {
 				return b, nil, codemode.Refuse(400, "code_connection_model_required")
@@ -508,9 +512,9 @@ func codeTree(b codemode.Binding, pins []codemode.Pin) ([]string, map[string]str
 // else to another account the tree uses, else to the first available account
 // of an adapter the tree does not use yet. Nothing fails over: a tree account
 // that cools refuses a new model it serves as it refuses its pinned ones.
-func codePin(ctx context.Context, tx pgx.Tx, in CodeAdmission, b codemode.Binding, pins []codemode.Pin) (codemode.Pin, codeSelection, error) {
+func codePin(ctx context.Context, tx pgx.Tx, in CodeAdmission, b codemode.Binding, pins []codemode.Pin, bandOrdered bool) (codemode.Pin, codeSelection, error) {
 	tree, principals := codeTree(b, pins)
-	selection, err := codeAccount(ctx, tx, in, "", b.RootID, tree)
+	selection, err := codeAccount(ctx, tx, in, "", b.RootID, tree, bandOrdered)
 	if err != nil {
 		return codemode.Pin{}, selection, err
 	}
@@ -529,11 +533,13 @@ type codeCandidate struct {
 	account       codemode.Account
 	outcome       codemode.Candidate
 	cooldownRetry *time.Time
+	assessment    *codemode.BandAssessment
 }
 
 type codeSelection struct {
 	account    codemode.Account
 	candidates []codemode.Candidate
+	assessment *codemode.BandAssessment
 }
 
 func (s codeSelection) chosen() (codemode.Candidate, bool) {
@@ -546,6 +552,14 @@ func (s codeSelection) chosen() (codemode.Candidate, bool) {
 	return s.candidates[index], true
 }
 
+func codeBandAssessment(bandOrdered bool, allowance *codemode.Allowance, now time.Time) (*codemode.BandAssessment, codemode.Band, *time.Time) {
+	if !bandOrdered {
+		return nil, "", nil
+	}
+	assessed := codemode.AssessBand(allowance, now)
+	return &assessed, assessed.Band, assessed.SoonestReset
+}
+
 // codeAccount selects the pool account that serves an admission: an eligible
 // one of the admission's providers, so its adapter serves the request's path
 // and the gateway can reach it. It is the account id when given, else the
@@ -554,7 +568,7 @@ func (s codeSelection) chosen() (codemode.Candidate, bool) {
 // earlier one has its adapter, now or as the root's pins recorded it, since a
 // republish can change or drop an account's connection; a selected account
 // that is unavailable refuses the admission.
-func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root string, tree []string) (codeSelection, error) {
+func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root string, tree []string, bandOrdered bool) (codeSelection, error) {
 	var none codeSelection
 	if _, paid := in.Route.PaidTargets[in.Operation.Model]; paid {
 		return none, codemode.Refuse(503, "code_account_unavailable")
@@ -590,6 +604,7 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root stri
 	if err != nil {
 		return none, err
 	}
+	now := time.Now().UTC()
 	candidates, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (codeCandidate, error) {
 		var candidate codeCandidate
 		var weight int64
@@ -601,8 +616,9 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root stri
 		if err != nil {
 			return candidate, err
 		}
-		outcome := codemode.Candidate{AccountID: candidate.account.ID, Available: candidate.outcome.Available && !cooling, Cooldown: candidate.outcome.Cooldown || cooling, Position: candidate.outcome.Position, Score: routing.Score(routeID, accountID, weight, in.Operation.Name, "code", in.Operation.Model, []byte(in.APIKeyID+":"+in.Operation.Identity.Conversation))}
-		return codeCandidate{account: candidate.account, outcome: outcome, cooldownRetry: candidate.cooldownRetry}, nil
+		assessment, band, resetAt := codeBandAssessment(bandOrdered, candidate.account.Allowance, now)
+		outcome := codemode.Candidate{AccountID: candidate.account.ID, Available: candidate.outcome.Available && !cooling, Cooldown: candidate.outcome.Cooldown || cooling, Position: candidate.outcome.Position, Score: routing.Score(routeID, accountID, weight, in.Operation.Name, "code", in.Operation.Model, []byte(in.APIKeyID+":"+in.Operation.Identity.Conversation)), Band: band, ResetAt: resetAt}
+		return codeCandidate{account: candidate.account, outcome: outcome, cooldownRetry: candidate.cooldownRetry, assessment: assessment}, nil
 	})
 	if err != nil {
 		return none, err
@@ -612,7 +628,7 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root stri
 		outcomes = append(outcomes, candidate.outcome)
 	}
 	chosen, ok := codemode.ChooseCandidate(outcomes)
-	if !ok || !chosen.Available {
+	if !ok || !chosen.Eligible() {
 		if len(candidates) == 0 {
 			return none, codemode.Refuse(503, "code_account_unavailable")
 		}
@@ -621,12 +637,12 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root stri
 			recoveries = append(recoveries, candidate.account.UnavailableUntil, candidate.cooldownRetry)
 			recoveries = append(recoveries, codemode.AllowanceResets(candidate.account.Allowance)...)
 		}
-		return none, &codemode.Refusal{Status: 503, Code: "code_account_unavailable", RetryAt: codemode.EarliestRecovery(time.Now().UTC(), recoveries...)}
+		return none, &codemode.Refusal{Status: 503, Code: "code_account_unavailable", RetryAt: codemode.EarliestRecovery(now, recoveries...)}
 	}
 	index := slices.IndexFunc(candidates, func(candidate codeCandidate) bool {
 		return candidate.account.ID == chosen.AccountID
 	})
-	return codeSelection{account: candidates[index].account, candidates: outcomes}, nil
+	return codeSelection{account: candidates[index].account, candidates: outcomes, assessment: candidates[index].assessment}, nil
 }
 
 // MarkDispatched is the irreversible pre-send transition. Network ambiguity

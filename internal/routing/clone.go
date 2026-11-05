@@ -264,7 +264,7 @@ func cloneCodeRoute(route codemode.Route) codemode.Route {
 			}
 		}),
 		Models: slices.Clone(route.Models), Aliases: maps.Clone(route.Aliases), ModelRewriting: route.ModelRewriting,
-		CodexCLIIdentity: route.CodexCLIIdentity, ChatToCodex: route.ChatToCodex, MessagesToCodex: route.MessagesToCodex, ChatToAntigravity: route.ChatToAntigravity, InitialRecoveryAttempts: route.InitialRecoveryAttempts,
+		CodexCLIIdentity: route.CodexCLIIdentity, ChatToCodex: route.ChatToCodex, MessagesToCodex: route.MessagesToCodex, ChatToAntigravity: route.ChatToAntigravity, AllowanceOrdering: route.AllowanceOrdering, InitialRecoveryAttempts: route.InitialRecoveryAttempts,
 		Tools: func() *codemode.ResearchTools {
 			if route.Tools == nil {
 				return nil

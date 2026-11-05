@@ -234,6 +234,7 @@ type Route struct {
 	Aliases                 map[string]string     `json:"aliases,omitempty"`
 	ChatToCodex             bool                  `json:"chat_to_codex,omitempty"`
 	MessagesToCodex         bool                  `json:"messages_to_codex,omitempty"`
+	AllowanceOrdering       bool                  `json:"allowance_ordering,omitempty"`
 	Tools                   *ResearchTools        `json:"tools,omitempty"`
 	MaxBodyBytes            *int64                `json:"max_body_bytes,omitempty"`
 	ID                      string                `json:"id"`

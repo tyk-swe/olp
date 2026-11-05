@@ -5,6 +5,7 @@ package service_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -146,6 +147,215 @@ func TestCodeAdmissionRecordsChosenAndPinnedDecisions(t *testing.T) {
 	}
 	if missing := attemptAllowanceCharge(t, pool, third.Attempt.ID); missing != nil {
 		t.Fatalf("fresh attempt charge = %v, want null (unknown)", missing)
+	}
+}
+
+func bandAllowanceJSON(t *testing.T, remaining float64, resetsAt *time.Time, observedAt time.Time) []byte {
+	t.Helper()
+	document, err := json.Marshal(codemode.Allowance{
+		Windows:          []codemode.AllowanceWindow{{LimitID: "codex", Window: "primary", Unit: codemode.AllowanceUnitPercent, Evidence: codemode.AllowanceEvidencePassive, UsedPercent: 100 - remaining, RemainingPercent: remaining, ResetsAt: resetsAt, ObservedAt: observedAt}},
+		RemainingPercent: &remaining,
+		ResetsAt:         resetsAt,
+		ObservedAt:       observedAt,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return document
+}
+
+func TestCodeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T) {
+	pool, _ := newDatabase(t)
+	if err := database.Migrate(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+	user, project, provider := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	key := "11111111-1111-4111-8111-111111111111"
+	healthy := "a1111111-1111-4111-8111-111111111111"
+	low := "b2222222-2222-4222-8222-222222222222"
+	unknown := "c3333333-3333-4333-8333-333333333333"
+	stale := "d4444444-4444-4444-8444-444444444444"
+	exhausted := "e5555555-5555-4555-8555-555555555555"
+	shareA := "f6666666-6666-4666-8666-666666666666"
+	shareB := "a7777777-7777-4777-8777-777777777777"
+	base := time.Now().UTC().Truncate(time.Second)
+	reset := base.Add(2 * time.Hour)
+	observed := base.Add(-time.Minute)
+	accounts := []struct {
+		id        string
+		principal string
+		allowance []byte
+	}{
+		{healthy, "band-healthy", bandAllowanceJSON(t, 75, &reset, observed)},
+		{low, "band-low", bandAllowanceJSON(t, 5, &reset, observed)},
+		{unknown, "band-unknown", nil},
+		{stale, "band-stale", bandAllowanceJSON(t, 90, nil, base.Add(-2*time.Hour))},
+		{exhausted, "band-exhausted", bandAllowanceJSON(t, 0, &reset, observed)},
+		{shareA, "band-share-a", bandAllowanceJSON(t, 75, &reset, observed)},
+		{shareB, "band-share-b", bandAllowanceJSON(t, 60, &reset, observed)},
+	}
+	poolMain, poolNoHealthy, poolShare := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	routes := []struct {
+		id       string
+		slug     string
+		poolID   string
+		ordering bool
+	}{
+		{"22222222-2222-4222-8222-222222222222", "band-off", poolMain, false},
+		{"33333333-3333-4333-8333-333333333333", "band-on", poolMain, true},
+		{"44444444-4444-4444-8444-444444444444", "band-no-healthy", poolNoHealthy, true},
+		{"55555555-5555-4555-8555-555555555555", "band-share", poolShare, true},
+	}
+	connections := `{"` + provider + `":{"kind":"plugin","auth_mode":"grant","profile_id":"codex-subscription"}}`
+	statements := []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO olp.users(id, email, display_name, role, etag) VALUES($1, 'band@example.invalid', 'Journey', 'owner', $2)`, []any{user, uuid.NewString()}},
+		{`INSERT INTO olp.projects(id, name, etag, created_by) VALUES($1, 'band-journey', $2, $3)`, []any{project, uuid.NewString(), user}},
+		{`INSERT INTO olp.providers(id, project_id, name, kind, state, configuration, etag, slots_etag, created_by) VALUES($1, $2, 'band-journey', 'plugin', 'active', '{}', $3, $4, $5)`, []any{provider, project, uuid.NewString(), uuid.NewString(), user}},
+		{`INSERT INTO olp.api_keys(id, lookup_id, digest, name, created_by, policy, etag, project_id) VALUES($1, 'band-lookup', '\x00', 'journey', $2, '{"scopes":["inference"]}', $3, $4)`, []any{key, user, uuid.NewString(), project}},
+	}
+	for index, account := range accounts {
+		credential := uuid.NewString()
+		statements = append(statements,
+			struct {
+				sql  string
+				args []any
+			}{`INSERT INTO olp.provider_credentials(id, provider_id, version, principal, plugin_digest, grant_facts) VALUES($1, $2, $3, $4, repeat('0',64), '{}')`, []any{credential, provider, index + 1, account.principal}},
+			struct {
+				sql  string
+				args []any
+			}{`INSERT INTO olp.provider_grants(credential_id) VALUES($1)`, []any{credential}},
+			struct {
+				sql  string
+				args []any
+			}{`INSERT INTO olp.code_accounts(id, project_id, provider_id, credential_id, principal, name, models, allowance, etag, created_by) VALUES($1, $2, $3, $4, $5, $6, '["model"]', $7, $8, $9)`, []any{account.id, project, provider, credential, account.principal, account.principal, account.allowance, uuid.NewString(), user}},
+		)
+	}
+	for _, membership := range []struct {
+		poolID  string
+		name    string
+		members map[string]int64
+	}{
+		{poolMain, "band-main", map[string]int64{healthy: 1, low: 1, unknown: 1}},
+		{poolNoHealthy, "band-no-healthy", map[string]int64{unknown: 1, low: 1, stale: 1, exhausted: 1}},
+		{poolShare, "band-share", map[string]int64{shareA: 3, shareB: 1}},
+	} {
+		statements = append(statements, struct {
+			sql  string
+			args []any
+		}{`INSERT INTO olp.code_pools(id, project_id, name, kind, etag, created_by) VALUES($1, $2, $3, 'shared', $4, $5)`, []any{membership.poolID, project, membership.name, uuid.NewString(), user}})
+		for accountID, weight := range membership.members {
+			statements = append(statements, struct {
+				sql  string
+				args []any
+			}{`INSERT INTO olp.code_pool_accounts(pool_id, account_id, weight) VALUES($1, $2, $3)`, []any{membership.poolID, accountID, weight}})
+		}
+		statements = append(statements, struct {
+			sql  string
+			args []any
+		}{`INSERT INTO olp.code_pool_keys(pool_id, api_key_id) VALUES($1, $2)`, []any{membership.poolID, key}})
+	}
+	bySlug := map[string]codemode.Route{}
+	for _, seeded := range routes {
+		revisionID := uuid.NewString()
+		route := codemode.Route{ID: seeded.id, ProjectID: project, Slug: seeded.slug, PoolID: seeded.poolID, Models: []string{"model"}, Enabled: true, AllowanceOrdering: seeded.ordering, RevisionID: revisionID, Revision: 1, ETag: uuid.NewString()}
+		bySlug[seeded.slug] = route
+		document, err := json.Marshal(route)
+		if err != nil {
+			t.Fatal(err)
+		}
+		statements = append(statements,
+			struct {
+				sql  string
+				args []any
+			}{`INSERT INTO olp.code_routes(id, project_id, slug, draft, etag, created_by) VALUES($1, $2, $3, '{}', $4, $5)`, []any{seeded.id, project, seeded.slug, uuid.NewString(), user}},
+			struct {
+				sql  string
+				args []any
+			}{`INSERT INTO olp.code_route_revisions(id, route_id, revision, document, connections, created_by) VALUES($1, $2, 1, $3, $4, $5)`, []any{revisionID, seeded.id, document, connections, user}},
+			struct {
+				sql  string
+				args []any
+			}{`UPDATE olp.code_routes SET latest_revision_id=$2 WHERE id=$1`, []any{seeded.id, revisionID}},
+		)
+	}
+	for _, statement := range statements {
+		if _, err := pool.Exec(t.Context(), statement.sql, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := &resources.CodeStore{Pool: pool}
+	admit := func(route codemode.Route, conversation string) resources.CodePermit {
+		t.Helper()
+		permit, err := store.Admit(t.Context(), resources.CodeAdmission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: conversation}}, Providers: []string{provider}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return permit
+	}
+	skippedClass := func(decision codemode.Decision, accountID string) codemode.SkipClass {
+		t.Helper()
+		for _, skipped := range decision.Skipped {
+			if skipped.AccountID == accountID {
+				return skipped.Class
+			}
+		}
+		t.Fatalf("decision %+v does not skip %s", decision, accountID)
+		return ""
+	}
+
+	off := admit(bySlug["band-off"], "band-conv-0")
+	if off.Account.ID != low {
+		t.Fatalf("ordering off chose %s, want the weighted score winner %s", off.Account.ID, low)
+	}
+	if decision := codeDecisionForAttempt(t, pool, off.Attempt.ID); decision.Band != nil || decision.Reason != codemode.DecisionChosen {
+		t.Fatalf("ordering off decision = %+v, want no band", decision)
+	}
+
+	on := admit(bySlug["band-on"], "band-conv-0")
+	if on.Account.ID != healthy {
+		t.Fatalf("ordering on chose %s, want the healthy account %s", on.Account.ID, healthy)
+	}
+	decision := codeDecisionForAttempt(t, pool, on.Attempt.ID)
+	if decision.Band == nil || *decision.Band != string(codemode.BandHealthy) ||
+		decision.Evidence == nil || *decision.Evidence != codemode.AllowanceEvidencePassive ||
+		decision.EvidenceObservedAt == nil || !decision.EvidenceObservedAt.Equal(observed) ||
+		skippedClass(decision, low) != codemode.SkipBand || skippedClass(decision, unknown) != codemode.SkipBand {
+		t.Fatalf("ordering on decision = %+v", decision)
+	}
+
+	noneHealthy := admit(bySlug["band-no-healthy"], "band-nohealthy-0")
+	if noneHealthy.Account.ID != unknown && noneHealthy.Account.ID != stale {
+		t.Fatalf("unknown band must beat low and exhausted, chose %s", noneHealthy.Account.ID)
+	}
+	decision = codeDecisionForAttempt(t, pool, noneHealthy.Attempt.ID)
+	if decision.Band == nil || *decision.Band != string(codemode.BandUnknown) || decision.Evidence != nil || decision.EvidenceObservedAt != nil ||
+		skippedClass(decision, low) != codemode.SkipBand || skippedClass(decision, exhausted) != codemode.SkipUnavailable {
+		t.Fatalf("no healthy decision = %+v", decision)
+	}
+
+	wins := map[string]int{}
+	for index := range 40 {
+		wins[admit(bySlug["band-share"], fmt.Sprintf("band-share-%d", index)).Account.ID]++
+	}
+	if wins[shareA]+wins[shareB] != 40 || wins[shareB] < 5 || wins[shareA] < 2*wins[shareB] {
+		t.Fatalf("weights must share roots inside the healthy band, got %v", wins)
+	}
+
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1`, healthy, bandAllowanceJSON(t, 5, &reset, base)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1`, low, bandAllowanceJSON(t, 80, &reset, base)); err != nil {
+		t.Fatal(err)
+	}
+	pinned := admit(bySlug["band-on"], "band-conv-0")
+	if pinned.Account.ID != healthy {
+		t.Fatalf("pinned turn moved to %s after bands flipped", pinned.Account.ID)
+	}
+	if decision = codeDecisionForAttempt(t, pool, pinned.Attempt.ID); decision.Reason != codemode.DecisionPin || decision.Band != nil {
+		t.Fatalf("pinned decision = %+v", decision)
 	}
 }
 
