@@ -180,13 +180,13 @@ OpenCode documents Go as a dollar metered subscription rather than a request cou
 | Signal | Evidence | Source |
 |---|---|---|
 | Per model 5 hour, weekly, and monthly windows derived from a monthly dollar limit | Proven plan rule | [OpenCode Go](https://opencode.ai/docs/go/) |
-| `opencode.allowance` on each response, reporting how much that request counted toward the Go allowance in cents by token category | Proven response field | [OpenCode Inference API cost](https://opencode.ai/v2/docs/console/api/inference/#cost) |
-| `opencode.cost` as the parallel credit funded charge object, separate from `opencode.allowance` | Proven response field | [OpenCode Inference API cost](https://opencode.ai/v2/docs/console/api/inference/#cost) |
+| `opencode.allowance` on each response, reporting the amount counted toward the Go allowance in dollars | Proven response field | [OpenCode Inference API cost](https://opencode.ai/v2/docs/console/api/inference/#cost) |
+| `usage.cost` as the dollar charge, with `opencode.list_cost` as the list price and `opencode.tokens` as billed token counts | Proven response field | [OpenCode Inference API cost](https://opencode.ai/v2/docs/console/api/inference/#cost) |
 | Current usage in the OpenCode Console | Proven human surface | [OpenCode Go](https://opencode.ai/docs/go/) |
 | An API key endpoint that returns remaining 5 hour, weekly, or monthly allowance with reset times | None documented on the fetched Go or Inference API pages | [OpenCode Go](https://opencode.ai/docs/go/) and [OpenCode Inference API](https://opencode.ai/v2/docs/console/api/inference/) |
 | A quota remaining or reset response header | None documented on the fetched Go or Inference API pages | [OpenCode Go](https://opencode.ai/docs/go/) and [OpenCode Inference API](https://opencode.ai/v2/docs/console/api/inference/) |
 
-The shape of that response field limits what OLP can infer. OpenCode documents a charge for the request that just ran, not a remaining balance, not a window start, and not a reset timestamp. Source is [OpenCode Inference API cost](https://opencode.ai/v2/docs/console/api/inference/#cost)
+The cost fields and billing source values were checked on 2026-11-05 against the [OpenCode Inference API](https://opencode.ai/v2/docs/console/api/inference/#cost). The shape of that response field limits what OLP can infer. OpenCode documents a charge for the request that just ran, not a remaining balance, not a window start, and not a reset timestamp. Source is [OpenCode Inference API cost](https://opencode.ai/v2/docs/console/api/inference/#cost)
 
 One transport detail matters for OLP even though it is not a quota field. OpenCode asks Go clients to send a stable session ID in `x-opencode-session` for routing and prompt caching, and the OLP code mode guide already treats OpenCode session headers as conversation identity. Sources are [OpenCode Go](https://opencode.ai/docs/go/) and the [OLP code mode guide](../use/code-mode.md)
 

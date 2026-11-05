@@ -12,11 +12,6 @@ func TestEarliestRecoveryPicksSoonestFutureReset(t *testing.T) {
 	past := now.Add(-time.Hour)
 	soon := now.Add(10 * time.Minute)
 	later := now.Add(time.Hour)
-	allowance := &codemode.Allowance{
-		ResetsAt:         &later,
-		TokenObservation: &codemode.CountObservation{ResetsAt: &past, ObservedAt: now},
-		Windows:          []codemode.AllowanceWindow{{ResetsAt: &later}},
-	}
 	got := codemode.EarliestRecovery(now, &later, &past, nil, &soon)
 	if got == nil || !got.Equal(soon) {
 		t.Fatalf("EarliestRecovery = %v", got)
@@ -24,19 +19,7 @@ func TestEarliestRecoveryPicksSoonestFutureReset(t *testing.T) {
 	if got := codemode.EarliestRecovery(now, &past, nil); got != nil {
 		t.Fatalf("EarliestRecovery(past) = %v", got)
 	}
-	fromAllowance := codemode.AllowanceResets(allowance)
-	foundPast := false
-	for _, reset := range fromAllowance {
-		if reset != nil && reset.Equal(past) {
-			foundPast = true
-		}
-	}
-	if !foundPast || len(fromAllowance) != 3 {
-		t.Fatalf("AllowanceResets = %v", fromAllowance)
-	}
-	if got := codemode.AllowanceResets(nil); len(got) != 0 {
-		t.Fatalf("AllowanceResets(nil) = %v", got)
-	}
+
 }
 
 func TestRefusalRetryAfterRoundsUpWithOneSecondFloor(t *testing.T) {
@@ -82,8 +65,8 @@ func TestBlockingDeadlineIgnoresNonBlockingEarlierResets(t *testing.T) {
 	if other == nil || !other.Equal(middle) {
 		t.Fatalf("BlockingDeadline(other) = %v, want %v", other, middle)
 	}
-	if got := codemode.EarliestUsefulRecovery(bandNow, deadline, other); got == nil || !got.Equal(middle) {
-		t.Fatalf("EarliestUsefulRecovery = %v, want %v", got, middle)
+	if got := codemode.EarliestRecovery(bandNow, deadline, other); got == nil || !got.Equal(middle) {
+		t.Fatalf("EarliestRecovery = %v, want %v", got, middle)
 	}
 }
 

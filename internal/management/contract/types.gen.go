@@ -8835,7 +8835,7 @@ type CodeAccount struct {
 	// AllowanceReadRequestedAt When an operator last requested an active allowance read. The worker clears it once that read completes.
 	AllowanceReadRequestedAt nullable.Nullable[time.Time] `json:"allowance_read_requested_at,omitempty"`
 
-	// AllowanceSignal Allowance signal qualification of the account's provider profile. Proven signals may order new conversation roots and support an active allowance read. Remains-unqualified names a signal whose schema is not pinned yet. None means the profile has no qualified allowance signal.
+	// AllowanceSignal Allowance signal qualification of the account's provider profile. Proven passive signals may order new conversation roots. Active reads require separate live qualification. Remains-unqualified names a signal that has not completed qualification. None means the profile has no qualified allowance signal.
 	AllowanceSignal CodeAccountAllowanceSignal `json:"allowance_signal"`
 
 	// AllowanceSignalReason Why the allowance signal is not qualified, or null when no reason is recorded.
@@ -8880,7 +8880,7 @@ type CodeAccount struct {
 // CodeAccountAdapter The subscription family of the account's provider profile: Codex, Claude, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.
 type CodeAccountAdapter string
 
-// CodeAccountAllowanceSignal Allowance signal qualification of the account's provider profile. Proven signals may order new conversation roots and support an active allowance read. Remains-unqualified names a signal whose schema is not pinned yet. None means the profile has no qualified allowance signal.
+// CodeAccountAllowanceSignal Allowance signal qualification of the account's provider profile. Proven passive signals may order new conversation roots. Active reads require separate live qualification. Remains-unqualified names a signal that has not completed qualification. None means the profile has no qualified allowance signal.
 type CodeAccountAllowanceSignal string
 
 // CodeAccountGrantState Grant authority is independent of serving health and allowance. A rejected refresh lapses the grant and requires enrollment again.
@@ -8981,7 +8981,7 @@ type CodeAllowanceWindowWindow string
 type CodeAttempt struct {
 	AccountId nullable.Nullable[openapi_types.UUID] `json:"account_id"`
 
-	// AllowanceCharge Vendor-reported per-request allowance charge as reported (OpenCode Go usage.opencode object, with usage.cost when reported). Its allowance value counts toward plan usage limits in dollars of the monthly limit. Null means no charge was observed; it is never a remaining allowance and never an admission or ordering input.
+	// AllowanceCharge Validated per-request OpenCode Go billing and numeric usage fields, with usage.cost when reported. The allowance value counts toward plan usage limits in dollars of the monthly limit. Null means no supported charge was observed; it is never a remaining allowance and never an admission or ordering input.
 	AllowanceCharge nullable.Nullable[map[string]interface{}] `json:"allowance_charge"`
 	ApiKeyId        openapi_types.UUID                        `json:"api_key_id"`
 	Attribution     *map[string]string                        `json:"attribution,omitempty"`

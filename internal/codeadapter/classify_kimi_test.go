@@ -7,7 +7,6 @@ import (
 
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/upstream"
 )
 
 func kimiVendor(t *testing.T) (codeadapter.Vendor, codeadapter.Endpoint, codeadapter.Endpoint) {
@@ -165,7 +164,7 @@ func TestClassifyKimiNearMissMessagesAndShapesStayUnclassified(t *testing.T) {
 	}
 }
 
-func TestClassifyKimiStructuredQuotaCodesAreProvenNotExecuted(t *testing.T) {
+func TestClassifyKimiStructuredQuotaCodesKeepCooldownWithoutReplay(t *testing.T) {
 	// Sources: MoonshotAI/kimi-code@df90d90 (fetched 2026-11-05), classifyKimiQuotaError keys on code or type equal to exceeded_current_quota_error at HTTP 429 while the base OpenAI decoder also treats insufficient_quota and the Anthropic decoder reads the nested error type, and https://www.kimi.com/code/docs/en/kimi-code/error-reference.html (fetched 2026-11-05) for the 429 quota context. Member sets are pinned to exactly what those decoders read, so message wording is required to exist but never matched on this path
 	vendor, chat, messages := kimiVendor(t)
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
@@ -182,18 +181,16 @@ func TestClassifyKimiStructuredQuotaCodesAreProvenNotExecuted(t *testing.T) {
 		"messages type insufficient":  {messages, []byte(`{"type":"error","error":{"type":"insufficient_quota","message":"quota exceeded"}}`), "kimi_insufficient_quota"},
 	} {
 		got, ok := vendor.Classify(attempt.endpoint, 429, attempt.body, http.Header{}, now)
-		if !ok || got.Class != codeadapter.CooldownQuota || got.Scope != codeadapter.ScopeCredential || !got.RetryAt.Equal(now.Add(time.Minute)) || got.Envelope != attempt.envelope || !got.NotExecuted || got.SuppressFallback {
+		if !ok || got.Class != codeadapter.CooldownQuota || got.Scope != codeadapter.ScopeCredential || !got.RetryAt.Equal(now.Add(time.Minute)) || got.Envelope != attempt.envelope || got.NotExecuted || got.SuppressFallback {
 			t.Fatalf("Classify(%s) = %+v, %v", name, got, ok)
 		}
-		rejection, ok := vendor.InitialRejection(attempt.endpoint, 429, attempt.body, http.Header{}, now)
-		if !ok || rejection.Class != upstream.RateLimit || rejection.Envelope != attempt.envelope || !rejection.RetryAt.Equal(now.Add(time.Minute)) {
-			t.Fatalf("InitialRejection(%s) = %+v, %v", name, rejection, ok)
+		if rejection, ok := vendor.InitialRejection(attempt.endpoint, 429, attempt.body, http.Header{}, now); ok {
+			t.Fatalf("InitialRejection(%s) = %+v, want no replay", name, rejection)
 		}
 	}
 }
 
-func TestClassifyKimiStructuredQuotaProofIsBoundToEndpointProtocol(t *testing.T) {
-	// Source: MoonshotAI/kimi-code@df90d90 (fetched 2026-11-05), the OpenAI decoder reads the chat error code and type while the Anthropic decoder reads only the nested messages error type, so each envelope proves non execution only on its own endpoint protocol and a crossed envelope keeps at most its cooldown without replay
+func TestClassifyKimiStructuredQuotaOnDifferentEndpointKeepsCooldownWithoutReplay(t *testing.T) {
 	vendor, chat, messages := kimiVendor(t)
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
 	for name, attempt := range map[string]struct {
@@ -214,8 +211,7 @@ func TestClassifyKimiStructuredQuotaProofIsBoundToEndpointProtocol(t *testing.T)
 	}
 }
 
-func TestKimiInitialRejectionOnlyForStructuredQuotaCodes(t *testing.T) {
-	// Sources: MoonshotAI/kimi-code@df90d90 (fetched 2026-11-05), structured code only and message wording refused, and https://www.kimi.com/code/docs/en/kimi-code/error-reference.html (fetched 2026-11-05), exact HTTP 429 quota messages, so message-only quota keeps its cooldown but never replays and any member outside the pinned decoder sets kills the proof
+func TestKimiInitialRejectionHoldsUnprovenEnvelopes(t *testing.T) {
 	vendor, chat, messages := kimiVendor(t)
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
 	for name, attempt := range map[string]struct {

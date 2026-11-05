@@ -3,10 +3,12 @@ package resources
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/codeallowance"
+	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -47,4 +49,58 @@ func (s *CodeStore) CompleteAllowanceRead(ctx context.Context, account string, r
 		allowance_read_requested_at=CASE WHEN allowance_read_requested_at<=$2 THEN NULL ELSE allowance_read_requested_at END
 		WHERE id=$1`, account, readAt)
 	return err
+}
+
+func (s *CodeStore) InvalidateActiveAllowance(ctx context.Context, account string) error {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var document []byte
+	if err := tx.QueryRow(ctx, `SELECT allowance FROM olp.code_accounts WHERE id=$1 FOR UPDATE`, account).Scan(&document); err != nil {
+		return err
+	}
+	if len(document) == 0 {
+		return tx.Commit(ctx)
+	}
+	var current codemode.Allowance
+	if err := json.Unmarshal(document, &current); err != nil {
+		return err
+	}
+	activePrimary := slices.ContainsFunc(current.Windows, func(w codemode.AllowanceWindow) bool {
+		return w.LimitID == "codex" && w.Window == "primary" && w.EffectiveEvidence() == codemode.AllowanceEvidenceActive
+	})
+	passivePrimary := slices.IndexFunc(current.Windows, func(w codemode.AllowanceWindow) bool {
+		return w.LimitID == "codex" && w.Window == "primary" && w.EffectiveEvidence() == codemode.AllowanceEvidencePassive && w.EffectiveUnit() == codemode.AllowanceUnitPercent
+	})
+	percent, reset := func() (*float64, *time.Time) {
+		if passivePrimary >= 0 {
+			return &current.Windows[passivePrimary].RemainingPercent, current.Windows[passivePrimary].ResetsAt
+		}
+		if activePrimary {
+			return nil, nil
+		}
+		return current.RemainingPercent, current.ResetsAt
+	}()
+	windows := slices.Collect(func(yield func(codemode.AllowanceWindow) bool) {
+		for _, w := range current.Windows {
+			if w.EffectiveEvidence() != codemode.AllowanceEvidenceActive && !yield(w) {
+				return
+			}
+		}
+	})
+	cleared := codemode.Allowance{
+		Windows: windows, Credits: current.Credits, RemainingTokens: current.RemainingTokens, RemainingRequests: current.RemainingRequests,
+		TokenObservation: current.TokenObservation, RequestObservation: current.RequestObservation,
+		RemainingPercent: percent, ResetsAt: reset, ObservedAt: current.ObservedAt,
+	}
+	encoded, err := json.Marshal(cleared)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1`, account, encoded); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }

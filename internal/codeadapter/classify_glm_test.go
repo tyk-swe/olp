@@ -7,7 +7,6 @@ import (
 
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/upstream"
 )
 
 func glmVendor(t *testing.T) (codeadapter.Vendor, codeadapter.Endpoint) {
@@ -45,7 +44,7 @@ func TestClassifyGLMQuotaCodesAreCredentialQuotaWithTemplateReset(t *testing.T) 
 	}
 	for _, tc := range cases {
 		got, ok := vendor.Classify(endpoint, 429, glmBody(tc.code, tc.message), http.Header{"Retry-After": {"99999"}}, now)
-		if !ok || got.Class != codeadapter.CooldownQuota || got.Scope != codeadapter.ScopeCredential || !got.RetryAt.Equal(reset) || got.Envelope != "glm_"+tc.code || !got.NotExecuted {
+		if !ok || got.Class != codeadapter.CooldownQuota || got.Scope != codeadapter.ScopeCredential || !got.RetryAt.Equal(reset) || got.Envelope != "glm_"+tc.code || got.NotExecuted {
 			t.Fatalf("Classify(%s) = %+v, %v", tc.code, got, ok)
 		}
 	}
@@ -161,15 +160,13 @@ func TestClassifyGLMOtherCodesStayUnclassified(t *testing.T) {
 	}
 }
 
-func TestGLMInitialRejectionOnlyForProvenQuotaEnvelopes(t *testing.T) {
-	// Source: https://docs.z.ai/api-reference/api-code (fetched 2026-11-05), code 1308 pre-generation 429 envelope; complete unary body before any content is what gateway recover() hands over.
+func TestGLMInitialRejectionHoldsUnprovenQuotaEnvelopes(t *testing.T) {
 	vendor, endpoint := glmVendor(t)
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
 	reset := now.Add(2 * time.Hour)
 	proven := glmBody("1308", "Usage limit reached for 5 hours. Your limit will reset at "+reset.Format(time.RFC3339))
-	rejection, ok := vendor.InitialRejection(endpoint, 429, proven, http.Header{}, now)
-	if !ok || rejection.Class != upstream.RateLimit || rejection.Envelope != "glm_1308" || !rejection.RetryAt.Equal(reset) {
-		t.Fatalf("InitialRejection(proven) = %+v, %v", rejection, ok)
+	if rejection, ok := vendor.InitialRejection(endpoint, 429, proven, http.Header{}, now); ok {
+		t.Fatalf("InitialRejection(quota) = %+v, want no replay", rejection)
 	}
 	for name, body := range map[string][]byte{
 		"extra root member": []byte(`{"error":{"code":"1308","message":"Usage limit reached for 5 hours. Your limit will reset at 2026-11-05T12:00:00Z"},"extra":1}`),

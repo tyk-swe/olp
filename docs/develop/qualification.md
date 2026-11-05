@@ -157,8 +157,8 @@ profile, model, protocol, transport, result, and evidence, where
 evidence is always `live`, plus a checks list. The inference check
 passes only when the journey returns success and attempt diagnostics
 show the settled attempt. The Codex allowance check passes only when
-account diagnostics carry allowance windows after inference, or after
-an active allowance read the lane requests through the management API.
+account diagnostics carry passive allowance windows after inference. Active
+reads remain disabled pending live qualification.
 Other adapters record `no_signal` for allowance in stage one. The band
 check needs the second Codex account and passes only when a selection
 decision carries allowance evidence. Without the second account it

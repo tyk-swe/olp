@@ -7,8 +7,6 @@
     listCodeRoutes,
     listCodeBudgets,
     publishCodeRoute,
-    requestCodeAccountAllowanceRead,
-    type CodeAccount,
     type CodeRoute,
     type CodeClientConfiguration,
     type CodeClientSelection
@@ -28,7 +26,6 @@
     adapterLabel,
     allowanceEvidenceLabel,
     allowanceWindowSummary,
-    canRequestAllowanceRead,
     cooldownSummary,
     extraUsageLabel,
     showsExtraUsage,
@@ -47,7 +44,6 @@
   import { managementSections, type CodeManagementKind } from './sections';
 
   const publishIntent = useMutationIntent();
-  const allowanceReadIntent = useMutationIntent();
 
   let {
     projectId,
@@ -196,34 +192,6 @@
       busy = false;
     }
   }
-  async function readAllowance(account: CodeAccount) {
-    if (busy || !allowed || !canRequestAllowanceRead(account.adapter)) return;
-    busy = true;
-    error = '';
-    notice = '';
-    let committed = false;
-    try {
-      const submission = allowanceReadIntent.prepare({ id: account.id });
-      await requestCodeAccountAllowanceRead(
-        submission.input,
-        submission.requestId
-      );
-      allowanceReadIntent.reset();
-      committed = true;
-      notice =
-        'Allowance read requested. The worker reads the provider allowance in the background, never on an inference request.';
-      await client.invalidateQueries(
-        { queryKey: codeKeys.root },
-        { throwOnError: true }
-      );
-    } catch (e) {
-      error = committed
-        ? `Allowance read requested, but refreshing failed. ${errorMessage(e)}`
-        : mutationError(e);
-    } finally {
-      busy = false;
-    }
-  }
 </script>
 
 <div class="management">
@@ -301,13 +269,7 @@
                 onclick={() =>
                   (editing = { kind: 'accounts', current: account })}
                 >Edit account</button
-              >{#if canRequestAllowanceRead(account.adapter)}<button
-                  class="button button-secondary"
-                  type="button"
-                  disabled={!!editing || busy}
-                  onclick={() => readAllowance(account)}
-                  >Read allowance now</button
-                >{/if}{/if}
+              >{/if}
           </div>
           <dl>
             <dt>Subscription</dt>
@@ -318,11 +280,7 @@
             {/if}
             <dt>Ordering signal</dt>
             <dd>
-              {orderingSignalLabel(
-                account.allowance_signal,
-                true,
-                account.adapter
-              )}
+              {orderingSignalLabel(account.allowance_signal, true)}
             </dd>
             <dt>Account / principal</dt>
             <dd>{account.id} / {account.principal}</dd>
@@ -412,19 +370,6 @@
                     : 'Unknown'}{/if}
               {:else}Unknown — no provider observation{/if}
             </dd>
-            {#if canRequestAllowanceRead(account.adapter)}
-              <dt>Active allowance read</dt>
-              <dd>
-                {#if account.allowance_read_requested_at}
-                  Requested {formatDate(account.allowance_read_requested_at)},
-                  waiting for the worker.
-                {:else if account.allowance_read_at}
-                  Last read {formatDate(account.allowance_read_at)}.
-                {:else}
-                  No active read yet.
-                {/if}
-              </dd>
-            {/if}
             {#if account.allowance?.credits}
               <dt>Provider-reported credits</dt>
               <dd>

@@ -17,18 +17,19 @@ const (
 )
 
 type AllowanceSignalInfo struct {
-	Signal AllowanceSignal
-	Reason string
+	Signal          AllowanceSignal
+	Reason          string
+	ActiveQualified bool
 }
 
 func (info AllowanceSignalInfo) QualifiedForActiveRead() bool {
-	return info.Signal == AllowanceSignalProven
+	return info.ActiveQualified
 }
 
 var allowanceSignals = map[string]AllowanceSignalInfo{
 	codexauth.ProfileID:        {Signal: AllowanceSignalProven},
-	codeplans.MiniMaxProfile:   {Signal: AllowanceSignalProven, Reason: "vendor-client-schema"},
-	codeplans.MiniMaxCNProfile: {Signal: AllowanceSignalProven, Reason: "vendor-client-schema"},
+	codeplans.MiniMaxProfile:   {Signal: AllowanceSignalRemainsUnqualified, Reason: "live-qualification-pending"},
+	codeplans.MiniMaxCNProfile: {Signal: AllowanceSignalRemainsUnqualified, Reason: "live-qualification-pending"},
 }
 
 func (v Vendor) AllowanceSignal(profileID string) AllowanceSignalInfo {

@@ -84,10 +84,17 @@ func (a Allowance) Merge(incoming Allowance) Allowance {
 		}
 		return a.Credits
 	}()
-	primary := slices.IndexFunc(windows, func(w AllowanceWindow) bool { return w.LimitID == "codex" && w.Window == allowancePrimary })
+	primary := slices.IndexFunc(windows, func(w AllowanceWindow) bool {
+		return w.LimitID == "codex" && w.Window == allowancePrimary && w.EffectiveEvidence() == AllowanceEvidencePassive
+	})
 	percent, reset := func() (*float64, *time.Time) {
 		if primary >= 0 && windows[primary].EffectiveUnit() == AllowanceUnitPercent {
 			return &windows[primary].RemainingPercent, windows[primary].ResetsAt
+		}
+		if slices.ContainsFunc(windows, func(w AllowanceWindow) bool {
+			return w.LimitID == "codex" && w.Window == allowancePrimary && w.EffectiveEvidence() == AllowanceEvidenceActive
+		}) {
+			return nil, nil
 		}
 		return a.RemainingPercent, a.ResetsAt
 	}()
@@ -104,7 +111,9 @@ func allowanceWindows(a Allowance) []AllowanceWindow {
 func mergedAllowanceWindows(current, incoming []AllowanceWindow) iter.Seq[AllowanceWindow] {
 	return func(yield func(AllowanceWindow) bool) {
 		for _, old := range current {
-			index := slices.IndexFunc(incoming, func(w AllowanceWindow) bool { return old.LimitID == w.LimitID && old.Window == w.Window })
+			index := slices.IndexFunc(incoming, func(w AllowanceWindow) bool {
+				return old.LimitID == w.LimitID && old.Window == w.Window && old.EffectiveEvidence() == w.EffectiveEvidence()
+			})
 			if index < 0 || !incoming[index].ObservedAt.After(old.ObservedAt) {
 				if !yield(old.normalized()) {
 					return
@@ -118,7 +127,9 @@ func mergedAllowanceWindows(current, incoming []AllowanceWindow) iter.Seq[Allowa
 			}
 		}
 		for _, next := range incoming {
-			if slices.ContainsFunc(current, func(old AllowanceWindow) bool { return old.LimitID == next.LimitID && old.Window == next.Window }) {
+			if slices.ContainsFunc(current, func(old AllowanceWindow) bool {
+				return old.LimitID == next.LimitID && old.Window == next.Window && old.EffectiveEvidence() == next.EffectiveEvidence()
+			}) {
 				continue
 			}
 			if !yield(next.normalized()) {
@@ -242,8 +253,6 @@ func (c Credits) Validate() error {
 	return nil
 }
 
-// Normalize orders windows by limit and window, and mirrors the Codex
-// primary window into the top-level remaining percentage and reset time.
 func (a *Allowance) Normalize() {
 	for index, w := range a.Windows {
 		a.Windows[index] = w.normalized()
@@ -252,7 +261,7 @@ func (a *Allowance) Normalize() {
 		return strings.Compare(x.LimitID+":"+x.Window, y.LimitID+":"+y.Window)
 	})
 	for _, w := range a.Windows {
-		if w.LimitID == "codex" && w.Window == allowancePrimary && w.Unit == AllowanceUnitPercent {
+		if w.LimitID == "codex" && w.Window == allowancePrimary && w.Unit == AllowanceUnitPercent && w.EffectiveEvidence() == AllowanceEvidencePassive {
 			remaining := w.RemainingPercent
 			a.RemainingPercent, a.ResetsAt = &remaining, w.ResetsAt
 		}
@@ -265,7 +274,7 @@ func (a Allowance) validateObservations() error {
 	}
 	seen := map[string]bool{}
 	for _, w := range a.Windows {
-		key := w.LimitID + ":" + w.Window
+		key := w.LimitID + ":" + w.Window + ":" + string(w.EffectiveEvidence())
 		if seen[key] || w.ObservedAt.After(a.ObservedAt) {
 			return fmt.Errorf("invalid provider allowance observation")
 		}

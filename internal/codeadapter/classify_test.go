@@ -46,6 +46,9 @@ func TestClassifyCodexUsageLimitFallsBackToResetsInSecondsThenRetryAfterThenMinu
 	}{
 		{"resets_in_seconds beats shorter retry-after", `{"error":{"type":"usage_limit_reached","resets_in_seconds":600}}`, http.Header{"Retry-After": {"30"}}, now.Add(600 * time.Second)},
 		{"single retry-after beats minute", `{"error":{"type":"usage_limit_reached"}}`, http.Header{"Retry-After": {"300"}}, now.Add(300 * time.Second)},
+		{"short retry-after beats minute", `{"error":{"type":"usage_limit_reached"}}`, http.Header{"Retry-After": {"7"}}, now.Add(7 * time.Second)},
+		{"zero retry-after permits immediate retry", `{"error":{"type":"usage_limit_reached"}}`, http.Header{"Retry-After": {"0"}}, now},
+		{"short vendor reset beats minute", `{"error":{"type":"usage_limit_reached","resets_in_seconds":12}}`, http.Header{}, now.Add(12 * time.Second)},
 		{"multiple retry-after values ignored", `{"error":{"type":"usage_limit_reached"}}`, http.Header{"Retry-After": {"300", "600"}}, now.Add(time.Minute)},
 		{"minute fallback", `{"error":{"type":"usage_limit_reached"}}`, http.Header{}, now.Add(time.Minute)},
 		{"past reset ignored", `{"error":{"type":"usage_limit_reached","resets_at":` + itoa(now.Add(-time.Hour).Unix()) + `}}`, http.Header{}, now.Add(time.Minute)},
@@ -135,4 +138,32 @@ func TestInitialRejectionKeepsCodexEnvelopesAndClasses(t *testing.T) {
 
 func itoa(value int64) string {
 	return strconv.FormatInt(value, 10)
+}
+
+func TestUnqualifiedQuotaEnvelopesDoNotAuthorizeReplay(t *testing.T) {
+	for _, tc := range []struct {
+		adapter codemode.Adapter
+		body    string
+	}{
+		{codemode.AdapterZAICoding, `{"error":{"code":"1308","message":"usage limit reached"}}`},
+		{codemode.AdapterKimiCode, `{"error":{"message":"quota exceeded","type":"rate_limit_error","code":"exceeded_current_quota_error"}}`},
+		{codemode.AdapterQwenTokenPlan, `{"error":{"message":"Your token-plan quota has been exhausted.","type":"insufficient_quota","param":null,"code":"insufficient_quota"}}`},
+	} {
+		vendor, ok := codeadapter.Lookup(tc.adapter)
+		if !ok {
+			t.Fatalf("adapter %s unavailable", tc.adapter)
+		}
+		endpoint, ok := vendor.Endpoint("v1/chat/completions")
+		if !ok {
+			t.Fatalf("adapter %s chat endpoint unavailable", tc.adapter)
+		}
+		now := time.Unix(1_800_000_000, 0).UTC()
+		classification, ok := vendor.Classify(endpoint, 429, []byte(tc.body), http.Header{}, now)
+		if !ok || classification.Class != codeadapter.CooldownQuota || classification.NotExecuted {
+			t.Errorf("%s classification = %+v, %v", tc.adapter, classification, ok)
+		}
+		if rejection, ok := vendor.InitialRejection(endpoint, 429, []byte(tc.body), http.Header{}, now); ok {
+			t.Errorf("%s unexpectedly authorizes replay: %+v", tc.adapter, rejection)
+		}
+	}
 }

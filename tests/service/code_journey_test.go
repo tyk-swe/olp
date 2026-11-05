@@ -228,7 +228,7 @@ func TestCodeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T) {
 			struct {
 				sql  string
 				args []any
-			}{`INSERT INTO olp.provider_credentials(id, provider_id, version, principal, plugin_digest, grant_facts) VALUES($1, $2, $3, $4, repeat('0',64), '{}')`, []any{credential, provider, index + 1, account.principal}},
+			}{`INSERT INTO olp.provider_credentials(id, provider_id, version, principal, plugin_digest, grant_facts, profile_id) VALUES($1, $2, $3, $4, repeat('0',64), '{}', 'codex-subscription')`, []any{credential, provider, index + 1, account.principal}},
 			struct {
 				sql  string
 				args []any
@@ -363,6 +363,66 @@ func TestCodeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T) {
 	if decision = codeDecisionForAttempt(t, pool, pinned.Attempt.ID); decision.Reason != codemode.DecisionPin || decision.Band != nil || decision.Evidence != nil || decision.EvidenceObservedAt != nil {
 		t.Fatalf("pinned decision = %+v", decision)
 	}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=(id=$1)`, healthy); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_route_revisions SET connections=jsonb_set(connections,ARRAY[$1,'profile_revision'],to_jsonb(repeat('0',64)),true)`, provider); err != nil {
+		t.Fatal(err)
+	}
+	window := func(family string, unit codemode.AllowanceUnit, evidence codemode.AllowanceEvidence, remainingPercent float64, remainingValue *float64, observation time.Time, resetAt *time.Time) codemode.AllowanceWindow {
+		usedPercent := func() float64 {
+			if unit == codemode.AllowanceUnitPercent {
+				return 100 - remainingPercent
+			}
+			return 0
+		}()
+		return codemode.AllowanceWindow{LimitID: family, Window: "primary", Unit: unit, Evidence: evidence, UsedPercent: usedPercent, RemainingPercent: remainingPercent, RemainingValue: remainingValue, ObservedAt: observation, ResetsAt: resetAt}
+	}
+	cases := []struct {
+		name      string
+		allowance codemode.Allowance
+		off, on   bool
+	}{
+		{"old active mirror", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidenceActive, 0, nil, observed, &reset)}, RemainingPercent: new(float64(0)), ResetsAt: &reset, ObservedAt: observed}, true, true},
+		{"positive count", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitCount, codemode.AllowanceEvidencePassive, 0, new(float64(9)), observed, &reset)}, ObservedAt: observed}, true, true},
+		{"positive credits", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitCredits, codemode.AllowanceEvidencePassive, 0, new(float64(9)), observed, &reset)}, ObservedAt: observed}, true, true},
+		{"positive cents", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitCents, codemode.AllowanceEvidencePassive, 0, new(float64(9)), observed, &reset)}, ObservedAt: observed}, true, true},
+		{"fresh exhausted", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, observed, &reset)}, ObservedAt: observed}, false, false},
+		{"stale no reset", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, base.Add(-time.Hour), nil)}, ObservedAt: base.Add(-time.Hour)}, false, true},
+		{"stale future reset", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, base.Add(-time.Hour), &reset)}, ObservedAt: base.Add(-time.Hour)}, false, true},
+		{"stale token count", codemode.Allowance{RemainingTokens: new(int64(0)), TokenObservation: &codemode.CountObservation{ObservedAt: base.Add(-time.Hour), ResetsAt: &reset}, ObservedAt: observed}, false, true},
+		{"fresh request count", codemode.Allowance{RemainingRequests: new(int64(0)), RequestObservation: &codemode.CountObservation{ObservedAt: observed, ResetsAt: &reset}, ObservedAt: observed}, false, false},
+		{"unrelated family", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("special_model", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, observed, &reset)}, ObservedAt: observed}, false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			document, err := json.Marshal(tc.allowance)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1`, healthy, document); err != nil {
+				t.Fatal(err)
+			}
+			for _, check := range []struct {
+				slug      string
+				available bool
+			}{{"band-off", tc.off}, {"band-on", tc.on}} {
+				route := bySlug[check.slug]
+				permit, err := store.Admit(t.Context(), resources.CodeAdmission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{provider}})
+				if check.available && (err != nil || permit.Account.ID != healthy) {
+					t.Fatalf("%s admission = %+v, %v", check.slug, permit, err)
+				}
+				if !check.available && err == nil {
+					t.Fatalf("%s admitted exhausted account %+v", check.slug, permit)
+				}
+				offers, err := resources.CodeOffers(t.Context(), pool, route.RevisionID)
+				if err != nil || (len(offers) > 0) != check.available {
+					t.Fatalf("%s offers = %+v, %v; available %t", check.slug, offers, err, check.available)
+				}
+			}
+		})
+	}
+
 }
 
 func attemptAllowanceCharge(t *testing.T, pool *pgxpool.Pool, attemptID string) map[string]any {
@@ -541,7 +601,7 @@ func TestCodeCooldownClassesScopeSelectionNeverShortenAndNameRefusalRecovery(t *
 	}
 }
 
-func TestCodeActiveAllowanceReadBandsLikePassive(t *testing.T) {
+func TestCodeActiveAllowanceDoesNotAffectBands(t *testing.T) {
 	pool, _ := newDatabase(t)
 	if err := database.Migrate(t.Context(), pool); err != nil {
 		t.Fatal(err)
@@ -604,7 +664,7 @@ func TestCodeActiveAllowanceReadBandsLikePassive(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := &resources.CodeStore{Pool: pool}
-	due, err := store.DueAllowanceReads(t.Context(), base, 50, codeadapter.QualifiedProfileIDs())
+	due, err := store.DueAllowanceReads(t.Context(), base, 50, []string{"codex-subscription"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -630,29 +690,45 @@ func TestCodeActiveAllowanceReadBandsLikePassive(t *testing.T) {
 	if requestedAt != nil || readAt == nil || !readAt.Equal(base) {
 		t.Fatalf("completed read state requested %v read %v", requestedAt, readAt)
 	}
-	due, err = store.DueAllowanceReads(t.Context(), base, 50, codeadapter.QualifiedProfileIDs())
+	due, err = store.DueAllowanceReads(t.Context(), base, 50, []string{"codex-subscription"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(due) != 1 || due[0].Account.ID != unknown {
 		t.Fatalf("fresh active evidence must not be due again, got %+v", due)
 	}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, unknown); err != nil {
+		t.Fatal(err)
+	}
 	permit, err := store.Admit(t.Context(), resources.CodeAdmission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: "active-conv-0"}}, Providers: []string{provider}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if permit.Account.ID != active {
-		t.Fatalf("active healthy account must win over unknown, chose %s", permit.Account.ID)
+		t.Fatalf("chosen account = %s", permit.Account.ID)
 	}
 	decision := codeDecisionForAttempt(t, pool, permit.Attempt.ID)
-	if decision.Band == nil || *decision.Band != codemode.BandHealthy ||
-		decision.Evidence == nil || *decision.Evidence != codemode.AllowanceEvidenceActive ||
-		decision.EvidenceObservedAt == nil || !decision.EvidenceObservedAt.Equal(base) {
+	if decision.Band == nil || *decision.Band != codemode.BandUnknown || decision.Evidence != nil || decision.EvidenceObservedAt != nil {
 		t.Fatalf("active band decision = %+v", decision)
 	}
+	passive := codemode.Allowance{Windows: []codemode.AllowanceWindow{{LimitID: "codex", Window: "primary", Unit: codemode.AllowanceUnitPercent, Evidence: codemode.AllowanceEvidencePassive, UsedPercent: 40, RemainingPercent: 60, ResetsAt: &reset, ObservedAt: base}}, ObservedAt: base}
+	if err := store.ObserveAllowance(t.Context(), active, passive); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.InvalidateActiveAllowance(t.Context(), active); err != nil {
+		t.Fatal(err)
+	}
+	var stored codemode.Allowance
+	if err := pool.QueryRow(t.Context(), `SELECT allowance FROM olp.code_accounts WHERE id=$1`, active).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Windows) != 1 || stored.Windows[0].Evidence != codemode.AllowanceEvidencePassive || stored.Windows[0].RemainingPercent != 60 || stored.RemainingPercent == nil || *stored.RemainingPercent != 60 || stored.Credits == nil {
+		t.Fatalf("allowance after failed read = %+v, want passive window and credits preserved", stored)
+	}
+
 }
 
-func TestCodeMiniMaxActiveRemainsReadBandsAtDBSeam(t *testing.T) {
+func TestCodeMiniMaxActiveRemainsDoesNotAffectBands(t *testing.T) {
 	pool, _ := newDatabase(t)
 	if err := database.Migrate(t.Context(), pool); err != nil {
 		t.Fatal(err)
@@ -715,7 +791,7 @@ func TestCodeMiniMaxActiveRemainsReadBandsAtDBSeam(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := &resources.CodeStore{Pool: pool}
-	due, err := store.DueAllowanceReads(t.Context(), base, 50, codeadapter.QualifiedProfileIDs())
+	due, err := store.DueAllowanceReads(t.Context(), base, 50, []string{"minimax-plan"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -736,24 +812,25 @@ func TestCodeMiniMaxActiveRemainsReadBandsAtDBSeam(t *testing.T) {
 	if err := store.CompleteAllowanceRead(t.Context(), active, base); err != nil {
 		t.Fatal(err)
 	}
-	due, err = store.DueAllowanceReads(t.Context(), base, 50, codeadapter.QualifiedProfileIDs())
+	due, err = store.DueAllowanceReads(t.Context(), base, 50, []string{"minimax-plan"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(due) != 1 || due[0].Account.ID != unknown {
 		t.Fatalf("fresh MiniMax active evidence must not be due again, got %+v", due)
 	}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, unknown); err != nil {
+		t.Fatal(err)
+	}
 	permit, err := store.Admit(t.Context(), resources.CodeAdmission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "messages", Model: "MiniMax-M3", Identity: codemode.Identity{Conversation: "minimax-active-conv-0"}}, Providers: []string{provider}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if permit.Account.ID != active {
-		t.Fatalf("MiniMax active healthy account must win over unknown, chose %s", permit.Account.ID)
+		t.Fatalf("chosen account = %s", permit.Account.ID)
 	}
 	decision := codeDecisionForAttempt(t, pool, permit.Attempt.ID)
-	if decision.Band == nil || *decision.Band != codemode.BandHealthy ||
-		decision.Evidence == nil || *decision.Evidence != codemode.AllowanceEvidenceActive ||
-		decision.EvidenceObservedAt == nil || !decision.EvidenceObservedAt.Equal(base) {
+	if decision.Band == nil || *decision.Band != codemode.BandUnknown || decision.Evidence != nil || decision.EvidenceObservedAt != nil {
 		t.Fatalf("MiniMax active band decision = %+v", decision)
 	}
 }
@@ -792,18 +869,10 @@ func TestCodeAllowanceReadRequestEndpoint(t *testing.T) {
 	if status, raw := s.do(owner, "POST", "/api/v1/code/accounts/"+codex+"/allowance-reads", nil, nil); status != http.StatusBadRequest {
 		t.Fatalf("missing Idempotency-Key: status %d: %s", status, raw)
 	}
-	key := idempotent()
-	account := s.want(owner, "POST", "/api/v1/code/accounts/"+codex+"/allowance-reads", nil, key, http.StatusOK)
-	if account["id"] != codex || account["adapter"] != "codex" || account["allowance_read_requested_at"] == nil {
-		t.Fatalf("allowance read response = %v", account)
-	}
-	replayed := s.want(owner, "POST", "/api/v1/code/accounts/"+codex+"/allowance-reads", nil, key, http.StatusOK)
-	if replayed["allowance_read_requested_at"] != account["allowance_read_requested_at"] {
-		t.Fatalf("replay must return the stored response: %v vs %v", replayed, account)
-	}
-	minimaxAccount := s.want(owner, "POST", "/api/v1/code/accounts/"+minimax+"/allowance-reads", nil, idempotent(), http.StatusOK)
-	if minimaxAccount["id"] != minimax || minimaxAccount["adapter"] != "minimax_plan" || minimaxAccount["allowance_read_requested_at"] == nil {
-		t.Fatalf("MiniMax allowance read response = %v", minimaxAccount)
+	for _, account := range []string{codex, minimax} {
+		if status, raw := s.do(owner, "POST", "/api/v1/code/accounts/"+account+"/allowance-reads", nil, idempotent()); status != http.StatusUnprocessableEntity {
+			t.Fatalf("unqualified allowance read: status %d: %s", status, raw)
+		}
 	}
 	if status, raw := s.do(owner, "POST", "/api/v1/code/accounts/"+claude+"/allowance-reads", nil, idempotent()); status != http.StatusUnprocessableEntity {
 		t.Fatalf("unqualified allowance read: status %d: %s", status, raw)

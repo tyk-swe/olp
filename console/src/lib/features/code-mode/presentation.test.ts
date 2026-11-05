@@ -6,7 +6,6 @@ import {
   allowanceChargeSummary,
   allowanceEvidenceLabel,
   allowanceWindowSummary,
-  canRequestAllowanceRead,
   clientLabel,
   cooldownClassLabel,
   cooldownSummary,
@@ -449,13 +448,7 @@ describe('extra usage presentation', () => {
 describe('code ordering signals', () => {
   it('names only proven bands, as fixture-proven only and never live-proven', () => {
     expect(orderingSignalLabel('proven', true)).toBe(
-      'Allowance bands from passive and active windows, fixture-proven only'
-    );
-    expect(orderingSignalLabel('proven', true, 'codex')).toBe(
-      'Allowance bands from passive and active windows, fixture-proven only'
-    );
-    expect(orderingSignalLabel('proven', true, 'minimax_plan')).toBe(
-      'Allowance bands from active remains, fixture-proven only'
+      'Allowance bands from passive windows, fixture-proven only'
     );
     for (const signal of ['none', 'remains-unqualified']) {
       expect(orderingSignalLabel(signal, true)).toBe(
@@ -468,14 +461,6 @@ describe('code ordering signals', () => {
     expect(orderingSignalLabel(undefined, true)).toBe(
       'Weights plus cooldown, no qualified allowance signal'
     );
-  });
-
-  it('offers the active allowance read only for codex and minimax accounts', () => {
-    expect(canRequestAllowanceRead('codex')).toBe(true);
-    expect(canRequestAllowanceRead('minimax_plan')).toBe(true);
-    expect(canRequestAllowanceRead('zai_coding')).toBe(false);
-    expect(canRequestAllowanceRead(null)).toBe(false);
-    expect(canRequestAllowanceRead(undefined)).toBe(false);
   });
 
   it('keeps every signal on weights plus cooldown while ordering is off', () => {

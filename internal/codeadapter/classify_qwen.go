@@ -27,7 +27,7 @@ func classifyQwen(status int, body []byte, headers http.Header, now time.Time) (
 		return Classification{}, false
 	}
 	if code == "insufficient_quota" && message == qwenQuotaMessage {
-		return Classification{Class: CooldownQuota, Scope: ScopeCredential, RetryAt: retryAtFrom(time.Time{}, false, headers, now), Envelope: QwenQuotaEnvelope, NotExecuted: true}, true
+		return Classification{Class: CooldownQuota, Scope: ScopeCredential, RetryAt: retryAtFrom(time.Time{}, false, headers, now), Envelope: QwenQuotaEnvelope}, true
 	}
 	if code == qwenRateCode && strings.HasPrefix(message, qwenRatePrefix) {
 		return Classification{Class: CooldownRate, Scope: ScopeCredential, RetryAt: retryAtFrom(time.Time{}, false, headers, now), Envelope: qwenRateEnvelope}, true

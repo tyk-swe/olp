@@ -1,10 +1,9 @@
-package codeallowance_test
+package codeallowance
 
 import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/codeallowance"
 	"github.com/tyk-swe/olp/internal/codemode"
 )
 
@@ -39,7 +38,7 @@ func window(t *testing.T, a codemode.Allowance, limit, name string) codemode.All
 }
 
 func TestParseUsageMapsPinnedWindowsAndCredits(t *testing.T) {
-	allowance, ok := codeallowance.ParseUsage([]byte(validUsage), usageNow)
+	allowance, ok := ParseUsage([]byte(validUsage), usageNow)
 	if !ok {
 		t.Fatal("pinned payload must parse")
 	}
@@ -55,8 +54,8 @@ func TestParseUsageMapsPinnedWindowsAndCredits(t *testing.T) {
 	if secondary.RemainingPercent != 60 || secondary.WindowMinutes == nil || *secondary.WindowMinutes != 10080 {
 		t.Fatalf("secondary window = %+v", secondary)
 	}
-	if allowance.RemainingPercent == nil || *allowance.RemainingPercent != 75 || allowance.ResetsAt == nil || !allowance.ResetsAt.Equal(*primary.ResetsAt) {
-		t.Fatalf("primary must mirror to the top level, got %+v", allowance)
+	if allowance.RemainingPercent != nil || allowance.ResetsAt != nil {
+		t.Fatalf("unqualified active evidence must not mirror to the top level, got %+v", allowance)
 	}
 	if allowance.Credits == nil || !allowance.Credits.HasCredits || allowance.Credits.Unlimited ||
 		allowance.Credits.Balance == nil || *allowance.Credits.Balance != "12.50" || !allowance.Credits.ObservedAt.Equal(usageNow) {
@@ -95,14 +94,14 @@ func TestParseUsageRejectsMalformed(t *testing.T) {
 		"windows null only":     `{"plan_type": "plus", "rate_limit": {"allowed": true, "limit_reached": false, "primary_window": null, "secondary_window": null}, "credits": null}`,
 	}
 	for name, body := range cases {
-		if allowance, ok := codeallowance.ParseUsage([]byte(body), usageNow); ok {
+		if allowance, ok := ParseUsage([]byte(body), usageNow); ok {
 			t.Errorf("%s must write nothing, got %+v", name, allowance)
 		}
 	}
 }
 
 func TestParseUsageCreditsOnlyAndNullableRateLimit(t *testing.T) {
-	allowance, ok := codeallowance.ParseUsage([]byte(`{"plan_type": "free", "rate_limit": null, "credits": {"has_credits": false, "unlimited": true, "balance": null}}`), usageNow)
+	allowance, ok := ParseUsage([]byte(`{"plan_type": "free", "rate_limit": null, "credits": {"has_credits": false, "unlimited": true, "balance": null}}`), usageNow)
 	if !ok || len(allowance.Windows) != 0 || allowance.Credits == nil || !allowance.Credits.Unlimited || allowance.Credits.Balance != nil {
 		t.Fatalf("credits-only payload = %+v, ok %v", allowance, ok)
 	}
@@ -110,7 +109,7 @@ func TestParseUsageCreditsOnlyAndNullableRateLimit(t *testing.T) {
 
 func TestParseUsageWindowMinutesOnlyWhenDivisible(t *testing.T) {
 	body := `{"plan_type": "pro", "rate_limit": {"allowed": true, "limit_reached": false, "primary_window": {"used_percent": 130, "limit_window_seconds": 17999, "reset_after_seconds": 5, "reset_at": 1794038400}, "secondary_window": null}, "credits": null}`
-	allowance, ok := codeallowance.ParseUsage([]byte(body), usageNow)
+	allowance, ok := ParseUsage([]byte(body), usageNow)
 	if !ok {
 		t.Fatal("payload with a non-divisible window must parse")
 	}
@@ -130,7 +129,7 @@ func TestParseUsageAdditionalLimitsSkippedByName(t *testing.T) {
 	    {"limit_name": "not a limit!", "metered_feature": "x", "rate_limit": {"allowed": true, "limit_reached": false, "primary_window": {"used_percent": 99, "limit_window_seconds": 3600, "reset_after_seconds": 1, "reset_at": 1794038400}, "secondary_window": null}}
 	  ]
 	}`
-	allowance, ok := codeallowance.ParseUsage([]byte(body), usageNow)
+	allowance, ok := ParseUsage([]byte(body), usageNow)
 	if !ok {
 		t.Fatal("an unusable additional limit name must not sink the payload")
 	}
@@ -147,7 +146,7 @@ func TestUsageURLIsTheApprovedChatGPTWhamEndpoint(t *testing.T) {
 	// openai/codex c0100ad: chatgpt_base_url.rs DEFAULT_CHATGPT_BASE_URL is
 	// https://chatgpt.com/backend-api/ and client.rs rate_limit_status_url
 	// appends /wham/usage on the ChatGptApi path style, fetched 2026-11-05.
-	if codeallowance.UsageURL != "https://chatgpt.com/backend-api/wham/usage" {
-		t.Fatalf("usage URL = %q", codeallowance.UsageURL)
+	if UsageURL != "https://chatgpt.com/backend-api/wham/usage" {
+		t.Fatalf("usage URL = %q", UsageURL)
 	}
 }

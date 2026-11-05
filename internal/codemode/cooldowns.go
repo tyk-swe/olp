@@ -74,27 +74,6 @@ func BlockingDeadline(now time.Time, unavailableUntil, cooldownRetryAt *time.Tim
 	return LatestDeadline(now, deadlines...)
 }
 
-func EarliestUsefulRecovery(now time.Time, deadlines ...*time.Time) *time.Time {
-	return EarliestRecovery(now, deadlines...)
-}
-
-func AllowanceResets(allowance *Allowance) []*time.Time {
-	if allowance == nil {
-		return nil
-	}
-	resets := []*time.Time{allowance.ResetsAt}
-	if allowance.TokenObservation != nil {
-		resets = append(resets, allowance.TokenObservation.ResetsAt)
-	}
-	if allowance.RequestObservation != nil {
-		resets = append(resets, allowance.RequestObservation.ResetsAt)
-	}
-	for _, window := range allowanceWindows(*allowance) {
-		resets = append(resets, window.ResetsAt)
-	}
-	return resets
-}
-
 func (r *Refusal) RetryAfter(now time.Time) time.Duration {
 	if r == nil || r.RetryAt == nil || !r.RetryAt.After(now) {
 		return 0

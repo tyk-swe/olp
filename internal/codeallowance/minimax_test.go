@@ -1,11 +1,10 @@
-package codeallowance_test
+package codeallowance
 
 import (
 	"fmt"
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/codeallowance"
 	"github.com/tyk-swe/olp/internal/codemode"
 )
 
@@ -40,7 +39,7 @@ func minimaxBody(buckets ...string) string {
 }
 
 func TestParseRemainsMapsServerPercentsToActiveWindows(t *testing.T) {
-	allowance, ok := codeallowance.ParseRemains([]byte(minimaxBody(
+	allowance, ok := ParseRemains([]byte(minimaxBody(
 		minimaxBucket("speech-hd", ""),
 		minimaxBucket("MiniMax-M*", ""),
 	)), nil, usageNow)
@@ -70,7 +69,7 @@ func TestParseRemainsMapsServerPercentsToActiveWindows(t *testing.T) {
 }
 
 func TestParseRemainsGeneralBucketAndBoostNeverMultipliesWeekly(t *testing.T) {
-	allowance, ok := codeallowance.ParseRemains([]byte(minimaxBody(
+	allowance, ok := ParseRemains([]byte(minimaxBody(
 		minimaxBucket("general", `,"weekly_boost_permille":1500`),
 	)), nil, usageNow)
 	if !ok {
@@ -87,17 +86,17 @@ func TestParseRemainsPrefersExactAccountModelWhenSeveralMatch(t *testing.T) {
 		`"current_weekly_total_count":0,"current_weekly_usage_count":0,`+
 		`"weekly_start_time":%d,"weekly_end_time":%d,"weekly_remains_time":1}`,
 		remainsStart, remainsEnd, remainsStart, remainsWeeklyEnd)
-	allowance, ok := codeallowance.ParseRemains([]byte(minimaxBody(other, minimaxBucket("MiniMax-M3", ""))), []string{"MiniMax-M3"}, usageNow)
+	allowance, ok := ParseRemains([]byte(minimaxBody(other, minimaxBucket("MiniMax-M3", ""))), []string{"MiniMax-M3"}, usageNow)
 	if !ok {
 		t.Fatal("exact account model must disambiguate several coding buckets")
 	}
 	if primary := window(t, allowance, "minimax", "primary"); primary.RemainingPercent != 80 {
 		t.Fatalf("selected bucket must be the exact account model, got %+v", primary)
 	}
-	if _, ok := codeallowance.ParseRemains([]byte(minimaxBody(other, minimaxBucket("MiniMax-M3", ""))), nil, usageNow); ok {
+	if _, ok := ParseRemains([]byte(minimaxBody(other, minimaxBucket("MiniMax-M3", ""))), nil, usageNow); ok {
 		t.Fatal("several coding buckets with no exact account model must write nothing")
 	}
-	if _, ok := codeallowance.ParseRemains([]byte(minimaxBody(minimaxBucket("speech-hd", ""), minimaxBucket("image-01", ""))), nil, usageNow); ok {
+	if _, ok := ParseRemains([]byte(minimaxBody(minimaxBucket("speech-hd", ""), minimaxBucket("image-01", ""))), nil, usageNow); ok {
 		t.Fatal("zero coding buckets must write nothing")
 	}
 }
@@ -108,7 +107,7 @@ func TestParseRemainsStatusAndWeeklyTotalZero(t *testing.T) {
 		`"current_weekly_total_count":0,"current_weekly_usage_count":0,"current_weekly_status":3,`+
 		`"weekly_start_time":%d,"weekly_end_time":%d,"weekly_remains_time":1}`,
 		remainsStart, remainsEnd, remainsStart, remainsWeeklyEnd)
-	allowance, ok := codeallowance.ParseRemains([]byte(minimaxBody(exhausted)), nil, usageNow)
+	allowance, ok := ParseRemains([]byte(minimaxBody(exhausted)), nil, usageNow)
 	if !ok {
 		t.Fatal("status 2 must map to an exhausted window without a server percent")
 	}
@@ -124,7 +123,7 @@ func TestParseRemainsStatusAndWeeklyTotalZero(t *testing.T) {
 		`"current_weekly_total_count":0,"current_weekly_usage_count":0,"current_weekly_status":3,`+
 		`"weekly_start_time":%d,"weekly_end_time":%d,"weekly_remains_time":1}`,
 		remainsStart, remainsEnd, remainsStart, remainsWeeklyEnd)
-	if allowance, ok := codeallowance.ParseRemains([]byte(minimaxBody(notInPlan)), nil, usageNow); ok {
+	if allowance, ok := ParseRemains([]byte(minimaxBody(notInPlan)), nil, usageNow); ok {
 		t.Fatalf("a bucket outside the plan must write nothing, got %+v", allowance)
 	}
 
@@ -133,7 +132,7 @@ func TestParseRemainsStatusAndWeeklyTotalZero(t *testing.T) {
 		`"current_weekly_total_count":0,"current_weekly_usage_count":0,`+
 		`"weekly_start_time":%d,"weekly_end_time":%d,"weekly_remains_time":1}`,
 		remainsStart, remainsEnd, remainsStart, remainsWeeklyEnd)
-	allowance, ok = codeallowance.ParseRemains([]byte(minimaxBody(weeklyZeroNoPercent)), nil, usageNow)
+	allowance, ok = ParseRemains([]byte(minimaxBody(weeklyZeroNoPercent)), nil, usageNow)
 	if !ok || len(allowance.Windows) != 1 {
 		t.Fatalf("weekly total 0 with no weekly percent must keep only the interval window, got %+v ok %v", allowance, ok)
 	}
@@ -145,7 +144,7 @@ func TestParseRemainsCountsNeverMapToAPercent(t *testing.T) {
 		`"current_weekly_total_count":500,"current_weekly_usage_count":100,`+
 		`"weekly_start_time":%d,"weekly_end_time":%d,"weekly_remains_time":1}`,
 		remainsStart, remainsEnd, remainsStart, remainsWeeklyEnd)
-	if allowance, ok := codeallowance.ParseRemains([]byte(minimaxBody(countsOnly)), nil, usageNow); ok {
+	if allowance, ok := ParseRemains([]byte(minimaxBody(countsOnly)), nil, usageNow); ok {
 		t.Fatalf("counts without a server percent or exhausted status must write nothing, got %+v", allowance)
 	}
 }
@@ -189,7 +188,7 @@ func TestParseRemainsRejectsMalformed(t *testing.T) {
 			remainsEnd, remainsStart, remainsWeeklyEnd),
 	}
 	for name, body := range cases {
-		if allowance, ok := codeallowance.ParseRemains([]byte(body), nil, usageNow); ok {
+		if allowance, ok := ParseRemains([]byte(body), nil, usageNow); ok {
 			t.Errorf("%s must write nothing, got %+v", name, allowance)
 		}
 	}
@@ -198,16 +197,16 @@ func TestParseRemainsRejectsMalformed(t *testing.T) {
 func TestParseRemainsMalformedRowAnywhereWritesNothing(t *testing.T) {
 	brokenType := fmt.Sprintf(`{"model_name":"speech-hd","start_time":%d,"end_time":%d,"remains_time":1,"current_interval_total_count":"not-a-count","current_interval_usage_count":0,"current_weekly_total_count":0,"current_weekly_usage_count":0,"weekly_start_time":%d,"weekly_end_time":%d,"weekly_remains_time":1}`,
 		remainsStart, remainsEnd, remainsStart, remainsWeeklyEnd)
-	if allowance, ok := codeallowance.ParseRemains([]byte(minimaxBody(brokenType, minimaxBucket("general", ""))), nil, usageNow); ok {
+	if allowance, ok := ParseRemains([]byte(minimaxBody(brokenType, minimaxBucket("general", ""))), nil, usageNow); ok {
 		t.Fatalf("a malformed required field on an unselected row must write nothing, got %+v", allowance)
 	}
 	brokenMissing := `{"model_name":"speech-hd"}`
-	if allowance, ok := codeallowance.ParseRemains([]byte(minimaxBody(brokenMissing, minimaxBucket("general", ""))), nil, usageNow); ok {
+	if allowance, ok := ParseRemains([]byte(minimaxBody(brokenMissing, minimaxBucket("general", ""))), nil, usageNow); ok {
 		t.Fatalf("a row missing required numeric fields must write nothing, got %+v", allowance)
 	}
 	brokenPercent := fmt.Sprintf(`{"model_name":"speech-hd","start_time":%d,"end_time":%d,"remains_time":1,"current_interval_total_count":1,"current_interval_usage_count":0,"current_interval_remaining_percent":"80","current_weekly_total_count":0,"current_weekly_usage_count":0,"weekly_start_time":%d,"weekly_end_time":%d,"weekly_remains_time":1}`,
 		remainsStart, remainsEnd, remainsStart, remainsWeeklyEnd)
-	if allowance, ok := codeallowance.ParseRemains([]byte(minimaxBody(brokenPercent, minimaxBucket("general", ""))), nil, usageNow); ok {
+	if allowance, ok := ParseRemains([]byte(minimaxBody(brokenPercent, minimaxBucket("general", ""))), nil, usageNow); ok {
 		t.Fatalf("a mistyped percent on an unselected row must write nothing, got %+v", allowance)
 	}
 }
@@ -218,7 +217,7 @@ func TestParseRemainsStatus3UsesValidServerPercent(t *testing.T) {
 		`"current_weekly_total_count":0,"current_weekly_usage_count":0,"current_weekly_remaining_percent":60,"current_weekly_status":3,`+
 		`"weekly_start_time":%d,"weekly_end_time":%d,"weekly_remains_time":1}`,
 		remainsStart, remainsEnd, remainsStart, remainsWeeklyEnd)
-	allowance, ok := codeallowance.ParseRemains([]byte(minimaxBody(unlimited)), nil, usageNow)
+	allowance, ok := ParseRemains([]byte(minimaxBody(unlimited)), nil, usageNow)
 	if !ok {
 		t.Fatal("status 3 with a valid server percent must use that percent")
 	}
@@ -231,23 +230,23 @@ func TestParseRemainsStatus3UsesValidServerPercent(t *testing.T) {
 }
 
 func TestParseRemainsSelectionNarrowsToEvidence(t *testing.T) {
-	if allowance, ok := codeallowance.ParseRemains([]byte(minimaxBody(minimaxBucket("MiniMax-M9", ""))), nil, usageNow); ok {
+	if allowance, ok := ParseRemains([]byte(minimaxBody(minimaxBucket("MiniMax-M9", ""))), nil, usageNow); ok {
 		t.Fatalf("an arbitrary MiniMax-M prefix name must not qualify on prefix alone, got %+v", allowance)
 	}
-	allowance, ok := codeallowance.ParseRemains([]byte(minimaxBody(minimaxBucket("MiniMax-M9", ""))), []string{"MiniMax-M9"}, usageNow)
+	allowance, ok := ParseRemains([]byte(minimaxBody(minimaxBucket("MiniMax-M9", ""))), []string{"MiniMax-M9"}, usageNow)
 	if !ok {
 		t.Fatal("an exact account model starting with MiniMax-M must qualify")
 	}
 	if primary := window(t, allowance, "minimax", "primary"); primary.RemainingPercent != 80 {
 		t.Fatalf("primary = %+v", primary)
 	}
-	if allowance, ok := codeallowance.ParseRemains([]byte(minimaxBody(minimaxBucket("speech-hd", ""))), []string{"speech-hd"}, usageNow); ok {
+	if allowance, ok := ParseRemains([]byte(minimaxBody(minimaxBucket("speech-hd", ""))), []string{"speech-hd"}, usageNow); ok {
 		t.Fatalf("an exact account model that is not MiniMax-M must not qualify, got %+v", allowance)
 	}
-	if _, ok := codeallowance.ParseRemains([]byte(minimaxBody(minimaxBucket("MiniMax-M*", ""))), nil, usageNow); !ok {
+	if _, ok := ParseRemains([]byte(minimaxBody(minimaxBucket("MiniMax-M*", ""))), nil, usageNow); !ok {
 		t.Fatal("the literal MiniMax-M* bucket must qualify")
 	}
-	if _, ok := codeallowance.ParseRemains([]byte(minimaxBody(minimaxBucket("general", ""))), nil, usageNow); !ok {
+	if _, ok := ParseRemains([]byte(minimaxBody(minimaxBucket("general", ""))), nil, usageNow); !ok {
 		t.Fatal("the general bucket must qualify")
 	}
 }

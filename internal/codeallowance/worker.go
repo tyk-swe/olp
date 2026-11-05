@@ -34,6 +34,7 @@ type DueAccount struct {
 type Store interface {
 	DueAllowanceReads(ctx context.Context, now time.Time, limit int, qualifiedProfileIDs []string) ([]DueAccount, error)
 	ObserveAllowance(ctx context.Context, account string, allowance codemode.Allowance) error
+	InvalidateActiveAllowance(ctx context.Context, account string) error
 	CompleteAllowanceRead(ctx context.Context, account string, readAt time.Time) error
 }
 
@@ -117,6 +118,9 @@ func (r *Reader) Pass(ctx context.Context) (usage.Outcome, bool) {
 	}
 	progress := false
 	for _, entry := range due {
+		if !qualifiedForActiveRead(entry.Configuration) {
+			continue
+		}
 		ran, wrote, err := r.locker().TryLock(ctx, entry.Account.ID, func() (bool, error) {
 			return r.read(ctx, entry)
 		})
@@ -140,7 +144,7 @@ func qualifiedForActiveRead(configuration routing.Configuration) bool {
 
 func (r *Reader) read(ctx context.Context, entry DueAccount) (bool, error) {
 	now := r.now()
-	if !Due(entry.Account, now) || !qualifiedForActiveRead(entry.Configuration) {
+	if !Due(entry.Account, now) {
 		return false, nil
 	}
 	vendor, ok := codeadapter.ForConnection(entry.Configuration.Kind, entry.Configuration.AuthMode, entry.Configuration.ProfileID)
@@ -160,6 +164,8 @@ func (r *Reader) read(ctx context.Context, entry DueAccount) (bool, error) {
 		if err := r.Store.ObserveAllowance(ctx, entry.Account.ID, allowance); err != nil {
 			return false, err
 		}
+	} else if err := r.Store.InvalidateActiveAllowance(ctx, entry.Account.ID); err != nil {
+		return false, err
 	}
 	if err := r.Store.CompleteAllowanceRead(ctx, entry.Account.ID, now); err != nil {
 		return false, err

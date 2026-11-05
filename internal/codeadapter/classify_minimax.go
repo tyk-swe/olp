@@ -1,10 +1,6 @@
 package codeadapter
 
 import (
-	"bytes"
-	"encoding/json"
-	"errors"
-	"io"
 	"math"
 	"net/http"
 	"strconv"
@@ -36,10 +32,6 @@ func classifyMiniMax(status int, body []byte, headers http.Header, now time.Time
 func minimaxBusinessCode(body []byte) (string, bool) {
 	document, err := oif.ParseJSON(body, oif.Limits{MaxBytes: 64 << 10})
 	if err != nil {
-		var sourceErr *oif.SourceError
-		if errors.As(err, &sourceErr) && sourceErr.Code == "duplicate_key" {
-			return minimaxDeclaredCodeSplit(body)
-		}
 		return "", false
 	}
 	if document.Root().Kind() != oif.Object {
@@ -49,69 +41,6 @@ func minimaxBusinessCode(body []byte) (string, bool) {
 		return code, true
 	}
 	return minimaxEnvelope(document.Root())
-}
-
-func minimaxDeclaredCodeSplit(body []byte) (string, bool) {
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	open, err := decoder.Token()
-	if err != nil || open != json.Delim('{') {
-		return "", false
-	}
-	var baseRaw, errorRaw json.RawMessage
-	var haveBaseResp, haveFailure, basePoisoned, failurePoisoned bool
-	for decoder.More() {
-		key, err := decoder.Token()
-		if err != nil {
-			return "", false
-		}
-		name, ok := key.(string)
-		if !ok {
-			return "", false
-		}
-		var raw json.RawMessage
-		if err := decoder.Decode(&raw); err != nil {
-			return "", false
-		}
-		switch name {
-		case "base_resp":
-			if haveBaseResp {
-				basePoisoned = true
-				continue
-			}
-			baseRaw, haveBaseResp = raw, true
-		case "error":
-			if haveFailure {
-				failurePoisoned = true
-				continue
-			}
-			errorRaw, haveFailure = raw, true
-		}
-	}
-	if _, err := decoder.Token(); err != nil {
-		return "", false
-	}
-	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
-		return "", false
-	}
-	var statusCode int64
-	var haveStatusCode bool
-	if haveBaseResp && !basePoisoned {
-		statusCode, haveStatusCode = minimaxRawCode(baseRaw, minimaxBaseRespCode)
-	}
-	var errorCode int64
-	var haveErrorCode bool
-	if haveFailure && !failurePoisoned {
-		errorCode, haveErrorCode = minimaxRawCode(errorRaw, minimaxErrorCode)
-	}
-	return minimaxFoldCodes(statusCode, haveStatusCode, errorCode, haveErrorCode)
-}
-
-func minimaxRawCode(raw json.RawMessage, extract func(oif.Value) (int64, bool)) (int64, bool) {
-	document, err := oif.ParseJSON(raw, oif.Limits{MaxBytes: 64 << 10})
-	if err != nil {
-		return 0, false
-	}
-	return extract(document.Root())
 }
 
 func minimaxFoldCodes(statusCode int64, haveStatusCode bool, errorCode int64, haveErrorCode bool) (string, bool) {

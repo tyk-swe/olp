@@ -161,21 +161,12 @@ export function allowanceEvidenceLabel(
 
 export function orderingSignalLabel(
   signal: string | null | undefined,
-  allowanceOrdering: boolean,
-  adapter?: string | null
+  allowanceOrdering: boolean
 ): string {
   if (!allowanceOrdering) return 'Weights plus cooldown';
   if (signal !== 'proven')
     return 'Weights plus cooldown, no qualified allowance signal';
-  if (adapter === 'minimax_plan')
-    return 'Allowance bands from active remains, fixture-proven only';
-  return 'Allowance bands from passive and active windows, fixture-proven only';
-}
-
-export function canRequestAllowanceRead(
-  adapter: string | null | undefined
-): boolean {
-  return adapter === 'codex' || adapter === 'minimax_plan';
+  return 'Allowance bands from passive windows, fixture-proven only';
 }
 
 export function nextMonthlyReset(

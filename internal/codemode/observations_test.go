@@ -85,17 +85,20 @@ func TestMergePreservesUnitEvidenceAndValuesAndStampsLegacy(t *testing.T) {
 	if err := merged.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if len(merged.Windows) != 2 {
+	if len(merged.Windows) != 3 {
 		t.Fatalf("windows = %+v", merged.Windows)
 	}
-	percent, cents := merged.Windows[0], merged.Windows[1]
+	passive, percent, cents := merged.Windows[0], merged.Windows[1], merged.Windows[2]
+	if passive.Evidence != "passive" || passive.RemainingPercent != 80 {
+		t.Fatalf("passive window lost: %+v", passive)
+	}
 	if percent.LimitID != "codex" || percent.Unit != "percent" || percent.Evidence != "active" || percent.RemainingPercent != 70 {
 		t.Fatalf("newer percent window not kept: %+v", percent)
 	}
 	if cents.Unit != "cents" || cents.Evidence != "active" || cents.UsedValue == nil || *cents.UsedValue != 120 || cents.RemainingValue == nil || *cents.RemainingValue != 880 {
 		t.Fatalf("vendor values lost in merge: %+v", cents)
 	}
-	if merged.RemainingPercent == nil || *merged.RemainingPercent != 70 {
+	if merged.RemainingPercent == nil || *merged.RemainingPercent != 80 {
 		t.Fatalf("top-level percent mirror changed: %v", merged.RemainingPercent)
 	}
 }
@@ -125,5 +128,19 @@ func TestStaleIncomingWindowDoesNotReplaceNewerEvidence(t *testing.T) {
 	window := merged.Windows[0]
 	if window.RemainingPercent != 70 || window.Evidence != "active" {
 		t.Fatalf("stale observation won: %+v", window)
+	}
+}
+
+func TestMergeKeepsPassiveEvidenceWhenAnActiveReadUpdatesTheSameWindow(t *testing.T) {
+	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	reset := now.Add(time.Hour)
+	passive := codemode.Allowance{ObservedAt: now, Windows: []codemode.AllowanceWindow{{LimitID: "codex", Window: "primary", Unit: codemode.AllowanceUnitPercent, Evidence: codemode.AllowanceEvidencePassive, UsedPercent: 20, RemainingPercent: 80, ObservedAt: now, ResetsAt: &reset}}}
+	active := codemode.Allowance{ObservedAt: now.Add(time.Minute), Windows: []codemode.AllowanceWindow{{LimitID: "codex", Window: "primary", Unit: codemode.AllowanceUnitPercent, Evidence: codemode.AllowanceEvidenceActive, UsedPercent: 100, RemainingPercent: 0, ObservedAt: now.Add(time.Minute), ResetsAt: &reset}}}
+	merged := passive.Merge(active)
+	if err := merged.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if len(merged.Windows) != 2 || merged.RemainingPercent == nil || *merged.RemainingPercent != 80 {
+		t.Fatalf("active read overwrote passive evidence: %+v", merged)
 	}
 }

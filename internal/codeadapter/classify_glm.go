@@ -19,7 +19,7 @@ func classifyGLM(status int, body []byte, headers http.Header, now time.Time) (C
 	switch code {
 	case "1308", "1310", "1316", "1317", "1318", "1319", "1320", "1321":
 		reset, hasReset := glmReset(code, message)
-		return Classification{Class: CooldownQuota, Scope: ScopeCredential, RetryAt: retryAtFrom(reset, hasReset, headers, now), Envelope: "glm_" + code, NotExecuted: true}, true
+		return Classification{Class: CooldownQuota, Scope: ScopeCredential, RetryAt: retryAtFrom(reset, hasReset, headers, now), Envelope: "glm_" + code}, true
 	case "1311":
 		return Classification{Class: CooldownEntitlement, Scope: ScopeModel, RetryAt: retryAtFrom(time.Time{}, false, headers, now), Envelope: "glm_1311"}, true
 	case "1302":

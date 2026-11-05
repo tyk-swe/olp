@@ -15687,7 +15687,7 @@
             ]
           },
           "allowance_signal": {
-            "description": "Allowance signal qualification of the account's provider profile. Proven signals may order new conversation roots and support an active allowance read. Remains-unqualified names a signal whose schema is not pinned yet. None means the profile has no qualified allowance signal.",
+            "description": "Allowance signal qualification of the account's provider profile. Proven passive signals may order new conversation roots. Active reads require separate live qualification. Remains-unqualified names a signal that has not completed qualification. None means the profile has no qualified allowance signal.",
             "enum": [
               "proven",
               "none",
@@ -16006,7 +16006,7 @@
               "null"
             ],
             "additionalProperties": true,
-            "description": "Vendor-reported per-request allowance charge as reported (OpenCode Go usage.opencode object, with usage.cost when reported). Its allowance value counts toward plan usage limits in dollars of the monthly limit. Null means no charge was observed; it is never a remaining allowance and never an admission or ordering input."
+            "description": "Validated per-request OpenCode Go billing and numeric usage fields, with usage.cost when reported. The allowance value counts toward plan usage limits in dollars of the monthly limit. Null means no supported charge was observed; it is never a remaining allowance and never an admission or ordering input."
           },
           "reported_tokens": {
             "format": "int64",

@@ -7,7 +7,6 @@ import (
 
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/upstream"
 )
 
 func qwenVendor(t *testing.T) (codeadapter.Vendor, codeadapter.Endpoint) {
@@ -32,7 +31,7 @@ func TestClassifyQwenInsufficientQuotaIsCredentialQuota(t *testing.T) {
 	vendor, endpoint := qwenVendor(t)
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
 	got, ok := vendor.Classify(endpoint, 429, qwenQuotaBody(), http.Header{}, now)
-	if !ok || got.Class != codeadapter.CooldownQuota || got.Scope != codeadapter.ScopeCredential || got.Envelope != "qwen_insufficient_quota" || !got.NotExecuted || !got.RetryAt.Equal(now.Add(time.Minute)) {
+	if !ok || got.Class != codeadapter.CooldownQuota || got.Scope != codeadapter.ScopeCredential || got.Envelope != "qwen_insufficient_quota" || got.NotExecuted || !got.RetryAt.Equal(now.Add(time.Minute)) {
 		t.Fatalf("Classify = %+v, %v", got, ok)
 	}
 	got, ok = vendor.Classify(endpoint, 429, qwenQuotaBody(), http.Header{"Retry-After": {"3600"}}, now)
@@ -40,7 +39,7 @@ func TestClassifyQwenInsufficientQuotaIsCredentialQuota(t *testing.T) {
 		t.Fatalf("Classify with retry-after = %+v, %v", got, ok)
 	}
 	got, ok = vendor.Classify(endpoint, 429, []byte(`{"type":"error","error":{"type":"rate_limit_error","code":"insufficient_quota","message":"Your token-plan quota has been exhausted."}}`), http.Header{}, now)
-	if !ok || got.Class != codeadapter.CooldownQuota || got.Envelope != "qwen_insufficient_quota" || !got.NotExecuted {
+	if !ok || got.Class != codeadapter.CooldownQuota || got.Envelope != "qwen_insufficient_quota" || got.NotExecuted {
 		t.Fatalf("Classify messages shape = %+v, %v", got, ok)
 	}
 	got, ok = vendor.Classify(endpoint, 429, []byte(`{"code":"insufficient_quota","message":"Your token-plan quota has been exhausted.","request_id":"649b2bbc-c541-9e16-9845-db7fe4fe5b2d"}`), http.Header{}, now)
@@ -102,13 +101,11 @@ func TestClassifyQwenCodingPlanAllocatedQuotaNeverClassifies(t *testing.T) {
 	}
 }
 
-func TestQwenInitialRejectionOnlyForProvenQuotaEnvelope(t *testing.T) {
-	// Source: https://www.alibabacloud.com/help/en/model-studio/token-plan-team-faq (fetched 2026-11-05), 429 insufficient_quota; complete unary body before any content is what gateway recover() hands over.
+func TestQwenInitialRejectionHoldsUnprovenQuotaEnvelope(t *testing.T) {
 	vendor, endpoint := qwenVendor(t)
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
-	rejection, ok := vendor.InitialRejection(endpoint, 429, qwenQuotaBody(), http.Header{}, now)
-	if !ok || rejection.Class != upstream.RateLimit || rejection.Envelope != "qwen_insufficient_quota" || !rejection.RetryAt.Equal(now.Add(time.Minute)) {
-		t.Fatalf("InitialRejection(proven) = %+v, %v", rejection, ok)
+	if rejection, ok := vendor.InitialRejection(endpoint, 429, qwenQuotaBody(), http.Header{}, now); ok {
+		t.Fatalf("InitialRejection(quota) = %+v, want no replay", rejection)
 	}
 	for name, body := range map[string][]byte{
 		"rate":              []byte(`{"error":{"code":"Throttling.RateQuota","message":"Requests rate limit exceeded, please try again later."}}`),

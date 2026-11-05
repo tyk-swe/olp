@@ -5,7 +5,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/oif"
 )
 
@@ -51,7 +50,7 @@ var (
 	kimiRateCodes     = []string{"rate_limit_exceeded", "rate_limit_reached_error", "rate_limit_error"}
 )
 
-func classifyKimi(endpoint Endpoint, status int, body []byte, headers http.Header, now time.Time) (Classification, bool) {
+func classifyKimi(status int, body []byte, headers http.Header, now time.Time) (Classification, bool) {
 	if status != 429 {
 		return Classification{}, false
 	}
@@ -63,7 +62,7 @@ func classifyKimi(endpoint Endpoint, status int, body []byte, headers http.Heade
 	fields, structured := envelope.structuredFields()
 	if structured {
 		if code, ok := kimiFieldCode(fields, kimiQuotaCodes); ok {
-			return Classification{Class: CooldownQuota, Scope: ScopeCredential, RetryAt: retryAt, Envelope: "kimi_" + code, NotExecuted: envelope.matchesEndpoint(endpoint)}, true
+			return Classification{Class: CooldownQuota, Scope: ScopeCredential, RetryAt: retryAt, Envelope: "kimi_" + code}, true
 		}
 		if code, ok := kimiFieldCode(fields, kimiOverloadCodes); ok {
 			return Classification{Class: CooldownCapacity, Scope: ScopeModel, RetryAt: retryAt, Envelope: "kimi_" + code}, true
@@ -131,13 +130,6 @@ func extractKimiEnvelope(body []byte) (kimiEnvelope, bool) {
 		return kimiEnvelope{}, false
 	}
 	return kimiEnvelope{isMessagesEnvelope: len(root) == 2, members: failure.Members()}, true
-}
-
-func (e kimiEnvelope) matchesEndpoint(endpoint Endpoint) bool {
-	if e.isMessagesEnvelope {
-		return endpoint.Protocol == codemode.ProtocolMessages
-	}
-	return endpoint.Protocol == codemode.ProtocolChat
 }
 
 func (e kimiEnvelope) structuredFields() (map[string]string, bool) {

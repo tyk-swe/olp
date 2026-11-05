@@ -49,7 +49,7 @@ func (v Vendor) Classify(endpoint Endpoint, status int, body []byte, headers htt
 	case codemode.AdapterZAICoding:
 		return classifyGLM(status, body, headers, now)
 	case codemode.AdapterKimiCode:
-		return classifyKimi(endpoint, status, body, headers, now)
+		return classifyKimi(status, body, headers, now)
 	case codemode.AdapterQwenTokenPlan:
 		return classifyQwen(status, body, headers, now)
 	case codemode.AdapterMiniMaxPlan:
@@ -113,19 +113,22 @@ func rejectionDocument(body []byte) (oif.Document, string, string, bool, bool) {
 }
 
 func rejectionRetryAt(document oif.Document, headers http.Header, now time.Time) time.Time {
-	candidates := []time.Time{now.Add(time.Minute)}
+	candidates := []time.Time{}
 	if values := headers.Values("Retry-After"); len(values) == 1 {
 		if delay, valid := upstream.ParseRetryAfter(values[0], now); valid {
 			candidates = append(candidates, now.Add(delay))
 		}
 	}
 	reset, _ := document.Lookup("/error/resets_at")
-	if seconds, err := strconv.ParseInt(reset.Raw(), 10, 64); err == nil {
+	if seconds, err := strconv.ParseInt(reset.Raw(), 10, 64); err == nil && time.Unix(seconds, 0).After(now) {
 		candidates = append(candidates, time.Unix(seconds, 0).UTC())
 	}
 	delay, _ := document.Lookup("/error/resets_in_seconds")
-	if seconds, err := strconv.ParseInt(delay.Raw(), 10, 32); err == nil && seconds > 0 {
+	if seconds, err := strconv.ParseInt(delay.Raw(), 10, 32); err == nil && seconds >= 0 {
 		candidates = append(candidates, now.Add(time.Duration(seconds)*time.Second))
 	}
-	return slices.MaxFunc(candidates, time.Time.Compare)
+	if len(candidates) == 0 {
+		return now.Add(time.Minute)
+	}
+	return slices.MaxFunc(append(candidates, now), time.Time.Compare)
 }

@@ -552,11 +552,11 @@ func (s codeSelection) chosen() (codemode.Candidate, bool) {
 	return s.candidates[index], true
 }
 
-func codeBandAssessment(bandOrdered bool, allowance *codemode.Allowance, now time.Time) (*codemode.BandAssessment, codemode.Band, *time.Time) {
+func codeBandAssessment(bandOrdered bool, allowance *codemode.Allowance, family string, now time.Time) (*codemode.BandAssessment, codemode.Band, *time.Time) {
 	if !bandOrdered {
 		return nil, "", nil
 	}
-	assessed := codemode.AssessBand(allowance, now)
+	assessed := codemode.AssessBand(allowance, family, now)
 	return &assessed, assessed.Band, assessed.SoonestReset
 }
 
@@ -588,7 +588,7 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root stri
 	if err != nil {
 		return none, err
 	}
-	rows, err := tx.Query(ctx, `SELECT a.id::text,a.project_id::text,a.provider_id::text,a.credential_id::text,a.principal,a.models,a.name,a.enabled,a.etag::text,a.health,a.allowance,olp.code_account_available(a),(a.health IN ('unavailable','quota_limited') AND NOT coalesce(a.unavailable_until<=now(),false)),coalesce(array_position($6::text[],a.id::text),2147483647),pa.weight,a.unavailable_until,EXISTS(SELECT 1 FROM olp.code_account_cooldowns cd WHERE cd.account_id=a.id AND cd.retry_at>now() AND (cd.model IS NULL OR cd.model=$10)),(SELECT max(cd.retry_at) FROM olp.code_account_cooldowns cd WHERE cd.account_id=a.id AND cd.retry_at>now() AND (cd.model IS NULL OR cd.model=$10)),a.extra_usage_enabled,a.cycle_anchor::text
+	rows, err := tx.Query(ctx, `SELECT a.id::text,a.project_id::text,a.provider_id::text,a.credential_id::text,a.principal,a.models,a.name,a.enabled,a.etag::text,a.health,a.allowance,olp.code_account_available(a,$11,CASE WHEN f.adapter='codex' THEN 'codex' ELSE '' END),(a.health IN ('unavailable','quota_limited') AND NOT coalesce(a.unavailable_until<=now(),false)),coalesce(array_position($6::text[],a.id::text),2147483647),pa.weight,a.unavailable_until,EXISTS(SELECT 1 FROM olp.code_account_cooldowns cd WHERE cd.account_id=a.id AND cd.retry_at>now() AND (cd.model IS NULL OR cd.model=$10)),(SELECT max(cd.retry_at) FROM olp.code_account_cooldowns cd WHERE cd.account_id=a.id AND cd.retry_at>now() AND (cd.model IS NULL OR cd.model=$10)),a.extra_usage_enabled,a.cycle_anchor::text,f.adapter
 		FROM olp.code_accounts a JOIN olp.code_pool_accounts pa ON pa.account_id=a.id
 		JOIN olp.provider_credentials c ON c.id=a.credential_id JOIN olp.provider_grants g ON g.credential_id=c.id JOIN olp.providers p ON p.id=a.provider_id
 		JOIN olp.code_route_revisions v ON v.id=$7 CROSS JOIN LATERAL (SELECT `+codeadapter.SQL("v.connections->(a.provider_id::text)")+` adapter) f
@@ -600,7 +600,7 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root stri
 			AND coalesce(array_position($6::text[],t.id::text)<array_position($6::text[],a.id::text),true)
 			AND (`+codeadapter.SQL("v.connections->(t.provider_id::text)")+` IS NOT DISTINCT FROM f.adapter
 				OR EXISTS(SELECT 1 FROM olp.code_pins p WHERE p.root_id=nullif($8,'')::uuid AND p.account_id=t.id AND p.adapter IS NOT DISTINCT FROM f.adapter)))`,
-		in.Route.PoolID, in.Route.ProjectID, requiredJSON, id, in.Providers, tree, in.Route.RevisionID, root, codeRecoveryExclusion(in.Recovery), in.Operation.PublicModel())
+		in.Route.PoolID, in.Route.ProjectID, requiredJSON, id, in.Providers, tree, in.Route.RevisionID, root, codeRecoveryExclusion(in.Recovery), in.Operation.PublicModel(), in.Route.AllowanceOrdering)
 	if err != nil {
 		return none, err
 	}
@@ -609,14 +609,21 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root stri
 		var candidate codeCandidate
 		var weight int64
 		var cooling bool
-		if err := row.Scan(&candidate.account.ID, &candidate.account.ProjectID, &candidate.account.ProviderID, &candidate.account.CredentialID, &candidate.account.Principal, &candidate.account.Models, &candidate.account.Name, &candidate.account.Enabled, &candidate.account.ETag, &candidate.account.Health, &candidate.account.Allowance, &candidate.outcome.Available, &candidate.outcome.Cooldown, &candidate.outcome.Position, &weight, &candidate.account.UnavailableUntil, &cooling, &candidate.cooldownRetry, &candidate.account.ExtraUsageEnabled, &candidate.account.CycleAnchor); err != nil {
+		var adapter *string
+		if err := row.Scan(&candidate.account.ID, &candidate.account.ProjectID, &candidate.account.ProviderID, &candidate.account.CredentialID, &candidate.account.Principal, &candidate.account.Models, &candidate.account.Name, &candidate.account.Enabled, &candidate.account.ETag, &candidate.account.Health, &candidate.account.Allowance, &candidate.outcome.Available, &candidate.outcome.Cooldown, &candidate.outcome.Position, &weight, &candidate.account.UnavailableUntil, &cooling, &candidate.cooldownRetry, &candidate.account.ExtraUsageEnabled, &candidate.account.CycleAnchor, &adapter); err != nil {
 			return candidate, err
 		}
 		accountID, err := uuid.Parse(candidate.account.ID)
 		if err != nil {
 			return candidate, err
 		}
-		assessment, band, resetAt := codeBandAssessment(bandOrdered, candidate.account.Allowance, now)
+		family := func() string {
+			if adapter != nil && *adapter == string(codemode.AdapterCodex) {
+				return "codex"
+			}
+			return ""
+		}()
+		assessment, band, resetAt := codeBandAssessment(bandOrdered, candidate.account.Allowance, family, now)
 		outcome := codemode.Candidate{AccountID: candidate.account.ID, Available: candidate.outcome.Available && !cooling, Cooldown: candidate.outcome.Cooldown || cooling, Position: candidate.outcome.Position, Score: routing.Score(routeID, accountID, weight, in.Operation.Name, "code", in.Operation.Model, []byte(in.APIKeyID+":"+in.Operation.Identity.Conversation)), Band: band, ResetAt: resetAt}
 		return codeCandidate{account: candidate.account, outcome: outcome, cooldownRetry: candidate.cooldownRetry, assessment: assessment}, nil
 	})
@@ -636,7 +643,7 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root stri
 		for _, candidate := range candidates {
 			deadlines = append(deadlines, codemode.BlockingDeadline(now, candidate.account.UnavailableUntil, candidate.cooldownRetry, candidate.account.Allowance))
 		}
-		return none, &codemode.Refusal{Status: 503, Code: "code_account_unavailable", RetryAt: codemode.EarliestUsefulRecovery(now, deadlines...)}
+		return none, &codemode.Refusal{Status: 503, Code: "code_account_unavailable", RetryAt: codemode.EarliestRecovery(now, deadlines...)}
 	}
 	index := slices.IndexFunc(candidates, func(candidate codeCandidate) bool {
 		return candidate.account.ID == chosen.AccountID

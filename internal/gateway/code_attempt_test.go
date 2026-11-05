@@ -211,7 +211,7 @@ func TestCodeAttemptGLMExpiry429WritesNoHealthOrCooldown(t *testing.T) {
 	}
 }
 
-func TestCodeAttemptGLMProvenQuotaRecoversAndAmbiguousDoesNot(t *testing.T) {
+func TestCodeAttemptGLMQuotaDoesNotRecoverWithoutNonexecutionProof(t *testing.T) {
 	// Source: https://docs.z.ai/api-reference/api-code (fetched 2026-11-05), code 1308.
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
 	reset := now.Add(2 * time.Hour)
@@ -219,8 +219,8 @@ func TestCodeAttemptGLMProvenQuotaRecoversAndAmbiguousDoesNot(t *testing.T) {
 	proven := glmAttempt(t, &fakeCodeLedger{}, now, "v1/chat/completions")
 	response := &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"1308","message":"Usage limit reached for 5 hours. Your limit will reset at ` + reset.Format(time.RFC3339) + `"}}`))}
 	recovery, err := proven.recover(t.Context(), response, route, nil)
-	if err != nil || recovery == nil || recovery.Envelope != "glm_1308" || recovery.Number != 1 || recovery.From != "attempt" {
-		t.Fatalf("recover(proven) = %+v, %v", recovery, err)
+	if err != nil || recovery != nil {
+		t.Fatalf("recover(quota) = %+v, %v, want no replay", recovery, err)
 	}
 	ambiguous := glmAttempt(t, &fakeCodeLedger{}, now, "v1/chat/completions")
 	response = &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"1308","message":"Usage limit reached for 5 hours. Your limit will reset at ` + reset.Format(time.RFC3339) + `"},"extra":1}`))}
@@ -402,8 +402,7 @@ func kimiAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time, path strin
 	}
 }
 
-func TestCodeAttemptKimiStructuredQuotaRecoversAndMessageOnlyDoesNot(t *testing.T) {
-	// Sources: MoonshotAI/kimi-code@df90d90 (fetched 2026-11-05), classifyKimiQuotaError keys on the structured code at HTTP 429 and refuses message wording while each base decoder reads only its own protocol envelope, and https://www.kimi.com/code/docs/en/kimi-code/error-reference.html (fetched 2026-11-05) for the exact quota message used in the message-only case
+func TestCodeAttemptKimiQuotaDoesNotRecoverWithoutNonexecutionProof(t *testing.T) {
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
 	route := codemode.Route{InitialRecoveryAttempts: 1}
 	for name, tc := range map[string]struct {
@@ -419,14 +418,8 @@ func TestCodeAttemptKimiStructuredQuotaRecoversAndMessageOnlyDoesNot(t *testing.
 		attempt := kimiAttempt(t, &fakeCodeLedger{}, now, tc.path)
 		response := &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(tc.body))}
 		recovery, err := attempt.recover(t.Context(), response, route, nil)
-		if tc.envelope == "" {
-			if err != nil || recovery != nil {
-				t.Fatalf("recover(%s) = %+v, %v, want no replay", name, recovery, err)
-			}
-			continue
-		}
-		if err != nil || recovery == nil || recovery.Envelope != tc.envelope || recovery.Number != 1 || recovery.From != "attempt" {
-			t.Fatalf("recover(%s) = %+v, %v", name, recovery, err)
+		if err != nil || recovery != nil {
+			t.Fatalf("recover(%s) = %+v, %v, want no replay", name, recovery, err)
 		}
 	}
 }

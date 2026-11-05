@@ -285,13 +285,7 @@ func (s *service) liveAllowanceCheck(owner *caller, project, primary string, l l
 	if pollLive(20*time.Second, time.Second, observed) {
 		return runCheck{Name: "allowance", Result: "pass", Detail: "allowance windows observed after inference"}
 	}
-	if _, err := s.liveCreate(owner, "/api/v1/code/accounts/"+primary+"/allowance-reads", nil, idempotent(), http.StatusOK); err != nil {
-		return runCheck{Name: "allowance", Result: "fail", Detail: "active allowance read request failed: " + err.Error()}
-	}
-	if pollLive(90*time.Second, 2*time.Second, observed) {
-		return runCheck{Name: "allowance", Result: "pass", Detail: "allowance windows observed after active read"}
-	}
-	return runCheck{Name: "allowance", Result: "fail", Detail: "no allowance windows observed after inference and active read"}
+	return runCheck{Name: "allowance", Result: "no_signal", Detail: "no passive allowance observed; active reads are not qualified"}
 }
 
 func (s *service) liveBandsCheck(owner *caller, project string, accountIDs []string, secondDetail string, l liveLane) runCheck {

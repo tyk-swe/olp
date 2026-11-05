@@ -111,21 +111,6 @@ func SkippedAccounts(candidates []Candidate, chosen Candidate) []SkippedAccount 
 	return skipped
 }
 
-func FreshestEvidence(allowance *Allowance) (*AllowanceEvidence, *time.Time) {
-	if allowance == nil {
-		return nil, nil
-	}
-	windows := allowanceWindows(*allowance)
-	if len(windows) == 0 {
-		return nil, nil
-	}
-	freshest := slices.MaxFunc(windows, func(left, right AllowanceWindow) int {
-		return left.ObservedAt.Compare(right.ObservedAt)
-	})
-	evidence := freshest.EffectiveEvidence()
-	return &evidence, &freshest.ObservedAt
-}
-
 type Decision struct {
 	ID                 string             `json:"id"`
 	AttemptID          *string            `json:"attempt_id"`

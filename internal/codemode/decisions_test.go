@@ -3,7 +3,6 @@ package codemode_test
 import (
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/tyk-swe/olp/internal/codemode"
 )
@@ -76,30 +75,6 @@ func TestSkippedAccountsEmptyForSinglePinnedCandidate(t *testing.T) {
 	}
 	if skipped := codemode.SkippedAccounts(candidates, chosen); len(skipped) != 0 {
 		t.Fatalf("pinned evaluation must skip nobody, got %+v", skipped)
-	}
-}
-
-func TestFreshestEvidenceUsesLatestWindowAndStaysAbsentWithoutAllowance(t *testing.T) {
-	early := time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)
-	late := early.Add(2 * time.Hour)
-	allowance := &codemode.Allowance{
-		Windows: []codemode.AllowanceWindow{
-			{LimitID: "codex", Window: "primary", Evidence: codemode.AllowanceEvidencePassive, ObservedAt: early},
-			{LimitID: "codex", Window: "secondary", Evidence: codemode.AllowanceEvidenceActive, ObservedAt: late},
-		},
-		ObservedAt: late,
-	}
-	kind, observed := codemode.FreshestEvidence(allowance)
-	if kind == nil || *kind != codemode.AllowanceEvidenceActive || observed == nil || !observed.Equal(late) {
-		t.Fatalf("freshest evidence = %v %v", kind, observed)
-	}
-	if kind, observed := codemode.FreshestEvidence(nil); kind != nil || observed != nil {
-		t.Fatalf("missing allowance must stay unknown, got %v %v", kind, observed)
-	}
-	legacy := &codemode.Allowance{RemainingPercent: new(float64(40)), ObservedAt: early}
-	kind, observed = codemode.FreshestEvidence(legacy)
-	if kind == nil || *kind != codemode.AllowanceEvidencePassive || observed == nil || !observed.Equal(early) {
-		t.Fatalf("legacy top-level evidence = %v %v", kind, observed)
 	}
 }
 

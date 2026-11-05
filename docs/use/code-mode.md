@@ -32,33 +32,23 @@ profile only when the matching live lane in
 and its claims summary names that pair. Until then the console and this
 guide keep the no proven signal wording for that pair.
 
-Reset aware band ordering exists for Codex and for MiniMax M Plan in
-this stage. Codex orders from its passive and active allowance
-windows, and MiniMax orders from the active windows of its token plan
-remains read on `minimax-plan` and `minimax-plan-cn`. Both sources are
-fixture proven only, and they stay live unproven until the matching
-live lane runs green with its allowance and band checks passing. The
-GLM Coding Plan on `zai-coding-plan` and `bigmodel-coding-plan`, Kimi
-Code on `kimi-code` and `kimi-code-cn`, Qwen Token Plan on
-`qwen-token-plan` and `qwen-token-plan-cn`, and OpenCode Go on
-`opencode-go` all order on weights plus cooldown, with no qualified
-allowance signal.
+Reset-aware band ordering uses fresh passive Codex allowance windows for
+new conversation roots. Active Codex reads and both MiniMax M Plan remains
+reads are held pending live qualification. Existing active observations do not
+influence admission or ordering. Codex additional model-specific limit names do
+not affect unrelated models; OLP does not yet map those names to requested
+models. Other coding-plan adapters use weights plus cooldown without a
+qualified allowance signal.
 
-Replay after a proven nonexecution rejection is fixture proven for the
-GLM Coding Plan on both profiles and for the Qwen Token Plan on both
-profiles. It is held for MiniMax M Plan on both profiles and for Kimi
-Code on both profiles, because their inference error envelopes are not
-yet proven against a live account, so no rejection from those adapters
-replays. The Codex rejection envelopes remain the controlled
-assumptions documented under portable conversation recovery. OpenCode
-Go has no qualified replay proof in this stage, and its reported
-allowance charge stays an observation, never an ordering input.
+GLM, Kimi, Qwen and MiniMax quota envelopes can set a cooldown, but they do
+not establish that inference did not execute and cannot authorize replay.
+The Codex rejection envelopes remain the controlled assumptions documented
+under portable conversation recovery. OpenCode Go has no qualified replay
+proof, and its reported allowance charge stays an observation, never an
+ordering input.
 
-The MiniMax remains read is qualified from the vendor client schema
-on both profiles, and it stays fixture proven only until a live lane
-names the pair. Cooldown classes and failover behavior claim live
-evidence only for the pairs a green live run summary names. No
-adapter or profile claims live proven inference, ordering, cooldown,
+Cooldown and failover behavior claim live evidence only for the pairs a
+green live run summary names. No adapter or profile claims live proven inference
 or failover from fixture evidence alone.
 
 ## Adapters and clients
@@ -911,15 +901,10 @@ block subsequent budgeted admission. Historical unknown usage prevents falsely
 enabling a hard guarantee.
 
 Provider-reported allowance is separate metadata with observation and reset
-times. Codex and MiniMax M Plan report allowance OLP reads, and the
-other coding-plan accounts show none, with health from response
-status alone. For MiniMax token plan accounts, OLP reads
-`GET https://api.minimax.io/v1/token_plan/remains` on the global
-profile and `GET https://api.minimax.cn/v1/token_plan/remains` on the
-mainland China profile. The read maps only the server remaining
-percents of one coding bucket, plus an exhausted status as zero
-remaining, and it writes nothing when the response does not match
-the pinned vendor client schema. For
+times. Codex inference responses may carry passive allowance windows. Active
+Codex and MiniMax reads remain disabled pending live qualification. Other
+coding-plan accounts have no qualified allowance signal, with health from
+response status alone. For
 responses that mark an account unavailable or quota-limited, OLP honors a
 single valid Retry-After header as unsigned seconds or an HTTP date. Zero
 seconds and past dates permit an immediate retry when other eligibility checks
@@ -933,8 +918,10 @@ Primary and secondary windows are retained independently for each metered limit.
 Token and request counts also retain their own observation and reset times.
 Credits remain separate from those windows and from local budgets. Partial
 observations preserve other dimensions, and stale observations cannot replace
-newer ones. An exhausted count or window refuses admission until its supported
-reset. An unknown reset keeps that exhausted dimension blocked. Passing a retry
+newer ones. With allowance ordering enabled, stale window observations do not
+block admission or influence bands. With ordering disabled, passive exhaustion
+retains its established admission behavior until its supported reset, including
+when that reset is unknown. Passing a retry
 or reset time permits another attempt once all eligibility checks pass, while
 reported allowance values remain tied to upstream observations. Never infer
 subscription allowance from a local budget, monetary estimate or a successful

@@ -27,11 +27,13 @@ type BandAssessment struct {
 	SoonestReset *time.Time
 }
 
-func AssessBand(allowance *Allowance, now time.Time) BandAssessment {
+func AssessBand(allowance *Allowance, family string, now time.Time) BandAssessment {
 	if allowance == nil {
 		return BandAssessment{Band: BandUnknown}
 	}
-	windows := allowanceWindows(*allowance)
+	windows := slices.DeleteFunc(slices.Clone(allowanceWindows(*allowance)), func(window AllowanceWindow) bool {
+		return family == "" || window.LimitID != family || window.EffectiveEvidence() != AllowanceEvidencePassive
+	})
 	if exhausted := slices.IndexFunc(windows, func(window AllowanceWindow) bool {
 		return bandFresh(window, now) && bandExhausted(window)
 	}); exhausted >= 0 {
@@ -58,6 +60,9 @@ func bandFromWindow(band Band, window AllowanceWindow, soonestReset *time.Time) 
 }
 
 func bandFresh(window AllowanceWindow, now time.Time) bool {
+	if now.Sub(window.ObservedAt) > bandFreshness {
+		return false
+	}
 	if window.ResetsAt != nil && window.ResetsAt.After(now) {
 		return true
 	}

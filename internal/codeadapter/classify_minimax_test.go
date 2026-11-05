@@ -148,9 +148,6 @@ func TestClassifyMiniMaxDeclaredFoldingPerEnvelope(t *testing.T) {
 		{"error not object, valid base_resp", "minimax_2056", []byte(`{"base_resp":{"status_code":2056},"error":"broken"}`), codeadapter.CooldownQuota, codeadapter.ScopeCredential},
 		{"malformed base_resp, valid error code", "minimax_2062", []byte(`{"base_resp":{"status_code":"2056","status_msg":"usage limit exceeded"},"error":{"message":"M Plan rate limit reached","type":"rate_limit_error","code":2062}}`), codeadapter.CooldownRate, codeadapter.ScopeCredential},
 		{"base_resp not object, valid error code", "minimax_2062", []byte(`{"base_resp":"broken","error":{"message":"M Plan rate limit reached","code":2062}}`), codeadapter.CooldownRate, codeadapter.ScopeCredential},
-		{"duplicate base_resp member poisons only base_resp", "minimax_2062", []byte(`{"base_resp":{"status_code":2056,"status_code":2061},"error":{"message":"M Plan rate limit reached","code":2062}}`), codeadapter.CooldownRate, codeadapter.ScopeCredential},
-		{"duplicate error member poisons only error", "minimax_2061", []byte(`{"base_resp":{"status_code":2061},"error":{"code":2056,"code":2062}}`), codeadapter.CooldownEntitlement, codeadapter.ScopeModel},
-		{"duplicate root base_resp poisons only base_resp", "minimax_2062", []byte(`{"base_resp":{"status_code":2056},"base_resp":{"status_code":2061},"error":{"code":2062}}`), codeadapter.CooldownRate, codeadapter.ScopeCredential},
 		{"integral float status code", "minimax_2056", []byte(`{"base_resp":{"status_code":2056.0}}`), codeadapter.CooldownQuota, codeadapter.ScopeCredential},
 		{"integral exponent error code", "minimax_2056", []byte(`{"error":{"message":"usage limit exceeded","code":2.056e3}}`), codeadapter.CooldownQuota, codeadapter.ScopeCredential},
 	}
@@ -186,6 +183,7 @@ func TestClassifyMiniMaxUnprovenShapesStayUnclassified(t *testing.T) {
 		"string status code":     []byte(`{"base_resp":{"status_code":"2056","status_msg":"usage limit exceeded"}}`),
 		"fractional status code": []byte(`{"base_resp":{"status_code":2056.5,"status_msg":"usage limit exceeded"}}`),
 		"duplicate status code":  []byte(`{"base_resp":{"status_code":2056,"status_code":2056}}`),
+		"escaped duplicate root": []byte(`{"base_resp":{"status_code":2056},"base_\u0072esp":{"status_code":2061},"error":{"code":2062}}`),
 		"unknown declared code":  []byte(`{"base_resp":{"status_code":9999,"status_msg":"unknown"}}`),
 		"stream event":           []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded (2056)"}}`),
 		"missing request id":     []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded (2056)","http_code":"429"}}`),
