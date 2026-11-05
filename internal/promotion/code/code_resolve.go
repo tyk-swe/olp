@@ -87,7 +87,7 @@ func resolveCode(ctx context.Context, q access.Queryer, code *promotion.CodeConf
 			return resolvedCodeResource[providers.CodeAccountInput]{}, err
 		}
 		id, exists, err := codeIdentity(q.Query(ctx, `SELECT id::text FROM olp.code_accounts WHERE project_id=$1 AND provider_id=$2 AND principal=$3`, project, provider, principal))
-		return resolvedCodeResource[providers.CodeAccountInput]{Ref: entry.ID, ID: id, Existing: exists, Identity: codeIdentityKey(project, provider, principal), Input: providers.CodeAccountInput{ProjectID: project, ProviderID: provider, CredentialID: credential, Name: entry.Name, Enabled: entry.Enabled, Models: entry.Models}}, err
+		return resolvedCodeResource[providers.CodeAccountInput]{Ref: entry.ID, ID: id, Existing: exists, Identity: codeIdentityKey(project, provider, principal), Input: providers.CodeAccountInput{ProjectID: project, ProviderID: provider, CredentialID: credential, Name: entry.Name, Enabled: entry.Enabled, Models: entry.Models, CycleAnchor: entry.CycleAnchor}}, err
 	})
 	if err != nil {
 		return nil, err

@@ -15587,6 +15587,14 @@
             },
             "description": "Live failure class cooldowns for this account. A null model cools the whole credential."
           },
+          "cycle_anchor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "Operator recorded subscription cycle anchor date for Qwen Token Plan accounts. The monthly quota reset is the next monthly anniversary of this date. Null when no anchor is recorded, and no reset is reported then."
+          },
           "health": {
             "enum": [
               "unknown",
@@ -15778,6 +15786,14 @@
           "provider_id": {
             "format": "uuid",
             "type": "string"
+          },
+          "cycle_anchor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "Optional subscription cycle anchor date, recorded only for Qwen Token Plan accounts."
           }
         },
         "required": [
@@ -31687,6 +31703,13 @@
             "minItems": 1,
             "type": "array",
             "uniqueItems": true
+          },
+          "cycle_anchor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
           }
         },
         "required": [

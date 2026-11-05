@@ -8811,9 +8811,12 @@ type CodeAccount struct {
 	// Cooldowns Live failure class cooldowns for this account. A null model cools the whole credential.
 	Cooldowns    *[]CodeAccountCooldown `json:"cooldowns,omitempty"`
 	CredentialId openapi_types.UUID     `json:"credential_id"`
-	Eligible     bool                   `json:"eligible"`
-	Enabled      bool                   `json:"enabled"`
-	Etag         openapi_types.UUID     `json:"etag"`
+
+	// CycleAnchor Operator recorded subscription cycle anchor date for Qwen Token Plan accounts. The monthly quota reset is the next monthly anniversary of this date. Null when no anchor is recorded, and no reset is reported then.
+	CycleAnchor nullable.Nullable[openapi_types.Date] `json:"cycle_anchor,omitempty"`
+	Eligible    bool                                  `json:"eligible"`
+	Enabled     bool                                  `json:"enabled"`
+	Etag        openapi_types.UUID                    `json:"etag"`
 
 	// GrantState Grant authority is independent of serving health and allowance. A rejected refresh lapses the grant and requires enrollment again.
 	GrantState CodeAccountGrantState `json:"grant_state"`
@@ -8871,11 +8874,14 @@ type CodeAccountList struct {
 // CodeAccountWrite defines model for CodeAccountWrite.
 type CodeAccountWrite struct {
 	CredentialId openapi_types.UUID `json:"credential_id"`
-	Enabled      bool               `json:"enabled"`
-	Models       []string           `json:"models"`
-	Name         string             `json:"name"`
-	ProjectId    openapi_types.UUID `json:"project_id"`
-	ProviderId   openapi_types.UUID `json:"provider_id"`
+
+	// CycleAnchor Optional subscription cycle anchor date, recorded only for Qwen Token Plan accounts.
+	CycleAnchor nullable.Nullable[openapi_types.Date] `json:"cycle_anchor,omitempty"`
+	Enabled     bool                                  `json:"enabled"`
+	Models      []string                              `json:"models"`
+	Name        string                                `json:"name"`
+	ProjectId   openapi_types.UUID                    `json:"project_id"`
+	ProviderId  openapi_types.UUID                    `json:"provider_id"`
 }
 
 // CodeAllowance Provider-reported subscription metadata. Unknown values remain null and never become local hard budgets or billed spend.
@@ -9574,13 +9580,14 @@ type ConfigurationCode struct {
 
 // ConfigurationCodeAccount defines model for ConfigurationCodeAccount.
 type ConfigurationCodeAccount struct {
-	CredentialRef string             `json:"credential_ref"`
-	Enabled       bool               `json:"enabled"`
-	Id            openapi_types.UUID `json:"id"`
-	Models        []string           `json:"models"`
-	Name          string             `json:"name"`
-	Project       string             `json:"project"`
-	Provider      string             `json:"provider"`
+	CredentialRef string                                `json:"credential_ref"`
+	CycleAnchor   nullable.Nullable[openapi_types.Date] `json:"cycle_anchor,omitempty"`
+	Enabled       bool                                  `json:"enabled"`
+	Id            openapi_types.UUID                    `json:"id"`
+	Models        []string                              `json:"models"`
+	Name          string                                `json:"name"`
+	Project       string                                `json:"project"`
+	Provider      string                                `json:"provider"`
 }
 
 // ConfigurationCodeBindings defines model for ConfigurationCodeBindings.

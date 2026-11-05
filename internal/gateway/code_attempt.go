@@ -354,6 +354,22 @@ func (a *codeAttempt) flushPendingHealth(ctx context.Context) {
 	a.observeHealth(ctx, pending)
 }
 
+func (a *codeAttempt) qwenQuotaRetryAt(envelope string, retryAt time.Time, headers http.Header, now time.Time) time.Time {
+	if envelope != "qwen_insufficient_quota" || a.permit.Account.CycleAnchor == nil {
+		return retryAt
+	}
+	if values := headers.Values("Retry-After"); len(values) == 1 {
+		if _, valid := upstream.ParseRetryAfter(values[0], now); valid {
+			return retryAt
+		}
+	}
+	reset, ok := codemode.NextMonthlyReset(*a.permit.Account.CycleAnchor, now)
+	if !ok || !reset.After(retryAt) {
+		return retryAt
+	}
+	return reset
+}
+
 func (a *codeAttempt) observeCooldownClass(o codemode.Observation) (codeadapter.Classification, bool) {
 	if a.paid != nil || len(o.RejectionBody) == 0 || a.permit.Account.ID == "" {
 		return codeadapter.Classification{}, false
@@ -379,6 +395,7 @@ func (a *codeAttempt) observeCooldownClass(o codemode.Observation) (codeadapter.
 		a.pendingHealth = nil
 		return classification, true
 	}
+	classification.RetryAt = a.qwenQuotaRetryAt(classification.Envelope, classification.RetryAt, headers, now)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	err := a.server.CodeLedger.ObserveCooldownClass(ctx, a.permit.Account.ID, a.model, classification, now)
