@@ -169,14 +169,28 @@ report path that matches the fixture report path, and the script fails
 if fixture evidence appears in the live report. Fixture evidence is
 never substituted for a live record.
 
-The `qualify-code-live` workflow runs only on manual dispatch, because
-push and pull request runs have no account secrets. It maps repository
+The `qualify-code-live` workflow runs on manual dispatch, because push
+and pull request runs have no account secrets. It maps repository
 secrets of the same names to the variables above and runs
 `make qualify-code-live` with no step allowed to continue on error.
 Dispatch it before making any reset aware ordering or reliability
 claim for a release, and scope the claim to exactly the pairs the
 green run summary names. A release with no green live run makes no
-such claim.
+such claim. The workflow is also reusable through `workflow_call`.
+When the repository variable `OLP_LIVE_QUALIFICATION` is set to
+`required`, the release workflow calls it with inherited secrets and
+promotion needs it, so a red or missing live run blocks the release.
+When the variable is unset, that release job is skipped, claims remain
+fixture-scoped, and the `check-docs` guard in
+`scripts/check-docs.mjs` enforces that scope. The guard rejects the
+exact claiming phrases `live-proven only`, `is live proven`,
+`are live proven`, and `live proven ordering`, plus their hyphenated
+and band or signal variants, in scoped documentation, and its test
+applies the same rule to the code mode guide and console copy.
+Wording that defines the term without claiming it, such as counts as
+live proven only when a lane runs green, stays allowed. Claiming live
+status for a pair therefore takes a green live run and a deliberate
+change to the guard in the same change.
 
 ### Latest official clients
 

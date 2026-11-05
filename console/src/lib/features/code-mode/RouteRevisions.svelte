@@ -44,8 +44,8 @@
           </p>
           <p>
             Allowance ordering {revision.route.allowance_ordering
-              ? 'enabled. New conversation roots and new model pins rank known healthy above unknown above known low from fresh proven observations, with the weighted score inside the best band. Established pins never move.'
-              : 'disabled. New conversation roots are picked by weights plus cooldown. Enable it in the draft and publish to order by proven allowance bands.'}
+              ? 'enabled. New conversation roots and new model pins rank known healthy above unknown above known low from fresh qualified observations, with the weighted score inside the best band. Codex bands are fixture-proven only. Established pins never move.'
+              : 'disabled. New conversation roots are picked by weights plus cooldown. Enable it in the draft and publish to order by allowance bands, fixture-proven only for Codex.'}
           </p>
           <code>{revision.id}</code>
         </li>{:else}<li>No published revisions.</li>{/each}

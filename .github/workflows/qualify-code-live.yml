@@ -1,6 +1,7 @@
 name: Qualify code live
 on:
   workflow_dispatch:
+  workflow_call:
 permissions:
   contents: read
 defaults:

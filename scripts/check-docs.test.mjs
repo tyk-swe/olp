@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
-import { checkDocs, collectAnchors, listScopedDocs } from './check-docs.mjs';
+import { checkDocs, collectAnchors, findLiveProvenClaims, listScopedDocs } from './check-docs.mjs';
 
 const reader =
   (files) =>
@@ -32,6 +32,27 @@ test('broken files, anchors, index entries and em dashes are rejected', () => {
   assert.match(message, /broken local anchor #absent/);
   assert.match(message, /contains an em dash/);
   assert.match(message, /missing handbook link for unindexed\.md/);
+});
+
+test('live-proven claims are rejected in guides and console copy', () => {
+  assert.deepEqual(findLiveProvenClaims('Codex bands are live-proven only'), [
+    'live-proven only',
+    'are live-proven'
+  ]);
+  assert.deepEqual(findLiveProvenClaims('live proven ordering for every adapter'), [
+    'live proven ordering'
+  ]);
+  assert.deepEqual(findLiveProvenClaims('A mechanism counts as live proven only when a lane runs green'), []);
+  assert.deepEqual(findLiveProvenClaims('Codex bands, fixture-proven only'), []);
+  const userFacing = [
+    'docs/use/code-mode.md',
+    'console/src/lib/features/code-mode/presentation.ts',
+    'console/src/lib/features/code-mode/RouteEditor.svelte',
+    'console/src/lib/features/code-mode/RouteRevisions.svelte'
+  ];
+  for (const file of userFacing) {
+    assert.deepEqual(findLiveProvenClaims(readFileSync(file, 'utf8')), [], file);
+  }
 });
 
 test('the scoped repository documentation passes the documentation contract', () => {

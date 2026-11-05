@@ -31,6 +31,13 @@ jobs:
       - name: Install latest coding clients
         run: npm install --global @openai/codex@latest @anthropic-ai/claude-code@latest opencode-ai@latest
       - run: make qualify-code
+  qualify-code-live:
+    if: vars.OLP_LIVE_QUALIFICATION == 'required'
+    needs: qualification
+    uses: ./.github/workflows/qualify-code-live.yml
+    secrets: inherit
+    permissions:
+      contents: read
   candidate-build:
     needs: qualification
     strategy:
@@ -205,8 +212,8 @@ jobs:
             console/test-results
           if-no-files-found: warn
   promote:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v0.')
-    needs: [candidate, packaged, qualify-code]
+    if: ${{ !cancelled() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v0.') && needs.candidate.result == 'success' && needs.packaged.result == 'success' && needs.qualify-code.result == 'success' && (needs.qualify-code-live.result == 'success' || needs.qualify-code-live.result == 'skipped') }}
+    needs: [candidate, packaged, qualify-code, qualify-code-live]
     runs-on: ubuntu-latest
     permissions:
       contents: write

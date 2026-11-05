@@ -4,6 +4,19 @@ import { dirname, join, normalize, relative } from 'node:path';
 const rootDocs = ['CHANGELOG.md', 'CONTRIBUTING.md', 'GLOSSARY.md', 'README.md', 'SECURITY.md'];
 const docDirectories = ['docs', 'docs/develop', 'docs/operate', 'docs/use', 'docs/use/providers'];
 
+export const liveProvenClaimPatterns = [
+  /\blive-proven only\b/i,
+  /\b(?:is|are) live[- ]proven\b/i,
+  /\blive[- ]proven (?:ordering|bands?|signal)\b/i
+];
+
+export function findLiveProvenClaims(text) {
+  const visible = withoutInlineCode(withoutFencedCode(text));
+  return liveProvenClaimPatterns
+    .filter((pattern) => pattern.test(visible))
+    .map((pattern) => visible.match(pattern)[0]);
+}
+
 export function listScopedDocs(listDirectory = (directory) => readdirSync(directory)) {
   const handbook = docDirectories.flatMap((directory) =>
     listDirectory(directory)
@@ -124,6 +137,9 @@ export function checkDocs(files, read, exists) {
     }
     anchorsByFile.set(file, collectAnchors(markdown));
     if (markdown.includes('—')) errors.push(`${file}: contains an em dash`);
+    for (const claim of findLiveProvenClaims(markdown)) {
+      errors.push(`${file}: claims live-proven status (${claim})`);
+    }
   }
 
   for (const file of files) {

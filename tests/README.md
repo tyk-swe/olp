@@ -72,12 +72,18 @@ database or Valkey, and keep everything else in the net.
 
 ## Qualification lanes
 
-`make qualify-code` is a third test target. It runs `tests/qualification`
-behind the `qualification` build tag through `scripts/qualification.sh`, in
-disposable Docker containers, as a release gate rather than pre-merge
-validation. It sits outside the fast and service allowlists as the one stated
-exception to the defect rule below, and it carries no wall-time budget. The
-release workflow runs it before a release can be promoted. What the lanes
+`make qualify-code` and `make qualify-code-live` are further test targets.
+They run `tests/qualification` in disposable Docker containers as release
+gates rather than pre-merge validation. `make qualify-code` runs behind the
+`qualification` build tag through `scripts/qualification.sh`.
+`make qualify-code-live` runs behind the `qualification` and
+`qualificationlive` build tags through `scripts/qualification-live.sh` and
+needs real vendor account secrets from the environment. Both targets sit
+outside the fast and service allowlists as the one stated exception to the
+defect rule below, and neither carries a wall-time budget. The release
+workflow runs `make qualify-code` before a release can be promoted, and it
+runs `make qualify-code-live` as a promotion gate when the repository
+variable `OLP_LIVE_QUALIFICATION` is set to `required`. What the lanes
 establish is recorded in
 [qualification](../docs/develop/qualification.md#code-mode-qualification).
 
@@ -111,8 +117,8 @@ Admission to the net is budgeted. A new test or package enters
 budget with headroom, or when it displaces a weaker test already in the
 net. State the timed result in the change that admits it. A test file that
 exists outside the allowlist is a defect, because nothing runs it. The
-qualification lanes are the stated exception, because `make qualify-code` and
-the release workflow run them. A shallow test that cannot fail gets rewritten
+qualification lanes are the stated exception, because `make qualify-code`
+and `make qualify-code-live` and the release workflow run them. A shallow test that cannot fail gets rewritten
 as a behavior test or deleted. No signal beats false signal.
 
 ## Focused runs
@@ -124,8 +130,8 @@ Run one allowlisted package or file directly while iterating, for example
 `go test -count=1 ./internal/gateway` or
 `pnpm --dir console test --project unit src/lib/features/usage/priceEntry.test.ts`.
 Focused `.only` tests must never land. `make test-fast`, `make test-service`,
-and `make qualify-code` are the only test targets, and each always runs its
-whole suite.
+`make qualify-code`, and `make qualify-code-live` are the only test targets,
+and each always runs its whole suite.
 
 Authorization changes surface as diffs to
 `internal/access/testdata/authorization.golden.json`, which records the
