@@ -669,3 +669,39 @@ func TestTransformedRerankPreservesDocumentIdentity(t *testing.T) {
 		})
 	}
 }
+
+func TestTransformedEmbeddingsRejectIncompleteVectors(t *testing.T) {
+	for _, tc := range []struct {
+		name, response string
+		want           int
+	}{
+		{"complete", `{"embeddings":[{"values":[0.5,0.25]},{"values":[0.25,0.5]}]}`, http.StatusOK},
+		{"missing input", `{"embeddings":[{"values":[0.5,0.25]}]}`, http.StatusBadGateway},
+		{"extra input", `{"embeddings":[{"values":[0.5,0.25]},{"values":[0.25,0.5]},{"values":[1,1]}]}`, http.StatusBadGateway},
+		{"null coordinate", `{"embeddings":[{"values":[0.5,null]},{"values":[0.25,0.5]}]}`, http.StatusBadGateway},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, Config{})
+			h.republish(func(snapshot *routing.Snapshot, a, b routing.Provider) {
+				strictEmbeddings(snapshot)
+				for id, provider := range snapshot.Providers {
+					provider.Kind = "gemini"
+					snapshot.Providers[id] = provider
+				}
+				route := snapshot.Routes[routeSlug]
+				route.MaxAttempts = 1
+				snapshot.Routes[routeSlug] = route
+			})
+			h.mock.set("a", status(http.StatusOK, tc.response))
+			resp := h.do(t.Context(), http.MethodPost, "/v1/embeddings", fullKey, []byte(`{"model":"team-chat","input":["a","b"],"encoding_format":"float"}`), nil)
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != tc.want {
+				t.Fatalf("status %d, want %d, body %s", resp.StatusCode, tc.want, body)
+			}
+		})
+	}
+}
