@@ -123,8 +123,9 @@
   creating={!current}
   {allowed}
   {submission}
-  referenceError={providers.error || credentials.error}
-  enrolling={enrolling || profilePending}
+  referenceError={providers.error || credentials.error || provider.error}
+  {enrolling}
+  saveBlocked={profilePending}
   {enrollment}
 >
   <label for="code-name">Name</label><input
