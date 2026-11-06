@@ -30,10 +30,10 @@
     enrollPassword,
     getProfile,
     listOidcIdentities,
-    reauthenticateWithPassword,
     unlinkOidcIdentity,
     updateProfile
   } from '$lib/features/access/profile/api';
+  import { reauthenticateWithPassword } from '$lib/features/access/profile/reauthentication';
   import ActiveSessionsPanel from '$lib/features/access/profile/ActiveSessionsPanel.svelte';
   import LocalPasswordPanel from '$lib/features/access/profile/LocalPasswordPanel.svelte';
   import OidcIdentitiesPanel from '$lib/features/access/profile/OidcIdentitiesPanel.svelte';
@@ -199,11 +199,6 @@
     }
   }
 
-  /**
-   * Recent authentication is proven either by an inline password confirmation
-   * or by a linked-identity round trip. The password path opens a real form so the value
-   * is masked, cancellable, and never typed into a browser prompt.
-   */
   async function acquireRecentAuthentication(
     purpose: 'oidc_link' | 'oidc_unlink',
     resourceId?: string

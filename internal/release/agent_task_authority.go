@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 )
 
 func (m *Manager) AuthorizeAgentTask(keyID, projectID, publicationID, revisionID, workloadRevision string, callerExpiresAt *time.Time) error {
@@ -20,7 +21,7 @@ func (m *Manager) AuthorizeAgentTask(keyID, projectID, publicationID, revisionID
 	if principal.WorkloadIssuerID != nil && (principal.WorkloadDigest == "" || callerExpiresAt == nil || workloadRevision == "") {
 		return access.Forbidden()
 	}
-	identity := access.Authority{
+	identity := keyauthority.Authority{
 		ID:               principal.ID,
 		WorkloadDigest:   principal.WorkloadDigest,
 		WorkloadIssuerID: principal.WorkloadIssuerID,
@@ -33,7 +34,7 @@ func (m *Manager) AuthorizeAgentTask(keyID, projectID, publicationID, revisionID
 	return m.authority.authorizeTaskPublication(projectID, publicationID, revisionID)
 }
 
-func (state authorityState) taskPrincipal(keyID string) (access.Authority, bool) {
+func (state authorityState) taskPrincipal(keyID string) (keyauthority.Authority, bool) {
 	if principal, ok := state.agentPrincipals[keyID]; ok {
 		return principal, true
 	}
@@ -42,7 +43,7 @@ func (state authorityState) taskPrincipal(keyID string) (access.Authority, bool)
 			return principal, true
 		}
 	}
-	return access.Authority{}, false
+	return keyauthority.Authority{}, false
 }
 
 func (state authorityState) authorizeTaskPublication(projectID, publicationID, revisionID string) error {

@@ -25,6 +25,7 @@ import (
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/mediacontract"
 	"github.com/tyk-swe/olp/internal/operationplan"
+	"github.com/tyk-swe/olp/internal/providerconfig"
 	"github.com/tyk-swe/olp/internal/realtimecontract"
 	"github.com/tyk-swe/olp/internal/routeidentity"
 )
@@ -197,7 +198,7 @@ type Route struct {
 	Behavior
 }
 
-// Snapshot is the complete immutable serving configuration.
+// Snapshot is mutable construction data. ReadOnly detaches the published view.
 type Snapshot struct {
 	AgentPublications    []agentcontract.Revision `json:"agent_publications,omitempty"`
 	MCPServers           []MCPServer              `json:"mcp_servers,omitempty"`
@@ -440,7 +441,18 @@ func (p *Provider) Connector() connectors.Config {
 	if mode == "" {
 		mode = "api_key"
 	}
-	return connectors.Config{Network: p.Network, Plugin: p.Plugin, PluginOptions: p.PluginOptions, ProfileID: p.ProfileID, ProfileRevision: p.ProfileRevision, SemanticHeaders: p.SemanticHeaders, QuerySettings: p.QuerySettings, OperationDefaults: p.OperationDefaults, Bindings: p.Bindings, ObservedPrincipal: p.ObservedPrincipal, CredentialSource: p.CredentialSource, Kind: p.Kind, AuthMode: mode, Endpoint: p.Endpoint, CloudRegion: p.CloudRegion, CloudProject: p.CloudProject, BatchStorage: p.BatchStorage, TuningDatasetURIPrefixes: p.TuningDatasetURIPrefixes, DocumentURIPrefixes: p.DocumentURIPrefixes, Deployment: p.Deployment, APIVersion: p.APIVersion, VendorID: p.VendorID, CredentialHeaders: p.CredentialHeaders, Models: p.Models}
+	identity := providerconfig.Identity[string]{
+		CredentialSource: p.CredentialSource, ProfileID: p.ProfileID, ProfileRevision: p.ProfileRevision,
+		Kind: p.Kind, AuthMode: mode, Endpoint: p.Endpoint, CloudRegion: p.CloudRegion,
+		CloudProject: p.CloudProject, BatchStorage: p.BatchStorage, Deployment: p.Deployment, APIVersion: p.APIVersion,
+	}
+	options := providerconfig.Options{
+		Network: p.Network, SemanticHeaders: p.SemanticHeaders, QuerySettings: p.QuerySettings,
+		OperationDefaults: p.OperationDefaults, Bindings: p.Bindings, PluginOptions: p.PluginOptions,
+		TuningDatasetURIPrefixes: p.TuningDatasetURIPrefixes, DocumentURIPrefixes: p.DocumentURIPrefixes,
+		VendorID: p.VendorID, CredentialHeaders: p.CredentialHeaders, Models: p.Models, ParameterDefaults: p.ParameterDefaults,
+	}
+	return identity.Connector(options, p.Plugin, p.CredentialSource, p.ObservedPrincipal)
 }
 
 // HasBodyLimits reports whether ingress needs byte measurements for ordinary routes.

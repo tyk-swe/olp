@@ -25,7 +25,6 @@ type Management struct {
 }
 
 func (m *Management) Register(mux *http.ServeMux) {
-	m.registerCodeMode(mux)
 	m.registerRetainedManagement(mux)
 	m.Access.Route(mux, "GET /api/v1/provider-resources", m.list)
 	m.Access.Route(mux, "GET /api/v1/provider-resource-contracts", m.contracts)

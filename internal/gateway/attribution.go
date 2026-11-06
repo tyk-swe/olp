@@ -7,16 +7,16 @@ import (
 	"net/http"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-func (s *Server) parseAttribution(r *http.Request, authority access.Authority) (map[string]string, *Error) {
+func (s *Server) parseAttribution(r *http.Request, authority keyauthority.Authority) (map[string]string, *Error) {
 	return parseAttributionValues(r.Header.Values(usage.AttributionHeader), authority)
 }
 
-func parseAttributionValues(values []string, authority access.Authority) (map[string]string, *Error) {
+func parseAttributionValues(values []string, authority keyauthority.Authority) (map[string]string, *Error) {
 	labels, err := parseCallerAttribution(values, authority)
 	if err != nil {
 		return nil, err
@@ -35,7 +35,7 @@ func parseAttributionValues(values []string, authority access.Authority) (map[st
 	return resolved, nil
 }
 
-func parseCallerAttribution(values []string, authority access.Authority) (map[string]string, *Error) {
+func parseCallerAttribution(values []string, authority keyauthority.Authority) (map[string]string, *Error) {
 	if len(values) == 0 {
 		return nil, nil
 	}

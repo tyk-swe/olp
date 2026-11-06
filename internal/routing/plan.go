@@ -37,6 +37,13 @@ func (n Names) list() []string {
 	return n()
 }
 
+type CandidatePreparation struct {
+	Parameters Names
+	Demand     *TokenDemand
+}
+
+type PrepareCandidate func(Provider, Target) (*CandidatePreparation, error)
+
 type Options struct {
 	Region      string
 	KeyID       string
@@ -56,8 +63,7 @@ type Options struct {
 	// plugins. Elsewhere, targets of providers whose plugin is unconfined
 	// are ineligible.
 	UnconfinedPlugins bool
-	Accept            func(Provider, Target) error
-	Effective         func(Provider, Target) (Names, *TokenDemand)
+	Prepare           PrepareCandidate
 	// Supply reads the live capacity and spend state the plan needs in one
 	// round trip, bounded by Context. The planner reads it at most once, and
 	// only when the capacity strategy or a spend cap applies.
@@ -195,6 +201,7 @@ func (p Plan) Conditions() []string {
 }
 
 type rankedCandidate struct {
+	provider   Provider
 	slots      []Slot
 	skipped    []skippedSlot
 	attempt    Attempt
@@ -210,16 +217,17 @@ type rankedCandidate struct {
 // Select evaluates targets, orders eligible candidates, and explains the
 // credential attempts within the route's budget. Execution rechecks live
 // credential authority and transient availability before dispatch.
-func Select(s *Snapshot, slug, operation, surface, mode string, affinity []byte, options Options) (Plan, error) {
+func Select(s selectionSource, slug, operation, surface, mode string, affinity []byte, options Options) (Plan, error) {
 	plan := Plan{Attempts: []Attempt{}, Decisions: []Decision{}}
-	route, ok := s.Routes[slug]
+	route, ok := s.lookupRoute(slug)
 	if !ok {
 		return plan, &SelectionError{Code: RouteNotFound}
 	}
 	if !slices.Contains(route.Operations, operation) {
 		return plan, &SelectionError{Code: OperationNotSupported}
 	}
-	policy, e := ResolvePolicy(s.InstallationPolicy, route.Policy, s.KeyPolicies[options.KeyID], options.Preferences)
+	installationPolicy, keyPolicy := s.selectionPolicies(options.KeyID)
+	policy, e := ResolvePolicy(installationPolicy, route.Policy, keyPolicy, options.Preferences)
 	if e != nil {
 		return plan, e
 	}
@@ -239,12 +247,12 @@ func Select(s *Snapshot, slug, operation, surface, mode string, affinity []byte,
 		return plan, e
 	}
 	capacity := policy.Strategy == strategyCapacity
-	if query := supplyQuery(route, rows, s, capacity && options.CheckSlots); !query.empty() {
+	if query := supplyQuery(route, rows, capacity && options.CheckSlots); !query.empty() {
 		var state *SupplyState
 		if options.Supply != nil {
 			state = options.Supply.ReadSupply(cmp.Or(options.Context, context.Background()), query)
 		}
-		applySupply(route, rows, s, state)
+		applySupply(route, rows, state)
 		for i := range rows {
 			if capacity {
 				OrderSlots(rows[i].slots, state)
@@ -311,7 +319,7 @@ func strptr(s string) *string { return &s }
 
 // evaluateCandidates preserves admission order: published eligibility and
 // source constraints precede preparation, then effective request constraints.
-func evaluateCandidates(s *Snapshot, route Route, operation, surface, mode string, affinity []byte, policy EffectivePolicy, chosen selection, options Options) ([]rankedCandidate, error) {
+func evaluateCandidates(s selectionSource, route Route, operation, surface, mode string, affinity []byte, policy EffectivePolicy, chosen selection, options Options) ([]rankedCandidate, error) {
 	now := options.Now
 	if now.IsZero() {
 		now = time.Now()
@@ -322,8 +330,8 @@ func evaluateCandidates(s *Snapshot, route Route, operation, surface, mode strin
 	}
 	rows := make([]rankedCandidate, 0, len(route.Targets))
 	for _, target := range route.Targets {
-		provider, exists := s.Providers[target.ProviderID]
-		row := rankedCandidate{decision: Decision{TargetID: target.ID, ProviderID: target.ProviderID, UpstreamModel: target.ProviderModel, Priority: target.Priority, Strategy: policy.Strategy, Shadow: target.Shadow != nil}, order: len(policy.Preferences.Order), shadow: target.Shadow != nil}
+		provider, exists := s.lookupProvider(target.ProviderID)
+		row := rankedCandidate{provider: provider, decision: Decision{TargetID: target.ID, ProviderID: target.ProviderID, UpstreamModel: target.ProviderModel, Priority: target.Priority, Strategy: policy.Strategy, Shadow: target.Shadow != nil}, order: len(policy.Preferences.Order), shadow: target.Shadow != nil}
 		if chosen.selector != nil && !row.shadow {
 			row.decision.Selector = &chosen.selector.ID
 		}
@@ -404,29 +412,28 @@ func evaluateCandidates(s *Snapshot, route Route, operation, surface, mode strin
 			}
 		}
 
-		if reason == "" && options.Accept != nil {
-			if e := options.Accept(provider, target); e != nil {
+		if reason == "" && options.Prepare != nil {
+			prepared, err := options.Prepare(provider, target)
+			if err != nil {
 				reason = "unsupported_request_semantics"
 				var detail incompatibilityError
-				if errors.As(e, &detail) {
+				if errors.As(err, &detail) {
 					code, field, requirement, message := detail.Incompatibility()
 					row.decision.Incompatibility = &Incompatibility{Code: code, Field: field, Requirement: requirement, Message: message}
 					reason = code
 				}
-			}
-		}
-		if reason == "" && options.Effective != nil {
-			parameters, demand := options.Effective(provider, target)
-			reason = capacityReason(metadata, demand)
-			if reason == "" {
-				reason = constraintReason(policy, provider, metadata, row.decision.Price, parameters)
-			}
-			if demand != nil {
-				input := demand.EstimatedInputTokens
-				row.decision.EstimatedInputTokens = &input
-				row.decision.RequestedOutputTokens = demand.MaxOutputTokens
-				if options.EstimateCost && options.WorstCost != nil {
-					row.decision.EstimatedCost = estimatedCost(provider, row.decision.Price, row.attempt.Discount, demand, now, options.WorstCost, target)
+			} else if prepared != nil {
+				reason = capacityReason(metadata, prepared.Demand)
+				if reason == "" {
+					reason = constraintReason(policy, provider, metadata, row.decision.Price, prepared.Parameters)
+				}
+				if prepared.Demand != nil {
+					input := prepared.Demand.EstimatedInputTokens
+					row.decision.EstimatedInputTokens = &input
+					row.decision.RequestedOutputTokens = prepared.Demand.MaxOutputTokens
+					if options.EstimateCost && options.WorstCost != nil {
+						row.decision.EstimatedCost = estimatedCost(provider, row.decision.Price, row.attempt.Discount, prepared.Demand, now, options.WorstCost, target)
+					}
 				}
 			}
 		}

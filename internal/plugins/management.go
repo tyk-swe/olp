@@ -129,15 +129,11 @@ func (s *Management) install(r *http.Request, _ access.Principal) (access.Reply,
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.Access.Begin(r)
+	tx, p, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	var count int
 	if err = tx.QueryRow(r.Context(), "SELECT count(*) FROM olp.plugins").Scan(&count); err != nil {
 		return access.Reply{}, err
@@ -161,7 +157,7 @@ func (s *Management) install(r *http.Request, _ access.Principal) (access.Reply,
 	if err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, access.Reply{Status: status, Body: installed, ETag: installed.Etag.String(), Location: "/api/v1/plugins/" + digest})
+	return access.Reply{Status: status, Body: installed, ETag: installed.Etag.String(), Location: "/api/v1/plugins/" + digest}, tx.Commit(r.Context())
 }
 
 func (s *Management) approve(r *http.Request, _ access.Principal) (access.Reply, error) {
@@ -173,15 +169,11 @@ func (s *Management) approve(r *http.Request, _ access.Principal) (access.Reply,
 	if err = access.Decode(r, &input); err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.Access.Begin(r)
+	tx, p, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	plugin, err := s.load(r.Context(), tx, digest)
 	if err != nil {
 		return access.Reply{}, err
@@ -205,7 +197,7 @@ func (s *Management) approve(r *http.Request, _ access.Principal) (access.Reply,
 	if plugin, err = loadPlugin(r.Context(), tx, digest); err != nil {
 		return access.Reply{}, err
 	}
-	reply, err := access.Commit(r, tx, access.Detail(plugin, plugin.Etag.String()))
+	reply, err := access.Detail(plugin, plugin.Etag.String()), tx.Commit(r.Context())
 	if err == nil {
 		s.Host.Prepare(digest)
 	}
@@ -217,15 +209,11 @@ func (s *Management) uninstall(r *http.Request, _ access.Principal) (access.Repl
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.Access.Begin(r)
+	tx, p, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	plugin, err := s.load(r.Context(), tx, digest)
 	if err != nil {
 		return access.Reply{}, err
@@ -262,7 +250,7 @@ func (s *Management) uninstall(r *http.Request, _ access.Principal) (access.Repl
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "plugin.uninstall", "plugin", digest, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	reply, err := access.Commit(r, tx, access.Reply{Status: http.StatusNoContent})
+	reply, err := access.Reply{Status: http.StatusNoContent}, tx.Commit(r.Context())
 	if err == nil {
 		// The plugin's cached code here stops; every other replica's copy is
 		// evicted when its next usability recheck observes the removal.

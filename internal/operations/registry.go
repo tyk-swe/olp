@@ -1,14 +1,12 @@
-// Package operations links trusted operation-owned unary codecs. It does not
-// know providers, transports, storage services or generation representations.
 package operations
 
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/url"
 	"regexp"
 	"slices"
-	"sync"
 
 	"github.com/tyk-swe/olp/internal/oif"
 )
@@ -68,15 +66,11 @@ const (
 	PollFailed    PollState = "failed"
 )
 
-// WireRequest is the bounded wire lowering of an effective request document:
-// query parameters plus the exact body bytes to submit, if any.
 type WireRequest struct {
 	Query url.Values
 	Body  []byte
 }
 
-// Dialect is the small unary contract. Optional hooks are absent where that
-// operation has no model-body identity, textual policy surface or usage record.
 type Dialect struct {
 	Identity, Operation           oif.Identity
 	Surface, Label, Documentation string
@@ -115,16 +109,55 @@ type Mapping struct {
 }
 
 type Registry struct {
-	mu       sync.RWMutex
 	dialects map[oif.Identity]Dialect
 	mappings map[[2]oif.Identity]Mapping
 }
 
-func NewRegistry() *Registry {
-	return &Registry{dialects: map[oif.Identity]Dialect{}, mappings: map[[2]oif.Identity]Mapping{}}
+func NewRegistry(dialects []Dialect, mappings []Mapping) (Registry, error) {
+	if len(dialects) > 256 {
+		return Registry{}, errors.New("duplicate or excessive dialect registration")
+	}
+	for _, d := range dialects {
+		if err := validateDialect(d); err != nil {
+			return Registry{}, err
+		}
+	}
+	registered := maps.Collect(func(yield func(oif.Identity, Dialect) bool) {
+		for _, d := range dialects {
+			normalized := cloneDialect(d)
+			normalized.Transport = d.Transport.Normalized()
+			if !yield(d.Identity, normalized) {
+				return
+			}
+		}
+	})
+	if len(registered) != len(dialects) {
+		return Registry{}, errors.New("duplicate or excessive dialect registration")
+	}
+	if len(mappings) > 1024 {
+		return Registry{}, errors.New("mapping requires registered matching operations and complete directions")
+	}
+	for _, m := range mappings {
+		a, aok := registered[m.Source]
+		b, bok := registered[m.Target]
+		if !aok || !bok || a.Operation != b.Operation || m.Lower == nil || m.Project == nil || m.Evidence == "" {
+			return Registry{}, errors.New("mapping requires registered matching operations and complete directions")
+		}
+	}
+	registeredMappings := maps.Collect(func(yield func([2]oif.Identity, Mapping) bool) {
+		for _, m := range mappings {
+			if !yield([2]oif.Identity{m.Source, m.Target}, m) {
+				return
+			}
+		}
+	})
+	if len(registeredMappings) != len(mappings) {
+		return Registry{}, errors.New("duplicate mapping registration")
+	}
+	return Registry{dialects: registered, mappings: registeredMappings}, nil
 }
 
-func (r *Registry) Register(d Dialect) error {
+func validateDialect(d Dialect) error {
 	if !ValidLabel(d.Identity.ID) || d.Identity.Revision == "" || !ValidLabel(d.Operation.ID) || d.Operation.Revision == "" || d.Request == nil || d.Result == nil || d.Probe == nil || d.Evidence == "" || d.Label == "" {
 		return errors.New("unary dialect requires bounded identities, codecs, probe and evidence")
 	}
@@ -147,49 +180,20 @@ func (r *Registry) Register(d Dialect) error {
 	default:
 		return errors.New("unary dialect transport is not registered")
 	}
-	d.Transport = d.Transport.Normalized()
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, exists := r.dialects[d.Identity]; exists || len(r.dialects) >= 256 {
-		return errors.New("duplicate or excessive dialect registration")
-	}
-	r.dialects[d.Identity] = cloneDialect(d)
 	return nil
 }
 
-func (r *Registry) RegisterMapping(m Mapping) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	a, aok := r.dialects[m.Source]
-	b, bok := r.dialects[m.Target]
-	if !aok || !bok || a.Operation != b.Operation || m.Lower == nil || m.Project == nil || m.Evidence == "" || len(r.mappings) >= 1024 {
-		return errors.New("mapping requires registered matching operations and complete directions")
-	}
-	key := [2]oif.Identity{m.Source, m.Target}
-	if _, exists := r.mappings[key]; exists {
-		return errors.New("duplicate mapping registration")
-	}
-	r.mappings[key] = m
-	return nil
-}
-
-func (r *Registry) Lookup(id, revision string) (Dialect, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+func (r Registry) Lookup(id, revision string) (Dialect, bool) {
 	d, ok := r.dialects[oif.Identity{ID: id, Revision: revision}]
 	return cloneDialect(d), ok
 }
 
-func (r *Registry) Mapping(source, target oif.Identity) (Mapping, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+func (r Registry) Mapping(source, target oif.Identity) (Mapping, bool) {
 	m, ok := r.mappings[[2]oif.Identity{source, target}]
 	return m, ok
 }
 
-func (r *Registry) Dialects() []Dialect {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+func (r Registry) Dialects() []Dialect {
 	out := make([]Dialect, 0, len(r.dialects))
 	for _, d := range r.dialects {
 		out = append(out, cloneDialect(d))
@@ -206,12 +210,10 @@ func (r *Registry) Dialects() []Dialect {
 	return out
 }
 
-func (r *Registry) Supports(operation, surface, mode string) bool {
+func (r Registry) Supports(operation, surface, mode string) bool {
 	if mode != "unary" {
 		return false
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
 	for _, d := range r.dialects {
 		if d.Operation.ID == operation && (surface == d.Surface || surface == "native") {
 			return true
@@ -232,9 +234,7 @@ func cloneDialect(d Dialect) Dialect {
 	return d
 }
 
-func (r *Registry) HasOperation(id string) bool {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+func (r Registry) HasOperation(id string) bool {
 	for _, d := range r.dialects {
 		if d.Operation.ID == id {
 			return true
@@ -243,12 +243,10 @@ func (r *Registry) HasOperation(id string) bool {
 	return false
 }
 
-func (r *Registry) SupportsTarget(target oif.Identity, surface, mode string) bool {
+func (r Registry) SupportsTarget(target oif.Identity, surface, mode string) bool {
 	if mode != "unary" {
 		return false
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
 	d, ok := r.dialects[target]
 	if !ok {
 		return false

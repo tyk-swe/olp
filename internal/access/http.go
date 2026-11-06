@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -33,6 +34,25 @@ const recentCookie = "__Host-olp_recent_auth"
 const csrfHeader = "X-CSRF-Token"
 const sessionTTL = 24 * time.Hour
 
+type Config struct {
+	RuntimePublisher     func(context.Context, pgx.Tx, string) error
+	Pool                 *pgxpool.Pool
+	Installation, Origin string
+	Auth                 *secrets.AuthKey
+	Keys                 *secrets.KeyRing
+	Bootstrap            string
+	Egress               *egress.Policy
+
+	OIDCClient                  *http.Client
+	ClientIP                    func(*http.Request) string
+	LimitsEnforced              bool
+	LocalLoginDisabled          bool
+	ManagementNetworkRestricted bool
+	RetentionEnforced           bool
+	NotificationsActive         bool
+	ResponseCacheConfigured     bool
+}
+
 type Server struct {
 	RuntimePublisher     func(context.Context, pgx.Tx, string) error
 	Pool                 *pgxpool.Pool
@@ -40,66 +60,62 @@ type Server struct {
 	Auth                 *secrets.AuthKey
 	Keys                 *secrets.KeyRing
 	Bootstrap            string
-	OIDCClient           *http.Client
-	// LimitsEnforced is true where the process has the shared state that
-	// admission needs, so stored request, token, concurrency and cost limits
-	// are actually applied. The console shows stored amounts either way and
-	// uses this to say whether they bind. It is set during composition,
-	// before the first request is served, and never changes afterwards.
-	LimitsEnforced     bool
-	LocalLoginDisabled bool
-	// ManagementNetworkRestricted reports the process's immutable CIDR policy.
-	ManagementNetworkRestricted bool
-	// ClientIP is wired to the shared trusted-proxy resolver by the process.
-	ClientIP func(*http.Request) string
-	// RetentionEnforced is true where this installation is configured with the
-	// shared coordination state (OLP_VALKEY_URL) the worker plane requires, so
-	// retention and aggregation run in its worker and all processes. A control
-	// process cannot observe a separate worker replica, so this reports the
-	// installation's configuration rather than a worker's liveness: the console
-	// uses it to say whether stored retention policies are applied at all, not
-	// whether a pass ran. It is set during composition, before the first
-	// request is served, and never changes afterwards.
-	RetentionEnforced       bool
-	NotificationsActive     bool
-	ResponseCacheConfigured bool
+	Egress               *egress.Policy
 
-	Egress        *egress.Policy
-	passwordSlots chan struct{}
-	dummyPassword string
+	oidcClient                  *http.Client
+	resolveClientIP             func(*http.Request) string
+	limitsEnforced              bool
+	localLoginDisabled          bool
+	managementNetworkRestricted bool
+	retentionEnforced           bool
+	notificationsActive         bool
+	responseCacheConfigured     bool
+	passwordSlots               chan struct{}
+	dummyPassword               string
 }
 
-func New(ctx context.Context, pool *pgxpool.Pool, installation, origin string, auth *secrets.AuthKey, keys *secrets.KeyRing, bootstrap string) (*Server, error) {
-	s := &Server{Pool: pool, Installation: installation, Origin: strings.TrimSuffix(origin, "/"), Auth: auth, Keys: keys, Bootstrap: bootstrap, passwordSlots: make(chan struct{}, 4), dummyPassword: secrets.HashPassword(secrets.Token()), OIDCClient: oidcHTTPClient()}
+func New(cfg Config) *Server {
+	return &Server{
+		RuntimePublisher: cfg.RuntimePublisher, Pool: cfg.Pool, Installation: cfg.Installation,
+		Origin: strings.TrimSuffix(cfg.Origin, "/"), Auth: cfg.Auth, Keys: cfg.Keys, Bootstrap: cfg.Bootstrap,
+		Egress: cfg.Egress, oidcClient: oidcHTTPClient(cfg.OIDCClient), resolveClientIP: cfg.ClientIP,
+		limitsEnforced: cfg.LimitsEnforced, localLoginDisabled: cfg.LocalLoginDisabled,
+		managementNetworkRestricted: cfg.ManagementNetworkRestricted, retentionEnforced: cfg.RetentionEnforced,
+		notificationsActive: cfg.NotificationsActive, responseCacheConfigured: cfg.ResponseCacheConfigured,
+		passwordSlots: make(chan struct{}, 4), dummyPassword: secrets.HashPassword(secrets.Token()),
+	}
+}
+
+func PrepareInstallation(ctx context.Context, pool *pgxpool.Pool, installation string, auth *secrets.AuthKey, keys *secrets.KeyRing) error {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer tx.Rollback(ctx)
 	var fingerprint []byte
 	var active *int
 	if err = tx.QueryRow(ctx, "SELECT auth_fingerprint,active_key_version FROM olp.installation WHERE singleton FOR UPDATE").Scan(&fingerprint, &active); err != nil {
-		return nil, err
+		return err
 	}
 	expected := auth.Digest(secrets.InstallationDigest, "identity")
 	if fingerprint != nil && !hmac.Equal(fingerprint, expected) {
-		return nil, errors.New("authentication key does not match the installation")
+		return errors.New("authentication key does not match the installation")
 	}
 	if active != nil && *active != keys.Active {
-		return nil, errors.New("master key active version differs; run master-key reencrypt or reload the current ring")
+		return errors.New("master key active version differs; run master-key reencrypt or reload the current ring")
 	}
 	// Authenticate every record, including expired replays and old key versions,
 	// before admitting writes.
 	if _, err = keys.VerifyAll(ctx, tx, installation); err != nil {
-		return nil, err
+		return err
 	}
 	if _, err = tx.Exec(ctx, "UPDATE olp.installation SET auth_fingerprint=$1,active_key_version=$2 WHERE singleton", expected, keys.Active); err != nil {
-		return nil, err
+		return err
 	}
 	if err = tx.Commit(ctx); err != nil {
-		return nil, err
+		return err
 	}
-	return s, nil
+	return nil
 }
 
 type Problem struct {
@@ -258,6 +274,8 @@ func WriteProblem(w http.ResponseWriter, err error) {
 	var pg *pgconn.PgError
 	if known, ok := errors.AsType[*Problem](err); ok {
 		p = known
+	} else if validation, ok := errors.AsType[*authority.ValidationError](err); ok {
+		p = &Problem{Status: 422, Code: "validation_failed", Detail: validation.Detail, Field: validation.Field}
 	} else if contract := ContractProblem(err); contract != nil {
 		p = contract
 	} else if refusal, ok := errors.AsType[interface {
@@ -392,8 +410,8 @@ type clientIPKey struct{}
 // clientIP resolves the request's client address through the trusted-proxy
 // resolver when one is configured.
 func (s *Server) clientIP(r *http.Request) string {
-	if s.ClientIP != nil {
-		return s.ClientIP(r)
+	if s.resolveClientIP != nil {
+		return s.resolveClientIP(r)
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -444,9 +462,6 @@ func auditForProject(ctx context.Context, tx pgx.Tx, r *http.Request, actor Acto
 	}
 	_, err := tx.Exec(ctx, auditInsertSQL, NewID(), userID, tokenID, action, resource, id, outcome, source, family, projectID)
 	return err
-}
-func Commit(r *http.Request, tx pgx.Tx, result Reply) (Reply, error) {
-	return result, tx.Commit(r.Context())
 }
 
 type Pagination struct {

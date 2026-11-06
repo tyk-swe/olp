@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -45,15 +46,11 @@ func (s *DelegationManagement) options(r *http.Request, _ access.Principal) (acc
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.Access.Begin(r)
+	tx, principal, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	principal, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	var projectID *string
 	if err := tx.QueryRow(r.Context(), "SELECT project_id::text FROM olp.api_keys WHERE id=$1 AND workload_issuer_id IS NULL", keyID).Scan(&projectID); err != nil {
 		if err == pgx.ErrNoRows {
@@ -141,9 +138,10 @@ func (s *DelegationManagement) options(r *http.Request, _ access.Principal) (acc
 			}
 		}
 	}, func(left, right delegationOption) int { return cmp.Compare(left.ID, right.ID) })
-	return access.Commit(r, tx, access.Reply{Status: http.StatusOK, Body: struct {
+	return access.Reply{Status: http.StatusOK, Body: struct {
 		Agents []delegationOption `json:"agents"`
-	}{Agents: append([]delegationOption{}, options...)}})
+	}{Agents: append([]delegationOption{}, options...)}}, tx.Commit(r.Context())
+
 }
 
 func (s *DelegationManagement) create(r *http.Request, _ access.Principal) (access.Reply, error) {
@@ -159,15 +157,11 @@ func (s *DelegationManagement) create(r *http.Request, _ access.Principal) (acce
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.Access.Begin(r)
+	tx, principal, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	principal, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	if err := s.Access.ConsumeRecent(r, tx, principal, "agent_delegation", keyID); err != nil {
 		return access.Reply{}, err
 	}
@@ -194,7 +188,7 @@ func (s *DelegationManagement) create(r *http.Request, _ access.Principal) (acce
 		return access.Reply{}, err
 	}
 	pair, _ := s.Manager.delegationPair(*target.key.ProjectID, keyID, agentID, &principal.ID)
-	return access.Commit(r, tx, access.Reply{Status: http.StatusCreated, Body: map[string]any{"consent": code, "expires_at": expires, "delegation_pair_digest": pair}})
+	return access.Reply{Status: http.StatusCreated, Body: map[string]any{"consent": code, "expires_at": expires, "delegation_pair_digest": pair}}, tx.Commit(r.Context())
 }
 
 func consentScopes(scopes []string) []string {
@@ -205,8 +199,8 @@ func consentScopes(scopes []string) []string {
 }
 
 type memberConsentTarget struct {
-	agent    access.Authority
-	key      access.Authority
+	agent    keyauthority.Authority
+	key      keyauthority.Authority
 	revision string
 }
 
@@ -237,9 +231,9 @@ func (m *Manager) memberConsentTarget(ctx context.Context, tx pgx.Tx, agentID, k
 	return memberConsentTarget{}, access.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
 }
 
-func (state authorityState) memberConsentAgent(principal access.Authority) (access.Authority, string, bool) {
+func (state authorityState) memberConsentAgent(principal keyauthority.Authority) (keyauthority.Authority, string, bool) {
 	if principal.WorkloadIssuerID == nil || principal.RevokedAt != nil || principal.ProjectID == nil {
-		return access.Authority{}, "", false
+		return keyauthority.Authority{}, "", false
 	}
 	for _, issuer := range state.workloadIssuers {
 		if issuer.ID != *principal.WorkloadIssuerID || !issuer.Config.Enabled {
@@ -255,5 +249,5 @@ func (state authorityState) memberConsentAgent(principal access.Authority) (acce
 			}
 		}
 	}
-	return access.Authority{}, "", false
+	return keyauthority.Authority{}, "", false
 }

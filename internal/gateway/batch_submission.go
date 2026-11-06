@@ -90,13 +90,13 @@ func (s *Server) prepareBatchSubmissionWithID(ctx context.Context, x *call, auth
 	canonical, effective []byte, serving oif.ServingIdentity,
 	localFileID, upstreamFileID, resourceKind, adapter, surface, lineOperation string, window time.Duration, expected *int64, reconciliationCursor json.RawMessage, resourceID uuid.UUID,
 ) (*batchSubmission, *Error) {
-	if s.Batches == nil {
+	if s.deps.Batches == nil {
 		return nil, serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Batch settlement is not configured.")
 	}
 	if p != nil && p.provider.CredentialSource == "caller" {
 		return nil, policyUnavailable("target_capability", "Batch submissions require gateway-managed credentials so settlement can run after the request ends.")
 	}
-	digester, ok := s.Runtime.(interface {
+	digester, ok := s.deps.Runtime.(interface {
 		Digest(secrets.DigestPurpose, string) []byte
 	})
 	if !ok {
@@ -176,7 +176,7 @@ func (s *Server) prepareBatchSubmissionWithID(ctx context.Context, x *call, auth
 		LineOperation: lineOperation, Template: template, State: batches.StateSubmitting, ExpectedResults: expected,
 		Cursor: cursor, CloseAfter: closeAfter,
 	}
-	if err = s.Batches.BeginSubmission(ctx, settlement); err != nil {
+	if err = s.deps.Batches.BeginSubmission(ctx, settlement); err != nil {
 		if errors.Is(err, batches.ErrSubmissionInFlight) {
 			return nil, serverError(http.StatusConflict, "submission_unknown",
 				"An identical batch submission has an unknown outcome; list batches before retrying.")
@@ -189,11 +189,11 @@ func (s *Server) prepareBatchSubmissionWithID(ctx context.Context, x *call, auth
 			Binding: p.model, Serving: serving,
 		})
 		if marshalErr != nil {
-			_ = s.Batches.DeleteSubmission(ctx, resourceID)
+			_ = s.deps.Batches.DeleteSubmission(ctx, resourceID)
 			return nil, durableError(marshalErr)
 		}
-		if err = s.Resources.StageDurableContract(ctx, resourceID, payload, resource.ExpiresAt); err != nil {
-			_ = s.Batches.DeleteSubmission(ctx, resourceID)
+		if err = s.deps.Resources.StageDurableContract(ctx, resourceID, payload, resource.ExpiresAt); err != nil {
+			_ = s.deps.Batches.DeleteSubmission(ctx, resourceID)
 			return nil, serverError(http.StatusInternalServerError, "internal_error", "The native batch contract could not be staged.")
 		}
 	}
@@ -201,10 +201,10 @@ func (s *Server) prepareBatchSubmissionWithID(ctx context.Context, x *call, auth
 }
 
 func (s *Server) requireBatchEvidenceSettled(ctx context.Context, resourceID uuid.UUID) *Error {
-	if s.Batches == nil {
+	if s.deps.Batches == nil {
 		return serverError(http.StatusServiceUnavailable, "accounting_unavailable", "Batch settlement state is unavailable.")
 	}
-	pending, err := s.Batches.Pending(ctx, resourceID)
+	pending, err := s.deps.Batches.Pending(ctx, resourceID)
 	if err != nil {
 		return serverError(http.StatusServiceUnavailable, "accounting_unavailable", "Batch settlement state could not be read.")
 	}
@@ -218,10 +218,10 @@ func (s *Server) batchSettlementTemplate(x *call, p *pin, surface, lineOperation
 	if x == nil || x.request.release == nil || x.route == nil || p == nil {
 		return nil, errors.New("batch accounting identity is incomplete")
 	}
-	if s.Runtime == nil {
+	if s.deps.Runtime == nil {
 		return nil, errors.New("batch pricing inputs are unavailable")
 	}
-	inputs := s.Runtime.RoutingInputs()
+	inputs := s.deps.Runtime.RoutingInputs()
 	if inputs == nil || now.Sub(inputs.RefreshedAt) > usage.PerformanceMaxAge {
 		return nil, errors.New("batch pricing inputs are unavailable or stale")
 	}
@@ -263,7 +263,7 @@ func (s *Server) batchSettlementTemplate(x *call, p *pin, surface, lineOperation
 		BudgetGroupID: x.budgetGroupID, Attribution: x.attribution,
 		EvaluatorGuardrailID: x.evaluatorGuardrailID, GuardrailDecisions: x.guardrailEvidence(),
 		PolicyDecisions: x.policyDecisions, Route: x.route.Slug, RouteRevisionID: x.route.RevisionID,
-		Operation: lineOperation, Surface: surface, RuntimeGenerationID: x.request.release.Snapshot.Generation.ID,
+		Operation: lineOperation, Surface: surface, RuntimeGenerationID: x.request.release.Snapshot().Generation().ID,
 		StartedAt: now, CompletedAt: now, Attempts: []AttemptFact{fact},
 	})
 	if err != nil {
@@ -330,7 +330,7 @@ func batchExpectedResults(body []byte) *int64 {
 func (s *Server) batchSubmissionUnknown(ctx context.Context, resourceID uuid.UUID, message string) *Error {
 	commitCtx, stop := resourceCommitContext(ctx)
 	defer stop()
-	if err := s.Batches.MarkUnknown(commitCtx, resourceID, "submission_unknown", s.now()); err != nil {
+	if err := s.deps.Batches.MarkUnknown(commitCtx, resourceID, "submission_unknown", s.now()); err != nil {
 		s.log.Warn("batch submission outcome could not be recorded", "resource_id", resourceID, "error", err)
 	}
 	return serverError(http.StatusBadGateway, "submission_unknown", message)

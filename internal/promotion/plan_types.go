@@ -1,11 +1,12 @@
 package promotion
 
 import (
-	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/attribution"
-	"github.com/tyk-swe/olp/internal/billing"
 	"slices"
 	"strings"
+
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/billing"
 )
 
 type PlanItem struct {
@@ -84,12 +85,12 @@ type ExistingDraft struct {
 }
 
 type StateView struct {
-	ProjectAttributionBudgets  map[string]access.AttributionBudgets
-	ProjectBudgets             map[string]*access.BudgetPolicy
-	ProjectTemplates           map[string]access.LimitTemplates
-	ProjectRouteGroups         map[string]access.RouteGroups
+	ProjectAttributionBudgets  map[string]keyauthority.AttributionBudgets
+	ProjectBudgets             map[string]*keyauthority.BudgetPolicy
+	ProjectTemplates           map[string]keyauthority.LimitTemplates
+	ProjectRouteGroups         map[string]keyauthority.RouteGroups
 	Projects                   map[string]string
-	ProjectEndUserPolicies     map[string]*access.EndUserPolicy
+	ProjectEndUserPolicies     map[string]*keyauthority.EndUserPolicy
 	ProjectAttributionPolicies map[string]*attribution.Policy
 	ProjectName                map[string]string
 	ProjectOrganization        map[string]*string
@@ -111,7 +112,7 @@ func (v *StateView) ProjectOf(id *string) *string {
 func NormalizeDocument(doc *Document) {
 	for i := range doc.Projects {
 		doc.Projects[i].Name = strings.TrimSpace(doc.Projects[i].Name)
-		doc.Projects[i].Budget = access.NormalizedBudget(doc.Projects[i].Budget)
+		doc.Projects[i].Budget = keyauthority.NormalizedBudget(doc.Projects[i].Budget)
 		for _, members := range doc.Projects[i].RouteGroups {
 			slices.Sort(members)
 		}

@@ -10,12 +10,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
-	"github.com/tyk-swe/olp/internal/routing"
-
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 // Admission enforces the budgets every replica shares through Valkey: the API
@@ -172,7 +171,7 @@ func retryHint(dimension limits.Dimension, retryAfter time.Duration) time.Durati
 // provider are not the caller's, and are answered with the decision alone. The
 // surface the caller speaks may have no such headers, and then admission clears
 // the request for the allowance, which nothing would write.
-func keyRequest(authority access.Authority, estimate int64, ttl time.Duration) limits.Request {
+func keyRequest(authority keyauthority.Authority, estimate int64, ttl time.Duration) limits.Request {
 	policy := authority.Policy
 	return limits.Request{
 		CostOwnerID:       authority.ID,
@@ -189,7 +188,7 @@ func keyRequest(authority access.Authority, estimate int64, ttl time.Duration) l
 	}
 }
 
-func groupRequest(authority *access.Authority, ttl time.Duration) *limits.Request {
+func groupRequest(authority *keyauthority.Authority, ttl time.Duration) *limits.Request {
 	if authority.BudgetGroupID == nil ||
 		(authority.BudgetGroupDailyCostLimit == nil && authority.BudgetGroupMonthlyCostLimit == nil && authority.BudgetGroupWeeklyCostLimit == nil && authority.BudgetGroupRPM == nil && authority.BudgetGroupTPM == nil && authority.BudgetGroupConcurrency == nil) {
 		return nil
@@ -211,26 +210,26 @@ func groupRequest(authority *access.Authority, ttl time.Duration) *limits.Reques
 // or the limiter is unreachable and the installation chose to fail open. The
 // surface is the one the caller speaks, whose headers report the key's allowance
 // if it has any.
-func (a *Admission) reserveKey(ctx context.Context, authority access.Authority, surface string, estimate int64, ttl time.Duration, route ...string) (*limits.Lease, *Error) {
+func (a *Admission) reserveKey(ctx context.Context, authority keyauthority.Authority, surface string, estimate int64, ttl time.Duration, route ...string) (*limits.Lease, *Error) {
 	return a.reserveKeyCosted(ctx, &authority, surface, estimate, ttl, costReservation{}, route...)
 }
 
 // reserveKeyCosted applies all configured caller boundaries and attaches their
 // leases for one settlement. Every refusal refunds earlier reservations. The
 // optional route identifies the ingress route for per-key route policy.
-func (a *Admission) reserveKeyCosted(ctx context.Context, authority *access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*limits.Lease, *Error) {
+func (a *Admission) reserveKeyCosted(ctx context.Context, authority *keyauthority.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*limits.Lease, *Error) {
 	if authority.DelegationAgentLimits == nil && keyBoundariesOnly(authority) && authority.BudgetGroupID == nil && !keyHasHardLimits(&authority.Policy) {
 		return nil, nil
 	}
 	return a.reserveKeyWithLimits(ctx, authority, surface, estimate, ttl, hold, route...)
 }
 
-func (a *Admission) reserveKeyWithLimits(ctx context.Context, authority *access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*limits.Lease, *Error) {
+func (a *Admission) reserveKeyWithLimits(ctx context.Context, authority *keyauthority.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*limits.Lease, *Error) {
 	if authority.DelegationAgentLimits == nil {
 		return a.reserveCallerLimits(ctx, authority, surface, estimate, ttl, hold, route...)
 	}
 	agent := authority.DelegationAgentLimits
-	principal := access.Authority{ID: agent.ID, LookupID: agent.LookupID, BudgetIncreases: authority.BudgetIncreases, Policy: access.KeyPolicy{
+	principal := keyauthority.Authority{ID: agent.ID, LookupID: agent.LookupID, BudgetIncreases: authority.BudgetIncreases, Policy: keyauthority.KeyPolicy{
 		RequestsPerMinute: agent.Limits.RequestsPerMinute,
 		TokensPerMinute:   agent.Limits.TokensPerMinute,
 		MaxConcurrency:    agent.Limits.MaxConcurrency,
@@ -256,7 +255,7 @@ func (a *Admission) reserveKeyWithLimits(ctx context.Context, authority *access.
 	return lease, nil
 }
 
-func (a *Admission) reserveCallerLimits(ctx context.Context, authority *access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*limits.Lease, *Error) {
+func (a *Admission) reserveCallerLimits(ctx context.Context, authority *keyauthority.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*limits.Lease, *Error) {
 	// Every cost boundary checks shared accounting evidence just before it
 	// spends against it, once per request, so keys without budgets stay free.
 	costChecked := false
@@ -342,17 +341,17 @@ func (a *Admission) checkPendingCostAccounting(ctx context.Context, owner string
 // keyBoundariesOnly reports whether an authority configures no aggregate,
 // end-user or route boundary, as most keys do, so that admission skips
 // straight to the key and its group.
-func keyBoundariesOnly(authority *access.Authority) bool {
+func keyBoundariesOnly(authority *keyauthority.Authority) bool {
 	return authority.InstallationBudget == nil && authority.OrganizationBudget == nil && authority.ProjectBudget == nil && len(authority.ProjectAttributionBudgets) == 0 &&
 		authority.Policy.EndUserPolicy == nil && authority.ProjectEndUserPolicy == nil && len(authority.Policy.RouteLimits) == 0
 }
 
-func keyHasHardLimits(policy *access.KeyPolicy) bool {
+func keyHasHardLimits(policy *keyauthority.KeyPolicy) bool {
 	return policy.RequestsPerMinute != nil || policy.TokensPerMinute != nil || policy.MaxConcurrency != nil ||
 		policy.DailyCostLimit != nil || policy.MonthlyCostLimit != nil || policy.WeeklyCostLimit != nil
 }
 
-func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, costChecked *bool) (*limits.Lease, *Error) {
+func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *keyauthority.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, costChecked *bool) (*limits.Lease, *Error) {
 	var group *limits.Lease
 	if request := groupRequest(authority, ttl); request != nil {
 		if request.TokensPerMinute != nil {
@@ -680,7 +679,7 @@ const maxEstimate = estimate.MaxTokens
 func requestEstimate(x *call) int64 {
 	var reserved int64
 	for _, attempt := range x.attempts {
-		provider := x.snapshot().Providers[attempt.ProviderID]
+		provider := x.snapshot().Provider(attempt.ProviderID)
 		reserved = max(reserved, x.attemptReservation(attempt, &provider))
 	}
 	return max(reserved, 1)

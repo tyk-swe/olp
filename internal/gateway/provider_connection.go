@@ -21,7 +21,7 @@ func (s *Server) slotSecret(ctx context.Context, x *call, slot routing.Slot, pro
 	if slot.CredentialID == nil {
 		return nil, nil
 	}
-	secret, generation, err := s.Runtime.Secret(ctx, x.request.release, *slot.CredentialID)
+	secret, generation, err := s.deps.Runtime.Secret(ctx, x.request.release, *slot.CredentialID)
 	x.grantGeneration = generation
 	return secret, err
 }
@@ -47,19 +47,19 @@ func (s *Server) providerNetworkSecret(ctx context.Context, release *release.Rel
 	if provider.Network == nil || provider.Network.CredentialID == "" {
 		return nil, nil
 	}
-	return s.Runtime.NetworkSecret(ctx, release, provider.ID, provider.Network.CredentialID)
+	return s.deps.Runtime.NetworkSecret(ctx, release, provider.ID, provider.Network.CredentialID)
 }
 
 // pinEligibility reports whether a pinned slot's credential version and its
 // provider's network credential may still serve.
 func (s *Server) pinEligibility(p *pin) routing.Eligibility {
 	if p.slot.CredentialID != nil {
-		if eligibility := s.Runtime.Eligibility(*p.slot.CredentialID); eligibility != routing.Eligible {
+		if eligibility := s.deps.Runtime.Eligibility(*p.slot.CredentialID); eligibility != routing.Eligible {
 			return eligibility
 		}
 	}
 	if p.provider.Network != nil && p.provider.Network.CredentialID != "" {
-		return s.Runtime.Eligibility(p.provider.Network.CredentialID)
+		return s.deps.Runtime.Eligibility(p.provider.Network.CredentialID)
 	}
 	return routing.Eligible
 }

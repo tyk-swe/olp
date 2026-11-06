@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
-  import { listCodeRevisions } from '$lib/management/code-mode';
+  import { listCodeRevisions } from '$lib/features/code-mode/api';
   import {
     emptyCursorHistory,
     cursorPaginationProps

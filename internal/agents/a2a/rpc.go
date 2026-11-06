@@ -119,7 +119,7 @@ func (s *Server) rpc(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unsupported A2A version", http.StatusBadRequest)
 		return
 	}
-	call := agents.Call{Authority: authority, Publication: revision, Revisions: snapshot.Snapshot.AgentPublications, ReleaseID: releaseAffinity(snapshot), Version: version, Revalidate: func(ctx context.Context, pinned agentcontract.Revision) bool {
+	call := agents.Call{Authority: authority, Publication: revision, Revisions: snapshot.Snapshot().AgentPublications(), ReleaseID: releaseAffinity(snapshot), Version: version, Revalidate: func(ctx context.Context, pinned agentcontract.Revision) bool {
 		return s.streamAuthorized(r.WithContext(ctx), authority, pinned)
 	}}
 	switch value := decoded.(type) {
@@ -153,7 +153,7 @@ func releaseAffinity(snapshot *release.Release) string {
 	if id, err := uuid.Parse(snapshot.ID); err == nil && id != uuid.Nil && id.String() == snapshot.ID {
 		return snapshot.ID
 	}
-	return snapshot.Snapshot.Generation.ID
+	return snapshot.Snapshot().Generation().ID
 }
 func replyTask(w http.ResponseWriter, id json.RawMessage, version string, task *protocol.Task, err error) {
 	if err != nil {

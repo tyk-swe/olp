@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"log/slog"
 	"maps"
 	"net/http"
@@ -21,7 +22,6 @@ import (
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/secrets"
-	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
@@ -94,7 +94,7 @@ func (r *Refresher) Run(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		if err := usage.CheckpointTask(ctx, r.Pool, usage.TaskGrantRefresh, outcome, progress); err != nil {
+		if err := workerhealth.New(workerhealth.TaskGrantRefresh, "").Checkpoint(ctx, r.Pool, outcome, progress); err != nil {
 			r.Log.Warn("grant refresh checkpoint failed", "error", err)
 		}
 		select {
@@ -112,14 +112,14 @@ func (r *Refresher) Run(ctx context.Context) {
 // its recovery deadline, and a permanent failure lapses the grant. The pass
 // fails only when it can't read or record grants. It reports whether it
 // refreshed or retired a grant or recorded a failure.
-func (r *Refresher) Pass(ctx context.Context) (usage.Outcome, bool) {
+func (r *Refresher) Pass(ctx context.Context) (workerhealth.Outcome, bool) {
 	due, err := r.due(ctx)
 	if err != nil {
 		r.Log.Warn("grants due a refresh could not be read", "error", err)
-		return usage.OutcomeFailure, false
+		return workerhealth.OutcomeFailure, false
 	}
 	if len(due) == 0 {
-		return usage.OutcomeSuccess, false
+		return workerhealth.OutcomeSuccess, false
 	}
 	// A grant's lock is a session lock, so no transaction stays open while
 	// its plugin reaches the upstream. Closing the connection releases any
@@ -127,7 +127,7 @@ func (r *Refresher) Pass(ctx context.Context) (usage.Outcome, bool) {
 	resource, err := r.Pool.Acquire(ctx)
 	if err != nil {
 		r.Log.Warn("grant refresh connection unavailable", "error", err)
-		return usage.OutcomeFailure, false
+		return workerhealth.OutcomeFailure, false
 	}
 	conn := resource.Hijack()
 	defer conn.Close(context.WithoutCancel(ctx))
@@ -139,10 +139,10 @@ func (r *Refresher) Pass(ctx context.Context) (usage.Outcome, bool) {
 			if ctx.Err() == nil {
 				r.Log.Warn("grant refresh could not be recorded", "credential_id", credentialID, "error", err)
 			}
-			return usage.OutcomeFailure, progress
+			return workerhealth.OutcomeFailure, progress
 		}
 	}
-	return usage.OutcomeSuccess, progress
+	return workerhealth.OutcomeSuccess, progress
 }
 
 // due returns the credential versions whose grants are due a refresh, the

@@ -12,9 +12,9 @@
   } from '$lib/features/access/oidc/api';
   import {
     beginIdentityReauthentication,
-    listOidcIdentities,
-    reauthenticateWithPassword
+    listOidcIdentities
   } from '$lib/features/access/profile/api';
+  import { reauthenticateWithPassword } from '$lib/features/access/profile/reauthentication';
   import { FIXED_ROLES } from '$lib/features/access/session/authorization';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import ConflictNotice from '$lib/shell/ConflictNotice.svelte';
@@ -167,8 +167,6 @@
     try {
       const identities = await listOidcIdentities();
       if (!identities.has_local_password) {
-        // The profile callback requires explicit confirmation before consuming
-        // the one-time OIDC reauthentication.
         window.location.assign(
           await beginIdentityReauthentication('oidc_link')
         );
@@ -192,8 +190,6 @@
       reauthenticating = false;
       window.location.assign(await beginOidcLink());
     } catch (cause) {
-      // The dialog closes once the password is accepted, so a link failure
-      // after that point must surface on the panel itself.
       const detail = errorMessage(cause);
       if (reauthenticating) reauthenticationError = detail;
       else error = detail;

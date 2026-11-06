@@ -8,7 +8,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
@@ -84,7 +84,7 @@ func (s *Server) prepareWorkflowResume(ctx context.Context, x *call) *Error {
 	if json.Unmarshal(raw, &request) != nil || !request.Approved || request.ContinuationToken == "" || len(request.Arguments) == 0 {
 		return permissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
 	}
-	store, ok := s.WorkflowRuns.(WorkflowApprovalStore)
+	store, ok := s.deps.WorkflowRuns.(WorkflowApprovalStore)
 	if !ok {
 		return serverError(503, "tool_approval_unavailable", "The approval service is unavailable.")
 	}
@@ -143,16 +143,16 @@ func (s *Server) prepareWorkflowResume(ctx context.Context, x *call) *Error {
 	return nil
 }
 
-func (s *Server) callWorkflowTool(ctx context.Context, x *call, authority access.Authority, tool WorkflowTool, call wire.ToolCall, identityOrdinal int) (json.RawMessage, error) {
+func (s *Server) callWorkflowTool(ctx context.Context, x *call, authority keyauthority.Authority, tool WorkflowTool, call wire.ToolCall, identityOrdinal int) (json.RawMessage, error) {
 	if tool.Definition.Alias == recoveryToolName {
 		return s.recoverWorkflowContent(ctx, x, authority, call.ID, json.RawMessage(call.Arguments))
 	}
 	callID := fmt.Sprintf("%s:%d:%s", x.workflow.runID, identityOrdinal, call.ID)
 	index := slices.IndexFunc(x.workflow.approvals, func(approval runs.WorkflowApproval) bool { return approval.CallID == call.ID })
 	if index < 0 {
-		return s.WorkflowTools.Call(ctx, authority, x.request.release, tool, x.workflow.runID, x.workflow.ordinal, callID, json.RawMessage(call.Arguments))
+		return s.deps.WorkflowTools.Call(ctx, authority, x.request.release, tool, x.workflow.runID, x.workflow.ordinal, callID, json.RawMessage(call.Arguments))
 	}
-	runner, ok := s.WorkflowTools.(WorkflowApprovedToolRunner)
+	runner, ok := s.deps.WorkflowTools.(WorkflowApprovedToolRunner)
 	if !ok {
 		return nil, &mcp.WorkflowError{Status: 503, Code: "tool_approval_unavailable", Message: "The approval service is unavailable."}
 	}
@@ -208,7 +208,7 @@ func (s *Server) pauseWorkflow(ctx context.Context, x *call, completion *wire.Co
 			}
 		}
 	})
-	store, ok := s.WorkflowRuns.(WorkflowApprovalStore)
+	store, ok := s.deps.WorkflowRuns.(WorkflowApprovalStore)
 	if !ok {
 		return nil, serverError(503, "tool_approval_unavailable", "The approval service is unavailable.")
 	}

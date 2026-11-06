@@ -13,7 +13,6 @@ import (
 //go:embed operations.gen.json
 var registry []byte
 
-// Parameter describes a declared path, query or conditional header parameter.
 type Parameter struct {
 	Name     string `json:"name"`
 	In       string `json:"in"`

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/mcp/messages"
 	"github.com/tyk-swe/olp/internal/mcp/sessions"
@@ -94,7 +94,7 @@ func acceptsStreamableHTTP(r *http.Request) bool {
 	return accept == "" || strings.Contains(accept, "application/json") || strings.Contains(accept, "text/event-stream") || strings.Contains(accept, "*/*")
 }
 
-func (s *Server) requireSession(ctx context.Context, r *http.Request, authority access.Authority, transport sessionTransport) (sessions.Record, sessions.Binding, *rpcFailure) {
+func (s *Server) requireSession(ctx context.Context, r *http.Request, authority keyauthority.Authority, transport sessionTransport) (sessions.Record, sessions.Binding, *rpcFailure) {
 	binding := sessions.BindingOf(authority)
 	if s.sessions == nil {
 		failure := failureRPC(http.StatusServiceUnavailable, rpcServerError, errSessionUnavailable)
@@ -220,14 +220,14 @@ func (s *Server) serveSessionHTTP(w http.ResponseWriter, r *http.Request, transp
 	s.serveSessionRequest(w, r, authority, record, message)
 }
 
-func (s *Server) authenticateSessionMessage(r *http.Request, message messages.Message, transport sessionTransport) (access.Authority, *apiError) {
+func (s *Server) authenticateSessionMessage(r *http.Request, message messages.Message, transport sessionTransport) (keyauthority.Authority, *apiError) {
 	if transport == sessionStreamable && (message.Kind != messages.Response) && message.Method == "initialize" {
 		return s.authenticate(r)
 	}
 	return s.authenticateSession(r)
 }
 
-func (s *Server) sessionToolset(authority access.Authority, snapshot *routing.Snapshot, requested string) (resolvedToolset, *apiError) {
+func (s *Server) sessionToolset(authority keyauthority.Authority, snapshot *routing.View, requested string) (resolvedToolset, *apiError) {
 	if requested != "" {
 		return s.resolveToolset(authority, snapshot, requested)
 	}
@@ -273,7 +273,7 @@ type initializeResult struct {
 	ServerInfo      serverInfo             `json:"serverInfo"`
 }
 
-func (s *Server) initializeSession(w http.ResponseWriter, r *http.Request, authority access.Authority, message messages.Message) {
+func (s *Server) initializeSession(w http.ResponseWriter, r *http.Request, authority keyauthority.Authority, message messages.Message) {
 	var params initializeRequest
 	if len(message.Params) == 0 || json.Unmarshal(message.Params, &params) != nil || params.ProtocolVersion == "" {
 		writeRPCFailure(w, message.ID, rpcFailure{status: http.StatusBadRequest, code: rpcInvalidParams, message: "Supply initialize parameters with a protocol version.", data: rpcErrorData{Code: "invalid_params"}})
@@ -296,7 +296,7 @@ func writeInitializeResult(w http.ResponseWriter, id json.RawMessage, record ses
 	})
 }
 
-func (s *Server) createSessionRecord(r *http.Request, authority access.Authority, protocol string) (sessions.Record, *rpcFailure) {
+func (s *Server) createSessionRecord(r *http.Request, authority keyauthority.Authority, protocol string) (sessions.Record, *rpcFailure) {
 	release, snapshot, failure := s.snapshot()
 	if failure != nil {
 		refused := failureRPC(failure.status, rpcServerError, failure)
@@ -367,7 +367,7 @@ func unsupportedCapability(method string) (string, bool) {
 
 type pingResult struct{}
 
-func (s *Server) serveSessionRequest(w http.ResponseWriter, r *http.Request, authority access.Authority, current sessions.Record, message messages.Message) {
+func (s *Server) serveSessionRequest(w http.ResponseWriter, r *http.Request, authority keyauthority.Authority, current sessions.Record, message messages.Message) {
 	if !current.Initialized {
 		writeRPCFailure(w, message.ID, failureRPC(http.StatusOK, rpcNotInitialized, errSessionNotInitialized))
 		return
@@ -397,7 +397,7 @@ func (s *Server) serveSessionRequest(w http.ResponseWriter, r *http.Request, aut
 	}
 }
 
-func (s *Server) reauthorizeSession(authority access.Authority, current sessions.Record, resolved resolvedToolset) *apiError {
+func (s *Server) reauthorizeSession(authority keyauthority.Authority, current sessions.Record, resolved resolvedToolset) *apiError {
 	if err := s.runtime.AuthorizeAgentResource(authority, "tools", current.ToolsetID, current.ToolsetRevisionID, *authority.ProjectID); err != nil {
 		if errors.Is(err, release.ErrStaleAuthority) {
 			return fail(http.StatusServiceUnavailable, "authority_unavailable", "api_error", "Key authority is unavailable; retry shortly.")
@@ -420,12 +420,12 @@ func (s *Server) writeSessionFailure(w http.ResponseWriter, r *http.Request, cur
 	writeRPCFailure(w, id, failureRPC(http.StatusOK, rpcServerError, failure))
 }
 
-func (s *Server) pinnedToolset(current sessions.Record) (resolvedToolset, *release.Release, *routing.Snapshot, *apiError) {
+func (s *Server) pinnedToolset(current sessions.Record) (resolvedToolset, *release.Release, *routing.View, *apiError) {
 	release, snapshot, failure := s.snapshot()
 	if failure != nil {
 		return resolvedToolset{}, nil, nil, failure
 	}
-	pinned := slices.ContainsFunc(snapshot.AgentPublications, func(revision agentcontract.Revision) bool {
+	pinned := slices.ContainsFunc(snapshot.AgentPublications(), func(revision agentcontract.Revision) bool {
 		return revision.ID == current.ToolsetRevisionID && revision.PublicationID == current.ToolsetID &&
 			revision.ProjectID == current.Binding.ProjectID() && revision.Kind == "toolset"
 	})
@@ -456,7 +456,7 @@ func (s *Server) endSession(ctx context.Context, current sessions.Record) {
 	_, _ = s.sessions.Delete(ctx, current.ID, current.Binding)
 }
 
-func (s *Server) sessionListTools(w http.ResponseWriter, r *http.Request, authority access.Authority, current sessions.Record, message messages.Message) {
+func (s *Server) sessionListTools(w http.ResponseWriter, r *http.Request, authority keyauthority.Authority, current sessions.Record, message messages.Message) {
 	var params struct {
 		Cursor string `json:"cursor"`
 	}
@@ -506,7 +506,7 @@ func (r sessionCallRequest) callID() *string {
 	return r.Meta.CallID
 }
 
-func (s *Server) sessionCallTool(w http.ResponseWriter, r *http.Request, authority access.Authority, current sessions.Record, message messages.Message) {
+func (s *Server) sessionCallTool(w http.ResponseWriter, r *http.Request, authority keyauthority.Authority, current sessions.Record, message messages.Message) {
 	var params sessionCallRequest
 	if len(message.Params) == 0 || json.Unmarshal(message.Params, &params) != nil || params.Name == "" {
 		writeRPCFailure(w, message.ID, rpcFailure{status: http.StatusOK, code: rpcInvalidParams, message: "Supply the tool name to call.", data: rpcErrorData{Code: "invalid_params"}})

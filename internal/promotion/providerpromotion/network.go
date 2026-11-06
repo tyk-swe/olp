@@ -63,5 +63,9 @@ func BindNetwork(s *promotion.Server, ctx context.Context, tx pgx.Tx, providerID
 	if err != nil {
 		return err
 	}
-	return providers.StoreDraftConfiguration(ctx, tx, providerID, entry.Name, &cfg, s.Egress)
+	prepared, err := providers.PrepareConfiguration(ctx, tx, s.Unconfined, s.Egress, cfg)
+	if err != nil {
+		return err
+	}
+	return providers.StoreDraftConfiguration(ctx, tx, providerID, entry.Name, prepared)
 }

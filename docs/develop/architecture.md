@@ -13,9 +13,11 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | --- | --- |
 | Connections, certification and grants | `internal/providers/`, `internal/connectors/`, `internal/grants/`; console `providers/` |
 | Routes, publication and selection | `internal/routes/`, `internal/routing/`, `internal/release/`; console `routes/` |
-| Users, keys, identity, settings and policy | `internal/access/`, `internal/limits/`; console `access/` |
+| Users, keys and identity | `internal/access/`, `internal/access/authority/`; console `access/` |
+| Projects, installation settings and policy | `internal/projects/`, `internal/settings/`, `internal/limits/`; console `access/` |
+| Notifications | `internal/notifications/`; console `access/notifications/` |
 | Admission, execution and retained resources | `internal/gateway/`, `internal/resources/`, `internal/media/`; console inference/media |
-| Code mode | `internal/codemode/`, `internal/codeadapter/`, `internal/codeclient/`, `internal/coderesearch/`, `resources/code_*.go`; console code mode |
+| Code mode | `internal/codemode/`, `internal/codeadapter/`, `internal/codeclient/`, `internal/coderesearch/`, `internal/codesessions/`; console code mode |
 | Source and operation contracts | `internal/oif/`, `internal/operations/`, `internal/interaction/`, `internal/operationplan/`, `internal/operationregistry/` |
 | Protocol and lifecycle contracts | `internal/protocols/`, `internal/mediacontract/`, `internal/durablecontract/`, `internal/realtimecontract/`, `internal/geminilifecycle/` |
 | Preparation and failure evidence | `internal/providerinvoke/`, `internal/upstream/` |
@@ -46,6 +48,14 @@ validation. Direct and promoted provider edits share credential-boundary,
 certification-invalidation and staged-inventory operations. Unchanged slots retain
 enrollment lifetime; parent/collection ETags advance coherently. Installation
 serialization protects reauthorization, replay, publication and atomic audit.
+`access.BeginMutation` acquires that lock and refreshes authorization before
+feature commands run. Project-policy batches and billing-import writes share
+their feature-owned persistence commands with promotion.
+
+Provider configuration identity and connector projection live in `providerconfig`.
+Provider mutations accept a prepared configuration whose constructor owns
+normalization, plugin resolution and validation. Stored management and serving
+representations retain their original serialization.
 
 MCP follows the same feature ownership. `mcp/registration` owns registration
 validation, revisions, executable permissions, and publication. Direct writes and
@@ -69,11 +79,17 @@ registration over the shared types in `grants/config`. See
 
 ## Runtime and immutable sources
 
-Published releases freeze configuration and credential bytes; serving borrows
-immutable state without copying complete snapshots per request. Live authority
+Published releases freeze configuration and credential bytes. A `routing.View`
+keeps published maps private and returns detached selected values while reusing
+compiled contracts. Serving never copies complete snapshots per request. Live authority
 refresh progresses independently with monotonic freshness and generation fences.
 Historical remote-secret lookup occurs outside short authorized database
 transactions, followed by revocation revalidation.
+
+Worker health belongs to `observability/workerhealth`. Reporters receive their
+task and region explicitly and can write through a caller-owned transaction.
+Application shutdown waits for every registered worker, including workflow
+recovery, before closing its dependencies.
 
 Routing has no runtime-manager or database dependency. `Snapshot.Validate` checks
 configuration without replacing compiled contracts; `Snapshot.Compile` publishes
@@ -145,9 +161,9 @@ account, and the native first dispatch remains unchanged.
 | --- | --- | --- |
 | `codemode` | shared account, route, binding, usage and allowance types | observations never replace forwarded bytes |
 | `codeadapter`, fed by `codeplans` and `codexauth` | subscription profiles, client/upstream paths, operations, transports, conversation identity, credentials and observation rules | families sharing a client path agree on semantics, checked by `codeadapter.Validate` during snapshot validation |
-| `routing`, installed by `runtime` | endpoint and model eligibility compiled from the frozen revision | a failed compile leaves the previous release serving |
+| `routing`, installed by `release` | endpoint and model eligibility compiled from the frozen revision | a failed compile leaves the previous release serving |
 | `codewire`, `codexwire` | native request classification and response observation on copies | parsing never reserializes the forwarded payload |
-| `gateway/code_attempt.go`, `resources.CodeStore`, `limits` | dispatch, durable conversation pinning, admission and settlement, hard token budgets | one `MarkDispatched` per attributed attempt, atomic initial rebinding only after proven nonexecution, no replay of accepted or ambiguous work |
+| `gateway/code_attempt.go`, `codesessions.Store`, `limits` | dispatch, durable conversation pinning, admission and settlement, hard token budgets | one `MarkDispatched` per attributed attempt, atomic initial rebinding only after proven nonexecution, no replay of accepted or ambiguous work |
 | `codeclient`, `routes`, `providers.CodeAuthorizer` | generated client configuration, project authority, upstream credential construction | generated configuration never contains an OLP or vendor key |
 
 `gateway/code_attempt.go` shares dispatch, observations, settlement and workload
@@ -168,7 +184,7 @@ Research uses a separate `/code/{slug}/mcp/{service}` proxy. The published
 `codemode.ResearchTools` binding selects one global Z.ai account without model
 or conversation admission. `coderesearch` filters methods/discovery and preserves
 native tool definitions/results; the gateway reuses bounded SSE decoding and
-raw egress with no replay. `resources.CodeStore` rechecks live key/pool/account
+raw egress with no replay. `codesessions.Store` rechecks live key/pool/account
 authority and stores only opaque session metadata, bound to key, revision,
 service, account, credential and grant generation. Research errors do not update
 inference health. This proxy is separate from the management MCP endpoint and

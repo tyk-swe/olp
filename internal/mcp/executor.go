@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
@@ -18,16 +18,16 @@ import (
 )
 
 type ToolAuthority interface {
-	AuthorizeMCPTool(access.Authority, string, string, string, string, string) error
-	AdmitTaskCapabilityAttempt(context.Context, access.Authority, string, string, string, *string, string) error
-	VerifyEntraUser(context.Context, string, access.Authority, string, string) (workload.UserAssertion, error)
+	AuthorizeMCPTool(keyauthority.Authority, string, string, string, string, string) error
+	AdmitTaskCapabilityAttempt(context.Context, keyauthority.Authority, string, string, string, *string, string) error
+	VerifyEntraUser(context.Context, string, keyauthority.Authority, string, string) (workload.UserAssertion, error)
 }
 
 type GrantResolver interface {
-	Resolve(context.Context, access.Authority, routing.MCPToolsetTool) ([]byte, error)
-	ResolveEntra(context.Context, access.Authority, routing.MCPToolsetTool, workload.UserAssertion) ([]byte, error)
-	Delegate(context.Context, access.Authority, routing.MCPToolsetTool) ([]byte, error)
-	CheckGrant(context.Context, access.Authority, routing.MCPToolsetTool) error
+	Resolve(context.Context, keyauthority.Authority, routing.MCPToolsetTool) ([]byte, error)
+	ResolveEntra(context.Context, keyauthority.Authority, routing.MCPToolsetTool, workload.UserAssertion) ([]byte, error)
+	Delegate(context.Context, keyauthority.Authority, routing.MCPToolsetTool) ([]byte, error)
+	CheckGrant(context.Context, keyauthority.Authority, routing.MCPToolsetTool) error
 }
 
 type ExecutorOptions struct {

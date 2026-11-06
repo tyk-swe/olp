@@ -210,15 +210,11 @@ func (s *Server) write(r *http.Request, id string, retire bool) (access.Reply, e
 		}
 	}
 	a := s.Access
-	tx, err := a.Begin(r)
+	tx, p, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	var current *Definition
 	if id != "" {
 		current, err = load(r.Context(), tx, id, true)
@@ -244,7 +240,7 @@ func (s *Server) write(r *http.Request, id string, retire bool) (access.Reply, e
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	if current != nil {
 		if err = access.Match(r, current.ETag); err != nil {
@@ -309,5 +305,5 @@ func (s *Server) write(r *http.Request, id string, retire bool) (access.Reply, e
 	if err = a.CompleteReplay(r, tx, claim, reply); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, reply)
+	return reply, tx.Commit(r.Context())
 }

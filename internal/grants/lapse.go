@@ -7,9 +7,9 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/notifications"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/secrets"
-	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
@@ -59,7 +59,7 @@ func lapse(ctx context.Context, tx pgx.Tx, g *dueGrant, reason string) (bool, er
 	if err = ended(ctx, tx, g, "provider.grant.lapse"); err != nil {
 		return false, err
 	}
-	return true, usage.NotifyGrantLapsed(ctx, tx, g.credentialID)
+	return true, notifications.NotifyGrantLapsed(ctx, tx, g.credentialID)
 }
 
 // retire retires, in tx, a due grant that no configuration or retained resource uses any more

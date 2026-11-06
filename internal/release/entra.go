@@ -3,11 +3,11 @@ package release
 import (
 	"context"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/workload"
 )
 
-func (m *Manager) VerifyEntraUser(ctx context.Context, raw string, expected access.Authority, issuer, audience string) (workload.UserAssertion, error) {
+func (m *Manager) VerifyEntraUser(ctx context.Context, raw string, expected keyauthority.Authority, issuer, audience string) (workload.UserAssertion, error) {
 	if ctx.Err() != nil || expected.WorkloadIssuerID == nil || expected.EndUserDigest == "" {
 		return workload.UserAssertion{}, ErrInvalidKey
 	}

@@ -7,9 +7,9 @@ import (
 	"slices"
 )
 
-// Clone owns every mutable configuration value. PluginProfile is immutable.
 func (config Config) Clone() Config {
 	out := config
+	out.Plugin = copyPointer(config.Plugin)
 	out.TuningDatasetURIPrefixes = slices.Clone(config.TuningDatasetURIPrefixes)
 	out.DocumentURIPrefixes = slices.Clone(config.DocumentURIPrefixes)
 	if config.BatchStorage != nil {

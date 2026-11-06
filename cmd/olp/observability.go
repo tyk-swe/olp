@@ -5,7 +5,6 @@ import (
 
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/gateway"
-	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/release"
@@ -23,10 +22,10 @@ func configureObservability(state *observability.State, rt *release.Manager, gw 
 				probe.AuthorityAge = &age
 			}
 			release := rt.Release()
-			if release != nil && release.ID != "" && release.Snapshot != nil {
-				ordinal := release.Snapshot.Generation.Ordinal
+			if release != nil && release.ID != "" && release.Snapshot() != nil {
+				ordinal := release.Snapshot().Generation().Ordinal
 				probe.Generation = &ordinal
-				for _, provider := range release.Snapshot.Providers {
+				for _, provider := range release.Snapshot().Providers() {
 					p := provider
 					if err := p.Connector().Validate(policy); err != nil {
 						probe.AllTransports = false
@@ -41,15 +40,7 @@ func configureObservability(state *observability.State, rt *release.Manager, gw 
 	if gw != nil {
 		state.Circuits = gw.OpenCircuits
 		state.Shadows = gw.ShadowCounts
-		if gw.Admission != nil {
-			admission := gw.Admission
-			state.LimiterCounts = func() (failOpen, daily, weekly, monthly int64) {
-				return admission.FailOpenTotal(),
-					admission.BudgetRejections(limits.DimensionDailyCost),
-					admission.BudgetRejections(limits.DimensionWeeklyCost),
-					admission.BudgetRejections(limits.DimensionMonthlyCost)
-			}
-		}
+		state.LimiterCounts = gw.LimiterCounts()
 	}
 	if emitter != nil {
 		state.Emitter = func() *usage.Snapshot {

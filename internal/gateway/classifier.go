@@ -114,7 +114,7 @@ func (s *Server) classify(ctx context.Context, x *call, c *routing.ClassifierPre
 // classification route answers with its highest-scoring label, a generation
 // route with its trimmed reply.
 func (s *Server) callClassifier(ctx context.Context, parent *call, c *routing.ClassifierPredicate) classification {
-	route, ok := parent.snapshot().Routes[c.Route]
+	route, ok := parent.snapshot().FindRoute(c.Route)
 	switch {
 	case !ok || parent.generation.parsed == nil:
 		return classification{failure: classifierFailed}
@@ -250,6 +250,6 @@ func (s *Server) admitClassifier(ctx context.Context, x *call) *Error {
 	ttl := time.Duration(x.named().OverallTimeout) * time.Millisecond
 	var e *Error
 	admitted := x.admissionAuthority(x.authority)
-	x.lease, e = s.Admission.reserveKeyCosted(ctx, &admitted, x.clientSurface(), keyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), ttl, s.costReservation(x, x.authority), x.limitRoute())
+	x.lease, e = s.deps.Admission.reserveKeyCosted(ctx, &admitted, x.clientSurface(), keyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), ttl, s.costReservation(x, x.authority), x.limitRoute())
 	return e
 }

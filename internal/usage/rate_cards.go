@@ -367,21 +367,17 @@ func (s *Server) createRateCard(r *http.Request, _ access.Principal) (access.Rep
 	if err := access.Decode(r, &input); err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.Access.Begin(r)
+	tx, principal, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(context.WithoutCancel(r.Context()))
-	principal, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	claim, replayed, err := s.Access.Replay(r, tx, principal, input)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	var organizationID, projectID *string
 	switch input.Owner.Kind {
@@ -438,7 +434,7 @@ func (s *Server) createRateCard(r *http.Request, _ access.Principal) (access.Rep
 	if err = s.Access.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 
 func (s *Server) getRateCard(r *http.Request, _ access.Principal) (access.Reply, error) {
@@ -529,21 +525,17 @@ func (s *Server) createRateCardRevision(r *http.Request, _ access.Principal) (ac
 	if input.Markup == nil {
 		return access.Reply{}, access.Invalid("markup", "A rate card revision needs a markup.")
 	}
-	tx, err := s.Access.Begin(r)
+	tx, principal, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(context.WithoutCancel(r.Context()))
-	principal, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	claim, replayed, err := s.Access.Replay(r, tx, principal, input)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	var exists bool
 	if err = tx.QueryRow(r.Context(),
@@ -580,5 +572,5 @@ func (s *Server) createRateCardRevision(r *http.Request, _ access.Principal) (ac
 	if err = s.Access.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }

@@ -278,7 +278,7 @@ func (in *playgroundRequest) parse(operation, mode string, p *Playground, x *cal
 func (p *Playground) call(r *http.Request, principal access.Principal, parsed *wire.Request, family wire.Format, preferences *routing.Preferences) *call {
 	s := p.Gateway
 	return &call{
-		request:     request{id: uuidString(), minted: true, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: s.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context())},
+		request:     request{id: uuidString(), minted: true, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: s.deps.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context())},
 		family:      family,
 		preferences: preferences,
 

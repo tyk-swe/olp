@@ -64,15 +64,11 @@ func (s *Server) createNetworkCredential(r *http.Request, _ access.Principal) (a
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.Access.Begin(r)
+	tx, principal, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	principal, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	// The stored reply discloses the provider, so the caller must still reach
 	// its project before a replay is served.
 	provider, err := load(r.Context(), tx, id, true)
@@ -87,7 +83,7 @@ func (s *Server) createNetworkCredential(r *http.Request, _ access.Principal) (a
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	if err := access.Match(r, provider.ETag); err != nil {
 		return access.Reply{}, err
@@ -107,7 +103,7 @@ func (s *Server) createNetworkCredential(r *http.Request, _ access.Principal) (a
 	if err := s.Access.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 
 func (s *Server) revokeNetworkCredential(r *http.Request, _ access.Principal) (access.Reply, error) {

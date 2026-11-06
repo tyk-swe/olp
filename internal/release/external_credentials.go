@@ -154,7 +154,7 @@ func readExternalReferences(ctx context.Context, q access.Queryer, ids []string)
 // externalSecret observes live authority again after potentially slow remote
 // I/O. Cache population never overrides revocation or the freshness boundary.
 func (m *Manager) externalSecret(ctx context.Context, id string, reference secretstore.Reference) ([]byte, error) {
-	value, err := m.external.read(ctx, m.ExternalSecrets, id, reference)
+	value, err := m.external.read(ctx, m.externalSecrets, id, reference)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +178,7 @@ func (m *Manager) refreshExternalCredentials(ctx context.Context) error {
 	}
 	var failures []error
 	for id, reference := range references {
-		value, err := m.external.read(ctx, m.ExternalSecrets, id, reference)
+		value, err := m.external.read(ctx, m.externalSecrets, id, reference)
 		clear(value)
 		if err != nil {
 			failures = append(failures, ErrCredentialUnavailable)

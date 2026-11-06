@@ -15,15 +15,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
-	"github.com/tyk-swe/olp/internal/routing"
-
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/mediacontract"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -36,7 +35,7 @@ type MediaDeps struct {
 }
 
 // transport returns the media upstream transport.
-func (s *Server) transport() *media.Transport { return s.Media.Jobs.Transport }
+func (s *Server) transport() *media.Transport { return s.deps.Media.Jobs.Transport }
 
 // multipartParseDeadline bounds one inbound multipart body.
 const multipartParseDeadline = 60 * time.Second
@@ -46,7 +45,7 @@ const multipartParseDeadline = 60 * time.Second
 const mediaMultipartTokens = 2000
 
 func (s *Server) registerMedia(mux *http.ServeMux) {
-	if s.Media == nil {
+	if s.deps.Media == nil {
 		return
 	}
 	mux.HandleFunc("POST /v1/images/generations", s.imageGenerations)
@@ -135,7 +134,7 @@ func (s *Server) parseMediaForm(w http.ResponseWriter, r *http.Request, keyID st
 	rc.SetReadDeadline(time.Now().Add(multipartParseDeadline))
 	defer rc.SetReadDeadline(time.Time{})
 	admission := media.Admission{
-		Lease: s.Media.Admission.TryAdmit(keyID, min(limit, maxFileBytes*int64(maxFiles))),
+		Lease: s.deps.Media.Admission.TryAdmit(keyID, min(limit, maxFileBytes*int64(maxFiles))),
 		Route: media.RouteAdmission{Kind: media.RouteUnrestricted},
 	}
 	form, err := media.ParseMultipart(r.Context(), r, s.transport().Spool, &admission, maxFileBytes, maxFiles)
@@ -147,37 +146,37 @@ func (s *Server) parseMediaForm(w http.ResponseWriter, r *http.Request, keyID st
 
 // mediaBegin runs the shared prelude: identity, admission, authentication,
 // and the routing header every route-planned media operation shares.
-func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*call, access.Authority, bool) {
+func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*call, keyauthority.Authority, bool) {
 	x := &call{request: s.begin(w, r), family: wire.Chat, actor: "api_key"}
 	x.semanticHeaders = semanticHeaders(r.Header)
 	query, queryErr := url.ParseQuery(r.URL.RawQuery)
 	x.semanticQuery, x.semanticQueryInvalid = query, queryErr != nil
 	if !s.admitLater(r.Context()) {
 		s.mediaFail(x, w, overloaded)
-		return x, access.Authority{}, true
+		return x, keyauthority.Authority{}, true
 	}
 	authority, e := s.authenticate(r, "inference")
 	if e != nil {
 		s.release(r.Context())
 		s.mediaFail(x, w, e)
-		return x, access.Authority{}, true
+		return x, keyauthority.Authority{}, true
 	}
 	if x.preferences, x.priority, e = routingControls(r, authority.Policy); e != nil {
 		s.release(r.Context())
 		s.mediaFail(x, w, e)
-		return x, access.Authority{}, true
+		return x, keyauthority.Authority{}, true
 	}
 	// Media waits before staging uploads, so the queue timeout alone bounds it.
 	if e = s.awaitAdmission(r.Context(), x); e != nil {
 		s.release(r.Context())
 		s.mediaFail(x, w, e)
-		return x, access.Authority{}, true
+		return x, keyauthority.Authority{}, true
 	}
 	s.bindAuthority(x, authority)
 	if x.attribution, e = s.parseAttribution(r, authority); e != nil {
 		s.release(r.Context())
 		s.mediaFail(x, w, e)
-		return x, access.Authority{}, true
+		return x, keyauthority.Authority{}, true
 	}
 	return x, authority, false
 }
@@ -190,7 +189,7 @@ func (s *Server) mediaFail(x *call, w http.ResponseWriter, e *Error) {
 }
 
 // serveMedia plans and executes one media operation, then renders the result.
-func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *call, authority access.Authority, request *media.Request) {
+func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *call, authority keyauthority.Authority, request *media.Request) {
 	defer s.release(ctx)
 	x.media = request
 	switch request.Op {
@@ -212,7 +211,7 @@ func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *call,
 	ctx, cancel := x.routeContext(ctx)
 	defer cancel()
 	var e *Error
-	if x.lease, e = s.Admission.reserveKey(ctx, x.admissionAuthority(authority), x.clientSurface(), x.estimate, overall, x.limitRoute()); e != nil {
+	if x.lease, e = s.deps.Admission.reserveKey(ctx, x.admissionAuthority(authority), x.clientSurface(), x.estimate, overall, x.limitRoute()); e != nil {
 		s.mediaFail(x, w, e)
 		return
 	}
@@ -241,7 +240,7 @@ func (s *Server) cleanupUploads(request *media.Request) {
 		return
 	}
 	for _, handle := range request.Uploads() {
-		if err := s.Media.Jobs.Transport.Spool.Remove(handle); err != nil {
+		if err := s.deps.Media.Jobs.Transport.Spool.Remove(handle); err != nil {
 			s.log.Warn("media upload cleanup failed", "error", err)
 		}
 	}
@@ -249,10 +248,10 @@ func (s *Server) cleanupUploads(request *media.Request) {
 
 // prepareMedia resolves the route, the caller's route permission, and the
 // eligible attempt set for one media operation.
-func (s *Server) prepareMedia(ctx context.Context, x *call, authority access.Authority) *Error {
+func (s *Server) prepareMedia(ctx context.Context, x *call, authority keyauthority.Authority) *Error {
 	request := x.media
 	x.mode = request.Mode()
-	route, ok := x.snapshot().Routes[request.Route]
+	route, ok := x.snapshot().FindRoute(request.Route)
 	if !ok {
 		return modelNotFound(request.Route)
 	}
@@ -289,18 +288,14 @@ func (s *Server) planMedia(ctx context.Context, x *call) *Error {
 		return invalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow video lifecycle operations.", nil)
 	}
 	var semantic error
-	// Candidate defaults are part of the actual provider request. Inspect each
-	// encoded call for the metadata check so require_parameters cannot overlook
-	// a default or an explicit native null.
-	candidates := make(map[string][]string, len(route.Targets))
 	options := s.selectionOptions(ctx, x)
 	options.Parameters = routing.Listed(mediaParameterNames(request))
-	options.Accept = func(p routing.Provider, t routing.Target) error {
+	options.Prepare = func(p routing.Provider, t routing.Target) (*routing.CandidatePreparation, error) {
 		if !connectorsSupports(p, request.Op, x.mode) {
-			return errors.New("connector capability unavailable")
+			return nil, errors.New("connector capability unavailable")
 		}
 		if request.Op == media.OpVideoCreate && !videoLifecycleProvider(&p, t.ProviderModel) {
-			return errors.New("video lifecycle capabilities unavailable")
+			return nil, errors.New("video lifecycle capabilities unavailable")
 		}
 		encode := media.EncodeConfigured
 		if route.Fidelity.Strict() {
@@ -309,40 +304,28 @@ func (s *Server) planMedia(ctx context.Context, x *call) *Error {
 		call, effective, e := encode(request, p.Connector(), t.ProviderModel)
 		if e != nil {
 			semantic = errors.New(e.Message)
-			return semantic
+			return nil, semantic
 		}
 		if route.Fidelity.Strict() {
 			template, ok := snapshot.MediaTemplate(route.Slug, t.ID, request.Op)
 			if !ok {
 				semantic = errors.New("compiled strict media contract unavailable")
-				return semantic
+				return nil, semantic
 			}
 			if _, err := bindMediaContract(template, request, call, effective); err != nil {
 				semantic = err
-				return err
+				return nil, err
 			}
 		}
 		if p.ProfileID != "" {
 			parameters, err := mediaOutboundParameterNames(call, effective)
 			if err != nil {
 				semantic = err
-				return err
+				return nil, err
 			}
-			candidates[t.ID] = parameters
+			return &routing.CandidatePreparation{Parameters: routing.Listed(parameters)}, nil
 		}
-		return nil
-	}
-	options.Effective = func(p routing.Provider, t routing.Target) (routing.Names, *routing.TokenDemand) {
-		if p.ProfileID == "" {
-			// Automatic providers keep their codec's null/default wire behavior;
-			// only explicit profiles define an exact effective native source.
-			return routing.Listed(mediaParameterNames(request)), nil
-		}
-		parameters, ok := candidates[t.ID]
-		if !ok {
-			return nil, nil
-		}
-		return routing.Listed(parameters), nil
+		return &routing.CandidatePreparation{Parameters: routing.Listed(mediaParameterNames(request))}, nil
 	}
 	plan, err := routing.Select(snapshot, route.Slug, request.Op, "openai", x.mode, x.affinity, options)
 	if err != nil {
@@ -637,7 +620,7 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *cal
 	var strictTemplate *mediacontract.Template
 	var bound mediacontract.Bound
 	if x.strict() {
-		strictTemplate, _ = x.request.release.Snapshot.MediaTemplate(x.route.Slug, a.TargetID, x.media.Op)
+		strictTemplate, _ = x.request.release.Snapshot().MediaTemplate(x.route.Slug, a.TargetID, x.media.Op)
 		if strictTemplate == nil {
 			return fail(classProtocol, nil)
 		}
@@ -670,7 +653,7 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *cal
 		return fail(classCredential, nil)
 	}
 	target := media.Target{Sensitive: &x.sensitive, CallerCredential: provider.CredentialSource == "caller" && x.origin != "probe", Config: cfg, Model: cfg.Model(a.UpstreamModel), Secret: secret, NetworkSecret: networkSecret, ConnectionScope: providerConnectionScope(provider, slot)}
-	result, failure := s.Media.Jobs.Transport.Do(actx, target, call, effective)
+	result, failure := s.deps.Media.Jobs.Transport.Do(actx, target, call, effective)
 	if failure != nil {
 		fact.Status = failure.Status
 		return fail(mediaClass(failure), &attemptFailure{
@@ -971,7 +954,7 @@ func (s *Server) writeImageResult(w http.ResponseWriter, x *call, out *mediaOutc
 
 // streamBase64 writes one staged artifact base64-encoded into w.
 func (s *Server) streamBase64(w io.Writer, handle media.Handle) error {
-	opened, err := s.Media.Jobs.Transport.Spool.Open(handle)
+	opened, err := s.deps.Media.Jobs.Transport.Spool.Open(handle)
 	if err != nil {
 		return err
 	}
@@ -988,15 +971,15 @@ func (s *Server) streamBase64(w io.Writer, handle media.Handle) error {
 // it once the body is exhausted or the write fails.
 func (s *Server) streamArtifact(w http.ResponseWriter, x *call, out *mediaOutcome) {
 	artifact := out.result.Artifact
-	opened, err := s.Media.Jobs.Transport.Spool.Open(artifact.Handle)
+	opened, err := s.deps.Media.Jobs.Transport.Spool.Open(artifact.Handle)
 	if err != nil {
-		s.Media.Jobs.Transport.Spool.Remove(artifact.Handle)
+		s.deps.Media.Jobs.Transport.Spool.Remove(artifact.Handle)
 		out.err = serverError(http.StatusBadGateway, "media_content_unavailable", "The staged media could not be read.")
 		out.status, out.committed = out.err.Status, false
 		writeSurfaceError(w, out.err, "openai")
 		return
 	}
-	defer s.Media.Jobs.Transport.Spool.Remove(artifact.Handle)
+	defer s.deps.Media.Jobs.Transport.Spool.Remove(artifact.Handle)
 	defer opened.File.Close()
 	if artifact.ContentLength > 0 {
 		w.Header().Set("Content-Length", strconv.FormatInt(artifact.ContentLength, 10))

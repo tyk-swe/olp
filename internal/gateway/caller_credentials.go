@@ -98,8 +98,8 @@ func (x *call) callerCostExempt() bool {
 	if x == nil || x.origin != "" || x.named() == nil {
 		return false
 	}
-	if x.request.release != nil && x.request.release.Snapshot != nil {
-		if current, ok := x.request.release.Snapshot.Routes[x.named().Slug]; ok {
+	if x.request.release != nil && x.request.release.Snapshot() != nil {
+		if current, ok := x.request.release.Snapshot().FindRoute(x.named().Slug); ok {
 			return current.CallerCostExempt
 		}
 	}

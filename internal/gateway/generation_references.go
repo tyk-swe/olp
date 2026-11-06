@@ -175,7 +175,7 @@ func (s *Server) bindGenerationReferences(ctx context.Context, x *call) *Error {
 	if len(refs) == 0 && x.previousResponse() == nil {
 		return nil
 	}
-	if s.Resources == nil {
+	if s.deps.Resources == nil {
 		return serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Provider resource authority is unavailable.")
 	}
 	if len(refs) > 0 && !x.authority.Policy.AllowProviderState {
@@ -214,7 +214,7 @@ func (s *Server) bindGenerationReferences(ctx context.Context, x *call) *Error {
 		if ref.kind == resources.KindFile {
 			resource, durable, err = s.readDurable(ctx, durableKind(resources.KindFile, ref.id), x.keyID, ref.id)
 		} else {
-			resource, err = s.Resources.Get(ctx, ref.kind, x.keyID, localID)
+			resource, err = s.deps.Resources.Get(ctx, ref.kind, x.keyID, localID)
 		}
 		if err != nil || resource == nil || resource.RouteSlug != parsed.Route || resource.State == "submitting" || resource.State == "submission_unknown" || resource.State == "not_accepted" || resource.State == resources.StateDeleted || resource.ExpiresAt != nil && !resource.ExpiresAt.After(s.now()) {
 			return invalidRequest("invalid_resource_reference", "The resource is unavailable to this key and model.", &ref.pointer)
@@ -294,7 +294,7 @@ func (s *Server) generationReferenceBudget(x *call, p *pin, route *routing.Route
 	}
 	authority := x.authority
 	authority.Attribution = x.attribution
-	if s.Runtime == nil {
+	if s.deps.Runtime == nil {
 		return unboundedWorkLimits(authority, &p.provider, &p.slot, route)
 	}
 	return s.unboundedPinLimits(authority, p, route)

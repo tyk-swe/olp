@@ -137,7 +137,12 @@ func (d externalDetector) detect(ctx context.Context, e Evaluation) (Verdict, er
 	if d.evaluator == nil {
 		return Verdict{}, errEvaluation
 	}
-	return d.evaluator.Evaluate(ctx, d.definition, e)
+	definition := Revision{
+		LegacyRuleID: d.definition.LegacyRuleID, ID: d.definition.ID, GuardrailID: d.definition.GuardrailID,
+		ProjectID: d.definition.ProjectID, Name: d.definition.Name, Type: d.definition.Type,
+		Configuration: bytes.Clone(d.definition.Configuration), TimeoutMS: d.definition.TimeoutMS, OnError: d.definition.OnError,
+	}
+	return d.evaluator.Evaluate(ctx, definition, e)
 }
 
 // ExternalRunner shares transport pools, but breakers belong to one immutable

@@ -141,7 +141,7 @@ func (s *Server) beginSAML(r *http.Request, kind string) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.saml_flows(id,state_digest,cookie_digest,configuration_etag,request_id,expires_at) VALUES($1,$2,$3,$4,$5,$6)", flow.ID, s.Auth.Digest(secrets.SAMLStateDigest, state), s.Auth.Digest(secrets.SAMLCookieDigest, browser), c.ETag, request.ID, flow.Expires); err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, Reply{Status: 200, Body: map[string]any{"authorization_url": destination.String()}, Cookies: []*http.Cookie{cookie("__Host-olp_saml_"+flow.ID, browser, samlFlowTTL, true)}})
+	return Reply{Status: 200, Body: map[string]any{"authorization_url": destination.String()}, Cookies: []*http.Cookie{cookie("__Host-olp_saml_"+flow.ID, browser, samlFlowTTL, true)}}, tx.Commit(r.Context())
 }
 
 func (s *Server) readSAMLFlow(r *http.Request, q Queryer, state string) (samlFlow, []byte, *time.Time, error) {
@@ -270,7 +270,7 @@ func (s *Server) samlACS(r *http.Request) (Reply, error) {
 	if err = s.Keys.Store(r.Context(), tx, s.Installation, flow.ID, secrets.SAMLFlow, data, &flow.Expires); err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, Reply{Status: 303, Location: "/api/v1/saml/complete?state=" + url.QueryEscape(state)})
+	return Reply{Status: 303, Location: "/api/v1/saml/complete?state=" + url.QueryEscape(state)}, tx.Commit(r.Context())
 }
 
 func (s *Server) completeSAML(r *http.Request) (Reply, error) {
@@ -316,7 +316,7 @@ func (s *Server) completeSAML(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	response.Cookies = append(response.Cookies, clearCookie("__Host-olp_saml_"+flow.ID))
-	return Commit(r, tx, response)
+	return response, tx.Commit(r.Context())
 }
 
 func (s *Server) acceptSAML(r *http.Request, tx pgx.Tx, c samlConfiguration, flow samlFlow) (Reply, error) {

@@ -1,3 +1,4 @@
+import { requestNative } from '$lib/management/transport';
 import type { components } from '$lib/management/schema';
 import { apiClient } from '$lib/management/client';
 import { unwrap } from '$lib/management/http';
@@ -9,7 +10,6 @@ export type CatalogSuggestion = Schemas['ProviderCatalogSuggestion'];
 export type CatalogSuggestionList =
   Schemas['ProviderCatalogSuggestionListResponse'];
 
-/** The reference catalog's facts for a provider's models. */
 export async function listCatalogSuggestions(
   providerId: string,
   signal?: AbortSignal
@@ -32,7 +32,9 @@ export async function acceptCatalogSuggestions(
   upstreamModels: string[],
   requestId: string
 ): Promise<Provider> {
-  const response = await apiClient.POST(
+  return requestNative(
+    apiClient,
+    'post',
     '/api/v1/providers/{provider_id}/catalog-suggestions/accept',
     {
       params: {
@@ -43,7 +45,7 @@ export async function acceptCatalogSuggestions(
         }
       },
       body: { catalog_sha256: catalogSHA256, upstream_models: upstreamModels }
-    }
+    },
+    [['configuration']]
   );
-  return unwrap(response);
 }

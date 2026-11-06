@@ -2,6 +2,10 @@ package main
 
 import (
 	"context"
+	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/codesessions"
+	"github.com/tyk-swe/olp/internal/notifications"
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"log/slog"
 	"sync"
 	"time"
@@ -43,7 +47,6 @@ import (
 // vk is the consumer's own Valkey client: its blocking stream reads would
 // otherwise stall every command the gateway sends on a shared connection.
 func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Client, limiter *limits.Limiter, stream string, mediaService *media.Service, pluginHost *plugins.Host, keys *secrets.KeyRing, auth *secrets.AuthKey, installation, region, hostname string, policy *egress.Policy, log *slog.Logger, exporter *export.Worker, focusWorker *export.FocusWorker, importer *billing.Importer, reference *catalog.Signed) func() {
-	ctx = usage.WithWorkerRegion(ctx, region)
 	var wg sync.WaitGroup
 	managedExporter := &sinks.Worker{Pool: pool, Keys: keys, Installation: installation, Egress: policy}
 	wg.Go(func() { managedExporter.Run(ctx, log) })
@@ -71,7 +74,7 @@ func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Clie
 	refresher := &grants.Refresher{Pool: pool, Keys: keys, Installation: installation, Plugins: pluginHost, Egress: policy, Log: log}
 	wg.Go(func() { refresher.Run(ctx) })
 	allowanceReader := &codeallowance.Reader{
-		Pool: pool, Store: &resources.CodeStore{Pool: pool},
+		Pool: pool, Store: codesessions.New(pool),
 		Authorizer: &providers.CodeAuthorizer{Pool: pool, Credentials: mediaService.Credentials, Plugins: pluginHost},
 		Client:     policy.Client(30 * time.Second), Log: log,
 	}
@@ -88,17 +91,21 @@ func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Clie
 		wg.Go(func() { importer.Run(ctx) })
 	}
 	wg.Go(func() {
-		usage.RunNotificationDelivery(ctx, pool, keys, installation, policy, log,
-			usage.NotificationDependencies{Limiter: limiter, Catalog: reference})
+		notifications.RunDelivery(ctx, notifications.DeliveryConfig{
+			Pool: pool, Keys: keys, Installation: installation, Log: log,
+			Sender: notifications.NewSender(*policy), Limiter: limiter, Catalog: reference,
+			NewID: access.NewID, Now: time.Now,
+		})
 	})
 	wg.Go(func() { runDebitReconciliation(ctx, pool, limiter, log) })
+	wg.Go(func() { recoverWorkflowModels(ctx, &limits.DebitStore{Pool: pool, Limiter: limiter}, log) })
 	if limiter == nil {
 		return wg.Wait
 	}
 	wg.Go(func() {
 		// The consumer identity is stable for this process and unique among
 		// live ones, so a restart reclaims exactly its own deliveries.
-		if err := usage.RunConsumer(ctx, pool, vk, stream, usage.ConsumerName(hostname), limiter, log); err != nil {
+		if err := usage.RunConsumer(ctx, pool, vk, stream, usage.ConsumerName(hostname), region, limiter, log); err != nil {
 			log.Error("request metadata consumer stopped", "error", err)
 		}
 	})
@@ -106,21 +113,21 @@ func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Clie
 	wg.Go(func() { runMaintenance(ctx, pool, log) })
 	wg.Go(func() {
 		connect := func(context.Context) (*limits.Limiter, error) { return limiter, nil }
-		limits.RunRegionalCostReconciliation(ctx, pool, region, connect, costCheckpoint(pool), log)
+		limits.RunRegionalCostReconciliation(ctx, pool, region, connect, costCheckpoint(pool, region), log)
 	})
 	return wg.Wait
 }
 
 // probeCheckpoint records how one health probe pass ended in the shared
 // worker health table.
-func probeCheckpoint(pool *pgxpool.Pool, log *slog.Logger) func(context.Context, int, error) {
+func probeCheckpoint(pool *pgxpool.Pool, log *slog.Logger, region string) func(context.Context, int, error) {
 	return func(ctx context.Context, probed int, err error) {
-		outcome := usage.OutcomeSuccess
+		outcome := workerhealth.OutcomeSuccess
 		if err != nil {
-			outcome = usage.OutcomeFailure
+			outcome = workerhealth.OutcomeFailure
 			log.Warn("health probes failed", "error", err.Error())
 		}
-		if err := usage.CheckpointTask(ctx, pool, usage.TaskHealthProbes, outcome, probed > 0); err != nil {
+		if err := workerhealth.New(workerhealth.TaskHealthProbes, region).Checkpoint(ctx, pool, outcome, probed > 0); err != nil {
 			log.Warn("health probe checkpoint failed", "error", err.Error())
 		}
 	}
@@ -129,15 +136,15 @@ func probeCheckpoint(pool *pgxpool.Pool, log *slog.Logger) func(context.Context,
 // costCheckpoint records how one cost reconciliation pass ended in the shared
 // worker health table. The limiter and the metadata plane keep their own
 // outcome vocabularies, so the two are translated here rather than aliased.
-func costCheckpoint(pool *pgxpool.Pool) func(context.Context, limits.Outcome, bool) error {
+func costCheckpoint(pool *pgxpool.Pool, region string) func(context.Context, limits.Outcome, bool) error {
 	return func(ctx context.Context, outcome limits.Outcome, progress bool) error {
-		recorded := usage.OutcomeSuccess
+		recorded := workerhealth.OutcomeSuccess
 		switch outcome {
 		case limits.OutcomeFailure:
-			recorded = usage.OutcomeFailure
+			recorded = workerhealth.OutcomeFailure
 		case limits.OutcomeSkipped:
-			recorded = usage.OutcomeSkipped
+			recorded = workerhealth.OutcomeSkipped
 		}
-		return usage.CheckpointTask(ctx, pool, usage.TaskCostReconciliation, recorded, progress)
+		return workerhealth.New(workerhealth.TaskCostReconciliation, region).Checkpoint(ctx, pool, recorded, progress)
 	}
 }

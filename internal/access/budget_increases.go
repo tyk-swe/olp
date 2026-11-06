@@ -50,15 +50,11 @@ func (s *Server) createBudgetIncrease(r *http.Request, _ Principal) (Reply, erro
 	if in.Window != "day" && in.Window != "week" && in.Window != "month" {
 		return Reply{}, Invalid("window", "Choose day, week or month.")
 	}
-	tx, err := s.Begin(r)
+	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Reauthorize(r, tx)
-	if err != nil {
-		return Reply{}, err
-	}
 	owner, project, policy, err := s.budgetIncreaseTarget(r, tx, p, in.Target)
 	if err != nil {
 		return Reply{}, err
@@ -68,7 +64,7 @@ func (s *Server) createBudgetIncrease(r *http.Request, _ Principal) (Reply, erro
 		return Reply{}, err
 	}
 	if replay != nil {
-		return Commit(r, tx, *replay)
+		return *replay, tx.Commit(r.Context())
 	}
 	var cap *string
 	if policy != nil {
@@ -124,7 +120,7 @@ func (s *Server) createBudgetIncrease(r *http.Request, _ Principal) (Reply, erro
 	if err = s.CompleteReplay(r, tx, claim, result); err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 
 func (s *Server) revokeBudgetIncrease(r *http.Request, _ Principal) (Reply, error) {
@@ -132,15 +128,11 @@ func (s *Server) revokeBudgetIncrease(r *http.Request, _ Principal) (Reply, erro
 	if err != nil {
 		return Reply{}, err
 	}
-	tx, err := s.Begin(r)
+	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Reauthorize(r, tx)
-	if err != nil {
-		return Reply{}, err
-	}
 	var target BudgetTarget
 	var project *string
 	var etag string
@@ -172,7 +164,7 @@ func (s *Server) revokeBudgetIncrease(r *http.Request, _ Principal) (Reply, erro
 	if err = Audit(r.Context(), tx, r, p.Actor(), "budget.increase.revoke", "budget_increase", id, "success"); err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, Reply{Status: http.StatusNoContent})
+	return Reply{Status: http.StatusNoContent}, tx.Commit(r.Context())
 }
 
 func (s *Server) budgetIncrease(r *http.Request, p Principal) (Reply, error) {

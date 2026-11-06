@@ -126,7 +126,7 @@ type capCheck struct {
 // cannot be read skips the target, as an unreadable quota does.
 func (s *Server) holdCaps(ctx context.Context, x *call, attempt routing.Attempt, provider *routing.Provider, slot *routing.Slot, deadline time.Time) capCheck {
 	var check capCheck
-	if x.retainedFreeControl {
+	if x.freeRetainedControl() {
 		return check
 	}
 	if x.callerCostExempt() && provider.CredentialSource == "caller" {
@@ -138,12 +138,12 @@ func (s *Server) holdCaps(ctx context.Context, x *call, attempt routing.Attempt,
 			continue
 		}
 		if !checked {
-			if e := s.Admission.checkCostAccounting(ctx); e != nil {
+			if e := s.deps.Admission.checkCostAccounting(ctx); e != nil {
 				return capCheck{quota: owner.quota}
 			}
 			checked = true
 		}
-		if e := s.Admission.checkPendingCostAccounting(ctx, owner.id); e != nil {
+		if e := s.deps.Admission.checkPendingCostAccounting(ctx, owner.id); e != nil {
 			return capCheck{quota: owner.quota}
 		}
 		check.owners = append(check.owners, owner.id)
@@ -155,7 +155,7 @@ func (s *Server) holdCaps(ctx context.Context, x *call, attempt routing.Attempt,
 				continue
 			}
 		}
-		if !s.Admission.ready() {
+		if !s.deps.Admission.ready() {
 			return capCheck{quota: owner.quota}
 		}
 		request := limits.Request{
@@ -167,13 +167,13 @@ func (s *Server) holdCaps(ctx context.Context, x *call, attempt routing.Attempt,
 			request.CostEstimate, request.RequestID = bound.String(), x.request.accountingID()
 		}
 		decision, cancel := context.WithTimeout(ctx, reserveTimeout)
-		lease, err := s.Admission.limiter.Reserve(decision, request)
+		lease, err := s.deps.Admission.limiter.Reserve(decision, request)
 		cancel()
 		if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
 			return capCheck{quota: owner.quota, refusal: &attemptFailure{class: classBudget, quota: owner.quota, retryAfter: exceeded.RetryAfter}}
 		}
 		if err != nil {
-			s.Admission.logger().Warn("skipping a target whose spend cap is unreadable", "owner_id", owner.id, "error", err.Error())
+			s.deps.Admission.logger().Warn("skipping a target whose spend cap is unreadable", "owner_id", owner.id, "error", err.Error())
 			return capCheck{quota: owner.quota}
 		}
 		if index < 0 {

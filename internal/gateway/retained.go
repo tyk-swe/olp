@@ -8,10 +8,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/routing"
-
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 // Retained resources are provider objects a key created earlier and may use
@@ -26,15 +25,15 @@ func pinUnavailable() *Error {
 		"The provider revision, slot, or credential that owns this object is no longer available.")
 }
 
-func (s *Server) authorizeListedResource(ctx context.Context, authority access.Authority, res *resources.Resource) *Error {
-	if s.Resolver == nil {
+func (s *Server) authorizeListedResource(ctx context.Context, authority keyauthority.Authority, res *resources.Resource) *Error {
+	if s.deps.Resolver == nil {
 		return serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Provider state is unavailable.")
 	}
 	operation := "batch"
 	if res.Kind == resources.KindFile {
 		operation = retainedFileOperation(res)
 	}
-	_, route, _, err := s.Resolver.ResolveCurrent(ctx, res, operation)
+	_, route, _, err := s.deps.Resolver.ResolveCurrent(ctx, res, operation)
 	if err != nil {
 		return pinUnavailable()
 	}
@@ -126,11 +125,11 @@ func (x *call) retainedContentGate(resource *resources.Resource, route *routing.
 
 // resolveResource rebuilds the provider pin that owns a retained resource and
 // refuses a use its route no longer promises.
-func (s *Server) resolveResource(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, operation string, use retainedUse) (*pin, *routing.Route, *Error) {
-	if s.Resolver == nil || s.Resources == nil {
+func (s *Server) resolveResource(ctx context.Context, x *call, authority keyauthority.Authority, res *resources.Resource, operation string, use retainedUse) (*pin, *routing.Route, *Error) {
+	if s.deps.Resolver == nil || s.deps.Resources == nil {
 		return nil, nil, serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Provider state is not configured on this installation.")
 	}
-	provider, route, slot, err := s.Resolver.ResolveCurrent(ctx, res, operation)
+	provider, route, slot, err := s.deps.Resolver.ResolveCurrent(ctx, res, operation)
 	if errors.Is(err, resources.ErrUnavailable) || errors.Is(err, resources.ErrNoRows) {
 		return nil, nil, pinUnavailable()
 	}
@@ -140,7 +139,7 @@ func (s *Server) resolveResource(ctx context.Context, x *call, authority access.
 	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
 		return nil, nil, notFoundError("not_found", "No "+res.Kind+" with this identifier exists for this key.")
 	}
-	if current, published := x.request.release.Snapshot.Routes[res.RouteSlug]; published {
+	if current, published := x.request.release.Snapshot().FindRoute(res.RouteSlug); published {
 		if use != retainedHousekeeping {
 			if e := s.checkRouteFidelity(ctx, &current); e != nil {
 				return nil, nil, e
@@ -170,7 +169,7 @@ func (s *Server) resolveResource(ctx context.Context, x *call, authority access.
 		return nil, nil, pinUnavailable()
 	}
 	if use == retainedNewWork {
-		if e := restrictRetainedWork(x.request.release.Snapshot, authority.ID, provider, route, slot, target, operation); e != nil {
+		if e := restrictRetainedWork(x.request.release.Snapshot(), authority.ID, provider, route, slot, target, operation); e != nil {
 			return nil, nil, e
 		}
 		if e := x.checkBody(route); e != nil {
@@ -193,9 +192,9 @@ func (s *Server) resolveResource(ctx context.Context, x *call, authority access.
 // admitStoredResponse admits a key to a retained response and returns the pin
 // that serves it. A strict response also needs provider state on the key and
 // the serving identity its contract recorded.
-func (s *Server) admitStoredResponse(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, contract *storedResponseContract, use retainedUse) (*pin, *routing.Route, *Error) {
+func (s *Server) admitStoredResponse(ctx context.Context, x *call, authority keyauthority.Authority, res *resources.Resource, contract *storedResponseContract, use retainedUse) (*pin, *routing.Route, *Error) {
 	if contract != nil {
-		current, ok := x.request.release.Snapshot.Routes[res.RouteSlug]
+		current, ok := x.request.release.Snapshot().FindRoute(res.RouteSlug)
 		if !ok || !authority.Policy.AllowProviderState || !authority.Allows("inference", current.Slug, current.ProjectID, s.now()) {
 			return nil, nil, notFoundError("not_found", "The stored response is unavailable to this key.")
 		}
@@ -217,7 +216,7 @@ func (s *Server) admitStoredResponse(ctx context.Context, x *call, authority acc
 
 // authorizeResponseContract checks a key may use a strict retained response
 // whose pin is resolved later.
-func (s *Server) authorizeResponseContract(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, contract *storedResponseContract, use retainedUse) *Error {
+func (s *Server) authorizeResponseContract(ctx context.Context, x *call, authority keyauthority.Authority, res *resources.Resource, contract *storedResponseContract, use retainedUse) *Error {
 	_, _, e := s.admitStoredResponse(ctx, x, authority, res, contract, use)
 	return e
 }
@@ -225,9 +224,9 @@ func (s *Server) authorizeResponseContract(ctx context.Context, x *call, authori
 // admitDurable admits a key to a retained file or batch and returns the pin
 // that serves it. A strict one also needs provider state on the key and the
 // serving identity its document recorded.
-func (s *Server) admitDurable(ctx context.Context, x *call, authority access.Authority, r *resources.Resource, doc *durableDocument, operation string, use retainedUse) (*pin, *routing.Route, *Error) {
+func (s *Server) admitDurable(ctx context.Context, x *call, authority keyauthority.Authority, r *resources.Resource, doc *durableDocument, operation string, use retainedUse) (*pin, *routing.Route, *Error) {
 	if doc != nil {
-		current, ok := x.snapshot().Routes[r.RouteSlug]
+		current, ok := x.snapshot().FindRoute(r.RouteSlug)
 		if !ok || !authority.Policy.AllowProviderState || !authority.Allows("inference", current.Slug, current.ProjectID, s.now()) {
 			return nil, nil, notFoundError("not_found", "The stored provider resource is unavailable to this key.")
 		}
@@ -250,7 +249,7 @@ func (s *Server) admitDurable(ctx context.Context, x *call, authority access.Aut
 
 // authorizeDurable checks a key may use a strict retained file or batch; a
 // transformed one (doc is nil) is checked when its pin is resolved.
-func (s *Server) authorizeDurable(ctx context.Context, x *call, authority access.Authority, r *resources.Resource, doc *durableDocument, operation string, use retainedUse) *Error {
+func (s *Server) authorizeDurable(ctx context.Context, x *call, authority keyauthority.Authority, r *resources.Resource, doc *durableDocument, operation string, use retainedUse) *Error {
 	if doc == nil {
 		return nil
 	}
@@ -260,12 +259,12 @@ func (s *Server) authorizeDurable(ctx context.Context, x *call, authority access
 
 // Historical protocol and credential identity do not grant historical authority
 // to start fresh inference. Intersect that contract with the installed release.
-func restrictRetainedWork(current *routing.Snapshot, keyID string, provider *routing.Provider, route *routing.Route, slot *routing.Slot, target *routing.Target, operation string) *Error {
-	live, ok := current.Providers[provider.ID]
+func restrictRetainedWork(current *routing.View, keyID string, provider *routing.Provider, route *routing.Route, slot *routing.Slot, target *routing.Target, operation string) *Error {
+	live, ok := current.FindProvider(provider.ID)
 	if !ok || !live.Enabled {
 		return pinUnavailable()
 	}
-	liveRoute, ok := current.Routes[route.Slug]
+	liveRoute, ok := current.FindRoute(route.Slug)
 	if !ok || liveRoute.ID != route.ID || !slices.Contains(liveRoute.Operations, operation) {
 		return pinUnavailable()
 	}

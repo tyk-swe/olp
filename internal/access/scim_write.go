@@ -22,15 +22,11 @@ func (s *Server) scimWrite(r *http.Request, _ Principal, group bool) (Reply, err
 			return Reply{}, err
 		}
 	}
-	tx, err := s.Begin(r)
+	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Reauthorize(r, tx)
-	if err != nil {
-		return Reply{}, err
-	}
 	create := r.Method == "POST"
 	id := NewID()
 	var current scim.Document
@@ -88,7 +84,7 @@ func (s *Server) scimWrite(r *http.Request, _ Principal, group bool) (Reply, err
 		}
 		return Reply{}, err
 	}
-	if err = s.usableOwner(r, tx); err != nil {
+	if err = s.EnsureUsableOwner(r, tx); err != nil {
 		return Reply{}, err
 	}
 	if _, err = AdvanceAuthority(r.Context(), tx); err != nil {
@@ -98,7 +94,7 @@ func (s *Server) scimWrite(r *http.Request, _ Principal, group bool) (Reply, err
 		return Reply{}, err
 	}
 	if r.Method == "DELETE" {
-		return Commit(r, tx, Reply{Status: 204})
+		return Reply{Status: 204}, tx.Commit(r.Context())
 	}
 	resource, etag, err := s.scimRead(r, tx, group, id)
 	if err != nil {
@@ -112,7 +108,7 @@ func (s *Server) scimWrite(r *http.Request, _ Principal, group bool) (Reply, err
 			reply.Location = s.Origin + "/scim/v2/Groups/" + id
 		}
 	}
-	return Commit(r, tx, reply)
+	return reply, tx.Commit(r.Context())
 }
 
 // scimManagedProjects lists the managed projects that a directory change could

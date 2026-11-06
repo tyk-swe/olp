@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/limits"
 )
 
@@ -29,10 +30,10 @@ func validateAndNormalizeBudgetGroup(input *budgetGroupInput) error {
 		return err
 	}
 	input.Name = strings.TrimSpace(input.Name)
-	if err := validTemplateName(input.LimitTemplate); err != nil {
+	if err := keyauthority.ValidateTemplateName(input.LimitTemplate); err != nil {
 		return err
 	}
-	if err := (AdmissionLimits{
+	if err := (keyauthority.AdmissionLimits{
 		RequestsPerMinute: input.RequestsPerMinute,
 		TokensPerMinute:   input.TokensPerMinute,
 		MaxConcurrency:    input.MaxConcurrency,
@@ -57,7 +58,7 @@ const budgetGroupFrom = " FROM olp.budget_groups_with_limits g JOIN olp.users u 
 
 func (s *Server) budgetGroupJSON() string {
 	enforcement := "false"
-	if s.LimitsEnforced {
+	if s.limitsEnforced {
 		enforcement = "true"
 	}
 	return `jsonb_build_object(` + budgetGroupFields + `,'budget',olp.budget_allowances(g.id,g.effective_limits,` + limits.GroupBudgetSQL +
@@ -104,15 +105,11 @@ func (s *Server) createBudgetGroup(r *http.Request, _ Principal) (Reply, error) 
 		return Reply{}, err
 	}
 	input.ProjectID = projectID
-	tx, err := s.Begin(r)
+	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Reauthorize(r, tx)
-	if err != nil {
-		return Reply{}, err
-	}
 	claim, replayed, err := s.Replay(r, tx, p, input)
 	if err != nil {
 		return Reply{}, err
@@ -123,7 +120,7 @@ func (s *Server) createBudgetGroup(r *http.Request, _ Principal) (Reply, error) 
 		if err := s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
 			return Reply{}, err
 		}
-		return Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	if err := validateAndNormalizeBudgetGroup(&input); err != nil {
 		return Reply{}, err
@@ -131,7 +128,7 @@ func (s *Server) createBudgetGroup(r *http.Request, _ Principal) (Reply, error) 
 	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
 		return Reply{}, err
 	}
-	if err = checkLimitTemplates(r.Context(), tx, input.ProjectID, input.LimitTemplate); err != nil {
+	if err = CheckLimitTemplates(r.Context(), tx, input.ProjectID, input.LimitTemplate); err != nil {
 		return Reply{}, err
 	}
 	id, etag := NewID(), NewID()
@@ -145,7 +142,7 @@ func (s *Server) createBudgetGroup(r *http.Request, _ Principal) (Reply, error) 
 	if err = s.CompleteReplay(r, tx, claim, result); err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 
 func (s *Server) updateBudgetGroup(r *http.Request, _ Principal) (Reply, error) {
@@ -169,15 +166,11 @@ func (s *Server) updateBudgetGroup(r *http.Request, _ Principal) (Reply, error) 
 	if err != nil {
 		return Reply{}, err
 	}
-	tx, err := s.Begin(r)
+	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Reauthorize(r, tx)
-	if err != nil {
-		return Reply{}, err
-	}
 	var etag string
 	var projectID *string
 	var data []byte
@@ -206,7 +199,7 @@ func (s *Server) updateBudgetGroup(r *http.Request, _ Principal) (Reply, error) 
 	if err = validateAndNormalizeBudgetGroup(&input); err != nil {
 		return Reply{}, err
 	}
-	if err = checkLimitTemplates(r.Context(), tx, projectID, input.LimitTemplate); err != nil {
+	if err = CheckLimitTemplates(r.Context(), tx, projectID, input.LimitTemplate); err != nil {
 		return Reply{}, err
 	}
 	etag = NewID()
@@ -219,7 +212,7 @@ func (s *Server) updateBudgetGroup(r *http.Request, _ Principal) (Reply, error) 
 	if err = Audit(r.Context(), tx, r, p.Actor(), "budget_group.update", "budget_group", id, "success"); err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, Detail(map[string]any{"etag": etag}, etag))
+	return Detail(map[string]any{"etag": etag}, etag), tx.Commit(r.Context())
 }
 
 func checkBudgetGroup(ctx context.Context, q Queryer, groupID, projectID *string) error {

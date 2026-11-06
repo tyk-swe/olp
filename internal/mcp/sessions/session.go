@@ -7,7 +7,7 @@ import (
 	"encoding/hex"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 )
 
 const (
@@ -27,7 +27,7 @@ type principalIdentity struct {
 	taskCapability  string
 }
 
-func principalOf(authority access.Authority) principalIdentity {
+func principalOf(authority keyauthority.Authority) principalIdentity {
 	capability := ""
 	if authority.TaskCapability != nil {
 		capability = authority.TaskCapability.Digest
@@ -40,7 +40,7 @@ func principalOf(authority access.Authority) principalIdentity {
 	}
 }
 
-func VerifiedEndUser(a access.Authority) string {
+func VerifiedEndUser(a keyauthority.Authority) string {
 	if a.WorkloadIssuerID == nil && a.TaskCapability == nil {
 		return ""
 	}
@@ -78,7 +78,7 @@ type Binding struct {
 	principal      principalIdentity
 }
 
-func BindingOf(authority access.Authority) Binding {
+func BindingOf(authority keyauthority.Authority) Binding {
 	binding := Binding{installationID: authority.InstallationID, principal: principalOf(authority)}
 	if authority.ProjectID != nil {
 		binding.projectID = *authority.ProjectID

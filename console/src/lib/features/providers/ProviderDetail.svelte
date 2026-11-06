@@ -5,7 +5,7 @@
   import ProviderBulkModels from './ProviderBulkModels.svelte';
   import ProviderCredentialPool from './ProviderCredentialPool.svelte';
   import { focusErrorSummary } from '$lib/editing/focusError';
-  import { overviewKeys } from '$lib/features/overview/overviewKeys';
+  import { refreshProviderChange } from './providerChanges';
   import { providerKeys } from '$lib/features/providers/providerKeys';
 
   import { guardUnsavedChanges } from '$lib/editing/unsavedChanges';
@@ -175,11 +175,11 @@
       acknowledged && result.data.provider.etag === mutation?.etag
         ? markSaved(mutation.etag, sync.dirty)
         : acceptRemote(sync, result.data.provider.etag);
-    await queryClient.invalidateQueries({
-      queryKey: providerKeys.modelCatalog
+    const refreshed = await refreshProviderChange(queryClient, {
+      kind: 'details'
     });
-    if (!isCurrent()) return;
-    await queryClient.invalidateQueries({ queryKey: overviewKeys.root });
+    if (isCurrent() && refreshed.kind === 'refresh-failed')
+      throw new Error(refreshed.message);
   }
 
   function reportError(message: string) {
@@ -267,8 +267,6 @@
       await queryClient.invalidateQueries({
         queryKey: providerKeys.summaries
       });
-      if (!isCurrent()) return;
-      await queryClient.invalidateQueries({ queryKey: overviewKeys.root });
     } catch (error) {
       if (!isCurrent()) return;
       saveRefreshError = providerDetailError(error);

@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -47,7 +47,7 @@ func (s *Server) registerAnthropicState(mux *http.ServeMux) {
 	mux.HandleFunc("GET /anthropic/v1/messages/batches/{id}/results", s.anthropicBatchResults)
 }
 
-func (s *Server) anthropicBegin(w http.ResponseWriter, r *http.Request, family wire.Format) (*call, access.Authority, bool) {
+func (s *Server) anthropicBegin(w http.ResponseWriter, r *http.Request, family wire.Format) (*call, keyauthority.Authority, bool) {
 	x, authority, done := s.stateBegin(w, r, family)
 	if done {
 		return x, authority, true
@@ -60,7 +60,7 @@ func (s *Server) anthropicBegin(w http.ResponseWriter, r *http.Request, family w
 	return x, authority, false
 }
 
-func (s *Server) anthropicRoute(x *call, authority access.Authority, r *http.Request, requested string) (*routing.Route, *Error) {
+func (s *Server) anthropicRoute(x *call, authority keyauthority.Authority, r *http.Request, requested string) (*routing.Route, *Error) {
 	slug := strings.TrimSpace(r.Header.Get(stateRouteHeader))
 	if slug == "" {
 		slug = requested
@@ -68,7 +68,7 @@ func (s *Server) anthropicRoute(x *call, authority access.Authority, r *http.Req
 	if slug == "" {
 		return nil, invalidRequest("missing_required_parameter", "X-OLP-Route or params.model is required.", nil)
 	}
-	route, ok := x.snapshot().Routes[slug]
+	route, ok := x.snapshot().FindRoute(slug)
 	if !ok {
 		return nil, modelNotFound(slug)
 	}
@@ -173,7 +173,7 @@ func (s *Server) anthropicUploadFile(w http.ResponseWriter, r *http.Request) {
 	metadata, state, expires := anthropicFileMetadata(body, p.model)
 	commitCtx, stopCommit := resourceCommitContext(ctx)
 	defer stopCommit()
-	res, putErr := s.Resources.Put(commitCtx, &resources.Resource{
+	res, putErr := s.deps.Resources.Put(commitCtx, &resources.Resource{
 		Kind: resources.KindAnthropicFile, APIKeyID: authority.ID, RouteSlug: route.Slug,
 		ProviderID: p.provider.ID, ProviderRevisionID: p.provider.RevisionID, RouteRevisionID: route.RevisionID,
 		TargetID: p.target.ID, SlotID: p.slot.ID, CredentialID: p.slot.CredentialID,
@@ -194,7 +194,7 @@ func (s *Server) anthropicFileCall(w http.ResponseWriter, r *http.Request, use r
 		return
 	}
 	defer s.release(r.Context())
-	res, err := s.Resources.Get(r.Context(), resources.KindAnthropicFile, authority.ID, r.PathValue("id"))
+	res, err := s.deps.Resources.Get(r.Context(), resources.KindAnthropicFile, authority.ID, r.PathValue("id"))
 	if errors.Is(err, resources.ErrNotFound) {
 		s.stateFail(x, w, notFoundError("not_found", "No file with this identifier exists for this key."), x.family)
 		return
@@ -243,7 +243,7 @@ func (s *Server) anthropicGetFile(w http.ResponseWriter, r *http.Request) {
 		resp, failure := s.pinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
 		if failure != nil {
 			if failure.status == http.StatusNotFound {
-				_ = s.Resources.Tombstone(ctx, res.ID)
+				_ = s.deps.Resources.Tombstone(ctx, res.ID)
 				return notFoundError("not_found", "No file with this identifier exists for this key.")
 			}
 			return upstreamError(failure)
@@ -258,7 +258,7 @@ func (s *Server) anthropicGetFile(w http.ResponseWriter, r *http.Request) {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a mismatched file identity.")
 		}
 		metadata, state, expires := anthropicFileMetadata(body, p.model)
-		if err := s.Resources.Update(ctx, res.ID, state, metadata, expires); err != nil {
+		if err := s.deps.Resources.Update(ctx, res.ID, state, metadata, expires); err != nil {
 			return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The file refresh could not be committed.")
 		}
 		res.Metadata = metadata
@@ -283,13 +283,13 @@ func (s *Server) anthropicDeleteFile(w http.ResponseWriter, r *http.Request) {
 		resp, failure := s.pinnedDo(ctx, x, p, http.MethodDelete, endpoint, nil, "")
 		if failure != nil {
 			if failure.status == http.StatusNotFound {
-				_ = s.Resources.Tombstone(ctx, res.ID)
+				_ = s.deps.Resources.Tombstone(ctx, res.ID)
 				return notFoundError("not_found", "No file with this identifier exists for this key.")
 			}
 			return upstreamError(failure)
 		}
 		_ = resp.Body.Close()
-		if err := s.Resources.Tombstone(ctx, res.ID); err != nil {
+		if err := s.deps.Resources.Tombstone(ctx, res.ID); err != nil {
 			return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The file mapping could not be deleted.")
 		}
 		x.dispatched = true
@@ -410,7 +410,7 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 	if len(fileIDs) > 0 {
 		rewrites := map[string]string{}
 		for _, id := range fileIDs {
-			file, getErr := s.Resources.Get(r.Context(), resources.KindAnthropicFile, authority.ID, id)
+			file, getErr := s.deps.Resources.Get(r.Context(), resources.KindAnthropicFile, authority.ID, id)
 			if getErr != nil || file.RouteSlug != route.Slug {
 				s.releaseHold(r.Context(), p.hold)
 				s.stateFail(x, w, notFoundError("not_found", "No file with this identifier exists for this key."), x.family)
@@ -476,7 +476,7 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 		if failure.acceptance.Unresolved() {
 			commit, stop := resourceCommitContext(r.Context())
 			defer stop()
-			if markErr := s.Batches.MarkUnknown(commit, submission.resource.UUID, "submission_unknown", s.now()); markErr != nil {
+			if markErr := s.deps.Batches.MarkUnknown(commit, submission.resource.UUID, "submission_unknown", s.now()); markErr != nil {
 				s.log.Warn("Anthropic batch submission outcome could not be recorded", "resource_id", submission.resource.UUID, "error", markErr)
 			}
 			s.stateFail(x, w, serverError(http.StatusBadGateway, "submission_unknown", "The provider may have accepted this batch, but its outcome is unknown."), x.family)
@@ -484,7 +484,7 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 		}
 		commit, stop := resourceCommitContext(r.Context())
 		defer stop()
-		if deleteErr := s.Batches.DeleteSubmission(commit, submission.resource.UUID); deleteErr != nil {
+		if deleteErr := s.deps.Batches.DeleteSubmission(commit, submission.resource.UUID); deleteErr != nil {
 			s.log.Warn("Anthropic batch submission intent could not be removed", "resource_id", submission.resource.UUID, "error", deleteErr)
 		}
 		s.stateFail(x, w, upstreamError(failure), x.family)
@@ -518,24 +518,24 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 	resource.Metadata = mustJSON(metadata)
 	commit, stop := resourceCommitContext(ctx)
 	defer stop()
-	tx, beginErr := s.Resources.Begin(commit)
+	tx, beginErr := s.deps.Resources.Begin(commit)
 	if beginErr != nil {
-		if markErr := s.Batches.MarkUnknown(commit, resource.UUID, "submission_commit_unavailable", s.now()); markErr != nil {
+		if markErr := s.deps.Batches.MarkUnknown(commit, resource.UUID, "submission_commit_unavailable", s.now()); markErr != nil {
 			s.log.Warn("accepted Anthropic batch intent could not be marked unknown", "resource_id", resource.UUID, "error", markErr)
 		}
 		s.stateFail(x, w, serverError(http.StatusBadGateway, "submission_unknown", "The accepted batch could not be stored."), x.family)
 		return
 	}
 	defer tx.Rollback(commit)
-	_, commitErr := s.Resources.PutTx(commit, tx, resource)
+	_, commitErr := s.deps.Resources.PutTx(commit, tx, resource)
 	if commitErr == nil {
-		commitErr = s.Batches.ActivateTx(commit, tx, resource.UUID, upstreamID, &expected)
+		commitErr = s.deps.Batches.ActivateTx(commit, tx, resource.UUID, upstreamID, &expected)
 	}
 	if commitErr == nil {
 		commitErr = tx.Commit(commit)
 	}
 	if commitErr != nil {
-		if markErr := s.Batches.MarkUnknown(commit, resource.UUID, "submission_commit_unavailable", s.now()); markErr != nil {
+		if markErr := s.deps.Batches.MarkUnknown(commit, resource.UUID, "submission_commit_unavailable", s.now()); markErr != nil {
 			s.log.Warn("accepted Anthropic batch intent could not be marked unknown", "resource_id", resource.UUID, "error", markErr)
 		}
 		s.stateFail(x, w, serverError(http.StatusBadGateway, "submission_unknown", "The accepted batch could not be confirmed locally."), x.family)
@@ -565,7 +565,7 @@ func anthropicCommonModel(body []byte) (string, bool) {
 	return model, model != ""
 }
 
-func (s *Server) anthropicSelectPinWithFiles(ctx context.Context, x *call, authority access.Authority, route *routing.Route, body []byte) (*pin, []*resources.Resource, *Error) {
+func (s *Server) anthropicSelectPinWithFiles(ctx context.Context, x *call, authority keyauthority.Authority, route *routing.Route, body []byte) (*pin, []*resources.Resource, *Error) {
 	refs, refErr := anthropicBatchFileReferences(body)
 	if refErr != nil {
 		return nil, nil, invalidRequest("invalid_request", "The request contains an invalid file source.", nil)
@@ -573,7 +573,7 @@ func (s *Server) anthropicSelectPinWithFiles(ctx context.Context, x *call, autho
 	ids := uniqueStrings(refs)
 	files := make([]*resources.Resource, 0, len(ids))
 	for _, id := range ids {
-		file, err := s.Resources.Get(ctx, resources.KindAnthropicFile, authority.ID, id)
+		file, err := s.deps.Resources.Get(ctx, resources.KindAnthropicFile, authority.ID, id)
 		if err != nil || file.RouteSlug != route.Slug {
 			return nil, nil, notFoundError("not_found", "No file with this identifier exists for this key.")
 		}
@@ -640,9 +640,9 @@ func (s *Server) anthropicListResources(w http.ResponseWriter, r *http.Request, 
 	var rows []*resources.Resource
 	var listErr error
 	if before != "" {
-		rows, listErr = s.Resources.ListKindsBefore(r.Context(), []string{kind}, authority.ID, limit+1, before)
+		rows, listErr = s.deps.Resources.ListKindsBefore(r.Context(), []string{kind}, authority.ID, limit+1, before)
 	} else {
-		rows, listErr = s.Resources.ListKinds(r.Context(), []string{kind}, authority.ID, limit+1, cursor)
+		rows, listErr = s.deps.Resources.ListKinds(r.Context(), []string{kind}, authority.ID, limit+1, cursor)
 	}
 	if listErr != nil {
 		if errors.Is(listErr, resources.ErrNotFound) {
@@ -711,13 +711,13 @@ func (s *Server) anthropicResourceObject(res *resources.Resource, kind string, r
 	return json.Marshal(fields)
 }
 
-func (s *Server) anthropicBatchCall(w http.ResponseWriter, r *http.Request, use retainedUse, op func(context.Context, *call, access.Authority, *resources.Resource, *pin) *Error) {
+func (s *Server) anthropicBatchCall(w http.ResponseWriter, r *http.Request, use retainedUse, op func(context.Context, *call, keyauthority.Authority, *resources.Resource, *pin) *Error) {
 	x, authority, done := s.anthropicBegin(w, r, wire.AnthropicBatch)
 	if done {
 		return
 	}
 	defer s.release(r.Context())
-	res, err := s.Resources.Get(r.Context(), resources.KindAnthropicBatch, authority.ID, r.PathValue("id"))
+	res, err := s.deps.Resources.Get(r.Context(), resources.KindAnthropicBatch, authority.ID, r.PathValue("id"))
 	if errors.Is(err, resources.ErrNotFound) {
 		s.stateFail(x, w, notFoundError("not_found", "No message batch with this identifier exists for this key."), x.family)
 		return
@@ -749,7 +749,7 @@ func (s *Server) anthropicBatchCall(w http.ResponseWriter, r *http.Request, use 
 }
 
 func (s *Server) anthropicBatchRequest(w http.ResponseWriter, r *http.Request, use retainedUse, method string, cancel bool) {
-	s.anthropicBatchCall(w, r, use, func(ctx context.Context, x *call, _ access.Authority, res *resources.Resource, p *pin) *Error {
+	s.anthropicBatchCall(w, r, use, func(ctx context.Context, x *call, _ keyauthority.Authority, res *resources.Resource, p *pin) *Error {
 		path := "messages/batches/" + url.PathEscape(res.UpstreamID)
 		if cancel {
 			path += "/cancel"
@@ -783,7 +783,7 @@ func (s *Server) anthropicBatchRequest(w http.ResponseWriter, r *http.Request, u
 		delete(stored, "id")
 		stored["upstream_model"], _ = json.Marshal(resourceModel(res))
 		metadata := mustJSON(stored)
-		if err := s.Resources.Update(ctx, res.ID, anthropicBatchState(body), metadata, nil); err != nil {
+		if err := s.deps.Resources.Update(ctx, res.ID, anthropicBatchState(body), metadata, nil); err != nil {
 			return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The batch refresh could not be committed.")
 		}
 		res.Metadata = metadata
@@ -811,7 +811,7 @@ func (s *Server) anthropicCancelBatch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) anthropicDeleteBatch(w http.ResponseWriter, r *http.Request) {
-	s.anthropicBatchCall(w, r, retainedHousekeeping, func(ctx context.Context, x *call, _ access.Authority, res *resources.Resource, p *pin) *Error {
+	s.anthropicBatchCall(w, r, retainedHousekeeping, func(ctx context.Context, x *call, _ keyauthority.Authority, res *resources.Resource, p *pin) *Error {
 		if err := s.requireBatchEvidenceSettled(ctx, res.UUID); err != nil {
 			return err
 		}
@@ -822,7 +822,7 @@ func (s *Server) anthropicDeleteBatch(w http.ResponseWriter, r *http.Request) {
 		resp, failure := s.pinnedDo(ctx, x, p, http.MethodDelete, endpoint, nil, "")
 		if failure != nil {
 			if failure.status == http.StatusNotFound {
-				_ = s.Resources.Tombstone(ctx, res.ID)
+				_ = s.deps.Resources.Tombstone(ctx, res.ID)
 				return notFoundError("not_found", "No message batch with this identifier exists for this key.")
 			}
 			return upstreamError(failure)
@@ -832,7 +832,7 @@ func (s *Server) anthropicDeleteBatch(w http.ResponseWriter, r *http.Request) {
 		if readErr != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 		}
-		if err := s.Resources.Tombstone(ctx, res.ID); err != nil {
+		if err := s.deps.Resources.Tombstone(ctx, res.ID); err != nil {
 			return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The batch mapping could not be deleted.")
 		}
 		x.dispatched = true
@@ -847,7 +847,7 @@ func (s *Server) anthropicDeleteBatch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) anthropicBatchResults(w http.ResponseWriter, r *http.Request) {
-	s.anthropicBatchCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, _ access.Authority, res *resources.Resource, p *pin) *Error {
+	s.anthropicBatchCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, _ keyauthority.Authority, res *resources.Resource, p *pin) *Error {
 		endpoint, err := resourceURL(p.provider.Connector(), p.model, "messages/batches/"+url.PathEscape(res.UpstreamID)+"/results", nil)
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")

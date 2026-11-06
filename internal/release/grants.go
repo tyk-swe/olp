@@ -37,7 +37,7 @@ func (m *Manager) refreshGrants(ctx context.Context) error {
 		// Mounted gateways refuse credentials that have grants.
 		return nil
 	}
-	providers := grantProviders(m.Release().Snapshot)
+	providers := grantProviders(m.Release().Snapshot())
 	if len(providers) == 0 {
 		m.serveGrants(nil)
 		return nil
@@ -66,9 +66,9 @@ func (m *Manager) refreshGrants(ctx context.Context) error {
 // grantProviders names exactly the grant membership of a serving snapshot.
 // Both installation and rotation polling use this set; historical credentials
 // outside it retain the database fallback in Secret.
-func grantProviders(snapshot *routing.Snapshot) map[string]string {
+func grantProviders(snapshot *routing.View) map[string]string {
 	providers := map[string]string{}
-	for _, provider := range snapshot.Providers {
+	for _, provider := range snapshot.Providers() {
 		if provider.AuthMode != connectors.AuthGrant {
 			continue
 		}
@@ -122,7 +122,7 @@ func advancedGrants(providers map[string]string, known, served map[string]served
 // and of those later polls find until it is done, so a slow store holds up
 // no poll and gathers no goroutines.
 func (m *Manager) grantsRefreshed(refreshed map[string]string) {
-	if m.GrantRefreshed == nil || len(refreshed) == 0 {
+	if m.grantRefreshed == nil || len(refreshed) == 0 {
 		return
 	}
 	m.mu.Lock()
@@ -151,7 +151,7 @@ func (m *Manager) tellRefreshedGrants() {
 		m.refreshedGrants = map[string]string{}
 		m.mu.Unlock()
 		for credentialID, providerID := range pending {
-			m.GrantRefreshed(providerID, credentialID)
+			m.grantRefreshed(providerID, credentialID)
 		}
 	}
 }

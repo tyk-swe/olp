@@ -58,7 +58,7 @@ func (s *Server) newSession(r *http.Request, tx pgx.Tx, userID string, auth ...s
 	return Reply{Status: 201, Body: body, CSRF: s.csrf(token), Cookies: []*http.Cookie{cookie(sessionCookie, token, sessionTTL, true), cookie(csrfCookie, s.csrf(token), sessionTTL, false), clearCookie(recentCookie)}}, err
 }
 func (s *Server) login(r *http.Request) (Reply, error) {
-	if s.LocalLoginDisabled {
+	if s.localLoginDisabled {
 		return Reply{}, Fail(404, "local_login_disabled", "Password-based local sign-in is disabled for this installation.")
 	}
 	var input struct {
@@ -121,7 +121,7 @@ func (s *Server) login(r *http.Request) (Reply, error) {
 	if err = Audit(r.Context(), tx, r, UserActor(id), action, "user", id, "success"); err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, response)
+	return response, tx.Commit(r.Context())
 }
 func (s *Server) currentSession(r *http.Request, p Principal) (Reply, error) {
 	var err error
@@ -167,15 +167,11 @@ func (s *Server) revokeSession(r *http.Request, _ Principal) (Reply, error) {
 	return s.deleteSession(r, false)
 }
 func (s *Server) deleteSession(r *http.Request, current bool) (Reply, error) {
-	tx, err := s.Begin(r)
+	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Reauthorize(r, tx)
-	if err != nil {
-		return Reply{}, err
-	}
 	session := p.SessionID
 	if !current {
 		session, err = IDParam(r, "session_id")
@@ -205,7 +201,7 @@ func (s *Server) deleteSession(r *http.Request, current bool) (Reply, error) {
 	if session == p.SessionID {
 		response.Cookies = []*http.Cookie{clearCookie(sessionCookie), clearCookie(csrfCookie), clearCookie(recentCookie)}
 	}
-	return Commit(r, tx, response)
+	return response, tx.Commit(r.Context())
 }
 
 func (s *Server) profile(r *http.Request, p Principal) (Reply, error) {
@@ -254,15 +250,11 @@ func (s *Server) updateProfile(r *http.Request, _ Principal) (Reply, error) {
 	if err := ValidText("display_name", input.Name, 100); err != nil {
 		return Reply{}, err
 	}
-	tx, err := s.Begin(r)
+	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Reauthorize(r, tx)
-	if err != nil {
-		return Reply{}, err
-	}
 	if err = Match(r, p.ETag); err != nil {
 		return Reply{}, err
 	}
@@ -281,7 +273,7 @@ func (s *Server) updateProfile(r *http.Request, _ Principal) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, reply)
+	return reply, tx.Commit(r.Context())
 }
 func (s *Server) changePassword(r *http.Request, p Principal) (Reply, error) {
 	return s.writePassword(r, p, false)
@@ -329,15 +321,11 @@ func (s *Server) writePassword(r *http.Request, p Principal, enroll bool) (Reply
 	if !valid {
 		return Reply{}, Fail(403, "current_password_invalid", "The current password is invalid.")
 	}
-	tx, err := s.Begin(r)
+	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err = s.Reauthorize(r, tx)
-	if err != nil {
-		return Reply{}, err
-	}
 	if err = Match(r, p.ETag); err != nil {
 		return Reply{}, err
 	}
@@ -370,7 +358,7 @@ func (s *Server) writePassword(r *http.Request, p Principal, enroll bool) (Reply
 	if err = Audit(r.Context(), tx, r, p.Actor(), "profile.password.update", "user", p.ID, "success"); err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, response)
+	return response, tx.Commit(r.Context())
 }
 func validatePurpose(purpose, resource string) error {
 	switch purpose {
@@ -414,15 +402,11 @@ func (s *Server) reauthenticate(r *http.Request, p Principal) (Reply, error) {
 	if !valid {
 		return Reply{}, Fail(403, "current_password_invalid", "The current password is invalid.")
 	}
-	tx, err := s.Begin(r)
+	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err = s.Reauthorize(r, tx)
-	if err != nil {
-		return Reply{}, err
-	}
 	// Recheck the password snapshot after taking the authority lock.
 	var current bool
 	if err = tx.QueryRow(r.Context(), "SELECT COALESCE(password_hash=$2,false) FROM olp.users WHERE id=$1", p.ID, *hash).Scan(&current); err != nil {
@@ -440,7 +424,7 @@ func (s *Server) reauthenticate(r *http.Request, p Principal) (Reply, error) {
 		if e != nil {
 			return Reply{}, e
 		}
-		return Commit(r, tx, reply)
+		return reply, tx.Commit(r.Context())
 	}
 	response, err := s.grantRecent(r, tx, p, input.Purpose, input.Resource, false)
 	if err != nil {
@@ -449,7 +433,7 @@ func (s *Server) reauthenticate(r *http.Request, p Principal) (Reply, error) {
 	if err = Audit(r.Context(), tx, r, p.Actor(), "session.reauthenticate", "session", p.SessionID, "success"); err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, response)
+	return response, tx.Commit(r.Context())
 }
 func (s *Server) grantRecent(r *http.Request, tx pgx.Tx, p Principal, purpose, resource string, factorVerified bool) (Reply, error) {
 	if purpose == "mfa_manage" && !factorVerified {

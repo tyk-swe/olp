@@ -1,3 +1,4 @@
+import { requestNative } from '$lib/management/transport';
 import type { components } from '$lib/management/schema';
 import { apiClient } from '$lib/management/client';
 import { ApiProblem, ensureOk, unwrap, unwrapPage } from '$lib/management/http';
@@ -15,9 +16,9 @@ export type ProviderSummary = Schemas['ProviderSummaryResponse'];
 export type CreateProviderInput = Schemas['CreateProviderRequest'];
 export type UpdateProviderInput = Schemas['UpdateProviderRequest'];
 export type ProviderProbe = Schemas['ProbeResponse'];
-/** The operation body and its committed provider version remain separate. */
+
 export type ProviderProbeReceipt = { result: ProviderProbe; etag: string };
-/** Reviewed connection facts for one known vendor, independent of protocol. */
+
 export type ProviderVendor = Schemas['Vendor'];
 
 export async function listProviderVendors(
@@ -51,11 +52,16 @@ export async function getProvider(
   id: string,
   signal?: AbortSignal
 ): Promise<Provider> {
-  const response = await apiClient.GET('/api/v1/providers/{provider_id}', {
-    params: { path: { provider_id: id } },
-    signal
-  });
-  return unwrap(response);
+  return requestNative(
+    apiClient,
+    'get',
+    '/api/v1/providers/{provider_id}',
+    {
+      params: { path: { provider_id: id } },
+      signal
+    },
+    [['configuration']]
+  );
 }
 
 export async function createProvider(
@@ -74,11 +80,16 @@ export async function updateProvider(
   etag: string,
   input: UpdateProviderInput
 ): Promise<Provider> {
-  const response = await apiClient.PATCH('/api/v1/providers/{provider_id}', {
-    params: { path: { provider_id: id }, header: { 'If-Match': etag } },
-    body: input
-  });
-  return unwrap(response);
+  return requestNative(
+    apiClient,
+    'patch',
+    '/api/v1/providers/{provider_id}',
+    {
+      params: { path: { provider_id: id }, header: { 'If-Match': etag } },
+      body: input
+    },
+    [['configuration']]
+  );
 }
 
 export async function probeProvider(
@@ -102,8 +113,6 @@ export async function probeProvider(
   return { result, etag };
 }
 
-/** Manual inventory fallback for compatible endpoints without a model-list API. */
-
 export async function activateProvider(
   provider: Pick<Provider, 'id' | 'etag'>,
   requestId: string
@@ -123,12 +132,6 @@ export async function activateProvider(
   return unwrap(response).runtime_generation.sequence;
 }
 
-/**
- * Stops the active revision from serving. The server refuses with 409 while a
- * route still targets one of this provider's models, or an upstream media job
- * is still live. Returns the runtime generation that no longer carries the
- * provider.
- */
 export async function disableProvider(
   provider: Pick<Provider, 'id' | 'etag'>,
   requestId: string
@@ -148,12 +151,13 @@ export async function disableProvider(
   return unwrap(response).runtime_generation?.sequence ?? null;
 }
 
-/** Moves a disabled provider back to an editable draft. */
 export async function restoreProviderAsDraft(
   provider: Pick<Provider, 'id' | 'etag'>,
   requestId: string
 ): Promise<Provider> {
-  const response = await apiClient.POST(
+  return requestNative(
+    apiClient,
+    'post',
     '/api/v1/providers/{provider_id}/restore-as-draft',
     {
       params: {
@@ -163,21 +167,14 @@ export async function restoreProviderAsDraft(
           'Idempotency-Key': requestId
         }
       }
-    }
+    },
+    [['configuration']]
   );
-  return unwrap(response);
 }
 
-/**
- * The 409 the server raises for a resource that is still active or referenced.
- * Several unrelated conflicts share the status — a replayed or in-flight
- * `Idempotency-Key`, an unvalidated route — so the problem type, not the
- * status, is what identifies this one.
- */
 const PROVIDER_IN_USE_TYPE =
   'https://openllmproxy.dev/problems/configuration_resource_in_use';
 
-/** True for the 409 the server returns when a resource is still referenced. */
 export function isProviderInUse(error: unknown): boolean {
   return (
     error instanceof ApiProblem &&

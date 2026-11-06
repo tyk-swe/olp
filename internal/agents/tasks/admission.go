@@ -6,13 +6,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
-func (l *Store) admitRate(ctx context.Context, authority access.Authority) ([]*limits.Lease, error) {
+func (l *Store) admitRate(ctx context.Context, authority keyauthority.Authority) ([]*limits.Lease, error) {
 	if l == nil || l.debits == nil || l.debits.Limiter == nil {
 		return nil, limits.ErrDebitAuthority
 	}
@@ -91,7 +91,7 @@ func taskDeadlineSeconds(definition *agentcontract.Definition) int {
 	return *definition.TaskDeadlineSeconds
 }
 
-func (l *Store) admitTask(ctx context.Context, res reservation, authority access.Authority, taskID string, revision agentcontract.Revision) (string, error) {
+func (l *Store) admitTask(ctx context.Context, res reservation, authority keyauthority.Authority, taskID string, revision agentcontract.Revision) (string, error) {
 	definition := revision.Definition.Agent
 	token := "olpt_" + secrets.Token()
 	delegationDigest, err := hex.DecodeString(authority.DelegationTokenDigest)

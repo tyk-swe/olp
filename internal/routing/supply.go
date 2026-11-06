@@ -171,7 +171,7 @@ func BudgetReason(reason string) bool {
 
 // supplyQuery collects what the plan needs to read: the slots of eligible
 // targets when the strategy orders by capacity, and every applicable cap.
-func supplyQuery(route Route, rows []rankedCandidate, s *Snapshot, capacity bool) SupplyQuery {
+func supplyQuery(route Route, rows []rankedCandidate, capacity bool) SupplyQuery {
 	var query SupplyQuery
 	if route.Budget != nil && !route.CallerCostExempt {
 		query.Caps = append(query.Caps, SpendCap{OwnerID: route.ID, Limits: *route.Budget})
@@ -181,10 +181,7 @@ func supplyQuery(route Route, rows []rankedCandidate, s *Snapshot, capacity bool
 		if !row.decision.Eligible {
 			continue
 		}
-		provider, ok := s.Providers[row.attempt.ProviderID]
-		if !ok {
-			continue
-		}
+		provider := row.provider
 		if costs := provider.supply().Costs(); costs != nil && !route.CallerCostExempt && !seen[provider.ID] {
 			seen[provider.ID] = true
 			query.Caps = append(query.Caps, SpendCap{OwnerID: provider.ID, Limits: *costs})
@@ -212,7 +209,7 @@ func (p Provider) supply() Supply {
 // applySupply removes capped owners that may not spend and records each
 // candidate's best known slot headroom. A route that may not spend removes
 // every candidate.
-func applySupply(route Route, rows []rankedCandidate, s *Snapshot, state *SupplyState) {
+func applySupply(route Route, rows []rankedCandidate, state *SupplyState) {
 	routeReason := ""
 	if route.Budget != nil && !route.CallerCostExempt {
 		routeReason = state.spendReason(route.ID, "route")
@@ -223,7 +220,8 @@ func applySupply(route Route, rows []rankedCandidate, s *Snapshot, state *Supply
 			continue
 		}
 		reason := routeReason
-		if !route.CallerCostExempt && reason == "" && s.Providers[row.attempt.ProviderID].supply().Costs() != nil {
+		provider := row.provider
+		if !route.CallerCostExempt && reason == "" && provider.supply().Costs() != nil {
 			reason = state.spendReason(row.attempt.ProviderID, "connection")
 		}
 		if !route.CallerCostExempt && reason == "" && len(row.slots) > 0 {

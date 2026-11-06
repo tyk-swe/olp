@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -14,7 +14,7 @@ import (
 // Notification streams have the configured concurrency bounds, but their own
 // counters per service. They must not occupy tool-call slots. Request rates
 // remain shared with ordinary traffic through the usual research reservation.
-func (a *Admission) reserveResearchStream(ctx context.Context, authority access.Authority, route, service, provider string, providerLimits *routing.Limits) (*limits.Lease, *Error) {
+func (a *Admission) reserveResearchStream(ctx context.Context, authority keyauthority.Authority, route, service, provider string, providerLimits *routing.Limits) (*limits.Lease, *Error) {
 	type boundary struct {
 		scope string
 		max   *int64

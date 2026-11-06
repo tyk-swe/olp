@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/oif"
@@ -67,7 +67,7 @@ func (s *Server) initializeCache(x *call) *Error {
 		return nil
 	}
 	// New endpoint contracts require explicit cache qualification.
-	if x.prompt != nil || x.family == wire.Completions || operationregistry.TransformedServing(x.operationName()) {
+	if x.prompt != nil || x.family == wire.Completions || !operationregistry.PolicyFor(x.operationName()).CacheEligible {
 		return nil
 	}
 	if x.route.Cache == nil && x.request.cacheDirectives == "" {
@@ -78,7 +78,7 @@ func (s *Server) initializeCache(x *call) *Error {
 		return invalidRequest("invalid_cache_control", err.Error(), nil)
 	}
 	x.cache = &responseCacheCall{controls: c, result: "bypass"}
-	if x.route.Cache == nil || s.Cache == nil || x.origin != "" || x.authority.Policy.ForbidResponseCache || x.authority.TaskCapability != nil || x.request.callerCredential != nil || x.providerState || x.generation.resources != nil || x.generation.continuation != nil {
+	if x.route.Cache == nil || s.deps.Cache == nil || x.origin != "" || x.authority.Policy.ForbidResponseCache || x.authority.TaskCapability != nil || x.request.callerCredential != nil || x.providerState || x.generation.resources != nil || x.generation.continuation != nil {
 		return nil
 	}
 	p := x.route.Cache.Effective()
@@ -160,18 +160,18 @@ func containsCacheReference(v oif.Value) bool {
 
 // admitCacheAware takes only request/concurrency reservations before lookup.
 // Misses then reserve the remaining dimensions; both leases settle once.
-func (s *Server) admitCacheAware(ctx context.Context, x *call, authority *access.Authority, estimate int64, ttl time.Duration, hold costReservation) *Error {
+func (s *Server) admitCacheAware(ctx context.Context, x *call, authority *keyauthority.Authority, estimate int64, ttl time.Duration, hold costReservation) *Error {
 	if e := s.initializeCache(x); e != nil {
 		return e
 	}
 	if x.cache == nil || x.cache.result == "bypass" {
 		var e *Error
-		x.lease, e = s.Admission.reserveKeyCosted(ctx, authority, x.clientSurface(), estimate, ttl, hold, x.limitRoute())
+		x.lease, e = s.deps.Admission.reserveKeyCosted(ctx, authority, x.clientSurface(), estimate, ttl, hold, x.limitRoute())
 		return e
 	}
 	rates := cacheAuthority(*authority, true, false, false)
 	var e *Error
-	x.cacheRateLease, e = s.Admission.reserveKeyCosted(ctx, &rates, x.clientSurface(), 0, ttl, costReservation{}, x.limitRoute())
+	x.cacheRateLease, e = s.deps.Admission.reserveKeyCosted(ctx, &rates, x.clientSurface(), 0, ttl, costReservation{}, x.limitRoute())
 	if e != nil {
 		return e
 	}
@@ -194,7 +194,7 @@ func (s *Server) admitCacheAware(ctx context.Context, x *call, authority *access
 		hold = costReservation{amount: x.cache.budgetCost, charge: x.cache.budgetCharge, requestID: x.request.accountingID()}
 	}
 	remainder := cacheAuthority(*authority, false, tokens, budgets)
-	x.lease, e = s.Admission.reserveKeyCosted(ctx, &remainder, x.clientSurface(), estimate, ttl, hold, x.limitRoute())
+	x.lease, e = s.deps.Admission.reserveKeyCosted(ctx, &remainder, x.clientSurface(), estimate, ttl, hold, x.limitRoute())
 	if e == nil && x.cache.entry != nil {
 		x.cache.admitted = true
 		x.cache.result = "hit"
@@ -205,8 +205,8 @@ func (s *Server) admitCacheAware(ctx context.Context, x *call, authority *access
 	return e
 }
 
-func cacheAuthority(a access.Authority, rates, tokens, budgets bool) access.Authority {
-	filter := func(p access.AdmissionLimits) access.AdmissionLimits {
+func cacheAuthority(a keyauthority.Authority, rates, tokens, budgets bool) keyauthority.Authority {
+	filter := func(p keyauthority.AdmissionLimits) keyauthority.AdmissionLimits {
 		if !rates {
 			p.RequestsPerMinute = nil
 			p.MaxConcurrency = nil
@@ -222,7 +222,7 @@ func cacheAuthority(a access.Authority, rates, tokens, budgets bool) access.Auth
 		return p
 	}
 	if a.DelegationAgentLimits != nil {
-		a.DelegationAgentLimits = &access.DelegationAgentLimits{ID: a.DelegationAgentLimits.ID, LookupID: a.DelegationAgentLimits.LookupID, Limits: filter(a.DelegationAgentLimits.Limits)}
+		a.DelegationAgentLimits = &keyauthority.DelegationAgentLimits{ID: a.DelegationAgentLimits.ID, LookupID: a.DelegationAgentLimits.LookupID, Limits: filter(a.DelegationAgentLimits.Limits)}
 	}
 	if !rates {
 		a.Policy.RequestsPerMinute = nil
@@ -247,19 +247,19 @@ func cacheAuthority(a access.Authority, rates, tokens, budgets bool) access.Auth
 		a.ProjectAttributionBudgets = nil
 	}
 	if a.Policy.RouteLimits != nil {
-		copy := access.RouteLimits{}
+		copy := keyauthority.RouteLimits{}
 		for k, p := range a.Policy.RouteLimits {
 			copy[k] = filter(p)
 		}
 		a.Policy.RouteLimits = copy
 	}
-	endUser := func(p *access.EndUserPolicy) *access.EndUserPolicy {
+	endUser := func(p *keyauthority.EndUserPolicy) *keyauthority.EndUserPolicy {
 		if p == nil {
 			return nil
 		}
 		out := *p
 		out.Defaults = filter(p.Defaults)
-		out.Overrides = map[string]access.AdmissionLimits{}
+		out.Overrides = map[string]keyauthority.AdmissionLimits{}
 		for k, v := range p.Overrides {
 			out.Overrides[k] = filter(v)
 		}
@@ -273,7 +273,7 @@ func cacheAuthority(a access.Authority, rates, tokens, budgets bool) access.Auth
 func (s *Server) lookupCache(ctx context.Context, x *call) *Error {
 	c := x.cache
 	a := x.attempts[0]
-	p := x.snapshot().Providers[a.ProviderID]
+	p := x.snapshot().Provider(a.ProviderID)
 	var doc oif.Document
 	if x.unary != nil {
 		plan, err := x.unaryPlan(&p, a.TargetID, a.UpstreamModel)
@@ -307,18 +307,14 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *Error {
 	} else if c.policy.Scope == "route" {
 		scope = x.route.ID
 	}
-	var entries any
 	guardrailProject := project
 	if guardrailProject == "" {
 		guardrailProject = "installation"
 	}
-	if registry := x.snapshot().Guardrails; registry != nil {
-		var err error
-		entries, err = registry.Entries(guardrails.Boundary{ProjectID: guardrailProject, OrganizationID: registry.ProjectOrganizations[guardrailProject], RouteID: x.route.ID, KeyID: x.keyID})
-		if err != nil {
-			c.result = "bypass"
-			return nil
-		}
+	entries, guardrailErr := x.snapshot().GuardrailEntries(guardrailProject, x.route.ID, x.keyID)
+	if guardrailErr != nil {
+		c.result = "bypass"
+		return nil
 	}
 	headers := map[string][]string{}
 	for _, name := range []string{"Anthropic-Version", "Anthropic-Beta", "OpenAI-Organization", "OpenAI-Project", "OpenAI-Beta", "X-OLP-Client-Contract"} {
@@ -347,7 +343,7 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *Error {
 	// always requests stream usage for accounting, even when the caller does not.
 	fingerprint, _ := json.Marshal([]any{x.route.RevisionID, x.route, entries, p.RevisionID, a.TargetID, x.surfaceName(), x.family, dialect, x.named().ID, x.named().RevisionID, x.named().Slug, x.mode, headers, x.semanticQuery, encoding, includeUsage})
 	if c.policy.Mode == "semantic" {
-		er, ok := x.snapshot().Routes[c.policy.EmbeddingRoute]
+		er, ok := x.snapshot().FindRoute(c.policy.EmbeddingRoute)
 		if !ok {
 			c.result = "bypass"
 			return nil
@@ -355,7 +351,7 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *Error {
 		embeddingRevision, _ := json.Marshal(er)
 		fingerprint = append(fingerprint, embeddingRevision...)
 		for _, t := range er.Targets {
-			fingerprint = append(fingerprint, []byte(x.snapshot().Providers[t.ProviderID].RevisionID)...)
+			fingerprint = append(fingerprint, []byte(x.snapshot().Provider(t.ProviderID).RevisionID)...)
 		}
 	}
 	sum := sha256.Sum256(fingerprint)
@@ -389,9 +385,9 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *Error {
 	var entry *cache.Entry
 	var err error
 	if c.controls.NoCache {
-		ticket, err = s.Cache.Begin(lookup, space, canonical)
+		ticket, err = s.deps.Cache.Begin(lookup, space, canonical)
 	} else {
-		ticket, entry, err = s.Cache.Lookup(lookup, space, canonical, c.controls)
+		ticket, entry, err = s.deps.Cache.Lookup(lookup, space, canonical, c.controls)
 	}
 	cancel()
 	if err != nil {
@@ -419,7 +415,7 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *Error {
 		}
 		lookup, cancel = context.WithTimeout(ctx, 100*time.Millisecond)
 		var similarity float64
-		entry, similarity, err = s.Cache.Nearest(lookup, c.ticket, c.vector, c.policy, c.controls)
+		entry, similarity, err = s.deps.Cache.Nearest(lookup, c.ticket, c.vector, c.policy, c.controls)
 		cancel()
 		if err != nil {
 			c.result = "bypass"
@@ -530,7 +526,7 @@ func (s *Server) storeCache(x *call, out *outcome, status int) {
 	metadata, _ := json.Marshal(cacheMetadata{Usage: f.Usage, ProviderID: f.ProviderID, ProviderRevisionID: f.ProviderRevisionID, UpstreamModel: f.UpstreamModel, UsageComplete: f.UsageComplete})
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	if err := s.Cache.Put(ctx, c.ticket, cache.Entry{Body: c.body, Frames: c.frames, Metadata: metadata}, c.policy, c.controls, c.vector); err != nil {
+	if err := s.deps.Cache.Put(ctx, c.ticket, cache.Entry{Body: c.body, Frames: c.frames, Metadata: metadata}, c.policy, c.controls, c.vector); err != nil {
 		if !errors.Is(err, cache.ErrNotStored) {
 			c.reason = "unavailable"
 		}

@@ -208,17 +208,20 @@ func (m *Management) resolve(r *http.Request, p access.Principal) (access.Reply,
 			return access.Reply{}, err
 		}
 	}
-	tx, err := m.access.Begin(r)
+	tx, p, err := m.access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
+	if err := p.Project(&call.ProjectID, access.Change); err != nil {
+		return access.Reply{}, err
+	}
 	claim, replay, err := m.access.Replay(r, tx, p, request)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	if replay != nil {
-		return access.Commit(r, tx, *replay)
+		return *replay, tx.Commit(r.Context())
 	}
 	switch request.Outcome {
 	case ResolveSettled:
@@ -256,7 +259,7 @@ func (m *Management) resolve(r *http.Request, p access.Principal) (access.Reply,
 	if err = m.access.CompleteReplay(r, tx, claim, reply); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, reply)
+	return reply, tx.Commit(r.Context())
 }
 
 func (m *Management) list(r *http.Request, p access.Principal) (access.Reply, error) {

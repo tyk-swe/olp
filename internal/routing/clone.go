@@ -18,6 +18,7 @@ func (s *Snapshot) Clone() *Snapshot {
 		return nil
 	}
 	out := &Snapshot{Commitments: maps.Clone(s.Commitments), Generation: s.Generation, Providers: maps.Clone(s.Providers), Routes: maps.Clone(s.Routes), CodeRoutes: maps.Clone(s.CodeRoutes), CodeConnections: maps.Clone(s.CodeConnections), CodePaidConnections: maps.Clone(s.CodePaidConnections), InstallationPolicy: s.InstallationPolicy.Clone(), KeyPolicies: maps.Clone(s.KeyPolicies)}
+	out.Guardrails = s.Guardrails.Clone()
 	out.MCPServers = slices.Collect(func(yield func(MCPServer) bool) {
 		for _, server := range s.MCPServers {
 			if !yield(MCPServer{
@@ -159,6 +160,7 @@ func cloneProvider(provider Provider) Provider {
 	p.OperationDefaults = c.OperationDefaults
 	p.Bindings = c.Bindings
 	p.PluginOptions = c.PluginOptions
+	p.Plugin = c.Plugin
 	p.CredentialHeaders = c.CredentialHeaders
 	p.Models = c.Models
 	p.metadata = nil
@@ -294,3 +296,5 @@ func cloneConfiguration(c Configuration) Configuration {
 	c.Options.HealthProbe = copyPointer(c.Options.HealthProbe)
 	return c
 }
+
+func (c Configuration) Clone() Configuration { return cloneConfiguration(c) }

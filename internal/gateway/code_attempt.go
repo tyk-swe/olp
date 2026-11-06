@@ -4,20 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/tyk-swe/olp/internal/codesessions"
 	"net/http"
 	"reflect"
 	"time"
 
 	"github.com/coder/websocket"
-
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
 	"github.com/tyk-swe/olp/internal/codexwire"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/release"
-	"github.com/tyk-swe/olp/internal/resources"
+
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/upstream"
 )
@@ -29,7 +29,7 @@ type codeAttempt struct {
 	adapter            codemode.Adapter
 	paid               *paidCodeAttempt
 	server             *Server
-	permit             resources.CodePermit
+	permit             codesessions.Permit
 	config             routing.Configuration
 	auth               codemode.Authorization
 	lease              *limits.Lease
@@ -49,7 +49,7 @@ type codeAttempt struct {
 	pendingHealth      *codemode.HealthObservation
 }
 
-func (s *Server) prepareCode(r *http.Request, release *release.Release, route codemode.Route, observation codemode.Request, ingress codeIngress, transport codeadapter.Transport, recovery *resources.CodeRecovery, body []byte) (*codeAttempt, error) {
+func (s *Server) prepareCode(r *http.Request, release *release.Release, route codemode.Route, observation codemode.Request, ingress codeIngress, transport codeadapter.Transport, recovery *codesessions.Recovery, body []byte) (*codeAttempt, error) {
 	authority, failure := s.authenticate(r, "inference")
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_authentication_refused")
@@ -65,11 +65,11 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 		if recovery != nil || len(route.PaidTargets) == 0 || resolved.PublicModel() == resolved.Model {
 			return resolved, nil
 		}
-		ledger, supported := s.CodeLedger.(PaidCodeLedger)
+		ledger, supported := s.deps.CodeLedger.(PaidCodeLedger)
 		if !supported {
 			return codemode.Operation{}, codemode.Refuse(503, "code_paid_authority_unavailable")
 		}
-		return ledger.ResolvePaidModel(r.Context(), resources.CodeAdmission{Route: route, APIKeyID: authority.ID, Operation: resolved, EndUserDigest: authority.EndUserDigest, PreviousResponse: observation.PreviousResponse}, authority)
+		return ledger.ResolvePaidModel(r.Context(), codesessions.Admission{Route: route, APIKeyID: authority.ID, Operation: resolved, EndUserDigest: authority.EndUserDigest, PreviousResponse: observation.PreviousResponse}, authority)
 	}()
 	if err != nil {
 		return nil, err
@@ -78,8 +78,8 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 		return s.preparePaidCode(r, release, route, observation, operation, ingress, transport, authority, body, nil, false)
 	}
 	if recovery == nil && len(route.PaidFallbackTargets) > 0 {
-		if ledger, ok := s.CodeLedger.(PaidCodeLedger); ok {
-			selected, err := ledger.ResolvePaidFallback(r.Context(), resources.CodeAdmission{Route: route, APIKeyID: authority.ID, Operation: operation, PreviousResponse: observation.PreviousResponse}, authority)
+		if ledger, ok := s.deps.CodeLedger.(PaidCodeLedger); ok {
+			selected, err := ledger.ResolvePaidFallback(r.Context(), codesessions.Admission{Route: route, APIKeyID: authority.ID, Operation: operation, PreviousResponse: observation.PreviousResponse}, authority)
 			if err != nil {
 				return nil, err
 			}
@@ -88,8 +88,8 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 			}
 		}
 	}
-	providers := release.Snapshot.CodeModelProviders(route, ingress.path, operation.Model, transport)
-	if len(providers) == 0 && len(route.PaidFallbackTargets) == 0 && (!route.ModelRewriting || len(release.Snapshot.CodeProviders(route, ingress.path, transport)) == 0) {
+	providers := release.Snapshot().CodeModelProviders(route, ingress.path, operation.Model, transport)
+	if len(providers) == 0 && len(route.PaidFallbackTargets) == 0 && (!route.ModelRewriting || len(release.Snapshot().CodeProviders(route, ingress.path, transport)) == 0) {
 		return nil, codemode.Refuse(400, "code_operation_unsupported")
 	}
 
@@ -97,22 +97,22 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_"+failure.Code)
 	}
-	lease, failure := s.Admission.ReserveCodeRate(r.Context(), authority, observation.Estimate, codeGenerationTimeout+time.Minute, route.Slug)
+	lease, failure := s.deps.Admission.ReserveCodeRate(r.Context(), authority, observation.Estimate, codeGenerationTimeout+time.Minute, route.Slug)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_rate_limited")
 	}
-	permit, err := s.CodeLedger.Admit(r.Context(), resources.CodeAdmission{
+	permit, err := s.deps.CodeLedger.Admit(r.Context(), codesessions.Admission{
 		Attribution: labels, Route: route, APIKeyID: authority.ID, EndUserDigest: authority.EndUserDigest,
-		InitialRecovery: observation.Recoverable, Recovery: recovery, Operation: operation, Providers: providers, ModelSource: release.Snapshot, ModelPath: ingress.path, ModelTransport: transport, PreviousResponse: observation.PreviousResponse,
+		InitialRecovery: observation.Recoverable, Recovery: recovery, Operation: operation, Providers: providers, ModelSource: release.Snapshot(), ModelPath: ingress.path, ModelTransport: transport, PreviousResponse: observation.PreviousResponse,
 	})
 	if err != nil {
 		settleKey(r.Context(), lease, false, nil, s.log)
 		if refusal, ok := errors.AsType[*codemode.Refusal](err); ok && refusal.Code == "code_account_unavailable" && (recovery == nil || recovery.AccountID == "") && transport == codeadapter.HTTP && observation.Recoverable && len(route.PaidFallbackTargets) > 0 {
-			ledger, supported := s.CodeLedger.(PaidCodeLedger)
+			ledger, supported := s.deps.CodeLedger.(PaidCodeLedger)
 			if !supported {
 				return nil, codemode.Refuse(503, "code_paid_authority_unavailable")
 			}
-			selected, selectionErr := ledger.ResolvePaidFallback(r.Context(), resources.CodeAdmission{Route: route, APIKeyID: authority.ID, Operation: operation, InitialRecovery: observation.Recoverable, Recovery: recovery, PreviousResponse: observation.PreviousResponse}, authority)
+			selected, selectionErr := ledger.ResolvePaidFallback(r.Context(), codesessions.Admission{Route: route, APIKeyID: authority.ID, Operation: operation, InitialRecovery: observation.Recoverable, Recovery: recovery, PreviousResponse: observation.PreviousResponse}, authority)
 			if selectionErr != nil {
 				return nil, selectionErr
 			}
@@ -156,7 +156,7 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 		if fresh.EndUserDigest != authority.EndUserDigest {
 			return nil, codemode.Refuse(409, "code_end_user_changed")
 		}
-		a.lease, failure = s.Admission.ReserveCodeRate(r.Context(), fresh, observation.Estimate, codeGenerationTimeout+time.Minute, route.Slug)
+		a.lease, failure = s.deps.Admission.ReserveCodeRate(r.Context(), fresh, observation.Estimate, codeGenerationTimeout+time.Minute, route.Slug)
 		if failure != nil {
 			return nil, codemode.Refuse(failure.Status, "code_rate_limited")
 		}
@@ -164,7 +164,7 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 	if permit.Pin.AccountID != permit.Account.ID || permit.Pin.Principal != permit.Account.Principal || permit.Authority.ID != authority.ID {
 		return nil, codemode.Refuse(503, "code_binding_invalid")
 	}
-	target, err := resolveCodeTarget(release.Snapshot, route, permit.Account.ProviderID, ingress, transport)
+	target, err := resolveCodeTarget(release.Snapshot(), route, permit.Account.ProviderID, ingress, transport)
 	if err != nil {
 		return nil, err
 	}
@@ -174,11 +174,11 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 	a.config, a.endpoint, a.observer = target.config, target.endpoint, codeObserver(target.endpoint)
 	a.adapter = target.adapter.Adapter
 	a.identityOriginator = target.adapter.CompatibilityOriginator(route)
-	a.providerLease, failure = s.Admission.reserveCodeProvider(r.Context(), permit.Account.ProviderID, target.config, observation.Estimate, codeGenerationTimeout+time.Minute)
+	a.providerLease, failure = s.deps.Admission.reserveCodeProvider(r.Context(), permit.Account.ProviderID, target.config, observation.Estimate, codeGenerationTimeout+time.Minute)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_provider_rate_limited")
 	}
-	a.auth, err = s.CodeAuthorizer.AuthorizeCode(r.Context(), target.config, permit.Account, target.dispatchDescriptor())
+	a.auth, err = s.deps.CodeAuthorizer.AuthorizeCode(r.Context(), target.config, permit.Account, target.dispatchDescriptor())
 	if err != nil {
 		return nil, codemode.Refuse(503, "code_account_unavailable")
 	}
@@ -193,7 +193,7 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 }
 
 func (a *codeAttempt) dispatch(ctx context.Context) error {
-	if err := a.server.CodeLedger.MarkDispatched(ctx, a.permit.Attempt.ID); err != nil {
+	if err := a.server.deps.CodeLedger.MarkDispatched(ctx, a.permit.Attempt.ID); err != nil {
 		return codemode.Refuse(503, "code_dispatch_unavailable")
 	}
 	a.dispatched = true
@@ -221,7 +221,7 @@ func (a *codeAttempt) observeEncodedUnary(body []byte, encoding string) {
 func (a *codeAttempt) observe(o codemode.Observation) {
 	if o.ResponseID != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		_ = a.server.CodeLedger.ObserveReference(ctx, a.permit.Attempt.ID, o.ResponseID)
+		_ = a.server.deps.CodeLedger.ObserveReference(ctx, a.permit.Attempt.ID, o.ResponseID)
 		cancel()
 	}
 	classification, classified := a.observeCooldownClass(o)
@@ -279,11 +279,11 @@ func (a *codeAttempt) finish(ctx context.Context) {
 	defer cancel()
 	var err error
 	if a.dispatched {
-		err = a.server.CodeLedger.Settle(ctx, a.permit.Attempt.ID, a.usage)
+		err = a.server.deps.CodeLedger.Settle(ctx, a.permit.Attempt.ID, a.usage)
 	} else {
-		err = a.server.CodeLedger.Abort(ctx, a.permit.Attempt.ID)
+		err = a.server.deps.CodeLedger.Abort(ctx, a.permit.Attempt.ID)
 		if err != nil {
-			err = a.server.CodeLedger.Settle(ctx, a.permit.Attempt.ID, codemode.Usage{})
+			err = a.server.deps.CodeLedger.Settle(ctx, a.permit.Attempt.ID, codemode.Usage{})
 		}
 	}
 	if err != nil {
@@ -305,7 +305,7 @@ func (a *codeAttempt) outcome(ctx context.Context, outcome codemode.Outcome) {
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	if err := a.server.CodeLedger.ObserveOutcome(ctx, a.permit.Attempt.ID, outcome); err != nil {
+	if err := a.server.deps.CodeLedger.ObserveOutcome(ctx, a.permit.Attempt.ID, outcome); err != nil {
 		a.server.log.Warn("code outcome unavailable", "attempt_id", a.permit.Attempt.ID)
 	}
 }
@@ -338,7 +338,7 @@ func (a *codeAttempt) observeAllowanceCharge(ctx context.Context, charge json.Ra
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	_ = a.server.CodeLedger.ObserveAllowanceCharge(ctx, a.permit.Attempt.ID, charge)
+	_ = a.server.deps.CodeLedger.ObserveAllowanceCharge(ctx, a.permit.Attempt.ID, charge)
 }
 
 func (a *codeAttempt) observeAllowance(ctx context.Context, allowance codemode.Allowance) {
@@ -347,7 +347,7 @@ func (a *codeAttempt) observeAllowance(ctx context.Context, allowance codemode.A
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	_ = a.server.CodeLedger.ObserveAllowance(ctx, a.permit.Account.ID, allowance)
+	_ = a.server.deps.CodeLedger.ObserveAllowance(ctx, a.permit.Account.ID, allowance)
 }
 
 func (a *codeAttempt) health(ctx context.Context, status string) {
@@ -360,7 +360,7 @@ func (a *codeAttempt) observeHealth(ctx context.Context, observation codemode.He
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	_ = a.server.CodeLedger.ObserveHealth(ctx, a.permit.Account.ID, observation)
+	_ = a.server.deps.CodeLedger.ObserveHealth(ctx, a.permit.Account.ID, observation)
 }
 
 func (a *codeAttempt) flushPendingHealth(ctx context.Context) {
@@ -400,7 +400,7 @@ func (a *codeAttempt) observeCooldownClass(o codemode.Observation) (codeadapter.
 	classification = codeadapter.WithCycleReset(classification, a.permit.Account.CycleAnchor, now)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	err := a.server.CodeLedger.ObserveCooldownClass(ctx, a.permit.Account.ID, a.model, classification, now)
+	err := a.server.deps.CodeLedger.ObserveCooldownClass(ctx, a.permit.Account.ID, a.model, classification, now)
 	return classification, err == nil
 }
 
@@ -418,7 +418,7 @@ func (a *codeAttempt) response(ctx context.Context, status int, headers http.Hea
 	}
 	a.outcome(ctx, outcome)
 	if status == http.StatusUnauthorized {
-		a.server.Runtime.CredentialRefused(a.auth.CredentialID, a.auth.GrantGeneration)
+		a.server.deps.Runtime.CredentialRefused(a.auth.CredentialID, a.auth.GrantGeneration)
 	}
 	if status == 429 || status == 401 || status == 403 || status >= 500 {
 		health := func() string {
@@ -453,7 +453,7 @@ func (a *codeAttempt) response(ctx context.Context, status int, headers http.Hea
 
 // A durable permit reads current issuer state. It may retain the verified claim
 // digest only while the same declared issuer revision still owns the principal.
-func bindCodeWorkload(fresh *access.Authority, verified access.Authority) error {
+func bindCodeWorkload(fresh *keyauthority.Authority, verified keyauthority.Authority) error {
 	if fresh.WorkloadIssuerID == nil && verified.WorkloadIssuerID == nil {
 		return nil
 	}

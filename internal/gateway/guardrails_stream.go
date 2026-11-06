@@ -20,7 +20,7 @@ type guardrailStream struct {
 }
 
 func newGuardrailStream(x *call) (*guardrailStream, error) {
-	s, err := guardrails.NewStream(x.guardrailEngine, guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.route.Slug, InternalModel: x.internalGuardrail}, x.snapshot().Guardrails.Window())
+	s, err := guardrails.NewStream(x.guardrailEngine, guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.route.Slug, InternalModel: x.internalGuardrail}, x.snapshot().GuardrailWindow())
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +41,7 @@ func (g *guardrailStream) push(ctx context.Context, frame []byte) ([][]byte, err
 	}
 	if touched || len(g.pending) > 0 {
 		g.pendingBytes += len(frame)
-		if g.pendingBytes > g.x.snapshot().Guardrails.Window() {
+		if g.pendingBytes > g.x.snapshot().GuardrailWindow() {
 			return nil, guardrails.ErrSurface
 		}
 		g.pending = append(g.pending, bytes.Clone(frame))

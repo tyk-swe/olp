@@ -6,13 +6,13 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
-
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/workload"
 )
 
 // IdentityHTTPClient applies the independent, bounded identity egress policy.
 // Provider network exceptions never broaden this client.
-func IdentityHTTPClient() *http.Client { return oidcHTTPClient() }
+func IdentityHTTPClient() *http.Client { return oidcHTTPClient(nil) }
 
 const workloadIssuerJSON = `i.document||jsonb_build_object('id',i.id,'etag',i.etag,'created_at',i.created_at,'updated_at',i.updated_at,'created_by',i.created_by)`
 
@@ -83,20 +83,16 @@ func (s *Server) writeWorkloadIssuer(r *http.Request, _ Principal, create bool) 
 		verifyKeys = !oldEnabled || oldURL != input.JWKSURL
 	}
 	if verifyKeys {
-		if _, err := workload.Fetch(r.Context(), s.OIDCClient, input.JWKSURL); err != nil {
+		if _, err := workload.Fetch(r.Context(), s.oidcClient, input.JWKSURL); err != nil {
 			return Reply{}, Fail(422, "workload_keys_unavailable", "The public signing keys are unavailable or outside identity egress policy.")
 		}
 	}
 
-	tx, e := s.Begin(r)
+	tx, p, e := s.BeginMutation(r)
 	if e != nil {
 		return Reply{}, e
 	}
 	defer tx.Rollback(r.Context())
-	p, e := s.Reauthorize(r, tx)
-	if e != nil {
-		return Reply{}, e
-	}
 	var replay ReplayClaim
 	var oldETag, issuer string
 	if create {
@@ -106,7 +102,7 @@ func (s *Server) writeWorkloadIssuer(r *http.Request, _ Principal, create bool) 
 			return Reply{}, e
 		}
 		if old != nil {
-			return Commit(r, tx, *old)
+			return *old, tx.Commit(r.Context())
 		}
 	} else {
 		if e = tx.QueryRow(r.Context(), "SELECT etag::text,issuer FROM olp.workload_issuers WHERE id=$1 FOR UPDATE", id).Scan(&oldETag, &issuer); e != nil {
@@ -138,12 +134,12 @@ func (s *Server) writeWorkloadIssuer(r *http.Request, _ Principal, create bool) 
 			return Reply{}, e
 		}
 	}
-	return Commit(r, tx, reply)
+	return reply, tx.Commit(r.Context())
 }
 
-func WorkloadKeyPolicy(m workload.Mapping) KeyPolicy {
+func WorkloadKeyPolicy(m workload.Mapping) keyauthority.KeyPolicy {
 	template := m.LimitTemplate
-	return KeyPolicy{Scopes: m.Scopes, AllowedToolsets: m.AllowedToolsets, AllowedAgents: m.AllowedAgents, AllowedRoutes: []string{}, AllowedAttributionKeys: []string{}, AllowedRouteGroups: m.RouteGroups, LimitTemplate: &template, AllowProviderState: m.AllowProviderState}
+	return keyauthority.KeyPolicy{Scopes: m.Scopes, AllowedToolsets: m.AllowedToolsets, AllowedAgents: m.AllowedAgents, AllowedRoutes: []string{}, AllowedAttributionKeys: []string{}, AllowedRouteGroups: m.RouteGroups, LimitTemplate: &template, AllowProviderState: m.AllowProviderState}
 }
 
 // ValidateWorkloadConfig checks declared identity URLs without fetching them.
@@ -188,7 +184,7 @@ func (s *Server) StoreWorkloadIssuer(ctx context.Context, tx pgx.Tx, p Principal
 		if !input.Enabled {
 			continue
 		}
-		if e = checkLimitTemplates(ctx, tx, &project, &mapping.LimitTemplate); e != nil {
+		if e = CheckLimitTemplates(ctx, tx, &project, &mapping.LimitTemplate); e != nil {
 			return "", e
 		}
 		resources := WorkloadKeyPolicy(mapping)

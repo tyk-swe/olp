@@ -9,8 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -93,7 +93,7 @@ func scanAgentBinding(row pgx.Row, expected Binding) (Binding, error) {
 	return current, nil
 }
 
-func (s *Store) Resolve(ctx context.Context, authority access.Authority, tool routing.MCPToolsetTool) ([]byte, error) {
+func (s *Store) Resolve(ctx context.Context, authority keyauthority.Authority, tool routing.MCPToolsetTool) ([]byte, error) {
 	expected, bindErr := Bind(authority, tool)
 	if bindErr != nil {
 		return nil, bindErr
@@ -105,7 +105,7 @@ func (s *Store) Resolve(ctx context.Context, authority access.Authority, tool ro
 
 }
 
-func (s *Store) AgentBinding(authority access.Authority, publicationID string, agent agentcontract.Definition) (string, error) {
+func (s *Store) AgentBinding(authority keyauthority.Authority, publicationID string, agent agentcontract.Definition) (string, error) {
 	expected, err := BindAgent(authority, publicationID, agent)
 	if err != nil {
 		return "", err
@@ -113,7 +113,7 @@ func (s *Store) AgentBinding(authority access.Authority, publicationID string, a
 	return expected.Digest(), nil
 }
 
-func (s *Store) StartAgent(ctx context.Context, authority access.Authority, publicationID string, agent agentcontract.Definition) (Handoff, error) {
+func (s *Store) StartAgent(ctx context.Context, authority keyauthority.Authority, publicationID string, agent agentcontract.Definition) (Handoff, error) {
 	expected, err := BindAgent(authority, publicationID, agent)
 	if err != nil {
 		return Handoff{}, err
@@ -121,7 +121,7 @@ func (s *Store) StartAgent(ctx context.Context, authority access.Authority, publ
 	return s.Start(ctx, expected, nil)
 }
 
-func (s *Store) ResolveAgent(ctx context.Context, authority access.Authority, publicationID string, agent agentcontract.Definition) ([]byte, string, error) {
+func (s *Store) ResolveAgent(ctx context.Context, authority keyauthority.Authority, publicationID string, agent agentcontract.Definition) ([]byte, string, error) {
 	expected, err := BindAgent(authority, publicationID, agent)
 	if err != nil {
 		return nil, "", err

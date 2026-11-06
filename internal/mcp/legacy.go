@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/mcp/messages"
 	"github.com/tyk-swe/olp/internal/mcp/sessions"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
@@ -149,7 +149,7 @@ func (s *Server) serveLegacyPOST(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
-func (s *Server) initializeLegacySession(w http.ResponseWriter, r *http.Request, authority access.Authority, message messages.Message) {
+func (s *Server) initializeLegacySession(w http.ResponseWriter, r *http.Request, authority keyauthority.Authority, message messages.Message) {
 	var params initializeRequest
 	if json.Unmarshal(message.Params, &params) != nil || params.ProtocolVersion != upstream.LegacyProtocol {
 		writeRPCFailure(w, message.ID, rpcFailure{status: http.StatusBadRequest, code: rpcInvalidParams, message: "Legacy HTTP+SSE requires protocol version 2024-11-05.", data: rpcErrorData{Code: "invalid_params"}})

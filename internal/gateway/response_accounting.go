@@ -65,7 +65,7 @@ func (s *Server) pendingGenerationUsage(x *call, fact *AttemptFact, metadata map
 		BudgetGroupID: x.budgetGroupID, Attribution: x.attribution, EndUserDigest: x.endUserDigest,
 		EvaluatorGuardrailID: x.evaluatorGuardrailID, GuardrailDecisions: x.guardrailEvidence(), PolicyDecisions: x.policyDecisions, Route: x.named().Slug,
 		Operation: x.family.Operation(), Surface: x.family.Surface(),
-		RuntimeGenerationID: x.request.release.Snapshot.Generation.ID,
+		RuntimeGenerationID: x.request.release.Snapshot().Generation().ID,
 		StartedAt:           x.request.startedAt, CompletedAt: now,
 		Duration: now.Sub(x.request.startedAt),
 		Attempts: facts,
@@ -118,7 +118,7 @@ func attachGenerationHTTP(x *call, resource *resources.Resource) error {
 
 func (s *Server) finalizeGenerationHTTP(x *call, env Envelope) {
 	owner := x.generation.generationHTTP
-	if owner == nil || owner.localID == "" || s.Resources == nil || len(env.Attempts) == 0 {
+	if owner == nil || owner.localID == "" || s.deps.Resources == nil || len(env.Attempts) == 0 {
 		return
 	}
 	last := &owner.event.Attempts[len(owner.event.Attempts)-1]
@@ -145,7 +145,7 @@ func (s *Server) finalizeGenerationHTTP(x *call, env Envelope) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := s.Resources.CompleteGenerationHTTP(ctx, owner.localID, completion); err != nil {
+	if err := s.deps.Resources.CompleteGenerationHTTP(ctx, owner.localID, completion); err != nil {
 		// A crash or failed bounded finalization leaves explicit missing HTTP
 		// metadata. Never manufacture success or replay its financial event.
 		s.log.Warn("deferred generation HTTP outcome not recorded", "request_id", env.RequestID, "error", err)
@@ -165,13 +165,13 @@ func (s *Server) applyResponseObservation(ctx context.Context, localID string, o
 	if observation.Usage != nil {
 		evidence = observedAttemptUsage(observation.Usage, observation.Complete, "generation")
 	}
-	result, err := s.Resources.ObserveResponseUsage(ctx, localID, observation.Status, evidence, s.now())
+	result, err := s.deps.Resources.ObserveResponseUsage(ctx, localID, observation.Status, evidence, s.now())
 	if err != nil {
 		return serverError(http.StatusServiceUnavailable, "response_usage_unavailable", "The stored response usage could not be reconciled; retry the request.")
 	}
-	if s.Admission != nil && s.Admission.limiter != nil {
+	if s.deps.Admission != nil && s.deps.Admission.limiter != nil {
 		for _, snapshot := range result.CostSnapshots {
-			if _, _, err := s.Admission.limiter.ApplyCostSnapshot(ctx, snapshot); err != nil {
+			if _, _, err := s.deps.Admission.limiter.ApplyCostSnapshot(ctx, snapshot); err != nil {
 				s.log.Warn("response cost snapshot application failed; reconciliation will repair it", "error", err)
 			}
 		}

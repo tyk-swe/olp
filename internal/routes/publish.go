@@ -137,15 +137,11 @@ func (s *Server) validateDraft(r *http.Request, _ access.Principal) (access.Repl
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := a.Begin(r)
+	tx, p, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	current, err := loadDraft(r.Context(), tx, id, true)
 	if err != nil {
 		return access.Reply{}, err
@@ -189,7 +185,7 @@ func (s *Server) validateDraft(r *http.Request, _ access.Principal) (access.Repl
 		return access.Reply{}, err
 	}
 	current.State, current.ETag = "validated", etag
-	return access.Commit(r, tx, access.Detail(current.summary(), etag))
+	return access.Detail(current.summary(), etag), tx.Commit(r.Context())
 }
 
 func (s *Server) activateDraft(r *http.Request, _ access.Principal) (access.Reply, error) {
@@ -198,15 +194,11 @@ func (s *Server) activateDraft(r *http.Request, _ access.Principal) (access.Repl
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := a.Begin(r)
+	tx, p, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	// The stored reply discloses the draft, so the caller must still reach
 	// its project before a replay is served.
 	current, err := loadDraft(r.Context(), tx, id, true)
@@ -221,7 +213,7 @@ func (s *Server) activateDraft(r *http.Request, _ access.Principal) (access.Repl
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	if err = access.Match(r, current.ETag); err != nil {
 		return access.Reply{}, err
@@ -246,7 +238,7 @@ func (s *Server) activateDraft(r *http.Request, _ access.Principal) (access.Repl
 	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 
 // promotion is the route revision a draft became.
@@ -593,15 +585,11 @@ func (s *Server) retireRoute(r *http.Request, _ access.Principal) (access.Reply,
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := a.Begin(r)
+	tx, p, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	// The stored reply discloses the route, so the caller must still reach
 	// its project before a replay is served.
 	var state, current string
@@ -617,7 +605,7 @@ func (s *Server) retireRoute(r *http.Request, _ access.Principal) (access.Reply,
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	if err = access.Match(r, current); err != nil {
 		return access.Reply{}, err
@@ -640,7 +628,7 @@ func (s *Server) retireRoute(r *http.Request, _ access.Principal) (access.Reply,
 	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 
 func (s *Server) revisionDiff(r *http.Request, p access.Principal) (access.Reply, error) {
@@ -720,15 +708,11 @@ func (s *Server) restoreRevision(r *http.Request, _ access.Principal) (access.Re
 		return access.Reply{}, err
 	}
 	ref := r.PathValue("revision_id")
-	tx, err := a.Begin(r)
+	tx, p, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	// The stored reply discloses the restored draft, so the caller must still
 	// reach the route's project before a replay is served.
 	project, err := routeProject(r.Context(), tx, id)
@@ -743,7 +727,7 @@ func (s *Server) restoreRevision(r *http.Request, _ access.Principal) (access.Re
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	v, err := loadRevision(r.Context(), tx, id, ref)
 	if err != nil {
@@ -780,5 +764,5 @@ func (s *Server) restoreRevision(r *http.Request, _ access.Principal) (access.Re
 	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }

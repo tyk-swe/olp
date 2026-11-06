@@ -12,7 +12,7 @@
     type CodeAccount,
     type CodePool,
     type CodePoolWrite
-  } from '$lib/management/code-mode';
+  } from '$lib/features/code-mode/api';
   import { adapterLabel } from './presentation';
 
   import {
@@ -91,7 +91,12 @@
         api_key_ids: keyIds
       };
     },
-    persist: (input, requestId) => saveCodePool(input, current, requestId)
+    persist: (input, requestId) =>
+      saveCodePool(
+        current
+          ? { kind: 'update', body: input, current }
+          : { kind: 'create', body: input, requestId }
+      )
   });
 </script>
 

@@ -217,7 +217,7 @@ func (s *Server) mfaVerify(r *http.Request) (Reply, error) {
 	if err = Audit(r.Context(), tx, r, UserActor(f.UserID), "mfa.verify", "user", f.UserID, "success"); err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, reply)
+	return reply, tx.Commit(r.Context())
 }
 
 func (s *Server) activateMFA(r *http.Request, tx pgx.Tx, f mfaFlow, credential *webauthn.Credential, counter int64) ([]string, error) {

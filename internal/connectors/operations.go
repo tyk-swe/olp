@@ -13,7 +13,7 @@ import (
 )
 
 func registerUnaryProfiles() {
-	for _, d := range operationregistry.Default.Dialects() {
+	for _, d := range operationregistry.Catalog().Dialects() {
 		// These are hosting compositions, not operation-kernel provider cases.
 		kind, hosting, auth := "openai_compatible", "direct-compatible", []string{"api_key", "headers", "none"}
 		switch d.Identity.ID {

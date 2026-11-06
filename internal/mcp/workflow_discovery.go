@@ -7,7 +7,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/release"
@@ -66,7 +66,7 @@ func SelectWorkflowToolsets(allowed []string, raw json.RawMessage) ([]string, er
 }
 
 type WorkflowResolver interface {
-	Resolve(context.Context, access.Authority, *release.Release, []string) ([]WorkflowTool, error)
+	Resolve(context.Context, keyauthority.Authority, *release.Release, []string) ([]WorkflowTool, error)
 }
 
 type discoveredToolset struct {
@@ -74,21 +74,21 @@ type discoveredToolset struct {
 	tools     []WorkflowTool
 }
 
-func DescribeWorkflow(ctx context.Context, resolver WorkflowResolver, authority access.Authority, release *release.Release, route, serving routing.Route, surface string, caller *limits.WorkflowBounds, available bool, now time.Time) *routing.WorkflowCapability {
+func DescribeWorkflow(ctx context.Context, resolver WorkflowResolver, authority keyauthority.Authority, release *release.Release, route, serving routing.Route, surface string, caller *limits.WorkflowBounds, available bool, now time.Time) *routing.WorkflowCapability {
 	return describeWorkflow(ctx, resolver, authority, release, route, caller, available, now, func(mode string) bool {
-		return workflowServingRouteAllowed(authority, serving, now) && workflowTargetSupports(release.Snapshot, serving, surface, mode, nil)
+		return workflowServingRouteAllowed(authority, serving, now) && workflowTargetSupports(release.Snapshot(), serving, surface, mode, nil)
 	})
 }
 
-func DescribeReachableWorkflow(ctx context.Context, resolver WorkflowResolver, authority access.Authority, release *release.Release, route routing.Route, surface string, available bool, now time.Time) *routing.WorkflowCapability {
+func DescribeReachableWorkflow(ctx context.Context, resolver WorkflowResolver, authority keyauthority.Authority, release *release.Release, route routing.Route, surface string, available bool, now time.Time) *routing.WorkflowCapability {
 	return describeWorkflow(ctx, resolver, authority, release, route, nil, available, now, func(mode string) bool {
-		supported, _ := workflowReachableMode(release.Snapshot, authority, route, surface, mode, nil, now)
+		supported, _ := workflowReachableMode(release.Snapshot(), authority, route, surface, mode, nil, now)
 		return supported
 	})
 }
 
-func describeWorkflow(ctx context.Context, resolver WorkflowResolver, authority access.Authority, release *release.Release, route routing.Route, caller *limits.WorkflowBounds, available bool, now time.Time, supports func(string) bool) *routing.WorkflowCapability {
-	if route.ToolExecution != "gateway" || route.Fidelity.Strict() || !authority.Allows("inference", route.Slug, route.ProjectID, now) || resolver == nil || release == nil || release.Snapshot == nil {
+func describeWorkflow(ctx context.Context, resolver WorkflowResolver, authority keyauthority.Authority, release *release.Release, route routing.Route, caller *limits.WorkflowBounds, available bool, now time.Time, supports func(string) bool) *routing.WorkflowCapability {
+	if route.ToolExecution != "gateway" || route.Fidelity.Strict() || !authority.Allows("inference", route.Slug, route.ProjectID, now) || resolver == nil || release == nil || release.Snapshot() == nil {
 		return nil
 	}
 	sets := slices.Collect(func(yield func(discoveredToolset) bool) {
@@ -135,13 +135,13 @@ func workflowClassification(classification string) string {
 	return classification
 }
 
-func workflowServingRouteAllowed(authority access.Authority, route routing.Route, now time.Time) bool {
+func workflowServingRouteAllowed(authority keyauthority.Authority, route routing.Route, now time.Time) bool {
 	return !route.Fidelity.Strict() && slices.Contains(route.Operations, "generation") && authority.Allows("inference", route.Slug, route.ProjectID, now)
 }
 
-func workflowTargetSupports(snapshot *routing.Snapshot, route routing.Route, surface, mode string, tags []string) bool {
+func workflowTargetSupports(snapshot *routing.View, route routing.Route, surface, mode string, tags []string) bool {
 	return slices.ContainsFunc(route.Targets, func(target routing.Target) bool {
-		provider, ok := snapshot.Providers[target.ProviderID]
+		provider, ok := snapshot.FindProvider(target.ProviderID)
 		return workflowTargetMatches(target, tags) && ok && provider.Enabled && provider.SupportsToolCalls(target.ProviderModel, surface, mode) && provider.Connector().Supports("generation", surface, mode)
 	})
 }
@@ -150,9 +150,9 @@ func workflowTargetMatches(target routing.Target, tags []string) bool {
 	return target.Shadow == nil && (len(tags) == 0 || slices.ContainsFunc(tags, func(tag string) bool { return slices.Contains(target.Tags, tag) }))
 }
 
-func workflowTargetCanExceedContext(snapshot *routing.Snapshot, route routing.Route, surface, mode string, tags []string) bool {
+func workflowTargetCanExceedContext(snapshot *routing.View, route routing.Route, surface, mode string, tags []string) bool {
 	return slices.ContainsFunc(route.Targets, func(target routing.Target) bool {
-		provider, ok := snapshot.Providers[target.ProviderID]
+		provider, ok := snapshot.FindProvider(target.ProviderID)
 		if !workflowTargetMatches(target, tags) || !ok || !provider.Enabled || !provider.Supports(target.ProviderModel, "generation", surface, mode) {
 			return false
 		}
@@ -162,7 +162,7 @@ func workflowTargetCanExceedContext(snapshot *routing.Snapshot, route routing.Ro
 	})
 }
 
-func workflowReachableMode(snapshot *routing.Snapshot, authority access.Authority, route routing.Route, surface, mode string, path []string, now time.Time) (eligible, mayFallback bool) {
+func workflowReachableMode(snapshot *routing.View, authority keyauthority.Authority, route routing.Route, surface, mode string, path []string, now time.Time) (eligible, mayFallback bool) {
 	if slices.Contains(path, route.Slug) || !workflowServingRouteAllowed(authority, route, now) {
 		return false, false
 	}
@@ -175,7 +175,7 @@ func workflowReachableMode(snapshot *routing.Snapshot, authority access.Authorit
 		if !slices.Contains(fallback.On, routing.FallbackContextWindow) {
 			return false
 		}
-		next, ok := snapshot.Routes[fallback.Route]
+		next, ok := snapshot.FindRoute(fallback.Route)
 		if !ok {
 			return false
 		}
@@ -184,7 +184,7 @@ func workflowReachableMode(snapshot *routing.Snapshot, authority access.Authorit
 	}), true
 }
 
-func workflowSelectorsSupport(snapshot *routing.Snapshot, authority access.Authority, route routing.Route, selectors []routing.Selector, surface, mode string, path []string, now time.Time) (eligible, mayFallback bool) {
+func workflowSelectorsSupport(snapshot *routing.View, authority keyauthority.Authority, route routing.Route, selectors []routing.Selector, surface, mode string, path []string, now time.Time) (eligible, mayFallback bool) {
 	if len(selectors) == 0 {
 		return workflowTargetSupports(snapshot, route, surface, mode, nil), workflowTargetCanExceedContext(snapshot, route, surface, mode, nil)
 	}
@@ -193,7 +193,7 @@ func workflowSelectorsSupport(snapshot *routing.Snapshot, authority access.Autho
 		return workflowSelectorsSupport(snapshot, authority, route, selectors[1:], surface, mode, path, now)
 	}
 	if selector.Route != "" {
-		next, ok := snapshot.Routes[selector.Route]
+		next, ok := snapshot.FindRoute(selector.Route)
 		if !ok || !slices.Contains(next.Operations, "generation") || !authority.Allows("inference", next.Slug, next.ProjectID, now) {
 			return workflowSelectorsSupport(snapshot, authority, route, selectors[1:], surface, mode, path, now)
 		}
@@ -221,7 +221,7 @@ func workflowPredicateAlwaysMatches(predicate routing.Predicate) bool {
 	return predicate.MinInputTokens == nil && predicate.MaxInputTokens == nil && predicate.MinOutputTokens == nil && predicate.MaxOutputTokens == nil && predicate.Tools == nil && len(predicate.Modalities) == 0 && predicate.StructuredOutput == nil && len(predicate.ReasoningEffort) == 0 && predicate.Classifier == nil && predicate.Plugin == nil
 }
 
-func defaultToolsetsAllowed(ctx context.Context, resolver WorkflowResolver, authority access.Authority, release *release.Release, selected []string, sets []discoveredToolset) bool {
+func defaultToolsetsAllowed(ctx context.Context, resolver WorkflowResolver, authority keyauthority.Authority, release *release.Release, selected []string, sets []discoveredToolset) bool {
 	if slices.ContainsFunc(sets, func(set discoveredToolset) bool { return !set.permitted }) {
 		return false
 	}

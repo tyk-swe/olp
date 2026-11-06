@@ -4,7 +4,7 @@
     CodeClientConfiguration,
     CodeClientSelection,
     CodeRoute
-  } from '$lib/management/code-mode';
+  } from '$lib/features/code-mode/api';
   import { listProjectMemberships } from '$lib/features/access/projects/api';
   import { projectKeys } from '$lib/features/access/projects/projectKeys';
   import { useRole } from '$lib/features/access/session/useRole.svelte';

@@ -23,8 +23,7 @@
         prompt.finish(undefined, new Error('Verification was cancelled.'))}
     >
       <MFAFlow
-        challenge={prompt.challenge}
-        enrollment={prompt.enrollment}
+        request={prompt}
         onComplete={(result) => prompt.finish(result)}
       />
     </SecretDialog>

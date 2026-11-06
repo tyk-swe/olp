@@ -9,6 +9,7 @@ import (
 	"slices"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/access/authority"
 )
 
 // CodeWrite shares the management transaction, current authority, optimistic
@@ -21,15 +22,11 @@ func (s *Server) CodeWrite(r *http.Request, table, resource, project string, inp
 	if err != nil {
 		return Reply{}, err
 	}
-	tx, err := s.Begin(r)
+	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Reauthorize(r, tx)
-	if err != nil {
-		return Reply{}, err
-	}
 	if err = s.RequireProject(r.Context(), tx, p, &project); err != nil {
 		return Reply{}, err
 	}
@@ -43,7 +40,7 @@ func (s *Server) CodeWrite(r *http.Request, table, resource, project string, inp
 			return Reply{}, err
 		}
 		if replayed != nil {
-			return Commit(r, tx, *replayed)
+			return *replayed, tx.Commit(r.Context())
 		}
 		id = NewID()
 	} else {
@@ -80,7 +77,7 @@ func (s *Server) CodeWrite(r *http.Request, table, resource, project string, inp
 			return Reply{}, err
 		}
 	}
-	return Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 
 // CodeMatch matches a listing's rows to a query field by SQL other than its
@@ -117,7 +114,7 @@ func (s *Server) codeList(r *http.Request, p Principal, selectSQL string, endUse
 	if digest := r.URL.Query().Get("end_user_digest"); endUsers && digest != "" {
 		if digest == "unidentified" {
 			digest = ""
-		} else if !ValidEndUserDigest(digest) {
+		} else if !authority.ValidEndUserDigest(digest) {
 			return Reply{}, Invalid("end_user_digest", "Use an end-user digest or unidentified.")
 		}
 		args = append(args, digest)

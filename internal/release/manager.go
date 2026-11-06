@@ -15,8 +15,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -48,7 +48,7 @@ type Release struct {
 	ID          string
 	Sequence    int64
 	Digest      string
-	Snapshot    *routing.Snapshot
+	snapshot    *routing.View
 	InstalledAt time.Time
 	credentials map[string][]byte
 	references  map[string]secretstore.Reference
@@ -62,16 +62,12 @@ type releaseCandidate struct {
 	grants       map[string]servedGrant
 }
 
-// NewRelease freezes an independent serving snapshot and credentials. The
-// caller retains its mutable inputs; serving consumers borrow the resulting
-// release and must not mutate it. Database installation already decodes into
-// exclusively owned storage and does not pay for this construction copy.
 func NewRelease(id string, sequence int64, snapshot *routing.Snapshot, credentials map[string][]byte) (*Release, error) {
 	if snapshot == nil {
 		return nil, errors.New("snapshot is required")
 	}
-	frozen := snapshot.Clone()
-	if err := frozen.Compile(); err != nil {
+	frozen, err := snapshot.CompiledView()
+	if err != nil {
 		return nil, err
 	}
 	digest, err := frozen.Digest()
@@ -82,7 +78,15 @@ func NewRelease(id string, sequence int64, snapshot *routing.Snapshot, credentia
 	for id, secret := range credentials {
 		owned[id] = append([]byte(nil), secret...)
 	}
-	return &Release{ID: id, Sequence: sequence, Digest: digest, Snapshot: frozen, InstalledAt: time.Now(), credentials: owned}, nil
+	return &Release{ID: id, Sequence: sequence, Digest: digest, snapshot: frozen, InstalledAt: time.Now(), credentials: owned}, nil
+}
+
+func (r *Release) Snapshot() *routing.View {
+	if r.snapshot == nil {
+		return nil
+	}
+	view := *r.snapshot
+	return &view
 }
 
 // Credential returns an independent plaintext credential for fixture setup.
@@ -111,22 +115,22 @@ type AuthorityStatus struct {
 
 type keyRecord struct {
 	expiresAt *time.Time
-	authority access.Authority
+	authority keyauthority.Authority
 	digest    []byte
 }
 
 type authorityState struct {
 	mcpTools                  map[string]mcpToolAuthority
-	agentPrincipals           map[string]access.Authority
+	agentPrincipals           map[string]keyauthority.Authority
 	agentResources            map[string]agentResourceAuthority
 	workloadIssuers           map[string]workloadIssuer
-	workloadPrincipals        map[string]access.Authority
+	workloadPrincipals        map[string]keyauthority.Authority
 	budgetIncreases           map[string]string
-	installationBudget        *access.BudgetPolicy
+	installationBudget        *keyauthority.BudgetPolicy
 	projectOrganizations      map[string]string
-	organizationBudgets       map[string]*access.BudgetPolicy
-	projectBudgets            map[string]*access.BudgetPolicy
-	projectAttributionBudgets map[string]access.AttributionBudgets
+	organizationBudgets       map[string]*keyauthority.BudgetPolicy
+	projectBudgets            map[string]*keyauthority.BudgetPolicy
+	projectAttributionBudgets map[string]keyauthority.AttributionBudgets
 	loaded                    bool
 	readAt                    time.Time
 	id                        string
@@ -137,34 +141,40 @@ type authorityState struct {
 	ineligible map[string]routing.Eligibility
 }
 
-// Manager installs releases and refreshes key authority for one gateway.
-type Manager struct {
+type ManagerConfig struct {
+	Pool                   *pgxpool.Pool
+	ReadPool               *pgxpool.Pool
+	Installation           string
+	Auth                   *secrets.AuthKey
+	Keys                   *secrets.KeyRing
+	Log                    *slog.Logger
+	Hostname               string
+	Region                 string
+	ExternalSecrets        ExternalSecrets
+	Mounted                map[string]MountedProvider
 	PrepareGuardrailPlugin func(context.Context, string) (func(), error)
+}
+
+type Manager struct {
+	prepareGuardrailPlugin func(context.Context, string) (func(), error)
 	workloadKeys           *workload.Cache
 	workloadRegistration   sync.Mutex
 	pool                   *pgxpool.Pool
-	// ReadPool, when set before Start, supplies runtime release and authority
-	// reads. Writes and historical secret resolution always use the primary.
-	ReadPool *pgxpool.Pool
-	// Region is the deployment's explicit region name, fixed before Start.
-	Region string
-	// ExternalSecrets is fixed before Start and follows the provider egress policy.
-	ExternalSecrets  ExternalSecrets
-	external         externalCredentials
-	authorityRefresh sync.Mutex
-	grantRefresh     sync.Mutex
-	replica          replicaProgress
-	installation     string
-	auth             *secrets.AuthKey
-	keys             *secrets.KeyRing
-	Mounted          map[string]MountedProvider
-	log              *slog.Logger
-	InstanceID       string
+	readPool               *pgxpool.Pool
+	region                 string
+	externalSecrets        ExternalSecrets
+	external               externalCredentials
+	authorityRefresh       sync.Mutex
+	grantRefresh           sync.Mutex
+	replica                replicaProgress
+	installation           string
+	auth                   *secrets.AuthKey
+	keys                   *secrets.KeyRing
+	mounted                map[string]MountedProvider
+	log                    *slog.Logger
+	instanceID             string
 
-	// GrantRefreshed, when set before Start, is told of each credential
-	// version of the installed release whose grant a poll found refreshed,
-	// with the provider it belongs to, apart from the poll.
-	GrantRefreshed func(providerID, credentialID string)
+	grantRefreshed func(providerID, credentialID string)
 
 	mu        sync.RWMutex
 	taskStore taskCapabilityStore
@@ -188,45 +198,45 @@ type Manager struct {
 	tasksMu    sync.Mutex
 	taskCtx    context.Context
 	cancelTask context.CancelFunc
+	started    bool
 	stopping   bool
 	waitStop   sync.Once
 	stopped    chan struct{}
 }
 
-// NewManager prepares a manager that serves the empty snapshot until the
-// first release installs and rejects admissions until authority loads.
-func NewManager(pool *pgxpool.Pool, installation string, auth *secrets.AuthKey, keys *secrets.KeyRing, log *slog.Logger, hostname string) *Manager {
+func NewManager(config ManagerConfig) *Manager {
 	tasks, cancel := context.WithCancel(context.Background())
-	return &Manager{workloadKeys: workload.NewCache(access.IdentityHTTPClient()),
-		pool:         pool,
-		installation: installation,
-		auth:         auth,
-		keys:         keys,
-		log:          log,
-		release:      emptyRelease(),
-		stop:         make(chan struct{}),
-		taskCtx:      tasks,
-		cancelTask:   cancel,
-		stopped:      make(chan struct{}),
-		InstanceID:   usage.GatewayInstance(hostname),
-
+	return &Manager{
+		workloadKeys: workload.NewCache(access.IdentityHTTPClient()),
+		pool:         config.Pool, readPool: config.ReadPool, installation: config.Installation,
+		auth: config.Auth, keys: config.Keys, log: config.Log, region: config.Region,
+		externalSecrets: config.ExternalSecrets, mounted: cloneMounted(config.Mounted),
+		prepareGuardrailPlugin: config.PrepareGuardrailPlugin,
+		release:                emptyRelease(), stop: make(chan struct{}), taskCtx: tasks,
+		cancelTask: cancel, stopped: make(chan struct{}),
+		instanceID:       usage.GatewayInstance(config.Hostname),
 		refreshRequested: map[string]int64{},
 	}
 }
 
+func (m *Manager) InstanceID() string { return m.instanceID }
+func (m *Manager) Region() string     { return m.region }
+
 func emptyRelease() *Release {
-	return &Release{Snapshot: &routing.Snapshot{Providers: map[string]routing.Provider{}, Routes: map[string]routing.Route{}}, InstalledAt: time.Now()}
+	return &Release{snapshot: (&routing.Snapshot{Providers: map[string]routing.Provider{}, Routes: map[string]routing.Route{}}).ReadOnly(), InstalledAt: time.Now()}
 }
 
 // Start performs one synchronous refresh and then polls until ctx ends or
 // Stop is called. Refresh failures are logged; the gateway keeps serving its
 // last installed state and fails closed once authority goes stale.
-func (m *Manager) Start(ctx context.Context) {
+func (m *Manager) Start(ctx context.Context, grantRefreshed func(providerID, credentialID string)) {
 	m.tasksMu.Lock()
-	if m.stopping {
+	if m.stopping || m.started {
 		m.tasksMu.Unlock()
 		return
 	}
+	m.started = true
+	m.grantRefreshed = grantRefreshed
 	m.wg.Add(1)
 	m.tasksMu.Unlock()
 	defer m.wg.Done()
@@ -300,7 +310,7 @@ func (m *Manager) Refresh(ctx context.Context) error {
 	err := refreshObligations(ctx, PollInterval, m.refreshAuthority, m.refreshRelease, m.refreshGrants, m.refreshInputs, m.refreshExternalCredentials)
 	status, cancel := context.WithTimeout(ctx, PollInterval)
 	defer cancel()
-	return errors.Join(err, m.RecordInstallStatus(status, m.InstanceID))
+	return errors.Join(err, m.RecordInstallStatus(status, m.instanceID))
 }
 
 func refreshObligations(ctx context.Context, budget time.Duration, obligations ...func(context.Context) error) error {
@@ -363,15 +373,15 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 		return err
 	}
 	state.projectOrganizations = map[string]string{}
-	state.organizationBudgets = map[string]*access.BudgetPolicy{}
-	state.projectBudgets = map[string]*access.BudgetPolicy{}
-	state.projectAttributionBudgets = map[string]access.AttributionBudgets{}
+	state.organizationBudgets = map[string]*keyauthority.BudgetPolicy{}
+	state.projectBudgets = map[string]*keyauthority.BudgetPolicy{}
+	state.projectAttributionBudgets = map[string]keyauthority.AttributionBudgets{}
 	for budgetRows.Next() {
 		var project string
-		var policy *access.BudgetPolicy
-		var labels access.AttributionBudgets
+		var policy *keyauthority.BudgetPolicy
+		var labels keyauthority.AttributionBudgets
 		var organization *string
-		var organizationPolicy *access.BudgetPolicy
+		var organizationPolicy *keyauthority.BudgetPolicy
 		if err = budgetRows.Scan(&project, &policy, &labels, &organization, &organizationPolicy); err != nil {
 			budgetRows.Close()
 			return err
@@ -403,7 +413,7 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 			return fmt.Errorf("authority: key %s policy: %w", record.authority.ID, err)
 		}
 		record.authority.SnapshotID = state.id
-		record.authority.Policy = record.authority.Policy.InRegion(m.Region)
+		record.authority.Policy = record.authority.Policy.InRegion(m.region)
 		record.authority.BudgetIncreases = state.budgetIncreases
 		record.authority.InstallationID = m.installation
 		record.authority.InstallationBudget = state.installationBudget
@@ -450,12 +460,12 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 		if e != nil {
 			return fmt.Errorf("authority route groups: %w", e)
 		}
-		byProject := map[string]access.RouteGroups{}
-		templatesByProject := map[string]access.LimitTemplates{}
+		byProject := map[string]keyauthority.RouteGroups{}
+		templatesByProject := map[string]keyauthority.LimitTemplates{}
 		for groupRows.Next() {
 			var id string
-			var groups access.RouteGroups
-			var templates access.LimitTemplates
+			var groups keyauthority.RouteGroups
+			var templates keyauthority.LimitTemplates
 			if e = groupRows.Scan(&id, &groups, &templates); e != nil {
 				groupRows.Close()
 				return e
@@ -483,7 +493,7 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 			}
 		}
 	}
-	state.workloadPrincipals = map[string]access.Authority{}
+	state.workloadPrincipals = map[string]keyauthority.Authority{}
 	for _, record := range state.keys {
 		if record.authority.WorkloadIssuerID != nil {
 			state.workloadPrincipals[record.authority.WorkloadDigest] = record.authority
@@ -495,7 +505,7 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 	if state.ineligible, err = ReadIneligible(ctx, tx, nil); err != nil {
 		return fmt.Errorf("authority: %w", err)
 	}
-	state.agentPrincipals = map[string]access.Authority{}
+	state.agentPrincipals = map[string]keyauthority.Authority{}
 	for _, record := range state.keys {
 		state.agentPrincipals[record.authority.ID] = record.authority
 	}
@@ -555,7 +565,7 @@ func (m *Manager) refreshRelease(ctx context.Context) error {
 	}
 	if installed {
 		release := candidate.release
-		m.log.Info("release installed", "sequence", sequence, "sha256", digest, "providers", len(release.Snapshot.Providers), "routes", len(release.Snapshot.Routes))
+		m.log.Info("release installed", "sequence", sequence, "sha256", digest, "providers", release.Snapshot().ProviderCount(), "routes", release.Snapshot().RouteCount())
 	}
 	return nil
 }
@@ -581,17 +591,18 @@ func (m *Manager) install(ctx context.Context, id string, sequence int64, digest
 	if !hmac.Equal([]byte(computed), []byte(digest)) {
 		return nil, errors.New("snapshot digest mismatch")
 	}
-	release := &Release{ID: id, Sequence: sequence, Digest: digest, Snapshot: snapshot, InstalledAt: time.Now(), credentials: map[string][]byte{}}
+	release := &Release{ID: id, Sequence: sequence, Digest: digest, InstalledAt: time.Now(), credentials: map[string][]byte{}}
 	m.mu.RLock()
 	candidate := &releaseCandidate{release: release, baseSequence: m.release.Sequence}
 	knownGrants := m.grants
 	m.mu.RUnlock()
 	if m.keys == nil {
-		credentials, err := installMounted(snapshot, m.Mounted)
+		credentials, err := installMounted(snapshot, m.mounted)
 		if err != nil {
 			return nil, err
 		}
 		release.credentials = credentials
+		release.snapshot = snapshot.ReadOnly()
 		return candidate, nil
 	}
 	tx, err := m.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
@@ -654,11 +665,11 @@ func (m *Manager) install(ctx context.Context, id string, sequence int64, digest
 		for _, definition := range snapshot.Guardrails.Definitions {
 			if definition.Type == "plugin" {
 				var c guardrails.ExternalConfig
-				if json.Unmarshal(definition.Configuration, &c) != nil || m.PrepareGuardrailPlugin == nil {
+				if json.Unmarshal(definition.Configuration, &c) != nil || m.prepareGuardrailPlugin == nil {
 					return nil, errors.New("guardrail plugin unavailable")
 				}
 				if !pinned[c.PluginVersion] {
-					unpin, err := m.PrepareGuardrailPlugin(ctx, c.PluginVersion)
+					unpin, err := m.prepareGuardrailPlugin(ctx, c.PluginVersion)
 					if err != nil {
 						return nil, errors.New("guardrail plugin could not be preloaded")
 					}
@@ -695,7 +706,8 @@ func (m *Manager) install(ctx context.Context, id string, sequence int64, digest
 	// A newly published grant credential must already have a coherent token
 	// and generation. Requests can then gate and dispatch against the same
 	// generation, and later polls can observe its advancement.
-	candidate.grants, err = m.readGrants(ctx, tx, grantProviders(snapshot), knownGrants)
+	release.snapshot = snapshot.ReadOnly()
+	candidate.grants, err = m.readGrants(ctx, tx, grantProviders(release.Snapshot()), knownGrants)
 	if err != nil {
 		return nil, err
 	}
@@ -705,7 +717,7 @@ func (m *Manager) install(ctx context.Context, id string, sequence int64, digest
 	// Record store availability before publication so failed references produce
 	// explicit route-plan decisions. Fetches hold neither transaction nor mutex.
 	for id, reference := range release.references {
-		value, _ := m.external.read(ctx, m.ExternalSecrets, id, reference)
+		value, _ := m.external.read(ctx, m.externalSecrets, id, reference)
 		clear(value)
 	}
 	return candidate, nil
@@ -741,7 +753,7 @@ func (m *Manager) publishRelease(ctx context.Context, candidate *releaseCandidat
 			candidate.grants[credentialID] = previous
 		}
 	}
-	refreshed := advancedGrants(grantProviders(candidate.release.Snapshot), m.grants, candidate.grants)
+	refreshed := advancedGrants(grantProviders(candidate.release.Snapshot()), m.grants, candidate.grants)
 	m.serveGrantsLocked(candidate.grants)
 	m.release = candidate.release
 	m.mu.Unlock()
@@ -749,13 +761,11 @@ func (m *Manager) publishRelease(ctx context.Context, candidate *releaseCandidat
 	return true, nil
 }
 
-// Release borrows the currently installed immutable release for pinning. Its
-// snapshot, maps, slices, nested pointers, and secret storage must not be mutated.
-// Mutable planning/request state belongs in the consumer, outside the release.
 func (m *Manager) Release() *Release {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.release
+	release := *m.release
+	return &release
 }
 
 // EndUserDigest derives a project-scoped identity without retaining the identifier.
@@ -770,7 +780,7 @@ func (m *Manager) Digest(purpose secrets.DigestPurpose, value string) []byte {
 // Authenticate resolves an API key against the last authority read. The
 // authority it returns is shared with the installed key records: callers read
 // it and copy it before changing it.
-func (m *Manager) Authenticate(secret string) (*access.Authority, error) {
+func (m *Manager) Authenticate(secret string) (*keyauthority.Authority, error) {
 	// An API key needs only the key records, and copying the whole authority
 	// would cost every request more than the lookup.
 	m.mu.RLock()
@@ -913,13 +923,13 @@ func (m *Manager) loadKeyOverlaps(ctx context.Context, tx pgx.Tx, state *authori
 
 // BudgetAuthority gives system-origin work the same aggregate caps and freshness
 // bound as caller work, without creating an API-key or end-user identity.
-func (m *Manager) BudgetAuthority(project *string) (access.Authority, error) {
+func (m *Manager) BudgetAuthority(project *string) (keyauthority.Authority, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if !m.authority.loaded || time.Since(m.authority.readAt) > AuthorityStaleAfter {
-		return access.Authority{}, ErrStaleAuthority
+		return keyauthority.Authority{}, ErrStaleAuthority
 	}
-	a := access.Authority{BudgetIncreases: m.authority.budgetIncreases, InstallationID: m.installation, ProjectID: project, InstallationBudget: m.authority.installationBudget}
+	a := keyauthority.Authority{BudgetIncreases: m.authority.budgetIncreases, InstallationID: m.installation, ProjectID: project, InstallationBudget: m.authority.installationBudget}
 	if project != nil {
 		if org, ok := m.authority.projectOrganizations[*project]; ok {
 			a.OrganizationID = &org

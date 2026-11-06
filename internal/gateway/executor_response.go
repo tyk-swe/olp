@@ -105,8 +105,8 @@ func (s *Server) finish(x *call, out *outcome, status int) {
 		}
 		if x.request.release != nil {
 			env.ReleaseSequence = x.request.release.Sequence
-			if x.request.release.Snapshot != nil {
-				env.RuntimeGenerationID = x.request.release.Snapshot.Generation.ID
+			if x.request.release.Snapshot() != nil {
+				env.RuntimeGenerationID = x.request.release.Snapshot().Generation().ID
 			}
 		}
 		if x.route != nil {
@@ -155,14 +155,14 @@ func (s *Server) finish(x *call, out *outcome, status int) {
 			if len(x.facts) != 0 {
 				serving := &x.facts[len(x.facts)-1]
 				var providerKind string
-				var snapshot *routing.Snapshot
+				var snapshot *routing.View
 				if x.historicalSnapshot != nil {
 					snapshot = x.historicalSnapshot
 				} else if x.request.release != nil {
-					snapshot = x.request.release.Snapshot
+					snapshot = x.request.release.Snapshot()
 				}
 				if snapshot != nil {
-					if provider, ok := snapshot.Providers[serving.ProviderID]; ok {
+					if provider, ok := snapshot.FindProvider(serving.ProviderID); ok {
 						providerKind = provider.Kind
 					}
 				}
@@ -195,7 +195,7 @@ func (s *Server) finish(x *call, out *outcome, status int) {
 		}
 		s.finalizeGenerationHTTP(x, env)
 		s.recordBusiness(env, x)
-		s.Sink.Terminal(env)
+		s.deps.Sink.Terminal(env)
 	})
 }
 
@@ -236,7 +236,7 @@ func (x *call) captureProject() string {
 }
 
 func (s *Server) recordBusiness(env Envelope, x *call) {
-	if s.Business == nil {
+	if s.deps.Business == nil {
 		return
 	}
 	project := ""
@@ -246,16 +246,16 @@ func (s *Server) recordBusiness(env Envelope, x *call) {
 		project = *x.route.ProjectID
 	}
 	if x.cache != nil {
-		s.Business.Cache(env.Route, x.cache.result, x.cache.storedBytes, x.cache.reason != "")
+		s.deps.Business.Cache(env.Route, x.cache.result, x.cache.storedBytes, x.cache.reason != "")
 	}
 	for _, decision := range env.GuardrailDecisions {
-		s.Business.Guardrail(telemetry.BusinessLabels{Route: env.Route, Project: project, Key: env.KeyID}, decision.Phase, decision.Action, decision.Outcome, decision.LatencyMS)
+		s.deps.Business.Guardrail(telemetry.BusinessLabels{Route: env.Route, Project: project, Key: env.KeyID}, decision.Phase, decision.Action, decision.Outcome, decision.LatencyMS)
 	}
-	var snapshot *routing.Snapshot
+	var snapshot *routing.View
 	if x.historicalSnapshot != nil {
 		snapshot = x.historicalSnapshot
 	} else if x.request.release != nil {
-		snapshot = x.request.release.Snapshot
+		snapshot = x.request.release.Snapshot()
 	}
 	for index := range env.Attempts {
 		fact := &env.Attempts[index]
@@ -265,12 +265,12 @@ func (s *Server) recordBusiness(env Envelope, x *call) {
 		}
 		labels := telemetry.BusinessLabels{Route: route, Project: project, Key: env.KeyID, EndUser: env.EndUserDigest}
 		if snapshot != nil {
-			if provider, ok := snapshot.Providers[fact.ProviderID]; ok {
+			if provider, ok := snapshot.FindProvider(fact.ProviderID); ok {
 				labels.ProviderKind = provider.Kind
 			}
 		}
 		if u := fact.Usage; u != nil && fact.UsageObserved {
-			s.Business.Tokens(labels, &u.InputTokens, &u.OutputTokens)
+			s.deps.Business.Tokens(labels, &u.InputTokens, &u.OutputTokens)
 			if fact.Price != nil {
 				if cost, ok := fact.Price.Cost(attemptUsage(fact, env.Operation), fact.StartedAt, attemptSuccessful(fact), fact.Discount); ok {
 					// A committed attempt prices but owes nothing: record its
@@ -279,17 +279,17 @@ func (s *Server) recordBusiness(env Envelope, x *call) {
 						if x.factCommitted(fact) {
 							amount = 0
 						}
-						s.Business.Cost(labels, fact.Price.Currency, amount)
+						s.deps.Business.Cost(labels, fact.Price.Currency, amount)
 					}
 				}
 			}
 		}
 		if fact.FirstOutput != nil {
 			elapsed := fact.StartedAt.Add(*fact.FirstOutput).Sub(env.StartedAt).Seconds()
-			s.Business.FirstToken(labels, elapsed)
+			s.deps.Business.FirstToken(labels, elapsed)
 			if u := fact.Usage; u != nil && fact.UsageObserved && u.OutputTokens > 0 {
 				if seconds := fact.Duration.Seconds() - fact.FirstOutput.Seconds(); seconds > 0 {
-					s.Business.OutputRate(labels, u.OutputTokens, seconds)
+					s.deps.Business.OutputRate(labels, u.OutputTokens, seconds)
 				}
 			}
 		}

@@ -3,6 +3,7 @@ package routes
 import (
 	"context"
 	"encoding/json"
+	"github.com/tyk-swe/olp/internal/codesessions"
 	"maps"
 	"net/http"
 	"slices"
@@ -15,7 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/release"
-	"github.com/tyk-swe/olp/internal/resources"
+
 	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -84,15 +85,11 @@ func (s *Server) publishCodeRoute(r *http.Request, _ access.Principal) (access.R
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.Access.Begin(r)
+	tx, p, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	var document []byte
 	var project, etag string
 	if err = tx.QueryRow(r.Context(), `SELECT draft,project_id::text,etag::text FROM olp.code_routes WHERE id=$1`, id).Scan(&document, &project, &etag); err != nil {
@@ -106,7 +103,7 @@ func (s *Server) publishCodeRoute(r *http.Request, _ access.Principal) (access.R
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	if err = access.Match(r, etag); err != nil {
 		return access.Reply{}, err
@@ -132,7 +129,7 @@ func (s *Server) publishCodeRoute(r *http.Request, _ access.Principal) (access.R
 	if err = s.Access.CompleteReplay(r, tx, claim, out); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, out)
+	return out, tx.Commit(r.Context())
 }
 
 func (s *Server) codeRevisions(r *http.Request, p access.Principal) (access.Reply, error) {
@@ -217,7 +214,7 @@ func SaveCodeRoute(ctx context.Context, tx pgx.Tx, p access.Principal, id, etag 
 		return nil, access.Fail(404, "not_found", "The pool was not found.")
 	}
 	if out.Tools != nil {
-		if _, err := resources.ResearchAccount(ctx, tx, out); err != nil {
+		if _, err := codesessions.ResearchAccount(ctx, tx, out); err != nil {
 			return nil, err
 		}
 	}
@@ -291,7 +288,7 @@ func SaveCodePublication(ctx context.Context, tx pgx.Tx, p access.Principal, id 
 		return nil, access.Invalid("tools", err.Error())
 	}
 	if route.Tools != nil {
-		if _, err = resources.ResearchAccount(ctx, tx, route); err != nil {
+		if _, err = codesessions.ResearchAccount(ctx, tx, route); err != nil {
 			return nil, err
 		}
 	}

@@ -156,15 +156,15 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 		return simulatedLeg{}, routing.Plan{}, false, access.Invalid("request", "The workflow controls could not be processed.")
 	}
 	counted := newSimulatedDemand(parsed, input, m.demand)
-	inspected, effective, inspections, effectiveRequests := inspectionAccept(route, inspectionRequest, semantic, counted, &m.inspectionBudget, workflow)
-	accept := workflowInspectionAccept(workflow, inspected, effectiveRequests, m, workflowCapability)
+	inspected, inspections, effectiveRequests := inspectionAccept(route, inspectionRequest, semantic, counted, &m.inspectionBudget, workflow)
+	prepare := workflowInspectionAccept(workflow, inspected, effectiveRequests, m, workflowCapability)
 	if unary != nil {
-		accept, effective, inspections = inspectionUnaryAccept(route, cmp.Or(m.named, slug), *unary, semantic, input.ClientContract, m.demand, &m.inspectionBudget)
+		prepare, inspections = inspectionUnaryAccept(route, cmp.Or(m.named, slug), *unary, semantic, input.ClientContract, m.demand, &m.inspectionBudget)
 	}
-	if operationregistry.UnboundedWork(input.Operation) {
-		prepare := accept
+	if !operationregistry.PolicyFor(input.Operation).BoundedWork {
+		prior := prepare
 		named := m.snapshot.Routes[cmp.Or(m.named, slug)]
-		accept = func(provider routing.Provider, target routing.Target) error {
+		prepare = func(provider routing.Provider, target routing.Target) (*routing.CandidatePreparation, error) {
 			costExempt := named.CallerCostExempt && provider.CredentialSource == "caller"
 			budgeted := key.authority.UnboundedWorkBudgeted(named.Slug, costExempt) || routing.UnboundedWorkBudgeted(nil, nil, &named, costExempt) || routing.UnboundedWorkBudgeted(&provider, nil, &route, costExempt)
 			for _, slot := range routing.SelectSlots(provider, target.ProviderModel, route, key.id, input.Operation, input.Surface, input.Mode, []byte(input.Seed)) {
@@ -175,16 +175,16 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 			}
 			if budgeted {
 				inspections[target.ID] = &interactionInspection{Status: "incompatible", Fidelity: route.Fidelity.Mode, Evidence: []string{}}
-				return &inspectionDiagnostic{"unbounded_work_budget", "/limits", "bounded_provider_work", "Decisions cannot enforce token or cost budgets."}
+				return nil, &inspectionDiagnostic{"unbounded_work_budget", "/limits", "bounded_provider_work", "Decisions cannot enforce token or cost budgets."}
 			}
-			if prepare != nil {
-				return prepare(provider, target)
+			if prior != nil {
+				return prior(provider, target)
 			}
-			return nil
+			return nil, nil
 		}
 	}
 	if mediaRequest != nil {
-		accept, effective, inspections = inspectionMediaAccept(route, mediaRequest, input.Dialect, semantic, input.ClientContract, m.demand, &m.inspectionBudget)
+		prepare, inspections = inspectionMediaAccept(route, mediaRequest, input.Dialect, semantic, input.ClientContract, m.demand, &m.inspectionBudget)
 	}
 	preferences := input.Preferences
 	if via != "" && preferences != nil {
@@ -199,12 +199,12 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 		Region:  s.Region,
 		Context: m.ctx, KeyID: key.id, Preferences: preferences, Inputs: m.inputs, TokenDemand: counted.fixed, Demand: counted.sourceDemand(),
 		CheckSlots: true, CredentialEligibility: eligibility, UnconfinedPlugins: s.UnconfinedPlugins,
-		Accept: accept, Effective: effective, Supply: m.supply, Unhealthy: m.unhealthy, Now: now,
+		Prepare: prepare, Supply: m.supply, Unhealthy: m.unhealthy, Now: now,
 		// A simulation reports what each target could cost and applies the
 		// caller's cost ceiling to the same worst case.
 		EstimateCost: true,
 		WorstCost: func(provider routing.Provider, target routing.Target, price *usage.RoutingPrice, discount *usage.RoutingDiscount) (usage.Cost, bool) {
-			if operationregistry.UnboundedWork(input.Operation) {
+			if !operationregistry.PolicyFor(input.Operation).BoundedWork {
 				return usage.Cost{}, false
 			}
 			if provider.Commitment != nil {
@@ -218,7 +218,7 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 				if mediaRequest.Seconds != nil {
 					seconds = *mediaRequest.Seconds
 				}
-				return price.Cost(usage.AttemptUsage{Complete: true, MediaUnits: &seconds}, now, true, discount)
+				return price.Cost(usage.AttemptUsage{Complete: true, UsageQuantities: usage.UsageQuantities{MediaUnits: &seconds}}, now, true, discount)
 			}
 			if input.Operation == "search" {
 				return price.Cost(usage.AttemptUsage{Complete: true}, now, true, discount)
@@ -255,8 +255,7 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 		},
 	}
 	if key.reason != "" {
-		options.Accept = nil
-		options.Effective = nil
+		options.Prepare = nil
 	}
 	if parsed != nil {
 		options.Parameters = sync.OnceValue(func() []string { return protocols.ParameterNames(parsed) })
@@ -312,20 +311,27 @@ func workflowInspectionRequest(request *wire.Request, workflow bool) (*wire.Requ
 	}
 }
 
-func workflowInspectionAccept(workflow bool, prior func(routing.Provider, routing.Target) error, requests map[string]*wire.Request, m *simulation, capability *routing.WorkflowCapability) func(routing.Provider, routing.Target) error {
+func workflowInspectionAccept(workflow bool, prior routing.PrepareCandidate, requests map[string]*wire.Request, m *simulation, capability *routing.WorkflowCapability) routing.PrepareCandidate {
 	if !workflow {
 		return prior
 	}
-	return func(provider routing.Provider, target routing.Target) error {
+	return func(provider routing.Provider, target routing.Target) (*routing.CandidatePreparation, error) {
+		defer delete(requests, target.ID)
 		if !provider.SupportsToolCalls(target.ProviderModel, m.input.Surface, m.input.Mode) {
-			return &inspectionDiagnostic{"tool_execution_unsupported", "/tools", "certified_tool_calls", "The target is not certified for gateway tool execution."}
+			return nil, &inspectionDiagnostic{"tool_execution_unsupported", "/tools", "certified_tool_calls", "The target is not certified for gateway tool execution."}
 		}
+		var prepared *routing.CandidatePreparation
 		if prior != nil {
-			if err := prior(provider, target); err != nil {
-				return err
+			result, err := prior(provider, target)
+			if err != nil {
+				return nil, err
 			}
+			prepared = result
 		}
-		return workflowModelInspectionCost(m, provider, target, requests[target.ID], capability)
+		if err := workflowModelInspectionCost(m, provider, target, requests[target.ID], capability); err != nil {
+			return nil, err
+		}
+		return prepared, nil
 	}
 }
 
@@ -420,7 +426,7 @@ func (s *Server) explain(m *simulation, slug string) (explanation, error) {
 		return explanation{}, err
 	}
 	route := m.snapshot.Routes[slug]
-	w := &walk{s: s, m: m, route: &route, visited: []string{slug}}
+	w := &walk{s: s, m: m, route: &route, traversal: routing.NewRouteWalk(&route)}
 	w.out = explanation{Legs: []simulatedLeg{first}, Fallbacks: []routing.FallbackStep{}}
 	if !permitted {
 		return w.out, nil
@@ -436,17 +442,9 @@ type walk struct {
 	s          *Server
 	m          *simulation
 	route      *routing.Route
-	delegators []*routing.Route
-	visited    []string
+	traversal  routing.RouteWalk
 	conditions []string
-	frames     []walkFrame
 	out        explanation
-}
-
-type walkFrame struct {
-	route      *routing.Route
-	conditions []string
-	next       int
 }
 
 // settle follows a plan's selector delegation and records the conditions an
@@ -468,7 +466,7 @@ func (w *walk) settle(plan routing.Plan) string {
 
 // adopt moves the request to another route, as the gateway does.
 func (w *walk) adopt(slug, via string) string {
-	if slices.Contains(w.visited, slug) {
+	if w.traversal.Visited(slug) {
 		return routing.FallbackRepeated
 	}
 	route, ok := w.m.snapshot.Routes[slug]
@@ -478,12 +476,8 @@ func (w *walk) adopt(slug, via string) string {
 	if !w.m.permitted(route) {
 		return routing.FallbackForbidden
 	}
-	if via == usage.ViaSelector {
-		w.delegators = append(w.delegators, w.route)
-	} else {
-		w.delegators = nil
-	}
-	w.route, w.visited = &route, append(w.visited, slug)
+	w.traversal = w.traversal.Move(&route, via == usage.ViaSelector)
+	w.route = &route
 	leg, plan, permitted, err := w.s.leg(w.m, slug, via)
 	if err != nil {
 		w.conditions = nil
@@ -501,68 +495,41 @@ func (w *walk) adopt(slug, via string) string {
 	return w.settle(plan)
 }
 
-// push frames the serving route and the routes that delegated to it, as the
-// gateway does, so the serving route's fallbacks come first.
-func (w *walk) push() {
-	for _, route := range append(slices.Clone(w.delegators), w.route) {
-		if len(route.Fallbacks) > 0 && !slices.ContainsFunc(w.frames, func(f walkFrame) bool { return f.route.Slug == route.Slug }) {
-			w.frames = append(w.frames, walkFrame{route: route, conditions: w.conditions})
-		}
-	}
-}
-
-// fallBack walks the fallbacks the plan-time conditions start, depth first, and
-// reports whether one of them plans attempts.
 func (w *walk) fallBack() bool {
 	if len(w.conditions) == 0 {
 		return false
 	}
-	w.push()
-	for len(w.frames) > 0 {
-		top := &w.frames[len(w.frames)-1]
-		if top.next == len(top.route.Fallbacks) {
-			w.frames = w.frames[:len(w.frames)-1]
-			continue
+	w.traversal = w.traversal.Failed(w.conditions)
+	for {
+		next, step, ok := w.traversal.Next()
+		w.traversal = next
+		if !ok {
+			return false
 		}
-		fallback := top.route.Fallbacks[top.next]
-		from := top.route.Slug
-		top.next++
-		met := fallback.Met(top.conditions)
-		if len(met) == 0 {
-			continue
-		}
-		step := routing.FallbackStep{From: from, Route: fallback.Route, Conditions: met}
-		step.Outcome = w.adopt(fallback.Route, usage.ViaFallback)
+		step.Outcome = w.adopt(step.Route, usage.ViaFallback)
 		w.out.Fallbacks = append(w.out.Fallbacks, step)
 		if step.Outcome == routing.FallbackPlanned {
 			return true
 		}
 		if len(w.conditions) > 0 {
-			w.push()
+			w.traversal = w.traversal.Failed(w.conditions)
 		}
 	}
-	return false
 }
 
-// standby names, in the order the gateway would consider them, the fallbacks
-// that only a failed attempt could still start.
 func (w *walk) standby() {
-	w.conditions = nil
-	w.push()
-	for i := len(w.frames) - 1; i >= 0; i-- {
-		frame := w.frames[i]
-		for _, fallback := range frame.route.Fallbacks[frame.next:] {
-			step := routing.FallbackStep{From: frame.route.Slug, Route: fallback.Route, Conditions: fallback.On, Outcome: fallbackStandby}
-			target, ok := w.m.snapshot.Routes[fallback.Route]
-			switch {
-			case slices.Contains(w.visited, fallback.Route):
-				step.Outcome = routing.FallbackRepeated
-			case !ok:
-				step.Outcome = routing.FallbackUnavailable
-			case !w.m.permitted(target):
-				step.Outcome = routing.FallbackForbidden
-			}
-			w.out.Fallbacks = append(w.out.Fallbacks, step)
+	for _, pending := range w.traversal.Pending() {
+		step := pending
+		step.Outcome = fallbackStandby
+		target, ok := w.m.snapshot.Routes[step.Route]
+		switch {
+		case w.traversal.Visited(step.Route):
+			step.Outcome = routing.FallbackRepeated
+		case !ok:
+			step.Outcome = routing.FallbackUnavailable
+		case !w.m.permitted(target):
+			step.Outcome = routing.FallbackForbidden
 		}
+		w.out.Fallbacks = append(w.out.Fallbacks, step)
 	}
 }

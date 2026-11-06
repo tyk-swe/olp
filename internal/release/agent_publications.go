@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 )
 
@@ -64,7 +65,7 @@ func loadAgentResourceAuthority(ctx context.Context, tx pgx.Tx) (map[string]agen
 // AuthorizeAgentResource intersects fresh key policy with live publication
 // authority. Long-running callers must invoke it before each outbound step and
 // at least every PollInterval; stale authority is never accepted.
-func (m *Manager) AuthorizeAgentResource(a access.Authority, scope, id, revision, project string) error {
+func (m *Manager) AuthorizeAgentResource(a keyauthority.Authority, scope, id, revision, project string) error {
 	if a.TaskCapability != nil && (scope != "tools" || !slices.Contains(a.TaskCapability.ToolsetRevisions, revision)) {
 		return access.Forbidden()
 	}
@@ -87,7 +88,7 @@ func (m *Manager) AuthorizeAgentResource(a access.Authority, scope, id, revision
 	return nil
 }
 
-func (state authorityState) currentAgentPrincipal(a access.Authority, scope, id, project string, now time.Time) bool {
+func (state authorityState) currentAgentPrincipal(a keyauthority.Authority, scope, id, project string, now time.Time) bool {
 	current, ok := state.agentPrincipals[a.ID]
 	if a.WorkloadDigest != "" {
 		principal, known := state.workloadPrincipals[a.WorkloadDigest]
@@ -118,7 +119,7 @@ func (state authorityState) currentAgentPrincipal(a access.Authority, scope, id,
 	if a.DelegationAgentLimits == nil || a.DelegationAgentLimits.ID != a.DelegationAgentID || a.DelegationAgentLimits.WorkloadDigest == "" {
 		return false
 	}
-	return state.currentAgentPrincipal(access.Authority{ID: a.DelegationAgentID, WorkloadIssuerID: a.DelegationAgentLimits.WorkloadIssuerID, WorkloadDigest: a.DelegationAgentLimits.WorkloadDigest, WorkloadRevision: a.DelegationAgentLimits.WorkloadRevision, WorkloadMapping: a.DelegationAgentLimits.WorkloadMapping}, scope, id, project, now)
+	return state.currentAgentPrincipal(keyauthority.Authority{ID: a.DelegationAgentID, WorkloadIssuerID: a.DelegationAgentLimits.WorkloadIssuerID, WorkloadDigest: a.DelegationAgentLimits.WorkloadDigest, WorkloadRevision: a.DelegationAgentLimits.WorkloadRevision, WorkloadMapping: a.DelegationAgentLimits.WorkloadMapping}, scope, id, project, now)
 }
 
 type mcpToolAuthority struct {
@@ -155,7 +156,7 @@ func loadMCPToolAuthority(ctx context.Context, tx pgx.Tx) (map[string]mcpToolAut
 		}
 	}), nil
 }
-func (m *Manager) AuthorizeMCPTool(a access.Authority, id, revision, project, server, serverRevision string) error {
+func (m *Manager) AuthorizeMCPTool(a keyauthority.Authority, id, revision, project, server, serverRevision string) error {
 	if a.TaskCapability != nil && !slices.Contains(a.TaskCapability.ToolsetRevisions, revision) {
 		return access.Forbidden()
 	}

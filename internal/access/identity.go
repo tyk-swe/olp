@@ -59,71 +59,27 @@ func (s *Server) Register(mux *http.ServeMux) {
 		"DELETE /api/v1/profile/mfa/factors/{factor_id}": s.mfaRemove,
 		"GET /api/v1/profile":                            s.profile, "PATCH /api/v1/profile": s.updateProfile,
 		"POST /api/v1/profile/password": s.changePassword, "POST /api/v1/profile/password/enroll": s.enrollPassword,
-		"POST /api/v1/profile/reauthenticate":                   s.reauthenticate,
-		"POST /api/v1/api-keys/{api_key_id}/end-user":           s.lookupEndUser,
-		"GET /api/v1/projects/{project_id}/limit-templates":     s.projectLimitTemplates,
-		"PUT /api/v1/projects/{project_id}/limit-templates":     s.putProjectLimitTemplates,
-		"GET /api/v1/projects/{project_id}/route-groups":        s.projectRouteGroups,
-		"PUT /api/v1/projects/{project_id}/route-groups":        s.putProjectRouteGroups,
-		"GET /api/v1/projects/{project_id}/attribution-budgets": s.projectAttributionBudgets,
-		"PUT /api/v1/projects/{project_id}/attribution-budgets": s.putProjectAttributionBudgets,
-		"GET /api/v1/projects/{project_id}/budget":              s.projectBudget,
-		"PUT /api/v1/projects/{project_id}/budget":              s.putProjectBudget,
-		"GET /api/v1/budget-increases":                          s.budgetIncreases,
-		"POST /api/v1/budget-increases":                         s.createBudgetIncrease,
-		"GET /api/v1/budget-increases/{increase_id}":            s.budgetIncrease,
-		"DELETE /api/v1/budget-increases/{increase_id}":         s.revokeBudgetIncrease,
-		"GET /api/v1/budgets/installation":                      s.installationBudget,
-		"PUT /api/v1/budgets/installation":                      s.putInstallationBudget,
-		"GET /api/v1/projects/{project_id}/attribution-policy":  s.projectAttributionPolicy,
-		"PUT /api/v1/projects/{project_id}/attribution-policy":  s.putProjectAttributionPolicy,
-		"GET /api/v1/projects/{project_id}/end-user-policy":     s.projectEndUserPolicy,
-		"PUT /api/v1/projects/{project_id}/end-user-policy":     s.putProjectEndUserPolicy,
-		"GET /api/v1/api-keys":                                  s.apiKeys, "POST /api/v1/api-keys": s.createAPIKey,
+		"POST /api/v1/profile/reauthenticate":         s.reauthenticate,
+		"POST /api/v1/api-keys/{api_key_id}/end-user": s.lookupEndUser,
+
+		"GET /api/v1/budget-increases":                  s.budgetIncreases,
+		"POST /api/v1/budget-increases":                 s.createBudgetIncrease,
+		"GET /api/v1/budget-increases/{increase_id}":    s.budgetIncrease,
+		"DELETE /api/v1/budget-increases/{increase_id}": s.revokeBudgetIncrease,
+
+		"GET /api/v1/api-keys": s.apiKeys, "POST /api/v1/api-keys": s.createAPIKey,
 		"GET /api/v1/api-keys/{api_key_id}": s.apiKey, "PATCH /api/v1/api-keys/{api_key_id}": s.updateAPIKey,
 		"POST /api/v1/api-keys/{api_key_id}/revoke": s.revokeAPIKey, "POST /api/v1/api-keys/{api_key_id}/rotate": s.rotateAPIKey,
 		"GET /api/v1/budget-groups": s.budgetGroups, "POST /api/v1/budget-groups": s.createBudgetGroup,
 		"GET /api/v1/budget-groups/{budget_group_id}": s.budgetGroup, "PATCH /api/v1/budget-groups/{budget_group_id}": s.updateBudgetGroup,
 		"DELETE /api/v1/budget-groups/{budget_group_id}": s.deleteBudgetGroup,
-		"GET /api/v1/settings":                           s.settings, "GET /api/v1/settings/{key}": s.setting, "PUT /api/v1/settings/{key}": s.updateSetting,
-		"GET /api/v1/notifications/destinations": s.notificationDestinations, "POST /api/v1/notifications/destinations": s.createNotificationDestination,
-		"GET /api/v1/notifications/destinations/{notification_destination_id}":    s.notificationDestination,
-		"PATCH /api/v1/notifications/destinations/{notification_destination_id}":  s.updateNotificationDestination,
-		"DELETE /api/v1/notifications/destinations/{notification_destination_id}": s.deleteNotificationDestination,
-		"GET /api/v1/notifications/rules":                                         s.notificationRules, "POST /api/v1/notifications/rules": s.createNotificationRule,
-		"GET /api/v1/notifications/rules/{notification_rule_id}":                                 s.notificationRule,
-		"PATCH /api/v1/notifications/rules/{notification_rule_id}":                               s.updateNotificationRule,
-		"DELETE /api/v1/notifications/rules/{notification_rule_id}":                              s.deleteNotificationRule,
-		"GET /api/v1/notifications/deliveries":                                                   s.notificationDeliveries,
-		"GET /api/v1/audit":                                                                      s.auditEvents,
-		"GET /api/v1/workload-issuers":                                                           s.workloadIssuers,
-		"POST /api/v1/workload-issuers":                                                          s.createWorkloadIssuer,
-		"GET /api/v1/workload-issuers/{issuer_id}":                                               s.workloadIssuer,
-		"PUT /api/v1/workload-issuers/{issuer_id}":                                               s.putWorkloadIssuer,
-		"GET /api/v1/organizations":                                                              s.organizations,
-		"POST /api/v1/organizations":                                                             s.createOrganization,
-		"GET /api/v1/organizations/{organization_id}":                                            s.organization,
-		"PATCH /api/v1/organizations/{organization_id}":                                          s.updateOrganization,
-		"GET /api/v1/organizations/{organization_id}/members":                                    s.organizationMembers,
-		"PUT /api/v1/organizations/{organization_id}/members/{user_id}":                          s.putOrganizationMember,
-		"DELETE /api/v1/organizations/{organization_id}/members/{user_id}":                       s.deleteOrganizationMember,
-		"GET /api/v1/organizations/{organization_id}/projects":                                   s.projects,
-		"POST /api/v1/organizations/{organization_id}/projects":                                  s.createProject,
-		"GET /api/v1/organizations/{organization_id}/projects/{project_id}":                      s.project,
-		"PATCH /api/v1/organizations/{organization_id}/projects/{project_id}":                    s.updateProject,
-		"GET /api/v1/organizations/{organization_id}/projects/{project_id}/members":              s.projectMembers,
-		"PUT /api/v1/organizations/{organization_id}/projects/{project_id}/members/{user_id}":    s.putProjectMember,
-		"DELETE /api/v1/organizations/{organization_id}/projects/{project_id}/members/{user_id}": s.deleteProjectMember,
-		"GET /api/v1/organizations/{organization_id}/budget":                                     s.installationBudget,
-		"PUT /api/v1/organizations/{organization_id}/budget":                                     s.putInstallationBudget,
-		"GET /api/v1/projects":                                                                   s.projects, "POST /api/v1/projects": s.createProject,
-		"GET /api/v1/project-memberships":   s.projectMemberships,
-		"GET /api/v1/projects/{project_id}": s.project, "PATCH /api/v1/projects/{project_id}": s.updateProject,
-		"DELETE /api/v1/projects/{project_id}":                   s.deleteProject,
-		"GET /api/v1/projects/{project_id}/members":              s.projectMembers,
-		"PUT /api/v1/projects/{project_id}/members/{user_id}":    s.putProjectMember,
-		"DELETE /api/v1/projects/{project_id}/members/{user_id}": s.deleteProjectMember,
-		"GET /api/v1/management-tokens":                          s.managementTokens, "POST /api/v1/management-tokens": s.createManagementToken,
+		"GET /api/v1/audit":                        s.auditEvents,
+		"GET /api/v1/workload-issuers":             s.workloadIssuers,
+		"POST /api/v1/workload-issuers":            s.createWorkloadIssuer,
+		"GET /api/v1/workload-issuers/{issuer_id}": s.workloadIssuer,
+		"PUT /api/v1/workload-issuers/{issuer_id}": s.putWorkloadIssuer,
+
+		"GET /api/v1/management-tokens": s.managementTokens, "POST /api/v1/management-tokens": s.createManagementToken,
 		"GET /api/v1/management-tokens/{management_token_id}":         s.managementToken,
 		"POST /api/v1/management-tokens/{management_token_id}/revoke": s.revokeManagementToken,
 		"PUT /api/v1/provisioning/{source}/users/{external_id}":       s.provisionUser,
@@ -146,7 +102,7 @@ func (s *Server) setupStatus(r *http.Request) (Reply, error) {
 func (s *Server) capabilities(r *http.Request) (Reply, error) {
 	var local, oidc, samlEnabled, captureEnabled bool
 	err := s.Pool.QueryRow(r.Context(), authenticationCapabilitiesSQL).Scan(&local, &oidc, &samlEnabled, &captureEnabled)
-	return OK(map[string]bool{"local_login_enabled": local && !s.LocalLoginDisabled, "oidc_login_enabled": oidc, "saml_login_enabled": samlEnabled, "gateway_available": true, "limits_enforced": s.LimitsEnforced, "management_network_restricted": s.ManagementNetworkRestricted, "retention_enforced": s.RetentionEnforced, "notifications_active": s.NotificationsActive, "payload_capture_active": captureEnabled, "response_cache_configured": s.ResponseCacheConfigured, "semantic_cache_vectors_unsealed": true}), err
+	return OK(map[string]bool{"local_login_enabled": local && !s.localLoginDisabled, "oidc_login_enabled": oidc, "saml_login_enabled": samlEnabled, "gateway_available": true, "limits_enforced": s.limitsEnforced, "management_network_restricted": s.managementNetworkRestricted, "retention_enforced": s.retentionEnforced, "notifications_active": s.notificationsActive, "payload_capture_active": captureEnabled, "response_cache_configured": s.responseCacheConfigured, "semantic_cache_vectors_unsealed": true}), err
 }
 
 func (s *Server) passwordWork(r *http.Request, work func()) error {
@@ -279,7 +235,7 @@ func (s *Server) setup(r *http.Request) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, response)
+	return response, tx.Commit(r.Context())
 }
 
 func (s *Server) users(r *http.Request, _ Principal) (Reply, error) {
@@ -324,15 +280,11 @@ func (s *Server) updateUser(r *http.Request, _ Principal) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	tx, err := s.Begin(r)
+	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Reauthorize(r, tx)
-	if err != nil {
-		return Reply{}, err
-	}
 	u, err := scanUser(tx.QueryRow(r.Context(), "SELECT "+userColumns+" FROM olp.users u WHERE id=$1", id))
 	if err != nil {
 		return Reply{}, err
@@ -362,7 +314,7 @@ func (s *Server) updateUser(r *http.Request, _ Principal) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET role=$1,active=$2,access_scope=$3,etag=$4,updated_at=now(),role_management=CASE WHEN role_management='provisioned' THEN 'local' ELSE role_management END WHERE id=$5", u.Role, u.Active, u.AccessScope, u.ETag, id); err != nil {
 		return Reply{}, err
 	}
-	if err = s.usableOwner(r, tx); err != nil {
+	if err = s.EnsureUsableOwner(r, tx); err != nil {
 		return Reply{}, err
 	}
 	if err = keepSCIMManagers(r, tx, managed); err != nil {
@@ -388,13 +340,13 @@ func (s *Server) updateUser(r *http.Request, _ Principal) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, Detail(u, u.ETag))
+	return Detail(u, u.ETag), tx.Commit(r.Context())
 }
 
-func (s *Server) usableOwner(r *http.Request, tx pgx.Tx) error {
+func (s *Server) EnsureUsableOwner(r *http.Request, tx pgx.Tx) error {
 	var exists bool
 	err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM olp.users WHERE active AND oidc_authorized AND role='owner'
-        AND access_scope='global' AND password_hash IS NOT NULL AND $1 AND COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true))`, !s.LocalLoginDisabled).Scan(&exists)
+        AND access_scope='global' AND password_hash IS NOT NULL AND $1 AND COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true))`, !s.localLoginDisabled).Scan(&exists)
 	if err != nil {
 		return err
 	}
@@ -499,15 +451,11 @@ func (s *Server) createInvitation(r *http.Request, _ Principal) (Reply, error) {
 	if hours < 1 || hours > 720 {
 		return Reply{}, Invalid("expires_in_hours", "Use 1–720 hours.")
 	}
-	tx, err := s.Begin(r)
+	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Reauthorize(r, tx)
-	if err != nil {
-		return Reply{}, err
-	}
 	if err = s.requireInvitationLogin(r, tx); err != nil {
 		return Reply{}, err
 	}
@@ -516,7 +464,7 @@ func (s *Server) createInvitation(r *http.Request, _ Principal) (Reply, error) {
 		return Reply{}, err
 	}
 	if replayed != nil {
-		return Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	var exists bool
 	if err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.users WHERE email=$1)", address).Scan(&exists); err != nil {
@@ -543,28 +491,24 @@ func (s *Server) createInvitation(r *http.Request, _ Principal) (Reply, error) {
 	if err = s.CompleteReplay(r, tx, claim, result); err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 func (s *Server) retireInvitation(r *http.Request, _ Principal) (Reply, error) {
 	id, err := IDParam(r, "invitation_id")
 	if err != nil {
 		return Reply{}, err
 	}
-	tx, err := s.Begin(r)
+	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Reauthorize(r, tx)
-	if err != nil {
-		return Reply{}, err
-	}
 	claim, replayed, err := s.Replay(r, tx, p, nil)
 	if err != nil {
 		return Reply{}, err
 	}
 	if replayed != nil {
-		return Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	var accepted, revoked *time.Time
 	if err = tx.QueryRow(r.Context(), "SELECT accepted_at,revoked_at FROM olp.invitations WHERE id=$1", id).Scan(&accepted, &revoked); err != nil {
@@ -589,7 +533,7 @@ func (s *Server) retireInvitation(r *http.Request, _ Principal) (Reply, error) {
 	if err = s.CompleteReplay(r, tx, claim, result); err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 func (s *Server) acceptInvitation(r *http.Request) (Reply, error) {
 	var input struct {
@@ -643,7 +587,7 @@ func (s *Server) acceptInvitation(r *http.Request) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, response)
+	return response, tx.Commit(r.Context())
 }
 
 // The process switch is immutable after composition; database policy is read
@@ -651,7 +595,7 @@ func (s *Server) acceptInvitation(r *http.Request) (Reply, error) {
 func (s *Server) localLoginEnabled(r *http.Request, q Queryer) (bool, error) {
 	var enabled bool
 	err := q.QueryRow(r.Context(), "SELECT COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true)").Scan(&enabled)
-	return enabled && !s.LocalLoginDisabled, err
+	return enabled && !s.localLoginDisabled, err
 }
 
 func (s *Server) requireInvitationLogin(r *http.Request, q Queryer) error {

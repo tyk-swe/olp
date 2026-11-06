@@ -8,9 +8,9 @@
   import { profileKeys } from '$lib/features/access/profile/profileKeys';
   import {
     getProfile,
-    reauthenticateWithPassword,
     beginIdentityReauthentication
   } from '$lib/features/access/profile/api';
+  import { reauthenticateWithPassword } from '$lib/features/access/profile/reauthentication';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { usePrincipalLifetime } from '$lib/editing/mutationIntent.svelte';
   import { agentKeys } from './agentKeys';

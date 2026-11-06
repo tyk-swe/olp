@@ -47,7 +47,10 @@ func oidcAddresses(ctx context.Context, host string) ([]netip.Addr, error) {
 	}
 	return addresses, nil
 }
-func oidcHTTPClient() *http.Client {
+func oidcHTTPClient(injected *http.Client) *http.Client {
+	if injected != nil {
+		return injected
+	}
 	transport := &http.Transport{TLSHandshakeTimeout: 3 * time.Second, ResponseHeaderTimeout: 5 * time.Second, MaxResponseHeaderBytes: 32768, MaxIdleConns: 10, MaxConnsPerHost: 8, IdleConnTimeout: time.Minute, ForceAttemptHTTP2: true}
 	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(address)

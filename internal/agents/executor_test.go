@@ -8,7 +8,7 @@ import (
 	"time"
 
 	protocol "github.com/a2aproject/a2a-go/v2/a2a"
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/agents/tasks"
@@ -45,7 +45,7 @@ type taskFixture struct {
 	states     chan tasks.State
 }
 
-func (s taskFixture) Find(_ context.Context, authority access.Authority, _, id string) (tasks.Task, error) {
+func (s taskFixture) Find(_ context.Context, authority keyauthority.Authority, _, id string) (tasks.Task, error) {
 	if authority.ID != s.owner || id != s.owned.ID {
 		return tasks.Task{}, tasks.ErrNotFound
 	}
@@ -107,7 +107,7 @@ func (p peerFactory) Open(_ context.Context, definition agentcontract.Definition
 func fixtureCall() agents.Call {
 	project := "project"
 	revision := agentcontract.Revision{ID: "revision", PublicationID: "publication", ProjectID: project, Definition: agentcontract.Draft{ProjectID: project, Agent: &agentcontract.Definition{Protocol: "a2a-1.0.0", Endpoint: "https://agent.example"}}}
-	return agents.Call{Authority: access.Authority{ID: "owner", ProjectID: &project}, Publication: revision, Revisions: []agentcontract.Revision{revision}, ReleaseID: "release", Version: "a2a-1.0.0", Revalidate: func(context.Context, agentcontract.Revision) bool { return true }}
+	return agents.Call{Authority: keyauthority.Authority{ID: "owner", ProjectID: &project}, Publication: revision, Revisions: []agentcontract.Revision{revision}, ReleaseID: "release", Version: "a2a-1.0.0", Revalidate: func(context.Context, agentcontract.Revision) bool { return true }}
 }
 func fixtureMessage() protocol.SendMessageRequest {
 	return protocol.SendMessageRequest{Message: &protocol.Message{ID: "message", Role: protocol.MessageRoleUser, Parts: protocol.ContentParts{protocol.NewTextPart("hello")}}}
@@ -184,7 +184,7 @@ func TestContinuationUsesOwnedPinnedRevision(t *testing.T) {
 	if request.Message.TaskID != "public-task" || request.Message.ContextID != "public-task" {
 		t.Fatal("send changed caller-owned request")
 	}
-	foreign := agents.Call{Authority: access.Authority{ID: "another-owner", ProjectID: call.Authority.ProjectID}, Publication: current, Revisions: call.Revisions, Version: call.Version, Revalidate: call.Revalidate}
+	foreign := agents.Call{Authority: keyauthority.Authority{ID: "another-owner", ProjectID: call.Authority.ProjectID}, Publication: current, Revisions: call.Revisions, Version: call.Version, Revalidate: call.Revalidate}
 	if _, err := executor.Send(t.Context(), foreign, request); !errors.Is(err, agents.ErrTaskNotFound) {
 		t.Fatalf("foreign task was accepted: %v", err)
 	}

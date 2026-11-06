@@ -18,17 +18,20 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/google/uuid"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
+	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/codewire"
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/providerconfig"
 	"github.com/tyk-swe/olp/internal/release"
-	"github.com/tyk-swe/olp/internal/resources"
+
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -288,8 +291,8 @@ func TestWebSocketHandshakeCapacityCooldownUsesSelectedModel(t *testing.T) {
 		RevisionID: "revision", Models: []string{"gpt-model", "alternate-model"},
 		ModelRewriting: true, Aliases: map[string]string{"public-model": "gpt-model"},
 	}
-	snapshot := &routing.Snapshot{CodeConnections: map[string]routing.Configuration{
-		"revision:provider": {Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID, Endpoint: upstream.URL},
+	snapshot := &routing.Snapshot{Generation: routing.Generation{ID: uuid.NewString()}, CodeConnections: map[string]routing.Configuration{
+		"revision:provider": {Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID, Endpoint: upstream.URL}},
 	}}
 	ingress, ok := codeIngressFor("responses")
 	if !ok {
@@ -307,14 +310,14 @@ func TestWebSocketHandshakeCapacityCooldownUsesSelectedModel(t *testing.T) {
 		{name: "no hint"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ledger := &fakeCodeLedger{connectionPermit: resources.CodePermit{
+			ledger := &fakeCodeLedger{connectionPermit: codesessions.Permit{
 				Account: codemode.Account{ID: "account", ProviderID: "provider", Principal: "principal"},
 				Pin:     codemode.Pin{Model: tc.pin.Model, TargetModel: tc.pin.TargetModel, Principal: "principal"},
 			}}
 			server := &Server{
-				CodeLedger: ledger, CodeAuthorizer: fakeCodeAuthorizer{},
+
 				now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil)),
-				egress: &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}},
+				egress: &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}, deps: Dependencies{CodeLedger: ledger, CodeAuthorizer: fakeCodeAuthorizer{}},
 			}
 			request := httptest.NewRequest(http.MethodGet, "/responses", nil)
 			request.Header.Set("X-OLP-Code-Affinity", "conversation")
@@ -322,7 +325,11 @@ func TestWebSocketHandshakeCapacityCooldownUsesSelectedModel(t *testing.T) {
 				request.Header.Set("X-OLP-Code-Model", tc.hint)
 			}
 			writer := httptest.NewRecorder()
-			server.codeWebSocket(writer, request, &release.Release{Snapshot: snapshot}, route, access.Authority{}, ingress)
+			snapshotRelease, err := release.NewRelease("", 0, snapshot, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			server.codeWebSocket(writer, request, snapshotRelease, route, keyauthority.Authority{}, ingress)
 			if writer.Code != http.StatusTooManyRequests || writer.Body.String() != body {
 				t.Fatalf("response = %d %s", writer.Code, writer.Body.String())
 			}
@@ -391,7 +398,7 @@ func TestTranslatedRejectionRecordsModelCooldown(t *testing.T) {
 }
 
 type fakeCodeLedger struct {
-	connectionPermit resources.CodePermit
+	connectionPermit codesessions.Permit
 	health           []codemode.HealthObservation
 	cooldowns        []recordedCooldown
 	outcomes         []codemode.Outcome
@@ -403,10 +410,10 @@ type fakeCodeLedger struct {
 func (f *fakeCodeLedger) Models(context.Context, codemode.Route, string) (codeclient.Offers, error) {
 	return codeclient.Offers{}, nil
 }
-func (f *fakeCodeLedger) Admit(context.Context, resources.CodeAdmission) (resources.CodePermit, error) {
-	return resources.CodePermit{}, nil
+func (f *fakeCodeLedger) Admit(context.Context, codesessions.Admission) (codesessions.Permit, error) {
+	return codesessions.Permit{}, nil
 }
-func (f *fakeCodeLedger) BindConnection(context.Context, codemode.Route, string, codemode.Identity, string, []string) (resources.CodePermit, error) {
+func (f *fakeCodeLedger) BindConnection(context.Context, codemode.Route, string, codemode.Identity, string, []string) (codesessions.Permit, error) {
 	return f.connectionPermit, nil
 }
 func (f *fakeCodeLedger) MarkDispatched(context.Context, string) error { return nil }
@@ -459,11 +466,11 @@ func codexAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time) *codeAtte
 	if !ok {
 		t.Fatal("codex responses endpoint missing")
 	}
-	server := &Server{CodeLedger: ledger, now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	server := &Server{now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil)), deps: Dependencies{CodeLedger: ledger}}
 	return &codeAttempt{
 		server:      server,
-		permit:      resources.CodePermit{Account: codemode.Account{ID: "account"}, Attempt: codemode.Attempt{ID: "attempt"}},
-		config:      routing.Configuration{Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID},
+		permit:      codesessions.Permit{Account: codemode.Account{ID: "account"}, Attempt: codemode.Attempt{ID: "attempt"}},
+		config:      routing.Configuration{Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID}},
 		endpoint:    endpoint,
 		observer:    codeObserver(endpoint),
 		model:       "gpt-model",
@@ -532,13 +539,13 @@ func TestTranslatedRecoveryBoundsStalledRejection(t *testing.T) {
 			ledger := &fakeCodeLedger{}
 			attempt := codexAttempt(t, ledger, time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC))
 			attempt.permit.InitialRecovery = true
-			attempt.server.Runtime = &fakeRuntime{}
+			attempt.server.deps.Runtime = &fakeRuntime{}
 			attempt.dispatched = true
 			body := &stalledRejectionBody{prefix: strings.NewReader(`{"error":`), waiting: make(chan struct{}), closed: make(chan struct{})}
 			defer body.Close()
 			response := &http.Response{StatusCode: status, Header: http.Header{}, Body: body}
 			attempt.response(t.Context(), status, response.Header)
-			result := make(chan *resources.CodeRecovery, 1)
+			result := make(chan *codesessions.Recovery, 1)
 			go func() {
 				recovery, _ := attempt.recover(t.Context(), response, codemode.Route{InitialRecoveryAttempts: 1}, nil, true)
 				result <- recovery
@@ -596,7 +603,7 @@ func TestRecoveryPreservesUntranslatedRejectionBody(t *testing.T) {
 		_, _ = io.WriteString(writer, suffix)
 		_ = writer.Close()
 	}()
-	result := make(chan *resources.CodeRecovery, 1)
+	result := make(chan *codesessions.Recovery, 1)
 	go func() {
 		recovery, _ := attempt.recover(t.Context(), response, codemode.Route{InitialRecoveryAttempts: 1}, nil, false)
 		result <- recovery
@@ -660,11 +667,11 @@ func glmAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time, path string
 	if !ok {
 		t.Fatal("glm endpoint missing")
 	}
-	server := &Server{CodeLedger: ledger, now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	server := &Server{now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil)), deps: Dependencies{CodeLedger: ledger}}
 	return &codeAttempt{
 		server:      server,
-		permit:      resources.CodePermit{InitialRecovery: true, Account: codemode.Account{ID: "account"}, Attempt: codemode.Attempt{ID: "attempt"}},
-		config:      routing.Configuration{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.ZAIProfile},
+		permit:      codesessions.Permit{InitialRecovery: true, Account: codemode.Account{ID: "account"}, Attempt: codemode.Attempt{ID: "attempt"}},
+		config:      routing.Configuration{Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.ZAIProfile}},
 		endpoint:    endpoint,
 		observer:    codeObserver(endpoint),
 		model:       "glm-model",
@@ -735,11 +742,11 @@ func qwenAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time, anchor *st
 	if !ok {
 		t.Fatal("qwen messages endpoint missing")
 	}
-	server := &Server{CodeLedger: ledger, now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	server := &Server{now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil)), deps: Dependencies{CodeLedger: ledger}}
 	return &codeAttempt{
 		server:      server,
-		permit:      resources.CodePermit{InitialRecovery: true, Account: codemode.Account{ID: "account", CycleAnchor: anchor}, Attempt: codemode.Attempt{ID: "attempt"}},
-		config:      routing.Configuration{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.QwenTokenPlanProfile},
+		permit:      codesessions.Permit{InitialRecovery: true, Account: codemode.Account{ID: "account", CycleAnchor: anchor}, Attempt: codemode.Attempt{ID: "attempt"}},
+		config:      routing.Configuration{Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.QwenTokenPlanProfile}},
 		endpoint:    endpoint,
 		observer:    codeObserver(endpoint),
 		model:       "qwen-model",
@@ -812,11 +819,11 @@ func minimaxAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time, path st
 	if !ok {
 		t.Fatal("minimax endpoint missing")
 	}
-	server := &Server{CodeLedger: ledger, now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	server := &Server{now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil)), deps: Dependencies{CodeLedger: ledger}}
 	return &codeAttempt{
 		server:      server,
-		permit:      resources.CodePermit{InitialRecovery: true, Account: codemode.Account{ID: "account"}, Attempt: codemode.Attempt{ID: "attempt"}},
-		config:      routing.Configuration{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.MiniMaxProfile},
+		permit:      codesessions.Permit{InitialRecovery: true, Account: codemode.Account{ID: "account"}, Attempt: codemode.Attempt{ID: "attempt"}},
+		config:      routing.Configuration{Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.MiniMaxProfile}},
 		endpoint:    endpoint,
 		observer:    codeObserver(endpoint),
 		model:       "MiniMax-M3",
@@ -912,11 +919,11 @@ func kimiAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time, path strin
 	if !ok {
 		t.Fatal("kimi endpoint missing")
 	}
-	server := &Server{CodeLedger: ledger, now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	server := &Server{now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil)), deps: Dependencies{CodeLedger: ledger}}
 	return &codeAttempt{
 		server:      server,
-		permit:      resources.CodePermit{InitialRecovery: true, Account: codemode.Account{ID: "account"}, Attempt: codemode.Attempt{ID: "attempt"}},
-		config:      routing.Configuration{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.KimiProfile},
+		permit:      codesessions.Permit{InitialRecovery: true, Account: codemode.Account{ID: "account"}, Attempt: codemode.Attempt{ID: "attempt"}},
+		config:      routing.Configuration{Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.KimiProfile}},
 		endpoint:    endpoint,
 		observer:    codeObserver(endpoint),
 		model:       "kimi-model",

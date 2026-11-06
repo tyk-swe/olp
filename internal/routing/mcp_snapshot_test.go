@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/plugins"
@@ -62,7 +62,7 @@ func TestAmountSyntaxAcrossToolAgentRoutingCacheAndBudgets(t *testing.T) {
 			preference := Preferences{MaxCost: &tc.amount}
 			cache := usage.CacheEvidence{Result: "hit", AvoidedCost: tc.amount}
 			budgetAmount := tc.amount
-			budget := access.AdmissionLimits{DailyCostLimit: &budgetAmount}
+			budget := keyauthority.AdmissionLimits{DailyCostLimit: &budgetAmount}
 			agentErr, preferenceErr, cacheErr := draft.Validate("agent"), preference.Validate("preferences"), cache.Validate()
 			budgetErr := budget.ValidateAndNormalize()
 			if ValidToolPrice(tc.amount) != tc.valid || (agentErr == nil) != tc.valid || (preferenceErr == nil) != tc.valid || (cacheErr == nil) != tc.valid {

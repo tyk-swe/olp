@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/providerconfig"
+
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 
 	"github.com/coder/websocket"
@@ -98,7 +100,7 @@ func (s *Server) callWithHeaders(ctx context.Context, cfg *Configuration, creden
 }
 
 func (s *Server) callAsWithHeaders(ctx context.Context, cfg *Configuration, credential []byte, method, path string, body []byte, contentType, signingService string) (int, http.Header, []byte, error) {
-	base, err := s.Egress.ValidateEndpoint(*cfg.Endpoint)
+	base, err := s.Egress.ValidateEndpoint(providerconfig.Value(cfg.Endpoint))
 	if err != nil {
 		return 0, nil, nil, &probeError{Code: "invalid_endpoint", Detail: err.Error()}
 	}
@@ -251,13 +253,13 @@ func listingFor(cfg *Configuration) (modelListing, bool, error) {
 		}
 		// Keep the rendered address's escaped option segments. call validates
 		// absolute URLs without rebuilding their path from a normalized base.
-		listing := modelListing{path: strings.TrimRight(value(cfg.Endpoint), "/") + declared.Path, models: declared.Models, id: declared.ID}
+		listing := modelListing{path: strings.TrimRight(providerconfig.Value(cfg.Endpoint), "/") + declared.Path, models: declared.Models, id: declared.ID}
 		if pagination := declared.Pagination; pagination != nil {
 			listing.cursor, listing.more, listing.parameter = pagination.Cursor, pagination.More, pagination.Parameter
 		}
 		return listing, true, nil
 	}
-	if contract, ok := vendors.Lookup(value(cfg.Options.VendorID)); ok && !contract.Discovery {
+	if contract, ok := vendors.Lookup(providerconfig.Value(cfg.Options.VendorID)); ok && !contract.Discovery {
 		return modelListing{}, false, nil
 	}
 	listing := modelListing{path: "/models", models: "data", id: "id", display: "display_name"}
@@ -270,12 +272,12 @@ func listingFor(cfg *Configuration) (modelListing, bool, error) {
 	case KindWatsonx:
 		// The chat-capable foundation models, in one page of the most the
 		// listing returns.
-		listing.path = "/ml/v1/foundation_model_specs?version=" + connectors.WatsonxVersion(value(cfg.APIVersion)) + "&filters=function_text_chat&limit=200"
+		listing.path = "/ml/v1/foundation_model_specs?version=" + connectors.WatsonxVersion(providerconfig.Value(cfg.APIVersion)) + "&filters=function_text_chat&limit=200"
 		listing.models, listing.id, listing.display = "resources", "model_id", "label"
 	case KindBedrock:
 		listing.path, listing.models, listing.id, listing.display = "/foundation-models", "modelSummaries", "modelId", "modelName"
-		if value(cfg.Endpoint) == connectors.DefaultEndpoint(cfg.Kind, value(cfg.CloudRegion), "") {
-			endpoint, err := connectors.BedrockEndpoint(value(cfg.CloudRegion), true)
+		if providerconfig.Value(cfg.Endpoint) == connectors.DefaultEndpoint(cfg.Kind, providerconfig.Value(cfg.CloudRegion), "") {
+			endpoint, err := connectors.BedrockEndpoint(providerconfig.Value(cfg.CloudRegion), true)
 			if err != nil {
 				return modelListing{}, false, err
 			}
@@ -296,7 +298,7 @@ func (s *Server) listModelFacts(ctx context.Context, cfg *Configuration, credent
 		defer cancel()
 		names := append([]string{}, cfg.ProbeModels...)
 		if cfg.Kind == KindAzure {
-			names = append(names, value(cfg.Deployment))
+			names = append(names, providerconfig.Value(cfg.Deployment))
 		}
 		for name := range cfg.Options.Models {
 			names = append(names, name)
@@ -368,7 +370,7 @@ func (s *Server) listModelFacts(ctx context.Context, cfg *Configuration, credent
 				}
 			}
 			if len(facts) > 0 {
-				facts["source"], _ = json.Marshal(value(cfg.Endpoint))
+				facts["source"], _ = json.Marshal(providerconfig.Value(cfg.Endpoint))
 				facts["observed_at"], _ = json.Marshal(time.Now().UTC())
 			}
 			out = append(out, discoveredModel{Name: name, Display: display, Metadata: facts})
@@ -499,7 +501,7 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 			families = []wire.Format{wire.Responses}
 		}
 	}
-	if cfg.ProfileID == "" && tuple.Operation == "generation" && tuple.Surface == "openai" && vendors.Speaks(value(cfg.Options.VendorID), "openai-responses") && (cfg.Kind == KindOpenAI || cfg.Kind == KindAzure || cfg.Kind == KindOpenAICompatible) {
+	if cfg.ProfileID == "" && tuple.Operation == "generation" && tuple.Surface == "openai" && vendors.Speaks(providerconfig.Value(cfg.Options.VendorID), "openai-responses") && (cfg.Kind == KindOpenAI || cfg.Kind == KindAzure || cfg.Kind == KindOpenAICompatible) {
 		families = append(families, wire.Responses)
 	}
 	for _, family := range families {
@@ -1106,14 +1108,14 @@ func selectProbeSlot(slots []slotRow, cfg *Configuration) *slotRow {
 // Vertex, Bedrock and Azure offer no costless proof, so their media
 // certifies by the smallest real call of the operation.
 func (s *Server) certifyNativeMedia(ctx context.Context, cfg *Configuration, credential []byte, model string, tuple CapabilityInput) error {
-	vendor := value(cfg.Options.VendorID)
+	vendor := providerconfig.Value(cfg.Options.VendorID)
 	if mediaByCall(cfg.Kind, vendor, tuple.Operation) {
 		return s.certifyMediaCall(ctx, cfg, credential, model, tuple.Operation)
 	}
 	if reviewedMedia(cfg.Kind, vendor, tuple.Operation) {
 		return s.certifyVendorMedia(ctx, cfg, credential, model, vendor)
 	}
-	endpoint, err := url.Parse(value(cfg.Endpoint))
+	endpoint, err := url.Parse(providerconfig.Value(cfg.Endpoint))
 	if err != nil || cfg.Kind != KindOpenAI || cfg.AuthMode != AuthAPIKey || len(credential) == 0 ||
 		len(cfg.Options.CredentialHeaders) != 0 || endpoint.Scheme != "https" ||
 		endpoint.Hostname() != "api.openai.com" || (endpoint.Port() != "" && endpoint.Port() != "443") ||

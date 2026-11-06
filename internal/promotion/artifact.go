@@ -5,18 +5,18 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"github.com/tyk-swe/olp/internal/cache"
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/routing"
-
 	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routes"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -37,18 +37,18 @@ type Document struct {
 	RequireLocalMFA      *bool                      `json:"require_local_mfa,omitempty"`
 	SCIMGroupMappings    []SCIMGroupMapping         `json:"scim_group_mappings,omitempty"`
 	// Endpoint preflight runs before the mutation lock; these versions detect races.
-	PreparedWorkloads  map[string]string     `json:"-"`
-	WorkloadIssuers    []WorkloadIssuerEntry `json:"workload_issuers,omitempty"`
-	Organizations      []OrganizationEntry   `json:"organizations,omitempty"`
-	BudgetTimeZone     *string               `json:"budget_time_zone,omitempty"`
-	InstallationBudget *access.BudgetPolicy  `json:"installation_budget,omitempty"`
-	APIVersion         string                `json:"api_version"`
-	ExportedAt         string                `json:"exported_at"`
-	Projects           []ProjectEntry        `json:"projects"`
-	Providers          []ProviderEntry       `json:"providers"`
-	Routes             []RouteEntry          `json:"routes"`
-	Templates          []TemplateEntry       `json:"templates,omitempty"`
-	Pricing            *PricingEntry         `json:"pricing"`
+	PreparedWorkloads  map[string]string          `json:"-"`
+	WorkloadIssuers    []WorkloadIssuerEntry      `json:"workload_issuers,omitempty"`
+	Organizations      []OrganizationEntry        `json:"organizations,omitempty"`
+	BudgetTimeZone     *string                    `json:"budget_time_zone,omitempty"`
+	InstallationBudget *keyauthority.BudgetPolicy `json:"installation_budget,omitempty"`
+	APIVersion         string                     `json:"api_version"`
+	ExportedAt         string                     `json:"exported_at"`
+	Projects           []ProjectEntry             `json:"projects"`
+	Providers          []ProviderEntry            `json:"providers"`
+	Routes             []RouteEntry               `json:"routes"`
+	Templates          []TemplateEntry            `json:"templates,omitempty"`
+	Pricing            *PricingEntry              `json:"pricing"`
 	// Discounts are the scopes the document prices under; scopes the document
 	// omits are left untouched on apply.
 	Discounts []DiscountEntry `json:"discounts,omitempty"`
@@ -58,17 +58,17 @@ type Document struct {
 }
 
 type ProjectEntry struct {
-	PublicCatalog        bool                      `json:"public_catalog,omitempty"`
-	PublicCatalogPrices  bool                      `json:"public_catalog_prices,omitempty"`
-	Organization         *string                   `json:"organization,omitempty"`
-	AttributionBudgets   access.AttributionBudgets `json:"attribution_budgets,omitempty"`
-	LimitTemplates       *access.LimitTemplates    `json:"limit_templates,omitempty"`
-	EndUserLimitTemplate *string                   `json:"end_user_limit_template,omitempty"`
-	Budget               *access.BudgetPolicy      `json:"budget,omitempty"`
-	RouteGroups          access.RouteGroups        `json:"route_groups,omitempty"`
-	AttributionPolicy    *attribution.Policy       `json:"attribution_policy,omitempty"`
-	Name                 string                    `json:"name"`
-	EndUserDefaults      *access.AdmissionLimits   `json:"end_user_defaults,omitempty"`
+	PublicCatalog        bool                            `json:"public_catalog,omitempty"`
+	PublicCatalogPrices  bool                            `json:"public_catalog_prices,omitempty"`
+	Organization         *string                         `json:"organization,omitempty"`
+	AttributionBudgets   keyauthority.AttributionBudgets `json:"attribution_budgets,omitempty"`
+	LimitTemplates       *keyauthority.LimitTemplates    `json:"limit_templates,omitempty"`
+	EndUserLimitTemplate *string                         `json:"end_user_limit_template,omitempty"`
+	Budget               *keyauthority.BudgetPolicy      `json:"budget,omitempty"`
+	RouteGroups          keyauthority.RouteGroups        `json:"route_groups,omitempty"`
+	AttributionPolicy    *attribution.Policy             `json:"attribution_policy,omitempty"`
+	Name                 string                          `json:"name"`
+	EndUserDefaults      *keyauthority.AdmissionLimits   `json:"end_user_defaults,omitempty"`
 }
 
 type CapabilityEntry = providers.CapabilityInput

@@ -9,16 +9,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/routing"
-
 	"github.com/coder/websocket"
-
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
 	"github.com/tyk-swe/olp/internal/release"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 type codeMessage struct {
@@ -66,7 +64,7 @@ type codeWebSocketHandshake struct {
 	target     string
 }
 
-func (s *Server) prepareCodeWebSocket(r *http.Request, release *release.Release, route codemode.Route, authority access.Authority, ingress codeIngress) (codeWebSocketHandshake, error) {
+func (s *Server) prepareCodeWebSocket(r *http.Request, release *release.Release, route codemode.Route, authority keyauthority.Authority, ingress codeIngress) (codeWebSocketHandshake, error) {
 	var handshake codeWebSocketHandshake
 	identity, err := codeConnectionIdentity(ingress, r.Header)
 	if err != nil {
@@ -86,7 +84,7 @@ func (s *Server) prepareCodeWebSocket(r *http.Request, release *release.Release,
 			return handshake, codemode.Refuse(400, "code_paid_operation_unsupported")
 		}
 	}
-	permit, err := s.CodeLedger.BindConnection(r.Context(), route, authority.ID, identity, r.Header.Get("X-OLP-Code-Model"), release.Snapshot.CodeProviders(route, ingress.path, codeadapter.WebSocket))
+	permit, err := s.deps.CodeLedger.BindConnection(r.Context(), route, authority.ID, identity, r.Header.Get("X-OLP-Code-Model"), release.Snapshot().CodeProviders(route, ingress.path, codeadapter.WebSocket))
 	if err != nil {
 		return handshake, err
 	}
@@ -110,11 +108,11 @@ func (s *Server) prepareCodeWebSocket(r *http.Request, release *release.Release,
 	if failure := s.checkKeyAddress(r, permit.Authority); failure != nil {
 		return handshake, codemode.Refuse(failure.Status, "code_ip_not_allowed")
 	}
-	target, err := resolveCodeTarget(release.Snapshot, route, permit.Account.ProviderID, ingress, codeadapter.WebSocket)
+	target, err := resolveCodeTarget(release.Snapshot(), route, permit.Account.ProviderID, ingress, codeadapter.WebSocket)
 	if err != nil {
 		return handshake, err
 	}
-	auth, err := s.CodeAuthorizer.AuthorizeCode(r.Context(), target.config, permit.Account, target.dispatchDescriptor())
+	auth, err := s.deps.CodeAuthorizer.AuthorizeCode(r.Context(), target.config, permit.Account, target.dispatchDescriptor())
 	if err != nil {
 		return handshake, codemode.Refuse(503, "code_account_unavailable")
 	}
@@ -138,7 +136,7 @@ func (s *Server) prepareCodeWebSocket(r *http.Request, release *release.Release,
 	return handshake, nil
 }
 
-func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *release.Release, route codemode.Route, authority access.Authority, ingress codeIngress) {
+func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *release.Release, route codemode.Route, authority keyauthority.Authority, ingress codeIngress) {
 	keyID, digest := authority.ID, authority.EndUserDigest
 	reject := func(err error) { s.codeRefuse(w, r, route, keyID, digest, err) }
 	if r.Header.Get("Sec-Websocket-Protocol") != "" {
@@ -270,11 +268,11 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 			// The socket still uses the authorization sent at its handshake,
 			// even if this generation's admission reads a refreshed credential.
 			active.auth = connection.auth
-			if s.Runtime.Eligibility(connection.auth.CredentialID) != routing.Eligible {
+			if s.deps.Runtime.Eligibility(connection.auth.CredentialID) != routing.Eligible {
 				refuse(codemode.Refuse(503, "code_account_unavailable"))
 				return
 			}
-			if network := connection.config.Options.Network; network != nil && network.CredentialID != "" && s.Runtime.Eligibility(network.CredentialID) != routing.Eligible {
+			if network := connection.config.Options.Network; network != nil && network.CredentialID != "" && s.deps.Runtime.Eligibility(network.CredentialID) != routing.Eligible {
 				refuse(codemode.Refuse(503, "code_network_credential_unavailable"))
 				return
 			}

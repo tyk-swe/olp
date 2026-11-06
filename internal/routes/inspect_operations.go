@@ -16,7 +16,7 @@ import (
 )
 
 func inspectorAnyRequest(raw json.RawMessage, operation, surface, mode, dialect, slug string, strict bool) (*wire.Request, *oif.Request, *media.Request, error) {
-	if !strict && !operationregistry.TransformedServing(operation) || operation == "generation" {
+	if !strict && !operationregistry.PolicyFor(operation).TransformedUnary || operation == "generation" {
 		request, err := inspectorRequest(raw, operation, surface, mode, dialect, slug, strict)
 		return request, nil, nil, err
 	}
@@ -64,19 +64,18 @@ func inspectorAnyRequest(raw json.RawMessage, operation, surface, mode, dialect,
 	}
 	return nil, &request, nil, nil
 }
-func inspectionUnaryAccept(route routing.Route, sourceRoute string, source oif.Request, context interaction.Context, client string, demand *routing.TokenDemand, budget *inspectionBudget) (func(routing.Provider, routing.Target) error, func(routing.Provider, routing.Target) (routing.Names, *routing.TokenDemand), map[string]*interactionInspection) {
+func inspectionUnaryAccept(route routing.Route, sourceRoute string, source oif.Request, context interaction.Context, client string, demand *routing.TokenDemand, budget *inspectionBudget) (routing.PrepareCandidate, map[string]*interactionInspection) {
 	details := map[string]*interactionInspection{}
-	plans := map[string]*operationplan.Plan{}
-	accept := func(provider routing.Provider, target routing.Target) error {
+	prepare := func(provider routing.Provider, target routing.Target) (*routing.CandidatePreparation, error) {
 		result := &interactionInspection{Status: "incompatible", Fidelity: routing.FidelityStrict, Evidence: []string{}}
 		details[target.ID] = result
 		template, err := operationplan.Compile(operationplan.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: source.Descriptor().Operation.ID, Policy: route.ContentPolicy, AllowProviderFetchedDocuments: route.ProviderFetchedDocuments})
 		if err != nil {
-			return safeInspectionError(err)
+			return nil, safeInspectionError(err)
 		}
 		plan, err := template.Bind(source, operationplan.Context{Route: sourceRoute, Headers: context.Headers, Query: context.Query, ClientContract: client})
 		if err != nil {
-			return safeInspectionError(err)
+			return nil, safeInspectionError(err)
 		}
 		receipt := plan.Receipt()
 		result.Class, result.Operation = receipt.Class, receipt.Operation
@@ -101,38 +100,29 @@ func inspectionUnaryAccept(route routing.Route, sourceRoute string, source oif.R
 			if diagnostic, ok := safe.(*inspectionDiagnostic); ok && diagnostic.code == "content_policy_blocked" {
 				result.Status = "blocked"
 			}
-			return safe
+			return nil, safe
 		}
 		result.Status = "admitted"
-		plans[target.ID] = plan
-		return nil
+		return &routing.CandidatePreparation{Parameters: routing.Listed(plan.Parameters()), Demand: demand}, nil
 	}
-	effective := func(_ routing.Provider, target routing.Target) (routing.Names, *routing.TokenDemand) {
-		plan := plans[target.ID]
-		if plan == nil {
-			return nil, demand
-		}
-		return routing.Listed(plan.Parameters()), demand
-	}
-	return accept, effective, details
+	return prepare, details
 }
 
-func inspectionMediaAccept(route routing.Route, source *media.Request, dialect string, context interaction.Context, client string, demand *routing.TokenDemand, budget *inspectionBudget) (func(routing.Provider, routing.Target) error, func(routing.Provider, routing.Target) (routing.Names, *routing.TokenDemand), map[string]*interactionInspection) {
+func inspectionMediaAccept(route routing.Route, source *media.Request, dialect string, context interaction.Context, client string, demand *routing.TokenDemand, budget *inspectionBudget) (routing.PrepareCandidate, map[string]*interactionInspection) {
 	details := map[string]*interactionInspection{}
-	parameters := map[string][]string{}
-	accept := func(provider routing.Provider, target routing.Target) error {
+	prepare := func(provider routing.Provider, target routing.Target) (*routing.CandidatePreparation, error) {
 		result := &interactionInspection{Status: "incompatible", Fidelity: routing.FidelityStrict, Evidence: []string{}}
 		details[target.ID] = result
 		if client != "" || len(context.Headers) != 0 || len(context.Query) != 0 {
-			return safeInspectionError(&oif.Incompatibility{Code: "target_capability", Field: "/semantic_context", Requirement: "media_context", Message: "This media profile has no qualified caller semantic context."})
+			return nil, safeInspectionError(&oif.Incompatibility{Code: "target_capability", Field: "/semantic_context", Requirement: "media_context", Message: "This media profile has no qualified caller semantic context."})
 		}
 		template, err := mediacontract.Compile(mediacontract.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: source.Op, Policy: route.ContentPolicy})
 		if err != nil {
-			return safeInspectionError(err)
+			return nil, safeInspectionError(err)
 		}
 		call, effective, failure := media.EncodeStrictConfigured(source, provider.Connector(), target.ProviderModel)
 		if failure != nil {
-			return safeInspectionError(failure)
+			return nil, safeInspectionError(failure)
 		}
 		bound, err := template.Bind(mediacontract.Input{Route: route.Slug, Mode: effective.Mode(), Source: source.SourceDocument(), JSON: call.JSON, PolicyBudget: budget.reserve})
 		if err != nil {
@@ -140,11 +130,11 @@ func inspectionMediaAccept(route routing.Route, source *media.Request, dialect s
 			if diagnostic, ok := safe.(*inspectionDiagnostic); ok && diagnostic.code == "content_policy_blocked" {
 				result.Status = "blocked"
 			}
-			return safe
+			return nil, safe
 		}
 		receipt := bound.Receipt
 		if dialect != "" && dialect != receipt.SourceDialect {
-			return safeInspectionError(&oif.Incompatibility{Code: "target_capability", Field: "/dialect", Requirement: "native_media_dialect", Message: "The requested media dialect differs from the selected target."})
+			return nil, safeInspectionError(&oif.Incompatibility{Code: "target_capability", Field: "/dialect", Requirement: "native_media_dialect", Message: "The requested media dialect differs from the selected target."})
 		}
 		result.Class, result.Operation = receipt.Class, receipt.Operation
 		result.IngressDialect, result.EgressDialect, result.ReturnDialect = receipt.SourceDialect, receipt.TargetDialect, receipt.SourceDialect
@@ -163,16 +153,14 @@ func inspectionMediaAccept(route routing.Route, source *media.Request, dialect s
 		}
 		summary := inspectRequest(bound.Effective.Document(), bound.Effective.Provenance())
 		result.EffectiveRequest = &summary
+		parameters := []string{}
 		for _, member := range bound.Effective.Document().Root().Members() {
 			if member.Name != "model" && member.Name != "stream" && member.Name != "stream_format" {
-				parameters[target.ID] = append(parameters[target.ID], member.Name)
+				parameters = append(parameters, member.Name)
 			}
 		}
 		result.Status = "admitted"
-		return nil
+		return &routing.CandidatePreparation{Parameters: routing.Listed(parameters), Demand: demand}, nil
 	}
-	effective := func(_ routing.Provider, target routing.Target) (routing.Names, *routing.TokenDemand) {
-		return routing.Listed(parameters[target.ID]), demand
-	}
-	return accept, effective, details
+	return prepare, details
 }

@@ -12,7 +12,7 @@ type codeTarget struct {
 	endpoint codeadapter.Endpoint
 }
 
-func resolveCodeTarget(snapshot *routing.Snapshot, route codemode.Route, providerID string, ingress codeIngress, transport codeadapter.Transport) (codeTarget, error) {
+func resolveCodeTarget(snapshot *routing.View, route codemode.Route, providerID string, ingress codeIngress, transport codeadapter.Transport) (codeTarget, error) {
 	config, exists := snapshot.CodeConnection(route, providerID)
 	if !exists {
 		return codeTarget{}, codemode.Refuse(503, "code_connection_unpublished")

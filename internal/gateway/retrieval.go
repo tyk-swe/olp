@@ -28,7 +28,7 @@ func (s *Server) queryRetrieval(w http.ResponseWriter, r *http.Request) {
 	x.operationOverride = "retrieval"
 	x.mode = "unary"
 	x.actor = "api_key_resource"
-	x.retainedMetered = true
+	x.retained = retainedOperation{use: retainedNewWork, billing: retainedMeteredWork}
 	var p *pin
 	status := http.StatusInternalServerError
 	defer func() { s.finish(x, nil, status); s.retainedSettle(r.Context(), x, p) }()
@@ -46,11 +46,11 @@ func (s *Server) queryRetrieval(w http.ResponseWriter, r *http.Request) {
 		fail(invalidRequest("invalid_parameter", "Retrieval does not accept query parameters.", nil))
 		return
 	}
-	if s.Resources == nil {
+	if s.deps.Resources == nil {
 		fail(serverError(503, "provider_state_unavailable", "Retrieval bindings are unavailable."))
 		return
 	}
-	tx, readErr := s.Resources.Begin(r.Context())
+	tx, readErr := s.deps.Resources.Begin(r.Context())
 	if readErr != nil {
 		fail(serverError(503, "provider_state_unavailable", "Retrieval bindings are unavailable."))
 		return
@@ -61,7 +61,7 @@ func (s *Server) queryRetrieval(w http.ResponseWriter, r *http.Request) {
 		fail(notFoundError("not_found", "No retrieval binding exists for this key."))
 		return
 	}
-	candidate, ok := x.snapshot().Routes[binding.Route]
+	candidate, ok := x.snapshot().FindRoute(binding.Route)
 	if !ok || candidate.ProjectID == nil || *candidate.ProjectID != binding.ProjectID {
 		fail(modelNotFound(binding.Route))
 		return

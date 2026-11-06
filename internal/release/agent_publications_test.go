@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/agents/tasks"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -23,7 +24,7 @@ func TestConsumerKeyAuthenticationRequiresCurrentExactCredential(t *testing.T) {
 	issuer := "workload-issuer"
 	auth := secrets.NewAuthKey(make([]byte, 32), "installation")
 	secret := "olp_lookup_secret"
-	principal := access.Authority{ID: "key", LookupID: "lookup", Policy: access.KeyPolicy{Scopes: []string{"tools"}}}
+	principal := keyauthority.Authority{ID: "key", LookupID: "lookup", Policy: keyauthority.KeyPolicy{Scopes: []string{"tools"}}}
 	for _, test := range []struct {
 		name      string
 		presented string
@@ -44,7 +45,7 @@ func TestConsumerKeyAuthenticationRequiresCurrentExactCredential(t *testing.T) {
 		{name: "workload identity", presented: secret, loaded: true, readAt: now, issuerID: &issuer, want: ErrInvalidKey},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			captured := access.Authority{ID: principal.ID, LookupID: principal.LookupID, Policy: principal.Policy, WorkloadIssuerID: test.issuerID}
+			captured := keyauthority.Authority{ID: principal.ID, LookupID: principal.LookupID, Policy: principal.Policy, WorkloadIssuerID: test.issuerID}
 			manager := Manager{auth: auth, authority: authorityState{
 				loaded: test.loaded, readAt: test.readAt,
 				keys: map[string]*keyRecord{"lookup": {authority: captured, digest: auth.Digest(secrets.APIKeyDigest, secret), expiresAt: test.expiresAt}},
@@ -113,10 +114,10 @@ func TestTaskCapabilityAuthenticatesAndCountsOwnerCallbacks(t *testing.T) {
 	expires := now.Add(time.Minute)
 	maximum := 2
 	definition := agentcontract.Draft{Agent: &agentcontract.Definition{RouteRevisions: []string{"route-revision"}, ToolsetRevisions: []string{"toolset-revision"}, MaxTaskContinuations: &maximum}}
-	owner := access.Authority{ID: "owner", ProjectID: &project, Policy: access.KeyPolicy{Scopes: []string{"agents", "inference", "tools"}, AllowedAgents: []string{publication}, AllowedRoutes: []string{"route"}, AllowedToolsets: []string{"toolset"}}}
+	owner := keyauthority.Authority{ID: "owner", ProjectID: &project, Policy: keyauthority.KeyPolicy{Scopes: []string{"agents", "inference", "tools"}, AllowedAgents: []string{publication}, AllowedRoutes: []string{"route"}, AllowedToolsets: []string{"toolset"}}}
 	newFixture := func() (*Manager, *taskStoreFixture) {
 		store := &taskStoreFixture{row: taskRow{values: []any{owner.ID, project, publication, revision, "", (*time.Time)(nil), expires, "", []byte(nil), definition, "", ""}}, tx: &taskTxFixture{rows: []taskRow{{values: []any{"dispatch", "task", definition}}, {values: []any{1}}}}}
-		manager := &Manager{auth: secrets.NewAuthKey(make([]byte, 32), "installation"), taskStore: tasks.NewCapabilities(store), authority: authorityState{loaded: true, readAt: now, agentPrincipals: map[string]access.Authority{owner.ID: owner}, agentResources: map[string]agentResourceAuthority{publication: {ProjectID: project, Kind: "agent", Revisions: map[string]bool{revision: true}}}}}
+		manager := &Manager{auth: secrets.NewAuthKey(make([]byte, 32), "installation"), taskStore: tasks.NewCapabilities(store), authority: authorityState{loaded: true, readAt: now, agentPrincipals: map[string]keyauthority.Authority{owner.ID: owner}, agentResources: map[string]agentResourceAuthority{publication: {ProjectID: project, Kind: "agent", Revisions: map[string]bool{revision: true}}}}}
 		return manager, store
 	}
 	t.Run("owner and pinned resources", func(t *testing.T) {
@@ -133,11 +134,11 @@ func TestTaskCapabilityAuthenticatesAndCountsOwnerCallbacks(t *testing.T) {
 		manager, store := newFixture()
 		issuerID := "workload-issuer"
 		callerExpires := now.Add(30 * time.Second)
-		principal := access.Authority{ID: owner.ID, ProjectID: &project, WorkloadIssuerID: &issuerID, WorkloadDigest: "workload-digest", WorkloadMapping: "worker"}
+		principal := keyauthority.Authority{ID: owner.ID, ProjectID: &project, WorkloadIssuerID: &issuerID, WorkloadDigest: "workload-digest", WorkloadMapping: "worker"}
 		store.row.values[4], store.row.values[5], store.row.values[7] = "workload-revision", &callerExpires, "bound-user"
 		delete(manager.authority.agentPrincipals, owner.ID)
-		manager.authority.workloadPrincipals = map[string]access.Authority{principal.WorkloadDigest: principal}
-		manager.authority.workloadIssuers = map[string]workloadIssuer{issuerID: {ID: issuerID, Revision: "workload-revision", Config: workload.Config{Enabled: true}, bindings: map[string]access.Authority{"worker": owner}}}
+		manager.authority.workloadPrincipals = map[string]keyauthority.Authority{principal.WorkloadDigest: principal}
+		manager.authority.workloadIssuers = map[string]workloadIssuer{issuerID: {ID: issuerID, Revision: "workload-revision", Config: workload.Config{Enabled: true}, bindings: map[string]keyauthority.Authority{"worker": owner}}}
 		got, err := manager.AuthenticateTaskCapability(t.Context(), "olpt_valid")
 		if err != nil || got.WorkloadDigest != principal.WorkloadDigest || got.EndUserDigest != "bound-user" || got.ExpiresAt == nil || got.ExpiresAt.After(callerExpires) || !got.Allows("inference", "route", &project, now) {
 			t.Fatalf("workload callback authority = %+v, error = %v", got, err)
@@ -213,8 +214,8 @@ func TestTaskCapabilityAuthenticatesAndCountsOwnerCallbacks(t *testing.T) {
 func TestAgentLiveAuthority(t *testing.T) {
 	project := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607"
 	resource := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50608"
-	a := access.Authority{ID: project, ProjectID: &project, Policy: access.KeyPolicy{Scopes: []string{"tools"}, AllowedToolsets: []string{resource}}}
-	m := Manager{authority: authorityState{loaded: true, readAt: time.Now(), agentPrincipals: map[string]access.Authority{a.ID: a}, agentResources: map[string]agentResourceAuthority{resource: {ProjectID: project, Kind: "toolset", Revisions: map[string]bool{resource: true}}}}}
+	a := keyauthority.Authority{ID: project, ProjectID: &project, Policy: keyauthority.KeyPolicy{Scopes: []string{"tools"}, AllowedToolsets: []string{resource}}}
+	m := Manager{authority: authorityState{loaded: true, readAt: time.Now(), agentPrincipals: map[string]keyauthority.Authority{a.ID: a}, agentResources: map[string]agentResourceAuthority{resource: {ProjectID: project, Kind: "toolset", Revisions: map[string]bool{resource: true}}}}}
 	if err := m.AuthorizeAgentResource(a, "tools", resource, resource, project); err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +241,7 @@ func TestAgentWorkloadLiveAuthority(t *testing.T) {
 	project, resource, issuerID := "project", "resource", "issuer"
 	for _, scope := range []string{"tools", "agents"} {
 		t.Run(scope, func(t *testing.T) {
-			a := access.Authority{ID: "principal", ProjectID: &project, WorkloadIssuerID: &issuerID, WorkloadDigest: "digest", WorkloadMapping: "worker", WorkloadRevision: "revision", Policy: access.KeyPolicy{Scopes: []string{scope}, AllowedToolsets: []string{resource}, AllowedAgents: []string{resource}}}
+			a := keyauthority.Authority{ID: "principal", ProjectID: &project, WorkloadIssuerID: &issuerID, WorkloadDigest: "digest", WorkloadMapping: "worker", WorkloadRevision: "revision", Policy: keyauthority.KeyPolicy{Scopes: []string{scope}, AllowedToolsets: []string{resource}, AllowedAgents: []string{resource}}}
 			kind := "toolset"
 			if scope == "agents" {
 				kind = "agent"
@@ -248,10 +249,10 @@ func TestAgentWorkloadLiveAuthority(t *testing.T) {
 			for _, scenario := range []string{"allowed", "new principal", "disabled issuer", "removed issuer", "changed revision", "removed mapping", "reduced permissions", "revoked principal", "changed project"} {
 				t.Run(scenario, func(t *testing.T) {
 					principal := a
-					issuer := workloadIssuer{ID: issuerID, Revision: a.WorkloadRevision, Config: workload.Config{Enabled: true}, bindings: map[string]access.Authority{a.WorkloadMapping: a}}
+					issuer := workloadIssuer{ID: issuerID, Revision: a.WorkloadRevision, Config: workload.Config{Enabled: true}, bindings: map[string]keyauthority.Authority{a.WorkloadMapping: a}}
 					switch scenario {
 					case "new principal":
-						principal.Policy = access.KeyPolicy{} // Enrollment caches revocation metadata only.
+						principal.Policy = keyauthority.KeyPolicy{} // Enrollment caches revocation metadata only.
 					case "disabled issuer":
 						issuer.Config.Enabled = false
 					case "changed revision":
@@ -260,7 +261,7 @@ func TestAgentWorkloadLiveAuthority(t *testing.T) {
 						delete(issuer.bindings, a.WorkloadMapping)
 					case "reduced permissions":
 						live := a
-						live.Policy = access.KeyPolicy{Scopes: []string{scope}}
+						live.Policy = keyauthority.KeyPolicy{Scopes: []string{scope}}
 						issuer.bindings[a.WorkloadMapping] = live
 					case "revoked principal":
 						now := time.Now()
@@ -271,7 +272,7 @@ func TestAgentWorkloadLiveAuthority(t *testing.T) {
 						live.ProjectID = &other
 						issuer.bindings[a.WorkloadMapping] = live
 					}
-					m := Manager{authority: authorityState{loaded: true, readAt: time.Now(), workloadPrincipals: map[string]access.Authority{a.WorkloadDigest: principal}, workloadIssuers: map[string]workloadIssuer{"issuer": issuer}, agentResources: map[string]agentResourceAuthority{resource: {ProjectID: project, Kind: kind, Revisions: map[string]bool{resource: true}}}}}
+					m := Manager{authority: authorityState{loaded: true, readAt: time.Now(), workloadPrincipals: map[string]keyauthority.Authority{a.WorkloadDigest: principal}, workloadIssuers: map[string]workloadIssuer{"issuer": issuer}, agentResources: map[string]agentResourceAuthority{resource: {ProjectID: project, Kind: kind, Revisions: map[string]bool{resource: true}}}}}
 					if scenario == "removed issuer" {
 						delete(m.authority.workloadIssuers, "issuer")
 					}
@@ -290,13 +291,13 @@ func TestAgentTaskRechecksWorkloadRevisionAndExpiry(t *testing.T) {
 	project, resource, issuerID := "project", "resource", "issuer"
 	now := time.Now()
 	active, expired := now.Add(time.Minute), now.Add(-time.Minute)
-	principal := access.Authority{ID: "principal", ProjectID: &project, WorkloadIssuerID: &issuerID, WorkloadDigest: "digest", WorkloadMapping: "worker"}
-	binding := access.Authority{ID: principal.ID, ProjectID: &project, Policy: access.KeyPolicy{Scopes: []string{"agents"}, AllowedAgents: []string{resource}}}
+	principal := keyauthority.Authority{ID: "principal", ProjectID: &project, WorkloadIssuerID: &issuerID, WorkloadDigest: "digest", WorkloadMapping: "worker"}
+	binding := keyauthority.Authority{ID: principal.ID, ProjectID: &project, Policy: keyauthority.KeyPolicy{Scopes: []string{"agents"}, AllowedAgents: []string{resource}}}
 	manager := Manager{authority: authorityState{
 		loaded:             true,
 		readAt:             now,
-		workloadPrincipals: map[string]access.Authority{principal.WorkloadDigest: principal},
-		workloadIssuers:    map[string]workloadIssuer{issuerID: {ID: issuerID, Revision: "revision", Config: workload.Config{Enabled: true}, bindings: map[string]access.Authority{principal.WorkloadMapping: binding}}},
+		workloadPrincipals: map[string]keyauthority.Authority{principal.WorkloadDigest: principal},
+		workloadIssuers:    map[string]workloadIssuer{issuerID: {ID: issuerID, Revision: "revision", Config: workload.Config{Enabled: true}, bindings: map[string]keyauthority.Authority{principal.WorkloadMapping: binding}}},
 		agentResources:     map[string]agentResourceAuthority{resource: {ProjectID: project, Kind: "agent", Revisions: map[string]bool{resource: true}}},
 	}}
 	for _, test := range []struct {
@@ -322,16 +323,16 @@ func TestAgentTaskRechecksWorkloadRevisionAndExpiry(t *testing.T) {
 func TestMCPToolAuthorizationUsesCurrentPublicationAndServerRevision(t *testing.T) {
 	project, publication, revision, server, serverRevision := "project", "tools", "revision", "server", "server-revision"
 	now := time.Now()
-	caller := access.Authority{ID: "principal", ProjectID: &project, Policy: access.KeyPolicy{Scopes: []string{"tools"}, AllowedToolsets: []string{publication}}}
-	noScope := access.Authority{ID: caller.ID, ProjectID: &project, Policy: access.KeyPolicy{AllowedToolsets: []string{publication}}}
-	revoked := access.Authority{ID: caller.ID, ProjectID: &project, Policy: caller.Policy, RevokedAt: &now}
+	caller := keyauthority.Authority{ID: "principal", ProjectID: &project, Policy: keyauthority.KeyPolicy{Scopes: []string{"tools"}, AllowedToolsets: []string{publication}}}
+	noScope := keyauthority.Authority{ID: caller.ID, ProjectID: &project, Policy: keyauthority.KeyPolicy{AllowedToolsets: []string{publication}}}
+	revoked := keyauthority.Authority{ID: caller.ID, ProjectID: &project, Policy: caller.Policy, RevokedAt: &now}
 	published := map[string]mcpToolAuthority{revision: {PublicationID: publication, ProjectID: project, Servers: map[string]string{server: serverRevision}}}
 	wrongPublication := map[string]mcpToolAuthority{revision: {PublicationID: "other", ProjectID: project, Servers: map[string]string{server: serverRevision}}}
 	wrongProject := map[string]mcpToolAuthority{revision: {PublicationID: publication, ProjectID: "other", Servers: map[string]string{server: serverRevision}}}
 	for _, test := range []struct {
 		name             string
-		caller           access.Authority
-		current          access.Authority
+		caller           keyauthority.Authority
+		current          keyauthority.Authority
 		toolsets         map[string]mcpToolAuthority
 		readAt           time.Time
 		requestedID      string
@@ -353,7 +354,7 @@ func TestMCPToolAuthorizationUsesCurrentPublicationAndServerRevision(t *testing.
 		{name: "stale authority", caller: caller, current: caller, toolsets: published, readAt: now.Add(-AuthorityStaleAfter - time.Second), requestedID: publication, requestedRev: revision, requestedHost: server, requestedHostRev: serverRevision, stale: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			manager := Manager{authority: authorityState{loaded: true, readAt: test.readAt, agentPrincipals: map[string]access.Authority{caller.ID: test.current}, mcpTools: test.toolsets}}
+			manager := Manager{authority: authorityState{loaded: true, readAt: test.readAt, agentPrincipals: map[string]keyauthority.Authority{caller.ID: test.current}, mcpTools: test.toolsets}}
 			err := manager.AuthorizeMCPTool(test.caller, test.requestedID, test.requestedRev, project, test.requestedHost, test.requestedHostRev)
 			if test.stale {
 				if !errors.Is(err, ErrStaleAuthority) {
@@ -373,12 +374,12 @@ func TestDelegatedToolAuthorityRechecksAgent(t *testing.T) {
 	toolset := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50608"
 	issuerID := "issuer"
 	digest := "workload"
-	agent := access.Authority{ID: "agent", AgentPrincipal: true, ProjectID: &project, WorkloadIssuerID: &issuerID, WorkloadDigest: digest, WorkloadRevision: "revision", WorkloadMapping: "mapping", Policy: access.KeyPolicy{Scopes: []string{"tools"}, AllowedToolsets: []string{toolset}}}
-	key := access.Authority{ID: "key", ProjectID: &project, Policy: access.KeyPolicy{Scopes: []string{"tools"}, AllowedToolsets: []string{toolset}}}
+	agent := keyauthority.Authority{ID: "agent", AgentPrincipal: true, ProjectID: &project, WorkloadIssuerID: &issuerID, WorkloadDigest: digest, WorkloadRevision: "revision", WorkloadMapping: "mapping", Policy: keyauthority.KeyPolicy{Scopes: []string{"tools"}, AllowedToolsets: []string{toolset}}}
+	key := keyauthority.Authority{ID: "key", ProjectID: &project, Policy: keyauthority.KeyPolicy{Scopes: []string{"tools"}, AllowedToolsets: []string{toolset}}}
 	delegated := *key.Delegated([]string{"tools"}, nil, []string{toolset}, nil, agent, "", "pair", "grant", time.Now().Add(time.Minute))
 	for _, test := range []struct {
 		name     string
-		agent    access.Authority
+		agent    keyauthority.Authority
 		enabled  bool
 		revision string
 		allowed  bool
@@ -386,10 +387,10 @@ func TestDelegatedToolAuthorityRechecksAgent(t *testing.T) {
 		{name: "allowed", agent: agent, enabled: true, revision: "revision", allowed: true},
 		{name: "issuer disabled", agent: agent, revision: "revision"},
 		{name: "issuer revised", agent: agent, enabled: true, revision: "other"},
-		{name: "agent loses toolset", agent: access.Authority{ID: agent.ID, ProjectID: &project, WorkloadIssuerID: &issuerID, WorkloadMapping: "mapping", Policy: access.KeyPolicy{Scopes: []string{"tools"}}}, enabled: true, revision: "revision"},
+		{name: "agent loses toolset", agent: keyauthority.Authority{ID: agent.ID, ProjectID: &project, WorkloadIssuerID: &issuerID, WorkloadMapping: "mapping", Policy: keyauthority.KeyPolicy{Scopes: []string{"tools"}}}, enabled: true, revision: "revision"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			manager := Manager{authority: authorityState{loaded: true, readAt: time.Now(), agentPrincipals: map[string]access.Authority{key.ID: key}, workloadPrincipals: map[string]access.Authority{digest: agent}, workloadIssuers: map[string]workloadIssuer{"issuer": {ID: issuerID, Revision: test.revision, Config: workload.Config{Enabled: test.enabled}, bindings: map[string]access.Authority{"mapping": test.agent}}}, mcpTools: map[string]mcpToolAuthority{toolset: {PublicationID: toolset, ProjectID: project}}}}
+			manager := Manager{authority: authorityState{loaded: true, readAt: time.Now(), agentPrincipals: map[string]keyauthority.Authority{key.ID: key}, workloadPrincipals: map[string]keyauthority.Authority{digest: agent}, workloadIssuers: map[string]workloadIssuer{"issuer": {ID: issuerID, Revision: test.revision, Config: workload.Config{Enabled: test.enabled}, bindings: map[string]keyauthority.Authority{"mapping": test.agent}}}, mcpTools: map[string]mcpToolAuthority{toolset: {PublicationID: toolset, ProjectID: project}}}}
 			err := manager.AuthorizeMCPTool(delegated, toolset, toolset, project, "", "")
 			if (err == nil) != test.allowed {
 				t.Fatalf("authorization allowed = %t, want %t: %v", err == nil, test.allowed, err)

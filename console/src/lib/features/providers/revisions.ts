@@ -1,3 +1,4 @@
+import { requestNative } from '$lib/management/transport';
 import type { components } from '$lib/management/schema';
 import { apiClient } from '$lib/management/client';
 import { type CursorPage, unwrap, unwrapPage } from '$lib/management/http';
@@ -39,16 +40,18 @@ export async function getProviderRevision(
   revisionId: string,
   signal?: AbortSignal
 ): Promise<ProviderRevisionDetail> {
-  const response = await apiClient.GET(
+  return requestNative(
+    apiClient,
+    'get',
     '/api/v1/providers/{provider_id}/revisions/{revision_id}',
     {
       params: {
         path: { provider_id: providerId, revision_id: revisionId }
       },
       signal
-    }
+    },
+    [['configuration']]
   );
-  return unwrap(response);
 }
 
 export async function listProviderRevisionModelPage(
@@ -91,7 +94,9 @@ export async function restoreProviderRevision(
   revisionId: string,
   requestId: string
 ): Promise<ProviderRevisionRestore> {
-  const response = await apiClient.POST(
+  return requestNative(
+    apiClient,
+    'post',
     '/api/v1/providers/{provider_id}/revisions/{revision_id}/restore-as-draft',
     {
       params: {
@@ -101,7 +106,7 @@ export async function restoreProviderRevision(
           'Idempotency-Key': requestId
         }
       }
-    }
+    },
+    [['provider', 'configuration']]
   );
-  return unwrap(response);
 }

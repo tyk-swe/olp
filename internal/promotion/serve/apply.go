@@ -4,28 +4,28 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/modelcatalog"
+	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/charge"
 	"github.com/tyk-swe/olp/internal/promotion/guardrail"
 	"github.com/tyk-swe/olp/internal/promotion/organizations"
 	"github.com/tyk-swe/olp/internal/promotion/providerpromotion"
 	"github.com/tyk-swe/olp/internal/promotion/scimmappings"
-	"github.com/tyk-swe/olp/internal/sinks"
-	"maps"
-	"reflect"
-	"strconv"
-	"strings"
-	"time"
-
-	"github.com/jackc/pgx/v5"
-
-	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/attribution"
-	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routes"
+	"github.com/tyk-swe/olp/internal/settings"
+	"github.com/tyk-swe/olp/internal/sinks"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -42,11 +42,11 @@ type resolvedSlot struct {
 func validateAppliedTemplateReferences(ctx context.Context, q access.Queryer, doc *promotion.Document) error {
 	for _, project := range doc.Projects {
 		var id string
-		var templates access.LimitTemplates
+		var templates keyauthority.LimitTemplates
 		if err := q.QueryRow(ctx, "SELECT id::text,limit_templates FROM olp.projects WHERE lower(name)=lower($1)", project.Name).Scan(&id, &templates); err != nil {
 			return err
 		}
-		if err := access.ValidateTemplateReferences(ctx, q, id, templates); err != nil {
+		if err := projects.ValidateTemplateReferences(ctx, q, id, templates); err != nil {
 			return err
 		}
 	}
@@ -68,10 +68,10 @@ func applyDocument(s *promotion.Server, ctx context.Context, tx pgx.Tx, p access
 	if err := organizations.ApplyOrganizations(ctx, tx, p, doc); err != nil {
 		return err
 	}
-	if err := access.ApplyBudgetTimeZone(ctx, tx, p, doc.BudgetTimeZone); err != nil {
+	if err := settings.ApplyBudgetTimeZone(ctx, tx, p, doc.BudgetTimeZone); err != nil {
 		return err
 	}
-	projectPoliciesChanged, err := access.ApplyInstallationBudget(ctx, tx, p, doc.InstallationBudget)
+	installationBudgetChanged, err := settings.ApplyInstallationBudget(ctx, tx, p, doc.InstallationBudget)
 	if err != nil {
 		return err
 	}
@@ -89,59 +89,23 @@ func applyDocument(s *promotion.Server, ctx context.Context, tx pgx.Tx, p access
 		if err := organizations.ApplyProjectOrganization(s, ctx, tx, p, id, project.Organization); err != nil {
 			return err
 		}
-		var current *access.EndUserPolicy
-		var currentAttribution *attribution.Policy
-		var currentGroups access.RouteGroups
-		var currentBudget *access.BudgetPolicy
-		var currentTemplates access.LimitTemplates
-		var currentCaps access.AttributionBudgets
-		if err := tx.QueryRow(ctx, `SELECT end_user_policy,attribution_policy,route_groups,budget_policy,limit_templates,attribution_budgets FROM olp.projects WHERE id=$1 FOR UPDATE`, id).Scan(&current, &currentAttribution, &currentGroups, &currentBudget, &currentTemplates, &currentCaps); err != nil {
-			return err
-		}
-		policy := projectEndUserPolicy(current, project.EndUserDefaults, project.EndUserLimitTemplate)
-		templates := currentTemplates
-		if project.LimitTemplates != nil {
-			templates = *project.LimitTemplates
-		}
-		if currentCaps.Equal(project.AttributionBudgets) && reflect.DeepEqual(templates, currentTemplates) && reflect.DeepEqual(current, policy) && reflect.DeepEqual(currentAttribution, project.AttributionPolicy) && currentGroups.Equal(project.RouteGroups) && reflect.DeepEqual(currentBudget, project.Budget) {
-			continue
-		}
-		// Promoting admission policy needs the same permission as editing it
-		// directly. A configure-only token may still apply unchanged defaults.
-		if err := p.Authorize(access.Keys); err != nil {
-			return err
-		}
-		encoded, err := json.Marshal(policy)
-		if err != nil {
-			return err
-		}
-		labels, err := json.Marshal(project.AttributionPolicy)
-		if err != nil {
-			return err
-		}
-		if project.Budget.Limited() {
-			if err := limits.EnsureAggregateBudget(ctx, tx, "project", id); err != nil {
-				return err
+	}
+	policyChanges := slices.Collect(func(yield func(projects.PolicyImport) bool) {
+		for _, project := range doc.Projects {
+			if !yield(projects.PolicyImport{ProjectID: projectIDs[strings.ToLower(project.Name)], EndUserDefaults: project.EndUserDefaults, EndUserTemplate: project.EndUserLimitTemplate, Attribution: project.AttributionPolicy, RouteGroups: project.RouteGroups, Budget: project.Budget, Templates: project.LimitTemplates, AttributionBudgets: project.AttributionBudgets}) {
+				return
 			}
 		}
-		if err := project.AttributionBudgets.EnsureAccounts(ctx, tx, id); err != nil {
-			return err
-		}
-		budget, err := json.Marshal(project.Budget)
-		if err != nil {
-			return err
-		}
-		tag, err := tx.Exec(ctx, `UPDATE olp.projects SET end_user_policy=NULLIF($2::jsonb,'null'::jsonb),etag=$3,updated_at=now(),attribution_policy=NULLIF($4::jsonb,'null'::jsonb),route_groups=$5::jsonb,budget_policy=NULLIF($6::jsonb,'null'::jsonb),limit_templates=$7::jsonb,attribution_budgets=$8::jsonb
-   WHERE id=$1`, id, encoded, access.NewID(), labels, project.RouteGroups.JSON(), budget, templates.JSON(), project.AttributionBudgets.JSON())
-		if err != nil {
-			return err
-		}
-		projectPoliciesChanged = projectPoliciesChanged || tag.RowsAffected() > 0
+	})
+	projectPoliciesChanged, err := projects.ApplyPolicies(ctx, tx, p, policyChanges)
+	if err != nil {
+		return err
 	}
+
 	if err := scimmappings.ApplySCIMMappings(s, ctx, tx, p, doc, projectIDs); err != nil {
 		return err
 	}
-	if projectPoliciesChanged {
+	if installationBudgetChanged || projectPoliciesChanged {
 		if _, err := access.AdvanceAuthority(ctx, tx); err != nil {
 			return err
 		}
@@ -458,18 +422,3 @@ func sameProjectID(a, b *string) bool {
 
 // Digest-specific controls belong to the destination installation. Promotion
 // changes portable defaults while preserving its local overrides and blocks.
-func projectEndUserPolicy(existing *access.EndUserPolicy, defaults *access.AdmissionLimits, template *string) *access.EndUserPolicy {
-	if defaults == nil && template == nil && (existing == nil || len(existing.Overrides)+len(existing.Blocked) == 0) {
-		return nil
-	}
-	policy := &access.EndUserPolicy{}
-	if existing != nil {
-		*policy = *existing
-	}
-	policy.LimitTemplate = template
-	policy.Defaults = access.AdmissionLimits{}
-	if defaults != nil {
-		policy.Defaults = *defaults
-	}
-	return policy
-}

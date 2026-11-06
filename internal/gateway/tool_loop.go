@@ -9,7 +9,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
@@ -23,8 +23,8 @@ import (
 )
 
 type WorkflowRunStore interface {
-	Start(context.Context, access.Authority, string, string) (string, error)
-	Prepare(context.Context, access.Authority, limits.DebitIntent, int, []limits.DebitOwner) (limits.DebitState, error)
+	Start(context.Context, keyauthority.Authority, string, string) (string, error)
+	Prepare(context.Context, keyauthority.Authority, limits.DebitIntent, int, []limits.DebitOwner) (limits.DebitState, error)
 }
 
 type WorkflowTool = mcp.WorkflowTool
@@ -32,18 +32,18 @@ type WorkflowTool = mcp.WorkflowTool
 const recoveryToolName = "olp_recover_context"
 
 type WorkflowApprovalStore interface {
-	Pause(context.Context, access.Authority, runs.WorkflowApprovalRequest, int) (string, error)
-	Continue(context.Context, access.Authority, string, json.RawMessage, map[string]json.RawMessage, int) (runs.WorkflowContinuation, error)
+	Pause(context.Context, keyauthority.Authority, runs.WorkflowApprovalRequest, int) (string, error)
+	Continue(context.Context, keyauthority.Authority, string, json.RawMessage, map[string]json.RawMessage, int) (runs.WorkflowContinuation, error)
 }
 
 type WorkflowToolRunner interface {
-	Resolve(context.Context, access.Authority, *release.Release, []string) ([]WorkflowTool, error)
-	AuthorizeWorkflowTool(access.Authority, WorkflowTool) error
-	Call(context.Context, access.Authority, *release.Release, WorkflowTool, string, int, string, json.RawMessage) (json.RawMessage, error)
+	Resolve(context.Context, keyauthority.Authority, *release.Release, []string) ([]WorkflowTool, error)
+	AuthorizeWorkflowTool(keyauthority.Authority, WorkflowTool) error
+	Call(context.Context, keyauthority.Authority, *release.Release, WorkflowTool, string, int, string, json.RawMessage) (json.RawMessage, error)
 }
 
 type WorkflowApprovedToolRunner interface {
-	CallApproved(context.Context, access.Authority, *release.Release, WorkflowTool, string, int, string, json.RawMessage, runs.WorkflowApproval) (json.RawMessage, error)
+	CallApproved(context.Context, keyauthority.Authority, *release.Release, WorkflowTool, string, int, string, json.RawMessage, runs.WorkflowApproval) (json.RawMessage, error)
 }
 
 type workflowCall struct {
@@ -89,7 +89,7 @@ func (s *Server) prepareWorkflow(ctx context.Context, x *call, token string) *Er
 	case "tool_execution_choices_unsupported":
 		return invalidRequest(refusal, "Gateway tool execution requires a single choice.", nil)
 	}
-	tools, err := s.WorkflowTools.Resolve(ctx, x.authority, x.request.release, x.generation.toolsets)
+	tools, err := s.deps.WorkflowTools.Resolve(ctx, x.authority, x.request.release, x.generation.toolsets)
 	if err != nil {
 		return workflowError(err)
 	}
@@ -155,7 +155,7 @@ func workflowDefinitions(family wire.Format, tools []WorkflowTool) (json.RawMess
 	return protocols.WorkflowDefinitions(family, definitions)
 }
 
-func (s *Server) workflowAuthority(ctx context.Context, x *call, route *routing.Route, toolsetID string) (*access.Authority, *Error) {
+func (s *Server) workflowAuthority(ctx context.Context, x *call, route *routing.Route, toolsetID string) (*keyauthority.Authority, *Error) {
 	authority, err := s.reauthenticateSession(ctx, x, x.workflow.token)
 	if errors.Is(err, release.ErrStaleAuthority) {
 		return nil, serverError(http.StatusServiceUnavailable, "authority_unavailable", "Key authority is unavailable; retry shortly.")
@@ -179,7 +179,7 @@ func (s *Server) workflowAuthority(ctx context.Context, x *call, route *routing.
 		if tool.ToolsetID == "" && tool.Definition.Alias == recoveryToolName {
 			continue
 		}
-		if err := s.WorkflowTools.AuthorizeWorkflowTool(*authority, tool); err != nil {
+		if err := s.deps.WorkflowTools.AuthorizeWorkflowTool(*authority, tool); err != nil {
 			return nil, workflowError(err)
 		}
 	}
@@ -236,9 +236,9 @@ func (s *Server) abandonWorkflowDebit(ctx context.Context, x *call) *Error {
 	defer cancel()
 	err := func() error {
 		if !x.sessionDebit.dispatched {
-			return s.Debits.ReleaseUndispatched(releaseCtx, x.sessionDebit.id, x.sessionDebit.claim)
+			return s.deps.Debits.ReleaseUndispatched(releaseCtx, x.sessionDebit.id, x.sessionDebit.claim)
 		}
-		ledger, ok := s.Debits.(interface {
+		ledger, ok := s.deps.Debits.(interface {
 			MarkNotSent(context.Context, string, string) error
 		})
 		if !ok {

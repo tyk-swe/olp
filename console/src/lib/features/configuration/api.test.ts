@@ -1,3 +1,4 @@
+import { stringifyNativeJSON } from '$lib/nativeJson';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   applyConfiguration,
@@ -388,3 +389,49 @@ describe('configuration plan requirements', () => {
     expect(pinningProviders(artifact, `sha256:${'c'.repeat(64)}`)).toEqual([]);
   });
 });
+
+it('preserves native provider numbers when exporting a configuration document', async () => {
+  const exported = {
+    document: {
+      ...document,
+      providers: [
+        provider('Native', {
+          kind: 'openai_compatible',
+          auth_mode: 'none',
+          options: {
+            credential_headers: [],
+            limits: null,
+            models: {},
+            vendor_id: null,
+            parameter_defaults: { seed: 'native-number' }
+          }
+        })
+      ]
+    },
+    digest: plan.digest
+  };
+  respond(
+    () =>
+      new Response(
+        JSON.stringify(exported).replace('"native-number"', '9007199254740993'),
+        { headers: { 'Content-Type': 'application/json' } }
+      )
+  );
+  const result = await exportConfiguration();
+  expect(
+    stringifyNativeJSON(result.document.providers[0].configuration)
+  ).toContain('9007199254740993');
+});
+
+it.each(['{', '{"document":{},"document":{}}'])(
+  'reports an invalid export response for malformed native JSON',
+  async (body) => {
+    respond(
+      () =>
+        new Response(body, { headers: { 'Content-Type': 'application/json' } })
+    );
+    await expect(exportConfiguration()).rejects.toMatchObject({
+      problem: { type: 'urn:olp:problem:invalid-api-response', status: 502 }
+    });
+  }
+);

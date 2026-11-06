@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,7 +15,6 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 const ReadFreshFor = 5 * time.Minute
@@ -98,7 +98,7 @@ func (r *Reader) Run(ctx context.Context) {
 			return
 		}
 		if r.Pool != nil {
-			if err := usage.CheckpointTask(ctx, r.Pool, usage.TaskCodeAllowanceRead, outcome, progress); err != nil {
+			if err := workerhealth.New(workerhealth.TaskCodeAllowanceRead, "").Checkpoint(ctx, r.Pool, outcome, progress); err != nil {
 				r.Log.Warn("code allowance read checkpoint failed", "error", err)
 			}
 		}
@@ -110,11 +110,11 @@ func (r *Reader) Run(ctx context.Context) {
 	}
 }
 
-func (r *Reader) Pass(ctx context.Context) (usage.Outcome, bool) {
+func (r *Reader) Pass(ctx context.Context) (workerhealth.Outcome, bool) {
 	due, err := r.Store.DueAllowanceReads(ctx, r.now(), readsPerPass, codeadapter.QualifiedProfileIDs())
 	if err != nil {
 		r.Log.Warn("code accounts due an allowance read could not be read", "error", err)
-		return usage.OutcomeFailure, false
+		return workerhealth.OutcomeFailure, false
 	}
 	progress := false
 	for _, entry := range due {
@@ -128,11 +128,11 @@ func (r *Reader) Pass(ctx context.Context) (usage.Outcome, bool) {
 			if ctx.Err() == nil {
 				r.Log.Warn("code allowance read could not be recorded", "account_id", entry.Account.ID, "error", err)
 			}
-			return usage.OutcomeFailure, progress
+			return workerhealth.OutcomeFailure, progress
 		}
 		progress = progress || ran && wrote
 	}
-	return usage.OutcomeSuccess, progress
+	return workerhealth.OutcomeSuccess, progress
 }
 
 var errAllowanceReadUnqualified = errors.New("allowance read is not qualified for this adapter")

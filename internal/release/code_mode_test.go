@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/tyk-swe/olp/internal/providerconfig"
 	"strings"
 
 	"fmt"
@@ -25,7 +26,7 @@ func BenchmarkCodeProviders(b *testing.B) {
 		b.Run(fmt.Sprintf("connections=%d", count), func(b *testing.B) {
 			s := &routing.Snapshot{Generation: routing.Generation{ID: uuid.NewString()}, CodeConnections: make(map[string]routing.Configuration, count)}
 			for i := range count {
-				s.CodeConnections[fmt.Sprintf("revision-%d:provider", i)] = routing.Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: codexauth.ProfileID}
+				s.CodeConnections[fmt.Sprintf("revision-%d:provider", i)] = routing.Configuration{Identity: providerconfig.Identity[string]{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: codexauth.ProfileID}}
 			}
 			if err := s.Compile(); err != nil {
 				b.Fatal(err)

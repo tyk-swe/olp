@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
@@ -52,7 +52,7 @@ const (
 )
 
 type ReserveInput struct {
-	Authority         access.Authority
+	Authority         keyauthority.Authority
 	Approval          *runs.WorkflowApproval
 	RunID             string
 	Ordinal           int
@@ -69,7 +69,7 @@ type ReserveInput struct {
 
 type Reservation struct {
 	Approval             *runs.WorkflowApproval
-	Authority            access.Authority
+	Authority            keyauthority.Authority
 	DispatchID           string
 	ClaimID              string
 	RunID                string

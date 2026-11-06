@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"slices"
 	"strings"
 	"time"
@@ -214,7 +215,7 @@ func probeStore(ctx context.Context, s *State, now time.Time, hasGeneration bool
 		// A gateway holding a pinned runtime can keep serving from the last
 		// known good snapshot; anything else is simply unready.
 		if s.ServesGateway && hasGeneration {
-			for _, task := range usage.WorkerTasks() {
+			for _, task := range workerhealth.WorkerTasks() {
 				probe.tasks.Tasks = append(probe.tasks.Tasks, WorkerTaskStatus{Task: string(task.Name), State: TaskStateUnknown})
 			}
 			return probe, nil
@@ -253,10 +254,10 @@ func probeStore(ctx context.Context, s *State, now time.Time, hasGeneration bool
 // expectedTasks lists the worker responsibilities this process must see live.
 func expectedTasks(limiterConfigured bool) []WorkerTask {
 	if limiterConfigured {
-		return usage.WorkerTasks()
+		return workerhealth.WorkerTasks()
 	}
 	return slices.Collect(func(yield func(WorkerTask) bool) {
-		for _, task := range usage.WorkerTasks() {
+		for _, task := range workerhealth.WorkerTasks() {
 			if !task.Regional && !yield(task) {
 				return
 			}
@@ -270,7 +271,7 @@ func expectedTasks(limiterConfigured bool) []WorkerTask {
 func asynchronousPlaneFlags(tasks *WorkerTaskHealth, expected []WorkerTask, consumer usage.ConsumerStatus) (current, drained bool) {
 	expectsConsumer := false
 	for _, task := range expected {
-		if task.Name == usage.TaskRequestMetadataConsumer {
+		if task.Name == workerhealth.TaskRequestMetadataConsumer {
 			expectsConsumer = true
 		}
 	}

@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -56,7 +56,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	// The batch runs under the file's retained route revision. Resolution
 	// refuses a file whose contract the current route no longer promises, so
 	// that revision's fidelity is also the route's current one.
-	if candidate, exists := x.snapshot().Routes[file.RouteSlug]; exists {
+	if candidate, exists := x.snapshot().FindRoute(file.RouteSlug); exists {
 		x.route = &candidate
 	}
 	p, route, e := s.resolveResource(r.Context(), x, authority, file, "batch", retainedNewWork)
@@ -144,7 +144,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if x.strict() {
-		if fileKind != resources.KindStrictFile || fileContract == nil || !authority.Policy.AllowProviderState || !s.Resources.Encrypted() {
+		if fileKind != resources.KindStrictFile || fileContract == nil || !authority.Policy.AllowProviderState || !s.deps.Resources.Encrypted() {
 			s.releaseHold(r.Context(), p.hold)
 			s.stateFail(x, w, invalidRequest("resource_affinity", "Strict batches require a file uploaded under the same strict route and state-enabled key.", strPtr("input_file_id")), x.family)
 			return
@@ -277,7 +277,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			cleanupCtx, stopCleanup := resourceCommitContext(r.Context())
 			defer stopCleanup()
-			if cleanupErr := s.Batches.DeleteSubmission(cleanupCtx, submission.resource.UUID); cleanupErr != nil {
+			if cleanupErr := s.deps.Batches.DeleteSubmission(cleanupCtx, submission.resource.UUID); cleanupErr != nil {
 				s.log.Warn("Gemini batch submission intent could not be removed", "resource_id", submission.resource.UUID, "error", cleanupErr)
 			}
 			s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The Gemini batch request could not be constructed."), x.family)
@@ -290,7 +290,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		if failure.acceptance.Unresolved() {
 			unknownCtx, stopUnknown := resourceCommitContext(r.Context())
 			defer stopUnknown()
-			if err := s.Batches.MarkUnknown(unknownCtx, submission.resource.UUID, "submission_unknown", s.now()); err != nil {
+			if err := s.deps.Batches.MarkUnknown(unknownCtx, submission.resource.UUID, "submission_unknown", s.now()); err != nil {
 				s.log.Warn("batch submission outcome could not be recorded", "resource_id", submission.resource.UUID, "error", err)
 			}
 			s.stateFail(x, w, serverError(http.StatusBadGateway, "submission_unknown", "The provider may have accepted this batch, but its outcome is unknown."), x.family)
@@ -298,7 +298,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		}
 		cleanupCtx, stopCleanup := resourceCommitContext(r.Context())
 		defer stopCleanup()
-		if err := s.Batches.DeleteSubmission(cleanupCtx, submission.resource.UUID); err != nil {
+		if err := s.deps.Batches.DeleteSubmission(cleanupCtx, submission.resource.UUID); err != nil {
 			s.log.Warn("failed batch submission intent could not be removed", "resource_id", submission.resource.UUID, "error", err)
 		}
 		s.stateFail(x, w, upstreamError(failure), x.family)
@@ -325,7 +325,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		if identityErr != nil {
 			unknownCtx, stopUnknown := resourceCommitContext(r.Context())
 			defer stopUnknown()
-			if markErr := s.Batches.MarkUnknown(unknownCtx, submission.resource.UUID, "submission_unknown", s.now()); markErr != nil {
+			if markErr := s.deps.Batches.MarkUnknown(unknownCtx, submission.resource.UUID, "submission_unknown", s.now()); markErr != nil {
 				s.log.Warn("Gemini batch submission outcome could not be recorded", "resource_id", submission.resource.UUID, "error", markErr)
 			}
 			s.stateFail(x, w, serverError(http.StatusBadGateway, "submission_unknown", "The provider accepted a batch with an invalid operation name."), x.family)
@@ -337,7 +337,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		if !valid {
 			unknownCtx, stopUnknown := resourceCommitContext(r.Context())
 			defer stopUnknown()
-			if markErr := s.Batches.MarkUnknown(unknownCtx, submission.resource.UUID, "submission_unknown", s.now()); markErr != nil {
+			if markErr := s.deps.Batches.MarkUnknown(unknownCtx, submission.resource.UUID, "submission_unknown", s.now()); markErr != nil {
 				s.log.Warn("managed batch submission outcome could not be recorded", "resource_id", submission.resource.UUID, "error", markErr)
 			}
 			s.stateFail(x, w, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid managed batch result."), x.family)
@@ -367,7 +367,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		}
 		resource.Metadata, state, err = geminiManagedBatchMetadata(result, p.model, localFile, inputManifest, nil, clientMetadata)
 		if err != nil {
-			if markErr := s.Batches.MarkUnknown(commitCtx, resource.UUID, "submission_unknown", s.now()); markErr != nil {
+			if markErr := s.deps.Batches.MarkUnknown(commitCtx, resource.UUID, "submission_unknown", s.now()); markErr != nil {
 				s.log.Warn("Gemini batch submission metadata could not be recorded", "resource_id", resource.UUID, "error", markErr)
 			}
 			s.stateFail(x, w, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid Gemini batch object."), x.family)
@@ -383,7 +383,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		resource.State = state
 	}
 	res, err = func() (*resources.Resource, error) {
-		tx, beginErr := s.Resources.Begin(commitCtx)
+		tx, beginErr := s.deps.Resources.Begin(commitCtx)
 		if beginErr != nil {
 			return nil, beginErr
 		}
@@ -397,9 +397,9 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 			if marshalErr != nil {
 				return nil, marshalErr
 			}
-			created, beginErr = s.Resources.PutDurableContractTx(commitCtx, tx, resource, payload)
+			created, beginErr = s.deps.Resources.PutDurableContractTx(commitCtx, tx, resource, payload)
 		} else {
-			created, beginErr = s.Resources.PutTx(commitCtx, tx, resource)
+			created, beginErr = s.deps.Resources.PutTx(commitCtx, tx, resource)
 		}
 		if beginErr != nil {
 			return nil, beginErr
@@ -408,7 +408,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		if acceptedExpected == nil {
 			acceptedExpected = batchExpectedResults(result)
 		}
-		if beginErr = s.Batches.ActivateTx(commitCtx, tx, resource.UUID, upstreamID, acceptedExpected); beginErr != nil {
+		if beginErr = s.deps.Batches.ActivateTx(commitCtx, tx, resource.UUID, upstreamID, acceptedExpected); beginErr != nil {
 			return nil, beginErr
 		}
 		if beginErr = tx.Commit(commitCtx); beginErr != nil {
@@ -417,7 +417,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		return created, nil
 	}()
 	if err != nil {
-		if markErr := s.Batches.MarkUnknown(commitCtx, resource.UUID, "submission_commit_unavailable", s.now()); markErr != nil {
+		if markErr := s.deps.Batches.MarkUnknown(commitCtx, resource.UUID, "submission_commit_unavailable", s.now()); markErr != nil {
 			s.log.Warn("accepted batch submission intent could not be activated", "resource_id", resource.UUID, "error", markErr)
 		}
 		s.stateFail(x, w, serverError(http.StatusBadGateway, "submission_unknown", "The provider accepted the batch, but its local state could not be confirmed."), x.family)
@@ -431,7 +431,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	s.writeStateJSON(w, x, out)
 }
 
-func (s *Server) batchCall(w http.ResponseWriter, r *http.Request, use retainedUse, op func(context.Context, *call, access.Authority, *resources.Resource, *pin, *routing.Route) *Error) {
+func (s *Server) batchCall(w http.ResponseWriter, r *http.Request, use retainedUse, op func(context.Context, *call, keyauthority.Authority, *resources.Resource, *pin, *routing.Route) *Error) {
 	x, authority, done := s.stateBegin(w, r, wire.Batch)
 	if done {
 		return
@@ -486,7 +486,7 @@ func (s *Server) listBatches(w http.ResponseWriter, r *http.Request) {
 	}
 	// One extra row reports whether another page follows; it is never
 	// authorized or projected.
-	rows, err := s.Resources.ListKinds(r.Context(), kinds, authority.ID, limit+1, after)
+	rows, err := s.deps.Resources.ListKinds(r.Context(), kinds, authority.ID, limit+1, after)
 	if err != nil {
 		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The batch list could not be read."), x.family)
 		return
@@ -517,13 +517,13 @@ func (s *Server) listBatches(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getBatch(w http.ResponseWriter, r *http.Request) {
-	s.batchCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
+	s.batchCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, authority keyauthority.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
 		return s.batchRefresh(ctx, x, res, p, http.MethodGet, managedBatchPath(res, false), nil, w)
 	})
 }
 
 func (s *Server) cancelBatch(w http.ResponseWriter, r *http.Request) {
-	s.batchCall(w, r, retainedHousekeeping, func(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
+	s.batchCall(w, r, retainedHousekeeping, func(ctx context.Context, x *call, authority keyauthority.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
 		if batchAdapter(res) == "gemini_managed" {
 			endpoint, err := resourceURL(p.provider.Connector(), p.model, managedBatchPath(res, true), nil)
 			if err != nil {
@@ -644,7 +644,7 @@ func (s *Server) batchRefresh(ctx context.Context, x *call, res *resources.Resou
 		if err != nil {
 			return durableError(err)
 		}
-		if _, _, err = s.Resources.UpdateDurableContract(commitCtx, res.Kind, res.APIKeyID, res.ID, state, payload); err != nil {
+		if _, _, err = s.deps.Resources.UpdateDurableContract(commitCtx, res.Kind, res.APIKeyID, res.ID, state, payload); err != nil {
 			return durableError(err)
 		}
 	} else if adapter == "gemini_managed" {
@@ -653,7 +653,7 @@ func (s *Server) batchRefresh(ctx context.Context, x *call, res *resources.Resou
 			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned a mismatched Gemini batch identity.")
 		}
 		x.completePinned()
-		if err := s.Resources.Update(commitCtx, res.ID, state, metadata, nil); err != nil {
+		if err := s.deps.Resources.Update(commitCtx, res.ID, state, metadata, nil); err != nil {
 			return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The refreshed batch state could not be committed.")
 		}
 		res.State, res.Metadata = state, metadata
@@ -662,7 +662,7 @@ func (s *Server) batchRefresh(ctx context.Context, x *call, res *resources.Resou
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed batch object.")
 		}
 		x.completePinned()
-		if err := s.Resources.Update(commitCtx, res.ID, state, metadata, nil); err != nil {
+		if err := s.deps.Resources.Update(commitCtx, res.ID, state, metadata, nil); err != nil {
 			return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The refreshed batch state could not be committed.")
 		}
 		res.State, res.Metadata = state, metadata

@@ -306,15 +306,11 @@ func (s *Server) write(r *http.Request, _ access.Principal) (access.Reply, error
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.Access.Begin(r)
+	tx, p, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	if err = p.Authorize(access.Configure); err != nil {
 		return access.Reply{}, err
 	}
@@ -341,7 +337,7 @@ func (s *Server) write(r *http.Request, _ access.Principal) (access.Reply, error
 		return access.Reply{}, err
 	}
 	if replay != nil {
-		return access.Commit(r, tx, *replay)
+		return *replay, tx.Commit(r.Context())
 	}
 	if current != nil {
 		if err = access.Match(r, current.ETag); err != nil {
@@ -385,5 +381,5 @@ func (s *Server) write(r *http.Request, _ access.Principal) (access.Reply, error
 	if err = s.Access.CompleteReplay(r, tx, claim, reply); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, reply)
+	return reply, tx.Commit(r.Context())
 }

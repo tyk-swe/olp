@@ -91,30 +91,43 @@ func workflowTerminalFixture(t *testing.T) (*Event, []byte) {
 }
 
 func TestPersistWorkflowReceiptIsIdempotentAndRejectsConflicts(t *testing.T) {
-	event, payload := workflowTerminalFixture(t)
+	_, payload := workflowTerminalFixture(t)
+	accepted, acceptErr := DecodeAccountingEvent(payload)
+	if acceptErr != nil {
+		t.Fatal(acceptErr)
+	}
 	replayTx := cardRevisionTx{row: workflowReceiptRow{digest: sha256.Sum256(payload)}}
-	result, replayErr := PersistEventTx(t.Context(), replayTx, event, payload)
+	clear(payload)
+	result, replayErr := PersistEventTx(t.Context(), replayTx, accepted)
 	if replayErr != nil || result.Outcome != PersistOutcomeDuplicate {
 		t.Fatalf("workflow replay was not recognized: outcome %v, error %v", result.Outcome, replayErr)
 	}
 	conflictTx := cardRevisionTx{row: workflowReceiptRow{digest: sha256.Sum256([]byte("different receipt"))}}
-	if _, conflictErr := PersistEventTx(t.Context(), conflictTx, event, payload); !errors.Is(conflictErr, ErrInvalidEvent) {
+	if _, conflictErr := PersistEventTx(t.Context(), conflictTx, accepted); !errors.Is(conflictErr, ErrInvalidEvent) {
 		t.Fatalf("conflicting workflow receipt accepted: %v", conflictErr)
 	}
 }
 
 func TestPersistWorkflowRejectsAttemptWithoutSettledDebit(t *testing.T) {
-	event, payload := workflowTerminalFixture(t)
+	_, payload := workflowTerminalFixture(t)
+	accepted, acceptErr := DecodeAccountingEvent(payload)
+	if acceptErr != nil {
+		t.Fatal(acceptErr)
+	}
 	ledger := cardRevisionTx{row: unsettledWorkflowRow{}}
-	if _, err := PersistEventTx(t.Context(), ledger, event, payload); !errors.Is(err, limits.ErrDebitConflict) {
+	if _, err := PersistEventTx(t.Context(), ledger, accepted); !errors.Is(err, limits.ErrDebitConflict) {
 		t.Fatalf("workflow with an unsettled attempt was accepted: %v", err)
 	}
 }
 
 func TestPersistWorkflowRejectsUnboundReceiptIdentity(t *testing.T) {
-	event, payload := workflowTerminalFixture(t)
+	event, _ := workflowTerminalFixture(t)
 	event.EventID = uuid.NewString()
-	if _, err := PersistEventTx(t.Context(), cardRevisionTx{}, event, payload); !errors.Is(err, limits.ErrDebitConflict) {
+	changed, changedErr := NewAccountingEvent(event)
+	if changedErr != nil {
+		t.Fatal(changedErr)
+	}
+	if _, err := PersistEventTx(t.Context(), cardRevisionTx{}, changed); !errors.Is(err, limits.ErrDebitConflict) {
 		t.Fatalf("workflow accepted a receipt unrelated to its run and request: %v", err)
 	}
 }

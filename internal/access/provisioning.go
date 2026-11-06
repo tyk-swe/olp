@@ -51,15 +51,11 @@ func (s *Server) provisionUser(r *http.Request, _ Principal) (Reply, error) {
 	if input.Active == nil {
 		return Reply{}, Invalid("active", "Provide the active state.")
 	}
-	tx, err := s.Begin(r)
+	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Reauthorize(r, tx)
-	if err != nil {
-		return Reply{}, err
-	}
 	var userID, management string
 	err = tx.QueryRow(r.Context(), "SELECT pu.user_id::text,u.role_management FROM olp.provisioned_users pu JOIN olp.users u ON u.id=pu.user_id WHERE pu.source=$1 AND pu.external_id=$2 FOR UPDATE", source, external).Scan(&userID, &management)
 	mapped := !errors.Is(err, pgx.ErrNoRows)
@@ -105,7 +101,7 @@ func (s *Server) provisionUser(r *http.Request, _ Principal) (Reply, error) {
 			return Reply{}, err
 		}
 	}
-	if err = s.usableOwner(r, tx); err != nil {
+	if err = s.EnsureUsableOwner(r, tx); err != nil {
 		return Reply{}, err
 	}
 	if err = Audit(r.Context(), tx, r, p.Actor(), "user.provision", "user", userID, "success"); err != nil {
@@ -115,7 +111,7 @@ func (s *Server) provisionUser(r *http.Request, _ Principal) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, Detail(u, u.ETag))
+	return Detail(u, u.ETag), tx.Commit(r.Context())
 }
 
 func (s *Server) deprovisionUser(r *http.Request, _ Principal) (Reply, error) {
@@ -127,15 +123,11 @@ func (s *Server) deprovisionUser(r *http.Request, _ Principal) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	tx, err := s.Begin(r)
+	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Reauthorize(r, tx)
-	if err != nil {
-		return Reply{}, err
-	}
 	var userID, management string
 	if err = tx.QueryRow(r.Context(), "SELECT pu.user_id::text,u.role_management FROM olp.provisioned_users pu JOIN olp.users u ON u.id=pu.user_id WHERE pu.source=$1 AND pu.external_id=$2 FOR UPDATE", source, external).Scan(&userID, &management); err != nil {
 		return Reply{}, err
@@ -152,11 +144,11 @@ func (s *Server) deprovisionUser(r *http.Request, _ Principal) (Reply, error) {
 	if err = retireIssuedInvitations(r, tx, userID, p.Actor(), p.UserID()); err != nil {
 		return Reply{}, err
 	}
-	if err = s.usableOwner(r, tx); err != nil {
+	if err = s.EnsureUsableOwner(r, tx); err != nil {
 		return Reply{}, err
 	}
 	if err = Audit(r.Context(), tx, r, p.Actor(), "user.deprovision", "user", userID, "success"); err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, Reply{Status: 204})
+	return Reply{Status: 204}, tx.Commit(r.Context())
 }

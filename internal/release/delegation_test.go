@@ -7,15 +7,16 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 )
 
-func delegationPrincipals(project, issuer string) (access.Authority, access.Authority) {
-	return access.Authority{
+func delegationPrincipals(project, issuer string) (keyauthority.Authority, keyauthority.Authority) {
+	return keyauthority.Authority{
 		ID: "agent", ProjectID: &project, AgentPrincipal: true, WorkloadIssuerID: &issuer, SnapshotID: "snapshot",
-		Policy: access.KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{"shared"}},
-	}, access.Authority{
+		Policy: keyauthority.KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{"shared"}},
+	}, keyauthority.Authority{
 		ID: "key", ProjectID: &project, SnapshotID: "snapshot",
-		Policy: access.KeyPolicy{Scopes: []string{"delegate", "inference"}, AllowedRoutes: []string{"shared"}},
+		Policy: keyauthority.KeyPolicy{Scopes: []string{"delegate", "inference"}, AllowedRoutes: []string{"shared"}},
 	}
 }
 
@@ -50,22 +51,22 @@ func TestDelegationRefusesInvalidBoundsBeforeIssuing(t *testing.T) {
 func TestDelegationRequiresBothPrincipalsAuthority(t *testing.T) {
 	project, issuer, otherProject := "project", "issuer", "other"
 	agent, key := delegationPrincipals(project, issuer)
-	nonAgent := access.Authority{ProjectID: &project, WorkloadIssuerID: &issuer, SnapshotID: "snapshot"}
-	missingIssuer := access.Authority{ProjectID: &project, AgentPrincipal: true, SnapshotID: "snapshot"}
+	nonAgent := keyauthority.Authority{ProjectID: &project, WorkloadIssuerID: &issuer, SnapshotID: "snapshot"}
+	missingIssuer := keyauthority.Authority{ProjectID: &project, AgentPrincipal: true, SnapshotID: "snapshot"}
 	otherAgent, _ := delegationPrincipals(otherProject, issuer)
-	nestedKey := access.Authority{ProjectID: &project, WorkloadIssuerID: &issuer, SnapshotID: "snapshot", Policy: key.Policy}
-	unprivilegedKey := access.Authority{ProjectID: &project, SnapshotID: "snapshot", Policy: access.KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{"shared"}}}
-	staleAgent := access.Authority{ProjectID: &project, AgentPrincipal: true, WorkloadIssuerID: &issuer, SnapshotID: "old", Policy: agent.Policy}
-	restrictedAgent := access.Authority{ProjectID: &project, AgentPrincipal: true, WorkloadIssuerID: &issuer, SnapshotID: "snapshot", Policy: access.KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{"other"}}}
-	restrictedKey := access.Authority{ProjectID: &project, SnapshotID: "snapshot", Policy: access.KeyPolicy{Scopes: []string{"delegate", "inference"}, AllowedRoutes: []string{"other"}}}
+	nestedKey := keyauthority.Authority{ProjectID: &project, WorkloadIssuerID: &issuer, SnapshotID: "snapshot", Policy: key.Policy}
+	unprivilegedKey := keyauthority.Authority{ProjectID: &project, SnapshotID: "snapshot", Policy: keyauthority.KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{"shared"}}}
+	staleAgent := keyauthority.Authority{ProjectID: &project, AgentPrincipal: true, WorkloadIssuerID: &issuer, SnapshotID: "old", Policy: agent.Policy}
+	restrictedAgent := keyauthority.Authority{ProjectID: &project, AgentPrincipal: true, WorkloadIssuerID: &issuer, SnapshotID: "snapshot", Policy: keyauthority.KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{"other"}}}
+	restrictedKey := keyauthority.Authority{ProjectID: &project, SnapshotID: "snapshot", Policy: keyauthority.KeyPolicy{Scopes: []string{"delegate", "inference"}, AllowedRoutes: []string{"other"}}}
 	revokedAt := time.Now()
-	revokedKey := access.Authority{ProjectID: &project, SnapshotID: "snapshot", Policy: key.Policy, RevokedAt: &revokedAt}
+	revokedKey := keyauthority.Authority{ProjectID: &project, SnapshotID: "snapshot", Policy: key.Policy, RevokedAt: &revokedAt}
 	bounds := DelegationBounds{Scopes: []string{"inference"}, AllowedRoutes: []string{"shared"}}
 	manager := &Manager{}
 	for _, test := range []struct {
 		name  string
-		agent access.Authority
-		key   access.Authority
+		agent keyauthority.Authority
+		key   keyauthority.Authority
 		stale bool
 	}{
 		{name: "non-agent workload", agent: nonAgent, key: key},
@@ -104,14 +105,14 @@ func TestMemberConsentRejectsInvalidAgent(t *testing.T) {
 	agent, _ := delegationPrincipals(project, issuer)
 	for _, test := range []struct {
 		name  string
-		agent access.Authority
+		agent keyauthority.Authority
 		want  error
 	}{
 		{name: "missing agent", want: ErrInvalidKey},
 		{name: "missing expiry", agent: agent, want: ErrInvalidKey},
-		{name: "expired", agent: access.Authority{ProjectID: &project, AgentPrincipal: true, WorkloadIssuerID: &issuer, ExpiresAt: &expired}, want: ErrInvalidKey},
-		{name: "revoked", agent: access.Authority{ProjectID: &project, AgentPrincipal: true, WorkloadIssuerID: &issuer, ExpiresAt: &active, RevokedAt: &now}, want: ErrInvalidKey},
-		{name: "active requires current authority", agent: access.Authority{ProjectID: &project, AgentPrincipal: true, WorkloadIssuerID: &issuer, SnapshotID: "snapshot", ExpiresAt: &active}, want: ErrStaleAuthority},
+		{name: "expired", agent: keyauthority.Authority{ProjectID: &project, AgentPrincipal: true, WorkloadIssuerID: &issuer, ExpiresAt: &expired}, want: ErrInvalidKey},
+		{name: "revoked", agent: keyauthority.Authority{ProjectID: &project, AgentPrincipal: true, WorkloadIssuerID: &issuer, ExpiresAt: &active, RevokedAt: &now}, want: ErrInvalidKey},
+		{name: "active requires current authority", agent: keyauthority.Authority{ProjectID: &project, AgentPrincipal: true, WorkloadIssuerID: &issuer, SnapshotID: "snapshot", ExpiresAt: &active}, want: ErrStaleAuthority},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			grant, err := (&Manager{}).ExchangeMemberConsent(context.Background(), test.agent, "consent", DelegationBounds{Scopes: []string{"inference"}, AllowedRoutes: []string{"shared"}})

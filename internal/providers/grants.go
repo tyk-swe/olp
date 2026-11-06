@@ -95,14 +95,11 @@ func (s *Server) startGrantEnrollment(r *http.Request, p access.Principal) (acce
 		}
 		return access.Reply{}, err
 	}
-	tx, err := a.Begin(r)
+	tx, p, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	if p, err = a.Reauthorize(r, tx); err != nil {
-		return access.Reply{}, err
-	}
 	locked, err := load(r.Context(), tx, id, true)
 	if err != nil {
 		return access.Reply{}, err
@@ -125,7 +122,7 @@ func (s *Server) startGrantEnrollment(r *http.Request, p access.Principal) (acce
 	if enrollment.Input != "" {
 		body["input"] = enrollment.Input
 	}
-	return access.Commit(r, tx, access.Reply{Status: 201, Body: body})
+	return access.Reply{Status: 201, Body: body}, tx.Commit(r.Context())
 }
 
 type grantContinuation struct {
@@ -155,15 +152,11 @@ func (s *Server) continueGrantEnrollment(r *http.Request, _ access.Principal) (a
 	}
 	// The claim commits before the plugin reaches the upstream, so neither a
 	// repeated continuation nor another replica can exchange the same sign-in.
-	tx, err := a.Begin(r)
+	tx, p, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	current, err := load(r.Context(), tx, providerID, false)
 	if err != nil {
 		return access.Reply{}, err
@@ -216,15 +209,11 @@ func (s *Server) stageGrant(r *http.Request, current *record, enrollment grants.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), stageGrantTimeout)
 	defer cancel()
 	r = r.WithContext(ctx)
-	tx, err := a.Begin(r)
+	tx, p, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	locked, err := load(r.Context(), tx, current.ID, true)
 	if err != nil {
 		return access.Reply{}, err
@@ -274,7 +263,7 @@ func (s *Server) bindGrant(r *http.Request, tx pgx.Tx, actor access.Actor, bindi
 	if err := access.Audit(r.Context(), tx, r, actor, binding.Action, "provider_credential", binding.Credential.ID, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, access.Reply{Status: 201, ETag: etag, Body: completion(binding.ProviderID, etag, binding.Credential)})
+	return access.Reply{Status: 201, ETag: etag, Body: completion(binding.ProviderID, etag, binding.Credential)}, tx.Commit(r.Context())
 }
 
 // completion is what a completed grant enrollment reports: the credential
@@ -419,15 +408,11 @@ func (s *Server) cancelGrantEnrollment(r *http.Request, _ access.Principal) (acc
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := a.Begin(r)
+	tx, p, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	current, err := load(r.Context(), tx, providerID, false)
 	if err != nil {
 		return access.Reply{}, err
@@ -438,5 +423,5 @@ func (s *Server) cancelGrantEnrollment(r *http.Request, _ access.Principal) (acc
 	if err = grants.Cancel(r.Context(), tx, providerID, enrollmentID, p.ID); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, access.Reply{Status: 204})
+	return access.Reply{Status: 204}, tx.Commit(r.Context())
 }

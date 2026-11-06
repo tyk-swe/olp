@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"log/slog"
 	"time"
 
@@ -10,12 +11,10 @@ import (
 
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func runDebitReconciliation(ctx context.Context, pool *pgxpool.Pool, limiter *limits.Limiter, log *slog.Logger) {
 	store := &limits.DebitStore{Pool: pool, Limiter: limiter}
-	go recoverWorkflowModels(ctx, store, log)
 	toolLedger := accounting.NewDurableLedger(pool, store, nil)
 	timer := time.NewTicker(time.Minute)
 	defer timer.Stop()
@@ -27,13 +26,13 @@ func runDebitReconciliation(ctx context.Context, pool *pgxpool.Pool, limiter *li
 		_, expiryErr := toolLedger.DrainExpiredCallIdentities(expiry, 256)
 		expiryCancel()
 		err := errors.Join(reconcileErr, expiryErr)
-		outcome := usage.OutcomeSuccess
+		outcome := workerhealth.OutcomeSuccess
 		if err != nil {
-			outcome = usage.OutcomeFailure
+			outcome = workerhealth.OutcomeFailure
 			log.Warn("execution debit reconciliation failed", "error", err)
 		}
 		checkpoint, checkpointCancel := context.WithTimeout(ctx, 5*time.Second)
-		if checkpointErr := usage.CheckpointTask(checkpoint, pool, usage.TaskExecutionDebits, outcome, err == nil); checkpointErr != nil && ctx.Err() == nil {
+		if checkpointErr := workerhealth.New(workerhealth.TaskExecutionDebits, "").Checkpoint(checkpoint, pool, outcome, err == nil); checkpointErr != nil && ctx.Err() == nil {
 			log.Warn("execution debit checkpoint failed", "error", checkpointErr)
 		}
 		checkpointCancel()

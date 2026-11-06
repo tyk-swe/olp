@@ -4,7 +4,7 @@
     usePrincipalLifetime
   } from '$lib/editing/mutationIntent.svelte';
 
-  import { overviewKeys } from '$lib/features/overview/overviewKeys';
+  import { refreshProviderChange } from './providerChanges';
   import { providerKeys } from '$lib/features/providers/providerKeys';
 
   import { useQueryClient } from '@tanstack/svelte-query';
@@ -77,37 +77,15 @@
       (current.state === 'active' && current.pending_activation)
   );
 
-  // Every action clears the reference conflict, so a later success never
-  // renders beside the red banner the previous disable attempt left behind.
   const runAction: RunProviderAction = (label, action) => {
     referenceConflict = '';
     return run(label, action);
   };
 
-  // Save draft runs through the parent, so it clears the banner on its own way
-  // out rather than through `runAction`.
   function save() {
     if (pendingRefresh) return;
     referenceConflict = '';
     onSave();
-  }
-
-  function invalidateProviderViews() {
-    return Promise.all([
-      queryClient.invalidateQueries({
-        queryKey: providerKeys.summaries
-      }),
-      queryClient.invalidateQueries({
-        queryKey: providerKeys.modelCatalog
-      }),
-      queryClient.invalidateQueries({
-        queryKey: providerKeys.credentials(current.id)
-      }),
-      queryClient.invalidateQueries({
-        queryKey: providerKeys.revisionsOf(current.id)
-      }),
-      queryClient.invalidateQueries({ queryKey: overviewKeys.root })
-    ]);
   }
 
   async function testDraft() {
@@ -171,8 +149,7 @@
         disableProviderIntent.reset();
       } catch (error) {
         if (!isCurrent()) return;
-        // The server refuses while a route still targets one of this
-        // provider's models, or an upstream media job is still live.
+
         if (!isProviderInUse(error)) throw error;
         referenceConflict = errorMessage(error);
         return;
@@ -217,7 +194,12 @@
           throw new Error('The provider detail could not be refreshed.');
       } else await onProviderChanged();
       if (!isCurrent()) return;
-      await invalidateProviderViews();
+      const refreshed = await refreshProviderChange(queryClient, {
+        kind: 'activation',
+        id: confirmed.providerId
+      });
+      if (refreshed.kind === 'refresh-failed')
+        throw new Error(refreshed.message);
       if (!isCurrent()) return;
       if (pendingRefresh === confirmed) pendingRefresh = null;
       onNotice(confirmed.notice);

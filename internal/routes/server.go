@@ -528,15 +528,11 @@ func (s *Server) createDraft(r *http.Request, _ access.Principal) (access.Reply,
 	if err := access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := a.Begin(r)
+	tx, p, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	claim, replayed, err := a.Replay(r, tx, p, input)
 	if err != nil {
 		return access.Reply{}, err
@@ -547,7 +543,7 @@ func (s *Server) createDraft(r *http.Request, _ access.Principal) (access.Reply,
 		if err := a.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
 			return access.Reply{}, err
 		}
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	if err = a.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
 		return access.Reply{}, err
@@ -569,7 +565,7 @@ func (s *Server) createDraft(r *http.Request, _ access.Principal) (access.Reply,
 	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 
 func (s *Server) replaceDraft(r *http.Request, _ access.Principal) (access.Reply, error) {
@@ -582,15 +578,11 @@ func (s *Server) replaceDraft(r *http.Request, _ access.Principal) (access.Reply
 	if err = access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := a.Begin(r)
+	tx, p, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	current, err := loadDraft(r.Context(), tx, id, true)
 	if err != nil {
 		return access.Reply{}, err
@@ -625,7 +617,7 @@ func (s *Server) replaceDraft(r *http.Request, _ access.Principal) (access.Reply
 	if err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 
 func (s *Server) deleteDraft(r *http.Request, _ access.Principal) (access.Reply, error) {
@@ -634,15 +626,11 @@ func (s *Server) deleteDraft(r *http.Request, _ access.Principal) (access.Reply,
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := a.Begin(r)
+	tx, p, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	current, err := loadDraft(r.Context(), tx, id, true)
 	if err != nil {
 		return access.Reply{}, err
@@ -659,14 +647,14 @@ func (s *Server) deleteDraft(r *http.Request, _ access.Principal) (access.Reply,
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route_draft.delete", "route_draft", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, access.Reply{Status: 204})
+	return access.Reply{Status: 204}, tx.Commit(r.Context())
 }
 
 func registeredOperation(operation string) bool {
 	if retainedapi.Operation(operation) {
 		return true
 	}
-	for _, d := range operationregistry.Default.Dialects() {
+	for _, d := range operationregistry.Catalog().Dialects() {
 		if d.Operation.ID == operation {
 			return true
 		}

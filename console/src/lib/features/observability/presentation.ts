@@ -37,7 +37,6 @@ export function focusDatasetStatus(dataset: FocusDataset): string {
   return dataset.current ? 'Current' : 'Restatement pending';
 }
 
-// A one-line summary of the sink's format-specific settings.
 export function sinkSettingsSummary(sink: ExportSink): string {
   const settings = (sink.settings ?? {}) as Record<string, unknown>;
   const parts: string[] = [];
@@ -62,8 +61,8 @@ export function sinkSettingsSummary(sink: ExportSink): string {
 }
 
 export const sinkTypeFormats: Record<
-  string,
-  { value: string; label: string }[]
+  ExportSink['type'],
+  { value: ExportSink['format']; label: string }[]
 > = {
   https: [
     { value: 'json', label: 'JSON' },
@@ -84,6 +83,10 @@ export const sinkTypeFormats: Record<
   ],
   stripe_meter: [{ value: 'stripe', label: 'Stripe meter events' }]
 };
+export function isSinkType(value: string): value is ExportSink['type'] {
+  return Object.hasOwn(sinkTypeFormats, value);
+}
+
 export const sinkTypeLabels: Record<string, string> = {
   https: 'HTTPS',
   otlp_logs: 'OTLP logs',
@@ -102,7 +105,7 @@ export const sinkStreamOptions = [
   { value: 'runs', label: 'Runs (gateway observed)' },
   { value: 'trace_spans', label: 'Trace spans (client asserted)' },
   { value: 'focus', label: 'FOCUS' }
-];
+] as const;
 export const stripeMeterValues = [
   { value: 'charge', label: 'Charge' },
   { value: 'cost', label: 'Cost' },

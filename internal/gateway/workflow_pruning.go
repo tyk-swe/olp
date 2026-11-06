@@ -186,7 +186,7 @@ func (x *call) pruningInput(ctx context.Context, request *wire.Request) (*wire.R
 }
 
 func (s *Server) typeSafeRelevance(ctx context.Context, parent *call, policy guardrails.TypeSafePolicy, request *wire.Request, system []string, candidates []workflowRelevanceExchange) ([]int, *Error) {
-	route, ok := parent.request.release.Snapshot.Routes[policy.Config.Route]
+	route, ok := parent.request.release.Snapshot().FindRoute(policy.Config.Route)
 	if !ok || !slices.Contains(route.Operations, "decision") {
 		if policy.Revision.OnError == guardrails.FailOpen {
 			return nil, nil
@@ -270,7 +270,7 @@ func (s *Server) typeSafeRelevance(ctx context.Context, parent *call, policy gua
 	defer cancel()
 	x.estimate = requestEstimate(x)
 	authority := cacheAuthority(x.admissionAuthority(x.authority), false, true, false)
-	lease, problem := s.Admission.reserveKeyCosted(stepCtx, &authority, x.clientSurface(), keyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), time.Duration(x.named().OverallTimeout)*time.Millisecond, costReservation{}, x.limitRoute())
+	lease, problem := s.deps.Admission.reserveKeyCosted(stepCtx, &authority, x.clientSurface(), keyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), time.Duration(x.named().OverallTimeout)*time.Millisecond, costReservation{}, x.limitRoute())
 	if problem != nil {
 		return nil, problem
 	}

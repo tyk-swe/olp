@@ -4,14 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/tyk-swe/olp/internal/promotion"
 	"reflect"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/projects"
+	"github.com/tyk-swe/olp/internal/promotion"
 )
 
 func ValidateOrganizations(ctx context.Context, q access.Queryer, doc *promotion.Document) error {
@@ -33,7 +35,7 @@ func ValidateOrganizations(ctx context.Context, q access.Queryer, doc *promotion
 		if err := o.Budget.ValidateAndNormalize(); err != nil {
 			return err
 		}
-		o.Budget = access.NormalizedBudget(o.Budget)
+		o.Budget = keyauthority.NormalizedBudget(o.Budget)
 	}
 	for i := range doc.Projects {
 		p := &doc.Projects[i]
@@ -58,7 +60,7 @@ func ValidateOrganizations(ctx context.Context, q access.Queryer, doc *promotion
 
 func PlanOrganizations(ctx context.Context, q access.Queryer, doc *promotion.Document, result *promotion.PlanResult) error {
 	for _, o := range doc.Organizations {
-		var current *access.BudgetPolicy
+		var current *keyauthority.BudgetPolicy
 		err := q.QueryRow(ctx, "SELECT budget_policy FROM olp.organizations WHERE lower(name)=lower($1)", o.Name).Scan(&current)
 		action := "reuse"
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -77,13 +79,13 @@ func ApplyOrganizations(ctx context.Context, tx pgx.Tx, p access.Principal, doc 
 	changed := false
 	for _, o := range doc.Organizations {
 		var id string
-		var current *access.BudgetPolicy
+		var current *keyauthority.BudgetPolicy
 		err := tx.QueryRow(ctx, "SELECT id::text,budget_policy FROM olp.organizations WHERE lower(name)=lower($1) FOR UPDATE", o.Name).Scan(&id, &current)
 		if errors.Is(err, pgx.ErrNoRows) {
 			if err = p.Authorize(access.Access); err != nil {
 				return err
 			}
-			id, _, err = access.CreateOrganization(ctx, tx, o.Name, p.UserID())
+			id, _, err = projects.CreateOrganization(ctx, tx, o.Name, p.UserID())
 			if err != nil {
 				return err
 			}
@@ -168,7 +170,7 @@ func ApplyProjectOrganization(s *promotion.Server, ctx context.Context, tx pgx.T
 // applied the document, which would outlive their organization membership.
 func CreateProject(ctx context.Context, tx pgx.Tx, p access.Principal, name string, organization *string) (string, error) {
 	if organization == nil {
-		id, _, err := access.CreateProject(ctx, tx, name, p.UserID())
+		id, _, err := projects.CreateProject(ctx, tx, name, p.UserID())
 		return id, err
 	}
 	var desired string
@@ -178,6 +180,6 @@ func CreateProject(ctx context.Context, tx pgx.Tx, p access.Principal, name stri
 	if err := p.Authorize(access.Access); err != nil {
 		return "", err
 	}
-	id, _, err := access.CreateProjectInOrganization(ctx, tx, name, p.UserID(), &desired)
+	id, _, err := projects.CreateProjectInOrganization(ctx, tx, name, p.UserID(), &desired)
 	return id, err
 }

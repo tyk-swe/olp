@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 )
 
 // Handler serves a management request whose caller the route has already
@@ -23,7 +24,7 @@ type PublicHandler func(*http.Request) (Reply, error)
 type routeOptions struct {
 	maxBody int64
 	timeout time.Duration
-	keyAuth func(*http.Request) (Authority, error)
+	keyAuth func(*http.Request) (keyauthority.Authority, error)
 }
 
 // RouteOption adjusts a route's request bounds.
@@ -39,7 +40,7 @@ func Deadline(d time.Duration) RouteOption { return func(o *routeOptions) { o.ti
 
 // InferenceKeyAuth supplies the pinned gateway authority for a contract's
 // read-only apiKeyBearer alternative. Other routes cannot enable it.
-func InferenceKeyAuth(authenticate func(*http.Request) (Authority, error)) RouteOption {
+func InferenceKeyAuth(authenticate func(*http.Request) (keyauthority.Authority, error)) RouteOption {
 	return func(o *routeOptions) { o.keyAuth = authenticate }
 }
 
@@ -158,4 +159,17 @@ func (s *Server) Reauthorize(r *http.Request, tx pgx.Tx) (Principal, error) {
 		return p, err
 	}
 	return p, req.Admits(p)
+}
+
+func (s *Server) BeginMutation(r *http.Request) (pgx.Tx, Principal, error) {
+	tx, err := s.Begin(r)
+	if err != nil {
+		return nil, Principal{}, err
+	}
+	principal, err := s.Reauthorize(r, tx)
+	if err != nil {
+		tx.Rollback(r.Context())
+		return nil, Principal{}, err
+	}
+	return tx, principal, nil
 }

@@ -353,11 +353,11 @@ func (s *Store) CommitPage(ctx context.Context, settlement Settlement, results [
 		if tag.RowsAffected() == 0 {
 			continue
 		}
-		payload, err := usage.Encode(event)
+		accepted, err := usage.NewAccountingEvent(event)
 		if err != nil {
 			return nil, nil, false, err
 		}
-		persisted, err := usage.PersistEventTx(ctx, tx, event, payload)
+		persisted, err := usage.PersistEventTx(ctx, tx, accepted)
 		if err != nil {
 			return nil, nil, false, fmt.Errorf("persist batch usage event: %w", err)
 		}
@@ -488,11 +488,11 @@ func (s *Store) CloseWithErrorClass(ctx context.Context, settlement Settlement, 
 				VALUES($1,$2,'gap',$3,$4)`, settlement.ResourceID, gapDigest, eventID, evidenceDigest); err != nil {
 				return nil, fmt.Errorf("insert batch gap result: %w", err)
 			}
-			payload, encodeErr := usage.Encode(event)
+			accepted, encodeErr := usage.NewAccountingEvent(event)
 			if encodeErr != nil {
 				return nil, encodeErr
 			}
-			persisted, persistErr := usage.PersistEventTx(ctx, tx, event, payload)
+			persisted, persistErr := usage.PersistEventTx(ctx, tx, accepted)
 			if persistErr != nil {
 				return nil, fmt.Errorf("persist batch gap event: %w", persistErr)
 			}

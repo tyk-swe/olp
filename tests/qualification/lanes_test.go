@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/tyk-swe/olp/internal/providerconfig"
 	"io"
 	"net"
 	"net/http"
@@ -252,13 +253,12 @@ func (s *service) seedSubscriptionE(project, ownerID string, spec laneSeed, netw
 		return "", "", err
 	}
 	configuration, err := json.Marshal(providers.Configuration{
-		Kind: "plugin", AuthMode: "grant", ProfileID: spec.profile, ProfileRevision: digest, Endpoint: &address,
-		Options: providers.Options{
-			Network:           network,
+
+		Options: providers.Options{Network: network,
 			CredentialHeaders: []string{},
 			Models:            map[string]json.RawMessage{},
 			ParameterDefaults: map[string]json.RawMessage{},
-		},
+		}, Identity: providerconfig.Identity[*string]{Kind: "plugin", AuthMode: "grant", ProfileID: spec.profile, ProfileRevision: digest, Endpoint: &address},
 	})
 	if err != nil {
 		return "", "", err

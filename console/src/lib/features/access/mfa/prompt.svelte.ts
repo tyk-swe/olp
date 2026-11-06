@@ -1,14 +1,15 @@
 import type { MFAChallenge, MFAEnrollment, MFAVerification } from './api';
-type Prompt = {
+export type MFARequest =
+  | { kind: 'challenge'; challenge: MFAChallenge }
+  | { kind: 'enrollment'; enrollment: MFAEnrollment };
+type Prompt = MFARequest & {
   id: number;
-  challenge?: MFAChallenge;
-  enrollment?: MFAEnrollment;
   finish: (result?: MFAVerification, error?: Error) => void;
 };
 export const mfaPrompt = $state<{ current: Prompt | null }>({ current: null });
 let nextID = 0;
 export function confirmMFA(
-  value: { challenge?: MFAChallenge; enrollment?: MFAEnrollment },
+  value: MFARequest,
   signal?: AbortSignal
 ): Promise<MFAVerification> {
   if (mfaPrompt.current)

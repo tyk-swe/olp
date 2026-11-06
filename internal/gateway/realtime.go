@@ -609,8 +609,8 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		fail(invalidRequest("invalid_value", "model must name a published route slug.", strPtr("model")))
 		return
 	}
-	snapshot := x.request.release.Snapshot
-	route, ok := snapshot.Routes[slug]
+	snapshot := x.request.release.Snapshot()
+	route, ok := snapshot.FindRoute(slug)
 	if !ok {
 		fail(modelNotFound(slug))
 		return
@@ -792,7 +792,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	s.finish(x, &outcome{committed: true}, terminalStatus)
 }
 
-func strictRealtimeHandshake(snapshot *routing.Snapshot, route *routing.Route, r *http.Request) *Error {
+func strictRealtimeHandshake(snapshot *routing.View, route *routing.Route, r *http.Request) *Error {
 	for _, target := range route.Targets {
 		template, ok := snapshot.RealtimeTemplate(route.Slug, target.ID)
 		if !ok {

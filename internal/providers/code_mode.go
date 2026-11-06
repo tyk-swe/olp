@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/tyk-swe/olp/internal/providerconfig"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codeadapter"
@@ -42,15 +44,11 @@ func (s *Server) requestCodeAllowanceRead(r *http.Request, _ access.Principal) (
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.Access.Begin(r)
+	tx, p, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	var project string
 	var profileKind, profileAuthMode, profileID *string
 	if err = tx.QueryRow(r.Context(), `SELECT a.project_id::text,p.configuration->>'kind',p.configuration->>'auth_mode',p.configuration->>'profile_id' FROM olp.code_accounts a JOIN olp.providers p ON p.id=a.provider_id WHERE a.id=$1`, id).Scan(&project, &profileKind, &profileAuthMode, &profileID); err != nil {
@@ -64,9 +62,9 @@ func (s *Server) requestCodeAllowanceRead(r *http.Request, _ access.Principal) (
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
-	signal, signalKnown := codeadapter.AllowanceSignalForProfile(value(profileKind), value(profileAuthMode), value(profileID))
+	signal, signalKnown := codeadapter.AllowanceSignalForProfile(providerconfig.Value(profileKind), providerconfig.Value(profileAuthMode), providerconfig.Value(profileID))
 	if !signalKnown || !signal.ActiveQualified {
 		return access.Reply{}, access.Invalid("adapter", "Only accounts with a proven allowance signal support an active allowance read.")
 	}
@@ -84,7 +82,7 @@ func (s *Server) requestCodeAllowanceRead(r *http.Request, _ access.Principal) (
 	if err = s.Access.CompleteReplay(r, tx, claim, out); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, out)
+	return out, tx.Commit(r.Context())
 }
 
 type CodeAccountInput struct {

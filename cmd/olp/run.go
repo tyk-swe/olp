@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agents"
@@ -22,6 +24,7 @@ import (
 	"github.com/tyk-swe/olp/internal/billing"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/catalog"
+	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/console"
 	"github.com/tyk-swe/olp/internal/coordination"
@@ -39,6 +42,7 @@ import (
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/observability"
+	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/pluginindex"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -65,6 +69,9 @@ var Version = "dev"
 func Run(ctx context.Context, c Config, log *slog.Logger) error {
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
+	if err := operationregistry.Validate(); err != nil {
+		return fmt.Errorf("operation catalog: %w", err)
+	}
 	if err := c.Validate(); err != nil {
 		return err
 	}
@@ -270,12 +277,9 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		focusWorker = &export.FocusWorker{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Log: log}
 		capturer = &export.Manager{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Log: log}
 		importer = &billing.Importer{Pool: pool, Keys: keys, Installation: installation, Egress: &policy, Log: log}
-		rt = release.NewManager(pool, installation, auth, keys, log, c.Hostname)
-		rt.ReadPool = readPool
-		rt.Region = c.Region
-		rt.ExternalSecrets = secretstore.New(policy, os.Getenv)
+		var mounted map[string]release.MountedProvider
 		if c.ConnectorConfigFile != "" {
-			rt.Mounted, err = providers.LoadMounted(c.ConnectorConfigFile, &policy)
+			mounted, err = providers.LoadMounted(c.ConnectorConfigFile, &policy)
 			if err != nil {
 				return err
 			}
@@ -299,12 +303,18 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		}
 		defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "plugin runtime", hostRuntime.Close)
 		pluginHost = plugins.NewHost(hostRuntime, unconfined, pool)
-		if rt != nil {
-			rt.PrepareGuardrailPlugin = pluginHost.PinGuardrail
-		}
+		rt = release.NewManager(release.ManagerConfig{
+			Pool: pool, ReadPool: readPool, Installation: installation,
+			Auth: auth, Keys: keys, Log: log, Hostname: c.Hostname, Region: c.Region,
+			ExternalSecrets: secretstore.New(policy, os.Getenv), Mounted: mounted,
+			PrepareGuardrailPlugin: pluginHost.PinGuardrail,
+		})
 		defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "plugin host", func(ctx context.Context) error { pluginHost.Close(ctx); return nil })
+		var gatewayConfig, probeConfig gateway.Config
+		gatewayDeps := gateway.Dependencies{Runtime: rt, Egress: &policy, Log: log, Sink: gateway.LogSink{Log: log}}
+		probeDeps := gatewayDeps
 		if c.Mode.Management() || c.Mode.Inference() {
-			gw = gateway.New(rt, &policy, gateway.Config{
+			gatewayConfig = gateway.Config{
 				Region:             c.Region,
 				MaxInFlight:        c.MaxInFlightInference,
 				MaxShadowInFlight:  c.MaxInFlightShadow,
@@ -320,25 +330,24 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 				Predicates:         pluginHost,
 				Carrier:            pluginHost,
 				UnconfinedPlugins:  unconfined != nil,
-			}, log)
-			gw.Traces = &gateway.TraceDeps{Pool: pool, Limiter: limiter, Auth: auth}
-			gw.Batches = batches.NewStore(pool)
-			gw.Cache = responseCache
-			gw.Business = business
-			rt.GrantRefreshed = gw.GrantRefreshed
+			}
+			gatewayDeps.Traces = &gateway.TraceDeps{Pool: pool, Limiter: limiter, Auth: auth}
+			gatewayDeps.Batches = batches.NewStore(pool)
+			gatewayDeps.Cache = responseCache
+			gatewayDeps.Business = business
 			if limiter != nil {
 				var policy func() limits.OutagePolicy
 				if outage != nil {
 					policy = outage.Policy
 				}
 				// Control-only processes also execute playground requests.
-				gw.Admission = gateway.NewAdmission(limiter, policy, log)
+				gatewayDeps.Admission = gateway.NewAdmission(limiter, policy, log)
 			}
 		}
 		if limiter != nil && (c.Mode == Worker || c.Mode == All) {
 			// The worker plane's health probes run through a gateway of their
 			// own: planned, gated, priced and emitted like any request.
-			prober = gateway.New(rt, &policy, gateway.Config{
+			probeConfig = gateway.Config{
 				Region:            c.Region,
 				MaxInFlight:       1,
 				MaxResponseBytes:  c.ProviderMaxResponseBytes,
@@ -346,9 +355,9 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 				Signer:            pluginHost,
 				Carrier:           pluginHost,
 				UnconfinedPlugins: unconfined != nil,
-			}, log)
-			prober.Business = business
-			prober.Admission = gateway.NewAdmission(limiter, nil, log)
+			}
+			probeDeps.Business = business
+			probeDeps.Admission = gateway.NewAdmission(limiter, nil, log)
 		}
 		if c.Mode.Management() || c.Mode.Inference() || c.Mode == Worker {
 			spoolDir := c.MediaSpoolDir
@@ -378,17 +387,16 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			}
 		}
 		if c.Mode.Inference() {
-			gw.Capture = capturer
-			gw.Media = &gateway.MediaDeps{Jobs: mediaService, Admission: media.NewAdmissionState(c.MediaSpoolCapacityBytes)}
+			gatewayDeps.Capture = capturer
+			gatewayDeps.Media = &gateway.MediaDeps{Jobs: mediaService, Admission: media.NewAdmissionState(c.MediaSpoolCapacityBytes)}
 			if pool != nil {
-				gw.CodeLedger = &resources.CodeStore{Pool: pool}
-				gw.CodeAuthorizer = &providers.CodeAuthorizer{Pool: pool, Credentials: rt, Plugins: pluginHost}
-				gw.CodeResearch = &resources.CodeStore{Pool: pool}
-				gw.ResearchAuth = &providers.CodeAuthorizer{Pool: pool, Credentials: rt, Plugins: pluginHost}
-				gw.Resources = resources.NewEncrypted(pool, installation, keys)
-				gw.Resolver = resources.NewResolver(pool)
+				gatewayDeps.CodeLedger = codesessions.New(pool)
+				gatewayDeps.CodeAuthorizer = &providers.CodeAuthorizer{Pool: pool, Credentials: rt, Plugins: pluginHost}
+				gatewayDeps.CodeResearch = codesessions.New(pool)
+				gatewayDeps.ResearchAuth = &providers.CodeAuthorizer{Pool: pool, Credentials: rt, Plugins: pluginHost}
+				gatewayDeps.Resources = resources.NewEncrypted(pool, installation, keys)
+				gatewayDeps.Resolver = resources.NewResolver(pool)
 			}
-			gw.Register(public)
 			grantStore := personal.NewStore(pool, installation, auth, keys, &policy)
 			agentTasks := tasks.New(pool, &limits.DebitStore{Pool: pool, Limiter: limiter}, auth)
 			agentPeers := a2a.NewPeers(&policy, func(ctx context.Context, id string) ([]byte, error) {
@@ -427,8 +435,8 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			})
 			toolServer := mcp.New(mcp.ServerOptions{Runtime: rt, Executor: toolExecutor, Auth: auth, Grants: grantStore, Sessions: sessionStore, TrustedProxies: c.TrustedProxyCIDRs})
 			if limiter != nil {
-				gw.WorkflowRuns = runs.NewWorkflowStore(pool, auth, &limits.DebitStore{Pool: pool, Limiter: limiter}, keys, installation)
-				gw.WorkflowTools = toolServer
+				gatewayDeps.WorkflowRuns = runs.NewWorkflowStore(pool, auth, &limits.DebitStore{Pool: pool, Limiter: limiter}, keys, installation)
+				gatewayDeps.WorkflowTools = toolServer
 			}
 			toolServer.Register(public)
 		}
@@ -439,8 +447,8 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		if limiter != nil {
 			emitter = usage.NewEmitter(metadataBuffer)
 			gatewayInstance = usage.GatewayInstance(c.Hostname)
-			for _, server := range []*gateway.Server{gw, prober} {
-				if server == nil {
+			for _, server := range []*gateway.Dependencies{&gatewayDeps, &probeDeps} {
+				if server.Admission == nil {
 					continue
 				}
 				debits := &limits.DebitStore{Pool: pool, Limiter: limiter}
@@ -456,22 +464,31 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 					}}
 			}
 		}
+		if c.Mode.Management() || c.Mode.Inference() {
+			gw = gateway.New(gatewayDeps, gatewayConfig)
+		}
+		if probeDeps.Admission != nil {
+			prober = gateway.New(probeDeps, probeConfig)
+		}
+		if c.Mode.Inference() {
+			gw.Register(public)
+		}
 		if c.Mode.Management() {
-			control, err := access.New(startup, pool, installation, c.PublicOrigin, auth, keys, bootstrap)
-			if err != nil {
+			if err := access.PrepareInstallation(startup, pool, installation, auth, keys); err != nil {
 				return err
 			}
-			control.LocalLoginDisabled = !c.LocalLoginEnabled
-			control.ManagementNetworkRestricted = len(c.ManagementAllowedCIDRs) != 0
-			control.ClientIP = func(r *http.Request) string { return gateway.ClientIP(r, c.TrustedProxyCIDRs) }
-			control.LimitsEnforced = limiter != nil
-			control.ResponseCacheConfigured = responseCache != nil
-			// The worker plane that applies retention runs only where shared
-			// state is configured, and a control process cannot see whether a
-			// separate worker replica is alive, so the console is told what
-			// this installation is configured for.
-			control.RetentionEnforced = limiter != nil
-			control.NotificationsActive = true
+			identityClient := access.IdentityHTTPClient()
+			control := access.New(access.Config{
+				Pool: pool, Installation: installation, Origin: c.PublicOrigin, Auth: auth, Keys: keys, Bootstrap: bootstrap, Egress: &policy,
+				OIDCClient: identityClient,
+				RuntimePublisher: func(ctx context.Context, tx pgx.Tx, actor string) error {
+					_, err := release.Publish(ctx, tx, actor)
+					return err
+				},
+				ClientIP:           func(r *http.Request) string { return gateway.ClientIP(r, c.TrustedProxyCIDRs) },
+				LocalLoginDisabled: !c.LocalLoginEnabled, ManagementNetworkRestricted: len(c.ManagementAllowedCIDRs) != 0,
+				LimitsEnforced: limiter != nil, ResponseCacheConfigured: responseCache != nil, RetentionEnforced: limiter != nil, NotificationsActive: true,
+			})
 			// Installing reads a module's manifest once, which the
 			// interpreter is ready to do several times sooner.
 			pluginRuntime, err := plugins.NewRuntime(startup, plugins.Interpreted, plugins.DefaultLimits(), log)
@@ -479,7 +496,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 				return err
 			}
 			defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "management plugin runtime", pluginRuntime.Close)
-			Management{Getenv: os.Getenv, Access: control, Egress: &policy, Limiter: limiter, Runtime: rt, Gateway: gw, Media: mediaService, Health: obsCache, Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog, CatalogKeys: catalogKeys, PluginIndex: pluginIndex}.Register(public)
+			Management{Getenv: os.Getenv, Access: control, IdentityClient: identityClient, Egress: &policy, Limiter: limiter, Runtime: rt, Gateway: gw, Media: mediaService, Health: obsCache, Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog, CatalogKeys: catalogKeys, PluginIndex: pluginIndex}.Register(public)
 		}
 	}
 	if err := startup.Err(); err != nil {
@@ -560,7 +577,11 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 	if rt != nil {
 		// Authority must stay fresh while accepted requests drain, so
 		// polling outlives the listeners and stops once handlers finish.
-		rt.Start(context.WithoutCancel(ctx))
+		var grantRefreshed func(string, string)
+		if gw != nil {
+			grantRefreshed = gw.GrantRefreshed
+		}
+		rt.Start(context.WithoutCancel(ctx), grantRefreshed)
 	}
 	if agentMonitor != nil {
 		background.Go(func() { agentMonitor.Run(auxiliary) })
@@ -635,7 +656,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		probesStopped = make(chan struct{})
 		go func() {
 			defer close(probesStopped)
-			prober.RunHealthProbes(usage.WithWorkerRegion(probes, c.Region), probeCheckpoint(pool, log))
+			prober.RunHealthProbes(probes, probeCheckpoint(pool, log, c.Region))
 		}()
 	}
 	liveMetrics := newLiveMetrics(rt, inferencePool, managementPool)

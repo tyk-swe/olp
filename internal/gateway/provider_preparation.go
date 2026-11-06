@@ -100,9 +100,6 @@ func (x *call) preparedProvider(provider *routing.Provider, targetID, model stri
 	if record.provider.invocation.Prepared.Document().Valid() {
 		return record.provider, nil
 	}
-	previous := x.guardrailPreparation
-	x.guardrailPreparation = record
-	defer func() { x.guardrailPreparation = previous }()
 	if x.strict() {
 		template, _ := x.snapshot().InteractionTemplate(x.route.Slug, targetID)
 		if template == nil {
@@ -123,12 +120,14 @@ func (x *call) preparedProvider(provider *routing.Provider, targetID, model stri
 		if err == nil && x.guardrailEngine != nil {
 			if coverage := interaction.CheckGuardrailCoverage(plan.Wire(), plan.EffectiveRequest().OIF().Document()); coverage != nil && (x.named().ToolExecution != "gateway" || !x.guardrailEngine.OnlyTypeSafe()) {
 				result, e := x.guardrailEngine.Unavailable("")
-				x.recordGuardrails(result.Decisions)
+				x.recordPreparationGuardrails(record, result.Decisions)
 				if e != nil {
 					return preparedProvider{}, e
 				}
 			} else {
-				_, guardrailSegments, err = x.inspectGuardrailInput(plan.EffectiveRequest().OIF().Document())
+				result, inputErr := x.evaluateGuardrailInput(x.guardrailCtx, plan.EffectiveRequest().OIF().Document(), true)
+				x.recordPreparationGuardrails(record, result.decisions)
+				guardrailSegments, err = result.segments, inputErr
 			}
 		}
 		effective := x.summarize(plan.EffectiveRequest())
@@ -196,12 +195,14 @@ func (x *call) preparedProvider(provider *routing.Provider, targetID, model stri
 	if x.guardrailEngine != nil {
 		if coverage := interaction.CheckGuardrailCoverage(invocation.Wire, native.OIF().Document()); coverage != nil && (x.named().ToolExecution != "gateway" || !x.guardrailEngine.OnlyTypeSafe()) {
 			result, e := x.guardrailEngine.Unavailable("")
-			x.recordGuardrails(result.Decisions)
+			x.recordPreparationGuardrails(record, result.Decisions)
 			if e != nil {
 				return preparedProvider{}, e
 			}
 		} else {
-			document, segments, err := x.inspectGuardrailInput(native.OIF().Document())
+			result, err := x.evaluateGuardrailInput(x.guardrailCtx, native.OIF().Document(), true)
+			x.recordPreparationGuardrails(record, result.decisions)
+			document, segments := result.document, result.segments
 			if err != nil {
 				return preparedProvider{}, err
 			}
@@ -394,7 +395,7 @@ func (x *call) recordEstimate(fact *AttemptFact, a routing.Attempt) {
 	if x.generation.parsed == nil && x.unary == nil {
 		return
 	}
-	provider := x.snapshot().Providers[a.ProviderID]
+	provider := x.snapshot().Provider(a.ProviderID)
 	if admitted, err := x.attemptEstimate(&provider, a.TargetID, a.UpstreamModel); err == nil {
 		fact.EstimatedInputTokens, fact.EstimateProvenance = admitted.input, string(admitted.provenance)
 	}

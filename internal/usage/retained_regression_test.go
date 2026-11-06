@@ -91,7 +91,7 @@ func TestRetainedOnlySourceOverridesAreNotRemovals(t *testing.T) {
 
 func TestRetainedEvalAggregateUsageCannotChooseInvocationTiers(t *testing.T) {
 	price := Price{ProviderKind: "openai", Model: "m", Operation: "generation", InputPerMillion: new("1"), OutputPerMillion: new("0"), Tiers: []PriceTier{{AboveInputTokens: 100_000, InputPerMillion: new("3"), OutputPerMillion: new("0")}}}
-	evidence := AttemptUsage{Observed: true, Complete: true, Deferred: true, InvocationCount: new(int64(2)), InputTokens: new(int64(120_000)), OutputTokens: new(int64(0))}
+	evidence := AttemptUsage{Observed: true, Complete: true, Deferred: true, UsageQuantities: UsageQuantities{InvocationCount: new(int64(2)), InputTokens: new(int64(120_000)), OutputTokens: new(int64(0))}}
 	if cost, priced := price.Cost(evidence, time.Now(), true); priced {
 		t.Fatalf("two 60k invocations charged aggregate tier: %s", cost.String())
 	}

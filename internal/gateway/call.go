@@ -8,10 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
-	"github.com/tyk-swe/olp/internal/routing"
-
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export"
@@ -19,7 +16,9 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -27,7 +26,7 @@ import (
 // Route changes replace routeLeg; operation state lives independently.
 type call struct {
 	prompt               *usage.PromptReference
-	currentCommitments   *routing.Snapshot
+	currentCommitments   *routing.View
 	cache                *responseCacheCall
 	cacheRateLease       *limits.Lease
 	sessionDebit         *sessionDebit
@@ -37,11 +36,8 @@ type call struct {
 	semanticHeaders      http.Header
 	semanticQuery        url.Values
 	semanticQueryInvalid bool
-	retainedMetered      bool
-	retainedAccounting   bool
-	retainedTokenless    bool
-	retainedHousekeeping bool
-	retainedFreeControl  bool
+	retained             retainedOperation
+	retainedAdmission    *retainedAdmissionPlan
 	anthropicFilesBeta   bool
 	anthropicFileBinary  bool
 	geminiFileBinary     bool
@@ -61,7 +57,7 @@ type call struct {
 	attribution   map[string]string
 	userID        string
 
-	authority      access.Authority
+	authority      keyauthority.Authority
 	cardPinned     bool
 	cardRevisionID *string
 	cardRev        *usage.RoutingCardRevision
@@ -82,9 +78,7 @@ type call struct {
 	spentCharge usage.Cost
 	seed        []byte
 
-	visited    []string
-	delegators []*routing.Route
-	frames     []fallbackFrame
+	walk routing.RouteWalk
 
 	fallbacks  []routing.FallbackStep
 	caps       []capHold
@@ -103,7 +97,6 @@ type call struct {
 	workflowRecoveryCalls     []string
 	guardrailMu               sync.Mutex
 	guardrailDecisions        []guardrails.Evidence
-	guardrailPreparation      *targetPreparation
 	guardrailAttemptActive    bool
 	guardrailAttemptDecisions []guardrails.Evidence
 	guardrailModels           map[[32]byte]guardrails.Verdict
@@ -116,7 +109,7 @@ type call struct {
 	estimate       int64
 	sizedInput     *int64
 
-	historicalSnapshot *routing.Snapshot
+	historicalSnapshot *routing.View
 
 	pin           *resources.Resource
 	pinnedSlot    *routing.Slot

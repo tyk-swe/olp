@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
@@ -25,7 +25,7 @@ type researchAttempt struct {
 	dispatched           bool
 }
 
-func (s *Server) prepareResearch(r *http.Request, release *release.Release, route codemode.Route, service string, authority access.Authority, notification bool) (*researchAttempt, error) {
+func (s *Server) prepareResearch(r *http.Request, release *release.Release, route codemode.Route, service string, authority keyauthority.Authority, notification bool) (*researchAttempt, error) {
 	ctx := r.Context()
 	fresh, account, err := s.researchAuthority(r, route, service, authority)
 	if err != nil {
@@ -42,12 +42,12 @@ func (s *Server) prepareResearch(r *http.Request, release *release.Release, rout
 	streamAuthority := fresh
 	control := notification || r.Method == http.MethodGet
 	fresh = researchRateAuthority(fresh, control)
-	a.lease, failure = s.Admission.ReserveCodeRate(ctx, fresh, 0, researchTimeout+time.Minute, route.Slug)
+	a.lease, failure = s.deps.Admission.ReserveCodeRate(ctx, fresh, 0, researchTimeout+time.Minute, route.Slug)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_rate_limited")
 	}
 	var found bool
-	a.config, found = release.Snapshot.CodeConnection(route, account.ProviderID)
+	a.config, found = release.Snapshot().CodeConnection(route, account.ProviderID)
 	if !found || a.config.ProfileID != codeplans.ZAIProfile {
 		return nil, codemode.Refuse(503, "code_configuration_unsupported")
 	}
@@ -60,12 +60,12 @@ func (s *Server) prepareResearch(r *http.Request, release *release.Release, rout
 		}
 		quota.Options.Limits = &copy
 	}
-	a.providerLease, failure = s.Admission.reserveCodeProvider(ctx, account.ProviderID, quota, 0, researchTimeout+time.Minute)
+	a.providerLease, failure = s.deps.Admission.reserveCodeProvider(ctx, account.ProviderID, quota, 0, researchTimeout+time.Minute)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_provider_rate_limited")
 	}
 	if r.Method == http.MethodGet {
-		a.streamLease, failure = s.Admission.reserveResearchStream(ctx, streamAuthority, route.Slug, service, account.ProviderID, a.config.Options.Limits)
+		a.streamLease, failure = s.deps.Admission.reserveResearchStream(ctx, streamAuthority, route.Slug, service, account.ProviderID, a.config.Options.Limits)
 		if failure != nil {
 			return nil, codemode.Refuse(failure.Status, "code_research_stream_limited")
 		}
@@ -81,7 +81,7 @@ func (s *Server) prepareResearch(r *http.Request, release *release.Release, rout
 
 // Research consumes requests, without inference tokens. Lifecycle notifications
 // bypass work concurrency; GET streams reserve separate concurrency below.
-func researchRateAuthority(authority access.Authority, control bool) access.Authority {
+func researchRateAuthority(authority keyauthority.Authority, control bool) keyauthority.Authority {
 	// This also clones the nested route and end-user policies before editing.
 	authority = withoutCostBudgets(authority)
 	authority.Policy.TokensPerMinute = nil
@@ -97,7 +97,7 @@ func researchRateAuthority(authority access.Authority, control bool) access.Auth
 		}
 		authority.Policy.RouteLimits[slug] = policy
 	}
-	for _, policy := range []*access.EndUserPolicy{authority.Policy.EndUserPolicy, authority.ProjectEndUserPolicy} {
+	for _, policy := range []*keyauthority.EndUserPolicy{authority.Policy.EndUserPolicy, authority.ProjectEndUserPolicy} {
 		if policy != nil {
 			policy.Defaults.TokensPerMinute = nil
 			if control {
@@ -115,9 +115,9 @@ func researchRateAuthority(authority access.Authority, control bool) access.Auth
 	return authority
 }
 
-func (s *Server) researchAuthority(r *http.Request, route codemode.Route, service string, authority access.Authority) (access.Authority, codemode.Account, error) {
+func (s *Server) researchAuthority(r *http.Request, route codemode.Route, service string, authority keyauthority.Authority) (keyauthority.Authority, codemode.Account, error) {
 	ctx := r.Context()
-	fresh, account, err := s.CodeResearch.AuthorizeResearch(ctx, route, authority.ID, service)
+	fresh, account, err := s.deps.CodeResearch.AuthorizeResearch(ctx, route, authority.ID, service)
 	if err != nil {
 		return fresh, account, err
 	}
@@ -144,7 +144,7 @@ func (s *Server) researchAuthority(r *http.Request, route codemode.Route, servic
 }
 
 func (s *Server) researchAuthorization(ctx context.Context, config routing.Configuration, account codemode.Account, service string) (codemode.Authorization, error) {
-	auth, err := s.ResearchAuth.AuthorizeResearch(ctx, config, account, service)
+	auth, err := s.deps.ResearchAuth.AuthorizeResearch(ctx, config, account, service)
 	if err != nil {
 		return auth, err
 	}

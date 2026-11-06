@@ -5,10 +5,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/routing"
-
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -22,20 +21,12 @@ const (
 	mediaPlanner
 )
 
-// fallbackFrame is a failed route whose declared fallbacks remain to be tried
-// for the conditions it met.
-type fallbackFrame struct {
-	route      *routing.Route
-	conditions []string
-	next       int
-}
-
 // bind makes x.route the request's primary route: its deadline and attempt
 // budget bound the request, whichever routes it moves on to. A fixed request
 // belongs to its route and never leaves it.
 func (x *call) bind(p planner, authorize func(*routing.Route) *Error, fixed bool) {
 	x.primary, x.planner, x.authorize, x.fixed = x.route, p, authorize, fixed
-	x.visited = append(x.visited[:0], x.route.Slug)
+	x.walk = routing.NewRouteWalk(x.route)
 	x.seed = x.affinity
 	x.affinity = x.routeSeed(x.route)
 }
@@ -136,10 +127,10 @@ func (s *Server) delegate(ctx context.Context, x *call, plan routing.Plan) *Erro
 // adopt moves the request to the named route and plans it, returning the
 // outcome a fallback step records and the route's planning refusal.
 func (s *Server) adopt(ctx context.Context, x *call, slug, via string) (string, *Error) {
-	if slices.Contains(x.visited, slug) {
+	if x.walk.Visited(slug) {
 		return routing.FallbackRepeated, nil
 	}
-	route, ok := x.snapshot().Routes[slug]
+	route, ok := x.snapshot().FindRoute(slug)
 	if !ok {
 		return routing.FallbackUnavailable, nil
 	}
@@ -153,67 +144,35 @@ func (s *Server) adopt(ctx context.Context, x *call, slug, via string) (string, 
 	return routing.FallbackPlanned, nil
 }
 
-// fallBack moves a request whose route failed with conditions to the first
-// declared fallback those conditions start. Fallbacks are tried depth first:
-// a fallback route's own fallbacks come before its siblings, and a selector's
-// route fails for the route that delegated to it as well. It reports whether
-// a fallback route planned attempts within what remains of the request's
-// attempt budget.
 func (s *Server) fallBack(ctx context.Context, x *call, conditions []string) bool {
 	if x.primary == nil || x.fixed {
 		return false
 	}
-	x.pushFrames(conditions)
-	for len(x.frames) > 0 && x.spent < x.allowance && ctx.Err() == nil {
-		top := &x.frames[len(x.frames)-1]
-		if top.next == len(top.route.Fallbacks) {
-			x.frames = x.frames[:len(x.frames)-1]
-			continue
+	x.walk = x.walk.Failed(conditions)
+	for x.spent < x.allowance && ctx.Err() == nil {
+		next, step, ok := x.walk.Next()
+		x.walk = next
+		if !ok {
+			return false
 		}
-		fallback := top.route.Fallbacks[top.next]
-		top.next++
-		met := fallback.Met(top.conditions)
-		if len(met) == 0 {
-			continue
-		}
-		step := routing.FallbackStep{From: top.route.Slug, Route: fallback.Route, Conditions: met}
-		step.Outcome, _ = s.adopt(ctx, x, fallback.Route, usage.ViaFallback)
+		step.Outcome, _ = s.adopt(ctx, x, step.Route, usage.ViaFallback)
 		x.fallbacks = append(x.fallbacks, step)
 		if step.Outcome == routing.FallbackPlanned {
 			return true
 		}
 		if len(x.planConditions) > 0 {
-			x.pushFrames(x.planConditions)
+			x.walk = x.walk.Failed(x.planConditions)
 		}
 	}
 	return false
-}
-
-// pushFrames records that x.route, and every route that delegated to it,
-// failed with conditions.
-func (x *call) pushFrames(conditions []string) {
-	push := func(route *routing.Route) {
-		if len(route.Fallbacks) > 0 && !slices.ContainsFunc(x.frames, func(f fallbackFrame) bool { return f.route.Slug == route.Slug }) {
-			x.frames = append(x.frames, fallbackFrame{route: route, conditions: conditions})
-		}
-	}
-	for _, route := range x.delegators {
-		push(route)
-	}
-	push(x.route)
 }
 
 // useRoute moves the request to route. Provider preparation depends on the
 // route's fidelity and content policy, and the session seed on its affinity,
 // so both start over.
 func (x *call) useRoute(route *routing.Route, via string) {
-	if via == usage.ViaSelector {
-		x.delegators = append(x.delegators, x.route)
-	} else {
-		x.delegators = nil
-	}
+	x.walk = x.walk.Move(route, via == usage.ViaSelector)
 	x.routeLeg = routeLeg{route: route}
-	x.visited = append(x.visited, route.Slug)
 	x.leg = &usage.RouteLeg{Route: route.Slug, RevisionID: route.RevisionID, Via: via}
 	x.requestPreparation = requestPreparation{}
 	x.affinity = x.routeSeed(route)
@@ -242,11 +201,11 @@ func (x *call) legPreferences() *routing.Preferences {
 // mayLeaveRoute reports whether the request can move on to another route
 // after its own attempts fail, so admission reserves its whole budget.
 func (x *call) mayLeaveRoute() bool {
-	return x.primary != nil && !x.fixed && (len(x.route.Fallbacks) > 0 || len(x.delegators) > 0 || len(x.frames) > 0)
+	return x.primary != nil && !x.fixed && x.walk.MayLeave()
 }
 
 // keyAuthorizer allows the routes an API key may use for inference.
-func (s *Server) keyAuthorizer(authority access.Authority) func(*routing.Route) *Error {
+func (s *Server) keyAuthorizer(authority keyauthority.Authority) func(*routing.Route) *Error {
 	return func(route *routing.Route) *Error {
 		if authority.TaskCapability != nil && !slices.Contains(authority.TaskCapability.RouteRevisions, route.RevisionID) {
 			return permissionError("route_forbidden", "This task is not allowed to use the model `"+route.Slug+"`.")

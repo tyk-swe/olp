@@ -12,28 +12,27 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
-	"github.com/tyk-swe/olp/internal/routing"
-
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
 const stateRouteHeader = "X-OLP-Route"
 
 func (s *Server) registerState(mux *http.ServeMux) {
-	if s.Resources == nil {
+	if s.deps.Resources == nil {
 		return
 	}
 	s.registerRetainedLifecycle(mux)
 	s.registerRetainedGeneric(mux)
 	s.registerRetrieval(mux)
 	s.registerCloudBatchState(mux)
-	if s.Media != nil {
+	if s.deps.Media != nil {
 		s.registerAnthropicState(mux)
 		s.registerGeminiFilesState(mux)
 		mux.HandleFunc("POST /v1/files", s.uploadFile)
@@ -46,7 +45,7 @@ func (s *Server) registerState(mux *http.ServeMux) {
 		mux.HandleFunc("GET /v1/batches/{id}", s.getBatch)
 		mux.HandleFunc("POST /v1/batches/{id}/cancel", s.cancelBatch)
 	}
-	if s.Resources.Encrypted() {
+	if s.deps.Resources.Encrypted() {
 		mux.HandleFunc("GET /v1/continuations/{id}", s.recoverContinuation)
 		mux.HandleFunc("GET /v1/continuation-submissions/{submission}", s.recoverContinuation)
 	}
@@ -108,7 +107,7 @@ func fireworksBatchRefusal(x *call, route *routing.Route) *Error {
 		return nil
 	}
 	for _, target := range route.Targets {
-		provider, ok := x.snapshot().Providers[target.ProviderID]
+		provider, ok := x.snapshot().FindProvider(target.ProviderID)
 		if ok && provider.Kind == "openai_compatible" && provider.VendorID == "fireworks" {
 			return policyUnavailable("target_capability",
 				"Fireworks documents no OpenAI-compatible files/batches API; its dataset batch jobs return results only through provider-returned signed URLs, which the egress contract forbids.")
@@ -156,7 +155,7 @@ func (s *Server) selectBoundPinSurface(ctx context.Context, x *call, route *rout
 	if e := x.checkBody(route); e != nil {
 		return nil, e
 	}
-	snapshot := x.request.release.Snapshot
+	snapshot := x.request.release.Snapshot()
 	// Pinned work must select a target on this route rather than delegate.
 	x.fixed = true
 	qualifiesSlot := func(provider *routing.Provider, slot *routing.Slot, model string) bool {
@@ -168,12 +167,12 @@ func (s *Server) selectBoundPinSurface(ctx context.Context, x *call, route *rout
 		return true
 	}
 	options := s.selectionOptions(ctx, x)
-	options.Accept = func(p routing.Provider, t routing.Target) error {
+	options.Prepare = func(p routing.Provider, t routing.Target) (*routing.CandidatePreparation, error) {
 		if bound != nil && (bound.ProviderID != p.ID || bound.ProviderRevisionID != p.RevisionID || bound.TargetID != t.ID) {
-			return errors.New("resource affinity unavailable")
+			return nil, errors.New("resource affinity unavailable")
 		}
 		if !qualified(&p, t.ProviderModel) {
-			return errors.New("provider capability unavailable")
+			return nil, errors.New("provider capability unavailable")
 		}
 		if len(slotQualifiers) > 0 {
 			attempt := routing.Attempt{ProviderID: p.ID, UpstreamModel: t.ProviderModel}
@@ -183,12 +182,12 @@ func (s *Server) selectBoundPinSurface(ctx context.Context, x *call, route *rout
 					continue
 				}
 				if qualifiesSlot(&p, slot, t.ProviderModel) && s.slotAvailable(x, attempt, slot) && !s.cooling(ctx, p.ID, slot) {
-					return nil
+					return nil, nil
 				}
 			}
-			return errors.New("credential model authority unavailable")
+			return nil, errors.New("credential model authority unavailable")
 		}
-		return nil
+		return nil, nil
 	}
 	plan, err := routing.Select(snapshot, route.Slug, operation, surface, mode, x.affinity, options)
 	if err != nil {
@@ -202,7 +201,7 @@ func (s *Server) selectBoundPinSurface(ctx context.Context, x *call, route *rout
 		return nil, selectionError(&routing.SelectionError{Code: routing.NoEligibleTargets}, route.Slug)
 	}
 	attempt := plan.Attempts[0]
-	provider, ok := snapshot.Providers[attempt.ProviderID]
+	provider, ok := snapshot.FindProvider(attempt.ProviderID)
 	if !ok {
 		return nil, selectionError(&routing.SelectionError{Code: routing.NoEligibleTargets}, route.Slug)
 	}
@@ -308,17 +307,17 @@ func upstreamError(f *attemptFailure) *Error {
 	return serverError(http.StatusBadGateway, "upstream_error", "The provider could not complete the request.")
 }
 
-func (s *Server) stateBegin(w http.ResponseWriter, r *http.Request, family wire.Format) (*call, access.Authority, bool) {
+func (s *Server) stateBegin(w http.ResponseWriter, r *http.Request, family wire.Format) (*call, keyauthority.Authority, bool) {
 	x := &call{request: s.begin(w, r), family: family, actor: "api_key"}
 	if !s.admit(r.Context()) {
 		s.stateFail(x, w, overloaded, family)
-		return x, access.Authority{}, true
+		return x, keyauthority.Authority{}, true
 	}
 	authority, e := s.authenticate(r, "inference")
 	if e != nil {
 		s.release(r.Context())
 		s.stateFail(x, w, e, family)
-		return x, access.Authority{}, true
+		return x, keyauthority.Authority{}, true
 	}
 	s.bindAuthority(x, authority)
 	switch family {
@@ -332,7 +331,7 @@ func (s *Server) stateBegin(w http.ResponseWriter, r *http.Request, family wire.
 	if x.attribution, e = s.parseAttribution(r, authority); e != nil {
 		s.release(r.Context())
 		s.stateFail(x, w, e, family)
-		return x, access.Authority{}, true
+		return x, keyauthority.Authority{}, true
 	}
 	return x, authority, false
 }
@@ -347,16 +346,16 @@ func (s *Server) stateDeadline(ctx context.Context, route *routing.Route) (conte
 	return context.WithTimeout(ctx, time.Duration(route.OverallTimeout)*time.Millisecond)
 }
 
-func (s *Server) reserveState(ctx context.Context, x *call, authority access.Authority, overall time.Duration) *Error {
+func (s *Server) reserveState(ctx context.Context, x *call, authority keyauthority.Authority, overall time.Duration) *Error {
 	if e := x.checkBody(x.route); e != nil {
 		return e
 	}
 	var e *Error
-	x.lease, e = s.Admission.reserveKey(ctx, x.admissionAuthority(authority), x.clientSurface(), max(resourceEstimate, x.estimate), overall, x.limitRoute())
+	x.lease, e = s.deps.Admission.reserveKey(ctx, x.admissionAuthority(authority), x.clientSurface(), max(resourceEstimate, x.estimate), overall, x.limitRoute())
 	return e
 }
 
-func (s *Server) reserveStateAndSlot(ctx context.Context, x *call, authority access.Authority, p *pin) *Error {
+func (s *Server) reserveStateAndSlot(ctx context.Context, x *call, authority keyauthority.Authority, p *pin) *Error {
 	overall := time.Duration(x.route.OverallTimeout) * time.Millisecond
 	if e := s.reserveState(ctx, x, authority, overall); e != nil {
 		return e
@@ -612,7 +611,7 @@ func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 	}
 	identity := owner.NativeIdentity()
 	identity.Kind, identity.UpstreamID = kind, upstreamID
-	if existing, err := s.Resources.GetByUpstream(ctx, identity); err == nil {
+	if existing, err := s.deps.Resources.GetByUpstream(ctx, identity); err == nil {
 		return existing, nil
 	} else if !errors.Is(err, resources.ErrNotFound) {
 		return nil, err
@@ -649,22 +648,22 @@ func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 		resource.ExpiresAt = owner.ExpiresAt
 		source, _ := json.Marshal(map[string]string{"batch_id": owner.ID, "upstream_file_id": upstreamID})
 		payload, _ := json.Marshal(durableDocument{Version: version, Source: source, Binding: resourceModel(owner), Serving: batch.Serving})
-		created, err := s.Resources.PutDurableContract(ctx, resource, payload)
+		created, err := s.deps.Resources.PutDurableContract(ctx, resource, payload)
 		if err == nil {
 			return created, nil
 		}
 		// Another authorized poll may have installed the same output-file
 		// mapping concurrently. A collision owned by someone else still fails.
-		if existing, readErr := s.Resources.GetByUpstream(ctx, identity); readErr == nil {
+		if existing, readErr := s.deps.Resources.GetByUpstream(ctx, identity); readErr == nil {
 			return existing, nil
 		}
 		return nil, err
 	}
-	created, err := s.Resources.Put(ctx, resource)
+	created, err := s.deps.Resources.Put(ctx, resource)
 	if err == nil {
 		return created, nil
 	}
-	if existing, readErr := s.Resources.GetByUpstream(ctx, identity); readErr == nil {
+	if existing, readErr := s.deps.Resources.GetByUpstream(ctx, identity); readErr == nil {
 		return existing, nil
 	}
 	return nil, err
@@ -858,7 +857,7 @@ func refreshedFileMetadata(res *resources.Resource, body []byte) (json.RawMessag
 }
 
 func (x *call) completeFileControl() {
-	if x.retainedAccounting {
+	if x.retainedAdmission != nil {
 		_ = observeRetainedUsage(x, oif.Document{}, false)
 	}
 	x.completePinned()

@@ -16,7 +16,6 @@ import (
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
-// maxFrame bounds a frame the plugin writes, as OLP does.
 const maxFrame = 1 << 20
 
 // Serve runs the plugin as an unconfined plugin: it serves OLP's calls, each
@@ -35,27 +34,19 @@ func Serve() {
 	}
 }
 
-// session is the stdio transport Serve runs.
 type session struct {
-	out     io.Writer
-	writing sync.Mutex
-	mu      sync.Mutex
-	// calls cancel the calls from OLP that are running, by ID.
-	calls map[uint64]context.CancelFunc
-	// requests receive OLP's responses to the capability requests awaiting
-	// them, by ID.
+	out      io.Writer
+	writing  sync.Mutex
+	mu       sync.Mutex
+	calls    map[uint64]context.CancelFunc
 	requests map[uint64]chan abi.Response
 	next     uint64
 }
 
-// serving is the session Serve runs, if any.
 var serving atomic.Pointer[session]
 
-// callKey holds the ID of the call from OLP a context belongs to.
 type callKey struct{}
 
-// serveFrames serves the frames OLP writes to in, writing the plugin's to out,
-// until in ends.
 func serveFrames(in io.Reader, out io.Writer) error {
 	s := &session{out: out, calls: map[uint64]context.CancelFunc{}, requests: map[uint64]chan abi.Response{}}
 	serving.Store(s)
@@ -78,8 +69,6 @@ func serveFrames(in io.Reader, out io.Writer) error {
 	}
 }
 
-// receive handles one frame from OLP: a call to serve, a response to a
-// capability request, or a cancellation.
 func (s *session) receive(line []byte) {
 	var frame abi.Frame
 	if err := json.Unmarshal(line, &frame); err != nil {
@@ -111,7 +100,6 @@ func (s *session) receive(line []byte) {
 	}
 }
 
-// serve answers call id, whose context cancel ends.
 func (s *session) serve(ctx context.Context, cancel context.CancelFunc, id uint64, request abi.Request) {
 	response := handle(ctx, request)
 	s.mu.Lock()
@@ -135,7 +123,6 @@ func (s *session) send(frame abi.Frame) error {
 	return s.write(data)
 }
 
-// write writes one frame, encoded.
 func (s *session) write(frame []byte) error {
 	s.writing.Lock()
 	defer s.writing.Unlock()
@@ -143,7 +130,6 @@ func (s *session) write(frame []byte) error {
 	return err
 }
 
-// sendPart streams one part of the result of the call ctx belongs to.
 func sendPart(ctx context.Context, part any) error {
 	s := serving.Load()
 	if s == nil {

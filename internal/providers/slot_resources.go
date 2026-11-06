@@ -51,15 +51,11 @@ func (s *Server) deleteSlot(r *http.Request, _ access.Principal) (access.Reply, 
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.Access.Begin(r)
+	tx, p, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	current, err := load(r.Context(), tx, providerID, true)
 	if err != nil {
 		return access.Reply{}, err
@@ -72,7 +68,7 @@ func (s *Server) deleteSlot(r *http.Request, _ access.Principal) (access.Reply, 
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	rows, err := loadSlots(r.Context(), tx, providerID)
 	if err != nil {
@@ -116,5 +112,5 @@ func (s *Server) deleteSlot(r *http.Request, _ access.Principal) (access.Reply, 
 	if err = s.Access.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }

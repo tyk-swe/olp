@@ -1,7 +1,7 @@
 import type {
   CodeClientSelection,
   CodeFilters
-} from '$lib/management/code-mode';
+} from '$lib/features/code-mode/api';
 
 const root = ['code-mode'] as const;
 export const codeKeys = {

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routeidentity"
@@ -32,7 +33,7 @@ type DelegationGrant struct {
 	DelegationPairDigest string    `json:"delegation_pair_digest"`
 }
 
-func (m *Manager) CreateDelegation(ctx context.Context, agent, key access.Authority, bounds DelegationBounds) (DelegationGrant, error) {
+func (m *Manager) CreateDelegation(ctx context.Context, agent, key keyauthority.Authority, bounds DelegationBounds) (DelegationGrant, error) {
 	if !agent.AgentPrincipal || agent.WorkloadIssuerID == nil || key.WorkloadIssuerID != nil || agent.ProjectID == nil || key.ProjectID == nil || *agent.ProjectID != *key.ProjectID || !slices.Contains(key.Policy.Scopes, "delegate") {
 		return DelegationGrant{}, access.Forbidden()
 	}
@@ -95,11 +96,11 @@ func validDelegationBounds(bounds DelegationBounds) bool {
 	return true
 }
 
-func (m *Manager) AuthenticateDelegation(ctx context.Context, token, assertion string) (*access.Authority, error) {
+func (m *Manager) AuthenticateDelegation(ctx context.Context, token, assertion string) (*keyauthority.Authority, error) {
 	return m.authenticateDelegation(ctx, token, assertion, false)
 }
 
-func (m *Manager) ExchangeMemberConsent(ctx context.Context, agent access.Authority, consent string, bounds DelegationBounds) (DelegationGrant, error) {
+func (m *Manager) ExchangeMemberConsent(ctx context.Context, agent keyauthority.Authority, consent string, bounds DelegationBounds) (DelegationGrant, error) {
 	if !validDelegationBounds(bounds) {
 		return DelegationGrant{}, ErrDelegationBounds
 	}
@@ -166,11 +167,11 @@ func (m *Manager) ExchangeMemberConsent(ctx context.Context, agent access.Author
 	return DelegationGrant{Token: token, ExpiresAt: expires, DelegationPairDigest: pair}, nil
 }
 
-func (m *Manager) ReauthenticateDelegation(ctx context.Context, token, assertion string) (*access.Authority, error) {
+func (m *Manager) ReauthenticateDelegation(ctx context.Context, token, assertion string) (*keyauthority.Authority, error) {
 	return m.authenticateDelegation(ctx, token, assertion, true)
 }
 
-func (m *Manager) authenticateDelegation(ctx context.Context, token, assertion string, consumed bool) (*access.Authority, error) {
+func (m *Manager) authenticateDelegation(ctx context.Context, token, assertion string, consumed bool) (*keyauthority.Authority, error) {
 	agent, err := m.Authenticate(assertion)
 	if err != nil {
 		return nil, err
@@ -225,7 +226,7 @@ func (m *Manager) authenticateDelegation(ctx context.Context, token, assertion s
 	return key.Delegated(scopes, routes, toolsets, agents, *agent, member, pairDigest, hex.EncodeToString(m.auth.Digest(secrets.DelegationTokenDigest, token)), boundDelegationExpiry(expires, agent.ExpiresAt)), nil
 }
 
-func (m *Manager) authorizeDelegatedTask(ctx context.Context, digest []byte, expectedKey, expectedProject, publication, expectedPair, expectedRevision string) (*access.Authority, error) {
+func (m *Manager) authorizeDelegatedTask(ctx context.Context, digest []byte, expectedKey, expectedProject, publication, expectedPair, expectedRevision string) (*keyauthority.Authority, error) {
 	if m == nil || m.pool == nil {
 		return nil, ErrInvalidKey
 	}
@@ -341,7 +342,7 @@ func (m *Manager) delegationTransactionWithLock(ctx context.Context, expected st
 	return tx, nil
 }
 
-func delegationResourcesAllowed(agent, key access.Authority, routes, toolsets, agents []string, now time.Time) bool {
+func delegationResourcesAllowed(agent, key keyauthority.Authority, routes, toolsets, agents []string, now time.Time) bool {
 	for _, route := range routes {
 		if !agent.Allows("inference", route, agent.ProjectID, now) || !key.Allows("inference", route, key.ProjectID, now) {
 			return false

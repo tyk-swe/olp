@@ -54,10 +54,10 @@ func (f *fleetHealth) unhealthy(providerID string) bool {
 // and follows the fleet's, until ctx ends. Without shared state it returns at
 // once, and local circuits alone decide.
 func (s *Server) RunFleetHealth(ctx context.Context) {
-	if !s.Admission.ready() {
+	if !s.deps.Admission.ready() {
 		return
 	}
-	limiter := s.Admission.limiter
+	limiter := s.deps.Admission.limiter
 	ticker := time.NewTicker(fleetPoll)
 	defer ticker.Stop()
 	s.pollFleet(ctx, limiter)

@@ -2,12 +2,12 @@ package routes
 
 import (
 	"encoding/json"
+	"github.com/tyk-swe/olp/internal/codesessions"
 	"net/http"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/resources"
 )
 
 // CodeClientConfiguration returns configuration for the latest publication.
@@ -34,7 +34,7 @@ func (s *Server) CodeClientConfiguration(r *http.Request, p access.Principal) (a
 	if err = json.Unmarshal(document, &route); err != nil {
 		return access.Reply{}, err
 	}
-	offers, err := resources.CodeOffers(r.Context(), s.Access.Pool, revision)
+	offers, err := codesessions.Offers(r.Context(), s.Access.Pool, revision)
 	if err != nil {
 		return access.Reply{}, err
 	}

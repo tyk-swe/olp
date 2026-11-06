@@ -7,7 +7,7 @@
     type CodePool,
     type CodeRoute,
     type CodeRouteWrite
-  } from '$lib/management/code-mode';
+  } from '$lib/features/code-mode/api';
   import { nativeModels, type PaidTargetOption } from './presentation';
 
   import {
@@ -285,7 +285,12 @@
         enabled
       };
     },
-    persist: (input, requestId) => saveCodeRoute(input, current, requestId)
+    persist: (input, requestId) =>
+      saveCodeRoute(
+        current
+          ? { kind: 'update', body: input, current }
+          : { kind: 'create', body: input, requestId }
+      )
   });
 </script>
 

@@ -24,12 +24,12 @@ func (s *Server) codeModels(w http.ResponseWriter, r *http.Request) {
 		codeWriteError(w, r, codemode.Refuse(failure.Status, "code_authentication_refused"))
 		return
 	}
-	release := s.Runtime.Release()
-	if release == nil || release.Snapshot == nil {
+	release := s.deps.Runtime.Release()
+	if release == nil || release.Snapshot() == nil {
 		codeWriteError(w, r, codemode.Refuse(503, "code_runtime_unavailable"))
 		return
 	}
-	route, ok := release.Snapshot.CodeRoutes[r.PathValue("slug")]
+	route, ok := release.Snapshot().FindCodeRoute(r.PathValue("slug"))
 	if !ok {
 		codeWriteError(w, r, codemode.Refuse(404, "code_route_unavailable"))
 		return
@@ -38,11 +38,11 @@ func (s *Server) codeModels(w http.ResponseWriter, r *http.Request) {
 		codeWriteError(w, r, codemode.Refuse(404, "code_route_unavailable"))
 		return
 	}
-	if s.CodeLedger == nil {
+	if s.deps.CodeLedger == nil {
 		codeWriteError(w, r, codemode.Refuse(503, "code_admission_unavailable"))
 		return
 	}
-	offers, err := s.CodeLedger.Models(r.Context(), route, authority.ID)
+	offers, err := s.deps.CodeLedger.Models(r.Context(), route, authority.ID)
 	if err != nil {
 		codeWriteError(w, r, err)
 		return

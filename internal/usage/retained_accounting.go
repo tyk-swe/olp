@@ -11,12 +11,16 @@ import (
 // PersistRetainedEventTx keeps the accepted accounting pins and also charges a
 // budget group attached to the key after acceptance. The key lock serializes
 // that changing boundary with this atomic financial commit.
-func PersistRetainedEventTx(ctx context.Context, tx pgx.Tx, event *Event, payload []byte) (Persisted, error) {
+func PersistRetainedEventTx(ctx context.Context, tx pgx.Tx, accepted AccountingEvent) (Persisted, error) {
+	if accepted.validated == nil {
+		return Persisted{}, ErrInvalidEvent
+	}
+	event := accepted.event
 	var currentGroup *string
 	if err := tx.QueryRow(ctx, `SELECT budget_group_id::text FROM olp.api_keys WHERE id=$1 FOR SHARE`, event.APIKeyID).Scan(&currentGroup); err != nil {
 		return Persisted{}, err
 	}
-	result, err := PersistEventTx(ctx, tx, event, payload)
+	result, err := PersistEventTx(ctx, tx, accepted)
 	if err != nil || result.Outcome != PersistOutcomePersisted {
 		return result, err
 	}

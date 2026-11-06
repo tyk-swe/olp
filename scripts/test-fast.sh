@@ -10,6 +10,7 @@ go test -mod=readonly -vet=off -count=1 -timeout=60s \
   ./internal/agents/publications \
   ./internal/secrets \
   ./internal/access \
+  ./internal/notifications \
   ./internal/billing \
   ./internal/usage \
   ./internal/protocols \

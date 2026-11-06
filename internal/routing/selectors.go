@@ -38,7 +38,7 @@ type selection struct {
 // decided first, so a classifier or plugin is consulted only for a selector
 // whose features already match. The operation is the one being planned,
 // whatever the features say.
-func selectTargets(s *Snapshot, route Route, operation string, options Options) selection {
+func selectTargets(s selectionSource, route Route, operation string, options Options) selection {
 	var out selection
 	if len(route.Selectors) == 0 || options.Features == nil {
 		return out
@@ -57,7 +57,7 @@ func selectTargets(s *Snapshot, route Route, operation string, options Options) 
 	return out
 }
 
-func evaluateSelector(s *Snapshot, selector *Selector, features Features, options Options) SelectorOutcome {
+func evaluateSelector(s selectionSource, selector *Selector, features Features, options Options) SelectorOutcome {
 	out := SelectorOutcome{ID: selector.ID, Outcome: "not_matched"}
 	if !selector.When.Matches(features) {
 		return out
@@ -81,7 +81,7 @@ func evaluateSelector(s *Snapshot, selector *Selector, features Features, option
 		}
 	}
 	if selector.Route != "" {
-		next, ok := s.Routes[selector.Route]
+		next, ok := s.lookupRoute(selector.Route)
 		switch {
 		case !ok || !slices.Contains(next.Operations, features.Operation):
 			out.Outcome = "selector_route_unavailable"

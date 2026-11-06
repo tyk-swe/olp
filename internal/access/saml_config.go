@@ -161,7 +161,7 @@ func (s *Server) samlProvider(r *http.Request, q Queryer, c samlConfiguration) (
 	}
 	metadataURL, _ := url.Parse(s.Origin + "/api/v1/saml/metadata")
 	acs, _ := url.Parse(s.Origin + "/api/v1/saml/acs")
-	sp := &saml.ServiceProvider{EntityID: s.Origin + "/api/v1/saml/metadata", Key: rsaKey, Certificate: cert, MetadataURL: *metadataURL, AcsURL: *acs, IDPMetadata: m.Entity, SignatureMethod: dsig.RSASHA256SignatureMethod, AuthnNameIDFormat: saml.PersistentNameIDFormat, HTTPClient: s.OIDCClient}
+	sp := &saml.ServiceProvider{EntityID: s.Origin + "/api/v1/saml/metadata", Key: rsaKey, Certificate: cert, MetadataURL: *metadataURL, AcsURL: *acs, IDPMetadata: m.Entity, SignatureMethod: dsig.RSASHA256SignatureMethod, AuthnNameIDFormat: saml.PersistentNameIDFormat, HTTPClient: s.oidcClient}
 	return sp, m, nil
 }
 
@@ -176,15 +176,11 @@ func (s *Server) putSAMLConfiguration(r *http.Request, _ Principal) (Reply, erro
 	if err := ValidateSAMLDefinition(input.SAMLDefinition); err != nil {
 		return Reply{}, err
 	}
-	tx, err := s.Begin(r)
+	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Reauthorize(r, tx)
-	if err != nil {
-		return Reply{}, err
-	}
 	old, err := loadSAML(r, tx)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return Reply{}, err
@@ -200,7 +196,7 @@ func (s *Server) putSAMLConfiguration(r *http.Request, _ Principal) (Reply, erro
 	if err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, Detail(c, c.ETag))
+	return Detail(c, c.ETag), tx.Commit(r.Context())
 }
 
 // StoreSAMLDefinition is shared by owner management and configuration promotion.
@@ -255,7 +251,7 @@ func (s *Server) StoreSAMLDefinition(r *http.Request, tx pgx.Tx, p Principal, d 
 			return c, err
 		}
 	}
-	if err = s.usableOwner(r, tx); err != nil {
+	if err = s.EnsureUsableOwner(r, tx); err != nil {
 		return c, err
 	}
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE purpose=$1", secrets.SAMLFlow); err != nil {
@@ -287,7 +283,7 @@ func (s *Server) importSAMLMetadata(r *http.Request, _ Principal) (Reply, error)
 	if err != nil {
 		return Reply{}, err
 	}
-	resp, err := s.OIDCClient.Do(req)
+	resp, err := s.oidcClient.Do(req)
 	if err != nil {
 		return Reply{}, Invalid("url", "The metadata endpoint is unavailable or outside identity egress policy.")
 	}

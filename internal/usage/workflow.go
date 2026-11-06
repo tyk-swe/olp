@@ -2,7 +2,6 @@ package usage
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,11 +55,8 @@ func workflowEvent(event *Event) bool {
 	return workflowRunID(event) != ""
 }
 
-func persistWorkflowTerminalTx(ctx context.Context, tx pgx.Tx, event *Event, payload []byte) (Persisted, error) {
-	validated, err := Validate(event)
-	if err != nil {
-		return Persisted{}, err
-	}
+func persistWorkflowTerminalTx(ctx context.Context, tx pgx.Tx, accepted AccountingEvent) (Persisted, error) {
+	event, validated := accepted.event, accepted.validated
 	runID := workflowRunID(event)
 	for _, attempt := range validated.Attempts {
 		ref := attempt.Attempt.Execution
@@ -71,7 +67,7 @@ func persistWorkflowTerminalTx(ctx context.Context, tx pgx.Tx, event *Event, pay
 			return Persisted{}, limits.ErrDebitConflict
 		}
 	}
-	digest := sha256.Sum256(payload)
+	digest := accepted.digest
 	var claimed string
 	claimErr := tx.QueryRow(ctx, `INSERT INTO olp.request_metadata_event_receipts(event_id,request_id,event_sha256,status,observed_at)
 SELECT $1,$2,$3,'pending',$4 WHERE $4 >= now()-make_interval(days=>$5) AND $4 <= now()+make_interval(mins=>$6)
@@ -111,7 +107,7 @@ ON CONFLICT DO NOTHING RETURNING event_id::text`, event.EventID, event.RequestID
 			}
 			continue
 		}
-		if attempt.Usage.Observed || attempt.Usage.BillingUncertain {
+		if attempt.Usage.observed() || attempt.Usage.uncertain() {
 			return Persisted{}, limits.ErrDebitConflict
 		}
 		if _, err := insertFact(ctx, tx, event, attempt); err != nil {

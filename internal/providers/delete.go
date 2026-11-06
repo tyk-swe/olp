@@ -18,21 +18,17 @@ func (s *Server) deleteProvider(r *http.Request, _ access.Principal) (access.Rep
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.Access.Begin(r)
+	tx, p, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	claim, replayed, err := s.Access.Replay(r, tx, p, map[string]string{"provider_id": id})
 	if err != nil {
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	current, err := load(r.Context(), tx, id, true)
 	if err != nil {
@@ -87,5 +83,5 @@ func (s *Server) deleteProvider(r *http.Request, _ access.Principal) (access.Rep
 	if err = s.Access.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }

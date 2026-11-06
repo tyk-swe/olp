@@ -11,22 +11,40 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/release"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 func installTestGuardrail(t *testing.T, h *harness, phase, action, kind, configuration string) {
 	t.Helper()
-	snapshot := h.rt.release.Snapshot
+	current := h.rt.release
+	snapshot := current.Snapshot().Clone()
 	route := snapshot.Routes[routeSlug]
 	snapshot.Guardrails = &guardrails.Registry{Definitions: map[string]guardrails.Revision{"revision": {ID: "revision", GuardrailID: "guard", ProjectID: "installation", Name: "Guard", Type: kind, Configuration: json.RawMessage(configuration), TimeoutMS: 1000, OnError: guardrails.FailClosed}}, Policies: map[string]guardrails.PolicyRevision{"policy-revision": {ID: "policy-revision", PolicyID: "policy", ProjectID: "installation", Entries: []guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: phase, Action: action}}}}, Attachments: []guardrails.Attachment{{ID: "attachment", Scope: "route", ScopeID: route.ID, PolicyRevisionID: "policy-revision"}}}
-	if err := snapshot.Compile(); err != nil {
+	credentials := map[string][]byte{}
+	for _, provider := range snapshot.Providers {
+		for _, slot := range provider.Slots {
+			if slot.CredentialID != nil {
+				credentials[*slot.CredentialID], _ = current.Credential(*slot.CredentialID)
+			}
+		}
+	}
+	installed, err := release.NewRelease(current.ID, current.Sequence, snapshot, credentials)
+	if err != nil {
 		t.Fatal(err)
 	}
+	h.rt.release = installed
 }
 
 func TestGuardrailMaskRestoresBeforeOutputAndRecordsOnlyMetadata(t *testing.T) {
 	h := newHarness(t, Config{})
 	installTestGuardrail(t, h, guardrails.Input, guardrails.Mask, "builtin.pii", `{"categories":["pii.email"]}`)
+	borrowed := h.rt.release.Snapshot()
+	*borrowed.GuardrailEngine(routeSlug, "") = guardrails.Engine{}
+	*borrowed = routing.View{}
+
 	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		if strings.Contains(string(body), "alice@example.com") {
@@ -57,10 +75,8 @@ func TestGuardrailMaskRestoresBeforeOutputAndRecordsOnlyMetadata(t *testing.T) {
 }
 
 func TestGuardrailParallelRefusalAfterCommitmentIsInBand(t *testing.T) {
-	h := newHarness(t, Config{})
-	installTestGuardrail(t, h, guardrails.InputParallel, guardrails.Block, "webhook", `{"endpoint":"https://example.com","credential_ref":"key","content_egress":true}`)
 	release := make(chan struct{})
-	h.gateway.GuardrailEvaluator = guardrails.EvaluatorFunc(func(ctx context.Context, _ guardrails.Revision, _ guardrails.Evaluation) (guardrails.Verdict, error) {
+	evaluator := guardrails.EvaluatorFunc(func(ctx context.Context, _ guardrails.Revision, _ guardrails.Evaluation) (guardrails.Verdict, error) {
 		select {
 		case <-release:
 		case <-ctx.Done():
@@ -68,6 +84,8 @@ func TestGuardrailParallelRefusalAfterCommitmentIsInBand(t *testing.T) {
 		}
 		return guardrails.Verdict{Action: "block"}, nil
 	})
+	h := newHarness(t, Config{}, Dependencies{GuardrailEvaluator: evaluator})
+	installTestGuardrail(t, h, guardrails.InputParallel, guardrails.Block, "webhook", `{"endpoint":"https://example.com","credential_ref":"key","content_egress":true}`)
 	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 		io.Copy(io.Discard, r.Body)
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -133,7 +151,20 @@ func TestNativeOperationOutputUnavailableIsExplicit(t *testing.T) {
 }
 
 func TestToolGuardrailEvaluationReachesConfiguredEvaluator(t *testing.T) {
-	h := newHarness(t, Config{})
+	evaluator := guardrails.EvaluatorFunc(func(_ context.Context, definition guardrails.Revision, evaluation guardrails.Evaluation) (guardrails.Verdict, error) {
+		if !json.Valid(definition.Configuration) {
+			return guardrails.Verdict{}, guardrails.ErrSurface
+		}
+		clear(definition.Configuration)
+		if len(evaluation.Segments) != 1 || evaluation.Segments[0].Kind != "tool_call" {
+			return guardrails.Verdict{}, guardrails.ErrSurface
+		}
+		if strings.Contains(evaluation.Segments[0].Text, "bad") {
+			return guardrails.Verdict{Action: "block", Categories: []string{"test.block"}}, nil
+		}
+		return guardrails.Verdict{Action: "pass"}, nil
+	})
+	h := newHarness(t, Config{}, Dependencies{GuardrailEvaluator: evaluator})
 	authority, err := h.rt.Authenticate(fullKey)
 	if err != nil {
 		t.Fatal(err)
@@ -143,15 +174,7 @@ func TestToolGuardrailEvaluationReachesConfiguredEvaluator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.gateway.GuardrailEvaluator = guardrails.EvaluatorFunc(func(_ context.Context, _ guardrails.Revision, evaluation guardrails.Evaluation) (guardrails.Verdict, error) {
-		if len(evaluation.Segments) != 1 || evaluation.Segments[0].Kind != "tool_call" {
-			return guardrails.Verdict{}, guardrails.ErrSurface
-		}
-		if strings.Contains(evaluation.Segments[0].Text, "bad") {
-			return guardrails.Verdict{Action: "block", Categories: []string{"test.block"}}, nil
-		}
-		return guardrails.Verdict{Action: "pass"}, nil
-	})
+
 	evaluate := func(text string) (guardrails.Result, error) {
 		return h.gateway.EvaluateToolGuardrails(t.Context(), *authority, h.rt.release, engine, "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50901", guardrails.Input, []guardrails.Segment{{ID: "arguments", Kind: "tool_call", ToolName: "t_alias", Text: text}}, &guardrails.Masking{})
 	}
@@ -169,5 +192,28 @@ func TestToolGuardrailEvaluationReachesConfiguredEvaluator(t *testing.T) {
 	}
 	if len(blocked.Decisions) != 1 || blocked.Decisions[0].Outcome != "blocked" {
 		t.Fatalf("blocked tool arguments kept no decision evidence: %+v", blocked.Decisions)
+	}
+}
+
+func TestPublishedPolicySurvivesMutationOfReturnedCompiledRules(t *testing.T) {
+	h := newHarness(t, Config{})
+	h.republish(func(snapshot *routing.Snapshot, _, _ routing.Provider) {
+		route := snapshot.Routes[routeSlug]
+		route.ContentPolicy = &contentpolicy.Policy{Rules: []contentpolicy.Rule{{ID: "secret", Phase: contentpolicy.PhaseInput, Pattern: "secret", Action: contentpolicy.ActionBlock}}}
+		snapshot.Routes[routeSlug] = route
+	})
+	route := h.rt.release.Snapshot().Route(routeSlug)
+	compiled := route.CompiledContentPolicy()
+	if err := compiled.Input[0].Re.UnmarshalText([]byte("public")); err != nil {
+		t.Fatal(err)
+	}
+	compiled.Input[0].Action = contentpolicy.ActionRedact
+	compiled.Policy.Rules[0].Pattern = "public"
+	resp, body := h.chat(fullKey, nil, `,"messages":[{"role":"user","content":"secret"}]`)
+	if resp.StatusCode != http.StatusBadRequest || body["error"].(map[string]any)["code"] != "content_policy_blocked" {
+		t.Fatalf("published policy changed through returned rules: %d %v", resp.StatusCode, body)
+	}
+	if calls := h.mock.count("a") + h.mock.count("b"); calls != 0 {
+		t.Fatalf("blocked request reached providers: %d", calls)
 	}
 }

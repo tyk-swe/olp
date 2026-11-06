@@ -12,7 +12,7 @@ import type {
   CodeDecision,
   CodePool,
   CodeRoute
-} from '$lib/management/code-mode';
+} from '$lib/features/code-mode/api';
 import {
   errorMessage,
   fieldIssues,
@@ -20,7 +20,6 @@ import {
 } from '$lib/management/http';
 import { formatInteger } from '$lib/format';
 
-/** The resource an editor creates, or updates when `current` is set. */
 export type CodeEditing =
   | { kind: 'accounts'; current?: CodeAccount }
   | { kind: 'pools'; current?: CodePool }
@@ -37,7 +36,6 @@ const adapterLabels: Record<string, string> = {
   qwen_token_plan: 'Qwen Token Plan'
 };
 
-/** The subscription family an account or a published route serves. */
 export function adapterLabel(adapter: string | null | undefined): string {
   return adapter ? (adapterLabels[adapter] ?? adapter) : 'No adapter';
 }

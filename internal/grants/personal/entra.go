@@ -12,17 +12,17 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/oauth2"
-
 	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/workload"
+	"golang.org/x/oauth2"
 )
 
-func (s *Store) ResolveEntra(ctx context.Context, authority access.Authority, tool routing.MCPToolsetTool, assertion workload.UserAssertion) ([]byte, error) {
+func (s *Store) ResolveEntra(ctx context.Context, authority keyauthority.Authority, tool routing.MCPToolsetTool, assertion workload.UserAssertion) ([]byte, error) {
 	bound, err := Bind(authority, tool)
 	if err != nil {
 		return nil, err
@@ -30,7 +30,7 @@ func (s *Store) ResolveEntra(ctx context.Context, authority access.Authority, to
 	return s.resolveEntra(ctx, bound, assertion)
 }
 
-func (s *Store) ResolveAgentEntra(ctx context.Context, authority access.Authority, publicationID string, agent agentcontract.Definition, assertion workload.UserAssertion) ([]byte, string, error) {
+func (s *Store) ResolveAgentEntra(ctx context.Context, authority keyauthority.Authority, publicationID string, agent agentcontract.Definition, assertion workload.UserAssertion) ([]byte, string, error) {
 	bound, err := BindAgent(authority, publicationID, agent)
 	if err != nil {
 		return nil, "", err

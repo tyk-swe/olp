@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"reflect"
 
+	"github.com/tyk-swe/olp/internal/providerconfig"
+
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/jackc/pgx/v5"
@@ -116,7 +118,7 @@ func privacyEvidence(stored json.RawMessage) bool {
 // suggestionsFor matches a provider's models against the catalog under the
 // provider's vendor.
 func suggestionsFor(signed *catalog.Signed, cfg *Configuration, models []storedModel) ([]catalogSuggestion, error) {
-	vendorID := value(cfg.Options.VendorID)
+	vendorID := providerconfig.Value(cfg.Options.VendorID)
 	out := []catalogSuggestion{}
 	for _, model := range models {
 		stored := cfg.Options.Models[model.UpstreamModel]
@@ -159,7 +161,7 @@ func (s *Server) catalogSuggestions(r *http.Request, p access.Principal) (access
 	if err != nil {
 		return access.Reply{}, err
 	}
-	return access.OK(map[string]any{"catalog": s.Catalog.Summary(), "vendor_id": value(current.Configuration.Options.VendorID), "items": items}), nil
+	return access.OK(map[string]any{"catalog": s.Catalog.Summary(), "vendor_id": providerconfig.Value(current.Configuration.Options.VendorID), "items": items}), nil
 }
 
 type acceptCatalogRequest struct {
@@ -218,7 +220,11 @@ func (s *Server) acceptCatalogSuggestions(r *http.Request, _ access.Principal) (
 			}
 			next.Options.Models[name] = merged
 		}
-		if err = StoreDraftConfiguration(ctx, tx, current.ID, current.Name, &next, s.Egress); err != nil {
+		prepared, err := PrepareConfiguration(ctx, tx, s.Unconfined, s.Egress, next)
+		if err != nil {
+			return access.Reply{}, err
+		}
+		if err = StoreDraftConfiguration(ctx, tx, current.ID, current.Name, prepared); err != nil {
 			return access.Reply{}, err
 		}
 		return s.detailReply(ctx, tx, current.ID)

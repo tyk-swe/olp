@@ -1,13 +1,13 @@
 package gateway
 
 import (
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
 // callerCostBudgeted checks the boundaries this request actually spends against.
 // A policy for another route or end user must not quarantine unlimited traffic.
-func callerCostBudgeted(authority *access.Authority, route string) bool {
+func callerCostBudgeted(authority *keyauthority.Authority, route string) bool {
 	return authority.CostBudgetedForRoute(route)
 }
 
@@ -16,7 +16,7 @@ func callerCostBudgeted(authority *access.Authority, route string) bool {
 // Request-rate and concurrency limits remain supported by normal admission.
 // Caller-paid exempt routes waive cost caps on caller-credential providers only.
 // callerRoute retains named-route key limits when a selector changes route.
-func unboundedWorkLimits(authority access.Authority, provider *routing.Provider, slot *routing.Slot, route *routing.Route, callerRoute ...string) *Error {
+func unboundedWorkLimits(authority keyauthority.Authority, provider *routing.Provider, slot *routing.Slot, route *routing.Route, callerRoute ...string) *Error {
 	var slug string
 	if route != nil {
 		slug = route.Slug
@@ -33,17 +33,17 @@ func unboundedWorkLimits(authority access.Authority, provider *routing.Provider,
 
 // A retained file and an ongoing session also respect consumption budgets added
 // after the serving contract was pinned, including current route and slot caps.
-func (s *Server) unboundedPinLimits(authority access.Authority, p *pin, route *routing.Route) *Error {
+func (s *Server) unboundedPinLimits(authority keyauthority.Authority, p *pin, route *routing.Route) *Error {
 	if e := unboundedWorkLimits(authority, &p.provider, &p.slot, route); e != nil {
 		return e
 	}
-	if release := s.Runtime.Release(); release != nil {
+	if release := s.deps.Runtime.Release(); release != nil {
 		if route != nil {
-			if current, ok := release.Snapshot.Routes[route.Slug]; ok {
+			if current, ok := release.Snapshot().FindRoute(route.Slug); ok {
 				route = &current
 			}
 		}
-		if provider, ok := release.Snapshot.Providers[p.provider.ID]; ok {
+		if provider, ok := release.Snapshot().FindProvider(p.provider.ID); ok {
 			for _, slot := range provider.Slots {
 				if slot.ID == p.slot.ID {
 					return unboundedWorkLimits(authority, &provider, &slot, route)

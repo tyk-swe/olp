@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/limits"
 )
@@ -75,8 +76,8 @@ type PairBudget struct {
 
 type DelegationView struct {
 	DelegationRecord
-	BudgetPolicy *access.BudgetPolicy `json:"budget_policy"`
-	Budget       PairBudget           `json:"budget"`
+	BudgetPolicy *keyauthority.BudgetPolicy `json:"budget_policy"`
+	Budget       PairBudget                 `json:"budget"`
 }
 
 type delegationPairRecord struct {
@@ -86,9 +87,9 @@ type delegationPairRecord struct {
 }
 
 type delegationPairBudget struct {
-	Ordinal int                  `db:"ordinal"`
-	Policy  *access.BudgetPolicy `db:"policy"`
-	Usage   *PairBudget          `db:"usage"`
+	Ordinal int                        `db:"ordinal"`
+	Policy  *keyauthority.BudgetPolicy `db:"policy"`
+	Usage   *PairBudget                `db:"usage"`
 }
 
 func (s *DelegationManagement) listDelegations(r *http.Request, p access.Principal) (access.Reply, error) {

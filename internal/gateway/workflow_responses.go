@@ -30,7 +30,7 @@ func (x *call) responseMCPContractCertified() bool {
 	if len(x.facts) == 0 {
 		return false
 	}
-	provider, ok := x.snapshot().Providers[x.facts[len(x.facts)-1].ProviderID]
+	provider, ok := x.snapshot().FindProvider(x.facts[len(x.facts)-1].ProviderID)
 	if !ok || provider.Plugin != nil {
 		return false
 	}

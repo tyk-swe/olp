@@ -5,7 +5,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -22,7 +22,7 @@ func NewWorkflowStore(pool *pgxpool.Pool, auth *secrets.AuthKey, debits *limits.
 	return &WorkflowStore{pool: pool, auth: auth, debits: debits, keys: keys, installation: installation}
 }
 
-func (s *WorkflowStore) Start(ctx context.Context, authority access.Authority, routeID, revisionID string) (string, error) {
+func (s *WorkflowStore) Start(ctx context.Context, authority keyauthority.Authority, routeID, revisionID string) (string, error) {
 	if s == nil || s.pool == nil || s.auth == nil || authority.ProjectID == nil || !validApprovalID(routeID) || !validApprovalID(revisionID) {
 		return "", limits.ErrDebitAuthority
 	}
@@ -41,7 +41,7 @@ func (s *WorkflowStore) Start(ctx context.Context, authority access.Authority, r
 	return id.String(), nil
 }
 
-func (s *WorkflowStore) Prepare(ctx context.Context, authority access.Authority, intent limits.DebitIntent, ordinal int, owners []limits.DebitOwner) (limits.DebitState, error) {
+func (s *WorkflowStore) Prepare(ctx context.Context, authority keyauthority.Authority, intent limits.DebitIntent, ordinal int, owners []limits.DebitOwner) (limits.DebitState, error) {
 	if s == nil || s.pool == nil || s.debits == nil {
 		return "", limits.ErrDebitAuthority
 	}

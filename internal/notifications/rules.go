@@ -189,3 +189,9 @@ func (c RuleConfiguration) ThresholdState(value string, active bool) (bool, erro
 	}
 	return v.Cmp(recovery) > 0, nil
 }
+
+const (
+	BudgetThresholdEvent = "budget.threshold"
+	KeyExpiringEvent     = "key.expiring"
+	GrantLapsedEvent     = "provider.grant.lapsed"
+)

@@ -107,15 +107,11 @@ func (s *Server) probe(r *http.Request, p access.Principal) (access.Reply, error
 // caller's authority and project reach are decided again under it before
 // anything is written.
 func (s *Server) recordProbe(r *http.Request, action, id string, at time.Time, succeeded bool, detail string) error {
-	tx, err := s.Access.Begin(r)
+	tx, p, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return err
-	}
 	current, err := load(r.Context(), tx, id, true)
 	if err != nil {
 		return err
@@ -207,15 +203,11 @@ func (s *Server) discover(r *http.Request, p access.Principal) (access.Reply, er
 			models = append(models, declared{name.Name, name.Display, name.Metadata})
 		}
 	}
-	tx, err := a.Begin(r)
+	tx, p, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err = a.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	locked, err := load(r.Context(), tx, id, true)
 	if err != nil {
 		return access.Reply{}, err
@@ -251,7 +243,7 @@ func (s *Server) discover(r *http.Request, p access.Principal) (access.Reply, er
 	if err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 
 func (s *Server) models(r *http.Request, p access.Principal) (access.Reply, error) {
@@ -327,7 +319,7 @@ func ValidCapabilities(inputs []CapabilityInput) ([]CapabilityInput, error) {
 	var out []CapabilityInput
 	seen := map[CapabilityInput]bool{}
 	for _, c := range inputs {
-		supported := operationregistry.Default.Supports(c.Operation, c.Surface, c.Mode)
+		supported := operationregistry.Catalog().Supports(c.Operation, c.Surface, c.Mode)
 		for _, option := range capabilityVocabulary {
 			supported = supported || option == c
 		}
@@ -356,15 +348,11 @@ func (s *Server) setModel(r *http.Request, _ access.Principal) (access.Reply, er
 	if err = access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := a.Begin(r)
+	tx, p, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	current, err := load(r.Context(), tx, id, true)
 	if err != nil {
 		return access.Reply{}, err
@@ -415,7 +403,7 @@ func (s *Server) setModel(r *http.Request, _ access.Principal) (access.Reply, er
 	if err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 
 func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, error) {
@@ -482,15 +470,11 @@ func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, err
 	case certified < len(m.Capabilities):
 		status = "partial"
 	}
-	tx, err := a.Begin(r)
+	tx, p, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err = a.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	locked, err := load(r.Context(), tx, id, true)
 	if err != nil {
 		return access.Reply{}, err
@@ -527,7 +511,7 @@ func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, err
 		return access.Reply{}, err
 	}
 	result := access.Detail(map[string]any{"provider_id": id, "model_id": modelID, "status": status, "checked_at": at, "certified_count": certified, "attempted_count": len(m.Capabilities), "results": results}, etag)
-	reply, err := access.Commit(r, tx, result)
+	reply, err := result, tx.Commit(r.Context())
 	if err == nil && certified == len(m.Capabilities) {
 		s.clearValidatedCooldowns(r.Context(), id, defaultSlot)
 	}

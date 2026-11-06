@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -51,7 +51,7 @@ type WorkflowContinuation struct {
 	ExpiresAt       time.Time          `json:"expires_at"`
 }
 
-func (s *WorkflowStore) Pause(ctx context.Context, authority access.Authority, request WorkflowApprovalRequest, maxBytes int) (string, error) {
+func (s *WorkflowStore) Pause(ctx context.Context, authority keyauthority.Authority, request WorkflowApprovalRequest, maxBytes int) (string, error) {
 	if s == nil || s.pool == nil || s.auth == nil || s.keys == nil || authority.ProjectID == nil || request.StartOrdinal < 0 || len(request.Calls) == 0 || len(request.Calls) > 32 || !json.Valid(request.Transcript) || !json.Valid(request.State) {
 		return "", ErrApproval
 	}
@@ -127,7 +127,7 @@ func (s *WorkflowStore) Pause(ctx context.Context, authority access.Authority, r
 	return token, nil
 }
 
-func (s *WorkflowStore) Continue(ctx context.Context, authority access.Authority, token string, transcript json.RawMessage, arguments map[string]json.RawMessage, maxBytes int) (WorkflowContinuation, error) {
+func (s *WorkflowStore) Continue(ctx context.Context, authority keyauthority.Authority, token string, transcript json.RawMessage, arguments map[string]json.RawMessage, maxBytes int) (WorkflowContinuation, error) {
 	if s == nil || s.pool == nil || s.auth == nil || s.keys == nil || authority.ProjectID == nil || maxBytes <= 0 || len(token) > maxBytes || !json.Valid(transcript) {
 		return WorkflowContinuation{}, ErrApproval
 	}

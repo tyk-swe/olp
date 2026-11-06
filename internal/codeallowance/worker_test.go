@@ -3,6 +3,8 @@ package codeallowance
 import (
 	"context"
 	"errors"
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
+	"github.com/tyk-swe/olp/internal/providerconfig"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,7 +16,6 @@ import (
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 type fakeStore struct {
@@ -80,7 +81,7 @@ func dueAccount() DueAccount {
 			ID: "account-1", ProjectID: "project", ProviderID: "provider", CredentialID: "credential",
 			Principal: "principal", Enabled: true,
 		},
-		Configuration: routing.Configuration{Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID},
+		Configuration: routing.Configuration{Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID}},
 	}
 }
 
@@ -93,12 +94,12 @@ func reader(store *fakeStore, authorizer *fakeAuthorizer, locker fakeLocker, tra
 	}
 }
 
-func readFixture(ctx context.Context, r *Reader, entry DueAccount) (usage.Outcome, bool) {
+func readFixture(ctx context.Context, r *Reader, entry DueAccount) (workerhealth.Outcome, bool) {
 	progress, err := r.read(ctx, entry)
 	if err != nil {
-		return usage.OutcomeFailure, progress
+		return workerhealth.OutcomeFailure, progress
 	}
-	return usage.OutcomeSuccess, progress
+	return workerhealth.OutcomeSuccess, progress
 }
 
 func TestDueOperatorRequestAndStaleActiveEvidence(t *testing.T) {
@@ -146,7 +147,7 @@ func TestReadWritesActiveAllowanceFromUpstream(t *testing.T) {
 		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(validUsage))}, nil
 	})
 	outcome, progress := readFixture(t.Context(), reader(store, &fakeAuthorizer{}, fakeLocker{}, transport), store.due[0])
-	if outcome != usage.OutcomeSuccess || !progress {
+	if outcome != workerhealth.OutcomeSuccess || !progress {
 		t.Fatalf("pass = %v, progress %v", outcome, progress)
 	}
 	if seen == nil || seen.Method != http.MethodGet || seen.URL.String() != UsageURL {
@@ -174,7 +175,7 @@ func TestPassSkipsAccountAnotherWorkerHolds(t *testing.T) {
 		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(validUsage))}, nil
 	})
 	outcome, progress := reader(store, authorizer, fakeLocker{held: map[string]bool{"account-1": true}}, transport).Pass(t.Context())
-	if outcome != usage.OutcomeSuccess || progress || calls != 0 || authorizer.calls != 0 || len(store.completed) != 0 {
+	if outcome != workerhealth.OutcomeSuccess || progress || calls != 0 || authorizer.calls != 0 || len(store.completed) != 0 {
 		t.Fatalf("held lock must skip without a read: outcome %v progress %v calls %d completed %v", outcome, progress, calls, store.completed)
 	}
 }
@@ -193,7 +194,7 @@ func TestReadMalformedOrFailedReadInvalidatesActiveEvidence(t *testing.T) {
 	} {
 		store := &fakeStore{due: []DueAccount{dueAccount()}}
 		outcome, progress := readFixture(t.Context(), reader(store, &fakeAuthorizer{}, fakeLocker{}, transport), store.due[0])
-		if outcome != usage.OutcomeSuccess || progress || len(store.observed) != 0 || len(store.completed) != 1 || len(store.invalidated) != 1 {
+		if outcome != workerhealth.OutcomeSuccess || progress || len(store.observed) != 0 || len(store.completed) != 1 || len(store.invalidated) != 1 {
 			t.Errorf("%s: outcome %v progress %v observed %d completed %v", name, outcome, progress, len(store.observed), store.completed)
 		}
 	}
@@ -202,7 +203,7 @@ func TestReadMalformedOrFailedReadInvalidatesActiveEvidence(t *testing.T) {
 		t.Error("no upstream call without authorization")
 		return nil, errors.New("unreachable")
 	})), store.due[0])
-	if outcome != usage.OutcomeSuccess || len(store.observed) != 0 || len(store.completed) != 1 || len(store.invalidated) != 1 {
+	if outcome != workerhealth.OutcomeSuccess || len(store.observed) != 0 || len(store.completed) != 1 || len(store.invalidated) != 1 {
 		t.Fatalf("authorize failure: outcome %v observed %d completed %v", outcome, len(store.observed), store.completed)
 	}
 }
@@ -210,7 +211,7 @@ func TestReadMalformedOrFailedReadInvalidatesActiveEvidence(t *testing.T) {
 func TestPassFailureOnlyWhenDueCannotBeRead(t *testing.T) {
 	store := &fakeStore{dueErr: errors.New("database down")}
 	outcome, progress := reader(store, &fakeAuthorizer{}, fakeLocker{}, nil).Pass(t.Context())
-	if outcome != usage.OutcomeFailure || progress {
+	if outcome != workerhealth.OutcomeFailure || progress {
 		t.Fatalf("pass = %v, progress %v", outcome, progress)
 	}
 }
@@ -229,7 +230,7 @@ func TestReadWritesActiveAllowanceFromMiniMaxRemains(t *testing.T) {
 				ID: "account-1", ProjectID: "project", ProviderID: "provider", CredentialID: "credential",
 				Principal: "principal", Enabled: true, Models: []string{"MiniMax-M3"},
 			},
-			Configuration: routing.Configuration{Kind: "plugin", AuthMode: "grant", ProfileID: tc.profile},
+			Configuration: routing.Configuration{Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: tc.profile}},
 		}
 		store := &fakeStore{due: []DueAccount{due}}
 		var seen *http.Request
@@ -238,7 +239,7 @@ func TestReadWritesActiveAllowanceFromMiniMaxRemains(t *testing.T) {
 			return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(minimaxBody(minimaxBucket("MiniMax-M3", ""))))}, nil
 		})
 		outcome, progress := readFixture(t.Context(), reader(store, &fakeAuthorizer{}, fakeLocker{}, transport), store.due[0])
-		if outcome != usage.OutcomeSuccess || !progress {
+		if outcome != workerhealth.OutcomeSuccess || !progress {
 			t.Fatalf("profile %q pass = %v, progress %v", tc.profile, outcome, progress)
 		}
 		if seen == nil || seen.Method != http.MethodGet || seen.URL.String() != tc.url {
@@ -272,7 +273,7 @@ func assertPassSkipsProfile(t *testing.T, profile string) {
 			ID: "account-1", ProjectID: "project", ProviderID: "provider", CredentialID: "credential",
 			Principal: "principal", Enabled: true,
 		},
-		Configuration: routing.Configuration{Kind: "plugin", AuthMode: "grant", ProfileID: profile},
+		Configuration: routing.Configuration{Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: profile}},
 	}
 	store := &fakeStore{due: []DueAccount{due}}
 	authorizer := &fakeAuthorizer{}
@@ -283,7 +284,7 @@ func assertPassSkipsProfile(t *testing.T, profile string) {
 		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(validUsage))}, nil
 	})
 	outcome, progress := reader(store, authorizer, fakeLocker{}, transport).Pass(t.Context())
-	if outcome != usage.OutcomeSuccess || progress || calls != 0 || authorizer.calls != 0 || len(store.observed) != 0 || len(store.completed) != 0 {
+	if outcome != workerhealth.OutcomeSuccess || progress || calls != 0 || authorizer.calls != 0 || len(store.observed) != 0 || len(store.completed) != 0 {
 		t.Fatalf("profile %q: outcome %v progress %v calls %d auth %d observed %d completed %v, want a silent skip with no network call", profile, outcome, progress, calls, authorizer.calls, len(store.observed), store.completed)
 	}
 }

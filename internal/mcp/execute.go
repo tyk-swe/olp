@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
@@ -21,7 +21,7 @@ import (
 
 const toolRateLeaseTTL = 150 * time.Second
 
-func toolPerKeyLookup(authority access.Authority, serverID string) string {
+func toolPerKeyLookup(authority keyauthority.Authority, serverID string) string {
 	sum := sha256.Sum256([]byte(authority.LimitsLookup() + "\x00" + serverID))
 	return "tk_" + hex.EncodeToString(sum[:16])
 }
@@ -53,21 +53,21 @@ func toolRateRequests(in CallRequest) []limits.Request {
 	return append(requests, toolCallerRate(in.Authority), toolGroupRate(in.Authority), toolAgentRate(in.Authority))
 }
 
-func toolCallerRate(authority access.Authority) limits.Request {
+func toolCallerRate(authority keyauthority.Authority) limits.Request {
 	if authority.Policy.RequestsPerMinute == nil && authority.Policy.MaxConcurrency == nil {
 		return limits.Request{}
 	}
 	return limits.Request{CostOwnerID: authority.ID, LookupID: authority.LimitsLookup(), RequestsPerMinute: authority.Policy.RequestsPerMinute, MaxConcurrency: authority.Policy.MaxConcurrency, LeaseTTL: toolRateLeaseTTL}
 }
 
-func toolGroupRate(authority access.Authority) limits.Request {
+func toolGroupRate(authority keyauthority.Authority) limits.Request {
 	if authority.BudgetGroupID == nil || (authority.BudgetGroupRPM == nil && authority.BudgetGroupConcurrency == nil) {
 		return limits.Request{}
 	}
 	return limits.Request{CostOwnerID: *authority.BudgetGroupID, LookupID: limits.BudgetGroupLookup(*authority.BudgetGroupID), RequestsPerMinute: authority.BudgetGroupRPM, MaxConcurrency: authority.BudgetGroupConcurrency, LeaseTTL: toolRateLeaseTTL}
 }
 
-func toolAgentRate(authority access.Authority) limits.Request {
+func toolAgentRate(authority keyauthority.Authority) limits.Request {
 	if authority.DelegationAgentLimits == nil || (authority.DelegationAgentLimits.Limits.RequestsPerMinute == nil && authority.DelegationAgentLimits.Limits.MaxConcurrency == nil) {
 		return limits.Request{}
 	}
@@ -103,7 +103,7 @@ func (s *Executor) reserveToolRate(ctx context.Context, in CallRequest) ([]*limi
 }
 
 type CallRequest struct {
-	Authority         access.Authority
+	Authority         keyauthority.Authority
 	Approval          *runs.WorkflowApproval
 	RunID             string
 	Ordinal           int
@@ -126,7 +126,7 @@ type dispatchResult struct {
 	certification sessions.Certification
 }
 
-func (s *Executor) loadOriginalCredential(ctx context.Context, authority access.Authority, tool routing.MCPToolsetTool) ([]byte, *Failure) {
+func (s *Executor) loadOriginalCredential(ctx context.Context, authority keyauthority.Authority, tool routing.MCPToolsetTool) ([]byte, *Failure) {
 	if tool.OAuth != nil {
 		if s.grants == nil {
 			return nil, refusal("user_grant_required", "Enroll a usable personal grant before calling this tool.")

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/tyk-swe/olp/internal/codesessions"
 	"io"
 	"log/slog"
 	"maps"
@@ -19,11 +20,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/routing"
-
 	"github.com/google/uuid"
-
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -31,7 +29,8 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/release"
-	"github.com/tyk-swe/olp/internal/resources"
+
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -51,7 +50,7 @@ type fakeRuntime struct {
 	mu      sync.Mutex
 	release *release.Release
 	inputs  *usage.RoutingInputs
-	keys    map[string]access.Authority
+	keys    map[string]keyauthority.Authority
 	stale   bool
 	revoked map[string]bool
 	// lapsed holds the credential versions whose grants lapsed.
@@ -69,7 +68,7 @@ func (f *fakeRuntime) RoutingInputs() *usage.RoutingInputs {
 	return f.inputs
 }
 
-func (f *fakeRuntime) Authenticate(secret string) (*access.Authority, error) {
+func (f *fakeRuntime) Authenticate(secret string) (*keyauthority.Authority, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.stale {
@@ -213,11 +212,11 @@ type harness struct {
 	upstream *httptest.Server
 }
 
-func newHarness(t *testing.T, cfg Config) *harness {
-	return newHarnessWrapped(t, cfg, func(h http.Handler) http.Handler { return h })
+func newHarness(t *testing.T, cfg Config, extra ...Dependencies) *harness {
+	return newHarnessWrapped(t, cfg, func(h http.Handler) http.Handler { return h }, extra...)
 }
 
-func newHarnessWrapped(t *testing.T, cfg Config, wrap func(http.Handler) http.Handler) *harness {
+func newHarnessWrapped(t *testing.T, cfg Config, wrap func(http.Handler) http.Handler, extra ...Dependencies) *harness {
 	t.Helper()
 	m := &mock{handlers: map[string]http.HandlerFunc{}, calls: map[string]int{}}
 	m.set("a", completion(modelA, answerText))
@@ -256,10 +255,10 @@ func newHarnessWrapped(t *testing.T, cfg Config, wrap func(http.Handler) http.Ha
 		t.Fatal(err)
 	}
 	keyID := uuid.NewString()
-	rt := &fakeRuntime{release: release, revoked: map[string]bool{}, keys: map[string]access.Authority{
-		fullKey:  {ID: keyID, Policy: access.KeyPolicy{Scopes: []string{"inference", "models_read"}}},
-		readKey:  {ID: uuid.NewString(), Policy: access.KeyPolicy{Scopes: []string{"models_read"}}},
-		otherKey: {ID: uuid.NewString(), Policy: access.KeyPolicy{Scopes: []string{"inference", "models_read"}, AllowedRoutes: []string{"another-route"}}},
+	rt := &fakeRuntime{release: release, revoked: map[string]bool{}, keys: map[string]keyauthority.Authority{
+		fullKey:  {ID: keyID, Policy: keyauthority.KeyPolicy{Scopes: []string{"inference", "models_read"}}},
+		readKey:  {ID: uuid.NewString(), Policy: keyauthority.KeyPolicy{Scopes: []string{"models_read"}}},
+		otherKey: {ID: uuid.NewString(), Policy: keyauthority.KeyPolicy{Scopes: []string{"inference", "models_read"}, AllowedRoutes: []string{"another-route"}}},
 	}}
 	policy := egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
 	if cfg.MaxInFlight == 0 {
@@ -275,8 +274,12 @@ func newHarnessWrapped(t *testing.T, cfg Config, wrap func(http.Handler) http.Ha
 		cfg.MaxEventBytes = 4096
 	}
 	sink := &capture{}
-	gw := New(rt, &policy, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	gw.Sink = sink
+	dependencies := Dependencies{}
+	if len(extra) > 0 {
+		dependencies = extra[0]
+	}
+	dependencies.Runtime, dependencies.Egress, dependencies.Log, dependencies.Sink = rt, &policy, slog.New(slog.NewTextHandler(io.Discard, nil)), sink
+	gw := New(dependencies, cfg)
 	mux := http.NewServeMux()
 	gw.Register(mux)
 	server := httptest.NewServer(wrap(mux))
@@ -285,28 +288,29 @@ func newHarnessWrapped(t *testing.T, cfg Config, wrap func(http.Handler) http.Ha
 }
 
 // admissionAuthority builds a key with the limits a case needs.
-func admissionAuthority(policy access.KeyPolicy) access.Authority {
-	return access.Authority{ID: uuid.Must(uuid.NewV7()).String(), LookupID: "lookupid0123", Policy: policy}
+func admissionAuthority(policy keyauthority.KeyPolicy) keyauthority.Authority {
+	return keyauthority.Authority{ID: uuid.Must(uuid.NewV7()).String(), LookupID: "lookupid0123", Policy: policy}
 }
 
 // reissue publishes a release in which the harness's first provider is
 // edited, with credential as its secret unless that is nil.
 func (h *harness) reissue(edit func(*routing.Provider), credential []byte) {
 	h.t.Helper()
+	snapshot := h.rt.release.Snapshot().Clone()
 	secrets := map[string][]byte{}
-	for id, provider := range h.rt.release.Snapshot.Providers {
+	for id, provider := range snapshot.Providers {
 		for _, slot := range provider.Slots {
 			secrets[*slot.CredentialID], _ = h.rt.release.Credential(*slot.CredentialID)
 		}
 		if provider.Slots[0].ID == h.slotA {
 			edit(&provider)
-			h.rt.release.Snapshot.Providers[id] = provider
+			snapshot.Providers[id] = provider
 		}
 	}
 	if credential != nil {
 		secrets[h.credA] = credential
 	}
-	release, err := release.NewRelease(uuid.NewString(), 7, h.rt.release.Snapshot, secrets)
+	release, err := release.NewRelease(uuid.NewString(), 7, snapshot, secrets)
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -326,7 +330,7 @@ func strictHarnessCfg(t *testing.T, cfg Config, configure func(*routing.Snapshot
 func strictRelease(t *testing.T, h *harness, configure func(*routing.Snapshot)) *harness {
 	t.Helper()
 	current := h.rt.release
-	snapshot := current.Snapshot
+	snapshot := current.Snapshot().Clone()
 	credentials := map[string][]byte{}
 	for id, provider := range snapshot.Providers {
 		provider.ProfileID, provider.ProfileRevision = "compatible-chat", connectors.ProfileRevision
@@ -366,9 +370,9 @@ func (h *harness) republish(edit func(s *routing.Snapshot, a, b routing.Provider
 	h.t.Helper()
 	old := h.rt.Release()
 	snapshot := &routing.Snapshot{
-		Generation: routing.Generation{ID: uuid.NewString(), Ordinal: old.Snapshot.Generation.Ordinal + 1, ActivatedAt: old.Snapshot.Generation.ActivatedAt},
-		Providers:  maps.Clone(old.Snapshot.Providers),
-		Routes:     maps.Clone(old.Snapshot.Routes),
+		Generation: routing.Generation{ID: uuid.NewString(), Ordinal: old.Snapshot().Generation().Ordinal + 1, ActivatedAt: old.Snapshot().Generation().ActivatedAt},
+		Providers:  maps.Collect(old.Snapshot().Providers()),
+		Routes:     maps.Collect(old.Snapshot().Routes()),
 	}
 	var a, b routing.Provider
 	credentials := map[string][]byte{}
@@ -554,11 +558,11 @@ type chargeLedger struct {
 func (l *chargeLedger) Models(context.Context, codemode.Route, string) (codeclient.Offers, error) {
 	return nil, nil
 }
-func (l *chargeLedger) Admit(context.Context, resources.CodeAdmission) (resources.CodePermit, error) {
-	return resources.CodePermit{}, nil
+func (l *chargeLedger) Admit(context.Context, codesessions.Admission) (codesessions.Permit, error) {
+	return codesessions.Permit{}, nil
 }
-func (l *chargeLedger) BindConnection(context.Context, codemode.Route, string, codemode.Identity, string, []string) (resources.CodePermit, error) {
-	return resources.CodePermit{}, nil
+func (l *chargeLedger) BindConnection(context.Context, codemode.Route, string, codemode.Identity, string, []string) (codesessions.Permit, error) {
+	return codesessions.Permit{}, nil
 }
 func (l *chargeLedger) MarkDispatched(context.Context, string) error { return nil }
 func (l *chargeLedger) ConfirmNonexecution(context.Context, string, int) error {
@@ -602,7 +606,7 @@ func TestCodeAttemptStoresAllowanceChargeOnlyForOpenCodeGo(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			ledger := &chargeLedger{}
-			attempt := &codeAttempt{server: &Server{CodeLedger: ledger}, adapter: tc.adapter, permit: resources.CodePermit{Attempt: codemode.Attempt{ID: "attempt-1"}}}
+			attempt := &codeAttempt{server: &Server{deps: Dependencies{CodeLedger: ledger}}, adapter: tc.adapter, permit: codesessions.Permit{Attempt: codemode.Attempt{ID: "attempt-1"}}}
 			if tc.paid {
 				attempt.paid = &paidCodeAttempt{}
 			}
@@ -619,7 +623,7 @@ func TestCodeAttemptStoresAllowanceChargeOnlyForOpenCodeGo(t *testing.T) {
 
 func TestCodeAttemptLastTerminalChargeWins(t *testing.T) {
 	ledger := &chargeLedger{}
-	attempt := &codeAttempt{server: &Server{CodeLedger: ledger}, adapter: codemode.AdapterOpenCodeGo, permit: resources.CodePermit{Attempt: codemode.Attempt{ID: "attempt-1"}}}
+	attempt := &codeAttempt{server: &Server{deps: Dependencies{CodeLedger: ledger}}, adapter: codemode.AdapterOpenCodeGo, permit: codesessions.Permit{Attempt: codemode.Attempt{ID: "attempt-1"}}}
 	attempt.observe(codemode.Observation{Terminal: true, AllowanceCharge: json.RawMessage(`{"billing_source":"go","allowance":0.001}`)})
 	terminal := json.RawMessage(`{"billing_source":"go","allowance":0.0021}`)
 	attempt.observe(codemode.Observation{Terminal: true, AllowanceCharge: terminal})
@@ -716,7 +720,7 @@ func TestTransformedMediaPreservesUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = spool.Close() })
-	h.gateway.Media = &MediaDeps{
+	h.gateway.deps.Media = &MediaDeps{
 		Jobs: &media.Service{Transport: &media.Transport{
 			Client: h.gateway.client, Auth: h.gateway.auth, Egress: h.gateway.egress,
 			Spool: spool, MaxResponseBytes: 1 << 20,

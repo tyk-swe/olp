@@ -135,10 +135,10 @@ func responseNativeIdentity(x *call, fact *AttemptFact, upstream string) resourc
 }
 func (s *Server) readResponseResource(ctx context.Context, owner, id string) (*resources.Resource, *storedResponseContract, error) {
 	if !strings.HasPrefix(id, resources.KindStrictResponse+"_") {
-		r, err := s.Resources.Get(ctx, resources.KindResponse, owner, id)
+		r, err := s.deps.Resources.Get(ctx, resources.KindResponse, owner, id)
 		return r, nil, err
 	}
-	r, payload, err := s.Resources.ReadContract(ctx, resources.KindStrictResponse, owner, id)
+	r, payload, err := s.deps.Resources.ReadContract(ctx, resources.KindStrictResponse, owner, id)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -149,7 +149,7 @@ func (s *Server) readResponseResource(ctx context.Context, owner, id string) (*r
 	return r, &contract, nil
 }
 func (s *Server) putStrictResponse(ctx context.Context, x *call, fact *AttemptFact, upstream, state string, metadata []byte, providerExpiry *time.Time) (*resources.Resource, error) {
-	provider, ok := x.snapshot().Providers[fact.ProviderID]
+	provider, ok := x.snapshot().FindProvider(fact.ProviderID)
 	if !ok {
 		return nil, resources.ErrContract
 	}
@@ -157,7 +157,7 @@ func (s *Server) putStrictResponse(ctx context.Context, x *call, fact *AttemptFa
 	if err != nil || prepared.plan == nil || prepared.plan.Obligations().Continuation != "native_response_resource" {
 		return nil, resources.ErrContract
 	}
-	existing, err := s.Resources.GetByUpstream(ctx, responseNativeIdentity(x, fact, upstream))
+	existing, err := s.deps.Resources.GetByUpstream(ctx, responseNativeIdentity(x, fact, upstream))
 	if err == nil {
 		return existing, nil
 	}
@@ -198,5 +198,5 @@ func (s *Server) putStrictResponse(ctx context.Context, x *call, fact *AttemptFa
 	if previous := x.previousResponse(); previous != nil {
 		r.ParentID = &previous.UUID
 	}
-	return s.Resources.PutContract(ctx, r, payload)
+	return s.deps.Resources.PutContract(ctx, r, payload)
 }

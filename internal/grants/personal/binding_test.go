@@ -8,8 +8,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
-
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -25,9 +24,9 @@ func testOAuth(scopes ...string) *routing.MCPOAuth {
 	}
 }
 
-func testAuthority() access.Authority {
+func testAuthority() keyauthority.Authority {
 	project := "project-1"
-	return access.Authority{ID: "key-1", ProjectID: &project}
+	return keyauthority.Authority{ID: "key-1", ProjectID: &project}
 }
 
 func testTool(scopes ...string) routing.MCPToolsetTool {
@@ -45,7 +44,7 @@ func TestBindRequiresProjectAndOAuth(t *testing.T) {
 	if _, err := Bind(testAuthority(), tool); !errors.Is(err, ErrRequired) {
 		t.Errorf("Bind without OAuth err = %v, want ErrRequired", err)
 	}
-	if _, err := Bind(access.Authority{ProjectID: testAuthority().ProjectID}, testTool("read")); !errors.Is(err, ErrRequired) {
+	if _, err := Bind(keyauthority.Authority{ProjectID: testAuthority().ProjectID}, testTool("read")); !errors.Is(err, ErrRequired) {
 		t.Errorf("Bind without any identity err = %v, want ErrRequired", err)
 	}
 }

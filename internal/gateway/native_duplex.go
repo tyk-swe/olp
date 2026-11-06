@@ -11,8 +11,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/duplexcontract"
 	"github.com/tyk-swe/olp/internal/oif"
@@ -70,7 +69,7 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token := bearerToken(r)
-	var authority access.Authority
+	var authority keyauthority.Authority
 	var e *Error
 	if len(r.Header.Values("Authorization")) != 1 || token == "" {
 		e = authenticationError("invalid_api_key", "Provide one API key.")
@@ -86,7 +85,7 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 		writeSurfaceError(w, e, surface)
 		return
 	}
-	route, ok := x.request.release.Snapshot.Routes[routeSlug]
+	route, ok := x.request.release.Snapshot().FindRoute(routeSlug)
 	if !ok || !x.authority.Allows("inference", route.Slug, route.ProjectID, s.now()) || !slices.Contains(route.Operations, "realtime") {
 		e := modelNotFound(routeSlug)
 		x.failure, status = e, e.Status
@@ -185,7 +184,7 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 		x.failure, status = e, e.Status
 		return
 	}
-	template, compiled := x.request.release.Snapshot.DuplexTemplate(route.Slug, p.target.ID)
+	template, compiled := x.request.release.Snapshot().DuplexTemplate(route.Slug, p.target.ID)
 	if !compiled || template.Dialect() != descriptor.Dialect {
 		client.Close(websocket.StatusPolicyViolation, "profile unavailable")
 		x.failure, status = serverError(http.StatusBadGateway, "upstream_error", "The selected target has no compiled native duplex contract."), http.StatusBadGateway

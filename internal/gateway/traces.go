@@ -16,7 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -60,7 +60,7 @@ type traceRecord struct {
 
 func (s *Server) ingestTraces(w http.ResponseWriter, r *http.Request) {
 	token, _ := consumerauth.Bearer(r.Header.Get("Authorization"))
-	authority, failure := consumerauth.Authenticate(s.Runtime, r, token, "traces_write", s.cfg.TrustedProxies, time.Now())
+	authority, failure := consumerauth.Authenticate(s.deps.Runtime, r, token, "traces_write", s.cfg.TrustedProxies, time.Now())
 	if failure != nil {
 		writeTraceError(w, failure.Status, failure.Message)
 		return
@@ -69,11 +69,11 @@ func (s *Server) ingestTraces(w http.ResponseWriter, r *http.Request) {
 		writeTraceError(w, http.StatusForbidden, "This API key cannot write traces for a project.")
 		return
 	}
-	if s.Traces == nil || s.Traces.Pool == nil || s.Traces.Limiter == nil || s.Traces.Auth == nil {
+	if s.deps.Traces == nil || s.deps.Traces.Pool == nil || s.deps.Traces.Limiter == nil || s.deps.Traces.Auth == nil {
 		writeTraceError(w, http.StatusServiceUnavailable, "Trace ingestion is unavailable.")
 		return
 	}
-	leases, err := s.Traces.reserve(r.Context(), authority)
+	leases, err := s.deps.Traces.reserve(r.Context(), authority)
 	if err != nil {
 		var exceeded *limits.ExceededError
 		if errors.As(err, &exceeded) {
@@ -118,7 +118,7 @@ func (s *Server) ingestTraces(w http.ResponseWriter, r *http.Request) {
 		}
 	})
 	if len(records) > 0 {
-		if err := s.Traces.persist(r.Context(), authority, records); err != nil {
+		if err := s.deps.Traces.persist(r.Context(), authority, records); err != nil {
 			writeTraceError(w, http.StatusServiceUnavailable, "Trace ingestion is unavailable.")
 			return
 		}
@@ -176,7 +176,7 @@ func readTraceBytes(reader io.Reader) ([]byte, int) {
 	return body, 0
 }
 
-func (d *TraceDeps) reserve(ctx context.Context, authority access.Authority) ([]*limits.Lease, error) {
+func (d *TraceDeps) reserve(ctx context.Context, authority keyauthority.Authority) ([]*limits.Lease, error) {
 	limit := int64(60)
 	hash := sha256.Sum256([]byte(authority.ID))
 	traceLease, err := d.Limiter.Reserve(ctx, limits.Request{CostOwnerID: authority.ID, LookupID: "tr_" + hex.EncodeToString(hash[:16]), RequestsPerMinute: &limit, LeaseTTL: time.Minute})
@@ -197,14 +197,14 @@ func (d *TraceDeps) reserve(ctx context.Context, authority access.Authority) ([]
 	return []*limits.Lease{traceLease, keyLease, groupLease}, nil
 }
 
-func (d *TraceDeps) reserveTraceKey(ctx context.Context, authority access.Authority) (*limits.Lease, error) {
+func (d *TraceDeps) reserveTraceKey(ctx context.Context, authority keyauthority.Authority) (*limits.Lease, error) {
 	if authority.Policy.RequestsPerMinute == nil && authority.Policy.MaxConcurrency == nil {
 		return nil, nil
 	}
 	return d.Limiter.Reserve(ctx, limits.Request{CostOwnerID: authority.ID, LookupID: authority.LimitsLookup(), RequestsPerMinute: authority.Policy.RequestsPerMinute, MaxConcurrency: authority.Policy.MaxConcurrency, LeaseTTL: time.Minute})
 }
 
-func (d *TraceDeps) reserveTraceGroup(ctx context.Context, authority access.Authority) (*limits.Lease, error) {
+func (d *TraceDeps) reserveTraceGroup(ctx context.Context, authority keyauthority.Authority) (*limits.Lease, error) {
 	if authority.BudgetGroupID == nil || authority.BudgetGroupRPM == nil && authority.BudgetGroupConcurrency == nil {
 		return nil, nil
 	}
@@ -328,7 +328,7 @@ LEFT JOIN olp.agent_steps s ON s.dispatch_id=NULLIF(v.attempt_id,'')::uuid
 LEFT JOIN olp.agent_runs sr ON sr.id=s.run_id AND sr.project_id=$1 AND sr.api_key_id=$2 AND sr.principal_digest=$3
 ON CONFLICT(project_id,api_key_id,principal_digest,trace_id,span_id) DO NOTHING`
 
-func (d *TraceDeps) persist(ctx context.Context, authority access.Authority, records []traceRecord) error {
+func (d *TraceDeps) persist(ctx context.Context, authority keyauthority.Authority, records []traceRecord) error {
 	payload, err := json.Marshal(records)
 	if err != nil {
 		return err

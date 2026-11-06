@@ -2,10 +2,8 @@
   import { goto, replaceState } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { onDestroy, onMount } from 'svelte';
-  import {
-    acceptInvitation,
-    authenticationCapabilities
-  } from '$lib/features/access/session/api';
+  import { authenticationCapabilities } from '$lib/features/access/session/api';
+  import { acceptInvitation } from '$lib/features/access/session/authentication';
   import {
     ApiProblem,
     applyServerFieldErrors,
@@ -63,8 +61,7 @@
       window.location.hash.replace(/^#/, '')
     );
     token = fragment.get('token') ?? '';
-    // Remove the one-time material before the invitee enters any data. The
-    // token remains only in this component's memory until submission.
+
     if (token) void checkPolicy();
     else view = 'invalid';
     const scrub = window.setTimeout(

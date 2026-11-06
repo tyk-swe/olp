@@ -3,7 +3,7 @@
     QueryClientProvider,
     type QueryClient
   } from '@tanstack/svelte-query';
-  import type { CodeRoute } from '$lib/management/code-mode';
+  import type { CodeRoute } from '$lib/features/code-mode/api';
   import RouteEditor from '../RouteEditor.svelte';
   import type { PaidTargetOption } from '../presentation';
 

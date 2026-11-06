@@ -10,7 +10,6 @@ type DigestPurpose struct{ name string }
 
 func (p DigestPurpose) String() string { return p.name }
 
-// Digest purposes.
 var (
 	SAMLStateDigest          = DigestPurpose{"saml_state"}
 	SAMLCookieDigest         = DigestPurpose{"saml_cookie"}
@@ -46,7 +45,6 @@ var (
 	MCPEnrollmentDigest      = DigestPurpose{"mcp_enrollment"}
 )
 
-// DigestPurposes lists every digest purpose.
 func DigestPurposes() []DigestPurpose {
 	return []DigestPurpose{CacheKeyDigest, SAMLStateDigest, SAMLCookieDigest, SAMLAssertionDigest, MFAChallengeDigest, MFARecoveryDigest, APIKeyDigest, WorkloadDigest, WorkloadAgentDigest, EndUserDigest, ManagementTokenDigest, SessionDigest, RecentAuthDigest, CSRFDigest,
 		OIDCStateDigest, OIDCCookieDigest, InvitationDigest, AdmissionDigest, MutationDigest, InstallationDigest, BatchSubmissionDigest, BatchLineDigest, ApprovalDigest, AgentPrincipalDigest, DelegationTokenDigest, DelegationConsentDigest, DelegationPairDigest, TaskCapabilityDigest, RetainedSubmissionDigest, ToolInputDigest, ToolCallDigest, MCPEnrollmentDigest}
@@ -65,7 +63,6 @@ func (p SealPurpose) String() string { return p.name }
 // spelling it.
 func (p SealPurpose) Value() (driver.Value, error) { return p.name, nil }
 
-// Seal purposes.
 var (
 	SAMLKey  = SealPurpose{"saml_key"}
 	SAMLFlow = SealPurpose{"saml_flow"}
@@ -101,13 +98,11 @@ var (
 	WorkflowContinuation  = SealPurpose{"workflow_continuation"}
 )
 
-// SealPurposes lists every seal purpose.
 func SealPurposes() []SealPurpose {
 	return []SealPurpose{SAMLKey, SAMLFlow, MFATOTP, MFAWebAuthn, ProviderCredential, ProviderContinuation, NotificationSecret, MutationReplay,
 		OIDCClientSecret, OIDCFlow, MediaJobSource, ProviderGrantRefresh, GrantEnrollment, SinkCredential, MCPCredential, MCPGrantAccess, MCPGrantRefresh, MCPGrantEnrollment, MCPEntraClient, MCPDelegationSigning, BillingCredential, GuardrailCredential, ResponseCache, ProviderUploadSession, AgentCredential, WorkflowContinuation}
 }
 
-// ParseSealPurpose returns the seal purpose a stored record names.
 func ParseSealPurpose(name string) (SealPurpose, bool) {
 	for _, purpose := range SealPurposes() {
 		if purpose.name == name {

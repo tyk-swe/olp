@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/workload"
 )
@@ -18,7 +19,7 @@ func TestAllowedAttributionKeysAgreeWithRequestLabels(t *testing.T) {
 		{"", false}, {"2team", false}, {"team/name", false}, {strings.Repeat("a", 33), false},
 	} {
 		t.Run(tc.key, func(t *testing.T) {
-			key := keyInput{Name: "key", KeyPolicy: KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{}, AllowedAttributionKeys: []string{tc.key}}}
+			key := keyInput{Name: "key", KeyPolicy: keyauthority.KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{}, AllowedAttributionKeys: []string{tc.key}}}
 			keyErr := validateAndNormalizeKey(key, false)
 			labelErr := attribution.Validate(map[string]string{tc.key: "value"})
 			if (keyErr == nil) != tc.valid || (labelErr == nil) != tc.valid {
@@ -41,8 +42,8 @@ func TestWorkloadReferencesAgreeWithProjectNames(t *testing.T) {
 	}
 	for _, name := range []string{"name", "name-a.b_c", "UPPER", "name/path", "", strings.Repeat("a", 100), strings.Repeat("a", 101)} {
 		t.Run(name, func(t *testing.T) {
-			groupErr := (RouteGroups{name: []string{"route"}}).Validate()
-			templateErr := (LimitTemplates{name: AdmissionLimits{}}).ValidateAndNormalize()
+			groupErr := (keyauthority.RouteGroups{name: []string{"route"}}).Validate()
+			templateErr := (keyauthority.LimitTemplates{name: keyauthority.AdmissionLimits{}}).ValidateAndNormalize()
 			workloadGroupErr := issuer("template", name).Validate()
 			workloadTemplateErr := issuer(name, "group").Validate()
 			if (groupErr == nil) != (workloadGroupErr == nil) || (templateErr == nil) != (workloadTemplateErr == nil) {
@@ -56,7 +57,7 @@ func TestConsumerResourceDenyMatrix(t *testing.T) {
 	project := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607"
 	resource := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50608"
 	now := time.Now()
-	a := Authority{ProjectID: &project, Policy: KeyPolicy{Scopes: []string{"inference", "tools", "agents", "traces_write"}, AllowedRoutes: []string{"*"}, AllowedRouteGroups: []string{"all"}, AllowedToolsets: []string{resource}}}
+	a := keyauthority.Authority{ProjectID: &project, Policy: keyauthority.KeyPolicy{Scopes: []string{"inference", "tools", "agents", "traces_write"}, AllowedRoutes: []string{"*"}, AllowedRouteGroups: []string{"all"}, AllowedToolsets: []string{resource}}}
 	if !a.AllowsResource("tools", resource, project, now) || !a.AllowsResource("traces_write", "", project, now) {
 		t.Fatal("explicit consumer authority refused")
 	}
@@ -106,7 +107,7 @@ func TestConsumerScopesWorkForKeysAndWorkloadMappings(t *testing.T) {
 		{name: "unknown scope", scopes: []string{"unknown"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			key := keyInput{Name: "key", KeyPolicy: KeyPolicy{Scopes: tc.scopes, AllowedRoutes: []string{}}}
+			key := keyInput{Name: "key", KeyPolicy: keyauthority.KeyPolicy{Scopes: tc.scopes, AllowedRoutes: []string{}}}
 			issuer := workload.Config{
 				Name: "workload", Issuer: "https://issuer.example", JWKSURL: "https://issuer.example/keys",
 				Audiences: []string{"gateway"}, Algorithms: []string{"RS256"}, MaxLifetimeSeconds: 600,

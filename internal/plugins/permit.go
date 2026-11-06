@@ -96,15 +96,11 @@ func (s *Management) permit(r *http.Request, _ access.Principal) (access.Reply, 
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.Access.Begin(r)
+	tx, p, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	if err = s.Access.ConsumeRecent(r, tx, p, permitPurpose, ""); err != nil {
 		return access.Reply{}, err
 	}
@@ -129,7 +125,7 @@ func (s *Management) permit(r *http.Request, _ access.Principal) (access.Reply, 
 	if err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, access.Reply{Status: http.StatusCreated, Body: plugin, ETag: plugin.Etag.String(), Location: "/api/v1/plugins/" + file.Digest})
+	return access.Reply{Status: http.StatusCreated, Body: plugin, ETag: plugin.Etag.String(), Location: "/api/v1/plugins/" + file.Digest}, tx.Commit(r.Context())
 }
 
 // isPermitted reports whether an owner permitted the executable with digest.

@@ -68,7 +68,7 @@ func (s *Server) observeRetainedSettlement(ctx context.Context, r *resources.Res
 	if err != nil {
 		return err
 	}
-	return s.Resources.RecordRetainedObservation(ctx, r, observation, nil)
+	return s.deps.Resources.RecordRetainedObservation(ctx, r, observation, nil)
 }
 
 func (s *Server) fenceRetainedMutation(ctx context.Context, r *http.Request, x *call, e retainedapi.Endpoint, resource *resources.Resource, body []byte) (func(), *Error) {
@@ -82,7 +82,7 @@ func (s *Server) fenceRetainedMutation(ctx context.Context, r *http.Request, x *
 	}
 	payload := append([]byte(e.Method+":"+e.Pattern+":"+resource.ID+":"+r.URL.RawQuery+":"), body...)
 	digest := sha256.Sum256(payload)
-	err := s.Resources.PrepareRetainedMutation(ctx, resource, e.Operation+":"+e.Action, key, digest[:])
+	err := s.deps.Resources.PrepareRetainedMutation(ctx, resource, e.Operation+":"+e.Action, key, digest[:])
 	if err != nil {
 		if errors.Is(err, resources.ErrSubmissionConflict) {
 			return noop, serverError(409, "idempotency_conflict", "This mutation identity already exists or conflicts with its original request.")
@@ -92,7 +92,7 @@ func (s *Server) fenceRetainedMutation(ctx context.Context, r *http.Request, x *
 	return func() {
 		commit, cancel := resourceCommitContext(ctx)
 		defer cancel()
-		_ = s.Resources.UnknownRetainedMutation(commit, resource.UUID, key, e.Operation+":"+e.Action)
+		_ = s.deps.Resources.UnknownRetainedMutation(commit, resource.UUID, key, e.Operation+":"+e.Action)
 	}, nil
 }
 
@@ -109,13 +109,13 @@ func (s *Server) retainedUnboundedLimits(x *call, p *pin) *Error {
 		return route != nil && route.Budget != nil && (route.Budget.DailyCostLimit != nil || route.Budget.MonthlyCostLimit != nil) || provider != nil && provider.Limits != nil && provider.Limits.Costs() != nil || slot != nil && slot.Costs() != nil
 	}
 	capped := authority.CostBudgetedForRoute(x.route.Slug) || monetary(&p.provider, &p.slot, x.route)
-	if s.Runtime != nil {
-		if release := s.Runtime.Release(); release != nil {
+	if s.deps.Runtime != nil {
+		if release := s.deps.Runtime.Release(); release != nil {
 			var route *routing.Route
-			if current, ok := release.Snapshot.Routes[x.route.Slug]; ok {
+			if current, ok := release.Snapshot().FindRoute(x.route.Slug); ok {
 				route = &current
 			}
-			if provider, ok := release.Snapshot.Providers[p.provider.ID]; ok {
+			if provider, ok := release.Snapshot().FindProvider(p.provider.ID); ok {
 				var slot *routing.Slot
 				for _, candidate := range provider.Slots {
 					if candidate.ID == p.slot.ID {

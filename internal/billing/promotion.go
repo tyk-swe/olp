@@ -11,8 +11,6 @@ import (
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
-// ImportState is the stored billing import configuration promotion compares
-// documents against.
 type ImportState struct {
 	Source       string
 	Enabled      bool
@@ -20,8 +18,6 @@ type ImportState struct {
 	CredentialID *string
 }
 
-// ReadImportState reads one provider's import settings, or nil when it has
-// none.
 func ReadImportState(ctx context.Context, q access.Queryer, providerID string) (*ImportState, error) {
 	var s ImportState
 	err := q.QueryRow(ctx, `SELECT source,enabled,scope,credential_id::text
@@ -36,8 +32,6 @@ func ReadImportState(ctx context.Context, q access.Queryer, providerID string) (
 	return &s, nil
 }
 
-// ImportCredential stores a billing credential under its purpose and returns
-// the new secret's id.
 func ImportCredential(ctx context.Context, tx pgx.Tx, keys *secrets.KeyRing, installation, source, credential string) (string, error) {
 	document, err := encodeCredential(source, credential)
 	if err != nil {
@@ -71,8 +65,6 @@ func ImportCredentialCompatible(ctx context.Context, q access.Queryer, keys *sec
 	return true, nil
 }
 
-// ImportCredentialMatches reports whether the stored credential holds the
-// same material as the supplied secret.
 func ImportCredentialMatches(ctx context.Context, q access.Queryer, keys *secrets.KeyRing, installation, source string, credentialID *string, credential string) (bool, error) {
 	if credentialID == nil {
 		return false, nil
@@ -114,47 +106,53 @@ func ImportCredentialMatches(ctx context.Context, q access.Queryer, keys *secret
 	return sha256.Sum256(key) == sha256.Sum256(canonical), nil
 }
 
-// ApplyImport creates, replaces or deletes a provider's billing import to
-// match desired settings. Configuration promotion calls it inside its
-// transaction; the API's PUT handler writes the same columns.
-func ApplyImport(ctx context.Context, tx pgx.Tx, providerID, source string, enabled bool, scope json.RawMessage, credentialID *string, createdBy string) error {
+type ImportConfiguration struct {
+	Source       string
+	Enabled      bool
+	Scope        json.RawMessage
+	CredentialID *string
+}
+
+func SaveImport(ctx context.Context, tx pgx.Tx, providerID string, desired ImportConfiguration, createdBy string) (string, error) {
+	scope := desired.Scope
 	if scope == nil {
 		scope = json.RawMessage(`{}`)
 	}
-	canonical, err := ValidateScope(source, scope)
+	canonical, err := ValidateScope(desired.Source, scope)
 	if err != nil {
-		return err
+		return "", err
 	}
 	existing, err := ReadImportState(ctx, tx, providerID)
 	if err != nil {
-		return err
+		return "", err
 	}
+	etag := access.NewID()
 	if existing == nil {
-		_, err = tx.Exec(ctx, `INSERT INTO olp.provider_billing_imports
+		if _, err := tx.Exec(ctx, `INSERT INTO olp.provider_billing_imports
 			(provider_id,source,credential_id,scope,enabled,etag,created_by,next_import_at)
 			VALUES($1::uuid,$2,$3::uuid,$4::jsonb,$5,$6,$7::uuid,now())`,
-			providerID, source, credentialID, canonical, enabled, access.NewID(), createdBy)
-	} else {
-		var old *string
-		if existing.CredentialID != nil && (credentialID == nil || *existing.CredentialID != *credentialID) {
-			old = existing.CredentialID
+			providerID, desired.Source, desired.CredentialID, canonical, desired.Enabled, etag, createdBy); err != nil {
+			return "", err
 		}
-		_, err = tx.Exec(ctx, `UPDATE olp.provider_billing_imports SET
+	} else {
+		if _, err := tx.Exec(ctx, `UPDATE olp.provider_billing_imports SET
 			source=$2,credential_id=$3::uuid,scope=$4::jsonb,enabled=$5,etag=$6,updated_at=now()
 			WHERE provider_id=$1::uuid`,
-			providerID, source, credentialID, canonical, enabled, access.NewID())
-		if err == nil && old != nil {
-			_, err = tx.Exec(ctx, `DELETE FROM olp.secrets WHERE id=$1::uuid AND purpose=$2`, *old, secrets.BillingCredential)
+			providerID, desired.Source, desired.CredentialID, canonical, desired.Enabled, etag); err != nil {
+			return "", err
+		}
+		if existing.CredentialID != nil && (desired.CredentialID == nil || *existing.CredentialID != *desired.CredentialID) {
+			if _, err := tx.Exec(ctx, `DELETE FROM olp.secrets WHERE id=$1::uuid AND purpose=$2`, *existing.CredentialID, secrets.BillingCredential); err != nil {
+				return "", err
+			}
 		}
 	}
-	if err != nil {
-		return err
+	if err := syncImportRevision(ctx, tx, providerID, desired.Source, canonical); err != nil {
+		return "", err
 	}
-	return syncImportRevision(ctx, tx, providerID, source, canonical)
+	return etag, nil
 }
 
-// RemoveImport deletes a provider's billing import and its sealed credential.
-// Imported costs are kept.
 func RemoveImport(ctx context.Context, tx pgx.Tx, providerID string) error {
 	existing, err := ReadImportState(ctx, tx, providerID)
 	if err != nil {

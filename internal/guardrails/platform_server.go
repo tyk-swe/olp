@@ -168,15 +168,11 @@ func (s *Server) writePolicy(r *http.Request, id string, retire bool) (access.Re
 			return access.Reply{}, access.Invalid("policy", "Supply a name and at most 128 entries.")
 		}
 	}
-	tx, err := s.Access.Begin(r)
+	tx, p, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	var current *ManagedPolicy
 	if id != "" {
 		current, err = loadPolicy(r.Context(), tx, id, true)
@@ -199,7 +195,7 @@ func (s *Server) writePolicy(r *http.Request, id string, retire bool) (access.Re
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	if current != nil {
 		if err = access.Match(r, current.ETag); err != nil {
@@ -269,7 +265,7 @@ func (s *Server) writePolicy(r *http.Request, id string, retire bool) (access.Re
 	if err = s.Access.CompleteReplay(r, tx, claim, reply); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, reply)
+	return reply, tx.Commit(r.Context())
 }
 func (s *Server) activateDefinition(r *http.Request, _ access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "guardrail_id")
@@ -292,15 +288,11 @@ func (s *Server) activate(r *http.Request, id string, policy bool) (access.Reply
 	if err := access.DecodeUnique(r, &in, 65536); err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.Access.Begin(r)
+	tx, p, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	table, revisionTable, owner := "guardrails", "guardrail_revisions", "guardrail_id"
 	if policy {
 		table, revisionTable, owner = "guardrail_policies", "guardrail_policy_revisions", "policy_id"
@@ -319,7 +311,7 @@ func (s *Server) activate(r *http.Request, id string, policy bool) (access.Reply
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	if err = access.Match(r, etag); err != nil {
 		return access.Reply{}, err
@@ -356,7 +348,7 @@ func (s *Server) activate(r *http.Request, id string, policy bool) (access.Reply
 	if err = s.Access.CompleteReplay(r, tx, claim, reply); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, reply)
+	return reply, tx.Commit(r.Context())
 }
 
 // AuthorizeAttachment preserves the authority of the resource being changed.
@@ -465,15 +457,11 @@ func (s *Server) writeAttachment(r *http.Request, remove bool) (access.Reply, er
 			return access.Reply{}, access.Invalid("scope", "Choose installation, organization, project, route, toolset or api-key.")
 		}
 	}
-	tx, err := s.Access.Begin(r)
+	tx, p, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	etag := ""
 	if remove {
 		id, err := access.IDParam(r, "attachment_id")
@@ -493,7 +481,7 @@ func (s *Server) writeAttachment(r *http.Request, remove bool) (access.Reply, er
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	if remove {
 		if err = access.Match(r, etag); err != nil {
@@ -527,7 +515,7 @@ func (s *Server) writeAttachment(r *http.Request, remove bool) (access.Reply, er
 	if err = s.Access.CompleteReplay(r, tx, claim, reply); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, reply)
+	return reply, tx.Commit(r.Context())
 }
 func (s *Server) evaluate(r *http.Request, p access.Principal) (access.Reply, error) {
 	var in ApplyInput
@@ -584,15 +572,11 @@ func (s *Server) createCredential(r *http.Request, _ access.Principal) (access.R
 	if ValidateCredential(in.Credential) != nil || in.Name == "" || len(in.Name) > 100 {
 		return access.Reply{}, access.Invalid("credential", "Supply a named credential object.")
 	}
-	tx, err := s.Access.Begin(r)
+	tx, p, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	if err = s.Access.RequireProject(r.Context(), tx, p, &in.ProjectID); err != nil {
 		return access.Reply{}, err
 	}
@@ -601,7 +585,7 @@ func (s *Server) createCredential(r *http.Request, _ access.Principal) (access.R
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	id := access.NewID()
 	if err = s.Access.Keys.Store(r.Context(), tx, s.Access.Installation, id, secrets.GuardrailCredential, in.Credential, nil); err != nil {
@@ -618,7 +602,7 @@ func (s *Server) createCredential(r *http.Request, _ access.Principal) (access.R
 	if err = s.Access.CompleteReplay(r, tx, claim, reply); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, reply)
+	return reply, tx.Commit(r.Context())
 }
 
 func (p ManagedPolicy) MarshalJSON() ([]byte, error) {

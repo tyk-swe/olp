@@ -1,3 +1,4 @@
+import { requestNative } from '$lib/management/transport';
 import type { components } from '$lib/management/schema';
 import { apiClient } from '$lib/management/client';
 import { unwrap } from '$lib/management/http';
@@ -34,11 +35,13 @@ export type ExternalCredentialReference =
 export async function exportConfiguration(
   signal?: AbortSignal
 ): Promise<ConfigurationExport> {
-  const { data, error, response } = await apiClient.GET(
+  return requestNative(
+    apiClient,
+    'get',
     '/api/v1/configuration/export',
-    { signal }
+    { signal },
+    [['document', 'providers', '*', 'configuration']]
   );
-  return unwrap({ data, error, response });
 }
 
 export async function planConfiguration(
@@ -93,16 +96,12 @@ export function missingSecretBindings(plan: ConfigurationPlan): string[] {
     .map((item) => item.key);
 }
 
-/** The credential references a plan leaves for grant enrollment after
- * applying: exports never carry grants. */
 export function grantEnrollments(plan: ConfigurationPlan): string[] {
   return plan.actions
     .filter((item) => item.action === 'enroll')
     .map((item) => item.key);
 }
 
-/** The names of the artifact's providers that pin the plugin build with the
- * digest. */
 export function pinningProviders(
   document: ConfigurationDocument,
   digest: string

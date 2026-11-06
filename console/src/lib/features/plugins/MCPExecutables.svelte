@@ -8,9 +8,9 @@
   import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
   import {
     beginIdentityReauthentication,
-    listOidcIdentities,
-    reauthenticateWithPassword
+    listOidcIdentities
   } from '$lib/features/access/profile/api';
+  import { reauthenticateWithPassword } from '$lib/features/access/profile/reauthentication';
   import {
     listMCPExecutables,
     reviewMCPExecutable,

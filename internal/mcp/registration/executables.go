@@ -101,15 +101,11 @@ func (s *Server) permitExecutable(r *http.Request, _ access.Principal) (access.R
 	if file.Digest != input.Digest {
 		return access.Reply{}, access.Fail(http.StatusConflict, "executable_changed", "The executable changed. Review the installed build again.")
 	}
-	tx, err := s.access.Begin(r)
+	tx, principal, err := s.access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	principal, err := s.access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	if err := s.access.ConsumeRecent(r, tx, principal, "plugin_permit", ""); err != nil {
 		return access.Reply{}, err
 	}
@@ -119,26 +115,22 @@ func (s *Server) permitExecutable(r *http.Request, _ access.Principal) (access.R
 	if err := access.Audit(r.Context(), tx, r, principal.Actor(), "mcp_executable.permit", "mcp_executable", file.Digest, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, access.Reply{Status: http.StatusCreated, Body: executablePermission{ExecutableFile: file.ExecutableFile, Permitted: true}})
+	return access.Reply{Status: http.StatusCreated, Body: executablePermission{ExecutableFile: file.ExecutableFile, Permitted: true}}, tx.Commit(r.Context())
 }
 
 func (s *Server) revokeExecutable(r *http.Request, _ access.Principal) (access.Reply, error) {
-	tx, err := s.access.Begin(r)
+	tx, principal, err := s.access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	principal, err := s.access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	if _, err := tx.Exec(r.Context(), "DELETE FROM olp.mcp_executable_permissions WHERE executable=$1 AND digest=$2", r.PathValue("executable"), r.PathValue("digest")); err != nil {
 		return access.Reply{}, err
 	}
 	if err := access.Audit(r.Context(), tx, r, principal.Actor(), "mcp_executable.revoke", "mcp_executable", r.PathValue("digest"), "success"); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, access.Reply{Status: http.StatusNoContent})
+	return access.Reply{Status: http.StatusNoContent}, tx.Commit(r.Context())
 }
 
 func (e *Executables) Start(ctx context.Context, binding *routing.MCPStdioBinding, timeout time.Duration) (*plugins.NativeProcess, error) {

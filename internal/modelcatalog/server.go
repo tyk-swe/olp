@@ -7,12 +7,12 @@ import (
 	"slices"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/routing"
-
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/release"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 type Server struct {
@@ -34,9 +34,9 @@ type Exposure struct {
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
-	s.Access.Route(mux, "GET /api/v1/catalog", s.list, access.InferenceKeyAuth(func(r *http.Request) (access.Authority, error) {
+	s.Access.Route(mux, "GET /api/v1/catalog", s.list, access.InferenceKeyAuth(func(r *http.Request) (keyauthority.Authority, error) {
 		if s.Gateway == nil || s.Runtime == nil {
-			return access.Authority{}, access.Fail(503, "authority_unavailable", "Key authority is unavailable.")
+			return keyauthority.Authority{}, access.Fail(503, "authority_unavailable", "Key authority is unavailable.")
 		}
 		return s.Gateway.CatalogAuthority(r)
 	}))
@@ -76,7 +76,7 @@ func (s *Server) describe(r *http.Request, visible func(routing.Route) bool, pri
 		return access.Reply{}, access.Fail(503, "catalog_unavailable", "The catalog is unavailable.")
 	}
 	release := s.Runtime.Release()
-	if release == nil || release.Snapshot == nil {
+	if release == nil || release.Snapshot() == nil {
 		return access.Reply{}, access.Fail(503, "catalog_unavailable", "The catalog is unavailable.")
 	}
 	rows, err := s.Access.Pool.Query(r.Context(), "SELECT route_id::text,expose_upstream_models FROM olp.model_catalog_route_settings")
@@ -99,9 +99,9 @@ func (s *Server) describe(r *http.Request, visible func(routing.Route) bool, pri
 	}
 	models := []Model{}
 	inputs, now := s.Runtime.RoutingInputs(), time.Now()
-	for _, route := range release.Snapshot.Routes {
+	for _, route := range release.Snapshot().Routes() {
 		if visible(route) {
-			models = append(models, Describe(release.Snapshot, route, inputs, s.Origin, prices, exposure[route.ID], now))
+			models = append(models, Describe(release.Snapshot(), route, inputs, s.Origin, prices, exposure[route.ID], now))
 		}
 	}
 	slices.SortFunc(models, func(a, b Model) int {
@@ -152,15 +152,11 @@ func (s *Server) putPublication(r *http.Request, _ access.Principal) (access.Rep
 	if input.Enabled == nil || input.PricesPublic == nil {
 		return access.Reply{}, access.Invalid("enabled", "Include enabled and prices_public explicitly.")
 	}
-	tx, err := s.Access.Begin(r)
+	tx, p, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	if err = p.Project(&id, access.Change); err != nil {
 		return access.Reply{}, err
 	}
@@ -185,7 +181,7 @@ func (s *Server) putPublication(r *http.Request, _ access.Principal) (access.Rep
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "catalog.publish", "project", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, access.Detail(result, result.ETag))
+	return access.Detail(result, result.ETag), tx.Commit(r.Context())
 }
 
 func readExposure(ctx context.Context, q access.Queryer, id string) (Exposure, *string, error) {
@@ -227,15 +223,11 @@ func (s *Server) putExposure(r *http.Request, _ access.Principal) (access.Reply,
 	if input.ExposeUpstreamModels == nil {
 		return access.Reply{}, access.Invalid("expose_upstream_models", "Include expose_upstream_models explicitly.")
 	}
-	tx, err := s.Access.Begin(r)
+	tx, p, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	var locked string
 	if err = tx.QueryRow(r.Context(), "SELECT id::text FROM olp.routes WHERE id=$1 AND state='active' FOR UPDATE", id).Scan(&locked); errors.Is(err, pgx.ErrNoRows) {
 		return access.Reply{}, access.Fail(404, "not_found", "The resource was not found.")
@@ -260,5 +252,5 @@ func (s *Server) putExposure(r *http.Request, _ access.Principal) (access.Reply,
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "catalog.exposure", "route", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, access.Detail(result, result.ETag))
+	return access.Detail(result, result.ETag), tx.Commit(r.Context())
 }

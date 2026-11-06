@@ -6,15 +6,14 @@ import (
 	"maps"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/routing"
-
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 // ReserveCodeRate uses the shared request/token-rate/concurrency counters.
 // Estimates here never become proven hard token bounds or subscription spend.
-func (a *Admission) ReserveCodeRate(ctx context.Context, authority access.Authority, estimate int64, ttl time.Duration, route ...string) (*limits.Lease, *Error) {
+func (a *Admission) ReserveCodeRate(ctx context.Context, authority keyauthority.Authority, estimate int64, ttl time.Duration, route ...string) (*limits.Lease, *Error) {
 	authority = withoutCostBudgets(authority)
 	// Code forwarding preserves upstream allowance headers rather than adding
 	// the synthetic API-key allowance of the inference surfaces.
@@ -22,7 +21,7 @@ func (a *Admission) ReserveCodeRate(ctx context.Context, authority access.Author
 }
 
 // withoutCostBudgets preserves rate, token, concurrency and identity controls.
-func withoutCostBudgets(authority access.Authority) access.Authority {
+func withoutCostBudgets(authority keyauthority.Authority) keyauthority.Authority {
 	authority.Policy.WeeklyCostLimit = nil
 	authority.Policy.DailyCostLimit = nil
 	authority.Policy.MonthlyCostLimit = nil
@@ -45,7 +44,7 @@ func withoutCostBudgets(authority access.Authority) access.Authority {
 
 // Subscription allowances have no invoice cost. Preserve every admission
 // dimension that applies to code without mutating cached authority policy.
-func codeEndUserPolicy(policy *access.EndUserPolicy) *access.EndUserPolicy {
+func codeEndUserPolicy(policy *keyauthority.EndUserPolicy) *keyauthority.EndUserPolicy {
 	if policy == nil {
 		return nil
 	}

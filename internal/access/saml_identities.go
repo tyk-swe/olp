@@ -76,15 +76,11 @@ func (s *Server) unlinkSAML(r *http.Request, _ Principal) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	tx, err := s.Begin(r)
+	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Reauthorize(r, tx)
-	if err != nil {
-		return Reply{}, err
-	}
 	if err = s.ConsumeRecent(r, tx, p, "saml_unlink", id); err != nil {
 		return Reply{}, err
 	}
@@ -96,7 +92,7 @@ func (s *Server) unlinkSAML(r *http.Request, _ Principal) (Reply, error) {
 		return Reply{}, Fail(404, "not_found", "The linked identity was not found.")
 	}
 	var local bool
-	if err = tx.QueryRow(r.Context(), "SELECT password_hash IS NOT NULL AND $2 AND COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true) FROM olp.users WHERE id=$1", p.ID, !s.LocalLoginDisabled).Scan(&local); err != nil {
+	if err = tx.QueryRow(r.Context(), "SELECT password_hash IS NOT NULL AND $2 AND COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true) FROM olp.users WHERE id=$1", p.ID, !s.localLoginDisabled).Scan(&local); err != nil {
 		return Reply{}, err
 	}
 	var management string
@@ -144,7 +140,7 @@ func (s *Server) unlinkSAML(r *http.Request, _ Principal) (Reply, error) {
 			}
 		}
 	}
-	if err = s.usableOwner(r, tx); err != nil {
+	if err = s.EnsureUsableOwner(r, tx); err != nil {
 		return Reply{}, err
 	}
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET etag=$2,updated_at=now() WHERE id=$1", p.ID, NewID()); err != nil {
@@ -168,7 +164,7 @@ func (s *Server) unlinkSAML(r *http.Request, _ Principal) (Reply, error) {
 	if err = Audit(r.Context(), tx, r, p.Actor(), "saml.unlink", "saml_identity", id, "success"); err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, session)
+	return session, tx.Commit(r.Context())
 }
 
 func usableSAMLIdentities(r *http.Request, q Queryer, p Principal) ([]string, error) {

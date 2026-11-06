@@ -39,18 +39,18 @@ func (s *Server) serveCodeResearch(w http.ResponseWriter, r *http.Request) {
 		refuse(codemode.Refuse(failure.Status, "code_authentication_refused"))
 		return
 	}
-	release := s.Runtime.Release()
-	if release == nil || release.Snapshot == nil {
+	release := s.deps.Runtime.Release()
+	if release == nil || release.Snapshot() == nil {
 		refuse(codemode.Refuse(503, "code_research_unavailable"))
 		return
 	}
-	route, found := release.Snapshot.CodeRoutes[r.PathValue("slug")]
+	route, found := release.Snapshot().FindCodeRoute(r.PathValue("slug"))
 	service := r.PathValue("service")
 	if !found || !route.Enabled || !route.Tools.Enables(service) || !authority.Allows("inference", route.Slug, &route.ProjectID, s.now()) {
 		refuse(codemode.Refuse(404, "code_research_disabled"))
 		return
 	}
-	if s.CodeResearch == nil || s.ResearchAuth == nil {
+	if s.deps.CodeResearch == nil || s.deps.ResearchAuth == nil {
 		refuse(codemode.Refuse(503, "code_research_unavailable"))
 		return
 	}
@@ -120,7 +120,7 @@ func (s *Server) serveCodeResearch(w http.ResponseWriter, r *http.Request) {
 	}
 	upstreamSession := ""
 	if session != "" {
-		upstreamSession, err = s.CodeResearch.ResearchSession(ctx, session, attempt.binding)
+		upstreamSession, err = s.deps.CodeResearch.ResearchSession(ctx, session, attempt.binding)
 		if err != nil {
 			refuse(err)
 			return
@@ -129,7 +129,7 @@ func (s *Server) serveCodeResearch(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodDelete && upstreamSession == "" {
 		// Stateless vendors have no session to terminate. Retire the local
 		// authorization state without requiring an upstream DELETE capability.
-		if err = s.CodeResearch.DeleteResearchSession(ctx, session, attempt.binding.APIKeyID); err != nil {
+		if err = s.deps.CodeResearch.DeleteResearchSession(ctx, session, attempt.binding.APIKeyID); err != nil {
 			refuse(err)
 			return
 		}
@@ -181,7 +181,7 @@ func (s *Server) serveCodeResearch(w http.ResponseWriter, r *http.Request) {
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusNotFound || r.Method == http.MethodDelete && response.StatusCode >= 200 && response.StatusCode < 300 {
 		if session != "" {
-			if err = s.CodeResearch.DeleteResearchSession(ctx, session, attempt.binding.APIKeyID); err != nil {
+			if err = s.deps.CodeResearch.DeleteResearchSession(ctx, session, attempt.binding.APIKeyID); err != nil {
 				refuse(codemode.Refuse(503, "code_research_session_unavailable"))
 				return
 			}
@@ -198,7 +198,7 @@ func (s *Server) serveCodeResearch(w http.ResponseWriter, r *http.Request) {
 	if method == "initialize" && response.StatusCode == http.StatusOK {
 		// An OLP session also fences stateless upstreams: event IDs and stream
 		// resumes must not cross caller keys sharing one subscription bearer.
-		session, err = s.CodeResearch.CreateResearchSession(ctx, attempt.binding, upstreamID)
+		session, err = s.deps.CodeResearch.CreateResearchSession(ctx, attempt.binding, upstreamID)
 		if err != nil {
 			refuse(err)
 			return
@@ -215,7 +215,7 @@ func (s *Server) serveCodeResearch(w http.ResponseWriter, r *http.Request) {
 				// tentative handshake in the key's bounded session allowance.
 				cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 				defer cancel()
-				if err := s.CodeResearch.DeleteResearchSession(cleanup, session, attempt.binding.APIKeyID); err != nil {
+				if err := s.deps.CodeResearch.DeleteResearchSession(cleanup, session, attempt.binding.APIKeyID); err != nil {
 					s.log.Warn("research session cleanup unavailable", "session_id", session)
 				}
 			}

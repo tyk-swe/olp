@@ -19,9 +19,9 @@ func TestProcessIdentitiesUseProvidedHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager := release.NewManager(nil, uuid.NewString(), nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)), cfg.Hostname)
+	manager := release.NewManager(release.ManagerConfig{Installation: uuid.NewString(), Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Hostname: cfg.Hostname})
 	t.Cleanup(manager.Stop)
-	for _, identity := range []string{manager.InstanceID, usage.ConsumerName(cfg.Hostname)} {
+	for _, identity := range []string{manager.InstanceID(), usage.ConsumerName(cfg.Hostname)} {
 		if !strings.HasPrefix(identity, host+"-") {
 			t.Fatalf("identity %q does not use provided host %q", identity, host)
 		}

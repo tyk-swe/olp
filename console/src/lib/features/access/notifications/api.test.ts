@@ -1,3 +1,16 @@
+import {
+  createDestinationInput,
+  editDestinationDraft,
+  newDestinationDraft,
+  parseDestinationSecret,
+  updateDestinationInput
+} from './destinationDraft';
+import {
+  newRuleDraft,
+  createRuleInput,
+  newRuleConfiguration,
+  parseRuleConfiguration
+} from './ruleDraft';
 import { describe, expect, it, vi } from 'vitest';
 import { json, route, serve } from '$lib/management/test/transport';
 import {
@@ -168,4 +181,192 @@ describe('notification API', () => {
       expect(await update()).toEqual(updated);
     }
   );
+});
+
+describe('notification draft requests', () => {
+  it('sends email configuration and replaces only explicitly supplied credentials', async () => {
+    const email = {
+      ...destination,
+      type: 'email' as const,
+      configuration: {
+        from: ' sender@example.test ',
+        to: ['first@example.test', 'second@example.test'],
+        subject_prefix: ' alerts '
+      }
+    };
+    const draft = editDestinationDraft(email);
+    const kept = parseDestinationSecret(email.type, '', false);
+    expect(kept.kind).toBe('valid');
+    if (kept.kind !== 'valid') return;
+    const requests: unknown[] = [];
+    serve(async (request) => {
+      requests.push(await request.json());
+      return json(email);
+    });
+    await updateNotificationDestination(
+      email,
+      updateDestinationInput(draft, kept.change)
+    );
+    const replacement = parseDestinationSecret(
+      email.type,
+      '{"username":"mail-user","password":"secret"}',
+      false
+    );
+    expect(replacement.kind).toBe('valid');
+    if (replacement.kind !== 'valid') return;
+    await updateNotificationDestination(
+      email,
+      updateDestinationInput(draft, replacement.change)
+    );
+    expect(requests).toEqual([
+      {
+        name: destination.name,
+        url: destination.url,
+        configuration: {
+          from: 'sender@example.test',
+          to: ['first@example.test', 'second@example.test'],
+          subject_prefix: 'alerts'
+        }
+      },
+      {
+        name: destination.name,
+        url: destination.url,
+        configuration: {
+          from: 'sender@example.test',
+          to: ['first@example.test', 'second@example.test'],
+          subject_prefix: 'alerts'
+        },
+        secret: { username: 'mail-user', password: 'secret' }
+      }
+    ]);
+    for (const raw of ['{}', 'null']) {
+      const change = parseDestinationSecret(email.type, raw, false);
+      expect(change.kind).toBe('valid');
+      if (change.kind !== 'valid') continue;
+      expect(updateDestinationInput(draft, change.change).secret).toEqual(
+        JSON.parse(raw)
+      );
+    }
+    expect(
+      parseDestinationSecret(email.type, '{"username":7}', false).kind
+    ).toBe('invalid');
+  });
+
+  it('keeps transport-specific credentials out of unrelated destination fields', async () => {
+    const input = createDestinationInput({
+      type: 'slack',
+      name: ' Chat ',
+      url: ' https://fallback.example.test ',
+      projectId: '',
+      webhookUrl: ' https://chat.example.test/secret '
+    });
+    serve(async (request) => {
+      expect(await request.json()).toEqual({
+        type: 'slack',
+        name: 'Chat',
+        url: 'https://fallback.example.test',
+        project_id: null,
+        secret: { webhook_url: 'https://chat.example.test/secret' }
+      });
+      return json({ ...destination, type: 'slack' });
+    });
+    await createNotificationDestination(input, 'chat-create');
+  });
+
+  it('preserves decimal rule thresholds and sends integer sampling windows', async () => {
+    const parsed = parseRuleConfiguration({
+      ...newRuleConfiguration('provider.error_rate'),
+      values: {
+        threshold: '0.0500',
+        recovery_threshold: '0.0100',
+        window_seconds: '120',
+        minimum_samples: '5'
+      }
+    });
+    expect(parsed.kind).toBe('valid');
+    if (parsed.kind !== 'valid') return;
+    serve(async (request) => {
+      const body = await request.json();
+      expect(body.configuration).toEqual({
+        threshold: '0.0500',
+        recovery_threshold: '0.0100',
+        window_seconds: 120,
+        minimum_samples: 5
+      });
+      return json(rule);
+    });
+    await createNotificationRule(
+      {
+        name: 'Error rate',
+        event: 'provider.error_rate',
+        destination_id: destination.id,
+        configuration: parsed.configuration
+      },
+      'rate-create'
+    );
+    expect(
+      parseRuleConfiguration({
+        ...newRuleConfiguration('provider.error_rate'),
+        values: { window_seconds: '1.5' }
+      }).kind
+    ).toBe('invalid');
+  });
+});
+
+it('writes only the subject and scope supported by the selected rule event', async () => {
+  const key = newRuleDraft('key.expiring', {
+    name: 'Key expiry',
+    destinationId: destination.id,
+    projectId: 'project-id'
+  });
+  expect(key.event).toBe('key.expiring');
+  if (key.event !== 'key.expiring') return;
+  const selected = createRuleInput({ ...key, subjectId: 'key-id' });
+  expect(selected.kind).toBe('valid');
+  if (selected.kind !== 'valid') return;
+  const requests: unknown[] = [];
+  serve(async (request) => {
+    requests.push(await request.json());
+    return json(rule);
+  });
+  await createNotificationRule(selected.input, 'key-expiry');
+  const installation = createRuleInput(
+    newRuleDraft('provider.grant.lapsed', key)
+  );
+  expect(installation.kind).toBe('valid');
+  if (installation.kind !== 'valid') return;
+  await createNotificationRule(installation.input, 'provider-grant');
+  expect(requests).toEqual([
+    {
+      name: 'Key expiry',
+      event: 'key.expiring',
+      destination_id: destination.id,
+      project_id: 'project-id',
+      subject_kind: 'api_key',
+      subject_id: 'key-id'
+    },
+    {
+      name: 'Key expiry',
+      event: 'provider.grant.lapsed',
+      destination_id: destination.id
+    }
+  ]);
+});
+
+it('clears channel credentials when the destination type changes', () => {
+  const email = {
+    type: 'email' as const,
+    name: 'Mail',
+    url: 'smtp+starttls://mail.example.test:587',
+    projectId: '',
+    username: 'mail-user',
+    password: 'mail-password',
+    from: 'sender@example.test',
+    to: 'recipient@example.test',
+    subjectPrefix: '',
+    caCertificate: ''
+  };
+  const switched = newDestinationDraft('webhook', email);
+  expect(JSON.stringify(switched)).not.toContain(email.password);
+  expect(createDestinationInput(switched).secret).toBeNull();
 });

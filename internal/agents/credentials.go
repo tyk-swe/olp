@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/workload"
 )
 
-func (s *Executor) agentCredential(ctx context.Context, authority access.Authority, revision agentcontract.Revision) ([]byte, string, error) {
+func (s *Executor) agentCredential(ctx context.Context, authority keyauthority.Authority, revision agentcontract.Revision) ([]byte, string, error) {
 	if revision.Definition.Agent == nil || revision.Definition.Agent.OAuth == nil {
 		return nil, "", nil
 	}
@@ -34,14 +34,14 @@ func (s *Executor) agentCredential(ctx context.Context, authority access.Authori
 	return credential, binding, nil
 }
 
-func (s *Executor) verifyAgentEntra(ctx context.Context, authority access.Authority, agent agentcontract.Definition) (workload.UserAssertion, error) {
+func (s *Executor) verifyAgentEntra(ctx context.Context, authority keyauthority.Authority, agent agentcontract.Definition) (workload.UserAssertion, error) {
 	if s.entra == nil {
 		return workload.UserAssertion{}, ErrCredential
 	}
 	return s.entra.VerifyEntraUser(ctx, workload.RequestAssertion(ctx), authority, agent.OAuth.EntraOBO.Issuer, agent.OAuth.ClientID)
 }
 
-func (s *Executor) agentTaskCredential(ctx context.Context, authority access.Authority, revision agentcontract.Revision, binding string) ([]byte, error) {
+func (s *Executor) agentTaskCredential(ctx context.Context, authority keyauthority.Authority, revision agentcontract.Revision, binding string) ([]byte, error) {
 	if revision.Definition.Agent == nil {
 		return nil, errors.New("agent grant unavailable")
 	}

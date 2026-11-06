@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"github.com/tyk-swe/olp/internal/providerconfig"
 	"slices"
 	"testing"
 	"time"
@@ -77,16 +78,16 @@ func TestPublishedMessagesPolicySelectsEligibleFrozenProviders(t *testing.T) {
 			"translated":  {ID: "translated-route", ProjectID: "project", Slug: "translated", PoolID: "pool", Models: []string{"gpt-fixture-model", "minimax-fixture-model", "gemini-fixture-model"}, Enabled: true, RevisionID: "translated-revision", Revision: 1, PublishedAt: &publishedAt, ChatToCodex: true, MessagesToCodex: true, ModelRewriting: true, Aliases: map[string]string{"client-stable": "gpt-fixture-model"}},
 		},
 		CodeConnections: map[string]Configuration{
-			"native-revision:antigravity":      {Kind: "plugin", AuthMode: "grant", ProfileID: antigravityauth.ProfileID},
-			"translated-revision:antigravity":  {Kind: "plugin", AuthMode: "grant", ProfileID: antigravityauth.ProfileID},
-			"antigravity-revision:antigravity": {Kind: "plugin", AuthMode: "grant", ProfileID: antigravityauth.ProfileID},
-			"antigravity-revision:a-native":    {Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.OpenCodeGoProfile},
-			"native-revision:a-native":         {Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.OpenCodeGoProfile},
-			"native-revision:b-codex":          {Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID},
-			"translated-revision:a-native":     {Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.OpenCodeGoProfile},
-			"translated-revision:b-codex":      {Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID},
-			"translated-revision:wrong-auth":   {Kind: "plugin", AuthMode: "api_key", ProfileID: codexauth.ProfileID},
-			"other-revision:foreign-codex":     {Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID},
+			"native-revision:antigravity":      {Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: antigravityauth.ProfileID}},
+			"translated-revision:antigravity":  {Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: antigravityauth.ProfileID}},
+			"antigravity-revision:antigravity": {Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: antigravityauth.ProfileID}},
+			"antigravity-revision:a-native":    {Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.OpenCodeGoProfile}},
+			"native-revision:a-native":         {Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.OpenCodeGoProfile}},
+			"native-revision:b-codex":          {Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID}},
+			"translated-revision:a-native":     {Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.OpenCodeGoProfile}},
+			"translated-revision:b-codex":      {Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID}},
+			"translated-revision:wrong-auth":   {Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "api_key", ProfileID: codexauth.ProfileID}},
+			"other-revision:foreign-codex":     {Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID}},
 		},
 	}
 	encoded, err := json.Marshal(snapshot)

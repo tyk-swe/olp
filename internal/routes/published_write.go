@@ -30,15 +30,11 @@ func (s *Server) writePublished(r *http.Request, id string) (access.Reply, error
 		return access.Reply{}, err
 	}
 	a := s.Access
-	tx, err := a.Begin(r)
+	tx, p, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	var previous *routeRow
 	if id != "" {
 		previous, err = scanRoute(tx.QueryRow(r.Context(), "SELECT "+routeColumns+routeFrom+" WHERE r.id=$1 FOR UPDATE OF r", id))
@@ -56,7 +52,7 @@ func (s *Server) writePublished(r *http.Request, id string) (access.Reply, error
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	var targets []routing.PublishedTarget
 	if previous != nil {
@@ -133,5 +129,5 @@ func (s *Server) writePublished(r *http.Request, id string) (access.Reply, error
 	if err = a.CompleteReplay(r, tx, claim, reply); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, reply)
+	return reply, tx.Commit(r.Context())
 }

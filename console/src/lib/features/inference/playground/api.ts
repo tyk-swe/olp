@@ -1,3 +1,4 @@
+import { requestNative } from '$lib/management/transport';
 import type { components } from '$lib/management/schema';
 import { apiClient } from '$lib/management/client';
 import { unwrap } from '$lib/management/http';
@@ -46,12 +47,16 @@ export type PlaygroundStreamHandlers = {
 export async function runPlayground(
   input: PlaygroundRequest
 ): Promise<PlaygroundResponse> {
-  return unwrap(
-    await apiClient.POST('/api/v1/playground', {
+  return requestNative(
+    apiClient,
+    'post',
+    '/api/v1/playground',
+    {
       cache: 'no-store',
       headers: { 'cache-control': 'no-store' },
       body: input
-    })
+    },
+    [['response']]
   );
 }
 
@@ -133,8 +138,6 @@ export type InspectRoutingInput = {
   seed?: string;
 };
 
-/** Public management inspection. The backend plans against current authority
- * and the prepared request, and makes no provider or tool call. */
 export async function inspectRouting(
   input: InspectRoutingInput,
   signal?: AbortSignal

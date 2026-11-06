@@ -17,7 +17,6 @@ type RowQuerier interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
-// RowsQuerier reads many rows, as a pool or a transaction does.
 type RowsQuerier interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
 }

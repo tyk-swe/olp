@@ -153,7 +153,7 @@ func validTuple(operation, surface, mode string) error {
 	if operation == "realtime" && surface == "native" && mode == "realtime" {
 		return nil
 	}
-	if operationregistry.Default.Supports(operation, surface, mode) || operation == "generation" && surface == "native" && (mode == "unary" || mode == "streaming") {
+	if operationregistry.Catalog().Supports(operation, surface, mode) || operation == "generation" && surface == "native" && (mode == "unary" || mode == "streaming") {
 		return nil
 	}
 	if !slices.Contains(supportedOperations, operation) && !registeredOperation(operation) {

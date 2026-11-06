@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/pricingpolicy"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -61,7 +62,7 @@ func approvalDigest(key *secrets.AuthKey, b ApprovalBinding) ([]byte, error) {
 	return key.Digest(secrets.ApprovalDigest, string(data)), nil
 }
 
-func CreateApprovalTx(ctx context.Context, tx pgx.Tx, key *secrets.AuthKey, a access.Authority, b ApprovalBinding, expires time.Time) (string, error) {
+func CreateApprovalTx(ctx context.Context, tx pgx.Tx, key *secrets.AuthKey, a keyauthority.Authority, b ApprovalBinding, expires time.Time) (string, error) {
 	now := time.Now()
 	if a.ProjectID == nil || !a.AllowsResource("tools", b.ToolsetID, *a.ProjectID, now) {
 		return "", ErrApproval
@@ -94,7 +95,7 @@ func CreateApprovalTx(ctx context.Context, tx pgx.Tx, key *secrets.AuthKey, a ac
 // ConsumeApprovalTx must share a transaction with limits.MarkDispatchedTx.
 // The supplied authority must be freshly resolved by runtime; the database also
 // refuses revoked/expired principals and retired resources at consumption.
-func ConsumeApprovalTx(ctx context.Context, tx pgx.Tx, key *secrets.AuthKey, a access.Authority, id, dispatch string, b ApprovalBinding) error {
+func ConsumeApprovalTx(ctx context.Context, tx pgx.Tx, key *secrets.AuthKey, a keyauthority.Authority, id, dispatch string, b ApprovalBinding) error {
 	if a.ProjectID == nil || !a.AllowsResource("tools", b.ToolsetID, *a.ProjectID, time.Now()) {
 		return ErrApproval
 	}

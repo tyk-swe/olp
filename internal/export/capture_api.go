@@ -67,15 +67,11 @@ func (m *Management) updateCaptureConfiguration(r *http.Request, _ access.Princi
 	if input.Enabled == nil {
 		return access.Reply{}, access.Invalid("enabled", "Send whether capture is enabled.")
 	}
-	tx, err := m.Access.Begin(r)
+	tx, p, err := m.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := m.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	if err := p.Authorize(access.Access); err != nil {
 		return access.Reply{}, err
 	}
@@ -94,7 +90,7 @@ func (m *Management) updateCaptureConfiguration(r *http.Request, _ access.Princi
 	if err = access.AuditForProject(r.Context(), tx, r, p.Actor(), "capture_configuration.update", "capture_configuration", "singleton", "success", nil); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, access.Detail(map[string]any{"enabled": *input.Enabled, "etag": etag}, etag))
+	return access.Detail(map[string]any{"enabled": *input.Enabled, "etag": etag}, etag), tx.Commit(r.Context())
 }
 
 func (m *Management) listCapturePolicies(r *http.Request, p access.Principal) (access.Reply, error) {
@@ -161,15 +157,11 @@ func (m *Management) createCapturePolicy(r *http.Request, _ access.Principal) (a
 	if input.Enabled != nil {
 		policy.Enabled = *input.Enabled
 	}
-	tx, err := m.Access.Begin(r)
+	tx, p, err := m.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := m.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	if err := m.captureEnabled(r, tx); err != nil {
 		return access.Reply{}, err
 	}
@@ -184,7 +176,7 @@ func (m *Management) createCapturePolicy(r *http.Request, _ access.Principal) (a
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	if err := publishCaptureRedactors(r.Context(), tx, &policy); err != nil {
 		return access.Reply{}, err
@@ -218,7 +210,7 @@ func (m *Management) createCapturePolicy(r *http.Request, _ access.Principal) (a
 	if err := m.Access.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 
 func (m *Management) updateCapturePolicy(r *http.Request, _ access.Principal) (access.Reply, error) {
@@ -237,15 +229,11 @@ func (m *Management) updateCapturePolicy(r *http.Request, _ access.Principal) (a
 	if err := access.Decode(r, &input); err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := m.Access.Begin(r)
+	tx, p, err := m.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := m.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	current, etag, projectID, err := m.lockCapturePolicy(r, tx)
 	if err != nil {
 		return access.Reply{}, err
@@ -328,19 +316,15 @@ func (m *Management) updateCapturePolicy(r *http.Request, _ access.Principal) (a
 		return access.Reply{}, err
 	}
 	current.ETag = etag
-	return access.Commit(r, tx, access.Detail(current, etag))
+	return access.Detail(current, etag), tx.Commit(r.Context())
 }
 
 func (m *Management) deleteCapturePolicy(r *http.Request, _ access.Principal) (access.Reply, error) {
-	tx, err := m.Access.Begin(r)
+	tx, p, err := m.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := m.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	current, etag, projectID, err := m.lockCapturePolicy(r, tx)
 	if err != nil {
 		return access.Reply{}, err
@@ -360,7 +344,7 @@ func (m *Management) deleteCapturePolicy(r *http.Request, _ access.Principal) (a
 	if err := access.AuditForProject(r.Context(), tx, r, p.Actor(), "capture_policy.delete", "capture_policy", current.ID, "success", projectID); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, access.Reply{Status: 204})
+	return access.Reply{Status: 204}, tx.Commit(r.Context())
 }
 
 func (m *Management) lockCapturePolicy(r *http.Request, tx pgx.Tx) (CapturePolicy, string, *string, error) {

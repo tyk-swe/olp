@@ -124,15 +124,11 @@ func (s *Server) stageCredentialImport(request *http.Request, current *record, s
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(request.Context()), stageGrantTimeout)
 	defer cancel()
 	r := request.WithContext(ctx)
-	tx, err := s.Access.Begin(r)
+	tx, p, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(ctx)
-	p, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	locked, err := load(ctx, tx, current.ID, true)
 	if err != nil {
 		return access.Reply{}, err

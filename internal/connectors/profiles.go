@@ -653,7 +653,7 @@ func (c Config) Supports(operation, surface, mode string) bool {
 			// An operation outside the profile has no dialect of its own; the
 			// default dialect OperationDialect names for it does not apply.
 			if codec, ok := operationregistry.Lookup(p.OperationDialect(operation)); ok && codec.Operation.ID == operation && slices.Contains(p.Operations, operation) {
-				if operationregistry.Default.SupportsTarget(codec.Identity, surface, mode) {
+				if operationregistry.Catalog().SupportsTarget(codec.Identity, surface, mode) {
 					return true
 				}
 				if _, dedicated := operationregistry.Lookup(p.Dialect); dedicated {

@@ -15,13 +15,13 @@ func (s *Server) observeGeminiInteraction(ctx context.Context, owner, localID, s
 	if observed := geminiInteractionUsage(object); observed != nil {
 		evidence = observedAttemptUsage(observed, geminilifecycle.InteractionTurnFinished(status), "generation")
 	}
-	result, err := s.Resources.ObserveInteraction(ctx, owner, localID, status, evidence, s.now())
+	result, err := s.deps.Resources.ObserveInteraction(ctx, owner, localID, status, evidence, s.now())
 	if err != nil {
 		return usage.Persisted{}, err
 	}
-	if s.Admission != nil && s.Admission.limiter != nil {
+	if s.deps.Admission != nil && s.deps.Admission.limiter != nil {
 		for _, snapshot := range result.CostSnapshots {
-			if _, _, err := s.Admission.limiter.ApplyCostSnapshot(ctx, snapshot); err != nil {
+			if _, _, err := s.deps.Admission.limiter.ApplyCostSnapshot(ctx, snapshot); err != nil {
 				s.log.Warn("interaction cost snapshot application failed; reconciliation will repair it", "error_type", "cost_snapshot")
 			}
 		}

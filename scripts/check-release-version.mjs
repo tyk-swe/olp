@@ -2,7 +2,6 @@ import { readFileSync } from 'node:fs';
 
 const json = (text) => JSON.parse(text);
 
-// Every copy of the release version, read from the file that carries it.
 export const versionCopies = [
   ['console/package.json', (text) => json(text).version],
   ['deploy/helm/Chart.yaml', (text) => /^version:\s*["']?([^"'\s]+)/m.exec(text)?.[1]],

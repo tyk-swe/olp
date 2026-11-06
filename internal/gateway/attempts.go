@@ -8,7 +8,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -24,8 +24,8 @@ type attemptAdapter[Result any] struct {
 
 func (a attemptAdapter[Result]) dispatchWithAuthority(ctx context.Context, s *Server, x *call, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, Result, *attemptFailure, *Error) {
 	if x.authority.TaskCapability != nil {
-		admitter, ok := s.Runtime.(interface {
-			AdmitTaskCapabilityAttempt(context.Context, access.Authority, string, string, string, *string, string) error
+		admitter, ok := s.deps.Runtime.(interface {
+			AdmitTaskCapabilityAttempt(context.Context, keyauthority.Authority, string, string, string, *string, string) error
 		})
 		var err error
 		if ok {
@@ -69,8 +69,8 @@ func runAttempts[Result any](ctx context.Context, s *Server, x *call, adapter at
 		x.guardrailCtx = context.WithValue(ctx, guardrailCallerKey{}, x)
 	}
 	var generation string
-	if x.request.release != nil && x.request.release.Snapshot != nil {
-		generation = x.request.release.Snapshot.Generation.ID
+	if x.request.release != nil && x.request.release.Snapshot() != nil {
+		generation = x.request.release.Snapshot().Generation().ID
 	}
 	x.request.trace.RecordSessionContext(x.surfaceName(), x.operationName(), string(x.family), x.named().Slug, generation)
 	for {
@@ -101,7 +101,7 @@ route:
 		if x.spent >= x.budget || ctx.Err() != nil {
 			break
 		}
-		provider, ok := snapshot.Providers[attempt.ProviderID]
+		provider, ok := snapshot.FindProvider(attempt.ProviderID)
 		if !ok || s.health.open(provider.ID) {
 			continue
 		}

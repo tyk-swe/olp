@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/consumerauth"
 )
 
@@ -63,29 +64,29 @@ func bedrockPresentedKey(r *http.Request) (string, *Error) {
 
 // authenticate resolves the key a request presents and checks the scope the
 // endpoint needs.
-func (s *Server) authenticate(r *http.Request, scope string) (access.Authority, *Error) {
+func (s *Server) authenticate(r *http.Request, scope string) (keyauthority.Authority, *Error) {
 	token, e := presentedKey(r)
 	if e != nil {
-		return access.Authority{}, e
+		return keyauthority.Authority{}, e
 	}
 	return s.authenticateRequest(r, token, scope)
 }
 
 // CatalogAuthority shares the gateway's pinned authority, revocation, scope
 // and client-address checks with the management catalog's consumer-key reads.
-func (s *Server) CatalogAuthority(r *http.Request) (access.Authority, error) {
+func (s *Server) CatalogAuthority(r *http.Request) (keyauthority.Authority, error) {
 	authority, failure := s.authenticate(r, "models_read")
 	if failure != nil {
-		return access.Authority{}, access.Fail(failure.Status, failure.Code, failure.Message)
+		return keyauthority.Authority{}, access.Fail(failure.Status, failure.Code, failure.Message)
 	}
 	return authority, nil
 }
 
 // bedrockAuthenticate is authenticate for Bedrock's credential locations.
-func (s *Server) bedrockAuthenticate(r *http.Request) (access.Authority, *Error) {
+func (s *Server) bedrockAuthenticate(r *http.Request) (keyauthority.Authority, *Error) {
 	token, e := bedrockPresentedKey(r)
 	if e != nil {
-		return access.Authority{}, e
+		return keyauthority.Authority{}, e
 	}
 	return s.authenticateRequest(r, token, "inference")
 }
@@ -104,13 +105,13 @@ func consumerFailure(failure *consumerauth.Failure) *Error {
 	}
 }
 
-func (s *Server) authenticateRequest(r *http.Request, token, scope string) (access.Authority, *Error) {
+func (s *Server) authenticateRequest(r *http.Request, token, scope string) (keyauthority.Authority, *Error) {
 	authority, failure := s.authenticateKey(r, token, scope)
 	if failure != nil {
-		return access.Authority{}, failure
+		return keyauthority.Authority{}, failure
 	}
 	if authority.TaskCapability != nil && !taskCapabilityEndpoint(r) {
-		return access.Authority{}, permissionError("permission_denied", "This task capability cannot use this endpoint.")
+		return keyauthority.Authority{}, permissionError("permission_denied", "This task capability cannot use this endpoint.")
 	}
 	if scope != "inference" {
 		return authority, nil
@@ -138,7 +139,7 @@ func taskCapabilityEndpoint(r *http.Request) bool {
 	return false
 }
 
-func (s *Server) checkKeyAddress(r *http.Request, authority access.Authority) *Error {
+func (s *Server) checkKeyAddress(r *http.Request, authority keyauthority.Authority) *Error {
 	return consumerFailure(consumerauth.CheckAddress(authority, r, s.cfg.TrustedProxies))
 }
 
@@ -174,10 +175,10 @@ func (x *call) dropQueryKey() *Error {
 	return nil
 }
 
-func (s *Server) authenticateKey(r *http.Request, token, scope string) (access.Authority, *Error) {
-	authority, failure := consumerauth.Authenticate(s.Runtime, r, token, scope, s.cfg.TrustedProxies, s.now())
+func (s *Server) authenticateKey(r *http.Request, token, scope string) (keyauthority.Authority, *Error) {
+	authority, failure := consumerauth.Authenticate(s.deps.Runtime, r, token, scope, s.cfg.TrustedProxies, s.now())
 	if failure != nil {
-		return access.Authority{}, consumerFailure(failure)
+		return keyauthority.Authority{}, consumerFailure(failure)
 	}
 	return authority, nil
 }

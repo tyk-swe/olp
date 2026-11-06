@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
@@ -34,8 +34,8 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, invalidRequest("missing_required_parameter", "X-OLP-Route is required for file uploads.", nil), x.family)
 		return
 	}
-	snapshot := x.request.release.Snapshot
-	route, ok := snapshot.Routes[slug]
+	snapshot := x.request.release.Snapshot()
+	route, ok := snapshot.FindRoute(slug)
 	if !ok {
 		s.stateFail(x, w, modelNotFound(slug), x.family)
 		return
@@ -86,7 +86,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, invalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow batch operations.", nil), x.family)
 		return
 	}
-	if x.strict() && !s.Resources.Encrypted() {
+	if x.strict() && !s.deps.Resources.Encrypted() {
 		s.stateFail(x, w, providerStateForbidden(), x.family)
 		return
 	}
@@ -289,9 +289,9 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 			s.stateFail(x, w, durableError(marshalErr), x.family)
 			return
 		}
-		res, err = s.Resources.PutDurableContract(commitCtx, resource, payload)
+		res, err = s.deps.Resources.PutDurableContract(commitCtx, resource, payload)
 	} else {
-		res, err = s.Resources.Put(commitCtx, resource)
+		res, err = s.deps.Resources.Put(commitCtx, resource)
 	}
 	if err != nil {
 		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The file mapping could not be stored."), x.family)
@@ -433,7 +433,7 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 	}
 	// One extra row reports whether another page follows; it is never
 	// authorized or projected.
-	rows, err := s.Resources.ListKinds(r.Context(), kinds, authority.ID, limit+1, after)
+	rows, err := s.deps.Resources.ListKinds(r.Context(), kinds, authority.ID, limit+1, after)
 	if err != nil {
 		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The file list could not be read."), x.family)
 		return
@@ -474,7 +474,7 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
-	s.fileCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
+	s.fileCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, authority keyauthority.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
 		path := "files/" + url.PathEscape(res.UpstreamID)
 		if fileAdapter(res) == "gemini_managed" {
 			var err error
@@ -490,7 +490,7 @@ func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 		resp, failure := s.pinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
 		if failure != nil {
 			if failure.status == http.StatusNotFound {
-				if err := s.Resources.Tombstone(ctx, res.ID); err != nil {
+				if err := s.deps.Resources.Tombstone(ctx, res.ID); err != nil {
 					return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The missing file state could not be recorded.")
 				}
 				return notFoundError("not_found", "No file with this identifier exists for this key.")
@@ -533,13 +533,13 @@ func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 			}
 			commitCtx, stopCommit := resourceCommitContext(ctx)
 			defer stopCommit()
-			if _, _, commitErr := s.Resources.UpdateDurableContract(commitCtx, res.Kind, authority.ID, res.ID, state, payload); commitErr != nil {
+			if _, _, commitErr := s.deps.Resources.UpdateDurableContract(commitCtx, res.Kind, authority.ID, res.ID, state, payload); commitErr != nil {
 				return durableError(commitErr)
 			}
 			out, err = durableProjection(body, res.ID, nil)
 		} else {
 			x.completeFileControl()
-			if err := s.Resources.Update(ctx, res.ID, state, metadata, expires); err != nil {
+			if err := s.deps.Resources.Update(ctx, res.ID, state, metadata, expires); err != nil {
 				return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The refreshed file state could not be committed.")
 			}
 			res.State, res.Metadata, res.ExpiresAt = state, metadata, expires
@@ -558,7 +558,7 @@ func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
-	s.fileCall(w, r, retainedHousekeeping, func(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
+	s.fileCall(w, r, retainedHousekeeping, func(ctx context.Context, x *call, authority keyauthority.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
 		writeDeleted := func() {
 			s.writeStateJSON(w, x, mustJSON(map[string]any{"id": res.ID, "object": "file", "deleted": true}))
 		}
@@ -570,7 +570,7 @@ func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
 			if fields.Role == "output" || fields.Role == "error" {
 				commitCtx, stop := resourceCommitContext(ctx)
 				defer stop()
-				detached, pending, err := s.Resources.DetachGeminiResultView(commitCtx, res, geminiManagedFileName(res))
+				detached, pending, err := s.deps.Resources.DetachGeminiResultView(commitCtx, res, geminiManagedFileName(res))
 				if errors.Is(err, resources.ErrNotFound) {
 					return notFoundError("not_found", "No file with this identifier exists for this key.")
 				}
@@ -608,7 +608,7 @@ func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
 			if failure.status == http.StatusNotFound {
 				commitCtx, stopCommit := resourceCommitContext(ctx)
 				defer stopCommit()
-				if err := s.Resources.Tombstone(commitCtx, res.ID); err != nil {
+				if err := s.deps.Resources.Tombstone(commitCtx, res.ID); err != nil {
 					return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The missing file state could not be recorded.")
 				}
 				return notFoundError("not_found", "No file with this identifier exists for this key.")
@@ -622,7 +622,7 @@ func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, errorBodyLimit))
 		commitCtx, stopCommit := resourceCommitContext(ctx)
 		defer stopCommit()
-		if err := s.Resources.Tombstone(commitCtx, res.ID); err != nil {
+		if err := s.deps.Resources.Tombstone(commitCtx, res.ID); err != nil {
 			return serverError(http.StatusInternalServerError, "internal_error", "The file mapping could not be deleted.")
 		}
 		writeDeleted()
@@ -631,7 +631,7 @@ func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) fileContent(w http.ResponseWriter, r *http.Request) {
-	s.fileCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
+	s.fileCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, authority keyauthority.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
 		if fileAdapter(res) == "gemini_managed" {
 			return s.geminiManagedFileContent(ctx, w, x, res, p)
 		}
@@ -705,7 +705,7 @@ func (s *Server) fileContent(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) fileCall(w http.ResponseWriter, r *http.Request, use retainedUse, op func(context.Context, *call, access.Authority, *resources.Resource, *pin, *routing.Route) *Error) {
+func (s *Server) fileCall(w http.ResponseWriter, r *http.Request, use retainedUse, op func(context.Context, *call, keyauthority.Authority, *resources.Resource, *pin, *routing.Route) *Error) {
 	x, authority, done := s.stateBegin(w, r, wire.File)
 	if done {
 		return
@@ -735,8 +735,7 @@ func (s *Server) fileCall(w http.ResponseWriter, r *http.Request, use retainedUs
 			s.stateFail(x, w, serverError(http.StatusConflict, "submission_unknown", "The file upload has no reconciled native identity yet."), x.family)
 			return
 		}
-		x.retainedHousekeeping = true
-		x.retainedTokenless = true
+		x.retained = retainedOperation{use: retainedHousekeeping, usage: retainedTokenlessUsage}
 		p, route, e := s.resolveResource(r.Context(), x, authority, res, operation, use)
 		if e != nil {
 			s.stateFail(x, w, e, x.family)

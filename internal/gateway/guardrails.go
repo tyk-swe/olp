@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/guardrails"
@@ -32,8 +33,7 @@ import (
 
 type guardrailCallerKey struct{}
 
-func (s *Server) initGuardrails() {
-	runner := &guardrails.ExternalRunner{Egress: *s.egress, Clients: egress.NewConnectionClientCache(128)}
+func (s *Server) newGuardrailEvaluator() guardrails.Evaluator {
 	credential := func(ctx context.Context, id string) ([]byte, error) {
 		x, _ := ctx.Value(guardrailCallerKey{}).(*call)
 		if x == nil || x.request.release == nil {
@@ -45,10 +45,10 @@ func (s *Server) initGuardrails() {
 		}
 		return secret, nil
 	}
-	runner.Credentials, runner.NetworkCredentials = credential, credential
-	runner.Model = guardrails.EvaluatorFunc(s.modelGuardrail)
-	runner.Plugin = guardrails.EvaluatorFunc(s.pluginGuardrail)
-	s.GuardrailEvaluator = runner
+	return &guardrails.ExternalRunner{
+		Egress: *s.egress, Clients: egress.NewConnectionClientCache(128), Credentials: credential, NetworkCredentials: credential,
+		Model: guardrails.EvaluatorFunc(s.modelGuardrail), Plugin: guardrails.EvaluatorFunc(s.pluginGuardrail),
+	}
 }
 func guardrailError(err error) *Error {
 	if err == nil {
@@ -66,7 +66,7 @@ func guardrailError(err error) *Error {
 }
 func (s *Server) bindGuardrails(ctx context.Context, x *call) *Error {
 	x.guardrailMetadata = x.request.guardrailMetadata
-	x.guardrailEngine = x.snapshot().GuardrailEngine(x.route.Slug, x.keyID).WithEvaluator(s.GuardrailEvaluator)
+	x.guardrailEngine = x.snapshot().GuardrailEngine(x.route.Slug, x.keyID).WithEvaluator(s.deps.GuardrailEvaluator)
 	if x.internalGuardrail {
 		x.guardrailEngine = x.guardrailEngine.WithoutModelGuardrails()
 	}
@@ -121,7 +121,7 @@ func (s *Server) bindGuardrails(ctx context.Context, x *call) *Error {
 		if err := x.guardrailStreamSurface(x.generation.parsed.OIF().Document()); err != nil {
 			return guardrailError(err)
 		}
-		if err := x.guardrailEngine.ValidateStream(x.snapshot().Guardrails.Window()); err != nil {
+		if err := x.guardrailEngine.ValidateStream(x.snapshot().GuardrailWindow()); err != nil {
 			if x.route.ContentPolicy != nil {
 				for _, rule := range x.route.ContentPolicy.Rules {
 					if rule.Phase == contentpolicy.PhaseOutput {
@@ -159,9 +159,6 @@ func (x *call) recordGuardrails(values []guardrails.Evidence) {
 	x.guardrailMu.Lock()
 	defer x.guardrailMu.Unlock()
 	x.guardrailDecisions = appendGuardrailEvidence(x.guardrailDecisions, values)
-	if x.guardrailPreparation != nil {
-		x.guardrailPreparation.guardrailDecisions = appendGuardrailEvidence(x.guardrailPreparation.guardrailDecisions, values)
-	}
 	if x.guardrailAttemptActive {
 		x.guardrailAttemptDecisions = appendGuardrailEvidence(x.guardrailAttemptDecisions, values)
 	}
@@ -218,16 +215,27 @@ func (x *call) inspectGuardrailInput(document oif.Document) (oif.Document, []gua
 	return x.inspectGuardrailInputWithRecovery(x.guardrailCtx, document, true)
 }
 
+type guardrailInput struct {
+	document  oif.Document
+	segments  []guardrails.Segment
+	decisions []guardrails.Evidence
+}
+
 func (x *call) inspectGuardrailInputWithRecovery(ctx context.Context, document oif.Document, recoverable bool) (oif.Document, []guardrails.Segment, error) {
+	result, err := x.evaluateGuardrailInput(ctx, document, recoverable)
+	x.recordGuardrails(result.decisions)
+	return result.document, result.segments, err
+}
+
+func (x *call) evaluateGuardrailInput(ctx context.Context, document oif.Document, recoverable bool) (guardrailInput, error) {
 	// Effective provider defaults may enable an unsupported stream surface.
 	if err := x.guardrailStreamSurface(document); err != nil {
-		return document, nil, err
+		return guardrailInput{document: document}, err
 	}
 	surface, err := guardrails.NativeSurface(document, false)
 	if err != nil {
 		result, e := x.guardrailEngine.Unavailable("")
-		x.recordGuardrails(result.Decisions)
-		return document, nil, e
+		return guardrailInput{document: document, decisions: result.Decisions}, e
 	}
 	evaluation := guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.route.Slug, Phase: guardrails.Input, Segments: surface.Segments, InternalModel: x.internalGuardrail, WorkflowRecovery: recoverable && x.workflow != nil}
 	evaluation.CompressionExemptIDs = slices.Collect(func(yield func(string) bool) {
@@ -248,25 +256,23 @@ func (x *call) inspectGuardrailInputWithRecovery(ctx context.Context, document o
 	if recoverable && x.workflow != nil && len(result.Recovery) > 0 {
 		x.workflowRecovery = result.Recovery
 	}
-	x.recordGuardrails(result.Decisions)
 	err = x.legacyGuardrailError(result, err)
 	if err != nil {
-		return document, result.Segments, err
+		return guardrailInput{document: document, segments: result.Segments, decisions: result.Decisions}, err
 	}
 	if result.Changed {
 		document, err = surface.Apply(result.Segments)
 	}
-	return document, result.Segments, err
+	return guardrailInput{document: document, segments: result.Segments, decisions: result.Decisions}, err
 }
-func (x *call) inspectOperationInput(texts []operations.Text) error {
+func (x *call) inspectOperationInput(texts []operations.Text) ([]guardrails.Evidence, error) {
 	segments := make([]guardrails.Segment, len(texts))
 	for i, t := range texts {
 		segments[i] = guardrails.Segment{ID: "s" + strconv.Itoa(i), Text: t.Value}
 	}
 	result, err := x.guardrailEngine.Evaluate(x.guardrailCtx, guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.route.Slug, Phase: guardrails.Input, Segments: segments, InternalModel: x.internalGuardrail}, x.guardrailMasks)
-	x.recordGuardrails(result.Decisions)
 	x.guardrailInput = segments
-	return x.legacyGuardrailError(result, err)
+	return result.Decisions, x.legacyGuardrailError(result, err)
 }
 func (x *call) inspectOperationOutput(texts []operations.Text) error {
 	segments := make([]guardrails.Segment, len(texts))
@@ -437,8 +443,8 @@ func (s *Server) applyGuardrails(w http.ResponseWriter, r *http.Request) {
 	s.settleAdmission(context.WithoutCancel(r.Context()), x)
 	s.finish(x, out, status)
 }
-func (s *Server) EvaluateToolGuardrails(ctx context.Context, authority access.Authority, release *release.Release, engine *guardrails.Engine, requestID, phase string, segments []guardrails.Segment, masks *guardrails.Masking) (guardrails.Result, error) {
-	if s == nil || release == nil || release.Snapshot == nil {
+func (s *Server) EvaluateToolGuardrails(ctx context.Context, authority keyauthority.Authority, release *release.Release, engine *guardrails.Engine, requestID, phase string, segments []guardrails.Segment, masks *guardrails.Masking) (guardrails.Result, error) {
+	if s == nil || release == nil || release.Snapshot() == nil {
 		return guardrails.Result{Segments: segments}, guardrails.ErrSurface
 	}
 	parent := &call{
@@ -452,18 +458,18 @@ func (s *Server) EvaluateToolGuardrails(ctx context.Context, authority access.Au
 		family:        wire.Chat,
 	}
 	evaluation := guardrails.Evaluation{RequestID: parent.request.accountingID(), Phase: phase, Segments: segments}
-	return engine.WithEvaluator(s.GuardrailEvaluator).Evaluate(context.WithValue(ctx, guardrailCallerKey{}, parent), evaluation, masks)
+	return engine.WithEvaluator(s.deps.GuardrailEvaluator).Evaluate(context.WithValue(ctx, guardrailCallerKey{}, parent), evaluation, masks)
 }
 
 func (s *Server) EvaluateGuardrails(r *http.Request, p access.Principal, in guardrails.ApplyInput) (guardrails.Result, error) {
-	if s == nil || s.Runtime == nil {
+	if s == nil || s.deps.Runtime == nil {
 		return guardrails.Result{}, access.Fail(503, "guardrails_unavailable", "The evaluator is unavailable.")
 	}
 	if !s.admit(r.Context()) {
 		return guardrails.Result{}, access.Fail(overloaded.Status, overloaded.Code, overloaded.Message)
 	}
 	defer s.release(r.Context())
-	x := &call{request: request{id: uuid.Must(uuid.NewV7()).String(), minted: true, startedAt: s.now(), release: s.Runtime.Release()}, actor: "playground", origin: usage.OriginPlayground, userID: p.UserID(), family: wire.Chat, operationOverride: "guardrail"}
+	x := &call{request: request{id: uuid.Must(uuid.NewV7()).String(), minted: true, startedAt: s.now(), release: s.deps.Runtime.Release()}, actor: "playground", origin: usage.OriginPlayground, userID: p.UserID(), family: wire.Chat, operationOverride: "guardrail"}
 	x.authorize = func(route *routing.Route) *Error {
 		if err := p.Authorize(access.Playground); err != nil {
 			return permissionError("guardrail_forbidden", "Playground access is required.")
@@ -489,10 +495,10 @@ func (s *Server) evaluateGuardrails(ctx context.Context, x *call, in guardrails.
 	x.route = &routing.Route{Slug: "guardrails", OverallTimeout: 30000, MaxAttempts: 1}
 	x.primary = x.route
 	x.mode = "unary"
-	if x.request.release == nil || (x.snapshot().Guardrails == nil && in.Policy == nil) {
+	if x.request.release == nil || (!x.snapshot().HasGuardrails() && in.Policy == nil) {
 		return guardrails.Result{}, guardrails.ErrSurface
 	}
-	registry := x.snapshot().Guardrails
+	registry := x.snapshot().Guardrails()
 	var p guardrails.PolicyRevision
 	var ok bool
 	var definitions map[string]guardrails.Revision
@@ -511,7 +517,7 @@ func (s *Server) evaluateGuardrails(ctx context.Context, x *call, in guardrails.
 	if x.keyID != "" && (x.authority.ProjectID == nil || *x.authority.ProjectID != p.ProjectID) {
 		return guardrails.Result{}, guardrails.ErrSurface
 	}
-	engine, err := guardrails.Compile(p.Entries, definitions, s.GuardrailEvaluator)
+	engine, err := guardrails.Compile(p.Entries, definitions, s.deps.GuardrailEvaluator)
 	if err != nil {
 		return guardrails.Result{}, err
 	}
@@ -525,7 +531,7 @@ func (s *Server) evaluateGuardrails(ctx context.Context, x *call, in guardrails.
 			n += int64(len(segment.Text))
 		}
 		x.estimate = max(1, (n+3)/4)
-		lease, e := s.Admission.reserveKey(ctx, x.authority, "openai", x.estimate, 30*time.Second, "guardrails")
+		lease, e := s.deps.Admission.reserveKey(ctx, x.authority, "openai", x.estimate, 30*time.Second, "guardrails")
 		if e != nil {
 			return guardrails.Result{}, e
 		}
@@ -572,7 +578,7 @@ func (s *Server) modelGuardrail(ctx context.Context, d guardrails.Revision, e gu
 	}
 	// A retained serving snapshot contains only its pinned route/provider.
 	// Evaluators belong to the full release pinned at request admission.
-	route, ok := parent.request.release.Snapshot.Routes[config.Route]
+	route, ok := parent.request.release.Snapshot().FindRoute(config.Route)
 	if !ok {
 		return guardrails.Verdict{}, guardrails.ErrSurface
 	}
@@ -794,11 +800,11 @@ func (x *call) guardrailSurfaceGate(route *routing.Route) *Error {
 }
 
 func (x *call) legacyGuardrailError(result guardrails.Result, err error) error {
-	if x.snapshot().Guardrails == nil {
+	if !x.snapshot().HasGuardrails() {
 		return err
 	}
 	for _, evidence := range result.Decisions {
-		d := x.snapshot().Guardrails.Definitions[evidence.Revision]
+		d := x.snapshot().GuardrailDefinition(evidence.Revision)
 		if d.LegacyRuleID == "" {
 			continue
 		}
@@ -808,7 +814,7 @@ func (x *call) legacyGuardrailError(result guardrails.Result, err error) error {
 	}
 	if errors.Is(err, guardrails.ErrBlocked) && len(result.Decisions) > 0 {
 		last := result.Decisions[len(result.Decisions)-1]
-		if x.snapshot().Guardrails.Definitions[last.Revision].LegacyRuleID != "" {
+		if x.snapshot().GuardrailDefinition(last.Revision).LegacyRuleID != "" {
 			return &guardrails.Error{Code: "content_policy_blocked", Status: 400}
 		}
 	}

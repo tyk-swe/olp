@@ -194,7 +194,7 @@ CLIProxyAPI has no OpenCode Go allowance parser in the pinned tree. A search for
 
 ## What OLP could adopt
 
-OLP starts from a stricter position than CLIProxyAPI. A conversation tree pins one account per subscription family and per model, an unavailable pinned account does not trigger silent switching, and new conversation share can already be weighted per pool account. Sources are the [OLP code mode guide](../use/code-mode.md) and [the candidate choice in `code_mode.go`](../../internal/resources/code_mode.go#L536-L583)
+OLP starts from a stricter position than CLIProxyAPI. A conversation tree pins one account per subscription family and per model, an unavailable pinned account does not trigger silent switching, and new conversation share can already be weighted per pool account. Sources are the [OLP code mode guide](../use/code-mode.md) and [the candidate choice in `codesessions/store.go`](../../internal/codesessions/store.go)
 
 OLP also already reads Codex allowance windows and uses exhausted windows as an availability gate, while OpenCode Go and the coding plans currently show no allowance and take health from response status plus a single valid `Retry-After` with a one minute fallback. Source is the [OLP code mode guide](../use/code-mode.md)
 

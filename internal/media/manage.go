@@ -67,15 +67,11 @@ func (m *Management) scopedJob(r *http.Request, q Querier, p access.Principal, n
 // installation lock, so a job mutation never starts under authority revoked
 // since admission. The lock is released before the provider call runs.
 func (m *Management) reauthorizeJob(r *http.Request, need access.Need) (access.Principal, *JobRecord, error) {
-	tx, err := m.Access.Begin(r)
+	tx, p, err := m.Access.BeginMutation(r)
 	if err != nil {
 		return access.Principal{}, nil, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := m.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Principal{}, nil, err
-	}
 	record, err := m.scopedJob(r, tx, p, need)
 	if err != nil {
 		return access.Principal{}, nil, err

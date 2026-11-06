@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -31,7 +31,7 @@ func tighterToolLimit(server int64, key *int64) *int64 {
 	return &server
 }
 
-func describeTool(authority access.Authority, resolved resolvedToolset, tool routing.MCPToolsetTool) listedTool {
+func describeTool(authority keyauthority.Authority, resolved resolvedToolset, tool routing.MCPToolsetTool) listedTool {
 	effective := routing.EffectiveToolLimits(tool.CallsPerMinute, tool.MaxConcurrency, tool.PerKeyCallsPerMinute, tool.PerKeyMaxConcurrency)
 	return listedTool{
 		ToolsetID: resolved.id, ToolsetRevisionID: resolved.revisionID,
@@ -88,7 +88,7 @@ func normalizedArguments(arguments json.RawMessage) json.RawMessage {
 	return arguments
 }
 
-func (s *Server) prepareCall(authority access.Authority, snapshot *routing.Snapshot, request callRequest) (preparedCall, *apiError) {
+func (s *Server) prepareCall(authority keyauthority.Authority, snapshot *routing.View, request callRequest) (preparedCall, *apiError) {
 	resolved, failure := s.resolveToolset(authority, snapshot, request.ToolsetID)
 	if failure != nil {
 		return preparedCall{}, failure

@@ -156,21 +156,17 @@ func (s *Server) createPricingDiscount(r *http.Request, _ access.Principal) (acc
 	if err := access.Decode(r, &input); err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.Access.Begin(r)
+	tx, principal, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(context.WithoutCancel(r.Context()))
-	principal, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	claim, replayed, err := s.Access.Replay(r, tx, principal, input)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	discount, err := NormalizeDiscount(r.Context(), tx, input, s.VendorKind)
 	if err != nil {
@@ -189,5 +185,5 @@ func (s *Server) createPricingDiscount(r *http.Request, _ access.Principal) (acc
 	if err = s.Access.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }

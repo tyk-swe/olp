@@ -350,4 +350,34 @@ describe('provider wizard', () => {
     expect(state.wizardStep).toBe(3);
     expect(state.notice).toContain('runtime generation 42');
   });
+  it('retries refresh after confirmed activation without activating twice', async () => {
+    let activated = false;
+    let refreshUnavailable = true;
+    const activate = vi.fn(() => {
+      activated = true;
+      return json({ runtime_generation: { sequence: 42 } });
+    });
+    serveWizard(undefined, (request) => {
+      const path = new URL(request.url).pathname;
+      if (path.endsWith('/activate')) return activate();
+      if (activated && refreshUnavailable && path.endsWith('/models'))
+        return json({ title: 'Refresh unavailable', status: 503 }, 503);
+      return undefined;
+    });
+    const state = await wizard();
+    const draft = state.draft;
+    expect(draft).not.toBeNull();
+    if (!draft) return;
+    draft.name = 'Service';
+    draft.endpoint = 'https://example.test/v1';
+    draft.credential = 'secret';
+    await state.createDraft(new SubmitEvent('submit', { cancelable: true }));
+    await state.activateWizardProvider();
+    expect(state.errorMessage).toContain('Refresh unavailable');
+    refreshUnavailable = false;
+    await state.activateWizardProvider();
+    expect(activate).toHaveBeenCalledTimes(1);
+    expect(state.wizardStep).toBe(3);
+    expect(state.errorMessage).toBe('');
+  });
 });

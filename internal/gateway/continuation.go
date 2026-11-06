@@ -46,14 +46,14 @@ type storedContinuation struct {
 	Query           url.Values                `json:"query"`
 }
 
-func (x *call) snapshot() *routing.Snapshot {
+func (x *call) snapshot() *routing.View {
 	if x.historicalSnapshot != nil {
 		return x.historicalSnapshot
 	}
 	if x.request.release == nil {
 		return nil
 	}
-	return x.request.release.Snapshot
+	return x.request.release.Snapshot()
 }
 func continuationError(code, message string) *Error {
 	return serverError(http.StatusConflict, code, message)
@@ -79,7 +79,7 @@ func (s *Server) prepareContinuation(ctx context.Context, x *call) *Error {
 	if len(values) != 1 || values[0] != interaction.ContinuationV1 || len(submission) != 1 || len(handles) > 1 || x.family != wire.Chat {
 		return invalidRequest("state_carrier", "Provide the tested chat-anthropic-tools-v1 continuation contract and one submission identity.", nil)
 	}
-	route, ok := x.request.release.Snapshot.Routes[x.generation.parsed.Route]
+	route, ok := x.request.release.Snapshot().FindRoute(x.generation.parsed.Route)
 	if !ok || !route.Fidelity.Strict() {
 		return invalidRequest("state_carrier", "Negotiated continuation requires a strict route.", nil)
 	}
@@ -89,14 +89,14 @@ func (s *Server) prepareContinuation(ctx context.Context, x *call) *Error {
 	if !x.authority.Policy.AllowProviderState {
 		return invalidRequest("policy_conflict", "Encrypted native continuation requires allow_provider_state on this API key.", nil)
 	}
-	if !s.Resources.Encrypted() {
+	if !s.deps.Resources.Encrypted() {
 		return serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Encrypted continuation authority is not configured.")
 	}
 	c := &continuationExecution{version: values[0], submission: submission[0]}
 	x.generation.continuation = c
 	// Existing ready delivery is recoverable for the resource lifetime even after
 	// the shorter window for claiming a fresh submission has closed.
-	res, payload, err := s.Resources.FindSubmission(ctx, x.keyID, c.submission)
+	res, payload, err := s.deps.Resources.FindSubmission(ctx, x.keyID, c.submission)
 	if err == nil {
 		state, e := decodeStoredContinuation(payload)
 		if e != nil {
@@ -124,7 +124,7 @@ func (s *Server) prepareContinuation(ctx context.Context, x *call) *Error {
 	if len(handles) == 0 {
 		return nil
 	}
-	res, payload, err = s.Resources.ReadContract(ctx, resources.KindContinuation, x.keyID, handles[0])
+	res, payload, err = s.deps.Resources.ReadContract(ctx, resources.KindContinuation, x.keyID, handles[0])
 	if err != nil || res.State != resources.StateReady {
 		return continuationError("continuation_unavailable", "The continuation handle is expired, incomplete, or unavailable to this key.")
 	}
@@ -186,7 +186,7 @@ func (s *Server) claimToolWork(ctx context.Context, x *call, plan *interaction.P
 	if err != nil {
 		return err
 	}
-	res, created, err := s.Resources.ClaimForDispatch(ctx, r, payload)
+	res, created, err := s.deps.Resources.ClaimForDispatch(ctx, r, payload)
 	if err != nil {
 		return err
 	}
@@ -209,7 +209,7 @@ func (s *Server) commitToolDelivery(ctx context.Context, x *call, state *interac
 	if len(payload) > resources.MaxContinuationBytes {
 		return resources.ErrPayloadTooLarge
 	}
-	return s.Resources.CompleteContinuation(ctx, c.resource, payload)
+	return s.deps.Resources.CompleteContinuation(ctx, c.resource, payload)
 }
 
 // replayContinuation answers a request from the delivery already committed for
@@ -298,15 +298,15 @@ func (s *Server) recoverContinuation(w http.ResponseWriter, r *http.Request) {
 	var payload []byte
 	var err error
 	if submission := r.PathValue("submission"); submission != "" {
-		res, payload, err = s.Resources.FindSubmission(r.Context(), authority.ID, submission)
+		res, payload, err = s.deps.Resources.FindSubmission(r.Context(), authority.ID, submission)
 	} else {
-		res, payload, err = s.Resources.ReadContract(r.Context(), resources.KindContinuation, authority.ID, r.PathValue("id"))
+		res, payload, err = s.deps.Resources.ReadContract(r.Context(), resources.KindContinuation, authority.ID, r.PathValue("id"))
 	}
 	if err != nil {
 		s.stateFail(x, w, notFoundError("continuation_unavailable", "No unexpired continuation with this identity is available to this key."), x.family)
 		return
 	}
-	route, exists := x.request.release.Snapshot.Routes[res.RouteSlug]
+	route, exists := x.request.release.Snapshot().FindRoute(res.RouteSlug)
 	if !exists || !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
 		s.stateFail(x, w, notFoundError("continuation_unavailable", "The continuation is unavailable to this key."), x.family)
 		return

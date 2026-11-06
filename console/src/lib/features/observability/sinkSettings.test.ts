@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildSinkSettings,
-  validateSinkSettings,
+  parseSinkSettings,
+  parseSinkCredential,
+  newSinkDelivery,
+  changeSinkDelivery,
+  toggleSinkStream,
   type SinkSettingsDraft
 } from './sinkSettings';
 
-const stripe: SinkSettingsDraft = {
+const stripe: Extract<SinkSettingsDraft, { format: 'stripe' }> = {
   format: 'stripe',
-  focusCostBasis: 'cost',
-  focusStartDate: '',
-  ceSource: '',
   stripeEvent: 'usage-recorded',
   stripeValue: 'cost',
   customers: [{ project: 'project-a', customer: 'cus_ABC123' }],
@@ -17,21 +17,36 @@ const stripe: SinkSettingsDraft = {
   stripeValueKey: ''
 };
 
+function settings(draft: SinkSettingsDraft) {
+  const parsed = parseSinkSettings(draft, { editing: true, stripeKey: '' });
+  expect(parsed.kind).toBe('valid');
+  return parsed.kind === 'valid' ? parsed.settings : null;
+}
+function issue(
+  draft: SinkSettingsDraft,
+  credential: { editing: boolean; stripeKey: string }
+) {
+  const parsed = parseSinkSettings(draft, credential);
+  return parsed.kind === 'invalid' ? parsed.message : '';
+}
+
 const createCredential = { editing: false, stripeKey: 'restricted-key' };
 
 describe('export sink settings', () => {
   it('builds cost or charge settings with an optional start date', () => {
     expect(
-      buildSinkSettings({
+      settings({
         ...stripe,
         format: 'csv_gzip',
-        focusCostBasis: 'charge'
+        focusCostBasis: 'charge',
+        focusStartDate: ''
       })
     ).toEqual({ cost_basis: 'charge' });
     expect(
-      buildSinkSettings({
+      settings({
         ...stripe,
         format: 'csv_gzip',
+        focusCostBasis: 'cost',
         focusStartDate: '2025-01-02'
       })
     ).toEqual({ cost_basis: 'cost', start_date: '2025-01-02' });
@@ -39,21 +54,21 @@ describe('export sink settings', () => {
 
   it('includes only a nonblank, trimmed CloudEvents source', () => {
     expect(
-      buildSinkSettings({
+      settings({
         ...stripe,
         format: 'cloudevents',
         ceSource: '  urn:source  '
       })
     ).toEqual({ source: 'urn:source' });
     expect(
-      buildSinkSettings({ ...stripe, format: 'cloudevents', ceSource: '  ' })
+      settings({ ...stripe, format: 'cloudevents', ceSource: '  ' })
     ).toBeNull();
-    expect(buildSinkSettings({ ...stripe, format: 'json' })).toBeNull();
+    expect(settings({ ...stripe, format: 'json' })).toBeNull();
   });
 
   it('builds Stripe settings from complete mappings and optional field names', () => {
     expect(
-      buildSinkSettings({
+      settings({
         ...stripe,
         stripeEvent: ' usage.recorded ',
         customers: [
@@ -71,20 +86,18 @@ describe('export sink settings', () => {
       customer_key: 'customer_id',
       value_key: 'total'
     });
-    expect(buildSinkSettings(stripe)).not.toHaveProperty('customer_key');
-    expect(buildSinkSettings(stripe)).not.toHaveProperty('value_key');
+    expect(settings(stripe)).not.toHaveProperty('customer_key');
+    expect(settings(stripe)).not.toHaveProperty('value_key');
   });
 
   it('requires a restricted key for creation but permits edits to keep their credential', () => {
-    expect(
-      validateSinkSettings(stripe, { editing: false, stripeKey: ' ' })
-    ).toContain('restricted API key');
-    expect(validateSinkSettings(stripe, { editing: true, stripeKey: '' })).toBe(
-      ''
+    expect(issue(stripe, { editing: false, stripeKey: ' ' })).toContain(
+      'restricted API key'
     );
+    expect(issue(stripe, { editing: true, stripeKey: '' })).toBe('');
     expect(
-      validateSinkSettings(
-        { ...stripe, format: 'csv_gzip' },
+      issue(
+        { format: 'csv_gzip', focusCostBasis: 'cost', focusStartDate: '' },
         { editing: false, stripeKey: '' }
       )
     ).toBe('');
@@ -93,9 +106,9 @@ describe('export sink settings', () => {
   it.each(['', 'invalid event', 'x'.repeat(101)])(
     'rejects an invalid event name %s',
     (stripeEvent) => {
-      expect(
-        validateSinkSettings({ ...stripe, stripeEvent }, createCredential)
-      ).toContain('event name');
+      expect(issue({ ...stripe, stripeEvent }, createCredential)).toContain(
+        'event name'
+      );
     }
   );
 
@@ -105,9 +118,7 @@ describe('export sink settings', () => {
     [[{ project: 'project-a', customer: '' }], 'customer IDs'],
     [[{ project: 'project-a', customer: 'bad' }], 'customer IDs']
   ])('rejects incomplete or invalid customer mappings', (customers, error) => {
-    expect(
-      validateSinkSettings({ ...stripe, customers }, createCredential)
-    ).toContain(error);
+    expect(issue({ ...stripe, customers }, createCredential)).toContain(error);
   });
 
   it.each([
@@ -117,17 +128,44 @@ describe('export sink settings', () => {
     'rejects an invalid %s while allowing a valid one',
     (field, error) => {
       expect(
-        validateSinkSettings(
-          { ...stripe, [field]: 'bad-key' },
-          createCredential
-        )
+        issue({ ...stripe, [field]: 'bad-key' }, createCredential)
       ).toContain(error);
       expect(
-        validateSinkSettings(
-          { ...stripe, [field]: ' valid_key_1 ' },
-          createCredential
-        )
+        issue({ ...stripe, [field]: ' valid_key_1 ' }, createCredential)
       ).toBe('');
     }
+  );
+});
+
+it('changes delivery formats without carrying unsupported streams', () => {
+  const audit = toggleSinkStream(newSinkDelivery('https'), 'audit');
+  const objectStorage = changeSinkDelivery(audit, 's3', 'jsonl');
+  expect(objectStorage.streams).toEqual(['requests', 'audit']);
+  const focus = changeSinkDelivery(objectStorage, 's3', 'csv_gzip');
+  expect(focus.streams).toEqual(['focus']);
+  expect(toggleSinkStream(focus, 'audit')).toEqual(focus);
+  expect(changeSinkDelivery(focus, 'https', 'json').streams).toEqual([]);
+});
+
+it('distinguishes retaining, clearing and replacing a sink credential', () => {
+  const input = {
+    type: 'https' as const,
+    clear: false,
+    stripeKey: '',
+    json: ''
+  };
+  expect(parseSinkCredential(input)).toEqual({
+    kind: 'valid',
+    change: { kind: 'keep' }
+  });
+  expect(parseSinkCredential({ ...input, clear: true })).toEqual({
+    kind: 'valid',
+    change: { kind: 'clear' }
+  });
+  expect(parseSinkCredential({ ...input, json: '{"token":"secret"}' })).toEqual(
+    { kind: 'valid', change: { kind: 'replace', value: { token: 'secret' } } }
+  );
+  expect(parseSinkCredential({ ...input, json: '["secret"]' }).kind).toBe(
+    'invalid'
   );
 });

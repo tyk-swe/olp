@@ -31,8 +31,8 @@ func (x *call) checkBody(route *routing.Route) *Error {
 	}
 	// Retained resources may return a historical serving route; ingress policy
 	// comes from the request's pinned release.
-	if x.request.release != nil && x.request.release.Snapshot != nil {
-		if current, ok := x.request.release.Snapshot.Routes[route.Slug]; ok {
+	if x.request.release != nil && x.request.release.Snapshot() != nil {
+		if current, ok := x.request.release.Snapshot().FindRoute(route.Slug); ok {
 			route = &current
 		}
 	}

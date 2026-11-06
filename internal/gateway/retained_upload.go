@@ -11,7 +11,7 @@ import (
 	"net/textproto"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
@@ -44,7 +44,7 @@ func retainedFilePurposeOperation(purpose string) string {
 
 // Native retained-family uploads keep file bytes in the existing bounded spool
 // and persist their at-most-once submission identity before the provider sees it.
-func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *call, a access.Authority, route *routing.Route, file *media.Part, purpose string, extra map[string]string) {
+func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *call, a keyauthority.Authority, route *routing.Route, file *media.Part, purpose string, extra map[string]string) {
 	status := http.StatusInternalServerError
 	var p *pin
 	defer func() { s.finish(x, nil, status); s.retainedSettle(r.Context(), x, p) }()
@@ -74,7 +74,7 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *c
 		return
 	}
 	x.operationOverride, x.mode, x.actor = operation, "unary", "api_key_resource"
-	x.retainedTokenless = true
+	x.retained = retainedOperation{use: retainedNewWork, usage: retainedTokenlessUsage}
 	ctx, cancel := s.stateDeadline(r.Context(), route)
 	defer cancel()
 	body, contentType, encodeErr := s.retainedUploadBody(file, purpose)
@@ -88,7 +88,7 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *c
 		fail(digestErr)
 		return
 	}
-	prior, lookupErr := s.Resources.LookupLifecycle(ctx, x.keyID, operation+":file", idempotency, digest)
+	prior, lookupErr := s.deps.Resources.LookupLifecycle(ctx, x.keyID, operation+":file", idempotency, digest)
 	if errors.Is(lookupErr, resources.ErrSubmissionConflict) {
 		fail(serverError(409, "idempotency_conflict", "This submission identity is already bound to another upload."))
 		return
@@ -117,7 +117,7 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *c
 	version := retainedapi.Revision
 	meta, _ := json.Marshal(map[string]any{"upstream_model": p.model, "file_operation": operation, "purpose": purpose, "bytes": file.Size, "filename": file.Filename, "upload_digest": file.Digest})
 	candidate := &resources.Resource{Kind: resources.KindFile, APIKeyID: x.keyID, RouteSlug: route.Slug, RouteRevisionID: route.RevisionID, ProviderID: p.provider.ID, ProviderRevisionID: p.provider.RevisionID, TargetID: p.target.ID, SlotID: p.slot.ID, CredentialID: p.slot.CredentialID, ContractVersion: &version, Metadata: meta}
-	resource, fresh, prepareErr := s.Resources.PrepareLifecycle(ctx, candidate, operation+":file", idempotency, digest)
+	resource, fresh, prepareErr := s.deps.Resources.PrepareLifecycle(ctx, candidate, operation+":file", idempotency, digest)
 	if errors.Is(prepareErr, resources.ErrSubmissionConflict) {
 		fail(serverError(409, "idempotency_conflict", "This submission identity is already bound to another upload."))
 		return
@@ -136,14 +136,14 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *c
 		fail(pinUnavailable())
 		return
 	}
-	if err := s.Resources.DispatchLifecycle(ctx, resource.UUID); err != nil {
+	if err := s.deps.Resources.DispatchLifecycle(ctx, resource.UUID); err != nil {
 		fail(serverError(503, "provider_state_unavailable", "The file submission could not be fenced."))
 		return
 	}
 	defer func() {
 		commitCtx, cancel := resourceCommitContext(r.Context())
 		defer cancel()
-		_ = s.Resources.UnknownLifecycle(commitCtx, resource.UUID)
+		_ = s.deps.Resources.UnknownLifecycle(commitCtx, resource.UUID)
 	}()
 	status = s.retainedDispatch(w, r.WithContext(ctx), x, p, e, resource, endpoint, body, contentType, true, fail)
 }

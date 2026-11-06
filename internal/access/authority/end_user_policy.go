@@ -1,0 +1,123 @@
+package authority
+
+import (
+	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
+	"regexp"
+	"slices"
+	"strings"
+)
+
+// AdmissionLimits is a complete limit set. Nil dimensions are unlimited.
+type AdmissionLimits struct {
+	RequestsPerMinute *int64  `json:"requests_per_minute"`
+	TokensPerMinute   *int64  `json:"tokens_per_minute"`
+	MaxConcurrency    *int64  `json:"max_concurrency"`
+	DailyCostLimit    *string `json:"daily_cost_limit"`
+	MonthlyCostLimit  *string `json:"monthly_cost_limit"`
+	WeeklyCostLimit   *string `json:"weekly_cost_limit"`
+	// CostBasis is "cost" (the provider-billed amount, the default) or
+	// "charge" (what the consumer owes under its rate card).
+	CostBasis string `json:"cost_basis,omitempty"`
+}
+
+func (p AdmissionLimits) Limited() bool {
+	return p.RequestsPerMinute != nil || p.TokensPerMinute != nil || p.MaxConcurrency != nil || p.CostBudgeted()
+}
+
+func (p AdmissionLimits) CostBudgeted() bool {
+	return p.DailyCostLimit != nil || p.MonthlyCostLimit != nil || p.WeeklyCostLimit != nil
+}
+
+// EndUserPolicy applies independently at each boundary. An override replaces
+// the complete default set; it never removes a policy on another boundary.
+type EndUserPolicy struct {
+	LimitTemplate *string                    `json:"limit_template,omitempty"`
+	Defaults      AdmissionLimits            `json:"defaults"`
+	Overrides     map[string]AdmissionLimits `json:"overrides,omitempty"`
+	Blocked       []string                   `json:"blocked,omitempty"`
+}
+
+var endUserDigest = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// ValidEndUserDigest accepts only a derived identity, never a raw identifier.
+func ValidEndUserDigest(value string) bool { return endUserDigest.MatchString(value) }
+
+func (p *EndUserPolicy) Limits(digest string) AdmissionLimits {
+	if p == nil {
+		return AdmissionLimits{}
+	}
+	if override, ok := p.Overrides[digest]; ok {
+		return override
+	}
+	return p.Defaults
+}
+
+func (p *EndUserPolicy) Blocks(digest string) bool {
+	return p != nil && slices.Contains(p.Blocked, digest)
+}
+
+// AllowsEndUser rechecks an established session against current authority.
+// Enabling a policy also requires previously unidentified sessions to reconnect.
+func (a Authority) AllowsEndUser(digest string) bool {
+	if a.Policy.EndUserPolicy == nil && a.ProjectEndUserPolicy == nil {
+		return true
+	}
+	return digest != "" && !a.Policy.EndUserPolicy.Blocks(digest) && !a.ProjectEndUserPolicy.Blocks(digest)
+}
+
+func (policy AdmissionLimits) ValidateAndNormalize() error {
+	for field, value := range map[string]*int64{"requests_per_minute": policy.RequestsPerMinute, "max_concurrency": policy.MaxConcurrency} {
+		if !limits.ValidRequestLimit(value) {
+			return invalid(field, "Use a positive integer of at most 2147483647.")
+		}
+	}
+	if !limits.ValidTokenLimit(policy.TokensPerMinute) {
+		return invalid("tokens_per_minute", "Use a positive integer of at most 9007199254740991.")
+	}
+	if policy.CostBasis != "" && policy.CostBasis != "cost" && policy.CostBasis != "charge" {
+		return invalid("cost_basis", `The cost basis must be "cost" or "charge".`)
+	}
+	for field, value := range map[string]*string{"daily_cost_limit": policy.DailyCostLimit, "monthly_cost_limit": policy.MonthlyCostLimit, "weekly_cost_limit": policy.WeeklyCostLimit} {
+		if value != nil {
+			amount := strings.TrimSpace(*value)
+			if !pricingpolicy.ValidAmount(amount) || !strings.ContainsAny(amount, "123456789") {
+				return invalid(field, "Use a positive decimal amount with at most 12 integer and 12 fractional digits.")
+			}
+			*value = amount
+		}
+	}
+	return nil
+}
+
+func (p *EndUserPolicy) ValidateAndNormalize() error {
+	if p == nil {
+		return nil
+	}
+	if err := ValidateTemplateName(p.LimitTemplate); err != nil {
+		return err
+	}
+	if len(p.Overrides) > 256 || len(p.Blocked) > 256 {
+		return invalid("end_user_policy", "At most 256 overrides and 256 blocked digests are supported.")
+	}
+
+	if err := p.Defaults.ValidateAndNormalize(); err != nil {
+		return err
+	}
+	for digest, policy := range p.Overrides {
+		if !endUserDigest.MatchString(digest) {
+			return invalid("end_user_policy.overrides", "Use project-scoped SHA-256 digests as override keys.")
+		}
+		if err := policy.ValidateAndNormalize(); err != nil {
+			return err
+		}
+	}
+	seen := make(map[string]bool, len(p.Blocked))
+	for _, digest := range p.Blocked {
+		if !endUserDigest.MatchString(digest) || seen[digest] {
+			return invalid("end_user_policy.blocked", "Use unique project-scoped SHA-256 digests.")
+		}
+		seen[digest] = true
+	}
+	return nil
+}

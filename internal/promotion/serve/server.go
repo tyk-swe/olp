@@ -104,15 +104,11 @@ func applyEndpoint(s *promotion.Server, r *http.Request, _ access.Principal) (ac
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.Access.Begin(r)
+	tx, p, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	if err = Input.authorizeExternalBindings(p); err != nil {
 		return access.Reply{}, err
 	}
@@ -149,7 +145,7 @@ func applyEndpoint(s *promotion.Server, r *http.Request, _ access.Principal) (ac
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	var preparedServers map[[2]string]mcpentries.PreparedMCP
 	if len(doc.WorkloadIssuers) > 0 || len(doc.MCPServers) > 0 {
@@ -164,15 +160,11 @@ func applyEndpoint(s *promotion.Server, r *http.Request, _ access.Principal) (ac
 		if err != nil {
 			return access.Reply{}, err
 		}
-		tx, err = s.Access.Begin(r)
+		tx, p, err = s.Access.BeginMutation(r)
 		if err != nil {
 			return access.Reply{}, err
 		}
 		defer tx.Rollback(r.Context())
-		p, err = s.Access.Reauthorize(r, tx)
-		if err != nil {
-			return access.Reply{}, err
-		}
 		if err = Input.authorizeExternalBindings(p); err != nil {
 			return access.Reply{}, err
 		}
@@ -184,7 +176,7 @@ func applyEndpoint(s *promotion.Server, r *http.Request, _ access.Principal) (ac
 			return access.Reply{}, err
 		}
 		if replayed != nil {
-			return access.Commit(r, tx, *replayed)
+			return *replayed, tx.Commit(r.Context())
 		}
 	}
 	result, err := plan(s, r.Context(), tx, doc, bindings, Input.ExpectedDigest)
@@ -252,7 +244,7 @@ func applyEndpoint(s *promotion.Server, r *http.Request, _ access.Principal) (ac
 	if err = s.Access.CompleteReplay(r, tx, claim, reply); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, reply)
+	return reply, tx.Commit(r.Context())
 }
 
 func authorizeIdentityPromotion(p access.Principal, doc *promotion.Document) error {

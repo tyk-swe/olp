@@ -200,7 +200,7 @@ func PrepareWorkloadIssuers(s *promotion.Server, ctx context.Context, p access.P
 		if err == nil && old.Enabled && old.JWKSURL == e.JWKSURL {
 			continue
 		}
-		if _, err = workload.Fetch(ctx, s.Access.OIDCClient, e.JWKSURL); err != nil {
+		if _, err = workload.Fetch(ctx, s.IdentityClient, e.JWKSURL); err != nil {
 			return access.Fail(422, "workload_keys_unavailable", "The declared public signing keys could not be verified through identity egress.")
 		}
 	}

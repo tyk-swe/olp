@@ -4,6 +4,7 @@
 package providers
 
 import (
+	"github.com/tyk-swe/olp/internal/providerconfig"
 	"slices"
 	"strings"
 
@@ -267,7 +268,7 @@ func capabilityOptionsForKind(kind string) []CapabilityInput {
 	var profiles []Configuration
 	for _, profile := range connectors.Profiles() {
 		if profile.Kind == kind {
-			cfg := Configuration{Kind: kind, ProfileID: profile.ID, ProfileRevision: profile.Revision}
+			cfg := Configuration{Identity: providerconfig.Identity[*string]{Kind: kind, ProfileID: profile.ID, ProfileRevision: profile.Revision}}
 			if kind == KindOpenAICompatible && strings.HasSuffix(profile.ID, "-files-batches") {
 				vendor := strings.TrimSuffix(profile.ID, "-files-batches")
 				cfg.Options.VendorID = &vendor

@@ -11,10 +11,8 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/secrets"
 )
 
-// importRow is one provider_billing_imports row.
 type importRow struct {
 	ProviderID            string
 	Source                string
@@ -59,8 +57,6 @@ func loadImport(ctx context.Context, q access.Queryer, providerID string, lock b
 	return scanImport(q.QueryRow(ctx, query, providerID))
 }
 
-// importDocument is the resource shape GET and PUT share. The credential is
-// never part of it, only whether one is stored.
 func importDocument(r *importRow) map[string]any {
 	return map[string]any{
 		"provider_id":           r.ProviderID,
@@ -96,9 +92,6 @@ func (s *Server) getImport(r *http.Request, p access.Principal) (access.Reply, e
 	return access.Detail(importDocument(row), row.ETag), nil
 }
 
-// putImport creates or replaces the provider's billing import. A stored
-// credential survives a PUT that omits it; credential:null is rejected —
-// DELETE removes the import.
 func (s *Server) putImport(r *http.Request, _ access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
@@ -112,15 +105,11 @@ func (s *Server) putImport(r *http.Request, _ access.Principal) (access.Reply, e
 	if err := access.DecodeUnique(r, &input, 65536); err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.Access.Begin(r)
+	tx, p, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	// The stored reply discloses the provider, so the caller must still reach
 	// its project before a replay is served.
 	current, err := loadProvider(r.Context(), tx, id, true)
@@ -135,7 +124,7 @@ func (s *Server) putImport(r *http.Request, _ access.Principal) (access.Reply, e
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	existing, err := loadImport(r.Context(), tx, id, true)
 	if err != nil && !errors.Is(err, errImportMissing) {
@@ -185,13 +174,8 @@ func (s *Server) putImport(r *http.Request, _ access.Principal) (access.Reply, e
 	case credentialNull:
 		return access.Reply{}, access.Invalid("credential", "credential cannot be null; delete the billing import instead")
 	case credential != nil:
-		document, err := encodeCredential(source, *credential)
+		newID, err := ImportCredential(r.Context(), tx, s.Access.Keys, s.Access.Installation, source, *credential)
 		if err != nil {
-			return access.Reply{}, err
-		}
-		defer clear(document)
-		newID := access.NewID()
-		if err := s.Access.Keys.Store(r.Context(), tx, s.Access.Installation, newID, secrets.BillingCredential, document, nil); err != nil {
 			return access.Reply{}, err
 		}
 		credentialID = &newID
@@ -206,34 +190,15 @@ func (s *Server) putImport(r *http.Request, _ access.Principal) (access.Reply, e
 			return access.Reply{}, access.Invalid("credential", "supply a credential compatible with the billing source")
 		}
 	}
-	newETag := access.NewID()
-	action := "provider.billing_import.create"
-	status := http.StatusCreated
-	if existing == nil {
-		_, err = tx.Exec(r.Context(), `INSERT INTO olp.provider_billing_imports
-			(provider_id,source,credential_id,scope,enabled,etag,created_by,next_import_at)
-			VALUES($1::uuid,$2,$3::uuid,$4::jsonb,$5,$6,$7::uuid,now())`,
-			id, source, credentialID, scope, enabled, newETag, p.UserID())
-	} else {
-		action = "provider.billing_import.update"
-		status = http.StatusOK
-		_, err = tx.Exec(r.Context(), `UPDATE olp.provider_billing_imports
-			SET source=$2,credential_id=$3::uuid,scope=$4::jsonb,enabled=$5,etag=$6,updated_at=now()
-			WHERE provider_id=$1::uuid`,
-			id, source, credentialID, scope, enabled, newETag)
-	}
+	newETag, err := SaveImport(r.Context(), tx, id, ImportConfiguration{Source: source, Enabled: enabled, Scope: scope, CredentialID: credentialID}, p.UserID())
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err := syncImportRevision(r.Context(), tx, id, source, scope); err != nil {
-		return access.Reply{}, err
-	}
-	// The row no longer references the replaced credential, so the old secret
-	// can go once the pointer moved.
-	if old := existingCredential(existing); credential != nil && old != nil {
-		if _, err := tx.Exec(r.Context(), `DELETE FROM olp.secrets WHERE id=$1::uuid AND purpose=$2`, *old, secrets.BillingCredential); err != nil {
-			return access.Reply{}, err
-		}
+	action := "provider.billing_import.create"
+	status := http.StatusCreated
+	if existing != nil {
+		action = "provider.billing_import.update"
+		status = http.StatusOK
 	}
 	if err := access.Audit(r.Context(), tx, r, p.Actor(), action, "provider", id, "success"); err != nil {
 		return access.Reply{}, err
@@ -246,7 +211,7 @@ func (s *Server) putImport(r *http.Request, _ access.Principal) (access.Reply, e
 	if err := s.Access.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 
 func existingCredential(r *importRow) *string {
@@ -256,22 +221,16 @@ func existingCredential(r *importRow) *string {
 	return r.CredentialID
 }
 
-// deleteImport removes the import and its sealed credential; the costs it
-// already imported stay.
 func (s *Server) deleteImport(r *http.Request, _ access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.Access.Begin(r)
+	tx, p, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	current, err := loadProvider(r.Context(), tx, id, true)
 	if err != nil {
 		return access.Reply{}, err
@@ -286,38 +245,25 @@ func (s *Server) deleteImport(r *http.Request, _ access.Principal) (access.Reply
 	if err := access.Match(r, existing.ETag); err != nil {
 		return access.Reply{}, err
 	}
-	if err := rememberImportCoverage(r.Context(), tx, id); err != nil {
+	if err := RemoveImport(r.Context(), tx, id); err != nil {
 		return access.Reply{}, err
-	}
-	if _, err := tx.Exec(r.Context(), `DELETE FROM olp.provider_billing_imports WHERE provider_id=$1::uuid`, id); err != nil {
-		return access.Reply{}, err
-	}
-	if existing.CredentialID != nil {
-		if _, err := tx.Exec(r.Context(), `DELETE FROM olp.secrets WHERE id=$1::uuid AND purpose=$2`, *existing.CredentialID, secrets.BillingCredential); err != nil {
-			return access.Reply{}, err
-		}
 	}
 	if err := access.Audit(r.Context(), tx, r, p.Actor(), "provider.billing_import.delete", "provider", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, access.Reply{Status: 204})
+	return access.Reply{Status: 204}, tx.Commit(r.Context())
 }
 
-// runImport brings the next import forward to now.
 func (s *Server) runImport(r *http.Request, _ access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.Access.Begin(r)
+	tx, p, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	current, err := loadProvider(r.Context(), tx, id, true)
 	if err != nil {
 		return access.Reply{}, err
@@ -330,7 +276,7 @@ func (s *Server) runImport(r *http.Request, _ access.Principal) (access.Reply, e
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	if _, err := loadImport(r.Context(), tx, id, true); err != nil {
 		return access.Reply{}, err
@@ -351,10 +297,9 @@ func (s *Server) runImport(r *http.Request, _ access.Principal) (access.Reply, e
 	if err := s.Access.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 
-// invoicedCosts lists the stored invoice rows for one provider over a range.
 func (s *Server) invoicedCosts(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {

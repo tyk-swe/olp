@@ -58,7 +58,6 @@ type Envelope = abi.Envelope
 // Rewrite changes one member of a dialect's request body.
 type Rewrite = abi.Rewrite
 
-// Rewrite operations.
 const (
 	RewriteSet     = abi.RewriteSet
 	RewriteDefault = abi.RewriteDefault
@@ -99,7 +98,6 @@ type (
 // Error is a failure a plugin reports to OLP with a code of its own.
 type Error = abi.Error
 
-// SignRequest is an upstream request for a Signer to sign.
 type SignRequest = abi.SignRequest
 
 // SignResult carries the headers a Signer adds to a request.
@@ -112,7 +110,6 @@ type (
 	RouteVerdict  = abi.RouteVerdict
 )
 
-// Plugin is implemented by every provider plugin.
 type Plugin interface {
 	// Manifest declares the plugin's profiles and the origins it may reach.
 	// OLP reads it once, at install.
@@ -130,15 +127,15 @@ type Signer interface {
 	Sign(ctx context.Context, request SignRequest) (SignResult, error)
 }
 
+type Guardrail interface {
+	EvaluateGuardrail(context.Context, abi.GuardrailRequest) (abi.GuardrailVerdict, error)
+}
+
 // RoutePredicate is implemented by a plugin that route selectors consult. OLP
 // calls it only on a confined plugin, while it plans a request, with the
 // request's features and never its content. A match can only narrow the
 // route's targets or delegate to another route; an error falls through to
 // the route's next selector.
-type Guardrail interface {
-	EvaluateGuardrail(context.Context, abi.GuardrailRequest) (abi.GuardrailVerdict, error)
-}
-
 type RoutePredicate interface {
 	MatchRoute(ctx context.Context, features RouteFeatures) (RouteVerdict, error)
 }
@@ -206,7 +203,6 @@ type Carrier interface {
 	Carry(ctx context.Context, request HTTPRequest) (CarriedResponse, error)
 }
 
-// CarriedResponse is the upstream's response to a request a Carrier carried.
 type CarriedResponse struct {
 	Status int
 	Header map[string][]string

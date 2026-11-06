@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CodeAttempt } from '$lib/management/code-mode';
+import type { CodeAttempt } from '$lib/features/code-mode/api';
 import { ApiProblem } from '$lib/management/http';
 import {
   adapterLabel,

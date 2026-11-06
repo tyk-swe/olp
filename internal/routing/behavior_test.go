@@ -262,3 +262,39 @@ func TestModalitySelectorsAcceptAndMatchRequestFeatures(t *testing.T) {
 
 // A classifier only labels the request, so a strict route may classify
 // with a transformed one, and the classifier adds no serving depth.
+
+func TestRouteWalkKeepsDelegatedFallbacksBehindNestedServingFallbacks(t *testing.T) {
+	named := Route{Slug: "named", Behavior: Behavior{Fallbacks: []Fallback{{Route: "named-backup", On: []string{FallbackRateLimit}}}}}
+	serving := Route{Slug: "serving", Behavior: Behavior{Fallbacks: []Fallback{
+		{Route: "ignored", On: []string{FallbackBudget}},
+		{Route: "nested", On: []string{FallbackRateLimit}},
+		{Route: "serving-backup", On: []string{FallbackRateLimit}},
+	}}}
+	nested := Route{Slug: "nested", Behavior: Behavior{Fallbacks: []Fallback{{Route: "nested-backup", On: []string{FallbackExhausted}}}}}
+	walk := NewRouteWalk(&named).Move(&serving, true).Failed([]string{FallbackRateLimit})
+	first, step, ok := walk.Next()
+	if !ok || step.From != serving.Slug || step.Route != nested.Slug {
+		t.Fatalf("first fallback = %+v, available %t", step, ok)
+	}
+	descended := first.Move(&nested, false).Failed([]string{FallbackExhausted})
+	for _, want := range []struct{ from, route string }{{"nested", "nested-backup"}, {"serving", "serving-backup"}, {"named", "named-backup"}} {
+		next, step, ok := descended.Next()
+		if !ok || step.From != want.from || step.Route != want.route {
+			t.Fatalf("fallback = %+v, available %t, want %s from %s", step, ok, want.route, want.from)
+		}
+		descended = next
+	}
+	if _, _, ok := descended.Next(); ok {
+		t.Fatal("exhausted traversal offered another fallback")
+	}
+	if !descended.Visited(named.Slug) || !descended.Visited(serving.Slug) || !descended.Visited(nested.Slug) {
+		t.Fatal("traversal forgot a visited route")
+	}
+	pending := first.Pending()
+	if len(pending) != 2 || pending[0].Route != "serving-backup" || pending[1].Route != "named-backup" {
+		t.Fatalf("remaining fallbacks = %+v", pending)
+	}
+	if _, step, ok := walk.Next(); !ok || step.Route != nested.Slug {
+		t.Fatalf("advancing a copy changed the earlier traversal, step %+v", step)
+	}
+}

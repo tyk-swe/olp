@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"log/slog"
 	"strings"
 	"sync/atomic"
@@ -535,13 +536,13 @@ func RunEpochDetection(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger
 					return
 				}
 				log.Warn("stale gateway epoch detection failed", "error", err)
-				if err := CheckpointTask(ctx, pool, TaskEpochDetection, OutcomeFailure, false); err != nil {
+				if err := workerhealth.New(workerhealth.TaskEpochDetection, "").Checkpoint(ctx, pool, workerhealth.OutcomeFailure, false); err != nil {
 					log.Warn("stale gateway epoch checkpoint failed", "error", err)
 				}
 				continue
 			}
 			progress := report.CandidateEpochs > 0 || report.DetectedEpochs > 0
-			if err := CheckpointTask(ctx, pool, TaskEpochDetection, OutcomeSuccess, progress); err != nil {
+			if err := workerhealth.New(workerhealth.TaskEpochDetection, "").Checkpoint(ctx, pool, workerhealth.OutcomeSuccess, progress); err != nil {
 				log.Warn("stale gateway epoch checkpoint failed", "error", err)
 			}
 			if report.DetectedEpochs > 0 {

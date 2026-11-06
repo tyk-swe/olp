@@ -10,14 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
-	"github.com/tyk-swe/olp/internal/routing"
-
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 func responsePath(cfg connectors.Config, suffix string) string {
@@ -31,7 +30,7 @@ func providerStateForbidden() *Error {
 	return permissionError("provider_state_forbidden", "This API key does not allow provider state; provider-retained content requires the allow_provider_state policy.")
 }
 
-func (s *Server) responsesStateGate(ctx context.Context, x *call, authority access.Authority, parsed *wire.Request) *Error {
+func (s *Server) responsesStateGate(ctx context.Context, x *call, authority keyauthority.Authority, parsed *wire.Request) *Error {
 	var previous string
 	if raw := parsed.Field("previous_response_id"); raw != nil {
 		_ = json.Unmarshal(raw, &previous)
@@ -45,7 +44,7 @@ func (s *Server) responsesStateGate(ctx context.Context, x *call, authority acce
 	}
 	conversation := parsed.Field("conversation")
 	hasConversation := conversation != nil && !bytes.Equal(bytes.TrimSpace(conversation), []byte("null"))
-	if route, ok := x.request.release.Snapshot.Routes[parsed.Route]; ok && route.Fidelity.Strict() {
+	if route, ok := x.request.release.Snapshot().FindRoute(parsed.Route); ok && route.Fidelity.Strict() {
 		if parsed.Field("store") == nil || bytes.Equal(bytes.TrimSpace(parsed.Field("store")), []byte("null")) {
 			// Native Responses omission requests provider retention. Strict admission
 			// cannot silently inject store:false to avoid the caller's state policy.
@@ -78,10 +77,10 @@ func (s *Server) responsesStateGate(ctx context.Context, x *call, authority acce
 		param := "store"
 		return invalidRequest("unsupported_parameter", "Storing responses at the provider requires the allow_provider_state policy.", &param)
 	}
-	if s.Resources == nil {
+	if s.deps.Resources == nil {
 		return serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Provider state is not configured on this installation.")
 	}
-	if route, ok := x.request.release.Snapshot.Routes[parsed.Route]; ok && route.Fidelity.Strict() && !s.Resources.Encrypted() {
+	if route, ok := x.request.release.Snapshot().FindRoute(parsed.Route); ok && route.Fidelity.Strict() && !s.deps.Resources.Encrypted() {
 		return serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Strict retained Responses requires encrypted resource authority.")
 	}
 	x.providerState = true
@@ -145,13 +144,13 @@ func (s *Server) pinAttempts(ctx context.Context, x *call) *Error {
 	// Preserve the historical provider and compiled route contract. Resolving
 	// only a slot/attempt and then reading the current provider changes defaults,
 	// endpoint or profile behind a retained response/continuation handle.
-	current := x.request.release.Snapshot
+	current := x.request.release.Snapshot()
 	if retained, slot, same := current.PinnedCurrent(*historical, p.provider, p.target, p.slot, x.keyID, x.family.Surface(), x.mode); same {
 		// The installed release was already validated and compiled at
 		// publication. Reusing its immutable target template avoids compiling
 		// the same strict contract again for every continuation turn.
 		x.historicalSnapshot = retained
-		route := retained.Routes[historical.Slug]
+		route := retained.Route(historical.Slug)
 		x.route = &route
 		x.attempts = []routing.Attempt{p.attempt}
 		x.budget = 1
@@ -160,12 +159,12 @@ func (s *Server) pinAttempts(ctx context.Context, x *call) *Error {
 	}
 	historical.Targets = []routing.Target{p.target}
 	p.provider.Slots = []routing.Slot{p.slot}
-	retained := &routing.Snapshot{Generation: current.Generation, Providers: map[string]routing.Provider{p.provider.ID: p.provider}, Routes: map[string]routing.Route{historical.Slug: *historical}, InstallationPolicy: current.InstallationPolicy, KeyPolicies: current.KeyPolicies, Guardrails: current.Guardrails}
-	if err := retained.Compile(); err != nil {
+	retained, err := current.Historical(p.provider, *historical)
+	if err != nil {
 		return pinUnavailable()
 	}
 	x.historicalSnapshot = retained
-	route := retained.Routes[historical.Slug]
+	route := retained.Route(historical.Slug)
 	x.route = &route
 	x.attempts = []routing.Attempt{p.attempt}
 	x.budget = 1
@@ -186,8 +185,8 @@ func responseMetadataFields() [5]string {
 	return [5]string{"object", "status", "status_details", "created_at", "expires_at"}
 }
 
-func (s *Server) mapStoredResponse(ctx context.Context, x *call, authority access.Authority, body []byte) ([]byte, *Error) {
-	if s.Resources == nil || len(x.facts) == 0 || !responseStoreRequested(x.generation.parsed) {
+func (s *Server) mapStoredResponse(ctx context.Context, x *call, authority keyauthority.Authority, body []byte) ([]byte, *Error) {
+	if s.deps.Resources == nil || len(x.facts) == 0 || !responseStoreRequested(x.generation.parsed) {
 		return body, nil
 	}
 	upstreamID, ok := upstreamString(body, "id")
@@ -261,9 +260,9 @@ func (s *Server) mapStoredResponse(ctx context.Context, x *call, authority acces
 	deferred := s.pendingResponseUsage(x, &fact, metadata)
 	encoded, _ := json.Marshal(metadata)
 	identity := responseNativeIdentity(x, &fact, upstreamID)
-	res, err := s.Resources.GetByUpstream(ctx, identity)
+	res, err := s.deps.Resources.GetByUpstream(ctx, identity)
 	if errors.Is(err, resources.ErrNotFound) {
-		res, err = s.Resources.Put(ctx, &resources.Resource{
+		res, err = s.deps.Resources.Put(ctx, &resources.Resource{
 			Kind:               resources.KindResponse,
 			APIKeyID:           authority.ID,
 			RouteSlug:          x.route.Slug,
@@ -310,11 +309,11 @@ func (s *Server) previousResponseLocal(ctx context.Context, identity resources.N
 	if pin != nil && pin.UpstreamID == upstream {
 		return pin.ID
 	}
-	if s.Resources == nil {
+	if s.deps.Resources == nil {
 		return ""
 	}
 	identity.UpstreamID = upstream
-	res, err := s.Resources.GetByUpstream(ctx, identity)
+	res, err := s.deps.Resources.GetByUpstream(ctx, identity)
 	if err != nil {
 		return ""
 	}
@@ -331,7 +330,7 @@ func (s *Server) mapPreviousResponse(ctx context.Context, body []byte, identity 
 	return rewritePrevious(body, s.previousResponseLocal(ctx, identity, pin, upstream))
 }
 
-func (s *Server) responseCall(w http.ResponseWriter, r *http.Request, use retainedUse, op func(context.Context, *call, access.Authority, *resources.Resource, *pin, *routing.Route) *Error) {
+func (s *Server) responseCall(w http.ResponseWriter, r *http.Request, use retainedUse, op func(context.Context, *call, keyauthority.Authority, *resources.Resource, *pin, *routing.Route) *Error) {
 	x, authority, done := s.stateBegin(w, r, wire.Responses)
 	if done {
 		return
@@ -458,7 +457,7 @@ func (s *Server) responseUpstream(ctx context.Context, x *call, res *resources.R
 		return serverError(http.StatusBadGateway, "resource_affinity", "The retained provider returned an unowned result reference.")
 	}
 	if method == http.MethodPost && res.Kind == resources.KindStrictResponse {
-		current, present := x.request.release.Snapshot.Routes[res.RouteSlug]
+		current, present := x.request.release.Snapshot().FindRoute(res.RouteSlug)
 		if !present || retainedContract(true, current.Fidelity, retainedRetrieval) != nil || s.checkRouteFidelity(ctx, &current) != nil {
 			// Cancellation remains available for cleanup, but cannot return content
 			// that the same resource's retrieval guard forbids.
@@ -470,7 +469,7 @@ func (s *Server) responseUpstream(ctx context.Context, x *call, res *resources.R
 }
 
 func (s *Server) getResponse(w http.ResponseWriter, r *http.Request) {
-	s.responseCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
+	s.responseCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, authority keyauthority.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
 		query, stream, e := responseRetrievalQuery(r.URL.RawQuery)
 		if e != nil {
 			return e
@@ -483,13 +482,13 @@ func (s *Server) getResponse(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) cancelResponse(w http.ResponseWriter, r *http.Request) {
-	s.responseCall(w, r, retainedHousekeeping, func(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
+	s.responseCall(w, r, retainedHousekeeping, func(ctx context.Context, x *call, authority keyauthority.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
 		return s.responseUpstream(ctx, x, res, p, http.MethodPost, "/"+url.PathEscape(res.UpstreamID)+"/cancel", []byte(`{}`), w, nil)
 	})
 }
 
 func (s *Server) deleteResponse(w http.ResponseWriter, r *http.Request) {
-	s.responseCall(w, r, retainedHousekeeping, func(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
+	s.responseCall(w, r, retainedHousekeeping, func(ctx context.Context, x *call, authority keyauthority.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
 		endpoint, err := resourceURL(p.provider.Connector(), p.model, responsePath(p.provider.Connector(), "/"+url.PathEscape(res.UpstreamID)), nil)
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
@@ -499,7 +498,7 @@ func (s *Server) deleteResponse(w http.ResponseWriter, r *http.Request) {
 			if failure.status == http.StatusNotFound {
 				commitCtx, stopCommit := resourceCommitContext(ctx)
 				defer stopCommit()
-				_ = s.Resources.Tombstone(commitCtx, res.ID)
+				_ = s.deps.Resources.Tombstone(commitCtx, res.ID)
 				return notFoundError("not_found", "No stored response with this identifier exists for this key.")
 			}
 			return upstreamError(failure)
@@ -512,7 +511,7 @@ func (s *Server) deleteResponse(w http.ResponseWriter, r *http.Request) {
 		// even when the client has gone.
 		commitCtx, stopCommit := resourceCommitContext(ctx)
 		defer stopCommit()
-		if err := s.Resources.Tombstone(commitCtx, res.ID); err != nil {
+		if err := s.deps.Resources.Tombstone(commitCtx, res.ID); err != nil {
 			return serverError(http.StatusInternalServerError, "internal_error", "The response mapping could not be deleted.")
 		}
 		out, err := rewriteID(result, "id", res.ID)
@@ -528,7 +527,7 @@ func (s *Server) deleteResponse(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) responseInputItems(w http.ResponseWriter, r *http.Request) {
-	s.responseCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, authority access.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
+	s.responseCall(w, r, retainedRetrieval, func(ctx context.Context, x *call, authority keyauthority.Authority, res *resources.Resource, p *pin, route *routing.Route) *Error {
 		query := url.Values{}
 		for _, name := range []string{"limit", "after", "order"} {
 			if value := r.URL.Query().Get(name); value != "" {
@@ -599,7 +598,7 @@ func (binding *responseStreamBinding) mappedID(ordinal int, upstreamID string) (
 }
 
 func (s *Server) observeStreamResponseEvent(ctx context.Context, x *call, fact *AttemptFact, event oif.Event) error {
-	if s.Resources == nil || !responseStoreRequested(x.generation.parsed) {
+	if s.deps.Resources == nil || !responseStoreRequested(x.generation.parsed) {
 		return nil
 	}
 	observation, lifecycle, err := openai.ObserveResponseEventUsage(event)
@@ -632,7 +631,7 @@ func (s *Server) observeStreamResponseEvent(ctx context.Context, x *call, fact *
 	local := binding.localID
 	if local == "" {
 		commitCtx, stopCommit := resourceCommitContext(ctx)
-		res, err := s.Resources.GetByUpstream(commitCtx, responseNativeIdentity(x, fact, upstreamID))
+		res, err := s.deps.Resources.GetByUpstream(commitCtx, responseNativeIdentity(x, fact, upstreamID))
 		if errors.Is(err, resources.ErrNotFound) {
 			res, err = s.putStreamResponse(commitCtx, x, fact, upstreamID, observation.Status, response)
 		}
@@ -660,7 +659,7 @@ func (s *Server) observeStreamResponseEvent(ctx context.Context, x *call, fact *
 }
 
 func (s *Server) mapStreamResponseFrame(ctx context.Context, x *call, fact *AttemptFact, frame []byte, observe bool) ([]byte, error) {
-	if s.Resources == nil || !responseStoreRequested(x.generation.parsed) {
+	if s.deps.Resources == nil || !responseStoreRequested(x.generation.parsed) {
 		return frame, nil
 	}
 	i := bytes.Index(frame, []byte("\ndata: "))
@@ -789,7 +788,7 @@ func (s *Server) putStreamResponse(ctx context.Context, x *call, fact *AttemptFa
 	if x.strict() {
 		return s.putStrictResponse(ctx, x, fact, upstreamID, state, encoded, expires)
 	}
-	res, err := s.Resources.Put(ctx, &resources.Resource{
+	res, err := s.deps.Resources.Put(ctx, &resources.Resource{
 		Kind:               resources.KindResponse,
 		APIKeyID:           x.keyID,
 		RouteSlug:          x.route.Slug,

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/tyk-swe/olp/internal/providerconfig"
+
 	"github.com/tyk-swe/olp/internal/access"
 )
 
@@ -58,7 +60,7 @@ func PreserveCredentialBoundary(ctx context.Context, q access.Queryer, providerI
 			return err
 		}
 	}
-	networkChanged := current.credentialNetwork() != next.credentialNetwork() || value(current.Endpoint) != value(next.Endpoint)
+	networkChanged := current.credentialNetwork() != next.credentialNetwork() || providerconfig.Value(current.Endpoint) != providerconfig.Value(next.Endpoint)
 	var stored bool
 	if err := q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.provider_credentials
 		WHERE provider_id=$1 AND revoked_at IS NULL AND (NOT $2 OR plugin_digest IS NULL))

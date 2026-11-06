@@ -77,15 +77,11 @@ func (s *Server) update(r *http.Request, _ access.Principal) (access.Reply, erro
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.Access.Begin(r)
+	tx, p, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	var identity Identity
 	if err = tx.QueryRow(r.Context(), "SELECT name,logo,branding_etag::text FROM olp.installation WHERE singleton FOR UPDATE").Scan(&identity.Name, &identity.Logo, &identity.ETag); err != nil {
 		return access.Reply{}, err
@@ -100,5 +96,5 @@ func (s *Server) update(r *http.Request, _ access.Principal) (access.Reply, erro
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "branding.update", "installation", s.Access.Installation, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, access.Detail(identity, identity.ETag))
+	return access.Detail(identity, identity.ETag), tx.Commit(r.Context())
 }

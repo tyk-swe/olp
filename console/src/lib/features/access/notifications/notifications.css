@@ -1,0 +1,59 @@
+.notifications-panel {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.5rem;
+  padding: 1.5rem;
+}
+.notifications-panel h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+.notifications-panel h3 {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+.notifications-panel .section-help {
+  margin: 0;
+  color: var(--foreground-muted);
+  font-size: 0.8rem;
+}
+.notifications-panel .submission-fields {
+  display: grid;
+  gap: inherit;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.notifications-panel .create-form {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+}
+.notifications-panel .form-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.notifications-panel .table-scroll {
+  overflow-x: auto;
+}
+.notifications-panel td small {
+  color: var(--foreground-muted);
+  font-size: var(--text-caption);
+}
+.notifications-panel .badge.danger {
+  color: var(--danger);
+}
+.notifications-panel .inline-check {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: var(--text-caption);
+  color: var(--foreground-muted);
+}

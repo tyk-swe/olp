@@ -13,7 +13,7 @@ import (
 	protocol "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2acompat/a2av0"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/consumerauth"
@@ -24,13 +24,13 @@ import (
 
 type Runtime interface {
 	consumerauth.Authenticator
-	ReauthenticateDelegation(context.Context, string, string) (*access.Authority, error)
+	ReauthenticateDelegation(context.Context, string, string) (*keyauthority.Authority, error)
 	Release() *release.Release
-	AuthorizeAgentResource(access.Authority, string, string, string, string) error
+	AuthorizeAgentResource(keyauthority.Authority, string, string, string, string) error
 }
 
 type Enrollment interface {
-	StartAgent(context.Context, access.Authority, string, agentcontract.Definition) (personal.Handoff, error)
+	StartAgent(context.Context, keyauthority.Authority, string, agentcontract.Definition) (personal.Handoff, error)
 }
 type Options struct {
 	Runtime        Runtime
@@ -99,51 +99,51 @@ func (s *Server) startGrantEnrollment(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(handoff)
 }
 
-func (s *Server) resolve(r *http.Request) (access.Authority, agentcontract.Revision, *release.Release, int) {
+func (s *Server) resolve(r *http.Request) (keyauthority.Authority, agentcontract.Revision, *release.Release, int) {
 	if s.runtime == nil {
-		return access.Authority{}, agentcontract.Revision{}, nil, http.StatusServiceUnavailable
+		return keyauthority.Authority{}, agentcontract.Revision{}, nil, http.StatusServiceUnavailable
 	}
 	token, _ := consumerauth.Bearer(r.Header.Get("Authorization"))
 	authority, failure := consumerauth.Authenticate(s.runtime, r, token, "agents", s.trustedProxies, time.Now())
 	if failure != nil {
-		return access.Authority{}, agentcontract.Revision{}, nil, failure.Status
+		return keyauthority.Authority{}, agentcontract.Revision{}, nil, failure.Status
 	}
 	if authority.EndUserDigest == "" {
 		if authority.Policy.EndUserSource == nil {
 			if authority.ProjectEndUserPolicy != nil || authority.Policy.EndUserPolicy != nil {
-				return access.Authority{}, agentcontract.Revision{}, nil, http.StatusBadRequest
+				return keyauthority.Authority{}, agentcontract.Revision{}, nil, http.StatusBadRequest
 			}
 		} else {
 			digest, failure := consumerauth.HeaderEndUserDigest(s.runtime, r, authority)
 			if failure != nil {
-				return access.Authority{}, agentcontract.Revision{}, nil, failure.Status
+				return keyauthority.Authority{}, agentcontract.Revision{}, nil, failure.Status
 			}
 			authority.EndUserDigest = digest
 		}
 	}
 	if !authority.AllowsEndUser(authority.EndUserDigest) {
-		return access.Authority{}, agentcontract.Revision{}, nil, http.StatusForbidden
+		return keyauthority.Authority{}, agentcontract.Revision{}, nil, http.StatusForbidden
 	}
 	if authority.ProjectID == nil {
-		return access.Authority{}, agentcontract.Revision{}, nil, http.StatusNotFound
+		return keyauthority.Authority{}, agentcontract.Revision{}, nil, http.StatusNotFound
 	}
 	current := s.runtime.Release()
-	if current == nil || current.Snapshot == nil {
-		return access.Authority{}, agentcontract.Revision{}, nil, http.StatusServiceUnavailable
+	if current == nil || current.Snapshot() == nil {
+		return keyauthority.Authority{}, agentcontract.Revision{}, nil, http.StatusServiceUnavailable
 	}
-	for _, revision := range current.Snapshot.AgentPublications {
+	for _, revision := range current.Snapshot().AgentPublications() {
 		if revision.PublicationID != r.PathValue("agent") || revision.Kind != "agent" || revision.ProjectID != *authority.ProjectID || !revision.Current || revision.Definition.Agent == nil || !supportedProtocol(revision.Definition.Agent.Protocol) {
 			continue
 		}
 		if err := s.runtime.AuthorizeAgentResource(authority, "agents", revision.PublicationID, revision.ID, revision.ProjectID); err != nil {
 			if errors.Is(err, release.ErrStaleAuthority) {
-				return access.Authority{}, agentcontract.Revision{}, nil, http.StatusServiceUnavailable
+				return keyauthority.Authority{}, agentcontract.Revision{}, nil, http.StatusServiceUnavailable
 			}
-			return access.Authority{}, agentcontract.Revision{}, nil, http.StatusNotFound
+			return keyauthority.Authority{}, agentcontract.Revision{}, nil, http.StatusNotFound
 		}
 		return authority, revision, current, 0
 	}
-	return access.Authority{}, agentcontract.Revision{}, nil, http.StatusNotFound
+	return keyauthority.Authority{}, agentcontract.Revision{}, nil, http.StatusNotFound
 }
 
 func (s *Server) getCard(w http.ResponseWriter, r *http.Request) {
@@ -197,7 +197,7 @@ func publicSkills(skills []protocol.AgentSkill) []protocol.AgentSkill {
 	})
 }
 
-func (s *Server) streamAuthorized(r *http.Request, authority access.Authority, revision agentcontract.Revision) bool {
+func (s *Server) streamAuthorized(r *http.Request, authority keyauthority.Authority, revision agentcontract.Revision) bool {
 	token, _ := consumerauth.Bearer(r.Header.Get("Authorization"))
 	current, failure := consumerauth.Authenticate(streamAuthenticator{s.runtime}, r, token, "agents", s.trustedProxies, time.Now())
 	return failure == nil && current.ID == authority.ID && current.DelegationAgentID == authority.DelegationAgentID && current.DelegationPairDigest == authority.DelegationPairDigest && current.DelegationTokenDigest == authority.DelegationTokenDigest && s.runtime.AuthorizeAgentResource(current, "agents", revision.PublicationID, revision.ID, revision.ProjectID) == nil
@@ -205,6 +205,6 @@ func (s *Server) streamAuthorized(r *http.Request, authority access.Authority, r
 
 type streamAuthenticator struct{ Runtime }
 
-func (a streamAuthenticator) AuthenticateDelegation(ctx context.Context, token, assertion string) (*access.Authority, error) {
+func (a streamAuthenticator) AuthenticateDelegation(ctx context.Context, token, assertion string) (*keyauthority.Authority, error) {
 	return a.Runtime.ReauthenticateDelegation(ctx, token, assertion)
 }

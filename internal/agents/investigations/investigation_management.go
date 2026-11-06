@@ -185,15 +185,11 @@ func (s *Management) createInvestigation(r *http.Request, _ access.Principal) (a
 	if err := input.Validate(); err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.access.Begin(r)
+	tx, p, err := s.access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	if err := s.access.RequireProject(r.Context(), tx, p, &input.ProjectID); err != nil {
 		return access.Reply{}, err
 	}
@@ -202,7 +198,7 @@ func (s *Management) createInvestigation(r *http.Request, _ access.Principal) (a
 		return access.Reply{}, err
 	}
 	if replay != nil {
-		return access.Commit(r, tx, *replay)
+		return *replay, tx.Commit(r.Context())
 	}
 	if input.Filters.RunID != nil {
 		if err := validateInvestigationEvidence(r.Context(), tx, input.ProjectID, InvestigationEvidence{Kind: "run", ID: *input.Filters.RunID}); err != nil {
@@ -230,5 +226,5 @@ func (s *Management) createInvestigation(r *http.Request, _ access.Principal) (a
 	if err := s.access.CompleteReplay(r, tx, claim, reply); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, reply)
+	return reply, tx.Commit(r.Context())
 }

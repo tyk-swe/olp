@@ -173,6 +173,24 @@ type Compiled struct {
 	Output []CompiledRule
 }
 
+func (c *Compiled) Clone() *Compiled {
+	if c == nil {
+		return nil
+	}
+	return &Compiled{Policy: c.Policy.Clone(), Input: cloneCompiledRules(c.Input), Output: cloneCompiledRules(c.Output)}
+}
+
+func cloneCompiledRules(rules []CompiledRule) []CompiledRule {
+	return slices.Collect(func(yield func(CompiledRule) bool) {
+		for _, rule := range rules {
+			expression := *rule.Re
+			if !yield(CompiledRule{Rule: rule.Rule, Re: &expression}) {
+				return
+			}
+		}
+	})
+}
+
 func Compile(p *Policy) (*Compiled, error) {
 	if p == nil || len(p.Rules) == 0 {
 		return nil, nil

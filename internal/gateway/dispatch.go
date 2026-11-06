@@ -129,8 +129,8 @@ func (s *Server) settlePinHold(ctx context.Context, x *call, hold *dispatchHold,
 // replica's local cooldown when it is not.
 func (s *Server) cooling(ctx context.Context, providerID string, slot *routing.Slot) bool {
 	generation := s.slotGrantGeneration(slot)
-	if s.Admission.ready() {
-		return s.Admission.cooling(ctx, providerID, slot, generation)
+	if s.deps.Admission.ready() {
+		return s.deps.Admission.cooling(ctx, providerID, slot, generation)
 	}
 	return s.health.coolingDown(providerID, slot.ID) ||
 		s.health.coolingDown(providerID, credentialHealthKey(slot, generation))
@@ -140,7 +140,7 @@ func (s *Server) slotGrantGeneration(slot *routing.Slot) int64 {
 	if slot.CredentialID == nil {
 		return 0
 	}
-	return s.Runtime.GrantGeneration(*slot.CredentialID)
+	return s.deps.Runtime.GrantGeneration(*slot.CredentialID)
 }
 
 // gateSlot is the shared pre-dispatch boundary every new upstream attempt
@@ -153,10 +153,10 @@ func (s *Server) slotGrantGeneration(slot *routing.Slot) int64 {
 // until the attempt settles or releaseHold abandons them before dispatch.
 func (s *Server) gateSlot(ctx context.Context, provider *routing.Provider, slot *routing.Slot, estimate int64, deadline time.Time, priority string) gateResult {
 	// Authority can change while an earlier credential attempt is pending.
-	if connectors.SecretRequired(provider.AuthMode) && slot.CredentialID != nil && s.Runtime.Eligibility(*slot.CredentialID) != routing.Eligible {
+	if connectors.SecretRequired(provider.AuthMode) && slot.CredentialID != nil && s.deps.Runtime.Eligibility(*slot.CredentialID) != routing.Eligible {
 		return gateResult{verdict: gateSkip}
 	}
-	if provider.Network != nil && provider.Network.CredentialID != "" && s.Runtime.Eligibility(provider.Network.CredentialID) != routing.Eligible {
+	if provider.Network != nil && provider.Network.CredentialID != "" && s.deps.Runtime.Eligibility(provider.Network.CredentialID) != routing.Eligible {
 		return gateResult{verdict: gateSkip}
 	}
 	// attempt.Timeout bounds first-byte/idle waits, not the lifetime of a
@@ -173,7 +173,7 @@ func (s *Server) gateSlot(ctx context.Context, provider *routing.Provider, slot 
 	if s.cooling(ctx, provider.ID, slot) {
 		return gateResult{verdict: gateSkip}
 	}
-	reservation, rejection, skip := s.Admission.reserveTarget(ctx, provider, slot, estimate, ttl, priority)
+	reservation, rejection, skip := s.deps.Admission.reserveTarget(ctx, provider, slot, estimate, ttl, priority)
 	if skip {
 		return gateResult{verdict: gateUnmeterable}
 	}
@@ -201,7 +201,7 @@ func (s *Server) cooldownFailure(ctx context.Context, providerID string, slot *r
 		// The upstream refused the credential, whatever rule classified the
 		// failure: a grant beneath it is refreshed early, which ends the
 		// cooldown (GrantRefreshed).
-		s.Runtime.CredentialRefused(*slot.CredentialID, generation)
+		s.deps.Runtime.CredentialRefused(*slot.CredentialID, generation)
 	}
 	switch failure.class {
 	case classCredential:
@@ -212,10 +212,10 @@ func (s *Server) cooldownFailure(ctx context.Context, providerID string, slot *r
 		// recording this cooldown. Its generation keeps that write scoped
 		// to the refused token, including across gateway replicas.
 		s.health.cooldown(providerID, credentialHealthKey(slot, generation), credentialCooldown)
-		s.Admission.cooldown(ctx, providerID, slot, generation, credentialCooldown, true)
+		s.deps.Admission.cooldown(ctx, providerID, slot, generation, credentialCooldown, true)
 	case classRateLimit:
 		s.health.cooldown(providerID, slot.ID, failure.retryAfter)
-		s.Admission.cooldown(ctx, providerID, slot, generation, cooldownDuration(failure.retryAfter), false)
+		s.deps.Admission.cooldown(ctx, providerID, slot, generation, cooldownDuration(failure.retryAfter), false)
 	default:
 		return true
 	}
@@ -229,7 +229,7 @@ func (s *Server) GrantRefreshed(providerID, credentialID string) {
 	// Cleanup is best-effort: older generations are already ineligible and
 	// their cooldowns expire. A delayed notifier must never clear a refusal
 	// of the newly served token.
-	generation := max(0, s.Runtime.GrantGeneration(credentialID)-1)
+	generation := max(0, s.deps.Runtime.GrantGeneration(credentialID)-1)
 	s.health.endCooldown(providerID, credentialHealthKey(&routing.Slot{CredentialID: &credentialID}, generation))
-	s.Admission.endCredentialCooldown(context.Background(), providerID, credentialID, generation)
+	s.deps.Admission.endCredentialCooldown(context.Background(), providerID, credentialID, generation)
 }

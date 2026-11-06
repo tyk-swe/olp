@@ -10,7 +10,7 @@
     type CodeRoute,
     type CodeClientConfiguration,
     type CodeClientSelection
-  } from '$lib/management/code-mode';
+  } from '$lib/features/code-mode/api';
   import { collectCursorPages } from '$lib/management/pagination';
   import { errorMessage } from '$lib/management/http';
   import {
@@ -93,8 +93,7 @@
     enabled: kind === 'budgets'
   }));
   const selected = $derived({ accounts, pools, routes, budgets }[kind]);
-  // Load complete references for editors: route research binds a pool account,
-  // while budgets may scope to a route.
+
   const inventory = createQuery(() => ({
     queryKey: codeKeys.inventory(projectId, kind),
     queryFn: async ({ signal }) => ({

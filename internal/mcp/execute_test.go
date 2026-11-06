@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
@@ -329,7 +329,7 @@ func newExecutionFixture(t *testing.T, scenario executionScenario) executionFixt
 		},
 		Ledger: ledger, Limiter: executionLimiter{}, Auth: secrets.NewAuthKey(make([]byte, 32), "installation"), Guardrails: scenario.guard,
 	})
-	return executionFixture{executor: executor, ledger: ledger, peer: peer, request: CallRequest{Authority: access.Authority{ID: "principal", ProjectID: &project},
+	return executionFixture{executor: executor, ledger: ledger, peer: peer, request: CallRequest{Authority: keyauthority.Authority{ID: "principal", ProjectID: &project},
 		ToolsetID: "toolset", ToolsetRevisionID: "toolset-revision", CallID: "call", Arguments: json.RawMessage(`{}`), Policies: policy,
 		Tool: routing.MCPToolsetTool{ServerID: "server", ServerRevisionID: "revision", Name: "lookup", Alias: "lookup", CatalogDigest: digest, OAuth: func() *routing.MCPOAuth {
 			if scenario.revokedGrant {
@@ -355,32 +355,32 @@ type executionAuthority struct {
 	checks     chan struct{}
 }
 
-func (a executionAuthority) AuthorizeMCPTool(access.Authority, string, string, string, string, string) error {
+func (a executionAuthority) AuthorizeMCPTool(keyauthority.Authority, string, string, string, string, string) error {
 	a.checks <- struct{}{}
 	if a.denySecond && len(a.checks) == 2 {
 		return errors.New("authority revoked")
 	}
 	return nil
 }
-func (executionAuthority) AdmitTaskCapabilityAttempt(context.Context, access.Authority, string, string, string, *string, string) error {
+func (executionAuthority) AdmitTaskCapabilityAttempt(context.Context, keyauthority.Authority, string, string, string, *string, string) error {
 	return nil
 }
-func (executionAuthority) VerifyEntraUser(context.Context, string, access.Authority, string, string) (workload.UserAssertion, error) {
+func (executionAuthority) VerifyEntraUser(context.Context, string, keyauthority.Authority, string, string) (workload.UserAssertion, error) {
 	return workload.UserAssertion{}, errors.New("not configured")
 }
 
 type executionGrants struct{ revoked bool }
 
-func (executionGrants) Resolve(context.Context, access.Authority, routing.MCPToolsetTool) ([]byte, error) {
+func (executionGrants) Resolve(context.Context, keyauthority.Authority, routing.MCPToolsetTool) ([]byte, error) {
 	return []byte("credential"), nil
 }
-func (executionGrants) ResolveEntra(context.Context, access.Authority, routing.MCPToolsetTool, workload.UserAssertion) ([]byte, error) {
+func (executionGrants) ResolveEntra(context.Context, keyauthority.Authority, routing.MCPToolsetTool, workload.UserAssertion) ([]byte, error) {
 	return nil, errors.New("not configured")
 }
-func (executionGrants) Delegate(context.Context, access.Authority, routing.MCPToolsetTool) ([]byte, error) {
+func (executionGrants) Delegate(context.Context, keyauthority.Authority, routing.MCPToolsetTool) ([]byte, error) {
 	return nil, errors.New("not configured")
 }
-func (g executionGrants) CheckGrant(context.Context, access.Authority, routing.MCPToolsetTool) error {
+func (g executionGrants) CheckGrant(context.Context, keyauthority.Authority, routing.MCPToolsetTool) error {
 	if g.revoked {
 		return errors.New("grant revoked")
 	}

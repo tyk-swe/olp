@@ -7,7 +7,7 @@ import (
 	"time"
 
 	protocol "github.com/a2aproject/a2a-go/v2/a2a"
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/agents/tasks"
 	"github.com/tyk-swe/olp/internal/workload"
@@ -30,7 +30,7 @@ const (
 )
 
 type TaskStore interface {
-	Find(context.Context, access.Authority, string, string) (tasks.Task, error)
+	Find(context.Context, keyauthority.Authority, string, string) (tasks.Task, error)
 	Prepare(context.Context, tasks.SendIntent) (tasks.Dispatch, error)
 	RecordState(context.Context, string, tasks.State) error
 }
@@ -48,13 +48,13 @@ type Peers interface {
 	Open(context.Context, agentcontract.Definition, []byte, bool) (Peer, error)
 }
 type Grants interface {
-	AgentBinding(access.Authority, string, agentcontract.Definition) (string, error)
-	ResolveAgent(context.Context, access.Authority, string, agentcontract.Definition) ([]byte, string, error)
-	ResolveAgentEntra(context.Context, access.Authority, string, agentcontract.Definition, workload.UserAssertion) ([]byte, string, error)
+	AgentBinding(keyauthority.Authority, string, agentcontract.Definition) (string, error)
+	ResolveAgent(context.Context, keyauthority.Authority, string, agentcontract.Definition) ([]byte, string, error)
+	ResolveAgentEntra(context.Context, keyauthority.Authority, string, agentcontract.Definition, workload.UserAssertion) ([]byte, string, error)
 	ResolveAgentTask(context.Context, string, string, string, string, agentcontract.Definition) ([]byte, error)
 }
 type EntraVerifier interface {
-	VerifyEntraUser(context.Context, string, access.Authority, string, string) (workload.UserAssertion, error)
+	VerifyEntraUser(context.Context, string, keyauthority.Authority, string, string) (workload.UserAssertion, error)
 }
 type Options struct {
 	Tasks  TaskStore
@@ -74,7 +74,7 @@ func New(options Options) *Executor {
 }
 
 type Call struct {
-	Authority   access.Authority
+	Authority   keyauthority.Authority
 	Publication agentcontract.Revision
 	Revisions   []agentcontract.Revision
 	ReleaseID   string

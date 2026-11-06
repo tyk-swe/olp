@@ -7,8 +7,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-
 	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/mcp/registration"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -98,7 +98,7 @@ func (s *Server) startAgent(r *http.Request, p access.Principal) (access.Reply, 
 	if keyProject != project || draft.Agent == nil {
 		return access.Reply{}, access.Fail(404, "not_found", "The API key was not found.")
 	}
-	bound, err := BindAgent(access.Authority{ID: keyUUID.String(), ProjectID: &project}, id, *draft.Agent)
+	bound, err := BindAgent(keyauthority.Authority{ID: keyUUID.String(), ProjectID: &project}, id, *draft.Agent)
 	if err != nil {
 		return access.Reply{}, access.Invalid("agent_id", "Configure personal OAuth for this agent before enrollment.")
 	}
@@ -141,7 +141,7 @@ func (s *Server) start(r *http.Request, p access.Principal) (access.Reply, error
 	if project != server.ProjectID {
 		return access.Reply{}, access.Fail(404, "not_found", "The API key was not found.")
 	}
-	bound, err := Bind(access.Authority{ID: keyID, ProjectID: &project}, routing.MCPToolsetTool{ServerID: id, Endpoint: server.Endpoint, OAuth: server.OAuth})
+	bound, err := Bind(keyauthority.Authority{ID: keyID, ProjectID: &project}, routing.MCPToolsetTool{ServerID: id, Endpoint: server.Endpoint, OAuth: server.OAuth})
 	if err != nil {
 		return access.Reply{}, access.Invalid("server_id", "Configure personal OAuth for this server before enrollment.")
 	}
@@ -218,7 +218,7 @@ func (s *Server) revoke(r *http.Request, p access.Principal) (access.Reply, erro
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.access.Begin(r)
+	tx, p, err := s.access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -238,5 +238,5 @@ func (s *Server) revoke(r *http.Request, p access.Principal) (access.Reply, erro
 	if err := access.AuditForProject(r.Context(), tx, r, p.Actor(), "mcp_grant_revoke", "mcp_user_grant", id, "success", &project); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, access.Reply{Status: http.StatusNoContent})
+	return access.Reply{Status: http.StatusNoContent}, tx.Commit(r.Context())
 }

@@ -257,8 +257,8 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 		s.cloudBatchFail(x, w, invalidRequest("missing_required_parameter", "X-OLP-Route must name a batch-enabled route.", nil))
 		return
 	}
-	snapshot := x.request.release.Snapshot
-	route, ok := snapshot.Routes[slug]
+	snapshot := x.request.release.Snapshot()
+	route, ok := snapshot.FindRoute(slug)
 	if !ok || !slices.Contains(route.Operations, "batch") {
 		s.cloudBatchFail(x, w, notFoundError("not_found", "No matching batch route exists."))
 		return
@@ -381,11 +381,11 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 		if attemptFailure.acceptance.Unresolved() {
 			unknownCtx, stop := resourceCommitContext(r.Context())
 			defer stop()
-			_ = s.Batches.MarkUnknown(unknownCtx, resourceID, "submission_unknown", s.now())
+			_ = s.deps.Batches.MarkUnknown(unknownCtx, resourceID, "submission_unknown", s.now())
 			s.cloudBatchFail(x, w, serverError(http.StatusBadGateway, "submission_unknown", "The cloud provider may have accepted the batch job."))
 			return
 		}
-		_ = s.Batches.DeleteSubmission(r.Context(), resourceID)
+		_ = s.deps.Batches.DeleteSubmission(r.Context(), resourceID)
 		s.cloudBatchFail(x, w, upstreamError(attemptFailure))
 		return
 	}
@@ -415,7 +415,7 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 	if upstreamID == "" {
 		unknownCtx, stop := resourceCommitContext(r.Context())
 		defer stop()
-		_ = s.Batches.MarkUnknown(unknownCtx, resourceID, "submission_unknown", s.now())
+		_ = s.deps.Batches.MarkUnknown(unknownCtx, resourceID, "submission_unknown", s.now())
 		s.cloudBatchFail(x, w, serverError(http.StatusBadGateway, "submission_unknown", "The cloud provider returned no job identity."))
 		return
 	}
@@ -432,7 +432,7 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 	metadata, _ := json.Marshal(meta)
 	projection, err := projectCloudBatchJob(result, resources.LocalID(resources.KindCloudBatch, resourceID), dialect, slug, input.InputURI, input.OutputURIPrefix)
 	if err != nil {
-		_ = s.Batches.MarkUnknown(ctx, resourceID, "submission_unknown", s.now())
+		_ = s.deps.Batches.MarkUnknown(ctx, resourceID, "submission_unknown", s.now())
 		s.cloudBatchFail(x, w, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The cloud provider returned an unknown batch status."))
 		return
 	}
@@ -441,12 +441,12 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 	submission.resource.UpstreamID, submission.resource.State, submission.resource.Metadata = upstreamID, statusOr(projectedObject["status"], "queued"), metadata
 	commitCtx, stop := resourceCommitContext(ctx)
 	defer stop()
-	tx, err := s.Resources.Begin(commitCtx)
+	tx, err := s.deps.Resources.Begin(commitCtx)
 	if err == nil {
-		_, err = s.Resources.PutTx(commitCtx, tx, submission.resource)
+		_, err = s.deps.Resources.PutTx(commitCtx, tx, submission.resource)
 	}
 	if err == nil {
-		err = s.Batches.ActivateTx(commitCtx, tx, resourceID, upstreamID, nil)
+		err = s.deps.Batches.ActivateTx(commitCtx, tx, resourceID, upstreamID, nil)
 	}
 	if err == nil {
 		err = tx.Commit(commitCtx)
@@ -454,7 +454,7 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 		_ = tx.Rollback(commitCtx)
 	}
 	if err != nil {
-		_ = s.Batches.MarkUnknown(commitCtx, resourceID, "submission_commit_unavailable", s.now())
+		_ = s.deps.Batches.MarkUnknown(commitCtx, resourceID, "submission_commit_unavailable", s.now())
 		s.cloudBatchFail(x, w, serverError(http.StatusBadGateway, "submission_unknown", "The cloud provider accepted the batch but local activation failed."))
 		return
 	}
@@ -469,7 +469,7 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 	}
 	defer s.release(r.Context())
 	id := r.PathValue("id")
-	res, err := s.Resources.Get(r.Context(), resources.KindCloudBatch, authority.ID, id)
+	res, err := s.deps.Resources.Get(r.Context(), resources.KindCloudBatch, authority.ID, id)
 	if errors.Is(err, resources.ErrNotFound) {
 		s.cloudBatchFail(x, w, notFoundError("not_found", "No cloud batch job with this ID exists for this key."))
 		return
@@ -486,7 +486,7 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 		return
 	}
 	if !cancel {
-		candidate, exists := x.request.release.Snapshot.Routes[res.RouteSlug]
+		candidate, exists := x.request.release.Snapshot().FindRoute(res.RouteSlug)
 		if !exists {
 			s.cloudBatchFail(x, w, notFoundError("not_found", "The cloud batch route is unavailable."))
 			return
@@ -580,7 +580,7 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 	_ = json.Unmarshal(projected, &projectedObject)
 	commit, release := resourceCommitContext(ctx)
 	defer release()
-	if err := s.Resources.Update(commit, res.ID, statusOr(projectedObject["status"], "queued"), encoded, nil); err != nil {
+	if err := s.deps.Resources.Update(commit, res.ID, statusOr(projectedObject["status"], "queued"), encoded, nil); err != nil {
 		s.cloudBatchFail(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The cloud job refresh could not be committed."))
 		return
 	}
@@ -612,7 +612,7 @@ func (s *Server) listCloudBatches(w http.ResponseWriter, r *http.Request) {
 		s.cloudBatchFail(x, w, notFoundError("not_found", "Unknown cloud batch dialect."))
 		return
 	}
-	filtered, listErr := s.Resources.ListCloudBatches(r.Context(), authority.ID, dialect, limit+1, after)
+	filtered, listErr := s.deps.Resources.ListCloudBatches(r.Context(), authority.ID, dialect, limit+1, after)
 	if listErr != nil {
 		if errors.Is(listErr, resources.ErrNotFound) {
 			s.cloudBatchFail(x, w, invalidRequest("invalid_cursor", "after must identify a local cloud batch job.", strPtr("after")))

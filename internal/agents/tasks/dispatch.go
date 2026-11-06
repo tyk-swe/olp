@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/limits"
 )
@@ -24,7 +24,7 @@ var ErrTaskLimit = errors.New("agent task limit reached")
 var ErrNotFound = errors.New("agent task not found")
 
 type SendIntent struct {
-	Authority access.Authority
+	Authority keyauthority.Authority
 	Revision  agentcontract.Revision
 	ReleaseID string
 	TaskID    string

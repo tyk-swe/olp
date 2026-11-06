@@ -10,8 +10,12 @@
     listCodeTokenWindows,
     retireCodeBinding,
     type CodeBinding,
-    type CodeFilters
-  } from '$lib/management/code-mode';
+    type CodeDecisionsQuery,
+    type CodeRefusalsQuery,
+    type CodeBindingsQuery,
+    type CodeAttemptsQuery,
+    type CodeTokenWindowsQuery
+  } from '$lib/features/code-mode/api';
   import { errorMessage } from '$lib/management/http';
   import { collectCursorPages } from '$lib/management/pagination';
   import {
@@ -60,7 +64,13 @@
     endUser: ''
   };
   let filterForm = $state({ ...emptyFilterForm });
-  let applied = $state<CodeFilters>({});
+  let applied = $state<
+    CodeDecisionsQuery &
+      CodeRefusalsQuery &
+      CodeBindingsQuery &
+      CodeAttemptsQuery &
+      CodeTokenWindowsQuery
+  >({});
   let paging = $state(emptyCursorHistory());
   let busy = $state('');
   let error = $state('');

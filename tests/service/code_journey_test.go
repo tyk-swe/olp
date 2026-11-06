@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/tyk-swe/olp/internal/codesessions"
 	"net/http"
 	"slices"
 	"strings"
@@ -23,7 +24,6 @@ import (
 	"github.com/tyk-swe/olp/internal/promotion"
 	codepromotion "github.com/tyk-swe/olp/internal/promotion/code"
 	"github.com/tyk-swe/olp/internal/providers"
-	"github.com/tyk-swe/olp/internal/resources"
 )
 
 func TestCodeDecisionJourneys(t *testing.T) {
@@ -74,8 +74,8 @@ func codeAdmissionRecordsChosenAndPinnedDecisions(t *testing.T, pool *pgxpool.Po
 			t.Fatal(err)
 		}
 	}
-	store := &resources.CodeStore{Pool: pool}
-	admission := resources.CodeAdmission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: "journey-conversation"}}, Providers: []string{provider}}
+	store := codesessions.New(pool)
+	admission := codesessions.Admission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: "journey-conversation"}}, Providers: []string{provider}}
 	permit, err := store.Admit(t.Context(), admission)
 	if err != nil {
 		t.Fatal(err)
@@ -122,7 +122,7 @@ func codeAdmissionRecordsChosenAndPinnedDecisions(t *testing.T, pool *pgxpool.Po
 	if rebound.Binding.RootID != bound.Binding.RootID || rebound.Account.ID != healthy {
 		t.Fatalf("reconnected permit = %+v", rebound)
 	}
-	generation, err := store.Admit(t.Context(), resources.CodeAdmission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: "connection-conversation"}}, Providers: []string{provider}})
+	generation, err := store.Admit(t.Context(), codesessions.Admission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: "connection-conversation"}}, Providers: []string{provider}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,10 +305,10 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 			t.Fatal(err)
 		}
 	}
-	store := &resources.CodeStore{Pool: pool}
-	admit := func(route codemode.Route, conversation string) resources.CodePermit {
+	store := codesessions.New(pool)
+	admit := func(route codemode.Route, conversation string) codesessions.Permit {
 		t.Helper()
-		permit, err := store.Admit(t.Context(), resources.CodeAdmission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: conversation}}, Providers: []string{provider}})
+		permit, err := store.Admit(t.Context(), codesessions.Admission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: conversation}}, Providers: []string{provider}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -400,7 +400,7 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 				t.Fatal(err)
 			}
 			for _, conversation := range []string{uuid.NewString(), "band-conv-0"} {
-				_, err = store.Admit(t.Context(), resources.CodeAdmission{Route: bySlug["band-on"], APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: conversation}}, Providers: []string{provider}})
+				_, err = store.Admit(t.Context(), codesessions.Admission{Route: bySlug["band-on"], APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: conversation}}, Providers: []string{provider}})
 				var refusal *codemode.Refusal
 				if !errors.As(err, &refusal) || refusal.Code != "code_account_unavailable" || (tc.retryAt == nil && refusal.RetryAt != nil) || (tc.retryAt != nil && (refusal.RetryAt == nil || !refusal.RetryAt.Equal(*tc.retryAt))) {
 					t.Fatalf("admission for %s = %v (%+v), want refusal with retry at %v", conversation, err, refusal, tc.retryAt)
@@ -463,14 +463,14 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 				available bool
 			}{{"band-off", tc.off}, {"band-on", tc.on}} {
 				route := bySlug[check.slug]
-				permit, err := store.Admit(t.Context(), resources.CodeAdmission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{provider}})
+				permit, err := store.Admit(t.Context(), codesessions.Admission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{provider}})
 				if check.available && (err != nil || permit.Account.ID != healthy) {
 					t.Fatalf("%s admission = %+v, %v", check.slug, permit, err)
 				}
 				if !check.available && err == nil {
 					t.Fatalf("%s admitted exhausted account %+v", check.slug, permit)
 				}
-				offers, err := resources.CodeOffers(t.Context(), pool, route.RevisionID)
+				offers, err := codesessions.Offers(t.Context(), pool, route.RevisionID)
 				if err != nil || (len(offers) > 0) != check.available {
 					t.Fatalf("%s offers = %+v, %v; available %t", check.slug, offers, err, check.available)
 				}
@@ -499,7 +499,7 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 		slug  string
 		reset time.Time
 	}{{"band-on", reset}, {"band-off", reset}} {
-		_, err := store.Admit(t.Context(), resources.CodeAdmission{Route: bySlug[tc.slug], APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{provider}})
+		_, err := store.Admit(t.Context(), codesessions.Admission{Route: bySlug[tc.slug], APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{provider}})
 		var refusal *codemode.Refusal
 		if !errors.As(err, &refusal) || refusal.RetryAt == nil || !refusal.RetryAt.Equal(tc.reset) {
 			t.Fatalf("%s refusal = %+v, want retry at %s", tc.slug, err, tc.reset)
@@ -527,7 +527,7 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 				slug    string
 				retryAt *time.Time
 			}{{"band-on", nil}, {"band-off", nil}} {
-				_, err := store.Admit(t.Context(), resources.CodeAdmission{Route: bySlug[policy.slug], APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{provider}})
+				_, err := store.Admit(t.Context(), codesessions.Admission{Route: bySlug[policy.slug], APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{provider}})
 				var refusal *codemode.Refusal
 				if !errors.As(err, &refusal) || (policy.retryAt == nil && refusal.RetryAt != nil) || (policy.retryAt != nil && (refusal.RetryAt == nil || !refusal.RetryAt.Equal(*policy.retryAt))) {
 					t.Fatalf("%s refusal = %+v, want retry at %v", policy.slug, err, policy.retryAt)
@@ -553,7 +553,7 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 			slug  string
 			reset *time.Time
 		}{{"band-on", nil}, {"band-off", nil}} {
-			_, err := store.Admit(t.Context(), resources.CodeAdmission{Route: bySlug[tc.slug], APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{provider}})
+			_, err := store.Admit(t.Context(), codesessions.Admission{Route: bySlug[tc.slug], APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{provider}})
 			var refusal *codemode.Refusal
 			if !errors.As(err, &refusal) || (tc.reset == nil && refusal.RetryAt != nil) || (tc.reset != nil && (refusal.RetryAt == nil || !refusal.RetryAt.Equal(*tc.reset))) {
 				t.Fatalf("%s resetless refusal = %+v, want retry at %v", tc.slug, err, tc.reset)
@@ -618,7 +618,7 @@ func codeDecisionForAttempt(t *testing.T, pool *pgxpool.Pool, attemptID string) 
 }
 
 type cooldownJourney struct {
-	store    *resources.CodeStore
+	store    *codesessions.Store
 	route    codemode.Route
 	key      string
 	provider string
@@ -665,11 +665,11 @@ func seedCooldownJourney(t *testing.T, pool *pgxpool.Pool) cooldownJourney {
 			t.Fatal(err)
 		}
 	}
-	return cooldownJourney{store: &resources.CodeStore{Pool: pool}, route: route, key: key, provider: provider, first: first, second: second}
+	return cooldownJourney{store: codesessions.New(pool), route: route, key: key, provider: provider, first: first, second: second}
 }
 
-func (j cooldownJourney) admission(model, conversation string) resources.CodeAdmission {
-	return resources.CodeAdmission{Route: j.route, APIKeyID: j.key, Operation: codemode.Operation{Name: "responses", Model: model, Identity: codemode.Identity{Conversation: conversation}}, Providers: []string{j.provider}}
+func (j cooldownJourney) admission(model, conversation string) codesessions.Admission {
+	return codesessions.Admission{Route: j.route, APIKeyID: j.key, Operation: codemode.Operation{Name: "responses", Model: model, Identity: codemode.Identity{Conversation: conversation}}, Providers: []string{j.provider}}
 }
 
 func TestCodeCooldownJourneys(t *testing.T) {
@@ -770,11 +770,11 @@ func codeModelLessConnectionChecksEveryModelCooldown(t *testing.T, pool *pgxpool
 	if err != nil || reconnected.Account.ID != journey.first {
 		t.Fatalf("model-less reconnect = %+v, %v, want account %s", reconnected, err, journey.first)
 	}
-	healthy, err := journey.store.Admit(t.Context(), resources.CodeAdmission{Route: journey.route, APIKeyID: journey.key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: "pinned-model-less"}}, Providers: providers})
+	healthy, err := journey.store.Admit(t.Context(), codesessions.Admission{Route: journey.route, APIKeyID: journey.key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: "pinned-model-less"}}, Providers: providers})
 	if err != nil || healthy.Account.ID != journey.first {
 		t.Fatalf("healthy generation = %+v, %v, want account %s", healthy, err, journey.first)
 	}
-	_, err = journey.store.Admit(t.Context(), resources.CodeAdmission{Route: journey.route, APIKeyID: journey.key, Operation: codemode.Operation{Name: "responses", Model: "other", Identity: codemode.Identity{Conversation: "pinned-model-less"}}, Providers: providers})
+	_, err = journey.store.Admit(t.Context(), codesessions.Admission{Route: journey.route, APIKeyID: journey.key, Operation: codemode.Operation{Name: "responses", Model: "other", Identity: codemode.Identity{Conversation: "pinned-model-less"}}, Providers: providers})
 	var refusal *codemode.Refusal
 	if !errors.As(err, &refusal) || refusal.Code != "code_account_unavailable" || refusal.RetryAt == nil || !refusal.RetryAt.Equal(late) {
 		t.Fatalf("cooled generation = %v (%+v), want retry at %s", err, refusal, late)
@@ -903,7 +903,7 @@ func codeModelCooldownFollowsAliasTarget(t *testing.T, pool *pgxpool.Pool) {
 		t.Fatal(err)
 	}
 	for _, alias := range []string{"first-alias", "second-alias"} {
-		_, err := journey.store.Admit(t.Context(), resources.CodeAdmission{Route: route, APIKeyID: journey.key, Operation: codemode.Operation{Name: "responses", Model: alias, Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{journey.provider}})
+		_, err := journey.store.Admit(t.Context(), codesessions.Admission{Route: route, APIKeyID: journey.key, Operation: codemode.Operation{Name: "responses", Model: alias, Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{journey.provider}})
 		var refusal *codemode.Refusal
 		if !errors.As(err, &refusal) || refusal.Code != "code_account_unavailable" || refusal.RetryAt == nil || !refusal.RetryAt.Equal(reset) {
 			t.Fatalf("cooled target via %s = %v (%+v), want refusal until %s", alias, err, refusal, reset)
@@ -911,7 +911,7 @@ func codeModelCooldownFollowsAliasTarget(t *testing.T, pool *pgxpool.Pool) {
 	}
 	checkCatalog := func(want []string) {
 		t.Helper()
-		offers, err := resources.CodeOffers(t.Context(), pool, route.RevisionID, journey.key)
+		offers, err := codesessions.Offers(t.Context(), pool, route.RevisionID, journey.key)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -948,7 +948,7 @@ func codeModelCooldownFollowsAliasTarget(t *testing.T, pool *pgxpool.Pool) {
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_routes SET latest_revision_id=$2 WHERE id=$1`, route.ID, republished.RevisionID); err != nil {
 		t.Fatal(err)
 	}
-	permit, err := journey.store.Admit(t.Context(), resources.CodeAdmission{Route: republished, APIKeyID: journey.key, Operation: codemode.Operation{Name: "responses", Model: "first-alias", Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{journey.provider}})
+	permit, err := journey.store.Admit(t.Context(), codesessions.Admission{Route: republished, APIKeyID: journey.key, Operation: codemode.Operation{Name: "responses", Model: "first-alias", Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{journey.provider}})
 	if err != nil || permit.Account.ID != journey.first || permit.Attempt.Model != "other" {
 		t.Fatalf("same alias with a different target = %+v, %v", permit, err)
 	}
@@ -1081,7 +1081,7 @@ func codeRecoveryRecordsActualDestinationSelection(t *testing.T, pool *pgxpool.P
 			t.Fatal(err)
 		}
 	}
-	admission.Recovery = &resources.CodeRecovery{From: first.Attempt.ID, Envelope: "codex_usage_limit_reached", Number: 1}
+	admission.Recovery = &codesessions.Recovery{From: first.Attempt.ID, Envelope: "codex_usage_limit_reached", Number: 1}
 	recovered, err := journey.store.Admit(t.Context(), admission)
 	if err != nil || recovered.Attempt.Model != "other" {
 		t.Fatalf("model-pool recovery = %+v, %v", recovered, err)
@@ -1128,7 +1128,7 @@ func codeTreeRefusalUsesPreferredAccountRecovery(t *testing.T, pool *pgxpool.Poo
 			t.Fatal(err)
 		}
 	}
-	_, err = journey.store.Admit(t.Context(), resources.CodeAdmission{Route: journey.route, APIKeyID: journey.key, Operation: codemode.Operation{Name: "responses", Model: "other", Identity: codemode.Identity{Conversation: "tree-recovery"}}, Providers: []string{journey.provider, provider}})
+	_, err = journey.store.Admit(t.Context(), codesessions.Admission{Route: journey.route, APIKeyID: journey.key, Operation: codemode.Operation{Name: "responses", Model: "other", Identity: codemode.Identity{Conversation: "tree-recovery"}}, Providers: []string{journey.provider, provider}})
 	var refusal *codemode.Refusal
 	if !errors.As(err, &refusal) || refusal.RetryAt == nil || !refusal.RetryAt.Equal(preferredRetry) {
 		t.Fatalf("tree refusal = %v (%+v), want preferred account recovery at %s", err, refusal, preferredRetry)
@@ -1202,7 +1202,7 @@ func codeActiveAllowanceDoesNotAffectBands(t *testing.T, pool *pgxpool.Pool) {
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance_read_requested_at=$2 WHERE id=$1`, active, base.Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	store := &resources.CodeStore{Pool: pool}
+	store := codesessions.New(pool)
 	due, err := store.DueAllowanceReads(t.Context(), base, 50, []string{"codex-subscription"})
 	if err != nil {
 		t.Fatal(err)
@@ -1239,7 +1239,7 @@ func codeActiveAllowanceDoesNotAffectBands(t *testing.T, pool *pgxpool.Pool) {
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, unknown); err != nil {
 		t.Fatal(err)
 	}
-	permit, err := store.Admit(t.Context(), resources.CodeAdmission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: "active-conv-0"}}, Providers: []string{provider}})
+	permit, err := store.Admit(t.Context(), codesessions.Admission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: "active-conv-0"}}, Providers: []string{provider}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1325,7 +1325,7 @@ func codeMiniMaxActiveRemainsDoesNotAffectBands(t *testing.T, pool *pgxpool.Pool
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance_read_requested_at=$2 WHERE id=$1`, active, base.Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	store := &resources.CodeStore{Pool: pool}
+	store := codesessions.New(pool)
 	due, err := store.DueAllowanceReads(t.Context(), base, 50, []string{"minimax-plan"})
 	if err != nil {
 		t.Fatal(err)
@@ -1357,7 +1357,7 @@ func codeMiniMaxActiveRemainsDoesNotAffectBands(t *testing.T, pool *pgxpool.Pool
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, unknown); err != nil {
 		t.Fatal(err)
 	}
-	permit, err := store.Admit(t.Context(), resources.CodeAdmission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "messages", Model: "MiniMax-M3", Identity: codemode.Identity{Conversation: "minimax-active-conv-0"}}, Providers: []string{provider}})
+	permit, err := store.Admit(t.Context(), codesessions.Admission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "messages", Model: "MiniMax-M3", Identity: codemode.Identity{Conversation: "minimax-active-conv-0"}}, Providers: []string{provider}})
 	if err != nil {
 		t.Fatal(err)
 	}

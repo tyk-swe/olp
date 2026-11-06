@@ -3,6 +3,7 @@ package routing
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 )
@@ -24,7 +25,7 @@ func decodeMetadata(raw json.RawMessage) decodedMetadata {
 func (p Provider) Metadata(model string) (ModelMetadata, bool) {
 	if p.metadata != nil {
 		metadata := p.metadata[model]
-		return metadata.value, metadata.valid
+		return metadata.value.clone(), metadata.valid
 	}
 	metadata := decodeMetadata(p.Models[model])
 	return metadata.value, metadata.valid
@@ -78,4 +79,19 @@ func (m ModelMetadata) Validate() error {
 		return errors.New("privacy declarations require a source and observation time")
 	}
 	return nil
+}
+
+func (m ModelMetadata) clone() ModelMetadata {
+	parameters := func() *[]string {
+		if m.SupportedParameters == nil {
+			return nil
+		}
+		return new(slices.Clone(*m.SupportedParameters))
+	}()
+	return ModelMetadata{
+		CanonicalModel: copyPointer(m.CanonicalModel), InputModalities: slices.Clone(m.InputModalities), OutputModalities: slices.Clone(m.OutputModalities),
+		ContextLength: copyPointer(m.ContextLength), MaxOutputTokens: copyPointer(m.MaxOutputTokens), SupportedParameters: parameters,
+		Quantization: copyPointer(m.Quantization), Region: copyPointer(m.Region), DataCollection: copyPointer(m.DataCollection),
+		ZeroDataRetention: copyPointer(m.ZeroDataRetention), Deployment: copyPointer(m.Deployment), Source: copyPointer(m.Source), ObservedAt: copyPointer(m.ObservedAt),
+	}
 }

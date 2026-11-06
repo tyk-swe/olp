@@ -45,11 +45,11 @@ func (s *Server) bedrockConverseStream(w http.ResponseWriter, r *http.Request) {
 // Strict and cache-enabled Converse routes use the shared prepared invocation
 // and Attempt owner. Its native codec retains AWS event-stream framing.
 func (s *Server) preparedBedrockConverse(w http.ResponseWriter, r *http.Request) bool {
-	release := s.Runtime.Release()
+	release := s.deps.Runtime.Release()
 	if release == nil {
 		return false
 	}
-	route, ok := release.Snapshot.Routes[r.PathValue("model")]
+	route, ok := release.Snapshot().FindRoute(r.PathValue("model"))
 	if !ok || !route.Fidelity.Strict() && route.Cache == nil && route.PromptCache == nil {
 		return false
 	}
@@ -97,8 +97,8 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family wir
 		fail(invalidRequest("invalid_value", "model must name a published route slug.", nil))
 		return
 	}
-	snapshot := x.request.release.Snapshot
-	route, ok := snapshot.Routes[slug]
+	snapshot := x.request.release.Snapshot()
+	route, ok := snapshot.FindRoute(slug)
 	if !ok {
 		fail(modelNotFound(slug))
 		return

@@ -1,6 +1,8 @@
 package access
 
-import "slices"
+import (
+	"slices"
+)
 
 // Operation is a management action that authorization decides. Delegable
 // operations are also the scopes a management token may carry; the others are

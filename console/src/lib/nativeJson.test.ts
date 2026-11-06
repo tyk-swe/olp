@@ -128,7 +128,8 @@ describe('native JSON documents', () => {
 
   it('keeps native configuration and result numbers exact while decoding management scalars', () => {
     const parsed = parseManagementJSON(
-      '{"status":429,"configuration":{"kind":"custom","auth_mode":"header","limit":9007199254740993},"result":{"response":{"amount":9007199254740993},"output_text":"","tool_calls":[],"routing":{},"latency_ms":3}}'
+      '{"status":429,"configuration":{"kind":"custom","auth_mode":"header","limit":9007199254740993},"result":{"response":{"amount":9007199254740993},"output_text":"","tool_calls":[],"routing":{},"latency_ms":3}}',
+      [['configuration'], ['result', 'response']]
     );
 
     expect(nativeObject(parsed)).toBe(true);

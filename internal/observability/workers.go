@@ -4,19 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
-type WorkerTask = usage.WorkerTask
+type WorkerTask = workerhealth.WorkerTask
 
 func regionalWorkerTaskNames() []string {
 	return slices.Collect(func(yield func(string) bool) {
-		for _, task := range usage.WorkerTasks() {
+		for _, task := range workerhealth.WorkerTasks() {
 			if task.Regional && !yield(string(task.Name)) {
 				return
 			}
@@ -147,7 +147,7 @@ func ReadRegionalWorkerTaskHealth(ctx context.Context, q access.Queryer, region 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	tasks := usage.WorkerTasks()
+	tasks := workerhealth.WorkerTasks()
 	summary := &WorkerTaskHealth{Tasks: make([]WorkerTaskStatus, 0, len(tasks))}
 	for _, task := range tasks {
 		row, ok := byTask[string(task.Name)]

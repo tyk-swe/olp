@@ -1,3 +1,4 @@
+import { requestNative } from '$lib/management/transport';
 import type { components } from '$lib/management/schema';
 import { apiClient } from '$lib/management/client';
 import {
@@ -63,7 +64,9 @@ export async function listProviderModelPage(
   cursor?: string,
   signal?: AbortSignal
 ): Promise<ProviderModelPage> {
-  const response = await apiClient.GET(
+  const page = await requestNative(
+    apiClient,
+    'get',
     '/api/v1/providers/{provider_id}/models',
     {
       params: {
@@ -71,9 +74,9 @@ export async function listProviderModelPage(
         query: { limit: PROVIDER_PAGE_SIZE, cursor }
       },
       signal
-    }
+    },
+    [['provider', 'configuration']]
   );
-  const page = unwrap(response);
   return { ...pageResult(page), provider: page.provider };
 }
 
@@ -105,7 +108,9 @@ export async function listProviderModelInventory(
 export async function discoverProviderModels(
   provider: Provider
 ): Promise<Provider> {
-  const response = await apiClient.POST(
+  return requestNative(
+    apiClient,
+    'post',
     '/api/v1/providers/{provider_id}/discovery',
     {
       params: {
@@ -113,16 +118,18 @@ export async function discoverProviderModels(
         header: { 'If-Match': provider.etag }
       },
       body: { models: [] }
-    }
+    },
+    [['configuration']]
   );
-  return unwrap(response);
 }
 
 export async function declareProviderModels(
   provider: Provider,
   modelNames: string[]
 ): Promise<Provider> {
-  const response = await apiClient.POST(
+  return requestNative(
+    apiClient,
+    'post',
     '/api/v1/providers/{provider_id}/discovery',
     {
       params: {
@@ -138,9 +145,9 @@ export async function declareProviderModels(
             }) satisfies Schemas['DiscoveredModelRequest']
         )
       }
-    }
+    },
+    [['configuration']]
   );
-  return unwrap(response);
 }
 
 export async function setProviderModel(
@@ -149,7 +156,9 @@ export async function setProviderModel(
   enabled: boolean,
   capabilities: CapabilityDeclaration[]
 ): Promise<Provider> {
-  const response = await apiClient.PATCH(
+  return requestNative(
+    apiClient,
+    'patch',
     '/api/v1/providers/{provider_id}/models/{model_id}',
     {
       params: {
@@ -157,9 +166,9 @@ export async function setProviderModel(
         header: { 'If-Match': provider.etag }
       },
       body: { enabled, capabilities }
-    }
+    },
+    [['configuration']]
   );
-  return unwrap(response);
 }
 
 export async function certifyProviderModel(

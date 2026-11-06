@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"maps"
 	"slices"
 	"time"
 
@@ -55,7 +54,7 @@ var probeRequests = map[string]struct {
 // reported to checkpoint. Probes need shared state to divide work and share
 // results, so without it this returns at once.
 func (s *Server) RunHealthProbes(ctx context.Context, checkpoint func(ctx context.Context, probed int, err error)) {
-	if !s.Admission.ready() {
+	if !s.deps.Admission.ready() {
 		return
 	}
 	ticker := time.NewTicker(probeTick)
@@ -76,13 +75,13 @@ func (s *Server) RunHealthProbes(ctx context.Context, checkpoint func(ctx contex
 
 // probeDue probes the targets whose fleet-wide claim this replica wins.
 func (s *Server) probeDue(ctx context.Context) (int, error) {
-	release := s.Runtime.Release()
-	if release == nil || release.Snapshot == nil {
+	release := s.deps.Runtime.Release()
+	if release == nil || release.Snapshot() == nil {
 		return 0, nil
 	}
-	limiter := s.Admission.limiter
+	limiter := s.deps.Admission.limiter
 	probed := 0
-	for _, target := range probeTargets(release.Snapshot) {
+	for _, target := range probeTargets(release.Snapshot()) {
 		call, cancel := context.WithTimeout(ctx, reserveTimeout)
 		claimed, err := limiter.ClaimProbe(call, target.key(), target.interval)
 		cancel()
@@ -107,11 +106,11 @@ func (s *Server) probeDue(ctx context.Context) (int, error) {
 // probeTargets lists the probe-enabled provider models in route order. A
 // probe speaks the canonical OpenAI shape, so strict routes, which carry a
 // native dialect verbatim, are never probed through.
-func probeTargets(snapshot *routing.Snapshot) []probeTarget {
+func probeTargets(snapshot *routing.View) []probeTarget {
 	var targets []probeTarget
 	seen := map[string]bool{}
-	for _, slug := range slices.Sorted(maps.Keys(snapshot.Routes)) {
-		route := snapshot.Routes[slug]
+	for _, slug := range snapshot.RouteSlugs() {
+		route := snapshot.Route(slug)
 		operation := ""
 		for _, candidate := range []string{operationGeneration, "embeddings", "rerank"} {
 			if slices.Contains(route.Operations, candidate) {
@@ -123,7 +122,7 @@ func probeTargets(snapshot *routing.Snapshot) []probeTarget {
 			continue
 		}
 		for _, target := range route.Targets {
-			provider, ok := snapshot.Providers[target.ProviderID]
+			provider, ok := snapshot.FindProvider(target.ProviderID)
 			if target.Shadow != nil || !ok || !provider.Enabled || provider.HealthProbe == nil {
 				continue
 			}
@@ -144,7 +143,7 @@ func probeTargets(snapshot *routing.Snapshot) []probeTarget {
 func (s *Server) probe(ctx context.Context, release *release.Release, target probeTarget) (limits.ProbeResult, bool) {
 	shape := probeRequests[target.operation]
 	if target.operation == operationGeneration {
-		provider := release.Snapshot.Providers[target.provider]
+		provider := release.Snapshot().Provider(target.provider)
 		if family, err := provider.Connector().TargetFamily(wire.Chat); err == nil && family == wire.Completions {
 			shape.family = wire.Completions
 			shape.body = `{"model":%q,"prompt":"Reply with OK.","max_tokens":16}`
@@ -163,16 +162,12 @@ func (s *Server) probe(ctx context.Context, release *release.Release, target pro
 	route.MaxAttempts = 1
 	route.OverallTimeout = min(route.OverallTimeout, probeDeadline.Milliseconds())
 	route.Behavior = routing.Behavior{Budget: route.Budget}
-	snapshot := *release.Snapshot
-	snapshot.Routes = map[string]routing.Route{route.Slug: route}
-	narrowed := *release
-	narrowed.Snapshot = &snapshot
 	x := &call{
-		request: request{id: uuid.Must(uuid.NewV7()).String(), minted: true, startedAt: s.now(), release: &narrowed},
-		family:  shape.family,
-
-		actor: "system",
-		mode:  "unary",
+		request:            request{id: uuid.Must(uuid.NewV7()).String(), minted: true, startedAt: s.now(), release: release},
+		family:             shape.family,
+		historicalSnapshot: release.Snapshot().WithRoute(route),
+		actor:              "system",
+		mode:               "unary",
 
 		origin:   usage.OriginProbe,
 		priority: routing.PriorityLow, routeLeg: routeLeg{route: &route}, generation: generationCall{parsed: parsed},

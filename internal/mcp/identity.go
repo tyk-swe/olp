@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -29,7 +29,7 @@ func toolIdentityDecisions(tool routing.MCPToolsetTool, failure *Failure) []acco
 	return decisions
 }
 
-func (s *Executor) loadCredential(ctx context.Context, authority access.Authority, tool routing.MCPToolsetTool) ([]byte, *Failure) {
+func (s *Executor) loadCredential(ctx context.Context, authority keyauthority.Authority, tool routing.MCPToolsetTool) ([]byte, *Failure) {
 	if tool.OAuth != nil && tool.OAuth.EntraOBO != nil {
 		assertion, err := s.authority.VerifyEntraUser(ctx, workload.RequestAssertion(ctx), authority, tool.OAuth.EntraOBO.Issuer, tool.OAuth.ClientID)
 		if err != nil || s.grants == nil {
@@ -76,7 +76,7 @@ func (s *Executor) refuseToolIdentity(ctx context.Context, in CallRequest, reser
 	return failure
 }
 
-func (s *Executor) loadEntraCredential(ctx context.Context, authority access.Authority, tool routing.MCPToolsetTool, assertion workload.UserAssertion) ([]byte, *Failure) {
+func (s *Executor) loadEntraCredential(ctx context.Context, authority keyauthority.Authority, tool routing.MCPToolsetTool, assertion workload.UserAssertion) ([]byte, *Failure) {
 	credential, err := s.grants.ResolveEntra(ctx, authority, tool, assertion)
 	if err != nil {
 		return nil, refusal("user_grant_required", "A verified delegated user grant is required.")

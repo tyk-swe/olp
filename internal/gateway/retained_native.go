@@ -436,16 +436,16 @@ func (s *Server) retainedNativeResult(ctx context.Context, r *resources.Resource
 	// Create results were already committed with their submission identities.
 	// Empty item creations intentionally leave a deleted placeholder.
 	if persist && e.Action != "create" {
-		save := s.Resources.SaveRetainedResult
+		save := s.deps.Resources.SaveRetainedResult
 		if e.Metered && (e.Action == "update" || e.Action == "patch") {
-			save = s.Resources.SaveRetainedMutationResult
+			save = s.deps.Resources.SaveRetainedMutationResult
 		}
 		if err := save(ctx, r); err != nil {
 			return err
 		}
 	}
 	if e.Operation == "fine_tuning" {
-		return s.Resources.DiscoverRetainedModels(ctx, r, source)
+		return s.deps.Resources.DiscoverRetainedModels(ctx, r, source)
 	}
 	return nil
 }

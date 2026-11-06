@@ -365,8 +365,8 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		fail(e)
 		return
 	}
-	snapshot := x.request.release.Snapshot
-	route, ok := snapshot.Routes[slug]
+	snapshot := x.request.release.Snapshot()
+	route, ok := snapshot.FindRoute(slug)
 	if !ok {
 		fail(modelNotFound(slug))
 		return

@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/providerconfig"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/duplexcontract"
 	"github.com/tyk-swe/olp/internal/operationplan"
@@ -54,7 +56,7 @@ func configurationCertifiable(cfg *Configuration, tuple CapabilityInput) bool {
 		// Only a profile in a native generation dialect serves this surface.
 		return cfg.ProfileID != "" && cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
 	}
-	return certifiable(cfg.Kind, value(cfg.Options.VendorID), tuple)
+	return certifiable(cfg.Kind, providerconfig.Value(cfg.Options.VendorID), tuple)
 }
 
 // defaultProbeTuple is the unary tuple a provider without model discovery
@@ -92,7 +94,7 @@ func defaultProbeTuple(cfg *Configuration) CapabilityInput {
 // probeOperation is the operation that certifies a declared model of the
 // configured vendor: the one its contract names, or generation.
 func probeOperation(cfg *Configuration) string {
-	if contract, ok := vendors.Lookup(value(cfg.Options.VendorID)); ok && contract.ProbeOperation != "" {
+	if contract, ok := vendors.Lookup(providerconfig.Value(cfg.Options.VendorID)); ok && contract.ProbeOperation != "" {
 		return contract.ProbeOperation
 	}
 	return "generation"
@@ -202,7 +204,7 @@ func (s *Server) cancelOperationPoll(cfg *Configuration, credential []byte, plan
 
 func (s *Server) operationDialects(r *http.Request, _ access.Principal) (access.Reply, error) {
 	items := []map[string]any{}
-	for _, d := range operationregistry.Default.Dialects() {
+	for _, d := range operationregistry.Catalog().Dialects() {
 		items = append(items, map[string]any{"id": d.Identity.ID, "revision": d.Identity.Revision, "operation": d.Operation.ID, "operation_revision": d.Operation.Revision, "surface": d.Surface, "mode": "unary", "label": d.Label, "request_schema": d.RequestSchema, "result_schema": d.ResultSchema, "documentation": d.Documentation, "evidence": d.Evidence})
 	}
 	return access.OK(map[string]any{"items": items}), nil

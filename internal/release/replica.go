@@ -67,8 +67,8 @@ func parseLSN(raw string) (uint64, error) {
 }
 
 func (m *Manager) runtimeReadPool() *pgxpool.Pool {
-	if m.ReadPool != nil {
-		return m.ReadPool
+	if m.readPool != nil {
+		return m.readPool
 	}
 	return m.pool
 }
@@ -78,14 +78,14 @@ func (m *Manager) runtimeReadPool() *pgxpool.Pool {
 // two constant-size queries per poll, never a query on the admission path.
 func (m *Manager) authorityReadTime(ctx context.Context) (time.Time, error) {
 	at := time.Now()
-	if m.ReadPool == nil {
+	if m.readPool == nil {
 		return at, nil
 	}
 	var primary, replay string
 	if err := m.pool.QueryRow(ctx, "SELECT pg_current_wal_lsn()::text").Scan(&primary); err != nil {
 		return time.Time{}, err
 	}
-	if err := m.ReadPool.QueryRow(ctx, "SELECT CASE WHEN pg_is_in_recovery() THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_lsn() END::text").Scan(&replay); err != nil {
+	if err := m.readPool.QueryRow(ctx, "SELECT CASE WHEN pg_is_in_recovery() THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_lsn() END::text").Scan(&replay); err != nil {
 		return time.Time{}, err
 	}
 	head, err := parseLSN(primary)

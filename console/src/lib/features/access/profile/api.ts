@@ -1,7 +1,7 @@
-import { confirmMFA } from '$lib/features/access/mfa/prompt.svelte';
+import { parseMFAChallenge } from '$lib/features/access/mfa/api';
 import type { components } from '$lib/management/schema';
 import { apiClient } from '$lib/management/client';
-import { ensureOk, unwrap } from '$lib/management/http';
+import { ensureOk, unwrap, unwrapOutcome } from '$lib/management/http';
 
 export type UserProfile = components['schemas']['UserDetailResponse'];
 export type OidcIdentityList =
@@ -36,11 +36,15 @@ export async function updateProfile(
   return unwrap({ data, error, response });
 }
 
+export type ReauthenticationStep =
+  | { kind: 'verified' }
+  | { kind: 'mfa'; challenge: components['schemas']['MFAChallenge'] };
+
 export async function reauthenticateWithPassword(
   currentPassword: string,
   purpose: RecentAuthenticationPurpose,
   resourceId?: string
-): Promise<void> {
+): Promise<ReauthenticationStep> {
   const { data, error, response } = await apiClient.POST(
     '/api/v1/profile/reauthenticate',
     {
@@ -52,7 +56,14 @@ export async function reauthenticateWithPassword(
     }
   );
   ensureOk({ error, response });
-  if (response.status === 202 && data) await confirmMFA({ challenge: data });
+  return response.status === 202
+    ? {
+        kind: 'mfa',
+        challenge: unwrapOutcome(
+          parseMFAChallenge(unwrap({ data, error, response }))
+        )
+      }
+    : { kind: 'verified' };
 }
 
 export async function changePassword(

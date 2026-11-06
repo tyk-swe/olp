@@ -6,14 +6,13 @@ import (
 	"slices"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/routing"
-
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/retainedapi"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -39,7 +38,7 @@ func (r costReservation) amountFor(basis limits.Basis) string {
 // costBudgeted reports whether this request spends against a caller budget.
 // Estimation and growth use the same named-route boundary as admission, even
 // after the request moves to a fallback route.
-func (x *call) costBudgeted(authority access.Authority) bool {
+func (x *call) costBudgeted(authority keyauthority.Authority) bool {
 	authority = x.admissionAuthority(authority)
 	return callerCostBudgeted(&authority, x.limitRoute())
 }
@@ -47,7 +46,7 @@ func (x *call) costBudgeted(authority access.Authority) bool {
 // attemptCostReservation holds the price of the one attempt a request runs on,
 // such as a video create, which never fails over because a second target would
 // mint a second job.
-func (x *call) attemptCostReservation(authority access.Authority, attempt routing.Attempt) costReservation {
+func (x *call) attemptCostReservation(authority keyauthority.Authority, attempt routing.Attempt) costReservation {
 	if !x.costBudgeted(authority) {
 		return costReservation{}
 	}
@@ -65,20 +64,20 @@ func (x *call) attemptCostReservation(authority access.Authority, attempt routin
 // attempt that reported usage, a retry through another credential slot
 // included, so the bound is their sum; it is replaced by the cost of what was
 // actually dispatched.
-func (s *Server) costReservation(x *call, authority access.Authority) costReservation {
+func (s *Server) costReservation(x *call, authority keyauthority.Authority) costReservation {
 	if x.workflow != nil {
 		return costReservation{}
 	}
-	if s.Runtime != nil {
-		if release := s.Runtime.Release(); release != nil {
-			x.currentCommitments = release.Snapshot
+	if s.deps.Runtime != nil {
+		if release := s.deps.Runtime.Release(); release != nil {
+			x.currentCommitments = release.Snapshot()
 		}
 	}
 	if !x.costBudgeted(authority) {
 		return costReservation{}
 	}
-	if x.routingInputs == nil && s.Runtime != nil {
-		x.routingInputs = s.Runtime.RoutingInputs()
+	if x.routingInputs == nil && s.deps.Runtime != nil {
+		x.routingInputs = s.deps.Runtime.RoutingInputs()
 	}
 	bound := s.routeCostBound(x)
 	charge := s.routeChargeBound(x)
@@ -127,9 +126,9 @@ func (s *Server) reserveFallbackCost(ctx context.Context, x *call) *Error {
 	if x.workflow != nil {
 		return nil
 	}
-	if s.Runtime != nil {
-		if release := s.Runtime.Release(); release != nil {
-			x.currentCommitments = release.Snapshot
+	if s.deps.Runtime != nil {
+		if release := s.deps.Runtime.Release(); release != nil {
+			x.currentCommitments = release.Snapshot()
 		}
 	}
 	if x.lease == nil || !x.costBudgeted(x.authority) {
@@ -147,14 +146,14 @@ func (s *Server) reserveFallbackCost(ctx context.Context, x *call) *Error {
 // reserveSessionCost holds the price of a realtime session's selected attempt.
 // A session admits apart from choosing its target, so the hold follows the
 // selection, before the provider is dialled.
-func (s *Server) reserveSessionCost(ctx context.Context, x *call, authority access.Authority, attempt routing.Attempt, ttl time.Duration) *Error {
-	if s.Runtime != nil {
-		if release := s.Runtime.Release(); release != nil {
-			x.currentCommitments = release.Snapshot
+func (s *Server) reserveSessionCost(ctx context.Context, x *call, authority keyauthority.Authority, attempt routing.Attempt, ttl time.Duration) *Error {
+	if s.deps.Runtime != nil {
+		if release := s.deps.Runtime.Release(); release != nil {
+			x.currentCommitments = release.Snapshot()
 		}
 	}
-	if x.routingInputs == nil && s.Runtime != nil {
-		x.routingInputs = s.Runtime.RoutingInputs()
+	if x.routingInputs == nil && s.deps.Runtime != nil {
+		x.routingInputs = s.deps.Runtime.RoutingInputs()
 	}
 	hold := x.attemptCostReservation(authority, attempt)
 	if x.lease == nil || hold.amount == "" || x.sessionDebit != nil {
@@ -164,12 +163,12 @@ func (s *Server) reserveSessionCost(ctx context.Context, x *call, authority acce
 }
 
 func (s *Server) growCost(ctx context.Context, lease *limits.Lease, cost, charge, requestID string, ttl time.Duration) *Error {
-	if e := s.Admission.checkCostAccounting(ctx); e != nil {
+	if e := s.deps.Admission.checkCostAccounting(ctx); e != nil {
 		return e
 	}
-	if s.Admission != nil && s.Admission.PendingCostAccountingReady != nil {
+	if s.deps.Admission != nil && s.deps.Admission.PendingCostAccountingReady != nil {
 		for _, owner := range lease.CostOwnerIDs() {
-			if e := s.Admission.checkPendingCostAccounting(ctx, owner); e != nil {
+			if e := s.deps.Admission.checkPendingCostAccounting(ctx, owner); e != nil {
 				return e
 			}
 		}
@@ -178,7 +177,7 @@ func (s *Server) growCost(ctx context.Context, lease *limits.Lease, cost, charge
 	defer cancel()
 	err := lease.GrowCost(decision, cost, charge, requestID, ttl)
 	if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
-		s.Admission.recordRejection(exceeded.Dimension)
+		s.deps.Admission.recordRejection(exceeded.Dimension)
 		return rateLimitedBasis(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate, exceeded.Basis)
 	}
 	if err != nil {
@@ -204,7 +203,7 @@ func (x *call) attemptCostBound(attempt routing.Attempt) usage.Cost {
 	var provider routing.Provider
 	if snapshot := x.snapshot(); snapshot != nil {
 		var ok bool
-		if provider, ok = snapshot.Providers[attempt.ProviderID]; !ok && (x.generation.parsed != nil || x.unary != nil) {
+		if provider, ok = snapshot.FindProvider(attempt.ProviderID); !ok && (x.generation.parsed != nil || x.unary != nil) {
 			return usage.Cost{}
 		}
 	} else if x.generation.parsed != nil || x.unary != nil {
@@ -227,11 +226,11 @@ func (x *call) attemptChargeBound(attempt routing.Attempt, costBound usage.Cost)
 	if rev == nil {
 		return costBound
 	}
-	provider, ok := x.snapshot().Providers[attempt.ProviderID]
+	provider, ok := x.snapshot().FindProvider(attempt.ProviderID)
 	if !ok {
 		return costBound
 	}
-	if x.media != nil || x.retainedTokenless || x.operationName() == "search" || x.operationName() == routing.PassthroughOperation || retainedapi.Operation(x.operationName()) {
+	if x.media != nil || x.retained.usage == retainedTokenlessUsage || x.operationName() == "search" || x.operationName() == routing.PassthroughOperation || retainedapi.Operation(x.operationName()) {
 		u := usage.AttemptUsage{Complete: true}
 		if x.media != nil {
 			var ok bool
@@ -276,7 +275,7 @@ func (x *call) attemptChargeBound(attempt routing.Attempt, costBound usage.Cost)
 // dispatched attempt: the same worst case under the same pinned price and
 // discount, or false when the request cannot be bounded.
 func (x *call) targetCostBound(provider routing.Provider, target routing.Target, price *usage.RoutingPrice, discount *usage.RoutingDiscount) (usage.Cost, bool) {
-	if operationregistry.UnboundedWork(x.operationName()) {
+	if !operationregistry.PolicyFor(x.operationName()).BoundedWork {
 		return usage.Cost{}, false
 	}
 	if x.callerCostExempt() || price == nil {
@@ -292,7 +291,7 @@ func (x *call) targetCostBound(provider routing.Provider, target routing.Target,
 		}
 		return price.Cost(u, x.request.startedAt, true, discount)
 	}
-	if x.retainedTokenless || x.operationName() == "search" || x.operationName() == routing.PassthroughOperation || retainedapi.Operation(x.operationName()) {
+	if x.retained.usage == retainedTokenlessUsage || x.operationName() == "search" || x.operationName() == routing.PassthroughOperation || retainedapi.Operation(x.operationName()) {
 		return price.Cost(usage.AttemptUsage{Complete: true}, x.request.startedAt, true, discount)
 	}
 	if x.generation.parsed == nil && x.unary == nil {
@@ -317,7 +316,7 @@ func videoCreateUsage(m *media.Request) (usage.AttemptUsage, bool) {
 	if m.Seconds != nil {
 		seconds = *m.Seconds
 	}
-	return usage.AttemptUsage{Complete: true, MediaUnits: &seconds}, true
+	return usage.AttemptUsage{Complete: true, UsageQuantities: usage.UsageQuantities{MediaUnits: &seconds}}, true
 }
 
 // committed reports whether the attempt's provider settled under provisioned
@@ -463,7 +462,7 @@ func (s *Server) settledCharge(x *call) usage.Cost {
 			total = total.Add(cost)
 			continue
 		}
-		provider := x.snapshot().Providers[fact.ProviderID]
+		provider := x.snapshot().Provider(fact.ProviderID)
 		if charge, ok := rev.Charge(attemptUsage(fact, operation), fact.StartedAt, attemptSuccessful(fact), costPtr,
 			provider.Kind, provider.VendorID, fact.UpstreamModel, operation); ok {
 			total = total.Add(charge)
@@ -489,7 +488,7 @@ func (x *call) attemptCardRevisionForRoute(providerID string, route *routing.Rou
 	project := x.authority.ProjectID
 	if project == nil {
 		if snapshot := x.snapshot(); snapshot != nil {
-			if provider, ok := snapshot.Providers[providerID]; ok {
+			if provider, ok := snapshot.FindProvider(providerID); ok {
 				project = provider.ProjectID
 			}
 		}
@@ -523,6 +522,6 @@ func (x *call) factCommitted(fact *AttemptFact) bool {
 	if snapshot == nil {
 		return false
 	}
-	p, ok := snapshot.Providers[fact.ProviderID]
+	p, ok := snapshot.FindProvider(fact.ProviderID)
 	return ok && p.CommitmentAt(fact.StartedAt) != nil
 }

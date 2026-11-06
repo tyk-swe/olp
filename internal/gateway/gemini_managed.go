@@ -153,7 +153,7 @@ func (s *Server) mapGeminiManagedResultFiles(ctx context.Context, owner *resourc
 	}
 	commitCtx, stop := resourceCommitContext(ctx)
 	defer stop()
-	return s.Resources.EnsureGeminiResultViews(commitCtx, fileName, views[0], views[1])
+	return s.deps.Resources.EnsureGeminiResultViews(commitCtx, fileName, views[0], views[1])
 }
 
 func geminiManagedFileName(resource *resources.Resource) string {

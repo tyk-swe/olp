@@ -6,13 +6,13 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/limits"
 )
 
 // Each boundary reserves independently. A later refusal refunds every earlier
 // reservation, while every dispatched request settles the complete chain.
-func (a *Admission) reserveEndUsers(ctx context.Context, authority *access.Authority, estimate int64, ttl time.Duration, hold costReservation, costChecked *bool) (*limits.Lease, *Error) {
+func (a *Admission) reserveEndUsers(ctx context.Context, authority *keyauthority.Authority, estimate int64, ttl time.Duration, hold costReservation, costChecked *bool) (*limits.Lease, *Error) {
 	if authority.Policy.EndUserPolicy == nil && authority.ProjectEndUserPolicy == nil {
 		return nil, nil
 	}
@@ -24,7 +24,7 @@ func (a *Admission) reserveEndUsers(ctx context.Context, authority *access.Autho
 	}
 	var chain *limits.Lease
 	for _, boundary := range [...]struct {
-		policy  *access.EndUserPolicy
+		policy  *keyauthority.EndUserPolicy
 		project bool
 	}{
 		{authority.ProjectEndUserPolicy, true}, {authority.Policy.EndUserPolicy, false},

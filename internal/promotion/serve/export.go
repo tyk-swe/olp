@@ -3,6 +3,12 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"slices"
+	"time"
+
+	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/agentpublications"
 	"github.com/tyk-swe/olp/internal/promotion/charge"
@@ -13,14 +19,8 @@ import (
 	"github.com/tyk-swe/olp/internal/promotion/retrievalbindings"
 	"github.com/tyk-swe/olp/internal/promotion/scimmappings"
 	"github.com/tyk-swe/olp/internal/promotion/workloadissuers"
-	"github.com/tyk-swe/olp/internal/sinks"
-	"slices"
-	"time"
-
 	"github.com/tyk-swe/olp/internal/routing"
-
-	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/sinks"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -33,7 +33,7 @@ func exportDocument(s *promotion.Server, ctx context.Context, q access.Queryer) 
 		return nil, err
 	}
 	if doc.InstallationBudget == nil {
-		doc.InstallationBudget = &access.BudgetPolicy{}
+		doc.InstallationBudget = &keyauthority.BudgetPolicy{}
 	}
 	organizations, err := q.Query(ctx, "SELECT name,budget_policy FROM olp.organizations ORDER BY lower(name),name")
 	if err != nil {
@@ -59,12 +59,12 @@ func exportDocument(s *promotion.Server, ctx context.Context, q access.Queryer) 
 	for projects.Next() {
 		var organization *string
 		var name string
-		var policy *access.EndUserPolicy
+		var policy *keyauthority.EndUserPolicy
 		var labels *attribution.Policy
-		var groups access.RouteGroups
-		var budget *access.BudgetPolicy
-		var templates access.LimitTemplates
-		var caps access.AttributionBudgets
+		var groups keyauthority.RouteGroups
+		var budget *keyauthority.BudgetPolicy
+		var templates keyauthority.LimitTemplates
+		var caps keyauthority.AttributionBudgets
 		var publicCatalog, publicPrices bool
 		if err = projects.Scan(&organization, &name, &policy, &labels, &groups, &budget, &templates, &caps, &publicCatalog, &publicPrices); err != nil {
 			return nil, err

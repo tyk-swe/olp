@@ -5,12 +5,11 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
+	"github.com/golang-jwt/jwt/v5"
 	"reflect"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
-
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -21,7 +20,7 @@ type delegatedClaims struct {
 	ProjectID string `json:"olp_project_id"`
 }
 
-func (s *Store) Delegate(ctx context.Context, authority access.Authority, tool routing.MCPToolsetTool) ([]byte, error) {
+func (s *Store) Delegate(ctx context.Context, authority keyauthority.Authority, tool routing.MCPToolsetTool) ([]byte, error) {
 	bound, bindErr := Bind(authority, tool)
 	if bindErr != nil || tool.Delegation == nil {
 		return nil, ErrRequired
@@ -60,14 +59,14 @@ func (s *Store) Delegate(ctx context.Context, authority access.Authority, tool r
 	return []byte(encoded), nil
 }
 
-func delegatedExpiry(authority access.Authority, now time.Time) time.Time {
+func delegatedExpiry(authority keyauthority.Authority, now time.Time) time.Time {
 	if authority.DelegationAgentID != "" && authority.ExpiresAt != nil && authority.ExpiresAt.Before(now.Add(2*time.Minute)) {
 		return *authority.ExpiresAt
 	}
 	return now.Add(2 * time.Minute)
 }
 
-func (s *Store) CheckGrant(ctx context.Context, authority access.Authority, tool routing.MCPToolsetTool) error {
+func (s *Store) CheckGrant(ctx context.Context, authority keyauthority.Authority, tool routing.MCPToolsetTool) error {
 	bound, bindErr := Bind(authority, tool)
 	if bindErr != nil {
 		return bindErr

@@ -3,18 +3,17 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
-	"github.com/tyk-swe/olp/internal/routing"
-
 	"github.com/google/uuid"
-
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/protocols"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -22,7 +21,6 @@ func costText(value string) *string { return &value }
 
 func costCount(value int64) *int64 { return &value }
 
-// costPrice prices a million tokens of input at one unit and of output at ten.
 func costPrice() *usage.RoutingPrice {
 	return &usage.RoutingPrice{Price: usage.Price{
 		InputPerMillion: costText("1"), OutputPerMillion: costText("10"),
@@ -50,7 +48,7 @@ func TestWorkflowCostRejectsPartiallyDecodedModelFacts(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				x := &call{family: wire.Chat, historicalSnapshot: snapshot, workflow: &workflowCall{}, unary: &unaryCall{}, generation: generationCall{runLimits: limits.WorkflowBounds{MaxRunCost: new("1")}}}
+				x := &call{family: wire.Chat, historicalSnapshot: snapshot.ReadOnly(), workflow: &workflowCall{}, unary: &unaryCall{}, generation: generationCall{runLimits: limits.WorkflowBounds{MaxRunCost: new("1")}}}
 				err := x.workflowModelCost(routing.Attempt{ProviderID: id, UpstreamModel: "model", Price: costPrice()})
 				if tc.want == "" {
 					if err != nil {
@@ -66,9 +64,6 @@ func TestWorkflowCostRejectsPartiallyDecodedModelFacts(t *testing.T) {
 	}
 }
 
-// costExecution is a request routed to the given attempts, each served by a
-// provider with one usable slot, so the walk of dispatchable attempts has
-// something to walk.
 func costExecution(t *testing.T, body string, family wire.Format, budget int, attempts ...routing.Attempt) *call {
 	t.Helper()
 	request, err := protocols.Parse(family, []byte(body), "team-chat")
@@ -88,22 +83,14 @@ func costExecution(t *testing.T, body string, family wire.Format, budget int, at
 	}
 	return &call{
 		family:             family,
-		historicalSnapshot: snapshot, routeLeg: routeLeg{route: &routing.Route{Slug: "team-chat", Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed}},
+		historicalSnapshot: snapshot.ReadOnly(), routeLeg: routeLeg{route: &routing.Route{Slug: "team-chat", Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed}},
 			attempts: attempts, budget: budget}, generation: generationCall{parsed: request},
 	}
 }
 
-func budgeted() access.Authority {
-	return admissionAuthority(access.KeyPolicy{DailyCostLimit: costText("5.00")})
+func budgeted() keyauthority.Authority {
+	return admissionAuthority(keyauthority.KeyPolicy{DailyCostLimit: costText("5.00")})
 }
-
-// Two input tokens at 1 per million and the default 4096 reply tokens at
-// 10 per million, each division rounded up.
-
-// Settlement bills every attempt that reports usage, so a failover
-// adds each attempt's bound rather than taking the dearest.
-
-// A request whose attempt budget is one still reserves a single dispatch.
 
 func TestAutomaticReservationsPriceEffectiveGeminiOutputControls(t *testing.T) {
 	const chat = `"model":"team-chat","messages":[{"role":"user","content":"hello"}]`
@@ -133,10 +120,12 @@ func TestAutomaticReservationsPriceEffectiveGeminiOutputControls(t *testing.T) {
 				x := costExecution(t, tc.body, tc.family, 1, routing.Attempt{UpstreamModel: "gemini-2.5-flash", Price: costPrice()})
 				x.request.id, x.request.minted = uuid.NewString(), true
 				attempt := x.attempts[0]
-				provider := x.snapshot().Providers[attempt.ProviderID]
+				snapshot := x.snapshot().Clone()
+				provider := snapshot.Providers[attempt.ProviderID]
 				provider.Kind = "gemini"
 				provider.ParameterDefaults = protocols.Object{"generationConfig": json.RawMessage(`{"maxOutputTokens":32768,"candidateCount":4}`)}
-				x.snapshot().Providers[provider.ID] = provider
+				snapshot.Providers[provider.ID] = provider
+				x.historicalSnapshot = snapshot.ReadOnly()
 				if preparation == "body not kept" {
 					for range keptEncodings {
 						other := provider
@@ -288,15 +277,17 @@ func TestSettledChargeRetainsEachAttemptCardRevision(t *testing.T) {
 				routing.Attempt{Price: costPrice()})
 			x.request.startedAt = now
 			project := uuid.NewString()
-			authority := access.Authority{}
+			authority := keyauthority.Authority{}
 			card := usage.RoutingRateCard{ProjectID: &project, Revisions: []usage.RoutingCardRevision{{
 				ID: uuid.NewString(), Markup: "2", EffectiveAt: now.Add(-time.Hour),
 			}}}
-			provider := x.snapshot().Providers[x.attempts[0].ProviderID]
+			snapshot := x.snapshot().Clone()
+			provider := snapshot.Providers[x.attempts[0].ProviderID]
 			switch owner {
 			case "provider":
 				provider.ProjectID = &project
-				x.snapshot().Providers[provider.ID] = provider
+				snapshot.Providers[provider.ID] = provider
+				x.historicalSnapshot = snapshot.ReadOnly()
 			case "route":
 				x.route.ProjectID = &project
 			case "installation":
@@ -305,7 +296,7 @@ func TestSettledChargeRetainsEachAttemptCardRevision(t *testing.T) {
 				authority.ProjectID = &project
 			}
 			rt := &fakeRuntime{inputs: &usage.RoutingInputs{RefreshedAt: now, RateCards: []usage.RoutingRateCard{card}}}
-			s := &Server{Runtime: rt, now: func() time.Time { return now }, fleet: &fleetHealth{}}
+			s := &Server{now: func() time.Time { return now }, fleet: &fleetHealth{}, deps: Dependencies{Runtime: rt}}
 			s.bindAuthority(x, authority)
 			dispatch := func() {
 				fact := s.newFact(x, x.attempts[0], provider.Slots[0], len(x.facts)+1)
@@ -339,5 +330,56 @@ func TestSettledChargeRetainsEachAttemptCardRevision(t *testing.T) {
 				t.Fatalf("charge with new revision = %s, want %s", got, want)
 			}
 		})
+	}
+}
+
+func TestRetainedPageOnlyAdmitsCostsForEntriesBeingRead(t *testing.T) {
+	now := time.Now()
+	provider := routing.Provider{ID: uuid.NewString(), Kind: "openai"}
+	x := &call{
+		actor: "api_key_resource", operationOverride: "fine_tuning",
+		retained:           retainedOperation{use: retainedHousekeeping, usage: retainedTokenlessUsage},
+		request:            request{startedAt: now},
+		historicalSnapshot: (&routing.Snapshot{Providers: map[string]routing.Provider{provider.ID: provider}}).ReadOnly(),
+		routingInputs: &usage.RoutingInputs{RefreshedAt: now, Prices: []usage.RoutingPrice{
+			{Price: usage.Price{ProviderKind: provider.Kind, Model: "free", Operation: "fine_tuning", PerRequest: new("0")}},
+			{Price: usage.Price{ProviderKind: provider.Kind, Model: "paid", Operation: "fine_tuning", PerRequest: new("1")}},
+		}},
+	}
+	s := &Server{now: func() time.Time { return now }, deps: Dependencies{Admission: &Admission{
+		CostAccountingReady: func(context.Context) error { return errors.New("accounting unavailable") },
+	}}}
+	prepare := func(model string) retainedListEntry {
+		t.Helper()
+		pin := &pin{provider: provider, model: model, attempt: routing.Attempt{ProviderID: provider.ID, UpstreamModel: model}}
+		admission, err := s.prepareRetainedAdmission(x, pin, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return retainedListEntry{pin: pin, admission: admission}
+	}
+	free, paid := prepare("free"), prepare("paid")
+	for _, tc := range []struct {
+		name    string
+		entries []retainedListEntry
+		limit   int
+		blocked bool
+	}{
+		{"free page with paid continuation", []retainedListEntry{free, paid}, 1, false},
+		{"mixed page", []retainedListEntry{free, paid}, 2, true},
+		{"paid page with free continuation", []retainedListEntry{paid, free}, 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			failure := s.reserveRetainedPage(context.Background(), x, budgeted(), tc.entries, tc.limit, time.Second)
+			if tc.blocked && (failure == nil || failure.Code != "cost_accounting_incomplete") {
+				t.Fatalf("paid page admission = %v", failure)
+			}
+			if !tc.blocked && failure != nil {
+				t.Fatalf("free page admission = %v", failure)
+			}
+		})
+	}
+	if failure := s.admitRetainedPageCost(context.Background(), x, budgeted(), time.Second); failure == nil || failure.Code != "cost_accounting_incomplete" {
+		t.Fatalf("paid refill admission = %v", failure)
 	}
 }

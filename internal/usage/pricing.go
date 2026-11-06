@@ -46,7 +46,7 @@ func validOperation(value string) bool {
 	if slices.Contains(priceOperations, value) {
 		return true
 	}
-	return operationregistry.Default.HasOperation(value)
+	return operationregistry.Catalog().HasOperation(value)
 }
 
 func validProviderKind(value string) bool {

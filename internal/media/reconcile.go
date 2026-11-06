@@ -3,6 +3,7 @@ package media
 import (
 	"context"
 	"errors"
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -16,7 +17,6 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/secrets"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // Reconciliation concurrency and pacing match the reference worker.
@@ -76,11 +76,11 @@ func (s *Service) RecordGap() {
 }
 
 // checkpoint records one reconciliation pass in worker_task_health.
-func (s *Service) checkpoint(ctx context.Context, outcome usage.Outcome, progress bool) {
+func (s *Service) checkpoint(ctx context.Context, outcome workerhealth.Outcome, progress bool) {
 	if s.Pool == nil {
 		return
 	}
-	if err := usage.CheckpointTask(ctx, s.Pool, usage.TaskMediaReconciliation, outcome, progress); err != nil {
+	if err := workerhealth.New(workerhealth.TaskMediaReconciliation, "").Checkpoint(ctx, s.Pool, outcome, progress); err != nil {
 		s.log().Debug("media reconciliation checkpoint failed", "error", err)
 	}
 }
@@ -644,10 +644,10 @@ func (s *Service) RunReconciler(ctx context.Context) {
 			pass, err := s.ReconcileOnce(ctx, ReconciliationBatch)
 			if err != nil {
 				s.log().Warn("media reconciliation pass failed", "error", err)
-				s.checkpoint(ctx, usage.OutcomeFailure, false)
+				s.checkpoint(ctx, workerhealth.OutcomeFailure, false)
 				continue
 			}
-			s.checkpoint(ctx, usage.OutcomeSuccess, pass.Claimed > 0)
+			s.checkpoint(ctx, workerhealth.OutcomeSuccess, pass.Claimed > 0)
 			if pass.Claimed > 0 {
 				s.log().Info("media reconciliation pass completed",
 					"claimed", pass.Claimed, "completed", pass.Completed, "failed", pass.Failed)

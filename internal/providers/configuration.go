@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/providerconfig"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/google/uuid"
@@ -64,28 +65,16 @@ type Options struct {
 // ProviderConfiguration verbatim. A plugin provider pins its plugin's digest
 // as the profile revision; Pin resolves that plugin profile.
 type Configuration struct {
-	CredentialSource string                   `json:"credential_source,omitempty"`
-	ProviderID       string                   `json:"-"`
-	ProfileID        string                   `json:"profile_id,omitempty"`
-	ProfileRevision  string                   `json:"profile_revision,omitempty"`
-	ProbeModels      []string                 `json:"-"`
-	Kind             string                   `json:"kind"`
-	AuthMode         string                   `json:"auth_mode"`
-	Endpoint         *string                  `json:"endpoint"`
-	CloudRegion      *string                  `json:"cloud_region"`
-	CloudProject     *string                  `json:"cloud_project"`
-	BatchStorage     *connectors.BatchStorage `json:"batch_storage,omitempty"`
-	Deployment       *string                  `json:"deployment"`
-	APIVersion       *string                  `json:"api_version"`
-	Options          Options                  `json:"options"`
-	plugin           *connectors.PluginProfile
+	providerconfig.Identity[*string]
+	ProviderID  string   `json:"-"`
+	ProbeModels []string `json:"-"`
+	Options     Options  `json:"options"`
+	plugin      *connectors.PluginProfile
 }
 
-// normalize applies defaults and canonical forms so equal configurations
-// compare equal and every stored document is complete.
 func (c *Configuration) Normalize() {
 	if c.Endpoint == nil || *c.Endpoint == "" {
-		if endpoint := connectors.DefaultProfileEndpoint(c.Kind, c.ProfileID, value(c.CloudRegion), value(c.CloudProject)); endpoint != "" {
+		if endpoint := connectors.DefaultProfileEndpoint(c.Kind, c.ProfileID, providerconfig.Value(c.CloudRegion), providerconfig.Value(c.CloudProject)); endpoint != "" {
 			c.Endpoint = new(endpoint)
 		}
 	}
@@ -262,7 +251,7 @@ func (c *Configuration) ValidateAndNormalize(policy *egress.Policy) error {
 		if !c.VendorMissing() {
 			return access.Invalid("configuration.options.vendor_id", "A plugin provider has no vendor.")
 		}
-	} else if kind, ok := VendorKind(value(c.Options.VendorID)); !ok || kind != c.Kind {
+	} else if kind, ok := VendorKind(providerconfig.Value(c.Options.VendorID)); !ok || kind != c.Kind {
 		return access.Invalid("configuration.options.vendor_id", "Vendor does not support this connector")
 	}
 	if len(c.Options.Models) > 2000 {
@@ -384,12 +373,11 @@ func (c *Configuration) transportFingerprint() string {
 	return hex.EncodeToString(h.Sum(nil))[:32]
 }
 
-func value(v *string) string {
-	if v == nil {
-		return ""
-	}
-	return *v
-}
 func (c *Configuration) transport() connectors.Config {
-	return connectors.Config{Network: c.Options.Network, Plugin: c.plugin, PluginOptions: c.Options.PluginOptions, ProfileID: c.ProfileID, ProfileRevision: c.ProfileRevision, SemanticHeaders: c.Options.SemanticHeaders, QuerySettings: c.Options.QuerySettings, OperationDefaults: c.Options.OperationDefaults, Bindings: c.Options.Bindings, Kind: c.Kind, AuthMode: c.AuthMode, Endpoint: value(c.Endpoint), CloudRegion: value(c.CloudRegion), CloudProject: value(c.CloudProject), BatchStorage: c.BatchStorage, TuningDatasetURIPrefixes: c.Options.TuningDatasetURIPrefixes, DocumentURIPrefixes: c.Options.DocumentURIPrefixes, Deployment: value(c.Deployment), APIVersion: value(c.APIVersion), VendorID: value(c.Options.VendorID), CredentialHeaders: c.Options.CredentialHeaders, Models: c.Options.Models}
+	return c.Identity.Connector(providerconfig.Options{
+		Network: c.Options.Network, SemanticHeaders: c.Options.SemanticHeaders, QuerySettings: c.Options.QuerySettings,
+		OperationDefaults: c.Options.OperationDefaults, Bindings: c.Options.Bindings, PluginOptions: c.Options.PluginOptions,
+		TuningDatasetURIPrefixes: c.Options.TuningDatasetURIPrefixes, DocumentURIPrefixes: c.Options.DocumentURIPrefixes,
+		VendorID: providerconfig.Value(c.Options.VendorID), CredentialHeaders: c.Options.CredentialHeaders, Models: c.Options.Models,
+	}, c.plugin, "", "")
 }

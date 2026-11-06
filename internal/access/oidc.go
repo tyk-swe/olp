@@ -76,7 +76,7 @@ func (s *Server) discover(ctx context.Context, c *oidcConfiguration) (*oidc.Prov
 	if err != nil {
 		return nil, nil, err
 	}
-	response, err := s.OIDCClient.Do(request)
+	response, err := s.oidcClient.Do(request)
 	if err != nil {
 		return nil, nil, Fail(422, "oidc_discovery_failed", "The OIDC discovery endpoint is unavailable or outside the identity egress policy.")
 	}
@@ -102,7 +102,7 @@ func (s *Server) discover(ctx context.Context, c *oidcConfiguration) (*oidc.Prov
 	}
 	// Keep the verifier's refresh context independent of this request's
 	// cancellation; every fetch still uses the bounded identity HTTP client.
-	provider := metadata.NewProvider(oidc.ClientContext(context.Background(), s.OIDCClient))
+	provider := metadata.NewProvider(oidc.ClientContext(context.Background(), s.oidcClient))
 	oauth := &oauth2.Config{ClientID: c.ClientID, Endpoint: provider.Endpoint(), RedirectURL: s.Origin + "/api/v1/oidc/callback", Scopes: c.Scopes}
 	switch {
 	case metadata.AuthMethods == nil || slices.Contains(metadata.AuthMethods, "client_secret_basic"):
@@ -200,15 +200,11 @@ func (s *Server) putOIDCConfiguration(r *http.Request, _ Principal) (Reply, erro
 			return Reply{}, err
 		}
 	}
-	tx, err := s.Begin(r)
+	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Reauthorize(r, tx)
-	if err != nil {
-		return Reply{}, err
-	}
 	old, err := loadOIDC(r, tx)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return Reply{}, err
@@ -261,7 +257,7 @@ func (s *Server) putOIDCConfiguration(r *http.Request, _ Principal) (Reply, erro
 	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.oidc_configuration(singleton,id,document,etag,updated_by) VALUES(true,$1,$2,$3,$4) ON CONFLICT(singleton) DO UPDATE SET document=excluded.document,etag=excluded.etag,updated_by=excluded.updated_by", c.ID, data, c.ETag, p.UserID()); err != nil {
 		return Reply{}, err
 	}
-	if err = s.usableOwner(r, tx); err != nil {
+	if err = s.EnsureUsableOwner(r, tx); err != nil {
 		return Reply{}, err
 	}
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE purpose=$1", secrets.OIDCFlow); err != nil {
@@ -271,7 +267,7 @@ func (s *Server) putOIDCConfiguration(r *http.Request, _ Principal) (Reply, erro
 		return Reply{}, err
 	}
 	c.DiscoveryBinding = ""
-	return Commit(r, tx, Detail(c, c.ETag))
+	return Detail(c, c.ETag), tx.Commit(r.Context())
 }
 
 type oidcFlow struct {
@@ -392,7 +388,7 @@ func (s *Server) beginOIDC(r *http.Request, kind string) (Reply, error) {
 		response.Body = nil
 		response.Location = authorizationURL
 	}
-	return Commit(r, tx, response)
+	return response, tx.Commit(r.Context())
 }
 
 // The flow is consumed and committed before network exchange. Neither a
@@ -476,7 +472,7 @@ func (s *Server) oidcCallback(r *http.Request) (reply Reply, callbackErr error) 
 			return Reply{}, err
 		}
 	}
-	ctx := oidc.ClientContext(r.Context(), s.OIDCClient)
+	ctx := oidc.ClientContext(r.Context(), s.oidcClient)
 	token, err := oauth.Exchange(ctx, r.URL.Query().Get("code"), oauth2.VerifierOption(flow.Verifier))
 	if err != nil {
 		return Reply{}, Fail(403, "oidc_token_invalid", "The identity provider token could not be verified.")
@@ -662,7 +658,7 @@ func (s *Server) oidcCallback(r *http.Request) (reply Reply, callbackErr error) 
 	if err = Audit(r.Context(), tx, r, UserActor(userID), "oidc."+flow.Kind, "oidc_identity", identityID, "success"); err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, response)
+	return response, tx.Commit(r.Context())
 }
 func mappedRole(c oidcConfiguration, address string, groups []string) string {
 	for _, m := range c.EmailMappings {
@@ -778,7 +774,7 @@ func (s *Server) oidcIdentities(r *http.Request, p Principal) (Reply, error) {
 		if usable[item["id"].(string)] {
 			remaining--
 		}
-		item["can_unlink"] = remaining > 0 || locallyManaged && (local && localEnabled && !s.LocalLoginDisabled || len(samlUsable) > 0)
+		item["can_unlink"] = remaining > 0 || locallyManaged && (local && localEnabled && !s.localLoginDisabled || len(samlUsable) > 0)
 	}
 	return OK(map[string]any{"items": items, "linking_available": enabled, "has_local_password": local, "oidc_reauthentication_available": len(usable) > 0}), nil
 }
@@ -787,15 +783,11 @@ func (s *Server) unlinkOIDCIdentity(r *http.Request, _ Principal) (Reply, error)
 	if err != nil {
 		return Reply{}, err
 	}
-	tx, err := s.Begin(r)
+	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Reauthorize(r, tx)
-	if err != nil {
-		return Reply{}, err
-	}
 	var owner string
 	if err = tx.QueryRow(r.Context(), "SELECT user_id::text FROM olp.oidc_identities WHERE id=$1", id).Scan(&owner); err != nil {
 		return Reply{}, err
@@ -813,7 +805,7 @@ func (s *Server) unlinkOIDCIdentity(r *http.Request, _ Principal) (Reply, error)
 	if err = tx.QueryRow(r.Context(), `SELECT password_hash IS NOT NULL,COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true),role_management<>'oidc' FROM olp.users WHERE id=$1`, p.ID).Scan(&local, &localEnabled, &locallyManaged); err != nil {
 		return Reply{}, err
 	}
-	if !local || !locallyManaged || !localEnabled || s.LocalLoginDisabled {
+	if !local || !locallyManaged || !localEnabled || s.localLoginDisabled {
 		usable, err := usableOIDCIdentities(r, tx, p, locallyManaged)
 		if err != nil {
 			return Reply{}, err
@@ -830,7 +822,7 @@ func (s *Server) unlinkOIDCIdentity(r *http.Request, _ Principal) (Reply, error)
 			return Reply{}, Fail(409, "last_sign_in_method", "Keep at least one usable sign-in method.")
 		}
 	}
-	if err = s.usableOwner(r, tx); err != nil {
+	if err = s.EnsureUsableOwner(r, tx); err != nil {
 		return Reply{}, err
 	}
 	if err = Audit(r.Context(), tx, r, p.Actor(), "oidc.unlink", "oidc_identity", id, "success"); err != nil {
@@ -847,7 +839,7 @@ func (s *Server) unlinkOIDCIdentity(r *http.Request, _ Principal) (Reply, error)
 		return Reply{}, err
 	}
 	rotated.Status, rotated.Body = 204, nil
-	return Commit(r, tx, rotated)
+	return rotated, tx.Commit(r.Context())
 }
 
 func (s *Server) changeSignInMethod(r *http.Request, tx pgx.Tx, userID string, strength sessionAuth) (Reply, error) {

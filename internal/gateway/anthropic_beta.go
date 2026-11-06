@@ -45,9 +45,9 @@ func takesAnthropicBeta(cfg connectors.Config) bool {
 // servesAnthropicBeta is whether a target of the route is a provider that
 // takes the header.
 func (x *call) servesAnthropicBeta() bool {
-	providers := x.snapshot().Providers
+	snapshot := x.snapshot()
 	return slices.ContainsFunc(x.route.Targets, func(t routing.Target) bool {
-		provider := providers[t.ProviderID]
+		provider := snapshot.Provider(t.ProviderID)
 		return takesAnthropicBeta(provider.Connector())
 	})
 }
@@ -98,9 +98,9 @@ func (x *call) checkAnthropicBeta() *Error {
 		param := "anthropic-beta"
 		return invalidRequest("invalid_request", "The Anthropic-Beta header must be a valid header value of at most 2048 bytes.", &param)
 	}
-	providers := x.snapshot().Providers
+	snapshot := x.snapshot()
 	for _, target := range x.route.Targets {
-		provider := providers[target.ProviderID]
+		provider := snapshot.Provider(target.ProviderID)
 		cfg := provider.Connector()
 		if !takesAnthropicBeta(cfg) {
 			continue

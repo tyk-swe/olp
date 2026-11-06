@@ -163,7 +163,7 @@ func (t *Template) Bind(source oif.Request, ctx Context) (*Plan, error) {
 	var mapping *operations.Mapping
 	var provenance []oif.Provenance
 	if sourceCodec.Identity != t.codec.Identity {
-		m, ok := operationregistry.Default.Mapping(sourceCodec.Identity, t.codec.Identity)
+		m, ok := operationregistry.Catalog().Mapping(sourceCodec.Identity, t.codec.Identity)
 		if !ok {
 			return nil, fail("target_capability", "/dialect", "qualified_mapping", "No complete qualified mapping links these operation dialects.")
 		}

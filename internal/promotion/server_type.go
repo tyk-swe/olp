@@ -7,11 +7,13 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/plugins"
+	"net/http"
 )
 
 type Server struct {
-	Access *access.Server
-	Egress *egress.Policy
+	IdentityClient *http.Client
+	Access         *access.Server
+	Egress         *egress.Policy
 	// Unconfined is the deployment's unconfined plugin tier, or nil where it
 	// enables none, for plugin providers to pin.
 	Unconfined *plugins.Unconfined

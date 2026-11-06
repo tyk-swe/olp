@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"time"
 
 	"github.com/google/uuid"
@@ -127,8 +128,8 @@ func (s *Store) RetainedTemplates(ctx context.Context, id uuid.UUID) (map[string
 	return out, err
 }
 
-func (s *Store) CheckpointRetained(ctx context.Context, outcome usage.Outcome, progress bool) error {
-	return usage.CheckpointTask(ctx, s.pool, usage.TaskRetainedSettlement, outcome, progress)
+func (s *Store) CheckpointRetained(ctx context.Context, outcome workerhealth.Outcome, progress bool) error {
+	return workerhealth.New(workerhealth.TaskRetainedSettlement, "").Checkpoint(ctx, s.pool, outcome, progress)
 }
 
 // CloseUndispatchedRetained uses the durable submission fence as proof that no

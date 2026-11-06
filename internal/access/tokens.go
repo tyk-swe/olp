@@ -90,21 +90,17 @@ func (s *Server) createManagementToken(r *http.Request, _ Principal) (Reply, err
 	if err := Decode(r, &input); err != nil {
 		return Reply{}, err
 	}
-	tx, err := s.Begin(r)
+	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Reauthorize(r, tx)
-	if err != nil {
-		return Reply{}, err
-	}
 	claim, replayed, err := s.Replay(r, tx, p, input)
 	if err != nil {
 		return Reply{}, err
 	}
 	if replayed != nil {
-		return Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	if err = validManagementToken(input); err != nil {
 		return Reply{}, err
@@ -143,7 +139,7 @@ func (s *Server) createManagementToken(r *http.Request, _ Principal) (Reply, err
 	if err = s.CompleteReplay(r, tx, claim, result); err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 
 func (s *Server) revokeManagementToken(r *http.Request, _ Principal) (Reply, error) {
@@ -151,21 +147,17 @@ func (s *Server) revokeManagementToken(r *http.Request, _ Principal) (Reply, err
 	if err != nil {
 		return Reply{}, err
 	}
-	tx, err := s.Begin(r)
+	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Reauthorize(r, tx)
-	if err != nil {
-		return Reply{}, err
-	}
 	claim, replayed, err := s.Replay(r, tx, p, nil)
 	if err != nil {
 		return Reply{}, err
 	}
 	if replayed != nil {
-		return Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	var etag string
 	var revoked *time.Time
@@ -189,5 +181,5 @@ func (s *Server) revokeManagementToken(r *http.Request, _ Principal) (Reply, err
 	if err = s.CompleteReplay(r, tx, claim, result); err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }

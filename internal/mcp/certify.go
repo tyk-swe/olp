@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/mcp/sessions"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -27,7 +27,7 @@ func certifyTransport(ctx context.Context, peer upstream.Upstream, credential []
 	return sessions.Certified
 }
 
-func (s *Server) certifyToolsetServers(ctx context.Context, authority access.Authority, resolved resolvedToolset) map[string]sessions.Certification {
+func (s *Server) certifyToolsetServers(ctx context.Context, authority keyauthority.Authority, resolved resolvedToolset) map[string]sessions.Certification {
 	representatives := map[string]routing.MCPToolsetTool{}
 	for _, tool := range resolved.tools {
 		if _, ok := representatives[tool.ServerID]; !ok {
@@ -65,7 +65,7 @@ func (s *Server) certifyToolsetServers(ctx context.Context, authority access.Aut
 	return certified
 }
 
-func (s *Executor) certifyServer(ctx context.Context, authority access.Authority, tool routing.MCPToolsetTool) sessions.Certification {
+func (s *Executor) certifyServer(ctx context.Context, authority keyauthority.Authority, tool routing.MCPToolsetTool) sessions.Certification {
 	if s.connect == nil {
 		return sessions.Invalid
 	}

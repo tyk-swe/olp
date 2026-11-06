@@ -11,17 +11,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
-	"github.com/tyk-swe/olp/internal/routing"
-
 	"github.com/coder/websocket"
-
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/geminilifecycle"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routeidentity"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -115,7 +113,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 	}
 	token, e := geminiClientKey(r)
 	if e == nil {
-		var authority access.Authority
+		var authority keyauthority.Authority
 		authority, e = s.authenticateRequest(r, token, "inference")
 		if e == nil {
 			s.bindAuthority(x, authority)
@@ -157,7 +155,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 		x.failure, status = invalidRequest("invalid_live_setup", "Gemini Live setup is malformed.", nil), http.StatusBadRequest
 		return
 	}
-	route, ok := x.request.release.Snapshot.Routes[setup.Model]
+	route, ok := x.request.release.Snapshot().FindRoute(setup.Model)
 	if !ok || !x.authority.Allows("inference", route.Slug, route.ProjectID, s.now()) || !slices.Contains(route.Operations, "realtime") {
 		client.Close(websocket.StatusPolicyViolation, "route unavailable")
 		x.failure, status = modelNotFound(setup.Model), http.StatusNotFound

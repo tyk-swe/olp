@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/oif"
 )
@@ -19,25 +20,25 @@ type endUserIdentity struct{ key, project, digest string }
 
 // authenticateRequest binds an authenticated caller to its declared end-user
 // source. The cached authority is copied; only the digest escapes the request.
-func (s *Server) identifyEndUser(r *http.Request, authority access.Authority) (access.Authority, *Error) {
+func (s *Server) identifyEndUser(r *http.Request, authority keyauthority.Authority) (keyauthority.Authority, *Error) {
 	if authority.TaskCapability != nil || authority.WorkloadIssuerID != nil && authority.EndUserDigest != "" {
 		return authority, nil
 	}
 	if authority.Policy.EndUserSource == nil {
 		if authority.ProjectEndUserPolicy != nil || authority.Policy.EndUserPolicy != nil {
-			return access.Authority{}, invalidRequest("end_user_source_required", "This key must configure an end-user identifier source before using an end-user policy.", nil)
+			return keyauthority.Authority{}, invalidRequest("end_user_source_required", "This key must configure an end-user identifier source before using an end-user policy.", nil)
 		}
 		return authority, nil
 	}
 	identifier := ""
 	switch *authority.Policy.EndUserSource {
 	case "header":
-		digest, failure := consumerauth.HeaderEndUserDigest(s.Runtime, r, authority)
+		digest, failure := consumerauth.HeaderEndUserDigest(s.deps.Runtime, r, authority)
 		if failure != nil {
 			if failure.Status == http.StatusBadRequest {
-				return access.Authority{}, invalidRequest(failure.Code, failure.Message, nil)
+				return keyauthority.Authority{}, invalidRequest(failure.Code, failure.Message, nil)
 			}
-			return access.Authority{}, serverError(failure.Status, failure.Code, failure.Message)
+			return keyauthority.Authority{}, serverError(failure.Status, failure.Code, failure.Message)
 		}
 		authority.EndUserDigest = digest
 		return authority, nil
@@ -61,7 +62,7 @@ func (s *Server) identifyEndUser(r *http.Request, authority access.Authority) (a
 			body, err := s.readBody(r)
 			_ = original.Close()
 			if err != nil {
-				return access.Authority{}, err
+				return keyauthority.Authority{}, err
 			}
 			if measured, ok := original.(*measuredBody); ok {
 				measured.decoded = int64(len(body))
@@ -72,11 +73,11 @@ func (s *Server) identifyEndUser(r *http.Request, authority access.Authority) (a
 		}
 	}
 	if !access.ValidEndUserIdentifier(identifier) {
-		return access.Authority{}, invalidRequest("invalid_end_user", "Provide an end-user machine token of 1–128 characters in the key's configured source.", nil)
+		return keyauthority.Authority{}, invalidRequest("invalid_end_user", "Provide an end-user machine token of 1–128 characters in the key's configured source.", nil)
 	}
-	digester, ok := s.Runtime.(interface{ EndUserDigest(*string, string) string })
+	digester, ok := s.deps.Runtime.(interface{ EndUserDigest(*string, string) string })
 	if !ok {
-		return access.Authority{}, serverError(http.StatusServiceUnavailable, "authority_unavailable", "End-user identity is unavailable.")
+		return keyauthority.Authority{}, serverError(http.StatusServiceUnavailable, "authority_unavailable", "End-user identity is unavailable.")
 	}
 	authority.EndUserDigest = digester.EndUserDigest(authority.ProjectID, identifier)
 	if *authority.Policy.EndUserSource == "native" {

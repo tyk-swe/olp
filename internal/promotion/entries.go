@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
@@ -184,8 +184,8 @@ type MCPServerEntry struct {
 }
 
 type OrganizationEntry struct {
-	Name   string               `json:"name"`
-	Budget *access.BudgetPolicy `json:"budget,omitempty"`
+	Name   string                     `json:"name"`
+	Budget *keyauthority.BudgetPolicy `json:"budget,omitempty"`
 }
 
 // RetrievalBindingEntry references destination keys by exact project-local

@@ -341,11 +341,11 @@ func (s *Store) applyRetainedEvidenceTx(ctx context.Context, tx pgx.Tx, id uuid.
 			// Keep the accepted pricing timestamp, including time-window tariffs.
 			event.Attempts[0].CompletedAt = event.Attempts[0].StartedAt
 			setPendingUsage(event, line.Usage)
-			payload, e := usage.Encode(event)
+			accepted, e := usage.NewAccountingEvent(event)
 			if e != nil {
 				return result, e
 			}
-			persisted, e := usage.PersistRetainedEventTx(ctx, tx, event, payload)
+			persisted, e := usage.PersistRetainedEventTx(ctx, tx, accepted)
 			if e != nil {
 				return result, e
 			}

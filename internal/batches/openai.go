@@ -533,13 +533,13 @@ func ParseLine(line []byte, endpoint string, errorFile bool) (Result, error) {
 		result.Kind = ResultExpired
 		result.ErrorClass = "batch_expired"
 		if !result.Usage.Observed {
-			result.Usage = usage.AttemptUsage{Complete: true, Batch: true}
+			result.Usage = usage.AttemptUsage{Complete: true, UsageQuantities: usage.UsageQuantities{Batch: true}}
 		}
 	case "batch_cancelled", "batch_canceled":
 		result.Kind = ResultCancelled
 		result.ErrorClass = "batch_cancelled"
 		if !result.Usage.Observed {
-			result.Usage = usage.AttemptUsage{Complete: true, Batch: true}
+			result.Usage = usage.AttemptUsage{Complete: true, UsageQuantities: usage.UsageQuantities{Batch: true}}
 		}
 	default:
 		if result.Kind != ResultSucceeded {

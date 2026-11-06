@@ -6,19 +6,19 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
-func PrincipalDigest(key *secrets.AuthKey, a access.Authority) []byte {
+func PrincipalDigest(key *secrets.AuthKey, a keyauthority.Authority) []byte {
 	principal, _ := json.Marshal(struct{ Key, Project, Workload string }{a.ID, *a.ProjectID, a.WorkloadDigest})
 	return key.Digest(secrets.AgentPrincipalDigest, string(principal))
 }
 
 // StartRunTx deduplicates a correlation record. It grants no permission to
 // resend a step and does not itself reserve or charge money.
-func StartRunTx(ctx context.Context, tx pgx.Tx, key *secrets.AuthKey, a access.Authority, id, scope, resource, revision string) error {
+func StartRunTx(ctx context.Context, tx pgx.Tx, key *secrets.AuthKey, a keyauthority.Authority, id, scope, resource, revision string) error {
 	if key == nil || a.ProjectID == nil || !validApprovalID(id) || !a.AllowsResource(scope, resource, *a.ProjectID, time.Now()) {
 		return limits.ErrDebitAuthority
 	}
@@ -51,7 +51,7 @@ func StartRunTx(ctx context.Context, tx pgx.Tx, key *secrets.AuthKey, a access.A
 
 // PrepareStepTx persists the run/step link and shared reservation intent in
 // one transaction. Deferred foreign keys fence orphaned financial references.
-func PrepareStepTx(ctx context.Context, tx pgx.Tx, store *limits.DebitStore, a access.Authority, intent limits.DebitIntent, ordinal int, owners []limits.DebitOwner) (limits.DebitState, error) {
+func PrepareStepTx(ctx context.Context, tx pgx.Tx, store *limits.DebitStore, a keyauthority.Authority, intent limits.DebitIntent, ordinal int, owners []limits.DebitOwner) (limits.DebitState, error) {
 	if a.ProjectID == nil || intent.APIKeyID != a.ID || intent.ProjectID != *a.ProjectID || ordinal < 0 || intent.RunID == "" || intent.StepID == "" {
 		return "", limits.ErrDebitAuthority
 	}
@@ -79,7 +79,7 @@ func PrepareStepTx(ctx context.Context, tx pgx.Tx, store *limits.DebitStore, a a
 	return state, nil
 }
 
-func EnsureBoundaryAccountsTx(ctx context.Context, tx pgx.Tx, authority access.Authority, boundaries access.ToolDebitBoundariesResult) error {
+func EnsureBoundaryAccountsTx(ctx context.Context, tx pgx.Tx, authority keyauthority.Authority, boundaries keyauthority.ToolDebitBoundariesResult) error {
 	if authority.EndUserDigest != "" {
 		if err := limits.EnsureEndUserAccounts(ctx, tx, authority.ID, authority.ProjectID, authority.EndUserDigest); err != nil {
 			return err

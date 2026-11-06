@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/mcp/sessions"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -70,14 +70,14 @@ func validCallID(callID string) bool {
 	return true
 }
 
-func (s *Executor) callDigest(authority access.Authority, callID string) string {
+func (s *Executor) callDigest(authority keyauthority.Authority, callID string) string {
 	if !validCallID(callID) {
 		return ""
 	}
 	return hex.EncodeToString(s.auth.Digest(secrets.ToolCallDigest, retainedPrincipal(authority)+"\x00"+callID))
 }
 
-func retainedPrincipal(authority access.Authority) string {
+func retainedPrincipal(authority keyauthority.Authority) string {
 	if authority.DelegationAgentID != "" {
 		return authority.ID + "\x00delegation\x00" + authority.DelegationAgentID + "\x00" + authority.DelegationPairDigest
 	}

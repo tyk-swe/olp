@@ -1,9 +1,7 @@
+import { reauthenticateWithPassword } from './reauthentication';
 import { afterEach, expect, it, vi } from 'vitest';
 import { confirmMFA } from '$lib/features/access/mfa/prompt.svelte';
-import {
-  beginIdentityReauthentication,
-  reauthenticateWithPassword
-} from './api';
+import { beginIdentityReauthentication } from './api';
 
 vi.mock('$lib/features/access/session/authMiddleware', () => ({
   createAuthMiddleware: () => ({
@@ -46,9 +44,17 @@ it('does not treat a rejected password as fresh authentication', async () => {
 });
 
 it('requires the offered second factor before password verification completes', async () => {
-  const challenge = { challenge_id: 'challenge', methods: ['totp'] };
+  const challenge = {
+    challenge: 'challenge',
+    methods: ['totp'],
+    expires_at: '2026-01-01T00:00:00Z',
+    enrollment_required: false,
+    public_key: null
+  };
   vi.mocked(confirmMFA).mockImplementation(async (input) => {
-    expect(input.challenge).toEqual(challenge);
+    expect(input.kind === 'challenge' ? input.challenge : undefined).toEqual(
+      challenge
+    );
     throw new Error('Verification incomplete');
   });
   vi.stubGlobal('fetch', async () => Response.json(challenge, { status: 202 }));

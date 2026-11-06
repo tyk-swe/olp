@@ -230,15 +230,11 @@ func (s *Server) retire(r *http.Request, p access.Principal) (access.Reply, erro
 // then releases every database lock. The commit phase repeats the checks so
 // upstream validation cannot race a new owner or draft observation.
 func (s *Server) preflight(r *http.Request, in Input, id string) (*Definition, *access.Reply, error) {
-	tx, err := s.access.Begin(r)
+	tx, p, err := s.access.BeginMutation(r)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.access.Reauthorize(r, tx)
-	if err != nil {
-		return nil, nil, err
-	}
 	if id == "" && (in.ProjectID == nil || !routing.MCPTransport(in.Transport).Valid()) {
 		return nil, nil, access.Invalid("project_id", "Choose an owning project and a supported MCP transport.")
 	}
@@ -251,7 +247,7 @@ func (s *Server) preflight(r *http.Request, in Input, id string) (*Definition, *
 		return nil, nil, err
 	}
 	if replayed != nil {
-		reply, err := access.Commit(r, tx, *replayed)
+		reply, err := *replayed, tx.Commit(r.Context())
 		return d, &reply, err
 	}
 	if d != nil {
@@ -370,15 +366,11 @@ func (s *Server) write(r *http.Request, _ access.Principal, id string, retire bo
 		return access.Reply{}, err
 	}
 	defer clear(material)
-	tx, err := s.access.Begin(r)
+	tx, principal, err := s.access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	principal, err := s.access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	current, err := s.loadForWrite(r.Context(), tx, principal, in, id)
 	if err != nil {
 		return access.Reply{}, err
@@ -388,7 +380,7 @@ func (s *Server) write(r *http.Request, _ access.Principal, id string, retire bo
 		return access.Reply{}, err
 	}
 	if replay != nil {
-		return access.Commit(r, tx, *replay)
+		return *replay, tx.Commit(r.Context())
 	}
 	if current != nil {
 		if err := access.Match(r, current.ETag); err != nil {
@@ -423,7 +415,7 @@ func (s *Server) write(r *http.Request, _ access.Principal, id string, retire bo
 	if err := s.access.CompleteReplay(r, tx, claim, reply); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, reply)
+	return reply, tx.Commit(r.Context())
 }
 
 func definitionStdio(in Input, previous *Definition) *routing.MCPStdioBinding {

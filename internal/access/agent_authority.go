@@ -3,19 +3,19 @@ package access
 import (
 	"context"
 	"slices"
-	"time"
 
 	"github.com/google/uuid"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/consumerscope"
 )
 
-func addedKeyAgentResources(policy, previous KeyPolicy) KeyPolicy {
+func addedKeyAgentResources(policy, previous keyauthority.KeyPolicy) keyauthority.KeyPolicy {
 	policy.AllowedToolsets = slices.DeleteFunc(slices.Clone(policy.AllowedToolsets), func(id string) bool { return slices.Contains(previous.AllowedToolsets, id) })
 	policy.AllowedAgents = slices.DeleteFunc(slices.Clone(policy.AllowedAgents), func(id string) bool { return slices.Contains(previous.AllowedAgents, id) })
 	return policy
 }
 
-func checkKeyAgentResources(ctx context.Context, q Queryer, policy KeyPolicy, project *string) error {
+func checkKeyAgentResources(ctx context.Context, q Queryer, policy keyauthority.KeyPolicy, project *string) error {
 	for field, ids := range map[string][]string{"allowed_toolsets": policy.AllowedToolsets, "allowed_agents": policy.AllowedAgents} {
 		if len(ids) == 0 {
 			continue
@@ -57,23 +57,4 @@ func validateResourceAllowlist(field string, ids []string) error {
 		seen[raw] = true
 	}
 	return nil
-}
-
-// AllowsResource is deliberately separate from route authorization. A route
-// group, inference scope, or installation-wide key cannot grant project tools.
-// The caller also checks the resource's current publication and revocation.
-func (a Authority) AllowsResource(scope, id, project string, now time.Time) bool {
-	if a.ProjectID == nil || *a.ProjectID != project || a.RevokedAt != nil || a.ExpiresAt != nil && !a.ExpiresAt.After(now) || !slices.Contains(a.Policy.Scopes, scope) {
-		return false
-	}
-	switch scope {
-	case "tools":
-		return slices.Contains(a.Policy.AllowedToolsets, id)
-	case "agents":
-		return slices.Contains(a.Policy.AllowedAgents, id)
-	case "traces_write":
-		return id == ""
-	default:
-		return false
-	}
 }

@@ -9,7 +9,6 @@ import (
 	"strings"
 )
 
-// Surface is the API a public request speaks.
 type Surface struct {
 	// Name selects the error envelope and credential locations: openai,
 	// anthropic, gemini, bedrock, or management.

@@ -100,22 +100,22 @@ func (s *Server) newFact(x *call, a routing.Attempt, slot routing.Slot, ordinal 
 		Baseline:           x.baseline,
 	}
 	fact.Execution = x.sessionDebit.reference()
-	if !x.cardPinned && s.Runtime != nil {
+	if !x.cardPinned && s.deps.Runtime != nil {
 		// A retry can outlive the inputs used to plan the request. Resolve
 		// its consumer's card from current inputs and retain it on the fact.
-		x.routingInputs = s.Runtime.RoutingInputs()
+		x.routingInputs = s.deps.Runtime.RoutingInputs()
 	}
 	fact.cardRev = x.attemptCardRevision(a.ProviderID, fact.StartedAt)
-	provider, known := x.snapshot().Providers[a.ProviderID]
+	provider, known := x.snapshot().FindProvider(a.ProviderID)
 	if len(pinned) != 0 && pinned[0] != nil {
 		provider, known = *pinned[0], true
 	}
 	fact.CommitmentPinned = known
 	if known {
 		timeline := x.snapshot()
-		if s.Runtime != nil {
-			if release := s.Runtime.Release(); release != nil {
-				timeline = release.Snapshot
+		if s.deps.Runtime != nil {
+			if release := s.deps.Runtime.Release(); release != nil {
+				timeline = release.Snapshot()
 			}
 		}
 		fact.Commitment = timeline.CommitmentAt(a.ProviderID, fact.StartedAt)
@@ -139,7 +139,7 @@ func (s *Server) newFact(x *call, a routing.Attempt, slot routing.Slot, ordinal 
 		fact.GuardrailDecisions = append([]guardrails.Evidence(nil), record.guardrailDecisions...)
 	}
 	if x.strict() {
-		provider := x.snapshot().Providers[a.ProviderID]
+		provider := x.snapshot().Provider(a.ProviderID)
 		if x.family == wire.GeminiInteractions || x.family == wire.GeminiLive {
 			fact.Interaction = &usage.InteractionEvidence{Fidelity: routing.FidelityStrict, PlanClass: "native_identity", UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
 			return fact

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"io"
 	"log/slog"
 	"net/http"
@@ -21,7 +22,6 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 type Worker struct {
@@ -42,9 +42,9 @@ func (w *Worker) Run(ctx context.Context) {
 	defer ticker.Stop()
 	for {
 		err := w.Pass(ctx)
-		outcome := usage.OutcomeSuccess
+		outcome := workerhealth.OutcomeSuccess
 		if err != nil {
-			outcome = usage.OutcomeFailure
+			outcome = workerhealth.OutcomeFailure
 			if ctx.Err() == nil && w.Log != nil {
 				w.Log.Warn("retained reconciliation failed", "error", err)
 			}
@@ -82,7 +82,7 @@ func (w *Worker) Pass(ctx context.Context) error {
 					case <-work.Done():
 						return
 					case <-t.C:
-						_ = w.Store.CheckpointRetained(work, usage.OutcomeSuccess, false)
+						_ = w.Store.CheckpointRetained(work, workerhealth.OutcomeSuccess, false)
 						if w.Store.HeartbeatRetained(work, claim) != nil {
 							cancel()
 							return

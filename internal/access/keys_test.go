@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/limits"
 )
@@ -13,11 +14,11 @@ import (
 func TestKeyValidationNormalizesCostLimits(t *testing.T) {
 	keyAmount, routeAmount, userAmount := " 1.25 ", " 2.50 ", " 3.75 "
 	source := "header"
-	input := keyInput{Name: "key", KeyPolicy: KeyPolicy{
+	input := keyInput{Name: "key", KeyPolicy: keyauthority.KeyPolicy{
 		Scopes: []string{"inference"}, AllowedRoutes: []string{}, DailyCostLimit: &keyAmount,
-		RouteLimits:   RouteLimits{"route": {MonthlyCostLimit: &routeAmount}},
+		RouteLimits:   keyauthority.RouteLimits{"route": {MonthlyCostLimit: &routeAmount}},
 		EndUserSource: &source,
-		EndUserPolicy: &EndUserPolicy{Defaults: AdmissionLimits{WeeklyCostLimit: &userAmount}},
+		EndUserPolicy: &keyauthority.EndUserPolicy{Defaults: keyauthority.AdmissionLimits{WeeklyCostLimit: &userAmount}},
 	}}
 	if err := validateAndNormalizeKey(input, false); err != nil {
 		t.Fatal(err)
@@ -41,15 +42,15 @@ func TestKeyRejectsInvalidEndUserLimits(t *testing.T) {
 	digest := strings.Repeat("a", 64)
 	for _, tc := range []struct {
 		name   string
-		policy EndUserPolicy
+		policy keyauthority.EndUserPolicy
 	}{
-		{name: "defaults", policy: EndUserPolicy{Defaults: AdmissionLimits{DailyCostLimit: &invalid}}},
-		{name: "override digest", policy: EndUserPolicy{Overrides: map[string]AdmissionLimits{"invalid": {}}}},
-		{name: "override limit", policy: EndUserPolicy{Overrides: map[string]AdmissionLimits{digest: {WeeklyCostLimit: &invalid}}}},
-		{name: "blocked digest", policy: EndUserPolicy{Blocked: []string{"invalid"}}},
+		{name: "defaults", policy: keyauthority.EndUserPolicy{Defaults: keyauthority.AdmissionLimits{DailyCostLimit: &invalid}}},
+		{name: "override digest", policy: keyauthority.EndUserPolicy{Overrides: map[string]keyauthority.AdmissionLimits{"invalid": {}}}},
+		{name: "override limit", policy: keyauthority.EndUserPolicy{Overrides: map[string]keyauthority.AdmissionLimits{digest: {WeeklyCostLimit: &invalid}}}},
+		{name: "blocked digest", policy: keyauthority.EndUserPolicy{Blocked: []string{"invalid"}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			input := keyInput{Name: "key", KeyPolicy: KeyPolicy{
+			input := keyInput{Name: "key", KeyPolicy: keyauthority.KeyPolicy{
 				Scopes: []string{"inference"}, AllowedRoutes: []string{},
 				EndUserSource: &source, EndUserPolicy: &tc.policy,
 			}}
@@ -62,8 +63,8 @@ func TestKeyRejectsInvalidEndUserLimits(t *testing.T) {
 
 func TestBudgetAndTemplateValidationNormalizeCostLimits(t *testing.T) {
 	budgetAmount, templateAmount := " 4.50 ", " 5.75 "
-	budgets := AttributionBudgets{"team": {"app": {DailyCostLimit: &budgetAmount}}}
-	templates := LimitTemplates{"template": {MonthlyCostLimit: &templateAmount}}
+	budgets := keyauthority.AttributionBudgets{"team": {"app": {DailyCostLimit: &budgetAmount}}}
+	templates := keyauthority.LimitTemplates{"template": {MonthlyCostLimit: &templateAmount}}
 	if err := budgets.ValidateAndNormalize(); err != nil {
 		t.Fatal(err)
 	}
@@ -85,12 +86,12 @@ func TestTaskAuthorityKeepsOwnerIdentityAndBindingLimits(t *testing.T) {
 	project, issuer := "project", "issuer"
 	daily := "7"
 	expires := time.Now().Add(time.Hour)
-	policy := Authority{
+	policy := keyauthority.Authority{
 		Issuer: "binding", ProjectID: &project,
-		Policy: KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{"allowed"}, DailyCostLimit: &daily},
+		Policy: keyauthority.KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{"allowed"}, DailyCostLimit: &daily},
 	}
-	owner := Authority{ID: "owner", LookupID: "owner-lookup", LimitLookupID: "owner-limits", WorkloadIssuerID: &issuer, WorkloadDigest: "workload", WorkloadMapping: "mapping"}
-	capability := &TaskCapability{Digest: "capability", RouteRevisions: []string{"revision"}}
+	owner := keyauthority.Authority{ID: "owner", LookupID: "owner-lookup", LimitLookupID: "owner-limits", WorkloadIssuerID: &issuer, WorkloadDigest: "workload", WorkloadMapping: "mapping"}
+	capability := &keyauthority.TaskCapability{Digest: "capability", RouteRevisions: []string{"revision"}}
 	callback := policy.TaskAuthority(owner, "snapshot", "workload-revision", &expires, "end-user", capability)
 	if !callback.Allows("inference", "allowed", &project, time.Now()) || callback.Allows("inference", "other", &project, time.Now()) {
 		t.Fatal("task authority did not retain the binding's route policy")
@@ -109,11 +110,11 @@ func TestTaskAuthorityKeepsOwnerIdentityAndBindingLimits(t *testing.T) {
 
 func TestKeyDebitRequestCarriesKeyBudgetsAndStableLookup(t *testing.T) {
 	daily, weekly, monthly := "1", "2", "3"
-	authority := Authority{
+	authority := keyauthority.Authority{
 		ID:              "key-one",
 		LookupID:        "lookup-one",
 		BudgetIncreases: map[string]string{"key-one": "grant-evidence", "other": "ignored"},
-		Policy: KeyPolicy{
+		Policy: keyauthority.KeyPolicy{
 			CostBasis:        string(limits.BasisCharge),
 			DailyCostLimit:   &daily,
 			WeeklyCostLimit:  &weekly,
@@ -145,23 +146,23 @@ func TestToolDebitBoundariesCoverEveryCappedBoundary(t *testing.T) {
 	group := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50602"
 	organization := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50605"
 	digest := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	authority := Authority{
+	authority := keyauthority.Authority{
 		ID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50603", LookupID: "lookup-one",
 		InstallationID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50604",
 		OrganizationID: &organization,
 		ProjectID:      &project, BudgetGroupID: &group,
 		BudgetGroupCostBasis:        string(limits.BasisCharge),
 		BudgetGroupMonthlyCostLimit: &groupMonthly,
-		InstallationBudget:          &BudgetPolicy{WeeklyCostLimit: &installationWeekly, CostBasis: "charge"},
-		OrganizationBudget:          &BudgetPolicy{DailyCostLimit: &organizationDaily},
-		ProjectBudget:               &BudgetPolicy{MonthlyCostLimit: &projectMonthly},
+		InstallationBudget:          &keyauthority.BudgetPolicy{WeeklyCostLimit: &installationWeekly, CostBasis: "charge"},
+		OrganizationBudget:          &keyauthority.BudgetPolicy{DailyCostLimit: &organizationDaily},
+		ProjectBudget:               &keyauthority.BudgetPolicy{MonthlyCostLimit: &projectMonthly},
 		Attribution:                 map[string]string{"team": "search"},
-		ProjectAttributionBudgets:   AttributionBudgets{"team": {"search": BudgetPolicy{DailyCostLimit: &attributionDaily, CostBasis: "charge"}}},
+		ProjectAttributionBudgets:   keyauthority.AttributionBudgets{"team": {"search": keyauthority.BudgetPolicy{DailyCostLimit: &attributionDaily, CostBasis: "charge"}}},
 		EndUserDigest:               digest,
-		ProjectEndUserPolicy:        &EndUserPolicy{Defaults: AdmissionLimits{MonthlyCostLimit: &endUserProjectMonthly}},
-		Policy: KeyPolicy{
+		ProjectEndUserPolicy:        &keyauthority.EndUserPolicy{Defaults: keyauthority.AdmissionLimits{MonthlyCostLimit: &endUserProjectMonthly}},
+		Policy: keyauthority.KeyPolicy{
 			DailyCostLimit: &keyDaily,
-			EndUserPolicy:  &EndUserPolicy{Defaults: AdmissionLimits{DailyCostLimit: &endUserKeyDaily}},
+			EndUserPolicy:  &keyauthority.EndUserPolicy{Defaults: keyauthority.AdmissionLimits{DailyCostLimit: &endUserKeyDaily}},
 		},
 	}
 	result := authority.ToolDebitBoundaries(time.Hour)
@@ -215,7 +216,7 @@ func TestToolDebitBoundariesCoverEveryCappedBoundary(t *testing.T) {
 
 func TestToolDebitBoundariesUncappedKeyHasNoCeiling(t *testing.T) {
 	project := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50601"
-	authority := Authority{ID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50603", LookupID: "lookup-one", ProjectID: &project}
+	authority := keyauthority.Authority{ID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50603", LookupID: "lookup-one", ProjectID: &project}
 	result := authority.ToolDebitBoundaries(time.Hour)
 	if !result.Resolved || result.CostBudgeted {
 		t.Fatalf("uncapped authority reported a ceiling: %+v", result)
@@ -224,7 +225,7 @@ func TestToolDebitBoundariesUncappedKeyHasNoCeiling(t *testing.T) {
 		t.Fatalf("uncapped authority gained boundaries: %+v", result.Boundaries)
 	}
 	limited := "5"
-	authority.OrganizationBudget = &BudgetPolicy{DailyCostLimit: &limited}
+	authority.OrganizationBudget = &keyauthority.BudgetPolicy{DailyCostLimit: &limited}
 	if authority.ToolDebitBoundaries(time.Hour).Resolved {
 		t.Fatal("aggregate boundary without a subject resolved")
 	}
@@ -234,10 +235,10 @@ func TestDelegatedToolDebitEnforcesAgentPairAndAttributionBudgets(t *testing.T) 
 	project, pair := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50601", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	agentDaily, pairWeekly, teamMonthly := "3", "4", "5"
 	agentID, keyID := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50602", "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50603"
-	authority := Authority{
+	authority := keyauthority.Authority{
 		ID: keyID, ProjectID: &project, Attribution: map[string]string{"team": "core"}, DelegationPairDigest: pair,
-		DelegationAgentLimits: &DelegationAgentLimits{ID: agentID, LookupID: "agent", Limits: AdmissionLimits{DailyCostLimit: &agentDaily}},
-		ProjectAttributionBudgets: AttributionBudgets{
+		DelegationAgentLimits: &keyauthority.DelegationAgentLimits{ID: agentID, LookupID: "agent", Limits: keyauthority.AdmissionLimits{DailyCostLimit: &agentDaily}},
+		ProjectAttributionBudgets: keyauthority.AttributionBudgets{
 			attribution.DelegationPairKey: {pair: {WeeklyCostLimit: &pairWeekly}},
 			"team":                        {"core": {MonthlyCostLimit: &teamMonthly}},
 		},
@@ -271,7 +272,7 @@ func TestDelegatedToolDebitEnforcesAgentPairAndAttributionBudgets(t *testing.T) 
 			t.Fatalf("wrong limits for owner %s: %+v", check.owner, request)
 		}
 	}
-	uncapped := Authority{ID: keyID, ProjectID: &project, DelegationPairDigest: pair, DelegationAgentLimits: &DelegationAgentLimits{ID: agentID}}
+	uncapped := keyauthority.Authority{ID: keyID, ProjectID: &project, DelegationPairDigest: pair, DelegationAgentLimits: &keyauthority.DelegationAgentLimits{ID: agentID}}
 	if uncapped.ToolDebitBoundaries(time.Minute).CostBudgeted {
 		t.Fatal("tracking an uncapped delegated pair must not create a cost limit")
 	}

@@ -4,10 +4,8 @@
   import { errorMessage } from '$lib/management/http';
   import { formatDate } from '$lib/format';
   import { profileKeys } from '$lib/features/access/profile/profileKeys';
-  import {
-    beginIdentityReauthentication,
-    reauthenticateWithPassword
-  } from '$lib/features/access/profile/api';
+  import { beginIdentityReauthentication } from '$lib/features/access/profile/api';
+  import { reauthenticateWithPassword } from '$lib/features/access/profile/reauthentication';
   import { getMFA, enrollMFA, manageMFA, removeMFA, recoveryMFA } from './api';
   import { confirmMFA } from './prompt.svelte';
   let {
@@ -42,7 +40,7 @@
   });
   async function authorize() {
     if (status.data?.factors.length) {
-      await confirmMFA({ challenge: await manageMFA() });
+      await confirmMFA({ kind: 'challenge', challenge: await manageMFA() });
       return true;
     }
     if (oidcConfirmed) {
@@ -93,7 +91,10 @@
   }
   async function enroll() {
     await action(async () => {
-      await confirmMFA({ enrollment: await enrollMFA(kind, name) });
+      await confirmMFA({
+        kind: 'enrollment',
+        enrollment: await enrollMFA(kind, name)
+      });
       notice = 'Authenticator enrolled. Other sessions have ended.';
     });
   }

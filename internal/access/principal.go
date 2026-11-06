@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -41,7 +41,7 @@ type Principal struct {
 	Kind string
 	// KeyAuthority is set only by an inference-key authentication alternative.
 	// It grants consumer catalog reads, never management mutation authority.
-	KeyAuthority     *Authority
+	KeyAuthority     *keyauthority.Authority
 	Creator          string
 	AllProjects      bool
 	Projects         map[string]string

@@ -72,7 +72,7 @@ func TestContainerTiersAgreeAcrossCatalogPricingAndUsage(t *testing.T) {
 		}
 		fixture.Vendors[0].Models[0].Prices[0].ContainerPerSession = map[string]catalog.Decimal{tc.tier: "1"}
 		catalogErr, pricingErr := catalogPriceValidation(t, fixture)
-		usageValid := ConsistentUsage(&AttemptUsage{ContainerSessions: map[string]int64{tc.tier: 1}})
+		usageValid := ConsistentUsage(&AttemptUsage{UsageQuantities: UsageQuantities{ContainerSessions: map[string]int64{tc.tier: 1}}})
 		if (catalogErr == nil) != tc.valid || (pricingErr == nil) != tc.valid || usageValid != tc.valid {
 			t.Errorf("tier %q, catalog error %v, pricing error %v, usage valid %v, want valid %v", tc.tier, catalogErr, pricingErr, usageValid, tc.valid)
 		}
@@ -101,7 +101,7 @@ func TestContainerTiersAgreeAcrossCatalogPricingAndUsage(t *testing.T) {
 		})
 		fixture.Vendors[0].Models[0].Prices[0].ContainerPerSession = rates
 		catalogErr, pricingErr := catalogPriceValidation(t, fixture)
-		usageValid := ConsistentUsage(&AttemptUsage{ContainerSessions: sessions})
+		usageValid := ConsistentUsage(&AttemptUsage{UsageQuantities: UsageQuantities{ContainerSessions: sessions}})
 		if (catalogErr == nil) != tc.valid || (pricingErr == nil) != tc.valid || usageValid != tc.valid {
 			t.Errorf("%d tiers, catalog error %v, pricing error %v, usage valid %v, want valid %v", tc.count, catalogErr, pricingErr, usageValid, tc.valid)
 		}
@@ -123,7 +123,7 @@ func TestMeteredToolNamesAgreeAcrossCatalogPricingAndUsage(t *testing.T) {
 		}
 		fixture.Vendors[0].Models[0].Prices[0].ToolCalls = map[string]catalog.Decimal{tc.name: "1"}
 		catalogErr, pricingErr := catalogPriceValidation(t, fixture)
-		usageValid := ConsistentUsage(&AttemptUsage{ToolCalls: map[string]int64{tc.name: 1}})
+		usageValid := ConsistentUsage(&AttemptUsage{UsageQuantities: UsageQuantities{ToolCalls: map[string]int64{tc.name: 1}}})
 		if (catalogErr == nil) != tc.valid || (pricingErr == nil) != tc.valid || usageValid != tc.valid {
 			t.Errorf("tool %q, catalog error %v, pricing error %v, usage valid %t", tc.name, catalogErr, pricingErr, usageValid)
 		}

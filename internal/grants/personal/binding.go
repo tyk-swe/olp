@@ -7,7 +7,7 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -38,7 +38,7 @@ type Binding struct {
 	Identity          Identity         `json:"identity"`
 }
 
-func BindAgent(authority access.Authority, publicationID string, agent agentcontract.Definition) (Binding, error) {
+func BindAgent(authority keyauthority.Authority, publicationID string, agent agentcontract.Definition) (Binding, error) {
 	if authority.ProjectID == nil || publicationID == "" || agent.OAuth == nil || !agent.OAuth.Valid() || (agent.OAuth.EntraOBO == nil && agent.CredentialID != nil) || (agent.OAuth.EntraOBO != nil && agent.CredentialID == nil) {
 		return Binding{}, ErrRequired
 	}
@@ -74,7 +74,7 @@ func (b Binding) refreshPurpose() secrets.SealPurpose {
 	return secrets.MCPGrantRefresh
 }
 
-func identityOf(authority access.Authority) (Identity, error) {
+func identityOf(authority keyauthority.Authority) (Identity, error) {
 	if authority.WorkloadIssuerID != nil && authority.EndUserDigest != "" {
 		return Identity{Kind: EndUserIdentity, ID: authority.EndUserDigest, WorkloadIssuerID: *authority.WorkloadIssuerID}, nil
 	}
@@ -84,7 +84,7 @@ func identityOf(authority access.Authority) (Identity, error) {
 	return Identity{Kind: KeyIdentity, ID: authority.ID}, nil
 }
 
-func Bind(authority access.Authority, tool routing.MCPToolsetTool) (Binding, error) {
+func Bind(authority keyauthority.Authority, tool routing.MCPToolsetTool) (Binding, error) {
 	if authority.ProjectID == nil || tool.OAuth == nil || !tool.OAuth.Valid() {
 		return Binding{}, ErrRequired
 	}

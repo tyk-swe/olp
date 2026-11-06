@@ -34,15 +34,11 @@ func (s *Server) mfaStatus(r *http.Request, p Principal) (Reply, error) {
 }
 
 func (s *Server) mfaManageChallenge(r *http.Request, _ Principal) (Reply, error) {
-	tx, err := s.Begin(r)
+	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Reauthorize(r, tx)
-	if err != nil {
-		return Reply{}, err
-	}
 	enabled, err := mfaConfigured(r.Context(), tx, p.ID)
 	if err != nil {
 		return Reply{}, err
@@ -54,7 +50,7 @@ func (s *Server) mfaManageChallenge(r *http.Request, _ Principal) (Reply, error)
 	if err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, reply)
+	return reply, tx.Commit(r.Context())
 }
 
 type mfaEnrollInput struct {
@@ -175,7 +171,7 @@ func (s *Server) beginMFAEnrollment(r *http.Request, bootstrap bool) (Reply, err
 	}
 	response["challenge"] = token
 	response["expires_at"] = until
-	return Commit(r, tx, OK(response))
+	return OK(response), tx.Commit(r.Context())
 }
 
 func (s *Server) mfaRemove(r *http.Request, _ Principal) (Reply, error) {
@@ -183,15 +179,11 @@ func (s *Server) mfaRemove(r *http.Request, _ Principal) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	tx, err := s.Begin(r)
+	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Reauthorize(r, tx)
-	if err != nil {
-		return Reply{}, err
-	}
 	if err = s.checkMFARevision(r, tx, p); err != nil {
 		return Reply{}, err
 	}
@@ -236,7 +228,7 @@ func (s *Server) mfaRemove(r *http.Request, _ Principal) (Reply, error) {
 	if err = Audit(r.Context(), tx, r, p.Actor(), "mfa.remove", "mfa_factor", id, "success"); err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, Reply{Status: 204})
+	return Reply{Status: 204}, tx.Commit(r.Context())
 }
 
 func (s *Server) checkMFARevision(r *http.Request, tx pgx.Tx, p Principal) error {
@@ -248,15 +240,11 @@ func (s *Server) checkMFARevision(r *http.Request, tx pgx.Tx, p Principal) error
 }
 
 func (s *Server) mfaRecovery(r *http.Request, _ Principal) (Reply, error) {
-	tx, err := s.Begin(r)
+	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Reauthorize(r, tx)
-	if err != nil {
-		return Reply{}, err
-	}
 	if err = s.checkMFARevision(r, tx, p); err != nil {
 		return Reply{}, err
 	}
@@ -280,5 +268,5 @@ func (s *Server) mfaRecovery(r *http.Request, _ Principal) (Reply, error) {
 	if err = Audit(r.Context(), tx, r, p.Actor(), "mfa.recovery.rotate", "user", p.ID, "success"); err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, OK(map[string]any{"recovery_codes": codes}))
+	return OK(map[string]any{"recovery_codes": codes}), tx.Commit(r.Context())
 }

@@ -563,15 +563,11 @@ func (s *Server) createTemplate(r *http.Request, _ access.Principal) (access.Rep
 	if err := access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := a.Begin(r)
+	tx, p, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	claim, replayed, err := a.Replay(r, tx, p, input)
 	if err != nil {
 		return access.Reply{}, err
@@ -580,7 +576,7 @@ func (s *Server) createTemplate(r *http.Request, _ access.Principal) (access.Rep
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	if err = ValidateTemplateInput(&input); err != nil {
 		return access.Reply{}, err
@@ -604,7 +600,7 @@ func (s *Server) createTemplate(r *http.Request, _ access.Principal) (access.Rep
 	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 
 // WriteTemplate inserts or replaces a validated template; a duplicate name is
@@ -641,15 +637,11 @@ func (s *Server) replaceTemplate(r *http.Request, _ access.Principal) (access.Re
 	if err = access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := a.Begin(r)
+	tx, p, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	current, err := loadTemplate(r.Context(), tx, id, true)
 	if err != nil {
 		return access.Reply{}, err
@@ -680,7 +672,7 @@ func (s *Server) replaceTemplate(r *http.Request, _ access.Principal) (access.Re
 	if err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 
 func (s *Server) deleteTemplate(r *http.Request, _ access.Principal) (access.Reply, error) {
@@ -689,15 +681,11 @@ func (s *Server) deleteTemplate(r *http.Request, _ access.Principal) (access.Rep
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := a.Begin(r)
+	tx, p, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	current, err := loadTemplate(r.Context(), tx, id, true)
 	if err != nil {
 		return access.Reply{}, err
@@ -714,7 +702,7 @@ func (s *Server) deleteTemplate(r *http.Request, _ access.Principal) (access.Rep
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route_template.delete", "route_template", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, access.Reply{Status: 204})
+	return access.Reply{Status: 204}, tx.Commit(r.Context())
 }
 
 // applyTemplate applies one template to every active provider, catching up
@@ -725,15 +713,11 @@ func (s *Server) applyTemplate(r *http.Request, _ access.Principal) (access.Repl
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := a.Begin(r)
+	tx, p, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	t, err := loadTemplate(r.Context(), tx, id, true)
 	if err != nil {
 		return access.Reply{}, err
@@ -746,7 +730,7 @@ func (s *Server) applyTemplate(r *http.Request, _ access.Principal) (access.Repl
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	results, promoted, err := s.instantiate(r.Context(), tx, []*template{t}, "", p.UserID())
 	if err != nil {
@@ -767,5 +751,5 @@ func (s *Server) applyTemplate(r *http.Request, _ access.Principal) (access.Repl
 	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }

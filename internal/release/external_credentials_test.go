@@ -24,7 +24,7 @@ func TestExternalCredentialFailuresBecomePlanIneligibilityWithoutStaleFallback(t
 	reference := externalReference("1")
 	m := &Manager{authority: authorityState{loaded: true, readAt: time.Now(), ineligible: map[string]routing.Eligibility{}}, release: &Release{references: map[string]secretstore.Reference{"credential": reference}}}
 	var fail atomic.Bool
-	m.ExternalSecrets = externalResolveFunc(func(context.Context, secretstore.Reference) ([]byte, error) {
+	m.externalSecrets = externalResolveFunc(func(context.Context, secretstore.Reference) ([]byte, error) {
 		if fail.Load() {
 			return nil, errors.New("private-store-failure")
 		}

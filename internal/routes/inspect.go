@@ -218,37 +218,38 @@ func (b *inspectionBudget) reserve(size int) error {
 	return nil
 }
 
-func inspectionAccept(route routing.Route, parsed *wire.Request, context interaction.Context, demand *simulatedDemand, budget *inspectionBudget, workflow bool) (func(routing.Provider, routing.Target) error, func(routing.Provider, routing.Target) (routing.Names, *routing.TokenDemand), map[string]*interactionInspection, map[string]*wire.Request) {
+func inspectionAccept(route routing.Route, parsed *wire.Request, context interaction.Context, demand *simulatedDemand, budget *inspectionBudget, workflow bool) (routing.PrepareCandidate, map[string]*interactionInspection, map[string]*wire.Request) {
 	inspections := map[string]*interactionInspection{}
 	if parsed == nil {
-		return nil, nil, inspections, nil
+		return nil, inspections, nil
 	}
 	fidelity := route.Fidelity.Mode
 	effectiveRequests := map[string]*wire.Request{}
-	var effective func(routing.Provider, routing.Target) (routing.Names, *routing.TokenDemand)
-	if route.Fidelity.Strict() || parsed.Family == wire.Completions {
-		effective = func(_ routing.Provider, target routing.Target) (routing.Names, *routing.TokenDemand) {
-			request := effectiveRequests[target.ID]
-			delete(effectiveRequests, target.ID)
-			if request == nil {
-				return nil, demand.source(target)
-			}
-			output := demand.outputBound(request)
-			var resolved *routing.TokenDemand
-			if prepared := demand.prepared(target, request); prepared != nil || output != nil {
-				resolved = &routing.TokenDemand{MaxOutputTokens: output}
-				if prepared != nil {
-					resolved.EstimatedInputTokens = prepared.EstimatedInputTokens
-					resolved.CostInputTokens = prepared.CostInputTokens
-					if output == nil {
-						resolved.MaxOutputTokens = prepared.MaxOutputTokens
-					}
+	effective := func(request *wire.Request, target routing.Target) *routing.CandidatePreparation {
+		if !route.Fidelity.Strict() && parsed.Family != wire.Completions {
+			return nil
+		}
+		if request == nil {
+			return &routing.CandidatePreparation{Demand: demand.source(target)}
+		}
+		output := demand.outputBound(request)
+		var resolved *routing.TokenDemand
+		if prepared := demand.prepared(target, request); prepared != nil || output != nil {
+			resolved = &routing.TokenDemand{MaxOutputTokens: output}
+			if prepared != nil {
+				resolved.EstimatedInputTokens = prepared.EstimatedInputTokens
+				resolved.CostInputTokens = prepared.CostInputTokens
+				if output == nil {
+					resolved.MaxOutputTokens = prepared.MaxOutputTokens
 				}
 			}
-			return sync.OnceValue(func() []string { return protocols.ParameterNames(request) }), resolved
 		}
+		return &routing.CandidatePreparation{Parameters: sync.OnceValue(func() []string { return protocols.ParameterNames(request) }), Demand: resolved}
 	}
-	accept := func(provider routing.Provider, target routing.Target) error {
+	prepare := func(provider routing.Provider, target routing.Target) (*routing.CandidatePreparation, error) {
+		if !workflow {
+			defer delete(effectiveRequests, target.ID)
+		}
 		result := &interactionInspection{Status: "incompatible", Fidelity: fidelity, Evidence: []string{}}
 		inspections[target.ID] = result
 		config := provider.Connector()
@@ -256,19 +257,19 @@ func inspectionAccept(route routing.Route, parsed *wire.Request, context interac
 			// Transformed previews show the translated invocation and never
 			// acquire a strict qualification class from a successful encode.
 			if len(context.Headers) > 0 || len(context.Query) > 0 || context.ContinuationVersion != "" {
-				return &inspectionDiagnostic{"target_capability", "/", "semantic_context", "Inspect caller semantic context on an explicit strict route."}
+				return nil, &inspectionDiagnostic{"target_capability", "/", "semantic_context", "Inspect caller semantic context on an explicit strict route."}
 			}
 			invocation, err := providerinvoke.Prepare(parsed, config, target.ProviderModel, provider.ParameterDefaults)
 			if err == nil && route.PromptCache != nil {
 				invocation, err = providerinvoke.ApplyPromptCache(invocation, config, route.PromptCache, "olp-preview-key")
 			}
 			if err != nil {
-				return err
+				return nil, err
 			}
 			if parsed.Family == wire.Completions || workflow {
 				request, err := wire.NewRequest(invocation.Wire, parsed.Route, parsed.Stream, invocation.Prepared.Document())
 				if err != nil {
-					return err
+					return nil, err
 				}
 				effectiveRequests[target.ID] = request
 			}
@@ -280,17 +281,17 @@ func inspectionAccept(route routing.Route, parsed *wire.Request, context interac
 			result.Representation = "oif"
 			summary := inspectRequest(invocation.Prepared.Document(), invocation.Prepared.Provenance())
 			result.EffectiveRequest = &summary
-			return nil
+			return effective(effectiveRequests[target.ID], target), nil
 		}
 		template, err := interaction.Compile(interaction.Config{Provider: config, ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Policy: route.ContentPolicy})
 		if err != nil {
-			return safeInspectionError(err)
+			return nil, safeInspectionError(err)
 		}
 		binding := context
 		binding.RetainedResponses = context.DurableContinuation && config.SupportsRetainedResponses()
 		plan, err := template.Bind(parsed, binding)
 		if err != nil {
-			return safeInspectionError(err)
+			return nil, safeInspectionError(err)
 		}
 		receipt, obligations := plan.Receipt(), plan.Obligations()
 		result.Class, result.Operation = receipt.Class, receipt.Operation
@@ -338,13 +339,13 @@ func inspectionAccept(route routing.Route, parsed *wire.Request, context interac
 			if diagnostic, ok := safe.(*inspectionDiagnostic); ok && diagnostic.code == "content_policy_blocked" {
 				result.Status = "blocked"
 			}
-			return safe
+			return nil, safe
 		}
 		result.Status = "admitted"
 		effectiveRequests[target.ID] = effectiveRequest
-		return nil
+		return effective(effectiveRequest, target), nil
 	}
-	return accept, effective, inspections, effectiveRequests
+	return prepare, inspections, effectiveRequests
 }
 
 func inspectedDecisions(decisions []routing.Decision, route routing.Route, inspected bool, details map[string]*interactionInspection, estimates map[string]estimate.Estimate, capability *routing.WorkflowCapability) []inspectedDecision {

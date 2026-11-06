@@ -341,7 +341,7 @@ func managedBatchEndpoint(adapter, endpoint string) (string, wire.Format, bool) 
 }
 
 func (s *Server) batchLineDigest(customID string) ([]byte, bool) {
-	digester, ok := s.Runtime.(interface {
+	digester, ok := s.deps.Runtime.(interface {
 		Digest(secrets.DigestPurpose, string) []byte
 	})
 	if !ok {

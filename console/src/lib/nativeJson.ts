@@ -325,40 +325,35 @@ class NativeConfiguration {
   }
 }
 
-/** Provider configuration and operation results are native documents.
- * Pagination, status and other generated management scalars retain ordinary
- * generated-contract types. */
-export function parseManagementJSON(source: string): unknown {
-  const parsed = parseNativeJSON(source);
-  const normalize = (value: NativeValue, native = false): unknown => {
-    if (value instanceof NativeNumber)
-      return native ? value : Number(value.source);
+export function parseManagementJSON(
+  source: string,
+  nativePaths: readonly NativePath[] = []
+): unknown {
+  const normalize = (
+    value: NativeValue,
+    path: readonly (string | number)[]
+  ): unknown => {
+    if (
+      nativePaths.some(
+        (nativePath) =>
+          nativePath.length === path.length &&
+          nativePath.every(
+            (part, index) =>
+              part === path[index] ||
+              (part === '*' && typeof path[index] === 'number')
+          )
+      )
+    )
+      return nativeObject(value)
+        ? new NativeConfiguration(value)
+        : freezeNative(value);
+    if (value instanceof NativeNumber) return Number(value.source);
     if (Array.isArray(value))
-      return value.map((item) => normalize(item, native));
+      return value.map((item, index) => normalize(item, [...path, index]));
     if (!nativeObject(value)) return value;
-    const playgroundResult =
-      Object.hasOwn(value, 'response') &&
-      Object.hasOwn(value, 'output_text') &&
-      Object.hasOwn(value, 'tool_calls') &&
-      Object.hasOwn(value, 'routing') &&
-      Object.hasOwn(value, 'latency_ms');
-    const entries = nativeEntries(value).map(([key, child]) => {
-      const configuration =
-        key === 'configuration' &&
-        nativeObject(child) &&
-        Object.hasOwn(child, 'kind') &&
-        Object.hasOwn(child, 'auth_mode');
-      const decoded = normalize(
-        child,
-        native || configuration || (playgroundResult && key === 'response')
-      );
-      return [
-        key,
-        configuration
-          ? new NativeConfiguration(decoded as NativeObject)
-          : decoded
-      ] as const;
-    });
+    const entries = nativeEntries(value).map(
+      ([key, child]) => [key, normalize(child, [...path, key])] as const
+    );
     const result = Object.fromEntries(entries);
     rememberOrder(
       result,
@@ -366,7 +361,7 @@ export function parseManagementJSON(source: string): unknown {
     );
     return result;
   };
-  return normalize(parsed);
+  return normalize(parseNativeJSON(source), []);
 }
 
 /** An unfinished field edit is part of the one draft tree, never a second

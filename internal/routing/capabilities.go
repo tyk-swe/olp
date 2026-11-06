@@ -34,14 +34,14 @@ type RouteCapabilities struct {
 	Unknown             []string          `json:"unknown"`
 }
 
-func EffectiveCapabilities(snapshot *Snapshot, route Route) RouteCapabilities {
+func EffectiveCapabilities(snapshot selectionSource, route Route) RouteCapabilities {
 	operations := slices.Clone(route.Operations)
 	slices.Sort(operations)
 	capabilities := RouteCapabilities{Operations: operations, OperationSupport: map[string]string{}}
 	var enabled []map[string]bool
 	var considered []ModelMetadata
 	for _, target := range route.Targets {
-		provider, ok := snapshot.Providers[target.ProviderID]
+		provider, ok := snapshot.lookupProvider(target.ProviderID)
 		if !ok || !provider.Enabled {
 			continue
 		}

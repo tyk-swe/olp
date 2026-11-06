@@ -1,6 +1,7 @@
+import { overviewKeys } from '$lib/features/overview/overviewKeys';
 import { snapshotNativeJSON, stringifyNativeJSON } from '$lib/nativeJson';
 import { networkCredentialPath } from './configurationDraft.svelte';
-import { overviewKeys } from '$lib/features/overview/overviewKeys';
+import { refreshProviderChange } from './providerChanges';
 import { providerKeys } from '$lib/features/providers/providerKeys';
 import { createQuery, skipToken, useQueryClient } from '@tanstack/svelte-query';
 import { onDestroy } from 'svelte';
@@ -60,10 +61,6 @@ import {
   usePrincipalLifetime
 } from '$lib/editing/mutationIntent.svelte';
 
-/** Reports whether the credential version with the id is a live grant
- * enrolled through the plugin build with the digest, which a provider pinning
- * that build authenticates with: its grant hasn't lapsed and the version isn't
- * revoked. */
 function isLiveGrant(
   credentials: ProviderCredential[] | undefined,
   id: string | null | undefined,
@@ -78,22 +75,26 @@ function isLiveGrant(
   );
 }
 
-type ConnectionProgress = {
-  input: Parameters<typeof createProvider>[0];
-  existing?: Pick<Provider, 'id' | 'etag'>;
-  configured?: Pick<Provider, 'id' | 'etag'>;
-  id?: string;
-  saved: boolean;
-  credentialRefused?: boolean;
-  writeAmbiguous?: boolean;
-  credentialAmbiguous?: boolean;
-};
+type ConnectionInput = Parameters<typeof createProvider>[0];
+type ConnectionProgress = { input: ConnectionInput } & (
+  | { phase: 'create'; uncertain: boolean }
+  | {
+      phase: 'update';
+      provider: Pick<Provider, 'id' | 'etag'>;
+      uncertain: boolean;
+    }
+  | {
+      phase: 'credential';
+      provider: Pick<Provider, 'id' | 'etag'>;
+      status: 'ready' | 'refused' | 'uncertain';
+    }
+  | { phase: 'saved'; id: string }
+);
 
-type ActivationProgress = {
-  input: Pick<Provider, 'id' | 'etag'>;
-  generation?: number;
-  ambiguous?: boolean;
-};
+type ActivationProgress = { input: Pick<Provider, 'id' | 'etag'> } & (
+  | { phase: 'pending'; uncertain: boolean }
+  | { phase: 'committed'; generation: number }
+);
 
 export class ProviderWizardState {
   private connectionProgress?: ConnectionProgress;
@@ -117,11 +118,10 @@ export class ProviderWizardState {
   wizardModelPagination = $state(emptyCursorHistory());
   wizardModels;
   capabilityOptions;
-  /** The draft provider's credential versions, while its profile takes a
-   * grant. */
+
   draftCredentials;
   probe = $state<ProviderProbe | null>(null);
-  /** The grant enrollment the operator is signing in through, if any. */
+
   private grantPrincipal = this.access.user?.id;
   grant = new GrantEnrollmentState({
     allowed: () =>
@@ -143,7 +143,7 @@ export class ProviderWizardState {
   get grantEnrollment(): GrantEnrollment | null {
     return this.grant.enrollment;
   }
-  /** What the operator pastes back from the upstream's sign-in. */
+
   get grantInput() {
     return this.grant.input;
   }
@@ -186,9 +186,7 @@ export class ProviderWizardState {
       requiresGrant(this.selectedSpec, this.draft.authMode)
     )
   );
-  /** Set while a live grant, enrolled through the plugin build the
-   * Connection stage pins, backs the draft, so saving tests the connection
-   * rather than signing in upstream. */
+
   grantEnrolled = $derived.by(() =>
     isLiveGrant(
       this.draftCredentials.data,
@@ -205,13 +203,6 @@ export class ProviderWizardState {
     );
   }
   private retireProgress() {
-    if (this.connectionProgress) {
-      this.connectionProgress.input = snapshotNativeJSON({
-        ...this.connectionProgress.input,
-        credential: undefined,
-        credential_reference: undefined
-      });
-    }
     this.connectionProgress = undefined;
     this.activationProgress = undefined;
     this.createIntent.reset();
@@ -250,11 +241,12 @@ export class ProviderWizardState {
     } catch (error) {
       if (!isCurrent()) return false;
       const progress = this.connectionProgress;
-      if (progress && !progress.id && !progress.configured) {
-        if (this.refused(error) && !progress.writeAmbiguous) {
+      if (progress?.phase === 'create' || progress?.phase === 'update') {
+        if (this.refused(error) && !progress.uncertain) {
           this.connectionProgress = undefined;
           this.createIntent.reset();
-        } else if (!this.refused(error)) progress.writeAmbiguous = true;
+        } else if (!this.refused(error))
+          this.connectionProgress = { ...progress, uncertain: true };
       }
       if (this.wizardProvider && isEtagMismatch(error))
         this.wizardConflict = true;
@@ -312,8 +304,7 @@ export class ProviderWizardState {
     draft.credential = '';
     this.draft = draft;
   };
-  /** Return to a blank step 1 without leaving the route; the draft effect
-   * recreates the connection form from the first provider kind. */
+
   startAnother = () => {
     this.ownerEpoch += 1;
     this.retireProgress();
@@ -342,16 +333,13 @@ export class ProviderWizardState {
       return;
     const current = this.draft;
     const spec = this.selectedSpec;
-    // The connector kind is locked once the draft exists, so stepping back
-    // always edits that provider rather than orphaning it behind a second one.
+
     const existing = this.wizardProvider;
     const issue = validateProviderDraft(current, spec, {
-      // The first pass stored a write-only credential; the field is cleared
-      // afterwards and must not be demanded again on a re-save.
       credentialAlreadyStored: Boolean(
-        existing || this.connectionProgress?.saved
+        existing || this.connectionProgress?.phase === 'saved'
       ),
-      // The connection form loads the profile catalogue.
+
       profiles: this.queryClient.getQueryData<ProviderProfile[]>(
         providerKeys.profiles()
       ),
@@ -365,119 +353,67 @@ export class ProviderWizardState {
       return;
     }
     const input = buildCreateProviderInput(current, spec);
-    let progress = this.connectionProgress;
-    if (
-      progress &&
-      stringifyNativeJSON(progress.input) !== stringifyNativeJSON(input)
-    ) {
-      if (
-        progress.credentialRefused &&
+    const previous = this.connectionProgress;
+    const changed =
+      previous &&
+      stringifyNativeJSON(previous.input) !== stringifyNativeJSON(input);
+    const credentialCorrection =
+      previous?.phase === 'credential' &&
+      previous.status === 'refused' &&
+      stringifyNativeJSON({
+        ...previous.input,
+        credential: undefined,
+        credential_reference: undefined
+      }) ===
         stringifyNativeJSON({
-          ...progress.input,
+          ...input,
           credential: undefined,
           credential_reference: undefined
-        }) ===
-          stringifyNativeJSON({
-            ...input,
-            credential: undefined,
-            credential_reference: undefined
-          })
-      ) {
-        progress.input = snapshotNativeJSON(input);
-        progress.credentialRefused = false;
-      } else {
-        this.errorMessage = progress.saved
+        });
+    if (changed && !credentialCorrection) {
+      this.errorMessage =
+        previous.phase === 'saved'
           ? 'Connection saved. Retry the original fields to refresh and test it before editing, or leave this wizard.'
           : 'The previous submission may already have saved. Retry its original fields before editing, or leave this wizard.';
-        return;
-      }
+      return;
     }
-    if (!progress) {
-      progress = {
-        input: snapshotNativeJSON(input),
-        existing: existing
-          ? { id: existing.id, etag: existing.etag }
-          : undefined,
-        saved: false
-      };
-      this.connectionProgress = progress;
+    const progress: ConnectionProgress = credentialCorrection
+      ? { ...previous, input: snapshotNativeJSON(input), status: 'ready' }
+      : (previous ??
+        (existing
+          ? {
+              phase: 'update',
+              input: snapshotNativeJSON(input),
+              provider: { id: existing.id, etag: existing.etag },
+              uncertain: false
+            }
+          : {
+              phase: 'create',
+              input: snapshotNativeJSON(input),
+              uncertain: false
+            }));
+    this.connectionProgress = progress;
+    if (!previous) {
       this.activationProgress = undefined;
       this.activateProviderIntent.reset();
     }
-    const submission = progress;
     await this.run('create', async (isCurrent) => {
-      if (!submission.id) {
-        if (submission.existing) {
-          if (!submission.configured) {
-            const updated = await updateProvider(
-              submission.existing.id,
-              submission.existing.etag,
-              {
-                name: submission.input.name,
-                configuration: submission.input.configuration
-              }
-            );
-            if (!isCurrent()) return;
-            submission.configured = { id: updated.id, etag: updated.etag };
-            this.notice = 'Connection configuration saved.';
-          }
-          const credential =
-            submission.input.credential_reference ??
-            submission.input.credential;
-          if (credential) {
-            submission.credentialRefused = false;
-            try {
-              await this.rotateProviderCredentialIntent.submit(
-                [submission.configured, credential] as const,
-                (input, requestId) =>
-                  rotateProviderCredential(...input, requestId)
-              );
-            } catch (error) {
-              if (isCurrent()) {
-                if (this.refused(error) && !submission.credentialAmbiguous) {
-                  submission.credentialRefused = true;
-                  this.rotateProviderCredentialIntent.reset();
-                } else if (!this.refused(error))
-                  submission.credentialAmbiguous = true;
-              }
-              throw error;
-            }
-            if (!isCurrent()) return;
-          }
-          submission.id = submission.configured.id;
-        } else {
-          const request = this.createIntent.prepare(submission.input);
-          const id = await createProvider(request.input, request.requestId);
-          if (!isCurrent()) return;
-          submission.id = id;
-          this.createIntent.reset();
-        }
-        submission.saved = true;
-        submission.input = snapshotNativeJSON({
-          ...submission.input,
-          credential:
-            requiresCredential(spec, current.authMode) &&
-            !current.useExternalCredential
-              ? ''
-              : undefined
-        });
-        current.credential = '';
-      }
+      const submission = await this.saveConnection(progress, isCurrent);
+      if (!submission || !isCurrent()) return;
+      current.credential = '';
       this.providerId = submission.id;
       this.notice =
         'Provider saved. Connection testing remains a separate step.';
       const snapshot = await this.refetchWizardModels();
       if (!isCurrent()) return;
-      await Promise.all([
-        this.queryClient.invalidateQueries(
-          { queryKey: providerKeys.summaries },
-          { throwOnError: true }
-        ),
-        this.queryClient.invalidateQueries(
-          { queryKey: providerKeys.modelCatalog },
-          { throwOnError: true }
-        )
-      ]);
+      const refreshed = await refreshProviderChange(this.queryClient, {
+        kind: 'connection'
+      });
+      if (!isCurrent()) return;
+      if (refreshed.kind === 'refresh-failed') {
+        this.errorMessage = `The provider change succeeded, but refreshing failed. ${refreshed.message}`;
+        return;
+      }
       if (!isCurrent()) return;
       if (this.grantRequired) {
         const enrolled = await this.holdsLiveGrant(snapshot.provider);
@@ -493,8 +429,78 @@ export class ProviderWizardState {
       if (isCurrent()) this.connectionProgress = undefined;
     });
   };
-  /** Reports whether a live grant, enrolled through the plugin build the
-   * provider pins, backs its draft now. */
+  private saveConnection = async (
+    progress: ConnectionProgress,
+    isCurrent: () => boolean
+  ): Promise<Extract<ConnectionProgress, { phase: 'saved' }> | undefined> => {
+    if (progress.phase === 'saved') return progress;
+    if (progress.phase === 'update') {
+      const updated = await updateProvider(
+        progress.provider.id,
+        progress.provider.etag,
+        {
+          name: progress.input.name,
+          configuration: progress.input.configuration
+        }
+      );
+      if (!isCurrent()) return;
+      const next: ConnectionProgress = {
+        phase: 'credential',
+        input: progress.input,
+        provider: { id: updated.id, etag: updated.etag },
+        status: 'ready'
+      };
+      this.connectionProgress = next;
+      this.notice = 'Connection configuration saved.';
+      return this.saveConnection(next, isCurrent);
+    }
+    if (progress.phase === 'credential') {
+      const credential =
+        progress.input.credential_reference ?? progress.input.credential;
+      if (credential) {
+        try {
+          await this.rotateProviderCredentialIntent.submit(
+            [progress.provider, credential] as const,
+            (input, requestId) => rotateProviderCredential(...input, requestId)
+          );
+        } catch (error) {
+          if (isCurrent()) {
+            const refused =
+              this.refused(error) && progress.status !== 'uncertain';
+            this.connectionProgress = {
+              ...progress,
+              status: refused ? 'refused' : 'uncertain'
+            };
+            if (refused) this.rotateProviderCredentialIntent.reset();
+          }
+          throw error;
+        }
+      }
+      if (!isCurrent()) return;
+      return this.connectionSaved(progress.input, progress.provider.id);
+    }
+    const request = this.createIntent.prepare(progress.input);
+    const id = await createProvider(request.input, request.requestId);
+    if (!isCurrent()) return;
+    this.createIntent.reset();
+    return this.connectionSaved(progress.input, id);
+  };
+  private connectionSaved(
+    input: ConnectionInput,
+    id: string
+  ): Extract<ConnectionProgress, { phase: 'saved' }> {
+    const progress = {
+      phase: 'saved' as const,
+      id,
+      input: snapshotNativeJSON({
+        ...input,
+        credential: input.credential === undefined ? undefined : ''
+      })
+    };
+    this.connectionProgress = progress;
+    return progress;
+  }
+
   private holdsLiveGrant = async (provider: Provider) => {
     if (!provider.draft_credential_id) return false;
     const credentials = await this.queryClient.fetchQuery({
@@ -508,7 +514,7 @@ export class ProviderWizardState {
       provider.configuration.profile_revision
     );
   };
-  /** Tests the connection with the grant a completed enrollment staged. */
+
   private testEnrolledGrant = async (isCurrent: () => boolean) => {
     await this.queryClient.invalidateQueries(
       {
@@ -616,7 +622,7 @@ export class ProviderWizardState {
         if (!isCurrent()) return;
         this.probe = probe;
         if (!this.probe.succeeded) throw new Error(this.probe.detail);
-        // Refresh the observation before certifying the reviewed model.
+
         provider = (await this.refetchWizardModels()).provider;
         if (!isCurrent()) return;
       }
@@ -653,47 +659,52 @@ export class ProviderWizardState {
     const provider = this.wizardProvider;
     if (!provider) return;
     const progress: ActivationProgress = this.activationProgress ?? {
-      input: { id: provider.id, etag: provider.etag }
+      input: { id: provider.id, etag: provider.etag },
+      phase: 'pending',
+      uncertain: false
     };
     this.activationProgress = progress;
     await this.run('activate', async (isCurrent) => {
-      if (progress.generation === undefined) {
-        let generation: number;
+      const activate = async (): Promise<
+        Extract<ActivationProgress, { phase: 'committed' }> | undefined
+      > => {
+        if (progress.phase === 'committed') return progress;
         try {
-          generation = await this.activateProviderIntent.submit(
+          const generation = await this.activateProviderIntent.submit(
             progress.input,
             (input, requestId) => activateProvider(input, requestId)
           );
+          if (!isCurrent()) return;
+          const committed = {
+            phase: 'committed' as const,
+            input: progress.input,
+            generation
+          };
+          this.activationProgress = committed;
+          return committed;
         } catch (error) {
           if (isCurrent()) {
-            if (this.refused(error) && !progress.ambiguous) {
+            if (this.refused(error) && !progress.uncertain) {
               this.activationProgress = undefined;
               this.activateProviderIntent.reset();
-            } else if (!this.refused(error)) progress.ambiguous = true;
+            } else if (!this.refused(error))
+              this.activationProgress = { ...progress, uncertain: true };
           }
           throw error;
         }
-        if (!isCurrent()) return;
-        progress.generation = generation;
-      }
-      this.notice = `Provider activated in runtime generation ${progress.generation}.`;
+      };
+      const committed = await activate();
+      if (!committed || !isCurrent()) return;
+      this.notice = `Provider activated in runtime generation ${committed.generation}.`;
       await this.refetchWizardModels();
       if (!isCurrent()) return;
       this.wizardStep = 3;
-      await Promise.all([
-        this.queryClient.invalidateQueries(
-          { queryKey: providerKeys.summaries },
-          { throwOnError: true }
-        ),
-        this.queryClient.invalidateQueries(
-          { queryKey: providerKeys.modelCatalog },
-          { throwOnError: true }
-        ),
-        this.queryClient.invalidateQueries(
-          { queryKey: overviewKeys.root },
-          { throwOnError: true }
-        )
-      ]);
+      const refreshed = await refreshProviderChange(this.queryClient, {
+        kind: 'activation',
+        id: provider.id
+      });
+      if (isCurrent() && refreshed.kind === 'refresh-failed')
+        this.errorMessage = `The provider change succeeded, but refreshing failed. ${refreshed.message}`;
     });
   };
   constructor() {
@@ -770,7 +781,6 @@ export class ProviderWizardState {
               : null)
           );
         } catch {
-          // Editing an incomplete draft also retires the original copy result.
           return false;
         }
       };

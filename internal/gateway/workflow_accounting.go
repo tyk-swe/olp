@@ -46,11 +46,11 @@ func accountingAttemptID(e Envelope, index int) (uuid.UUID, error) {
 }
 
 func (s *Server) settleWorkflowModelAttempt(ctx context.Context, x *call, fact AttemptFact) *Error {
-	settler, ok := s.Debits.(workflowDebitSettler)
+	settler, ok := s.deps.Debits.(workflowDebitSettler)
 	if !ok {
 		return s.workflowSettlementFailure(ctx, x, fmt.Errorf("workflow settlement is unavailable"))
 	}
-	if x.request.release == nil || x.request.release.Snapshot == nil {
+	if x.request.release == nil || x.request.release.Snapshot() == nil {
 		return s.workflowSettlementFailure(ctx, x, fmt.Errorf("workflow release is unavailable"))
 	}
 	completedAt := s.now()
@@ -62,7 +62,7 @@ func (s *Server) settleWorkflowModelAttempt(ctx context.Context, x *call, fact A
 		Operation: x.operationName(), Surface: x.surfaceName(), Route: x.named().Slug,
 		RouteRevisionID: x.named().RevisionID, Status: fact.Status, StartedAt: x.request.startedAt,
 		CompletedAt: completedAt, Duration: completedAt.Sub(x.request.startedAt), Attempts: x.facts,
-		RuntimeGenerationID: x.request.release.Snapshot.Generation.ID, ReleaseSequence: x.request.release.Sequence,
+		RuntimeGenerationID: x.request.release.Snapshot().Generation().ID, ReleaseSequence: x.request.release.Sequence,
 	}
 	event, err := accountingEvent(envelope)
 	if err != nil {
@@ -74,9 +74,9 @@ func (s *Server) settleWorkflowModelAttempt(ctx context.Context, x *call, fact A
 	settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), persistTimeout)
 	defer cancel()
 	snapshots, settleErr := settler.SettleWorkflow(settleCtx, event, len(event.Attempts)-1)
-	if s.Admission != nil && s.Admission.limiter != nil {
+	if s.deps.Admission != nil && s.deps.Admission.limiter != nil {
 		for _, snapshot := range snapshots {
-			if _, _, err := s.Admission.limiter.ApplyCostSnapshot(settleCtx, snapshot); err != nil {
+			if _, _, err := s.deps.Admission.limiter.ApplyCostSnapshot(settleCtx, snapshot); err != nil {
 				return s.workflowSettlementFailure(ctx, x, err)
 			}
 		}

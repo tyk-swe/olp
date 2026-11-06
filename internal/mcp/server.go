@@ -13,8 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/grants/personal"
 	"github.com/tyk-swe/olp/internal/guardrails"
@@ -46,15 +45,15 @@ func cloneUnitPrice(price *string) *string {
 
 type Runtime interface {
 	consumerauth.TaskCapabilityAuthenticator
-	ReauthenticateDelegation(context.Context, string, string) (*access.Authority, error)
-	Authenticate(secret string) (*access.Authority, error)
+	ReauthenticateDelegation(context.Context, string, string) (*keyauthority.Authority, error)
+	Authenticate(secret string) (*keyauthority.Authority, error)
 	Release() *release.Release
-	AuthorizeAgentResource(a access.Authority, scope, id, revision, project string) error
-	AuthorizeMCPTool(a access.Authority, id, revision, project, server, serverRevision string) error
+	AuthorizeAgentResource(a keyauthority.Authority, scope, id, revision, project string) error
+	AuthorizeMCPTool(a keyauthority.Authority, id, revision, project, server, serverRevision string) error
 }
 
 type GuardrailEvaluation struct {
-	Authority access.Authority
+	Authority keyauthority.Authority
 	Release   *release.Release
 	Engine    *guardrails.Engine
 	RequestID string
@@ -101,11 +100,11 @@ func (s *Server) Register(mux *http.ServeMux) {
 	}
 }
 
-func releaseIDFor(release *release.Release, snapshot *routing.Snapshot) string {
+func releaseIDFor(release *release.Release, snapshot *routing.View) string {
 	if canonicalUUID(release.ID) {
 		return release.ID
 	}
-	return snapshot.Generation.ID
+	return snapshot.Generation().ID
 }
 
 type apiError struct {
@@ -155,33 +154,33 @@ func canonicalUUID(raw string) bool {
 
 type delegatedSessionAuthenticator struct{ Runtime }
 
-func (a delegatedSessionAuthenticator) AuthenticateTaskCapability(ctx context.Context, token string) (*access.Authority, error) {
+func (a delegatedSessionAuthenticator) AuthenticateTaskCapability(ctx context.Context, token string) (*keyauthority.Authority, error) {
 	return a.Runtime.AuthenticateTaskCapability(ctx, token)
 }
 
-func (a delegatedSessionAuthenticator) AuthenticateDelegation(ctx context.Context, token, assertion string) (*access.Authority, error) {
+func (a delegatedSessionAuthenticator) AuthenticateDelegation(ctx context.Context, token, assertion string) (*keyauthority.Authority, error) {
 	return a.Runtime.ReauthenticateDelegation(ctx, token, assertion)
 }
 
-func (s *Server) authenticate(r *http.Request) (access.Authority, *apiError) {
+func (s *Server) authenticate(r *http.Request) (keyauthority.Authority, *apiError) {
 	return s.authenticateWith(r, s.runtime)
 }
 
-func (s *Server) authenticateSession(r *http.Request) (access.Authority, *apiError) {
+func (s *Server) authenticateSession(r *http.Request) (keyauthority.Authority, *apiError) {
 	if s.runtime == nil || (r.Header.Get("Mcp-Session-Id") == "" && r.URL.Query().Get("session_id") == "") {
 		return s.authenticate(r)
 	}
 	return s.reauthenticateSession(r)
 }
 
-func (s *Server) reauthenticateSession(r *http.Request) (access.Authority, *apiError) {
+func (s *Server) reauthenticateSession(r *http.Request) (keyauthority.Authority, *apiError) {
 	if s.runtime == nil {
 		return s.authenticate(r)
 	}
 	return s.authenticateWith(r, delegatedSessionAuthenticator{s.runtime})
 }
 
-func (s *Server) authenticateWith(r *http.Request, auth consumerauth.Authenticator) (access.Authority, *apiError) {
+func (s *Server) authenticateWith(r *http.Request, auth consumerauth.Authenticator) (keyauthority.Authority, *apiError) {
 	token, _ := consumerauth.Bearer(r.Header.Get("Authorization"))
 	authority, failure := consumerauth.Authenticate(auth, r, token, "tools", s.trustedProxies, time.Now())
 	if failure != nil {
@@ -192,30 +191,30 @@ func (s *Server) authenticateWith(r *http.Request, auth consumerauth.Authenticat
 		case http.StatusForbidden:
 			kind = "permission_error"
 		}
-		return access.Authority{}, fail(failure.Status, failure.Code, kind, failure.Message)
+		return keyauthority.Authority{}, fail(failure.Status, failure.Code, kind, failure.Message)
 	}
 	if authority.ProjectID == nil {
-		return access.Authority{}, fail(http.StatusForbidden, "permission_denied", "permission_error", "This API key does not have the tools scope for a project.")
+		return keyauthority.Authority{}, fail(http.StatusForbidden, "permission_denied", "permission_error", "This API key does not have the tools scope for a project.")
 	}
 	return s.identifyEndUser(r, authority)
 }
 
-func (s *Server) identifyEndUser(r *http.Request, authority access.Authority) (access.Authority, *apiError) {
+func (s *Server) identifyEndUser(r *http.Request, authority keyauthority.Authority) (keyauthority.Authority, *apiError) {
 	if authority.TaskCapability != nil || authority.WorkloadIssuerID != nil && authority.EndUserDigest != "" {
 		return authority, nil
 	}
 	if authority.Policy.EndUserSource == nil {
 		if authority.ProjectEndUserPolicy != nil || authority.Policy.EndUserPolicy != nil {
-			return access.Authority{}, fail(http.StatusBadRequest, "end_user_source_required", "invalid_request_error", "This key must configure an end-user identifier source before using an end-user policy.")
+			return keyauthority.Authority{}, fail(http.StatusBadRequest, "end_user_source_required", "invalid_request_error", "This key must configure an end-user identifier source before using an end-user policy.")
 		}
 		return authority, nil
 	}
 	digest, failure := consumerauth.HeaderEndUserDigest(s.runtime, r, authority)
 	if failure != nil {
 		if failure.Status == http.StatusBadRequest {
-			return access.Authority{}, fail(failure.Status, failure.Code, "invalid_request_error", failure.Message)
+			return keyauthority.Authority{}, fail(failure.Status, failure.Code, "invalid_request_error", failure.Message)
 		}
-		return access.Authority{}, fail(failure.Status, failure.Code, "api_error", failure.Message)
+		return keyauthority.Authority{}, fail(failure.Status, failure.Code, "api_error", failure.Message)
 	}
 	authority.EndUserDigest = digest
 	return authority, nil
@@ -286,24 +285,24 @@ func (r resolvedToolset) listingFailure() *apiError {
 	return nil
 }
 
-func (s *Server) driftScoped(authority access.Authority, resolved resolvedToolset) bool {
+func (s *Server) driftScoped(authority keyauthority.Authority, resolved resolvedToolset) bool {
 	return len(resolved.drifted) > 0 && len(resolved.missing) == 0 &&
 		s.runtime.AuthorizeMCPTool(authority, resolved.id, resolved.revisionID, *authority.ProjectID, "", "") == nil
 }
 
-func (s *Server) snapshot() (*release.Release, *routing.Snapshot, *apiError) {
+func (s *Server) snapshot() (*release.Release, *routing.View, *apiError) {
 	if s.runtime == nil {
 		return nil, nil, fail(http.StatusServiceUnavailable, "authority_unavailable", "api_error", "Tool serving is unavailable; retry shortly.")
 	}
 	release := s.runtime.Release()
-	if release == nil || release.Snapshot == nil {
+	if release == nil || release.Snapshot() == nil {
 		return nil, nil, fail(http.StatusServiceUnavailable, "authority_unavailable", "api_error", "Tool serving is unavailable; retry shortly.")
 	}
-	return release, release.Snapshot, nil
+	return release, release.Snapshot(), nil
 }
 
-func currentToolsetRevision(snapshot *routing.Snapshot, toolsetID, project string) (string, bool) {
-	for _, revision := range snapshot.AgentPublications {
+func currentToolsetRevision(snapshot *routing.View, toolsetID, project string) (string, bool) {
+	for _, revision := range snapshot.AgentPublications() {
 		if revision.PublicationID == toolsetID && revision.Kind == "toolset" && revision.ProjectID == project && revision.Current {
 			return revision.ID, true
 		}
@@ -311,7 +310,7 @@ func currentToolsetRevision(snapshot *routing.Snapshot, toolsetID, project strin
 	return "", false
 }
 
-func (s *Server) resolveToolset(authority access.Authority, snapshot *routing.Snapshot, toolsetID string) (resolvedToolset, *apiError) {
+func (s *Server) resolveToolset(authority keyauthority.Authority, snapshot *routing.View, toolsetID string) (resolvedToolset, *apiError) {
 	if !canonicalUUID(toolsetID) {
 		return resolvedToolset{}, errToolsetNotFound
 	}

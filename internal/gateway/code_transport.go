@@ -49,7 +49,7 @@ func (s *Server) codeClient(ctx context.Context, release *release.Release, cfg r
 	var secret []byte
 	if network := cfg.Options.Network; network != nil && network.CredentialID != "" {
 		var err error
-		secret, err = s.Runtime.NetworkSecret(ctx, release, providerID, network.CredentialID)
+		secret, err = s.deps.Runtime.NetworkSecret(ctx, release, providerID, network.CredentialID)
 		if err != nil {
 			return nil, codemode.Refuse(503, "code_network_credential_unavailable")
 		}

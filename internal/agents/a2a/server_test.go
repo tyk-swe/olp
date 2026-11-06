@@ -16,7 +16,8 @@ import (
 	protocol "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2acompat/a2av0"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
-	"github.com/tyk-swe/olp/internal/access"
+	"github.com/google/uuid"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/agents/a2a"
@@ -27,16 +28,18 @@ import (
 )
 
 type runtimeFixture struct {
-	authority access.Authority
+	authority keyauthority.Authority
 	snapshot  *release.Release
 }
 
-func (r runtimeFixture) Authenticate(string) (*access.Authority, error) { return &r.authority, nil }
-func (r runtimeFixture) ReauthenticateDelegation(context.Context, string, string) (*access.Authority, error) {
+func (r runtimeFixture) Authenticate(string) (*keyauthority.Authority, error) {
+	return &r.authority, nil
+}
+func (r runtimeFixture) ReauthenticateDelegation(context.Context, string, string) (*keyauthority.Authority, error) {
 	return &r.authority, nil
 }
 func (r runtimeFixture) Release() *release.Release { return r.snapshot }
-func (runtimeFixture) AuthorizeAgentResource(access.Authority, string, string, string, string) error {
+func (runtimeFixture) AuthorizeAgentResource(keyauthority.Authority, string, string, string, string) error {
 	return nil
 }
 
@@ -139,10 +142,18 @@ func TestA2AHTTPVersionsAndSingleCredentialResolution(t *testing.T) {
 				defer remote.Close()
 				endpoint := remote.URL + "/rpc"
 				digest := sha256.Sum256(cardBody(t, endpoint, version))
-				project, credential := "project", "credential"
-				revision := agentcontract.Revision{ID: "revision", PublicationID: "publication", ProjectID: project, Kind: "agent", Current: true, Definition: agentcontract.Draft{ProjectID: project, Agent: &agentcontract.Definition{Protocol: version, Endpoint: endpoint, CardDigest: hex.EncodeToString(digest[:]), CredentialID: &credential}}}
-				authority := access.Authority{ID: "owner", ProjectID: &project, Policy: access.KeyPolicy{Scopes: []string{"agents"}}}
-				runtime := runtimeFixture{authority: authority, snapshot: &release.Release{ID: "release", Snapshot: &routing.Snapshot{AgentPublications: []agentcontract.Revision{revision}}}}
+				project, credential := uuid.NewString(), uuid.NewString()
+				definition := agentcontract.Draft{Name: "Remote agent", ProjectID: project, Agent: &agentcontract.Definition{
+					Protocol: version, Endpoint: endpoint, CardDigest: hex.EncodeToString(digest[:]), CredentialID: &credential,
+					PricingRevisionID: uuid.NewString(), MaxCost: "1",
+				}}
+				revision := agentcontract.Revision{ID: uuid.NewString(), PublicationID: uuid.NewString(), ProjectID: project, Kind: "agent", Current: true, Definition: definition, Digest: agentcontract.DraftDigest(definition)}
+				authority := keyauthority.Authority{ID: "owner", ProjectID: &project, Policy: keyauthority.KeyPolicy{Scopes: []string{"agents"}}}
+				published, err := release.NewRelease("release", 0, &routing.Snapshot{Generation: routing.Generation{ID: uuid.NewString()}, AgentPublications: []agentcontract.Revision{revision}}, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				runtime := runtimeFixture{authority: authority, snapshot: published}
 				peers := a2a.NewPeers(&egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}, func(context.Context, string) ([]byte, error) {
 					credentials <- struct{}{}
 					return []byte("upstream-secret"), nil
@@ -176,7 +187,7 @@ func TestA2AHTTPVersionsAndSingleCredentialResolution(t *testing.T) {
 					return encoded
 				}()
 				body := fmt.Sprintf(`{"jsonrpc":"2.0","id":"request","method":%q,"params":%s}`, method, params)
-				request := httptest.NewRequest(http.MethodPost, "/a2a/publication", strings.NewReader(body))
+				request := httptest.NewRequest(http.MethodPost, "/a2a/"+revision.PublicationID, strings.NewReader(body))
 				request.Header.Set("Content-Type", "application/json")
 				request.Header.Set("Authorization", "Bearer consumer-secret")
 				request.Header.Set("A2A-Version", strings.TrimPrefix(version, "a2a-"))

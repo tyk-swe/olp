@@ -7,6 +7,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/providerconfig"
 )
 
 // RevisionModel is the published shape of one enabled model inside a provider
@@ -41,18 +42,8 @@ type RevisionSlot struct {
 
 // Configuration is the subset of a provider configuration the gateway needs.
 type Configuration struct {
-	CredentialSource string                   `json:"credential_source,omitempty"`
-	ProfileID        string                   `json:"profile_id,omitempty"`
-	ProfileRevision  string                   `json:"profile_revision,omitempty"`
-	Kind             string                   `json:"kind"`
-	AuthMode         string                   `json:"auth_mode"`
-	Endpoint         string                   `json:"endpoint"`
-	CloudRegion      string                   `json:"cloud_region"`
-	CloudProject     string                   `json:"cloud_project"`
-	BatchStorage     *connectors.BatchStorage `json:"batch_storage,omitempty"`
-	Deployment       string                   `json:"deployment"`
-	APIVersion       string                   `json:"api_version"`
-	Options          struct {
+	providerconfig.Identity[string]
+	Options struct {
 		TuningDatasetURIPrefixes []string                         `json:"tuning_dataset_uri_prefixes,omitempty"`
 		DocumentURIPrefixes      []string                         `json:"document_uri_prefixes,omitempty"`
 		Network                  *egress.ConnectionOptions        `json:"network,omitempty"`

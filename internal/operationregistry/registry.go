@@ -1,8 +1,8 @@
-// Package operationregistry is the trusted composition root for unary operation
-// contracts. Runtime requests can select registrations, never install codecs.
 package operationregistry
 
 import (
+	"slices"
+
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations"
 	"github.com/tyk-swe/olp/internal/operations/classification"
@@ -14,33 +14,33 @@ import (
 	"github.com/tyk-swe/olp/internal/operations/tokenization"
 )
 
-var Default = builtins()
+var catalog, catalogError = builtins()
 
-func builtins() *operations.Registry {
-	r := operations.NewRegistry()
-	for _, definitions := range [][]operations.Dialect{embeddings.Definitions(), rerank.Definitions(), classification.Definitions(), tokenization.Definitions(), decision.Definitions(), ocr.Definitions(), search.Definitions()} {
-		for _, d := range definitions {
-			if err := r.Register(d); err != nil {
-				panic(err)
-			}
-		}
-	}
-	for _, m := range append(append(append(mappings(), decision.Mappings()...), search.Mappings()...), ocr.Mappings()...) {
-		if err := r.RegisterMapping(m); err != nil {
-			panic(err)
-		}
-	}
-	return r
+func Catalog() operations.Registry { return catalog }
+
+func Validate() error { return catalogError }
+
+func builtins() (operations.Registry, error) {
+	dialects := slices.Concat(embeddings.Definitions(), rerank.Definitions(), classification.Definitions(), tokenization.Definitions(), decision.Definitions(), ocr.Definitions(), search.Definitions())
+	return operations.NewRegistry(dialects, slices.Concat(mappings(), decision.Mappings(), search.Mappings(), ocr.Mappings()))
 }
 
-// TransformedServing reports whether the operation serves on strict and
-// transformed routes, with no caching and unary inspector parsing.
-func TransformedServing(op string) bool { return op == "decision" || op == "ocr" || op == "search" }
+type Policy struct {
+	TransformedUnary bool
+	CacheEligible    bool
+	BoundedWork      bool
+}
 
-// UnboundedWork reports whether the operation cannot bound its provider work
-// before dispatch, so token and non-exempt cost caps refuse it.
-func UnboundedWork(op string) bool { return op == "decision" || op == "ocr" }
+func PolicyFor(operation string) Policy {
+	switch operation {
+	case "decision", "ocr":
+		return Policy{TransformedUnary: true}
+	case "search":
+		return Policy{TransformedUnary: true, BoundedWork: true}
+	default:
+		return Policy{CacheEligible: true, BoundedWork: true}
+	}
+}
 
-// Lookup resolves the canonical dialect declared by a provider profile.
-func Lookup(id string) (operations.Dialect, bool) { return Default.Lookup(id, operations.Revision) }
+func Lookup(id string) (operations.Dialect, bool) { return catalog.Lookup(id, operations.Revision) }
 func Identity(id string) oif.Identity             { return oif.Identity{ID: id, Revision: operations.Revision} }

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -123,7 +123,7 @@ func (s *Server) monitorWorkflowModelLease(ctx context.Context, debit *sessionDe
 	callCtx, cancel := context.WithCancel(ctx)
 	result := make(chan *Error, 1)
 	done := make(chan struct{})
-	ledger, ok := s.Debits.(workflowModelLeases)
+	ledger, ok := s.deps.Debits.(workflowModelLeases)
 	if !ok || debit == nil {
 		close(done)
 		return callCtx, func() *Error { cancel(); return nil }
@@ -197,28 +197,28 @@ func (s *Server) sessionExposureHeld(ctx context.Context, keyID string) (bool, *
 	if s.webrtcExposureHeld(keyID) {
 		return true, nil
 	}
-	if s.Debits == nil {
+	if s.deps.Debits == nil {
 		return false, nil
 	}
-	held, err := s.Debits.HasUnknownExposure(ctx, keyID, max(s.cfg.WebRTCBound, nativeDuplexSession))
+	held, err := s.deps.Debits.HasUnknownExposure(ctx, keyID, max(s.cfg.WebRTCBound, nativeDuplexSession))
 	if err != nil {
 		return false, serverError(http.StatusInternalServerError, "debit_ledger_unavailable", "The durable debit ledger is unavailable, so unresolved session exposure cannot be checked.")
 	}
 	return held, nil
 }
 
-func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority access.Authority, attempt routing.Attempt, supply []cappedOwner) *Error {
+func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority keyauthority.Authority, attempt routing.Attempt, supply []cappedOwner) *Error {
 	if e := x.workflowModelCost(attempt); e != nil {
 		return e
 	}
-	if s.Debits == nil || x.callerCostExempt() && x.workflow == nil {
+	if s.deps.Debits == nil || x.callerCostExempt() && x.workflow == nil {
 		return nil
 	}
 	snapshot := x.snapshot()
 	if snapshot == nil || x.route == nil {
 		return serverError(http.StatusInternalServerError, "debit_ledger_unavailable", "The session cannot be reserved without a pinned release.")
 	}
-	releaseID := canonicalSessionID(snapshot.Generation.ID)
+	releaseID := canonicalSessionID(snapshot.Generation().ID)
 	routeRevisionID := canonicalSessionID(x.route.RevisionID)
 	if releaseID == "" {
 		return serverError(http.StatusInternalServerError, "debit_ledger_unavailable", "The session cannot be reserved without a pinned release.")
@@ -232,7 +232,7 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority acc
 		currency = attempt.Price.Currency
 	}
 	if currency == "" {
-		resolved, err := s.Debits.Currency(ctx)
+		resolved, err := s.deps.Debits.Currency(ctx)
 		if err != nil || resolved == "" {
 			return limitsUnavailable()
 		}
@@ -284,9 +284,9 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority acc
 	}
 	var state limits.DebitState
 	if x.workflow != nil {
-		state, err = s.WorkflowRuns.Prepare(ctx, authority, intent, x.workflow.ordinal, owners)
+		state, err = s.deps.WorkflowRuns.Prepare(ctx, authority, intent, x.workflow.ordinal, owners)
 	} else {
-		state, err = s.Debits.Prepare(ctx, intent, owners)
+		state, err = s.deps.Debits.Prepare(ctx, intent, owners)
 	}
 	if err != nil || state != limits.DebitPrepared {
 		return limitsUnavailable()
@@ -294,13 +294,13 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority acc
 	if x.workflow != nil {
 		x.workflow.ordinal++
 	}
-	if err := s.Debits.Admit(ctx, dispatchID, claimID, requests); err != nil {
+	if err := s.deps.Debits.Admit(ctx, dispatchID, claimID, requests); err != nil {
 		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), webrtcCloseTimeout)
-		_ = s.Debits.ReleaseUndispatched(releaseCtx, dispatchID, claimID)
+		_ = s.deps.Debits.ReleaseUndispatched(releaseCtx, dispatchID, claimID)
 		cancel()
 		if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
-			if s.Admission != nil {
-				s.Admission.recordRejection(exceeded.Dimension)
+			if s.deps.Admission != nil {
+				s.deps.Admission.recordRejection(exceeded.Dimension)
 			}
 			return rateLimitedBasis(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate, exceeded.Basis)
 		}
@@ -310,7 +310,7 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority acc
 	return nil
 }
 
-func sessionDebitBoundaries(x *call, authority access.Authority) ([]limits.DebitOwner, []limits.Request, bool) {
+func sessionDebitBoundaries(x *call, authority keyauthority.Authority) ([]limits.DebitOwner, []limits.Request, bool) {
 	admission := x.admissionAuthority(authority)
 	owners := []limits.DebitOwner{{ID: admission.ID, Kind: "key", Basis: limits.Basis(admission.Policy.CostBasis)}}
 	key := keyRequest(admission, x.estimate, time.Hour)
@@ -343,7 +343,7 @@ func sessionDebitBoundaries(x *call, authority access.Authority) ([]limits.Debit
 	}
 	for _, boundary := range [...]struct {
 		level, subject string
-		policy         *access.BudgetPolicy
+		policy         *keyauthority.BudgetPolicy
 	}{
 		{"installation", admission.InstallationID, admission.InstallationBudget},
 		{"organization", projectBudgetSubject(admission.OrganizationID), admission.OrganizationBudget},
@@ -391,7 +391,7 @@ func sessionDebitBoundaries(x *call, authority access.Authority) ([]limits.Debit
 	}
 	if admission.EndUserDigest != "" {
 		for _, boundary := range [...]struct {
-			policy  *access.EndUserPolicy
+			policy  *keyauthority.EndUserPolicy
 			project bool
 		}{
 			{admission.ProjectEndUserPolicy, true}, {admission.Policy.EndUserPolicy, false},
@@ -420,14 +420,14 @@ func sessionDebitBoundaries(x *call, authority access.Authority) ([]limits.Debit
 }
 
 func (s *Server) markSessionDispatched(ctx context.Context, x *call) *Error {
-	if x.sessionDebit == nil || s.Debits == nil {
+	if x.sessionDebit == nil || s.deps.Debits == nil {
 		return nil
 	}
 	err := func() error {
 		if x.workflow == nil {
-			return s.Debits.MarkDispatched(ctx, x.sessionDebit.id, x.sessionDebit.claim)
+			return s.deps.Debits.MarkDispatched(ctx, x.sessionDebit.id, x.sessionDebit.claim)
 		}
-		ledger, ok := s.Debits.(workflowModelLeases)
+		ledger, ok := s.deps.Debits.(workflowModelLeases)
 		if !ok {
 			return limits.ErrDebitAuthority
 		}
@@ -444,11 +444,11 @@ func (s *Server) markSessionDispatched(ctx context.Context, x *call) *Error {
 }
 
 func (s *Server) abandonSessionDebit(ctx context.Context, x *call) {
-	if x.sessionDebit == nil || x.sessionDebit.dispatched || s.Debits == nil {
+	if x.sessionDebit == nil || x.sessionDebit.dispatched || s.deps.Debits == nil {
 		return
 	}
 	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), webrtcCloseTimeout)
-	if err := s.Debits.ReleaseUndispatched(releaseCtx, x.sessionDebit.id, x.sessionDebit.claim); err != nil && s.log != nil {
+	if err := s.deps.Debits.ReleaseUndispatched(releaseCtx, x.sessionDebit.id, x.sessionDebit.claim); err != nil && s.log != nil {
 		s.log.Warn("session debit release failed", "error", err.Error())
 	}
 	cancel()
@@ -459,11 +459,11 @@ func (s *Server) abandonSessionDebit(ctx context.Context, x *call) {
 }
 
 func (s *Server) markSessionUnknown(ctx context.Context, x *call) {
-	if x.sessionDebit == nil || !x.sessionDebit.dispatched || s.Debits == nil {
+	if x.sessionDebit == nil || !x.sessionDebit.dispatched || s.deps.Debits == nil {
 		return
 	}
 	markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), webrtcCloseTimeout)
-	if err := s.Debits.MarkUnknown(markCtx, x.sessionDebit.id, x.sessionDebit.claim); err != nil && s.log != nil {
+	if err := s.deps.Debits.MarkUnknown(markCtx, x.sessionDebit.id, x.sessionDebit.claim); err != nil && s.log != nil {
 		s.log.Warn("session debit exposure could not be marked unknown", "error", err.Error())
 	}
 	cancel()

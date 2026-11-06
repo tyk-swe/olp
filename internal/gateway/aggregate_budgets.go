@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/limits"
 )
 
-func (a *Admission) reserveAggregateBudgets(ctx context.Context, authority *access.Authority, ttl time.Duration, hold costReservation, costChecked *bool) (*limits.Lease, *Error) {
+func (a *Admission) reserveAggregateBudgets(ctx context.Context, authority *keyauthority.Authority, ttl time.Duration, hold costReservation, costChecked *bool) (*limits.Lease, *Error) {
 	labels := authority.BudgetAttribution()
 	if !authority.OrganizationBudget.Limited() && !authority.InstallationBudget.Limited() && !authority.ProjectBudget.Limited() && !authority.ProjectAttributionBudgets.Matches(labels) {
 		return nil, nil
@@ -20,7 +20,7 @@ func (a *Admission) reserveAggregateBudgets(ctx context.Context, authority *acce
 	var chain *limits.Lease
 	for _, boundary := range [...]struct {
 		level, subject string
-		policy         *access.BudgetPolicy
+		policy         *keyauthority.BudgetPolicy
 	}{
 		{"installation", authority.InstallationID, authority.InstallationBudget},
 		{"organization", projectBudgetSubject(authority.OrganizationID), authority.OrganizationBudget},
@@ -82,7 +82,7 @@ func budgetKind(basis limits.Basis) string {
 
 // Every aggregate boundary uses the same reservation and fail-closed semantics.
 // The caller attaches successful leases or refunds earlier boundaries on refusal.
-func (a *Admission) reserveCostBoundary(ctx context.Context, keyID, owner, label, param string, increases string, policy *access.BudgetPolicy, ttl time.Duration, hold costReservation, costChecked *bool) (*limits.Lease, *Error) {
+func (a *Admission) reserveCostBoundary(ctx context.Context, keyID, owner, label, param string, increases string, policy *keyauthority.BudgetPolicy, ttl time.Duration, hold costReservation, costChecked *bool) (*limits.Lease, *Error) {
 	if e := a.checkCostAccountingOnce(ctx, costChecked); e != nil {
 		return nil, e
 	}
@@ -126,8 +126,8 @@ func projectBudgetSubject(project *string) string {
 
 // System work has no key/group/end-user spend but shares aggregate invoice caps.
 func (s *Server) reserveSystemBudgets(ctx context.Context, x *call) *Error {
-	source, ok := s.Runtime.(interface {
-		BudgetAuthority(*string) (access.Authority, error)
+	source, ok := s.deps.Runtime.(interface {
+		BudgetAuthority(*string) (keyauthority.Authority, error)
 	})
 	if !ok {
 		return nil
@@ -150,28 +150,25 @@ func (s *Server) reserveSystemBudgets(ctx context.Context, x *call) *Error {
 	}
 	costChecked := callerCostBudgeted(&authority, x.limitRoute())
 	if costChecked {
-		if failure := s.Admission.checkCostAccounting(ctx); failure != nil {
+		if failure := s.deps.Admission.checkCostAccounting(ctx); failure != nil {
 			return failure
 		}
 	}
 	var failure *Error
-	x.lease, failure = s.Admission.reserveAggregateBudgets(ctx, &authority, time.Duration(x.route.OverallTimeout)*time.Millisecond, s.costReservation(x, authority), &costChecked)
+	x.lease, failure = s.deps.Admission.reserveAggregateBudgets(ctx, &authority, time.Duration(x.route.OverallTimeout)*time.Millisecond, s.costReservation(x, authority), &costChecked)
 	return failure
 }
 
-func (x *call) admissionAuthority(authority access.Authority) access.Authority {
-	if x != nil {
-		if x.retainedFreeControl {
-			authority.Attribution = x.attribution
-			return researchRateAuthority(authority, false)
-		}
-		authority.Attribution = x.attribution
-		// Billable retained calls keep caller cost budgets even though
-		// they act on an API-key resource; only unpriced resource
-		// control strips them.
-		if (x.actor == "api_key_resource" && !x.retainedAccounting && !x.retainedMetered) || x.callerCostExempt() {
-			authority = withoutCostBudgets(authority)
-		}
+func (x *call) admissionAuthority(authority keyauthority.Authority) keyauthority.Authority {
+	if x == nil {
+		return authority
+	}
+	authority.Attribution = x.attribution
+	if x.retainedAdmission != nil {
+		return x.retainedAdmission.authority(authority, x.callerCostExempt())
+	}
+	if (x.actor == "api_key_resource" && x.unpricedRetainedControl()) || x.callerCostExempt() {
+		return withoutCostBudgets(authority)
 	}
 	return authority
 }

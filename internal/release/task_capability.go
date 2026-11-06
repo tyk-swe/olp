@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agents/tasks"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -39,11 +40,11 @@ func taskCapabilityError(err error) error {
 	}
 }
 
-func (m *Manager) AuthenticateTaskCapability(ctx context.Context, token string) (*access.Authority, error) {
+func (m *Manager) AuthenticateTaskCapability(ctx context.Context, token string) (*keyauthority.Authority, error) {
 	return m.authenticateTaskCapability(ctx, m.auth.Digest(secrets.TaskCapabilityDigest, token))
 }
 
-func (m *Manager) authenticateTaskCapability(ctx context.Context, digest []byte) (*access.Authority, error) {
+func (m *Manager) authenticateTaskCapability(ctx context.Context, digest []byte) (*keyauthority.Authority, error) {
 	record, lookupErr := m.taskCapabilities().Lookup(ctx, digest)
 	if lookupErr != nil {
 		return nil, taskCapabilityError(lookupErr)
@@ -68,12 +69,12 @@ func (m *Manager) authenticateTaskCapability(ctx context.Context, digest []byte)
 		return nil, ErrInvalidKey
 	}
 	boundedExpiry := boundDelegationExpiry(record.Expires, principalExpires)
-	capability := &access.TaskCapability{Digest: hex.EncodeToString(digest), RouteRevisions: slices.Clone(record.Definition.Agent.RouteRevisions), ToolsetRevisions: slices.Clone(record.Definition.Agent.ToolsetRevisions)}
+	capability := &keyauthority.TaskCapability{Digest: hex.EncodeToString(digest), RouteRevisions: slices.Clone(record.Definition.Agent.RouteRevisions), ToolsetRevisions: slices.Clone(record.Definition.Agent.ToolsetRevisions)}
 	callback := currentPolicy.TaskAuthority(principal, snapshot, record.WorkloadRevision, &boundedExpiry, record.EndUser, capability)
 	return &callback, nil
 }
 
-func (m *Manager) taskCapabilityPolicy(ctx context.Context, policy access.Authority, delegation []byte, keyID, project, publication, pair, revision string) (*access.Authority, error) {
+func (m *Manager) taskCapabilityPolicy(ctx context.Context, policy keyauthority.Authority, delegation []byte, keyID, project, publication, pair, revision string) (*keyauthority.Authority, error) {
 	if len(delegation) == 0 {
 		if pair != "" {
 			return nil, ErrInvalidKey
@@ -86,16 +87,16 @@ func (m *Manager) taskCapabilityPolicy(ctx context.Context, policy access.Author
 	return m.authorizeDelegatedTask(ctx, delegation, keyID, project, publication, pair, revision)
 }
 
-func (state authorityState) taskCapabilityPrincipal(keyID, revision string, expiry *time.Time) (access.Authority, access.Authority, string, *time.Time, bool) {
+func (state authorityState) taskCapabilityPrincipal(keyID, revision string, expiry *time.Time) (keyauthority.Authority, keyauthority.Authority, string, *time.Time, bool) {
 	principal, ok := state.taskPrincipal(keyID)
 	if !ok {
-		return access.Authority{}, access.Authority{}, "", nil, false
+		return keyauthority.Authority{}, keyauthority.Authority{}, "", nil, false
 	}
 	if principal.WorkloadIssuerID == nil {
 		return principal, principal, principal.SnapshotID, principal.ExpiresAt, true
 	}
 	if expiry == nil {
-		return access.Authority{}, access.Authority{}, "", nil, false
+		return keyauthority.Authority{}, keyauthority.Authority{}, "", nil, false
 	}
 	for _, issuer := range state.workloadIssuers {
 		if issuer.ID != *principal.WorkloadIssuerID || !issuer.Config.Enabled || issuer.Revision != revision {
@@ -103,14 +104,14 @@ func (state authorityState) taskCapabilityPrincipal(keyID, revision string, expi
 		}
 		base, ok := issuer.bindings[principal.WorkloadMapping]
 		if !ok {
-			return access.Authority{}, access.Authority{}, "", nil, false
+			return keyauthority.Authority{}, keyauthority.Authority{}, "", nil, false
 		}
 		return base, principal, state.id, expiry, true
 	}
-	return access.Authority{}, access.Authority{}, "", nil, false
+	return keyauthority.Authority{}, keyauthority.Authority{}, "", nil, false
 }
 
-func (m *Manager) AdmitTaskCapabilityAttempt(ctx context.Context, authority access.Authority, scope, resource, revision string, project *string, accountingID string) error {
+func (m *Manager) AdmitTaskCapabilityAttempt(ctx context.Context, authority keyauthority.Authority, scope, resource, revision string, project *string, accountingID string) error {
 	if authority.TaskCapability == nil {
 		return ErrInvalidKey
 	}

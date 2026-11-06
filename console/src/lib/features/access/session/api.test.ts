@@ -1,13 +1,12 @@
+import { login, acceptInvitation } from './authentication';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { components } from '$lib/management/schema';
 import { json, route, serve } from '$lib/management/test/transport';
 import { confirmMFA } from '$lib/features/access/mfa/prompt.svelte';
 import {
-  acceptInvitation,
   authenticationCapabilities,
   beginOidcLogin,
   currentSession,
-  login,
   logout
 } from './api';
 
@@ -134,7 +133,10 @@ describe('session API', () => {
         return json(challenge, 202);
       }
       route(request, 'GET', '/api/v1/sessions/current');
-      expect(confirmMFA).toHaveBeenCalledWith({ challenge }, undefined);
+      expect(confirmMFA).toHaveBeenCalledWith(
+        { kind: 'challenge', challenge },
+        undefined
+      );
       return json(session);
     });
     serve(requests);
@@ -170,4 +172,14 @@ describe('session API', () => {
     serve(() => json({ title: 'Unavailable', status: 503 }, 503));
     await expect(logout()).rejects.toMatchObject({ problem: { status: 503 } });
   });
+});
+
+it('rejects an invalid second-factor challenge before opening verification', async () => {
+  vi.stubGlobal('fetch', async () =>
+    Response.json({ challenge: 'token', methods: ['unknown'] }, { status: 202 })
+  );
+  await expect(login('member@example.test', 'password')).rejects.toMatchObject({
+    problem: { status: 502 }
+  });
+  expect(confirmMFA).not.toHaveBeenCalled();
 });

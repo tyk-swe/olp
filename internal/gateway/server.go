@@ -19,14 +19,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/priority"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
-	"github.com/tyk-swe/olp/internal/routing"
-
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/google/uuid"
-
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -35,12 +30,16 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
+	"github.com/tyk-swe/olp/internal/priority"
 	"github.com/tyk-swe/olp/internal/protocols"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/telemetry"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -89,7 +88,7 @@ type Runtime interface {
 	// CheckRouteFidelity confirms a strict admission against current publication.
 	CheckRouteFidelity(context.Context, routing.Route) error
 	Release() *release.Release
-	Authenticate(secret string) (*access.Authority, error)
+	Authenticate(secret string) (*keyauthority.Authority, error)
 	// RoutingInputs returns current price and performance measurements, or
 	// nil when no measurements are available.
 	RoutingInputs() *usage.RoutingInputs
@@ -102,36 +101,34 @@ type Runtime interface {
 	CredentialRefused(credentialID string, generation int64)
 }
 
-// Server serves the native OpenAI surface from pinned runtime releases.
-type Server struct {
+type Dependencies struct {
+	Egress             *egress.Policy
+	Log                *slog.Logger
 	Cache              *cache.Store
 	GuardrailEvaluator guardrails.Evaluator
-	// CodeLedger and CodeAuthorizer enable raw code-mode forwarding. Register
-	// mounts the code routes only when both are set.
-	CodeLedger     CodeLedger
-	CodeAuthorizer CodeAuthorizer
-	CodeResearch   ResearchLedger
-	ResearchAuth   ResearchAuthorizer
-	Runtime        Runtime
-	Sink           Sink
-	// Admission enforces the budgets shared by every replica. A nil Admission
-	// means none were configured: keys and targets that bound nothing are
-	// served, and anything that must be metered fails closed.
-	Admission     *Admission
-	Debits        SessionDebitLedger
-	WorkflowRuns  WorkflowRunStore
-	WorkflowTools WorkflowToolRunner
-	Traces        *TraceDeps
-	// Media wires the bounded media substrate into the public surface. A nil
-	// Media leaves the media routes unregistered.
-	Media    *MediaDeps
-	Capture  *export.Manager
-	Business *telemetry.BusinessMetrics
+	CodeLedger         CodeLedger
+	CodeAuthorizer     CodeAuthorizer
+	CodeResearch       ResearchLedger
+	ResearchAuth       ResearchAuthorizer
+	Runtime            Runtime
+	Sink               Sink
+	Admission          *Admission
+	Debits             SessionDebitLedger
+	WorkflowRuns       WorkflowRunStore
+	WorkflowTools      WorkflowToolRunner
+	Traces             *TraceDeps
+	Media              *MediaDeps
+	Capture            *export.Manager
+	Business           *telemetry.BusinessMetrics
 
 	Resources *resources.Store
 	Batches   *batches.Store
 
 	Resolver *resources.Resolver
+}
+
+type Server struct {
+	deps Dependencies
 
 	log         *slog.Logger
 	cfg         Config
@@ -156,28 +153,13 @@ type Server struct {
 
 const UpstreamHeaderTimeout = 5 * time.Minute
 
-func New(rt Runtime, policy *egress.Policy, cfg Config, log *slog.Logger) *Server {
-	if cfg.WebRTCBound <= 0 {
-		cfg.WebRTCBound = time.Hour
-	}
-	if cfg.WebRTCReauth <= 0 {
-		cfg.WebRTCReauth = realtimeReauth
-	}
-	if cfg.WebRTCHeartbeat <= 0 {
-		cfg.WebRTCHeartbeat = realtimePing
-	}
-	if cfg.MaxMediaBodyBytes <= 0 {
-		cfg.MaxMediaBodyBytes = 64 << 20
-	}
-	if cfg.InlineMedia.Items == 0 {
-		cfg.InlineMedia = protocols.InlineMediaLimits{Items: 4, ItemBytes: 1 << 20, TotalBytes: 2 << 20}
-	}
-	pool := cfg.AdmissionPool
-	if pool == nil {
-		pool = observability.NewPool(max(cfg.MaxInFlight, 1))
-	}
+func New(deps Dependencies, cfg Config) *Server {
+	policy, log := deps.Egress, deps.Log
+	config := normalizedConfig(cfg)
+	pool := inferencePool(config)
+
 	auth := connectors.NewAuth(policy)
-	auth.Signer = cfg.Signer
+	auth.Signer = config.Signer
 	// The tokenizers parse their rank tables on first use, which would land on
 	// the first request that needs one. A table that cannot be read leaves its
 	// family on the heuristic, which says so in every estimate it makes.
@@ -188,10 +170,9 @@ func New(rt Runtime, policy *egress.Policy, cfg Config, log *slog.Logger) *Serve
 	health.changes = make(chan circuitChange, 64)
 	fleet := &fleetHealth{now: time.Now}
 	server := &Server{
-		Runtime:     rt,
-		Sink:        LogSink{Log: log},
+
 		log:         log,
-		cfg:         cfg,
+		cfg:         config,
 		egress:      policy,
 		client:      policy.Client(UpstreamHeaderTimeout),
 		connections: egress.NewConnectionClientCache(128),
@@ -200,10 +181,12 @@ func New(rt Runtime, policy *egress.Policy, cfg Config, log *slog.Logger) *Serve
 		health:      health,
 		fleet:       fleet,
 		unhealthy:   fleet.unhealthy,
-		shadows:     newShadowing(cfg.MaxShadowInFlight),
-		now:         time.Now,
+		shadows:     newShadowing(config.MaxShadowInFlight),
+		now:         time.Now, deps: normalizedDependencies(deps),
 	}
-	server.initGuardrails()
+	if server.deps.GuardrailEvaluator == nil {
+		server.deps.GuardrailEvaluator = server.newGuardrailEvaluator()
+	}
 	return server
 }
 
@@ -219,7 +202,7 @@ func (s *Server) OpenCircuits() int64 { return s.health.openCircuits() }
 
 // Register mounts the OpenAI surface on the public mux.
 func (s *Server) Register(mux *http.ServeMux) {
-	if s.CodeLedger != nil && s.CodeAuthorizer != nil {
+	if s.deps.CodeLedger != nil && s.deps.CodeAuthorizer != nil {
 		s.RegisterCode(mux)
 	}
 	mux.HandleFunc("POST /v1/guardrails/apply", s.applyGuardrails)
@@ -292,9 +275,9 @@ func (s *Server) begin(w http.ResponseWriter, r *http.Request) request {
 	}
 	h.Set("Cache-Control", "no-store")
 	s.cors(w, r)
-	release := s.Runtime.Release()
+	release := s.deps.Runtime.Release()
 	var measured *measuredBody
-	if release != nil && release.Snapshot.HasBodyLimits() && r.Body != nil && r.Body != http.NoBody {
+	if release != nil && release.Snapshot().HasBodyLimits() && r.Body != nil && r.Body != http.NoBody {
 		measured = &measuredBody{ReadCloser: r.Body, declared: r.ContentLength}
 		r.Body = measured
 	}
@@ -488,7 +471,7 @@ const routingHeader = "X-OLP-Routing"
 // admission class: the key's own priority unless the header asks for another
 // within the key's ceiling. Asking above it is refused like any other budget
 // increase.
-func routingControls(r *http.Request, policy access.KeyPolicy) (*routing.Preferences, string, *Error) {
+func routingControls(r *http.Request, policy keyauthority.KeyPolicy) (*routing.Preferences, string, *Error) {
 	preferences, e := routingPreferences(r)
 	if e != nil {
 		return nil, "", e
@@ -760,9 +743,9 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			writeError(w, e)
 			return
 		}
-		if s.Capture != nil && x.prompt == nil && x.workflow == nil && x.origin == "" && x.operationName() == "generation" {
+		if s.deps.Capture != nil && x.prompt == nil && x.workflow == nil && x.origin == "" && x.operationName() == "generation" {
 			x.captureContext = r.Context()
-			x.capture = s.Capture.Resolve(x.captureProject(), x.named().Slug, x.keyID, x.endUserDigest, x.request.accountingID())
+			x.capture = s.deps.Capture.Resolve(x.captureProject(), x.named().Slug, x.keyID, x.endUserDigest, x.request.accountingID())
 		}
 
 		// Admission happens once the request is understood and before any
@@ -795,11 +778,11 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 		}
 		defer func() {
 			if err := workflowLease.Release(ctx); err != nil {
-				s.Admission.logger().Error("release workflow concurrency", "error", err)
+				s.deps.Admission.logger().Error("release workflow concurrency", "error", err)
 			}
 		}()
 		if x.workflow != nil && x.workflow.runID == "" {
-			runID, err := s.WorkflowRuns.Start(ctx, authority, x.named().ID, x.named().RevisionID)
+			runID, err := s.deps.WorkflowRuns.Start(ctx, authority, x.named().ID, x.named().RevisionID)
 			if err != nil {
 				x.failure = serverError(http.StatusServiceUnavailable, "tool_execution_unavailable", "The workflow run could not be reserved.")
 				status = x.failure.Status
@@ -939,7 +922,7 @@ func (s *Server) prepare(ctx context.Context, x *call, authorize func(*routing.R
 	if x.generation.parsed.Stream {
 		x.mode = "streaming"
 	}
-	route, ok := x.snapshot().Routes[x.generation.parsed.Route]
+	route, ok := x.snapshot().FindRoute(x.generation.parsed.Route)
 	if !ok {
 		return modelNotFound(x.generation.parsed.Route)
 	}
@@ -970,7 +953,7 @@ func (s *Server) prepare(ctx context.Context, x *call, authorize func(*routing.R
 		x.generation.parsed = parsed
 		x.generation.toolsetsSelected = true
 	}
-	if route.ToolExecution == "gateway" && (s.WorkflowRuns == nil || s.WorkflowTools == nil || s.Debits == nil) {
+	if route.ToolExecution == "gateway" && (s.deps.WorkflowRuns == nil || s.deps.WorkflowTools == nil || s.deps.Debits == nil) {
 		return serverError(http.StatusServiceUnavailable, "tool_execution_unavailable", "Gateway tool execution requires durable accounting and tool services.")
 	}
 	if x.pin != nil {
@@ -1032,62 +1015,41 @@ func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
 		}
 		return x.sourceDemand(t.ProviderModel)
 	}
-	options.Effective = func(p routing.Provider, t routing.Target) (routing.Names, *routing.TokenDemand) {
-		if x.automatic(&p) {
-			return source.parameters, x.sourceDemand(t.ProviderModel)
-		}
-		prepared, err := x.preparedProvider(&p, t.ID, t.ProviderModel)
-		if err != nil {
-			return nil, nil
-		}
-		return prepared.parameters, prepared.demand
-	}
-	options.Accept = func(p routing.Provider, t routing.Target) error {
+	options.Prepare = func(p routing.Provider, t routing.Target) (*routing.CandidatePreparation, error) {
 		cfg := p.Connector()
 		if x.named().ToolExecution == "gateway" && !p.SupportsToolCalls(t.ProviderModel, x.family.Surface(), x.mode) {
-			return errors.New("model tool-call capability unavailable")
+			return nil, errors.New("model tool-call capability unavailable")
 		}
-		if p.Network != nil && p.Network.CredentialID != "" && s.Runtime.Eligibility(p.Network.CredentialID) != routing.Eligible {
-			return errors.New("provider network credential unavailable")
+		if p.Network != nil && p.Network.CredentialID != "" && s.deps.Runtime.Eligibility(p.Network.CredentialID) != routing.Eligible {
+			return nil, errors.New("provider network credential unavailable")
 		}
 		if !cfg.Supports(x.family.Operation(), x.family.Surface(), x.mode) {
-			return errors.New("connector capability unavailable")
+			return nil, errors.New("connector capability unavailable")
 		}
 		if x.providerState && !stateQualified(&p, t.ProviderModel, x.family.Operation(), x.mode) {
 			semantic = errors.New("provider-state capability unavailable")
-			return semantic
+			return nil, semantic
 		}
 		if !x.strict() && protocols.StructuredOutputRequested(x.generation.parsed) {
 			metadata, _ := p.Metadata(t.ProviderModel)
 			if metadata.SupportedParameters == nil || !slices.Contains(*metadata.SupportedParameters, "response_format") {
 				semantic = errors.New("model does not declare structured-output support")
-				return semantic
+				return nil, semantic
 			}
 		}
-		var e error
-		if !x.automatic(&p) {
-			var prepared preparedProvider
-			prepared, e = x.preparedProvider(&p, t.ID, t.ProviderModel)
-			if e != nil {
-				policyDecisions = prepared.policyDecisions
+		if x.automatic(&p) {
+			err := x.encodes(&p, cfg, t.ID, t.ProviderModel)
+			if err != nil {
+				semantic = err
 			}
-		} else {
-			e = x.encodes(&p, cfg, t.ID, t.ProviderModel)
+			return nil, err
 		}
-		if e != nil {
-			semantic = e
+		prepared, err := x.preparedProvider(&p, t.ID, t.ProviderModel)
+		if err != nil {
+			semantic, policyDecisions = err, prepared.policyDecisions
+			return nil, err
 		}
-		return e
-	}
-	if !x.strict() && route.ContentPolicy == nil && x.guardrailEngine == nil {
-		allAutomatic := true
-		for _, target := range route.Targets {
-			provider := snapshot.Providers[target.ProviderID]
-			allAutomatic = allAutomatic && x.automatic(&provider)
-		}
-		if allAutomatic {
-			options.Effective = nil
-		}
+		return &routing.CandidatePreparation{Parameters: prepared.parameters, Demand: prepared.demand}, nil
 	}
 	options.Preferences = x.legPreferences()
 	plan, err := routing.Select(snapshot, route.Slug, x.family.Operation(), x.family.Surface(), x.mode, x.affinity, options)
@@ -1129,7 +1091,7 @@ func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
 }
 
 // modelObject renders a route as an OpenAI model object.
-func (s *Server) modelObject(ctx context.Context, release *release.Release, authority access.Authority, route *routing.Route) map[string]any {
+func (s *Server) modelObject(ctx context.Context, release *release.Release, authority keyauthority.Authority, route *routing.Route) map[string]any {
 	capabilities := s.modelCapabilities(ctx, release, authority, *route, "openai")
 	return map[string]any{
 		"id":           route.Slug,
@@ -1145,10 +1107,10 @@ type modelCapabilities struct {
 	GatewayExecution *routing.WorkflowCapability `json:"gateway_execution,omitempty"`
 }
 
-func (s *Server) modelCapabilities(ctx context.Context, release *release.Release, authority access.Authority, route routing.Route, surface string) modelCapabilities {
+func (s *Server) modelCapabilities(ctx context.Context, release *release.Release, authority keyauthority.Authority, route routing.Route, surface string) modelCapabilities {
 	return modelCapabilities{
-		RouteCapabilities: routing.EffectiveCapabilities(release.Snapshot, route),
-		GatewayExecution:  mcp.DescribeReachableWorkflow(ctx, s.WorkflowTools, authority, release, route, surface, s.WorkflowRuns != nil && s.Debits != nil, s.now()),
+		RouteCapabilities: routing.EffectiveCapabilities(release.Snapshot(), route),
+		GatewayExecution:  mcp.DescribeReachableWorkflow(ctx, s.deps.WorkflowTools, authority, release, route, surface, s.deps.WorkflowRuns != nil && s.deps.Debits != nil, s.now()),
 	}
 }
 
@@ -1161,9 +1123,9 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 	}
 	now := s.now()
 	data := []map[string]any{}
-	for _, slug := range slices.Sorted(mapsKeys(req.release.Snapshot.Routes)) {
-		if authority.Allows("models_read", slug, req.release.Snapshot.Routes[slug].ProjectID, now) {
-			route := req.release.Snapshot.Routes[slug]
+	for _, slug := range req.release.Snapshot().RouteSlugs() {
+		if authority.Allows("models_read", slug, req.release.Snapshot().Route(slug).ProjectID, now) {
+			route := req.release.Snapshot().Route(slug)
 			data = append(data, s.modelObject(r.Context(), req.release, authority, &route))
 		}
 	}
@@ -1178,22 +1140,12 @@ func (s *Server) model(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slug := r.PathValue("model")
-	route, ok := req.release.Snapshot.Routes[slug]
+	route, ok := req.release.Snapshot().FindRoute(slug)
 	if !ok || !authority.Allows("models_read", slug, route.ProjectID, s.now()) {
 		writeError(w, modelNotFound(slug))
 		return
 	}
 	writeJSON(w, s.modelObject(r.Context(), req.release, authority, &route))
-}
-
-func mapsKeys[V any](m map[string]V) func(func(string) bool) {
-	return func(yield func(string) bool) {
-		for k := range m {
-			if !yield(k) {
-				return
-			}
-		}
-	}
 }
 
 // WriteAdmissionOverload renders the surface's 503 rejection. The public
@@ -1214,16 +1166,16 @@ func WriteNotFound(w http.ResponseWriter, r *http.Request, surface string) {
 // bindAuthority attaches the authenticated caller's authority to x and pins
 // its consumer rate card when the routing inputs are fresh. Stale inputs leave
 // the request unpinned so accounting resolves the card at fact time.
-func (s *Server) bindAuthority(x *call, authority access.Authority) {
+func (s *Server) bindAuthority(x *call, authority keyauthority.Authority) {
 	x.authority = authority
 	x.keyID, x.affinity = authority.ID, []byte(authority.ID)
 	x.endUserDigest = authority.EndUserDigest
 	x.budgetGroupID = authority.BudgetGroupID
 	x.responseMetadata = authority.Policy.ResponseMetadata
-	if s.Runtime == nil {
+	if s.deps.Runtime == nil {
 		return
 	}
-	inputs := s.Runtime.RoutingInputs()
+	inputs := s.deps.Runtime.RoutingInputs()
 	x.routingInputs = inputs
 	if authority.ProjectID != nil && inputs != nil {
 		if revision, known := inputs.RateCardRevision(authority.ProjectID, s.now()); known {
@@ -1323,4 +1275,69 @@ func (sw *streamWriter) finish(out *outcome) int {
 	}
 	sw.emit([]byte(frame))
 	return http.StatusOK
+}
+
+func (s *Server) WorkflowResolver() WorkflowToolRunner {
+	if s == nil || s.deps.WorkflowRuns == nil || s.deps.WorkflowTools == nil || s.deps.Debits == nil {
+		return nil
+	}
+	return s.deps.WorkflowTools
+}
+
+func (s *Server) LimiterCounts() func() (failOpen, daily, weekly, monthly int64) {
+	admission := s.deps.Admission
+	if admission == nil {
+		return nil
+	}
+	return func() (failOpen, daily, weekly, monthly int64) {
+		return admission.FailOpenTotal(), admission.BudgetRejections(limits.DimensionDailyCost), admission.BudgetRejections(limits.DimensionWeeklyCost), admission.BudgetRejections(limits.DimensionMonthlyCost)
+	}
+}
+
+func normalizedConfig(cfg Config) Config {
+	return Config{
+		Region: cfg.Region, MaxInFlight: cfg.MaxInFlight, MaxBodyBytes: cfg.MaxBodyBytes,
+		MaxMediaBodyBytes: positiveOrDefault(cfg.MaxMediaBodyBytes, 64<<20), MaxResponseBytes: cfg.MaxResponseBytes, MaxEventBytes: cfg.MaxEventBytes,
+		TrustedProxies: slices.Clone(cfg.TrustedProxies), CORSAllowedOrigins: slices.Clone(cfg.CORSAllowedOrigins),
+		InlineMedia: normalizedInlineMedia(cfg.InlineMedia), AdmissionPool: cfg.AdmissionPool, Predicates: cfg.Predicates, Signer: cfg.Signer, Carrier: cfg.Carrier,
+		UnconfinedPlugins: cfg.UnconfinedPlugins, MaxShadowInFlight: cfg.MaxShadowInFlight,
+		WebRTCBound: positiveOrDefault(cfg.WebRTCBound, time.Hour), WebRTCReauth: positiveOrDefault(cfg.WebRTCReauth, realtimeReauth), WebRTCHeartbeat: positiveOrDefault(cfg.WebRTCHeartbeat, realtimePing),
+	}
+}
+
+func positiveOrDefault[T ~int64](value, fallback T) T {
+	if value > 0 {
+		return value
+	}
+	return fallback
+}
+
+func normalizedInlineMedia(value protocols.InlineMediaLimits) protocols.InlineMediaLimits {
+	if value.Items != 0 {
+		return value
+	}
+	return protocols.InlineMediaLimits{Items: 4, ItemBytes: 1 << 20, TotalBytes: 2 << 20}
+}
+
+func inferencePool(cfg Config) *observability.Pool {
+	if cfg.AdmissionPool != nil {
+		return cfg.AdmissionPool
+	}
+	return observability.NewPool(max(cfg.MaxInFlight, 1))
+}
+
+func normalizedDependencies(deps Dependencies) Dependencies {
+	return Dependencies{
+		Egress: deps.Egress, Log: deps.Log, Cache: deps.Cache, GuardrailEvaluator: deps.GuardrailEvaluator,
+		CodeLedger: deps.CodeLedger, CodeAuthorizer: deps.CodeAuthorizer, CodeResearch: deps.CodeResearch, ResearchAuth: deps.ResearchAuth,
+		Runtime: deps.Runtime, Sink: configuredSink(deps.Sink, deps.Log), Admission: deps.Admission, Debits: deps.Debits, WorkflowRuns: deps.WorkflowRuns, WorkflowTools: deps.WorkflowTools,
+		Traces: deps.Traces, Media: deps.Media, Capture: deps.Capture, Business: deps.Business, Resources: deps.Resources, Batches: deps.Batches, Resolver: deps.Resolver,
+	}
+}
+
+func configuredSink(sink Sink, log *slog.Logger) Sink {
+	if sink != nil {
+		return sink
+	}
+	return LogSink{Log: log}
 }

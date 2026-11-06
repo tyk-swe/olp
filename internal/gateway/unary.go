@@ -75,12 +75,12 @@ func (s *Server) selectUnary(x *call, family wire.Format, dialect string, body [
 		_ = json.Unmarshal(body, &header)
 		model = header.Model
 	}
-	route, exists := x.request.release.Snapshot.Routes[model]
+	route, exists := x.request.release.Snapshot().FindRoute(model)
 	// The native Gemini embedding methods exist only on strict routes, and the
 	// parser that takes any other request cannot read their bodies, so an
 	// unknown or transformed route is refused here with its own error.
 	nativeOnly := family == wire.GeminiEmbeddings || family == wire.GeminiEmbeddingsBatch
-	serving := operationregistry.TransformedServing(family.Operation())
+	serving := operationregistry.PolicyFor(family.Operation()).TransformedUnary
 	if !explicit && !nativeOnly && !serving && (!exists || !route.Fidelity.Strict()) {
 		return false, nil
 	}
@@ -116,9 +116,6 @@ func (x *call) unaryPlan(p *routing.Provider, targetID, model string) (*operatio
 	if record.unary.plan != nil {
 		return record.unary.plan, nil
 	}
-	previous := x.guardrailPreparation
-	x.guardrailPreparation = record
-	defer func() { x.guardrailPreparation = previous }()
 	template, _ := x.snapshot().OperationTemplate(x.route.Slug, targetID, x.operationName())
 	if template == nil {
 		return nil, operations.Error("target_capability", "/operation", "compiled_operation", "The selected target has no compiled native operation contract.")
@@ -146,9 +143,9 @@ func (x *call) unaryPlan(p *routing.Provider, targetID, model string) (*operatio
 		texts, err := plan.GuardrailInput()
 		if err != nil {
 			result, unavailable := x.guardrailEngine.Unavailable(guardrails.Input)
-			x.recordGuardrails(result.Decisions)
+			x.recordPreparationGuardrails(record, result.Decisions)
 			parallel, parallelErr := x.guardrailEngine.Unavailable(guardrails.InputParallel)
-			x.recordGuardrails(parallel.Decisions)
+			x.recordPreparationGuardrails(record, parallel.Decisions)
 			if x.guardrailEngine.HasLegacyInput() {
 				return nil, operations.Error("policy_conflict", "/request", "input_policy_coverage", "The input policy cannot inspect this native request.")
 			}
@@ -158,8 +155,12 @@ func (x *call) unaryPlan(p *routing.Provider, targetID, model string) (*operatio
 			if parallelErr != nil {
 				return nil, parallelErr
 			}
-		} else if err = x.inspectOperationInput(texts); err != nil {
-			return nil, err
+		} else {
+			evidence, err := x.inspectOperationInput(texts)
+			x.recordPreparationGuardrails(record, evidence)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	record.unary = unaryAdmission{plan: plan, estimate: plan.Estimate(), receipt: plan.Receipt(), parameters: routing.Listed(plan.Parameters())}
@@ -191,21 +192,21 @@ func (s *Server) planUnary(ctx context.Context, x *call) *Error {
 	}
 	budgetRoute := *x.route
 	budgetRoute.CallerCostExempt = x.callerCostExempt()
-	if operationregistry.UnboundedWork(x.operationName()) {
+	if !operationregistry.PolicyFor(x.operationName()).BoundedWork {
 		if err := unboundedWorkLimits(x.admissionAuthority(x.authority), nil, nil, &budgetRoute, x.limitRoute()); err != nil {
 			return err
 		}
 	}
 	var incompatible error
 	options := s.selectionOptions(ctx, x)
-	options.Accept = func(p routing.Provider, t routing.Target) error {
+	options.Prepare = func(p routing.Provider, t routing.Target) (*routing.CandidatePreparation, error) {
 		// Decisions does not expose a provider-enforced output bound. An input
 		// estimate alone cannot enforce a token or spend cap on this request.
-		if operationregistry.UnboundedWork(x.operationName()) {
+		if !operationregistry.PolicyFor(x.operationName()).BoundedWork {
 			authority := x.admissionAuthority(x.authority)
 			if err := unboundedWorkLimits(authority, &p, nil, &budgetRoute, x.limitRoute()); err != nil {
 				incompatible = err
-				return err
+				return nil, err
 			}
 			for _, slot := range routing.SelectSlots(p, t.ProviderModel, *x.route, x.keyID, x.operationName(), x.surfaceName(), x.mode, x.affinity) {
 				if options.CredentialEligibility != nil && slot.CredentialID != nil && options.CredentialEligibility(*slot.CredentialID) != routing.Eligible {
@@ -213,24 +214,18 @@ func (s *Server) planUnary(ctx context.Context, x *call) *Error {
 				}
 				if err := unboundedWorkLimits(authority, &p, &slot, &budgetRoute, x.limitRoute()); err != nil {
 					incompatible = err
-					return err
+					return nil, err
 				}
 			}
 		}
-		_, err := x.unaryAdmission(&p, t.ID, t.ProviderModel)
-		if err != nil {
-			incompatible = err
-		}
-		return err
-	}
-	options.Effective = func(p routing.Provider, t routing.Target) (routing.Names, *routing.TokenDemand) {
 		admission, err := x.unaryAdmission(&p, t.ID, t.ProviderModel)
 		if err != nil {
-			return nil, nil
+			incompatible = err
+			return nil, err
 		}
-		return admission.parameters, nil
+		return &routing.CandidatePreparation{Parameters: admission.parameters}, nil
 	}
-	plan, err := routing.Select(x.request.release.Snapshot, x.route.Slug, x.operationName(), x.surfaceName(), "unary", x.affinity, options)
+	plan, err := routing.Select(x.snapshot(), x.route.Slug, x.operationName(), x.surfaceName(), "unary", x.affinity, options)
 	if err != nil {
 		return requestError(err)
 	}
@@ -241,7 +236,7 @@ func (s *Server) planUnary(ctx context.Context, x *call) *Error {
 	if len(plan.Attempts) == 0 {
 		if incompatible != nil {
 			problem := requestError(incompatible)
-			if operationregistry.UnboundedWork(x.operationName()) && problem.Code == "target_capability" {
+			if !operationregistry.PolicyFor(x.operationName()).BoundedWork && problem.Code == "target_capability" {
 				problem.Status = http.StatusUnprocessableEntity
 			}
 			return problem

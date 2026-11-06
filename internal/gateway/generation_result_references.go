@@ -172,14 +172,14 @@ func (s *Server) generationResultResolver(ctx context.Context, x *call, identity
 				return bound.ID, nil
 			}
 		}
-		if s.Resources == nil {
+		if s.deps.Resources == nil {
 			return "", resources.ErrNotFound
 		}
 		identity.Kind, identity.UpstreamID, identity.ParentID = kind, upstream, nil
-		resource, err := s.Resources.GetByUpstreamIncludingDeleted(ctx, identity)
+		resource, err := s.deps.Resources.GetByUpstreamIncludingDeleted(ctx, identity)
 		if errors.Is(err, resources.ErrNotFound) && kind == resources.KindFile {
 			identity.Kind = resources.KindStrictFile
-			resource, err = s.Resources.GetByUpstreamIncludingDeleted(ctx, identity)
+			resource, err = s.deps.Resources.GetByUpstreamIncludingDeleted(ctx, identity)
 		}
 		if err != nil {
 			return "", err

@@ -154,6 +154,20 @@ type pricingFailureRow struct{ err error }
 
 func (row pricingFailureRow) Scan(...any) error { return row.err }
 
+type pricingCurrencyRow string
+
+func (row pricingCurrencyRow) Scan(destinations ...any) error {
+	if len(destinations) != 1 {
+		return errors.New("expected one currency destination")
+	}
+	currency, ok := destinations[0].(*string)
+	if !ok {
+		return errors.New("expected a string currency destination")
+	}
+	*currency = string(row)
+	return nil
+}
+
 func TestCardRevisionRespectsCurrencyFailures(t *testing.T) {
 	lockFailure := errors.New("currency lock unavailable")
 	readFailure := errors.New("currency state unavailable")
@@ -166,7 +180,7 @@ func TestCardRevisionRespectsCurrencyFailures(t *testing.T) {
 		{"lock failure", true, cardRevisionTx{execError: lockFailure, row: pricingFailureRow{readFailure}}, lockFailure},
 		{"currency read failure", true, cardRevisionTx{row: pricingFailureRow{readFailure}}, readFailure},
 		{"markup-only bypasses currency", false, cardRevisionTx{execError: lockFailure, row: pricingFailureRow{readFailure}}, readFailure},
-		{"conflicting currency", true, cardRevisionTx{row: signalTestRow{"EUR"}}, nil},
+		{"conflicting currency", true, cardRevisionTx{row: pricingCurrencyRow("EUR")}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			prices := func() []Price {

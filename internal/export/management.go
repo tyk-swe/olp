@@ -258,15 +258,11 @@ func (m *Management) createSink(r *http.Request, _ access.Principal) (access.Rep
 	if sink.Type == "stripe_meter" && sink.Enabled && !credentialPresent(input.Credential) {
 		return access.Reply{}, access.Invalid("credential", "an enabled stripe_meter sink requires a credential")
 	}
-	tx, err := m.Access.Begin(r)
+	tx, p, err := m.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := m.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	if err := m.requireSinkScope(r, tx, p, sink.ProjectID); err != nil {
 		return access.Reply{}, err
 	}
@@ -275,7 +271,7 @@ func (m *Management) createSink(r *http.Request, _ access.Principal) (access.Rep
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	var count int64
 	if err := tx.QueryRow(r.Context(), countSinksSQL).Scan(&count); err != nil {
@@ -311,7 +307,7 @@ func (m *Management) createSink(r *http.Request, _ access.Principal) (access.Rep
 	if err := m.Access.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 
 func (m *Management) updateSink(r *http.Request, _ access.Principal) (access.Reply, error) {
@@ -330,15 +326,11 @@ func (m *Management) updateSink(r *http.Request, _ access.Principal) (access.Rep
 	if err := access.Decode(r, &input); err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := m.Access.Begin(r)
+	tx, p, err := m.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := m.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	current, etag, projectID, credentialID, err := m.lockSink(r, tx)
 	if err != nil {
 		return access.Reply{}, err
@@ -443,19 +435,15 @@ func (m *Management) updateSink(r *http.Request, _ access.Principal) (access.Rep
 	if err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, access.Detail(body, etag))
+	return access.Detail(body, etag), tx.Commit(r.Context())
 }
 
 func (m *Management) deleteSink(r *http.Request, _ access.Principal) (access.Reply, error) {
-	tx, err := m.Access.Begin(r)
+	tx, p, err := m.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := m.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	current, etag, projectID, credentialID, err := m.lockSink(r, tx)
 	if err != nil {
 		return access.Reply{}, err
@@ -481,7 +469,7 @@ func (m *Management) deleteSink(r *http.Request, _ access.Principal) (access.Rep
 	if err := access.AuditForProject(r.Context(), tx, r, p.Actor(), "export_sink.delete", "export_sink", current.ID, "success", projectID); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, access.Reply{Status: 204})
+	return access.Reply{Status: 204}, tx.Commit(r.Context())
 }
 
 func (m *Management) lockSink(r *http.Request, tx pgx.Tx) (Sink, string, *string, *string, error) {

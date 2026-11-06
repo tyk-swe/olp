@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"log/slog"
 	"sync/atomic"
 	"time"
@@ -15,7 +16,6 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/evidence"
 	"github.com/tyk-swe/olp/internal/secrets"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 type Worker struct {
@@ -74,13 +74,13 @@ func (w *Worker) Run(ctx context.Context) {
 		passCtx, cancel := context.WithTimeout(ctx, w.passBudget())
 		progress, err := w.pass(passCtx)
 		cancel()
-		outcome := usage.OutcomeSuccess
+		outcome := workerhealth.OutcomeSuccess
 		if err != nil {
-			outcome = usage.OutcomeFailure
+			outcome = workerhealth.OutcomeFailure
 			w.Log.Warn("export delivery pass failed", "code", "database")
 		}
 		checkpoint, done := context.WithTimeout(context.WithoutCancel(ctx), boundedWindow)
-		if err := usage.CheckpointTask(checkpoint, w.Pool, usage.TaskExportDelivery, outcome, progress); err != nil {
+		if err := workerhealth.New(workerhealth.TaskExportDelivery, "").Checkpoint(checkpoint, w.Pool, outcome, progress); err != nil {
 			w.Log.Warn("export delivery checkpoint failed", "code", "database")
 		}
 		done()

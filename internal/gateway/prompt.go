@@ -362,7 +362,7 @@ func (s *Server) expandPrompt(x *call, family wire.Format, doc oif.Document, pat
 	if x.snapshot() == nil {
 		return oif.Document{}, nil, serverError(http.StatusServiceUnavailable, "runtime_unavailable", "No runtime release is available.")
 	}
-	route, ok := x.snapshot().Routes[slug]
+	route, ok := x.snapshot().FindRoute(slug)
 	if !ok {
 		return oif.Document{}, nil, modelNotFound(slug)
 	}
@@ -376,7 +376,7 @@ func (s *Server) expandPrompt(x *call, family wire.Format, doc oif.Document, pat
 		return oif.Document{}, nil, invalidRequest("invalid_prompt", "Published prompts require a transformed route.", &param)
 	}
 	publicationID := promptPublicationID(family, selection.ID)
-	for _, revision := range x.snapshot().AgentPublications {
+	for _, revision := range x.snapshot().AgentPublications() {
 		if revision.Kind != "prompt" || revision.PublicationID != publicationID || route.ProjectID == nil || revision.ProjectID != *route.ProjectID || revision.Definition.Prompt == nil {
 			continue
 		}

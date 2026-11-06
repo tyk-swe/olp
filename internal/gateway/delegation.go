@@ -9,32 +9,33 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/release"
 )
 
 type delegationRuntime interface {
-	CreateDelegation(context.Context, access.Authority, access.Authority, release.DelegationBounds) (release.DelegationGrant, error)
-	AuthenticateDelegation(context.Context, string, string) (*access.Authority, error)
-	ReauthenticateDelegation(context.Context, string, string) (*access.Authority, error)
+	CreateDelegation(context.Context, keyauthority.Authority, keyauthority.Authority, release.DelegationBounds) (release.DelegationGrant, error)
+	AuthenticateDelegation(context.Context, string, string) (*keyauthority.Authority, error)
+	ReauthenticateDelegation(context.Context, string, string) (*keyauthority.Authority, error)
 }
 
 type memberConsentRuntime interface {
-	ExchangeMemberConsent(context.Context, access.Authority, string, release.DelegationBounds) (release.DelegationGrant, error)
+	ExchangeMemberConsent(context.Context, keyauthority.Authority, string, release.DelegationBounds) (release.DelegationGrant, error)
 }
 
-func (s *Server) reauthenticateSession(ctx context.Context, x *call, token string) (*access.Authority, error) {
+func (s *Server) reauthenticateSession(ctx context.Context, x *call, token string) (*keyauthority.Authority, error) {
 	if x.authority.TaskCapability != nil {
-		auth, ok := s.Runtime.(consumerauth.TaskCapabilityAuthenticator)
+		auth, ok := s.deps.Runtime.(consumerauth.TaskCapabilityAuthenticator)
 		if !ok {
 			return nil, release.ErrInvalidKey
 		}
 		return auth.AuthenticateTaskCapability(ctx, token)
 	}
 	if x.authority.DelegationAgentID == "" {
-		return s.Runtime.Authenticate(token)
+		return s.deps.Runtime.Authenticate(token)
 	}
-	delegate, ok := s.Runtime.(delegationRuntime)
+	delegate, ok := s.deps.Runtime.(delegationRuntime)
 	if !ok {
 		return nil, release.ErrInvalidKey
 	}
@@ -48,7 +49,7 @@ func (s *Server) createDelegation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.release(r.Context())
-	delegate, ok := s.Runtime.(delegationRuntime)
+	delegate, ok := s.deps.Runtime.(delegationRuntime)
 	if !ok {
 		writeError(w, serverError(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable."))
 		return
@@ -63,7 +64,7 @@ func (s *Server) createDelegation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, invalidRequest("invalid_request", "Provide bounded delegation scopes and resources.", nil))
 		return
 	}
-	agent, failure := consumerauth.Authenticate(s.Runtime, r, assertion, delegationScope(bounds), s.cfg.TrustedProxies, s.now())
+	agent, failure := consumerauth.Authenticate(s.deps.Runtime, r, assertion, delegationScope(bounds), s.cfg.TrustedProxies, s.now())
 	if failure != nil {
 		writeError(w, consumerFailure(failure))
 		return
@@ -73,7 +74,7 @@ func (s *Server) createDelegation(w http.ResponseWriter, r *http.Request) {
 			writeError(w, invalidRequest("invalid_request", "Provide either a delegating key or member consent.", nil))
 			return
 		}
-		member, ok := s.Runtime.(memberConsentRuntime)
+		member, ok := s.deps.Runtime.(memberConsentRuntime)
 		if !ok {
 			writeError(w, serverError(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable."))
 			return
@@ -82,7 +83,7 @@ func (s *Server) createDelegation(w http.ResponseWriter, r *http.Request) {
 		writeDelegationGrant(w, grant, err)
 		return
 	}
-	key, failure := consumerauth.Authenticate(s.Runtime, r, strings.TrimSpace(r.Header.Get("X-OLP-Delegating-Key")), "delegate", s.cfg.TrustedProxies, s.now())
+	key, failure := consumerauth.Authenticate(s.deps.Runtime, r, strings.TrimSpace(r.Header.Get("X-OLP-Delegating-Key")), "delegate", s.cfg.TrustedProxies, s.now())
 	if failure != nil {
 		writeError(w, consumerFailure(failure))
 		return

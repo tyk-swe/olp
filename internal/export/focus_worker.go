@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"log/slog"
 	"sync"
 	"time"
@@ -14,7 +15,6 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/secrets"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // FocusWorker generates and delivers the daily FOCUS 1.4 datasets a csv_gzip
@@ -81,13 +81,13 @@ func (w *FocusWorker) FocusMetrics() map[[2]string]int64 {
 func (w *FocusWorker) Run(ctx context.Context) {
 	for {
 		progress, err := w.Pass(ctx)
-		outcome := usage.OutcomeSuccess
+		outcome := workerhealth.OutcomeSuccess
 		if err != nil {
-			outcome = usage.OutcomeFailure
+			outcome = workerhealth.OutcomeFailure
 			w.log().Warn("focus export pass failed", "code", "database")
 		}
 		checkpoint, done := context.WithTimeout(context.WithoutCancel(ctx), boundedWindow)
-		if err := usage.CheckpointTask(checkpoint, w.Pool, usage.TaskFocusExport, outcome, progress); err != nil {
+		if err := workerhealth.New(workerhealth.TaskFocusExport, "").Checkpoint(checkpoint, w.Pool, outcome, progress); err != nil {
 			w.log().Warn("focus export checkpoint failed", "code", "database")
 		}
 		done()

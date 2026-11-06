@@ -9,9 +9,9 @@
   import ReauthenticateDialog from '$lib/shell/ReauthenticateDialog.svelte';
   import {
     beginIdentityReauthentication,
-    listOidcIdentities,
-    reauthenticateWithPassword
+    listOidcIdentities
   } from '$lib/features/access/profile/api';
+  import { reauthenticateWithPassword } from '$lib/features/access/profile/reauthentication';
   import { pluginKeys } from '$lib/features/plugins/pluginKeys';
   import {
     listUnconfinedExecutables,
@@ -29,13 +29,11 @@
     canManage,
     onPermitted
   }: {
-    // Whether the deployment enables the unconfined tier.
     enabled: boolean;
     canManage: boolean;
     onPermitted: () => Promise<unknown>;
   } = $props();
 
-  // How long a recent authentication authorizes a permission.
   const VERIFIED_FOR_MS = 5 * 60 * 1000;
 
   const executables = createQuery(() => ({
@@ -53,8 +51,7 @@
   let reauthenticationBusy = $state(false);
   let reauthenticationError = $state('');
   let singleSignOn = $state(false);
-  // Set while single sign-on has verified the owner for a permission, which
-  // the next permission spends.
+
   let verified = $state(false);
   let verifiedExpiry: ReturnType<typeof setTimeout> | undefined;
 
@@ -92,10 +89,6 @@
     else await reauthenticate();
   }
 
-  /**
-   * Asks the owner to confirm their identity: with their password when they
-   * have one, else through single sign-on, which returns to this page.
-   */
   async function reauthenticate() {
     busy = 'permit';
     error = '';

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -132,15 +133,15 @@ func (w *Worker) Run(ctx context.Context) {
 	defer ticker.Stop()
 	for {
 		pass, err := w.ReconcileOnce(ctx, WorkerBatchSize)
-		outcome := usage.OutcomeSuccess
+		outcome := workerhealth.OutcomeSuccess
 		if err != nil || pass != nil && pass.Failed > 0 {
-			outcome = usage.OutcomeFailure
+			outcome = workerhealth.OutcomeFailure
 			if err != nil {
 				w.logger().Warn("batch settlement pass failed", "error", err)
 			}
 		}
 		if w.Pool != nil {
-			if checkpointErr := usage.CheckpointTask(ctx, w.Pool, usage.TaskBatchSettlement, outcome, pass != nil && pass.Claimed > 0); checkpointErr != nil {
+			if checkpointErr := workerhealth.New(workerhealth.TaskBatchSettlement, "").Checkpoint(ctx, w.Pool, outcome, pass != nil && pass.Claimed > 0); checkpointErr != nil {
 				w.logger().Debug("batch settlement checkpoint failed", "error", checkpointErr)
 			}
 		}
@@ -723,7 +724,7 @@ func (w *Worker) keepLease(ctx context.Context, settlement Settlement) (context.
 				}
 				// Lease renewal proves this worker is alive during a long result
 				// read, even when a full pass exceeds the health freshness window.
-				if err := usage.CheckpointTask(leaseCtx, w.Pool, usage.TaskBatchSettlement, usage.OutcomeSuccess, false); err != nil {
+				if err := workerhealth.New(workerhealth.TaskBatchSettlement, "").Checkpoint(leaseCtx, w.Pool, workerhealth.OutcomeSuccess, false); err != nil {
 					w.logger().Debug("batch settlement heartbeat failed", "error", err)
 				}
 			}

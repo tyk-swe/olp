@@ -12,9 +12,9 @@ import (
 func grantCandidate(sequence, generation int64, credentialID string) *releaseCandidate {
 	return &releaseCandidate{
 		baseSequence: sequence - 1,
-		release: &Release{Sequence: sequence, Snapshot: &routing.Snapshot{Providers: map[string]routing.Provider{
+		release: &Release{Sequence: sequence, snapshot: (&routing.Snapshot{Providers: map[string]routing.Provider{
 			"provider": {ID: "provider", AuthMode: connectors.AuthGrant, Slots: []routing.Slot{{CredentialID: &credentialID}}},
-		}}},
+		}}).ReadOnly()},
 		grants: map[string]servedGrant{credentialID: {generation: generation, secret: []byte(strconv.FormatInt(generation, 10))}},
 	}
 }
@@ -40,7 +40,7 @@ func publishGrantCandidate(t *testing.T, m *Manager, candidate *releaseCandidate
 func TestReleasePublicationNotifiesOnlyAdvancedGrantGenerations(t *testing.T) {
 	m := credentialManager(t, time.Now())
 	notified := make(chan string, 3)
-	m.GrantRefreshed = func(providerID, credentialID string) { notified <- providerID + "/" + credentialID }
+	m.grantRefreshed = func(providerID, credentialID string) { notified <- providerID + "/" + credentialID }
 	publishGrantCandidate(t, m, grantCandidate(1, 1, "credential"))
 	publishGrantCandidate(t, m, grantCandidate(2, 2, "credential"))
 	publishGrantCandidate(t, m, grantCandidate(3, 2, "credential"))

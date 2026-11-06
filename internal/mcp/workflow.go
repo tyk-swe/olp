@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -30,13 +30,13 @@ func workflowFailure(failure *apiError) error {
 	return &WorkflowError{Status: failure.status, Code: failure.code, Message: failure.msg}
 }
 
-func (s *Server) Resolve(_ context.Context, authority access.Authority, release *release.Release, toolsets []string) ([]WorkflowTool, error) {
-	if s == nil || s.runtime == nil || authority.ProjectID == nil || release == nil || release.Snapshot == nil {
+func (s *Server) Resolve(_ context.Context, authority keyauthority.Authority, release *release.Release, toolsets []string) ([]WorkflowTool, error) {
+	if s == nil || s.runtime == nil || authority.ProjectID == nil || release == nil || release.Snapshot() == nil {
 		return nil, workflowFailure(errToolsetNotFound)
 	}
 	var tools []WorkflowTool
 	for _, id := range toolsets {
-		resolved, failure := s.resolveToolset(authority, release.Snapshot, id)
+		resolved, failure := s.resolveToolset(authority, release.Snapshot(), id)
 		if failure != nil {
 			return nil, workflowFailure(failure)
 		}
@@ -53,7 +53,7 @@ func (s *Server) Resolve(_ context.Context, authority access.Authority, release 
 	return tools, nil
 }
 
-func (s *Server) AuthorizeWorkflowTool(authority access.Authority, tool WorkflowTool) error {
+func (s *Server) AuthorizeWorkflowTool(authority keyauthority.Authority, tool WorkflowTool) error {
 	if s == nil || s.runtime == nil {
 		return workflowFailure(fail(http.StatusServiceUnavailable, "authority_unavailable", "api_error", "Key authority is unavailable; retry shortly."))
 	}
@@ -67,19 +67,19 @@ func (s *Server) AuthorizeWorkflowTool(authority access.Authority, tool Workflow
 	return nil
 }
 
-func (s *Server) Call(ctx context.Context, authority access.Authority, release *release.Release, selected WorkflowTool, runID string, ordinal int, callID string, arguments json.RawMessage) (json.RawMessage, error) {
+func (s *Server) Call(ctx context.Context, authority keyauthority.Authority, release *release.Release, selected WorkflowTool, runID string, ordinal int, callID string, arguments json.RawMessage) (json.RawMessage, error) {
 	return s.callWorkflow(ctx, authority, release, selected, runID, ordinal, callID, arguments, nil)
 }
 
-func (s *Server) CallApproved(ctx context.Context, authority access.Authority, release *release.Release, selected WorkflowTool, runID string, ordinal int, callID string, arguments json.RawMessage, approval runs.WorkflowApproval) (json.RawMessage, error) {
+func (s *Server) CallApproved(ctx context.Context, authority keyauthority.Authority, release *release.Release, selected WorkflowTool, runID string, ordinal int, callID string, arguments json.RawMessage, approval runs.WorkflowApproval) (json.RawMessage, error) {
 	return s.callWorkflow(ctx, authority, release, selected, runID, ordinal, callID, arguments, &approval)
 }
 
-func (s *Server) callWorkflow(ctx context.Context, authority access.Authority, release *release.Release, selected WorkflowTool, runID string, ordinal int, callID string, arguments json.RawMessage, approval *runs.WorkflowApproval) (json.RawMessage, error) {
-	if s == nil || s.runtime == nil || !s.executor.available() || authority.ProjectID == nil || release == nil || release.Snapshot == nil {
+func (s *Server) callWorkflow(ctx context.Context, authority keyauthority.Authority, release *release.Release, selected WorkflowTool, runID string, ordinal int, callID string, arguments json.RawMessage, approval *runs.WorkflowApproval) (json.RawMessage, error) {
+	if s == nil || s.runtime == nil || !s.executor.available() || authority.ProjectID == nil || release == nil || release.Snapshot() == nil {
 		return nil, workflowFailure(errLedger)
 	}
-	resolved, failure := s.resolveToolset(authority, release.Snapshot, selected.ToolsetID)
+	resolved, failure := s.resolveToolset(authority, release.Snapshot(), selected.ToolsetID)
 	if failure != nil {
 		return nil, workflowFailure(failure)
 	}
@@ -96,7 +96,7 @@ func (s *Server) callWorkflow(ctx context.Context, authority access.Authority, r
 	}
 	result := s.executor.Execute(ctx, CallRequest{
 		Authority: authority, Approval: approval, ToolsetID: resolved.id, ToolsetRevisionID: resolved.revisionID, Tool: tool, Arguments: arguments,
-		ReleaseID: releaseIDFor(release, release.Snapshot), Release: release, Policies: release.Snapshot,
+		ReleaseID: releaseIDFor(release, release.Snapshot()), Release: release, Policies: release.Snapshot(),
 		RunID: runID, Ordinal: ordinal, CallID: callID,
 	})
 	switch outcome := result.Outcome.(type) {

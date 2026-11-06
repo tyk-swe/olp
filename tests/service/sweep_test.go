@@ -3,6 +3,7 @@
 package service_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -13,6 +14,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/promotion"
 )
 
 // readinessRoute reports 503 by design until a process has a fresh snapshot.
@@ -189,4 +192,125 @@ func TestManagementIsolationSweep(t *testing.T) {
 			}
 		}
 	}
+
+	t.Run("project_policy_promotion_preserves_local_state_and_rolls_back", func(t *testing.T) {
+		other := s.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "batch-policy"}, idempotent(), http.StatusCreated)
+		projectID, otherID := project["id"].(string), other["id"].(string)
+		path := "/api/v1/projects/" + projectID
+		templates := s.want(owner, "GET", path+"/limit-templates", nil, nil, http.StatusOK)
+		s.want(owner, "PUT", path+"/limit-templates", map[string]any{
+			"templates": map[string]any{"retained": map[string]any{"requests_per_minute": 5}},
+		}, etag(templates), http.StatusOK)
+		s.want(owner, "POST", "/api/v1/api-keys", map[string]any{
+			"name": "template-member", "scopes": []string{"inference"}, "project_id": projectID, "limit_template": "retained",
+		}, idempotent(), http.StatusCreated)
+		for index, id := range []string{projectID, otherID} {
+			policyPath := "/api/v1/projects/" + id + "/end-user-policy"
+			current := s.want(owner, "GET", policyPath, nil, nil, http.StatusOK)
+			s.want(owner, "PUT", policyPath, map[string]any{"policy": map[string]any{
+				"defaults":  map[string]any{"requests_per_minute": 11 - index},
+				"overrides": map[string]any{strings.Repeat("a", 64): map[string]any{"requests_per_minute": 3}},
+				"blocked":   []string{strings.Repeat("b", 64)},
+			}}, etag(current), http.StatusOK)
+		}
+		live := s.want(owner, "GET", path+"/end-user-policy", nil, nil, http.StatusOK)
+		limit := int64(11)
+		document := promotion.Document{APIVersion: promotion.APIVersion, Projects: []promotion.ProjectEntry{
+			{Name: project["name"].(string), EndUserDefaults: &authority.AdmissionLimits{RequestsPerMinute: &limit}},
+			{Name: other["name"].(string), EndUserDefaults: &authority.AdmissionLimits{RequestsPerMinute: &limit}},
+		}}
+		s.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idempotent(), http.StatusOK)
+		liveAfter := s.want(owner, "GET", path+"/end-user-policy", nil, nil, http.StatusOK)
+		promoted := s.want(owner, "GET", "/api/v1/projects/"+otherID+"/end-user-policy", nil, nil, http.StatusOK)
+		livePolicy, err := json.Marshal(live["policy"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		promotedPolicy, err := json.Marshal(promoted["policy"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(livePolicy) != string(promotedPolicy) {
+			t.Fatalf("promoted policy = %s, live policy = %s", promotedPolicy, livePolicy)
+		}
+		emptyTemplates := authority.LimitTemplates{}
+		changedLimit := int64(17)
+		invalid := promotion.Document{APIVersion: promotion.APIVersion, Projects: []promotion.ProjectEntry{
+			{Name: other["name"].(string), EndUserDefaults: &authority.AdmissionLimits{RequestsPerMinute: &changedLimit}},
+			{Name: project["name"].(string), EndUserDefaults: &authority.AdmissionLimits{RequestsPerMinute: &changedLimit}, LimitTemplates: &emptyTemplates},
+		}}
+		problem := s.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": invalid}, idempotent(), http.StatusConflict)
+		if problem["type"] != "https://openllmproxy.dev/problems/template_in_use" {
+			t.Fatalf("promotion did not reach the referenced-template check: %v", problem)
+		}
+		for index, id := range []string{projectID, otherID} {
+			current := s.want(owner, "GET", "/api/v1/projects/"+id+"/end-user-policy", nil, nil, http.StatusOK)
+			currentPolicy, err := json.Marshal(current["policy"])
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := []map[string]any{liveAfter, promoted}[index]
+			if string(currentPolicy) != string(livePolicy) || current["etag"] != before["etag"] {
+				t.Fatalf("failed promotion changed project %s policy or version: %v", id, current)
+			}
+		}
+	})
+
+	t.Run("queued_mutation_rechecks_project_membership", func(t *testing.T) {
+		projectID := project["id"].(string)
+		path := "/api/v1/projects/" + projectID + "/end-user-policy"
+		current := s.want(callers[0], "GET", path, nil, nil, http.StatusOK)
+		gate, err := s.pool.Begin(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer gate.Rollback(t.Context())
+		var gatePID int32
+		if err := gate.QueryRow(t.Context(), "SELECT pg_backend_pid() FROM olp.installation WHERE singleton FOR UPDATE").Scan(&gatePID); err != nil {
+			t.Fatal(err)
+		}
+		type response struct {
+			status int
+			raw    []byte
+		}
+		result := make(chan response, 1)
+		go func() {
+			status, raw := s.do(callers[0], "PUT", path, map[string]any{"policy": nil}, etag(current))
+			result <- response{status, raw}
+		}()
+		s.eventually("the policy mutation waiting for the concurrent membership change", 5*time.Second, func() (bool, string) {
+			var blocked bool
+			err := s.pool.QueryRow(t.Context(), "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid)))", gatePID).Scan(&blocked)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return blocked, "the mutation has not reached the membership transaction"
+		})
+		if _, err := gate.Exec(t.Context(), "DELETE FROM olp.project_members WHERE project_id=$1 AND user_id=$2", projectID, userID); err != nil {
+			t.Fatal(err)
+		}
+		if err := gate.Commit(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case reply := <-result:
+			if reply.status != http.StatusNotFound {
+				t.Fatalf("queued mutation retained revoked project authority: %s", describe(reply.status, reply.raw))
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("queued mutation did not finish after the membership change")
+		}
+		after := s.want(owner, "GET", path, nil, nil, http.StatusOK)
+		beforeJSON, err := json.Marshal(current)
+		if err != nil {
+			t.Fatal(err)
+		}
+		afterJSON, err := json.Marshal(after)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(beforeJSON) != string(afterJSON) {
+			t.Fatalf("denied mutation changed the project policy: before %s, after %s", beforeJSON, afterJSON)
+		}
+	})
 }

@@ -183,11 +183,11 @@ func TestFocusSettlesMultipleAttemptsAndOverlappingCommitmentDays(t *testing.T) 
 				t.Fatal(err)
 			}
 			event := fixture.event(fixture.attempt(1), fixture.attempt(2))
-			payload, err := usage.Encode(event)
+			accepted, err := usage.NewAccountingEvent(event)
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := usage.PersistEvent(t.Context(), pool, event, payload)
+			result, err := usage.PersistEvent(t.Context(), pool, accepted)
 			if err != nil || result.Outcome != usage.PersistOutcomePersisted {
 				t.Fatalf("settle FOCUS event: outcome=%v error=%v", result.Outcome, err)
 			}
@@ -274,7 +274,7 @@ func (f usageFixture) attempt(ordinal int) usage.Attempt {
 	return usage.Attempt{
 		ID: uuid.NewString(), Ordinal: ordinal, ProviderID: f.providerID, UpstreamModel: vendorModel,
 		StartedAt: f.observedAt, CompletedAt: f.observedAt, StatusCode: &status, Committed: true,
-		Usage: &usage.AttemptUsage{Observed: true, Complete: true, InputTokens: &input, OutputTokens: &output},
+		Usage: &usage.AttemptUsage{Observed: true, Complete: true, UsageQuantities: usage.UsageQuantities{InputTokens: &input, OutputTokens: &output}},
 	}
 }
 
@@ -341,7 +341,7 @@ func TestConsumerCommitsBeforeLaterEventIsBlocked(t *testing.T) {
 	consumerContext, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
-		done <- usage.RunConsumer(consumerContext, pool, client, stream, "service-consumer", nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		done <- usage.RunConsumer(consumerContext, pool, client, stream, "service-consumer", "service-region", nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -586,11 +586,11 @@ func TestUsageReportsKeepWholePeriodAllocationAndCompleteness(t *testing.T) {
 	selected, earlier, later := fixture.attempt(1), fixture.attempt(2), fixture.attempt(3)
 	ineligible, legacy, absent := fixture.attempt(4), fixture.attempt(5), fixture.attempt(6)
 	event := fixture.event(selected, earlier, later, ineligible, legacy, absent)
-	payload, err := usage.Encode(event)
+	accepted, err := usage.NewAccountingEvent(event)
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := usage.PersistEvent(t.Context(), pool, event, payload)
+	result, err := usage.PersistEvent(t.Context(), pool, accepted)
 	if err != nil || result.Outcome != usage.PersistOutcomePersisted {
 		t.Fatalf("persist report fixture: outcome=%v error=%v", result.Outcome, err)
 	}

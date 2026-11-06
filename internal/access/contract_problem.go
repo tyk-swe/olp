@@ -1,6 +1,8 @@
 package access
 
-import "errors"
+import (
+	"errors"
+)
 
 // ContractProblem reports an obligation a strict route's target cannot meet as a
 // 422, or returns nil when err is not such an obligation. A refusal that exists

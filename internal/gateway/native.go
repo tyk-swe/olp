@@ -6,12 +6,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
-
-	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/surface"
 )
 
@@ -91,7 +90,7 @@ func (s *Server) registerNative(mux *http.ServeMux) {
 		}
 	}
 }
-func (s *Server) nativeModel(ctx context.Context, release *release.Release, authority access.Authority, route routing.Route, surface string) map[string]any {
+func (s *Server) nativeModel(ctx context.Context, release *release.Release, authority keyauthority.Authority, route routing.Route, surface string) map[string]any {
 	capabilities := s.modelCapabilities(ctx, release, authority, route, surface)
 	if surface == "anthropic" {
 		return map[string]any{"id": route.Slug, "type": "model", "display_name": route.Slug, "created_at": route.PublishedAt.UTC().Format("2006-01-02T15:04:05Z"), "capabilities": capabilities}
@@ -114,7 +113,7 @@ func (s *Server) nativeModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if slug := r.PathValue("model"); slug != "" {
-		route, ok := req.release.Snapshot.Routes[slug]
+		route, ok := req.release.Snapshot().FindRoute(slug)
 		if !ok || !authority.Allows("models_read", slug, route.ProjectID, s.now()) {
 			writeSurfaceError(w, modelNotFound(slug), surface)
 			return
@@ -123,9 +122,9 @@ func (s *Server) nativeModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows := []map[string]any{}
-	for _, slug := range slices.Sorted(mapsKeys(req.release.Snapshot.Routes)) {
-		if authority.Allows("models_read", slug, req.release.Snapshot.Routes[slug].ProjectID, s.now()) {
-			rows = append(rows, s.nativeModel(r.Context(), req.release, authority, req.release.Snapshot.Routes[slug], surface))
+	for _, slug := range req.release.Snapshot().RouteSlugs() {
+		if authority.Allows("models_read", slug, req.release.Snapshot().Route(slug).ProjectID, s.now()) {
+			rows = append(rows, s.nativeModel(r.Context(), req.release, authority, req.release.Snapshot().Route(slug), surface))
 		}
 	}
 	if surface == "anthropic" {

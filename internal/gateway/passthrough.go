@@ -45,13 +45,13 @@ func (s *Server) passthrough(w http.ResponseWriter, r *http.Request) {
 		fail(e)
 		return
 	}
-	if x.request.release == nil || x.request.release.Snapshot == nil {
+	if x.request.release == nil || x.request.release.Snapshot() == nil {
 		fail(serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No serving release is installed."))
 		return
 	}
-	snapshot := x.request.release.Snapshot
+	snapshot := x.request.release.Snapshot()
 	slug := r.PathValue("route")
-	route, ok := snapshot.Routes[slug]
+	route, ok := snapshot.FindRoute(slug)
 	if !ok || !route.IsPassthrough() || route.Passthrough.Dialect != r.PathValue("dialect") || !authority.Allows("inference", slug, route.ProjectID, s.now()) || !slices.Contains(authority.Policy.AllowedRoutes, slug) {
 		fail(modelNotFound(slug))
 		return
@@ -113,7 +113,7 @@ func passthroughSuffix(r *http.Request) (string, bool) {
 
 func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *call, route *routing.Route, normalized string, query url.Values, fail func(*Error)) {
 	target := route.Targets[0]
-	provider, ok := x.snapshot().Providers[target.ProviderID]
+	provider, ok := x.snapshot().FindProvider(target.ProviderID)
 	if !ok || !provider.Enabled {
 		fail(serverError(http.StatusServiceUnavailable, "upstream_unavailable", "The bound connection is unavailable."))
 		return

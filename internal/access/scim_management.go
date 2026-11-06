@@ -7,7 +7,6 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
-
 	"github.com/tyk-swe/olp/internal/scim"
 )
 
@@ -47,15 +46,11 @@ func (s *Server) scimGroupMapping(r *http.Request, _ Principal) (Reply, error) {
 	if input.Mapping == nil {
 		return Reply{}, Invalid("mapping", "Provide an explicit mapping object.")
 	}
-	tx, err := s.Begin(r)
+	tx, p, err := s.BeginMutation(r)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Reauthorize(r, tx)
-	if err != nil {
-		return Reply{}, err
-	}
 	document, etag, err := s.scimRead(r, tx, true, id)
 	if err != nil {
 		return Reply{}, err
@@ -83,7 +78,7 @@ func (s *Server) scimGroupMapping(r *http.Request, _ Principal) (Reply, error) {
 	if err = keepSCIMManagers(r, tx, managed); err != nil {
 		return Reply{}, err
 	}
-	if err = s.usableOwner(r, tx); err != nil {
+	if err = s.EnsureUsableOwner(r, tx); err != nil {
 		return Reply{}, err
 	}
 	if _, err = AdvanceAuthority(r.Context(), tx); err != nil {
@@ -96,7 +91,7 @@ func (s *Server) scimGroupMapping(r *http.Request, _ Principal) (Reply, error) {
 	if err = tx.QueryRow(r.Context(), "SELECT "+scimGroupJSON+",g.etag::text FROM olp.scim_groups g WHERE id=$1", id).Scan(&body, &etag); err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, Detail(json.RawMessage(body), etag))
+	return Detail(json.RawMessage(body), etag), tx.Commit(r.Context())
 }
 
 // keepSCIMManagers refuses a mapping change that leaves a project it managed
@@ -152,7 +147,7 @@ func (s *Server) StoreSCIMMapping(ctx context.Context, tx pgx.Tx, p Principal, n
 	if err = keepSCIMManagers(r, tx, managed); err != nil {
 		return err
 	}
-	if err = s.usableOwner(r, tx); err != nil {
+	if err = s.EnsureUsableOwner(r, tx); err != nil {
 		return err
 	}
 	_, err = AdvanceAuthority(ctx, tx)

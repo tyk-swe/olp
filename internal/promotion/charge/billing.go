@@ -94,5 +94,6 @@ func ApplyBillingImport(s *promotion.Server, ctx context.Context, tx pgx.Tx, pro
 	if !compatible {
 		return access.Invalid("secret_bindings", "Supply the provider's billing credential binding.")
 	}
-	return billing.ApplyImport(ctx, tx, providerID, source, entry.BillingImport.Enabled, entry.BillingImport.Scope, credentialID, createdBy)
+	_, err = billing.SaveImport(ctx, tx, providerID, billing.ImportConfiguration{Source: source, Enabled: entry.BillingImport.Enabled, Scope: entry.BillingImport.Scope, CredentialID: credentialID}, createdBy)
+	return err
 }

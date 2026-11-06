@@ -3,13 +3,14 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"github.com/tyk-swe/olp/internal/codesessions"
 	"io"
 	"net/http"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/resources"
+
 	"github.com/tyk-swe/olp/internal/upstream"
 )
 
@@ -42,7 +43,7 @@ func readTranslatedRejection(ctx context.Context, body io.ReadCloser, limit int6
 	}
 }
 
-func (a *codeAttempt) recover(ctx context.Context, response *http.Response, route codemode.Route, previous *resources.CodeRecovery, translated bool) (*resources.CodeRecovery, error) {
+func (a *codeAttempt) recover(ctx context.Context, response *http.Response, route codemode.Route, previous *codesessions.Recovery, translated bool) (*codesessions.Recovery, error) {
 	if a.paid != nil {
 		return nil, nil
 	}
@@ -65,7 +66,7 @@ func (a *codeAttempt) recover(ctx context.Context, response *http.Response, rout
 	if !ok || !proven {
 		return nil, nil
 	}
-	if err := a.server.CodeLedger.ConfirmNonexecution(ctx, a.permit.Attempt.ID, response.StatusCode); err != nil {
+	if err := a.server.deps.CodeLedger.ConfirmNonexecution(ctx, a.permit.Attempt.ID, response.StatusCode); err != nil {
 		return nil, nil
 	}
 	rejection = codeadapter.RejectionWithCycleReset(rejection, a.permit.Account.CycleAnchor, a.server.now().UTC())
@@ -86,7 +87,7 @@ func (a *codeAttempt) recover(ctx context.Context, response *http.Response, rout
 		return nil, nil
 	}
 	if rejection.Class == upstream.Credential {
-		if err := a.server.CodeLedger.ObserveCooldown(ctx, a.permit.Account.ID, rejection.RetryAt); err != nil {
+		if err := a.server.deps.CodeLedger.ObserveCooldown(ctx, a.permit.Account.ID, rejection.RetryAt); err != nil {
 			return nil, nil
 		}
 	}
@@ -97,9 +98,9 @@ func (a *codeAttempt) recover(ctx context.Context, response *http.Response, rout
 		return nil, nil
 	}
 	if rejection.Class == upstream.Credential && a.auth.CredentialID != "" && a.auth.GrantGeneration > 0 && a.refreshed(ctx, adapter) {
-		return &resources.CodeRecovery{From: a.permit.Attempt.ID, Envelope: rejection.Envelope, Number: ordinal, AccountID: a.permit.Account.ID, CredentialID: a.auth.CredentialID, GrantGeneration: a.auth.GrantGeneration, RejectedUntil: rejection.RetryAt}, nil
+		return &codesessions.Recovery{From: a.permit.Attempt.ID, Envelope: rejection.Envelope, Number: ordinal, AccountID: a.permit.Account.ID, CredentialID: a.auth.CredentialID, GrantGeneration: a.auth.GrantGeneration, RejectedUntil: rejection.RetryAt}, nil
 	}
-	return &resources.CodeRecovery{From: a.permit.Attempt.ID, Envelope: rejection.Envelope, Number: ordinal}, nil
+	return &codesessions.Recovery{From: a.permit.Attempt.ID, Envelope: rejection.Envelope, Number: ordinal}, nil
 }
 
 func (a *codeAttempt) refreshed(ctx context.Context, adapter codeadapter.Vendor) bool {
@@ -108,7 +109,7 @@ func (a *codeAttempt) refreshed(ctx context.Context, adapter codeadapter.Vendor)
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		auth, err := a.server.CodeAuthorizer.AuthorizeCode(refreshCtx, a.config, a.permit.Account, codemode.Dispatch{Adapter: adapter.Adapter, Protocol: a.endpoint.Protocol, ClientPath: a.endpoint.ClientPath})
+		auth, err := a.server.deps.CodeAuthorizer.AuthorizeCode(refreshCtx, a.config, a.permit.Account, codemode.Dispatch{Adapter: adapter.Adapter, Protocol: a.endpoint.Protocol, ClientPath: a.endpoint.ClientPath})
 		if err == nil && auth.CredentialID == a.auth.CredentialID && auth.GrantGeneration > a.auth.GrantGeneration && adapter.ValidateAuthorization(a.endpoint, auth, a.permit.Pin.Principal) == nil {
 			return true
 		}
@@ -120,7 +121,7 @@ func (a *codeAttempt) refreshed(ctx context.Context, adapter codeadapter.Vendor)
 	}
 }
 
-func recoveryOrdinal(previous *resources.CodeRecovery) int {
+func recoveryOrdinal(previous *codesessions.Recovery) int {
 	if previous != nil {
 		return previous.Number + 1
 	}

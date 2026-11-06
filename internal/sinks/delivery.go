@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"io"
 	"log/slog"
 	"net/http"
@@ -20,7 +21,6 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/evidence"
 	"github.com/tyk-swe/olp/internal/secrets"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 const deliveryTimeout = 5 * time.Second
@@ -56,17 +56,17 @@ func (w *Worker) Run(ctx context.Context, log *slog.Logger) {
 		if ctx.Err() != nil {
 			return
 		}
-		outcome := usage.OutcomeSuccess
+		outcome := workerhealth.OutcomeSuccess
 		if err != nil {
-			outcome = usage.OutcomeFailure
+			outcome = workerhealth.OutcomeFailure
 			log.Warn("export delivery pass failed", "error_type", "export_delivery")
 		}
-		if err = usage.CheckpointTask(ctx, w.Pool, usage.TaskManagedExportDelivery, outcome, progress); err != nil {
+		if err = workerhealth.New(workerhealth.TaskManagedExportDelivery, "").Checkpoint(ctx, w.Pool, outcome, progress); err != nil {
 			log.Warn("export delivery checkpoint failed", "error_type", "checkpoint")
 		}
 		// Drain healthy backlog through additional bounded passes; the ticker
 		// governs idle polling, rather than limiting a busy worker's throughput.
-		if outcome == usage.OutcomeSuccess && progress {
+		if outcome == workerhealth.OutcomeSuccess && progress {
 			continue
 		}
 		select {

@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
@@ -125,7 +125,7 @@ func (s *Server) retainedBodyDigest(e retainedapi.Endpoint, slug string, body []
 	if !strings.HasPrefix(contentType, "multipart/") {
 		return s.retainedSubmissionDigest(e, slug, body)
 	}
-	digester, ok := s.Runtime.(interface {
+	digester, ok := s.deps.Runtime.(interface {
 		Digest(secrets.DigestPurpose, string) []byte
 	})
 	if !ok {
@@ -280,9 +280,9 @@ func (s *Server) referencedResources(ctx context.Context, x *call, source oif.Do
 			if localErr != nil {
 				return localErr
 			}
-			bound, err = s.Resources.Get(ctx, kind, x.keyID, local)
+			bound, err = s.deps.Resources.Get(ctx, kind, x.keyID, local)
 		default:
-			bound, err = s.Resources.Get(ctx, kind, x.keyID, id)
+			bound, err = s.deps.Resources.Get(ctx, kind, x.keyID, id)
 		}
 		if err != nil {
 			return err
@@ -307,12 +307,12 @@ func samePin(a, b *resources.Resource) bool {
 	return a.ProviderID == b.ProviderID && a.ProviderRevisionID == b.ProviderRevisionID && a.TargetID == b.TargetID && a.SlotID == b.SlotID && sameCredential(a.CredentialID, b.CredentialID)
 }
 
-func (s *Server) rewriteRetainedRequest(ctx context.Context, x *call, a access.Authority, p *pin, route *routing.Route, source oif.Document, e retainedapi.Endpoint) (oif.Document, error) {
+func (s *Server) rewriteRetainedRequest(ctx context.Context, x *call, a keyauthority.Authority, p *pin, route *routing.Route, source oif.Document, e retainedapi.Endpoint) (oif.Document, error) {
 	if (e.Operation == "conversation" || e.Operation == "compaction") && hasItemReference(source.Root()) {
 		return oif.Document{}, errors.New("item_reference inputs are not supported")
 	}
 	rewritten, err := retainedapi.Rewrite(source, retainedRequestRefsForSource(e, source), func(kind, id string) (string, error) {
-		if s.Resources == nil {
+		if s.deps.Resources == nil {
 			return "", resources.ErrNotFound
 		}
 		var bound *resources.Resource
@@ -351,7 +351,7 @@ func (s *Server) rewriteRetainedRequest(ctx context.Context, x *call, a access.A
 					return "", err
 				}
 			}
-			bound, err = s.Resources.Get(ctx, kind, x.keyID, local)
+			bound, err = s.deps.Resources.Get(ctx, kind, x.keyID, local)
 			if err == nil {
 				_, _, failure := s.resolveResource(ctx, x, a, bound, x.operationName(), retainedNewWork)
 				if failure != nil {
@@ -400,7 +400,7 @@ func (s *Server) retainedQuery(ctx context.Context, x *call, e retainedapi.Endpo
 			if e.Action != "list" {
 				return nil, invalidRequest("invalid_parameter", "Cursor is only valid on a collection.", &name)
 			}
-			bound, err := s.Resources.Get(ctx, e.Kind, x.keyID, v)
+			bound, err := s.deps.Resources.Get(ctx, e.Kind, x.keyID, v)
 			if err != nil || resource == nil || bound.ParentID == nil || *bound.ParentID != resource.UUID || bound.RouteRevisionID != resource.RouteRevisionID || !samePin(bound, resource) {
 				return nil, invalidRequest("invalid_resource_reference", "The cursor is unavailable under this parent.", &name)
 			}
@@ -658,19 +658,19 @@ func (s *Server) projectRetainedGeneric(ctx context.Context, resource *resources
 			identity.ParentID = &resource.UUID
 		} else if resource.ParentID != nil && len(e.Ancestors) > 0 && kind == e.Ancestors[len(e.Ancestors)-1] {
 			// The parent's own parent may not be nil (eval runs, for example).
-			parent, findErr := s.Resources.GetByUUID(ctx, *resource.ParentID, resource.APIKeyID)
+			parent, findErr := s.deps.Resources.GetByUUID(ctx, *resource.ParentID, resource.APIKeyID)
 			if findErr != nil || parent.Kind != kind || parent.UpstreamID != id {
 				return "", resources.ErrNotFound
 			}
 			return parent.ID, nil
 		}
-		bound, findErr := s.Resources.GetByUpstreamIncludingDeleted(ctx, identity)
+		bound, findErr := s.deps.Resources.GetByUpstreamIncludingDeleted(ctx, identity)
 		if errors.Is(findErr, resources.ErrNotFound) && kind == resources.KindFile {
 			// An echoed file reference may name the strict durable
 			// kind under the same serving identity.
 			strictIdentity := identity
 			strictIdentity.Kind = resources.KindStrictFile
-			bound, findErr = s.Resources.GetByUpstreamIncludingDeleted(ctx, strictIdentity)
+			bound, findErr = s.deps.Resources.GetByUpstreamIncludingDeleted(ctx, strictIdentity)
 		}
 		resultFile := kind == resources.KindFile && resultFiles[id]
 		if errors.Is(findErr, resources.ErrNotFound) && (kind == e.Kind && e.Action == "list" && len(e.Ancestors) > 0 || kind == "skill_version" && resource.Kind == "skill" || resultFile) {
@@ -694,7 +694,7 @@ func (s *Server) projectRetainedGeneric(ctx context.Context, resource *resources
 					submission = append(submission, original)
 				}
 			}
-			bound, findErr = s.Resources.BindDiscovered(ctx, child, submission...)
+			bound, findErr = s.deps.Resources.BindDiscovered(ctx, child, submission...)
 		}
 		if findErr != nil {
 			return "", findErr
@@ -704,7 +704,7 @@ func (s *Server) projectRetainedGeneric(ctx context.Context, resource *resources
 			if err != nil {
 				return "", err
 			}
-			if err := s.Resources.DiscoverRetainedModels(ctx, bound, checkpoint); err != nil {
+			if err := s.deps.Resources.DiscoverRetainedModels(ctx, bound, checkpoint); err != nil {
 				return "", err
 			}
 		}

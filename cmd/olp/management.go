@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/tyk-swe/olp/internal/codesessions"
 	"log/slog"
 	"net/http"
 
@@ -28,9 +29,11 @@ import (
 	"github.com/tyk-swe/olp/internal/mcp/registration"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/modelcatalog"
+	"github.com/tyk-swe/olp/internal/notifications"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/pluginindex"
 	"github.com/tyk-swe/olp/internal/plugins"
+	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/internal/promotion"
 	promotionserve "github.com/tyk-swe/olp/internal/promotion/serve"
 	"github.com/tyk-swe/olp/internal/providers"
@@ -39,6 +42,7 @@ import (
 	"github.com/tyk-swe/olp/internal/retrieval"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/settings"
 	"github.com/tyk-swe/olp/internal/signing"
 	"github.com/tyk-swe/olp/internal/sinks"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -48,18 +52,19 @@ import (
 // and integration tests mount it the same way, so neither can drift from the
 // routes the contract declares.
 type Management struct {
-	Getenv        func(string) string
-	Access        *access.Server
-	Egress        *egress.Policy
-	Limiter       *limits.Limiter
-	Runtime       *release.Manager
-	Gateway       *gateway.Server
-	Media         *media.Service
-	Health        *observability.Cache
-	Log           *slog.Logger
-	PluginRuntime *plugins.Runtime
-	PluginHost    *plugins.Host
-	Unconfined    *plugins.Unconfined
+	IdentityClient *http.Client
+	Getenv         func(string) string
+	Access         *access.Server
+	Egress         *egress.Policy
+	Limiter        *limits.Limiter
+	Runtime        *release.Manager
+	Gateway        *gateway.Server
+	Media          *media.Service
+	Health         *observability.Cache
+	Log            *slog.Logger
+	PluginRuntime  *plugins.Runtime
+	PluginHost     *plugins.Host
+	Unconfined     *plugins.Unconfined
 	// Catalog is the reference catalog this release ships, verified at
 	// start-up.
 	Catalog     *catalog.Signed
@@ -74,12 +79,10 @@ type Management struct {
 func (m Management) Register(mux *http.ServeMux) {
 	management.Register(mux)
 	management.NewMCP(m.Access, mux).Register(mux)
-	m.Access.Egress = m.Egress
-	m.Access.RuntimePublisher = func(ctx context.Context, tx pgx.Tx, actor string) error {
-		_, err := release.Publish(ctx, tx, actor)
-		return err
-	}
 	m.Access.Register(mux)
+	projects.New(m.Access).Register(mux)
+	notifications.NewManagement(m.Access, m.Egress).Register(mux)
+	settings.New(m.Access, m.Access.RuntimePublisher).Register(mux)
 	(&release.DelegationManagement{Access: m.Access, Manager: m.Runtime}).Register(mux)
 	(&gateway.CacheManagement{Access: m.Access, Gateway: m.Gateway}).Register(mux)
 	(&branding.Server{Access: m.Access}).Register(mux)
@@ -119,15 +122,15 @@ func (m Management) Register(mux *http.ServeMux) {
 		if m.Gateway == nil {
 			return nil
 		}
-		return m.Gateway.WorkflowTools
+		return m.Gateway.WorkflowResolver()
 	}
 	routeServer.WorkflowRelease = m.Runtime.Release
 	routeServer.WorkflowAvailable = func() bool {
-		return m.Gateway != nil && m.Gateway.WorkflowRuns != nil && m.Gateway.WorkflowTools != nil && m.Gateway.Debits != nil
+		return m.Gateway.WorkflowResolver() != nil
 	}
 	routeServer.Inputs = m.Runtime.RoutingInputs
 	if m.Runtime != nil {
-		routeServer.Region = m.Runtime.Region
+		routeServer.Region = m.Runtime.Region()
 	}
 	routeServer.UnconfinedPlugins = m.Unconfined != nil
 	routeServer.Catalog = m.Catalog
@@ -139,6 +142,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	routeServer.Register(mux)
 	(&gateway.Playground{Access: m.Access, Gateway: m.Gateway}).Register(mux)
 	(&media.Management{Access: m.Access, Pool: m.Access.Pool, Jobs: m.Media, Log: m.Log}).Register(mux)
+	codesessions.NewManagement(m.Access).Register(mux)
 	(&resources.Management{Access: m.Access, Pool: m.Access.Pool}).Register(mux)
 	(&management.Overview{Access: m.Access}).Register(mux)
 	health := &observability.Management{Access: m.Access, Cache: m.Health, Pool: m.Access.Pool}
@@ -155,6 +159,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	(&billing.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
 	promotionserve.Register(&promotion.Server{
 		Limiter:                m.Limiter,
+		IdentityClient:         m.IdentityClient,
 		Access:                 m.Access,
 		Egress:                 m.Egress,
 		Unconfined:             m.Unconfined,

@@ -188,7 +188,7 @@ func TestPriceValidationComponents(t *testing.T) {
 
 // usageOf builds observed complete usage on input/output totals.
 func usageOf(input, output int64) AttemptUsage {
-	return AttemptUsage{Observed: true, Complete: true, InputTokens: tokens(input), OutputTokens: tokens(output)}
+	return AttemptUsage{Observed: true, Complete: true, UsageQuantities: UsageQuantities{InputTokens: tokens(input), OutputTokens: tokens(output)}}
 }
 
 // at the threshold the base rate applies

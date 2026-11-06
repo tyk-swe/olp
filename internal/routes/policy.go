@@ -149,15 +149,11 @@ func (s *Server) writePolicy(r *http.Request, remove bool) (access.Reply, error)
 		}
 	}
 	a := s.Access
-	tx, err := a.Begin(r)
+	tx, principal, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	principal, err := a.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	if err = principal.Authorize(operation); err != nil {
 		return access.Reply{}, err
 	}
@@ -175,7 +171,7 @@ func (s *Server) writePolicy(r *http.Request, remove bool) (access.Reply, error)
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	_, etag, err := loadPolicy(r.Context(), tx, scope, id, true)
 	if err != nil {
@@ -224,5 +220,5 @@ func (s *Server) writePolicy(r *http.Request, remove bool) (access.Reply, error)
 	if err = a.CompleteReplay(r, tx, claim, reply); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, reply)
+	return reply, tx.Commit(r.Context())
 }

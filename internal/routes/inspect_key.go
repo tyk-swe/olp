@@ -6,15 +6,15 @@ import (
 	"slices"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/routing"
-
 	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 type inspectionKeyContext struct {
 	id, reason         string
 	allowProviderState bool
-	authority          access.Authority
+	authority          keyauthority.Authority
 }
 
 func (s *Server) inspectionKey(r *http.Request, q access.Queryer, principal access.Principal, selected *string, route routing.Route) (inspectionKeyContext, error) {
@@ -37,10 +37,10 @@ LEFT JOIN olp.organizations o ON o.id=p.organization_id WHERE i.singleton`, rout
 	if err != nil {
 		return key, access.Invalid("api_key_id", "Use an API key identifier.")
 	}
-	authority := access.Authority{ID: key.id}
+	authority := keyauthority.Authority{ID: key.id}
 	var raw []byte
-	var groups access.RouteGroups
-	var templates access.LimitTemplates
+	var groups keyauthority.RouteGroups
+	var templates keyauthority.LimitTemplates
 	if err := q.QueryRow(r.Context(), `SELECT k.policy,k.expires_at,k.revoked_at,k.project_id::text,
 COALESCE(p.route_groups,'{}'::jsonb),COALESCE(p.limit_templates,'{}'::jsonb),
 k.budget_group_id::text,g.limit_template,g.requests_per_minute,g.tokens_per_minute,g.max_concurrency,

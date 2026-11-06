@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"log/slog"
 	"time"
 
@@ -35,14 +36,14 @@ func runMaintenance(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) {
 		if ctx.Err() != nil {
 			return
 		}
-		outcome, progress := usage.OutcomeSuccess, report.LockAcquired
+		outcome, progress := workerhealth.OutcomeSuccess, report.LockAcquired
 		if resourceErr != nil || usageErr != nil || batchErr != nil {
-			outcome, progress = usage.OutcomeFailure, false
+			outcome, progress = workerhealth.OutcomeFailure, false
 			log.Error("maintenance pass failed", "resource_error_type", fmt.Sprintf("%T", resourceErr), "usage_error_type", fmt.Sprintf("%T", usageErr), "batch_error_type", fmt.Sprintf("%T", batchErr))
 		} else if !report.LockAcquired {
-			outcome = usage.OutcomeSkipped
+			outcome = workerhealth.OutcomeSkipped
 		}
-		if err := usage.CheckpointTask(ctx, pool, usage.TaskMaintenance, outcome, progress); err != nil {
+		if err := workerhealth.New(workerhealth.TaskMaintenance, "").Checkpoint(ctx, pool, outcome, progress); err != nil {
 			log.Warn("maintenance health checkpoint failed", "error_type", fmt.Sprintf("%T", err))
 		}
 		select {

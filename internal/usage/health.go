@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -34,7 +35,7 @@ const reportConsumerHealthSQL = `INSERT INTO olp.request_metadata_consumer_healt
 //
 // An older sample never overwrites a newer one: several consumers report the
 // same group, and the freshest reading is the one that tells the truth.
-func ReportConsumerHealth(ctx context.Context, pool *pgxpool.Pool, pending, lag int64,
+func ReportConsumerHealth(ctx context.Context, pool *pgxpool.Pool, region string, pending, lag int64,
 	oldestPendingAt, oldestLaggedAt *time.Time, checkedAt time.Time) error {
 	if pending < 0 || lag < 0 {
 		return fmt.Errorf("%w: negative consumer backlog", ErrInvalidCheckpoint)
@@ -68,7 +69,7 @@ func ReportConsumerHealth(ctx context.Context, pool *pgxpool.Pool, pending, lag 
 	}
 	// Sampling the backlog is the consumer's proof of life. Progress is
 	// reported separately by the pass that actually drained events.
-	if err = CheckpointTask(ctx, tx, TaskRequestMetadataConsumer, OutcomeSuccess, false); err != nil {
+	if err = workerhealth.New(workerhealth.TaskRequestMetadataConsumer, region).Checkpoint(ctx, tx, workerhealth.OutcomeSuccess, false); err != nil {
 		return err
 	}
 	if err = tx.Commit(ctx); err != nil {

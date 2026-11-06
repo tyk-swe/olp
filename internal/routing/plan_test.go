@@ -231,3 +231,34 @@ func TestLatencyStrategyOrdersProvidersByMeasuredLatency(t *testing.T) {
 
 // plan answers each decision's outcome by credential slot, or by provider
 // for a target with no slot to try: its attempt, or its reason.
+
+func TestPublishedRoutingOwnsConfigurationAndReturnedValues(t *testing.T) {
+	snapshot, slug, ids := planningFixture()
+	provider := snapshot.Providers[ids[0]]
+	provider.Models = map[string]json.RawMessage{"wire-model": json.RawMessage(`{"context_length":2048,"max_output_tokens":1024,"supported_parameters":["response_format"]}`)}
+	snapshot.Providers[ids[0]] = provider
+	published, err := snapshot.CompiledView()
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := Options{Preferences: &Preferences{Only: []string{"provider:" + ids[0]}}, TokenDemand: &TokenDemand{EstimatedInputTokens: 512}}
+	before, err := Select(published, slug, "generation", "openai", "unary", []byte("seed"), options)
+	if err != nil || len(before.Attempts) != 1 {
+		t.Fatalf("initial plan %+v, error %v", before, err)
+	}
+	snapshot.Providers[ids[0]].Models["wire-model"] = json.RawMessage(`{"context_length":1}`)
+	snapshot.Routes[slug].Targets[0].ProviderID = "missing"
+	borrowed := published.Provider(ids[0])
+	borrowed.Models["wire-model"] = json.RawMessage(`{"context_length":1}`)
+	borrowed.Capabilities[0].Operation = "unsupported"
+	facts, ok := borrowed.Metadata("wire-model")
+	if !ok {
+		t.Fatal("published model facts are unavailable")
+	}
+	*facts.ContextLength = 1
+	published.Route(slug).Targets[0].ProviderID = "missing"
+	after, err := Select(published, slug, "generation", "openai", "unary", []byte("seed"), options)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("borrowed values changed published routing, plan %+v, error %v", after, err)
+	}
+}

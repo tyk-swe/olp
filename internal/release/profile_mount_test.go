@@ -3,6 +3,7 @@ package release
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/tyk-swe/olp/internal/providerconfig"
 	"testing"
 
 	"github.com/google/uuid"
@@ -13,7 +14,7 @@ import (
 func TestMountedProfileCannotChangePublishedSemanticsOrCredentialIdentity(t *testing.T) {
 	id, slotID, credentialID, networkID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 	provider := routing.Provider{ID: id, Enabled: true, Kind: "openai", AuthMode: "api_key", ProfileID: "openai-chat", ProfileRevision: "1", Endpoint: "https://api.openai.com/v1", DefaultSlotID: slotID, Slots: []routing.Slot{{ID: slotID, Enabled: true, CredentialID: &credentialID}}, SemanticHeaders: map[string]string{"OpenAI-Beta": "fixture"}, Network: &egress.ConnectionOptions{CredentialID: networkID}}
-	cfg := routing.Configuration{Kind: provider.Kind, AuthMode: provider.AuthMode, ProfileID: provider.ProfileID, ProfileRevision: provider.ProfileRevision, Endpoint: provider.Endpoint}
+	cfg := routing.Configuration{Identity: providerconfig.Identity[string]{Kind: provider.Kind, AuthMode: provider.AuthMode, ProfileID: provider.ProfileID, ProfileRevision: provider.ProfileRevision, Endpoint: provider.Endpoint}}
 	cfg.Options.SemanticHeaders = map[string]string{"OpenAI-Beta": "fixture"}
 	cfg.Options.Network = &egress.ConnectionOptions{CredentialID: networkID}
 	cfg.Options.CredentialHeaders = []string{}

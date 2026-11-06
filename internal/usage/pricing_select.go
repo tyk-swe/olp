@@ -319,7 +319,7 @@ func priceAttempt(ctx context.Context, tx pgx.Tx, event *Event, attempt Validate
 	}
 	successful := attempt.Attempt.ErrorClass == nil && attempt.StatusCode != nil &&
 		(*attempt.StatusCode >= 200 && *attempt.StatusCode <= 299 || event.Operation == "passthrough" && *attempt.StatusCode == 304)
-	return priceUsage(ctx, tx, event, attempt.Usage, attempt.Attempt.StartedAt,
+	return priceUsage(ctx, tx, event, attempt.Usage.wire(), attempt.Attempt.StartedAt,
 		successful, attempt.Attempt.ProviderID, attempt.Attempt.UpstreamModel, pin)
 }
 
@@ -330,7 +330,7 @@ func priceBaseline(ctx context.Context, tx pgx.Tx, event *Event, attempt Validat
 	baseline := attempt.Attempt.Routing.Baseline
 	successful := attempt.Attempt.ErrorClass == nil && attempt.StatusCode != nil &&
 		*attempt.StatusCode >= 200 && *attempt.StatusCode <= 299
-	pricing, err := priceUsage(ctx, tx, event, attempt.Usage, attempt.Attempt.StartedAt,
+	pricing, err := priceUsage(ctx, tx, event, attempt.Usage.wire(), attempt.Attempt.StartedAt,
 		successful, baseline.ProviderID, baseline.UpstreamModel, routingPin{vendorID: baseline.VendorID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil

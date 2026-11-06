@@ -5,11 +5,11 @@ import (
 	"errors"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/limits"
 )
 
-func (a *Admission) reserveRouteLimits(ctx context.Context, authority *access.Authority, route string, estimate int64, ttl time.Duration, hold costReservation, costChecked *bool) (*limits.Lease, *Error) {
+func (a *Admission) reserveRouteLimits(ctx context.Context, authority *keyauthority.Authority, route string, estimate int64, ttl time.Duration, hold costReservation, costChecked *bool) (*limits.Lease, *Error) {
 	policy := authority.Policy.RouteLimits[route]
 	if !policy.Limited() {
 		return nil, nil

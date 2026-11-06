@@ -102,15 +102,11 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 	if err := access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := a.Begin(r)
+	tx, p, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	if err = authorizeCredentialReference(p, input.CredentialReference); err != nil {
 		return access.Reply{}, err
 	}
@@ -124,19 +120,17 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 		if err := a.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
 			return access.Reply{}, err
 		}
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	if err = access.ValidText("name", input.Name, 100); err != nil {
 		return access.Reply{}, err
 	}
-	input.Configuration.Normalize()
-	if err = input.Configuration.Pin(r.Context(), tx, s.Unconfined); err != nil {
+	prepared, err := PrepareConfiguration(r.Context(), tx, s.Unconfined, s.Egress, input.Configuration)
+	if err != nil {
 		return access.Reply{}, err
 	}
-	if err = input.Configuration.ValidateAndNormalize(s.Egress); err != nil {
-		return access.Reply{}, err
-	}
-	switch cfg := &input.Configuration; {
+	configuration := prepared.configuration
+	switch cfg := &configuration; {
 	case cfg.Grant() && (input.Credential != nil || input.CredentialReference != nil):
 		return access.Reply{}, access.Invalid("credential", grantEnrollmentOnly)
 	case cfg.CredentialRequired() && !cfg.Grant() && input.Credential == nil && input.CredentialReference == nil:
@@ -162,14 +156,14 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 		return access.Reply{}, err
 	}
 	id, etag := access.NewID(), access.NewID()
-	if err := validateNetworkReference(r.Context(), tx, id, &input.Configuration); err != nil {
+	if err := validateNetworkReference(r.Context(), tx, id, &configuration); err != nil {
 		return access.Reply{}, err
 	}
-	configuration, err := json.Marshal(input.Configuration)
+	configurationJSON, err := json.Marshal(configuration)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id) VALUES($1,$2,$3,'draft',$4,$5,$6,$7,$8)", id, input.Name, input.Configuration.Kind, configuration, etag, access.NewID(), p.UserID(), input.ProjectID); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id) VALUES($1,$2,$3,'draft',$4,$5,$6,$7,$8)", id, input.Name, configuration.Kind, configurationJSON, etag, access.NewID(), p.UserID(), input.ProjectID); err != nil {
 		return access.Reply{}, err
 	}
 	var credentialID *string
@@ -184,15 +178,15 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 		return access.Reply{}, err
 	}
 	if input.Model != nil {
-		surface, operation := "openai", probeOperation(&input.Configuration)
-		switch input.Configuration.Kind {
+		surface, operation := "openai", probeOperation(&configuration)
+		switch configuration.Kind {
 		case KindAnthropic:
 			surface = "anthropic"
 		case KindGemini, KindVertex:
 			surface = "gemini"
 		}
-		if input.Configuration.ProfileID != "" {
-			profile, _ := input.Configuration.transport().Profile()
+		if configuration.ProfileID != "" {
+			profile, _ := configuration.transport().Profile()
 			if _, native := protocols.NativeGenerationFamily(profile.OperationDialect("generation")); native && operation == "generation" {
 				surface = "native"
 			}
@@ -214,8 +208,8 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 		// A dedicated operation profile, such as an embeddings or rerank
 		// dialect, declares the tuple it can actually certify.
 		mode := ModeUnary
-		if input.Configuration.ProfileID != "" && !probeable(&input.Configuration, CapabilityInput{Operation: operation, Surface: surface, Mode: mode}) {
-			if tuple := defaultProbeTuple(&input.Configuration); probeable(&input.Configuration, tuple) {
+		if configuration.ProfileID != "" && !probeable(&configuration, CapabilityInput{Operation: operation, Surface: surface, Mode: mode}) {
+			if tuple := defaultProbeTuple(&configuration); probeable(&configuration, tuple) {
 				operation, surface, mode = tuple.Operation, tuple.Surface, tuple.Mode
 			}
 		}
@@ -231,11 +225,11 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.create", "provider", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	result := access.Reply{Status: 201, Location: "/api/v1/providers/" + id, ETag: etag, Body: map[string]any{"id": id, "name": input.Name, "kind": input.Configuration.Kind, "state": "draft", "etag": etag, "model": input.Model, "project_id": input.ProjectID}}
+	result := access.Reply{Status: 201, Location: "/api/v1/providers/" + id, ETag: etag, Body: map[string]any{"id": id, "name": input.Name, "kind": configuration.Kind, "state": "draft", "etag": etag, "model": input.Model, "project_id": input.ProjectID}}
 	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 
 // invalidateEvidence downgrades every certified capability after a transport
@@ -256,15 +250,11 @@ func (s *Server) updateProvider(r *http.Request, _ access.Principal) (access.Rep
 	if err = access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := a.Begin(r)
+	tx, p, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	current, err := load(r.Context(), tx, id, true)
 	if err != nil {
 		return access.Reply{}, err
@@ -278,11 +268,11 @@ func (s *Server) updateProvider(r *http.Request, _ access.Principal) (access.Rep
 	if err = access.ValidText("name", input.Name, 100); err != nil {
 		return access.Reply{}, err
 	}
-	input.Configuration.Normalize()
-	if err = input.Configuration.Pin(r.Context(), tx, s.Unconfined); err != nil {
+	prepared, err := PrepareConfiguration(r.Context(), tx, s.Unconfined, s.Egress, input.Configuration)
+	if err != nil {
 		return access.Reply{}, err
 	}
-	if err = StoreDraftConfiguration(r.Context(), tx, id, input.Name, &input.Configuration, s.Egress); err != nil {
+	if err = StoreDraftConfiguration(r.Context(), tx, id, input.Name, prepared); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.update", "provider", id, "success"); err != nil {
@@ -292,7 +282,7 @@ func (s *Server) updateProvider(r *http.Request, _ access.Principal) (access.Rep
 	if err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 
 // mutation runs a locked, replay-protected provider mutation that needs
@@ -309,15 +299,11 @@ func (s *Server) mutationWith(r *http.Request, action string, input any, fn func
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := a.Begin(r)
+	tx, p, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	// The stored reply discloses the provider, so the caller must still reach
 	// its project before a replay is served.
 	current, err := load(r.Context(), tx, id, true)
@@ -332,7 +318,7 @@ func (s *Server) mutationWith(r *http.Request, action string, input any, fn func
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	if err = access.Match(r, current.ETag); err != nil {
 		return access.Reply{}, err
@@ -347,7 +333,7 @@ func (s *Server) mutationWith(r *http.Request, action string, input any, fn func
 	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 
 type storedCapability struct {
@@ -539,13 +525,12 @@ func (s *Server) activateProvider(r *http.Request, _ access.Principal) (access.R
 	return s.mutation(r, "provider.activate", func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
 		// The plugin a draft pinned may since have become unusable, such as
 		// an unconfined plugin in a deployment that no longer enables them.
-		if err := current.Configuration.Pin(ctx, tx, s.Unconfined); err != nil {
+		prepared, err := PrepareConfiguration(ctx, tx, s.Unconfined, s.Egress, current.Configuration)
+		if err != nil {
 			return access.Reply{}, err
 		}
-		if err := current.Configuration.ValidateAndNormalize(s.Egress); err != nil {
-			return access.Reply{}, err
-		}
-		if err := validateNetworkReference(ctx, tx, current.ID, &current.Configuration); err != nil {
+		configuration := prepared.configuration
+		if err := validateNetworkReference(ctx, tx, current.ID, &configuration); err != nil {
 			return access.Reply{}, err
 		}
 		if _, _, err := s.credentialFor(ctx, tx, current); err != nil {
@@ -576,21 +561,21 @@ func (s *Server) activateProvider(r *http.Request, _ access.Principal) (access.R
 		if err != nil {
 			return access.Reply{}, err
 		}
-		if err = onePrincipal(slots, &current.Configuration); err != nil {
+		if err = onePrincipal(slots, &configuration); err != nil {
 			return access.Reply{}, err
 		}
 		var credentialVersion *int
 		revisionSlots := make([]routing.RevisionSlot, 0, len(slots))
 		for i := range slots {
-			slot := slots[i].published(current.Configuration.AuthMode)
-			if err := slots[i].credentialFits(&current.Configuration); err != nil {
+			slot := slots[i].published(configuration.AuthMode)
+			if err := slots[i].credentialFits(&configuration); err != nil {
 				return access.Reply{}, err
 			}
-			if slot.Enabled && current.Configuration.CredentialRequired() && slots[i].validationFingerprint(&current.Configuration, models) != "" {
+			if slot.Enabled && configuration.CredentialRequired() && slots[i].validationFingerprint(&configuration, models) != "" {
 				if slot.CredentialID == nil {
 					return access.Reply{}, access.Fail(422, "credential_required", "Slot "+slot.Name+" has no credential.")
 				}
-				if slots[i].validationTime(&current.Configuration, models) == nil {
+				if slots[i].validationTime(&configuration, models) == nil {
 					return access.Reply{}, access.Fail(422, "slot_validation_required", "Validate slot "+slot.Name+" for its enabled models before activating.")
 				}
 			}
@@ -601,10 +586,13 @@ func (s *Server) activateProvider(r *http.Request, _ access.Principal) (access.R
 		}
 		modelsJSON, _ := json.Marshal(published)
 		slotsJSON, _ := json.Marshal(revisionSlots)
-		configuration, _ := json.Marshal(current.Configuration)
+		configurationJSON, err := json.Marshal(configuration)
+		if err != nil {
+			return access.Reply{}, err
+		}
 		revisionID, etag := access.NewID(), access.NewID()
 		var revision int
-		if err = tx.QueryRow(ctx, "INSERT INTO olp.provider_revisions(id,provider_id,revision,name,configuration,models,slots,credential_version,source_etag,activated_by) VALUES($1,$2,(SELECT coalesce(max(revision),0)+1 FROM olp.provider_revisions WHERE provider_id=$2),$3,$4,$5,$6,$7,$8,$9) RETURNING revision", revisionID, current.ID, current.Name, configuration, modelsJSON, slotsJSON, credentialVersion, current.ETag, p.UserID()).Scan(&revision); err != nil {
+		if err = tx.QueryRow(ctx, "INSERT INTO olp.provider_revisions(id,provider_id,revision,name,configuration,models,slots,credential_version,source_etag,activated_by) VALUES($1,$2,(SELECT coalesce(max(revision),0)+1 FROM olp.provider_revisions WHERE provider_id=$2),$3,$4,$5,$6,$7,$8,$9) RETURNING revision", revisionID, current.ID, current.Name, configurationJSON, modelsJSON, slotsJSON, credentialVersion, current.ETag, p.UserID()).Scan(&revision); err != nil {
 			return access.Reply{}, err
 		}
 		if _, err = tx.Exec(ctx, "UPDATE olp.providers SET state='active',active_revision=$2,active_revision_id=$3,draft_dirty=false,etag=$4,updated_at=now() WHERE id=$1", current.ID, revision, revisionID, etag); err != nil {

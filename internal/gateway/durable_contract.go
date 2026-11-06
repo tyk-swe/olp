@@ -142,10 +142,10 @@ func validDurableDocument(doc durableDocument, r *resources.Resource) bool {
 
 func (s *Server) readDurable(ctx context.Context, kind, owner, id string) (*resources.Resource, *durableDocument, error) {
 	if kind != resources.KindStrictBatch && kind != resources.KindStrictFile {
-		r, err := s.Resources.Get(ctx, kind, owner, id)
+		r, err := s.deps.Resources.Get(ctx, kind, owner, id)
 		return r, nil, err
 	}
-	r, payload, err := s.Resources.ReadDurableContract(ctx, kind, owner, id)
+	r, payload, err := s.deps.Resources.ReadDurableContract(ctx, kind, owner, id)
 	if err != nil {
 		return nil, nil, err
 	}

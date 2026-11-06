@@ -195,7 +195,7 @@ func (s *Snapshot) compileOperations(route Route) (map[string]*operationplan.Tem
 			}
 			continue
 		}
-		if !route.Fidelity.Strict() && !operationregistry.TransformedServing(op) {
+		if !route.Fidelity.Strict() && !operationregistry.PolicyFor(op).TransformedUnary {
 			continue
 		}
 		if op == "generation" || op == "batch" || op == "realtime" || mediacontract.IsMediaOperation(op) {

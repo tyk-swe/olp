@@ -7,7 +7,18 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"reflect"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/billing"
 	"github.com/tyk-swe/olp/internal/modelcatalog"
+	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/agentpublications"
 	"github.com/tyk-swe/olp/internal/promotion/charge"
@@ -19,18 +30,8 @@ import (
 	"github.com/tyk-swe/olp/internal/promotion/retrievalbindings"
 	"github.com/tyk-swe/olp/internal/promotion/scimmappings"
 	"github.com/tyk-swe/olp/internal/promotion/workloadissuers"
-	"github.com/tyk-swe/olp/internal/sinks"
-	"reflect"
-	"slices"
-	"strings"
-	"time"
-
 	"github.com/tyk-swe/olp/internal/routing"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/attribution"
-	"github.com/tyk-swe/olp/internal/billing"
+	"github.com/tyk-swe/olp/internal/sinks"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -49,7 +50,7 @@ func routeKey(slug string, project *string) string {
 }
 
 func loadState(ctx context.Context, q access.Queryer) (*promotion.StateView, error) {
-	v := &promotion.StateView{ProjectOrganization: map[string]*string{}, ProjectAttributionBudgets: map[string]access.AttributionBudgets{}, ProjectTemplates: map[string]access.LimitTemplates{}, ProjectBudgets: map[string]*access.BudgetPolicy{}, ProjectRouteGroups: map[string]access.RouteGroups{}, Projects: map[string]string{}, ProjectName: map[string]string{}, ProjectEndUserPolicies: map[string]*access.EndUserPolicy{}, ProjectAttributionPolicies: map[string]*attribution.Policy{}, Providers: map[string]*promotion.ExistingProvider{}, Routes: map[string]*promotion.ExistingRoute{}, Drafts: map[string]*promotion.ExistingDraft{}}
+	v := &promotion.StateView{ProjectOrganization: map[string]*string{}, ProjectAttributionBudgets: map[string]keyauthority.AttributionBudgets{}, ProjectTemplates: map[string]keyauthority.LimitTemplates{}, ProjectBudgets: map[string]*keyauthority.BudgetPolicy{}, ProjectRouteGroups: map[string]keyauthority.RouteGroups{}, Projects: map[string]string{}, ProjectName: map[string]string{}, ProjectEndUserPolicies: map[string]*keyauthority.EndUserPolicy{}, ProjectAttributionPolicies: map[string]*attribution.Policy{}, Providers: map[string]*promotion.ExistingProvider{}, Routes: map[string]*promotion.ExistingRoute{}, Drafts: map[string]*promotion.ExistingDraft{}}
 	rows, err := q.Query(ctx, "SELECT id::text,name,end_user_policy,attribution_policy,route_groups,budget_policy,limit_templates,attribution_budgets,(SELECT name FROM olp.organizations WHERE id=organization_id) FROM olp.projects")
 	if err != nil {
 		return nil, err
@@ -58,12 +59,12 @@ func loadState(ctx context.Context, q access.Queryer) (*promotion.StateView, err
 	for rows.Next() {
 		var id, name string
 		var organization *string
-		var policy *access.EndUserPolicy
+		var policy *keyauthority.EndUserPolicy
 		var labels *attribution.Policy
-		var groups access.RouteGroups
-		var budget *access.BudgetPolicy
-		var templates access.LimitTemplates
-		var caps access.AttributionBudgets
+		var groups keyauthority.RouteGroups
+		var budget *keyauthority.BudgetPolicy
+		var templates keyauthority.LimitTemplates
+		var caps keyauthority.AttributionBudgets
 		if err = rows.Scan(&id, &name, &policy, &labels, &groups, &budget, &templates, &caps, &organization); err != nil {
 			return nil, err
 		}
@@ -264,12 +265,12 @@ func plan(s *promotion.Server, ctx context.Context, q access.Queryer, doc *promo
 	}
 
 	if doc.InstallationBudget != nil {
-		var current *access.BudgetPolicy
+		var current *keyauthority.BudgetPolicy
 		if err := q.QueryRow(ctx, "SELECT budget_policy FROM olp.installation WHERE singleton").Scan(&current); err != nil {
 			return nil, err
 		}
 		action := "reuse"
-		if !reflect.DeepEqual(current, access.NormalizedBudget(doc.InstallationBudget)) {
+		if !reflect.DeepEqual(current, keyauthority.NormalizedBudget(doc.InstallationBudget)) {
 			action = "replace"
 		}
 		result.Add("configuration", "installation_budget", action, "")
@@ -297,7 +298,7 @@ func plan(s *promotion.Server, ctx context.Context, q access.Queryer, doc *promo
 					action = "replace"
 				}
 			}
-			desired := projectEndUserPolicy(state.ProjectEndUserPolicies[id], p.EndUserDefaults, p.EndUserLimitTemplate)
+			desired := projects.ImportedEndUserPolicy(state.ProjectEndUserPolicies[id], p.EndUserDefaults, p.EndUserLimitTemplate)
 			if !p.AttributionBudgets.Equal(state.ProjectAttributionBudgets[id]) || (p.LimitTemplates != nil && !reflect.DeepEqual(*p.LimitTemplates, state.ProjectTemplates[id])) || !reflect.DeepEqual(desired, state.ProjectEndUserPolicies[id]) || !reflect.DeepEqual(p.AttributionPolicy, state.ProjectAttributionPolicies[id]) || !p.RouteGroups.Equal(state.ProjectRouteGroups[id]) || !reflect.DeepEqual(p.Budget, state.ProjectBudgets[id]) {
 				action = "replace"
 			}
@@ -702,6 +703,9 @@ func sameTemplate(a, b *promotion.TemplateEntry) bool {
 // withFieldPrefix places a validation problem under the document field that
 // holds the value it names.
 func withFieldPrefix(err error, prefix string) error {
+	if validation, ok := errors.AsType[*keyauthority.ValidationError](err); ok {
+		return &keyauthority.ValidationError{Field: prefix + "." + validation.Field, Detail: validation.Detail}
+	}
 	var problem *access.Problem
 	if errors.As(err, &problem) && problem.Field != "" {
 		copied := *problem

@@ -84,15 +84,11 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 	if err = validateCredentialInput(plain, input.CredentialReference); err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := a.Begin(r)
+	tx, p, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	if err = authorizeCredentialReference(p, input.CredentialReference); err != nil {
 		return access.Reply{}, err
 	}
@@ -110,7 +106,7 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	if err = access.Match(r, current.ETag); err != nil {
 		return access.Reply{}, err
@@ -164,15 +160,11 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 		}
 		validatedAt = new(time.Now().UTC())
 	}
-	tx, err = a.Begin(r)
+	tx, p, err = a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err = a.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	if err = authorizeCredentialReference(p, input.CredentialReference); err != nil {
 		return access.Reply{}, err
 	}
@@ -190,7 +182,7 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	if locked.ETag != current.ETag {
 		return access.Reply{}, access.Fail(412, "etag_mismatch", "The connection changed during validation; reload and retry.")
@@ -218,7 +210,7 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 
 // revoke marks a credential version unusable everywhere: drafts, published
@@ -500,15 +492,11 @@ func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, e
 	if input.CredentialReference != nil && input.Slot.CredentialVersionID != nil {
 		return access.Reply{}, access.Invalid("credential_reference", "Choose a new reference or an existing credential version.")
 	}
-	tx, err := a.Begin(r)
+	tx, p, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	if err = authorizeCredentialReference(p, input.CredentialReference); err != nil {
 		return access.Reply{}, err
 	}
@@ -526,7 +514,7 @@ func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, e
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	slots, err := loadSlots(r.Context(), tx, id)
 	if err != nil {
@@ -620,7 +608,7 @@ func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, e
 	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 
 func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply, error) {
@@ -693,14 +681,11 @@ func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply
 	probeErr := s.validateModelAccess(r.Context(), &current.Configuration, credential, slot, models)
 	// Probes run without mutation locks. Only save evidence if its complete
 	// input (credential, transport, restrictions, and models) is still current.
-	tx, err = a.Begin(r)
+	tx, p, err = a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	if p, err = a.Reauthorize(r, tx); err != nil {
-		return access.Reply{}, err
-	}
 	locked, err := load(r.Context(), tx, id, true)
 	if err != nil {
 		return access.Reply{}, err
@@ -727,7 +712,7 @@ func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply
 	if err != nil {
 		return access.Reply{}, err
 	}
-	result, err = access.Commit(r, tx, result)
+	err = tx.Commit(r.Context())
 	if err == nil && probeErr == nil {
 		s.clearValidatedCooldowns(r.Context(), id, *slot)
 	}

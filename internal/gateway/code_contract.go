@@ -3,13 +3,14 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"github.com/tyk-swe/olp/internal/codesessions"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/resources"
+
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -17,8 +18,8 @@ import (
 // coding generation, including each generation on an upgraded connection.
 type CodeLedger interface {
 	Models(context.Context, codemode.Route, string) (codeclient.Offers, error)
-	Admit(context.Context, resources.CodeAdmission) (resources.CodePermit, error)
-	BindConnection(context.Context, codemode.Route, string, codemode.Identity, string, []string) (resources.CodePermit, error)
+	Admit(context.Context, codesessions.Admission) (codesessions.Permit, error)
+	BindConnection(context.Context, codemode.Route, string, codemode.Identity, string, []string) (codesessions.Permit, error)
 	MarkDispatched(context.Context, string) error
 	ConfirmNonexecution(context.Context, string, int) error
 	ObserveCooldown(context.Context, string, time.Time) error
@@ -47,14 +48,14 @@ type ResearchAuthorizer interface {
 
 // ResearchLedger checks live authority and retains bounded opaque session state.
 type ResearchLedger interface {
-	AuthorizeResearch(context.Context, codemode.Route, string, string) (access.Authority, codemode.Account, error)
+	AuthorizeResearch(context.Context, codemode.Route, string, string) (keyauthority.Authority, codemode.Account, error)
 	ResearchSession(context.Context, string, codemode.ResearchSessionBinding) (string, error)
 	CreateResearchSession(context.Context, codemode.ResearchSessionBinding, string) (string, error)
 	DeleteResearchSession(context.Context, string, string) error
 }
 
 type PaidCodeLedger interface {
-	ResolvePaidFallback(context.Context, resources.CodeAdmission, access.Authority) (*codemode.Operation, error)
-	ResolvePaidModel(context.Context, resources.CodeAdmission, access.Authority) (codemode.Operation, error)
-	AdmitPaid(context.Context, resources.PaidCodeAdmission) (resources.PaidCodePermit, error)
+	ResolvePaidFallback(context.Context, codesessions.Admission, keyauthority.Authority) (*codemode.Operation, error)
+	ResolvePaidModel(context.Context, codesessions.Admission, keyauthority.Authority) (codemode.Operation, error)
+	AdmitPaid(context.Context, codesessions.PaidAdmission) (codesessions.PaidPermit, error)
 }

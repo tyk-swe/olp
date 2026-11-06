@@ -187,21 +187,17 @@ func (s *Server) createPricingSource(r *http.Request, _ access.Principal) (acces
 	if err := access.Decode(r, &input); err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.Access.Begin(r)
+	tx, principal, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(context.WithoutCancel(r.Context()))
-	principal, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	claim, replayed, err := s.Access.Replay(r, tx, principal, input)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	if err = s.validateSourceInput(&input); err != nil {
 		return access.Reply{}, err
@@ -228,7 +224,7 @@ func (s *Server) createPricingSource(r *http.Request, _ access.Principal) (acces
 	if err = s.Access.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 
 // validateSourceInput normalizes a new source: a price list needs a URL, and
@@ -284,15 +280,11 @@ func (s *Server) updatePricingSource(r *http.Request, _ access.Principal) (acces
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.Access.Begin(r)
+	tx, principal, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(context.WithoutCancel(r.Context()))
-	principal, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	source, err := scanSource(tx.QueryRow(r.Context(),
 		sourceColumns+" WHERE id=$1 FOR UPDATE", id))
 	if err != nil {
@@ -344,7 +336,7 @@ func (s *Server) updatePricingSource(r *http.Request, _ access.Principal) (acces
 		"pricing_source", source.ID, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, access.Detail(source, source.ETag))
+	return access.Detail(source, source.ETag), tx.Commit(r.Context())
 }
 
 // fetchedSource is a fetched, validated source document and its canonical
@@ -541,17 +533,13 @@ func (s *Server) refreshPricingSource(r *http.Request, _ access.Principal) (acce
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.Access.Begin(r)
+	// The fetch ran without the installation lock, so authority is decided
+	// again under it before the snapshot and audit record are written.
+	tx, principal, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(context.WithoutCancel(r.Context()))
-	// The fetch ran without the installation lock, so authority is decided
-	// again under it before the snapshot and audit record are written.
-	principal, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	var catalogSHA256, catalogKeyID *string
 	var catalogPublishedAt *time.Time
 	if signed := fetched.Catalog; signed != nil {
@@ -576,7 +564,7 @@ func (s *Server) refreshPricingSource(r *http.Request, _ access.Principal) (acce
 		return access.Reply{}, err
 	}
 	refresh := SourceRefresh{Source: source, Snapshot: snapshot, Diff: diff, Skipped: fetched.Skipped}
-	return access.Commit(r, tx, access.OK(refresh))
+	return access.OK(refresh), tx.Commit(r.Context())
 }
 
 // advanceCatalog records the newest catalog a source took, refusing an older
@@ -828,21 +816,17 @@ func (s *Server) publishPricingSourceSnapshot(r *http.Request, _ access.Principa
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.Access.Begin(r)
+	tx, principal, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(context.WithoutCancel(r.Context()))
-	principal, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	claim, replayed, err := s.Access.Replay(r, tx, principal, input)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	snapshot, err := scanSnapshot(tx.QueryRow(r.Context(), snapshotColumns+" WHERE id=$1", id))
 	if err != nil {
@@ -890,7 +874,7 @@ func (s *Server) publishPricingSourceSnapshot(r *http.Request, _ access.Principa
 	if err = s.Access.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 
 func mergeSourceOverrides(source, overrides []Price, vendorKind func(vendor string) (string, bool)) ([]Price, error) {

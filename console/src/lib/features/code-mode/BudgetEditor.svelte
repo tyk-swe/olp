@@ -9,7 +9,7 @@
     type CodeBudget,
     type CodeRoute,
     type CodeBudgetWrite
-  } from '$lib/management/code-mode';
+  } from '$lib/features/code-mode/api';
   import { tokenLimit } from './presentation';
 
   import {
@@ -64,7 +64,12 @@
         enabled
       };
     },
-    persist: (input, requestId) => saveCodeBudget(input, current, requestId)
+    persist: (input, requestId) =>
+      saveCodeBudget(
+        current
+          ? { kind: 'update', body: input, current }
+          : { kind: 'create', body: input, requestId }
+      )
   });
 </script>
 

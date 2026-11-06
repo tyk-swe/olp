@@ -11,19 +11,20 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/release"
 )
 
 type Authenticator interface {
-	Authenticate(secret string) (*access.Authority, error)
+	Authenticate(secret string) (*keyauthority.Authority, error)
 }
 
 type DelegationAuthenticator interface {
-	AuthenticateDelegation(context.Context, string, string) (*access.Authority, error)
+	AuthenticateDelegation(context.Context, string, string) (*keyauthority.Authority, error)
 }
 
 type TaskCapabilityAuthenticator interface {
-	AuthenticateTaskCapability(context.Context, string) (*access.Authority, error)
+	AuthenticateTaskCapability(context.Context, string) (*keyauthority.Authority, error)
 }
 
 type Failure struct {
@@ -34,7 +35,7 @@ type Failure struct {
 
 func (f *Failure) Error() string { return f.Code + ": " + f.Message }
 
-func HeaderEndUserDigest(auth any, r *http.Request, authority access.Authority) (string, *Failure) {
+func HeaderEndUserDigest(auth any, r *http.Request, authority keyauthority.Authority) (string, *Failure) {
 	values := r.Header.Values("X-OLP-End-User")
 	if authority.Policy.EndUserSource == nil || *authority.Policy.EndUserSource != "header" || len(values) != 1 || !access.ValidEndUserIdentifier(values[0]) {
 		return "", &Failure{Status: http.StatusBadRequest, Code: "invalid_end_user", Message: "Provide an end-user machine token of 1-128 characters in the key's configured source."}
@@ -82,37 +83,37 @@ func ClientIP(r *http.Request, trusted []netip.Prefix) string {
 	return addr.String()
 }
 
-func CheckAddress(authority access.Authority, r *http.Request, trusted []netip.Prefix) *Failure {
+func CheckAddress(authority keyauthority.Authority, r *http.Request, trusted []netip.Prefix) *Failure {
 	if len(authority.Policy.AllowedCIDRs) != 0 && !authority.AllowsClientIP(ClientIP(r, trusted)) {
 		return &Failure{Status: http.StatusForbidden, Code: "ip_not_allowed", Message: "This API key does not allow the client address."}
 	}
 	return nil
 }
 
-func Authenticate(auth Authenticator, r *http.Request, token, scope string, trusted []netip.Prefix, now time.Time) (access.Authority, *Failure) {
+func Authenticate(auth Authenticator, r *http.Request, token, scope string, trusted []netip.Prefix, now time.Time) (keyauthority.Authority, *Failure) {
 	if auth == nil || token == "" {
-		return access.Authority{}, &Failure{Status: http.StatusUnauthorized, Code: "invalid_api_key", Message: "Provide an API key as a Bearer [REDACTED] in the Authorization header."}
+		return keyauthority.Authority{}, &Failure{Status: http.StatusUnauthorized, Code: "invalid_api_key", Message: "Provide an API key as a Bearer [REDACTED] in the Authorization header."}
 	}
 	authority, err := authenticate(auth, r, token, scope)
 	switch {
 	case errors.Is(err, release.ErrStaleAuthority):
-		return access.Authority{}, &Failure{Status: http.StatusServiceUnavailable, Code: "authority_unavailable", Message: "Key authority is unavailable; retry shortly."}
+		return keyauthority.Authority{}, &Failure{Status: http.StatusServiceUnavailable, Code: "authority_unavailable", Message: "Key authority is unavailable; retry shortly."}
 	case err != nil || authority == nil:
-		return access.Authority{}, &Failure{Status: http.StatusUnauthorized, Code: "invalid_api_key", Message: "Incorrect API key provided."}
+		return keyauthority.Authority{}, &Failure{Status: http.StatusUnauthorized, Code: "invalid_api_key", Message: "Incorrect API key provided."}
 	case authority.RevokedAt != nil:
-		return access.Authority{}, &Failure{Status: http.StatusUnauthorized, Code: "invalid_api_key", Message: "This API key has been revoked."}
+		return keyauthority.Authority{}, &Failure{Status: http.StatusUnauthorized, Code: "invalid_api_key", Message: "This API key has been revoked."}
 	case authority.ExpiresAt != nil && !authority.ExpiresAt.After(now):
-		return access.Authority{}, &Failure{Status: http.StatusUnauthorized, Code: "invalid_api_key", Message: "This API key has expired."}
+		return keyauthority.Authority{}, &Failure{Status: http.StatusUnauthorized, Code: "invalid_api_key", Message: "This API key has expired."}
 	case !slices.Contains(authority.Policy.Scopes, scope):
-		return access.Authority{}, &Failure{Status: http.StatusForbidden, Code: "permission_denied", Message: "This API key does not have the " + scope + " scope."}
+		return keyauthority.Authority{}, &Failure{Status: http.StatusForbidden, Code: "permission_denied", Message: "This API key does not have the " + scope + " scope."}
 	}
 	if failure := CheckAddress(*authority, r, trusted); failure != nil {
-		return access.Authority{}, failure
+		return keyauthority.Authority{}, failure
 	}
 	return *authority, nil
 }
 
-func authenticate(auth Authenticator, r *http.Request, token, scope string) (*access.Authority, error) {
+func authenticate(auth Authenticator, r *http.Request, token, scope string) (*keyauthority.Authority, error) {
 	if strings.HasPrefix(token, "olpt_") {
 		capability, ok := auth.(TaskCapabilityAuthenticator)
 		if !ok || (scope != "inference" && scope != "tools") {

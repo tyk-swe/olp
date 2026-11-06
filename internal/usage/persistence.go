@@ -3,7 +3,6 @@ package usage
 import (
 	"cmp"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -216,13 +215,16 @@ const (
 // either fully accounted for or not at all. `payload` is the original stream
 // bytes, fingerprinted so a replay is recognised even if this build serializes
 // the event differently than the one that wrote it.
-func PersistEvent(ctx context.Context, pool *pgxpool.Pool, ev *Event, payload []byte) (Persisted, error) {
+func PersistEvent(ctx context.Context, pool *pgxpool.Pool, accepted AccountingEvent) (Persisted, error) {
+	if accepted.validated == nil {
+		return Persisted{}, ErrInvalidEvent
+	}
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return Persisted{}, fmt.Errorf("persist request metadata event: %w", err)
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-	result, err := PersistEventTx(ctx, tx, ev, payload)
+	result, err := PersistEventTx(ctx, tx, accepted)
 	if err != nil {
 		return Persisted{}, err
 	}
@@ -234,22 +236,22 @@ func PersistEvent(ctx context.Context, pool *pgxpool.Pool, ev *Event, payload []
 
 // PersistEventTx records accounting in the caller's transaction, allowing a
 // resource's reconciliation marker and its usage to commit atomically.
-func PersistEventTx(ctx context.Context, tx pgx.Tx, ev *Event, payload []byte) (Persisted, error) {
+func PersistEventTx(ctx context.Context, tx pgx.Tx, accepted AccountingEvent) (Persisted, error) {
+	if accepted.validated == nil {
+		return Persisted{}, ErrInvalidEvent
+	}
+	ev := accepted.event
 	if workflowEvent(ev) {
-		return persistWorkflowTerminalTx(ctx, tx, ev, payload)
+		return persistWorkflowTerminalTx(ctx, tx, accepted)
 	}
 	if _, present := debitDispatchID(ev); present {
-		return PersistDebitEventTx(ctx, tx, ev, payload)
+		return persistDebitEventTx(ctx, tx, accepted)
 	}
-	return persistEventTx(ctx, tx, ev, payload, nil)
+	return persistEventTx(ctx, tx, accepted, nil)
 }
 
-func persistEventTx(ctx context.Context, tx pgx.Tx, ev *Event, payload []byte, supplyOwners []string) (Persisted, error) {
-	validated, err := Validate(ev)
-	if err != nil {
-		return Persisted{}, err
-	}
-	digest := sha256.Sum256(payload)
+func persistEventTx(ctx context.Context, tx pgx.Tx, accepted AccountingEvent, supplyOwners []string) (Persisted, error) {
+	ev, validated, digest := accepted.event, accepted.validated, accepted.digest
 
 	admission, err := admitReceipt(ctx, tx, ev, digest[:])
 	if err != nil {
@@ -415,7 +417,7 @@ func insertRequestRows(ctx context.Context, tx pgx.Tx, ev *Event, validated *Val
 // attempt whose evidence never arrived is billing uncertain, priced if it can
 // be, and never counted as complete.
 func insertFact(ctx context.Context, tx pgx.Tx, ev *Event, attempt ValidatedAttempt) (factCharge, error) {
-	usage := attempt.Usage
+	usage := attempt.Usage.wire()
 	status := chargeNotBillable
 	switch {
 	case usage.BillingUncertain:

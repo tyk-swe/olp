@@ -7,10 +7,8 @@ import (
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
-// HTTPRequest is a request a plugin sends with Fetch, or carries for OLP.
 type HTTPRequest = abi.HTTPRequest
 
-// HTTPResponse is the response Fetch returns.
 type HTTPResponse = abi.HTTPResponse
 
 // Fetch sends an HTTP request through OLP, the only way a confined plugin

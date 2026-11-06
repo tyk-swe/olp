@@ -3,17 +3,17 @@ package mcp
 import (
 	"context"
 	"encoding/json"
-	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/mcp/messages"
-	"github.com/tyk-swe/olp/internal/mcp/sessions"
-	"github.com/tyk-swe/olp/internal/oif"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"testing"
 
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
+	"github.com/tyk-swe/olp/internal/mcp/messages"
+	"github.com/tyk-swe/olp/internal/mcp/sessions"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -218,7 +218,7 @@ func TestRPCRequestIDsRoundTripWithoutConversion(t *testing.T) {
 func TestSharedSessionRejectsOtherIdentities(t *testing.T) {
 	issuer := "issuer"
 	binding := func(installation, project, individual, delegation string) sessions.Binding {
-		return sessions.BindingOf(access.Authority{ID: "key", InstallationID: installation, ProjectID: &project, WorkloadIssuerID: &issuer, WorkloadDigest: "workload", EndUserDigest: individual, DelegationTokenDigest: delegation})
+		return sessions.BindingOf(keyauthority.Authority{ID: "key", InstallationID: installation, ProjectID: &project, WorkloadIssuerID: &issuer, WorkloadDigest: "workload", EndUserDigest: individual, DelegationTokenDigest: delegation})
 	}
 	owner := binding("installation", "project", "person", "delegation")
 	store, err := sessions.New(&sessionReplySource{}, "test")

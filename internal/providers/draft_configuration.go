@@ -6,16 +6,18 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/grants"
 )
 
 // StoreDraftConfiguration owns the provider configuration/evidence transition
 // after a caller has acquired the installation lock and current authorization.
-// next already has pinned plugin/profile and destination-owned secret references.
 // Both ordinary edits and promotion use the stored full configuration as the
 // evidence boundary; a portable document cannot stand in for that identity.
-func StoreDraftConfiguration(ctx context.Context, tx pgx.Tx, id, name string, next *Configuration, policy *egress.Policy) error {
+func StoreDraftConfiguration(ctx context.Context, tx pgx.Tx, id, name string, prepared PreparedConfiguration) error {
+	next := prepared.configuration
+	if next.Endpoint == nil {
+		return access.Invalid("configuration", "Prepare a valid provider configuration before saving it.")
+	}
 	var previous Configuration
 	var encoded []byte
 	var previousName string
@@ -26,14 +28,10 @@ func StoreDraftConfiguration(ctx context.Context, tx pgx.Tx, id, name string, ne
 		return err
 	}
 	previous.Normalize()
-	next.Normalize()
-	if err := next.ValidateAndNormalize(policy); err != nil {
+	if err := PreserveCredentialBoundary(ctx, tx, id, &previous, &next); err != nil {
 		return err
 	}
-	if err := PreserveCredentialBoundary(ctx, tx, id, &previous, next); err != nil {
-		return err
-	}
-	if err := validateNetworkReference(ctx, tx, id, next); err != nil {
+	if err := validateNetworkReference(ctx, tx, id, &next); err != nil {
 		return err
 	}
 	before, err := json.Marshal(previous)

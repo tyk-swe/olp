@@ -5,6 +5,7 @@ import (
 	"errors"
 	"maps"
 	"reflect"
+	"slices"
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -127,4 +128,18 @@ func mountedSettingsEqual(left, right []any) bool {
 		return encoded
 	}
 	return string(normalize(left)) == string(normalize(right))
+}
+
+func cloneMounted(entries map[string]MountedProvider) map[string]MountedProvider {
+	return maps.Collect(func(yield func(string, MountedProvider) bool) {
+		for id, entry := range entries {
+			if !yield(id, MountedProvider{
+				Configuration:     entry.Configuration.Clone(),
+				Credential:        slices.Clone(entry.Credential),
+				NetworkCredential: slices.Clone(entry.NetworkCredential),
+			}) {
+				return
+			}
+		}
+	})
 }

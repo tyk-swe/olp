@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routeidentity"
@@ -38,7 +39,7 @@ func (t *BudgetTarget) validate() error {
 		return Invalid("target.route", "Supply a route only for a key-route budget.")
 	}
 	identified := t.Kind == "key_end_user" || t.Kind == "project_end_user"
-	if (identified && !ValidEndUserDigest(t.EndUserDigest)) || (!identified && t.EndUserDigest != "") {
+	if (identified && !keyauthority.ValidEndUserDigest(t.EndUserDigest)) || (!identified && t.EndUserDigest != "") {
 		return Invalid("target.end_user_digest", "Supply a digest only for an end-user budget.")
 	}
 	if t.Kind == "attribution" {
@@ -51,11 +52,11 @@ func (t *BudgetTarget) validate() error {
 	return nil
 }
 
-func costs(l AdmissionLimits) *BudgetPolicy {
-	return &BudgetPolicy{DailyCostLimit: l.DailyCostLimit, WeeklyCostLimit: l.WeeklyCostLimit, MonthlyCostLimit: l.MonthlyCostLimit}
+func costs(l keyauthority.AdmissionLimits) *keyauthority.BudgetPolicy {
+	return &keyauthority.BudgetPolicy{DailyCostLimit: l.DailyCostLimit, WeeklyCostLimit: l.WeeklyCostLimit, MonthlyCostLimit: l.MonthlyCostLimit}
 }
 
-func (s *Server) budgetIncreaseTarget(r *http.Request, tx pgx.Tx, p Principal, t BudgetTarget) (owner string, project *string, policy *BudgetPolicy, err error) {
+func (s *Server) budgetIncreaseTarget(r *http.Request, tx pgx.Tx, p Principal, t BudgetTarget) (owner string, project *string, policy *keyauthority.BudgetPolicy, err error) {
 	if err = t.validate(); err != nil {
 		return
 	}
@@ -89,9 +90,9 @@ func (s *Server) budgetIncreaseTarget(r *http.Request, tx pgx.Tx, p Principal, t
 		if err = p.Project(project, Change); err != nil {
 			return
 		}
-		var endUser *EndUserPolicy
-		var templates LimitTemplates
-		var labels AttributionBudgets
+		var endUser *keyauthority.EndUserPolicy
+		var templates keyauthority.LimitTemplates
+		var labels keyauthority.AttributionBudgets
 		if err = tx.QueryRow(r.Context(), "SELECT budget_policy,end_user_policy,limit_templates,attribution_budgets FROM olp.projects WHERE id=$1", t.ID).Scan(&policy, &endUser, &templates, &labels); err != nil {
 			return
 		}
@@ -104,19 +105,19 @@ func (s *Server) budgetIncreaseTarget(r *http.Request, tx pgx.Tx, p Principal, t
 			policy = &v
 		case "project_end_user":
 			owner = limits.EndUserProjectID(t.ID, t.EndUserDigest)
-			endUser, err = templates.endUser(endUser)
+			endUser, err = templates.EndUser(endUser)
 			if err == nil {
 				policy = costs(endUser.Limits(t.EndUserDigest))
 			}
 		}
 	case "budget_group":
-		var l AdmissionLimits
+		var l keyauthority.AdmissionLimits
 		err = tx.QueryRow(r.Context(), "SELECT project_id::text,effective_limits FROM olp.budget_groups_with_limits WHERE id=$1", t.ID).Scan(&project, &l)
 		owner = t.ID
 		policy = costs(l)
 	default:
-		var a Authority
-		var templates LimitTemplates
+		var a keyauthority.Authority
+		var templates keyauthority.LimitTemplates
 		err = tx.QueryRow(r.Context(), `SELECT k.project_id::text,k.policy,COALESCE(p.limit_templates,'{}'::jsonb) FROM olp.api_keys k LEFT JOIN olp.projects p ON p.id=k.project_id WHERE k.id=$1 AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>now())`, t.ID).Scan(&a.ProjectID, &a.Policy, &templates)
 		if err != nil {
 			return

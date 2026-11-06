@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"math"
@@ -9,7 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -91,8 +92,8 @@ func TestEndUserDigestsAgreeWithAccessPolicy(t *testing.T) {
 			t.Fatal(err)
 		}
 		decoded, decodeErr := Decode(payload)
-		if access.ValidEndUserDigest(tc.digest) != tc.valid || (validationErr == nil) != tc.valid || (decodeErr == nil) != tc.valid {
-			t.Errorf("digest %q, access valid %v, validation error %v, decode error %v", tc.digest, access.ValidEndUserDigest(tc.digest), validationErr, decodeErr)
+		if keyauthority.ValidEndUserDigest(tc.digest) != tc.valid || (validationErr == nil) != tc.valid || (decodeErr == nil) != tc.valid {
+			t.Errorf("digest %q, access valid %v, validation error %v, decode error %v", tc.digest, keyauthority.ValidEndUserDigest(tc.digest), validationErr, decodeErr)
 		}
 		if decodeErr == nil && decoded.EndUserDigest != tc.digest {
 			t.Errorf("digest %q decoded as %q", tc.digest, decoded.EndUserDigest)
@@ -256,7 +257,7 @@ func TestRouteSlugsAgreeAcrossRequestsAccessAccountingAndCache(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, requestErr := openai.Parse(wire.Chat, request)
-			accessErr := (access.RouteGroups{"group": []string{tc.slug}}).Validate()
+			accessErr := (keyauthority.RouteGroups{"group": []string{tc.slug}}).Validate()
 			cacheErr := (&cache.Policy{Mode: "semantic", EmbeddingRoute: tc.slug, AllowUnsealedVectors: true}).Validate()
 			if (accountingErr == nil) != tc.valid || (requestErr == nil) != tc.valid || (accessErr == nil) != tc.valid || (cacheErr == nil) != tc.valid {
 				t.Fatalf("accounting error = %v, request error = %v, access error = %v, cache error = %v", accountingErr, requestErr, accessErr, cacheErr)
@@ -414,7 +415,6 @@ func TestBudgetBoundarySurvivesUsageEvent(t *testing.T) {
 	}
 }
 
-// withAttemptFields sets raw JSON fields on the first attempt of an envelope.
 func withAttemptFields(t *testing.T, fields map[string]string) func(map[string]json.RawMessage) {
 	t.Helper()
 	return func(m map[string]json.RawMessage) {
@@ -587,5 +587,45 @@ func TestValidateRejectsUnboundDelegationAttribution(t *testing.T) {
 				t.Fatalf("invalid delegation accepted or misidentified: %v", err)
 			}
 		})
+	}
+}
+
+func TestAccountingEventPreservesUsageEvidence(t *testing.T) {
+	for _, state := range []struct{ observed, complete, uncertain bool }{
+		{false, true, false}, {false, false, true}, {true, false, false}, {true, false, true}, {true, true, false},
+	} {
+		for _, deferred := range []bool{false, true} {
+			event := metadataEvent()
+			event.ProviderID, event.UpstreamModel = nil, nil
+			event.Committed = false
+			event.Attempts[0].Usage = &AttemptUsage{Observed: state.observed, Complete: state.complete, BillingUncertain: state.uncertain, Deferred: deferred}
+			accepted, err := NewAccountingEvent(event)
+			if err != nil {
+				t.Fatalf("state %+v deferred %v: %v", state, deferred, err)
+			}
+			recorded := accepted.validated.Attempts[0].Usage.wire()
+			if recorded.Observed != state.observed || recorded.Complete != state.complete || recorded.BillingUncertain != state.uncertain || recorded.Deferred != deferred {
+				t.Fatalf("accounting changed evidence %+v deferred %v to %+v", state, deferred, recorded)
+			}
+			final := event.Attempts[len(event.Attempts)-1]
+			if *accepted.event.ProviderID != final.ProviderID || *accepted.event.UpstreamModel != final.UpstreamModel || accepted.event.Committed != final.Committed {
+				t.Fatal("accounting request did not derive its final attempt")
+			}
+		}
+	}
+}
+
+func TestUsageFingerprintSurvivesReconstruction(t *testing.T) {
+	payload := []byte(`{"invocation_count":2,"training_tokens":3,"storage_byte_seconds":"4","cache_token_seconds":"5","container_sessions":{"small":6},"deferred":true,"observed":true,"complete":false,"billing_uncertain":true,"input_tokens":7,"output_tokens":8,"cached_input_tokens":null,"cache_write_input_tokens":null,"cache_write_5m_input_tokens":null,"cache_write_1h_input_tokens":null,"audio_input_tokens":null,"cached_audio_input_tokens":null,"audio_output_tokens":null,"image_input_tokens":null,"cached_image_input_tokens":null,"image_output_tokens":null,"media_units":"9","tool_calls":{"search":10},"batch":true}`)
+	var decoded AttemptUsage
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	reconstructed, err := json.Marshal(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sha256.Sum256(payload) != sha256.Sum256(reconstructed) {
+		t.Fatalf("reconstructing persisted usage changed its receipt fingerprint\noriginal %s\nreconstructed %s", payload, reconstructed)
 	}
 }

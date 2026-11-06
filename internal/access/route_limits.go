@@ -4,43 +4,11 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/routeidentity"
 )
 
-type RouteLimits map[string]AdmissionLimits
-
-func (policies RouteLimits) ValidateAndNormalize() error {
-	if len(policies) > 100 {
-		return Invalid("route_limits", "Use at most 100 routes.")
-	}
-	for route, policy := range policies {
-		if !routeidentity.ValidSlug(route) {
-			return Invalid("route_limits", "Each entry must name a route slug.")
-		}
-		if err := policy.ValidateAndNormalize(); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-func (policies RouteLimits) Limited() bool {
-	for _, p := range policies {
-		if p.Limited() {
-			return true
-		}
-	}
-	return false
-}
-func (policies RouteLimits) CostBudgeted() bool {
-	for _, p := range policies {
-		if p.CostBudgeted() {
-			return true
-		}
-	}
-	return false
-}
-func ensureRouteBudgetAccounts(ctx context.Context, tx pgx.Tx, id string, policies RouteLimits) error {
+func ensureRouteBudgetAccounts(ctx context.Context, tx pgx.Tx, id string, policies keyauthority.RouteLimits) error {
 	for route, policy := range policies {
 		if policy.CostBudgeted() {
 			if err := limits.EnsureKeyRouteBudget(ctx, tx, id, route); err != nil {

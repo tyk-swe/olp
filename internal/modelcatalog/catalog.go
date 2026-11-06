@@ -58,11 +58,11 @@ type Model struct {
 
 // Describe exposes only the route identity by default. Prices are consumer
 // ranges, rather than provider records; upstream names require a separate opt-in.
-func Describe(snapshot *routing.Snapshot, route routing.Route, inputs *usage.RoutingInputs, origin string, prices, upstream bool, now time.Time) Model {
+func Describe(snapshot *routing.View, route routing.Route, inputs *usage.RoutingInputs, origin string, prices, upstream bool, now time.Time) Model {
 	model := Model{ID: route.Slug, Capabilities: routing.EffectiveCapabilities(snapshot, route), Samples: certifiedSamples(snapshot, route, origin)}
 	metadata := []routing.ModelMetadata{}
 	for _, target := range route.Targets {
-		provider, ok := snapshot.Providers[target.ProviderID]
+		provider, ok := snapshot.FindProvider(target.ProviderID)
 		if !ok || !provider.Enabled {
 			continue
 		}
@@ -145,7 +145,7 @@ func extend(bounds **Range, value *string) {
 	}
 }
 
-func priceRanges(snapshot *routing.Snapshot, route routing.Route, inputs *usage.RoutingInputs, now time.Time) []Price {
+func priceRanges(snapshot *routing.View, route routing.Route, inputs *usage.RoutingInputs, now time.Time) []Price {
 	result := []Price{}
 	if inputs == nil {
 		return result
@@ -157,7 +157,7 @@ func priceRanges(snapshot *routing.Snapshot, route routing.Route, inputs *usage.
 			if target.Shadow != nil {
 				continue
 			}
-			provider, ok := snapshot.Providers[target.ProviderID]
+			provider, ok := snapshot.FindProvider(target.ProviderID)
 			if !ok || !provider.Enabled {
 				continue
 			}
@@ -199,7 +199,7 @@ func priceRanges(snapshot *routing.Snapshot, route routing.Route, inputs *usage.
 
 // Samples use a certified unary tuple. A strict generation example must also
 // speak its target's pinned native dialect, rather than imply translation.
-func certifiedSamples(snapshot *routing.Snapshot, route routing.Route, origin string) []Sample {
+func certifiedSamples(snapshot *routing.View, route routing.Route, origin string) []Sample {
 	result := []Sample{}
 	for _, candidate := range samples(route, origin) {
 		surface := candidate.SDK
@@ -207,7 +207,7 @@ func certifiedSamples(snapshot *routing.Snapshot, route routing.Route, origin st
 			continue
 		}
 		for _, target := range route.Targets {
-			provider, ok := snapshot.Providers[target.ProviderID]
+			provider, ok := snapshot.FindProvider(target.ProviderID)
 			if !ok || !provider.Enabled || target.Shadow != nil || !provider.Supports(target.ProviderModel, candidate.Operation, surface, "unary") {
 				continue
 			}

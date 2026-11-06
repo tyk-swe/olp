@@ -106,7 +106,7 @@ func enableTestCache(t *testing.T, h *harness) (*harness, *cacheMemory) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.gateway.Cache = &cache.Store{Client: m, Keys: keys, Auth: secrets.NewAuthKey(bytes.Repeat([]byte{2}, 32), "test"), Installation: "test"}
+	h.gateway.deps.Cache = &cache.Store{Client: m, Keys: keys, Auth: secrets.NewAuthKey(bytes.Repeat([]byte{2}, 32), "test"), Installation: "test"}
 	h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
 		r := s.Routes[routeSlug]
 		r.Cache = &cache.Policy{Mode: "exact"}
@@ -226,11 +226,11 @@ func TestResponseCacheClientSurfaces(t *testing.T) {
 					path, body := tc.path, tc.body
 					if tc.kind == "bedrock" {
 						credentials := map[string][]byte{}
-						for _, provider := range h.rt.release.Snapshot.Providers {
+						for _, provider := range h.rt.release.Snapshot().Providers() {
 							credentials[*provider.ActiveCredential] = []byte(`{"access_key_id":"TESTBEDROCKKEY123456","secret_access_key":"test-bedrock-secret-for-cache"}`)
 						}
 						var err error
-						h.rt.release, err = release.NewRelease(h.rt.release.ID, h.rt.release.Sequence, h.rt.release.Snapshot, credentials)
+						h.rt.release, err = release.NewRelease(h.rt.release.ID, h.rt.release.Sequence, h.rt.release.Snapshot().Clone(), credentials)
 						if err != nil {
 							t.Fatal(err)
 						}

@@ -104,15 +104,11 @@ func (s *Server) write(r *http.Request, kind, action string) (access.Reply, erro
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, beginErr := s.access.Begin(r)
-	if beginErr != nil {
-		return access.Reply{}, beginErr
-	}
-	defer tx.Rollback(r.Context())
-	principal, authErr := s.access.Reauthorize(r, tx)
+	tx, principal, authErr := s.access.BeginMutation(r)
 	if authErr != nil {
 		return access.Reply{}, authErr
 	}
+	defer tx.Rollback(r.Context())
 	current, loadErr := s.current(r, tx, principal, kind, action, input)
 	if loadErr != nil {
 		return access.Reply{}, loadErr
@@ -122,7 +118,7 @@ func (s *Server) write(r *http.Request, kind, action string) (access.Reply, erro
 		return access.Reply{}, replayErr
 	}
 	if replay != nil {
-		return access.Commit(r, tx, *replay)
+		return *replay, tx.Commit(r.Context())
 	}
 	if current != nil {
 		if err := access.Match(r, current.ETag); err != nil {
@@ -157,7 +153,7 @@ func (s *Server) write(r *http.Request, kind, action string) (access.Reply, erro
 	if err := s.access.CompleteReplay(r, tx, claim, response); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, response)
+	return response, tx.Commit(r.Context())
 }
 func publicationReply(publication agentcontract.Publication, action string) access.Reply {
 	if action == "retire" {

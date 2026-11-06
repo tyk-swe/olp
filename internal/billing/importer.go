@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"log/slog"
 	"maps"
 	"net/http"
@@ -22,7 +23,6 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/secrets"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // Importer polls configured billing imports and stores the invoiced costs
@@ -117,13 +117,13 @@ func (i *Importer) Run(ctx context.Context) {
 		passCtx, cancel := context.WithTimeout(ctx, budget)
 		progress, err := i.pass(passCtx)
 		cancel()
-		outcome := usage.OutcomeSuccess
+		outcome := workerhealth.OutcomeSuccess
 		if err != nil {
-			outcome = usage.OutcomeFailure
+			outcome = workerhealth.OutcomeFailure
 			i.log().Warn("billing import pass failed", "code", "database")
 		}
 		checkpoint, done := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-		if err := usage.CheckpointTask(checkpoint, i.Pool, usage.TaskBillingImport, outcome, progress); err != nil {
+		if err := workerhealth.New(workerhealth.TaskBillingImport, "").Checkpoint(checkpoint, i.Pool, outcome, progress); err != nil {
 			i.log().Warn("billing import checkpoint failed", "code", "database")
 		}
 		done()

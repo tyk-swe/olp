@@ -4,19 +4,23 @@
   import {
     enrollMFA,
     verifyMFA,
-    type MFAChallenge,
     type MFAEnrollment,
     type MFAVerification
   } from './api';
+  import type { MFARequest } from './prompt.svelte';
   let {
-    challenge,
-    enrollment,
+    request,
     onComplete
   }: {
-    challenge?: MFAChallenge;
-    enrollment?: MFAEnrollment;
+    request: MFARequest;
     onComplete: (result?: MFAVerification) => void;
   } = $props();
+  const challenge = $derived(
+    request.kind === 'challenge' ? request.challenge : undefined
+  );
+  const enrollment = $derived(
+    request.kind === 'enrollment' ? request.enrollment : undefined
+  );
   let started = $state<MFAEnrollment | null>(null);
   const current = $derived(started ?? enrollment);
   let method = $state<'totp' | 'recovery' | 'webauthn'>('totp');
@@ -51,7 +55,10 @@
     error = '';
     try {
       const token = current?.challenge ?? challenge?.challenge;
-      if (!token) throw new Error('Start verification again.');
+      if (!token || !selected) {
+        error = 'Start verification again.';
+        return;
+      }
       let credential: Record<string, unknown> | undefined;
       if (selected === 'webauthn') {
         if (
@@ -77,12 +84,12 @@
             });
         if (!(result instanceof PublicKeyCredential))
           throw new Error('No security-key response was received.');
-        credential = result.toJSON() as unknown as Record<string, unknown>;
+        credential = { ...result.toJSON() };
       }
       const result = await verifyMFA(
         {
           challenge: token,
-          method: selected as 'totp' | 'recovery' | 'webauthn',
+          method: selected,
           ...(credential ? { credential } : { code })
         },
         controller.signal

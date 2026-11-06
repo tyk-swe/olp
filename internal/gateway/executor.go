@@ -12,10 +12,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
-	"github.com/tyk-swe/olp/internal/routing"
-
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/interaction"
@@ -23,7 +20,9 @@ import (
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -127,7 +126,7 @@ func (s *Server) walkDispatchable(x *call, attempts []routing.Attempt, visit fun
 	repeats := retryDispatches(x.route)
 	available := 0
 	for _, attempt := range attempts {
-		provider, ok := x.snapshot().Providers[attempt.ProviderID]
+		provider, ok := x.snapshot().FindProvider(attempt.ProviderID)
 		if !ok {
 			continue
 		}
@@ -301,7 +300,7 @@ func forwardable(status int) bool {
 }
 
 // A call owns mutexes, pinned authority, and request-wide accounting, so model steps update it in place.
-func (s *Server) executeModelStep(ctx context.Context, x *call, source *wire.Request, current access.Authority) *outcome {
+func (s *Server) executeModelStep(ctx context.Context, x *call, source *wire.Request, current keyauthority.Authority) *outcome {
 	if x.generation.firstStep == nil {
 		x.generation.parsed = source
 		out := s.execute(ctx, x)
@@ -316,15 +315,14 @@ func (s *Server) executeModelStep(ctx context.Context, x *call, source *wire.Req
 	first := x.generation.firstStep
 	actual := x.settledTokensFor(x.facts[:first.factEnd], first.estimate)
 	if err := x.lease.Reconcile(stepCtx, *actual); err != nil {
-		if e := s.Admission.outage(x.authority.ID, false, err); e != nil {
+		if e := s.deps.Admission.outage(x.authority.ID, false, err); e != nil {
 			return &outcome{err: e}
 		}
 	}
 	x.generation.parsed = source
 	x.routeLeg = routeLeg{affinity: x.seed}
 	x.allowance = 0
-	x.frames = nil
-	x.delegators = nil
+	x.walk = routing.RouteWalk{}
 	x.classified = nil
 	if e := s.prepare(stepCtx, x, x.authorize); e != nil {
 		return &outcome{err: e}
@@ -332,7 +330,7 @@ func (s *Server) executeModelStep(ctx context.Context, x *call, source *wire.Req
 	x.estimate = requestEstimate(x)
 	authority := cacheAuthority(x.admissionAuthority(current), false, true, false)
 	reservation := keyReservationEstimate(x.estimate, s.dispatchableAttempts(x))
-	lease, e := s.Admission.reserveKeyCosted(stepCtx, &authority, x.clientSurface(), reservation, time.Duration(x.named().OverallTimeout)*time.Millisecond, costReservation{}, x.limitRoute())
+	lease, e := s.deps.Admission.reserveKeyCosted(stepCtx, &authority, x.clientSurface(), reservation, time.Duration(x.named().OverallTimeout)*time.Millisecond, costReservation{}, x.limitRoute())
 	if e != nil {
 		return &outcome{err: e}
 	}
@@ -386,7 +384,7 @@ func (s *Server) slots(x *call, attempt routing.Attempt, provider *routing.Provi
 	}
 	out := make([]routing.Slot, 0, len(ordered))
 	for _, slot := range ordered {
-		if !s.slotAvailable(x, attempt, &slot) || (!s.Admission.ready() && (s.health.coolingDown(provider.ID, slot.ID) || s.health.coolingDown(provider.ID, credentialHealthKey(&slot, s.slotGrantGeneration(&slot))))) {
+		if !s.slotAvailable(x, attempt, &slot) || (!s.deps.Admission.ready() && (s.health.coolingDown(provider.ID, slot.ID) || s.health.coolingDown(provider.ID, credentialHealthKey(&slot, s.slotGrantGeneration(&slot))))) {
 			continue
 		}
 		out = append(out, slot)
@@ -399,11 +397,11 @@ func (s *Server) slotAvailable(x *call, attempt routing.Attempt, slot *routing.S
 	if !slot.Allows(attempt.UpstreamModel, x.route.Slug, x.keyID) {
 		return false
 	}
-	provider := x.snapshot().Providers[attempt.ProviderID]
+	provider := x.snapshot().Provider(attempt.ProviderID)
 	if !connectors.SecretRequired(provider.AuthMode) {
 		return true
 	}
-	return slot.CredentialID != nil && s.Runtime.Eligibility(*slot.CredentialID) == routing.Eligible
+	return slot.CredentialID != nil && s.deps.Runtime.Eligibility(*slot.CredentialID) == routing.Eligible
 }
 
 // attempt performs one upstream call with one credential.
@@ -450,7 +448,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 		f.accepted = st.accepted
 		if x.generation.continuation != nil && x.generation.continuation.resource != nil {
 			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-			_ = s.Resources.MarkUnknown(cleanup, x.generation.continuation.resource)
+			_ = s.deps.Resources.MarkUnknown(cleanup, x.generation.continuation.resource)
 			cancel()
 		}
 

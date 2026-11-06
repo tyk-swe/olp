@@ -18,7 +18,7 @@ func (x *call) workflowModelCost(attempt routing.Attempt) *Error {
 	if attempt.Price == nil || x.snapshot() == nil {
 		return workflowUnboundedCost()
 	}
-	provider, ok := x.snapshot().Providers[attempt.ProviderID]
+	provider, ok := x.snapshot().FindProvider(attempt.ProviderID)
 	if !ok {
 		return workflowUnboundedCost()
 	}
@@ -86,7 +86,7 @@ func (s *Server) reserveWorkflowRun(ctx context.Context, x *call) (*limits.Lease
 	if x.workflow == nil {
 		return nil, nil
 	}
-	if !s.Admission.ready() {
+	if !s.deps.Admission.ready() {
 		if x.generation.runLimits.MaxConcurrentRuns == nil {
 			return nil, nil
 		}
@@ -94,7 +94,7 @@ func (s *Server) reserveWorkflowRun(ctx context.Context, x *call) (*limits.Lease
 	}
 	reserveCtx, cancel := context.WithTimeout(ctx, reserveTimeout)
 	defer cancel()
-	lease, err := s.Admission.limiter.Reserve(reserveCtx, limits.Request{
+	lease, err := s.deps.Admission.limiter.Reserve(reserveCtx, limits.Request{
 		LookupID:         "run_" + strings.ReplaceAll(x.keyID, "-", ""),
 		CostOwnerID:      x.keyID,
 		MaxConcurrency:   x.generation.runLimits.MaxConcurrentRuns,
@@ -108,5 +108,5 @@ func (s *Server) reserveWorkflowRun(ctx context.Context, x *call) (*limits.Lease
 	if errors.As(err, &exceeded) {
 		return nil, rateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate)
 	}
-	return nil, s.Admission.outage(x.keyID, false, err)
+	return nil, s.deps.Admission.outage(x.keyID, false, err)
 }

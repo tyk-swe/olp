@@ -348,7 +348,7 @@ func (s *Snapshot) MCPToolset(revisionID string) (MCPToolsetResolution, bool) {
 			if !yield(MCPToolsetTool{
 				Classification: tool.Classification,
 				Alias:          tool.Alias, Name: tool.Name, Description: tool.Description,
-				InputSchema: tool.InputSchema, ServerID: tool.ServerID, ServerRevisionID: tool.ServerRevisionID,
+				InputSchema: slices.Clone(tool.InputSchema), ServerID: tool.ServerID, ServerRevisionID: tool.ServerRevisionID,
 				CatalogDigest: tool.CatalogDigest, Endpoint: tool.Endpoint, Transport: tool.Transport,
 				UnitPrice: copyPointer(tool.UnitPrice), CredentialID: copyPointer(tool.CredentialID),
 				OAuth: tool.OAuth.Clone(), Delegation: tool.Delegation.Clone(), Stdio: tool.Stdio.Clone(),

@@ -12,7 +12,7 @@
     saveCodeAccount,
     type CodeAccount,
     type CodeAccountWrite
-  } from '$lib/management/code-mode';
+  } from '$lib/features/code-mode/api';
   import {
     extraUsageAdapterFor,
     extraUsageValue,
@@ -100,7 +100,12 @@
         initial?.extra_usage_enabled
       )
     }),
-    persist: (input, requestId) => saveCodeAccount(input, current, requestId)
+    persist: (input, requestId) =>
+      saveCodeAccount(
+        current
+          ? { kind: 'update', body: input, current }
+          : { kind: 'create', body: input, requestId }
+      )
   });
 </script>
 

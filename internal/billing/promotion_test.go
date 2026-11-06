@@ -42,21 +42,29 @@ func (tx *applyImportTx) Exec(context.Context, string, ...any) (pgconn.CommandTa
 	return pgconn.CommandTag{}, err
 }
 
-func TestApplyImportReturnsWriteErrors(t *testing.T) {
+func TestSaveImportReturnsWriteErrors(t *testing.T) {
 	writeErr := errors.New("billing import write unavailable")
 	syncErr := errors.New("billing import revision sync unavailable")
+	credentialErr := errors.New("billing import credential removal unavailable")
+	existing := &ImportState{Source: SourceOpenAI, Enabled: true, Scope: json.RawMessage(`{}`)}
+	credential := "33333333-3333-3333-3333-333333333333"
 	for _, tc := range []struct {
-		name  string
-		state *ImportState
+		name     string
+		state    *ImportState
+		execErrs []error
+		want     error
 	}{
-		{"insert", nil},
-		{"update", &ImportState{Source: SourceOpenAI, Enabled: true, Scope: json.RawMessage(`{}`)}},
+		{"insert", nil, []error{writeErr}, writeErr},
+		{"update", existing, []error{writeErr}, writeErr},
+		{"insert revision", nil, []error{nil, syncErr}, syncErr},
+		{"update revision", existing, []error{nil, syncErr}, syncErr},
+		{"credential removal", &ImportState{Source: SourceOpenAI, Enabled: true, Scope: json.RawMessage(`{}`), CredentialID: &credential}, []error{nil, credentialErr}, credentialErr},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			tx := &applyImportTx{row: applyImportRow{state: tc.state}, execErrs: []error{writeErr, syncErr}}
-			err := ApplyImport(t.Context(), tx, "11111111-1111-1111-1111-111111111111", SourceOpenAI, true, nil, nil, "22222222-2222-2222-2222-222222222222")
-			if !errors.Is(err, writeErr) {
-				t.Fatalf("ApplyImport error = %v, want the write error %v", err, writeErr)
+			tx := &applyImportTx{row: applyImportRow{state: tc.state}, execErrs: tc.execErrs}
+			_, err := SaveImport(t.Context(), tx, "11111111-1111-1111-1111-111111111111", ImportConfiguration{Source: SourceOpenAI, Enabled: true}, "22222222-2222-2222-2222-222222222222")
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("SaveImport error = %v, want %v", err, tc.want)
 			}
 		})
 	}

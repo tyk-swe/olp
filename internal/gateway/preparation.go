@@ -146,11 +146,16 @@ func (x *call) requiresParameters() bool {
 	if x.route != nil && requires(x.route.Policy) {
 		return true
 	}
-	var snapshot *routing.Snapshot
+	var snapshot *routing.View
 	if x.historicalSnapshot != nil {
 		snapshot = x.historicalSnapshot
 	} else if x.request.release != nil {
-		snapshot = x.request.release.Snapshot
+		snapshot = x.request.release.Snapshot()
 	}
-	return snapshot != nil && (requires(snapshot.InstallationPolicy) || requires(snapshot.KeyPolicies[x.keyID]))
+	return snapshot != nil && (requires(snapshot.InstallationPolicy()) || requires(snapshot.KeyPolicy(x.keyID)))
+}
+
+func (x *call) recordPreparationGuardrails(record *targetPreparation, decisions []guardrails.Evidence) {
+	record.guardrailDecisions = appendGuardrailEvidence(record.guardrailDecisions, decisions)
+	x.recordGuardrails(decisions)
 }

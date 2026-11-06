@@ -95,7 +95,8 @@ func validateDebitEvent(ctx context.Context, tx pgx.Tx, event *Event, dispatchID
 	return currency, supplyOwners, nil
 }
 
-func PersistDebitEventTx(ctx context.Context, tx pgx.Tx, event *Event, payload []byte) (Persisted, error) {
+func persistDebitEventTx(ctx context.Context, tx pgx.Tx, accepted AccountingEvent) (Persisted, error) {
+	event, payload := accepted.event, accepted.payload
 	dispatchID, present := debitDispatchID(event)
 	if !present || dispatchID == "" {
 		return Persisted{}, limits.ErrDebitConflict
@@ -119,7 +120,7 @@ func PersistDebitEventTx(ctx context.Context, tx pgx.Tx, event *Event, payload [
 			return Persisted{Outcome: PersistOutcomeDuplicate}, nil
 		}
 	}
-	persisted, err := persistEventTx(ctx, tx, event, payload, supplyOwners)
+	persisted, err := persistEventTx(ctx, tx, accepted, supplyOwners)
 	if err != nil {
 		return Persisted{}, err
 	}
@@ -140,32 +141,6 @@ func PersistDebitEventTx(ctx context.Context, tx pgx.Tx, event *Event, payload [
 	}
 	result := sessionDebitResult(dispatchID, event, payload, cost, charge, complete)
 	if err := limits.SettleDebitTx(ctx, tx, result, persisted.CostSnapshots); err != nil {
-		return Persisted{}, err
-	}
-	return persisted, nil
-}
-
-// PersistDebitResultTx is the single financial commit boundary used by
-// lifecycle owners. It retains ordinary usage receipt admission and pricing;
-// reservations are reduced only after matching observed facts are durable.
-func PersistDebitResultTx(ctx context.Context, tx pgx.Tx, event *Event, payload []byte, result limits.DebitResult) (Persisted, error) {
-	if event == nil || event.EventID != result.EventID {
-		return Persisted{}, limits.ErrDebitConflict
-	}
-	_, supplyOwners, err := validateDebitEvent(ctx, tx, event, result.DispatchID)
-	if err != nil {
-		return Persisted{}, err
-	}
-	if duplicate, err := limits.DebitResultReplayTx(ctx, tx, result); err != nil {
-		return Persisted{}, err
-	} else if duplicate {
-		return Persisted{Outcome: PersistOutcomeDuplicate}, nil
-	}
-	persisted, err := persistEventTx(ctx, tx, event, payload, supplyOwners)
-	if err != nil {
-		return Persisted{}, err
-	}
-	if err = limits.SettleDebitTx(ctx, tx, result, persisted.CostSnapshots); err != nil {
 		return Persisted{}, err
 	}
 	return persisted, nil

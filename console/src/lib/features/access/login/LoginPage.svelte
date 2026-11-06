@@ -6,9 +6,9 @@
   import {
     authenticationCapabilities,
     beginOidcLogin,
-    login,
     type AuthenticationCapabilities
   } from '$lib/features/access/session/api';
+  import { login } from '$lib/features/access/session/authentication';
   import { oidcFailureMessage } from '$lib/features/access/login/oidcFailure';
   import { errorMessage } from '$lib/management/http';
   import { authLifecycle } from '$lib/features/access/session/lifecycle';
@@ -65,8 +65,7 @@
       await authLifecycle.authenticate((signal) =>
         login(email.trim(), password, signal)
       );
-      // destination() rejects external, ambiguous, malformed, and login-loop values.
-      // eslint-disable-next-line svelte/no-navigation-without-resolve
+      // eslint-disable-next-line svelte/no-navigation-without-resolve -- destination() validates local paths and rejects login loops.
       await goto(destination(), { replaceState: true, invalidateAll: true });
     } catch (error) {
       message = errorMessage(error, 'The control API could not be reached.');

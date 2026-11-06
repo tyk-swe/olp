@@ -49,7 +49,7 @@ func (s *Server) codeRefuse(w http.ResponseWriter, r *http.Request, route codemo
 func (s *Server) recordCodeRefusal(ctx context.Context, route codemode.Route, keyID, digest, code string) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	_ = s.CodeLedger.RecordRefusal(ctx, route, keyID, digest, code)
+	_ = s.deps.CodeLedger.RecordRefusal(ctx, route, keyID, digest, code)
 }
 
 func codeRefusalMessage(code string) string {

@@ -207,7 +207,7 @@ func ObserveRetained(r *Resource, e retainedapi.Endpoint, source oif.Document, n
 		if err != nil {
 			return out, err
 		}
-		out.Lines = append(out.Lines, RetainedEvidenceLine{Component: "training", Model: model, Start: start, End: end, Usage: usage.AttemptUsage{Observed: true, Complete: true, TrainingTokens: &tokens}})
+		out.Lines = append(out.Lines, RetainedEvidenceLine{Component: "training", Model: model, Start: start, End: end, Usage: usage.AttemptUsage{Observed: true, Complete: true, UsageQuantities: usage.UsageQuantities{TrainingTokens: &tokens}}})
 		out.CoverageComplete = true
 		return out, nil
 	}
@@ -251,7 +251,7 @@ func ObserveRetained(r *Resource, e retainedapi.Endpoint, source oif.Document, n
 		if inputErr != nil || outputErr != nil || cacheErr != nil || totalErr != nil || invocationsErr != nil || cached > input || input > math.MaxInt64-output || total != input+output {
 			return out, ErrContract
 		}
-		out.Lines = append(out.Lines, RetainedEvidenceLine{Component: "generation", Model: name, Start: start, End: end, Usage: usage.AttemptUsage{Observed: true, Complete: true, InputTokens: &input, OutputTokens: &output, CachedInputTokens: &cached, InvocationCount: &invocations}})
+		out.Lines = append(out.Lines, RetainedEvidenceLine{Component: "generation", Model: name, Start: start, End: end, Usage: usage.AttemptUsage{Observed: true, Complete: true, UsageQuantities: usage.UsageQuantities{InputTokens: &input, OutputTokens: &output, CachedInputTokens: &cached, InvocationCount: &invocations}}})
 	}
 	// Every authorized model needs explicit native quantities, including zero
 	// invocations. Omitted model usage remains an unresolved liability.
@@ -291,7 +291,7 @@ func ObserveRetainedExpiry(r *Resource, now time.Time, remoteNotFound bool) (Ret
 	nanos := new(big.Int).Add(new(big.Int).Mul(seconds, big.NewInt(1_000_000_000)), big.NewInt(int64(end.Nanosecond()-start.Nanosecond())))
 	quantity := new(big.Rat).SetFrac(new(big.Int).Mul(nanos, big.NewInt(*meta.Tokens)), big.NewInt(1_000_000_000)).FloatString(9)
 	quantity = strings.TrimRight(strings.TrimRight(quantity, "0"), ".")
-	out.Lines = []RetainedEvidenceLine{{Component: "cache_storage", Model: meta.Model, Start: start.UTC(), End: end.UTC(), Usage: usage.AttemptUsage{Observed: true, Complete: true, CacheTokenSeconds: &quantity}}}
+	out.Lines = []RetainedEvidenceLine{{Component: "cache_storage", Model: meta.Model, Start: start.UTC(), End: end.UTC(), Usage: usage.AttemptUsage{Observed: true, Complete: true, UsageQuantities: usage.UsageQuantities{CacheTokenSeconds: &quantity}}}}
 	out.RemoteTerminated, out.CoverageComplete = true, true
 	out.ObservedAt = end.UTC()
 	return out, nil

@@ -10,7 +10,7 @@
     CodeClientConfiguration,
     CodeClientSelection,
     CodeRoute
-  } from '$lib/management/code-mode';
+  } from '$lib/features/code-mode/api';
   import { codeKeys } from './codeKeys';
   import { adapterLabel, clientLabel } from './presentation';
 
@@ -28,14 +28,12 @@
     ) => Promise<CodeClientConfiguration>;
   } = $props();
   let copied = $state('');
-  // A selection belongs to the publication it was made for; a new
-  // publication starts again from its defaults.
+
   let chosen = $state<{ revisionId: string; selection: CodeClientSelection }>();
   const selection = $derived<CodeClientSelection>(
     chosen?.revisionId === route.revision_id ? chosen.selection : {}
   );
-  // Keep the pickers in place and focused while another selection loads or
-  // after the server refuses one. Generated text uses only the current query.
+
   let shown = $state<{
     revisionId: string;
     config: CodeClientConfiguration;
@@ -82,8 +80,6 @@
     choose({ ...selection, ...change });
   }
 
-  // On a mixed route each client has its own native models, so a new client
-  // starts again from its default models.
   function selectClient(client: CodeClient) {
     choose({ client, platform: selection.platform ?? pickerConfig?.platform });
   }

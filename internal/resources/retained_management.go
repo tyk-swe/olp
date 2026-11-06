@@ -47,15 +47,11 @@ func (m *Management) reconcileRetained(r *http.Request, _ access.Principal) (acc
 	if err := access.Decode(r, &input); err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := m.Access.Begin(r)
+	tx, p, err := m.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := m.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	if err = p.Authorize(access.Configure); err != nil {
 		return access.Reply{}, err
 	}
@@ -72,7 +68,7 @@ func (m *Management) reconcileRetained(r *http.Request, _ access.Principal) (acc
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider_resource.reconcile", "provider_resource", resource.UUID.String(), "success"); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, access.OK(map[string]any{"id": resource.ID, "state": "reconciliation_requested"}))
+	return access.OK(map[string]any{"id": resource.ID, "state": "reconciliation_requested"}), tx.Commit(r.Context())
 }
 
 type retainedEvidenceInput struct {
@@ -97,15 +93,11 @@ func (m *Management) retainedEvidence(r *http.Request, _ access.Principal) (acce
 	if err := access.Decode(r, &input); err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := m.Access.Begin(r)
+	tx, p, err := m.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := m.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	if err = p.Authorize(access.Settings); err != nil {
 		return access.Reply{}, err
 	}
@@ -133,7 +125,7 @@ func (m *Management) retainedEvidence(r *http.Request, _ access.Principal) (acce
 	if templates[model] == nil {
 		return access.Reply{}, access.Invalid("model", "Choose a model pinned by this resource's original acceptance.")
 	}
-	u := usage.AttemptUsage{InvocationCount: input.InvocationCount, TrainingTokens: input.TrainingTokens, StorageByteSeconds: input.StorageByteSeconds, CacheTokenSeconds: input.CacheTokenSeconds, ContainerSessions: input.ContainerSessions, InputTokens: input.InputTokens, OutputTokens: input.OutputTokens, CachedInputTokens: input.CachedInputTokens}
+	u := usage.AttemptUsage{UsageQuantities: usage.UsageQuantities{InvocationCount: input.InvocationCount, TrainingTokens: input.TrainingTokens, StorageByteSeconds: input.StorageByteSeconds, CacheTokenSeconds: input.CacheTokenSeconds, ContainerSessions: input.ContainerSessions, InputTokens: input.InputTokens, OutputTokens: input.OutputTokens, CachedInputTokens: input.CachedInputTokens}}
 	var lines []RetainedEvidenceLine
 	add := func(component, tier string, v usage.AttemptUsage) {
 		lines = append(lines, RetainedEvidenceLine{Component: component, Model: model, MemoryTier: tier, Start: input.Start, End: input.End, Usage: v})
@@ -186,5 +178,5 @@ func (m *Management) retainedEvidence(r *http.Request, _ access.Principal) (acce
 	if err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, access.OK(map[string]any{"id": resource.ID, "settlement_status": status, "provenance": "operator_verified"}))
+	return access.OK(map[string]any{"id": resource.ID, "settlement_status": status, "provenance": "operator_verified"}), tx.Commit(r.Context())
 }

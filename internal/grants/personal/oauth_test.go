@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"golang.org/x/oauth2"
-
 	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"golang.org/x/oauth2"
 )
 
 func TestValidTokenRequiresLiveBearerMaterial(t *testing.T) {
@@ -67,11 +67,11 @@ func TestGrantProblemMapping(t *testing.T) {
 
 func TestDelegatedExpiryCapsAtAgentExpiry(t *testing.T) {
 	now := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
-	if got := delegatedExpiry(access.Authority{}, now); !got.Equal(now.Add(2 * time.Minute)) {
+	if got := delegatedExpiry(keyauthority.Authority{}, now); !got.Equal(now.Add(2 * time.Minute)) {
 		t.Fatalf("default expiry = %v", got)
 	}
 	soon := now.Add(time.Minute)
-	agent := access.Authority{DelegationAgentID: "agent-1", ExpiresAt: &soon}
+	agent := keyauthority.Authority{DelegationAgentID: "agent-1", ExpiresAt: &soon}
 	if got := delegatedExpiry(agent, now); !got.Equal(soon) {
 		t.Fatalf("agent expiry = %v, want capped at %v", got, soon)
 	}
@@ -80,7 +80,7 @@ func TestDelegatedExpiryCapsAtAgentExpiry(t *testing.T) {
 	if got := delegatedExpiry(agent, now); !got.Equal(now.Add(2 * time.Minute)) {
 		t.Fatalf("far agent expiry = %v, want the two minute cap", got)
 	}
-	plain := access.Authority{ExpiresAt: &soon}
+	plain := keyauthority.Authority{ExpiresAt: &soon}
 	if got := delegatedExpiry(plain, now); !got.Equal(now.Add(2 * time.Minute)) {
 		t.Fatalf("non-agent expiry = %v, want the two minute cap", got)
 	}

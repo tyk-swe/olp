@@ -270,21 +270,17 @@ func (s *Server) createPricingRevision(r *http.Request, _ access.Principal) (acc
 		return access.Reply{}, access.Invalid("effective_at",
 			"Give the time these prices take effect.")
 	}
-	tx, err := s.Access.Begin(r)
+	tx, principal, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(context.WithoutCancel(r.Context()))
-	principal, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	claim, replayed, err := s.Access.Replay(r, tx, principal, input)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	if replayed != nil {
-		return access.Commit(r, tx, *replayed)
+		return *replayed, tx.Commit(r.Context())
 	}
 	revision, err := CreateRevision(r.Context(), tx, principal.UserID(), *input.EffectiveAt,
 		input.Prices, s.VendorKind)
@@ -299,7 +295,7 @@ func (s *Server) createPricingRevision(r *http.Request, _ access.Principal) (acc
 	if err = s.Access.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, result)
+	return result, tx.Commit(r.Context())
 }
 
 func (s *Server) listGatewayEpochs(r *http.Request, p access.Principal) (access.Reply, error) {
@@ -326,15 +322,11 @@ func (s *Server) acknowledgeGatewayEpoch(r *http.Request, _ access.Principal) (a
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.Access.Begin(r)
+	tx, principal, err := s.Access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(context.WithoutCancel(r.Context()))
-	principal, err := s.Access.Reauthorize(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	acknowledgement, err := AcknowledgeGatewayEpoch(r.Context(), tx, epoch, principal.UserID())
 	if err != nil {
 		return access.Reply{}, err
@@ -350,7 +342,7 @@ func (s *Server) acknowledgeGatewayEpoch(r *http.Request, _ access.Principal) (a
 		epoch, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, access.OK(acknowledgement))
+	return access.OK(acknowledgement), tx.Commit(r.Context())
 }
 
 // usageFilters reads the shared usage query. Times are required and the range

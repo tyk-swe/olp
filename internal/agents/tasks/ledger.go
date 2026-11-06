@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -60,7 +60,7 @@ func newReservation(price string) (reservation, error) {
 	return reservation{DispatchID: dispatch, ClaimID: claim, RunID: run, StepID: step, EventID: event, Price: price}, nil
 }
 
-func (l *Store) reserve(ctx context.Context, authority access.Authority, revision agentcontract.Revision, releaseID string) (reservation, error) {
+func (l *Store) reserve(ctx context.Context, authority keyauthority.Authority, revision agentcontract.Revision, releaseID string) (reservation, error) {
 	if l == nil || l.pool == nil || l.debits == nil || l.auth == nil || authority.ProjectID == nil || revision.Definition.Agent == nil || revision.Definition.Agent.MessagePrice == "" || releaseID == "" {
 		return reservation{}, limits.ErrDebitAuthority
 	}
@@ -108,7 +108,7 @@ func (l *Store) reserve(ctx context.Context, authority access.Authority, revisio
 	return res, nil
 }
 
-func (l *Store) Find(ctx context.Context, authority access.Authority, publicationID, rawID string) (Task, error) {
+func (l *Store) Find(ctx context.Context, authority keyauthority.Authority, publicationID, rawID string) (Task, error) {
 	if l == nil || l.pool == nil || authority.ProjectID == nil {
 		return Task{}, pgx.ErrNoRows
 	}
@@ -123,7 +123,7 @@ func (l *Store) Find(ctx context.Context, authority access.Authority, publicatio
 	return found, nil
 }
 
-func (l *Store) settle(ctx context.Context, res reservation, authority access.Authority, revision agentcontract.Revision, upstreamID, contextID string, state State, binding string) (string, error) {
+func (l *Store) settle(ctx context.Context, res reservation, authority keyauthority.Authority, revision agentcontract.Revision, upstreamID, contextID string, state State, binding string) (string, error) {
 	if authority.ProjectID == nil || len(upstreamID) > 1024 || len(contextID) > 1024 || strings.ContainsRune(upstreamID, 0) || strings.ContainsRune(contextID, 0) {
 		return "", limits.ErrDebitConflict
 	}
@@ -169,7 +169,7 @@ func (l *Store) settle(ctx context.Context, res reservation, authority access.Au
 	return taskID, nil
 }
 
-func settleTask(ctx context.Context, tx pgx.Tx, res reservation, authority access.Authority, revision agentcontract.Revision, upstreamID, contextID string, state State, binding string) (string, error) {
+func settleTask(ctx context.Context, tx pgx.Tx, res reservation, authority keyauthority.Authority, revision agentcontract.Revision, upstreamID, contextID string, state State, binding string) (string, error) {
 	if upstreamID == "" {
 		return "", nil
 	}

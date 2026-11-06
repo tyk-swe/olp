@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/release"
 )
@@ -13,7 +13,7 @@ import (
 // answerResearchPing answers only a validated upstream liveness request, under
 // the stream's existing admission. Reauthorization fences revocations and
 // generation changes without reserving another concurrency slot for the stream.
-func (s *Server) answerResearchPing(r *http.Request, release *release.Release, route codemode.Route, service string, authority access.Authority, attempt *researchAttempt, session string, reply []byte) error {
+func (s *Server) answerResearchPing(r *http.Request, release *release.Release, route codemode.Route, service string, authority keyauthority.Authority, attempt *researchAttempt, session string, reply []byte) error {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	fresh, account, err := s.researchAuthority(r.WithContext(ctx), route, service, authority)
@@ -27,7 +27,7 @@ func (s *Server) answerResearchPing(r *http.Request, release *release.Release, r
 	if researchBinding(fresh.ID, route, service, account, auth) != attempt.binding {
 		return codemode.Refuse(409, "code_research_session_invalid")
 	}
-	upstream, err := s.CodeResearch.ResearchSession(ctx, session, attempt.binding)
+	upstream, err := s.deps.CodeResearch.ResearchSession(ctx, session, attempt.binding)
 	if err != nil {
 		return err
 	}

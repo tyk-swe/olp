@@ -108,11 +108,11 @@ func persistPendingUsage(ctx context.Context, tx pgx.Tx, raw []byte, evidence us
 			final.Routing.Interaction.UpstreamState = usage.UpstreamUnknown
 		}
 	}
-	payload, err := usage.Encode(ev)
+	accepted, err := usage.NewAccountingEvent(ev)
 	if err != nil {
 		return usage.Persisted{}, err
 	}
-	return usage.PersistEventTx(ctx, tx, ev, payload)
+	return usage.PersistEventTx(ctx, tx, accepted)
 }
 
 // Pending owners retain exactly the current versioned accounting envelope.
