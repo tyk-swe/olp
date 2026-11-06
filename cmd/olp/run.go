@@ -47,6 +47,7 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/secretstore"
+	"github.com/tyk-swe/olp/internal/signing"
 	"github.com/tyk-swe/olp/internal/surface"
 	"github.com/tyk-swe/olp/internal/telemetry"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -70,6 +71,10 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 	// The signed documents a release ships verify before anything starts: a
 	// tampered reference catalog must never feed discovery, prices or token
 	// estimates.
+	catalogKeys, err := signing.Trusted()
+	if err != nil {
+		return err
+	}
 	referenceCatalog, err := catalog.Embedded()
 	if err != nil {
 		return err
@@ -474,7 +479,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 				return err
 			}
 			defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "management plugin runtime", pluginRuntime.Close)
-			Management{Getenv: os.Getenv, Access: control, Egress: &policy, Limiter: limiter, Runtime: rt, Gateway: gw, Media: mediaService, Health: obsCache, Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog, PluginIndex: pluginIndex}.Register(public)
+			Management{Getenv: os.Getenv, Access: control, Egress: &policy, Limiter: limiter, Runtime: rt, Gateway: gw, Media: mediaService, Health: obsCache, Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog, CatalogKeys: catalogKeys, PluginIndex: pluginIndex}.Register(public)
 		}
 	}
 	if err := startup.Err(); err != nil {

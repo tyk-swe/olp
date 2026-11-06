@@ -62,7 +62,8 @@ type Management struct {
 	Unconfined    *plugins.Unconfined
 	// Catalog is the reference catalog this release ships, verified at
 	// start-up.
-	Catalog *catalog.Signed
+	Catalog     *catalog.Signed
+	CatalogKeys signing.Keyring
 	// PluginIndex is the signed index of reviewed plugins this release
 	// ships, verified at start-up.
 	PluginIndex *pluginindex.Signed
@@ -149,7 +150,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	// Usage, pricing, request history and recovery reporting are part
 	// of the management surface; their patterns are more specific than
 	// its catch-all, which answers everything no surface claims.
-	(&usage.Server{Access: m.Access, VendorKind: providers.VendorKind, Egress: m.Egress, Catalog: m.Catalog, CatalogKeys: signing.Trusted()}).Register(mux)
+	(&usage.Server{Access: m.Access, VendorKind: providers.VendorKind, Egress: m.Egress, Catalog: m.Catalog, CatalogKeys: m.CatalogKeys}).Register(mux)
 	(&export.Management{Access: m.Access, Pool: m.Access.Pool, Keys: m.Access.Keys, Installation: m.Access.Installation, Egress: m.Egress}).Register(mux)
 	(&billing.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
 	promotionserve.Register(&promotion.Server{

@@ -1,39 +1,52 @@
 package signing
 
-// DevelopmentKeyID names the development key. Its seed is public, in
-// devkey/, so local builds and tests can sign documents after an edit.
+import (
+	"fmt"
+	"slices"
+	"sync"
+)
+
 const DevelopmentKeyID = "dev-2026a"
 
-// developmentKey verifies documents signed with the development seed. Only
-// builds without the release tag trust it.
-var developmentKey = Key{ID: DevelopmentKeyID, Public: mustPublicKey("8FPiQcGvJqYX0/Kb56ly8UK67gpnU0DERDlQfuFIqtw=")}
+type encodedKey struct{ id, public string }
 
-// releaseKeys verify documents the release workflow signed with the key only
-// CI holds. Rotation adds the incoming key here a release before documents
-// are signed with it alone; see docs/develop/catalog.md#signing-keys.
-var releaseKeys = []Key{
-	{ID: "release-2026a", Public: mustPublicKey("DhzCvhBBGXWpg+mNX7Z1fE4hJBUSVi0Llmxe6U7A+Nk=")},
+func developmentKey() encodedKey {
+	return encodedKey{id: DevelopmentKeyID, public: "8FPiQcGvJqYX0/Kb56ly8UK67gpnU0DERDlQfuFIqtw="}
 }
 
-// Trusted is the keyring this build trusts: the release keys, and in a
-// development build the development key.
-func Trusted() Keyring { return trusted }
+func releaseKeys() []encodedKey {
+	return []encodedKey{
+		{id: "release-2026a", public: "DhzCvhBBGXWpg+mNX7Z1fE4hJBUSVi0Llmxe6U7A+Nk="},
+	}
+}
 
-func mustPublicKey(encoded string) []byte {
-	key, err := ParsePublicKey(encoded)
+func compiledKeys() []encodedKey {
+	return slices.Concat([]encodedKey{developmentKey()}, releaseKeys())
+}
+
+var trusted = sync.OnceValues(func() (Keyring, error) {
+	return NewKeyring(slices.Collect(mapped(trustedKeys(), encodedKey.decode))...)
+})
+
+func Trusted() (Keyring, error) { return trusted() }
+
+func Known(id string) (Key, error) {
+	known := compiledKeys()
+	i := slices.IndexFunc(known, func(k encodedKey) bool { return k.id == id })
+	if i < 0 {
+		return Key{}, fmt.Errorf("key %q is not compiled into this build; add its public key to internal/signing/keys.go first", id)
+	}
+	key := known[i].decode()
+	if malformedKey(key) {
+		return Key{}, fmt.Errorf("compiled signing key %q is malformed", id)
+	}
+	return key, nil
+}
+
+func (k encodedKey) decode() Key {
+	public, err := ParsePublicKey(k.public)
 	if err != nil {
-		panic(err)
+		return Key{ID: k.id}
 	}
-	return key
-}
-
-// Known returns a key compiled into the binary, trusted by this build or not,
-// so a signer can refuse a seed that is not the key it names.
-func Known(id string) (Key, bool) {
-	for _, key := range append([]Key{developmentKey}, releaseKeys...) {
-		if key.ID == id {
-			return key, true
-		}
-	}
-	return Key{}, false
+	return Key{ID: k.id, Public: public}
 }

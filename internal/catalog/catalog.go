@@ -183,8 +183,8 @@ var (
 // Decode parses a catalog document strictly: unknown members, trailing data
 // and another format version are refused. Decode does not validate.
 func Decode(document []byte) (*Catalog, error) {
-	var c Catalog
-	if err := signing.DecodeDocument(document, "the catalog", APIVersion, MaxBytes, &c); err != nil {
+	c, err := signing.DecodeDocument[Catalog](document, "the catalog", APIVersion, MaxBytes)
+	if err != nil {
 		return nil, err
 	}
 	return &c, nil

@@ -80,7 +80,11 @@ func Load(document, signature []byte, keys signing.Keyring) (*Signed, error) {
 // Embedded is the catalog this release ships, verified against the keys this
 // build trusts. A process refuses to start when it does not verify.
 var Embedded = sync.OnceValues(func() (*Signed, error) {
-	return Load(document, signature, signing.Trusted())
+	keys, err := signing.Trusted()
+	if err != nil {
+		return nil, err
+	}
+	return Load(document, signature, keys)
 })
 
 // EmbeddedEstimation is the estimation factors of the catalog this release
@@ -88,7 +92,11 @@ var Embedded = sync.OnceValues(func() (*Signed, error) {
 // only these, so the rest of the catalog is not kept: holding every model in
 // each process that estimates would cost its allocation-heavy work.
 var EmbeddedEstimation = sync.OnceValues(func() ([]Estimation, error) {
-	if _, err := signing.Trusted().Verify(document, signature); err != nil {
+	keys, err := signing.Trusted()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := keys.Verify(document, signature); err != nil {
 		return nil, fmt.Errorf("reference catalog signature: %w", err)
 	}
 	var section struct {
