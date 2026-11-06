@@ -236,3 +236,48 @@ func TestStreamableSessionLifecycle(t *testing.T) {
 		})
 	}
 }
+
+func TestStreamableRepliesPreserveSSEFraming(t *testing.T) {
+	for _, framing := range []struct {
+		name, prefix, newline string
+	}{
+		{"lf", "", "\n"},
+		{"crlf", "", "\r\n"},
+		{"cr", "", "\r"},
+		{"bom", "\ufeff", "\n"},
+	} {
+		t.Run(framing.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var request messages.Request
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Errorf("invalid request: %v", err)
+					return
+				}
+				switch request.Method {
+				case "initialize":
+					w.Header().Set("Content-Type", "application/json")
+					fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":%q,"capabilities":{"tools":{}}}}`, request.ID, messages.SupportedProtocols()[0])
+				case "notifications/initialized":
+					w.WriteHeader(http.StatusAccepted)
+				case "tools/call":
+					w.Header().Set("Content-Type", "text/event-stream")
+					fmt.Fprintf(w, "%sdata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}%s%s", framing.prefix, framing.newline, framing.newline)
+					fmt.Fprintf(w, "data: {\"jsonrpc\":\"2.0\",\"id\":%s,%sdata: \"result\":{\"content\":[{\"type\":\"text\",\"text\":\"done\"}]}}%s%s", request.ID, framing.newline, framing.newline, framing.newline)
+				default:
+					t.Errorf("unexpected method %s", request.Method)
+				}
+			}))
+			defer server.Close()
+			policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+			peer, err := NewDialer(policy, nil)(t.Context(), server.URL, nil, TransportOptions{ClientName: "test", Timeout: time.Second})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer peer.Close(t.Context())
+			result, err := peer.CallTool(t.Context(), "lookup", json.RawMessage(`{}`))
+			if err != nil || len(result.Content) != 1 || result.Content[0].Text != "done" || !peer.ListChanged() {
+				t.Fatalf("SSE reply or notification was lost: result=%+v changed=%t error=%v", result, peer.ListChanged(), err)
+			}
+		})
+	}
+}
