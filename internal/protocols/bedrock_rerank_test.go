@@ -27,12 +27,12 @@ func TestBedrockRerankDecodesRankedSources(t *testing.T) {
 	}
 	encoded, _ := json.Marshal(map[string]any{"model": "team-rerank", "query": "q", "documents": documents, "top_n": 2, "return_documents": true})
 	r := bedrockRerankRequest(t, string(encoded))
-	body := `{"results":[{"document":{"type":"TEXT","textDocument":{"text":"document 7"}},"index":7,"relevanceScore":0.91},{"index":3,"relevanceScore":0.25}]}`
+	body := `{"results":[{"document":{"type":"TEXT","textDocument":{"text":"document 7"}},"index":7,"relevanceScore":0.91},{"index":3,"relevanceScore":0}]}`
 	completion, err := DecodeRequest(wire.BedrockRerank, wire.Rerank, []byte(body), "team-rerank", "", r)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"object":"list","model":"team-rerank","results":[{"index":7,"relevance_score":0.91,"document":"document 7"},{"index":3,"relevance_score":0.25,"document":"document 3"}]}`
+	want := `{"object":"list","model":"team-rerank","results":[{"index":7,"relevance_score":0.91,"document":"document 7"},{"index":3,"relevance_score":0,"document":"document 3"}]}`
 	if diff := sameJSON(t, completion.Body, want); diff != "" || completion.Usage == nil || completion.Usage.MediaUnits == nil || *completion.Usage.MediaUnits != "2" {
 		t.Fatalf("decoded %s %+v", completion.Body, completion.Usage)
 	}
@@ -41,6 +41,7 @@ func TestBedrockRerankDecodesRankedSources(t *testing.T) {
 		`{"results":[{"index":150,"relevanceScore":0.5}]}`,
 		`{"results":[{"index":1,"relevanceScore":0.5},{"index":1,"relevanceScore":0.4}]}`,
 		`{"results":[{"index":1,"relevanceScore":1.5}]}`,
+		`{"results":[{"index":1,"relevanceScore":null}]}`,
 		`{"results":[{"index":1,"relevanceScore":0.5}],"nextToken":"more"}`,
 	} {
 		if _, err := DecodeRequest(wire.BedrockRerank, wire.Rerank, []byte(invalid), "team-rerank", "", r); err == nil {

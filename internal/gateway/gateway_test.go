@@ -624,3 +624,48 @@ func TestCodeAttemptLastTerminalChargeWins(t *testing.T) {
 		t.Fatalf("charge = %s, want the last terminal charge %s", ledger.charge, terminal)
 	}
 }
+
+func TestTransformedRerankPreservesDocumentIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		result string
+		status int
+	}{
+		{"wrong string document", `{"index":0,"relevance_score":0.5,"document":"second"}`, http.StatusBadGateway},
+		{"wrong object document", `{"index":0,"relevance_score":0.5,"document":{"text":"second"}}`, http.StatusBadGateway},
+		{"null score", `{"index":0,"relevance_score":null,"document":"first"}`, http.StatusBadGateway},
+		{"zero score", `{"index":0,"relevance_score":0,"document":"first"}`, http.StatusOK},
+		{"matching object", `{"index":0,"relevance_score":0.5,"document":{"text":"first"}}`, http.StatusOK},
+		{"omitted document", `{"index":0,"relevance_score":0.5}`, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, Config{})
+			h.republish(func(snapshot *routing.Snapshot, _, _ routing.Provider) {
+				for id, provider := range snapshot.Providers {
+					provider.VendorID = "cohere"
+					provider.Capabilities = []routing.Capability{{Model: provider.Capabilities[0].Model, Operation: "rerank", Surface: "openai", Mode: "unary"}}
+					snapshot.Providers[id] = provider
+				}
+				route := snapshot.Routes[routeSlug]
+				route.Operations, route.MaxAttempts = []string{"rerank"}, 1
+				snapshot.Routes[routeSlug] = route
+			})
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				io.WriteString(w, `{"results":[`+tc.result+`]}`)
+			})
+			resp := h.do(t.Context(), http.MethodPost, "/v1/rerank", fullKey, []byte(`{"model":"team-chat","query":"q","documents":["first","second"],"top_n":1,"return_documents":true}`), nil)
+			defer resp.Body.Close()
+			body, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != tc.status {
+				t.Fatalf("status %d, want %d, body %s", resp.StatusCode, tc.status, body)
+			}
+			if tc.status == http.StatusBadGateway && !strings.Contains(string(body), `"code":"provider_protocol_error"`) {
+				t.Fatalf("unexpected rejection: %s", body)
+			}
+			if tc.status == http.StatusOK && !strings.Contains(string(body), `"document":"first"`) {
+				t.Fatalf("document identity lost: %s", body)
+			}
+		})
+	}
+}

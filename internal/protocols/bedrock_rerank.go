@@ -70,7 +70,7 @@ func decodeBedrockRerank(body []byte, route string, request *wire.Request) (*wir
 		}
 		seen[index] = true
 		var score float64
-		if json.Unmarshal(result["relevanceScore"], &score) != nil || math.IsNaN(score) || math.IsInf(score, 0) || score < 0 || score > 1 {
+		if json.Unmarshal(result["relevanceScore"], &score) != nil || !present(result["relevanceScore"]) || math.IsNaN(score) || math.IsInf(score, 0) || score < 0 || score > 1 {
 			return nil, protocolError("invalid rerank relevance score")
 		}
 		entry := Object{"index": raw(index), "relevance_score": raw(score)}
