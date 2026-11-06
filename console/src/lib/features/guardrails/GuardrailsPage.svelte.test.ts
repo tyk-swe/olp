@@ -48,12 +48,17 @@ for (const editor of [
     'existing',
     'same',
     'round-trip',
-    'new-from-new'
+    'new-from-new',
+    'same-untouched',
+    'round-trip-untouched',
+    'save-error',
+    'save-error-new'
   ])(
     `preserves the %s editor after a delayed ${editor.tab} save`,
     async (destination) => {
       const pending = Promise.withResolvers<void>();
       const release = Promise.withResolvers<void>();
+      const savedOriginal = vi.fn(() => original);
       const writes =
         vi.fn<(request: Request, body: { name: string }) => void>();
       serve(
@@ -64,24 +69,44 @@ for (const editor of [
               return json({ items: [{ id: 'project', name: 'Project' }] });
             if (path === '/api/v1/guardrail-attachments')
               return json({ items: [] });
-            return json({ items: [original, other] });
+            return json({ items: [savedOriginal(), other] });
           }
           const body = (await request.json()) as { name: string };
           writes(request, body);
           if (writes.mock.calls.length === 1) {
             pending.resolve();
             await release.promise;
+            if (destination.startsWith('save-error'))
+              return json(
+                { title: 'Save failed. Try again.', status: 500 },
+                500
+              );
           }
           const id =
-            request.method === 'POST' ? 'created' : path.split('/').at(-1);
-          return json({
+            request.method === 'POST'
+              ? 'created'
+              : (path.split('/').at(-1) ?? '');
+          if (
+            id === 'original' &&
+            request.headers.get('If-Match') !== `"${savedOriginal().etag}"`
+          )
+            return json(
+              {
+                title: 'The guardrail changed. Reload before saving.',
+                status: 412
+              },
+              412
+            );
+          const saved = {
             ...original,
             ...body,
             id,
             policy_id: id,
             etag: `${id}-saved-etag`,
             revision: 2
-          });
+          };
+          if (id === 'original') savedOriginal.mockReturnValue(saved);
+          return json(saved);
         },
         ['configure']
       );
@@ -130,37 +155,75 @@ for (const editor of [
       click('Original');
       if (destination === 'new-from-new') click(editor.create);
       rename('First save');
+      const configuration = target.querySelector('textarea');
+      if (configuration) {
+        configuration.value = '{"words":["secret"]}';
+        configuration.dispatchEvent(new Event('input', { bubbles: true }));
+        flushSync();
+      }
       save();
       await pending.promise;
-      if (destination === 'new' || destination === 'new-from-new')
+      if (
+        destination === 'new' ||
+        destination === 'new-from-new' ||
+        destination === 'save-error-new'
+      )
         click(editor.create);
-      if (destination === 'existing' || destination === 'round-trip')
+      if (destination === 'existing' || destination.startsWith('round-trip'))
         click('Other');
-      if (destination === 'same' || destination === 'round-trip')
+      if (
+        destination.startsWith('same') ||
+        destination.startsWith('round-trip')
+      )
         click('Original');
-      rename('Current edits');
+      if (!destination.endsWith('untouched')) rename('Current edits');
       release.resolve();
       await vi.waitFor(() => expect(button(editor.save).disabled).toBe(false));
-      expect(target.querySelector('input')?.value).toBe('Current edits');
+      expect(target.querySelector('input')?.value).toBe(
+        destination.endsWith('untouched') ? 'Original' : 'Current edits'
+      );
+      if (destination.startsWith('save-error'))
+        expect(target.querySelector('[role=alert]')?.textContent).toContain(
+          'Save failed'
+        );
       if (destination !== 'unchanged')
         expect(target.textContent).not.toMatch(/draft saved/i);
       save();
       await vi.waitFor(() => expect(writes).toHaveBeenCalledTimes(2));
       const [request, body] = writes.mock.calls[1];
       const newDestination =
-        destination === 'new' || destination === 'new-from-new';
+        destination === 'new' ||
+        destination === 'new-from-new' ||
+        destination === 'save-error-new';
       const id = destination === 'existing' ? 'other' : 'original';
       expect(request.method).toBe(newDestination ? 'POST' : 'PUT');
       expect(new URL(request.url).pathname).toBe(
         `/api/v1/${editor.path}${newDestination ? '' : `/${id}`}`
       );
+      const reselected =
+        destination.startsWith('same') || destination.startsWith('round-trip');
       expect(request.headers.get('If-Match')).toBe(
         newDestination
           ? null
-          : `"${id}${destination === 'existing' ? '' : '-saved'}-etag"`
+          : `"${id}${destination === 'existing' || reselected || destination === 'save-error' ? '' : '-saved'}-etag"`
       );
-      expect(body.name).toBe('Current edits');
+      expect(body.name).toBe(
+        destination.endsWith('untouched') ? 'Original' : 'Current edits'
+      );
       await vi.waitFor(() => expect(button(editor.save).disabled).toBe(false));
+      if (reselected) {
+        expect(target.querySelector('[role=alert]')?.textContent).toContain(
+          'Reload before saving'
+        );
+        expect(savedOriginal().name).toBe('First save');
+        expect(target.querySelector('input')?.value).toBe(
+          destination.endsWith('untouched') ? 'Original' : 'Current edits'
+        );
+        click('First save');
+        expect(target.querySelector('input')?.value).toBe('First save');
+        if (configuration)
+          expect(target.querySelector('textarea')?.value).toContain('secret');
+      }
       rename('Another edit');
       save();
       await vi.waitFor(() => expect(writes).toHaveBeenCalledTimes(3));

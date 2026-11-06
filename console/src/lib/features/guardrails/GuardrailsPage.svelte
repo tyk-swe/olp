@@ -252,9 +252,8 @@
           )
       );
       if (!current()) return;
-      if (editor !== definitionEditor && selected?.id !== saved.id) return;
-      selected = saved;
       if (editor !== definitionEditor) return;
+      selected = saved;
       notice = 'Draft saved. Activate its revision when it is ready.';
     });
   }
@@ -274,13 +273,8 @@
         entries
       });
       if (!current()) return;
-      if (
-        editor !== policyEditor &&
-        selectedPolicy?.policy_id !== saved.policy_id
-      )
-        return;
-      selectedPolicy = saved;
       if (editor !== policyEditor) return;
+      selectedPolicy = saved;
       notice = 'Policy draft saved with its ordered, pinned revisions.';
     });
   }
