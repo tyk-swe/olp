@@ -844,7 +844,7 @@ func (t *streamTranslator) frame(frame []byte) error {
 						if id == "" {
 							id = "call_" + strconv.Itoa(index)
 						}
-						if e := t.toolDelta(index, id, str(call["name"]), string(call["args"])); e != nil {
+						if e := t.toolDelta(index, id, str(call["name"]), string(geminiArguments(call["args"]))); e != nil {
 							return e
 						}
 					}

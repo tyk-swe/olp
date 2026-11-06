@@ -510,7 +510,7 @@ func (s *CaptureStream) gemini(f map[string]json.RawMessage) {
 				if present(fn["partialArgs"]) || present(fn["willContinue"]) {
 					s.invalid = true
 				}
-				s.tool(key, s.str(fn["name"]), string(fn["args"]), true, true)
+				s.tool(key, s.str(fn["name"]), string(geminiArguments(fn["args"])), true, true)
 			}
 			if s.output && (present(p["inlineData"]) || present(p["fileData"]) || present(p["executableCode"]) || present(p["codeExecutionResult"])) {
 				s.invalid = true

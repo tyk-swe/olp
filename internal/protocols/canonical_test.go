@@ -376,3 +376,34 @@ func TestChatToolChoicePreservesRequiredSemantics(t *testing.T) {
 		})
 	}
 }
+
+func TestGeminiArgumentlessCallHistoryUsesEmptyArguments(t *testing.T) {
+	// FunctionCall.args is optional, https://github.com/googleapis/googleapis/blob/master/google/ai/generativelanguage/v1beta/content.proto, checked 2026-11-05.
+	for _, args := range []string{"", `,"args":null`, `,"args":{}`} {
+		body := []byte(`{"contents":[{"role":"model","parts":[{"functionCall":{"id":"call-clock","name":"clock"` + args + `}}]},{"role":"user","parts":[{"functionResponse":{"id":"call-clock","name":"clock","response":{"time":"noon"}}}]}]}`)
+		request, err := Parse(wire.Gemini, body, "route")
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, _, err := EncodeTarget(request, wire.Chat, "openai", "openai", "native-model", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var target struct {
+			Messages []struct {
+				ToolCalls []struct {
+					ID       string
+					Function struct{ Name, Arguments string }
+				} `json:"tool_calls"`
+				ToolCallID string `json:"tool_call_id"`
+			}
+		}
+		if err := json.Unmarshal(encoded, &target); err != nil || len(target.Messages) != 2 || len(target.Messages[0].ToolCalls) != 1 {
+			t.Fatalf("invalid translated history %s, %v", encoded, err)
+		}
+		call := target.Messages[0].ToolCalls[0]
+		if call.Function.Arguments != "{}" || call.Function.Name != "clock" || call.ID != "call-clock" || target.Messages[1].ToolCallID != call.ID {
+			t.Fatalf("argumentless history changed %s", encoded)
+		}
+	}
+}
