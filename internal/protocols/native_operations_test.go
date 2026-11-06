@@ -96,3 +96,56 @@ func TestRerankDecodeRejects(t *testing.T) {
 		}
 	}
 }
+
+func TestEmbeddingDecodePreservesInputCorrespondence(t *testing.T) {
+	request := parseEmbeddings(t, `{"model":"route","input":["a","b"]}`)
+	for _, tc := range []struct {
+		name                           string
+		family                         wire.Format
+		complete, missing, extra, null string
+	}{
+		{"Gemini", wire.GeminiEmbeddingsBatch,
+			`{"embeddings":[{"values":[0.5,0]},{"values":[0.25,0.5]}]}`,
+			`{"embeddings":[{"values":[0.5,0]}]}`,
+			`{"embeddings":[{"values":[0.5,0]},{"values":[0.25,0.5]},{"values":[1,1]}]}`,
+			`{"embeddings":[{"values":[0.5,null]},{"values":[0.25,0.5]}]}`},
+		{"Vertex", wire.VertexEmbeddings,
+			`{"predictions":[{"embeddings":{"values":[0.5,0]}},{"embeddings":{"values":[0.25,0.5]}}]}`,
+			`{"predictions":[{"embeddings":{"values":[0.5,0]}}]}`,
+			`{"predictions":[{"embeddings":{"values":[0.5,0]}},{"embeddings":{"values":[0.25,0.5]}},{"embeddings":{"values":[1,1]}}]}`,
+			`{"predictions":[{"embeddings":{"values":[0.5,null]}},{"embeddings":{"values":[0.25,0.5]}}]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, body := range []string{tc.missing, tc.extra, tc.null} {
+				if c, err := DecodeRequest(tc.family, wire.Embeddings, []byte(body), "route", "float", request); err == nil {
+					t.Fatalf("invalid response accepted %s", c.Body)
+				}
+			}
+			for _, context := range []*wire.Request{request, nil, {Family: tc.family}} {
+				c := decodeEmbedding(t, tc.family, tc.complete, "float", context)
+				var result struct {
+					Data []struct {
+						Embedding []float64 `json:"embedding"`
+					} `json:"data"`
+				}
+				if err := json.Unmarshal(c.Body, &result); err != nil || len(result.Data) != 2 || len(result.Data[0].Embedding) != 2 || result.Data[0].Embedding[0] != 0.5 || result.Data[0].Embedding[1] != 0 {
+					t.Fatalf("complete vectors changed %s", c.Body)
+				}
+			}
+			encoded := decodeEmbedding(t, tc.family, tc.complete, "base64", request)
+			if !strings.Contains(string(encoded.Body), `"embedding":"AAAAPwAAAAA="`) {
+				t.Fatalf("base64 vector changed %s", encoded.Body)
+			}
+			single := parseEmbeddings(t, `{"model":"route","input":"a"}`)
+			decodeEmbedding(t, tc.family, tc.missing, "float", single)
+			if _, err := Decode(tc.family, wire.Embeddings, []byte(tc.missing), "route", "float"); err != nil {
+				t.Fatalf("requestless decoding failed %v", err)
+			}
+		})
+	}
+	for _, body := range []string{`{"data":[{"index":0,"embedding":[0.5,null]}]}`, `{"data":[{"index":0,"embedding":[null,0.5]}]}`} {
+		if c, err := Decode(wire.Embeddings, wire.Embeddings, []byte(body), "route", "float"); err == nil {
+			t.Fatalf("null coordinate accepted %s", c.Body)
+		}
+	}
+}

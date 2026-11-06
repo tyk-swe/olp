@@ -119,9 +119,9 @@ func decodeTransformed(encodedWire, target wire.Format, body []byte, route, enco
 	case wire.GeminiEmbeddings:
 		c, err = decodeGeminiEmbedding(body, route, encoding)
 	case wire.GeminiEmbeddingsBatch:
-		c, err = decodeGeminiEmbeddingBatch(body, route, encoding)
+		c, err = decodeGeminiEmbeddingBatch(body, route, encoding, request)
 	case wire.VertexEmbeddings:
-		c, err = decodeVertexEmbeddings(body, route, encoding)
+		c, err = decodeVertexEmbeddings(body, route, encoding, request)
 	case wire.BedrockEmbeddings:
 		c, err = decodeBedrockEmbedding(body, route, encoding)
 	case wire.Rerank:
@@ -819,8 +819,12 @@ func embeddingItems(data []json.RawMessage, encoding string) ([]json.RawMessage,
 				}
 				values = append(values, float64(v))
 			}
-		} else if json.Unmarshal(item["embedding"], &values) != nil || len(values) == 0 {
-			return nil, protocolError("invalid embedding vector")
+		} else {
+			var err error
+			values, err = floatVector(item["embedding"])
+			if err != nil {
+				return nil, err
+			}
 		}
 		for _, value := range values {
 			if math.IsInf(value, 0) || math.IsNaN(value) {
@@ -865,11 +869,28 @@ func nativeEmbeddingsCompletion(values [][]float64, route, encoding string, usag
 }
 
 func floatVector(raw json.RawMessage) ([]float64, error) {
-	var values []float64
-	if err := json.Unmarshal(raw, &values); err != nil || len(values) == 0 {
+	var elements []json.RawMessage
+	if err := json.Unmarshal(raw, &elements); err != nil || len(elements) == 0 {
 		return nil, protocolError("invalid embedding vector")
 	}
+	values := make([]float64, len(elements))
+	for index, element := range elements {
+		if !present(element) || json.Unmarshal(element, &values[index]) != nil {
+			return nil, protocolError("invalid embedding vector")
+		}
+	}
 	return values, nil
+}
+
+func validateEmbeddingCount(request *wire.Request, actual int) error {
+	if request == nil || request.Family != wire.Embeddings {
+		return nil
+	}
+	inputs, err := textInputs(request.Field("input"))
+	if err != nil || len(inputs) != actual {
+		return protocolError("embedding count does not match input count")
+	}
+	return nil
 }
 
 func decodeGeminiEmbedding(body []byte, route, encoding string) (*wire.Completion, error) {
@@ -916,7 +937,7 @@ func geminiEmbeddingUsage(f Object) (*wire.Usage, error) {
 	return &wire.Usage{InputTokens: n, TotalTokens: n}, nil
 }
 
-func decodeGeminiEmbeddingBatch(body []byte, route, encoding string) (*wire.Completion, error) {
+func decodeGeminiEmbeddingBatch(body []byte, route, encoding string, request *wire.Request) (*wire.Completion, error) {
 	f, e := object(body)
 	if e != nil {
 		return nil, protocolError("invalid embeddings result")
@@ -930,6 +951,9 @@ func decodeGeminiEmbeddingBatch(body []byte, route, encoding string) (*wire.Comp
 	embeddings := arr(f["embeddings"])
 	if len(embeddings) == 0 {
 		return nil, protocolError("missing embeddings")
+	}
+	if err := validateEmbeddingCount(request, len(embeddings)); err != nil {
+		return nil, err
 	}
 	values := make([][]float64, len(embeddings))
 	for i, v := range embeddings {
@@ -950,7 +974,7 @@ func decodeGeminiEmbeddingBatch(body []byte, route, encoding string) (*wire.Comp
 	return nativeEmbeddingsCompletion(values, route, encoding, usage)
 }
 
-func decodeVertexEmbeddings(body []byte, route, encoding string) (*wire.Completion, error) {
+func decodeVertexEmbeddings(body []byte, route, encoding string, request *wire.Request) (*wire.Completion, error) {
 	f, e := object(body)
 	if e != nil {
 		return nil, protocolError("invalid embeddings result")
@@ -964,6 +988,9 @@ func decodeVertexEmbeddings(body []byte, route, encoding string) (*wire.Completi
 	predictions := arr(f["predictions"])
 	if len(predictions) == 0 {
 		return nil, protocolError("missing embeddings")
+	}
+	if err := validateEmbeddingCount(request, len(predictions)); err != nil {
+		return nil, err
 	}
 	values := make([][]float64, len(predictions))
 	var tokens int64
