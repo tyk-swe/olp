@@ -2,6 +2,7 @@ package protocols
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"math"
 
@@ -172,9 +173,6 @@ func streamCohereEvents(r io.Reader, limit int, emit wire.Emit, observe func(oif
 	done := false
 	sequence := uint64(0)
 	err := sse.Decode(r, limit, func(frame sse.Frame) (parsed error) {
-		if done {
-			return protocolError("event after message-end")
-		}
 		event, err := openai.LiftSSE(wire.CohereChat, frame, sequence, limit)
 		if err != nil {
 			return err
@@ -211,9 +209,12 @@ func streamCohereEvents(r io.Reader, limit int, emit wire.Emit, observe func(oif
 			return protocolError("unknown event " + kind)
 		}
 		encoded = frame.Encode()
+		if done {
+			return errStreamDone
+		}
 		return nil
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, errStreamDone) {
 		return c, streamError(err)
 	}
 	if !done {
