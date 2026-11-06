@@ -122,6 +122,17 @@ func codeAdmissionRecordsChosenAndPinnedDecisions(t *testing.T, pool *pgxpool.Po
 	if rebound.Binding.RootID != bound.Binding.RootID || rebound.Account.ID != healthy {
 		t.Fatalf("reconnected permit = %+v", rebound)
 	}
+	generation, err := store.Admit(t.Context(), resources.CodeAdmission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: "connection-conversation"}}, Providers: []string{provider}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinnedReconnect, err := store.BindConnection(t.Context(), route, key, codemode.Identity{Conversation: "connection-conversation"}, "model", []string{provider})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pinnedReconnect.Binding.RootID != bound.Binding.RootID || pinnedReconnect.Account.ID != generation.Pin.AccountID {
+		t.Fatalf("pinned reconnect permit = %+v, want pinned account %s", pinnedReconnect, generation.Pin.AccountID)
+	}
 	recordedConnections := codeConnectionDecisions(t, pool, bound.Binding.RootID)
 	emptySkipped := 0
 	for _, recorded := range recordedConnections {
@@ -132,7 +143,7 @@ func codeAdmissionRecordsChosenAndPinnedDecisions(t *testing.T, pool *pgxpool.Po
 			emptySkipped++
 		}
 	}
-	if len(recordedConnections) != 2 || emptySkipped != 1 {
+	if len(recordedConnections) != 3 || emptySkipped != 2 {
 		t.Fatalf("connection decisions = %+v", recordedConnections)
 	}
 	// Vendor object shape per https://opencode.ai/v2/docs/console/api/inference/ (fetched 2026-11-05).

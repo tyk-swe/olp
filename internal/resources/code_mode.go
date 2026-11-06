@@ -283,14 +283,14 @@ func (s *CodeStore) admit(ctx context.Context, admission CodeAdmission, connecti
 		if _, err := tx.Exec(ctx, `UPDATE olp.code_bindings SET socket_bound=true WHERE id=$1 AND NOT socket_bound`, out.Binding.RootID); err != nil {
 			return out, err
 		}
-		if reason == codemode.DecisionConnection {
-			decisionSelection := selection
+		decisionSelection := func() codeSelection {
 			if rootSelection != nil && rootSelection.account.ID == selection.account.ID {
-				decisionSelection = *rootSelection
+				return *rootSelection
 			}
-			if err = recordCodeDecision(ctx, tx, in, out.Binding, nil, decisionSelection, reason); err != nil {
-				return out, err
-			}
+			return selection
+		}()
+		if err = recordCodeDecision(ctx, tx, in, out.Binding, nil, decisionSelection, codemode.DecisionConnection); err != nil {
+			return out, err
 		}
 		return out, tx.Commit(ctx)
 	}
