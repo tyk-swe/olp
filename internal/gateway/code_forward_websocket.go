@@ -90,6 +90,15 @@ func (s *Server) prepareCodeWebSocket(r *http.Request, release *release.Release,
 	if err != nil {
 		return handshake, err
 	}
+	operation, err := func() (codemode.Operation, error) {
+		if len(models) == 0 {
+			return codemode.Operation{}, nil
+		}
+		return route.ResolvePinnedModel(codemode.Operation{Model: models[0]}, []codemode.Pin{permit.Pin})
+	}()
+	if err != nil {
+		return handshake, err
+	}
 	if err := bindCodeWorkload(&permit.Authority, authority); err != nil {
 		return handshake, err
 	}
@@ -116,7 +125,7 @@ func (s *Server) prepareCodeWebSocket(r *http.Request, release *release.Release,
 		}
 		return handshake, err
 	}
-	handshake.connection = &codeAttempt{identityOriginator: target.adapter.CompatibilityOriginator(route), adapter: target.adapter.Adapter, server: s, permit: permit, config: target.config, auth: auth, endpoint: target.endpoint, observer: codeObserver(target.endpoint)}
+	handshake.connection = &codeAttempt{model: operation.Model, identityOriginator: target.adapter.CompatibilityOriginator(route), adapter: target.adapter.Adapter, server: s, permit: permit, config: target.config, auth: auth, endpoint: target.endpoint, observer: codeObserver(target.endpoint)}
 	handshake.client, err = s.codeClient(r.Context(), release, target.config, permit.Account.ProviderID)
 	if err != nil {
 		return handshake, err

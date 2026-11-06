@@ -11,19 +11,23 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/codewire"
 	"github.com/tyk-swe/olp/internal/codexauth"
+	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -271,6 +275,80 @@ func TestWebSocketHandshakeRejectionForwardsOversizedBody(t *testing.T) {
 	}
 }
 
+func TestWebSocketHandshakeCapacityCooldownUsesSelectedModel(t *testing.T) {
+	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	body := `{"error":{"type":"rate_limit_error","code":"model_at_capacity"}}`
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "120")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = io.WriteString(w, body)
+	}))
+	defer upstream.Close()
+	route := codemode.Route{
+		RevisionID: "revision", Models: []string{"gpt-model", "alternate-model"},
+		ModelRewriting: true, Aliases: map[string]string{"public-model": "gpt-model"},
+	}
+	snapshot := &routing.Snapshot{CodeConnections: map[string]routing.Configuration{
+		"revision:provider": {Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID, Endpoint: upstream.URL},
+	}}
+	ingress, ok := codeIngressFor("responses")
+	if !ok {
+		t.Fatal("responses ingress missing")
+	}
+	for _, tc := range []struct {
+		name  string
+		hint  string
+		pin   codemode.Pin
+		model string
+	}{
+		{name: "native", hint: "gpt-model", model: "gpt-model"},
+		{name: "alias", hint: "public-model", model: "gpt-model"},
+		{name: "pinned alias", hint: "public-model", pin: codemode.Pin{Model: "public-model", TargetModel: "alternate-model"}, model: "alternate-model"},
+		{name: "no hint"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ledger := &fakeCodeLedger{connectionPermit: resources.CodePermit{
+				Account: codemode.Account{ID: "account", ProviderID: "provider", Principal: "principal"},
+				Pin:     codemode.Pin{Model: tc.pin.Model, TargetModel: tc.pin.TargetModel, Principal: "principal"},
+			}}
+			server := &Server{
+				CodeLedger: ledger, CodeAuthorizer: fakeCodeAuthorizer{},
+				now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+				egress: &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}},
+			}
+			request := httptest.NewRequest(http.MethodGet, "/responses", nil)
+			request.Header.Set("X-OLP-Code-Affinity", "conversation")
+			if tc.hint != "" {
+				request.Header.Set("X-OLP-Code-Model", tc.hint)
+			}
+			writer := httptest.NewRecorder()
+			server.codeWebSocket(writer, request, &release.Release{Snapshot: snapshot}, route, access.Authority{}, ingress)
+			if writer.Code != http.StatusTooManyRequests || writer.Body.String() != body {
+				t.Fatalf("response = %d %s", writer.Code, writer.Body.String())
+			}
+			if tc.model == "" {
+				if len(ledger.cooldowns) != 0 || len(ledger.health) != 1 || ledger.health[0].Status != "quota_limited" {
+					t.Fatalf("cooldowns = %+v, health = %+v", ledger.cooldowns, ledger.health)
+				}
+				return
+			}
+			if len(ledger.cooldowns) != 1 || len(ledger.health) != 0 {
+				t.Fatalf("cooldowns = %+v, health = %+v", ledger.cooldowns, ledger.health)
+			}
+			cooldown := ledger.cooldowns[0]
+			if cooldown.account != ledger.connectionPermit.Account.ID || cooldown.model != tc.model || cooldown.classification.Class != codeadapter.CooldownCapacity || cooldown.classification.Scope != codeadapter.ScopeModel || !cooldown.classification.RetryAt.Equal(now.Add(2*time.Minute)) {
+				t.Fatalf("cooldown = %+v", cooldown)
+			}
+		})
+	}
+}
+
+type fakeCodeAuthorizer struct{}
+
+func (fakeCodeAuthorizer) AuthorizeCode(_ context.Context, _ routing.Configuration, account codemode.Account, _ codemode.Dispatch) (codemode.Authorization, error) {
+	return codemode.Authorization{Principal: account.Principal, Headers: http.Header{"Authorization": {"Bearer fixture"}}}, nil
+}
+
 func TestTranslatedRejectionRecordsModelCooldown(t *testing.T) {
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
 	for _, family := range []wire.Format{wire.Chat, wire.Anthropic} {
@@ -313,12 +391,13 @@ func TestTranslatedRejectionRecordsModelCooldown(t *testing.T) {
 }
 
 type fakeCodeLedger struct {
-	health        []codemode.HealthObservation
-	cooldowns     []recordedCooldown
-	outcomes      []codemode.Outcome
-	settlements   []codemode.Usage
-	confirmations int
-	cooldownErr   error
+	connectionPermit resources.CodePermit
+	health           []codemode.HealthObservation
+	cooldowns        []recordedCooldown
+	outcomes         []codemode.Outcome
+	settlements      []codemode.Usage
+	confirmations    int
+	cooldownErr      error
 }
 
 func (f *fakeCodeLedger) Models(context.Context, codemode.Route, string) (codeclient.Offers, error) {
@@ -328,7 +407,7 @@ func (f *fakeCodeLedger) Admit(context.Context, resources.CodeAdmission) (resour
 	return resources.CodePermit{}, nil
 }
 func (f *fakeCodeLedger) BindConnection(context.Context, codemode.Route, string, codemode.Identity, string, []string) (resources.CodePermit, error) {
-	return resources.CodePermit{}, nil
+	return f.connectionPermit, nil
 }
 func (f *fakeCodeLedger) MarkDispatched(context.Context, string) error { return nil }
 func (f *fakeCodeLedger) ConfirmNonexecution(context.Context, string, int) error {
@@ -337,6 +416,9 @@ func (f *fakeCodeLedger) ConfirmNonexecution(context.Context, string, int) error
 }
 func (f *fakeCodeLedger) ObserveCooldown(context.Context, string, time.Time) error { return nil }
 func (f *fakeCodeLedger) ObserveCooldownClass(_ context.Context, account, model string, classification codeadapter.Classification, _ time.Time) error {
+	if classification.Scope == codeadapter.ScopeModel && model == "" {
+		return codemode.Refuse(400, "code_cooldown_invalid")
+	}
 	if f.cooldownErr != nil {
 		return f.cooldownErr
 	}
