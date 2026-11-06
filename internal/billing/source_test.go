@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -332,5 +333,41 @@ func TestPollingFetchRejectsCredential(t *testing.T) {
 	}
 	if emitted {
 		t.Fatal("failed fetch emitted days")
+	}
+}
+
+func TestPollingFetchRejectsIncompletePagination(t *testing.T) {
+	for _, source := range []struct {
+		name string
+		data string
+	}{
+		{SourceOpenAI, `[{"start_time":1893542400,"results":[{"amount":{"value":"1","currency":"USD"}}]}]`},
+		{SourceAnthropic, `[{"starting_at":"2030-01-02T00:00:00Z","results":[{"amount":"100","currency":"USD"}]}]`},
+	} {
+		for _, cursor := range []string{"", `,"next_page":""`, `,"next_page":null`} {
+			t.Run(source.name+"/"+cursor, func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					_, _ = fmt.Fprintf(w, `{"data":%s,"has_more":true%s}`, source.data, cursor)
+				}))
+				defer server.Close()
+				adapter, ok := lookupSource(source.name)
+				if !ok {
+					t.Fatal("source missing")
+				}
+				policy := egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+				in := &fetchInput{
+					importer: &Importer{Egress: &policy},
+					row:      &importRow{ProviderID: "00000000-0000-0000-0000-000000000001", Source: source.name, Scope: json.RawMessage(`{}`)},
+					cfg:      &providerConfig{Endpoint: &server.URL},
+					key:      []byte(pollingKey),
+				}
+				err := adapter.fetch(context.Background(), in, func(periodDays) error {
+					return errors.New("incomplete report emitted billing days")
+				})
+				if err == nil || fetchCode(err) != "response" {
+					t.Fatalf("got %v, want a response failure before emitting billing days", err)
+				}
+			})
+		}
 	}
 }
