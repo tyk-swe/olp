@@ -1,10 +1,3 @@
-// Package signing verifies the detached Ed25519 signatures of the documents a
-// release ships: the reference catalog and the plugin index. A signature
-// covers the exact bytes of its document, so anyone can verify it without
-// reproducing an encoding.
-//
-// A signature file may carry one signature per key, so a document can be
-// signed by an outgoing and an incoming key while installations rotate.
 package signing
 
 import (
@@ -13,139 +6,90 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"regexp"
 	"slices"
 	"strings"
 )
 
 var (
-	// ErrMalformedSignature reports a signature file that is not one.
 	ErrMalformedSignature = errors.New("the signature file is malformed")
-	// ErrUnknownKey reports a document signed by no trusted key.
-	ErrUnknownKey = errors.New("no trusted key signed the document")
-	// ErrInvalidSignature reports a trusted key's signature that does not
-	// verify: the document or its signature was altered.
-	ErrInvalidSignature = errors.New("a trusted key's signature does not verify")
+	ErrUnknownKey         = errors.New("no trusted key signed the document")
+	ErrInvalidSignature   = errors.New("a trusted key's signature does not verify")
 )
 
-// MaxSignatureFile bounds a signature file.
 const MaxSignatureFile = 64 << 10
 
 var keyID = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{2,62}$`)
 
-// Key is a named Ed25519 verification key.
 type Key struct {
 	ID     string
 	Public ed25519.PublicKey
 }
 
-// Keyring is a set of trusted verification keys by identifier.
-type Keyring struct{ keys map[string]ed25519.PublicKey }
+type Keyring struct{ keys []Key }
 
-// NewKeyring builds a keyring. An empty keyring trusts nothing.
-func NewKeyring(keys ...Key) (Keyring, error) {
-	ring := Keyring{keys: make(map[string]ed25519.PublicKey, len(keys))}
-	for _, key := range keys {
-		if !keyID.MatchString(key.ID) || len(key.Public) != ed25519.PublicKeySize {
-			return Keyring{}, fmt.Errorf("signing key %q is malformed", key.ID)
-		}
-		if _, duplicate := ring.keys[key.ID]; duplicate {
-			return Keyring{}, fmt.Errorf("signing key %q is declared twice", key.ID)
-		}
-		ring.keys[key.ID] = slices.Clone(key.Public)
-	}
-	return ring, nil
-}
-
-// MustKeyring is NewKeyring for keys compiled into the binary.
-func MustKeyring(keys ...Key) Keyring {
-	ring, err := NewKeyring(keys...)
-	if err != nil {
-		panic(err)
-	}
-	return ring
-}
-
-// IDs are the identifiers of the trusted keys, sorted.
-func (k Keyring) IDs() []string {
-	ids := make([]string, 0, len(k.keys))
-	for id := range k.keys {
-		ids = append(ids, id)
-	}
-	slices.Sort(ids)
-	return ids
-}
-
-// Public returns a trusted key.
-func (k Keyring) Public(id string) (ed25519.PublicKey, bool) {
-	key, ok := k.keys[id]
-	return slices.Clone(key), ok
-}
-
-// File is a detached signature file.
 type File struct {
 	Signatures []Entry `json:"signatures"`
 }
 
-// Entry is one key's signature; Signature is base64 in JSON.
 type Entry struct {
 	KeyID     string `json:"key_id"`
 	Signature []byte `json:"signature"`
 }
 
-// Verify checks a document against its signature file and returns the
-// trusted key that verified it. Signatures by keys outside the keyring are
-// ignored, at least one trusted key must have signed, and every trusted key's
-// signature must verify.
+func NewKeyring(keys ...Key) (Keyring, error) {
+	if i := slices.IndexFunc(keys, malformedKey); i >= 0 {
+		return Keyring{}, fmt.Errorf("signing key %q is malformed", keys[i].ID)
+	}
+	sorted := slices.SortedFunc(mapped(keys, cloneKey), func(a, b Key) int { return strings.Compare(a.ID, b.ID) })
+	if id, repeats := repeated(slices.Collect(mapped(sorted, keyIDOf))); repeats {
+		return Keyring{}, fmt.Errorf("signing key %q is declared twice", id)
+	}
+	return Keyring{keys: sorted}, nil
+}
+
+func (k Keyring) IDs() []string {
+	return slices.Collect(mapped(k.keys, keyIDOf))
+}
+
 func (k Keyring) Verify(document, signatures []byte) (string, error) {
 	file, err := parse(signatures)
 	if err != nil {
 		return "", err
 	}
-	verified := ""
-	for _, entry := range file.Signatures {
-		public, trusted := k.keys[entry.KeyID]
-		if !trusted {
-			continue
-		}
-		if !ed25519.Verify(public, document, entry.Signature) {
-			return "", fmt.Errorf("%w: key %s", ErrInvalidSignature, entry.KeyID)
-		}
-		if verified == "" {
-			verified = entry.KeyID
-		}
+	trusted := slices.Collect(filtered(file.Signatures, k.trusts))
+	forged := func(entry Entry) bool {
+		public, _ := k.lookup(entry.KeyID)
+		return !ed25519.Verify(public, document, entry.Signature)
 	}
-	if verified == "" {
+	if i := slices.IndexFunc(trusted, forged); i >= 0 {
+		return "", fmt.Errorf("%w: key %s", ErrInvalidSignature, trusted[i].KeyID)
+	}
+	if len(trusted) == 0 {
 		return "", ErrUnknownKey
 	}
-	return verified, nil
+	return trusted[0].KeyID, nil
 }
 
-// Sign adds or replaces one key's signature of document in a signature file,
-// keeping the other keys' signatures. An empty file starts a new one.
 func Sign(signatures []byte, id string, private ed25519.PrivateKey, document []byte) ([]byte, error) {
 	if !keyID.MatchString(id) || len(private) != ed25519.PrivateKeySize {
 		return nil, errors.New("the signing key or its identifier is malformed")
 	}
-	file := File{}
-	if len(signatures) > 0 {
-		parsed, err := parse(signatures)
-		if err != nil {
-			return nil, err
-		}
-		file = parsed
+	existing, err := existingEntries(signatures)
+	if err != nil {
+		return nil, err
 	}
-	file.Signatures = slices.DeleteFunc(file.Signatures, func(e Entry) bool { return e.KeyID == id })
-	file.Signatures = append(file.Signatures, Entry{KeyID: id, Signature: ed25519.Sign(private, document)})
-	slices.SortFunc(file.Signatures, func(a, b Entry) int { return strings.Compare(a.KeyID, b.KeyID) })
-	encoded, err := json.MarshalIndent(file, "", "  ")
+	others := slices.Collect(filtered(existing, func(e Entry) bool { return e.KeyID != id }))
+	entries := slices.Concat(others, []Entry{{KeyID: id, Signature: ed25519.Sign(private, document)}})
+	sorted := slices.SortedFunc(slices.Values(entries), func(a, b Entry) int { return strings.Compare(a.KeyID, b.KeyID) })
+	encoded, err := json.MarshalIndent(File{Signatures: sorted}, "", "  ")
 	if err != nil {
 		return nil, err
 	}
 	return append(encoded, '\n'), nil
 }
 
-// ParsePublicKey decodes a base64 Ed25519 public key.
 func ParsePublicKey(encoded string) (ed25519.PublicKey, error) {
 	raw, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil || len(raw) != ed25519.PublicKeySize {
@@ -154,13 +98,33 @@ func ParsePublicKey(encoded string) (ed25519.PublicKey, error) {
 	return ed25519.PublicKey(raw), nil
 }
 
-// ParseSeed decodes a base64 Ed25519 seed into its private key.
 func ParseSeed(encoded string) (ed25519.PrivateKey, error) {
 	raw, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil || len(raw) != ed25519.SeedSize {
 		return nil, errors.New("the signing seed must be 32 base64-encoded bytes")
 	}
 	return ed25519.NewKeyFromSeed(raw), nil
+}
+
+func (k Keyring) lookup(id string) (ed25519.PublicKey, bool) {
+	i, found := slices.BinarySearchFunc(k.keys, id, func(key Key, id string) int { return strings.Compare(key.ID, id) })
+	if !found {
+		return nil, false
+	}
+	return k.keys[i].Public, true
+}
+
+func (k Keyring) trusts(entry Entry) bool {
+	_, ok := k.lookup(entry.KeyID)
+	return ok
+}
+
+func existingEntries(signatures []byte) ([]Entry, error) {
+	if len(signatures) == 0 {
+		return nil, nil
+	}
+	file, err := parse(signatures)
+	return file.Signatures, err
 }
 
 func parse(signatures []byte) (File, error) {
@@ -171,12 +135,52 @@ func parse(signatures []byte) (File, error) {
 	if err := json.Unmarshal(signatures, &file); err != nil || len(file.Signatures) == 0 {
 		return File{}, ErrMalformedSignature
 	}
-	seen := map[string]bool{}
-	for _, entry := range file.Signatures {
-		if !keyID.MatchString(entry.KeyID) || len(entry.Signature) != ed25519.SignatureSize || seen[entry.KeyID] {
-			return File{}, ErrMalformedSignature
-		}
-		seen[entry.KeyID] = true
+	if slices.ContainsFunc(file.Signatures, malformedEntry) {
+		return File{}, ErrMalformedSignature
+	}
+	if _, repeats := repeated(slices.Sorted(mapped(file.Signatures, func(e Entry) string { return e.KeyID }))); repeats {
+		return File{}, ErrMalformedSignature
 	}
 	return file, nil
+}
+
+func malformedKey(key Key) bool {
+	return !keyID.MatchString(key.ID) || len(key.Public) != ed25519.PublicKeySize
+}
+
+func malformedEntry(entry Entry) bool {
+	return !keyID.MatchString(entry.KeyID) || len(entry.Signature) != ed25519.SignatureSize
+}
+
+func cloneKey(key Key) Key { return Key{ID: key.ID, Public: slices.Clone(key.Public)} }
+
+func keyIDOf(key Key) string { return key.ID }
+
+func repeated(sorted []string) (string, bool) {
+	for i := range len(sorted) - 1 {
+		if sorted[i] == sorted[i+1] {
+			return sorted[i], true
+		}
+	}
+	return "", false
+}
+
+func mapped[E, R any](s []E, f func(E) R) iter.Seq[R] {
+	return func(yield func(R) bool) {
+		for _, e := range s {
+			if !yield(f(e)) {
+				return
+			}
+		}
+	}
+}
+
+func filtered[E any](s []E, keep func(E) bool) iter.Seq[E] {
+	return func(yield func(E) bool) {
+		for _, e := range s {
+			if keep(e) && !yield(e) {
+				return
+			}
+		}
+	}
 }

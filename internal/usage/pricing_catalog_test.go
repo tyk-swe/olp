@@ -300,7 +300,11 @@ func signedCatalog(t *testing.T, published time.Time) ([]byte, []byte, signing.K
 	if err != nil {
 		t.Fatal(err)
 	}
-	return document, signature, signing.MustKeyring(signing.Key{ID: "test-release", Public: public}), private
+	keys, err := signing.NewKeyring(signing.Key{ID: "test-release", Public: public})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return document, signature, keys, private
 }
 
 func problemCode(err error) string {

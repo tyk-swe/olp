@@ -75,8 +75,8 @@ var (
 
 // Decode parses an index document strictly.
 func Decode(document []byte) (*Index, error) {
-	var index Index
-	if err := signing.DecodeDocument(document, "the plugin index", APIVersion, MaxBytes, &index); err != nil {
+	index, err := signing.DecodeDocument[Index](document, "the plugin index", APIVersion, MaxBytes)
+	if err != nil {
 		return nil, err
 	}
 	return &index, nil
@@ -210,5 +210,9 @@ var (
 // Embedded is the index this release ships, verified against the keys this
 // build trusts. A process refuses to start when it does not verify.
 var Embedded = sync.OnceValues(func() (*Signed, error) {
-	return Load(document, signature, signing.Trusted())
+	keys, err := signing.Trusted()
+	if err != nil {
+		return nil, err
+	}
+	return Load(document, signature, keys)
 })
