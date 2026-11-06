@@ -103,7 +103,7 @@ func Maintenance(ctx context.Context, c Config, command string, options Maintena
 				return errors.New("cannot grant runtime privileges")
 			}
 			defer tx.Rollback(ctx)
-			for _, statement := range []string{"GRANT USAGE ON SCHEMA olp TO " + role, "GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA olp TO " + role, "REVOKE INSERT,UPDATE,DELETE ON olp.migrations FROM " + role} {
+			for _, statement := range []string{"GRANT USAGE ON SCHEMA olp TO " + role, "GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA olp TO " + role, "GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA olp TO " + role, "REVOKE INSERT,UPDATE,DELETE ON olp.migrations FROM " + role} {
 				if _, err = tx.Exec(ctx, statement); err != nil {
 					return errors.New("cannot grant runtime privileges; the runtime role must already exist")
 				}
