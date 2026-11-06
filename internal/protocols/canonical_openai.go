@@ -243,7 +243,11 @@ func encodeOpenAIGeneration(c *Generation, model string, count bool) (Object, er
 				parts := []Object{}
 				for _, p := range m.Parts {
 					if p.URL != "" {
-						parts = append(parts, Object{"type": raw("input_image"), "image_url": raw(p.URL)})
+						image := Object{"type": raw("input_image"), "image_url": raw(p.URL)}
+						if p.Detail != "" {
+							image["detail"] = raw(p.Detail)
+						}
+						parts = append(parts, image)
 					} else {
 						parts = append(parts, Object{"type": raw(textType), "text": raw(p.Text)})
 					}
