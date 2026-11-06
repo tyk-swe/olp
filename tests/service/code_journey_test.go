@@ -1506,3 +1506,70 @@ func TestCodeAccountExtraUsageRoundTripsAndRefusesNonKimiAccounts(t *testing.T) 
 		t.Fatalf("exported accounts = %+v, want the kimi account carrying extra usage on", exported.Accounts)
 	}
 }
+
+func TestCodeAccountPromotionCycleAnchor(t *testing.T) {
+	pool, _ := newDatabase(t)
+	if err := database.Migrate(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+	user, project, provider, credential, account := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	anchor, changedAnchor, etag := "2026-10-04", "2026-10-12", uuid.NewString()
+	for _, statement := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO olp.users(id, email, display_name, role, etag) VALUES($1, 'cycle-anchor@example.invalid', 'Journey', 'owner', $2)`, []any{user, uuid.NewString()}},
+		{`INSERT INTO olp.projects(id, name, etag, created_by) VALUES($1, 'cycle-anchor-journey', $2, $3)`, []any{project, uuid.NewString(), user}},
+		{`INSERT INTO olp.providers(id, project_id, name, kind, state, configuration, etag, slots_etag, created_by) VALUES($1, $2, 'cycle-anchor-provider', 'plugin', 'active', '{"kind":"plugin","auth_mode":"grant","profile_id":"qwen-token-plan"}', $3, $4, $5)`, []any{provider, project, uuid.NewString(), uuid.NewString(), user}},
+		{`INSERT INTO olp.provider_credentials(id, provider_id, version, principal, plugin_digest, grant_facts) VALUES($1, $2, 1, 'cycle-anchor-principal', repeat('0',64), '{}')`, []any{credential, provider}},
+		{`INSERT INTO olp.provider_grants(credential_id) VALUES($1)`, []any{credential}},
+		{`INSERT INTO olp.code_accounts(id, project_id, provider_id, credential_id, principal, name, models, cycle_anchor, etag, created_by) VALUES($1, $2, $3, $4, 'cycle-anchor-principal', 'cycle-anchor-account', '["model"]', $5, $6, $7)`, []any{account, project, provider, credential, anchor, etag, user}},
+	} {
+		if _, err := pool.Exec(t.Context(), statement.sql, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		name   string
+		anchor *string
+		action string
+	}{
+		{"unchanged", &anchor, "noop"},
+		{"cleared", nil, "replace"},
+		{"changed", &changedAnchor, "replace"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tx, err := pool.Begin(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback(t.Context())
+			doc := &promotion.Document{
+				Code:         &promotion.CodeConfiguration{Accounts: []promotion.CodeAccountEntry{{ID: account, Project: "cycle-anchor-journey", Provider: "cycle-anchor-provider", CredentialRef: "account-credential", Name: "cycle-anchor-account", Enabled: true, Models: []string{"model"}, CycleAnchor: tc.anchor}}},
+				CodeBindings: promotion.CodeBindings{Credentials: map[string]string{"account-credential": credential}},
+			}
+			var plan promotion.PlanResult
+			if err := codepromotion.PlanCode(t.Context(), tx, doc, &plan); err != nil {
+				t.Fatal(err)
+			}
+			if len(plan.Actions) != 1 || plan.Actions[0].Kind != "code_account" || plan.Actions[0].Action != tc.action {
+				t.Fatalf("promotion plan = %+v, want one account %s", plan.Actions, tc.action)
+			}
+			operator := access.Principal{User: access.User{ID: user}, AllProjects: true}
+			if err := codepromotion.ApplyCode(t.Context(), tx, operator, doc); err != nil {
+				t.Fatal(err)
+			}
+			var storedAnchor *string
+			var storedETag string
+			if err := tx.QueryRow(t.Context(), `SELECT cycle_anchor::text,etag FROM olp.code_accounts WHERE id=$1`, account).Scan(&storedAnchor, &storedETag); err != nil {
+				t.Fatal(err)
+			}
+			if (storedAnchor == nil) != (tc.anchor == nil) || storedAnchor != nil && tc.anchor != nil && *storedAnchor != *tc.anchor {
+				t.Fatalf("stored cycle anchor = %v, want %v", storedAnchor, tc.anchor)
+			}
+			if tc.action == "noop" && storedETag != etag {
+				t.Fatal("unchanged account was replaced")
+			}
+		})
+	}
+}
