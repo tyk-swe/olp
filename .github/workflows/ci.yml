@@ -175,11 +175,21 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/setup
+      - id: setup
+        uses: ./.github/actions/setup
         with:
           node-modules: "false"
-          go-cache-suffix: -test-service-${{ hashFiles('**/*.go') }}
+          go-cache-suffix: -test-service-${{ hashFiles('**/*.go', 'scripts/test-service.sh') }}
+          go-cache-restore-suffix: -test-service-
       - run: make test-service
+      - if: ${{ failure() && steps.setup.outcome == 'success' && steps.setup.outputs.go-cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+            ~/.cache/staticcheck
+          key: ${{ steps.setup.outputs.go-cache-key }}
   contracts:
     needs: changes
     if: needs.changes.outputs.contracts == 'true'

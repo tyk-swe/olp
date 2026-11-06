@@ -87,7 +87,7 @@ func resolveCode(ctx context.Context, q access.Queryer, code *promotion.CodeConf
 			return resolvedCodeResource[providers.CodeAccountInput]{}, err
 		}
 		id, exists, err := codeIdentity(q.Query(ctx, `SELECT id::text FROM olp.code_accounts WHERE project_id=$1 AND provider_id=$2 AND principal=$3`, project, provider, principal))
-		return resolvedCodeResource[providers.CodeAccountInput]{Ref: entry.ID, ID: id, Existing: exists, Identity: codeIdentityKey(project, provider, principal), Input: providers.CodeAccountInput{ProjectID: project, ProviderID: provider, CredentialID: credential, Name: entry.Name, Enabled: entry.Enabled, Models: entry.Models}}, err
+		return resolvedCodeResource[providers.CodeAccountInput]{Ref: entry.ID, ID: id, Existing: exists, Identity: codeIdentityKey(project, provider, principal), Input: providers.CodeAccountInput{ProjectID: project, ProviderID: provider, CredentialID: credential, Name: entry.Name, Enabled: entry.Enabled, Models: entry.Models, ExtraUsageEnabled: entry.ExtraUsageEnabled, CycleAnchor: entry.CycleAnchor}}, err
 	})
 	if err != nil {
 		return nil, err
@@ -268,7 +268,7 @@ func resolveCodePolicy(policy promotion.CodeRoutePolicy, pools, accounts map[str
 		}
 		return &codemode.ResearchTools{AccountID: accounts[policy.Tools.AccountID], Services: policy.Tools.Services}
 	}()
-	return promotion.CodeRoutePolicy{ChatToAntigravity: policy.ChatToAntigravity, PaidParticipation: policy.PaidParticipation, PaidTargets: policy.PaidTargets, PaidFallbackTargets: policy.PaidFallbackTargets, Pool: pools[policy.Pool], Models: policy.Models, Enabled: policy.Enabled, ModelPools: policy.ModelPools, InitialRecoveryAttempts: policy.InitialRecoveryAttempts, ModelRewriting: policy.ModelRewriting, Aliases: policy.Aliases, CodexCLIIdentity: policy.CodexCLIIdentity, ChatToCodex: policy.ChatToCodex, MessagesToCodex: policy.MessagesToCodex, Tools: tools, MaxBodyBytes: policy.MaxBodyBytes}
+	return promotion.CodeRoutePolicy{ChatToAntigravity: policy.ChatToAntigravity, AllowanceOrdering: policy.AllowanceOrdering, PaidParticipation: policy.PaidParticipation, PaidTargets: policy.PaidTargets, PaidFallbackTargets: policy.PaidFallbackTargets, Pool: pools[policy.Pool], Models: policy.Models, Enabled: policy.Enabled, ModelPools: policy.ModelPools, InitialRecoveryAttempts: policy.InitialRecoveryAttempts, ModelRewriting: policy.ModelRewriting, Aliases: policy.Aliases, CodexCLIIdentity: policy.CodexCLIIdentity, ChatToCodex: policy.ChatToCodex, MessagesToCodex: policy.MessagesToCodex, Tools: tools, MaxBodyBytes: policy.MaxBodyBytes}
 }
 
 func resolveCodePublication(ctx context.Context, q access.Queryer, publication *promotion.CodePublication, poolIDs, accountIDs map[string]string, project string, bindings promotion.CodeBindings, accounts []resolvedCodeResource[providers.CodeAccountInput], pools []resolvedCodeResource[access.CodePoolInput]) (*promotion.CodePublication, error) {

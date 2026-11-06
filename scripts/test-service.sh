@@ -24,7 +24,7 @@ export OLP_TEST_BINARY="$scratch/olp"
 export OLP_TEST_DATABASE_URL="postgres://olp:olp-local@$postgres/olp?sslmode=disable"
 export OLP_TEST_VALKEY_URL="redis://:olp-local@$valkey/0"
 start=$(date +%s)
-go test -mod=readonly -tags service -count=1 -timeout=180s ./tests/service
+go test -mod=readonly -trimpath -tags service -count=1 -timeout=180s ./tests/service
 elapsed=$(( $(date +%s) - start ))
 printf 'test-service: %ss (budget %ss)\n' "$elapsed" "$budget"
 if [ "$elapsed" -gt "$budget" ]; then

@@ -6,8 +6,10 @@ export type PaidTargetOption = {
 };
 import type {
   CodeAccount,
+  CodeAllowanceWindow,
   CodeAttempt,
   CodeBudget,
+  CodeDecision,
   CodePool,
   CodeRoute
 } from '$lib/management/code-mode';
@@ -40,6 +42,45 @@ export function adapterLabel(adapter: string | null | undefined): string {
   return adapter ? (adapterLabels[adapter] ?? adapter) : 'No adapter';
 }
 
+export function showsExtraUsage(adapter: string | null | undefined): boolean {
+  return adapter === 'kimi_code';
+}
+
+export function extraUsageLabel(value: boolean | null | undefined): string {
+  if (value == null) return 'Not recorded';
+  return value ? 'On, paid fallback beyond included quota' : 'Off';
+}
+
+export function extraUsageAdapterFor(
+  initialAdapter: string | null | undefined,
+  creating: boolean,
+  profileId: string | null | undefined
+): string | null {
+  if (!creating) return initialAdapter ?? null;
+  if (profileId === 'kimi-code' || profileId === 'kimi-code-cn') {
+    return 'kimi_code';
+  }
+  return null;
+}
+
+export function extraUsageValue(
+  adapter: string | null | undefined,
+  selected: string,
+  recorded: boolean | null | undefined
+): boolean | null {
+  if (!showsExtraUsage(adapter)) return recorded ?? null;
+  if (selected === '') return null;
+  return selected === 'true';
+}
+
+export function providerProfilePending(
+  creating: boolean,
+  providerId: string,
+  providerLoaded: boolean
+): boolean {
+  return creating && providerId !== '' && !providerLoaded;
+}
+
 const servingHealthLabels: Record<CodeAccount['health'], string> = {
   unknown: 'Unknown',
   healthy: 'Healthy',
@@ -49,6 +90,26 @@ const servingHealthLabels: Record<CodeAccount['health'], string> = {
 
 export function servingHealthLabel(health: CodeAccount['health']): string {
   return servingHealthLabels[health];
+}
+
+type CodeCooldown = NonNullable<CodeAccount['cooldowns']>[number];
+
+const cooldownClassLabels: Record<CodeCooldown['class'], string> = {
+  quota: 'Quota',
+  entitlement: 'Entitlement',
+  rate: 'Rate limit',
+  capacity: 'Capacity',
+  concurrency: 'Concurrency'
+};
+
+export function cooldownClassLabel(
+  cooldownClass: CodeCooldown['class']
+): string {
+  return cooldownClassLabels[cooldownClass];
+}
+
+export function cooldownSummary(cooldown: CodeCooldown): string {
+  return `${cooldownClassLabel(cooldown.class)} · ${cooldown.model ?? 'All models'}`;
 }
 
 const clientLabels: Record<string, string> = {
@@ -63,6 +124,76 @@ export function clientLabel(client: string): string {
 
 export function tokenCount(value: number | null | undefined): string {
   return value == null ? 'Unknown' : formatInteger(value);
+}
+
+export function allowanceWindowSummary(window: CodeAllowanceWindow): string {
+  if (window.unit === 'percent') {
+    return `${window.used_percent}% used · ${window.remaining_percent}% remaining`;
+  }
+  const used =
+    window.used_value == null
+      ? 'Unknown'
+      : `${window.used_value} ${window.unit}`;
+  const remaining =
+    window.remaining_value == null
+      ? 'Unknown'
+      : `${window.remaining_value} ${window.unit}`;
+  return `${used} used · ${remaining} remaining`;
+}
+
+export function allowanceChargeSummary(attempt: CodeAttempt): string {
+  const charge = attempt.allowance_charge;
+  if (charge == null) return 'Unknown, no charge observed';
+  if (typeof charge.allowance !== 'number')
+    return 'Charge reported without an allowance amount';
+  const billed =
+    typeof charge.billing_source === 'string'
+      ? `, billed from ${charge.billing_source}`
+      : '';
+  return `Observed charge $${charge.allowance} of monthly limit${billed}`;
+}
+
+export function allowanceEvidenceLabel(
+  evidence: CodeAllowanceWindow['evidence']
+): string {
+  return evidence === 'active' ? 'Active read' : 'Passive observation';
+}
+
+export function nextMonthlyReset(
+  anchor: string | null | undefined,
+  now: Date
+): string | null {
+  const match = anchor?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const day = Number(match[3]);
+  const anchorDate = new Date(
+    Date.UTC(Number(match[1]), Number(match[2]) - 1, day)
+  );
+  if (
+    anchorDate.getUTCDate() !== day ||
+    anchorDate.getUTCMonth() !== Number(match[2]) - 1
+  ) {
+    return null;
+  }
+  for (let offset = -1; offset <= 2; offset += 1) {
+    const probe = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + offset, 1)
+    );
+    const lastDay = new Date(
+      Date.UTC(probe.getUTCFullYear(), probe.getUTCMonth() + 1, 0)
+    ).getUTCDate();
+    const candidate = new Date(
+      Date.UTC(
+        probe.getUTCFullYear(),
+        probe.getUTCMonth(),
+        Math.min(day, lastDay)
+      )
+    );
+    if (candidate.getTime() > now.getTime()) {
+      return candidate.toISOString().slice(0, 10);
+    }
+  }
+  return null;
 }
 
 export function nativeModels(value: string): string[] {
@@ -128,6 +259,30 @@ export function usageCertaintyLabel(attempt: CodeAttempt): string {
     return 'Confirmed zero consumption';
   if (attempt.reported_tokens !== null) return 'Reported total';
   return 'Unknown consumption';
+}
+
+const decisionReasonLabels: Record<CodeDecision['reason'], string> = {
+  chosen: 'Weighted selection',
+  pin: 'Conversation pin',
+  connection: 'Tree connection account'
+};
+
+export function decisionReasonLabel(reason: CodeDecision['reason']): string {
+  return decisionReasonLabels[reason];
+}
+
+type CodeSkipClass = CodeDecision['skipped'][number]['class'];
+
+const skipClassLabels: Record<CodeSkipClass, string> = {
+  cooldown: 'in cooldown',
+  band: 'lower allowance band',
+  weight: 'weighted score',
+  tree: 'tree account served',
+  unavailable: 'allowance exhausted'
+};
+
+export function skipClassLabel(skipClass: CodeSkipClass): string {
+  return skipClassLabels[skipClass];
 }
 
 export function recoveryReasonLabel(attempt: CodeAttempt): string {

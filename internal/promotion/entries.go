@@ -49,13 +49,15 @@ type CodeBindings struct {
 }
 
 type CodeAccountEntry struct {
-	ID            string   `json:"id"`
-	Project       string   `json:"project"`
-	Provider      string   `json:"provider"`
-	CredentialRef string   `json:"credential_ref"`
-	Name          string   `json:"name"`
-	Enabled       bool     `json:"enabled"`
-	Models        []string `json:"models"`
+	ID                string   `json:"id"`
+	Project           string   `json:"project"`
+	Provider          string   `json:"provider"`
+	CredentialRef     string   `json:"credential_ref"`
+	Name              string   `json:"name"`
+	Enabled           bool     `json:"enabled"`
+	Models            []string `json:"models"`
+	ExtraUsageEnabled *bool    `json:"extra_usage_enabled"`
+	CycleAnchor       *string  `json:"cycle_anchor,omitempty"`
 }
 
 type CodePoolEntry struct {
@@ -94,6 +96,7 @@ type CodeRoutePolicy struct {
 	Aliases                 map[string]string         `json:"aliases"`
 	ChatToCodex             bool                      `json:"chat_to_codex,omitempty"`
 	MessagesToCodex         bool                      `json:"messages_to_codex"`
+	AllowanceOrdering       bool                      `json:"allowance_ordering,omitempty"`
 	Tools                   *codemode.ResearchTools   `json:"tools"`
 	MaxBodyBytes            *int64                    `json:"max_body_bytes"`
 }

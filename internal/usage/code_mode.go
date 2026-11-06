@@ -8,8 +8,14 @@ import (
 
 func (s *Server) registerCodeMode(mux *http.ServeMux) {
 	s.Access.Route(mux, "GET /api/v1/code/attempts", s.codeAttempts)
+	s.Access.Route(mux, "GET /api/v1/code/decisions", s.codeDecisions)
 	s.Access.Route(mux, "GET /api/v1/code/refusals", s.codeRefusals)
 	s.Access.Route(mux, "GET /api/v1/code/token-windows", s.codeTokenWindows)
+}
+func (s *Server) codeDecisions(r *http.Request, p access.Principal) (access.Reply, error) {
+	return s.Access.CodeList(r, p, `SELECT to_jsonb(x) FROM olp.code_decisions x`,
+		access.CodeMatch{Field: "account_id", SQL: `x.chosen_account_id=$%[1]d::uuid`},
+		access.CodeMatch{Field: "attempt_id", SQL: `x.attempt_id=$%[1]d::uuid`})
 }
 func (s *Server) codeAttempts(r *http.Request, p access.Principal) (access.Reply, error) {
 	return s.Access.CodeUsageList(r, p, `SELECT jsonb_build_object(
@@ -17,7 +23,7 @@ func (s *Server) codeAttempts(r *http.Request, p access.Principal) (access.Reply
 'account_id',x.account_id,'api_key_id',x.api_key_id,'binding_id',x.binding_id,'bound_evidence',x.bound_evidence,
 'cached_tokens',x.cached_tokens,'created_at',x.created_at,'finished_at',x.finished_at,'id',x.id,
 'input_tokens',x.input_tokens,'model',x.model,'operation',x.operation,'output_tokens',x.output_tokens,
-'project_id',x.project_id,'reasoning_tokens',x.reasoning_tokens,'refusal',x.refusal,'reported_tokens',x.reported_tokens,
+'project_id',x.project_id,'reasoning_tokens',x.reasoning_tokens,'refusal',x.refusal,'allowance_charge',x.allowance_charge,'reported_tokens',x.reported_tokens,
 'reserved_tokens',x.reserved_tokens,'route_id',x.route_id,'state',x.state,'route_revision_id',x.route_revision_id,
 'end_user_digest',x.end_user_digest,'attribution',x.attribution,'paid_binding_id',x.paid_binding_id,'paid_provider_id',x.paid_provider_id,
 'paid_slot_id',x.paid_slot_id,'requested_model',x.requested_model,

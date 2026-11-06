@@ -21,6 +21,10 @@ func codeRefusal(err error) *codemode.Refusal {
 // codeWriteError writes a refusal in the envelope of the request's surface:
 // Anthropic's for a route's Messages paths, OpenAI's otherwise.
 func codeWriteError(w http.ResponseWriter, r *http.Request, err error) {
+	writeSurfaceError(w, codeError(r, err), requestSurface(r))
+}
+
+func codeError(r *http.Request, err error) *Error {
 	refusal := codeRefusal(err)
 	surface, kind := requestSurface(r), "code_mode_error"
 	if surface == "anthropic" {
@@ -33,7 +37,7 @@ func codeWriteError(w http.ResponseWriter, r *http.Request, err error) {
 			kind = "permission_error"
 		}
 	}
-	writeSurfaceError(w, &Error{Status: refusal.Status, Code: refusal.Code, Type: kind, Message: codeRefusalMessage(refusal.Code)}, surface)
+	return &Error{Status: refusal.Status, Code: refusal.Code, Type: kind, Message: codeRefusalMessage(refusal.Code), RetryAfter: refusal.RetryAfter(time.Now())}
 }
 
 func (s *Server) codeRefuse(w http.ResponseWriter, r *http.Request, route codemode.Route, keyID, digest string, err error) {
@@ -54,6 +58,8 @@ func codeRefusalMessage(code string) string {
 		return "Continue on the original account when available, or start a new conversation with full context and no response references, reasoning signatures or socket state"
 	case "code_parent_unresolved":
 		return "Establish the parent conversation first, or start a new conversation with full context and no response reference"
+	case "code_connection_model_required":
+		return "Set X-OLP-Code-Model to a route model before connecting. If Retry-After is present, at least one model-hinted connection may be available after that delay"
 	case "code_response_account_conflict":
 		return "Continue on the account that produced the response, or start a new conversation with full context and no response reference"
 	case "code_translation_unsupported_semantics":

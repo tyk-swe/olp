@@ -22,6 +22,8 @@ unqualified.
 | `make check-contracts` | Compare all tracked contracts with temporary generated outputs |
 | `make test-fast` | Fast safety net inside its 60 second budget, in [tests/README.md](tests/README.md) |
 | `make test-service` | Database-backed service suite in disposable Docker containers, in [tests/README.md](tests/README.md#service-suite) |
+| `make qualify-code` | Code mode fixture qualification lanes (release gate) in disposable Docker containers, in [tests/README.md](tests/README.md#qualification-lanes) |
+| `make qualify-code-live` | Code mode live qualification lanes against real vendor accounts (release gate when `OLP_LIVE_QUALIFICATION=required`) in disposable Docker containers, in [tests/README.md](tests/README.md#qualification-lanes) |
 | `make api` | Generate Go and TypeScript types without building the gateway |
 | `make build` | Versioned `.local/bin/olp` plus separate `console/build` assets |
 | `make build-go` | Build the native Go binary from generated contracts |

@@ -4,6 +4,8 @@ import { ensureOk, unwrap, unwrapPage } from '$lib/management/http';
 
 type Schemas = components['schemas'];
 export type CodeAccount = Schemas['CodeAccount'];
+export type CodeAccountCooldown = Schemas['CodeAccountCooldown'];
+export type CodeAllowanceWindow = Schemas['CodeAllowanceWindow'];
 export type CodeAccountWrite = Schemas['CodeAccountWrite'];
 export type CodePool = Schemas['CodePool'];
 export type CodePoolWrite = Schemas['CodePoolWrite'];
@@ -13,6 +15,7 @@ export type CodeBudget = Schemas['CodeBudget'];
 export type CodeBudgetWrite = Schemas['CodeBudgetWrite'];
 export type CodeBinding = Schemas['CodeBinding'];
 export type CodeAttempt = Schemas['CodeAttempt'];
+export type CodeDecision = Schemas['CodeDecision'];
 export type CodeClientConfiguration = Schemas['CodeClientConfiguration'];
 
 export type CodeClient = CodeClientConfiguration['client'];
@@ -229,6 +232,18 @@ export async function listCodeAttempts(
   );
 }
 
+export async function listCodeDecisions(
+  filters: CodeFilters = {},
+  signal?: AbortSignal
+) {
+  return unwrapPage(
+    await apiClient.GET('/api/v1/code/decisions', {
+      params: { query: { limit: 50, ...filters } },
+      signal
+    })
+  );
+}
+
 export async function listCodeRefusals(
   filters: CodeFilters = {},
   signal?: AbortSignal
@@ -279,6 +294,22 @@ export async function listCodeRevisions(
     await apiClient.GET('/api/v1/code/routes/{id}/revisions', {
       params: { path: { id }, query: { limit: 50, cursor } },
       signal
+    })
+  );
+}
+
+export async function requestCodeAccountAllowanceRead(
+  account: Pick<CodeAccount, 'id'>,
+  requestId: string
+) {
+  if (!requestId)
+    throw new Error('An allowance read requires a stable request ID.');
+  return unwrap(
+    await apiClient.POST('/api/v1/code/accounts/{id}/allowance-reads', {
+      params: {
+        path: { id: account.id },
+        header: { 'Idempotency-Key': requestId }
+      }
     })
   );
 }

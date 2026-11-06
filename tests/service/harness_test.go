@@ -144,14 +144,19 @@ func runBinary(t *testing.T, env environment, args ...string) {
 	}
 }
 
-func freeAddress(t *testing.T) string {
+func freeAddresses(t *testing.T) (string, string) {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	public, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
-	return listener.Addr().String()
+	defer public.Close()
+	private, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer private.Close()
+	return public.Addr().String(), private.Addr().String()
 }
 
 type service struct {
@@ -198,7 +203,7 @@ func TestStartupFailureCleanup(t *testing.T) {
 
 func startProcess(t *testing.T, pool *pgxpool.Pool, env environment) *service {
 	t.Helper()
-	public, private := freeAddress(t), freeAddress(t)
+	public, private := freeAddresses(t)
 	origin := "http://" + public
 	logPath := filepath.Join(t.TempDir(), "olp.log")
 	logFile, err := os.Create(logPath)

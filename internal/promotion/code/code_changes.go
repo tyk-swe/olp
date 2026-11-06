@@ -32,7 +32,7 @@ func codeChangeFor[T any](ctx context.Context, q access.Queryer, kind string, en
 }
 func codeChanges(ctx context.Context, q access.Queryer, resolved *resolvedCode) ([]codeChange, error) {
 	accounts, err := mapCodeResult(resolved.Accounts, func(e resolvedCodeResource[providers.CodeAccountInput]) (codeChange, error) {
-		return codeChangeFor(ctx, q, "code_account", e, `SELECT jsonb_build_object('project_id',project_id,'provider_id',provider_id,'credential_id',credential_id,'name',name,'enabled',enabled,'models',models) FROM olp.code_accounts WHERE id=$1`)
+		return codeChangeFor(ctx, q, "code_account", e, `SELECT jsonb_build_object('project_id',project_id,'provider_id',provider_id,'credential_id',credential_id,'name',name,'enabled',enabled,'models',models,'extra_usage_enabled',extra_usage_enabled,'cycle_anchor',cycle_anchor) FROM olp.code_accounts WHERE id=$1`)
 	})
 	if err != nil {
 		return nil, err

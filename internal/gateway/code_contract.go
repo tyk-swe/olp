@@ -2,9 +2,11 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -20,10 +22,12 @@ type CodeLedger interface {
 	MarkDispatched(context.Context, string) error
 	ConfirmNonexecution(context.Context, string, int) error
 	ObserveCooldown(context.Context, string, time.Time) error
+	ObserveCooldownClass(context.Context, string, string, codeadapter.Classification, time.Time) error
 	Settle(context.Context, string, codemode.Usage) error
 	Abort(context.Context, string) error
 	ObserveHealth(context.Context, string, codemode.HealthObservation) error
 	ObserveAllowance(context.Context, string, codemode.Allowance) error
+	ObserveAllowanceCharge(context.Context, string, json.RawMessage) error
 	ObserveReference(context.Context, string, string) error
 	ObserveOutcome(context.Context, string, codemode.Outcome) error
 	RecordRefusal(context.Context, codemode.Route, string, string, string) error

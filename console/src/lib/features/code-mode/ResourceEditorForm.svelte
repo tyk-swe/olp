@@ -9,6 +9,7 @@
     submission,
     referenceError = null,
     enrolling = false,
+    saveBlocked = false,
     children,
     enrollment
   }: {
@@ -18,6 +19,7 @@
     submission: ResourceSubmission;
     referenceError?: unknown;
     enrolling?: boolean;
+    saveBlocked?: boolean;
     children: Snippet;
     enrollment?: Snippet;
   } = $props();
@@ -28,7 +30,7 @@
     <button
       class="button button-primary"
       type="submit"
-      disabled={submission.busy || enrolling || !allowed}
+      disabled={submission.busy || enrolling || saveBlocked || !allowed}
       >{submission.busy
         ? 'Saving…'
         : submission.submitted

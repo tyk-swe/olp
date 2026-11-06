@@ -118,13 +118,21 @@ func (offers Offers) nativePaidProtocol(route codemode.Route, model string) (cod
 	if err != nil || !route.PaidParticipation {
 		return "", false, false
 	}
-	if _, direct := route.PaidTargets[resolved.Model]; !direct {
-		if _, fallback := route.PaidFallbackTargets[resolved.Model]; !fallback || route.InitialRecoveryAttempts < 1 {
-			return "", false, false
+	target := func() string {
+		if _, direct := route.PaidTargets[resolved.Model]; direct {
+			return resolved.Model
 		}
-	}
+		if route.InitialRecoveryAttempts < 1 {
+			return ""
+		}
+		fallback, err := route.PaidFallbackModel(codemode.Operation{Model: model}, nil)
+		if err != nil || fallback == nil {
+			return ""
+		}
+		return fallback.Model
+	}()
 	for _, offer := range offers {
-		if offer.PaidProtocol != "" && slices.Contains(offer.Models, resolved.Model) {
+		if offer.PaidProtocol != "" && slices.Contains(offer.Models, target) {
 			return offer.PaidProtocol, offer.PaidStreaming, true
 		}
 	}

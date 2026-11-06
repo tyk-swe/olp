@@ -170,6 +170,7 @@
   let messagesToCodex = $state(initial?.messages_to_codex ?? false);
   let codexCLIIdentity = $state(initial?.codex_cli_identity ?? false);
   let chatToAntigravity = $state(initial?.chat_to_antigravity ?? false);
+  let allowanceOrdering = $state(initial?.allowance_ordering ?? false);
   let research = $state(!!initial?.tools);
   let researchAccount = $state(initial?.tools?.account_id ?? '');
   let researchServices = $state<('search' | 'reader' | 'zread')[]>(
@@ -276,6 +277,7 @@
         messages_to_codex: messagesToCodex,
         codex_cli_identity: codexCLIIdentity,
         chat_to_antigravity: chatToAntigravity,
+        allowance_ordering: allowanceOrdering,
         initial_recovery_attempts: recoveryAttempts,
         tools: research
           ? { account_id: researchAccount, services: researchServices }
@@ -540,6 +542,20 @@
     account suspension. Review the exact change and risk before enabling and
     publishing. Existing route administrators authorize this policy for eligible
     accounts in the route pool.
+  </p>
+  <label class="choice">
+    <input
+      id="code-allowance-ordering"
+      type="checkbox"
+      bind:checked={allowanceOrdering}
+    />
+    Order new conversations by allowance bands
+  </label>
+  <p>
+    Off by default. No requested model has a qualified mapping to an allowance
+    limit family yet, so this setting has no effect. Legacy eligibility remains
+    in force for new conversations, existing pins and model offers. Published
+    revisions retain this policy and established pins never move.
   </p>
   <label class="choice"
     ><input

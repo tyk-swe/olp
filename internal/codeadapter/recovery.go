@@ -2,8 +2,6 @@ package codeadapter
 
 import (
 	"net/http"
-	"slices"
-	"strconv"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -13,12 +11,21 @@ import (
 )
 
 type Rejection struct {
-	Class   upstream.Class
-	RetryAt time.Time
+	Class    upstream.Class
+	Envelope string
+	RetryAt  time.Time
 }
 
 func (v Vendor) InitialRejection(endpoint Endpoint, status int, body []byte, headers http.Header, now time.Time) (Rejection, bool) {
-	if v.Adapter != codemode.AdapterCodex || endpoint.Observation != ObserveCodex || status != 401 && status != 429 {
+	classified := v.Adapter == codemode.AdapterZAICoding || v.Adapter == codemode.AdapterKimiCode || v.Adapter == codemode.AdapterQwenTokenPlan || (v.Adapter == codemode.AdapterCodex && endpoint.Observation == ObserveCodex)
+	if status == 429 && classified {
+		classification, ok := v.Classify(endpoint, status, body, headers, now)
+		if !ok || !classification.NotExecuted {
+			return Rejection{}, false
+		}
+		return Rejection{Class: upstream.RateLimit, Envelope: classification.Envelope, RetryAt: classification.RetryAt}, true
+	}
+	if v.Adapter != codemode.AdapterCodex || endpoint.Observation != ObserveCodex || status != 401 {
 		return Rejection{}, false
 	}
 	document, err := oif.ParseJSON(body, oif.Limits{MaxBytes: 64 << 10})
@@ -29,17 +36,12 @@ func (v Vendor) InitialRejection(endpoint Endpoint, status int, body []byte, hea
 	errorCode, _ := document.Lookup("/error/code")
 	typeName, _ := errorType.Text()
 	code, _ := errorCode.Text()
-	if !(status == 401 && typeName == "authentication_error" && code == "invalid_api_key" || status == 429 && typeName == "usage_limit_reached") {
+	if typeName != "authentication_error" || code != "invalid_api_key" {
 		return Rejection{}, false
 	}
 	outcome := (upstream.Classifier{AtMostOnce: true}).Classify(upstream.Evidence{Reached: true, Status: status, Error: &wire.UpstreamError{Type: typeName, Code: code}})
-	if outcome.Acceptance != upstream.Terminal || outcome.Class != upstream.Credential && outcome.Class != upstream.RateLimit {
+	if outcome.Acceptance != upstream.Terminal || outcome.Class != upstream.Credential {
 		return Rejection{}, false
 	}
-	reset, _ := document.Lookup("/error/resets_at")
-	resetSeconds, _ := strconv.ParseInt(reset.Raw(), 10, 64)
-	delay, _ := document.Lookup("/error/resets_in_seconds")
-	delaySeconds, _ := strconv.ParseInt(delay.Raw(), 10, 32)
-	retryAt := slices.MaxFunc([]time.Time{now.Add(time.Minute), now.Add(upstream.RetryAfter(headers.Get("Retry-After"), now)), time.Unix(resetSeconds, 0), now.Add(time.Duration(delaySeconds) * time.Second)}, time.Time.Compare)
-	return Rejection{Class: outcome.Class, RetryAt: retryAt}, true
+	return Rejection{Class: outcome.Class, Envelope: "codex_invalid_api_key", RetryAt: rejectionRetryAt(document, headers, now)}, true
 }

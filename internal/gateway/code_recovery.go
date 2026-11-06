@@ -18,7 +18,31 @@ type codeRejectionBody struct {
 	io.Closer
 }
 
-func (a *codeAttempt) recover(ctx context.Context, response *http.Response, route codemode.Route, previous *resources.CodeRecovery) (*resources.CodeRecovery, error) {
+func readTranslatedRejection(ctx context.Context, body io.ReadCloser, limit int64) ([]byte, error) {
+	type readResult struct {
+		body []byte
+		err  error
+	}
+	result := make(chan readResult, 1)
+	go func() {
+		data, err := io.ReadAll(io.LimitReader(body, limit))
+		result <- readResult{body: data, err: err}
+	}()
+	timer := time.NewTimer(250 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case received := <-result:
+		return received.body, received.err
+	case <-timer.C:
+		_ = body.Close()
+		return nil, context.DeadlineExceeded
+	case <-ctx.Done():
+		_ = body.Close()
+		return nil, ctx.Err()
+	}
+}
+
+func (a *codeAttempt) recover(ctx context.Context, response *http.Response, route codemode.Route, previous *resources.CodeRecovery, translated bool) (*resources.CodeRecovery, error) {
 	if a.paid != nil {
 		return nil, nil
 	}
@@ -26,7 +50,12 @@ func (a *codeAttempt) recover(ctx context.Context, response *http.Response, rout
 	if route.InitialRecoveryAttempts < 1 || response.StatusCode != 401 && response.StatusCode != 429 || ctx.Err() != nil {
 		return nil, nil
 	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, (64<<10)+1))
+	body, err := func() ([]byte, error) {
+		if translated {
+			return readTranslatedRejection(ctx, response.Body, (64<<10)+1)
+		}
+		return io.ReadAll(io.LimitReader(response.Body, (64<<10)+1))
+	}()
 	response.Body = codeRejectionBody{Reader: io.MultiReader(bytes.NewReader(body), response.Body), Closer: response.Body}
 	if err != nil || len(body) > 64<<10 {
 		return nil, nil
@@ -39,11 +68,27 @@ func (a *codeAttempt) recover(ctx context.Context, response *http.Response, rout
 	if err := a.server.CodeLedger.ConfirmNonexecution(ctx, a.permit.Attempt.ID, response.StatusCode); err != nil {
 		return nil, nil
 	}
+	rejection = codeadapter.RejectionWithCycleReset(rejection, a.permit.Account.CycleAnchor, a.server.now().UTC())
 	zero := int64(0)
 	a.usage, a.terminal = codemode.Usage{Total: &zero}, true
+	recorded := func() bool {
+		if rejection.Class != upstream.RateLimit {
+			return true
+		}
+		_, ok := a.observeCooldownClass(codemode.Observation{Status: response.StatusCode, RejectionBody: body, RetryAfter: response.Header.Values("Retry-After")})
+		if ok {
+			a.pendingHealth = nil
+		}
+		return ok
+	}()
 	a.finish(ctx)
-	if err := a.server.CodeLedger.ObserveCooldown(ctx, a.permit.Account.ID, rejection.RetryAt); err != nil {
+	if !recorded {
 		return nil, nil
+	}
+	if rejection.Class == upstream.Credential {
+		if err := a.server.CodeLedger.ObserveCooldown(ctx, a.permit.Account.ID, rejection.RetryAt); err != nil {
+			return nil, nil
+		}
 	}
 	if !a.permit.InitialRecovery {
 		return nil, codemode.Refuse(409, "code_recovery_unsafe")
@@ -52,9 +97,9 @@ func (a *codeAttempt) recover(ctx context.Context, response *http.Response, rout
 		return nil, nil
 	}
 	if rejection.Class == upstream.Credential && a.auth.CredentialID != "" && a.auth.GrantGeneration > 0 && a.refreshed(ctx, adapter) {
-		return &resources.CodeRecovery{From: a.permit.Attempt.ID, Number: ordinal, AccountID: a.permit.Account.ID, CredentialID: a.auth.CredentialID, GrantGeneration: a.auth.GrantGeneration, RejectedUntil: rejection.RetryAt}, nil
+		return &resources.CodeRecovery{From: a.permit.Attempt.ID, Envelope: rejection.Envelope, Number: ordinal, AccountID: a.permit.Account.ID, CredentialID: a.auth.CredentialID, GrantGeneration: a.auth.GrantGeneration, RejectedUntil: rejection.RetryAt}, nil
 	}
-	return &resources.CodeRecovery{From: a.permit.Attempt.ID, Number: ordinal}, nil
+	return &resources.CodeRecovery{From: a.permit.Attempt.ID, Envelope: rejection.Envelope, Number: ordinal}, nil
 }
 
 func (a *codeAttempt) refreshed(ctx context.Context, adapter codeadapter.Vendor) bool {

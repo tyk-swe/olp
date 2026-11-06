@@ -80,6 +80,10 @@ Recovery to another eligible account when the request is known not to have execu
 **Usage uncertainty**:
 An unresolved consumption outcome retained when final upstream usage is unavailable. It is not zero usage.
 
+**Allowance observation**:
+A vendor-reported state of one allowance window for one account at one time, in the vendor unit. It is not a remaining balance that OLP computed from its own records.
+_Avoid_: Balance, quota estimate
+
 **Fixture qualification**:
 Evidence from controlled peers and repeatable client journeys for a stated revision and scope. It does not establish acceptance by a real subscription service.
 

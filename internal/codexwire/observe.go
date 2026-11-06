@@ -15,6 +15,10 @@ import (
 
 type Observation = codemode.Observation
 
+func codexWindowNames() [2]string {
+	return [2]string{"primary", "secondary"}
+}
+
 func Observe(body []byte, unary bool) Observation {
 	document, err := oif.ParseJSON(body, oif.Limits{MaxBytes: MaxBody})
 	if err != nil {
@@ -47,7 +51,10 @@ func Observe(body []byte, unary bool) Observation {
 		if status != 0 {
 			outcome.UpstreamStatus = &status
 		}
-		return Observation{Terminal: true, Status: status, RetryAfter: headers.Values("Retry-After"), Outcome: outcome, Allowance: Allowance(headers, now)}
+		return Observation{Terminal: true, Status: status, RetryAfter: headers.Values("Retry-After"), Outcome: outcome, Allowance: Allowance(headers, now), RejectionBody: codewire.RejectionBody(body)}
+	}
+	if unary && len(root.Members()) == 1 && field(root, "error").Kind() == oif.Object {
+		return Observation{RejectionBody: codewire.RejectionBody(body)}
 	}
 	terminal := wire.IsTerminalResponseEvent(kind)
 	successful := kind == "response.completed"
@@ -89,7 +96,7 @@ func Observe(body []byte, unary bool) Observation {
 	if u.Validate() != nil {
 		u = codemode.Usage{}
 	}
-	return Observation{Terminal: true, Successful: successful, Outcome: &codemode.Outcome{Origin: "upstream", Kind: outcomeKind, ObservedAt: now}, Usage: u, ResponseID: id}
+	return Observation{Terminal: true, Successful: successful, Outcome: &codemode.Outcome{Origin: "upstream", Kind: outcomeKind, ObservedAt: now}, Usage: u, ResponseID: id, AllowanceCharge: codewire.AllowanceCharge(usage)}
 }
 
 func Allowance(headers http.Header, now time.Time) *codemode.Allowance {
@@ -97,15 +104,15 @@ func Allowance(headers http.Header, now time.Time) *codemode.Allowance {
 	prefixes := map[string]bool{"x-codex": true}
 	for name := range headers {
 		name = strings.ToLower(name)
-		for _, window := range codemode.AllowanceWindowNames() {
+		for _, window := range codexWindowNames() {
 			if strings.HasPrefix(name, "x-") && strings.HasSuffix(name, "-"+window+"-used-percent") {
 				prefixes[strings.TrimSuffix(name, "-"+window+"-used-percent")] = true
 			}
 		}
 	}
 	for prefix := range prefixes {
-		id := normalizeLimit(strings.TrimPrefix(prefix, "x-"))
-		for _, kind := range codemode.AllowanceWindowNames() {
+		id, _ := codemode.NormalizeLimitID(strings.TrimPrefix(prefix, "x-"))
+		for _, kind := range codexWindowNames() {
 			base := prefix + "-" + kind
 			if w := allowanceWindow(id, kind, headerValue(headers, base+"-used-percent"), headerValue(headers, base+"-window-minutes"), headerValue(headers, base+"-reset-at"), now); w != nil && (w.UsedPercent != 0 || w.WindowMinutes != nil && *w.WindowMinutes != 0 || w.ResetsAt != nil) {
 				result.Windows = append(result.Windows, *w)
@@ -124,16 +131,12 @@ func headerValue(headers http.Header, name string) string {
 	return values[0]
 }
 
-func normalizeLimit(id string) string {
-	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(id)), "-", "_")
-}
-
 func allowanceWindow(id, kind, usedText, minutesText, resetText string, now time.Time) *codemode.AllowanceWindow {
 	used, err := strconv.ParseFloat(usedText, 64)
 	if err != nil || math.IsNaN(used) || math.IsInf(used, 0) || used < 0 || used > 1<<53-1 {
 		return nil
 	}
-	w := &codemode.AllowanceWindow{LimitID: id, Window: kind, UsedPercent: used, RemainingPercent: max(0, 100-used), ObservedAt: now}
+	w := &codemode.AllowanceWindow{LimitID: id, Window: kind, Unit: codemode.AllowanceUnitPercent, Evidence: codemode.AllowanceEvidencePassive, UsedPercent: used, RemainingPercent: max(0, 100-used), ObservedAt: now}
 	if minutes, err := strconv.ParseInt(minutesText, 10, 64); err == nil && minutes >= 0 && minutes <= 1<<53-1 {
 		w.WindowMinutes = &minutes
 	}
@@ -184,10 +187,11 @@ func eventAllowance(root oif.Value, now time.Time) *codemode.Allowance {
 	if id == "" {
 		id = "codex"
 	}
+	limit, _ := codemode.NormalizeLimitID(id)
 	result := &codemode.Allowance{ObservedAt: now}
-	for _, kind := range codemode.AllowanceWindowNames() {
+	for _, kind := range codexWindowNames() {
 		value := field(field(root, "rate_limits"), kind)
-		if w := allowanceWindow(normalizeLimit(id), kind, field(value, "used_percent").Raw(), field(value, "window_minutes").Raw(), field(value, "reset_at").Raw(), now); w != nil {
+		if w := allowanceWindow(limit, kind, field(value, "used_percent").Raw(), field(value, "window_minutes").Raw(), field(value, "reset_at").Raw(), now); w != nil {
 			result.Windows = append(result.Windows, *w)
 		}
 	}

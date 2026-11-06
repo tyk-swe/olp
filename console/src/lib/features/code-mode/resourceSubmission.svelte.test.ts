@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { flushSync, mount, unmount } from 'svelte';
+import { flushSync, getAllContexts, mount, unmount } from 'svelte';
+import { useQueryClient } from '@tanstack/svelte-query';
 import { ApiProblem } from '$lib/management/http';
+import { json, serve } from '$lib/management/test/transport';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
+import AccountEditor from './AccountEditor.svelte';
 import { useResourceSubmission } from './resourceSubmission.svelte';
 
 vi.mock('$app/navigation', () => ({ beforeNavigate: vi.fn() }));
@@ -49,6 +52,71 @@ function submit(): SubmitEvent {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('resource submissions', () => {
+  it('shows failed account provider lookups and allows cancelling without enabling save', async () => {
+    const lookup = Promise.withResolvers<Response>();
+    serve((request) => {
+      const path = new URL(request.url).pathname;
+      if (path === '/api/v1/providers')
+        return json({
+          items: [{ id: 'provider', project_id: 'project', name: 'Fixture' }]
+        });
+      if (path === '/api/v1/providers/provider') return lookup.promise;
+      if (path === '/api/v1/providers/provider/credentials')
+        return json({ items: [] });
+      if (path === '/api/v1/provider-kinds') return json({ items: [] });
+      return json({ title: 'Unexpected request', status: 404 }, 404);
+    });
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true)
+    );
+    const onCancel = vi.fn();
+    const target = document.createElement('div');
+    const setup = vi.fn(() => {
+      useQueryClient().setDefaultOptions({ queries: { retry: false } });
+      return mount(AccountEditor, {
+        target,
+        context: getAllContexts(),
+        props: {
+          projectId: 'project',
+          allowed: true,
+          onDraftChange: vi.fn(),
+          onSaved: vi.fn(async () => undefined),
+          onCancel
+        }
+      });
+    });
+    const harness = mount(StateHarness, { target, props: { setup } });
+    onTestFinished(async () => {
+      await unmount(setup.mock.results[0].value);
+      await unmount(harness);
+    });
+    flushSync();
+    const provider = target.querySelector<HTMLSelectElement>('#code-provider');
+    await vi.waitFor(() => expect(provider?.options.length).toBe(2));
+    if (!provider) throw new Error('Provider selection is missing');
+    provider.value = 'provider';
+    provider.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(
+      target.querySelector<HTMLButtonElement>('[type="submit"]')?.disabled
+    ).toBe(true);
+
+    lookup.resolve(json({ title: 'Provider lookup failed', status: 503 }, 503));
+    await vi.waitFor(() =>
+      expect(target.textContent).toMatch(/Cancel\s+and reopen to retry\./)
+    );
+    expect(
+      target.querySelector<HTMLButtonElement>('[type="submit"]')?.disabled
+    ).toBe(true);
+    const cancel = [...target.querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === 'Cancel'
+    );
+    expect(cancel?.disabled).toBe(false);
+    cancel?.click();
+    expect(onCancel).toHaveBeenCalledOnce();
+  });
+
   it.each([{ allowed: () => false }, { blocked: () => true }])(
     'does not submit when permission or another operation blocks it',
     async (options) => {

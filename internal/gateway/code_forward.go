@@ -202,7 +202,7 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *re
 		return
 	}
 	defer response.Body.Close()
-	next, recoveryErr := attempt.recover(ctx, response, route, recovery)
+	next, recoveryErr := attempt.recover(ctx, response, route, recovery, payload.translated)
 	if recoveryErr != nil {
 		refuse(recoveryErr)
 		return
@@ -303,7 +303,7 @@ func (a *codeAttempt) copyResponse(ctx context.Context, w http.ResponseWriter, r
 					if streaming {
 						events.Write(decoded)
 					} else {
-						a.observe(a.observer.Unary(decoded))
+						a.observeUnary(decoded)
 					}
 				}
 			}

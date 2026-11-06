@@ -24,6 +24,12 @@
   import { codeKeys } from './codeKeys';
   import {
     adapterLabel,
+    allowanceEvidenceLabel,
+    allowanceWindowSummary,
+    cooldownSummary,
+    extraUsageLabel,
+    showsExtraUsage,
+    nextMonthlyReset,
     servingHealthLabel,
     mutationError,
     tokenCount,
@@ -258,7 +264,7 @@
             {#if allowed}<button
                 class="button button-secondary"
                 type="button"
-                disabled={!!editing}
+                disabled={!!editing || busy}
                 onclick={() =>
                   (editing = { kind: 'accounts', current: account })}
                 >Edit account</button
@@ -267,6 +273,15 @@
           <dl>
             <dt>Subscription</dt>
             <dd><span class="badge">{adapterLabel(account.adapter)}</span></dd>
+            {#if showsExtraUsage(account.adapter)}
+              <dt>Extra Usage</dt>
+              <dd>{extraUsageLabel(account.extra_usage_enabled)}</dd>
+            {/if}
+            <dt>Ordering signal</dt>
+            <dd>
+              No qualified model-to-limit mapping. Legacy eligibility and
+              weighted selection apply.
+            </dd>
             <dt>Account / principal</dt>
             <dd>{account.id} / {account.principal}</dd>
             <dt>Eligibility</dt>
@@ -293,7 +308,25 @@
               {account.unavailable_until
                 ? formatDate(account.unavailable_until)
                 : 'No serving cooldown reported'}
+              {#if account.cooldowns?.length}
+                {#each account.cooldowns as cooldown (cooldown.class + ':' + (cooldown.model ?? ''))}
+                  <p>
+                    {cooldownSummary(cooldown)} · until {formatDate(
+                      cooldown.retry_at
+                    )}
+                  </p>
+                {/each}
+              {/if}
             </dd>
+            {#if account.cycle_anchor}
+              <dt>Subscription cycle</dt>
+              <dd>
+                Anchor {account.cycle_anchor} · Monthly reset {nextMonthlyReset(
+                  account.cycle_anchor,
+                  new Date()
+                ) ?? 'Unknown'}
+              </dd>
+            {/if}
             <dt>Native models</dt>
             <dd>{account.models.join(', ')}</dd>
             <dt>Provider / credential</dt>
@@ -315,14 +348,17 @@
                 {#if account.allowance.windows?.length}
                   {#each account.allowance.windows as window (window.limit_id + ':' + window.window)}
                     <p>
-                      {window.limit_id} / {window.window}: {window.used_percent}%
-                      used · {window.remaining_percent}% remaining<br />
+                      {window.limit_id} / {window.window}: {allowanceWindowSummary(
+                        window
+                      )}<br />
                       Window: {window.window_minutes == null
                         ? 'Unknown'
                         : window.window_minutes + ' minutes'} · Reset {window.resets_at
                         ? formatDate(window.resets_at)
                         : 'Unknown'}<br />
-                      Observed {formatDate(window.observed_at)}
+                      {allowanceEvidenceLabel(window.evidence)} · Observed {formatDate(
+                        window.observed_at
+                      )}
                     </p>
                   {/each}
                 {:else}Percent: {account.allowance.remaining_percent == null
@@ -420,6 +456,12 @@
                   ? 'No subscription adapter is published'
                   : 'Set at publication'}
               {/each}
+            </dd>
+            <dt>Draft allowance ordering</dt>
+            <dd>
+              {route.allowance_ordering
+                ? 'Configured, requires publication and a qualified model-to-limit mapping'
+                : 'Disabled'}
             </dd>
             <dt>Paid native models</dt>
             <dd>

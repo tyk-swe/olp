@@ -37,7 +37,7 @@ func (a *codeAttempt) copyModelResponse(ctx context.Context, w http.ResponseWrit
 		if readErr != nil || len(body) > codewire.MaxBody {
 			return codemode.Refuse(502, "code_upstream_invalid")
 		}
-		a.observe(a.observer.Unary(body))
+		a.observeUnary(body)
 		rewritten, rewriteErr := codewire.RewriteResponseModel(body, a.model, a.publicModel)
 		if rewriteErr != nil {
 			return rewriteErr

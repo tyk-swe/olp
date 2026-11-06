@@ -90,6 +90,15 @@ func (s *Server) prepareCodeWebSocket(r *http.Request, release *release.Release,
 	if err != nil {
 		return handshake, err
 	}
+	operation, err := func() (codemode.Operation, error) {
+		if len(models) == 0 {
+			return codemode.Operation{}, nil
+		}
+		return route.ResolvePinnedModel(codemode.Operation{Model: models[0]}, []codemode.Pin{permit.Pin})
+	}()
+	if err != nil {
+		return handshake, err
+	}
 	if err := bindCodeWorkload(&permit.Authority, authority); err != nil {
 		return handshake, err
 	}
@@ -116,7 +125,7 @@ func (s *Server) prepareCodeWebSocket(r *http.Request, release *release.Release,
 		}
 		return handshake, err
 	}
-	handshake.connection = &codeAttempt{identityOriginator: target.adapter.CompatibilityOriginator(route), server: s, permit: permit, config: target.config, auth: auth, endpoint: target.endpoint, observer: codeObserver(target.endpoint)}
+	handshake.connection = &codeAttempt{model: operation.Model, identityOriginator: target.adapter.CompatibilityOriginator(route), adapter: target.adapter.Adapter, server: s, permit: permit, config: target.config, auth: auth, endpoint: target.endpoint, observer: codeObserver(target.endpoint)}
 	handshake.client, err = s.codeClient(r.Context(), release, target.config, permit.Account.ProviderID)
 	if err != nil {
 		return handshake, err
@@ -150,24 +159,16 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 	forwarded := false
 	httpClient.Transport = &codeHandshakeTransport{base: httpClient.Transport, reject: func(response *http.Response) {
 		forwarded = true
-		maps.Copy(w.Header(), codewire.ForwardHeaders(response.Header, false))
-		for name := range codewire.ForwardTrailers(response.Trailer, response.Header, false) {
-			w.Header().Add("Trailer", name)
-		}
-		w.WriteHeader(response.StatusCode)
-		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
-		_, _ = io.Copy(w, response.Body)
-		for name, values := range codewire.ForwardTrailers(response.Trailer, response.Header, false) {
-			w.Header()[http.TrailerPrefix+name] = values
-		}
+		forwardCodeHandshakeRejection(r.Context(), w, connection, response)
 	}}
 	dialCtx, dialCancel := context.WithTimeout(r.Context(), 30*time.Second)
 	upstream, response, err := websocket.Dial(dialCtx, target, &websocket.DialOptions{HTTPClient: httpClient, HTTPHeader: headers, CompressionMode: websocket.CompressionDisabled})
 	dialCancel()
-	if response != nil {
+	if response != nil && !forwarded {
 		connection.response(r.Context(), response.StatusCode, response.Header)
 	}
 	if err != nil {
+		connection.flushPendingHealth(r.Context())
 		if !forwarded {
 			reject(codemode.Refuse(502, "code_upstream_unavailable"))
 		}
@@ -338,6 +339,38 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 			}
 		}
 	}
+}
+
+func forwardCodeHandshakeRejection(ctx context.Context, w http.ResponseWriter, attempt *codeAttempt, response *http.Response) {
+	attempt.response(ctx, response.StatusCode, response.Header)
+	maps.Copy(w.Header(), codewire.ForwardHeaders(response.Header, false))
+	for name := range codewire.ForwardTrailers(response.Trailer, response.Header, false) {
+		w.Header().Add("Trailer", name)
+	}
+	w.WriteHeader(response.StatusCode)
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+	writer := flushingHandshakeWriter{w}
+	body, readErr := io.ReadAll(io.TeeReader(io.LimitReader(response.Body, codewire.MaxBody+1), writer))
+	if readErr == nil {
+		if _, err := io.Copy(writer, response.Body); err == nil && response.StatusCode >= 400 {
+			attempt.observeEncodedUnary(body, response.Header.Get("Content-Encoding"))
+		}
+	}
+	for name, values := range codewire.ForwardTrailers(response.Trailer, response.Header, false) {
+		w.Header()[http.TrailerPrefix+name] = values
+	}
+}
+
+type flushingHandshakeWriter struct {
+	http.ResponseWriter
+}
+
+func (w flushingHandshakeWriter) Write(body []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(body)
+	if err == nil {
+		_ = http.NewResponseController(w.ResponseWriter).Flush()
+	}
+	return n, err
 }
 
 type codeHandshakeTransport struct {

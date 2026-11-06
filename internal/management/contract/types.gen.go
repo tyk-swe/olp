@@ -126,22 +126,22 @@ func (e A2ATaskToolCallbackPricingState) Valid() bool {
 
 // Defines values for AdmissionPriority.
 const (
-	Critical AdmissionPriority = "critical"
-	High     AdmissionPriority = "high"
-	Low      AdmissionPriority = "low"
-	Normal   AdmissionPriority = "normal"
+	AdmissionPriorityCritical AdmissionPriority = "critical"
+	AdmissionPriorityHigh     AdmissionPriority = "high"
+	AdmissionPriorityLow      AdmissionPriority = "low"
+	AdmissionPriorityNormal   AdmissionPriority = "normal"
 )
 
 // Valid indicates whether the value is a known member of the AdmissionPriority enum.
 func (e AdmissionPriority) Valid() bool {
 	switch e {
-	case Critical:
+	case AdmissionPriorityCritical:
 		return true
-	case High:
+	case AdmissionPriorityHigh:
 		return true
-	case Low:
+	case AdmissionPriorityLow:
 		return true
-	case Normal:
+	case AdmissionPriorityNormal:
 		return true
 	default:
 		return false
@@ -916,6 +916,27 @@ func (e CodeAccountAdapter) Valid() bool {
 	}
 }
 
+// Defines values for CodeAccountAllowanceSignal.
+const (
+	CodeAccountAllowanceSignalNone               CodeAccountAllowanceSignal = "none"
+	CodeAccountAllowanceSignalProven             CodeAccountAllowanceSignal = "proven"
+	CodeAccountAllowanceSignalRemainsUnqualified CodeAccountAllowanceSignal = "remains-unqualified"
+)
+
+// Valid indicates whether the value is a known member of the CodeAccountAllowanceSignal enum.
+func (e CodeAccountAllowanceSignal) Valid() bool {
+	switch e {
+	case CodeAccountAllowanceSignalNone:
+		return true
+	case CodeAccountAllowanceSignalProven:
+		return true
+	case CodeAccountAllowanceSignalRemainsUnqualified:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CodeAccountGrantState.
 const (
 	CodeAccountGrantStateCurrent CodeAccountGrantState = "current"
@@ -985,18 +1006,96 @@ func (e CodeAccountResearchServices) Valid() bool {
 	}
 }
 
+// Defines values for CodeAccountCooldownClass.
+const (
+	CodeAccountCooldownClassCapacity    CodeAccountCooldownClass = "capacity"
+	CodeAccountCooldownClassConcurrency CodeAccountCooldownClass = "concurrency"
+	CodeAccountCooldownClassEntitlement CodeAccountCooldownClass = "entitlement"
+	CodeAccountCooldownClassQuota       CodeAccountCooldownClass = "quota"
+	CodeAccountCooldownClassRate        CodeAccountCooldownClass = "rate"
+)
+
+// Valid indicates whether the value is a known member of the CodeAccountCooldownClass enum.
+func (e CodeAccountCooldownClass) Valid() bool {
+	switch e {
+	case CodeAccountCooldownClassCapacity:
+		return true
+	case CodeAccountCooldownClassConcurrency:
+		return true
+	case CodeAccountCooldownClassEntitlement:
+		return true
+	case CodeAccountCooldownClassQuota:
+		return true
+	case CodeAccountCooldownClassRate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeAllowanceWindowEvidence.
+const (
+	CodeAllowanceWindowEvidenceActive  CodeAllowanceWindowEvidence = "active"
+	CodeAllowanceWindowEvidencePassive CodeAllowanceWindowEvidence = "passive"
+)
+
+// Valid indicates whether the value is a known member of the CodeAllowanceWindowEvidence enum.
+func (e CodeAllowanceWindowEvidence) Valid() bool {
+	switch e {
+	case CodeAllowanceWindowEvidenceActive:
+		return true
+	case CodeAllowanceWindowEvidencePassive:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeAllowanceWindowUnit.
+const (
+	Cents   CodeAllowanceWindowUnit = "cents"
+	Count   CodeAllowanceWindowUnit = "count"
+	Credits CodeAllowanceWindowUnit = "credits"
+	Percent CodeAllowanceWindowUnit = "percent"
+)
+
+// Valid indicates whether the value is a known member of the CodeAllowanceWindowUnit enum.
+func (e CodeAllowanceWindowUnit) Valid() bool {
+	switch e {
+	case Cents:
+		return true
+	case Count:
+		return true
+	case Credits:
+		return true
+	case Percent:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CodeAllowanceWindowWindow.
 const (
+	FiveHour  CodeAllowanceWindowWindow = "five_hour"
+	Monthly   CodeAllowanceWindowWindow = "monthly"
 	Primary   CodeAllowanceWindowWindow = "primary"
 	Secondary CodeAllowanceWindowWindow = "secondary"
+	Weekly    CodeAllowanceWindowWindow = "weekly"
 )
 
 // Valid indicates whether the value is a known member of the CodeAllowanceWindowWindow enum.
 func (e CodeAllowanceWindowWindow) Valid() bool {
 	switch e {
+	case FiveHour:
+		return true
+	case Monthly:
+		return true
 	case Primary:
 		return true
 	case Secondary:
+		return true
+	case Weekly:
 		return true
 	default:
 		return false
@@ -1279,6 +1378,102 @@ func (e CodeConfigurationFileFormat) Valid() bool {
 	case CodeConfigurationFileFormatShell:
 		return true
 	case CodeConfigurationFileFormatToml:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeDecisionBand.
+const (
+	CodeDecisionBandExhausted   CodeDecisionBand = "exhausted"
+	CodeDecisionBandHealthy     CodeDecisionBand = "healthy"
+	CodeDecisionBandLessThannil CodeDecisionBand = "<nil>"
+	CodeDecisionBandLow         CodeDecisionBand = "low"
+	CodeDecisionBandUnknown     CodeDecisionBand = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the CodeDecisionBand enum.
+func (e CodeDecisionBand) Valid() bool {
+	switch e {
+	case CodeDecisionBandExhausted:
+		return true
+	case CodeDecisionBandHealthy:
+		return true
+	case CodeDecisionBandLessThannil:
+		return true
+	case CodeDecisionBandLow:
+		return true
+	case CodeDecisionBandUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeDecisionEvidence.
+const (
+	CodeDecisionEvidenceActive      CodeDecisionEvidence = "active"
+	CodeDecisionEvidenceLessThannil CodeDecisionEvidence = "<nil>"
+	CodeDecisionEvidencePassive     CodeDecisionEvidence = "passive"
+)
+
+// Valid indicates whether the value is a known member of the CodeDecisionEvidence enum.
+func (e CodeDecisionEvidence) Valid() bool {
+	switch e {
+	case CodeDecisionEvidenceActive:
+		return true
+	case CodeDecisionEvidenceLessThannil:
+		return true
+	case CodeDecisionEvidencePassive:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeDecisionReason.
+const (
+	Chosen     CodeDecisionReason = "chosen"
+	Connection CodeDecisionReason = "connection"
+	Pin        CodeDecisionReason = "pin"
+)
+
+// Valid indicates whether the value is a known member of the CodeDecisionReason enum.
+func (e CodeDecisionReason) Valid() bool {
+	switch e {
+	case Chosen:
+		return true
+	case Connection:
+		return true
+	case Pin:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeDecisionSkippedClass.
+const (
+	CodeDecisionSkippedClassBand        CodeDecisionSkippedClass = "band"
+	CodeDecisionSkippedClassCooldown    CodeDecisionSkippedClass = "cooldown"
+	CodeDecisionSkippedClassTree        CodeDecisionSkippedClass = "tree"
+	CodeDecisionSkippedClassUnavailable CodeDecisionSkippedClass = "unavailable"
+	CodeDecisionSkippedClassWeight      CodeDecisionSkippedClass = "weight"
+)
+
+// Valid indicates whether the value is a known member of the CodeDecisionSkippedClass enum.
+func (e CodeDecisionSkippedClass) Valid() bool {
+	switch e {
+	case CodeDecisionSkippedClassBand:
+		return true
+	case CodeDecisionSkippedClassCooldown:
+		return true
+	case CodeDecisionSkippedClassTree:
+		return true
+	case CodeDecisionSkippedClassUnavailable:
+		return true
+	case CodeDecisionSkippedClassWeight:
 		return true
 	default:
 		return false
@@ -3063,25 +3258,25 @@ func (e ExternalCredentialReferenceStore) Valid() bool {
 
 // Defines values for FallbackCondition.
 const (
-	Budget        FallbackCondition = "budget"
-	ContentFilter FallbackCondition = "content_filter"
-	ContextWindow FallbackCondition = "context_window"
-	Exhausted     FallbackCondition = "exhausted"
-	RateLimit     FallbackCondition = "rate_limit"
+	FallbackConditionBudget        FallbackCondition = "budget"
+	FallbackConditionContentFilter FallbackCondition = "content_filter"
+	FallbackConditionContextWindow FallbackCondition = "context_window"
+	FallbackConditionExhausted     FallbackCondition = "exhausted"
+	FallbackConditionRateLimit     FallbackCondition = "rate_limit"
 )
 
 // Valid indicates whether the value is a known member of the FallbackCondition enum.
 func (e FallbackCondition) Valid() bool {
 	switch e {
-	case Budget:
+	case FallbackConditionBudget:
 		return true
-	case ContentFilter:
+	case FallbackConditionContentFilter:
 		return true
-	case ContextWindow:
+	case FallbackConditionContextWindow:
 		return true
-	case Exhausted:
+	case FallbackConditionExhausted:
 		return true
-	case RateLimit:
+	case FallbackConditionRateLimit:
 		return true
 	default:
 		return false
@@ -6267,25 +6462,25 @@ func (e RouteTemplateResultOutcome) Valid() bool {
 
 // Defines values for RoutingStrategy.
 const (
-	Capacity   RoutingStrategy = "capacity"
-	Latency    RoutingStrategy = "latency"
-	Price      RoutingStrategy = "price"
-	Throughput RoutingStrategy = "throughput"
-	Weighted   RoutingStrategy = "weighted"
+	RoutingStrategyCapacity   RoutingStrategy = "capacity"
+	RoutingStrategyLatency    RoutingStrategy = "latency"
+	RoutingStrategyPrice      RoutingStrategy = "price"
+	RoutingStrategyThroughput RoutingStrategy = "throughput"
+	RoutingStrategyWeighted   RoutingStrategy = "weighted"
 )
 
 // Valid indicates whether the value is a known member of the RoutingStrategy enum.
 func (e RoutingStrategy) Valid() bool {
 	switch e {
-	case Capacity:
+	case RoutingStrategyCapacity:
 		return true
-	case Latency:
+	case RoutingStrategyLatency:
 		return true
-	case Price:
+	case RoutingStrategyPrice:
 		return true
-	case Throughput:
+	case RoutingStrategyThroughput:
 		return true
-	case Weighted:
+	case RoutingStrategyWeighted:
 		return true
 	default:
 		return false
@@ -8631,12 +8826,33 @@ type ClaudeCredentialImportRequest struct {
 // CodeAccount defines model for CodeAccount.
 type CodeAccount struct {
 	// Adapter The subscription family of the account's provider profile: Codex, Claude, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.
-	Adapter      nullable.Nullable[CodeAccountAdapter] `json:"adapter"`
-	Allowance    nullable.Nullable[CodeAllowance]      `json:"allowance"`
-	CredentialId openapi_types.UUID                    `json:"credential_id"`
-	Eligible     bool                                  `json:"eligible"`
-	Enabled      bool                                  `json:"enabled"`
-	Etag         openapi_types.UUID                    `json:"etag"`
+	Adapter   nullable.Nullable[CodeAccountAdapter] `json:"adapter"`
+	Allowance nullable.Nullable[CodeAllowance]      `json:"allowance"`
+
+	// AllowanceReadAt When the worker last completed an active allowance read for this account, whether or not the provider response was usable.
+	AllowanceReadAt nullable.Nullable[time.Time] `json:"allowance_read_at,omitempty"`
+
+	// AllowanceReadRequestedAt When an operator last requested an active allowance read. The worker clears it once that read completes.
+	AllowanceReadRequestedAt nullable.Nullable[time.Time] `json:"allowance_read_requested_at,omitempty"`
+
+	// AllowanceSignal Allowance signal qualification of the account's provider profile. Passive signals may be recorded, but no requested-model-to-limit mapping is qualified for ordering. Active reads require separate live qualification. Remains-unqualified names a signal that has not completed qualification. None means the profile has no qualified allowance signal.
+	AllowanceSignal CodeAccountAllowanceSignal `json:"allowance_signal"`
+
+	// AllowanceSignalReason Why the allowance signal is not qualified, or null when no reason is recorded.
+	AllowanceSignalReason nullable.Nullable[string] `json:"allowance_signal_reason"`
+
+	// Cooldowns Live failure class cooldowns for this account. A null model cools the whole credential.
+	Cooldowns    *[]CodeAccountCooldown `json:"cooldowns,omitempty"`
+	CredentialId openapi_types.UUID     `json:"credential_id"`
+
+	// CycleAnchor Operator recorded subscription cycle anchor date for Qwen Token Plan accounts. The monthly quota reset is the next monthly anniversary of this date. Null when no anchor is recorded, and no reset is reported then.
+	CycleAnchor nullable.Nullable[openapi_types.Date] `json:"cycle_anchor,omitempty"`
+	Eligible    bool                                  `json:"eligible"`
+	Enabled     bool                                  `json:"enabled"`
+	Etag        openapi_types.UUID                    `json:"etag"`
+
+	// ExtraUsageEnabled Whether the member Extra Usage paid fallback setting is on for a Kimi Code account, recorded by the operator at enrollment. Null means not recorded. It is never spare included allowance.
+	ExtraUsageEnabled nullable.Nullable[bool] `json:"extra_usage_enabled"`
 
 	// GrantState Grant authority is independent of serving health and allowance. A rejected refresh lapses the grant and requires enrollment again.
 	GrantState CodeAccountGrantState `json:"grant_state"`
@@ -8664,6 +8880,9 @@ type CodeAccount struct {
 // CodeAccountAdapter The subscription family of the account's provider profile: Codex, Claude, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.
 type CodeAccountAdapter string
 
+// CodeAccountAllowanceSignal Allowance signal qualification of the account's provider profile. Passive signals may be recorded, but no requested-model-to-limit mapping is qualified for ordering. Active reads require separate live qualification. Remains-unqualified names a signal that has not completed qualification. None means the profile has no qualified allowance signal.
+type CodeAccountAllowanceSignal string
+
 // CodeAccountGrantState Grant authority is independent of serving health and allowance. A rejected refresh lapses the grant and requires enrollment again.
 type CodeAccountGrantState string
 
@@ -8672,6 +8891,18 @@ type CodeAccountHealth string
 
 // CodeAccountResearchServices defines model for CodeAccount.ResearchServices.
 type CodeAccountResearchServices string
+
+// CodeAccountCooldown defines model for CodeAccountCooldown.
+type CodeAccountCooldown struct {
+	Class CodeAccountCooldownClass `json:"class"`
+
+	// Model The model this cooldown cools, or null when it cools the whole credential.
+	Model   nullable.Nullable[string] `json:"model"`
+	RetryAt time.Time                 `json:"retry_at"`
+}
+
+// CodeAccountCooldownClass defines model for CodeAccountCooldown.Class.
+type CodeAccountCooldownClass string
 
 // CodeAccountList defines model for CodeAccountList.
 type CodeAccountList struct {
@@ -8682,11 +8913,17 @@ type CodeAccountList struct {
 // CodeAccountWrite defines model for CodeAccountWrite.
 type CodeAccountWrite struct {
 	CredentialId openapi_types.UUID `json:"credential_id"`
-	Enabled      bool               `json:"enabled"`
-	Models       []string           `json:"models"`
-	Name         string             `json:"name"`
-	ProjectId    openapi_types.UUID `json:"project_id"`
-	ProviderId   openapi_types.UUID `json:"provider_id"`
+
+	// CycleAnchor Optional subscription cycle anchor date, recorded only for Qwen Token Plan accounts.
+	CycleAnchor nullable.Nullable[openapi_types.Date] `json:"cycle_anchor,omitempty"`
+	Enabled     bool                                  `json:"enabled"`
+
+	// ExtraUsageEnabled Whether the member Extra Usage paid fallback setting is on for a Kimi Code account, recorded by the operator at enrollment. Null means not recorded. It is never spare included allowance and is refused for other adapters.
+	ExtraUsageEnabled nullable.Nullable[bool] `json:"extra_usage_enabled,omitempty"`
+	Models            []string                `json:"models"`
+	Name              string                  `json:"name"`
+	ProjectId         openapi_types.UUID      `json:"project_id"`
+	ProviderId        openapi_types.UUID      `json:"provider_id"`
 }
 
 // CodeAllowance Provider-reported subscription metadata. Unknown values remain null and never become local hard budgets or billed spend.
@@ -8711,26 +8948,46 @@ type CodeAllowance struct {
 
 // CodeAllowanceWindow defines model for CodeAllowanceWindow.
 type CodeAllowanceWindow struct {
-	LimitId          string                       `json:"limit_id"`
-	ObservedAt       time.Time                    `json:"observed_at"`
-	RemainingPercent float32                      `json:"remaining_percent"`
-	ResetsAt         nullable.Nullable[time.Time] `json:"resets_at"`
-	UsedPercent      float32                      `json:"used_percent"`
-	Window           CodeAllowanceWindowWindow    `json:"window"`
-	WindowMinutes    nullable.Nullable[int64]     `json:"window_minutes"`
+	// Evidence How the observation was learned: passive from a forwarded response, or active from a provider usage read.
+	Evidence         CodeAllowanceWindowEvidence `json:"evidence"`
+	LimitId          string                      `json:"limit_id"`
+	ObservedAt       time.Time                   `json:"observed_at"`
+	RemainingPercent float32                     `json:"remaining_percent"`
+
+	// RemainingValue Remaining amount in the vendor unit for non-percent windows. Null when the provider did not report it.
+	RemainingValue nullable.Nullable[float64]   `json:"remaining_value"`
+	ResetsAt       nullable.Nullable[time.Time] `json:"resets_at"`
+
+	// Unit Vendor unit of the reported values. Percent windows report used and remaining percentages; other units report used and remaining values in that unit.
+	Unit        CodeAllowanceWindowUnit `json:"unit"`
+	UsedPercent float32                 `json:"used_percent"`
+
+	// UsedValue Used amount in the vendor unit for non-percent windows. Null when the provider did not report it.
+	UsedValue     nullable.Nullable[float64] `json:"used_value"`
+	Window        CodeAllowanceWindowWindow  `json:"window"`
+	WindowMinutes nullable.Nullable[int64]   `json:"window_minutes"`
 }
+
+// CodeAllowanceWindowEvidence How the observation was learned: passive from a forwarded response, or active from a provider usage read.
+type CodeAllowanceWindowEvidence string
+
+// CodeAllowanceWindowUnit Vendor unit of the reported values. Percent windows report used and remaining percentages; other units report used and remaining values in that unit.
+type CodeAllowanceWindowUnit string
 
 // CodeAllowanceWindowWindow defines model for CodeAllowanceWindow.Window.
 type CodeAllowanceWindowWindow string
 
 // CodeAttempt Metadata only. No request or response body, tools, headers or secrets are retained. Reserved tokens are conservative bounds, not reported usage; unreported consumption remains uncertain indefinitely. Cached and reasoning tokens are subsets.
 type CodeAttempt struct {
-	AccountId     nullable.Nullable[openapi_types.UUID] `json:"account_id"`
-	ApiKeyId      openapi_types.UUID                    `json:"api_key_id"`
-	Attribution   *map[string]string                    `json:"attribution,omitempty"`
-	BindingId     nullable.Nullable[openapi_types.UUID] `json:"binding_id"`
-	BoundEvidence nullable.Nullable[string]             `json:"bound_evidence"`
-	CachedTokens  nullable.Nullable[int64]              `json:"cached_tokens"`
+	AccountId nullable.Nullable[openapi_types.UUID] `json:"account_id"`
+
+	// AllowanceCharge Validated per-request OpenCode Go billing and numeric usage fields, with usage.cost when reported. The allowance value counts toward plan usage limits in dollars of the monthly limit. Null means no supported charge was observed; it is never a remaining allowance and never an admission or ordering input.
+	AllowanceCharge nullable.Nullable[map[string]interface{}] `json:"allowance_charge"`
+	ApiKeyId        openapi_types.UUID                        `json:"api_key_id"`
+	Attribution     *map[string]string                        `json:"attribution,omitempty"`
+	BindingId       nullable.Nullable[openapi_types.UUID]     `json:"binding_id"`
+	BoundEvidence   nullable.Nullable[string]                 `json:"bound_evidence"`
+	CachedTokens    nullable.Nullable[int64]                  `json:"cached_tokens"`
 
 	// CodexCliIdentityEnabled Whether the frozen route revision enabled Codex CLI identity compatibility. This is route policy, not evidence that an Originator header changed or that this attempt used Codex. No client identity header values or prompt content are recorded.
 	CodexCliIdentityEnabled *bool     `json:"codex_cli_identity_enabled,omitempty"`
@@ -8945,6 +9202,62 @@ type CodeCredits struct {
 	Unlimited  bool                      `json:"unlimited"`
 }
 
+// CodeDecision Content-free account selection record for one admitted attempt or one WebSocket connection bind. Names the chosen account, why it served, the freshest allowance evidence kind behind it, and the class reason each other candidate was skipped. No prompt, response, header or credential content is retained.
+type CodeDecision struct {
+	ApiKeyId openapi_types.UUID `json:"api_key_id"`
+
+	// AttemptId Attempt this decision admitted. Null for connection decisions, which bind a WebSocket connection to the tree account without admitting an attempt.
+	AttemptId nullable.Nullable[openapi_types.UUID] `json:"attempt_id"`
+
+	// Band Allowance band of the chosen account when allowance ordering recorded one. Null unless the route enables banding and the requested model has a qualified limit mapping.
+	Band            nullable.Nullable[CodeDecisionBand] `json:"band"`
+	BindingId       openapi_types.UUID                  `json:"binding_id"`
+	ChosenAccountId openapi_types.UUID                  `json:"chosen_account_id"`
+	CreatedAt       time.Time                           `json:"created_at"`
+
+	// Evidence Kind of the chosen account freshest allowance window at admission. Null when the account had no allowance observation.
+	Evidence           nullable.Nullable[CodeDecisionEvidence] `json:"evidence"`
+	EvidenceObservedAt nullable.Nullable[time.Time]            `json:"evidence_observed_at"`
+	Id                 openapi_types.UUID                      `json:"id"`
+	ProjectId          openapi_types.UUID                      `json:"project_id"`
+
+	// Reason Chosen means weighted selection picked the account for a new pin, pin means an established conversation pin served without re-running selection, and connection means the tree connection account served.
+	Reason CodeDecisionReason `json:"reason"`
+
+	// RecoveryEnvelope Proven not-executed rejection envelope this admission recovered from. Null when the admission was not a recovery.
+	RecoveryEnvelope nullable.Nullable[string] `json:"recovery_envelope"`
+	RecoveryOrdinal  nullable.Nullable[int32]  `json:"recovery_ordinal"`
+	RootId           openapi_types.UUID        `json:"root_id"`
+	RouteId          openapi_types.UUID        `json:"route_id"`
+	RouteRevisionId  openapi_types.UUID        `json:"route_revision_id"`
+
+	// Skipped Candidates evaluated alongside the chosen account that did not serve, each with the class reason it lost. Covers the evaluated candidate set only. Accounts excluded earlier by model, path or tree-adapter SQL filters are not listed.
+	Skipped []struct {
+		AccountId openapi_types.UUID `json:"account_id"`
+
+		// Class Why the candidate did not serve: cooldown means a live health cooldown, unavailable means reported allowance exhaustion, tree means an earlier account of the conversation tree served, weight means the weighted score picked another account of the same tier, and band means a lower allowance band under allowance ordering.
+		Class CodeDecisionSkippedClass `json:"class"`
+	} `json:"skipped"`
+}
+
+// CodeDecisionBand Allowance band of the chosen account when allowance ordering recorded one. Null unless the route enables banding and the requested model has a qualified limit mapping.
+type CodeDecisionBand string
+
+// CodeDecisionEvidence Kind of the chosen account freshest allowance window at admission. Null when the account had no allowance observation.
+type CodeDecisionEvidence string
+
+// CodeDecisionReason Chosen means weighted selection picked the account for a new pin, pin means an established conversation pin served without re-running selection, and connection means the tree connection account served.
+type CodeDecisionReason string
+
+// CodeDecisionSkippedClass Why the candidate did not serve: cooldown means a live health cooldown, unavailable means reported allowance exhaustion, tree means an earlier account of the conversation tree served, weight means the weighted score picked another account of the same tier, and band means a lower allowance band under allowance ordering.
+type CodeDecisionSkippedClass string
+
+// CodeDecisionList defines model for CodeDecisionList.
+type CodeDecisionList struct {
+	Items      []CodeDecision            `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
 // CodeModel A published model currently reachable through eligible accounts in the route pool.
 type CodeModel struct {
 	Capabilities []CodeModelCapability `json:"capabilities"`
@@ -9087,6 +9400,9 @@ type CodeRoute struct {
 	// Aliases Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized.
 	Aliases *map[string]string `json:"aliases,omitempty"`
 
+	// AllowanceOrdering Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy.
+	AllowanceOrdering *bool `json:"allowance_ordering,omitempty"`
+
 	// ChatToAntigravity Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow.
 	ChatToAntigravity *bool `json:"chat_to_antigravity,omitempty"`
 
@@ -9147,6 +9463,9 @@ type CodeRouteList struct {
 type CodeRouteWrite struct {
 	// Aliases Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized.
 	Aliases *map[string]string `json:"aliases,omitempty"`
+
+	// AllowanceOrdering Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy.
+	AllowanceOrdering *bool `json:"allowance_ordering,omitempty"`
 
 	// ChatToAntigravity Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow.
 	ChatToAntigravity *bool `json:"chat_to_antigravity,omitempty"`
@@ -9303,13 +9622,17 @@ type ConfigurationCode struct {
 
 // ConfigurationCodeAccount defines model for ConfigurationCodeAccount.
 type ConfigurationCodeAccount struct {
-	CredentialRef string             `json:"credential_ref"`
-	Enabled       bool               `json:"enabled"`
-	Id            openapi_types.UUID `json:"id"`
-	Models        []string           `json:"models"`
-	Name          string             `json:"name"`
-	Project       string             `json:"project"`
-	Provider      string             `json:"provider"`
+	CredentialRef string                                `json:"credential_ref"`
+	CycleAnchor   nullable.Nullable[openapi_types.Date] `json:"cycle_anchor,omitempty"`
+	Enabled       bool                                  `json:"enabled"`
+
+	// ExtraUsageEnabled Whether the member Extra Usage paid fallback setting is on for a Kimi Code account. Null means not recorded.
+	ExtraUsageEnabled nullable.Nullable[bool] `json:"extra_usage_enabled,omitempty"`
+	Id                openapi_types.UUID      `json:"id"`
+	Models            []string                `json:"models"`
+	Name              string                  `json:"name"`
+	Project           string                  `json:"project"`
+	Provider          string                  `json:"provider"`
 }
 
 // ConfigurationCodeBindings defines model for ConfigurationCodeBindings.
@@ -9383,6 +9706,9 @@ type ConfigurationCodeRoute struct {
 type ConfigurationCodeRoutePolicy struct {
 	// Aliases Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized.
 	Aliases *map[string]string `json:"aliases,omitempty"`
+
+	// AllowanceOrdering Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy.
+	AllowanceOrdering *bool `json:"allowance_ordering,omitempty"`
 
 	// ChatToAntigravity Explicit opt-in for chat translation through the Antigravity adapter.
 	ChatToAntigravity *bool `json:"chat_to_antigravity,omitempty"`
@@ -17395,6 +17721,11 @@ type ReplaceCodeAccountParams struct {
 	IfMatch string `json:"If-Match"`
 }
 
+// RequestCodeAccountAllowanceReadParams defines parameters for RequestCodeAccountAllowanceRead.
+type RequestCodeAccountAllowanceReadParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // ListCodeAttemptsParams defines parameters for ListCodeAttempts.
 type ListCodeAttemptsParams struct {
 	Cursor    *string             `form:"cursor,omitempty" json:"cursor,omitempty"`
@@ -17442,6 +17773,22 @@ type CreateCodeBudgetParams struct {
 // ReplaceCodeBudgetParams defines parameters for ReplaceCodeBudget.
 type ReplaceCodeBudgetParams struct {
 	IfMatch string `json:"If-Match"`
+}
+
+// ListCodeDecisionsParams defines parameters for ListCodeDecisions.
+type ListCodeDecisionsParams struct {
+	Cursor    *string             `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit     *int32              `form:"limit,omitempty" json:"limit,omitempty"`
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+	RouteId   *openapi_types.UUID `form:"route_id,omitempty" json:"route_id,omitempty"`
+	ApiKeyId  *openapi_types.UUID `form:"api_key_id,omitempty" json:"api_key_id,omitempty"`
+
+	// AccountId Select decisions that chose this account.
+	AccountId *openapi_types.UUID `form:"account_id,omitempty" json:"account_id,omitempty"`
+	BindingId *openapi_types.UUID `form:"binding_id,omitempty" json:"binding_id,omitempty"`
+
+	// AttemptId Select the decision recorded for a single attempt within current project visibility. Other filters still apply.
+	AttemptId *openapi_types.UUID `form:"attempt_id,omitempty" json:"attempt_id,omitempty"`
 }
 
 // ListCodePoolsParams defines parameters for ListCodePools.

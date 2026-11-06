@@ -3,9 +3,22 @@ import type { CodeAttempt } from '$lib/management/code-mode';
 import { ApiProblem } from '$lib/management/http';
 import {
   adapterLabel,
+  allowanceChargeSummary,
+  allowanceEvidenceLabel,
+  allowanceWindowSummary,
   clientLabel,
+  cooldownClassLabel,
+  cooldownSummary,
+  decisionReasonLabel,
+  extraUsageAdapterFor,
+  extraUsageLabel,
+  extraUsageValue,
+  providerProfilePending,
+  showsExtraUsage,
+  skipClassLabel,
   mutationError,
   nativeModels,
+  nextMonthlyReset,
   recoveryReasonLabel,
   refusalAdvice,
   reservationLabel,
@@ -35,6 +48,7 @@ const attempt: CodeAttempt = {
   reasoning_tokens: null,
   bound_evidence: null,
   refusal: null,
+  allowance_charge: null,
   created_at: '2026-01-01T00:00:00Z',
   finished_at: '2026-01-01T00:00:01Z',
   outcome_origin: null,
@@ -189,6 +203,25 @@ describe('code diagnostics', () => {
     expect(clientLabel('fixture-client')).toBe('fixture-client');
   });
 
+  it('names the failure class and scope behind a live cooldown', () => {
+    expect(cooldownClassLabel('quota')).toBe('Quota');
+    expect(cooldownClassLabel('capacity')).toBe('Capacity');
+    expect(
+      cooldownSummary({
+        class: 'quota',
+        model: null,
+        retry_at: '2026-11-05T12:00:00Z'
+      })
+    ).toBe('Quota · All models');
+    expect(
+      cooldownSummary({
+        class: 'capacity',
+        model: 'fixture-model',
+        retry_at: '2026-11-05T12:00:00Z'
+      })
+    ).toBe('Capacity · fixture-model');
+  });
+
   it('uses operator-facing names for supported subscription families and clients', () => {
     expect(adapterLabel('codex')).toBe('Codex');
     expect(adapterLabel('antigravity')).toBe('Antigravity');
@@ -281,5 +314,185 @@ describe('code diagnostics', () => {
 
   it.each([null, undefined])('explains missing failure detail %s', (error) => {
     expect(mutationError(error)).toContain('control API');
+  });
+});
+
+describe('allowance window presentation', () => {
+  const percentWindow = {
+    limit_id: 'codex',
+    window: 'primary' as const,
+    unit: 'percent' as const,
+    evidence: 'passive' as const,
+    used_percent: 25,
+    remaining_percent: 75,
+    used_value: null,
+    remaining_value: null,
+    window_minutes: 300,
+    resets_at: '2026-11-05T15:00:00Z',
+    observed_at: '2026-11-05T10:00:00Z'
+  };
+
+  it('shows percent windows as percentages', () => {
+    expect(allowanceWindowSummary(percentWindow)).toBe(
+      '25% used · 75% remaining'
+    );
+  });
+
+  it('shows non-percent windows in the vendor unit', () => {
+    expect(
+      allowanceWindowSummary({
+        ...percentWindow,
+        window: 'monthly',
+        unit: 'cents',
+        evidence: 'active',
+        used_percent: 0,
+        remaining_percent: 0,
+        used_value: 120,
+        remaining_value: 880
+      })
+    ).toBe('120 cents used · 880 cents remaining');
+  });
+
+  it('shows unknown rather than zero for unreported values', () => {
+    expect(
+      allowanceWindowSummary({
+        ...percentWindow,
+        window: 'weekly',
+        unit: 'count',
+        used_percent: 0,
+        remaining_percent: 0,
+        used_value: null,
+        remaining_value: null
+      })
+    ).toBe('Unknown used · Unknown remaining');
+  });
+
+  it('labels the evidence kind', () => {
+    expect(allowanceEvidenceLabel('passive')).toBe('Passive observation');
+    expect(allowanceEvidenceLabel('active')).toBe('Active read');
+  });
+});
+
+describe('code account decisions', () => {
+  it('labels why the chosen account served', () => {
+    expect(decisionReasonLabel('chosen')).toBe('Weighted selection');
+    expect(decisionReasonLabel('pin')).toBe('Conversation pin');
+    expect(decisionReasonLabel('connection')).toBe('Tree connection account');
+  });
+
+  it('labels every skip class', () => {
+    expect(skipClassLabel('cooldown')).toBe('in cooldown');
+    expect(skipClassLabel('unavailable')).toBe('allowance exhausted');
+    expect(skipClassLabel('tree')).toBe('tree account served');
+    expect(skipClassLabel('weight')).toBe('weighted score');
+    expect(skipClassLabel('band')).toBe('lower allowance band');
+  });
+});
+
+describe('extra usage presentation', () => {
+  it('shows the setting only for Kimi Code accounts', () => {
+    expect(showsExtraUsage('kimi_code')).toBe(true);
+    for (const adapter of [
+      'codex',
+      'zai_coding',
+      'minimax_plan',
+      'qwen_token_plan',
+      'opencode_go',
+      'claude',
+      'antigravity',
+      null,
+      undefined,
+      ''
+    ]) {
+      expect(showsExtraUsage(adapter)).toBe(false);
+    }
+  });
+
+  it('keeps an unrecorded setting distinct from off and never reads paid fallback as spare allowance', () => {
+    expect(extraUsageLabel(null)).toBe('Not recorded');
+    expect(extraUsageLabel(undefined)).toBe('Not recorded');
+    expect(extraUsageLabel(false)).toBe('Off');
+    const on = extraUsageLabel(true);
+    expect(on).toContain('paid fallback');
+    expect(on).not.toMatch(/spare|remaining/i);
+  });
+
+  it('derives the create-flow adapter from the provider profile only', () => {
+    expect(extraUsageAdapterFor(null, true, 'kimi-code')).toBe('kimi_code');
+    expect(extraUsageAdapterFor(null, true, 'kimi-code-cn')).toBe('kimi_code');
+    expect(extraUsageAdapterFor(null, true, 'qwen-token-plan')).toBeNull();
+    expect(extraUsageAdapterFor(null, true, undefined)).toBeNull();
+    expect(extraUsageAdapterFor('kimi_code', false, undefined)).toBe(
+      'kimi_code'
+    );
+    expect(extraUsageAdapterFor('codex', false, 'kimi-code')).toBe('codex');
+  });
+
+  it('submits the selected value for Kimi and the recorded value otherwise', () => {
+    expect(extraUsageValue('kimi_code', '', true)).toBeNull();
+    expect(extraUsageValue('kimi_code', 'true', null)).toBe(true);
+    expect(extraUsageValue('kimi_code', 'false', null)).toBe(false);
+    expect(extraUsageValue('codex', 'true', false)).toBe(false);
+    expect(extraUsageValue(null, '', undefined)).toBeNull();
+  });
+
+  it('holds a create save while the selected provider profile is not loaded', () => {
+    expect(providerProfilePending(true, 'provider-1', false)).toBe(true);
+    expect(providerProfilePending(true, 'provider-1', true)).toBe(false);
+    expect(providerProfilePending(true, '', false)).toBe(false);
+    expect(providerProfilePending(false, 'provider-1', false)).toBe(false);
+  });
+});
+
+describe('qwen cycle reset presentation', () => {
+  // Source: https://www.alibabacloud.com/help/en/model-studio/token-plan-team-faq (fetched 2026-11-05), seat quotas reset at the end of each subscription month.
+  it('reports the next monthly anniversary of the anchor, clamped to month end', () => {
+    expect(
+      nextMonthlyReset('2026-01-15', new Date('2026-11-05T10:00:00Z'))
+    ).toBe('2026-11-15');
+    expect(
+      nextMonthlyReset('2026-01-15', new Date('2026-11-15T00:00:00Z'))
+    ).toBe('2026-12-15');
+    expect(
+      nextMonthlyReset('2026-01-31', new Date('2026-02-10T00:00:00Z'))
+    ).toBe('2026-02-28');
+    expect(
+      nextMonthlyReset('2026-01-31', new Date('2026-03-01T00:00:00Z'))
+    ).toBe('2026-03-31');
+  });
+
+  it('reports no reset without a valid anchor', () => {
+    expect(nextMonthlyReset(null, new Date('2026-11-05T10:00:00Z'))).toBeNull();
+    expect(
+      nextMonthlyReset('2026-13-15', new Date('2026-11-05T10:00:00Z'))
+    ).toBeNull();
+  });
+});
+
+describe('observed allowance charge presentation', () => {
+  it('keeps a missing charge unknown instead of zero', () => {
+    const summary = allowanceChargeSummary(attempt);
+    expect(summary).toContain('Unknown');
+    expect(summary).not.toMatch(/\$0/);
+  });
+
+  it('labels the reported allowance as an observed charge in dollars of monthly limit', () => {
+    const summary = allowanceChargeSummary({
+      ...attempt,
+      allowance_charge: { billing_source: 'go', allowance: 0.0021 }
+    });
+    expect(summary).toBe(
+      'Observed charge $0.0021 of monthly limit, billed from go'
+    );
+    expect(summary).not.toMatch(/remaining/i);
+  });
+
+  it('invents no amount when the reported object has no allowance value', () => {
+    const summary = allowanceChargeSummary({
+      ...attempt,
+      allowance_charge: { billing_source: 'balance', list_cost: 0.00412 }
+    });
+    expect(summary).not.toMatch(/\$/);
+    expect(summary).not.toMatch(/remaining/i);
   });
 });

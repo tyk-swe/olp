@@ -5,6 +5,7 @@
     listCodeBindings,
     listCodeAttempts,
     listCodeAccounts,
+    listCodeDecisions,
     listCodeRefusals,
     listCodeTokenWindows,
     retireCodeBinding,
@@ -23,11 +24,15 @@
   import { formatDate } from '$lib/format';
   import { codeKeys } from './codeKeys';
   import {
+    allowanceChargeSummary,
+    allowanceEvidenceLabel,
+    decisionReasonLabel,
     mutationError,
     refusalAdvice,
     reservationLabel,
     recoveryReasonLabel,
     servingHealthLabel,
+    skipClassLabel,
     tokenCount,
     usageCertaintyLabel,
     utcWindowStart
@@ -87,6 +92,44 @@
       attempts.data?.items.some((attempt) => attempt.account_id !== null) ===
         true
   }));
+  const decisionAttemptIds = $derived(
+    (attempts.data?.items ?? [])
+      .filter((attempt) => !attempt.paid_provider_id)
+      .map((attempt) => attempt.id)
+  );
+  const decisions = createQuery(() => {
+    const ids = decisionAttemptIds;
+    return {
+      queryKey: [
+        ...codeKeys.collection('decisions', { project_id: projectId }),
+        ids
+      ],
+      queryFn: ({ signal }) =>
+        Promise.all(
+          ids.map(async (id) => {
+            try {
+              const page = await listCodeDecisions(
+                { project_id: projectId, attempt_id: id },
+                signal
+              );
+              return {
+                id,
+                status: 'success' as const,
+                decision: page.items[0]
+              };
+            } catch (error) {
+              return { id, status: 'error' as const, error };
+            }
+          })
+        ),
+      enabled: kind === 'attempts' && ids.length > 0
+    };
+  });
+  const decisionByAttempt = $derived(
+    new Map(
+      (decisions.data ?? []).map((result) => [result.id, result] as const)
+    )
+  );
   const refusals = createQuery(() => ({
     queryKey: codeKeys.collection('refusals', filters),
     queryFn: ({ signal }) => listCodeRefusals(filters, signal),
@@ -151,6 +194,9 @@
   async function refresh() {
     await Promise.all([
       selected.refetch(),
+      ...(kind === 'attempts' && decisionAttemptIds.length
+        ? [decisions.refetch()]
+        : []),
       ...(kind === 'attempts' &&
       attempts.data?.items.some((attempt) => attempt.account_id !== null)
         ? [accounts.refetch()]
@@ -402,9 +448,51 @@
               {accounts.isPending ? 'Loading current account' : 'Unknown'}
             {/if}
             <p>
-              Admission-time eligibility was not retained. Current eligibility
-              does not explain historical selection or grant permission to retry
+              Current eligibility does not explain historical selection or grant
+              permission to retry. The account decision below records the
+              admission-time selection
             </p>
+          </dd>
+          <dt>Account decision</dt>
+          <dd>
+            {#if attempt.paid_provider_id}
+              Paid target, account selection does not apply
+            {:else}
+              {@const result = decisionByAttempt.get(attempt.id)}
+              {#if result?.status === 'success' && result.decision}
+                {@const decision = result.decision}
+                {decisionReasonLabel(decision.reason)} · chosen {decision.chosen_account_id}
+                {#if decision.evidence}
+                  · {allowanceEvidenceLabel(decision.evidence)} observed {decision.evidence_observed_at
+                    ? formatDate(decision.evidence_observed_at)
+                    : 'Unknown'}
+                {/if}
+                {#if decision.band}· band {decision.band}{/if}
+                {#if decision.recovery_envelope}
+                  · recovery {decision.recovery_envelope} #{decision.recovery_ordinal}
+                {/if}
+                {#if decision.skipped.length}
+                  <p>
+                    Skipped {decision.skipped
+                      .map(
+                        (skipped) =>
+                          `${skipped.account_id} (${skipClassLabel(skipped.class)})`
+                      )
+                      .join(', ')}
+                  </p>
+                {/if}
+              {:else if result?.status === 'error'}
+                <span role="alert"
+                  >Could not load account decision. {errorMessage(
+                    result.error
+                  )}</span
+                >
+              {:else}
+                {decisions.isPending
+                  ? 'Loading account decision'
+                  : 'No decision recorded for this attempt'}
+              {/if}
+            {/if}
           </dd>
           <dt>Recorded recovery evidence</dt>
           <dd>
@@ -457,6 +545,11 @@
           <dd>{tokenCount(attempt.reported_tokens)}</dd>
           <dt>Usage certainty</dt>
           <dd>{usageCertaintyLabel(attempt)}</dd>
+          <dt>Observed charge</dt>
+          <dd>
+            {allowanceChargeSummary(attempt)}. A reported charge counts toward
+            plan usage limits as reported, and never states remaining allowance
+          </dd>
           {#if attempt.paid_binding_id}
             <dt>Paid accounting</dt>
             <dd>{attempt.paid_monetary_state ?? 'unknown'}</dd>

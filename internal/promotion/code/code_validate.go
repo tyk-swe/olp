@@ -24,7 +24,7 @@ func Validate(code promotion.CodeConfiguration) error {
 		if access.ValidText("code", e.Project, 100) != nil || access.ValidText("code", e.Provider, 100) != nil || access.ValidText("code", e.CredentialRef, 200) != nil {
 			return access.Invalid("code.accounts", "Name the project, provider and destination credential reference.")
 		}
-		if err := (providers.CodeAccountInput{ProjectID: e.ID, ProviderID: e.ID, CredentialID: e.ID, Name: e.Name, Enabled: e.Enabled, Models: e.Models}).Validate(); err != nil {
+		if err := (providers.CodeAccountInput{ProjectID: e.ID, ProviderID: e.ID, CredentialID: e.ID, Name: e.Name, Enabled: e.Enabled, Models: e.Models, ExtraUsageEnabled: e.ExtraUsageEnabled, CycleAnchor: e.CycleAnchor}).Validate(); err != nil {
 			return err
 		}
 	}

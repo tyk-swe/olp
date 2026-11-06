@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"reflect"
@@ -25,6 +26,7 @@ const codeGenerationTimeout = 10 * time.Minute
 
 type codeAttempt struct {
 	identityOriginator string
+	adapter            codemode.Adapter
 	paid               *paidCodeAttempt
 	server             *Server
 	permit             resources.CodePermit
@@ -42,6 +44,9 @@ type codeAttempt struct {
 	finished           bool
 	model              string
 	publicModel        string
+	status             int
+	responseHeaders    http.Header
+	pendingHealth      *codemode.HealthObservation
 }
 
 func (s *Server) prepareCode(r *http.Request, release *release.Release, route codemode.Route, observation codemode.Request, ingress codeIngress, transport codeadapter.Transport, recovery *resources.CodeRecovery, body []byte) (*codeAttempt, error) {
@@ -167,6 +172,7 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 		return nil, codemode.Refuse(503, "code_configuration_unsupported")
 	}
 	a.config, a.endpoint, a.observer = target.config, target.endpoint, codeObserver(target.endpoint)
+	a.adapter = target.adapter.Adapter
 	a.identityOriginator = target.adapter.CompatibilityOriginator(route)
 	a.providerLease, failure = s.Admission.reserveCodeProvider(r.Context(), permit.Account.ProviderID, target.config, observation.Estimate, codeGenerationTimeout+time.Minute)
 	if failure != nil {
@@ -194,17 +200,46 @@ func (a *codeAttempt) dispatch(ctx context.Context) error {
 	return nil
 }
 
+func (a *codeAttempt) observeUnary(body []byte) {
+	observation := a.observer.Unary(body)
+	if a.status >= 400 && len(observation.RejectionBody) == 0 {
+		a.observe(codemode.Observation{RejectionBody: codewire.RejectionBody(body)})
+	}
+	a.observe(observation)
+	if a.status >= 400 {
+		a.terminal = true
+	}
+}
+
+func (a *codeAttempt) observeEncodedUnary(body []byte, encoding string) {
+	decoded, err := codewire.Decode(body, encoding, codewire.MaxBody)
+	if err == nil {
+		a.observeUnary(decoded)
+	}
+}
+
 func (a *codeAttempt) observe(o codemode.Observation) {
 	if o.ResponseID != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		_ = a.server.CodeLedger.ObserveReference(ctx, a.permit.Attempt.ID, o.ResponseID)
 		cancel()
 	}
-	if o.Status != 0 {
+	classification, classified := a.observeCooldownClass(o)
+	switch {
+	case classified && classification.Scope == codeadapter.ScopeModel:
+		a.pendingHealth = nil
+	case len(o.RejectionBody) > 0:
+		a.flushPendingHealth(context.Background())
+	}
+	if o.Status != 0 && !classified {
 		a.response(context.Background(), o.Status, http.Header{"Retry-After": o.RetryAfter})
+		a.flushPendingHealth(context.Background())
 	}
 	if o.Allowance != nil {
 		a.observeAllowance(context.Background(), *o.Allowance)
+	}
+	if o.AllowanceCharge != nil {
+		a.observeAllowanceCharge(context.Background(), o.AllowanceCharge)
 	}
 	if o.Outcome != nil {
 		a.outcome(context.Background(), *o.Outcome)
@@ -230,6 +265,7 @@ func (a *codeAttempt) finish(ctx context.Context) {
 		return
 	}
 	a.finished = true
+	a.flushPendingHealth(ctx)
 	if !a.dispatched {
 		a.outcome(ctx, codemode.Outcome{Origin: "gateway", Kind: "rejected"})
 	} else if !a.terminal {
@@ -296,6 +332,15 @@ func codeUnavailableClose(err error) bool {
 	return code >= websocket.StatusInternalError && code <= websocket.StatusBadGateway
 }
 
+func (a *codeAttempt) observeAllowanceCharge(ctx context.Context, charge json.RawMessage) {
+	if a.paid != nil || a.adapter != codemode.AdapterOpenCodeGo || a.permit.Attempt.ID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	_ = a.server.CodeLedger.ObserveAllowanceCharge(ctx, a.permit.Attempt.ID, charge)
+}
+
 func (a *codeAttempt) observeAllowance(ctx context.Context, allowance codemode.Allowance) {
 	if a.paid != nil {
 		return
@@ -318,7 +363,52 @@ func (a *codeAttempt) observeHealth(ctx context.Context, observation codemode.He
 	_ = a.server.CodeLedger.ObserveHealth(ctx, a.permit.Account.ID, observation)
 }
 
+func (a *codeAttempt) flushPendingHealth(ctx context.Context) {
+	if a.pendingHealth == nil {
+		return
+	}
+	pending := *a.pendingHealth
+	a.pendingHealth = nil
+	a.observeHealth(ctx, pending)
+}
+
+func (a *codeAttempt) observeCooldownClass(o codemode.Observation) (codeadapter.Classification, bool) {
+	if a.paid != nil || len(o.RejectionBody) == 0 || a.permit.Account.ID == "" {
+		return codeadapter.Classification{}, false
+	}
+	adapter, ok := codeadapter.ForConnection(a.config.Kind, a.config.AuthMode, a.config.ProfileID)
+	if !ok {
+		return codeadapter.Classification{}, false
+	}
+	status := o.Status
+	if status == 0 {
+		status = a.status
+	}
+	headers := http.Header{"Retry-After": o.RetryAfter}
+	if len(o.RetryAfter) == 0 && a.responseHeaders != nil {
+		headers = a.responseHeaders
+	}
+	now := a.server.now().UTC()
+	classification, ok := adapter.Classify(a.endpoint, status, o.RejectionBody, headers, now)
+	if !ok {
+		return codeadapter.Classification{}, false
+	}
+	if classification.SuppressFallback {
+		a.pendingHealth = nil
+		return classification, true
+	}
+	classification = codeadapter.WithCycleReset(classification, a.permit.Account.CycleAnchor, now)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	err := a.server.CodeLedger.ObserveCooldownClass(ctx, a.permit.Account.ID, a.model, classification, now)
+	return classification, err == nil
+}
+
 func (a *codeAttempt) response(ctx context.Context, status int, headers http.Header) {
+	a.status = status
+	if headers != nil {
+		a.responseHeaders = headers.Clone()
+	}
 	if a.paid != nil {
 		a.paid.status = status
 	}
@@ -350,7 +440,8 @@ func (a *codeAttempt) response(ctx context.Context, status int, headers http.Hea
 			at := now.Add(delay)
 			return &at
 		}()
-		a.observeHealth(ctx, codemode.HealthObservation{Status: health, ObservedAt: now, RetryAt: retryAt})
+		a.flushPendingHealth(ctx)
+		a.pendingHealth = &codemode.HealthObservation{Status: health, ObservedAt: now, RetryAt: retryAt}
 	}
 	if a.endpoint.Observation != codeadapter.ObserveCodex {
 		return

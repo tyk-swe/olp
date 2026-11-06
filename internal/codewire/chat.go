@@ -2,6 +2,7 @@ package codewire
 
 import (
 	"bytes"
+	"encoding/json"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -13,6 +14,7 @@ import (
 // with a [DONE] event. Without usage, consumption stays unknown.
 type Chat struct {
 	usage    codemode.Usage
+	charge   json.RawMessage
 	finished string
 	terminal bool
 }
@@ -33,7 +35,7 @@ func (c *Chat) Event(data []byte) codemode.Observation {
 	if failure := field(root, "error"); failure.Kind() == oif.Object {
 		// Vendors put their own business codes in errors; never statuses.
 		c.terminal = true
-		return failed(0)
+		return failed(0, data)
 	}
 	c.read(root)
 	return codemode.Observation{}
@@ -46,7 +48,7 @@ func (c *Chat) Unary(body []byte) codemode.Observation {
 	}
 	if failure := field(root, "error"); failure.Kind() == oif.Object {
 		c.terminal = true
-		return failed(0)
+		return failed(0, body)
 	}
 	if field(root, "choices").Kind() != oif.Array {
 		return codemode.Observation{}
@@ -70,6 +72,9 @@ func (c *Chat) read(root oif.Value) {
 		}
 	}
 	if usage := field(root, "usage"); usage.Kind() == oif.Object {
+		if charge := AllowanceCharge(usage); charge != nil {
+			c.charge = charge
+		}
 		total, present := usage.Lookup("total_tokens")
 		u := codemode.Usage{Total: count(total), Input: count(field(usage, "prompt_tokens")), Output: count(field(usage, "completion_tokens")),
 			Cached: count(field(field(usage, "prompt_tokens_details"), "cached_tokens")), Reasoning: count(field(field(usage, "completion_tokens_details"), "reasoning_tokens"))}
@@ -89,5 +94,5 @@ func (c *Chat) finish() codemode.Observation {
 	if c.finished == "length" {
 		kind = "incomplete"
 	}
-	return codemode.Observation{Terminal: true, Successful: kind == "completed", Usage: c.usage, Outcome: &codemode.Outcome{Origin: "upstream", Kind: kind, ObservedAt: time.Now().UTC()}}
+	return codemode.Observation{Terminal: true, Successful: kind == "completed", Usage: c.usage, AllowanceCharge: c.charge, Outcome: &codemode.Outcome{Origin: "upstream", Kind: kind, ObservedAt: time.Now().UTC()}}
 }

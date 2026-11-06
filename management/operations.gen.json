@@ -5141,6 +5141,13 @@
             "enabled": {
               "type": "boolean"
             },
+            "extra_usage_enabled": {
+              "description": "Whether the member Extra Usage paid fallback setting is on for a Kimi Code account. Null means not recorded.",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
             "models": {
               "items": {
                 "maxLength": 200,
@@ -5151,6 +5158,13 @@
               "minItems": 1,
               "type": "array",
               "uniqueItems": true
+            },
+            "cycle_anchor": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date"
             }
           },
           "required": [
@@ -5358,6 +5372,10 @@
             "chat_to_codex": {
               "type": "boolean",
               "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
+            },
+            "allowance_ordering": {
+              "type": "boolean",
+              "description": "Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy."
             }
           },
           "required": [
@@ -7319,6 +7337,13 @@
             "enabled": {
               "type": "boolean"
             },
+            "extra_usage_enabled": {
+              "description": "Whether the member Extra Usage paid fallback setting is on for a Kimi Code account, recorded by the operator at enrollment. Null means not recorded. It is never spare included allowance and is refused for other adapters.",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
             "models": {
               "items": {
                 "maxLength": 200,
@@ -7342,6 +7367,14 @@
             "provider_id": {
               "format": "uuid",
               "type": "string"
+            },
+            "cycle_anchor": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date",
+              "description": "Optional subscription cycle anchor date, recorded only for Qwen Token Plan accounts."
             }
           },
           "required": [
@@ -7725,6 +7758,10 @@
             "chat_to_codex": {
               "type": "boolean",
               "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
+            },
+            "allowance_ordering": {
+              "type": "boolean",
+              "description": "Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy."
             }
           },
           "required": [
@@ -21690,6 +21727,118 @@
     }
   },
   {
+    "name": "list_code_decisions",
+    "group": "code-mode",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/code/decisions",
+    "description": "list code decisions",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      },
+      {
+        "name": "project_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "route_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "api_key_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "account_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "binding_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "attempt_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "project_id": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "route_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "api_key_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "account_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "binding_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "attempt_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "list_code_pools",
     "group": "code-mode",
     "method": "GET",
@@ -30867,6 +31016,13 @@
             "enabled": {
               "type": "boolean"
             },
+            "extra_usage_enabled": {
+              "description": "Whether the member Extra Usage paid fallback setting is on for a Kimi Code account. Null means not recorded.",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
             "models": {
               "items": {
                 "maxLength": 200,
@@ -30877,6 +31033,13 @@
               "minItems": 1,
               "type": "array",
               "uniqueItems": true
+            },
+            "cycle_anchor": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date"
             }
           },
           "required": [
@@ -31084,6 +31247,10 @@
             "chat_to_codex": {
               "type": "boolean",
               "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
+            },
+            "allowance_ordering": {
+              "type": "boolean",
+              "description": "Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy."
             }
           },
           "required": [
@@ -35957,6 +36124,13 @@
             "enabled": {
               "type": "boolean"
             },
+            "extra_usage_enabled": {
+              "description": "Whether the member Extra Usage paid fallback setting is on for a Kimi Code account, recorded by the operator at enrollment. Null means not recorded. It is never spare included allowance and is refused for other adapters.",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
             "models": {
               "items": {
                 "maxLength": 200,
@@ -35980,6 +36154,14 @@
             "provider_id": {
               "format": "uuid",
               "type": "string"
+            },
+            "cycle_anchor": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date",
+              "description": "Optional subscription cycle anchor date, recorded only for Qwen Token Plan accounts."
             }
           },
           "required": [
@@ -36423,6 +36605,10 @@
             "chat_to_codex": {
               "type": "boolean",
               "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
+            },
+            "allowance_ordering": {
+              "type": "boolean",
+              "description": "Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy."
             }
           },
           "required": [
@@ -37985,6 +38171,65 @@
           "type": "string"
         }
       }
+    }
+  },
+  {
+    "name": "request_code_account_allowance_read",
+    "group": "code-mode",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/code/accounts/{id}/allowance-reads",
+    "description": "request code account allowance read",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id"
+          ]
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "idempotency_key"
+      ]
     }
   },
   {

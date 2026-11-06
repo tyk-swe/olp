@@ -23,6 +23,35 @@ and qualified against controlled fixtures. Fixture qualification is not a releas
 claim for a real ChatGPT, OpenCode Go or other coding-plan subscription. Review
 the [support matrix and release gates](../develop/qualification.md) before rollout.
 
+### Qualification status
+
+Reliability claims in this guide name adapters and profiles, never code
+mode as a whole. A mechanism counts as live proven for an adapter and
+profile only when the matching live lane in
+[qualification](../develop/qualification.md#live-lanes) has run green
+and its claims summary names that pair. Until then the console and this
+guide keep the no proven signal wording for that pair.
+
+No requested model currently has a qualified mapping to an allowance limit
+family, so allowance ordering has no effect and legacy eligibility remains in
+force for new roots, existing pins and model offers. Eligible accounts are
+selected using weights and cooldowns. Codex inference responses can supply
+passive observations, but OLP does not assume which models they cover. Active
+Codex reads and both MiniMax M
+Plan remains reads are held pending live qualification. Existing active
+observations do not influence admission or ordering.
+
+GLM, Kimi, Qwen and MiniMax quota envelopes can set a cooldown, but they do
+not establish that inference did not execute and cannot authorize replay.
+The Codex rejection envelopes remain the controlled assumptions documented
+under portable conversation recovery. OpenCode Go has no qualified replay
+proof, and its reported allowance charge stays an observation, never an
+ordering input.
+
+Cooldown and failover behavior claim live evidence only for the pairs a
+green live run summary names. No adapter or profile claims live proven inference
+or failover from fixture evidence alone.
+
 ## Adapters and clients
 
 Each code account belongs to a subscription family, its **adapter**, which OLP
@@ -873,8 +902,10 @@ block subsequent budgeted admission. Historical unknown usage prevents falsely
 enabling a hard guarantee.
 
 Provider-reported allowance is separate metadata with observation and reset
-times. Only Codex reports allowance OLP reads. OpenCode Go and coding-plan
-accounts show none, and their health comes from response status alone. For
+times. Codex inference responses may carry passive allowance windows. Active
+Codex and MiniMax reads remain disabled pending live qualification. Other
+coding-plan accounts have no qualified allowance signal, with health from
+response status alone. For
 responses that mark an account unavailable or quota-limited, OLP honors a
 single valid Retry-After header as unsigned seconds or an HTTP date. Zero
 seconds and past dates permit an immediate retry when other eligibility checks
@@ -888,8 +919,12 @@ Primary and secondary windows are retained independently for each metered limit.
 Token and request counts also retain their own observation and reset times.
 Credits remain separate from those windows and from local budgets. Partial
 observations preserve other dimensions, and stale observations cannot replace
-newer ones. An exhausted count or window refuses admission until its supported
-reset. An unknown reset keeps that exhausted dimension blocked. Passing a retry
+newer ones. For a qualified allowance band, an observation stays fresh until its
+reported future reset, or for at most fifteen minutes when there is no future
+reset. No model has a qualified limit mapping today, so the allowance ordering
+setting has no effect. Legacy eligibility continues to treat passive exhaustion
+as unavailable until its supported reset, including when that reset is unknown.
+Passing a retry
 or reset time permits another attempt once all eligibility checks pass, while
 reported allowance values remain tied to upstream observations. Never infer
 subscription allowance from a local budget, monetary estimate or a successful

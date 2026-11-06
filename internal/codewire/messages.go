@@ -1,6 +1,7 @@
 package codewire
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -12,6 +13,7 @@ import (
 // message_stop, or a message_delta that stops it, ends the generation.
 type Messages struct {
 	input, cacheRead, cacheWrite, output *int64
+	charge                               json.RawMessage
 	stop                                 string
 	terminal                             bool
 	finalOutput, invalidUsage            bool
@@ -36,7 +38,7 @@ func (m *Messages) Event(data []byte) codemode.Observation {
 		return m.finish()
 	case "error":
 		m.terminal = true
-		return failed(anthropicStatus(root))
+		return failed(anthropicStatus(root), data)
 	}
 	return codemode.Observation{}
 }
@@ -51,10 +53,16 @@ func (m *Messages) Unary(body []byte) codemode.Observation {
 		m.record(field(root, "usage"), true)
 		m.stop, _ = field(root, "stop_reason").Text()
 		return m.finish()
+	case "":
+		if failure := field(root, "error"); failure.Kind() == oif.Object {
+			m.terminal = true
+			return failed(0, body)
+		}
+		return codemode.Observation{}
 	case "error":
 		m.terminal = true
 		// The response status already reported the failure.
-		return failed(0)
+		return failed(0, body)
 	}
 	return codemode.Observation{}
 }
@@ -69,6 +77,9 @@ func (m *Messages) Finish() (codemode.Observation, bool) {
 }
 
 func (m *Messages) record(usage oif.Value, final bool) {
+	if charge := AllowanceCharge(usage); charge != nil {
+		m.charge = charge
+	}
 	for target, name := range map[**int64]string{&m.input: "input_tokens", &m.cacheRead: "cache_read_input_tokens", &m.cacheWrite: "cache_creation_input_tokens", &m.output: "output_tokens"} {
 		value, present := usage.Lookup(name)
 		if !present {
@@ -108,7 +119,7 @@ func (m *Messages) finish() codemode.Observation {
 			usage = codemode.Usage{}
 		}
 	}
-	return codemode.Observation{Terminal: true, Successful: kind == "completed", Usage: usage, Outcome: &codemode.Outcome{Origin: "upstream", Kind: kind, ObservedAt: time.Now().UTC()}}
+	return codemode.Observation{Terminal: true, Successful: kind == "completed", Usage: usage, AllowanceCharge: m.charge, Outcome: &codemode.Outcome{Origin: "upstream", Kind: kind, ObservedAt: time.Now().UTC()}}
 }
 
 // anthropicStatus is the HTTP status an Anthropic error type stands for, for
@@ -121,12 +132,19 @@ func anthropicStatus(root oif.Value) int {
 	}[kind]
 }
 
-func failed(status int) codemode.Observation {
+func failed(status int, body []byte) codemode.Observation {
 	outcome := &codemode.Outcome{Origin: "upstream", Kind: "failed", ObservedAt: time.Now().UTC()}
 	if status != 0 {
 		outcome.UpstreamStatus = &status
 	}
-	return codemode.Observation{Terminal: true, Status: status, Outcome: outcome}
+	return codemode.Observation{Terminal: true, Status: status, Outcome: outcome, RejectionBody: RejectionBody(body)}
+}
+
+func RejectionBody(body []byte) []byte {
+	if len(body) == 0 || len(body) > 64<<10 {
+		return nil
+	}
+	return append([]byte(nil), body...)
 }
 
 func object(data []byte) (oif.Value, bool) {

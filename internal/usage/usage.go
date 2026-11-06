@@ -95,7 +95,8 @@ const (
 	// TaskBillingImport imports provider invoices and reports its liveness.
 	TaskBillingImport Task = "billing_import"
 	// TaskFocusExport delivers the daily FOCUS datasets to csv_gzip sinks.
-	TaskFocusExport Task = "focus_export"
+	TaskFocusExport       Task = "focus_export"
+	TaskCodeAllowanceRead Task = "code_allowance_read"
 )
 
 type WorkerTask struct {
@@ -121,6 +122,7 @@ func WorkerTasks() []WorkerTask {
 		{Name: TaskExportDelivery, StaleAfter: 30},
 		{Name: TaskBillingImport, StaleAfter: 180},
 		{Name: TaskFocusExport, StaleAfter: 180},
+		{Name: TaskCodeAllowanceRead, StaleAfter: 60},
 	}
 }
 

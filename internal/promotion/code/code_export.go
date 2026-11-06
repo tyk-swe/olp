@@ -16,7 +16,7 @@ import (
 
 func ExportCode(ctx context.Context, q access.Queryer) (*promotion.CodeConfiguration, error) {
 	var accounts []promotion.CodeAccountEntry
-	if err := q.QueryRow(ctx, `SELECT coalesce(jsonb_agg(jsonb_build_object('id',a.id,'project',p.name,'provider',v.name,'credential_ref','code/account/'||a.id,'name',a.name,'enabled',a.enabled,'models',a.models)),'[]') FROM olp.code_accounts a JOIN olp.projects p ON p.id=a.project_id JOIN olp.providers v ON v.id=a.provider_id`).Scan(&accounts); err != nil {
+	if err := q.QueryRow(ctx, `SELECT coalesce(jsonb_agg(jsonb_build_object('id',a.id,'project',p.name,'provider',v.name,'credential_ref','code/account/'||a.id,'name',a.name,'enabled',a.enabled,'models',a.models,'extra_usage_enabled',a.extra_usage_enabled,'cycle_anchor',a.cycle_anchor)),'[]') FROM olp.code_accounts a JOIN olp.projects p ON p.id=a.project_id JOIN olp.providers v ON v.id=a.provider_id`).Scan(&accounts); err != nil {
 		return nil, err
 	}
 	var pools []promotion.CodePoolEntry

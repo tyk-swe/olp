@@ -15550,6 +15550,13 @@
           "enabled": {
             "type": "boolean"
           },
+          "extra_usage_enabled": {
+            "description": "Whether the member Extra Usage paid fallback setting is on for a Kimi Code account, recorded by the operator at enrollment. Null means not recorded. It is never spare included allowance.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "etag": {
             "format": "uuid",
             "type": "string"
@@ -15579,6 +15586,21 @@
             ],
             "format": "date-time",
             "description": "End of the serving cooldown. Exhausted allowance and grant authority remain independent eligibility requirements."
+          },
+          "cooldowns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CodeAccountCooldown"
+            },
+            "description": "Live failure class cooldowns for this account. A null model cools the whole credential."
+          },
+          "cycle_anchor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "Operator recorded subscription cycle anchor date for Qwen Token Plan accounts. The monthly quota reset is the next monthly anniversary of this date. Null when no anchor is recorded, and no reset is reported then."
           },
           "health": {
             "enum": [
@@ -15630,6 +15652,22 @@
               }
             ]
           },
+          "allowance_read_requested_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When an operator last requested an active allowance read. The worker clears it once that read completes."
+          },
+          "allowance_read_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the worker last completed an active allowance read for this account, whether or not the provider response was usable."
+          },
           "adapter": {
             "description": "The subscription family of the account's provider profile: Codex, Claude, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.",
             "enum": [
@@ -15643,6 +15681,22 @@
               "qwen_token_plan",
               null
             ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "allowance_signal": {
+            "description": "Allowance signal qualification of the account's provider profile. Passive signals may be recorded, but no requested-model-to-limit mapping is qualified for ordering. Active reads require separate live qualification. Remains-unqualified names a signal that has not completed qualification. None means the profile has no qualified allowance signal.",
+            "enum": [
+              "proven",
+              "none",
+              "remains-unqualified"
+            ],
+            "type": "string"
+          },
+          "allowance_signal_reason": {
+            "description": "Why the allowance signal is not qualified, or null when no reason is recorded.",
             "type": [
               "string",
               "null"
@@ -15674,13 +15728,48 @@
           "name",
           "enabled",
           "models",
+          "extra_usage_enabled",
           "principal",
           "etag",
           "health",
           "eligible",
           "grant_state",
           "allowance",
-          "adapter"
+          "adapter",
+          "allowance_signal",
+          "allowance_signal_reason"
+        ],
+        "type": "object"
+      },
+      "CodeAccountCooldown": {
+        "additionalProperties": false,
+        "properties": {
+          "class": {
+            "enum": [
+              "quota",
+              "entitlement",
+              "rate",
+              "capacity",
+              "concurrency"
+            ],
+            "type": "string"
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The model this cooldown cools, or null when it cools the whole credential."
+          },
+          "retry_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "class",
+          "model",
+          "retry_at"
         ],
         "type": "object"
       },
@@ -15716,6 +15805,13 @@
           "enabled": {
             "type": "boolean"
           },
+          "extra_usage_enabled": {
+            "description": "Whether the member Extra Usage paid fallback setting is on for a Kimi Code account, recorded by the operator at enrollment. Null means not recorded. It is never spare included allowance and is refused for other adapters.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "models": {
             "items": {
               "maxLength": 200,
@@ -15739,6 +15835,14 @@
           "provider_id": {
             "format": "uuid",
             "type": "string"
+          },
+          "cycle_anchor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "Optional subscription cycle anchor date, recorded only for Qwen Token Plan accounts."
           }
         },
         "required": [
@@ -15896,6 +16000,14 @@
               "null"
             ]
           },
+          "allowance_charge": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true,
+            "description": "Validated per-request OpenCode Go billing and numeric usage fields, with usage.cost when reported. The allowance value counts toward plan usage limits in dollars of the monthly limit. Null means no supported charge was observed; it is never a remaining allowance and never an admission or ordering input."
+          },
           "reported_tokens": {
             "format": "int64",
             "maximum": 9007199254740991,
@@ -16042,6 +16154,7 @@
           "reasoning_tokens",
           "bound_evidence",
           "refusal",
+          "allowance_charge",
           "created_at",
           "finished_at",
           "route_revision_id",
@@ -16059,6 +16172,185 @@
           "items": {
             "items": {
               "$ref": "#/components/schemas/CodeAttempt"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "CodeDecision": {
+        "additionalProperties": false,
+        "description": "Content-free account selection record for one admitted attempt or one WebSocket connection bind. Names the chosen account, why it served, the freshest allowance evidence kind behind it, and the class reason each other candidate was skipped. No prompt, response, header or credential content is retained.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "attempt_id": {
+            "description": "Attempt this decision admitted. Null for connection decisions, which bind a WebSocket connection to the tree account without admitting an attempt.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "route_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "route_revision_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "api_key_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "binding_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "root_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "chosen_account_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "chosen",
+              "pin",
+              "connection"
+            ],
+            "type": "string",
+            "description": "Chosen means weighted selection picked the account for a new pin, pin means an established conversation pin served without re-running selection, and connection means the tree connection account served."
+          },
+          "band": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "healthy",
+              "unknown",
+              "low",
+              "exhausted",
+              null
+            ],
+            "description": "Allowance band of the chosen account when allowance ordering recorded one. Null unless the route enables banding and the requested model has a qualified limit mapping."
+          },
+          "evidence": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "passive",
+              "active",
+              null
+            ],
+            "description": "Kind of the chosen account freshest allowance window at admission. Null when the account had no allowance observation."
+          },
+          "evidence_observed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "skipped": {
+            "type": "array",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "account_id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "class": {
+                  "enum": [
+                    "cooldown",
+                    "band",
+                    "weight",
+                    "tree",
+                    "unavailable"
+                  ],
+                  "type": "string",
+                  "description": "Why the candidate did not serve: cooldown means a live health cooldown, unavailable means reported allowance exhaustion, tree means an earlier account of the conversation tree served, weight means the weighted score picked another account of the same tier, and band means a lower allowance band under allowance ordering."
+                }
+              },
+              "required": [
+                "account_id",
+                "class"
+              ],
+              "type": "object"
+            },
+            "description": "Candidates evaluated alongside the chosen account that did not serve, each with the class reason it lost. Covers the evaluated candidate set only. Accounts excluded earlier by model, path or tree-adapter SQL filters are not listed."
+          },
+          "recovery_envelope": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-z0-9][a-z0-9_]{0,99}$",
+            "description": "Proven not-executed rejection envelope this admission recovered from. Null when the admission was not a recovery."
+          },
+          "recovery_ordinal": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 1
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "attempt_id",
+          "project_id",
+          "route_id",
+          "route_revision_id",
+          "api_key_id",
+          "binding_id",
+          "root_id",
+          "chosen_account_id",
+          "reason",
+          "band",
+          "evidence",
+          "evidence_observed_at",
+          "skipped",
+          "recovery_envelope",
+          "recovery_ordinal",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "CodeDecisionList": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CodeDecision"
             },
             "type": "array"
           },
@@ -16976,6 +17268,10 @@
           "chat_to_codex": {
             "type": "boolean",
             "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
+          },
+          "allowance_ordering": {
+            "type": "boolean",
+            "description": "Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy."
           }
         },
         "required": [
@@ -17132,6 +17428,10 @@
           "chat_to_codex": {
             "type": "boolean",
             "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
+          },
+          "allowance_ordering": {
+            "type": "boolean",
+            "description": "Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy."
           }
         },
         "required": [
@@ -17330,8 +17630,29 @@
             "type": "string",
             "enum": [
               "primary",
-              "secondary"
+              "secondary",
+              "five_hour",
+              "weekly",
+              "monthly"
             ]
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "percent",
+              "count",
+              "credits",
+              "cents"
+            ],
+            "description": "Vendor unit of the reported values. Percent windows report used and remaining percentages; other units report used and remaining values in that unit."
+          },
+          "evidence": {
+            "type": "string",
+            "enum": [
+              "passive",
+              "active"
+            ],
+            "description": "How the observation was learned: passive from a forwarded response, or active from a provider usage read."
           },
           "used_percent": {
             "type": "number",
@@ -17342,6 +17663,26 @@
             "type": "number",
             "minimum": 0,
             "maximum": 100
+          },
+          "used_value": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Used amount in the vendor unit for non-percent windows. Null when the provider did not report it."
+          },
+          "remaining_value": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Remaining amount in the vendor unit for non-percent windows. Null when the provider did not report it."
           },
           "window_minutes": {
             "type": [
@@ -17367,8 +17708,12 @@
         "required": [
           "limit_id",
           "window",
+          "unit",
+          "evidence",
           "used_percent",
           "remaining_percent",
+          "used_value",
+          "remaining_value",
           "window_minutes",
           "resets_at",
           "observed_at"
@@ -31397,6 +31742,13 @@
           "enabled": {
             "type": "boolean"
           },
+          "extra_usage_enabled": {
+            "description": "Whether the member Extra Usage paid fallback setting is on for a Kimi Code account. Null means not recorded.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "models": {
             "items": {
               "maxLength": 200,
@@ -31407,6 +31759,13 @@
             "minItems": 1,
             "type": "array",
             "uniqueItems": true
+          },
+          "cycle_anchor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
           }
         },
         "required": [
@@ -31585,6 +31944,10 @@
           "chat_to_codex": {
             "type": "boolean",
             "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
+          },
+          "allowance_ordering": {
+            "type": "boolean",
+            "description": "Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy."
           }
         },
         "required": [
@@ -47341,6 +47704,148 @@
         ]
       }
     },
+    "/api/v1/code/accounts/{id}/allowance-reads": {
+      "post": {
+        "operationId": "request_code_account_allowance_read",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodeAccount"
+                }
+              }
+            },
+            "description": "Code-mode management result"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request refused without inference"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request refused without inference"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request refused without inference"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request refused without inference"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request refused without inference"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request refused without inference"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request refused without inference"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request refused without inference"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request refused without inference"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "code-mode"
+        ]
+      }
+    },
     "/api/v1/code/attempts": {
       "get": {
         "operationId": "list_code_attempts",
@@ -47436,6 +47941,205 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CodeAttemptList"
+                }
+              }
+            },
+            "description": "Code-mode management result"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request refused without inference"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request refused without inference"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request refused without inference"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request refused without inference"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request refused without inference"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request refused without inference"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request refused without inference"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request refused without inference"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request refused without inference"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "code-mode"
+        ]
+      }
+    },
+    "/api/v1/code/decisions": {
+      "get": {
+        "operationId": "list_code_decisions",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "route_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "api_key_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Select decisions that chose this account."
+          },
+          {
+            "name": "binding_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "attempt_id",
+            "in": "query",
+            "required": false,
+            "description": "Select the decision recorded for a single attempt within current project visibility. Other filters still apply.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodeDecisionList"
                 }
               }
             },

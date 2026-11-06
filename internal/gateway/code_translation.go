@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/codeadapter"
@@ -169,7 +170,15 @@ func codeTextContent(parent oif.Value, key string) bool {
 
 func (a *codeAttempt) translateResponse(ctx context.Context, w http.ResponseWriter, r *http.Request, response *http.Response, model string, stream bool, family wire.Format, includeUsage bool) {
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		codeWriteError(w, r, codemode.Refuse(response.StatusCode, "code_upstream_rejected"))
+		refusal := codeError(r, codemode.Refuse(response.StatusCode, "code_upstream_rejected"))
+		surface := requestSurface(r)
+		w.Header().Set("Content-Length", strconv.Itoa(len(refusal.surfaceBody(surface))))
+		writeSurfaceError(w, refusal, surface)
+		_ = http.NewResponseController(w).Flush()
+		if response.StatusCode == http.StatusTooManyRequests {
+			a.observeTranslatedRateLimit(ctx, response)
+		}
+		a.terminal = true
 		return
 	}
 	writer := &streamWriter{w: w, family: family}
@@ -186,6 +195,13 @@ func (a *codeAttempt) translateResponse(ctx context.Context, w http.ResponseWrit
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(completion.Body)
+}
+
+func (a *codeAttempt) observeTranslatedRateLimit(ctx context.Context, response *http.Response) {
+	body, err := readTranslatedRejection(ctx, response.Body, codewire.MaxBody+1)
+	if err == nil {
+		a.observeEncodedUnary(body, response.Header.Get("Content-Encoding"))
+	}
 }
 
 func (a *codeAttempt) translatedCompletion(response *http.Response, model string, stream bool, family wire.Format, includeUsage bool, emit func([]byte) error) (*wire.Completion, error) {
@@ -206,6 +222,6 @@ func (a *codeAttempt) translatedCompletion(response *http.Response, model string
 	if err != nil || len(body) > codewire.MaxBody {
 		return nil, codemode.Refuse(502, "code_upstream_invalid")
 	}
-	a.observe(a.observer.Unary(body))
+	a.observeUnary(body)
 	return protocols.Decode(wire.Responses, family, body, model, "")
 }
