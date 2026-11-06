@@ -148,7 +148,7 @@ func rerankResults(items []json.RawMessage, documents int, texts []string, wantD
 		}
 		seen[index] = true
 		var score float64
-		if err := json.Unmarshal(item["relevance_score"], &score); err != nil || math.IsNaN(score) || math.IsInf(score, 0) || score < 0 || score > 1 {
+		if err := json.Unmarshal(item["relevance_score"], &score); err != nil || !present(item["relevance_score"]) || math.IsNaN(score) || math.IsInf(score, 0) || score < 0 || score > 1 {
 			return nil, protocolError("invalid rerank relevance score")
 		}
 		entry := Object{"index": raw(index), "relevance_score": raw(score)}
@@ -160,10 +160,13 @@ func rerankResults(items []json.RawMessage, documents int, texts []string, wantD
 				var echoed struct {
 					Text *string `json:"text"`
 				}
-				if json.Unmarshal(item["document"], &echoed) != nil || echoed.Text == nil || index >= int64(len(texts)) || *echoed.Text != texts[index] {
+				if json.Unmarshal(item["document"], &echoed) != nil || echoed.Text == nil {
 					return nil, protocolError("invalid rerank document")
 				}
 				document = *echoed.Text
+			}
+			if index >= int64(len(texts)) || document != texts[index] {
+				return nil, protocolError("invalid rerank document")
 			}
 			entry["document"] = raw(document)
 		} else if wantDocuments && index < int64(len(texts)) {
