@@ -2195,7 +2195,7 @@ func TestCodeSignedToolContinuation(t *testing.T) {
 			t.Fatalf("%s restart = %s", surface.protocol, describe(status, raw))
 		}
 	}
-	continueSummaryJourney(t, restarted, journey, consumer, summary)
+	continueSummaryJourney(t, restarted, journey, consumer, summary, &calls)
 	var root string
 	if err := s.pool.QueryRow(t.Context(), `SELECT root_id::text FROM olp.code_bindings WHERE conversation='signed-root' AND route_id=$1`, journey.route.ID).Scan(&root); err != nil {
 		t.Fatal(err)
@@ -2220,6 +2220,11 @@ func TestCodeSignedToolContinuation(t *testing.T) {
 	restarted.want(owner, "POST", summaryBindingPath+"/retire", nil, idempotent(), http.StatusOK)
 	if err := s.pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.secrets WHERE id=$1`, summary.key).Scan(&remaining); err != nil || remaining != 0 {
 		t.Fatalf("retired summary key remains, %d, %v", remaining, err)
+	}
+	beforeRetiredSummary := calls.Load()
+	retiredStatus, retiredBody := restarted.do(consumer, "POST", "/code/"+journey.route.Slug+"/responses", json.RawMessage(`{"model":"gemini-fixture","input":[`+string(summary.item)+`,{"role":"user","content":"Continue"}]}`), map[string]string{"Session-Id": summary.conversation + "-child", "X-Codex-Parent-Thread-Id": summary.conversation})
+	if retiredStatus != http.StatusGone || calls.Load() != beforeRetiredSummary {
+		t.Fatalf("retired child summary dispatched %d %s", retiredStatus, retiredBody)
 	}
 	if err := s.pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.secrets WHERE id=$1 OR id=$2`, message.ToolCalls[0].ID, message.ToolCalls[1].ID).Scan(&remaining); err != nil || remaining != 0 {
 		t.Fatalf("retired state count %d, %v", remaining, err)
@@ -2451,7 +2456,7 @@ func startSummaryJourney(t *testing.T, s *service, owner *caller, journey cooldo
 		t.Fatalf("compact %d %s, calls %d", response.StatusCode, encoded, calls.Load()-before)
 	}
 	var binding, secretID string
-	if err := s.pool.QueryRow(t.Context(), `SELECT b.id::text,k.id::text FROM olp.code_bindings b JOIN olp.code_summary_keys k ON k.binding_id=b.id WHERE b.conversation=$1 AND b.route_id=$2`, conversation, journey.route.ID).Scan(&binding, &secretID); err != nil {
+	if err := s.pool.QueryRow(t.Context(), `SELECT b.id::text,k.id::text FROM olp.code_bindings b JOIN olp.code_summary_keys k ON k.root_id=b.root_id AND k.account_id=b.account_id AND k.principal=b.principal WHERE b.conversation=$1 AND b.route_id=$2`, conversation, journey.route.ID).Scan(&binding, &secretID); err != nil {
 		t.Fatal(err)
 	}
 	var count int
@@ -2499,13 +2504,35 @@ func startSummaryJourney(t *testing.T, s *service, owner *caller, journey cooldo
 	return summaryJourney{conversation: conversation, item: item, binding: binding, key: secretID}
 }
 
-func continueSummaryJourney(t *testing.T, s *service, journey cooldownJourney, consumer *caller, summary summaryJourney) {
+func continueSummaryJourney(t *testing.T, s *service, journey cooldownJourney, consumer *caller, summary summaryJourney, calls *atomic.Int64) {
 	t.Helper()
 	response := summarySurfaceRequest(t, s, consumer, summary.conversation, "/code/"+journey.route.Slug+"/responses", `{"model":"gemini-fixture","input":[`+string(summary.item)+`,{"role":"user","content":"Continue the migration"}]}`)
 	body, _ := io.ReadAll(response.Body)
 	response.Body.Close()
 	if response.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("PostgreSQL migration constraints are restored")) {
 		t.Fatalf("summary after restart and rotation %d %s", response.StatusCode, body)
+	}
+	path := "/code/" + journey.route.Slug + "/responses"
+	continuation := `{"model":"gemini-fixture","input":[` + string(summary.item) + `,{"role":"user","content":"Continue the migration"}]}`
+	status, raw := s.do(consumer, "POST", path, json.RawMessage(continuation), map[string]string{"Session-Id": summary.conversation + "-child", "X-Codex-Parent-Thread-Id": summary.conversation})
+	if status != http.StatusOK || !bytes.Contains(raw, []byte("PostgreSQL migration constraints are restored")) {
+		t.Fatalf("authorized child summary after restart and rotation %d %s", status, raw)
+	}
+	foreignRoot := uuid.NewString()
+	foreign := summarySurfaceRequest(t, s, consumer, foreignRoot, path+"/compact", `{"model":"gemini-fixture","input":"Keep the migration requirements"}`)
+	foreign.Body.Close()
+	if foreign.StatusCode != http.StatusOK {
+		t.Fatalf("foreign root summary setup %d", foreign.StatusCode)
+	}
+	before := calls.Load()
+	for _, headers := range []map[string]string{
+		{"Session-Id": foreignRoot},
+		{"Session-Id": foreignRoot + "-child", "X-Codex-Parent-Thread-Id": foreignRoot},
+	} {
+		status, raw := s.do(consumer, "POST", path, json.RawMessage(continuation), headers)
+		if status != http.StatusUnprocessableEntity || calls.Load() != before {
+			t.Fatalf("foreign root or child summary dispatched %d %s", status, raw)
+		}
 	}
 }
 

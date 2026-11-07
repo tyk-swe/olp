@@ -80,11 +80,10 @@ func summaryCipher(key []byte) (cipher.AEAD, error) {
 func summaryContext(permit Permit) ([]byte, error) {
 	return json.Marshal(struct {
 		Version   int
-		Binding   string
 		Root      string
 		Account   string
 		Principal string
-	}{1, permit.Binding.ID, permit.Binding.RootID, permit.Account.ID, permit.Account.Principal})
+	}{1, permit.Binding.RootID, permit.Account.ID, permit.Account.Principal})
 }
 
 func (s *Store) codeSummaryKey(ctx context.Context, permit Permit, create bool) ([]byte, error) {
@@ -101,7 +100,7 @@ func (s *Store) codeSummaryKey(ctx context.Context, permit Permit, create bool) 
 		return nil, err
 	}
 	var id string
-	lookupErr := tx.QueryRow(ctx, `SELECT id::text FROM olp.code_summary_keys WHERE binding_id=$1`, permit.Binding.ID).Scan(&id)
+	lookupErr := tx.QueryRow(ctx, `SELECT id::text FROM olp.code_summary_keys WHERE root_id=$1 AND account_id=$2 AND principal=$3`, permit.Binding.RootID, permit.Account.ID, permit.Account.Principal).Scan(&id)
 	if lookupErr == nil {
 		key, err := s.keys.Read(ctx, tx, s.installation, id, secrets.CodeSummaryKey)
 		if err != nil {
@@ -124,7 +123,7 @@ func (s *Store) codeSummaryKey(ctx context.Context, permit Permit, create bool) 
 	if err := s.keys.Store(ctx, tx, s.installation, secretID, secrets.CodeSummaryKey, key, nil); err != nil {
 		return nil, refused
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO olp.code_summary_keys(id,binding_id,root_id) VALUES($1,$2,$3)`, secretID, permit.Binding.ID, permit.Binding.RootID); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO olp.code_summary_keys(id,root_id,account_id,principal) VALUES($1,$2,$3,$4)`, secretID, permit.Binding.RootID, permit.Account.ID, permit.Account.Principal); err != nil {
 		return nil, refused
 	}
 	return key, tx.Commit(ctx)

@@ -3,7 +3,8 @@ ALTER TABLE olp.secrets ADD CONSTRAINT secrets_purpose_check CHECK(purpose IN ('
 ALTER TABLE olp.secrets ADD CONSTRAINT secrets_code_summary_key_bound CHECK (purpose <> 'code_summary_key' OR (expires_at IS NULL AND octet_length(ciphertext)=60));
 CREATE TABLE olp.code_summary_keys (
  id uuid PRIMARY KEY REFERENCES olp.secrets(id),
- binding_id uuid NOT NULL UNIQUE REFERENCES olp.code_bindings(id),
- root_id uuid NOT NULL REFERENCES olp.code_bindings(id)
+ root_id uuid NOT NULL REFERENCES olp.code_bindings(id),
+ account_id uuid NOT NULL REFERENCES olp.code_accounts(id),
+ principal text NOT NULL,
+ UNIQUE(root_id,account_id,principal)
 );
-CREATE INDEX code_summary_keys_root ON olp.code_summary_keys(root_id);
