@@ -17309,6 +17309,11 @@
             "type": "boolean",
             "default": false,
             "description": "Separately enable identity compatibility mapping metadata.user_id to the SHA-256 digest encoded as lowercase unpadded base32 in Gemini request labels.safety_identifier. Public generateContent documents this field. Subscription proxy acceptance is unverified. Published revisions pin this default-off policy."
+          },
+          "responses_to_antigravity": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly enable Responses text and signed function tools through Antigravity over HTTP or SSE after publication. Unsupported continuation state is refused. Existing published revisions retain their behavior. Provider terms and account suspension risks apply. Live subscription acceptance remains unverified."
           }
         },
         "required": [
@@ -17503,6 +17508,11 @@
             "type": "boolean",
             "default": false,
             "description": "Separately enable identity compatibility mapping metadata.user_id to the SHA-256 digest encoded as lowercase unpadded base32 in Gemini request labels.safety_identifier. Public generateContent documents this field. Subscription proxy acceptance is unverified. Published revisions pin this default-off policy."
+          },
+          "responses_to_antigravity": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly enable Responses text and signed function tools through Antigravity over HTTP or SSE after publication. Unsupported continuation state is refused. Existing published revisions retain their behavior. Provider terms and account suspension risks apply. Live subscription acceptance remains unverified."
           }
         },
         "required": [
@@ -32053,6 +32063,11 @@
             "type": "boolean",
             "default": false,
             "description": "Separately enable identity compatibility mapping metadata.user_id to the SHA-256 digest encoded as lowercase unpadded base32 in Gemini request labels.safety_identifier. Public generateContent documents this field. Subscription proxy acceptance is unverified. Published revisions pin this default-off policy."
+          },
+          "responses_to_antigravity": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly enable Responses text and signed function tools through Antigravity over HTTP or SSE after publication. Unsupported continuation state is refused. Existing published revisions retain their behavior. Provider terms and account suspension risks apply. Live subscription acceptance remains unverified."
           }
         },
         "required": [

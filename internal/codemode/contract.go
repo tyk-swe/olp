@@ -246,6 +246,7 @@ type Route struct {
 	ChatToCodex                         bool                  `json:"chat_to_codex,omitempty"`
 	MessagesToCodex                     bool                  `json:"messages_to_codex,omitempty"`
 	MessagesToAntigravity               bool                  `json:"messages_to_antigravity,omitempty"`
+	ResponsesToAntigravity              bool                  `json:"responses_to_antigravity,omitempty"`
 	MessagesAntigravitySafetyIdentifier bool                  `json:"messages_antigravity_safety_identifier,omitempty"`
 	MessagesCodexSafetyIdentifier       bool                  `json:"messages_codex_safety_identifier,omitempty"`
 	AllowanceOrdering                   bool                  `json:"allowance_ordering,omitempty"`
