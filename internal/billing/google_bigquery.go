@@ -217,7 +217,7 @@ func (i *Importer) importGooglePeriod(ctx context.Context, row *importRow, clien
 	if err != nil {
 		return err
 	}
-	return emit(periodDays{start: month.Format(dayFormat), revision: revision, days: days})
+	return emit(periodDays{start: month.Format(dayFormat), revision: revision, days: days, replaces: &dayWindow{from: start, to: end}})
 }
 
 func fetchGoogle(ctx context.Context, client *http.Client, auth *connectors.Auth, rawScope json.RawMessage, rawCredential []byte, start, end time.Time) (map[string]map[lineKey]lineSum, *sourceRevision, error) {
