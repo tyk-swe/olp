@@ -12,6 +12,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1550,98 +1551,8 @@ func TestCodeExactModelOrderingThroughGateway(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"id": "resp_" + uuid.NewString(), "object": "response", "status": "completed", "output": []any{}, "fixture_account": r.Header.Get("Chatgpt-Account-Id")})
 	}))
-	journey := seedCooldownJourney(t, s.pool)
-	var user string
-	if err := s.pool.QueryRow(t.Context(), `SELECT created_by::text FROM olp.projects WHERE id=$1`, journey.route.ProjectID).Scan(&user); err != nil {
-		t.Fatal(err)
-	}
-	key := s.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "ordering", "scopes": []string{"inference"}, "project_id": journey.route.ProjectID}, idempotent(), http.StatusCreated)
-	if _, err := s.pool.Exec(t.Context(), `INSERT INTO olp.code_pool_keys(pool_id,api_key_id) VALUES($1,$2)`, journey.route.PoolID, key["id"]); err != nil {
-		t.Fatal(err)
-	}
-	master, err := os.ReadFile(s.env.values["OLP_MASTER_KEY_FILE"])
-	if err != nil {
-		t.Fatal(err)
-	}
-	ring, err := secrets.ParseRing(master)
-	if err != nil {
-		t.Fatal(err)
-	}
-	digest := strings.Repeat("1", 64)
-	manifest, err := json.Marshal(codexauth.Manifest())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.pool.Exec(t.Context(), `INSERT INTO olp.plugins(digest,abi_version,manifest,module,size_bytes,etag,installed_by,approved_by,approved_at) VALUES($1,1,$2,'\x00',1,$3,$4,$4,now())`, digest, manifest, uuid.NewString(), user); err != nil {
-		t.Fatal(err)
-	}
-	address := codexauth.Upstream
-	config := providers.Configuration{
-		Identity: providerconfig.Identity[*string]{Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID, ProfileRevision: digest, Endpoint: &address},
-		Options:  providers.Options{Network: &egress.ConnectionOptions{ProxyURL: proxyURL, TrustRootsPEM: roots}},
-	}
-	configuration, err := json.Marshal(config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.pool.Exec(t.Context(), `UPDATE olp.providers SET configuration=$2 WHERE id=$1`, journey.provider, configuration); err != nil {
-		t.Fatal(err)
-	}
-	accounts := []string{uuid.NewString(), uuid.NewString()}
-	for index, source := range []string{journey.first, journey.second} {
-		account := accounts[index]
-		payload, err := json.Marshal(map[string]any{"exp": time.Now().Add(time.Hour).Unix(), "https://api.openai.com/auth": map[string]any{"chatgpt_account_id": fmt.Sprintf("account-%d", index), "chatgpt_user_id": "fixture-user"}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		token := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`)) + "." + base64.RawURLEncoding.EncodeToString(payload) + ".fixture"
-		identity, err := codexauth.TokenIdentity(token, time.Now())
-		if err != nil {
-			t.Fatal(err)
-		}
-		served, err := json.Marshal(connectors.GrantCredential{PluginDigest: digest, ProfileID: codexauth.ProfileID, AccessToken: token, Facts: identity.Facts()})
-		if err != nil {
-			t.Fatal(err)
-		}
-		tx, err := s.pool.Begin(t.Context())
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer tx.Rollback(context.Background())
-		credential := uuid.NewString()
-		var installation string
-		facts, err := json.Marshal(identity.Facts())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO olp.provider_credentials(id,provider_id,version,principal,plugin_digest,grant_facts,profile_id) VALUES($1,$2,$3,$4,$5,$6,'codex-subscription')`, credential, journey.provider, index+20, identity.Principal(), digest, facts); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO olp.provider_grants(credential_id,expires_at) VALUES($1,now()+interval '1 hour')`, credential); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO olp.code_accounts(id,project_id,provider_id,credential_id,principal,name,models,etag,created_by) SELECT $1,project_id,provider_id,$2,$3,name,models,etag,created_by FROM olp.code_accounts WHERE id=$4`, account, credential, identity.Principal(), source); err != nil {
-			t.Fatal(err)
-		}
-		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM olp.installation WHERE singleton`).Scan(&installation); err != nil {
-			t.Fatal(err)
-		}
-		if err := ring.Store(t.Context(), tx, installation, credential, secrets.ProviderCredential, served, nil); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO olp.code_pool_accounts(pool_id,account_id,weight) VALUES($1,$2,1)`, journey.route.PoolID, account); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tx.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, source); err != nil {
-			t.Fatal(err)
-		}
-		if err := tx.Commit(t.Context()); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_routes SET latest_revision_id=NULL WHERE id=$1`, journey.route.ID); err != nil {
-		t.Fatal(err)
-	}
+	journey, accounts, key := newCodeGatewayJourney(t, s, owner, proxyURL, roots)
+	consumer := &caller{name: "ordering", token: key.secret}
 	published := s.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": journey.route.ProjectID, "slug": journey.route.Slug + "-http", "pool_id": journey.route.PoolID, "models": []string{"model"}, "enabled": true, "allowance_ordering": true}, idempotent(), http.StatusCreated)
 	s.want(owner, "POST", "/api/v1/code/routes/"+published["id"].(string)+"/publish", nil, idempotent(etag(published)), http.StatusOK)
 	slug := published["slug"].(string)
@@ -1653,7 +1564,6 @@ func TestCodeExactModelOrderingThroughGateway(t *testing.T) {
 	if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1`, accounts[1], bandAllowanceJSON(t, 0, &reset, now)); err != nil {
 		t.Fatal(err)
 	}
-	consumer := &caller{name: "ordering", token: key["secret"].(string)}
 	request := map[string]any{"model": "model", "input": "hello"}
 	s.eventually("advisory ordering reaches the gateway", 20*time.Second, func() (bool, string) {
 		status, raw := s.do(consumer, "POST", "/code/"+slug+"/responses", request, nil)
@@ -1710,7 +1620,7 @@ func TestCodeExactModelOrderingThroughGateway(t *testing.T) {
 	weightedThread := func(weightChangesWinner bool) string {
 		for index := range 1000 {
 			thread := fmt.Sprintf("gateway-share-%d", index)
-			affinity := []byte(key["id"].(string) + ":" + thread)
+			affinity := []byte(key.id + ":" + thread)
 			first := routing.Score(uuid.MustParse(published["id"].(string)), uuid.MustParse(accounts[0]), 1, "responses", "code", "model", affinity)
 			second := routing.Score(uuid.MustParse(published["id"].(string)), uuid.MustParse(accounts[1]), 1, "responses", "code", "model", affinity)
 			if second > first && (3*first > second) == weightChangesWinner {
@@ -1814,6 +1724,322 @@ func TestCodePublicationPinsTranslatedOutputContract(t *testing.T) {
 		}
 		if contract != true || identity != true {
 			t.Fatalf("republished revision missing output contract, got %v", contract)
+		}
+	}
+}
+
+type codeGatewayKey struct{ id, secret string }
+
+func newCodeGatewayJourney(t *testing.T, s *service, owner *caller, proxyURL, roots string) (cooldownJourney, []string, codeGatewayKey) {
+	t.Helper()
+	journey := seedCooldownJourney(t, s.pool)
+	var user string
+	if err := s.pool.QueryRow(t.Context(), `SELECT created_by::text FROM olp.projects WHERE id=$1`, journey.route.ProjectID).Scan(&user); err != nil {
+		t.Fatal(err)
+	}
+	key := s.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "ordering", "scopes": []string{"inference"}, "project_id": journey.route.ProjectID}, idempotent(), http.StatusCreated)
+	if _, err := s.pool.Exec(t.Context(), `INSERT INTO olp.code_pool_keys(pool_id,api_key_id) VALUES($1,$2)`, journey.route.PoolID, key["id"]); err != nil {
+		t.Fatal(err)
+	}
+	master, err := os.ReadFile(s.env.values["OLP_MASTER_KEY_FILE"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	ring, err := secrets.ParseRing(master)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := strings.Repeat("1", 64)
+	manifest, err := json.Marshal(codexauth.Manifest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.pool.Exec(t.Context(), `INSERT INTO olp.plugins(digest,abi_version,manifest,module,size_bytes,etag,installed_by,approved_by,approved_at) VALUES($1,1,$2,'\x00',1,$3,$4,$4,now()) ON CONFLICT(digest) DO NOTHING`, digest, manifest, uuid.NewString(), user); err != nil {
+		t.Fatal(err)
+	}
+	address := codexauth.Upstream
+	config := providers.Configuration{
+		Identity: providerconfig.Identity[*string]{Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID, ProfileRevision: digest, Endpoint: &address},
+		Options:  providers.Options{Network: &egress.ConnectionOptions{ProxyURL: proxyURL, TrustRootsPEM: roots}},
+	}
+	configuration, err := json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.pool.Exec(t.Context(), `UPDATE olp.providers SET configuration=$2 WHERE id=$1`, journey.provider, configuration); err != nil {
+		t.Fatal(err)
+	}
+	accounts := []string{uuid.NewString(), uuid.NewString()}
+	for index, source := range []string{journey.first, journey.second} {
+
+		provider := func() string {
+			if index == 0 {
+				return journey.provider
+			}
+			id := uuid.NewString()
+			if _, err := s.pool.Exec(t.Context(), `INSERT INTO olp.providers(id,project_id,name,kind,state,configuration,etag,slots_etag,created_by) SELECT $1,project_id,'gateway-second',kind,state,configuration,$3,$4,created_by FROM olp.providers WHERE id=$2`, id, journey.provider, uuid.NewString(), uuid.NewString()); err != nil {
+				t.Fatal(err)
+			}
+			return id
+		}()
+		account := accounts[index]
+		payload, err := json.Marshal(map[string]any{"exp": time.Now().Add(time.Hour).Unix(), "https://api.openai.com/auth": map[string]any{"chatgpt_account_id": fmt.Sprintf("account-%d", index), "chatgpt_user_id": "fixture-user"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		token := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`)) + "." + base64.RawURLEncoding.EncodeToString(payload) + ".fixture"
+		identity, err := codexauth.TokenIdentity(token, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		served, err := json.Marshal(connectors.GrantCredential{PluginDigest: digest, ProfileID: codexauth.ProfileID, AccessToken: token, Facts: identity.Facts()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tx, err := s.pool.Begin(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(context.Background())
+		credential := uuid.NewString()
+		var installation string
+		facts, err := json.Marshal(identity.Facts())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO olp.provider_credentials(id,provider_id,version,principal,plugin_digest,grant_facts,profile_id) VALUES($1,$2,$3,$4,$5,$6,'codex-subscription')`, credential, provider, index+20, identity.Principal(), digest, facts); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO olp.provider_grants(credential_id,expires_at) VALUES($1,now()+interval '1 hour')`, credential); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO olp.code_accounts(id,project_id,provider_id,credential_id,principal,name,models,etag,created_by) SELECT $1,project_id,$5,$2,$3,name,models,etag,created_by FROM olp.code_accounts WHERE id=$4`, account, credential, identity.Principal(), source, provider); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM olp.installation WHERE singleton`).Scan(&installation); err != nil {
+			t.Fatal(err)
+		}
+		if err := ring.Store(t.Context(), tx, installation, credential, secrets.ProviderCredential, served, nil); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO olp.code_pool_accounts(pool_id,account_id,weight) VALUES($1,$2,1)`, journey.route.PoolID, account); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, source); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_routes SET latest_revision_id=NULL WHERE id=$1`, journey.route.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	return journey, accounts, codeGatewayKey{id: key["id"].(string), secret: key["secret"].(string)}
+}
+
+type codeRateProbe struct {
+	recover  bool
+	fallback bool
+	calls    atomic.Int64
+}
+
+type codeRateCase struct {
+	path, phase, scope string
+	secret, slug       string
+	body               json.RawMessage
+}
+
+func TestCodeTranslatedRateReservationsThroughGateway(t *testing.T) {
+	s := startService(t)
+	owner := s.owner()
+	var active atomic.Pointer[codeRateProbe]
+	proxy, roots := newCodeVendorProxy(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		probe := active.Load()
+		if probe == nil {
+			http.Error(w, "fixture not ready", http.StatusServiceUnavailable)
+			return
+		}
+		probe.calls.Add(1)
+		var input struct {
+			Model string `json:"model"`
+			Cap   int    `json:"max_output_tokens"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			t.Error(err)
+			return
+		}
+		if probe.fallback {
+			expected := func() string {
+				if r.Header.Get("Chatgpt-Account-Id") == "account-0" {
+					return "first"
+				}
+				return "second"
+			}()
+			if input.Model != expected {
+				t.Errorf("fallback dispatched model %q, want %q", input.Model, expected)
+			}
+		}
+		if input.Cap != 16 {
+			t.Errorf("dispatched output cap = %d, want effective minimum", input.Cap)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if probe.recover && r.Header.Get("Chatgpt-Account-Id") == "account-0" {
+
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"type":"usage_limit_reached","message":"fixture refusal","resets_in_seconds":60}}`))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "resp_fixture", "object": "response", "model": input.Model, "status": "completed", "output": []any{map[string]any{"id": "msg_fixture", "type": "message", "role": "assistant", "content": []any{map[string]string{"type": "output_text", "text": "recovered"}}}}, "usage": map[string]int{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}})
+	}))
+	journey, accounts, _ := newCodeGatewayJourney(t, s, owner, proxy, roots)
+
+	var secondProvider string
+	if err := s.pool.QueryRow(t.Context(), `SELECT provider_id::text FROM olp.code_accounts WHERE id=$1`, accounts[1]).Scan(&secondProvider); err != nil {
+		t.Fatal(err)
+	}
+
+	for index, account := range accounts {
+		models, err := json.Marshal([][]string{{"model", "first"}, {"model", "second"}}[index])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_accounts SET models=$2 WHERE id=$1`, account, models); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scenarios := []struct{ path, phase, scope string }{
+		{"v1/messages", "initial", "key"},
+		{"v1/messages", "initial", "provider"},
+		{"v1/messages", "recovery", "key"},
+		{"v1/messages", "recovery", "provider"},
+		{"v1/messages", "recovery", "control"},
+		{"v1/messages", "fallback", "key"},
+		{"v1/messages", "fallback", "provider"},
+		{"v1/messages", "fallback", "control"},
+		{"v1/chat/completions", "initial", "key"},
+		{"v1/chat/completions", "initial", "provider"},
+		{"v1/chat/completions", "recovery", "key"},
+		{"v1/chat/completions", "recovery", "provider"},
+		{"v1/chat/completions", "recovery", "control"},
+		{"v1/chat/completions", "fallback", "key"},
+		{"v1/chat/completions", "fallback", "provider"},
+		{"v1/chat/completions", "fallback", "control"},
+	}
+	prepared := slices.Collect(func(yield func(codeRateCase) bool) {
+		for _, tc := range scenarios {
+			phase, scope := tc.phase, tc.scope
+			model := func() string {
+				if phase == "fallback" {
+					return "pool"
+				}
+				return "model"
+			}()
+			body := json.RawMessage(fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hi"}],"max_tokens":1}`, model))
+			capacity := func() int {
+				inputEstimate := max(1, len(body)/4)
+				callerEstimate := inputEstimate + 1
+				if scope == "key" && phase != "initial" {
+					firstEffective := inputEstimate + 16
+					return firstEffective + callerEstimate + 1
+				}
+				return callerEstimate + 1
+			}()
+			key := s.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "effective-cap", "scopes": []string{"inference"}, "project_id": journey.route.ProjectID, "tokens_per_minute": func() int {
+				if scope == "key" {
+					return capacity
+				}
+				return 10000
+			}()}, idempotent(), http.StatusCreated)
+			if _, err := s.pool.Exec(t.Context(), `INSERT INTO olp.code_pool_keys(pool_id,api_key_id) VALUES($1,$2)`, journey.route.PoolID, key["id"]); err != nil {
+				t.Fatal(err)
+			}
+			for index, provider := range []string{journey.provider, secondProvider} {
+				limit := func() string {
+					if scope == "provider" && (phase == "initial" || index == 1) {
+						return fmt.Sprintf(`{"tokens_per_minute":%d}`, capacity)
+					}
+					return "null"
+				}()
+				if _, err := s.pool.Exec(t.Context(), `UPDATE olp.providers SET configuration=jsonb_set(configuration::jsonb,'{options,limits}',$2::jsonb) WHERE id=$1`, provider, limit); err != nil {
+					t.Fatal(err)
+				}
+			}
+			route := s.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": journey.route.ProjectID, "slug": "rate-" + uuid.NewString(), "pool_id": journey.route.PoolID, "models": func() []string {
+				if phase == "fallback" {
+					return []string{"first", "second"}
+				}
+				return []string{"model"}
+			}(), "aliases": func() map[string]string {
+				if phase == "fallback" {
+					return map[string]string{"pool": "first"}
+				}
+				return nil
+			}(), "enabled": true, "messages_to_codex": true, "chat_to_codex": true, "allowance_ordering": true, "initial_recovery_attempts": 1, "model_rewriting": phase == "fallback", "model_pools": func() map[string][]string {
+				if phase == "fallback" {
+					return map[string][]string{"pool": {"first", "second"}}
+				}
+				return nil
+			}()}, idempotent(), http.StatusCreated)
+			s.want(owner, "POST", "/api/v1/code/routes/"+route["id"].(string)+"/publish", nil, idempotent(etag(route)), http.StatusOK)
+			if !yield(codeRateCase{path: tc.path, phase: phase, scope: scope, secret: key["secret"].(string), slug: route["slug"].(string), body: body}) {
+				return
+			}
+		}
+	})
+	now := time.Now().UTC()
+	reset := now.Add(time.Hour)
+	for _, tc := range prepared {
+		path, phase, scope := tc.path, tc.phase, tc.scope
+		if _, err := s.pool.Exec(t.Context(), `DELETE FROM olp.code_account_cooldowns WHERE account_id=ANY($1::uuid[])`, accounts); err != nil {
+			t.Fatal(err)
+		}
+		for index, account := range accounts {
+			if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance=$2,health='healthy',unavailable_until=NULL WHERE id=$1`, account, bandAllowanceJSON(t, []float64{75, 10}[index], &reset, now)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		probe := &codeRateProbe{recover: phase != "initial", fallback: phase == "fallback"}
+		active.Store(probe)
+		consumer := &caller{name: "effective-cap", token: tc.secret}
+		status, raw := func() (int, []byte) {
+			for deadline := time.Now().Add(5 * time.Second); ; {
+				status, raw := s.do(consumer, "POST", "/code/"+tc.slug+"/"+path, tc.body, nil)
+				if status != http.StatusUnauthorized && !(status == http.StatusNotFound && strings.Contains(string(raw), "code_route_unavailable")) || time.Now().After(deadline) {
+					return status, raw
+				}
+				time.Sleep(25 * time.Millisecond)
+			}
+		}()
+		expectedCalls := func() int64 {
+			if phase == "initial" {
+				return 0
+			}
+			if scope == "control" {
+				return 2
+			}
+			return 1
+		}()
+		code := func() string {
+			if scope == "provider" {
+				return "code_provider_rate_limited"
+			}
+			return "code_rate_limited"
+		}()
+		if scope == "control" {
+			if status != http.StatusOK || !strings.Contains(string(raw), "recovered") {
+				t.Fatalf("%s %s control = %s", path, phase, describe(status, raw))
+			}
+		} else if (status != http.StatusBadRequest && status != http.StatusTooManyRequests) || !strings.Contains(string(raw), code) {
+			t.Fatalf("%s %s %s = %s", path, phase, scope, describe(status, raw))
+		}
+		if count := probe.calls.Load(); count != expectedCalls {
+			t.Fatalf("%s %s %s dispatched %d attempts, want %d", path, phase, scope, count, expectedCalls)
 		}
 	}
 }

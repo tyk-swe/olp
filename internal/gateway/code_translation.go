@@ -231,16 +231,24 @@ func (a *codeAttempt) translatedCompletion(response *http.Response, model string
 	return protocols.Decode(wire.Responses, family, body, model, "")
 }
 
-func codeOutputMinimumChanges(root oif.Value, enabled bool) []oif.Change {
-	if !enabled {
-		return nil
+func codeEffectiveOutputCap(cap int64, minimum bool) int64 {
+	if minimum && cap > 0 {
+		return max(16, cap)
 	}
+	return cap
+}
+
+func codeOutputMinimumChanges(root oif.Value, enabled bool) []oif.Change {
 	value, _ := root.Lookup("max_output_tokens")
 	cap, err := strconv.ParseInt(value.Raw(), 10, 64)
-	if err != nil || cap <= 0 || cap >= 16 {
+	if err != nil {
 		return nil
 	}
-	return []oif.Change{{Pointer: "/max_output_tokens", Value: "16", Origin: oif.TransformedMapping, Reason: "Published Codex translated output minimum"}}
+	effective := codeEffectiveOutputCap(cap, enabled)
+	if effective == cap {
+		return nil
+	}
+	return []oif.Change{{Pointer: "/max_output_tokens", Value: strconv.FormatInt(effective, 10), Origin: oif.TransformedMapping, Reason: "Published Codex translated output minimum"}}
 }
 
 func codeTargetEstimate(observation codemode.Request, body []byte, route codemode.Route, target codeTarget, ingress codeIngress) int64 {
@@ -253,7 +261,7 @@ func codeTargetEstimate(observation codemode.Request, body []byte, route codemod
 	}
 	cap := codewire.RateOutputCap(root.Root(), ingress.protocol)
 	if cap > 0 {
-		return observation.Estimate + max(0, 16-cap)
+		return observation.Estimate + codeEffectiveOutputCap(cap, true) - cap
 	}
 	return observation.Estimate
 }

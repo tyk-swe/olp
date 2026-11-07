@@ -96,21 +96,21 @@ func newLaneReport(writer *reportWriter, lanes []lane) *laneReport {
 	report := &laneReport{writer: writer, pending: map[string]runRecord{}}
 	for _, l := range lanes {
 		record := l.record("no_signal", "lane did not complete", "", false)
-		identity := recordIdentity(record, record.ClientVersion)
+		identity := pendingLaneScope(record)
 		report.order = append(report.order, identity)
 		report.pending[identity] = record
 	}
 	return report
 }
 
-func recordIdentity(record runRecord, version string) string {
-	scope, _ := json.Marshal([]string{record.Client, version, record.Platform, record.Adapter, record.Profile, record.Model, record.Protocol, record.Transport})
+func pendingLaneScope(record runRecord) string {
+	scope, _ := json.Marshal([]string{record.Client, record.Platform, record.Adapter, record.Profile, record.Model, record.Protocol, record.Transport})
 	return string(scope)
 }
 
 func (r *laneReport) complete(t *testing.T, record runRecord) {
 	t.Helper()
-	delete(r.pending, recordIdentity(record, ""))
+	delete(r.pending, pendingLaneScope(record))
 	r.writer.emit(t, record)
 }
 

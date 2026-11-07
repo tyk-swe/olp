@@ -147,7 +147,9 @@ func newVendorMux(codexToken string, toolProof chan<- struct{}) *http.ServeMux {
 func fixtureCodexTool(w http.ResponseWriter, request vendorRequest, proof chan<- struct{}) bool {
 	hasBash := slices.ContainsFunc(request.Tools, func(tool struct {
 		Name string `json:"name"`
-	}) bool { return tool.Name == "Bash" })
+	}) bool {
+		return tool.Name == "Bash"
+	})
 	if !hasBash {
 		return false
 	}
@@ -182,20 +184,30 @@ func fixtureCodexTool(w http.ResponseWriter, request vendorRequest, proof chan<-
 		_ = json.NewEncoder(w).Encode(response)
 		return true
 	}
-	events := []map[string]any{
-		{"type": "response.created", "response": map[string]any{"id": "resp_fixture_tool", "object": "response", "model": vendorModel, "status": "in_progress", "output": []any{}}},
-		{"type": "response.output_item.added", "output_index": 0, "item": map[string]any{"id": "fc_fixture", "type": "function_call", "call_id": "call_fixture_bash", "name": "Bash", "arguments": "", "status": "in_progress"}},
-		{"type": "response.function_call_arguments.delta", "item_id": "fc_fixture", "output_index": 0, "delta": arguments},
-		{"type": "response.function_call_arguments.done", "item_id": "fc_fixture", "output_index": 0, "arguments": arguments},
-		{"type": "response.output_item.done", "output_index": 0, "item": item},
-		{"type": "response.completed", "response": response},
+
+	events := []struct {
+		SequenceNumber int            `json:"sequence_number"`
+		Type           string         `json:"type"`
+		Response       map[string]any `json:"response,omitempty"`
+		OutputIndex    *int           `json:"output_index,omitempty"`
+		Item           map[string]any `json:"item,omitempty"`
+		ItemID         string         `json:"item_id,omitempty"`
+		Delta          string         `json:"delta,omitempty"`
+		Arguments      string         `json:"arguments,omitempty"`
+	}{
+		{SequenceNumber: 0, Type: "response.created", Response: map[string]any{"id": "resp_fixture_tool", "object": "response", "model": vendorModel, "status": "in_progress", "output": []any{}}},
+		{SequenceNumber: 1, Type: "response.output_item.added", OutputIndex: new(0), Item: map[string]any{"id": "fc_fixture", "type": "function_call", "call_id": "call_fixture_bash", "name": "Bash", "arguments": "", "status": "in_progress"}},
+		{SequenceNumber: 2, Type: "response.function_call_arguments.delta", ItemID: "fc_fixture", OutputIndex: new(0), Delta: arguments},
+		{SequenceNumber: 3, Type: "response.function_call_arguments.done", ItemID: "fc_fixture", OutputIndex: new(0), Arguments: arguments},
+		{SequenceNumber: 4, Type: "response.output_item.done", OutputIndex: new(0), Item: item},
+		{SequenceNumber: 5, Type: "response.completed", Response: response},
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
-	for index, event := range events {
-		event["sequence_number"] = index
+	for _, event := range events {
 		raw, _ := json.Marshal(event)
-		_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event["type"], raw)
+		_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, raw)
 	}
+
 	return true
 }
 
