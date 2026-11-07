@@ -214,7 +214,7 @@ func TestUpgradeKeepsLegacyBillingGapsUnimported(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	migrateBefore(t, pool, "0140")
+	migrateBefore(t, pool, "0141")
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.provider_billing_days SET last_success_at=now() WHERE provider_id=$1 AND day='2026-10-17'`, provider); err != nil {
 		t.Fatal(err)
 	}
