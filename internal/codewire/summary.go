@@ -56,10 +56,13 @@ func SummaryHistory(body []byte, open func(string) (string, error)) (string, err
 	}
 	items := input.Elements()
 	for index, item := range items {
+		if !summaryAnnotation(item) {
+			return "", refused
+		}
 		kind, _ := field(item, "type").Text()
 		switch kind {
 		case "", "message":
-			if !portableFields(item, "type", "role", "content", "id", "status") || !slices.Contains([]string{"user", "assistant", "system", "developer"}, summaryText(item, "role")) || !summaryContent(field(item, "content")) {
+			if !portableFields(item, "type", "role", "content", "id", "status", "internal_chat_message_metadata_passthrough") || !slices.Contains([]string{"user", "assistant", "system", "developer"}, summaryText(item, "role")) || !summaryContent(field(item, "content")) {
 				return "", refused
 			}
 			status := summaryText(item, "status")
@@ -191,9 +194,9 @@ func summaryToolExchange(items []oif.Value, index int, kind string) bool {
 	}
 	other := matches[0]
 	if kind == "function_call" {
-		return portableFields(item, "type", "id", "call_id", "name", "arguments", "status") && summaryText(item, "name") != "" && field(item, "arguments").Kind() == oif.String && (summaryText(item, "status") == "" || summaryText(item, "status") == "completed") && other > index && summaryText(items[other], "type") == "function_call_output"
+		return portableFields(item, "type", "id", "call_id", "name", "arguments", "status", "internal_chat_message_metadata_passthrough") && summaryText(item, "name") != "" && field(item, "arguments").Kind() == oif.String && (summaryText(item, "status") == "" || summaryText(item, "status") == "completed") && other > index && summaryText(items[other], "type") == "function_call_output"
 	}
-	return portableFields(item, "type", "id", "call_id", "output") && field(item, "output").Kind() == oif.String && other < index && summaryText(items[other], "type") == "function_call"
+	return portableFields(item, "type", "id", "call_id", "output", "internal_chat_message_metadata_passthrough") && field(item, "output").Kind() == oif.String && other < index && summaryText(items[other], "type") == "function_call"
 }
 
 func summaryControls(root oif.Value) bool {
@@ -225,4 +228,29 @@ func summaryControls(root oif.Value) bool {
 		}
 	}
 	return true
+}
+
+func summaryAnnotation(item oif.Value) bool {
+	annotation := field(item, "internal_chat_message_metadata_passthrough")
+	if annotation.Kind() == oif.Absent || annotation.Kind() == oif.Null {
+		return true
+	}
+	if !portableFields(annotation, "turn_id", "create_time", "content_item_kinds") {
+		return false
+	}
+	return !slices.ContainsFunc(annotation.Members(), func(member oif.Member) bool {
+		if member.Value.Kind() == oif.Null {
+			return false
+		}
+		switch member.Name {
+		case "turn_id":
+			return member.Value.Kind() != oif.String
+		case "create_time":
+			return member.Value.Kind() != oif.Number
+		case "content_item_kinds":
+			return member.Value.Kind() != oif.Array || slices.ContainsFunc(member.Value.Elements(), func(value oif.Value) bool { return value.Kind() != oif.String })
+		default:
+			return true
+		}
+	})
 }

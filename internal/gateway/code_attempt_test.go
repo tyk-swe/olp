@@ -1702,20 +1702,24 @@ func (summaryTestAuthorizer) AuthorizeCode(_ context.Context, _ routing.Configur
 func TestCodeSummaryCompactionAccountsOneCallAndNeverReplaysAcceptedWork(t *testing.T) {
 	for _, profile := range []string{"antigravity-subscription", "grok-build-subscription"} {
 		for _, test := range []struct {
-			name    string
-			path    string
-			stream  bool
-			trigger bool
-			fail    bool
-			finish  string
-			status  int
+			metadata string
+			name     string
+			path     string
+			stream   bool
+			trigger  bool
+			fail     bool
+			finish   string
+			status   int
 		}{
-			{"streaming endpoint", "responses/compact", true, false, false, "STOP", 422},
-			{"nonstreaming trigger", "responses", false, true, false, "STOP", 422},
-			{"endpoint", "responses/compact", false, false, false, "STOP", 200},
-			{"trigger", "responses", true, true, false, "STOP", 200},
-			{"key storage failure", "responses/compact", false, false, true, "STOP", 502},
-			{"incomplete summary", "responses/compact", false, false, false, "MAX_TOKENS", 502},
+			{"", "streaming endpoint", "responses/compact", true, false, false, "STOP", 422},
+			{"", "nonstreaming trigger", "responses", false, true, false, "STOP", 422},
+			{"", "endpoint", "responses/compact", false, false, false, "STOP", 200},
+			{"", "trigger", "responses", true, true, false, "STOP", 200},
+			{`{"turn_id":"turn-fixture","create_time":123,"content_item_kinds":["text"]}`, "annotated trigger", "responses", true, true, false, "STOP", 200},
+			{`{"create_time":"unsupported"}`, "malformed annotation", "responses", true, true, false, "STOP", 422},
+			{`{"encrypted_content":"foreign-state"}`, "opaque annotation", "responses", true, true, false, "STOP", 422},
+			{"", "key storage failure", "responses/compact", false, false, true, "STOP", 502},
+			{"", "incomplete summary", "responses/compact", false, false, false, "MAX_TOKENS", 502},
 		} {
 			t.Run(profile+"/"+test.name, func(t *testing.T) {
 				observed := make(chan []byte, 2)
@@ -1754,7 +1758,13 @@ func TestCodeSummaryCompactionAccountsOneCallAndNeverReplaysAcceptedWork(t *test
 				if test.trigger {
 					trigger = `,{"type":"compaction_trigger"}`
 				}
-				request := httptest.NewRequest(http.MethodPost, "/code/summary/"+test.path, strings.NewReader(fmt.Sprintf(`{"model":"gemini-fixture","stream":%t,"input":[{"role":"user","content":"Keep the migration constraints"}%s]}`, test.stream, trigger)))
+				annotation := func() string {
+					if test.metadata == "" {
+						return ""
+					}
+					return `,"internal_chat_message_metadata_passthrough":` + test.metadata
+				}()
+				request := httptest.NewRequest(http.MethodPost, "/code/summary/"+test.path, strings.NewReader(fmt.Sprintf(`{"model":"gemini-fixture","stream":%t,"input":[{"role":"user","content":"Keep the migration constraints"%s},{"type":"function_call","call_id":"call","name":"query","arguments":"{}","status":"completed"%s},{"type":"function_call_output","call_id":"call","output":"migration constraints"%s}%s]}`, test.stream, annotation, annotation, annotation, trigger)))
 				request.Header.Set("Authorization", "Bearer "+fullKey)
 				request.Header.Set("Session-Id", "summary-root")
 				response := httptest.NewRecorder()
@@ -1770,6 +1780,9 @@ func TestCodeSummaryCompactionAccountsOneCallAndNeverReplaysAcceptedWork(t *test
 				}
 				if len(observed) != 1 || len(ledger.settlements) != 1 || ledger.settlements[0].Total == nil || *ledger.settlements[0].Total != 10 {
 					t.Fatalf("calls %d, usage %+v", len(observed), ledger.settlements)
+				}
+				if test.metadata != "" && !bytes.Contains(<-observed, []byte("turn-fixture")) {
+					t.Fatal("summary lost the typed message annotation")
 				}
 				if test.status != 200 {
 					if strings.Contains(response.Body.String(), "encrypted_content") || strings.Contains(response.Body.String(), "migration constraints") {
