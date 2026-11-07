@@ -230,6 +230,8 @@ func (r Route) AllPaidTargets() map[string]PaidTarget {
 type Route struct {
 	TranslatedCodexOutputMinimum  bool                  `json:"translated_codex_output_minimum,omitempty"`
 	ResponsesToGrok               bool                  `json:"responses_to_grok,omitempty"`
+	MessagesToGrok                bool                  `json:"messages_to_grok,omitempty"`
+	MessagesGrokSafetyIdentifier  bool                  `json:"messages_grok_safety_identifier,omitempty"`
 	GrokCLIIdentity               bool                  `json:"grok_cli_identity,omitempty"`
 	CodexCLIIdentity              bool                  `json:"codex_cli_identity,omitempty"`
 	PaidFallbackTargets           map[string]PaidTarget `json:"paid_fallback_targets,omitempty"`

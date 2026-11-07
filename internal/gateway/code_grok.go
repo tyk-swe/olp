@@ -113,3 +113,25 @@ func grokTextContent(item oif.Value, field string) bool {
 	}
 	return true
 }
+
+func codeTranslateGrokMessages(body []byte, r *http.Request, model string, safetyMapping bool) (codePayload, error) {
+	request, safety, err := codeParseMessages(body, r, model, safetyMapping)
+	if err != nil {
+		return codePayload{}, err
+	}
+	target, err := codeEncodeResponses(request)
+	if err != nil {
+		return codePayload{}, err
+	}
+	prepared, err := target.OIF().WithChanges(codeSafetyIdentifierChanges(safety)...)
+	if err != nil {
+		return codePayload{}, codemode.Refuse(422, "code_translation_unsupported_semantics")
+	}
+	clean := r.Clone(r.Context())
+	clean.URL.RawQuery = ""
+	payload, err := codeTranslateGrok(prepared.Document().Bytes(), clean, model)
+	if err != nil {
+		return codePayload{}, err
+	}
+	return codePayload{body: payload.body, stream: request.Stream, translated: true, target: codeadapter.TargetGrok}, nil
+}

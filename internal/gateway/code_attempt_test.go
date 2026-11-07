@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -1221,9 +1222,15 @@ func TestAntigravitySignedToolRoundTrip(t *testing.T) {
 func TestGrokPublishedTransportPreservesTextAndRefusesMedia(t *testing.T) {
 	for _, test := range []struct {
 		name, body string
+		messages   bool
 		identity   bool
+		safety     bool
 		status     int
 	}{
+		{name: "Grok metadata requires its own opt-in", messages: true, body: `{"model":"grok-model","max_tokens":4,"metadata":{"user_id":"fixture-user"},"messages":[{"role":"user","content":"hello"}]}`, status: http.StatusUnprocessableEntity},
+		{name: "Grok metadata opt-in hashes identity", messages: true, safety: true, body: `{"model":"grok-model","max_tokens":4,"metadata":{"user_id":"fixture-user"},"messages":[{"role":"user","content":"hello"}]}`, status: http.StatusOK},
+		{name: "Grok metadata extra state refuses", messages: true, safety: true, body: `{"model":"grok-model","max_tokens":4,"metadata":{"user_id":"fixture-user","state":"foreign"},"messages":[{"role":"user","content":"hello"}]}`, status: http.StatusUnprocessableEntity},
+		{name: "translated Messages text", messages: true, body: `{"model":"grok-model","max_tokens":4,"messages":[{"role":"user","content":"hello"}]}`, status: http.StatusOK},
 		{name: "unsupported media", body: `{"model":"grok-model","input":[{"role":"user","content":[{"type":"input_image","image_url":"https://example.invalid/image.png"}]}]}`, status: http.StatusUnprocessableEntity},
 		{name: "truthful gateway identity", body: `{"model":"grok-model","input":"hello","include":["reasoning.encrypted_content"],"client_metadata":{"thread_id":"fixture-thread"}}`, status: http.StatusOK},
 		{name: "explicit Grok identity", body: `{"model":"grok-model","input":"hello"}`, identity: true, status: http.StatusOK},
@@ -1233,8 +1240,14 @@ func TestGrokPublishedTransportPreservesTextAndRefusesMedia(t *testing.T) {
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				reached <- struct{}{}
 				raw, err := io.ReadAll(r.Body)
-				if err != nil || string(raw) != test.body {
+				if err != nil || !test.messages && string(raw) != test.body {
 					t.Errorf("request changed %q, %v", raw, err)
+				}
+				if test.safety {
+					expected := fmt.Sprintf(`"safety_identifier":"%x"`, sha256.Sum256([]byte("fixture-user")))
+					if !bytes.Contains(raw, []byte(expected)) || bytes.Contains(raw, []byte("fixture-user")) {
+						t.Errorf("identity mapping %s", raw)
+					}
 				}
 				if !test.identity && (r.Header.Get("User-Agent") != "OLP" || r.Header.Get("X-Grok-Client-Identifier") != "") {
 					t.Errorf("implicit identity %v", r.Header)
@@ -1251,7 +1264,7 @@ func TestGrokPublishedTransportPreservesTextAndRefusesMedia(t *testing.T) {
 			h := newHarness(t, Config{}, Dependencies{Admission: NewAdmission(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil))), CodeLedger: ledger, CodeAuthorizer: fakeCodeAuthorizer{}})
 			h.rt.keys[fullKey] = authority
 			published := time.Now()
-			route := codemode.Route{PublishedAt: &published, ID: "route", ProjectID: project, Slug: "grok", PoolID: "pool", Models: []string{"grok-model"}, Enabled: true, RevisionID: "revision", Revision: 1, ResponsesToGrok: true, GrokCLIIdentity: test.identity}
+			route := codemode.Route{PublishedAt: &published, ID: "route", ProjectID: project, Slug: "grok", PoolID: "pool", Models: []string{"grok-model"}, Enabled: true, RevisionID: "revision", Revision: 1, ResponsesToGrok: !test.messages, MessagesToGrok: test.messages, MessagesGrokSafetyIdentifier: test.safety, MessagesCodexSafetyIdentifier: true, GrokCLIIdentity: test.identity}
 			publication, err := release.NewRelease("", 0, &routing.Snapshot{Generation: routing.Generation{ID: uuid.NewString()}, CodeRoutes: map[string]codemode.Route{"grok": route}, CodeConnections: map[string]routing.Configuration{"revision:provider": {Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: "grok-build-subscription", Endpoint: upstream.URL}}}}, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -1259,7 +1272,11 @@ func TestGrokPublishedTransportPreservesTextAndRefusesMedia(t *testing.T) {
 			h.rt.release = publication
 			mux := http.NewServeMux()
 			h.gateway.RegisterCode(mux)
-			request := httptest.NewRequest(http.MethodPost, "/code/grok/responses", strings.NewReader(test.body))
+			path := "/code/grok/responses"
+			if test.messages {
+				path = "/code/grok/v1/messages?beta=true"
+			}
+			request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(test.body))
 			request.Header.Set("Authorization", "Bearer "+fullKey)
 			response := httptest.NewRecorder()
 			mux.ServeHTTP(response, request)
@@ -1275,6 +1292,115 @@ func TestGrokPublishedTransportPreservesTextAndRefusesMedia(t *testing.T) {
 				if test.status == http.StatusOK {
 					t.Fatal("text did not reach subscription")
 				}
+			}
+		})
+	}
+}
+
+func TestGrokMessagesToolContinuationAndUnsupportedState(t *testing.T) {
+	for _, mode := range []struct{ stream, incomplete bool }{{}, {stream: true}, {stream: true, incomplete: true}} {
+		stream := mode.stream
+		t.Run(fmt.Sprintf("stream=%t/incomplete=%t", stream, mode.incomplete), func(t *testing.T) {
+			observed := make(chan []byte, 8)
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				observed <- body
+				var request struct {
+					Stream bool   `json:"stream"`
+					Safety string `json:"safety_identifier"`
+					Cap    int    `json:"max_output_tokens"`
+				}
+				if err := json.Unmarshal(body, &request); err != nil || request.Stream != stream || request.Cap != 4 || request.Safety != fmt.Sprintf("%x", sha256.Sum256([]byte("fixture-user"))) {
+					t.Errorf("translated request %s, %v", body, err)
+				}
+				output := `[{"type":"function_call","call_id":"call-read","name":"read_file","arguments":"{\"path\":\"main.go\"}"}]`
+				if bytes.Contains(body, []byte(`"function_call_output"`)) {
+					output = `[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"file read"}]}]`
+				}
+				response := `{"id":"answer","status":"completed","model":"grok-model","output":` + output + `,"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`
+				if stream {
+					w.Header().Set("Content-Type", "text/event-stream")
+					if mode.incomplete {
+						_, _ = io.WriteString(w, "data: "+`{"type":"response.created","response":{"id":"answer","status":"in_progress","output":[]}}`+"\n\ndata: "+`{"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"partial"}`+"\n\n")
+						return
+					}
+					_, _ = io.WriteString(w, "data: "+`{"type":"response.created","response":{"id":"answer","status":"in_progress","output":[]}}`+"\n\ndata: "+`{"type":"response.completed","response":`+response+"}\n\n")
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, response)
+			}))
+			defer upstream.Close()
+			project := "project"
+			authority := keyauthority.Authority{ID: "key", ProjectID: &project, Policy: keyauthority.KeyPolicy{Scopes: []string{"inference"}}}
+			ledger := &fakeCodeLedger{connectionPermit: codesessions.Permit{Authority: authority, Account: codemode.Account{ID: "account", ProviderID: "provider", Principal: "principal"}, Pin: codemode.Pin{AccountID: "account", Principal: "principal"}, Attempt: codemode.Attempt{ID: "attempt"}}}
+			h := newHarness(t, Config{}, Dependencies{Admission: NewAdmission(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil))), CodeLedger: ledger, CodeAuthorizer: fakeCodeAuthorizer{}})
+			h.rt.keys[fullKey] = authority
+			published := time.Now()
+			route := codemode.Route{PublishedAt: &published, ID: "route", ProjectID: project, Slug: "grok", PoolID: "pool", Models: []string{"grok-model"}, Enabled: true, RevisionID: "revision", Revision: 1, MessagesToGrok: true, MessagesGrokSafetyIdentifier: true, TranslatedCodexOutputMinimum: true}
+			publication, err := release.NewRelease("", 0, &routing.Snapshot{Generation: routing.Generation{ID: uuid.NewString()}, CodeRoutes: map[string]codemode.Route{"grok": route}, CodeConnections: map[string]routing.Configuration{"revision:provider": {Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: "grok-build-subscription", Endpoint: upstream.URL}}}}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.rt.release = publication
+			mux := http.NewServeMux()
+			h.gateway.RegisterCode(mux)
+			call := func(body string) *httptest.ResponseRecorder {
+				request := httptest.NewRequest(http.MethodPost, "/code/grok/v1/messages?beta=true", strings.NewReader(body))
+				request.Header.Set("Authorization", "Bearer "+fullKey)
+				response := httptest.NewRecorder()
+				mux.ServeHTTP(response, request)
+				return response
+			}
+			prefix := fmt.Sprintf(`{"model":"grok-model","max_tokens":4,"stream":%t,"system":"Read carefully","metadata":{"user_id":"fixture-user"},"tools":[{"name":"read_file","description":"Read a file","input_schema":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}}],"messages":`, stream)
+			first := call(prefix + `[{"role":"user","content":"read main.go"}]}`)
+			if mode.incomplete {
+				if !strings.Contains(first.Body.String(), "code_upstream_invalid") {
+					t.Fatalf("incomplete stream %d %s", first.Code, first.Body.String())
+				}
+				<-observed
+				select {
+				case body := <-observed:
+					t.Fatalf("incomplete stream replayed %s", body)
+				default:
+				}
+				if !slices.ContainsFunc(ledger.outcomes, func(outcome codemode.Outcome) bool { return outcome.Kind == "incomplete" }) || ledger.confirmations != 0 {
+					t.Fatalf("incomplete outcome %+v, confirmations %d", ledger.outcomes, ledger.confirmations)
+				}
+				return
+			}
+			if first.Code != http.StatusOK || !strings.Contains(first.Body.String(), `"id":"call-read"`) || !strings.Contains(first.Body.String(), `"name":"read_file"`) || !strings.Contains(first.Body.String(), `"stop_reason":"tool_use"`) {
+				t.Fatalf("tool response %d %s", first.Code, first.Body.String())
+			}
+			firstRequest := <-observed
+			for _, value := range []string{"Read carefully", `"name":"read_file"`, `"required":["path"]`} {
+				if !bytes.Contains(firstRequest, []byte(value)) {
+					t.Fatalf("lost %s in %s", value, firstRequest)
+				}
+			}
+			second := call(prefix + `[{"role":"user","content":"read main.go"},{"role":"assistant","content":[{"type":"tool_use","id":"call-read","name":"read_file","input":{"path":"main.go"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-read","content":"package main"}]}]}`)
+			if second.Code != http.StatusOK || !strings.Contains(second.Body.String(), "file read") {
+				t.Fatalf("continuation %d %s", second.Code, second.Body.String())
+			}
+			secondRequest := <-observed
+			for _, value := range []string{`"call_id":"call-read"`, `"type":"function_call_output"`, "package main", `\"path\":\"main.go\"`} {
+				if !bytes.Contains(secondRequest, []byte(value)) {
+					t.Fatalf("lost %s in %s", value, secondRequest)
+				}
+			}
+			if len(ledger.settlements) != 2 || ledger.settlements[0].Total == nil || *ledger.settlements[0].Total != 5 || ledger.settlements[1].Total == nil || *ledger.settlements[1].Total != 5 {
+				t.Fatalf("usage %+v", ledger.settlements)
+			}
+			for _, content := range []string{`{"type":"thinking","thinking":"opaque","signature":"signed"}`, `{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAAA"}}`, `{"type":"text","text":"cached","cache_control":{"type":"ephemeral"}}`} {
+				response := call(prefix + `[{"role":"user","content":[` + content + `]}]}`)
+				if response.Code != http.StatusUnprocessableEntity && response.Code != http.StatusConflict {
+					t.Fatalf("unsupported content = %d %s", response.Code, response.Body.String())
+				}
+			}
+			select {
+			case body := <-observed:
+				t.Fatalf("unsupported request dispatched %s", body)
+			default:
 			}
 		})
 	}
