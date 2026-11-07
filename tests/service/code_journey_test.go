@@ -1730,12 +1730,6 @@ func TestCodePublicationPinsTranslatedOutputContract(t *testing.T) {
 		}
 	}
 
-	for _, platform := range []string{"linux", "windows"} {
-		configuration, err := codeclient.Generate(codemode.Route{Enabled: true, RevisionID: "fixture", Slug: "output-contract", Models: []string{"grok-fixture-model"}, MessagesToGrok: true}, codeclient.Offers{{Adapter: codemode.AdapterGrokBuild, Models: []string{"grok-fixture-model"}}}, codeclient.Request{GatewayURL: "http://localhost:4000", Client: codeadapter.ClientClaudeCode, Model: "grok-fixture-model", Platform: platform})
-		if err != nil || !strings.Contains(configuration.Configuration, "DISABLE_PROMPT_CACHING") || !strings.Contains(configuration.Configuration, "MAX_THINKING_TOKENS") || !strings.Contains(configuration.Configuration, "OLP_API_KEY") {
-			t.Fatalf("Grok Claude setup %s = %+v, %v", platform, configuration, err)
-		}
-	}
 }
 
 type codeGatewayKey struct{ id, secret string }

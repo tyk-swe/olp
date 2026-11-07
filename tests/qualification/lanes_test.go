@@ -760,9 +760,13 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 
 func TestLaneReportRetainsEveryAdapterScope(t *testing.T) {
 	specs := lanes()
-	first := specs[1]
-	second := first
-	second.seed = specs[0].seed
+	codex := slices.IndexFunc(specs, func(spec lane) bool { return spec.seed.adapter == "codex" })
+	grok := slices.IndexFunc(specs, func(spec lane) bool { return spec.seed.adapter == "grok-build" })
+	if codex < 0 || grok < 0 {
+		t.Fatal("report requires two distinct adapter fixtures")
+	}
+	first := specs[codex]
+	second := lane{client: first.client, seed: specs[grok].seed, protocol: first.protocol}
 	var output bytes.Buffer
 	report := newLaneReport(&reportWriter{out: &output}, []lane{first, second})
 	report.complete(t, first.record("pass", "fixture only", "test-version", true))
