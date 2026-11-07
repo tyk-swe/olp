@@ -91,7 +91,7 @@ func (e Endpoint) Enabled(route codemode.Route) bool {
 			return false
 		}
 	}
-	return e.Target == "" || e.Target == TargetGrok && route.ResponsesToGrok
+	return e.Target == "" || e.Target == TargetGrok && route.ResponsesToGrok && (e.ClientPath != "responses/compact" || route.SummaryCompaction)
 }
 
 type Endpoint struct {
@@ -144,8 +144,11 @@ var keyEnrollmentNotes = []string{
 var vendors = []Vendor{
 	{
 		Adapter: codemode.AdapterGrokBuild, Name: "Grok Build", profiles: []string{grokauth.ProfileID}, manifest: grokauth.Manifest,
-		credential:      grokCredential,
-		endpoints:       []Endpoint{{ClientPath: "responses", UpstreamPath: "responses", Protocol: codemode.ProtocolResponses, Operation: "responses", Identity: IdentityCodex, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP, Target: TargetGrok}},
+		credential: grokCredential,
+		endpoints: []Endpoint{
+			{ClientPath: "responses", UpstreamPath: "responses", Protocol: codemode.ProtocolResponses, Operation: "responses", Identity: IdentityCodex, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP, Target: TargetGrok},
+			{ClientPath: "responses/compact", UpstreamPath: "responses", Protocol: codemode.ProtocolResponses, Operation: "responses/compact", Identity: IdentityCodex, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP, Target: TargetGrok},
+		},
 		clients:         []Client{{ID: ClientCodex}},
 		enrollmentNotes: []string{"Enrollment verifies the provider subject through authenticated userinfo and stores refreshable grants encrypted. Live independent-gateway acceptance remains unverified."},
 		notes:           []string{"Explicit responses_to_grok, messages_to_grok and chat_to_grok policies independently enable controlled text and function tools over HTTP or SSE. Grok client identity requires separate grok_cli_identity policy. Provider terms may restrict independent gateways and accounts may be suspended. Fixture success does not qualify live subscription acceptance."},

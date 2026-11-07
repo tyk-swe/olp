@@ -121,7 +121,7 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *re
 		if rewriteErr != nil {
 			return codePayload{}, rewriteErr
 		}
-		if attempt.endpoint.Target == codeadapter.TargetAntigravity && observation.Operation.Name == "compact" {
+		if (attempt.endpoint.Target == codeadapter.TargetAntigravity || attempt.endpoint.Target == codeadapter.TargetGrok) && observation.Operation.Name == "compact" {
 			if !route.SummaryCompaction || attempt.paid != nil {
 				return codePayload{}, codemode.Refuse(422, "code_compaction_disabled")
 			}
@@ -134,7 +134,11 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *re
 			if ingress.protocol == codemode.ProtocolMessages {
 				return codeTranslateGrokMessages(requestBody, r, attempt.model, route.MessagesGrokSafetyIdentifier)
 			}
-			return codeTranslateGrok(requestBody, r, attempt.model)
+			restored, err := attempt.restoreSummaries(r.Context(), requestBody, route.SummaryCompaction)
+			if err != nil {
+				return codePayload{}, err
+			}
+			return codeTranslateGrok(restored, r, attempt.model)
 		}
 		if attempt.endpoint.Target == codeadapter.TargetAntigravity {
 			restored, err := attempt.restoreSummaries(r.Context(), requestBody, route.SummaryCompaction)

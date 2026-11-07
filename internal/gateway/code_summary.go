@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/codewire"
@@ -69,7 +70,12 @@ func (a *codeAttempt) prepareSummary(body []byte, r *http.Request, route codemod
 	if err != nil {
 		return codePayload{}, codemode.Refuse(422, "code_compaction_history_unsupported")
 	}
-	payload, err := codeTranslateAntigravityProtocol(prepared, r, a.model, a.auth.ProjectID, wire.Responses, codeAntigravityPolicy{})
+	payload, err := func() (codePayload, error) {
+		if a.endpoint.Target == codeadapter.TargetGrok {
+			return codeTranslateGrok(prepared, r, a.model)
+		}
+		return codeTranslateAntigravityProtocol(prepared, r, a.model, a.auth.ProjectID, wire.Responses, codeAntigravityPolicy{})
+	}()
 	if err != nil {
 		return codePayload{}, err
 	}
@@ -93,9 +99,21 @@ func (a *codeAttempt) summaryResponse(ctx context.Context, w http.ResponseWriter
 		fail()
 		return
 	}
-	unwrapped, stateErr := antigravityResult(body)
-	completion, decodeErr := protocols.Decode(wire.Gemini, wire.Responses, unwrapped, a.publicModel, "")
-	a.observe(antigravityObservation(completion, decodeErr == nil, decodeErr == nil && stateErr == nil))
+	completion, stateErr, decodeErr := func() (*wire.Completion, error, error) {
+		if a.endpoint.Target == codeadapter.TargetGrok {
+			a.observeEncodedUnary(body, response.Header.Get("Content-Encoding"))
+			decoded, err := codewire.Decode(body, response.Header.Get("Content-Encoding"), codewire.MaxBody)
+			if err != nil {
+				return nil, err, nil
+			}
+			result, decodeErr := protocols.Decode(wire.Responses, wire.Responses, decoded, a.publicModel, "")
+			return result, nil, decodeErr
+		}
+		unwrapped, stateErr := antigravityResult(body)
+		result, decodeErr := protocols.Decode(wire.Gemini, wire.Responses, unwrapped, a.publicModel, "")
+		a.observe(antigravityObservation(result, decodeErr == nil, decodeErr == nil && stateErr == nil))
+		return result, stateErr, decodeErr
+	}()
 	if stateErr != nil || decodeErr != nil || completion == nil || completion.Failure != nil || completion.FinishReason != "stop" || len(completion.ToolCalls) != 0 || strings.TrimSpace(completion.OutputText) == "" {
 		fail()
 		return

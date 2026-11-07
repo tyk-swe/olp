@@ -31,6 +31,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/grokauth"
 	"github.com/tyk-swe/olp/internal/providerconfig"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -2067,8 +2068,24 @@ func TestCodeSignedToolContinuation(t *testing.T) {
 	s := startService(t)
 	owner := s.owner()
 	checkCodePublicationPinsTranslatedOutputContract(t, s, owner)
-	var calls atomic.Int64
+	var calls, grokCalls atomic.Int64
 	proxy, roots := newCodeVendorProxy(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Host == "cli-chat-proxy.grok.com" {
+			grokCalls.Add(1)
+			body, _ := io.ReadAll(r.Body)
+			if !bytes.Contains(body, []byte("gemini-fixture")) || r.Header.Get("Authorization") != "Bearer fixture-token" || r.Header.Get("User-Agent") == "" {
+				t.Errorf("Grok summary identity or model missing")
+			}
+			text := func() string {
+				if bytes.Contains(body, []byte("Conversation summary")) && !bytes.Contains(body, []byte("Summarize this complete conversation")) {
+					return "The PostgreSQL migration constraints are restored"
+				}
+				return "Preserve the PostgreSQL migration constraints"
+			}()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"id":"grok-summary","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":%q}]}],"usage":{"input_tokens":8,"output_tokens":2,"total_tokens":10}}`, text)
+			return
+		}
 		calls.Add(1)
 		var body struct {
 			Model   string `json:"model"`
@@ -2113,8 +2130,10 @@ func TestCodeSignedToolContinuation(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(result))
 	}))
-	journey, consumer := newSignedCodeJourney(t, s, owner, proxy, roots)
+	journey, consumer := newSignedCodeJourney(t, s, owner, proxy, roots, false)
 	summarySetup := prepareSummaryJourney(t, s, owner, journey)
+	grokJourney, grokConsumer := newSignedCodeJourney(t, s, owner, proxy, roots, true)
+	grokSetup := prepareSummaryJourney(t, s, owner, grokJourney)
 	configuration, configErr := codeclient.Generate(journey.route, codeclient.Offers{{Adapter: codemode.AdapterCodex, Models: []string{"gemini-fixture"}}, {Adapter: codemode.AdapterAntigravity, Models: []string{"gemini-fixture"}}}, codeclient.Request{GatewayURL: s.origin, Client: codeadapter.ClientCodex, Model: "gemini-fixture"})
 	if configErr != nil || !strings.Contains(configuration.Configuration, "supports_websockets = false") || !strings.Contains(configuration.Configuration, `web_search = "disabled"`) {
 		t.Fatalf("HTTP Codex configuration = %s, %v", configuration.Configuration, configErr)
@@ -2181,6 +2200,20 @@ func TestCodeSignedToolContinuation(t *testing.T) {
 		t.Fatalf("failed-save accounting=%d, %v", reported, err)
 	}
 	summary := startSummaryJourney(t, s, owner, journey, summarySetup, consumer, &calls)
+	grokSummary := startSummaryJourney(t, s, owner, grokJourney, grokSetup, grokConsumer, &grokCalls)
+	for _, cross := range []struct {
+		journey          cooldownJourney
+		consumer         *caller
+		summary, foreign summaryJourney
+		calls            *atomic.Int64
+	}{{journey, consumer, summary, grokSummary, &calls}, {grokJourney, grokConsumer, grokSummary, summary, &grokCalls}} {
+		before := cross.calls.Load()
+		refused := summarySurfaceRequest(t, s, cross.consumer, cross.summary.conversation, "/code/"+cross.journey.route.Slug+"/responses", `{"model":"gemini-fixture","input":[`+string(cross.foreign.item)+`,{"role":"user","content":"Continue"}]}`)
+		refused.Body.Close()
+		if refused.StatusCode != http.StatusUnprocessableEntity || cross.calls.Load() != before {
+			t.Fatalf("foreign account summary dispatched, %d", refused.StatusCode)
+		}
+	}
 	rotateSummarySecrets(t, s)
 	beforeRestart := calls.Load()
 	s.stop()
@@ -2196,6 +2229,7 @@ func TestCodeSignedToolContinuation(t *testing.T) {
 		}
 	}
 	continueSummaryJourney(t, restarted, journey, consumer, summary, &calls)
+	continueSummaryJourney(t, restarted, grokJourney, grokConsumer, grokSummary, &grokCalls)
 	var root string
 	if err := s.pool.QueryRow(t.Context(), `SELECT root_id::text FROM olp.code_bindings WHERE conversation='signed-root' AND route_id=$1`, journey.route.ID).Scan(&root); err != nil {
 		t.Fatal(err)
@@ -2216,15 +2250,23 @@ func TestCodeSignedToolContinuation(t *testing.T) {
 	}
 	restarted.want(owner, "POST", "/api/v1/code/bindings/"+root+"/retire", nil, idempotent(), http.StatusOK)
 	var remaining int
-	summaryBindingPath := "/api/v1/code/bindings/" + summary.binding
-	restarted.want(owner, "POST", summaryBindingPath+"/retire", nil, idempotent(), http.StatusOK)
-	if err := s.pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.secrets WHERE id=$1`, summary.key).Scan(&remaining); err != nil || remaining != 0 {
-		t.Fatalf("retired summary key remains, %d, %v", remaining, err)
-	}
-	beforeRetiredSummary := calls.Load()
-	retiredStatus, retiredBody := restarted.do(consumer, "POST", "/code/"+journey.route.Slug+"/responses", json.RawMessage(`{"model":"gemini-fixture","input":[`+string(summary.item)+`,{"role":"user","content":"Continue"}]}`), map[string]string{"Session-Id": summary.conversation + "-child", "X-Codex-Parent-Thread-Id": summary.conversation})
-	if retiredStatus != http.StatusGone || calls.Load() != beforeRetiredSummary {
-		t.Fatalf("retired child summary dispatched %d %s", retiredStatus, retiredBody)
+	for _, state := range []struct {
+		summary  summaryJourney
+		journey  cooldownJourney
+		consumer *caller
+		calls    *atomic.Int64
+	}{{summary, journey, consumer, &calls}, {grokSummary, grokJourney, grokConsumer, &grokCalls}} {
+		summary, journey, consumer, calls := state.summary, state.journey, state.consumer, state.calls
+		summaryBindingPath := "/api/v1/code/bindings/" + summary.binding
+		restarted.want(owner, "POST", summaryBindingPath+"/retire", nil, idempotent(), http.StatusOK)
+		if err := s.pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.secrets WHERE id=$1`, summary.key).Scan(&remaining); err != nil || remaining != 0 {
+			t.Fatalf("retired summary key remains, %d, %v", remaining, err)
+		}
+		beforeRetiredSummary := calls.Load()
+		retiredStatus, retiredBody := restarted.do(consumer, "POST", "/code/"+journey.route.Slug+"/responses", json.RawMessage(`{"model":"gemini-fixture","input":[`+string(summary.item)+`,{"role":"user","content":"Continue"}]}`), map[string]string{"Session-Id": summary.conversation + "-child", "X-Codex-Parent-Thread-Id": summary.conversation})
+		if retiredStatus != http.StatusGone || calls.Load() != beforeRetiredSummary {
+			t.Fatalf("retired child summary dispatched %d %s", retiredStatus, retiredBody)
+		}
 	}
 	if err := s.pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.secrets WHERE id=$1 OR id=$2`, message.ToolCalls[0].ID, message.ToolCalls[1].ID).Scan(&remaining); err != nil || remaining != 0 {
 		t.Fatalf("retired state count %d, %v", remaining, err)
@@ -2235,7 +2277,14 @@ func TestCodeSignedToolContinuation(t *testing.T) {
 	}
 }
 
-func newSignedCodeJourney(t *testing.T, s *service, owner *caller, proxy, roots string) (cooldownJourney, *caller) {
+type signedJourneyProfile struct {
+	id, address, digest, principal string
+	manifest                       []byte
+	facts                          map[string]string
+	options                        map[string]string
+}
+
+func newSignedCodeJourney(t *testing.T, s *service, owner *caller, proxy, roots string, grok bool) (cooldownJourney, *caller) {
 	t.Helper()
 	journey := seedCooldownJourney(t, s.pool)
 	var user, installation string
@@ -2255,14 +2304,22 @@ func newSignedCodeJourney(t *testing.T, s *service, owner *caller, proxy, roots 
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifest, _ := json.Marshal(antigravityauth.Manifest())
-	digest := strings.Repeat("2", 64)
-	address := antigravityauth.Upstream
-	configuration, _ := json.Marshal(providers.Configuration{Identity: providerconfig.Identity[*string]{Kind: "plugin", AuthMode: "grant", ProfileID: antigravityauth.ProfileID, ProfileRevision: digest, Endpoint: &address}, Options: providers.Options{PluginOptions: map[string]string{"client_id": "fixture.apps.googleusercontent.com"}, Network: &egress.ConnectionOptions{ProxyURL: proxy, TrustRootsPEM: roots}}})
-	facts := map[string]string{"subject": "fixture-subject", "project_id": "fixture-project"}
-	principal := antigravityauth.Principal(facts["subject"], facts["project_id"])
+	profile := func() signedJourneyProfile {
+		if grok {
+			manifest, _ := json.Marshal(grokauth.Manifest())
+			return signedJourneyProfile{grokauth.ProfileID, grokauth.Upstream, strings.Repeat("3", 64), grokauth.Principal("fixture-grok-subject"), manifest, map[string]string{"subject": "fixture-grok-subject"}, nil}
+		}
+		manifest, _ := json.Marshal(antigravityauth.Manifest())
+		return signedJourneyProfile{antigravityauth.ProfileID, antigravityauth.Upstream, strings.Repeat("2", 64), antigravityauth.Principal("fixture-subject", "fixture-project"), manifest, map[string]string{"subject": "fixture-subject", "project_id": "fixture-project"}, map[string]string{"client_id": "fixture.apps.googleusercontent.com"}}
+	}()
+	manifest := profile.manifest
+	digest := profile.digest
+	address := profile.address
+	configuration, _ := json.Marshal(providers.Configuration{Identity: providerconfig.Identity[*string]{Kind: "plugin", AuthMode: "grant", ProfileID: profile.id, ProfileRevision: digest, Endpoint: &address}, Options: providers.Options{PluginOptions: profile.options, Network: &egress.ConnectionOptions{ProxyURL: proxy, TrustRootsPEM: roots}}})
+	facts := profile.facts
+	principal := profile.principal
 	encodedFacts, _ := json.Marshal(facts)
-	served, _ := json.Marshal(connectors.GrantCredential{PluginDigest: digest, ProfileID: antigravityauth.ProfileID, AccessToken: "fixture-token", Facts: facts})
+	served, _ := json.Marshal(connectors.GrantCredential{PluginDigest: digest, ProfileID: profile.id, AccessToken: "fixture-token", Facts: facts})
 	tx, err := s.pool.Begin(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -2275,7 +2332,7 @@ func newSignedCodeJourney(t *testing.T, s *service, owner *caller, proxy, roots 
 		{`INSERT INTO olp.plugins(digest,abi_version,manifest,module,size_bytes,etag,installed_by,approved_by,approved_at) VALUES($1,1,$2,'\x00',1,$3,$4,$4,now())`, []any{digest, manifest, uuid.NewString(), user}},
 		{`UPDATE olp.providers SET configuration=$2 WHERE id=$1`, []any{journey.provider, configuration}},
 		{`UPDATE olp.code_routes SET latest_revision_id=NULL WHERE id=$1`, []any{journey.route.ID}},
-		{`INSERT INTO olp.provider_credentials(id,provider_id,version,principal,plugin_digest,profile_id,grant_facts) VALUES($1,$2,3,$3,$4,$5,$6)`, []any{credential, journey.provider, principal, digest, antigravityauth.ProfileID, encodedFacts}},
+		{`INSERT INTO olp.provider_credentials(id,provider_id,version,principal,plugin_digest,profile_id,grant_facts) VALUES($1,$2,3,$3,$4,$5,$6)`, []any{credential, journey.provider, principal, digest, profile.id, encodedFacts}},
 		{`INSERT INTO olp.code_accounts(id,project_id,provider_id,credential_id,principal,name,models,etag,created_by) VALUES($1,$2,$3,$4,$5,'signed-tools','["gemini-fixture"]',$6,$7)`, []any{account, journey.route.ProjectID, journey.provider, credential, principal, uuid.NewString(), user}},
 		{`INSERT INTO olp.code_pool_accounts(pool_id,account_id,weight) VALUES($1,$2,1)`, []any{journey.route.PoolID, account}},
 		{`UPDATE olp.code_accounts SET enabled=false WHERE id IN ($1,$2)`, []any{journey.first, journey.second}},
@@ -2295,10 +2352,11 @@ func newSignedCodeJourney(t *testing.T, s *service, owner *caller, proxy, roots 
 	if _, err := s.pool.Exec(t.Context(), `INSERT INTO olp.code_pool_keys(pool_id,api_key_id) VALUES($1,$2)`, journey.route.PoolID, key["id"]); err != nil {
 		t.Fatal(err)
 	}
-	route := s.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": journey.route.ProjectID, "slug": "signed-" + uuid.NewString(), "pool_id": journey.route.PoolID, "models": []string{"gemini-fixture"}, "enabled": true, "chat_to_antigravity": true, "responses_to_antigravity": true, "responses_antigravity_compatibility": true, "messages_to_antigravity": true}, idempotent(), http.StatusCreated)
+	route := s.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": journey.route.ProjectID, "slug": "signed-" + uuid.NewString(), "pool_id": journey.route.PoolID, "models": []string{"gemini-fixture"}, "enabled": true, "chat_to_antigravity": true, "responses_to_antigravity": !grok, "responses_to_grok": grok, "responses_antigravity_compatibility": true, "messages_to_antigravity": true}, idempotent(), http.StatusCreated)
 	published := s.want(owner, "POST", "/api/v1/code/routes/"+route["id"].(string)+"/publish", nil, idempotent(etag(route)), http.StatusOK)
 	journey.route.ETag = published["etag"].(string)
-	journey.route.ChatToAntigravity, journey.route.ResponsesToAntigravity, journey.route.ResponsesAntigravityCompatibility, journey.route.MessagesToAntigravity = true, true, true, true
+	journey.route.ChatToAntigravity, journey.route.ResponsesToAntigravity, journey.route.ResponsesAntigravityCompatibility, journey.route.MessagesToAntigravity = true, !grok, true, true
+	journey.route.ResponsesToGrok = grok
 	journey.route.ID, journey.route.Slug, journey.route.Models = route["id"].(string), route["slug"].(string), []string{"gemini-fixture"}
 	if err := s.pool.QueryRow(t.Context(), `SELECT latest_revision_id::text FROM olp.code_routes WHERE id=$1`, journey.route.ID).Scan(&journey.route.RevisionID); err != nil {
 		t.Fatal(err)
@@ -2408,12 +2466,12 @@ type summaryJourneySetup struct {
 
 func prepareSummaryJourney(t *testing.T, s *service, owner *caller, journey cooldownJourney) summaryJourneySetup {
 	t.Helper()
-	frozen := s.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": journey.route.ProjectID, "slug": "summary-frozen-" + uuid.NewString(), "pool_id": journey.route.PoolID, "models": []string{"gemini-fixture"}, "enabled": true, "responses_to_antigravity": true, "responses_antigravity_compatibility": true}, idempotent(), http.StatusCreated)
+	frozen := s.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": journey.route.ProjectID, "slug": "summary-frozen-" + uuid.NewString(), "pool_id": journey.route.PoolID, "models": []string{"gemini-fixture"}, "enabled": true, "responses_to_antigravity": journey.route.ResponsesToAntigravity, "responses_to_grok": journey.route.ResponsesToGrok, "responses_antigravity_compatibility": true}, idempotent(), http.StatusCreated)
 	frozenPath := "/api/v1/code/routes/" + frozen["id"].(string)
 	published := s.want(owner, "POST", frozenPath+"/publish", nil, idempotent(etag(frozen)), http.StatusOK)
-	s.want(owner, "PUT", frozenPath, map[string]any{"project_id": journey.route.ProjectID, "slug": frozen["slug"], "pool_id": journey.route.PoolID, "models": []string{"gemini-fixture"}, "enabled": true, "responses_to_antigravity": true, "responses_antigravity_compatibility": true, "summary_compaction": true}, idempotent(etag(published)), http.StatusOK)
+	s.want(owner, "PUT", frozenPath, map[string]any{"project_id": journey.route.ProjectID, "slug": frozen["slug"], "pool_id": journey.route.PoolID, "models": []string{"gemini-fixture"}, "enabled": true, "responses_to_antigravity": journey.route.ResponsesToAntigravity, "responses_to_grok": journey.route.ResponsesToGrok, "responses_antigravity_compatibility": true, "summary_compaction": true}, idempotent(etag(published)), http.StatusOK)
 	path := "/api/v1/code/routes/" + journey.route.ID
-	changed := s.want(owner, "PUT", path, map[string]any{"project_id": journey.route.ProjectID, "slug": journey.route.Slug, "pool_id": journey.route.PoolID, "models": []string{"gemini-fixture"}, "enabled": true, "chat_to_antigravity": true, "responses_to_antigravity": true, "responses_antigravity_compatibility": true, "messages_to_antigravity": journey.route.MessagesToAntigravity, "summary_compaction": true}, idempotent(etag(map[string]any{"etag": journey.route.ETag})), http.StatusOK)
+	changed := s.want(owner, "PUT", path, map[string]any{"project_id": journey.route.ProjectID, "slug": journey.route.Slug, "pool_id": journey.route.PoolID, "models": []string{"gemini-fixture"}, "enabled": true, "chat_to_antigravity": true, "responses_to_antigravity": journey.route.ResponsesToAntigravity, "responses_to_grok": journey.route.ResponsesToGrok, "responses_antigravity_compatibility": true, "messages_to_antigravity": journey.route.MessagesToAntigravity, "summary_compaction": true}, idempotent(etag(map[string]any{"etag": journey.route.ETag})), http.StatusOK)
 	enabled := s.want(owner, "POST", path+"/publish", nil, idempotent(etag(changed)), http.StatusOK)
 	return summaryJourneySetup{frozenSlug: frozen["slug"].(string), enabledETag: enabled["etag"].(string)}
 }

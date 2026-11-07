@@ -165,7 +165,7 @@ func newCodeVendorProxy(t *testing.T, handler http.Handler) (string, string) {
 		t.Fatal(err)
 	}
 	certificate := &x509.Certificate{
-		SerialNumber: big.NewInt(1), DNSNames: []string{"chatgpt.com", "daily-cloudcode-pa.googleapis.com"},
+		SerialNumber: big.NewInt(1), DNSNames: []string{"chatgpt.com", "daily-cloudcode-pa.googleapis.com", "cli-chat-proxy.grok.com"},
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
 		IsCA: true, BasicConstraintsValid: true,
 		KeyUsage:    x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
