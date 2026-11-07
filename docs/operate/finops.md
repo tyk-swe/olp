@@ -350,7 +350,9 @@ KMS decrypt permission required by the bucket's encryption key. Supply
 as the billing credential, adding `session_token` for temporary credentials,
 or `{"auth_mode":"workload"}` to use the workload's AWS credential chain.
 The workload chain uses the bounded AWS metadata transport; S3 access uses the
-connection's normal network and egress policy. The import reads only Bedrock
+connection's normal network and egress policy. A web identity token is exchanged
+only with the default STS endpoint for the report's region, and configured
+endpoint URLs such as `AWS_ENDPOINT_URL_STS` are ignored for that exchange. The import reads only Bedrock
 service rows, uses effective costs for reserved and Savings Plan usage, and
 excludes commitment fees and negation lines. It uses the assembly manifest and
 its S3 modification time as the revision and ordering marker. Parquet exports
