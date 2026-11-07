@@ -1279,3 +1279,12 @@ func TestGrokPublishedTransportPreservesTextAndRefusesMedia(t *testing.T) {
 		})
 	}
 }
+
+func TestAntigravityMessagesText(t *testing.T) {
+	attempt := &codeAttempt{model: "gemini-native", server: &Server{deps: Dependencies{CodeLedger: &signedTestLedger{}}}}
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages?beta=true", nil)
+	payload, err := attempt.translateAntigravity([]byte(`{"model":"gemini-native","max_tokens":8,"system":"Be concise","messages":[{"role":"user","content":"Hello"}]}`), request, "gemini-native", "project", true)
+	if err != nil || !strings.Contains(string(payload.body), `"maxOutputTokens":8`) || !strings.Contains(string(payload.body), "Hello") || !strings.Contains(string(payload.body), "Be concise") {
+		t.Fatalf("Messages translation = %s, %v", payload.body, err)
+	}
+}

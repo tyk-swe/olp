@@ -5390,6 +5390,16 @@
             "messages_codex_safety_identifier": {
               "type": "boolean",
               "description": "Separately authorizes translating Messages metadata.user_id to a stable SHA-256 Responses safety_identifier. Disabled by default. Only the documented user identifier is accepted, and other metadata refuses. Review provider identity and account terms before enabling."
+            },
+            "messages_to_antigravity": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly enable supported Messages text and function-tool translation to Antigravity. Published revisions pin this policy and account-bound signed continuation. Unsupported state is refused. Live provider acceptance is unverified."
+            },
+            "messages_antigravity_safety_identifier": {
+              "type": "boolean",
+              "default": false,
+              "description": "Separately enable identity compatibility mapping metadata.user_id to the SHA-256 digest encoded as lowercase unpadded base32 in Gemini request labels.safety_identifier. Public generateContent documents this field. Subscription proxy acceptance is unverified. Published revisions pin this default-off policy."
             }
           },
           "required": [
@@ -7790,6 +7800,16 @@
             "messages_codex_safety_identifier": {
               "type": "boolean",
               "description": "Separately authorizes translating Messages metadata.user_id to a stable SHA-256 Responses safety_identifier. Disabled by default. Only the documented user identifier is accepted, and other metadata refuses. Review provider identity and account terms before enabling."
+            },
+            "messages_to_antigravity": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly enable supported Messages text and function-tool translation to Antigravity. Published revisions pin this policy and account-bound signed continuation. Unsupported state is refused. Live provider acceptance is unverified."
+            },
+            "messages_antigravity_safety_identifier": {
+              "type": "boolean",
+              "default": false,
+              "description": "Separately enable identity compatibility mapping metadata.user_id to the SHA-256 digest encoded as lowercase unpadded base32 in Gemini request labels.safety_identifier. Public generateContent documents this field. Subscription proxy acceptance is unverified. Published revisions pin this default-off policy."
             }
           },
           "required": [
@@ -31293,6 +31313,16 @@
             "messages_codex_safety_identifier": {
               "type": "boolean",
               "description": "Separately authorizes translating Messages metadata.user_id to a stable SHA-256 Responses safety_identifier. Disabled by default. Only the documented user identifier is accepted, and other metadata refuses. Review provider identity and account terms before enabling."
+            },
+            "messages_to_antigravity": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly enable supported Messages text and function-tool translation to Antigravity. Published revisions pin this policy and account-bound signed continuation. Unsupported state is refused. Live provider acceptance is unverified."
+            },
+            "messages_antigravity_safety_identifier": {
+              "type": "boolean",
+              "default": false,
+              "description": "Separately enable identity compatibility mapping metadata.user_id to the SHA-256 digest encoded as lowercase unpadded base32 in Gemini request labels.safety_identifier. Public generateContent documents this field. Subscription proxy acceptance is unverified. Published revisions pin this default-off policy."
             }
           },
           "required": [
@@ -36665,6 +36695,16 @@
             "messages_codex_safety_identifier": {
               "type": "boolean",
               "description": "Separately authorizes translating Messages metadata.user_id to a stable SHA-256 Responses safety_identifier. Disabled by default. Only the documented user identifier is accepted, and other metadata refuses. Review provider identity and account terms before enabling."
+            },
+            "messages_to_antigravity": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly enable supported Messages text and function-tool translation to Antigravity. Published revisions pin this policy and account-bound signed continuation. Unsupported state is refused. Live provider acceptance is unverified."
+            },
+            "messages_antigravity_safety_identifier": {
+              "type": "boolean",
+              "default": false,
+              "description": "Separately enable identity compatibility mapping metadata.user_id to the SHA-256 digest encoded as lowercase unpadded base32 in Gemini request labels.safety_identifier. Public generateContent documents this field. Subscription proxy acceptance is unverified. Published revisions pin this default-off policy."
             }
           },
           "required": [

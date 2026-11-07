@@ -167,6 +167,10 @@
   );
   let recoveryAttempts = $state(initial?.initial_recovery_attempts ?? 0);
   let chatToCodex = $state(initial?.chat_to_codex ?? false);
+  let messagesToAntigravity = $state(initial?.messages_to_antigravity ?? false);
+  let messagesAntigravitySafetyIdentifier = $state(
+    initial?.messages_antigravity_safety_identifier ?? false
+  );
   let messagesToCodex = $state(initial?.messages_to_codex ?? false);
   let messagesCodexSafetyIdentifier = $state(
     initial?.messages_codex_safety_identifier ?? false
@@ -280,6 +284,9 @@
         model_pools: poolResult.pools,
         chat_to_codex: chatToCodex,
         messages_to_codex: messagesToCodex,
+        messages_to_antigravity: messagesToAntigravity,
+        messages_antigravity_safety_identifier:
+          messagesAntigravitySafetyIdentifier,
         messages_codex_safety_identifier: messagesCodexSafetyIdentifier,
         responses_to_grok: responsesToGrok,
         grok_cli_identity: grokCLIIdentity,
@@ -564,6 +571,33 @@
     Disabled by default. Publication enables supported Responses text and
     function tools over HTTP/SSE. Translation preserves client identity.
     Existing revisions retain their published behavior until republished.
+  </p>
+  <label class="choice">
+    <input
+      id="code-messages-to-antigravity"
+      type="checkbox"
+      bind:checked={messagesToAntigravity}
+    />
+    Translate Messages to Antigravity
+  </label>
+  <p>
+    Off by default and pinned at publication. Supported text and function tools
+    use account-bound signed continuation. Unsupported state is refused. Live
+    provider acceptance is unverified.
+  </p>
+  <label class="choice">
+    <input
+      id="code-messages-antigravity-safety-identifier"
+      type="checkbox"
+      bind:checked={messagesAntigravitySafetyIdentifier}
+    />
+    Map Messages user identity to Antigravity safety labels
+  </label>
+  <p>
+    Separate default-off published identity compatibility. Maps metadata.user_id
+    to a SHA-256 digest encoded as lowercase unpadded base32 in request
+    labels.safety_identifier. Public Gemini documents this field. Subscription
+    proxy acceptance is unverified.
   </p>
   <label class="choice">
     <input
