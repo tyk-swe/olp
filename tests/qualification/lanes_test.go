@@ -29,6 +29,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/grokauth"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/plugin/abi"
@@ -217,6 +218,7 @@ func lanes() []lane {
 	}
 	codexSeed := laneSeed{adapter: "codex", profile: codexauth.ProfileID, manifest: codexauth.Manifest, token: token, principal: identity.Principal(), facts: identity.Facts(), expiresAt: &expires}
 	return []lane{
+		{client: laneClient{name: "codex", binary: "codex", userAgent: "codex_cli_rs (qualification fixture)"}, seed: laneSeed{adapter: "grok-build", profile: grokauth.ProfileID, manifest: grokauth.Manifest, token: grokToken, principal: grokauth.Principal("fixture-subject"), facts: map[string]string{"subject": "fixture-subject"}, expiresAt: &expires}, protocol: "responses", toolRoundTrip: true},
 		{
 			client:   laneClient{name: "codex", binary: "codex", userAgent: "codex_cli_rs (qualification fixture)"},
 			seed:     codexSeed,
@@ -413,10 +415,13 @@ func runFixtureClient(t *testing.T, client, binary, bridge, slug, key, configura
 	prompt := "Say hello."
 	switch client {
 	case "codex":
+		if toolRoundTrip {
+			prompt = "Execute printf olp-tool-round-trip with the shell tool, then say hello."
+		}
 		return sandboxClient(t, binary, bridge, []string{"OLP_API_KEY=" + key}, "exec", "--skip-git-repo-check", "--ephemeral", "-m", vendorModel,
 			"-c", `model_provider="olp"`, "-c", `model_providers.olp.name="OLP"`, "-c", `model_providers.olp.base_url="`+base+`"`,
 			"-c", `model_providers.olp.env_key="OLP_API_KEY"`, "-c", `model_providers.olp.wire_api="responses"`,
-			"-c", `model_providers.olp.supports_websockets=false`, "-c", `check_for_update_on_startup=false`, prompt)
+			"-c", `model_providers.olp.supports_websockets=false`, "-c", `check_for_update_on_startup=false`, "-c", `features.apply_patch_freeform=false`, "--dangerously-bypass-approvals-and-sandbox", prompt)
 	case "claude-code":
 		if toolRoundTrip {
 			return sandboxClient(t, binary, bridge, fixtureConfigurationEnvironment(t, configuration, key), "--print", "--bare", "--no-session-persistence", "--tools", "Bash", "--allowedTools", "Bash", "--max-turns", "3", "--model", vendorModel, "Execute printf olp-tool-round-trip using Bash, then say hello.")
@@ -500,7 +505,7 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 	}
 	project := s.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "qualification"}, idempotent(), http.StatusCreated)["id"].(string)
 	toolProof := make(chan struct{}, 1)
-	proxy := newVendorProxy(t, newVendorMux(specs[0].seed.token, toolProof))
+	proxy := newVendorProxy(t, newVendorMux(codexFixtureAccessToken(specs), toolProof))
 	key := s.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "qualification", "scopes": []string{"inference"}, "project_id": project}, idempotent(), http.StatusCreated)
 	consumer := &caller{name: "qualification key", token: key["secret"].(string)}
 	bridge := fixtureBridge(t, s.origin)
@@ -521,7 +526,7 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 			}, idempotent(), http.StatusCreated)
 			slug := uniqueName("qualify-" + spec.client.name)
 			route := s.want(owner, "POST", "/api/v1/code/routes", map[string]any{
-				"project_id": project, "slug": slug, "pool_id": pool["id"], "models": []string{vendorModel}, "enabled": true, "messages_to_codex": spec.toolRoundTrip, "messages_codex_safety_identifier": spec.toolRoundTrip, "chat_to_codex": spec.toolRoundTrip,
+				"project_id": project, "slug": slug, "pool_id": pool["id"], "models": []string{vendorModel}, "enabled": true, "messages_to_codex": spec.toolRoundTrip && spec.seed.adapter == "codex", "messages_codex_safety_identifier": spec.toolRoundTrip && spec.seed.adapter == "codex", "chat_to_codex": spec.toolRoundTrip && spec.seed.adapter == "codex", "responses_to_grok": spec.seed.adapter == "grok-build", "grok_cli_identity": spec.seed.adapter == "grok-build",
 			}, idempotent(), http.StatusCreated)
 			s.want(owner, "POST", "/api/v1/code/routes/"+route["id"].(string)+"/publish", nil, idempotent(etag(route)), http.StatusOK)
 
@@ -531,7 +536,7 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 					return "", false, err
 				}
 				configuration := func() string {
-					if !lane.toolRoundTrip {
+					if !lane.toolRoundTrip || lane.client.name != "claude-code" {
 						return ""
 					}
 					config := s.want(owner, "GET", "/api/v1/code/routes/"+route["id"].(string)+"/client-config?client=claude-code&platform=linux&gateway_url=http%3A%2F%2F127.0.0.1%3A18765", nil, nil, http.StatusOK)
@@ -554,7 +559,7 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 				}
 				return output, executed, nil
 			})
-			if lane.toolRoundTrip && record.Result == "pass" {
+			if lane.toolRoundTrip && lane.seed.adapter == "codex" && record.Result == "pass" {
 				assertTranslatedCodeRates(t, s, owner, project, slug, pool, providerID)
 				s.want(owner, "POST", "/api/v1/code/budgets", map[string]any{"project_id": project, "route_id": route["id"], "api_key_id": key["id"], "daily_tokens": 100, "enabled": true}, idempotent(), http.StatusCreated)
 				consumer := &caller{name: "hard token bound", token: key["secret"].(string)}
@@ -658,4 +663,13 @@ func fixtureConfigurationEnvironment(t *testing.T, configuration, key string) []
 		t.Fatalf("generated setup failed: %v", err)
 	}
 	return strings.Split(strings.TrimSuffix(string(output), "\x00"), "\x00")
+}
+
+func codexFixtureAccessToken(specs []lane) string {
+	for _, spec := range specs {
+		if spec.seed.adapter == "codex" {
+			return spec.seed.token
+		}
+	}
+	return ""
 }

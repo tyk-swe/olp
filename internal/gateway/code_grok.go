@@ -3,6 +3,7 @@ package gateway
 import (
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -15,6 +16,11 @@ func codeTranslateGrok(body []byte, r *http.Request, model string) (codePayload,
 	refused := codemode.Refuse(422, "code_translation_unsupported_semantics")
 	if r.URL.RawQuery != "" || len(r.Trailer) != 0 || r.Header.Get("X-Codex-Turn-State") != "" || r.Header.Get("OpenAI-Beta") != "" {
 		return codePayload{}, refused
+	}
+	for header := range r.Header {
+		if strings.HasPrefix(strings.ToLower(header), "x-grok-") || strings.EqualFold(header, "X-Xai-Token-Auth") || strings.EqualFold(header, "X-Authenticateresponse") {
+			return codePayload{}, refused
+		}
 	}
 	request, err := protocols.ParseForModel(wire.Responses, body, model)
 	if err != nil {

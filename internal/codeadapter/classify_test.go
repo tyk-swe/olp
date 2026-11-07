@@ -239,3 +239,39 @@ func TestGrokSubscriptionNeverUsesPaidAPIOrWebSocket(t *testing.T) {
 		t.Fatal("credential crossed principal boundary")
 	}
 }
+
+func TestGrokRefreshReverifiesSubjectAndRequiresProvenExpiry(t *testing.T) {
+	for _, test := range []struct {
+		name, token, identity string
+		accepted              bool
+		refresh               string
+	}{
+		{name: "retains existing refresh", token: `{"access_token":"new-access","token_type":"Bearer","expires_in":3600}`, identity: `{"sub":"verified-subject"}`, accepted: true},
+		{name: "rotates refresh", token: `{"access_token":"new-access","refresh_token":"rotated-refresh","token_type":"Bearer","expires_in":3600}`, identity: `{"sub":"verified-subject"}`, accepted: true, refresh: "rotated-refresh"},
+		{name: "rejects changed subject", token: `{"access_token":"new-access","token_type":"Bearer","expires_in":3600}`, identity: `{"sub":"other-subject"}`},
+		{name: "rejects absent subject", token: `{"access_token":"new-access","token_type":"Bearer","expires_in":3600}`, identity: `{"email":"display-only@example.invalid"}`},
+		{name: "rejects unknown expiry", token: `{"access_token":"new-access","token_type":"Bearer"}`, identity: `{"sub":"verified-subject"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			adapter := grokauth.Adapter{Fetch: func(_ context.Context, request abi.HTTPRequest) (abi.HTTPResponse, error) {
+				if request.URL == grokauth.Issuer+"/oauth2/token" {
+					return abi.HTTPResponse{Status: 200, Body: []byte(test.token)}, nil
+				}
+				if request.URL != grokauth.Issuer+"/oauth2/userinfo" || http.Header(request.Header).Get("Authorization") != "Bearer new-access" {
+					t.Fatalf("unexpected identity verification %+v", request)
+				}
+				return abi.HTTPResponse{Status: 200, Body: []byte(test.identity)}, nil
+			}}
+			grant, err := adapter.RefreshGrant(t.Context(), abi.GrantRefresh{Profile: grokauth.ProfileID, RefreshToken: "current-refresh", Facts: map[string]string{"subject": "verified-subject"}})
+			if !test.accepted {
+				if err == nil || grant.AccessToken != "" {
+					t.Fatalf("unsupported refresh issued %+v, %v", grant, err)
+				}
+				return
+			}
+			if err != nil || grant.Principal != grokauth.Principal("verified-subject") || grant.Facts["subject"] != "verified-subject" || grant.AccessToken != "new-access" || grant.RefreshToken != test.refresh {
+				t.Fatalf("refresh %+v, %v", grant, err)
+			}
+		})
+	}
+}

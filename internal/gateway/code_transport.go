@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/codemode"
- "github.com/tyk-swe/olp/internal/grokauth"
 	"github.com/tyk-swe/olp/internal/codewire"
+	"github.com/tyk-swe/olp/internal/grokauth"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -27,13 +27,13 @@ func (a *codeAttempt) headers(source http.Header) http.Header {
 		h.Set("Originator", a.identityOriginator)
 	}
 	if a.grokIdentity {
- h.Set("User-Agent", "grok-shell/" + grokauth.CompatibilityVersion)
- h.Set("X-Grok-Client-Version", grokauth.CompatibilityVersion)
- h.Set("X-Grok-Client-Identifier", "grok-shell")
- h.Set("X-Xai-Token-Auth", "xai-grok-cli")
- h.Set("X-Authenticateresponse", "authenticate-response")
- }
- if _, present := h["User-Agent"]; !present {
+		h.Set("User-Agent", "grok-shell/"+grokauth.CompatibilityVersion)
+		h.Set("X-Grok-Client-Version", grokauth.CompatibilityVersion)
+		h.Set("X-Grok-Client-Identifier", "grok-shell")
+		h.Set("X-Xai-Token-Auth", "xai-grok-cli")
+		h.Set("X-Authenticateresponse", "authenticate-response")
+	}
+	if _, present := h["User-Agent"]; !present {
 		h["User-Agent"] = []string{""}
 	}
 	return h
