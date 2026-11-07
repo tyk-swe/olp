@@ -124,7 +124,7 @@ disconnects:
 
 | Prefix | Service |
 | --- | --- |
-| `/v1`, `/v1beta`, `/native`, `/anthropic`, `/gemini`, `/bedrock`, `/ws`, `/code` | gateway |
+| `/v1`, `/v1beta`, `/native`, `/anthropic`, `/gemini`, `/bedrock`, `/ws`, `/code`, `/mcp`, `/a2a` | gateway |
 | `/api`, `/`, and console deep links | control |
 
 Example values:
@@ -161,9 +161,9 @@ request-size or idle-timeout bounds. Enable WebSocket upgrades for
 native duplex paths under `/native/` when they are used.
 
 The checked-in chart Ingress routes exactly these prefixes, which
-`internal/surface` also reserves from the console and admits from the
-inference pool. Vite does not proxy WebSockets; use the Go listener directly
-for local realtime and Gemini Live clients.
+`internal/surface` also reserves from the console. Vite does not proxy
+WebSockets; use the Go listener directly for local realtime and Gemini Live
+clients.
 
 ## Observability and capacity
 

@@ -79,4 +79,18 @@ for invalid in 'config.region=Invalid' 'config.databaseMaxConnections=0' 'config
     exit 1
   fi
 done
+ingress_gateway=$(helm template olp deploy/helm --set ingress.enabled=true,config.trustedProxyCidrs=10.0.0.0/8 \
+  --show-only templates/ingress.yaml | awk '/- path:/ { path = $3 } /name: .*-gateway$/ { print path }' | sort)
+documented_gateway=$(grep -E '^\| .* \| gateway \|$' docs/operate/deployment.md | grep -oE '`/[^`]*`' | tr -d '`' | sort)
+for prefix in /mcp /a2a; do
+  if ! grep -qx "$prefix" <<<"$documented_gateway"; then
+    echo "Expected the deployment guide to route $prefix to gateway" >&2
+    exit 1
+  fi
+done
+if [ "$ingress_gateway" != "$documented_gateway" ]; then
+  echo 'Expected the chart Ingress gateway prefixes to match the deployment guide' >&2
+  diff <(echo "$ingress_gateway") <(echo "$documented_gateway") >&2 || true
+  exit 1
+fi
 echo 'Helm profiles and invalid-input checks passed.'

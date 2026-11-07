@@ -142,28 +142,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		public.Handle("/", assets)
 		public.Handle("/health", assets)
 	}
-	// Reserved prefixes must never fall through to the SPA, in any public
-	// mode. When inference is enabled the gateway answers its catch-all
-	// prefixes itself and registers more specific handlers under the others;
-	// anything left over is answered in the prefix's own error envelope
-	// instead of reaching the console.
-	for _, reserved := range surface.Reserved() {
-		if c.Mode.Management() && reserved.ManagementCatchAll {
-			continue
-		}
-		handler := http.HandlerFunc(http.NotFound)
-		if c.Mode.Inference() {
-			if reserved.GatewayCatchAll {
-				continue
-			}
-			if reserved.Surface.Inference {
-				handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					gateway.WriteNotFound(w, r, reserved.Surface.Name)
-				})
-			}
-		}
-		public.Handle(reserved.Path, handler)
-	}
+	reservePublicPaths(public, c.Mode)
 	startup, cancelStartup := context.WithTimeout(ctx, c.StartupTimeout)
 	defer cancelStartup()
 	pool, err := database.Open(startup, pgConfig)
@@ -688,6 +667,31 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		return nil
 	}
 	return serveErr
+}
+
+// reservePublicPaths keeps reserved prefixes from falling through to the SPA,
+// in any public mode. When inference is enabled the gateway answers its
+// catch-all prefixes itself and registers more specific handlers under the
+// others; anything left over is answered in the prefix's own error envelope
+// instead of reaching the console.
+func reservePublicPaths(public *http.ServeMux, mode Mode) {
+	for _, reserved := range surface.Reserved() {
+		if mode.Management() && reserved.ManagementCatchAll {
+			continue
+		}
+		handler := http.HandlerFunc(http.NotFound)
+		if mode.Inference() {
+			if reserved.GatewayCatchAll {
+				continue
+			}
+			if reserved.Surface.Inference {
+				handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					gateway.WriteNotFound(w, r, reserved.Surface.Name)
+				})
+			}
+		}
+		public.Handle(reserved.Path, handler)
+	}
 }
 
 // drainProbes stops synthetic request production before metadata intake closes.
