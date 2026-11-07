@@ -262,7 +262,9 @@ user-agent family, never request bodies, credentials, or content. See
   Captured content never enters the database, Valkey, logs or spans and is
   delivered only to the operator-configured sink.
 - Provider authentication may reach cloud metadata endpoints to obtain workload
-  identity for AWS and Azure providers.
+  identity for AWS, Azure and Google providers. Google metadata requests go to
+  `169.254.169.254`, and a `GCE_METADATA_HOST` override is used only when the
+  egress policy permits that host.
 - Bedrock clients authenticate to OLP with an API key, never with AWS
   signatures.
 

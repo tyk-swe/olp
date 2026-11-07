@@ -13,12 +13,14 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	cloudauth "cloud.google.com/go/auth"
 	googlecredentials "cloud.google.com/go/auth/credentials"
+	"cloud.google.com/go/compute/metadata"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
@@ -532,7 +534,7 @@ func (a *Auth) googleToken(ctx context.Context, c Config, secret []byte) (*cloud
 		if a.adc == nil {
 			a.adc = make(chan credentialResult, 1)
 			result := a.adc
-			go func() { creds, e := googlecredentials.DetectDefault(opts); result <- credentialResult{creds, e} }()
+			go func() { creds, e := a.googleDefaultCredentials(opts); result <- credentialResult{creds, e} }()
 		}
 		result := a.adc
 		a.mu.Unlock()
@@ -558,6 +560,71 @@ func (a *Auth) googleToken(ctx context.Context, c Config, secret []byte) (*cloud
 	a.tokens[key] = token
 	a.mu.Unlock()
 	return token, nil
+}
+
+// googleDefaultCredentials follows the Application Default Credentials search
+// order, but reads metadata through the authentication client instead of the
+// library's unrestricted default, so GCE_METADATA_HOST must pass egress policy.
+func (a *Auth) googleDefaultCredentials(opts *googlecredentials.DetectOptions) (*cloudauth.Credentials, error) {
+	if path := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"); path != "" {
+		file, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		return googleCredentialsJSON(file, opts)
+	}
+	if file, err := googleWellKnownCredentials(); err == nil {
+		return googleCredentialsJSON(file, opts)
+	}
+	client := metadata.NewWithOptions(&metadata.Options{Client: a.client})
+	ctx, cancel := context.WithTimeout(context.Background(), authTimeout)
+	defer cancel()
+	if !client.OnGCEWithContext(ctx) {
+		return nil, ErrCredentialRejected
+	}
+	return cloudauth.NewCredentials(&cloudauth.CredentialsOptions{TokenProvider: googleMetadataTokens{client: client, scopes: strings.Join(opts.Scopes, ",")}}), nil
+}
+
+func googleWellKnownCredentials() ([]byte, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(filepath.Join(home, ".config", "gcloud", "application_default_credentials.json"))
+}
+
+func googleCredentialsJSON(file []byte, opts *googlecredentials.DetectOptions) (*cloudauth.Credentials, error) {
+	var header struct {
+		Type googlecredentials.CredType `json:"type"`
+	}
+	if err := json.Unmarshal(file, &header); err != nil {
+		return nil, err
+	}
+	return googlecredentials.NewCredentialsFromJSON(header.Type, file, opts)
+}
+
+type googleMetadataTokens struct {
+	client *metadata.Client
+	scopes string
+}
+
+func (t googleMetadataTokens) Token(ctx context.Context) (*cloudauth.Token, error) {
+	raw, err := t.client.GetWithContext(ctx, "instance/service-accounts/default/token?"+url.Values{"scopes": {t.scopes}}.Encode())
+	if err != nil {
+		return nil, err
+	}
+	var token struct {
+		AccessToken string `json:"access_token"`
+		ExpiresIn   int    `json:"expires_in"`
+		TokenType   string `json:"token_type"`
+	}
+	if err := json.Unmarshal([]byte(raw), &token); err != nil {
+		return nil, err
+	}
+	if token.AccessToken == "" || token.ExpiresIn <= 0 {
+		return nil, ErrAuthentication
+	}
+	return &cloudauth.Token{Value: token.AccessToken, Type: token.TokenType, Expiry: time.Now().Add(time.Duration(token.ExpiresIn) * time.Second)}, nil
 }
 
 func (a *Auth) azureToken(ctx context.Context, c Config, secret []byte) (azcore.AccessToken, error) {
