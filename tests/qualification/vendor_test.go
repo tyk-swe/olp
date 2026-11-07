@@ -353,7 +353,15 @@ func fixtureResponses(w http.ResponseWriter, r *http.Request, toolProof chan<- s
 	if !ok {
 		return
 	}
-	if fixtureCodexTool(w, request, toolProof, toolName) {
+	selectedTool := func() string {
+		if slices.ContainsFunc(request.Tools, func(tool struct {
+			Name string `json:"name"`
+		}) bool { return tool.Name == "Bash" }) {
+			return "Bash"
+		}
+		return toolName
+	}()
+	if fixtureCodexTool(w, request, toolProof, selectedTool) {
 		return
 	}
 	message := map[string]any{"id": "msg_fixture", "type": "message", "role": "assistant", "status": "completed", "content": []any{map[string]any{"type": "output_text", "text": vendorAnswer, "annotations": []any{}}}}

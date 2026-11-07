@@ -302,3 +302,18 @@ func TestCodeGrokClientConfiguration(t *testing.T) {
 		t.Fatalf("disabled Grok path must preserve native transport: %+v, %v", configuration, err)
 	}
 }
+
+func TestGrokMessagesPublishedPolicy(t *testing.T) {
+	route := codemode.Route{}
+	adapter, _ := codeadapter.Lookup(codemode.AdapterGrokBuild)
+	if _, ok := codeadapter.RouteEndpoint(route, adapter, "v1/messages"); ok {
+		t.Fatal("Messages enabled without publication policy")
+	}
+	route.MessagesToGrok = true
+	if endpoint, ok := codeadapter.RouteEndpoint(route, adapter, "v1/messages"); !ok || endpoint.Protocol != codemode.ProtocolResponses {
+		t.Fatal("Messages policy did not offer Responses upstream")
+	}
+	if protocol, ok := codeadapter.RouteClientProtocol(route, adapter, codeadapter.ClientClaudeCode, "grok-fixture-model"); !ok || protocol != codemode.ProtocolMessages {
+		t.Fatal("Claude configuration unavailable")
+	}
+}

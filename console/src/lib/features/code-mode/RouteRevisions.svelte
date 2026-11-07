@@ -38,7 +38,13 @@
             Pool {revision.route.pool_id} · {revision.route.models.join(', ')}
           </p>
           <p>
-            Responses to Grok Build {revision.route.responses_to_grok
+            Messages to Grok Build {revision.route.messages_to_grok
+              ? 'enabled'
+              : 'disabled'}. Messages Grok safety identity mapping {revision
+              .route.messages_grok_safety_identifier
+              ? 'enabled'
+              : 'disabled'}. Responses to Grok Build {revision.route
+              .responses_to_grok
               ? 'enabled'
               : 'disabled'}. Grok CLI identity compatibility {revision.route
               .grok_cli_identity
