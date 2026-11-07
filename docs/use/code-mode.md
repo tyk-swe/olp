@@ -1145,3 +1145,39 @@ Paid fallback uses a separate `paid_fallback_targets` map with the same native-m
 A new root with complete portable input can fall back before any subscription dispatch when durable admission proves that no eligible subscription destination exists and no subscription or paid binding already owns it. Existing conversations can fall back only after a subscription adapter proves an HTTP authentication or quota rejection did not execute and the existing recovery path finds no eligible subscription destination. The complete request must be portable. Same-model paid fallback needs no model pool. Substitution also needs model rewriting and an explicit model pool containing the alternate native model. Child conversations, multiple model pins, sockets, opaque continuation state, partial output and ambiguous execution cannot migrate.
 
 The paid fallback attempt uses current caller and pool authority, frozen provider and credential selection, known pricing and all applicable monetary limits. Requested and selected models remain distinct in diagnostics and accounting. Later requests retain the paid owner, while previous subscription response references retain their original owner. Removing permission or retiring the original subscription root prevents continuation. Missing usage keeps durable monetary exposure against limits until complete paid accounting is available.
+
+### Grok Build subscription routes
+
+Grok Build uses a subscription grant, encrypted storage and the existing account,
+pool, key and route workflow. It does not use a paid API key or silently fall back
+to a metered API. Device authorization must establish a verified provider subject,
+and refresh must preserve that identity. Enrollment does not establish live
+inference acceptance.
+
+Enable `responses_to_grok` in a route draft and publish it to allow supported
+Responses text and function-tool workflows through Grok Build accounts over HTTP
+and SSE. The policy is disabled by default. Generated Codex configuration disables
+WebSockets when the selected model can use a Grok account. Unsupported request
+semantics are refused rather than discarded. Generated Grok setup disables web search,
+multi-agent namespace tools, freeform patch tools and goal tools, and requests no
+reasoning effort or summaries. The controlled fixture covers text and function
+tools without encrypted reasoning. Current models that return encrypted reasoning
+may fail on the next turn because opaque reasoning input is refused. OLP does not
+yet establish ownership of that ciphertext, so complete current-model reasoning
+workflows remain unqualified.
+
+The separate `grok_cli_identity` policy is also disabled by default and takes
+effect only after publication. Without it, OLP identifies itself truthfully.
+Protocol translation does not enable Grok client identity compatibility. Editing
+either draft policy does not change an existing revision, and older revisions
+retain their prior behavior until deliberately republished.
+
+The [xAI consumer terms](https://x.ai/legal/x-subscription-terms-of-service)
+restrict sharing account access. The [Google consumer Antigravity
+terms](https://antigravity.google/terms) prohibit third-party access and identify
+suspension risk. Enterprise agreements may differ. Independent gateway access and pooled account use may violate
+applicable terms and risk account suspension. Provider acceptance remains
+unverified. Disclosures do not authorize provider use, and OLP adds no separate
+acknowledgement gate. Fixture qualification establishes only the controlled
+client and gateway behavior covered by that fixture, not live subscription
+acceptance.

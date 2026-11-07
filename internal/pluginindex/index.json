@@ -1,6 +1,6 @@
 {
   "api_version": "openllmproxy.dev/plugin-index/v1",
-  "published_at": "2026-10-27T09:40:24Z",
+  "published_at": "2026-11-07T08:27:32Z",
   "plugins": [
     {
       "name": "codex",
@@ -24,6 +24,31 @@
           ],
           "commit": "531354f829421e75b190defe406dc9049af7d111",
           "reviewed_at": "2026-10-05T16:09:39Z"
+        }
+      ]
+    },
+    {
+      "name": "grok-build",
+      "description": "Grok Build device enrollment for code mode. Live provider acceptance is unverified.",
+      "maintainer": "OpenLLMProxy",
+      "documentation_url": "https://github.com/tyk-swe/olp/blob/main/internal/grokauth/grok/README.md",
+      "repository": "https://github.com/tyk-swe/olp",
+      "path": "internal/grokauth/grok",
+      "releases": [
+        {
+          "version": "0.1.0",
+          "digest": "14d83456ea1dfa065094b2a9fe9901196907c158f7906ad317b970c371bf7687",
+          "abi_version": 1,
+          "size_bytes": 7182944,
+          "origins": [
+            "https://auth.x.ai",
+            "https://cli-chat-proxy.grok.com"
+          ],
+          "profiles": [
+            "grok-build-subscription"
+          ],
+          "commit": "b3c80c477543918e7934c2e51b9bc48ad3a80e5c",
+          "reviewed_at": "2026-11-07T08:27:32Z"
         }
       ]
     },

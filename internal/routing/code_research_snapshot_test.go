@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/codexauth"
+	"github.com/tyk-swe/olp/internal/grokauth"
 )
 
 func TestResearchAbsentPreservesLegacySnapshotDigest(t *testing.T) {
@@ -65,6 +66,34 @@ func TestPublishedCodexIdentityFreezesSeparatePolicy(t *testing.T) {
 	disabled, err := input.Clone().Digest()
 	if err != nil || enabled == disabled {
 		t.Fatal("new publication did not capture policy change", err)
+	}
+}
+
+func TestPublishedGrokPoliciesRemainIndependent(t *testing.T) {
+	for _, route := range []codemode.Route{{ResponsesToGrok: true}, {GrokCLIIdentity: true}, {ResponsesToGrok: true, GrokCLIIdentity: true}} {
+		input := &Snapshot{CodeRoutes: map[string]codemode.Route{"coding": route}}
+		frozen := input.Clone()
+		input.CodeRoutes["coding"] = codemode.Route{}
+		document, err := json.Marshal(frozen)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var restored Snapshot
+		if err := json.Unmarshal(document, &restored); err != nil {
+			t.Fatal(err)
+		}
+		published := restored.CodeRoutes["coding"]
+		if published.ResponsesToGrok != route.ResponsesToGrok || published.GrokCLIIdentity != route.GrokCLIIdentity {
+			t.Fatalf("published Grok policy changed after draft edit and reload: %+v", published)
+		}
+		before, err := restored.Digest()
+		if err != nil {
+			t.Fatal(err)
+		}
+		after, err := input.Clone().Digest()
+		if err != nil || before == after {
+			t.Fatalf("publication did not capture policy change: %v", err)
+		}
 	}
 }
 
@@ -177,5 +206,27 @@ func TestExactAliasSnapshotFreezesPublishedModelMapping(t *testing.T) {
 	operations, err := frozen.CodeRoutes["coding"].RecoveryModels(codemode.Operation{Model: "team-code"}, nil)
 	if err != nil || len(operations) != 2 || operations[1].Model != "native-next" {
 		t.Fatalf("draft pool edit changed frozen recovery %+v, %v", operations, err)
+	}
+}
+
+func TestPublishedGrokPolicyControlsFrozenProviders(t *testing.T) {
+	snapshot := &Snapshot{CodeRoutes: map[string]codemode.Route{
+		"disabled": {RevisionID: "disabled"},
+		"identity": {RevisionID: "identity", GrokCLIIdentity: true},
+		"enabled":  {RevisionID: "enabled", ResponsesToGrok: true},
+	}, CodeConnections: map[string]Configuration{}}
+	for _, id := range []string{"disabled", "identity", "enabled"} {
+		snapshot.CodeConnections[id+":grok"] = Configuration{Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: grokauth.ProfileID}}
+	}
+	if err := snapshot.compileCodeMode(); err != nil {
+		t.Fatal(err)
+	}
+	for slug, route := range snapshot.CodeRoutes {
+		if snapshot.HasCodeProviders(route, "responses", codeadapter.HTTP) != route.ResponsesToGrok {
+			t.Fatalf("%s Responses eligibility does not match published translation policy", slug)
+		}
+		if snapshot.HasCodeProviders(route, "responses", codeadapter.WebSocket) {
+			t.Fatalf("%s offered unsupported WebSocket", slug)
+		}
 	}
 }

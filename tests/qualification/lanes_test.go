@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"github.com/tyk-swe/olp/internal/providerconfig"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -29,6 +31,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/grokauth"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/plugin/abi"
@@ -217,6 +220,7 @@ func lanes() []lane {
 	}
 	codexSeed := laneSeed{adapter: "codex", profile: codexauth.ProfileID, manifest: codexauth.Manifest, token: token, principal: identity.Principal(), facts: identity.Facts(), expiresAt: &expires}
 	return []lane{
+		{client: laneClient{name: "codex", binary: "codex", userAgent: "codex_cli_rs (qualification fixture)"}, seed: laneSeed{adapter: "grok-build", profile: grokauth.ProfileID, manifest: grokauth.Manifest, token: grokToken, principal: grokauth.Principal("fixture-subject"), facts: map[string]string{"subject": "fixture-subject"}, expiresAt: &expires}, protocol: "responses", toolRoundTrip: true},
 		{
 			client:   laneClient{name: "codex", binary: "codex", userAgent: "codex_cli_rs (qualification fixture)"},
 			seed:     codexSeed,
@@ -328,6 +332,142 @@ func (s *service) seedSubscriptionE(project, ownerID string, spec laneSeed, netw
 	return providerID, credentialID, nil
 }
 
+func (s *service) enrollGrokSubscription(owner *caller, project string, proxy vendorProxy) (string, string) {
+	s.t.Helper()
+	modulePath := filepath.Join(s.t.TempDir(), "grok-build.wasm")
+	build := exec.CommandContext(s.t.Context(), "go", "build", "-mod=readonly", "-trimpath", "-buildvcs=false", "-buildmode=c-shared", "-o", modulePath, "./internal/grokauth/grok")
+	build.Dir = filepath.Join("..", "..")
+	build.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm", "CGO_ENABLED=0")
+	if output, err := build.CombinedOutput(); err != nil {
+		s.t.Fatalf("build Grok plugin: %v %s", err, output)
+	}
+	module, err := os.ReadFile(modulePath)
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	request, err := http.NewRequestWithContext(s.t.Context(), http.MethodPost, s.origin+"/api/v1/plugins", bytes.NewReader(module))
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/wasm")
+	request.Header.Set("Origin", s.origin)
+	request.Header.Set("X-CSRF-Token", owner.csrf)
+	for _, cookie := range owner.cookies {
+		request.AddCookie(cookie)
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var plugin struct {
+		Digest string `json:"digest"`
+		ETag   string `json:"etag"`
+	}
+	if response.StatusCode != http.StatusCreated || json.NewDecoder(response.Body).Decode(&plugin) != nil {
+		s.t.Fatalf("install real Grok WASM failed with status %d", response.StatusCode)
+	}
+	s.want(owner, "POST", "/api/v1/plugins/"+plugin.Digest+"/approve", map[string]any{"origins": grokauth.Manifest().Origins}, idempotent(map[string]string{"If-Match": strconv.Quote(plugin.ETag)}), http.StatusOK)
+	provider := s.want(owner, "POST", "/api/v1/providers", map[string]any{
+		"name": uniqueName("qualify-grok-grant"), "project_id": project,
+		"configuration": map[string]any{"kind": "plugin", "auth_mode": "grant", "profile_id": grokauth.ProfileID, "profile_revision": plugin.Digest, "options": map[string]any{"network": map[string]string{"proxy_url": proxy.url, "trust_roots_pem": proxy.roots}}},
+	}, idempotent(), http.StatusCreated)
+	providerID := provider["id"].(string)
+	enrollment := s.want(owner, "POST", "/api/v1/providers/"+providerID+"/grant-enrollments", map[string]any{}, idempotent(etag(provider)), http.StatusCreated)
+	device := enrollment["device"].(map[string]any)
+	if device["verification_url"] != "https://auth.x.ai/device" || device["user_code"] != "FIXTURE" {
+		s.t.Fatal("device enrollment did not expose the controlled approval step")
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		status := s.want(owner, "POST", "/api/v1/providers/"+providerID+"/grant-enrollments/"+enrollment["id"].(string)+"/poll", nil, idempotent(), http.StatusOK)
+		if status["status"] == "completed" {
+			completion := status["completion"].(map[string]any)
+			if completion["principal"] != grokauth.Principal("fixture-subject") {
+				s.t.Fatal("device enrollment did not retain authenticated subject")
+			}
+			return providerID, completion["credential_id"].(string)
+		}
+		if status["status"] != "pending" {
+			s.t.Fatal("device enrollment did not complete")
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	s.t.Fatal("device enrollment did not complete before deadline")
+	return "", ""
+}
+
+type grokGrantSnapshot struct {
+	generation                          int64
+	principal                           string
+	facts                               map[string]string
+	served                              connectors.GrantCredential
+	refresh                             string
+	accessCiphertext, refreshCiphertext []byte
+}
+
+func (s *service) grokGrant(credentialID string) grokGrantSnapshot {
+	s.t.Helper()
+	var snapshot grokGrantSnapshot
+	var installation, refreshID string
+	err := s.pool.QueryRow(s.t.Context(), `SELECT i.id::text,c.principal,c.grant_facts,g.generation,g.refresh_token_id::text,a.ciphertext,r.ciphertext
+ FROM olp.installation i,olp.provider_credentials c JOIN olp.provider_grants g ON g.credential_id=c.id
+ JOIN olp.secrets a ON a.id=c.id JOIN olp.secrets r ON r.id=g.refresh_token_id WHERE i.singleton AND c.id=$1`, credentialID).Scan(&installation, &snapshot.principal, &snapshot.facts, &snapshot.generation, &refreshID, &snapshot.accessCiphertext, &snapshot.refreshCiphertext)
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	ring, err := secrets.ParseRing([]byte(s.env.master))
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	served, err := ring.Read(s.t.Context(), s.pool, installation, credentialID, secrets.ProviderCredential)
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	if json.Unmarshal(served, &snapshot.served) != nil {
+		s.t.Fatal("invalid encrypted served grant")
+	}
+	refresh, err := ring.Read(s.t.Context(), s.pool, installation, refreshID, secrets.ProviderGrantRefresh)
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	snapshot.refresh = string(refresh)
+	if bytes.Contains(snapshot.accessCiphertext, []byte(snapshot.served.AccessToken)) || bytes.Contains(snapshot.refreshCiphertext, refresh) {
+		s.t.Fatal("grant token persisted without encryption")
+	}
+	return snapshot
+}
+
+func (s *service) refreshGrokSubscription(credentialID string) {
+	s.t.Helper()
+	before := s.grokGrant(credentialID)
+	if before.served.AccessToken != grokToken || before.refresh != grokRefreshToken || before.principal != grokauth.Principal("fixture-subject") || before.facts["subject"] != "fixture-subject" {
+		s.t.Fatal("initial encrypted device grant did not retain verified identity and refresh continuity")
+	}
+	if _, err := s.pool.Exec(s.t.Context(), `UPDATE olp.provider_grants SET refresh_at=now() WHERE credential_id=$1`, credentialID); err != nil {
+		s.t.Fatal(err)
+	}
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		var generation int64
+		if err := s.pool.QueryRow(s.t.Context(), `SELECT generation FROM olp.provider_grants WHERE credential_id=$1`, credentialID).Scan(&generation); err != nil {
+			s.t.Fatal(err)
+		}
+		if generation > before.generation {
+			after := s.grokGrant(credentialID)
+			if after.generation != before.generation+1 || after.principal != before.principal || !maps.Equal(after.facts, before.facts) || !maps.Equal(after.served.Facts, before.served.Facts) {
+				s.t.Fatal("refresh changed grant identity or repeated rotation")
+			}
+			if after.served.AccessToken != grokRotatedToken || after.refresh != grokRotatedRefresh || bytes.Equal(after.accessCiphertext, before.accessCiphertext) || bytes.Equal(after.refreshCiphertext, before.refreshCiphertext) {
+				s.t.Fatal("refresh did not rotate both encrypted grant tokens")
+			}
+			return
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	s.t.Fatal("real grant worker did not refresh the enrolled Grok grant before deadline")
+}
+
 const sandboxBridge = `
 import select, socket, socketserver, subprocess, sys, threading
 
@@ -413,10 +553,13 @@ func runFixtureClient(t *testing.T, client, binary, bridge, slug, key, configura
 	prompt := "Say hello."
 	switch client {
 	case "codex":
+		if toolRoundTrip {
+			prompt = "Execute printf olp-tool-round-trip with the shell tool, then say hello."
+		}
 		return sandboxClient(t, binary, bridge, []string{"OLP_API_KEY=" + key}, "exec", "--skip-git-repo-check", "--ephemeral", "-m", vendorModel,
 			"-c", `model_provider="olp"`, "-c", `model_providers.olp.name="OLP"`, "-c", `model_providers.olp.base_url="`+base+`"`,
 			"-c", `model_providers.olp.env_key="OLP_API_KEY"`, "-c", `model_providers.olp.wire_api="responses"`,
-			"-c", `model_providers.olp.supports_websockets=false`, "-c", `check_for_update_on_startup=false`, prompt)
+			"-c", `model_providers.olp.supports_websockets=false`, "-c", `check_for_update_on_startup=false`, "-c", `features.apply_patch_freeform=false`, "-c", `features.multi_agent=false`, "-c", `features.goals=false`, "-c", `web_search="disabled"`, "-c", `model_reasoning_summary="none"`, "-c", `model_reasoning_effort="none"`, "--dangerously-bypass-approvals-and-sandbox", prompt)
 	case "claude-code":
 		if toolRoundTrip {
 			return sandboxClient(t, binary, bridge, fixtureConfigurationEnvironment(t, configuration, key), "--print", "--bare", "--no-session-persistence", "--tools", "Bash", "--allowedTools", "Bash", "--max-turns", "3", "--model", vendorModel, "Execute printf olp-tool-round-trip using Bash, then say hello.")
@@ -500,14 +643,19 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 	}
 	project := s.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "qualification"}, idempotent(), http.StatusCreated)["id"].(string)
 	toolProof := make(chan struct{}, 1)
-	proxy := newVendorProxy(t, newVendorMux(specs[0].seed.token, toolProof))
+	proxy := newVendorProxy(t, newVendorMux(codexFixtureAccessToken(specs), toolProof))
 	key := s.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "qualification", "scopes": []string{"inference"}, "project_id": project}, idempotent(), http.StatusCreated)
 	consumer := &caller{name: "qualification key", token: key["secret"].(string)}
 	bridge := fixtureBridge(t, s.origin)
 
 	for _, spec := range specs {
 		t.Run(spec.client.name+"-"+spec.seed.adapter, func(t *testing.T) {
-			providerID, credentialID := s.seedSubscription(project, ownerID, spec.seed, proxy)
+			providerID, credentialID := func() (string, string) {
+				if spec.seed.adapter == "grok-build" {
+					return s.enrollGrokSubscription(owner, project, proxy)
+				}
+				return s.seedSubscription(project, ownerID, spec.seed, proxy)
+			}()
 			account := s.want(owner, "POST", "/api/v1/code/accounts", map[string]any{
 				"project_id": project, "provider_id": providerID, "credential_id": credentialID,
 				"name": "qualify-" + spec.client.name, "enabled": true, "models": []string{vendorModel},
@@ -521,9 +669,12 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 			}, idempotent(), http.StatusCreated)
 			slug := uniqueName("qualify-" + spec.client.name)
 			route := s.want(owner, "POST", "/api/v1/code/routes", map[string]any{
-				"project_id": project, "slug": slug, "pool_id": pool["id"], "models": []string{vendorModel}, "enabled": true, "messages_to_codex": spec.toolRoundTrip, "messages_codex_safety_identifier": spec.toolRoundTrip, "chat_to_codex": spec.toolRoundTrip,
+				"project_id": project, "slug": slug, "pool_id": pool["id"], "models": []string{vendorModel}, "enabled": true, "messages_to_codex": spec.toolRoundTrip && spec.seed.adapter == "codex", "messages_codex_safety_identifier": spec.toolRoundTrip && spec.seed.adapter == "codex", "chat_to_codex": spec.toolRoundTrip && spec.seed.adapter == "codex", "responses_to_grok": spec.seed.adapter == "grok-build", "grok_cli_identity": spec.seed.adapter == "grok-build",
 			}, idempotent(), http.StatusCreated)
 			s.want(owner, "POST", "/api/v1/code/routes/"+route["id"].(string)+"/publish", nil, idempotent(etag(route)), http.StatusOK)
+			if spec.seed.adapter == "grok-build" {
+				s.refreshGrokSubscription(credentialID)
+			}
 
 			lane := spec
 			record := runLane(t, lane, bridge, func(binary string) (string, bool, error) {
@@ -531,7 +682,7 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 					return "", false, err
 				}
 				configuration := func() string {
-					if !lane.toolRoundTrip {
+					if !lane.toolRoundTrip || lane.client.name != "claude-code" {
 						return ""
 					}
 					config := s.want(owner, "GET", "/api/v1/code/routes/"+route["id"].(string)+"/client-config?client=claude-code&platform=linux&gateway_url=http%3A%2F%2F127.0.0.1%3A18765", nil, nil, http.StatusOK)
@@ -554,7 +705,7 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 				}
 				return output, executed, nil
 			})
-			if lane.toolRoundTrip && record.Result == "pass" {
+			if lane.toolRoundTrip && lane.seed.adapter == "codex" && record.Result == "pass" {
 				assertTranslatedCodeRates(t, s, owner, project, slug, pool, providerID)
 				s.want(owner, "POST", "/api/v1/code/budgets", map[string]any{"project_id": project, "route_id": route["id"], "api_key_id": key["id"], "daily_tokens": 100, "enabled": true}, idempotent(), http.StatusCreated)
 				consumer := &caller{name: "hard token bound", token: key["secret"].(string)}
@@ -658,4 +809,13 @@ func fixtureConfigurationEnvironment(t *testing.T, configuration, key string) []
 		t.Fatalf("generated setup failed: %v", err)
 	}
 	return strings.Split(strings.TrimSuffix(string(output), "\x00"), "\x00")
+}
+
+func codexFixtureAccessToken(specs []lane) string {
+	for _, spec := range specs {
+		if spec.seed.adapter == "codex" {
+			return spec.seed.token
+		}
+	}
+	return ""
 }
