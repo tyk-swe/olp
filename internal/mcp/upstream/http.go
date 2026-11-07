@@ -1,7 +1,6 @@
 package upstream
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/mcp/messages"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/protocols/sse"
 )
 
 type httpConnection struct {
@@ -96,33 +96,18 @@ func (c *httpConnection) exchange(ctx context.Context, protocol string, id int, 
 	if media != "text/event-stream" {
 		return nil, ErrTransport
 	}
-	eventLimit := sseEventLimit(method)
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 4096), eventLimit)
-	var data []byte
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			if len(data) != 0 {
-				if _, matched := matchingReply(data, id); matched {
-					return data, nil
-				}
-				c.observeNotification(data)
-				data = nil
-			}
-			continue
-		}
-		if strings.HasPrefix(line, "data:") {
-			if len(data) > 0 {
-				data = append(data, '\n')
-			}
-			data = append(data, strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " ")...)
-		}
-		if len(data) > eventLimit || reader.N == 0 {
+	decoder := sse.NewDecoder(reader, sseEventLimit(method))
+	for {
+		frame, err := decoder.Next()
+		if err != nil || reader.N == 0 {
 			return nil, ErrTransport
 		}
+		data := []byte(frame.Data)
+		if _, matched := matchingReply(data, id); matched {
+			return data, nil
+		}
+		c.observeNotification(data)
 	}
-	return nil, ErrTransport
 }
 func sseEventLimit(method string) int {
 	if method == "tools/call" {
