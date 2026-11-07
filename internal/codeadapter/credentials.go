@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/grokauth"
 )
 
 // Authorize constructs credentials after the provider has checked the live
@@ -111,4 +112,16 @@ func antigravityCredential(secret []byte, _ string, principal string, _ Endpoint
 		return codemode.Authorization{}, codemode.Refuse(503, "code_principal_mismatch")
 	}
 	return codemode.Authorization{Principal: observed, ProjectID: credential.Facts["project_id"], Headers: http.Header{"Authorization": {"Bearer " + credential.AccessToken}}}, nil
+}
+
+func grokCredential(secret []byte, _ string, principal string, _ Endpoint, _ time.Time) (codemode.Authorization, error) {
+	var credential connectors.GrantCredential
+	if len(secret) > 64<<10 || json.Unmarshal(secret, &credential) != nil || credential.AccessToken == "" || strings.ContainsAny(credential.AccessToken, "\r\n\x00") {
+		return codemode.Authorization{}, codemode.Refuse(503, "code_credential_unavailable")
+	}
+	verified := grokauth.Principal(credential.Facts["subject"])
+	if verified == "" || verified != principal || len(credential.Facts) != 1 {
+		return codemode.Authorization{}, codemode.Refuse(503, "code_principal_mismatch")
+	}
+	return codemode.Authorization{Principal: verified, Headers: http.Header{"Authorization": {"Bearer " + credential.AccessToken}}}, nil
 }

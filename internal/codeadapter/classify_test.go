@@ -215,3 +215,27 @@ func TestGrokRefreshRejectsAmbiguousSubjectWithoutIssuingGrant(t *testing.T) {
 		t.Fatalf("ambiguous subject issued grant %+v, %v", grant, err)
 	}
 }
+
+func TestGrokSubscriptionNeverUsesPaidAPIOrWebSocket(t *testing.T) {
+	vendor, ok := codeadapter.ForConnection("plugin", "grant", grokauth.ProfileID)
+	if !ok {
+		t.Fatal("Grok subscription profile is unavailable")
+	}
+	address, ok := vendor.Address(grokauth.ProfileID)
+	if !ok || address != grokauth.Upstream {
+		t.Fatalf("subscription address %q, %v", address, ok)
+	}
+	endpoint, ok := vendor.Endpoint("responses")
+	if !ok || !endpoint.Supports(codeadapter.HTTP) || endpoint.Supports(codeadapter.WebSocket) || endpoint.Observation != codeadapter.ObserveUsage {
+		t.Fatalf("subscription endpoint %+v, %v", endpoint, ok)
+	}
+	secret := []byte(`{"access_token":"opaque-access","facts":{"subject":"verified-subject"}}`)
+	dispatch := codemode.Dispatch{Adapter: vendor.Adapter, Protocol: codemode.ProtocolResponses, ClientPath: "responses"}
+	authorization, err := vendor.Authorize(secret, grokauth.ProfileID, grokauth.Principal("verified-subject"), dispatch, time.Now())
+	if err != nil || authorization.Headers.Get("Authorization") != "Bearer opaque-access" {
+		t.Fatalf("authorization %+v, %v", authorization, err)
+	}
+	if _, err := vendor.Authorize(secret, grokauth.ProfileID, grokauth.Principal("other-subject"), dispatch, time.Now()); err == nil {
+		t.Fatal("credential crossed principal boundary")
+	}
+}
