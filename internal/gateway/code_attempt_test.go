@@ -1414,6 +1414,7 @@ func TestGrokChatPublishedTranslation(t *testing.T) {
 	}{
 		{name: "stream usage", body: `{"model":"grok-model","messages":[{"role":"user","content":"hello"}],"stream":true,"stream_options":{"include_usage":true}}`, status: http.StatusOK},
 		{name: "stream without usage", body: `{"model":"grok-model","messages":[{"role":"user","content":"hello"}],"stream":true}`, status: http.StatusOK},
+		{name: "identity opt-in", body: `{"model":"grok-model","messages":[{"role":"user","content":"hello"}]}`, identity: true, status: http.StatusOK},
 		{name: "text", body: `{"model":"grok-model","messages":[{"role":"system","content":"instructions"},{"role":"user","content":"hello"}],"max_tokens":1}`, status: http.StatusOK},
 		{name: "tool continuation", body: `{"model":"grok-model","messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"shell","arguments":"{}"}}]},{"role":"tool","tool_call_id":"call_1","content":"result"}]}`, status: http.StatusOK},
 		{name: "reasoning refused", body: `{"model":"grok-model","messages":[{"role":"user","content":"hello"}],"reasoning_effort":"low"}`, status: http.StatusUnprocessableEntity},
