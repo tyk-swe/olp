@@ -67,8 +67,11 @@ func fetchOpenAI(ctx context.Context, client *http.Client, endpoint *string, key
 				days.add(day, amount, result.Amount.Currency, result.LineItem)
 			}
 		}
-		if !doc.HasMore || doc.NextPage == "" {
+		if !doc.HasMore {
 			return days, nil
+		}
+		if doc.NextPage == "" {
+			return nil, failFetch("response", errors.New("cost report has no continuation cursor"))
 		}
 		q.Set("page", doc.NextPage)
 	}

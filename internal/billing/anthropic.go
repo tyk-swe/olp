@@ -79,8 +79,11 @@ func fetchAnthropic(ctx context.Context, client *http.Client, endpoint *string, 
 				days.add(day, cents.Shift(-2), result.Currency, result.Description, result.CostType)
 			}
 		}
-		if !doc.HasMore || doc.NextPage == "" {
+		if !doc.HasMore {
 			return days, nil
+		}
+		if doc.NextPage == "" {
+			return nil, failFetch("response", errors.New("cost report has no continuation cursor"))
 		}
 		q.Set("page", doc.NextPage)
 	}
