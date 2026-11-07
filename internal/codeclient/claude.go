@@ -11,7 +11,7 @@ type claudeSetting struct {
 	name, value string
 }
 
-func claudeSettings(baseURL, model, plan, small string, translated bool) []claudeSetting {
+func claudeSettings(baseURL, model, plan, small string, translated, omitEffort bool) []claudeSetting {
 	base := []claudeSetting{
 		{"ANTHROPIC_BASE_URL", baseURL},
 		{"ANTHROPIC_MODEL", claudeModel(model, plan)},
@@ -24,7 +24,13 @@ func claudeSettings(baseURL, model, plan, small string, translated bool) []claud
 	if !translated {
 		return base
 	}
-	return slices.Concat(base, []claudeSetting{
+	effort := func() []claudeSetting {
+		if omitEffort {
+			return []claudeSetting{{"CLAUDE_CODE_EFFORT_LEVEL", "unset"}}
+		}
+		return nil
+	}()
+	return slices.Concat(base, effort, []claudeSetting{
 		{"CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS", "1"},
 		{"CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING", "1"},
 		{"MAX_THINKING_TOKENS", "0"},
@@ -34,9 +40,9 @@ func claudeSettings(baseURL, model, plan, small string, translated bool) []claud
 	})
 }
 
-func claudeCodeConfiguration(baseURL, model, plan, small string, translated bool) string {
+func claudeCodeConfiguration(baseURL, model, plan, small string, translated, omitEffort bool) string {
 	settings := slices.Collect(func(yield func(string) bool) {
-		for _, setting := range claudeSettings(baseURL, model, plan, small, translated) {
+		for _, setting := range claudeSettings(baseURL, model, plan, small, translated, omitEffort) {
 			if !yield("export " + setting.name + "=" + shellQuote(setting.value)) {
 				return
 			}
@@ -48,9 +54,9 @@ export ANTHROPIC_AUTH_TOKEN="${OLP_API_KEY:?Set OLP_API_KEY to your OLP inferenc
 ` + strings.Join(settings, "\n") + "\n"
 }
 
-func claudeCodePowerShellConfiguration(baseURL, model, plan, small string, translated bool) string {
+func claudeCodePowerShellConfiguration(baseURL, model, plan, small string, translated, omitEffort bool) string {
 	settings := slices.Collect(func(yield func(string) bool) {
-		for _, setting := range claudeSettings(baseURL, model, plan, small, translated) {
+		for _, setting := range claudeSettings(baseURL, model, plan, small, translated, omitEffort) {
 			if !yield("$env:" + setting.name + " = " + powerShellQuote(setting.value)) {
 				return
 			}
