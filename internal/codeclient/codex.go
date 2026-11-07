@@ -6,9 +6,11 @@ import (
 )
 
 func codexConfiguration(baseURL, model string, websockets, grok bool) string {
-	compatibility := ""
-	if grok {
-		compatibility = `web_search = "disabled"
+	compatibility := func() string {
+		if !grok {
+			return ""
+		}
+		return `web_search = "disabled"
 model_reasoning_summary = "none"
 model_reasoning_effort = "none"
 
@@ -18,7 +20,7 @@ multi_agent = false
 goals = false
 
 `
-	}
+	}()
 	return fmt.Sprintf(`model_provider = "olp"
 model = %s
 

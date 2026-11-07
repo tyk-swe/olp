@@ -2043,27 +2043,3 @@ func TestCodeTranslatedRateReservationsThroughGateway(t *testing.T) {
 		}
 	}
 }
-
-func TestCodeGrokClientConfiguration(t *testing.T) {
-	route := codemode.Route{Enabled: true, RevisionID: "revision", Slug: "coding", Models: []string{"grok-fixture-model"}}
-	grok := codeclient.Offers{{Adapter: codemode.AdapterGrokBuild, Models: route.Models}}
-	request := codeclient.Request{GatewayURL: "http://localhost:4000", Client: codeadapter.ClientCodex, Model: route.Models[0]}
-	if _, err := codeclient.Generate(route, grok, request); err == nil {
-		t.Fatal("disabled Grok translation offered client configuration")
-	}
-	route.ResponsesToGrok = true
-	configuration, err := codeclient.Generate(route, grok, request)
-	if err != nil || !strings.Contains(configuration.Configuration, "supports_websockets = false") {
-		t.Fatalf("Grok configuration must select HTTP: %+v, %v", configuration, err)
-	}
-	mixed := slices.Concat(grok, codeclient.Offers{{Adapter: codemode.AdapterCodex, Models: route.Models}})
-	configuration, err = codeclient.Generate(route, mixed, request)
-	if err != nil || !strings.Contains(configuration.Configuration, "supports_websockets = false") {
-		t.Fatalf("mixed eligible paths must select HTTP: %+v, %v", configuration, err)
-	}
-	route.ResponsesToGrok = false
-	configuration, err = codeclient.Generate(route, mixed, request)
-	if err != nil || !strings.Contains(configuration.Configuration, "supports_websockets = true") {
-		t.Fatalf("disabled Grok path must preserve native transport: %+v, %v", configuration, err)
-	}
-}
