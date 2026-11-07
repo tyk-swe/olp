@@ -17304,6 +17304,11 @@
             "type": "boolean",
             "default": false,
             "description": "Explicitly enable Responses text and signed function tools through Antigravity over HTTP or SSE after publication. Unsupported continuation state is refused. Existing published revisions retain their behavior. Provider terms and account suspension risks apply. Live subscription acceptance remains unverified."
+          },
+          "responses_antigravity_compatibility": {
+            "type": "boolean",
+            "default": false,
+            "description": "Separate published opt-in to ignore Codex prompt-cache hints and client metadata upstream and treat effort none and requested reasoning output as best effort. Provider reasoning may occur and usage or cache behavior may differ. Opaque reasoning continuation and unrepresentable reasoning output remain refused."
           }
         },
         "required": [
@@ -17493,6 +17498,11 @@
             "type": "boolean",
             "default": false,
             "description": "Explicitly enable Responses text and signed function tools through Antigravity over HTTP or SSE after publication. Unsupported continuation state is refused. Existing published revisions retain their behavior. Provider terms and account suspension risks apply. Live subscription acceptance remains unverified."
+          },
+          "responses_antigravity_compatibility": {
+            "type": "boolean",
+            "default": false,
+            "description": "Separate published opt-in to ignore Codex prompt-cache hints and client metadata upstream and treat effort none and requested reasoning output as best effort. Provider reasoning may occur and usage or cache behavior may differ. Opaque reasoning continuation and unrepresentable reasoning output remain refused."
           }
         },
         "required": [
@@ -32038,6 +32048,11 @@
             "type": "boolean",
             "default": false,
             "description": "Explicitly enable Responses text and signed function tools through Antigravity over HTTP or SSE after publication. Unsupported continuation state is refused. Existing published revisions retain their behavior. Provider terms and account suspension risks apply. Live subscription acceptance remains unverified."
+          },
+          "responses_antigravity_compatibility": {
+            "type": "boolean",
+            "default": false,
+            "description": "Separate published opt-in to ignore Codex prompt-cache hints and client metadata upstream and treat effort none and requested reasoning output as best effort. Provider reasoning may occur and usage or cache behavior may differ. Opaque reasoning continuation and unrepresentable reasoning output remain refused."
           }
         },
         "required": [

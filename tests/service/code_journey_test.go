@@ -2098,7 +2098,25 @@ func TestCodeSignedToolContinuation(t *testing.T) {
 		_, _ = w.Write([]byte(result))
 	}))
 	journey, consumer := newSignedCodeJourney(t, s, owner, proxy, roots)
-	surfaceJourneys := []signedSurfaceJourney{startSignedSurfaceJourney(t, s, consumer, journey.route.Slug, "responses")}
+	configuration, configErr := codeclient.Generate(journey.route, codeclient.Offers{{Adapter: codemode.AdapterCodex, Models: []string{"gemini-fixture"}}, {Adapter: codemode.AdapterAntigravity, Models: []string{"gemini-fixture"}}}, codeclient.Request{GatewayURL: s.origin, Client: codeadapter.ClientCodex, Model: "gemini-fixture"})
+	if configErr != nil || !strings.Contains(configuration.Configuration, "supports_websockets = false") || !strings.Contains(configuration.Configuration, `web_search = "disabled"`) {
+		t.Fatalf("HTTP Codex configuration = %s, %v", configuration.Configuration, configErr)
+	}
+	strictSurface := startSignedSurfaceJourney(t, s, consumer, journey.route.Slug, "responses")
+	compatibleBody := json.RawMessage(`{"model":"gemini-fixture","input":"Inspect","store":false,"parallel_tool_calls":true,"prompt_cache_key":"cache-hint","client_metadata":{"thread_id":"signed-responses-root"},"reasoning":{"effort":"none"},"include":["reasoning.encrypted_content"]}`)
+	beforeCompatibility := calls.Load()
+	statusBefore, bodyBefore := s.do(consumer, "POST", strictSurface.path, compatibleBody, strictSurface.headers)
+	if statusBefore != http.StatusUnprocessableEntity || !strings.Contains(string(bodyBefore), "code_translation_unsupported_semantics") || calls.Load() != beforeCompatibility {
+		t.Fatalf("strict published policy = %s", describe(statusBefore, bodyBefore))
+	}
+	updated := s.want(owner, "PUT", "/api/v1/code/routes/"+journey.route.ID, map[string]any{"project_id": journey.route.ProjectID, "slug": journey.route.Slug, "pool_id": journey.route.PoolID, "models": journey.route.Models, "enabled": true, "chat_to_antigravity": true, "responses_to_antigravity": true, "responses_antigravity_compatibility": true}, idempotent(map[string]string{"If-Match": `"` + journey.route.ETag + `"`}), http.StatusOK)
+	published := s.want(owner, "POST", "/api/v1/code/routes/"+journey.route.ID+"/publish", nil, idempotent(etag(updated)), http.StatusOK)
+	journey.route.ETag, journey.route.RevisionID = published["etag"].(string), published["revision_id"].(string)
+	surfaceJourneys := []signedSurfaceJourney{strictSurface, startSignedSurfaceJourney(t, s, consumer, journey.route.Slug, "responses-compatible")}
+	statusPinned, bodyPinned := s.do(consumer, "POST", strictSurface.path, compatibleBody, strictSurface.headers)
+	if statusPinned != http.StatusUnprocessableEntity || !strings.Contains(string(bodyPinned), "code_translation_unsupported_semantics") {
+		t.Fatalf("pinned strict policy = %s", describe(statusPinned, bodyPinned))
+	}
 	path := "/code/" + journey.route.Slug + "/v1/chat/completions"
 	initial := json.RawMessage(`{"model":"gemini-fixture","messages":[{"role":"user","content":"Inspect"}]}`)
 	headers := map[string]string{"X-Opencode-Session-Id": "signed-root"}
@@ -2262,7 +2280,9 @@ func newSignedCodeJourney(t *testing.T, s *service, owner *caller, proxy, roots 
 		t.Fatal(err)
 	}
 	route := s.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": journey.route.ProjectID, "slug": "signed-" + uuid.NewString(), "pool_id": journey.route.PoolID, "models": []string{"gemini-fixture"}, "enabled": true, "chat_to_antigravity": true, "responses_to_antigravity": true}, idempotent(), http.StatusCreated)
-	s.want(owner, "POST", "/api/v1/code/routes/"+route["id"].(string)+"/publish", nil, idempotent(etag(route)), http.StatusOK)
+	published := s.want(owner, "POST", "/api/v1/code/routes/"+route["id"].(string)+"/publish", nil, idempotent(etag(route)), http.StatusOK)
+	journey.route.ETag = published["etag"].(string)
+	journey.route.ChatToAntigravity, journey.route.ResponsesToAntigravity = true, true
 	journey.route.ID, journey.route.Slug, journey.route.Models = route["id"].(string), route["slug"].(string), []string{"gemini-fixture"}
 	if err := s.pool.QueryRow(t.Context(), `SELECT latest_revision_id::text FROM olp.code_routes WHERE id=$1`, journey.route.ID).Scan(&journey.route.RevisionID); err != nil {
 		t.Fatal(err)
@@ -2283,7 +2303,16 @@ func startSignedSurfaceJourney(t *testing.T, s *service, consumer *caller, slug,
 	t.Helper()
 	path := "/code/" + slug + "/responses"
 	headers := map[string]string{"Session-Id": "signed-responses-root"}
-	initial := json.RawMessage(`{"model":"gemini-fixture","input":"Inspect"}`)
+	compatibility := func() string {
+		if protocol == "responses-compatible" {
+			return `,"store":false,"parallel_tool_calls":true,"prompt_cache_key":"cache-hint","client_metadata":{"turn_id":"fixture-turn"},"reasoning":{"effort":"none"},"include":["reasoning.encrypted_content"]`
+		}
+		return ""
+	}()
+	if protocol == "responses-compatible" {
+		headers = map[string]string{"Session-Id": "signed-responses-compatible-root"}
+	}
+	initial := json.RawMessage(fmt.Sprintf(`{"model":"gemini-fixture","input":"Inspect"%s}`, compatibility))
 	status, raw := func() (int, []byte) {
 		for deadline := time.Now().Add(5 * time.Second); ; {
 			status, raw := s.do(consumer, "POST", path, initial, headers)
@@ -2306,8 +2335,8 @@ func startSignedSurfaceJourney(t *testing.T, s *service, consumer *caller, slug,
 	}
 	calls, _ := json.Marshal(result.Output)
 	prefix := strings.TrimSuffix(string(calls), "]")
-	continuation := json.RawMessage(fmt.Sprintf(`{"model":"gemini-fixture","input":%s,{"type":"function_call_output","call_id":%q,"output":"directory result"},{"type":"function_call_output","call_id":%q,"output":"file result"}]}`, prefix, result.Output[1].CallID, result.Output[0].CallID))
-	partial := json.RawMessage(fmt.Sprintf(`{"model":"gemini-fixture","input":%s,{"type":"function_call_output","call_id":%q,"output":"file result"}]}`, prefix, result.Output[0].CallID))
+	continuation := json.RawMessage(fmt.Sprintf(`{"model":"gemini-fixture"%s,"input":%s,{"type":"function_call_output","call_id":%q,"output":"directory result"},{"type":"function_call_output","call_id":%q,"output":"file result"}]}`, compatibility, prefix, result.Output[1].CallID, result.Output[0].CallID))
+	partial := json.RawMessage(fmt.Sprintf(`{"model":"gemini-fixture"%s,"input":%s,{"type":"function_call_output","call_id":%q,"output":"file result"}]}`, compatibility, prefix, result.Output[0].CallID))
 	for _, request := range []struct {
 		body    json.RawMessage
 		headers map[string]string

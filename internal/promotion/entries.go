@@ -82,29 +82,30 @@ type CodePaidConnection struct {
 }
 
 type CodeRoutePolicy struct {
-	ResponsesToGrok               bool                      `json:"responses_to_grok,omitempty"`
-	MessagesToGrok                bool                      `json:"messages_to_grok,omitempty"`
-	MessagesGrokSafetyIdentifier  bool                      `json:"messages_grok_safety_identifier,omitempty"`
-	GrokCLIIdentity               bool                      `json:"grok_cli_identity,omitempty"`
-	CodexCLIIdentity              bool                      `json:"codex_cli_identity,omitempty"`
-	PaidFallbackTargets           map[string]CodePaidTarget `json:"paid_fallback_targets,omitempty"`
-	ResponsesToAntigravity        bool                      `json:"responses_to_antigravity,omitempty"`
-	ChatToAntigravity             bool                      `json:"chat_to_antigravity,omitempty"`
-	PaidParticipation             bool                      `json:"paid_participation"`
-	PaidTargets                   map[string]CodePaidTarget `json:"paid_targets,omitempty"`
-	Pool                          string                    `json:"pool"`
-	Models                        []string                  `json:"models"`
-	Enabled                       bool                      `json:"enabled"`
-	ModelPools                    map[string][]string       `json:"model_pools"`
-	InitialRecoveryAttempts       int                       `json:"initial_recovery_attempts"`
-	ModelRewriting                bool                      `json:"model_rewriting"`
-	Aliases                       map[string]string         `json:"aliases"`
-	ChatToCodex                   bool                      `json:"chat_to_codex,omitempty"`
-	MessagesToCodex               bool                      `json:"messages_to_codex"`
-	MessagesCodexSafetyIdentifier bool                      `json:"messages_codex_safety_identifier,omitempty"`
-	AllowanceOrdering             bool                      `json:"allowance_ordering,omitempty"`
-	Tools                         *codemode.ResearchTools   `json:"tools"`
-	MaxBodyBytes                  *int64                    `json:"max_body_bytes"`
+	ResponsesToGrok                   bool                      `json:"responses_to_grok,omitempty"`
+	MessagesToGrok                    bool                      `json:"messages_to_grok,omitempty"`
+	MessagesGrokSafetyIdentifier      bool                      `json:"messages_grok_safety_identifier,omitempty"`
+	GrokCLIIdentity                   bool                      `json:"grok_cli_identity,omitempty"`
+	CodexCLIIdentity                  bool                      `json:"codex_cli_identity,omitempty"`
+	PaidFallbackTargets               map[string]CodePaidTarget `json:"paid_fallback_targets,omitempty"`
+	ResponsesToAntigravity            bool                      `json:"responses_to_antigravity,omitempty"`
+	ResponsesAntigravityCompatibility bool                      `json:"responses_antigravity_compatibility,omitempty"`
+	ChatToAntigravity                 bool                      `json:"chat_to_antigravity,omitempty"`
+	PaidParticipation                 bool                      `json:"paid_participation"`
+	PaidTargets                       map[string]CodePaidTarget `json:"paid_targets,omitempty"`
+	Pool                              string                    `json:"pool"`
+	Models                            []string                  `json:"models"`
+	Enabled                           bool                      `json:"enabled"`
+	ModelPools                        map[string][]string       `json:"model_pools"`
+	InitialRecoveryAttempts           int                       `json:"initial_recovery_attempts"`
+	ModelRewriting                    bool                      `json:"model_rewriting"`
+	Aliases                           map[string]string         `json:"aliases"`
+	ChatToCodex                       bool                      `json:"chat_to_codex,omitempty"`
+	MessagesToCodex                   bool                      `json:"messages_to_codex"`
+	MessagesCodexSafetyIdentifier     bool                      `json:"messages_codex_safety_identifier,omitempty"`
+	AllowanceOrdering                 bool                      `json:"allowance_ordering,omitempty"`
+	Tools                             *codemode.ResearchTools   `json:"tools"`
+	MaxBodyBytes                      *int64                    `json:"max_body_bytes"`
 }
 
 type CodeConnectionEntry struct {
