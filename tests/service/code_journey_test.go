@@ -2095,6 +2095,7 @@ func TestCodeSignedToolContinuation(t *testing.T) {
 		_, _ = w.Write([]byte(result))
 	}))
 	journey, consumer := newSignedCodeJourney(t, s, owner, proxy, roots)
+	surfaceJourneys := []signedSurfaceJourney{startSignedSurfaceJourney(t, s, consumer, journey.route.Slug, "responses")}
 	path := "/code/" + journey.route.Slug + "/v1/chat/completions"
 	initial := json.RawMessage(`{"model":"gemini-fixture","messages":[{"role":"user","content":"Inspect"}]}`)
 	headers := map[string]string{"X-Opencode-Session-Id": "signed-root"}
@@ -2161,6 +2162,12 @@ func TestCodeSignedToolContinuation(t *testing.T) {
 	status, raw = restarted.do(consumer, "POST", path, continuation, headers)
 	if status != http.StatusOK || !strings.Contains(string(raw), "continued after restart") || calls.Load() != beforeRestart+1 {
 		t.Fatalf("restart = %s", describe(status, raw))
+	}
+	for _, surface := range surfaceJourneys {
+		status, raw := restarted.do(consumer, "POST", surface.path, surface.continuation, surface.headers)
+		if status != http.StatusOK || !strings.Contains(string(raw), "continued after restart") {
+			t.Fatalf("%s restart = %s", surface.protocol, describe(status, raw))
+		}
 	}
 	var root string
 	if err := s.pool.QueryRow(t.Context(), `SELECT root_id::text FROM olp.code_bindings WHERE conversation='signed-root' AND route_id=$1`, journey.route.ID).Scan(&root); err != nil {
@@ -2251,7 +2258,7 @@ func newSignedCodeJourney(t *testing.T, s *service, owner *caller, proxy, roots 
 	if _, err := s.pool.Exec(t.Context(), `INSERT INTO olp.code_pool_keys(pool_id,api_key_id) VALUES($1,$2)`, journey.route.PoolID, key["id"]); err != nil {
 		t.Fatal(err)
 	}
-	route := s.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": journey.route.ProjectID, "slug": "signed-" + uuid.NewString(), "pool_id": journey.route.PoolID, "models": []string{"gemini-fixture"}, "enabled": true, "chat_to_antigravity": true}, idempotent(), http.StatusCreated)
+	route := s.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": journey.route.ProjectID, "slug": "signed-" + uuid.NewString(), "pool_id": journey.route.PoolID, "models": []string{"gemini-fixture"}, "enabled": true, "chat_to_antigravity": true, "responses_to_antigravity": true}, idempotent(), http.StatusCreated)
 	s.want(owner, "POST", "/api/v1/code/routes/"+route["id"].(string)+"/publish", nil, idempotent(etag(route)), http.StatusOK)
 	journey.route.ID, journey.route.Slug, journey.route.Models = route["id"].(string), route["slug"].(string), []string{"gemini-fixture"}
 	if err := s.pool.QueryRow(t.Context(), `SELECT latest_revision_id::text FROM olp.code_routes WHERE id=$1`, journey.route.ID).Scan(&journey.route.RevisionID); err != nil {
@@ -2260,4 +2267,56 @@ func newSignedCodeJourney(t *testing.T, s *service, owner *caller, proxy, roots 
 	journey.key = key["id"].(string)
 	journey.store = codesessions.NewEncrypted(s.pool, installation, ring)
 	return journey, &caller{name: "signed-tools", token: key["secret"].(string)}
+}
+
+type signedSurfaceJourney struct {
+	protocol     string
+	path         string
+	headers      map[string]string
+	continuation json.RawMessage
+}
+
+func startSignedSurfaceJourney(t *testing.T, s *service, consumer *caller, slug, protocol string) signedSurfaceJourney {
+	t.Helper()
+	path := "/code/" + slug + "/responses"
+	headers := map[string]string{"Session-Id": "signed-responses-root"}
+	initial := json.RawMessage(`{"model":"gemini-fixture","input":"Inspect"}`)
+	status, raw := func() (int, []byte) {
+		for deadline := time.Now().Add(5 * time.Second); ; {
+			status, raw := s.do(consumer, "POST", path, initial, headers)
+			if status == http.StatusOK || time.Now().After(deadline) {
+				return status, raw
+			}
+			time.Sleep(25 * time.Millisecond)
+		}
+	}()
+	var result struct {
+		Output []struct {
+			Type      string `json:"type"`
+			CallID    string `json:"call_id"`
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		} `json:"output"`
+	}
+	if status != http.StatusOK || json.Unmarshal(raw, &result) != nil || len(result.Output) != 2 || strings.Contains(string(raw), "private-") {
+		t.Fatalf("%s initial = %s", protocol, describe(status, raw))
+	}
+	calls, _ := json.Marshal(result.Output)
+	prefix := strings.TrimSuffix(string(calls), "]")
+	continuation := json.RawMessage(fmt.Sprintf(`{"model":"gemini-fixture","input":%s,{"type":"function_call_output","call_id":%q,"output":"directory result"},{"type":"function_call_output","call_id":%q,"output":"file result"}]}`, prefix, result.Output[1].CallID, result.Output[0].CallID))
+	partial := json.RawMessage(fmt.Sprintf(`{"model":"gemini-fixture","input":%s,{"type":"function_call_output","call_id":%q,"output":"file result"}]}`, prefix, result.Output[0].CallID))
+	for _, request := range []struct {
+		body    json.RawMessage
+		headers map[string]string
+	}{
+		{partial, headers},
+		{continuation, map[string]string{"Session-Id": "foreign-responses-root"}},
+		{json.RawMessage(strings.Replace(string(continuation), "sample", "altered", 1)), headers},
+	} {
+		status, raw := s.do(consumer, "POST", path, request.body, request.headers)
+		if status != http.StatusUnprocessableEntity || !strings.Contains(string(raw), "code_continuation_unavailable") {
+			t.Fatalf("%s mismatch = %s", protocol, describe(status, raw))
+		}
+	}
+	return signedSurfaceJourney{protocol: protocol, path: path, headers: headers, continuation: continuation}
 }
