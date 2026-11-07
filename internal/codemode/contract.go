@@ -264,6 +264,7 @@ type Route struct {
 	Revision                            int                   `json:"revision"`
 	ETag                                string                `json:"etag"`
 	PublishedAt                         *time.Time            `json:"published_at"`
+	SummaryCompaction                   bool                  `json:"summary_compaction,omitempty"`
 }
 
 func (r Route) BasePath() string { return BasePath + r.Slug }

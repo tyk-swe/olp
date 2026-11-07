@@ -20,6 +20,7 @@ import (
 )
 
 type codePayload struct {
+	summaryCompaction  bool
 	signedContinuation bool
 	body               []byte
 	query              string

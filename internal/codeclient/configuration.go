@@ -125,11 +125,14 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 		switch client {
 		case codeadapter.ClientCodex:
 			_, paid := offers.paidProtocol(route, model, client)
+			declaration, _ := codeadapter.Lookup(through[model])
+			compactEndpoint, compact := codeadapter.RouteEndpoint(route, declaration, "responses/compact")
+			remoteCompaction := route.SummaryCompaction && !paid && compact && compactEndpoint.Target != "" && compactEndpoint.Supports(codeadapter.HTTP)
 			return codexauth.ClientVersion, "toml", codexConfiguration(baseURL, model, !paid && !slices.ContainsFunc(offers.adapters(route, model), func(adapter codemode.Adapter) bool {
 				declaration, _ := codeadapter.Lookup(adapter)
 				endpoint, eligible := codeadapter.RouteEndpoint(route, declaration, "responses")
 				return eligible && !endpoint.Supports(codeadapter.WebSocket)
-			}), slices.Contains(offers.adapters(route, model), codemode.AdapterGrokBuild) || route.ResponsesToAntigravity && slices.Contains(offers.adapters(route, model), codemode.AdapterAntigravity)), nil
+			}), slices.Contains(offers.adapters(route, model), codemode.AdapterGrokBuild) || route.ResponsesToAntigravity && slices.Contains(offers.adapters(route, model), codemode.AdapterAntigravity), remoteCompaction), nil
 		case codeadapter.ClientClaudeCode:
 			if platform == "windows" {
 				return codeadapter.ClaudeCodeVersion, "powershell", claudeCodePowerShellConfiguration(baseURL, model, *plan, *small, translatedClaude, antigravityClaude), nil
@@ -143,6 +146,11 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 	}()
 	file, nativeInstructions := platformInstructions(client, platform)
 	instructions := nativeInstructions + func() string {
+		if client != codeadapter.ClientCodex || !route.SummaryCompaction {
+			return ""
+		}
+		return " This published route explicitly opts in to summary compaction under the existing client API and version contract. Supported compaction makes an additional provider call, consumes usage and may lose detail. Authenticated encrypted summaries stay in client-held items. OLP retains only a conversation-specific key in encrypted secret management until root retirement. Keep the complete representable history and original conversation identity. Unresolved references, foreign opaque state and incomplete tool exchanges are refused. This policy does not establish live provider or client acceptance."
+	}() + func() string {
 		if (route.ChatToAntigravity || route.ResponsesToAntigravity) && slices.Contains(adapters, codemode.AdapterAntigravity) {
 			return " This published route enables the controlled Antigravity Gemini target for enabled Chat or Responses text and function tools over HTTP/SSE. Republish the route to enable encrypted signed function continuation bound to its root conversation and selected account. Other signed parts, reasoning controls, media and server tools are refused. Missing continuation state requires retiring the root conversation and starting a new one. This path may carry provider terms and account suspension risks. Client identity and prompt compatibility remain disabled. Current-model tool acceptance and live subscription qualification remain pending."
 		}

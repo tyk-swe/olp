@@ -3,11 +3,14 @@
 package service_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"slices"
@@ -1279,9 +1282,8 @@ func codeMiniMaxActiveRemainsDoesNotAffectBands(t *testing.T, pool *pgxpool.Pool
 	}
 }
 
-func TestCodeAllowanceReadRequestEndpoint(t *testing.T) {
-	s := startService(t)
-	owner := s.owner()
+func checkCodeAllowanceReadRequestEndpoint(t *testing.T, s *service, owner *caller) {
+	t.Helper()
 	var user string
 	if err := s.pool.QueryRow(t.Context(), `SELECT id::text FROM olp.users WHERE email='owner@example.com'`).Scan(&user); err != nil {
 		t.Fatal(err)
@@ -1647,6 +1649,7 @@ func TestCodeExactModelOrderingThroughGateway(t *testing.T) {
 	if status != http.StatusOK || !strings.Contains(string(raw), `"fixture_account":"account-1"`) {
 		t.Fatalf("last exhausted account excluded: %s", describe(status, raw))
 	}
+	checkCodeAllowanceReadRequestEndpoint(t, s, owner)
 }
 
 func codeBandsAssessEachAdapter(t *testing.T, pool *pgxpool.Pool) {
@@ -1696,9 +1699,8 @@ func codeBandsAssessEachAdapter(t *testing.T, pool *pgxpool.Pool) {
 	}
 }
 
-func TestCodePublicationPinsTranslatedOutputContract(t *testing.T) {
-	s := startService(t)
-	owner := s.owner()
+func checkCodePublicationPinsTranslatedOutputContract(t *testing.T, s *service, owner *caller) {
+	t.Helper()
 	project := s.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "Output contract"}, idempotent(), http.StatusCreated)["id"].(string)
 	pool := s.want(owner, "POST", "/api/v1/code/pools", map[string]any{"project_id": project, "name": "Output contract", "kind": "shared", "account_ids": []string{}, "api_key_ids": []string{}, "account_weights": map[string]int{}}, idempotent(), http.StatusCreated)
 	route := s.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": project, "slug": "output-contract", "pool_id": pool["id"], "models": []string{"model"}, "enabled": false, "responses_to_antigravity": true, "responses_antigravity_compatibility": true, "messages_codex_safety_identifier": true, "messages_to_grok": true, "messages_grok_safety_identifier": true}, idempotent(), http.StatusCreated)
@@ -2051,6 +2053,7 @@ func TestCodeTranslatedRateReservationsThroughGateway(t *testing.T) {
 }
 
 type signedJourneyPart struct {
+	Text      string          `json:"text,omitempty"`
 	Call      json.RawMessage `json:"functionCall"`
 	Signature string          `json:"thoughtSignature"`
 	Response  json.RawMessage `json:"functionResponse"`
@@ -2063,13 +2066,15 @@ type signedJourneyContent struct {
 func TestCodeSignedToolContinuation(t *testing.T) {
 	s := startService(t)
 	owner := s.owner()
+	checkCodePublicationPinsTranslatedOutputContract(t, s, owner)
 	var calls atomic.Int64
 	proxy, roots := newCodeVendorProxy(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		var body struct {
 			Model   string `json:"model"`
 			Request struct {
-				Contents []signedJourneyContent `json:"contents"`
+				Contents          []signedJourneyContent `json:"contents"`
+				SystemInstruction json.RawMessage        `json:"systemInstruction"`
 			} `json:"request"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -2078,6 +2083,15 @@ func TestCodeSignedToolContinuation(t *testing.T) {
 		}
 		if body.Model != "gemini-fixture" {
 			t.Errorf("model = %s", body.Model)
+		}
+		if bytes.Contains(body.Request.SystemInstruction, []byte("Summarize this complete conversation")) {
+			_, _ = io.WriteString(w, `{"response":{"candidates":[{"content":{"parts":[{"text":"Preserve the PostgreSQL migration constraints"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":2,"totalTokenCount":10}}}`)
+			return
+		}
+		encodedRequest, _ := json.Marshal(body.Request)
+		if bytes.Contains(encodedRequest, []byte("Conversation summary")) {
+			_, _ = io.WriteString(w, `{"response":{"candidates":[{"content":{"parts":[{"text":"The PostgreSQL migration constraints are restored"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":2,"totalTokenCount":10}}}`)
+			return
 		}
 		continued := slices.ContainsFunc(body.Request.Contents, func(content signedJourneyContent) bool {
 			return slices.ContainsFunc(content.Parts, func(part signedJourneyPart) bool { return len(part.Response) != 0 })
@@ -2100,6 +2114,7 @@ func TestCodeSignedToolContinuation(t *testing.T) {
 		_, _ = w.Write([]byte(result))
 	}))
 	journey, consumer := newSignedCodeJourney(t, s, owner, proxy, roots)
+	summarySetup := prepareSummaryJourney(t, s, owner, journey)
 	configuration, configErr := codeclient.Generate(journey.route, codeclient.Offers{{Adapter: codemode.AdapterCodex, Models: []string{"gemini-fixture"}}, {Adapter: codemode.AdapterAntigravity, Models: []string{"gemini-fixture"}}}, codeclient.Request{GatewayURL: s.origin, Client: codeadapter.ClientCodex, Model: "gemini-fixture"})
 	if configErr != nil || !strings.Contains(configuration.Configuration, "supports_websockets = false") || !strings.Contains(configuration.Configuration, `web_search = "disabled"`) {
 		t.Fatalf("HTTP Codex configuration = %s, %v", configuration.Configuration, configErr)
@@ -2165,6 +2180,8 @@ func TestCodeSignedToolContinuation(t *testing.T) {
 	if err := s.pool.QueryRow(t.Context(), `SELECT a.reported_tokens FROM olp.code_attempts a JOIN olp.code_bindings b ON b.id=a.binding_id WHERE b.conversation='save-failure-root' AND a.state='settled'`).Scan(&reported); err != nil || reported != 10 {
 		t.Fatalf("failed-save accounting=%d, %v", reported, err)
 	}
+	summary := startSummaryJourney(t, s, owner, journey, summarySetup, consumer, &calls)
+	rotateSummarySecrets(t, s)
 	beforeRestart := calls.Load()
 	s.stop()
 	restarted := startProcess(t, s.pool, s.env)
@@ -2178,6 +2195,7 @@ func TestCodeSignedToolContinuation(t *testing.T) {
 			t.Fatalf("%s restart = %s", surface.protocol, describe(status, raw))
 		}
 	}
+	continueSummaryJourney(t, restarted, journey, consumer, summary, &calls)
 	var root string
 	if err := s.pool.QueryRow(t.Context(), `SELECT root_id::text FROM olp.code_bindings WHERE conversation='signed-root' AND route_id=$1`, journey.route.ID).Scan(&root); err != nil {
 		t.Fatal(err)
@@ -2198,6 +2216,16 @@ func TestCodeSignedToolContinuation(t *testing.T) {
 	}
 	restarted.want(owner, "POST", "/api/v1/code/bindings/"+root+"/retire", nil, idempotent(), http.StatusOK)
 	var remaining int
+	summaryBindingPath := "/api/v1/code/bindings/" + summary.binding
+	restarted.want(owner, "POST", summaryBindingPath+"/retire", nil, idempotent(), http.StatusOK)
+	if err := s.pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.secrets WHERE id=$1`, summary.key).Scan(&remaining); err != nil || remaining != 0 {
+		t.Fatalf("retired summary key remains, %d, %v", remaining, err)
+	}
+	beforeRetiredSummary := calls.Load()
+	retiredStatus, retiredBody := restarted.do(consumer, "POST", "/code/"+journey.route.Slug+"/responses", json.RawMessage(`{"model":"gemini-fixture","input":[`+string(summary.item)+`,{"role":"user","content":"Continue"}]}`), map[string]string{"Session-Id": summary.conversation + "-child", "X-Codex-Parent-Thread-Id": summary.conversation})
+	if retiredStatus != http.StatusGone || calls.Load() != beforeRetiredSummary {
+		t.Fatalf("retired child summary dispatched %d %s", retiredStatus, retiredBody)
+	}
 	if err := s.pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.secrets WHERE id=$1 OR id=$2`, message.ToolCalls[0].ID, message.ToolCalls[1].ID).Scan(&remaining); err != nil || remaining != 0 {
 		t.Fatalf("retired state count %d, %v", remaining, err)
 	}
@@ -2364,4 +2392,209 @@ func startSignedSurfaceJourney(t *testing.T, s *service, consumer *caller, slug,
 		}
 	}
 	return signedSurfaceJourney{protocol: protocol, path: path, headers: headers, continuation: continuation}
+}
+
+type summaryJourney struct {
+	conversation string
+	item         json.RawMessage
+	binding      string
+	key          string
+}
+
+type summaryJourneySetup struct {
+	frozenSlug  string
+	enabledETag string
+}
+
+func prepareSummaryJourney(t *testing.T, s *service, owner *caller, journey cooldownJourney) summaryJourneySetup {
+	t.Helper()
+	frozen := s.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": journey.route.ProjectID, "slug": "summary-frozen-" + uuid.NewString(), "pool_id": journey.route.PoolID, "models": []string{"gemini-fixture"}, "enabled": true, "responses_to_antigravity": true, "responses_antigravity_compatibility": true}, idempotent(), http.StatusCreated)
+	frozenPath := "/api/v1/code/routes/" + frozen["id"].(string)
+	published := s.want(owner, "POST", frozenPath+"/publish", nil, idempotent(etag(frozen)), http.StatusOK)
+	s.want(owner, "PUT", frozenPath, map[string]any{"project_id": journey.route.ProjectID, "slug": frozen["slug"], "pool_id": journey.route.PoolID, "models": []string{"gemini-fixture"}, "enabled": true, "responses_to_antigravity": true, "responses_antigravity_compatibility": true, "summary_compaction": true}, idempotent(etag(published)), http.StatusOK)
+	path := "/api/v1/code/routes/" + journey.route.ID
+	changed := s.want(owner, "PUT", path, map[string]any{"project_id": journey.route.ProjectID, "slug": journey.route.Slug, "pool_id": journey.route.PoolID, "models": []string{"gemini-fixture"}, "enabled": true, "chat_to_antigravity": true, "responses_to_antigravity": true, "responses_antigravity_compatibility": true, "messages_to_antigravity": journey.route.MessagesToAntigravity, "summary_compaction": true}, idempotent(etag(map[string]any{"etag": journey.route.ETag})), http.StatusOK)
+	enabled := s.want(owner, "POST", path+"/publish", nil, idempotent(etag(changed)), http.StatusOK)
+	return summaryJourneySetup{frozenSlug: frozen["slug"].(string), enabledETag: enabled["etag"].(string)}
+}
+
+func startSummaryJourney(t *testing.T, s *service, owner *caller, journey cooldownJourney, setup summaryJourneySetup, consumer *caller, calls *atomic.Int64) summaryJourney {
+	t.Helper()
+	conversation := uuid.NewString()
+	path := "/code/" + journey.route.Slug + "/responses/compact"
+	body := `{"model":"gemini-fixture","instructions":"Keep the requirements","input":[{"role":"user","content":"Inspect the migration"},{"type":"function_call","call_id":"read","name":"read_file","arguments":"{}"},{"type":"function_call_output","call_id":"read","output":"Preserve the PostgreSQL migration constraints"}]}`
+	request := func(path, conversation, body string) *http.Response {
+		return summarySurfaceRequest(t, s, consumer, conversation, path, body)
+	}
+	before := calls.Load()
+	off := request("/code/"+setup.frozenSlug+"/responses/compact", conversation, body)
+	off.Body.Close()
+	if off.StatusCode != http.StatusBadRequest || calls.Load() != before {
+		t.Fatal("default-off published compaction policy leaked its enabled draft")
+	}
+	offTrigger := request("/code/"+setup.frozenSlug+"/responses", conversation, `{"model":"gemini-fixture","stream":true,"input":[{"role":"user","content":"hello"},{"type":"compaction_trigger"}]}`)
+	offTrigger.Body.Close()
+	if offTrigger.StatusCode != http.StatusUnprocessableEntity || calls.Load() != before {
+		t.Fatal("default-off published trigger policy leaked its enabled draft")
+	}
+	managePath := "/api/v1/code/routes/" + journey.route.ID
+	response, encoded := func() (*http.Response, []byte) {
+		for deadline := time.Now().Add(5 * time.Second); ; {
+			response := request(path, conversation, body)
+			encoded, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			if response.StatusCode != http.StatusBadRequest || !bytes.Contains(encoded, []byte("code_operation_unsupported")) || time.Now().After(deadline) {
+				return response, encoded
+			}
+			time.Sleep(25 * time.Millisecond)
+		}
+	}()
+	var compact struct {
+		Output []json.RawMessage `json:"output"`
+	}
+	if response.StatusCode != http.StatusOK || json.Unmarshal(encoded, &compact) != nil || len(compact.Output) != 1 || !bytes.Contains(compact.Output[0], []byte("olp.summary.v1.")) || bytes.Contains(encoded, []byte("PostgreSQL")) || calls.Load() != before+1 {
+		t.Fatalf("compact %d %s, calls %d", response.StatusCode, encoded, calls.Load()-before)
+	}
+	var binding, secretID string
+	if err := s.pool.QueryRow(t.Context(), `SELECT b.id::text,k.id::text FROM olp.code_bindings b JOIN olp.code_summary_keys k ON k.root_id=b.root_id AND k.account_id=b.account_id AND k.principal=b.principal WHERE b.conversation=$1 AND b.route_id=$2`, conversation, journey.route.ID).Scan(&binding, &secretID); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := s.pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.code_attempts WHERE binding_id=$1 AND operation='compact' AND state='settled' AND reported_tokens=10`, binding).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("summary accounting %d, %v", count, err)
+	}
+	item := compact.Output[0]
+	continuation := `{"model":"gemini-fixture","input":[` + string(item) + `,{"role":"user","content":"Continue the migration"}]}`
+	for _, invalid := range []struct{ conversation, body string }{
+		{uuid.NewString(), continuation},
+		{conversation, strings.Replace(continuation, "olp.summary.v1.", "olp.summary.v1.altered", 1)},
+		{conversation, `{"model":"gemini-fixture","input":[{"type":"compaction","encrypted_content":"foreign"}]}`},
+		{conversation, `{"model":"gemini-fixture","previous_response_id":"unresolved","input":"hello"}`},
+		{conversation, `{"model":"gemini-fixture","input":[{"type":"function_call","call_id":"missing","name":"read","arguments":"{}"}]}`},
+	} {
+		refused := request(path, invalid.conversation, invalid.body)
+		refused.Body.Close()
+		if refused.StatusCode == http.StatusOK || calls.Load() != before+1 {
+			t.Fatalf("unportable summary dispatched, %d", refused.StatusCode)
+		}
+	}
+	if _, err := s.pool.Exec(t.Context(), `ALTER TABLE olp.code_summary_keys ADD CONSTRAINT fixture_summary_failure CHECK(false) NOT VALID`); err != nil {
+		t.Fatal(err)
+	}
+	failedConversation := uuid.NewString()
+	failed := request(path, failedConversation, body)
+	failedBody, _ := io.ReadAll(failed.Body)
+	failed.Body.Close()
+	if _, err := s.pool.Exec(t.Context(), `ALTER TABLE olp.code_summary_keys DROP CONSTRAINT fixture_summary_failure`); err != nil {
+		t.Fatal(err)
+	}
+	if failed.StatusCode != http.StatusBadGateway || bytes.Contains(failedBody, []byte("encrypted_content")) || calls.Load() != before+2 {
+		t.Fatalf("summary persistence replayed %d %s, calls %d", failed.StatusCode, failedBody, calls.Load()-before)
+	}
+	if err := s.pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.code_attempts a JOIN olp.code_bindings b ON b.id=a.binding_id WHERE b.conversation=$1 AND a.state='settled' AND a.reported_tokens=10`, failedConversation).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("failed summary usage %d, %v", count, err)
+	}
+	trigger := request("/code/"+journey.route.Slug+"/responses", conversation, `{"model":"gemini-fixture","stream":true,"input":[`+string(item)+`,{"role":"user","content":"Keep the migration requirements"},{"type":"compaction_trigger"}]}`)
+	stream, _ := io.ReadAll(trigger.Body)
+	trigger.Body.Close()
+	if trigger.StatusCode != http.StatusOK || !strings.Contains(trigger.Header.Get("Content-Type"), "text/event-stream") || !bytes.Contains(stream, []byte("response.output_item.done")) || !bytes.Contains(stream, []byte("response.completed")) || bytes.Contains(stream, []byte("PostgreSQL")) || calls.Load() != before+3 {
+		t.Fatalf("trigger %d %s, calls %d", trigger.StatusCode, stream, calls.Load()-before)
+	}
+	s.want(owner, "POST", managePath+"/publish", nil, idempotent(etag(map[string]any{"etag": setup.enabledETag})), http.StatusOK)
+	return summaryJourney{conversation: conversation, item: item, binding: binding, key: secretID}
+}
+
+func continueSummaryJourney(t *testing.T, s *service, journey cooldownJourney, consumer *caller, summary summaryJourney, calls *atomic.Int64) {
+	t.Helper()
+	response := summarySurfaceRequest(t, s, consumer, summary.conversation, "/code/"+journey.route.Slug+"/responses", `{"model":"gemini-fixture","input":[`+string(summary.item)+`,{"role":"user","content":"Continue the migration"}]}`)
+	body, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("PostgreSQL migration constraints are restored")) {
+		t.Fatalf("summary after restart and rotation %d %s", response.StatusCode, body)
+	}
+	path := "/code/" + journey.route.Slug + "/responses"
+	continuation := `{"model":"gemini-fixture","input":[` + string(summary.item) + `,{"role":"user","content":"Continue the migration"}]}`
+	status, raw := s.do(consumer, "POST", path, json.RawMessage(continuation), map[string]string{"Session-Id": summary.conversation + "-child", "X-Codex-Parent-Thread-Id": summary.conversation})
+	if status != http.StatusOK || !bytes.Contains(raw, []byte("PostgreSQL migration constraints are restored")) {
+		t.Fatalf("authorized child summary after restart and rotation %d %s", status, raw)
+	}
+	foreignRoot := uuid.NewString()
+	foreign := summarySurfaceRequest(t, s, consumer, foreignRoot, path+"/compact", `{"model":"gemini-fixture","input":"Keep the migration requirements"}`)
+	foreign.Body.Close()
+	if foreign.StatusCode != http.StatusOK {
+		t.Fatalf("foreign root summary setup %d", foreign.StatusCode)
+	}
+	before := calls.Load()
+	for _, headers := range []map[string]string{
+		{"Session-Id": foreignRoot},
+		{"Session-Id": foreignRoot + "-child", "X-Codex-Parent-Thread-Id": foreignRoot},
+	} {
+		status, raw := s.do(consumer, "POST", path, json.RawMessage(continuation), headers)
+		if status != http.StatusUnprocessableEntity || calls.Load() != before {
+			t.Fatalf("foreign root or child summary dispatched %d %s", status, raw)
+		}
+	}
+}
+
+type summaryMasterKey struct {
+	Version int    `json:"version"`
+	Key     string `json:"key"`
+}
+
+type summaryMasterDocument struct {
+	Active int                `json:"active_version"`
+	Keys   []summaryMasterKey `json:"keys"`
+}
+
+func rotateSummarySecrets(t *testing.T, s *service) {
+	t.Helper()
+	path := s.env.values["OLP_MASTER_KEY_FILE"]
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document summaryMasterDocument
+	if err := json.Unmarshal(original, &document); err != nil {
+		t.Fatal(err)
+	}
+	first, second := uuid.New(), uuid.New()
+	newKey := summaryMasterKey{2, hex.EncodeToString(append(first[:], second[:]...))}
+	rotated, err := json.Marshal(summaryMasterDocument{2, append(document.Keys, newKey)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ring, err := secrets.ParseRing(rotated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var installation string
+	if err := s.pool.QueryRow(t.Context(), `SELECT id::text FROM olp.installation WHERE singleton`).Scan(&installation); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ring.Rotate(t.Context(), s.pool, installation); err != nil {
+		t.Fatal(err)
+	}
+	active, err := json.Marshal(summaryMasterDocument{2, []summaryMasterKey{newKey}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, active, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func summarySurfaceRequest(t *testing.T, s *service, consumer *caller, conversation, path, body string) *http.Response {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodPost, s.origin+path, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+consumer.token)
+	request.Header.Set("Session-Id", conversation)
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return response
 }

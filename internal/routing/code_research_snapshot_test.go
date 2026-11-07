@@ -255,3 +255,25 @@ func TestPublishedGrokPolicyControlsFrozenProviders(t *testing.T) {
 		}
 	}
 }
+
+func TestSummaryCompactionPublicationIsExplicitAndFrozen(t *testing.T) {
+	input := &Snapshot{CodeRoutes: map[string]codemode.Route{"enabled": {SummaryCompaction: true}, "default": {}}}
+	published := input.Clone()
+	if !published.CodeRoutes["enabled"].SummaryCompaction || published.CodeRoutes["default"].SummaryCompaction {
+		t.Fatal("publication changed the explicit summary compaction policy")
+	}
+	before, err := published.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.CodeRoutes["enabled"] = codemode.Route{}
+	if !published.CodeRoutes["enabled"].SummaryCompaction {
+		t.Fatal("draft edit disabled published summary compaction")
+	}
+	changed := published.Clone()
+	changed.CodeRoutes["enabled"] = codemode.Route{}
+	after, err := changed.Digest()
+	if err != nil || before == after {
+		t.Fatalf("summary compaction policy did not change publication digest, %v", err)
+	}
+}

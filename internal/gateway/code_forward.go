@@ -121,6 +121,12 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *re
 		if rewriteErr != nil {
 			return codePayload{}, rewriteErr
 		}
+		if attempt.endpoint.Target == codeadapter.TargetAntigravity && observation.Operation.Name == "compact" {
+			if !route.SummaryCompaction || attempt.paid != nil {
+				return codePayload{}, codemode.Refuse(422, "code_compaction_disabled")
+			}
+			return attempt.prepareSummary(requestBody, r, route)
+		}
 		if attempt.endpoint.Target == codeadapter.TargetGrok {
 			if ingress.protocol == codemode.ProtocolChat {
 				return codeTranslateGrokChat(requestBody, r, attempt.model)
@@ -131,7 +137,11 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *re
 			return codeTranslateGrok(requestBody, r, attempt.model)
 		}
 		if attempt.endpoint.Target == codeadapter.TargetAntigravity {
-			return attempt.translateAntigravity(requestBody, r, attempt.model, attempt.auth.ProjectID, route.AntigravitySignedContinuation, codeAntigravityPolicy{messagesSafetyIdentifier: route.MessagesAntigravitySafetyIdentifier, responsesCompatibility: route.ResponsesAntigravityCompatibility})
+			restored, err := attempt.restoreSummaries(r.Context(), requestBody, route.SummaryCompaction)
+			if err != nil {
+				return codePayload{}, err
+			}
+			return attempt.translateAntigravity(restored, r, attempt.model, attempt.auth.ProjectID, route.AntigravitySignedContinuation, codeAntigravityPolicy{messagesSafetyIdentifier: route.MessagesAntigravitySafetyIdentifier, responsesCompatibility: route.ResponsesAntigravityCompatibility})
 		}
 		if attempt.endpoint.Protocol == ingress.protocol {
 			if attempt.model != attempt.publicModel {
@@ -218,6 +228,10 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *re
 	}
 	if next != nil {
 		s.forwardCode(w, r, release, route, observation, ingress, raw, body, next, refuse)
+		return
+	}
+	if payload.summaryCompaction {
+		attempt.summaryResponse(ctx, w, r, response)
 		return
 	}
 	if payload.target == codeadapter.TargetAntigravity {

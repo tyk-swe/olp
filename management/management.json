@@ -17252,6 +17252,11 @@
             },
             "description": "Exact native model to directly selected published metered provider and credential slot. A mapped model takes precedence over subscription accounts."
           },
+          "summary_compaction": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly opt in to summary compaction after publication. Disabled by default and pinned by immutable route revisions. A supported compaction request makes an additional provider call, consumes usage and may lose detail. Authenticated encrypted summaries remain in client-held items. Only a conversation-specific key is retained in encrypted secret management until root retirement. Existing client API and version contracts still apply. This policy does not qualify live provider or client acceptance."
+          },
           "chat_to_antigravity": {
             "type": "boolean",
             "description": "Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Republishing enables encrypted signed function continuation bound to the root conversation and selected account, saved before actionable output and removed on retirement. Existing published revisions keep their behavior. Missing or unrepresentable continuation state is refused without replay. Reasoning controls, media and server tools remain unsupported. Client identity and prompts are preserved. This path may carry provider terms and account suspension risks. Controlled fixtures do not qualify any current model or live subscription workflow."
@@ -17460,6 +17465,11 @@
             "type": "boolean",
             "default": false,
             "description": "Explicitly permit metered API targets. Direct selection and subscription-first fallback require their separate target maps."
+          },
+          "summary_compaction": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly opt in to summary compaction after publication. Disabled by default and pinned by immutable route revisions. A supported compaction request makes an additional provider call, consumes usage and may lose detail. Authenticated encrypted summaries remain in client-held items. Only a conversation-specific key is retained in encrypted secret management until root retirement. Existing client API and version contracts still apply. This policy does not qualify live provider or client acceptance."
           },
           "chat_to_antigravity": {
             "type": "boolean",
@@ -32025,6 +32035,11 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/ConfigurationCodePaidTarget"
             }
+          },
+          "summary_compaction": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly opt in to summary compaction after publication. Disabled by default and pinned by immutable route revisions. A supported compaction request makes an additional provider call, consumes usage and may lose detail. Authenticated encrypted summaries remain in client-held items. Only a conversation-specific key is retained in encrypted secret management until root retirement. Existing client API and version contracts still apply. This policy does not qualify live provider or client acceptance."
           },
           "chat_to_antigravity": {
             "type": "boolean",

@@ -109,6 +109,7 @@ type CodeRoutePolicy struct {
 	AllowanceOrdering                   bool                      `json:"allowance_ordering,omitempty"`
 	Tools                               *codemode.ResearchTools   `json:"tools"`
 	MaxBodyBytes                        *int64                    `json:"max_body_bytes"`
+	SummaryCompaction                   bool                      `json:"summary_compaction,omitempty"`
 }
 
 type CodeConnectionEntry struct {
