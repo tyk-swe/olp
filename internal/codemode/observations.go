@@ -108,11 +108,23 @@ func allowanceWindows(a Allowance) []AllowanceWindow {
 	return a.Windows
 }
 
+type allowanceWindowIdentity struct {
+	meterID   string
+	limitName string
+	limitID   string
+	window    string
+	evidence  AllowanceEvidence
+}
+
+func (w AllowanceWindow) identity() allowanceWindowIdentity {
+	return allowanceWindowIdentity{meterID: w.MeterID, limitName: w.LimitName, limitID: w.LimitID, window: w.Window, evidence: w.EffectiveEvidence()}
+}
+
 func mergedAllowanceWindows(current, incoming []AllowanceWindow) iter.Seq[AllowanceWindow] {
 	return func(yield func(AllowanceWindow) bool) {
 		for _, old := range current {
 			index := slices.IndexFunc(incoming, func(w AllowanceWindow) bool {
-				return old.MeterID == w.MeterID && old.LimitName == w.LimitName && old.LimitID == w.LimitID && old.Window == w.Window && old.EffectiveEvidence() == w.EffectiveEvidence()
+				return old.identity() == w.identity()
 			})
 			if index < 0 || !incoming[index].ObservedAt.After(old.ObservedAt) {
 				if !yield(old.normalized()) {
@@ -128,7 +140,7 @@ func mergedAllowanceWindows(current, incoming []AllowanceWindow) iter.Seq[Allowa
 		}
 		for _, next := range incoming {
 			if slices.ContainsFunc(current, func(old AllowanceWindow) bool {
-				return old.MeterID == next.MeterID && old.LimitName == next.LimitName && old.LimitID == next.LimitID && old.Window == next.Window && old.EffectiveEvidence() == next.EffectiveEvidence()
+				return old.identity() == next.identity()
 			}) {
 				continue
 			}
@@ -278,9 +290,9 @@ func (a Allowance) validateObservations() error {
 	if len(a.Windows) > MaxAllowanceWindows {
 		return fmt.Errorf("too many provider allowance windows")
 	}
-	seen := map[string]bool{}
+	seen := map[allowanceWindowIdentity]bool{}
 	for _, w := range a.Windows {
-		key := w.MeterID + "\x00" + w.LimitName + "\x00" + w.LimitID + ":" + w.Window + ":" + string(w.EffectiveEvidence())
+		key := w.identity()
 		if seen[key] || w.ObservedAt.After(a.ObservedAt) {
 			return fmt.Errorf("invalid provider allowance observation")
 		}

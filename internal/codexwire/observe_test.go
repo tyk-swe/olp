@@ -32,6 +32,23 @@ func TestAllowanceHeadersStampPercentPassiveWindows(t *testing.T) {
 	if primary.Window != "primary" || primary.UsedPercent != 25 || primary.RemainingPercent != 75 || primary.ResetsAt == nil || !primary.ResetsAt.Equal(time.Unix(1794000000, 0).UTC()) {
 		t.Fatalf("primary window changed: %+v", primary)
 	}
+	headers.Set("X-Meter_A-Primary-Used-Percent", "25")
+	headers.Set("X-Meter-A-Primary-Used-Percent", "75")
+	colliding := codexwire.Allowance(headers, now)
+	if colliding == nil || len(colliding.Windows) != 4 {
+		t.Fatalf("header meters were collapsed: %+v", colliding)
+	}
+	identities := map[string]bool{}
+	for _, window := range colliding.Windows {
+		if window.LimitName != "" {
+			t.Fatalf("header supplied a model-facing name: %+v", window)
+		}
+		identities[window.MeterID] = true
+	}
+	if !identities["meter_a"] || !identities["meter-a"] {
+		t.Fatalf("raw header meter identity was lost: %v", identities)
+	}
+
 }
 
 func TestCodexProbesIgnoreWidenedWindowNames(t *testing.T) {

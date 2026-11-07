@@ -27,6 +27,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/providerconfig"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
 
 	"github.com/tyk-swe/olp/internal/database"
@@ -1668,6 +1669,66 @@ func TestCodeExactModelOrderingThroughGateway(t *testing.T) {
 		}
 		return true, ""
 	})
+	call := func(thread string) string {
+		status, raw := s.do(consumer, "POST", "/code/"+slug+"/responses", request, map[string]string{"thread-id": thread})
+		if status != http.StatusOK {
+			t.Fatalf("gateway selection failed: %s", describe(status, raw))
+		}
+		var response struct {
+			Account string `json:"fixture_account"`
+		}
+		if err := json.Unmarshal(raw, &response); err != nil {
+			t.Fatal(err)
+		}
+		return response.Account
+	}
+	for _, phase := range []struct {
+		name   string
+		first  []byte
+		second []byte
+	}{
+		{name: "unknown before low", second: bandAllowanceJSON(t, 10, &reset, now)},
+		{name: "low before exhausted", first: bandAllowanceJSON(t, 10, &reset, now), second: bandAllowanceJSON(t, 0, &reset, now)},
+	} {
+		for index, allowance := range [][]byte{phase.first, phase.second} {
+			if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1`, accounts[index], allowance); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if selected := call(uuid.NewString()); selected != "account-0" {
+			t.Fatalf("%s selected %s", phase.name, selected)
+		}
+	}
+	for index, account := range accounts {
+		if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1`, account, bandAllowanceJSON(t, 75, &reset, now)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_pool_accounts SET weight=$3 WHERE pool_id=$1 AND account_id=$2`, journey.route.PoolID, account, []int{3, 1}[index]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	weightedThread := func(weightChangesWinner bool) string {
+		for index := range 1000 {
+			thread := fmt.Sprintf("gateway-share-%d", index)
+			affinity := []byte(key["id"].(string) + ":" + thread)
+			first := routing.Score(uuid.MustParse(published["id"].(string)), uuid.MustParse(accounts[0]), 1, "responses", "code", "model", affinity)
+			second := routing.Score(uuid.MustParse(published["id"].(string)), uuid.MustParse(accounts[1]), 1, "responses", "code", "model", affinity)
+			if second > first && (3*first > second) == weightChangesWinner {
+				return thread
+			}
+		}
+		t.Fatal("could not find a request distinguishing account weights")
+		return ""
+	}
+	if selected := call(weightedThread(true)); selected != "account-0" {
+		t.Fatalf("higher weight did not change the gateway selection: %s", selected)
+	}
+	if selected := call(weightedThread(false)); selected != "account-1" {
+		t.Fatalf("lower-weight account did not share gateway requests: %s", selected)
+	}
+	if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1`, accounts[1], bandAllowanceJSON(t, 0, &reset, now)); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, accounts[0]); err != nil {
 		t.Fatal(err)
 	}
