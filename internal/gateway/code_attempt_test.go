@@ -1701,17 +1701,20 @@ func (summaryTestAuthorizer) AuthorizeCode(_ context.Context, _ routing.Configur
 
 func TestCodeSummaryCompactionAccountsOneCallAndNeverReplaysAcceptedWork(t *testing.T) {
 	for _, test := range []struct {
-		name   string
-		path   string
-		stream bool
-		fail   bool
-		finish string
-		status int
+		name    string
+		path    string
+		stream  bool
+		trigger bool
+		fail    bool
+		finish  string
+		status  int
 	}{
-		{"endpoint", "responses/compact", false, false, "STOP", 200},
-		{"trigger", "responses", true, false, "STOP", 200},
-		{"key storage failure", "responses/compact", false, true, "STOP", 502},
-		{"incomplete summary", "responses/compact", false, false, "MAX_TOKENS", 502},
+		{"streaming endpoint", "responses/compact", true, false, false, "STOP", 422},
+		{"nonstreaming trigger", "responses", false, true, false, "STOP", 422},
+		{"endpoint", "responses/compact", false, false, false, "STOP", 200},
+		{"trigger", "responses", true, true, false, "STOP", 200},
+		{"key storage failure", "responses/compact", false, false, true, "STOP", 502},
+		{"incomplete summary", "responses/compact", false, false, false, "MAX_TOKENS", 502},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			observed := make(chan []byte, 2)
@@ -1737,7 +1740,7 @@ func TestCodeSummaryCompactionAccountsOneCallAndNeverReplaysAcceptedWork(t *test
 			mux := http.NewServeMux()
 			h.gateway.RegisterCode(mux)
 			trigger := ""
-			if test.stream {
+			if test.trigger {
 				trigger = `,{"type":"compaction_trigger"}`
 			}
 			request := httptest.NewRequest(http.MethodPost, "/code/summary/"+test.path, strings.NewReader(fmt.Sprintf(`{"model":"gemini-fixture","stream":%t,"input":[{"role":"user","content":"Keep the migration constraints"}%s]}`, test.stream, trigger)))
@@ -1747,6 +1750,12 @@ func TestCodeSummaryCompactionAccountsOneCallAndNeverReplaysAcceptedWork(t *test
 			mux.ServeHTTP(response, request)
 			if response.Code != test.status {
 				t.Fatalf("summary = %d %s", response.Code, response.Body.String())
+			}
+			if test.status == 422 {
+				if len(observed) != 0 {
+					t.Fatal("unsupported compaction dispatched")
+				}
+				return
 			}
 			if len(observed) != 1 || len(ledger.settlements) != 1 || ledger.settlements[0].Total == nil || *ledger.settlements[0].Total != 10 {
 				t.Fatalf("calls %d, usage %+v", len(observed), ledger.settlements)

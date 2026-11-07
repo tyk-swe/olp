@@ -50,7 +50,7 @@ func ClassifyWith(body []byte, path string, websocket bool, identity func(oif.Va
 		return request, codemode.Refuse(400, "code_model_invalid")
 	}
 	request.Operation.Name = "responses"
-	if path == "responses/compact" && !websocket || path == "responses" && compact && !websocket {
+	if path == "responses/compact" && !websocket || path == "responses" && compact {
 		request.Operation.Name = "compact"
 	} else if path != "responses" {
 		return request, codemode.Refuse(400, "code_operation_unsupported")

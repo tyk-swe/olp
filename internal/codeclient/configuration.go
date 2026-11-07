@@ -125,11 +125,14 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 		switch client {
 		case codeadapter.ClientCodex:
 			_, paid := offers.paidProtocol(route, model, client)
+			declaration, _ := codeadapter.Lookup(through[model])
+			compactEndpoint, compact := codeadapter.RouteEndpoint(route, declaration, "responses/compact")
+			remoteCompaction := route.SummaryCompaction && !paid && compact && compactEndpoint.Target != "" && compactEndpoint.Supports(codeadapter.HTTP)
 			return codexauth.ClientVersion, "toml", codexConfiguration(baseURL, model, !paid && !slices.ContainsFunc(offers.adapters(route, model), func(adapter codemode.Adapter) bool {
 				declaration, _ := codeadapter.Lookup(adapter)
 				endpoint, eligible := codeadapter.RouteEndpoint(route, declaration, "responses")
 				return eligible && !endpoint.Supports(codeadapter.WebSocket)
-			}), slices.Contains(offers.adapters(route, model), codemode.AdapterGrokBuild) || route.ResponsesToAntigravity && slices.Contains(offers.adapters(route, model), codemode.AdapterAntigravity)), nil
+			}), slices.Contains(offers.adapters(route, model), codemode.AdapterGrokBuild) || route.ResponsesToAntigravity && slices.Contains(offers.adapters(route, model), codemode.AdapterAntigravity), remoteCompaction), nil
 		case codeadapter.ClientClaudeCode:
 			if platform == "windows" {
 				return codeadapter.ClaudeCodeVersion, "powershell", claudeCodePowerShellConfiguration(baseURL, model, *plan, *small, translatedClaude, antigravityClaude), nil

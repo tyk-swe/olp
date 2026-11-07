@@ -1239,6 +1239,8 @@ The peer checked the returned tool result before serving the final answer. This 
 
 Summary compaction requires the separate `summary_compaction` route policy. It is disabled by default. Enable it explicitly in the route editor or route API and publish the route. The policy is pinned by the published revision and carried by configuration export and promotion. Existing revisions keep their behavior until republished. Antigravity and Grok use this shared policy without enabling a paid API fallback or changing the existing client API and version contract.
 
+Generated Codex setup enables its remote compaction protocol only when the selected published translated model path supports this policy. Other model paths retain their existing setup.
+
 Supported compaction makes an additional provider call through the selected subscription account, consumes usage and may lose detail. Normal account authorization, rate limits and attempt accounting apply. Supply complete representable conversation history and keep the original conversation identity. Unresolved references, foreign opaque state and incomplete tool exchanges are refused.
 
 Authenticated encrypted summaries are returned in client-held compaction items. OLP retains only the conversation-specific key in encrypted secret management until root retirement. Summary text is excluded from content-free diagnostics. Retiring the root removes its key, so its compaction items can no longer continue that conversation. This policy and controlled fixtures do not establish live subscription or client acceptance.

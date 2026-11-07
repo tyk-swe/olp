@@ -377,10 +377,12 @@ func (s *service) enrollGrokSubscription(owner *caller, project string, proxy ve
 		Digest string `json:"digest"`
 		ETag   string `json:"etag"`
 	}
-	if response.StatusCode != http.StatusCreated || json.NewDecoder(response.Body).Decode(&plugin) != nil {
+	if (response.StatusCode != http.StatusCreated && response.StatusCode != http.StatusOK) || json.NewDecoder(response.Body).Decode(&plugin) != nil {
 		s.t.Fatalf("install real Grok WASM failed with status %d", response.StatusCode)
 	}
-	s.want(owner, "POST", "/api/v1/plugins/"+plugin.Digest+"/approve", map[string]any{"origins": grokauth.Manifest().Origins}, idempotent(map[string]string{"If-Match": strconv.Quote(plugin.ETag)}), http.StatusOK)
+	if response.StatusCode == http.StatusCreated {
+		s.want(owner, "POST", "/api/v1/plugins/"+plugin.Digest+"/approve", map[string]any{"origins": grokauth.Manifest().Origins}, idempotent(map[string]string{"If-Match": strconv.Quote(plugin.ETag)}), http.StatusOK)
+	}
 	provider := s.want(owner, "POST", "/api/v1/providers", map[string]any{
 		"name": uniqueName("qualify-grok-grant"), "project_id": project,
 		"configuration": map[string]any{"kind": "plugin", "auth_mode": "grant", "profile_id": grokauth.ProfileID, "profile_revision": plugin.Digest, "options": map[string]any{"network": map[string]string{"proxy_url": proxy.url, "trust_roots_pem": proxy.roots}}},
@@ -575,8 +577,14 @@ func runFixtureClient(t *testing.T, client, binary, bridge, slug, key, configura
 			}
 			return "1000000"
 		}()
+		compactProtocol := func() string {
+			if compact {
+				return `"v2"`
+			}
+			return `"unsupported"`
+		}()
 		return sandboxClient(t, binary, bridge, []string{"OLP_API_KEY=" + key}, "exec", "--skip-git-repo-check", "--ephemeral", "-m", vendorModel,
-			"-c", "model_auto_compact_token_limit="+compactLimit, "-c", `model_provider="olp"`, "-c", `model_providers.olp.name="OLP"`, "-c", `model_providers.olp.base_url="`+base+`"`,
+			"-c", "model_providers.olp.capabilities.remote_compaction="+compactProtocol, "-c", "model_auto_compact_token_limit="+compactLimit, "-c", `model_provider="olp"`, "-c", `model_providers.olp.name="OLP"`, "-c", `model_providers.olp.base_url="`+base+`"`,
 			"-c", `model_providers.olp.env_key="OLP_API_KEY"`, "-c", `model_providers.olp.wire_api="responses"`,
 			"-c", `model_providers.olp.supports_websockets=false`, "-c", `check_for_update_on_startup=false`, "-c", `features.apply_patch_freeform=false`, "-c", `features.multi_agent=false`, "-c", `features.goals=false`, "-c", `web_search="disabled"`, "-c", `model_reasoning_summary="none"`, "-c", `model_reasoning_effort="none"`, "--dangerously-bypass-approvals-and-sandbox", prompt)
 	case "claude-code":
@@ -748,7 +756,7 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 				rawOutput, executed, err := runFixtureClient(t, lane.client.name, binary, bridge, slug, key["secret"].(string), configuration, lane.toolRoundTrip, false)
 				output := strings.ReplaceAll(rawOutput, key["secret"].(string), "[redacted]")
 				if err != nil {
-					return output, executed, err
+					return output, executed, fmt.Errorf("ordinary client flow failed, %w", err)
 				}
 				if !strings.Contains(output, vendorAnswer) {
 					return output, executed, fmt.Errorf("journey did not return the fixture answer")
@@ -764,7 +772,7 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 					compacted, ran, compactErr := runFixtureClient(t, lane.client.name, binary, bridge, slug, key["secret"].(string), configuration, true, true)
 					cleaned := strings.ReplaceAll(compacted, key["secret"].(string), "[redacted]")
 					if compactErr != nil {
-						return cleaned, ran, compactErr
+						return cleaned, ran, fmt.Errorf("summary compaction failed, %w", compactErr)
 					}
 					if !strings.Contains(cleaned, vendorAnswer) {
 						return cleaned, ran, fmt.Errorf("compaction continuation did not return the fixture answer")

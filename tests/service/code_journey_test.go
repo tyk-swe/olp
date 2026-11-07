@@ -1282,9 +1282,8 @@ func codeMiniMaxActiveRemainsDoesNotAffectBands(t *testing.T, pool *pgxpool.Pool
 	}
 }
 
-func TestCodeAllowanceReadRequestEndpoint(t *testing.T) {
-	s := startService(t)
-	owner := s.owner()
+func checkCodeAllowanceReadRequestEndpoint(t *testing.T, s *service, owner *caller) {
+	t.Helper()
 	var user string
 	if err := s.pool.QueryRow(t.Context(), `SELECT id::text FROM olp.users WHERE email='owner@example.com'`).Scan(&user); err != nil {
 		t.Fatal(err)
@@ -1650,6 +1649,7 @@ func TestCodeExactModelOrderingThroughGateway(t *testing.T) {
 	if status != http.StatusOK || !strings.Contains(string(raw), `"fixture_account":"account-1"`) {
 		t.Fatalf("last exhausted account excluded: %s", describe(status, raw))
 	}
+	checkCodeAllowanceReadRequestEndpoint(t, s, owner)
 }
 
 func codeBandsAssessEachAdapter(t *testing.T, pool *pgxpool.Pool) {
@@ -2114,6 +2114,7 @@ func TestCodeSignedToolContinuation(t *testing.T) {
 		_, _ = w.Write([]byte(result))
 	}))
 	journey, consumer := newSignedCodeJourney(t, s, owner, proxy, roots)
+	summarySetup := prepareSummaryJourney(t, s, owner, journey)
 	configuration, configErr := codeclient.Generate(journey.route, codeclient.Offers{{Adapter: codemode.AdapterCodex, Models: []string{"gemini-fixture"}}, {Adapter: codemode.AdapterAntigravity, Models: []string{"gemini-fixture"}}}, codeclient.Request{GatewayURL: s.origin, Client: codeadapter.ClientCodex, Model: "gemini-fixture"})
 	if configErr != nil || !strings.Contains(configuration.Configuration, "supports_websockets = false") || !strings.Contains(configuration.Configuration, `web_search = "disabled"`) {
 		t.Fatalf("HTTP Codex configuration = %s, %v", configuration.Configuration, configErr)
@@ -2179,7 +2180,7 @@ func TestCodeSignedToolContinuation(t *testing.T) {
 	if err := s.pool.QueryRow(t.Context(), `SELECT a.reported_tokens FROM olp.code_attempts a JOIN olp.code_bindings b ON b.id=a.binding_id WHERE b.conversation='save-failure-root' AND a.state='settled'`).Scan(&reported); err != nil || reported != 10 {
 		t.Fatalf("failed-save accounting=%d, %v", reported, err)
 	}
-	summary := startSummaryJourney(t, s, owner, journey, consumer, &calls)
+	summary := startSummaryJourney(t, s, owner, journey, summarySetup, consumer, &calls)
 	rotateSummarySecrets(t, s)
 	beforeRestart := calls.Load()
 	s.stop()
@@ -2395,7 +2396,24 @@ type summaryJourney struct {
 	key          string
 }
 
-func startSummaryJourney(t *testing.T, s *service, owner *caller, journey cooldownJourney, consumer *caller, calls *atomic.Int64) summaryJourney {
+type summaryJourneySetup struct {
+	frozenSlug  string
+	enabledETag string
+}
+
+func prepareSummaryJourney(t *testing.T, s *service, owner *caller, journey cooldownJourney) summaryJourneySetup {
+	t.Helper()
+	frozen := s.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": journey.route.ProjectID, "slug": "summary-frozen-" + uuid.NewString(), "pool_id": journey.route.PoolID, "models": []string{"gemini-fixture"}, "enabled": true, "responses_to_antigravity": true, "responses_antigravity_compatibility": true}, idempotent(), http.StatusCreated)
+	frozenPath := "/api/v1/code/routes/" + frozen["id"].(string)
+	published := s.want(owner, "POST", frozenPath+"/publish", nil, idempotent(etag(frozen)), http.StatusOK)
+	s.want(owner, "PUT", frozenPath, map[string]any{"project_id": journey.route.ProjectID, "slug": frozen["slug"], "pool_id": journey.route.PoolID, "models": []string{"gemini-fixture"}, "enabled": true, "responses_to_antigravity": true, "responses_antigravity_compatibility": true, "summary_compaction": true}, idempotent(etag(published)), http.StatusOK)
+	path := "/api/v1/code/routes/" + journey.route.ID
+	changed := s.want(owner, "PUT", path, map[string]any{"project_id": journey.route.ProjectID, "slug": journey.route.Slug, "pool_id": journey.route.PoolID, "models": []string{"gemini-fixture"}, "enabled": true, "chat_to_antigravity": true, "responses_to_antigravity": true, "responses_antigravity_compatibility": true, "messages_to_antigravity": journey.route.MessagesToAntigravity, "summary_compaction": true}, idempotent(etag(map[string]any{"etag": journey.route.ETag})), http.StatusOK)
+	enabled := s.want(owner, "POST", path+"/publish", nil, idempotent(etag(changed)), http.StatusOK)
+	return summaryJourneySetup{frozenSlug: frozen["slug"].(string), enabledETag: enabled["etag"].(string)}
+}
+
+func startSummaryJourney(t *testing.T, s *service, owner *caller, journey cooldownJourney, setup summaryJourneySetup, consumer *caller, calls *atomic.Int64) summaryJourney {
 	t.Helper()
 	conversation := uuid.NewString()
 	path := "/code/" + journey.route.Slug + "/responses/compact"
@@ -2404,25 +2422,17 @@ func startSummaryJourney(t *testing.T, s *service, owner *caller, journey cooldo
 		return summarySurfaceRequest(t, s, consumer, conversation, path, body)
 	}
 	before := calls.Load()
-	off := request(path, conversation, body)
+	off := request("/code/"+setup.frozenSlug+"/responses/compact", conversation, body)
 	off.Body.Close()
-	if off.StatusCode == http.StatusOK || calls.Load() != before {
-		t.Fatal("default-off compaction reached upstream")
+	if off.StatusCode != http.StatusBadRequest || calls.Load() != before {
+		t.Fatal("default-off published compaction policy leaked its enabled draft")
 	}
-	offTrigger := request("/code/"+journey.route.Slug+"/responses", conversation, `{"model":"gemini-fixture","stream":true,"input":[{"role":"user","content":"hello"},{"type":"compaction_trigger"}]}`)
+	offTrigger := request("/code/"+setup.frozenSlug+"/responses", conversation, `{"model":"gemini-fixture","stream":true,"input":[{"role":"user","content":"hello"},{"type":"compaction_trigger"}]}`)
 	offTrigger.Body.Close()
-	if offTrigger.StatusCode == http.StatusOK || calls.Load() != before {
-		t.Fatal("default-off trigger reached upstream")
+	if offTrigger.StatusCode != http.StatusUnprocessableEntity || calls.Load() != before {
+		t.Fatal("default-off published trigger policy leaked its enabled draft")
 	}
 	managePath := "/api/v1/code/routes/" + journey.route.ID
-	current := map[string]any{"etag": journey.route.ETag}
-	changed := s.want(owner, "PUT", managePath, map[string]any{"project_id": journey.route.ProjectID, "slug": journey.route.Slug, "pool_id": journey.route.PoolID, "models": []string{"gemini-fixture"}, "enabled": true, "chat_to_antigravity": true, "responses_to_antigravity": true, "responses_antigravity_compatibility": true, "summary_compaction": true}, idempotent(etag(current)), http.StatusOK)
-	frozen := request(path, conversation, body)
-	frozen.Body.Close()
-	if frozen.StatusCode == http.StatusOK || calls.Load() != before {
-		t.Fatal("unpublished compaction policy reached upstream")
-	}
-	enabled := s.want(owner, "POST", managePath+"/publish", nil, idempotent(etag(changed)), http.StatusOK)
 	response, encoded := func() (*http.Response, []byte) {
 		for deadline := time.Now().Add(5 * time.Second); ; {
 			response := request(path, conversation, body)
@@ -2485,7 +2495,7 @@ func startSummaryJourney(t *testing.T, s *service, owner *caller, journey cooldo
 	if trigger.StatusCode != http.StatusOK || !strings.Contains(trigger.Header.Get("Content-Type"), "text/event-stream") || !bytes.Contains(stream, []byte("response.output_item.done")) || !bytes.Contains(stream, []byte("response.completed")) || bytes.Contains(stream, []byte("PostgreSQL")) || calls.Load() != before+3 {
 		t.Fatalf("trigger %d %s, calls %d", trigger.StatusCode, stream, calls.Load()-before)
 	}
-	s.want(owner, "POST", managePath+"/publish", nil, idempotent(etag(enabled)), http.StatusOK)
+	s.want(owner, "POST", managePath+"/publish", nil, idempotent(etag(map[string]any{"etag": setup.enabledETag})), http.StatusOK)
 	return summaryJourney{conversation: conversation, item: item, binding: binding, key: secretID}
 }
 

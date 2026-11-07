@@ -5,7 +5,7 @@ import (
 	"strconv"
 )
 
-func codexConfiguration(baseURL, model string, websockets, grok bool) string {
+func codexConfiguration(baseURL, model string, websockets, grok, compact bool) string {
 	compatibility := func() string {
 		if !grok {
 			return ""
@@ -21,6 +21,15 @@ goals = false
 
 `
 	}()
+	compaction := func() string {
+		if !compact {
+			return ""
+		}
+		return `
+[model_providers.olp.capabilities]
+remote_compaction = "v2"
+`
+	}()
 	return fmt.Sprintf(`model_provider = "olp"
 model = %s
 
@@ -32,5 +41,5 @@ wire_api = "responses"
 requires_openai_auth = false
 supports_websockets = %t
 http_headers = { "X-OLP-Code-Model" = %s }
-`, strconv.Quote(model), compatibility, strconv.Quote(baseURL), websockets, strconv.Quote(model))
+`, strconv.Quote(model), compatibility, strconv.Quote(baseURL), websockets, strconv.Quote(model)) + compaction
 }

@@ -54,6 +54,10 @@ func (a *codeAttempt) prepareSummary(body []byte, r *http.Request, route codemod
 	if err != nil {
 		return codePayload{}, codemode.Refuse(422, "code_compaction_history_unsupported")
 	}
+	stream, _ := document.Root().Lookup("stream")
+	if strings.HasSuffix(r.URL.Path, "/responses/compact") && stream.Raw() == "true" || strings.HasSuffix(r.URL.Path, "/responses") && stream.Raw() != "true" {
+		return codePayload{}, codemode.Refuse(422, "code_compaction_history_unsupported")
+	}
 	capValue, _ := document.Root().Lookup("max_output_tokens")
 	cap, _ := strconv.ParseInt(capValue.Raw(), 10, 64)
 	prepared, err := json.Marshal(struct {
@@ -168,6 +172,7 @@ type codeSummaryCompleted struct {
 }
 
 func (a *codeAttempt) reserveSummaryRates(ctx context.Context, estimate int64, route string) error {
+	// The attempt owns settlement, so replacement leases stay attached if provider reservation fails
 	settleKey(ctx, a.lease, false, nil, a.server.log)
 	settleKey(ctx, a.providerLease, false, nil, a.server.log)
 	a.lease, a.providerLease = nil, nil

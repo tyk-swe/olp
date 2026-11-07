@@ -375,3 +375,24 @@ func TestSummaryCompactionClientSetupDisclosesPublishedOptIn(t *testing.T) {
 		}
 	}
 }
+
+func TestSummaryCompactionClientCapabilityFollowsSelectedPublishedPath(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		enabled bool
+		model   string
+		remote  bool
+	}{{"default off", false, "gemini-fixture", false}, {"translated opt in", true, "gemini-fixture", true}, {"unrelated native path", true, "native-model", false}} {
+		t.Run(test.name, func(t *testing.T) {
+			route := codemode.Route{Enabled: true, RevisionID: "revision", Slug: "coding", Models: []string{"gemini-fixture", "native-model"}, ResponsesToAntigravity: true, SummaryCompaction: test.enabled}
+			offers := codeclient.Offers{{Adapter: codemode.AdapterAntigravity, Models: []string{"gemini-fixture"}}, {Adapter: codemode.AdapterCodex, Models: []string{"native-model"}}}
+			configuration, err := codeclient.Generate(route, offers, codeclient.Request{GatewayURL: "http://localhost:4000", Client: codeadapter.ClientCodex, Model: test.model})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(configuration.Configuration, `remote_compaction = "v2"`) != test.remote {
+				t.Fatalf("remote compaction capability does not match selected published path\n%s", configuration.Configuration)
+			}
+		})
+	}
+}
