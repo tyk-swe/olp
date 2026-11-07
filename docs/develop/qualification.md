@@ -216,9 +216,11 @@ change to the guard in the same change.
 
 The fixture lanes execute each installed official client and record its
 version against scripted upstreams. The live lanes record client versions
-but send the live requests through protocol fixtures, so they do not
-qualify the client program itself against a real account. Client version
-pins in user documentation describe configuration written against those
+through the same sandboxed version probe, so the live gate has the same
+Bubblewrap and native executable prerequisites, and no client process
+can read the live account secrets. The live lanes send the live requests
+through protocol fixtures, so they do not qualify the client program
+itself against a real account. Client version pins in user documentation describe configuration written against those
 clients, not a live qualification result. Requalifying a client against a
 real account still means running it by hand against a local gateway and
 recording the client version, platform, adapter, profile, model, protocol,

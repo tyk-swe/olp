@@ -90,8 +90,7 @@ func (l liveLane) provided() (key, model string, missing []string) {
 	return key, model, missing
 }
 
-func (l liveLane) record(result, detail string, checks []runCheck) runRecord {
-	version, _ := clientVersion(l.client.binary)
+func (l liveLane) record(result, detail, version string, checks []runCheck) runRecord {
 	_, model, _ := l.provided()
 	return runRecord{
 		Client: l.client.name, ClientVersion: version, ClientExecuted: false,
@@ -203,7 +202,7 @@ func TestLiveRecordsNeverContainSecrets(t *testing.T) {
 	lane := liveLanes()[1]
 	t.Setenv(lane.keyEnv, sentinel)
 	t.Setenv(lane.modelEnv, "some-model")
-	record := lane.record("no_signal", "missing env: "+lane.keyEnv, []runCheck{{Name: "inference", Result: "no_signal", Detail: "env " + lane.keyEnv + " unusable"}})
+	record := lane.record("no_signal", "missing env: "+lane.keyEnv, "", []runCheck{{Name: "inference", Result: "no_signal", Detail: "env " + lane.keyEnv + " unusable"}})
 	encoded, err := json.Marshal(record)
 	if err != nil {
 		t.Fatal(err)

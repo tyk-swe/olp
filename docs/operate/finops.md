@@ -455,7 +455,10 @@ the beginning of the queried period and includes later arrivals. A day is covere
 only when the export contains activity for the configured account and projects
 on that UTC day, across any service,
 and the day closed before the watermark. An evidenced day with no Vertex charges
-is covered zero. Days without scope activity remain not imported. Google exports
+is covered zero. Days without scope activity remain not imported. Each applied
+import of a period replaces every covered day in its queried range, so a day the
+result no longer evidences returns to not imported, including a day imported
+under an earlier source or scope. Google exports
 can begin after historical usage, contain gaps or arrive late. Activity and a
 watermark provide evidence of coverage, but do not guarantee that the export
 contained every historical cost.
