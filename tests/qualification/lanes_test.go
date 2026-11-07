@@ -224,6 +224,7 @@ func lanes() []lane {
 	codexSeed := laneSeed{adapter: "codex", profile: codexauth.ProfileID, manifest: codexauth.Manifest, token: token, principal: identity.Principal(), facts: identity.Facts(), expiresAt: &expires}
 	return []lane{
 		{client: laneClient{name: "codex", binary: "codex", userAgent: "codex_cli_rs (qualification fixture)"}, seed: laneSeed{adapter: "grok-build", profile: grokauth.ProfileID, manifest: grokauth.Manifest, token: grokToken, principal: grokauth.Principal("fixture-subject"), facts: map[string]string{"subject": "fixture-subject"}, expiresAt: &expires}, protocol: "responses", toolRoundTrip: true},
+		{client: laneClient{name: "opencode", binary: "opencode", userAgent: "opencode (qualification fixture)"}, seed: laneSeed{adapter: "grok-build", profile: grokauth.ProfileID, manifest: grokauth.Manifest, token: grokToken, principal: grokauth.Principal("fixture-subject"), facts: map[string]string{"subject": "fixture-subject"}, expiresAt: &expires}, protocol: "chat", toolRoundTrip: true},
 		{client: laneClient{name: "claude-code", binary: "claude", userAgent: "claude-cli (qualification fixture)"}, seed: laneSeed{adapter: "grok-build", profile: grokauth.ProfileID, manifest: grokauth.Manifest, token: grokToken, principal: grokauth.Principal("fixture-subject"), facts: map[string]string{"subject": "fixture-subject"}, expiresAt: &expires}, protocol: "messages", toolRoundTrip: true},
 		{
 			client:   laneClient{name: "codex", binary: "codex", userAgent: "codex_cli_rs (qualification fixture)"},
@@ -593,8 +594,23 @@ func runFixtureClient(t *testing.T, client, binary, bridge, slug, key, configura
 		if err != nil {
 			return "", false, err
 		}
-		return sandboxClient(t, binary, bridge, []string{"OLP_API_KEY=" + key, "OPENCODE_CONFIG_CONTENT=" + string(config), "OPENCODE_DISABLE_MODELS_FETCH=true", "OPENCODE_DISABLE_AUTOUPDATE=true"},
-			"run", "--pure", "--model", "olp/"+vendorModel, toolPrompt)
+		selectedConfig, selectedModel, configErr := func() ([]byte, string, error) {
+			if configuration == "" {
+				return config, "olp/" + vendorModel, nil
+			}
+			var generated struct {
+				Model string `json:"model"`
+			}
+			if err := json.Unmarshal([]byte(configuration), &generated); err != nil {
+				return nil, "", err
+			}
+			return []byte(configuration), generated.Model, nil
+		}()
+		if configErr != nil {
+			return "", false, configErr
+		}
+		return sandboxClient(t, binary, bridge, []string{"OLP_API_KEY=" + key, "OPENCODE_CONFIG_CONTENT=" + string(selectedConfig), "OPENCODE_DISABLE_MODELS_FETCH=true", "OPENCODE_DISABLE_AUTOUPDATE=true"},
+			"run", "--pure", "--model", selectedModel, toolPrompt)
 	default:
 		return "", false, fmt.Errorf("unknown client %s", client)
 	}
@@ -696,7 +712,7 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 						return []string{"gemini-fixture"}
 					}
 					return []string{vendorModel}
-				}(), "enabled": true, "messages_to_codex": spec.toolRoundTrip && spec.seed.adapter == "codex", "messages_codex_safety_identifier": spec.toolRoundTrip && spec.seed.adapter == "codex", "chat_to_codex": spec.toolRoundTrip && spec.seed.adapter == "codex", "responses_to_grok": spec.seed.adapter == "grok-build" && spec.protocol == "responses", "messages_to_grok": spec.seed.adapter == "grok-build" && spec.protocol == "messages", "messages_grok_safety_identifier": spec.seed.adapter == "grok-build" && spec.protocol == "messages", "grok_cli_identity": spec.seed.adapter == "grok-build", "chat_to_antigravity": spec.signedContinuation, "model_rewriting": spec.signedContinuation, "aliases": func() map[string]string {
+				}(), "enabled": true, "messages_to_codex": spec.toolRoundTrip && spec.seed.adapter == "codex", "messages_codex_safety_identifier": spec.toolRoundTrip && spec.seed.adapter == "codex", "chat_to_codex": spec.toolRoundTrip && spec.seed.adapter == "codex", "responses_to_grok": spec.seed.adapter == "grok-build" && spec.protocol == "responses", "chat_to_grok": spec.seed.adapter == "grok-build" && spec.protocol == "chat", "messages_to_grok": spec.seed.adapter == "grok-build" && spec.protocol == "messages", "messages_grok_safety_identifier": spec.seed.adapter == "grok-build" && spec.protocol == "messages", "grok_cli_identity": spec.seed.adapter == "grok-build", "chat_to_antigravity": spec.signedContinuation, "model_rewriting": spec.signedContinuation, "aliases": func() map[string]string {
 					if spec.signedContinuation {
 						return map[string]string{vendorModel: "gemini-fixture"}
 					}
@@ -714,10 +730,10 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 					return "", false, err
 				}
 				configuration := func() string {
-					if !lane.toolRoundTrip || lane.client.name != "claude-code" {
+					if !lane.toolRoundTrip || (lane.client.name != "claude-code" && lane.client.name != "opencode") {
 						return ""
 					}
-					config := s.want(owner, "GET", "/api/v1/code/routes/"+route["id"].(string)+"/client-config?client=claude-code&platform=linux&gateway_url=http%3A%2F%2F127.0.0.1%3A18765", nil, nil, http.StatusOK)
+					config := s.want(owner, "GET", "/api/v1/code/routes/"+route["id"].(string)+"/client-config?client="+lane.client.name+"&platform=linux&gateway_url=http%3A%2F%2F127.0.0.1%3A18765", nil, nil, http.StatusOK)
 					return config["configuration"].(string)
 				}()
 				rawOutput, executed, err := runFixtureClient(t, lane.client.name, binary, bridge, slug, key["secret"].(string), configuration, lane.toolRoundTrip)

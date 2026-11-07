@@ -144,8 +144,8 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 		}
 		return ""
 	}() + func() string {
-		if (route.ResponsesToGrok || route.MessagesToGrok) && slices.Contains(adapters, codemode.AdapterGrokBuild) {
-			return " This published route translates supported Responses text and function tools through Grok Build over HTTP/SSE. Grok CLI identity compatibility requires its independent published opt-in. xAI consumer terms restrict account sharing, and violations may risk account suspension. Applicable enterprise terms may differ. Provider acceptance of this independent gateway and pooled accounts is unverified. These disclosures require no acknowledgement."
+		if (route.ResponsesToGrok || route.MessagesToGrok || route.ChatToGrok) && slices.Contains(adapters, codemode.AdapterGrokBuild) {
+			return " This published route translates supported text and function tool paths through Grok Build over HTTP/SSE. Grok CLI identity compatibility requires its independent published opt-in. xAI consumer terms restrict account sharing, and violations may risk account suspension. Applicable enterprise terms may differ. Provider acceptance of this independent gateway and pooled accounts is unverified. These disclosures require no acknowledgement."
 		}
 		return ""
 	}() + func() string {

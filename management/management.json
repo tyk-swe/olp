@@ -17299,6 +17299,11 @@
             "type": "boolean",
             "default": false,
             "description": "Explicitly map Messages metadata.user_id to a SHA-256 safety_identifier for Grok. Independently published and disabled by default. Public API documentation supports this mapping. Subscription proxy acceptance remains unverified. Unsupported metadata is refused."
+          },
+          "chat_to_grok": {
+            "type": "boolean",
+            "default": false,
+            "description": "Allow Chat text and function tools through Grok Build after publication. Disabled by default. Client identity requires its separate published opt-in."
           }
         },
         "required": [
@@ -17483,6 +17488,11 @@
             "type": "boolean",
             "default": false,
             "description": "Explicitly map Messages metadata.user_id to a SHA-256 safety_identifier for Grok. Independently published and disabled by default. Public API documentation supports this mapping. Subscription proxy acceptance remains unverified. Unsupported metadata is refused."
+          },
+          "chat_to_grok": {
+            "type": "boolean",
+            "default": false,
+            "description": "Allow Chat text and function tools through Grok Build after publication. Disabled by default. Client identity requires its separate published opt-in."
           }
         },
         "required": [
@@ -32023,6 +32033,11 @@
             "type": "boolean",
             "default": false,
             "description": "Explicitly map Messages metadata.user_id to a SHA-256 safety_identifier for Grok. Independently published and disabled by default. Public API documentation supports this mapping. Subscription proxy acceptance remains unverified. Unsupported metadata is refused."
+          },
+          "chat_to_grok": {
+            "type": "boolean",
+            "default": false,
+            "description": "Allow Chat text and function tools through Grok Build after publication. Disabled by default. Client identity requires its separate published opt-in."
           }
         },
         "required": [

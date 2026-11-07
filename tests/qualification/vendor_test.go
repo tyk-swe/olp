@@ -472,10 +472,10 @@ func fixtureResponses(w http.ResponseWriter, r *http.Request, toolProof chan<- s
 		return
 	}
 	selectedTool := func() string {
-		if slices.ContainsFunc(request.Tools, func(tool struct {
-			Name string `json:"name"`
-		}) bool { return tool.Name == "Bash" }) {
-			return "Bash"
+		for _, tool := range request.Tools {
+			if tool.Name == "Bash" || tool.Name == "bash" {
+				return tool.Name
+			}
 		}
 		return toolName
 	}()

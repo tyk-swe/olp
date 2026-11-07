@@ -83,6 +83,7 @@ type CodePaidConnection struct {
 
 type CodeRoutePolicy struct {
 	ResponsesToGrok               bool                      `json:"responses_to_grok,omitempty"`
+	ChatToGrok                    bool                      `json:"chat_to_grok,omitempty"`
 	MessagesToGrok                bool                      `json:"messages_to_grok,omitempty"`
 	MessagesGrokSafetyIdentifier  bool                      `json:"messages_grok_safety_identifier,omitempty"`
 	GrokCLIIdentity               bool                      `json:"grok_cli_identity,omitempty"`

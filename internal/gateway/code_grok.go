@@ -135,3 +135,23 @@ func codeTranslateGrokMessages(body []byte, r *http.Request, model string, safet
 	}
 	return codePayload{body: payload.body, stream: request.Stream, translated: true, target: codeadapter.TargetGrok}, nil
 }
+
+func codeTranslateGrokChat(body []byte, r *http.Request, model string) (codePayload, error) {
+	request, err := codeParseChat(body, r, model)
+	if err != nil {
+		return codePayload{}, err
+	}
+	effort, _ := request.OIF().Document().Root().Lookup("reasoning_effort")
+	if effort.Kind() != oif.Absent && effort.Kind() != oif.Null {
+		return codePayload{}, codemode.Refuse(422, "code_translation_unsupported_semantics")
+	}
+	encoded, encodeErr := codeEncodeResponses(request)
+	if encodeErr != nil {
+		return codePayload{}, codemode.Refuse(422, "code_translation_unsupported_semantics")
+	}
+	payload, payloadErr := codeTranslateGrok(encoded.OIF().Document().Bytes(), r, model)
+	if payloadErr != nil {
+		return codePayload{}, payloadErr
+	}
+	return codePayload{body: payload.body, stream: request.Stream, translated: true, includeUsage: request.IncludeUsage, target: codeadapter.TargetGrok}, nil
+}

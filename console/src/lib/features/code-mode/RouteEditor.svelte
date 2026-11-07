@@ -175,6 +175,7 @@
   let messagesGrokSafetyIdentifier = $state(
     initial?.messages_grok_safety_identifier ?? false
   );
+  let chatToGrok = $state(initial?.chat_to_grok ?? false);
   let responsesToGrok = $state(initial?.responses_to_grok ?? false);
   let grokCLIIdentity = $state(initial?.grok_cli_identity ?? false);
   let codexCLIIdentity = $state(initial?.codex_cli_identity ?? false);
@@ -287,6 +288,7 @@
         messages_codex_safety_identifier: messagesCodexSafetyIdentifier,
         messages_to_grok: messagesToGrok,
         messages_grok_safety_identifier: messagesGrokSafetyIdentifier,
+        chat_to_grok: chatToGrok,
         responses_to_grok: responsesToGrok,
         grok_cli_identity: grokCLIIdentity,
         codex_cli_identity: codexCLIIdentity,
@@ -557,6 +559,16 @@
     Signed thought state, reasoning controls, media and server tools are
     refused. This translation preserves identity and prompts. Current models and
     live subscription tool workflows remain unqualified.
+  </p>
+  <label class="choice">
+    <input id="code-chat-to-grok" type="checkbox" bind:checked={chatToGrok} />
+    Translate Chat to Grok Build
+  </label>
+  <p>
+    Off by default. Publish to enable supported Chat text and function tools
+    through Grok Build. This policy preserves requested streaming and output
+    limits. Grok client identity requires its separate published opt-in. Live
+    subscription acceptance remains unverified.
   </p>
   <label class="choice">
     <input
