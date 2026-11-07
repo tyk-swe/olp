@@ -1011,3 +1011,48 @@ func TestModerationRejectsIncompleteDecisions(t *testing.T) {
 		})
 	}
 }
+
+func TestBraveSearchRejectsNonObjectResponses(t *testing.T) {
+	for _, tc := range []struct {
+		name, response string
+		want           int
+	}{
+		{"null", `null`, http.StatusBadGateway},
+		{"array", `[]`, http.StatusBadGateway},
+		{"string", `"not a result"`, http.StatusBadGateway},
+		{"boolean", `false`, http.StatusBadGateway},
+		{"number", `1`, http.StatusBadGateway},
+		{"omitted web", `{"type":"search","query":{"original":"test"}}`, http.StatusOK},
+		{"empty results", `{"type":"search","web":{"results":[]}}`, http.StatusOK},
+		{"null web", `{"type":"search","web":null}`, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, Config{})
+			h.republish(func(snapshot *routing.Snapshot, _, _ routing.Provider) {
+				for id, provider := range snapshot.Providers {
+					provider.VendorID = "brave"
+					provider.ProfileID, provider.ProfileRevision = "brave-search", connectors.ProfileRevision
+					provider.Capabilities = []routing.Capability{{Model: provider.Capabilities[0].Model, Operation: "search", Surface: "openai", Mode: "unary"}}
+					snapshot.Providers[id] = provider
+				}
+				route := snapshot.Routes[routeSlug]
+				route.Operations, route.MaxAttempts = []string{"search"}, 1
+				snapshot.Routes[routeSlug] = route
+			})
+			h.mock.set("a", status(http.StatusOK, tc.response))
+			resp := h.do(t.Context(), http.MethodPost, "/v1/search", fullKey, []byte(`{"query":"test","max_results":1}`), map[string]string{"X-OLP-Route": routeSlug})
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("provider=%s status=%d body=%s", tc.response, resp.StatusCode, body)
+			if resp.StatusCode != tc.want {
+				t.Fatalf("status %d, want %d", resp.StatusCode, tc.want)
+			}
+			if tc.want == http.StatusBadGateway && !strings.Contains(string(body), `"code":"fidelity_protocol_violation"`) {
+				t.Fatalf("unexpected rejection: %s", body)
+			}
+		})
+	}
+}
