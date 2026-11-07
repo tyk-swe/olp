@@ -144,7 +144,7 @@ func (s *Snapshot) compileCodeMode() error {
 		if !ok {
 			continue
 		}
-		if route.ResponsesToGrok {
+		if route.ResponsesToGrok || route.ResponsesToAntigravity {
 			revision.providers[codeCapability{"responses", codeadapter.HTTP}] = s.codeProvidersWithTranslation(route, "responses")
 		}
 		if route.MessagesToCodex {

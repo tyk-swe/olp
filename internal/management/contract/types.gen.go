@@ -9458,6 +9458,9 @@ type CodeRoute struct {
 	ProjectId   openapi_types.UUID           `json:"project_id"`
 	PublishedAt nullable.Nullable[time.Time] `json:"published_at"`
 
+	// ResponsesToAntigravity Explicitly enable Responses text and signed function tools through Antigravity over HTTP or SSE after publication. Unsupported continuation state is refused. Existing published revisions retain their behavior. Provider terms and account suspension risks apply. Live subscription acceptance remains unverified.
+	ResponsesToAntigravity *bool `json:"responses_to_antigravity,omitempty"`
+
 	// ResponsesToGrok Allow Responses text and function tools through Grok Build subscription accounts after publication. Disabled by default. Translation preserves client identity. Grok client identity requires its separate published opt-in.
 	ResponsesToGrok *bool  `json:"responses_to_grok,omitempty"`
 	Revision        int32  `json:"revision"`
@@ -9527,6 +9530,9 @@ type CodeRouteWrite struct {
 	PaidTargets *map[string]CodePaidTarget `json:"paid_targets,omitempty"`
 	PoolId      openapi_types.UUID         `json:"pool_id"`
 	ProjectId   openapi_types.UUID         `json:"project_id"`
+
+	// ResponsesToAntigravity Explicitly enable Responses text and signed function tools through Antigravity over HTTP or SSE after publication. Unsupported continuation state is refused. Existing published revisions retain their behavior. Provider terms and account suspension risks apply. Live subscription acceptance remains unverified.
+	ResponsesToAntigravity *bool `json:"responses_to_antigravity,omitempty"`
 
 	// ResponsesToGrok Allow Responses text and function tools through Grok Build subscription accounts after publication. Disabled by default. Translation preserves client identity. Grok client identity requires its separate published opt-in.
 	ResponsesToGrok *bool  `json:"responses_to_grok,omitempty"`
@@ -9774,6 +9780,9 @@ type ConfigurationCodeRoutePolicy struct {
 	PaidParticipation   *bool                                   `json:"paid_participation,omitempty"`
 	PaidTargets         *map[string]ConfigurationCodePaidTarget `json:"paid_targets,omitempty"`
 	Pool                openapi_types.UUID                      `json:"pool"`
+
+	// ResponsesToAntigravity Explicitly enable Responses text and signed function tools through Antigravity over HTTP or SSE after publication. Unsupported continuation state is refused. Existing published revisions retain their behavior. Provider terms and account suspension risks apply. Live subscription acceptance remains unverified.
+	ResponsesToAntigravity *bool `json:"responses_to_antigravity,omitempty"`
 
 	// ResponsesToGrok Allow Responses text and function tools through Grok Build subscription accounts after publication. Disabled by default. Translation preserves client identity. Grok client identity requires its separate published opt-in.
 	ResponsesToGrok *bool `json:"responses_to_grok,omitempty"`

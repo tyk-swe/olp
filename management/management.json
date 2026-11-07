@@ -17289,6 +17289,11 @@
           "messages_codex_safety_identifier": {
             "type": "boolean",
             "description": "Separately authorizes translating Messages metadata.user_id to a stable SHA-256 Responses safety_identifier. Disabled by default. Only the documented user identifier is accepted, and other metadata refuses. Review provider identity and account terms before enabling."
+          },
+          "responses_to_antigravity": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly enable Responses text and signed function tools through Antigravity over HTTP or SSE after publication. Unsupported continuation state is refused. Existing published revisions retain their behavior. Provider terms and account suspension risks apply. Live subscription acceptance remains unverified."
           }
         },
         "required": [
@@ -17463,6 +17468,11 @@
           "messages_codex_safety_identifier": {
             "type": "boolean",
             "description": "Separately authorizes translating Messages metadata.user_id to a stable SHA-256 Responses safety_identifier. Disabled by default. Only the documented user identifier is accepted, and other metadata refuses. Review provider identity and account terms before enabling."
+          },
+          "responses_to_antigravity": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly enable Responses text and signed function tools through Antigravity over HTTP or SSE after publication. Unsupported continuation state is refused. Existing published revisions retain their behavior. Provider terms and account suspension risks apply. Live subscription acceptance remains unverified."
           }
         },
         "required": [
@@ -31993,6 +32003,11 @@
           "messages_codex_safety_identifier": {
             "type": "boolean",
             "description": "Separately authorizes translating Messages metadata.user_id to a stable SHA-256 Responses safety_identifier. Disabled by default. Only the documented user identifier is accepted, and other metadata refuses. Review provider identity and account terms before enabling."
+          },
+          "responses_to_antigravity": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly enable Responses text and signed function tools through Antigravity over HTTP or SSE after publication. Unsupported continuation state is refused. Existing published revisions retain their behavior. Provider terms and account suspension risks apply. Live subscription acceptance remains unverified."
           }
         },
         "required": [
