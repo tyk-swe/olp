@@ -9460,6 +9460,7 @@ type CodeRoute struct {
 
 	// ResponsesToGrok Allow Responses text and function tools through Grok Build subscription accounts after publication. Disabled by default. Translation preserves client identity. Grok client identity requires its separate published opt-in.
 	ResponsesToGrok *bool  `json:"responses_to_grok,omitempty"`
+	ChatToGrok      *bool  `json:"chat_to_grok,omitempty"`
 	Revision        int32  `json:"revision"`
 	RevisionId      string `json:"revision_id"`
 	Slug            string `json:"slug"`
@@ -9530,6 +9531,7 @@ type CodeRouteWrite struct {
 
 	// ResponsesToGrok Allow Responses text and function tools through Grok Build subscription accounts after publication. Disabled by default. Translation preserves client identity. Grok client identity requires its separate published opt-in.
 	ResponsesToGrok *bool  `json:"responses_to_grok,omitempty"`
+	ChatToGrok      *bool  `json:"chat_to_grok,omitempty"`
 	Slug            string `json:"slug"`
 
 	// Tools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
@@ -9777,6 +9779,7 @@ type ConfigurationCodeRoutePolicy struct {
 
 	// ResponsesToGrok Allow Responses text and function tools through Grok Build subscription accounts after publication. Disabled by default. Translation preserves client identity. Grok client identity requires its separate published opt-in.
 	ResponsesToGrok *bool `json:"responses_to_grok,omitempty"`
+	ChatToGrok      *bool `json:"chat_to_grok,omitempty"`
 
 	// Tools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
 	Tools nullable.Nullable[CodeResearchTools] `json:"tools,omitempty"`

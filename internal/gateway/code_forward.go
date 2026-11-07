@@ -122,6 +122,9 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *re
 			return codePayload{}, rewriteErr
 		}
 		if attempt.endpoint.Target == codeadapter.TargetGrok {
+			if ingress.protocol == codemode.ProtocolChat {
+				return codeTranslateGrokChat(requestBody, r, attempt.model)
+			}
 			return codeTranslateGrok(requestBody, r, attempt.model)
 		}
 		if attempt.endpoint.Target == codeadapter.TargetAntigravity {

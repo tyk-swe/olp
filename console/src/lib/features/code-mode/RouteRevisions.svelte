@@ -38,6 +38,7 @@
             Pool {revision.route.pool_id} · {revision.route.models.join(', ')}
           </p>
           <p>
+            Chat to Grok Build {revision.route.chat_to_grok ? "enabled" : "disabled"}.
             Responses to Grok Build {revision.route.responses_to_grok
               ? 'enabled'
               : 'disabled'}. Grok CLI identity compatibility {revision.route

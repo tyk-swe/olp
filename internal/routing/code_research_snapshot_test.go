@@ -214,8 +214,9 @@ func TestPublishedGrokPolicyControlsFrozenProviders(t *testing.T) {
 		"disabled": {RevisionID: "disabled"},
 		"identity": {RevisionID: "identity", GrokCLIIdentity: true},
 		"enabled":  {RevisionID: "enabled", ResponsesToGrok: true},
+		"chat":     {RevisionID: "chat", ChatToGrok: true},
 	}, CodeConnections: map[string]Configuration{}}
-	for _, id := range []string{"disabled", "identity", "enabled"} {
+	for _, id := range []string{"disabled", "identity", "enabled", "chat"} {
 		snapshot.CodeConnections[id+":grok"] = Configuration{Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: grokauth.ProfileID}}
 	}
 	if err := snapshot.compileCodeMode(); err != nil {
@@ -224,6 +225,9 @@ func TestPublishedGrokPolicyControlsFrozenProviders(t *testing.T) {
 	for slug, route := range snapshot.CodeRoutes {
 		if snapshot.HasCodeProviders(route, "responses", codeadapter.HTTP) != route.ResponsesToGrok {
 			t.Fatalf("%s Responses eligibility does not match published translation policy", slug)
+		}
+		if snapshot.HasCodeProviders(route, "v1/chat/completions", codeadapter.HTTP) != route.ChatToGrok {
+			t.Fatalf("%s Chat eligibility disagrees with policy", slug)
 		}
 		if snapshot.HasCodeProviders(route, "responses", codeadapter.WebSocket) {
 			t.Fatalf("%s offered unsupported WebSocket", slug)

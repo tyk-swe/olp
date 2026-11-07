@@ -470,6 +470,8 @@
             <dd>{route.models.join(', ')}</dd>
             <dt>Draft pool</dt>
             <dd>{route.pool_id}</dd>
+            <dt>Draft Chat to Grok Build</dt>
+            <dd>{route.chat_to_grok ? "Enabled, requires publication" : "Disabled"}</dd>
             <dt>Draft Responses to Grok Build</dt>
             <dd>
               {route.responses_to_grok

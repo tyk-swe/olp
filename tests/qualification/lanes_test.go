@@ -221,6 +221,7 @@ func lanes() []lane {
 	codexSeed := laneSeed{adapter: "codex", profile: codexauth.ProfileID, manifest: codexauth.Manifest, token: token, principal: identity.Principal(), facts: identity.Facts(), expiresAt: &expires}
 	return []lane{
 		{client: laneClient{name: "codex", binary: "codex", userAgent: "codex_cli_rs (qualification fixture)"}, seed: laneSeed{adapter: "grok-build", profile: grokauth.ProfileID, manifest: grokauth.Manifest, token: grokToken, principal: grokauth.Principal("fixture-subject"), facts: map[string]string{"subject": "fixture-subject"}, expiresAt: &expires}, protocol: "responses", toolRoundTrip: true},
+		{client: laneClient{name: "opencode", binary: "opencode", userAgent: "opencode (qualification fixture)"}, seed: laneSeed{adapter: "grok-build", profile: grokauth.ProfileID, manifest: grokauth.Manifest, token: grokToken, principal: grokauth.Principal("fixture-subject"), facts: map[string]string{"subject": "fixture-subject"}, expiresAt: &expires}, protocol: "chat", toolRoundTrip: true},
 		{
 			client:   laneClient{name: "codex", binary: "codex", userAgent: "codex_cli_rs (qualification fixture)"},
 			seed:     codexSeed,
@@ -567,8 +568,11 @@ func runFixtureClient(t *testing.T, client, binary, bridge, slug, key, configura
 		return sandboxClient(t, binary, bridge, []string{"ANTHROPIC_BASE_URL=" + base, "ANTHROPIC_AUTH_TOKEN=" + key, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"},
 			"--print", "--bare", "--no-session-persistence", "--tools", "", "--model", vendorModel, prompt)
 	case "opencode":
+		if toolRoundTrip {
+			prompt = "Execute printf olp-tool-round-trip using bash, then say hello."
+		}
 		config, err := json.Marshal(map[string]any{
-			"model": "olp/" + vendorModel, "small_model": "olp/" + vendorModel, "enabled_providers": []string{"olp"},
+			"permission": map[string]string{"*": "allow"}, "model": "olp/" + vendorModel, "small_model": "olp/" + vendorModel, "enabled_providers": []string{"olp"},
 			"provider": map[string]any{"olp": map[string]any{"npm": "@ai-sdk/openai-compatible", "name": "OLP",
 				"options": map[string]string{"baseURL": base + "/v1", "apiKey": "{env:OLP_API_KEY}"},
 				"models":  map[string]any{vendorModel: map[string]string{"name": "Fixture"}}}},
@@ -576,8 +580,19 @@ func runFixtureClient(t *testing.T, client, binary, bridge, slug, key, configura
 		if err != nil {
 			return "", false, err
 		}
+		selectedModel := "olp/" + vendorModel
+		if configuration != "" {
+			config = []byte(configuration)
+			var generated struct {
+				Model string `json:"model"`
+			}
+			if err := json.Unmarshal(config, &generated); err != nil {
+				return "", false, err
+			}
+			selectedModel = generated.Model
+		}
 		return sandboxClient(t, binary, bridge, []string{"OLP_API_KEY=" + key, "OPENCODE_CONFIG_CONTENT=" + string(config), "OPENCODE_DISABLE_MODELS_FETCH=true", "OPENCODE_DISABLE_AUTOUPDATE=true"},
-			"run", "--pure", "--model", "olp/"+vendorModel, prompt)
+			"run", "--pure", "--model", selectedModel, prompt)
 	default:
 		return "", false, fmt.Errorf("unknown client %s", client)
 	}
@@ -669,7 +684,7 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 			}, idempotent(), http.StatusCreated)
 			slug := uniqueName("qualify-" + spec.client.name)
 			route := s.want(owner, "POST", "/api/v1/code/routes", map[string]any{
-				"project_id": project, "slug": slug, "pool_id": pool["id"], "models": []string{vendorModel}, "enabled": true, "messages_to_codex": spec.toolRoundTrip && spec.seed.adapter == "codex", "messages_codex_safety_identifier": spec.toolRoundTrip && spec.seed.adapter == "codex", "chat_to_codex": spec.toolRoundTrip && spec.seed.adapter == "codex", "responses_to_grok": spec.seed.adapter == "grok-build", "grok_cli_identity": spec.seed.adapter == "grok-build",
+				"project_id": project, "slug": slug, "pool_id": pool["id"], "models": []string{vendorModel}, "enabled": true, "messages_to_codex": spec.toolRoundTrip && spec.seed.adapter == "codex", "messages_codex_safety_identifier": spec.toolRoundTrip && spec.seed.adapter == "codex", "chat_to_codex": spec.toolRoundTrip && spec.seed.adapter == "codex", "responses_to_grok": spec.seed.adapter == "grok-build" && spec.protocol == "responses", "chat_to_grok": spec.seed.adapter == "grok-build" && spec.protocol == "chat", "grok_cli_identity": spec.seed.adapter == "grok-build",
 			}, idempotent(), http.StatusCreated)
 			s.want(owner, "POST", "/api/v1/code/routes/"+route["id"].(string)+"/publish", nil, idempotent(etag(route)), http.StatusOK)
 			if spec.seed.adapter == "grok-build" {
@@ -682,10 +697,10 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 					return "", false, err
 				}
 				configuration := func() string {
-					if !lane.toolRoundTrip || lane.client.name != "claude-code" {
+					if !lane.toolRoundTrip || (lane.client.name != "claude-code" && lane.client.name != "opencode") {
 						return ""
 					}
-					config := s.want(owner, "GET", "/api/v1/code/routes/"+route["id"].(string)+"/client-config?client=claude-code&platform=linux&gateway_url=http%3A%2F%2F127.0.0.1%3A18765", nil, nil, http.StatusOK)
+					config := s.want(owner, "GET", "/api/v1/code/routes/"+route["id"].(string)+"/client-config?client="+lane.client.name+"&platform=linux&gateway_url=http%3A%2F%2F127.0.0.1%3A18765", nil, nil, http.StatusOK)
 					return config["configuration"].(string)
 				}()
 				rawOutput, executed, err := runFixtureClient(t, lane.client.name, binary, bridge, slug, key["secret"].(string), configuration, lane.toolRoundTrip)

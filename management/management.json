@@ -17289,6 +17289,11 @@
           "messages_codex_safety_identifier": {
             "type": "boolean",
             "description": "Separately authorizes translating Messages metadata.user_id to a stable SHA-256 Responses safety_identifier. Disabled by default. Only the documented user identifier is accepted, and other metadata refuses. Review provider identity and account terms before enabling."
+          },
+          "chat_to_grok": {
+            "type": "boolean",
+            "default": false,
+            "description": "Allow Chat text and function tools through Grok Build after publication. Disabled by default. Client identity requires its separate published opt-in."
           }
         },
         "required": [
@@ -17463,6 +17468,11 @@
           "messages_codex_safety_identifier": {
             "type": "boolean",
             "description": "Separately authorizes translating Messages metadata.user_id to a stable SHA-256 Responses safety_identifier. Disabled by default. Only the documented user identifier is accepted, and other metadata refuses. Review provider identity and account terms before enabling."
+          },
+          "chat_to_grok": {
+            "type": "boolean",
+            "default": false,
+            "description": "Allow Chat text and function tools through Grok Build after publication. Disabled by default. Client identity requires its separate published opt-in."
           }
         },
         "required": [
@@ -31993,6 +32003,11 @@
           "messages_codex_safety_identifier": {
             "type": "boolean",
             "description": "Separately authorizes translating Messages metadata.user_id to a stable SHA-256 Responses safety_identifier. Disabled by default. Only the documented user identifier is accepted, and other metadata refuses. Review provider identity and account terms before enabling."
+          },
+          "chat_to_grok": {
+            "type": "boolean",
+            "default": false,
+            "description": "Allow Chat text and function tools through Grok Build after publication. Disabled by default. Client identity requires its separate published opt-in."
           }
         },
         "required": [

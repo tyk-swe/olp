@@ -1181,3 +1181,9 @@ unverified. Disclosures do not authorize provider use, and OLP adds no separate
 acknowledgement gate. Fixture qualification establishes only the controlled
 client and gateway behavior covered by that fixture, not live subscription
 acceptance.
+
+### OpenCode through Grok Build
+
+Publish `chat_to_grok` on a route with eligible Grok Build accounts to enable Chat text and function tools over HTTP or SSE. The policy defaults off and does not enable Responses ingress. Draft edits take effect only after republication. Generate the existing OpenCode configuration for the route, export `OLP_API_KEY`, and use the generated main, plan and small models. The generated provider uses the Chat compatible SDK and the route's `/v1` base URL.
+
+Translation preserves text, function schemas, call identifiers, arguments, tool results and requested streaming usage. It retains the caller's output cap without the Codex minimum or forced streaming. Reasoning controls, media, named participants and unrepresentable or foreign continuation state are refused. Normal authorization, account affinity, limits, usage accounting and safe recovery apply. Grok client identity requires its separate published `grok_cli_identity` opt-in. A controlled OpenCode fixture executes a shell tool and continues through the Responses peer. Fixture qualification does not establish live subscription acceptance, which remains unverified.

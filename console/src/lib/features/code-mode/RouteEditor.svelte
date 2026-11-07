@@ -171,6 +171,7 @@
   let messagesCodexSafetyIdentifier = $state(
     initial?.messages_codex_safety_identifier ?? false
   );
+  let chatToGrok = $state(initial?.chat_to_grok ?? false);
   let responsesToGrok = $state(initial?.responses_to_grok ?? false);
   let grokCLIIdentity = $state(initial?.grok_cli_identity ?? false);
   let codexCLIIdentity = $state(initial?.codex_cli_identity ?? false);
@@ -281,6 +282,7 @@
         chat_to_codex: chatToCodex,
         messages_to_codex: messagesToCodex,
         messages_codex_safety_identifier: messagesCodexSafetyIdentifier,
+        chat_to_grok: chatToGrok,
         responses_to_grok: responsesToGrok,
         grok_cli_identity: grokCLIIdentity,
         codex_cli_identity: codexCLIIdentity,
@@ -552,6 +554,11 @@
     refused. This translation preserves identity and prompts. Current models and
     live subscription tool workflows remain unqualified.
   </p>
+  <label class="choice">
+    <input id="code-chat-to-grok" type="checkbox" bind:checked={chatToGrok} />
+    Translate Chat to Grok Build
+  </label>
+  <p>Publication enables OpenCode text and function tools over HTTP/SSE. Disabled by default. Live subscription acceptance remains unverified.</p>
   <label class="choice">
     <input
       id="code-responses-to-grok"

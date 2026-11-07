@@ -1160,3 +1160,89 @@ func TestGrokPublishedTransportPreservesTextAndRefusesMedia(t *testing.T) {
 		})
 	}
 }
+
+func TestGrokChatPublishedTranslation(t *testing.T) {
+	for _, test := range []struct {
+		name, body string
+		identity   bool
+		status     int
+	}{
+		{name: "stream usage", body: `{"model":"grok-model","messages":[{"role":"user","content":"hello"}],"stream":true,"stream_options":{"include_usage":true}}`, status: http.StatusOK},
+		{name: "stream without usage", body: `{"model":"grok-model","messages":[{"role":"user","content":"hello"}],"stream":true}`, status: http.StatusOK},
+		{name: "text", body: `{"model":"grok-model","messages":[{"role":"system","content":"instructions"},{"role":"user","content":"hello"}],"max_tokens":1}`, status: http.StatusOK},
+		{name: "tool continuation", body: `{"model":"grok-model","messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"shell","arguments":"{}"}}]},{"role":"tool","tool_call_id":"call_1","content":"result"}]}`, status: http.StatusOK},
+		{name: "reasoning refused", body: `{"model":"grok-model","messages":[{"role":"user","content":"hello"}],"reasoning_effort":"low"}`, status: http.StatusUnprocessableEntity},
+		{name: "foreign state", body: `{"model":"grok-model","messages":[{"role":"user","content":"hello"}],"previous_response_id":"foreign"}`, status: http.StatusConflict},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			reached := make(chan struct{}, 1)
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				reached <- struct{}{}
+				raw, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if (strings.Contains(string(raw), `"stream":true`) != strings.Contains(test.body, `"stream":true`)) || strings.Contains(string(raw), `"max_output_tokens":16`) {
+					t.Errorf("Codex transport leaked %s", raw)
+				}
+				if test.name == "tool continuation" && (!strings.Contains(string(raw), `"function_call_output"`) || !strings.Contains(string(raw), `"call_1"`) || !strings.Contains(string(raw), `"result"`)) {
+					t.Errorf("tool continuation lost %s", raw)
+				}
+
+				if !test.identity && (r.Header.Get("User-Agent") != "OLP" || r.Header.Get("X-Grok-Client-Identifier") != "") {
+					t.Errorf("implicit identity %v", r.Header)
+				}
+				if test.identity && (r.Header.Get("X-Grok-Client-Identifier") != "grok-shell" || r.Header.Get("X-Xai-Token-Auth") != "xai-grok-cli") {
+					t.Errorf("missing identity %v", r.Header)
+				}
+				if strings.HasPrefix(test.name, "stream") {
+					w.Header().Set("Content-Type", "text/event-stream")
+					_, _ = io.WriteString(w, "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"grok-model\",\"status\":\"in_progress\",\"output\":[]}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"content_index\":0,\"delta\":\"hello\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":2,\"output_tokens\":1,\"total_tokens\":3}}}\n\n")
+					return
+				}
+				_, _ = io.WriteString(w, `{"id":"resp_1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`)
+			}))
+			defer upstream.Close()
+			project := "project"
+			authority := keyauthority.Authority{ID: "key", ProjectID: &project, Policy: keyauthority.KeyPolicy{Scopes: []string{"inference"}}}
+			ledger := &fakeCodeLedger{connectionPermit: codesessions.Permit{Authority: authority, Account: codemode.Account{ID: "account", ProviderID: "provider", Principal: "principal"}, Pin: codemode.Pin{AccountID: "account", Principal: "principal"}, Attempt: codemode.Attempt{ID: "attempt"}}}
+			h := newHarness(t, Config{}, Dependencies{Admission: NewAdmission(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil))), CodeLedger: ledger, CodeAuthorizer: fakeCodeAuthorizer{}})
+			h.rt.keys[fullKey] = authority
+			published := time.Now()
+			route := codemode.Route{PublishedAt: &published, ID: "route", ProjectID: project, Slug: "grok", PoolID: "pool", Models: []string{"grok-model"}, Enabled: true, RevisionID: "revision", Revision: 1, ChatToGrok: true, TranslatedCodexOutputMinimum: true, GrokCLIIdentity: test.identity}
+			publication, err := release.NewRelease("", 0, &routing.Snapshot{Generation: routing.Generation{ID: uuid.NewString()}, CodeRoutes: map[string]codemode.Route{"grok": route}, CodeConnections: map[string]routing.Configuration{"revision:provider": {Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: "grok-build-subscription", Endpoint: upstream.URL}}}}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.rt.release = publication
+			mux := http.NewServeMux()
+			h.gateway.RegisterCode(mux)
+			request := httptest.NewRequest(http.MethodPost, "/code/grok/v1/chat/completions", strings.NewReader(test.body))
+			request.Header.Set("Authorization", "Bearer "+fullKey)
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, request)
+			if response.Code != test.status {
+				t.Fatalf("unsupported input = %d %s", response.Code, response.Body.String())
+			}
+			if strings.HasPrefix(test.name, "stream") {
+				if !strings.Contains(response.Body.String(), "hello") || !strings.Contains(response.Body.String(), "[DONE]") {
+					t.Fatalf("stream incomplete %s", response.Body.String())
+				}
+				if strings.Contains(response.Body.String(), `"prompt_tokens"`) != (test.name == "stream usage") {
+					t.Fatalf("stream usage contract %s", response.Body.String())
+				}
+			}
+
+			select {
+			case <-reached:
+				if test.status != http.StatusOK {
+					t.Fatal("unsupported media reached subscription")
+				}
+			default:
+				if test.status == http.StatusOK {
+					t.Fatal("text did not reach subscription")
+				}
+			}
+		})
+	}
+}

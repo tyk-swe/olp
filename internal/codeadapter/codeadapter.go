@@ -476,6 +476,9 @@ func SQLAdapters(connections string) string {
 }
 
 func RouteEndpoint(route codemode.Route, adapter Vendor, path string) (Endpoint, bool) {
+	if adapter.Adapter == codemode.AdapterGrokBuild && route.ChatToGrok && path == "v1/chat/completions" {
+		return adapter.Endpoint("responses")
+	}
 	if endpoint, ok := adapter.Endpoint(path); ok {
 		return endpoint, endpoint.Target.Enabled(route)
 	}
@@ -486,6 +489,9 @@ func RouteEndpoint(route codemode.Route, adapter Vendor, path string) (Endpoint,
 }
 
 func RouteClientProtocol(route codemode.Route, adapter Vendor, client, model string) (codemode.Protocol, bool) {
+	if adapter.Adapter == codemode.AdapterGrokBuild && client == ClientOpenCode && route.ChatToGrok {
+		return codemode.ProtocolChat, adapter.ServesModel(codemode.ProtocolResponses, model)
+	}
 	if protocol, ok := adapter.Protocol(client, model); ok {
 		return protocol, slices.ContainsFunc(adapter.endpoints, func(endpoint Endpoint) bool { return endpoint.Protocol == protocol && endpoint.Target.Enabled(route) })
 	}
@@ -504,6 +510,9 @@ func RouteClientProtocol(route codemode.Route, adapter Vendor, client, model str
 }
 
 func RouteClient(route codemode.Route, adapter Vendor, client string) (Client, bool) {
+	if adapter.Adapter == codemode.AdapterGrokBuild && client == ClientOpenCode && route.ChatToGrok {
+		return Client{ID: ClientOpenCode, Provider: "olp-grok", URLSuffix: "/v1", Protocol: codemode.ProtocolChat}, true
+	}
 	if native, ok := adapter.Client(client); ok {
 		return native, true
 	}
@@ -514,6 +523,16 @@ func RouteClient(route codemode.Route, adapter Vendor, client string) (Client, b
 }
 
 func RouteClients(route codemode.Route, adapter Vendor) []string {
+	if adapter.Adapter == codemode.AdapterGrokBuild {
+		return slices.Collect(func(yield func(string) bool) {
+			if route.ResponsesToGrok && !yield(ClientCodex) {
+				return
+			}
+			if route.ChatToGrok {
+				yield(ClientOpenCode)
+			}
+		})
+	}
 	return slices.Collect(func(yield func(string) bool) {
 		for _, client := range adapter.Clients() {
 			if !yield(client) {
