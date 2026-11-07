@@ -115,18 +115,21 @@ func (r *laneReport) flush(t *testing.T) {
 	}
 }
 
-func clientVersion(binary string) (string, bool) {
+func clientVersion(t *testing.T, binary string) (string, bool) {
+	t.Helper()
 	path, err := exec.LookPath(binary)
 	if err != nil {
 		return "", false
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, path, "--version").CombinedOutput()
+	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		return "", false
 	}
-	version := strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
+	out, err := sandbox(t, resolved, "/client", "--version")
+	if err != nil {
+		return "", false
+	}
+	version := strings.TrimSpace(strings.SplitN(out, "\n", 2)[0])
 	return version, version != ""
 }
 
@@ -342,30 +345,33 @@ sys.exit(process.wait())
 
 func sandboxClient(t *testing.T, binary, bridge string, env []string, args ...string) (string, bool, error) {
 	t.Helper()
+	text, err := sandbox(t, binary, slices.Concat([]string{"--ro-bind", bridge, "/bridge.sock", "/usr/bin/env"}, env, []string{"/usr/bin/python3", "-c", sandboxBridge, "/client"}, args)...)
+	started := strings.Contains(text, "\x00client-started\x00")
+	return strings.Replace(text, "\x00client-started\x00", "", 1), started, err
+}
+
+func sandbox(t *testing.T, binary string, argv ...string) (string, error) {
+	t.Helper()
 	passwd := filepath.Join(t.TempDir(), "passwd")
 	entry := fmt.Sprintf("fixture:x:%d:%d::/work:/bin/sh\n", os.Getuid(), os.Getgid())
 	if err := os.WriteFile(passwd, []byte(entry), 0o600); err != nil {
-		return "", false, err
+		return "", err
 	}
 	options := slices.Concat([]string{
 		"--unshare-net", "--unshare-pid", "--die-with-parent", "--new-session", "--clearenv",
 		"--ro-bind", "/usr", "/usr", "--ro-bind", "/lib", "/lib", "--ro-bind", "/lib64", "/lib64", "--symlink", "usr/bin", "/bin",
 		"--tmpfs", "/tmp", "--dir", "/work", "--dir", "/etc", "--ro-bind", passwd, "/etc/passwd", "--proc", "/proc", "--dev", "/dev",
 		"--ro-bind", binary, "/client", "--chdir", "/work", "--setenv", "PATH", "/usr/bin:/bin",
-		"--ro-bind", bridge, "/bridge.sock", "/usr/bin/env",
-	}, env, []string{"/usr/bin/python3", "-c", sandboxBridge, "/client"}, args)
+	}, argv)
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, "bwrap", options...)
 	command.Env = []string{}
 	output, err := command.CombinedOutput()
-	text := string(output)
-	started := strings.Contains(text, "\x00client-started\x00")
-	cleaned := strings.Replace(text, "\x00client-started\x00", "", 1)
 	if err != nil && ctx.Err() != nil {
-		return cleaned, started, ctx.Err()
+		return string(output), ctx.Err()
 	}
-	return cleaned, started, err
+	return string(output), err
 }
 
 func fixtureBridge(t *testing.T, origin string) string {
@@ -470,6 +476,27 @@ func TestMissingClientReportsNoSignal(t *testing.T) {
 	}
 	if record.Result != "no_signal" || record.Evidence != "fixture" || record.ClientVersion != "" || record.ClientExecuted {
 		t.Fatalf("missing client must report no_signal, got %+v", record)
+	}
+}
+
+func TestClientVersionProbeCannotReadHarnessSecrets(t *testing.T) {
+	sentinel := "olp-qualification-sentinel-secret"
+	if os.Getenv("OLP_LIVE_SENTINEL_KEY") != sentinel {
+		harness := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestClientVersionProbeCannotReadHarnessSecrets$", "-test.count=1")
+		harness.Env = slices.Concat(os.Environ(), []string{"OLP_LIVE_SENTINEL_KEY=" + sentinel})
+		if output, err := harness.CombinedOutput(); err != nil {
+			t.Fatalf("%v\n%s", err, output)
+		}
+		return
+	}
+	dir := t.TempDir()
+	probe := "#!/bin/sh\nif env | grep -q " + sentinel + " || cat /proc/*/environ 2>/dev/null | grep -aq " + sentinel + "; then echo leaked; else echo 1.2.3; fi\n"
+	if err := os.WriteFile(filepath.Join(dir, "olp-qualification-probe"), []byte(probe), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if version, ok := clientVersion(t, "olp-qualification-probe"); !ok || version != "1.2.3" {
+		t.Fatalf("client version probe = %q, %v, want 1.2.3 without harness secrets", version, ok)
 	}
 }
 

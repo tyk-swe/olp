@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/google/uuid"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/codeadapter"
@@ -27,6 +28,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/release"
 
@@ -854,6 +856,100 @@ func TestTransformedMediaPreservesUsage(t *testing.T) {
 			expectedUsage, expectedPresent := upstream["usage"]
 			if actualPresent != expectedPresent || !reflect.DeepEqual(actualUsage, expectedUsage) {
 				t.Fatalf("usage changed from %v to %v, client response %s", expectedUsage, actualUsage, gotBody)
+			}
+		})
+	}
+}
+
+type unreachableValkey struct{}
+
+func (unreachableValkey) Do(context.Context, ...string) (any, error) {
+	return nil, context.DeadlineExceeded
+}
+
+func TestResearchStreamFollowsOutagePolicy(t *testing.T) {
+	limiter, err := limits.New(unreachableValkey{}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	slots := int64(1)
+	authority := keyauthority.Authority{ID: uuid.NewString(), Policy: keyauthority.KeyPolicy{MaxConcurrency: &slots}}
+	for _, test := range []struct {
+		name       string
+		policy     limits.OutagePolicy
+		provider   *routing.Limits
+		wantRefuse bool
+	}{
+		{"fail open admits key concurrency", limits.FailOpen, nil, false},
+		{"fail closed refuses key concurrency", limits.FailClosed, nil, true},
+		{"fail open still refuses provider concurrency", limits.FailOpen, &routing.Limits{MaxConcurrency: &slots}, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			admission := NewAdmission(limiter, func() limits.OutagePolicy { return test.policy }, slog.New(slog.DiscardHandler))
+			lease, failure := admission.reserveResearchStream(t.Context(), authority, routeSlug, "service", "provider", test.provider)
+			if test.wantRefuse {
+				if failure == nil || failure.Code != "distributed_limits_unavailable" {
+					t.Fatalf("outage admitted the stream: lease=%v failure=%v", lease, failure)
+				}
+				return
+			}
+			if failure != nil {
+				t.Fatalf("fail-open installation refused the stream: %v", failure)
+			}
+			if admission.FailOpenTotal() != 1 {
+				t.Fatalf("fail-open total = %d, want 1", admission.FailOpenTotal())
+			}
+		})
+	}
+}
+
+func TestBedrockStreamClassifiesRequestEndings(t *testing.T) {
+	for _, tc := range []struct {
+		name, class, outcome, errorClass string
+		overallTimeout                   int64
+	}{
+		{"client cancelled", classCancelled, "cancelled", "client_cancelled", 5000},
+		{"overall timeout", classTimeout, "failure", "gateway_timeout", 300},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, Config{})
+			h.republish(func(snapshot *routing.Snapshot, _, _ routing.Provider) {
+				for id, provider := range snapshot.Providers {
+					provider.Kind, provider.ProfileID, provider.ProfileRevision, provider.VendorID = "bedrock", "bedrock-converse", connectors.ProfileRevision, ""
+					provider.CloudRegion, provider.AuthMode = "us-east-1", "static"
+					provider.Capabilities = []routing.Capability{{Model: provider.Capabilities[0].Model, Operation: "generation", Surface: "bedrock", Mode: "streaming"}}
+					snapshot.Providers[id] = provider
+				}
+				route := snapshot.Routes[routeSlug]
+				route.OverallTimeout = tc.overallTimeout
+				snapshot.Routes[routeSlug] = route
+			})
+			serveBedrock(t, h)
+			started := bedrockEvent(t, "messageStart", map[string]any{"role": "assistant"})
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
+				if err := eventstream.NewEncoder().Encode(w, *started); err != nil {
+					t.Error(err)
+					return
+				}
+				_ = http.NewResponseController(w).Flush()
+				<-r.Context().Done()
+			})
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			resp := h.do(ctx, http.MethodPost, "/bedrock/model/team-chat/converse-stream", fullKey, []byte(`{"messages":[{"role":"user","content":[{"text":"hello"}]}],"inferenceConfig":{"maxTokens":16}}`), nil)
+			defer resp.Body.Close()
+			if _, err := eventstream.NewDecoder().Decode(resp.Body, nil); err != nil || resp.StatusCode != http.StatusOK {
+				t.Fatalf("stream did not start: status=%d err=%v", resp.StatusCode, err)
+			}
+			if tc.class == classCancelled {
+				cancel()
+			} else {
+				_, _ = io.ReadAll(resp.Body)
+			}
+			env := h.sink.last(t)
+			if env.Outcome != tc.outcome || env.ErrorClass != tc.errorClass || len(env.Attempts) != 1 || env.Attempts[0].Class != tc.class {
+				t.Fatalf("outcome=%q error=%q attempts=%+v", env.Outcome, env.ErrorClass, env.Attempts)
 			}
 		})
 	}

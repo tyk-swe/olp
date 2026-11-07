@@ -321,6 +321,16 @@ func (s *Server) recordBedrockUsage(x *call, usage *wire.Usage) {
 	fact.recordEvidence(false)
 }
 
+func bedrockReadFailure(ctx context.Context) (*Error, string) {
+	switch {
+	case errors.Is(ctx.Err(), context.Canceled):
+		return (&attemptFailure{class: classCancelled}).toError(), classCancelled
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		return (&attemptFailure{class: classTimeout}).toError(), classTimeout
+	}
+	return serverError(http.StatusBadGateway, "upstream_error", "The native stream was malformed or truncated."), classProtocol
+}
+
 func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, x *call, p *pin, resp *http.Response) {
 	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" {
@@ -348,7 +358,7 @@ func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, 
 			break
 		}
 		if err != nil {
-			failure = serverError(http.StatusBadGateway, "upstream_error", "The native stream was malformed or truncated.")
+			failure, class = bedrockReadFailure(ctx)
 			break
 		}
 		observation, err := protocols.ObserveBedrockEvent(&message, limit)

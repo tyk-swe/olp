@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { dirname, join, normalize, relative } from 'node:path';
+import { dirname, join, normalize, relative, sep } from 'node:path';
 
 const rootDocs = ['CHANGELOG.md', 'CONTRIBUTING.md', 'GLOSSARY.md', 'README.md', 'SECURITY.md'];
 const docDirectories = ['docs', 'docs/develop', 'docs/operate', 'docs/use', 'docs/use/providers'];
@@ -26,13 +26,19 @@ export function listScopedDocs(listDirectory = (directory) => readdirSync(direct
   return [...rootDocs, ...handbook].sort();
 }
 
+function withoutEmphasisMarkers(text) {
+  return text.replace(/[*~]/g, '').replace(/(?<![\p{L}\p{N}])_+|_+(?![\p{L}\p{N}])/gu, '');
+}
+
 function stripInlineMarkdown(text) {
   return text
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/\[([^\]]*)\]\[[^\]]*\]/g, '$1')
     .replace(/<[^>]+>/g, '')
-    .replace(/[`*_~]/g, '');
+    .split(/(`[^`]*`)/)
+    .map((part, index) => (index % 2 === 1 ? part.slice(1, -1) : withoutEmphasisMarkers(part)))
+    .join('');
 }
 
 export function headingAnchor(text) {
@@ -116,13 +122,22 @@ function isExternal(destination) {
   return /^[a-z][a-z0-9+.-]*:/i.test(destination) || destination.startsWith('//');
 }
 
+function decodeComponent(text) {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return undefined;
+  }
+}
+
 function resolveLink(source, destination) {
   const hash = destination.indexOf('#');
-  const pathPart = hash < 0 ? destination : destination.slice(0, hash);
-  const anchor = hash < 0 ? '' : destination.slice(hash + 1);
-  const decodedPath = decodeURIComponent(pathPart);
+  const decodedPath = decodeComponent(hash < 0 ? destination : destination.slice(0, hash));
+  const anchor = decodeComponent(hash < 0 ? '' : destination.slice(hash + 1));
+  if (decodedPath === undefined || anchor === undefined) return undefined;
   const target = decodedPath ? normalize(join(dirname(source), decodedPath)) : source;
-  return { anchor: decodeURIComponent(anchor), target };
+  if (target === '..' || target.startsWith(`..${sep}`)) return undefined;
+  return { anchor, target };
 }
 
 export function checkDocs(files, read, exists) {
@@ -147,11 +162,12 @@ export function checkDocs(files, read, exists) {
     if (typeof markdown !== 'string') continue;
     for (const destination of collectLinks(markdown)) {
       if (!destination || isExternal(destination)) continue;
-      const { anchor, target } = resolveLink(file, destination);
-      if (!exists(target)) {
+      const resolved = resolveLink(file, destination);
+      if (!resolved || !exists(resolved.target)) {
         errors.push(`${file}: broken local link ${destination}`);
         continue;
       }
+      const { anchor, target } = resolved;
       if (anchor && target.endsWith('.md')) {
         const anchors = anchorsByFile.get(target) ?? collectAnchors(read(target) ?? '');
         if (!anchors.has(anchor)) errors.push(`${file}: broken local anchor ${destination}`);
@@ -165,7 +181,7 @@ export function checkDocs(files, read, exists) {
     const indexed = new Set(
       collectLinks(indexMarkdown)
         .filter((destination) => destination && !isExternal(destination))
-        .map((destination) => resolveLink(index, destination).target)
+        .flatMap((destination) => resolveLink(index, destination)?.target ?? [])
     );
     for (const file of files) {
       if (file.startsWith('docs/') && file !== index && !indexed.has(file)) {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/tyk-swe/olp/internal/codesessions"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -1370,7 +1371,7 @@ func codeMiniMaxActiveRemainsDoesNotAffectBands(t *testing.T, pool *pgxpool.Pool
 	}
 }
 
-func TestCodeAllowanceReadRequestEndpoint(t *testing.T) {
+func TestCodeAccountEndpoints(t *testing.T) {
 	s := startService(t)
 	owner := s.owner()
 	var user string
@@ -1419,6 +1420,25 @@ func TestCodeAllowanceReadRequestEndpoint(t *testing.T) {
 		}
 		return checks > 0, "no checkpoint yet"
 	})
+
+	if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_accounts SET models='["model","other"]' WHERE id=$1`, minimax); err != nil {
+		t.Fatal(err)
+	}
+	store := codesessions.New(s.pool)
+	retryAt := time.Now().Add(time.Hour)
+	for _, account := range []string{codex, minimax} {
+		if err := store.ObserveCooldownClass(t.Context(), account, "model", codeadapter.Classification{Class: codeadapter.CooldownCapacity, Scope: codeadapter.ScopeModel, RetryAt: retryAt}, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	eligible := map[string]bool{}
+	for _, item := range s.want(owner, "GET", "/api/v1/code/accounts?project_id="+project, nil, nil, http.StatusOK)["items"].([]any) {
+		account := item.(map[string]any)
+		eligible[account["id"].(string)] = account["eligible"].(bool)
+	}
+	if want := map[string]bool{codex: false, minimax: true, claude: true}; !maps.Equal(eligible, want) {
+		t.Fatalf("eligible after model cooldowns = %v, want %v", eligible, want)
+	}
 }
 func TestCodeAccountExtraUsageRoundTripsAndRefusesNonKimiAccounts(t *testing.T) {
 	pool, _ := newDatabase(t)

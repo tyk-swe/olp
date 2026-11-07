@@ -27,6 +27,8 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/credentials/processcreds"
+	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/vendors"
@@ -634,10 +636,12 @@ func (a *Auth) newAzureCredential(mode string, secret []byte) (azcore.TokenCrede
 }
 
 func (a *Auth) AWSWorkloadCredentials(ctx context.Context, region string) (aws.Credentials, error) {
-	return a.awsCredentials(ctx, Config{AuthMode: "default_chain", CloudRegion: region}, nil)
+	stsClient := sts.New(sts.Options{Region: region, HTTPClient: a.client, RetryMaxAttempts: 1})
+	return a.awsCredentials(ctx, Config{AuthMode: "default_chain", CloudRegion: region}, nil,
+		awsconfig.WithWebIdentityRoleCredentialOptions(func(o *stscreds.WebIdentityRoleOptions) { o.Client = stsClient }))
 }
 
-func (a *Auth) awsCredentials(ctx context.Context, c Config, secret []byte) (aws.Credentials, error) {
+func (a *Auth) awsCredentials(ctx context.Context, c Config, secret []byte, chain ...func(*awsconfig.LoadOptions) error) (aws.Credentials, error) {
 	if c.AuthMode == "static" {
 		var v struct {
 			AccessKeyID     string `json:"access_key_id"`
@@ -662,7 +666,8 @@ func (a *Auth) awsCredentials(ctx context.Context, c Config, secret []byte) (aws
 	ctx, cancel := context.WithTimeout(ctx, authTimeout)
 	defer cancel()
 	if provider == nil {
-		cfg, e := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(c.CloudRegion), awsconfig.WithHTTPClient(a.client), awsconfig.WithRetryMaxAttempts(1), awsconfig.WithProcessCredentialOptions(func(o *processcreds.Options) { o.Timeout = authTimeout }))
+		options := append([]func(*awsconfig.LoadOptions) error{awsconfig.WithRegion(c.CloudRegion), awsconfig.WithHTTPClient(a.client), awsconfig.WithRetryMaxAttempts(1), awsconfig.WithProcessCredentialOptions(func(o *processcreds.Options) { o.Timeout = authTimeout })}, chain...)
+		cfg, e := awsconfig.LoadDefaultConfig(ctx, options...)
 		if e != nil {
 			return aws.Credentials{}, ErrCredentialRejected
 		}
