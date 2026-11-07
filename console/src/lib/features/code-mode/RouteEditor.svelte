@@ -182,6 +182,7 @@
   let responsesAntigravityCompatibility = $state(initial?.responses_antigravity_compatibility ?? false);
   let responsesToAntigravity = $state(initial?.responses_to_antigravity ?? false);
   let chatToAntigravity = $state(initial?.chat_to_antigravity ?? false);
+  let summaryCompaction = $state(initial?.summary_compaction ?? false);
   let allowanceOrdering = $state(initial?.allowance_ordering ?? false);
   let research = $state(!!initial?.tools);
   let researchAccount = $state(initial?.tools?.account_id ?? '');
@@ -297,6 +298,7 @@
         responses_to_antigravity: responsesToAntigravity,
         responses_antigravity_compatibility: responsesAntigravityCompatibility,
         chat_to_antigravity: chatToAntigravity,
+        summary_compaction: summaryCompaction,
         allowance_ordering: allowanceOrdering,
         initial_recovery_attempts: recoveryAttempts,
         tools: research
@@ -508,6 +510,22 @@
   <p>
     Without a configured model pool, recovery keeps the exact model. Zero
     attempts disables automatic recovery.
+  </p>
+  <label class="choice">
+    <input
+      id="code-summary-compaction"
+      type="checkbox"
+      bind:checked={summaryCompaction}
+    />
+    Allow summary compaction
+  </label>
+  <p>
+    Disabled by default. Publish to opt in under the existing client API and
+    version contract. Supported compaction makes an additional provider call,
+    consumes usage and may lose detail. Authenticated encrypted summaries stay
+    in client-held items. OLP retains only a conversation-specific key in
+    encrypted secret management until root retirement. This opt-in does not
+    establish live provider or client acceptance.
   </p>
   <label class="choice">
     <input id="code-chat-to-codex" type="checkbox" bind:checked={chatToCodex} />

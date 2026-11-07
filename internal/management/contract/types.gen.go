@@ -9479,6 +9479,9 @@ type CodeRoute struct {
 	RevisionId      string `json:"revision_id"`
 	Slug            string `json:"slug"`
 
+	// SummaryCompaction Explicitly opt in to summary compaction after publication. Disabled by default and pinned by immutable route revisions. A supported compaction request makes an additional provider call, consumes usage and may lose detail. Authenticated encrypted summaries remain in client-held items. Only a conversation-specific key is retained in encrypted secret management until root retirement. Existing client API and version contracts still apply. This policy does not qualify live provider or client acceptance.
+	SummaryCompaction *bool `json:"summary_compaction,omitempty"`
+
 	// Tools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
 	Tools nullable.Nullable[CodeResearchTools] `json:"tools,omitempty"`
 }
@@ -9561,6 +9564,9 @@ type CodeRouteWrite struct {
 	// ResponsesToGrok Allow Responses text and function tools through Grok Build subscription accounts after publication. Disabled by default. Translation preserves client identity. Grok client identity requires its separate published opt-in.
 	ResponsesToGrok *bool  `json:"responses_to_grok,omitempty"`
 	Slug            string `json:"slug"`
+
+	// SummaryCompaction Explicitly opt in to summary compaction after publication. Disabled by default and pinned by immutable route revisions. A supported compaction request makes an additional provider call, consumes usage and may lose detail. Authenticated encrypted summaries remain in client-held items. Only a conversation-specific key is retained in encrypted secret management until root retirement. Existing client API and version contracts still apply. This policy does not qualify live provider or client acceptance.
+	SummaryCompaction *bool `json:"summary_compaction,omitempty"`
 
 	// Tools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
 	Tools nullable.Nullable[CodeResearchTools] `json:"tools,omitempty"`
@@ -9822,6 +9828,9 @@ type ConfigurationCodeRoutePolicy struct {
 
 	// ResponsesToGrok Allow Responses text and function tools through Grok Build subscription accounts after publication. Disabled by default. Translation preserves client identity. Grok client identity requires its separate published opt-in.
 	ResponsesToGrok *bool `json:"responses_to_grok,omitempty"`
+
+	// SummaryCompaction Explicitly opt in to summary compaction after publication. Disabled by default and pinned by immutable route revisions. A supported compaction request makes an additional provider call, consumes usage and may lose detail. Authenticated encrypted summaries remain in client-held items. Only a conversation-specific key is retained in encrypted secret management until root retirement. Existing client API and version contracts still apply. This policy does not qualify live provider or client acceptance.
+	SummaryCompaction *bool `json:"summary_compaction,omitempty"`
 
 	// Tools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
 	Tools nullable.Nullable[CodeResearchTools] `json:"tools,omitempty"`

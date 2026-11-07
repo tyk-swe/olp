@@ -237,6 +237,7 @@ type Route struct {
 	CodexCLIIdentity                  bool                  `json:"codex_cli_identity,omitempty"`
 	PaidFallbackTargets               map[string]PaidTarget `json:"paid_fallback_targets,omitempty"`
 	AntigravitySignedContinuation     bool                  `json:"antigravity_signed_continuation,omitempty"`
+	SummaryCompaction                 bool                  `json:"summary_compaction,omitempty"`
 	ChatToAntigravity                 bool                  `json:"chat_to_antigravity,omitempty"`
 	ResponsesToAntigravity            bool                  `json:"responses_to_antigravity,omitempty"`
 	ResponsesAntigravityCompatibility bool                  `json:"responses_antigravity_compatibility,omitempty"`

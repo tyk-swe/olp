@@ -5353,6 +5353,11 @@
                 "$ref": "#/$defs/ConfigurationCodePaidTarget"
               }
             },
+            "summary_compaction": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly opt in to summary compaction after publication. Disabled by default and pinned by immutable route revisions. A supported compaction request makes an additional provider call, consumes usage and may lose detail. Authenticated encrypted summaries remain in client-held items. Only a conversation-specific key is retained in encrypted secret management until root retirement. Existing client API and version contracts still apply. This policy does not qualify live provider or client acceptance."
+            },
             "chat_to_antigravity": {
               "type": "boolean",
               "description": "Explicit opt-in for chat translation through the Antigravity adapter."
@@ -7777,6 +7782,11 @@
               "type": "boolean",
               "default": false,
               "description": "Explicitly permit metered API targets. Direct selection and subscription-first fallback require their separate target maps."
+            },
+            "summary_compaction": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly opt in to summary compaction after publication. Disabled by default and pinned by immutable route revisions. A supported compaction request makes an additional provider call, consumes usage and may lose detail. Authenticated encrypted summaries remain in client-held items. Only a conversation-specific key is retained in encrypted secret management until root retirement. Existing client API and version contracts still apply. This policy does not qualify live provider or client acceptance."
             },
             "chat_to_antigravity": {
               "type": "boolean",
@@ -31306,6 +31316,11 @@
                 "$ref": "#/$defs/ConfigurationCodePaidTarget"
               }
             },
+            "summary_compaction": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly opt in to summary compaction after publication. Disabled by default and pinned by immutable route revisions. A supported compaction request makes an additional provider call, consumes usage and may lose detail. Authenticated encrypted summaries remain in client-held items. Only a conversation-specific key is retained in encrypted secret management until root retirement. Existing client API and version contracts still apply. This policy does not qualify live provider or client acceptance."
+            },
             "chat_to_antigravity": {
               "type": "boolean",
               "description": "Explicit opt-in for chat translation through the Antigravity adapter."
@@ -36702,6 +36717,11 @@
               "type": "boolean",
               "default": false,
               "description": "Explicitly permit metered API targets. Direct selection and subscription-first fallback require their separate target maps."
+            },
+            "summary_compaction": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly opt in to summary compaction after publication. Disabled by default and pinned by immutable route revisions. A supported compaction request makes an additional provider call, consumes usage and may lose detail. Authenticated encrypted summaries remain in client-held items. Only a conversation-specific key is retained in encrypted secret management until root retirement. Existing client API and version contracts still apply. This policy does not qualify live provider or client acceptance."
             },
             "chat_to_antigravity": {
               "type": "boolean",

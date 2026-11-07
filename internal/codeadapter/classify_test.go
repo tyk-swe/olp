@@ -341,3 +341,16 @@ func TestCodeGrokOpenCodeConfiguration(t *testing.T) {
 		t.Fatal("Chat opt-in enabled Responses")
 	}
 }
+
+func TestSummaryCompactionClientSetupDisclosesPublishedOptIn(t *testing.T) {
+	route := codemode.Route{Enabled: true, RevisionID: "revision", Slug: "coding", Models: []string{"grok-fixture-model"}, ResponsesToGrok: true, SummaryCompaction: true}
+	configuration, err := codeclient.Generate(route, codeclient.Offers{{Adapter: codemode.AdapterGrokBuild, Models: route.Models}}, codeclient.Request{GatewayURL: "http://localhost:4000", Client: codeadapter.ClientCodex, Model: route.Models[0]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, disclosure := range []string{"additional provider call", "consumes usage", "may lose detail", "client-held items", "until root retirement"} {
+		if !strings.Contains(configuration.Instructions, disclosure) {
+			t.Fatalf("client setup omitted %q", disclosure)
+		}
+	}
+}
