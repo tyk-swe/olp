@@ -382,13 +382,13 @@ func (i *Importer) storeDays(ctx context.Context, row *importRow, period periodD
 				source_revision=EXCLUDED.source_revision,
 				ordering_at=CASE WHEN olp.provider_billing_revisions.source_revision=EXCLUDED.source_revision
 					THEN olp.provider_billing_revisions.ordering_at ELSE EXCLUDED.ordering_at END,
-				covered_from=CASE WHEN olp.provider_billing_revisions.source_revision=EXCLUDED.source_revision
+				covered_from=CASE WHEN olp.provider_billing_revisions.source_revision=EXCLUDED.source_revision AND NOT $9
 					THEN LEAST(olp.provider_billing_revisions.covered_from,EXCLUDED.covered_from) ELSE EXCLUDED.covered_from END,
-				covered_through=CASE WHEN olp.provider_billing_revisions.source_revision=EXCLUDED.source_revision
+				covered_through=CASE WHEN olp.provider_billing_revisions.source_revision=EXCLUDED.source_revision AND NOT $9
 					THEN GREATEST(olp.provider_billing_revisions.covered_through,EXCLUDED.covered_through) ELSE EXCLUDED.covered_through END
 			WHERE olp.provider_billing_revisions.source_revision=EXCLUDED.source_revision
 				OR olp.provider_billing_revisions.ordering_at < EXCLUDED.ordering_at`,
-			row.ProviderID, row.Source, digest[:], period.start, revision.id, revision.orderingAt, minDay, maxDay)
+			row.ProviderID, row.Source, digest[:], period.start, revision.id, revision.orderingAt, minDay, maxDay, period.replaces != nil)
 		if err != nil {
 			return err
 		}
@@ -401,12 +401,12 @@ func (i *Importer) storeDays(ctx context.Context, row *importRow, period periodD
 	}
 	if appliedRevision != nil && period.replaces != nil {
 		if _, err := tx.Exec(ctx, `WITH omitted AS (
-				DELETE FROM olp.provider_billing_days WHERE provider_id=$1::uuid AND source=$2 AND scope=$3::jsonb
-				AND day>=$4::date AND day<$5::date AND day <> ALL(COALESCE($6::text[],'{}')::date[])
+				DELETE FROM olp.provider_billing_days WHERE provider_id=$1::uuid
+				AND day>=$2::date AND day<$3::date AND day <> ALL(COALESCE($4::text[],'{}')::date[])
 				RETURNING day
 			)
 			DELETE FROM olp.provider_invoiced_costs WHERE provider_id=$1::uuid AND day IN (SELECT day FROM omitted)`,
-			row.ProviderID, row.Source, row.Scope, period.replaces.from.Format(dayFormat), period.replaces.to.Format(dayFormat), daysList); err != nil {
+			row.ProviderID, period.replaces.from.Format(dayFormat), period.replaces.to.Format(dayFormat), daysList); err != nil {
 			return err
 		}
 	}
