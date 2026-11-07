@@ -17,6 +17,8 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -36,6 +38,10 @@ const (
 type vendorRequest struct {
 	Model  string `json:"model"`
 	Stream bool   `json:"stream"`
+	Tools  []struct {
+		Name string `json:"name"`
+	} `json:"tools"`
+	Input json.RawMessage `json:"input"`
 }
 
 func refuseVendor(w http.ResponseWriter, status int, body string) {
@@ -57,7 +63,7 @@ func bearer(r *http.Request) string {
 	return r.Header.Get("Authorization")
 }
 
-func newVendorMux(codexToken string) *http.ServeMux {
+func newVendorMux(codexToken string, toolProof chan<- struct{}) *http.ServeMux {
 	mux := http.NewServeMux()
 	openAIError := `{"error":{"message":"unknown model","type":"invalid_request_error","code":"model_not_found"}}`
 	badKey := `{"error":{"message":"bad key","type":"invalid_request_error","code":"invalid_api_key"}}`
@@ -88,6 +94,9 @@ func newVendorMux(codexToken string) *http.ServeMux {
 		}
 		request, ok := decodeVendor(w, r, openAIError)
 		if !ok {
+			return
+		}
+		if fixtureCodexTool(w, request, toolProof) {
 			return
 		}
 		message := map[string]any{"id": "msg_fixture", "type": "message", "role": "assistant", "status": "completed", "content": []any{map[string]any{"type": "output_text", "text": vendorAnswer, "annotations": []any{}}}}
@@ -133,6 +142,73 @@ func newVendorMux(codexToken string) *http.ServeMux {
 		_, _ = io.WriteString(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
 	})
 	return mux
+}
+
+func fixtureCodexTool(w http.ResponseWriter, request vendorRequest, proof chan<- struct{}) bool {
+	hasBash := slices.ContainsFunc(request.Tools, func(tool struct {
+		Name string `json:"name"`
+	}) bool {
+		return tool.Name == "Bash"
+	})
+	if !hasBash {
+		return false
+	}
+	var input []struct {
+		Type   string `json:"type"`
+		CallID string `json:"call_id"`
+		Output string `json:"output"`
+	}
+	if err := json.Unmarshal(request.Input, &input); err != nil {
+		refuseVendor(w, http.StatusBadRequest, `{"error":{"message":"tool input must be an array"}}`)
+		return true
+	}
+	for _, item := range input {
+		if item.Type != "function_call_output" {
+			continue
+		}
+		if item.CallID != "call_fixture_bash" || !strings.Contains(item.Output, "olp-tool-round-trip") {
+			refuseVendor(w, http.StatusBadRequest, `{"error":{"message":"fixture tool output missing"}}`)
+			return true
+		}
+		select {
+		case proof <- struct{}{}:
+		default:
+		}
+		return false
+	}
+	arguments := `{"command":"printf olp-tool-round-trip","description":"Print the fixture marker"}`
+	item := map[string]any{"id": "fc_fixture", "type": "function_call", "call_id": "call_fixture_bash", "name": "Bash", "arguments": arguments, "status": "completed"}
+	response := map[string]any{"id": "resp_fixture_tool", "object": "response", "model": vendorModel, "status": "completed", "output": []any{item}, "usage": map[string]int{"input_tokens": 4, "output_tokens": 6, "total_tokens": 10}}
+	if !request.Stream {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+		return true
+	}
+
+	events := []struct {
+		SequenceNumber int            `json:"sequence_number"`
+		Type           string         `json:"type"`
+		Response       map[string]any `json:"response,omitempty"`
+		OutputIndex    *int           `json:"output_index,omitempty"`
+		Item           map[string]any `json:"item,omitempty"`
+		ItemID         string         `json:"item_id,omitempty"`
+		Delta          string         `json:"delta,omitempty"`
+		Arguments      string         `json:"arguments,omitempty"`
+	}{
+		{SequenceNumber: 0, Type: "response.created", Response: map[string]any{"id": "resp_fixture_tool", "object": "response", "model": vendorModel, "status": "in_progress", "output": []any{}}},
+		{SequenceNumber: 1, Type: "response.output_item.added", OutputIndex: new(0), Item: map[string]any{"id": "fc_fixture", "type": "function_call", "call_id": "call_fixture_bash", "name": "Bash", "arguments": "", "status": "in_progress"}},
+		{SequenceNumber: 2, Type: "response.function_call_arguments.delta", ItemID: "fc_fixture", OutputIndex: new(0), Delta: arguments},
+		{SequenceNumber: 3, Type: "response.function_call_arguments.done", ItemID: "fc_fixture", OutputIndex: new(0), Arguments: arguments},
+		{SequenceNumber: 4, Type: "response.output_item.done", OutputIndex: new(0), Item: item},
+		{SequenceNumber: 5, Type: "response.completed", Response: response},
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	for _, event := range events {
+		raw, _ := json.Marshal(event)
+		_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, raw)
+	}
+
+	return true
 }
 
 type vendorProxy struct {

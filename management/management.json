@@ -17272,6 +17272,10 @@
           "allowance_ordering": {
             "type": "boolean",
             "description": "Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy."
+          },
+          "messages_codex_safety_identifier": {
+            "type": "boolean",
+            "description": "Separately authorizes translating Messages metadata.user_id to a stable SHA-256 Responses safety_identifier. Disabled by default. Only the documented user identifier is accepted, and other metadata refuses. Review provider identity and account terms before enabling."
           }
         },
         "required": [
@@ -17432,6 +17436,10 @@
           "allowance_ordering": {
             "type": "boolean",
             "description": "Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy."
+          },
+          "messages_codex_safety_identifier": {
+            "type": "boolean",
+            "description": "Separately authorizes translating Messages metadata.user_id to a stable SHA-256 Responses safety_identifier. Disabled by default. Only the documented user identifier is accepted, and other metadata refuses. Review provider identity and account terms before enabling."
           }
         },
         "required": [
@@ -31948,6 +31956,10 @@
           "allowance_ordering": {
             "type": "boolean",
             "description": "Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy."
+          },
+          "messages_codex_safety_identifier": {
+            "type": "boolean",
+            "description": "Separately authorizes translating Messages metadata.user_id to a stable SHA-256 Responses safety_identifier. Disabled by default. Only the documented user identifier is accepted, and other metadata refuses. Review provider identity and account terms before enabling."
           }
         },
         "required": [

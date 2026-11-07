@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,7 +28,7 @@ type codePayload struct {
 	target       codeadapter.Target
 }
 
-func codeTranslateMessages(body []byte, r *http.Request, model string) (codePayload, error) {
+func codeTranslateMessages(body []byte, r *http.Request, model string, minimum, safetyMapping bool) (codePayload, error) {
 	refused := codemode.Refuse(422, "code_translation_unsupported_semantics")
 	query, queryErr := url.ParseQuery(r.URL.RawQuery)
 	if queryErr != nil || (len(query) != 0 && (len(query) != 1 || !slices.Equal(query["beta"], []string{"true"}))) || r.Header.Get("Anthropic-Beta") != "" || len(r.Trailer) != 0 {
@@ -50,10 +51,14 @@ func codeTranslateMessages(body []byte, r *http.Request, model string) (codePayl
 			return codePayload{}, refused
 		}
 	}
-	return codeTranslateResponses(request)
+	prepared, safety, identityErr := codeMessagesSafetyIdentifier(request, safetyMapping)
+	if identityErr != nil {
+		return codePayload{}, identityErr
+	}
+	return codeTranslateResponses(prepared, minimum, safety)
 }
 
-func codeTranslateChat(body []byte, r *http.Request, model string) (codePayload, error) {
+func codeTranslateChat(body []byte, r *http.Request, model string, minimum bool) (codePayload, error) {
 	refused := codemode.Refuse(422, "code_translation_unsupported_semantics")
 	if r.URL.RawQuery != "" || len(r.Trailer) != 0 || len(r.Header.Values("X-Codex-Turn-State")) != 0 || len(r.Header.Values("OpenAI-Beta")) != 0 {
 		return codePayload{}, refused
@@ -87,7 +92,7 @@ func codeTranslateChat(body []byte, r *http.Request, model string) (codePayload,
 			return codePayload{}, refused
 		}
 	}
-	return codeTranslateResponses(request)
+	return codeTranslateResponses(request, minimum, "")
 }
 
 func stringValue(value oif.Value) string {
@@ -95,7 +100,7 @@ func stringValue(value oif.Value) string {
 	return text
 }
 
-func codeTranslateResponses(request *wire.Request) (codePayload, error) {
+func codeTranslateResponses(request *wire.Request, minimum bool, safety string) (codePayload, error) {
 	refused := codemode.Refuse(422, "code_translation_unsupported_semantics")
 	encoded, _, encodeErr := protocols.EncodeTarget(request, wire.Responses, "openai", "openai", request.Route, nil)
 	if encodeErr != nil {
@@ -119,7 +124,7 @@ func codeTranslateResponses(request *wire.Request) (codePayload, error) {
 		{Pointer: "/stream", Value: "true", Origin: oif.TransportOption, Reason: "Codex subscription streaming transport"},
 		{Pointer: "/store", Value: "false", Origin: oif.TransportOption, Reason: "Stateless code-mode translation"},
 		{Pointer: "/instructions", Value: `""`, Origin: oif.TransportOption, Reason: "Codex required empty transport instructions"},
-	}, roles)
+	}, roles, codeOutputMinimumChanges(target.OIF().Document().Root(), minimum), codeSafetyIdentifierChanges(safety))
 	prepared, preparedErr := target.OIF().WithChanges(changes...)
 	if preparedErr != nil {
 		return codePayload{}, refused
@@ -224,4 +229,67 @@ func (a *codeAttempt) translatedCompletion(response *http.Response, model string
 	}
 	a.observeUnary(body)
 	return protocols.Decode(wire.Responses, family, body, model, "")
+}
+
+func codeEffectiveOutputCap(cap int64, minimum bool) int64 {
+	if minimum && cap > 0 {
+		return max(16, cap)
+	}
+	return cap
+}
+
+func codeOutputMinimumChanges(root oif.Value, enabled bool) []oif.Change {
+	value, _ := root.Lookup("max_output_tokens")
+	cap, err := strconv.ParseInt(value.Raw(), 10, 64)
+	if err != nil {
+		return nil
+	}
+	effective := codeEffectiveOutputCap(cap, enabled)
+	if effective == cap {
+		return nil
+	}
+	return []oif.Change{{Pointer: "/max_output_tokens", Value: strconv.FormatInt(effective, 10), Origin: oif.TransformedMapping, Reason: "Published Codex translated output minimum"}}
+}
+
+func codeTargetEstimate(observation codemode.Request, body []byte, route codemode.Route, target codeTarget, ingress codeIngress) int64 {
+	if !route.TranslatedCodexOutputMinimum || target.adapter.Adapter != codemode.AdapterCodex || target.endpoint.Protocol == ingress.protocol {
+		return observation.Estimate
+	}
+	root, err := oif.ParseJSON(body, oif.Limits{MaxBytes: codewire.MaxBody})
+	if err != nil {
+		return observation.Estimate
+	}
+	cap := codewire.RateOutputCap(root.Root(), ingress.protocol)
+	if cap > 0 {
+		return observation.Estimate + codeEffectiveOutputCap(cap, true) - cap
+	}
+	return observation.Estimate
+}
+
+func codeMessagesSafetyIdentifier(request *wire.Request, enabled bool) (*wire.Request, string, error) {
+	metadata, present := request.OIF().Document().Root().Lookup("metadata")
+	if !present {
+		return request, "", nil
+	}
+	refused := codemode.Refuse(422, "code_translation_unsupported_semantics")
+	if !enabled || metadata.Kind() != oif.Object || len(metadata.Members()) != 1 {
+		return nil, "", refused
+	}
+	user, present := metadata.Lookup("user_id")
+	identity, text := user.Text()
+	if !present || !text || identity == "" {
+		return nil, "", refused
+	}
+	prepared, err := request.WithFields(request.OIF().Document().FieldsWithout("metadata"), oif.TransformedMapping)
+	if err != nil {
+		return nil, "", refused
+	}
+	return prepared, fmt.Sprintf("%x", sha256.Sum256([]byte(identity))), nil
+}
+
+func codeSafetyIdentifierChanges(identifier string) []oif.Change {
+	if identifier == "" {
+		return nil
+	}
+	return []oif.Change{{Pointer: "/safety_identifier", Value: strconv.Quote(identifier), Origin: oif.TransformedMapping, Reason: "Explicit Messages abuse-detection identity mapping"}}
 }

@@ -19,15 +19,15 @@ type Observer interface {
 
 // ClassifyMessages reads an Anthropic Messages request.
 func ClassifyMessages(body []byte, headers http.Header) (codemode.Request, error) {
-	return classify(body, headers, string(codemode.ProtocolMessages), "max_tokens")
+	return classify(body, headers, codemode.ProtocolMessages)
 }
 
 // ClassifyChat reads a Chat Completions request.
 func ClassifyChat(body []byte, headers http.Header) (codemode.Request, error) {
-	return classify(body, headers, string(codemode.ProtocolChat), "max_completion_tokens", "max_tokens")
+	return classify(body, headers, codemode.ProtocolChat)
 }
 
-func classify(body []byte, headers http.Header, operation string, caps ...string) (codemode.Request, error) {
+func classify(body []byte, headers http.Header, protocol codemode.Protocol) (codemode.Request, error) {
 	var request codemode.Request
 	document, err := oif.ParseJSON(body, oif.Limits{MaxBytes: MaxBody})
 	if err != nil || document.Root().Kind() != oif.Object {
@@ -42,19 +42,25 @@ func classify(body []byte, headers http.Header, operation string, caps ...string
 	if err != nil {
 		return request, err
 	}
-	request.Operation = codemode.Operation{Name: operation, Model: model, Identity: identity}
+	request.Operation = codemode.Operation{Name: string(protocol), Model: model, Identity: identity}
 	if err := ValidateGenericRequest(root, headers, request); err != nil {
 		return request, err
 	}
 	// This is a rate estimate only; prompt tokens have no proven bound.
-	request.Estimate = max(1, int64(len(body))/4)
-	for _, name := range caps {
+	request.Estimate = max(1, int64(len(body))/4) + RateOutputCap(root, protocol)
+	return request, nil
+}
+
+func RateOutputCap(root oif.Value, protocol codemode.Protocol) int64 {
+	for _, name := range []string{"max_completion_tokens", "max_tokens"} {
+		if protocol != codemode.ProtocolChat && name != "max_tokens" {
+			continue
+		}
 		if cap, err := strconv.ParseInt(field(root, name).Raw(), 10, 64); err == nil && cap > 0 && cap <= 1<<32 {
-			request.Estimate += cap
-			break
+			return cap
 		}
 	}
-	return request, nil
+	return 0
 }
 
 func count(value oif.Value) *int64 {

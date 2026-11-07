@@ -9421,6 +9421,9 @@ type CodeRoute struct {
 	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
 	MaxBodyBytes nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
 
+	// MessagesCodexSafetyIdentifier Separately authorizes translating Messages metadata.user_id to a stable SHA-256 Responses safety_identifier. Disabled by default. Only the documented user identifier is accepted, and other metadata refuses. Review provider identity and account terms before enabling.
+	MessagesCodexSafetyIdentifier *bool `json:"messages_codex_safety_identifier,omitempty"`
+
 	// MessagesToCodex Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Translation alone preserves client identity and prompts. Codex identity compatibility requires its separate codex_cli_identity opt-in. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch.
 	MessagesToCodex *bool `json:"messages_to_codex,omitempty"`
 
@@ -9482,6 +9485,9 @@ type CodeRouteWrite struct {
 
 	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
 	MaxBodyBytes nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
+
+	// MessagesCodexSafetyIdentifier Separately authorizes translating Messages metadata.user_id to a stable SHA-256 Responses safety_identifier. Disabled by default. Only the documented user identifier is accepted, and other metadata refuses. Review provider identity and account terms before enabling.
+	MessagesCodexSafetyIdentifier *bool `json:"messages_codex_safety_identifier,omitempty"`
 
 	// MessagesToCodex Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Translation alone preserves client identity and prompts. Codex identity compatibility requires its separate codex_cli_identity opt-in. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch.
 	MessagesToCodex *bool `json:"messages_to_codex,omitempty"`
@@ -9725,6 +9731,9 @@ type ConfigurationCodeRoutePolicy struct {
 
 	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
 	MaxBodyBytes nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
+
+	// MessagesCodexSafetyIdentifier Separately authorizes translating Messages metadata.user_id to a stable SHA-256 Responses safety_identifier. Disabled by default. Only the documented user identifier is accepted, and other metadata refuses. Review provider identity and account terms before enabling.
+	MessagesCodexSafetyIdentifier *bool `json:"messages_codex_safety_identifier,omitempty"`
 
 	// MessagesToCodex Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Translation alone preserves client identity and prompts. Codex identity compatibility requires its separate codex_cli_identity opt-in. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch.
 	MessagesToCodex *bool `json:"messages_to_codex,omitempty"`

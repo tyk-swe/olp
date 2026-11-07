@@ -131,9 +131,9 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *re
 			return codePayload{body: raw, query: r.URL.RawQuery}, nil
 		}
 		if ingress.protocol == codemode.ProtocolChat {
-			return codeTranslateChat(requestBody, r, attempt.model)
+			return codeTranslateChat(requestBody, r, attempt.model, route.TranslatedCodexOutputMinimum)
 		}
-		return codeTranslateMessages(requestBody, r, attempt.model)
+		return codeTranslateMessages(requestBody, r, attempt.model, route.TranslatedCodexOutputMinimum, route.MessagesCodexSafetyIdentifier)
 	}()
 	if err != nil {
 		refuse(err)

@@ -168,6 +168,9 @@
   let recoveryAttempts = $state(initial?.initial_recovery_attempts ?? 0);
   let chatToCodex = $state(initial?.chat_to_codex ?? false);
   let messagesToCodex = $state(initial?.messages_to_codex ?? false);
+  let messagesCodexSafetyIdentifier = $state(
+    initial?.messages_codex_safety_identifier ?? false
+  );
   let codexCLIIdentity = $state(initial?.codex_cli_identity ?? false);
   let chatToAntigravity = $state(initial?.chat_to_antigravity ?? false);
   let allowanceOrdering = $state(initial?.allowance_ordering ?? false);
@@ -275,6 +278,7 @@
         model_pools: poolResult.pools,
         chat_to_codex: chatToCodex,
         messages_to_codex: messagesToCodex,
+        messages_codex_safety_identifier: messagesCodexSafetyIdentifier,
         codex_cli_identity: codexCLIIdentity,
         chat_to_antigravity: chatToAntigravity,
         allowance_ordering: allowanceOrdering,
@@ -516,6 +520,20 @@
     unsupported required semantics are refused. Translation alone preserves
     client identity and prompts. Model rewriting and Codex identity
     compatibility require their separate opt-ins.
+  </p>
+  <label class="choice">
+    <input
+      id="code-messages-codex-safety-identifier"
+      type="checkbox"
+      bind:checked={messagesCodexSafetyIdentifier}
+    />
+    Map Messages abuse-detection identity to Codex
+  </label>
+  <p>
+    Separately authorizes mapping metadata.user_id to a stable SHA-256 Responses
+    safety identifier after publication. Other metadata is refused. Review the
+    provider's identity rules and account terms before enabling this policy.
+    Identity mapping can carry account suspension risk
   </p>
   <label class="choice"
     ><input
