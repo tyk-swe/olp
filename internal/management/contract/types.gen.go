@@ -882,6 +882,7 @@ const (
 	CodeAccountAdapterAntigravity   CodeAccountAdapter = "antigravity"
 	CodeAccountAdapterClaude        CodeAccountAdapter = "claude"
 	CodeAccountAdapterCodex         CodeAccountAdapter = "codex"
+	CodeAccountAdapterGrokBuild     CodeAccountAdapter = "grok-build"
 	CodeAccountAdapterKimiCode      CodeAccountAdapter = "kimi_code"
 	CodeAccountAdapterLessThannil   CodeAccountAdapter = "<nil>"
 	CodeAccountAdapterMinimaxPlan   CodeAccountAdapter = "minimax_plan"
@@ -898,6 +899,8 @@ func (e CodeAccountAdapter) Valid() bool {
 	case CodeAccountAdapterClaude:
 		return true
 	case CodeAccountAdapterCodex:
+		return true
+	case CodeAccountAdapterGrokBuild:
 		return true
 	case CodeAccountAdapterKimiCode:
 		return true
@@ -1245,6 +1248,7 @@ const (
 	CodeClientConfigurationAdaptersAntigravity   CodeClientConfigurationAdapters = "antigravity"
 	CodeClientConfigurationAdaptersClaude        CodeClientConfigurationAdapters = "claude"
 	CodeClientConfigurationAdaptersCodex         CodeClientConfigurationAdapters = "codex"
+	CodeClientConfigurationAdaptersGrokBuild     CodeClientConfigurationAdapters = "grok-build"
 	CodeClientConfigurationAdaptersKimiCode      CodeClientConfigurationAdapters = "kimi_code"
 	CodeClientConfigurationAdaptersMinimaxPlan   CodeClientConfigurationAdapters = "minimax_plan"
 	CodeClientConfigurationAdaptersOpencodeGo    CodeClientConfigurationAdapters = "opencode_go"
@@ -1260,6 +1264,8 @@ func (e CodeClientConfigurationAdapters) Valid() bool {
 	case CodeClientConfigurationAdaptersClaude:
 		return true
 	case CodeClientConfigurationAdaptersCodex:
+		return true
+	case CodeClientConfigurationAdaptersGrokBuild:
 		return true
 	case CodeClientConfigurationAdaptersKimiCode:
 		return true
@@ -1617,6 +1623,7 @@ const (
 	CodeRouteAdaptersAntigravity   CodeRouteAdapters = "antigravity"
 	CodeRouteAdaptersClaude        CodeRouteAdapters = "claude"
 	CodeRouteAdaptersCodex         CodeRouteAdapters = "codex"
+	CodeRouteAdaptersGrokBuild     CodeRouteAdapters = "grok-build"
 	CodeRouteAdaptersKimiCode      CodeRouteAdapters = "kimi_code"
 	CodeRouteAdaptersMinimaxPlan   CodeRouteAdapters = "minimax_plan"
 	CodeRouteAdaptersOpencodeGo    CodeRouteAdapters = "opencode_go"
@@ -1632,6 +1639,8 @@ func (e CodeRouteAdapters) Valid() bool {
 	case CodeRouteAdaptersClaude:
 		return true
 	case CodeRouteAdaptersCodex:
+		return true
+	case CodeRouteAdaptersGrokBuild:
 		return true
 	case CodeRouteAdaptersKimiCode:
 		return true
@@ -9413,7 +9422,10 @@ type CodeRoute struct {
 	CodexCliIdentity *bool              `json:"codex_cli_identity,omitempty"`
 	Enabled          bool               `json:"enabled"`
 	Etag             openapi_types.UUID `json:"etag"`
-	Id               openapi_types.UUID `json:"id"`
+
+	// GrokCliIdentity Allow Grok client identity compatibility after publication independently of protocol translation. Disabled by default. xAI consumer terms restrict account sharing and violations may risk account suspension. Provider acceptance of this independent gateway and pooled accounts is unverified. No acknowledgement gate is required.
+	GrokCliIdentity *bool              `json:"grok_cli_identity,omitempty"`
+	Id              openapi_types.UUID `json:"id"`
 
 	// InitialRecoveryAttempts Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models remain the default. Only explicit model_pools authorize model changes. Live authority remains required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays.
 	InitialRecoveryAttempts *int `json:"initial_recovery_attempts,omitempty"`
@@ -9445,9 +9457,12 @@ type CodeRoute struct {
 	PoolId      openapi_types.UUID           `json:"pool_id"`
 	ProjectId   openapi_types.UUID           `json:"project_id"`
 	PublishedAt nullable.Nullable[time.Time] `json:"published_at"`
-	Revision    int32                        `json:"revision"`
-	RevisionId  string                       `json:"revision_id"`
-	Slug        string                       `json:"slug"`
+
+	// ResponsesToGrok Allow Responses text and function tools through Grok Build subscription accounts after publication. Disabled by default. Translation preserves client identity. Grok client identity requires its separate published opt-in.
+	ResponsesToGrok *bool  `json:"responses_to_grok,omitempty"`
+	Revision        int32  `json:"revision"`
+	RevisionId      string `json:"revision_id"`
+	Slug            string `json:"slug"`
 
 	// Tools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
 	Tools nullable.Nullable[CodeResearchTools] `json:"tools,omitempty"`
@@ -9480,6 +9495,9 @@ type CodeRouteWrite struct {
 	CodexCliIdentity *bool `json:"codex_cli_identity,omitempty"`
 	Enabled          bool  `json:"enabled"`
 
+	// GrokCliIdentity Allow Grok client identity compatibility after publication independently of protocol translation. Disabled by default. xAI consumer terms restrict account sharing and violations may risk account suspension. Provider acceptance of this independent gateway and pooled accounts is unverified. No acknowledgement gate is required.
+	GrokCliIdentity *bool `json:"grok_cli_identity,omitempty"`
+
 	// InitialRecoveryAttempts Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models remain the default. Only explicit model_pools authorize model changes. Live authority remains required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays.
 	InitialRecoveryAttempts *int `json:"initial_recovery_attempts,omitempty"`
 
@@ -9509,7 +9527,10 @@ type CodeRouteWrite struct {
 	PaidTargets *map[string]CodePaidTarget `json:"paid_targets,omitempty"`
 	PoolId      openapi_types.UUID         `json:"pool_id"`
 	ProjectId   openapi_types.UUID         `json:"project_id"`
-	Slug        string                     `json:"slug"`
+
+	// ResponsesToGrok Allow Responses text and function tools through Grok Build subscription accounts after publication. Disabled by default. Translation preserves client identity. Grok client identity requires its separate published opt-in.
+	ResponsesToGrok *bool  `json:"responses_to_grok,omitempty"`
+	Slug            string `json:"slug"`
 
 	// Tools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
 	Tools nullable.Nullable[CodeResearchTools] `json:"tools,omitempty"`
@@ -9726,6 +9747,9 @@ type ConfigurationCodeRoutePolicy struct {
 	CodexCliIdentity *bool `json:"codex_cli_identity,omitempty"`
 	Enabled          bool  `json:"enabled"`
 
+	// GrokCliIdentity Allow Grok client identity compatibility after publication independently of protocol translation. Disabled by default. xAI consumer terms restrict account sharing and violations may risk account suspension. Provider acceptance of this independent gateway and pooled accounts is unverified. No acknowledgement gate is required.
+	GrokCliIdentity *bool `json:"grok_cli_identity,omitempty"`
+
 	// InitialRecoveryAttempts Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models remain the default. Only explicit model_pools authorize model changes. Live authority remains required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays.
 	InitialRecoveryAttempts *int `json:"initial_recovery_attempts,omitempty"`
 
@@ -9750,6 +9774,9 @@ type ConfigurationCodeRoutePolicy struct {
 	PaidParticipation   *bool                                   `json:"paid_participation,omitempty"`
 	PaidTargets         *map[string]ConfigurationCodePaidTarget `json:"paid_targets,omitempty"`
 	Pool                openapi_types.UUID                      `json:"pool"`
+
+	// ResponsesToGrok Allow Responses text and function tools through Grok Build subscription accounts after publication. Disabled by default. Translation preserves client identity. Grok client identity requires its separate published opt-in.
+	ResponsesToGrok *bool `json:"responses_to_grok,omitempty"`
 
 	// Tools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
 	Tools nullable.Nullable[CodeResearchTools] `json:"tools,omitempty"`
