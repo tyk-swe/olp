@@ -250,7 +250,7 @@ func (s *DebitStore) HasUnknownDebit(ctx context.Context, apiKeyID string, maxDi
 		maxDispatch = time.Hour
 	}
 	var held bool
-	err := s.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.execution_debits d WHERE d.api_key_id=$1 AND (d.state='outcome_unknown' OR (d.state='dispatched' AND d.dispatched_at<clock_timestamp()-make_interval(secs=>$2))) AND d.closed_at IS NULL AND NOT EXISTS(SELECT 1 FROM olp.execution_debit_results r WHERE r.dispatch_id=d.id AND r.final AND (d.kind<>'model' OR r.complete) AND EXISTS(SELECT 1 FROM olp.attempt_usage_facts f WHERE f.event_id=r.event_id AND (d.kind<>'model' OR f.attempt_id=d.id)) AND NOT EXISTS(SELECT 1 FROM olp.attempt_usage_facts f WHERE f.event_id=r.event_id AND (d.kind<>'model' OR f.attempt_id=d.id) AND NOT f.usage_complete)))`, apiKeyID, maxDispatch.Seconds()).Scan(&held)
+	err := s.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.execution_debits d WHERE d.api_key_id=$1 AND (d.state='outcome_unknown' OR (d.state='dispatched' AND d.dispatched_at<clock_timestamp()-make_interval(secs=>$2))) AND d.closed_at IS NULL AND NOT EXISTS(SELECT 1 FROM olp.execution_debit_results r WHERE r.dispatch_id=d.id AND r.final AND (d.kind<>'model' OR r.complete) AND r.usage_complete))`, apiKeyID, maxDispatch.Seconds()).Scan(&held)
 	return held, err
 }
 
@@ -410,7 +410,12 @@ func appendDebitResultTx(ctx context.Context, tx pgx.Tx, r DebitResult, owners [
 	if err := lockDebitOwners(ctx, tx, owners); err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO olp.execution_debit_results(dispatch_id,result_digest,evidence_digest,event_id,cost,charge,final,complete,resolution_digest) VALUES($1,$2,$3,$4,$5::numeric,$6::numeric,$7,$8,$9)`, r.DispatchID, r.ResultDigest, r.EvidenceDigest, r.EventID, r.Cost, r.Charge, r.Final, r.Complete, resolutionDigest)
+	tag, err := tx.Exec(ctx, `INSERT INTO olp.execution_debit_results(dispatch_id,result_digest,evidence_digest,event_id,cost,charge,final,complete,resolution_digest,usage_complete)
+ SELECT d.id,$2,$3,$4,$5::numeric,$6::numeric,$7,$8,$9,COALESCE((SELECT bool_and(f.usage_complete) FROM olp.attempt_usage_facts f WHERE f.event_id=$4 AND (d.kind<>'model' OR f.attempt_id=d.id)),false)
+ FROM olp.execution_debits d WHERE d.id=$1`, r.DispatchID, r.ResultDigest, r.EvidenceDigest, r.EventID, r.Cost, r.Charge, r.Final, r.Complete, resolutionDigest)
+	if err == nil && tag.RowsAffected() != 1 {
+		return ErrDebitState
+	}
 	return err
 }
 

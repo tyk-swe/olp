@@ -361,9 +361,15 @@ func (s *Spool) Open(handle Handle) (*Opened, error) {
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			s.mu.Lock()
-			delete(s.entries, string(handle))
+			current, present := s.entries[string(handle)]
+			owned := present && current == entry
+			if owned {
+				delete(s.entries, string(handle))
+			}
 			s.mu.Unlock()
-			s.release(entry.contentLength)
+			if owned {
+				s.release(entry.contentLength)
+			}
 			return nil, ErrNotFound
 		}
 		return nil, ErrUnavailable

@@ -412,6 +412,65 @@ func TestCleanupPreservesRetainedAndActiveEvidence(t *testing.T) {
 	t.Run("identity expiry", func(t *testing.T) { testIdentityExpiry(t, fixture) })
 	t.Run("workflow recovery", func(t *testing.T) { testWorkflowRecovery(t, fixture) })
 	t.Run("retained settlement failure", func(t *testing.T) { testRetainedSettlementPollFailure(t, fixture) })
+	t.Run("session admission after usage retention", func(t *testing.T) { testSessionAdmissionAfterUsageRetention(t, fixture) })
+}
+
+func testSessionAdmissionAfterUsageRetention(t *testing.T, fixture usageFixture) {
+	t.Helper()
+	store := &limits.DebitStore{Pool: fixture.pool}
+	session := func(complete bool) (string, usage.AccountingEvent) {
+		key, dispatch := uuid.NewString(), uuid.NewString()
+		if _, err := fixture.pool.Exec(t.Context(), `INSERT INTO olp.api_keys (id,lookup_id,digest,name,created_by,policy,etag,project_id)
+			VALUES ($1::uuid,$1::text,decode(repeat('00',32),'hex'),'Session fixture',$2,'{}',$1::uuid,$3)`, key, fixture.ownerID, fixture.projectID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fixture.pool.Exec(t.Context(), `INSERT INTO olp.execution_debits(id,api_key_id,project_id,kind,affinity,intent_digest,claim_id,currency,cost_bound,charge_bound,state,prepared_until,dispatched_at)
+			VALUES($1,$2,$3,'api',jsonb_build_object('release_id',$4::text,'revision_id',''),decode(repeat('00',32),'hex'),gen_random_uuid(),'USD',1,1,'dispatched',now(),now())`, dispatch, key, fixture.projectID, fixture.generationID); err != nil {
+			t.Fatal(err)
+		}
+		attempt := fixture.attempt(1)
+		attempt.UpstreamModel = "unpriced-session-model"
+		attempt.Usage.Complete = complete
+		attempt.Execution = &usage.ExecutionReference{DispatchID: dispatch}
+		event := fixture.event(attempt)
+		event.APIKeyID, event.UsageComplete = key, complete
+		accepted, err := usage.NewAccountingEvent(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result, err := usage.PersistEvent(t.Context(), fixture.pool, accepted); err != nil || result.Outcome != usage.PersistOutcomePersisted {
+			t.Fatalf("persist session: outcome=%v error=%v", result.Outcome, err)
+		}
+		return key, accepted
+	}
+	cleanKey, clean := session(true)
+	incompleteKey, _ := session(false)
+	admission := func(stage string) {
+		t.Helper()
+		for key, want := range map[string]bool{cleanKey: false, incompleteKey: true} {
+			held, err := store.HasUnknownDebit(t.Context(), key, time.Hour)
+			if err != nil || held != want {
+				t.Fatalf("%s: key %s held=%v, want %v, error=%v", stage, key, held, want, err)
+			}
+		}
+	}
+	admission("before retention")
+	if _, err := fixture.pool.Exec(t.Context(), `INSERT INTO olp.settings(key,value,etag,updated_by)
+		VALUES ('retention.usage_days','1',gen_random_uuid(),$1) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, fixture.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if report, err := usage.RunMaintenance(t.Context(), fixture.pool, time.Now().Add(72*time.Hour)); err != nil || !report.LockAcquired {
+		t.Fatalf("maintenance: lock=%v error=%v", report.LockAcquired, err)
+	}
+	var facts int
+	if err := fixture.pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.attempt_usage_facts WHERE api_key_id=ANY($1::uuid[])`, []string{cleanKey, incompleteKey}).Scan(&facts); err != nil || facts != 0 {
+		t.Fatalf("retention kept %d session facts, error=%v", facts, err)
+	}
+	admission("after retention")
+	if result, err := usage.PersistEvent(t.Context(), fixture.pool, clean); err != nil || result.Outcome != usage.PersistOutcomeDuplicate {
+		t.Fatalf("replay after retention: outcome=%v error=%v", result.Outcome, err)
+	}
+	admission("after replay")
 }
 
 func testAnchorRetention(t *testing.T, fixture usageFixture) {

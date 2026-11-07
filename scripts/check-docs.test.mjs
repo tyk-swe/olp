@@ -11,25 +11,53 @@ const exists = (files) => (file) => files.has(file) || file.endsWith('/');
 
 test('documentation anchors follow the rendered heading contract', () => {
   const anchors = collectAnchors(
-    ['# Routes & revisions', '## Routes & revisions', '<a id="stable"></a>'].join('\n')
+    [
+      '# Routes & revisions',
+      '## Routes & revisions',
+      '<a id="stable"></a>',
+      '## `OLP_HOST_PORT`',
+      '## _Emphasis_ and snake_case'
+    ].join('\n')
   );
-  assert.deepEqual([...anchors], ['routes--revisions', 'routes--revisions-1', 'stable']);
+  assert.deepEqual(
+    [...anchors],
+    ['routes--revisions', 'routes--revisions-1', 'stable', 'olp_host_port', 'emphasis-and-snake_case']
+  );
 });
 
 test('broken files, anchors, index entries and em dashes are rejected', () => {
   const handbook = new Map([
-    ['docs/README.md', '[Guide](guide.md#present)\n[Missing](missing.md)'],
-    ['docs/guide.md', '# Present\n\n[Bad anchor](#absent)\n\nThis sentence uses — punctuation.'],
-    ['docs/unindexed.md', '# Unindexed']
+    [
+      'docs/README.md',
+      [
+        '[Guide](guide.md#present)',
+        '[Missing](missing.md)',
+        '[Port](guide.md#olp_host_port)',
+        '[Mangled port](guide.md#olphostport)',
+        '[Outside](../../outside.md#outside)',
+        '[Malformed](%E0%A4%A.md)'
+      ].join('\n')
+    ],
+    [
+      'docs/guide.md',
+      '# Present\n\n## `OLP_HOST_PORT`\n\n[Bad anchor](#absent)\n\nThis sentence uses — punctuation.'
+    ],
+    ['docs/unindexed.md', '# Unindexed'],
+    ['../outside.md', '# Outside']
   ]);
+  const files = [...handbook.keys()].filter((file) => file.startsWith('docs/'));
   let message = '';
   try {
-    checkDocs([...handbook.keys()], reader(handbook), exists(handbook));
+    checkDocs(files, reader(handbook), exists(handbook));
   } catch (error) {
     message = error.message;
   }
   assert.match(message, /broken local link missing\.md/);
   assert.match(message, /broken local anchor #absent/);
+  assert.match(message, /broken local anchor guide\.md#olphostport/);
+  assert.doesNotMatch(message, /olp_host_port/);
+  assert.match(message, /broken local link \.\.\/\.\.\/outside\.md#outside/);
+  assert.match(message, /broken local link %E0%A4%A\.md/);
   assert.match(message, /contains an em dash/);
   assert.match(message, /missing handbook link for unindexed\.md/);
 });

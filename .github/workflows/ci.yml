@@ -106,6 +106,9 @@ jobs:
             deps:
               - 'go.mod'
               - 'go.sum'
+              - '**/*.go'
+              - 'internal/operations/tokenization/estimate/ranks/LICENSE'
+              - 'deploy/native/**'
               - '**/package.json'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'

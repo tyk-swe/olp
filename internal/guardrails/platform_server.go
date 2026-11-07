@@ -432,7 +432,7 @@ func (s *Server) listAttachments(r *http.Request, p access.Principal) (access.Re
 	}
 	visible := []item{}
 	for _, a := range values {
-		if AuthorizeAttachment(r.Context(), s.Access.Pool, p, a.Attachment, access.View) == nil || a.Scope == "installation" && len(p.ProjectIDs()) > 0 {
+		if AuthorizeAttachment(r.Context(), s.Access.Pool, p, a.Attachment, access.View) == nil {
 			visible = append(visible, a)
 		}
 	}
