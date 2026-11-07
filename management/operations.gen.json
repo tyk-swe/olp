@@ -5415,6 +5415,11 @@
               "type": "boolean",
               "default": false,
               "description": "Explicitly enable Responses text and signed function tools through Antigravity over HTTP or SSE after publication. Unsupported continuation state is refused. Existing published revisions retain their behavior. Provider terms and account suspension risks apply. Live subscription acceptance remains unverified."
+            },
+            "chat_to_grok": {
+              "type": "boolean",
+              "default": false,
+              "description": "Allow Chat text and function tools through Grok Build after publication. Disabled by default. Client identity requires its separate published opt-in."
             }
           },
           "required": [
@@ -7840,6 +7845,11 @@
               "type": "boolean",
               "default": false,
               "description": "Explicitly enable Responses text and signed function tools through Antigravity over HTTP or SSE after publication. Unsupported continuation state is refused. Existing published revisions retain their behavior. Provider terms and account suspension risks apply. Live subscription acceptance remains unverified."
+            },
+            "chat_to_grok": {
+              "type": "boolean",
+              "default": false,
+              "description": "Allow Chat text and function tools through Grok Build after publication. Disabled by default. Client identity requires its separate published opt-in."
             }
           },
           "required": [
@@ -31368,6 +31378,11 @@
               "type": "boolean",
               "default": false,
               "description": "Explicitly enable Responses text and signed function tools through Antigravity over HTTP or SSE after publication. Unsupported continuation state is refused. Existing published revisions retain their behavior. Provider terms and account suspension risks apply. Live subscription acceptance remains unverified."
+            },
+            "chat_to_grok": {
+              "type": "boolean",
+              "default": false,
+              "description": "Allow Chat text and function tools through Grok Build after publication. Disabled by default. Client identity requires its separate published opt-in."
             }
           },
           "required": [
@@ -36765,6 +36780,11 @@
               "type": "boolean",
               "default": false,
               "description": "Explicitly enable Responses text and signed function tools through Antigravity over HTTP or SSE after publication. Unsupported continuation state is refused. Existing published revisions retain their behavior. Provider terms and account suspension risks apply. Live subscription acceptance remains unverified."
+            },
+            "chat_to_grok": {
+              "type": "boolean",
+              "default": false,
+              "description": "Allow Chat text and function tools through Grok Build after publication. Disabled by default. Client identity requires its separate published opt-in."
             }
           },
           "required": [

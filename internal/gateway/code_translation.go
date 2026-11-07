@@ -68,29 +68,37 @@ func codeTranslateMessages(body []byte, r *http.Request, model string, minimum, 
 }
 
 func codeTranslateChat(body []byte, r *http.Request, model string, minimum bool) (codePayload, error) {
+	request, err := codeParseChat(body, r, model)
+	if err != nil {
+		return codePayload{}, err
+	}
+	return codeTranslateResponses(request, minimum, "")
+}
+
+func codeParseChat(body []byte, r *http.Request, model string) (*wire.Request, error) {
 	refused := codemode.Refuse(422, "code_translation_unsupported_semantics")
 	if r.URL.RawQuery != "" || len(r.Trailer) != 0 || len(r.Header.Values("X-Codex-Turn-State")) != 0 || len(r.Header.Values("OpenAI-Beta")) != 0 {
-		return codePayload{}, refused
+		return nil, refused
 	}
 	request, err := protocols.ParseForModel(wire.Chat, body, model)
 	if err != nil {
-		return codePayload{}, refused
+		return nil, refused
 	}
 	root := request.OIF().Document().Root()
 	options, _ := root.Lookup("stream_options")
 	if options.Kind() != oif.Absent && options.Kind() != oif.Null {
 		if options.Kind() != oif.Object {
-			return codePayload{}, refused
+			return nil, refused
 		}
 		for _, member := range options.Members() {
 			if member.Name != "include_usage" || member.Value.Kind() != oif.Boolean {
-				return codePayload{}, refused
+				return nil, refused
 			}
 		}
 	}
 	effort, _ := root.Lookup("reasoning_effort")
 	if effort.Kind() != oif.Absent && effort.Kind() != oif.Null && !slices.Contains([]string{"low", "medium", "high"}, stringValue(effort)) {
-		return codePayload{}, refused
+		return nil, refused
 	}
 	messages, _ := root.Lookup("messages")
 	for _, message := range messages.Elements() {
@@ -98,10 +106,10 @@ func codeTranslateChat(body []byte, r *http.Request, model string, minimum bool)
 		name, _ := message.Lookup("name")
 		content, _ := message.Lookup("content")
 		if !slices.Contains([]string{"system", "developer", "user", "assistant", "tool"}, stringValue(role)) || name.Kind() != oif.Absent && name.Kind() != oif.Null || content.Kind() != oif.Null && !codeTextContent(message, "content") {
-			return codePayload{}, refused
+			return nil, refused
 		}
 	}
-	return codeTranslateResponses(request, minimum, "")
+	return request, nil
 }
 
 func stringValue(value oif.Value) string {
