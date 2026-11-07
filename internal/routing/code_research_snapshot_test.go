@@ -70,7 +70,7 @@ func TestPublishedCodexIdentityFreezesSeparatePolicy(t *testing.T) {
 }
 
 func TestPublishedGrokPoliciesRemainIndependent(t *testing.T) {
-	for _, route := range []codemode.Route{{ResponsesToGrok: true}, {GrokCLIIdentity: true}, {ResponsesToGrok: true, GrokCLIIdentity: true}} {
+	for _, route := range []codemode.Route{{ResponsesToGrok: true}, {ChatToGrok: true}, {GrokCLIIdentity: true}, {ResponsesToGrok: true, ChatToGrok: true, GrokCLIIdentity: true}} {
 		input := &Snapshot{CodeRoutes: map[string]codemode.Route{"coding": route}}
 		frozen := input.Clone()
 		input.CodeRoutes["coding"] = codemode.Route{}
@@ -83,7 +83,7 @@ func TestPublishedGrokPoliciesRemainIndependent(t *testing.T) {
 			t.Fatal(err)
 		}
 		published := restored.CodeRoutes["coding"]
-		if published.ResponsesToGrok != route.ResponsesToGrok || published.GrokCLIIdentity != route.GrokCLIIdentity {
+		if published.ResponsesToGrok != route.ResponsesToGrok || published.ChatToGrok != route.ChatToGrok || published.GrokCLIIdentity != route.GrokCLIIdentity {
 			t.Fatalf("published Grok policy changed after draft edit and reload: %+v", published)
 		}
 		before, err := restored.Digest()

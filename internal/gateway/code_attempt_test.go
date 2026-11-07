@@ -1224,6 +1224,9 @@ func TestGrokChatPublishedTranslation(t *testing.T) {
 			if response.Code != test.status {
 				t.Fatalf("unsupported input = %d %s", response.Code, response.Body.String())
 			}
+			if test.status == http.StatusOK && (len(ledger.settlements) != 1 || ledger.settlements[0].Total == nil || *ledger.settlements[0].Total != 3) {
+				t.Fatalf("usage not settled %+v", ledger.settlements)
+			}
 			if strings.HasPrefix(test.name, "stream") {
 				if !strings.Contains(response.Body.String(), "hello") || !strings.Contains(response.Body.String(), "[DONE]") {
 					t.Fatalf("stream incomplete %s", response.Body.String())

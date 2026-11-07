@@ -558,7 +558,10 @@
     <input id="code-chat-to-grok" type="checkbox" bind:checked={chatToGrok} />
     Translate Chat to Grok Build
   </label>
-  <p>Publication enables OpenCode text and function tools over HTTP/SSE. Disabled by default. Live subscription acceptance remains unverified.</p>
+  <p>
+    Publication enables OpenCode text and function tools over HTTP/SSE. Disabled
+    by default. Live subscription acceptance remains unverified.
+  </p>
   <label class="choice">
     <input
       id="code-responses-to-grok"
