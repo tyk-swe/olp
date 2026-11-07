@@ -24,7 +24,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/antigravityauth"
 	"github.com/tyk-swe/olp/internal/codeadapter"
+	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -153,10 +155,11 @@ type laneSeed struct {
 }
 
 type lane struct {
-	client        laneClient
-	seed          laneSeed
-	protocol      string
-	toolRoundTrip bool
+	signedContinuation bool
+	client             laneClient
+	seed               laneSeed
+	protocol           string
+	toolRoundTrip      bool
 }
 
 func (l lane) record(result, detail, version string, executed bool) runRecord {
@@ -233,6 +236,7 @@ func lanes() []lane {
 			seed:     laneSeed{adapter: "opencode_go", profile: codeplans.OpenCodeGoProfile, manifest: codeplans.OpenCodeGoManifest, token: openCodeGoKey, principal: codeplans.Principal(codeplans.OpenCodeGoProfile, openCodeGoKey), facts: map[string]string{}},
 			protocol: "chat",
 		},
+		{client: laneClient{name: "opencode", binary: "opencode", userAgent: "opencode (qualification fixture)"}, seed: laneSeed{adapter: "antigravity", profile: antigravityauth.ProfileID, manifest: antigravityauth.Manifest, token: "antigravity-fixture-token", principal: antigravityauth.Principal("fixture-subject", "fixture-project"), facts: map[string]string{"subject": "fixture-subject", "project_id": "fixture-project"}, expiresAt: &expires}, protocol: "chat", toolRoundTrip: true, signedContinuation: true},
 	}
 }
 
@@ -265,7 +269,12 @@ func (s *service) seedSubscriptionE(project, ownerID string, spec laneSeed, netw
 	}
 	configuration, err := json.Marshal(providers.Configuration{
 
-		Options: providers.Options{Network: network,
+		Options: providers.Options{PluginOptions: func() map[string]string {
+			if spec.adapter == string(codemode.AdapterAntigravity) {
+				return map[string]string{"client_id": "fixture.apps.googleusercontent.com"}
+			}
+			return nil
+		}(), Network: network,
 			CredentialHeaders: []string{},
 			Models:            map[string]json.RawMessage{},
 			ParameterDefaults: map[string]json.RawMessage{},
@@ -424,8 +433,15 @@ func runFixtureClient(t *testing.T, client, binary, bridge, slug, key, configura
 		return sandboxClient(t, binary, bridge, []string{"ANTHROPIC_BASE_URL=" + base, "ANTHROPIC_AUTH_TOKEN=" + key, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"},
 			"--print", "--bare", "--no-session-persistence", "--tools", "", "--model", vendorModel, prompt)
 	case "opencode":
+		toolPrompt := func() string {
+			if toolRoundTrip {
+				return "Execute printf olp-tool-round-trip using bash, then say hello."
+			}
+			return prompt
+		}()
 		config, err := json.Marshal(map[string]any{
 			"model": "olp/" + vendorModel, "small_model": "olp/" + vendorModel, "enabled_providers": []string{"olp"},
+			"permission": map[string]string{"bash": "allow"},
 			"provider": map[string]any{"olp": map[string]any{"npm": "@ai-sdk/openai-compatible", "name": "OLP",
 				"options": map[string]string{"baseURL": base + "/v1", "apiKey": "{env:OLP_API_KEY}"},
 				"models":  map[string]any{vendorModel: map[string]string{"name": "Fixture"}}}},
@@ -434,7 +450,7 @@ func runFixtureClient(t *testing.T, client, binary, bridge, slug, key, configura
 			return "", false, err
 		}
 		return sandboxClient(t, binary, bridge, []string{"OLP_API_KEY=" + key, "OPENCODE_CONFIG_CONTENT=" + string(config), "OPENCODE_DISABLE_MODELS_FETCH=true", "OPENCODE_DISABLE_AUTOUPDATE=true"},
-			"run", "--pure", "--model", "olp/"+vendorModel, prompt)
+			"run", "--pure", "--model", "olp/"+vendorModel, toolPrompt)
 	default:
 		return "", false, fmt.Errorf("unknown client %s", client)
 	}
@@ -500,7 +516,14 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 	}
 	project := s.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "qualification"}, idempotent(), http.StatusCreated)["id"].(string)
 	toolProof := make(chan struct{}, 1)
-	proxy := newVendorProxy(t, newVendorMux(specs[0].seed.token, toolProof))
+	proxy := newVendorProxy(t, newVendorMux(func() string {
+		for _, spec := range specs {
+			if spec.seed.adapter == "codex" {
+				return spec.seed.token
+			}
+		}
+		return ""
+	}(), toolProof))
 	key := s.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "qualification", "scopes": []string{"inference"}, "project_id": project}, idempotent(), http.StatusCreated)
 	consumer := &caller{name: "qualification key", token: key["secret"].(string)}
 	bridge := fixtureBridge(t, s.origin)
@@ -510,7 +533,12 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 			providerID, credentialID := s.seedSubscription(project, ownerID, spec.seed, proxy)
 			account := s.want(owner, "POST", "/api/v1/code/accounts", map[string]any{
 				"project_id": project, "provider_id": providerID, "credential_id": credentialID,
-				"name": "qualify-" + spec.client.name, "enabled": true, "models": []string{vendorModel},
+				"name": "qualify-" + spec.client.name, "enabled": true, "models": func() []string {
+					if spec.signedContinuation {
+						return []string{"gemini-fixture"}
+					}
+					return []string{vendorModel}
+				}(),
 			}, idempotent(), http.StatusCreated)
 			if account["adapter"] != spec.seed.adapter {
 				t.Errorf("lane %s: account adapter %v, want %s", spec.client.name, account["adapter"], spec.seed.adapter)
@@ -521,7 +549,17 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 			}, idempotent(), http.StatusCreated)
 			slug := uniqueName("qualify-" + spec.client.name)
 			route := s.want(owner, "POST", "/api/v1/code/routes", map[string]any{
-				"project_id": project, "slug": slug, "pool_id": pool["id"], "models": []string{vendorModel}, "enabled": true, "messages_to_codex": spec.toolRoundTrip, "messages_codex_safety_identifier": spec.toolRoundTrip, "chat_to_codex": spec.toolRoundTrip,
+				"project_id": project, "slug": slug, "pool_id": pool["id"], "models": func() []string {
+					if spec.signedContinuation {
+						return []string{"gemini-fixture"}
+					}
+					return []string{vendorModel}
+				}(), "enabled": true, "messages_to_codex": spec.toolRoundTrip && !spec.signedContinuation, "messages_codex_safety_identifier": spec.toolRoundTrip && !spec.signedContinuation, "chat_to_codex": spec.toolRoundTrip && !spec.signedContinuation, "chat_to_antigravity": spec.signedContinuation, "model_rewriting": spec.signedContinuation, "aliases": func() map[string]string {
+					if spec.signedContinuation {
+						return map[string]string{vendorModel: "gemini-fixture"}
+					}
+					return map[string]string{}
+				}(),
 			}, idempotent(), http.StatusCreated)
 			s.want(owner, "POST", "/api/v1/code/routes/"+route["id"].(string)+"/publish", nil, idempotent(etag(route)), http.StatusOK)
 
@@ -531,7 +569,7 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 					return "", false, err
 				}
 				configuration := func() string {
-					if !lane.toolRoundTrip {
+					if !lane.toolRoundTrip || lane.client.name != "claude-code" {
 						return ""
 					}
 					config := s.want(owner, "GET", "/api/v1/code/routes/"+route["id"].(string)+"/client-config?client=claude-code&platform=linux&gateway_url=http%3A%2F%2F127.0.0.1%3A18765", nil, nil, http.StatusOK)
@@ -554,7 +592,7 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 				}
 				return output, executed, nil
 			})
-			if lane.toolRoundTrip && record.Result == "pass" {
+			if lane.toolRoundTrip && !lane.signedContinuation && record.Result == "pass" {
 				assertTranslatedCodeRates(t, s, owner, project, slug, pool, providerID)
 				s.want(owner, "POST", "/api/v1/code/budgets", map[string]any{"project_id": project, "route_id": route["id"], "api_key_id": key["id"], "daily_tokens": 100, "enabled": true}, idempotent(), http.StatusCreated)
 				consumer := &caller{name: "hard token bound", token: key["secret"].(string)}

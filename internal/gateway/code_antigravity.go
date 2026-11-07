@@ -75,7 +75,12 @@ func (a *codeAttempt) antigravityResponse(ctx context.Context, w http.ResponseWr
 			if !strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
 				return nil, codemode.Refuse(502, "code_upstream_invalid")
 			}
-			reader := antigravityStream(response.Body, model)
+			reader := antigravityStreamWithResult(response.Body, model, func(body []byte) ([]byte, error) {
+				if payload.signedContinuation {
+					return a.signedAntigravityResult(ctx, body, a.model)
+				}
+				return antigravityResult(body)
+			})
 			defer reader.Close()
 			return protocols.StreamWithEvents(wire.Gemini, wire.Chat, reader, codewire.MaxBody, model, payload.includeUsage, writer.emit, nil, 1)
 		}
@@ -83,7 +88,12 @@ func (a *codeAttempt) antigravityResponse(ctx context.Context, w http.ResponseWr
 		if err != nil || len(body) > codewire.MaxBody {
 			return nil, codemode.Refuse(502, "code_upstream_invalid")
 		}
-		unwrapped, stateErr := antigravityResult(body)
+		unwrapped, stateErr := func() ([]byte, error) {
+			if payload.signedContinuation {
+				return a.signedAntigravityResult(ctx, body, a.model)
+			}
+			return antigravityResult(body)
+		}()
 		completion, err := protocols.Decode(wire.Gemini, wire.Chat, unwrapped, model, "")
 		if err != nil {
 			return nil, err
@@ -91,12 +101,16 @@ func (a *codeAttempt) antigravityResponse(ctx context.Context, w http.ResponseWr
 		return completion, stateErr
 	}()
 	if unsupported, ok := errors.AsType[*antigravityStateError](err); ok {
-		a.observe(antigravityObservation(unsupported.completion, true))
+		observation := antigravityObservation(unsupported.completion, true)
+		observation.Successful = false
+		a.observe(observation)
 	}
-	a.observe(antigravityObservation(completion, err == nil || !payload.stream && completion != nil))
+	observation := antigravityObservation(completion, err == nil || !payload.stream && completion != nil)
+	observation.Successful = observation.Successful && err == nil
+	a.observe(observation)
 	if err != nil {
 		code := func() string {
-			if refusal, ok := errors.AsType[*codemode.Refusal](err); ok && refusal.Code == "code_upstream_unsupported_state" {
+			if refusal, ok := errors.AsType[*codemode.Refusal](err); ok && (refusal.Code == "code_upstream_unsupported_state" || refusal.Code == "code_continuation_unavailable") {
 				return refusal.Code
 			}
 			return "code_upstream_invalid"
@@ -119,6 +133,10 @@ type antigravityStateError struct {
 func (e *antigravityStateError) Unwrap() error { return e.Refusal }
 
 func antigravityStream(source io.Reader, model string) io.ReadCloser {
+	return antigravityStreamWithResult(source, model, antigravityResult)
+}
+
+func antigravityStreamWithResult(source io.Reader, model string, result func([]byte) ([]byte, error)) io.ReadCloser {
 	reader, writer := io.Pipe()
 	go func() {
 		err := sse.Decode(source, codewire.MaxBody, func(frame sse.Frame) error {
@@ -126,9 +144,9 @@ func antigravityStream(source io.Reader, model string) io.ReadCloser {
 				_, err := writer.Write(frame.Encode())
 				return err
 			}
-			body, err := antigravityResult([]byte(frame.Data))
+			body, err := result([]byte(frame.Data))
 			if err != nil {
-				if refusal, ok := errors.AsType[*codemode.Refusal](err); ok && refusal.Code == "code_upstream_unsupported_state" {
+				if refusal, ok := errors.AsType[*codemode.Refusal](err); ok && (refusal.Code == "code_upstream_unsupported_state" || refusal.Code == "code_continuation_unavailable") {
 					completion, _ := protocols.Decode(wire.Gemini, wire.Gemini, body, model, "")
 					return &antigravityStateError{Refusal: refusal, completion: completion}
 				}

@@ -390,7 +390,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			gatewayDeps.Capture = capturer
 			gatewayDeps.Media = &gateway.MediaDeps{Jobs: mediaService, Admission: media.NewAdmissionState(c.MediaSpoolCapacityBytes)}
 			if pool != nil {
-				gatewayDeps.CodeLedger = codesessions.New(pool)
+				gatewayDeps.CodeLedger = codesessions.NewEncrypted(pool, installation, keys)
 				gatewayDeps.CodeAuthorizer = &providers.CodeAuthorizer{Pool: pool, Credentials: rt, Plugins: pluginHost}
 				gatewayDeps.CodeResearch = codesessions.New(pool)
 				gatewayDeps.ResearchAuth = &providers.CodeAuthorizer{Pool: pool, Credentials: rt, Plugins: pluginHost}

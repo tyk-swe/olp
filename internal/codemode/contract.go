@@ -230,6 +230,7 @@ type Route struct {
 	TranslatedCodexOutputMinimum  bool                  `json:"translated_codex_output_minimum,omitempty"`
 	CodexCLIIdentity              bool                  `json:"codex_cli_identity,omitempty"`
 	PaidFallbackTargets           map[string]PaidTarget `json:"paid_fallback_targets,omitempty"`
+	AntigravitySignedContinuation bool                  `json:"antigravity_signed_continuation,omitempty"`
 	ChatToAntigravity             bool                  `json:"chat_to_antigravity,omitempty"`
 	PaidParticipation             bool                  `json:"paid_participation,omitempty"`
 	PaidTargets                   map[string]PaidTarget `json:"paid_targets,omitempty"`

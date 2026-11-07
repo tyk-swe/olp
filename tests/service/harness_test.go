@@ -160,6 +160,7 @@ func freeAddresses(t *testing.T) (string, string) {
 }
 
 type service struct {
+	stop   func()
 	t      *testing.T
 	pool   *pgxpool.Pool
 	origin string
@@ -251,7 +252,14 @@ func startProcess(t *testing.T, pool *pgxpool.Pool, env environment) *service {
 		if err == nil {
 			response.Body.Close()
 			if response.StatusCode == http.StatusOK {
-				return &service{t: t, pool: pool, origin: origin, env: env}
+				return &service{t: t, pool: pool, origin: origin, env: env, stop: func() {
+					_ = command.Process.Signal(syscall.SIGTERM)
+					select {
+					case <-exited:
+					case <-time.After(10 * time.Second):
+						t.Fatal("service did not stop")
+					}
+				}}
 			}
 		}
 		time.Sleep(50 * time.Millisecond)

@@ -67,6 +67,11 @@ func (m *Management) retireCodeBinding(r *http.Request, _ access.Principal) (acc
 	if _, err = tx.Exec(r.Context(), `UPDATE `+table+` SET retired_at=now() WHERE id=$1 AND retired_at IS NULL`, root); err != nil {
 		return access.Reply{}, err
 	}
+	if provider == nil {
+		if _, err = tx.Exec(r.Context(), `WITH retired AS (DELETE FROM olp.code_continuations WHERE root_id=$1 RETURNING id) DELETE FROM olp.secrets WHERE id IN (SELECT id FROM retired)`, root); err != nil {
+			return access.Reply{}, err
+		}
+	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "code_binding.retire", "code_binding", root, "success"); err != nil {
 		return access.Reply{}, err
 	}

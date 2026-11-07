@@ -157,7 +157,7 @@ var vendors = []Vendor{
 			"Supply an authorized Google desktop OAuth client ID as the provider option. Complete masked enrollment with callback_url and client_secret JSON. Client secrets and refresh tokens remain encrypted.",
 			"Enrollment verifies the Google subject and an existing cloudcode project. It does not onboard accounts or establish live inference, entitlement, allowance or hard token bounds.",
 		},
-		notes: []string{"Explicit chat_to_antigravity policy enables controlled Gemini text and function tools over HTTP or SSE. Signed reasoning, media and server tools are unsupported. Client identity and prompt compatibility remain disabled. Live subscription and OpenCode workflow qualification remain pending."},
+		notes: []string{"Explicit chat_to_antigravity policy enables controlled Gemini text and function tools over HTTP or SSE. Republishing enables encrypted signed function continuation bound to the root conversation and selected account. Other signed parts, reasoning controls, media and server tools are unsupported. Client identity and prompt compatibility remain disabled. Provider terms and account suspension risks apply. Live subscription qualification remains pending."},
 	},
 	{
 		Adapter: codemode.AdapterOpenCodeGo, Name: "OpenCode Go", profiles: []string{codeplans.OpenCodeGoProfile}, manifest: codeplans.OpenCodeGoManifest, KeyGrant: true,

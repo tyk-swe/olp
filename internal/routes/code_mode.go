@@ -363,6 +363,7 @@ func SaveCodePublication(ctx context.Context, tx pgx.Tx, p access.Principal, id 
 	}
 
 	route.TranslatedCodexOutputMinimum = true
+	route.AntigravitySignedContinuation = route.ChatToAntigravity
 	route.RevisionID = access.NewID()
 	route.ETag = access.NewID()
 	now := time.Now().UTC().Truncate(time.Microsecond)

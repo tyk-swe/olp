@@ -95,12 +95,13 @@ var (
 	GuardrailCredential   = SealPurpose{"guardrail_credential"}
 	ResponseCache         = SealPurpose{"response_cache"}
 	ProviderUploadSession = SealPurpose{"provider_upload_session"}
+	CodeContinuation      = SealPurpose{"code_continuation"}
 	WorkflowContinuation  = SealPurpose{"workflow_continuation"}
 )
 
 func SealPurposes() []SealPurpose {
 	return []SealPurpose{SAMLKey, SAMLFlow, MFATOTP, MFAWebAuthn, ProviderCredential, ProviderContinuation, NotificationSecret, MutationReplay,
-		OIDCClientSecret, OIDCFlow, MediaJobSource, ProviderGrantRefresh, GrantEnrollment, SinkCredential, MCPCredential, MCPGrantAccess, MCPGrantRefresh, MCPGrantEnrollment, MCPEntraClient, MCPDelegationSigning, BillingCredential, GuardrailCredential, ResponseCache, ProviderUploadSession, AgentCredential, WorkflowContinuation}
+		OIDCClientSecret, OIDCFlow, MediaJobSource, ProviderGrantRefresh, GrantEnrollment, SinkCredential, MCPCredential, MCPGrantAccess, MCPGrantRefresh, MCPGrantEnrollment, MCPEntraClient, MCPDelegationSigning, BillingCredential, GuardrailCredential, ResponseCache, ProviderUploadSession, AgentCredential, WorkflowContinuation, CodeContinuation}
 }
 
 func ParseSealPurpose(name string) (SealPurpose, bool) {

@@ -65,6 +65,8 @@ func bearer(r *http.Request) string {
 
 func newVendorMux(codexToken string, toolProof chan<- struct{}) *http.ServeMux {
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1internal:generateContent", func(w http.ResponseWriter, r *http.Request) { fixtureAntigravity(w, r, toolProof) })
+	mux.HandleFunc("POST /v1internal:streamGenerateContent", func(w http.ResponseWriter, r *http.Request) { fixtureAntigravity(w, r, toolProof) })
 	openAIError := `{"error":{"message":"unknown model","type":"invalid_request_error","code":"model_not_found"}}`
 	badKey := `{"error":{"message":"bad key","type":"invalid_request_error","code":"invalid_api_key"}}`
 	mux.HandleFunc("POST /zen/go/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
@@ -265,7 +267,7 @@ func newVendorProxy(t *testing.T, handler http.Handler) vendorProxy {
 	}
 	roots := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}))
 	certificates := map[string]tls.Certificate{}
-	for i, host := range []string{"chatgpt.com", "api.z.ai", "opencode.ai"} {
+	for i, host := range []string{"chatgpt.com", "api.z.ai", "opencode.ai", "daily-cloudcode-pa.googleapis.com"} {
 		leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		if err != nil {
 			t.Fatal(err)
@@ -322,4 +324,78 @@ func newVendorProxy(t *testing.T, handler http.Handler) vendorProxy {
 		}
 	}()
 	return vendorProxy{url: "http://" + listener.Addr().String(), roots: roots}
+}
+
+func fixtureAntigravity(w http.ResponseWriter, r *http.Request, toolProof chan<- struct{}) {
+	var envelope struct {
+		Model   string `json:"model"`
+		Request struct {
+			Contents []struct {
+				Parts []struct {
+					Call struct {
+						Name string          `json:"name"`
+						ID   *string         `json:"id"`
+						Args json.RawMessage `json:"args"`
+					} `json:"functionCall"`
+					Signature string `json:"thoughtSignature"`
+					Response  struct {
+						Response json.RawMessage `json:"response"`
+					} `json:"functionResponse"`
+				} `json:"parts"`
+			} `json:"contents"`
+			Tools []struct {
+				Declarations []struct {
+					Name string `json:"name"`
+				} `json:"functionDeclarations"`
+			} `json:"tools"`
+		} `json:"request"`
+	}
+	if bearer(r) != "Bearer antigravity-fixture-token" || json.NewDecoder(r.Body).Decode(&envelope) != nil || envelope.Model != "gemini-fixture" {
+		refuseVendor(w, http.StatusBadRequest, `{"error":{"message":"fixture envelope invalid"}}`)
+		return
+	}
+	var bash string
+	for _, tool := range envelope.Request.Tools {
+		for _, declaration := range tool.Declarations {
+			if strings.EqualFold(declaration.Name, "bash") {
+				bash = declaration.Name
+			}
+		}
+	}
+	continued := false
+	signed := false
+	for _, content := range envelope.Request.Contents {
+		for _, part := range content.Parts {
+			if len(part.Response.Response) != 0 && strings.Contains(string(part.Response.Response), "olp-tool-round-trip") {
+				continued = true
+			}
+			if strings.EqualFold(part.Call.Name, "bash") && part.Signature == "fixture-private-signature" && part.Call.ID == nil && strings.Contains(string(part.Call.Args), "printf olp-tool-round-trip") {
+				signed = true
+			}
+		}
+	}
+	if continued && !signed {
+		refuseVendor(w, http.StatusBadRequest, `{"error":{"message":"fixture signed continuation missing"}}`)
+		return
+	}
+	if continued {
+		select {
+		case toolProof <- struct{}{}:
+		default:
+		}
+	}
+	parts := func() []any {
+		if bash != "" && !continued {
+			return []any{map[string]any{"functionCall": map[string]any{"name": bash, "args": map[string]string{"command": "printf olp-tool-round-trip", "description": "Run the fixture proof"}}, "thoughtSignature": "fixture-private-signature"}}
+		}
+		return []any{map[string]string{"text": vendorAnswer}}
+	}()
+	body, _ := json.Marshal(map[string]any{"response": map[string]any{"candidates": []any{map[string]any{"index": 0, "content": map[string]any{"role": "model", "parts": parts}, "finishReason": "STOP"}}, "usageMetadata": map[string]int{"promptTokenCount": vendorInputTokens, "candidatesTokenCount": vendorOutputTokens, "totalTokenCount": vendorInputTokens + vendorOutputTokens}}})
+	if strings.Contains(r.URL.Path, "streamGenerateContent") {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", body)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(body)
 }
