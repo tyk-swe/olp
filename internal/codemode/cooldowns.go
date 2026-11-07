@@ -54,10 +54,6 @@ func LatestDeadline(now time.Time, times ...*time.Time) *time.Time {
 	return latest
 }
 
-func BlockingDeadline(now time.Time, unavailableUntil, cooldownRetryAt *time.Time, _ *Allowance, _ bool, _ string) *time.Time {
-	return LatestDeadline(now, unavailableUntil, cooldownRetryAt)
-}
-
 func (r *Refusal) RetryAfter(now time.Time) time.Duration {
 	if r == nil || r.RetryAt == nil || !r.RetryAt.After(now) {
 		return 0
