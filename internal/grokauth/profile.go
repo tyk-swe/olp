@@ -11,11 +11,11 @@ import (
 )
 
 const (
-	ProfileID = "grok-build-subscription"
-	Issuer    = "https://auth.x.ai"
-	Upstream  = "https://cli-chat-proxy.grok.com/v1"
+	ProfileID            = "grok-build-subscription"
+	Issuer               = "https://auth.x.ai"
+	Upstream             = "https://cli-chat-proxy.grok.com/v1"
 	CompatibilityVersion = "1.0.45"
- ClientID  = "b1a00492-073a-47ea-816f-4c329264a828"
+	ClientID             = "b1a00492-073a-47ea-816f-4c329264a828"
 )
 
 func Manifest() abi.Manifest {
