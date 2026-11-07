@@ -383,39 +383,15 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 	if _, err := other.store.Admit(t.Context(), other.admission("model", "other-project-first")); err != nil {
 		t.Fatalf("other project admission after pinned selection: %v", err)
 	}
-	for _, tc := range []struct {
-		name      string
-		allowance codemode.Allowance
-		retryAt   *time.Time
-	}{
-		{"exhausted window", codemode.Allowance{Windows: []codemode.AllowanceWindow{{LimitID: "codex", Window: "primary", Unit: codemode.AllowanceUnitPercent, Evidence: codemode.AllowanceEvidencePassive, UsedPercent: 100, RemainingPercent: 0, ResetsAt: &reset, ObservedAt: base}}, ObservedAt: base}, &reset},
-		{"stale resetless count", codemode.Allowance{RemainingTokens: new(int64(0)), ObservedAt: base.Add(-time.Hour)}, nil},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			document, err := json.Marshal(tc.allowance)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1`, low, document); err != nil {
-				t.Fatal(err)
-			}
-			for _, conversation := range []string{uuid.NewString(), "band-conv-0"} {
-				_, err = store.Admit(t.Context(), codesessions.Admission{Route: bySlug["band-on"], APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: conversation}}, Providers: []string{provider}})
-				var refusal *codemode.Refusal
-				if !errors.As(err, &refusal) || refusal.Code != "code_account_unavailable" || (tc.retryAt == nil && refusal.RetryAt != nil) || (tc.retryAt != nil && (refusal.RetryAt == nil || !refusal.RetryAt.Equal(*tc.retryAt))) {
-					t.Fatalf("admission for %s = %v (%+v), want refusal with retry at %v", conversation, err, refusal, tc.retryAt)
-				}
-			}
-		})
-	}
-	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=(id=$1) WHERE project_id=$2`, healthy, project); err != nil {
-		t.Fatal(err)
-	}
+
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_route_revisions SET connections=jsonb_set(connections,ARRAY[$1,'profile_revision'],to_jsonb(repeat('0',64)),true) WHERE route_id IN (SELECT id FROM olp.code_routes WHERE project_id=$2)`, provider, project); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := other.store.Admit(t.Context(), other.admission("model", "other-project-second")); err != nil {
 		t.Fatalf("other project admission after root selection: %v", err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=(id=$1) WHERE project_id=$2`, healthy, project); err != nil {
+		t.Fatal(err)
 	}
 	window := func(family string, unit codemode.AllowanceUnit, evidence codemode.AllowanceEvidence, remainingPercent float64, remainingValue *float64, observation time.Time, resetAt *time.Time) codemode.AllowanceWindow {
 		usedPercent := func() float64 {
@@ -431,17 +407,19 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 		allowance codemode.Allowance
 		off, on   bool
 	}{
+		{"missing window", codemode.Allowance{ObservedAt: observed}, true, true},
+		{"ambiguous windows", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, observed, &reset), window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 60, nil, observed, &reset)}, ObservedAt: observed}, true, true},
 		{"old active mirror", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidenceActive, 0, nil, observed, &reset)}, RemainingPercent: new(float64(0)), ResetsAt: &reset, ObservedAt: observed}, true, true},
-		{"legacy top-level exhausted", codemode.Allowance{RemainingPercent: new(float64(0)), ResetsAt: &reset, ObservedAt: observed}, false, false},
+		{"legacy top-level exhausted", codemode.Allowance{RemainingPercent: new(float64(0)), ResetsAt: &reset, ObservedAt: observed}, true, true},
 		{"positive count", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitCount, codemode.AllowanceEvidencePassive, 0, new(float64(9)), observed, &reset)}, ObservedAt: observed}, true, true},
 		{"positive credits", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitCredits, codemode.AllowanceEvidencePassive, 0, new(float64(9)), observed, &reset)}, ObservedAt: observed}, true, true},
 		{"positive cents", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitCents, codemode.AllowanceEvidencePassive, 0, new(float64(9)), observed, &reset)}, ObservedAt: observed}, true, true},
-		{"fresh exhausted", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, observed, &reset)}, ObservedAt: observed}, false, false},
-		{"stale no reset", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, base.Add(-time.Hour), nil)}, ObservedAt: base.Add(-time.Hour)}, false, false},
-		{"stale future reset", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, base.Add(-time.Hour), &reset)}, ObservedAt: base.Add(-time.Hour)}, false, false},
-		{"stale token count", codemode.Allowance{RemainingTokens: new(int64(0)), TokenObservation: &codemode.CountObservation{ObservedAt: base.Add(-time.Hour), ResetsAt: &reset}, ObservedAt: observed}, false, false},
-		{"fresh request count", codemode.Allowance{RemainingRequests: new(int64(0)), RequestObservation: &codemode.CountObservation{ObservedAt: observed, ResetsAt: &reset}, ObservedAt: observed}, false, false},
-		{"unrelated family", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("special_model", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, observed, &reset)}, ObservedAt: observed}, false, false},
+		{"fresh exhausted", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, observed, &reset)}, ObservedAt: observed}, true, true},
+		{"stale no reset", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, base.Add(-time.Hour), nil)}, ObservedAt: base.Add(-time.Hour)}, true, true},
+		{"stale future reset", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, base.Add(-time.Hour), &reset)}, ObservedAt: base.Add(-time.Hour)}, true, true},
+		{"stale token count", codemode.Allowance{RemainingTokens: new(int64(0)), TokenObservation: &codemode.CountObservation{ObservedAt: base.Add(-time.Hour), ResetsAt: &reset}, ObservedAt: observed}, true, true},
+		{"fresh request count", codemode.Allowance{RemainingRequests: new(int64(0)), RequestObservation: &codemode.CountObservation{ObservedAt: observed, ResetsAt: &reset}, ObservedAt: observed}, true, true},
+		{"unrelated family", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("special_model", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, observed, &reset)}, ObservedAt: observed}, true, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -452,12 +430,6 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 			if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1`, healthy, document); err != nil {
 				t.Fatal(err)
 			}
-			if tc.name == "stale future reset" {
-				var available bool
-				if err := pool.QueryRow(t.Context(), `SELECT olp.code_account_available(a,true,'codex') FROM olp.code_accounts a WHERE a.id=$1`, healthy).Scan(&available); err != nil || available {
-					t.Fatalf("future-reset window availability = %t, %v", available, err)
-				}
-			}
 			for _, check := range []struct {
 				slug      string
 				available bool
@@ -465,7 +437,7 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 				route := bySlug[check.slug]
 				permit, err := store.Admit(t.Context(), codesessions.Admission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{provider}})
 				if check.available && (err != nil || permit.Account.ID != healthy) {
-					t.Fatalf("%s admission = %+v, %v", check.slug, permit, err)
+					t.Fatalf("%s selected account = %s, error = %v", check.slug, permit.Account.ID, err)
 				}
 				if !check.available && err == nil {
 					t.Fatalf("%s admitted exhausted account %+v", check.slug, permit)
@@ -476,89 +448,6 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 				}
 			}
 		})
-	}
-	countReset := base.Add(30 * time.Minute)
-	activeReset := base.Add(4 * time.Hour)
-	blocked := codemode.Allowance{
-		RemainingTokens:  new(int64(0)),
-		TokenObservation: &codemode.CountObservation{ObservedAt: observed, ResetsAt: &countReset},
-		ObservedAt:       observed,
-		Windows: []codemode.AllowanceWindow{
-			window("special_model", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, observed, &reset),
-			window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidenceActive, 0, nil, observed, &activeReset),
-		},
-	}
-	blockedJSON, err := json.Marshal(blocked)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1`, healthy, blockedJSON); err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
-		slug  string
-		reset time.Time
-	}{{"band-on", reset}, {"band-off", reset}} {
-		_, err := store.Admit(t.Context(), codesessions.Admission{Route: bySlug[tc.slug], APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{provider}})
-		var refusal *codemode.Refusal
-		if !errors.As(err, &refusal) || refusal.RetryAt == nil || !refusal.RetryAt.Equal(tc.reset) {
-			t.Fatalf("%s refusal = %+v, want retry at %s", tc.slug, err, tc.reset)
-		}
-	}
-	for _, tc := range []struct {
-		name      string
-		allowance codemode.Allowance
-	}{
-		{"token freshness", codemode.Allowance{RemainingTokens: new(int64(0)), TokenObservation: &codemode.CountObservation{ObservedAt: observed}, ObservedAt: observed}},
-		{"request freshness", codemode.Allowance{RemainingRequests: new(int64(0)), RequestObservation: &codemode.CountObservation{ObservedAt: observed}, ObservedAt: observed}},
-		{"legacy freshness", codemode.Allowance{RemainingTokens: new(int64(0)), ObservedAt: observed}},
-		{"latest freshness", codemode.Allowance{RemainingTokens: new(int64(0)), TokenObservation: &codemode.CountObservation{ObservedAt: observed.Add(-time.Minute)}, RemainingRequests: new(int64(0)), RequestObservation: &codemode.CountObservation{ObservedAt: observed}, ObservedAt: observed}},
-		{"later vendor reset", codemode.Allowance{RemainingTokens: new(int64(0)), TokenObservation: &codemode.CountObservation{ObservedAt: observed}, RemainingRequests: new(int64(0)), RequestObservation: &codemode.CountObservation{ObservedAt: observed, ResetsAt: &countReset}, ObservedAt: observed}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			document, err := json.Marshal(tc.allowance)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1`, healthy, document); err != nil {
-				t.Fatal(err)
-			}
-			for _, policy := range []struct {
-				slug    string
-				retryAt *time.Time
-			}{{"band-on", nil}, {"band-off", nil}} {
-				_, err := store.Admit(t.Context(), codesessions.Admission{Route: bySlug[policy.slug], APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{provider}})
-				var refusal *codemode.Refusal
-				if !errors.As(err, &refusal) || (policy.retryAt == nil && refusal.RetryAt != nil) || (policy.retryAt != nil && (refusal.RetryAt == nil || !refusal.RetryAt.Equal(*policy.retryAt))) {
-					t.Fatalf("%s refusal = %+v, want retry at %v", policy.slug, err, policy.retryAt)
-				}
-			}
-		})
-	}
-	if err := store.ObserveCooldownClass(t.Context(), healthy, "model", codeadapter.Classification{Class: codeadapter.CooldownRate, Scope: codeadapter.ScopeModel, RetryAt: countReset, Envelope: "fixture_rate"}, observed); err != nil {
-		t.Fatal(err)
-	}
-	for _, allowance := range []codemode.Allowance{
-		{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, observed, nil)}, ObservedAt: observed},
-		{RemainingTokens: new(int64(0)), TokenObservation: &codemode.CountObservation{ObservedAt: base.Add(-time.Hour)}, ObservedAt: base.Add(-time.Hour)},
-	} {
-		withoutReset, err := json.Marshal(allowance)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1`, healthy, withoutReset); err != nil {
-			t.Fatal(err)
-		}
-		for _, tc := range []struct {
-			slug  string
-			reset *time.Time
-		}{{"band-on", nil}, {"band-off", nil}} {
-			_, err := store.Admit(t.Context(), codesessions.Admission{Route: bySlug[tc.slug], APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{provider}})
-			var refusal *codemode.Refusal
-			if !errors.As(err, &refusal) || (tc.reset == nil && refusal.RetryAt != nil) || (tc.reset != nil && (refusal.RetryAt == nil || !refusal.RetryAt.Equal(*tc.reset))) {
-				t.Fatalf("%s resetless refusal = %+v, want retry at %v", tc.slug, err, tc.reset)
-			}
-		}
 	}
 
 }
@@ -1412,6 +1301,57 @@ func TestCodeAllowanceReadRequestEndpoint(t *testing.T) {
 	if status, raw := s.do(owner, "POST", "/api/v1/code/accounts/"+claude+"/allowance-reads", nil, idempotent()); status != http.StatusUnprocessableEntity {
 		t.Fatalf("unqualified allowance read: status %d: %s", status, raw)
 	}
+	journey := seedCooldownJourney(t, s.pool)
+	reset := time.Now().UTC().Truncate(time.Second).Add(time.Hour)
+	if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance=$2 WHERE id IN ($1,$3)`, journey.first, bandAllowanceJSON(t, 0, &reset, time.Now().UTC()), journey.second); err != nil {
+		t.Fatal(err)
+	}
+	if err := journey.store.ObserveCooldownClass(t.Context(), journey.first, "model", codeadapter.Classification{Class: codeadapter.CooldownRate, Scope: codeadapter.ScopeModel, RetryAt: reset, Envelope: "fixture_rate"}, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if err := journey.store.ObserveCooldownClass(t.Context(), journey.second, "", codeadapter.Classification{Class: codeadapter.CooldownRate, Scope: codeadapter.ScopeCredential, RetryAt: reset, Envelope: "fixture_rate"}, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	listing := s.want(owner, "GET", "/api/v1/code/accounts?project_id="+journey.route.ProjectID, nil, nil, http.StatusOK)
+	if len(listing["items"].([]any)) != 2 {
+		t.Fatalf("management accounts = %v", listing)
+	}
+	for _, item := range listing["items"].([]any) {
+		account := item.(map[string]any)
+		if account["id"] == journey.first && account["eligible"] != true {
+			t.Fatalf("account with another usable model is ineligible: %v", account)
+		}
+		if account["id"] == journey.second && account["eligible"] != false {
+			t.Fatalf("account-wide cooldown remains eligible: %v", account)
+		}
+	}
+	permit, err := journey.store.Admit(t.Context(), journey.admission("other", "allowance-model-scope"))
+	if err != nil || permit.Account.ID != journey.first {
+		t.Fatalf("unrelated model admission = %+v, %v", permit, err)
+	}
+	_, err = journey.store.Admit(t.Context(), journey.admission("model", "allowance-model-blocked"))
+	var refusal *codemode.Refusal
+	if !errors.As(err, &refusal) || refusal.RetryAt == nil || !refusal.RetryAt.Equal(reset) {
+		t.Fatalf("blocked model refusal = %v", err)
+	}
+	offers, err := codesessions.Offers(t.Context(), s.pool, journey.route.RevisionID)
+	if err != nil || len(offers) != 1 || !slices.Equal(offers[0].Models, []string{"other"}) {
+		t.Fatalf("model-scoped offers = %+v, %v", offers, err)
+	}
+
+	if err := journey.store.ObserveCooldownClass(t.Context(), journey.first, "other", codeadapter.Classification{Class: codeadapter.CooldownRate, Scope: codeadapter.ScopeModel, RetryAt: reset, Envelope: "fixture_rate"}, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	blockedListing := s.want(owner, "GET", "/api/v1/code/accounts?project_id="+journey.route.ProjectID, nil, nil, http.StatusOK)
+	if len(blockedListing["items"].([]any)) != 2 {
+		t.Fatalf("blocked management accounts = %v", blockedListing)
+	}
+	for _, item := range blockedListing["items"].([]any) {
+		if item.(map[string]any)["eligible"] != false {
+			t.Fatalf("account without any usable models remains eligible: %v", item)
+		}
+	}
+
 	s.eventually("code allowance worker checkpoint", 30*time.Second, func() (bool, string) {
 		var checks int
 		if err := s.pool.QueryRow(t.Context(), `SELECT successes_total+failures_total FROM olp.worker_task_health WHERE task='code_allowance_read'`).Scan(&checks); err != nil {

@@ -84,6 +84,21 @@ An unresolved consumption outcome retained when final upstream usage is unavaila
 A vendor-reported state of one allowance window for one account at one time, in the vendor unit. It is not a remaining balance that OLP computed from its own records.
 _Avoid_: Balance, quota estimate
 
+**Advisory allowance band**:
+An account's relative preference for a requested model based on an associated allowance observation. A band expresses ordering, without granting or denying authority to use the account.
+
+**Model-facing limit name**:
+The provider label associating an allowance window with a model. It is distinct from the identifier of the provider's meter and does not by itself establish charging scope.
+
+**Account eligibility**:
+The ability to use at least one enrolled model under current account health, authorization and cooldown restrictions. A particular route or requested model may have narrower availability.
+
+**Signed continuation state**:
+Provider-authenticated conversation state owned by its originating account and root conversation. It cannot be moved to another account merely because another account is eligible.
+
+**Client-held summary**:
+An authenticated encrypted summary returned to a client for later continuation, bound to its account and conversation. Summary compaction may lose detail and consumes provider usage.
+
 **Fixture qualification**:
 Evidence from controlled peers and repeatable client journeys for a stated revision and scope. It does not establish acceptance by a real subscription service.
 
