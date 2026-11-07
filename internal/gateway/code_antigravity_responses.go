@@ -75,29 +75,11 @@ func codePrepareAntigravityResponses(request *wire.Request, r *http.Request, com
 		}
 	}
 	input, _ := root.Lookup("input")
-	if input.Kind() != oif.String && input.Kind() != oif.Array {
+	if !codeResponsesInput(input) {
 		return nil, refused
 	}
 	for _, item := range input.Elements() {
 		if _, present := item.Lookup("internal_chat_message_metadata_passthrough"); present && (!compatibility || !codewire.SupportedResponsesItemAnnotation(item)) {
-			return nil, refused
-		}
-		kind, _ := item.Lookup("type")
-		switch stringValue(kind) {
-		case "", "message":
-			role, _ := item.Lookup("role")
-			if !slices.Contains([]string{"user", "assistant", "system", "developer"}, stringValue(role)) || !grokTextContent(item, "content") {
-				return nil, refused
-			}
-		case "function_call":
-			if !grokString(item, "call_id") || !grokString(item, "name") || !grokString(item, "arguments") {
-				return nil, refused
-			}
-		case "function_call_output":
-			if !grokString(item, "call_id") || !grokString(item, "output") {
-				return nil, refused
-			}
-		default:
 			return nil, refused
 		}
 	}

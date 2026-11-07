@@ -59,28 +59,8 @@ func codeTranslateGrok(body []byte, r *http.Request, model string) (codePayload,
 		}
 	}
 	input, _ := root.Lookup("input")
-	if input.Kind() != oif.String && input.Kind() != oif.Array {
+	if !codeResponsesInput(input) {
 		return codePayload{}, refused
-	}
-	for _, item := range input.Elements() {
-		kind, _ := item.Lookup("type")
-		switch stringValue(kind) {
-		case "", "message":
-			role, _ := item.Lookup("role")
-			if !slices.Contains([]string{"user", "assistant", "system", "developer"}, stringValue(role)) || !grokTextContent(item, "content") {
-				return codePayload{}, refused
-			}
-		case "function_call":
-			if !grokString(item, "call_id") || !grokString(item, "name") || !grokString(item, "arguments") {
-				return codePayload{}, refused
-			}
-		case "function_call_output":
-			if !grokString(item, "call_id") || !grokString(item, "output") {
-				return codePayload{}, refused
-			}
-		default:
-			return codePayload{}, refused
-		}
 	}
 	tools, _ := root.Lookup("tools")
 	for _, tool := range tools.Elements() {
@@ -90,28 +70,6 @@ func codeTranslateGrok(body []byte, r *http.Request, model string) (codePayload,
 		}
 	}
 	return codePayload{body: body, stream: request.Stream, target: codeadapter.TargetGrok}, nil
-}
-
-func grokString(item oif.Value, field string) bool {
-	value, _ := item.Lookup(field)
-	return value.Kind() == oif.String
-}
-
-func grokTextContent(item oif.Value, field string) bool {
-	content, _ := item.Lookup(field)
-	if content.Kind() == oif.String {
-		return true
-	}
-	if content.Kind() != oif.Array {
-		return false
-	}
-	for _, part := range content.Elements() {
-		kind, _ := part.Lookup("type")
-		if !slices.Contains([]string{"input_text", "output_text"}, stringValue(kind)) || !grokString(part, "text") {
-			return false
-		}
-	}
-	return true
 }
 
 func codeTranslateGrokMessages(body []byte, r *http.Request, model string, safetyMapping bool) (codePayload, error) {
