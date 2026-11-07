@@ -71,6 +71,8 @@ func bearer(r *http.Request) string {
 
 func newVendorMux(codexToken string, toolProof chan<- struct{}) *http.ServeMux {
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1internal:generateContent", func(w http.ResponseWriter, r *http.Request) { fixtureAntigravity(w, r, toolProof) })
+	mux.HandleFunc("POST /v1internal:streamGenerateContent", func(w http.ResponseWriter, r *http.Request) { fixtureAntigravity(w, r, toolProof) })
 	openAIError := `{"error":{"message":"unknown model","type":"invalid_request_error","code":"model_not_found"}}`
 	badKey := `{"error":{"message":"bad key","type":"invalid_request_error","code":"invalid_api_key"}}`
 	mux.HandleFunc("POST /zen/go/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
@@ -289,7 +291,7 @@ func newVendorProxy(t *testing.T, handler http.Handler) vendorProxy {
 	}
 	roots := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}))
 	certificates := map[string]tls.Certificate{}
-	for i, host := range []string{"chatgpt.com", "api.z.ai", "opencode.ai", "cli-chat-proxy.grok.com", "auth.x.ai"} {
+	for i, host := range []string{"chatgpt.com", "api.z.ai", "opencode.ai", "cli-chat-proxy.grok.com", "auth.x.ai", "daily-cloudcode-pa.googleapis.com"} {
 		leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		if err != nil {
 			t.Fatal(err)
@@ -346,6 +348,122 @@ func newVendorProxy(t *testing.T, handler http.Handler) vendorProxy {
 		}
 	}()
 	return vendorProxy{url: "http://" + listener.Addr().String(), roots: roots}
+}
+
+type antigravityFixtureArguments struct {
+	Command     string `json:"command"`
+	Description string `json:"description"`
+}
+
+type antigravityFixtureCall struct {
+	ID   *string                     `json:"id,omitempty"`
+	Name string                      `json:"name"`
+	Args antigravityFixtureArguments `json:"args"`
+}
+
+type antigravityFixturePart struct {
+	Response *struct {
+		Response json.RawMessage `json:"response"`
+	} `json:"functionResponse,omitempty"`
+	Text      string                  `json:"text,omitempty"`
+	Call      *antigravityFixtureCall `json:"functionCall,omitempty"`
+	Signature string                  `json:"thoughtSignature,omitempty"`
+}
+
+type antigravityFixtureContent struct {
+	Role  string                   `json:"role"`
+	Parts []antigravityFixturePart `json:"parts"`
+}
+
+type antigravityFixtureCandidate struct {
+	Index        int                       `json:"index"`
+	Content      antigravityFixtureContent `json:"content"`
+	FinishReason string                    `json:"finishReason"`
+}
+
+type antigravityFixtureUsage struct {
+	Input  int `json:"promptTokenCount"`
+	Output int `json:"candidatesTokenCount"`
+	Total  int `json:"totalTokenCount"`
+}
+
+type antigravityFixtureResult struct {
+	Candidates []antigravityFixtureCandidate `json:"candidates"`
+	Usage      antigravityFixtureUsage       `json:"usageMetadata"`
+}
+
+type antigravityFixtureResponse struct {
+	Response antigravityFixtureResult `json:"response"`
+}
+
+func fixtureAntigravity(w http.ResponseWriter, r *http.Request, toolProof chan<- struct{}) {
+	var envelope struct {
+		Model   string `json:"model"`
+		Request struct {
+			Contents []antigravityFixtureContent `json:"contents"`
+			Tools    []struct {
+				Declarations []struct {
+					Name string `json:"name"`
+				} `json:"functionDeclarations"`
+			} `json:"tools"`
+		} `json:"request"`
+	}
+	if bearer(r) != "Bearer antigravity-fixture-token" || json.NewDecoder(r.Body).Decode(&envelope) != nil || envelope.Model != "gemini-fixture" {
+		refuseVendor(w, http.StatusBadRequest, `{"error":{"message":"fixture envelope invalid"}}`)
+		return
+	}
+	bash := func() string {
+		for _, tool := range envelope.Request.Tools {
+			for _, declaration := range tool.Declarations {
+				if strings.EqualFold(declaration.Name, "bash") {
+					return declaration.Name
+				}
+			}
+		}
+		return ""
+	}()
+	requestParts := slices.Collect(func(yield func(antigravityFixturePart) bool) {
+		for _, content := range envelope.Request.Contents {
+			for _, part := range content.Parts {
+				if !yield(part) {
+					return
+				}
+			}
+		}
+	})
+	continued := slices.ContainsFunc(requestParts, func(part antigravityFixturePart) bool {
+		return part.Response != nil && strings.Contains(string(part.Response.Response), "olp-tool-round-trip")
+	})
+	signed := slices.ContainsFunc(requestParts, func(part antigravityFixturePart) bool {
+		return part.Call != nil && strings.EqualFold(part.Call.Name, "bash") && part.Signature == "fixture-private-signature" && part.Call.ID == nil && part.Call.Args.Command == "printf olp-tool-round-trip"
+	})
+	if continued && !signed {
+		refuseVendor(w, http.StatusBadRequest, `{"error":{"message":"fixture signed continuation missing"}}`)
+		return
+	}
+	if continued {
+		select {
+		case toolProof <- struct{}{}:
+		default:
+		}
+	}
+	parts := func() []antigravityFixturePart {
+		if bash != "" && !continued {
+			return []antigravityFixturePart{{Call: &antigravityFixtureCall{Name: bash, Args: antigravityFixtureArguments{Command: "printf olp-tool-round-trip", Description: "Run the fixture proof"}}, Signature: "fixture-private-signature"}}
+		}
+		return []antigravityFixturePart{{Text: vendorAnswer}}
+	}()
+	body, _ := json.Marshal(antigravityFixtureResponse{Response: antigravityFixtureResult{
+		Candidates: []antigravityFixtureCandidate{{Index: 0, Content: antigravityFixtureContent{Role: "model", Parts: parts}, FinishReason: "STOP"}},
+		Usage:      antigravityFixtureUsage{Input: vendorInputTokens, Output: vendorOutputTokens, Total: vendorInputTokens + vendorOutputTokens},
+	}})
+	if strings.Contains(r.URL.Path, "streamGenerateContent") {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", body)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(body)
 }
 
 func fixtureResponses(w http.ResponseWriter, r *http.Request, toolProof chan<- struct{}, toolName string) {

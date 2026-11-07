@@ -20,12 +20,13 @@ import (
 )
 
 type codePayload struct {
-	body         []byte
-	query        string
-	stream       bool
-	translated   bool
-	includeUsage bool
-	target       codeadapter.Target
+	signedContinuation bool
+	body               []byte
+	query              string
+	stream             bool
+	translated         bool
+	includeUsage       bool
+	target             codeadapter.Target
 }
 
 func codeParseMessages(body []byte, r *http.Request, model string, safetyMapping bool) (*wire.Request, string, error) {
