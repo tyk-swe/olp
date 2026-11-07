@@ -1,6 +1,6 @@
 {
   "api_version": "openllmproxy.dev/plugin-index/v1",
-  "published_at": "2026-11-07T08:22:09Z",
+  "published_at": "2026-11-07T08:27:32Z",
   "plugins": [
     {
       "name": "codex",
@@ -47,8 +47,8 @@
           "profiles": [
             "grok-build-subscription"
           ],
-          "commit": "215cbeb8d9c44b788222833eacb022715f106f2e",
-          "reviewed_at": "2026-11-07T08:22:09Z"
+          "commit": "b3c80c477543918e7934c2e51b9bc48ad3a80e5c",
+          "reviewed_at": "2026-11-07T08:27:32Z"
         }
       ]
     },
