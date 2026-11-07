@@ -4,6 +4,7 @@ package qualification_test
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -70,10 +71,10 @@ func bearer(r *http.Request) string {
 	return r.Header.Get("Authorization")
 }
 
-func newVendorMux(codexToken string, toolProof chan<- struct{}) *http.ServeMux {
+func newVendorMux(codexToken string, toolProof, summaryProof chan<- struct{}) *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1internal:generateContent", func(w http.ResponseWriter, r *http.Request) { fixtureAntigravity(w, r, toolProof) })
-	mux.HandleFunc("POST /v1internal:streamGenerateContent", func(w http.ResponseWriter, r *http.Request) { fixtureAntigravity(w, r, toolProof) })
+	mux.HandleFunc("POST /v1internal:generateContent", func(w http.ResponseWriter, r *http.Request) { fixtureAntigravity(w, r, toolProof, summaryProof) })
+	mux.HandleFunc("POST /v1internal:streamGenerateContent", func(w http.ResponseWriter, r *http.Request) { fixtureAntigravity(w, r, toolProof, summaryProof) })
 	openAIError := `{"error":{"message":"unknown model","type":"invalid_request_error","code":"model_not_found"}}`
 	badKey := `{"error":{"message":"bad key","type":"invalid_request_error","code":"invalid_api_key"}}`
 	mux.HandleFunc("POST /zen/go/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
@@ -398,13 +399,14 @@ type antigravityFixtureResponse struct {
 	Response antigravityFixtureResult `json:"response"`
 }
 
-func fixtureAntigravity(w http.ResponseWriter, r *http.Request, toolProof chan<- struct{}) {
+func fixtureAntigravity(w http.ResponseWriter, r *http.Request, toolProof, summaryProof chan<- struct{}) {
 	var envelope struct {
 		Model   string `json:"model"`
 		Request struct {
-			Contents []antigravityFixtureContent `json:"contents"`
-			Labels   map[string]string           `json:"labels"`
-			Tools    []struct {
+			Contents          []antigravityFixtureContent `json:"contents"`
+			SystemInstruction json.RawMessage             `json:"systemInstruction"`
+			Labels            map[string]string           `json:"labels"`
+			Tools             []struct {
 				Declarations []struct {
 					Name       string `json:"name"`
 					Parameters struct {
@@ -429,6 +431,16 @@ func fixtureAntigravity(w http.ResponseWriter, r *http.Request, toolProof chan<-
 			return
 		}
 	}
+	if bytes.Contains(envelope.Request.SystemInstruction, []byte("Summarize this complete conversation")) {
+		if len(envelope.Request.Tools) != 0 {
+			refuseVendor(w, http.StatusBadRequest, `{"error":{"message":"summary attempted tools"}}`)
+			return
+		}
+		body, _ := json.Marshal(antigravityFixtureResponse{Response: antigravityFixtureResult{Candidates: []antigravityFixtureCandidate{{Content: antigravityFixtureContent{Role: "model", Parts: []antigravityFixturePart{{Text: "The fixture tool was executed successfully. Answer with " + vendorAnswer}}}, FinishReason: "STOP"}}, Usage: antigravityFixtureUsage{Input: 4, Output: 6, Total: 10}}})
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+		return
+	}
 	toolName := func() string {
 		for _, tool := range envelope.Request.Tools {
 			for _, declaration := range tool.Declarations {
@@ -448,6 +460,15 @@ func fixtureAntigravity(w http.ResponseWriter, r *http.Request, toolProof chan<-
 			}
 		}
 	})
+	restored := slices.ContainsFunc(requestParts, func(part antigravityFixturePart) bool {
+		return strings.Contains(part.Text, "Conversation summary") && strings.Contains(part.Text, "fixture tool was executed successfully")
+	})
+	if restored {
+		select {
+		case summaryProof <- struct{}{}:
+		default:
+		}
+	}
 	continued := slices.ContainsFunc(requestParts, func(part antigravityFixturePart) bool {
 		return part.Response != nil && strings.Contains(string(part.Response.Response), "olp-tool-round-trip")
 	})
@@ -465,7 +486,7 @@ func fixtureAntigravity(w http.ResponseWriter, r *http.Request, toolProof chan<-
 		}
 	}
 	parts := func() []antigravityFixturePart {
-		if toolName != "" && !continued {
+		if toolName != "" && !continued && !restored {
 			arguments := func() antigravityFixtureArguments {
 				if toolName == "exec_command" {
 					return antigravityFixtureArguments{Cmd: "printf olp-tool-round-trip"}

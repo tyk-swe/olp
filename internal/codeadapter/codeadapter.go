@@ -77,6 +77,9 @@ const (
 
 func (e Endpoint) Enabled(route codemode.Route) bool {
 	if e.Target == TargetAntigravity {
+		if e.ClientPath == "responses/compact" {
+			return route.ResponsesToAntigravity && route.SummaryCompaction
+		}
 		switch e.Protocol {
 		case codemode.ProtocolChat:
 			return route.ChatToAntigravity
@@ -176,6 +179,7 @@ var vendors = []Vendor{
 		endpoints: []Endpoint{
 			{ClientPath: "v1/chat/completions", UpstreamPath: "v1internal:generateContent", Protocol: codemode.ProtocolChat, Operation: "chat/completions", Identity: IdentityClient, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP, Target: TargetAntigravity},
 			{ClientPath: "responses", UpstreamPath: "v1internal:generateContent", Protocol: codemode.ProtocolResponses, Operation: "responses", Identity: IdentityCodex, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP, Target: TargetAntigravity},
+			{ClientPath: "responses/compact", UpstreamPath: "v1internal:generateContent", Protocol: codemode.ProtocolResponses, Operation: "responses/compact", Identity: IdentityCodex, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP, Target: TargetAntigravity},
 		},
 		clients: []Client{{ID: ClientOpenCode, Provider: "olp-antigravity", URLSuffix: "/v1", Protocol: codemode.ProtocolChat}, {ID: ClientCodex, Protocol: codemode.ProtocolResponses}},
 		enrollmentNotes: []string{

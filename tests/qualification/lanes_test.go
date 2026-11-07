@@ -560,7 +560,7 @@ func fixtureBridge(t *testing.T, origin string) string {
 	return path
 }
 
-func runFixtureClient(t *testing.T, client, binary, bridge, slug, key, configuration string, toolRoundTrip bool) (string, bool, error) {
+func runFixtureClient(t *testing.T, client, binary, bridge, slug, key, configuration string, toolRoundTrip, compact bool) (string, bool, error) {
 	base := "http://127.0.0.1:18765/code/" + slug
 	prompt := "Say hello."
 	switch client {
@@ -568,8 +568,14 @@ func runFixtureClient(t *testing.T, client, binary, bridge, slug, key, configura
 		if toolRoundTrip {
 			prompt = "Execute printf olp-tool-round-trip with the shell tool, then say hello."
 		}
+		compactLimit := func() string {
+			if compact {
+				return "1"
+			}
+			return "1000000"
+		}()
 		return sandboxClient(t, binary, bridge, []string{"OLP_API_KEY=" + key}, "exec", "--skip-git-repo-check", "--ephemeral", "-m", vendorModel,
-			"-c", `model_provider="olp"`, "-c", `model_providers.olp.name="OLP"`, "-c", `model_providers.olp.base_url="`+base+`"`,
+			"-c", "model_auto_compact_token_limit="+compactLimit, "-c", `model_provider="olp"`, "-c", `model_providers.olp.name="OLP"`, "-c", `model_providers.olp.base_url="`+base+`"`,
 			"-c", `model_providers.olp.env_key="OLP_API_KEY"`, "-c", `model_providers.olp.wire_api="responses"`,
 			"-c", `model_providers.olp.supports_websockets=false`, "-c", `check_for_update_on_startup=false`, "-c", `features.apply_patch_freeform=false`, "-c", `features.multi_agent=false`, "-c", `features.goals=false`, "-c", `web_search="disabled"`, "-c", `model_reasoning_summary="none"`, "-c", `model_reasoning_effort="none"`, "--dangerously-bypass-approvals-and-sandbox", prompt)
 	case "claude-code":
@@ -677,7 +683,8 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 	}
 	project := s.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "qualification"}, idempotent(), http.StatusCreated)["id"].(string)
 	toolProof := make(chan struct{}, 1)
-	proxy := newVendorProxy(t, newVendorMux(codexFixtureAccessToken(specs), toolProof))
+	summaryProof := make(chan struct{}, 1)
+	proxy := newVendorProxy(t, newVendorMux(codexFixtureAccessToken(specs), toolProof, summaryProof))
 	key := s.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "qualification", "scopes": []string{"inference"}, "project_id": project}, idempotent(), http.StatusCreated)
 	consumer := &caller{name: "qualification key", token: key["secret"].(string)}
 	bridge := fixtureBridge(t, s.origin)
@@ -713,7 +720,7 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 						return []string{"gemini-fixture"}
 					}
 					return []string{vendorModel}
-				}(), "enabled": true, "messages_to_codex": spec.toolRoundTrip && spec.seed.adapter == "codex", "messages_codex_safety_identifier": spec.toolRoundTrip && spec.seed.adapter == "codex", "chat_to_codex": spec.toolRoundTrip && spec.seed.adapter == "codex", "responses_to_grok": spec.seed.adapter == "grok-build" && spec.protocol == "responses", "chat_to_grok": spec.seed.adapter == "grok-build" && spec.protocol == "chat", "messages_to_grok": spec.seed.adapter == "grok-build" && spec.protocol == "messages", "messages_grok_safety_identifier": spec.seed.adapter == "grok-build" && spec.protocol == "messages", "grok_cli_identity": spec.seed.adapter == "grok-build", "chat_to_antigravity": spec.signedContinuation && spec.protocol == "chat", "responses_to_antigravity": spec.signedContinuation && spec.protocol == "responses", "responses_antigravity_compatibility": spec.signedContinuation && spec.protocol == "responses", "model_rewriting": spec.signedContinuation, "aliases": func() map[string]string {
+				}(), "enabled": true, "messages_to_codex": spec.toolRoundTrip && spec.seed.adapter == "codex", "messages_codex_safety_identifier": spec.toolRoundTrip && spec.seed.adapter == "codex", "chat_to_codex": spec.toolRoundTrip && spec.seed.adapter == "codex", "responses_to_grok": spec.seed.adapter == "grok-build" && spec.protocol == "responses", "chat_to_grok": spec.seed.adapter == "grok-build" && spec.protocol == "chat", "messages_to_grok": spec.seed.adapter == "grok-build" && spec.protocol == "messages", "messages_grok_safety_identifier": spec.seed.adapter == "grok-build" && spec.protocol == "messages", "grok_cli_identity": spec.seed.adapter == "grok-build", "chat_to_antigravity": spec.signedContinuation && spec.protocol == "chat", "responses_to_antigravity": spec.signedContinuation && spec.protocol == "responses", "responses_antigravity_compatibility": spec.signedContinuation && spec.protocol == "responses", "summary_compaction": spec.client.name == "codex" && spec.seed.adapter == "antigravity", "model_rewriting": spec.signedContinuation, "aliases": func() map[string]string {
 					if spec.signedContinuation {
 						return map[string]string{vendorModel: "gemini-fixture"}
 					}
@@ -737,7 +744,7 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 					config := s.want(owner, "GET", "/api/v1/code/routes/"+route["id"].(string)+"/client-config?client="+lane.client.name+"&platform=linux&gateway_url=http%3A%2F%2F127.0.0.1%3A18765", nil, nil, http.StatusOK)
 					return config["configuration"].(string)
 				}()
-				rawOutput, executed, err := runFixtureClient(t, lane.client.name, binary, bridge, slug, key["secret"].(string), configuration, lane.toolRoundTrip)
+				rawOutput, executed, err := runFixtureClient(t, lane.client.name, binary, bridge, slug, key["secret"].(string), configuration, lane.toolRoundTrip, false)
 				output := strings.ReplaceAll(rawOutput, key["secret"].(string), "[redacted]")
 				if err != nil {
 					return output, executed, err
@@ -751,6 +758,22 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 					default:
 						return output, executed, fmt.Errorf("client did not execute the fixture tool and continue")
 					}
+				}
+				if lane.client.name == "codex" && lane.seed.adapter == "antigravity" {
+					compacted, ran, compactErr := runFixtureClient(t, lane.client.name, binary, bridge, slug, key["secret"].(string), configuration, true, true)
+					cleaned := strings.ReplaceAll(compacted, key["secret"].(string), "[redacted]")
+					if compactErr != nil {
+						return cleaned, ran, compactErr
+					}
+					if !strings.Contains(cleaned, vendorAnswer) {
+						return cleaned, ran, fmt.Errorf("compaction continuation did not return the fixture answer")
+					}
+					select {
+					case <-summaryProof:
+					default:
+						return cleaned, ran, fmt.Errorf("client did not compact and restore its encrypted summary")
+					}
+					return output + "\n" + cleaned, ran, nil
 				}
 				return output, executed, nil
 			})

@@ -1593,3 +1593,98 @@ func TestGrokChatPublishedTranslation(t *testing.T) {
 		})
 	}
 }
+
+type summaryTestLedger struct {
+	fakeCodeLedger
+	saved chan string
+	fail  bool
+}
+
+func (s *summaryTestLedger) SealCodeSummary(_ context.Context, _ codesessions.Permit, summary string) (string, error) {
+	s.saved <- summary
+	if s.fail {
+		return "", errors.New("unavailable")
+	}
+	return "olp.summary.v1.fixture", nil
+}
+
+func (s *summaryTestLedger) OpenCodeSummary(_ context.Context, _ codesessions.Permit, encrypted string) (string, error) {
+	if encrypted != "olp.summary.v1.fixture" {
+		return "", errors.New("unavailable")
+	}
+	return "Keep the migration constraints", nil
+}
+
+type summaryTestAuthorizer struct{}
+
+func (summaryTestAuthorizer) AuthorizeCode(_ context.Context, _ routing.Configuration, account codemode.Account, _ codemode.Dispatch) (codemode.Authorization, error) {
+	return codemode.Authorization{Principal: account.Principal, ProjectID: "fixture-project", Headers: http.Header{"Authorization": {"Bearer fixture"}}}, nil
+}
+
+func TestCodeSummaryCompactionAccountsOneCallAndNeverReplaysAcceptedWork(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		path   string
+		stream bool
+		fail   bool
+		finish string
+		status int
+	}{
+		{"endpoint", "responses/compact", false, false, "STOP", 200},
+		{"trigger", "responses", true, false, "STOP", 200},
+		{"key storage failure", "responses/compact", false, true, "STOP", 502},
+		{"incomplete summary", "responses/compact", false, false, "MAX_TOKENS", 502},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			observed := make(chan []byte, 2)
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				observed <- body
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{"response":{"candidates":[{"content":{"parts":[{"text":"Keep the migration constraints"}]},"finishReason":%q}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":2,"totalTokenCount":10}}}`, test.finish)
+			}))
+			defer upstream.Close()
+			project := "project"
+			authority := keyauthority.Authority{ID: "key", ProjectID: &project, Policy: keyauthority.KeyPolicy{Scopes: []string{"inference"}}}
+			ledger := &summaryTestLedger{fakeCodeLedger: fakeCodeLedger{connectionPermit: codesessions.Permit{Authority: authority, Account: codemode.Account{ID: "account", ProviderID: "provider", Principal: "principal"}, Pin: codemode.Pin{AccountID: "account", Principal: "principal"}, Attempt: codemode.Attempt{ID: "attempt"}}}, saved: make(chan string, 1), fail: test.fail}
+			h := newHarness(t, Config{}, Dependencies{Admission: NewAdmission(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil))), CodeLedger: ledger, CodeAuthorizer: summaryTestAuthorizer{}})
+			h.rt.keys[fullKey] = authority
+			published := time.Now()
+			route := codemode.Route{PublishedAt: &published, ID: "route", ProjectID: project, Slug: "summary", PoolID: "pool", Models: []string{"gemini-fixture"}, Enabled: true, RevisionID: "revision", Revision: 1, ResponsesToAntigravity: true, SummaryCompaction: true}
+			publication, err := release.NewRelease("", 0, &routing.Snapshot{Generation: routing.Generation{ID: uuid.NewString()}, CodeRoutes: map[string]codemode.Route{"summary": route}, CodeConnections: map[string]routing.Configuration{"revision:provider": {Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: "antigravity-subscription", Endpoint: upstream.URL}}}}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.rt.release = publication
+			mux := http.NewServeMux()
+			h.gateway.RegisterCode(mux)
+			trigger := ""
+			if test.stream {
+				trigger = `,{"type":"compaction_trigger"}`
+			}
+			request := httptest.NewRequest(http.MethodPost, "/code/summary/"+test.path, strings.NewReader(fmt.Sprintf(`{"model":"gemini-fixture","stream":%t,"input":[{"role":"user","content":"Keep the migration constraints"}%s]}`, test.stream, trigger)))
+			request.Header.Set("Authorization", "Bearer "+fullKey)
+			request.Header.Set("Session-Id", "summary-root")
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, request)
+			if response.Code != test.status {
+				t.Fatalf("summary = %d %s", response.Code, response.Body.String())
+			}
+			if len(observed) != 1 || len(ledger.settlements) != 1 || ledger.settlements[0].Total == nil || *ledger.settlements[0].Total != 10 {
+				t.Fatalf("calls %d, usage %+v", len(observed), ledger.settlements)
+			}
+			if test.status != 200 {
+				if strings.Contains(response.Body.String(), "encrypted_content") || strings.Contains(response.Body.String(), "migration constraints") {
+					t.Fatalf("failed compaction leaked success %s", response.Body.String())
+				}
+				return
+			}
+			if !strings.Contains(response.Body.String(), `"encrypted_content":"olp.summary.v1.fixture"`) || strings.Contains(response.Body.String(), "migration constraints") {
+				t.Fatalf("summary item = %s", response.Body.String())
+			}
+			if test.stream && (!strings.Contains(response.Header().Get("Content-Type"), "text/event-stream") || !strings.Contains(response.Body.String(), "response.output_item.done") || !strings.Contains(response.Body.String(), "response.completed")) {
+				t.Fatalf("trigger SSE = %s", response.Body.String())
+			}
+		})
+	}
+}
