@@ -20,8 +20,7 @@ import (
 )
 
 type codeAntigravityPolicy struct {
-	messagesSafetyIdentifier bool
-	responsesCompatibility   bool
+	responsesCompatibility bool
 }
 
 func codeAntigravityProtocol(r *http.Request) wire.Format {
