@@ -32,14 +32,21 @@ profile only when the matching live lane in
 and its claims summary names that pair. Until then the console and this
 guide keep the no proven signal wording for that pair.
 
-No requested model currently has a qualified mapping to an allowance limit
-family, so allowance ordering has no effect and legacy eligibility remains in
-force for new roots, existing pins and model offers. Eligible accounts are
-selected using weights and cooldowns. Codex inference responses can supply
-passive observations, but OLP does not assume which models they cover. Active
-Codex reads and both MiniMax M
-Plan remains reads are held pending live qualification. Existing active
-observations do not influence admission or ordering.
+Allowance ordering is an explicit published policy, off by default. When enabled,
+a fresh passive Codex window with a model-facing `limit_name` exactly matching
+the selected upstream model ranks otherwise eligible accounts as healthy,
+unknown, low and exhausted. Different meters sharing that name are ambiguous
+and remain unknown. Each candidate is assessed independently, so other adapters
+remain unknown even in a mixed pool. Weights choose within each band and
+established conversations keep their account affinity. Exhaustion never excludes
+an account by itself. Authorization, supported models, account health and
+classified cooldowns still control eligibility and model offers.
+
+This name association is an advisory inference from
+[pinned client source](https://github.com/openai/codex/blob/d4a341bd52cc47ff635761334bde8a972d6de943/codex-rs/tui/src/chatwidget/rate_limits.rs#L193-L210),
+not a live-proven charging scope. Meter identity and model-facing names remain
+separate in stored observations. Active Codex and MiniMax reads remain disabled
+pending separate qualification, and active observations never affect ordering.
 
 GLM, Kimi, Qwen and MiniMax quota envelopes can set a cooldown, but they do
 not establish that inference did not execute and cannot authorize replay.
@@ -866,7 +873,7 @@ the root handshake before OLP is not qualified by the fallback test.
 
 Every generation rechecks key/project/route/pool permission, account eligibility,
 grant state and limits. A WebSocket upgrade is not lasting authorization to
-generate. Revocation, retirement, an unavailable account, exhausted allowance or
+generate. Revocation, retirement, an unavailable account or
 an unsupported model never triggers silent account switching; a cooling
 account the tree would take for a new model refuses that model too. A credential
 refresh may change authentication for the same principal; it must not change
@@ -916,14 +923,23 @@ Successful generations already running when another request starts a cooldown
 do not shorten it.
 
 Primary and secondary windows are retained independently for each metered limit.
+Account management responses retain the raw provider `meter_id`, exact
+model-facing `limit_name`, legacy normalized `limit_id`, window, values, unit,
+evidence kind and observation and reset times in `allowance.windows`.
+Missing names in older observations are not reconstructed from meter IDs.
+Selection diagnostics report the chosen advisory band, passive evidence kind
+and determining observation time without recording conversation content.
+An unknown band has no determining evidence. With ordering disabled, decisions
+have no allowance band and use the configured weights under normal eligibility.
 Token and request counts also retain their own observation and reset times.
 Credits remain separate from those windows and from local budgets. Partial
 observations preserve other dimensions, and stale observations cannot replace
-newer ones. For a qualified allowance band, an observation stays fresh until its
+newer ones. For an advisory allowance band, an observation stays fresh until its
 reported future reset, or for at most fifteen minutes when there is no future
-reset. No model has a qualified limit mapping today, so the allowance ordering
-setting has no effect. Legacy eligibility continues to treat passive exhaustion
-as unavailable until its supported reset, including when that reset is unknown.
+reset. A passed reset newer than the observation makes that observation stale.
+Model names match exactly, including case, without normalization or aliases.
+Legacy observations without a separate model-facing name remain unknown.
+Missing, unrelated, stale and ambiguous observations carry no band evidence.
 Passing a retry
 or reset time permits another attempt once all eligibility checks pass, while
 reported allowance values remain tied to upstream observations. Never infer

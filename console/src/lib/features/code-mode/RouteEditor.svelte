@@ -557,10 +557,11 @@
     Order new conversations by allowance bands
   </label>
   <p>
-    Off by default. No requested model has a qualified mapping to an allowance
-    limit family yet, so this setting has no effect. Legacy eligibility remains
-    in force for new conversations, existing pins and model offers. Published
-    revisions retain this policy and established pins never move.
+    Off by default. Fresh passive Codex windows named exactly for the selected
+    model rank eligible accounts as healthy, unknown, low and exhausted. This
+    advisory association is not live-proven and never excludes an account by
+    itself. Weights apply within each band. Published revisions retain this
+    policy and established pins never move. Active reads remain disabled.
   </p>
   <label class="choice"
     ><input

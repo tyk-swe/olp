@@ -122,3 +122,37 @@ func TestResponsesWithoutOpenCodeObjectKeepsChargeUnknown(t *testing.T) {
 		t.Fatalf("charge = %s, want nil (unknown, never zero)", observation.AllowanceCharge)
 	}
 }
+
+func TestPassiveModelLabelPreservesDistinctMeters(t *testing.T) {
+	first := codexwire.Observe([]byte(`{"type":"codex.rate_limits","metered_limit_name":"Meter_A","limit_name":"model.Exact","rate_limits":{"primary":{"used_percent":20}}}`), false).Allowance
+	second := codexwire.Observe([]byte(`{"type":"codex.rate_limits","metered_limit_name":"Meter-A","limit_name":"model.Exact","rate_limits":{"primary":{"used_percent":80}}}`), false).Allowance
+	if first == nil || second == nil {
+		t.Fatal("missing observations")
+	}
+	third := codexwire.Observe([]byte(`{"type":"codex.rate_limits","metered_limit_name":"Meter A","limit_name":"model.Exact","rate_limits":{"primary":{"used_percent":50}}}`), false).Allowance
+	if third == nil {
+		t.Fatal("opaque meter identity was lost")
+	}
+	merged := first.Merge(*second).Merge(*third)
+	raw, err := json.Marshal(merged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved struct {
+		Windows []struct {
+			MeterID   string `json:"meter_id"`
+			LimitName string `json:"limit_name"`
+		} `json:"windows"`
+	}
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.Windows) != 3 {
+		t.Fatalf("distinct meters collapsed: %s", raw)
+	}
+	for _, window := range saved.Windows {
+		if window.MeterID == "" || window.LimitName != "model.Exact" {
+			t.Fatalf("lost provider identity or label: %s", raw)
+		}
+	}
+}

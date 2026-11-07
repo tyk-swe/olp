@@ -112,7 +112,7 @@ func mergedAllowanceWindows(current, incoming []AllowanceWindow) iter.Seq[Allowa
 	return func(yield func(AllowanceWindow) bool) {
 		for _, old := range current {
 			index := slices.IndexFunc(incoming, func(w AllowanceWindow) bool {
-				return old.LimitID == w.LimitID && old.Window == w.Window && old.EffectiveEvidence() == w.EffectiveEvidence()
+				return old.MeterID == w.MeterID && old.LimitName == w.LimitName && old.LimitID == w.LimitID && old.Window == w.Window && old.EffectiveEvidence() == w.EffectiveEvidence()
 			})
 			if index < 0 || !incoming[index].ObservedAt.After(old.ObservedAt) {
 				if !yield(old.normalized()) {
@@ -128,7 +128,7 @@ func mergedAllowanceWindows(current, incoming []AllowanceWindow) iter.Seq[Allowa
 		}
 		for _, next := range incoming {
 			if slices.ContainsFunc(current, func(old AllowanceWindow) bool {
-				return old.LimitID == next.LimitID && old.Window == next.Window && old.EffectiveEvidence() == next.EffectiveEvidence()
+				return old.MeterID == next.MeterID && old.LimitName == next.LimitName && old.LimitID == next.LimitID && old.Window == next.Window && old.EffectiveEvidence() == next.EffectiveEvidence()
 			}) {
 				continue
 			}
@@ -175,6 +175,8 @@ type CountObservation struct {
 }
 
 type AllowanceWindow struct {
+	MeterID          string            `json:"meter_id,omitempty"`
+	LimitName        string            `json:"limit_name,omitempty"`
 	LimitID          string            `json:"limit_id"`
 	Window           string            `json:"window"`
 	Unit             AllowanceUnit     `json:"unit"`
@@ -216,9 +218,13 @@ type Credits struct {
 	ObservedAt time.Time `json:"observed_at"`
 }
 
+func validAllowanceLabel(label string) bool {
+	return len(label) <= 256 && !strings.ContainsFunc(label, func(r rune) bool { return r < 32 || r == 127 })
+}
+
 func (w AllowanceWindow) Validate() error {
 	names := AllowanceWindowNames()
-	if !limitID.MatchString(w.LimitID) || !slices.Contains(names[:], w.Window) || w.ObservedAt.IsZero() ||
+	if !validAllowanceLabel(w.MeterID) || !validAllowanceLabel(w.LimitName) || !limitID.MatchString(w.LimitID) || !slices.Contains(names[:], w.Window) || w.ObservedAt.IsZero() ||
 		!slices.Contains([]AllowanceEvidence{"", AllowanceEvidencePassive, AllowanceEvidenceActive}, w.Evidence) ||
 		w.WindowMinutes != nil && (*w.WindowMinutes < 0 || *w.WindowMinutes > 1<<53-1) ||
 		w.ResetsAt != nil && (w.ResetsAt.Unix() <= 0 || w.ResetsAt.Unix() >= 253402300800) {
@@ -274,7 +280,7 @@ func (a Allowance) validateObservations() error {
 	}
 	seen := map[string]bool{}
 	for _, w := range a.Windows {
-		key := w.LimitID + ":" + w.Window + ":" + string(w.EffectiveEvidence())
+		key := w.MeterID + "\x00" + w.LimitName + "\x00" + w.LimitID + ":" + w.Window + ":" + string(w.EffectiveEvidence())
 		if seen[key] || w.ObservedAt.After(a.ObservedAt) {
 			return fmt.Errorf("invalid provider allowance observation")
 		}

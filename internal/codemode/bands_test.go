@@ -10,7 +10,7 @@ import (
 var bandNow = time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
 
 func percentWindow(remaining float64, resetsAt *time.Time, observedAt time.Time) codemode.AllowanceWindow {
-	return codemode.AllowanceWindow{LimitID: "codex", Window: "primary", Unit: codemode.AllowanceUnitPercent, Evidence: codemode.AllowanceEvidencePassive, UsedPercent: 100 - remaining, RemainingPercent: remaining, ResetsAt: resetsAt, ObservedAt: observedAt}
+	return codemode.AllowanceWindow{LimitID: "codex", LimitName: "codex", Window: "primary", Unit: codemode.AllowanceUnitPercent, Evidence: codemode.AllowanceEvidencePassive, UsedPercent: 100 - remaining, RemainingPercent: remaining, ResetsAt: resetsAt, ObservedAt: observedAt}
 }
 
 func bandAllowance(windows ...codemode.AllowanceWindow) *codemode.Allowance {
@@ -82,7 +82,7 @@ func TestAssessBandExhaustedFromPercentAndCountWindows(t *testing.T) {
 	if percent.Band != codemode.BandExhausted {
 		t.Fatalf("zero percent remaining must be exhausted, got %+v", percent)
 	}
-	count := codemode.AllowanceWindow{LimitID: "codex", Window: "monthly", Unit: codemode.AllowanceUnitCount, Evidence: codemode.AllowanceEvidencePassive, RemainingValue: new(float64(0)), ResetsAt: &future, ObservedAt: bandNow}
+	count := codemode.AllowanceWindow{LimitID: "codex", LimitName: "codex", Window: "monthly", Unit: codemode.AllowanceUnitCount, Evidence: codemode.AllowanceEvidencePassive, RemainingValue: new(float64(0)), ResetsAt: &future, ObservedAt: bandNow}
 	if got := codemode.AssessBand(bandAllowance(percentWindow(75, &future, bandNow), count), "codex", bandNow); got.Band != codemode.BandExhausted {
 		t.Fatalf("zero count remaining must be exhausted, got %+v", got)
 	}
@@ -92,22 +92,22 @@ func TestAssessBandExhaustedFromPercentAndCountWindows(t *testing.T) {
 	if got := codemode.AssessBand(bandAllowance(percentWindow(75, &future, bandNow), staleCount), "codex", bandNow); got.Band != codemode.BandHealthy {
 		t.Fatalf("stale zero count must not exhaust, got %+v", got)
 	}
-	lowCount := codemode.AllowanceWindow{LimitID: "codex", Window: "monthly", Unit: codemode.AllowanceUnitCount, Evidence: codemode.AllowanceEvidencePassive, UsedValue: new(float64(95)), RemainingValue: new(float64(5)), ResetsAt: &future, ObservedAt: bandNow}
+	lowCount := codemode.AllowanceWindow{LimitID: "codex", LimitName: "codex", Window: "monthly", Unit: codemode.AllowanceUnitCount, Evidence: codemode.AllowanceEvidencePassive, UsedValue: new(float64(95)), RemainingValue: new(float64(5)), ResetsAt: &future, ObservedAt: bandNow}
 	if got := codemode.AssessBand(bandAllowance(lowCount), "codex", bandNow); got.Band != codemode.BandUnknown || got.Evidence != nil || got.ObservedAt != nil {
 		t.Fatalf("count windows never derive a low fraction, got %+v", got)
 	}
-	spareCount := codemode.AllowanceWindow{LimitID: "codex", Window: "monthly", Unit: codemode.AllowanceUnitCount, Evidence: codemode.AllowanceEvidencePassive, RemainingValue: new(float64(5)), ResetsAt: &future, ObservedAt: bandNow}
+	spareCount := codemode.AllowanceWindow{LimitID: "codex", LimitName: "codex", Window: "monthly", Unit: codemode.AllowanceUnitCount, Evidence: codemode.AllowanceEvidencePassive, RemainingValue: new(float64(5)), ResetsAt: &future, ObservedAt: bandNow}
 	if got := codemode.AssessBand(bandAllowance(spareCount), "codex", bandNow); got.Band != codemode.BandUnknown || got.Evidence != nil {
 		t.Fatalf("fresh count alone never proves healthy, got %+v", got)
 	}
 	if got := codemode.AssessBand(bandAllowance(count), "codex", bandNow); got.Band != codemode.BandExhausted {
 		t.Fatalf("zero count alone must be exhausted, got %+v", got)
 	}
-	credits := codemode.AllowanceWindow{LimitID: "codex", Window: "monthly", Unit: codemode.AllowanceUnitCredits, Evidence: codemode.AllowanceEvidencePassive, RemainingValue: new(float64(0)), ResetsAt: &future, ObservedAt: bandNow}
+	credits := codemode.AllowanceWindow{LimitID: "codex", LimitName: "codex", Window: "monthly", Unit: codemode.AllowanceUnitCredits, Evidence: codemode.AllowanceEvidencePassive, RemainingValue: new(float64(0)), ResetsAt: &future, ObservedAt: bandNow}
 	if got := codemode.AssessBand(bandAllowance(credits), "codex", bandNow); got.Band != codemode.BandUnknown {
 		t.Fatalf("credits never place an account in a band, got %+v", got)
 	}
-	cents := codemode.AllowanceWindow{LimitID: "codex", Window: "monthly", Unit: codemode.AllowanceUnitCents, Evidence: codemode.AllowanceEvidencePassive, RemainingValue: new(float64(0)), ResetsAt: &future, ObservedAt: bandNow}
+	cents := codemode.AllowanceWindow{LimitID: "codex", LimitName: "codex", Window: "monthly", Unit: codemode.AllowanceUnitCents, Evidence: codemode.AllowanceEvidencePassive, RemainingValue: new(float64(0)), ResetsAt: &future, ObservedAt: bandNow}
 	if got := codemode.AssessBand(bandAllowance(percentWindow(75, &future, bandNow), cents), "codex", bandNow); got.Band != codemode.BandHealthy {
 		t.Fatalf("cents never place an account in a band, got %+v", got)
 	}
@@ -135,7 +135,7 @@ func TestAssessBandEvidenceComesFromDeterminingWindow(t *testing.T) {
 
 	freshPercent := percentWindow(75, &future, bandNow)
 	freshPercent.Evidence = codemode.AllowanceEvidencePassive
-	count := codemode.AllowanceWindow{LimitID: "codex", Window: "monthly", Unit: codemode.AllowanceUnitCount, Evidence: codemode.AllowanceEvidencePassive, RemainingValue: new(float64(0)), ResetsAt: &future, ObservedAt: earlier}
+	count := codemode.AllowanceWindow{LimitID: "codex", LimitName: "codex", Window: "monthly", Unit: codemode.AllowanceUnitCount, Evidence: codemode.AllowanceEvidencePassive, RemainingValue: new(float64(0)), ResetsAt: &future, ObservedAt: earlier}
 	exhausted := codemode.AssessBand(bandAllowance(freshPercent, count), "codex", bandNow)
 	if exhausted.Band != codemode.BandExhausted || exhausted.Evidence == nil || *exhausted.Evidence != codemode.AllowanceEvidencePassive || exhausted.ObservedAt == nil || !exhausted.ObservedAt.Equal(earlier) {
 		t.Fatalf("exhausted evidence must come from the exhausted window, got %+v", exhausted)
@@ -146,7 +146,7 @@ func TestAssessBandReadsLegacyTopLevelPercent(t *testing.T) {
 	future := bandNow.Add(time.Hour)
 	legacy := &codemode.Allowance{RemainingPercent: new(float64(5)), ResetsAt: &future, ObservedAt: bandNow.Add(-time.Minute)}
 	got := codemode.AssessBand(legacy, "codex", bandNow)
-	if got.Band != codemode.BandLow || got.Evidence == nil || *got.Evidence != codemode.AllowanceEvidencePassive {
+	if got.Band != codemode.BandUnknown || got.Evidence != nil {
 		t.Fatalf("legacy top level percent = %+v", got)
 	}
 }
@@ -180,8 +180,8 @@ func TestChooseCandidateOrdersBandsInsideTreeTier(t *testing.T) {
 		{AccountID: "low", Available: true, Position: 3, Score: 1, Band: codemode.BandLow},
 	}
 	chosen, ok = codemode.ChooseCandidate(exhausted)
-	if !ok || chosen.AccountID != "low" || (codemode.Candidate{Available: true, Band: codemode.BandExhausted}).Eligible() {
-		t.Fatalf("exhausted must be treated unavailable, got %+v", chosen)
+	if !ok || chosen.AccountID != "low" || !(codemode.Candidate{Available: true, Band: codemode.BandExhausted}).Eligible() {
+		t.Fatalf("exhausted must rank below low and remain eligible, got %+v", chosen)
 	}
 
 	cooling := []codemode.Candidate{
@@ -241,7 +241,7 @@ func TestSkippedAccountsNameLowerBandLosses(t *testing.T) {
 	want := map[string]codemode.SkipClass{
 		"unknown":    codemode.SkipBand,
 		"low":        codemode.SkipBand,
-		"exhausted":  codemode.SkipUnavailable,
+		"exhausted":  codemode.SkipBand,
 		"same-band":  codemode.SkipWeight,
 		"later-tree": codemode.SkipTree,
 		"cooling":    codemode.SkipCooldown,
@@ -260,7 +260,7 @@ func TestSkippedAccountsNameLowerBandLosses(t *testing.T) {
 func TestAssessBandIgnoresUnqualifiedAndUnrelatedWindows(t *testing.T) {
 	future := bandNow.Add(time.Hour)
 	unrelated := percentWindow(0, &future, bandNow)
-	unrelated.LimitID = "special_model"
+	unrelated.LimitName = "special_model"
 	active := percentWindow(0, &future, bandNow)
 	active.Window = "secondary"
 	active.Evidence = codemode.AllowanceEvidenceActive
@@ -270,12 +270,47 @@ func TestAssessBandIgnoresUnqualifiedAndUnrelatedWindows(t *testing.T) {
 	}
 }
 
-func TestAssessBandUsesMatchingFamily(t *testing.T) {
+func TestAssessBandUsesExactModelLabel(t *testing.T) {
 	future := bandNow.Add(time.Hour)
 	special := percentWindow(0, &future, bandNow)
-	special.LimitID = "special_model"
+	special.LimitName = "special_model"
 	allowance := bandAllowance(percentWindow(75, &future, bandNow), special)
 	if got := codemode.AssessBand(allowance, "special_model", bandNow); got.Band != codemode.BandExhausted {
 		t.Fatalf("matching family must use its exhausted window: %+v", got)
+	}
+}
+
+func TestExactModelBandsAreAdvisoryAndUnambiguous(t *testing.T) {
+	future := bandNow.Add(time.Hour)
+	exact := percentWindow(0, &future, bandNow)
+	exact.LimitName = "model.Exact"
+	exact.MeterID = "meter-a"
+	if got := codemode.AssessBand(bandAllowance(exact), "model.Exact", bandNow); got.Band != codemode.BandExhausted {
+		t.Fatalf("exact model = %+v", got)
+	}
+	chosen, ok := codemode.ChooseCandidate([]codemode.Candidate{{AccountID: "last", Available: true, Band: codemode.BandExhausted}})
+	if !ok || !chosen.Eligible() {
+		t.Fatalf("advisory exhaustion excluded last account: %+v", chosen)
+	}
+	for _, model := range []string{"model.exact", "other", "codex", ""} {
+		if got := codemode.AssessBand(bandAllowance(exact), model, bandNow); got.Band != codemode.BandUnknown {
+			t.Fatalf("unrelated %q = %+v", model, got)
+		}
+	}
+	ambiguous := exact
+	ambiguous.MeterID = "meter-b"
+	if got := codemode.AssessBand(bandAllowance(exact, ambiguous), "model.Exact", bandNow); got.Band != codemode.BandUnknown {
+		t.Fatalf("ambiguous meters = %+v", got)
+	}
+	active := exact
+	active.Evidence = codemode.AllowanceEvidenceActive
+	if got := codemode.AssessBand(bandAllowance(active), "model.Exact", bandNow); got.Band != codemode.BandUnknown {
+		t.Fatalf("active = %+v", got)
+	}
+	stale := exact
+	stale.ResetsAt = nil
+	stale.ObservedAt = bandNow.Add(-time.Hour)
+	if got := codemode.AssessBand(bandAllowance(stale), "model.Exact", bandNow); got.Band != codemode.BandUnknown {
+		t.Fatalf("stale = %+v", got)
 	}
 }
