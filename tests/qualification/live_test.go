@@ -26,15 +26,17 @@ func liveBody(protocol, model string) map[string]any {
 	}
 }
 
-func runLiveLane(l liveLane, journey func() []runCheck) runRecord {
+func runLiveLane(t *testing.T, l liveLane, journey func() []runCheck) runRecord {
+	t.Helper()
 	if _, _, missing := l.provided(); len(missing) > 0 {
-		return l.record("no_signal", "missing env: "+strings.Join(missing, ", "), nil)
+		return l.record("no_signal", "missing env: "+strings.Join(missing, ", "), "", nil)
 	}
-	if _, ok := clientVersion(l.client.binary); !ok {
-		return l.record("no_signal", "client binary "+l.client.binary+" unavailable", nil)
+	version, ok := clientVersion(t, l.client.binary)
+	if !ok {
+		return l.record("no_signal", "client binary "+l.client.binary+" unavailable", "", nil)
 	}
 	checks := journey()
-	return l.record(liveLaneResult(l, checks), "", checks)
+	return l.record(liveLaneResult(l, checks), "", version, checks)
 }
 
 func liveLaneResult(l liveLane, checks []runCheck) string {
@@ -349,7 +351,7 @@ func TestCodeModeLiveQualificationLanes(t *testing.T) {
 	defer func() {
 		for _, spec := range specs {
 			if !emitted[spec.id()] {
-				record := spec.record("no_signal", "lane did not complete", nil)
+				record := spec.record("no_signal", "lane did not complete", "", nil)
 				records = append(records, record)
 				writer.emit(t, record)
 			}
@@ -374,7 +376,7 @@ func TestCodeModeLiveQualificationLanes(t *testing.T) {
 	})
 	if !anyProvided {
 		for _, spec := range specs {
-			complete(runLiveLane(spec, func() []runCheck {
+			complete(runLiveLane(t, spec, func() []runCheck {
 				return []runCheck{{Name: "inference", Result: "no_signal", Detail: "no live lane env provided"}}
 			}))
 		}
@@ -397,7 +399,7 @@ func TestCodeModeLiveQualificationLanes(t *testing.T) {
 
 	for _, spec := range specs {
 		lane := spec
-		complete(runLiveLane(lane, func() []runCheck {
+		complete(runLiveLane(t, lane, func() []runCheck {
 			return s.liveJourney(owner, consumer, project, ownerID, keyID, lane)
 		}))
 	}
@@ -439,7 +441,7 @@ func TestLiveMissingEnvRecordsNoSignal(t *testing.T) {
 	t.Setenv(lane.keyEnv, "")
 	t.Setenv(lane.modelEnv, "")
 	called := false
-	record := runLiveLane(lane, func() []runCheck {
+	record := runLiveLane(t, lane, func() []runCheck {
 		called = true
 		return nil
 	})

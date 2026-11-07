@@ -350,7 +350,9 @@ KMS decrypt permission required by the bucket's encryption key. Supply
 as the billing credential, adding `session_token` for temporary credentials,
 or `{"auth_mode":"workload"}` to use the workload's AWS credential chain.
 The workload chain uses the bounded AWS metadata transport; S3 access uses the
-connection's normal network and egress policy. The import reads only Bedrock
+connection's normal network and egress policy. A web identity token is exchanged
+only with the default STS endpoint for the report's region, and configured
+endpoint URLs such as `AWS_ENDPOINT_URL_STS` are ignored for that exchange. The import reads only Bedrock
 service rows, uses effective costs for reserved and Savings Plan usage, and
 excludes commitment fees and negation lines. It uses the assembly manifest and
 its S3 modification time as the revision and ordering marker. Parquet exports
@@ -455,7 +457,10 @@ the beginning of the queried period and includes later arrivals. A day is covere
 only when the export contains activity for the configured account and projects
 on that UTC day, across any service,
 and the day closed before the watermark. An evidenced day with no Vertex charges
-is covered zero. Days without scope activity remain not imported. Google exports
+is covered zero. Days without scope activity remain not imported. Each applied
+import of a period replaces every covered day in its queried range, so a day the
+result no longer evidences returns to not imported, including a day imported
+under an earlier source or scope. Google exports
 can begin after historical usage, contain gaps or arrive late. Activity and a
 watermark provide evidence of coverage, but do not guarantee that the export
 contained every historical cost.
@@ -485,7 +490,10 @@ streams up to 200 CSV parts, 128 MiB compressed and 512 MiB expanded per pass,
 with two million rows, 100,000 aggregates and a one-minute import budget. Each
 day's returned line items are summed per
 `(day, line_item, currency)` and replace the stored rows. A returned bucket with
-no results records an invoiced zero. On success the import schedules one hour
+no results records an invoiced zero. Migration 0141 keeps OpenAI and Anthropic
+days imported before per-day coverage only when they hold imported costs,
+because an empty fetched day cannot be told apart from an import gap, so the
+others report `not_imported`. On success the import schedules one hour
 out. When AWS or Azure reaches the pass budget after completing a period, it
 continues the remaining periods on the next worker scan. An individual period
 that exceeds the limits still fails and backs off. Google schedules the next
