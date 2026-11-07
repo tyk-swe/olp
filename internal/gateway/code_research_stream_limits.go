@@ -16,22 +16,23 @@ import (
 // remain shared with ordinary traffic through the usual research reservation.
 func (a *Admission) reserveResearchStream(ctx context.Context, authority keyauthority.Authority, route, service, provider string, providerLimits *routing.Limits) (*limits.Lease, *Error) {
 	type boundary struct {
-		scope string
-		max   *int64
+		scope    string
+		max      *int64
+		provider bool
 	}
 	boundaries := []boundary{
-		{"key:" + authority.LimitsLookup(), authority.Policy.MaxConcurrency},
-		{"route:" + authority.ID + ":" + route, authority.Policy.RouteLimits[route].MaxConcurrency},
-		{"key-end-user:" + authority.ID + ":" + authority.EndUserDigest, authority.Policy.EndUserPolicy.Limits(authority.EndUserDigest).MaxConcurrency},
+		{scope: "key:" + authority.LimitsLookup(), max: authority.Policy.MaxConcurrency},
+		{scope: "route:" + authority.ID + ":" + route, max: authority.Policy.RouteLimits[route].MaxConcurrency},
+		{scope: "key-end-user:" + authority.ID + ":" + authority.EndUserDigest, max: authority.Policy.EndUserPolicy.Limits(authority.EndUserDigest).MaxConcurrency},
 	}
 	if authority.BudgetGroupID != nil {
-		boundaries = append(boundaries, boundary{"group:" + *authority.BudgetGroupID, authority.BudgetGroupConcurrency})
+		boundaries = append(boundaries, boundary{scope: "group:" + *authority.BudgetGroupID, max: authority.BudgetGroupConcurrency})
 	}
 	if authority.ProjectID != nil {
-		boundaries = append(boundaries, boundary{"project-end-user:" + *authority.ProjectID + ":" + authority.EndUserDigest, authority.ProjectEndUserPolicy.Limits(authority.EndUserDigest).MaxConcurrency})
+		boundaries = append(boundaries, boundary{scope: "project-end-user:" + *authority.ProjectID + ":" + authority.EndUserDigest, max: authority.ProjectEndUserPolicy.Limits(authority.EndUserDigest).MaxConcurrency})
 	}
 	if providerLimits != nil {
-		boundaries = append(boundaries, boundary{"provider:" + provider, providerLimits.MaxConcurrency})
+		boundaries = append(boundaries, boundary{scope: "provider:" + provider, max: providerLimits.MaxConcurrency, provider: true})
 	}
 	var chain *limits.Lease
 	for _, boundary := range boundaries {
@@ -54,7 +55,13 @@ func (a *Admission) reserveResearchStream(ctx context.Context, authority keyauth
 			if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
 				return refuse(rateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate))
 			}
-			return refuse(limitsUnavailable())
+			if boundary.provider {
+				return refuse(limitsUnavailable())
+			}
+			if failure := a.outage(authority.ID, false, err); failure != nil {
+				return refuse(failure)
+			}
+			continue
 		}
 		lease.Attach(chain)
 		chain = lease

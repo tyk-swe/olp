@@ -27,6 +27,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/release"
 
@@ -854,6 +855,48 @@ func TestTransformedMediaPreservesUsage(t *testing.T) {
 			expectedUsage, expectedPresent := upstream["usage"]
 			if actualPresent != expectedPresent || !reflect.DeepEqual(actualUsage, expectedUsage) {
 				t.Fatalf("usage changed from %v to %v, client response %s", expectedUsage, actualUsage, gotBody)
+			}
+		})
+	}
+}
+
+type unreachableValkey struct{}
+
+func (unreachableValkey) Do(context.Context, ...string) (any, error) {
+	return nil, context.DeadlineExceeded
+}
+
+func TestResearchStreamFollowsOutagePolicy(t *testing.T) {
+	limiter, err := limits.New(unreachableValkey{}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	slots := int64(1)
+	authority := keyauthority.Authority{ID: uuid.NewString(), Policy: keyauthority.KeyPolicy{MaxConcurrency: &slots}}
+	for _, test := range []struct {
+		name       string
+		policy     limits.OutagePolicy
+		provider   *routing.Limits
+		wantRefuse bool
+	}{
+		{"fail open admits key concurrency", limits.FailOpen, nil, false},
+		{"fail closed refuses key concurrency", limits.FailClosed, nil, true},
+		{"fail open still refuses provider concurrency", limits.FailOpen, &routing.Limits{MaxConcurrency: &slots}, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			admission := NewAdmission(limiter, func() limits.OutagePolicy { return test.policy }, slog.New(slog.DiscardHandler))
+			lease, failure := admission.reserveResearchStream(t.Context(), authority, routeSlug, "service", "provider", test.provider)
+			if test.wantRefuse {
+				if failure == nil || failure.Code != "distributed_limits_unavailable" {
+					t.Fatalf("outage admitted the stream: lease=%v failure=%v", lease, failure)
+				}
+				return
+			}
+			if failure != nil {
+				t.Fatalf("fail-open installation refused the stream: %v", failure)
+			}
+			if admission.FailOpenTotal() != 1 {
+				t.Fatalf("fail-open total = %d, want 1", admission.FailOpenTotal())
 			}
 		})
 	}
