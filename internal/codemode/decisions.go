@@ -40,7 +40,7 @@ type Candidate struct {
 }
 
 func (c Candidate) Eligible() bool {
-	return c.Available && c.Band != BandExhausted
+	return c.Available && !c.Cooldown
 }
 
 func candidatePreferred(left, right Candidate) int {

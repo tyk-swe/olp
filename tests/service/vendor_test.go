@@ -3,12 +3,21 @@
 package service_test
 
 import (
+	"bufio"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -148,3 +157,50 @@ func (s *service) publishedRoute(owner *caller, slug string, provider map[string
 }
 
 func uniqueName(prefix string) string { return prefix + "-" + uuid.NewString()[:8] }
+
+func newCodeVendorProxy(t *testing.T, handler http.Handler) (string, string) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificate := &x509.Certificate{
+		SerialNumber: big.NewInt(1), DNSNames: []string{"chatgpt.com"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		IsCA: true, BasicConstraintsValid: true,
+		KeyUsage:    x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, certificate, certificate, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodConnect {
+			http.Error(w, "unsupported fixture destination", http.StatusBadGateway)
+			return
+		}
+		conn, _, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		if _, err := io.WriteString(conn, "HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
+			return
+		}
+		secured := tls.Server(conn, &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}}})
+		defer secured.Close()
+		request, err := http.ReadRequest(bufio.NewReader(secured))
+		if err != nil {
+			return
+		}
+		defer request.Body.Close()
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		response := recorder.Result()
+		defer response.Body.Close()
+		_ = response.Write(secured)
+	}))
+	t.Cleanup(proxy.Close)
+	return proxy.URL, string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+}

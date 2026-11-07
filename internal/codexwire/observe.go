@@ -114,7 +114,7 @@ func Allowance(headers http.Header, now time.Time) *codemode.Allowance {
 		id, _ := codemode.NormalizeLimitID(strings.TrimPrefix(prefix, "x-"))
 		for _, kind := range codexWindowNames() {
 			base := prefix + "-" + kind
-			if w := allowanceWindow(id, kind, headerValue(headers, base+"-used-percent"), headerValue(headers, base+"-window-minutes"), headerValue(headers, base+"-reset-at"), now); w != nil && (w.UsedPercent != 0 || w.WindowMinutes != nil && *w.WindowMinutes != 0 || w.ResetsAt != nil) {
+			if w := allowanceWindow(allowanceIdentity{limitID: id, meterID: strings.TrimPrefix(prefix, "x-")}, kind, headerValue(headers, base+"-used-percent"), headerValue(headers, base+"-window-minutes"), headerValue(headers, base+"-reset-at"), now); w != nil && (w.UsedPercent != 0 || w.WindowMinutes != nil && *w.WindowMinutes != 0 || w.ResetsAt != nil) {
 				result.Windows = append(result.Windows, *w)
 			}
 		}
@@ -131,12 +131,18 @@ func headerValue(headers http.Header, name string) string {
 	return values[0]
 }
 
-func allowanceWindow(id, kind, usedText, minutesText, resetText string, now time.Time) *codemode.AllowanceWindow {
+type allowanceIdentity struct {
+	limitID   string
+	meterID   string
+	limitName string
+}
+
+func allowanceWindow(identity allowanceIdentity, kind, usedText, minutesText, resetText string, now time.Time) *codemode.AllowanceWindow {
 	used, err := strconv.ParseFloat(usedText, 64)
 	if err != nil || math.IsNaN(used) || math.IsInf(used, 0) || used < 0 || used > 1<<53-1 {
 		return nil
 	}
-	w := &codemode.AllowanceWindow{LimitID: id, Window: kind, Unit: codemode.AllowanceUnitPercent, Evidence: codemode.AllowanceEvidencePassive, UsedPercent: used, RemainingPercent: max(0, 100-used), ObservedAt: now}
+	w := &codemode.AllowanceWindow{LimitID: identity.limitID, MeterID: identity.meterID, LimitName: identity.limitName, Window: kind, Unit: codemode.AllowanceUnitPercent, Evidence: codemode.AllowanceEvidencePassive, UsedPercent: used, RemainingPercent: max(0, 100-used), ObservedAt: now}
 	if minutes, err := strconv.ParseInt(minutesText, 10, 64); err == nil && minutes >= 0 && minutes <= 1<<53-1 {
 		w.WindowMinutes = &minutes
 	}
@@ -180,18 +186,27 @@ func credits(hasText, unlimitedText, balance string, now time.Time) *codemode.Cr
 }
 
 func eventAllowance(root oif.Value, now time.Time) *codemode.Allowance {
-	id, _ := field(root, "metered_limit_name").Text()
-	if id == "" {
-		id, _ = field(root, "limit_name").Text()
-	}
-	if id == "" {
-		id = "codex"
-	}
-	limit, _ := codemode.NormalizeLimitID(id)
+	meter, _ := field(root, "metered_limit_name").Text()
+	name, _ := field(root, "limit_name").Text()
+	id := func() string {
+		if meter != "" {
+			return meter
+		}
+		if name != "" {
+			return name
+		}
+		return "codex"
+	}()
+	limit := func() string {
+		if normalized, ok := codemode.NormalizeLimitID(id); ok {
+			return normalized
+		}
+		return "codex"
+	}()
 	result := &codemode.Allowance{ObservedAt: now}
 	for _, kind := range codexWindowNames() {
 		value := field(field(root, "rate_limits"), kind)
-		if w := allowanceWindow(limit, kind, field(value, "used_percent").Raw(), field(value, "window_minutes").Raw(), field(value, "reset_at").Raw(), now); w != nil {
+		if w := allowanceWindow(allowanceIdentity{limitID: limit, meterID: meter, limitName: name}, kind, field(value, "used_percent").Raw(), field(value, "window_minutes").Raw(), field(value, "reset_at").Raw(), now); w != nil {
 			result.Windows = append(result.Windows, *w)
 		}
 	}

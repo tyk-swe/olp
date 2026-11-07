@@ -3,11 +3,13 @@
 package service_test
 
 import (
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/tyk-swe/olp/internal/codesessions"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -20,6 +22,14 @@ import (
 	"github.com/tyk-swe/olp/internal/codeallowance"
 	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codesessions"
+	"github.com/tyk-swe/olp/internal/codexauth"
+	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/providerconfig"
+	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/secrets"
+
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	codepromotion "github.com/tyk-swe/olp/internal/promotion/code"
@@ -33,6 +43,7 @@ func TestCodeDecisionJourneys(t *testing.T) {
 	}
 	t.Run("chosen and pinned", func(t *testing.T) { codeAdmissionRecordsChosenAndPinnedDecisions(t, pool) })
 	t.Run("allowance ordering", func(t *testing.T) { codeBandOrderingOrdersNewRootsAndNeverMovesPins(t, pool) })
+	t.Run("mixed adapter bands", func(t *testing.T) { codeBandsAssessEachAdapter(t, pool) })
 }
 
 func codeAdmissionRecordsChosenAndPinnedDecisions(t *testing.T, pool *pgxpool.Pool) {
@@ -176,7 +187,7 @@ func codeAdmissionRecordsChosenAndPinnedDecisions(t *testing.T, pool *pgxpool.Po
 func bandAllowanceJSON(t *testing.T, remaining float64, resetsAt *time.Time, observedAt time.Time) []byte {
 	t.Helper()
 	document, err := json.Marshal(codemode.Allowance{
-		Windows:          []codemode.AllowanceWindow{{LimitID: "codex", Window: "primary", Unit: codemode.AllowanceUnitPercent, Evidence: codemode.AllowanceEvidencePassive, UsedPercent: 100 - remaining, RemainingPercent: remaining, ResetsAt: resetsAt, ObservedAt: observedAt}},
+		Windows:          []codemode.AllowanceWindow{{LimitID: "codex", MeterID: "codex", LimitName: "model", Window: "primary", Unit: codemode.AllowanceUnitPercent, Evidence: codemode.AllowanceEvidencePassive, UsedPercent: 100 - remaining, RemainingPercent: remaining, ResetsAt: resetsAt, ObservedAt: observedAt}},
 		RemainingPercent: &remaining,
 		ResetsAt:         resetsAt,
 		ObservedAt:       observedAt,
@@ -334,25 +345,20 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 	}
 
 	on := admit(bySlug["band-on"], "band-conv-0")
-	if on.Account.ID != low {
-		t.Fatalf("an unmapped model chose %s, want the weighted score winner %s", on.Account.ID, low)
+	if on.Account.ID != healthy {
+		t.Fatalf("exact model ordering chose %s, want healthy %s", on.Account.ID, healthy)
 	}
 	decision := codeDecisionForAttempt(t, pool, on.Attempt.ID)
-	if decision.Band != nil ||
-		decision.Evidence != nil || decision.EvidenceObservedAt != nil ||
-		skippedClass(decision, healthy) != codemode.SkipWeight || skippedClass(decision, unknown) != codemode.SkipWeight {
+	if decision.Band == nil || *decision.Band != codemode.BandHealthy ||
+		decision.Evidence == nil || decision.EvidenceObservedAt == nil ||
+		skippedClass(decision, low) != codemode.SkipBand || skippedClass(decision, unknown) != codemode.SkipBand {
 		t.Fatalf("ordering on decision = %+v", decision)
 	}
 
 	noneHealthy := admit(bySlug["band-no-healthy"], "band-nohealthy-0")
 	decision = codeDecisionForAttempt(t, pool, noneHealthy.Attempt.ID)
-	if decision.Band != nil || decision.Evidence != nil || decision.EvidenceObservedAt != nil {
-		t.Fatalf("no healthy decision = %+v", decision)
-	}
-	for _, skipped := range decision.Skipped {
-		if skipped.Class == codemode.SkipBand {
-			t.Fatalf("an unmapped family affected selection: %+v", decision)
-		}
+	if decision.Band == nil || *decision.Band != codemode.BandUnknown || decision.Evidence != nil || decision.EvidenceObservedAt != nil || skippedClass(decision, low) != codemode.SkipBand || skippedClass(decision, exhausted) != codemode.SkipBand {
+		t.Fatalf("unknown must precede low and exhausted: %+v", decision)
 	}
 
 	wins := map[string]int{}
@@ -363,6 +369,18 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 		t.Fatalf("weights must share roots, got %v", wins)
 	}
 
+	for _, phase := range []struct {
+		remaining float64
+		band      codemode.Band
+	}{{5, codemode.BandLow}, {0, codemode.BandExhausted}} {
+		if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance=$2 WHERE id IN ($1,$3)`, shareA, bandAllowanceJSON(t, phase.remaining, &reset, base), shareB); err != nil {
+			t.Fatal(err)
+		}
+		selected := admit(bySlug["band-share"], uuid.NewString())
+		if got := codeDecisionForAttempt(t, pool, selected.Attempt.ID); got.Band == nil || *got.Band != phase.band {
+			t.Fatalf("last advisory band must remain usable: %+v", got)
+		}
+	}
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1`, healthy, bandAllowanceJSON(t, 5, &reset, base)); err != nil {
 		t.Fatal(err)
 	}
@@ -370,7 +388,7 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 		t.Fatal(err)
 	}
 	pinned := admit(bySlug["band-on"], "band-conv-0")
-	if pinned.Account.ID != low {
+	if pinned.Account.ID != healthy {
 		t.Fatalf("pinned turn moved to %s after bands flipped", pinned.Account.ID)
 	}
 	if decision = codeDecisionForAttempt(t, pool, pinned.Attempt.ID); decision.Reason != codemode.DecisionPin || decision.Band != nil || decision.Evidence != nil || decision.EvidenceObservedAt != nil {
@@ -1136,7 +1154,7 @@ func codeActiveAllowanceDoesNotAffectBands(t *testing.T, pool *pgxpool.Pool) {
 		t.Fatalf("chosen account = %s", permit.Account.ID)
 	}
 	decision := codeDecisionForAttempt(t, pool, permit.Attempt.ID)
-	if decision.Band != nil || decision.Evidence != nil || decision.EvidenceObservedAt != nil {
+	if decision.Band == nil || *decision.Band != codemode.BandUnknown || decision.Evidence != nil || decision.EvidenceObservedAt != nil {
 		t.Fatalf("active band decision = %+v", decision)
 	}
 	passive := codemode.Allowance{Windows: []codemode.AllowanceWindow{{LimitID: "codex", Window: "primary", Unit: codemode.AllowanceUnitPercent, Evidence: codemode.AllowanceEvidencePassive, UsedPercent: 40, RemainingPercent: 60, ResetsAt: &reset, ObservedAt: base}}, ObservedAt: base}
@@ -1254,7 +1272,7 @@ func codeMiniMaxActiveRemainsDoesNotAffectBands(t *testing.T, pool *pgxpool.Pool
 		t.Fatalf("chosen account = %s", permit.Account.ID)
 	}
 	decision := codeDecisionForAttempt(t, pool, permit.Attempt.ID)
-	if decision.Band != nil || decision.Evidence != nil || decision.EvidenceObservedAt != nil {
+	if decision.Band == nil || *decision.Band != codemode.BandUnknown || decision.Evidence != nil || decision.EvidenceObservedAt != nil {
 		t.Fatalf("MiniMax active band decision = %+v", decision)
 	}
 }
@@ -1522,5 +1540,247 @@ func TestCodeAccountPromotionCycleAnchor(t *testing.T) {
 				t.Fatal("unchanged account was replaced")
 			}
 		})
+	}
+}
+
+func TestCodeExactModelOrderingThroughGateway(t *testing.T) {
+	s := startService(t)
+	owner := s.owner()
+	proxyURL, roots := newCodeVendorProxy(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "resp_" + uuid.NewString(), "object": "response", "status": "completed", "output": []any{}, "fixture_account": r.Header.Get("Chatgpt-Account-Id")})
+	}))
+	journey := seedCooldownJourney(t, s.pool)
+	var user string
+	if err := s.pool.QueryRow(t.Context(), `SELECT created_by::text FROM olp.projects WHERE id=$1`, journey.route.ProjectID).Scan(&user); err != nil {
+		t.Fatal(err)
+	}
+	key := s.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "ordering", "scopes": []string{"inference"}, "project_id": journey.route.ProjectID}, idempotent(), http.StatusCreated)
+	if _, err := s.pool.Exec(t.Context(), `INSERT INTO olp.code_pool_keys(pool_id,api_key_id) VALUES($1,$2)`, journey.route.PoolID, key["id"]); err != nil {
+		t.Fatal(err)
+	}
+	master, err := os.ReadFile(s.env.values["OLP_MASTER_KEY_FILE"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	ring, err := secrets.ParseRing(master)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := strings.Repeat("1", 64)
+	manifest, err := json.Marshal(codexauth.Manifest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.pool.Exec(t.Context(), `INSERT INTO olp.plugins(digest,abi_version,manifest,module,size_bytes,etag,installed_by,approved_by,approved_at) VALUES($1,1,$2,'\x00',1,$3,$4,$4,now())`, digest, manifest, uuid.NewString(), user); err != nil {
+		t.Fatal(err)
+	}
+	address := codexauth.Upstream
+	config := providers.Configuration{
+		Identity: providerconfig.Identity[*string]{Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID, ProfileRevision: digest, Endpoint: &address},
+		Options:  providers.Options{Network: &egress.ConnectionOptions{ProxyURL: proxyURL, TrustRootsPEM: roots}},
+	}
+	configuration, err := json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.pool.Exec(t.Context(), `UPDATE olp.providers SET configuration=$2 WHERE id=$1`, journey.provider, configuration); err != nil {
+		t.Fatal(err)
+	}
+	accounts := []string{uuid.NewString(), uuid.NewString()}
+	for index, source := range []string{journey.first, journey.second} {
+		account := accounts[index]
+		payload, err := json.Marshal(map[string]any{"exp": time.Now().Add(time.Hour).Unix(), "https://api.openai.com/auth": map[string]any{"chatgpt_account_id": fmt.Sprintf("account-%d", index), "chatgpt_user_id": "fixture-user"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		token := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`)) + "." + base64.RawURLEncoding.EncodeToString(payload) + ".fixture"
+		identity, err := codexauth.TokenIdentity(token, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		served, err := json.Marshal(connectors.GrantCredential{PluginDigest: digest, ProfileID: codexauth.ProfileID, AccessToken: token, Facts: identity.Facts()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tx, err := s.pool.Begin(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(context.Background())
+		credential := uuid.NewString()
+		var installation string
+		facts, err := json.Marshal(identity.Facts())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO olp.provider_credentials(id,provider_id,version,principal,plugin_digest,grant_facts,profile_id) VALUES($1,$2,$3,$4,$5,$6,'codex-subscription')`, credential, journey.provider, index+20, identity.Principal(), digest, facts); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO olp.provider_grants(credential_id,expires_at) VALUES($1,now()+interval '1 hour')`, credential); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO olp.code_accounts(id,project_id,provider_id,credential_id,principal,name,models,etag,created_by) SELECT $1,project_id,provider_id,$2,$3,name,models,etag,created_by FROM olp.code_accounts WHERE id=$4`, account, credential, identity.Principal(), source); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM olp.installation WHERE singleton`).Scan(&installation); err != nil {
+			t.Fatal(err)
+		}
+		if err := ring.Store(t.Context(), tx, installation, credential, secrets.ProviderCredential, served, nil); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO olp.code_pool_accounts(pool_id,account_id,weight) VALUES($1,$2,1)`, journey.route.PoolID, account); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, source); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_routes SET latest_revision_id=NULL WHERE id=$1`, journey.route.ID); err != nil {
+		t.Fatal(err)
+	}
+	published := s.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": journey.route.ProjectID, "slug": journey.route.Slug + "-http", "pool_id": journey.route.PoolID, "models": []string{"model"}, "enabled": true, "allowance_ordering": true}, idempotent(), http.StatusCreated)
+	s.want(owner, "POST", "/api/v1/code/routes/"+published["id"].(string)+"/publish", nil, idempotent(etag(published)), http.StatusOK)
+	slug := published["slug"].(string)
+	now := time.Now().UTC()
+	reset := now.Add(time.Hour)
+	if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1`, accounts[0], bandAllowanceJSON(t, 75, &reset, now)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1`, accounts[1], bandAllowanceJSON(t, 0, &reset, now)); err != nil {
+		t.Fatal(err)
+	}
+	consumer := &caller{name: "ordering", token: key["secret"].(string)}
+	request := map[string]any{"model": "model", "input": "hello"}
+	s.eventually("advisory ordering reaches the gateway", 20*time.Second, func() (bool, string) {
+		status, raw := s.do(consumer, "POST", "/code/"+slug+"/responses", request, nil)
+		if status != http.StatusOK {
+			return false, describe(status, raw)
+		}
+		var response map[string]any
+		if err := json.Unmarshal(raw, &response); err != nil {
+			t.Fatal(err)
+		}
+		if response["fixture_account"] != "account-0" {
+			t.Fatalf("healthy account did not win: %s", raw)
+		}
+		return true, ""
+	})
+	call := func(thread string) string {
+		status, raw := s.do(consumer, "POST", "/code/"+slug+"/responses", request, map[string]string{"thread-id": thread})
+		if status != http.StatusOK {
+			t.Fatalf("gateway selection failed: %s", describe(status, raw))
+		}
+		var response struct {
+			Account string `json:"fixture_account"`
+		}
+		if err := json.Unmarshal(raw, &response); err != nil {
+			t.Fatal(err)
+		}
+		return response.Account
+	}
+	for _, phase := range []struct {
+		name   string
+		first  []byte
+		second []byte
+	}{
+		{name: "unknown before low", second: bandAllowanceJSON(t, 10, &reset, now)},
+		{name: "low before exhausted", first: bandAllowanceJSON(t, 10, &reset, now), second: bandAllowanceJSON(t, 0, &reset, now)},
+	} {
+		for index, allowance := range [][]byte{phase.first, phase.second} {
+			if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1`, accounts[index], allowance); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if selected := call(uuid.NewString()); selected != "account-0" {
+			t.Fatalf("%s selected %s", phase.name, selected)
+		}
+	}
+	for index, account := range accounts {
+		if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1`, account, bandAllowanceJSON(t, 75, &reset, now)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_pool_accounts SET weight=$3 WHERE pool_id=$1 AND account_id=$2`, journey.route.PoolID, account, []int{3, 1}[index]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	weightedThread := func(weightChangesWinner bool) string {
+		for index := range 1000 {
+			thread := fmt.Sprintf("gateway-share-%d", index)
+			affinity := []byte(key["id"].(string) + ":" + thread)
+			first := routing.Score(uuid.MustParse(published["id"].(string)), uuid.MustParse(accounts[0]), 1, "responses", "code", "model", affinity)
+			second := routing.Score(uuid.MustParse(published["id"].(string)), uuid.MustParse(accounts[1]), 1, "responses", "code", "model", affinity)
+			if second > first && (3*first > second) == weightChangesWinner {
+				return thread
+			}
+		}
+		t.Fatal("could not find a request distinguishing account weights")
+		return ""
+	}
+	if selected := call(weightedThread(true)); selected != "account-0" {
+		t.Fatalf("higher weight did not change the gateway selection: %s", selected)
+	}
+	if selected := call(weightedThread(false)); selected != "account-1" {
+		t.Fatalf("lower-weight account did not share gateway requests: %s", selected)
+	}
+	if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1`, accounts[1], bandAllowanceJSON(t, 0, &reset, now)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, accounts[0]); err != nil {
+		t.Fatal(err)
+	}
+	status, raw := s.do(consumer, "POST", "/code/"+slug+"/responses", request, nil)
+	if status != http.StatusOK || !strings.Contains(string(raw), `"fixture_account":"account-1"`) {
+		t.Fatalf("last exhausted account excluded: %s", describe(status, raw))
+	}
+}
+
+func codeBandsAssessEachAdapter(t *testing.T, pool *pgxpool.Pool) {
+	journey := seedCooldownJourney(t, pool)
+	provider, credential, account := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	statements := []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO olp.providers(id,project_id,name,kind,state,configuration,etag,slots_etag,created_by) SELECT $1,project_id,'mixed',kind,state,configuration,etag,slots_etag,created_by FROM olp.providers WHERE id=$2`, []any{provider, journey.provider}},
+		{`INSERT INTO olp.provider_credentials(id,provider_id,version,principal,plugin_digest,grant_facts,profile_id) VALUES($1,$2,1,'mixed',repeat('0',64),'{}','minimax-plan')`, []any{credential, provider}},
+		{`INSERT INTO olp.provider_grants(credential_id) VALUES($1)`, []any{credential}},
+		{`INSERT INTO olp.code_accounts(id,project_id,provider_id,credential_id,principal,name,models,etag,created_by) SELECT $1,project_id,$2,$3,'mixed','mixed',models,etag,created_by FROM olp.code_accounts WHERE id=$4`, []any{account, provider, credential, journey.second}},
+		{`INSERT INTO olp.code_pool_accounts(pool_id,account_id,weight) VALUES($1,$2,1)`, []any{journey.route.PoolID, account}},
+		{`UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, []any{journey.second}},
+		{`UPDATE olp.code_route_revisions SET connections=connections || jsonb_build_object($2::text,jsonb_build_object('kind','plugin','auth_mode','grant','profile_id','minimax-plan','profile_revision',repeat('0',64))) WHERE id=$1`, []any{journey.route.RevisionID, provider}},
+	}
+	for _, statement := range statements {
+		if _, err := pool.Exec(t.Context(), statement.sql, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now().UTC()
+	reset := now.Add(time.Hour)
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1`, account, bandAllowanceJSON(t, 75, &reset, now)); err != nil {
+		t.Fatal(err)
+	}
+	for _, phase := range []struct {
+		remaining float64
+		want      string
+		band      codemode.Band
+	}{{5, account, codemode.BandUnknown}, {75, journey.first, codemode.BandHealthy}} {
+		if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1`, journey.first, bandAllowanceJSON(t, phase.remaining, &reset, now)); err != nil {
+			t.Fatal(err)
+		}
+		admission := journey.admission("model", uuid.NewString())
+		admission.Route.AllowanceOrdering = true
+		admission.Providers = []string{journey.provider, provider}
+		permit, err := journey.store.Admit(t.Context(), admission)
+		if err != nil {
+			t.Fatal(err)
+		}
+		decision := codeDecisionForAttempt(t, pool, permit.Attempt.ID)
+		if permit.Account.ID != phase.want || decision.Band == nil || *decision.Band != phase.band {
+			t.Fatalf("adapter bands chose %s with %+v, want %s %s", permit.Account.ID, decision, phase.want, phase.band)
+		}
 	}
 }
