@@ -515,7 +515,8 @@ their order so a slow period does not starve other periods. A failed query or an
 incomplete result does not replace that period's invoice rows. Token exchanges
 use the configured connection proxy while validating the Google authentication
 destination with a public-only policy. Workload credentials are used only when
-ADC is explicitly selected.
+ADC is explicitly selected. ADC reads the Google metadata server only at its
+fixed address and fails while `GCE_METADATA_HOST` names another host.
 
 `GET /api/v1/providers/{id}/invoiced-costs?start=…&end=…` lists stored line
 items (`day`, `line_item`, `currency`, `amount`, `source`, `fetched_at`),
