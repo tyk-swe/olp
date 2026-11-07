@@ -2283,7 +2283,7 @@ func startSignedSurfaceJourney(t *testing.T, s *service, consumer *caller, slug,
 	t.Helper()
 	surface := func() signedSurfaceJourney {
 		if protocol == "messages" {
-			return signedSurfaceJourney{protocol: protocol, path: "/code/" + slug + "/v1/messages", headers: map[string]string{"X-Opencode-Session-Id": "signed-messages-root"}, continuation: json.RawMessage(`{"model":"gemini-fixture","max_tokens":8,"messages":[{"role":"user","content":"Inspect"}]}`)}
+			return signedSurfaceJourney{protocol: protocol, path: "/code/" + slug + "/v1/messages", headers: map[string]string{"X-Claude-Code-Session-Id": "signed-messages-root"}, continuation: json.RawMessage(`{"model":"gemini-fixture","max_tokens":8,"messages":[{"role":"user","content":"Inspect"}]}`)}
 		}
 		return signedSurfaceJourney{protocol: protocol, path: "/code/" + slug + "/responses", headers: map[string]string{"Session-Id": "signed-responses-root"}, continuation: json.RawMessage(`{"model":"gemini-fixture","input":"Inspect"}`)}
 	}()
@@ -2332,7 +2332,7 @@ func startSignedSurfaceJourney(t *testing.T, s *service, consumer *caller, slug,
 	continuation, partial := bodies[0], bodies[1]
 	foreignHeaders := func() map[string]string {
 		if protocol == "messages" {
-			return map[string]string{"X-Opencode-Session-Id": "foreign-messages-root"}
+			return map[string]string{"X-Claude-Code-Session-Id": "foreign-messages-root"}
 		}
 		return map[string]string{"Session-Id": "foreign-responses-root"}
 	}()
