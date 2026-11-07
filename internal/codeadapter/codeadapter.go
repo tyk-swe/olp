@@ -143,7 +143,7 @@ var vendors = []Vendor{
 		endpoints:       []Endpoint{{ClientPath: "responses", UpstreamPath: "responses", Protocol: codemode.ProtocolResponses, Operation: "responses", Identity: IdentityCodex, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP, Target: TargetGrok}},
 		clients:         []Client{{ID: ClientCodex}},
 		enrollmentNotes: []string{"Enrollment verifies the provider subject through authenticated userinfo and stores refreshable grants encrypted. Live independent-gateway acceptance remains unverified."},
-		notes:           []string{"Explicit responses_to_grok policy enables controlled text and function tools over HTTP or SSE. Grok client identity requires separate grok_cli_identity policy. Provider terms may restrict independent gateways and accounts may be suspended. Fixture success does not qualify live subscription acceptance."},
+		notes:           []string{"Explicit responses_to_grok and messages_to_grok policies independently enable controlled text and function tools over HTTP or SSE. Grok client identity requires separate grok_cli_identity policy. Provider terms may restrict independent gateways and accounts may be suspended. Fixture success does not qualify live subscription acceptance."},
 	},
 	{
 		Adapter: codemode.AdapterCodex, Name: "Codex", profiles: []string{codexauth.ProfileID}, manifest: codexauth.Manifest,
@@ -495,6 +495,9 @@ func RouteEndpoint(route codemode.Route, adapter Vendor, path string) (Endpoint,
 	if endpoint, ok := adapter.Endpoint(path); ok {
 		return endpoint, endpoint.Enabled(route)
 	}
+	if adapter.Adapter == codemode.AdapterGrokBuild && route.MessagesToGrok && path == "v1/messages" {
+		return adapter.Endpoint("responses")
+	}
 	if adapter.Adapter == codemode.AdapterCodex && (route.MessagesToCodex && path == "v1/messages" || route.ChatToCodex && path == "v1/chat/completions") {
 		return adapter.Endpoint("responses")
 	}
@@ -504,6 +507,10 @@ func RouteEndpoint(route codemode.Route, adapter Vendor, path string) (Endpoint,
 func RouteClientProtocol(route codemode.Route, adapter Vendor, client, model string) (codemode.Protocol, bool) {
 	if protocol, ok := adapter.Protocol(client, model); ok {
 		return protocol, slices.ContainsFunc(adapter.endpoints, func(endpoint Endpoint) bool { return endpoint.Protocol == protocol && endpoint.Enabled(route) })
+	}
+	if adapter.Adapter == codemode.AdapterGrokBuild && route.MessagesToGrok && client == ClientClaudeCode {
+		endpoint, ok := RouteEndpoint(route, adapter, "v1/messages")
+		return codemode.ProtocolMessages, ok && adapter.ServesModel(endpoint.Protocol, model)
 	}
 	if adapter.Adapter != codemode.AdapterCodex {
 		return "", false
@@ -531,6 +538,9 @@ func RouteClient(route codemode.Route, adapter Vendor, client string) (Client, b
 
 func RouteClients(route codemode.Route, adapter Vendor) []string {
 	return slices.Collect(func(yield func(string) bool) {
+		if adapter.Adapter == codemode.AdapterGrokBuild && route.MessagesToGrok && !yield(ClientClaudeCode) {
+			return
+		}
 		for _, client := range adapter.Clients() {
 			if !yield(client) {
 				return

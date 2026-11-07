@@ -9436,8 +9436,14 @@ type CodeRoute struct {
 	// MessagesCodexSafetyIdentifier Separately authorizes translating Messages metadata.user_id to a stable SHA-256 Responses safety_identifier. Disabled by default. Only the documented user identifier is accepted, and other metadata refuses. Review provider identity and account terms before enabling.
 	MessagesCodexSafetyIdentifier *bool `json:"messages_codex_safety_identifier,omitempty"`
 
+	// MessagesGrokSafetyIdentifier Explicitly map Messages metadata.user_id to a SHA-256 safety_identifier for Grok. Independently published and disabled by default. Public API documentation supports this mapping. Subscription proxy acceptance remains unverified. Unsupported metadata is refused.
+	MessagesGrokSafetyIdentifier *bool `json:"messages_grok_safety_identifier,omitempty"`
+
 	// MessagesToCodex Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Translation alone preserves client identity and prompts. Codex identity compatibility requires its separate codex_cli_identity opt-in. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch.
 	MessagesToCodex *bool `json:"messages_to_codex,omitempty"`
+
+	// MessagesToGrok Allow Messages text and function tools through Grok Build subscription accounts after publication. Disabled by default. Existing revisions keep their published policy.
+	MessagesToGrok *bool `json:"messages_to_grok,omitempty"`
 
 	// ModelPools Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed.
 	ModelPools *map[string][]string `json:"model_pools,omitempty"`
@@ -9510,8 +9516,14 @@ type CodeRouteWrite struct {
 	// MessagesCodexSafetyIdentifier Separately authorizes translating Messages metadata.user_id to a stable SHA-256 Responses safety_identifier. Disabled by default. Only the documented user identifier is accepted, and other metadata refuses. Review provider identity and account terms before enabling.
 	MessagesCodexSafetyIdentifier *bool `json:"messages_codex_safety_identifier,omitempty"`
 
+	// MessagesGrokSafetyIdentifier Explicitly map Messages metadata.user_id to a SHA-256 safety_identifier for Grok. Independently published and disabled by default. Public API documentation supports this mapping. Subscription proxy acceptance remains unverified. Unsupported metadata is refused.
+	MessagesGrokSafetyIdentifier *bool `json:"messages_grok_safety_identifier,omitempty"`
+
 	// MessagesToCodex Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Translation alone preserves client identity and prompts. Codex identity compatibility requires its separate codex_cli_identity opt-in. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch.
 	MessagesToCodex *bool `json:"messages_to_codex,omitempty"`
+
+	// MessagesToGrok Allow Messages text and function tools through Grok Build subscription accounts after publication. Disabled by default. Existing revisions keep their published policy.
+	MessagesToGrok *bool `json:"messages_to_grok,omitempty"`
 
 	// ModelPools Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed.
 	ModelPools *map[string][]string `json:"model_pools,omitempty"`
@@ -9765,8 +9777,14 @@ type ConfigurationCodeRoutePolicy struct {
 	// MessagesCodexSafetyIdentifier Separately authorizes translating Messages metadata.user_id to a stable SHA-256 Responses safety_identifier. Disabled by default. Only the documented user identifier is accepted, and other metadata refuses. Review provider identity and account terms before enabling.
 	MessagesCodexSafetyIdentifier *bool `json:"messages_codex_safety_identifier,omitempty"`
 
+	// MessagesGrokSafetyIdentifier Explicitly map Messages metadata.user_id to a SHA-256 safety_identifier for Grok. Independently published and disabled by default. Public API documentation supports this mapping. Subscription proxy acceptance remains unverified. Unsupported metadata is refused.
+	MessagesGrokSafetyIdentifier *bool `json:"messages_grok_safety_identifier,omitempty"`
+
 	// MessagesToCodex Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Translation alone preserves client identity and prompts. Codex identity compatibility requires its separate codex_cli_identity opt-in. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch.
 	MessagesToCodex *bool `json:"messages_to_codex,omitempty"`
+
+	// MessagesToGrok Allow Messages text and function tools through Grok Build subscription accounts after publication. Disabled by default. Existing revisions keep their published policy.
+	MessagesToGrok *bool `json:"messages_to_grok,omitempty"`
 
 	// ModelPools Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed.
 	ModelPools *map[string][]string `json:"model_pools,omitempty"`
