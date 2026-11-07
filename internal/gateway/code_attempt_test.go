@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -411,7 +412,7 @@ func (f *fakeCodeLedger) Models(context.Context, codemode.Route, string) (codecl
 	return codeclient.Offers{}, nil
 }
 func (f *fakeCodeLedger) Admit(context.Context, codesessions.Admission) (codesessions.Permit, error) {
-	return codesessions.Permit{}, nil
+	return f.connectionPermit, nil
 }
 func (f *fakeCodeLedger) BindConnection(context.Context, codemode.Route, string, codemode.Identity, string, []string) (codesessions.Permit, error) {
 	return f.connectionPermit, nil
@@ -968,5 +969,132 @@ func TestCodeAttemptMiniMaxUsageAndAmbiguousDoNotRecover(t *testing.T) {
 	recovery, err = ambiguous.recover(t.Context(), response, route, nil, false)
 	if err != nil || recovery != nil {
 		t.Fatalf("recover(ambiguous) = %+v, %v, want no replay", recovery, err)
+	}
+}
+
+func TestTranslatedCodexPublishedOutputCap(t *testing.T) {
+	for _, spec := range []struct {
+		path, cap, metadata string
+		safety, refuse      bool
+	}{
+		{path: "v1/messages", cap: "max_tokens"}, {path: "v1/chat/completions", cap: "max_tokens"}, {path: "v1/chat/completions", cap: "max_completion_tokens"}, {path: "responses", cap: "max_output_tokens"},
+		{path: "v1/messages", cap: "max_tokens", metadata: `{"user_id":"` + strings.Repeat("identity", 30) + `"}`, safety: true},
+		{path: "v1/messages", cap: "max_tokens", metadata: `{"user_id":"other identity"}`, safety: true},
+		{path: "v1/messages", cap: "max_tokens", metadata: `{"user_id":"identity"}`, refuse: true},
+		{path: "v1/messages", cap: "max_tokens", metadata: `{"user_id":"identity","other":"state"}`, safety: true, refuse: true},
+		{path: "v1/messages", cap: "max_tokens", metadata: `{"user_id":42}`, safety: true, refuse: true},
+	} {
+		path := spec.path
+		for _, callerCap := range []int{1, 15, 16, 32} {
+			for _, minimum := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/minimum=%t/cap=%d", path, spec.cap, minimum, callerCap), func(t *testing.T) {
+					type observation struct {
+						Cap    int    `json:"max_output_tokens"`
+						Safety string `json:"safety_identifier"`
+					}
+					observed := make(chan observation, 1)
+					upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						var body observation
+						if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+							t.Error(err)
+						}
+						observed <- body
+						w.Header().Set("Content-Type", "application/json")
+						_, _ = io.WriteString(w, `{"id":"resp_cap","object":"response","status":"completed","model":"gpt-model","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+					}))
+					defer upstream.Close()
+					project := "project"
+					authority := keyauthority.Authority{ID: "key", ProjectID: &project, Policy: keyauthority.KeyPolicy{Scopes: []string{"inference"}}}
+					ledger := &fakeCodeLedger{connectionPermit: codesessions.Permit{Authority: authority, Account: codemode.Account{ID: "account", ProviderID: "provider", Principal: "principal"}, Pin: codemode.Pin{AccountID: "account", Principal: "principal"}, Attempt: codemode.Attempt{ID: "attempt"}}}
+					h := newHarness(t, Config{}, Dependencies{Admission: NewAdmission(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil))), CodeLedger: ledger, CodeAuthorizer: fakeCodeAuthorizer{}})
+					h.rt.keys[fullKey] = authority
+					var route codemode.Route
+					raw := fmt.Sprintf(`{"id":"route","project_id":"project","slug":"coding","pool_id":"pool","models":["gpt-model"],"enabled":true,"revision_id":"revision","revision":1,"published_at":"2026-11-07T00:00:00Z","messages_to_codex":true,"chat_to_codex":true,"translated_codex_output_minimum":%t,"messages_codex_safety_identifier":%t}`, minimum, spec.safety)
+					if err := json.Unmarshal([]byte(raw), &route); err != nil {
+						t.Fatal(err)
+					}
+					snapshot := &routing.Snapshot{Generation: routing.Generation{ID: uuid.NewString()}, CodeRoutes: map[string]codemode.Route{"coding": route}, CodeConnections: map[string]routing.Configuration{"revision:provider": {Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID, Endpoint: upstream.URL}}}}
+					publication, err := release.NewRelease("", 0, snapshot, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					h.rt.release = publication
+					mux := http.NewServeMux()
+					h.gateway.RegisterCode(mux)
+					body := func() string {
+						if path == "responses" {
+							return fmt.Sprintf(`{"model":"gpt-model","input":"hi","max_output_tokens":%d}`, callerCap)
+						}
+						metadata := ""
+						if spec.metadata != "" {
+							metadata = `,"metadata":` + spec.metadata
+						}
+						return fmt.Sprintf(`{"model":"gpt-model","messages":[{"role":"user","content":"hi"}],%q:%d%s}`, spec.cap, callerCap, metadata)
+					}()
+					request := httptest.NewRequest(http.MethodPost, "/code/coding/"+path, strings.NewReader(body))
+					request.Header.Set("Authorization", "Bearer "+fullKey)
+					response := httptest.NewRecorder()
+					mux.ServeHTTP(response, request)
+					if spec.refuse {
+						if response.Code != http.StatusUnprocessableEntity {
+							t.Fatalf("unsupported metadata = %d %s", response.Code, response.Body.String())
+						}
+						select {
+						case <-observed:
+							t.Fatal("unsupported metadata dispatched")
+						default:
+						}
+						return
+					}
+					if response.Code != http.StatusOK {
+						t.Fatalf("status %d %s", response.Code, response.Body.String())
+					}
+					want := callerCap
+					if minimum && path != "responses" {
+						want = max(16, callerCap)
+					}
+					upstreamBody := <-observed
+					if upstreamBody.Cap != want {
+						t.Fatalf("upstream output cap %d, want %d", upstreamBody.Cap, want)
+					}
+					if spec.safety && spec.metadata != "" {
+						var metadata struct {
+							UserID string `json:"user_id"`
+						}
+						if err := json.Unmarshal([]byte(spec.metadata), &metadata); err != nil {
+							t.Fatal(err)
+						}
+						expected := fmt.Sprintf("%x", sha256.Sum256([]byte(metadata.UserID)))
+						if upstreamBody.Safety != expected {
+							t.Fatalf("safety identifier = %q, want stable hash %q", upstreamBody.Safety, expected)
+						}
+					}
+					if minimum && callerCap == 1 && path != "responses" {
+						unsupported := httptest.NewRequest(http.MethodPost, "/code/coding/"+path, strings.NewReader(body))
+						unsupported.Header.Set("Authorization", "Bearer "+fullKey)
+						if path == "v1/messages" {
+							unsupported.Header.Set("Anthropic-Beta", "interleaved-thinking-2025-05-14")
+						} else {
+							unsupported.Header.Set("X-Codex-Turn-State", "opaque")
+						}
+						refused := httptest.NewRecorder()
+						mux.ServeHTTP(refused, unsupported)
+						expected := http.StatusUnprocessableEntity
+						if path == "v1/chat/completions" {
+							expected = http.StatusConflict
+						}
+						if refused.Code != expected {
+							t.Fatalf("unsupported state = %d %s", refused.Code, refused.Body.String())
+						}
+						select {
+						case <-observed:
+							t.Fatal("unsupported state dispatched upstream")
+						default:
+						}
+					}
+
+				})
+			}
+		}
 	}
 }

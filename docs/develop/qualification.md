@@ -56,7 +56,19 @@ Each lane seeds one subscription code account, publishes a code route
 onto it, and drives one client journey end to end over HTTP against the
 real binary. Codex uses `responses` through the `codex` adapter, Claude
 Code uses `v1/messages` through the `zai_coding` coding-plan adapter,
-and OpenCode uses `v1/chat/completions` through `opencode_go`. The
+and OpenCode uses `v1/chat/completions` through `opencode_go`. A separate Claude
+Code lane translates Messages through `codex`, executes a Bash tool, and sends
+the tool result in a follow-up request before accepting the fixture answer.
+That lane executes the generated shell setup with adaptive thinking disabled,
+`MAX_THINKING_TOKENS=0`, `CLAUDE_CODE_SIMULATE_PROXY_USAGE=1`,
+`ENABLE_TOOL_SEARCH=false`, `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` and
+`DISABLE_PROMPT_CACHING=1`. The real client emits no beta headers in this
+version-scoped fixture. Unsupported beta state still refuses at the gateway.
+The route independently enables `messages_codex_safety_identifier`. Native-only
+setup keeps its existing settings. Reports distinguish client, version, platform,
+adapter, profile, model, protocol and transport, so two lanes for one client
+remain separate. These controlled peers provide fixture evidence only and do
+not qualify the undocumented live Codex subscription endpoint. The
 driver runs each installed client in isolation. The account,
 its credential and grant, and its plugin provider are seeded directly in
 the database, because grant enrollment needs a real vendor account. The

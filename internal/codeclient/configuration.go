@@ -123,9 +123,9 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 			return codexauth.ClientVersion, "toml", codexConfiguration(baseURL, model, !paid), nil
 		case codeadapter.ClientClaudeCode:
 			if platform == "windows" {
-				return codeadapter.ClaudeCodeVersion, "powershell", claudeCodePowerShellConfiguration(baseURL, model, *plan, *small), nil
+				return codeadapter.ClaudeCodeVersion, "powershell", claudeCodePowerShellConfiguration(baseURL, model, *plan, *small, route.MessagesToCodex && slices.Contains(adapters, codemode.AdapterCodex)), nil
 			}
-			return codeadapter.ClaudeCodeVersion, "shell", claudeCodeConfiguration(baseURL, model, *plan, *small), nil
+			return codeadapter.ClaudeCodeVersion, "shell", claudeCodeConfiguration(baseURL, model, *plan, *small, route.MessagesToCodex && slices.Contains(adapters, codemode.AdapterCodex)), nil
 		case codeadapter.ClientOpenCode:
 			text, err := openCodeConfiguration(route, adapters, offers, through, native, baseURL, model, *plan, *small)
 			return codeadapter.OpenCodeVersion, "json", text, err
@@ -145,7 +145,7 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 			return " This published route explicitly translates Chat text and function tool workflows through Codex Responses. Low, medium and high reasoning effort is supported. Signed reasoning, media, server-owned state and unsupported required semantics are refused. Identity compatibility requires its independent opt-in. Current OpenCode client and live subscription acceptance remain unqualified."
 		}
 		if client == codeadapter.ClientClaudeCode && route.MessagesToCodex && slices.Contains(adapters, codemode.AdapterCodex) {
-			return " This published route enables Messages text and tool use through Codex accounts. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and other unsupported required semantics are refused. Prompt text is preserved, and identity and prompt compatibility remain disabled."
+			return " This published route enables Messages text and tool use through Codex accounts. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and other unsupported required semantics are refused. Prompt text is preserved. Generated setup disables thinking, prompt caching, tool search and experimental beta features using settings verified for the scoped client version. The separate messages_codex_safety_identifier policy must be enabled and published to map current Claude abuse-detection metadata. This opt-in changes provider identity handling and may carry account suspension or terms risks. Codex CLI identity compatibility still requires its separate opt-in."
 		}
 		return ""
 	}() + func() string {

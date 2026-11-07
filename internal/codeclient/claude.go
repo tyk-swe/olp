@@ -11,8 +11,8 @@ type claudeSetting struct {
 	name, value string
 }
 
-func claudeSettings(baseURL, model, plan, small string) []claudeSetting {
-	return []claudeSetting{
+func claudeSettings(baseURL, model, plan, small string, translated bool) []claudeSetting {
+	base := []claudeSetting{
 		{"ANTHROPIC_BASE_URL", baseURL},
 		{"ANTHROPIC_MODEL", claudeModel(model, plan)},
 		{"ANTHROPIC_DEFAULT_OPUS_MODEL", plan},
@@ -21,11 +21,22 @@ func claudeSettings(baseURL, model, plan, small string) []claudeSetting {
 		{"CLAUDE_CODE_SUBAGENT_MODEL", model},
 		{"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1"},
 	}
+	if !translated {
+		return base
+	}
+	return slices.Concat(base, []claudeSetting{
+		{"CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS", "1"},
+		{"CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING", "1"},
+		{"MAX_THINKING_TOKENS", "0"},
+		{"CLAUDE_CODE_SIMULATE_PROXY_USAGE", "1"},
+		{"ENABLE_TOOL_SEARCH", "false"},
+		{"DISABLE_PROMPT_CACHING", "1"},
+	})
 }
 
-func claudeCodeConfiguration(baseURL, model, plan, small string) string {
+func claudeCodeConfiguration(baseURL, model, plan, small string, translated bool) string {
 	settings := slices.Collect(func(yield func(string) bool) {
-		for _, setting := range claudeSettings(baseURL, model, plan, small) {
+		for _, setting := range claudeSettings(baseURL, model, plan, small, translated) {
 			if !yield("export " + setting.name + "=" + shellQuote(setting.value)) {
 				return
 			}
@@ -37,9 +48,9 @@ export ANTHROPIC_AUTH_TOKEN="${OLP_API_KEY:?Set OLP_API_KEY to your OLP inferenc
 ` + strings.Join(settings, "\n") + "\n"
 }
 
-func claudeCodePowerShellConfiguration(baseURL, model, plan, small string) string {
+func claudeCodePowerShellConfiguration(baseURL, model, plan, small string, translated bool) string {
 	settings := slices.Collect(func(yield func(string) bool) {
-		for _, setting := range claudeSettings(baseURL, model, plan, small) {
+		for _, setting := range claudeSettings(baseURL, model, plan, small, translated) {
 			if !yield("$env:" + setting.name + " = " + powerShellQuote(setting.value)) {
 				return
 			}

@@ -3,6 +3,7 @@
 package qualification_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -94,15 +95,22 @@ type laneReport struct {
 func newLaneReport(writer *reportWriter, lanes []lane) *laneReport {
 	report := &laneReport{writer: writer, pending: map[string]runRecord{}}
 	for _, l := range lanes {
-		report.order = append(report.order, l.client.name)
-		report.pending[l.client.name] = l.record("no_signal", "lane did not complete", "", false)
+		record := l.record("no_signal", "lane did not complete", "", false)
+		identity := recordIdentity(record, record.ClientVersion)
+		report.order = append(report.order, identity)
+		report.pending[identity] = record
 	}
 	return report
 }
 
+func recordIdentity(record runRecord, version string) string {
+	scope, _ := json.Marshal([]string{record.Client, version, record.Platform, record.Adapter, record.Profile, record.Model, record.Protocol, record.Transport})
+	return string(scope)
+}
+
 func (r *laneReport) complete(t *testing.T, record runRecord) {
 	t.Helper()
-	delete(r.pending, record.Client)
+	delete(r.pending, recordIdentity(record, ""))
 	r.writer.emit(t, record)
 }
 
@@ -145,9 +153,10 @@ type laneSeed struct {
 }
 
 type lane struct {
-	client   laneClient
-	seed     laneSeed
-	protocol string
+	client        laneClient
+	seed          laneSeed
+	protocol      string
+	toolRoundTrip bool
 }
 
 func (l lane) record(result, detail, version string, executed bool) runRecord {
@@ -206,10 +215,11 @@ func lanes() []lane {
 	if err != nil {
 		panic(err)
 	}
+	codexSeed := laneSeed{adapter: "codex", profile: codexauth.ProfileID, manifest: codexauth.Manifest, token: token, principal: identity.Principal(), facts: identity.Facts(), expiresAt: &expires}
 	return []lane{
 		{
 			client:   laneClient{name: "codex", binary: "codex", userAgent: "codex_cli_rs (qualification fixture)"},
-			seed:     laneSeed{adapter: "codex", profile: codexauth.ProfileID, manifest: codexauth.Manifest, token: token, principal: identity.Principal(), facts: identity.Facts(), expiresAt: &expires},
+			seed:     codexSeed,
 			protocol: "responses",
 		},
 		{
@@ -217,6 +227,7 @@ func lanes() []lane {
 			seed:     laneSeed{adapter: "zai_coding", profile: codeplans.ZAIProfile, manifest: codeplans.ZAIManifest, token: zaiKey, principal: codeplans.Principal(codeplans.ZAIProfile, zaiKey), facts: map[string]string{}},
 			protocol: "messages",
 		},
+		{client: laneClient{name: "claude-code", binary: "claude", userAgent: "claude-cli (qualification fixture)"}, seed: codexSeed, protocol: "messages", toolRoundTrip: true},
 		{
 			client:   laneClient{name: "opencode", binary: "opencode", userAgent: "opencode (qualification fixture)"},
 			seed:     laneSeed{adapter: "opencode_go", profile: codeplans.OpenCodeGoProfile, manifest: codeplans.OpenCodeGoManifest, token: openCodeGoKey, principal: codeplans.Principal(codeplans.OpenCodeGoProfile, openCodeGoKey), facts: map[string]string{}},
@@ -397,7 +408,7 @@ func fixtureBridge(t *testing.T, origin string) string {
 	return path
 }
 
-func runFixtureClient(t *testing.T, client, binary, bridge, slug, key string) (string, bool, error) {
+func runFixtureClient(t *testing.T, client, binary, bridge, slug, key, configuration string, toolRoundTrip bool) (string, bool, error) {
 	base := "http://127.0.0.1:18765/code/" + slug
 	prompt := "Say hello."
 	switch client {
@@ -407,6 +418,9 @@ func runFixtureClient(t *testing.T, client, binary, bridge, slug, key string) (s
 			"-c", `model_providers.olp.env_key="OLP_API_KEY"`, "-c", `model_providers.olp.wire_api="responses"`,
 			"-c", `model_providers.olp.supports_websockets=false`, "-c", `check_for_update_on_startup=false`, prompt)
 	case "claude-code":
+		if toolRoundTrip {
+			return sandboxClient(t, binary, bridge, fixtureConfigurationEnvironment(t, configuration, key), "--print", "--bare", "--no-session-persistence", "--tools", "Bash", "--allowedTools", "Bash", "--max-turns", "3", "--model", vendorModel, "Execute printf olp-tool-round-trip using Bash, then say hello.")
+		}
 		return sandboxClient(t, binary, bridge, []string{"ANTHROPIC_BASE_URL=" + base, "ANTHROPIC_AUTH_TOKEN=" + key, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"},
 			"--print", "--bare", "--no-session-persistence", "--tools", "", "--model", vendorModel, prompt)
 	case "opencode":
@@ -485,51 +499,163 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 		t.Fatal(err)
 	}
 	project := s.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "qualification"}, idempotent(), http.StatusCreated)["id"].(string)
-	proxy := newVendorProxy(t, newVendorMux(specs[0].seed.token))
+	toolProof := make(chan struct{}, 1)
+	proxy := newVendorProxy(t, newVendorMux(specs[0].seed.token, toolProof))
 	key := s.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "qualification", "scopes": []string{"inference"}, "project_id": project}, idempotent(), http.StatusCreated)
 	consumer := &caller{name: "qualification key", token: key["secret"].(string)}
 	bridge := fixtureBridge(t, s.origin)
 
 	for _, spec := range specs {
-		providerID, credentialID := s.seedSubscription(project, ownerID, spec.seed, proxy)
-		account := s.want(owner, "POST", "/api/v1/code/accounts", map[string]any{
-			"project_id": project, "provider_id": providerID, "credential_id": credentialID,
-			"name": "qualify-" + spec.client.name, "enabled": true, "models": []string{vendorModel},
-		}, idempotent(), http.StatusCreated)
-		if account["adapter"] != spec.seed.adapter {
-			t.Errorf("lane %s: account adapter %v, want %s", spec.client.name, account["adapter"], spec.seed.adapter)
-		}
-		pool := s.want(owner, "POST", "/api/v1/code/pools", map[string]any{
-			"project_id": project, "name": "qualify-" + spec.client.name, "kind": "shared", "owner_user_id": nil,
-			"account_ids": []any{account["id"]}, "account_weights": map[string]any{}, "api_key_ids": []any{key["id"]},
-		}, idempotent(), http.StatusCreated)
-		slug := uniqueName("qualify-" + spec.client.name)
-		route := s.want(owner, "POST", "/api/v1/code/routes", map[string]any{
-			"project_id": project, "slug": slug, "pool_id": pool["id"], "models": []string{vendorModel}, "enabled": true,
-		}, idempotent(), http.StatusCreated)
-		s.want(owner, "POST", "/api/v1/code/routes/"+route["id"].(string)+"/publish", nil, idempotent(etag(route)), http.StatusOK)
+		t.Run(spec.client.name+"-"+spec.seed.adapter, func(t *testing.T) {
+			providerID, credentialID := s.seedSubscription(project, ownerID, spec.seed, proxy)
+			account := s.want(owner, "POST", "/api/v1/code/accounts", map[string]any{
+				"project_id": project, "provider_id": providerID, "credential_id": credentialID,
+				"name": "qualify-" + spec.client.name, "enabled": true, "models": []string{vendorModel},
+			}, idempotent(), http.StatusCreated)
+			if account["adapter"] != spec.seed.adapter {
+				t.Errorf("lane %s: account adapter %v, want %s", spec.client.name, account["adapter"], spec.seed.adapter)
+			}
+			pool := s.want(owner, "POST", "/api/v1/code/pools", map[string]any{
+				"project_id": project, "name": "qualify-" + spec.client.name, "kind": "shared", "owner_user_id": nil,
+				"account_ids": []any{account["id"]}, "account_weights": map[string]any{}, "api_key_ids": []any{key["id"]},
+			}, idempotent(), http.StatusCreated)
+			slug := uniqueName("qualify-" + spec.client.name)
+			route := s.want(owner, "POST", "/api/v1/code/routes", map[string]any{
+				"project_id": project, "slug": slug, "pool_id": pool["id"], "models": []string{vendorModel}, "enabled": true, "messages_to_codex": spec.toolRoundTrip, "messages_codex_safety_identifier": spec.toolRoundTrip, "chat_to_codex": spec.toolRoundTrip,
+			}, idempotent(), http.StatusCreated)
+			s.want(owner, "POST", "/api/v1/code/routes/"+route["id"].(string)+"/publish", nil, idempotent(etag(route)), http.StatusOK)
 
-		lane := spec
-		record := runLane(t, lane, bridge, func(binary string) (string, bool, error) {
-			if err := waitForFixtureRoute(s, consumer, slug, lane.protocol); err != nil {
-				return "", false, err
+			lane := spec
+			record := runLane(t, lane, bridge, func(binary string) (string, bool, error) {
+				if err := waitForFixtureRoute(s, consumer, slug, lane.protocol); err != nil {
+					return "", false, err
+				}
+				configuration := func() string {
+					if !lane.toolRoundTrip {
+						return ""
+					}
+					config := s.want(owner, "GET", "/api/v1/code/routes/"+route["id"].(string)+"/client-config?client=claude-code&platform=linux&gateway_url=http%3A%2F%2F127.0.0.1%3A18765", nil, nil, http.StatusOK)
+					return config["configuration"].(string)
+				}()
+				rawOutput, executed, err := runFixtureClient(t, lane.client.name, binary, bridge, slug, key["secret"].(string), configuration, lane.toolRoundTrip)
+				output := strings.ReplaceAll(rawOutput, key["secret"].(string), "[redacted]")
+				if err != nil {
+					return output, executed, err
+				}
+				if !strings.Contains(output, vendorAnswer) {
+					return output, executed, fmt.Errorf("journey did not return the fixture answer")
+				}
+				if lane.toolRoundTrip {
+					select {
+					case <-toolProof:
+					default:
+						return output, executed, fmt.Errorf("client did not execute the fixture tool and continue")
+					}
+				}
+				return output, executed, nil
+			})
+			if lane.toolRoundTrip && record.Result == "pass" {
+				assertTranslatedCodeRates(t, s, owner, project, slug, pool, providerID)
+				s.want(owner, "POST", "/api/v1/code/budgets", map[string]any{"project_id": project, "route_id": route["id"], "api_key_id": key["id"], "daily_tokens": 100, "enabled": true}, idempotent(), http.StatusCreated)
+				consumer := &caller{name: "hard token bound", token: key["secret"].(string)}
+				status, reply := s.do(consumer, "POST", "/code/"+slug+"/v1/messages", json.RawMessage(`{"model":"`+vendorModel+`","messages":[{"role":"user","content":"hi"}],"max_tokens":1}`), nil)
+				if status != http.StatusUnprocessableEntity || !strings.Contains(string(reply), "code_token_bound_unavailable") {
+					t.Fatalf("incomplete bound admitted = %d %s", status, reply)
+				}
 			}
-			rawOutput, executed, err := runFixtureClient(t, lane.client.name, binary, bridge, slug, key["secret"].(string))
-			output := strings.ReplaceAll(rawOutput, key["secret"].(string), "[redacted]")
-			if err != nil {
-				return output, executed, err
+
+			report.complete(t, record)
+			if record.Result != "pass" {
+				t.Errorf("lane %s: result %s (%s)", lane.client.name, record.Result, record.Detail)
 			}
-			if !strings.Contains(output, vendorAnswer) {
-				return output, executed, fmt.Errorf("journey did not return the fixture answer")
+			if record.Result == "pass" && !record.ClientExecuted {
+				t.Errorf("lane %s: passing fixture must execute the client", lane.client.name)
 			}
-			return output, executed, nil
 		})
-		report.complete(t, record)
-		if record.Result != "pass" {
-			t.Errorf("lane %s: result %s (%s)", lane.client.name, record.Result, record.Detail)
+	}
+}
+
+func TestLaneReportRetainsEveryAdapterScope(t *testing.T) {
+	specs := lanes()
+	first := specs[1]
+	second := first
+	second.seed = specs[0].seed
+	var output bytes.Buffer
+	report := newLaneReport(&reportWriter{out: &output}, []lane{first, second})
+	report.complete(t, first.record("pass", "fixture only", "test-version", true))
+	report.flush(t)
+	decoder := json.NewDecoder(&output)
+	var completed, pending runRecord
+	if err := decoder.Decode(&completed); err != nil {
+		t.Fatal(err)
+	}
+	if err := decoder.Decode(&pending); err != nil {
+		t.Fatalf("second adapter lane disappeared: %v", err)
+	}
+	if completed.Adapter != first.seed.adapter || pending.Adapter != second.seed.adapter || pending.Result != "no_signal" {
+		t.Fatalf("scoped report records = %+v, %+v", completed, pending)
+	}
+	var extra runRecord
+	if decoder.Decode(&extra) != io.EOF {
+		t.Fatalf("unexpected duplicate record %+v", extra)
+	}
+}
+
+func assertTranslatedCodeRates(t *testing.T, s *service, owner *caller, project, slug string, pool map[string]any, provider string) {
+	t.Helper()
+	for _, path := range []string{"v1/messages", "v1/chat/completions"} {
+		body := `{"model":"` + vendorModel + `","messages":[{"role":"user","content":"hi"}],"max_tokens":1}`
+		cap := max(1, len(body)/4) + 2
+		key := s.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "cap admission", "scopes": []string{"inference"}, "project_id": project, "tokens_per_minute": cap}, idempotent(), http.StatusCreated)
+		if _, err := s.pool.Exec(t.Context(), `INSERT INTO olp.code_pool_keys(pool_id,api_key_id) VALUES($1,$2)`, pool["id"], key["id"]); err != nil {
+			t.Fatal(err)
 		}
-		if record.Result == "pass" && !record.ClientExecuted {
-			t.Errorf("lane %s: passing fixture must execute the client", lane.client.name)
+		consumer := &caller{name: "limited cap", token: key["secret"].(string)}
+		status, reply := fixtureCapRequest(s, consumer, slug, path, body)
+		if status != http.StatusBadRequest || !strings.Contains(string(reply), "code_rate_limited") {
+			t.Fatalf("%s key effective cap admission = %d %s", path, status, reply)
 		}
 	}
+	consumerKey := s.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "provider cap admission", "scopes": []string{"inference"}, "project_id": project}, idempotent(), http.StatusCreated)
+	if _, err := s.pool.Exec(t.Context(), `INSERT INTO olp.code_pool_keys(pool_id,api_key_id) VALUES($1,$2)`, pool["id"], consumerKey["id"]); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"v1/messages", "v1/chat/completions"} {
+		body := `{"model":"` + vendorModel + `","messages":[{"role":"user","content":"hi"}],"max_tokens":1}`
+		cap := max(1, len(body)/4) + 2
+		if _, err := s.pool.Exec(t.Context(), `UPDATE olp.providers SET configuration=jsonb_set(configuration::jsonb,'{options,limits}',jsonb_build_object('tokens_per_minute',$2::bigint)) WHERE id=$1`, provider, cap); err != nil {
+			t.Fatal(err)
+		}
+		providerSlug := uniqueName("qualify-provider-cap")
+		providerRoute := s.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": project, "slug": providerSlug, "pool_id": pool["id"], "models": []string{vendorModel}, "enabled": true, "messages_to_codex": true, "chat_to_codex": true}, idempotent(), http.StatusCreated)
+		s.want(owner, "POST", "/api/v1/code/routes/"+providerRoute["id"].(string)+"/publish", nil, idempotent(etag(providerRoute)), http.StatusOK)
+		consumer := &caller{name: "provider limited cap", token: consumerKey["secret"].(string)}
+		status, reply := fixtureCapRequest(s, consumer, providerSlug, path, body)
+		if status != http.StatusTooManyRequests || !strings.Contains(string(reply), "code_provider_rate_limited") {
+			t.Fatalf("%s provider effective cap admission = %d %s", path, status, reply)
+		}
+	}
+}
+
+func fixtureCapRequest(s *service, consumer *caller, slug, path, body string) (int, []byte) {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		status, reply := s.do(consumer, "POST", "/code/"+slug+"/"+path, json.RawMessage(body), nil)
+		if (status != http.StatusUnauthorized && !(status == http.StatusNotFound && strings.Contains(string(reply), "code_route_unavailable"))) || time.Now().After(deadline) {
+			return status, reply
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func fixtureConfigurationEnvironment(t *testing.T, configuration, key string) []string {
+	t.Helper()
+	command := exec.Command("bash", "-c", configuration+"\n/usr/bin/env -0")
+	command.Env = []string{"OLP_API_KEY=" + key}
+	command.Dir = t.TempDir()
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("generated setup failed: %v", err)
+	}
+	return strings.Split(strings.TrimSuffix(string(output), "\x00"), "\x00")
 }

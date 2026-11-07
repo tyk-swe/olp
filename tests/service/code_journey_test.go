@@ -1784,3 +1784,36 @@ func codeBandsAssessEachAdapter(t *testing.T, pool *pgxpool.Pool) {
 		}
 	}
 }
+
+func TestCodePublicationPinsTranslatedOutputContract(t *testing.T) {
+	s := startService(t)
+	owner := s.owner()
+	project := s.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "Output contract"}, idempotent(), http.StatusCreated)["id"].(string)
+	pool := s.want(owner, "POST", "/api/v1/code/pools", map[string]any{"project_id": project, "name": "Output contract", "kind": "shared", "account_ids": []string{}, "api_key_ids": []string{}, "account_weights": map[string]int{}}, idempotent(), http.StatusCreated)
+	route := s.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": project, "slug": "output-contract", "pool_id": pool["id"], "models": []string{"model"}, "enabled": false, "messages_codex_safety_identifier": true}, idempotent(), http.StatusCreated)
+	path := "/api/v1/code/routes/" + route["id"].(string)
+	first := s.want(owner, "POST", path+"/publish", nil, idempotent(etag(route)), http.StatusOK)
+	if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_route_revisions SET document=document-'translated_codex_output_minimum'-'messages_codex_safety_identifier' WHERE id=$1`, first["revision_id"]); err != nil {
+		t.Fatal(err)
+	}
+	s.want(owner, "POST", path+"/publish", nil, idempotent(etag(first)), http.StatusOK)
+	revisions := s.want(owner, "GET", path+"/revisions", nil, nil, http.StatusOK)
+	rows := revisions["items"].([]any)
+	if len(rows) != 2 {
+		t.Fatalf("revisions = %v", revisions)
+	}
+	for _, row := range rows {
+		item := row.(map[string]any)
+		contract := item["route"].(map[string]any)["translated_codex_output_minimum"]
+		identity := item["route"].(map[string]any)["messages_codex_safety_identifier"]
+		if item["id"] == first["revision_id"] {
+			if contract != nil || identity != nil {
+				t.Fatalf("legacy revision changed contract to %v", contract)
+			}
+			continue
+		}
+		if contract != true || identity != true {
+			t.Fatalf("republished revision missing output contract, got %v", contract)
+		}
+	}
+}

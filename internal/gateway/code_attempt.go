@@ -142,25 +142,28 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 	if !permit.Authority.AllowsAttribution(labels) {
 		return nil, codemode.Refuse(409, "code_attribution_changed")
 	}
-	if !reflect.DeepEqual(authority.Policy, permit.Authority.Policy) || !reflect.DeepEqual(authority.ProjectEndUserPolicy, permit.Authority.ProjectEndUserPolicy) || !reflect.DeepEqual(authority.BudgetGroupID, permit.Authority.BudgetGroupID) || !reflect.DeepEqual(authority.GroupLimits(), permit.Authority.GroupLimits()) {
-		settleKey(r.Context(), a.lease, false, nil, s.log)
-		a.lease = nil
+	authorityChanged := !reflect.DeepEqual(authority.Policy, permit.Authority.Policy) || !reflect.DeepEqual(authority.ProjectEndUserPolicy, permit.Authority.ProjectEndUserPolicy) || !reflect.DeepEqual(authority.BudgetGroupID, permit.Authority.BudgetGroupID) || !reflect.DeepEqual(authority.GroupLimits(), permit.Authority.GroupLimits())
+	rateAuthority, authorityErr := func() (keyauthority.Authority, error) {
+		if !authorityChanged {
+			return authority, nil
+		}
 		fresh := permit.Authority
-		if failure = s.checkKeyAddress(r, fresh); failure != nil {
-			return nil, codemode.Refuse(failure.Status, "code_ip_not_allowed")
+		if failure := s.checkKeyAddress(r, fresh); failure != nil {
+			return fresh, codemode.Refuse(failure.Status, "code_ip_not_allowed")
 		}
-		fresh, failure = s.identifyEndUser(r, fresh)
+		identified, failure := s.identifyEndUser(r, fresh)
 		if failure != nil {
-			return nil, codemode.Refuse(failure.Status, "code_end_user_invalid")
+			return fresh, codemode.Refuse(failure.Status, "code_end_user_invalid")
 		}
-		if fresh.EndUserDigest != authority.EndUserDigest {
-			return nil, codemode.Refuse(409, "code_end_user_changed")
+		if identified.EndUserDigest != authority.EndUserDigest {
+			return fresh, codemode.Refuse(409, "code_end_user_changed")
 		}
-		a.lease, failure = s.deps.Admission.ReserveCodeRate(r.Context(), fresh, observation.Estimate, codeGenerationTimeout+time.Minute, route.Slug)
-		if failure != nil {
-			return nil, codemode.Refuse(failure.Status, "code_rate_limited")
-		}
+		return identified, nil
+	}()
+	if authorityErr != nil {
+		return nil, authorityErr
 	}
+
 	if permit.Pin.AccountID != permit.Account.ID || permit.Pin.Principal != permit.Account.Principal || permit.Authority.ID != authority.ID {
 		return nil, codemode.Refuse(503, "code_binding_invalid")
 	}
@@ -174,7 +177,18 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 	a.config, a.endpoint, a.observer = target.config, target.endpoint, codeObserver(target.endpoint)
 	a.adapter = target.adapter.Adapter
 	a.identityOriginator = target.adapter.CompatibilityOriginator(route)
-	a.providerLease, failure = s.deps.Admission.reserveCodeProvider(r.Context(), permit.Account.ProviderID, target.config, observation.Estimate, codeGenerationTimeout+time.Minute)
+
+	estimate := codeTargetEstimate(observation, body, route, target, ingress)
+	if authorityChanged || estimate != observation.Estimate {
+		settleKey(r.Context(), a.lease, false, nil, s.log)
+		a.lease = nil
+		a.lease, failure = s.deps.Admission.ReserveCodeRate(r.Context(), rateAuthority, estimate, codeGenerationTimeout+time.Minute, route.Slug)
+		if failure != nil {
+			return nil, codemode.Refuse(failure.Status, "code_rate_limited")
+		}
+	}
+
+	a.providerLease, failure = s.deps.Admission.reserveCodeProvider(r.Context(), permit.Account.ProviderID, target.config, estimate, codeGenerationTimeout+time.Minute)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_provider_rate_limited")
 	}

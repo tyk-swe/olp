@@ -164,10 +164,24 @@ preserved across turns, including fragmented argument streams. Explicit
 those explicit effort values. This mapping follows the
 [pinned translator](https://github.com/router-for-me/CLIProxyAPI/blob/90c447d3a8727d115aa7552ec93ce023736ed492/internal/translator/codex/claude/codex_claude_request.go#L407-L453)
 reviewed on 2026-10-30. Both unary Messages replies and Messages event streams are supported.
-System text is preserved in developer input, and the caller's output-token cap
-is preserved. Admission, selected-account authorization and usage settlement use
+System text is preserved in developer input. Newly published revisions raise a
+positive translated output-token cap below 16 to 16. Existing revisions keep
+their published behavior until republished. Admission, selected-account
+authorization and usage settlement use
 the existing code-mode ledger. Native Messages accounts continue to forward
 native payloads unchanged.
+
+The separate `messages_codex_safety_identifier` policy is disabled by default
+and takes effect only after publication. It accepts only nonempty string
+`metadata.user_id` and maps its SHA-256 hex digest to Responses
+`safety_identifier`. Other metadata refuses. This preserves a stable
+client-provided abuse-detection identifier without forwarding its original value.
+It does not establish authenticated identity. The mapping follows the
+[Messages user identifier](https://platform.claude.com/docs/en/api/http/messages)
+and [Responses safety identifier](https://developers.openai.com/api/reference/resources/responses/methods/create)
+purposes, reviewed on November 7, 2026. Review provider identity rules and account
+terms before enabling it. Identity compatibility may carry account suspension
+risk. Existing published revisions retain their independent identity policy.
 
 The documented Claude `?beta=true` transport flag is accepted and removed before
 the Codex request is sent. Signed thinking, opaque reasoning state, numeric
@@ -179,7 +193,25 @@ the ledger. Translation alone does not enable identity compatibility, and prompt
 compatibility remains disabled. This translated
 path does not establish complete Claude Code qualification. CLI context and beta
 requirements and durable opaque state need separate qualification.
-Live Codex acceptance, including output-token caps, remains unqualified.
+The real-client fixture lane exercises Claude Code tool execution and a follow-up
+request using generated shell setup. The route independently enables
+`messages_codex_safety_identifier`. The setup disables adaptive thinking with
+`CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1` and `MAX_THINKING_TOKENS=0`, disables
+prompt caching with `DISABLE_PROMPT_CACHING=1`, and sets
+`CLAUDE_CODE_SIMULATE_PROXY_USAGE=1`, `ENABLE_TOOL_SEARCH=false` and
+`CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` to avoid beta headers. These settings
+are verified only for the recorded client version and platform. Unsupported
+beta state still refuses. The result remains fixture evidence only.
+
+The [public Responses reference](https://developers.openai.com/api/reference/python/resources/responses/methods/create)
+documents a minimum `max_output_tokens` of 16, checked on November 7, 2026. The
+Codex subscription endpoint is undocumented and live acceptance remains
+unverified. A translated reply can therefore contain more tokens than a
+caller-requested cap below 16. Key and selected-provider token-rate admission
+reserve the effective cap on each attempt, including recovery and model fallback.
+This rate estimate supplies no complete token bound. Hard token budgets still
+refuse requests without a proven complete bound. Native Codex forwarding and
+other target adapters retain their existing caps.
 
 ### OpenCode Chat through Codex
 
@@ -194,7 +226,8 @@ remain the public selection, including planning and small models.
 
 HTTP `v1/chat/completions` text and function tools translate through the Codex
 Responses transport. System and developer text, function names, call IDs, JSON
-arguments, text results and output-token caps are preserved. Explicit
+arguments and text results are preserved. The published output minimum described
+above also applies to Chat translation. Explicit
 `reasoning_effort` values `low`, `medium` and `high` map to the same Responses
 effort. Unary and SSE replies share the existing Responses codec and native
 Codex usage accounting. OpenCode session and parent headers retain code-mode

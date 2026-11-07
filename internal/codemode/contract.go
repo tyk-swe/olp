@@ -227,30 +227,32 @@ func (r Route) AllPaidTargets() map[string]PaidTarget {
 }
 
 type Route struct {
-	CodexCLIIdentity        bool                  `json:"codex_cli_identity,omitempty"`
-	PaidFallbackTargets     map[string]PaidTarget `json:"paid_fallback_targets,omitempty"`
-	ChatToAntigravity       bool                  `json:"chat_to_antigravity,omitempty"`
-	PaidParticipation       bool                  `json:"paid_participation,omitempty"`
-	PaidTargets             map[string]PaidTarget `json:"paid_targets,omitempty"`
-	ModelPools              map[string][]string   `json:"model_pools,omitempty"`
-	InitialRecoveryAttempts int                   `json:"initial_recovery_attempts,omitempty"`
-	ModelRewriting          bool                  `json:"model_rewriting,omitempty"`
-	Aliases                 map[string]string     `json:"aliases,omitempty"`
-	ChatToCodex             bool                  `json:"chat_to_codex,omitempty"`
-	MessagesToCodex         bool                  `json:"messages_to_codex,omitempty"`
-	AllowanceOrdering       bool                  `json:"allowance_ordering,omitempty"`
-	Tools                   *ResearchTools        `json:"tools,omitempty"`
-	MaxBodyBytes            *int64                `json:"max_body_bytes,omitempty"`
-	ID                      string                `json:"id"`
-	ProjectID               string                `json:"project_id"`
-	Slug                    string                `json:"slug"`
-	PoolID                  string                `json:"pool_id"`
-	Models                  []string              `json:"models"`
-	Enabled                 bool                  `json:"enabled"`
-	RevisionID              string                `json:"revision_id"`
-	Revision                int                   `json:"revision"`
-	ETag                    string                `json:"etag"`
-	PublishedAt             *time.Time            `json:"published_at"`
+	TranslatedCodexOutputMinimum  bool                  `json:"translated_codex_output_minimum,omitempty"`
+	CodexCLIIdentity              bool                  `json:"codex_cli_identity,omitempty"`
+	PaidFallbackTargets           map[string]PaidTarget `json:"paid_fallback_targets,omitempty"`
+	ChatToAntigravity             bool                  `json:"chat_to_antigravity,omitempty"`
+	PaidParticipation             bool                  `json:"paid_participation,omitempty"`
+	PaidTargets                   map[string]PaidTarget `json:"paid_targets,omitempty"`
+	ModelPools                    map[string][]string   `json:"model_pools,omitempty"`
+	InitialRecoveryAttempts       int                   `json:"initial_recovery_attempts,omitempty"`
+	ModelRewriting                bool                  `json:"model_rewriting,omitempty"`
+	Aliases                       map[string]string     `json:"aliases,omitempty"`
+	ChatToCodex                   bool                  `json:"chat_to_codex,omitempty"`
+	MessagesToCodex               bool                  `json:"messages_to_codex,omitempty"`
+	MessagesCodexSafetyIdentifier bool                  `json:"messages_codex_safety_identifier,omitempty"`
+	AllowanceOrdering             bool                  `json:"allowance_ordering,omitempty"`
+	Tools                         *ResearchTools        `json:"tools,omitempty"`
+	MaxBodyBytes                  *int64                `json:"max_body_bytes,omitempty"`
+	ID                            string                `json:"id"`
+	ProjectID                     string                `json:"project_id"`
+	Slug                          string                `json:"slug"`
+	PoolID                        string                `json:"pool_id"`
+	Models                        []string              `json:"models"`
+	Enabled                       bool                  `json:"enabled"`
+	RevisionID                    string                `json:"revision_id"`
+	Revision                      int                   `json:"revision"`
+	ETag                          string                `json:"etag"`
+	PublishedAt                   *time.Time            `json:"published_at"`
 }
 
 func (r Route) BasePath() string { return BasePath + r.Slug }
