@@ -167,6 +167,10 @@
   );
   let recoveryAttempts = $state(initial?.initial_recovery_attempts ?? 0);
   let chatToCodex = $state(initial?.chat_to_codex ?? false);
+  let messagesToAntigravity = $state(initial?.messages_to_antigravity ?? false);
+  let messagesAntigravitySafetyIdentifier = $state(
+    initial?.messages_antigravity_safety_identifier ?? false
+  );
   let messagesToCodex = $state(initial?.messages_to_codex ?? false);
   let messagesCodexSafetyIdentifier = $state(
     initial?.messages_codex_safety_identifier ?? false
@@ -179,8 +183,12 @@
   let responsesToGrok = $state(initial?.responses_to_grok ?? false);
   let grokCLIIdentity = $state(initial?.grok_cli_identity ?? false);
   let codexCLIIdentity = $state(initial?.codex_cli_identity ?? false);
-  let responsesAntigravityCompatibility = $state(initial?.responses_antigravity_compatibility ?? false);
-  let responsesToAntigravity = $state(initial?.responses_to_antigravity ?? false);
+  let responsesAntigravityCompatibility = $state(
+    initial?.responses_antigravity_compatibility ?? false
+  );
+  let responsesToAntigravity = $state(
+    initial?.responses_to_antigravity ?? false
+  );
   let chatToAntigravity = $state(initial?.chat_to_antigravity ?? false);
   let allowanceOrdering = $state(initial?.allowance_ordering ?? false);
   let research = $state(!!initial?.tools);
@@ -287,6 +295,9 @@
         model_pools: poolResult.pools,
         chat_to_codex: chatToCodex,
         messages_to_codex: messagesToCodex,
+        messages_to_antigravity: messagesToAntigravity,
+        messages_antigravity_safety_identifier:
+          messagesAntigravitySafetyIdentifier,
         messages_codex_safety_identifier: messagesCodexSafetyIdentifier,
         messages_to_grok: messagesToGrok,
         messages_grok_safety_identifier: messagesGrokSafetyIdentifier,
@@ -551,10 +562,32 @@
     provider's identity rules and account terms before enabling this policy.
     Identity mapping can carry account suspension risk
   </p>
-  <label class="choice"><input id="code-responses-antigravity-compatibility" type="checkbox" bind:checked={responsesAntigravityCompatibility} /> Allow best-effort Codex compatibility through Antigravity</label>
-  <p>Off by default and applied only after publication. Ignores the prompt-cache hint and client metadata when forwarding to the provider. Reasoning settings and requested reasoning output become best effort. Provider reasoning may occur and usage or cache behavior may differ. Opaque reasoning continuation and unrepresentable reasoning output remain refused</p>
-  <label class="choice"><input id="code-responses-to-antigravity" type="checkbox" bind:checked={responsesToAntigravity} /> Translate Responses through Antigravity</label>
-  <p>Enables supported text and signed function tools over HTTP or SSE after publication. Unsupported state is refused. Provider terms and account suspension risks apply. Live subscription acceptance remains unverified</p>
+  <label class="choice"
+    ><input
+      id="code-responses-antigravity-compatibility"
+      type="checkbox"
+      bind:checked={responsesAntigravityCompatibility}
+    /> Allow best-effort Codex compatibility through Antigravity</label
+  >
+  <p>
+    Off by default and applied only after publication. Ignores the prompt-cache
+    hint and client metadata when forwarding to the provider. Reasoning settings
+    and requested reasoning output become best effort. Provider reasoning may
+    occur and usage or cache behavior may differ. Opaque reasoning continuation
+    and unrepresentable reasoning output remain refused
+  </p>
+  <label class="choice"
+    ><input
+      id="code-responses-to-antigravity"
+      type="checkbox"
+      bind:checked={responsesToAntigravity}
+    /> Translate Responses through Antigravity</label
+  >
+  <p>
+    Enables supported text and signed function tools over HTTP or SSE after
+    publication. Unsupported state is refused. Provider terms and account
+    suspension risks apply. Live subscription acceptance remains unverified
+  </p>
   <label class="choice"
     ><input
       id="code-chat-to-antigravity"
@@ -616,6 +649,33 @@
     Separately published and disabled by default. Hashes metadata.user_id as
     safety_identifier. Other metadata is refused. Public API documentation
     supports this mapping. Subscription proxy acceptance remains unverified.
+  </p>
+  <label class="choice">
+    <input
+      id="code-messages-to-antigravity"
+      type="checkbox"
+      bind:checked={messagesToAntigravity}
+    />
+    Translate Messages to Antigravity
+  </label>
+  <p>
+    Off by default and pinned at publication. Supported text and function tools
+    use account-bound signed continuation. Unsupported state is refused. Live
+    provider acceptance is unverified.
+  </p>
+  <label class="choice">
+    <input
+      id="code-messages-antigravity-safety-identifier"
+      type="checkbox"
+      bind:checked={messagesAntigravitySafetyIdentifier}
+    />
+    Map Messages user identity to Antigravity safety labels
+  </label>
+  <p>
+    Separate default-off published identity compatibility. Maps metadata.user_id
+    to a SHA-256 digest encoded as lowercase unpadded base32 in request
+    labels.safety_identifier. Public Gemini documents this field. Subscription
+    proxy acceptance is unverified.
   </p>
   <label class="choice">
     <input

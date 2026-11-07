@@ -17300,20 +17300,30 @@
             "default": false,
             "description": "Explicitly map Messages metadata.user_id to a SHA-256 safety_identifier for Grok. Independently published and disabled by default. Public API documentation supports this mapping. Subscription proxy acceptance remains unverified. Unsupported metadata is refused."
           },
+          "messages_to_antigravity": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly enable supported Messages text and function-tool translation to Antigravity. Published revisions pin this policy and account-bound signed continuation. Unsupported state is refused. Live provider acceptance is unverified."
+          },
+          "messages_antigravity_safety_identifier": {
+            "type": "boolean",
+            "default": false,
+            "description": "Separately enable identity compatibility mapping metadata.user_id to the SHA-256 digest encoded as lowercase unpadded base32 in Gemini request labels.safety_identifier. Public generateContent documents this field. Subscription proxy acceptance is unverified. Published revisions pin this default-off policy."
+          },
           "responses_to_antigravity": {
             "type": "boolean",
             "default": false,
             "description": "Explicitly enable Responses text and signed function tools through Antigravity over HTTP or SSE after publication. Unsupported continuation state is refused. Existing published revisions retain their behavior. Provider terms and account suspension risks apply. Live subscription acceptance remains unverified."
           },
-          "responses_antigravity_compatibility": {
-            "type": "boolean",
-            "default": false,
-            "description": "Separate published opt-in to ignore Codex prompt-cache hints and client metadata upstream and treat effort none and requested reasoning output as best effort. Provider reasoning may occur and usage or cache behavior may differ. Opaque reasoning continuation and unrepresentable reasoning output remain refused."
-          },
           "chat_to_grok": {
             "type": "boolean",
             "default": false,
             "description": "Allow Chat text and function tools through Grok Build after publication. Disabled by default. Client identity requires its separate published opt-in."
+          },
+          "responses_antigravity_compatibility": {
+            "type": "boolean",
+            "default": false,
+            "description": "Separate published opt-in to ignore Codex prompt-cache hints and client metadata upstream and treat effort none and requested reasoning output as best effort. Provider reasoning may occur and usage or cache behavior may differ. Opaque reasoning continuation and unrepresentable reasoning output remain refused."
           }
         },
         "required": [
@@ -17499,20 +17509,30 @@
             "default": false,
             "description": "Explicitly map Messages metadata.user_id to a SHA-256 safety_identifier for Grok. Independently published and disabled by default. Public API documentation supports this mapping. Subscription proxy acceptance remains unverified. Unsupported metadata is refused."
           },
+          "messages_to_antigravity": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly enable supported Messages text and function-tool translation to Antigravity. Published revisions pin this policy and account-bound signed continuation. Unsupported state is refused. Live provider acceptance is unverified."
+          },
+          "messages_antigravity_safety_identifier": {
+            "type": "boolean",
+            "default": false,
+            "description": "Separately enable identity compatibility mapping metadata.user_id to the SHA-256 digest encoded as lowercase unpadded base32 in Gemini request labels.safety_identifier. Public generateContent documents this field. Subscription proxy acceptance is unverified. Published revisions pin this default-off policy."
+          },
           "responses_to_antigravity": {
             "type": "boolean",
             "default": false,
             "description": "Explicitly enable Responses text and signed function tools through Antigravity over HTTP or SSE after publication. Unsupported continuation state is refused. Existing published revisions retain their behavior. Provider terms and account suspension risks apply. Live subscription acceptance remains unverified."
           },
-          "responses_antigravity_compatibility": {
-            "type": "boolean",
-            "default": false,
-            "description": "Separate published opt-in to ignore Codex prompt-cache hints and client metadata upstream and treat effort none and requested reasoning output as best effort. Provider reasoning may occur and usage or cache behavior may differ. Opaque reasoning continuation and unrepresentable reasoning output remain refused."
-          },
           "chat_to_grok": {
             "type": "boolean",
             "default": false,
             "description": "Allow Chat text and function tools through Grok Build after publication. Disabled by default. Client identity requires its separate published opt-in."
+          },
+          "responses_antigravity_compatibility": {
+            "type": "boolean",
+            "default": false,
+            "description": "Separate published opt-in to ignore Codex prompt-cache hints and client metadata upstream and treat effort none and requested reasoning output as best effort. Provider reasoning may occur and usage or cache behavior may differ. Opaque reasoning continuation and unrepresentable reasoning output remain refused."
           }
         },
         "required": [
@@ -32054,20 +32074,30 @@
             "default": false,
             "description": "Explicitly map Messages metadata.user_id to a SHA-256 safety_identifier for Grok. Independently published and disabled by default. Public API documentation supports this mapping. Subscription proxy acceptance remains unverified. Unsupported metadata is refused."
           },
+          "messages_to_antigravity": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly enable supported Messages text and function-tool translation to Antigravity. Published revisions pin this policy and account-bound signed continuation. Unsupported state is refused. Live provider acceptance is unverified."
+          },
+          "messages_antigravity_safety_identifier": {
+            "type": "boolean",
+            "default": false,
+            "description": "Separately enable identity compatibility mapping metadata.user_id to the SHA-256 digest encoded as lowercase unpadded base32 in Gemini request labels.safety_identifier. Public generateContent documents this field. Subscription proxy acceptance is unverified. Published revisions pin this default-off policy."
+          },
           "responses_to_antigravity": {
             "type": "boolean",
             "default": false,
             "description": "Explicitly enable Responses text and signed function tools through Antigravity over HTTP or SSE after publication. Unsupported continuation state is refused. Existing published revisions retain their behavior. Provider terms and account suspension risks apply. Live subscription acceptance remains unverified."
           },
-          "responses_antigravity_compatibility": {
-            "type": "boolean",
-            "default": false,
-            "description": "Separate published opt-in to ignore Codex prompt-cache hints and client metadata upstream and treat effort none and requested reasoning output as best effort. Provider reasoning may occur and usage or cache behavior may differ. Opaque reasoning continuation and unrepresentable reasoning output remain refused."
-          },
           "chat_to_grok": {
             "type": "boolean",
             "default": false,
             "description": "Allow Chat text and function tools through Grok Build after publication. Disabled by default. Client identity requires its separate published opt-in."
+          },
+          "responses_antigravity_compatibility": {
+            "type": "boolean",
+            "default": false,
+            "description": "Separate published opt-in to ignore Codex prompt-cache hints and client metadata upstream and treat effort none and requested reasoning output as best effort. Provider reasoning may occur and usage or cache behavior may differ. Opaque reasoning continuation and unrepresentable reasoning output remain refused."
           }
         },
         "required": [

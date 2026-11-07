@@ -82,6 +82,8 @@ func (e Endpoint) Enabled(route codemode.Route) bool {
 			return route.ChatToAntigravity
 		case codemode.ProtocolResponses:
 			return route.ResponsesToAntigravity
+		case codemode.ProtocolMessages:
+			return route.MessagesToAntigravity
 		default:
 			return false
 		}
@@ -176,8 +178,9 @@ var vendors = []Vendor{
 		endpoints: []Endpoint{
 			{ClientPath: "v1/chat/completions", UpstreamPath: "v1internal:generateContent", Protocol: codemode.ProtocolChat, Operation: "chat/completions", Identity: IdentityClient, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP, Target: TargetAntigravity},
 			{ClientPath: "responses", UpstreamPath: "v1internal:generateContent", Protocol: codemode.ProtocolResponses, Operation: "responses", Identity: IdentityCodex, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP, Target: TargetAntigravity},
+			{ClientPath: "v1/messages", UpstreamPath: "v1internal:generateContent", Protocol: codemode.ProtocolMessages, Operation: "messages", Identity: IdentityClient, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP, Target: TargetAntigravity},
 		},
-		clients: []Client{{ID: ClientOpenCode, Provider: "olp-antigravity", URLSuffix: "/v1", Protocol: codemode.ProtocolChat}, {ID: ClientCodex, Protocol: codemode.ProtocolResponses}},
+		clients: []Client{{ID: ClientOpenCode, Provider: "olp-antigravity", URLSuffix: "/v1", Protocol: codemode.ProtocolChat}, {ID: ClientCodex, Protocol: codemode.ProtocolResponses}, {ID: ClientClaudeCode, Protocol: codemode.ProtocolMessages}},
 		enrollmentNotes: []string{
 			"Supply an authorized Google desktop OAuth client ID as the provider option. Complete masked enrollment with callback_url and client_secret JSON. Client secrets and refresh tokens remain encrypted.",
 			"Enrollment verifies the Google subject and an existing cloudcode project. It does not onboard accounts or establish live inference, entitlement, allowance or hard token bounds.",
@@ -276,7 +279,7 @@ func validate(registry []Vendor) error {
 }
 
 func (e Endpoint) valid() bool {
-	if e.Target != "" && !(e.Target == TargetAntigravity && (e.Protocol == codemode.ProtocolChat || e.Protocol == codemode.ProtocolResponses) && e.transports == HTTP || e.Target == TargetGrok && e.Protocol == codemode.ProtocolResponses && e.transports == HTTP) {
+	if e.Target != "" && !(e.Target == TargetAntigravity && (e.Protocol == codemode.ProtocolChat || e.Protocol == codemode.ProtocolResponses || e.Protocol == codemode.ProtocolMessages) && e.transports == HTTP || e.Target == TargetGrok && e.Protocol == codemode.ProtocolResponses && e.transports == HTTP) {
 		return false
 	}
 	if e.ClientPath == "" || e.UpstreamPath == "" || e.CredentialHeader == "" || e.transports == 0 || e.transports & ^(HTTP|WebSocket) != 0 {

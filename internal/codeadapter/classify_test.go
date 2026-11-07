@@ -324,6 +324,27 @@ func TestGrokMessagesPublishedPolicy(t *testing.T) {
 	}
 }
 
+func TestAntigravityClaudeConfigurationOmitsEffort(t *testing.T) {
+	for _, platform := range []string{"linux", "windows"} {
+		for _, test := range []struct {
+			name, model, plan, small string
+			omit                     bool
+		}{
+			{name: "selected", model: "gemini-fixture", omit: true},
+			{name: "planning", model: "native-model", plan: "gemini-fixture", omit: true},
+			{name: "background", model: "native-model", small: "gemini-fixture", omit: true},
+			{name: "unrelated", model: "native-model"},
+		} {
+			t.Run(platform+"/"+test.name, func(t *testing.T) {
+				configuration, err := codeclient.Generate(codemode.Route{Enabled: true, RevisionID: "revision", Slug: "coding", Models: []string{"native-model", "gemini-fixture"}, MessagesToAntigravity: true}, codeclient.Offers{{Adapter: codemode.AdapterZAICoding, Models: []string{"native-model", "gemini-fixture"}}, {Adapter: codemode.AdapterAntigravity, Models: []string{"gemini-fixture"}}}, codeclient.Request{GatewayURL: "http://localhost:4000", Client: codeadapter.ClientClaudeCode, Model: test.model, PlanModel: test.plan, SmallModel: test.small, Platform: platform})
+				if err != nil || strings.Contains(configuration.Configuration, "CLAUDE_CODE_EFFORT_LEVEL") != test.omit || test.omit && !strings.Contains(configuration.Configuration, "'unset'") {
+					t.Fatalf("Claude setup = %+v, %v", configuration, err)
+				}
+			})
+		}
+	}
+}
+
 func TestCodeGrokOpenCodeConfiguration(t *testing.T) {
 	disabled := codemode.Route{Enabled: true, RevisionID: "revision", Slug: "coding", Models: []string{"grok-fixture-model"}}
 	offers := codeclient.Offers{{Adapter: codemode.AdapterGrokBuild, Models: disabled.Models}}

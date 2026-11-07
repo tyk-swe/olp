@@ -116,7 +116,11 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 	base.Path = strings.TrimRight(base.Path, "/") + route.BasePath()
 	base.RawPath = ""
 	baseURL := base.String()
-	translatedClaude := route.MessagesToCodex && slices.Contains(adapters, codemode.AdapterCodex) || route.MessagesToGrok && slices.Contains(adapters, codemode.AdapterGrokBuild)
+	antigravityClaude := client == codeadapter.ClientClaudeCode && slices.ContainsFunc(selected, func(model string) bool {
+		declaration, _ := codeadapter.Lookup(codemode.AdapterAntigravity)
+		return slices.Contains(offers.adapters(route, model), codemode.AdapterAntigravity) && routeReaches(route, declaration, client, model)
+	})
+	translatedClaude := route.MessagesToCodex && slices.Contains(adapters, codemode.AdapterCodex) || route.MessagesToGrok && slices.Contains(adapters, codemode.AdapterGrokBuild) || route.MessagesToAntigravity && slices.Contains(adapters, codemode.AdapterAntigravity)
 	version, format, configuration, renderErr := func() (string, string, string, error) {
 		switch client {
 		case codeadapter.ClientCodex:
@@ -128,9 +132,9 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 			}), slices.Contains(offers.adapters(route, model), codemode.AdapterGrokBuild) || route.ResponsesToAntigravity && slices.Contains(offers.adapters(route, model), codemode.AdapterAntigravity)), nil
 		case codeadapter.ClientClaudeCode:
 			if platform == "windows" {
-				return codeadapter.ClaudeCodeVersion, "powershell", claudeCodePowerShellConfiguration(baseURL, model, *plan, *small, translatedClaude), nil
+				return codeadapter.ClaudeCodeVersion, "powershell", claudeCodePowerShellConfiguration(baseURL, model, *plan, *small, translatedClaude, antigravityClaude), nil
 			}
-			return codeadapter.ClaudeCodeVersion, "shell", claudeCodeConfiguration(baseURL, model, *plan, *small, translatedClaude), nil
+			return codeadapter.ClaudeCodeVersion, "shell", claudeCodeConfiguration(baseURL, model, *plan, *small, translatedClaude, antigravityClaude), nil
 		case codeadapter.ClientOpenCode:
 			text, err := openCodeConfiguration(route, adapters, offers, through, native, baseURL, model, *plan, *small)
 			return codeadapter.OpenCodeVersion, "json", text, err
@@ -163,7 +167,10 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 		if client == codeadapter.ClientClaudeCode && route.MessagesToGrok && slices.Contains(adapters, codemode.AdapterGrokBuild) {
 			return " This published route translates Messages text and function tools through Grok Build. Generated setup disables thinking, prompt caching, tool search and experimental beta features. Current Claude metadata requires the independent messages_grok_safety_identifier policy. It hashes metadata.user_id for provider safety attribution. Public API documentation supports this field. Subscription proxy acceptance remains unverified. Grok client identity requires its separate published policy."
 		}
-		if client == codeadapter.ClientClaudeCode && translatedClaude {
+		if client == codeadapter.ClientClaudeCode && route.MessagesToAntigravity && slices.Contains(adapters, codemode.AdapterAntigravity) {
+			return " This published route translates supported Messages text and function tools through Antigravity over HTTP/SSE. Generated setup disables thinking, prompt caching, tool search and experimental beta features. The separate messages_antigravity_safety_identifier policy maps metadata.user_id into Gemini safety labels. Signed continuation remains bound to the original account and conversation. Subscription proxy acceptance is unverified."
+		}
+		if client == codeadapter.ClientClaudeCode && route.MessagesToCodex && slices.Contains(adapters, codemode.AdapterCodex) {
 			return " This published route enables Messages text and tool use through Codex accounts. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and other unsupported required semantics are refused. Prompt text is preserved. Generated setup disables thinking, prompt caching, tool search and experimental beta features using settings verified for the scoped client version. The separate messages_codex_safety_identifier policy must be enabled and published to map current Claude abuse-detection metadata. This opt-in changes provider identity handling and may carry account suspension or terms risks. Codex CLI identity compatibility still requires its separate opt-in."
 		}
 		return ""
