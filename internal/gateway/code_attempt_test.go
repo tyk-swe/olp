@@ -1099,7 +1099,7 @@ func TestTranslatedCodexPublishedOutputCap(t *testing.T) {
 	}
 }
 
-func TestGrokRefusesOpaqueStateBeforeDispatch(t *testing.T) {
+func TestGrokRefusesUnsupportedMediaBeforeDispatch(t *testing.T) {
 	reached := make(chan struct{}, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reached <- struct{}{}
@@ -1120,16 +1120,16 @@ func TestGrokRefusesOpaqueStateBeforeDispatch(t *testing.T) {
 	h.rt.release = publication
 	mux := http.NewServeMux()
 	h.gateway.RegisterCode(mux)
-	request := httptest.NewRequest(http.MethodPost, "/code/grok/responses", strings.NewReader(`{"model":"grok-model","input":[{"type":"reasoning","encrypted_content":"foreign-signed-state","summary":[]}]}`))
+	request := httptest.NewRequest(http.MethodPost, "/code/grok/responses", strings.NewReader(`{"model":"grok-model","input":[{"role":"user","content":[{"type":"input_image","image_url":"https://example.invalid/image.png"}]}]}`))
 	request.Header.Set("Authorization", "Bearer "+fullKey)
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, request)
 	if response.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("opaque input = %d %s", response.Code, response.Body.String())
+		t.Fatalf("unsupported input = %d %s", response.Code, response.Body.String())
 	}
 	select {
 	case <-reached:
-		t.Fatal("opaque state reached subscription")
+		t.Fatal("unsupported media reached subscription")
 	default:
 	}
 }

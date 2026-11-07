@@ -29,8 +29,12 @@ func (a Adapter) StartGrant(ctx context.Context, start abi.GrantStart) (abi.Gran
 		ExpiresIn       int64  `json:"expires_in"`
 		Interval        int64  `json:"interval"`
 	}
-	if err := a.form(ctx, "/oauth2/device/code", url.Values{"client_id": {ClientID}, "scope": {"openid profile email offline_access grok-cli:access api:access"}}, &device); err != nil {
+	payload, err := a.form(ctx, "/oauth2/device/code", url.Values{"client_id": {ClientID}, "scope": {"openid profile email offline_access grok-cli:access api:access"}})
+	if err != nil {
 		return abi.GrantAuthorization{}, err
+	}
+	if json.Unmarshal(payload, &device) != nil {
+		return abi.GrantAuthorization{}, invalid()
 	}
 	verification, err := url.Parse(device.VerificationURI)
 	if err != nil || verification.Scheme != "https" || verification.Host != "auth.x.ai" || verification.User != nil || verification.Fragment != "" || !credential(device.DeviceCode) || !credential(device.UserCode) || len(device.UserCode) > 64 || device.ExpiresIn <= 0 || device.ExpiresIn > 1800 || device.Interval < 0 || device.Interval > 300 {
@@ -55,10 +59,11 @@ func (a Adapter) PollGrant(ctx context.Context, poll abi.GrantPoll) (abi.Grant, 
 		return abi.Grant{}, invalid()
 	}
 	var tokens tokenResponse
-	if err := a.form(ctx, "/oauth2/token", url.Values{"grant_type": {"urn:ietf:params:oauth:grant-type:device_code"}, "client_id": {ClientID}, "device_code": {poll.Session}}, &tokens); err != nil {
+	payload, err := a.form(ctx, "/oauth2/token", url.Values{"grant_type": {"urn:ietf:params:oauth:grant-type:device_code"}, "client_id": {ClientID}, "device_code": {poll.Session}})
+	if err != nil {
 		return abi.Grant{}, err
 	}
-	if !credential(tokens.RefreshToken) {
+	if json.Unmarshal(payload, &tokens) != nil || !credential(tokens.RefreshToken) {
 		return abi.Grant{}, invalid()
 	}
 	return a.grant(ctx, tokens)
@@ -69,8 +74,12 @@ func (a Adapter) RefreshGrant(ctx context.Context, refresh abi.GrantRefresh) (ab
 		return abi.Grant{}, invalid()
 	}
 	var tokens tokenResponse
-	if err := a.form(ctx, "/oauth2/token", url.Values{"grant_type": {"refresh_token"}, "client_id": {ClientID}, "refresh_token": {refresh.RefreshToken}}, &tokens); err != nil {
+	payload, err := a.form(ctx, "/oauth2/token", url.Values{"grant_type": {"refresh_token"}, "client_id": {ClientID}, "refresh_token": {refresh.RefreshToken}})
+	if err != nil {
 		return abi.Grant{}, err
+	}
+	if json.Unmarshal(payload, &tokens) != nil {
+		return abi.Grant{}, invalid()
 	}
 	grant, err := a.grant(ctx, tokens)
 	if err != nil {
@@ -102,34 +111,31 @@ func (a Adapter) grant(ctx context.Context, tokens tokenResponse) (abi.Grant, er
 	return abi.Grant{AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken, ExpiresIn: tokens.ExpiresIn, Principal: Principal(subject), Facts: map[string]string{"subject": subject}}, nil
 }
 
-func (a Adapter) form(ctx context.Context, path string, form url.Values, output any) error {
+func (a Adapter) form(ctx context.Context, path string, form url.Values) ([]byte, error) {
 	response, err := a.Fetch(ctx, abi.HTTPRequest{Method: http.MethodPost, URL: Issuer + path, Header: map[string][]string{"Content-Type": {"application/x-www-form-urlencoded"}, "User-Agent": {"OLP"}}, Body: []byte(form.Encode())})
 	if err != nil {
-		return &abi.Error{Code: abi.CodeHTTPFailed, Message: "Authorization request did not complete."}
+		return nil, &abi.Error{Code: abi.CodeHTTPFailed, Message: "Authorization request did not complete."}
 	}
 	if len(response.Body) > 64<<10 {
-		return invalid()
+		return nil, invalid()
 	}
 	if response.Status != http.StatusOK {
 		var refusal struct {
 			Error string `json:"error"`
 		}
 		if json.Unmarshal(response.Body, &refusal) != nil {
-			return invalid()
+			return nil, invalid()
 		}
 		switch refusal.Error {
 		case abi.CodeAuthorizationPending, abi.CodeSlowDown, abi.CodeAccessDenied, abi.CodeExpiredToken, abi.CodeInvalidGrant:
-			return &abi.Error{Code: refusal.Error, Message: "Authorization endpoint refused the request."}
+			return nil, &abi.Error{Code: refusal.Error, Message: "Authorization endpoint refused the request."}
 		case "authorization_denied":
-			return &abi.Error{Code: abi.CodeAccessDenied, Message: "Device authorization was denied."}
+			return nil, &abi.Error{Code: abi.CodeAccessDenied, Message: "Device authorization was denied."}
 		default:
-			return invalid()
+			return nil, invalid()
 		}
 	}
-	if json.Unmarshal(response.Body, output) != nil {
-		return invalid()
-	}
-	return nil
+	return response.Body, nil
 }
 
 func credential(value string) bool {
