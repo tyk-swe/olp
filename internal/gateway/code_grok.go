@@ -28,7 +28,7 @@ func codeTranslateGrok(body []byte, r *http.Request, model string) (codePayload,
 	}
 	root := request.OIF().Document().Root()
 	for _, field := range root.Members() {
-		if !slices.Contains([]string{"model", "input", "instructions", "stream", "store", "tools", "tool_choice", "parallel_tool_calls", "max_output_tokens", "temperature", "top_p", "text", "reasoning", "metadata", "prompt_cache_key", "safety_identifier", "include"}, field.Name) {
+		if !slices.Contains([]string{"model", "input", "instructions", "stream", "store", "tools", "tool_choice", "parallel_tool_calls", "max_output_tokens", "temperature", "top_p", "text", "reasoning", "metadata", "prompt_cache_key", "safety_identifier", "include", "client_metadata"}, field.Name) {
 			return codePayload{}, refused
 		}
 	}
@@ -37,8 +37,26 @@ func codeTranslateGrok(body []byte, r *http.Request, model string) (codePayload,
 		return codePayload{}, refused
 	}
 	include, _ := root.Lookup("include")
-	if include.Kind() != oif.Absent && include.Kind() != oif.Null && (include.Kind() != oif.Array || len(include.Elements()) != 0) {
-		return codePayload{}, refused
+	if include.Kind() != oif.Absent && include.Kind() != oif.Null {
+		if include.Kind() != oif.Array {
+			return codePayload{}, refused
+		}
+		for _, item := range include.Elements() {
+			if stringValue(item) != "reasoning.encrypted_content" {
+				return codePayload{}, refused
+			}
+		}
+	}
+	metadata, _ := root.Lookup("client_metadata")
+	if metadata.Kind() != oif.Absent && metadata.Kind() != oif.Null {
+		if metadata.Kind() != oif.Object || len(metadata.Members()) > 64 {
+			return codePayload{}, refused
+		}
+		for _, field := range metadata.Members() {
+			if field.Value.Kind() != oif.String || len(field.Value.Raw()) > 16384 {
+				return codePayload{}, refused
+			}
+		}
 	}
 	input, _ := root.Lookup("input")
 	if input.Kind() != oif.String && input.Kind() != oif.Array {

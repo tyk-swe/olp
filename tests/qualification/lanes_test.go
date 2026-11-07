@@ -421,7 +421,7 @@ func runFixtureClient(t *testing.T, client, binary, bridge, slug, key, configura
 		return sandboxClient(t, binary, bridge, []string{"OLP_API_KEY=" + key}, "exec", "--skip-git-repo-check", "--ephemeral", "-m", vendorModel,
 			"-c", `model_provider="olp"`, "-c", `model_providers.olp.name="OLP"`, "-c", `model_providers.olp.base_url="`+base+`"`,
 			"-c", `model_providers.olp.env_key="OLP_API_KEY"`, "-c", `model_providers.olp.wire_api="responses"`,
-			"-c", `model_providers.olp.supports_websockets=false`, "-c", `check_for_update_on_startup=false`, "-c", `features.apply_patch_freeform=false`, "--dangerously-bypass-approvals-and-sandbox", prompt)
+			"-c", `model_providers.olp.supports_websockets=false`, "-c", `check_for_update_on_startup=false`, "-c", `features.apply_patch_freeform=false`, "-c", `features.multi_agent=false`, "-c", `features.goals=false`, "-c", `web_search="disabled"`, "-c", `model_reasoning_summary="none"`, "-c", `model_reasoning_effort="none"`, "--dangerously-bypass-approvals-and-sandbox", prompt)
 	case "claude-code":
 		if toolRoundTrip {
 			return sandboxClient(t, binary, bridge, fixtureConfigurationEnvironment(t, configuration, key), "--print", "--bare", "--no-session-persistence", "--tools", "Bash", "--allowedTools", "Bash", "--max-turns", "3", "--model", vendorModel, "Execute printf olp-tool-round-trip using Bash, then say hello.")

@@ -125,7 +125,7 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 				declaration, _ := codeadapter.Lookup(adapter)
 				endpoint, eligible := codeadapter.RouteEndpoint(route, declaration, "responses")
 				return eligible && !endpoint.Supports(codeadapter.WebSocket)
-			})), nil
+			}), slices.Contains(offers.adapters(route, model), codemode.AdapterGrokBuild)), nil
 		case codeadapter.ClientClaudeCode:
 			if platform == "windows" {
 				return codeadapter.ClaudeCodeVersion, "powershell", claudeCodePowerShellConfiguration(baseURL, model, *plan, *small, translatedClaude), nil

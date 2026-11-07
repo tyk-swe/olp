@@ -1158,7 +1158,13 @@ Enable `responses_to_grok` in a route draft and publish it to allow supported
 Responses text and function-tool workflows through Grok Build accounts over HTTP
 and SSE. The policy is disabled by default. Generated Codex configuration disables
 WebSockets when the selected model can use a Grok account. Unsupported request
-semantics are refused rather than discarded.
+semantics are refused rather than discarded. Generated Grok setup disables web search,
+multi-agent namespace tools, freeform patch tools and goal tools, and requests no
+reasoning effort or summaries. The controlled fixture covers text and function
+tools without encrypted reasoning. Current models that return encrypted reasoning
+may fail on the next turn because opaque reasoning input is refused. OLP does not
+yet establish ownership of that ciphertext, so complete current-model reasoning
+workflows remain unqualified.
 
 The separate `grok_cli_identity` policy is also disabled by default and takes
 effect only after publication. Without it, OLP identifies itself truthfully.
