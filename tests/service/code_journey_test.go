@@ -1701,10 +1701,10 @@ func TestCodePublicationPinsTranslatedOutputContract(t *testing.T) {
 	owner := s.owner()
 	project := s.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "Output contract"}, idempotent(), http.StatusCreated)["id"].(string)
 	pool := s.want(owner, "POST", "/api/v1/code/pools", map[string]any{"project_id": project, "name": "Output contract", "kind": "shared", "account_ids": []string{}, "api_key_ids": []string{}, "account_weights": map[string]int{}}, idempotent(), http.StatusCreated)
-	route := s.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": project, "slug": "output-contract", "pool_id": pool["id"], "models": []string{"model"}, "enabled": false, "messages_codex_safety_identifier": true, "messages_to_grok": true, "messages_grok_safety_identifier": true}, idempotent(), http.StatusCreated)
+	route := s.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": project, "slug": "output-contract", "pool_id": pool["id"], "models": []string{"model"}, "enabled": false, "responses_to_antigravity": true, "responses_antigravity_compatibility": true, "messages_codex_safety_identifier": true, "messages_to_grok": true, "messages_grok_safety_identifier": true}, idempotent(), http.StatusCreated)
 	path := "/api/v1/code/routes/" + route["id"].(string)
 	first := s.want(owner, "POST", path+"/publish", nil, idempotent(etag(route)), http.StatusOK)
-	if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_route_revisions SET document=document-'translated_codex_output_minimum'-'messages_codex_safety_identifier'-'messages_to_grok'-'messages_grok_safety_identifier' WHERE id=$1`, first["revision_id"]); err != nil {
+	if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_route_revisions SET document=document-'translated_codex_output_minimum'-'messages_codex_safety_identifier'-'messages_to_grok'-'messages_grok_safety_identifier'-'responses_to_antigravity'-'responses_antigravity_compatibility' WHERE id=$1`, first["revision_id"]); err != nil {
 		t.Fatal(err)
 	}
 	s.want(owner, "POST", path+"/publish", nil, idempotent(etag(first)), http.StatusOK)
@@ -1719,13 +1719,15 @@ func TestCodePublicationPinsTranslatedOutputContract(t *testing.T) {
 		identity := item["route"].(map[string]any)["messages_codex_safety_identifier"]
 		grok := item["route"].(map[string]any)["messages_to_grok"]
 		grokSafety := item["route"].(map[string]any)["messages_grok_safety_identifier"]
+		antigravity := item["route"].(map[string]any)["responses_to_antigravity"]
+		antigravityCompatibility := item["route"].(map[string]any)["responses_antigravity_compatibility"]
 		if item["id"] == first["revision_id"] {
-			if contract != nil || identity != nil || grok != nil || grokSafety != nil {
+			if contract != nil || identity != nil || grok != nil || grokSafety != nil || antigravity != nil || antigravityCompatibility != nil {
 				t.Fatalf("legacy revision changed contract to %v", contract)
 			}
 			continue
 		}
-		if contract != true || identity != true || grok != true || grokSafety != true {
+		if contract != true || identity != true || grok != true || grokSafety != true || antigravity != true || antigravityCompatibility != true {
 			t.Fatalf("republished revision missing output contract, got %v", contract)
 		}
 	}
@@ -2102,21 +2104,7 @@ func TestCodeSignedToolContinuation(t *testing.T) {
 	if configErr != nil || !strings.Contains(configuration.Configuration, "supports_websockets = false") || !strings.Contains(configuration.Configuration, `web_search = "disabled"`) {
 		t.Fatalf("HTTP Codex configuration = %s, %v", configuration.Configuration, configErr)
 	}
-	strictSurface := startSignedSurfaceJourney(t, s, consumer, journey.route.Slug, "responses")
-	compatibleBody := json.RawMessage(`{"model":"gemini-fixture","input":"Inspect","store":false,"parallel_tool_calls":true,"prompt_cache_key":"cache-hint","client_metadata":{"thread_id":"signed-responses-root"},"reasoning":{"effort":"none"},"include":["reasoning.encrypted_content"]}`)
-	beforeCompatibility := calls.Load()
-	statusBefore, bodyBefore := s.do(consumer, "POST", strictSurface.path, compatibleBody, strictSurface.headers)
-	if statusBefore != http.StatusUnprocessableEntity || !strings.Contains(string(bodyBefore), "code_translation_unsupported_semantics") || calls.Load() != beforeCompatibility {
-		t.Fatalf("strict published policy = %s", describe(statusBefore, bodyBefore))
-	}
-	updated := s.want(owner, "PUT", "/api/v1/code/routes/"+journey.route.ID, map[string]any{"project_id": journey.route.ProjectID, "slug": journey.route.Slug, "pool_id": journey.route.PoolID, "models": journey.route.Models, "enabled": true, "chat_to_antigravity": true, "responses_to_antigravity": true, "responses_antigravity_compatibility": true}, idempotent(map[string]string{"If-Match": `"` + journey.route.ETag + `"`}), http.StatusOK)
-	published := s.want(owner, "POST", "/api/v1/code/routes/"+journey.route.ID+"/publish", nil, idempotent(etag(updated)), http.StatusOK)
-	journey.route.ETag, journey.route.RevisionID = published["etag"].(string), published["revision_id"].(string)
-	surfaceJourneys := []signedSurfaceJourney{strictSurface, startSignedSurfaceJourney(t, s, consumer, journey.route.Slug, "responses-compatible")}
-	statusPinned, bodyPinned := s.do(consumer, "POST", strictSurface.path, compatibleBody, strictSurface.headers)
-	if statusPinned != http.StatusUnprocessableEntity || !strings.Contains(string(bodyPinned), "code_translation_unsupported_semantics") {
-		t.Fatalf("pinned strict policy = %s", describe(statusPinned, bodyPinned))
-	}
+	surfaceJourneys := []signedSurfaceJourney{startSignedSurfaceJourney(t, s, consumer, journey.route.Slug, "responses"), startSignedSurfaceJourney(t, s, consumer, journey.route.Slug, "responses-compatible")}
 	path := "/code/" + journey.route.Slug + "/v1/chat/completions"
 	initial := json.RawMessage(`{"model":"gemini-fixture","messages":[{"role":"user","content":"Inspect"}]}`)
 	headers := map[string]string{"X-Opencode-Session-Id": "signed-root"}
@@ -2279,10 +2267,10 @@ func newSignedCodeJourney(t *testing.T, s *service, owner *caller, proxy, roots 
 	if _, err := s.pool.Exec(t.Context(), `INSERT INTO olp.code_pool_keys(pool_id,api_key_id) VALUES($1,$2)`, journey.route.PoolID, key["id"]); err != nil {
 		t.Fatal(err)
 	}
-	route := s.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": journey.route.ProjectID, "slug": "signed-" + uuid.NewString(), "pool_id": journey.route.PoolID, "models": []string{"gemini-fixture"}, "enabled": true, "chat_to_antigravity": true, "responses_to_antigravity": true}, idempotent(), http.StatusCreated)
+	route := s.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": journey.route.ProjectID, "slug": "signed-" + uuid.NewString(), "pool_id": journey.route.PoolID, "models": []string{"gemini-fixture"}, "enabled": true, "chat_to_antigravity": true, "responses_to_antigravity": true, "responses_antigravity_compatibility": true}, idempotent(), http.StatusCreated)
 	published := s.want(owner, "POST", "/api/v1/code/routes/"+route["id"].(string)+"/publish", nil, idempotent(etag(route)), http.StatusOK)
 	journey.route.ETag = published["etag"].(string)
-	journey.route.ChatToAntigravity, journey.route.ResponsesToAntigravity = true, true
+	journey.route.ChatToAntigravity, journey.route.ResponsesToAntigravity, journey.route.ResponsesAntigravityCompatibility = true, true, true
 	journey.route.ID, journey.route.Slug, journey.route.Models = route["id"].(string), route["slug"].(string), []string{"gemini-fixture"}
 	if err := s.pool.QueryRow(t.Context(), `SELECT latest_revision_id::text FROM olp.code_routes WHERE id=$1`, journey.route.ID).Scan(&journey.route.RevisionID); err != nil {
 		t.Fatal(err)
