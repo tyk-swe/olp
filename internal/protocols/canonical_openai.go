@@ -90,7 +90,12 @@ func decodeOpenAIGeneration(r *reader, family wire.Format) error {
 					item.take("id")
 					item.take("status")
 					tc := wire.ToolCall{ID: str(item.take("call_id")), Name: str(item.take("name")), Arguments: str(item.take("arguments"))}
-					c.Messages = append(c.Messages, Message{Role: "assistant", Calls: []wire.ToolCall{tc}})
+					if len(c.Messages) > 0 && c.Messages[len(c.Messages)-1].Role == "assistant" {
+						previous := c.Messages[len(c.Messages)-1]
+						c.Messages[len(c.Messages)-1] = Message{Role: previous.Role, Parts: previous.Parts, Calls: append(previous.Calls, tc)}
+					} else {
+						c.Messages = append(c.Messages, Message{Role: "assistant", Calls: []wire.ToolCall{tc}})
+					}
 				case "function_call_output":
 					item.take("id")
 					item.ignoreDefault("status", `"completed"`)

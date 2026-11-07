@@ -1288,3 +1288,40 @@ func TestAntigravityMessagesText(t *testing.T) {
 		t.Fatalf("Messages translation = %s, %v", payload.body, err)
 	}
 }
+
+func TestAntigravityResponsesSignedParallelContinuation(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprint(stream), func(t *testing.T) {
+			ledger := &signedTestLedger{}
+			attempt := &codeAttempt{model: "gemini-native", server: &Server{deps: Dependencies{CodeLedger: ledger}, now: time.Now}}
+			body := `{"response":{"candidates":[{"content":{"parts":[{"functionCall":{"name":"read_file","args":{"path":"sample"}},"thoughtSignature":"private-first"},{"functionCall":{"name":"list_files","args":{}},"thoughtSignature":"private-second"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":2,"totalTokenCount":10}}}`
+			contentType := "application/json"
+			if stream {
+				body = "data: " + body + "\n\n"
+				contentType = "text/event-stream"
+			}
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/code/route/responses", nil)
+			attempt.antigravityResponse(context.Background(), recorder, request, &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {contentType}}, Body: io.NopCloser(strings.NewReader(body))}, "public-model", codePayload{stream: stream, signedContinuation: true})
+			if len(ledger.calls) != 2 || strings.Contains(recorder.Body.String(), "private-") || !strings.Contains(recorder.Body.String(), `"type":"function_call"`) {
+				t.Fatalf("response = %s", recorder.Body.String())
+			}
+			calls := make([]codesessions.SignedCall, 2)
+			for _, call := range ledger.calls {
+				calls[call.Index] = call
+				if !strings.Contains(recorder.Body.String(), call.ID) {
+					t.Fatalf("outward call missing from response = %s", recorder.Body.String())
+				}
+			}
+			input := fmt.Sprintf(`{"model":"gemini-native","input":[{"type":"function_call","call_id":%q,"name":"read_file","arguments":"{\"path\":\"sample\"}"},{"type":"function_call","call_id":%q,"name":"list_files","arguments":"{}"},{"type":"function_call_output","call_id":%q,"output":"directory result"},{"type":"function_call_output","call_id":%q,"output":"file result"}]}`, calls[0].ID, calls[1].ID, calls[1].ID, calls[0].ID)
+			payload, err := attempt.translateAntigravity([]byte(input), request, "gemini-native", "project", true)
+			if err != nil || !strings.Contains(string(payload.body), `"thoughtSignature":"private-first"`) || !strings.Contains(string(payload.body), `"thoughtSignature":"private-second"`) || strings.Contains(string(payload.body), calls[0].ID) {
+				t.Fatalf("continuation = %s, %v", payload.body, err)
+			}
+			incomplete := strings.Replace(input, fmt.Sprintf(`,{"type":"function_call_output","call_id":%q,"output":"file result"}`, calls[0].ID), "", 1)
+			if _, err := attempt.translateAntigravity([]byte(incomplete), request, "gemini-native", "project", true); err == nil {
+				t.Fatal("incomplete tool group accepted")
+			}
+		})
+	}
+}
