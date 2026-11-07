@@ -18,6 +18,41 @@ func TestEmbeddedCatalogIsCanonical(t *testing.T) {
 	}
 }
 
+func TestEstimationFactorsRequirePositiveCanonicalDecimals(t *testing.T) {
+	fixture, err := os.ReadFile("testdata/valid/complete.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		factor string
+		valid  bool
+	}{
+		{factor: "0.000000000001", valid: true},
+		{factor: "1", valid: true},
+		{factor: "999999999999.999999999999", valid: true},
+		{factor: "0"},
+		{factor: "-1"},
+		{factor: "NaN"},
+		{factor: "+Inf"},
+		{factor: "1e2"},
+		{factor: "1.0"},
+		{factor: "01"},
+		{factor: "1000000000000"},
+		{factor: "0.0000000000001"},
+	} {
+		t.Run(tc.factor, func(t *testing.T) {
+			input := bytes.Replace(fixture, []byte(`"factor": "1.18"`), []byte(`"factor": "`+tc.factor+`"`), 1)
+			canonical, err := Canonical(input)
+			if (err == nil) != tc.valid {
+				t.Fatalf("factor %q accepted = %v, want %v: %v", tc.factor, err == nil, tc.valid, err)
+			}
+			if tc.valid && !bytes.Contains(canonical, []byte(`"factor": "`+tc.factor+`"`)) {
+				t.Fatalf("canonical output changed factor %q", tc.factor)
+			}
+		})
+	}
+}
+
 func TestEncodeSortsTiersWithoutChangingCatalog(t *testing.T) {
 	tiers := []Tier{{AboveInputTokens: 30}, {AboveInputTokens: 10}, {AboveInputTokens: 20}}
 	catalog := &Catalog{APIVersion: APIVersion, Vendors: []Vendor{{Models: []Model{{Prices: []Price{{Tiers: slices.Clone(tiers)}}}}}}}

@@ -202,8 +202,8 @@ func (c *Catalog) Validate() error {
 			return fmt.Errorf("estimation family %q is unknown or repeated", e.Family)
 		}
 		families[e.Family] = true
-		if factor, err := e.Factor.Float64(); err != nil || factor <= 0 {
-			return fmt.Errorf("estimation family %s needs a positive factor", e.Family)
+		if !e.Factor.Valid() || e.Factor == "0" {
+			return fmt.Errorf("estimation family %s needs a positive decimal factor", e.Family)
 		}
 		if err := c.validateProvenance(e.Provenance); err != nil {
 			return fmt.Errorf("estimation family %s: %w", e.Family, err)
