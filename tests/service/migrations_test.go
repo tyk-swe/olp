@@ -4,10 +4,12 @@ package service_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -15,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/database"
 )
@@ -149,6 +152,90 @@ func TestCodeDecisionsMigrationKeepsRecordsContentFree(t *testing.T) {
 		if _, err := pool.Exec(t.Context(), insert, args...); err == nil {
 			t.Fatalf("%s accepted", rejectedInsert.name)
 		}
+	}
+}
+
+func migrateBefore(t *testing.T, pool *pgxpool.Pool, version string) {
+	t.Helper()
+	if _, err := pool.Exec(t.Context(), `CREATE SCHEMA IF NOT EXISTS olp;
+		CREATE TABLE IF NOT EXISTS olp.migrations (
+			version text PRIMARY KEY, checksum bytea NOT NULL, applied_at timestamptz NOT NULL DEFAULT now()
+		)`); err != nil {
+		t.Fatal(err)
+	}
+	directory := "../../internal/database/migrations"
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if name >= version {
+			return
+		}
+		var applied bool
+		if err := pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp.migrations WHERE version=$1)`, name).Scan(&applied); err != nil {
+			t.Fatal(err)
+		}
+		if applied {
+			continue
+		}
+		sql, err := os.ReadFile(filepath.Join(directory, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(t.Context(), string(sql)); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		checksum := sha256.Sum256(sql)
+		if _, err := pool.Exec(t.Context(), `INSERT INTO olp.migrations(version,checksum) VALUES($1,$2)`, name, checksum[:]); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestUpgradeKeepsLegacyBillingGapsUnimported(t *testing.T) {
+	pool, _ := newDatabase(t)
+	migrateBefore(t, pool, "0127")
+	user, provider := uuid.NewString(), uuid.NewString()
+	legacy := []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO olp.users(id, email, display_name, role, etag) VALUES($1, 'billing-gap@example.invalid', 'Billing gap', 'owner', $2)`, []any{user, uuid.NewString()}},
+		{`INSERT INTO olp.providers(id, name, kind, state, configuration, etag, slots_etag, created_by) VALUES($1, 'billing-gap', 'plugin', 'active', '{}', $2, $3, $4)`, []any{provider, uuid.NewString(), uuid.NewString(), user}},
+		{`INSERT INTO olp.provider_billing_imports(provider_id, source, scope, etag, created_by, last_success_at, imported_from, imported_through)
+			VALUES($1, 'openai_costs', '{}', $2, $3, now() - interval '1 day', '2026-10-01', '2026-10-26')`, []any{provider, uuid.NewString(), user}},
+		{`INSERT INTO olp.provider_invoiced_costs(provider_id, day, line_item, currency, amount, source)
+			VALUES($1, '2026-10-05', 'gpt', 'USD', 5, 'openai_costs'), ($1, '2026-10-24', 'gpt', 'USD', 7, 'openai_costs')`, []any{provider}},
+	}
+	for _, statement := range legacy {
+		if _, err := pool.Exec(t.Context(), statement.sql, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	migrateBefore(t, pool, "0140")
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.provider_billing_days SET last_success_at=now() WHERE provider_id=$1 AND day='2026-10-17'`, provider); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Migrate(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+	var covered []string
+	if err := pool.QueryRow(t.Context(), `SELECT COALESCE(array_agg(day::text ORDER BY day), '{}') FROM olp.provider_billing_days WHERE provider_id=$1`, provider).Scan(&covered); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(covered, ",") != "2026-10-05,2026-10-17,2026-10-24" {
+		t.Fatalf("covered days = %v, want fetched invoice days and the day refetched after the upgrade", covered)
+	}
+	var invoicedKept bool
+	var from, through string
+	if err := pool.QueryRow(t.Context(), `SELECT (SELECT sum(amount)=12 FROM olp.provider_invoiced_costs WHERE provider_id=$1),
+		COALESCE(imported_from::text, ''), COALESCE(imported_through::text, '') FROM olp.provider_billing_imports WHERE provider_id=$1`, provider).Scan(&invoicedKept, &from, &through); err != nil {
+		t.Fatal(err)
+	}
+	if !invoicedKept || from != "2026-10-24" || through != "2026-10-24" {
+		t.Fatalf("invoiced kept=%t imported_from=%q imported_through=%q", invoicedKept, from, through)
 	}
 }
 
