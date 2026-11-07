@@ -323,3 +323,21 @@ func TestGrokMessagesPublishedPolicy(t *testing.T) {
 		t.Fatal("Claude configuration unavailable")
 	}
 }
+
+func TestCodeGrokOpenCodeConfiguration(t *testing.T) {
+	disabled := codemode.Route{Enabled: true, RevisionID: "revision", Slug: "coding", Models: []string{"grok-fixture-model"}}
+	offers := codeclient.Offers{{Adapter: codemode.AdapterGrokBuild, Models: disabled.Models}}
+	request := codeclient.Request{GatewayURL: "http://localhost:4000", Client: codeadapter.ClientOpenCode, Model: disabled.Models[0]}
+	if _, err := codeclient.Generate(disabled, offers, request); err == nil {
+		t.Fatal("disabled Chat translation offered configuration")
+	}
+	route := codemode.Route{Enabled: true, RevisionID: "revision", Slug: "coding", Models: disabled.Models, ChatToGrok: true}
+	configuration, err := codeclient.Generate(route, offers, request)
+	if err != nil || !strings.Contains(configuration.Configuration, "@ai-sdk/openai-compatible") || !strings.Contains(configuration.Configuration, "/code/coding/v1") {
+		t.Fatalf("Chat configuration %+v, %v", configuration, err)
+	}
+	codex := codeclient.Request{GatewayURL: request.GatewayURL, Client: codeadapter.ClientCodex, Model: request.Model}
+	if _, err := codeclient.Generate(route, offers, codex); err == nil {
+		t.Fatal("Chat opt-in enabled Responses")
+	}
+}

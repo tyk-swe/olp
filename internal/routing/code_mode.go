@@ -150,7 +150,7 @@ func (s *Snapshot) compileCodeMode() error {
 		if route.MessagesToCodex || route.MessagesToGrok {
 			revision.providers[codeCapability{"v1/messages", codeadapter.HTTP}] = s.codeProvidersWithTranslation(route, "v1/messages")
 		}
-		if route.ChatToAntigravity || route.ChatToCodex {
+		if route.ChatToAntigravity || route.ChatToCodex || route.ChatToGrok {
 			revision.providers[codeCapability{"v1/chat/completions", codeadapter.HTTP}] = s.codeProvidersWithTranslation(route, "v1/chat/completions")
 		}
 	}

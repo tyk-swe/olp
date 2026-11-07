@@ -83,14 +83,15 @@ type CodePaidConnection struct {
 
 type CodeRoutePolicy struct {
 	ResponsesToGrok                   bool                      `json:"responses_to_grok,omitempty"`
+	ChatToGrok                        bool                      `json:"chat_to_grok,omitempty"`
 	MessagesToGrok                    bool                      `json:"messages_to_grok,omitempty"`
 	MessagesGrokSafetyIdentifier      bool                      `json:"messages_grok_safety_identifier,omitempty"`
 	GrokCLIIdentity                   bool                      `json:"grok_cli_identity,omitempty"`
 	CodexCLIIdentity                  bool                      `json:"codex_cli_identity,omitempty"`
 	PaidFallbackTargets               map[string]CodePaidTarget `json:"paid_fallback_targets,omitempty"`
+	ChatToAntigravity                 bool                      `json:"chat_to_antigravity,omitempty"`
 	ResponsesToAntigravity            bool                      `json:"responses_to_antigravity,omitempty"`
 	ResponsesAntigravityCompatibility bool                      `json:"responses_antigravity_compatibility,omitempty"`
-	ChatToAntigravity                 bool                      `json:"chat_to_antigravity,omitempty"`
 	PaidParticipation                 bool                      `json:"paid_participation"`
 	PaidTargets                       map[string]CodePaidTarget `json:"paid_targets,omitempty"`
 	Pool                              string                    `json:"pool"`
