@@ -410,6 +410,9 @@ func fixtureAntigravity(w http.ResponseWriter, r *http.Request, toolProof chan<-
 					Parameters struct {
 						Properties map[string]json.RawMessage `json:"properties"`
 					} `json:"parameters"`
+					ParametersJSONSchema struct {
+						Properties map[string]json.RawMessage `json:"properties"`
+					} `json:"parametersJsonSchema"`
 				} `json:"functionDeclarations"`
 			} `json:"tools"`
 		} `json:"request"`
@@ -429,7 +432,7 @@ func fixtureAntigravity(w http.ResponseWriter, r *http.Request, toolProof chan<-
 	toolName := func() string {
 		for _, tool := range envelope.Request.Tools {
 			for _, declaration := range tool.Declarations {
-				if strings.EqualFold(declaration.Name, "bash") && len(declaration.Parameters.Properties["command"]) != 0 || declaration.Name == "exec_command" && len(declaration.Parameters.Properties["cmd"]) != 0 {
+				if strings.EqualFold(declaration.Name, "bash") && (len(declaration.Parameters.Properties["command"]) != 0 || len(declaration.ParametersJSONSchema.Properties["command"]) != 0) || declaration.Name == "exec_command" && (len(declaration.Parameters.Properties["cmd"]) != 0 || len(declaration.ParametersJSONSchema.Properties["cmd"]) != 0) {
 					return declaration.Name
 				}
 			}

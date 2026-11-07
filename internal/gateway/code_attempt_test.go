@@ -1501,6 +1501,7 @@ func TestAntigravityMessagesIdentityAndRefusals(t *testing.T) {
 		{name: "identity default refusal", extra: `,"metadata":{"user_id":"hello"}}`},
 		{name: "unknown metadata", extra: `,"metadata":{"user_id":"hello","unknown":"value"}}`, mapping: true},
 		{name: "thinking", extra: `,"thinking":{"type":"enabled","budget_tokens":1024}}`},
+		{name: "explicit effort", extra: `,"output_config":{"effort":"high"}}`},
 		{name: "cache control", extra: `,"system":[{"type":"text","text":"Be concise","cache_control":{"type":"ephemeral"}}]}`},
 		{name: "parallel semantics", extra: `,"tool_choice":{"type":"auto","disable_parallel_tool_use":true}}`},
 	} {

@@ -116,6 +116,10 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 	base.Path = strings.TrimRight(base.Path, "/") + route.BasePath()
 	base.RawPath = ""
 	baseURL := base.String()
+	antigravityClaude := client == codeadapter.ClientClaudeCode && slices.ContainsFunc(selected, func(model string) bool {
+		declaration, _ := codeadapter.Lookup(codemode.AdapterAntigravity)
+		return slices.Contains(offers.adapters(route, model), codemode.AdapterAntigravity) && routeReaches(route, declaration, client, model)
+	})
 	translatedClaude := route.MessagesToCodex && slices.Contains(adapters, codemode.AdapterCodex) || route.MessagesToGrok && slices.Contains(adapters, codemode.AdapterGrokBuild) || route.MessagesToAntigravity && slices.Contains(adapters, codemode.AdapterAntigravity)
 	version, format, configuration, renderErr := func() (string, string, string, error) {
 		switch client {
@@ -128,9 +132,9 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 			}), slices.Contains(offers.adapters(route, model), codemode.AdapterGrokBuild) || route.ResponsesToAntigravity && slices.Contains(offers.adapters(route, model), codemode.AdapterAntigravity)), nil
 		case codeadapter.ClientClaudeCode:
 			if platform == "windows" {
-				return codeadapter.ClaudeCodeVersion, "powershell", claudeCodePowerShellConfiguration(baseURL, model, *plan, *small, translatedClaude), nil
+				return codeadapter.ClaudeCodeVersion, "powershell", claudeCodePowerShellConfiguration(baseURL, model, *plan, *small, translatedClaude, antigravityClaude), nil
 			}
-			return codeadapter.ClaudeCodeVersion, "shell", claudeCodeConfiguration(baseURL, model, *plan, *small, translatedClaude), nil
+			return codeadapter.ClaudeCodeVersion, "shell", claudeCodeConfiguration(baseURL, model, *plan, *small, translatedClaude, antigravityClaude), nil
 		case codeadapter.ClientOpenCode:
 			text, err := openCodeConfiguration(route, adapters, offers, through, native, baseURL, model, *plan, *small)
 			return codeadapter.OpenCodeVersion, "json", text, err
