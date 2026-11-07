@@ -4,6 +4,9 @@ inputs:
   node-modules:
     description: Install the pnpm workspace.
     default: "true"
+  go-cache:
+    description: Restore and save the Go module and build caches.
+    default: "true"
   go-cache-suffix:
     description: Distinguish jobs that build different Go artifacts.
     default: ""
@@ -44,6 +47,7 @@ runs:
           echo "EOF"
         } >> "$GITHUB_OUTPUT"
     - id: go-build-cache
+      if: inputs.go-cache == 'true'
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: |
