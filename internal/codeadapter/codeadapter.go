@@ -133,7 +133,7 @@ var vendors = []Vendor{
 		endpoints:       []Endpoint{{ClientPath: "responses", UpstreamPath: "responses", Protocol: codemode.ProtocolResponses, Operation: "responses", Identity: IdentityCodex, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP, Target: TargetGrok}},
 		clients:         []Client{{ID: ClientCodex}},
 		enrollmentNotes: []string{"Enrollment verifies the provider subject through authenticated userinfo and stores refreshable grants encrypted. Live independent-gateway acceptance remains unverified."},
-		notes:           []string{"Explicit responses_to_grok policy enables controlled text and function tools over HTTP or SSE. Grok client identity requires separate grok_cli_identity policy. Provider terms may restrict independent gateways and accounts may be suspended. Fixture success does not qualify live subscription acceptance."},
+		notes:           []string{"Explicit responses_to_grok and messages_to_grok policies independently enable controlled text and function tools over HTTP or SSE. Grok client identity requires separate grok_cli_identity policy. Provider terms may restrict independent gateways and accounts may be suspended. Fixture success does not qualify live subscription acceptance."},
 	},
 	{
 		Adapter: codemode.AdapterCodex, Name: "Codex", profiles: []string{codexauth.ProfileID}, manifest: codexauth.Manifest,
@@ -169,7 +169,7 @@ var vendors = []Vendor{
 			"Supply an authorized Google desktop OAuth client ID as the provider option. Complete masked enrollment with callback_url and client_secret JSON. Client secrets and refresh tokens remain encrypted.",
 			"Enrollment verifies the Google subject and an existing cloudcode project. It does not onboard accounts or establish live inference, entitlement, allowance or hard token bounds.",
 		},
-		notes: []string{"Explicit chat_to_antigravity policy enables controlled Gemini text and function tools over HTTP or SSE. Signed reasoning, media and server tools are unsupported. Client identity and prompt compatibility remain disabled. Live subscription and OpenCode workflow qualification remain pending."},
+		notes: []string{"Explicit chat_to_antigravity policy enables controlled Gemini text and function tools over HTTP or SSE. Republishing enables encrypted signed function continuation bound to the root conversation and selected account. Other signed parts, reasoning controls, media and server tools are unsupported. Client identity and prompt compatibility remain disabled. Provider terms and account suspension risks apply. Live subscription qualification remains pending."},
 	},
 	{
 		Adapter: codemode.AdapterOpenCodeGo, Name: "OpenCode Go", profiles: []string{codeplans.OpenCodeGoProfile}, manifest: codeplans.OpenCodeGoManifest, KeyGrant: true,
@@ -482,6 +482,9 @@ func RouteEndpoint(route codemode.Route, adapter Vendor, path string) (Endpoint,
 	if endpoint, ok := adapter.Endpoint(path); ok {
 		return endpoint, endpoint.Target.Enabled(route)
 	}
+	if adapter.Adapter == codemode.AdapterGrokBuild && route.MessagesToGrok && path == "v1/messages" {
+		return adapter.Endpoint("responses")
+	}
 	if adapter.Adapter == codemode.AdapterCodex && (route.MessagesToCodex && path == "v1/messages" || route.ChatToCodex && path == "v1/chat/completions") {
 		return adapter.Endpoint("responses")
 	}
@@ -494,6 +497,10 @@ func RouteClientProtocol(route codemode.Route, adapter Vendor, client, model str
 	}
 	if protocol, ok := adapter.Protocol(client, model); ok {
 		return protocol, slices.ContainsFunc(adapter.endpoints, func(endpoint Endpoint) bool { return endpoint.Protocol == protocol && endpoint.Target.Enabled(route) })
+	}
+	if adapter.Adapter == codemode.AdapterGrokBuild && route.MessagesToGrok && client == ClientClaudeCode {
+		endpoint, ok := RouteEndpoint(route, adapter, "v1/messages")
+		return codemode.ProtocolMessages, ok && adapter.ServesModel(endpoint.Protocol, model)
 	}
 	if adapter.Adapter != codemode.AdapterCodex {
 		return "", false
@@ -526,6 +533,9 @@ func RouteClients(route codemode.Route, adapter Vendor) []string {
 	if adapter.Adapter == codemode.AdapterGrokBuild {
 		return slices.Collect(func(yield func(string) bool) {
 			if route.ResponsesToGrok && !yield(ClientCodex) {
+				return
+			}
+			if route.MessagesToGrok && !yield(ClientClaudeCode) {
 				return
 			}
 			if route.ChatToGrok {

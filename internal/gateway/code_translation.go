@@ -20,42 +20,51 @@ import (
 )
 
 type codePayload struct {
-	body         []byte
-	query        string
-	stream       bool
-	translated   bool
-	includeUsage bool
-	target       codeadapter.Target
+	signedContinuation bool
+	body               []byte
+	query              string
+	stream             bool
+	translated         bool
+	includeUsage       bool
+	target             codeadapter.Target
 }
 
-func codeTranslateMessages(body []byte, r *http.Request, model string, minimum, safetyMapping bool) (codePayload, error) {
+func codeParseMessages(body []byte, r *http.Request, model string, safetyMapping bool) (*wire.Request, string, error) {
 	refused := codemode.Refuse(422, "code_translation_unsupported_semantics")
 	query, queryErr := url.ParseQuery(r.URL.RawQuery)
 	if queryErr != nil || (len(query) != 0 && (len(query) != 1 || !slices.Equal(query["beta"], []string{"true"}))) || r.Header.Get("Anthropic-Beta") != "" || len(r.Trailer) != 0 {
-		return codePayload{}, refused
+		return nil, "", refused
 	}
 	request, requestErr := protocols.ParseForModel(wire.Anthropic, body, model)
 	if requestErr != nil {
-		return codePayload{}, refused
+		return nil, "", refused
 	}
 	if request.Field("stream_options") != nil {
-		return codePayload{}, refused
+		return nil, "", refused
 	}
 	root := request.OIF().Document().Root()
 	if !codeTextContent(root, "system") {
-		return codePayload{}, refused
+		return nil, "", refused
 	}
 	messages, _ := root.Lookup("messages")
 	for _, message := range messages.Elements() {
 		if !codeMessagesContent(message) {
-			return codePayload{}, refused
+			return nil, "", refused
 		}
 	}
 	prepared, safety, identityErr := codeMessagesSafetyIdentifier(request, safetyMapping)
 	if identityErr != nil {
-		return codePayload{}, identityErr
+		return nil, "", identityErr
 	}
-	return codeTranslateResponses(prepared, minimum, safety)
+	return prepared, safety, nil
+}
+
+func codeTranslateMessages(body []byte, r *http.Request, model string, minimum, safetyMapping bool) (codePayload, error) {
+	request, safety, err := codeParseMessages(body, r, model, safetyMapping)
+	if err != nil {
+		return codePayload{}, err
+	}
+	return codeTranslateResponses(request, minimum, safety)
 }
 
 func codeTranslateChat(body []byte, r *http.Request, model string, minimum bool) (codePayload, error) {
@@ -108,15 +117,25 @@ func stringValue(value oif.Value) string {
 	return text
 }
 
-func codeTranslateResponses(request *wire.Request, minimum bool, safety string) (codePayload, error) {
+func codeEncodeResponses(request *wire.Request) (*wire.Request, error) {
 	refused := codemode.Refuse(422, "code_translation_unsupported_semantics")
 	encoded, _, encodeErr := protocols.EncodeTarget(request, wire.Responses, "openai", "openai", request.Route, nil)
 	if encodeErr != nil {
-		return codePayload{}, refused
+		return nil, refused
 	}
 	target, targetErr := protocols.ParseForModel(wire.Responses, encoded, request.Route)
 	if targetErr != nil {
-		return codePayload{}, refused
+		return nil, refused
+	}
+
+	return target, nil
+}
+
+func codeTranslateResponses(request *wire.Request, minimum bool, safety string) (codePayload, error) {
+	refused := codemode.Refuse(422, "code_translation_unsupported_semantics")
+	target, targetErr := codeEncodeResponses(request)
+	if targetErr != nil {
+		return codePayload{}, targetErr
 	}
 
 	input, _ := target.OIF().Document().Root().Lookup("input")
@@ -300,18 +319,4 @@ func codeSafetyIdentifierChanges(identifier string) []oif.Change {
 		return nil
 	}
 	return []oif.Change{{Pointer: "/safety_identifier", Value: strconv.Quote(identifier), Origin: oif.TransformedMapping, Reason: "Explicit Messages abuse-detection identity mapping"}}
-}
-
-func codeEncodeResponses(request *wire.Request) (*wire.Request, error) {
-	refused := codemode.Refuse(422, "code_translation_unsupported_semantics")
-	encoded, _, encodeErr := protocols.EncodeTarget(request, wire.Responses, "openai", "openai", request.Route, nil)
-	if encodeErr != nil {
-		return nil, refused
-	}
-	target, targetErr := protocols.ParseForModel(wire.Responses, encoded, request.Route)
-	if targetErr != nil {
-		return nil, refused
-	}
-
-	return target, nil
 }

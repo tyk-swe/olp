@@ -5391,6 +5391,16 @@
               "type": "boolean",
               "description": "Separately authorizes translating Messages metadata.user_id to a stable SHA-256 Responses safety_identifier. Disabled by default. Only the documented user identifier is accepted, and other metadata refuses. Review provider identity and account terms before enabling."
             },
+            "messages_to_grok": {
+              "type": "boolean",
+              "default": false,
+              "description": "Allow Messages text and function tools through Grok Build subscription accounts after publication. Disabled by default. Existing revisions keep their published policy."
+            },
+            "messages_grok_safety_identifier": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly map Messages metadata.user_id to a SHA-256 safety_identifier for Grok. Independently published and disabled by default. Public API documentation supports this mapping. Subscription proxy acceptance remains unverified. Unsupported metadata is refused."
+            },
             "chat_to_grok": {
               "type": "boolean",
               "default": false,
@@ -7760,7 +7770,7 @@
             },
             "chat_to_antigravity": {
               "type": "boolean",
-              "description": "Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow."
+              "description": "Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Republishing enables encrypted signed function continuation bound to the root conversation and selected account, saved before actionable output and removed on retirement. Existing published revisions keep their behavior. Missing or unrepresentable continuation state is refused without replay. Reasoning controls, media and server tools remain unsupported. Client identity and prompts are preserved. This path may carry provider terms and account suspension risks. Controlled fixtures do not qualify any current model or live subscription workflow."
             },
             "paid_fallback_targets": {
               "type": "object",
@@ -7795,6 +7805,16 @@
             "messages_codex_safety_identifier": {
               "type": "boolean",
               "description": "Separately authorizes translating Messages metadata.user_id to a stable SHA-256 Responses safety_identifier. Disabled by default. Only the documented user identifier is accepted, and other metadata refuses. Review provider identity and account terms before enabling."
+            },
+            "messages_to_grok": {
+              "type": "boolean",
+              "default": false,
+              "description": "Allow Messages text and function tools through Grok Build subscription accounts after publication. Disabled by default. Existing revisions keep their published policy."
+            },
+            "messages_grok_safety_identifier": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly map Messages metadata.user_id to a SHA-256 safety_identifier for Grok. Independently published and disabled by default. Public API documentation supports this mapping. Subscription proxy acceptance remains unverified. Unsupported metadata is refused."
             },
             "chat_to_grok": {
               "type": "boolean",
@@ -31304,6 +31324,16 @@
               "type": "boolean",
               "description": "Separately authorizes translating Messages metadata.user_id to a stable SHA-256 Responses safety_identifier. Disabled by default. Only the documented user identifier is accepted, and other metadata refuses. Review provider identity and account terms before enabling."
             },
+            "messages_to_grok": {
+              "type": "boolean",
+              "default": false,
+              "description": "Allow Messages text and function tools through Grok Build subscription accounts after publication. Disabled by default. Existing revisions keep their published policy."
+            },
+            "messages_grok_safety_identifier": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly map Messages metadata.user_id to a SHA-256 safety_identifier for Grok. Independently published and disabled by default. Public API documentation supports this mapping. Subscription proxy acceptance remains unverified. Unsupported metadata is refused."
+            },
             "chat_to_grok": {
               "type": "boolean",
               "default": false,
@@ -36645,7 +36675,7 @@
             },
             "chat_to_antigravity": {
               "type": "boolean",
-              "description": "Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow."
+              "description": "Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Republishing enables encrypted signed function continuation bound to the root conversation and selected account, saved before actionable output and removed on retirement. Existing published revisions keep their behavior. Missing or unrepresentable continuation state is refused without replay. Reasoning controls, media and server tools remain unsupported. Client identity and prompts are preserved. This path may carry provider terms and account suspension risks. Controlled fixtures do not qualify any current model or live subscription workflow."
             },
             "paid_fallback_targets": {
               "type": "object",
@@ -36680,6 +36710,16 @@
             "messages_codex_safety_identifier": {
               "type": "boolean",
               "description": "Separately authorizes translating Messages metadata.user_id to a stable SHA-256 Responses safety_identifier. Disabled by default. Only the documented user identifier is accepted, and other metadata refuses. Review provider identity and account terms before enabling."
+            },
+            "messages_to_grok": {
+              "type": "boolean",
+              "default": false,
+              "description": "Allow Messages text and function tools through Grok Build subscription accounts after publication. Disabled by default. Existing revisions keep their published policy."
+            },
+            "messages_grok_safety_identifier": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly map Messages metadata.user_id to a SHA-256 safety_identifier for Grok. Independently published and disabled by default. Public API documentation supports this mapping. Subscription proxy acceptance remains unverified. Unsupported metadata is refused."
             },
             "chat_to_grok": {
               "type": "boolean",

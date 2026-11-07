@@ -40,6 +40,12 @@
           <p>
             Chat to Grok Build {revision.route.chat_to_grok
               ? 'enabled'
+              : 'disabled'}. Messages to Grok Build {revision.route
+              .messages_to_grok
+              ? 'enabled'
+              : 'disabled'}. Messages Grok safety identity mapping {revision
+              .route.messages_grok_safety_identifier
+              ? 'enabled'
               : 'disabled'}. Responses to Grok Build {revision.route
               .responses_to_grok
               ? 'enabled'

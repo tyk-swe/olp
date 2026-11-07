@@ -1136,9 +1136,13 @@ boundary and durable ownership checks remain required.
 
 The `antigravity-subscription` profile uses an operator-supplied Google desktop OAuth client. Configure its public `client_id` and complete headless PKCE enrollment with the callback URL and client secret in the masked grant input. The existing encrypted grant store holds the secret and refresh token. Authenticated Google subject and existing cloudcode project evidence establish identity, and both must remain unchanged on refresh. See the [plugin setup](../../internal/antigravityauth/antigravity/README.md) for the completion payload and credential setup requirement.
 
-The independent `chat_to_antigravity` route flag enables an internal Gemini target after publication. Existing OpenCode Chat Completions ingress supports controlled single-candidate text/function tool fixtures over HTTP unary or SSE. Eligible operator-configured model IDs start with `gemini-`, which does not establish model inventory, entitlement or live compatibility. Native forwarding remains the default. Public Gemini ingress, Responses, Messages, WebSocket, reasoning controls, signed state, media and server tools are unsupported. Identity and prompt compatibility remain disabled.
+The independent `chat_to_antigravity` route flag enables an internal Gemini target after publication. Existing OpenCode Chat Completions ingress supports controlled single-candidate text/function tool fixtures over HTTP unary or SSE. Eligible operator-configured model IDs start with `gemini-`, which does not establish model inventory, entitlement or live compatibility. Native forwarding remains the default. Public Gemini ingress, Responses, Messages, WebSocket, reasoning controls, media and server tools are unsupported. Identity and prompt compatibility remain disabled.
 
-Google documents that current generateContent responses may carry required thought signatures on any part. This target refuses that state instead of discarding it, preserves authoritative usage from dispatched requests and never replays an unsupported result. No current model or live subscription tool workflow has been qualified. Signature-free fixtures do not close that gap. A current model/tool combination that works within the restricted path, or faithful signature support, remains a prerequisite for live qualification.
+Republish an existing `chat_to_antigravity` route to enable signed function continuation. Existing published revisions keep their refusal behavior. OLP encrypts the minimum signature and call association, bound to the root conversation, selected account, principal and model, before returning a tool call or streaming its actionable delta. The client returns the complete assistant tool call and matching tool result using its original OpenCode session identity. OLP restores the exact provider ID presence and signature after a process restart. It does not retain tool arguments or results in this state.
+
+Missing, foreign or changed associations fail with `code_continuation_unavailable` before dispatch. Signed text, thought parts and other state that cannot be represented faithfully remain unsupported. Save failures refuse actionable output, preserve observed authoritative usage and never replay accepted work. Retiring the root conversation deletes its encrypted continuation state. Start a new conversation after retirement or state loss.
+
+The controlled OpenCode tool fixture does not qualify any current model or live subscription workflow. Live acceptance remains unverified and requires a separate scoped provider qualification. This path may carry provider terms and account suspension risks. No acknowledgment step is required.
 
 Paid fallback uses a separate `paid_fallback_targets` map with the same native-model, provider and slot fields. Enable paid participation and bounded recovery, select a fallback provider and slot in the route editor, then publish. Existing `paid_targets` remain direct selection and take precedence. A native model cannot appear in both maps.
 
@@ -1165,6 +1169,31 @@ tools without encrypted reasoning. Current models that return encrypted reasonin
 may fail on the next turn because opaque reasoning input is refused. OLP does not
 yet establish ownership of that ciphertext, so complete current-model reasoning
 workflows remain unqualified.
+
+Enable `messages_to_grok` separately and publish the route to offer Claude Code
+supported Messages text and function tools over the same Responses upstream.
+This policy does not require or enable `responses_to_grok`. Generate Claude Code
+setup from the published route, set `OLP_API_KEY` and apply the generated shell
+or PowerShell configuration. Main, planning and background models must all be
+available through compatible account offers. Setup disables thinking, prompt
+caching, tool search and experimental beta features. Unary and SSE replies
+preserve text, function schemas, call identifiers, arguments and tool results.
+Unsupported thinking, media, cache controls, beta headers and foreign state are
+refused before provider dispatch. The Codex translated output minimum does not
+apply to Grok.
+
+Current Claude Code sends `metadata.user_id`. To use it, independently enable
+and publish `messages_grok_safety_identifier`. This default-off policy hashes
+that value with SHA-256 and sends only the hash as `safety_identifier`. Without
+the opt-in, metadata is refused. Other metadata is refused even with the policy
+enabled. The Codex identity mapping policy does not enable this Grok mapping.
+The [xAI API security FAQ](https://docs.x.ai/developers/faq/security), consulted
+November 7, 2026, documents this field and recommends hashing internal user
+identifiers on the public API. That evidence does not establish support on the
+separate subscription proxy. The Claude/Grok fixture uses a controlled peer,
+requires an actual tool execution and submitted tool result, and reports its
+full client, adapter, profile, model, protocol and transport scope. Live
+subscription acceptance remains unverified.
 
 The separate `grok_cli_identity` policy is also disabled by default and takes
 effect only after publication. Without it, OLP identifies itself truthfully.

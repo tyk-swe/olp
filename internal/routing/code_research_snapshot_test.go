@@ -70,7 +70,7 @@ func TestPublishedCodexIdentityFreezesSeparatePolicy(t *testing.T) {
 }
 
 func TestPublishedGrokPoliciesRemainIndependent(t *testing.T) {
-	for _, route := range []codemode.Route{{ResponsesToGrok: true}, {ChatToGrok: true}, {GrokCLIIdentity: true}, {ResponsesToGrok: true, ChatToGrok: true, GrokCLIIdentity: true}} {
+	for _, route := range []codemode.Route{{ChatToGrok: true}, {MessagesToGrok: true}, {MessagesGrokSafetyIdentifier: true}, {MessagesToGrok: true, MessagesGrokSafetyIdentifier: true}, {ResponsesToGrok: true}, {GrokCLIIdentity: true}, {ResponsesToGrok: true, GrokCLIIdentity: true}} {
 		input := &Snapshot{CodeRoutes: map[string]codemode.Route{"coding": route}}
 		frozen := input.Clone()
 		input.CodeRoutes["coding"] = codemode.Route{}
@@ -83,7 +83,7 @@ func TestPublishedGrokPoliciesRemainIndependent(t *testing.T) {
 			t.Fatal(err)
 		}
 		published := restored.CodeRoutes["coding"]
-		if published.ResponsesToGrok != route.ResponsesToGrok || published.ChatToGrok != route.ChatToGrok || published.GrokCLIIdentity != route.GrokCLIIdentity {
+		if published.MessagesToGrok != route.MessagesToGrok || published.MessagesGrokSafetyIdentifier != route.MessagesGrokSafetyIdentifier || published.ResponsesToGrok != route.ResponsesToGrok || published.ChatToGrok != route.ChatToGrok || published.GrokCLIIdentity != route.GrokCLIIdentity {
 			t.Fatalf("published Grok policy changed after draft edit and reload: %+v", published)
 		}
 		before, err := restored.Digest()
@@ -215,8 +215,10 @@ func TestPublishedGrokPolicyControlsFrozenProviders(t *testing.T) {
 		"identity": {RevisionID: "identity", GrokCLIIdentity: true},
 		"enabled":  {RevisionID: "enabled", ResponsesToGrok: true},
 		"chat":     {RevisionID: "chat", ChatToGrok: true},
+		"messages": {RevisionID: "messages", MessagesToGrok: true},
+		"safety":   {RevisionID: "safety", MessagesGrokSafetyIdentifier: true},
 	}, CodeConnections: map[string]Configuration{}}
-	for _, id := range []string{"disabled", "identity", "enabled", "chat"} {
+	for _, id := range []string{"disabled", "identity", "enabled", "messages", "safety", "chat"} {
 		snapshot.CodeConnections[id+":grok"] = Configuration{Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: grokauth.ProfileID}}
 	}
 	if err := snapshot.compileCodeMode(); err != nil {
@@ -225,6 +227,9 @@ func TestPublishedGrokPolicyControlsFrozenProviders(t *testing.T) {
 	for slug, route := range snapshot.CodeRoutes {
 		if snapshot.HasCodeProviders(route, "responses", codeadapter.HTTP) != route.ResponsesToGrok {
 			t.Fatalf("%s Responses eligibility does not match published translation policy", slug)
+		}
+		if snapshot.HasCodeProviders(route, "v1/messages", codeadapter.HTTP) != route.MessagesToGrok {
+			t.Fatalf("%s Messages eligibility does not match published translation policy", slug)
 		}
 		if snapshot.HasCodeProviders(route, "v1/chat/completions", codeadapter.HTTP) != route.ChatToGrok {
 			t.Fatalf("%s Chat eligibility disagrees with policy", slug)

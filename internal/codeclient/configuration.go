@@ -116,7 +116,7 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 	base.Path = strings.TrimRight(base.Path, "/") + route.BasePath()
 	base.RawPath = ""
 	baseURL := base.String()
-	translatedClaude := route.MessagesToCodex && slices.Contains(adapters, codemode.AdapterCodex)
+	translatedClaude := route.MessagesToCodex && slices.Contains(adapters, codemode.AdapterCodex) || route.MessagesToGrok && slices.Contains(adapters, codemode.AdapterGrokBuild)
 	version, format, configuration, renderErr := func() (string, string, string, error) {
 		switch client {
 		case codeadapter.ClientCodex:
@@ -140,17 +140,20 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 	file, nativeInstructions := platformInstructions(client, platform)
 	instructions := nativeInstructions + func() string {
 		if route.ChatToAntigravity && slices.Contains(adapters, codemode.AdapterAntigravity) {
-			return " This published route enables the controlled Antigravity Gemini target for Chat text and function tools over HTTP/SSE. Signed thought state, reasoning controls, media and server tools are refused. Client identity and prompt compatibility remain disabled. Current-model tool acceptance and live subscription qualification remain pending."
+			return " This published route enables the controlled Antigravity Gemini target for Chat text and function tools over HTTP/SSE. Republish the route to enable encrypted signed function continuation bound to its root conversation and selected account. Other signed parts, reasoning controls, media and server tools are refused. Missing continuation state requires retiring the root conversation and starting a new one. This path may carry provider terms and account suspension risks. Client identity and prompt compatibility remain disabled. Current-model tool acceptance and live subscription qualification remain pending."
 		}
 		return ""
 	}() + func() string {
-		if (route.ResponsesToGrok || route.ChatToGrok) && slices.Contains(adapters, codemode.AdapterGrokBuild) {
-			return " This published route translates supported published text and function tool paths through Grok Build over HTTP/SSE. Grok CLI identity compatibility requires its independent published opt-in. xAI consumer terms restrict account sharing, and violations may risk account suspension. Applicable enterprise terms may differ. Provider acceptance of this independent gateway and pooled accounts is unverified. These disclosures require no acknowledgement."
+		if (route.ResponsesToGrok || route.MessagesToGrok || route.ChatToGrok) && slices.Contains(adapters, codemode.AdapterGrokBuild) {
+			return " This published route translates supported text and function tool paths through Grok Build over HTTP/SSE. Grok CLI identity compatibility requires its independent published opt-in. xAI consumer terms restrict account sharing, and violations may risk account suspension. Applicable enterprise terms may differ. Provider acceptance of this independent gateway and pooled accounts is unverified. These disclosures require no acknowledgement."
 		}
 		return ""
 	}() + func() string {
 		if client == codeadapter.ClientOpenCode && route.ChatToCodex && slices.Contains(adapters, codemode.AdapterCodex) {
 			return " This published route explicitly translates Chat text and function tool workflows through Codex Responses. Low, medium and high reasoning effort is supported. Signed reasoning, media, server-owned state and unsupported required semantics are refused. Identity compatibility requires its independent opt-in. Current OpenCode client and live subscription acceptance remain unqualified."
+		}
+		if client == codeadapter.ClientClaudeCode && route.MessagesToGrok && slices.Contains(adapters, codemode.AdapterGrokBuild) {
+			return " This published route translates Messages text and function tools through Grok Build. Generated setup disables thinking, prompt caching, tool search and experimental beta features. Current Claude metadata requires the independent messages_grok_safety_identifier policy. It hashes metadata.user_id for provider safety attribution. Public API documentation supports this field. Subscription proxy acceptance remains unverified. Grok client identity requires its separate published policy."
 		}
 		if client == codeadapter.ClientClaudeCode && translatedClaude {
 			return " This published route enables Messages text and tool use through Codex accounts. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and other unsupported required semantics are refused. Prompt text is preserved. Generated setup disables thinking, prompt caching, tool search and experimental beta features using settings verified for the scoped client version. The separate messages_codex_safety_identifier policy must be enabled and published to map current Claude abuse-detection metadata. This opt-in changes provider identity handling and may carry account suspension or terms risks. Codex CLI identity compatibility still requires its separate opt-in."

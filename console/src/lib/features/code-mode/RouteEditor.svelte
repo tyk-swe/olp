@@ -171,6 +171,10 @@
   let messagesCodexSafetyIdentifier = $state(
     initial?.messages_codex_safety_identifier ?? false
   );
+  let messagesToGrok = $state(initial?.messages_to_grok ?? false);
+  let messagesGrokSafetyIdentifier = $state(
+    initial?.messages_grok_safety_identifier ?? false
+  );
   let chatToGrok = $state(initial?.chat_to_grok ?? false);
   let responsesToGrok = $state(initial?.responses_to_grok ?? false);
   let grokCLIIdentity = $state(initial?.grok_cli_identity ?? false);
@@ -282,6 +286,8 @@
         chat_to_codex: chatToCodex,
         messages_to_codex: messagesToCodex,
         messages_codex_safety_identifier: messagesCodexSafetyIdentifier,
+        messages_to_grok: messagesToGrok,
+        messages_grok_safety_identifier: messagesGrokSafetyIdentifier,
         chat_to_grok: chatToGrok,
         responses_to_grok: responsesToGrok,
         grok_cli_identity: grokCLIIdentity,
@@ -559,8 +565,10 @@
     Translate Chat to Grok Build
   </label>
   <p>
-    Publication enables OpenCode text and function tools over HTTP/SSE. Disabled
-    by default. Live subscription acceptance remains unverified.
+    Off by default. Publish to enable supported Chat text and function tools
+    through Grok Build. This policy preserves requested streaming and output
+    limits. Grok client identity requires its separate published opt-in. Live
+    subscription acceptance remains unverified.
   </p>
   <label class="choice">
     <input
@@ -574,6 +582,32 @@
     Disabled by default. Publication enables supported Responses text and
     function tools over HTTP/SSE. Translation preserves client identity.
     Existing revisions retain their published behavior until republished.
+  </p>
+  <label class="choice">
+    <input
+      id="code-messages-to-grok"
+      type="checkbox"
+      bind:checked={messagesToGrok}
+    />
+    Translate Messages to Grok Build
+  </label>
+  <p>
+    Disabled by default. Publication enables supported text and function tools
+    for Claude Code over HTTP/SSE. Unsupported thinking, media, beta features
+    and foreign state are refused.
+  </p>
+  <label class="choice">
+    <input
+      id="code-messages-grok-safety-identifier"
+      type="checkbox"
+      bind:checked={messagesGrokSafetyIdentifier}
+    />
+    Map Claude user identity for Grok safety reporting
+  </label>
+  <p>
+    Separately published and disabled by default. Hashes metadata.user_id as
+    safety_identifier. Other metadata is refused. Public API documentation
+    supports this mapping. Subscription proxy acceptance remains unverified.
   </p>
   <label class="choice">
     <input

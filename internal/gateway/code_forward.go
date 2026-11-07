@@ -125,10 +125,13 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *re
 			if ingress.protocol == codemode.ProtocolChat {
 				return codeTranslateGrokChat(requestBody, r, attempt.model)
 			}
+			if ingress.protocol == codemode.ProtocolMessages {
+				return codeTranslateGrokMessages(requestBody, r, attempt.model, route.MessagesGrokSafetyIdentifier)
+			}
 			return codeTranslateGrok(requestBody, r, attempt.model)
 		}
 		if attempt.endpoint.Target == codeadapter.TargetAntigravity {
-			return codeTranslateAntigravity(requestBody, r, attempt.model, attempt.auth.ProjectID)
+			return attempt.translateAntigravity(requestBody, r, attempt.model, attempt.auth.ProjectID, route.AntigravitySignedContinuation)
 		}
 		if attempt.endpoint.Protocol == ingress.protocol {
 			if attempt.model != attempt.publicModel {

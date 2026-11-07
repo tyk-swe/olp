@@ -266,7 +266,7 @@ func cloneCodeRoute(route codemode.Route) codemode.Route {
 			}
 		}),
 		Models: slices.Clone(route.Models), Aliases: maps.Clone(route.Aliases), ModelRewriting: route.ModelRewriting,
-		TranslatedCodexOutputMinimum: route.TranslatedCodexOutputMinimum, ResponsesToGrok: route.ResponsesToGrok, ChatToGrok: route.ChatToGrok, GrokCLIIdentity: route.GrokCLIIdentity, CodexCLIIdentity: route.CodexCLIIdentity, ChatToCodex: route.ChatToCodex, MessagesToCodex: route.MessagesToCodex, MessagesCodexSafetyIdentifier: route.MessagesCodexSafetyIdentifier, ChatToAntigravity: route.ChatToAntigravity, AllowanceOrdering: route.AllowanceOrdering, InitialRecoveryAttempts: route.InitialRecoveryAttempts,
+		AntigravitySignedContinuation: route.AntigravitySignedContinuation, TranslatedCodexOutputMinimum: route.TranslatedCodexOutputMinimum, MessagesToGrok: route.MessagesToGrok, MessagesGrokSafetyIdentifier: route.MessagesGrokSafetyIdentifier, ResponsesToGrok: route.ResponsesToGrok, ChatToGrok: route.ChatToGrok, GrokCLIIdentity: route.GrokCLIIdentity, CodexCLIIdentity: route.CodexCLIIdentity, ChatToCodex: route.ChatToCodex, MessagesToCodex: route.MessagesToCodex, MessagesCodexSafetyIdentifier: route.MessagesCodexSafetyIdentifier, ChatToAntigravity: route.ChatToAntigravity, AllowanceOrdering: route.AllowanceOrdering, InitialRecoveryAttempts: route.InitialRecoveryAttempts,
 		Tools: func() *codemode.ResearchTools {
 			if route.Tools == nil {
 				return nil

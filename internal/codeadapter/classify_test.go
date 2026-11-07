@@ -301,6 +301,27 @@ func TestCodeGrokClientConfiguration(t *testing.T) {
 	if err != nil || !strings.Contains(configuration.Configuration, "supports_websockets = true") {
 		t.Fatalf("disabled Grok path must preserve native transport: %+v, %v", configuration, err)
 	}
+	for _, platform := range []string{"linux", "windows"} {
+		configuration, err := codeclient.Generate(codemode.Route{Enabled: true, RevisionID: "fixture", Slug: "output-contract", Models: []string{"grok-fixture-model"}, MessagesToGrok: true}, codeclient.Offers{{Adapter: codemode.AdapterGrokBuild, Models: []string{"grok-fixture-model"}}}, codeclient.Request{GatewayURL: "http://localhost:4000", Client: codeadapter.ClientClaudeCode, Model: "grok-fixture-model", Platform: platform})
+		if err != nil || !strings.Contains(configuration.Configuration, "DISABLE_PROMPT_CACHING") || !strings.Contains(configuration.Configuration, "MAX_THINKING_TOKENS") || !strings.Contains(configuration.Configuration, "OLP_API_KEY") {
+			t.Fatalf("Grok Claude setup %s = %+v, %v", platform, configuration, err)
+		}
+	}
+}
+
+func TestGrokMessagesPublishedPolicy(t *testing.T) {
+	route := codemode.Route{}
+	adapter, _ := codeadapter.Lookup(codemode.AdapterGrokBuild)
+	if _, ok := codeadapter.RouteEndpoint(route, adapter, "v1/messages"); ok {
+		t.Fatal("Messages enabled without publication policy")
+	}
+	route.MessagesToGrok = true
+	if endpoint, ok := codeadapter.RouteEndpoint(route, adapter, "v1/messages"); !ok || endpoint.Protocol != codemode.ProtocolResponses {
+		t.Fatal("Messages policy did not offer Responses upstream")
+	}
+	if protocol, ok := codeadapter.RouteClientProtocol(route, adapter, codeadapter.ClientClaudeCode, "grok-fixture-model"); !ok || protocol != codemode.ProtocolMessages {
+		t.Fatal("Claude configuration unavailable")
+	}
 }
 
 func TestCodeGrokOpenCodeConfiguration(t *testing.T) {
