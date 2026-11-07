@@ -1,6 +1,8 @@
 package codeadapter_test
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"testing"
@@ -8,7 +10,9 @@ import (
 
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/grokauth"
 	"github.com/tyk-swe/olp/internal/upstream"
+	"github.com/tyk-swe/olp/plugin/abi"
 )
 
 func codexVendor(t *testing.T) (codeadapter.Vendor, codeadapter.Endpoint) {
@@ -165,5 +169,36 @@ func TestUnqualifiedQuotaEnvelopesDoNotAuthorizeReplay(t *testing.T) {
 		if rejection, ok := vendor.InitialRejection(endpoint, 429, []byte(tc.body), http.Header{}, now); ok {
 			t.Errorf("%s unexpectedly authorizes replay: %+v", tc.adapter, rejection)
 		}
+	}
+}
+
+func TestGrokDeviceGrantUsesAuthenticatedSubject(t *testing.T) {
+	adapter := grokauth.Adapter{Fetch: func(_ context.Context, request abi.HTTPRequest) (abi.HTTPResponse, error) {
+		switch request.URL {
+		case grokauth.Issuer + "/oauth2/device/code":
+			return abi.HTTPResponse{Status: 200, Body: []byte(`{"device_code":"device-secret","user_code":"ABCD","verification_uri":"https://auth.x.ai/device","expires_in":600,"interval":5}`)}, nil
+		case grokauth.Issuer + "/oauth2/token":
+			return abi.HTTPResponse{Status: 200, Body: []byte(`{"access_token":"opaque-access","refresh_token":"refresh-secret","token_type":"Bearer","expires_in":3600}`)}, nil
+		case grokauth.Issuer + "/oauth2/userinfo":
+			if request.Method != http.MethodGet || http.Header(request.Header).Get("Authorization") != "Bearer opaque-access" {
+				t.Fatal("identity was not authenticated with the new access token")
+			}
+			return abi.HTTPResponse{Status: 200, Body: []byte(`{"sub":"verified-subject","email":"display-only@example.invalid"}`)}, nil
+		default:
+			t.Fatalf("unexpected request %s", request.URL)
+			return abi.HTTPResponse{}, nil
+		}
+	}}
+	started, err := adapter.StartGrant(t.Context(), abi.GrantStart{Profile: grokauth.ProfileID})
+	if err != nil || started.Device == nil || started.Device.UserCode != "ABCD" {
+		t.Fatalf("start = %+v, %v", started, err)
+	}
+	grant, err := adapter.PollGrant(t.Context(), abi.GrantPoll{Profile: grokauth.ProfileID, Session: started.Session})
+	if err != nil || grant.Principal != grokauth.Principal("verified-subject") || grant.Facts["subject"] != "verified-subject" || grant.AccessToken != "opaque-access" || grant.RefreshToken != "refresh-secret" || grant.ExpiresIn != 3600 {
+		t.Fatalf("grant = %+v, %v", grant, err)
+	}
+	encoded, _ := json.Marshal(grant.Facts)
+	if string(encoded) != `{"subject":"verified-subject"}` {
+		t.Fatalf("unexpected authority facts %s", encoded)
 	}
 }
