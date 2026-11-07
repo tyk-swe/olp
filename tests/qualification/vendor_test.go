@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base32"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -351,8 +352,9 @@ func newVendorProxy(t *testing.T, handler http.Handler) vendorProxy {
 }
 
 type antigravityFixtureArguments struct {
-	Command     string `json:"command"`
-	Description string `json:"description"`
+	Command     string `json:"command,omitempty"`
+	Cmd         string `json:"cmd,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 type antigravityFixtureCall struct {
@@ -401,9 +403,13 @@ func fixtureAntigravity(w http.ResponseWriter, r *http.Request, toolProof chan<-
 		Model   string `json:"model"`
 		Request struct {
 			Contents []antigravityFixtureContent `json:"contents"`
+			Labels   map[string]string           `json:"labels"`
 			Tools    []struct {
 				Declarations []struct {
-					Name string `json:"name"`
+					Name       string `json:"name"`
+					Parameters struct {
+						Properties map[string]json.RawMessage `json:"properties"`
+					} `json:"parameters"`
 				} `json:"functionDeclarations"`
 			} `json:"tools"`
 		} `json:"request"`
@@ -412,10 +418,18 @@ func fixtureAntigravity(w http.ResponseWriter, r *http.Request, toolProof chan<-
 		refuseVendor(w, http.StatusBadRequest, `{"error":{"message":"fixture envelope invalid"}}`)
 		return
 	}
-	bash := func() string {
+	if len(envelope.Request.Labels) != 0 {
+		label := envelope.Request.Labels["safety_identifier"]
+		decoded, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(label))
+		if len(envelope.Request.Labels) != 1 || err != nil || len(decoded) != 32 || label != strings.ToLower(label) {
+			refuseVendor(w, http.StatusBadRequest, `{"error":{"message":"fixture identity label invalid"}}`)
+			return
+		}
+	}
+	toolName := func() string {
 		for _, tool := range envelope.Request.Tools {
 			for _, declaration := range tool.Declarations {
-				if strings.EqualFold(declaration.Name, "bash") {
+				if strings.EqualFold(declaration.Name, "bash") && len(declaration.Parameters.Properties["command"]) != 0 || declaration.Name == "exec_command" && len(declaration.Parameters.Properties["cmd"]) != 0 {
 					return declaration.Name
 				}
 			}
@@ -435,7 +449,7 @@ func fixtureAntigravity(w http.ResponseWriter, r *http.Request, toolProof chan<-
 		return part.Response != nil && strings.Contains(string(part.Response.Response), "olp-tool-round-trip")
 	})
 	signed := slices.ContainsFunc(requestParts, func(part antigravityFixturePart) bool {
-		return part.Call != nil && strings.EqualFold(part.Call.Name, "bash") && part.Signature == "fixture-private-signature" && part.Call.ID == nil && part.Call.Args.Command == "printf olp-tool-round-trip"
+		return part.Call != nil && part.Call.Name == toolName && part.Signature == "fixture-private-signature" && part.Call.ID == nil && (part.Call.Args.Command == "printf olp-tool-round-trip" || part.Call.Args.Cmd == "printf olp-tool-round-trip")
 	})
 	if continued && !signed {
 		refuseVendor(w, http.StatusBadRequest, `{"error":{"message":"fixture signed continuation missing"}}`)
@@ -448,8 +462,14 @@ func fixtureAntigravity(w http.ResponseWriter, r *http.Request, toolProof chan<-
 		}
 	}
 	parts := func() []antigravityFixturePart {
-		if bash != "" && !continued {
-			return []antigravityFixturePart{{Call: &antigravityFixtureCall{Name: bash, Args: antigravityFixtureArguments{Command: "printf olp-tool-round-trip", Description: "Run the fixture proof"}}, Signature: "fixture-private-signature"}}
+		if toolName != "" && !continued {
+			arguments := func() antigravityFixtureArguments {
+				if toolName == "exec_command" {
+					return antigravityFixtureArguments{Cmd: "printf olp-tool-round-trip"}
+				}
+				return antigravityFixtureArguments{Command: "printf olp-tool-round-trip", Description: "Run the fixture proof"}
+			}()
+			return []antigravityFixturePart{{Call: &antigravityFixtureCall{Name: toolName, Args: arguments}, Signature: "fixture-private-signature"}}
 		}
 		return []antigravityFixturePart{{Text: vendorAnswer}}
 	}()
@@ -474,7 +494,9 @@ func fixtureResponses(w http.ResponseWriter, r *http.Request, toolProof chan<- s
 	selectedTool := func() string {
 		if slices.ContainsFunc(request.Tools, func(tool struct {
 			Name string `json:"name"`
-		}) bool { return tool.Name == "Bash" }) {
+		}) bool {
+			return tool.Name == "Bash"
+		}) {
 			return "Bash"
 		}
 		return toolName
