@@ -22,6 +22,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/grokauth"
 )
 
 const (
@@ -29,6 +31,10 @@ const (
 	vendorAnswer       = "hello from the fixture vendor"
 	vendorInputTokens  = 4
 	vendorOutputTokens = 6
+	grokToken          = "opaque-grok-fixture-access"
+	grokRefreshToken   = "opaque-grok-fixture-refresh"
+	grokRotatedToken   = "opaque-grok-fixture-rotated-access"
+	grokRotatedRefresh = "opaque-grok-fixture-rotated-refresh"
 	codexAccountID     = "acct-qualify"
 	codexUserID        = "user-qualify"
 	zaiKey             = "qualify-zai-coding-plan-key-1"
@@ -94,32 +100,45 @@ func newVendorMux(codexToken string, toolProof chan<- struct{}) *http.ServeMux {
 			refuseVendor(w, http.StatusUnauthorized, badKey)
 			return
 		}
-		request, ok := decodeVendor(w, r, openAIError)
-		if !ok {
+		fixtureResponses(w, r, toolProof, "Bash")
+	})
+	mux.HandleFunc("POST /oauth2/device/code", func(w http.ResponseWriter, r *http.Request) {
+		if r.ParseForm() != nil || r.Form.Get("client_id") != grokauth.ClientID || !strings.Contains(r.Form.Get("scope"), "offline_access") {
+			refuseVendor(w, 400, `{"error":"invalid_request"}`)
 			return
 		}
-		if fixtureCodexTool(w, request, toolProof) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"device_code":"fixture-device-session","user_code":"FIXTURE","verification_uri":"https://auth.x.ai/device","expires_in":600,"interval":1}`)
+	})
+	mux.HandleFunc("POST /oauth2/token", func(w http.ResponseWriter, r *http.Request) {
+		if r.ParseForm() != nil || r.Form.Get("client_id") != grokauth.ClientID {
+			refuseVendor(w, 400, `{"error":"invalid_request"}`)
 			return
 		}
-		message := map[string]any{"id": "msg_fixture", "type": "message", "role": "assistant", "status": "completed", "content": []any{map[string]any{"type": "output_text", "text": vendorAnswer, "annotations": []any{}}}}
-		response := map[string]any{
-			"id": "resp_fixture", "object": "response", "created_at": 1, "model": vendorModel, "status": "completed", "error": nil, "incomplete_details": nil,
-			"output": []any{message},
-			"usage":  map[string]int{"input_tokens": vendorInputTokens, "output_tokens": vendorOutputTokens, "total_tokens": vendorInputTokens + vendorOutputTokens},
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Form.Get("grant_type") == "urn:ietf:params:oauth:grant-type:device_code" && r.Form.Get("device_code") == "fixture-device-session":
+			_, _ = fmt.Fprintf(w, `{"access_token":%q,"refresh_token":%q,"token_type":"Bearer","expires_in":3600}`, grokToken, grokRefreshToken)
+		case r.Form.Get("grant_type") == "refresh_token" && r.Form.Get("refresh_token") == grokRefreshToken:
+			_, _ = fmt.Fprintf(w, `{"access_token":%q,"refresh_token":%q,"token_type":"Bearer","expires_in":3600}`, grokRotatedToken, grokRotatedRefresh)
+		default:
+			refuseVendor(w, 400, `{"error":"invalid_grant"}`)
 		}
-		if !request.Stream {
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(response)
+	})
+	mux.HandleFunc("GET /oauth2/userinfo", func(w http.ResponseWriter, r *http.Request) {
+		if bearer(r) != "Bearer "+grokToken && bearer(r) != "Bearer "+grokRotatedToken {
+			refuseVendor(w, 401, badKey)
 			return
 		}
-		created, _ := json.Marshal(map[string]any{"type": "response.created", "sequence_number": 0, "response": map[string]any{"id": "resp_fixture", "object": "response", "created_at": 1, "model": vendorModel, "status": "in_progress", "error": nil, "incomplete_details": nil, "output": []any{}, "usage": nil}})
-		added, _ := json.Marshal(map[string]any{"type": "response.output_item.added", "sequence_number": 1, "output_index": 0, "item": map[string]any{"id": "msg_fixture", "type": "message", "role": "assistant", "status": "in_progress", "content": []any{}}})
-		part, _ := json.Marshal(map[string]any{"type": "response.content_part.added", "sequence_number": 2, "item_id": "msg_fixture", "output_index": 0, "content_index": 0, "part": map[string]any{"type": "output_text", "text": "", "annotations": []any{}}})
-		delta, _ := json.Marshal(map[string]any{"type": "response.output_text.delta", "sequence_number": 3, "item_id": "msg_fixture", "output_index": 0, "content_index": 0, "delta": vendorAnswer, "logprobs": []any{}})
-		item, _ := json.Marshal(map[string]any{"type": "response.output_item.done", "sequence_number": 4, "output_index": 0, "item": message})
-		terminal, _ := json.Marshal(map[string]any{"type": "response.completed", "sequence_number": 5, "response": response})
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = fmt.Fprintf(w, "event: response.created\ndata: %s\n\nevent: response.output_item.added\ndata: %s\n\nevent: response.content_part.added\ndata: %s\n\nevent: response.output_text.delta\ndata: %s\n\nevent: response.output_item.done\ndata: %s\n\nevent: response.completed\ndata: %s\n\n", created, added, part, delta, item, terminal)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"sub":"fixture-subject"}`)
+	})
+	mux.HandleFunc("POST /v1/responses", func(w http.ResponseWriter, r *http.Request) {
+		if bearer(r) != "Bearer "+grokRotatedToken || r.Header.Get("X-Grok-Client-Identifier") != "grok-shell" || r.Header.Get("X-Xai-Token-Auth") != "xai-grok-cli" || r.Header.Get("X-Authenticateresponse") != "authenticate-response" {
+			refuseVendor(w, http.StatusUnauthorized, badKey)
+			return
+		}
+		fixtureResponses(w, r, toolProof, "exec_command")
 	})
 	mux.HandleFunc("POST /api/anthropic/v1/messages", func(w http.ResponseWriter, r *http.Request) {
 		if bearer(r) != "Bearer "+zaiKey {
@@ -146,11 +165,11 @@ func newVendorMux(codexToken string, toolProof chan<- struct{}) *http.ServeMux {
 	return mux
 }
 
-func fixtureCodexTool(w http.ResponseWriter, request vendorRequest, proof chan<- struct{}) bool {
+func fixtureCodexTool(w http.ResponseWriter, request vendorRequest, proof chan<- struct{}, toolName string) bool {
 	hasBash := slices.ContainsFunc(request.Tools, func(tool struct {
 		Name string `json:"name"`
 	}) bool {
-		return tool.Name == "Bash"
+		return tool.Name == toolName
 	})
 	if !hasBash {
 		return false
@@ -178,8 +197,13 @@ func fixtureCodexTool(w http.ResponseWriter, request vendorRequest, proof chan<-
 		}
 		return false
 	}
-	arguments := `{"command":"printf olp-tool-round-trip","description":"Print the fixture marker"}`
-	item := map[string]any{"id": "fc_fixture", "type": "function_call", "call_id": "call_fixture_bash", "name": "Bash", "arguments": arguments, "status": "completed"}
+	arguments := func() string {
+		if toolName == "exec_command" {
+			return `{"cmd":"printf olp-tool-round-trip","max_output_tokens":100}`
+		}
+		return `{"command":"printf olp-tool-round-trip","description":"Print the fixture marker"}`
+	}()
+	item := map[string]any{"id": "fc_fixture", "type": "function_call", "call_id": "call_fixture_bash", "name": toolName, "arguments": arguments, "status": "completed"}
 	response := map[string]any{"id": "resp_fixture_tool", "object": "response", "model": vendorModel, "status": "completed", "output": []any{item}, "usage": map[string]int{"input_tokens": 4, "output_tokens": 6, "total_tokens": 10}}
 	if !request.Stream {
 		w.Header().Set("Content-Type", "application/json")
@@ -198,7 +222,7 @@ func fixtureCodexTool(w http.ResponseWriter, request vendorRequest, proof chan<-
 		Arguments      string         `json:"arguments,omitempty"`
 	}{
 		{SequenceNumber: 0, Type: "response.created", Response: map[string]any{"id": "resp_fixture_tool", "object": "response", "model": vendorModel, "status": "in_progress", "output": []any{}}},
-		{SequenceNumber: 1, Type: "response.output_item.added", OutputIndex: new(0), Item: map[string]any{"id": "fc_fixture", "type": "function_call", "call_id": "call_fixture_bash", "name": "Bash", "arguments": "", "status": "in_progress"}},
+		{SequenceNumber: 1, Type: "response.output_item.added", OutputIndex: new(0), Item: map[string]any{"id": "fc_fixture", "type": "function_call", "call_id": "call_fixture_bash", "name": toolName, "arguments": "", "status": "in_progress"}},
 		{SequenceNumber: 2, Type: "response.function_call_arguments.delta", ItemID: "fc_fixture", OutputIndex: new(0), Delta: arguments},
 		{SequenceNumber: 3, Type: "response.function_call_arguments.done", ItemID: "fc_fixture", OutputIndex: new(0), Arguments: arguments},
 		{SequenceNumber: 4, Type: "response.output_item.done", OutputIndex: new(0), Item: item},
@@ -267,7 +291,7 @@ func newVendorProxy(t *testing.T, handler http.Handler) vendorProxy {
 	}
 	roots := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}))
 	certificates := map[string]tls.Certificate{}
-	for i, host := range []string{"chatgpt.com", "api.z.ai", "opencode.ai", "daily-cloudcode-pa.googleapis.com"} {
+	for i, host := range []string{"chatgpt.com", "api.z.ai", "opencode.ai", "cli-chat-proxy.grok.com", "auth.x.ai", "daily-cloudcode-pa.googleapis.com"} {
 		leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		if err != nil {
 			t.Fatal(err)
@@ -398,4 +422,33 @@ func fixtureAntigravity(w http.ResponseWriter, r *http.Request, toolProof chan<-
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(body)
+}
+
+func fixtureResponses(w http.ResponseWriter, r *http.Request, toolProof chan<- struct{}, toolName string) {
+	request, ok := decodeVendor(w, r, `{"error":{"message":"unknown model"}}`)
+	if !ok {
+		return
+	}
+	if fixtureCodexTool(w, request, toolProof, toolName) {
+		return
+	}
+	message := map[string]any{"id": "msg_fixture", "type": "message", "role": "assistant", "status": "completed", "content": []any{map[string]any{"type": "output_text", "text": vendorAnswer, "annotations": []any{}}}}
+	response := map[string]any{
+		"id": "resp_fixture", "object": "response", "created_at": 1, "model": vendorModel, "status": "completed", "error": nil, "incomplete_details": nil,
+		"output": []any{message},
+		"usage":  map[string]int{"input_tokens": vendorInputTokens, "output_tokens": vendorOutputTokens, "total_tokens": vendorInputTokens + vendorOutputTokens},
+	}
+	if !request.Stream {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+		return
+	}
+	created, _ := json.Marshal(map[string]any{"type": "response.created", "sequence_number": 0, "response": map[string]any{"id": "resp_fixture", "object": "response", "created_at": 1, "model": vendorModel, "status": "in_progress", "error": nil, "incomplete_details": nil, "output": []any{}, "usage": nil}})
+	added, _ := json.Marshal(map[string]any{"type": "response.output_item.added", "sequence_number": 1, "output_index": 0, "item": map[string]any{"id": "msg_fixture", "type": "message", "role": "assistant", "status": "in_progress", "content": []any{}}})
+	part, _ := json.Marshal(map[string]any{"type": "response.content_part.added", "sequence_number": 2, "item_id": "msg_fixture", "output_index": 0, "content_index": 0, "part": map[string]any{"type": "output_text", "text": "", "annotations": []any{}}})
+	delta, _ := json.Marshal(map[string]any{"type": "response.output_text.delta", "sequence_number": 3, "item_id": "msg_fixture", "output_index": 0, "content_index": 0, "delta": vendorAnswer, "logprobs": []any{}})
+	item, _ := json.Marshal(map[string]any{"type": "response.output_item.done", "sequence_number": 4, "output_index": 0, "item": message})
+	terminal, _ := json.Marshal(map[string]any{"type": "response.completed", "sequence_number": 5, "response": response})
+	w.Header().Set("Content-Type", "text/event-stream")
+	_, _ = fmt.Fprintf(w, "event: response.created\ndata: %s\n\nevent: response.output_item.added\ndata: %s\n\nevent: response.content_part.added\ndata: %s\n\nevent: response.output_text.delta\ndata: %s\n\nevent: response.output_item.done\ndata: %s\n\nevent: response.completed\ndata: %s\n\n", created, added, part, delta, item, terminal)
 }

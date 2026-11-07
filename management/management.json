@@ -15674,6 +15674,7 @@
               "codex",
               "claude",
               "antigravity",
+              "grok-build",
               "opencode_go",
               "zai_coding",
               "minimax_plan",
@@ -16635,6 +16636,7 @@
                 "codex",
                 "claude",
                 "antigravity",
+                "grok-build",
                 "opencode_go",
                 "zai_coding",
                 "minimax_plan",
@@ -17120,6 +17122,7 @@
                 "codex",
                 "claude",
                 "antigravity",
+                "grok-build",
                 "opencode_go",
                 "zai_coding",
                 "minimax_plan",
@@ -17260,6 +17263,16 @@
               "$ref": "#/components/schemas/CodePaidTarget"
             },
             "description": "Explicit native model to published metered provider and credential slot for subscription-first bounded recovery. Requires paid_participation and positive initial_recovery_attempts. Subscription candidates are preferred. Same-model fallback needs no model pool. Different models require model_rewriting and a model_pool. Proven nonexecution and complete-input portability are required. Direct paid_targets retain precedence and cannot overlap this map. Existing paid owners stay pinned. Unknown paid money remains held against applicable limits."
+          },
+          "responses_to_grok": {
+            "type": "boolean",
+            "default": false,
+            "description": "Allow Responses text and function tools through Grok Build subscription accounts after publication. Disabled by default. Translation preserves client identity. Grok client identity requires its separate published opt-in."
+          },
+          "grok_cli_identity": {
+            "type": "boolean",
+            "default": false,
+            "description": "Allow Grok client identity compatibility after publication independently of protocol translation. Disabled by default. xAI consumer terms restrict account sharing and violations may risk account suspension. Provider acceptance of this independent gateway and pooled accounts is unverified. No acknowledgement gate is required."
           },
           "codex_cli_identity": {
             "type": "boolean",
@@ -17424,6 +17437,16 @@
               "$ref": "#/components/schemas/CodePaidTarget"
             },
             "description": "Explicit native model to published metered provider and credential slot for subscription-first bounded recovery. Requires paid_participation and positive initial_recovery_attempts. Subscription candidates are preferred. Same-model fallback needs no model pool. Different models require model_rewriting and a model_pool. Proven nonexecution and complete-input portability are required. Direct paid_targets retain precedence and cannot overlap this map. Existing paid owners stay pinned. Unknown paid money remains held against applicable limits."
+          },
+          "responses_to_grok": {
+            "type": "boolean",
+            "default": false,
+            "description": "Allow Responses text and function tools through Grok Build subscription accounts after publication. Disabled by default. Translation preserves client identity. Grok client identity requires its separate published opt-in."
+          },
+          "grok_cli_identity": {
+            "type": "boolean",
+            "default": false,
+            "description": "Allow Grok client identity compatibility after publication independently of protocol translation. Disabled by default. xAI consumer terms restrict account sharing and violations may risk account suspension. Provider acceptance of this independent gateway and pooled accounts is unverified. No acknowledgement gate is required."
           },
           "codex_cli_identity": {
             "type": "boolean",
@@ -31944,6 +31967,16 @@
               "$ref": "#/components/schemas/ConfigurationCodePaidTarget"
             },
             "description": "Explicit recovery-only paid targets keyed by native model, using the same named destination provider, slot and credential bindings as direct paid targets. Requires paid participation and a positive initial recovery limit."
+          },
+          "responses_to_grok": {
+            "type": "boolean",
+            "default": false,
+            "description": "Allow Responses text and function tools through Grok Build subscription accounts after publication. Disabled by default. Translation preserves client identity. Grok client identity requires its separate published opt-in."
+          },
+          "grok_cli_identity": {
+            "type": "boolean",
+            "default": false,
+            "description": "Allow Grok client identity compatibility after publication independently of protocol translation. Disabled by default. xAI consumer terms restrict account sharing and violations may risk account suspension. Provider acceptance of this independent gateway and pooled accounts is unverified. No acknowledgement gate is required."
           },
           "codex_cli_identity": {
             "type": "boolean",

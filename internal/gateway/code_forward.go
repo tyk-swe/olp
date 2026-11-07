@@ -121,6 +121,9 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *re
 		if rewriteErr != nil {
 			return codePayload{}, rewriteErr
 		}
+		if attempt.endpoint.Target == codeadapter.TargetGrok {
+			return codeTranslateGrok(requestBody, r, attempt.model)
+		}
 		if attempt.endpoint.Target == codeadapter.TargetAntigravity {
 			return attempt.translateAntigravity(requestBody, r, attempt.model, attempt.auth.ProjectID, route.AntigravitySignedContinuation)
 		}

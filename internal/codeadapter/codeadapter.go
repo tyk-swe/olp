@@ -17,6 +17,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/codexauth"
+	"github.com/tyk-swe/olp/internal/grokauth"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
@@ -69,10 +70,13 @@ const (
 // operation, independently of either the client or upstream URL.
 type Target string
 
-const TargetAntigravity Target = "antigravity"
+const (
+	TargetAntigravity Target = "antigravity"
+	TargetGrok        Target = "grok"
+)
 
 func (t Target) Enabled(route codemode.Route) bool {
-	return t == "" || t == TargetAntigravity && route.ChatToAntigravity
+	return t == "" || t == TargetAntigravity && route.ChatToAntigravity || t == TargetGrok && route.ResponsesToGrok
 }
 
 type Endpoint struct {
@@ -123,6 +127,14 @@ var keyEnrollmentNotes = []string{
 
 // vendors is in display order, which orders every list of adapters.
 var vendors = []Vendor{
+	{
+		Adapter: codemode.AdapterGrokBuild, Name: "Grok Build", profiles: []string{grokauth.ProfileID}, manifest: grokauth.Manifest,
+		credential:      grokCredential,
+		endpoints:       []Endpoint{{ClientPath: "responses", UpstreamPath: "responses", Protocol: codemode.ProtocolResponses, Operation: "responses", Identity: IdentityCodex, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP, Target: TargetGrok}},
+		clients:         []Client{{ID: ClientCodex}},
+		enrollmentNotes: []string{"Enrollment verifies the provider subject through authenticated userinfo and stores refreshable grants encrypted. Live independent-gateway acceptance remains unverified."},
+		notes:           []string{"Explicit responses_to_grok policy enables controlled text and function tools over HTTP or SSE. Grok client identity requires separate grok_cli_identity policy. Provider terms may restrict independent gateways and accounts may be suspended. Fixture success does not qualify live subscription acceptance."},
+	},
 	{
 		Adapter: codemode.AdapterCodex, Name: "Codex", profiles: []string{codexauth.ProfileID}, manifest: codexauth.Manifest,
 		credential: codexCredential,
@@ -251,7 +263,7 @@ func validate(registry []Vendor) error {
 }
 
 func (e Endpoint) valid() bool {
-	if e.Target != "" && (e.Target != TargetAntigravity || e.Protocol != codemode.ProtocolChat || e.transports != HTTP) {
+	if e.Target != "" && !(e.Target == TargetAntigravity && e.Protocol == codemode.ProtocolChat && e.transports == HTTP || e.Target == TargetGrok && e.Protocol == codemode.ProtocolResponses && e.transports == HTTP) {
 		return false
 	}
 	if e.ClientPath == "" || e.UpstreamPath == "" || e.CredentialHeader == "" || e.transports == 0 || e.transports & ^(HTTP|WebSocket) != 0 {

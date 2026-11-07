@@ -121,7 +121,11 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 		switch client {
 		case codeadapter.ClientCodex:
 			_, paid := offers.paidProtocol(route, model, client)
-			return codexauth.ClientVersion, "toml", codexConfiguration(baseURL, model, !paid), nil
+			return codexauth.ClientVersion, "toml", codexConfiguration(baseURL, model, !paid && !slices.ContainsFunc(offers.adapters(route, model), func(adapter codemode.Adapter) bool {
+				declaration, _ := codeadapter.Lookup(adapter)
+				endpoint, eligible := codeadapter.RouteEndpoint(route, declaration, "responses")
+				return eligible && !endpoint.Supports(codeadapter.WebSocket)
+			}), slices.Contains(offers.adapters(route, model), codemode.AdapterGrokBuild)), nil
 		case codeadapter.ClientClaudeCode:
 			if platform == "windows" {
 				return codeadapter.ClaudeCodeVersion, "powershell", claudeCodePowerShellConfiguration(baseURL, model, *plan, *small, translatedClaude), nil
@@ -140,6 +144,9 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 		}
 		return ""
 	}() + func() string {
+		if route.ResponsesToGrok && slices.Contains(adapters, codemode.AdapterGrokBuild) {
+			return " This published route translates supported Responses text and function tools through Grok Build over HTTP/SSE. Grok CLI identity compatibility requires its independent published opt-in. xAI consumer terms restrict account sharing, and violations may risk account suspension. Applicable enterprise terms may differ. Provider acceptance of this independent gateway and pooled accounts is unverified. These disclosures require no acknowledgement."
+		}
 		return ""
 	}() + func() string {
 		if client == codeadapter.ClientOpenCode && route.ChatToCodex && slices.Contains(adapters, codemode.AdapterCodex) {

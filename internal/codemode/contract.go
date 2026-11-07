@@ -23,6 +23,7 @@ const BasePath = "/code/"
 type Adapter string
 
 const (
+	AdapterGrokBuild     Adapter = "grok-build"
 	AdapterClaude        Adapter = "claude"
 	AdapterAntigravity   Adapter = "antigravity"
 	AdapterCodex         Adapter = "codex"
@@ -228,6 +229,8 @@ func (r Route) AllPaidTargets() map[string]PaidTarget {
 
 type Route struct {
 	TranslatedCodexOutputMinimum  bool                  `json:"translated_codex_output_minimum,omitempty"`
+	ResponsesToGrok               bool                  `json:"responses_to_grok,omitempty"`
+	GrokCLIIdentity               bool                  `json:"grok_cli_identity,omitempty"`
 	CodexCLIIdentity              bool                  `json:"codex_cli_identity,omitempty"`
 	PaidFallbackTargets           map[string]PaidTarget `json:"paid_fallback_targets,omitempty"`
 	AntigravitySignedContinuation bool                  `json:"antigravity_signed_continuation,omitempty"`

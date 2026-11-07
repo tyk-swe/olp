@@ -82,6 +82,8 @@ type CodePaidConnection struct {
 }
 
 type CodeRoutePolicy struct {
+	ResponsesToGrok               bool                      `json:"responses_to_grok,omitempty"`
+	GrokCLIIdentity               bool                      `json:"grok_cli_identity,omitempty"`
 	CodexCLIIdentity              bool                      `json:"codex_cli_identity,omitempty"`
 	PaidFallbackTargets           map[string]CodePaidTarget `json:"paid_fallback_targets,omitempty"`
 	ChatToAntigravity             bool                      `json:"chat_to_antigravity,omitempty"`

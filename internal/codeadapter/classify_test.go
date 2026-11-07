@@ -1,14 +1,21 @@
 package codeadapter_test
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
+	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/codeadapter"
+	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/grokauth"
 	"github.com/tyk-swe/olp/internal/upstream"
+	"github.com/tyk-swe/olp/plugin/abi"
 )
 
 func codexVendor(t *testing.T) (codeadapter.Vendor, codeadapter.Endpoint) {
@@ -165,5 +172,133 @@ func TestUnqualifiedQuotaEnvelopesDoNotAuthorizeReplay(t *testing.T) {
 		if rejection, ok := vendor.InitialRejection(endpoint, 429, []byte(tc.body), http.Header{}, now); ok {
 			t.Errorf("%s unexpectedly authorizes replay: %+v", tc.adapter, rejection)
 		}
+	}
+}
+
+func TestGrokDeviceGrantUsesAuthenticatedSubject(t *testing.T) {
+	adapter := grokauth.Adapter{Fetch: func(_ context.Context, request abi.HTTPRequest) (abi.HTTPResponse, error) {
+		switch request.URL {
+		case grokauth.Issuer + "/oauth2/device/code":
+			return abi.HTTPResponse{Status: 200, Body: []byte(`{"device_code":"device-secret","user_code":"ABCD","verification_uri":"https://auth.x.ai/device","expires_in":600,"interval":5}`)}, nil
+		case grokauth.Issuer + "/oauth2/token":
+			return abi.HTTPResponse{Status: 200, Body: []byte(`{"access_token":"opaque-access","refresh_token":"refresh-secret","token_type":"Bearer","expires_in":3600}`)}, nil
+		case grokauth.Issuer + "/oauth2/userinfo":
+			if request.Method != http.MethodGet || http.Header(request.Header).Get("Authorization") != "Bearer opaque-access" {
+				t.Fatal("identity was not authenticated with the new access token")
+			}
+			return abi.HTTPResponse{Status: 200, Body: []byte(`{"sub":"verified-subject","email":"display-only@example.invalid"}`)}, nil
+		default:
+			t.Fatalf("unexpected request %s", request.URL)
+			return abi.HTTPResponse{}, nil
+		}
+	}}
+	started, err := adapter.StartGrant(t.Context(), abi.GrantStart{Profile: grokauth.ProfileID})
+	if err != nil || started.Device == nil || started.Device.UserCode != "ABCD" {
+		t.Fatalf("start = %+v, %v", started, err)
+	}
+	grant, err := adapter.PollGrant(t.Context(), abi.GrantPoll{Profile: grokauth.ProfileID, Session: started.Session})
+	if err != nil || grant.Principal != grokauth.Principal("verified-subject") || grant.Facts["subject"] != "verified-subject" || grant.AccessToken != "opaque-access" || grant.RefreshToken != "refresh-secret" || grant.ExpiresIn != 3600 {
+		t.Fatalf("grant = %+v, %v", grant, err)
+	}
+	encoded, _ := json.Marshal(grant.Facts)
+	if string(encoded) != `{"subject":"verified-subject"}` {
+		t.Fatalf("unexpected authority facts %s", encoded)
+	}
+}
+
+func TestGrokRefreshRejectsAmbiguousSubjectWithoutIssuingGrant(t *testing.T) {
+	adapter := grokauth.Adapter{Fetch: func(_ context.Context, request abi.HTTPRequest) (abi.HTTPResponse, error) {
+		if request.URL == grokauth.Issuer+"/oauth2/token" {
+			return abi.HTTPResponse{Status: 200, Body: []byte(`{"access_token":"opaque-new","token_type":"Bearer","expires_in":3600}`)}, nil
+		}
+		return abi.HTTPResponse{Status: 200, Body: []byte(`{"sub":"foreign-subject","sub":"verified-subject"}`)}, nil
+	}}
+	grant, err := adapter.RefreshGrant(t.Context(), abi.GrantRefresh{Profile: grokauth.ProfileID, RefreshToken: "encrypted-refresh", Facts: map[string]string{"subject": "verified-subject"}})
+	if err == nil || grant.AccessToken != "" {
+		t.Fatalf("ambiguous subject issued grant %+v, %v", grant, err)
+	}
+}
+
+func TestGrokSubscriptionNeverUsesPaidAPIOrWebSocket(t *testing.T) {
+	vendor, ok := codeadapter.ForConnection("plugin", "grant", grokauth.ProfileID)
+	if !ok {
+		t.Fatal("Grok subscription profile is unavailable")
+	}
+	address, ok := vendor.Address(grokauth.ProfileID)
+	if !ok || address != grokauth.Upstream {
+		t.Fatalf("subscription address %q, %v", address, ok)
+	}
+	endpoint, ok := vendor.Endpoint("responses")
+	if !ok || !endpoint.Supports(codeadapter.HTTP) || endpoint.Supports(codeadapter.WebSocket) || endpoint.Observation != codeadapter.ObserveUsage {
+		t.Fatalf("subscription endpoint %+v, %v", endpoint, ok)
+	}
+	secret := []byte(`{"access_token":"opaque-access","facts":{"subject":"verified-subject"}}`)
+	dispatch := codemode.Dispatch{Adapter: vendor.Adapter, Protocol: codemode.ProtocolResponses, ClientPath: "responses"}
+	authorization, err := vendor.Authorize(secret, grokauth.ProfileID, grokauth.Principal("verified-subject"), dispatch, time.Now())
+	if err != nil || authorization.Headers.Get("Authorization") != "Bearer opaque-access" {
+		t.Fatalf("authorization %+v, %v", authorization, err)
+	}
+	if _, err := vendor.Authorize(secret, grokauth.ProfileID, grokauth.Principal("other-subject"), dispatch, time.Now()); err == nil {
+		t.Fatal("credential crossed principal boundary")
+	}
+}
+
+func TestGrokRefreshReverifiesSubjectAndRequiresProvenExpiry(t *testing.T) {
+	for _, test := range []struct {
+		name, token, identity string
+		accepted              bool
+		refresh               string
+	}{
+		{name: "retains existing refresh", token: `{"access_token":"new-access","token_type":"Bearer","expires_in":3600}`, identity: `{"sub":"verified-subject"}`, accepted: true},
+		{name: "rotates refresh", token: `{"access_token":"new-access","refresh_token":"rotated-refresh","token_type":"Bearer","expires_in":3600}`, identity: `{"sub":"verified-subject"}`, accepted: true, refresh: "rotated-refresh"},
+		{name: "rejects changed subject", token: `{"access_token":"new-access","token_type":"Bearer","expires_in":3600}`, identity: `{"sub":"other-subject"}`},
+		{name: "rejects absent subject", token: `{"access_token":"new-access","token_type":"Bearer","expires_in":3600}`, identity: `{"email":"display-only@example.invalid"}`},
+		{name: "rejects unknown expiry", token: `{"access_token":"new-access","token_type":"Bearer"}`, identity: `{"sub":"verified-subject"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			adapter := grokauth.Adapter{Fetch: func(_ context.Context, request abi.HTTPRequest) (abi.HTTPResponse, error) {
+				if request.URL == grokauth.Issuer+"/oauth2/token" {
+					return abi.HTTPResponse{Status: 200, Body: []byte(test.token)}, nil
+				}
+				if request.URL != grokauth.Issuer+"/oauth2/userinfo" || http.Header(request.Header).Get("Authorization") != "Bearer new-access" {
+					t.Fatalf("unexpected identity verification %+v", request)
+				}
+				return abi.HTTPResponse{Status: 200, Body: []byte(test.identity)}, nil
+			}}
+			grant, err := adapter.RefreshGrant(t.Context(), abi.GrantRefresh{Profile: grokauth.ProfileID, RefreshToken: "current-refresh", Facts: map[string]string{"subject": "verified-subject"}})
+			if !test.accepted {
+				if err == nil || grant.AccessToken != "" {
+					t.Fatalf("unsupported refresh issued %+v, %v", grant, err)
+				}
+				return
+			}
+			if err != nil || grant.Principal != grokauth.Principal("verified-subject") || grant.Facts["subject"] != "verified-subject" || grant.AccessToken != "new-access" || grant.RefreshToken != test.refresh {
+				t.Fatalf("refresh %+v, %v", grant, err)
+			}
+		})
+	}
+}
+
+func TestCodeGrokClientConfiguration(t *testing.T) {
+	route := codemode.Route{Enabled: true, RevisionID: "revision", Slug: "coding", Models: []string{"grok-fixture-model"}}
+	grok := codeclient.Offers{{Adapter: codemode.AdapterGrokBuild, Models: route.Models}}
+	request := codeclient.Request{GatewayURL: "http://localhost:4000", Client: codeadapter.ClientCodex, Model: route.Models[0]}
+	if _, err := codeclient.Generate(route, grok, request); err == nil {
+		t.Fatal("disabled Grok translation offered client configuration")
+	}
+	route.ResponsesToGrok = true
+	configuration, err := codeclient.Generate(route, grok, request)
+	if err != nil || !strings.Contains(configuration.Configuration, "supports_websockets = false") {
+		t.Fatalf("Grok configuration must select HTTP: %+v, %v", configuration, err)
+	}
+	mixed := slices.Concat(grok, codeclient.Offers{{Adapter: codemode.AdapterCodex, Models: route.Models}})
+	configuration, err = codeclient.Generate(route, mixed, request)
+	if err != nil || !strings.Contains(configuration.Configuration, "supports_websockets = false") {
+		t.Fatalf("mixed eligible paths must select HTTP: %+v, %v", configuration, err)
+	}
+	route.ResponsesToGrok = false
+	configuration, err = codeclient.Generate(route, mixed, request)
+	if err != nil || !strings.Contains(configuration.Configuration, "supports_websockets = true") {
+		t.Fatalf("disabled Grok path must preserve native transport: %+v, %v", configuration, err)
 	}
 }

@@ -26,6 +26,7 @@ const codeGenerationTimeout = 10 * time.Minute
 
 type codeAttempt struct {
 	identityOriginator string
+	grokIdentity       bool
 	adapter            codemode.Adapter
 	paid               *paidCodeAttempt
 	server             *Server
@@ -177,6 +178,7 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 	a.config, a.endpoint, a.observer = target.config, target.endpoint, codeObserver(target.endpoint)
 	a.adapter = target.adapter.Adapter
 	a.identityOriginator = target.adapter.CompatibilityOriginator(route)
+	a.grokIdentity = target.adapter.Adapter == codemode.AdapterGrokBuild && route.GrokCLIIdentity
 
 	estimate := codeTargetEstimate(observation, body, route, target, ingress)
 	if authorityChanged || estimate != observation.Estimate {

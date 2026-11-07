@@ -1205,3 +1205,65 @@ func TestAntigravitySignedToolRoundTrip(t *testing.T) {
 		t.Fatal("altered signed call was accepted")
 	}
 }
+
+func TestGrokPublishedTransportPreservesTextAndRefusesMedia(t *testing.T) {
+	for _, test := range []struct {
+		name, body string
+		identity   bool
+		status     int
+	}{
+		{name: "unsupported media", body: `{"model":"grok-model","input":[{"role":"user","content":[{"type":"input_image","image_url":"https://example.invalid/image.png"}]}]}`, status: http.StatusUnprocessableEntity},
+		{name: "truthful gateway identity", body: `{"model":"grok-model","input":"hello","include":["reasoning.encrypted_content"],"client_metadata":{"thread_id":"fixture-thread"}}`, status: http.StatusOK},
+		{name: "explicit Grok identity", body: `{"model":"grok-model","input":"hello"}`, identity: true, status: http.StatusOK},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			reached := make(chan struct{}, 1)
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				reached <- struct{}{}
+				raw, err := io.ReadAll(r.Body)
+				if err != nil || string(raw) != test.body {
+					t.Errorf("request changed %q, %v", raw, err)
+				}
+				if !test.identity && (r.Header.Get("User-Agent") != "OLP" || r.Header.Get("X-Grok-Client-Identifier") != "") {
+					t.Errorf("implicit identity %v", r.Header)
+				}
+				if test.identity && (r.Header.Get("X-Grok-Client-Identifier") != "grok-shell" || r.Header.Get("X-Xai-Token-Auth") != "xai-grok-cli") {
+					t.Errorf("missing identity %v", r.Header)
+				}
+				_, _ = io.WriteString(w, `{ "id":"resp_foreign", "status":"completed", "output":[] }`)
+			}))
+			defer upstream.Close()
+			project := "project"
+			authority := keyauthority.Authority{ID: "key", ProjectID: &project, Policy: keyauthority.KeyPolicy{Scopes: []string{"inference"}}}
+			ledger := &fakeCodeLedger{connectionPermit: codesessions.Permit{Authority: authority, Account: codemode.Account{ID: "account", ProviderID: "provider", Principal: "principal"}, Pin: codemode.Pin{AccountID: "account", Principal: "principal"}, Attempt: codemode.Attempt{ID: "attempt"}}}
+			h := newHarness(t, Config{}, Dependencies{Admission: NewAdmission(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil))), CodeLedger: ledger, CodeAuthorizer: fakeCodeAuthorizer{}})
+			h.rt.keys[fullKey] = authority
+			published := time.Now()
+			route := codemode.Route{PublishedAt: &published, ID: "route", ProjectID: project, Slug: "grok", PoolID: "pool", Models: []string{"grok-model"}, Enabled: true, RevisionID: "revision", Revision: 1, ResponsesToGrok: true, GrokCLIIdentity: test.identity}
+			publication, err := release.NewRelease("", 0, &routing.Snapshot{Generation: routing.Generation{ID: uuid.NewString()}, CodeRoutes: map[string]codemode.Route{"grok": route}, CodeConnections: map[string]routing.Configuration{"revision:provider": {Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: "grok-build-subscription", Endpoint: upstream.URL}}}}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.rt.release = publication
+			mux := http.NewServeMux()
+			h.gateway.RegisterCode(mux)
+			request := httptest.NewRequest(http.MethodPost, "/code/grok/responses", strings.NewReader(test.body))
+			request.Header.Set("Authorization", "Bearer "+fullKey)
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, request)
+			if response.Code != test.status {
+				t.Fatalf("unsupported input = %d %s", response.Code, response.Body.String())
+			}
+			select {
+			case <-reached:
+				if test.status != http.StatusOK {
+					t.Fatal("unsupported media reached subscription")
+				}
+			default:
+				if test.status == http.StatusOK {
+					t.Fatal("text did not reach subscription")
+				}
+			}
+		})
+	}
+}

@@ -470,6 +470,18 @@
             <dd>{route.models.join(', ')}</dd>
             <dt>Draft pool</dt>
             <dd>{route.pool_id}</dd>
+            <dt>Draft Responses to Grok Build</dt>
+            <dd>
+              {route.responses_to_grok
+                ? 'Enabled, requires publication'
+                : 'Disabled'}
+            </dd>
+            <dt>Draft Grok CLI identity compatibility</dt>
+            <dd>
+              {route.grok_cli_identity
+                ? 'Enabled, requires publication'
+                : 'Disabled'}
+            </dd>
             <dt>Draft Codex CLI identity compatibility</dt>
             <dd>
               {route.codex_cli_identity
