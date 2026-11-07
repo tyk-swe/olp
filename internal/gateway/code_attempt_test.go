@@ -1182,6 +1182,18 @@ func TestAntigravitySignedToolRoundTrip(t *testing.T) {
 	if strings.Count(string(payload.body), `"id":"provider-tool"`) != 2 || strings.Contains(string(payload.body), message.ToolCalls[1].ID) || !strings.Contains(string(payload.body), `"thoughtSignature":"private-second"`) {
 		t.Fatalf("parallel provider identity restoration = %s", payload.body)
 	}
+	partial := []byte(fmt.Sprintf(`{"model":"gemini-native","messages":[{"role":"user","content":"Inspect"},%s,{"role":"tool","tool_call_id":%q,"content":"file result"}]}`, response.Choices[0].Message, message.ToolCalls[0].ID))
+	if _, err := attempt.translateAntigravity(partial, request, "gemini-native", "project", true); err == nil {
+		t.Fatal("partial parallel tool results were accepted")
+	}
+	reversed := []byte(fmt.Sprintf(`{"model":"gemini-native","messages":[{"role":"user","content":"Inspect"},%s,{"role":"tool","tool_call_id":%q,"content":"directory result"},{"role":"tool","tool_call_id":%q,"content":"file result"}]}`, response.Choices[0].Message, message.ToolCalls[1].ID, message.ToolCalls[0].ID))
+	if _, err := attempt.translateAntigravity(reversed, request, "gemini-native", "project", true); err != nil {
+		t.Fatalf("reordered parallel results = %v", err)
+	}
+	premature := []byte(fmt.Sprintf(`{"model":"gemini-native","messages":[{"role":"user","content":"Inspect"},{"role":"tool","tool_call_id":%q,"content":"file result"},%s,{"role":"tool","tool_call_id":%q,"content":"directory result"}]}`, message.ToolCalls[0].ID, response.Choices[0].Message, message.ToolCalls[1].ID))
+	if _, err := attempt.translateAntigravity(premature, request, "gemini-native", "project", true); err == nil {
+		t.Fatal("tool result before its call was accepted")
+	}
 	missingState := ledger.calls[message.ToolCalls[1].ID]
 	delete(ledger.calls, message.ToolCalls[1].ID)
 	if _, err := attempt.translateAntigravity(requestBody, request, "gemini-native", "project", true); err == nil {

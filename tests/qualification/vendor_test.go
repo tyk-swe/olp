@@ -350,24 +350,58 @@ func newVendorProxy(t *testing.T, handler http.Handler) vendorProxy {
 	return vendorProxy{url: "http://" + listener.Addr().String(), roots: roots}
 }
 
+type antigravityFixtureArguments struct {
+	Command     string `json:"command"`
+	Description string `json:"description"`
+}
+
+type antigravityFixtureCall struct {
+	ID   *string                     `json:"id,omitempty"`
+	Name string                      `json:"name"`
+	Args antigravityFixtureArguments `json:"args"`
+}
+
+type antigravityFixturePart struct {
+	Response *struct {
+		Response json.RawMessage `json:"response"`
+	} `json:"functionResponse,omitempty"`
+	Text      string                  `json:"text,omitempty"`
+	Call      *antigravityFixtureCall `json:"functionCall,omitempty"`
+	Signature string                  `json:"thoughtSignature,omitempty"`
+}
+
+type antigravityFixtureContent struct {
+	Role  string                   `json:"role"`
+	Parts []antigravityFixturePart `json:"parts"`
+}
+
+type antigravityFixtureCandidate struct {
+	Index        int                       `json:"index"`
+	Content      antigravityFixtureContent `json:"content"`
+	FinishReason string                    `json:"finishReason"`
+}
+
+type antigravityFixtureUsage struct {
+	Input  int `json:"promptTokenCount"`
+	Output int `json:"candidatesTokenCount"`
+	Total  int `json:"totalTokenCount"`
+}
+
+type antigravityFixtureResult struct {
+	Candidates []antigravityFixtureCandidate `json:"candidates"`
+	Usage      antigravityFixtureUsage       `json:"usageMetadata"`
+}
+
+type antigravityFixtureResponse struct {
+	Response antigravityFixtureResult `json:"response"`
+}
+
 func fixtureAntigravity(w http.ResponseWriter, r *http.Request, toolProof chan<- struct{}) {
 	var envelope struct {
 		Model   string `json:"model"`
 		Request struct {
-			Contents []struct {
-				Parts []struct {
-					Call struct {
-						Name string          `json:"name"`
-						ID   *string         `json:"id"`
-						Args json.RawMessage `json:"args"`
-					} `json:"functionCall"`
-					Signature string `json:"thoughtSignature"`
-					Response  struct {
-						Response json.RawMessage `json:"response"`
-					} `json:"functionResponse"`
-				} `json:"parts"`
-			} `json:"contents"`
-			Tools []struct {
+			Contents []antigravityFixtureContent `json:"contents"`
+			Tools    []struct {
 				Declarations []struct {
 					Name string `json:"name"`
 				} `json:"functionDeclarations"`
@@ -378,26 +412,31 @@ func fixtureAntigravity(w http.ResponseWriter, r *http.Request, toolProof chan<-
 		refuseVendor(w, http.StatusBadRequest, `{"error":{"message":"fixture envelope invalid"}}`)
 		return
 	}
-	var bash string
-	for _, tool := range envelope.Request.Tools {
-		for _, declaration := range tool.Declarations {
-			if strings.EqualFold(declaration.Name, "bash") {
-				bash = declaration.Name
+	bash := func() string {
+		for _, tool := range envelope.Request.Tools {
+			for _, declaration := range tool.Declarations {
+				if strings.EqualFold(declaration.Name, "bash") {
+					return declaration.Name
+				}
 			}
 		}
-	}
-	continued := false
-	signed := false
-	for _, content := range envelope.Request.Contents {
-		for _, part := range content.Parts {
-			if len(part.Response.Response) != 0 && strings.Contains(string(part.Response.Response), "olp-tool-round-trip") {
-				continued = true
-			}
-			if strings.EqualFold(part.Call.Name, "bash") && part.Signature == "fixture-private-signature" && part.Call.ID == nil && strings.Contains(string(part.Call.Args), "printf olp-tool-round-trip") {
-				signed = true
+		return ""
+	}()
+	requestParts := slices.Collect(func(yield func(antigravityFixturePart) bool) {
+		for _, content := range envelope.Request.Contents {
+			for _, part := range content.Parts {
+				if !yield(part) {
+					return
+				}
 			}
 		}
-	}
+	})
+	continued := slices.ContainsFunc(requestParts, func(part antigravityFixturePart) bool {
+		return part.Response != nil && strings.Contains(string(part.Response.Response), "olp-tool-round-trip")
+	})
+	signed := slices.ContainsFunc(requestParts, func(part antigravityFixturePart) bool {
+		return part.Call != nil && strings.EqualFold(part.Call.Name, "bash") && part.Signature == "fixture-private-signature" && part.Call.ID == nil && part.Call.Args.Command == "printf olp-tool-round-trip"
+	})
 	if continued && !signed {
 		refuseVendor(w, http.StatusBadRequest, `{"error":{"message":"fixture signed continuation missing"}}`)
 		return
@@ -408,13 +447,16 @@ func fixtureAntigravity(w http.ResponseWriter, r *http.Request, toolProof chan<-
 		default:
 		}
 	}
-	parts := func() []any {
+	parts := func() []antigravityFixturePart {
 		if bash != "" && !continued {
-			return []any{map[string]any{"functionCall": map[string]any{"name": bash, "args": map[string]string{"command": "printf olp-tool-round-trip", "description": "Run the fixture proof"}}, "thoughtSignature": "fixture-private-signature"}}
+			return []antigravityFixturePart{{Call: &antigravityFixtureCall{Name: bash, Args: antigravityFixtureArguments{Command: "printf olp-tool-round-trip", Description: "Run the fixture proof"}}, Signature: "fixture-private-signature"}}
 		}
-		return []any{map[string]string{"text": vendorAnswer}}
+		return []antigravityFixturePart{{Text: vendorAnswer}}
 	}()
-	body, _ := json.Marshal(map[string]any{"response": map[string]any{"candidates": []any{map[string]any{"index": 0, "content": map[string]any{"role": "model", "parts": parts}, "finishReason": "STOP"}}, "usageMetadata": map[string]int{"promptTokenCount": vendorInputTokens, "candidatesTokenCount": vendorOutputTokens, "totalTokenCount": vendorInputTokens + vendorOutputTokens}}})
+	body, _ := json.Marshal(antigravityFixtureResponse{Response: antigravityFixtureResult{
+		Candidates: []antigravityFixtureCandidate{{Index: 0, Content: antigravityFixtureContent{Role: "model", Parts: parts}, FinishReason: "STOP"}},
+		Usage:      antigravityFixtureUsage{Input: vendorInputTokens, Output: vendorOutputTokens, Total: vendorInputTokens + vendorOutputTokens},
+	}})
 	if strings.Contains(r.URL.Path, "streamGenerateContent") {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = fmt.Fprintf(w, "data: %s\n\n", body)

@@ -58,10 +58,13 @@ func canonicalContinuationJSON(value oif.Value) json.RawMessage {
 		data, _ := json.Marshal(fields)
 		return data
 	case oif.Array:
-		values := make([]json.RawMessage, len(value.Elements()))
-		for index, element := range value.Elements() {
-			values[index] = canonicalContinuationJSON(element)
-		}
+		values := slices.Collect(func(yield func(json.RawMessage) bool) {
+			for _, element := range value.Elements() {
+				if !yield(canonicalContinuationJSON(element)) {
+					return
+				}
+			}
+		})
 		data, _ := json.Marshal(values)
 		return data
 	case oif.String:
@@ -86,123 +89,298 @@ func canonicalContinuationJSON(value oif.Value) json.RawMessage {
 	}
 }
 
+type signedResponseCandidate struct {
+	Grounding json.RawMessage `json:"groundingMetadata"`
+	Content   *struct {
+		Parts []json.RawMessage `json:"parts"`
+	} `json:"content"`
+}
+
+type preparedSignedPart struct {
+	call    *codesessions.SignedCall
+	changes []oif.Change
+	err     error
+}
+
+func prepareSignedResponsePart(raw json.RawMessage, pointer, group string) preparedSignedPart {
+	refused := preparedSignedPart{err: codemode.Refuse(502, "code_upstream_unsupported_state")}
+	document, err := oif.ParseJSON(raw, oif.Limits{})
+	if err != nil || document.Root().Kind() != oif.Object {
+		return refused
+	}
+	part := document.Root()
+	function, isCall := part.Lookup("functionCall")
+	if !isCall {
+		text, present := part.Lookup("text")
+		if !present || text.Kind() != oif.String || len(part.Members()) != 1 {
+			return refused
+		}
+		return preparedSignedPart{}
+	}
+	if slices.ContainsFunc(part.Members(), func(field oif.Member) bool { return field.Name != "functionCall" && field.Name != "thoughtSignature" }) {
+		return refused
+	}
+	if function.Kind() != oif.Object || slices.ContainsFunc(function.Members(), func(field oif.Member) bool { return !slices.Contains([]string{"id", "name", "args"}, field.Name) }) {
+		return refused
+	}
+	if id, present := function.Lookup("id"); present && id.Kind() != oif.String {
+		return refused
+	}
+	var call continuationCall
+	if err := json.Unmarshal(function.Bytes(), &call); err != nil {
+		return refused
+	}
+	signature, signatureErr := func() (string, error) {
+		value, present := part.Lookup("thoughtSignature")
+		if !present {
+			return "", nil
+		}
+		var signature string
+		if err := json.Unmarshal(value.Bytes(), &signature); err != nil || signature == "" {
+			return "", refused.err
+		}
+		return signature, nil
+	}()
+	if signatureErr != nil {
+		return refused
+	}
+	digest, err := continuationDigest(call)
+	if err != nil {
+		return refused
+	}
+	callID, err := uuid.NewV7()
+	if err != nil {
+		return preparedSignedPart{err: codemode.Refuse(502, "code_continuation_unavailable")}
+	}
+	id := callID.String()
+	outward, _ := json.Marshal(continuationCall{Name: call.Name, Args: call.Args, ID: &id})
+	callChange := oif.Change{Pointer: pointer + "/functionCall", Value: string(outward), Origin: oif.QualifiedMapping, Reason: "bind tool continuation"}
+	changes := func() []oif.Change {
+		if signature == "" {
+			return []oif.Change{callChange}
+		}
+		return []oif.Change{callChange, {Pointer: pointer + "/thoughtSignature", Remove: true, Origin: oif.QualifiedMapping, Reason: "retain provider state privately"}}
+	}()
+	return preparedSignedPart{call: &codesessions.SignedCall{ID: id, Group: group, Digest: digest, ProviderID: call.ID, Signature: signature}, changes: changes}
+}
+
+func prepareSignedResponse(candidates []signedResponseCandidate, group string) []preparedSignedPart {
+	return slices.Collect(func(yield func(preparedSignedPart) bool) {
+		for candidateIndex, candidate := range candidates {
+			if len(candidate.Grounding) != 0 {
+				yield(preparedSignedPart{err: codemode.Refuse(502, "code_upstream_unsupported_state")})
+				return
+			}
+			if candidate.Content == nil {
+				continue
+			}
+			for partIndex, part := range candidate.Content.Parts {
+				pointer := "/candidates/" + strconv.Itoa(candidateIndex) + "/content/parts/" + strconv.Itoa(partIndex)
+				if !yield(prepareSignedResponsePart(part, pointer, group)) {
+					return
+				}
+			}
+		}
+	})
+}
+
 func (a *codeAttempt) signedAntigravityResult(ctx context.Context, body []byte, model string) ([]byte, error) {
 	refused := codemode.Refuse(502, "code_upstream_unsupported_state")
-	var envelope map[string]json.RawMessage
+	var envelope struct {
+		Response json.RawMessage `json:"response"`
+	}
 	if err := json.Unmarshal(body, &envelope); err != nil {
 		return nil, refused
 	}
-	var result map[string]json.RawMessage
-	if err := json.Unmarshal(envelope["response"], &result); err != nil {
-		return nil, refused
+	var result struct {
+		Candidates []signedResponseCandidate `json:"candidates"`
 	}
-	var candidates []map[string]json.RawMessage
-	if raw, present := result["candidates"]; present {
-		if err := json.Unmarshal(raw, &candidates); err != nil {
-			return nil, refused
-		}
+	if err := json.Unmarshal(envelope.Response, &result); err != nil || len(result.Candidates) > 1 {
+		return envelope.Response, refused
 	}
-	if len(candidates) > 1 {
-		return envelope["response"], refused
+	group, err := uuid.NewV7()
+	if err != nil {
+		return envelope.Response, codemode.Refuse(502, "code_continuation_unavailable")
 	}
-	groupID, groupErr := uuid.NewV7()
-	if groupErr != nil {
-		return envelope["response"], codemode.Refuse(502, "code_continuation_unavailable")
+	prepared := prepareSignedResponse(result.Candidates, group.String())
+	if index := slices.IndexFunc(prepared, func(part preparedSignedPart) bool { return part.err != nil }); index >= 0 {
+		return envelope.Response, prepared[index].err
 	}
-	group := groupID.String()
-	var calls []codesessions.SignedCall
-	var changes []oif.Change
-	for candidateIndex, candidate := range candidates {
-		if _, exists := candidate["groundingMetadata"]; exists {
-			return envelope["response"], refused
-		}
-		var content map[string]json.RawMessage
-		if len(candidate["content"]) == 0 {
-			continue
-		}
-		if err := json.Unmarshal(candidate["content"], &content); err != nil {
-			return envelope["response"], refused
-		}
-		var parts []map[string]json.RawMessage
-		if err := json.Unmarshal(content["parts"], &parts); err != nil {
-			return envelope["response"], refused
-		}
-		for partIndex, part := range parts {
-			if len(part["functionCall"]) == 0 {
-				if len(part) != 1 || len(part["text"]) == 0 {
-					return envelope["response"], refused
-				}
-				continue
-			}
-			if len(part) > 2 {
-				return envelope["response"], refused
-			}
-			for field := range part {
-				if field != "functionCall" && field != "thoughtSignature" {
-					return envelope["response"], refused
+	changes := slices.Collect(func(yield func(oif.Change) bool) {
+		for _, part := range prepared {
+			for _, change := range part.changes {
+				if !yield(change) {
+					return
 				}
 			}
-			var call continuationCall
-			var signature string
-			if err := json.Unmarshal(part["functionCall"], &call); err != nil {
-				return envelope["response"], refused
-			}
-			if raw, present := part["thoughtSignature"]; present {
-				if err := json.Unmarshal(raw, &signature); err != nil || signature == "" {
-					return envelope["response"], refused
-				}
-			}
-			callDocument, err := oif.ParseJSON(part["functionCall"], oif.Limits{})
-			if err != nil || slices.ContainsFunc(callDocument.Root().Members(), func(member oif.Member) bool { return !slices.Contains([]string{"id", "name", "args"}, member.Name) }) {
-				return envelope["response"], refused
-			}
-			digest, err := continuationDigest(call)
-			if err != nil {
-				return envelope["response"], refused
-			}
-			callID, idErr := uuid.NewV7()
-			if idErr != nil {
-				return envelope["response"], codemode.Refuse(502, "code_continuation_unavailable")
-			}
-			id := callID.String()
-			calls = append(calls, codesessions.SignedCall{ID: id, Group: group, Index: len(calls), Digest: digest, ProviderID: call.ID, Signature: signature})
-			pointer := "/candidates/" + strconv.Itoa(candidateIndex) + "/content/parts/" + strconv.Itoa(partIndex)
-			outward, _ := json.Marshal(continuationCall{Name: call.Name, Args: call.Args, ID: &id})
-			changes = append(changes, oif.Change{Pointer: pointer + "/functionCall", Value: string(outward), Origin: oif.QualifiedMapping, Reason: "bind tool continuation"})
-			if _, present := part["thoughtSignature"]; present {
-				changes = append(changes, oif.Change{Pointer: pointer + "/thoughtSignature", Remove: true, Origin: oif.QualifiedMapping, Reason: "retain provider state privately"})
-			}
 		}
-	}
-	document, parseErr := oif.ParseJSON(envelope["response"], oif.Limits{})
-	if parseErr != nil {
-		return envelope["response"], refused
+	})
+	document, err := oif.ParseJSON(envelope.Response, oif.Limits{})
+	if err != nil {
+		return envelope.Response, refused
 	}
 	transformed, err := oif.Apply(document, changes)
 	if err != nil {
-		return envelope["response"], refused
+		return envelope.Response, refused
 	}
-	encoded := transformed.Bytes()
+	calls := slices.Collect(func(yield func(codesessions.SignedCall) bool) {
+		for _, part := range prepared {
+			if part.call != nil && !yield(*part.call) {
+				return
+			}
+		}
+	})
 	if len(calls) == 0 {
-		return encoded, nil
+		return transformed.Bytes(), nil
 	}
 	ledger, supported := a.server.deps.CodeLedger.(codeContinuationLedger)
 	if !supported {
-		return encoded, codemode.Refuse(502, "code_continuation_unavailable")
+		return transformed.Bytes(), codemode.Refuse(502, "code_continuation_unavailable")
 	}
-	stored := make([]codesessions.SignedCall, len(calls))
-	for index, call := range calls {
-		stored[index] = codesessions.SignedCall{ID: call.ID, Group: call.Group, Index: call.Index, Count: len(calls), Digest: call.Digest, ProviderID: call.ProviderID, Signature: call.Signature}
-	}
+	stored := slices.Collect(func(yield func(codesessions.SignedCall) bool) {
+		for index, call := range calls {
+			if !yield(codesessions.SignedCall{ID: call.ID, Group: call.Group, Index: index, Count: len(calls), Digest: call.Digest, ProviderID: call.ProviderID, Signature: call.Signature}) {
+				return
+			}
+		}
+	})
 	if err := ledger.SaveCodeContinuation(ctx, a.permit, model, stored); err != nil {
-		return encoded, codemode.Refuse(502, "code_continuation_unavailable")
+		return transformed.Bytes(), codemode.Refuse(502, "code_continuation_unavailable")
 	}
-	return encoded, nil
+	return transformed.Bytes(), nil
+}
+
+type continuationResponse struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type continuationPart struct {
+	Call     *continuationCall     `json:"functionCall"`
+	Response *continuationResponse `json:"functionResponse"`
 }
 
 type continuationContent struct {
-	Role  string                       `json:"role"`
-	Parts []map[string]json.RawMessage `json:"parts"`
+	Role  string             `json:"role"`
+	Parts []continuationPart `json:"parts"`
+}
+
+type locatedContinuationPart struct {
+	continuationPart
+	role    string
+	content int
+	part    int
+}
+
+func (p locatedContinuationPart) pointer() string {
+	return "/request/contents/" + strconv.Itoa(p.content) + "/parts/" + strconv.Itoa(p.part)
+}
+
+func (p locatedContinuationPart) before(other locatedContinuationPart) bool {
+	return p.content < other.content || p.content == other.content && p.part < other.part
+}
+
+type restoredContinuation struct {
+	entry   locatedContinuationPart
+	state   codesessions.SignedCall
+	changes []oif.Change
+	err     error
+}
+
+func continuationEntries(contents []continuationContent) []locatedContinuationPart {
+	return slices.Collect(func(yield func(locatedContinuationPart) bool) {
+		for contentIndex, content := range contents {
+			for partIndex, part := range content.Parts {
+				if !yield(locatedContinuationPart{continuationPart: part, role: content.Role, content: contentIndex, part: partIndex}) {
+					return
+				}
+			}
+		}
+	})
+}
+
+func (a *codeAttempt) restoreContinuationCall(ctx context.Context, entry locatedContinuationPart, model string) restoredContinuation {
+	refused := restoredContinuation{err: codemode.Refuse(422, "code_continuation_unavailable")}
+	ledger, supported := a.server.deps.CodeLedger.(codeContinuationLedger)
+	call := entry.Call
+	if !supported || entry.role != "model" || call.ID == nil || entry.Response != nil {
+		return refused
+	}
+	if _, err := uuid.Parse(*call.ID); err != nil {
+		return refused
+	}
+	state, err := ledger.LoadCodeContinuation(ctx, a.permit, model, *call.ID)
+	if err != nil {
+		return refused
+	}
+	digest, err := continuationDigest(*call)
+	if err != nil || state.ID != *call.ID || state.Digest != digest {
+		return refused
+	}
+	restored, _ := json.Marshal(continuationCall{Name: call.Name, Args: call.Args, ID: state.ProviderID})
+	signature, _ := json.Marshal(state.Signature)
+	changes := func() []oif.Change {
+		callChange := oif.Change{Pointer: entry.pointer() + "/functionCall", Value: string(restored), Origin: oif.QualifiedMapping, Reason: "restore tool continuation"}
+		if state.Signature == "" {
+			return []oif.Change{callChange}
+		}
+		return []oif.Change{callChange, {Pointer: entry.pointer() + "/thoughtSignature", Value: string(signature), Origin: oif.QualifiedMapping, Reason: "restore provider state"}}
+	}()
+	return restoredContinuation{entry: entry, state: state, changes: changes}
+}
+
+func restoreContinuationResult(entry locatedContinuationPart, calls []restoredContinuation) restoredContinuation {
+	refused := restoredContinuation{err: codemode.Refuse(422, "code_continuation_unavailable")}
+	index := slices.IndexFunc(calls, func(call restoredContinuation) bool { return call.state.ID == entry.Response.ID })
+	if index < 0 || entry.role != "user" {
+		return refused
+	}
+	call := calls[index]
+	if !call.entry.before(entry) || entry.Response.Name != call.entry.Call.Name {
+		return refused
+	}
+	original, _ := json.Marshal(call.state.ProviderID)
+	change := oif.Change{Pointer: entry.pointer() + "/functionResponse/id", Value: string(original), Origin: oif.QualifiedMapping, Reason: "restore provider identity"}
+	if call.state.ProviderID == nil {
+		return restoredContinuation{entry: entry, changes: []oif.Change{{Pointer: change.Pointer, Remove: true, Origin: change.Origin, Reason: change.Reason}}}
+	}
+	return restoredContinuation{entry: entry, changes: []oif.Change{change}}
+}
+
+func validateContinuationHistory(contents []continuationContent, calls, results []restoredContinuation) error {
+	refused := codemode.Refuse(422, "code_continuation_unavailable")
+	if len(calls) != len(results) {
+		return refused
+	}
+	for index, call := range calls {
+		if call.err != nil {
+			return call.err
+		}
+		if slices.IndexFunc(calls, func(prior restoredContinuation) bool { return prior.state.ID == call.state.ID }) != index {
+			return refused
+		}
+	}
+	for index, result := range results {
+		if result.err != nil {
+			return result.err
+		}
+		if slices.IndexFunc(results, func(prior restoredContinuation) bool { return prior.entry.Response.ID == result.entry.Response.ID }) != index {
+			return refused
+		}
+	}
+	for contentIndex := range contents {
+		group := slices.Collect(func(yield func(codesessions.SignedCall) bool) {
+			for _, call := range calls {
+				if call.entry.content == contentIndex && !yield(call.state) {
+					return
+				}
+			}
+		})
+		if !continuationGroupsComplete(group) {
+			return refused
+		}
+	}
+	return nil
 }
 
 func (a *codeAttempt) translateAntigravity(body []byte, r *http.Request, model, project string, signed bool) (codePayload, error) {
@@ -210,92 +388,54 @@ func (a *codeAttempt) translateAntigravity(body []byte, r *http.Request, model, 
 	if err != nil || !signed {
 		return payload, err
 	}
-	var envelope map[string]json.RawMessage
+	var envelope struct {
+		Request struct {
+			Contents []continuationContent `json:"contents"`
+		} `json:"request"`
+	}
 	if err := json.Unmarshal(payload.body, &envelope); err != nil {
 		return codePayload{}, err
 	}
-	var request map[string]json.RawMessage
-	if err := json.Unmarshal(envelope["request"], &request); err != nil {
+	entries := continuationEntries(envelope.Request.Contents)
+	calls := slices.Collect(func(yield func(restoredContinuation) bool) {
+		for _, entry := range entries {
+			if entry.Call != nil && !yield(a.restoreContinuationCall(r.Context(), entry, model)) {
+				return
+			}
+		}
+	})
+	if index := slices.IndexFunc(calls, func(call restoredContinuation) bool { return call.err != nil }); index >= 0 {
+		return codePayload{}, calls[index].err
+	}
+	results := slices.Collect(func(yield func(restoredContinuation) bool) {
+		for _, entry := range entries {
+			if entry.Response != nil && !yield(restoreContinuationResult(entry, calls)) {
+				return
+			}
+		}
+	})
+	if err := validateContinuationHistory(envelope.Request.Contents, calls, results); err != nil {
 		return codePayload{}, err
 	}
-	var contents []continuationContent
-	if err := json.Unmarshal(request["contents"], &contents); err != nil {
-		return codePayload{}, err
-	}
+	changes := slices.Collect(func(yield func(oif.Change) bool) {
+		for _, restored := range slices.Concat(calls, results) {
+			for _, change := range restored.changes {
+				if !yield(change) {
+					return
+				}
+			}
+		}
+	})
 	refused := codemode.Refuse(422, "code_continuation_unavailable")
-	ledger, supported := a.server.deps.CodeLedger.(codeContinuationLedger)
-	var represented []codesessions.SignedCall
-	var returned []string
-	var changes []oif.Change
-	for contentIndex, content := range contents {
-		var calls []codesessions.SignedCall
-		for partIndex, part := range content.Parts {
-			pointer := "/request/contents/" + strconv.Itoa(contentIndex) + "/parts/" + strconv.Itoa(partIndex)
-			if raw, present := part["functionCall"]; present {
-				if !supported || content.Role != "model" {
-					return codePayload{}, refused
-				}
-				var call continuationCall
-				if err := json.Unmarshal(raw, &call); err != nil || call.ID == nil {
-					return codePayload{}, refused
-				}
-				if _, err := uuid.Parse(*call.ID); err != nil {
-					return codePayload{}, refused
-				}
-				state, err := ledger.LoadCodeContinuation(r.Context(), a.permit, model, *call.ID)
-				if err != nil {
-					return codePayload{}, refused
-				}
-				digest, err := continuationDigest(call)
-				if err != nil || state.Digest != digest || slices.ContainsFunc(represented, func(prior codesessions.SignedCall) bool { return prior.ID == state.ID }) {
-					return codePayload{}, refused
-				}
-				calls = append(calls, state)
-				represented = append(represented, state)
-				restored, _ := json.Marshal(continuationCall{Name: call.Name, Args: call.Args, ID: state.ProviderID})
-				changes = append(changes, oif.Change{Pointer: pointer + "/functionCall", Value: string(restored), Origin: oif.QualifiedMapping, Reason: "restore tool continuation"})
-				if state.Signature != "" {
-					signature, _ := json.Marshal(state.Signature)
-					changes = append(changes, oif.Change{Pointer: pointer + "/thoughtSignature", Value: string(signature), Origin: oif.QualifiedMapping, Reason: "restore provider state"})
-				}
-			}
-			if raw, present := part["functionResponse"]; present {
-				var result map[string]json.RawMessage
-				if err := json.Unmarshal(raw, &result); err != nil {
-					return codePayload{}, refused
-				}
-				var id string
-				if err := json.Unmarshal(result["id"], &id); err != nil {
-					return codePayload{}, refused
-				}
-				index := slices.IndexFunc(represented, func(call codesessions.SignedCall) bool { return call.ID == id })
-				if index < 0 || slices.Contains(returned, id) {
-					return codePayload{}, refused
-				}
-				returned = append(returned, id)
-				state := represented[index]
-				if state.ProviderID == nil {
-					changes = append(changes, oif.Change{Pointer: pointer + "/functionResponse/id", Remove: true, Origin: oif.QualifiedMapping, Reason: "restore provider identity"})
-				} else {
-					original, _ := json.Marshal(state.ProviderID)
-					changes = append(changes, oif.Change{Pointer: pointer + "/functionResponse/id", Value: string(original), Origin: oif.QualifiedMapping, Reason: "restore provider identity"})
-				}
-			}
-		}
-		if !continuationGroupsComplete(calls) {
-			return codePayload{}, refused
-		}
-	}
-	document, parseErr := oif.ParseJSON(payload.body, oif.Limits{})
-	if parseErr != nil {
+	document, err := oif.ParseJSON(payload.body, oif.Limits{})
+	if err != nil {
 		return codePayload{}, refused
 	}
 	transformed, err := oif.Apply(document, changes)
 	if err != nil {
 		return codePayload{}, refused
 	}
-	encoded := transformed.Bytes()
-	return codePayload{body: encoded, query: payload.query, stream: payload.stream, includeUsage: payload.includeUsage, target: payload.target, signedContinuation: true}, nil
+	return codePayload{body: transformed.Bytes(), query: payload.query, stream: payload.stream, includeUsage: payload.includeUsage, target: payload.target, signedContinuation: true}, nil
 }
 
 func continuationGroupsComplete(calls []codesessions.SignedCall) bool {

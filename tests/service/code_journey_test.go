@@ -2045,6 +2045,16 @@ func TestCodeTranslatedRateReservationsThroughGateway(t *testing.T) {
 	}
 }
 
+type signedJourneyPart struct {
+	Call      json.RawMessage `json:"functionCall"`
+	Signature string          `json:"thoughtSignature"`
+	Response  json.RawMessage `json:"functionResponse"`
+}
+
+type signedJourneyContent struct {
+	Parts []signedJourneyPart `json:"parts"`
+}
+
 func TestCodeSignedToolContinuation(t *testing.T) {
 	s := startService(t)
 	owner := s.owner()
@@ -2054,13 +2064,7 @@ func TestCodeSignedToolContinuation(t *testing.T) {
 		var body struct {
 			Model   string `json:"model"`
 			Request struct {
-				Contents []struct {
-					Parts []struct {
-						Call      json.RawMessage `json:"functionCall"`
-						Signature string          `json:"thoughtSignature"`
-						Response  json.RawMessage `json:"functionResponse"`
-					} `json:"parts"`
-				} `json:"contents"`
+				Contents []signedJourneyContent `json:"contents"`
 			} `json:"request"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -2070,22 +2074,10 @@ func TestCodeSignedToolContinuation(t *testing.T) {
 		if body.Model != "gemini-fixture" {
 			t.Errorf("model = %s", body.Model)
 		}
-		continued := slices.ContainsFunc(body.Request.Contents, func(content struct {
-			Parts []struct {
-				Call      json.RawMessage `json:"functionCall"`
-				Signature string          `json:"thoughtSignature"`
-				Response  json.RawMessage `json:"functionResponse"`
-			} `json:"parts"`
-		}) bool {
-			return slices.ContainsFunc(content.Parts, func(part struct {
-				Call      json.RawMessage `json:"functionCall"`
-				Signature string          `json:"thoughtSignature"`
-				Response  json.RawMessage `json:"functionResponse"`
-			}) bool {
-				return len(part.Response) != 0
-			})
+		continued := slices.ContainsFunc(body.Request.Contents, func(content signedJourneyContent) bool {
+			return slices.ContainsFunc(content.Parts, func(part signedJourneyPart) bool { return len(part.Response) != 0 })
 		})
-		parts := `[{"functionCall":{"name":"read_file","args":{"path":"sample"}},"thoughtSignature":"private-signature"}]`
+		parts := `[{"functionCall":{"name":"read_file","args":{"path":"sample"}},"thoughtSignature":"private-signature"},{"functionCall":{"name":"list_files","args":{}},"thoughtSignature":"private-second"}]`
 		if continued {
 			encoded, _ := json.Marshal(body)
 			if !strings.Contains(string(encoded), `"thoughtSignature":"private-signature"`) || !strings.Contains(string(encoded), "file result") {
@@ -2131,17 +2123,20 @@ func TestCodeSignedToolContinuation(t *testing.T) {
 			ID string `json:"id"`
 		} `json:"tool_calls"`
 	}
-	if err := json.Unmarshal(result.Choices[0].Message, &message); err != nil || len(message.ToolCalls) != 1 {
+	if err := json.Unmarshal(result.Choices[0].Message, &message); err != nil || len(message.ToolCalls) != 2 {
 		t.Fatalf("message = %s, %v", result.Choices[0].Message, err)
 	}
-	continuation := json.RawMessage(fmt.Sprintf(`{"model":"gemini-fixture","messages":[{"role":"user","content":"Inspect"},%s,{"role":"tool","tool_call_id":%q,"content":"file result"}]}`, result.Choices[0].Message, message.ToolCalls[0].ID))
+	continuation := json.RawMessage(fmt.Sprintf(`{"model":"gemini-fixture","messages":[{"role":"user","content":"Inspect"},%s,{"role":"tool","tool_call_id":%q,"content":"directory result"},{"role":"tool","tool_call_id":%q,"content":"file result"}]}`, result.Choices[0].Message, message.ToolCalls[1].ID, message.ToolCalls[0].ID))
+	partial := json.RawMessage(fmt.Sprintf(`{"model":"gemini-fixture","messages":[{"role":"user","content":"Inspect"},%s,{"role":"tool","tool_call_id":%q,"content":"file result"}]}`, result.Choices[0].Message, message.ToolCalls[0].ID))
+	premature := json.RawMessage(fmt.Sprintf(`{"model":"gemini-fixture","messages":[{"role":"user","content":"Inspect"},{"role":"tool","tool_call_id":%q,"content":"file result"},%s,{"role":"tool","tool_call_id":%q,"content":"directory result"}]}`, message.ToolCalls[0].ID, result.Choices[0].Message, message.ToolCalls[1].ID))
 	before := calls.Load()
 	for _, request := range []struct {
 		body    json.RawMessage
 		session string
-	}{{continuation, "foreign-root"}, {json.RawMessage(strings.Replace(string(continuation), "sample", "altered", 1)), "signed-root"}} {
+		code    string
+	}{{partial, "signed-root", "code_continuation_unavailable"}, {premature, "signed-root", "code_translation_unsupported_semantics"}, {continuation, "foreign-root", "code_continuation_unavailable"}, {json.RawMessage(strings.Replace(string(continuation), "sample", "altered", 1)), "signed-root", "code_continuation_unavailable"}} {
 		status, raw := s.do(consumer, "POST", path, request.body, map[string]string{"X-Opencode-Session-Id": request.session})
-		if status != http.StatusUnprocessableEntity || !strings.Contains(string(raw), "code_continuation_unavailable") || calls.Load() != before {
+		if status != http.StatusUnprocessableEntity || !strings.Contains(string(raw), request.code) || calls.Load() != before {
 			t.Fatalf("mismatch = %s, vendor calls %d", describe(status, raw), calls.Load()-before)
 		}
 	}
@@ -2149,7 +2144,7 @@ func TestCodeSignedToolContinuation(t *testing.T) {
 		t.Fatal(err)
 	}
 	beforeFailure := calls.Load()
-	status, raw = s.do(consumer, "POST", path, map[string]any{"model": "gemini-fixture", "stream": true, "messages": []any{map[string]any{"role": "user", "content": "read sample"}}}, map[string]string{"X-Opencode-Session-Id": "save-failure-root"})
+	status, raw = s.do(consumer, "POST", path, json.RawMessage(`{"model":"gemini-fixture","stream":true,"messages":[{"role":"user","content":"read sample"}]}`), map[string]string{"X-Opencode-Session-Id": "save-failure-root"})
 	if calls.Load() != beforeFailure+1 || strings.Contains(string(raw), "read_file") || strings.Contains(string(raw), "private-signature") || !strings.Contains(string(raw), "code_continuation_unavailable") {
 		t.Fatalf("failed save = %s, calls %d", describe(status, raw), calls.Load())
 	}
@@ -2175,19 +2170,19 @@ func TestCodeSignedToolContinuation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_continuations SET root_id=$2 WHERE id=$1`, message.ToolCalls[0].ID, foreign.Binding.RootID); err != nil {
+	if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_continuations SET root_id=$2 WHERE root_id=$1`, root, foreign.Binding.RootID); err != nil {
 		t.Fatal(err)
 	}
 	status, raw = restarted.do(consumer, "POST", path, continuation, map[string]string{"X-Opencode-Session-Id": "foreign-bound-root"})
 	if status != http.StatusUnprocessableEntity || !strings.Contains(string(raw), "code_continuation_unavailable") {
 		t.Fatalf("transplanted state = %s", describe(status, raw))
 	}
-	if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_continuations SET root_id=$2 WHERE id=$1`, message.ToolCalls[0].ID, root); err != nil {
+	if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_continuations SET root_id=$2 WHERE root_id=$1`, foreign.Binding.RootID, root); err != nil {
 		t.Fatal(err)
 	}
 	restarted.want(owner, "POST", "/api/v1/code/bindings/"+root+"/retire", nil, idempotent(), http.StatusOK)
 	var remaining int
-	if err := s.pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.secrets WHERE id=$1`, message.ToolCalls[0].ID).Scan(&remaining); err != nil || remaining != 0 {
+	if err := s.pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.secrets WHERE id=$1 OR id=$2`, message.ToolCalls[0].ID, message.ToolCalls[1].ID).Scan(&remaining); err != nil || remaining != 0 {
 		t.Fatalf("retired state count %d, %v", remaining, err)
 	}
 	status, raw = restarted.do(consumer, "POST", path, continuation, headers)
