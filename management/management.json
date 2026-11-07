@@ -17290,6 +17290,16 @@
             "type": "boolean",
             "description": "Separately authorizes translating Messages metadata.user_id to a stable SHA-256 Responses safety_identifier. Disabled by default. Only the documented user identifier is accepted, and other metadata refuses. Review provider identity and account terms before enabling."
           },
+          "messages_to_grok": {
+            "type": "boolean",
+            "default": false,
+            "description": "Allow Messages text and function tools through Grok Build subscription accounts after publication. Disabled by default. Existing revisions keep their published policy."
+          },
+          "messages_grok_safety_identifier": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly map Messages metadata.user_id to a SHA-256 safety_identifier for Grok. Independently published and disabled by default. Public API documentation supports this mapping. Subscription proxy acceptance remains unverified. Unsupported metadata is refused."
+          },
           "messages_to_antigravity": {
             "type": "boolean",
             "default": false,
@@ -17473,6 +17483,16 @@
           "messages_codex_safety_identifier": {
             "type": "boolean",
             "description": "Separately authorizes translating Messages metadata.user_id to a stable SHA-256 Responses safety_identifier. Disabled by default. Only the documented user identifier is accepted, and other metadata refuses. Review provider identity and account terms before enabling."
+          },
+          "messages_to_grok": {
+            "type": "boolean",
+            "default": false,
+            "description": "Allow Messages text and function tools through Grok Build subscription accounts after publication. Disabled by default. Existing revisions keep their published policy."
+          },
+          "messages_grok_safety_identifier": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly map Messages metadata.user_id to a SHA-256 safety_identifier for Grok. Independently published and disabled by default. Public API documentation supports this mapping. Subscription proxy acceptance remains unverified. Unsupported metadata is refused."
           },
           "messages_to_antigravity": {
             "type": "boolean",
@@ -32013,6 +32033,16 @@
           "messages_codex_safety_identifier": {
             "type": "boolean",
             "description": "Separately authorizes translating Messages metadata.user_id to a stable SHA-256 Responses safety_identifier. Disabled by default. Only the documented user identifier is accepted, and other metadata refuses. Review provider identity and account terms before enabling."
+          },
+          "messages_to_grok": {
+            "type": "boolean",
+            "default": false,
+            "description": "Allow Messages text and function tools through Grok Build subscription accounts after publication. Disabled by default. Existing revisions keep their published policy."
+          },
+          "messages_grok_safety_identifier": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly map Messages metadata.user_id to a SHA-256 safety_identifier for Grok. Independently published and disabled by default. Public API documentation supports this mapping. Subscription proxy acceptance remains unverified. Unsupported metadata is refused."
           },
           "messages_to_antigravity": {
             "type": "boolean",

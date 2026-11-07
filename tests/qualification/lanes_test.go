@@ -224,6 +224,7 @@ func lanes() []lane {
 	codexSeed := laneSeed{adapter: "codex", profile: codexauth.ProfileID, manifest: codexauth.Manifest, token: token, principal: identity.Principal(), facts: identity.Facts(), expiresAt: &expires}
 	return []lane{
 		{client: laneClient{name: "codex", binary: "codex", userAgent: "codex_cli_rs (qualification fixture)"}, seed: laneSeed{adapter: "grok-build", profile: grokauth.ProfileID, manifest: grokauth.Manifest, token: grokToken, principal: grokauth.Principal("fixture-subject"), facts: map[string]string{"subject": "fixture-subject"}, expiresAt: &expires}, protocol: "responses", toolRoundTrip: true},
+		{client: laneClient{name: "claude-code", binary: "claude", userAgent: "claude-cli (qualification fixture)"}, seed: laneSeed{adapter: "grok-build", profile: grokauth.ProfileID, manifest: grokauth.Manifest, token: grokToken, principal: grokauth.Principal("fixture-subject"), facts: map[string]string{"subject": "fixture-subject"}, expiresAt: &expires}, protocol: "messages", toolRoundTrip: true},
 		{
 			client:   laneClient{name: "codex", binary: "codex", userAgent: "codex_cli_rs (qualification fixture)"},
 			seed:     codexSeed,
@@ -696,7 +697,7 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 						return []string{"gemini-fixture"}
 					}
 					return []string{vendorModel}
-				}(), "enabled": true, "messages_to_codex": spec.toolRoundTrip && spec.seed.adapter == "codex", "messages_codex_safety_identifier": spec.toolRoundTrip && spec.seed.adapter == "codex", "chat_to_codex": spec.toolRoundTrip && spec.seed.adapter == "codex", "responses_to_grok": spec.seed.adapter == "grok-build", "grok_cli_identity": spec.seed.adapter == "grok-build", "chat_to_antigravity": spec.signedContinuation && spec.protocol == "chat", "messages_to_antigravity": spec.signedContinuation && spec.protocol == "messages", "messages_antigravity_safety_identifier": spec.signedContinuation && spec.protocol == "messages", "model_rewriting": spec.signedContinuation, "aliases": func() map[string]string {
+				}(), "enabled": true, "messages_to_codex": spec.toolRoundTrip && spec.seed.adapter == "codex", "messages_codex_safety_identifier": spec.toolRoundTrip && spec.seed.adapter == "codex", "chat_to_codex": spec.toolRoundTrip && spec.seed.adapter == "codex", "responses_to_grok": spec.seed.adapter == "grok-build" && spec.protocol == "responses", "messages_to_grok": spec.seed.adapter == "grok-build" && spec.protocol == "messages", "messages_grok_safety_identifier": spec.seed.adapter == "grok-build" && spec.protocol == "messages", "grok_cli_identity": spec.seed.adapter == "grok-build", "chat_to_antigravity": spec.signedContinuation && spec.protocol == "chat", "messages_to_antigravity": spec.signedContinuation && spec.protocol == "messages", "messages_antigravity_safety_identifier": spec.signedContinuation && spec.protocol == "messages", "model_rewriting": spec.signedContinuation, "aliases": func() map[string]string {
 					if spec.signedContinuation {
 						return map[string]string{vendorModel: "gemini-fixture"}
 					}
@@ -760,9 +761,13 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 
 func TestLaneReportRetainsEveryAdapterScope(t *testing.T) {
 	specs := lanes()
-	first := specs[1]
-	second := first
-	second.seed = specs[0].seed
+	codex := slices.IndexFunc(specs, func(spec lane) bool { return spec.seed.adapter == "codex" })
+	grok := slices.IndexFunc(specs, func(spec lane) bool { return spec.seed.adapter == "grok-build" })
+	if codex < 0 || grok < 0 {
+		t.Fatal("report requires two distinct adapter fixtures")
+	}
+	first := specs[codex]
+	second := lane{client: first.client, seed: specs[grok].seed, protocol: first.protocol}
 	var output bytes.Buffer
 	report := newLaneReport(&reportWriter{out: &output}, []lane{first, second})
 	report.complete(t, first.record("pass", "fixture only", "test-version", true))

@@ -1170,6 +1170,31 @@ may fail on the next turn because opaque reasoning input is refused. OLP does no
 yet establish ownership of that ciphertext, so complete current-model reasoning
 workflows remain unqualified.
 
+Enable `messages_to_grok` separately and publish the route to offer Claude Code
+supported Messages text and function tools over the same Responses upstream.
+This policy does not require or enable `responses_to_grok`. Generate Claude Code
+setup from the published route, set `OLP_API_KEY` and apply the generated shell
+or PowerShell configuration. Main, planning and background models must all be
+available through compatible account offers. Setup disables thinking, prompt
+caching, tool search and experimental beta features. Unary and SSE replies
+preserve text, function schemas, call identifiers, arguments and tool results.
+Unsupported thinking, media, cache controls, beta headers and foreign state are
+refused before provider dispatch. The Codex translated output minimum does not
+apply to Grok.
+
+Current Claude Code sends `metadata.user_id`. To use it, independently enable
+and publish `messages_grok_safety_identifier`. This default-off policy hashes
+that value with SHA-256 and sends only the hash as `safety_identifier`. Without
+the opt-in, metadata is refused. Other metadata is refused even with the policy
+enabled. The Codex identity mapping policy does not enable this Grok mapping.
+The [xAI API security FAQ](https://docs.x.ai/developers/faq/security), consulted
+November 7, 2026, documents this field and recommends hashing internal user
+identifiers on the public API. That evidence does not establish support on the
+separate subscription proxy. The Claude/Grok fixture uses a controlled peer,
+requires an actual tool execution and submitted tool result, and reports its
+full client, adapter, profile, model, protocol and transport scope. Live
+subscription acceptance remains unverified.
+
 The separate `grok_cli_identity` policy is also disabled by default and takes
 effect only after publication. Without it, OLP identifies itself truthfully.
 Protocol translation does not enable Grok client identity compatibility. Editing

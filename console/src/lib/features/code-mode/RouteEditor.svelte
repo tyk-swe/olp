@@ -175,6 +175,10 @@
   let messagesCodexSafetyIdentifier = $state(
     initial?.messages_codex_safety_identifier ?? false
   );
+  let messagesToGrok = $state(initial?.messages_to_grok ?? false);
+  let messagesGrokSafetyIdentifier = $state(
+    initial?.messages_grok_safety_identifier ?? false
+  );
   let responsesToGrok = $state(initial?.responses_to_grok ?? false);
   let grokCLIIdentity = $state(initial?.grok_cli_identity ?? false);
   let codexCLIIdentity = $state(initial?.codex_cli_identity ?? false);
@@ -288,6 +292,8 @@
         messages_antigravity_safety_identifier:
           messagesAntigravitySafetyIdentifier,
         messages_codex_safety_identifier: messagesCodexSafetyIdentifier,
+        messages_to_grok: messagesToGrok,
+        messages_grok_safety_identifier: messagesGrokSafetyIdentifier,
         responses_to_grok: responsesToGrok,
         grok_cli_identity: grokCLIIdentity,
         codex_cli_identity: codexCLIIdentity,
@@ -571,6 +577,32 @@
     Disabled by default. Publication enables supported Responses text and
     function tools over HTTP/SSE. Translation preserves client identity.
     Existing revisions retain their published behavior until republished.
+  </p>
+  <label class="choice">
+    <input
+      id="code-messages-to-grok"
+      type="checkbox"
+      bind:checked={messagesToGrok}
+    />
+    Translate Messages to Grok Build
+  </label>
+  <p>
+    Disabled by default. Publication enables supported text and function tools
+    for Claude Code over HTTP/SSE. Unsupported thinking, media, beta features
+    and foreign state are refused.
+  </p>
+  <label class="choice">
+    <input
+      id="code-messages-grok-safety-identifier"
+      type="checkbox"
+      bind:checked={messagesGrokSafetyIdentifier}
+    />
+    Map Claude user identity for Grok safety reporting
+  </label>
+  <p>
+    Separately published and disabled by default. Hashes metadata.user_id as
+    safety_identifier. Other metadata is refused. Public API documentation
+    supports this mapping. Subscription proxy acceptance remains unverified.
   </p>
   <label class="choice">
     <input
