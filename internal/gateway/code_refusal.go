@@ -63,7 +63,7 @@ func codeRefusalMessage(code string) string {
 	case "code_response_account_conflict":
 		return "Continue on the account that produced the response, or start a new conversation with full context and no response reference"
 	case "code_translation_unsupported_semantics":
-		return "This route supports text, tools and explicit reasoning effort. Use a native Messages account for required semantics this route cannot represent."
+		return "This route cannot represent required request semantics. Use a native account for this protocol or remove unsupported fields"
 	}
 	return code
 }

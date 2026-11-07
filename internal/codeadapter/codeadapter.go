@@ -75,8 +75,18 @@ const (
 	TargetGrok        Target = "grok"
 )
 
-func (t Target) Enabled(route codemode.Route) bool {
-	return t == "" || t == TargetAntigravity && route.ChatToAntigravity || t == TargetGrok && route.ResponsesToGrok
+func (e Endpoint) Enabled(route codemode.Route) bool {
+	if e.Target == TargetAntigravity {
+		switch e.Protocol {
+		case codemode.ProtocolChat:
+			return route.ChatToAntigravity
+		case codemode.ProtocolResponses:
+			return route.ResponsesToAntigravity
+		default:
+			return false
+		}
+	}
+	return e.Target == "" || e.Target == TargetGrok && route.ResponsesToGrok
 }
 
 type Endpoint struct {
@@ -163,8 +173,11 @@ var vendors = []Vendor{
 	{
 		Adapter: codemode.AdapterAntigravity, Name: "Antigravity", profiles: []string{antigravityauth.ProfileID}, manifest: antigravityauth.Manifest,
 		credential: antigravityCredential, modelProtocol: antigravityModelProtocol,
-		endpoints: []Endpoint{{ClientPath: "v1/chat/completions", UpstreamPath: "v1internal:generateContent", Protocol: codemode.ProtocolChat, Operation: "chat/completions", Identity: IdentityClient, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP, Target: TargetAntigravity}},
-		clients:   []Client{{ID: ClientOpenCode, Provider: "olp-antigravity", URLSuffix: "/v1", Protocol: codemode.ProtocolChat}},
+		endpoints: []Endpoint{
+			{ClientPath: "v1/chat/completions", UpstreamPath: "v1internal:generateContent", Protocol: codemode.ProtocolChat, Operation: "chat/completions", Identity: IdentityClient, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP, Target: TargetAntigravity},
+			{ClientPath: "responses", UpstreamPath: "v1internal:generateContent", Protocol: codemode.ProtocolResponses, Operation: "responses", Identity: IdentityCodex, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP, Target: TargetAntigravity},
+		},
+		clients: []Client{{ID: ClientOpenCode, Provider: "olp-antigravity", URLSuffix: "/v1", Protocol: codemode.ProtocolChat}, {ID: ClientCodex, Protocol: codemode.ProtocolResponses}},
 		enrollmentNotes: []string{
 			"Supply an authorized Google desktop OAuth client ID as the provider option. Complete masked enrollment with callback_url and client_secret JSON. Client secrets and refresh tokens remain encrypted.",
 			"Enrollment verifies the Google subject and an existing cloudcode project. It does not onboard accounts or establish live inference, entitlement, allowance or hard token bounds.",
@@ -263,7 +276,7 @@ func validate(registry []Vendor) error {
 }
 
 func (e Endpoint) valid() bool {
-	if e.Target != "" && !(e.Target == TargetAntigravity && e.Protocol == codemode.ProtocolChat && e.transports == HTTP || e.Target == TargetGrok && e.Protocol == codemode.ProtocolResponses && e.transports == HTTP) {
+	if e.Target != "" && !(e.Target == TargetAntigravity && (e.Protocol == codemode.ProtocolChat || e.Protocol == codemode.ProtocolResponses) && e.transports == HTTP || e.Target == TargetGrok && e.Protocol == codemode.ProtocolResponses && e.transports == HTTP) {
 		return false
 	}
 	if e.ClientPath == "" || e.UpstreamPath == "" || e.CredentialHeader == "" || e.transports == 0 || e.transports & ^(HTTP|WebSocket) != 0 {
@@ -432,6 +445,9 @@ func (v Vendor) ServesModel(p codemode.Protocol, model string) bool {
 	if !v.Serves(p) {
 		return false
 	}
+	if v.Adapter == codemode.AdapterAntigravity {
+		return antigravityModelProtocol(model) != ""
+	}
 	if v.modelProtocol != nil {
 		return v.modelProtocol(model) == p
 	}
@@ -480,7 +496,7 @@ func RouteEndpoint(route codemode.Route, adapter Vendor, path string) (Endpoint,
 		return adapter.Endpoint("responses")
 	}
 	if endpoint, ok := adapter.Endpoint(path); ok {
-		return endpoint, endpoint.Target.Enabled(route)
+		return endpoint, endpoint.Enabled(route)
 	}
 	if adapter.Adapter == codemode.AdapterGrokBuild && route.MessagesToGrok && path == "v1/messages" {
 		return adapter.Endpoint("responses")
@@ -496,7 +512,7 @@ func RouteClientProtocol(route codemode.Route, adapter Vendor, client, model str
 		return codemode.ProtocolChat, adapter.ServesModel(codemode.ProtocolResponses, model)
 	}
 	if protocol, ok := adapter.Protocol(client, model); ok {
-		return protocol, slices.ContainsFunc(adapter.endpoints, func(endpoint Endpoint) bool { return endpoint.Protocol == protocol && endpoint.Target.Enabled(route) })
+		return protocol, slices.ContainsFunc(adapter.endpoints, func(endpoint Endpoint) bool { return endpoint.Protocol == protocol && endpoint.Enabled(route) })
 	}
 	if adapter.Adapter == codemode.AdapterGrokBuild && route.MessagesToGrok && client == ClientClaudeCode {
 		endpoint, ok := RouteEndpoint(route, adapter, "v1/messages")

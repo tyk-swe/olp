@@ -19,14 +19,41 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
+type codeAntigravityPolicy struct {
+	responsesCompatibility bool
+}
+
+func codeAntigravityProtocol(r *http.Request) wire.Format {
+	if strings.HasSuffix(r.URL.Path, "/responses") {
+		return wire.Responses
+	}
+	if strings.HasSuffix(r.URL.Path, "/messages") {
+		return wire.Anthropic
+	}
+	return wire.Chat
+}
+
 func codeTranslateAntigravity(body []byte, r *http.Request, model, project string) (codePayload, error) {
+	return codeTranslateAntigravityProtocol(body, r, model, project, codeAntigravityProtocol(r), codeAntigravityPolicy{})
+}
+
+func codeTranslateAntigravityProtocol(body []byte, r *http.Request, model, project string, family wire.Format, policy codeAntigravityPolicy) (codePayload, error) {
 	refused := codemode.Refuse(422, "code_translation_unsupported_semantics")
 	if r.URL.RawQuery != "" || len(r.Trailer) != 0 || project == "" {
 		return codePayload{}, refused
 	}
-	request, err := protocols.ParseForModel(wire.Chat, body, model)
+	parsed, err := protocols.ParseForModel(family, body, model)
 	if err != nil {
 		return codePayload{}, refused
+	}
+	request, preparationErr := func() (*wire.Request, error) {
+		if family == wire.Responses {
+			return codePrepareAntigravityResponses(parsed, r, policy.responsesCompatibility)
+		}
+		return parsed, nil
+	}()
+	if preparationErr != nil {
+		return codePayload{}, preparationErr
 	}
 	root := request.OIF().Document().Root()
 	messages, _ := root.Lookup("messages")
@@ -69,7 +96,8 @@ func (a *codeAttempt) antigravityResponse(ctx context.Context, w http.ResponseWr
 		codeWriteError(w, r, codemode.Refuse(response.StatusCode, "code_upstream_rejected"))
 		return
 	}
-	writer := &streamWriter{w: w, family: wire.Chat}
+	family := codeAntigravityProtocol(r)
+	writer := &streamWriter{w: w, family: family}
 	transform := func() func([]byte) ([]byte, error) {
 		if !payload.signedContinuation {
 			return antigravityResult
@@ -83,14 +111,14 @@ func (a *codeAttempt) antigravityResponse(ctx context.Context, w http.ResponseWr
 			}
 			reader := antigravityStreamWithResult(response.Body, model, transform)
 			defer reader.Close()
-			return protocols.StreamWithEvents(wire.Gemini, wire.Chat, reader, codewire.MaxBody, model, payload.includeUsage, writer.emit, nil, 1)
+			return protocols.StreamWithEvents(wire.Gemini, family, reader, codewire.MaxBody, model, payload.includeUsage, writer.emit, nil, 1)
 		}
 		body, err := io.ReadAll(io.LimitReader(response.Body, codewire.MaxBody+1))
 		if err != nil || len(body) > codewire.MaxBody {
 			return nil, codemode.Refuse(502, "code_upstream_invalid")
 		}
 		unwrapped, stateErr := transform(body)
-		completion, err := protocols.Decode(wire.Gemini, wire.Chat, unwrapped, model, "")
+		completion, err := protocols.Decode(wire.Gemini, family, unwrapped, model, "")
 		if err != nil {
 			return nil, err
 		}

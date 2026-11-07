@@ -45,31 +45,33 @@ func (s *Server) codeRoutes(r *http.Request, p access.Principal) (access.Reply, 
 }
 
 type CodeRouteInput struct {
-	ResponsesToGrok               bool                           `json:"responses_to_grok,omitempty"`
-	ChatToGrok                    bool                           `json:"chat_to_grok,omitempty"`
-	MessagesToGrok                bool                           `json:"messages_to_grok,omitempty"`
-	MessagesGrokSafetyIdentifier  bool                           `json:"messages_grok_safety_identifier,omitempty"`
-	GrokCLIIdentity               bool                           `json:"grok_cli_identity,omitempty"`
-	CodexCLIIdentity              bool                           `json:"codex_cli_identity"`
-	PaidFallbackTargets           map[string]codemode.PaidTarget `json:"paid_fallback_targets"`
-	ChatToAntigravity             bool                           `json:"chat_to_antigravity"`
-	PaidParticipation             bool                           `json:"paid_participation"`
-	PaidTargets                   map[string]codemode.PaidTarget `json:"paid_targets"`
-	ModelPools                    map[string][]string            `json:"model_pools"`
-	InitialRecoveryAttempts       int                            `json:"initial_recovery_attempts"`
-	ModelRewriting                bool                           `json:"model_rewriting"`
-	Aliases                       map[string]string              `json:"aliases"`
-	ChatToCodex                   bool                           `json:"chat_to_codex,omitempty"`
-	MessagesToCodex               bool                           `json:"messages_to_codex"`
-	MessagesCodexSafetyIdentifier bool                           `json:"messages_codex_safety_identifier,omitempty"`
-	AllowanceOrdering             bool                           `json:"allowance_ordering,omitempty"`
-	Tools                         *codemode.ResearchTools        `json:"tools"`
-	MaxBodyBytes                  *int64                         `json:"max_body_bytes,omitempty"`
-	ProjectID                     string                         `json:"project_id"`
-	Slug                          string                         `json:"slug"`
-	PoolID                        string                         `json:"pool_id"`
-	Models                        []string                       `json:"models"`
-	Enabled                       bool                           `json:"enabled"`
+	ResponsesToGrok                   bool                           `json:"responses_to_grok,omitempty"`
+	ChatToGrok                        bool                           `json:"chat_to_grok,omitempty"`
+	MessagesToGrok                    bool                           `json:"messages_to_grok,omitempty"`
+	MessagesGrokSafetyIdentifier      bool                           `json:"messages_grok_safety_identifier,omitempty"`
+	GrokCLIIdentity                   bool                           `json:"grok_cli_identity,omitempty"`
+	CodexCLIIdentity                  bool                           `json:"codex_cli_identity"`
+	PaidFallbackTargets               map[string]codemode.PaidTarget `json:"paid_fallback_targets"`
+	ChatToAntigravity                 bool                           `json:"chat_to_antigravity"`
+	ResponsesToAntigravity            bool                           `json:"responses_to_antigravity,omitempty"`
+	ResponsesAntigravityCompatibility bool                           `json:"responses_antigravity_compatibility,omitempty"`
+	PaidParticipation                 bool                           `json:"paid_participation"`
+	PaidTargets                       map[string]codemode.PaidTarget `json:"paid_targets"`
+	ModelPools                        map[string][]string            `json:"model_pools"`
+	InitialRecoveryAttempts           int                            `json:"initial_recovery_attempts"`
+	ModelRewriting                    bool                           `json:"model_rewriting"`
+	Aliases                           map[string]string              `json:"aliases"`
+	ChatToCodex                       bool                           `json:"chat_to_codex,omitempty"`
+	MessagesToCodex                   bool                           `json:"messages_to_codex"`
+	MessagesCodexSafetyIdentifier     bool                           `json:"messages_codex_safety_identifier,omitempty"`
+	AllowanceOrdering                 bool                           `json:"allowance_ordering,omitempty"`
+	Tools                             *codemode.ResearchTools        `json:"tools"`
+	MaxBodyBytes                      *int64                         `json:"max_body_bytes,omitempty"`
+	ProjectID                         string                         `json:"project_id"`
+	Slug                              string                         `json:"slug"`
+	PoolID                            string                         `json:"pool_id"`
+	Models                            []string                       `json:"models"`
+	Enabled                           bool                           `json:"enabled"`
 }
 
 func (s *Server) writeCodeRoute(r *http.Request, _ access.Principal) (access.Reply, error) {
@@ -210,7 +212,7 @@ func SaveCodeRoute(ctx context.Context, tx pgx.Tx, p access.Principal, id, etag 
 	if err := p.Project(&in.ProjectID, access.Change); err != nil {
 		return nil, err
 	}
-	out := codemode.Route{ChatToAntigravity: in.ChatToAntigravity, AllowanceOrdering: in.AllowanceOrdering, PaidParticipation: in.PaidParticipation, PaidTargets: in.PaidTargets, PaidFallbackTargets: in.PaidFallbackTargets, ModelPools: in.ModelPools, InitialRecoveryAttempts: in.InitialRecoveryAttempts, Aliases: in.Aliases, ModelRewriting: in.ModelRewriting, MessagesToGrok: in.MessagesToGrok, MessagesGrokSafetyIdentifier: in.MessagesGrokSafetyIdentifier, ResponsesToGrok: in.ResponsesToGrok, ChatToGrok: in.ChatToGrok, GrokCLIIdentity: in.GrokCLIIdentity, CodexCLIIdentity: in.CodexCLIIdentity, ChatToCodex: in.ChatToCodex, MessagesToCodex: in.MessagesToCodex, MessagesCodexSafetyIdentifier: in.MessagesCodexSafetyIdentifier, Tools: in.Tools, MaxBodyBytes: in.MaxBodyBytes, ID: id, ProjectID: in.ProjectID, Slug: in.Slug, PoolID: in.PoolID, Models: in.Models, Enabled: in.Enabled, ETag: etag}
+	out := codemode.Route{ResponsesToAntigravity: in.ResponsesToAntigravity, ResponsesAntigravityCompatibility: in.ResponsesAntigravityCompatibility, ChatToAntigravity: in.ChatToAntigravity, AllowanceOrdering: in.AllowanceOrdering, PaidParticipation: in.PaidParticipation, PaidTargets: in.PaidTargets, PaidFallbackTargets: in.PaidFallbackTargets, ModelPools: in.ModelPools, InitialRecoveryAttempts: in.InitialRecoveryAttempts, Aliases: in.Aliases, ModelRewriting: in.ModelRewriting, MessagesToGrok: in.MessagesToGrok, MessagesGrokSafetyIdentifier: in.MessagesGrokSafetyIdentifier, ResponsesToGrok: in.ResponsesToGrok, ChatToGrok: in.ChatToGrok, GrokCLIIdentity: in.GrokCLIIdentity, CodexCLIIdentity: in.CodexCLIIdentity, ChatToCodex: in.ChatToCodex, MessagesToCodex: in.MessagesToCodex, MessagesCodexSafetyIdentifier: in.MessagesCodexSafetyIdentifier, Tools: in.Tools, MaxBodyBytes: in.MaxBodyBytes, ID: id, ProjectID: in.ProjectID, Slug: in.Slug, PoolID: in.PoolID, Models: in.Models, Enabled: in.Enabled, ETag: etag}
 	adapters := []codemode.Adapter{}
 	var matches bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.code_pools WHERE id=$1 AND project_id=$2)`, in.PoolID, in.ProjectID).Scan(&matches); err != nil {
@@ -368,7 +370,7 @@ func SaveCodePublication(ctx context.Context, tx pgx.Tx, p access.Principal, id 
 	}
 
 	route.TranslatedCodexOutputMinimum = true
-	route.AntigravitySignedContinuation = route.ChatToAntigravity
+	route.AntigravitySignedContinuation = route.ChatToAntigravity || route.ResponsesToAntigravity
 	route.RevisionID = access.NewID()
 	route.ETag = access.NewID()
 	now := time.Now().UTC().Truncate(time.Microsecond)
@@ -472,7 +474,7 @@ func (in CodeRouteInput) Validated() (CodeRouteInput, error) {
 	if fallbackError != nil {
 		return CodeRouteInput{}, fallbackError
 	}
-	canonical := CodeRouteInput{ProjectID: ids[0], Slug: in.Slug, PoolID: ids[1], Models: in.Models, Enabled: in.Enabled, ChatToAntigravity: in.ChatToAntigravity, AllowanceOrdering: in.AllowanceOrdering, PaidParticipation: in.PaidParticipation, PaidTargets: paidTargets, PaidFallbackTargets: fallbackTargets, ModelPools: in.ModelPools, InitialRecoveryAttempts: in.InitialRecoveryAttempts, ModelRewriting: in.ModelRewriting, Aliases: in.Aliases, MessagesToGrok: in.MessagesToGrok, MessagesGrokSafetyIdentifier: in.MessagesGrokSafetyIdentifier, ResponsesToGrok: in.ResponsesToGrok, ChatToGrok: in.ChatToGrok, GrokCLIIdentity: in.GrokCLIIdentity, CodexCLIIdentity: in.CodexCLIIdentity, ChatToCodex: in.ChatToCodex, MessagesToCodex: in.MessagesToCodex, MessagesCodexSafetyIdentifier: in.MessagesCodexSafetyIdentifier, Tools: tools, MaxBodyBytes: in.MaxBodyBytes}
+	canonical := CodeRouteInput{ProjectID: ids[0], Slug: in.Slug, PoolID: ids[1], Models: in.Models, Enabled: in.Enabled, ResponsesToAntigravity: in.ResponsesToAntigravity, ResponsesAntigravityCompatibility: in.ResponsesAntigravityCompatibility, ChatToAntigravity: in.ChatToAntigravity, AllowanceOrdering: in.AllowanceOrdering, PaidParticipation: in.PaidParticipation, PaidTargets: paidTargets, PaidFallbackTargets: fallbackTargets, ModelPools: in.ModelPools, InitialRecoveryAttempts: in.InitialRecoveryAttempts, ModelRewriting: in.ModelRewriting, Aliases: in.Aliases, MessagesToGrok: in.MessagesToGrok, MessagesGrokSafetyIdentifier: in.MessagesGrokSafetyIdentifier, ResponsesToGrok: in.ResponsesToGrok, ChatToGrok: in.ChatToGrok, GrokCLIIdentity: in.GrokCLIIdentity, CodexCLIIdentity: in.CodexCLIIdentity, ChatToCodex: in.ChatToCodex, MessagesToCodex: in.MessagesToCodex, MessagesCodexSafetyIdentifier: in.MessagesCodexSafetyIdentifier, Tools: tools, MaxBodyBytes: in.MaxBodyBytes}
 	return canonical, canonical.validate()
 }
 

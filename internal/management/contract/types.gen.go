@@ -9418,6 +9418,9 @@ type CodeRoute struct {
 	// ChatToCodex Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified.
 	ChatToCodex *bool `json:"chat_to_codex,omitempty"`
 
+	// ChatToGrok Allow Chat text and function tools through Grok Build after publication. Disabled by default. Client identity requires its separate published opt-in.
+	ChatToGrok *bool `json:"chat_to_grok,omitempty"`
+
 	// CodexCliIdentity Explicit route-administrator opt-in, disabled by default and independent of protocol translation. On Codex subscription HTTP and WebSocket requests only, fills Originator with codex_cli_rs when every supplied Originator value is absent or blank. Preserves explicit Originator values, User-Agent, all prompts, tools, reasoning, state and other headers. Does not enable translation or prompt changes. Publication freezes the policy. Using subscription accounts through this compatibility identity may violate provider terms and risk account suspension. Review this behavior and risk before enabling and publishing.
 	CodexCliIdentity *bool              `json:"codex_cli_identity,omitempty"`
 	Enabled          bool               `json:"enabled"`
@@ -9464,9 +9467,14 @@ type CodeRoute struct {
 	ProjectId   openapi_types.UUID           `json:"project_id"`
 	PublishedAt nullable.Nullable[time.Time] `json:"published_at"`
 
+	// ResponsesAntigravityCompatibility Separate published opt-in to ignore Codex prompt-cache hints and client metadata upstream and treat effort none and requested reasoning output as best effort. Provider reasoning may occur and usage or cache behavior may differ. Opaque reasoning continuation and unrepresentable reasoning output remain refused.
+	ResponsesAntigravityCompatibility *bool `json:"responses_antigravity_compatibility,omitempty"`
+
+	// ResponsesToAntigravity Explicitly enable Responses text and signed function tools through Antigravity over HTTP or SSE after publication. Unsupported continuation state is refused. Existing published revisions retain their behavior. Provider terms and account suspension risks apply. Live subscription acceptance remains unverified.
+	ResponsesToAntigravity *bool `json:"responses_to_antigravity,omitempty"`
+
 	// ResponsesToGrok Allow Responses text and function tools through Grok Build subscription accounts after publication. Disabled by default. Translation preserves client identity. Grok client identity requires its separate published opt-in.
 	ResponsesToGrok *bool  `json:"responses_to_grok,omitempty"`
-	ChatToGrok      *bool  `json:"chat_to_grok,omitempty"`
 	Revision        int32  `json:"revision"`
 	RevisionId      string `json:"revision_id"`
 	Slug            string `json:"slug"`
@@ -9497,6 +9505,9 @@ type CodeRouteWrite struct {
 
 	// ChatToCodex Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified.
 	ChatToCodex *bool `json:"chat_to_codex,omitempty"`
+
+	// ChatToGrok Allow Chat text and function tools through Grok Build after publication. Disabled by default. Client identity requires its separate published opt-in.
+	ChatToGrok *bool `json:"chat_to_grok,omitempty"`
 
 	// CodexCliIdentity Explicit route-administrator opt-in, disabled by default and independent of protocol translation. On Codex subscription HTTP and WebSocket requests only, fills Originator with codex_cli_rs when every supplied Originator value is absent or blank. Preserves explicit Originator values, User-Agent, all prompts, tools, reasoning, state and other headers. Does not enable translation or prompt changes. Publication freezes the policy. Using subscription accounts through this compatibility identity may violate provider terms and risk account suspension. Review this behavior and risk before enabling and publishing.
 	CodexCliIdentity *bool `json:"codex_cli_identity,omitempty"`
@@ -9541,9 +9552,14 @@ type CodeRouteWrite struct {
 	PoolId      openapi_types.UUID         `json:"pool_id"`
 	ProjectId   openapi_types.UUID         `json:"project_id"`
 
+	// ResponsesAntigravityCompatibility Separate published opt-in to ignore Codex prompt-cache hints and client metadata upstream and treat effort none and requested reasoning output as best effort. Provider reasoning may occur and usage or cache behavior may differ. Opaque reasoning continuation and unrepresentable reasoning output remain refused.
+	ResponsesAntigravityCompatibility *bool `json:"responses_antigravity_compatibility,omitempty"`
+
+	// ResponsesToAntigravity Explicitly enable Responses text and signed function tools through Antigravity over HTTP or SSE after publication. Unsupported continuation state is refused. Existing published revisions retain their behavior. Provider terms and account suspension risks apply. Live subscription acceptance remains unverified.
+	ResponsesToAntigravity *bool `json:"responses_to_antigravity,omitempty"`
+
 	// ResponsesToGrok Allow Responses text and function tools through Grok Build subscription accounts after publication. Disabled by default. Translation preserves client identity. Grok client identity requires its separate published opt-in.
 	ResponsesToGrok *bool  `json:"responses_to_grok,omitempty"`
-	ChatToGrok      *bool  `json:"chat_to_grok,omitempty"`
 	Slug            string `json:"slug"`
 
 	// Tools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
@@ -9757,6 +9773,9 @@ type ConfigurationCodeRoutePolicy struct {
 	// ChatToCodex Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified.
 	ChatToCodex *bool `json:"chat_to_codex,omitempty"`
 
+	// ChatToGrok Allow Chat text and function tools through Grok Build after publication. Disabled by default. Client identity requires its separate published opt-in.
+	ChatToGrok *bool `json:"chat_to_grok,omitempty"`
+
 	// CodexCliIdentity Explicit route-administrator opt-in, disabled by default and independent of protocol translation. On Codex subscription HTTP and WebSocket requests only, fills Originator with codex_cli_rs when every supplied Originator value is absent or blank. Preserves explicit Originator values, User-Agent, all prompts, tools, reasoning, state and other headers. Does not enable translation or prompt changes. Publication freezes the policy. Using subscription accounts through this compatibility identity may violate provider terms and risk account suspension. Review this behavior and risk before enabling and publishing.
 	CodexCliIdentity *bool `json:"codex_cli_identity,omitempty"`
 	Enabled          bool  `json:"enabled"`
@@ -9795,9 +9814,14 @@ type ConfigurationCodeRoutePolicy struct {
 	PaidTargets         *map[string]ConfigurationCodePaidTarget `json:"paid_targets,omitempty"`
 	Pool                openapi_types.UUID                      `json:"pool"`
 
+	// ResponsesAntigravityCompatibility Separate published opt-in to ignore Codex prompt-cache hints and client metadata upstream and treat effort none and requested reasoning output as best effort. Provider reasoning may occur and usage or cache behavior may differ. Opaque reasoning continuation and unrepresentable reasoning output remain refused.
+	ResponsesAntigravityCompatibility *bool `json:"responses_antigravity_compatibility,omitempty"`
+
+	// ResponsesToAntigravity Explicitly enable Responses text and signed function tools through Antigravity over HTTP or SSE after publication. Unsupported continuation state is refused. Existing published revisions retain their behavior. Provider terms and account suspension risks apply. Live subscription acceptance remains unverified.
+	ResponsesToAntigravity *bool `json:"responses_to_antigravity,omitempty"`
+
 	// ResponsesToGrok Allow Responses text and function tools through Grok Build subscription accounts after publication. Disabled by default. Translation preserves client identity. Grok client identity requires its separate published opt-in.
 	ResponsesToGrok *bool `json:"responses_to_grok,omitempty"`
-	ChatToGrok      *bool `json:"chat_to_grok,omitempty"`
 
 	// Tools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
 	Tools nullable.Nullable[CodeResearchTools] `json:"tools,omitempty"`
