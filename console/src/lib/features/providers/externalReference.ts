@@ -16,7 +16,8 @@ function clean(value: string | undefined, max: number): boolean {
 
 function parseUrl(value: string): URL | null {
   try {
-    return new URL(value);
+    const url = new URL(value);
+    return url.href.toLowerCase() === value.toLowerCase() ? url : null;
   } catch {
     return null;
   }
@@ -30,9 +31,11 @@ function isAzureSecret(secretId: string): boolean {
   const url = parseUrl(secretId);
   if (!url || url.protocol !== 'https:' || url.port || !plainUrl(url))
     return false;
+  const authority = 'https://'.length;
+  const host = secretId.slice(authority, authority + url.hostname.length);
   const [kind, name, ...rest] = url.pathname.slice(1).split('/');
   return (
-    url.hostname.endsWith('.vault.azure.net') &&
+    host.endsWith('.vault.azure.net') &&
     kind === 'secrets' &&
     component.test(name ?? '') &&
     rest.length === 0

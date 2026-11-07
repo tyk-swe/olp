@@ -128,6 +128,12 @@ describe('provider editing', () => {
       store: 'azure',
       secret_id: 'https://vault.vault.azure.net/secrets/provider',
       version: '0123456789abcdef0123456789abcdef'
+    },
+    {
+      store: 'vault',
+      secret_id: 'HTTPS://Vault.example.test/v1/secret/data/service',
+      version: '1',
+      field: 'api_key'
     }
   ])('accepts a version-pinned $store reference', (reference) => {
     const draft = createProviderDraft(spec);
@@ -155,6 +161,23 @@ describe('provider editing', () => {
     [
       '{"store":"vault","secret_id":"https://vault.example.test/v1/secret/data/service","version":"1"}',
       'Vault KV v2 references require a version and field.'
+    ],
+    [
+      '{"store":"vault","secret_id":"https://@vault.example.test/v1/secret/data/service","version":"1","field":"api_key"}',
+      'Vault KV v2 references require a version and field.'
+    ],
+    [
+      JSON.stringify({
+        store: 'vault',
+        secret_id: String.raw`https:\\vault.example.test\v1\secret\data\service`,
+        version: '1',
+        field: 'api_key'
+      }),
+      'Vault KV v2 references require a version and field.'
+    ],
+    [
+      '{"store":"azure","secret_id":"https://VAULT.VAULT.AZURE.NET/secrets/name","version":"0123456789abcdef0123456789abcdef"}',
+      'Azure references require a versioned vault secret.'
     ],
     [
       '{"store":"aws","secret_id":"prod/provider","version":"latest","region":"us-east-1"}',
