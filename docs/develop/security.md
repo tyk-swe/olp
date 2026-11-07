@@ -263,8 +263,11 @@ user-agent family, never request bodies, credentials, or content. See
   delivered only to the operator-configured sink.
 - Provider authentication may reach cloud metadata endpoints to obtain workload
   identity for AWS, Azure and Google providers. Google metadata requests go to
-  `169.254.169.254`, and a `GCE_METADATA_HOST` override is used only when the
-  egress policy permits that host.
+  `169.254.169.254`. Inference honors a `GCE_METADATA_HOST` override only when
+  the egress policy permits that host, so a hostname such as
+  `metadata.google.internal` must be listed in
+  `OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS`. Billing imports reach only the fixed
+  address, so Google ADC fails there while the override names another host.
 - Bedrock clients authenticate to OLP with an API key, never with AWS
   signatures.
 
