@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -33,44 +34,95 @@ func codeTranslateAntigravity(body []byte, r *http.Request, model, project strin
 	return codeTranslateAntigravityProtocol(body, r, model, project, codeAntigravityProtocol(r))
 }
 
-func codeTranslateAntigravityProtocol(body []byte, r *http.Request, model, project string, family wire.Format) (codePayload, error) {
+func codeTranslateAntigravityProtocol(body []byte, r *http.Request, model, project string, family wire.Format, safetyMapping ...bool) (codePayload, error) {
 	refused := codemode.Refuse(422, "code_translation_unsupported_semantics")
-	if r.URL.RawQuery != "" || len(r.Trailer) != 0 || project == "" {
+	if family != wire.Anthropic && r.URL.RawQuery != "" || len(r.Trailer) != 0 || project == "" {
 		return codePayload{}, refused
 	}
 	request, err := protocols.ParseForModel(family, body, model)
 	if err != nil {
 		return codePayload{}, refused
 	}
-	root := request.OIF().Document().Root()
+	if family == wire.Anthropic {
+		if err := codeValidateAntigravityMessages(request, r); err != nil {
+			return codePayload{}, err
+		}
+	}
 	if family == wire.Responses {
 		if err := codeValidateAntigravityResponses(request, r); err != nil {
 			return codePayload{}, err
 		}
 	}
-	messages, _ := root.Lookup("messages")
-	for _, message := range messages.Elements() {
-		if !codeTextContent(message, "content") {
-			content, present := message.Lookup("content")
-			if !present || content.Kind() != oif.Null {
-				return codePayload{}, refused
+	if family == wire.Chat {
+		messages, _ := request.OIF().Document().Root().Lookup("messages")
+		for _, message := range messages.Elements() {
+			if !codeTextContent(message, "content") {
+				content, present := message.Lookup("content")
+				if !present || content.Kind() != oif.Null {
+					return codePayload{}, refused
+				}
 			}
 		}
+	}
+	identifier, identityErr := func() (string, error) {
+		if family != wire.Anthropic {
+			return "", nil
+		}
+		return codeAntigravityMessagesIdentity(request, len(safetyMapping) == 1 && safetyMapping[0])
+	}()
+	if identityErr != nil {
+		return codePayload{}, identityErr
+	}
+	prepared, prepareErr := func() (*wire.Request, error) {
+		if identifier == "" {
+			return request, nil
+		}
+		return request.WithFields(request.OIF().Document().FieldsWithout("metadata"), oif.TransformedMapping)
+	}()
+	if prepareErr != nil {
+		return codePayload{}, refused
 	}
 	for _, field := range []string{"reasoning_effort", "reasoning", "thinking", "audio", "modalities", "prediction", "response_format", "service_tier", "n", "parallel_tool_calls"} {
 		if request.Field(field) != nil {
 			return codePayload{}, refused
 		}
 	}
-	encoded, _, err := protocols.EncodeTarget(request, wire.Gemini, "gemini", "google", model, nil)
+	encoded, _, err := protocols.EncodeTarget(prepared, wire.Gemini, "gemini", "google", model, nil)
 	if err != nil {
+		return codePayload{}, refused
+	}
+	labelled, labelErr := func() ([]byte, error) {
+		if identifier == "" {
+			return encoded, nil
+		}
+		document, err := oif.ParseJSON(encoded, oif.Limits{})
+		if err != nil {
+			return nil, err
+		}
+		fields := document.Fields()
+		labels, err := json.Marshal(struct {
+			Identifier string `json:"safety_identifier"`
+		}{identifier})
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(maps.Collect(func(yield func(string, json.RawMessage) bool) {
+			for name, value := range fields {
+				if !yield(name, value) {
+					return
+				}
+			}
+			yield("labels", labels)
+		}))
+	}()
+	if labelErr != nil {
 		return codePayload{}, refused
 	}
 	wrapped, err := json.Marshal(struct {
 		Project string          `json:"project"`
 		Model   string          `json:"model"`
 		Request json.RawMessage `json:"request"`
-	}{Project: project, Model: model, Request: encoded})
+	}{Project: project, Model: model, Request: labelled})
 	if err != nil {
 		return codePayload{}, refused
 	}

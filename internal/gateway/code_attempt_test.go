@@ -1325,3 +1325,71 @@ func TestAntigravityResponsesSignedParallelContinuation(t *testing.T) {
 		})
 	}
 }
+
+func TestAntigravityMessagesSignedToolContinuation(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprint(stream), func(t *testing.T) {
+			ledger := &signedTestLedger{}
+			attempt := &codeAttempt{model: "gemini-native", server: &Server{deps: Dependencies{CodeLedger: ledger}, now: time.Now}}
+			body := `{"response":{"candidates":[{"content":{"parts":[{"functionCall":{"name":"read_file","args":{"path":"sample"}},"thoughtSignature":"private-first"},{"functionCall":{"name":"list_files","args":{}},"thoughtSignature":"private-second"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":2,"totalTokenCount":10}}}`
+			contentType := "application/json"
+			if stream {
+				body = "data: " + body + "\n\n"
+				contentType = "text/event-stream"
+			}
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/code/route/v1/messages?beta=true", nil)
+			attempt.antigravityResponse(context.Background(), recorder, request, &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {contentType}}, Body: io.NopCloser(strings.NewReader(body))}, "public-model", codePayload{stream: stream, signedContinuation: true})
+			if len(ledger.calls) != 2 || strings.Contains(recorder.Body.String(), "private-") || !strings.Contains(recorder.Body.String(), `"type":"tool_use"`) || attempt.usage.Total == nil || *attempt.usage.Total != 10 {
+				t.Fatalf("response = %s, usage = %+v", recorder.Body.String(), attempt.usage)
+			}
+			calls := make([]codesessions.SignedCall, 2)
+			for _, call := range ledger.calls {
+				calls[call.Index] = call
+				if !strings.Contains(recorder.Body.String(), call.ID) {
+					t.Fatalf("call ID missing = %s", recorder.Body.String())
+				}
+			}
+			input := fmt.Sprintf(`{"model":"gemini-native","max_tokens":8,"messages":[{"role":"assistant","content":[{"type":"tool_use","id":%q,"name":"read_file","input":{"path":"sample"}},{"type":"tool_use","id":%q,"name":"list_files","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":%q,"content":"directory result"},{"type":"tool_result","tool_use_id":%q,"content":"file result"}]}]}`, calls[0].ID, calls[1].ID, calls[1].ID, calls[0].ID)
+			payload, err := attempt.translateAntigravity([]byte(input), request, "gemini-native", "project", true)
+			if err != nil || !strings.Contains(string(payload.body), `"thoughtSignature":"private-first"`) || !strings.Contains(string(payload.body), `"thoughtSignature":"private-second"`) || strings.Contains(string(payload.body), calls[0].ID) {
+				t.Fatalf("continuation = %s, %v", payload.body, err)
+			}
+			for _, invalid := range []string{strings.Replace(input, "sample", "changed", 1), strings.Replace(input, fmt.Sprintf(`,{"type":"tool_result","tool_use_id":%q,"content":"file result"}`, calls[0].ID), "", 1)} {
+				if _, err := attempt.translateAntigravity([]byte(invalid), request, "gemini-native", "project", true); err == nil {
+					t.Fatal("invalid signed continuation accepted")
+				}
+			}
+		})
+	}
+}
+
+func TestAntigravityMessagesIdentityAndRefusals(t *testing.T) {
+	attempt := &codeAttempt{model: "gemini-native", server: &Server{deps: Dependencies{CodeLedger: &signedTestLedger{}}}}
+	base := `{"model":"gemini-native","max_tokens":8,"messages":[{"role":"user","content":"Hello"}]`
+	for _, test := range []struct {
+		name, extra      string
+		mapping, allowed bool
+	}{
+		{name: "identity mapping", extra: `,"metadata":{"user_id":"hello"}}`, mapping: true, allowed: true},
+		{name: "identity default refusal", extra: `,"metadata":{"user_id":"hello"}}`},
+		{name: "unknown metadata", extra: `,"metadata":{"user_id":"hello","unknown":"value"}}`, mapping: true},
+		{name: "thinking", extra: `,"thinking":{"type":"enabled","budget_tokens":1024}}`},
+		{name: "cache control", extra: `,"system":[{"type":"text","text":"Be concise","cache_control":{"type":"ephemeral"}}]}`},
+		{name: "parallel semantics", extra: `,"tool_choice":{"type":"auto","disable_parallel_tool_use":true}}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/v1/messages?beta=true", nil)
+			payload, err := attempt.translateAntigravity([]byte(base+test.extra), request, "gemini-native", "project", true, test.mapping)
+			if (err == nil) != test.allowed {
+				t.Fatalf("translation = %s, %v", payload.body, err)
+			}
+			if !test.allowed {
+				return
+			}
+			if !strings.Contains(string(payload.body), `"labels":{"safety_identifier":"ftze3os7wcrq4jxihmvmlopctynrmhs4d6tuexttaqzwfe4ltasa"}`) || strings.Contains(string(payload.body), "metadata") {
+				t.Fatalf("identity mapping = %s", payload.body)
+			}
+		})
+	}
+}
