@@ -86,6 +86,9 @@ func (s *service) seedCanary(owner *caller, vendorURL string) canaryFixture {
 	key := s.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "canary-key", "scopes": []string{"inference"}, "project_id": project}, idempotent(), http.StatusCreated)
 	group := s.want(owner, "POST", "/api/v1/budget-groups", map[string]any{"name": "canary-budget", "monthly_cost_limit": "5.00", "project_id": project}, idempotent(), http.StatusCreated)
 	increase := s.want(owner, "POST", "/api/v1/budget-increases", map[string]any{"target": map[string]any{"kind": "budget_group", "id": group["id"]}, "window": "month", "amount": "1", "reason": "canary increase"}, idempotent(), http.StatusCreated)
+	policy := s.want(owner, "POST", "/api/v1/guardrail-policies", map[string]any{"name": "canary-policy", "project_id": project, "entries": []any{}}, idempotent(), http.StatusCreated)
+	s.want(owner, "POST", "/api/v1/guardrail-policies/"+policy["policy_id"].(string)+"/activate", map[string]any{"revision_id": policy["revision_id"]}, idempotent(etag(policy)), http.StatusNoContent)
+	attachment := s.want(owner, "POST", "/api/v1/guardrail-attachments", map[string]any{"scope": "installation", "scope_id": "installation", "policy_revision_id": policy["revision_id"], "order": 0}, idempotent(), http.StatusCreated)
 	s.eventually("the canary runtime snapshot being ready", startupLimit, func() (bool, string) {
 		status, raw := s.do(owner, "GET", "/api/v1/health/ready", nil, nil)
 		return status == http.StatusOK, describe(status, raw)
@@ -101,6 +104,9 @@ func (s *service) seedCanary(owner *caller, vendorURL string) canaryFixture {
 			"api_key_id":      key["id"].(string),
 			"budget_group_id": group["id"].(string),
 			"increase_id":     increase["id"].(string),
+			"policy_id":       policy["policy_id"].(string),
+			"revision_id":     policy["revision_id"].(string),
+			"attachment_id":   attachment["id"].(string),
 		},
 	}
 }
@@ -184,7 +190,7 @@ func TestManagementIsolationSweep(t *testing.T) {
 			if status == http.StatusBadRequest || status == http.StatusUnprocessableEntity {
 				t.Errorf("%s as %s: %s", pattern, c.name, describe(status, raw))
 			}
-			if strings.Contains(string(raw), "canary") {
+			if strings.Contains(string(raw), "canary") || strings.Contains(string(raw), fixture.ids["attachment_id"]) {
 				t.Errorf("%s as %s disclosed another project (%d)", pattern, c.name, status)
 			}
 			if fixture.named(path) && status/100 == 2 {

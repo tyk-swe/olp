@@ -12,7 +12,9 @@ import (
 )
 
 func PrincipalDigest(key *secrets.AuthKey, a keyauthority.Authority) []byte {
-	principal, _ := json.Marshal(struct{ Key, Project, Workload string }{a.ID, *a.ProjectID, a.WorkloadDigest})
+	principal, _ := json.Marshal(struct{ Key, Project, Workload, DelegationAgent, DelegationMember, DelegationPair string }{
+		a.ID, *a.ProjectID, a.WorkloadDigest, a.DelegationAgentID, a.DelegationMemberID, a.DelegationPairDigest,
+	})
 	return key.Digest(secrets.AgentPrincipalDigest, string(principal))
 }
 
