@@ -188,7 +188,7 @@ type focusSink struct {
 // focusSinks lists the enabled csv_gzip sinks in a fixed order.
 func (w *FocusWorker) focusSinks(ctx context.Context) ([]focusSink, error) {
 	rows, err := w.Pool.Query(ctx, `SELECT id::text,name,type,destination,credential_id::text,project_id::text,
-		filter,settings,created_at::timestamptz::text
+		filter,settings,created_at
 		FROM olp.export_sinks WHERE enabled AND format='csv_gzip' AND 'focus'=ANY(streams) ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -197,11 +197,9 @@ func (w *FocusWorker) focusSinks(ctx context.Context) ([]focusSink, error) {
 	var out []focusSink
 	for rows.Next() {
 		var s focusSink
-		var created string
-		if err := rows.Scan(&s.ID, &s.Name, &s.Type, &s.URL, &s.CredentialID, &s.ProjectID, &s.Filter, &s.Settings, &created); err != nil {
+		if err := rows.Scan(&s.ID, &s.Name, &s.Type, &s.URL, &s.CredentialID, &s.ProjectID, &s.Filter, &s.Settings, &s.CreatedAt); err != nil {
 			return nil, err
 		}
-		s.CreatedAt, _ = time.Parse(time.RFC3339, created)
 		settings, err := decodeSettings(s.Settings)
 		if err != nil {
 			return nil, err
@@ -237,7 +235,7 @@ func (w *FocusWorker) focusSinks(ctx context.Context) ([]focusSink, error) {
 // least an hour past delivery.
 func (w *FocusWorker) dueDays(ctx context.Context, sink focusSink, now, retentionSafe time.Time) ([]time.Time, error) {
 	first := sink.CreatedAt.UTC().Truncate(24 * time.Hour)
-	if sink.startDate != nil && sink.startDate.After(first) {
+	if sink.startDate != nil {
 		first = *sink.startDate
 	}
 	if first.Before(retentionSafe) {

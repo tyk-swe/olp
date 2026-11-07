@@ -22,7 +22,7 @@ func readCommitmentTotals(ctx context.Context, tx pgx.Tx, sink focusSink, day, n
 		return nil, nil
 	}
 	first := sink.CreatedAt.UTC().Truncate(24 * time.Hour)
-	if sink.startDate != nil && sink.startDate.After(first) {
+	if sink.startDate != nil {
 		first = *sink.startDate
 	}
 	var days int

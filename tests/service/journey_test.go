@@ -23,12 +23,14 @@ import (
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/export"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/notifications"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedworker"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -805,5 +807,107 @@ func TestBudgetThresholdNotificationsUseBudgetBasis(t *testing.T) {
 		if amount != want.amount || delivered != (want.amount != 0) {
 			t.Errorf("%s amount=%d delivered=%t, want amount=%d", want.name, amount, delivered, want.amount)
 		}
+	}
+}
+
+func TestFocusExportsHonorDefaultAndExplicitStartDates(t *testing.T) {
+	pool, _ := newDatabase(t)
+	if err := database.Migrate(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+	fixture := newUsageFixture(t, pool)
+	var installation string
+	if err := pool.QueryRow(t.Context(), `UPDATE olp.installation SET active_key_version=1 WHERE singleton RETURNING id::text`).Scan(&installation); err != nil {
+		t.Fatal(err)
+	}
+	ring, err := secrets.ParseRing([]byte(`{"active_version":1,"keys":[{"version":1,"key":"` + strings.Repeat("42", 32) + `"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential := uuid.NewString()
+	tx, err := pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	if err := ring.Store(t.Context(), tx, installation, credential, secrets.SinkCredential, []byte(`{"region":"fixture-region","auth_mode":"static","secret":{"access_key_id":"synthetic-fixture-key-material","secret_access_key":"synthetic-fixture-key-material"}}`), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	uploads := make(chan string, 32)
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/manifest.json") {
+			var manifest struct {
+				ChargeDate       string                   `json:"charge_date"`
+				CommitmentTotals *export.CommitmentTotals `json:"commitment_totals"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&manifest); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			if manifest.CommitmentTotals == nil || !manifest.CommitmentTotals.Complete || manifest.CommitmentTotals.Provisional {
+				t.Errorf("incomplete FOCUS commitment totals at %s: %+v", r.URL.Path, manifest.CommitmentTotals)
+			}
+			uploads <- strings.Split(r.URL.Path, "/")[1] + "/" + manifest.ChargeDate
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer receiver.Close()
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	yesterday := today.AddDate(0, 0, -1).Format("2006-01-02")
+	twoDaysAgo := today.AddDate(0, 0, -2).Format("2006-01-02")
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.commitment_schedules
+ (provider_id,provider_revision_id,provider_name,provider_kind,amount,currency,period,effective_at,ends_at)
+ VALUES($1,$2,'fixture','openai_compatible',10,'USD','day',$3,$4)`, fixture.providerID, uuid.NewString(), today.AddDate(0, 0, -2), today.AddDate(0, 0, -1)); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name    string
+		created time.Time
+		start   string
+	}{
+		{"new", today, ""},
+		{"existing", today.AddDate(0, 0, -1), ""},
+		{"backfill", today, twoDaysAgo},
+		{"later", today.AddDate(0, 0, -4), yesterday},
+	} {
+		settings := map[string]string{"cost_basis": "cost"}
+		if c.start != "" {
+			settings["start_date"] = c.start
+		}
+		raw, err := json.Marshal(settings)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id := uuid.NewString()
+		if _, err := pool.Exec(t.Context(), `INSERT INTO olp.export_sinks(id,name,type,destination,streams,format,settings,credential_id,enabled,etag,created_by,created_at)
+ VALUES($1,$2,'s3',$3,ARRAY['focus'],'csv_gzip',$4,$5,true,$1,$6,$7)`, id, c.name, receiver.URL+"/"+c.name, raw, credential, fixture.ownerID, c.created); err != nil {
+			t.Fatal(err)
+		}
+	}
+	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+	worker := export.FocusWorker{Pool: pool, Keys: ring, Installation: installation, Sender: export.NewSender(policy, func(string) string { return "" }), Now: func() time.Time { return today.Add(12 * time.Hour) }}
+	if _, err := worker.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	close(uploads)
+	expected := map[string]bool{"existing/" + yesterday: true, "backfill/" + twoDaysAgo: true, "backfill/" + yesterday: true, "later/" + yesterday: true}
+	for upload := range uploads {
+		if !expected[upload] {
+			t.Errorf("unexpected FOCUS manifest %s", upload)
+		}
+		delete(expected, upload)
+	}
+	if len(expected) != 0 {
+		t.Errorf("missing FOCUS manifests %v", expected)
+	}
+	var delivered int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.focus_datasets WHERE delivered_at IS NOT NULL`).Scan(&delivered); err != nil {
+		t.Fatal(err)
+	}
+	if delivered != 4 {
+		t.Errorf("delivered %d FOCUS datasets, want 4", delivered)
 	}
 }
