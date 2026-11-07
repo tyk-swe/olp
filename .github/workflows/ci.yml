@@ -101,6 +101,7 @@ jobs:
               - 'deploy/monitoring/**'
               - 'scripts/check-helm.sh'
               - 'scripts/check-helm-egress.sh'
+              - 'docs/operate/deployment.md'
               - 'internal/**/*.go'
               - '.github/workflows/ci.yml'
             deps:

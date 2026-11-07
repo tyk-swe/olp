@@ -103,7 +103,7 @@ control:
 
 # Optional same-origin edge routing. The root and management API terminate at
 # control, while the /v1, /v1beta, /native, /anthropic, /gemini, /bedrock,
-# /ws and /code inference prefixes terminate at gateway. Keep this off
+# /ws, /code, /mcp and /a2a prefixes terminate at gateway. Keep this off
 # when an external Gateway API/Ingress controller owns the equivalent routes.
 ingress:
   enabled: false
