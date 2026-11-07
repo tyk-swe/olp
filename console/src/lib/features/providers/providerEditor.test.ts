@@ -97,21 +97,46 @@ describe('provider editing', () => {
     draft.credential = 'secret from an earlier selection';
     expect(validateProviderDraft(draft, spec)).toContain('credential');
 
-    draft.externalCredentialReference = JSON.stringify({
+    const reference = {
       store: 'vault',
-      secret_id: 'service-key',
-      version: '1'
-    });
+      secret_id: 'https://vault.example.test/v1/secret/data/service',
+      version: '1',
+      field: 'api_key'
+    };
+    draft.externalCredentialReference = JSON.stringify(reference);
 
     expect(validateProviderDraft(draft, spec)).toBeNull();
     expect(buildCreateProviderInput(draft, spec)).toMatchObject({
       credential: undefined,
-      credential_reference: {
-        store: 'vault',
-        secret_id: 'service-key',
-        version: '1'
-      }
+      credential_reference: reference
     });
+  });
+
+  it.each([
+    {
+      store: 'aws',
+      secret_id: 'prod/provider',
+      version: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+      region: 'us-east-1'
+    },
+    {
+      store: 'gcp',
+      secret_id: 'projects/project/secrets/provider',
+      version: '3'
+    },
+    {
+      store: 'azure',
+      secret_id: 'https://vault.vault.azure.net/secrets/provider',
+      version: '0123456789abcdef0123456789abcdef'
+    }
+  ])('accepts a version-pinned $store reference', (reference) => {
+    const draft = createProviderDraft(spec);
+    draft.name = 'Service';
+    draft.endpoint = 'https://example.test/v1';
+    draft.useExternalCredential = true;
+    draft.externalCredentialReference = JSON.stringify(reference);
+
+    expect(validateProviderDraft(draft, spec)).toBeNull();
   });
 
   it.each([
@@ -122,6 +147,30 @@ describe('provider editing', () => {
     [
       '{"store":"vault","secret_id":"service-key","version":""}',
       'Choose a supported store, secret ID and immutable version.'
+    ],
+    [
+      '{"store":"vault","secret_id":"service-key","version":"1"}',
+      'Vault KV v2 references require a version and field.'
+    ],
+    [
+      '{"store":"vault","secret_id":"https://vault.example.test/v1/secret/data/service","version":"1"}',
+      'Vault KV v2 references require a version and field.'
+    ],
+    [
+      '{"store":"aws","secret_id":"prod/provider","version":"latest","region":"us-east-1"}',
+      'AWS references require a region and immutable version ID.'
+    ],
+    [
+      '{"store":"aws","secret_id":"prod/provider","version":"AWSCURRENT","region":"us-east-1"}',
+      'AWS references require a region and immutable version ID.'
+    ],
+    [
+      '{"store":"gcp","secret_id":"projects/project/secrets/provider","version":"latest"}',
+      'Google references require a project secret and numeric version.'
+    ],
+    [
+      '{"store":"azure","secret_id":"https://vault.vault.azure.net/secrets/name","version":"latest"}',
+      'Azure references require a versioned vault secret.'
     ]
   ])(
     'rejects an invalid external credential reference before submission',
