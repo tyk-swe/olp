@@ -387,6 +387,42 @@ func TestGeminiArgumentlessCallsSurviveUnaryAndStreaming(t *testing.T) {
 	}
 }
 
+func TestNativeStreamUsageFollowsIncludeUsage(t *testing.T) {
+	usage := `"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}`
+	for _, format := range []wire.Format{wire.Chat, wire.Completions} {
+		kind, choice := "chat.completion.chunk", `"delta":{"content":"hi"},"finish_reason":"stop"`
+		if format == wire.Completions {
+			kind, choice = "text_completion", `"text":"hi","finish_reason":"stop"`
+		}
+		for _, includeUsage := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/include_usage=%t", format, includeUsage), func(t *testing.T) {
+				source := `data: {"id":"s","object":"` + kind + `","model":"upstream","choices":[{"index":0,` + choice + `}],` + usage + `}` + "\n\n" +
+					`data: {"id":"s","object":"` + kind + `","model":"upstream","choices":[],` + usage + `}` + "\n\n" +
+					"data: [DONE]\n\n"
+				var emitted bytes.Buffer
+				completion, err := Stream(format, format, strings.NewReader(source), 8192, "route", includeUsage, func(frame []byte) error {
+					_, err := emitted.Write(frame)
+					return err
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				frames := strings.Split(strings.TrimSpace(emitted.String()), "\n\n")
+				if includeUsage {
+					if len(frames) != 3 || !strings.Contains(emitted.String(), `"usage"`) {
+						t.Fatalf("usage frames missing %s", emitted.String())
+					}
+				} else if len(frames) != 2 || frames[1] != "data: [DONE]" || !strings.Contains(frames[0], `"model":"route"`) || strings.Contains(emitted.String(), `"usage"`) {
+					t.Fatalf("usage leaked or frames changed %s", emitted.String())
+				}
+				if completion.Usage == nil || completion.Usage.TotalTokens != 3 {
+					t.Fatalf("accounting lost usage %+v", completion.Usage)
+				}
+			})
+		}
+	}
+}
+
 func TestGeminiIncompleteFunctionArgumentsRemainRefused(t *testing.T) {
 	for _, args := range []string{`,"args":[]`, `,"args":""`, `,"partialArgs":[{"jsonPath":"$.time","stringValue":"noon"}]`, `,"willContinue":true`} {
 		body := []byte(`{"candidates":[{"index":0,"content":{"role":"model","parts":[{"functionCall":{"id":"call-clock","name":"clock"` + args + `}}]},"finishReason":"STOP"}]}`)

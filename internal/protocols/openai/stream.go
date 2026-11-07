@@ -120,6 +120,11 @@ type streamer interface {
 	finish() (*wire.Completion, error)
 }
 
+type chatCall struct {
+	id, name  string
+	arguments strings.Builder
+}
+
 type chatStream struct {
 	legacy       bool
 	exactUsage   bool
@@ -132,7 +137,7 @@ type chatStream struct {
 	finished     map[int64]bool
 	text         strings.Builder
 	refusal      strings.Builder
-	calls        map[int64]*wire.ToolCall
+	calls        map[int64]*chatCall
 	callOrder    []int64
 	c            wire.Completion
 }
@@ -258,22 +263,22 @@ func (s *chatStream) choice(raw json.RawMessage) error {
 			}
 			position, _ := int64Field(call, "index")
 			if s.calls == nil {
-				s.calls = map[int64]*wire.ToolCall{}
+				s.calls = map[int64]*chatCall{}
 			}
 			current := s.calls[position]
 			if current == nil {
-				current = &wire.ToolCall{}
+				current = &chatCall{}
 				s.calls[position] = current
 				s.callOrder = append(s.callOrder, position)
 			}
 			partial := chatToolCall(call)
 			if partial.ID != "" {
-				current.ID = partial.ID
+				current.id = partial.ID
 			}
 			if partial.Name != "" {
-				current.Name = partial.Name
+				current.name = partial.Name
 			}
-			current.Arguments += partial.Arguments
+			current.arguments.WriteString(partial.Arguments)
 		}
 	}
 	if s.finished == nil {
@@ -290,7 +295,8 @@ func (s *chatStream) finish() (*wire.Completion, error) {
 	s.c.OutputText = s.text.String()
 	s.c.Refusal = s.refusal.String()
 	for _, position := range s.callOrder {
-		s.c.ToolCalls = append(s.c.ToolCalls, *s.calls[position])
+		call := s.calls[position]
+		s.c.ToolCalls = append(s.c.ToolCalls, wire.ToolCall{ID: call.id, Name: call.name, Arguments: call.arguments.String()})
 	}
 	if !s.done {
 		return &s.c, &wire.ProtocolError{Detail: "stream ended before [DONE]", Truncated: true}

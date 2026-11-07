@@ -48,7 +48,7 @@ func StreamWithEvents(encodedWire, target wire.Format, r io.Reader, maxEvent int
 			translator := &candidateStream{source: encodedWire, target: target, route: route, limit: maxEvent, includeUsage: includeUsage, emit: emit, children: map[int]*streamTranslator{}, finishes: map[int]string{}}
 			upstreamEmit, finish = translator.frame, translator.finish
 		} else {
-			translator := &streamTranslator{source: encodedWire, target: target, route: route, limit: maxEvent, includeUsage: includeUsage, emit: emit, calls: map[int]*wire.ToolCall{}, blocks: map[int]int{}}
+			translator := &streamTranslator{source: encodedWire, target: target, route: route, limit: maxEvent, includeUsage: includeUsage, emit: emit, calls: map[int]*streamCall{}, responseTexts: map[int]*strings.Builder{}, responseRefusals: map[int]*strings.Builder{}, blocks: map[int]int{}}
 			upstreamEmit, finish = translator.frame, translator.finish
 		}
 	}
@@ -57,20 +57,7 @@ func StreamWithEvents(encodedWire, target wire.Format, r io.Reader, maxEvent int
 	var err error
 	switch encodedWire {
 	case wire.Completions, wire.Chat, wire.Responses:
-		c, err = openai.StreamMetadataEvents(encodedWire, target, r, maxEvent, route, true, func(frame []byte) error {
-			if native && (encodedWire == wire.Chat || encodedWire == wire.Completions) && !includeUsage {
-				var f Object
-				payload := strings.TrimSpace(strings.TrimPrefix(string(frame), "data: "))
-				if json.Unmarshal([]byte(payload), &f) == nil {
-					if len(arr(f["choices"])) == 0 && present(f["usage"]) {
-						return nil
-					}
-					delete(f, "usage")
-					frame = eventFrame("", f)
-				}
-			}
-			return upstreamEmit(frame)
-		}, observe)
+		c, err = openai.StreamMetadataEvents(encodedWire, target, r, maxEvent, route, includeUsage || !native, upstreamEmit, observe)
 	case wire.MistralFIM:
 		// Fill-in-the-middle streams chat completion chunks.
 		c, err = openai.StreamMetadataEvents(wire.MistralFIM, target, r, maxEvent, route, true, upstreamEmit, observe)
@@ -99,7 +86,7 @@ func StreamWithEvents(encodedWire, target wire.Format, r io.Reader, maxEvent int
 }
 
 func AggregateTranslatedResponses(target wire.Format, r io.Reader, maxEvent int, route string, observe func(oif.Event) error) (*wire.Completion, error) {
-	translator := &streamTranslator{source: wire.Responses, target: target, route: route, limit: maxEvent, includeUsage: true, emit: func([]byte) error { return nil }, calls: map[int]*wire.ToolCall{}, blocks: map[int]int{}}
+	translator := &streamTranslator{source: wire.Responses, target: target, route: route, limit: maxEvent, includeUsage: true, emit: func([]byte) error { return nil }, calls: map[int]*streamCall{}, responseTexts: map[int]*strings.Builder{}, responseRefusals: map[int]*strings.Builder{}, blocks: map[int]int{}}
 	completion, err := openai.StreamMetadataEvents(wire.Responses, target, r, maxEvent, route, true, translator.frame, observe)
 	if err != nil {
 		return completion, err
@@ -147,7 +134,10 @@ func emitObservedEvent(event oif.Event, observe func(oif.Event) error, parsed er
 	return parsed
 }
 
-type contentBlock struct{ kind, args string }
+type contentBlock struct {
+	kind string
+	args strings.Builder
+}
 
 func streamAnthropicEvents(r io.Reader, limit int, route string, emit wire.Emit, observe func(oif.Event) error) (*wire.Completion, error) {
 	c := &wire.Completion{}
@@ -228,8 +218,8 @@ func streamAnthropicEvents(r io.Reader, limit int, route string, emit wire.Emit,
 					return protocolError("invalid tool input")
 				}
 				if len(input) > 0 {
-					state.args = string(block["input"])
-					retained += len(state.args)
+					state.args.WriteString(string(block["input"]))
+					retained += state.args.Len()
 				}
 			} else if kind != "text" {
 				state.kind = ""
@@ -269,7 +259,7 @@ func streamAnthropicEvents(r io.Reader, limit int, route string, emit wire.Emit,
 					return wire.ErrEventTooLarge
 				}
 				retained += len(part)
-				block.args += part
+				block.args.WriteString(part)
 			}
 		case "content_block_stop":
 			index, ok := count(f["index"])
@@ -277,12 +267,12 @@ func streamAnthropicEvents(r io.Reader, limit int, route string, emit wire.Emit,
 			if !ok || block == nil || finished {
 				return protocolError("stop outside an active content block")
 			}
-			if block.kind == "tool_use" && block.args != "" {
-				if _, e := object([]byte(block.args)); e != nil {
+			if block.kind == "tool_use" && block.args.Len() != 0 {
+				if _, e := object([]byte(block.args.String())); e != nil {
 					return protocolError("incomplete tool arguments")
 				}
 			}
-			retained -= len(block.args)
+			retained -= block.args.Len()
 			delete(blocks, index)
 		case "message_delta":
 			if !started || finished || len(blocks) > 0 {
@@ -437,6 +427,11 @@ func streamGeminiEvents(r io.Reader, limit int, route string, emit wire.Emit, ob
 	return c, nil
 }
 
+type streamCall struct {
+	id, name  string
+	arguments strings.Builder
+}
+
 type streamTranslator struct {
 	source, target            wire.Format
 	route                     string
@@ -444,17 +439,27 @@ type streamTranslator struct {
 	includeUsage              bool
 	emit                      wire.Emit
 	started                   bool
-	id, text                  string
-	calls                     map[int]*wire.ToolCall
-	responseTexts             map[int]string
-	responseRefusals          map[int]string
+	id                        string
+	text                      strings.Builder
+	calls                     map[int]*streamCall
+	responseTexts             map[int]*strings.Builder
+	responseRefusals          map[int]*strings.Builder
 	blocks                    map[int]int
 	textBlock                 *int
 	refusalBlock              *int
-	refusal                   string
+	refusal                   strings.Builder
 	refused                   bool
 	sequence, nextBlock, size int
 	retained                  *int
+}
+
+func responseBuffer(buffers map[int]*strings.Builder, index int) *strings.Builder {
+	buffer := buffers[index]
+	if buffer == nil {
+		buffer = &strings.Builder{}
+		buffers[index] = buffer
+	}
+	return buffer
 }
 
 func (t *streamTranslator) send(event string, f Object) error {
@@ -505,7 +510,7 @@ func (t *streamTranslator) textDelta(text string) error {
 		if err := t.reserve(len(text)); err != nil {
 			return err
 		}
-		t.text += text
+		t.text.WriteString(text)
 	}
 	switch t.target {
 	case wire.Chat:
@@ -535,7 +540,7 @@ func (t *streamTranslator) textDelta(text string) error {
 				return e
 			}
 		}
-		t.text += text
+		t.text.WriteString(text)
 		return t.send("response.output_text.delta", Object{"type": raw("response.output_text.delta"), "item_id": raw("msg_" + t.id), "output_index": raw(*t.textBlock), "content_index": raw(0), "delta": raw(text)})
 	default:
 		return t.send("", Object{"responseId": raw(t.id), "modelVersion": raw(t.route), "candidates": raw([]any{map[string]any{"index": 0, "content": map[string]any{"role": "model", "parts": []any{map[string]string{"text": text}}}}})})
@@ -551,19 +556,19 @@ func (t *streamTranslator) toolDelta(index int, id, name, args string) error {
 		if e := t.reserve(64); e != nil {
 			return e
 		}
-		call = &wire.ToolCall{}
+		call = &streamCall{}
 		t.calls[index] = call
 	}
 	if id != "" {
-		call.ID += id
+		call.id += id
 	}
 	if name != "" {
-		call.Name += name
+		call.name += name
 	}
 	if e := t.reserve(len(args) + len(id) + len(name)); e != nil {
 		return e
 	}
-	call.Arguments += args
+	call.arguments.WriteString(args)
 	if t.target == wire.Chat {
 		fun := Object{}
 		if name != "" {
@@ -584,34 +589,35 @@ func (t *streamTranslator) toolDelta(index int, id, name, args string) error {
 		}
 		return t.chat(Object{"tool_calls": raw([]Object{v})}, nil, nil)
 	}
-	if call.ID == "" || call.Name == "" || call.Arguments == "" {
+	if call.id == "" || call.name == "" || call.arguments.Len() == 0 {
 		return nil
 	}
 	block, opened := t.blocks[index]
+	partial := args
 	if !opened {
 		block = t.nextBlock
 		t.nextBlock++
 		t.blocks[index] = block
 		switch t.target {
 		case wire.Anthropic:
-			if e := t.send("content_block_start", Object{"type": raw("content_block_start"), "index": raw(block), "content_block": raw(map[string]any{"type": "tool_use", "id": call.ID, "name": call.Name, "input": map[string]any{}})}); e != nil {
+			if e := t.send("content_block_start", Object{"type": raw("content_block_start"), "index": raw(block), "content_block": raw(map[string]any{"type": "tool_use", "id": call.id, "name": call.name, "input": map[string]any{}})}); e != nil {
 				return e
 			}
 		case wire.Responses:
-			if e := t.send("response.output_item.added", Object{"type": raw("response.output_item.added"), "output_index": raw(block), "item": raw(map[string]any{"type": "function_call", "id": "fc_" + call.ID, "call_id": call.ID, "name": call.Name, "arguments": "", "status": "in_progress"})}); e != nil {
+			if e := t.send("response.output_item.added", Object{"type": raw("response.output_item.added"), "output_index": raw(block), "item": raw(map[string]any{"type": "function_call", "id": "fc_" + call.id, "call_id": call.id, "name": call.name, "arguments": "", "status": "in_progress"})}); e != nil {
 				return e
 			}
 		}
-		args = call.Arguments
+		partial = call.arguments.String()
 	}
-	if args == "" {
+	if partial == "" {
 		return nil
 	}
 	switch t.target {
 	case wire.Anthropic:
-		return t.send("content_block_delta", Object{"type": raw("content_block_delta"), "index": raw(block), "delta": raw(map[string]string{"type": "input_json_delta", "partial_json": args})})
+		return t.send("content_block_delta", Object{"type": raw("content_block_delta"), "index": raw(block), "delta": raw(map[string]string{"type": "input_json_delta", "partial_json": partial})})
 	case wire.Responses:
-		return t.send("response.function_call_arguments.delta", Object{"type": raw("response.function_call_arguments.delta"), "item_id": raw("fc_" + call.ID), "output_index": raw(block), "delta": raw(args)})
+		return t.send("response.function_call_arguments.delta", Object{"type": raw("response.function_call_arguments.delta"), "item_id": raw("fc_" + call.id), "output_index": raw(block), "delta": raw(partial)})
 	}
 	return nil
 }
@@ -642,25 +648,19 @@ func (t *streamTranslator) responseToolSnapshot(index int, item Object) error {
 	if call == nil {
 		return t.toolDelta(index, id, name, arguments)
 	}
-	if call.ID != id || call.Name != name || !strings.HasPrefix(arguments, call.Arguments) {
+	if call.id != id || call.name != name || !strings.HasPrefix(arguments, call.arguments.String()) {
 		return protocolError("translated tool snapshot disagrees with deltas")
 	}
-	return t.toolDelta(index, "", "", strings.TrimPrefix(arguments, call.Arguments))
+	return t.toolDelta(index, "", "", strings.TrimPrefix(arguments, call.arguments.String()))
 }
 
 func (t *streamTranslator) responseTextDelta(index int, text string) error {
-	if t.responseTexts == nil {
-		t.responseTexts = map[int]string{}
-	}
-	t.responseTexts[index] += text
+	responseBuffer(t.responseTexts, index).WriteString(text)
 	return t.textDelta(text)
 }
 
 func (t *streamTranslator) responseRefusalDelta(index int, text string) error {
-	if t.responseRefusals == nil {
-		t.responseRefusals = map[int]string{}
-	}
-	t.responseRefusals[index] += text
+	responseBuffer(t.responseRefusals, index).WriteString(text)
 	return t.refusalDelta(text)
 }
 
@@ -679,13 +679,14 @@ func (t *streamTranslator) responseMessageSnapshot(index int, item Object) error
 		}), "")
 	}
 	text, refusal := content("output_text", "text"), content("refusal", "refusal")
-	if !strings.HasPrefix(text, t.responseTexts[index]) || !strings.HasPrefix(refusal, t.responseRefusals[index]) {
+	texts, refusals := responseBuffer(t.responseTexts, index), responseBuffer(t.responseRefusals, index)
+	if !strings.HasPrefix(text, texts.String()) || !strings.HasPrefix(refusal, refusals.String()) {
 		return protocolError("Responses message snapshot disagrees with streamed deltas")
 	}
-	if err := t.responseTextDelta(index, text[len(t.responseTexts[index]):]); err != nil {
+	if err := t.responseTextDelta(index, text[texts.Len():]); err != nil {
 		return err
 	}
-	return t.responseRefusalDelta(index, refusal[len(t.responseRefusals[index]):])
+	return t.responseRefusalDelta(index, refusal[refusals.Len():])
 }
 
 func (t *streamTranslator) frame(frame []byte) error {
@@ -739,7 +740,7 @@ func (t *streamTranslator) frame(frame []byte) error {
 				if !present {
 					return protocolError("Responses argument snapshot has no tool call")
 				}
-				return t.responseToolSnapshot(int(index), Object{"type": raw("function_call"), "call_id": raw(call.ID), "name": raw(call.Name), "arguments": f["arguments"]})
+				return t.responseToolSnapshot(int(index), Object{"type": raw("function_call"), "call_id": raw(call.id), "name": raw(call.name), "arguments": f["arguments"]})
 			case "response.output_item.done":
 				item, _ := object(f["item"])
 				if t.target == wire.Anthropic || t.target == wire.Chat {
@@ -859,26 +860,26 @@ func (t *streamTranslator) frame(frame []byte) error {
 func (t *streamTranslator) summary(c *wire.Completion) (*wire.Completion, error) {
 	summary := *c
 	summary.UpstreamID = t.id
-	summary.OutputText = t.text
-	summary.Refusal = t.refusal
+	summary.OutputText = t.text.String()
+	summary.Refusal = t.refusal.String()
 	if t.refused && summary.FinishReason == "stop" && t.target.Surface() != "openai" {
 		summary.FinishReason = "content_filter"
 	}
 	summary.ToolCalls = nil
 	for _, i := range slices.Sorted(maps.Keys(t.calls)) {
 		call := t.calls[i]
-		if call.ID == "" || call.Name == "" {
+		if call.id == "" || call.name == "" {
 			return nil, protocolError("incomplete translated tool call")
 		}
-		if call.Arguments == "" {
+		if call.arguments.Len() == 0 {
 			if err := t.toolDelta(i, "", "", "{}"); err != nil {
 				return nil, err
 			}
 		}
-		if _, e := object([]byte(call.Arguments)); e != nil {
+		if _, e := object([]byte(call.arguments.String())); e != nil {
 			return nil, protocolError("incomplete translated tool arguments")
 		}
-		summary.ToolCalls = append(summary.ToolCalls, *call)
+		summary.ToolCalls = append(summary.ToolCalls, wire.ToolCall{ID: call.id, Name: call.name, Arguments: call.arguments.String()})
 	}
 	if len(summary.ToolCalls) > 0 && summary.FinishReason == "stop" {
 		summary.FinishReason = "tool_calls"
@@ -932,8 +933,8 @@ func (t *streamTranslator) finish(c *wire.Completion) error {
 		output := make([]Object, t.nextBlock)
 		if t.textBlock != nil {
 			index := *t.textBlock
-			part := Object{"type": raw("output_text"), "text": raw(t.text), "annotations": raw([]any{})}
-			if e := t.send("response.output_text.done", Object{"type": raw("response.output_text.done"), "item_id": raw("msg_" + t.id), "output_index": raw(index), "content_index": raw(0), "text": raw(t.text)}); e != nil {
+			part := Object{"type": raw("output_text"), "text": raw(t.text.String()), "annotations": raw([]any{})}
+			if e := t.send("response.output_text.done", Object{"type": raw("response.output_text.done"), "item_id": raw("msg_" + t.id), "output_index": raw(index), "content_index": raw(0), "text": raw(t.text.String())}); e != nil {
 				return e
 			}
 			if e := t.send("response.content_part.done", Object{"type": raw("response.content_part.done"), "item_id": raw("msg_" + t.id), "output_index": raw(index), "content_index": raw(0), "part": raw(part)}); e != nil {
@@ -944,10 +945,10 @@ func (t *streamTranslator) finish(c *wire.Completion) error {
 		for _, i := range slices.Sorted(maps.Keys(t.calls)) {
 			call := t.calls[i]
 			index := t.blocks[i]
-			if e := t.send("response.function_call_arguments.done", Object{"type": raw("response.function_call_arguments.done"), "item_id": raw("fc_" + call.ID), "output_index": raw(index), "arguments": raw(call.Arguments)}); e != nil {
+			if e := t.send("response.function_call_arguments.done", Object{"type": raw("response.function_call_arguments.done"), "item_id": raw("fc_" + call.id), "output_index": raw(index), "arguments": raw(call.arguments.String())}); e != nil {
 				return e
 			}
-			output[index] = Object{"id": raw("fc_" + call.ID), "type": raw("function_call"), "status": raw("completed"), "call_id": raw(call.ID), "name": raw(call.Name), "arguments": raw(call.Arguments)}
+			output[index] = Object{"id": raw("fc_" + call.id), "type": raw("function_call"), "status": raw("completed"), "call_id": raw(call.id), "name": raw(call.name), "arguments": raw(call.arguments.String())}
 		}
 		if e := t.finishRefusal(output); e != nil {
 			return e
