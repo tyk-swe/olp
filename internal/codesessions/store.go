@@ -18,9 +18,14 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
-type Store struct{ pool *pgxpool.Pool }
+type Store struct {
+	pool         *pgxpool.Pool
+	installation string
+	keys         *secrets.KeyRing
+}
 
 func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 

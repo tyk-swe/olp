@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/antigravityauth"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codeallowance"
 	"github.com/tyk-swe/olp/internal/codeclient"
@@ -2042,4 +2043,221 @@ func TestCodeTranslatedRateReservationsThroughGateway(t *testing.T) {
 			t.Fatalf("%s %s %s dispatched %d attempts, want %d", path, phase, scope, count, expectedCalls)
 		}
 	}
+}
+
+type signedJourneyPart struct {
+	Call      json.RawMessage `json:"functionCall"`
+	Signature string          `json:"thoughtSignature"`
+	Response  json.RawMessage `json:"functionResponse"`
+}
+
+type signedJourneyContent struct {
+	Parts []signedJourneyPart `json:"parts"`
+}
+
+func TestCodeSignedToolContinuation(t *testing.T) {
+	s := startService(t)
+	owner := s.owner()
+	var calls atomic.Int64
+	proxy, roots := newCodeVendorProxy(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		var body struct {
+			Model   string `json:"model"`
+			Request struct {
+				Contents []signedJourneyContent `json:"contents"`
+			} `json:"request"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			return
+		}
+		if body.Model != "gemini-fixture" {
+			t.Errorf("model = %s", body.Model)
+		}
+		continued := slices.ContainsFunc(body.Request.Contents, func(content signedJourneyContent) bool {
+			return slices.ContainsFunc(content.Parts, func(part signedJourneyPart) bool { return len(part.Response) != 0 })
+		})
+		parts := `[{"functionCall":{"name":"read_file","args":{"path":"sample"}},"thoughtSignature":"private-signature"},{"functionCall":{"name":"list_files","args":{}},"thoughtSignature":"private-second"}]`
+		if continued {
+			encoded, _ := json.Marshal(body)
+			if !strings.Contains(string(encoded), `"thoughtSignature":"private-signature"`) || !strings.Contains(string(encoded), "file result") {
+				t.Errorf("missing restored continuation")
+			}
+			parts = `[{"text":"continued after restart"}]`
+		}
+		result := `{"response":{"candidates":[{"content":{"role":"model","parts":` + parts + `},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":2,"totalTokenCount":10}}}`
+		if strings.Contains(r.URL.Path, "streamGenerateContent") {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", result)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(result))
+	}))
+	journey, consumer := newSignedCodeJourney(t, s, owner, proxy, roots)
+	path := "/code/" + journey.route.Slug + "/v1/chat/completions"
+	initial := json.RawMessage(`{"model":"gemini-fixture","messages":[{"role":"user","content":"Inspect"}]}`)
+	headers := map[string]string{"X-Opencode-Session-Id": "signed-root"}
+	status, raw := func() (int, []byte) {
+		for deadline := time.Now().Add(5 * time.Second); ; {
+			status, raw := s.do(consumer, "POST", path, initial, headers)
+			if status == http.StatusOK || time.Now().After(deadline) {
+				return status, raw
+			}
+			time.Sleep(25 * time.Millisecond)
+		}
+	}()
+	if status != http.StatusOK || strings.Contains(string(raw), "private-signature") {
+		t.Fatalf("initial = %s", describe(status, raw))
+	}
+	var result struct {
+		Choices []struct {
+			Message json.RawMessage `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil || len(result.Choices) != 1 {
+		t.Fatalf("initial = %s, %v", raw, err)
+	}
+	var message struct {
+		ToolCalls []struct {
+			ID string `json:"id"`
+		} `json:"tool_calls"`
+	}
+	if err := json.Unmarshal(result.Choices[0].Message, &message); err != nil || len(message.ToolCalls) != 2 {
+		t.Fatalf("message = %s, %v", result.Choices[0].Message, err)
+	}
+	continuation := json.RawMessage(fmt.Sprintf(`{"model":"gemini-fixture","messages":[{"role":"user","content":"Inspect"},%s,{"role":"tool","tool_call_id":%q,"content":"directory result"},{"role":"tool","tool_call_id":%q,"content":"file result"}]}`, result.Choices[0].Message, message.ToolCalls[1].ID, message.ToolCalls[0].ID))
+	partial := json.RawMessage(fmt.Sprintf(`{"model":"gemini-fixture","messages":[{"role":"user","content":"Inspect"},%s,{"role":"tool","tool_call_id":%q,"content":"file result"}]}`, result.Choices[0].Message, message.ToolCalls[0].ID))
+	premature := json.RawMessage(fmt.Sprintf(`{"model":"gemini-fixture","messages":[{"role":"user","content":"Inspect"},{"role":"tool","tool_call_id":%q,"content":"file result"},%s,{"role":"tool","tool_call_id":%q,"content":"directory result"}]}`, message.ToolCalls[0].ID, result.Choices[0].Message, message.ToolCalls[1].ID))
+	before := calls.Load()
+	for _, request := range []struct {
+		body    json.RawMessage
+		session string
+		code    string
+	}{{partial, "signed-root", "code_continuation_unavailable"}, {premature, "signed-root", "code_translation_unsupported_semantics"}, {continuation, "foreign-root", "code_continuation_unavailable"}, {json.RawMessage(strings.Replace(string(continuation), "sample", "altered", 1)), "signed-root", "code_continuation_unavailable"}} {
+		status, raw := s.do(consumer, "POST", path, request.body, map[string]string{"X-Opencode-Session-Id": request.session})
+		if status != http.StatusUnprocessableEntity || !strings.Contains(string(raw), request.code) || calls.Load() != before {
+			t.Fatalf("mismatch = %s, vendor calls %d", describe(status, raw), calls.Load()-before)
+		}
+	}
+	if _, err := s.pool.Exec(t.Context(), `ALTER TABLE olp.code_continuations ADD CONSTRAINT fixture_signed_save_failure CHECK (false) NOT VALID`); err != nil {
+		t.Fatal(err)
+	}
+	beforeFailure := calls.Load()
+	status, raw = s.do(consumer, "POST", path, json.RawMessage(`{"model":"gemini-fixture","stream":true,"messages":[{"role":"user","content":"read sample"}]}`), map[string]string{"X-Opencode-Session-Id": "save-failure-root"})
+	if calls.Load() != beforeFailure+1 || strings.Contains(string(raw), "read_file") || strings.Contains(string(raw), "private-signature") || !strings.Contains(string(raw), "code_continuation_unavailable") {
+		t.Fatalf("failed save = %s, calls %d", describe(status, raw), calls.Load())
+	}
+	if _, err := s.pool.Exec(t.Context(), `ALTER TABLE olp.code_continuations DROP CONSTRAINT fixture_signed_save_failure`); err != nil {
+		t.Fatal(err)
+	}
+	var reported int64
+	if err := s.pool.QueryRow(t.Context(), `SELECT a.reported_tokens FROM olp.code_attempts a JOIN olp.code_bindings b ON b.id=a.binding_id WHERE b.conversation='save-failure-root' AND a.state='settled'`).Scan(&reported); err != nil || reported != 10 {
+		t.Fatalf("failed-save accounting=%d, %v", reported, err)
+	}
+	beforeRestart := calls.Load()
+	s.stop()
+	restarted := startProcess(t, s.pool, s.env)
+	status, raw = restarted.do(consumer, "POST", path, continuation, headers)
+	if status != http.StatusOK || !strings.Contains(string(raw), "continued after restart") || calls.Load() != beforeRestart+1 {
+		t.Fatalf("restart = %s", describe(status, raw))
+	}
+	var root string
+	if err := s.pool.QueryRow(t.Context(), `SELECT root_id::text FROM olp.code_bindings WHERE conversation='signed-root' AND route_id=$1`, journey.route.ID).Scan(&root); err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := journey.store.Admit(t.Context(), journey.admission("gemini-fixture", "foreign-bound-root"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_continuations SET root_id=$2 WHERE root_id=$1`, root, foreign.Binding.RootID); err != nil {
+		t.Fatal(err)
+	}
+	status, raw = restarted.do(consumer, "POST", path, continuation, map[string]string{"X-Opencode-Session-Id": "foreign-bound-root"})
+	if status != http.StatusUnprocessableEntity || !strings.Contains(string(raw), "code_continuation_unavailable") {
+		t.Fatalf("transplanted state = %s", describe(status, raw))
+	}
+	if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_continuations SET root_id=$2 WHERE root_id=$1`, foreign.Binding.RootID, root); err != nil {
+		t.Fatal(err)
+	}
+	restarted.want(owner, "POST", "/api/v1/code/bindings/"+root+"/retire", nil, idempotent(), http.StatusOK)
+	var remaining int
+	if err := s.pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.secrets WHERE id=$1 OR id=$2`, message.ToolCalls[0].ID, message.ToolCalls[1].ID).Scan(&remaining); err != nil || remaining != 0 {
+		t.Fatalf("retired state count %d, %v", remaining, err)
+	}
+	status, raw = restarted.do(consumer, "POST", path, continuation, headers)
+	if status != http.StatusGone || !strings.Contains(string(raw), "code_binding_retired") {
+		t.Fatalf("retired continuation = %s", describe(status, raw))
+	}
+}
+
+func newSignedCodeJourney(t *testing.T, s *service, owner *caller, proxy, roots string) (cooldownJourney, *caller) {
+	t.Helper()
+	journey := seedCooldownJourney(t, s.pool)
+	var user, installation string
+	credential, account := uuid.NewString(), uuid.NewString()
+	if err := s.pool.QueryRow(t.Context(), `SELECT created_by::text FROM olp.projects WHERE id=$1`, journey.route.ProjectID).Scan(&user); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.pool.QueryRow(t.Context(), `SELECT id::text FROM olp.installation WHERE singleton`).Scan(&installation); err != nil {
+		t.Fatal(err)
+	}
+
+	master, err := os.ReadFile(s.env.values["OLP_MASTER_KEY_FILE"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	ring, err := secrets.ParseRing(master)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, _ := json.Marshal(antigravityauth.Manifest())
+	digest := strings.Repeat("2", 64)
+	address := antigravityauth.Upstream
+	configuration, _ := json.Marshal(providers.Configuration{Identity: providerconfig.Identity[*string]{Kind: "plugin", AuthMode: "grant", ProfileID: antigravityauth.ProfileID, ProfileRevision: digest, Endpoint: &address}, Options: providers.Options{PluginOptions: map[string]string{"client_id": "fixture.apps.googleusercontent.com"}, Network: &egress.ConnectionOptions{ProxyURL: proxy, TrustRootsPEM: roots}}})
+	facts := map[string]string{"subject": "fixture-subject", "project_id": "fixture-project"}
+	principal := antigravityauth.Principal(facts["subject"], facts["project_id"])
+	encodedFacts, _ := json.Marshal(facts)
+	served, _ := json.Marshal(connectors.GrantCredential{PluginDigest: digest, ProfileID: antigravityauth.ProfileID, AccessToken: "fixture-token", Facts: facts})
+	tx, err := s.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	for _, statement := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO olp.plugins(digest,abi_version,manifest,module,size_bytes,etag,installed_by,approved_by,approved_at) VALUES($1,1,$2,'\x00',1,$3,$4,$4,now())`, []any{digest, manifest, uuid.NewString(), user}},
+		{`UPDATE olp.providers SET configuration=$2 WHERE id=$1`, []any{journey.provider, configuration}},
+		{`UPDATE olp.code_routes SET latest_revision_id=NULL WHERE id=$1`, []any{journey.route.ID}},
+		{`INSERT INTO olp.provider_credentials(id,provider_id,version,principal,plugin_digest,profile_id,grant_facts) VALUES($1,$2,3,$3,$4,$5,$6)`, []any{credential, journey.provider, principal, digest, antigravityauth.ProfileID, encodedFacts}},
+		{`INSERT INTO olp.code_accounts(id,project_id,provider_id,credential_id,principal,name,models,etag,created_by) VALUES($1,$2,$3,$4,$5,'signed-tools','["gemini-fixture"]',$6,$7)`, []any{account, journey.route.ProjectID, journey.provider, credential, principal, uuid.NewString(), user}},
+		{`INSERT INTO olp.code_pool_accounts(pool_id,account_id,weight) VALUES($1,$2,1)`, []any{journey.route.PoolID, account}},
+		{`UPDATE olp.code_accounts SET enabled=false WHERE id IN ($1,$2)`, []any{journey.first, journey.second}},
+		{`INSERT INTO olp.provider_grants(credential_id,expires_at) VALUES($1,now()+interval '1 hour')`, []any{credential}},
+	} {
+		if _, err := tx.Exec(t.Context(), statement.sql, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ring.Store(t.Context(), tx, installation, credential, secrets.ProviderCredential, served, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	key := s.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "signed-tools", "scopes": []string{"inference"}, "project_id": journey.route.ProjectID}, idempotent(), http.StatusCreated)
+	if _, err := s.pool.Exec(t.Context(), `INSERT INTO olp.code_pool_keys(pool_id,api_key_id) VALUES($1,$2)`, journey.route.PoolID, key["id"]); err != nil {
+		t.Fatal(err)
+	}
+	route := s.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": journey.route.ProjectID, "slug": "signed-" + uuid.NewString(), "pool_id": journey.route.PoolID, "models": []string{"gemini-fixture"}, "enabled": true, "chat_to_antigravity": true}, idempotent(), http.StatusCreated)
+	s.want(owner, "POST", "/api/v1/code/routes/"+route["id"].(string)+"/publish", nil, idempotent(etag(route)), http.StatusOK)
+	journey.route.ID, journey.route.Slug, journey.route.Models = route["id"].(string), route["slug"].(string), []string{"gemini-fixture"}
+	if err := s.pool.QueryRow(t.Context(), `SELECT latest_revision_id::text FROM olp.code_routes WHERE id=$1`, journey.route.ID).Scan(&journey.route.RevisionID); err != nil {
+		t.Fatal(err)
+	}
+	journey.key = key["id"].(string)
+	journey.store = codesessions.NewEncrypted(s.pool, installation, ring)
+	return journey, &caller{name: "signed-tools", token: key["secret"].(string)}
 }

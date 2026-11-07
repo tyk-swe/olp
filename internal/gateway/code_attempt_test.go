@@ -1099,6 +1099,125 @@ func TestTranslatedCodexPublishedOutputCap(t *testing.T) {
 	}
 }
 
+func TestAntigravitySignedToolDurability(t *testing.T) {
+	for _, policy := range []struct {
+		signed  bool
+		saves   int
+		refusal string
+	}{{false, 0, "code_upstream_unsupported_state"}, {true, 1, "code_continuation_unavailable"}} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("signed=%v/stream=%v", policy.signed, stream), func(t *testing.T) {
+				ledger := &signedTestLedger{fakeCodeLedger: fakeCodeLedger{}, saveErr: errors.New("storage unavailable")}
+				attempt := &codeAttempt{server: &Server{deps: Dependencies{CodeLedger: ledger}}}
+				body := `{"response":{"candidates":[{"content":{"parts":[{"functionCall":{"name":"read_file","args":{"path":"sample"}},"thoughtSignature":"private-signature"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":2,"totalTokenCount":10}}}`
+				contentType := "application/json"
+				if stream {
+					body = "data: " + body + "\n\n"
+					contentType = "text/event-stream"
+				}
+				response := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {contentType}}, Body: io.NopCloser(strings.NewReader(body))}
+				recorder := httptest.NewRecorder()
+				attempt.antigravityResponse(context.Background(), recorder, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), response, "gemini-model", codePayload{stream: stream, signedContinuation: policy.signed})
+				if ledger.saves != policy.saves || strings.Contains(recorder.Body.String(), "read_file") || strings.Contains(recorder.Body.String(), "private-signature") || !strings.Contains(recorder.Body.String(), policy.refusal) || attempt.usage.Total == nil || *attempt.usage.Total != 10 {
+					t.Fatalf("saves = %d, usage = %+v, response = %s", ledger.saves, attempt.usage, recorder.Body.String())
+				}
+			})
+		}
+	}
+}
+
+type signedTestLedger struct {
+	fakeCodeLedger
+	saveErr error
+	model   string
+	saves   int
+	calls   map[string]codesessions.SignedCall
+}
+
+func (l *signedTestLedger) SaveCodeContinuation(_ context.Context, _ codesessions.Permit, model string, calls []codesessions.SignedCall) error {
+	l.saves++
+	l.model = model
+	l.calls = make(map[string]codesessions.SignedCall)
+	for _, call := range calls {
+		l.calls[call.ID] = call
+	}
+	return l.saveErr
+}
+
+func (l *signedTestLedger) LoadCodeContinuation(_ context.Context, _ codesessions.Permit, model string, id string) (codesessions.SignedCall, error) {
+	if call, found := l.calls[id]; found && model == l.model {
+		return call, nil
+	}
+	return codesessions.SignedCall{}, errors.New("missing")
+}
+
+func TestAntigravitySignedToolRoundTrip(t *testing.T) {
+	ledger := &signedTestLedger{}
+	attempt := &codeAttempt{model: "gemini-native", server: &Server{deps: Dependencies{CodeLedger: ledger}, now: time.Now}}
+	body := `{"response":{"candidates":[{"content":{"parts":[{"text":"Looking"},{"functionCall":{"id":"provider-tool","name":"read_file","args":{"path":"sample","limit":1.0,"large":9007199254740993}},"thoughtSignature":"private-signature"},{"functionCall":{"name":"list_files","args":{}},"thoughtSignature":"private-second"}]},"finishReason":"STOP"}]}}`
+	recorder := httptest.NewRecorder()
+	attempt.antigravityResponse(context.Background(), recorder, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, "public-model", codePayload{signedContinuation: true})
+	var response struct {
+		Choices []struct {
+			Message json.RawMessage `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil || len(response.Choices) != 1 {
+		t.Fatalf("response = %s, %v", recorder.Body.String(), err)
+	}
+	var message struct {
+		ToolCalls []struct {
+			ID string `json:"id"`
+		} `json:"tool_calls"`
+	}
+	if err := json.Unmarshal(response.Choices[0].Message, &message); err != nil || len(message.ToolCalls) != 2 {
+		t.Fatalf("message = %s, %v", response.Choices[0].Message, err)
+	}
+	requestBody := []byte(fmt.Sprintf(`{"model":"gemini-native","messages":[{"role":"user","content":"Inspect"},%s,{"role":"tool","tool_call_id":%q,"content":"file result"},{"role":"tool","tool_call_id":%q,"content":"directory result"}]}`, response.Choices[0].Message, message.ToolCalls[0].ID, message.ToolCalls[1].ID))
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	payload, err := attempt.translateAntigravity(requestBody, request, "gemini-native", "project", true)
+	if err != nil || !strings.Contains(string(payload.body), `"thoughtSignature":"private-signature"`) || strings.Contains(string(payload.body), message.ToolCalls[0].ID) || !strings.Contains(string(payload.body), "file result") {
+		t.Fatalf("continuation = %s, %v", payload.body, err)
+	}
+	if strings.Count(string(payload.body), `"id":"provider-tool"`) != 2 || strings.Contains(string(payload.body), message.ToolCalls[1].ID) || !strings.Contains(string(payload.body), `"thoughtSignature":"private-second"`) {
+		t.Fatalf("parallel provider identity restoration = %s", payload.body)
+	}
+	partial := []byte(fmt.Sprintf(`{"model":"gemini-native","messages":[{"role":"user","content":"Inspect"},%s,{"role":"tool","tool_call_id":%q,"content":"file result"}]}`, response.Choices[0].Message, message.ToolCalls[0].ID))
+	if _, err := attempt.translateAntigravity(partial, request, "gemini-native", "project", true); err == nil {
+		t.Fatal("partial parallel tool results were accepted")
+	}
+	reversed := []byte(fmt.Sprintf(`{"model":"gemini-native","messages":[{"role":"user","content":"Inspect"},%s,{"role":"tool","tool_call_id":%q,"content":"directory result"},{"role":"tool","tool_call_id":%q,"content":"file result"}]}`, response.Choices[0].Message, message.ToolCalls[1].ID, message.ToolCalls[0].ID))
+	if _, err := attempt.translateAntigravity(reversed, request, "gemini-native", "project", true); err != nil {
+		t.Fatalf("reordered parallel results = %v", err)
+	}
+	premature := []byte(fmt.Sprintf(`{"model":"gemini-native","messages":[{"role":"user","content":"Inspect"},{"role":"tool","tool_call_id":%q,"content":"file result"},%s,{"role":"tool","tool_call_id":%q,"content":"directory result"}]}`, message.ToolCalls[0].ID, response.Choices[0].Message, message.ToolCalls[1].ID))
+	if _, err := attempt.translateAntigravity(premature, request, "gemini-native", "project", true); err == nil {
+		t.Fatal("tool result before its call was accepted")
+	}
+	missingState := ledger.calls[message.ToolCalls[1].ID]
+	delete(ledger.calls, message.ToolCalls[1].ID)
+	if _, err := attempt.translateAntigravity(requestBody, request, "gemini-native", "project", true); err == nil {
+		t.Fatal("missing parallel association was accepted")
+	}
+	ledger.calls[missingState.ID] = missingState
+	escaped := []byte(strings.Replace(string(requestBody), "sample", `\\u0073ample`, 1))
+	if _, err := attempt.translateAntigravity(escaped, request, "gemini-native", "project", true); err != nil {
+		t.Fatalf("escaped string argument = %v", err)
+	}
+	normalized := []byte(strings.Replace(string(requestBody), "1.0", "1", 1))
+	if _, err := attempt.translateAntigravity(normalized, request, "gemini-native", "project", true); err != nil {
+		t.Fatalf("reserialized numeric argument = %v", err)
+	}
+	changedInteger := []byte(strings.Replace(string(requestBody), "9007199254740993", "9007199254740992", 1))
+	if _, err := attempt.translateAntigravity(changedInteger, request, "gemini-native", "project", true); err == nil {
+		t.Fatal("changed large integer was accepted")
+	}
+	altered := []byte(strings.Replace(string(requestBody), "sample", "another", 1))
+	if _, err := attempt.translateAntigravity(altered, request, "gemini-native", "project", true); err == nil {
+		t.Fatal("altered signed call was accepted")
+	}
+}
+
 func TestGrokPublishedTransportPreservesTextAndRefusesMedia(t *testing.T) {
 	for _, test := range []struct {
 		name, body string

@@ -140,7 +140,7 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 	file, nativeInstructions := platformInstructions(client, platform)
 	instructions := nativeInstructions + func() string {
 		if route.ChatToAntigravity && slices.Contains(adapters, codemode.AdapterAntigravity) {
-			return " This published route enables the controlled Antigravity Gemini target for Chat text and function tools over HTTP/SSE. Signed thought state, reasoning controls, media and server tools are refused. Client identity and prompt compatibility remain disabled. Current-model tool acceptance and live subscription qualification remain pending."
+			return " This published route enables the controlled Antigravity Gemini target for Chat text and function tools over HTTP/SSE. Republish the route to enable encrypted signed function continuation bound to its root conversation and selected account. Other signed parts, reasoning controls, media and server tools are refused. Missing continuation state requires retiring the root conversation and starting a new one. This path may carry provider terms and account suspension risks. Client identity and prompt compatibility remain disabled. Current-model tool acceptance and live subscription qualification remain pending."
 		}
 		return ""
 	}() + func() string {
