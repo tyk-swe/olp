@@ -49,7 +49,8 @@ type vendorRequest struct {
 	Tools  []struct {
 		Name string `json:"name"`
 	} `json:"tools"`
-	Input json.RawMessage `json:"input"`
+	Input        json.RawMessage `json:"input"`
+	Instructions string          `json:"instructions"`
 }
 
 func refuseVendor(w http.ResponseWriter, status int, body string) {
@@ -140,7 +141,7 @@ func newVendorMux(codexToken string, toolProof, summaryProof chan<- struct{}) *h
 			refuseVendor(w, http.StatusUnauthorized, badKey)
 			return
 		}
-		fixtureResponses(w, r, toolProof, "exec_command")
+		fixtureGrok(w, r, toolProof, summaryProof)
 	})
 	mux.HandleFunc("POST /api/anthropic/v1/messages", func(w http.ResponseWriter, r *http.Request) {
 		if bearer(r) != "Bearer "+zaiKey {
@@ -508,6 +509,45 @@ func fixtureAntigravity(w http.ResponseWriter, r *http.Request, toolProof, summa
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(body)
+}
+
+func fixtureGrok(w http.ResponseWriter, r *http.Request, toolProof, summaryProof chan<- struct{}) {
+	body, err := io.ReadAll(r.Body)
+	var request vendorRequest
+	if err != nil || json.Unmarshal(body, &request) != nil {
+		refuseVendor(w, http.StatusBadRequest, `{"error":{"message":"fixture request invalid"}}`)
+		return
+	}
+	if strings.Contains(request.Instructions, "Summarize this complete conversation") {
+		if len(request.Tools) != 0 || !bytes.Contains(request.Input, []byte("olp-tool-round-trip")) {
+			refuseVendor(w, http.StatusBadRequest, `{"error":{"message":"fixture summary requires complete tool history"}}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "resp_fixture_summary", "object": "response", "model": vendorModel, "status": "completed",
+			"output": []any{map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]string{"type": "output_text", "text": "The fixture tool was executed successfully. Answer with " + vendorAnswer}}}},
+			"usage":  map[string]int{"input_tokens": 4, "output_tokens": 6, "total_tokens": 10},
+		})
+		return
+	}
+	if bytes.Contains(request.Input, []byte("Conversation summary")) && bytes.Contains(request.Input, []byte("fixture tool was executed successfully")) {
+		select {
+		case summaryProof <- struct{}{}:
+		default:
+		}
+		request.Tools = nil
+		encoded, encodeErr := json.Marshal(request)
+		if encodeErr != nil {
+			refuseVendor(w, http.StatusBadRequest, `{"error":{"message":"fixture continuation invalid"}}`)
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(encoded))
+		fixtureResponses(w, r, toolProof, "exec_command")
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	fixtureResponses(w, r, toolProof, "exec_command")
 }
 
 func fixtureResponses(w http.ResponseWriter, r *http.Request, toolProof chan<- struct{}, toolName string) {
