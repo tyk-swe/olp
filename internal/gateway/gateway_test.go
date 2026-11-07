@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/google/uuid"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/codeadapter"
@@ -897,6 +898,58 @@ func TestResearchStreamFollowsOutagePolicy(t *testing.T) {
 			}
 			if admission.FailOpenTotal() != 1 {
 				t.Fatalf("fail-open total = %d, want 1", admission.FailOpenTotal())
+			}
+		})
+	}
+}
+
+func TestBedrockStreamClassifiesRequestEndings(t *testing.T) {
+	for _, tc := range []struct {
+		name, class, outcome, errorClass string
+		overallTimeout                   int64
+	}{
+		{"client cancelled", classCancelled, "cancelled", "client_cancelled", 5000},
+		{"overall timeout", classTimeout, "failure", "gateway_timeout", 300},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, Config{})
+			h.republish(func(snapshot *routing.Snapshot, _, _ routing.Provider) {
+				for id, provider := range snapshot.Providers {
+					provider.Kind, provider.ProfileID, provider.ProfileRevision, provider.VendorID = "bedrock", "bedrock-converse", connectors.ProfileRevision, ""
+					provider.CloudRegion, provider.AuthMode = "us-east-1", "static"
+					provider.Capabilities = []routing.Capability{{Model: provider.Capabilities[0].Model, Operation: "generation", Surface: "bedrock", Mode: "streaming"}}
+					snapshot.Providers[id] = provider
+				}
+				route := snapshot.Routes[routeSlug]
+				route.OverallTimeout = tc.overallTimeout
+				snapshot.Routes[routeSlug] = route
+			})
+			serveBedrock(t, h)
+			started := bedrockEvent(t, "messageStart", map[string]any{"role": "assistant"})
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
+				if err := eventstream.NewEncoder().Encode(w, *started); err != nil {
+					t.Error(err)
+					return
+				}
+				_ = http.NewResponseController(w).Flush()
+				<-r.Context().Done()
+			})
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			resp := h.do(ctx, http.MethodPost, "/bedrock/model/team-chat/converse-stream", fullKey, []byte(`{"messages":[{"role":"user","content":[{"text":"hello"}]}],"inferenceConfig":{"maxTokens":16}}`), nil)
+			defer resp.Body.Close()
+			if _, err := eventstream.NewDecoder().Decode(resp.Body, nil); err != nil || resp.StatusCode != http.StatusOK {
+				t.Fatalf("stream did not start: status=%d err=%v", resp.StatusCode, err)
+			}
+			if tc.class == classCancelled {
+				cancel()
+			} else {
+				_, _ = io.ReadAll(resp.Body)
+			}
+			env := h.sink.last(t)
+			if env.Outcome != tc.outcome || env.ErrorClass != tc.errorClass || len(env.Attempts) != 1 || env.Attempts[0].Class != tc.class {
+				t.Fatalf("outcome=%q error=%q attempts=%+v", env.Outcome, env.ErrorClass, env.Attempts)
 			}
 		})
 	}

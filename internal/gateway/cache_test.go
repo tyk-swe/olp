@@ -225,21 +225,7 @@ func TestResponseCacheClientSurfaces(t *testing.T) {
 					}))
 					path, body := tc.path, tc.body
 					if tc.kind == "bedrock" {
-						credentials := map[string][]byte{}
-						for _, provider := range h.rt.release.Snapshot().Providers() {
-							credentials[*provider.ActiveCredential] = []byte(`{"access_key_id":"TESTBEDROCKKEY123456","secret_access_key":"test-bedrock-secret-for-cache"}`)
-						}
-						var err error
-						h.rt.release, err = release.NewRelease(h.rt.release.ID, h.rt.release.Sequence, h.rt.release.Snapshot().Clone(), credentials)
-						if err != nil {
-							t.Fatal(err)
-						}
-						mux := http.NewServeMux()
-						h.gateway.Register(mux)
-						mux.HandleFunc("POST /bedrock/model/{model}/converse", h.gateway.bedrockConverse)
-						mux.HandleFunc("POST /bedrock/model/{model}/converse-stream", h.gateway.bedrockConverseStream)
-						h.server = httptest.NewServer(mux)
-						t.Cleanup(h.server.Close)
+						serveBedrock(t, h)
 					}
 					reply, contentType := []byte(tc.reply), "application/json"
 					if mode == "streaming" {
@@ -298,6 +284,25 @@ func TestResponseCacheClientSurfaces(t *testing.T) {
 			}
 		})
 	}
+}
+
+func serveBedrock(t *testing.T, h *harness) {
+	t.Helper()
+	credentials := map[string][]byte{}
+	for _, provider := range h.rt.release.Snapshot().Providers() {
+		credentials[*provider.ActiveCredential] = []byte(`{"access_key_id":"TESTBEDROCKKEY123456","secret_access_key":"test-bedrock-secret-for-cache"}`)
+	}
+	var err error
+	h.rt.release, err = release.NewRelease(h.rt.release.ID, h.rt.release.Sequence, h.rt.release.Snapshot().Clone(), credentials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	h.gateway.Register(mux)
+	mux.HandleFunc("POST /bedrock/model/{model}/converse", h.gateway.bedrockConverse)
+	mux.HandleFunc("POST /bedrock/model/{model}/converse-stream", h.gateway.bedrockConverseStream)
+	h.server = httptest.NewServer(mux)
+	t.Cleanup(h.server.Close)
 }
 
 func bedrockEvent(t *testing.T, kind string, payload any) *eventstream.Message {
