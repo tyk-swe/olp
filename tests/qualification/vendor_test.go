@@ -49,7 +49,8 @@ type vendorRequest struct {
 	Tools  []struct {
 		Name string `json:"name"`
 	} `json:"tools"`
-	Input json.RawMessage `json:"input"`
+	Input        json.RawMessage `json:"input"`
+	Instructions string          `json:"instructions"`
 }
 
 func refuseVendor(w http.ResponseWriter, status int, body string) {
@@ -140,7 +141,7 @@ func newVendorMux(codexToken string, toolProof, summaryProof chan<- struct{}) *h
 			refuseVendor(w, http.StatusUnauthorized, badKey)
 			return
 		}
-		fixtureResponses(w, r, toolProof, "exec_command")
+		fixtureGrok(w, r, toolProof, summaryProof)
 	})
 	mux.HandleFunc("POST /api/anthropic/v1/messages", func(w http.ResponseWriter, r *http.Request) {
 		if bearer(r) != "Bearer "+zaiKey {
@@ -432,9 +433,16 @@ func fixtureAntigravity(w http.ResponseWriter, r *http.Request, toolProof, summa
 		}
 	}
 	if bytes.Contains(envelope.Request.SystemInstruction, []byte("Summarize this complete conversation")) {
-		if len(envelope.Request.Tools) != 0 {
+		complete := slices.ContainsFunc(envelope.Request.Contents, func(content antigravityFixtureContent) bool {
+			return slices.ContainsFunc(content.Parts, func(part antigravityFixturePart) bool { return fixtureSummaryToolOutput(part.Text) })
+		})
+		if len(envelope.Request.Tools) != 0 || !complete {
 			refuseVendor(w, http.StatusBadRequest, `{"error":{"message":"summary attempted tools"}}`)
 			return
+		}
+		select {
+		case toolProof <- struct{}{}:
+		default:
 		}
 		body, _ := json.Marshal(antigravityFixtureResponse{Response: antigravityFixtureResult{Candidates: []antigravityFixtureCandidate{{Content: antigravityFixtureContent{Role: "model", Parts: []antigravityFixturePart{{Text: "The fixture tool was executed successfully. Answer with " + vendorAnswer}}}, FinishReason: "STOP"}}, Usage: antigravityFixtureUsage{Input: 4, Output: 6, Total: 10}}})
 		w.Header().Set("Content-Type", "application/json")
@@ -510,11 +518,51 @@ func fixtureAntigravity(w http.ResponseWriter, r *http.Request, toolProof, summa
 	_, _ = w.Write(body)
 }
 
+func fixtureGrok(w http.ResponseWriter, r *http.Request, toolProof, summaryProof chan<- struct{}) {
+	body, err := io.ReadAll(r.Body)
+	var request vendorRequest
+	if err != nil || json.Unmarshal(body, &request) != nil {
+		refuseVendor(w, http.StatusBadRequest, `{"error":{"message":"fixture request invalid"}}`)
+		return
+	}
+	if strings.Contains(request.Instructions, "Summarize this complete conversation") {
+		var transcript string
+		if len(request.Tools) != 0 || json.Unmarshal(request.Input, &transcript) != nil || !fixtureSummaryToolOutput(transcript) {
+			refuseVendor(w, http.StatusBadRequest, `{"error":{"message":"fixture summary requires complete tool history"}}`)
+			return
+		}
+		select {
+		case toolProof <- struct{}{}:
+		default:
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "resp_fixture_summary", "object": "response", "model": vendorModel, "status": "completed",
+			"output": []any{map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]string{"type": "output_text", "text": "The fixture tool was executed successfully. Answer with " + vendorAnswer}}}},
+			"usage":  map[string]int{"input_tokens": 4, "output_tokens": 6, "total_tokens": 10},
+		})
+		return
+	}
+	if bytes.Contains(request.Input, []byte("Conversation summary")) && bytes.Contains(request.Input, []byte("fixture tool was executed successfully")) {
+		select {
+		case summaryProof <- struct{}{}:
+		default:
+		}
+		fixtureResponsesRequest(w, vendorRequest{Model: request.Model, Stream: request.Stream, Input: request.Input, Instructions: request.Instructions}, toolProof, "exec_command")
+		return
+	}
+	fixtureResponsesRequest(w, request, toolProof, "exec_command")
+}
+
 func fixtureResponses(w http.ResponseWriter, r *http.Request, toolProof chan<- struct{}, toolName string) {
 	request, ok := decodeVendor(w, r, `{"error":{"message":"unknown model"}}`)
 	if !ok {
 		return
 	}
+	fixtureResponsesRequest(w, request, toolProof, toolName)
+}
+
+func fixtureResponsesRequest(w http.ResponseWriter, request vendorRequest, toolProof chan<- struct{}, toolName string) {
 	selectedTool := func() string {
 		for _, tool := range request.Tools {
 			if tool.Name == "Bash" || tool.Name == "bash" {
@@ -545,4 +593,22 @@ func fixtureResponses(w http.ResponseWriter, r *http.Request, toolProof chan<- s
 	terminal, _ := json.Marshal(map[string]any{"type": "response.completed", "sequence_number": 5, "response": response})
 	w.Header().Set("Content-Type", "text/event-stream")
 	_, _ = fmt.Fprintf(w, "event: response.created\ndata: %s\n\nevent: response.output_item.added\ndata: %s\n\nevent: response.content_part.added\ndata: %s\n\nevent: response.output_text.delta\ndata: %s\n\nevent: response.output_item.done\ndata: %s\n\nevent: response.completed\ndata: %s\n\n", created, added, part, delta, item, terminal)
+}
+
+func fixtureSummaryToolOutput(transcript string) bool {
+	start := strings.Index(transcript, "\n[")
+	if start < 0 {
+		return false
+	}
+	type summaryItem struct {
+		Type   string `json:"type"`
+		Output string `json:"output"`
+	}
+	var items []summaryItem
+	if json.Unmarshal([]byte(transcript[start+1:]), &items) != nil {
+		return false
+	}
+	return slices.ContainsFunc(items, func(item summaryItem) bool {
+		return item.Type == "function_call_output" && strings.Contains(item.Output, "olp-tool-round-trip")
+	})
 }

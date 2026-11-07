@@ -484,7 +484,7 @@ func (s *service) refreshGrokSubscription(credentialID string) {
 }
 
 const sandboxBridge = `
-import select, socket, socketserver, subprocess, sys, threading
+import os, pathlib, select, socket, socketserver, subprocess, sys, threading
 
 class Handler(socketserver.BaseRequestHandler):
     def handle(self):
@@ -500,6 +500,12 @@ class Handler(socketserver.BaseRequestHandler):
 
 server = socketserver.ThreadingTCPServer(('127.0.0.1', 18765), Handler)
 threading.Thread(target=server.serve_forever, daemon=True).start()
+configuration = os.environ.pop('OLP_FIXTURE_CODEX_CONFIGURATION', '')
+if configuration:
+    home = pathlib.Path('/work/.codex')
+    home.mkdir()
+    (home / 'config.toml').write_text(configuration)
+    os.environ['CODEX_HOME'] = str(home)
 process = subprocess.Popen(sys.argv[1:])
 sys.stderr.write('\x00client-started\x00')
 sys.stderr.flush()
@@ -577,16 +583,8 @@ func runFixtureClient(t *testing.T, client, binary, bridge, slug, key, configura
 			}
 			return "1000000"
 		}()
-		compactProtocol := func() string {
-			if compact {
-				return `"v2"`
-			}
-			return `"unsupported"`
-		}()
-		return sandboxClient(t, binary, bridge, []string{"OLP_API_KEY=" + key}, "exec", "--skip-git-repo-check", "--ephemeral", "-m", vendorModel,
-			"-c", "model_providers.olp.capabilities.remote_compaction="+compactProtocol, "-c", "model_auto_compact_token_limit="+compactLimit, "-c", `model_provider="olp"`, "-c", `model_providers.olp.name="OLP"`, "-c", `model_providers.olp.base_url="`+base+`"`,
-			"-c", `model_providers.olp.env_key="OLP_API_KEY"`, "-c", `model_providers.olp.wire_api="responses"`,
-			"-c", `model_providers.olp.supports_websockets=false`, "-c", `check_for_update_on_startup=false`, "-c", `features.apply_patch_freeform=false`, "-c", `features.multi_agent=false`, "-c", `features.goals=false`, "-c", `web_search="disabled"`, "-c", `model_reasoning_summary="none"`, "-c", `model_reasoning_effort="none"`, "--dangerously-bypass-approvals-and-sandbox", prompt)
+		return sandboxClient(t, binary, bridge, []string{"OLP_API_KEY=" + key, "OLP_FIXTURE_CODEX_CONFIGURATION=" + configuration}, "exec", "--skip-git-repo-check", "--ephemeral", "-m", vendorModel,
+			"-c", "model_auto_compact_token_limit="+compactLimit, "-c", `model_providers.olp.supports_websockets=false`, "-c", `check_for_update_on_startup=false`, "-c", `features.apply_patch_freeform=false`, "-c", `features.multi_agent=false`, "-c", `features.goals=false`, "-c", `web_search="disabled"`, "-c", `model_reasoning_summary="none"`, "-c", `model_reasoning_effort="none"`, "--dangerously-bypass-approvals-and-sandbox", prompt)
 	case "claude-code":
 		if toolRoundTrip {
 			return sandboxClient(t, binary, bridge, fixtureConfigurationEnvironment(t, configuration, key), "--print", "--bare", "--no-session-persistence", "--tools", "Bash", "--allowedTools", "Bash", "--max-turns", "3", "--model", vendorModel, "Execute printf olp-tool-round-trip using Bash, then say hello.")
@@ -729,7 +727,7 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 						return []string{"gemini-fixture"}
 					}
 					return []string{vendorModel}
-				}(), "enabled": true, "messages_to_codex": spec.toolRoundTrip && spec.seed.adapter == "codex", "messages_codex_safety_identifier": spec.toolRoundTrip && spec.seed.adapter == "codex", "chat_to_codex": spec.toolRoundTrip && spec.seed.adapter == "codex", "responses_to_grok": spec.seed.adapter == "grok-build" && spec.protocol == "responses", "chat_to_grok": spec.seed.adapter == "grok-build" && spec.protocol == "chat", "messages_to_grok": spec.seed.adapter == "grok-build" && spec.protocol == "messages", "messages_grok_safety_identifier": spec.seed.adapter == "grok-build" && spec.protocol == "messages", "grok_cli_identity": spec.seed.adapter == "grok-build", "chat_to_antigravity": spec.signedContinuation && spec.protocol == "chat", "responses_to_antigravity": spec.signedContinuation && spec.protocol == "responses", "responses_antigravity_compatibility": spec.signedContinuation && spec.protocol == "responses", "messages_to_antigravity": spec.signedContinuation && spec.protocol == "messages", "messages_antigravity_safety_identifier": spec.signedContinuation && spec.protocol == "messages", "summary_compaction": spec.client.name == "codex" && spec.seed.adapter == "antigravity", "model_rewriting": spec.signedContinuation, "aliases": func() map[string]string {
+				}(), "enabled": true, "messages_to_codex": spec.toolRoundTrip && spec.seed.adapter == "codex", "messages_codex_safety_identifier": spec.toolRoundTrip && spec.seed.adapter == "codex", "chat_to_codex": spec.toolRoundTrip && spec.seed.adapter == "codex", "responses_to_grok": spec.seed.adapter == "grok-build" && spec.protocol == "responses", "chat_to_grok": spec.seed.adapter == "grok-build" && spec.protocol == "chat", "messages_to_grok": spec.seed.adapter == "grok-build" && spec.protocol == "messages", "messages_grok_safety_identifier": spec.seed.adapter == "grok-build" && spec.protocol == "messages", "grok_cli_identity": spec.seed.adapter == "grok-build", "chat_to_antigravity": spec.signedContinuation && spec.protocol == "chat", "responses_to_antigravity": spec.signedContinuation && spec.protocol == "responses", "responses_antigravity_compatibility": spec.signedContinuation && spec.protocol == "responses", "messages_to_antigravity": spec.signedContinuation && spec.protocol == "messages", "messages_antigravity_safety_identifier": spec.signedContinuation && spec.protocol == "messages", "summary_compaction": spec.client.name == "codex" && (spec.seed.adapter == "antigravity" || spec.seed.adapter == "grok-build"), "model_rewriting": spec.signedContinuation, "aliases": func() map[string]string {
 					if spec.signedContinuation {
 						return map[string]string{vendorModel: "gemini-fixture"}
 					}
@@ -747,7 +745,7 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 					return "", false, err
 				}
 				configuration := func() string {
-					if !lane.toolRoundTrip || (lane.client.name != "claude-code" && lane.client.name != "opencode") {
+					if lane.client.name != "codex" && (!lane.toolRoundTrip || (lane.client.name != "claude-code" && lane.client.name != "opencode")) {
 						return ""
 					}
 					config := s.want(owner, "GET", "/api/v1/code/routes/"+route["id"].(string)+"/client-config?client="+lane.client.name+"&platform=linux&gateway_url=http%3A%2F%2F127.0.0.1%3A18765", nil, nil, http.StatusOK)
@@ -768,7 +766,7 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 						return output, executed, fmt.Errorf("client did not execute the fixture tool and continue")
 					}
 				}
-				if lane.client.name == "codex" && lane.seed.adapter == "antigravity" {
+				if lane.client.name == "codex" && (lane.seed.adapter == "antigravity" || lane.seed.adapter == "grok-build") {
 					compacted, ran, compactErr := runFixtureClient(t, lane.client.name, binary, bridge, slug, key["secret"].(string), configuration, true, true)
 					cleaned := strings.ReplaceAll(compacted, key["secret"].(string), "[redacted]")
 					if compactErr != nil {
@@ -776,6 +774,11 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 					}
 					if !strings.Contains(cleaned, vendorAnswer) {
 						return cleaned, ran, fmt.Errorf("compaction continuation did not return the fixture answer")
+					}
+					select {
+					case <-toolProof:
+					default:
+						return cleaned, ran, fmt.Errorf("compaction workflow did not execute the fixture tool and continue")
 					}
 					select {
 					case <-summaryProof:
