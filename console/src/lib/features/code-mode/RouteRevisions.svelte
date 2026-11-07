@@ -38,6 +38,16 @@
             Pool {revision.route.pool_id} · {revision.route.models.join(', ')}
           </p>
           <p>
+            Responses to Grok Build {revision.route.responses_to_grok
+              ? 'enabled'
+              : 'disabled'}. Grok CLI identity compatibility {revision.route
+              .grok_cli_identity
+              ? 'enabled'
+              : 'disabled'}. xAI consumer terms restrict account sharing and
+            violations may risk account suspension. Provider acceptance of this
+            independent gateway and pooled accounts is unverified.
+          </p>
+          <p>
             Codex CLI identity compatibility {revision.route.codex_cli_identity
               ? 'enabled. Codex subscription requests with no nonblank Originator receive Originator=codex_cli_rs. Explicit identity headers and prompts are preserved. This may violate provider terms and risk account suspension.'
               : 'disabled. Identity headers and prompts are preserved.'}

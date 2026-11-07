@@ -171,6 +171,8 @@
   let messagesCodexSafetyIdentifier = $state(
     initial?.messages_codex_safety_identifier ?? false
   );
+  let responsesToGrok = $state(initial?.responses_to_grok ?? false);
+  let grokCLIIdentity = $state(initial?.grok_cli_identity ?? false);
   let codexCLIIdentity = $state(initial?.codex_cli_identity ?? false);
   let chatToAntigravity = $state(initial?.chat_to_antigravity ?? false);
   let allowanceOrdering = $state(initial?.allowance_ordering ?? false);
@@ -279,6 +281,8 @@
         chat_to_codex: chatToCodex,
         messages_to_codex: messagesToCodex,
         messages_codex_safety_identifier: messagesCodexSafetyIdentifier,
+        responses_to_grok: responsesToGrok,
+        grok_cli_identity: grokCLIIdentity,
         codex_cli_identity: codexCLIIdentity,
         chat_to_antigravity: chatToAntigravity,
         allowance_ordering: allowanceOrdering,
@@ -547,6 +551,36 @@
     Signed thought state, reasoning controls, media and server tools are
     refused. This translation preserves identity and prompts. Current models and
     live subscription tool workflows remain unqualified.
+  </p>
+  <label class="choice">
+    <input
+      id="code-responses-to-grok"
+      type="checkbox"
+      bind:checked={responsesToGrok}
+    />
+    Translate Responses to Grok Build
+  </label>
+  <p>
+    Disabled by default. Publication enables supported Responses text and
+    function tools over HTTP/SSE. Translation preserves client identity.
+    Existing revisions retain their published behavior until republished.
+  </p>
+  <label class="choice">
+    <input
+      id="code-grok-cli-identity"
+      type="checkbox"
+      bind:checked={grokCLIIdentity}
+    />
+    Enable Grok CLI identity compatibility
+  </label>
+  <p>
+    Disabled by default and independently published. With this policy disabled,
+    OLP identifies itself truthfully. xAI consumer terms restrict account
+    sharing. Violations may risk account suspension. Provider acceptance of this
+    independent gateway and pooled accounts is unverified. Enterprise agreements
+    may differ. These disclosures do not authorize provider use and require no
+    acknowledgement. Google consumer Antigravity terms also prohibit third-party
+    access and identify suspension risk.
   </p>
   <label class="choice">
     <input
