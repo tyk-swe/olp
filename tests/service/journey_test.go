@@ -11,6 +11,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -20,8 +22,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
+	"github.com/tyk-swe/olp/internal/notifications"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedworker"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -705,5 +709,101 @@ func TestUsageReportsKeepWholePeriodAllocationAndCompleteness(t *testing.T) {
 	}
 	if _, err := usage.ReadCompleteness(t.Context(), pool, invalidFilters, now); err == nil {
 		t.Fatal("completeness accepted more unpriced requests than total requests")
+	}
+}
+
+func TestBudgetThresholdNotificationsUseBudgetBasis(t *testing.T) {
+	pool, _ := newDatabase(t)
+	if err := database.Migrate(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+	fixture := newUsageFixture(t, pool)
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	defer receiver.Close()
+	destination := uuid.NewString()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_destinations(id,name,url,project_id,etag,created_by)
+ VALUES($1,'budget basis',$2,$3,$1,$4)`, destination, receiver.URL, fixture.projectID, fixture.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	type expectation struct {
+		name, rule string
+		amount     int
+	}
+	var expected []expectation
+	for _, kind := range []string{"api_key", "budget_group"} {
+		for _, budget := range []struct {
+			basis                  string
+			cost, charge, expected int
+		}{{"", 80, 40, 80}, {"cost", 80, 40, 80}, {"charge", 40, 80, 80}, {"charge", 80, 40, 0}} {
+			basis := budget.basis
+			subject := uuid.NewString()
+			policy := map[string]string{"daily_cost_limit": "100", "weekly_cost_limit": "100", "monthly_cost_limit": "100"}
+			if basis != "" {
+				policy["cost_basis"] = basis
+			}
+			raw, err := json.Marshal(policy)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kind == "api_key" {
+				_, err = pool.Exec(t.Context(), `INSERT INTO olp.api_keys(id,lookup_id,digest,name,created_by,policy,etag,project_id)
+     VALUES($1::uuid,$1::text,decode(repeat('00',32),'hex'),$1::text,$2,$3,$1::uuid,$4)`, subject, fixture.ownerID, raw, fixture.projectID)
+			} else {
+				_, err = pool.Exec(t.Context(), `INSERT INTO olp.budget_groups(id,name,project_id,etag,created_by,daily_cost_limit,weekly_cost_limit,monthly_cost_limit,cost_basis)
+     VALUES($1::uuid,$1::text,$2,$1::uuid,$3,100,100,100,COALESCE(NULLIF($4,''),'cost'))`, subject, fixture.projectID, fixture.ownerID, basis)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, window := range []string{"day", "week", "month"} {
+				table, owner := "olp.api_key_cost_windows", "api_key_id"
+				if kind == "budget_group" {
+					table, owner = "olp.budget_group_cost_windows", "budget_group_id"
+				}
+				if _, err := pool.Exec(t.Context(), `INSERT INTO `+table+`(`+owner+`,window_kind,window_id,accrued,charged,unpriced_attempts,weekly_complete)
+     SELECT $1,$2,window_id,$3,$4,0,true FROM olp.budget_window($2,now())`, subject, window, budget.cost, budget.charge); err != nil {
+					t.Fatal(err)
+				}
+				rule := uuid.NewString()
+				if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_rules(id,name,project_id,event,subject_kind,subject_id,window_kind,threshold_percent,destination_id,etag,created_by)
+     VALUES($1,'budget basis',$2,'budget.threshold',$3,$4,$5,75,$6,$1,$7)`, rule, fixture.projectID, kind, subject, window, destination, fixture.ownerID); err != nil {
+					t.Fatal(err)
+				}
+				expected = append(expected, expectation{name: fmt.Sprintf("%s/%s/%s/cost%d/charge%d", kind, basis, window, budget.cost, budget.charge), rule: rule, amount: budget.expected})
+			}
+		}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		notifications.RunDelivery(ctx, notifications.DeliveryConfig{Pool: pool, NewID: uuid.NewString, Now: time.Now,
+			Log:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+			Sender: notifications.NewSender(egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}})})
+	}()
+	defer func() { cancel(); <-done }()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var success bool
+		if err := pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp.worker_task_health WHERE task='notification_delivery' AND successes_total>0)`).Scan(&success); err != nil {
+			t.Fatal(err)
+		}
+		if success {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("notification worker did not finish its first pass")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	for _, want := range expected {
+		var amount int
+		var delivered bool
+		if err := pool.QueryRow(t.Context(), `SELECT COALESCE(sum(accrued),0)::int,COALESCE(bool_and(status='delivered'),false) FROM olp.notification_deliveries WHERE rule_id=$1`, want.rule).Scan(&amount, &delivered); err != nil {
+			t.Fatal(err)
+		}
+		if amount != want.amount || delivered != (want.amount != 0) {
+			t.Errorf("%s amount=%d delivered=%t, want amount=%d", want.name, amount, delivered, want.amount)
+		}
 	}
 }

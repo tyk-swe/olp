@@ -32,8 +32,13 @@ const dueAlertSQL = `SELECT r.id::text,r.threshold_percent,r.window_kind,
  CASE r.subject_kind WHEN 'api_key' THEN k.id ELSE g.id END::text AS subject_id,
  CASE WHEN r.window_kind='day' THEN COALESCE(kwd.window_id,gwd.window_id)
       WHEN r.window_kind='week' THEN COALESCE(kww.window_id,gww.window_id) ELSE COALESCE(kwm.window_id,gwm.window_id) END AS window_id,
- CASE WHEN r.window_kind='day' THEN COALESCE(kwd.accrued,gwd.accrued,0)
-      WHEN r.window_kind='week' THEN COALESCE(kww.accrued,gww.accrued,0) ELSE COALESCE(kwm.accrued,gwm.accrued,0) END::text AS accrued,
+ CASE WHEN COALESCE(k.effective_limits,g.effective_limits)->>'cost_basis'='charge' THEN
+   CASE WHEN r.window_kind='day' THEN COALESCE(kwd.charged,gwd.charged,0)
+        WHEN r.window_kind='week' THEN COALESCE(kww.charged,gww.charged,0) ELSE COALESCE(kwm.charged,gwm.charged,0) END
+ ELSE
+   CASE WHEN r.window_kind='day' THEN COALESCE(kwd.accrued,gwd.accrued,0)
+        WHEN r.window_kind='week' THEN COALESCE(kww.accrued,gww.accrued,0) ELSE COALESCE(kwm.accrued,gwm.accrued,0) END
+ END::text AS accrued,
  CASE WHEN r.subject_kind='api_key' AND r.window_kind='day' THEN k.effective_limits->>'daily_cost_limit'
       WHEN r.subject_kind='api_key' AND r.window_kind='week' THEN k.effective_limits->>'weekly_cost_limit' WHEN r.subject_kind='api_key' THEN k.effective_limits->>'monthly_cost_limit'
       WHEN r.window_kind='day' THEN g.effective_limits->>'daily_cost_limit' WHEN r.window_kind='week' THEN g.effective_limits->>'weekly_cost_limit' ELSE g.effective_limits->>'monthly_cost_limit' END AS limit,
