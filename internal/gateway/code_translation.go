@@ -31,32 +31,40 @@ type codePayload struct {
 
 func codeParseMessages(body []byte, r *http.Request, model string, safetyMapping bool) (*wire.Request, string, error) {
 	refused := codemode.Refuse(422, "code_translation_unsupported_semantics")
-	query, queryErr := url.ParseQuery(r.URL.RawQuery)
-	if queryErr != nil || (len(query) != 0 && (len(query) != 1 || !slices.Equal(query["beta"], []string{"true"}))) || r.Header.Get("Anthropic-Beta") != "" || len(r.Trailer) != 0 {
-		return nil, "", refused
-	}
 	request, requestErr := protocols.ParseForModel(wire.Anthropic, body, model)
 	if requestErr != nil {
 		return nil, "", refused
 	}
-	if request.Field("stream_options") != nil {
-		return nil, "", refused
-	}
-	root := request.OIF().Document().Root()
-	if !codeTextContent(root, "system") {
-		return nil, "", refused
-	}
-	messages, _ := root.Lookup("messages")
-	for _, message := range messages.Elements() {
-		if !codeMessagesContent(message) {
-			return nil, "", refused
-		}
+	if err := codeValidateMessages(request, r); err != nil {
+		return nil, "", err
 	}
 	prepared, safety, identityErr := codeMessagesSafetyIdentifier(request, safetyMapping)
 	if identityErr != nil {
 		return nil, "", identityErr
 	}
 	return prepared, safety, nil
+}
+
+func codeValidateMessages(request *wire.Request, r *http.Request) error {
+	refused := codemode.Refuse(422, "code_translation_unsupported_semantics")
+	query, queryErr := url.ParseQuery(r.URL.RawQuery)
+	if queryErr != nil || (len(query) != 0 && (len(query) != 1 || !slices.Equal(query["beta"], []string{"true"}))) || r.Header.Get("Anthropic-Beta") != "" || len(r.Trailer) != 0 {
+		return refused
+	}
+	if request.Field("stream_options") != nil {
+		return refused
+	}
+	root := request.OIF().Document().Root()
+	if !codeTextContent(root, "system") {
+		return refused
+	}
+	messages, _ := root.Lookup("messages")
+	for _, message := range messages.Elements() {
+		if !codeMessagesContent(message) {
+			return refused
+		}
+	}
+	return nil
 }
 
 func codeTranslateMessages(body []byte, r *http.Request, model string, minimum, safetyMapping bool) (codePayload, error) {

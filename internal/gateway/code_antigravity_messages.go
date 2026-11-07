@@ -4,8 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/base32"
 	"net/http"
-	"net/url"
-	"slices"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -15,24 +13,20 @@ import (
 
 func codeValidateAntigravityMessages(request *wire.Request, r *http.Request) error {
 	refused := codemode.Refuse(422, "code_translation_unsupported_semantics")
-	query, err := url.ParseQuery(r.URL.RawQuery)
-	if err != nil || len(query) != 0 && (len(query) != 1 || !slices.Equal(query["beta"], []string{"true"})) || len(r.Trailer) != 0 || len(r.Header.Values("Anthropic-Beta")) != 0 || len(r.Header.Values("X-Codex-Turn-State")) != 0 || len(r.Header.Values("OpenAI-Beta")) != 0 {
+	if err := codeValidateMessages(request, r); err != nil {
+		return err
+	}
+	if len(r.Header.Values("Anthropic-Beta")) != 0 || len(r.Header.Values("X-Codex-Turn-State")) != 0 || len(r.Header.Values("OpenAI-Beta")) != 0 {
 		return refused
 	}
-	for _, field := range []string{"stream_options", "thinking", "output_config"} {
+	for _, field := range []string{"thinking", "output_config"} {
 		if request.Field(field) != nil {
 			return refused
 		}
 	}
 	root := request.OIF().Document().Root()
-	if !codeTextContent(root, "system") {
-		return refused
-	}
 	messages, _ := root.Lookup("messages")
 	for _, message := range messages.Elements() {
-		if !codeMessagesContent(message) {
-			return refused
-		}
 		content, _ := message.Lookup("content")
 		for _, block := range content.Elements() {
 			if value, present := block.Lookup("is_error"); present && value.Raw() != "false" {

@@ -590,18 +590,6 @@
   </p>
   <label class="choice"
     ><input
-      id="code-responses-to-antigravity"
-      type="checkbox"
-      bind:checked={responsesToAntigravity}
-    /> Translate Responses through Antigravity</label
-  >
-  <p>
-    Enables supported text and signed function tools over HTTP or SSE after
-    publication. Unsupported state is refused. Provider terms and account
-    suspension risks apply. Live subscription acceptance remains unverified
-  </p>
-  <label class="choice"
-    ><input
       id="code-chat-to-antigravity"
       type="checkbox"
       bind:checked={chatToAntigravity}
