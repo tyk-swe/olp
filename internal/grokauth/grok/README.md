@@ -20,7 +20,7 @@ Publish `responses_to_grok` to enable the supported text and function-tool compa
 
 ## Evidence and limits
 
-Device endpoints, public client and refresh forms follow [OpenCode's pinned implementation](https://github.com/anomalyco/opencode/blob/145e948159e8dbaa3229d354a98dcfbcff7cfe92/packages/opencode/src/plugin/xai.ts). The authenticated userinfo identity seam is qualified with controlled fixtures. Anonymous discovery established endpoint availability, not successful live enrollment or independent-gateway authorization.
+Device endpoints, public client and refresh forms follow [OpenCode's pinned implementation](https://github.com/anomalyco/opencode/blob/145e948159e8dbaa3229d354a98dcfbcff7cfe92/packages/opencode/src/plugin/xai.ts). The controlled qualification lane builds and installs the real WASM, enrolls through the management API, and uses the real worker to rotate encrypted access and refresh tokens while retaining the authenticated subject. Installed Codex then executes a function tool and continues using the refreshed grant. Anonymous discovery established endpoint availability, not successful live enrollment or independent-gateway authorization.
 
 The separate identity policy follows [Grok Build proxy headers](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-shell/src/agent/proxy_headers.rs) and [client defaults](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-sampler/src/client.rs). Compatibility version `1.0.45` comes from that pinned source's package metadata. It is not a claim about the current released client. OLP does not invent account, deployment or conversation identities.
 

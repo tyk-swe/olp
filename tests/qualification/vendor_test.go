@@ -22,6 +22,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/grokauth"
 )
 
 const (
@@ -30,6 +32,9 @@ const (
 	vendorInputTokens  = 4
 	vendorOutputTokens = 6
 	grokToken          = "opaque-grok-fixture-access"
+	grokRefreshToken   = "opaque-grok-fixture-refresh"
+	grokRotatedToken   = "opaque-grok-fixture-rotated-access"
+	grokRotatedRefresh = "opaque-grok-fixture-rotated-refresh"
 	codexAccountID     = "acct-qualify"
 	codexUserID        = "user-qualify"
 	zaiKey             = "qualify-zai-coding-plan-key-1"
@@ -95,8 +100,39 @@ func newVendorMux(codexToken string, toolProof chan<- struct{}) *http.ServeMux {
 		}
 		fixtureResponses(w, r, toolProof, "Bash")
 	})
+	mux.HandleFunc("POST /oauth2/device/code", func(w http.ResponseWriter, r *http.Request) {
+		if r.ParseForm() != nil || r.Form.Get("client_id") != grokauth.ClientID || !strings.Contains(r.Form.Get("scope"), "offline_access") {
+			refuseVendor(w, 400, `{"error":"invalid_request"}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"device_code":"fixture-device-session","user_code":"FIXTURE","verification_uri":"https://auth.x.ai/device","expires_in":600,"interval":1}`)
+	})
+	mux.HandleFunc("POST /oauth2/token", func(w http.ResponseWriter, r *http.Request) {
+		if r.ParseForm() != nil || r.Form.Get("client_id") != grokauth.ClientID {
+			refuseVendor(w, 400, `{"error":"invalid_request"}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Form.Get("grant_type") == "urn:ietf:params:oauth:grant-type:device_code" && r.Form.Get("device_code") == "fixture-device-session":
+			_, _ = fmt.Fprintf(w, `{"access_token":%q,"refresh_token":%q,"token_type":"Bearer","expires_in":3600}`, grokToken, grokRefreshToken)
+		case r.Form.Get("grant_type") == "refresh_token" && r.Form.Get("refresh_token") == grokRefreshToken:
+			_, _ = fmt.Fprintf(w, `{"access_token":%q,"refresh_token":%q,"token_type":"Bearer","expires_in":3600}`, grokRotatedToken, grokRotatedRefresh)
+		default:
+			refuseVendor(w, 400, `{"error":"invalid_grant"}`)
+		}
+	})
+	mux.HandleFunc("GET /oauth2/userinfo", func(w http.ResponseWriter, r *http.Request) {
+		if bearer(r) != "Bearer "+grokToken && bearer(r) != "Bearer "+grokRotatedToken {
+			refuseVendor(w, 401, badKey)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"sub":"fixture-subject"}`)
+	})
 	mux.HandleFunc("POST /v1/responses", func(w http.ResponseWriter, r *http.Request) {
-		if bearer(r) != "Bearer "+grokToken || r.Header.Get("X-Grok-Client-Identifier") != "grok-shell" || r.Header.Get("X-Xai-Token-Auth") != "xai-grok-cli" || r.Header.Get("X-Authenticateresponse") != "authenticate-response" {
+		if bearer(r) != "Bearer "+grokRotatedToken || r.Header.Get("X-Grok-Client-Identifier") != "grok-shell" || r.Header.Get("X-Xai-Token-Auth") != "xai-grok-cli" || r.Header.Get("X-Authenticateresponse") != "authenticate-response" {
 			refuseVendor(w, http.StatusUnauthorized, badKey)
 			return
 		}
