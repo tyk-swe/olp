@@ -282,7 +282,7 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 	}
 	defer clear(key)
 	return source.fetch(ctx, &fetchInput{importer: i, row: row, cfg: cfg, key: key}, func(period periodDays) error {
-		return i.storeDays(ctx, row, period.start, period.revision, period.days)
+		return i.storeDays(ctx, row, period)
 	})
 }
 
@@ -343,7 +343,7 @@ type sourceRevision struct {
 	orderingAt time.Time
 }
 
-func (i *Importer) storeDays(ctx context.Context, row *importRow, periodStart string, revision *sourceRevision, days map[string]map[lineKey]lineSum) error {
+func (i *Importer) storeDays(ctx context.Context, row *importRow, period periodDays) error {
 	tx, err := i.Pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -364,13 +364,13 @@ func (i *Importer) storeDays(ctx context.Context, row *importRow, periodStart st
 	if etag != row.ETag {
 		return nil
 	}
-	daysList := slices.Sorted(maps.Keys(days))
+	daysList := slices.Sorted(maps.Keys(period.days))
 	var minDay, maxDay *string
 	if len(daysList) > 0 {
 		minDay, maxDay = &daysList[0], &daysList[len(daysList)-1]
 	}
 	var appliedRevision *string
-	if revision != nil {
+	if revision := period.revision; revision != nil {
 		digest, err := scopeDigest(row.Source, row.Scope)
 		if err != nil {
 			return err
@@ -382,11 +382,13 @@ func (i *Importer) storeDays(ctx context.Context, row *importRow, periodStart st
 				source_revision=EXCLUDED.source_revision,
 				ordering_at=CASE WHEN olp.provider_billing_revisions.source_revision=EXCLUDED.source_revision
 					THEN olp.provider_billing_revisions.ordering_at ELSE EXCLUDED.ordering_at END,
-				covered_from=LEAST(olp.provider_billing_revisions.covered_from,EXCLUDED.covered_from),
-				covered_through=GREATEST(olp.provider_billing_revisions.covered_through,EXCLUDED.covered_through)
+				covered_from=CASE WHEN olp.provider_billing_revisions.source_revision=EXCLUDED.source_revision
+					THEN LEAST(olp.provider_billing_revisions.covered_from,EXCLUDED.covered_from) ELSE EXCLUDED.covered_from END,
+				covered_through=CASE WHEN olp.provider_billing_revisions.source_revision=EXCLUDED.source_revision
+					THEN GREATEST(olp.provider_billing_revisions.covered_through,EXCLUDED.covered_through) ELSE EXCLUDED.covered_through END
 			WHERE olp.provider_billing_revisions.source_revision=EXCLUDED.source_revision
 				OR olp.provider_billing_revisions.ordering_at < EXCLUDED.ordering_at`,
-			row.ProviderID, row.Source, digest[:], periodStart, revision.id, revision.orderingAt, minDay, maxDay)
+			row.ProviderID, row.Source, digest[:], period.start, revision.id, revision.orderingAt, minDay, maxDay)
 		if err != nil {
 			return err
 		}
@@ -395,6 +397,17 @@ func (i *Importer) storeDays(ctx context.Context, row *importRow, periodStart st
 			minDay, maxDay = nil, nil
 		} else {
 			appliedRevision = &revision.id
+		}
+	}
+	if appliedRevision != nil && period.replaces != nil {
+		if _, err := tx.Exec(ctx, `WITH omitted AS (
+				DELETE FROM olp.provider_billing_days WHERE provider_id=$1::uuid AND source=$2 AND scope=$3::jsonb
+				AND day>=$4::date AND day<$5::date AND day <> ALL(COALESCE($6::text[],'{}')::date[])
+				RETURNING day
+			)
+			DELETE FROM olp.provider_invoiced_costs WHERE provider_id=$1::uuid AND day IN (SELECT day FROM omitted)`,
+			row.ProviderID, row.Source, row.Scope, period.replaces.from.Format(dayFormat), period.replaces.to.Format(dayFormat), daysList); err != nil {
+			return err
 		}
 	}
 	for _, day := range daysList {
@@ -408,7 +421,7 @@ func (i *Importer) storeDays(ctx context.Context, row *importRow, periodStart st
 			row.ProviderID, day); err != nil {
 			return err
 		}
-		items := days[day]
+		items := period.days[day]
 		keys := slices.SortedFunc(maps.Keys(items), func(a, b lineKey) int {
 			if result := cmp.Compare(a.item, b.item); result != 0 {
 				return result

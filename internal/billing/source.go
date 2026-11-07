@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
 )
@@ -22,6 +23,12 @@ type periodDays struct {
 	start    string
 	revision *sourceRevision
 	days     reportAccumulator
+	replaces *dayWindow
+}
+
+type dayWindow struct {
+	from time.Time
+	to   time.Time
 }
 
 type fetchInput struct {
