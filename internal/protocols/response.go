@@ -801,7 +801,7 @@ func embeddingItems(data []json.RawMessage, encoding string) ([]json.RawMessage,
 			return nil, protocolError("invalid embedding")
 		}
 		index, ok := count(item["index"])
-		if !ok || seen[index] {
+		if !ok || seen[index] || index >= int64(len(data)) {
 			return nil, protocolError("invalid embedding index")
 		}
 		seen[index] = true

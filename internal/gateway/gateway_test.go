@@ -713,6 +713,59 @@ func TestTransformedEmbeddingsRejectIncompleteVectors(t *testing.T) {
 	}
 }
 
+func TestEmbeddingsRejectInvalidResultIndices(t *testing.T) {
+	for _, tc := range []struct {
+		name, data string
+		want       int
+	}{
+		{"complete", `{"index":0,"embedding":[0.5,0]},{"index":1,"embedding":[0.25,0.5]}`, http.StatusOK},
+		{"reordered", `{"index":1,"embedding":[0.25,0.5]},{"index":0,"embedding":[0.5,0]}`, http.StatusOK},
+		{"out of range", `{"index":0,"embedding":[0.5,0]},{"index":2,"embedding":[0.25,0.5]}`, http.StatusBadGateway},
+		{"shifted", `{"index":1,"embedding":[0.5,0]},{"index":2,"embedding":[0.25,0.5]}`, http.StatusBadGateway},
+		{"duplicate", `{"index":0,"embedding":[0.5,0]},{"index":0,"embedding":[0.25,0.5]}`, http.StatusBadGateway},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, Config{})
+			h.republish(func(snapshot *routing.Snapshot, a, b routing.Provider) {
+				strictEmbeddings(snapshot)
+				route := snapshot.Routes[routeSlug]
+				route.MaxAttempts = 1
+				snapshot.Routes[routeSlug] = route
+			})
+			h.mock.set("a", status(http.StatusOK, `{"data":[`+tc.data+`]}`))
+			resp := h.do(t.Context(), http.MethodPost, "/v1/embeddings", fullKey, []byte(`{"model":"team-chat","input":["a","b"],"encoding_format":"float"}`), nil)
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != tc.want {
+				t.Fatalf("status %d, want %d, body %s", resp.StatusCode, tc.want, body)
+			}
+			if tc.want == http.StatusBadGateway && !strings.Contains(string(body), `"code":"provider_protocol_error"`) {
+				t.Fatalf("unexpected rejection %s", body)
+			}
+			if tc.want == http.StatusOK {
+				var result struct {
+					Data []struct {
+						Index     int       `json:"index"`
+						Embedding []float64 `json:"embedding"`
+					} `json:"data"`
+				}
+				if err := json.Unmarshal(body, &result); err != nil || len(result.Data) != 2 {
+					t.Fatalf("invalid result %s", body)
+				}
+				for _, item := range result.Data {
+					want := [][]float64{{0.5, 0}, {0.25, 0.5}}[item.Index]
+					if !slices.Equal(item.Embedding, want) {
+						t.Fatalf("vector identity changed %s", body)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestTransformedMediaPreservesUsage(t *testing.T) {
 	h := newHarness(t, Config{MaxMediaBodyBytes: 1 << 20})
 	spool, err := media.NewSpool(t.TempDir(), media.MinCapacityBytes, nil)
