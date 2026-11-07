@@ -490,7 +490,10 @@ streams up to 200 CSV parts, 128 MiB compressed and 512 MiB expanded per pass,
 with two million rows, 100,000 aggregates and a one-minute import budget. Each
 day's returned line items are summed per
 `(day, line_item, currency)` and replace the stored rows. A returned bucket with
-no results records an invoiced zero. On success the import schedules one hour
+no results records an invoiced zero. Migration 0141 keeps OpenAI and Anthropic
+days imported before per-day coverage only when they hold imported costs,
+because an empty fetched day cannot be told apart from an import gap, so the
+others report `not_imported`. On success the import schedules one hour
 out. When AWS or Azure reaches the pass budget after completing a period, it
 continues the remaining periods on the next worker scan. An individual period
 that exceeds the limits still fails and backs off. Google schedules the next
