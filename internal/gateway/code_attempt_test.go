@@ -1445,7 +1445,7 @@ func TestAntigravityResponsesSignedParallelContinuation(t *testing.T) {
 
 func TestAntigravityResponsesCompatibility(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/code/route/responses", nil)
-	body := `{"model":"gemini-fixture","input":[{"role":"user","content":[{"type":"input_text","text":"Read the file"}]}],"store":false,"parallel_tool_calls":true,"prompt_cache_key":"cache-hint","client_metadata":{"thread_id":"client-thread"},"reasoning":{"effort":"none"},"include":["reasoning.encrypted_content"],"tools":[{"type":"function","name":"read_file","parameters":{"type":"object","properties":{"path":{"type":"string"}}},"strict":false}],"tool_choice":"auto"}`
+	body := `{"model":"gemini-fixture","input":[{"role":"user","internal_chat_message_metadata_passthrough":{"turn_id":"client-turn","create_time":123,"content_item_kinds":["text"]},"content":[{"type":"input_text","text":"Read the file"}]}],"store":false,"parallel_tool_calls":true,"prompt_cache_key":"cache-hint","client_metadata":{"thread_id":"client-thread"},"reasoning":{"effort":"none"},"include":["reasoning.encrypted_content"],"tools":[{"type":"function","name":"read_file","parameters":{"type":"object","properties":{"path":{"type":"string"}}},"strict":false}],"tool_choice":"auto"}`
 	if _, err := codeTranslateAntigravityProtocol([]byte(`{"model":"gemini-fixture","input":"Read","include":["reasoning.encrypted_content"]}`), request, "gemini-fixture", "project", wire.Responses, codeAntigravityPolicy{}); err == nil {
 		t.Fatal("native reasoning include accepted without compatibility")
 	}
@@ -1461,12 +1461,14 @@ func TestAntigravityResponsesCompatibility(t *testing.T) {
 			if err != nil || !strings.Contains(string(payload.body), "Read the file") || !strings.Contains(string(payload.body), "read_file") {
 				t.Fatalf("compatible request = %s, %v", payload.body, err)
 			}
-			for _, private := range []string{"cache-hint", "client-thread", "encrypted_content", "reasoning", "parallel_tool_calls", "store"} {
+			for _, private := range []string{"cache-hint", "client-thread", "client-turn", "internal_chat_message_metadata_passthrough", "encrypted_content", "reasoning", "parallel_tool_calls", "store"} {
 				if strings.Contains(string(payload.body), private) {
 					t.Fatalf("client-only value %s forwarded in %s", private, payload.body)
 				}
 			}
 			for _, altered := range []string{
+				strings.Replace(body, `"create_time":123`, `"encrypted_content":"opaque"`, 1),
+				strings.Replace(body, `"create_time":123`, `"create_time":"unsupported"`, 1),
 				strings.Replace(body, `"store":false`, `"store":true`, 1),
 				strings.Replace(body, `"parallel_tool_calls":true`, `"parallel_tool_calls":false`, 1),
 				strings.Replace(body, `"effort":"none"`, `"effort":"high"`, 1),

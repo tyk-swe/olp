@@ -56,7 +56,7 @@ func SummaryHistory(body []byte, open func(string) (string, error)) (string, err
 	}
 	items := input.Elements()
 	for index, item := range items {
-		if !summaryAnnotation(item) {
+		if !SupportedResponsesItemAnnotation(item) {
 			return "", refused
 		}
 		kind, _ := field(item, "type").Text()
@@ -230,7 +230,7 @@ func summaryControls(root oif.Value) bool {
 	return true
 }
 
-func summaryAnnotation(item oif.Value) bool {
+func SupportedResponsesItemAnnotation(item oif.Value) bool {
 	annotation := field(item, "internal_chat_message_metadata_passthrough")
 	if annotation.Kind() == oif.Absent || annotation.Kind() == oif.Null {
 		return true

@@ -3,8 +3,10 @@ package gateway
 import (
 	"net/http"
 	"slices"
+	"strconv"
 
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codewire"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
@@ -77,6 +79,9 @@ func codePrepareAntigravityResponses(request *wire.Request, r *http.Request, com
 		return nil, refused
 	}
 	for _, item := range input.Elements() {
+		if _, present := item.Lookup("internal_chat_message_metadata_passthrough"); present && (!compatibility || !codewire.SupportedResponsesItemAnnotation(item)) {
+			return nil, refused
+		}
 		kind, _ := item.Lookup("type")
 		switch stringValue(kind) {
 		case "", "message":
@@ -99,7 +104,17 @@ func codePrepareAntigravityResponses(request *wire.Request, r *http.Request, com
 	if !compatibility {
 		return request, nil
 	}
-	prepared, err := request.WithFields(request.OIF().Document().FieldsWithout("store", "parallel_tool_calls", "prompt_cache_key", "client_metadata", "reasoning", "include"), oif.TransformedMapping)
+	document, err := oif.Apply(request.OIF().Document(), slices.Collect(func(yield func(oif.Change) bool) {
+		for index, item := range input.Elements() {
+			if _, present := item.Lookup("internal_chat_message_metadata_passthrough"); present && !yield(oif.Change{Pointer: oif.Pointer(oif.Pointer("/input", strconv.Itoa(index)), "internal_chat_message_metadata_passthrough"), Remove: true, Origin: oif.TransformedMapping, Reason: "published Responses compatibility policy"}) {
+				return
+			}
+		}
+	}))
+	if err != nil {
+		return nil, refused
+	}
+	prepared, err := request.WithFields(document.FieldsWithout("store", "parallel_tool_calls", "prompt_cache_key", "client_metadata", "reasoning", "include"), oif.TransformedMapping)
 	if err != nil {
 		return nil, refused
 	}
