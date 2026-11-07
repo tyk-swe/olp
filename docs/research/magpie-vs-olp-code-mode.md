@@ -1,69 +1,27 @@
 # Magpie compared with OLP code mode
 
-Status, Draft research note. Facts below come from primary sources where possible, and each section names its source so a reader can check whether a claim is stale or broken.
+Research snapshot from the cited product pages and repository sources. [ADR 0005](../adr/0005-make-code-mode-better-than-magpie.md) resolves the original interview questions and records OLP's accepted priorities.
 
-## What Magpie is
+## Product comparison
 
-Magpie describes itself as giving every agent every model, and it runs as a free and open source local gateway for coding agents on the developer machine. Sources are the [Magpie homepage](https://usemagpie.ai/), the [Magpie start guide](https://usemagpie.ai/docs/start), and the [Magpie source repository](https://github.com/yetone/magpie).
-
-The gateway listens locally and translates between OpenAI Chat, OpenAI Responses, Anthropic Messages, and Google Gemini in both directions, including streaming, tool calls, and reasoning. Source is the [Magpie homepage](https://usemagpie.ai/) and the linked product docs.
-
-A provider is added once by signing in or by pasting a key, and the same provider then becomes available to every supported agent. Subscriptions such as Claude and ChatGPT plans can act as providers for other agents, and Magpie warns that some vendors may suspend accounts used outside their own client. Sources are the [Magpie start guide](https://usemagpie.ai/docs/start) and the provider and import docs linked from it, including [Magpie import docs](https://usemagpie.ai/docs/import).
-
-Magpie supports a very wide agent list, with the homepage listing more than 30 agents and the repository readme listing around 70 agents at fetch time. Sources are the [Magpie homepage](https://usemagpie.ai/) and the [Magpie source repository](https://github.com/yetone/magpie).
-
-Routing groups pool several models or accounts behind one name, with strategies that include smart reset aware ordering, in order, round robin, least used first, and by intent. Failover can retry on another account before any byte reaches the agent, and rate limited accounts are passed over using vendor reset signals. Source is the routing material linked from the [Magpie homepage](https://usemagpie.ai/), with intent routing detailed at [Magpie intent docs](https://usemagpie.ai/docs/intent).
-
-Intent routing classifies one turn with a small fast model and then keeps that turn on the chosen model through its tool rounds. Source is [Magpie intent docs](https://usemagpie.ai/docs/intent).
-
-Privacy masking swaps secrets and personal data for stable placeholders before a request leaves the machine and swaps real values back into streamed text and tool calls. Source is [Magpie masking docs](https://usemagpie.ai/docs/masking), and the privacy position is stated at [Magpie privacy docs](https://usemagpie.ai/docs/privacy).
-
-The Library shares instructions, MCP servers, skills, hooks, and subagents across agents by writing each agent native format. Sources are [Magpie library docs](https://usemagpie.ai/docs/library) and [Magpie MCP router docs](https://usemagpie.ai/docs/mcp-router).
-
-Remote use covers LAN sharing, Docker, per client gateway keys, and token and cost caps. Sources are [Magpie remote docs](https://usemagpie.ai/docs/remote) and [Magpie Docker docs](https://usemagpie.ai/docs/docker).
-
-The user surface covers a native desktop app, a tray or menu bar panel, a terminal UI, a command line, and a web UI for headless use. Install covers a download page, a shell installer, go install, and Docker. Source is the [Magpie homepage](https://usemagpie.ai/) and the [Magpie start guide](https://usemagpie.ai/docs/start).
-
-Magpie has no paid tier on the fetched site, and the user brings their own keys or subscriptions. Sponsor tiles from API relays appear on the homepage. Source is the [Magpie homepage](https://usemagpie.ai/).
-
-## What OLP code mode is today
-
-OLP is a self hosted team gateway where operators connect providers and coding subscriptions once and then share them behind OLP keys, published routes, budgets, and attempt level accounting. Sources are the [OLP readme](/home/ubuntu/code/olp/1/olp/README.md) and the [OLP glossary](/home/ubuntu/code/olp/1/olp/GLOSSARY.md).
-
-Code mode is the route specific contract where coding clients use authorized accounts, models, and conversation state, and native forwarding is the default. Compatibility behavior needs explicit published route policy. Sources are the [OLP glossary](/home/ubuntu/code/olp/1/olp/GLOSSARY.md), the [code mode guide](/home/ubuntu/code/olp/1/olp/docs/use/code-mode.md), and [ADR 0001 on explicit code mode compatibility](/home/ubuntu/code/olp/1/olp/docs/adr/0001-explicit-code-mode-compatibility.md).
-
-An adapter is the subscription family of a code account, and it decides served paths, upstream host, credential placement, and generated client config. Documented adapters cover Codex, Claude subscription, OpenCode Go, and the GLM, MiniMax, Kimi Code, and Qwen coding plans, each with global and mainland China profiles where applicable. Antigravity exists for controlled fixtures with no public ingress. Source is the [code mode guide](/home/ubuntu/code/olp/1/olp/docs/use/code-mode.md).
-
-Accounts sit in pools, pools bind accounts and keys with optional per account weights, and routes publish immutable revisions that freeze connection config, models, and policy. Conversation affinity pins a conversation tree to an account per model and refuses revoked pins instead of silently switching accounts. Sources are the [code mode guide](/home/ubuntu/code/olp/1/olp/docs/use/code-mode.md) and [ADR 0002 on state aware code account recovery](/home/ubuntu/code/olp/1/olp/docs/adr/0002-state-aware-code-account-recovery.md).
-
-Explicit opt ins cover exact model aliases, ordered model pools, Messages to Codex and Chat to Codex translation, Codex client identity, and paid API targets with monetary policy. Recovery to another account needs a proven complete rejection and positively portable input, and accepted or partially streamed work never replays. Source is the [code mode guide](/home/ubuntu/code/olp/1/olp/docs/use/code-mode.md).
-
-Generated client config covers Codex, Claude Code, and OpenCode today, and the operator flow runs through enrollment, account and pool and route creation, publication, and key handoff. Source is the [code mode guide](/home/ubuntu/code/olp/1/olp/docs/use/code-mode.md), with renderers in the [generated client config code](/home/ubuntu/code/olp/1/olp/internal/codeclient/configuration.go).
-
-Qualification is the largest stated gap, because controlled client journeys no longer run in CI or as release gates and live acceptance for several adapters and translations remains pending or manual. Sources are the [qualification guide](/home/ubuntu/code/olp/1/olp/docs/develop/qualification.md) and the [code mode guide](/home/ubuntu/code/olp/1/olp/docs/use/code-mode.md).
-
-Other stated gaps include no proven native Codex generation bound for hard token budgets, no code specific manual usage resolution for paid targets, refused translation for signed reasoning and several other semantics, and no served Claude Code hello probe or count tokens endpoint. Source is the [code mode guide](/home/ubuntu/code/olp/1/olp/docs/use/code-mode.md).
-
-## Where they differ
-
-| Attribute | Magpie | OLP code mode |
+| Area | Magpie | OLP code mode |
 | --- | --- | --- |
-| Primary unit | One developer machine | One team installation |
-| Default posture | Translate so any agent can use any model | Native forwarding, translation only by explicit policy |
-| Agent breadth | Homepage over 30, repo around 70 | Generated config for Codex, Claude Code, OpenCode |
-| Provider breadth | Around 20 presets plus any compatible URL, plus subscriptions as providers | Named adapters and coding plans, plus explicit paid targets |
-| Routing | Groups with smart, intent, and failover before first byte | Pools with weights, affinity pins, narrow proven rejection recovery |
-| Shared config | Library writes instructions, MCP, skills, hooks per agent | Route generated client config fragments only |
-| Extras | Masking, intent routing, MCP hub, web search, plugins, profiles | Budgets, attempt accounting, certification, audit, FinOps on the wider gateway |
-| Deployment | Local app, tray, TUI, CLI, web, Docker, LAN sharing | Self hosted Go service with PostgreSQL, Valkey, and console |
-| Price | Free and open source, bring your own keys | Self hosted, AGPL, pre 1.0 |
+| Audience | Local gateway for one developer, with LAN sharing and Docker support. [Overview](https://usemagpie.ai/), [remote use](https://usemagpie.ai/docs/remote). | Self-hosted team gateway sharing providers and subscriptions through keys, published routes, budgets and attempt accounting. [Overview](../../README.md). |
+| Protocols | Bidirectional Chat, Responses, Messages and Gemini translation, including streaming, tools and reasoning. [Overview](https://usemagpie.ai/). | Native forwarding by default. Translation, model aliases, model pools, client identity changes and paid targets require explicit policy. [Code mode](../use/code-mode.md), [ADR 0001](../adr/0001-explicit-code-mode-compatibility.md). |
+| Clients and providers | At research time, the homepage listed over 30 agents and the repository around 70, with around 20 provider presets plus compatible URLs. Login or key enrollment makes a provider available across agents, including subscription providers. [Source](https://github.com/yetone/magpie), [setup](https://usemagpie.ai/docs/start), [imports](https://usemagpie.ai/docs/import). | Named adapters for Codex, Claude subscription, OpenCode Go and the GLM, MiniMax, Kimi Code and Qwen coding plans, with global and mainland profiles where applicable. Antigravity has controlled fixtures and no public ingress. Generated configuration covers Codex, Claude Code and OpenCode. [Code mode](../use/code-mode.md), [renderers](../../internal/codeclient/configuration.go). |
+| Routing | Groups pool models or accounts with reset-aware, ordered, round-robin, least-used and intent strategies. Failover can switch accounts before the first byte, using vendor resets to skip limited accounts. [Overview](https://usemagpie.ai/), [intent routing](https://usemagpie.ai/docs/intent). | Weighted account pools, immutable published revisions and conversation affinity per account and model. Revoked pins refuse service. Recovery needs a complete proven rejection and portable input. Accepted or partially streamed work never replays. [Code mode](../use/code-mode.md), [ADR 0002](../adr/0002-state-aware-code-account-recovery.md). |
+| Shared configuration | The Library writes instructions, MCP servers, skills, hooks and subagents in each agent's native format. [Library](https://usemagpie.ai/docs/library), [MCP router](https://usemagpie.ai/docs/mcp-router). | Route-specific generated client configuration. Operators enroll accounts, create pools and routes, publish them and hand off keys. [Code mode](../use/code-mode.md). |
+| Other capabilities | Privacy masking, intent routing, MCP hub, web search, plugins and profiles. Masking restores secret placeholders in streamed text and tool calls. Intent routing holds one model through a turn's tool rounds. [Masking](https://usemagpie.ai/docs/masking), [privacy](https://usemagpie.ai/docs/privacy), [intent](https://usemagpie.ai/docs/intent), [overview](https://usemagpie.ai/). | Team budgets, attempt accounting, certification, audit and FinOps in the wider gateway. [Handbook](../README.md). |
+| Deployment and cost | Desktop app, tray, TUI, CLI and headless web UI. Download, shell installer, Go and Docker installation. Remote use has per-client keys and token and cost caps. Free and open source with user-supplied keys or subscriptions, no paid tier on the fetched site, and API-relay sponsor tiles. [Setup](https://usemagpie.ai/docs/start), [Docker](https://usemagpie.ai/docs/docker), [remote use](https://usemagpie.ai/docs/remote), [overview](https://usemagpie.ai/). | Go service with PostgreSQL, Valkey and a console. Self-hosted, AGPL and pre-1.0. [Overview](../../README.md). |
 
-The table compresses the sections above, and the sources for each row are the primary links already cited in those sections.
+Magpie warns that vendors may suspend subscriptions used outside their own clients. Its broad compatibility posture differs from OLP's explicit authorization boundaries. [Magpie setup](https://usemagpie.ai/docs/start) and the [OLP glossary](../../GLOSSARY.md) define those contracts.
 
-## Open questions for the interview
+## OLP qualification gaps
 
-The word better is unresolved, because Magpie wins on local breadth and immediacy while OLP wins on team governance and accounting, and copying one into the other would trade away the reason the other exists.
+At research time, controlled client journeys no longer ran in CI or as release gates, and live acceptance for several adapters and translations was pending or manual. The [qualification guide](../develop/qualification.md) and [code-mode guide](../use/code-mode.md) record that limitation.
 
-Whether OLP should chase the individual developer at all, or stay a team gateway and beat Magpie only on the team job, is unresolved.
+The code-mode guide also records no proven native Codex generation bound for hard token budgets, no code-specific manual usage resolution for paid targets, refused translation for signed reasoning and other unsupported semantics, and no served Claude Code hello probe or count-tokens endpoint.
 
-Which Magpie capabilities are in scope as parity targets, which are deliberate no go areas under the native forwarding default in [ADR 0001 on explicit code mode compatibility](/home/ubuntu/code/olp/1/olp/docs/adr/0001-explicit-code-mode-compatibility.md), and which need new glossary terms before any design, is unresolved.
+## Accepted direction
+
+OLP prioritizes reliable team subscription pooling over local developer parity. [ADR 0005](../adr/0005-make-code-mode-better-than-magpie.md) combines better selection for new conversations with qualified rejection recovery, preserves native forwarding and hard pins, defers broader onboarding and shared configuration, and rejects a local single-developer mode.

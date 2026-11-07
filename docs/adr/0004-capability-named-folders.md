@@ -1,9 +1,9 @@
 # Capability-named folders
 
-Folders are named for the capability module that owns the behavior inside them, and no folder is named for a layer such as transport, storage, or presentation. Layer-named folders scattered one capability across many places, so a change needed edits in every layer and no place held the whole behavior. Each module instead keeps its transport adapters, SQL, validation, and audit behind a small interface in one folder, and callers and tests cross that module at the same seam.
+Folders name the capability that owns their behavior, including console route folders, rather than layers such as transport, storage or presentation. Layer folders scattered each capability across the codebase. Each module instead keeps transport adapters, SQL, validation and audit behind one small interface, shared by callers and tests.
 
-Shared code survives only when the deletion test shows that removing it would spread its complexity across callers, and surviving shared modules are named for a capability noun. Contract sources and their generated clients live with the capability that owns the surface, and public packages sit under capability-named top-level folders.
+Shared code survives only when removing it would spread complexity across callers, and shared modules use capability nouns. Contract sources and generated clients live with the owning capability. Public packages use capability-named top-level folders.
 
-We considered keeping compatibility alias packages at the old public paths. We rejected that option because an alias is a pass-through wrapper and keeps the old layer structure alive. Public Go import paths therefore break once under the current 0.x version, and the old-to-new path table ships in the user docs. Compiled plugins stay valid because the plugin wire ABI stays at version 1 and only Go import paths move.
+Compatibility aliases at old public paths were rejected because pass-through wrappers preserve the layer structure. Public Go import paths break once during 0.x, with a migration table in the user docs. Compiled plugins remain valid because the plugin wire ABI stays at version 1.
 
-Code review applies this naming convention, including to console route folders because each route folder names the capability page it serves. The fast safety net does not enforce folder or file names because those checks test structure rather than behavior.
+Code review enforces naming. The fast safety net checks behavior rather than folder or file names.
