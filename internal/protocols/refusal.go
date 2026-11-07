@@ -14,7 +14,7 @@ func (t *streamTranslator) refusalDelta(text string) error {
 		if err := t.reserve(len(text)); err != nil {
 			return err
 		}
-		t.refusal += text
+		t.refusal.WriteString(text)
 		return t.chat(Object{"refusal": raw(text)}, nil, nil)
 	}
 	if t.target != wire.Responses {
@@ -23,7 +23,7 @@ func (t *streamTranslator) refusalDelta(text string) error {
 	if err := t.reserve(len(text)); err != nil {
 		return err
 	}
-	t.refusal += text
+	t.refusal.WriteString(text)
 	if t.refusalBlock == nil {
 		index := t.nextBlock
 		t.nextBlock++
@@ -43,10 +43,10 @@ func (t *streamTranslator) finishRefusal(output []Object) error {
 		return nil
 	}
 	index := *t.refusalBlock
-	if e := t.send("response.refusal.done", Object{"type": raw("response.refusal.done"), "item_id": raw("ref_" + t.id), "output_index": raw(index), "content_index": raw(0), "refusal": raw(t.refusal)}); e != nil {
+	if e := t.send("response.refusal.done", Object{"type": raw("response.refusal.done"), "item_id": raw("ref_" + t.id), "output_index": raw(index), "content_index": raw(0), "refusal": raw(t.refusal.String())}); e != nil {
 		return e
 	}
-	part := Object{"type": raw("refusal"), "refusal": raw(t.refusal)}
+	part := Object{"type": raw("refusal"), "refusal": raw(t.refusal.String())}
 	if e := t.send("response.content_part.done", Object{"type": raw("response.content_part.done"), "item_id": raw("ref_" + t.id), "output_index": raw(index), "content_index": raw(0), "part": raw(part)}); e != nil {
 		return e
 	}

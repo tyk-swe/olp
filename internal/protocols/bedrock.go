@@ -489,7 +489,7 @@ func streamBedrockEvents(r io.Reader, limit int, route string, emit wire.Emit, o
 					return c, wire.ErrEventTooLarge
 				}
 				retained += len(part)
-				block.args += part
+				block.args.WriteString(part)
 			}
 		case "contentBlockStop":
 			index, ok := count(f["contentBlockIndex"])
@@ -497,12 +497,12 @@ func streamBedrockEvents(r io.Reader, limit int, route string, emit wire.Emit, o
 			if !ok || block == nil || stopped {
 				return c, protocolError("invalid Converse block stop")
 			}
-			if block.args != "" {
-				if _, e := object([]byte(block.args)); e != nil {
+			if block.args.Len() != 0 {
+				if _, e := object([]byte(block.args.String())); e != nil {
 					return c, protocolError("incomplete Converse tool arguments")
 				}
 			}
-			retained -= len(block.args)
+			retained -= block.args.Len()
 			delete(blocks, index)
 		case "messageStop":
 			if !started || stopped || len(blocks) > 0 || str(f["stopReason"]) == "" {

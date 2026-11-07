@@ -80,7 +80,7 @@ func (m *candidateStream) child(index int) *streamTranslator {
 	if t := m.children[index]; t != nil {
 		return t
 	}
-	t := &streamTranslator{source: m.source, target: m.target, route: m.route, limit: m.limit, retained: &m.retained, calls: map[int]*wire.ToolCall{}, blocks: map[int]int{}}
+	t := &streamTranslator{source: m.source, target: m.target, route: m.route, limit: m.limit, retained: &m.retained, calls: map[int]*streamCall{}, responseTexts: map[int]*strings.Builder{}, responseRefusals: map[int]*strings.Builder{}, blocks: map[int]int{}}
 	t.emit = func(frame []byte) error {
 		if strings.TrimSpace(string(frame)) == "data: [DONE]" {
 			return nil
