@@ -536,18 +536,10 @@ func fixtureGrok(w http.ResponseWriter, r *http.Request, toolProof, summaryProof
 		case summaryProof <- struct{}{}:
 		default:
 		}
-		request.Tools = nil
-		encoded, encodeErr := json.Marshal(request)
-		if encodeErr != nil {
-			refuseVendor(w, http.StatusBadRequest, `{"error":{"message":"fixture continuation invalid"}}`)
-			return
-		}
-		r.Body = io.NopCloser(bytes.NewReader(encoded))
-		fixtureResponses(w, r, toolProof, "exec_command")
+		fixtureResponsesRequest(w, vendorRequest{Model: request.Model, Stream: request.Stream, Input: request.Input, Instructions: request.Instructions}, toolProof, "exec_command")
 		return
 	}
-	r.Body = io.NopCloser(bytes.NewReader(body))
-	fixtureResponses(w, r, toolProof, "exec_command")
+	fixtureResponsesRequest(w, request, toolProof, "exec_command")
 }
 
 func fixtureResponses(w http.ResponseWriter, r *http.Request, toolProof chan<- struct{}, toolName string) {
@@ -555,6 +547,10 @@ func fixtureResponses(w http.ResponseWriter, r *http.Request, toolProof chan<- s
 	if !ok {
 		return
 	}
+	fixtureResponsesRequest(w, request, toolProof, toolName)
+}
+
+func fixtureResponsesRequest(w http.ResponseWriter, request vendorRequest, toolProof chan<- struct{}, toolName string) {
 	selectedTool := func() string {
 		for _, tool := range request.Tools {
 			if tool.Name == "Bash" || tool.Name == "bash" {
