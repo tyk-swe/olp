@@ -98,7 +98,8 @@ stream `focus` produces a daily [FOCUS 1.4](https://focus.finops.org/) cost
 and usage dataset per UTC charge date. `settings.cost_basis` is `cost` or
 `charge` and is immutable after creation; `settings.start_date` bounds how far
 back generation reaches. It can reach at most 90 days before the day it is set and never
-before the usage-retention cutoff.
+before the usage-retention cutoff. When omitted, generation starts on the sink's
+UTC creation date.
 
 ### Layout
 
