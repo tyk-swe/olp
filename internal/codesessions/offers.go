@@ -29,7 +29,7 @@ func (s *Store) Models(ctx context.Context, route codemode.Route, key string) (c
 
 func Offers(ctx context.Context, db access.Queryer, revision string, keys ...string) (codeclient.Offers, error) {
 	rows, err := db.Query(ctx, `SELECT DISTINCT (SELECT coalesce(jsonb_agg(m.model ORDER BY m.ordinal),'[]'::jsonb) FROM jsonb_array_elements_text(a.models) WITH ORDINALITY AS m(model,ordinal)
- WHERE NOT EXISTS(SELECT 1 FROM olp.code_account_cooldowns cd WHERE cd.account_id=a.id AND cd.retry_at>now() AND (cd.model IS NULL OR cd.model=m.model))),`+codeadapter.SQL("(v.connections->(a.provider_id::text))")+`,CASE WHEN v.document->>'paid_participation'='true' THEN jsonb_build_object('route',v.document,'connections',v.paid_connections) ELSE NULL END
+ WHERE NOT olp.code_model_cooling(a.id,m.model)),`+codeadapter.SQL("(v.connections->(a.provider_id::text))")+`,CASE WHEN v.document->>'paid_participation'='true' THEN jsonb_build_object('route',v.document,'connections',v.paid_connections) ELSE NULL END
  FROM olp.code_route_revisions v LEFT JOIN LATERAL(
  SELECT a.* FROM olp.code_pool_accounts pa JOIN olp.code_accounts a ON a.id=pa.account_id
  JOIN olp.provider_credentials c ON c.id=a.credential_id JOIN olp.provider_grants g ON g.credential_id=c.id JOIN olp.providers p ON p.id=a.provider_id
