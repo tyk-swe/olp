@@ -202,3 +202,16 @@ func TestGrokDeviceGrantUsesAuthenticatedSubject(t *testing.T) {
 		t.Fatalf("unexpected authority facts %s", encoded)
 	}
 }
+
+func TestGrokRefreshRejectsAmbiguousSubjectWithoutIssuingGrant(t *testing.T) {
+	adapter := grokauth.Adapter{Fetch: func(_ context.Context, request abi.HTTPRequest) (abi.HTTPResponse, error) {
+		if request.URL == grokauth.Issuer+"/oauth2/token" {
+			return abi.HTTPResponse{Status: 200, Body: []byte(`{"access_token":"opaque-new","token_type":"Bearer","expires_in":3600}`)}, nil
+		}
+		return abi.HTTPResponse{Status: 200, Body: []byte(`{"sub":"foreign-subject","sub":"verified-subject"}`)}, nil
+	}}
+	grant, err := adapter.RefreshGrant(t.Context(), abi.GrantRefresh{Profile: grokauth.ProfileID, RefreshToken: "encrypted-refresh", Facts: map[string]string{"subject": "verified-subject"}})
+	if err == nil || grant.AccessToken != "" {
+		t.Fatalf("ambiguous subject issued grant %+v, %v", grant, err)
+	}
+}

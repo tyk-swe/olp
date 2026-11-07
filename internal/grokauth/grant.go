@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
@@ -86,13 +87,19 @@ func (a Adapter) grant(ctx context.Context, tokens tokenResponse) (abi.Grant, er
 		return abi.Grant{}, invalid()
 	}
 	response, err := a.Fetch(ctx, abi.HTTPRequest{Method: http.MethodGet, URL: Issuer + "/oauth2/userinfo", Header: map[string][]string{"Authorization": {"Bearer " + tokens.AccessToken}}})
-	var identity struct {
-		Subject string `json:"sub"`
-	}
-	if err != nil || response.Status != http.StatusOK || len(response.Body) > 64<<10 || json.Unmarshal(response.Body, &identity) != nil || Principal(identity.Subject) == "" {
+	if err != nil || response.Status != http.StatusOK || len(response.Body) > 64<<10 {
 		return abi.Grant{}, invalid()
 	}
-	return abi.Grant{AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken, ExpiresIn: tokens.ExpiresIn, Principal: Principal(identity.Subject), Facts: map[string]string{"subject": identity.Subject}}, nil
+	document, parseErr := oif.ParseJSON(response.Body, oif.Limits{})
+	if parseErr != nil || document.Root().Kind() != oif.Object {
+		return abi.Grant{}, invalid()
+	}
+	value, _ := document.Root().Lookup("sub")
+	subject, _ := value.Text()
+	if Principal(subject) == "" {
+		return abi.Grant{}, invalid()
+	}
+	return abi.Grant{AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken, ExpiresIn: tokens.ExpiresIn, Principal: Principal(subject), Facts: map[string]string{"subject": subject}}, nil
 }
 
 func (a Adapter) form(ctx context.Context, path string, form url.Values, output any) error {

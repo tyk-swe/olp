@@ -13,12 +13,12 @@ import (
 const (
 	ProfileID = "grok-build-subscription"
 	Issuer    = "https://auth.x.ai"
-	Upstream  = "https://api.x.ai/v1"
+	Upstream  = "https://cli-chat-proxy.grok.com/v1"
 	ClientID  = "b1a00492-073a-47ea-816f-4c329264a828"
 )
 
 func Manifest() abi.Manifest {
-	return abi.Manifest{Name: "grok-build", Version: "0.1.0", Description: "Grok Build device enrollment for code mode. Live provider acceptance is unverified.", Origins: []string{Issuer, "https://api.x.ai"}, Profiles: []abi.Profile{{ID: ProfileID, Label: "Grok Build subscription (code-mode only)", Dialect: "openai-responses", Signing: true, Grant: &abi.GrantAuthentication{Facts: []string{"subject"}}, Hosting: abi.Hosting{Address: Upstream, Headers: map[string]string{"Authorization": "Bearer {credential}"}}}}}
+	return abi.Manifest{Name: "grok-build", Version: "0.1.0", Description: "Grok Build device enrollment for code mode. Live provider acceptance is unverified.", Origins: []string{Issuer, "https://cli-chat-proxy.grok.com"}, Profiles: []abi.Profile{{ID: ProfileID, Label: "Grok Build subscription (code-mode only)", Dialect: "openai-responses", Signing: true, Grant: &abi.GrantAuthentication{Facts: []string{"subject"}}, Hosting: abi.Hosting{Address: Upstream, Headers: map[string]string{"Authorization": "Bearer {credential}"}}}}}
 }
 
 func (Adapter) Sign(context.Context, abi.SignRequest) (abi.SignResult, error) {
