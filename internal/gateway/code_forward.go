@@ -131,7 +131,7 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *re
 			return codeTranslateGrok(requestBody, r, attempt.model)
 		}
 		if attempt.endpoint.Target == codeadapter.TargetAntigravity {
-			return attempt.translateAntigravity(requestBody, r, attempt.model, attempt.auth.ProjectID, route.AntigravitySignedContinuation, route.MessagesAntigravitySafetyIdentifier)
+			return attempt.translateAntigravity(requestBody, r, attempt.model, attempt.auth.ProjectID, route.AntigravitySignedContinuation, codeAntigravityPolicy{messagesSafetyIdentifier: route.MessagesAntigravitySafetyIdentifier, responsesCompatibility: route.ResponsesAntigravityCompatibility})
 		}
 		if attempt.endpoint.Protocol == ingress.protocol {
 			if attempt.model != attempt.publicModel {

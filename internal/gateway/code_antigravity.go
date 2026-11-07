@@ -20,6 +20,11 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
+type codeAntigravityPolicy struct {
+	messagesSafetyIdentifier bool
+	responsesCompatibility   bool
+}
+
 func codeAntigravityProtocol(r *http.Request) wire.Format {
 	if strings.HasSuffix(r.URL.Path, "/responses") {
 		return wire.Responses
@@ -31,25 +36,29 @@ func codeAntigravityProtocol(r *http.Request) wire.Format {
 }
 
 func codeTranslateAntigravity(body []byte, r *http.Request, model, project string) (codePayload, error) {
-	return codeTranslateAntigravityProtocol(body, r, model, project, codeAntigravityProtocol(r))
+	return codeTranslateAntigravityProtocol(body, r, model, project, codeAntigravityProtocol(r), codeAntigravityPolicy{})
 }
 
-func codeTranslateAntigravityProtocol(body []byte, r *http.Request, model, project string, family wire.Format, safetyMapping ...bool) (codePayload, error) {
+func codeTranslateAntigravityProtocol(body []byte, r *http.Request, model, project string, family wire.Format, policy codeAntigravityPolicy) (codePayload, error) {
 	refused := codemode.Refuse(422, "code_translation_unsupported_semantics")
 	if family != wire.Anthropic && r.URL.RawQuery != "" || len(r.Trailer) != 0 || project == "" {
 		return codePayload{}, refused
 	}
-	request, err := protocols.ParseForModel(family, body, model)
+	parsed, err := protocols.ParseForModel(family, body, model)
 	if err != nil {
 		return codePayload{}, refused
 	}
+	request, preparationErr := func() (*wire.Request, error) {
+		if family == wire.Responses {
+			return codePrepareAntigravityResponses(parsed, r, policy.responsesCompatibility)
+		}
+		return parsed, nil
+	}()
+	if preparationErr != nil {
+		return codePayload{}, preparationErr
+	}
 	if family == wire.Anthropic {
 		if err := codeValidateAntigravityMessages(request, r); err != nil {
-			return codePayload{}, err
-		}
-	}
-	if family == wire.Responses {
-		if err := codeValidateAntigravityResponses(request, r); err != nil {
 			return codePayload{}, err
 		}
 	}
@@ -68,7 +77,7 @@ func codeTranslateAntigravityProtocol(body []byte, r *http.Request, model, proje
 		if family != wire.Anthropic {
 			return "", nil
 		}
-		return codeAntigravityMessagesIdentity(request, len(safetyMapping) == 1 && safetyMapping[0])
+		return codeAntigravityMessagesIdentity(request, policy.messagesSafetyIdentifier)
 	}()
 	if identityErr != nil {
 		return codePayload{}, identityErr

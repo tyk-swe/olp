@@ -9473,6 +9473,9 @@ type CodeRoute struct {
 	ProjectId   openapi_types.UUID           `json:"project_id"`
 	PublishedAt nullable.Nullable[time.Time] `json:"published_at"`
 
+	// ResponsesAntigravityCompatibility Separate published opt-in to ignore Codex prompt-cache hints and client metadata upstream and treat effort none and requested reasoning output as best effort. Provider reasoning may occur and usage or cache behavior may differ. Opaque reasoning continuation and unrepresentable reasoning output remain refused.
+	ResponsesAntigravityCompatibility *bool `json:"responses_antigravity_compatibility,omitempty"`
+
 	// ResponsesToAntigravity Explicitly enable Responses text and signed function tools through Antigravity over HTTP or SSE after publication. Unsupported continuation state is refused. Existing published revisions retain their behavior. Provider terms and account suspension risks apply. Live subscription acceptance remains unverified.
 	ResponsesToAntigravity *bool `json:"responses_to_antigravity,omitempty"`
 
@@ -9560,6 +9563,9 @@ type CodeRouteWrite struct {
 	PaidTargets *map[string]CodePaidTarget `json:"paid_targets,omitempty"`
 	PoolId      openapi_types.UUID         `json:"pool_id"`
 	ProjectId   openapi_types.UUID         `json:"project_id"`
+
+	// ResponsesAntigravityCompatibility Separate published opt-in to ignore Codex prompt-cache hints and client metadata upstream and treat effort none and requested reasoning output as best effort. Provider reasoning may occur and usage or cache behavior may differ. Opaque reasoning continuation and unrepresentable reasoning output remain refused.
+	ResponsesAntigravityCompatibility *bool `json:"responses_antigravity_compatibility,omitempty"`
 
 	// ResponsesToAntigravity Explicitly enable Responses text and signed function tools through Antigravity over HTTP or SSE after publication. Unsupported continuation state is refused. Existing published revisions retain their behavior. Provider terms and account suspension risks apply. Live subscription acceptance remains unverified.
 	ResponsesToAntigravity *bool `json:"responses_to_antigravity,omitempty"`
@@ -9825,6 +9831,9 @@ type ConfigurationCodeRoutePolicy struct {
 	PaidParticipation   *bool                                   `json:"paid_participation,omitempty"`
 	PaidTargets         *map[string]ConfigurationCodePaidTarget `json:"paid_targets,omitempty"`
 	Pool                openapi_types.UUID                      `json:"pool"`
+
+	// ResponsesAntigravityCompatibility Separate published opt-in to ignore Codex prompt-cache hints and client metadata upstream and treat effort none and requested reasoning output as best effort. Provider reasoning may occur and usage or cache behavior may differ. Opaque reasoning continuation and unrepresentable reasoning output remain refused.
+	ResponsesAntigravityCompatibility *bool `json:"responses_antigravity_compatibility,omitempty"`
 
 	// ResponsesToAntigravity Explicitly enable Responses text and signed function tools through Antigravity over HTTP or SSE after publication. Unsupported continuation state is refused. Existing published revisions retain their behavior. Provider terms and account suspension risks apply. Live subscription acceptance remains unverified.
 	ResponsesToAntigravity *bool `json:"responses_to_antigravity,omitempty"`

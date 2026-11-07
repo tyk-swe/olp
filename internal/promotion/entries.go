@@ -103,6 +103,7 @@ type CodeRoutePolicy struct {
 	MessagesToCodex                     bool                      `json:"messages_to_codex"`
 	MessagesToAntigravity               bool                      `json:"messages_to_antigravity,omitempty"`
 	ResponsesToAntigravity              bool                      `json:"responses_to_antigravity,omitempty"`
+	ResponsesAntigravityCompatibility   bool                      `json:"responses_antigravity_compatibility,omitempty"`
 	MessagesAntigravitySafetyIdentifier bool                      `json:"messages_antigravity_safety_identifier,omitempty"`
 	MessagesCodexSafetyIdentifier       bool                      `json:"messages_codex_safety_identifier,omitempty"`
 	AllowanceOrdering                   bool                      `json:"allowance_ordering,omitempty"`

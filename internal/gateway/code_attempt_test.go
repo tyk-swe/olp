@@ -1176,7 +1176,7 @@ func TestAntigravitySignedToolRoundTrip(t *testing.T) {
 	}
 	requestBody := []byte(fmt.Sprintf(`{"model":"gemini-native","messages":[{"role":"user","content":"Inspect"},%s,{"role":"tool","tool_call_id":%q,"content":"file result"},{"role":"tool","tool_call_id":%q,"content":"directory result"}]}`, response.Choices[0].Message, message.ToolCalls[0].ID, message.ToolCalls[1].ID))
 	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	payload, err := attempt.translateAntigravity(requestBody, request, "gemini-native", "project", true)
+	payload, err := attempt.translateAntigravity(requestBody, request, "gemini-native", "project", true, codeAntigravityPolicy{})
 	if err != nil || !strings.Contains(string(payload.body), `"thoughtSignature":"private-signature"`) || strings.Contains(string(payload.body), message.ToolCalls[0].ID) || !strings.Contains(string(payload.body), "file result") {
 		t.Fatalf("continuation = %s, %v", payload.body, err)
 	}
@@ -1184,37 +1184,37 @@ func TestAntigravitySignedToolRoundTrip(t *testing.T) {
 		t.Fatalf("parallel provider identity restoration = %s", payload.body)
 	}
 	partial := []byte(fmt.Sprintf(`{"model":"gemini-native","messages":[{"role":"user","content":"Inspect"},%s,{"role":"tool","tool_call_id":%q,"content":"file result"}]}`, response.Choices[0].Message, message.ToolCalls[0].ID))
-	if _, err := attempt.translateAntigravity(partial, request, "gemini-native", "project", true); err == nil {
+	if _, err := attempt.translateAntigravity(partial, request, "gemini-native", "project", true, codeAntigravityPolicy{}); err == nil {
 		t.Fatal("partial parallel tool results were accepted")
 	}
 	reversed := []byte(fmt.Sprintf(`{"model":"gemini-native","messages":[{"role":"user","content":"Inspect"},%s,{"role":"tool","tool_call_id":%q,"content":"directory result"},{"role":"tool","tool_call_id":%q,"content":"file result"}]}`, response.Choices[0].Message, message.ToolCalls[1].ID, message.ToolCalls[0].ID))
-	if _, err := attempt.translateAntigravity(reversed, request, "gemini-native", "project", true); err != nil {
+	if _, err := attempt.translateAntigravity(reversed, request, "gemini-native", "project", true, codeAntigravityPolicy{}); err != nil {
 		t.Fatalf("reordered parallel results = %v", err)
 	}
 	premature := []byte(fmt.Sprintf(`{"model":"gemini-native","messages":[{"role":"user","content":"Inspect"},{"role":"tool","tool_call_id":%q,"content":"file result"},%s,{"role":"tool","tool_call_id":%q,"content":"directory result"}]}`, message.ToolCalls[0].ID, response.Choices[0].Message, message.ToolCalls[1].ID))
-	if _, err := attempt.translateAntigravity(premature, request, "gemini-native", "project", true); err == nil {
+	if _, err := attempt.translateAntigravity(premature, request, "gemini-native", "project", true, codeAntigravityPolicy{}); err == nil {
 		t.Fatal("tool result before its call was accepted")
 	}
 	missingState := ledger.calls[message.ToolCalls[1].ID]
 	delete(ledger.calls, message.ToolCalls[1].ID)
-	if _, err := attempt.translateAntigravity(requestBody, request, "gemini-native", "project", true); err == nil {
+	if _, err := attempt.translateAntigravity(requestBody, request, "gemini-native", "project", true, codeAntigravityPolicy{}); err == nil {
 		t.Fatal("missing parallel association was accepted")
 	}
 	ledger.calls[missingState.ID] = missingState
 	escaped := []byte(strings.Replace(string(requestBody), "sample", `\\u0073ample`, 1))
-	if _, err := attempt.translateAntigravity(escaped, request, "gemini-native", "project", true); err != nil {
+	if _, err := attempt.translateAntigravity(escaped, request, "gemini-native", "project", true, codeAntigravityPolicy{}); err != nil {
 		t.Fatalf("escaped string argument = %v", err)
 	}
 	normalized := []byte(strings.Replace(string(requestBody), "1.0", "1", 1))
-	if _, err := attempt.translateAntigravity(normalized, request, "gemini-native", "project", true); err != nil {
+	if _, err := attempt.translateAntigravity(normalized, request, "gemini-native", "project", true, codeAntigravityPolicy{}); err != nil {
 		t.Fatalf("reserialized numeric argument = %v", err)
 	}
 	changedInteger := []byte(strings.Replace(string(requestBody), "9007199254740993", "9007199254740992", 1))
-	if _, err := attempt.translateAntigravity(changedInteger, request, "gemini-native", "project", true); err == nil {
+	if _, err := attempt.translateAntigravity(changedInteger, request, "gemini-native", "project", true, codeAntigravityPolicy{}); err == nil {
 		t.Fatal("changed large integer was accepted")
 	}
 	altered := []byte(strings.Replace(string(requestBody), "sample", "another", 1))
-	if _, err := attempt.translateAntigravity(altered, request, "gemini-native", "project", true); err == nil {
+	if _, err := attempt.translateAntigravity(altered, request, "gemini-native", "project", true, codeAntigravityPolicy{}); err == nil {
 		t.Fatal("altered signed call was accepted")
 	}
 }
@@ -1406,15 +1406,6 @@ func TestGrokMessagesToolContinuationAndUnsupportedState(t *testing.T) {
 	}
 }
 
-func TestAntigravityMessagesText(t *testing.T) {
-	attempt := &codeAttempt{model: "gemini-native", server: &Server{deps: Dependencies{CodeLedger: &signedTestLedger{}}}}
-	request := httptest.NewRequest(http.MethodPost, "/v1/messages?beta=true", nil)
-	payload, err := attempt.translateAntigravity([]byte(`{"model":"gemini-native","max_tokens":8,"system":"Be concise","messages":[{"role":"user","content":"Hello"}]}`), request, "gemini-native", "project", true)
-	if err != nil || !strings.Contains(string(payload.body), `"maxOutputTokens":8`) || !strings.Contains(string(payload.body), "Hello") || !strings.Contains(string(payload.body), "Be concise") {
-		t.Fatalf("Messages translation = %s, %v", payload.body, err)
-	}
-}
-
 func TestAntigravityResponsesSignedParallelContinuation(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		t.Run(fmt.Sprint(stream), func(t *testing.T) {
@@ -1440,82 +1431,74 @@ func TestAntigravityResponsesSignedParallelContinuation(t *testing.T) {
 				}
 			}
 			input := fmt.Sprintf(`{"model":"gemini-native","input":[{"type":"function_call","call_id":%q,"name":"read_file","arguments":"{\"path\":\"sample\"}"},{"type":"function_call","call_id":%q,"name":"list_files","arguments":"{}"},{"type":"function_call_output","call_id":%q,"output":"directory result"},{"type":"function_call_output","call_id":%q,"output":"file result"}]}`, calls[0].ID, calls[1].ID, calls[1].ID, calls[0].ID)
-			payload, err := attempt.translateAntigravity([]byte(input), request, "gemini-native", "project", true)
+			payload, err := attempt.translateAntigravity([]byte(input), request, "gemini-native", "project", true, codeAntigravityPolicy{})
 			if err != nil || !strings.Contains(string(payload.body), `"thoughtSignature":"private-first"`) || !strings.Contains(string(payload.body), `"thoughtSignature":"private-second"`) || strings.Contains(string(payload.body), calls[0].ID) {
 				t.Fatalf("continuation = %s, %v", payload.body, err)
 			}
 			incomplete := strings.Replace(input, fmt.Sprintf(`,{"type":"function_call_output","call_id":%q,"output":"file result"}`, calls[0].ID), "", 1)
-			if _, err := attempt.translateAntigravity([]byte(incomplete), request, "gemini-native", "project", true); err == nil {
+			if _, err := attempt.translateAntigravity([]byte(incomplete), request, "gemini-native", "project", true, codeAntigravityPolicy{}); err == nil {
 				t.Fatal("incomplete tool group accepted")
 			}
 		})
 	}
 }
 
-func TestAntigravityMessagesSignedToolContinuation(t *testing.T) {
-	for _, stream := range []bool{false, true} {
-		t.Run(fmt.Sprint(stream), func(t *testing.T) {
-			ledger := &signedTestLedger{}
-			attempt := &codeAttempt{model: "gemini-native", server: &Server{deps: Dependencies{CodeLedger: ledger}, now: time.Now}}
-			body := `{"response":{"candidates":[{"content":{"parts":[{"functionCall":{"name":"read_file","args":{"path":"sample"}},"thoughtSignature":"private-first"},{"functionCall":{"name":"list_files","args":{}},"thoughtSignature":"private-second"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":2,"totalTokenCount":10}}}`
-			contentType := "application/json"
-			if stream {
-				body = "data: " + body + "\n\n"
-				contentType = "text/event-stream"
+func TestAntigravityResponsesCompatibility(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/code/route/responses", nil)
+	body := `{"model":"gemini-fixture","input":[{"role":"user","content":[{"type":"input_text","text":"Read the file"}]}],"store":false,"parallel_tool_calls":true,"prompt_cache_key":"cache-hint","client_metadata":{"thread_id":"client-thread"},"reasoning":{"effort":"none"},"include":["reasoning.encrypted_content"],"tools":[{"type":"function","name":"read_file","parameters":{"type":"object","properties":{"path":{"type":"string"}}},"strict":false}],"tool_choice":"auto"}`
+	if _, err := codeTranslateAntigravityProtocol([]byte(`{"model":"gemini-fixture","input":"Read","include":["reasoning.encrypted_content"]}`), request, "gemini-fixture", "project", wire.Responses, codeAntigravityPolicy{}); err == nil {
+		t.Fatal("native reasoning include accepted without compatibility")
+	}
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprint(enabled), func(t *testing.T) {
+			payload, err := codeTranslateAntigravityProtocol([]byte(body), request, "gemini-fixture", "project", wire.Responses, codeAntigravityPolicy{responsesCompatibility: enabled})
+			if !enabled {
+				if err == nil {
+					t.Fatal("unpublished compatibility accepted")
+				}
+				return
 			}
-			recorder := httptest.NewRecorder()
-			request := httptest.NewRequest(http.MethodPost, "/code/route/v1/messages?beta=true", nil)
-			attempt.antigravityResponse(context.Background(), recorder, request, &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {contentType}}, Body: io.NopCloser(strings.NewReader(body))}, "public-model", codePayload{stream: stream, signedContinuation: true})
-			if len(ledger.calls) != 2 || strings.Contains(recorder.Body.String(), "private-") || !strings.Contains(recorder.Body.String(), `"type":"tool_use"`) || attempt.usage.Total == nil || *attempt.usage.Total != 10 {
-				t.Fatalf("response = %s, usage = %+v", recorder.Body.String(), attempt.usage)
+			if err != nil || !strings.Contains(string(payload.body), "Read the file") || !strings.Contains(string(payload.body), "read_file") {
+				t.Fatalf("compatible request = %s, %v", payload.body, err)
 			}
-			calls := make([]codesessions.SignedCall, 2)
-			for _, call := range ledger.calls {
-				calls[call.Index] = call
-				if !strings.Contains(recorder.Body.String(), call.ID) {
-					t.Fatalf("call ID missing = %s", recorder.Body.String())
+			for _, private := range []string{"cache-hint", "client-thread", "encrypted_content", "reasoning", "parallel_tool_calls", "store"} {
+				if strings.Contains(string(payload.body), private) {
+					t.Fatalf("client-only value %s forwarded in %s", private, payload.body)
 				}
 			}
-			input := fmt.Sprintf(`{"model":"gemini-native","max_tokens":8,"messages":[{"role":"assistant","content":[{"type":"tool_use","id":%q,"name":"read_file","input":{"path":"sample"}},{"type":"tool_use","id":%q,"name":"list_files","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":%q,"content":"directory result"},{"type":"tool_result","tool_use_id":%q,"content":"file result"}]}]}`, calls[0].ID, calls[1].ID, calls[1].ID, calls[0].ID)
-			payload, err := attempt.translateAntigravity([]byte(input), request, "gemini-native", "project", true)
-			if err != nil || !strings.Contains(string(payload.body), `"thoughtSignature":"private-first"`) || !strings.Contains(string(payload.body), `"thoughtSignature":"private-second"`) || strings.Contains(string(payload.body), calls[0].ID) {
-				t.Fatalf("continuation = %s, %v", payload.body, err)
-			}
-			for _, invalid := range []string{strings.Replace(input, "sample", "changed", 1), strings.Replace(input, fmt.Sprintf(`,{"type":"tool_result","tool_use_id":%q,"content":"file result"}`, calls[0].ID), "", 1)} {
-				if _, err := attempt.translateAntigravity([]byte(invalid), request, "gemini-native", "project", true); err == nil {
-					t.Fatal("invalid signed continuation accepted")
+			for _, altered := range []string{
+				strings.Replace(body, `"store":false`, `"store":true`, 1),
+				strings.Replace(body, `"parallel_tool_calls":true`, `"parallel_tool_calls":false`, 1),
+				strings.Replace(body, `"effort":"none"`, `"effort":"high"`, 1),
+				strings.Replace(body, `"effort":"none"`, `"effort":"none","summary":"detailed"`, 1),
+				strings.Replace(body, `"model":"gemini-fixture"`, `"model":"gemini-fixture","previous_response_id":"opaque"`, 1),
+				strings.Replace(body, `"input":[`, `"input":[{"type":"reasoning","encrypted_content":"opaque"},`, 1),
+				strings.Replace(body, `"reasoning.encrypted_content"`, `"message.input_image.image_url"`, 1),
+			} {
+				if _, err := codeTranslateAntigravityProtocol([]byte(altered), request, "gemini-fixture", "project", wire.Responses, codeAntigravityPolicy{responsesCompatibility: true}); err == nil {
+					t.Fatalf("unsupported semantics accepted %s", altered)
 				}
 			}
 		})
 	}
 }
 
-func TestAntigravityMessagesIdentityAndRefusals(t *testing.T) {
-	attempt := &codeAttempt{model: "gemini-native", server: &Server{deps: Dependencies{CodeLedger: &signedTestLedger{}}}}
-	base := `{"model":"gemini-native","max_tokens":8,"messages":[{"role":"user","content":"Hello"}]`
-	for _, test := range []struct {
-		name, extra      string
-		mapping, allowed bool
-	}{
-		{name: "identity mapping", extra: `,"metadata":{"user_id":"hello"}}`, mapping: true, allowed: true},
-		{name: "identity default refusal", extra: `,"metadata":{"user_id":"hello"}}`},
-		{name: "unknown metadata", extra: `,"metadata":{"user_id":"hello","unknown":"value"}}`, mapping: true},
-		{name: "thinking", extra: `,"thinking":{"type":"enabled","budget_tokens":1024}}`},
-		{name: "explicit effort", extra: `,"output_config":{"effort":"high"}}`},
-		{name: "cache control", extra: `,"system":[{"type":"text","text":"Be concise","cache_control":{"type":"ephemeral"}}]}`},
-		{name: "parallel semantics", extra: `,"tool_choice":{"type":"auto","disable_parallel_tool_use":true}}`},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			request := httptest.NewRequest(http.MethodPost, "/v1/messages?beta=true", nil)
-			payload, err := attempt.translateAntigravity([]byte(base+test.extra), request, "gemini-native", "project", true, test.mapping)
-			if (err == nil) != test.allowed {
-				t.Fatalf("translation = %s, %v", payload.body, err)
+func TestAntigravityResponsesReasoningRefusal(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprint(stream), func(t *testing.T) {
+			ledger := &signedTestLedger{}
+			attempt := &codeAttempt{server: &Server{deps: Dependencies{CodeLedger: ledger}}}
+			body := `{"response":{"candidates":[{"content":{"parts":[{"text":"private-reasoning","thought":true,"thoughtSignature":"opaque"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":2,"totalTokenCount":10}}}`
+			contentType := "application/json"
+			if stream {
+				body = "data: " + body + "\n\n"
+				contentType = "text/event-stream"
 			}
-			if !test.allowed {
-				return
-			}
-			if !strings.Contains(string(payload.body), `"labels":{"safety_identifier":"ftze3os7wcrq4jxihmvmlopctynrmhs4d6tuexttaqzwfe4ltasa"}`) || strings.Contains(string(payload.body), "metadata") {
-				t.Fatalf("identity mapping = %s", payload.body)
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/code/route/responses", nil)
+			attempt.antigravityResponse(context.Background(), recorder, request, &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {contentType}}, Body: io.NopCloser(strings.NewReader(body))}, "gemini-fixture", codePayload{stream: stream, signedContinuation: true})
+			if !strings.Contains(recorder.Body.String(), "code_upstream_unsupported_state") || strings.Contains(recorder.Body.String(), "private-reasoning") || attempt.usage.Total == nil || *attempt.usage.Total != 10 || ledger.saves != 0 {
+				t.Fatalf("reasoning refusal = %s, usage %+v, saves %d", recorder.Body.String(), attempt.usage, ledger.saves)
 			}
 		})
 	}
@@ -1606,6 +1589,84 @@ func TestGrokChatPublishedTranslation(t *testing.T) {
 				if test.status == http.StatusOK {
 					t.Fatal("text did not reach subscription")
 				}
+			}
+		})
+	}
+}
+
+func TestAntigravityMessagesText(t *testing.T) {
+	attempt := &codeAttempt{model: "gemini-native", server: &Server{deps: Dependencies{CodeLedger: &signedTestLedger{}}}}
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages?beta=true", nil)
+	payload, err := attempt.translateAntigravity([]byte(`{"model":"gemini-native","max_tokens":8,"system":"Be concise","messages":[{"role":"user","content":"Hello"}]}`), request, "gemini-native", "project", true, codeAntigravityPolicy{})
+	if err != nil || !strings.Contains(string(payload.body), `"maxOutputTokens":8`) || !strings.Contains(string(payload.body), "Hello") || !strings.Contains(string(payload.body), "Be concise") {
+		t.Fatalf("Messages translation = %s, %v", payload.body, err)
+	}
+}
+
+func TestAntigravityMessagesSignedToolContinuation(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprint(stream), func(t *testing.T) {
+			ledger := &signedTestLedger{}
+			attempt := &codeAttempt{model: "gemini-native", server: &Server{deps: Dependencies{CodeLedger: ledger}, now: time.Now}}
+			body := `{"response":{"candidates":[{"content":{"parts":[{"functionCall":{"name":"read_file","args":{"path":"sample"}},"thoughtSignature":"private-first"},{"functionCall":{"name":"list_files","args":{}},"thoughtSignature":"private-second"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":2,"totalTokenCount":10}}}`
+			contentType := "application/json"
+			if stream {
+				body = "data: " + body + "\n\n"
+				contentType = "text/event-stream"
+			}
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/code/route/v1/messages?beta=true", nil)
+			attempt.antigravityResponse(context.Background(), recorder, request, &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {contentType}}, Body: io.NopCloser(strings.NewReader(body))}, "public-model", codePayload{stream: stream, signedContinuation: true})
+			if len(ledger.calls) != 2 || strings.Contains(recorder.Body.String(), "private-") || !strings.Contains(recorder.Body.String(), `"type":"tool_use"`) || attempt.usage.Total == nil || *attempt.usage.Total != 10 {
+				t.Fatalf("response = %s, usage = %+v", recorder.Body.String(), attempt.usage)
+			}
+			calls := make([]codesessions.SignedCall, 2)
+			for _, call := range ledger.calls {
+				calls[call.Index] = call
+				if !strings.Contains(recorder.Body.String(), call.ID) {
+					t.Fatalf("call ID missing = %s", recorder.Body.String())
+				}
+			}
+			input := fmt.Sprintf(`{"model":"gemini-native","max_tokens":8,"messages":[{"role":"assistant","content":[{"type":"tool_use","id":%q,"name":"read_file","input":{"path":"sample"}},{"type":"tool_use","id":%q,"name":"list_files","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":%q,"content":"directory result"},{"type":"tool_result","tool_use_id":%q,"content":"file result"}]}]}`, calls[0].ID, calls[1].ID, calls[1].ID, calls[0].ID)
+			payload, err := attempt.translateAntigravity([]byte(input), request, "gemini-native", "project", true, codeAntigravityPolicy{})
+			if err != nil || !strings.Contains(string(payload.body), `"thoughtSignature":"private-first"`) || !strings.Contains(string(payload.body), `"thoughtSignature":"private-second"`) || strings.Contains(string(payload.body), calls[0].ID) {
+				t.Fatalf("continuation = %s, %v", payload.body, err)
+			}
+			for _, invalid := range []string{strings.Replace(input, "sample", "changed", 1), strings.Replace(input, fmt.Sprintf(`,{"type":"tool_result","tool_use_id":%q,"content":"file result"}`, calls[0].ID), "", 1)} {
+				if _, err := attempt.translateAntigravity([]byte(invalid), request, "gemini-native", "project", true, codeAntigravityPolicy{}); err == nil {
+					t.Fatal("invalid signed continuation accepted")
+				}
+			}
+		})
+	}
+}
+
+func TestAntigravityMessagesIdentityAndRefusals(t *testing.T) {
+	attempt := &codeAttempt{model: "gemini-native", server: &Server{deps: Dependencies{CodeLedger: &signedTestLedger{}}}}
+	base := `{"model":"gemini-native","max_tokens":8,"messages":[{"role":"user","content":"Hello"}]`
+	for _, test := range []struct {
+		name, extra      string
+		mapping, allowed bool
+	}{
+		{name: "identity mapping", extra: `,"metadata":{"user_id":"hello"}}`, mapping: true, allowed: true},
+		{name: "identity default refusal", extra: `,"metadata":{"user_id":"hello"}}`},
+		{name: "unknown metadata", extra: `,"metadata":{"user_id":"hello","unknown":"value"}}`, mapping: true},
+		{name: "thinking", extra: `,"thinking":{"type":"enabled","budget_tokens":1024}}`},
+		{name: "explicit effort", extra: `,"output_config":{"effort":"high"}}`},
+		{name: "cache control", extra: `,"system":[{"type":"text","text":"Be concise","cache_control":{"type":"ephemeral"}}]}`},
+		{name: "parallel semantics", extra: `,"tool_choice":{"type":"auto","disable_parallel_tool_use":true}}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/v1/messages?beta=true", nil)
+			payload, err := attempt.translateAntigravity([]byte(base+test.extra), request, "gemini-native", "project", true, codeAntigravityPolicy{messagesSafetyIdentifier: test.mapping})
+			if (err == nil) != test.allowed {
+				t.Fatalf("translation = %s, %v", payload.body, err)
+			}
+			if !test.allowed {
+				return
+			}
+			if !strings.Contains(string(payload.body), `"labels":{"safety_identifier":"ftze3os7wcrq4jxihmvmlopctynrmhs4d6tuexttaqzwfe4ltasa"}`) || strings.Contains(string(payload.body), "metadata") {
+				t.Fatalf("identity mapping = %s", payload.body)
 			}
 		})
 	}

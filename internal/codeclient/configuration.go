@@ -143,10 +143,18 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 	}()
 	file, nativeInstructions := platformInstructions(client, platform)
 	instructions := nativeInstructions + func() string {
-		if route.ChatToAntigravity && slices.Contains(adapters, codemode.AdapterAntigravity) {
-			return " This published route enables the controlled Antigravity Gemini target for Chat text and function tools over HTTP/SSE. Republish the route to enable encrypted signed function continuation bound to its root conversation and selected account. Other signed parts, reasoning controls, media and server tools are refused. Missing continuation state requires retiring the root conversation and starting a new one. This path may carry provider terms and account suspension risks. Client identity and prompt compatibility remain disabled. Current-model tool acceptance and live subscription qualification remain pending."
+		if (route.ChatToAntigravity || route.ResponsesToAntigravity) && slices.Contains(adapters, codemode.AdapterAntigravity) {
+			return " This published route enables the controlled Antigravity Gemini target for enabled Chat or Responses text and function tools over HTTP/SSE. Republish the route to enable encrypted signed function continuation bound to its root conversation and selected account. Other signed parts, reasoning controls, media and server tools are refused. Missing continuation state requires retiring the root conversation and starting a new one. This path may carry provider terms and account suspension risks. Client identity and prompt compatibility remain disabled. Current-model tool acceptance and live subscription qualification remain pending."
 		}
 		return ""
+	}() + func() string {
+		if !route.ResponsesToAntigravity || !slices.Contains(adapters, codemode.AdapterAntigravity) {
+			return ""
+		}
+		if route.ResponsesAntigravityCompatibility {
+			return " The separate published Antigravity compatibility policy ignores Codex prompt-cache hints and client metadata upstream. Reasoning effort none and requested reasoning output are best effort. Provider reasoning may occur, usage or cache behavior may differ, and opaque reasoning input and unrepresentable output remain refused."
+		}
+		return " Current Codex request defaults require the separate published Responses Antigravity compatibility opt-in. Without it, requests carrying reasoning, prompt-cache hints or client metadata are refused."
 	}() + func() string {
 		if (route.ResponsesToGrok || route.MessagesToGrok || route.ChatToGrok) && slices.Contains(adapters, codemode.AdapterGrokBuild) {
 			return " This published route translates supported text and function tool paths through Grok Build over HTTP/SSE. Grok CLI identity compatibility requires its independent published opt-in. xAI consumer terms restrict account sharing, and violations may risk account suspension. Applicable enterprise terms may differ. Provider acceptance of this independent gateway and pooled accounts is unverified. These disclosures require no acknowledgement."

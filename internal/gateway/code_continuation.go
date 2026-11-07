@@ -383,8 +383,8 @@ func validateContinuationHistory(contents []continuationContent, calls, results 
 	return nil
 }
 
-func (a *codeAttempt) translateAntigravity(body []byte, r *http.Request, model, project string, signed bool, safetyMapping ...bool) (codePayload, error) {
-	payload, err := codeTranslateAntigravityProtocol(body, r, model, project, codeAntigravityProtocol(r), safetyMapping...)
+func (a *codeAttempt) translateAntigravity(body []byte, r *http.Request, model, project string, signed bool, policy codeAntigravityPolicy) (codePayload, error) {
+	payload, err := codeTranslateAntigravityProtocol(body, r, model, project, codeAntigravityProtocol(r), policy)
 	if err != nil || !signed {
 		return payload, err
 	}

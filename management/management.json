@@ -17319,6 +17319,11 @@
             "type": "boolean",
             "default": false,
             "description": "Allow Chat text and function tools through Grok Build after publication. Disabled by default. Client identity requires its separate published opt-in."
+          },
+          "responses_antigravity_compatibility": {
+            "type": "boolean",
+            "default": false,
+            "description": "Separate published opt-in to ignore Codex prompt-cache hints and client metadata upstream and treat effort none and requested reasoning output as best effort. Provider reasoning may occur and usage or cache behavior may differ. Opaque reasoning continuation and unrepresentable reasoning output remain refused."
           }
         },
         "required": [
@@ -17523,6 +17528,11 @@
             "type": "boolean",
             "default": false,
             "description": "Allow Chat text and function tools through Grok Build after publication. Disabled by default. Client identity requires its separate published opt-in."
+          },
+          "responses_antigravity_compatibility": {
+            "type": "boolean",
+            "default": false,
+            "description": "Separate published opt-in to ignore Codex prompt-cache hints and client metadata upstream and treat effort none and requested reasoning output as best effort. Provider reasoning may occur and usage or cache behavior may differ. Opaque reasoning continuation and unrepresentable reasoning output remain refused."
           }
         },
         "required": [
@@ -32083,6 +32093,11 @@
             "type": "boolean",
             "default": false,
             "description": "Allow Chat text and function tools through Grok Build after publication. Disabled by default. Client identity requires its separate published opt-in."
+          },
+          "responses_antigravity_compatibility": {
+            "type": "boolean",
+            "default": false,
+            "description": "Separate published opt-in to ignore Codex prompt-cache hints and client metadata upstream and treat effort none and requested reasoning output as best effort. Provider reasoning may occur and usage or cache behavior may differ. Opaque reasoning continuation and unrepresentable reasoning output remain refused."
           }
         },
         "required": [

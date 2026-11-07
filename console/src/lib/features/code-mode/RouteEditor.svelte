@@ -183,6 +183,9 @@
   let responsesToGrok = $state(initial?.responses_to_grok ?? false);
   let grokCLIIdentity = $state(initial?.grok_cli_identity ?? false);
   let codexCLIIdentity = $state(initial?.codex_cli_identity ?? false);
+  let responsesAntigravityCompatibility = $state(
+    initial?.responses_antigravity_compatibility ?? false
+  );
   let responsesToAntigravity = $state(
     initial?.responses_to_antigravity ?? false
   );
@@ -303,6 +306,7 @@
         grok_cli_identity: grokCLIIdentity,
         codex_cli_identity: codexCLIIdentity,
         responses_to_antigravity: responsesToAntigravity,
+        responses_antigravity_compatibility: responsesAntigravityCompatibility,
         chat_to_antigravity: chatToAntigravity,
         allowance_ordering: allowanceOrdering,
         initial_recovery_attempts: recoveryAttempts,
@@ -557,6 +561,32 @@
     safety identifier after publication. Other metadata is refused. Review the
     provider's identity rules and account terms before enabling this policy.
     Identity mapping can carry account suspension risk
+  </p>
+  <label class="choice"
+    ><input
+      id="code-responses-antigravity-compatibility"
+      type="checkbox"
+      bind:checked={responsesAntigravityCompatibility}
+    /> Allow best-effort Codex compatibility through Antigravity</label
+  >
+  <p>
+    Off by default and applied only after publication. Ignores the prompt-cache
+    hint and client metadata when forwarding to the provider. Reasoning settings
+    and requested reasoning output become best effort. Provider reasoning may
+    occur and usage or cache behavior may differ. Opaque reasoning continuation
+    and unrepresentable reasoning output remain refused
+  </p>
+  <label class="choice"
+    ><input
+      id="code-responses-to-antigravity"
+      type="checkbox"
+      bind:checked={responsesToAntigravity}
+    /> Translate Responses through Antigravity</label
+  >
+  <p>
+    Enables supported text and signed function tools over HTTP or SSE after
+    publication. Unsupported state is refused. Provider terms and account
+    suspension risks apply. Live subscription acceptance remains unverified
   </p>
   <label class="choice"
     ><input
