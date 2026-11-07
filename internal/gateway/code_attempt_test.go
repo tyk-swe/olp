@@ -1098,3 +1098,38 @@ func TestTranslatedCodexPublishedOutputCap(t *testing.T) {
 		}
 	}
 }
+
+func TestGrokRefusesOpaqueStateBeforeDispatch(t *testing.T) {
+	reached := make(chan struct{}, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached <- struct{}{}
+		_, _ = io.WriteString(w, `{ "id":"resp_foreign", "status":"completed", "output":[] }`)
+	}))
+	defer upstream.Close()
+	project := "project"
+	authority := keyauthority.Authority{ID: "key", ProjectID: &project, Policy: keyauthority.KeyPolicy{Scopes: []string{"inference"}}}
+	ledger := &fakeCodeLedger{connectionPermit: codesessions.Permit{Authority: authority, Account: codemode.Account{ID: "account", ProviderID: "provider", Principal: "principal"}, Pin: codemode.Pin{AccountID: "account", Principal: "principal"}, Attempt: codemode.Attempt{ID: "attempt"}}}
+	h := newHarness(t, Config{}, Dependencies{Admission: NewAdmission(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil))), CodeLedger: ledger, CodeAuthorizer: fakeCodeAuthorizer{}})
+	h.rt.keys[fullKey] = authority
+	published := time.Now()
+	route := codemode.Route{PublishedAt: &published, ID: "route", ProjectID: project, Slug: "grok", PoolID: "pool", Models: []string{"grok-model"}, Enabled: true, RevisionID: "revision", Revision: 1, ResponsesToGrok: true}
+	publication, err := release.NewRelease("", 0, &routing.Snapshot{Generation: routing.Generation{ID: uuid.NewString()}, CodeRoutes: map[string]codemode.Route{"grok": route}, CodeConnections: map[string]routing.Configuration{"revision:provider": {Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: "grok-build-subscription", Endpoint: upstream.URL}}}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.rt.release = publication
+	mux := http.NewServeMux()
+	h.gateway.RegisterCode(mux)
+	request := httptest.NewRequest(http.MethodPost, "/code/grok/responses", strings.NewReader(`{"model":"grok-model","input":[{"type":"reasoning","encrypted_content":"foreign-signed-state","summary":[]}]}`))
+	request.Header.Set("Authorization", "Bearer "+fullKey)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("opaque input = %d %s", response.Code, response.Body.String())
+	}
+	select {
+	case <-reached:
+		t.Fatal("opaque state reached subscription")
+	default:
+	}
+}
