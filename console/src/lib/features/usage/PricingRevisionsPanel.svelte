@@ -1,4 +1,5 @@
 <script lang="ts">
+  import EntityPicker from '#lib/components/EntityPicker.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
@@ -330,11 +331,11 @@
           >
         </div>
         <div class="form-field">
-          <label for="provider-id">Provider ID override</label><input
+          <label for="provider-id">Only for provider</label><EntityPicker
             id="provider-id"
+            kind="provider"
             bind:value={providerId}
-            class="mono"
-            placeholder="Optional UUID"
+            emptyLabel="Every provider of this kind"
             disabled={!canEditPricing}
           />
         </div>

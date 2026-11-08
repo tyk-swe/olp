@@ -1,4 +1,5 @@
 <script lang="ts">
+  import EntityPicker from '#lib/components/EntityPicker.svelte';
   import Advanced from '#lib/components/Advanced.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
@@ -137,10 +138,11 @@
           /></label
         >
         <label
-          >Actor user ID <input
+          >Done by <EntityPicker
+            id="audit-actor"
+            kind="person"
             bind:value={listState.actorUserId}
-            class="mono"
-            placeholder="All actors"
+            emptyLabel="Anyone"
           /></label
         >
       </div>

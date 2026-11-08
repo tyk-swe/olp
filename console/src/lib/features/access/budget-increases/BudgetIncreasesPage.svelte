@@ -1,4 +1,6 @@
 <script lang="ts">
+  import EntityPicker from '#lib/components/EntityPicker.svelte';
+  import type { EntityKind } from '#lib/components/entityOptions.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import { formatDate } from '#lib/format.js';
@@ -36,6 +38,17 @@
   );
   let kind = $state<IncreaseInput['target']['kind']>('api_key');
   let resourceId = $state('');
+  const targetPicker = $derived<{ kind: EntityKind; label: string } | null>(
+    kind === 'budget_group'
+      ? { kind: 'budget-group', label: 'Budget group' }
+      : kind === 'organization'
+        ? { kind: 'organization', label: 'Organization' }
+        : kind === 'project' ||
+            kind === 'project_end_user' ||
+            kind === 'attribution'
+          ? { kind: 'project', label: 'Project' }
+          : null
+  );
   let route = $state('');
   let digest = $state('');
   let label = $state('');
@@ -199,22 +212,21 @@
                 >{/if}</select
             >
           </div>
-          {#if kind !== 'installation'}<div class="form-field">
-              <label for="increase-resource"
-                >{kind === 'budget_group'
-                  ? 'Budget group'
-                  : kind === 'organization'
-                    ? 'Organization'
-                    : kind === 'project' ||
-                        kind === 'project_end_user' ||
-                        kind === 'attribution'
-                      ? 'Project'
-                      : 'API key'} ID</label
-              ><input
+          {#if targetPicker}<div class="form-field">
+              <label for="increase-resource">{targetPicker.label}</label>
+              {#key targetPicker.kind}<EntityPicker
+                  id="increase-resource"
+                  kind={targetPicker.kind}
+                  bind:value={resourceId}
+                  emptyLabel="Choose one"
+                  required
+                />{/key}
+            </div>{:else if kind !== 'installation'}<div class="form-field">
+              <label for="increase-resource">API key ID</label><input
                 id="increase-resource"
+                class="mono"
                 bind:value={resourceId}
                 required
-                placeholder="Resource UUID"
               />
             </div>{/if}
           {#if kind === 'key_route'}<div class="form-field">

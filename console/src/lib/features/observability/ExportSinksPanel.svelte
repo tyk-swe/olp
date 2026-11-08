@@ -1,4 +1,5 @@
 <script lang="ts">
+  import EntityPicker from '#lib/components/EntityPicker.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
@@ -411,11 +412,12 @@
               >{/if}
           </fieldset>
           <div class="form-field">
-            <label for="sink-filter-project">Filter project</label><input
+            <label for="sink-filter-project">Only for project</label
+            ><EntityPicker
               id="sink-filter-project"
-              class="mono"
+              kind="project"
               bind:value={sinkFilterProject}
-              placeholder="Optional project UUID"
+              emptyLabel="All projects"
             />
           </div>
           <div class="form-field">

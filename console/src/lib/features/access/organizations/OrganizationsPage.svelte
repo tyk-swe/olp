@@ -1,4 +1,5 @@
 <script lang="ts">
+  import EntityPicker from '#lib/components/EntityPicker.svelte';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
@@ -230,19 +231,22 @@
         }}
       >
         <label class="form-field"
-          >Organization member user ID<input
+          >Person<EntityPicker
+            id="organization-member"
+            kind="person"
             required
             bind:value={userId}
+            emptyLabel="Choose someone"
             disabled={busy}
           /></label
         ><label class="form-field"
-          >Organization role<select bind:value={role} disabled={busy}
+          >Role<select bind:value={role} disabled={busy}
             ><option value="viewer">Viewer</option><option value="manager"
               >Manager</option
             ></select
           ></label
         ><button class="button button-primary" disabled={busy}
-          >Assign organization member</button
+          >Add to organization</button
         >
       </form>{/if}
   </section>
@@ -363,19 +367,22 @@
           }}
         >
           <label class="form-field"
-            >Project member user ID<input
+            >Person<EntityPicker
+              id="organization-project-member"
+              kind="person"
               required
               bind:value={projectUser}
+              emptyLabel="Choose someone"
               disabled={busy}
             /></label
           ><label class="form-field"
-            >Project role<select bind:value={projectRole} disabled={busy}
+            >Role<select bind:value={projectRole} disabled={busy}
               ><option value="viewer">Viewer</option><option value="manager"
                 >Manager</option
               ></select
             ></label
           ><button class="button button-primary" disabled={busy}
-            >Assign project member</button
+            >Add to project</button
           >
         </form>{/if}
     {:else}<p>No projects in this organization.</p>{/if}

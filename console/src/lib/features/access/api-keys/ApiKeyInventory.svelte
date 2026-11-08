@@ -1,4 +1,5 @@
 <script lang="ts">
+  import EntityPicker from '#lib/components/EntityPicker.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import {
@@ -87,15 +88,6 @@
     queryKey: apiKeyKeys.page(cursor, createdBy),
     queryFn: ({ signal }) => listApiKeyPage(cursor, signal, createdBy)
   }));
-
-  const issuers = $derived(
-    new Map(
-      (keys.data?.items ?? []).map((key) => [
-        key.created_by,
-        key.created_by_email
-      ])
-    )
-  );
 
   async function filterIssuer(value: string) {
     const url = new URL(page.url.href);
@@ -195,40 +187,17 @@
     {submitError || mutationError}
   </div>{/if}
 
-<form
-  class="card issuer-filter"
-  onsubmit={(event) => {
-    event.preventDefault();
-    void filterIssuer(issuer);
-  }}
->
-  <label class="field">
-    <span>Issuer (user ID)</span>
-    <input
+<div class="toolbar issuer-filter">
+  <label for="key-issuer"
+    >Created by <EntityPicker
+      id="key-issuer"
+      kind="person"
       bind:value={issuer}
-      list="key-issuers"
-      placeholder="All issuers"
-      pattern={'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'}
-      aria-describedby="issuer-hint"
-    />
-  </label>
-  <datalist id="key-issuers">
-    {#each [...issuers] as [id, email] (id)}<option value={id}>{email}</option
-      >{/each}
-  </datalist>
-  <p id="issuer-hint">
-    Choose an issuer from this page or enter a user ID. Keys attributed to
-    inactive members remain available for review.
-  </p>
-  <div class="page-actions">
-    <button class="button button-secondary" type="submit">Apply issuer</button>
-    <button
-      class="button button-secondary"
-      type="button"
-      onclick={() => filterIssuer('')}>Clear issuer</button
-    >
-  </div>
-</form>
+      emptyLabel="Anyone"
+      onchange={filterIssuer}
+    /></label
+  >
+</div>
 
 {#if keys.isPending}
   <div class="loading-state" role="status">Loading API keys…</div>
@@ -244,16 +213,18 @@
 {:else if !keys.data?.items.length && listState.history.length === 0}
   <section class="card empty-state">
     <div>
-      <h2>{createdBy ? 'No API keys for this issuer' : 'No API keys'}</h2>
+      <h2>
+        {createdBy ? 'No API keys created by this person' : 'No API keys'}
+      </h2>
       <p>
         {createdBy
-          ? 'Choose another issuer or clear the filter to review all keys.'
+          ? 'Pick someone else or show every key.'
           : 'Create a scoped key for your clients.'}
       </p>
       {#if createdBy}<button
           class="button button-secondary"
           type="button"
-          onclick={() => filterIssuer('')}>Clear issuer</button
+          onclick={() => filterIssuer('')}>Show all keys</button
         >{/if}
       {#if canManage && !createdBy}<a
           class="button button-primary"
@@ -488,35 +459,17 @@
 
 <style>
   .issuer-filter {
-    display: grid;
-    gap: 0.75rem;
     margin-top: 1.5rem;
-    padding: 1.5rem;
   }
-  .field {
-    display: grid;
-    gap: 0.4rem;
-    font-weight: 500;
-  }
-  .field input {
-    min-height: 2.5rem;
-    padding: 0.5rem 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-control);
-    background: transparent;
-    color: var(--foreground);
-    font-weight: 400;
-    transition: border-color var(--motion);
-  }
-  .field input:hover {
-    border-color: var(--border-strong);
-  }
-  .field input::placeholder {
+  .issuer-filter label {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
     color: var(--foreground-muted);
+    font-size: var(--text-body-sm);
   }
-  .issuer-filter p {
-    margin: 0;
-    color: var(--foreground-muted);
+  .issuer-filter :global(:is(select, input)) {
+    min-width: min(18rem, 60vw);
   }
   .key-table {
     margin-top: 1.5rem;

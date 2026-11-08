@@ -1,4 +1,5 @@
 <script lang="ts">
+  import EntityPicker from '#lib/components/EntityPicker.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '#lib/shell/CursorPagination.svelte';
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
@@ -148,11 +149,11 @@
         >
       </div>
       <div class="form-field">
-        <label for="discount-provider">Provider ID</label><input
+        <label for="discount-provider">Provider</label><EntityPicker
           id="discount-provider"
+          kind="provider"
           bind:value={providerId}
-          class="mono"
-          placeholder="Optional UUID"
+          emptyLabel="Every provider of this kind"
           disabled={!canEdit}
         />
       </div>
