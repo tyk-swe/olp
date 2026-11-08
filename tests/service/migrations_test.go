@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -323,5 +325,43 @@ func TestServiceRunsUnderRuntimeRole(t *testing.T) {
 	}
 	if _, err = restricted.Exec(t.Context(), "DELETE FROM olp.migrations"); err == nil {
 		t.Fatal("the runtime role can rewrite migration history")
+	}
+}
+
+func TestNotificationEventConstraintMatchesPublishedEvents(t *testing.T) {
+	pool, _ := newDatabase(t)
+	if err := database.Migrate(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+	var definition string
+	if err := pool.QueryRow(t.Context(), `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname='notification_rules_event_check'`).Scan(&definition); err != nil {
+		t.Fatal(err)
+	}
+	allowed := slices.Compact(slices.Sorted(func(yield func(string) bool) {
+		for _, match := range regexp.MustCompile(`'([a-z_.]+)'`).FindAllStringSubmatch(definition, -1) {
+			if !yield(match[1]) {
+				return
+			}
+		}
+	}))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "management", "management.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec struct {
+		Components struct {
+			Schemas struct {
+				NotificationEvent struct {
+					Enum []string `json:"enum"`
+				} `json:"NotificationEvent"`
+			} `json:"schemas"`
+		} `json:"components"`
+	}
+	if err = json.Unmarshal(raw, &spec); err != nil {
+		t.Fatal(err)
+	}
+	published := slices.Sorted(slices.Values(spec.Components.Schemas.NotificationEvent.Enum))
+	if len(published) == 0 || !slices.Equal(allowed, published) {
+		t.Fatalf("database allows %v, API publishes %v", allowed, published)
 	}
 }

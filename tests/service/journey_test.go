@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
@@ -867,6 +868,28 @@ func TestBudgetThresholdNotificationsUseBudgetBasis(t *testing.T) {
 			t.Errorf("%s amount=%d delivered=%t, want amount=%d", want.name, amount, delivered, want.amount)
 		}
 	}
+}
+
+func TestInstallationNotificationDeleteRequiresSettings(t *testing.T) {
+	s := startService(t)
+	owner := s.owner()
+	ownerID := s.want(owner, "GET", "/api/v1/profile", nil, nil, http.StatusOK)["id"].(string)
+	destination := uuid.NewString()
+	if _, err := s.pool.Exec(t.Context(), `INSERT INTO olp.notification_destinations(id,name,url,etag,created_by)
+ VALUES($1,'installation',$2,$1,$3)`, destination, "https://hooks.example.com/olp", ownerID); err != nil {
+		t.Fatal(err)
+	}
+	token := s.want(owner, "POST", "/api/v1/management-tokens", map[string]any{
+		"name": "keys only", "scopes": []string{"keys"}, "expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+	}, idempotent(), http.StatusCreated)
+	path := "/api/v1/notifications/destinations/" + destination
+	match := map[string]string{"If-Match": `"` + destination + `"`}
+	for _, c := range []*caller{s.invite(owner, "developer@example.com", access.RoleDeveloper), {name: "keys token", token: token["secret"].(string)}} {
+		if status, raw := s.do(c, "DELETE", path, nil, idempotent(match)); status != http.StatusForbidden {
+			t.Errorf("%s deleted an installation destination: %s", c.name, describe(status, raw))
+		}
+	}
+	s.want(owner, "DELETE", path, nil, idempotent(match), http.StatusNoContent)
 }
 
 func TestFocusExportsHonorDefaultAndExplicitStartDates(t *testing.T) {

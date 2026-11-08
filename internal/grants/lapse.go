@@ -59,7 +59,31 @@ func lapse(ctx context.Context, tx pgx.Tx, g *dueGrant, reason string) (bool, er
 	if err = ended(ctx, tx, g, "provider.grant.lapse"); err != nil {
 		return false, err
 	}
-	return true, notifications.NotifyGrantLapsed(ctx, tx, g.credentialID)
+	notice, err := lapseNotice(ctx, tx, g.credentialID)
+	if err != nil {
+		return false, err
+	}
+	return true, notifications.NotifyGrantLapsed(ctx, tx, notice)
+}
+
+const lapseNoticeSQL = `SELECT c.id::text,c.version,c.principal,p.id::text,p.name,g.lapsed_at,
+ (SELECT coalesce(jsonb_agg(jsonb_build_object('id',s.id,'name',s.name) ORDER BY s.name,s.id),'[]')
+   FROM (SELECT DISTINCT ON (id) id,name FROM (
+     SELECT id,name,false AS published FROM olp.provider_slots WHERE credential_id=c.id
+     UNION ALL
+     SELECT (e->>'id')::uuid,e->>'name',true FROM olp.provider_revisions r CROSS JOIN jsonb_array_elements(r.slots) e
+     WHERE r.id=p.active_revision_id AND e->>'credential_id'=c.id::text) bound
+   ORDER BY id,published) s)
+FROM olp.provider_credentials c
+JOIN olp.providers p ON p.id=c.provider_id
+JOIN olp.provider_grants g ON g.credential_id=c.id
+WHERE c.id=$1`
+
+func lapseNotice(ctx context.Context, tx pgx.Tx, credentialID string) (notifications.GrantLapse, error) {
+	var n notifications.GrantLapse
+	err := tx.QueryRow(ctx, lapseNoticeSQL, credentialID).Scan(&n.CredentialID, &n.CredentialVersion,
+		&n.ObservedPrincipal, &n.ProviderID, &n.ProviderName, &n.LapsedAt, &n.CredentialSlots)
+	return n, err
 }
 
 // retire retires, in tx, a due grant that no configuration or retained resource uses any more
