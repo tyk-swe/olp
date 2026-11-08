@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"log/slog"
@@ -9,7 +10,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/batches"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -24,6 +27,7 @@ func runMaintenance(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) {
 		now := time.Now()
 		resourceCtx, stopResource := context.WithTimeout(ctx, usage.MaintenanceInterval/2)
 		_, resourceErr := store.Expire(resourceCtx, now)
+		resourceErr = errors.Join(resourceErr, access.ExpireKeyOverlaps(resourceCtx, pool), release.ExpireInstallStatus(resourceCtx, pool))
 		stopResource()
 		usageCtx, stopUsage := context.WithTimeout(ctx, usage.MaintenanceInterval/2)
 		report, usageErr := usage.RunMaintenance(usageCtx, pool, now)

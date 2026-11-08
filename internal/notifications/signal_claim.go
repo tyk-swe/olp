@@ -11,13 +11,16 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/tyk-swe/olp/internal/management/contract"
 )
 
 type signalRule struct {
-	id, event, name string
-	project         *string
-	configuration   RuleConfiguration
-	createdAt       time.Time
+	id, name      string
+	event         contract.NotificationEvent
+	project       *string
+	configuration ruleConfiguration
+	createdAt     time.Time
 }
 
 type notificationSignal struct {
@@ -28,7 +31,7 @@ type notificationSignal struct {
 	evidence    map[string]any
 }
 
-func (w *deliveryWorker) claimSignal(ctx context.Context, tx pgx.Tx, rule signalRule, signal notificationSignal, now time.Time) (int, error) {
+func (w *deliveryWorker) claimSignal(ctx context.Context, tx pgx.Tx, rule signalRule, source signalSource, signal notificationSignal, now time.Time) (int, error) {
 	if !signal.known {
 		return 0, nil
 	}
@@ -44,7 +47,7 @@ func (w *deliveryWorker) claimSignal(ctx context.Context, tx pgx.Tx, rule signal
 	desired := signal.active
 	if signal.measurement != nil {
 		var err error
-		desired, err = rule.configuration.ThresholdState(*signal.measurement, active)
+		desired, err = rule.configuration.breached(*signal.measurement, active)
 		if err != nil {
 			return 0, err
 		}
@@ -56,25 +59,25 @@ func (w *deliveryWorker) claimSignal(ctx context.Context, tx pgx.Tx, rule signal
 	if _, err := tx.Exec(ctx, updateSignalStateSQL, rule.id, signal.subject, next.active, next.incident, next.lastTriggerAt); err != nil {
 		return 0, err
 	}
-	if !next.trigger && !next.recover || rule.event == "provider.circuit.closed" && !next.recover {
+	if !next.recover && (!next.trigger || source.recoveryOnly) {
 		return 0, nil
 	}
 	digest := sha256.Sum256([]byte(rule.id + ":" + signal.subject))
 	incidentKey := "olp:" + hex.EncodeToString(digest[:]) + ":" + strconv.FormatInt(next.incident, 10)
 	dedupKey := incidentKey
 	event := rule.event
-	if next.recover && event == "provider.circuit.open" {
-		event = "provider.circuit.closed"
+	if next.recover && source.recoveredAs != "" {
+		event = source.recoveredAs
 	}
 	if !next.recover {
 		dedupKey += ":" + strconv.FormatInt(now.UnixNano(), 10)
 	}
-	id := w.newID()
-	payload, err := json.Marshal(map[string]any{
-		"version": 1, "delivery_id": id, "event": event, "rule_id": rule.id, "rule_name": rule.name,
-		"subject": signal.subject, "incident": next.incident, "incident_key": incidentKey,
-		"dedup_key": dedupKey, "resolved": next.recover, "occurred_at": now.UTC().Format(time.RFC3339Nano),
-		"evidence": signal.evidence,
+	id := w.NewID()
+	payload, err := json.Marshal(signalPayload{
+		Version: 1, DeliveryID: id, Event: event, RuleID: rule.id, RuleName: rule.name,
+		incidentRef: incidentRef{Key: incidentKey, Subject: signal.subject, Number: &next.incident},
+		DedupKey:    dedupKey, Resolved: next.recover, OccurredAt: now.UTC().Format(time.RFC3339Nano),
+		Evidence: signal.evidence,
 	})
 	if err != nil {
 		return 0, err
@@ -83,7 +86,7 @@ func (w *deliveryWorker) claimSignal(ctx context.Context, tx pgx.Tx, rule signal
 	return int(tag.RowsAffected()), err
 }
 
-func (w *deliveryWorker) claimSpendReport(ctx context.Context, tx pgx.Tx, rule signalRule) (int, error) {
+func claimSpendReport(w *deliveryWorker, ctx context.Context, tx pgx.Tx, rule signalRule, _ signalEnv) (int, error) {
 	unit := map[string]string{"daily": "day", "weekly": "week", "monthly": "month"}[rule.configuration.Period]
 	if unit == "" {
 		return 0, fmt.Errorf("invalid spend report period %q", rule.configuration.Period)
@@ -107,7 +110,7 @@ func (w *deliveryWorker) claimSpendReport(ctx context.Context, tx pgx.Tx, rule s
 	if rule.project != nil {
 		filters.AllowedProjects = []string{*rule.project}
 	}
-	summary, err := usage.ReadSummary(ctx, tx, filters, w.now())
+	summary, err := usage.ReadSummary(ctx, tx, filters, w.Now())
 	if err != nil {
 		return 0, err
 	}
@@ -119,12 +122,12 @@ func (w *deliveryWorker) claimSpendReport(ctx context.Context, tx pgx.Tx, rule s
 		}
 		breakdowns[dimension] = breakdown
 	}
-	id := w.newID()
-	payload, err := json.Marshal(map[string]any{
-		"version": 1, "delivery_id": id, "event": rule.event, "rule_id": rule.id, "rule_name": rule.name,
-		"dedup_key": dedupKey, "resolved": false, "period": rule.configuration.Period,
-		"start": start.UTC().Format(time.RFC3339), "end": end.UTC().Format(time.RFC3339),
-		"summary": summary, "breakdowns": breakdowns,
+	id := w.NewID()
+	payload, err := json.Marshal(spendReportPayload{
+		Version: 1, DeliveryID: id, Event: rule.event, RuleID: rule.id, RuleName: rule.name,
+		DedupKey: dedupKey, Period: rule.configuration.Period,
+		Start: start.UTC().Format(time.RFC3339), End: end.UTC().Format(time.RFC3339),
+		Summary: summary, Breakdowns: breakdowns,
 	})
 	if err != nil {
 		return 0, err

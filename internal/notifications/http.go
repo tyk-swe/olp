@@ -25,7 +25,7 @@ const (
 	channelDrainBytes = 64 << 10
 )
 
-func parseWebhook(policy *egress.Policy, d Destination) (endpoint, error) {
+func parseWebhook(policy *egress.Policy, d destination) (endpoint, error) {
 	if err := requireNoConfiguration(d.Configuration); err != nil {
 		return nil, err
 	}
@@ -36,7 +36,7 @@ func parseWebhook(policy *egress.Policy, d Destination) (endpoint, error) {
 	return webhook{url: target.String()}, nil
 }
 
-func parseChat(policy *egress.Policy, d Destination, render func(map[string]json.RawMessage) any) (endpoint, error) {
+func parseChat(policy *egress.Policy, d destination, render func(message) any) (endpoint, error) {
 	origin, err := channelOrigin(d.URL)
 	if err != nil {
 		return nil, err
@@ -50,7 +50,7 @@ func parseChat(policy *egress.Policy, d Destination, render func(map[string]json
 	return chat{origin: origin, render: render}, nil
 }
 
-func parsePagerDuty(policy *egress.Policy, d Destination) (endpoint, error) {
+func parsePagerDuty(policy *egress.Policy, d destination) (endpoint, error) {
 	if err := requireNoConfiguration(d.Configuration); err != nil {
 		return nil, err
 	}
@@ -110,14 +110,14 @@ func (w webhook) bind(_ *egress.Policy, secret []byte) (channel, error) {
 	return webhook{url: w.url, key: append([]byte(nil), secret...)}, nil
 }
 
-func (w webhook) send(ctx context.Context, s *Sender, body []byte) error {
+func (w webhook) send(ctx context.Context, s *Sender, m message) error {
 	header := make(http.Header)
 	if len(w.key) != 0 {
 		sum := hmac.New(sha256.New, w.key)
-		_, _ = sum.Write(body)
+		_, _ = sum.Write(m.body)
 		header.Set("X-OLP-Signature", "sha256="+hex.EncodeToString(sum.Sum(nil)))
 	}
-	status, _, err := post(ctx, s.webhooks, webhookTimeout, w.url, header, body)
+	status, _, err := post(ctx, s.webhooks, webhookTimeout, w.url, header, m.body)
 	if err != nil {
 		return err
 	}
@@ -126,7 +126,7 @@ func (w webhook) send(ctx context.Context, s *Sender, body []byte) error {
 
 type chat struct {
 	origin *url.URL
-	render func(map[string]json.RawMessage) any
+	render func(message) any
 	hook   string
 }
 
@@ -145,8 +145,8 @@ func (c chat) bind(policy *egress.Policy, secret []byte) (channel, error) {
 	return c, nil
 }
 
-func (c chat) send(ctx context.Context, s *Sender, body []byte) error {
-	payload, err := json.Marshal(c.render(bodyFields(body)))
+func (c chat) send(ctx context.Context, s *Sender, m message) error {
+	payload, err := json.Marshal(c.render(m))
 	if err != nil {
 		return channelError(invalidDestinationCode, err)
 	}
@@ -175,8 +175,8 @@ func (p pagerDuty) bind(_ *egress.Policy, secret []byte) (channel, error) {
 	return p, nil
 }
 
-func (p pagerDuty) send(ctx context.Context, s *Sender, body []byte) error {
-	payload, err := newPagerDutyEvent(p.routingKey, body)
+func (p pagerDuty) send(ctx context.Context, s *Sender, m message) error {
+	payload, err := newPagerDutyEvent(p.routingKey, m)
 	if err != nil {
 		return channelError(invalidDestinationCode, err)
 	}

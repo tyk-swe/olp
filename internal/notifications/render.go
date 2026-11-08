@@ -25,61 +25,31 @@ func truncate(text string, max int) string {
 	return string(runes[:max-1]) + "…"
 }
 
-func bodyFields(body []byte) map[string]json.RawMessage {
-	fields := map[string]json.RawMessage{}
-	_ = json.Unmarshal(body, &fields)
-	return fields
-}
-
-func bodyString(fields map[string]json.RawMessage, key string) string {
-	raw, present := fields[key]
-	if !present {
-		return ""
-	}
-	var value string
-	if err := json.Unmarshal(raw, &value); err == nil {
-		return value
-	}
-	var number json.Number
-	if err := json.Unmarshal(raw, &number); err == nil {
-		return number.String()
-	}
-	return ""
-}
-
-func eventTitle(fields map[string]json.RawMessage) string {
-	event, rule := bodyString(fields, "event"), bodyString(fields, "rule_name")
-	if rule == "" {
-		return mentionSafe.Replace(event)
-	}
-	return mentionSafe.Replace(event + " — " + rule)
-}
-
-func evidence(fields map[string]json.RawMessage) string {
-	raw, err := json.MarshalIndent(fields, "", "  ")
+func (m message) details() string {
+	raw, err := json.MarshalIndent(m.fields, "", "  ")
 	if err != nil {
 		return "(evidence unavailable)"
 	}
 	return string(raw)
 }
 
-func chatEvidence(fields map[string]json.RawMessage, max int) string {
-	return mentionSafe.Replace(truncate(evidence(fields), max))
+func chatEvidence(m message, max int) string {
+	return mentionSafe.Replace(truncate(m.details(), max))
 }
 
-func slackMessage(fields map[string]json.RawMessage) any {
-	title := eventTitle(fields)
+func slackMessage(m message) any {
+	title := m.title
 	return map[string]any{
 		"text": truncate(title, 150),
 		"blocks": []map[string]any{
 			{"type": "header", "text": map[string]any{"type": "plain_text", "text": truncate(title, 150)}},
-			{"type": "section", "text": map[string]any{"type": "mrkdwn", "text": "```" + chatEvidence(fields, 2800) + "```"}},
+			{"type": "section", "text": map[string]any{"type": "mrkdwn", "text": "```" + chatEvidence(m, 2800) + "```"}},
 		},
 	}
 }
 
-func teamsMessage(fields map[string]json.RawMessage) any {
-	title := eventTitle(fields)
+func teamsMessage(m message) any {
+	title := m.title
 	return map[string]any{
 		"type": "message",
 		"attachments": []map[string]any{
@@ -89,20 +59,20 @@ func teamsMessage(fields map[string]json.RawMessage) any {
 					"type":    "AdaptiveCard", "version": "1.4",
 					"body": []map[string]any{
 						{"type": "TextBlock", "text": truncate(title, 256), "weight": "Bolder"},
-						{"type": "TextBlock", "text": chatEvidence(fields, 3600), "wrap": true},
+						{"type": "TextBlock", "text": chatEvidence(m, 3600), "wrap": true},
 					},
 				}},
 		},
 	}
 }
 
-func discordMessage(fields map[string]json.RawMessage) any {
-	title := eventTitle(fields)
+func discordMessage(m message) any {
+	title := m.title
 	return map[string]any{
 		"content":          truncate(title, discordContentMax),
 		"allowed_mentions": map[string]any{"parse": []string{}},
 		"embeds": []map[string]any{
-			{"title": truncate(title, discordTitleMax), "description": chatEvidence(fields, discordDescMax)},
+			{"title": truncate(title, discordTitleMax), "description": chatEvidence(m, discordDescMax)},
 		},
 	}
 }
@@ -119,40 +89,21 @@ type pagerDutyEvent struct {
 	} `json:"payload"`
 }
 
-func newPagerDutyEvent(routingKey string, body []byte) (pagerDutyEvent, error) {
-	fields := bodyFields(body)
-	var resolved bool
-	_ = json.Unmarshal(fields["resolved"], &resolved)
-	dedup := bodyString(fields, "incident_key")
-	if dedup == "" {
-		dedup = bodyString(fields, "dedup_key")
-	}
-	if dedup == "" {
-		if ruleID, event, window := bodyString(fields, "rule_id"), bodyString(fields, "event"), bodyString(fields, "window_id"); ruleID != "" && event != "" && window != "" {
-			dedup = ruleID + ":" + event + ":" + window
-		}
-	}
-	if dedup == "" {
-		dedup = bodyString(fields, "delivery_id")
-	}
-	if len(dedup) > pagerDutyDedupMax {
+func newPagerDutyEvent(routingKey string, m message) (pagerDutyEvent, error) {
+	if len(m.dedupKey) > pagerDutyDedupMax {
 		return pagerDutyEvent{}, errors.New("deduplication key too long")
 	}
-	if dedup == "" {
+	if m.dedupKey == "" {
 		return pagerDutyEvent{}, errors.New("no deduplication key")
 	}
 	action := "trigger"
-	if resolved {
+	if m.resolved {
 		action = "resolve"
 	}
-	payload := pagerDutyEvent{
-		RoutingKey:  routingKey,
-		EventAction: action,
-		DedupKey:    dedup,
-	}
-	payload.Payload.Summary = truncate(eventTitle(fields), summaryMax)
+	payload := pagerDutyEvent{RoutingKey: routingKey, EventAction: action, DedupKey: m.dedupKey}
+	payload.Payload.Summary = truncate(m.title, summaryMax)
 	payload.Payload.Source = "OpenLLMProxy"
 	payload.Payload.Severity = "warning"
-	payload.Payload.CustomDetails = fields
+	payload.Payload.CustomDetails = m.fields
 	return payload, nil
 }

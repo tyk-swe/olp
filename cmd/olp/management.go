@@ -81,7 +81,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	management.NewMCP(m.Access, mux).Register(mux)
 	m.Access.Register(mux)
 	projects.New(m.Access).Register(mux)
-	notifications.NewManagement(m.Access, m.Egress).Register(mux)
+	notifications.NewManagement(m.Access, *m.Egress).Register(mux)
 	settings.New(m.Access, m.Access.RuntimePublisher).Register(mux)
 	(&release.DelegationManagement{Access: m.Access, Manager: m.Runtime}).Register(mux)
 	(&gateway.CacheManagement{Access: m.Access, Gateway: m.Gateway}).Register(mux)

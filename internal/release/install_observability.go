@@ -1,6 +1,10 @@
 package release
 
-import "context"
+import (
+	"context"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
 
 func (m *Manager) RecordInstallStatus(ctx context.Context, instance string) error {
 	if instance == "" {
@@ -16,4 +20,9 @@ func (m *Manager) installStatus() (int64, int64, bool) {
 	defer m.mu.RUnlock()
 	desired, installed := m.desired.Load(), m.release.Sequence
 	return desired, installed, desired > installed && m.failed == desired
+}
+
+func ExpireInstallStatus(ctx context.Context, pool *pgxpool.Pool) error {
+	_, err := pool.Exec(ctx, expireInstallStatusSQL)
+	return err
 }

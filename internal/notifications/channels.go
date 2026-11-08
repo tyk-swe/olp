@@ -31,13 +31,9 @@ const (
 	smtp5xxCode            = "smtp_5xx"
 	credentialCode         = "credential"
 	redirectCode           = "redirect"
-
-	channelSecretMax = 16384
-	channelConfigMax = 4096
 )
 
-// Destination identifies a notification channel and its configuration.
-type Destination struct {
+type destination struct {
 	Type          string
 	URL           string
 	Configuration json.RawMessage
@@ -48,7 +44,7 @@ type endpoint interface {
 }
 
 type channel interface {
-	send(ctx context.Context, s *Sender, body []byte) error
+	send(ctx context.Context, s *Sender, m message) error
 }
 
 type sendError struct {
@@ -93,17 +89,15 @@ func NewSender(policy egress.Policy) *Sender {
 	}
 }
 
-// Send validates and binds a destination before sending its body.
-func (s *Sender) Send(ctx context.Context, d Destination, secret, body []byte) error {
+func (s *Sender) send(ctx context.Context, d destination, secret []byte, m message) error {
 	c, err := open(&s.policy, d, secret)
 	if err != nil {
 		return channelError(invalidDestinationCode, err)
 	}
-	return c.send(ctx, s, body)
+	return c.send(ctx, s, m)
 }
 
-// SendErrorCode returns the safe delivery category for err.
-func SendErrorCode(err error) string {
+func sendErrorCode(err error) string {
 	if err == nil {
 		return ""
 	}
@@ -114,8 +108,7 @@ func SendErrorCode(err error) string {
 	return networkCode
 }
 
-// RequiresSecret reports whether a destination type requires a secret.
-func RequiresSecret(typ string) bool {
+func requiresSecret(typ string) bool {
 	switch typ {
 	case slackType, msteamsType, discordType, pagerDutyType:
 		return true
@@ -123,23 +116,8 @@ func RequiresSecret(typ string) bool {
 	return false
 }
 
-// ValidateDestinationShape checks a destination without binding its secret.
-func ValidateDestinationShape(policy *egress.Policy, d Destination) error {
-	_, err := parse(policy, d)
-	return err
-}
-
-// ValidateDestination checks a destination and its secret.
-func ValidateDestination(policy *egress.Policy, d Destination, secret []byte) error {
-	_, err := open(policy, d, secret)
-	return err
-}
-
-func parse(policy *egress.Policy, d Destination) (endpoint, error) {
-	if policy == nil {
-		return nil, errors.New("egress policy unavailable")
-	}
-	if len(d.Configuration) > channelConfigMax {
+func parse(policy *egress.Policy, d destination) (endpoint, error) {
+	if len(d.Configuration) > configurationLimit {
 		return nil, errors.New("configuration too large")
 	}
 	switch cmp.Or(d.Type, webhookType) {
@@ -160,8 +138,8 @@ func parse(policy *egress.Policy, d Destination) (endpoint, error) {
 	}
 }
 
-func open(policy *egress.Policy, d Destination, secret []byte) (channel, error) {
-	if len(secret) > channelSecretMax {
+func open(policy *egress.Policy, d destination, secret []byte) (channel, error) {
+	if len(secret) > secretObjectLimit {
 		return nil, errors.New("secret too large")
 	}
 	endpoint, err := parse(policy, d)

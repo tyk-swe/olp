@@ -86,7 +86,7 @@ func emailConfig(raw json.RawMessage) (emailConfiguration, error) {
 	if len(config.SubjectPrefix) > 200 || strings.ContainsAny(config.SubjectPrefix, "\r\n\x00") {
 		return config, errors.New("subject_prefix is invalid")
 	}
-	if len(config.CACertificate) > channelSecretMax {
+	if len(config.CACertificate) > secretObjectLimit {
 		return config, errors.New("ca_certificate too large")
 	}
 	return config, nil
@@ -147,7 +147,7 @@ func parseSMTPAddresses(config emailConfiguration) (*mail.Address, []*mail.Addre
 	return from, to, nil
 }
 
-func parseEmail(policy *egress.Policy, d Destination) (email, error) {
+func parseEmail(policy *egress.Policy, d destination) (email, error) {
 	scheme, host, err := smtpTarget(d.URL)
 	if err != nil {
 		return email{}, err
@@ -215,7 +215,7 @@ func (e email) bind(_ *egress.Policy, secret []byte) (channel, error) {
 	return e, nil
 }
 
-func (e email) send(ctx context.Context, s *Sender, body []byte) error {
+func (e email) send(ctx context.Context, s *Sender, m message) error {
 	sendCtx, cancel := context.WithTimeout(ctx, channelTimeout)
 	defer cancel()
 	rawConn, err := s.policy.DialContext(sendCtx, "tcp", e.address)
@@ -272,7 +272,7 @@ func (e email) send(ctx context.Context, s *Sender, body []byte) error {
 	if err != nil {
 		return smtpError(err)
 	}
-	if _, err = w.Write(e.message(body, time.Now())); err != nil {
+	if _, err = w.Write(e.message(m, time.Now())); err != nil {
 		_ = w.Close()
 		return smtpError(err)
 	}
@@ -284,9 +284,8 @@ func (e email) send(ctx context.Context, s *Sender, body []byte) error {
 	return nil
 }
 
-func (e email) message(body []byte, now time.Time) []byte {
-	fields := bodyFields(body)
-	subject := strings.TrimSpace(e.subjectPrefix + " " + eventTitle(fields))
+func (e email) message(m message, now time.Time) []byte {
+	subject := strings.TrimSpace(e.subjectPrefix + " " + m.title)
 	to := make([]string, 0, len(e.to))
 	for _, recipient := range e.to {
 		to = append(to, recipient.String())
@@ -306,7 +305,7 @@ func (e email) message(body []byte, now time.Time) []byte {
 			"Content-Type: text/plain; charset=utf-8\r\n"+
 			"Content-Transfer-Encoding: quoted-printable\r\n\r\n")
 	qp := quotedprintable.NewWriter(&message)
-	_, _ = io.WriteString(qp, truncate(evidence(fields), 60000)+"\r\n")
+	_, _ = io.WriteString(qp, truncate(m.details(), 60000)+"\r\n")
 	_ = qp.Close()
 	return message.Bytes()
 }

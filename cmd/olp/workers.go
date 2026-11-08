@@ -99,6 +99,7 @@ func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Clie
 	})
 	wg.Go(func() { runDebitReconciliation(ctx, pool, limiter, log) })
 	wg.Go(func() { recoverWorkflowModels(ctx, &limits.DebitStore{Pool: pool, Limiter: limiter}, log) })
+	wg.Go(func() { runMaintenance(ctx, pool, log) })
 	if limiter == nil {
 		return wg.Wait
 	}
@@ -110,7 +111,6 @@ func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Clie
 		}
 	})
 	wg.Go(func() { usage.RunEpochDetection(ctx, pool, log) })
-	wg.Go(func() { runMaintenance(ctx, pool, log) })
 	wg.Go(func() {
 		connect := func(context.Context) (*limits.Limiter, error) { return limiter, nil }
 		limits.RunRegionalCostReconciliation(ctx, pool, region, connect, costCheckpoint(pool, region), log)

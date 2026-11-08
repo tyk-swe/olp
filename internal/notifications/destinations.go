@@ -1,19 +1,16 @@
 package notifications
 
 import (
+	"cmp"
 	"encoding/json"
 	"net/http"
-
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
-
-const destinationFields = `'id',d.id,'name',d.name,'url',d.url,'type',d.type,'configuration',d.configuration,'secret_configured',d.secret_id IS NOT NULL,'project_id',d.project_id,'project_name',p.name,'enabled',d.enabled,'etag',d.etag,'created_by',d.created_by,'created_by_email',u.email,'created_at',d.created_at,'updated_at',d.updated_at`
-
-const destinationFrom = ` FROM olp.notification_destinations d
-	JOIN olp.users u ON u.id=d.created_by LEFT JOIN olp.projects p ON p.id=d.project_id`
 
 type destinationInput struct {
 	Name          string           `json:"name"`
@@ -25,83 +22,32 @@ type destinationInput struct {
 	Enabled       *bool            `json:"enabled"`
 }
 
-func (s *Server) notificationDestinations(r *http.Request, p access.Principal) (access.Reply, error) {
-	page, err := access.Page(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	rows, err := s.access.Pool.Query(r.Context(),
-		"SELECT jsonb_build_object("+destinationFields+")"+destinationFrom+
-			" WHERE d.id<$1::uuid AND ($2 OR d.project_id=ANY($3::uuid[])) ORDER BY d.id DESC LIMIT $4",
-		page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	items, err := access.JSONRows(rows)
-	return access.ListReply(items, page), err
+type storedDestination struct {
+	Name             string          `json:"name"`
+	URL              string          `json:"url"`
+	Type             string          `json:"type"`
+	Configuration    json.RawMessage `json:"configuration"`
+	Enabled          bool            `json:"enabled"`
+	SecretConfigured bool            `json:"secret_configured"`
 }
 
-func (s *Server) notificationDestination(r *http.Request, p access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "notification_destination_id")
-	if err != nil {
-		return access.Reply{}, err
-	}
-	var data []byte
-	var etag string
-	var projectID *string
-	if err = s.access.Pool.QueryRow(r.Context(),
-		"SELECT jsonb_build_object("+destinationFields+"),d.etag::text,d.project_id::text"+destinationFrom+" WHERE d.id=$1",
-		id).Scan(&data, &etag, &projectID); err != nil {
-		return access.Reply{}, err
-	}
-	if err := p.Project(projectID, access.View); err != nil {
-		return access.Reply{}, err
-	}
-	return access.Detail(json.RawMessage(data), etag), nil
-}
+var destinationPatchFields = map[string]bool{"name": true, "url": true, "type": true, "configuration": true, "enabled": true, "secret": true}
 
-func (s *Server) validateDestination(input destinationInput, secret []byte) error {
-	if err := access.ValidText("name", input.Name, 100); err != nil {
-		return err
-	}
-	if s.egress == nil {
-		return access.Fail(503, "egress_policy_unavailable", "Notification delivery is not configured on this installation.")
-	}
-	if len(input.Configuration) > 4096 {
-		return access.Invalid("configuration", "Use a configuration object of at most 4096 bytes.")
-	}
-	d := Destination{Type: input.Type, URL: strings.TrimSpace(input.URL), Configuration: input.Configuration}
-	if secret == nil {
-		if err := ValidateDestinationShape(s.egress, d); err != nil {
-			return access.Invalid("destination", "The destination or its configuration is invalid.")
-		}
-		if RequiresSecret(d.Type) && (input.Enabled == nil || *input.Enabled) {
-			return access.Invalid("secret", "This destination type requires a credential secret object.")
-		}
-		return nil
-	}
-	if err := ValidateDestination(s.egress, d, secret); err != nil {
-		return access.Invalid("destination", "The destination or its secret is invalid.")
-	}
-	return nil
-}
-
-// destinationSecret validates and decodes a notification destination secret.
 func destinationSecret(typ string, raw json.RawMessage) ([]byte, error) {
 	if string(raw) == "null" {
 		return nil, nil
 	}
-	if typ == "webhook" {
+	if typ == webhookType {
 		var secret string
 		if err := json.Unmarshal(raw, &secret); err != nil {
 			return nil, access.Invalid("secret", "Use a signing secret string or null.")
 		}
-		if secret == "" || len(secret) > 1024 {
+		if secret == "" || len(secret) > signingSecretLimit {
 			return nil, access.Invalid("secret", "Use a signing secret of 1–1024 bytes.")
 		}
 		return []byte(secret), nil
 	}
-	if len(raw) > 16384 {
+	if len(raw) > secretObjectLimit {
 		return nil, access.Invalid("secret", "The secret object is too large.")
 	}
 	var decoded map[string]json.RawMessage
@@ -111,87 +57,76 @@ func destinationSecret(typ string, raw json.RawMessage) ([]byte, error) {
 	return raw, nil
 }
 
+func configurationObject(raw json.RawMessage) (json.RawMessage, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return json.RawMessage(`{}`), nil
+	}
+	if len(raw) > configurationLimit {
+		return nil, access.Invalid("configuration", "Use a configuration object of at most 4096 bytes.")
+	}
+	var decoded map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &decoded); err != nil || decoded == nil {
+		return nil, access.Invalid("configuration", "Use a configuration object.")
+	}
+	return raw, nil
+}
+
+func (s *Server) checkDestination(d destination, secret []byte, bind, enabled bool) error {
+	if bind {
+		if _, err := open(&s.egress, d, secret); err != nil {
+			return access.Invalid("destination", "The destination, configuration or secret is invalid.")
+		}
+		return nil
+	}
+	if _, err := parse(&s.egress, d); err != nil {
+		return access.Invalid("destination", "The destination or its configuration is invalid.")
+	}
+	if enabled && requiresSecret(d.Type) {
+		return access.Invalid("secret", "This destination type requires a credential secret object.")
+	}
+	return nil
+}
+
 func (s *Server) createNotificationDestination(r *http.Request, _ access.Principal) (access.Reply, error) {
 	var input destinationInput
 	if err := access.Decode(r, &input); err != nil {
 		return access.Reply{}, err
 	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return access.Reply{}, err
+	return s.create(r, destinations, creation{projectID: input.ProjectID, fingerprint: input,
+		insert: func(tx pgx.Tx, p access.Principal, projectID *string, id, etag string) error {
+			if err := access.ValidText("name", input.Name, nameLimit); err != nil {
+				return err
+			}
+			configuration, err := configurationObject(input.Configuration)
+			if err != nil {
+				return err
+			}
+			typ := cmp.Or(input.Type, webhookType)
+			secret, err := suppliedSecret(typ, input.Secret)
+			if err != nil {
+				return err
+			}
+			enabled := input.Enabled == nil || *input.Enabled
+			target := destination{Type: typ, URL: strings.TrimSpace(input.URL), Configuration: configuration}
+			if err = s.checkDestination(target, secret, secret != nil, enabled); err != nil {
+				return err
+			}
+			if _, err = tx.Exec(r.Context(), createChannelDestinationSQL,
+				id, strings.TrimSpace(input.Name), target.URL, projectID, etag, p.UserID(), enabled, typ, configuration); err != nil {
+				return err
+			}
+			if input.Secret == nil {
+				return nil
+			}
+			return s.storeNotificationSecret(r, tx, id, secret)
+		}})
+}
+
+func suppliedSecret(typ string, raw *json.RawMessage) ([]byte, error) {
+	if raw == nil {
+		return nil, nil
 	}
-	defer tx.Rollback(r.Context())
-	if err = p.Authorize(notificationOperation(input.ProjectID)); err != nil {
-		return access.Reply{}, err
-	}
-	claim, replayed, err := s.access.Replay(r, tx, p, input)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if replayed != nil {
-		// The stored reply carries the created destination, so the caller
-		// must still reach its project to receive it.
-		if err := s.access.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
-			return access.Reply{}, err
-		}
-		return *replayed, tx.Commit(r.Context())
-	}
-	if input.Type == "" {
-		input.Type = "webhook"
-	}
-	var secret []byte
-	if input.Secret != nil {
-		if secret, err = destinationSecret(input.Type, *input.Secret); err != nil {
-			return access.Reply{}, err
-		}
-	}
-	if err = s.validateDestination(input, secret); err != nil {
-		return access.Reply{}, err
-	}
-	if input.ProjectID != nil {
-		var parsed string
-		if parsed, err = access.ParseUUID(*input.ProjectID); err != nil {
-			return access.Reply{}, err
-		}
-		input.ProjectID = &parsed
-	}
-	if err = s.access.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
-		return access.Reply{}, err
-	}
-	enabled := true
-	if input.Enabled != nil {
-		enabled = *input.Enabled
-	}
-	configuration := input.Configuration
-	if len(configuration) == 0 || string(configuration) == "null" {
-		configuration = json.RawMessage(`{}`)
-	}
-	id, etag := access.NewID(), access.NewID()
-	if _, err = tx.Exec(r.Context(), createChannelDestinationSQL,
-		id, strings.TrimSpace(input.Name), strings.TrimSpace(input.URL), input.ProjectID, etag,
-		p.UserID(), enabled, input.Type, configuration); err != nil {
-		return access.Reply{}, err
-	}
-	if input.Secret != nil {
-		if err = s.storeNotificationSecret(r, tx, id, secret); err != nil {
-			return access.Reply{}, err
-		}
-	}
-	var data []byte
-	if err = tx.QueryRow(r.Context(),
-		"SELECT jsonb_build_object("+destinationFields+")"+destinationFrom+" WHERE d.id=$1", id).Scan(&data); err != nil {
-		return access.Reply{}, err
-	}
-	result := access.Reply{Status: 201, ETag: etag, Location: "/api/v1/notifications/destinations/" + id,
-		Body: json.RawMessage(data)}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "notification_destination.create",
-		"notification_destination", id, "success"); err != nil {
-		return access.Reply{}, err
-	}
-	if err = s.access.CompleteReplay(r, tx, claim, result); err != nil {
-		return access.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
+	return destinationSecret(typ, *raw)
 }
 
 func (s *Server) updateNotificationDestination(r *http.Request, _ access.Principal) (access.Reply, error) {
@@ -203,155 +138,90 @@ func (s *Server) updateNotificationDestination(r *http.Request, _ access.Princip
 		return access.Reply{}, access.Invalid("destination", "Send at least one field to update.")
 	}
 	for field := range patch {
-		if field != "name" && field != "url" && field != "type" && field != "configuration" && field != "enabled" && field != "secret" {
+		if !destinationPatchFields[field] {
 			return access.Reply{}, access.Invalid(field, "Unknown destination field.")
 		}
 	}
-	id, err := access.IDParam(r, "notification_destination_id")
-	if err != nil {
-		return access.Reply{}, err
-	}
-	tx, p, err := s.access.BeginMutation(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	var projectID *string
-	if err = tx.QueryRow(r.Context(),
-		"SELECT project_id::text FROM olp.notification_destinations WHERE id=$1", id).Scan(&projectID); err != nil {
-		return access.Reply{}, err
-	}
-	if err = p.Project(projectID, access.View); err != nil {
-		return access.Reply{}, err
-	}
-	if err = p.Authorize(notificationOperation(projectID)); err != nil {
-		return access.Reply{}, err
-	}
-	if err = p.Project(projectID, access.Change); err != nil {
-		return access.Reply{}, err
-	}
-	var data []byte
-	var etag string
-	if err = tx.QueryRow(r.Context(),
-		"SELECT jsonb_build_object("+destinationFields+"),d.etag::text"+destinationFrom+" WHERE d.id=$1 FOR UPDATE OF d",
-		id).Scan(&data, &etag); err != nil {
-		return access.Reply{}, err
-	}
-	if err = access.Match(r, etag); err != nil {
-		return access.Reply{}, err
-	}
-	var current struct {
-		Name             string          `json:"name"`
-		URL              string          `json:"url"`
-		Type             string          `json:"type"`
-		Configuration    json.RawMessage `json:"configuration"`
-		Enabled          bool            `json:"enabled"`
-		SecretConfigured bool            `json:"secret_configured"`
-	}
-	if err = json.Unmarshal(data, &current); err != nil {
-		return access.Reply{}, err
-	}
-	previousURL := current.URL
-	if raw, ok := patch["name"]; ok {
-		if err = json.Unmarshal(raw, &current.Name); err != nil {
-			return access.Reply{}, access.Invalid("name", "Use a non-empty destination name.")
+	return s.update(r, destinations, func(tx pgx.Tx, row locked, etag string) error {
+		var current storedDestination
+		if err := json.Unmarshal(row.current, &current); err != nil {
+			return err
 		}
-		if err = access.ValidText("name", current.Name, 100); err != nil {
-			return access.Reply{}, err
+		next, err := patchDestination(current, patch)
+		if err != nil {
+			return err
+		}
+		target := destination{Type: next.Type, URL: strings.TrimSpace(next.URL), Configuration: next.Configuration}
+		rawSecret, secretSupplied := patch["secret"]
+		if !secretSupplied && current.SecretConfigured && target.URL != current.URL {
+			return access.Invalid("secret", "Changing the destination URL requires a replacement secret or null.")
+		}
+		secret, err := s.effectiveSecret(r, tx, row.id, current, rawSecret, secretSupplied)
+		if err != nil {
+			return err
+		}
+		cleared := secretSupplied && secret == nil
+		bind := len(secret) != 0 || !requiresSecret(next.Type) && !cleared
+		if err = s.checkDestination(target, secret, bind, next.Enabled); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(r.Context(), updateChannelDestinationSQL,
+			row.id, strings.TrimSpace(next.Name), target.URL, next.Enabled, etag, next.Type, next.Configuration); err != nil {
+			return err
+		}
+		if !secretSupplied {
+			return nil
+		}
+		return s.storeNotificationSecret(r, tx, row.id, secret)
+	})
+}
+
+func patchDestination(current storedDestination, patch map[string]json.RawMessage) (storedDestination, error) {
+	next := current
+	if raw, ok := patch["name"]; ok {
+		if err := json.Unmarshal(raw, &next.Name); err != nil {
+			return next, access.Invalid("name", "Use a non-empty destination name.")
+		}
+		if err := access.ValidText("name", next.Name, nameLimit); err != nil {
+			return next, err
 		}
 	}
 	if raw, ok := patch["url"]; ok {
-		if err = json.Unmarshal(raw, &current.URL); err != nil {
-			return access.Reply{}, access.Invalid("url", "Use a valid destination URL.")
+		if err := json.Unmarshal(raw, &next.URL); err != nil {
+			return next, access.Invalid("url", "Use a valid destination URL.")
 		}
 	}
 	if raw, ok := patch["type"]; ok {
 		var patched string
-		if err = json.Unmarshal(raw, &patched); err != nil || patched != current.Type {
-			return access.Reply{}, access.Invalid("type", "The destination type cannot be changed.")
+		if err := json.Unmarshal(raw, &patched); err != nil || patched != current.Type {
+			return next, access.Invalid("type", "The destination type cannot be changed.")
 		}
 	}
 	if raw, ok := patch["configuration"]; ok {
-		if string(raw) == "null" {
-			current.Configuration = json.RawMessage(`{}`)
-		} else {
-			current.Configuration = json.RawMessage(raw)
+		configuration, err := configurationObject(raw)
+		if err != nil {
+			return next, err
 		}
-		if len(current.Configuration) > 4096 {
-			return access.Reply{}, access.Invalid("configuration", "Use a configuration object of at most 4096 bytes.")
-		}
-		var decoded map[string]json.RawMessage
-		if err = json.Unmarshal(current.Configuration, &decoded); err != nil || decoded == nil {
-			return access.Reply{}, access.Invalid("configuration", "Use a configuration object.")
-		}
+		next.Configuration = configuration
 	}
 	if raw, ok := patch["enabled"]; ok {
-		if err = json.Unmarshal(raw, &current.Enabled); err != nil {
-			return access.Reply{}, access.Invalid("enabled", "Use true or false.")
+		if err := json.Unmarshal(raw, &next.Enabled); err != nil {
+			return next, access.Invalid("enabled", "Use true or false.")
 		}
 	}
-	if s.egress == nil {
-		return access.Reply{}, access.Fail(503, "egress_policy_unavailable", "Notification delivery is not configured on this installation.")
-	}
-	d := Destination{Type: current.Type, URL: strings.TrimSpace(current.URL), Configuration: current.Configuration}
-	raw, secretSupplied := patch["secret"]
-	if !secretSupplied && current.SecretConfigured && d.URL != previousURL {
-		return access.Reply{}, access.Invalid("secret", "Changing the destination URL requires a replacement secret or null.")
-	}
-	var effectiveSecret []byte
-	if secretSupplied {
-		if effectiveSecret, err = destinationSecret(current.Type, raw); err != nil {
-			return access.Reply{}, err
-		}
-	} else if current.SecretConfigured {
-		var secretID *string
-		if err = tx.QueryRow(r.Context(), readDestinationSecretSQL, id).Scan(&secretID); err != nil {
-			return access.Reply{}, err
-		}
-		if secretID != nil {
-			if effectiveSecret, err = s.access.Keys.Read(r.Context(), tx, s.access.Installation, *secretID, secrets.NotificationSecret); err != nil {
-				return access.Reply{}, err
-			}
-		}
-	}
-	secretCleared := secretSupplied && effectiveSecret == nil
-	if len(effectiveSecret) != 0 || (!RequiresSecret(current.Type) && !secretCleared) {
-		if err = ValidateDestination(s.egress, d, effectiveSecret); err != nil {
-			return access.Reply{}, access.Invalid("destination", "The destination, configuration or secret is invalid.")
-		}
-	} else {
-		if err = ValidateDestinationShape(s.egress, d); err != nil {
-			return access.Reply{}, access.Invalid("destination", "The destination or its configuration is invalid.")
-		}
-		if current.Enabled && RequiresSecret(current.Type) {
-			return access.Reply{}, access.Invalid("secret", "This destination type requires a credential secret object.")
-		}
-	}
-	etag = access.NewID()
-	if _, err = tx.Exec(r.Context(), updateChannelDestinationSQL,
-		id, strings.TrimSpace(current.Name), strings.TrimSpace(current.URL), current.Enabled, etag,
-		current.Type, current.Configuration); err != nil {
-		return access.Reply{}, err
-	}
-	if secretSupplied {
-		if err = s.storeNotificationSecret(r, tx, id, effectiveSecret); err != nil {
-			return access.Reply{}, err
-		}
-	}
-	if err = tx.QueryRow(r.Context(),
-		"SELECT jsonb_build_object("+destinationFields+")"+destinationFrom+" WHERE d.id=$1", id).Scan(&data); err != nil {
-		return access.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "notification_destination.update",
-		"notification_destination", id, "success"); err != nil {
-		return access.Reply{}, err
-	}
-	return access.Detail(json.RawMessage(data), etag), tx.Commit(r.Context())
+	return next, nil
 }
 
-const createChannelDestinationSQL = `INSERT INTO olp.notification_destinations(id,name,url,project_id,etag,created_by,enabled,type,configuration)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`
-
-const updateChannelDestinationSQL = `UPDATE olp.notification_destinations SET name=$2,url=$3,enabled=$4,etag=$5,type=$6,configuration=$7,updated_at=now() WHERE id=$1`
-
-const readDestinationSecretSQL = `SELECT secret_id::text FROM olp.notification_destinations WHERE id=$1`
+func (s *Server) effectiveSecret(r *http.Request, tx pgx.Tx, id string, current storedDestination, raw json.RawMessage, supplied bool) ([]byte, error) {
+	if supplied {
+		return destinationSecret(current.Type, raw)
+	}
+	if !current.SecretConfigured {
+		return nil, nil
+	}
+	var secretID *string
+	if err := tx.QueryRow(r.Context(), readDestinationSecretSQL, id).Scan(&secretID); err != nil || secretID == nil {
+		return nil, err
+	}
+	return s.access.Keys.Read(r.Context(), tx, s.access.Installation, *secretID, secrets.NotificationSecret)
+}
