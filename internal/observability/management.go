@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -61,8 +60,13 @@ func (m *Management) providerHealth(r *http.Request, p access.Principal) (access
 	if err != nil {
 		return access.Reply{}, err
 	}
-	page, err := ReadProviderHealth(r.Context(), m.Pool, window, &pagination.Before, pagination.Limit,
-		p.AllProjects, p.ProjectIDs())
+	page, err := ReadProviderHealth(r.Context(), m.Pool, ProviderHealthQuery{
+		WindowMinutes: window,
+		Before:        &pagination.Before,
+		Limit:         pagination.Limit,
+		AllProjects:   p.AllProjects,
+		Projects:      p.ProjectIDs(),
+	})
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -70,13 +74,13 @@ func (m *Management) providerHealth(r *http.Request, p access.Principal) (access
 	items := make([]contract.ProviderHealthItem, len(page.Items))
 	for i, record := range page.Items {
 		items[i] = providerHealthItem(&record)
-		if until, open := circuits[record.ProviderID]; open {
+		if until, open := circuits[record.ProviderID.String()]; open {
 			items[i].CircuitOpenUntil = nullable.NewNullableWithValue(until.UTC())
-			if items[i].Status != "disabled" {
-				items[i].Status = "unavailable"
+			if record.Status != StatusDisabled {
+				items[i].Status = string(StatusUnavailable)
 			}
 		}
-		if probe, ok := probes[record.ProviderID]; ok {
+		if probe, ok := probes[record.ProviderID.String()]; ok {
 			items[i].ActiveProbe = nullable.NewNullableWithValue(probeResult(probe))
 		}
 	}
@@ -131,11 +135,11 @@ func probeResult(probe limits.ProbeResult) contract.ProviderProbeResult {
 // providerHealthItem renders one record in the management wire shape.
 func providerHealthItem(record *ProviderHealthRecord) contract.ProviderHealthItem {
 	item := contract.ProviderHealthItem{
-		ProviderId:          uuid.MustParse(record.ProviderID),
+		ProviderId:          record.ProviderID,
 		ProviderName:        record.ProviderName,
 		ProviderKind:        contract.ProviderKind(record.ProviderKind),
 		ProviderState:       record.ProviderState,
-		Status:              record.Status,
+		Status:              string(record.Status),
 		AttemptCount:        record.AttemptCount,
 		SuccessCount:        record.SuccessCount,
 		RateLimitCount:      record.RateLimitCount,
@@ -162,65 +166,52 @@ func providerHealthItem(record *ProviderHealthRecord) contract.ProviderHealthIte
 	return item
 }
 
-// healthResponse renders the readiness payload in the management wire shape.
 func healthResponse(h *Health) contract.HealthResponse {
-	response := contract.HealthResponse{
-		Status:                                 h.Status,
-		AsynchronousPlane:                      h.AsynchronousPlane,
+	return contract.HealthResponse{
+		Status:                                 string(h.Status),
+		Generation:                             nullableOf(h.Generation),
+		Database:                               string(h.Database),
+		Limits:                                 string(h.Limits),
+		AsynchronousPlane:                      string(h.AsynchronousPlane),
 		AsynchronousPlaneCurrent:               h.AsynchronousPlaneCurrent,
 		AsynchronousPlaneDrained:               h.AsynchronousPlaneDrained,
-		Database:                               h.Database,
-		Limits:                                 h.Limits,
-		MediaReconciliation:                    h.MediaReconciliation,
-		MediaReconciliationFailed:              h.MediaReconciliationFailed,
-		MediaReconciliationGapsTotal:           h.MediaReconciliationGapsTotal,
-		MediaReconciliationPending:             h.MediaReconciliationPending,
-		MediaReconciliationStale:               h.MediaReconciliationStale,
-		RequestMetadataComplete:                h.RequestMetadataComplete,
-		RequestMetadataConsumer:                h.RequestMetadataConsumer,
-		RequestMetadataConsumerLagEvents:       h.RequestMetadataConsumerLagEvents,
-		RequestMetadataConsumerPendingEvents:   h.RequestMetadataConsumerPendingEvents,
-		RequestMetadataGatewayOpenEpochs:       h.RequestMetadataGatewayOpenEpochs,
-		RequestMetadataGatewayUnresolvedEpochs: h.RequestMetadataGatewayUnresolvedEpochs,
-		RequestMetadataHistoricalUncertainGaps: h.RequestMetadataHistoricalUncertainGaps,
-		RuntimeOutbox:                          h.RuntimeOutbox,
-		RuntimeOutboxClaimedRows:               h.RuntimeOutboxClaimedRows,
-		RuntimeOutboxOwnerAbandoned:            h.RuntimeOutboxOwnerAbandoned,
-		RuntimeOutboxOwnerActive:               h.RuntimeOutboxOwnerActive,
-		RuntimeOutboxPendingRows:               h.RuntimeOutboxPendingRows,
+		AsynchronousPlaneLastProgressAt:        nullableTime(h.AsynchronousPlaneLastProgressAt),
 		WorkerTasksStale:                       h.WorkerTasksStale,
 		WorkerTasksUnknown:                     h.WorkerTasksUnknown,
-	}
-	optionalTime(&response.AsynchronousPlaneLastProgressAt, h.AsynchronousPlaneLastProgressAt)
-	optionalInt(&response.Generation, h.Generation)
-	optionalInt(&response.MediaSpoolCapacityBytes, h.MediaSpoolCapacityBytes)
-	optionalInt(&response.MediaSpoolUsedBytes, h.MediaSpoolUsedBytes)
-	optionalTime(&response.RequestMetadataConsumerCheckedAt, h.RequestMetadataConsumerCheckedAt)
-	optionalInt(&response.RequestMetadataConsumerHeartbeatAgeSeconds, h.RequestMetadataConsumerHeartbeatAgeSeconds)
-	optionalInt(&response.RequestMetadataConsumerOldestPendingAgeSeconds, h.RequestMetadataConsumerOldestPendingAgeSec)
-	optionalTime(&response.RequestMetadataConsumerOldestPendingAt, h.RequestMetadataConsumerOldestPendingAt)
-	optionalInt(&response.RequestMetadataDuplicatePersistenceTotal, h.RequestMetadataDuplicatePersistenceTotal)
-	optionalInt(&response.RequestMetadataReclaimedEventsTotal, h.RequestMetadataReclaimedEventsTotal)
-	optionalInt(&response.RequestMetadataRecoveredEventsTotal, h.RequestMetadataRecoveredEventsTotal)
-	optionalInt(&response.RuntimeOutboxAbandonedOwnershipTotal, h.RuntimeOutboxAbandonedOwnershipTotal)
-	optionalInt(&response.RuntimeOutboxFailedTakeoversTotal, h.RuntimeOutboxFailedTakeoversTotal)
-	optionalInt(&response.RuntimeOutboxHeartbeatAgeSeconds, h.RuntimeOutboxHeartbeatAgeSeconds)
-	optionalInt(&response.RuntimeOutboxOldestPendingAgeSeconds, h.RuntimeOutboxOldestPendingAgeSeconds)
-	optionalTime(&response.RuntimeOutboxOldestPendingAt, h.RuntimeOutboxOldestPendingAt)
-	optionalInt(&response.RuntimeOutboxPublicationAttemptsTotal, h.RuntimeOutboxPublicationAttemptsTotal)
-	optionalInt(&response.RuntimeOutboxPublicationRetriesTotal, h.RuntimeOutboxPublicationRetriesTotal)
-	optionalInt(&response.RuntimeOutboxRepeatedPublicationAttemptsTotal, h.RuntimeOutboxRepeatedPublicationAttempts)
-	return response
-}
-
-func optionalTime(dst *nullable.Nullable[time.Time], src *time.Time) {
-	if src != nil {
-		*dst = nullable.NewNullableWithValue(src.UTC())
+		RequestMetadataComplete:                h.RequestMetadataComplete,
+		RequestMetadataConsumer:                h.RequestMetadataConsumer,
+		RequestMetadataConsumerPendingEvents:   h.RequestMetadataConsumerPendingEvents,
+		RequestMetadataConsumerLagEvents:       h.RequestMetadataConsumerLagEvents,
+		RequestMetadataConsumerOldestPendingAt: nullableTime(h.RequestMetadataConsumerOldestPendingAt),
+		RequestMetadataConsumerOldestPendingAgeSeconds: nullableOf(h.RequestMetadataConsumerOldestPendingAgeSec),
+		RequestMetadataConsumerCheckedAt:               nullableTime(h.RequestMetadataConsumerCheckedAt),
+		RequestMetadataConsumerHeartbeatAgeSeconds:     nullableOf(h.RequestMetadataConsumerHeartbeatAgeSeconds),
+		RequestMetadataReclaimedEventsTotal:            nullableOf(h.RequestMetadataReclaimedEventsTotal),
+		RequestMetadataRecoveredEventsTotal:            nullableOf(h.RequestMetadataRecoveredEventsTotal),
+		RequestMetadataDuplicatePersistenceTotal:       nullableOf(h.RequestMetadataDuplicatePersistenceTotal),
+		RequestMetadataGatewayOpenEpochs:               h.RequestMetadataGatewayOpenEpochs,
+		RequestMetadataGatewayUnresolvedEpochs:         h.RequestMetadataGatewayUnresolvedEpochs,
+		RequestMetadataHistoricalUncertainGaps:         h.RequestMetadataHistoricalUncertainGaps,
+		MediaReconciliation:                            string(h.MediaReconciliation),
+		MediaReconciliationPending:                     h.MediaReconciliationPending,
+		MediaReconciliationStale:                       h.MediaReconciliationStale,
+		MediaReconciliationFailed:                      h.MediaReconciliationFailed,
+		MediaReconciliationGapsTotal:                   h.MediaReconciliationGapsTotal,
+		MediaSpoolUsedBytes:                            nullableOf(h.MediaSpoolUsedBytes),
+		MediaSpoolCapacityBytes:                        nullableOf(h.MediaSpoolCapacityBytes),
 	}
 }
 
-func optionalInt(dst *nullable.Nullable[int64], src *int64) {
-	if src != nil {
-		*dst = nullable.NewNullableWithValue(*src)
+func nullableOf[T any](value *T) nullable.Nullable[T] {
+	if value == nil {
+		return nil
 	}
+	return nullable.NewNullableWithValue(*value)
+}
+
+func nullableTime(value *time.Time) nullable.Nullable[time.Time] {
+	if value == nil {
+		return nil
+	}
+	return nullable.NewNullableWithValue(value.UTC())
 }

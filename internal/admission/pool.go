@@ -1,4 +1,4 @@
-package observability
+package admission
 
 import (
 	"context"
@@ -10,9 +10,6 @@ import (
 	"github.com/tyk-swe/olp/internal/metric"
 )
 
-// MaxAdmissionCapacity bounds a configured admission pool.
-const MaxAdmissionCapacity = 1_000_000
-
 // Pool is a process-local bounded request pool with the counters the metrics
 // endpoint renders. A request that cannot enter is rejected unless the pool
 // has a queue with room for it.
@@ -23,17 +20,8 @@ type Pool struct {
 	queue    *queue
 }
 
-// NewPool builds a pool with capacity slots. Capacity must be at least one.
 func NewPool(capacity int) *Pool {
-	if capacity < 1 || capacity > MaxAdmissionCapacity {
-		panic("observability: admission capacity out of range")
-	}
 	return &Pool{sem: make(chan struct{}, capacity)}
-}
-
-// Acquire takes a slot or counts the rejection. It never blocks.
-func (p *Pool) Acquire() bool {
-	return p.AcquirePermit() != nil
 }
 
 // AcquirePermit takes a slot and returns it as a Permit, or counts the
@@ -46,13 +34,13 @@ func (p *Pool) AcquirePermit() *Permit {
 	return nil
 }
 
-func (p *Pool) permit(state int32) *Permit {
+func (p *Pool) permit(state permitState) *Permit {
 	permit := &Permit{pool: p}
-	permit.state.Store(state)
+	permit.state.Store(int32(state))
 	return permit
 }
 
-// Release returns a slot. It pairs strictly with a successful Acquire. While
+// Release returns a slot. It pairs strictly with a successful AcquirePermit. While
 // requests wait in the queue the slot passes to one of them instead.
 func (p *Pool) Release() {
 	q := p.queue
@@ -71,10 +59,8 @@ func (p *Pool) Release() {
 	}
 }
 
-// Capacity is the configured slot count.
 func (p *Pool) Capacity() int { return cap(p.sem) }
 
-// Admitted is the number of slots currently held.
 func (p *Pool) Admitted() int64 { return p.admitted.Load() }
 
 // Permit is one admission slot, held or still queued for. It is safe to
@@ -87,29 +73,29 @@ type Permit struct {
 	state atomic.Int32
 }
 
+type permitState int32
+
 const (
-	permitReleased int32 = iota
+	permitReleased permitState = iota
 	permitHeld
 	permitQueued
 )
 
-// Queued reports whether the permit still waits for its slot.
-func (p *Permit) Queued() bool { return p != nil && p.state.Load() == permitQueued }
+func (p *Permit) current() permitState { return permitState(p.state.Load()) }
+
+func (p *Permit) Queued() bool { return p != nil && p.current() == permitQueued }
 
 // Await waits for a queued permit's slot in class's line, at most until the
 // queue timeout or deadline, whichever comes first. It reports whether the
 // permit now holds a slot; a held permit returns at once.
-func (p *Permit) Await(ctx context.Context, class int, deadline time.Time) bool {
-	if p == nil || p.state.Load() != permitQueued {
-		return p != nil && p.state.Load() == permitHeld
-	}
-	if class < 0 || class >= classCount {
-		class = ClassNormal
+func (p *Permit) Await(ctx context.Context, class Class, deadline time.Time) bool {
+	if p == nil || p.current() != permitQueued {
+		return p != nil && p.current() == permitHeld
 	}
 	if !p.pool.await(ctx, class, deadline) {
 		return false
 	}
-	p.state.Store(permitHeld)
+	p.state.Store(int32(permitHeld))
 	p.pool.queue.reserved.Add(-1)
 	return true
 }
@@ -119,7 +105,7 @@ func (p *Permit) Release() {
 	if p == nil {
 		return
 	}
-	switch p.state.Swap(permitReleased) {
+	switch permitState(p.state.Swap(int32(permitReleased))) {
 	case permitHeld:
 		p.pool.Release()
 	case permitQueued:
@@ -128,7 +114,7 @@ func (p *Permit) Release() {
 }
 
 func (p *Permit) Transfer() *Permit {
-	if p == nil || !p.state.CompareAndSwap(permitHeld, permitReleased) {
+	if p == nil || !p.state.CompareAndSwap(int32(permitHeld), int32(permitReleased)) {
 		return nil
 	}
 	return p.pool.permit(permitHeld)
@@ -163,7 +149,7 @@ func (p *Pool) samples(surface string) []prometheus.Metric {
 	}
 }
 
-func AdmissionMetrics(inference, management *Pool) prometheus.Collector {
+func Metrics(inference, management *Pool) prometheus.Collector {
 	return metric.Collector(func() []prometheus.Metric {
 		return slices.Concat(inference.samples("inference"), management.samples("management"), inference.queue.samples())
 	})

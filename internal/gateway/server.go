@@ -22,6 +22,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/google/uuid"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -32,7 +33,6 @@ import (
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
-	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/priority"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -59,7 +59,7 @@ type Config struct {
 	// the server falls back to for direct handler calls; process composition
 	// shares it with the public admission middleware so both bound the same
 	// capacity and the metrics endpoint reads one truth.
-	AdmissionPool *observability.Pool
+	AdmissionPool *admission.Pool
 	// Signer runs the signing hooks of plugin profiles. Without one, a
 	// provider whose profile declares signing authorizes no request.
 	// Predicates runs the route_predicate hooks of confined plugins that
@@ -136,7 +136,7 @@ type Server struct {
 	client      *http.Client
 	connections *egress.ConnectionClientCache
 	auth        *connectors.Auth
-	admission   *observability.Pool
+	admission   *admission.Pool
 	health      *healthTracker
 	fleet       *fleetHealth
 	// unhealthy is fleet.unhealthy bound once, so selection never allocates
@@ -190,12 +190,9 @@ func New(deps Dependencies, cfg Config) *Server {
 	return server
 }
 
-// Health exposes windowed attempt statistics for the management API.
-func (s *Server) Health() observability.HealthSource { return s.health }
-
 // AdmissionPool exposes the process-local inference admission pool the
 // metrics endpoint renders.
-func (s *Server) AdmissionPool() *observability.Pool { return s.admission }
+func (s *Server) AdmissionPool() *admission.Pool { return s.admission }
 
 // OpenCircuits counts provider circuits currently open or half-open.
 func (s *Server) OpenCircuits() int64 { return s.health.openCircuits() }
@@ -365,9 +362,9 @@ func (s *Server) admit(ctx context.Context) bool {
 	return s.acquirePermit(ctx) != nil
 }
 
-func (s *Server) acquirePermit(ctx context.Context) *observability.Permit {
-	if permit := observability.PermitFromContext(ctx); permit != nil {
-		if permit.Await(ctx, observability.ClassNormal, time.Time{}) {
+func (s *Server) acquirePermit(ctx context.Context) *admission.Permit {
+	if permit := admission.PermitFromContext(ctx); permit != nil {
+		if permit.Await(ctx, admission.Normal, time.Time{}) {
 			return permit
 		}
 		return nil
@@ -379,22 +376,22 @@ func (s *Server) acquirePermit(ctx context.Context) *observability.Permit {
 // first: a queued permit the middleware only reserved waits for awaitAdmission.
 // Otherwise the server's own pool bounds the call.
 func (s *Server) admitLater(ctx context.Context) bool {
-	if observability.PermitFromContext(ctx) != nil {
+	if admission.PermitFromContext(ctx) != nil {
 		return true
 	}
-	return s.admission.Acquire()
+	return s.admission.AcquirePermit() != nil
 }
 
 // awaitAdmission waits for the slot a queued request reserved, in its
 // priority class and never past ctx's deadline, then answers the same 503 a
 // full pool does. A request admitted outright returns at once.
 func (s *Server) awaitAdmission(ctx context.Context, x *call) *Error {
-	permit := observability.PermitFromContext(ctx)
+	permit := admission.PermitFromContext(ctx)
 	if !permit.Queued() {
 		return nil
 	}
 	deadline, _ := ctx.Deadline()
-	if permit.Await(ctx, observability.ClassOf(x.priority), deadline) {
+	if permit.Await(ctx, admission.ClassOf(x.priority), deadline) {
 		return nil
 	}
 	return overloaded
@@ -404,7 +401,7 @@ func (s *Server) awaitAdmission(ctx context.Context, x *call) *Error {
 // the local pool. Release is idempotent on the permit: media handlers hand
 // their slot back once uploads finish staging, before the upstream call.
 func (s *Server) release(ctx context.Context) {
-	if permit := observability.PermitFromContext(ctx); permit != nil {
+	if permit := admission.PermitFromContext(ctx); permit != nil {
 		permit.Release()
 		return
 	}
@@ -1284,14 +1281,12 @@ func (s *Server) WorkflowResolver() WorkflowToolRunner {
 	return s.deps.WorkflowTools
 }
 
-func (s *Server) LimiterCounts() func() (failOpen, daily, weekly, monthly int64) {
+func (s *Server) LimiterCounts() (failOpen, daily, weekly, monthly int64) {
 	admission := s.deps.Admission
 	if admission == nil {
-		return nil
+		return 0, 0, 0, 0
 	}
-	return func() (failOpen, daily, weekly, monthly int64) {
-		return admission.FailOpenTotal(), admission.BudgetRejections(limits.DimensionDailyCost), admission.BudgetRejections(limits.DimensionWeeklyCost), admission.BudgetRejections(limits.DimensionMonthlyCost)
-	}
+	return admission.FailOpenTotal(), admission.BudgetRejections(limits.DimensionDailyCost), admission.BudgetRejections(limits.DimensionWeeklyCost), admission.BudgetRejections(limits.DimensionMonthlyCost)
 }
 
 func normalizedConfig(cfg Config) Config {
@@ -1319,11 +1314,11 @@ func normalizedInlineMedia(value protocols.InlineMediaLimits) protocols.InlineMe
 	return protocols.InlineMediaLimits{Items: 4, ItemBytes: 1 << 20, TotalBytes: 2 << 20}
 }
 
-func inferencePool(cfg Config) *observability.Pool {
+func inferencePool(cfg Config) *admission.Pool {
 	if cfg.AdmissionPool != nil {
 		return cfg.AdmissionPool
 	}
-	return observability.NewPool(max(cfg.MaxInFlight, 1))
+	return admission.NewPool(max(cfg.MaxInFlight, 1))
 }
 
 func normalizedDependencies(deps Dependencies) Dependencies {

@@ -1,6 +1,6 @@
 /**
  * Readiness checkpoint ages, measured against the runbook thresholds in
- * `docs/operate/operations.md`: metadata, outbox, and gateway-epoch checkpoints are
+ * `docs/operate/operations.md`: metadata and gateway-epoch checkpoints are
  * stale after 20 seconds. The backend reports both timestamps and pre-computed
  * ages; a timestamp is turned into an age here so an operator reading the page
  * never has to subtract clocks by hand.
@@ -79,10 +79,9 @@ export function reportedAgeStatus(
 export function oldestPendingStatus(
   at: string | null | undefined,
   reportedSeconds: number | null | undefined,
-  now: number,
-  threshold: number = PENDING_RECOVERY_SECONDS
+  now: number
 ): AgeStatus {
   return reportedSeconds === null || reportedSeconds === undefined
-    ? ageStatus(at, now, threshold)
-    : reportedAgeStatus(reportedSeconds, threshold);
+    ? ageStatus(at, now, PENDING_RECOVERY_SECONDS)
+    : reportedAgeStatus(reportedSeconds, PENDING_RECOVERY_SECONDS);
 }

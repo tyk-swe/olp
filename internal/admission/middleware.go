@@ -1,4 +1,4 @@
-package observability
+package admission
 
 import (
 	"net/http"
@@ -9,7 +9,7 @@ import (
 // RetryAfterOverload is the retry hint every admission rejection carries.
 const RetryAfterOverload = "1"
 
-// PublicAdmission bounds the whole public listener before routing: every
+// Public bounds the whole public listener before routing: every
 // request is charged against its surface's pool, and a full pool rejects
 // unless its queue has room. Inference surfaces take the inference pool and every
 // other public request takes the management pool, so a flood of console or
@@ -17,7 +17,7 @@ const RetryAfterOverload = "1"
 // the request context so inner handlers can await a queued slot once they know
 // the request's priority, or release it early; the final release runs when the
 // handler returns.
-type PublicAdmission struct {
+type Public struct {
 	Inference  *Pool
 	Management *Pool
 	// InferenceEnabled reports whether this process serves inference at all;
@@ -27,7 +27,7 @@ type PublicAdmission struct {
 	Reject func(w http.ResponseWriter, r *http.Request, surface string)
 }
 
-func (a *PublicAdmission) Wrap(next http.Handler) http.Handler {
+func (a *Public) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		classified := surface.Of(r.URL.Path)
 		pool := a.Management

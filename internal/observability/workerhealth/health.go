@@ -3,8 +3,9 @@ package workerhealth
 import (
 	"context"
 	"fmt"
+	"slices"
+
 	"github.com/jackc/pgx/v5/pgconn"
-	"strings"
 )
 
 type Reporter struct {
@@ -25,81 +26,75 @@ type Execer interface {
 type Task string
 
 const (
-	// TaskRequestMetadataConsumer drains the request metadata stream.
 	TaskRequestMetadataConsumer Task = "request_metadata_consumer"
-	// TaskMaintenance runs retention and rollup maintenance.
-	TaskMaintenance Task = "maintenance"
-	// TaskCostReconciliation rebuilds spend windows from persisted facts.
-	TaskCostReconciliation Task = "cost_reconciliation"
-	// TaskEpochDetection confirms gateway epochs that stopped checkpointing.
-	TaskEpochDetection Task = "request_metadata_gateway_epoch_detection"
-	// TaskMediaReconciliation advances durable media jobs toward a terminal
-	// state and retires orphaned upstream objects.
-	TaskMediaReconciliation Task = "media_reconciliation"
-	// TaskBatchSettlement reconciles accepted batch jobs and their result usage.
-	TaskBatchSettlement    Task = "batch_settlement"
-	TaskExecutionDebits    Task = "execution_debits"
-	TaskRetainedSettlement Task = "retained_settlement"
-	// TaskNotificationDelivery evaluates budget threshold rules and delivers
-	// every event notification rules subscribe their destinations to.
-	TaskNotificationDelivery Task = "notification_delivery"
-	// TaskManagedExportDelivery ships facts from operator-managed HTTPS sinks.
-	TaskManagedExportDelivery Task = "managed_export_delivery"
-	// TaskGrantRefresh refreshes grants ahead of their access tokens' expiry.
-	TaskGrantRefresh Task = "grant_refresh"
-	// TaskHealthProbes sends the active health probes connections opt into.
-	TaskHealthProbes   Task = "health_probes"
-	TaskExportDelivery Task = "export_delivery"
-	// TaskBillingImport imports provider invoices and reports its liveness.
-	TaskBillingImport Task = "billing_import"
-	// TaskFocusExport delivers the daily FOCUS datasets to csv_gzip sinks.
-	TaskFocusExport       Task = "focus_export"
-	TaskCodeAllowanceRead Task = "code_allowance_read"
+	TaskMaintenance             Task = "maintenance"
+	TaskCostReconciliation      Task = "cost_reconciliation"
+	TaskEpochDetection          Task = "request_metadata_gateway_epoch_detection"
+	TaskMediaReconciliation     Task = "media_reconciliation"
+	TaskBatchSettlement         Task = "batch_settlement"
+	TaskExecutionDebits         Task = "execution_debits"
+	TaskRetainedSettlement      Task = "retained_settlement"
+	TaskNotificationDelivery    Task = "notification_delivery"
+	TaskManagedExportDelivery   Task = "managed_export_delivery"
+	TaskGrantRefresh            Task = "grant_refresh"
+	TaskHealthProbes            Task = "health_probes"
+	TaskExportDelivery          Task = "export_delivery"
+	TaskBillingImport           Task = "billing_import"
+	TaskFocusExport             Task = "focus_export"
+	TaskCodeAllowanceRead       Task = "code_allowance_read"
 )
 
-type WorkerTask struct {
-	Name       Task
-	StaleAfter int64
-	Regional   bool
+var Tasks = [...]Task{
+	TaskRequestMetadataConsumer,
+	TaskEpochDetection,
+	TaskMediaReconciliation,
+	TaskBatchSettlement,
+	TaskRetainedSettlement,
+	TaskMaintenance,
+	TaskCostReconciliation,
+	TaskExecutionDebits,
+	TaskNotificationDelivery,
+	TaskManagedExportDelivery,
+	TaskGrantRefresh,
+	TaskHealthProbes,
+	TaskExportDelivery,
+	TaskBillingImport,
+	TaskFocusExport,
+	TaskCodeAllowanceRead,
 }
 
-func WorkerTasks() []WorkerTask {
-	return []WorkerTask{
-		{Name: TaskRequestMetadataConsumer, StaleAfter: 20, Regional: true},
-		{Name: TaskEpochDetection, StaleAfter: 20},
-		{Name: TaskMediaReconciliation, StaleAfter: 20},
-		{Name: TaskBatchSettlement, StaleAfter: 180},
-		{Name: TaskRetainedSettlement, StaleAfter: 180},
-		{Name: TaskMaintenance, StaleAfter: 180},
-		{Name: TaskCostReconciliation, StaleAfter: 180, Regional: true},
-		{Name: TaskExecutionDebits, StaleAfter: 180},
-		{Name: TaskNotificationDelivery, StaleAfter: 180},
-		{Name: TaskManagedExportDelivery, StaleAfter: 180},
-		{Name: TaskGrantRefresh, StaleAfter: 20},
-		{Name: TaskHealthProbes, StaleAfter: 180, Regional: true},
-		{Name: TaskExportDelivery, StaleAfter: 30},
-		{Name: TaskBillingImport, StaleAfter: 180},
-		{Name: TaskFocusExport, StaleAfter: 180},
-		{Name: TaskCodeAllowanceRead, StaleAfter: 60},
+func Parse(name string) (Task, bool) {
+	task := Task(name)
+	return task, slices.Contains(Tasks[:], task)
+}
+
+func (t Task) StaleAfter() int64 {
+	switch t {
+	case TaskRequestMetadataConsumer, TaskEpochDetection, TaskMediaReconciliation, TaskGrantRefresh:
+		return 20
+	case TaskExportDelivery:
+		return 30
+	case TaskCodeAllowanceRead:
+		return 60
+	default:
+		return 180
 	}
 }
 
-func WorkerStaleAfter(task Task) int64 {
-	for _, worker := range WorkerTasks() {
-		if worker.Name == task {
-			return worker.StaleAfter
-		}
+// Regional tasks run once per region, so each region checkpoints its own row.
+func (t Task) Regional() bool {
+	switch t {
+	case TaskRequestMetadataConsumer, TaskCostReconciliation, TaskHealthProbes:
+		return true
+	default:
+		return false
 	}
-	return 0
 }
 
-// Outcome is what one worker pass achieved.
 type Outcome int
 
 const (
-	// OutcomeSuccess is a pass that completed its work.
 	OutcomeSuccess Outcome = iota
-	// OutcomeFailure is a pass that could not complete.
 	OutcomeFailure
 	// OutcomeSkipped is a pass that deliberately did nothing, for example
 	// because another process holds the lock.
@@ -128,19 +123,28 @@ const checkpointTaskSQL = `INSERT INTO olp.worker_task_health
         failures_total = worker_task_health.failures_total + EXCLUDED.failures_total,
         skipped_total = worker_task_health.skipped_total + EXCLUDED.skipped_total`
 
-var regionalCheckpointTaskSQL = strings.NewReplacer(
-	"olp.worker_task_health", "olp.regional_worker_task_health",
-	"worker_task_health.", "regional_worker_task_health.",
-	"(task, checked_at", "(region, task, checked_at",
-	"VALUES ($1,", "VALUES ($7, $1,",
-	"ON CONFLICT (task)", "ON CONFLICT (region, task)",
-).Replace(checkpointTaskSQL)
+const regionalCheckpointTaskSQL = `INSERT INTO olp.regional_worker_task_health
+        (region, task, checked_at, last_success_at, last_progress_at,
+         successes_total, failures_total, skipped_total)
+    VALUES ($7, $1, clock_timestamp(),
+        CASE WHEN $2 THEN clock_timestamp() ELSE NULL END,
+        CASE WHEN $3 THEN clock_timestamp() ELSE NULL END, $4, $5, $6)
+    ON CONFLICT (region, task) DO UPDATE SET
+        checked_at = GREATEST(regional_worker_task_health.checked_at, EXCLUDED.checked_at),
+        last_success_at = CASE WHEN $2
+            THEN GREATEST(regional_worker_task_health.last_success_at, EXCLUDED.last_success_at)
+            ELSE regional_worker_task_health.last_success_at END,
+        last_progress_at = CASE WHEN $3
+            THEN GREATEST(regional_worker_task_health.last_progress_at, EXCLUDED.last_progress_at)
+            ELSE regional_worker_task_health.last_progress_at END,
+        successes_total = regional_worker_task_health.successes_total + EXCLUDED.successes_total,
+        failures_total = regional_worker_task_health.failures_total + EXCLUDED.failures_total,
+        skipped_total = regional_worker_task_health.skipped_total + EXCLUDED.skipped_total`
 
-// CheckpointTask records one pass of a worker task. `progress` says whether the
+// Checkpoint records one pass of a worker task. `progress` says whether the
 // pass actually moved work, which is what readiness distinguishes from a worker
 // that is merely awake.
 func (r Reporter) Checkpoint(ctx context.Context, q Execer, outcome Outcome, progress bool) error {
-	task := r.task
 	var success bool
 	var successes, failures, skipped int64
 	switch outcome {
@@ -153,23 +157,14 @@ func (r Reporter) Checkpoint(ctx context.Context, q Execer, outcome Outcome, pro
 	default:
 		return fmt.Errorf("unknown worker task outcome %d", int(outcome))
 	}
-	if _, err := q.Exec(ctx, checkpointTaskSQL, string(task), success, progress,
+	if _, err := q.Exec(ctx, checkpointTaskSQL, string(r.task), success, progress,
 		successes, failures, skipped); err != nil {
-		return fmt.Errorf("checkpoint worker task %s: %w", task, err)
+		return fmt.Errorf("checkpoint worker task %s: %w", r.task, err)
 	}
-	if region := r.region; region != "" && RegionalTask(task) {
-		if _, err := q.Exec(ctx, regionalCheckpointTaskSQL, string(task), success, progress, successes, failures, skipped, region); err != nil {
-			return fmt.Errorf("checkpoint regional worker task %s: %w", task, err)
+	if r.region != "" && r.task.Regional() {
+		if _, err := q.Exec(ctx, regionalCheckpointTaskSQL, string(r.task), success, progress, successes, failures, skipped, r.region); err != nil {
+			return fmt.Errorf("checkpoint regional worker task %s: %w", r.task, err)
 		}
 	}
 	return nil
-}
-
-func RegionalTask(task Task) bool {
-	for _, worker := range WorkerTasks() {
-		if worker.Name == task {
-			return worker.Regional
-		}
-	}
-	return false
 }

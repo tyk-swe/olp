@@ -156,10 +156,14 @@ func scanWorkerStale(row pgx.Row) (notificationSignal, error) {
 	if err != nil || seconds.IsNegative() {
 		return notificationSignal{}, errors.New("invalid worker age signal")
 	}
-	staleAfter := workerhealth.WorkerStaleAfter(workerhealth.Task(task))
+	known, recognized := workerhealth.Parse(task)
+	staleAfter := int64(0)
+	if recognized {
+		staleAfter = known.StaleAfter()
+	}
 	signal := notificationSignal{
 		subject:  task,
-		known:    staleAfter > 0,
+		known:    recognized,
 		active:   seconds.Cmp(decimal.NewFromInt(staleAfter)) > 0,
 		evidence: map[string]any{"task": task, "age_seconds": age, "stale_after_seconds": staleAfter},
 	}

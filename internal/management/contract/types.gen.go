@@ -11578,19 +11578,6 @@ type HealthResponse struct {
 	RequestMetadataHistoricalUncertainGaps          int64                        `json:"request_metadata_historical_uncertain_gaps"`
 	RequestMetadataReclaimedEventsTotal             nullable.Nullable[int64]     `json:"request_metadata_reclaimed_events_total,omitempty"`
 	RequestMetadataRecoveredEventsTotal             nullable.Nullable[int64]     `json:"request_metadata_recovered_events_total,omitempty"`
-	RuntimeOutbox                                   string                       `json:"runtime_outbox"`
-	RuntimeOutboxAbandonedOwnershipTotal            nullable.Nullable[int64]     `json:"runtime_outbox_abandoned_ownership_total,omitempty"`
-	RuntimeOutboxClaimedRows                        int64                        `json:"runtime_outbox_claimed_rows"`
-	RuntimeOutboxFailedTakeoversTotal               nullable.Nullable[int64]     `json:"runtime_outbox_failed_takeovers_total,omitempty"`
-	RuntimeOutboxHeartbeatAgeSeconds                nullable.Nullable[int64]     `json:"runtime_outbox_heartbeat_age_seconds,omitempty"`
-	RuntimeOutboxOldestPendingAgeSeconds            nullable.Nullable[int64]     `json:"runtime_outbox_oldest_pending_age_seconds,omitempty"`
-	RuntimeOutboxOldestPendingAt                    nullable.Nullable[time.Time] `json:"runtime_outbox_oldest_pending_at,omitempty"`
-	RuntimeOutboxOwnerAbandoned                     bool                         `json:"runtime_outbox_owner_abandoned"`
-	RuntimeOutboxOwnerActive                        bool                         `json:"runtime_outbox_owner_active"`
-	RuntimeOutboxPendingRows                        int64                        `json:"runtime_outbox_pending_rows"`
-	RuntimeOutboxPublicationAttemptsTotal           nullable.Nullable[int64]     `json:"runtime_outbox_publication_attempts_total,omitempty"`
-	RuntimeOutboxPublicationRetriesTotal            nullable.Nullable[int64]     `json:"runtime_outbox_publication_retries_total,omitempty"`
-	RuntimeOutboxRepeatedPublicationAttemptsTotal   nullable.Nullable[int64]     `json:"runtime_outbox_repeated_publication_attempts_total,omitempty"`
 	Status                                          string                       `json:"status"`
 	WorkerTasksStale                                int64                        `json:"worker_tasks_stale"`
 	WorkerTasksUnknown                              int64                        `json:"worker_tasks_unknown"`

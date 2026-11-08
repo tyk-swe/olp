@@ -88,6 +88,5 @@ describe('checkpoint age', () => {
     expect(ageStatus(at, now, 5).stale).toBe(true);
     expect(ageStatus(at, now, 6).stale).toBe(false);
     expect(reportedAgeStatus(6, 5).stale).toBe(true);
-    expect(oldestPendingStatus(at, null, now, 6).stale).toBe(false);
   });
 });

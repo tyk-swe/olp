@@ -78,7 +78,7 @@ func record[T any](latest *atomic.Pointer[snapshot[T]], value T, err error) {
 	latest.Store(&snapshot[T]{Value: value, LastAttempt: now, LastSuccess: now})
 }
 
-func (c *Cache) Run(ctx context.Context, state *State, log *slog.Logger) {
+func (c *Cache) Run(ctx context.Context, state *Sources, log *slog.Logger) {
 	c.refreshReadiness(ctx, state, log)
 	c.refreshMetrics(ctx, state)
 	readiness := time.NewTicker(readinessRefreshEvery)
@@ -97,7 +97,7 @@ func (c *Cache) Run(ctx context.Context, state *State, log *slog.Logger) {
 	}
 }
 
-func (c *Cache) refreshReadiness(ctx context.Context, state *State, log *slog.Logger) {
+func (c *Cache) refreshReadiness(ctx context.Context, state *Sources, log *slog.Logger) {
 	ctx, cancel := context.WithTimeout(ctx, refreshTimeout)
 	defer cancel()
 	health, err := CollectReadiness(ctx, state)
@@ -107,7 +107,7 @@ func (c *Cache) refreshReadiness(ctx context.Context, state *State, log *slog.Lo
 	record(&c.readiness, health, err)
 }
 
-func (c *Cache) refreshMetrics(ctx context.Context, state *State) {
+func (c *Cache) refreshMetrics(ctx context.Context, state *Sources) {
 	ctx, cancel := context.WithTimeout(ctx, refreshTimeout)
 	defer cancel()
 	record(&c.metrics, CollectMetrics(ctx, state), nil)

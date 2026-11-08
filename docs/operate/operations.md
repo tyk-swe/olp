@@ -98,9 +98,9 @@ Watch pending/lag/oldest age, reclaim/duplicate counts and `olp_worker_task_*`.
 Counters are shared durable totals; unavailable summary reads are not resets.
 Restart a consumer after startup misconfiguration; there is no outer supervisor.
 
-Runtime publication is synchronous under the installation lock. `runtime_outbox`
-is `not_configured`, not a missing worker. Monitor release convergence and
-independent authority freshness. Without Valkey, media/grants/exports run, but
+Runtime publication is synchronous under the installation lock, so there is no
+runtime outbox to watch. Monitor release convergence and independent authority
+freshness. Without Valkey, media/grants/exports run, but
 accounting/retention are not production-ready and readiness can remain degraded.
 
 ### Spend-budget reconciliation

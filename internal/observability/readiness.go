@@ -5,78 +5,137 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-// State carries the dependencies the readiness and metrics collectors probe.
-// Everything is a small function so collectors stay honest when a plane was
-// never configured: an unconfigured probe reports absence, not failure.
-type State struct {
-	Region string
-	Pool   storeQuerier
-	PingDB func(context.Context) error
-	// Mode classifies which responsibilities this process must evidence.
+// Sources are what the readiness and metrics collectors probe. A nil source
+// means that plane is not configured in this process, which is reported as
+// absence rather than failure.
+type Sources struct {
+	Region        string
+	Store         Store
 	ServesGateway bool
-	// Runtime probes the pinned authority and generation.
-	Runtime func() RuntimeProbe
-	// Limiter probes the Valkey limiter. Configured is false when the
-	// installation has no shared state backend at all.
-	Limiter       func(ctx context.Context) (configured, healthy bool)
-	LimiterCounts func() (failOpen, dailyRejections, weeklyRejections, monthlyRejections int64)
-	// Circuits counts currently open upstream circuits.
-	Circuits func() int64
-	// Shadows counts mirrored shadow attempts and those dropped for want of
-	// shadow capacity.
-	Shadows func() (mirrored, dropped int64)
-	// Emitter snapshots the local request metadata buffer.
-	Emitter func() *usage.Snapshot
-	// Spool reports media spool capacity and usage; nil means no spool.
-	Spool func() (capacity, used *int64)
-	// MediaGaps counts reconciliation steps that could not be checkpointed.
-	MediaGaps func() int64
-	// LossCounters returns the durably reported metadata-loss totals.
-	LossCounters func() (events, dropped, abandoned int64)
-	// HardLimits reports whether any pinned key carries hard limits; only then
-	// does a limiter outage degrade gateway readiness.
-	HardLimits func() bool
-	Export     func(context.Context) []prometheus.Metric
+	Runtime       RuntimeSource
+	Limiter       Pinger
+	Gateway       GatewayCounters
+	Emitter       MetadataBuffer
+	Spool         Spool
+	MediaGaps     *atomic.Uint64
+	Loss          LossCounters
+	Export        func(context.Context) []prometheus.Metric
 }
 
-// storeQuerier is the subset of the pool the collectors use.
-type storeQuerier interface {
+type Store interface {
 	access.Queryer
 	media.Querier
+	Pinger
+}
+
+type Pinger interface {
+	Ping(context.Context) error
+}
+
+type RuntimeSource interface {
+	Probe() RuntimeProbe
+	HasHardLimits() bool
+}
+
+type GatewayCounters interface {
+	OpenCircuits() int64
+	ShadowCounts() (mirrored, dropped int64)
+	LimiterCounts() (failOpen, daily, weekly, monthly int64)
+}
+
+type MetadataBuffer interface {
+	Snapshot() usage.Snapshot
+}
+
+type Spool interface {
+	CapacityBytes() int64
+	UsedBytes() int64
+}
+
+type LossCounters interface {
+	Totals() (events, dropped, abandoned int64)
 }
 
 // RuntimeProbe is the pinned-runtime picture readiness needs.
 type RuntimeProbe struct {
 	Generation     *int64
-	AuthorityAge   *time.Duration
 	AuthorityStale bool
 	// AllTransports is false when a pinned provider has no transport.
 	AllTransports bool
 }
 
-// Health is the management readiness payload. Field names and semantics match
-// the OpenAPI contract the console renders.
+func (s *Sources) runtimeProbe() RuntimeProbe {
+	if s.Runtime == nil {
+		return RuntimeProbe{}
+	}
+	return s.Runtime.Probe()
+}
+
+func (s *Sources) limiter(ctx context.Context) (configured, healthy bool) {
+	if s.Limiter == nil {
+		return false, false
+	}
+	return true, s.Limiter.Ping(ctx) == nil
+}
+
+func (s *Sources) mediaGaps() int64 {
+	if s.MediaGaps == nil {
+		return 0
+	}
+	return int64(s.MediaGaps.Load())
+}
+
+func (s *Sources) localMetadataComplete() bool {
+	return !s.ServesGateway || s.Emitter == nil || s.Emitter.Snapshot().Complete()
+}
+
+type Status string
+
+const (
+	StatusOK             Status = "ok"
+	StatusDegraded       Status = "degraded"
+	StatusHealthy        Status = "healthy"
+	StatusBacklogged     Status = "backlogged"
+	StatusStale          Status = "stale"
+	StatusUnknown        Status = "unknown"
+	StatusUnavailable    Status = "unavailable"
+	StatusUnavailableLKG Status = "unavailable_lkg"
+	StatusNotConfigured  Status = "not_configured"
+	StatusNotChecked     Status = "not_checked"
+	StatusDisabled       Status = "disabled"
+)
+
 type Health struct {
-	Status                                     string     `json:"status"`
-	AsynchronousPlane                          string     `json:"asynchronous_plane"`
-	AsynchronousPlaneCurrent                   bool       `json:"asynchronous_plane_current"`
-	AsynchronousPlaneDrained                   bool       `json:"asynchronous_plane_drained"`
-	AsynchronousPlaneLastProgressAt            *time.Time `json:"asynchronous_plane_last_progress_at,omitempty"`
-	WorkerTasksStale                           int64      `json:"worker_tasks_stale"`
-	WorkerTasksUnknown                         int64      `json:"worker_tasks_unknown"`
-	Generation                                 *int64     `json:"generation,omitempty"`
-	Database                                   string     `json:"database"`
-	Limits                                     string     `json:"limits"`
+	Status     Status `json:"status"`
+	Generation *int64 `json:"generation,omitempty"`
+	Database   Status `json:"database"`
+	Limits     Status `json:"limits"`
+	AsynchronousPlaneHealth
+	RequestMetadataHealth
+	MediaHealth
+}
+
+type AsynchronousPlaneHealth struct {
+	AsynchronousPlane               Status     `json:"asynchronous_plane"`
+	AsynchronousPlaneCurrent        bool       `json:"asynchronous_plane_current"`
+	AsynchronousPlaneDrained        bool       `json:"asynchronous_plane_drained"`
+	AsynchronousPlaneLastProgressAt *time.Time `json:"asynchronous_plane_last_progress_at,omitempty"`
+	WorkerTasksStale                int64      `json:"worker_tasks_stale"`
+	WorkerTasksUnknown              int64      `json:"worker_tasks_unknown"`
+}
+
+type RequestMetadataHealth struct {
 	RequestMetadataComplete                    bool       `json:"request_metadata_complete"`
 	RequestMetadataConsumer                    string     `json:"request_metadata_consumer"`
 	RequestMetadataConsumerPendingEvents       int64      `json:"request_metadata_consumer_pending_events"`
@@ -92,105 +151,99 @@ type Health struct {
 	RequestMetadataGatewayUnresolvedEpochs     int64      `json:"request_metadata_gateway_unresolved_epochs"`
 	RequestMetadataHistoricalUncertainGaps     int64      `json:"request_metadata_historical_uncertain_gaps"`
 	RequestMetadataGatewayUnresolvedLowerBound int64      `json:"request_metadata_gateway_unresolved_event_lower_bound"`
-	RuntimeOutbox                              string     `json:"runtime_outbox"`
-	RuntimeOutboxPendingRows                   int64      `json:"runtime_outbox_pending_rows"`
-	RuntimeOutboxOldestPendingAt               *time.Time `json:"runtime_outbox_oldest_pending_at,omitempty"`
-	RuntimeOutboxOldestPendingAgeSeconds       *int64     `json:"runtime_outbox_oldest_pending_age_seconds,omitempty"`
-	RuntimeOutboxOwnerActive                   bool       `json:"runtime_outbox_owner_active"`
-	RuntimeOutboxClaimedRows                   int64      `json:"runtime_outbox_claimed_rows"`
-	RuntimeOutboxOwnerAbandoned                bool       `json:"runtime_outbox_owner_abandoned"`
-	RuntimeOutboxHeartbeatAgeSeconds           *int64     `json:"runtime_outbox_heartbeat_age_seconds,omitempty"`
-	RuntimeOutboxPublicationAttemptsTotal      *int64     `json:"runtime_outbox_publication_attempts_total,omitempty"`
-	RuntimeOutboxPublicationRetriesTotal       *int64     `json:"runtime_outbox_publication_retries_total,omitempty"`
-	RuntimeOutboxRepeatedPublicationAttempts   *int64     `json:"runtime_outbox_repeated_publication_attempts_total,omitempty"`
-	RuntimeOutboxAbandonedOwnershipTotal       *int64     `json:"runtime_outbox_abandoned_ownership_total,omitempty"`
-	RuntimeOutboxFailedTakeoversTotal          *int64     `json:"runtime_outbox_failed_takeovers_total,omitempty"`
-	MediaReconciliation                        string     `json:"media_reconciliation"`
-	MediaReconciliationPending                 int64      `json:"media_reconciliation_pending"`
-	MediaReconciliationStale                   int64      `json:"media_reconciliation_stale"`
-	MediaReconciliationFailed                  int64      `json:"media_reconciliation_failed"`
-	MediaReconciliationGapsTotal               int64      `json:"media_reconciliation_gaps_total"`
-	MediaSpoolUsedBytes                        *int64     `json:"media_spool_used_bytes,omitempty"`
-	MediaSpoolCapacityBytes                    *int64     `json:"media_spool_capacity_bytes,omitempty"`
+}
+
+type MediaHealth struct {
+	MediaReconciliation          Status `json:"media_reconciliation"`
+	MediaReconciliationPending   int64  `json:"media_reconciliation_pending"`
+	MediaReconciliationStale     int64  `json:"media_reconciliation_stale"`
+	MediaReconciliationFailed    int64  `json:"media_reconciliation_failed"`
+	MediaReconciliationGapsTotal int64  `json:"media_reconciliation_gaps_total"`
+	MediaSpoolUsedBytes          *int64 `json:"media_spool_used_bytes,omitempty"`
+	MediaSpoolCapacityBytes      *int64 `json:"media_spool_capacity_bytes,omitempty"`
 }
 
 // LiveHealth is the liveness response: every dependency unchecked.
 func LiveHealth() Health {
 	return Health{
-		Status:                  "ok",
-		AsynchronousPlane:       "not_checked",
-		Database:                "not_checked",
-		Limits:                  "not_checked",
-		RequestMetadataComplete: true,
-		RequestMetadataConsumer: "not_checked",
-		RuntimeOutbox:           "not_checked",
-		MediaReconciliation:     "not_checked",
+		Status:                  StatusOK,
+		Database:                StatusNotChecked,
+		Limits:                  StatusNotChecked,
+		AsynchronousPlaneHealth: AsynchronousPlaneHealth{AsynchronousPlane: StatusNotChecked},
+		RequestMetadataHealth:   RequestMetadataHealth{RequestMetadataComplete: true, RequestMetadataConsumer: string(StatusNotChecked)},
+		MediaHealth:             MediaHealth{MediaReconciliation: StatusNotChecked},
 	}
 }
 
 // CollectReadiness probes every dependency and builds the readiness payload.
 // Database failure degrades honestly: a gateway with a pinned runtime may keep
 // serving from the last known good snapshot, which is reported as such.
-func CollectReadiness(ctx context.Context, s *State) (*Health, error) {
+func CollectReadiness(ctx context.Context, s *Sources) (*Health, error) {
 	now := time.Now()
-	var probe RuntimeProbe
-	if s.Runtime != nil {
-		probe = s.Runtime()
-	}
-	generation := probe.Generation
-	store, err := probeStore(ctx, s, now, generation != nil)
+	runtime := s.runtimeProbe()
+	store, err := probeStore(ctx, s, now, runtime.Generation != nil)
 	if err != nil {
 		return nil, err
 	}
-	if s.ServesGateway {
-		if generation == nil {
-			return nil, errors.New("runtime_generation_unavailable")
-		}
-		if probe.AuthorityStale {
-			return nil, errors.New("api_key_authority_stale")
-		}
-		if !probe.AllTransports {
-			return nil, errors.New("provider_transport_unavailable")
-		}
+	if err := gatewayReady(s.ServesGateway, runtime); err != nil {
+		return nil, err
 	}
-	limiterConfigured, limitsHealthy := false, false
-	if s.Limiter != nil {
-		limiterConfigured, limitsHealthy = s.Limiter(ctx)
-	}
-	hardLimits := s.HardLimits != nil && s.HardLimits()
+	limiterConfigured, limiterHealthy := s.limiter(ctx)
+	limits := limitsStatus(limiterConfigured, limiterHealthy)
+	gaps := s.mediaGaps()
+	plane := asynchronousPlane(store.tasks, expectedTasks(limiterConfigured), store.consumer)
+	metadata := requestMetadata(store, now, s.localMetadataComplete(), limiterConfigured)
 	// Valkey loss degrades only requests whose keys declare hard limits; the
 	// request path fails those keys closed while unlimited keys remain safe.
-	degradedLimits := s.ServesGateway && hardLimits && !limitsHealthy
-	mediaGaps := int64(0)
-	if s.MediaGaps != nil {
-		mediaGaps = s.MediaGaps()
+	degradedLimits := s.ServesGateway && s.Runtime != nil && s.Runtime.HasHardLimits() && !limiterHealthy
+	degradedMedia := mediaDegraded(store.media, gaps)
+	status := StatusOK
+	if degradedLimits || degradedMedia || !metadata.RequestMetadataComplete || plane.AsynchronousPlane != StatusHealthy {
+		status = StatusDegraded
 	}
-	degradedMedia := mediaDegraded(store.media, mediaGaps)
-	localMetadataComplete := true
-	if s.ServesGateway && s.Emitter != nil {
-		if snapshot := s.Emitter(); snapshot != nil {
-			localMetadataComplete = snapshot.Complete()
-		}
-	}
-	expectsConsumer := limiterConfigured
-	metadataComplete := localMetadataComplete &&
-		(!expectsConsumer || store.consumer.Complete()) &&
-		store.epochs.UnresolvedEpochs == 0
-	current, drained := asynchronousPlaneFlags(store.tasks, expectedTasks(limiterConfigured), store.consumer)
-	response := readinessResponse(s, now, generation, store, expectedTasks(limiterConfigured),
-		current, drained, metadataComplete, degradedLimits, degradedMedia, limitsHealthy, limiterConfigured, mediaGaps)
-	return response, nil
+	return &Health{
+		Status:                  status,
+		Generation:              runtime.Generation,
+		Database:                store.database,
+		Limits:                  limits,
+		AsynchronousPlaneHealth: plane,
+		RequestMetadataHealth:   metadata,
+		MediaHealth:             mediaHealth(store.media, gaps, degradedMedia, s.Spool),
+	}, nil
 }
 
-// mediaDegraded reports whether media reconciliation has stale or failed jobs
-// or recorded gaps.
+func gatewayReady(servesGateway bool, runtime RuntimeProbe) error {
+	switch {
+	case !servesGateway:
+		return nil
+	case runtime.Generation == nil:
+		return errors.New("runtime_generation_unavailable")
+	case runtime.AuthorityStale:
+		return errors.New("api_key_authority_stale")
+	case !runtime.AllTransports:
+		return errors.New("provider_transport_unavailable")
+	default:
+		return nil
+	}
+}
+
+func limitsStatus(configured, healthy bool) Status {
+	switch {
+	case !configured:
+		return StatusNotConfigured
+	case healthy:
+		return StatusOK
+	default:
+		return StatusUnavailable
+	}
+}
+
 func mediaDegraded(summary *media.Summary, gaps int64) bool {
 	return (summary != nil && (summary.Stale > 0 || summary.Failed > 0)) || gaps > 0
 }
 
-// storeProbe bundles the store-side probes.
 type storeProbe struct {
-	database string
+	database Status
 	media    *media.Summary
 	consumer usage.ConsumerStatus
 	epochs   EpochHealth
@@ -198,125 +251,87 @@ type storeProbe struct {
 	counters *WorkerRecoveryCounters
 }
 
-func probeStore(ctx context.Context, s *State, now time.Time, hasGeneration bool) (*storeProbe, error) {
-	probe := &storeProbe{
-		database: "unavailable_lkg",
-		consumer: usage.ConsumerStatus{State: usage.ConsumerUnknown},
-		tasks:    &WorkerTaskHealth{},
-	}
-	if err := s.PingDB(ctx); err != nil {
+func probeStore(ctx context.Context, s *Sources, now time.Time, hasGeneration bool) (*storeProbe, error) {
+	if err := s.Store.Ping(ctx); err != nil {
 		// A gateway holding a pinned runtime can keep serving from the last
 		// known good snapshot; anything else is simply unready.
 		if s.ServesGateway && hasGeneration {
-			for _, task := range workerhealth.WorkerTasks() {
-				probe.tasks.Tasks = append(probe.tasks.Tasks, WorkerTaskStatus{Task: string(task.Name), State: TaskStateUnknown})
-			}
-			return probe, nil
+			return &storeProbe{
+				database: StatusUnavailableLKG,
+				consumer: usage.ConsumerStatus{State: usage.ConsumerUnknown},
+				tasks:    unknownWorkerTasks(),
+			}, nil
 		}
 		return nil, errors.New("database_unavailable")
 	}
-	probe.database = "ok"
-	summary, err := media.ReconciliationSummary(ctx, s.Pool, now)
+	summary, err := media.ReconciliationSummary(ctx, s.Store, now)
 	if err != nil {
 		return nil, fmt.Errorf("database_unavailable: media reconciliation summary: %w", err)
 	}
-	probe.media = &summary
-	consumer, err := usage.ReadConsumerStatus(ctx, s.Pool, now)
+	consumer, err := usage.ReadConsumerStatus(ctx, s.Store, now)
 	if err != nil {
 		return nil, fmt.Errorf("database_unavailable: metadata consumer: %w", err)
 	}
-	probe.consumer = consumer
-	epochs, err := ReadEpochHealth(ctx, s.Pool)
+	epochs, err := ReadEpochHealth(ctx, s.Store)
 	if err != nil {
 		return nil, fmt.Errorf("database_unavailable: gateway epochs: %w", err)
 	}
-	probe.epochs = epochs
-	tasks, err := ReadRegionalWorkerTaskHealth(ctx, s.Pool, s.Region)
+	tasks, err := ReadRegionalWorkerTaskHealth(ctx, s.Store, s.Region)
 	if err != nil {
 		return nil, fmt.Errorf("database_unavailable: worker tasks: %w", err)
 	}
-	probe.tasks = tasks
-	counters, err := ReadWorkerRecoveryCounters(ctx, s.Pool)
+	counters, err := ReadWorkerRecoveryCounters(ctx, s.Store)
 	if err != nil {
 		return nil, fmt.Errorf("database_unavailable: worker counters: %w", err)
 	}
-	probe.counters = &counters
-	return probe, nil
+	return &storeProbe{database: StatusOK, media: &summary, consumer: consumer, epochs: epochs, tasks: tasks, counters: &counters}, nil
 }
 
 // expectedTasks lists the worker responsibilities this process must see live.
-func expectedTasks(limiterConfigured bool) []WorkerTask {
+func expectedTasks(limiterConfigured bool) []workerhealth.Task {
 	if limiterConfigured {
-		return workerhealth.WorkerTasks()
+		return workerhealth.Tasks[:]
 	}
-	return slices.Collect(func(yield func(WorkerTask) bool) {
-		for _, task := range workerhealth.WorkerTasks() {
-			if !task.Regional && !yield(task) {
+	return slices.Collect(func(yield func(workerhealth.Task) bool) {
+		for _, task := range workerhealth.Tasks {
+			if !task.Regional() && !yield(task) {
 				return
 			}
 		}
 	})
 }
 
-// asynchronousPlaneFlags classifies the replicated worker plane's freshness
-// and drainage. There is no runtime outbox on this backend, so the plane is
-// the metadata consumer plus the fixed tasks.
-func asynchronousPlaneFlags(tasks *WorkerTaskHealth, expected []WorkerTask, consumer usage.ConsumerStatus) (current, drained bool) {
-	expectsConsumer := false
-	for _, task := range expected {
-		if task.Name == workerhealth.TaskRequestMetadataConsumer {
-			expectsConsumer = true
-		}
-	}
-	current = tasks.CurrentFor(expected) &&
+func asynchronousPlane(tasks *WorkerTaskHealth, expected []workerhealth.Task, consumer usage.ConsumerStatus) AsynchronousPlaneHealth {
+	expectsConsumer := slices.Contains(expected, workerhealth.TaskRequestMetadataConsumer)
+	current := tasks.Count(expected, TaskHealthy) == int64(len(expected)) &&
 		(!expectsConsumer || consumer.State == usage.ConsumerHealthy || consumer.State == usage.ConsumerBacklogged)
-	drained = !expectsConsumer || (consumer.PendingEvents == 0 && consumer.LagEvents == 0)
-	return current, drained
+	drained := !expectsConsumer || (consumer.PendingEvents == 0 && consumer.LagEvents == 0)
+	unknown := tasks.Count(expected, TaskUnknown)
+	state := StatusStale
+	switch {
+	case current && drained:
+		state = StatusHealthy
+	case current:
+		state = StatusBacklogged
+	case unknown > 0 || consumer.State == usage.ConsumerUnknown:
+		state = StatusUnknown
+	}
+	return AsynchronousPlaneHealth{
+		AsynchronousPlane:               state,
+		AsynchronousPlaneCurrent:        current,
+		AsynchronousPlaneDrained:        drained,
+		AsynchronousPlaneLastProgressAt: tasks.LastProgressFor(expected),
+		WorkerTasksStale:                tasks.Count(expected, TaskStale),
+		WorkerTasksUnknown:              unknown,
+	}
 }
 
-func asynchronousPlaneState(current, drained bool, tasks *WorkerTaskHealth, expected []WorkerTask, consumer usage.ConsumerStatus) string {
-	if current && drained {
-		return "healthy"
-	}
-	if current {
-		return "backlogged"
-	}
-	if tasks.UnknownFor(expected) > 0 || consumer.State == usage.ConsumerUnknown {
-		return "unknown"
-	}
-	return "stale"
-}
-
-func readinessResponse(s *State, now time.Time, generation *int64, probe *storeProbe, expected []WorkerTask,
-	current, drained, metadataComplete, degradedLimits, degradedMedia, limitsHealthy, limiterConfigured bool, mediaGaps int64) *Health {
-	consumer := probe.consumer
-	epochs := probe.epochs
-	counters := probe.counters
-	summary := probe.media
-	status := "ok"
-	if degradedLimits || degradedMedia || !metadataComplete || !(current && drained) {
-		status = "degraded"
-	}
-	limits := "not_configured"
-	if limiterConfigured {
-		if limitsHealthy {
-			limits = "ok"
-		} else {
-			limits = "unavailable"
-		}
-	}
-	h := &Health{
-		Status:                                     status,
-		AsynchronousPlane:                          asynchronousPlaneState(current, drained, probe.tasks, expected, consumer),
-		AsynchronousPlaneCurrent:                   current,
-		AsynchronousPlaneDrained:                   drained,
-		AsynchronousPlaneLastProgressAt:            probe.tasks.LastProgressFor(expected),
-		WorkerTasksStale:                           probe.tasks.StaleFor(expected),
-		WorkerTasksUnknown:                         probe.tasks.UnknownFor(expected),
-		Generation:                                 generation,
-		Database:                                   probe.database,
-		Limits:                                     limits,
-		RequestMetadataComplete:                    metadataComplete,
+func requestMetadata(store *storeProbe, now time.Time, localComplete, expectsConsumer bool) RequestMetadataHealth {
+	consumer, epochs := store.consumer, store.epochs
+	health := RequestMetadataHealth{
+		RequestMetadataComplete: localComplete &&
+			(!expectsConsumer || consumer.Complete()) &&
+			epochs.UnresolvedEpochs == 0,
 		RequestMetadataConsumer:                    consumer.State,
 		RequestMetadataConsumerPendingEvents:       consumer.PendingEvents,
 		RequestMetadataConsumerLagEvents:           consumer.LagEvents,
@@ -327,33 +342,33 @@ func readinessResponse(s *State, now time.Time, generation *int64, probe *storeP
 		RequestMetadataGatewayUnresolvedEpochs:     epochs.UnresolvedEpochs,
 		RequestMetadataHistoricalUncertainGaps:     epochs.HistoricalUncertainGaps,
 		RequestMetadataGatewayUnresolvedLowerBound: epochs.UnresolvedEventLowerBound,
-		// This backend publishes runtime revisions in one transaction; there
-		// is no outbox to report.
-		RuntimeOutbox:                "not_configured",
-		MediaReconciliationGapsTotal: mediaGaps,
-	}
-	if summary != nil {
-		h.MediaReconciliation = "ok"
-		if degradedMedia {
-			h.MediaReconciliation = "degraded"
-		}
-		h.MediaReconciliationPending = summary.Pending
-		h.MediaReconciliationStale = summary.Stale
-		h.MediaReconciliationFailed = summary.Failed
-	} else {
-		h.MediaReconciliation = "unknown"
 	}
 	if consumer.OldestPendingAt != nil {
 		age := max(int64(now.Sub(*consumer.OldestPendingAt)/time.Second), 0)
-		h.RequestMetadataConsumerOldestPendingAgeSec = &age
+		health.RequestMetadataConsumerOldestPendingAgeSec = &age
 	}
-	if counters != nil {
-		h.RequestMetadataReclaimedEventsTotal = &counters.RequestMetadataReclaimed
-		h.RequestMetadataRecoveredEventsTotal = &counters.RequestMetadataRecovered
-		h.RequestMetadataDuplicatePersistenceTotal = &counters.RequestMetadataDuplicates
+	if counters := store.counters; counters != nil {
+		health.RequestMetadataReclaimedEventsTotal = &counters.RequestMetadataReclaimed
+		health.RequestMetadataRecoveredEventsTotal = &counters.RequestMetadataRecovered
+		health.RequestMetadataDuplicatePersistenceTotal = &counters.RequestMetadataDuplicates
 	}
-	if s.Spool != nil {
-		h.MediaSpoolCapacityBytes, h.MediaSpoolUsedBytes = s.Spool()
+	return health
+}
+
+func mediaHealth(summary *media.Summary, gaps int64, degraded bool, spool Spool) MediaHealth {
+	health := MediaHealth{MediaReconciliation: StatusUnknown, MediaReconciliationGapsTotal: gaps}
+	if summary != nil {
+		health.MediaReconciliation = StatusOK
+		if degraded {
+			health.MediaReconciliation = StatusDegraded
+		}
+		health.MediaReconciliationPending = summary.Pending
+		health.MediaReconciliationStale = summary.Stale
+		health.MediaReconciliationFailed = summary.Failed
 	}
-	return h
+	if spool != nil {
+		capacity, used := spool.CapacityBytes(), spool.UsedBytes()
+		health.MediaSpoolCapacityBytes, health.MediaSpoolUsedBytes = &capacity, &used
+	}
+	return health
 }
