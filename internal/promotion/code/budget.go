@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	openapi_types "github.com/oapi-codegen/runtime/types"
-
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -55,11 +54,7 @@ func (b Budget) keyRefs() []string {
 }
 
 func readBudgets(ctx context.Context, q access.Queryer) ([]Budget, error) {
-	rows, err := q.Query(ctx, `SELECT x.id::text,p.name,x.route_id::text,CASE WHEN x.api_key_id IS NULL THEN NULL ELSE 'code/key/'||x.api_key_id END,x.daily_tokens,x.monthly_tokens,x.enabled FROM olp.code_token_budgets x JOIN olp.projects p ON p.id=x.project_id`)
-	if err != nil {
-		return nil, err
-	}
-	return pgx.CollectRows(rows, pgx.RowToStructByPos[Budget])
+	return promotion.Rows(ctx, q, pgx.RowToStructByPos[Budget], `SELECT x.id::text,p.name,x.route_id::text,CASE WHEN x.api_key_id IS NULL THEN NULL ELSE 'code/key/'||x.api_key_id END,x.daily_tokens,x.monthly_tokens,x.enabled FROM olp.code_token_budgets x JOIN olp.projects p ON p.id=x.project_id`)
 }
 
 func renderBudget(b Budget) (contract.ConfigurationCodeBudget, error) {

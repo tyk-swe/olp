@@ -19,7 +19,7 @@ func present[T any](value nullable.Nullable[[]T]) []T {
 }
 
 func sortedKeys[V any](values map[string]V) []string {
-	return append(make([]string, 0, len(values)), slices.Sorted(maps.Keys(values))...)
+	return promotion.NonNil(slices.Sorted(maps.Keys(values)))
 }
 
 func orEmpty[K comparable, V any](values *map[K]V) map[K]V {

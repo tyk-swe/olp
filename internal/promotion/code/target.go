@@ -80,11 +80,7 @@ func validLimits(ctx context.Context, q access.Queryer, frozen routing.Provider,
 }
 
 func readSlotNames(ctx context.Context, q access.Queryer) (map[string]PaidTarget, error) {
-	rows, err := q.Query(ctx, `SELECT p.id::text,p.name,s.id::text,s.name FROM olp.providers p JOIN olp.provider_slots s ON s.provider_id=p.id`)
-	if err != nil {
-		return nil, err
-	}
-	names, err := pgx.CollectRows(rows, pgx.RowToStructByPos[slotName])
+	names, err := promotion.Rows(ctx, q, pgx.RowToStructByPos[slotName], `SELECT p.id::text,p.name,s.id::text,s.name FROM olp.providers p JOIN olp.provider_slots s ON s.provider_id=p.id`)
 	if err != nil {
 		return nil, err
 	}

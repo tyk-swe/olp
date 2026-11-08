@@ -37,7 +37,7 @@ func parsePool(e contract.ConfigurationCodePool, accounts []Account) (Pool, erro
 		return Pool{}, err
 	}
 	keys := present(e.ApiKeyRefs)
-	pool := Pool{ID: e.Id.String(), Project: e.Project, Name: e.Name, OwnerRef: owner, Accounts: weights, APIKeyRefs: append(make([]string, 0, len(keys)), keys...)}
+	pool := Pool{ID: e.Id.String(), Project: e.Project, Name: e.Name, OwnerRef: owner, Accounts: weights, APIKeyRefs: promotion.NonNil(slices.Clone(keys))}
 	placeholder := access.CodePoolInput{ProjectID: pool.ID, Name: pool.Name, Kind: string(e.Kind), OwnerUserID: placeholderOf(owner, pool.ID), AccountIDs: sortedKeys(weights), AccountWeights: weights, APIKeyIDs: promotion.Map(keys, func(string) string { return pool.ID })}
 	if err := placeholder.Validate(); err != nil {
 		return Pool{}, err
@@ -99,11 +99,7 @@ func (p Pool) ownerRefs() []string {
 }
 
 func readPools(ctx context.Context, q access.Queryer) ([]Pool, error) {
-	rows, err := q.Query(ctx, `SELECT x.id::text,p.name,x.name,CASE WHEN x.owner_user_id IS NULL THEN NULL ELSE 'code/user/'||x.owner_user_id END,coalesce((SELECT jsonb_object_agg(account_id::text,weight) FROM olp.code_pool_accounts WHERE pool_id=x.id),'{}'),ARRAY(SELECT 'code/key/'||api_key_id FROM olp.code_pool_keys WHERE pool_id=x.id ORDER BY api_key_id) FROM olp.code_pools x JOIN olp.projects p ON p.id=x.project_id`)
-	if err != nil {
-		return nil, err
-	}
-	return pgx.CollectRows(rows, pgx.RowToStructByPos[Pool])
+	return promotion.Rows(ctx, q, pgx.RowToStructByPos[Pool], `SELECT x.id::text,p.name,x.name,CASE WHEN x.owner_user_id IS NULL THEN NULL ELSE 'code/user/'||x.owner_user_id END,coalesce((SELECT jsonb_object_agg(account_id::text,weight) FROM olp.code_pool_accounts WHERE pool_id=x.id),'{}'),ARRAY(SELECT 'code/key/'||api_key_id FROM olp.code_pool_keys WHERE pool_id=x.id ORDER BY api_key_id) FROM olp.code_pools x JOIN olp.projects p ON p.id=x.project_id`)
 }
 
 func renderPool(p Pool) (contract.ConfigurationCodePool, error) {
@@ -119,7 +115,7 @@ func renderPool(p Pool) (contract.ConfigurationCodePool, error) {
 		}
 	})
 	keys := slices.Sorted(slices.Values(p.APIKeyRefs))
-	return contract.ConfigurationCodePool{Id: id, Project: p.Project, Name: p.Name, Kind: contract.ConfigurationCodePoolKind(p.kind()), OwnerRef: promotion.Nullable(p.OwnerRef), Accounts: accounts, ApiKeyRefs: nullable.NewNullableWithValue(append(make([]string, 0, len(keys)), keys...))}, nil
+	return contract.ConfigurationCodePool{Id: id, Project: p.Project, Name: p.Name, Kind: contract.ConfigurationCodePoolKind(p.kind()), OwnerRef: promotion.Nullable(p.OwnerRef), Accounts: accounts, ApiKeyRefs: nullable.NewNullableWithValue(promotion.NonNil(slices.Clone(keys)))}, nil
 }
 
 func resolvePool(ctx context.Context, q access.Queryer, p Pool, desired Desired, directory project.Directory, accountIDs map[string]string) (resolved[access.CodePoolInput], error) {
@@ -150,7 +146,7 @@ func resolvePool(ctx context.Context, q access.Queryer, p Pool, desired Desired,
 			}
 		}
 	})
-	input := access.CodePoolInput{ProjectID: projectID, Name: p.Name, Kind: p.kind(), OwnerUserID: ownerID, AccountIDs: sortedKeys(weights), AccountWeights: weights, APIKeyIDs: append(make([]string, 0, len(keys)), slices.Sorted(slices.Values(keys))...)}
+	input := access.CodePoolInput{ProjectID: projectID, Name: p.Name, Kind: p.kind(), OwnerUserID: ownerID, AccountIDs: sortedKeys(weights), AccountWeights: weights, APIKeyIDs: promotion.NonNil(slices.Sorted(slices.Values(keys)))}
 	return resolved[access.CodePoolInput]{ref: p.ID, to: to, input: input}, err
 }
 

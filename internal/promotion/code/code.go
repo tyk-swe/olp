@@ -9,7 +9,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
 	openapi_types "github.com/oapi-codegen/runtime/types"
-
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -50,7 +49,8 @@ type resolution struct {
 }
 
 func Parse(document *contract.ConfigurationCode, declared *contract.ConfigurationCodeBindings, names promotion.Names, deps provider.Deps) (Desired, error) {
-	values := bindings{credentials: uuids(declared, func(b contract.ConfigurationCodeBindings) *map[string]openapi_types.UUID { return b.Credentials }), users: uuids(declared, func(b contract.ConfigurationCodeBindings) *map[string]openapi_types.UUID { return b.Users }), keys: uuids(declared, func(b contract.ConfigurationCodeBindings) *map[string]openapi_types.UUID { return b.ApiKeys })}
+	codeBindings := promotion.ValueOf(declared)
+	values := bindings{credentials: uuids(codeBindings.Credentials), users: uuids(codeBindings.Users), keys: uuids(codeBindings.ApiKeys)}
 	if document == nil {
 		return Desired{}, onlyDeclared(values, Code{})
 	}
@@ -280,12 +280,9 @@ func resolve(ctx context.Context, q access.Queryer, desired Desired, directory p
 	return resolution{accounts: accounts, pools: pools, routes: routes, budgets: budgets}, nil
 }
 
-func uuids(declared *contract.ConfigurationCodeBindings, field func(contract.ConfigurationCodeBindings) *map[string]openapi_types.UUID) map[string]string {
-	if declared == nil || field(*declared) == nil {
-		return map[string]string{}
-	}
+func uuids(declared *map[string]openapi_types.UUID) map[string]string {
 	return maps.Collect(func(yield func(string, string) bool) {
-		for ref, id := range *field(*declared) {
+		for ref, id := range promotion.ValueOf(declared) {
 			if !yield(ref, id.String()) {
 				return
 			}

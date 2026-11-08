@@ -156,11 +156,7 @@ func renderRoute(r Route) (contract.ConfigurationCodeRoute, error) {
 }
 
 func readRoutes(ctx context.Context, q access.Queryer) ([]Route, error) {
-	rows, err := q.Query(ctx, `SELECT x.id::text,p.name,x.slug,x.draft,v.document,coalesce((SELECT jsonb_object_agg(p.name,c.value) FROM jsonb_each(v.connections) c JOIN olp.providers p ON p.id::text=c.key),'{}'),coalesce(v.paid_connections,'{}') FROM olp.code_routes x JOIN olp.projects p ON p.id=x.project_id LEFT JOIN olp.code_route_revisions v ON v.id=x.latest_revision_id`)
-	if err != nil {
-		return nil, err
-	}
-	stored, err := pgx.CollectRows(rows, pgx.RowToStructByPos[storedRoute])
+	stored, err := promotion.Rows(ctx, q, pgx.RowToStructByPos[storedRoute], `SELECT x.id::text,p.name,x.slug,x.draft,v.document,coalesce((SELECT jsonb_object_agg(p.name,c.value) FROM jsonb_each(v.connections) c JOIN olp.providers p ON p.id::text=c.key),'{}'),coalesce(v.paid_connections,'{}') FROM olp.code_routes x JOIN olp.projects p ON p.id=x.project_id LEFT JOIN olp.code_route_revisions v ON v.id=x.latest_revision_id`)
 	if err != nil {
 		return nil, err
 	}

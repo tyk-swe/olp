@@ -227,7 +227,7 @@ func (s server) decode(r *http.Request) (desired, error) {
 		planners:     planners,
 		digest:       digest,
 		expected:     expectedDigest(request.ExpectedDigest),
-		codeBindings: request.CodeBindings,
+		codeBindings: declaredCode(request.CodeBindings),
 	}, nil
 }
 
@@ -260,9 +260,6 @@ func (d desired) needsPrepare() bool {
 }
 
 func authorize(ctx context.Context, q access.Queryer, p access.Principal, d desired) error {
-	if err := identity.Authorize(d.identity, p); err != nil {
-		return err
-	}
 	if d.bindings.HasExternal() {
 		if err := p.Authorize(access.Settings); err != nil {
 			return err

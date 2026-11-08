@@ -54,3 +54,11 @@ func credentialMaterial(credential promotion.Credential) ([]byte, error) {
 	}
 	return nil, fmt.Errorf("unknown credential %T", credential)
 }
+
+func declaredCode(bindings *contract.ConfigurationCodeBindings) *contract.ConfigurationCodeBindings {
+	declared := promotion.ValueOf(bindings)
+	if len(promotion.ValueOf(declared.Credentials))+len(promotion.ValueOf(declared.Users))+len(promotion.ValueOf(declared.ApiKeys)) == 0 {
+		return nil
+	}
+	return bindings
+}

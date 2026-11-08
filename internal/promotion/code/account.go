@@ -3,13 +3,13 @@ package code
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	openapi_types "github.com/oapi-codegen/runtime/types"
-
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -33,7 +33,7 @@ func parseAccount(e contract.ConfigurationCodeAccount) (Account, error) {
 	if access.ValidText("code", e.Project, 100) != nil || access.ValidText("code", e.Provider, 100) != nil || access.ValidText("code", e.CredentialRef, 200) != nil {
 		return Account{}, access.Invalid("code.accounts", "Name the project, provider and destination credential reference.")
 	}
-	account := Account{ID: e.Id.String(), Project: e.Project, Provider: e.Provider, CredentialRef: e.CredentialRef, Name: e.Name, Enabled: e.Enabled, Models: append(make([]string, 0, len(e.Models)), e.Models...), ExtraUsageEnabled: promotion.Pointer(e.ExtraUsageEnabled), CycleAnchor: anchor(promotion.Pointer(e.CycleAnchor))}
+	account := Account{ID: e.Id.String(), Project: e.Project, Provider: e.Provider, CredentialRef: e.CredentialRef, Name: e.Name, Enabled: e.Enabled, Models: promotion.NonNil(slices.Clone(e.Models)), ExtraUsageEnabled: promotion.Pointer(e.ExtraUsageEnabled), CycleAnchor: anchor(promotion.Pointer(e.CycleAnchor))}
 	return account, account.input(account.ID, account.ID, account.ID).Validate()
 }
 
@@ -50,11 +50,7 @@ func (a Account) input(project, provider, credential string) providers.CodeAccou
 }
 
 func readAccounts(ctx context.Context, q access.Queryer) ([]Account, error) {
-	rows, err := q.Query(ctx, `SELECT a.id::text,p.name,v.name,'code/account/'||a.id,a.name,a.enabled,a.models,a.extra_usage_enabled,a.cycle_anchor::text FROM olp.code_accounts a JOIN olp.projects p ON p.id=a.project_id JOIN olp.providers v ON v.id=a.provider_id`)
-	if err != nil {
-		return nil, err
-	}
-	return pgx.CollectRows(rows, pgx.RowToStructByPos[Account])
+	return promotion.Rows(ctx, q, pgx.RowToStructByPos[Account], `SELECT a.id::text,p.name,v.name,'code/account/'||a.id,a.name,a.enabled,a.models,a.extra_usage_enabled,a.cycle_anchor::text FROM olp.code_accounts a JOIN olp.projects p ON p.id=a.project_id JOIN olp.providers v ON v.id=a.provider_id`)
 }
 
 func renderAccount(a Account) (contract.ConfigurationCodeAccount, error) {
@@ -66,7 +62,7 @@ func renderAccount(a Account) (contract.ConfigurationCodeAccount, error) {
 	if err != nil {
 		return contract.ConfigurationCodeAccount{}, err
 	}
-	return contract.ConfigurationCodeAccount{Id: id, Project: a.Project, Provider: a.Provider, CredentialRef: a.CredentialRef, Name: a.Name, Enabled: a.Enabled, Models: append(make([]string, 0, len(a.Models)), a.Models...), ExtraUsageEnabled: promotion.Nullable(a.ExtraUsageEnabled), CycleAnchor: promotion.Nullable(cycle)}, nil
+	return contract.ConfigurationCodeAccount{Id: id, Project: a.Project, Provider: a.Provider, CredentialRef: a.CredentialRef, Name: a.Name, Enabled: a.Enabled, Models: promotion.NonNil(slices.Clone(a.Models)), ExtraUsageEnabled: promotion.Nullable(a.ExtraUsageEnabled), CycleAnchor: promotion.Nullable(cycle)}, nil
 }
 
 func date(value *string) (*openapi_types.Date, error) {

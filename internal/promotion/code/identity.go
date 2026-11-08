@@ -44,11 +44,7 @@ func derivedID(kind, project, ref string) (string, error) {
 }
 
 func lookup(ctx context.Context, q access.Queryer, absent, sql string, args ...any) (destination, error) {
-	rows, err := q.Query(ctx, sql, args...)
-	if err != nil {
-		return destination{}, err
-	}
-	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	ids, err := promotion.Rows(ctx, q, pgx.RowTo[string], sql, args...)
 	if err != nil {
 		return destination{}, err
 	}
@@ -62,11 +58,7 @@ func lookup(ctx context.Context, q access.Queryer, absent, sql string, args ...a
 }
 
 func mapped(ctx context.Context, q access.Queryer, ref, project, derived string, unique bool, sql string, args ...any) (destination, error) {
-	rows, err := q.Query(ctx, sql, args...)
-	if err != nil {
-		return destination{}, err
-	}
-	candidates, err := pgx.CollectRows(rows, pgx.RowToStructByPos[candidate])
+	candidates, err := promotion.Rows(ctx, q, pgx.RowToStructByPos[candidate], sql, args...)
 	if err != nil {
 		return destination{}, err
 	}

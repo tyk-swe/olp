@@ -99,7 +99,7 @@ func configurationOf(frozen routing.Provider) providers.Configuration {
 		Options: providers.Options{
 			Limits: limitsOf(frozen.Limits), Commitment: frozen.Commitment, HealthProbe: frozen.HealthProbe, TuningDatasetURIPrefixes: frozen.TuningDatasetURIPrefixes,
 			DocumentURIPrefixes: frozen.DocumentURIPrefixes, Network: frozen.Network, SemanticHeaders: frozen.SemanticHeaders, QuerySettings: frozen.QuerySettings,
-			OperationDefaults: frozen.OperationDefaults, Bindings: frozen.Bindings, CredentialHeaders: append(make([]string, 0, len(frozen.CredentialHeaders)), frozen.CredentialHeaders...),
+			OperationDefaults: frozen.OperationDefaults, Bindings: frozen.Bindings, CredentialHeaders: promotion.NonNil(slices.Clone(frozen.CredentialHeaders)),
 			Models: maps.Collect(maps.All(frozen.Models)), ParameterDefaults: maps.Collect(maps.All(frozen.ParameterDefaults)), VendorID: nonEmpty(frozen.VendorID), PluginOptions: frozen.PluginOptions,
 		},
 		Identity: providerconfig.Identity[*string]{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"iter"
 	"maps"
+	"slices"
 
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
@@ -36,7 +37,7 @@ type Policy struct {
 
 func policyOf(e contract.ConfigurationCodeRoutePolicy) Policy {
 	return Policy{
-		Pool: e.Pool.String(), Models: append(make([]string, 0, len(e.Models)), e.Models...), Enabled: e.Enabled,
+		Pool: e.Pool.String(), Models: promotion.NonNil(slices.Clone(e.Models)), Enabled: e.Enabled,
 		ModelPools: maps.Clone(orEmpty(e.ModelPools)), Aliases: maps.Clone(orEmpty(e.Aliases)), InitialRecoveryAttempts: promotion.ValueOf(e.InitialRecoveryAttempts),
 		ModelRewriting: promotion.ValueOf(e.ModelRewriting), CodexCLIIdentity: promotion.ValueOf(e.CodexCliIdentity), ChatToCodex: promotion.ValueOf(e.ChatToCodex), MessagesToCodex: promotion.ValueOf(e.MessagesToCodex),
 		ChatToAntigravity: promotion.ValueOf(e.ChatToAntigravity), AllowanceOrdering: promotion.ValueOf(e.AllowanceOrdering), PaidParticipation: promotion.ValueOf(e.PaidParticipation),
@@ -61,7 +62,7 @@ func widened(limit *int) *int64 {
 
 func (p Policy) input(project, slug, pool string, tools *codemode.ResearchTools, targets, fallback map[string]codemode.PaidTarget) routes.CodeRouteInput {
 	return routes.CodeRouteInput{
-		ProjectID: project, Slug: slug, PoolID: pool, Models: append(make([]string, 0, len(p.Models)), p.Models...), Enabled: p.Enabled,
+		ProjectID: project, Slug: slug, PoolID: pool, Models: promotion.NonNil(slices.Clone(p.Models)), Enabled: p.Enabled,
 		ModelPools: maps.Collect(maps.All(p.ModelPools)), Aliases: maps.Collect(maps.All(p.Aliases)), InitialRecoveryAttempts: p.InitialRecoveryAttempts,
 		ModelRewriting: p.ModelRewriting, CodexCLIIdentity: p.CodexCLIIdentity, ChatToCodex: p.ChatToCodex, MessagesToCodex: p.MessagesToCodex,
 		ChatToAntigravity: p.ChatToAntigravity, AllowanceOrdering: p.AllowanceOrdering, PaidParticipation: p.PaidParticipation,
@@ -114,7 +115,7 @@ func cloned(tools *codemode.ResearchTools) *codemode.ResearchTools {
 	if tools == nil {
 		return nil
 	}
-	return &codemode.ResearchTools{AccountID: tools.AccountID, Services: append(make([]string, 0, len(tools.Services)), tools.Services...)}
+	return &codemode.ResearchTools{AccountID: tools.AccountID, Services: promotion.NonNil(slices.Clone(tools.Services))}
 }
 
 func (p Policy) paidTargets() iter.Seq2[string, PaidTarget] {
@@ -148,7 +149,7 @@ func renderPolicy(p Policy) (contract.ConfigurationCodeRoutePolicy, error) {
 		return contract.ConfigurationCodeRoutePolicy{}, err
 	}
 	return contract.ConfigurationCodeRoutePolicy{
-		Pool: pool, Models: append(make([]string, 0, len(p.Models)), p.Models...), Enabled: p.Enabled,
+		Pool: pool, Models: promotion.NonNil(slices.Clone(p.Models)), Enabled: p.Enabled,
 		ModelPools: new(maps.Collect(maps.All(p.ModelPools))), Aliases: new(maps.Collect(maps.All(p.Aliases))), InitialRecoveryAttempts: new(p.InitialRecoveryAttempts),
 		ModelRewriting: new(p.ModelRewriting), CodexCliIdentity: new(p.CodexCLIIdentity), ChatToCodex: new(p.ChatToCodex), MessagesToCodex: new(p.MessagesToCodex),
 		ChatToAntigravity: new(p.ChatToAntigravity), AllowanceOrdering: new(p.AllowanceOrdering), PaidParticipation: new(p.PaidParticipation),
