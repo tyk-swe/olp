@@ -1,4 +1,8 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
+  import Dialog from '#lib/components/Dialog.svelte';
+  import EmptyState from '#lib/components/EmptyState.svelte';
+  import { notify } from '#lib/components/toasts.svelte.js';
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import { validRouteSlug } from '#lib/routeIdentity.js';
   import { currentBudgetLimit } from '../api-keys/budgetPresentation';
@@ -54,6 +58,7 @@
     'max_concurrency'
   ] as const;
   let createBusy = $state(false);
+  let creating = $state(false);
   let error = $state('');
   let notice = $state('');
 
@@ -174,7 +179,8 @@
       createDaily = '';
       createMonthly = '';
       createWeekly = '';
-      notice = 'Budget group created.';
+      creating = false;
+      notify('Budget group created');
       await queryClient.invalidateQueries(
         { queryKey: budgetGroupKeys.root },
         { throwOnError: true }
@@ -260,93 +266,111 @@
   }
 </script>
 
-<section class="card groups-panel" aria-labelledby="budget-groups-heading">
-  <p class="eyebrow">Shared budgets</p>
-  <h2 id="budget-groups-heading">Budget groups</h2>
-  <p class="section-help">
-    {#if services.limitsEnforced}Keys assigned to a group share its cost budget,
-      which counts the spend so far and the estimated cost of members' requests
-      still running, while keeping their own limits and history. Windows reset
-      in the installation budget timezone; unpriced attempts accrue no known
-      USD. Unsettled retained generations can block cost admission before their
-      spend is recorded.{:else}Groups save shared budget policy for future
-      enforcement. Spending is not restricted yet.{/if}
-  </p>
+<section class="groups-panel" aria-labelledby="budget-groups-heading">
+  <div class="toolbar">
+    <h2 id="budget-groups-heading" class="sr-only">Budget groups</h2>
+    <p class="section-help">
+      Keys in a group share one spending limit and keep their own rate limits.
+      {#if !services.limitsEnforced}Limits are saved but not enforced yet.{/if}
+    </p>
+    {#if canManage}<div class="page-actions">
+        <button
+          class="button button-primary"
+          type="button"
+          onclick={() => {
+            error = '';
+            creating = true;
+          }}>New group</button
+        >
+      </div>{/if}
+  </div>
 
-  {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
+  {#if error && !creating}<Callout tone="danger">{error}</Callout>{/if}
   {#if notice}<p class="section-help" role="status">{notice}</p>{/if}
 
-  {#if canManage}
-    <form class="create-form" onsubmit={submitCreate}>
-      <fieldset class="submission-fields" disabled={createBusy}>
-        <div class="form-grid">
-          <div class="form-field">
-            <label for="group-name">Group name</label><input
-              id="group-name"
-              bind:value={createName}
-              required
-            />
-          </div>
-          <ProjectScopeField id="group-project" bind:value={createProjectId} />
-          <div class="form-field">
-            <label for="group-template">Limit template</label><input
-              id="group-template"
-              bind:value={createTemplate}
-              maxlength="100"
-            />
-          </div>
-          {#each rateFields as field (field)}<div class="form-field">
-              <label for={`group-${field}`}>{field.replaceAll('_', ' ')}</label
-              ><input
-                id={`group-${field}`}
-                bind:value={createRates[field]}
-                inputmode="numeric"
+  {#if creating}
+    <Dialog
+      title="New budget group"
+      description="Set at least one limit, or reference a project limit template."
+      placement="side"
+      onClose={() => (creating = false)}
+    >
+      {#if error}<Callout tone="danger">{error}</Callout>{/if}
+      <form class="create-form" onsubmit={submitCreate}>
+        <fieldset class="submission-fields" disabled={createBusy}>
+          <div class="form-grid">
+            <div class="form-field">
+              <label for="group-name">Group name</label><input
+                id="group-name"
+                bind:value={createName}
+                required
               />
-            </div>{/each}
-          <div class="form-field">
-            <label for="group-daily">Daily cost limit</label><input
-              id="group-daily"
-              inputmode="decimal"
-              placeholder="10.00"
-              bind:value={createDaily}
+            </div>
+            <ProjectScopeField
+              id="group-project"
+              bind:value={createProjectId}
             />
+            <div class="form-field">
+              <label for="group-template">Limit template</label><input
+                id="group-template"
+                bind:value={createTemplate}
+                maxlength="100"
+              />
+            </div>
+            {#each rateFields as field (field)}<div class="form-field">
+                <label for={`group-${field}`}
+                  >{field.replaceAll('_', ' ')}</label
+                ><input
+                  id={`group-${field}`}
+                  bind:value={createRates[field]}
+                  inputmode="numeric"
+                />
+              </div>{/each}
+            <div class="form-field">
+              <label for="group-daily">Daily cost limit</label><input
+                id="group-daily"
+                inputmode="decimal"
+                placeholder="10.00"
+                bind:value={createDaily}
+              />
+            </div>
+            <div class="form-field">
+              <label for="group-weekly">Weekly cost limit</label><input
+                id="group-weekly"
+                inputmode="decimal"
+                placeholder="100.00"
+                bind:value={createWeekly}
+              />
+            </div>
+            <div class="form-field">
+              <label for="group-monthly">Monthly cost limit</label><input
+                id="group-monthly"
+                inputmode="decimal"
+                placeholder="100.00"
+                bind:value={createMonthly}
+              />
+            </div>
+            <div class="form-field">
+              <label for="group-basis">Budget basis</label><select
+                id="group-basis"
+                bind:value={createBasis}
+                ><option value="cost">Provider cost</option><option
+                  value="charge">Consumer charge</option
+                ></select
+              >
+            </div>
           </div>
-          <div class="form-field">
-            <label for="group-weekly">Weekly cost limit</label><input
-              id="group-weekly"
-              inputmode="decimal"
-              placeholder="100.00"
-              bind:value={createWeekly}
-            />
-          </div>
-          <div class="form-field">
-            <label for="group-monthly">Monthly cost limit</label><input
-              id="group-monthly"
-              inputmode="decimal"
-              placeholder="100.00"
-              bind:value={createMonthly}
-            />
-          </div>
-          <div class="form-field">
-            <label for="group-basis">Budget basis</label><select
-              id="group-basis"
-              bind:value={createBasis}
-              ><option value="cost">Provider cost</option><option value="charge"
-                >Consumer charge</option
-              ></select
+          <div class="form-actions">
+            <button
+              class="button button-primary"
+              type="submit"
+              disabled={createBusy || !createName.trim()}
+              >{createBusy ? 'Creating…' : 'Create group'}</button
             >
           </div>
-        </div>
-        <div class="form-actions">
-          <button
-            class="button button-primary"
-            type="submit"
-            disabled={createBusy || !createName.trim()}
-            >{createBusy ? 'Creating…' : 'Create group'}</button
-          >
-        </div>
-      </fieldset>
-    </form>
+        </fieldset>
+      </form>
+    </Dialog>
   {/if}
 
   {#if groups.isPending}<span class="inline-status" role="status"
@@ -358,9 +382,9 @@
         >Retry</button
       ></span
     >
-  {:else if !items.length}<p class="section-help">
-      No budget groups yet. Assign keys to a group from the key policy form.
-    </p>
+  {:else if !items.length}<EmptyState title="No budget groups yet"
+      >Create a group, then add API keys to it from each key's settings.</EmptyState
+    >
   {:else}
     <div class="table-scroll">
       <table class="data-table">

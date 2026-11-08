@@ -7,19 +7,20 @@
 
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
-  import { useQueryClient } from '@tanstack/svelte-query';
+  import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import { useRole } from '#lib/features/access/session/useRole.svelte.js';
   import {
     createApiKey,
+    getApiKey,
     updateApiKey,
     type ApiKey,
     type ApiKeySecret
   } from '#lib/features/access/api-keys/api.js';
   import ApiKeyInventory from '#lib/features/access/api-keys/ApiKeyInventory.svelte';
   import ApiKeyPolicyForm from '#lib/features/access/api-keys/ApiKeyPolicyForm.svelte';
-  import BudgetGroupsPanel from '#lib/features/access/budget-groups/BudgetGroupsPanel.svelte';
-  import NotificationsPanel from '#lib/features/access/notifications/NotificationsPanel.svelte';
+  import Callout from '#lib/components/Callout.svelte';
+  import { notify } from '#lib/components/toasts.svelte.js';
   import ApiKeySecretDialog from '#lib/features/access/api-keys/ApiKeySecretDialog.svelte';
   import type { ApiKeyListState } from '#lib/features/access/api-keys/apiKeyListState.js';
   import type { ApiKeyPolicyInput } from '#lib/features/access/api-keys/apiKeyPolicy.js';
@@ -34,9 +35,11 @@
 
   let {
     isNew = false,
+    keyId,
     listState = $bindable()
   }: {
     isNew?: boolean;
+    keyId?: string;
     listState: ApiKeyListState;
   } = $props();
 
@@ -48,10 +51,17 @@
   let policyDirty = $state(false);
   let policyBusy = $state(false);
   let submitError = $state('');
-  let notice = $state('');
   let secret = $state<ApiKeySecret | null>(null);
   let secretContext = $state<'created' | 'rotated'>('created');
   let preferredRoute = $state<string | undefined>();
+  const loaded = createQuery(() => ({
+    queryKey: [...apiKeyKeys.root, 'detail', keyId ?? ''] as const,
+    enabled: Boolean(keyId),
+    queryFn: ({ signal }) => getApiKey(keyId ?? '', signal)
+  }));
+  $effect(() => {
+    if (loaded.data && editing?.id !== loaded.data.id) edit(loaded.data);
+  });
   const isForm = $derived(isNew || editing !== null);
   const canChangeForm = $derived(
     canManage && (!editing || isApiKeyUsable(editing))
@@ -62,36 +72,36 @@
     preferredRoute = undefined;
     editing = null;
     policyDirty = policyBusy = false;
-    submitError = notice = busy = '';
+    submitError = busy = '';
   });
 
   function edit(key: ApiKey) {
     policyDirty = policyBusy = false;
     editing = key;
-    submitError = notice = '';
+    submitError = '';
   }
 
   function cancelEdit() {
     if (busy || policyBusy) return;
-    editing = null;
-    policyDirty = false;
-    submitError = '';
+    void goto(resolve('keys'));
   }
 
   async function submit(input: ApiKeyPolicyInput, route?: string) {
     if (!canManage || busy || policyDirty || policyBusy) return false;
     const isCurrent = captureOwner();
     busy = editing ? 'update' : 'create';
-    submitError = notice = '';
+    submitError = '';
     try {
       if (editing) {
         const keyName = editing.name;
         await updateApiKey(editing, input);
         if (!isCurrent()) return false;
-        editing = null;
-        notice = services.gatewayAvailable
-          ? `${keyName} policy updated. Gateways will converge on the new runtime generation.`
-          : `${keyName} policy saved.`;
+        notify(
+          services.gatewayAvailable
+            ? `Saved ${keyName}. Gateways pick up the change within a few seconds.`
+            : `Saved ${keyName}`
+        );
+        void goto(resolve('keys'));
       } else {
         const submission =
           createIntent.prepare<Parameters<typeof createApiKey>[0]>(input);
@@ -138,7 +148,7 @@
   function dismissSecret() {
     secret = null;
     preferredRoute = undefined;
-    if (isNew) void goto(resolve('api-keys'));
+    if (isNew) void goto(resolve('keys'));
   }
 </script>
 
@@ -153,7 +163,17 @@
   />
 {/if}
 
-{#if isForm}
+{#if keyId && loaded.isPending}
+  <div class="loading-state" role="status">Loading API key…</div>
+{:else if keyId && loaded.isError}
+  <Callout tone="danger" title="API key didn’t load">
+    {errorMessage(loaded.error)}
+    {#snippet actions()}<a
+        class="button button-secondary"
+        href={resolve('keys')}>All API keys</a
+      >{/snippet}
+  </Callout>
+{:else if isForm}
   <ApiKeyPolicyForm
     {editing}
     busy={busy || (policyBusy ? 'routing' : '')}
@@ -167,14 +187,10 @@
 {:else}
   <ApiKeyInventory
     bind:listState
-    {notice}
     {submitError}
     {canManage}
-    onEdit={edit}
     onSecret={showRotatedSecret}
   />
-  <BudgetGroupsPanel />
-  <NotificationsPanel />
 {/if}
 
 {#if editing && services.gatewayAvailable}<RoutingPolicyEditor

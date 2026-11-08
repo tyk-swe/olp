@@ -110,8 +110,7 @@
 <section class="stack" aria-labelledby="discounts-title">
   <div class="section-heading">
     <div>
-      <p class="eyebrow">Discounts</p>
-      <h2 id="discounts-title">Provider cost discounts</h2>
+      <h2 class="sr-only" id="discounts-title">Provider cost discounts</h2>
       <p class="section-description">
         Immutable multipliers on provider cost, newest scope winning. A scope
         ends when a new discount at multiplier 1 supersedes it.

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { confirmAction } from '#lib/components/confirm.js';
   import {
     useMutationIntent,
     usePrincipalLifetime
@@ -126,7 +127,15 @@
 
   async function revoke(credential: ProviderCredential) {
     if (refreshPending) return;
-    if (!confirm(`Revoke credential version ${credential.version}?`)) return;
+    if (
+      !(await confirmAction({
+        title: `Revoke credential version ${credential.version}?`,
+        body: 'Requests that still use this version will fail. You can’t undo this.',
+        confirmLabel: 'Revoke',
+        danger: true
+      }))
+    )
+      return;
     await run(`revoke-${credential.id}`, async (isCurrent) => {
       const submission = revokeProviderCredentialIntent.prepare(
         { providerId: current.id, credentialId: credential.id },

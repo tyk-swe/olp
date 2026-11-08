@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageHeader from '#lib/components/PageHeader.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
   import { useRole } from '#lib/features/access/session/useRole.svelte.js';
@@ -48,13 +49,8 @@
 </script>
 
 <svelte:head><title>Tool call · OpenLLMProxy</title></svelte:head>
-<a class="text-button" href={resolve('tool-calls')}>All tool calls</a>
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Agents</p>
-    <h1 class="page-title">Tool call</h1>
-  </div>
-</div>
+<a class="text-button" href={resolve('activity/tool-calls')}>All tool calls</a>
+<PageHeader title="Tool call" />
 {#if call.error}
   <p class="inline-problem" role="alert">{errorMessage(call.error)}</p>
 {:else if call.isPending}

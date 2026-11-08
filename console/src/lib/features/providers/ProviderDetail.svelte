@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageHeader from '#lib/components/PageHeader.svelte';
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import { goto } from '$app/navigation';
   import { deleteProvider } from './providers';
@@ -283,26 +284,12 @@
   }
 </script>
 
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Gateway · Provider</p>
-    <h1 class="page-title">
-      {snapshot.data?.provider?.name ?? 'Provider detail'}
-    </h1>
-    <p class="page-description">
-      Test identity, review models and capability evidence, and rotate
-      write-only credentials.
-    </p>
-    {#if snapshot.data?.provider}<p class="provider-meta">
-        Created by {snapshot.data?.provider.created_by_email ??
-          'a removed account'}
-      </p>{/if}
-  </div>
-
-  <a class="button button-secondary" href={resolve('providers')}
-    >All providers</a
-  >
-</div>
+<PageHeader
+  title={snapshot.data?.provider?.name ?? 'Provider'}
+  description={snapshot.data?.provider
+    ? `Added by ${snapshot.data.provider.created_by_email ?? 'a removed account'}`
+    : undefined}
+/>
 {#if saveRefreshError}
   <div class="inline-problem" role="alert">
     <p>Draft saved, but refreshing failed. {saveRefreshError}</p>
@@ -490,11 +477,6 @@
     color: var(--warning);
   }
   .pending-banner span {
-    color: var(--foreground-muted);
-    font-size: var(--text-body-sm);
-  }
-  .provider-meta {
-    margin: 0.35rem 0 0;
     color: var(--foreground-muted);
     font-size: var(--text-body-sm);
   }

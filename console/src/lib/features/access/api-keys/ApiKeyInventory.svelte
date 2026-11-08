@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { confirmAction } from '#lib/components/confirm.js';
+  import PageHeader from '#lib/components/PageHeader.svelte';
   import {
     useMutationIntent,
     usePrincipalLifetime
@@ -43,17 +45,13 @@
 
   let {
     listState = $bindable(),
-    notice,
     submitError,
     canManage,
-    onEdit,
     onSecret
   }: {
     listState: ApiKeyListState;
-    notice: string;
     submitError: string;
     canManage: boolean;
-    onEdit: (key: ApiKey) => void;
     onSecret: (secret: ApiKeySecret, preferredRoute?: string) => void;
   } = $props();
 
@@ -105,10 +103,10 @@
     if (id) url.searchParams.set('created_by', id);
     else url.searchParams.delete('created_by');
     const target = url.search
-      ? resolve(`api-keys?${url.searchParams}${url.hash}`)
+      ? resolve(`keys?${url.searchParams}${url.hash}`)
       : url.hash
-        ? resolve(`api-keys#${url.hash.slice(1)}`)
-        : resolve('api-keys');
+        ? resolve(`keys#${url.hash.slice(1)}`)
+        : resolve('keys');
 
     await goto(target, { reset: false });
   }
@@ -146,7 +144,15 @@
   }
 
   async function revoke(key: ApiKey) {
-    if (!confirm(`Revoke “${key.name}”? This cannot be undone.`)) return;
+    if (
+      !(await confirmAction({
+        title: `Revoke ${key.name}?`,
+        body: 'Requests using this key start failing right away. You can’t undo this.',
+        confirmLabel: 'Revoke key',
+        danger: true
+      }))
+    )
+      return;
     const isCurrent = captureOwner();
     busy = `revoke-${key.id}`;
     mutationError = '';
@@ -166,20 +172,17 @@
   }
 </script>
 
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Access</p>
-    <h1 class="page-title">API keys</h1>
-    <p class="page-description">
-      Manage client access with scoped API keys, route permissions, and usage
-      limits.
-    </p>
-  </div>
-  {#if canManage}<a class="button button-primary" href={resolve('api-keys/new')}
-      >Create key <NavIcon name="arrow" /></a
-    >
-  {/if}
-</div>
+<PageHeader
+  title="API keys"
+  description="Manage client access with scoped API keys, route permissions, and usage limits."
+>
+  {#snippet actions()}
+    {#if canManage}<a class="button button-primary" href={resolve('keys/new')}
+        >Create key <NavIcon name="arrow" /></a
+      >
+    {/if}
+  {/snippet}
+</PageHeader>
 {#if !services.limitsEnforced}<p class="muted" role="status">
     Limit and budget policies are saved but not enforced yet.
   </p>{/if}
@@ -191,7 +194,6 @@
 {#if submitError || mutationError}<div class="inline-problem" role="alert">
     {submitError || mutationError}
   </div>{/if}
-{#if notice}<div class="success-message" role="status">{notice}</div>{/if}
 
 <form
   class="card issuer-filter"
@@ -255,7 +257,7 @@
         >{/if}
       {#if canManage && !createdBy}<a
           class="button button-primary"
-          href={resolve('api-keys/new')}>Create first key</a
+          href={resolve('keys/new')}>Create first key</a
         >
       {/if}
     </div>
@@ -376,7 +378,7 @@
             </td>
             <td>
               <a
-                href={`${resolve('api-keys')}?created_by=${key.created_by}`}
+                href={`${resolve('keys')}?created_by=${key.created_by}`}
                 aria-label={`Review API keys issued by ${key.created_by_email}`}
                 >{key.created_by_email}</a
               ><br /><small>{formatDate(key.created_at)}</small></td
@@ -390,14 +392,12 @@
                   >
                 {/if}
 
-                <button
+                <a
                   class="button button-secondary"
-                  type="button"
-                  onclick={() => onEdit(key)}
-                  disabled={Boolean(busy)}
+                  href={resolve(`keys/${key.id}`)}
                   >{canManage && usable && !key.workload_issuer_id
                     ? 'Edit'
-                    : 'View'}</button
+                    : 'View'}</a
                 >{#if canManage && !key.revoked_at}{#if usable && !key.workload_issuer_id}<button
                       class="button button-secondary"
                       type="button"

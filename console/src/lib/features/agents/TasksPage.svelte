@@ -30,15 +30,6 @@
 </script>
 
 <svelte:head><title>A2A tasks · OpenLLMProxy</title></svelte:head>
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Agents</p>
-    <h1 class="page-title">A2A tasks</h1>
-    <p class="page-description">
-      Remote task states and callback counts for your projects
-    </p>
-  </div>
-</div>
 <form
   class="filter-bar"
   onsubmit={(event) => {
@@ -81,7 +72,7 @@
         {#each tasks.data.items as task (task.id)}
           <tr>
             <td
-              ><a href={resolve(`a2a-tasks/${task.id}`)}
+              ><a href={resolve(`activity/tasks/${task.id}`)}
                 ><code>{task.id}</code></a
               ></td
             >

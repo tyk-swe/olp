@@ -71,16 +71,6 @@
 </script>
 
 <svelte:head><title>SCIM provisioning · OpenLLMProxy</title></svelte:head>
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Access</p>
-    <h1 class="page-title">SCIM provisioning</h1>
-    <p class="page-description">
-      Synchronize users and groups from your identity directory while preserving
-      direct project memberships.
-    </p>
-  </div>
-</div>
 <section class="card setup" aria-labelledby="scim-setup">
   <h2 id="scim-setup">Connect a directory</h2>
   <p>
@@ -88,8 +78,8 @@
     URL. Create an installation-wide management token with the
     <code>access</code>
     scope in
-    <a href={resolve('access')}>Access → Tokens</a>
-    , and supply it as the Bearer credential in your directory.
+    <a href={resolve('identity/tokens')}>Management tokens</a>, and supply it as
+    the Bearer credential in your directory.
   </p>
   <p>
     Discovery is available at <code>/ServiceProviderConfig</code>,

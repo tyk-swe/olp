@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { confirmAction } from '#lib/components/confirm.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import {
@@ -159,9 +160,11 @@
     if (
       busy ||
       !allowed ||
-      !confirm(
-        `Publish the current draft for ${route.slug}? Provider connections will be captured without an inference probe.${route.codex_cli_identity ? ' Codex CLI identity compatibility will fill Originator=codex_cli_rs only when all supplied Originator values are absent or blank on Codex subscription HTTP and WebSocket requests. Explicit identity headers, User-Agent, prompts, tools, reasoning and state are preserved. This compatibility identity may violate provider terms and risk account suspension.' : ' Codex CLI identity compatibility is disabled. Identity headers and prompts are preserved.'}`
-      )
+      !(await confirmAction({
+        title: `Publish ${route.slug}?`,
+        body: `Provider connections are captured without a test request.${route.codex_cli_identity ? ' Codex CLI identity compatibility fills Originator=codex_cli_rs only when every supplied Originator value is absent or blank on Codex subscription HTTP and WebSocket requests. Explicit identity headers, User-Agent, prompts, tools, reasoning and state are kept. This may break the provider’s terms and risk account suspension.' : ' Codex CLI identity compatibility is off. Identity headers and prompts are kept.'}`,
+        confirmLabel: 'Publish'
+      }))
     )
       return;
     busy = true;

@@ -44,15 +44,6 @@
 </script>
 
 <svelte:head><title>Delegations · OpenLLMProxy</title></svelte:head>
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Agents</p>
-    <h1 class="page-title">Delegations</h1>
-    <p class="page-description">
-      Delegating principals, agent principals and their shared budgets
-    </p>
-  </div>
-</div>
 <form
   class="filter-bar"
   onsubmit={(event) => {

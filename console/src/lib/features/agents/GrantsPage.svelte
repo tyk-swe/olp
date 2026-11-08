@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageHeader from '#lib/components/PageHeader.svelte';
   import { formatDate } from '#lib/format.js';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { onMount } from 'svelte';
@@ -429,16 +430,10 @@
 />
 
 <svelte:head><title>Personal tool grants · OpenLLMProxy</title></svelte:head>
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Agents</p>
-    <h1 class="page-title">Personal tool grants</h1>
-    <p class="page-description">
-      Grant standing is bound to one individual and the resource's authorization
-      settings.
-    </p>
-  </div>
-</div>
+<PageHeader
+  title="My connections"
+  description="Grant standing is bound to one individual and the resource's authorization settings."
+/>
 <DelegationConsent />
 {#if $state.error}<p class="inline-problem" role="alert">{$state.error}</p>{/if}
 {#if $state.message}<p class="success-message" role="status">

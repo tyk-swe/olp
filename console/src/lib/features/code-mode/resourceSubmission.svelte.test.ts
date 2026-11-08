@@ -6,6 +6,9 @@ import { json, serve } from '#lib/management/test/transport.js';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import AccountEditor from './AccountEditor.svelte';
 import { useResourceSubmission } from './resourceSubmission.svelte';
+import { confirmAction } from '#lib/components/confirm.js';
+
+vi.mock('#lib/components/confirm.js', () => ({ confirmAction: vi.fn() }));
 
 vi.mock('$app/navigation', () => ({ beforeNavigate: vi.fn() }));
 
@@ -202,17 +205,15 @@ describe('resource submissions', () => {
   it('starts a different request only after confirming an uncertain submission', async () => {
     const persist = vi.fn<Options['persist']>(async () => undefined);
     persist.mockRejectedValueOnce(new TypeError('Network error'));
-    const confirm = vi
-      .fn()
-      .mockReturnValueOnce(false)
-      .mockReturnValueOnce(true);
-    vi.stubGlobal('confirm', confirm);
+    vi.mocked(confirmAction)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
     const { state } = renderSubmission({ persist });
     await state.save(submit());
 
-    state.editRequest();
+    await state.editRequest();
     expect(state.submitted).toBe(true);
-    state.editRequest();
+    await state.editRequest();
     expect(state.submitted).toBe(false);
     expect(state.error).toBe('');
     await state.save(submit());

@@ -14,7 +14,6 @@
   }
 </script>
 
-<h3>Deliveries</h3>
 {#if deliveries.isPending}<span class="inline-status" role="status"
     >Loading deliveries…</span
   >

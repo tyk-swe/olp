@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageHeader from '#lib/components/PageHeader.svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import CursorPagination from '#lib/shell/CursorPagination.svelte';
   import {
@@ -99,22 +100,19 @@
 
 <svelte:head><title>Provider resources · OpenLLMProxy</title></svelte:head>
 
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Operations</p>
-    <h1 class="page-title">Provider resources</h1>
-    <p class="page-description">
-      Inspect resource ownership and settlement, or manage resources with an
-      inference API key.
-    </p>
-  </div>
-  <button
-    class="button button-secondary"
-    type="button"
-    onclick={() => resources.refetch()}
-    disabled={resources.isFetching}>Refresh</button
-  >
-</div>
+<PageHeader
+  title="Provider resources"
+  description="Inspect resource ownership and settlement, or manage resources with an inference API key."
+>
+  {#snippet actions()}
+    <button
+      class="button button-secondary"
+      type="button"
+      onclick={() => resources.refetch()}
+      disabled={resources.isFetching}>Refresh</button
+    >
+  {/snippet}
+</PageHeader>
 <AgentResources />
 <NativeResources />
 <RetrievalBindings />

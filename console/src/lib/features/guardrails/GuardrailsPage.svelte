@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import CredentialsPanel from './CredentialsPanel.svelte';
   import AttachmentControls from './AttachmentControls.svelte';
@@ -134,7 +135,10 @@
     text = '';
     result = null;
   });
-  let tab = $state('Definitions');
+  let {
+    tab
+  }: { tab: 'checks' | 'policies' | 'attachments' | 'credentials' | 'try' } =
+    $props();
   let busy = $state(false);
   let error = $state('');
   let notice = $state('');
@@ -322,42 +326,18 @@
 </script>
 
 <svelte:head><title>Guardrails · OpenLLMProxy</title></svelte:head>
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Gateway</p>
-    <h1 class="page-title">Guardrails</h1>
-    <p class="page-description">
-      Define safeguards, pin policy revisions, and apply them across your
-      gateway.
-    </p>
-  </div>
-</div>
-<nav aria-label="Guardrail sections" class="page-tabs">
-  {#each ['Definitions', 'Policies', 'Attachments', 'Credentials', 'Playground'] as section (section)}
-    <button
-      type="button"
-      aria-current={tab === section ? 'page' : undefined}
-      onclick={() => {
-        tab = section;
-        error = notice = '';
-      }}>{section}</button
-    >
-  {/each}
-</nav>
-{#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
-{#if notice}<p role="status">{notice}</p>{/if}
+{#if error}<Callout tone="danger">{error}</Callout>{/if}
+{#if notice}<Callout tone="success">{notice}</Callout>{/if}
 {#if definitions.isPending || policies.isPending || projects.isPending}
   <p role="status">Loading guardrail inventory…</p>
 {/if}
-{#if definitions.isError || policies.isError || attachments.isError || projects.isError}<p
-    role="alert"
-  >
-    Guardrails could not be loaded. Reload to try again.
-  </p>{/if}
+{#if definitions.isError || policies.isError || attachments.isError || projects.isError}<Callout
+    tone="danger">Guardrails didn’t load. Reload the page to try again.</Callout
+  >{/if}
 
-{#if tab === 'Definitions'}
+{#if tab === 'checks'}
   <section class="card stack-card">
-    <h2>Definitions</h2>
+    <h2>Checks</h2>
     <ul>
       {#each definitions.data?.items ?? [] as value (value.id)}<li>
           <button class="button button-secondary" onclick={() => edit(value)}
@@ -477,7 +457,7 @@
         creatingCredential = false;
       }}
     />{/if}
-{:else if tab === 'Policies'}
+{:else if tab === 'policies'}
   <section class="card stack-card">
     <h2>Ordered policies</h2>
     <ul>
@@ -602,7 +582,7 @@
           >{/if}
       </form>{/if}
   </section>
-{:else if tab === 'Attachments'}
+{:else if tab === 'attachments'}
   <section class="card stack-card">
     <h2>Inherited safeguards</h2>
     <p>
@@ -657,11 +637,11 @@
         >
       </form>{/if}
   </section>
-{:else if tab === 'Credentials'}
+{:else if tab === 'credentials'}
   <CredentialsPanel projects={projects.data?.items ?? []} />
 {:else}
   <section class="card stack-card">
-    <h2>Guardrail playground</h2>
+    <h2>Try a policy</h2>
     <p>
       Test a policy without saving the content you enter. External guardrails
       send it to their configured endpoints.

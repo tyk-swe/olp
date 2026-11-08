@@ -1,26 +1,18 @@
 <script lang="ts">
-  import BrandingPanel from './BrandingPanel.svelte';
-  import AggregateBudgetPanel from '#lib/features/access/budgets/AggregateBudgetPanel.svelte';
-  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
-  const services = useServiceCapabilities();
-  import RoutingPolicyEditor from '#lib/features/routes/RoutingPolicyEditor.svelte';
-  import ConfigurationPanel from '#lib/features/configuration/ConfigurationPanel.svelte';
-  import PricingSourcesPanel from '#lib/features/usage/PricingSourcesPanel.svelte';
-  import { settingsKeys } from '#lib/features/settings/settingsKeys.js';
-  import PricingRevisionsPanel from '#lib/features/usage/PricingRevisionsPanel.svelte';
-  import DiscountsPanel from '#lib/features/usage/DiscountsPanel.svelte';
-  import RateCardsPanel from '#lib/features/usage/RateCardsPanel.svelte';
-  import ObservabilityPanel from '#lib/features/observability/ObservabilityPanel.svelte';
-
-  import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import BrandingPanel from './BrandingPanel.svelte';
+  import Callout from '#lib/components/Callout.svelte';
+  import EmptyState from '#lib/components/EmptyState.svelte';
+  import { notify } from '#lib/components/toasts.svelte.js';
+  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import { sessionKeys } from '#lib/features/access/session/sessionKeys.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
   import {
     listSettings,
     updateSetting,
     type Setting
   } from '#lib/features/settings/api.js';
-  import { formatDate, stateLabel } from '#lib/format.js';
+  import { settingsKeys } from '#lib/features/settings/settingsKeys.js';
   import {
     LIMITS_OUTAGE_POLICIES,
     RETENTION_MAX_DAYS,
@@ -28,122 +20,136 @@
     isLimitsOutagePolicy,
     isRetentionKey
   } from '#lib/features/settings/validation.js';
+  import { formatDate, stateLabel } from '#lib/format.js';
   import {
     applyServerFieldErrors,
     errorMessage,
     isEtagMismatch
   } from '#lib/management/http.js';
-  import { sessionKeys } from '#lib/features/access/session/sessionKeys.js';
-  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+
+  type View = 'general' | 'security' | 'retention';
+  let { view }: { view: View } = $props();
+
+  const LIMITS_OUTAGE_KEY = 'limits.valkey_unavailable';
+  const SIGN_IN_KEYS = ['auth.local_login_enabled', 'auth.mfa_required'];
+  const OUTAGE_LABELS: Record<(typeof LIMITS_OUTAGE_POLICIES)[number], string> =
+    {
+      fail_closed: 'Reject the request',
+      fail_open: 'Let the request through without limits'
+    };
 
   const queryClient = useQueryClient();
   const access = useRole();
-  const canEditSettings = $derived(access.can('settings.update'));
-  let savingPrice = $state(false);
-  let values = $state<Record<string, string>>({});
-  let editEtags = $state<Record<string, string>>({});
-  let conflictKey = $state('');
-  function setValue(setting: Setting, value: string) {
-    editEtags[setting.key] ??= setting.etag;
-    values[setting.key] = value;
-  }
-  async function reloadConflict() {
-    const result = await settings.refetch();
-    if (result.isSuccess) {
-      delete values[conflictKey];
-      delete editEtags[conflictKey];
-      delete fieldErrors[conflictKey];
-      conflictKey = error = '';
-    }
-  }
-  let fieldErrors = $state<Record<string, string>>({});
-  let savingKey = $state('');
-  let status = $state('');
-  let error = $state('');
-
+  const services = useServiceCapabilities();
   const settings = createQuery(() => ({
     queryKey: settingsKeys.all(),
     queryFn: () => listSettings()
   }));
 
-  function settingLabel(key: string) {
+  let drafts = $state<Record<string, { value: string; etag: string }>>({});
+  let fieldErrors = $state<Record<string, string>>({});
+  let savingKey = $state('');
+  let conflictKey = $state('');
+  let problem = $state('');
+
+  const viewOf = (key: string): View =>
+    SIGN_IN_KEYS.includes(key)
+      ? 'security'
+      : isRetentionKey(key)
+        ? 'retention'
+        : 'general';
+  const shown = $derived(
+    (settings.data ?? []).filter((setting) => viewOf(setting.key) === view)
+  );
+  const editable = (setting: Setting) =>
+    access.can('settings.update') &&
+    (!SIGN_IN_KEYS.includes(setting.key) || access.can('users.manage'));
+  const valueOf = (setting: Setting) =>
+    drafts[setting.key]?.value ?? setting.value;
+
+  function label(key: string) {
     switch (key) {
+      case 'auth.local_login_enabled':
+        return 'Email and password sign-in';
       case 'auth.mfa_required':
-        return 'Require local multi-factor authentication';
+        return 'Require two-factor sign-in';
       case 'budgets.time_zone':
         return 'Budget time zone';
-      case 'auth.local_login_enabled':
-        return 'Local password sign-in';
-      case 'limits.valkey_unavailable':
-        return 'Limit service outage policy';
+      case LIMITS_OUTAGE_KEY:
+        return 'When rate limits can’t be checked';
       case 'retention.audit_days':
-        return 'Audit retention (days)';
+        return 'Keep audit log for';
       case 'retention.requests_days':
-        return 'Request retention (days)';
+        return 'Keep request details for';
       case 'retention.usage_days':
-        return 'Usage retention (days)';
+        return 'Keep usage details for';
     }
-    return stateLabel(key).replace(/\b\w/g, (character) =>
+    return stateLabel(key).replace(/^\w/, (character) =>
       character.toUpperCase()
     );
   }
 
-  const LIMITS_OUTAGE_KEY = 'limits.valkey_unavailable';
-
-  function settingHelp(key: string) {
-    if (key === 'auth.mfa_required')
-      return 'Require an authenticator app or security key before a local session is created. Existing enrolled members always verify a second factor. Only an owner can change this; linked identity sign-in follows the identity provider policy.';
-    if (key === 'budgets.time_zone')
-      return 'IANA name, such as America/New_York. Each active day, Monday-based week and month finishes before adopting the new zone. Changing this setting never resets current spend.';
-    if (key === 'auth.local_login_enabled')
-      return 'Allow members to sign in with local passwords. Only an owner can change this; keep a usable owner sign-in method.';
-    if (key === LIMITS_OUTAGE_KEY && !services.limitsEnforced)
-      return 'Saved outage policy for future limit enforcement. No request limits are enforced yet.';
-    if (isRetentionKey(key) && !services.retentionEnforced)
-      return 'Saved retention policy. Automatic record cleanup is not enabled yet.';
-    if (key === LIMITS_OUTAGE_KEY)
-      return 'What rate/concurrency-only API keys get while Valkey is unreachable: fail_closed rejects them with 503; fail_open bypasses those limits and counts olp_limits_fail_open_total. Budgeted keys always fail closed. Gateways apply a change within 15 seconds.';
+  function help(key: string) {
+    switch (key) {
+      case 'auth.local_login_enabled':
+        return 'Members can sign in with a password set in this console. Keep at least one owner able to sign in before turning this off. Only owners can change it.';
+      case 'auth.mfa_required':
+        return 'Password sign-ins must also use an authenticator app or security key. Single sign-on follows your identity provider instead. Only owners can change it.';
+      case 'budgets.time_zone':
+        return 'Daily, weekly and monthly budgets reset at midnight in this zone, for example America/New_York. Changing it never resets current spend.';
+      case LIMITS_OUTAGE_KEY:
+        return services.limitsEnforced
+          ? 'Applies to keys with rate or concurrency limits only. Keys with a budget are always rejected. Gateways pick up a change within 15 seconds.'
+          : 'Saved for later. Request limits aren’t enforced on this installation yet.';
+    }
     if (isRetentionKey(key))
-      return 'Number of days before detailed records are removed; hourly aggregates remain retained. Must be a whole number of days between 1 and 3650.';
-    return 'Installation setting stored transactionally in PostgreSQL.';
+      return services.retentionEnforced
+        ? `Older records are deleted. Hourly totals are always kept. Between ${RETENTION_MIN_DAYS} and ${RETENTION_MAX_DAYS} days.`
+        : 'Saved for later. Automatic cleanup isn’t enabled on this installation yet.';
+    return '';
   }
 
-  async function save(setting: Setting) {
-    if (
-      !canEditSettings ||
-      savingKey ||
-      savingPrice ||
-      ((setting.key === 'auth.local_login_enabled' ||
-        setting.key === 'auth.mfa_required') &&
-        !access.can('users.manage'))
-    )
-      return;
+  function edit(setting: Setting, value: string) {
+    drafts[setting.key] = {
+      value,
+      etag: drafts[setting.key]?.etag ?? setting.etag
+    };
+  }
 
-    const submittedValue = values[setting.key] ?? setting.value;
+  function discard(key: string) {
+    delete drafts[key];
+    delete fieldErrors[key];
+  }
+
+  async function reloadConflict() {
+    const result = await settings.refetch();
+    if (!result.isSuccess) return;
+    discard(conflictKey);
+    conflictKey = problem = '';
+  }
+
+  async function save(event: SubmitEvent, setting: Setting) {
+    event.preventDefault();
+    const draft = drafts[setting.key];
+    if (!draft || !editable(setting) || savingKey) return;
     savingKey = setting.key;
-    status = error = '';
+    problem = '';
     delete fieldErrors[setting.key];
     try {
       const updated = await updateSetting(
-        { ...setting, etag: editEtags[setting.key] ?? setting.etag },
-        submittedValue
+        { ...setting, etag: draft.etag },
+        draft.value
       );
-
       queryClient.setQueryData<Setting[]>(settingsKeys.all(), (current) =>
         current?.map((item) => (item.key === updated.key ? updated : item))
       );
-
-      if ((values[setting.key] ?? setting.value) === submittedValue) {
-        delete values[setting.key];
-        delete editEtags[setting.key];
-      } else {
-        editEtags[setting.key] = updated.etag;
-      }
+      if (drafts[setting.key]?.value === draft.value)
+        delete drafts[setting.key];
       if (setting.key === 'auth.local_login_enabled')
         await queryClient.invalidateQueries({
           queryKey: sessionKeys.serviceCapabilities
         });
-      status = `${settingLabel(setting.key)} saved.`;
+      notify(`${label(setting.key)} saved`);
     } catch (cause) {
       if (isEtagMismatch(cause)) conflictKey = setting.key;
       const fields = applyServerFieldErrors(cause, {
@@ -151,7 +157,7 @@
         value: 'value'
       });
       if (fields.value) fieldErrors[setting.key] = fields.value;
-      else error = errorMessage(cause);
+      else problem = errorMessage(cause);
     } finally {
       savingKey = '';
     }
@@ -160,279 +166,208 @@
 
 <svelte:head><title>Settings · OpenLLMProxy</title></svelte:head>
 
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Installation</p>
-    <h1 class="page-title">Settings</h1>
-    <p class="page-description">
-      {services.gatewayAvailable
-        ? 'Retention, installation defaults, and versioned pricing.'
-        : 'Installation access and saved policies.'} Personal details live in your
-      profile.
-    </p>
-  </div>
+{#if view === 'general'}<BrandingPanel />{/if}
 
-  <a class="button button-secondary" href={resolve('settings/profile')}
-    >Personal profile</a
+{#if view === 'security' && services.managementNetworkRestricted}
+  <Callout tone="info"
+    >This console only accepts connections from networks set in the deployment
+    configuration. Change that list in the deployment, not here.</Callout
   >
-</div>
+{/if}
 
-{#if status}<p class="success-message" role="status">{status}</p>{/if}
-{#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
-{#if conflictKey}<button
-    class="button button-secondary"
-    onclick={reloadConflict}
-    >Discard this edit and reload the current setting</button
-  >{/if}
+{#if conflictKey}
+  <Callout tone="warning" title="Someone else changed this setting">
+    Reload to see their value, then make your change again.
+    {#snippet actions()}<button
+        class="button button-secondary"
+        type="button"
+        onclick={reloadConflict}>Reload</button
+      >{/snippet}
+  </Callout>
+{/if}
+{#if problem}<Callout tone="danger">{problem}</Callout>{/if}
 
-<BrandingPanel />
-
-<section class="settings-section" aria-labelledby="installation-title">
-  <div class="section-heading">
-    <div>
-      <p class="eyebrow">Configuration</p>
-      <h2 id="installation-title">Installation defaults</h2>
-    </div>
-  </div>
-  {#if services.managementNetworkRestricted}
-    <p class="notice">
-      Management access is restricted to client networks configured by the
-      deployment. Update the deployment configuration to change those networks.
-    </p>
-  {/if}
-  {#if settings.isPending}<div class="loading-state" role="status">
-      Loading settings…
-    </div>
-  {:else if settings.isError}<div class="inline-problem" role="alert">
-      {errorMessage(settings.error)}
-      <button class="text-button" onclick={() => settings.refetch()}
-        >Try again</button
-      >
-    </div>
-  {:else if settings.data?.length === 0}<div class="card empty-state">
-      No editable installation settings are registered.
-    </div>
-  {:else}{#if !canEditSettings}<ReadOnlyNote
-        >Your role can view installation settings but not change them.</ReadOnlyNote
-      >{/if}
-    <div class="settings-list">
-      {#each settings.data ?? [] as setting (setting.key)}{@const fieldProblem =
-          fieldErrors[setting.key]}
-        <article class="card setting-row">
-          <div>
-            <label for={`setting-${setting.key}`}
-              >{settingLabel(setting.key)}</label
+{#if settings.isPending}
+  <div class="loading-state" role="status">Loading settings…</div>
+{:else if settings.isError}
+  <Callout tone="danger" title="Settings didn’t load">
+    {errorMessage(settings.error)}
+    {#snippet actions()}<button
+        class="button button-secondary"
+        type="button"
+        onclick={() => settings.refetch()}>Try again</button
+      >{/snippet}
+  </Callout>
+{:else if shown.length === 0}
+  <EmptyState title="No settings here yet" />
+{:else}
+  <div class="settings card">
+    {#each shown as setting (setting.key)}
+      {@const id = `setting-${setting.key}`}
+      {@const fieldError = fieldErrors[setting.key]}
+      {@const dirty = valueOf(setting) !== setting.value}
+      <form class="row" onsubmit={(event) => save(event, setting)}>
+        <div class="text">
+          <label for={id}>{label(setting.key)}</label>
+          {#if help(setting.key)}<p id="{id}-help">{help(setting.key)}</p>{/if}
+          {#if setting.calendar}
+            <ul>
+              {#each setting.calendar as window (window.window_kind)}
+                <li>
+                  {stateLabel(window.window_kind)} budgets use {window.time_zone}
+                  until {formatDate(
+                    window.ends_at
+                  )}{#if window.pending_time_zone}, then {window.pending_time_zone}
+                    from {formatDate(window.effective_at)}{/if}
+                </li>
+              {/each}
+            </ul>
+          {/if}
+          <small
+            >Last changed {formatDate(setting.updated_at)} by {setting.updated_by}</small
+          >
+        </div>
+        <div class="control">
+          {#if SIGN_IN_KEYS.includes(setting.key)}
+            <select
+              {id}
+              value={valueOf(setting)}
+              disabled={!editable(setting)}
+              aria-describedby="{id}-help"
+              onchange={(event) => edit(setting, event.currentTarget.value)}
             >
-            <p>{settingHelp(setting.key)}</p>
-            {#if setting.calendar}
-              <ul>
-                {#each setting.calendar as window (window.window_kind)}<li>
-                    {stateLabel(window.window_kind)}: {window.time_zone}, ends {formatDate(
-                      window.ends_at
-                    )}{#if window.pending_time_zone}; {window.pending_time_zone} takes
-                      effect {formatDate(window.effective_at)}{/if}
-                  </li>{/each}
-              </ul>
-            {/if}
-            <small
-              >Updated {formatDate(setting.updated_at)} by
-              <span class="mono">{setting.updated_by}</span></small
+              <option value="true">On</option>
+              <option value="false">Off</option>
+            </select>
+          {:else if setting.key === LIMITS_OUTAGE_KEY}
+            <select
+              {id}
+              value={isLimitsOutagePolicy(valueOf(setting))
+                ? valueOf(setting)
+                : 'fail_closed'}
+              disabled={!editable(setting)}
+              aria-describedby="{id}-help"
+              aria-invalid={fieldError ? 'true' : undefined}
+              onchange={(event) => edit(setting, event.currentTarget.value)}
             >
-          </div>
-          <div class="setting-control">
-            {#if setting.key === 'auth.local_login_enabled' || setting.key === 'auth.mfa_required'}<select
-                id={`setting-${setting.key}`}
-                value={values[setting.key] ?? setting.value}
-                onchange={(event) =>
-                  setValue(setting, event.currentTarget.value)}
-                disabled={!access.can('users.manage')}
-              >
-                <option value="true">Enabled</option><option value="false"
-                  >Disabled</option
-                >
-              </select>
-            {:else if setting.key === LIMITS_OUTAGE_KEY}<select
-                id={`setting-${setting.key}`}
-                value={isLimitsOutagePolicy(
-                  values[setting.key] ?? setting.value
-                )
-                  ? (values[setting.key] ?? setting.value)
-                  : 'fail_closed'}
-                onchange={(event) =>
-                  setValue(setting, event.currentTarget.value)}
-                disabled={!canEditSettings}
-                aria-invalid={fieldProblem ? 'true' : undefined}
-                aria-describedby={fieldProblem
-                  ? `setting-${setting.key}-error`
-                  : undefined}
-                >{#each LIMITS_OUTAGE_POLICIES as policy (policy)}<option
-                    value={policy}>{policy}</option
-                  >{/each}</select
-              >{:else if isRetentionKey(setting.key)}<input
-                id={`setting-${setting.key}`}
+              {#each LIMITS_OUTAGE_POLICIES as policy (policy)}
+                <option value={policy}>{OUTAGE_LABELS[policy]}</option>
+              {/each}
+            </select>
+          {:else if isRetentionKey(setting.key)}
+            <span class="suffix">
+              <input
+                {id}
                 type="number"
                 inputmode="numeric"
                 min={RETENTION_MIN_DAYS}
                 max={RETENTION_MAX_DAYS}
                 step="1"
-                value={values[setting.key] ?? setting.value}
-                oninput={(event) =>
-                  setValue(setting, event.currentTarget.value)}
-                readonly={!canEditSettings}
-                aria-invalid={fieldProblem ? 'true' : undefined}
-                aria-describedby={fieldProblem
-                  ? `setting-${setting.key}-error`
-                  : undefined}
-              />{:else}<input
-                id={`setting-${setting.key}`}
-                value={values[setting.key] ?? setting.value}
-                oninput={(event) =>
-                  setValue(setting, event.currentTarget.value)}
-                readonly={!canEditSettings}
-                aria-invalid={fieldProblem ? 'true' : undefined}
-                aria-describedby={fieldProblem
-                  ? `setting-${setting.key}-error`
-                  : undefined}
-              />{/if}<button
-              class="button button-secondary"
-              type="button"
-              onclick={() => save(setting)}
-              disabled={!canEditSettings ||
-                ((setting.key === 'auth.local_login_enabled' ||
-                  setting.key === 'auth.mfa_required') &&
-                  !access.can('users.manage')) ||
-                Boolean(savingKey) ||
-                savingPrice ||
-                (values[setting.key] ?? setting.value) === setting.value}
-              >{savingKey === setting.key ? 'Saving…' : 'Save'}</button
-            >
-
-            {#if fieldProblem}
-              <small
-                class="field-error"
-                id={`setting-${setting.key}-error`}
-                role="alert">{fieldProblem}</small
-              >{/if}
-          </div>
-        </article>{/each}
-    </div>{/if}
-</section>
-
-{#if services.gatewayAvailable}
-  <PricingSourcesPanel />
+                value={valueOf(setting)}
+                readonly={!editable(setting)}
+                aria-describedby="{id}-help"
+                aria-invalid={fieldError ? 'true' : undefined}
+                oninput={(event) => edit(setting, event.currentTarget.value)}
+              />
+              <span aria-hidden="true">days</span>
+            </span>
+          {:else}
+            <input
+              {id}
+              value={valueOf(setting)}
+              readonly={!editable(setting)}
+              aria-describedby="{id}-help"
+              aria-invalid={fieldError ? 'true' : undefined}
+              oninput={(event) => edit(setting, event.currentTarget.value)}
+            />
+          {/if}
+          {#if fieldError}<small class="field-error" role="alert"
+              >{fieldError}</small
+            >{/if}
+          {#if dirty}
+            <div class="actions">
+              <button
+                class="button button-secondary"
+                type="button"
+                onclick={() => discard(setting.key)}>Cancel</button
+              >
+              <button
+                class="button button-primary"
+                type="submit"
+                disabled={Boolean(savingKey)}
+                >{savingKey === setting.key ? 'Saving…' : 'Save'}</button
+              >
+            </div>
+          {/if}
+        </div>
+      </form>
+    {/each}
+  </div>
+  {#if shown.some((setting) => !editable(setting))}
+    <p class="read-only-note">
+      Your role can see these settings but not change them.
+    </p>
+  {/if}
 {/if}
-{#if services.gatewayAvailable}
-  <DiscountsPanel />
-  <RateCardsPanel />
-{/if}
-<PricingRevisionsPanel
-  blocked={Boolean(savingKey)}
-  onBusyChange={(busy) => {
-    savingPrice = busy;
-  }}
-  onFeedback={(feedback) => {
-    status = feedback.status;
-    error = feedback.error;
-  }}
-/>
-{#if services.gatewayAvailable}
-  <RoutingPolicyEditor
-    scope="installation"
-    id="00000000-0000-0000-0000-000000000000"
-    canManage={canEditSettings}
-  />
-{/if}
-
-{#if access.globalScope && access.can('providers.manage')}
-  <AggregateBudgetPanel
-    editable={access.allows('PUT /api/v1/budgets/installation')}
-  />
-  <ConfigurationPanel />
-{/if}
-
-<ObservabilityPanel />
 
 <style>
-  .settings-section {
-    margin-top: 2.5rem;
+  .settings {
+    padding: 0;
   }
-  .section-heading {
-    margin-bottom: 1rem;
+  .row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(14rem, 20rem);
+    gap: 1rem 2rem;
+    padding: 1.25rem 1.5rem;
   }
-  h2 {
+  .row + .row {
+    border-top: 1px solid var(--border-hairline);
+  }
+  label {
+    color: var(--foreground);
+    font-weight: 500;
+  }
+  .text p,
+  .text li {
+    margin-top: 0.35rem;
+    color: var(--foreground-subtle);
+    font-size: var(--text-body-sm);
+  }
+  .text ul {
     margin: 0;
-    font-size: 1rem;
-    font-weight: 500;
-    letter-spacing: -0.02em;
+    padding-left: 1.1rem;
   }
-  .section-heading p:last-child {
-    max-width: 44rem;
-    margin: 0.5rem 0 0;
-    color: var(--foreground-muted);
-    line-height: 1.5;
-  }
-  .settings-list {
-    display: grid;
-    gap: 0.75rem;
-  }
-  .setting-row {
-    display: grid;
-    grid-template-columns: minmax(18rem, 1fr) minmax(20rem, 0.8fr);
-    gap: 1rem;
-    align-items: center;
-    padding: 1.25rem;
-  }
-  .setting-row label {
-    font-weight: 500;
-  }
-  .setting-row p {
-    margin: 0.25rem 0 0;
-    color: var(--foreground-muted);
-    line-height: 1.5;
-  }
-  .setting-row small {
+  .text small {
     display: block;
-    margin: 0.25rem 0 0;
+    margin-top: 0.5rem;
     color: var(--foreground-muted);
     font-size: var(--text-caption);
   }
-  .setting-control {
+  .control {
+    display: grid;
+    align-content: start;
+    gap: 0.6rem;
+  }
+  .suffix {
     display: flex;
-    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem;
+    color: var(--foreground-muted);
+  }
+  .suffix input {
+    max-width: 8rem;
+  }
+  .actions {
+    display: flex;
+    justify-content: flex-end;
     gap: 0.5rem;
   }
-  .setting-control .field-error {
-    flex-basis: 100%;
+  .field-error {
     color: var(--danger);
-    font-size: var(--text-caption);
   }
-  .setting-control input,
-  .setting-control select {
-    min-width: 0;
-    flex: 1;
-    min-height: 2.5rem;
-    padding: 0.5rem 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-control);
-    background: transparent;
-    color: var(--foreground);
-    transition: border-color var(--motion);
-  }
-  .setting-control input:hover,
-  .setting-control select:hover {
-    border-color: var(--border-strong);
-  }
-  @media (max-width: 60rem) {
-    .setting-row {
-      grid-template-columns: 1fr;
-    }
-  }
-  @media (max-width: 36rem) {
-    .setting-row {
-      padding: 1rem;
-    }
-    .setting-control {
-      display: grid;
+  @media (max-width: 48rem) {
+    .row {
+      grid-template-columns: minmax(0, 1fr);
     }
   }
 </style>

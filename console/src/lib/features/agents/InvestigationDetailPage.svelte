@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageHeader from '#lib/components/PageHeader.svelte';
   import { formatDate } from '#lib/format.js';
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
@@ -20,12 +21,7 @@
 
 <a class="text-button" href={resolve('investigations')}>All investigations</a>
 
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Agents</p>
-    <h1 class="page-title">Investigation</h1>
-  </div>
-</div>
+<PageHeader title="Investigation" />
 {#if investigation.error}
   <p class="inline-problem" role="alert">{errorMessage(investigation.error)}</p>
 {:else if investigation.isFetching}
@@ -55,7 +51,7 @@
       <dd>
         {#if item.filters.run_id}<a
             class="text-button"
-            href={resolve(`runs/${item.filters.run_id}`)}
+            href={resolve(`activity/runs/${item.filters.run_id}`)}
             ><code>{item.filters.run_id}</code></a
           >
         {:else}
@@ -100,25 +96,29 @@
           <li>
             {reference.kind}
             {#if reference.kind === 'run'}
-              <a class="text-button" href={resolve(`runs/${reference.id}`)}
+              <a
+                class="text-button"
+                href={resolve(`activity/runs/${reference.id}`)}
                 ><code>{reference.id}</code></a
               >
             {:else if reference.kind === 'task'}
-              <a class="text-button" href={resolve(`a2a-tasks/${reference.id}`)}
+              <a
+                class="text-button"
+                href={resolve(`activity/tasks/${reference.id}`)}
                 ><code>{reference.id}</code></a
               >
             {:else if reference.kind === 'delegation'}
               <a
                 class="text-button"
-                href={`${resolve('delegations')}?project_id=${encodeURIComponent(item.project_id)}&delegation_id=${encodeURIComponent(reference.id)}`}
+                href={`${resolve('activity/delegations')}?project_id=${encodeURIComponent(item.project_id)}&delegation_id=${encodeURIComponent(reference.id)}`}
                 ><code>{reference.id}</code></a
               >
             {:else if reference.run_id}
               <a
                 class="text-button"
                 href={reference.kind === 'step' || reference.kind === 'span'
-                  ? `${resolve(`runs/${reference.run_id}`)}?${reference.kind}_id=${encodeURIComponent(reference.id)}`
-                  : resolve(`runs/${reference.run_id}`)}
+                  ? `${resolve(`activity/runs/${reference.run_id}`)}?${reference.kind}_id=${encodeURIComponent(reference.id)}`
+                  : resolve(`activity/runs/${reference.run_id}`)}
                 ><code>{reference.id}</code></a
               >
             {:else}

@@ -183,7 +183,6 @@
 
 {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
 {#if notice}<p class="section-help" role="status">{notice}</p>{/if}
-<h3>Destinations</h3>
 {#if canManage}
   <form class="create-form" onsubmit={submitDestination}>
     <fieldset class="submission-fields" disabled={destBusy}>

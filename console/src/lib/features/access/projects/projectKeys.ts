@@ -5,6 +5,7 @@ export const projectKeys = {
   root,
   page: (cursor?: string) => [...root, 'page', cursor ?? ''] as const,
   all: [...root, 'all'] as const,
+  detail: (projectId: string) => [...root, 'detail', projectId] as const,
   membersRoot,
   members: (projectId: string, cursor?: string) =>
     [...membersRoot, projectId, cursor ?? ''] as const,

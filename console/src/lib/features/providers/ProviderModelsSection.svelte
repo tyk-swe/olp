@@ -254,7 +254,7 @@
       <h2 id="models-heading">Models and capabilities</h2>
     </div>
 
-    <a class="button button-secondary" href={resolve('provider-models')}
+    <a class="button button-secondary" href={resolve('models')}
       >Inventory view</a
     >
   </div>

@@ -345,11 +345,11 @@ it.each(['save', 'conflict', 'retire'] as const)(
       [...target.querySelectorAll('button')].find(
         (item) => item.textContent?.trim() === name
       );
-    await vi.waitFor(() => expect(button('Inspect and edit')).toBeDefined());
-    button('Inspect and edit')?.click();
+    await vi.waitFor(() => expect(button('Edit')).toBeDefined());
+    button('Edit')?.click();
     await vi.waitFor(() =>
-      expect(target.querySelector('form h2')?.textContent).toContain(
-        'Edit and recertify'
+      expect(target.querySelector<HTMLInputElement>('form input')?.value).toBe(
+        'Original'
       )
     );
     if (operation === 'retire') {
@@ -406,7 +406,7 @@ it('clears remote task state on navigation and ignores the previous task respons
     }
   }));
   const { default: TaskRoute } =
-    await import('../../../routes/(console)/a2a-tasks/[taskId]/+page.svelte');
+    await import('../../../routes/(console)/activity/tasks/[taskId]/+page.svelte');
   const pending = Promise.withResolvers<Response>();
   const remote = vi
     .fn()
@@ -618,10 +618,10 @@ function mountServers(operations: ManagementOperation[]) {
 
 it('offers read-only members inspection but no server create or edit controls', async () => {
   const { target, button } = mountServers(['read']);
-  await vi.waitFor(() => expect(button('Inspect')).toBeDefined());
+  await vi.waitFor(() => expect(button('View')).toBeDefined());
 
   expect(button('New server')).toBeUndefined();
-  expect(button('Inspect and edit')).toBeUndefined();
+  expect(button('Edit')).toBeUndefined();
   expect(target.querySelector('form')).toBeNull();
 });
 
@@ -629,11 +629,11 @@ it('keeps an edited server draft when the operator declines to discard it', asyn
   const decline = vi.fn(() => false);
   vi.stubGlobal('confirm', decline);
   const { target, button } = mountServers(['read', 'configure']);
-  await vi.waitFor(() => expect(button('Inspect and edit')).toBeDefined());
-  button('Inspect and edit')?.click();
+  await vi.waitFor(() => expect(button('Edit')).toBeDefined());
+  button('Edit')?.click();
   await vi.waitFor(() =>
-    expect(target.querySelector('form h2')?.textContent).toContain(
-      'Edit and recertify'
+    expect(target.querySelector<HTMLInputElement>('form input')?.value).toBe(
+      'Original'
     )
   );
   const name = () => target.querySelector('form input') as HTMLInputElement;
@@ -641,7 +641,9 @@ it('keeps an edited server draft when the operator declines to discard it', asyn
   name().dispatchEvent(new Event('input', { bubbles: true }));
   flushSync();
 
-  button('New server')?.click();
+  target
+    .querySelector<HTMLButtonElement>('dialog [aria-label="Close"]')
+    ?.click();
   flushSync();
 
   expect(decline).toHaveBeenCalledOnce();

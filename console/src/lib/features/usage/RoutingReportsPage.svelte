@@ -1,6 +1,5 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
-  import { resolve } from '$app/paths';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { dateTimeLocalValue, formatInteger } from '#lib/format.js';
   import { errorMessage } from '#lib/management/http.js';
@@ -65,20 +64,6 @@
 </script>
 
 <svelte:head><title>Routing reports · OpenLLMProxy</title></svelte:head>
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Operations</p>
-    <h1 class="page-title">Routing reports</h1>
-    <p class="page-description">
-      Selector savings and shadow comparisons for the chosen interval.
-    </p>
-  </div>
-</div>
-<nav class="page-tabs" aria-label="Usage reports">
-  <a href={resolve('usage')}>Usage overview</a>
-
-  <a aria-current="page" href={resolve('usage/routing')}>Routing reports</a>
-</nav>
 <form class="card form-card" onsubmit={apply}>
   <label class="form-field"
     >Start<input required type="datetime-local" bind:value={start} /></label

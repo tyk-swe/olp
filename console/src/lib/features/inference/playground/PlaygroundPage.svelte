@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageHeader from '#lib/components/PageHeader.svelte';
   import RoutingPreferencesForm from '#lib/features/routes/RoutingPreferencesForm.svelte';
   import RoutingDecisions from '#lib/features/routes/RoutingDecisions.svelte';
   import { decisionRows } from '#lib/features/routes/routingExplanation.js';
@@ -49,17 +50,10 @@
 
 <svelte:head><title>Playground · OpenLLMProxy</title></svelte:head>
 
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Tools</p>
-    <h1 class="page-title">Playground</h1>
-    <p class="page-description">
-      Test an active route with your signed-in session. No saved proxy key is
-      required, and prompt or output content is not persisted.
-    </p>
-  </div>
-</div>
-
+<PageHeader
+  title="Playground"
+  description="Test an active route with your signed-in session. No saved proxy key is required, and prompt or output content is not persisted."
+/>
 <div class="privacy-note">
   <span aria-hidden="true">◉</span>
   <p>

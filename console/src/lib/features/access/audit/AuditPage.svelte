@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageHeader from '#lib/components/PageHeader.svelte';
   import { auditKeys } from '#lib/features/access/audit/auditKeys.js';
 
   import { createQuery } from '@tanstack/svelte-query';
@@ -64,23 +65,19 @@
 
 <svelte:head><title>Audit · OpenLLMProxy</title></svelte:head>
 
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Operations</p>
-    <h1 class="page-title">Audit</h1>
-    <p class="page-description">
-      Security-sensitive actions and outcomes. Credentials, prompts, outputs,
-      raw headers, and tool data are never recorded.
-    </p>
-  </div>
-  <button
-    class="button button-secondary"
-    type="button"
-    onclick={() => audit.refetch()}
-    disabled={audit.isFetching || Boolean(urlProblem)}>Refresh</button
-  >
-</div>
-
+<PageHeader
+  title="Audit log"
+  description="Security-sensitive actions and outcomes. Credentials, prompts, outputs, raw headers, and tool data are never recorded."
+>
+  {#snippet actions()}
+    <button
+      class="button button-secondary"
+      type="button"
+      onclick={() => audit.refetch()}
+      disabled={audit.isFetching || Boolean(urlProblem)}>Refresh</button
+    >
+  {/snippet}
+</PageHeader>
 <form class="card filters" aria-label="Audit filters" onsubmit={applyFilters}>
   <label
     >Action <input

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { confirmAction } from '#lib/components/confirm.js';
   import {
     useMutationIntent,
     usePrincipalLifetime
@@ -194,7 +195,15 @@
   }
 
   async function revoke(token: ManagementToken) {
-    if (!confirm(`Revoke the management token "${token.name}"?`)) return;
+    if (
+      !(await confirmAction({
+        title: `Revoke ${token.name}?`,
+        body: 'Automation using this token loses access right away. You can’t undo this.',
+        confirmLabel: 'Revoke token',
+        danger: true
+      }))
+    )
+      return;
     await run(`revoke-${token.id}`, async (isCurrent) => {
       await revokeManagementTokenIntent.submit(
         [token.id, token.etag] as const,

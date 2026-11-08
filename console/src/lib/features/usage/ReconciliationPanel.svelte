@@ -117,7 +117,7 @@
     class="card reconciliation-panel"
     aria-labelledby="reconciliation-heading"
   >
-    <h2 id="reconciliation-heading">Billing reconciliation</h2>
+    <h2 class="sr-only" id="reconciliation-heading">Billing reconciliation</h2>
     <p class="section-help">
       Attributed cost against provider invoices per UTC day — {range.first} to {range.last},
       end exclusive.

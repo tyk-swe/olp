@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { confirmAction } from '#lib/components/confirm.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import {
@@ -217,9 +218,12 @@
     if (
       !allowed ||
       busy ||
-      !confirm(
-        `Permanently retire tree ${item.root_id}? Every child and resume will be refused. This tree cannot be reassigned to another account.`
-      )
+      !(await confirmAction({
+        title: `Retire tree ${item.root_id}?`,
+        body: 'Every child and resume is refused from now on, and the tree can’t be moved to another account. You can’t undo this.',
+        confirmLabel: 'Retire tree',
+        danger: true
+      }))
     )
       return;
     busy = item.id;

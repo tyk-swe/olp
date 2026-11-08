@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -40,7 +41,7 @@
   const access = useRole();
   const client = useQueryClient();
   const intent = useMutationIntent();
-  let kind = $state<Kind>('toolsets');
+  let { kind }: { kind: Kind } = $props();
   let current = $state<Publication | null>(null);
   let form = $state(publicationForm());
   let editor = $state(false);
@@ -97,6 +98,8 @@
       JSON.stringify(publicationInput(kind, form)) !==
         JSON.stringify(publicationInput(kind, publicationForm(current)))
   );
+
+  guardUnsavedChanges(() => unsaved);
 
   function abandon() {
     epoch += 1;
@@ -311,28 +314,6 @@
   }
 </script>
 
-<svelte:head><title>Agent publications · OpenLLMProxy</title></svelte:head>
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Agents</p>
-    <h1 class="page-title">Agent publications</h1>
-    <p class="page-description">
-      Publish toolsets for authorized tool calls, and review project-owned agent
-      contracts and prompts.
-    </p>
-  </div>
-</div>
-<nav class="page-tabs" aria-label="Publication kind">
-  {#each ['toolsets', 'agents', 'prompts'] as value (value)}<button
-      type="button"
-      aria-current={kind === value ? 'page' : undefined}
-      disabled={busy}
-      onclick={() => {
-        abandon();
-        kind = value as Kind;
-      }}>{value}</button
-    >{/each}
-</nav>
 {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}{#if notice}<p
     class="success-message"
     role="status"
@@ -854,9 +835,6 @@
 {/if}
 
 <style>
-  .page-tabs button {
-    text-transform: capitalize;
-  }
   form,
   fieldset {
     display: grid;

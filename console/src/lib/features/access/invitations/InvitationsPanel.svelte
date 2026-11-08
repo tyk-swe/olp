@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { confirmAction } from '#lib/components/confirm.js';
   import {
     useMutationIntent,
     usePrincipalLifetime
@@ -125,7 +126,15 @@
   }
 
   async function removeInvitation(id: string, invitationEmail: string) {
-    if (!confirm(`Revoke the invitation for ${invitationEmail}?`)) return;
+    if (
+      !(await confirmAction({
+        title: `Revoke the invitation for ${invitationEmail}?`,
+        body: 'The link in their email stops working.',
+        confirmLabel: 'Revoke invitation',
+        danger: true
+      }))
+    )
+      return;
     await run(`invitation-${id}`, async (isCurrent) => {
       await revokeInvitationIntent.submit(id, (input, requestId) =>
         revokeInvitation(input, requestId)

@@ -241,8 +241,7 @@
 <section class="settings-section" aria-labelledby="pricing-sources-title">
   <div class="section-heading">
     <div>
-      <p class="eyebrow">Cost estimates</p>
-      <h2 id="pricing-sources-title">Pricing sources</h2>
+      <h2 class="sr-only" id="pricing-sources-title">Pricing sources</h2>
       <p>
         Sources publish external price documents into immutable revisions. A
         source is advisory: negotiated rates need publish-time overrides.

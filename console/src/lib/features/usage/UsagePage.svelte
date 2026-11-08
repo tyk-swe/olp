@@ -1,6 +1,6 @@
 <script lang="ts">
   import SavedFilters from './SavedFilters.svelte';
-  import ReconciliationPanel from './ReconciliationPanel.svelte';
+  import Advanced from '#lib/components/Advanced.svelte';
   import { usageKeys } from '#lib/features/usage/usageKeys.js';
 
   import { goto } from '$app/navigation';
@@ -18,7 +18,6 @@
     budgetWindowState
   } from '#lib/features/access/api-keys/budgetPresentation.js';
   import UsageChart from '#lib/features/usage/UsageChart.svelte';
-  import CostCalculator from '#lib/features/usage/CostCalculator.svelte';
   import { presentEstimate } from '#lib/features/usage/estimatePresentation.js';
   import { completenessFromSummary } from '#lib/features/usage/completenessPresentation.js';
   import UsageCompletenessStatus from '#lib/features/usage/UsageCompletenessStatus.svelte';
@@ -50,6 +49,11 @@
     readUsageState(page.url.searchParams, defaultUsageState())
   );
   const urlProblem = $derived(usageProblem(applied));
+  const hasNarrowingFilters = $derived(
+    Object.entries(applied.filters).some(
+      ([key, value]) => key !== 'start' && key !== 'end' && Boolean(value)
+    )
+  );
   let draft = $state(usageDraft(defaultUsageState()));
   let validation = $state<string | null>(null);
 
@@ -132,43 +136,31 @@
 
 <svelte:head><title>Usage · OpenLLMProxy</title></svelte:head>
 
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Operations</p>
-    <h1 class="page-title">Usage</h1>
-    <p class="page-description">
-      Traffic, tokens, media units, and estimated costs with visible pricing and
-      ingestion completeness.
-    </p>
-    <nav class="page-tabs" aria-label="Usage reports">
-      <a aria-current="page" href={resolve('usage')}>Usage overview</a>
-      <a href={resolve('usage/routing')}>Routing reports</a>
-    </nav>
+<div class="toolbar">
+  <SavedFilters
+    scope="usage"
+    search={`?${usageSearch(applied)}`}
+    apply={(search) => {
+      void showUsage(
+        readUsageState(new URLSearchParams(search), defaultUsageState())
+      );
+    }}
+  />
+  <div class="page-actions">
+    <button
+      class="button button-secondary"
+      type="button"
+      onclick={() => usage.refetch()}
+      disabled={usage.isFetching || Boolean(urlProblem)}>Refresh</button
+    ><button
+      class="button button-secondary"
+      type="button"
+      onclick={exportCsv}
+      disabled={exporting || Boolean(urlProblem)}
+      >{exporting ? 'Exporting…' : 'Download CSV'}</button
+    >
   </div>
-  <button
-    class="button button-secondary"
-    type="button"
-    onclick={() => usage.refetch()}
-    disabled={usage.isFetching || Boolean(urlProblem)}>Refresh</button
-  ><button
-    class="button button-secondary"
-    type="button"
-    onclick={exportCsv}
-    disabled={exporting || Boolean(urlProblem)}
-    >{exporting ? 'Exporting…' : 'Export CSV'}</button
-  >
 </div>
-
-<SavedFilters
-  scope="usage"
-  search={`?${usageSearch(applied)}`}
-  apply={(search) => {
-    void showUsage(
-      readUsageState(new URLSearchParams(search), defaultUsageState())
-    );
-  }}
-/>
-
 {#if exportError}<div class="inline-problem" role="alert">
     {exportError}
   </div>{/if}
@@ -184,58 +176,6 @@
     >
     <label
       >To <input bind:value={draft.end} type="datetime-local" required /></label
-    >
-    <label
-      >Route <input bind:value={draft.route} placeholder="All routes" /></label
-    >
-    <label
-      >Provider ID <input
-        bind:value={draft.provider_id}
-        class="mono"
-        placeholder="All providers"
-      /></label
-    >
-    <label
-      >Model <input bind:value={draft.model} placeholder="All models" /></label
-    >
-    <label
-      >API key ID <input
-        bind:value={draft.api_key_id}
-        class="mono"
-        placeholder="All keys"
-      /></label
-    >
-    <label
-      >Operation <input
-        bind:value={draft.operation}
-        placeholder="All operations"
-      /></label
-    >
-    <label
-      >Project ID <input
-        bind:value={draft.project_id}
-        class="mono"
-        placeholder="All projects"
-      /></label
-    >
-    <label
-      >Session ID <input
-        bind:value={draft.session_id}
-        class="mono"
-        placeholder="All sessions"
-      /></label
-    >
-    <label
-      >Attribution key <input
-        bind:value={draft.attribution_key}
-        placeholder="e.g. team"
-      /></label
-    >
-    <label
-      >Attribution value <input
-        bind:value={draft.attribution_value}
-        placeholder="Any value"
-      /></label
     >
     <label
       >Break down by <select bind:value={draft.dimension}
@@ -259,11 +199,73 @@
       ></label
     >
   </div>
+  <Advanced label="More filters" open={hasNarrowingFilters}>
+    <div class="filter-grid">
+      <label
+        >Route <input
+          bind:value={draft.route}
+          placeholder="All routes"
+        /></label
+      >
+      <label
+        >Provider ID <input
+          bind:value={draft.provider_id}
+          class="mono"
+          placeholder="All providers"
+        /></label
+      >
+      <label
+        >Model <input
+          bind:value={draft.model}
+          placeholder="All models"
+        /></label
+      >
+      <label
+        >API key ID <input
+          bind:value={draft.api_key_id}
+          class="mono"
+          placeholder="All keys"
+        /></label
+      >
+      <label
+        >Operation <input
+          bind:value={draft.operation}
+          placeholder="All operations"
+        /></label
+      >
+      <label
+        >Project ID <input
+          bind:value={draft.project_id}
+          class="mono"
+          placeholder="All projects"
+        /></label
+      >
+      <label
+        >Session ID <input
+          bind:value={draft.session_id}
+          class="mono"
+          placeholder="All sessions"
+        /></label
+      >
+      <label
+        >Attribution key <input
+          bind:value={draft.attribution_key}
+          placeholder="e.g. team"
+        /></label
+      >
+      <label
+        >Attribution value <input
+          bind:value={draft.attribution_value}
+          placeholder="Any value"
+        /></label
+      >
+    </div>
+  </Advanced>
   <div class="filter-actions">
     <button class="button button-primary" type="submit">Apply</button><button
       class="button button-secondary"
       type="button"
-      onclick={clear}>Clear</button
+      onclick={clear}>Reset</button
     >
   </div>
 </form>
@@ -621,11 +623,6 @@
       </div>
     {/if}
   </section>
-  <ReconciliationPanel
-    start={applied.filters.start}
-    end={applied.filters.end}
-  />
-  <CostCalculator />
 {/if}
 
 <style>

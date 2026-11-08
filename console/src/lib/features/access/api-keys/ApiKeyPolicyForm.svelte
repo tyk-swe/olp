@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageHeader from '#lib/components/PageHeader.svelte';
   import { validRouteSlug } from '#lib/routeIdentity.js';
   import RunLimits from '#lib/features/workflows/RunLimits.svelte';
   import { currentBudgetLimit } from './budgetPresentation';
@@ -17,7 +18,6 @@
   } from '#lib/editing/focusError.js';
   import { routeKeys } from '#lib/features/routes/routeKeys.js';
 
-  import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import type { ApiKey } from '#lib/features/access/api-keys/api.js';
   import { listRoutes } from '#lib/features/routes/api.js';
@@ -203,34 +203,14 @@
   }
 </script>
 
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Access · API keys</p>
-    <h1 class="page-title">
-      {editing
-        ? canManage
-          ? 'Edit key policy.'
-          : 'View key policy.'
-        : 'Create a proxy key.'}
-    </h1>
-    <p class="page-description">
-      {!services.limitsEnforced
-        ? 'Save scopes, route access, expiry, and limit policies. Limits and budgets are not enforced on this installation.'
-        : editing
-          ? 'Update scopes, route access, expiry, and shared hard limits. The key secret does not change.'
-          : 'Scope access, restrict route slugs, and apply shared hard limits. The secret is displayed once.'}
-    </p>
-  </div>
-  {#if editing}<button
-      class="button button-secondary"
-      type="button"
-      disabled={Boolean(busy)}
-      onclick={onCancel}>Cancel</button
-    >
-  {:else}
-    <a class="button button-secondary" href={resolve('api-keys')}>Cancel</a>
-  {/if}
-</div>
+<PageHeader
+  title={editing ? (canManage ? 'Edit key' : 'Key details') : 'New API key'}
+  description={!services.limitsEnforced
+    ? 'Limits and budgets you set here are saved but not enforced on this installation.'
+    : editing
+      ? 'Changes apply to the existing secret. Apps using it don’t need updating.'
+      : 'You’ll see the secret once, right after you create the key.'}
+/>
 {#if submitError || formError}<div
     class="inline-problem"
     role="alert"
@@ -840,6 +820,12 @@
       Save the routing policy before publishing this key.
     </p>{/if}
   {#if canManage || !editing}<div class="form-actions">
+      <button
+        class="button button-secondary"
+        type="button"
+        disabled={Boolean(busy)}
+        onclick={onCancel}>Cancel</button
+      >
       <button
         class="button button-primary"
         type="submit"

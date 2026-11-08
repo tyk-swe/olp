@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { confirmAction } from '#lib/components/confirm.js';
   import {
     useMutationIntent,
     usePrincipalLifetime
@@ -129,9 +130,12 @@
   async function disable() {
     if (!canManage || pendingRefresh) return;
     if (
-      !confirm(
-        `Disable “${current.name}”? Revision ${current.active_revision} stops serving as soon as the next runtime generation is published.`
-      )
+      !(await confirmAction({
+        title: `Disable ${current.name}?`,
+        body: `Revision ${current.active_revision} stops serving as soon as the next runtime generation is published.`,
+        confirmLabel: 'Disable',
+        danger: true
+      }))
     )
       return;
     await runAction('detail-disable', async (isCurrent) => {

@@ -155,16 +155,6 @@
 </script>
 
 <svelte:head><title>Budget increases · OpenLLMProxy</title></svelte:head>
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Access</p>
-    <h1 class="page-title">Budget increases</h1>
-    <p class="page-description">
-      Raise one existing cost cap temporarily, with a recorded reason and
-      automatic expiry.
-    </p>
-  </div>
-</div>
 <p>
   Increases add to the current permanent cap and share its accrued and in-flight
   spending. Every other budget still applies. An increase ends at its expiry or

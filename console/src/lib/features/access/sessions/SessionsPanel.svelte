@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { confirmAction } from '#lib/components/confirm.js';
   import { userKeys } from '#lib/features/access/users/userKeys.js';
 
   import { createQuery } from '@tanstack/svelte-query';
@@ -48,9 +49,14 @@
 
   async function removeSession(id: string, current: boolean) {
     if (
-      !confirm(
-        current ? 'Sign out this current session?' : 'Revoke this session?'
-      )
+      !(await confirmAction({
+        title: current ? 'Sign out here?' : 'Sign out that session?',
+        body: current
+          ? 'You’ll go back to the sign-in page.'
+          : 'Whoever is using it is signed out right away.',
+        confirmLabel: 'Sign out',
+        danger: true
+      }))
     )
       return;
     busy = `session-${id}`;

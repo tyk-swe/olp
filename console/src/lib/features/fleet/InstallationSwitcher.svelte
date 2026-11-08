@@ -154,13 +154,21 @@
     min-width: 0;
   }
   summary {
-    color: var(--foreground-muted);
+    display: block;
+    color: var(--foreground);
     cursor: pointer;
-    font-size: 0.75rem;
-    max-width: 12rem;
+    font-size: var(--text-body-sm);
+    font-weight: 500;
+    list-style: none;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  summary::-webkit-details-marker {
+    display: none;
+  }
+  summary span {
+    color: var(--foreground-subtle);
   }
   .switcher-menu {
     color: var(--foreground);
@@ -173,8 +181,8 @@
     white-space: normal;
     position: absolute;
     z-index: 40;
-    top: calc(100% + 1rem);
-    right: 0;
+    top: calc(100% + 0.75rem);
+    left: 0;
     width: min(22rem, 90vw);
     max-height: 75vh;
     overflow-y: auto;

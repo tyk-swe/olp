@@ -300,7 +300,6 @@
 
 {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
 {#if notice}<p class="section-help" role="status">{notice}</p>{/if}
-<h3>Export sinks</h3>
 {#if canManageInstallation || canManageProjects}
   <form class="create-form" onsubmit={submitSink}>
     <fieldset class="submission-fields" disabled={sinkBusy}>

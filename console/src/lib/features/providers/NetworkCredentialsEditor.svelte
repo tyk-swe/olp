@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { confirmAction } from '#lib/components/confirm.js';
   import {
     useMutationIntent,
     usePrincipalLifetime
@@ -87,9 +88,12 @@
   async function revoke(id: string) {
     if (editingDisabled) return;
     if (
-      !confirm(
-        'Revoke this network credential immediately? Active revisions using it will stop dispatching.'
-      )
+      !(await confirmAction({
+        title: 'Revoke this network credential?',
+        body: 'Provider revisions that use it stop sending requests right away.',
+        confirmLabel: 'Revoke',
+        danger: true
+      }))
     )
       return;
     await run('revoke-network-credential', async (isCurrent) => {

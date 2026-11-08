@@ -1,10 +1,10 @@
 <script lang="ts">
+  import PageHeader from '#lib/components/PageHeader.svelte';
   import SavedFilters from '../SavedFilters.svelte';
   import { requestKeys } from '#lib/features/usage/history/requestKeys.js';
 
   import RequestTimeline from '#lib/features/usage/history/RequestTimeline.svelte';
   import RequestResults from '#lib/features/usage/history/RequestResults.svelte';
-  import { resolve } from '$app/paths';
   import { page } from '$app/state';
   import { applyListSearch } from '#lib/listing/urlSync.svelte.js';
   import { createQuery } from '@tanstack/svelte-query';
@@ -77,24 +77,12 @@
 
 <svelte:head><title>Requests · OpenLLMProxy</title></svelte:head>
 
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Operations</p>
-    <h1 class="page-title">
-      {requestId ? 'Request timeline' : 'Requests'}
-    </h1>
-    <p class="page-description">
-      {requestId
-        ? 'Metadata-only route decisions and upstream attempts. Request and response content is never available here.'
-        : 'Filter operational metadata by route, target, key, outcome, or time range—never prompt or output content.'}
-    </p>
-  </div>
-  {#if requestId}<a
-      class="button button-secondary"
-      href={resolve(`requests${page.url.search}`)}>Back to requests</a
-    >
-  {/if}
-</div>
+<PageHeader
+  title={requestId ? 'Request' : 'Requests'}
+  description={requestId
+    ? 'How this request was routed and what each upstream attempt returned. Prompts and responses are never stored.'
+    : 'Every request the gateway handled. Prompts and responses are never stored.'}
+/>
 
 {#if !requestId}<SavedFilters
     scope="history"

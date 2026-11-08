@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageHeader from '#lib/components/PageHeader.svelte';
   import { formatDate, stateLabel } from '#lib/format.js';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { resolve } from '$app/paths';
@@ -46,14 +47,8 @@
 </script>
 
 <svelte:head><title>Run · OpenLLMProxy</title></svelte:head>
-<a class="text-button" href={resolve('runs')}>All runs</a>
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Agents</p>
-    <h1 class="page-title">Run</h1>
-    <p class="page-description"><code>{runID}</code></p>
-  </div>
-</div>
+<a class="text-button" href={resolve('activity/runs')}>All runs</a>
+<PageHeader title="Run" description={runID} />
 {#if run.error}
   <p class="inline-problem" role="alert">{errorMessage(run.error)}</p>
 {:else if run.isFetching}

@@ -239,8 +239,7 @@
     <section class="card oidc-form" aria-labelledby="oidc-heading">
       <div class="section-heading">
         <div>
-          <p class="eyebrow">Single identity provider</p>
-          <h2 id="oidc-heading">OIDC Authorization Code + PKCE</h2>
+          <h2 id="oidc-heading">OpenID Connect</h2>
         </div>
         <label class="enabled"
           ><input
@@ -335,8 +334,7 @@
       </div>
     </section>
     <section class="card mapping-form" aria-labelledby="mapping-heading">
-      <p class="eyebrow">Authorization mapping</p>
-      <h2 id="mapping-heading">Claims to fixed roles</h2>
+      <h2 id="mapping-heading">Roles from your identity provider</h2>
       <p class="muted">
         One mapping per line in <code>claim-value=role</code> form. Email mappings
         take precedence over group mappings and the default.

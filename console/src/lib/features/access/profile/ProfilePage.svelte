@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { confirmAction } from '#lib/components/confirm.js';
+  import PageHeader from '#lib/components/PageHeader.svelte';
   import SAMLIdentitiesPanel from '../saml/SAMLIdentitiesPanel.svelte';
   import { listSAMLIdentities } from '../saml/api';
   import { oidcFailureMessage } from '#lib/features/access/login/oidcFailure.js';
@@ -404,7 +406,15 @@
   }
 
   async function unlinkIdentity(id: string, issuer: string) {
-    if (!confirm(`Unlink the identity from ${issuer}?`)) return;
+    if (
+      !(await confirmAction({
+        title: `Unlink ${issuer}?`,
+        body: 'You won’t be able to sign in with this identity until you link it again.',
+        confirmLabel: 'Unlink',
+        danger: true
+      }))
+    )
+      return;
     pendingIdentityAction = undefined;
     identityBusy = id;
     identityError = '';
@@ -442,22 +452,12 @@
   }
 </script>
 
-<svelte:head><title>Personal profile · OpenLLMProxy</title></svelte:head>
+<svelte:head><title>Your profile · OpenLLMProxy</title></svelte:head>
 
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Account</p>
-    <h1 class="page-title">Personal profile</h1>
-    <p class="page-description">
-      Manage your display name, local password, and signed-in browser sessions.
-    </p>
-  </div>
-
-  <a class="button button-secondary" href={resolve('settings')}
-    >Installation settings</a
-  >
-</div>
-
+<PageHeader
+  title="Your profile"
+  description="Your name, password, linked sign-ins, and where you’re signed in."
+/>
 {#if reauthenticationRequest}
   <ReauthenticateDialog
     title={reauthenticationRequest.purpose === 'oidc_link'

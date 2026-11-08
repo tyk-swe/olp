@@ -1,3 +1,4 @@
+import { confirmAction } from '#lib/components/confirm.js';
 import { onDestroy } from 'svelte';
 import { ApiProblem, unanswered } from '#lib/management/http.js';
 import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
@@ -46,11 +47,13 @@ export function useResourceSubmission<Input>(options: {
       options.onCancel();
   }
 
-  function editRequest() {
+  async function editRequest() {
     if (
-      !confirm(
-        'The previous request may already have been saved. Start a different submission?'
-      )
+      !(await confirmAction({
+        title: 'Start a new request?',
+        body: 'The last request may already have been saved. Check before submitting again.',
+        confirmLabel: 'Start over'
+      }))
     )
       return;
     submitted = false;

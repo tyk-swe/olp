@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { confirmAction } from '#lib/components/confirm.js';
   import type { CreateQueryResult } from '@tanstack/svelte-query';
   import CursorPagination from '#lib/shell/CursorPagination.svelte';
   import {
@@ -30,9 +31,11 @@
 
   async function acknowledgeEpoch(processEpoch: string, gateway: string) {
     if (
-      !window.confirm(
-        `Acknowledge the investigated unclean epoch for ${gateway}? Retained gap evidence will not be removed.`
-      )
+      !(await confirmAction({
+        title: `Acknowledge the unclean shutdown on ${gateway}?`,
+        body: 'Use this once you’ve looked into it. The gap evidence stays on record.',
+        confirmLabel: 'Acknowledge'
+      }))
     )
       return;
     busyEpoch = processEpoch;

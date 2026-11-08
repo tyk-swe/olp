@@ -64,24 +64,17 @@
 
 <svelte:head><title>Route templates · OpenLLMProxy</title></svelte:head>
 <a class="text-button" href={resolve('routes')}>All routes</a>
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Gateway</p>
-    <h1 class="page-title">Route templates</h1>
-    <p class="page-description">
-      Generate routes for matching certified models from one reusable
-      definition.
-    </p>
+<div class="toolbar">
+  <div class="page-actions">
+    {#if access.allows('POST /api/v1/route-templates')}
+      <button
+        class="button button-primary"
+        type="button"
+        onclick={() => select('')}>New template</button
+      >
+    {/if}
   </div>
-  {#if access.allows('POST /api/v1/route-templates')}
-    <button
-      class="button button-primary"
-      type="button"
-      onclick={() => select('')}>New template</button
-    >
-  {/if}
 </div>
-
 {#if detail.error}
   <p class="inline-problem" role="alert">{errorMessage(detail.error)}</p>
 {/if}

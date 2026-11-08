@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { confirmAction } from '#lib/components/confirm.js';
+  import PageHeader from '#lib/components/PageHeader.svelte';
   import { mediaJobKeys } from '#lib/features/media/mediaJobKeys.js';
 
   import { resolve } from '$app/paths';
@@ -123,9 +125,12 @@
     const job = detail.data;
     if (!job || actionBusy) return;
     if (
-      !confirm(
-        'Delete the upstream artifact for this media job? This only removes provider-side content; it does not cancel a job.'
-      )
+      !(await confirmAction({
+        title: 'Delete the provider’s copy of this output?',
+        body: 'This only removes the file stored at the provider. It doesn’t cancel the job.',
+        confirmLabel: 'Delete output',
+        danger: true
+      }))
     )
       return;
     actionBusy = 'delete';
@@ -170,28 +175,25 @@
 <svelte:head><title>Media jobs · OpenLLMProxy</title></svelte:head>
 
 {#if jobId}
-  <div class="page-header">
-    <div>
-      <p class="eyebrow">Operations · Media job</p>
-      <h1 class="page-title">Media job detail</h1>
-      <p class="page-description">
-        Lifecycle and reconciliation metadata only. Uploaded and generated media
-        never appears in the console.
-      </p>
-    </div>
-    <div class="page-actions">
-      <a
-        class="button button-secondary"
-        href={resolve(`media-jobs${page.url.search}`)}>All media jobs</a
-      >
-      <button
-        class="button button-secondary"
-        type="button"
-        onclick={() => detail.refetch()}
-        disabled={detail.isFetching}>Refresh</button
-      >
-    </div>
-  </div>
+  <PageHeader
+    title="Media job"
+    description="Lifecycle and reconciliation metadata only. Uploaded and generated media never appears in the console."
+  >
+    {#snippet actions()}
+      <div class="page-actions">
+        <a
+          class="button button-secondary"
+          href={resolve(`media-jobs${page.url.search}`)}>All media jobs</a
+        >
+        <button
+          class="button button-secondary"
+          type="button"
+          onclick={() => detail.refetch()}
+          disabled={detail.isFetching}>Refresh</button
+        >
+      </div>
+    {/snippet}
+  </PageHeader>
   {#if detail.isPending}<div class="loading-state" role="status">
       Loading media job…
     </div>
@@ -364,22 +366,19 @@
     </section>
   {/if}
 {:else}
-  <div class="page-header">
-    <div>
-      <p class="eyebrow">Operations</p>
-      <h1 class="page-title">Media jobs</h1>
-      <p class="page-description">
-        Track asynchronous video and media lifecycles without exposing uploaded
-        or generated content.
-      </p>
-    </div>
-    <button
-      class="button button-secondary"
-      type="button"
-      onclick={() => jobs.refetch()}
-      disabled={jobs.isFetching || Boolean(urlProblem)}>Refresh</button
-    >
-  </div>
+  <PageHeader
+    title="Media jobs"
+    description="Video and other long-running media requests. Uploaded and generated files are never shown here."
+  >
+    {#snippet actions()}
+      <button
+        class="button button-secondary"
+        type="button"
+        onclick={() => jobs.refetch()}
+        disabled={jobs.isFetching || Boolean(urlProblem)}>Refresh</button
+      >
+    {/snippet}
+  </PageHeader>
   <form class="card filters" aria-label="Media job filters" onsubmit={apply}>
     <label
       >Route <input bind:value={listState.route} placeholder="All routes" />

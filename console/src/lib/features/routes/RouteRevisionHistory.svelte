@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { confirmAction } from '#lib/components/confirm.js';
+  import PageHeader from '#lib/components/PageHeader.svelte';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
   import { routeKeys } from '#lib/features/routes/routeKeys.js';
 
@@ -70,9 +72,11 @@
   async function restore(revision: RouteRevision) {
     if (!canManage) return;
     if (
-      !confirm(
-        `Restore route revision ${revision.revision} as a new draft? The live revision keeps serving traffic until the draft is activated.`
-      )
+      !(await confirmAction({
+        title: `Restore revision ${revision.revision}?`,
+        body: 'It becomes a new draft. The live revision keeps serving traffic until you activate the draft.',
+        confirmLabel: 'Restore as draft'
+      }))
     )
       return;
     await run(`restore-${revision.id}`, async () => {
@@ -101,18 +105,14 @@
 
 <svelte:head><title>Routes · OpenLLMProxy</title></svelte:head>
 
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Gateway · Route history</p>
-    <h1 class="page-title">Immutable revisions</h1>
-    <p class="page-description">
-      Restoring history creates a new editable draft. It never rolls back keys
-      or provider credentials.
-    </p>
-  </div>
-
-  <a class="button button-secondary" href={resolve('routes')}>All routes</a>
-</div>
+<PageHeader
+  title="Revision history"
+  description="Restoring history creates a new editable draft. It never rolls back keys or provider credentials."
+>
+  {#snippet actions()}
+    <a class="button button-secondary" href={resolve('routes')}>All routes</a>
+  {/snippet}
+</PageHeader>
 {#if errorMessage}<div class="inline-problem" role="alert">
     {errorMessage}
   </div>{/if}

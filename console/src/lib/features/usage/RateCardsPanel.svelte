@@ -188,8 +188,7 @@
 <section class="stack" aria-labelledby="rate-cards-title">
   <div class="section-heading">
     <div>
-      <p class="eyebrow">Rate cards</p>
-      <h2 id="rate-cards-title">Consumer charge terms</h2>
+      <h2 class="sr-only" id="rate-cards-title">Consumer charge terms</h2>
       <p class="section-description">
         Each card charges its owner's consumers a markup on provider cost, or
         explicit rates; a project card wins over its organization's, then the
