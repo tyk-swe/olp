@@ -10,6 +10,13 @@
     type IssuerWrite
   } from './api';
   import { workloadIssuerKeys } from './workloadIssuerKeys';
+  import Callout from '#lib/components/Callout.svelte';
+  import Dialog from '#lib/components/Dialog.svelte';
+  import EmptyState from '#lib/components/EmptyState.svelte';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
+  import StatusBadge from '#lib/components/StatusBadge.svelte';
+  import { confirmAction } from '#lib/components/confirm.js';
+  import { notify } from '#lib/components/toasts.svelte.js';
 
   const access = useRole();
   const client = useQueryClient();
@@ -34,19 +41,10 @@
   let pending = $state<IssuerWrite>();
   let busy = $state(false);
   let error = $state('');
-  let notice = $state('');
   const captureOwner = usePrincipalLifetime(() => {
     editing = pending = undefined;
     opened = busy = false;
-    name =
-      issuer =
-      jwks =
-      audiences =
-      disabledKeys =
-      requestId =
-      error =
-      notice =
-        '';
+    name = issuer = jwks = audiences = disabledKeys = requestId = error = '';
     enabled = true;
     algorithms = ['RS256'];
     lifetime = '3600';
@@ -83,7 +81,6 @@
     requestId = crypto.randomUUID();
     pending = undefined;
     error = '';
-    notice = '';
     opened = true;
   }
   async function submit(event: SubmitEvent) {
@@ -92,7 +89,6 @@
     const isCurrent = captureOwner();
     let committed = false;
     error = '';
-    notice = '';
     try {
       if (!pending) {
         const parsed: unknown = JSON.parse(mappings);
@@ -121,11 +117,11 @@
         };
       }
       busy = true;
-      const saved = await saveIssuer(pending, requestId, editing);
+      await saveIssuer(pending, requestId, editing);
       if (!isCurrent()) return;
       committed = true;
-      open(saved);
-      notice = 'Workload issuer saved.';
+      opened = false;
+      notify(editing ? 'Workload issuer saved' : 'Workload issuer added');
       await client.invalidateQueries(
         { queryKey: workloadIssuerKeys.root },
         { throwOnError: true }
@@ -143,10 +139,19 @@
   }
   async function disable(value: Issuer) {
     if (busy) return;
+    if (
+      !(await confirmAction({
+        title: `Disable ${value.name}?`,
+        body: 'Workloads signing in through this issuer stop being accepted at the next refresh.',
+        confirmLabel: 'Disable issuer',
+        danger: true
+      }))
+    )
+      return;
     const isCurrent = captureOwner();
     let committed = false;
     busy = true;
-    error = notice = '';
+    error = '';
     try {
       const saved = await saveIssuer(
         { ...issuerInput(value), enabled: false },
@@ -156,8 +161,7 @@
       if (!isCurrent()) return;
       committed = true;
       if (editing?.id === value.id) open(saved);
-      notice =
-        'Issuer disabled. Gateways apply the change at their next authority refresh.';
+      notify('Issuer disabled');
       await client.invalidateQueries(
         { queryKey: workloadIssuerKeys.root },
         { throwOnError: true }
@@ -176,52 +180,84 @@
 </script>
 
 <svelte:head><title>Workload identity · OpenLLMProxy</title></svelte:head>
-<section class="card">
-  <h1>Workload identity</h1>
-  <p>
-    Trust short-lived signed tokens from declared issuers. Claim mappings select
-    a project, its limit template, route groups and inference permissions. No
-    shared API secret is issued.
+<div class="toolbar">
+  <p class="lede">
+    Let workloads sign in with short-lived tokens from an issuer you trust, such
+    as a cloud or CI identity provider. No shared secret is handed out.
   </p>
-  {#if error}<p role="alert">{error}</p>{/if}
-  {#if notice}<p role="status">{notice}</p>{/if}
-  {#if query.isPending}<p>Loading issuers…</p>{:else if query.error}<p
-      role="alert"
-    >
-      Unable to load issuers.
-    </p>
-    <button class="button button-secondary" onclick={() => query.refetch()}
-      >Retry</button
-    >{:else}
-    <ul>
-      {#each query.data ?? [] as value (value.id)}
-        <li>
-          <strong>{value.name}</strong> — {value.enabled
-            ? 'Enabled'
-            : 'Disabled'}<br /><code>{value.issuer}</code>
-          <div class="actions">
-            <button
-              class="button button-secondary"
-              disabled={busy}
-              onclick={() => open(value)}>Edit {value.name}</button
-            >{#if editable && value.enabled}<button
-                class="button button-secondary button-danger"
+  {#if editable}<div class="page-actions">
+      <button
+        class="button button-primary"
+        disabled={busy}
+        onclick={() => open()}>New issuer</button
+      >
+    </div>{/if}
+</div>
+{#if error}<Callout tone="danger">{error}</Callout>{/if}
+{#if query.isPending}<p class="loading-state">
+    Loading issuers…
+  </p>{:else if query.error}<Callout
+    tone="danger"
+    title="Issuers could not be loaded"
+    >Check your connection and try again.{#snippet actions()}<button
+        class="button button-secondary"
+        onclick={() => query.refetch()}>Retry</button
+      >{/snippet}</Callout
+  >{:else if (query.data ?? []).length === 0}<EmptyState
+    title="No workload issuers yet"
+    >Add an issuer to let workloads authenticate without an API key.</EmptyState
+  >{:else}
+  <ScrollTable label="Workload issuers">
+    <table class="data-table">
+      <thead
+        ><tr
+          ><th scope="col">Name</th><th scope="col">Issuer URL</th><th
+            scope="col">Status</th
+          ><th scope="col"><span class="sr-only">Actions</span></th></tr
+        ></thead
+      >
+      <tbody>
+        {#each query.data ?? [] as value (value.id)}
+          <tr>
+            <td><strong>{value.name}</strong></td>
+            <td><code class="mono">{value.issuer}</code></td>
+            <td
+              ><StatusBadge
+                label={value.enabled ? 'Enabled' : 'Disabled'}
+                tone={value.enabled ? 'success' : 'neutral'}
+              /></td
+            >
+            <td class="row-actions">
+              <button
+                class="text-button"
                 disabled={busy}
-                onclick={() => disable(value)}>Disable {value.name}</button
-              >{/if}
-          </div>
-        </li>
-      {:else}<li>No workload issuers are configured.</li>{/each}
-    </ul>
-  {/if}
-  {#if editable}<button
-      class="button button-primary"
-      disabled={busy}
-      onclick={() => open()}>Add workload issuer</button
-    >{/if}
-  {#if opened}
+                onclick={() => open(value)}
+                aria-label={`Edit ${value.name}`}
+                >{editable ? 'Edit' : 'View'}</button
+              >{#if editable && value.enabled}<button
+                  class="text-button danger"
+                  disabled={busy}
+                  onclick={() => disable(value)}
+                  aria-label={`Disable ${value.name}`}>Disable</button
+                >{/if}
+            </td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+  </ScrollTable>
+{/if}
+{#if opened}
+  <Dialog
+    title={editing ? `Edit ${editing.name}` : 'New workload issuer'}
+    placement="side"
+    size="wide"
+    onClose={() => {
+      opened = false;
+      pending = undefined;
+    }}
+  >
     <form onsubmit={submit}>
-      <h2>{editing ? 'Edit issuer' : 'New issuer'}</h2>
       <fieldset disabled={!editable || busy || Boolean(pending)}>
         <div class="form-field">
           <label for="issuer-name">Name</label><input
@@ -323,8 +359,8 @@
         >
       </div>
     </form>
-  {/if}
-</section>
+  </Dialog>
+{/if}
 
 <style>
   fieldset {
@@ -340,13 +376,14 @@
     flex-wrap: wrap;
     gap: 0.75rem;
   }
-  form {
-    margin-top: 1.5rem;
-    border-top: 1px solid var(--border);
-    padding-top: 1rem;
+  .lede {
+    max-width: 60ch;
+    margin: 0;
+    color: var(--foreground-muted);
   }
-  li {
-    margin-bottom: 1rem;
-    overflow-wrap: anywhere;
+  .row-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
   }
 </style>

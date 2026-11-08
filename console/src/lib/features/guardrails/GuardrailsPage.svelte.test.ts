@@ -32,7 +32,7 @@ for (const editor of [
   {
     tab: 'checks',
     path: 'guardrails',
-    create: 'New definition',
+    create: 'New check',
     save: 'Save draft'
   },
   {
@@ -494,8 +494,7 @@ it.each(
     };
     flushSync();
     await vi.waitFor(() => expect(button('Original')).toBeDefined());
-    click('Original');
-    const kind = tab === 'checks' ? 'definition' : 'policy';
+    const kind = tab === 'checks' ? 'check' : 'policy';
     click(`Retire ${kind}`);
     click(`Confirm retire ${kind}`);
     await vi.waitFor(() =>
@@ -503,6 +502,7 @@ it.each(
         `/api/v1/${path}/original`
       )
     );
+    if (destination === 'selected') click('Original');
     if (destination === 'other') click('Other');
     if (destination === 'new') click(`New ${kind}`);
     const input = target.querySelector('form input');
@@ -514,13 +514,16 @@ it.each(
     retirement.resolve(new Response(null, { status: 204 }));
     await vi.waitFor(() =>
       expect(
-        button('Original')?.closest('li')?.textContent?.toLowerCase()
+        button('Original')?.closest('tr')?.textContent?.toLowerCase()
       ).not.toContain(`retire ${kind}`)
     );
+    if (destination === 'selected') {
+      expect(target.querySelector('form input')).toBeNull();
+      return;
+    }
     expect(target.querySelector<HTMLInputElement>('form input')?.value).toBe(
-      destination === 'selected' ? '' : 'Unsaved draft'
+      'Unsaved draft'
     );
-    if (destination === 'selected') return;
     target
       .querySelector('form')
       ?.dispatchEvent(

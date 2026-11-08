@@ -1,5 +1,9 @@
 <script lang="ts">
   import { confirmAction } from '#lib/components/confirm.js';
+  import Callout from '#lib/components/Callout.svelte';
+  import Dialog from '#lib/components/Dialog.svelte';
+  import EmptyState from '#lib/components/EmptyState.svelte';
+  import { notify } from '#lib/components/toasts.svelte.js';
   import {
     useMutationIntent,
     usePrincipalLifetime
@@ -66,7 +70,7 @@
   const pagination = $state(emptyCursorHistory());
   let busy = $state('');
   let error = $state('');
-  let notice = $state('');
+  let creating = $state(false);
   let name = $state('');
   let scopes = $state<ManagementTokenScope[]>(['read']);
   let expiresInDays = $state(30);
@@ -98,7 +102,8 @@
     projectIds = [];
     expiresInDays = 30;
     copied = false;
-    copyError = error = notice = busy = '';
+    copyError = error = busy = '';
+    creating = false;
   });
 
   function toggle(scope: ManagementTokenScope) {
@@ -127,7 +132,7 @@
   ) {
     const isCurrent = captureOwner();
     busy = label;
-    error = notice = '';
+    error = '';
     try {
       await action(isCurrent);
     } catch (cause) {
@@ -183,7 +188,7 @@
       scopes = ['read'];
       allProjects = true;
       projectIds = [];
-      notice = 'Management token created.';
+      creating = false;
       try {
         const observation = await tokens.refetch();
         if (observation?.isError) throw observation.error;
@@ -211,7 +216,7 @@
       );
       if (!isCurrent()) return;
       await tokens.refetch();
-      if (isCurrent()) notice = 'Management token revoked.';
+      if (isCurrent()) notify('Token revoked');
     });
   }
 
@@ -266,22 +271,32 @@
   </SecretDialog>
 {/if}
 
-{#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
-{#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
+{#if error}<Callout tone="danger">{error}</Callout>{/if}
 
 {#if !isOwner}
   <ReadOnlyNote>Only owners can manage management tokens.</ReadOnlyNote>
 {:else}
-  <section class="card token-panel" aria-labelledby="token-create-heading">
-    <div>
-      <p class="eyebrow">New management token</p>
-      <h2 id="token-create-heading">Scoped machine credential</h2>
-      <p>
-        The secret is shown once. Tokens authorize exactly the selected
-        management operations until expiry or revocation.
-      </p>
+  <div class="toolbar">
+    <p class="lede">
+      Tokens let scripts and CI call the management API with only the
+      permissions you pick. Each secret is shown once.
+    </p>
+    <div class="page-actions">
+      <button
+        class="button button-primary"
+        type="button"
+        onclick={() => (creating = true)}>New token</button
+      >
     </div>
-    <form onsubmit={create} novalidate>
+  </div>
+{/if}
+{#if isOwner && creating}
+  <Dialog
+    title="New management token"
+    placement="side"
+    onClose={() => (creating = false)}
+  >
+    <form class="token-form" onsubmit={create} novalidate>
       <label
         ><span>Name</span><input
           type="text"
@@ -341,7 +356,7 @@
                   onchange={() => toggleProject(project.id)}
                 />{project.name}</label
               >{:else}<span
-                >No projects exist. Create one under the Projects tab.</span
+                >No projects yet. Create one under Access, Projects.</span
               >{/each}{/if}
         {/if}
       </fieldset>
@@ -359,20 +374,20 @@
         >{busy === 'create' ? 'Creating…' : 'Create token'}</button
       >
     </form>
-  </section>
+  </Dialog>
 {/if}
 
 {#if isOwner}
   {#if tokens.isPending}
     <div class="loading-state" role="status">Loading management tokens…</div>
   {:else if tokens.isError}
-    <div class="inline-problem" role="alert">
-      {errorMessage(tokens.error)}
-    </div>
+    <Callout tone="danger" title="Tokens could not be loaded"
+      >{errorMessage(tokens.error)}</Callout
+    >
   {:else if !tokens.data?.items.length && pagination.history.length === 0}
-    <section class="card empty-state">
-      <p>No management tokens have been created.</p>
-    </section>
+    <EmptyState title="No management tokens yet"
+      >Create one when a script or pipeline needs to manage this installation.</EmptyState
+    >
   {:else}
     <div class="table-shell">
       <table class="data-table">
@@ -430,35 +445,22 @@
 {/if}
 
 <style>
-  h2 {
+  .lede {
+    max-width: 60ch;
     margin: 0;
-    font-size: 1rem;
-    font-weight: 500;
-    letter-spacing: -0.02em;
-  }
-  .token-panel {
-    display: flex;
-    align-items: start;
-    justify-content: space-between;
-    gap: 2rem;
-    margin-bottom: 1rem;
-    padding: 1.5rem;
-  }
-  .token-panel h2 + p {
-    margin: 0.4rem 0 0;
     color: var(--foreground-muted);
   }
-  .token-panel form {
+  .token-form {
     display: grid;
     gap: 0.65rem;
   }
-  .token-panel label {
+  .token-form label {
     display: grid;
     gap: 0.4rem;
     font-weight: 500;
   }
-  .token-panel input[type='text'],
-  .token-panel select {
+  .token-form input[type='text'],
+  .token-form select {
     min-height: 2.5rem;
     padding: 0.5rem 0.75rem;
     border: 1px solid var(--border);
@@ -468,14 +470,14 @@
     font-weight: 400;
     transition: border-color var(--motion);
   }
-  .token-panel input:hover,
-  .token-panel select:hover {
+  .token-form input:hover,
+  .token-form select:hover {
     border-color: var(--border-strong);
   }
-  .token-panel input::placeholder {
+  .token-form input::placeholder {
     color: var(--foreground-muted);
   }
-  .token-panel fieldset {
+  .token-form fieldset {
     display: grid;
     gap: 0.4rem;
     margin: 0;
@@ -483,7 +485,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-control);
   }
-  .token-panel legend {
+  .token-form legend {
     padding: 0 0.3rem;
     font-weight: 500;
   }
@@ -517,7 +519,7 @@
     color: var(--foreground-muted);
   }
   @media (max-width: 64rem) {
-    .token-panel {
+    .token-form {
       display: grid;
     }
   }
