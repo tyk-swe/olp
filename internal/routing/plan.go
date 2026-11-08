@@ -554,7 +554,17 @@ func orderCandidates(rows []rankedCandidate, strategy string) {
 func (plan *Plan) addCandidates(rows []rankedCandidate, checkSlots bool) {
 	decisions := 0
 	for r := range rows {
-		decisions += max(1, len(rows[r].slots)) + len(rows[r].skipped)
+		row := &rows[r]
+		if row.shadow || !row.decision.Eligible {
+			decisions++
+			continue
+		}
+		if checkSlots {
+			decisions += len(row.slots)
+		} else {
+			decisions++
+		}
+		decisions += len(row.skipped)
 	}
 	plan.Attempts = slices.Grow(plan.Attempts, len(rows))
 	plan.Decisions = slices.Grow(plan.Decisions, decisions)

@@ -2,7 +2,9 @@ package routing
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
+	"runtime"
 	"slices"
 	"testing"
 	"time"
@@ -26,6 +28,76 @@ func planningFixture() (Snapshot, string, []string) {
 	s.Routes[route.Slug] = route
 	return s, route.Slug, ids
 }
+
+func TestPreparationRejectionsDoNotRetainUnusedSlotDecisions(t *testing.T) {
+	snapshot, slug, ids := planningFixture()
+	route := snapshot.Routes[slug]
+	target := route.Targets[0]
+	provider := snapshot.Providers[ids[0]]
+	provider.AuthMode = "api_key"
+	route.Targets = nil
+	for range 32 {
+		candidate := target
+		candidate.ID = uuid.NewString()
+		candidate.RoutingID = candidate.ID
+		candidate.ProviderID = uuid.NewString()
+		connection := provider
+		connection.ID = candidate.ProviderID
+		connection.Slots = make([]Slot, 32)
+		for i := range connection.Slots {
+			credential := uuid.NewString()
+			connection.Slots[i] = Slot{ID: uuid.NewString(), Enabled: true, Weight: 1, CredentialID: &credential}
+		}
+		snapshot.Providers[connection.ID] = connection
+		route.Targets = append(route.Targets, candidate)
+	}
+	snapshot.Routes[slug] = route
+	early := snapshot.Clone()
+	for _, candidate := range route.Targets[1:] {
+		connection := early.Providers[candidate.ProviderID]
+		connection.Enabled = false
+		early.Providers[connection.ID] = connection
+	}
+	rejected := errors.New("preparation rejected")
+	options := Options{CheckSlots: true, Prepare: func(_ Provider, candidate Target) (*CandidatePreparation, error) {
+		if candidate.ID != route.Targets[0].ID {
+			return nil, rejected
+		}
+		return nil, nil
+	}}
+	makePlans := func(s *Snapshot) []Plan {
+		plans := make([]Plan, 0, 32)
+		for range 32 {
+			plan, err := Select(s, slug, "generation", "openai", "unary", []byte("seed"), options)
+			if err != nil || len(plan.Attempts) != 1 || len(plan.Decisions) != 63 {
+				t.Fatalf("unexpected plan: %d attempts, %d decisions, error %v", len(plan.Attempts), len(plan.Decisions), err)
+			}
+			plans = append(plans, plan)
+		}
+		return plans
+	}
+	heap := func() uint64 {
+		runtime.GC()
+		var stats runtime.MemStats
+		runtime.ReadMemStats(&stats)
+		return stats.HeapAlloc
+	}
+	before := heap()
+	earlyPlans := makePlans(early)
+	afterEarly := heap()
+	latePlans := makePlans(&snapshot)
+	afterLate := heap()
+	runtime.KeepAlive(earlyPlans)
+	runtime.KeepAlive(latePlans)
+	runtime.KeepAlive(early)
+	runtime.KeepAlive(snapshot)
+	earlyBytes := int64(afterEarly) - int64(before)
+	lateBytes := int64(afterLate) - int64(afterEarly)
+	if earlyBytes <= 0 || lateBytes > 2*earlyBytes {
+		t.Fatalf("plans retained %d bytes after early rejection and %d bytes after preparation rejection", earlyBytes, lateBytes)
+	}
+}
+
 func TestPoliciesIntersectUnknownFactsAndPublishedLimits(t *testing.T) {
 	s, slug, ids := planningFixture()
 	now := time.Now()
