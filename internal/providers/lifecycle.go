@@ -155,15 +155,8 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 	if err = a.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
 		return access.Reply{}, err
 	}
-	id, etag := access.NewID(), access.NewID()
-	if err := validateNetworkReference(r.Context(), tx, id, &configuration); err != nil {
-		return access.Reply{}, err
-	}
-	configurationJSON, err := json.Marshal(configuration)
+	id, etag, err := CreateDraft(r.Context(), tx, Draft{Name: input.Name, ProjectID: input.ProjectID, Configuration: prepared, CreatedBy: p.UserID()})
 	if err != nil {
-		return access.Reply{}, err
-	}
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id) VALUES($1,$2,$3,'draft',$4,$5,$6,$7,$8)", id, input.Name, configuration.Kind, configurationJSON, etag, access.NewID(), p.UserID(), input.ProjectID); err != nil {
 		return access.Reply{}, err
 	}
 	var credentialID *string

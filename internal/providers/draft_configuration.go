@@ -58,3 +58,26 @@ func StoreDraftConfiguration(ctx context.Context, tx pgx.Tx, id, name string, pr
 	_, err = tx.Exec(ctx, "UPDATE olp.providers SET name=$2,kind=$3,configuration=$4,etag=$5,draft_dirty=true,updated_at=now() WHERE id=$1", id, name, next.Kind, after, access.NewID())
 	return err
 }
+
+type Draft struct {
+	Name          string
+	ProjectID     *string
+	Configuration PreparedConfiguration
+	CreatedBy     string
+}
+
+func CreateDraft(ctx context.Context, tx pgx.Tx, draft Draft) (string, string, error) {
+	id, etag := access.NewID(), access.NewID()
+	configuration := draft.Configuration.configuration
+	if err := validateNetworkReference(ctx, tx, id, &configuration); err != nil {
+		return "", "", err
+	}
+	encoded, err := json.Marshal(configuration)
+	if err != nil {
+		return "", "", err
+	}
+	if _, err := tx.Exec(ctx, "INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id) VALUES($1,$2,$3,'draft',$4,$5,$6,$7,$8)", id, draft.Name, configuration.Kind, encoded, etag, access.NewID(), draft.CreatedBy, draft.ProjectID); err != nil {
+		return "", "", err
+	}
+	return id, etag, nil
+}

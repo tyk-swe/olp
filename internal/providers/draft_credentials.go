@@ -2,9 +2,14 @@ package providers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"errors"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
 // BindDraftCredential stages an already stored destination credential. A new
@@ -18,4 +23,29 @@ func BindDraftCredential(ctx context.Context, tx pgx.Tx, providerID, slotID, cre
 	}
 	_, err = tx.Exec(ctx, "UPDATE olp.providers SET etag=$2,slots_etag=$3,draft_dirty=true,updated_at=now() WHERE id=$1", providerID, access.NewID(), access.NewID())
 	return err
+}
+
+func (s *Server) CredentialEquals(ctx context.Context, q access.Queryer, credentialID, secret string) (bool, error) {
+	current, err := s.Access.Keys.Read(ctx, q, s.Access.Installation, credentialID, secrets.ProviderCredential)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	defer clear(current)
+	return sha256.Sum256(current) == sha256.Sum256([]byte(secret)), nil
+}
+
+func ExternalCredentialEquals(ctx context.Context, q access.Queryer, credentialID string, reference secretstore.Reference) (bool, error) {
+	var data []byte
+	err := q.QueryRow(ctx, "SELECT external_reference FROM olp.provider_credentials WHERE id=$1 AND revoked_at IS NULL", credentialID).Scan(&data)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var current secretstore.Reference
+	return len(data) > 0 && json.Unmarshal(data, &current) == nil && current == reference, nil
 }
