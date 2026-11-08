@@ -163,7 +163,7 @@ func (s *Server) saveChange(ctx context.Context, tx pgx.Tx, actor string, in Inp
 	return registrationChange{id: saved.ID, etag: saved.ETag, action: action}, nil
 }
 
-func deleteReplacedCredentials(ctx context.Context, tx pgx.Tx, in Input, current *Definition, retire bool) error {
+func DeleteReplacedCredentials(ctx context.Context, tx pgx.Tx, in Input, current *Definition, retire bool) error {
 	if current == nil {
 		return nil
 	}

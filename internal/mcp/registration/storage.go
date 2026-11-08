@@ -148,6 +148,17 @@ func FindActive(ctx context.Context, q access.Queryer, project, name string) (*D
 	return scan(q.QueryRow(ctx, "SELECT "+columns+joined+" WHERE s.project_id=$1 AND lower(s.name)=lower($2) AND s.retired_at IS NULL", project, name))
 }
 
+func ListActive(ctx context.Context, q access.Queryer) ([]Definition, error) {
+	rows, err := q.Query(ctx, "SELECT "+columns+joined+" WHERE s.retired_at IS NULL")
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Definition, error) {
+		d, err := scan(row)
+		return *d, err
+	})
+}
+
 func UpdateLimits(ctx context.Context, tx pgx.Tx, id string, limits routing.ToolLimits, etag string) error {
 	if !limits.WithinInstallation() {
 		return access.Invalid("calls_per_minute", "Stay inside the installation tool call limits.")

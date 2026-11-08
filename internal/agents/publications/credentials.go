@@ -110,7 +110,7 @@ func (s *Server) credential(ctx context.Context, tx pgx.Tx, current *agentcontra
 	return &id, nil
 }
 
-func draftWithCredential(d agentcontract.Draft, id *string) agentcontract.Draft {
+func WithCredential(d agentcontract.Draft, id *string) agentcontract.Draft {
 	if d.Agent == nil {
 		return d
 	}

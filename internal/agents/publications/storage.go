@@ -200,6 +200,16 @@ func SetLabel(ctx context.Context, tx pgx.Tx, p agentcontract.Publication, label
 	return err
 }
 
+func ClearLabels(ctx context.Context, tx pgx.Tx, publication string) error {
+	_, err := tx.Exec(ctx, `DELETE FROM olp.prompt_labels WHERE publication_id=$1`, publication)
+	return err
+}
+
+func SetLatestRevision(ctx context.Context, tx pgx.Tx, publication string, revision *string) error {
+	_, err := tx.Exec(ctx, `UPDATE olp.agent_publications SET latest_revision_id=$2 WHERE id=$1`, publication, revision)
+	return err
+}
+
 func mapConflict(err error) error {
 	if errors.Is(err, pgx.ErrNoRows) {
 		return access.Fail(404, "not_found", "The requested resource was not found.")
