@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { confirmAction } from '#lib/components/confirm.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
 
   import { routeKeys } from '#lib/features/routes/routeKeys.js';
@@ -50,9 +51,12 @@
   async function retire(item: ActiveRoute) {
     if (retiring !== null) return;
     if (
-      !confirm(
-        `Retire route “${item.slug}”? Clients calling this slug will get errors until a revision is restored and activated again.`
-      )
+      !(await confirmAction({
+        title: `Retire ${item.slug}?`,
+        body: 'Clients calling this route get errors until you restore and activate a revision.',
+        confirmLabel: 'Retire route',
+        danger: true
+      }))
     )
       return;
     retiring = item.id;
@@ -73,21 +77,14 @@
 
 <svelte:head><title>Routes · OpenLLMProxy</title></svelte:head>
 
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Gateway</p>
-    <h1 class="page-title">Routes</h1>
-    <p class="page-description">
-      Publish stable model names for your clients and choose the providers
-      behind each route.
-    </p>
+<div class="toolbar">
+  <div class="page-actions">
+    {#if canManage}
+      <a class="button button-primary" href={resolve('routes/new')}
+        >New route draft <NavIcon name="arrow" /></a
+      >
+    {/if}
   </div>
-
-  {#if canManage}
-    <a class="button button-primary" href={resolve('routes/new')}
-      >New route draft <NavIcon name="arrow" /></a
-    >
-  {/if}
 </div>
 {#if !canManage}<ReadOnlyNote
     >Your role can view routes but not create, edit, or activate them.</ReadOnlyNote

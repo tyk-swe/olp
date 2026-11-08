@@ -1,4 +1,6 @@
 <script lang="ts">
+  import EmptyState from '#lib/components/EmptyState.svelte';
+  import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -40,7 +42,22 @@
   const access = useRole();
   const client = useQueryClient();
   const intent = useMutationIntent();
-  let kind = $state<Kind>('toolsets');
+  let { kind }: { kind: Kind } = $props();
+
+  const EMPTY: Record<Kind, { title: string; body: string }> = {
+    toolsets: {
+      title: 'No toolsets yet',
+      body: 'A toolset bundles MCP tools so routes and agents can use them together.'
+    },
+    agents: {
+      title: 'No agents yet',
+      body: 'Publish an agent so other agents and API keys can delegate work to it.'
+    },
+    prompts: {
+      title: 'No prompts yet',
+      body: 'Publish a prompt so it can be reused by name.'
+    }
+  };
   let current = $state<Publication | null>(null);
   let form = $state(publicationForm());
   let editor = $state(false);
@@ -97,6 +114,8 @@
       JSON.stringify(publicationInput(kind, form)) !==
         JSON.stringify(publicationInput(kind, publicationForm(current)))
   );
+
+  guardUnsavedChanges(() => unsaved);
 
   function abandon() {
     epoch += 1;
@@ -311,30 +330,8 @@
   }
 </script>
 
-<svelte:head><title>Agent publications · OpenLLMProxy</title></svelte:head>
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Agents</p>
-    <h1 class="page-title">Agent publications</h1>
-    <p class="page-description">
-      Publish toolsets for authorized tool calls, and review project-owned agent
-      contracts and prompts.
-    </p>
-  </div>
-</div>
-<nav class="page-tabs" aria-label="Publication kind">
-  {#each ['toolsets', 'agents', 'prompts'] as value (value)}<button
-      type="button"
-      aria-current={kind === value ? 'page' : undefined}
-      disabled={busy}
-      onclick={() => {
-        abandon();
-        kind = value as Kind;
-      }}>{value}</button
-    >{/each}
-</nav>
 {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}{#if notice}<p
-    class="success-message"
+    class="success-banner"
     role="status"
   >
     {notice}
@@ -353,9 +350,9 @@
   </div>
   {#if items.isPending}<div class="loading-state" role="status">
       Loading publications…
-    </div>{:else if !items.data?.length}<div class="card empty-state">
-      No publications.
-    </div>{:else}<ScrollTable label="Publications">
+    </div>{:else if !items.data?.length}<EmptyState title={EMPTY[kind].title}
+      >{EMPTY[kind].body}</EmptyState
+    >{:else}<ScrollTable label="Publications">
       <table class="data-table">
         <thead
           ><tr
@@ -854,9 +851,6 @@
 {/if}
 
 <style>
-  .page-tabs button {
-    text-transform: capitalize;
-  }
   form,
   fieldset {
     display: grid;

@@ -430,7 +430,7 @@ Feature-specific budget/group/calendar omission semantics are in
 global merge rule. `expected_digest` fences destination drift; remaining blockers return
 409 with plan body, successful staging records one digest-only audit event.
 
-The **Configuration promotion** page under Settings forgets secrets on artifact changes;
+The **Import & export** tab under Settings forgets secrets on artifact changes;
 CLI [reviewed promotion](automation.md#configuration-promotion),
 [GitHub Actions](automation.md#github-actions) and [Terraform](automation.md#terraform-and-opentofu) preserve
 review/atomicity boundaries.

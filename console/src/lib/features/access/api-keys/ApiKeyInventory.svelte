@@ -1,4 +1,7 @@
 <script lang="ts">
+  import EntityPicker from '#lib/components/EntityPicker.svelte';
+  import { confirmAction } from '#lib/components/confirm.js';
+  import PageHeader from '#lib/components/PageHeader.svelte';
   import {
     useMutationIntent,
     usePrincipalLifetime
@@ -43,17 +46,13 @@
 
   let {
     listState = $bindable(),
-    notice,
     submitError,
     canManage,
-    onEdit,
     onSecret
   }: {
     listState: ApiKeyListState;
-    notice: string;
     submitError: string;
     canManage: boolean;
-    onEdit: (key: ApiKey) => void;
     onSecret: (secret: ApiKeySecret, preferredRoute?: string) => void;
   } = $props();
 
@@ -90,25 +89,16 @@
     queryFn: ({ signal }) => listApiKeyPage(cursor, signal, createdBy)
   }));
 
-  const issuers = $derived(
-    new Map(
-      (keys.data?.items ?? []).map((key) => [
-        key.created_by,
-        key.created_by_email
-      ])
-    )
-  );
-
   async function filterIssuer(value: string) {
     const url = new URL(page.url.href);
     const id = value.trim().toLowerCase();
     if (id) url.searchParams.set('created_by', id);
     else url.searchParams.delete('created_by');
     const target = url.search
-      ? resolve(`api-keys?${url.searchParams}${url.hash}`)
+      ? resolve(`keys?${url.searchParams}${url.hash}`)
       : url.hash
-        ? resolve(`api-keys#${url.hash.slice(1)}`)
-        : resolve('api-keys');
+        ? resolve(`keys#${url.hash.slice(1)}`)
+        : resolve('keys');
 
     await goto(target, { reset: false });
   }
@@ -146,7 +136,15 @@
   }
 
   async function revoke(key: ApiKey) {
-    if (!confirm(`Revoke “${key.name}”? This cannot be undone.`)) return;
+    if (
+      !(await confirmAction({
+        title: `Revoke ${key.name}?`,
+        body: 'Requests using this key start failing right away. You can’t undo this.',
+        confirmLabel: 'Revoke key',
+        danger: true
+      }))
+    )
+      return;
     const isCurrent = captureOwner();
     busy = `revoke-${key.id}`;
     mutationError = '';
@@ -166,20 +164,17 @@
   }
 </script>
 
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Access</p>
-    <h1 class="page-title">API keys</h1>
-    <p class="page-description">
-      Manage client access with scoped API keys, route permissions, and usage
-      limits.
-    </p>
-  </div>
-  {#if canManage}<a class="button button-primary" href={resolve('api-keys/new')}
-      >Create key <NavIcon name="arrow" /></a
-    >
-  {/if}
-</div>
+<PageHeader
+  title="API keys"
+  description="Manage client access with scoped API keys, route permissions, and usage limits."
+>
+  {#snippet actions()}
+    {#if canManage}<a class="button button-primary" href={resolve('keys/new')}
+        >New API key <NavIcon name="arrow" /></a
+      >
+    {/if}
+  {/snippet}
+</PageHeader>
 {#if !services.limitsEnforced}<p class="muted" role="status">
     Limit and budget policies are saved but not enforced yet.
   </p>{/if}
@@ -191,42 +186,18 @@
 {#if submitError || mutationError}<div class="inline-problem" role="alert">
     {submitError || mutationError}
   </div>{/if}
-{#if notice}<div class="success-message" role="status">{notice}</div>{/if}
 
-<form
-  class="card issuer-filter"
-  onsubmit={(event) => {
-    event.preventDefault();
-    void filterIssuer(issuer);
-  }}
->
-  <label class="field">
-    <span>Issuer (user ID)</span>
-    <input
+<div class="toolbar issuer-filter">
+  <label for="key-issuer"
+    >Created by <EntityPicker
+      id="key-issuer"
+      kind="person"
       bind:value={issuer}
-      list="key-issuers"
-      placeholder="All issuers"
-      pattern={'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'}
-      aria-describedby="issuer-hint"
-    />
-  </label>
-  <datalist id="key-issuers">
-    {#each [...issuers] as [id, email] (id)}<option value={id}>{email}</option
-      >{/each}
-  </datalist>
-  <p id="issuer-hint">
-    Choose an issuer from this page or enter a user ID. Keys attributed to
-    inactive members remain available for review.
-  </p>
-  <div class="page-actions">
-    <button class="button button-secondary" type="submit">Apply issuer</button>
-    <button
-      class="button button-secondary"
-      type="button"
-      onclick={() => filterIssuer('')}>Clear issuer</button
-    >
-  </div>
-</form>
+      emptyLabel="Anyone"
+      onchange={filterIssuer}
+    /></label
+  >
+</div>
 
 {#if keys.isPending}
   <div class="loading-state" role="status">Loading API keys…</div>
@@ -242,20 +213,22 @@
 {:else if !keys.data?.items.length && listState.history.length === 0}
   <section class="card empty-state">
     <div>
-      <h2>{createdBy ? 'No API keys for this issuer' : 'No API keys'}</h2>
+      <h2>
+        {createdBy ? 'No API keys created by this person' : 'No API keys'}
+      </h2>
       <p>
         {createdBy
-          ? 'Choose another issuer or clear the filter to review all keys.'
+          ? 'Pick someone else or show every key.'
           : 'Create a scoped key for your clients.'}
       </p>
       {#if createdBy}<button
           class="button button-secondary"
           type="button"
-          onclick={() => filterIssuer('')}>Clear issuer</button
+          onclick={() => filterIssuer('')}>Show all keys</button
         >{/if}
       {#if canManage && !createdBy}<a
           class="button button-primary"
-          href={resolve('api-keys/new')}>Create first key</a
+          href={resolve('keys/new')}>Create first key</a
         >
       {/if}
     </div>
@@ -376,7 +349,7 @@
             </td>
             <td>
               <a
-                href={`${resolve('api-keys')}?created_by=${key.created_by}`}
+                href={`${resolve('keys')}?created_by=${key.created_by}`}
                 aria-label={`Review API keys issued by ${key.created_by_email}`}
                 >{key.created_by_email}</a
               ><br /><small>{formatDate(key.created_at)}</small></td
@@ -390,14 +363,12 @@
                   >
                 {/if}
 
-                <button
+                <a
                   class="button button-secondary"
-                  type="button"
-                  onclick={() => onEdit(key)}
-                  disabled={Boolean(busy)}
+                  href={resolve(`keys/${key.id}`)}
                   >{canManage && usable && !key.workload_issuer_id
                     ? 'Edit'
-                    : 'View'}</button
+                    : 'View'}</a
                 >{#if canManage && !key.revoked_at}{#if usable && !key.workload_issuer_id}<button
                       class="button button-secondary"
                       type="button"
@@ -488,35 +459,17 @@
 
 <style>
   .issuer-filter {
-    display: grid;
-    gap: 0.75rem;
     margin-top: 1.5rem;
-    padding: 1.5rem;
   }
-  .field {
-    display: grid;
-    gap: 0.4rem;
-    font-weight: 500;
-  }
-  .field input {
-    min-height: 2.5rem;
-    padding: 0.5rem 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-control);
-    background: transparent;
-    color: var(--foreground);
-    font-weight: 400;
-    transition: border-color var(--motion);
-  }
-  .field input:hover {
-    border-color: var(--border-strong);
-  }
-  .field input::placeholder {
+  .issuer-filter label {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
     color: var(--foreground-muted);
+    font-size: var(--text-body-sm);
   }
-  .issuer-filter p {
-    margin: 0;
-    color: var(--foreground-muted);
+  .issuer-filter :global(:is(select, input)) {
+    min-width: min(18rem, 60vw);
   }
   .key-table {
     margin-top: 1.5rem;

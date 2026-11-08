@@ -1,4 +1,7 @@
 <script lang="ts">
+  import EntityPicker from '#lib/components/EntityPicker.svelte';
+  import Callout from '#lib/components/Callout.svelte';
+  import { notify } from '#lib/components/toasts.svelte.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '#lib/shell/CursorPagination.svelte';
@@ -70,15 +73,11 @@
     return parts.join(' · ');
   }
 
-  let {
-    blocked,
-    onBusyChange,
-    onFeedback
-  }: {
-    blocked: boolean;
-    onBusyChange: (busy: boolean) => void;
-    onFeedback: (feedback: { status: string; error: string }) => void;
-  } = $props();
+  let problem = $state('');
+  function onFeedback(feedback: { status: string; error: string }) {
+    problem = feedback.error;
+    if (feedback.status && !feedback.error) notify(feedback.status);
+  }
 
   const queryClient = useQueryClient();
   const services = useServiceCapabilities();
@@ -145,7 +144,7 @@
 
   async function addPricing(event: SubmitEvent) {
     event.preventDefault();
-    if (!canEditPricing || savingPrice || blocked) return;
+    if (!canEditPricing || savingPrice) return;
     onFeedback({ status: '', error: '' });
     if (!providerKind || !model.trim() || !operation.trim()) {
       onFeedback({
@@ -187,7 +186,6 @@
       effectiveAt
     };
     savingPrice = true;
-    onBusyChange(true);
     let committed = false;
     try {
       const price: PriceDraft = {
@@ -279,7 +277,6 @@
       });
     } finally {
       savingPrice = false;
-      onBusyChange(false);
     }
   }
 </script>
@@ -288,8 +285,7 @@
   <section class="settings-section" aria-labelledby="pricing-title">
     <div class="section-heading">
       <div>
-        <p class="eyebrow">Cost estimates</p>
-        <h2 id="pricing-title">Pricing revisions</h2>
+        <h2 class="sr-only" id="pricing-title">Pricing revisions</h2>
         <p>
           Prices are exact decimals. A missing price remains visibly unpriced
           and is never treated as zero. An empty cached input rate bills cached
@@ -300,6 +296,7 @@
     {#if !canEditPricing}<ReadOnlyNote
         >Your role can view pricing revisions but not create them.</ReadOnlyNote
       >{/if}
+    {#if problem}<Callout tone="danger">{problem}</Callout>{/if}
     <form class="card price-form" onsubmit={addPricing}>
       <div class="form-grid">
         <div class="form-field">
@@ -334,11 +331,11 @@
           >
         </div>
         <div class="form-field">
-          <label for="provider-id">Provider ID override</label><input
+          <label for="provider-id">Only for provider</label><EntityPicker
             id="provider-id"
+            kind="provider"
             bind:value={providerId}
-            class="mono"
-            placeholder="Optional UUID"
+            emptyLabel="Every provider of this kind"
             disabled={!canEditPricing}
           />
         </div>
@@ -412,7 +409,6 @@
         type="submit"
         disabled={!canEditPricing ||
           !services.limitsEnforced ||
-          blocked ||
           savingPrice ||
           !providerKind ||
           providerKinds.isError}

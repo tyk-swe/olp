@@ -1,8 +1,6 @@
 .observability-panel {
   display: grid;
   gap: 1rem;
-  margin-top: 1.5rem;
-  padding: 1.5rem;
 }
 .observability-panel h2 {
   margin: 0;
@@ -32,9 +30,6 @@
 .observability-panel .create-form {
   display: grid;
   gap: 1rem;
-  padding: 1rem;
-  border-radius: var(--radius-control);
-  background: var(--surface-raised);
 }
 .observability-panel .form-actions {
   display: flex;

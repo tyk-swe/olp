@@ -1,4 +1,6 @@
 <script lang="ts">
+  import EmptyState from '#lib/components/EmptyState.svelte';
+  import EntityPicker from '#lib/components/EntityPicker.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '#lib/shell/CursorPagination.svelte';
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
@@ -110,8 +112,7 @@
 <section class="stack" aria-labelledby="discounts-title">
   <div class="section-heading">
     <div>
-      <p class="eyebrow">Discounts</p>
-      <h2 id="discounts-title">Provider cost discounts</h2>
+      <h2 class="sr-only" id="discounts-title">Provider cost discounts</h2>
       <p class="section-description">
         Immutable multipliers on provider cost, newest scope winning. A scope
         ends when a new discount at multiplier 1 supersedes it.
@@ -149,11 +150,11 @@
         >
       </div>
       <div class="form-field">
-        <label for="discount-provider">Provider ID</label><input
+        <label for="discount-provider">Provider</label><EntityPicker
           id="discount-provider"
+          kind="provider"
           bind:value={providerId}
-          class="mono"
-          placeholder="Optional UUID"
+          emptyLabel="Every provider of this kind"
           disabled={!canEdit}
         />
       </div>
@@ -196,7 +197,9 @@
       >
     </div>
   {:else if (discounts.data?.items ?? []).length === 0}
-    <div class="card empty-state" role="status">No discounts published.</div>
+    <EmptyState title="No discounts yet"
+      >Add a discount to reflect negotiated provider pricing in cost reports.</EmptyState
+    >
   {:else}
     <div class="table-shell" role="region" aria-label="Discounts">
       <table class="data-table">

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageHeader from '#lib/components/PageHeader.svelte';
   import { healthKeys } from '#lib/features/runtime/health/healthKeys.js';
 
   import { createQuery } from '@tanstack/svelte-query';
@@ -93,23 +94,19 @@
 
 <svelte:head><title>Health · OpenLLMProxy</title></svelte:head>
 
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Operations</p>
-    <h1 class="page-title">Health</h1>
-    <p class="page-description">
-      Gateway dependencies, worker checkpoints, provider outcomes, runtime
-      convergence, and persistence completeness.
-    </p>
-  </div>
-  <button
-    class="button button-secondary"
-    type="button"
-    onclick={refresh}
-    disabled={fetching}>Refresh</button
-  >
-</div>
-
+<PageHeader
+  title="Health"
+  description="Gateway dependencies, worker checkpoints, provider outcomes, runtime convergence, and persistence completeness."
+>
+  {#snippet actions()}
+    <button
+      class="button button-secondary"
+      type="button"
+      onclick={refresh}
+      disabled={fetching}>Refresh</button
+    >
+  {/snippet}
+</PageHeader>
 <p class="refresh-note" aria-live="polite">
   Automatically refreshes every 15 seconds{checkedAt
     ? ` · Last checked ${formatTime(checkedAt)}`

@@ -1,4 +1,8 @@
 <script lang="ts">
+  import EmptyState from '#lib/components/EmptyState.svelte';
+  import Callout from '#lib/components/Callout.svelte';
+  import Dialog from '#lib/components/Dialog.svelte';
+  import { notify } from '#lib/components/toasts.svelte.js';
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
@@ -31,6 +35,7 @@
     canDelete
   }: { canManage: boolean; installationWide: boolean; canDelete: boolean } =
     $props();
+  let creating = $state(false);
   let error = $state('');
   let notice = $state('');
   const destinationIntent = useMutationIntent();
@@ -69,7 +74,8 @@
       destinationIntent.reset();
       committed = true;
       resetDestinationForm();
-      notice = 'Destination created.';
+      creating = false;
+      notify('Destination created');
       await queryClient.invalidateQueries(
         {
           queryKey: notificationKeys.root
@@ -181,156 +187,180 @@
   });
 </script>
 
-{#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
+{#if error && !creating}<Callout tone="danger">{error}</Callout>{/if}
 {#if notice}<p class="section-help" role="status">{notice}</p>{/if}
-<h3>Destinations</h3>
-{#if canManage}
-  <form class="create-form" onsubmit={submitDestination}>
-    <fieldset class="submission-fields" disabled={destBusy}>
-      <div class="form-grid">
-        <div class="form-field">
-          <label for="dest-name">Name</label><input
-            id="dest-name"
-            bind:value={draft.name}
-            required
+{#if canManage}<div class="toolbar">
+    <p class="section-help">
+      Where alerts are sent, such as a webhook or an email address.
+    </p>
+    <div class="page-actions">
+      <button
+        class="button button-primary"
+        type="button"
+        onclick={() => {
+          error = '';
+          creating = true;
+        }}>New destination</button
+      >
+    </div>
+  </div>{/if}
+{#if creating}
+  <Dialog
+    title="New destination"
+    description="Where alerts are sent, such as a webhook or chat channel."
+    placement="side"
+    onClose={() => (creating = false)}
+  >
+    {#if error}<Callout tone="danger">{error}</Callout>{/if}
+    <form class="create-form" onsubmit={submitDestination}>
+      <fieldset class="submission-fields" disabled={destBusy}>
+        <div class="form-grid">
+          <div class="form-field">
+            <label for="dest-name">Name</label><input
+              id="dest-name"
+              bind:value={draft.name}
+              required
+            />
+          </div>
+          <div class="form-field">
+            <label for="dest-type">Type</label><select
+              id="dest-type"
+              value={draft.type}
+              onchange={(event) => {
+                const selected = destinationTypes.find(
+                  (option) => option.value === event.currentTarget.value
+                );
+                if (selected)
+                  draft = newDestinationDraft(selected.value, {
+                    name: draft.name,
+                    url: draft.url,
+                    projectId: draft.projectId
+                  });
+              }}
+              >{#each destinationTypes as option (option.value)}<option
+                  value={option.value}>{option.label}</option
+                >{/each}</select
+            >
+          </div>
+          <div class="form-field">
+            <label for="dest-url">
+              {#if draft.type === 'slack' || draft.type === 'msteams' || draft.type === 'discord'}Channel
+                origin URL{:else if draft.type === 'pagerduty'}Events API
+                endpoint{:else if draft.type === 'email'}SMTP URL{:else}Webhook
+                URL{/if}</label
+            ><input
+              id="dest-url"
+              type="url"
+              bind:value={draft.url}
+              required
+              placeholder={isChat(draft.type)
+                ? 'https://hooks.slack.com'
+                : draft.type === 'pagerduty'
+                  ? 'https://events.pagerduty.com/v2/enqueue'
+                  : draft.type === 'email'
+                    ? 'smtps://smtp.example.com:465'
+                    : 'https://hooks.example.com/olp'}
+            />
+          </div>
+          <ProjectScopeField
+            id="dest-project"
+            bind:value={draft.projectId}
+            unassigned={installationWide}
           />
+          {#if draft.type === 'slack' || draft.type === 'msteams' || draft.type === 'discord'}
+            <div class="form-field">
+              <label for="dest-webhook-url">Channel webhook URL</label><input
+                id="dest-webhook-url"
+                bind:value={draft.webhookUrl}
+                autocomplete="off"
+                required
+                placeholder="Full tokenized webhook URL, sealed"
+              />
+              <p class="section-help">
+                Stored sealed; never shown again. Must share the origin URL
+                above.
+              </p>
+            </div>
+          {:else if draft.type === 'pagerduty'}
+            <div class="form-field">
+              <label for="dest-routing-key">Routing key</label><input
+                id="dest-routing-key"
+                bind:value={draft.routingKey}
+                autocomplete="off"
+                required
+                placeholder="PagerDuty Events API routing key, sealed"
+              />
+            </div>
+          {:else if draft.type === 'email'}
+            <div class="form-field">
+              <label for="dest-email-from">From address</label><input
+                id="dest-email-from"
+                bind:value={draft.from}
+                required
+                placeholder="alerts@example.com"
+              />
+            </div>
+            <div class="form-field">
+              <label for="dest-email-to">To addresses</label><input
+                id="dest-email-to"
+                bind:value={draft.to}
+                required
+                placeholder="ops@example.com, dev@example.com"
+              />
+            </div>
+            <div class="form-field">
+              <label for="dest-email-prefix">Subject prefix</label><input
+                id="dest-email-prefix"
+                bind:value={draft.subjectPrefix}
+                placeholder="Optional [OLP] prefix"
+              />
+            </div>
+            <div class="form-field">
+              <label for="dest-email-ca">CA certificate (PEM)</label><textarea
+                id="dest-email-ca"
+                bind:value={draft.caCertificate}
+                rows="3"
+                placeholder="Optional pinned CA bundle"></textarea>
+            </div>
+            <div class="form-field">
+              <label for="dest-email-username">SMTP username</label><input
+                id="dest-email-username"
+                bind:value={draft.username}
+                autocomplete="off"
+                placeholder="Optional"
+              />
+            </div>
+            <div class="form-field">
+              <label for="dest-email-password">SMTP password</label><input
+                id="dest-email-password"
+                type="password"
+                bind:value={draft.password}
+                autocomplete="new-password"
+                placeholder="Optional, sealed"
+              />
+            </div>
+          {:else if draft.type === 'webhook'}
+            <div class="form-field">
+              <label for="dest-secret">Signing secret</label><input
+                id="dest-secret"
+                bind:value={draft.secret}
+                autocomplete="off"
+                placeholder="Optional HMAC secret"
+              />
+            </div>
+          {/if}
         </div>
-        <div class="form-field">
-          <label for="dest-type">Type</label><select
-            id="dest-type"
-            value={draft.type}
-            onchange={(event) => {
-              const selected = destinationTypes.find(
-                (option) => option.value === event.currentTarget.value
-              );
-              if (selected)
-                draft = newDestinationDraft(selected.value, {
-                  name: draft.name,
-                  url: draft.url,
-                  projectId: draft.projectId
-                });
-            }}
-            >{#each destinationTypes as option (option.value)}<option
-                value={option.value}>{option.label}</option
-              >{/each}</select
+        <div class="form-actions">
+          <button
+            class="button button-primary"
+            type="submit"
+            disabled={destBusy || !draft.name.trim() || !draft.url.trim()}
+            >{destBusy ? 'Creating…' : 'Create destination'}</button
           >
         </div>
-        <div class="form-field">
-          <label for="dest-url">
-            {#if draft.type === 'slack' || draft.type === 'msteams' || draft.type === 'discord'}Channel
-              origin URL{:else if draft.type === 'pagerduty'}Events API endpoint{:else if draft.type === 'email'}SMTP
-              URL{:else}Webhook URL{/if}</label
-          ><input
-            id="dest-url"
-            type="url"
-            bind:value={draft.url}
-            required
-            placeholder={isChat(draft.type)
-              ? 'https://hooks.slack.com'
-              : draft.type === 'pagerduty'
-                ? 'https://events.pagerduty.com/v2/enqueue'
-                : draft.type === 'email'
-                  ? 'smtps://smtp.example.com:465'
-                  : 'https://hooks.example.com/olp'}
-          />
-        </div>
-        <ProjectScopeField
-          id="dest-project"
-          bind:value={draft.projectId}
-          unassigned={installationWide}
-        />
-        {#if draft.type === 'slack' || draft.type === 'msteams' || draft.type === 'discord'}
-          <div class="form-field">
-            <label for="dest-webhook-url">Channel webhook URL</label><input
-              id="dest-webhook-url"
-              bind:value={draft.webhookUrl}
-              autocomplete="off"
-              required
-              placeholder="Full tokenized webhook URL, sealed"
-            />
-            <p class="section-help">
-              Stored sealed; never shown again. Must share the origin URL above.
-            </p>
-          </div>
-        {:else if draft.type === 'pagerduty'}
-          <div class="form-field">
-            <label for="dest-routing-key">Routing key</label><input
-              id="dest-routing-key"
-              bind:value={draft.routingKey}
-              autocomplete="off"
-              required
-              placeholder="PagerDuty Events API routing key, sealed"
-            />
-          </div>
-        {:else if draft.type === 'email'}
-          <div class="form-field">
-            <label for="dest-email-from">From address</label><input
-              id="dest-email-from"
-              bind:value={draft.from}
-              required
-              placeholder="alerts@example.com"
-            />
-          </div>
-          <div class="form-field">
-            <label for="dest-email-to">To addresses</label><input
-              id="dest-email-to"
-              bind:value={draft.to}
-              required
-              placeholder="ops@example.com, dev@example.com"
-            />
-          </div>
-          <div class="form-field">
-            <label for="dest-email-prefix">Subject prefix</label><input
-              id="dest-email-prefix"
-              bind:value={draft.subjectPrefix}
-              placeholder="Optional [OLP] prefix"
-            />
-          </div>
-          <div class="form-field">
-            <label for="dest-email-ca">CA certificate (PEM)</label><textarea
-              id="dest-email-ca"
-              bind:value={draft.caCertificate}
-              rows="3"
-              placeholder="Optional pinned CA bundle"></textarea>
-          </div>
-          <div class="form-field">
-            <label for="dest-email-username">SMTP username</label><input
-              id="dest-email-username"
-              bind:value={draft.username}
-              autocomplete="off"
-              placeholder="Optional"
-            />
-          </div>
-          <div class="form-field">
-            <label for="dest-email-password">SMTP password</label><input
-              id="dest-email-password"
-              type="password"
-              bind:value={draft.password}
-              autocomplete="new-password"
-              placeholder="Optional, sealed"
-            />
-          </div>
-        {:else if draft.type === 'webhook'}
-          <div class="form-field">
-            <label for="dest-secret">Signing secret</label><input
-              id="dest-secret"
-              bind:value={draft.secret}
-              autocomplete="off"
-              placeholder="Optional HMAC secret"
-            />
-          </div>
-        {/if}
-      </div>
-      <div class="form-actions">
-        <button
-          class="button button-primary"
-          type="submit"
-          disabled={destBusy || !draft.name.trim() || !draft.url.trim()}
-          >{destBusy ? 'Creating…' : 'Create destination'}</button
-        >
-      </div>
-    </fieldset>
-  </form>
+      </fieldset>
+    </form>
+  </Dialog>
 {/if}
 
 {#if destinations.isPending}<span class="inline-status" role="status"
@@ -344,9 +374,10 @@
       onclick={() => destinations.refetch()}>Retry</button
     ></span
   >
-{:else if !(destinations.data ?? []).length}<p class="section-help">
-    No destinations yet.
-  </p>
+{:else if !(destinations.data ?? []).length}<EmptyState
+    title="No destinations yet"
+    >Add a webhook or email destination, then point rules at it.</EmptyState
+  >
 {:else}
   <div class="table-scroll">
     <table class="data-table">

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import EntityPicker from '#lib/components/EntityPicker.svelte';
+  import type { EntityKind } from '#lib/components/entityOptions.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import { formatDate } from '#lib/format.js';
@@ -13,6 +15,12 @@
   import { limitsError, limitForm } from '../budgets/limitForm';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { budgetIncreaseKeys } from './budgetIncreaseKeys';
+  import Callout from '#lib/components/Callout.svelte';
+  import Dialog from '#lib/components/Dialog.svelte';
+  import EmptyState from '#lib/components/EmptyState.svelte';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
+  import StatusBadge from '#lib/components/StatusBadge.svelte';
+  import { notify } from '#lib/components/toasts.svelte.js';
   const access = useRole();
   const client = useQueryClient();
   let before = $state<string | undefined>();
@@ -30,6 +38,17 @@
   );
   let kind = $state<IncreaseInput['target']['kind']>('api_key');
   let resourceId = $state('');
+  const targetPicker = $derived<{ kind: EntityKind; label: string } | null>(
+    kind === 'budget_group'
+      ? { kind: 'budget-group', label: 'Budget group' }
+      : kind === 'organization'
+        ? { kind: 'organization', label: 'Organization' }
+        : kind === 'project' ||
+            kind === 'project_end_user' ||
+            kind === 'attribution'
+          ? { kind: 'project', label: 'Project' }
+          : null
+  );
   let route = $state('');
   let digest = $state('');
   let label = $state('');
@@ -40,7 +59,7 @@
   let expires = $state('');
   let busy = $state(false);
   let problem = $state('');
-  let notice = $state('');
+  let creating = $state(false);
   let submitted = $state<IncreaseInput | null>(null);
   let requestId = crypto.randomUUID();
   const captureOwner = usePrincipalLifetime(() => {
@@ -53,7 +72,6 @@
       amount =
       reason =
       expires =
-      notice =
         '';
     kind = 'api_key';
     window = 'day';
@@ -71,7 +89,6 @@
     const isCurrent = captureOwner();
     let committed = false;
     problem = '';
-    notice = '';
     if (!submitted) {
       problem = limitsError({ ...limitForm(), daily_cost_limit: amount });
       if (!amount.trim() || !reason.trim())
@@ -101,7 +118,8 @@
       const result = await createIncrease(submitted, requestId);
       if (!isCurrent()) return;
       committed = true;
-      notice = `Increase recorded until ${formatDate(result.expires_at)}.`;
+      creating = false;
+      notify(`Increase granted until ${formatDate(result.expires_at)}`);
       reset();
       await client.invalidateQueries(
         { queryKey: budgetIncreaseKeys.root },
@@ -123,12 +141,11 @@
     let committed = false;
     busy = true;
     problem = '';
-    notice = '';
     try {
       await revokeIncrease(item);
       if (!isCurrent()) return;
       committed = true;
-      notice = 'Increase revoked.';
+      notify('Increase revoked');
       await client.invalidateQueries(
         { queryKey: budgetIncreaseKeys.root },
         { throwOnError: true }
@@ -155,179 +172,220 @@
 </script>
 
 <svelte:head><title>Budget increases · OpenLLMProxy</title></svelte:head>
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Access</p>
-    <h1 class="page-title">Budget increases</h1>
-    <p class="page-description">
-      Raise one existing cost cap temporarily, with a recorded reason and
-      automatic expiry.
-    </p>
-  </div>
+<div class="toolbar">
+  <p class="lede">
+    A temporary increase raises a budget cap until it expires or the budget
+    window ends. Every other budget still applies.
+  </p>
+  {#if canCreate}<div class="page-actions">
+      <button
+        class="button button-primary"
+        type="button"
+        onclick={() => {
+          problem = '';
+          creating = true;
+        }}>New increase</button
+      >
+    </div>{/if}
 </div>
-<p>
-  Increases add to the current permanent cap and share its accrued and in-flight
-  spending. Every other budget still applies. An increase ends at its expiry or
-  the current calendar-window boundary, whichever comes first.
-</p>
-{#if problem}<p role="alert" class="inline-problem">{problem}</p>{/if}
-{#if notice}<p role="status">{notice}</p>{/if}
-{#if canCreate}
-  <form onsubmit={submit}>
-    <fieldset disabled={busy || submitted !== null}>
-      <legend>New increase</legend>
-      <div class="fields">
-        <div class="form-field">
-          <label for="increase-kind">Budget boundary</label><select
-            id="increase-kind"
-            bind:value={kind}
-            >{#each kinds as option (option.value)}<option value={option.value}
-                >{option.label}</option
-              >{/each}{#if canOrganize}<option value="organization"
-                >Organization</option
-              >{/if}{#if canInstall}<option value="installation"
-                >Installation</option
-              >{/if}</select
-          >
-        </div>
-        {#if kind !== 'installation'}<div class="form-field">
-            <label for="increase-resource"
-              >{kind === 'budget_group'
-                ? 'Budget group'
-                : kind === 'organization'
-                  ? 'Organization'
-                  : kind === 'project' ||
-                      kind === 'project_end_user' ||
-                      kind === 'attribution'
-                    ? 'Project'
-                    : 'API key'} ID</label
-            ><input
-              id="increase-resource"
-              bind:value={resourceId}
-              required
-              placeholder="Resource UUID"
-            />
-          </div>{/if}
-        {#if kind === 'key_route'}<div class="form-field">
-            <label for="increase-route">Route slug</label><input
-              id="increase-route"
-              bind:value={route}
-              required
-            />
-          </div>{/if}
-        {#if kind === 'key_end_user' || kind === 'project_end_user'}<div
-            class="form-field"
-          >
-            <label for="increase-digest">End-user digest</label><input
-              id="increase-digest"
-              bind:value={digest}
-              required
-              pattern={'[0-9a-f]{64}'}
-            /><small
-              >Use the digest from end-user lookup, never a raw identifier.</small
+{#if problem && !creating}<Callout tone="danger">{problem}</Callout>{/if}
+{#if canCreate && creating}
+  <Dialog
+    title="New budget increase"
+    placement="side"
+    onClose={() => (creating = false)}
+  >
+    {#if problem}<Callout tone="danger">{problem}</Callout>{/if}
+    <form onsubmit={submit}>
+      <fieldset disabled={busy || submitted !== null}>
+        <div class="fields">
+          <div class="form-field">
+            <label for="increase-kind">Budget boundary</label><select
+              id="increase-kind"
+              bind:value={kind}
+              >{#each kinds as option (option.value)}<option
+                  value={option.value}>{option.label}</option
+                >{/each}{#if canOrganize}<option value="organization"
+                  >Organization</option
+                >{/if}{#if canInstall}<option value="installation"
+                  >Installation</option
+                >{/if}</select
             >
-          </div>{/if}
-        {#if kind === 'attribution'}<div class="form-field">
-            <label for="increase-label">Attribution label</label><input
-              id="increase-label"
-              bind:value={label}
+          </div>
+          {#if targetPicker}<div class="form-field">
+              <label for="increase-resource">{targetPicker.label}</label>
+              {#key targetPicker.kind}<EntityPicker
+                  id="increase-resource"
+                  kind={targetPicker.kind}
+                  bind:value={resourceId}
+                  emptyLabel="Choose one"
+                  required
+                />{/key}
+            </div>{:else if kind !== 'installation'}<div class="form-field">
+              <label for="increase-resource">API key ID</label><input
+                id="increase-resource"
+                class="mono"
+                bind:value={resourceId}
+                required
+              />
+            </div>{/if}
+          {#if kind === 'key_route'}<div class="form-field">
+              <label for="increase-route">Route slug</label><input
+                id="increase-route"
+                bind:value={route}
+                required
+              />
+            </div>{/if}
+          {#if kind === 'key_end_user' || kind === 'project_end_user'}<div
+              class="form-field"
+            >
+              <label for="increase-digest">End-user digest</label><input
+                id="increase-digest"
+                bind:value={digest}
+                required
+                pattern={'[0-9a-f]{64}'}
+              /><small
+                >Use the digest from end-user lookup, never a raw identifier.</small
+              >
+            </div>{/if}
+          {#if kind === 'attribution'}<div class="form-field">
+              <label for="increase-label">Attribution label</label><input
+                id="increase-label"
+                bind:value={label}
+                required
+              />
+            </div>
+            <div class="form-field">
+              <label for="increase-value">Attribution value</label><input
+                id="increase-value"
+                bind:value
+                required
+              />
+            </div>{/if}
+          <div class="form-field">
+            <label for="increase-window">Budget window</label><select
+              id="increase-window"
+              bind:value={window}
+              ><option value="day">Day</option><option value="week">Week</option
+              ><option value="month">Month</option></select
+            >
+          </div>
+          <div class="form-field">
+            <label for="increase-amount">Additional USD</label><input
+              id="increase-amount"
+              bind:value={amount}
+              inputmode="decimal"
               required
             />
           </div>
           <div class="form-field">
-            <label for="increase-value">Attribution value</label><input
-              id="increase-value"
-              bind:value
+            <label for="increase-expiry">Earlier expiry (optional)</label><input
+              id="increase-expiry"
+              type="datetime-local"
+              bind:value={expires}
+            /><small>Your local time. Blank uses the budget-window end.</small>
+          </div>
+          <div class="form-field">
+            <label for="increase-reason">Reason</label><input
+              id="increase-reason"
+              bind:value={reason}
               required
+              maxlength="256"
             />
-          </div>{/if}
-        <div class="form-field">
-          <label for="increase-window">Budget window</label><select
-            id="increase-window"
-            bind:value={window}
-            ><option value="day">Day</option><option value="week">Week</option
-            ><option value="month">Month</option></select
-          >
+          </div>
         </div>
-        <div class="form-field">
-          <label for="increase-amount">Additional USD</label><input
-            id="increase-amount"
-            bind:value={amount}
-            inputmode="decimal"
-            required
-          />
-        </div>
-        <div class="form-field">
-          <label for="increase-expiry">Earlier expiry (optional)</label><input
-            id="increase-expiry"
-            type="datetime-local"
-            bind:value={expires}
-          /><small>Your local time. Blank uses the budget-window end.</small>
-        </div>
-        <div class="form-field">
-          <label for="increase-reason">Reason</label><input
-            id="increase-reason"
-            bind:value={reason}
-            required
-            maxlength="256"
-          />
-        </div>
-      </div>
-    </fieldset>
-    <button class="button button-primary" disabled={busy} type="submit"
-      >{submitted ? 'Retry increase' : 'Create increase'}</button
-    >
-    {#if submitted}<button
-        class="button button-secondary"
-        type="button"
-        disabled={busy}
-        onclick={reset}>Start another request</button
+      </fieldset>
+      <button class="button button-primary" disabled={busy} type="submit"
+        >{submitted ? 'Retry increase' : 'Create increase'}</button
       >
-      <p>
-        Retry preserves the original request to recover a lost response without
-        adding another increase.
-      </p>{/if}
-  </form>
-{/if}
-{#if query.isPending}<p role="status">
-    Loading increases…
-  </p>{:else if query.isError}<p role="alert" class="inline-problem">
-    {errorMessage(query.error)}
-  </p>
-  <button
-    type="button"
-    class="button button-secondary"
-    onclick={() => query.refetch()}>Retry list</button
-  >{:else}
-  {#each query.data?.items ?? [] as item (item.id)}
-    <article>
-      <h2>{item.target.kind.replaceAll('_', ' ')} · {item.window_kind}</h2>
-      <p>+${item.amount} until {formatDate(item.expires_at)}</p>
-      <p>{item.reason}</p>
-      <dl>
-        <dt>Resource</dt>
-        <dd>{item.target.id ?? 'Installation'} {item.target.route ?? ''}</dd>
-        {#if item.target.end_user_digest}<dt>End-user digest</dt>
-          <dd>{item.target.end_user_digest}</dd>{/if}{#if item.target.label}<dt>
-            Attribution
-          </dt>
-          <dd>{item.target.label}={item.target.value}</dd>{/if}
-        <dt>Created</dt>
-        <dd>{formatDate(item.created_at)} · {item.created_by}</dd>
-      </dl>
-      {#if item.revoked_at}<p>
-          Revoked {formatDate(item.revoked_at)}
-        </p>{:else if new Date(item.expires_at).getTime() <= Date.now()}<p>
-          Expired
-        </p>{:else if canCreate && (item.target.kind !== 'installation' || canInstall)}<button
-          type="button"
+      {#if submitted}<button
           class="button button-secondary"
+          type="button"
           disabled={busy}
-          onclick={() => revoke(item)}>Revoke increase</button
-        >{/if}
-    </article>
-  {:else}<p>No increases in this page.</p>{/each}
-  <div>
+          onclick={reset}>Start another request</button
+        >
+        <p>
+          Retry preserves the original request to recover a lost response
+          without adding another increase.
+        </p>{/if}
+    </form>
+  </Dialog>
+{/if}
+{#if query.isPending}<p class="loading-state" role="status">
+    Loading increases…
+  </p>{:else if query.isError}<Callout
+    tone="danger"
+    title="Increases could not be loaded"
+    >{errorMessage(query.error)}{#snippet actions()}<button
+        type="button"
+        class="button button-secondary"
+        onclick={() => query.refetch()}>Retry</button
+      >{/snippet}</Callout
+  >{:else if !query.data?.items.length && !before}<EmptyState
+    title="No budget increases"
+    >Increases you grant show up here until they expire.</EmptyState
+  >{:else}
+  <ScrollTable label="Budget increases">
+    <table class="data-table">
+      <thead
+        ><tr
+          ><th scope="col">Applies to</th><th scope="col">Amount</th><th
+            scope="col">Reason</th
+          ><th scope="col">Status</th><th scope="col">Granted</th><th
+            scope="col"><span class="sr-only">Actions</span></th
+          ></tr
+        ></thead
+      >
+      <tbody>
+        {#each query.data?.items ?? [] as item (item.id)}
+          {@const expired = new Date(item.expires_at).getTime() <= Date.now()}
+          <tr>
+            <td>
+              <strong
+                >{kinds.find((choice) => choice.value === item.target.kind)
+                  ?.label ?? item.target.kind}</strong
+              >
+              <span class="muted">{item.window_kind} window</span>
+              {#if item.target.id}<code class="mono">{item.target.id}</code
+                >{/if}{#if item.target.route}<code class="mono"
+                  >{item.target.route}</code
+                >{/if}{#if item.target.label}<code class="mono"
+                  >{item.target.label}={item.target.value}</code
+                >{/if}
+            </td>
+            <td class="mono">+${item.amount}</td>
+            <td>{item.reason}</td>
+            <td
+              >{#if item.revoked_at}<StatusBadge
+                  label="Revoked"
+                  tone="neutral"
+                />{:else if expired}<StatusBadge
+                  label="Expired"
+                  tone="neutral"
+                />{:else}<StatusBadge
+                  label={`Until ${formatDate(item.expires_at)}`}
+                  tone="success"
+                />{/if}</td
+            >
+            <td
+              >{formatDate(item.created_at)}<span class="muted"
+                >{item.created_by}</span
+              ></td
+            >
+            <td
+              >{#if !item.revoked_at && !expired && canCreate && (item.target.kind !== 'installation' || canInstall)}<button
+                  type="button"
+                  class="text-button danger"
+                  disabled={busy}
+                  onclick={() => revoke(item)}>Revoke</button
+                >{/if}</td
+            >
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+  </ScrollTable>
+  <div class="list-pager">
     {#if before}<button
         type="button"
         class="button button-secondary"
@@ -339,7 +397,7 @@
         class="button button-secondary"
         onclick={() => {
           before = query.data?.next_cursor ?? undefined;
-        }}>Older increases</button
+        }}>Older</button
       >{/if}
   </div>
 {/if}
@@ -355,12 +413,18 @@
     padding: 0;
     margin: 1rem 0;
   }
-  article {
-    border-top: 1px solid var(--border);
-    margin-top: 1.5rem;
-    padding-top: 1rem;
+  .lede {
+    max-width: 60ch;
+    margin: 0;
+    color: var(--foreground-muted);
   }
-  dd {
+  td code,
+  .muted {
+    display: block;
     overflow-wrap: anywhere;
+  }
+  .muted {
+    color: var(--foreground-muted);
+    font-size: var(--text-caption);
   }
 </style>

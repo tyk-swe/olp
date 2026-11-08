@@ -83,7 +83,7 @@
 </script>
 
 <section class="card" aria-label="SAML configuration">
-  <h2>SAML single sign-on</h2>
+  <h2>SAML</h2>
   <p>
     Import one trusted identity provider, then register this service provider's
     metadata with it. OLP requires a separately signed assertion for every

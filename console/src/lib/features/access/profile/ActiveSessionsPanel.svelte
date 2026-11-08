@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { confirmAction } from '#lib/components/confirm.js';
   import { profileKeys } from '#lib/features/access/profile/profileKeys.js';
 
   import { createQuery } from '@tanstack/svelte-query';
@@ -28,7 +29,14 @@
 
   async function endSession(id: string, current: boolean) {
     if (
-      !confirm(current ? 'Sign out of this session?' : 'Revoke this session?')
+      !(await confirmAction({
+        title: current ? 'Sign out here?' : 'Sign out that session?',
+        body: current
+          ? 'You’ll go back to the sign-in page.'
+          : 'Whoever is using it is signed out right away.',
+        confirmLabel: 'Sign out',
+        danger: true
+      }))
     )
       return;
     revoking = id;
@@ -63,7 +71,7 @@
       disabled={sessions.isFetching}>Refresh</button
     >
   </div>
-  {#if notice}<p class="success-message" role="status">{notice}</p>{/if}
+  {#if notice}<p class="success-banner" role="status">{notice}</p>{/if}
   {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
   {#if sessions.isPending}
     <div class="loading-state" role="status">Loading sessions…</div>

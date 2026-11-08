@@ -195,7 +195,7 @@
     {#if !eligibleKeys.length}
       <p>
         No matching keys available.
-        <a href={resolve('api-keys')}>Manage OLP keys</a>
+        <a href={resolve('keys')}>Manage OLP keys</a>
         .
       </p>
     {/if}

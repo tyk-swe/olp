@@ -189,7 +189,7 @@
   <section class="card calculator" aria-labelledby="calculator-title">
     <div class="section-heading">
       <div>
-        <h2 id="calculator-title">Cost calculator</h2>
+        <h2 class="sr-only" id="calculator-title">Cost calculator</h2>
         <p>
           Bound a route's attempt costs or price usage exactly as accounting
           records it.

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageHeader from '#lib/components/PageHeader.svelte';
   import { formatDate, stateLabel } from '#lib/format.js';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { resolve } from '$app/paths';
@@ -34,14 +35,8 @@
 </script>
 
 <svelte:head><title>A2A task · OpenLLMProxy</title></svelte:head>
-<a class="text-button" href={resolve('a2a-tasks')}>All A2A tasks</a>
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Agents</p>
-    <h1 class="page-title">A2A task</h1>
-    <p class="page-description"><code>{taskID}</code></p>
-  </div>
-</div>
+<a class="text-button" href={resolve('activity/tasks')}>All A2A tasks</a>
+<PageHeader title="Task" description={taskID} />
 {#if task.error}
   <p class="inline-problem" role="alert">{errorMessage(task.error)}</p>
 {:else if task.isFetching}
@@ -102,7 +97,7 @@
             {#each task.data.remote_fees as fee (fee.dispatch_id)}
               <tr>
                 <td
-                  ><a href={resolve(`runs/${fee.run_id}`)}
+                  ><a href={resolve(`activity/runs/${fee.run_id}`)}
                     ><code>{fee.run_id}</code></a
                   ></td
                 >
@@ -184,7 +179,7 @@
             {#each task.data.callback_tools as tool (tool.dispatch_id)}
               <tr>
                 <td
-                  ><a href={resolve(`runs/${tool.run_id}`)}
+                  ><a href={resolve(`activity/runs/${tool.run_id}`)}
                     ><code>{tool.run_id}</code></a
                   ></td
                 >

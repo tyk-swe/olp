@@ -1,4 +1,5 @@
 <script lang="ts">
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
@@ -64,24 +65,17 @@
 
 <svelte:head><title>Route templates · OpenLLMProxy</title></svelte:head>
 <a class="text-button" href={resolve('routes')}>All routes</a>
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Gateway</p>
-    <h1 class="page-title">Route templates</h1>
-    <p class="page-description">
-      Generate routes for matching certified models from one reusable
-      definition.
-    </p>
+<div class="toolbar">
+  <div class="page-actions">
+    {#if access.allows('POST /api/v1/route-templates')}
+      <button
+        class="button button-primary"
+        type="button"
+        onclick={() => select('')}>New template</button
+      >
+    {/if}
   </div>
-  {#if access.allows('POST /api/v1/route-templates')}
-    <button
-      class="button button-primary"
-      type="button"
-      onclick={() => select('')}>New template</button
-    >
-  {/if}
 </div>
-
 {#if detail.error}
   <p class="inline-problem" role="alert">{errorMessage(detail.error)}</p>
 {/if}
@@ -90,7 +84,9 @@
 {:else if templates.isPending}
   <div class="loading-state" role="status">Loading templates…</div>
 {:else if !templates.data?.length}
-  <div class="card empty-state">No route templates yet.</div>
+  <EmptyState title="No route templates yet"
+    >Save a route as a template to reuse its targets and settings.</EmptyState
+  >
 {:else}
   <ScrollTable label="Route templates">
     <table class="data-table">

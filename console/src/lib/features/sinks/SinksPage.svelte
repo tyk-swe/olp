@@ -1,4 +1,8 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
+  import Dialog from '#lib/components/Dialog.svelte';
+  import EmptyState from '#lib/components/EmptyState.svelte';
+  import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
@@ -24,6 +28,7 @@
   }));
   let selected = $state('');
   let editorVersion = $state(0);
+  let editorOpen = $state(false);
   let editor = $state<ReturnType<typeof SinkEditor>>();
   const current = $derived(
     sinks.data?.find((value) => value.id === selected) ?? null
@@ -33,6 +38,7 @@
     if (!confirmDiscardChanges(editor?.isDirty() ?? false)) return;
     selected = id;
     editorVersion += 1;
+    editorOpen = true;
   }
   async function saved(value: Sink) {
     client.setQueryData<Sink[]>(sinkKeys.all, (items = []) =>
@@ -40,7 +46,9 @@
         ? items.map((item) => (item.id === value.id ? value : item))
         : [...items, value]
     );
-    selected = value.id;
+    editorOpen = false;
+    selected = '';
+    notify(`Saved ${value.name}`);
     await refresh();
   }
   async function refresh() {
@@ -49,35 +57,34 @@
 </script>
 
 <svelte:head><title>Signed fact exports · OpenLLMProxy</title></svelte:head>
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Operations</p>
-    <h1 class="page-title">Signed fact exports</h1>
-    <p class="page-description">
-      HTTPS JSON exports with exact-byte HMAC signing and an independent
-      delivery queue.
-    </p>
-  </div>
+<div class="toolbar">
+  <p class="section-help">
+    Sends signed usage and audit records to an HTTPS endpoint so another system
+    can verify them.
+  </p>
   <div class="page-actions">
-    <button class="button button-secondary" type="button" onclick={refresh}
-      >Refresh delivery counts</button
-    >
-    {#if access.allows('POST /api/v1/sinks')}
-      <button
-        class="button button-primary"
-        type="button"
-        onclick={() => select('')}>New export</button
+    <div class="page-actions">
+      <button class="button button-secondary" type="button" onclick={refresh}
+        >Refresh delivery counts</button
       >
-    {/if}
+      {#if access.allows('POST /api/v1/sinks')}
+        <button
+          class="button button-primary"
+          type="button"
+          onclick={() => select('')}>New export</button
+        >
+      {/if}
+    </div>
   </div>
 </div>
-
 {#if sinks.error}
-  <p class="inline-problem" role="alert">{errorMessage(sinks.error)}</p>
+  <Callout tone="danger">{errorMessage(sinks.error)}</Callout>
 {:else if sinks.isPending}
   <div class="loading-state" role="status">Loading exports…</div>
 {:else if !sinks.data?.length}
-  <div class="card empty-state">No signed fact exports yet.</div>
+  <EmptyState title="No signed exports yet"
+    >Create one to deliver signed records to your own endpoint.</EmptyState
+  >
 {:else}
   <ScrollTable label="Signed fact exports">
     <table class="data-table">
@@ -123,7 +130,7 @@
                   <button
                     class="button button-secondary"
                     type="button"
-                    onclick={() => select(value.id)}>Edit export</button
+                    onclick={() => select(value.id)}>Edit</button
                   >
                 {/if}
                 {#if !value.retired_at && access.allows('DELETE /api/v1/sinks/{sink_id}')}
@@ -145,16 +152,27 @@
   </ScrollTable>
 {/if}
 
-{#if (!selected || current) && !current?.retired_at && access.allows(current ? 'PUT /api/v1/sinks/{sink_id}' : 'POST /api/v1/sinks')}
-  {#key `${current?.id ?? 'new'}:${editorVersion}`}
-    <SinkEditor
-      bind:this={editor}
-      {current}
-      reload={() => {
-        editorVersion += 1;
-      }}
-      projects={projects.data ?? []}
-      {saved}
-    />
-  {/key}
+{#if editorOpen && (!selected || current) && !current?.retired_at && access.allows(current ? 'PUT /api/v1/sinks/{sink_id}' : 'POST /api/v1/sinks')}
+  <Dialog
+    title={current ? `Edit ${current.name}` : 'New signed export'}
+    placement="side"
+    size="wide"
+    canClose={() => confirmDiscardChanges(editor?.isDirty() ?? false)}
+    onClose={() => {
+      editorOpen = false;
+      selected = '';
+    }}
+  >
+    {#key `${current?.id ?? 'new'}:${editorVersion}`}
+      <SinkEditor
+        bind:this={editor}
+        {current}
+        reload={() => {
+          editorVersion += 1;
+        }}
+        projects={projects.data ?? []}
+        {saved}
+      />
+    {/key}
+  </Dialog>
 {/if}

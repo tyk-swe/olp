@@ -1,6 +1,7 @@
 <script lang="ts">
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import SavedFilters from './SavedFilters.svelte';
-  import ReconciliationPanel from './ReconciliationPanel.svelte';
+  import Advanced from '#lib/components/Advanced.svelte';
   import { usageKeys } from '#lib/features/usage/usageKeys.js';
 
   import { goto } from '$app/navigation';
@@ -18,9 +19,11 @@
     budgetWindowState
   } from '#lib/features/access/api-keys/budgetPresentation.js';
   import UsageChart from '#lib/features/usage/UsageChart.svelte';
-  import CostCalculator from '#lib/features/usage/CostCalculator.svelte';
   import { presentEstimate } from '#lib/features/usage/estimatePresentation.js';
-  import { completenessFromSummary } from '#lib/features/usage/completenessPresentation.js';
+  import {
+    completenessFromSummary,
+    presentUsageCompleteness
+  } from '#lib/features/usage/completenessPresentation.js';
   import UsageCompletenessStatus from '#lib/features/usage/UsageCompletenessStatus.svelte';
   import { errorMessage } from '#lib/management/http.js';
   import { downloadBlob } from '#lib/download.js';
@@ -50,6 +53,11 @@
     readUsageState(page.url.searchParams, defaultUsageState())
   );
   const urlProblem = $derived(usageProblem(applied));
+  const hasNarrowingFilters = $derived(
+    Object.entries(applied.filters).some(
+      ([key, value]) => key !== 'start' && key !== 'end' && Boolean(value)
+    )
+  );
   let draft = $state(usageDraft(defaultUsageState()));
   let validation = $state<string | null>(null);
 
@@ -132,43 +140,31 @@
 
 <svelte:head><title>Usage · OpenLLMProxy</title></svelte:head>
 
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Operations</p>
-    <h1 class="page-title">Usage</h1>
-    <p class="page-description">
-      Traffic, tokens, media units, and estimated costs with visible pricing and
-      ingestion completeness.
-    </p>
-    <nav class="page-tabs" aria-label="Usage reports">
-      <a aria-current="page" href={resolve('usage')}>Usage overview</a>
-      <a href={resolve('usage/routing')}>Routing reports</a>
-    </nav>
+<div class="toolbar">
+  <SavedFilters
+    scope="usage"
+    search={`?${usageSearch(applied)}`}
+    apply={(search) => {
+      void showUsage(
+        readUsageState(new URLSearchParams(search), defaultUsageState())
+      );
+    }}
+  />
+  <div class="page-actions">
+    <button
+      class="button button-secondary"
+      type="button"
+      onclick={() => usage.refetch()}
+      disabled={usage.isFetching || Boolean(urlProblem)}>Refresh</button
+    ><button
+      class="button button-secondary"
+      type="button"
+      onclick={exportCsv}
+      disabled={exporting || Boolean(urlProblem)}
+      >{exporting ? 'Exporting…' : 'Download CSV'}</button
+    >
   </div>
-  <button
-    class="button button-secondary"
-    type="button"
-    onclick={() => usage.refetch()}
-    disabled={usage.isFetching || Boolean(urlProblem)}>Refresh</button
-  ><button
-    class="button button-secondary"
-    type="button"
-    onclick={exportCsv}
-    disabled={exporting || Boolean(urlProblem)}
-    >{exporting ? 'Exporting…' : 'Export CSV'}</button
-  >
 </div>
-
-<SavedFilters
-  scope="usage"
-  search={`?${usageSearch(applied)}`}
-  apply={(search) => {
-    void showUsage(
-      readUsageState(new URLSearchParams(search), defaultUsageState())
-    );
-  }}
-/>
-
 {#if exportError}<div class="inline-problem" role="alert">
     {exportError}
   </div>{/if}
@@ -184,58 +180,6 @@
     >
     <label
       >To <input bind:value={draft.end} type="datetime-local" required /></label
-    >
-    <label
-      >Route <input bind:value={draft.route} placeholder="All routes" /></label
-    >
-    <label
-      >Provider ID <input
-        bind:value={draft.provider_id}
-        class="mono"
-        placeholder="All providers"
-      /></label
-    >
-    <label
-      >Model <input bind:value={draft.model} placeholder="All models" /></label
-    >
-    <label
-      >API key ID <input
-        bind:value={draft.api_key_id}
-        class="mono"
-        placeholder="All keys"
-      /></label
-    >
-    <label
-      >Operation <input
-        bind:value={draft.operation}
-        placeholder="All operations"
-      /></label
-    >
-    <label
-      >Project ID <input
-        bind:value={draft.project_id}
-        class="mono"
-        placeholder="All projects"
-      /></label
-    >
-    <label
-      >Session ID <input
-        bind:value={draft.session_id}
-        class="mono"
-        placeholder="All sessions"
-      /></label
-    >
-    <label
-      >Attribution key <input
-        bind:value={draft.attribution_key}
-        placeholder="e.g. team"
-      /></label
-    >
-    <label
-      >Attribution value <input
-        bind:value={draft.attribution_value}
-        placeholder="Any value"
-      /></label
     >
     <label
       >Break down by <select bind:value={draft.dimension}
@@ -259,11 +203,73 @@
       ></label
     >
   </div>
+  <Advanced label="More filters" open={hasNarrowingFilters}>
+    <div class="filter-grid">
+      <label
+        >Route <input
+          bind:value={draft.route}
+          placeholder="All routes"
+        /></label
+      >
+      <label
+        >Provider ID <input
+          bind:value={draft.provider_id}
+          class="mono"
+          placeholder="All providers"
+        /></label
+      >
+      <label
+        >Model <input
+          bind:value={draft.model}
+          placeholder="All models"
+        /></label
+      >
+      <label
+        >API key ID <input
+          bind:value={draft.api_key_id}
+          class="mono"
+          placeholder="All keys"
+        /></label
+      >
+      <label
+        >Operation <input
+          bind:value={draft.operation}
+          placeholder="All operations"
+        /></label
+      >
+      <label
+        >Project ID <input
+          bind:value={draft.project_id}
+          class="mono"
+          placeholder="All projects"
+        /></label
+      >
+      <label
+        >Session ID <input
+          bind:value={draft.session_id}
+          class="mono"
+          placeholder="All sessions"
+        /></label
+      >
+      <label
+        >Attribution key <input
+          bind:value={draft.attribution_key}
+          placeholder="e.g. team"
+        /></label
+      >
+      <label
+        >Attribution value <input
+          bind:value={draft.attribution_value}
+          placeholder="Any value"
+        /></label
+      >
+    </div>
+  </Advanced>
   <div class="filter-actions">
     <button class="button button-primary" type="submit">Apply</button><button
       class="button button-secondary"
       type="button"
-      onclick={clear}>Clear</button
+      onclick={clear}>Reset</button
     >
   </div>
 </form>
@@ -334,87 +340,92 @@
     </section>
   {/if}
 
-  <section
-    class="pipeline-grid"
-    aria-label="Request metadata persistence and usage range coverage"
+  <Advanced
+    label="Data pipeline details"
+    open={presentUsageCompleteness(usage.data.completeness).kind !== 'complete'}
   >
-    <article class="card pipeline-card">
-      <p>Request metadata consumer</p>
-      <strong
-        class:danger-text={usage.data.completeness.request_metadata_consumer
-          .state === 'stale'}
-        >{titleCase(
-          usage.data.completeness.request_metadata_consumer.state
-        )}</strong
-      >
-      <span
-        >{!usage.data.completeness.request_metadata_consumer.checked_at
-          ? 'No worker checkpoint recorded'
-          : usage.data.completeness.request_metadata_consumer
-                .heartbeat_age_seconds == null
-            ? 'Checkpoint age unknown'
-            : `Checkpoint ${usage.data.completeness.request_metadata_consumer.heartbeat_age_seconds}s ago`}</span
-      >
-    </article>
-    <article class="card pipeline-card">
-      <p>Pending acknowledgements</p>
-      <strong
-        >{formatCompact(
-          usage.data.completeness.request_metadata_consumer.pending_events
-        )}</strong
-      >
-      <span
-        >{usage.data.completeness.request_metadata_consumer.oldest_pending_at
-          ? 'Oldest pending event is tracked'
-          : 'No delivered events waiting'}</span
-      >
-    </article>
-    <article class="card pipeline-card">
-      <p>Stream lag</p>
-      <strong
-        >{formatCompact(
-          usage.data.completeness.request_metadata_consumer.lag_events
-        )}</strong
-      >
-      <span>Events not yet delivered to the worker</span>
-    </article>
-    <article class="card pipeline-card">
-      <p>Range coverage</p>
-      <strong class:danger-text={usage.data.completeness.coverage.approximate}
-        >{usage.data.completeness.coverage.range_complete
-          ? 'Exact'
-          : 'Incomplete'}</strong
-      >
-      <span
-        >{usage.data.completeness.coverage.approximate
-          ? 'Approximate totals · '
-          : ''}{usage.data.completeness.coverage
-          .excluded_partial_aggregate_boundaries} partial retained-hour {usage
-          .data.completeness.coverage.excluded_partial_aggregate_boundaries ===
-        1
-          ? 'boundary'
-          : 'boundaries'} excluded</span
-      >
-    </article>
-    <article class="card pipeline-card">
-      <p>Priced requests</p>
-      <strong>{formatCompact(usage.data.completeness.priced_count)}</strong>
-      <span
-        >of {formatCompact(usage.data.completeness.request_count)} requests in range</span
-      >
-    </article>
-    <article class="card pipeline-card">
-      <p>Gateway epoch uncertainty</p>
-      <strong
-        class:danger-text={usage.data.completeness
-          .uncertain_request_metadata_gap_count > 0}
-        >{formatCompact(
-          usage.data.completeness.uncertain_request_metadata_gap_count
-        )}</strong
-      >
-      <span>Unclean process epochs with an unknown exact loss count</span>
-    </article>
-  </section>
+    <section
+      class="pipeline-grid"
+      aria-label="Request metadata persistence and usage range coverage"
+    >
+      <article class="card pipeline-card">
+        <p>Request metadata consumer</p>
+        <strong
+          class:danger-text={usage.data.completeness.request_metadata_consumer
+            .state === 'stale'}
+          >{titleCase(
+            usage.data.completeness.request_metadata_consumer.state
+          )}</strong
+        >
+        <span
+          >{!usage.data.completeness.request_metadata_consumer.checked_at
+            ? 'No worker checkpoint recorded'
+            : usage.data.completeness.request_metadata_consumer
+                  .heartbeat_age_seconds == null
+              ? 'Checkpoint age unknown'
+              : `Checkpoint ${usage.data.completeness.request_metadata_consumer.heartbeat_age_seconds}s ago`}</span
+        >
+      </article>
+      <article class="card pipeline-card">
+        <p>Pending acknowledgements</p>
+        <strong
+          >{formatCompact(
+            usage.data.completeness.request_metadata_consumer.pending_events
+          )}</strong
+        >
+        <span
+          >{usage.data.completeness.request_metadata_consumer.oldest_pending_at
+            ? 'Oldest pending event is tracked'
+            : 'No delivered events waiting'}</span
+        >
+      </article>
+      <article class="card pipeline-card">
+        <p>Stream lag</p>
+        <strong
+          >{formatCompact(
+            usage.data.completeness.request_metadata_consumer.lag_events
+          )}</strong
+        >
+        <span>Events not yet delivered to the worker</span>
+      </article>
+      <article class="card pipeline-card">
+        <p>Range coverage</p>
+        <strong class:danger-text={usage.data.completeness.coverage.approximate}
+          >{usage.data.completeness.coverage.range_complete
+            ? 'Exact'
+            : 'Incomplete'}</strong
+        >
+        <span
+          >{usage.data.completeness.coverage.approximate
+            ? 'Approximate totals · '
+            : ''}{usage.data.completeness.coverage
+            .excluded_partial_aggregate_boundaries} partial retained-hour {usage
+            .data.completeness.coverage
+            .excluded_partial_aggregate_boundaries === 1
+            ? 'boundary'
+            : 'boundaries'} excluded</span
+        >
+      </article>
+      <article class="card pipeline-card">
+        <p>Priced requests</p>
+        <strong>{formatCompact(usage.data.completeness.priced_count)}</strong>
+        <span
+          >of {formatCompact(usage.data.completeness.request_count)} requests in range</span
+        >
+      </article>
+      <article class="card pipeline-card">
+        <p>Gateway epoch uncertainty</p>
+        <strong
+          class:danger-text={usage.data.completeness
+            .uncertain_request_metadata_gap_count > 0}
+          >{formatCompact(
+            usage.data.completeness.uncertain_request_metadata_gap_count
+          )}</strong
+        >
+        <span>Unclean process epochs with an unknown exact loss count</span>
+      </article>
+    </section>
+  </Advanced>
 
   <section class="metric-grid usage-metrics" aria-label="Usage summary">
     <article class="card metric-card">
@@ -536,7 +547,9 @@
       <span class="badge">Top {usage.data.breakdown.length}</span>
     </div>
     {#if usage.data.breakdown.length === 0}
-      <div class="card empty-state">No usage in this time range.</div>
+      <EmptyState title="No usage in this time range"
+        >Try a wider date range or fewer filters.</EmptyState
+      >
     {:else}
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the table.) -->
       <div
@@ -621,11 +634,6 @@
       </div>
     {/if}
   </section>
-  <ReconciliationPanel
-    start={applied.filters.start}
-    end={applied.filters.end}
-  />
-  <CostCalculator />
 {/if}
 
 <style>

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
+  import Advanced from '#lib/components/Advanced.svelte';
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
 
@@ -35,6 +37,19 @@
     queryProblem: string | null;
   } = $props();
 
+  const hasMoreFilters = $derived(
+    Boolean(
+      listState.operation ||
+      listState.errorClass ||
+      listState.providerId ||
+      listState.apiKeyId ||
+      listState.projectId ||
+      listState.sessionId ||
+      listState.attributionKey ||
+      listState.attributionValue
+    )
+  );
+
   let exporting = $state(false);
   let exportError = $state('');
 
@@ -62,92 +77,97 @@
         placeholder="support-chat"
       /></label
     >
-    <label
-      >Operation <input
-        bind:value={listState.operation}
-        name="operation"
-        placeholder="generation"
-      /></label
-    >
-    <label
-      >Provider ID <input
-        bind:value={listState.providerId}
-        name="provider"
-        class="mono"
-      /></label
-    >
     <label>Model <input bind:value={listState.model} name="model" /></label>
-    <label
-      >API key ID <input
-        bind:value={listState.apiKeyId}
-        name="key"
-        class="mono"
-      /></label
-    >
     <label
       >Status code <input
         bind:value={listState.statusCode}
         name="status"
         inputmode="numeric"
         pattern={'[0-9]{1,5}'}
+        placeholder="429"
       /></label
     >
     <label
-      >Error class <input
-        bind:value={listState.errorClass}
-        name="error"
-      /></label
-    >
-    <label
-      >Project ID <input
-        bind:value={listState.projectId}
-        name="project"
-        class="mono"
-      /></label
-    >
-    <label
-      >Session ID <input
-        bind:value={listState.sessionId}
-        name="session"
-        class="mono"
-      /></label
-    >
-    <label
-      >Attribution key <input
-        bind:value={listState.attributionKey}
-        name="attribution_key"
-      /></label
-    >
-    <label
-      >Attribution value <input
-        bind:value={listState.attributionValue}
-        name="attribution_value"
-      /></label
-    >
-    <label
-      >Started after <input
+      >From <input
         bind:value={listState.startedAfter}
         name="after"
         type={timeInputType(listState.startedAfter)}
       /></label
     >
     <label
-      >Started before <input
+      >To <input
         bind:value={listState.startedBefore}
         name="before"
         type={timeInputType(listState.startedBefore)}
       /></label
     >
   </div>
+  <Advanced label="More filters" open={hasMoreFilters}>
+    <div class="filter-grid">
+      <label
+        >Operation <input
+          bind:value={listState.operation}
+          name="operation"
+          placeholder="generation"
+        /></label
+      >
+      <label
+        >Error class <input
+          bind:value={listState.errorClass}
+          name="error"
+        /></label
+      >
+      <label
+        >Provider ID <input
+          bind:value={listState.providerId}
+          name="provider"
+          class="mono"
+        /></label
+      >
+      <label
+        >API key ID <input
+          bind:value={listState.apiKeyId}
+          name="key"
+          class="mono"
+        /></label
+      >
+      <label
+        >Project ID <input
+          bind:value={listState.projectId}
+          name="project"
+          class="mono"
+        /></label
+      >
+      <label
+        >Session ID <input
+          bind:value={listState.sessionId}
+          name="session"
+          class="mono"
+        /></label
+      >
+      <label
+        >Attribution key <input
+          bind:value={listState.attributionKey}
+          name="attribution_key"
+        /></label
+      >
+      <label
+        >Attribution value <input
+          bind:value={listState.attributionValue}
+          name="attribution_value"
+        /></label
+      >
+    </div>
+  </Advanced>
   <div class="filter-actions">
-    <button class="button button-primary" type="submit">Apply filters</button>
+    <button class="button button-primary" type="submit">Apply</button>
     <button class="button button-secondary" type="button" onclick={resetFilters}
-      >Clear</button
+      >Reset</button
     >
   </div>
 </form>
 
-{#if problem}<div class="inline-problem" role="alert">{problem}</div>{/if}
+{#if problem}<Callout tone="danger">{problem}</Callout>{/if}
 
 {#if !queryProblem && listState.applied.session_id && requests.data && !requests.isPending && !requests.isError && !requests.isPlaceholderData}
   {@const sessionItems = [...requests.data.items].sort((a, b) =>
@@ -452,12 +472,13 @@
     font-size: var(--text-caption);
   }
   .filters {
-    margin-top: 1.5rem;
-    padding: 1.5rem;
+    display: grid;
+    gap: 1rem;
+    padding: 1.25rem;
   }
   .filter-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
     gap: 0.8rem;
   }
   label {
@@ -594,9 +615,6 @@
   }
 
   @media (max-width: 72rem) {
-    .filter-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
     dl {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
@@ -611,7 +629,6 @@
     }
   }
   @media (max-width: 40rem) {
-    .filter-grid,
     dl {
       grid-template-columns: 1fr;
     }

@@ -177,10 +177,7 @@
   guardUnsavedChanges(isDirty);
 </script>
 
-<form class="card form-card" onsubmit={save}>
-  <h2>
-    {current ? 'Edit and recertify server' : 'Register and certify server'}
-  </h2>
+<form class="form-card" onsubmit={save}>
   <label class="form-field"
     >Name<input required maxlength="100" bind:value={name} /></label
   >

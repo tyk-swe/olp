@@ -1,4 +1,10 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
+  import Dialog from '#lib/components/Dialog.svelte';
+  import EmptyState from '#lib/components/EmptyState.svelte';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
+  import StatusBadge from '#lib/components/StatusBadge.svelte';
+  import { notify } from '#lib/components/toasts.svelte.js';
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import CredentialsPanel from './CredentialsPanel.svelte';
   import AttachmentControls from './AttachmentControls.svelte';
@@ -134,10 +140,14 @@
     text = '';
     result = null;
   });
-  let tab = $state('Definitions');
+  let {
+    tab
+  }: { tab: 'checks' | 'policies' | 'attachments' | 'credentials' | 'try' } =
+    $props();
   let busy = $state(false);
   let error = $state('');
-  let notice = $state('');
+  let definitionOpen = $state(false);
+  let policyOpen = $state(false);
   let definitionEditor = 0;
   let selected = $state<Definition | null>(null);
   let name = $state('');
@@ -181,7 +191,7 @@
   async function run(action: (current: () => boolean) => Promise<void>) {
     const current = capture();
     busy = true;
-    error = notice = '';
+    error = '';
     try {
       await action(current);
       if (current())
@@ -191,6 +201,24 @@
     } finally {
       if (current()) busy = false;
     }
+  }
+  function openDefinition(value: Definition | null) {
+    error = '';
+    edit(value);
+    definitionOpen = true;
+  }
+  function closeDefinition() {
+    edit(null);
+    definitionOpen = false;
+  }
+  function openPolicy(value: Policy | null) {
+    error = '';
+    editPolicy(value);
+    policyOpen = true;
+  }
+  function closePolicy() {
+    editPolicy(null);
+    policyOpen = false;
   }
   function edit(value: Definition | null) {
     definitionEditor += 1;
@@ -254,7 +282,7 @@
       if (!current()) return;
       if (editor !== definitionEditor) return;
       selected = saved;
-      notice = 'Draft saved. Activate its revision when it is ready.';
+      notify('Draft saved. Activate it when it is ready');
     });
   }
   function editPolicy(value: Policy | null) {
@@ -275,7 +303,7 @@
       if (!current()) return;
       if (editor !== policyEditor) return;
       selectedPolicy = saved;
-      notice = 'Policy draft saved with its ordered, pinned revisions.';
+      notify('Policy draft saved');
     });
   }
   function chooseDefinition(index: number, id: string) {
@@ -297,7 +325,7 @@
         order
       });
       if (!current()) return;
-      notice = 'Policy attached. Inherited policies continue to apply.';
+      notify('Policy attached');
     });
   }
   async function evaluate(event: SubmitEvent) {
@@ -322,70 +350,90 @@
 </script>
 
 <svelte:head><title>Guardrails · OpenLLMProxy</title></svelte:head>
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Gateway</p>
-    <h1 class="page-title">Guardrails</h1>
-    <p class="page-description">
-      Define safeguards, pin policy revisions, and apply them across your
-      gateway.
-    </p>
-  </div>
-</div>
-<nav aria-label="Guardrail sections" class="page-tabs">
-  {#each ['Definitions', 'Policies', 'Attachments', 'Credentials', 'Playground'] as section (section)}
-    <button
-      type="button"
-      aria-current={tab === section ? 'page' : undefined}
-      onclick={() => {
-        tab = section;
-        error = notice = '';
-      }}>{section}</button
-    >
-  {/each}
-</nav>
-{#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
-{#if notice}<p role="status">{notice}</p>{/if}
+{#if error && !definitionOpen && !policyOpen}<Callout tone="danger"
+    >{error}</Callout
+  >{/if}
 {#if definitions.isPending || policies.isPending || projects.isPending}
   <p role="status">Loading guardrail inventory…</p>
 {/if}
-{#if definitions.isError || policies.isError || attachments.isError || projects.isError}<p
-    role="alert"
-  >
-    Guardrails could not be loaded. Reload to try again.
-  </p>{/if}
+{#if definitions.isError || policies.isError || attachments.isError || projects.isError}<Callout
+    tone="danger">Guardrails didn’t load. Reload the page to try again.</Callout
+  >{/if}
 
-{#if tab === 'Definitions'}
-  <section class="card stack-card">
-    <h2>Definitions</h2>
-    <ul>
-      {#each definitions.data?.items ?? [] as value (value.id)}<li>
-          <button class="button button-secondary" onclick={() => edit(value)}
-            >{value.name}</button
-          >
-          {#if !value.retired_at && access.allows('DELETE /api/v1/guardrails/{guardrail_id}')}<ConfirmAction
-              danger
-              label="Retire definition"
-              description={`Retire ${value.name}`}
-              identity={`${value.id}:${value.etag}`}
-              run={(requestId) => retireDefinition(value, requestId)}
-              done={async () => {
-                if (selected?.id === value.id) edit(null);
-                await definitions.refetch();
-              }}
-            />{/if}
-          <span
-            >{value.type} · Revision {value.revision} · {value.active_revision_id ===
-            value.revision_id
-              ? 'Active'
-              : 'Draft'}</span
-          >
-        </li>{/each}
-    </ul>
-    {#if canEdit}<button
-        class="button button-secondary"
-        onclick={() => edit(null)}>New definition</button
-      >
+{#if tab === 'checks'}
+  <div class="toolbar">
+    <p class="lede">
+      A check inspects prompts or responses, for example for blocked words or
+      personal data. Group checks into a policy to use them.
+    </p>
+    {#if canEdit}<div class="page-actions">
+        <button
+          class="button button-primary"
+          onclick={() => openDefinition(null)}>New check</button
+        >
+      </div>{/if}
+  </div>
+  {#if !definitions.isPending && !definitions.data?.items.length}<EmptyState
+      title="No checks yet">Create a check, then add it to a policy.</EmptyState
+    >{:else}
+    <ScrollTable label="Checks">
+      <table class="data-table">
+        <thead
+          ><tr
+            ><th scope="col">Name</th><th scope="col">Type</th><th scope="col"
+              >Revision</th
+            ><th scope="col"><span class="sr-only">Actions</span></th></tr
+          ></thead
+        >
+        <tbody>
+          {#each definitions.data?.items ?? [] as value (value.id)}<tr>
+              <td
+                ><button
+                  class="text-button"
+                  onclick={() => openDefinition(value)}>{value.name}</button
+                ></td
+              >
+              <td class="mono">{value.type}</td>
+              <td
+                >{value.revision}
+                <StatusBadge
+                  label={value.active_revision_id === value.revision_id
+                    ? 'Active'
+                    : 'Draft'}
+                  tone={value.active_revision_id === value.revision_id
+                    ? 'success'
+                    : 'warning'}
+                /></td
+              >
+              <td
+                >{#if !value.retired_at && access.allows('DELETE /api/v1/guardrails/{guardrail_id}')}<ConfirmAction
+                    danger
+                    label="Retire check"
+                    description={`Retire ${value.name}`}
+                    identity={`${value.id}:${value.etag}`}
+                    run={(requestId) => retireDefinition(value, requestId)}
+                    done={async () => {
+                      if (selected?.id === value.id) closeDefinition();
+                      await definitions.refetch();
+                    }}
+                  />{/if}</td
+              >
+            </tr>{/each}
+        </tbody>
+      </table>
+    </ScrollTable>
+  {/if}
+  {#if definitionOpen}
+    <Dialog
+      title={selected ? selected.name : 'New check'}
+      description={selected
+        ? `Revision ${selected.revision}. Saving creates a new draft revision.`
+        : undefined}
+      placement="side"
+      size="wide"
+      onClose={closeDefinition}
+    >
+      {#if error}<Callout tone="danger">{error}</Callout>{/if}
       <form onsubmit={saveDefinition}>
         <label class="form-field"
           >Name<input required maxlength="100" bind:value={name} /></label
@@ -462,48 +510,81 @@
                 if (!selected) return;
                 await activateDefinition(selected);
                 if (!current()) return;
-                notice = 'Definition revision activated.';
-                edit(null);
+                notify('Check activated');
+                closeDefinition();
               })}>Activate revision {selected.revision}</button
           >{/if}
       </form>
-    {/if}
-  </section>
-  {#if creatingCredential}<CredentialsPanel
-      projects={projects.data?.items ?? []}
-      projectID={project}
-      oncreated={(id) => {
-        credentialID = id;
-        creatingCredential = false;
-      }}
-    />{/if}
-{:else if tab === 'Policies'}
-  <section class="card stack-card">
-    <h2>Ordered policies</h2>
-    <ul>
-      {#each policies.data?.items ?? [] as value (value.policy_id)}<li>
-          <button
-            class="button button-secondary"
-            onclick={() => editPolicy(value)}>{value.name}</button
-          >
-          {#if !value.retired_at && access.allows('DELETE /api/v1/guardrail-policies/{policy_id}')}<ConfirmAction
-              danger
-              label="Retire policy"
-              description={`Retire ${value.name}`}
-              identity={`${value.policy_id}:${value.etag}`}
-              run={(requestId) => retirePolicy(value, requestId)}
-              done={async () => {
-                if (selectedPolicy?.policy_id === value.policy_id)
-                  editPolicy(null);
-                await policies.refetch();
-              }}
-            />{/if} · Revision {value.revision}
-        </li>{/each}
-    </ul>
-    {#if canEdit}<button
-        class="button button-secondary"
-        onclick={() => editPolicy(null)}>New policy</button
-      >
+      {#if creatingCredential}<CredentialsPanel
+          projects={projects.data?.items ?? []}
+          projectID={project}
+          oncreated={(id) => {
+            credentialID = id;
+            creatingCredential = false;
+          }}
+        />{/if}
+    </Dialog>
+  {/if}
+{:else if tab === 'policies'}
+  <div class="toolbar">
+    <p class="lede">
+      A policy runs its checks in order. Attach a policy to apply it to an
+      installation, project, route or key.
+    </p>
+    {#if canEdit}<div class="page-actions">
+        <button class="button button-primary" onclick={() => openPolicy(null)}
+          >New policy</button
+        >
+      </div>{/if}
+  </div>
+  {#if !policies.isPending && !policies.data?.items.length}<EmptyState
+      title="No policies yet"
+      >Create a policy from one or more checks.</EmptyState
+    >{:else}
+    <ScrollTable label="Policies">
+      <table class="data-table">
+        <thead
+          ><tr
+            ><th scope="col">Name</th><th scope="col">Revision</th><th
+              scope="col"><span class="sr-only">Actions</span></th
+            ></tr
+          ></thead
+        >
+        <tbody>
+          {#each policies.data?.items ?? [] as value (value.policy_id)}<tr>
+              <td
+                ><button class="text-button" onclick={() => openPolicy(value)}
+                  >{value.name}</button
+                ></td
+              >
+              <td>{value.revision}</td>
+              <td
+                >{#if !value.retired_at && access.allows('DELETE /api/v1/guardrail-policies/{policy_id}')}<ConfirmAction
+                    danger
+                    label="Retire policy"
+                    description={`Retire ${value.name}`}
+                    identity={`${value.policy_id}:${value.etag}`}
+                    run={(requestId) => retirePolicy(value, requestId)}
+                    done={async () => {
+                      if (selectedPolicy?.policy_id === value.policy_id)
+                        closePolicy();
+                      await policies.refetch();
+                    }}
+                  />{/if}</td
+              >
+            </tr>{/each}
+        </tbody>
+      </table>
+    </ScrollTable>
+  {/if}
+  {#if policyOpen}
+    <Dialog
+      title={selectedPolicy ? selectedPolicy.name : 'New policy'}
+      placement="side"
+      size="wide"
+      onClose={closePolicy}
+    >
+      {#if error}<Callout tone="danger">{error}</Callout>{/if}
       <form onsubmit={savePolicy}>
         <label class="form-field"
           >Name<input required maxlength="100" bind:value={policyName} /></label
@@ -595,14 +676,16 @@
                 if (!selectedPolicy) return;
                 await activatePolicy(selectedPolicy);
                 if (!current()) return;
-                notice =
-                  'Policy activated. Existing attachments keep their pinned revision.';
-                editPolicy(null);
+                notify(
+                  'Policy activated. Existing attachments keep their pinned revision'
+                );
+                closePolicy();
               })}>Activate revision</button
           >{/if}
-      </form>{/if}
-  </section>
-{:else if tab === 'Attachments'}
+      </form>
+    </Dialog>
+  {/if}
+{:else if tab === 'attachments'}
   <section class="card stack-card">
     <h2>Inherited safeguards</h2>
     <p>
@@ -657,11 +740,11 @@
         >
       </form>{/if}
   </section>
-{:else if tab === 'Credentials'}
+{:else if tab === 'credentials'}
   <CredentialsPanel projects={projects.data?.items ?? []} />
 {:else}
   <section class="card stack-card">
-    <h2>Guardrail playground</h2>
+    <h2>Try a policy</h2>
     <p>
       Test a policy without saving the content you enter. External guardrails
       send it to their configured endpoints.

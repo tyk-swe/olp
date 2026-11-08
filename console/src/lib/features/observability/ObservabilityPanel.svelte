@@ -7,6 +7,8 @@
   import ExportSinksPanel from './ExportSinksPanel.svelte';
   import CapturePoliciesPanel from './CapturePoliciesPanel.svelte';
   import './observability.css';
+
+  let { view }: { view: 'telemetry' | 'capture' } = $props();
   const access = useRole();
   const globalScope = $derived(access.user?.access_scope === 'global');
   const ownerOnly = $derived(access.user?.role === 'owner' && globalScope);
@@ -30,28 +32,20 @@
   }
 </script>
 
-<section
-  class="card observability-panel"
-  aria-labelledby="observability-heading"
->
-  <p class="eyebrow">Observability</p>
-  <h2 id="observability-heading">Export sinks and payload capture</h2>
-  <p class="section-help">
-    Durable metadata and usage export sinks deliver to HTTPS, OTLP logs or
-    object storage. Bounded payload capture is opt-in, with optional pinned
-    local redactors.
-  </p>
-
-  <ExportSinksPanel
-    {canManageInstallation}
-    {canManageProjects}
-    {canMutate}
-    memberships={memberships.data ?? []}
-  />
-  <CapturePoliciesPanel
-    {canManageInstallation}
-    {canManageProjects}
-    {canMutate}
-    {ownerOnly}
-  />
-</section>
+<div class="observability-panel">
+  {#if view === 'telemetry'}
+    <ExportSinksPanel
+      {canManageInstallation}
+      {canManageProjects}
+      {canMutate}
+      memberships={memberships.data ?? []}
+    />
+  {:else}
+    <CapturePoliciesPanel
+      {canManageInstallation}
+      {canManageProjects}
+      {canMutate}
+      {ownerOnly}
+    />
+  {/if}
+</div>

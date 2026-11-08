@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageHeader from '#lib/components/PageHeader.svelte';
   import { formatDate } from '#lib/format.js';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { resolve } from '$app/paths';
@@ -32,22 +33,18 @@
 </script>
 
 <svelte:head><title>Investigations · OpenLLMProxy</title></svelte:head>
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Agents</p>
-    <h1 class="page-title">Investigations</h1>
-    <p class="page-description">
-      Saved filters, evidence references and operator summaries for your
-      projects.
-    </p>
-  </div>
-
-  {#if access.allows('POST /api/v1/investigations')}
-    <a class="button button-primary" href={resolve('investigations/new')}
-      >New investigation</a
-    >
-  {/if}
-</div>
+<PageHeader
+  title="Investigations"
+  description="Saved filters, evidence references and operator summaries for your projects."
+>
+  {#snippet actions()}
+    {#if access.allows('POST /api/v1/investigations')}
+      <a class="button button-primary" href={resolve('investigations/new')}
+        >New investigation</a
+      >
+    {/if}
+  {/snippet}
+</PageHeader>
 <form
   class="filter-bar"
   onsubmit={(event) => {

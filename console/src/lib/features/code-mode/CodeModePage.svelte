@@ -13,6 +13,11 @@
     confirmDiscardChanges,
     guardUnsavedChanges
   } from '#lib/editing/unsavedChanges.js';
+  import Advanced from '#lib/components/Advanced.svelte';
+  import Callout from '#lib/components/Callout.svelte';
+  import EmptyState from '#lib/components/EmptyState.svelte';
+  import PageHeader from '#lib/components/PageHeader.svelte';
+  import { getCodeClientConfiguration } from './api.js';
   import CodeManagement from './CodeManagement.svelte';
   import CodeDiagnostics from './CodeDiagnostics.svelte';
   import {
@@ -22,16 +27,16 @@
   } from './sections';
 
   let {
-    gatewayURL,
-    loadClientConfiguration
+    loadClientConfiguration = (route, selection, signal) =>
+      getCodeClientConfiguration(route, gatewayURL, selection, signal)
   }: {
-    gatewayURL: string;
     loadClientConfiguration?: (
       route: CodeRoute,
       selection: CodeClientSelection,
       signal?: AbortSignal
     ) => Promise<CodeClientConfiguration>;
   } = $props();
+  let gatewayURL = $state(globalThis.location?.origin ?? '');
   const access = useRole();
   const principal = $derived(
     access.user ? authLifecycle.principalPartition(access.user) : ''
@@ -70,47 +75,59 @@
   );
 </script>
 
-<svelte:head><title>Code mode · OpenLLMProxy</title></svelte:head>
+<PageHeader
+  title="Code mode"
+  description="Point coding tools like subscription-based assistants at an OLP route. Requests keep their native models and conversations, and paid targets need pricing and a spend limit."
+/>
 <div class="code-mode">
-  <header>
-    <h1>Code mode</h1>
-    <p>
-      Use coding subscriptions or explicitly selected paid API targets through
-      an OLP route and OLP API key. Requests retain native models and
-      conversation ownership. Paid targets require pricing and spend
-      authorization.
+  {#if !readable}
+    <EmptyState title="Nothing here for your role"
+      >Ask an operator for access to code mode.</EmptyState
+    >
+  {:else if projects.isPending}<p class="loading-state" role="status">
+      Loading projects…
     </p>
-  </header>
-  {#if !readable}<p role="status">
-      Your role cannot read code-mode configuration.
-    </p>
-  {:else if projects.isPending}<p role="status">Loading projects…</p>
-  {:else if projects.isError}<p role="alert">
-      Projects are unavailable. <button
-        class="text-button"
-        type="button"
-        onclick={() => projects.refetch()}>Retry</button
-      >
-    </p>
-  {:else if !projects.data?.length}<p>
-      No project is available. Code-mode resources belong to a project.
-    </p>
+  {:else if projects.isError}
+    <Callout tone="danger" title="Projects could not be loaded">
+      Check your connection and try again.
+      {#snippet actions()}<button
+          class="button button-secondary"
+          type="button"
+          onclick={() => projects.refetch()}>Try again</button
+        >{/snippet}
+    </Callout>
+  {:else if !projects.data?.length}
+    <EmptyState title="No projects yet"
+      >Code mode accounts, pools and routes belong to a project. Create a
+      project first.</EmptyState
+    >
   {:else}
-    <div class="project form-field">
-      <label for="code-project">Project</label><select
-        id="code-project"
-        value={projectId}
-        onchange={changeProject}
-        >{#each projects.data as project (project.id)}<option value={project.id}
-            >{project.name}</option
-          >{/each}</select
-      >
+    <div class="setup">
+      <div class="form-field">
+        <label for="code-project">Project</label><select
+          id="code-project"
+          value={projectId}
+          onchange={changeProject}
+          >{#each projects.data as project (project.id)}<option
+              value={project.id}>{project.name}</option
+            >{/each}</select
+        >
+      </div>
+      <Advanced label="Gateway address">
+        <div class="form-field">
+          <label for="code-gateway-url">Public gateway URL</label>
+          <input id="code-gateway-url" type="url" bind:value={gatewayURL} />
+          <p>
+            Change this when the gateway is served from a different address than
+            this console. Client setup snippets use it.
+          </p>
+        </div>
+      </Advanced>
     </div>
-    <nav aria-label="Code-mode sections">
+    <nav class="page-tabs" aria-label="Code mode sections">
       {#each codeSections as item (item.id)}<button
           type="button"
-          class:active={tab === item.id}
-          aria-pressed={tab === item.id}
+          aria-current={tab === item.id ? 'page' : undefined}
           onclick={() => {
             if (tab !== item.id && confirmDiscardChanges(draftDirty)) {
               draftDirty = false;
@@ -141,40 +158,12 @@
     display: grid;
     gap: 1.5rem;
   }
-  h1 {
-    font-size: 2rem;
-    font-weight: 650;
-  }
-  header p {
-    max-width: 60rem;
-    margin-top: 0.5rem;
-    color: var(--foreground-subtle);
-    line-height: 1.6;
-  }
-  .project {
+  .setup {
     display: grid;
-    gap: 0.5rem;
-    max-width: 26rem;
+    gap: 1rem;
+    max-width: 32rem;
   }
-  label {
-    font-size: 0.875rem;
-    font-weight: 600;
-  }
-  nav {
-    display: flex;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 1rem;
-  }
-  nav button {
-    padding: 0.6rem 0.8rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-control);
-    color: var(--foreground-subtle);
-  }
-  nav button.active {
-    color: var(--signal);
-    border-color: var(--signal);
+  .page-tabs {
+    margin-top: 0;
   }
 </style>

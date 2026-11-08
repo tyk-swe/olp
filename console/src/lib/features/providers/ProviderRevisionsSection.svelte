@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { confirmAction } from '#lib/components/confirm.js';
   import {
     useMutationIntent,
     usePrincipalLifetime
@@ -108,9 +109,11 @@
   async function restore(revisionId: string, revision: number) {
     if (!canManage || refreshPending) return;
     if (
-      !confirm(
-        `Restore provider revision ${revision} as a new draft? The current credential remains selected.`
-      )
+      !(await confirmAction({
+        title: `Restore revision ${revision}?`,
+        body: 'It becomes a new draft. The current credential stays selected and nothing changes until you activate it.',
+        confirmLabel: 'Restore as draft'
+      }))
     )
       return;
     await run('revision-restore', async (isCurrent) => {

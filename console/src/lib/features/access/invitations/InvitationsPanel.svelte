@@ -1,4 +1,6 @@
 <script lang="ts">
+  import EmptyState from '#lib/components/EmptyState.svelte';
+  import { confirmAction } from '#lib/components/confirm.js';
   import {
     useMutationIntent,
     usePrincipalLifetime
@@ -125,7 +127,15 @@
   }
 
   async function removeInvitation(id: string, invitationEmail: string) {
-    if (!confirm(`Revoke the invitation for ${invitationEmail}?`)) return;
+    if (
+      !(await confirmAction({
+        title: `Revoke the invitation for ${invitationEmail}?`,
+        body: 'The link in their email stops working.',
+        confirmLabel: 'Revoke invitation',
+        danger: true
+      }))
+    )
+      return;
     await run(`invitation-${id}`, async (isCurrent) => {
       await revokeInvitationIntent.submit(id, (input, requestId) =>
         revokeInvitation(input, requestId)
@@ -272,9 +282,9 @@
     {errorMessage(invitations.error)}
   </div>
 {:else if !invitations.data?.items.length && pagination.history.length === 0}
-  <section class="card empty-state">
-    <p>No invitations have been created.</p>
-  </section>
+  <EmptyState title="No invitations yet"
+    >Invite someone by email and choose their role.</EmptyState
+  >
 {:else}
   <div class="table-shell">
     <table class="data-table">

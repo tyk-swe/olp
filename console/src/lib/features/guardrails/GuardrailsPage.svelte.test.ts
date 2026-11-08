@@ -30,18 +30,18 @@ afterEach(() => vi.unstubAllGlobals());
 
 for (const editor of [
   {
-    tab: 'Definitions',
+    tab: 'checks',
     path: 'guardrails',
-    create: 'New definition',
+    create: 'New check',
     save: 'Save draft'
   },
   {
-    tab: 'Policies',
+    tab: 'policies',
     path: 'guardrail-policies',
     create: 'New policy',
     save: 'Save policy draft'
   }
-]) {
+] as const) {
   it.each([
     'unchanged',
     'new',
@@ -112,7 +112,11 @@ for (const editor of [
       );
       const target = document.createElement('div');
       const setup = vi.fn(() =>
-        mount(GuardrailsPage, { target, context: getAllContexts() })
+        mount(GuardrailsPage, {
+          target,
+          props: { tab: editor.tab },
+          context: getAllContexts()
+        })
       );
       const harness = mount(StateHarness, {
         target,
@@ -151,7 +155,6 @@ for (const editor of [
       };
       flushSync();
       await vi.waitFor(() => expect(button('Original')).toBeDefined());
-      click(editor.tab);
       click('Original');
       if (destination === 'new-from-new') click(editor.create);
       rename('First save');
@@ -282,7 +285,11 @@ it('replaces an attachment atomically and retains its displayed revision when pu
   );
   const target = document.createElement('div');
   const setup = vi.fn(() =>
-    mount(GuardrailsPage, { target, context: getAllContexts() })
+    mount(GuardrailsPage, {
+      target,
+      props: { tab: 'attachments' },
+      context: getAllContexts()
+    })
   );
   const harness = mount(StateHarness, { target, props: { setup } });
   onTestFinished(async () => {
@@ -296,7 +303,6 @@ it('replaces an attachment atomically and retains its displayed revision when pu
     flushSync();
   }
   flushSync();
-  click('Attachments');
   await vi.waitFor(() =>
     expect(target.textContent).toContain('Attached revision pinned')
   );
@@ -371,7 +377,11 @@ it.each(['loaded', 'pending'])(
     );
     const target = document.createElement('div');
     const setup = vi.fn(() =>
-      mount(GuardrailsPage, { target, context: getAllContexts() })
+      mount(GuardrailsPage, {
+        target,
+        props: { tab: 'attachments' },
+        context: getAllContexts()
+      })
     );
     const harness = mount(StateHarness, { target, props: { setup } });
     onTestFinished(async () => {
@@ -385,7 +395,6 @@ it.each(['loaded', 'pending'])(
       flushSync();
     }
     flushSync();
-    click('Attachments');
     await vi.waitFor(() =>
       expect(target.textContent).toContain('Attached revision pinned')
     );
@@ -425,7 +434,7 @@ it.each(['loaded', 'pending'])(
 );
 
 it.each(
-  ['Definitions', 'Policies'].flatMap((tab) =>
+  (['checks', 'policies'] as const).flatMap((tab) =>
     ['other', 'new', 'selected'].map((destination) => ({ tab, destination }))
   )
 )(
@@ -434,7 +443,7 @@ it.each(
     const retirement = Promise.withResolvers<Response>();
     const retired = vi.fn();
     const writes = vi.fn<(request: Request) => void>();
-    const path = tab === 'Definitions' ? 'guardrails' : 'guardrail-policies';
+    const path = tab === 'checks' ? 'guardrails' : 'guardrail-policies';
     serve(
       (request) => {
         if (request.method === 'DELETE') {
@@ -463,7 +472,11 @@ it.each(
     );
     const target = document.createElement('div');
     const setup = vi.fn(() =>
-      mount(GuardrailsPage, { target, context: getAllContexts() })
+      mount(GuardrailsPage, {
+        target,
+        props: { tab },
+        context: getAllContexts()
+      })
     );
     const harness = mount(StateHarness, { target, props: { setup } });
     onTestFinished(async () => {
@@ -480,10 +493,8 @@ it.each(
       flushSync();
     };
     flushSync();
-    click(tab);
     await vi.waitFor(() => expect(button('Original')).toBeDefined());
-    click('Original');
-    const kind = tab === 'Definitions' ? 'definition' : 'policy';
+    const kind = tab === 'checks' ? 'check' : 'policy';
     click(`Retire ${kind}`);
     click(`Confirm retire ${kind}`);
     await vi.waitFor(() =>
@@ -491,6 +502,7 @@ it.each(
         `/api/v1/${path}/original`
       )
     );
+    if (destination === 'selected') click('Original');
     if (destination === 'other') click('Other');
     if (destination === 'new') click(`New ${kind}`);
     const input = target.querySelector('form input');
@@ -502,13 +514,16 @@ it.each(
     retirement.resolve(new Response(null, { status: 204 }));
     await vi.waitFor(() =>
       expect(
-        button('Original')?.closest('li')?.textContent?.toLowerCase()
+        button('Original')?.closest('tr')?.textContent?.toLowerCase()
       ).not.toContain(`retire ${kind}`)
     );
+    if (destination === 'selected') {
+      expect(target.querySelector('form input')).toBeNull();
+      return;
+    }
     expect(target.querySelector<HTMLInputElement>('form input')?.value).toBe(
-      destination === 'selected' ? '' : 'Unsaved draft'
+      'Unsaved draft'
     );
-    if (destination === 'selected') return;
     target
       .querySelector('form')
       ?.dispatchEvent(

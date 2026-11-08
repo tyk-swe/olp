@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { confirmAction } from '#lib/components/confirm.js';
+  import PageHeader from '#lib/components/PageHeader.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
   import { formatBytes, formatDate } from '#lib/format.js';
@@ -99,10 +101,17 @@
   }
 
   async function uninstall(plugin: Plugin) {
-    const consequence = plugin.executable
-      ? 'and withdraw its permission? Its executable stays in the image.'
-      : 'and delete its module?';
-    if (!confirm(`Uninstall ${pluginTitle(plugin)} ${consequence}`)) return;
+    if (
+      !(await confirmAction({
+        title: `Uninstall ${pluginTitle(plugin)}?`,
+        body: plugin.executable
+          ? 'Its permission is withdrawn. The executable stays in the image.'
+          : 'Its module is deleted.',
+        confirmLabel: 'Uninstall',
+        danger: true
+      }))
+    )
+      return;
     await run(`uninstall-${plugin.digest}`, async () => {
       await uninstallPlugin(plugin);
       if (reviewing === plugin.digest) reviewing = '';
@@ -113,20 +122,10 @@
 
 <svelte:head><title>Plugins · OpenLLMProxy</title></svelte:head>
 
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Gateway</p>
-    <h1 class="page-title">Plugins</h1>
-    <p class="page-description">
-      Provider plugins supply authentication and hosting around built-in
-      dialects. OpenLLMProxy runs them confined and stores each module by its
-      digest. A plugin can't be used until an owner approves the origins it
-      declares. A deployment may also enable experimental unconfined plugins,
-      which an owner permits one by one.
-    </p>
-  </div>
-</div>
-
+<PageHeader
+  title="Plugins"
+  description="Provider plugins supply authentication and hosting around built-in dialects. OpenLLMProxy runs them confined and stores each module by its digest. A plugin can't be used until an owner approves the origins it declares. A deployment may also enable experimental unconfined plugins, which an owner permits one by one."
+/>
 {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
 {#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
 

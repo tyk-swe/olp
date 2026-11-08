@@ -27,8 +27,8 @@
           >{index < headline.length - 1 ? ' ' : ''}{/each}
       </h1>
       <p class="intro">
-        Connect providers, publish stable routes, and issue installation-scoped
-        keys without storing prompts or model output.
+        Connect model providers, publish routes, and hand out API keys. Prompts
+        and responses are not stored unless you turn on capture.
       </p>
 
       <div class="diagram">
@@ -246,6 +246,7 @@
     .setup-body {
       grid-template-columns: minmax(0, 31rem);
       justify-content: center;
+      align-content: start;
       align-items: start;
       gap: 2rem;
       padding: 2rem 0 0;
@@ -264,6 +265,19 @@
 
     .setup-stage {
       padding: 1.5rem;
+    }
+
+    .setup-body {
+      gap: 1.25rem;
+      padding-top: 1rem;
+    }
+
+    h1 {
+      font-size: 1.5rem;
+    }
+
+    .intro {
+      display: none;
     }
   }
 

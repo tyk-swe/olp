@@ -1,61 +1,42 @@
 <script lang="ts">
+  import PageHeader from '#lib/components/PageHeader.svelte';
   import { resolve } from '$app/paths';
   import { useRole } from './session/useRole.svelte';
   const access = useRole();
 </script>
 
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Installation</p>
-    <h1 class="page-title">Access and control</h1>
-    <p class="page-description">
-      Manage sign-in, members, client keys, and installation settings.
-    </p>
-  </div>
-</div>
+<PageHeader
+  title="Overview"
+  description="The gateway isn’t connected yet, so only account and access tools are available."
+/>
 <div class="controls">
   {#if access.can('users.read')}
-    <a class="card" href={resolve('access')}>
-      <h2>Members and sign-in</h2>
-      <p>
-        Invite members, assign roles, manage sessions, and configure your
-        identity provider.
-      </p>
+    <a class="card" href={resolve('members')}>
+      <h2>Members</h2>
+      <p>Invite people, change their role, and see who’s signed in.</p>
     </a>
   {/if}
 
-  <a class="card" href={resolve('api-keys')}>
+  <a class="card" href={resolve('keys')}>
     <h2>API keys</h2>
-    <p>
-      Create scoped client credentials, save policies, and rotate or revoke
-      secrets.
-    </p>
+    <p>Create keys for your apps, limit what they can do, and revoke them.</p>
   </a>
 
   <a class="card" href={resolve('settings/profile')}>
     <h2>Your profile</h2>
-    <p>
-      Update your details, password, linked identities, and active sessions.
-    </p>
+    <p>Your name, password, linked sign-ins, and sessions.</p>
   </a>
 
   <a class="card" href={resolve('settings')}>
     <h2>Installation settings</h2>
-    <p>Manage local sign-in and review saved retention and limit policies.</p>
+    <p>Sign-in rules, data retention, and installation defaults.</p>
   </a>
 
   <a class="card" href={resolve('audit')}>
-    <h2>Audit trail</h2>
-    <p>
-      Review account and configuration changes with their recorded actor and
-      outcome.
-    </p>
+    <h2>Audit log</h2>
+    <p>Who changed what, and when.</p>
   </a>
 </div>
-<p class="muted">
-  Gateway requests, limit enforcement, and automatic retention are not available
-  on this installation yet.
-</p>
 
 <style>
   .controls {

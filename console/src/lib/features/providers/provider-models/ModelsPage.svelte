@@ -149,20 +149,14 @@
 
 <svelte:head><title>Models · OpenLLMProxy</title></svelte:head>
 
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Gateway</p>
-    <h1 class="page-title">Models</h1>
-    <p class="page-description">
-      Route eligibility comes from certified provider, model, operation,
-      surface, and mode tuples.
-    </p>
+<div class="toolbar">
+  <div class="page-actions">
+    {#if canManage}<a
+        class="button button-primary"
+        href={resolve('providers/new')}>Discover models</a
+      >
+    {/if}
   </div>
-  {#if canManage}<a
-      class="button button-primary"
-      href={resolve('providers/new')}>Discover models</a
-    >
-  {/if}
 </div>
 {#if !canManage}<ReadOnlyNote
     >Your role can view the model inventory but not change route eligibility.</ReadOnlyNote

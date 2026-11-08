@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageHeader from '#lib/components/PageHeader.svelte';
   import ProviderBulkActions from './ProviderBulkActions.svelte';
   import { providerKeys } from '#lib/features/providers/providerKeys.js';
 
@@ -67,20 +68,18 @@
   );
 </script>
 
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Gateway</p>
-    <h1 class="page-title">Providers</h1>
-    <p class="page-description">
-      Connect upstream providers, review their models, and manage activation.
-    </p>
-  </div>
-  {#if canManage}<a
-      class="button button-primary"
-      href={resolve('providers/new')}>Add provider <NavIcon name="arrow" /></a
-    >
-  {/if}
-</div>
+<PageHeader
+  title="Providers"
+  description="Connect upstream providers, review their models, and manage activation."
+>
+  {#snippet actions()}
+    {#if canManage}<a
+        class="button button-primary"
+        href={resolve('providers/new')}>Add provider <NavIcon name="arrow" /></a
+      >
+    {/if}
+  {/snippet}
+</PageHeader>
 {#if !canManage}
   <ReadOnlyNote>
     Your role can view providers but not connect, edit, or activate them.

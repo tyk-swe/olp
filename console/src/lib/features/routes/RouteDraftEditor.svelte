@@ -1,4 +1,7 @@
 <script lang="ts">
+  import PageHeader from '#lib/components/PageHeader.svelte';
+  import Tabs from '#lib/components/Tabs.svelte';
+  import { routeTabs } from './routeTabs.js';
   import RouteFidelityEditor from './RouteFidelityEditor.svelte';
   import RouteToolExecutionEditor from './RouteToolExecutionEditor.svelte';
   import RoutePassthroughEditor from './RoutePassthroughEditor.svelte';
@@ -13,7 +16,6 @@
   import RouteCacheEditor from '#lib/features/caching/RouteCacheEditor.svelte';
   import RoutePublishPanel from '#lib/features/routes/RoutePublishPanel.svelte';
   import RouteSimulation from '#lib/features/routes/RouteSimulation.svelte';
-  import { resolve } from '$app/paths';
   import { errorMessage } from '#lib/management/http.js';
   import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
@@ -37,32 +39,15 @@
 
 <svelte:head><title>Routes · OpenLLMProxy</title></svelte:head>
 
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Gateway · Route Studio</p>
-    <h1 class="page-title">
-      {editor.isNew
-        ? 'Build a route draft.'
-        : (editor.draft.data?.slug ?? 'Route draft')}
-    </h1>
-    <p class="page-description">
-      Set explicit eligibility, deterministic priority and weight, and bounded
-      failover before publishing.
-    </p>
-    {#if editor.draft.data}<p class="draft-meta">
-        Created {formatDate(editor.draft.data.created_at)} by {editor.draft.data
-          .created_by_email ??
-          'a removed account'}{#if editor.draft.data.based_on_revision_id}
-          · Based on revision <code
-            >{editor.draft.data.based_on_revision_id}</code
-          >{/if}
-      </p>{/if}
-  </div>
-  <div class="page-actions">
-    <a class="button button-secondary" href={resolve('routes')}
-      >{editor.canManage ? 'Cancel' : 'Back to routes'}</a
-    >
-
+<PageHeader
+  title={editor.isNew
+    ? 'New route'
+    : (editor.draft.data?.slug ?? 'Route draft')}
+  description={editor.draft.data
+    ? `Draft started ${formatDate(editor.draft.data.created_at)} by ${editor.draft.data.created_by_email ?? 'a removed account'}${editor.draft.data.based_on_revision_id ? `, based on revision ${editor.draft.data.based_on_revision_id}` : ''}`
+    : 'Pick which models can serve this route and what happens when one fails.'}
+>
+  {#snippet actions()}
     {#if editor.canManage && editor.resourceId && editor.draft.data}
       {@const draft = editor.draft.data}
       <button
@@ -72,8 +57,12 @@
         disabled={Boolean(editor.busy)}>Delete draft</button
       >
     {/if}
-  </div>
-</div>
+  {/snippet}
+</PageHeader>
+{#if editor.resourceId}<Tabs
+    label="Route"
+    tabs={routeTabs(editor.resourceId)}
+  />{/if}
 {#if !editor.canManage}<ReadOnlyNote
     >Your role can view this route draft but not change or activate it.</ReadOnlyNote
   >{/if}
@@ -298,15 +287,6 @@
     color: var(--foreground-muted);
   }
 
-  code {
-    font-family: var(--font-mono);
-    font-size: var(--text-caption);
-  }
-  .draft-meta {
-    margin: 0.4rem 0 0;
-    color: var(--foreground-muted);
-    font-size: var(--text-caption);
-  }
   .scope-label {
     display: block;
     margin-bottom: 0.3rem;

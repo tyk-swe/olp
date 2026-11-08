@@ -103,8 +103,7 @@
   guardUnsavedChanges(isDirty);
 </script>
 
-<form class="card form-card" onsubmit={submit}>
-  <h2>{current ? 'Edit signed fact export' : 'Create signed fact export'}</h2>
+<form class="form-card" onsubmit={submit}>
   <label class="form-field"
     >Name<input required maxlength="100" bind:value={name} /></label
   >

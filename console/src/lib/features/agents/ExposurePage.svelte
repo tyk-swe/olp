@@ -14,17 +14,6 @@
 </script>
 
 <svelte:head><title>Provisional exposure · OpenLLMProxy</title></svelte:head>
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Agents</p>
-    <h1 class="page-title">Provisional exposure</h1>
-    <p class="page-description">
-      Unresolved finite obligations remain reserved across restarts and budget
-      resets. These bounds are not accrued spend or invoice charges. Observed
-      amounts are already accounted usage; do not add them to billing again.
-    </p>
-  </div>
-</div>
 <form
   class="filter-bar"
   onsubmit={(event) => {

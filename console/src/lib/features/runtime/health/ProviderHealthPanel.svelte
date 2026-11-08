@@ -1,4 +1,5 @@
 <script lang="ts">
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import type { CreateQueryResult } from '@tanstack/svelte-query';
   import type { ProviderHealth } from '#lib/features/runtime/health/api.js';
   import { errorMessage } from '#lib/management/http.js';
@@ -60,7 +61,9 @@
   {:else if !providers.data}
     <div class="loading-state" role="status">Loading provider outcomes…</div>
   {:else if providers.data.items.length === 0}
-    <div class="card empty-state">No providers are configured.</div>
+    <EmptyState title="No providers yet"
+      >Health appears here once a provider is connected.</EmptyState
+    >
   {:else}
     <div class="provider-grid">
       {#each providers.data.items as provider (provider.provider_id)}

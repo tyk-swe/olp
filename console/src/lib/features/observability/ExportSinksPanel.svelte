@@ -1,4 +1,9 @@
 <script lang="ts">
+  import EntityPicker from '#lib/components/EntityPicker.svelte';
+  import EmptyState from '#lib/components/EmptyState.svelte';
+  import Callout from '#lib/components/Callout.svelte';
+  import Dialog from '#lib/components/Dialog.svelte';
+  import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import ProjectScopeField from '#lib/features/access/projects/ProjectScopeField.svelte';
@@ -38,6 +43,7 @@
     stripeMeterValues
   } from './presentation';
   const queryClient = useQueryClient();
+  let creating = $state(false);
   let error = $state('');
   let notice = $state('');
   const sinkIntent = useMutationIntent();
@@ -121,6 +127,7 @@
     if (sinkBusy) return;
     sinkIntent.reset();
     editingSink = sink;
+    creating = true;
     sinkName = sink.name;
     delivery = editSinkDelivery(sink);
     sinkDestination = sink.destination;
@@ -154,6 +161,7 @@
   }
 
   function cancelSinkEdit() {
+    creating = false;
     if (!sinkBusy) resetSinkForm();
   }
 
@@ -208,7 +216,8 @@
         });
         committed = true;
         if (!isCurrent()) return;
-        notice = 'Sink updated.';
+        creating = false;
+        notify('Sink updated');
       } else {
         if (!delivery.streams.length) return;
         const submission = sinkIntent.prepare<
@@ -228,7 +237,8 @@
         committed = true;
         if (!isCurrent()) return;
         sinkIntent.reset();
-        notice = 'Sink created.';
+        creating = false;
+        notify('Sink created');
       }
       resetSinkForm();
       await queryClient.invalidateQueries(
@@ -298,258 +308,287 @@
   });
 </script>
 
-{#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
+{#if error && !creating}<Callout tone="danger">{error}</Callout>{/if}
 {#if notice}<p class="section-help" role="status">{notice}</p>{/if}
-<h3>Export sinks</h3>
-{#if canManageInstallation || canManageProjects}
-  <form class="create-form" onsubmit={submitSink}>
-    <fieldset class="submission-fields" disabled={sinkBusy}>
-      <div class="form-grid">
-        <div class="form-field">
-          <label for="sink-name">Name</label><input
-            id="sink-name"
-            bind:value={sinkName}
-            required
-          />
-        </div>
-        <div class="form-field">
-          <label for="sink-type">Type</label><select
-            id="sink-type"
-            value={delivery.type}
-            onchange={(event) => {
-              const type = event.currentTarget.value;
-              if (isSinkType(type)) selectDelivery(type);
-            }}
-            disabled={!!editingSink}
-            >{#each Object.keys(sinkTypeFormats) as type (type)}<option
-                value={type}>{sinkTypeLabels[type] ?? type}</option
-              >{/each}</select
-          >
-        </div>
-        <div class="form-field">
-          <label for="sink-destination">Destination</label><input
-            id="sink-destination"
-            bind:value={sinkDestination}
-            required
-            placeholder="https://collector.example.com/olp or bucket URL"
-          />
-        </div>
-        <ProjectScopeField
-          id="sink-project"
-          bind:value={sinkProjectId}
-          unassigned={canManageInstallation}
-          disabled={!!editingSink}
-        />
-        <div class="form-field">
-          <label for="sink-format">Format</label><select
-            id="sink-format"
-            value={delivery.format}
-            onchange={(event) => {
-              const option = sinkTypeFormats[delivery.type].find(
-                (option) => option.value === event.currentTarget.value
-              );
-              if (option) selectDelivery(delivery.type, option.value);
-            }}
-            disabled={!!editingSink}
-            >{#each sinkTypeFormats[delivery.type] ?? [] as option (option.value)}<option
-                value={option.value}>{option.label}</option
-              >{/each}</select
-          >
-        </div>
-        <fieldset class="form-field">
-          <legend>Streams</legend>
-          {#each sinkStreamOptions as stream (stream.value)}
-            {#if stream.value !== 'focus' || focusVisible}
-              <label class="inline-check"
-                ><input
-                  type="checkbox"
-                  checked={delivery.streams.some(
-                    (value) => value === stream.value
-                  )}
-                  disabled={!!editingSink || streamLock !== null}
-                  onchange={() => toggleStream(stream.value)}
-                />{stream.label}</label
-              >
-            {/if}
-          {/each}
-          {#if streamLock}<small
-              >This format carries {streamLock[0]} only.</small
-            >{/if}
-        </fieldset>
-        <div class="form-field">
-          <label for="sink-filter-project">Filter project</label><input
-            id="sink-filter-project"
-            class="mono"
-            bind:value={sinkFilterProject}
-            placeholder="Optional project UUID"
-          />
-        </div>
-        <div class="form-field">
-          <label for="sink-filter-route">Route filter</label><input
-            id="sink-filter-route"
-            bind:value={sinkFilterRoute}
-            placeholder="Optional route slug"
-          />
-        </div>
-        {#if outcomeVisible}<div class="form-field">
-            <label for="sink-filter-outcome">Outcome filter</label><select
-              id="sink-filter-outcome"
-              bind:value={sinkFilterOutcome}
-              ><option value="">All outcomes</option><option value="success"
-                >Success</option
-              ><option value="failure">Failure</option></select
-            >
-          </div>{/if}
-        {#if delivery.type === 'stripe_meter'}
+{#if canManageInstallation || canManageProjects}<div class="toolbar">
+    <p class="section-help">
+      Send logs, traces and metrics to an OpenTelemetry collector or another
+      endpoint.
+    </p>
+    <div class="page-actions">
+      <button
+        class="button button-primary"
+        type="button"
+        onclick={() => {
+          error = '';
+          creating = true;
+        }}>New sink</button
+      >
+    </div>
+  </div>{/if}
+{#if creating}
+  <Dialog
+    title={editingSink ? 'Edit sink' : 'New telemetry sink'}
+    description="Streams logs, traces and usage to a collector you run."
+    placement="side"
+    onClose={() => {
+      creating = false;
+      cancelSinkEdit();
+    }}
+  >
+    {#if error}<Callout tone="danger">{error}</Callout>{/if}
+    <form class="create-form" onsubmit={submitSink}>
+      <fieldset class="submission-fields" disabled={sinkBusy}>
+        <div class="form-grid">
           <div class="form-field">
-            <label for="sink-stripe-key">Restricted API key</label><input
-              id="sink-stripe-key"
-              type="password"
-              autocomplete="off"
-              bind:value={sinkStripeKey}
-              placeholder={editingSink ? 'Blank keeps the stored key' : 'rk_…'}
-            />
-          </div>
-        {:else}<div class="form-field">
-            <label for="sink-credential">Credential JSON</label><textarea
-              id="sink-credential"
-              bind:value={sinkCredential}
-              rows="2"
-              placeholder={editingSink
-                ? 'Optional sealed replacement — blank keeps current'
-                : 'Optional sealed credential object'}></textarea>
-            {#if editingSink}<label class="inline-check"
-                ><input
-                  type="checkbox"
-                  aria-label="Clear stored credential"
-                  bind:checked={sinkClearCredential}
-                />Clear stored credential</label
-              >{/if}
-          </div>{/if}
-        {#if delivery.format === 'csv_gzip'}
-          <div class="form-field">
-            <label for="sink-cost-basis">FOCUS cost basis</label><select
-              id="sink-cost-basis"
-              bind:value={delivery.focusCostBasis}
-              disabled={!!editingSink}
-              ><option value="cost">Provider cost</option><option value="charge"
-                >Charge</option
-              ></select
-            >{#if editingSink}<small
-                >Cost basis cannot change after creation.</small
-              >{/if}
-          </div>
-          <div class="form-field">
-            <label for="sink-focus-start">FOCUS start date</label><input
-              id="sink-focus-start"
-              type="date"
-              bind:value={delivery.focusStartDate}
-            /><small
-              >Optional, new dates must be within the retained usage window.</small
-            >
-          </div>
-        {:else if delivery.format === 'cloudevents'}
-          <div class="form-field">
-            <label for="sink-ce-source">CloudEvents source</label><input
-              id="sink-ce-source"
-              bind:value={delivery.ceSource}
-              placeholder="https://example.com/olp"
-            />
-          </div>
-        {:else if delivery.format === 'stripe'}
-          <div class="form-field">
-            <label for="sink-stripe-event">Stripe event name</label><input
-              id="sink-stripe-event"
-              bind:value={delivery.stripeEvent}
+            <label for="sink-name">Name</label><input
+              id="sink-name"
+              bind:value={sinkName}
               required
-              placeholder="olp.charge"
             />
           </div>
           <div class="form-field">
-            <label for="sink-stripe-value">Meter value</label><select
-              id="sink-stripe-value"
-              bind:value={delivery.stripeValue}
-              >{#each stripeMeterValues as option (option.value)}<option
+            <label for="sink-type">Type</label><select
+              id="sink-type"
+              value={delivery.type}
+              onchange={(event) => {
+                const type = event.currentTarget.value;
+                if (isSinkType(type)) selectDelivery(type);
+              }}
+              disabled={!!editingSink}
+              >{#each Object.keys(sinkTypeFormats) as type (type)}<option
+                  value={type}>{sinkTypeLabels[type] ?? type}</option
+                >{/each}</select
+            >
+          </div>
+          <div class="form-field">
+            <label for="sink-destination">Destination</label><input
+              id="sink-destination"
+              bind:value={sinkDestination}
+              required
+              placeholder="https://collector.example.com/olp or bucket URL"
+            />
+          </div>
+          <ProjectScopeField
+            id="sink-project"
+            bind:value={sinkProjectId}
+            unassigned={canManageInstallation}
+            disabled={!!editingSink}
+          />
+          <div class="form-field">
+            <label for="sink-format">Format</label><select
+              id="sink-format"
+              value={delivery.format}
+              onchange={(event) => {
+                const option = sinkTypeFormats[delivery.type].find(
+                  (option) => option.value === event.currentTarget.value
+                );
+                if (option) selectDelivery(delivery.type, option.value);
+              }}
+              disabled={!!editingSink}
+              >{#each sinkTypeFormats[delivery.type] ?? [] as option (option.value)}<option
                   value={option.value}>{option.label}</option
                 >{/each}</select
             >
           </div>
           <fieldset class="form-field">
-            <legend>Stripe customers</legend>
-            {#each delivery.customers as row, i (i)}
-              <div class="customer-row">
-                <select aria-label="Project" bind:value={row.project}
-                  >{#each memberships as membership (membership.id)}<option
-                      value={membership.id}
-                      >{membership.name ?? membership.id}</option
-                    >{/each}</select
-                ><input
-                  aria-label="Stripe customer"
-                  class="mono"
-                  bind:value={row.customer}
-                  placeholder="cus_…"
-                /><button
-                  class="text-button"
-                  type="button"
-                  aria-label="Remove mapping"
-                  disabled={delivery.customers.length <= 1}
-                  onclick={() => removeCustomer(i)}>&times;</button
+            <legend>Streams</legend>
+            {#each sinkStreamOptions as stream (stream.value)}
+              {#if stream.value !== 'focus' || focusVisible}
+                <label class="inline-check"
+                  ><input
+                    type="checkbox"
+                    checked={delivery.streams.some(
+                      (value) => value === stream.value
+                    )}
+                    disabled={!!editingSink || streamLock !== null}
+                    onchange={() => toggleStream(stream.value)}
+                  />{stream.label}</label
                 >
-              </div>
+              {/if}
             {/each}
-            <button class="text-button" type="button" onclick={addCustomer}
-              >Add mapping</button
-            >
+            {#if streamLock}<small
+                >This format carries {streamLock[0]} only.</small
+              >{/if}
           </fieldset>
-          <button
-            class="text-button"
-            type="button"
-            aria-expanded={sinkStripeAdvanced}
-            onclick={() => (sinkStripeAdvanced = !sinkStripeAdvanced)}
-            >Advanced</button
-          >
-          {#if sinkStripeAdvanced}
+          <div class="form-field">
+            <label for="sink-filter-project">Only for project</label
+            ><EntityPicker
+              id="sink-filter-project"
+              kind="project"
+              bind:value={sinkFilterProject}
+              emptyLabel="All projects"
+            />
+          </div>
+          <div class="form-field">
+            <label for="sink-filter-route">Route filter</label><input
+              id="sink-filter-route"
+              bind:value={sinkFilterRoute}
+              placeholder="Optional route slug"
+            />
+          </div>
+          {#if outcomeVisible}<div class="form-field">
+              <label for="sink-filter-outcome">Outcome filter</label><select
+                id="sink-filter-outcome"
+                bind:value={sinkFilterOutcome}
+                ><option value="">All outcomes</option><option value="success"
+                  >Success</option
+                ><option value="failure">Failure</option></select
+              >
+            </div>{/if}
+          {#if delivery.type === 'stripe_meter'}
             <div class="form-field">
-              <label for="sink-stripe-customer-key">Customer key</label><input
-                id="sink-stripe-customer-key"
-                class="mono"
-                bind:value={delivery.stripeCustomerKey}
-                placeholder="olp_project"
+              <label for="sink-stripe-key">Restricted API key</label><input
+                id="sink-stripe-key"
+                type="password"
+                autocomplete="off"
+                bind:value={sinkStripeKey}
+                placeholder={editingSink
+                  ? 'Blank keeps the stored key'
+                  : 'rk_…'}
+              />
+            </div>
+          {:else}<div class="form-field">
+              <label for="sink-credential">Credential JSON</label><textarea
+                id="sink-credential"
+                bind:value={sinkCredential}
+                rows="2"
+                placeholder={editingSink
+                  ? 'Optional sealed replacement — blank keeps current'
+                  : 'Optional sealed credential object'}></textarea>
+              {#if editingSink}<label class="inline-check"
+                  ><input
+                    type="checkbox"
+                    aria-label="Clear stored credential"
+                    bind:checked={sinkClearCredential}
+                  />Clear stored credential</label
+                >{/if}
+            </div>{/if}
+          {#if delivery.format === 'csv_gzip'}
+            <div class="form-field">
+              <label for="sink-cost-basis">FOCUS cost basis</label><select
+                id="sink-cost-basis"
+                bind:value={delivery.focusCostBasis}
+                disabled={!!editingSink}
+                ><option value="cost">Provider cost</option><option
+                  value="charge">Charge</option
+                ></select
+              >{#if editingSink}<small
+                  >Cost basis cannot change after creation.</small
+                >{/if}
+            </div>
+            <div class="form-field">
+              <label for="sink-focus-start">FOCUS start date</label><input
+                id="sink-focus-start"
+                type="date"
+                bind:value={delivery.focusStartDate}
+              /><small
+                >Optional, new dates must be within the retained usage window.</small
+              >
+            </div>
+          {:else if delivery.format === 'cloudevents'}
+            <div class="form-field">
+              <label for="sink-ce-source">CloudEvents source</label><input
+                id="sink-ce-source"
+                bind:value={delivery.ceSource}
+                placeholder="https://example.com/olp"
+              />
+            </div>
+          {:else if delivery.format === 'stripe'}
+            <div class="form-field">
+              <label for="sink-stripe-event">Stripe event name</label><input
+                id="sink-stripe-event"
+                bind:value={delivery.stripeEvent}
+                required
+                placeholder="olp.charge"
               />
             </div>
             <div class="form-field">
-              <label for="sink-stripe-value-key">Value key</label><input
-                id="sink-stripe-value-key"
-                class="mono"
-                bind:value={delivery.stripeValueKey}
-                placeholder="olp_value"
-              />
+              <label for="sink-stripe-value">Meter value</label><select
+                id="sink-stripe-value"
+                bind:value={delivery.stripeValue}
+                >{#each stripeMeterValues as option (option.value)}<option
+                    value={option.value}>{option.label}</option
+                  >{/each}</select
+              >
             </div>
+            <fieldset class="form-field">
+              <legend>Stripe customers</legend>
+              {#each delivery.customers as row, i (i)}
+                <div class="customer-row">
+                  <select aria-label="Project" bind:value={row.project}
+                    >{#each memberships as membership (membership.id)}<option
+                        value={membership.id}
+                        >{membership.name ?? membership.id}</option
+                      >{/each}</select
+                  ><input
+                    aria-label="Stripe customer"
+                    class="mono"
+                    bind:value={row.customer}
+                    placeholder="cus_…"
+                  /><button
+                    class="text-button"
+                    type="button"
+                    aria-label="Remove mapping"
+                    disabled={delivery.customers.length <= 1}
+                    onclick={() => removeCustomer(i)}>&times;</button
+                  >
+                </div>
+              {/each}
+              <button class="text-button" type="button" onclick={addCustomer}
+                >Add mapping</button
+              >
+            </fieldset>
+            <button
+              class="text-button"
+              type="button"
+              aria-expanded={sinkStripeAdvanced}
+              onclick={() => (sinkStripeAdvanced = !sinkStripeAdvanced)}
+              >Advanced</button
+            >
+            {#if sinkStripeAdvanced}
+              <div class="form-field">
+                <label for="sink-stripe-customer-key">Customer key</label><input
+                  id="sink-stripe-customer-key"
+                  class="mono"
+                  bind:value={delivery.stripeCustomerKey}
+                  placeholder="olp_project"
+                />
+              </div>
+              <div class="form-field">
+                <label for="sink-stripe-value-key">Value key</label><input
+                  id="sink-stripe-value-key"
+                  class="mono"
+                  bind:value={delivery.stripeValueKey}
+                  placeholder="olp_value"
+                />
+              </div>
+            {/if}
           {/if}
-        {/if}
-      </div>
-      <div class="form-actions">
-        {#if editingSink}<button
-            class="button button-secondary"
-            type="button"
-            onclick={cancelSinkEdit}>Cancel</button
-          >{/if}
-        <button
-          class="button button-primary"
-          type="submit"
-          disabled={sinkBusy ||
-            !sinkName.trim() ||
-            !sinkDestination.trim() ||
-            (!editingSink && !delivery.streams.length)}
-          >{sinkBusy
-            ? 'Saving…'
-            : editingSink
-              ? 'Save sink'
-              : 'Create sink'}</button
-        >
-      </div>
-    </fieldset>
-  </form>
+        </div>
+        <div class="form-actions">
+          {#if editingSink}<button
+              class="button button-secondary"
+              type="button"
+              onclick={cancelSinkEdit}>Cancel</button
+            >{/if}
+          <button
+            class="button button-primary"
+            type="submit"
+            disabled={sinkBusy ||
+              !sinkName.trim() ||
+              !sinkDestination.trim() ||
+              (!editingSink && !delivery.streams.length)}
+            >{sinkBusy
+              ? 'Saving…'
+              : editingSink
+                ? 'Save sink'
+                : 'Create sink'}</button
+          >
+        </div>
+      </fieldset>
+    </form>
+  </Dialog>
 {/if}
 
 {#if sinks.isPending}<span class="inline-status" role="status"
@@ -561,9 +600,9 @@
       >Retry</button
     ></span
   >
-{:else if !(sinks.data ?? []).length}<p class="section-help">
-    No export sinks yet.
-  </p>
+{:else if !(sinks.data ?? []).length}<EmptyState title="No telemetry sinks yet"
+    >Add a sink to send logs and traces to your own collector.</EmptyState
+  >
 {:else}
   <div class="table-scroll">
     <table class="data-table">

@@ -128,8 +128,8 @@ it.each(['refresh', 'conflict'])(
       [...target.querySelectorAll('button')].find(
         (item) => item.textContent?.trim() === name
       );
-    await vi.waitFor(() => expect(button('Edit export')).toBeDefined());
-    button('Edit export')?.click();
+    await vi.waitFor(() => expect(button('Edit')).toBeDefined());
+    button('Edit')?.click();
     flushSync();
     const name = target.querySelector('form input') as HTMLInputElement;
     name.value = 'My draft';
@@ -218,7 +218,7 @@ it('offers no create or edit controls to a member who cannot write exports', asy
   );
 
   expect(button('New export')).toBeUndefined();
-  expect(button('Edit export')).toBeUndefined();
+  expect(button('Edit')).toBeUndefined();
   expect(target.querySelector('form')).toBeNull();
 });
 
@@ -226,22 +226,17 @@ it('keeps an edited draft when the operator declines to discard it', async () =>
   const decline = vi.fn(() => false);
   vi.stubGlobal('confirm', decline);
   const { target, button } = mountSinks(['read', 'settings']);
-  await vi.waitFor(() => expect(button('Edit export')).toBeDefined());
-  button('Edit export')?.click();
+  await vi.waitFor(() => expect(button('Edit')).toBeDefined());
+  button('Edit')?.click();
   flushSync();
   const name = () => target.querySelector('form input') as HTMLInputElement;
-
-  button('New export')?.click();
-  flushSync();
-  expect(decline).not.toHaveBeenCalled();
-  expect(name().value).toBe('');
-
-  button('Edit export')?.click();
-  flushSync();
   name().value = 'My draft';
   name().dispatchEvent(new Event('input', { bubbles: true }));
   flushSync();
-  button('New export')?.click();
+
+  target
+    .querySelector<HTMLButtonElement>('dialog [aria-label="Close"]')
+    ?.click();
   flushSync();
 
   expect(decline).toHaveBeenCalledOnce();
@@ -255,11 +250,18 @@ it('clears a new draft when the operator accepts discarding it', async () => {
   );
   const { target, button } = mountSinks(['read', 'settings']);
   await vi.waitFor(() => expect(button('New export')).toBeDefined());
+  button('New export')?.click();
+  flushSync();
   const name = () => target.querySelector('form input') as HTMLInputElement;
   name().value = 'Abandoned draft';
   name().dispatchEvent(new Event('input', { bubbles: true }));
   flushSync();
 
+  target
+    .querySelector<HTMLButtonElement>('dialog [aria-label="Close"]')
+    ?.click();
+  flushSync();
+  expect(target.querySelector('form')).toBeNull();
   button('New export')?.click();
   flushSync();
 

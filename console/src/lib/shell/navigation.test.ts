@@ -5,9 +5,14 @@ import {
   type ManagementOperation
 } from '#lib/management/requirements.js';
 import {
-  isActivePath,
-  NAVIGATION_GROUPS,
-  navigationEntries
+  activeTab,
+  breadcrumbs,
+  NAVIGATION_SECTIONS,
+  owningItem,
+  paletteEntries,
+  PROFILE,
+  SETTINGS,
+  visibleSections
 } from '#lib/shell/navigation.js';
 
 const everyOperation = [
@@ -19,56 +24,78 @@ const everyOperation = [
 ] as ManagementOperation[];
 
 const fullGrant: Grant = { operations: everyOperation, access_scope: 'global' };
-const items = NAVIGATION_GROUPS.flatMap((group) => group.items);
-const activeLabels = (path: string) =>
-  items
-    .filter((item) => isActivePath(path, item.href))
-    .map(({ label }) => label);
-
-describe('navigation', () => {
-  it.each(items.map((item) => [item.label, item.href] as const))(
-    'highlights only %s on its own page',
-    (label, href) => {
-      expect(activeLabels(href)).toEqual([label]);
-    }
+const items = [
+  ...NAVIGATION_SECTIONS.flatMap((section) => section.items),
+  SETTINGS
+];
+const pages = items.flatMap((item) =>
+  (item.tabs ?? [item]).map((leaf) => [item.label, leaf.href] as const)
+);
+const hrefs = (grant: Grant, gatewayAvailable: boolean) =>
+  visibleSections(grant, gatewayAvailable).flatMap((section) =>
+    section.items.flatMap(({ href, tabs }) => [
+      href,
+      ...tabs.map((tab) => tab.href)
+    ])
   );
 
-  it.each(
-    items
-      .filter((item) => item.href !== '/')
-      .map((item) => [item.label, item.href] as const)
-  )('keeps %s highlighted on its detail pages', (label, href) => {
-    expect(activeLabels(`${href}/detail`)).toEqual([label]);
+describe('navigation', () => {
+  it.each(pages)('highlights %s on %s and its detail pages', (label, href) => {
+    expect(owningItem(href)?.label).toBe(label);
+    expect(owningItem(`${href}/detail`)?.label).toBe(label);
   });
 
-  it('opens each group on its primary page for a full grant', () => {
-    const landing = Object.fromEntries(
-      navigationEntries(fullGrant, true).map(({ label, href }) => [label, href])
+  it('gives pages nested under another item to their own owner', () => {
+    expect(owningItem('/settings/profile')).toBe(PROFILE);
+    expect(owningItem('/agents/grants')?.label).toBe('My connections');
+    expect(owningItem('/agents/toolsets')?.label).toBe('Agents and tools');
+  });
+
+  it('marks the deepest matching tab as active', () => {
+    const usage = items.find((item) => item.label === 'Usage');
+    expect(activeTab('/usage/routing', usage?.tabs ?? [])?.label).toBe(
+      'Routing savings'
     );
-
-    expect(landing.Gateway).toBe('/providers');
-    expect(landing.Agents).toBe('/agents');
-    expect(landing.Operations).toBe('/requests');
+    expect(activeTab('/usage', usage?.tabs ?? [])?.label).toBe('Summary');
   });
 
-  it('surfaces a group trimmed to one page as a direct link to it', () => {
-    const entries = navigationEntries(
+  it('opens an item on the first tab the grant can read', () => {
+    const members = visibleSections(
       { operations: ['access_read'], access_scope: 'global' },
-      false
-    );
+      true
+    )
+      .flatMap((section) => section.items)
+      .find(({ item }) => item.label === 'Members');
 
-    expect(entries.find(({ href }) => href === '/access')?.label).toBe(
-      'Members'
-    );
+    expect(members?.href).toBe(members?.tabs[0]?.href);
+    expect(members?.tabs.length).toBeGreaterThan(0);
   });
 
   it('hides gateway pages when the gateway is unavailable', () => {
-    const hrefs = navigationEntries(fullGrant, false).flatMap((entry) =>
-      entry.items.map(({ href }) => href)
-    );
+    const available = hrefs(fullGrant, false);
 
-    expect(hrefs).toContain('/plugins');
-    expect(hrefs).not.toContain('/providers');
-    expect(hrefs).not.toContain('/runs');
+    expect(available).toContain('/plugins');
+    expect(available).toContain('/keys');
+    expect(available).not.toContain('/providers');
+    expect(available).not.toContain('/activity/runs');
+  });
+
+  it('names the section, page and tab in breadcrumbs', () => {
+    expect(breadcrumbs('/pricing/discounts').map(({ label }) => label)).toEqual(
+      ['Spend', 'Pricing', 'Discounts']
+    );
+    expect(breadcrumbs('/')).toEqual([]);
+  });
+
+  it('only offers create actions the grant can perform', () => {
+    const labels = (grant: Grant) =>
+      paletteEntries(grant, true)
+        .filter((entry) => entry.group === 'Create')
+        .map(({ label }) => label);
+
+    expect(labels(fullGrant)).toContain('Create an API key');
+    expect(labels({ operations: ['read'], access_scope: 'global' })).toEqual(
+      []
+    );
   });
 });

@@ -18,8 +18,16 @@
   import { useRole } from '#lib/features/access/session/useRole.svelte.js';
   import CursorPagination from '#lib/shell/CursorPagination.svelte';
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
-  import { formatDate } from '#lib/format.js';
+  import Callout from '#lib/components/Callout.svelte';
+  import EmptyState from '#lib/components/EmptyState.svelte';
+  import Menu from '#lib/components/Menu.svelte';
+  import StatusBadge from '#lib/components/StatusBadge.svelte';
+  import { confirmAction } from '#lib/components/confirm.js';
+  import { notify } from '#lib/components/toasts.svelte.js';
+  import { formatDay } from '#lib/format.js';
   import { updateMembers } from './bulk';
+  import MemberAccessDialog from './MemberAccessDialog.svelte';
+  import { ROLE_DETAILS, SCOPE_DETAILS } from './roles';
 
   const queryClient = useQueryClient();
   const access = useRole();
@@ -28,7 +36,6 @@
   const pagination = $state(emptyCursorHistory());
   let busy = $state('');
   let error = $state('');
-  let notice = $state('');
   let selected = $state<string[]>([]);
   let bulkAction = $state('deactivate');
   $effect(() => {
@@ -43,7 +50,7 @@
 
   async function run(label: string, action: () => Promise<void>) {
     busy = label;
-    error = notice = '';
+    error = '';
     try {
       await action();
       return true;
@@ -77,16 +84,20 @@
     );
   }
 
-  async function changeRole(user: User, select: HTMLSelectElement) {
-    const role = select.value;
-    if (role === user.role) return;
-    const saved = await run(`role-${user.id}`, async () => {
-      const updated = await updateUser(user, { role });
+  let editing = $state<User | null>(null);
+
+  async function saveAccess(
+    user: User,
+    patch: Pick<User, 'role' | 'access_scope'>
+  ) {
+    return run(`access-${user.id}`, async () => {
+      const updated = await updateUser(user, patch);
       updateCachedUser(updated);
       await refreshUserViews();
-      notice = `${updated.display_name} is now ${updated.role}. Existing sessions were revoked.`;
+      notify(
+        `${updated.display_name} is now ${ROLE_DETAILS[updated.role].label.toLowerCase()} on ${SCOPE_DETAILS[updated.access_scope].label.toLowerCase()}`
+      );
     });
-    if (!saved) select.value = user.role;
   }
 
   async function applyBulk() {
@@ -94,129 +105,128 @@
       (user) => selected.includes(user.id) && user.id !== viewer?.id
     );
     if (!members.length || !canManage || busy) return;
-    if (
-      bulkAction === 'deactivate' &&
-      !window.confirm(
-        `Deactivate ${members.length} members and revoke their sessions? Review their API keys separately.`
-      )
-    )
-      return;
+    const role = bulkAction.startsWith('role:')
+      ? (bulkAction.slice(5) as User['role'])
+      : null;
+    const confirmed = await confirmAction(
+      role
+        ? {
+            title: `Make ${members.length} ${members.length === 1 ? 'person' : 'people'} ${ROLE_DETAILS[role].label.toLowerCase()}s?`,
+            body: 'They’ll be signed out everywhere and pick up the new role when they sign in again.',
+            confirmLabel: 'Change role'
+          }
+        : bulkAction === 'deactivate'
+          ? {
+              title: `Deactivate ${members.length} ${members.length === 1 ? 'person' : 'people'}?`,
+              body: 'They’re signed out right away and can’t sign in. API keys they created keep working until you revoke them.',
+              confirmLabel: 'Deactivate',
+              danger: true
+            }
+          : {
+              title: `Reactivate ${members.length} ${members.length === 1 ? 'person' : 'people'}?`,
+              body: 'They’ll be able to sign in again with their current role.',
+              confirmLabel: 'Reactivate'
+            }
+    );
+    if (!confirmed) return;
     await run('bulk', async () => {
-      const patch = bulkAction.startsWith('role:')
-        ? { role: bulkAction.slice(5) as User['role'] }
-        : { active: bulkAction === 'reactivate' };
+      const patch = role ? { role } : { active: bulkAction === 'reactivate' };
       const result = await updateMembers(members, patch);
       result.updated.forEach(updateCachedUser);
       selected = result.failed.map(({ user }) => user.id);
       await refreshUserViews();
-      notice = `${result.updated.length} of ${members.length} members updated. Existing sessions were revoked; attributed API keys remain active.`;
+      if (result.updated.length)
+        notify(`Updated ${result.updated.length} of ${members.length}`);
       error = result.failed
         .map(({ user, message }) => `${user.display_name}: ${message}`)
         .join(' ');
     });
   }
 
-  async function changeScope(user: User, select: HTMLSelectElement) {
-    const access_scope = select.value as 'global' | 'assigned';
-    if (access_scope === user.access_scope) return;
-    const saved = await run(`scope-${user.id}`, async () => {
-      const updated = await updateUser(user, { access_scope });
-      updateCachedUser(updated);
-      await refreshUserViews();
-      notice = `${updated.display_name} now has ${updated.access_scope === 'assigned' ? 'project-scoped' : 'installation-wide'} access. Existing sessions were revoked.`;
-    });
-    if (!saved) select.value = user.access_scope;
-  }
-
   async function changeActive(user: User) {
     const active = !user.active;
-    if (
-      !active &&
-      !confirm(
-        `Deactivate ${user.display_name}? Every active session will be revoked. API keys are installation-scoped and will remain active; after deactivation, review the API-key inventory and explicitly rotate or revoke any keys attributed to this member.`
-      )
-    )
-      return;
+    const confirmed = await confirmAction(
+      active
+        ? {
+            title: `Reactivate ${user.display_name}?`,
+            body: 'They’ll be able to sign in again with their current role.',
+            confirmLabel: 'Reactivate'
+          }
+        : {
+            title: `Deactivate ${user.display_name}?`,
+            body: 'They’re signed out right away and can’t sign in. API keys they created keep working until you revoke them.',
+            confirmLabel: 'Deactivate',
+            danger: true
+          }
+    );
+    if (!confirmed) return;
 
     await run(`active-${user.id}`, async () => {
       const updated = await updateUser(user, { active });
       updateCachedUser(updated);
       await refreshUserViews();
-      notice = active
-        ? `${updated.display_name} can sign in again.`
-        : `${updated.display_name} was deactivated and existing sessions were revoked. Next: review API keys for keys attributed to this member; installation-scoped keys are not automatically revoked.`;
+      notify(
+        active
+          ? `${updated.display_name} can sign in again`
+          : `Deactivated ${updated.display_name}`
+      );
     });
   }
 </script>
 
 {#if !canManage}
   <ReadOnlyNote>
-    Your role can view members but not change roles or deactivate accounts.
+    Your role can see who has access but can’t change it.
   </ReadOnlyNote>
 {/if}
 
-{#if error}
-  <div class="inline-problem" role="alert">{error}</div>
-{/if}
-
-{#if notice}
-  <div class="success-banner" role="status">{notice}</div>
-{/if}
-
-<div class="role-guide" aria-label="Fixed role permissions">
-  {#each [['owner', 'Full control, identity, and access'], ['operator', 'Gateway configuration and operations'], ['developer', 'Keys, playground, and request metadata'], ['viewer', 'Read-only monitoring']] as role (role[0])}
-    <div>
-      <span class="badge accent">{role[0]}</span><small>{role[1]}</small>
-    </div>
-  {/each}
-</div>
+{#if error}<Callout tone="danger">{error}</Callout>{/if}
 
 {#if users.isPending}
-  <div class="loading-state" role="status">Loading members…</div>
+  <div class="loading-state" role="status">Loading people…</div>
 {:else if users.isError}
-  <div class="inline-problem" role="alert">
+  <Callout tone="danger" title="People didn’t load">
     {errorMessage(users.error)}
-    <button
-      class="button button-secondary"
-      type="button"
-      onclick={() => users.refetch()}>Retry</button
-    >
-  </div>
-{:else}
-  {#if canManage}<div class="bulk-actions">
-      <span>{selected.length} selected on this page</span>
-      <button
+    {#snippet actions()}<button
         class="button button-secondary"
         type="button"
-        disabled={Boolean(busy) || users.isFetching}
-        onclick={() => users.refetch()}>Refresh members</button
-      >
+        onclick={() => users.refetch()}>Try again</button
+      >{/snippet}
+  </Callout>
+{:else if !users.data.items.length}
+  <EmptyState title="No one here yet">
+    Invite people from the Invitations tab.
+  </EmptyState>
+{:else}
+  {#if canManage && selected.length}<div
+      class="bulk-actions"
+      role="region"
+      aria-label="Selected people"
+    >
+      <strong>{selected.length} selected</strong>
       <label
-        ><span class="sr-only">Bulk member action</span><select
+        ><span class="sr-only">Action for selected people</span><select
           bind:value={bulkAction}
           class="filter-control"
           disabled={Boolean(busy)}
           ><option value="deactivate">Deactivate</option><option
             value="reactivate">Reactivate</option
           >{#each FIXED_ROLES as role (role)}<option value={`role:${role}`}
-              >Set role: {role}</option
+              >Make {ROLE_DETAILS[role].label.toLowerCase()}</option
             >{/each}</select
         ></label
       >
       <button
-        class="button button-secondary"
+        class="button button-primary"
         type="button"
-        disabled={!selected.length || Boolean(busy)}
-        onclick={applyBulk}
-        >{busy === 'bulk'
-          ? 'Updating members…'
-          : 'Apply to selected members'}</button
+        disabled={Boolean(busy)}
+        onclick={applyBulk}>{busy === 'bulk' ? 'Applying…' : 'Apply'}</button
       >
       <button
         class="button button-quiet"
         type="button"
-        disabled={!selected.length || Boolean(busy)}
-        onclick={() => (selected = [])}>Clear selection</button
+        disabled={Boolean(busy)}
+        onclick={() => (selected = [])}>Clear</button
       >
     </div>
   {/if}
@@ -225,41 +235,38 @@
     <table class="data-table">
       <thead
         ><tr
-          >{#if canManage}<th
+          >{#if canManage}<th class="check"
               ><input
                 type="checkbox"
-                aria-label="Select all members on this page"
+                aria-label="Select everyone on this page"
                 disabled={Boolean(busy)}
                 checked={Boolean(
-                  users.data?.items.filter((user) => user.id !== viewer?.id)
+                  users.data.items.filter((user) => user.id !== viewer?.id)
                     .length
                 ) &&
-                  users.data?.items
+                  users.data.items
                     .filter((user) => user.id !== viewer?.id)
                     .every((user) => selected.includes(user.id))}
                 onchange={(event) =>
                   (selected = event.currentTarget.checked
-                    ? (users.data?.items ?? [])
+                    ? users.data.items
                         .filter((user) => user.id !== viewer?.id)
                         .map((user) => user.id)
                     : [])}
               />
             </th>
           {/if}
-
-          <th>Member</th>
+          <th>Name</th>
+          <th>Role</th>
           <th>Status</th>
-          <th>Fixed role</th>
-          <th>Access scope</th>
           <th>Joined</th>
           <th><span class="sr-only">Actions</span></th>
         </tr>
       </thead>
-
       <tbody>
-        {#each users.data?.items ?? [] as user (user.id)}
+        {#each users.data.items as user (user.id)}
           <tr>
-            {#if canManage}<td
+            {#if canManage}<td class="check"
                 ><input
                   type="checkbox"
                   aria-label={`Select ${user.display_name}`}
@@ -269,138 +276,93 @@
                 /></td
               >{/if}
             <td
-              ><strong>{user.display_name}</strong><br /><span
-                >{user.email}</span
+              ><strong>{user.display_name}</strong
+              >{#if user.id === viewer?.id}<span class="you">You</span>{/if}<br
+              /><span class="muted">{user.email}</span></td
+            >
+            <td
+              >{ROLE_DETAILS[user.role].label}<br /><span class="muted"
+                >{SCOPE_DETAILS[user.access_scope].label}</span
               ></td
             >
             <td
-              ><span
-                class:success={user.active}
-                class:danger={!user.active}
-                class="badge">{user.active ? 'active' : 'disabled'}</span
-              ></td
+              ><StatusBadge
+                label={user.active ? 'Active' : 'Deactivated'}
+                tone={user.active ? 'success' : 'danger'}
+              /></td
             >
-            <td>
-              <label>
-                <span class="sr-only">Role for {user.display_name}</span>
-                <select
-                  class="role-select"
-                  value={user.role}
-                  onchange={(event) => changeRole(user, event.currentTarget)}
-                  disabled={!canManage ||
-                    !user.active ||
-                    user.id === viewer?.id ||
-                    Boolean(busy)}
+            <td>{formatDay(user.created_at)}</td>
+            <td class="row-actions">
+              <Menu label={`Actions for ${user.display_name}`}>
+                {#if canManage && user.id !== viewer?.id}
+                  {#if user.active}<button
+                      type="button"
+                      onclick={() => (editing = user)}>Change access</button
+                    >{/if}
+                  <button
+                    type="button"
+                    class:danger={user.active}
+                    onclick={() => changeActive(user)}
+                    >{user.active ? 'Deactivate' : 'Reactivate'}</button
+                  >
+                  <hr />
+                {/if}
+                <a href={`${resolve('keys')}?created_by=${user.id}`}
+                  >API keys they created</a
                 >
-                  {#each FIXED_ROLES as role (role)}<option value={role}
-                      >{role}</option
-                    >{/each}
-                </select>
-              </label>
+              </Menu>
             </td>
-            <td>
-              <label>
-                <span class="sr-only">Access scope for {user.display_name}</span
-                >
-                <select
-                  class="role-select"
-                  value={user.access_scope}
-                  onchange={(event) => changeScope(user, event.currentTarget)}
-                  disabled={!canManage ||
-                    !user.active ||
-                    user.id === viewer?.id ||
-                    Boolean(busy)}
-                >
-                  <option value="global">Installation-wide</option>
-                  <option value="assigned">Assigned projects</option>
-                </select>
-              </label>
-            </td>
-            <td>{formatDate(user.created_at)}</td>
-            <td
-              >{#if user.id === viewer?.id}<small>Your account</small
-                >{:else if canManage}<button
-                  class="button button-secondary"
-                  class:button-danger={user.active}
-                  type="button"
-                  onclick={() => changeActive(user)}
-                  disabled={Boolean(busy)}
-                  >{busy === `active-${user.id}`
-                    ? 'Saving…'
-                    : user.active
-                      ? 'Deactivate'
-                      : 'Reactivate'}</button
-                >{/if}
-              <a
-                class="button button-secondary"
-                href={`${resolve('api-keys')}?created_by=${user.id}`}
-                aria-label={`Review API keys issued by ${user.display_name}`}
-                >Review API keys</a
-              ></td
-            >
           </tr>
         {/each}
       </tbody>
     </table>
   </div>
   <CursorPagination
-    {...cursorPaginationProps(pagination, users.data?.nextCursor)}
+    {...cursorPaginationProps(pagination, users.data.nextCursor)}
     hasPrevious={!busy && pagination.history.length > 0}
-    hasNext={!busy && Boolean(users.data?.nextCursor)}
+    hasNext={!busy && Boolean(users.data.nextCursor)}
     label="Member pages"
+  />
+{/if}
+
+{#if editing}
+  {@const user = editing}
+  <MemberAccessDialog
+    {user}
+    onSave={(patch) => saveAccess(user, patch)}
+    onClose={() => (editing = null)}
   />
 {/if}
 
 <style>
   .bulk-actions {
+    position: sticky;
+    z-index: 5;
+    top: 4rem;
     display: flex;
     flex-wrap: wrap;
-    gap: 0.75rem;
     align-items: center;
-    margin-block: 1rem;
-  }
-  .role-guide {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 0.65rem;
+    gap: 0.75rem;
     margin-bottom: 1rem;
-  }
-  .role-guide div {
-    display: grid;
-    align-content: start;
-    gap: 0.45rem;
-    min-height: 5.5rem;
-    padding: 1rem;
-    border: 1px solid var(--border-hairline);
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--accent);
     border-radius: var(--radius-card);
+    background: var(--surface-raised);
+    animation: rise var(--dur-enter) var(--ease-out);
   }
-  .role-guide .badge {
-    justify-self: start;
+  .check {
+    width: 2.5rem;
   }
-  .role-guide small,
-  td span {
+  .muted {
     color: var(--foreground-muted);
+    font-size: var(--text-body-sm);
   }
-  .role-select {
-    min-height: 2.5rem;
-    padding: 0.5rem 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-control);
-    background: transparent;
-    color: var(--foreground);
-    transition: border-color var(--motion);
+  .you {
+    margin-left: 0.5rem;
+    color: var(--foreground-subtle);
+    font-size: var(--text-caption);
   }
-  .role-select:hover:not(:disabled) {
-    border-color: var(--border-strong);
-  }
-  @media (max-width: 64rem) {
-    .role-guide {
-      grid-template-columns: repeat(2, 1fr);
-    }
-  }
-  @media (max-width: 42rem) {
-    .role-guide {
-      grid-template-columns: 1fr;
-    }
+  .row-actions {
+    text-align: right;
   }
 </style>

@@ -30,16 +30,6 @@
 </script>
 
 <svelte:head><title>Runs · OpenLLMProxy</title></svelte:head>
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Agents</p>
-    <h1 class="page-title">Runs</h1>
-    <p class="page-description">
-      Gateway-executed runs for your projects, with steps, approvals and linked
-      spans.
-    </p>
-  </div>
-</div>
 <form
   class="filter-bar"
   onsubmit={(event) => {
@@ -82,7 +72,9 @@
         {#each runs.data.items as run (run.id)}
           <tr>
             <td
-              ><a href={resolve(`runs/${run.id}`)}><code>{run.id}</code></a></td
+              ><a href={resolve(`activity/runs/${run.id}`)}
+                ><code>{run.id}</code></a
+              ></td
             >
             <td
               >{projects.data?.find((project) => project.id === run.project_id)

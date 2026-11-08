@@ -38,6 +38,18 @@ export async function listProjectMemberships(
   ).items;
 }
 
+export async function getProject(
+  projectId: string,
+  signal?: AbortSignal
+): Promise<Project> {
+  return unwrap(
+    await apiClient.GET('/api/v1/projects/{project_id}', {
+      params: { path: { project_id: projectId } },
+      signal
+    })
+  );
+}
+
 export async function createProject(
   name: string,
   requestId: string

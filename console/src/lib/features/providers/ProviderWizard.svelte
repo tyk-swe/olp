@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageHeader from '#lib/components/PageHeader.svelte';
   import ProviderBulkModels from './ProviderBulkModels.svelte';
   import {
     focusErrorSummary,
@@ -18,21 +19,16 @@
   const wizard = new ProviderWizardState();
 </script>
 
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Gateway · Provider wizard</p>
-    <h1 class="page-title">Connect an upstream provider.</h1>
-    <p class="page-description">
-      Credentials are write-only. Test reachability, review model capabilities,
-      then activate.
-    </p>
-  </div>
-
-  <a class="button button-secondary" href={resolve('providers')}
-    >{wizard.wizardProvider ? 'Save and exit' : 'Cancel'}</a
-  >
-</div>
-
+<PageHeader
+  title="Add a provider"
+  description="Credentials are write-only. Test reachability, review model capabilities, then activate."
+>
+  {#snippet actions()}
+    <a class="button button-secondary" href={resolve('providers')}
+      >{wizard.wizardProvider ? 'Save and exit' : 'Cancel'}</a
+    >
+  {/snippet}
+</PageHeader>
 <p class="step-progress" aria-hidden="true">
   Step {wizard.wizardStep} of {wizard.stepLabels.length}
 </p>

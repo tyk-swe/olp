@@ -43,7 +43,7 @@
   {#if !editor.modelOptions.length}<div class="empty-state compact">
       <p>
         No enabled models are available.
-        <a href={resolve('provider-models')}>Review model eligibility</a>
+        <a href={resolve('models')}>Review model eligibility</a>
         .
       </p>
     </div>{/if}

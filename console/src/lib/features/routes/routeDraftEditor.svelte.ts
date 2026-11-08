@@ -1,3 +1,4 @@
+import { confirmAction } from '#lib/components/confirm.js';
 import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
 import { providerKeys } from '#lib/features/providers/providerKeys.js';
 import { routeKeys } from '#lib/features/routes/routeKeys.js';
@@ -498,7 +499,15 @@ export class RouteDraftEditorState {
   };
   remove = async (current: RouteDraft) => {
     if (!this.canManage || this.busy) return;
-    if (!confirm(`Delete draft “${current.slug}”?`)) return;
+    if (
+      !(await confirmAction({
+        title: `Delete draft ${current.slug}?`,
+        body: 'The draft is removed. Live revisions are not affected.',
+        confirmLabel: 'Delete draft',
+        danger: true
+      }))
+    )
+      return;
     await this.run('delete', async (isCurrent) => {
       await deleteRouteDraft(current.id, current.etag);
       await this.queryClient.invalidateQueries({

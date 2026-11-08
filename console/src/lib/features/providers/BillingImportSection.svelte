@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { confirmAction } from '#lib/components/confirm.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
   import { resolve } from '$app/paths';
@@ -450,7 +451,15 @@
 
   async function remove() {
     if (!canManage || busy || !detail) return;
-    if (!confirm('Delete the billing import? Imported costs are kept.')) return;
+    if (
+      !(await confirmAction({
+        title: 'Delete the billing import?',
+        body: 'Costs already imported are kept.',
+        confirmLabel: 'Delete',
+        danger: true
+      }))
+    )
+      return;
     const isCurrent = captureOwner();
     busy = true;
     error = notice = '';

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageHeader from '#lib/components/PageHeader.svelte';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
@@ -87,15 +88,10 @@
 
 <a class="text-button" href={resolve('investigations')}>All investigations</a>
 
-<div class="page-header">
-  <div>
-    <p class="eyebrow">Agents</p>
-    <h1 class="page-title">New investigation</h1>
-    <p class="page-description">
-      Save filters, references and your summary. Source payloads are not saved.
-    </p>
-  </div>
-</div>
+<PageHeader
+  title="New investigation"
+  description="Save filters, references and your summary. Source payloads are not saved."
+/>
 {#if projects.error}<p class="inline-problem" role="alert">
     {errorMessage(projects.error)}
   </p>{/if}
