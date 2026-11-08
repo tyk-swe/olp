@@ -212,8 +212,6 @@ func (s *Server) putSAMLConfiguration(r *http.Request, _ Principal) (Reply, erro
 	return Detail(c, c.ETag), tx.Commit(r.Context())
 }
 
-// StoreSAMLDefinition is shared by owner management and configuration promotion.
-// Callers hold the installation mutation lock, enforce their own precondition and audit the update.
 func (s *Server) StoreSAMLDefinition(ctx context.Context, tx pgx.Tx, p Principal, d SAMLDefinition, rotate bool) (samlConfiguration, error) {
 	c := samlConfiguration{SAMLDefinition: d, ServiceProviderID: s.Origin + "/api/v1/saml/metadata"}
 	if err := p.Authorize(Access); err != nil {
