@@ -12,7 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/providers"
 )
 
-func refusal(err error) (string, bool) {
+func Refusal(err error) (string, bool) {
 	problem, ok := errors.AsType[*access.Problem](err)
 	if !ok {
 		return "", false
@@ -37,7 +37,7 @@ func validated(configuration providers.Configuration, policy *egress.Policy) (pr
 
 func (p planning) prepare(ctx context.Context, q access.Queryer, entry Entry) (providers.Configuration, []promotion.Item, error) {
 	prepared, err := providers.PrepareConfiguration(ctx, q, p.deps.Unconfined, p.deps.Egress, entry.Configuration)
-	if code, refused := refusal(err); refused {
+	if code, refused := Refusal(err); refused {
 		return entry.Configuration, []promotion.Item{promotion.Blocker(contract.ConfigurationPlanItemKindPlugin, entry.Configuration.ProfileRevision, code)}, nil
 	}
 	if err != nil {

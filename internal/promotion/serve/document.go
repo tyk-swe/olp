@@ -8,6 +8,7 @@ import (
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/agentpublication"
+	"github.com/tyk-swe/olp/internal/promotion/code"
 	"github.com/tyk-swe/olp/internal/promotion/guardrail"
 	"github.com/tyk-swe/olp/internal/promotion/identity"
 	"github.com/tyk-swe/olp/internal/promotion/installation"
@@ -34,6 +35,7 @@ type snapshot struct {
 	servers       []mcpserver.Server
 	retrieval     []retrievalbinding.Binding
 	publications  []agentpublication.Publication
+	code          code.Code
 }
 
 type sections struct {
@@ -49,6 +51,7 @@ type sections struct {
 	servers       []mcpserver.Server
 	retrieval     retrievalbinding.Desired
 	publications  []agentpublication.Publication
+	code          code.Desired
 }
 
 func (s sections) snapshot() snapshot {
@@ -65,10 +68,11 @@ func (s sections) snapshot() snapshot {
 		servers:       s.servers,
 		retrieval:     s.retrieval.Bindings,
 		publications:  s.publications,
+		code:          s.code.Code,
 	}
 }
 
-func (s server) parse(document contract.ConfigurationDocument) (sections, error) {
+func (s server) parse(document contract.ConfigurationDocument, declared *contract.ConfigurationCodeBindings) (sections, error) {
 	names := promotion.NamesOf(document)
 	settings, err := installation.Parse(document)
 	if err != nil {
@@ -118,6 +122,10 @@ func (s server) parse(document contract.ConfigurationDocument) (sections, error)
 	if err != nil {
 		return sections{}, err
 	}
+	codes, err := code.Parse(document.Code, declared, names, s.providers)
+	if err != nil {
+		return sections{}, err
+	}
 	return sections{
 		installation:  settings,
 		organizations: organizations,
@@ -131,6 +139,7 @@ func (s server) parse(document contract.ConfigurationDocument) (sections, error)
 		servers:       servers,
 		retrieval:     retrieval,
 		publications:  publications,
+		code:          codes,
 	}, nil
 }
 
@@ -187,6 +196,10 @@ func read(ctx context.Context, q access.Queryer) (snapshot, error) {
 	if err != nil {
 		return snapshot{}, err
 	}
+	codes, err := code.Read(ctx, q)
+	if err != nil {
+		return snapshot{}, err
+	}
 	return snapshot{
 		installation:  settings,
 		organizations: organizations,
@@ -200,6 +213,7 @@ func read(ctx context.Context, q access.Queryer) (snapshot, error) {
 		servers:       servers,
 		retrieval:     retrieval,
 		publications:  publications,
+		code:          codes,
 	}, nil
 }
 
@@ -232,6 +246,10 @@ func (s snapshot) render(exportedAt *time.Time) (contract.ConfigurationDocument,
 	if err != nil {
 		return contract.ConfigurationDocument{}, err
 	}
+	codes, err := code.Render(s.code)
+	if err != nil {
+		return contract.ConfigurationDocument{}, err
+	}
 	identities, err := identity.Render(s.identity)
 	if err != nil {
 		return contract.ConfigurationDocument{}, err
@@ -261,5 +279,6 @@ func (s snapshot) render(exportedAt *time.Time) (contract.ConfigurationDocument,
 		McpServers:           mcpserver.Render(s.servers),
 		RetrievalBindings:    retrievalbinding.Render(s.retrieval),
 		AgentPublications:    publications,
+		Code:                 codes,
 	}, nil
 }

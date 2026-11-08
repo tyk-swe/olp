@@ -2,11 +2,6 @@ package serve
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
-	"fmt"
-	"maps"
 	"net/http"
 	"slices"
 	"time"
@@ -59,18 +54,6 @@ type desired struct {
 	digest       string
 	expected     *string
 	codeBindings *contract.ConfigurationCodeBindings
-}
-
-type bindingDigest struct {
-	Ref    promotion.Ref `json:"ref"`
-	SHA256 string        `json:"sha256"`
-}
-
-type fingerprint struct {
-	DocumentDigest string                              `json:"document_digest"`
-	ExpectedDigest *string                             `json:"expected_digest"`
-	SecretBindings []bindingDigest                     `json:"secret_bindings"`
-	CodeBindings   *contract.ConfigurationCodeBindings `json:"code_bindings,omitempty"`
 }
 
 type notApplicable struct {
@@ -218,7 +201,7 @@ func (s server) decode(r *http.Request) (desired, error) {
 	if err != nil {
 		return desired{}, err
 	}
-	parsed, err := s.parse(document)
+	parsed, err := s.parse(document, request.CodeBindings)
 	if err != nil {
 		return desired{}, err
 	}
@@ -294,82 +277,4 @@ func authorize(ctx context.Context, q access.Queryer, p access.Principal, d desi
 		}
 	}
 	return nil
-}
-
-func evaluate(ctx context.Context, q access.Queryer, d desired) (contract.ConfigurationPlanResponse, error) {
-	items, err := planned(ctx, q, d.planners)
-	if err != nil {
-		return contract.ConfigurationPlanResponse{}, err
-	}
-	drift, err := drifted(ctx, q, d.expected)
-	if err != nil {
-		return contract.ConfigurationPlanResponse{}, err
-	}
-	return promotion.Result(d.digest, slices.Concat(items, drift)), nil
-}
-
-func planned(ctx context.Context, q access.Queryer, planners []promotion.Planner) ([]promotion.Item, error) {
-	batches, err := promotion.TryMap(planners, func(planner promotion.Planner) ([]promotion.Item, error) {
-		if planner.Plan == nil {
-			return nil, nil
-		}
-		return planner.Plan(ctx, q)
-	})
-	if err != nil {
-		return nil, err
-	}
-	return slices.Concat(batches...), nil
-}
-
-func drifted(ctx context.Context, q access.Queryer, expected *string) ([]promotion.Item, error) {
-	if expected == nil {
-		return nil, nil
-	}
-	current, err := read(ctx, q)
-	if err != nil {
-		return nil, err
-	}
-	document, err := current.render(nil)
-	if err != nil {
-		return nil, err
-	}
-	digest, err := promotion.Digest(document)
-	if err != nil {
-		return nil, err
-	}
-	if digest == *expected {
-		return nil, nil
-	}
-	return []promotion.Item{promotion.Conflict(contract.ConfigurationPlanItemKindConfiguration, "expected_digest", "configuration_changed")}, nil
-}
-
-func (d desired) fingerprint() (fingerprint, error) {
-	secrets, err := promotion.TryMap(slices.Sorted(maps.Keys(d.bindings)), func(ref promotion.Ref) (bindingDigest, error) {
-		sum, err := credentialDigest(d.bindings[ref])
-		return bindingDigest{Ref: ref, SHA256: sum}, err
-	})
-	if err != nil {
-		return fingerprint{}, err
-	}
-	return fingerprint{DocumentDigest: d.digest, ExpectedDigest: d.expected, SecretBindings: secrets, CodeBindings: d.codeBindings}, nil
-}
-
-func credentialDigest(credential promotion.Credential) (string, error) {
-	material, err := credentialMaterial(credential)
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256(material)
-	return hex.EncodeToString(sum[:]), nil
-}
-
-func credentialMaterial(credential promotion.Credential) ([]byte, error) {
-	switch c := credential.(type) {
-	case promotion.External:
-		reference, err := json.Marshal(c.Reference)
-		return append([]byte("external:"), reference...), err
-	case promotion.Sealed:
-		return []byte("sealed:" + c.Secret), nil
-	}
-	return nil, fmt.Errorf("unknown credential %T", credential)
 }
