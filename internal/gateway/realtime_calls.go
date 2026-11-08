@@ -20,8 +20,8 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/bodylimit"
-	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -48,7 +48,7 @@ type webrtcSession struct {
 	cancel    context.CancelFunc
 	started   time.Time
 	rejected  bool
-	admission *observability.Permit
+	admission *admission.Permit
 
 	settleOnce sync.Once
 	usageMu    sync.Mutex

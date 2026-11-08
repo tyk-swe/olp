@@ -347,11 +347,10 @@ helm upgrade --install olp \
 
 Before issuing a proxy key or sending traffic, require a successful migration
 Job, ready pods, runtime-generation convergence, and healthy observability
-targets. With Valkey-backed workers, require all seven `olp_worker_task_healthy`
+targets. With Valkey-backed workers, require every `olp_worker_task_healthy`
 task series and zero request-metadata pending/lag; see
-[worker health](operations.md#replicated-worker-health). `runtime_outbox` is
-`not_configured`, not a drainage requirement. Continue with the monitoring and
-recovery checks in [`operations.md`](operations.md).
+[worker health](operations.md#replicated-worker-health). Continue with the
+monitoring and recovery checks in [`operations.md`](operations.md).
 
 ## Production example and connection budget
 

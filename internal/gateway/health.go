@@ -3,8 +3,6 @@ package gateway
 import (
 	"sync"
 	"time"
-
-	"github.com/tyk-swe/olp/internal/observability"
 )
 
 const (
@@ -204,34 +202,6 @@ func (h *healthTracker) publish(providerID string, until time.Time) {
 	case h.changes <- circuitChange{provider: providerID, until: until}:
 	default:
 	}
-}
-
-// ProviderHealth implements observability.HealthSource.
-func (h *healthTracker) ProviderHealth(window time.Duration) map[string]observability.HealthStats {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	now := h.now()
-	since := (now.Add(-window).Unix()) / 60
-	out := map[string]observability.HealthStats{}
-	for id, p := range h.providers {
-		var stats observability.HealthStats
-		for minute, b := range p.buckets {
-			if minute < since {
-				continue
-			}
-			stats.Attempts += b.attempts
-			stats.Successes += b.successes
-			stats.RateLimits += b.rateLimits
-			stats.ServerErrors += b.serverErrors
-			stats.TransportErrors += b.transportErrors
-			stats.TotalLatency += b.latency
-		}
-		stats.LastAttemptAt = p.last
-		if stats.Attempts > 0 {
-			out[id] = stats
-		}
-	}
-	return out
 }
 
 // claim reserves the one half-open endpoint probe. The first return value

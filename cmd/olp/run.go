@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/agents/a2a"
 	"github.com/tyk-swe/olp/internal/agents/runs"
@@ -217,8 +218,8 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 	// is shared with the gateway so middleware and direct handler calls bound
 	// one capacity; media reconciliation gaps and durable metadata loss are
 	// process counters the metrics endpoint renders.
-	inferencePool := observability.NewPool(c.MaxInFlightInference).Queue(c.AdmissionQueueDepth, c.AdmissionQueueTimeout)
-	managementPool := observability.NewPool(c.MaxInFlightManagement)
+	inferencePool := admission.NewPool(c.MaxInFlightInference).Queue(c.AdmissionQueueDepth, c.AdmissionQueueTimeout)
+	managementPool := admission.NewPool(c.MaxInFlightManagement)
 	lossCounters := &usage.LossCounters{}
 	var mediaGapsTotal atomic.Uint64
 	obsCache := observability.NewCache()
@@ -568,24 +569,23 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 	}
 	// The observability collectors probe only what this process composes: an
 	// unconfigured dependency is reported as absent, never as failed.
-	obsState := &observability.State{
-		Region:        c.Region,
-		Pool:          pool,
-		PingDB:        pool.Ping,
-		ServesGateway: c.Mode.Inference(),
-		Limiter: func(ctx context.Context) (configured, healthy bool) {
-			return vk != nil, vk != nil && vk.Ping(ctx) == nil
-		},
-		MediaGaps:    func() int64 { return int64(mediaGapsTotal.Load()) },
-		LossCounters: lossCounters.Totals,
-	}
-	if pool != nil {
-		obsState.Export = func(ctx context.Context) []prometheus.Metric {
+	obsSources := observabilitySources(observed{
+		region:        c.Region,
+		servesGateway: c.Mode.Inference(),
+		pool:          pool,
+		limiter:       vk,
+		runtime:       rt,
+		policy:        &policy,
+		gateway:       gw,
+		emitter:       emitter,
+		spool:         mediaSpool,
+		mediaGaps:     &mediaGapsTotal,
+		loss:          lossCounters,
+		export: func(ctx context.Context) []prometheus.Metric {
 			return slices.Concat(export.Metrics(ctx, pool, exporter, focusWorker, capturer), billing.Metrics(ctx, pool, importer))
-		}
-	}
-	configureObservability(obsState, rt, gw, emitter, mediaSpool, &policy)
-	background.Go(func() { obsCache.Run(auxiliary, obsState, log) })
+		},
+	})
+	background.Go(func() { obsCache.Run(auxiliary, obsSources, log) })
 	// The delivery plane outlives the listeners: it is cancelled only once the
 	// producers have drained, so every emitted event is written and this
 	// process's epoch is closed against what it actually delivered.
@@ -637,7 +637,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			prober.RunHealthProbes(probes, probeCheckpoint(pool, log, c.Region))
 		}()
 	}
-	live := []prometheus.Collector{runtimeMetrics(rt), observability.AdmissionMetrics(inferencePool, managementPool), traces.Metrics()}
+	live := []prometheus.Collector{runtimeMetrics(rt), admission.Metrics(inferencePool, managementPool), traces.Metrics()}
 	if business != nil {
 		live = append(live, business)
 	}
@@ -651,13 +651,13 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		// Network-permitted public requests enter their surface's pool before
 		// routing: a full pool rejects without queueing, and tracing spans
 		// open only for admitted requests.
-		admission := &observability.PublicAdmission{
+		publicAdmission := &admission.Public{
 			Inference:        inferencePool,
 			Management:       managementPool,
 			InferenceEnabled: c.Mode.Inference(),
 			Reject:           rejectPublic,
 		}
-		listenerConfigs = append(listenerConfigs, listenerConfig{name: "public", address: c.ListenAddr, handler: Perimeter(c.PublicOrigin, managementNetwork(c.ManagementAllowedCIDRs, c.TrustedProxyCIDRs, admission.Wrap(traces.Middleware(installation)(public))))})
+		listenerConfigs = append(listenerConfigs, listenerConfig{name: "public", address: c.ListenAddr, handler: Perimeter(c.PublicOrigin, managementNetwork(c.ManagementAllowedCIDRs, c.TrustedProxyCIDRs, publicAdmission.Wrap(traces.Middleware(installation)(public))))})
 	}
 	listeners, err = bindListeners(startup, listenerConfigs, c, requestContext)
 	if err != nil {

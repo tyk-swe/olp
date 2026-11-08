@@ -7,34 +7,34 @@ import (
 	"slices"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/observability/workerhealth"
-
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
-)
 
-type WorkerTask = workerhealth.WorkerTask
+	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
+)
 
 func regionalWorkerTaskNames() []string {
 	return slices.Collect(func(yield func(string) bool) {
-		for _, task := range workerhealth.WorkerTasks() {
-			if task.Regional && !yield(string(task.Name)) {
+		for _, task := range workerhealth.Tasks {
+			if task.Regional() && !yield(string(task)) {
 				return
 			}
 		}
 	})
 }
 
+type TaskState string
+
 const (
-	TaskStateUnknown = "unknown"
-	TaskStateHealthy = "healthy"
-	TaskStateStale   = "stale"
+	TaskUnknown TaskState = "unknown"
+	TaskHealthy TaskState = "healthy"
+	TaskStale   TaskState = "stale"
 )
 
 // WorkerTaskStatus is one task's durable checkpoint picture.
 type WorkerTaskStatus struct {
-	Task                  string
-	State                 string
+	Task                  workerhealth.Task
+	State                 TaskState
 	CheckedAt             *time.Time
 	LastSuccessAt         *time.Time
 	LastProgressAt        *time.Time
@@ -51,67 +51,48 @@ type WorkerTaskHealth struct {
 	Tasks []WorkerTaskStatus
 }
 
-// CurrentFor reports whether every expected task has a current success.
-func (w *WorkerTaskHealth) CurrentFor(expected []WorkerTask) bool {
-	for _, task := range expected {
-		if w.status(string(task.Name)).State != TaskStateHealthy {
-			return false
-		}
+func unknownWorkerTasks() *WorkerTaskHealth {
+	tasks := make([]WorkerTaskStatus, len(workerhealth.Tasks))
+	for i, task := range workerhealth.Tasks {
+		tasks[i] = WorkerTaskStatus{Task: task, State: TaskUnknown}
 	}
-	return true
+	return &WorkerTaskHealth{Tasks: tasks}
 }
 
-// StaleFor counts expected tasks whose last success is too old.
-func (w *WorkerTaskHealth) StaleFor(expected []WorkerTask) int64 {
+func (w *WorkerTaskHealth) Count(expected []workerhealth.Task, state TaskState) int64 {
 	var count int64
 	for _, task := range expected {
-		if w.status(string(task.Name)).State == TaskStateStale {
+		if w.status(task).State == state {
 			count++
 		}
 	}
 	return count
 }
 
-// UnknownFor counts expected tasks that have never checkpointed.
-func (w *WorkerTaskHealth) UnknownFor(expected []WorkerTask) int64 {
-	var count int64
-	for _, task := range expected {
-		if w.status(string(task.Name)).State == TaskStateUnknown {
-			count++
-		}
-	}
-	return count
-}
-
-// LastProgressFor is the newest progress timestamp among expected tasks.
-func (w *WorkerTaskHealth) LastProgressFor(expected []WorkerTask) *time.Time {
+func (w *WorkerTaskHealth) LastProgressFor(expected []workerhealth.Task) *time.Time {
 	var last *time.Time
 	for _, task := range expected {
-		if at := w.status(string(task.Name)).LastProgressAt; at != nil && (last == nil || at.After(*last)) {
+		if at := w.status(task).LastProgressAt; at != nil && (last == nil || at.After(*last)) {
 			last = at
 		}
 	}
 	return last
 }
 
-func (w *WorkerTaskHealth) status(name string) WorkerTaskStatus {
-	for _, task := range w.Tasks {
-		if task.Task == name {
-			return task
+func (w *WorkerTaskHealth) status(task workerhealth.Task) WorkerTaskStatus {
+	for _, status := range w.Tasks {
+		if status.Task == task {
+			return status
 		}
 	}
-	return WorkerTaskStatus{Task: name, State: TaskStateUnknown}
-}
-
-// ReadWorkerTaskHealth reports per-task freshness. Ages are computed by the
-// database against clock_timestamp(), the same clock workers stamp
-// checkpoints with, so replica clock skew cannot falsify staleness.
-func ReadWorkerTaskHealth(ctx context.Context, q access.Queryer) (*WorkerTaskHealth, error) {
-	return ReadRegionalWorkerTaskHealth(ctx, q, "")
+	return WorkerTaskStatus{Task: task, State: TaskUnknown}
 }
 
 // ReadRegionalWorkerTaskHealth combines local coordination checkpoints with
 // shared PostgreSQL task health. An empty region reads the global summary.
+// Ages are computed by the database against clock_timestamp(), the same clock
+// workers stamp checkpoints with, so replica clock skew cannot falsify
+// staleness.
 func ReadRegionalWorkerTaskHealth(ctx context.Context, q access.Queryer, region string) (*WorkerTaskHealth, error) {
 	rows, err := q.Query(ctx, `SELECT task, checked_at, last_success_at, last_progress_at,
 			successes_total, failures_total, skipped_total,
@@ -139,7 +120,7 @@ func ReadRegionalWorkerTaskHealth(ctx context.Context, q access.Queryer, region 
 			&row.HeartbeatAgeSeconds, &row.LastSuccessAgeSeconds); err != nil {
 			return nil, err
 		}
-		row.Task = task
+		row.Task = workerhealth.Task(task)
 		if row.SuccessesTotal < 0 || row.FailuresTotal < 0 || row.SkippedTotal < 0 {
 			return nil, errors.New("stored worker task health is invalid")
 		}
@@ -148,21 +129,23 @@ func ReadRegionalWorkerTaskHealth(ctx context.Context, q access.Queryer, region 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	tasks := workerhealth.WorkerTasks()
-	summary := &WorkerTaskHealth{Tasks: make([]WorkerTaskStatus, 0, len(tasks))}
-	for _, task := range tasks {
-		row, ok := byTask[string(task.Name)]
-		if !ok {
-			summary.Tasks = append(summary.Tasks, WorkerTaskStatus{Task: string(task.Name), State: TaskStateUnknown})
-			continue
-		}
-		row.State = TaskStateStale
-		if row.LastSuccessAgeSeconds != nil && *row.LastSuccessAgeSeconds <= task.StaleAfter {
-			row.State = TaskStateHealthy
-		}
-		summary.Tasks = append(summary.Tasks, row)
+	tasks := make([]WorkerTaskStatus, len(workerhealth.Tasks))
+	for i, task := range workerhealth.Tasks {
+		tasks[i] = taskStatus(task, byTask)
 	}
-	return summary, nil
+	return &WorkerTaskHealth{Tasks: tasks}, nil
+}
+
+func taskStatus(task workerhealth.Task, stored map[string]WorkerTaskStatus) WorkerTaskStatus {
+	row, ok := stored[string(task)]
+	if !ok {
+		return WorkerTaskStatus{Task: task, State: TaskUnknown}
+	}
+	row.State = TaskStale
+	if row.LastSuccessAgeSeconds != nil && *row.LastSuccessAgeSeconds <= task.StaleAfter() {
+		row.State = TaskHealthy
+	}
+	return row
 }
 
 // WorkerRecoveryCounters are the durable cross-replica counters the worker

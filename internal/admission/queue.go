@@ -1,4 +1,4 @@
-package observability
+package admission
 
 import (
 	"context"
@@ -12,17 +12,18 @@ import (
 	"github.com/tyk-swe/olp/internal/priority"
 )
 
+type Class int
+
 const (
-	ClassNormal = priority.Normal
-	classCount  = priority.Count
+	Normal     Class = priority.Normal
+	classCount       = priority.Count
 )
 
-// ClassOf returns the class a priority names; any other name is normal.
-func ClassOf(name string) int {
-	if class := priority.Rank(name); class >= 0 {
-		return class
+func ClassOf(name string) Class {
+	if rank := priority.Rank(name); rank >= 0 {
+		return Class(rank)
 	}
-	return ClassNormal
+	return Normal
 }
 
 // queue holds requests a full pool cannot admit yet. A request reserves a
@@ -52,9 +53,6 @@ type waiter struct{ granted chan struct{} }
 // at most timeout. Configure it before the pool serves; a depth of zero
 // leaves the pool rejecting as before.
 func (p *Pool) Queue(depth int, timeout time.Duration) *Pool {
-	if depth < 0 || depth > MaxAdmissionCapacity || (depth > 0 && timeout <= 0) {
-		panic("observability: admission queue out of range")
-	}
 	if depth > 0 {
 		p.queue = &queue{depth: int64(depth), timeout: timeout}
 	}
@@ -90,7 +88,7 @@ func (p *Pool) tryAcquire() bool {
 
 // await waits in class's line until a released slot is handed over, the
 // queue timeout or deadline passes, or ctx ends.
-func (p *Pool) await(ctx context.Context, class int, deadline time.Time) bool {
+func (p *Pool) await(ctx context.Context, class Class, deadline time.Time) bool {
 	q := p.queue
 	started := time.Now()
 	if p.tryAcquire() {
@@ -140,8 +138,8 @@ func (p *Pool) await(ctx context.Context, class int, deadline time.Time) bool {
 // was one. The slot stays admitted; only its holder changes.
 func (q *queue) handoff() bool {
 	q.mu.Lock()
-	class := q.next()
-	if class < 0 {
+	class, found := q.next()
+	if !found {
 		q.mu.Unlock()
 		return false
 	}
@@ -153,30 +151,30 @@ func (q *queue) handoff() bool {
 	return true
 }
 
-// next picks the line to serve by smooth weighted round-robin, or -1 when
-// every line is empty. Callers hold mu.
-func (q *queue) next() int {
-	best, total := -1, 0
+// next picks the line to serve by smooth weighted round-robin. Callers hold mu.
+func (q *queue) next() (Class, bool) {
+	var best Class
+	found, total := false, 0
 	classes := priority.Classes()
-	for class := range classCount {
+	for class := range Class(classCount) {
 		if len(q.lines[class]) == 0 {
 			continue
 		}
 		q.credit[class] += classes[class].Weight
 		total += classes[class].Weight
-		if best < 0 || q.credit[class] > q.credit[best] {
-			best = class
+		if !found || q.credit[class] > q.credit[best] {
+			best, found = class, true
 		}
 	}
-	if best >= 0 {
+	if found {
 		q.credit[best] -= total
 	}
-	return best
+	return best, found
 }
 
 // withdraw removes a waiter that gave up, reporting false when a handoff
 // already took it from its line.
-func (q *queue) withdraw(class int, w *waiter) bool {
+func (q *queue) withdraw(class Class, w *waiter) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	i := slices.Index(q.lines[class], w)
@@ -190,14 +188,14 @@ func (q *queue) withdraw(class int, w *waiter) bool {
 
 // left records a waiter leaving class's line. An emptied line forgets its
 // credit so it rejoins the rotation at an even start. Callers hold mu.
-func (q *queue) left(class int) {
+func (q *queue) left(class Class) {
 	q.waiting.Add(-1)
 	if len(q.lines[class]) == 0 {
 		q.credit[class] = 0
 	}
 }
 
-func (q *queue) observe(class int, waited time.Duration) {
+func (q *queue) observe(class Class, waited time.Duration) {
 	q.waits[class].Add(1)
 	q.waitNS[class].Add(uint64(waited))
 }
@@ -223,9 +221,17 @@ func (q *queue) samples() []prometheus.Metric {
 	for class, priorityClass := range classes {
 		metrics = append(metrics,
 			queueDepth.Sample(float64(depth[class]), priorityClass.Name),
-			prometheus.MustNewConstSummary(queueWait, q.waits[class].Load(), time.Duration(q.waitNS[class].Load()).Seconds(), nil, priorityClass.Name),
+			waitSummary(q.waits[class].Load(), time.Duration(q.waitNS[class].Load()), priorityClass.Name),
 			queueRejections.Sample(float64(q.expired[class].Load()), priorityClass.Name),
 		)
 	}
 	return metrics
+}
+
+func waitSummary(count uint64, total time.Duration, class string) prometheus.Metric {
+	summary, err := prometheus.NewConstSummary(queueWait, count, total.Seconds(), nil, class)
+	if err != nil {
+		return prometheus.NewInvalidMetric(queueWait, err)
+	}
+	return summary
 }

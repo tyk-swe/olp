@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"math"
+	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/media"
@@ -14,49 +18,70 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-func configureObservability(state *observability.State, rt *release.Manager, gw *gateway.Server, emitter *usage.Emitter, spool *media.Spool, policy *egress.Policy) {
-	if rt != nil {
-		state.Runtime = func() observability.RuntimeProbe {
-			probe := observability.RuntimeProbe{AllTransports: true}
-			status := rt.Authority()
-			probe.AuthorityStale = status.Stale
-			if status.Loaded && !status.ReadAt.IsZero() {
-				age := time.Since(status.ReadAt)
-				probe.AuthorityAge = &age
-			}
-			release := rt.Release()
-			if release != nil && release.ID != "" && release.Snapshot() != nil {
-				ordinal := release.Snapshot().Generation().Ordinal
-				probe.Generation = &ordinal
-				for _, provider := range release.Snapshot().Providers() {
-					p := provider
-					if err := p.Connector().Validate(policy); err != nil {
-						probe.AllTransports = false
-						break
-					}
-				}
-			}
+type observed struct {
+	region        string
+	servesGateway bool
+	pool          *pgxpool.Pool
+	limiter       *coordination.Client
+	runtime       *release.Manager
+	policy        *egress.Policy
+	gateway       *gateway.Server
+	emitter       *usage.Emitter
+	spool         *media.Spool
+	mediaGaps     *atomic.Uint64
+	loss          *usage.LossCounters
+	export        func(context.Context) []prometheus.Metric
+}
+
+func observabilitySources(o observed) *observability.Sources {
+	sources := &observability.Sources{
+		Region:        o.region,
+		Store:         o.pool,
+		ServesGateway: o.servesGateway,
+		MediaGaps:     o.mediaGaps,
+		Loss:          o.loss,
+		Export:        o.export,
+	}
+	if o.limiter != nil {
+		sources.Limiter = o.limiter
+	}
+	if o.runtime != nil {
+		sources.Runtime = runtimeSource{manager: o.runtime, policy: o.policy}
+	}
+	if o.gateway != nil {
+		sources.Gateway = o.gateway
+	}
+	if o.emitter != nil {
+		sources.Emitter = o.emitter
+	}
+	if o.spool != nil {
+		sources.Spool = o.spool
+	}
+	return sources
+}
+
+type runtimeSource struct {
+	manager *release.Manager
+	policy  *egress.Policy
+}
+
+func (r runtimeSource) HasHardLimits() bool { return r.manager.HasHardLimits() }
+
+func (r runtimeSource) Probe() observability.RuntimeProbe {
+	probe := observability.RuntimeProbe{AllTransports: true, AuthorityStale: r.manager.Authority().Stale}
+	current := r.manager.Release()
+	if current == nil || current.ID == "" || current.Snapshot() == nil {
+		return probe
+	}
+	ordinal := current.Snapshot().Generation().Ordinal
+	probe.Generation = &ordinal
+	for _, provider := range current.Snapshot().Providers() {
+		if provider.Connector().Validate(r.policy) != nil {
+			probe.AllTransports = false
 			return probe
 		}
-		state.HardLimits = rt.HasHardLimits
 	}
-	if gw != nil {
-		state.Circuits = gw.OpenCircuits
-		state.Shadows = gw.ShadowCounts
-		state.LimiterCounts = gw.LimiterCounts()
-	}
-	if emitter != nil {
-		state.Emitter = func() *usage.Snapshot {
-			snapshot := emitter.Snapshot()
-			return &snapshot
-		}
-	}
-	if spool != nil {
-		state.Spool = func() (capacity, used *int64) {
-			capacityBytes, usedBytes := spool.CapacityBytes(), spool.UsedBytes()
-			return &capacityBytes, &usedBytes
-		}
-	}
+	return probe
 }
 
 var (

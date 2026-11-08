@@ -90,31 +90,28 @@ func ageSecondsOrInf(age *int64) float64 {
 	return float64(*age)
 }
 
-func CollectMetrics(ctx context.Context, s *State) []prometheus.Metric {
+func CollectMetrics(ctx context.Context, s *Sources) []prometheus.Metric {
 	now := time.Now()
-	providers, providersComplete, providersErr := ReadProviderHealthMetrics(ctx, s.Pool)
-	limiterConfigured, limiterHealthy := false, false
-	if s.Limiter != nil {
-		limiterConfigured, limiterHealthy = s.Limiter(ctx)
-	}
-	consumer, consumerErr := usage.ReadConsumerStatus(ctx, s.Pool, now)
+	providers, providersComplete, providersErr := ReadProviderHealthMetrics(ctx, s.Store)
+	limiterConfigured, limiterHealthy := s.limiter(ctx)
+	consumer, consumerErr := usage.ReadConsumerStatus(ctx, s.Store, now)
 	if consumerErr != nil {
 		consumer = usage.ConsumerStatus{State: usage.ConsumerUnknown}
 	}
-	tasks, tasksErr := ReadRegionalWorkerTaskHealth(ctx, s.Pool, s.Region)
-	counters, countersErr := ReadWorkerRecoveryCounters(ctx, s.Pool)
-	operations, operationsErr := ReadOperationsSummary(ctx, s.Pool, 5)
+	tasks, tasksErr := ReadRegionalWorkerTaskHealth(ctx, s.Store, s.Region)
+	counters, countersErr := ReadWorkerRecoveryCounters(ctx, s.Store)
+	operations, operationsErr := ReadOperationsSummary(ctx, s.Store)
 	metrics := [][]prometheus.Metric{
 		{
 			providerMetricsComplete.Sample(metric.Flag(providersErr == nil && providersComplete)),
 			providerMetricsEmitted.Sample(float64(len(providers))),
-			runtimeGeneration.Sample(float64(currentGeneration(s))),
+			runtimeGeneration.Sample(float64(currentGeneration(s.runtimeProbe()))),
 			limiterAvailable.Sample(metric.Flag(limiterConfigured && limiterHealthy)),
 			asyncObservability.Sample(metric.Flag(consumerErr == nil && tasksErr == nil && countersErr == nil)),
 			operationsAvailable.Sample(metric.Flag(operationsErr == nil)),
 		},
 		metadataMetrics(ctx, s, consumer, consumerErr == nil),
-		gatewayMetrics(s),
+		gatewayMetrics(s.Gateway),
 		mediaMetrics(ctx, s, now),
 		asyncPlaneMetrics(tasks, consumer, limiterConfigured, now),
 		providerMetrics(providers),
@@ -143,32 +140,27 @@ func concat(groups [][]prometheus.Metric) []prometheus.Metric {
 	return all
 }
 
-func currentGeneration(s *State) int64 {
-	if s.Runtime == nil {
+func currentGeneration(probe RuntimeProbe) int64 {
+	if probe.Generation == nil {
 		return 0
 	}
-	if g := s.Runtime().Generation; g != nil {
-		return *g
-	}
-	return 0
+	return *probe.Generation
 }
 
-func metadataMetrics(ctx context.Context, s *State, consumer usage.ConsumerStatus, consumerRead bool) []prometheus.Metric {
+func metadataMetrics(ctx context.Context, s *Sources, consumer usage.ConsumerStatus, consumerRead bool) []prometheus.Metric {
 	snapshot := usage.Snapshot{Closed: true}
 	if s.Emitter != nil {
-		if current := s.Emitter(); current != nil {
-			snapshot = *current
-		}
+		snapshot = s.Emitter.Snapshot()
 	}
 	// An absent epoch table reads as zero rather than suppressing the exposition.
-	epochs, _ := ReadEpochHealth(ctx, s.Pool)
+	epochs, _ := ReadEpochHealth(ctx, s.Store)
 	heartbeatAge := math.Inf(1)
 	if consumerRead {
 		heartbeatAge = ageSecondsOrInf(consumer.HeartbeatAgeSeconds)
 	}
 	var events, dropped, abandoned int64
-	if s.LossCounters != nil {
-		events, dropped, abandoned = s.LossCounters()
+	if s.Loss != nil {
+		events, dropped, abandoned = s.Loss.Totals()
 	}
 	return []prometheus.Metric{
 		metadataDropped.Sample(float64(snapshot.Dropped)),
@@ -193,18 +185,12 @@ func metadataMetrics(ctx context.Context, s *State, consumer usage.ConsumerStatu
 	}
 }
 
-func gatewayMetrics(s *State) []prometheus.Metric {
-	var failOpen, daily, weekly, monthly int64
-	if s.LimiterCounts != nil {
-		failOpen, daily, weekly, monthly = s.LimiterCounts()
-	}
-	var circuits int64
-	if s.Circuits != nil {
-		circuits = s.Circuits()
-	}
-	var mirrored, shadowDropped int64
-	if s.Shadows != nil {
-		mirrored, shadowDropped = s.Shadows()
+func gatewayMetrics(gateway GatewayCounters) []prometheus.Metric {
+	var failOpen, daily, weekly, monthly, circuits, mirrored, shadowDropped int64
+	if gateway != nil {
+		failOpen, daily, weekly, monthly = gateway.LimiterCounts()
+		circuits = gateway.OpenCircuits()
+		mirrored, shadowDropped = gateway.ShadowCounts()
 	}
 	return []prometheus.Metric{
 		limitsFailOpen.Sample(float64(failOpen)),
@@ -217,32 +203,25 @@ func gatewayMetrics(s *State) []prometheus.Metric {
 	}
 }
 
-func mediaMetrics(ctx context.Context, s *State, now time.Time) []prometheus.Metric {
-	summary, err := media.ReconciliationSummary(ctx, s.Pool, now)
+func mediaMetrics(ctx context.Context, s *Sources, now time.Time) []prometheus.Metric {
+	summary, err := media.ReconciliationSummary(ctx, s.Store, now)
 	if err != nil {
 		summary = media.Summary{}
-	}
-	var gaps int64
-	if s.MediaGaps != nil {
-		gaps = s.MediaGaps()
 	}
 	metrics := []prometheus.Metric{
 		mediaPending.Sample(float64(summary.Pending)),
 		mediaStale.Sample(float64(summary.Stale)),
 		mediaFailed.Sample(float64(summary.Failed)),
-		mediaGaps.Sample(float64(gaps)),
+		mediaGaps.Sample(float64(s.mediaGaps())),
 	}
 	// Without a spool the series are absent, which says no spool is configured.
 	if s.Spool == nil {
 		return metrics
 	}
-	capacity, used := s.Spool()
-	if capacity != nil {
-		metrics = append(metrics, mediaSpoolCapacity.Sample(float64(*capacity)))
-	}
-	if used != nil {
-		metrics = append(metrics, mediaSpoolUsed.Sample(float64(*used)))
-	}
+	metrics = append(metrics,
+		mediaSpoolCapacity.Sample(float64(s.Spool.CapacityBytes())),
+		mediaSpoolUsed.Sample(float64(s.Spool.UsedBytes())),
+	)
 	return metrics
 }
 
@@ -250,9 +229,10 @@ func asyncPlaneMetrics(tasks *WorkerTaskHealth, consumer usage.ConsumerStatus, l
 	if tasks == nil {
 		return nil
 	}
-	current, drained := asynchronousPlaneFlags(tasks, expectedTasks(limiterConfigured), consumer)
+	plane := asynchronousPlane(tasks, expectedTasks(limiterConfigured), consumer)
+	current, drained := plane.AsynchronousPlaneCurrent, plane.AsynchronousPlaneDrained
 	var lastProgress int64
-	if at := tasks.LastProgressFor(workerhealth.WorkerTasks()); at != nil {
+	if at := tasks.LastProgressFor(workerhealth.Tasks[:]); at != nil {
 		lastProgress = at.Unix()
 	}
 	var oldestPendingAge float64
@@ -267,13 +247,14 @@ func asyncPlaneMetrics(tasks *WorkerTaskHealth, consumer usage.ConsumerStatus, l
 		consumerOldestPendingAge.Sample(oldestPendingAge),
 	}
 	for _, task := range tasks.Tasks {
+		name := string(task.Task)
 		metrics = append(metrics,
-			workerTaskHealthy.Sample(metric.Flag(task.State == TaskStateHealthy), task.Task),
-			workerTaskHeartbeat.Sample(ageSecondsOrInf(task.HeartbeatAgeSeconds), task.Task),
-			workerTaskLastSuccess.Sample(ageSecondsOrInf(task.LastSuccessAgeSeconds), task.Task),
-			workerTaskRuns.Sample(float64(task.SuccessesTotal), task.Task, "success"),
-			workerTaskRuns.Sample(float64(task.FailuresTotal), task.Task, "failure"),
-			workerTaskRuns.Sample(float64(task.SkippedTotal), task.Task, "skipped"),
+			workerTaskHealthy.Sample(metric.Flag(task.State == TaskHealthy), name),
+			workerTaskHeartbeat.Sample(ageSecondsOrInf(task.HeartbeatAgeSeconds), name),
+			workerTaskLastSuccess.Sample(ageSecondsOrInf(task.LastSuccessAgeSeconds), name),
+			workerTaskRuns.Sample(float64(task.SuccessesTotal), name, "success"),
+			workerTaskRuns.Sample(float64(task.FailuresTotal), name, "failure"),
+			workerTaskRuns.Sample(float64(task.SkippedTotal), name, "skipped"),
 		)
 	}
 	return metrics
@@ -310,9 +291,10 @@ func operationsMetrics(operations OperationsSummary) []prometheus.Metric {
 func providerMetrics(providers []ProviderHealthRecord) []prometheus.Metric {
 	metrics := make([]prometheus.Metric, 0, 4*len(providers))
 	for _, p := range providers {
+		id := p.ProviderID.String()
 		metrics = append(metrics,
-			providerHealth.Sample(1, p.ProviderID, p.ProviderName, p.ProviderKind, p.Status),
-			providerAttempts.Sample(float64(p.AttemptCount), p.ProviderID, p.ProviderKind),
+			providerHealth.Sample(1, id, p.ProviderName, p.ProviderKind, string(p.Status)),
+			providerAttempts.Sample(float64(p.AttemptCount), id, p.ProviderKind),
 		)
 		if p.AttemptCount == 0 {
 			continue
@@ -322,8 +304,8 @@ func providerMetrics(providers []ProviderHealthRecord) []prometheus.Metric {
 			latency = *p.AverageLatencyMs / 1000
 		}
 		metrics = append(metrics,
-			providerSuccessRatio.Sample(successRatio(p.SuccessCount, p.AttemptCount), p.ProviderID, p.ProviderKind),
-			providerLatency.Sample(latency, p.ProviderID, p.ProviderKind),
+			providerSuccessRatio.Sample(successRatio(p.SuccessCount, p.AttemptCount), id, p.ProviderKind),
+			providerLatency.Sample(latency, id, p.ProviderKind),
 		)
 	}
 	return metrics

@@ -40,18 +40,6 @@
         readiness.request_metadata_consumer_oldest_pending_at,
         readiness.request_metadata_consumer_oldest_pending_age_seconds,
         now
-      ),
-      outboxHeartbeat: reportedAgeStatus(
-        readiness.runtime_outbox_heartbeat_age_seconds
-      ),
-      // A pending outbox row is not waiting on the metadata reclaim window:
-      // the publication path is stale after CHECKPOINT_STALE_SECONDS, so the
-      // longer pending-recovery default would hide a wedged outbox.
-      outboxOldestPending: oldestPendingStatus(
-        readiness.runtime_outbox_oldest_pending_at,
-        readiness.runtime_outbox_oldest_pending_age_seconds,
-        now,
-        CHECKPOINT_STALE_SECONDS
       )
     };
   });
@@ -122,12 +110,11 @@
       <p class="eyebrow">Replicated workers</p>
       <h2 id="plane-title">Asynchronous plane</h2>
       <p class="section-description">
-        Healthy means every fixed worker task holds a current checkpoint and
-        both the request-metadata group and the runtime outbox are drained. It
-        does not require one specific replica. Metadata, outbox, and
-        gateway-epoch checkpoints go stale after {CHECKPOINT_STALE_SECONDS} seconds;
-        the maintenance task runs on a longer budget, and the stale count below is
-        the backend's own verdict for every fixed task.
+        Healthy means every fixed worker task holds a current checkpoint and the
+        request-metadata group is drained. It does not require one specific
+        replica. Metadata and gateway-epoch checkpoints go stale after {CHECKPOINT_STALE_SECONDS}
+        seconds; the maintenance task runs on a longer budget, and the stale count
+        below is the backend's own verdict for every fixed task.
       </p>
     </div>
     <span class="badge {healthTone(readiness.asynchronous_plane)}"
@@ -279,78 +266,6 @@
     {@render fact(
       'Historical uncertain gaps',
       formatInteger(readiness.request_metadata_historical_uncertain_gaps)
-    )}
-  </dl>
-</section>
-
-<section class="section" aria-labelledby="outbox-title">
-  <div class="section-heading">
-    <div>
-      <p class="eyebrow">Runtime publication</p>
-      <h2 id="outbox-title">Runtime outbox</h2>
-      <p class="section-description">
-        A released outbox session can be replaced during the {CHECKPOINT_STALE_SECONDS}-second
-        handoff. Inspect the PostgreSQL advisory-lock session when failed
-        takeovers rise.
-      </p>
-    </div>
-    <span class="badge {healthTone(readiness.runtime_outbox)}"
-      >{stateLabel(readiness.runtime_outbox)}</span
-    >
-  </div>
-  <dl class="card facts">
-    {@render fact(
-      'Pending rows',
-      formatInteger(readiness.runtime_outbox_pending_rows)
-    )}
-    {@render fact(
-      'Claimed rows',
-      formatInteger(readiness.runtime_outbox_claimed_rows)
-    )}
-    {@render timedFact(
-      'Oldest pending row',
-      readiness.runtime_outbox_oldest_pending_at,
-      ages.outboxOldestPending,
-      'None waiting'
-    )}
-    {@render fact(
-      'Owner session',
-      readiness.runtime_outbox_owner_active ? 'Active' : 'None',
-      !readiness.runtime_outbox_owner_active
-    )}
-    {@render fact(
-      'Ownership',
-      readiness.runtime_outbox_owner_abandoned ? 'Abandoned' : 'Held',
-      readiness.runtime_outbox_owner_abandoned
-    )}
-    {@render timedFact(
-      'Owner heartbeat',
-      null,
-      ages.outboxHeartbeat,
-      'No heartbeat'
-    )}
-    {@render fact(
-      'Publication attempts',
-      formatInteger(readiness.runtime_outbox_publication_attempts_total)
-    )}
-    {@render fact(
-      'Publication retries',
-      formatInteger(readiness.runtime_outbox_publication_retries_total)
-    )}
-    {@render fact(
-      'Repeated publications',
-      formatInteger(
-        readiness.runtime_outbox_repeated_publication_attempts_total
-      )
-    )}
-    {@render fact(
-      'Abandoned ownerships',
-      formatInteger(readiness.runtime_outbox_abandoned_ownership_total)
-    )}
-    {@render fact(
-      'Failed takeovers',
-      formatInteger(readiness.runtime_outbox_failed_takeovers_total),
-      (readiness.runtime_outbox_failed_takeovers_total ?? 0) > 0
     )}
   </dl>
 </section>

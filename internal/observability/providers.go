@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+
 	"github.com/tyk-swe/olp/internal/access"
 )
 
@@ -20,9 +23,11 @@ type OperationsSummary struct {
 	P99LatencyMs      *float64
 }
 
+const operationsWindowMinutes = 5
+
 // ReadOperationsSummary rolls up the trailing request window.
-func ReadOperationsSummary(ctx context.Context, q access.Queryer, windowMinutes int) (OperationsSummary, error) {
-	minutes := min(max(windowMinutes, 1), 60)
+func ReadOperationsSummary(ctx context.Context, q access.Queryer) (OperationsSummary, error) {
+	minutes := operationsWindowMinutes
 	var summary OperationsSummary
 	err := q.QueryRow(ctx, `WITH recent_requests AS MATERIALIZED (
 			SELECT id, started_at, status_code, error_class, total_latency_ms
@@ -54,11 +59,11 @@ func ReadOperationsSummary(ctx context.Context, q access.Queryer, windowMinutes 
 
 // ProviderHealthRecord is one provider's probe- and attempt-window health.
 type ProviderHealthRecord struct {
-	ProviderID          string
+	ProviderID          uuid.UUID
 	ProviderName        string
 	ProviderKind        string
 	ProviderState       string
-	Status              string
+	Status              Status
 	LastProbeAt         *time.Time
 	LastProbeStatus     *string
 	LastProbeDetail     *string
@@ -94,17 +99,22 @@ type ProviderHealthPage struct {
 	NextCursor *string
 }
 
-// ReadProviderHealth pages providers in descending id order for the management API. The
-// window bounds the attempt rollup; pageSize bounds the page.
-func ReadProviderHealth(ctx context.Context, q access.Queryer, windowMinutes int, cursor *string, pageSize int, allProjects bool, allowedProjects []string) (ProviderHealthPage, error) {
-	minutes := min(max(windowMinutes, 1), 1440)
-	size := min(max(pageSize, 1), 200)
+type ProviderHealthQuery struct {
+	WindowMinutes int
+	Before        *string
+	Limit         int
+	AllProjects   bool
+	Projects      []string
+}
+
+// ReadProviderHealth pages providers in descending id order for the management API.
+func ReadProviderHealth(ctx context.Context, q access.Queryer, query ProviderHealthQuery) (ProviderHealthPage, error) {
 	rows, err := q.Query(ctx, providerHealthSelect+`
 		WHERE ($2::uuid IS NULL OR p.id < $2)
 		  AND ($3 OR p.project_id = ANY($4::uuid[]))
 		GROUP BY p.id, p.name, p.kind, p.state, p.last_probe_at,
 			p.last_probe_status, p.last_probe_detail
-		ORDER BY p.id DESC LIMIT $5`, minutes, cursor, allProjects, allowedProjects, size+1)
+		ORDER BY p.id DESC LIMIT $5`, query.WindowMinutes, query.Before, query.AllProjects, query.Projects, query.Limit+1)
 	if err != nil {
 		return ProviderHealthPage{}, fmt.Errorf("read provider health: %w", err)
 	}
@@ -121,17 +131,15 @@ func ReadProviderHealth(ctx context.Context, q access.Queryer, windowMinutes int
 		return ProviderHealthPage{}, err
 	}
 	page := ProviderHealthPage{Items: records}
-	if len(records) > size {
-		page.Items = records[:size]
-		next := page.Items[len(page.Items)-1].ProviderID
+	if len(records) > query.Limit {
+		page.Items = records[:query.Limit]
+		next := page.Items[len(page.Items)-1].ProviderID.String()
 		page.NextCursor = &next
 	}
 	return page, nil
 }
 
-func scanProviderHealth(rows interface {
-	Scan(...any) error
-}) (ProviderHealthRecord, error) {
+func scanProviderHealth(rows pgx.Rows) (ProviderHealthRecord, error) {
 	var record ProviderHealthRecord
 	if err := rows.Scan(&record.ProviderID, &record.ProviderName, &record.ProviderKind,
 		&record.ProviderState, &record.LastProbeAt, &record.LastProbeStatus, &record.LastProbeDetail,
@@ -159,9 +167,9 @@ func scanProviderHealth(rows interface {
 // snapshot was truncated at the page bound.
 func ReadProviderHealthMetrics(ctx context.Context, q access.Queryer) ([]ProviderHealthRecord, bool, error) {
 	var records []ProviderHealthRecord
-	var cursor *string
+	query := ProviderHealthQuery{WindowMinutes: 15, Limit: 200, AllProjects: true}
 	for {
-		page, err := ReadProviderHealth(ctx, q, 15, cursor, 200, true, nil)
+		page, err := ReadProviderHealth(ctx, q, query)
 		if err != nil {
 			return nil, false, err
 		}
@@ -169,7 +177,7 @@ func ReadProviderHealthMetrics(ctx context.Context, q access.Queryer) ([]Provide
 		if page.NextCursor == nil {
 			return records, true, nil
 		}
-		cursor = page.NextCursor
+		query.Before = page.NextCursor
 		if len(records) >= 10000 {
 			return records, false, nil
 		}
@@ -178,31 +186,31 @@ func ReadProviderHealthMetrics(ctx context.Context, q access.Queryer) ([]Provide
 
 // providerHealthStatus classifies a provider from its durable state, its last
 // probe, and the attempt window, mirroring the operator-facing rules.
-func providerHealthStatus(state string, probeAt *time.Time, probeStatus *string, lastAttempt *time.Time, attempts, successes int64) string {
+func providerHealthStatus(state string, probeAt *time.Time, probeStatus *string, lastAttempt *time.Time, attempts, successes int64) Status {
 	if state == "disabled" {
-		return "disabled"
+		return StatusDisabled
 	}
 	// A failed probe newer than the newest attempt overrides attempt history.
 	probeIsLatest := probeStatus != nil && *probeStatus == "failed" &&
 		(probeAt != nil && (lastAttempt == nil || !probeAt.Before(*lastAttempt)))
 	if probeIsLatest {
-		return "unavailable"
+		return StatusUnavailable
 	}
 	if attempts == 0 {
 		switch {
 		case probeStatus != nil && *probeStatus == "succeeded":
-			return "healthy"
+			return StatusHealthy
 		case probeStatus != nil && *probeStatus == "failed":
-			return "unavailable"
+			return StatusUnavailable
 		}
-		return "unknown"
+		return StatusUnknown
 	}
 	failures := attempts - successes
 	switch {
 	case failures*2 >= attempts:
-		return "unavailable"
+		return StatusUnavailable
 	case failures*10 >= attempts:
-		return "degraded"
+		return StatusDegraded
 	}
-	return "healthy"
+	return StatusHealthy
 }
