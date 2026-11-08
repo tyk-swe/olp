@@ -248,7 +248,8 @@ func Select(s selectionSource, slug, operation, surface, mode string, affinity [
 		return plan, e
 	}
 	capacity := policy.Strategy == strategyCapacity
-	if query := supplyQuery(route, rows, capacity && options.CheckSlots); !query.empty() {
+	query := supplyQuery(route, rows, capacity && options.CheckSlots)
+	if !query.empty() {
 		var state *SupplyState
 		if options.Supply != nil {
 			state = options.Supply.ReadSupply(cmp.Or(options.Context, context.Background()), query)
@@ -262,6 +263,9 @@ func Select(s selectionSource, slug, operation, surface, mode string, affinity [
 	}
 	if options.CheckSlots {
 		for i := range rows {
+			if query.empty() && len(rows[i].skipped) > 0 {
+				continue
+			}
 			rows[i].attempt.Slots = slotIDs(rows[i].slots)
 		}
 	}

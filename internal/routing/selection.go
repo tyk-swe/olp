@@ -28,9 +28,8 @@ type Attempt struct {
 	// attempt under exactly it.
 	Discount    *usage.RoutingDiscount
 	Performance *usage.Performance
-	// Slots, when set, are the credential slots the plan left the attempt, in
-	// the order it ranked them. A plan that checks no slots leaves it nil, and
-	// the gateway orders the target's slots itself.
+	// Slots, when set, preserve the plan's slot order and supply restrictions.
+	// Nil leaves selection to execution, which rechecks credential eligibility.
 	Slots []string
 }
 
@@ -54,7 +53,18 @@ func Score(routeID, targetID uuid.UUID, weight int64, operation, surface, mode s
 	var buffer [256]byte
 	header := append(append(append(buffer[:0], "olp-weighted-rendezvous\x00"...), routeID[:]...), targetID[:]...)
 	request := appendPrefixed(appendPrefixed(appendPrefixed(header, operation), surface), mode)
-	sum := sha256.Sum256(appendPrefixed(request, affinity))
+	var sum [sha256.Size]byte
+	if len(affinity) <= len(buffer)-len(request)-8 {
+		sum = sha256.Sum256(appendPrefixed(request, affinity))
+	} else {
+		h := sha256.New()
+		h.Write(request)
+		var length [8]byte
+		binary.BigEndian.PutUint64(length[:], uint64(len(affinity)))
+		h.Write(length[:])
+		h.Write(affinity)
+		copy(sum[:], h.Sum(buffer[:0]))
+	}
 	raw := binary.BigEndian.Uint64(sum[:8])
 	sample := (float64(raw>>11) + 1) / (float64(uint64(1)<<53) + 1)
 	effective := weight

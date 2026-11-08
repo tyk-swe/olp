@@ -995,3 +995,33 @@ func TestPassthroughUnderSpendCapKeepsCredentialSlots(t *testing.T) {
 		t.Fatalf("passthrough slots %+v, want the connection's slot %s", slots, h.slotA)
 	}
 }
+
+func TestRecoveredCredentialServesAfterPlannedSlotsFail(t *testing.T) {
+	h := newHarness(t, Config{})
+	h.republish(func(snapshot *routing.Snapshot, a, b routing.Provider) {
+		recovered := a.Slots[0]
+		recovered.ID, recovered.Priority = uuid.NewString(), 1
+		b.Slots = append(b.Slots, recovered)
+		a.ActiveCredential = b.ActiveCredential
+		a.Slots[0].CredentialID = b.Slots[0].CredentialID
+		snapshot.Providers[a.ID], snapshot.Providers[b.ID] = a, b
+	})
+	h.rt.lapsed = map[string]bool{h.credA: true}
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		h.rt.mu.Lock()
+		delete(h.rt.lapsed, h.credA)
+		h.rt.mu.Unlock()
+		status(http.StatusServiceUnavailable, `{"error":{"message":"unavailable"}}`)(w, r)
+	})
+	h.mock.set("b", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer "+secretA {
+			completion(modelB, answerText)(w, r)
+			return
+		}
+		status(http.StatusUnauthorized, `{"error":{"message":"bad credential"}}`)(w, r)
+	})
+	resp, body := h.chat(fullKey, nil)
+	if resp.StatusCode != http.StatusOK || h.mock.count("a") != 1 || h.mock.count("b") != 2 {
+		t.Fatalf("status %d, body %v, calls a=%d b=%d", resp.StatusCode, body, h.mock.count("a"), h.mock.count("b"))
+	}
+}
