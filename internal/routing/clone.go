@@ -192,9 +192,17 @@ func detachedProvider(provider Provider) Provider {
 	return copy
 }
 func cloneTarget(target Target) Target {
-	target.Tags = slices.Clone(target.Tags)
-	target.Shadow = copyPointer(target.Shadow)
-	return target
+	return Target{
+		ID:            target.ID,
+		ProviderID:    target.ProviderID,
+		ProviderModel: target.ProviderModel,
+		Priority:      target.Priority,
+		Weight:        target.Weight,
+		Timeout:       target.Timeout,
+		RoutingID:     target.RoutingID,
+		Tags:          slices.Clone(target.Tags),
+		Shadow:        copyPointer(target.Shadow),
+	}
 }
 func detachedRoute(route Route) Route {
 	copy := cloneRoute(route)
