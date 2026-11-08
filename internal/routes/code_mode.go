@@ -75,8 +75,8 @@ func (s *Server) writeCodeRoute(r *http.Request, _ access.Principal) (access.Rep
 	if validationError != nil {
 		return access.Reply{}, validationError
 	}
-	return s.Access.CodeWrite(r, "code_routes", "code_route", input.ProjectID, input, func(tx pgx.Tx, p access.Principal, id, etag string) (any, error) {
-		return SaveCodeRoute(r.Context(), tx, p, id, etag, input, r.PathValue("id") != "")
+	return s.Access.CodeWrite(r, access.CodeRoutes, input.ProjectID, input, func(tx pgx.Tx, p access.Principal, id, etag string, existing bool) (any, error) {
+		return SaveCodeRoute(r.Context(), tx, p, id, etag, input, existing)
 	})
 }
 

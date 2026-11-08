@@ -106,8 +106,8 @@ func (s *Server) writeCodeAccount(r *http.Request, _ access.Principal) (access.R
 	if validationError != nil {
 		return access.Reply{}, validationError
 	}
-	return s.Access.CodeWrite(r, "code_accounts", "code_account", input.ProjectID, input, func(tx pgx.Tx, p access.Principal, id, etag string) (any, error) {
-		return SaveCodeAccount(r.Context(), tx, p, id, etag, input, r.PathValue("id") != "")
+	return s.Access.CodeWrite(r, access.CodeAccounts, input.ProjectID, input, func(tx pgx.Tx, p access.Principal, id, etag string, existing bool) (any, error) {
+		return SaveCodeAccount(r.Context(), tx, p, id, etag, input, existing)
 	})
 }
 
