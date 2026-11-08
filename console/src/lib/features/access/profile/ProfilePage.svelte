@@ -1,19 +1,19 @@
 <script lang="ts">
   import SAMLIdentitiesPanel from '../saml/SAMLIdentitiesPanel.svelte';
   import { listSAMLIdentities } from '../saml/api';
-  import { oidcFailureMessage } from '$lib/features/access/login/oidcFailure';
-  import { profileKeys } from '$lib/features/access/profile/profileKeys';
-  import { userKeys } from '$lib/features/access/users/userKeys';
-  import { authLifecycle } from '$lib/features/access/session/lifecycle';
+  import { oidcFailureMessage } from '#lib/features/access/login/oidcFailure.js';
+  import { profileKeys } from '#lib/features/access/profile/profileKeys.js';
+  import { userKeys } from '#lib/features/access/users/userKeys.js';
+  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
 
   import { onMount } from 'svelte';
-  import { replaceState } from '$app/navigation';
+  import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage, isEtagMismatch } from '$lib/management/http';
-  import { beginOidcLink } from '$lib/features/access/oidc/api';
-  import ConflictNotice from '$lib/shell/ConflictNotice.svelte';
-  import ReauthenticateDialog from '$lib/shell/ReauthenticateDialog.svelte';
+  import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
+  import { beginOidcLink } from '#lib/features/access/oidc/api.js';
+  import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
+  import ReauthenticateDialog from '#lib/shell/ReauthenticateDialog.svelte';
   import {
     acceptRemote,
     beginReload,
@@ -23,7 +23,7 @@
     markDirty,
     markSaved,
     reconcile
-  } from '$lib/editing/concurrentEdit';
+  } from '#lib/editing/concurrentEdit.js';
   import {
     beginIdentityReauthentication,
     changePassword,
@@ -32,24 +32,25 @@
     listOidcIdentities,
     unlinkOidcIdentity,
     updateProfile
-  } from '$lib/features/access/profile/api';
-  import { reauthenticateWithPassword } from '$lib/features/access/profile/reauthentication';
-  import ActiveSessionsPanel from '$lib/features/access/profile/ActiveSessionsPanel.svelte';
-  import LocalPasswordPanel from '$lib/features/access/profile/LocalPasswordPanel.svelte';
-  import OidcIdentitiesPanel from '$lib/features/access/profile/OidcIdentitiesPanel.svelte';
-  import MFAPanel from '$lib/features/access/mfa/MFAPanel.svelte';
-  import ProfileDetailsPanel from '$lib/features/access/profile/ProfileDetailsPanel.svelte';
+  } from '#lib/features/access/profile/api.js';
+  import { reauthenticateWithPassword } from '#lib/features/access/profile/reauthentication.js';
+  import ActiveSessionsPanel from '#lib/features/access/profile/ActiveSessionsPanel.svelte';
+  import LocalPasswordPanel from '#lib/features/access/profile/LocalPasswordPanel.svelte';
+  import OidcIdentitiesPanel from '#lib/features/access/profile/OidcIdentitiesPanel.svelte';
+  import MFAPanel from '#lib/features/access/mfa/MFAPanel.svelte';
+  import ProfileDetailsPanel from '#lib/features/access/profile/ProfileDetailsPanel.svelte';
   import {
     ENROLLMENT_VERIFIED_MESSAGE,
     ENROLLMENT_VERIFICATION_TTL_MS,
     parseRecentAuthenticationCallback,
     type PendingIdentityAction
-  } from '$lib/features/access/profile/recentAuthentication';
+  } from '#lib/features/access/profile/recentAuthentication.js';
+
   import {
     validateDisplayName,
     validateNewPassword,
     validatePassword
-  } from '$lib/features/access/profile/validation';
+  } from '#lib/features/access/profile/validation.js';
 
   const SECURITY_OPERATION_FAILED =
     'The security operation could not be completed.';
@@ -57,7 +58,6 @@
     'OIDC identity unlinked. All previous sessions were revoked and this browser was rotated.';
   const UNLINK_TARGET_MISSING =
     'The identity selected for unlinking is missing.';
-
   let displayName = $state('');
   let displayNameError = $state('');
   let currentPassword = $state('');
@@ -117,7 +117,7 @@
     );
     const callback = parseRecentAuthenticationCallback(window.location.search);
     if (callback) {
-      replaceState(resolve('/settings/profile'), {});
+      goto(resolve('settings/profile'), { shallow: true, replace: true });
       // Callback query parameters are only a display hint. They must never
       // directly begin a link or unlink request, because another site can
       // navigate a signed-in browser to this URL.
@@ -248,6 +248,7 @@
       reauthenticationRequest = null;
       identityBusy =
         request.purpose === 'oidc_link' ? 'link' : (request.resourceId ?? '');
+
       if (request.purpose === 'oidc_link') {
         window.location.assign(await beginOidcLink());
         return;
@@ -451,7 +452,8 @@
       Manage your display name, local password, and signed-in browser sessions.
     </p>
   </div>
-  <a class="button button-secondary" href={resolve('/settings')}
+
+  <a class="button button-secondary" href={resolve('settings')}
     >Installation settings</a
   >
 </div>

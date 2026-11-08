@@ -2,29 +2,29 @@
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/editing/mutationIntent.svelte';
+  } from '#lib/editing/mutationIntent.svelte.js';
 
   import ExternalReferenceEditor from './ExternalReferenceEditor.svelte';
   import { parseExternalReference } from './externalReference';
-  import { providerKeys } from '$lib/features/providers/providerKeys';
+  import { providerKeys } from '#lib/features/providers/providerKeys.js';
 
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
-  import { type Provider } from '$lib/features/providers/providers';
+  import { errorMessage } from '#lib/management/http.js';
+  import { type Provider } from '#lib/features/providers/providers.js';
   import {
     listProviderCredentials,
     revokeProviderCredential,
     rotateProviderCredential,
     type ProviderCredential
-  } from '$lib/features/providers/credentials';
-  import { type ProviderKindCapability } from '$lib/features/providers/models';
-  import { formatDate } from '$lib/format';
+  } from '#lib/features/providers/credentials.js';
+  import { type ProviderKindCapability } from '#lib/features/providers/models.js';
+  import { formatDate } from '#lib/format.js';
   import {
     DISABLED_EDIT_NOTE,
     providerDisabled,
     requiresCredential,
     requiresGrant
-  } from '$lib/features/providers/providerEditor';
+  } from '#lib/features/providers/providerEditor.js';
   import type { RunProviderAction } from './providerEditor';
 
   const rotateProviderCredentialIntent = useMutationIntent();

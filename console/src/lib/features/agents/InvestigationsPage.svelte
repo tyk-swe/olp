@@ -1,13 +1,13 @@
 <script lang="ts">
-  import { formatDate } from '$lib/format';
-  import ScrollTable from '$lib/components/ScrollTable.svelte';
+  import { formatDate } from '#lib/format.js';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import { writable } from 'svelte/store';
-  import { errorMessage } from '$lib/management/http';
-  import { listProjectMemberships } from '$lib/features/access/projects/api';
-  import { projectKeys } from '$lib/features/access/projects/projectKeys';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import { errorMessage } from '#lib/management/http.js';
+  import { listProjectMemberships } from '#lib/features/access/projects/api.js';
+  import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
   import { listInvestigations } from './api';
   import { agentKeys } from './agentKeys';
 
@@ -43,7 +43,7 @@
   </div>
 
   {#if access.allows('POST /api/v1/investigations')}
-    <a class="button button-primary" href={resolve('/investigations/new')}
+    <a class="button button-primary" href={resolve('investigations/new')}
       >New investigation</a
     >
   {/if}
@@ -94,10 +94,11 @@
             <td
               ><a
                 class="text-button"
-                href={resolve(`/investigations/${investigation.id}`)}
+                href={resolve(`investigations/${investigation.id}`)}
                 >{investigation.summary}</a
-              ></td
-            >
+              >
+            </td>
+
             <td
               >{projects.data?.find(
                 (project) => project.id === investigation.project_id

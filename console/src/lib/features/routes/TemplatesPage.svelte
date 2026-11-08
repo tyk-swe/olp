@@ -1,14 +1,14 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
-  import ConfirmAction from '$lib/components/ConfirmAction.svelte';
-  import ScrollTable from '$lib/components/ScrollTable.svelte';
-  import { confirmDiscardChanges } from '$lib/editing/unsavedChanges';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { stateLabel } from '$lib/format';
-  import { errorMessage } from '$lib/management/http';
-  import { listProjects } from '$lib/features/agents/api';
-  import { agentKeys } from '$lib/features/agents/agentKeys';
+  import ConfirmAction from '#lib/components/ConfirmAction.svelte';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
+  import { confirmDiscardChanges } from '#lib/editing/unsavedChanges.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { stateLabel } from '#lib/format.js';
+  import { errorMessage } from '#lib/management/http.js';
+  import { listProjects } from '#lib/features/agents/api.js';
+  import { agentKeys } from '#lib/features/agents/agentKeys.js';
   import {
     listTemplates,
     getTemplate,
@@ -63,7 +63,7 @@
 </script>
 
 <svelte:head><title>Route templates · OpenLLMProxy</title></svelte:head>
-<a class="text-button" href={resolve('/routes')}>All routes</a>
+<a class="text-button" href={resolve('routes')}>All routes</a>
 <div class="page-header">
   <div>
     <p class="eyebrow">Gateway</p>

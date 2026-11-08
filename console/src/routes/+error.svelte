@@ -1,7 +1,7 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
-  import BrandMark from '$lib/shell/BrandMark.svelte';
+  import BrandMark from '#lib/shell/BrandMark.svelte';
 </script>
 
 <main class="error-shell">
@@ -19,7 +19,7 @@
         type="button"
         onclick={() => window.location.reload()}>Reload page</button
       >
-      <a class="button button-secondary" href={resolve('/')}
+      <a class="button button-secondary" href={resolve('')}
         >Return to overview</a
       >
     </div>

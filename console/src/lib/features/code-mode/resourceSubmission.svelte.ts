@@ -1,7 +1,7 @@
 import { onDestroy } from 'svelte';
-import { ApiProblem, unanswered } from '$lib/management/http';
-import { useMutationIntent } from '$lib/editing/mutationIntent.svelte';
-import { confirmDiscardChanges } from '$lib/editing/unsavedChanges';
+import { ApiProblem, unanswered } from '#lib/management/http.js';
+import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
+import { confirmDiscardChanges } from '#lib/editing/unsavedChanges.js';
 import { mutationError } from './presentation';
 
 export type ResourceEditorProps<Current> = {

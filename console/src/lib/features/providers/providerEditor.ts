@@ -1,6 +1,6 @@
 import { ConfigurationDraft } from './configurationDraft.svelte';
 import { parseExternalReference } from './externalReference';
-import { nativeObject, type NativeValue } from '$lib/nativeJson';
+import { nativeObject, type NativeValue } from '#lib/nativeJson.js';
 import type { Provider, ProviderVendor } from './providers';
 import type {
   CreateProviderInput,
@@ -8,14 +8,14 @@ import type {
   ProviderKind,
   ProviderProbe,
   UpdateProviderInput
-} from '$lib/features/providers/providers';
+} from '#lib/features/providers/providers.js';
 import type {
   ProviderKindCapability,
   ProviderPreset
-} from '$lib/features/providers/models';
+} from '#lib/features/providers/models.js';
 import { declaresModels, pluginOptionFields } from './profiles';
 import type { ProviderProfile } from './providerProfiles';
-import { stateLabel } from '$lib/format';
+import { stateLabel } from '#lib/format.js';
 
 export type ProviderEditValues = {
   /** The sole configuration authority; the remaining properties are form views. */

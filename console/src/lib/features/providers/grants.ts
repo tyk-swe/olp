@@ -1,7 +1,7 @@
-import type { components } from '$lib/management/schema';
-import { apiClient } from '$lib/management/client';
-import { ensureOk, unwrap } from '$lib/management/http';
-import type { Provider } from '$lib/features/providers/providers';
+import type { components } from '#lib/management/schema.js';
+import { apiClient } from '#lib/management/client.js';
+import { ensureOk, unwrap } from '#lib/management/http.js';
+import type { Provider } from '#lib/features/providers/providers.js';
 
 type Schemas = components['schemas'];
 

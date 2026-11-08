@@ -1,8 +1,8 @@
-import { requestNative } from '$lib/management/transport';
-import type { components } from '$lib/management/schema';
-import { apiClient } from '$lib/management/client';
-import { unwrap } from '$lib/management/http';
-import type { Provider } from '$lib/features/providers/providers';
+import { requestNative } from '#lib/management/transport.js';
+import type { components } from '#lib/management/schema.js';
+import { apiClient } from '#lib/management/client.js';
+import { unwrap } from '#lib/management/http.js';
+import type { Provider } from '#lib/features/providers/providers.js';
 
 type Schemas = components['schemas'];
 

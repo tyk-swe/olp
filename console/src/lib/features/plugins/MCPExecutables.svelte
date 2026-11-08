@@ -2,15 +2,15 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { writable } from 'svelte/store';
   import { pluginKeys } from './pluginKeys';
-  import { errorMessage } from '$lib/management/http';
-  import { formatBytes } from '$lib/format';
-  import ReauthenticateDialog from '$lib/shell/ReauthenticateDialog.svelte';
-  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
+  import { errorMessage } from '#lib/management/http.js';
+  import { formatBytes } from '#lib/format.js';
+  import ReauthenticateDialog from '#lib/shell/ReauthenticateDialog.svelte';
+  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
   import {
     beginIdentityReauthentication,
     listOidcIdentities
-  } from '$lib/features/access/profile/api';
-  import { reauthenticateWithPassword } from '$lib/features/access/profile/reauthentication';
+  } from '#lib/features/access/profile/api.js';
+  import { reauthenticateWithPassword } from '#lib/features/access/profile/reauthentication.js';
   import {
     listMCPExecutables,
     reviewMCPExecutable,

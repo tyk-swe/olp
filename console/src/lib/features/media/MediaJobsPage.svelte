@@ -1,13 +1,13 @@
 <script lang="ts">
-  import { mediaJobKeys } from '$lib/features/media/mediaJobKeys';
+  import { mediaJobKeys } from '#lib/features/media/mediaJobKeys.js';
 
   import { resolve } from '$app/paths';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
-  import { applyListSearch } from '$lib/listing/urlSync.svelte';
-  import { timeInputType } from '$lib/listing/filters';
+  import { applyListSearch } from '#lib/listing/urlSync.svelte.js';
+  import { timeInputType } from '#lib/listing/filters.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import CursorPagination from '$lib/shell/CursorPagination.svelte';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
   import {
     deleteMediaJob,
     downloadMediaJobContent,
@@ -15,13 +15,13 @@
     listMediaJobs,
     refreshMediaJob,
     type MediaContentVariant
-  } from '$lib/features/media/api';
-  import { errorMessage } from '$lib/management/http';
-  import { cursorPaginationProps } from '$lib/listing/pagination';
-  import { formatDate, stateLabel } from '$lib/format';
-  import { downloadBlob } from '$lib/download';
+  } from '#lib/features/media/api.js';
+  import { errorMessage } from '#lib/management/http.js';
+  import { cursorPaginationProps } from '#lib/listing/pagination.js';
+  import { formatDate, stateLabel } from '#lib/format.js';
+  import { downloadBlob } from '#lib/download.js';
   import MediaTimeline from './MediaTimeline.svelte';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
   import {
     mediaJobFilters,
     mediaJobPending,
@@ -33,7 +33,7 @@
     mediaJobLifecycles,
     readMediaJobForm,
     type MediaJobListState
-  } from '$lib/features/media/mediaJobListState';
+  } from '#lib/features/media/mediaJobListState.js';
 
   let {
     jobId = '',
@@ -133,7 +133,7 @@
     try {
       await deleteMediaJob(jobId, job.etag);
       await queryClient.invalidateQueries({ queryKey: mediaJobKeys.all });
-      await goto(resolve(`/media-jobs${page.url.search}`));
+      await goto(resolve(`media-jobs${page.url.search}`));
     } catch (error) {
       actionError = errorMessage(error, 'The job could not be deleted.');
       // A refused delete may still have moved the job (for example to
@@ -182,7 +182,7 @@
     <div class="page-actions">
       <a
         class="button button-secondary"
-        href={resolve(`/media-jobs${page.url.search}`)}>All media jobs</a
+        href={resolve(`media-jobs${page.url.search}`)}>All media jobs</a
       >
       <button
         class="button button-secondary"
@@ -297,15 +297,24 @@
           </p>
         </div>{/if}
       <div class="identifiers">
-        <p><strong>OLP job</strong><code>{detail.data.id}</code></p>
         <p>
-          <strong>Upstream job</strong><code
-            >{detail.data.upstream_job_id ?? 'not assigned'}</code
-          >
+          <strong>OLP job</strong>
+          <code>{detail.data.id}</code>
         </p>
-        <p><strong>API key ID</strong><code>{detail.data.api_key_id}</code></p>
+
         <p>
-          <strong>Provider ID</strong><code>{detail.data.provider_id}</code>
+          <strong>Upstream job</strong>
+          <code>{detail.data.upstream_job_id ?? 'not assigned'}</code>
+        </p>
+
+        <p>
+          <strong>API key ID</strong>
+          <code>{detail.data.api_key_id}</code>
+        </p>
+
+        <p>
+          <strong>Provider ID</strong>
+          <code>{detail.data.provider_id}</code>
         </p>
       </div>
       {#if canOperate}
@@ -373,33 +382,41 @@
   </div>
   <form class="card filters" aria-label="Media job filters" onsubmit={apply}>
     <label
-      >Route <input
-        bind:value={listState.route}
-        placeholder="All routes"
-      /></label
-    >
-    <label
-      >State <select bind:value={listState.jobState}
-        ><option value="">All states</option
-        >{#if listState.jobState && !mediaJobStates.includes(listState.jobState)}<option
-            value={listState.jobState}>{listState.jobState}</option
-          >{/if}{#each mediaJobStates as value (value)}<option {value}
-            >{value}</option
-          >{/each}</select
-      ></label
-    >
-    <label
-      >Lifecycle <select bind:value={listState.lifecycle}
-        ><option value="">All lifecycles</option
-        >{#if listState.lifecycle && !mediaJobLifecycles.includes(listState.lifecycle)}<option
-            value={listState.lifecycle}>{listState.lifecycle}</option
-          >{/if}{#each mediaJobLifecycles as value (value)}<option {value}
-            >{stateLabel(value)}</option
-          >{/each}</select
-      ></label
-    >
-    <label
-      >API key ID <input
+      >Route <input bind:value={listState.route} placeholder="All routes" />
+    </label>
+
+    <label>
+      State
+
+      <select bind:value={listState.jobState}>
+        <option value="">All states</option>
+
+        {#if listState.jobState && !mediaJobStates.includes(listState.jobState)}
+          <option value={listState.jobState}>{listState.jobState}</option>
+        {/if}{#each mediaJobStates as value (value)}
+          <option {value}>{value}</option>
+        {/each}
+      </select>
+    </label>
+
+    <label>
+      Lifecycle
+
+      <select bind:value={listState.lifecycle}>
+        <option value="">All lifecycles</option>
+
+        {#if listState.lifecycle && !mediaJobLifecycles.includes(listState.lifecycle)}
+          <option value={listState.lifecycle}>{listState.lifecycle}</option>
+        {/if}{#each mediaJobLifecycles as value (value)}
+          <option {value}>{stateLabel(value)}</option>
+        {/each}
+      </select>
+    </label>
+
+    <label>
+      API key ID
+
+      <input
         bind:value={listState.apiKeyId}
         class="mono"
         placeholder="All keys"
@@ -489,12 +506,13 @@
                 ><td class="job-action"
                   ><a
                     class="button button-secondary"
-                    href={resolve(`/media-jobs/${job.id}${page.url.search}`)}
+                    href={resolve(`media-jobs/${job.id}${page.url.search}`)}
                     >View</a
-                  ></td
-                ></tr
-              >{/each}</tbody
-          >
+                  >
+                </td>
+              </tr>
+            {/each}
+          </tbody>
         </table>
       </div>
       <CursorPagination

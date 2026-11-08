@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { validRouteSlug } from '$lib/routeIdentity';
+  import { validRouteSlug } from '#lib/routeIdentity.js';
   import { untrack } from 'svelte';
   import {
     saveCodeRoute,
@@ -7,7 +7,7 @@
     type CodePool,
     type CodeRoute,
     type CodeRouteWrite
-  } from '$lib/features/code-mode/api';
+  } from '#lib/features/code-mode/api.js';
   import { nativeModels, type PaidTargetOption } from './presentation';
 
   import {

@@ -1,25 +1,28 @@
 <script lang="ts">
   import ProviderBulkActions from './ProviderBulkActions.svelte';
-  import { providerKeys } from '$lib/features/providers/providerKeys';
+  import { providerKeys } from '#lib/features/providers/providerKeys.js';
 
-  import { overviewKeys } from '$lib/features/overview/overviewKeys';
+  import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
 
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
-  import NavIcon from '$lib/shell/NavIcon.svelte';
-  import CursorPagination from '$lib/shell/CursorPagination.svelte';
-  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
-  import { listProviderPage } from '$lib/features/providers/providers';
-  import { cursorPaginationProps, resetCursor } from '$lib/listing/pagination';
-  import { debouncedSearch } from '$lib/listing/search.svelte';
+  import { errorMessage } from '#lib/management/http.js';
+  import NavIcon from '#lib/shell/NavIcon.svelte';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import { listProviderPage } from '#lib/features/providers/providers.js';
+  import {
+    cursorPaginationProps,
+    resetCursor
+  } from '#lib/listing/pagination.js';
+  import { debouncedSearch } from '#lib/listing/search.svelte.js';
   import type { ProviderListState } from './providerPagination';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { formatDate, stateLabel } from '$lib/format';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { formatDate, stateLabel } from '#lib/format.js';
   import {
     providerStatus,
     providerStatusTone
-  } from '$lib/features/providers/providerEditor';
+  } from '#lib/features/providers/providerEditor.js';
 
   let { listState = $bindable() }: { listState: ProviderListState } = $props();
   const access = useRole();
@@ -74,8 +77,9 @@
   </div>
   {#if canManage}<a
       class="button button-primary"
-      href={resolve('/providers/new')}>Add provider <NavIcon name="arrow" /></a
-    >{/if}
+      href={resolve('providers/new')}>Add provider <NavIcon name="arrow" /></a
+    >
+  {/if}
 </div>
 {#if !canManage}
   <ReadOnlyNote>
@@ -98,7 +102,9 @@
     /></label
   >
 </div>
-{#if canManage}<ProviderBulkActions
+
+{#if canManage}
+  <ProviderBulkActions
     {selected}
     onChanged={async () => {
       await providers.refetch();
@@ -125,8 +131,9 @@
       <p>Connect an upstream and test it before building a route.</p>
       {#if canManage}<a
           class="button button-primary"
-          href={resolve('/providers/new')}>Connect provider</a
-        >{/if}
+          href={resolve('providers/new')}>Connect provider</a
+        >
+      {/if}
     </div>
   </section>
 {:else}
@@ -168,33 +175,42 @@
                         ? [...selectedIds, item.id]
                         : selectedIds.filter((id) => id !== item.id);
                     }}
-                  />{/if}</td
-              ><td
-                ><a class="table-link" href={resolve(`/providers/${item.id}`)}
+                  />
+                {/if}
+              </td>
+              <td>
+                <a class="table-link" href={resolve(`providers/${item.id}`)}
                   >{item.name}</a
-                ><br /><small>{item.project_name ?? 'Installation-wide'}</small
-                ></td
-              ><td
-                >{item.vendor_id ?? 'Custom'}<small class="connector-name"
-                  >{stateLabel(item.kind)}</small
-                ></td
-              ><td
+                >
+                <br />
+                <small>{item.project_name ?? 'Installation-wide'}</small>
+              </td>
+              <td>
+                {item.vendor_id ?? 'Custom'}
+                <small class="connector-name">{stateLabel(item.kind)}</small>
+              </td>
+              <td
                 ><span class="badge {providerStatusTone(item)}"
                   >{providerStatus(item)}</span
                 ></td
-              ><td>{item.enabled_model_count} enabled</td><td
+              >
+              <td>{item.enabled_model_count} enabled</td>
+              <td
                 >{item.last_probe_at
                   ? formatDate(item.last_probe_at)
                   : 'Not tested'}</td
-              ><td
-                ><a
+              >
+              <td>
+                <a
                   class="button button-secondary"
-                  href={resolve(`/providers/${item.id}`)}
+                  href={resolve(`providers/${item.id}`)}
                   >{canManage ? 'Manage' : 'View'}</a
-                ></td
-              ></tr
-            >{/each}{/each}</tbody
-      >
+                >
+              </td>
+            </tr>
+          {/each}
+        {/each}
+      </tbody>
     </table>
   </div>
   <CursorPagination

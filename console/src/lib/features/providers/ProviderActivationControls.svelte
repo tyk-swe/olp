@@ -2,13 +2,13 @@
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/editing/mutationIntent.svelte';
+  } from '#lib/editing/mutationIntent.svelte.js';
 
   import { refreshProviderChange } from './providerChanges';
-  import { providerKeys } from '$lib/features/providers/providerKeys';
+  import { providerKeys } from '#lib/features/providers/providerKeys.js';
 
   import { useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
+  import { errorMessage } from '#lib/management/http.js';
   import {
     activateProvider,
     disableProvider,
@@ -16,7 +16,7 @@
     probeProvider,
     restoreProviderAsDraft,
     type Provider
-  } from '$lib/features/providers/providers';
+  } from '#lib/features/providers/providers.js';
   import {
     activationReady,
     capabilitiesCertified,
@@ -24,9 +24,9 @@
     probeReady,
     probeSummary,
     providerDisabled
-  } from '$lib/features/providers/providerEditor';
+  } from '#lib/features/providers/providerEditor.js';
   import type { RunProviderAction } from './providerEditor';
-  import { formatDate, stateLabel } from '$lib/format';
+  import { formatDate, stateLabel } from '#lib/format.js';
 
   const activateProviderIntent = useMutationIntent();
   const disableProviderIntent = useMutationIntent();

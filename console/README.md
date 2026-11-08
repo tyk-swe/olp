@@ -32,16 +32,16 @@ repository-wide commands.
 
 ## API wiring
 
-- `apiClient` is imported only by feature api modules (plus `$lib/management/**` and
+- `apiClient` is imported only by feature api modules (plus `#lib/management/**` and
   tests). A slice with one API module uses `api.ts`; a slice with several uses
   an `api/` folder with one file per domain (`api/<domain>.ts`). Api modules
   hold the API-call functions and the schema-derived types they return; pure
   helpers stay in the slice's domain modules.
 - Every call is resolved with `unwrap(fetched)`, `unwrapPage(fetched)` or
-  `ensureOk(fetched)` from `$lib/management/http`.
+  `ensureOk(fetched)` from `#lib/management/http.js`.
 - Every query key comes from the slice's `*Keys.ts` module.
 - The browser reaches the inference gateway only through `gatewayFetch` in
-  `$lib/management/gateway.ts`, which omits the session cookie and refuses redirects.
+  `#lib/management/gateway.ts`, which omits the session cookie and refuses redirects.
 - ESLint enforces the `apiClient` and `fetch` restrictions.
 
 ## Feature ownership

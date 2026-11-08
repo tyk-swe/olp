@@ -1,12 +1,12 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import ConfirmAction from '$lib/components/ConfirmAction.svelte';
-  import ScrollTable from '$lib/components/ScrollTable.svelte';
-  import { confirmDiscardChanges } from '$lib/editing/unsavedChanges';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { stateLabel } from '$lib/format';
-  import { errorMessage } from '$lib/management/http';
+  import ConfirmAction from '#lib/components/ConfirmAction.svelte';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
+  import { confirmDiscardChanges } from '#lib/editing/unsavedChanges.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { stateLabel } from '#lib/format.js';
+  import { errorMessage } from '#lib/management/http.js';
   import MCPServerEditor from './MCPServerEditor.svelte';
   import {
     listServers,
@@ -61,9 +61,10 @@
     <h1 class="page-title">MCP servers</h1>
     <p class="page-description">
       Register and certify servers, then select their tools in
-      <a class="text-button" href={resolve('/agents')}
+      <a class="text-button" href={resolve('agents')}
         >Agent publications and toolsets</a
-      >.
+      >
+      .
     </p>
   </div>
   {#if access.allows('POST /api/v1/mcp-servers')}

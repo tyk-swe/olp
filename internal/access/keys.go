@@ -106,7 +106,7 @@ func validateAndNormalizeKey(input keyInput, expirationChanged bool) error {
 	}
 	seen = map[string]bool{}
 	for _, key := range input.AllowedAttributionKeys {
-		if !attribution.ValidKey(key) || seen[key] {
+		if key == attribution.DelegationPairKey || !attribution.ValidKey(key) || seen[key] {
 			return Invalid("allowed_attribution_keys", "Use unique valid attribution keys.")
 		}
 		seen[key] = true

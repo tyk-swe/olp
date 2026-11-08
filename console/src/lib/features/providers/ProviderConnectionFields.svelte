@@ -3,7 +3,7 @@
   import { listProviderProfiles } from './providerProfiles';
   import { providerKeys } from './providerKeys';
   import type { ProviderKindCapability } from './models';
-  import { nativeObject, type NativeValue } from '$lib/nativeJson';
+  import { nativeObject, type NativeValue } from '#lib/nativeJson.js';
   import {
     authOptionsFor,
     hasApiVersion,

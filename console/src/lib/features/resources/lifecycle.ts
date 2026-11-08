@@ -1,10 +1,10 @@
-import { gatewayFetch } from '$lib/management/gateway';
+import { gatewayFetch } from '#lib/management/gateway.js';
 import {
   parseNativeJSON,
   stringifyNativeJSON,
   nativeObject,
   type NativeValue
-} from '$lib/nativeJson';
+} from '#lib/nativeJson.js';
 
 export type AgentAction = 'create' | 'list' | 'get' | 'delete';
 export type AgentRequest = {

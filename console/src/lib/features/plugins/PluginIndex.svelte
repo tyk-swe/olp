@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { PluginIndex } from './api';
   import { releaseStatus, sourceURL } from './pluginIndex';
-  import { formatBytes, formatDate } from '$lib/format';
+  import { formatBytes, formatDate } from '#lib/format.js';
 
   let { index }: { index: PluginIndex } = $props();
 </script>

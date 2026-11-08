@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { formatDate } from '$lib/format';
-  import ScrollTable from '$lib/components/ScrollTable.svelte';
+  import { formatDate } from '#lib/format.js';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import { writable } from 'svelte/store';
-  import { errorMessage } from '$lib/management/http';
-  import { listProjectMemberships } from '$lib/features/access/projects/api';
-  import { projectKeys } from '$lib/features/access/projects/projectKeys';
+  import { errorMessage } from '#lib/management/http.js';
+  import { listProjectMemberships } from '#lib/features/access/projects/api.js';
+  import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
   import { listRuns } from './api';
   import { agentKeys } from './agentKeys';
 
@@ -82,8 +82,7 @@
         {#each runs.data.items as run (run.id)}
           <tr>
             <td
-              ><a href={resolve(`/runs/${run.id}`)}><code>{run.id}</code></a
-              ></td
+              ><a href={resolve(`runs/${run.id}`)}><code>{run.id}</code></a></td
             >
             <td
               >{projects.data?.find((project) => project.id === run.project_id)

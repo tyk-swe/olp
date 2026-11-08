@@ -1,5 +1,5 @@
-import type { components } from '$lib/management/schema';
-import { formatInteger } from '$lib/format';
+import type { components } from '#lib/management/schema.js';
+import { formatInteger } from '#lib/format.js';
 
 type Schemas = components['schemas'];
 type RoutingDecision = Schemas['RoutingDecision'];

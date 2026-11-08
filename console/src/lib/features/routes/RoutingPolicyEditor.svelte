@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { useMutationIntent } from '$lib/editing/mutationIntent.svelte';
+  import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
 
   import { onDestroy, untrack } from 'svelte';
-  import { guardUnsavedChanges } from '$lib/editing/unsavedChanges';
-  import { parseJsonObject } from '$lib/editing/json';
+  import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
+  import { parseJsonObject } from '#lib/editing/json.js';
   import RoutingPreferencesForm from './RoutingPreferencesForm.svelte';
   import { createQuery } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
+  import { errorMessage } from '#lib/management/http.js';
   import {
     getRoutingPolicy,
     replaceRoutingPolicy,

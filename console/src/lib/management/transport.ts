@@ -9,7 +9,7 @@ import {
   parseManagementJSON,
   stringifyNativeJSON,
   type NativePath
-} from '$lib/nativeJson';
+} from '#lib/nativeJson.js';
 import type { paths } from './schema';
 import {
   requestOutcome,

@@ -1,11 +1,11 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { onMount } from 'svelte';
-  import { errorMessage } from '$lib/management/http';
-  import { formatDate } from '$lib/format';
-  import { profileKeys } from '$lib/features/access/profile/profileKeys';
-  import { beginIdentityReauthentication } from '$lib/features/access/profile/api';
-  import { reauthenticateWithPassword } from '$lib/features/access/profile/reauthentication';
+  import { errorMessage } from '#lib/management/http.js';
+  import { formatDate } from '#lib/format.js';
+  import { profileKeys } from '#lib/features/access/profile/profileKeys.js';
+  import { beginIdentityReauthentication } from '#lib/features/access/profile/api.js';
+  import { reauthenticateWithPassword } from '#lib/features/access/profile/reauthentication.js';
   import { getMFA, enrollMFA, manageMFA, removeMFA, recoveryMFA } from './api';
   import { confirmMFA } from './prompt.svelte';
   let {

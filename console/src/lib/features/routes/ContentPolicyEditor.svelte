@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { RouteDraftEditorState } from '$lib/features/routes/routeDraftEditor.svelte';
+  import type { RouteDraftEditorState } from '#lib/features/routes/routeDraftEditor.svelte.js';
   let { editor }: { editor: RouteDraftEditorState } = $props();
 </script>
 

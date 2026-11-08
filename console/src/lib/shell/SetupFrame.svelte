@@ -1,8 +1,8 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import type { Snippet } from 'svelte';
-  import BrandMark from '$lib/shell/BrandMark.svelte';
-  import RouteDiagram from '$lib/shell/RouteDiagram.svelte';
+  import BrandMark from '#lib/shell/BrandMark.svelte';
+  import RouteDiagram from '#lib/shell/RouteDiagram.svelte';
 
   let { children }: { children: Snippet } = $props();
   const headline = 'One control point for every model route.'.split(' ');
@@ -11,7 +11,7 @@
 <a class="skip-link" href="#setup-content">Skip to setup</a>
 <main class="setup-shell" id="setup-content" tabindex="-1">
   <div class="setup-header">
-    <a class="brand" href={resolve('/')} aria-label="OpenLLMProxy home">
+    <a class="brand" href={resolve('')} aria-label="OpenLLMProxy home">
       <BrandMark size={22} />
       <span class="wordmark">OpenLLMProxy</span>
     </a>

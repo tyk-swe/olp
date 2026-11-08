@@ -1,19 +1,19 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
-  import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
-  import { listProviders } from '$lib/features/providers/providers';
-  import { providerKeys } from '$lib/features/providers/providerKeys';
-  import { listProjects } from '$lib/features/access/projects/api';
-  import { projectKeys } from '$lib/features/access/projects/projectKeys';
-  import { listRoutes, simulateRouting } from '$lib/features/routes/api';
-  import { routeKeys } from '$lib/features/routes/routeKeys';
+  import { errorMessage } from '#lib/management/http.js';
+  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import { listProviders } from '#lib/features/providers/providers.js';
+  import { providerKeys } from '#lib/features/providers/providerKeys.js';
+  import { listProjects } from '#lib/features/access/projects/api.js';
+  import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
+  import { listRoutes, simulateRouting } from '#lib/features/routes/api.js';
+  import { routeKeys } from '#lib/features/routes/routeKeys.js';
   import {
     decisionRows,
     type ExplanationRow
-  } from '$lib/features/routes/routingExplanation';
-  import { operationKinds } from '$lib/features/usage/history/api';
-  import { quoteUsage, type PricingQuote } from '$lib/features/usage/quote';
+  } from '#lib/features/routes/routingExplanation.js';
+  import { operationKinds } from '#lib/features/usage/history/api.js';
+  import { quoteUsage, type PricingQuote } from '#lib/features/usage/quote.js';
 
   const services = useServiceCapabilities();
 

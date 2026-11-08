@@ -1,5 +1,5 @@
-import { gatewayFetch } from '$lib/management/gateway';
-import { validRouteSlug } from '$lib/routeIdentity';
+import { gatewayFetch } from '#lib/management/gateway.js';
+import { validRouteSlug } from '#lib/routeIdentity.js';
 
 export const translationFormats = [
   'json',

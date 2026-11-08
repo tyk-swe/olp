@@ -16,7 +16,7 @@ func TestAllowedAttributionKeysAgreeWithRequestLabels(t *testing.T) {
 		valid bool
 	}{
 		{"team", true}, {"Team_2.name", true}, {strings.Repeat("a", 32), true},
-		{"", false}, {"2team", false}, {"team/name", false}, {strings.Repeat("a", 33), false},
+		{attribution.DelegationPairKey, false}, {"", false}, {"2team", false}, {"team/name", false}, {strings.Repeat("a", 33), false},
 	} {
 		t.Run(tc.key, func(t *testing.T) {
 			key := keyInput{Name: "key", KeyPolicy: keyauthority.KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{}, AllowedAttributionKeys: []string{tc.key}}}
@@ -123,5 +123,28 @@ func TestConsumerScopesWorkForKeysAndWorkloadMappings(t *testing.T) {
 				t.Fatalf("workload validation = %v, valid = %t", err, tc.valid)
 			}
 		})
+	}
+}
+
+func TestRequiredAttributionKeysAgreeWithCallerLabels(t *testing.T) {
+	for _, label := range []string{"team", attribution.DelegationPairKey} {
+		t.Run(label, func(t *testing.T) {
+			policy := attribution.Policy{Required: []string{label}}
+			key := keyInput{Name: "key", KeyPolicy: keyauthority.KeyPolicy{
+				Scopes: []string{"inference"}, AllowedRoutes: []string{}, RequiredAttributionKeys: []string{label},
+			}}
+			valid := attribution.Validate(map[string]string{label: "value"}) == nil
+			if err := ValidateAttributionPolicy(&policy); (err == nil) != valid {
+				t.Errorf("project requirement for %q has error %v, caller label valid %t", label, err, valid)
+			}
+			if err := validateAndNormalizeKey(key, false); (err == nil) != valid {
+				t.Errorf("key requirement for %q has error %v, caller label valid %t", label, err, valid)
+			}
+		})
+	}
+	amount := "1"
+	budgets := keyauthority.AttributionBudgets{attribution.DelegationPairKey: {strings.Repeat("a", 64): {DailyCostLimit: &amount}}}
+	if err := budgets.ValidateAndNormalize(); err != nil {
+		t.Fatalf("reserved delegation budget must remain valid: %v", err)
 	}
 }

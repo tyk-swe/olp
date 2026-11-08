@@ -1,12 +1,12 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage, isEtagMismatch } from '$lib/management/http';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/editing/mutationIntent.svelte';
-  import { parseNativeJSON, nativeObject } from '$lib/nativeJson';
+  } from '#lib/editing/mutationIntent.svelte.js';
+  import { parseNativeJSON, nativeObject } from '#lib/nativeJson.js';
   import {
     listRetrievalBindings,
     getRetrievalBinding,

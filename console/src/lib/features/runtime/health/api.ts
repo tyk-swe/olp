@@ -1,12 +1,12 @@
-import type { components } from '$lib/management/schema';
-import { apiClient } from '$lib/management/client';
-import { pageResult, unwrap, unwrapPage } from '$lib/management/http';
+import type { components } from '#lib/management/schema.js';
+import { apiClient } from '#lib/management/client.js';
+import { pageResult, unwrap, unwrapPage } from '#lib/management/http.js';
 import {
   GATEWAY_EPOCH_PAGE_SIZE,
   PROVIDER_HEALTH_PAGE_SIZE
-} from '$lib/management/pageSizes';
-import { collectCursorPages } from '$lib/management/pagination';
-import { type CursorPage } from '$lib/management/http';
+} from '#lib/management/pageSizes.js';
+import { collectCursorPages } from '#lib/management/pagination.js';
+import { type CursorPage } from '#lib/management/http.js';
 
 export type RequestMetadataGatewayEpoch =
   components['schemas']['RequestMetadataGatewayEpochResponse'];

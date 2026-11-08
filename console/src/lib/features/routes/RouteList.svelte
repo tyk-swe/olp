@@ -1,25 +1,25 @@
 <script lang="ts">
-  import { useMutationIntent } from '$lib/editing/mutationIntent.svelte';
+  import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
 
-  import { routeKeys } from '$lib/features/routes/routeKeys';
-  import { retiringTargets } from '$lib/features/routes/routeEditor';
+  import { routeKeys } from '#lib/features/routes/routeKeys.js';
+  import { retiringTargets } from '#lib/features/routes/routeEditor.js';
 
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
-  import CursorPagination from '$lib/shell/CursorPagination.svelte';
-  import NavIcon from '$lib/shell/NavIcon.svelte';
-  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
+  import { errorMessage } from '#lib/management/http.js';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import NavIcon from '#lib/shell/NavIcon.svelte';
+  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
   import {
     listRouteDraftPage,
     listRoutePage,
     retireRoute,
     type ActiveRoute
-  } from '$lib/features/routes/api';
-  import { cursorPaginationProps } from '$lib/listing/pagination';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { formatDate, formatInteger } from '$lib/format';
-  import type { RouteListState } from '$lib/features/routes/routeListState';
+  } from '#lib/features/routes/api.js';
+  import { cursorPaginationProps } from '#lib/listing/pagination.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { formatDate, formatInteger } from '#lib/format.js';
+  import type { RouteListState } from '#lib/features/routes/routeListState.js';
 
   const retireRouteIntent = useMutationIntent();
 
@@ -82,9 +82,12 @@
       behind each route.
     </p>
   </div>
-  {#if canManage}<a class="button button-primary" href={resolve('/routes/new')}
+
+  {#if canManage}
+    <a class="button button-primary" href={resolve('routes/new')}
       >New route draft <NavIcon name="arrow" /></a
-    >{/if}
+    >
+  {/if}
 </div>
 {#if !canManage}<ReadOnlyNote
     >Your role can view routes but not create, edit, or activate them.</ReadOnlyNote
@@ -100,8 +103,9 @@
       </p>
       {#if canManage}<a
           class="button button-primary"
-          href={resolve('/routes/new')}>Build first route</a
-        >{/if}
+          href={resolve('routes/new')}>Build first route</a
+        >
+      {/if}
     </div>
   </section>
 {:else}
@@ -179,9 +183,12 @@
                 ><td class="row-actions"
                   ><a
                     class="button button-secondary"
-                    href={resolve(`/routes/${item.id}/revisions`)}
+                    href={resolve(`routes/${item.id}/revisions`)}
                     >History & restore</a
-                  >{#if canManage && item.state === 'active'}<button
+                  >
+
+                  {#if canManage && item.state === 'active'}
+                    <button
                       class="button button-secondary"
                       type="button"
                       disabled={retiring !== null}
@@ -237,25 +244,35 @@
         aria-busy={drafts.isPlaceholderData}
       >
         <table class="data-table">
-          <thead
-            ><tr
-              ><th>Slug</th><th>State</th><th>Operations</th><th>Targets</th><th
-                >Deadline / attempts</th
-              ><th>Updated</th><th>Created by</th><th
-                ><span class="sr-only">Actions</span></th
-              ></tr
-            ></thead
-          ><tbody
-            >{#each drafts.data.items as item (item.id)}{@const retiringCount =
-                retiringTargets(item.targets)}<tr
-                ><td
-                  ><a class="route-link" href={resolve(`/routes/${item.id}`)}
+          <thead>
+            <tr>
+              <th>Slug</th>
+              <th>State</th>
+              <th>Operations</th>
+              <th>Targets</th>
+              <th>Deadline / attempts</th>
+              <th>Updated</th>
+              <th>Created by</th>
+              <th><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {#each drafts.data.items as item (item.id)}
+              {@const retiringCount = retiringTargets(item.targets)}
+
+              <tr>
+                <td>
+                  <a class="route-link" href={resolve(`routes/${item.id}`)}
                     >{item.slug}</a
-                  ><br /><small
-                    >{item.project_name ?? 'Installation-wide'}</small
-                  ></td
-                ><td
-                  ><span
+                  >
+
+                  <br />
+                  <small>{item.project_name ?? 'Installation-wide'}</small>
+                </td>
+
+                <td>
+                  <span
                     class:success={item.state === 'validated'}
                     class:warning={item.state !== 'validated'}
                     class="badge">{item.state}</span
@@ -271,12 +288,13 @@
                 ><td
                   ><a
                     class="button button-secondary"
-                    href={resolve(`/routes/${item.id}`)}
+                    href={resolve(`routes/${item.id}`)}
                     >{canManage ? 'Open Studio' : 'View draft'}</a
-                  ></td
-                ></tr
-              >{/each}</tbody
-          >
+                  >
+                </td>
+              </tr>
+            {/each}
+          </tbody>
         </table>
       </div>
     {/if}

@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { providerKeys } from '$lib/features/providers/providerKeys';
-  import { usePrincipalLifetime } from '$lib/editing/mutationIntent.svelte';
+  import { providerKeys } from '#lib/features/providers/providerKeys.js';
+  import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
 
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage, isEtagMismatch } from '$lib/management/http';
-  import CursorPagination from '$lib/shell/CursorPagination.svelte';
-  import { formatDate } from '$lib/format';
+  import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import { formatDate } from '#lib/format.js';
   import {
     certifyProviderModel,
     declareProviderModels,
@@ -16,27 +16,27 @@
     type CapabilityCertification,
     type CapabilityDeclaration,
     type ProviderModel
-  } from '$lib/features/providers/models';
+  } from '#lib/features/providers/models.js';
   import {
     probeProvider,
     type Provider
-  } from '$lib/features/providers/providers';
-  import { declaresModels } from '$lib/features/providers/profiles';
-  import { listProviderProfiles } from '$lib/features/providers/providerProfiles';
+  } from '#lib/features/providers/providers.js';
+  import { declaresModels } from '#lib/features/providers/profiles.js';
+  import { listProviderProfiles } from '#lib/features/providers/providerProfiles.js';
   import {
     cursorPaginationProps,
     resetCursor,
     type CursorHistory
-  } from '$lib/listing/pagination';
-  import CapabilityReview from '$lib/features/providers/CapabilityReview.svelte';
-  import CatalogSuggestions from '$lib/features/providers/CatalogSuggestions.svelte';
+  } from '#lib/listing/pagination.js';
+  import CapabilityReview from '#lib/features/providers/CapabilityReview.svelte';
+  import CatalogSuggestions from '#lib/features/providers/CatalogSuggestions.svelte';
   import {
     activationReady,
     certificationPrerequisiteReady,
     DISABLED_EDIT_NOTE,
     parseManualModelNames,
     providerDisabled
-  } from '$lib/features/providers/providerEditor';
+  } from '#lib/features/providers/providerEditor.js';
   import type { RunProviderAction } from './providerEditor';
   import type { ProviderModelPage } from './models';
 
@@ -227,8 +227,8 @@
       }
       const { result } = await certifyProviderModel(provider, modelId);
       if (!isCurrent()) return;
-      certificationResults = { ...certificationResults, [modelId]: result };
 
+      certificationResults = { ...certificationResults, [modelId]: result };
       await observeChange(
         isCurrent,
         false,
@@ -253,7 +253,8 @@
       <p class="eyebrow">Discovery</p>
       <h2 id="models-heading">Models and capabilities</h2>
     </div>
-    <a class="button button-secondary" href={resolve('/provider-models')}
+
+    <a class="button button-secondary" href={resolve('provider-models')}
       >Inventory view</a
     >
   </div>
@@ -269,12 +270,13 @@
       type="button"
       onclick={discover}
       disabled={!canManage || Boolean(busy) || refreshPending || editingLocked}
-      >{busy === 'detail-discover'
+    >
+      {busy === 'detail-discover'
         ? 'Discovering…'
         : declared
           ? 'Recheck declared models'
-          : 'Run upstream discovery'}</button
-    >
+          : 'Run upstream discovery'}
+    </button>
   </div>
   {#if editingLocked}<p class="locked-note">{DISABLED_EDIT_NOTE}</p>{/if}
   <CatalogSuggestions
@@ -302,7 +304,8 @@
         ><textarea
           id="manual-models-detail"
           bind:value={manualModelNames}
-          placeholder="model-a&#10;model-b"></textarea>
+          placeholder="model-a
+model-b"></textarea>
       </div>
       <button
         class="button button-secondary"
@@ -321,16 +324,13 @@
         type="button"
         onclick={() => reloadModels()}>Retry</button
       >
-    </div>{/if}
-  {#if current.model_count === 0}<div class="empty-state">
-      <p>No models have been discovered.</p>
     </div>
-  {:else if loading && !visibleModelPage}<div
-      class="loading-state"
-      role="status"
-    >
-      Loading models…
-    </div>
+  {/if}
+
+  {#if current.model_count === 0}
+    <div class="empty-state"><p>No models have been discovered.</p></div>
+  {:else if loading && !visibleModelPage}
+    <div class="loading-state" role="status">Loading models…</div>
   {:else if visibleModelPage}
     {@const modelPage = visibleModelPage}
     <div class="table-shell">

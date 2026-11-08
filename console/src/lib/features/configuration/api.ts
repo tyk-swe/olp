@@ -1,7 +1,7 @@
-import { requestNative } from '$lib/management/transport';
-import type { components } from '$lib/management/schema';
-import { apiClient } from '$lib/management/client';
-import { unwrap } from '$lib/management/http';
+import { requestNative } from '#lib/management/transport.js';
+import type { components } from '#lib/management/schema.js';
+import { apiClient } from '#lib/management/client.js';
+import { unwrap } from '#lib/management/http.js';
 
 export type CodeBindings = components['schemas']['ConfigurationCodeBindings'];
 

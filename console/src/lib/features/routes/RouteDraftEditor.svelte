@@ -4,19 +4,22 @@
   import RoutePassthroughEditor from './RoutePassthroughEditor.svelte';
   import ContentPolicyEditor from './ContentPolicyEditor.svelte';
   import RoutingPolicyEditor from './RoutingPolicyEditor.svelte';
-  import { focusErrorSummary, focusFormError } from '$lib/editing/focusError';
-  import RouteTargets from '$lib/features/routes/RouteTargets.svelte';
+  import {
+    focusErrorSummary,
+    focusFormError
+  } from '#lib/editing/focusError.js';
+  import RouteTargets from '#lib/features/routes/RouteTargets.svelte';
   import RouteResilienceEditor from './RouteResilienceEditor.svelte';
-  import RouteCacheEditor from '$lib/features/caching/RouteCacheEditor.svelte';
-  import RoutePublishPanel from '$lib/features/routes/RoutePublishPanel.svelte';
-  import RouteSimulation from '$lib/features/routes/RouteSimulation.svelte';
+  import RouteCacheEditor from '#lib/features/caching/RouteCacheEditor.svelte';
+  import RoutePublishPanel from '#lib/features/routes/RoutePublishPanel.svelte';
+  import RouteSimulation from '#lib/features/routes/RouteSimulation.svelte';
   import { resolve } from '$app/paths';
-  import { errorMessage } from '$lib/management/http';
-  import ConflictNotice from '$lib/shell/ConflictNotice.svelte';
-  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
-  import { formatDate } from '$lib/format';
-  import { RouteDraftEditorState } from '$lib/features/routes/routeDraftEditor.svelte';
-  import ProjectScopeField from '$lib/features/access/projects/ProjectScopeField.svelte';
+  import { errorMessage } from '#lib/management/http.js';
+  import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
+  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import { formatDate } from '#lib/format.js';
+  import { RouteDraftEditorState } from '#lib/features/routes/routeDraftEditor.svelte.js';
+  import ProjectScopeField from '#lib/features/access/projects/ProjectScopeField.svelte';
   let {
     routeId
   }: {
@@ -56,9 +59,11 @@
       </p>{/if}
   </div>
   <div class="page-actions">
-    <a class="button button-secondary" href={resolve('/routes')}
+    <a class="button button-secondary" href={resolve('routes')}
       >{editor.canManage ? 'Cancel' : 'Back to routes'}</a
-    >{#if editor.canManage && editor.resourceId && editor.draft.data}
+    >
+
+    {#if editor.canManage && editor.resourceId && editor.draft.data}
       {@const draft = editor.draft.data}
       <button
         class="button button-secondary button-danger"
@@ -175,11 +180,13 @@
           </fieldset>
         </div>
       </section>
+
       <RouteFidelityEditor {editor} />
       <RouteToolExecutionEditor {editor} />
       <RoutePassthroughEditor {editor} />
       <RouteTargets {editor} />
       <ContentPolicyEditor {editor} />
+
       <section class="card editor advanced" aria-labelledby="advanced-heading">
         <p class="eyebrow">Advanced</p>
         <h2 id="advanced-heading">Deadline and failover</h2>

@@ -3,7 +3,7 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { listNotificationDeliveries } from './api';
   import { notificationKeys } from './notificationKeys';
-  import { formatDate } from '$lib/format';
+  import { formatDate } from '#lib/format.js';
   const deliveries = createQuery(() => ({
     queryKey: notificationKeys.deliveries(),
     queryFn: ({ signal }) => listNotificationDeliveries(undefined, signal)

@@ -90,7 +90,7 @@ export default [
         {
           paths: [
             {
-              name: '$lib/management/client',
+              name: '#lib/management/client.js',
               message:
                 'Call the management API from the feature api module, not a component.'
             }
@@ -102,7 +102,7 @@ export default [
         {
           name: 'fetch',
           message:
-            'Use a feature api module or $lib/management/gateway gatewayFetch.'
+            'Use a feature api module or #lib/management/gateway.js gatewayFetch.'
         }
       ]
     }

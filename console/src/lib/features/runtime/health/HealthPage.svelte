@@ -1,25 +1,25 @@
 <script lang="ts">
-  import { healthKeys } from '$lib/features/runtime/health/healthKeys';
+  import { healthKeys } from '#lib/features/runtime/health/healthKeys.js';
 
   import { createQuery } from '@tanstack/svelte-query';
-  import CursorPagination from '$lib/shell/CursorPagination.svelte';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
   import {
     cursorPaginationProps,
     emptyCursorHistory
-  } from '$lib/listing/pagination';
+  } from '#lib/listing/pagination.js';
   import {
     getReadiness,
     listProviderHealth,
     listRequestMetadataGatewayEpochs
-  } from '$lib/features/runtime/health/api';
-  import { errorMessage } from '$lib/management/http';
-  import { listRuntimeGenerations } from '$lib/features/runtime/api';
-  import { usageCompleteness } from '$lib/features/usage/usage';
-  import { formatDate, formatTime } from '$lib/format';
-  import GatewayEpochsPanel from '$lib/features/runtime/health/GatewayEpochsPanel.svelte';
-  import ProviderHealthPanel from '$lib/features/runtime/health/ProviderHealthPanel.svelte';
-  import ReadinessPanels from '$lib/features/runtime/health/ReadinessPanels.svelte';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
+  } from '#lib/features/runtime/health/api.js';
+  import { errorMessage } from '#lib/management/http.js';
+  import { listRuntimeGenerations } from '#lib/features/runtime/api.js';
+  import { usageCompleteness } from '#lib/features/usage/usage.js';
+  import { formatDate, formatTime } from '#lib/format.js';
+  import GatewayEpochsPanel from '#lib/features/runtime/health/GatewayEpochsPanel.svelte';
+  import ProviderHealthPanel from '#lib/features/runtime/health/ProviderHealthPanel.svelte';
+  import ReadinessPanels from '#lib/features/runtime/health/ReadinessPanels.svelte';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
 
   // Runtime generations and unresolved gateway epochs are installation-wide
   // reads, so they run only for principals the contract admits.

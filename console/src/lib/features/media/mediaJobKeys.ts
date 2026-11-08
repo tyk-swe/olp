@@ -1,4 +1,4 @@
-import type { MediaJobQuery } from '$lib/features/media/mediaJobListState';
+import type { MediaJobQuery } from '#lib/features/media/mediaJobListState.js';
 
 const root = ['media-jobs'] as const;
 

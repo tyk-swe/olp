@@ -1,17 +1,17 @@
 <script lang="ts">
-  import ConfirmAction from '$lib/components/ConfirmAction.svelte';
+  import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
-  import ProjectScopeField from '$lib/features/access/projects/ProjectScopeField.svelte';
+  import { errorMessage } from '#lib/management/http.js';
+  import ProjectScopeField from '#lib/features/access/projects/ProjectScopeField.svelte';
   import { notificationKeys } from './notificationKeys';
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/editing/mutationIntent.svelte';
-  import { listApiKeys } from '$lib/features/access/api-keys/api';
-  import { apiKeyKeys } from '$lib/features/access/api-keys/apiKeyKeys';
-  import { listBudgetGroups } from '$lib/features/access/budget-groups/api';
-  import { budgetGroupKeys } from '$lib/features/access/budget-groups/budgetGroupKeys';
+  } from '#lib/editing/mutationIntent.svelte.js';
+  import { listApiKeys } from '#lib/features/access/api-keys/api.js';
+  import { apiKeyKeys } from '#lib/features/access/api-keys/apiKeyKeys.js';
+  import { listBudgetGroups } from '#lib/features/access/budget-groups/api.js';
+  import { budgetGroupKeys } from '#lib/features/access/budget-groups/budgetGroupKeys.js';
   import {
     createNotificationRule,
     deleteNotificationRule,

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { nativeEntries, nativeObject } from '$lib/nativeJson';
+  import { nativeEntries, nativeObject } from '#lib/nativeJson.js';
   import type { ConfigurationDraft } from './configurationDraft.svelte';
   import type { FieldSchema, ProviderProfile } from './providerProfiles';
   import NativeValueField from './NativeValueField.svelte';

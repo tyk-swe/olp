@@ -1,4 +1,4 @@
-import type { UsageCompleteness } from '$lib/features/usage/usage';
+import type { UsageCompleteness } from '#lib/features/usage/usage.js';
 
 export function completenessFromSummary(
   summary: Omit<UsageCompleteness, 'priced_count'>

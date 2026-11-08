@@ -1,23 +1,23 @@
 <script lang="ts">
-  import { userKeys } from '$lib/features/access/users/userKeys';
+  import { userKeys } from '#lib/features/access/users/userKeys.js';
 
   import { createQuery } from '@tanstack/svelte-query';
-  import { logout } from '$lib/features/access/session/api';
+  import { logout } from '#lib/features/access/session/api.js';
   import {
     listSessionPage,
     revokeSession
-  } from '$lib/features/access/sessions/api';
-  import { listUsers } from '$lib/features/access/users/api';
-  import { authLifecycle } from '$lib/features/access/session/lifecycle';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { errorMessage } from '$lib/management/http';
+  } from '#lib/features/access/sessions/api.js';
+  import { listUsers } from '#lib/features/access/users/api.js';
+  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { errorMessage } from '#lib/management/http.js';
   import {
     cursorPaginationProps,
     emptyCursorHistory,
     resetCursor
-  } from '$lib/listing/pagination';
-  import CursorPagination from '$lib/shell/CursorPagination.svelte';
-  import { formatDate } from '$lib/format';
+  } from '#lib/listing/pagination.js';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import { formatDate } from '#lib/format.js';
 
   const access = useRole();
   const canManage = $derived(access.can('sessions.manage'));

@@ -1,9 +1,13 @@
-import type { AuditEvent, AuditFilters } from '$lib/features/access/audit/api';
-import { AUDIT_PAGE_SIZE } from '$lib/management/pageSizes';
+import type { ReadonlyURLSearchParams } from '$app/state';
+import type {
+  AuditEvent,
+  AuditFilters
+} from '#lib/features/access/audit/api.js';
+import { AUDIT_PAGE_SIZE } from '#lib/management/pageSizes.js';
 import {
   filteredListState,
   type FilteredListState
-} from '$lib/listing/pagination';
+} from '#lib/listing/pagination.js';
 import {
   formTimeValue,
   preservedTime,
@@ -12,8 +16,8 @@ import {
   readForm,
   timeProblem,
   uuidProblem
-} from '$lib/listing/filters';
-import type { ListUrlSpec } from '$lib/listing/urlSync.svelte';
+} from '#lib/listing/filters.js';
+import type { ListUrlSpec } from '#lib/listing/urlSync.svelte.js';
 
 export type AuditForm = {
   action: string;
@@ -105,11 +109,11 @@ export function auditProblem(
   );
 }
 
-export function readAuditForm(search: URLSearchParams): AuditForm {
+export function readAuditForm(search: ReadonlyURLSearchParams): AuditForm {
   return readForm<AuditForm>(search, params);
 }
 
-export function auditState(search: URLSearchParams): AuditListState {
+export function auditState(search: ReadonlyURLSearchParams): AuditListState {
   const form = readAuditForm(search);
   return {
     ...auditList.empty(),
@@ -125,7 +129,7 @@ export function auditSearch(applied: AuditQuery): string {
 }
 
 export const auditUrl: ListUrlSpec<AuditListState> = {
-  path: '/audit',
+  path: 'audit',
   state: auditState,
   canonical: (search) => {
     const form = readAuditForm(search);

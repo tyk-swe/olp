@@ -2,7 +2,7 @@
   import {
     orderedRows,
     type ExplanationRow
-  } from '$lib/features/routes/routingExplanation';
+  } from '#lib/features/routes/routingExplanation.js';
   import InteractionInspector from './InteractionInspector.svelte';
   let { rows }: { rows: ExplanationRow[] } = $props();
   const ordered = $derived(orderedRows(rows));

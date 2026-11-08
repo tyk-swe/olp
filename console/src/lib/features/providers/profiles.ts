@@ -1,4 +1,4 @@
-import { nativeObject } from '$lib/nativeJson';
+import { nativeObject } from '#lib/nativeJson.js';
 import type {
   FieldSchema,
   ProviderProfile,

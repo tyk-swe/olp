@@ -1,6 +1,6 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
-  import NavIcon from '$lib/shell/NavIcon.svelte';
+  import NavIcon from '#lib/shell/NavIcon.svelte';
   import type { SetupProgress } from './setupProgress';
 
   let { progress, onRetry }: { progress: SetupProgress; onRetry: () => void } =

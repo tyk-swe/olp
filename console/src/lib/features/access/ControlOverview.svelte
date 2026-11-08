@@ -15,40 +15,42 @@
 </div>
 <div class="controls">
   {#if access.can('users.read')}
-    <a class="card" href={resolve('/access')}
-      ><h2>Members and sign-in</h2>
+    <a class="card" href={resolve('access')}>
+      <h2>Members and sign-in</h2>
       <p>
         Invite members, assign roles, manage sessions, and configure your
         identity provider.
-      </p></a
-    >
+      </p>
+    </a>
   {/if}
-  <a class="card" href={resolve('/api-keys')}
-    ><h2>API keys</h2>
+
+  <a class="card" href={resolve('api-keys')}>
+    <h2>API keys</h2>
     <p>
       Create scoped client credentials, save policies, and rotate or revoke
       secrets.
-    </p></a
-  >
-  <a class="card" href={resolve('/settings/profile')}
-    ><h2>Your profile</h2>
+    </p>
+  </a>
+
+  <a class="card" href={resolve('settings/profile')}>
+    <h2>Your profile</h2>
     <p>
       Update your details, password, linked identities, and active sessions.
-    </p></a
-  >
-  <a class="card" href={resolve('/settings')}
-    ><h2>Installation settings</h2>
-    <p>
-      Manage local sign-in and review saved retention and limit policies.
-    </p></a
-  >
-  <a class="card" href={resolve('/audit')}
-    ><h2>Audit trail</h2>
+    </p>
+  </a>
+
+  <a class="card" href={resolve('settings')}>
+    <h2>Installation settings</h2>
+    <p>Manage local sign-in and review saved retention and limit policies.</p>
+  </a>
+
+  <a class="card" href={resolve('audit')}>
+    <h2>Audit trail</h2>
     <p>
       Review account and configuration changes with their recorded actor and
       outcome.
-    </p></a
-  >
+    </p>
+  </a>
 </div>
 <p class="muted">
   Gateway requests, limit enforcement, and automatic retention are not available

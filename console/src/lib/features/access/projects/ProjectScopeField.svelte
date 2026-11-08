@@ -1,8 +1,8 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
-  import { listProjectMemberships } from '$lib/features/access/projects/api';
-  import { projectKeys } from '$lib/features/access/projects/projectKeys';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import { listProjectMemberships } from '#lib/features/access/projects/api.js';
+  import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
 
   let {
     value = $bindable(''),

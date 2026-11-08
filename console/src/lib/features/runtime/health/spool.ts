@@ -1,4 +1,4 @@
-import { formatBytes } from '$lib/format';
+import { formatBytes } from '#lib/format.js';
 
 /**
  * Both spool figures come from the same readiness read, so either one being

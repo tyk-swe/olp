@@ -1,7 +1,11 @@
-import { instant } from '$lib/management/query';
-import type { UsageDimension, UsageFilters } from '$lib/features/usage/usage';
-import { dateTimeLocalValue } from '$lib/format';
-import { timeOrder, timeValid, UUID } from '$lib/listing/filters';
+import type { ReadonlyURLSearchParams } from '$app/state';
+import { instant } from '#lib/management/query.js';
+import type {
+  UsageDimension,
+  UsageFilters
+} from '#lib/features/usage/usage.js';
+import { dateTimeLocalValue } from '#lib/format.js';
+import { timeOrder, timeValid, UUID } from '#lib/listing/filters.js';
 
 const dimensions = [
   'route',
@@ -101,7 +105,7 @@ export function usageProblem(state: UsageState): string | null {
 }
 
 export function readUsageState(
-  search: URLSearchParams,
+  search: ReadonlyURLSearchParams,
   defaults: UsageState
 ): UsageState {
   const start = search.get('start')?.trim() || defaults.filters.start;

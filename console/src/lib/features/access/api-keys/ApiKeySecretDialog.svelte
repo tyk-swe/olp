@@ -1,24 +1,24 @@
 <script lang="ts">
-  import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
+  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
   const services = useServiceCapabilities();
-  import { routeKeys } from '$lib/features/routes/routeKeys';
+  import { routeKeys } from '#lib/features/routes/routeKeys.js';
 
   import { onMount } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
-  import { listRoutes } from '$lib/features/routes/api';
-  import type { ApiKeySecret } from '$lib/features/access/api-keys/api';
-  import { copyText } from '$lib/clipboard';
-  import NavIcon from '$lib/shell/NavIcon.svelte';
-  import SecretDialog from '$lib/shell/SecretDialog.svelte';
-  import { slidingIndicator } from '$lib/shell/indicator';
+  import { errorMessage } from '#lib/management/http.js';
+  import { listRoutes } from '#lib/features/routes/api.js';
+  import type { ApiKeySecret } from '#lib/features/access/api-keys/api.js';
+  import { copyText } from '#lib/clipboard.js';
+  import NavIcon from '#lib/shell/NavIcon.svelte';
+  import SecretDialog from '#lib/shell/SecretDialog.svelte';
+  import { slidingIndicator } from '#lib/shell/indicator.js';
   import {
     SDK_OPTIONS,
     sdkLabel,
     sdkSnippet,
     testSdkRequest,
     type ApiKeySdk
-  } from '$lib/features/access/api-keys/sdkExamples';
+  } from '#lib/features/access/api-keys/sdkExamples.js';
 
   let {
     secret,

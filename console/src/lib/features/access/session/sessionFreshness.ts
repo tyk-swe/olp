@@ -1,4 +1,4 @@
-import { ApiProblem } from '$lib/management/http';
+import { ApiProblem } from '#lib/management/http.js';
 
 /** How long a validated session is trusted before a mutation revalidates it. */
 export const SESSION_FRESHNESS_MS = 60_000;

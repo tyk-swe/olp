@@ -3,7 +3,7 @@
     nativeEntries,
     nativeObject,
     type NativePath
-  } from '$lib/nativeJson';
+  } from '#lib/nativeJson.js';
   import type { ConfigurationDraft } from './configurationDraft.svelte';
   import { operationFields } from './profiles';
   import type { ProviderProfile } from './providerProfiles';

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { CodeAttempt } from '$lib/features/code-mode/api';
-import { ApiProblem } from '$lib/management/http';
+import type { CodeAttempt } from '#lib/features/code-mode/api.js';
+import { ApiProblem } from '#lib/management/http.js';
 import {
   adapterLabel,
   allowanceChargeSummary,

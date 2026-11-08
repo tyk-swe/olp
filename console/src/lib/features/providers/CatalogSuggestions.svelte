@@ -1,21 +1,21 @@
 <script lang="ts">
-  import { useMutationIntent } from '$lib/editing/mutationIntent.svelte';
+  import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
 
   import { createQuery } from '@tanstack/svelte-query';
   import {
     acceptCatalogSuggestions,
     listCatalogSuggestions
-  } from '$lib/features/providers/catalog';
-  import type { Provider } from '$lib/features/providers/providers';
-  import { providerKeys } from '$lib/features/providers/providerKeys';
+  } from '#lib/features/providers/catalog.js';
+  import type { Provider } from '#lib/features/providers/providers.js';
+  import { providerKeys } from '#lib/features/providers/providerKeys.js';
   import {
     acceptableSuggestions,
     capabilityHints,
     changedFactLabels
-  } from '$lib/features/providers/catalogSuggestions';
-  import { lifecycleNotice } from '$lib/features/providers/provider-models/lifecycle';
-  import { metadataFacts } from '$lib/features/providers/provider-models/modelMetadata';
-  import { formatDate, stateLabel } from '$lib/format';
+  } from '#lib/features/providers/catalogSuggestions.js';
+  import { lifecycleNotice } from '#lib/features/providers/provider-models/lifecycle.js';
+  import { metadataFacts } from '#lib/features/providers/provider-models/modelMetadata.js';
+  import { formatDate, stateLabel } from '#lib/format.js';
   import type { RunProviderAction } from './providerEditor';
 
   const acceptCatalogSuggestionsIntent = useMutationIntent();

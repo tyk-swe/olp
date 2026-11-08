@@ -1,4 +1,4 @@
-import { confirmMFA } from '$lib/features/access/mfa/prompt.svelte';
+import { confirmMFA } from '#lib/features/access/mfa/prompt.svelte.js';
 import {
   acceptInvitation as submitInvitation,
   login as submitPassword,

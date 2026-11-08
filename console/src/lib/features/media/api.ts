@@ -1,8 +1,13 @@
-import type { components } from '$lib/management/schema';
-import { apiClient } from '$lib/management/client';
-import { ApiProblem, ensureOk, unwrap, unwrapPage } from '$lib/management/http';
-import type { CursorPage } from '$lib/management/http';
-import { compactQuery } from '$lib/management/query';
+import type { components } from '#lib/management/schema.js';
+import { apiClient } from '#lib/management/client.js';
+import {
+  ApiProblem,
+  ensureOk,
+  unwrap,
+  unwrapPage
+} from '#lib/management/http.js';
+import type { CursorPage } from '#lib/management/http.js';
+import { compactQuery } from '#lib/management/query.js';
 
 export type MediaJob = components['schemas']['MediaJobItem'];
 

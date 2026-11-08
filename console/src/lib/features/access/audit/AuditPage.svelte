@@ -1,18 +1,18 @@
 <script lang="ts">
-  import { auditKeys } from '$lib/features/access/audit/auditKeys';
+  import { auditKeys } from '#lib/features/access/audit/auditKeys.js';
 
   import { createQuery } from '@tanstack/svelte-query';
   import { page } from '$app/state';
-  import { listAudit } from '$lib/features/access/audit/api';
-  import { errorMessage } from '$lib/management/http';
-  import { cursorPaginationProps } from '$lib/listing/pagination';
-  import { timeInputType } from '$lib/listing/filters';
+  import { listAudit } from '#lib/features/access/audit/api.js';
+  import { errorMessage } from '#lib/management/http.js';
+  import { cursorPaginationProps } from '#lib/listing/pagination.js';
+  import { timeInputType } from '#lib/listing/filters.js';
   import {
     applyListSearch,
     syncListWithUrl
-  } from '$lib/listing/urlSync.svelte';
-  import CursorPagination from '$lib/shell/CursorPagination.svelte';
-  import { formatDate } from '$lib/format';
+  } from '#lib/listing/urlSync.svelte.js';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import { formatDate } from '#lib/format.js';
   import {
     auditFilters,
     auditProblem,
@@ -21,7 +21,7 @@
     auditSearch,
     auditUrl,
     readAuditForm
-  } from '$lib/features/access/audit/auditListState';
+  } from '#lib/features/access/audit/auditListState.js';
 
   const listState = $state(auditUrl.state(page.url.searchParams));
   let validation = $state<string | null>(null);

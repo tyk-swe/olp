@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
+  import { errorMessage } from '#lib/management/http.js';
   import { FIXED_ROLES } from '../session/authorization';
   import { useRole } from '../session/useRole.svelte';
   import { getSAML, saveSAML, importSAML, type SAMLWrite } from './api';

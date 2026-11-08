@@ -3,8 +3,8 @@
   import {
     decisionRows,
     simulationRows
-  } from '$lib/features/routes/routingExplanation';
-  import type { RouteDraftEditorState } from '$lib/features/routes/routeDraftEditor.svelte';
+  } from '#lib/features/routes/routingExplanation.js';
+  import type { RouteDraftEditorState } from '#lib/features/routes/routeDraftEditor.svelte.js';
   let { editor }: { editor: RouteDraftEditorState } = $props();
   const words = (code: string) => code.replaceAll('_', ' ');
 </script>

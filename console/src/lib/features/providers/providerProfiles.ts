@@ -1,8 +1,8 @@
-import type { components } from '$lib/management/schema';
-import { apiClient } from '$lib/management/client';
-import { unwrap, unwrapPage } from '$lib/management/http';
-import { collectCursorPages } from '$lib/management/pagination';
-import { nativeObject } from '$lib/nativeJson';
+import type { components } from '#lib/management/schema.js';
+import { apiClient } from '#lib/management/client.js';
+import { unwrap, unwrapPage } from '#lib/management/http.js';
+import { collectCursorPages } from '#lib/management/pagination.js';
+import { nativeObject } from '#lib/nativeJson.js';
 
 type Schemas = components['schemas'];
 export type ProviderProfile = Schemas['ProviderProfile'];

@@ -1,11 +1,11 @@
 <script lang="ts">
-  import type { UsagePoint } from '$lib/features/usage/usage';
+  import type { UsagePoint } from '#lib/features/usage/usage.js';
   import {
     formatCompact,
     formatCost,
     formatDate,
     formatDay
-  } from '$lib/format';
+  } from '#lib/format.js';
 
   let {
     points,

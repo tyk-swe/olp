@@ -1,20 +1,20 @@
 <script lang="ts">
-  import { useMutationIntents } from '$lib/editing/mutationIntent.svelte';
+  import { useMutationIntents } from '#lib/editing/mutationIntent.svelte.js';
 
-  import { authLifecycle } from '$lib/features/access/session/lifecycle';
+  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
   import { resolve } from '$app/paths';
   import { onDestroy } from 'svelte';
   import {
     createRouteDraft,
     activateRoute,
     type RouteDraftValidation
-  } from '$lib/features/routes/api';
+  } from '#lib/features/routes/api.js';
   import {
     fidelityOptions,
     type FidelityMode
-  } from '$lib/features/routes/routeFidelity';
+  } from '#lib/features/routes/routeFidelity.js';
   import type { ProviderModelInventory } from '../models';
-  import { errorMessage, isEtagMismatch } from '$lib/management/http';
+  import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
 
   const activateRouteIntent = useMutationIntents();
   const createIntents = useMutationIntents();
@@ -254,8 +254,9 @@
         during publication.
       </p>
       <ul>
-        {#each created as route (route.id)}<li>
-            <a href={resolve(`/routes/${route.id}`)}>{route.slug}</a>
+        {#each created as route (route.id)}
+          <li>
+            <a href={resolve(`routes/${route.id}`)}>{route.slug}</a>
             {published.includes(route.id) ? 'Published' : 'Draft'}
           </li>{/each}
       </ul>

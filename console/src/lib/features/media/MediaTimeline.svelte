@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { MediaJob } from './api';
   import { mediaTimeline } from './mediaTimeline';
-  import { formatDate } from '$lib/format';
+  import { formatDate } from '#lib/format.js';
 
   let { job }: { job: MediaJob } = $props();
   const timeline = $derived(mediaTimeline(job));

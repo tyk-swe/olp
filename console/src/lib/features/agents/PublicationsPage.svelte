@@ -1,13 +1,14 @@
 <script lang="ts">
-  import ScrollTable from '$lib/components/ScrollTable.svelte';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import { errorMessage } from '#lib/management/http.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/editing/mutationIntent.svelte';
+  } from '#lib/editing/mutationIntent.svelte.js';
+
   import {
     getPublication,
     getRevision,
@@ -405,18 +406,24 @@
               form.tools = [];
             }}
             required
-            ><option value="">Choose a project</option
-            >{#each projects.data ?? [] as project (project.id)}<option
-                value={project.id}>{project.name}</option
-              >{/each}</select
-          ></label
-        >
+          >
+            <option value="">Choose a project</option>
+
+            {#each projects.data ?? [] as project (project.id)}
+              <option value={project.id}>{project.name}</option>
+            {/each}
+          </select>
+        </label>
+
         {#if kind === 'toolsets'}
-          <a class="text-button" href={resolve('/mcp-servers')}
+          <a class="text-button" href={resolve('mcp-servers')}
             >Register or manage MCP servers</a
           >
-          <label class="form-field"
-            >Certified MCP server <select
+
+          <label class="form-field">
+            Certified MCP server
+
+            <select
               aria-label="Certified MCP server"
               bind:value={serverID}
               onchange={chooseServer}
@@ -464,7 +471,8 @@
                       (value) => value.alias !== tool.alias
                     ))}>Remove</button
                 >
-              </li>{/each}
+              </li>
+            {/each}
           </ul>
           <p>
             Each selected tool pins its certified server revision; catalog drift

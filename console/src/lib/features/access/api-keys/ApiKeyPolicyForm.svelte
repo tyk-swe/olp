@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { validRouteSlug } from '$lib/routeIdentity';
-  import RunLimits from '$lib/features/workflows/RunLimits.svelte';
+  import { validRouteSlug } from '#lib/routeIdentity.js';
+  import RunLimits from '#lib/features/workflows/RunLimits.svelte';
   import { currentBudgetLimit } from './budgetPresentation';
   import RouteLimitFields from '../route-limits/RouteLimitFields.svelte';
   import { routeLimitsError } from '../route-limits/policy';
@@ -9,36 +9,40 @@
   import { attributionError } from '../attribution/policy';
   import PolicyFields from '../end-users/PolicyFields.svelte';
   import { policyError } from '../end-users/policy';
-  import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
+  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
   const services = useServiceCapabilities();
-  import { focusFormError, focusErrorSummary } from '$lib/editing/focusError';
-  import { routeKeys } from '$lib/features/routes/routeKeys';
+  import {
+    focusFormError,
+    focusErrorSummary
+  } from '#lib/editing/focusError.js';
+  import { routeKeys } from '#lib/features/routes/routeKeys.js';
 
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
-  import type { ApiKey } from '$lib/features/access/api-keys/api';
-  import { listRoutes } from '$lib/features/routes/api';
-  import NavIcon from '$lib/shell/NavIcon.svelte';
-  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
-  import { formatBudget, formatDate, formatInteger } from '$lib/format';
+  import type { ApiKey } from '#lib/features/access/api-keys/api.js';
+  import { listRoutes } from '#lib/features/routes/api.js';
+  import NavIcon from '#lib/shell/NavIcon.svelte';
+  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import { formatBudget, formatDate, formatInteger } from '#lib/format.js';
   import {
     budgetStateNote,
     budgetWindowState
-  } from '$lib/features/access/api-keys/budgetPresentation';
-  import { guardUnsavedChanges } from '$lib/editing/unsavedChanges';
+  } from '#lib/features/access/api-keys/budgetPresentation.js';
+  import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
   import {
     admissionPriorities,
     validateApiKey
-  } from '$lib/features/access/api-keys/keyValidation';
+  } from '#lib/features/access/api-keys/keyValidation.js';
+
   import {
     buildApiKeyPolicyInput,
     createApiKeyFormState,
     expiryUnchanged,
     type ApiKeyPolicyInput
-  } from '$lib/features/access/api-keys/apiKeyPolicy';
-  import ProjectScopeField from '$lib/features/access/projects/ProjectScopeField.svelte';
-  import { listBudgetGroups } from '$lib/features/access/budget-groups/api';
-  import { budgetGroupKeys } from '$lib/features/access/budget-groups/budgetGroupKeys';
+  } from '#lib/features/access/api-keys/apiKeyPolicy.js';
+  import ProjectScopeField from '#lib/features/access/projects/ProjectScopeField.svelte';
+  import { listBudgetGroups } from '#lib/features/access/budget-groups/api.js';
+  import { budgetGroupKeys } from '#lib/features/access/budget-groups/budgetGroupKeys.js';
 
   let {
     editing,
@@ -81,6 +85,7 @@
     queryKey: budgetGroupKeys.list(),
     queryFn: ({ signal }) => listBudgetGroups(signal)
   }));
+
   const formProject = $derived(
     editing ? (editing.project_id ?? null) : form.projectId || null
   );
@@ -124,11 +129,14 @@
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
+
     const root =
       (event.currentTarget as HTMLFormElement).closest('main') ??
       (event.currentTarget as HTMLFormElement);
+
     if (!canManage || busy || publicationBlocked) return;
     onClearError();
+
     if (
       form.rotationIntervalDays.trim() &&
       (!/^\d+$/.test(form.rotationIntervalDays) ||
@@ -218,9 +226,10 @@
       type="button"
       disabled={Boolean(busy)}
       onclick={onCancel}>Cancel</button
-    >{:else}<a class="button button-secondary" href={resolve('/api-keys')}
-      >Cancel</a
-    >{/if}
+    >
+  {:else}
+    <a class="button button-secondary" href={resolve('api-keys')}>Cancel</a>
+  {/if}
 </div>
 {#if submitError || formError}<div
     class="inline-problem"
@@ -399,17 +408,17 @@
         aria-describedby={errors.allowedCIDRs
           ? 'key-allowed-cidrs-help key-allowed-cidrs-error'
           : 'key-allowed-cidrs-help'}
-        placeholder="192.0.2.0/24&#10;2001:db8::/32"></textarea>
+        placeholder="192.0.2.0/24
+2001:db8::/32"></textarea>
+
       <small id="key-allowed-cidrs-help"
         >One IPv4 or IPv6 CIDR range per line. Leave empty to allow any client
         address. Forwarded addresses are accepted only through configured
         trusted proxies.</small
       >
-      {#if errors.allowedCIDRs}<p
-          id="key-allowed-cidrs-error"
-          class="field-error"
-          role="alert"
-        >
+
+      {#if errors.allowedCIDRs}
+        <p id="key-allowed-cidrs-error" class="field-error" role="alert">
           {errors.allowedCIDRs}
         </p>{/if}
     </div>
@@ -510,10 +519,14 @@
                   route.slug,
                   event.currentTarget.checked
                 ))}
-            /> <code>{route.slug}</code></label
-          >{/each}{#if !routes.data?.length}<span
-            >No routes are configured yet.</span
-          >{/if}{/if}
+            />
+
+            <code>{route.slug}</code>
+          </label>
+        {/each}{#if !routes.data?.length}
+          <span>No routes are configured yet.</span>
+        {/if}
+      {/if}
     </fieldset>
     <AttributionFields
       bind:form={form.attributionPolicy}
@@ -621,16 +634,23 @@
           aria-describedby={errors.priority
             ? 'priority-error'
             : 'priority-help'}
-          ><option value="">Normal</option
-          >{#each admissionPriorities as priority (priority)}<option
-              value={priority}>{priority}</option
-            >{/each}</select
         >
+          <option value="">Normal</option>
+
+          {#each admissionPriorities as priority (priority)}
+            <option value={priority}>{priority}</option>
+          {/each}
+        </select>
+
         <small id="priority-help" class="section-help"
           >The class a saturated gateway queues this key's requests in.</small
-        >{#if errors.priority}<small class="field-error" id="priority-error"
+        >
+
+        {#if errors.priority}
+          <small class="field-error" id="priority-error"
             >{errors.priority}</small
-          >{/if}
+          >
+        {/if}
       </div>
       <div class="form-field">
         <label for="max-priority">Highest requestable priority</label><select
@@ -638,11 +658,14 @@
           bind:value={form.maxPriority}
           disabled={!canManage}
           aria-describedby="max-priority-help"
-          ><option value="">Its default</option
-          >{#each admissionPriorities as priority (priority)}<option
-              value={priority}>{priority}</option
-            >{/each}</select
         >
+          <option value="">Its default</option>
+
+          {#each admissionPriorities as priority (priority)}
+            <option value={priority}>{priority}</option>
+          {/each}
+        </select>
+
         <small id="max-priority-help" class="section-help"
           >Callers may ask for up to this class in the X-OLP-Routing header.</small
         >

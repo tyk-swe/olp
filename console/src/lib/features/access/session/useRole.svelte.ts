@@ -1,12 +1,12 @@
-import type { ManagementRoute } from '$lib/management/requirements';
+import type { ManagementRoute } from '#lib/management/requirements.js';
 import {
   allows,
   can,
   type Capability,
   type FixedRole
-} from '$lib/features/access/session/authorization';
-import { authLifecycle } from '$lib/features/access/session/lifecycle';
-import type { AuthenticatedUser } from '$lib/features/access/session/state';
+} from '#lib/features/access/session/authorization.js';
+import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+import type { AuthenticatedUser } from '#lib/features/access/session/state.js';
 
 export type RoleAccess = {
   readonly user: AuthenticatedUser | null;

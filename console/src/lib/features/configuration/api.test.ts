@@ -1,4 +1,4 @@
-import { stringifyNativeJSON } from '$lib/nativeJson';
+import { stringifyNativeJSON } from '#lib/nativeJson.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   applyConfiguration,
@@ -14,9 +14,9 @@ import {
   type ConfigurationPlan,
   type ExternalCredentialReference
 } from './api';
-import type { ProblemDetails } from '$lib/management/http';
+import type { ProblemDetails } from '#lib/management/http.js';
 
-vi.mock('$lib/features/access/session/authMiddleware', () => ({
+vi.mock('#lib/features/access/session/authMiddleware.js', () => ({
   createAuthMiddleware: () => ({
     onRequest: ({ request }: { request: Request }) => request
   })

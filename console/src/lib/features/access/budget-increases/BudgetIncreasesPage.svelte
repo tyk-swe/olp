@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
-  import { formatDate } from '$lib/format';
+  import { errorMessage } from '#lib/management/http.js';
+  import { formatDate } from '#lib/format.js';
   import { useRole } from '../session/useRole.svelte';
   import {
     createIncrease,
@@ -11,7 +11,7 @@
     type IncreaseInput
   } from './api';
   import { limitsError, limitForm } from '../budgets/limitForm';
-  import { usePrincipalLifetime } from '$lib/editing/mutationIntent.svelte';
+  import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { budgetIncreaseKeys } from './budgetIncreaseKeys';
   const access = useRole();
   const client = useQueryClient();

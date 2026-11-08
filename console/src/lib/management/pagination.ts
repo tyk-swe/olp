@@ -1,4 +1,4 @@
-import { ApiProblem, type CursorPage } from '$lib/management/http';
+import { ApiProblem, type CursorPage } from '#lib/management/http.js';
 
 const MAX_COLLECTED_ITEMS = 10_000;
 

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { page } from '$app/state';
-  import CatalogPage from '$lib/features/model-catalog/CatalogPage.svelte';
+  import CatalogPage from '#lib/features/model-catalog/CatalogPage.svelte';
 </script>
 
 <main><CatalogPage publicProjectId={page.params.projectId} /></main>

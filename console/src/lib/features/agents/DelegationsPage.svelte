@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { formatDate } from '$lib/format';
-  import ScrollTable from '$lib/components/ScrollTable.svelte';
+  import { formatDate } from '#lib/format.js';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { writable } from 'svelte/store';
   import { page } from '$app/state';
-  import { errorMessage } from '$lib/management/http';
-  import { listProjectMemberships } from '$lib/features/access/projects/api';
-  import { projectKeys } from '$lib/features/access/projects/projectKeys';
+  import { errorMessage } from '#lib/management/http.js';
+  import { listProjectMemberships } from '#lib/features/access/projects/api.js';
+  import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
   import { listDelegations } from './api';
   import { agentKeys } from './agentKeys';
 

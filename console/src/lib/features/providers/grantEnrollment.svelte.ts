@@ -1,6 +1,6 @@
 import { onDestroy } from 'svelte';
-import { authLifecycle } from '$lib/features/access/session/lifecycle';
-import { ApiProblem, errorMessage } from '$lib/management/http';
+import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+import { ApiProblem, errorMessage } from '#lib/management/http.js';
 import type { Provider } from './providers';
 import {
   cancelGrantEnrollment,

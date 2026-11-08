@@ -1,9 +1,9 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { listProjects } from '$lib/features/access/projects/api';
-  import { projectKeys } from '$lib/features/access/projects/projectKeys';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { listProjects } from '#lib/features/access/projects/api.js';
+  import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
   import { listGroups, saveMapping, type Group, type Mapping } from './api';
   import { scimKeys } from './scimKeys';
   const access = useRole();
@@ -87,8 +87,9 @@
     Use this installation’s public origin with <code>/scim/v2</code> as the base
     URL. Create an installation-wide management token with the
     <code>access</code>
-    scope in <a href={resolve('/access')}>Access → Tokens</a>, and supply it as
-    the Bearer credential in your directory.
+    scope in
+    <a href={resolve('access')}>Access → Tokens</a>
+    , and supply it as the Bearer credential in your directory.
   </p>
   <p>
     Discovery is available at <code>/ServiceProviderConfig</code>,
@@ -173,21 +174,23 @@
             <label for={`scim-project-${member.id}`}>Project</label><select
               id={`scim-project-${member.id}`}
               bind:value={member.value}
-              ><option value="">Choose a project</option
-              >{#each projects.data ?? [] as project (project.id)}<option
-                  value={project.id}>{project.name}</option
-                >{/each}</select
             >
+              <option value="">Choose a project</option>
+
+              {#each projects.data ?? [] as project (project.id)}
+                <option value={project.id}>{project.name}</option>
+              {/each}
+            </select>
           </div>
           <div class="form-field">
             <label for={`scim-project-role-${member.id}`}>Project role</label
             ><select
               id={`scim-project-role-${member.id}`}
               bind:value={member.role}
-              ><option value="viewer">Viewer</option><option value="manager"
-                >Manager</option
-              ></select
             >
+              <option value="viewer">Viewer</option>
+              <option value="manager">Manager</option>
+            </select>
           </div>
           <button
             type="button"
@@ -196,7 +199,9 @@
               (memberships = memberships.filter((p) => p.id !== member.id))}
             >Remove membership</button
           >
-        </div>{/each}<button
+        </div>
+      {/each}
+      <button
         type="button"
         class="button button-secondary"
         disabled={memberships.length >= 100}

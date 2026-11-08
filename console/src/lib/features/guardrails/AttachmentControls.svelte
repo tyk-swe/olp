@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { useAction } from '$lib/editing/action.svelte';
-  import ConfirmAction from '$lib/components/ConfirmAction.svelte';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import {
     detachPolicy,
     replaceAttachment,

@@ -1,8 +1,9 @@
+import type { Path } from '$app/types';
 import {
   can,
   type Capability,
   type Grant
-} from '$lib/features/access/session/authorization';
+} from '#lib/features/access/session/authorization.js';
 
 type SetupInput = {
   loading: boolean;
@@ -18,43 +19,43 @@ const definitions = [
   {
     label: 'Create the installation owner',
     description: 'Local authentication is ready.',
-    href: '/settings/profile',
-    viewHref: '/settings/profile'
+    href: 'settings/profile',
+    viewHref: 'settings/profile'
   },
   {
     label: 'Connect and activate a provider',
     description: 'Connect an upstream, test it, and activate the provider.',
-    href: '/providers/new',
-    viewHref: '/providers',
+    href: 'providers/new',
+    viewHref: 'providers',
     capability: 'providers.manage'
   },
   {
     label: 'Review discovered models',
     description: 'Enable the certified model capabilities your clients need.',
-    href: '/provider-models',
-    viewHref: '/provider-models',
+    href: 'provider-models',
+    viewHref: 'provider-models',
     capability: 'providers.manage'
   },
   {
     label: 'Build and activate a route',
     description:
       'Choose your model targets, simulate the route, then activate it.',
-    href: '/routes/new',
-    viewHref: '/routes',
+    href: 'routes/new',
+    viewHref: 'routes',
     capability: 'routes.manage'
   },
   {
     label: 'Create your first API key',
     description: 'Create a scoped key. Its secret is shown only once.',
-    href: '/api-keys/new',
-    viewHref: '/api-keys',
+    href: 'api-keys/new',
+    viewHref: 'api-keys',
     capability: 'api_keys.manage'
   }
 ] as const satisfies readonly {
   label: string;
   description: string;
-  href: string;
-  viewHref: string;
+  href: Path;
+  viewHref: Path;
   capability?: Capability;
 }[];
 

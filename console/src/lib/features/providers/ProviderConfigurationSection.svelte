@@ -3,16 +3,16 @@
   import ProviderCommitmentEditor from './ProviderCommitmentEditor.svelte';
   import ProviderConnectionFields from './ProviderConnectionFields.svelte';
   import PluginProfileField from './PluginProfileField.svelte';
-  import type { Provider } from '$lib/features/providers/providers';
-  import type { ProviderKindCapability } from '$lib/features/providers/models';
-  import ProviderActivationControls from '$lib/features/providers/ProviderActivationControls.svelte';
+  import type { Provider } from '#lib/features/providers/providers.js';
+  import type { ProviderKindCapability } from '#lib/features/providers/models.js';
+  import ProviderActivationControls from '#lib/features/providers/ProviderActivationControls.svelte';
   import type { RunProviderAction } from './providerEditor';
-  import type { FieldIssue } from '$lib/management/http';
+  import type { FieldIssue } from '#lib/management/http.js';
   import {
     providerStatus,
     providerStatusTone,
     type ProviderEditValues
-  } from '$lib/features/providers/providerEditor';
+  } from '#lib/features/providers/providerEditor.js';
 
   let {
     current,

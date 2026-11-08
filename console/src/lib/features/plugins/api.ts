@@ -1,12 +1,12 @@
-import type { components } from '$lib/management/schema';
-import { apiClient } from '$lib/management/client';
+import type { components } from '#lib/management/schema.js';
+import { apiClient } from '#lib/management/client.js';
 import {
   ApiProblem,
   ensureOk,
   errorMessage,
   fieldIssues,
   unwrap
-} from '$lib/management/http';
+} from '#lib/management/http.js';
 
 export type Plugin = components['schemas']['Plugin'];
 export type PluginList = components['schemas']['PluginListResponse'];

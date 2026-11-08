@@ -4,9 +4,9 @@ import {
   runAgentRequest,
   ResourceRequestError
 } from './lifecycle';
-import { gatewayFetch } from '$lib/management/gateway';
+import { gatewayFetch } from '#lib/management/gateway.js';
 
-vi.mock('$lib/management/gateway', () => ({ gatewayFetch: vi.fn() }));
+vi.mock('#lib/management/gateway.js', () => ({ gatewayFetch: vi.fn() }));
 
 describe('agent resource requests', () => {
   it('keeps unresolved submission identity across equivalent JSON edits', () => {

@@ -1,9 +1,9 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { holds } from '$lib/features/access/session/authorization';
-  import { listProjectMemberships } from '$lib/features/access/projects/api';
-  import { projectKeys } from '$lib/features/access/projects/projectKeys';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { holds } from '#lib/features/access/session/authorization.js';
+  import { listProjectMemberships } from '#lib/features/access/projects/api.js';
+  import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
   import ExportSinksPanel from './ExportSinksPanel.svelte';
   import CapturePoliciesPanel from './CapturePoliciesPanel.svelte';
   import './observability.css';

@@ -1,5 +1,5 @@
-import { validateDisplayName } from '$lib/displayNamePolicy';
-import { validatePasswordPolicy } from '$lib/passwordPolicy';
+import { validateDisplayName } from '#lib/displayNamePolicy.js';
+import { validatePasswordPolicy } from '#lib/passwordPolicy.js';
 
 export type OwnerFormValues = {
   displayName: string;

@@ -3,10 +3,10 @@
   import {
     useMutationIntents,
     usePrincipalLifetime
-  } from '$lib/editing/mutationIntent.svelte';
+  } from '#lib/editing/mutationIntent.svelte.js';
 
   import { createQuery } from '@tanstack/svelte-query';
-  import { listRoutes } from '$lib/features/routes/api';
+  import { listRoutes } from '#lib/features/routes/api.js';
   import { providerKeys } from './providerKeys';
   import {
     activateProvider,
@@ -14,7 +14,7 @@
     restoreProviderAsDraft,
     type ProviderSummary
   } from './providers';
-  import { ApiProblem, errorMessage } from '$lib/management/http';
+  import { ApiProblem, errorMessage } from '#lib/management/http.js';
 
   const intents = useMutationIntents();
   let {

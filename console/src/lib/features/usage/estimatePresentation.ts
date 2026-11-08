@@ -1,4 +1,4 @@
-import { formatInteger, formatSignedPercent } from '$lib/format';
+import { formatInteger, formatSignedPercent } from '#lib/format.js';
 
 /** The totals every usage report carries about admission estimates. They cover
  * only the attempts that had both an estimate and reported input usage, so the

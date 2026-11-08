@@ -1,12 +1,12 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
-  import ProjectScopeField from '$lib/features/access/projects/ProjectScopeField.svelte';
+  import { errorMessage } from '#lib/management/http.js';
+  import ProjectScopeField from '#lib/features/access/projects/ProjectScopeField.svelte';
   import { observabilityKeys } from './observabilityKeys';
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/editing/mutationIntent.svelte';
+  } from '#lib/editing/mutationIntent.svelte.js';
   import {
     createCapturePolicy,
     deleteCapturePolicy,

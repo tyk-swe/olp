@@ -1,16 +1,19 @@
 <script lang="ts">
   import ProviderBulkModels from './ProviderBulkModels.svelte';
-  import { focusErrorSummary, focusFormError } from '$lib/editing/focusError';
+  import {
+    focusErrorSummary,
+    focusFormError
+  } from '#lib/editing/focusError.js';
   import { resolve } from '$app/paths';
-  import ConflictNotice from '$lib/shell/ConflictNotice.svelte';
-  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
-  import ProviderActivationStage from '$lib/features/providers/ProviderActivationStage.svelte';
-  import ProviderCapabilityReviewStage from '$lib/features/providers/ProviderCapabilityReviewStage.svelte';
-  import ProviderConnectorForm from '$lib/features/providers/ProviderConnectorForm.svelte';
-  import ProviderDiscoveryStage from '$lib/features/providers/ProviderDiscoveryStage.svelte';
-  import GrantEnrollmentPanel from '$lib/features/providers/GrantEnrollmentPanel.svelte';
-  import ProviderValidationIssues from '$lib/features/providers/ProviderValidationIssues.svelte';
-  import { ProviderWizardState } from '$lib/features/providers/providerWizard.svelte';
+  import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
+  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import ProviderActivationStage from '#lib/features/providers/ProviderActivationStage.svelte';
+  import ProviderCapabilityReviewStage from '#lib/features/providers/ProviderCapabilityReviewStage.svelte';
+  import ProviderConnectorForm from '#lib/features/providers/ProviderConnectorForm.svelte';
+  import ProviderDiscoveryStage from '#lib/features/providers/ProviderDiscoveryStage.svelte';
+  import GrantEnrollmentPanel from '#lib/features/providers/GrantEnrollmentPanel.svelte';
+  import ProviderValidationIssues from '#lib/features/providers/ProviderValidationIssues.svelte';
+  import { ProviderWizardState } from '#lib/features/providers/providerWizard.svelte.js';
 
   const wizard = new ProviderWizardState();
 </script>
@@ -24,7 +27,8 @@
       then activate.
     </p>
   </div>
-  <a class="button button-secondary" href={resolve('/providers')}
+
+  <a class="button button-secondary" href={resolve('providers')}
     >{wizard.wizardProvider ? 'Save and exit' : 'Cancel'}</a
   >
 </div>

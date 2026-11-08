@@ -1,13 +1,13 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import ConfirmAction from '$lib/components/ConfirmAction.svelte';
-  import ScrollTable from '$lib/components/ScrollTable.svelte';
-  import { confirmDiscardChanges } from '$lib/editing/unsavedChanges';
-  import { agentKeys } from '$lib/features/agents/agentKeys';
-  import { listProjects } from '$lib/features/agents/api';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { formatDate, formatInteger } from '$lib/format';
-  import { errorMessage } from '$lib/management/http';
+  import ConfirmAction from '#lib/components/ConfirmAction.svelte';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
+  import { confirmDiscardChanges } from '#lib/editing/unsavedChanges.js';
+  import { agentKeys } from '#lib/features/agents/agentKeys.js';
+  import { listProjects } from '#lib/features/agents/api.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { formatDate, formatInteger } from '#lib/format.js';
+  import { errorMessage } from '#lib/management/http.js';
   import SinkEditor from './SinkEditor.svelte';
   import { listSinks, retireSink, type Sink } from './api';
   import { sinkKeys } from './sinkKeys';

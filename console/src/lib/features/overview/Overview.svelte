@@ -1,20 +1,20 @@
 <script lang="ts">
-  import { overviewKeys } from '$lib/features/overview/overviewKeys';
-  import { requestKeys } from '$lib/features/usage/history/requestKeys';
+  import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
+  import { requestKeys } from '#lib/features/usage/history/requestKeys.js';
 
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import { onMount } from 'svelte';
-  import NavIcon from '$lib/shell/NavIcon.svelte';
+  import NavIcon from '#lib/shell/NavIcon.svelte';
   import { setupProgress } from './setupProgress';
-  import SetupChecklist from '$lib/features/overview/SetupChecklist.svelte';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
-  import { copyText } from '$lib/clipboard';
-  import { getOverview } from '$lib/features/overview/api';
-  import { listRequests } from '$lib/features/usage/history/api';
-  import { errorMessage } from '$lib/management/http';
-  import { formatDate, statusLabel, statusTone } from '$lib/format';
+  import SetupChecklist from '#lib/features/overview/SetupChecklist.svelte';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import { copyText } from '#lib/clipboard.js';
+  import { getOverview } from '#lib/features/overview/api.js';
+  import { listRequests } from '#lib/features/usage/history/api.js';
+  import { errorMessage } from '#lib/management/http.js';
+  import { formatDate, statusLabel, statusTone } from '#lib/format.js';
 
   let { controlConnected = true }: { controlConnected?: boolean } = $props();
   let endpoint = $state('/v1');
@@ -85,7 +85,7 @@
     </p>
   </div>
   {#if progress.complete}
-    <a class="button button-primary" href={resolve('/requests')}
+    <a class="button button-primary" href={resolve('requests')}
       >Explore requests <NavIcon name="arrow" /></a
     >
   {:else if progress.nextStep}
@@ -191,9 +191,10 @@
       </div>
       {#if copyError}<p class="inline-problem" role="alert">{copyError}</p>{/if}
       {#if playgroundAllowed}
-        <a href={resolve('/playground')}
-          >Open the playground <NavIcon name="arrow" size={17} /></a
-        >
+        <a href={resolve('playground')}>
+          Open the playground
+          <NavIcon name="arrow" size={17} />
+        </a>
       {/if}
     </section>
 
@@ -218,9 +219,11 @@
       <p class="eyebrow">Operations</p>
       <h2 id="activity-title">Recent requests</h2>
     </div>
-    <a href={resolve('/requests')}
-      >Explore requests <NavIcon name="arrow" size={17} /></a
-    >
+
+    <a href={resolve('requests')}>
+      Explore requests
+      <NavIcon name="arrow" size={17} />
+    </a>
   </div>
   {#if services.pending}
     <div class="loading-state" role="status">
@@ -288,25 +291,28 @@
               <td>{formatDate(request.started_at)}</td>
               <td><code>{request.route}</code></td>
               <td>{request.operation} · {request.surface}</td>
-              <td
-                ><span
+
+              <td>
+                <span
                   class="badge {statusTone(
                     request.status_code,
                     request.error_class
                   )}"
                   >{statusLabel(request.status_code, request.error_class)}</span
-                ></td
-              >
+                >
+              </td>
+
               <td
                 >{request.total_latency_ms == null
                   ? '—'
                   : `${request.total_latency_ms} ms`}</td
               >
-              <td
-                ><a class="row-link" href={resolve(`/requests/${request.id}`)}
+
+              <td>
+                <a class="row-link" href={resolve(`requests/${request.id}`)}
                   >View timeline</a
-                ></td
-              >
+                >
+              </td>
             </tr>
           {/each}
         </tbody>

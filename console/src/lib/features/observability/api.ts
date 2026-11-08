@@ -1,12 +1,12 @@
-import type { components } from '$lib/management/schema';
-import { apiClient } from '$lib/management/client';
+import type { components } from '#lib/management/schema.js';
+import { apiClient } from '#lib/management/client.js';
 import {
   ensureOk,
   unwrap,
   unwrapPage,
   type CursorPage
-} from '$lib/management/http';
-import { collectCursorPages } from '$lib/management/pagination';
+} from '#lib/management/http.js';
+import { collectCursorPages } from '#lib/management/pagination.js';
 
 type Schemas = components['schemas'];
 
@@ -30,7 +30,7 @@ export async function listExportSinks(
 async function listExportSinkPage(
   cursor?: string,
   signal?: AbortSignal
-): Promise<import('$lib/management/http').CursorPage<ExportSink>> {
+): Promise<import('#lib/management/http.js').CursorPage<ExportSink>> {
   const response = await apiClient.GET('/api/v1/observability/sinks', {
     params: { query: { limit: 50, cursor } },
     signal
@@ -92,7 +92,7 @@ async function listExportSinkGapPage(
   sinkId: string,
   cursor?: string,
   signal?: AbortSignal
-): Promise<import('$lib/management/http').CursorPage<ExportSinkGap>> {
+): Promise<import('#lib/management/http.js').CursorPage<ExportSinkGap>> {
   const response = await apiClient.GET(
     '/api/v1/observability/sinks/{export_sink_id}/gaps',
     {
@@ -153,7 +153,7 @@ export async function listCapturePolicies(
 async function listCapturePolicyPage(
   cursor?: string,
   signal?: AbortSignal
-): Promise<import('$lib/management/http').CursorPage<CapturePolicy>> {
+): Promise<import('#lib/management/http.js').CursorPage<CapturePolicy>> {
   const response = await apiClient.GET(
     '/api/v1/observability/capture-policies',
     {

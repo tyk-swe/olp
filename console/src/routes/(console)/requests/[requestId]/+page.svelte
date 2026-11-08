@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from '$app/state';
-  import RequestsPage from '$lib/features/usage/history/RequestsPage.svelte';
-  import { requestList } from '$lib/features/usage/history/requestListState';
+  import RequestsPage from '#lib/features/usage/history/RequestsPage.svelte';
+  import { requestList } from '#lib/features/usage/history/requestListState.js';
 
   let listState = requestList.get();
 </script>

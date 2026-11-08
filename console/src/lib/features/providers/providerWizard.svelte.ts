@@ -1,8 +1,8 @@
-import { overviewKeys } from '$lib/features/overview/overviewKeys';
-import { snapshotNativeJSON, stringifyNativeJSON } from '$lib/nativeJson';
+import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
+import { snapshotNativeJSON, stringifyNativeJSON } from '#lib/nativeJson.js';
 import { networkCredentialPath } from './configurationDraft.svelte';
 import { refreshProviderChange } from './providerChanges';
-import { providerKeys } from '$lib/features/providers/providerKeys';
+import { providerKeys } from '#lib/features/providers/providerKeys.js';
 import { createQuery, skipToken, useQueryClient } from '@tanstack/svelte-query';
 import { onDestroy } from 'svelte';
 import { SvelteURLSearchParams } from 'svelte/reactivity';
@@ -12,8 +12,8 @@ import {
   fieldIssues,
   isEtagMismatch,
   type FieldIssue
-} from '$lib/management/http';
-import { emptyCursorHistory, resetCursor } from '$lib/listing/pagination';
+} from '#lib/management/http.js';
+import { emptyCursorHistory, resetCursor } from '#lib/listing/pagination.js';
 import {
   getProvider,
   activateProvider,
@@ -22,7 +22,7 @@ import {
   updateProvider,
   type Provider,
   type ProviderProbe
-} from '$lib/features/providers/providers';
+} from '#lib/features/providers/providers.js';
 import {
   certifyProviderModel,
   declareProviderModels,
@@ -33,14 +33,14 @@ import {
   setProviderModel,
   type CapabilityDeclaration,
   type CapabilityCertification
-} from '$lib/features/providers/models';
+} from '#lib/features/providers/models.js';
 import {
   listProviderCredentials,
   rotateProviderCredential,
   type ProviderCredential
-} from '$lib/features/providers/credentials';
-import type { ProviderProfile } from '$lib/features/providers/providerProfiles';
-import type { ProviderVendor } from '$lib/features/providers/providers';
+} from '#lib/features/providers/credentials.js';
+import type { ProviderProfile } from '#lib/features/providers/providerProfiles.js';
+import type { ProviderVendor } from '#lib/features/providers/providers.js';
 import type { GrantEnrollment } from './grants';
 import { GrantEnrollmentState } from './grantEnrollment.svelte';
 import {
@@ -54,12 +54,12 @@ import {
   requiresGrant,
   validateProviderDraft,
   type ProviderDraft
-} from '$lib/features/providers/providerEditor';
-import { useRole } from '$lib/features/access/session/useRole.svelte';
+} from '#lib/features/providers/providerEditor.js';
+import { useRole } from '#lib/features/access/session/useRole.svelte.js';
 import {
   useMutationIntent,
   usePrincipalLifetime
-} from '$lib/editing/mutationIntent.svelte';
+} from '#lib/editing/mutationIntent.svelte.js';
 
 function isLiveGrant(
   credentials: ProviderCredential[] | undefined,

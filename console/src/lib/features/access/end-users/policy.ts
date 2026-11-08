@@ -1,11 +1,11 @@
-import { validRouteSlug } from '$lib/routeIdentity';
+import { validRouteSlug } from '#lib/routeIdentity.js';
 import {
   limitForm,
   limitsInput,
   limitsError,
   type LimitForm
 } from '../budgets/limitForm';
-import type { components } from '$lib/management/schema';
+import type { components } from '#lib/management/schema.js';
 
 export type EndUserPolicy = components['schemas']['EndUserPolicy'];
 export type PolicyForm = {
