@@ -564,10 +564,8 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *media.JobRec
 		}
 	}
 	attemptCtx, atr := x.request.trace.Attempt(ctx, string(target.Config.Kind), record.ProviderRevisionID, record.UpstreamModel)
-	if x.request.trace.PropagateUpstream() {
-		call.Inject = http.Header{}
-		atr.InjectUpstream(call.Inject, true)
-	}
+	call.Inject = http.Header{}
+	atr.InjectUpstream(call.Inject)
 	callCtx, cancel := context.WithTimeout(attemptCtx, timeout+media.ReconciliationLeaseSlack)
 	defer cancel()
 	target.Sensitive = &sensitive
