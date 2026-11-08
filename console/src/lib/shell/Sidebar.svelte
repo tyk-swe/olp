@@ -46,6 +46,14 @@
     visibleItem(SETTINGS, user, services.gatewayAvailable)
   );
   const current = $derived(owningItem(page.url.pathname));
+  let navigation = $state<HTMLElement>();
+
+  $effect(() => {
+    if (!current) return;
+    navigation
+      ?.querySelector('[aria-current="page"]')
+      ?.scrollIntoView?.({ block: 'nearest' });
+  });
   const isMac = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform ?? '');
 </script>
 
@@ -79,7 +87,7 @@
     <kbd>{isMac ? '⌘' : 'Ctrl'} K</kbd>
   </button>
 
-  <nav aria-label="Primary">
+  <nav aria-label="Primary" bind:this={navigation}>
     <ul>
       {#each pinned as entry (entry.item.href)}{@render link(entry)}{/each}
     </ul>

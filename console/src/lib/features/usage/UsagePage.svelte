@@ -20,7 +20,10 @@
   } from '#lib/features/access/api-keys/budgetPresentation.js';
   import UsageChart from '#lib/features/usage/UsageChart.svelte';
   import { presentEstimate } from '#lib/features/usage/estimatePresentation.js';
-  import { completenessFromSummary } from '#lib/features/usage/completenessPresentation.js';
+  import {
+    completenessFromSummary,
+    presentUsageCompleteness
+  } from '#lib/features/usage/completenessPresentation.js';
   import UsageCompletenessStatus from '#lib/features/usage/UsageCompletenessStatus.svelte';
   import { errorMessage } from '#lib/management/http.js';
   import { downloadBlob } from '#lib/download.js';
@@ -337,87 +340,92 @@
     </section>
   {/if}
 
-  <section
-    class="pipeline-grid"
-    aria-label="Request metadata persistence and usage range coverage"
+  <Advanced
+    label="Data pipeline details"
+    open={presentUsageCompleteness(usage.data.completeness).kind !== 'complete'}
   >
-    <article class="card pipeline-card">
-      <p>Request metadata consumer</p>
-      <strong
-        class:danger-text={usage.data.completeness.request_metadata_consumer
-          .state === 'stale'}
-        >{titleCase(
-          usage.data.completeness.request_metadata_consumer.state
-        )}</strong
-      >
-      <span
-        >{!usage.data.completeness.request_metadata_consumer.checked_at
-          ? 'No worker checkpoint recorded'
-          : usage.data.completeness.request_metadata_consumer
-                .heartbeat_age_seconds == null
-            ? 'Checkpoint age unknown'
-            : `Checkpoint ${usage.data.completeness.request_metadata_consumer.heartbeat_age_seconds}s ago`}</span
-      >
-    </article>
-    <article class="card pipeline-card">
-      <p>Pending acknowledgements</p>
-      <strong
-        >{formatCompact(
-          usage.data.completeness.request_metadata_consumer.pending_events
-        )}</strong
-      >
-      <span
-        >{usage.data.completeness.request_metadata_consumer.oldest_pending_at
-          ? 'Oldest pending event is tracked'
-          : 'No delivered events waiting'}</span
-      >
-    </article>
-    <article class="card pipeline-card">
-      <p>Stream lag</p>
-      <strong
-        >{formatCompact(
-          usage.data.completeness.request_metadata_consumer.lag_events
-        )}</strong
-      >
-      <span>Events not yet delivered to the worker</span>
-    </article>
-    <article class="card pipeline-card">
-      <p>Range coverage</p>
-      <strong class:danger-text={usage.data.completeness.coverage.approximate}
-        >{usage.data.completeness.coverage.range_complete
-          ? 'Exact'
-          : 'Incomplete'}</strong
-      >
-      <span
-        >{usage.data.completeness.coverage.approximate
-          ? 'Approximate totals · '
-          : ''}{usage.data.completeness.coverage
-          .excluded_partial_aggregate_boundaries} partial retained-hour {usage
-          .data.completeness.coverage.excluded_partial_aggregate_boundaries ===
-        1
-          ? 'boundary'
-          : 'boundaries'} excluded</span
-      >
-    </article>
-    <article class="card pipeline-card">
-      <p>Priced requests</p>
-      <strong>{formatCompact(usage.data.completeness.priced_count)}</strong>
-      <span
-        >of {formatCompact(usage.data.completeness.request_count)} requests in range</span
-      >
-    </article>
-    <article class="card pipeline-card">
-      <p>Gateway epoch uncertainty</p>
-      <strong
-        class:danger-text={usage.data.completeness
-          .uncertain_request_metadata_gap_count > 0}
-        >{formatCompact(
-          usage.data.completeness.uncertain_request_metadata_gap_count
-        )}</strong
-      >
-      <span>Unclean process epochs with an unknown exact loss count</span>
-    </article>
-  </section>
+    <section
+      class="pipeline-grid"
+      aria-label="Request metadata persistence and usage range coverage"
+    >
+      <article class="card pipeline-card">
+        <p>Request metadata consumer</p>
+        <strong
+          class:danger-text={usage.data.completeness.request_metadata_consumer
+            .state === 'stale'}
+          >{titleCase(
+            usage.data.completeness.request_metadata_consumer.state
+          )}</strong
+        >
+        <span
+          >{!usage.data.completeness.request_metadata_consumer.checked_at
+            ? 'No worker checkpoint recorded'
+            : usage.data.completeness.request_metadata_consumer
+                  .heartbeat_age_seconds == null
+              ? 'Checkpoint age unknown'
+              : `Checkpoint ${usage.data.completeness.request_metadata_consumer.heartbeat_age_seconds}s ago`}</span
+        >
+      </article>
+      <article class="card pipeline-card">
+        <p>Pending acknowledgements</p>
+        <strong
+          >{formatCompact(
+            usage.data.completeness.request_metadata_consumer.pending_events
+          )}</strong
+        >
+        <span
+          >{usage.data.completeness.request_metadata_consumer.oldest_pending_at
+            ? 'Oldest pending event is tracked'
+            : 'No delivered events waiting'}</span
+        >
+      </article>
+      <article class="card pipeline-card">
+        <p>Stream lag</p>
+        <strong
+          >{formatCompact(
+            usage.data.completeness.request_metadata_consumer.lag_events
+          )}</strong
+        >
+        <span>Events not yet delivered to the worker</span>
+      </article>
+      <article class="card pipeline-card">
+        <p>Range coverage</p>
+        <strong class:danger-text={usage.data.completeness.coverage.approximate}
+          >{usage.data.completeness.coverage.range_complete
+            ? 'Exact'
+            : 'Incomplete'}</strong
+        >
+        <span
+          >{usage.data.completeness.coverage.approximate
+            ? 'Approximate totals · '
+            : ''}{usage.data.completeness.coverage
+            .excluded_partial_aggregate_boundaries} partial retained-hour {usage
+            .data.completeness.coverage
+            .excluded_partial_aggregate_boundaries === 1
+            ? 'boundary'
+            : 'boundaries'} excluded</span
+        >
+      </article>
+      <article class="card pipeline-card">
+        <p>Priced requests</p>
+        <strong>{formatCompact(usage.data.completeness.priced_count)}</strong>
+        <span
+          >of {formatCompact(usage.data.completeness.request_count)} requests in range</span
+        >
+      </article>
+      <article class="card pipeline-card">
+        <p>Gateway epoch uncertainty</p>
+        <strong
+          class:danger-text={usage.data.completeness
+            .uncertain_request_metadata_gap_count > 0}
+          >{formatCompact(
+            usage.data.completeness.uncertain_request_metadata_gap_count
+          )}</strong
+        >
+        <span>Unclean process epochs with an unknown exact loss count</span>
+      </article>
+    </section>
+  </Advanced>
 
   <section class="metric-grid usage-metrics" aria-label="Usage summary">
     <article class="card metric-card">
