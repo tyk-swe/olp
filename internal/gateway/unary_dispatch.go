@@ -3,7 +3,6 @@ package gateway
 import (
 	"context"
 	"errors"
-	"net/http"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -89,11 +88,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 	if s.cfg.MaxResponseBytes > 0 {
 		cap = min(cap, int(s.cfg.MaxResponseBytes))
 	}
-	exchange := &unaryExchange{server: s, ctx: actx, x: x, state: state, plan: plan, client: client, slot: slot, provider: provider, model: a.UpstreamModel, fact: &fact, bodyCap: cap, inject: func(header http.Header) {
-		if trace != nil {
-			trace.InjectUpstream(header, x.request.trace.PropagateUpstream())
-		}
-	}}
+	exchange := &unaryExchange{server: s, ctx: actx, x: x, state: state, plan: plan, client: client, slot: slot, provider: provider, model: a.UpstreamModel, fact: &fact, bodyCap: cap, inject: trace.InjectUpstream}
 	raw, failure := exchange.run(plan.Method(), submit, plan.WireBody())
 	if failure != nil {
 		return fail(failure.class, failure.failure)

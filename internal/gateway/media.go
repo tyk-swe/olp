@@ -644,10 +644,8 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *cal
 	if err != nil {
 		return fail(classCredential, nil)
 	}
-	if x.request.trace.PropagateUpstream() {
-		call.Inject = http.Header{}
-		atr.InjectUpstream(call.Inject, true)
-	}
+	call.Inject = http.Header{}
+	atr.InjectUpstream(call.Inject)
 	networkSecret, err := s.providerNetworkSecret(actx, x.request.release, provider)
 	if err != nil {
 		return fail(classCredential, nil)

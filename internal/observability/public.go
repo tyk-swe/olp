@@ -3,10 +3,7 @@ package observability
 import (
 	"net/http"
 
-	"go.opentelemetry.io/otel/trace"
-
 	"github.com/tyk-swe/olp/internal/surface"
-	"github.com/tyk-swe/olp/internal/telemetry"
 )
 
 // RetryAfterOverload is the retry hint every admission rejection carries.
@@ -28,13 +25,8 @@ type PublicAdmission struct {
 	InferenceEnabled bool
 	// Reject writes the surface's overload response.
 	Reject func(w http.ResponseWriter, r *http.Request, surface string)
-	// Tracing is the request tracing configuration, nil when no exporter is
-	// installed. Tracer is the process tracer (a no-op when tracing is off).
-	Tracing *telemetry.RequestConfig
-	Tracer  trace.Tracer
 }
 
-// Wrap returns next behind admission and, when configured, request tracing.
 func (a *PublicAdmission) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		classified := surface.Of(r.URL.Path)
@@ -49,10 +41,6 @@ func (a *PublicAdmission) Wrap(next http.Handler) http.Handler {
 			return
 		}
 		defer permit.Release()
-		handler := next
-		if a.Tracing != nil {
-			handler = telemetry.AdmittedRequest(*a.Tracing, a.Tracer, classified.Name, handler)
-		}
-		handler.ServeHTTP(w, r.WithContext(WithPermit(r.Context(), permit)))
+		next.ServeHTTP(w, r.WithContext(WithPermit(r.Context(), permit)))
 	})
 }

@@ -533,7 +533,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 	if err != nil {
 		return fail(classConnect, nil)
 	}
-	atr.InjectUpstream(req.Header, x.request.trace.PropagateUpstream())
+	atr.InjectUpstream(req.Header)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "olp/gateway")
 	req.Header.Set("Accept", "application/json")

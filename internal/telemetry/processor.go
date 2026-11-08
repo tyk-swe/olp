@@ -9,20 +9,30 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
-// BoundedSpanProcessor is the span processor the exporter sits behind. Span
-// hand-off never blocks: a full queue drops the span and counts it, because a
-// stalled collector must not backpressure inference work. A worker drains the
-// queue in bounded batches on a fixed schedule.
-type BoundedSpanProcessor struct {
+var exportDroppedTotal atomic.Uint64
+
+func ExportDroppedTotal() uint64 { return exportDroppedTotal.Load() }
+
+type countingExporter struct{ inner sdktrace.SpanExporter }
+
+func (c *countingExporter) ExportSpans(ctx context.Context, spans []sdktrace.ReadOnlySpan) error {
+	err := c.inner.ExportSpans(ctx, spans)
+	if err != nil {
+		exportDroppedTotal.Add(uint64(len(spans)))
+	}
+	return err
+}
+
+func (c *countingExporter) Shutdown(ctx context.Context) error { return c.inner.Shutdown(ctx) }
+
+// boundedSpanProcessor exists because the SDK batch processor blocks or drops
+// silently. Hand-off here never blocks and every drop is counted, so a
+// stalled collector cannot backpressure inference work.
+type boundedSpanProcessor struct {
 	spans    chan sdktrace.ReadOnlySpan
 	controls chan processorControl
 	stopped  atomic.Bool
 	done     chan struct{}
-}
-
-type processorControl struct {
-	kind controlKind
-	ack  chan error
 }
 
 type controlKind int
@@ -32,71 +42,52 @@ const (
 	controlShutdown
 )
 
-// NewBoundedSpanProcessor starts the drain worker behind the exporter.
-func NewBoundedSpanProcessor(exporter sdktrace.SpanExporter, queueCapacity, batchSize int, delay time.Duration) *BoundedSpanProcessor {
-	if queueCapacity <= 0 || batchSize <= 0 || delay <= 0 {
-		panic("telemetry: invalid span processor bounds")
-	}
-	p := &BoundedSpanProcessor{
-		spans:    make(chan sdktrace.ReadOnlySpan, queueCapacity),
+type processorControl struct {
+	kind controlKind
+	ack  chan error
+}
+
+func newBoundedSpanProcessor(exporter sdktrace.SpanExporter) *boundedSpanProcessor {
+	p := &boundedSpanProcessor{
+		spans:    make(chan sdktrace.ReadOnlySpan, exportQueueCapacity),
 		controls: make(chan processorControl, 16),
 		done:     make(chan struct{}),
 	}
-	go (&exportWorker{
-		exporter:  exporter,
-		spans:     p.spans,
-		controls:  p.controls,
-		batchSize: batchSize,
-		delay:     delay,
-		done:      p.done,
-	}).run()
+	go (&exportWorker{exporter: exporter, spans: p.spans, controls: p.controls, done: p.done}).run()
 	return p
 }
 
-func (p *BoundedSpanProcessor) OnStart(context.Context, sdktrace.ReadWriteSpan) {}
+func (p *boundedSpanProcessor) OnStart(context.Context, sdktrace.ReadWriteSpan) {}
 
-// OnEnd hands the span to the export queue. Unsampled spans are discarded and
-// a full queue counts the drop rather than blocking the request path.
-func (p *BoundedSpanProcessor) OnEnd(span sdktrace.ReadOnlySpan) {
+func (p *boundedSpanProcessor) OnEnd(span sdktrace.ReadOnlySpan) {
 	if !span.SpanContext().IsSampled() {
 		return
 	}
 	select {
 	case p.spans <- span:
 	default:
-		recordExportDrops(1)
+		exportDroppedTotal.Add(1)
 	}
 }
 
-func (p *BoundedSpanProcessor) ForceFlush(ctx context.Context) error {
+func (p *boundedSpanProcessor) ForceFlush(ctx context.Context) error {
 	if p.stopped.Load() {
 		return errors.New("telemetry: trace export worker is shut down")
 	}
-	ack := make(chan error, 1)
-	select {
-	case p.controls <- processorControl{kind: controlFlush, ack: ack}:
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-p.done:
-		return errors.New("telemetry: trace export worker is unavailable")
-	}
-	select {
-	case err := <-ack:
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-p.done:
-		return errors.New("telemetry: trace export worker dropped flush response")
-	}
+	return p.send(ctx, controlFlush)
 }
 
-func (p *BoundedSpanProcessor) Shutdown(ctx context.Context) error {
+func (p *boundedSpanProcessor) Shutdown(ctx context.Context) error {
 	if p.stopped.Swap(true) {
 		return nil
 	}
+	return p.send(ctx, controlShutdown)
+}
+
+func (p *boundedSpanProcessor) send(ctx context.Context, kind controlKind) error {
 	ack := make(chan error, 1)
 	select {
-	case p.controls <- processorControl{kind: controlShutdown, ack: ack}:
+	case p.controls <- processorControl{kind: kind, ack: ack}:
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-p.done:
@@ -108,107 +99,71 @@ func (p *BoundedSpanProcessor) Shutdown(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-p.done:
-		return errors.New("telemetry: trace export worker dropped shutdown response")
+		return errors.New("telemetry: trace export worker exited before answering")
 	}
 }
 
-// exportWorker drains the span queue into bounded export batches.
 type exportWorker struct {
-	exporter  sdktrace.SpanExporter
-	spans     chan sdktrace.ReadOnlySpan
-	controls  chan processorControl
-	pending   []sdktrace.ReadOnlySpan
-	batchSize int
-	delay     time.Duration
-	done      chan struct{}
+	exporter sdktrace.SpanExporter
+	spans    chan sdktrace.ReadOnlySpan
+	controls chan processorControl
+	pending  []sdktrace.ReadOnlySpan
+	done     chan struct{}
 }
 
 func (w *exportWorker) run() {
 	defer close(w.done)
-	ticker := time.NewTicker(w.delay)
+	ticker := time.NewTicker(exportScheduleDelay)
 	defer ticker.Stop()
 	for {
 		select {
 		case control := <-w.controls:
-			if !w.handle(control) {
+			if control.kind == controlShutdown {
+				control.ack <- w.shutdown()
 				return
 			}
+			control.ack <- w.drain(context.Background())
 		case span := <-w.spans:
-			w.push(span)
+			w.push(context.Background(), span)
 		case <-ticker.C:
-			w.exportPending()
+			w.exportPending(context.Background())
 		}
 	}
 }
 
-// handle answers one control message; a false return ends the worker.
-func (w *exportWorker) handle(control processorControl) bool {
-	var err error
-	switch control.kind {
-	case controlFlush:
-		w.flushQueued()
-	case controlShutdown:
-		err = w.shutdownExporter()
-	}
-	control.ack <- err
-	return control.kind == controlFlush
-}
-
-func (w *exportWorker) push(span sdktrace.ReadOnlySpan) {
+// push errors are already counted as drops by countingExporter.
+func (w *exportWorker) push(ctx context.Context, span sdktrace.ReadOnlySpan) error {
 	w.pending = append(w.pending, span)
-	if len(w.pending) >= w.batchSize {
-		w.exportPending()
+	if len(w.pending) < exportBatchSize {
+		return nil
 	}
+	return w.exportPending(ctx)
 }
 
-// exportPending exports the pending batch; push keeps it below batchSize. A
-// failed batch is already counted as dropped by the counting exporter.
-func (w *exportWorker) exportPending() {
+func (w *exportWorker) exportPending(ctx context.Context) error {
 	if len(w.pending) == 0 {
-		return
+		return nil
 	}
 	batch := w.pending
 	w.pending = nil
-	_ = w.exporter.ExportSpans(context.Background(), batch)
+	return w.exporter.ExportSpans(ctx, batch)
 }
 
-// flushQueued drains every queued span and exports what remains pending.
-func (w *exportWorker) flushQueued() {
+func (w *exportWorker) drain(ctx context.Context) error {
 	for {
 		select {
 		case span := <-w.spans:
-			w.push(span)
+			if err := w.push(ctx, span); err != nil {
+				return errors.Join(err, w.drain(ctx))
+			}
 		default:
-			w.exportPending()
-			return
+			return w.exportPending(ctx)
 		}
 	}
 }
 
-// shutdownExporter drains the queue, exports every remaining batch, and stops
-// the exporter. Failed batches are counted as dropped by the counting
-// exporter.
-func (w *exportWorker) shutdownExporter() error {
+func (w *exportWorker) shutdown() error {
 	ctx, cancel := context.WithTimeout(context.Background(), exportTimeout)
 	defer cancel()
-	for {
-		select {
-		case span := <-w.spans:
-			w.pending = append(w.pending, span)
-		default:
-			var first error
-			for len(w.pending) > 0 {
-				n := min(w.batchSize, len(w.pending))
-				batch := w.pending[:n:n]
-				w.pending = w.pending[n:]
-				if err := w.exporter.ExportSpans(ctx, batch); err != nil && first == nil {
-					first = err
-				}
-			}
-			if err := w.exporter.Shutdown(ctx); err != nil && first == nil {
-				first = err
-			}
-			return first
-		}
-	}
+	return errors.Join(w.drain(ctx), w.exporter.Shutdown(ctx))
 }

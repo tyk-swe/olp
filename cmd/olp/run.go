@@ -96,13 +96,12 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 	// Tracing is installed before any listener binds: an invalid endpoint or
 	// header file must stop startup rather than trace half a process.
 	traces, err := telemetry.Install(telemetry.Config{
-		Endpoint:          c.OTLPTracesEndpoint,
-		HeadersFile:       c.OTLPHeadersFile,
-		SampleRatio:       c.TraceSampleRatio,
-		PropagateUpstream: c.TracePropagateUpstream,
-		AcceptInbound:     c.TraceAcceptInbound,
-		Mode:              string(c.Mode),
-		Version:           Version,
+		Endpoint:    c.OTLPTracesEndpoint,
+		HeadersFile: c.OTLPHeadersFile,
+		SampleRatio: c.TraceSampleRatio,
+		Propagation: telemetry.Propagation{Upstream: c.TracePropagateUpstream, AcceptInbound: c.TraceAcceptInbound},
+		Mode:        string(c.Mode),
+		Version:     Version,
 	}, os.LookupEnv)
 	if err != nil {
 		return err
@@ -650,13 +649,8 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			Management:       managementPool,
 			InferenceEnabled: c.Mode.Inference(),
 			Reject:           rejectPublic,
-			Tracer:           traces.Tracer(),
 		}
-		if runtimeConfig := traces.Runtime(); runtimeConfig != nil {
-			request := runtimeConfig.ForInstallation(installation)
-			admission.Tracing = &request
-		}
-		listenerConfigs = append(listenerConfigs, listenerConfig{name: "public", address: c.ListenAddr, handler: Perimeter(c.PublicOrigin, managementNetwork(c.ManagementAllowedCIDRs, c.TrustedProxyCIDRs, admission.Wrap(public)))})
+		listenerConfigs = append(listenerConfigs, listenerConfig{name: "public", address: c.ListenAddr, handler: Perimeter(c.PublicOrigin, managementNetwork(c.ManagementAllowedCIDRs, c.TrustedProxyCIDRs, admission.Wrap(traces.Middleware(installation)(public))))})
 	}
 	listeners, err = bindListeners(startup, listenerConfigs, c, requestContext)
 	if err != nil {
