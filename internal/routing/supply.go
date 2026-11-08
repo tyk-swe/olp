@@ -290,9 +290,15 @@ func slotIDs(slots []Slot) []string {
 
 // ArrangeSlots keeps the slots an attempt's plan left it, in the plan's order.
 func ArrangeSlots(slots []Slot, order []string) []Slot {
+	index := make(map[string]int, len(slots))
+	for i := range slots {
+		if _, seen := index[slots[i].ID]; !seen {
+			index[slots[i].ID] = i
+		}
+	}
 	arranged := make([]Slot, 0, len(order))
 	for _, id := range order {
-		if i := slices.IndexFunc(slots, func(slot Slot) bool { return slot.ID == id }); i >= 0 {
+		if i, ok := index[id]; ok {
 			arranged = append(arranged, slots[i])
 		}
 	}

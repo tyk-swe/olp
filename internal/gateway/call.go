@@ -110,6 +110,7 @@ type call struct {
 	sizedInput     *int64
 
 	historicalSnapshot *routing.View
+	providers          map[snapshotProvider]routing.Provider
 
 	pin           *resources.Resource
 	pinnedSlot    *routing.Slot

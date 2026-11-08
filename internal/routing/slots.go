@@ -16,29 +16,32 @@ func SelectSlots(provider Provider, model string, route Route, keyID, operation,
 		return nil
 	}
 	type ranked struct {
-		slot  Slot
-		score float64
+		index    int
+		priority int
+		score    float64
 	}
-	rows := []ranked{}
-	for _, slot := range provider.Slots {
-		if !slot.Allows(model, route.Slug, keyID) || connectors.SecretRequired(provider.Connector().AuthMode) && slot.CredentialID == nil {
+	secretRequired := connectors.SecretRequired(provider.Connector().AuthMode)
+	rows := make([]ranked, 0, len(provider.Slots))
+	for i := range provider.Slots {
+		slot := &provider.Slots[i]
+		if !slot.Allows(model, route.Slug, keyID) || secretRequired && slot.CredentialID == nil {
 			continue
 		}
 		id, err := uuid.Parse(slot.ID)
 		if err != nil {
 			continue
 		}
-		rows = append(rows, ranked{slot, Score(routeID, id, slot.Weight, operation, surface, mode, affinity)})
+		rows = append(rows, ranked{i, slot.Priority, Score(routeID, id, slot.Weight, operation, surface, mode, affinity)})
 	}
 	slices.SortStableFunc(rows, func(a, b ranked) int {
-		if order := cmp.Compare(a.slot.Priority, b.slot.Priority); order != 0 {
+		if order := cmp.Compare(a.priority, b.priority); order != 0 {
 			return order
 		}
 		return cmp.Compare(b.score, a.score)
 	})
-	out := make([]Slot, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, row.slot)
+	out := make([]Slot, len(rows))
+	for i, row := range rows {
+		out[i] = provider.Slots[row.index]
 	}
 	return out
 }

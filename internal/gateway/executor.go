@@ -126,12 +126,12 @@ func (s *Server) walkDispatchable(x *call, attempts []routing.Attempt, visit fun
 	repeats := retryDispatches(x.route)
 	available := 0
 	for _, attempt := range attempts {
-		provider, ok := x.snapshot().FindProvider(attempt.ProviderID)
+		provider, ok := x.provider(attempt.ProviderID)
 		if !ok {
 			continue
 		}
 		for i := range provider.Slots {
-			if s.slotAvailable(x, attempt, &provider.Slots[i]) {
+			if s.slotAvailable(x, attempt, &provider, &provider.Slots[i]) {
 				for range min(repeats, remaining-available) {
 					available++
 					if visit != nil {
@@ -372,32 +372,33 @@ func (s *Server) execute(ctx context.Context, x *call) *outcome {
 // affinity so sibling keys spread across a pool.
 func (s *Server) slots(x *call, attempt routing.Attempt, provider *routing.Provider) []routing.Slot {
 	if x.pinnedSlot != nil {
-
-		if !s.slotAvailable(x, attempt, x.pinnedSlot) {
+		if !s.slotAvailable(x, attempt, provider, x.pinnedSlot) {
 			return nil
 		}
 		return []routing.Slot{*x.pinnedSlot}
 	}
-	ordered := routing.SelectSlots(*provider, attempt.UpstreamModel, *x.route, x.keyID, x.operationName(), x.surfaceName(), x.mode, x.affinity)
-	if attempt.Slots != nil {
-		ordered = routing.ArrangeSlots(ordered, attempt.Slots)
-	}
+	ordered := plannedSlots(x, attempt, provider)
 	out := make([]routing.Slot, 0, len(ordered))
 	for _, slot := range ordered {
-		if !s.slotAvailable(x, attempt, &slot) || (!s.deps.Admission.ready() && (s.health.coolingDown(provider.ID, slot.ID) || s.health.coolingDown(provider.ID, credentialHealthKey(&slot, s.slotGrantGeneration(&slot))))) {
+		if !s.slotAvailable(x, attempt, provider, &slot) || (!s.deps.Admission.ready() && (s.health.coolingDown(provider.ID, slot.ID) || s.health.coolingDown(provider.ID, credentialHealthKey(&slot, s.slotGrantGeneration(&slot))))) {
 			continue
 		}
 		out = append(out, slot)
 	}
-
 	return out
 }
 
-func (s *Server) slotAvailable(x *call, attempt routing.Attempt, slot *routing.Slot) bool {
+func plannedSlots(x *call, attempt routing.Attempt, provider *routing.Provider) []routing.Slot {
+	if attempt.Slots != nil {
+		return routing.ArrangeSlots(provider.Slots, attempt.Slots)
+	}
+	return routing.SelectSlots(*provider, attempt.UpstreamModel, *x.route, x.keyID, x.operationName(), x.surfaceName(), x.mode, x.affinity)
+}
+
+func (s *Server) slotAvailable(x *call, attempt routing.Attempt, provider *routing.Provider, slot *routing.Slot) bool {
 	if !slot.Allows(attempt.UpstreamModel, x.route.Slug, x.keyID) {
 		return false
 	}
-	provider := x.snapshot().Provider(attempt.ProviderID)
 	if !connectors.SecretRequired(provider.AuthMode) {
 		return true
 	}

@@ -92,7 +92,6 @@ func runAttempts[Result any](ctx context.Context, s *Server, x *call, adapter at
 // conditions the route met.
 func runRoute[Result any](ctx context.Context, s *Server, x *call, adapter attemptAdapter[Result]) (attemptOutcome[Result], []string) {
 	deadline, _ := ctx.Deadline()
-	snapshot := x.snapshot()
 	unmeterable := false
 	var last *attemptFailure
 	var met []string
@@ -101,7 +100,7 @@ route:
 		if x.spent >= x.budget || ctx.Err() != nil {
 			break
 		}
-		provider, ok := snapshot.FindProvider(attempt.ProviderID)
+		provider, ok := x.provider(attempt.ProviderID)
 		if !ok || s.health.open(provider.ID) {
 			continue
 		}

@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/tyk-swe/olp/internal/interaction"
@@ -54,6 +55,35 @@ func (x *call) snapshot() *routing.View {
 		return nil
 	}
 	return x.request.release.Snapshot()
+}
+
+type snapshotProvider struct {
+	historical *routing.View
+	release    *release.Release
+	id         string
+}
+
+// provider copies a provider from the request's snapshot once per request.
+// Callers share that copy, so they must not write through its maps, slices or
+// pointers.
+func (x *call) provider(id string) (routing.Provider, bool) {
+	key := snapshotProvider{historical: x.historicalSnapshot, release: x.request.release, id: id}
+	if provider, ok := x.providers[key]; ok {
+		return provider, true
+	}
+	snapshot := x.snapshot()
+	if snapshot == nil {
+		return routing.Provider{}, false
+	}
+	provider, ok := snapshot.FindProvider(id)
+	if !ok {
+		return provider, false
+	}
+	if x.providers == nil {
+		x.providers = map[snapshotProvider]routing.Provider{}
+	}
+	x.providers[key] = provider
+	return provider, true
 }
 func continuationError(code, message string) *Error {
 	return serverError(http.StatusConflict, code, message)

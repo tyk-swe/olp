@@ -487,10 +487,8 @@ func (x *call) attemptCardRevisionForRoute(providerID string, route *routing.Rou
 	// provider's, then the route's — the same precedence accounting applies.
 	project := x.authority.ProjectID
 	if project == nil {
-		if snapshot := x.snapshot(); snapshot != nil {
-			if provider, ok := snapshot.FindProvider(providerID); ok {
-				project = provider.ProjectID
-			}
+		if provider, ok := x.provider(providerID); ok {
+			project = provider.ProjectID
 		}
 	}
 	if project == nil && route != nil {

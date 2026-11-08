@@ -235,10 +235,23 @@ func ResolvePolicy(installation, route, key *Policy, requested *Preferences) (Ef
 	if !slices.Contains(e.Allowed, e.Strategy) {
 		return e, invalidValue("strategy", "The selected strategy is forbidden by routing policy")
 	}
+	e.Digest = policyDigest(installation, route, key, request)
+	return e, nil
+}
+
+var unconstrainedPolicyDigest = encodePolicyDigest(nil, nil, nil, nil)
+
+func policyDigest(installation, route, key *Policy, request *Preferences) string {
+	if installation == nil && route == nil && key == nil && request == nil {
+		return unconstrainedPolicyDigest
+	}
+	return encodePolicyDigest(installation, route, key, request)
+}
+
+func encodePolicyDigest(installation, route, key *Policy, request *Preferences) string {
 	data, _ := json.Marshal([]any{installation, route, key, request})
 	hash := sha256.Sum256(data)
-	e.Digest = hex.EncodeToString(hash[:])
-	return e, nil
+	return hex.EncodeToString(hash[:])
 }
 
 // selectorProblem explains why selector is not vendor:<catalog-id> or

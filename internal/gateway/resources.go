@@ -176,12 +176,13 @@ func (s *Server) selectBoundPinSurface(ctx context.Context, x *call, route *rout
 		}
 		if len(slotQualifiers) > 0 {
 			attempt := routing.Attempt{ProviderID: p.ID, UpstreamModel: t.ProviderModel}
+			current := x.snapshot().Provider(p.ID)
 			for i := range p.Slots {
 				slot := &p.Slots[i]
 				if bound != nil && (bound.SlotID != slot.ID || !sameCredential(bound.CredentialID, slot.CredentialID)) {
 					continue
 				}
-				if qualifiesSlot(&p, slot, t.ProviderModel) && s.slotAvailable(x, attempt, slot) && !s.cooling(ctx, p.ID, slot) {
+				if qualifiesSlot(&p, slot, t.ProviderModel) && s.slotAvailable(x, attempt, &current, slot) && !s.cooling(ctx, p.ID, slot) {
 					return nil, nil
 				}
 			}
@@ -230,6 +231,7 @@ func (s *Server) selectBoundPinSurface(ctx context.Context, x *call, route *rout
 			return nil, serverError(http.StatusInternalServerError, "internal_error", "Realtime admission requires a session deadline.")
 		}
 	}
+	current := x.snapshot().Provider(provider.ID)
 	for i := range provider.Slots {
 		slot := &provider.Slots[i]
 		if bound != nil && (bound.SlotID != slot.ID || !sameCredential(bound.CredentialID, slot.CredentialID)) {
@@ -238,7 +240,7 @@ func (s *Server) selectBoundPinSurface(ctx context.Context, x *call, route *rout
 		if !qualifiesSlot(&provider, slot, attempt.UpstreamModel) {
 			continue
 		}
-		if !s.slotAvailable(x, attempt, slot) || s.cooling(ctx, provider.ID, slot) {
+		if !s.slotAvailable(x, attempt, &current, slot) || s.cooling(ctx, provider.ID, slot) {
 			continue
 		}
 		gate := s.gateAttempt(ctx, x, attempt, &provider, slot, max(resourceEstimate, x.estimate), deadline)

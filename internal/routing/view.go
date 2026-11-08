@@ -186,8 +186,8 @@ func (s *Snapshot) lookupProvider(id string) (Provider, bool) {
 func (s *Snapshot) selectionPolicies(key string) (*Policy, *Policy) {
 	return s.InstallationPolicy, s.KeyPolicies[key]
 }
-func (v *View) lookupRoute(slug string) (Route, bool)     { return v.FindRoute(slug) }
-func (v *View) lookupProvider(id string) (Provider, bool) { return v.FindProvider(id) }
+func (v *View) lookupRoute(slug string) (Route, bool)     { return v.snapshot.lookupRoute(slug) }
+func (v *View) lookupProvider(id string) (Provider, bool) { return v.snapshot.lookupProvider(id) }
 func (v *View) selectionPolicies(key string) (*Policy, *Policy) {
 	return v.InstallationPolicy(), v.KeyPolicy(key)
 }

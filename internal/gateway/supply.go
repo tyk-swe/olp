@@ -18,13 +18,15 @@ import (
 // and ranks after slots whose headroom is known.
 func (a *Admission) ReadSupply(ctx context.Context, query routing.SupplyQuery) *routing.SupplyState {
 	var quotas []limits.QuotaProbe
+	probed := make(map[string]int, len(query.Slots))
 	probe := func(lookup string, rpm, tpm, concurrency *int64) int {
 		if rpm == nil && tpm == nil && concurrency == nil {
 			return -1
 		}
-		if i := slices.IndexFunc(quotas, func(q limits.QuotaProbe) bool { return q.LookupID == lookup }); i >= 0 {
+		if i, ok := probed[lookup]; ok {
 			return i
 		}
+		probed[lookup] = len(quotas)
 		quotas = append(quotas, limits.QuotaProbe{LookupID: lookup, RequestsPerMinute: rpm, TokensPerMinute: tpm, MaxConcurrency: concurrency})
 		return len(quotas) - 1
 	}

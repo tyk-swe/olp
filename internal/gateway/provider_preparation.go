@@ -395,7 +395,7 @@ func (x *call) recordEstimate(fact *AttemptFact, a routing.Attempt) {
 	if x.generation.parsed == nil && x.unary == nil {
 		return
 	}
-	provider := x.snapshot().Provider(a.ProviderID)
+	provider, _ := x.provider(a.ProviderID)
 	if admitted, err := x.attemptEstimate(&provider, a.TargetID, a.UpstreamModel); err == nil {
 		fact.EstimatedInputTokens, fact.EstimateProvenance = admitted.input, string(admitted.provenance)
 	}

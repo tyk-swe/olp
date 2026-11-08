@@ -954,3 +954,44 @@ func TestBedrockStreamClassifiesRequestEndings(t *testing.T) {
 		})
 	}
 }
+
+type spendAvailable struct{}
+
+func (spendAvailable) ReadSupply(_ context.Context, query routing.SupplyQuery) *routing.SupplyState {
+	state := &routing.SupplyState{Spend: map[string]routing.Spend{}}
+	for _, cap := range query.Caps {
+		state.Spend[cap.OwnerID] = routing.SpendAvailable
+	}
+	return state
+}
+
+// A passthrough plan never ranks slots, so a spend cap the connection can still
+// meet must leave the gateway every slot to try rather than none.
+func TestPassthroughUnderSpendCapKeepsCredentialSlots(t *testing.T) {
+	h := newHarness(t, Config{})
+	slug := "native-widgets"
+	h.republish(func(s *routing.Snapshot, a, _ routing.Provider) {
+		a.Limits = &routing.Limits{Supply: routing.Supply{DailyCostLimit: new("10")}}
+		s.Providers[a.ID] = a
+		routeID := uuid.NewString()
+		s.Routes[slug] = routing.Route{
+			ID: routeID, Slug: slug, RoutingID: routeID, RevisionID: uuid.NewString(), Revision: 1, OverallTimeout: 5000, MaxAttempts: 1,
+			Operations: []string{routing.PassthroughOperation}, Fidelity: routing.RouteFidelity{Mode: routing.FidelityStrict},
+			Behavior: routing.Behavior{Passthrough: &routing.PassthroughConfig{Dialect: "bound-native", Methods: []string{"GET"}, Paths: []string{"/v1/status"}, AcknowledgeOpaqueUnmetered: true}},
+			Targets:  []routing.Target{{ID: uuid.NewString(), ProviderID: a.ID, ProviderModel: modelA, Weight: 1, Timeout: 2000, RoutingID: uuid.NewString()}},
+		}
+	})
+	snapshot := h.rt.Release().Snapshot()
+	route, _ := snapshot.FindRoute(slug)
+	x := &call{request: request{release: h.rt.Release()}, keyID: h.keyID, routeLeg: routeLeg{route: &route}}
+	options := h.gateway.selectionOptions(t.Context(), x)
+	options.CheckSlots, options.Supply = false, spendAvailable{}
+	plan, err := routing.Select(snapshot, slug, routing.PassthroughOperation, "native", "unary", x.affinity, options)
+	if err != nil || len(plan.Attempts) != 1 {
+		t.Fatalf("passthrough plan %+v, error %v", plan, err)
+	}
+	provider, _ := snapshot.FindProvider(plan.Attempts[0].ProviderID)
+	if slots := h.gateway.slots(x, plan.Attempts[0], &provider); len(slots) != 1 || slots[0].ID != h.slotA {
+		t.Fatalf("passthrough slots %+v, want the connection's slot %s", slots, h.slotA)
+	}
+}

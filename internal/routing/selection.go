@@ -28,9 +28,9 @@ type Attempt struct {
 	// attempt under exactly it.
 	Discount    *usage.RoutingDiscount
 	Performance *usage.Performance
-	// Slots, when set, are the credential slots live supply state left the
-	// attempt, in the order it ranked them. Without supply state the gateway
-	// orders the target's slots itself, exactly as the plan did.
+	// Slots, when set, are the credential slots the plan left the attempt, in
+	// the order it ranked them. A plan that checks no slots leaves it nil, and
+	// the gateway orders the target's slots itself.
 	Slots []string
 }
 
@@ -51,21 +51,19 @@ const (
 // the route, target, request tuple and affinity. Each variable-length input is
 // length-prefixed so adjacent values cannot alias one another.
 func Score(routeID, targetID uuid.UUID, weight int64, operation, surface, mode string, affinity []byte) float64 {
-	h := sha256.New()
-	h.Write([]byte("olp-weighted-rendezvous\x00"))
-	h.Write(routeID[:])
-	h.Write(targetID[:])
-	var length [8]byte
-	for _, input := range [][]byte{[]byte(operation), []byte(surface), []byte(mode), affinity} {
-		binary.BigEndian.PutUint64(length[:], uint64(len(input)))
-		h.Write(length[:])
-		h.Write(input)
-	}
-	raw := binary.BigEndian.Uint64(h.Sum(nil)[:8])
+	var buffer [256]byte
+	header := append(append(append(buffer[:0], "olp-weighted-rendezvous\x00"...), routeID[:]...), targetID[:]...)
+	request := appendPrefixed(appendPrefixed(appendPrefixed(header, operation), surface), mode)
+	sum := sha256.Sum256(appendPrefixed(request, affinity))
+	raw := binary.BigEndian.Uint64(sum[:8])
 	sample := (float64(raw>>11) + 1) / (float64(uint64(1)<<53) + 1)
 	effective := weight
 	if effective < 1 {
 		effective = 1
 	}
 	return float64(effective) / -math.Log(sample)
+}
+
+func appendPrefixed[T string | []byte](dst []byte, value T) []byte {
+	return append(binary.BigEndian.AppendUint64(dst, uint64(len(value))), value...)
 }

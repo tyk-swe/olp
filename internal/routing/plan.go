@@ -206,6 +206,7 @@ type rankedCandidate struct {
 	skipped    []skippedSlot
 	attempt    Attempt
 	decision   Decision
+	price      *big.Rat
 	order      int
 	preference int
 	locality   int
@@ -227,7 +228,7 @@ func Select(s selectionSource, slug, operation, surface, mode string, affinity [
 		return plan, &SelectionError{Code: OperationNotSupported}
 	}
 	installationPolicy, keyPolicy := s.selectionPolicies(options.KeyID)
-	policy, e := ResolvePolicy(installationPolicy, route.Policy, keyPolicy, options.Preferences)
+	policy, e := ResolvePolicy(installationPolicy, route.Policy.Clone(), keyPolicy, options.Preferences)
 	if e != nil {
 		return plan, e
 	}
@@ -253,17 +254,21 @@ func Select(s selectionSource, slug, operation, surface, mode string, affinity [
 			state = options.Supply.ReadSupply(cmp.Or(options.Context, context.Background()), query)
 		}
 		applySupply(route, rows, state)
-		for i := range rows {
-			if capacity {
+		if capacity {
+			for i := range rows {
 				OrderSlots(rows[i].slots, state)
 			}
+		}
+	}
+	if options.CheckSlots {
+		for i := range rows {
 			rows[i].attempt.Slots = slotIDs(rows[i].slots)
 		}
 	}
 	if chosen.selector != nil && len(chosen.selector.Tags) > 0 {
 		plan.Baseline = baseline(rows, operation)
 	}
-	orderCandidates(rows, policy.Strategy, operation)
+	orderCandidates(rows, policy.Strategy)
 	plan.addCandidates(rows, options.CheckSlots)
 	return plan, nil
 }
@@ -333,7 +338,7 @@ func evaluateCandidates(s selectionSource, route Route, operation, surface, mode
 		provider, exists := s.lookupProvider(target.ProviderID)
 		row := rankedCandidate{provider: provider, decision: Decision{TargetID: target.ID, ProviderID: target.ProviderID, UpstreamModel: target.ProviderModel, Priority: target.Priority, Strategy: policy.Strategy, Shadow: target.Shadow != nil}, order: len(policy.Preferences.Order), shadow: target.Shadow != nil}
 		if chosen.selector != nil && !row.shadow {
-			row.decision.Selector = &chosen.selector.ID
+			row.decision.Selector = strptr(chosen.selector.ID)
 		}
 		row.decision.Unhealthy = options.Unhealthy != nil && options.Unhealthy(target.ProviderID)
 		if provider.VendorID != "" {
@@ -360,6 +365,9 @@ func evaluateCandidates(s selectionSource, route Route, operation, surface, mode
 			row.decision.RequestedOutputTokens = demand.MaxOutputTokens
 		}
 		row.decision.Price = options.Inputs.Price(provider.Kind, provider.ID, provider.VendorID, target.ProviderModel, operation, now)
+		if policy.Strategy == strategyPrice {
+			row.price = row.decision.Price.Scalar(operation)
+		}
 		row.attempt.Discount = options.Inputs.Discount(provider.Kind, provider.ID, provider.VendorID, now)
 		if options.EstimateCost && options.WorstCost != nil {
 			row.decision.EstimatedCost = estimatedCost(provider, row.decision.Price, row.attempt.Discount, demand, now, options.WorstCost, target)
@@ -465,7 +473,7 @@ func evaluateCandidates(s selectionSource, route Route, operation, surface, mode
 	return rows, nil
 }
 
-func orderCandidates(rows []rankedCandidate, strategy, operation string) {
+func orderCandidates(rows []rankedCandidate, strategy string) {
 	slices.SortStableFunc(rows, func(a, b rankedCandidate) int {
 		if a.decision.Eligible != b.decision.Eligible {
 			if a.decision.Eligible {
@@ -498,7 +506,7 @@ func orderCandidates(rows []rankedCandidate, strategy, operation string) {
 				return order
 			}
 		case strategyPrice:
-			ap, bp := a.decision.Price.Scalar(operation), b.decision.Price.Scalar(operation)
+			ap, bp := a.price, b.price
 			if (ap == nil) != (bp == nil) {
 				if ap != nil {
 					return -1
@@ -540,8 +548,15 @@ func orderCandidates(rows []rankedCandidate, strategy, operation string) {
 // addCandidates retains every eligible target for execution. Preview ordinals
 // account for credential slots; excluded credentials never spend the budget.
 func (plan *Plan) addCandidates(rows []rankedCandidate, checkSlots bool) {
+	decisions := 0
+	for r := range rows {
+		decisions += max(1, len(rows[r].slots)) + len(rows[r].skipped)
+	}
+	plan.Attempts = slices.Grow(plan.Attempts, len(rows))
+	plan.Decisions = slices.Grow(plan.Decisions, decisions)
 	ordinal := 0
-	for _, row := range rows {
+	for r := range rows {
+		row := &rows[r]
 		if row.shadow {
 			if row.decision.Eligible {
 				plan.Shadows = append(plan.Shadows, row.attempt)

@@ -106,7 +106,7 @@ func (s *Server) newFact(x *call, a routing.Attempt, slot routing.Slot, ordinal 
 		x.routingInputs = s.deps.Runtime.RoutingInputs()
 	}
 	fact.cardRev = x.attemptCardRevision(a.ProviderID, fact.StartedAt)
-	provider, known := x.snapshot().FindProvider(a.ProviderID)
+	provider, known := x.provider(a.ProviderID)
 	if len(pinned) != 0 && pinned[0] != nil {
 		provider, known = *pinned[0], true
 	}
@@ -139,7 +139,7 @@ func (s *Server) newFact(x *call, a routing.Attempt, slot routing.Slot, ordinal 
 		fact.GuardrailDecisions = append([]guardrails.Evidence(nil), record.guardrailDecisions...)
 	}
 	if x.strict() {
-		provider := x.snapshot().Provider(a.ProviderID)
+		provider, _ := x.provider(a.ProviderID)
 		if x.family == wire.GeminiInteractions || x.family == wire.GeminiLive {
 			fact.Interaction = &usage.InteractionEvidence{Fidelity: routing.FidelityStrict, PlanClass: "native_identity", UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
 			return fact

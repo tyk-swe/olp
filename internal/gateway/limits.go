@@ -679,7 +679,7 @@ const maxEstimate = estimate.MaxTokens
 func requestEstimate(x *call) int64 {
 	var reserved int64
 	for _, attempt := range x.attempts {
-		provider := x.snapshot().Provider(attempt.ProviderID)
+		provider, _ := x.provider(attempt.ProviderID)
 		reserved = max(reserved, x.attemptReservation(attempt, &provider))
 	}
 	return max(reserved, 1)
