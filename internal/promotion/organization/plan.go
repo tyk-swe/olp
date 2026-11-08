@@ -3,9 +3,7 @@ package organization
 import (
 	"context"
 	"errors"
-	"maps"
 	"reflect"
-	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -34,19 +32,9 @@ func Planner(desired []Organization) promotion.Planner {
 }
 
 func plan(desired, current []Organization) []promotion.Item {
-	existing := maps.Collect(func(yield func(string, Organization) bool) {
-		for _, organization := range current {
-			if !yield(strings.ToLower(organization.Name), organization) {
-				return
-			}
-		}
-	})
-	return slices.Collect(func(yield func(promotion.Item) bool) {
-		for _, organization := range desired {
-			if !yield(promotion.Item{Kind: contract.ConfigurationPlanItemKindOrganization, Key: organization.Name, Action: action(organization, existing), Detail: detail}) {
-				return
-			}
-		}
+	existing := promotion.Index(current, func(organization Organization) string { return strings.ToLower(organization.Name) })
+	return promotion.Map(desired, func(organization Organization) promotion.Item {
+		return promotion.Item{Kind: contract.ConfigurationPlanItemKindOrganization, Key: organization.Name, Action: action(organization, existing), Detail: detail}
 	})
 }
 

@@ -3,11 +3,13 @@ package mcpserver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/mcp/registration"
+	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -17,10 +19,10 @@ func Read(ctx context.Context, q access.Queryer, directory project.Directory) ([
 	if err != nil {
 		return nil, err
 	}
-	return collect(active, func(_ int, definition registration.Definition) (Server, error) {
+	return promotion.TryMap(active, func(definition registration.Definition) (Server, error) {
 		name, ok := directory.Name(definition.ProjectID)
 		if !ok {
-			return Server{}, pgx.ErrNoRows
+			return Server{}, fmt.Errorf("mcp server %s belongs to an unknown project", definition.ID)
 		}
 		return fromDefinition(definition, name)
 	})

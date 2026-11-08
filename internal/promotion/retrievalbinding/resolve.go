@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/retrieval"
 )
@@ -28,7 +29,7 @@ func resolve(ctx context.Context, q access.Queryer, directory project.Directory,
 	if !ok {
 		return retrieval.Input{}, errProjectAbsent
 	}
-	targets, err := texts(ctx, q, targetQuery, binding.Route, projectID, binding.TargetProvider, binding.Resource)
+	targets, err := promotion.Rows(ctx, q, pgx.RowTo[string], targetQuery, binding.Route, projectID, binding.TargetProvider, binding.Resource)
 	if err != nil {
 		return retrieval.Input{}, err
 	}
@@ -53,8 +54,8 @@ func resolve(ctx context.Context, q access.Queryer, directory project.Directory,
 }
 
 func keyIDs(ctx context.Context, q access.Queryer, projectID string, names []string) ([]string, error) {
-	return collect(names, func(name string) (string, error) {
-		ids, err := texts(ctx, q, activeKeysQuery, projectID, name)
+	return promotion.TryMap(names, func(name string) (string, error) {
+		ids, err := promotion.Rows(ctx, q, pgx.RowTo[string], activeKeysQuery, projectID, name)
 		if err != nil {
 			return "", err
 		}
@@ -66,26 +67,6 @@ func keyIDs(ctx context.Context, q access.Queryer, projectID string, names []str
 }
 
 func activeKeyCount(ctx context.Context, q access.Queryer, projectID, name string) (int, error) {
-	ids, err := texts(ctx, q, activeKeysQuery, projectID, name)
+	ids, err := promotion.Rows(ctx, q, pgx.RowTo[string], activeKeysQuery, projectID, name)
 	return len(ids), err
-}
-
-func texts(ctx context.Context, q access.Queryer, query string, arguments ...any) ([]string, error) {
-	rows, err := q.Query(ctx, query, arguments...)
-	if err != nil {
-		return nil, err
-	}
-	return pgx.CollectRows(rows, pgx.RowTo[string])
-}
-
-func collect[A, B any](values []A, convert func(A) (B, error)) ([]B, error) {
-	converted := make([]B, 0, len(values))
-	for _, value := range values {
-		result, err := convert(value)
-		if err != nil {
-			return nil, err
-		}
-		converted = append(converted, result)
-	}
-	return converted, nil
 }

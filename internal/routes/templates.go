@@ -78,7 +78,7 @@ func ValidateTemplateInput(in *TemplateInput) error {
 		if err = in.RoutingPolicy.Validate(); err != nil {
 			return err
 		}
-		if samePolicy(in.RoutingPolicy, nil) {
+		if SamePolicy(in.RoutingPolicy, nil) {
 			in.RoutingPolicy = nil
 		}
 	}

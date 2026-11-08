@@ -78,18 +78,18 @@ func (d directory) id(name string) (string, bool) {
 }
 
 func (d directory) resolves(name *string) bool {
-	_, ok := d.id(valueOf(name))
+	_, ok := d.id(promotion.ValueOf(name))
 	return name == nil || ok
 }
 
 func (d directory) idOf(name *string) *string {
-	id, ok := d.id(valueOf(name))
-	return nonNil(id, name != nil && ok)
+	id, ok := d.id(promotion.ValueOf(name))
+	return promotion.PointerIf(id, name != nil && ok)
 }
 
 func (d directory) nameOf(id *string) *string {
-	name, ok := d.names[valueOf(id)]
-	return nonNil(name, id != nil && ok)
+	name, ok := d.names[promotion.ValueOf(id)]
+	return promotion.PointerIf(name, id != nil && ok)
 }
 
 func declared(document func(string) bool, destination func(string) (string, bool), name *string) bool {
@@ -102,7 +102,7 @@ func declared(document func(string) bool, destination func(string) (string, bool
 
 func checkNames(desired Desired, names promotion.Names, at destination) error {
 	providerDeclared := func(name *string) bool { return declared(names.Provider, at.providers.id, name) }
-	if i := slices.IndexFunc(valueOf(desired.Pricing).Prices, func(price Price) bool { return !providerDeclared(price.Provider) }); i >= 0 {
+	if i := slices.IndexFunc(promotion.ValueOf(desired.Pricing).Prices, func(price Price) bool { return !providerDeclared(price.Provider) }); i >= 0 {
 		return undeclaredPrice(i)
 	}
 	if i := slices.IndexFunc(desired.Discounts, func(discount Discount) bool { return !providerDeclared(discount.Provider) }); i >= 0 {

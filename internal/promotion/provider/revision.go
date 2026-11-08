@@ -5,6 +5,7 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -56,13 +57,13 @@ func fromRevision(stored revision, draft map[string]int, imported *Billing) (Ent
 	return Entry{
 		Name:          stored.name,
 		Project:       stored.project,
-		Configuration: withNetworkCredential(configuration, ""),
-		Models: mapSlice(models, func(_ int, model routing.RevisionModel) providers.DraftModel {
-			return providers.DraftModel{UpstreamModel: model.UpstreamModel, DisplayName: model.DisplayName, Enabled: true, Capabilities: mapSlice(model.Capabilities, func(_ int, capability routing.RevisionCapability) providers.CapabilityInput {
+		Configuration: configuration.WithNetworkCredential(""),
+		Models: promotion.Map(models, func(model routing.RevisionModel) providers.DraftModel {
+			return providers.DraftModel{UpstreamModel: model.UpstreamModel, DisplayName: model.DisplayName, Enabled: true, Capabilities: promotion.Map(model.Capabilities, func(capability routing.RevisionCapability) providers.CapabilityInput {
 				return providers.CapabilityInput{Operation: capability.Operation, Surface: capability.Surface, Mode: capability.Mode}
 			})}
 		}),
-		Slots: mapSlice(slots, func(i int, slot routing.RevisionSlot) Slot {
+		Slots: promotion.MapIndex(slots, func(i int, slot routing.RevisionSlot) Slot {
 			return Slot{
 				Name:          slot.Name,
 				Default:       slot.Default,
@@ -70,8 +71,8 @@ func fromRevision(stored revision, draft map[string]int, imported *Billing) (Ent
 				Enabled:       slot.Enabled,
 				Priority:      slot.Priority,
 				Weight:        slot.Weight,
-				AllowedModels: orEmpty(slot.AllowedModels),
-				AllowedRoutes: orEmpty(slot.AllowedRoutes),
+				AllowedModels: promotion.NonNil(slot.AllowedModels),
+				AllowedRoutes: promotion.NonNil(slot.AllowedRoutes),
 				Limits:        providers.Limits{MaxConcurrency: slot.MaxConcurrency, RequestsPerMinute: slot.RequestsPerMinute, TokensPerMinute: slot.TokensPerMinute, Supply: slot.Supply},
 				Credential:    storedCredential(configuration.Grant(), slot.CredentialID != nil),
 			}
@@ -82,12 +83,12 @@ func fromRevision(stored revision, draft map[string]int, imported *Billing) (Ent
 }
 
 func revisionPositions(slots []routing.RevisionSlot, draft map[string]int) []int {
-	indices := mapSlice(slots, func(i int, _ routing.RevisionSlot) int { return i })
+	indices := promotion.MapIndex(slots, func(i int, _ routing.RevisionSlot) int { return i })
 	if slices.ContainsFunc(slots, func(slot routing.RevisionSlot) bool { _, ok := draft[slot.Name]; return !ok }) {
 		return indices
 	}
-	positions := mapSlice(slots, func(_ int, slot routing.RevisionSlot) int { return draft[slot.Name] })
-	if _, repeated := firstRepeat(positions, func(position int) int { return position }); repeated {
+	positions := promotion.Map(slots, func(slot routing.RevisionSlot) int { return draft[slot.Name] })
+	if _, repeated := promotion.FirstRepeat(positions, func(position int) int { return position }); repeated {
 		return indices
 	}
 	return positions

@@ -6,11 +6,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"maps"
 	"slices"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
@@ -70,41 +67,36 @@ type entry struct {
 }
 
 func Parse(document contract.ConfigurationDocument, policy *egress.Policy) ([]Sink, error) {
-	raw := valueOf(document.Sinks)
+	raw := promotion.ValueOf(document.Sinks)
 	if len(raw) > maxSinks {
 		return nil, access.Invalid("sinks", "Declare at most 64 export sinks.")
 	}
-	entries := slices.Collect(mapped(raw, trim))
-	first := firstIndex(entries, func(e entry) key { return e.sink.key() })
-	return settle(slices.Collect(func(yield func(outcome[Sink]) bool) {
-		for i, e := range entries {
-			parsed, err := parseSink(e, first[e.sink.key()] != i, policy)
-			if !yield(outcome[Sink]{parsed, err}) {
-				return
-			}
-		}
-	}))
+	entries := promotion.Map(raw, trim)
+	first := promotion.FirstIndex(entries, func(e entry) key { return e.sink.key() })
+	return promotion.TryMapIndex(entries, func(i int, e entry) (Sink, error) {
+		return parseSink(e, first[e.sink.key()] != i, policy)
+	})
 }
 
 func trim(raw contract.ConfigurationSink) entry {
 	project, scoped := promotion.Present(raw.Project)
-	ref, signed := promotion.Present(raw.CredentialRef)
+	_, signed := promotion.Present(raw.CredentialRef)
 	return entry{
 		sink: Sink{
 			Owner:       ownerOf(strings.TrimSpace(project), scoped),
 			Name:        strings.TrimSpace(raw.Name),
 			Destination: raw.Destination,
-			Streams:     slices.Collect(mapped(raw.Streams, func(stream contract.ConfigurationSinkStreams) string { return string(stream) })),
+			Streams:     promotion.Map(raw.Streams, func(stream contract.ConfigurationSinkStreams) string { return string(stream) }),
 			Enabled:     raw.Enabled,
 			Signed:      signed,
 		},
 		kind: string(raw.Type),
-		ref:  nonNil(ref, signed),
+		ref:  promotion.Pointer(raw.CredentialRef),
 	}
 }
 
 func parseSink(e entry, duplicate bool, policy *egress.Policy) (Sink, error) {
-	if project, scoped := e.sink.Owner.(Project); scoped && !label(project.Name) {
+	if project, scoped := e.sink.Owner.(Project); scoped && !promotion.ValidLabel(project.Name) {
 		return Sink{}, access.Invalid("sinks.project", "Use an owning project name.")
 	}
 	if duplicate {
@@ -119,11 +111,6 @@ func parseSink(e entry, duplicate bool, policy *egress.Policy) (Sink, error) {
 		return Sink{}, access.Invalid("sinks.credential_ref", "Use the deterministic exported signing-credential reference.")
 	}
 	return parsed, nil
-}
-
-func label(value string) bool {
-	length := utf8.RuneCountInString(value)
-	return utf8.ValidString(value) && length >= 1 && length <= 100 && !strings.ContainsFunc(value, unicode.IsControl)
 }
 
 func ownerOf(project string, scoped bool) Owner {
@@ -153,39 +140,29 @@ func Read(ctx context.Context, q access.Queryer) ([]Sink, error) {
 	if err != nil {
 		return nil, err
 	}
-	return slices.Collect(mapped(current, func(s stored) Sink { return s.sink })), nil
+	return promotion.Map(current, func(s stored) Sink { return s.sink }), nil
 }
 
 func readStored(ctx context.Context, q access.Queryer) ([]stored, error) {
-	rows, err := q.Query(ctx, "SELECT s.id::text,s.credential_id::text,s.name,p.name,s.destination,s.streams,s.enabled FROM olp.managed_export_sinks s LEFT JOIN olp.projects p ON p.id=s.project_id WHERE s.retired_at IS NULL")
-	if err != nil {
-		return nil, err
-	}
-	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (stored, error) {
+	return promotion.Rows(ctx, q, func(row pgx.CollectableRow) (stored, error) {
 		var id, name, destination string
 		var credential, project *string
 		var streams []string
 		var enabled bool
 		scanErr := row.Scan(&id, &credential, &name, &project, &destination, &streams, &enabled)
 		return stored{id: id, credential: credential, sink: Sink{
-			Owner:       ownerOf(valueOf(project), project != nil),
+			Owner:       ownerOf(promotion.ValueOf(project), project != nil),
 			Name:        name,
 			Destination: destination,
 			Streams:     slices.Sorted(slices.Values(streams)),
 			Enabled:     enabled,
 			Signed:      credential != nil,
 		}}, scanErr
-	})
+	}, "SELECT s.id::text,s.credential_id::text,s.name,p.name,s.destination,s.streams,s.enabled FROM olp.managed_export_sinks s LEFT JOIN olp.projects p ON p.id=s.project_id WHERE s.retired_at IS NULL")
 }
 
 func index(current []stored) map[key]stored {
-	return maps.Collect(func(yield func(key, stored) bool) {
-		for _, s := range current {
-			if !yield(s.sink.key(), s) {
-				return
-			}
-		}
-	})
+	return promotion.Index(current, func(s stored) key { return s.sink.key() })
 }
 
 func Render(state []Sink) *[]contract.ConfigurationSink {
@@ -195,7 +172,7 @@ func Render(state []Sink) *[]contract.ConfigurationSink {
 	sorted := slices.SortedFunc(slices.Values(state), func(a, b Sink) int {
 		return cmp.Or(strings.Compare(a.key().project, b.key().project), strings.Compare(a.key().name, b.key().name))
 	})
-	rendered := slices.Collect(mapped(sorted, render))
+	rendered := promotion.Map(sorted, render)
 	return &rendered
 }
 
@@ -205,10 +182,10 @@ func render(s Sink) contract.ConfigurationSink {
 		Destination:   s.Destination,
 		Enabled:       s.Enabled,
 		Name:          s.Name,
-		Project:       present(valueOf(scope(s.Owner)), scope(s.Owner) != nil),
-		Streams: slices.Collect(mapped(s.Streams, func(stream string) contract.ConfigurationSinkStreams {
+		Project:       present(promotion.ValueOf(scope(s.Owner)), scope(s.Owner) != nil),
+		Streams: promotion.Map(s.Streams, func(stream string) contract.ConfigurationSinkStreams {
 			return contract.ConfigurationSinkStreams(stream)
-		})),
+		}),
 		Type: contract.ConfigurationSinkTypeHttps,
 	}
 }
@@ -218,61 +195,4 @@ func present(value string, ok bool) nullable.Nullable[string] {
 		return nil
 	}
 	return nullable.NewNullableWithValue(value)
-}
-
-type outcome[T any] struct {
-	value T
-	err   error
-}
-
-func settle[T any](outcomes []outcome[T]) ([]T, error) {
-	if i := slices.IndexFunc(outcomes, func(o outcome[T]) bool { return o.err != nil }); i >= 0 {
-		return nil, outcomes[i].err
-	}
-	return slices.Collect(mapped(outcomes, func(o outcome[T]) T { return o.value })), nil
-}
-
-func mapped[T, U any](values []T, convert func(T) U) func(func(U) bool) {
-	return func(yield func(U) bool) {
-		for _, value := range values {
-			if !yield(convert(value)) {
-				return
-			}
-		}
-	}
-}
-
-func filtered[T any](values []T, keep func(T) bool) func(func(T) bool) {
-	return func(yield func(T) bool) {
-		for _, value := range values {
-			if keep(value) && !yield(value) {
-				return
-			}
-		}
-	}
-}
-
-func firstIndex[T any, K comparable](values []T, key func(T) K) map[K]int {
-	return maps.Collect(func(yield func(K, int) bool) {
-		for i, value := range slices.Backward(values) {
-			if !yield(key(value), i) {
-				return
-			}
-		}
-	})
-}
-
-func valueOf[T any](pointer *T) T {
-	if pointer == nil {
-		var zero T
-		return zero
-	}
-	return *pointer
-}
-
-func nonNil[T any](value T, present bool) *T {
-	if !present {
-		return nil
-	}
-	return &value
 }

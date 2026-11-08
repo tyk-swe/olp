@@ -24,7 +24,7 @@ func ValidateGuardrails(doc *promotion.Document) error {
 		entry := &doc.Guardrails[i]
 		entry.Name, entry.Project = strings.TrimSpace(entry.Name), strings.TrimSpace(entry.Project)
 		key := [2]string{strings.ToLower(entry.Project), strings.ToLower(entry.Name)}
-		if !promotion.GuardrailLabel(entry.Name) || (entry.Project != "" && !promotion.GuardrailLabel(entry.Project)) || seen[key] || (entry.Policy == nil && len(entry.Configuration) == 0) {
+		if !promotion.ValidLabel(entry.Name) || (entry.Project != "" && !promotion.ValidLabel(entry.Project)) || seen[key] || (entry.Policy == nil && len(entry.Configuration) == 0) {
 			return access.Invalid("guardrails", "Use unique project/name pairs, builtin.regex, and bounded content policies.")
 		}
 		if len(entry.Configuration) > 0 {

@@ -50,11 +50,11 @@ func (HTTP) transport()  {}
 type key [2]string
 
 func Parse(document contract.ConfigurationDocument, policy *egress.Policy) ([]Server, error) {
-	entries := valueOf(document.McpServers)
+	entries := promotion.ValueOf(document.McpServers)
 	if len(entries) > maxServers {
 		return nil, access.Invalid("mcp_servers", "Declare at most 128 MCP servers.")
 	}
-	servers, err := collect(entries, func(index int, entry contract.ConfigurationMCPServer) (Server, error) {
+	servers, err := promotion.TryMapIndex(entries, func(index int, entry contract.ConfigurationMCPServer) (Server, error) {
 		return parseEntry(entry, entries[:index], policy)
 	})
 	if err != nil {
@@ -65,15 +65,15 @@ func Parse(document contract.ConfigurationDocument, policy *egress.Policy) ([]Se
 
 func parseEntry(entry contract.ConfigurationMCPServer, prior []contract.ConfigurationMCPServer, policy *egress.Policy) (Server, error) {
 	identity := keyOf(entry.Project, entry.Name)
-	if !promotion.GuardrailLabel(strings.TrimSpace(entry.Project)) ||
+	if !promotion.ValidLabel(strings.TrimSpace(entry.Project)) ||
 		slices.ContainsFunc(prior, func(other contract.ConfigurationMCPServer) bool { return keyOf(other.Project, other.Name) == identity }) ||
 		!routing.MCPTransport(entry.Transport).Valid() || !certifiedDigest(entry.CatalogDigest) {
 		return Server{}, access.Invalid("mcp_servers", "Use unique project/name pairs, a supported MCP transport and a certified catalog digest.")
 	}
 	prepared, err := registration.Prepare(registration.Input{
 		Delegation: delegationOf(entry.Delegation), OAuth: oauthOf(entry.Oauth), Stdio: stdioOf(entry.Stdio),
-		Name: strings.TrimSpace(entry.Name), Transport: string(entry.Transport), Endpoint: valueOf(entry.Endpoint), Enabled: &entry.Enabled,
-		UnitPrice: present(entry.UnitPrice), ToolPrices: valueOf(entry.ToolPrices),
+		Name: strings.TrimSpace(entry.Name), Transport: string(entry.Transport), Endpoint: promotion.ValueOf(entry.Endpoint), Enabled: &entry.Enabled,
+		UnitPrice: promotion.Pointer(entry.UnitPrice), ToolPrices: promotion.ValueOf(entry.ToolPrices),
 		CallsPerMinute: widen(entry.CallsPerMinute), MaxConcurrency: widen(entry.MaxConcurrency),
 		PerKeyCallsPerMinute: widen(entry.PerKeyCallsPerMinute), PerKeyMaxConcurrency: widen(entry.PerKeyMaxConcurrency),
 	}, policy)
@@ -135,16 +135,4 @@ func bearerOf(bound bool, ref promotion.Ref) *promotion.Ref {
 		return nil
 	}
 	return &ref
-}
-
-func collect[A, B any](values []A, convert func(int, A) (B, error)) ([]B, error) {
-	converted := make([]B, 0, len(values))
-	for index, value := range values {
-		result, err := convert(index, value)
-		if err != nil {
-			return nil, err
-		}
-		converted = append(converted, result)
-	}
-	return converted, nil
 }

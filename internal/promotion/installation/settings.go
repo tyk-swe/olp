@@ -33,7 +33,7 @@ func Parse(document contract.ConfigurationDocument) (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
-	return Settings{TimeZone: zone, Budget: budget, RequireLocalMFA: declared(document.RequireLocalMfa)}, nil
+	return Settings{TimeZone: zone, Budget: budget, RequireLocalMFA: promotion.Pointer(document.RequireLocalMfa)}, nil
 }
 
 func Read(ctx context.Context, q access.Queryer) (Settings, error) {
@@ -65,7 +65,7 @@ func Render(current Settings) (Fragment, error) {
 }
 
 func parseTimeZone(value nullable.Nullable[string]) (*string, error) {
-	zone := declared(value)
+	zone := promotion.Pointer(value)
 	if zone == nil {
 		return nil, nil
 	}
@@ -106,12 +106,4 @@ func canonical(policy *authority.BudgetPolicy) *authority.BudgetPolicy {
 		return normalized
 	}
 	return &authority.BudgetPolicy{}
-}
-
-func declared[T any](value nullable.Nullable[T]) *T {
-	present, ok := promotion.Present(value)
-	if !ok {
-		return nil
-	}
-	return &present
 }

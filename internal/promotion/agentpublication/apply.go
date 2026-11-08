@@ -3,6 +3,7 @@ package agentpublication
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -68,7 +69,7 @@ func toolsetsFirst(a, b Publication) int {
 func apply(ctx context.Context, tx pgx.Tx, p access.Principal, directory project.Directory, bindings promotion.Bindings, deps Deps, publication Publication) error {
 	projectID, ok := directory.ID(publication.Project)
 	if !ok {
-		return pgx.ErrNoRows
+		return fmt.Errorf("agent publication project %q is missing", publication.Project)
 	}
 	if err := p.Project(&projectID, access.Change); err != nil {
 		return err

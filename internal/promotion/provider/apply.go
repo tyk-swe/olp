@@ -3,6 +3,7 @@ package provider
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -54,9 +55,9 @@ func (a applying) apply(ctx context.Context, tx pgx.Tx, entry Entry, existing de
 		return err
 	}
 	if same {
-		return a.rebind(ctx, tx, desired, existing)
+		return a.rebind(ctx, tx, desired, prepared, existing)
 	}
-	return a.replace(ctx, tx, desired, existing)
+	return a.replace(ctx, tx, desired, prepared, existing)
 }
 
 func (a applying) create(ctx context.Context, tx pgx.Tx, entry Entry, prepared providers.PreparedConfiguration, directory project.Directory) error {
@@ -64,11 +65,11 @@ func (a applying) create(ctx context.Context, tx pgx.Tx, entry Entry, prepared p
 	if err != nil {
 		return err
 	}
-	id, _, err := providers.CreateDraft(ctx, tx, providers.Draft{Name: entry.Name, ProjectID: projectID, Configuration: prepared, CreatedBy: a.createdBy})
+	created, err := providers.CreateDraft(ctx, tx, providers.Draft{Name: entry.Name, ProjectID: projectID, Configuration: prepared, CreatedBy: a.createdBy})
 	if err != nil {
 		return err
 	}
-	return a.replace(ctx, tx, entry, destination{id: id})
+	return a.replace(ctx, tx, entry, prepared, destination{id: created.ID})
 }
 
 func projectID(entry Entry, directory project.Directory) (*string, error) {
@@ -82,13 +83,13 @@ func projectID(entry Entry, directory project.Directory) (*string, error) {
 	return &id, nil
 }
 
-func (a applying) rebind(ctx context.Context, tx pgx.Tx, entry Entry, target destination) error {
+func (a applying) rebind(ctx context.Context, tx pgx.Tx, entry Entry, prepared providers.PreparedConfiguration, target destination) error {
 	for _, slot := range entry.Slots {
 		if err := a.rebindSlot(ctx, tx, entry, slot, target); err != nil {
 			return err
 		}
 	}
-	if err := a.bindNetwork(ctx, tx, entry, target); err != nil {
+	if err := a.bindNetwork(ctx, tx, entry, prepared, target, true); err != nil {
 		return err
 	}
 	return a.applyBilling(ctx, tx, entry, target)
@@ -106,14 +107,14 @@ func (a applying) rebindSlot(ctx context.Context, tx pgx.Tx, entry Entry, slot S
 	return providers.BindDraftCredential(ctx, tx, target.id, current.id, *fresh)
 }
 
-func (a applying) replace(ctx context.Context, tx pgx.Tx, entry Entry, target destination) error {
-	if err := a.bindNetwork(ctx, tx, entry, target); err != nil {
+func (a applying) replace(ctx context.Context, tx pgx.Tx, entry Entry, prepared providers.PreparedConfiguration, target destination) error {
+	if err := a.bindNetwork(ctx, tx, entry, prepared, target, false); err != nil {
 		return err
 	}
 	if err := a.applyBilling(ctx, tx, entry, target); err != nil {
 		return err
 	}
-	slots, err := each(entry.Slots, func(_ int, slot Slot) (providers.DraftSlot, error) {
+	slots, err := promotion.TryMap(entry.Slots, func(slot Slot) (providers.DraftSlot, error) {
 		return a.resolveSlot(ctx, tx, entry, slot, target)
 	})
 	if err != nil {
@@ -174,9 +175,9 @@ func (d Deps) matches(ctx context.Context, q access.Queryer, credentialID *strin
 	case promotion.Sealed:
 		return d.Catalogue.CredentialEquals(ctx, q, *credentialID, bound.Secret)
 	case promotion.External:
-		return providers.ExternalCredentialEquals(ctx, q, *credentialID, bound.Reference)
+		return d.Catalogue.ExternalCredentialEquals(ctx, q, *credentialID, bound.Reference)
 	}
-	return false, nil
+	return false, fmt.Errorf("unsupported credential binding %T", credential)
 }
 
 func (d Deps) store(ctx context.Context, tx pgx.Tx, providerID string, credential promotion.Credential) (string, error) {
@@ -185,8 +186,8 @@ func (d Deps) store(ctx context.Context, tx pgx.Tx, providerID string, credentia
 		id, _, err := d.Catalogue.StoreCredential(ctx, tx, providerID, bound.Secret)
 		return id, err
 	case promotion.External:
-		id, _, err := providers.StoreExternalCredential(ctx, tx, providerID, bound.Reference)
+		id, _, err := d.Catalogue.StoreExternalCredential(ctx, tx, providerID, bound.Reference)
 		return id, err
 	}
-	return "", nil
+	return "", fmt.Errorf("unsupported credential binding %T", credential)
 }

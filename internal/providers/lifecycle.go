@@ -155,10 +155,11 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 	if err = a.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
 		return access.Reply{}, err
 	}
-	id, etag, err := CreateDraft(r.Context(), tx, Draft{Name: input.Name, ProjectID: input.ProjectID, Configuration: prepared, CreatedBy: p.UserID()})
+	created, err := CreateDraft(r.Context(), tx, Draft{Name: input.Name, ProjectID: input.ProjectID, Configuration: prepared, CreatedBy: p.UserID()})
 	if err != nil {
 		return access.Reply{}, err
 	}
+	id, etag := created.ID, created.ETag
 	var credentialID *string
 	if input.Credential != nil || input.CredentialReference != nil {
 		stored, _, err := s.storeCredentialInput(r.Context(), tx, id, input.Credential, input.CredentialReference)

@@ -42,7 +42,7 @@ func ValidateAgentPublications(s *promotion.Server, doc *promotion.Document) err
 	seen := map[string]bool{}
 	for _, e := range doc.AgentPublications {
 		key := promotion.PublicationKey(e)
-		if !promotion.GuardrailLabel(e.Project) || seen[key] {
+		if !promotion.ValidLabel(e.Project) || seen[key] {
 			return access.Invalid("agent_publications", "Use unique owning project/kind/name identities.")
 		}
 		seen[key] = true

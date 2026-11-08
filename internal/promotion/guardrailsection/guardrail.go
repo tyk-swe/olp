@@ -8,8 +8,6 @@ import (
 	"errors"
 	"slices"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
@@ -43,19 +41,15 @@ type reference struct {
 
 func builtin(kind string) bool { return strings.HasPrefix(kind, "builtin.") }
 
-func label(value string) bool {
-	return utf8.ValidString(value) && utf8.RuneCountInString(value) >= 1 && utf8.RuneCountInString(value) <= 100 && !strings.ContainsFunc(value, unicode.IsControl)
-}
-
 func parseGuardrails(entries []contract.ConfigurationGuardrail) ([]Guardrail, error) {
 	if len(entries) > 1000 {
 		return nil, access.Invalid("guardrails", "Declare at most 1000 guardrails.")
 	}
-	parsed, err := collect(entries, parseGuardrail)
+	parsed, err := promotion.TryMap(entries, parseGuardrail)
 	if err != nil {
 		return nil, err
 	}
-	if duplicated(parsed, func(g Guardrail) portable { return keyOf(g.Project, g.Name) }) {
+	if _, repeated := promotion.FirstRepeat(parsed, guardrailKey); repeated {
 		return nil, access.Invalid("guardrails", invalidGuardrails)
 	}
 	return parsed, nil
@@ -63,7 +57,7 @@ func parseGuardrails(entries []contract.ConfigurationGuardrail) ([]Guardrail, er
 
 func parseGuardrail(entry contract.ConfigurationGuardrail) (Guardrail, error) {
 	project, name := strings.TrimSpace(entry.Project), strings.TrimSpace(entry.Name)
-	if !label(name) || (project != "" && !label(project)) || entry.Configuration == nil {
+	if !promotion.ValidLabel(name) || (project != "" && !promotion.ValidLabel(project)) || entry.Configuration == nil {
 		return Guardrail{}, access.Invalid("guardrails", invalidGuardrails)
 	}
 	configuration, err := json.Marshal(*entry.Configuration)
@@ -75,8 +69,8 @@ func parseGuardrail(entry contract.ConfigurationGuardrail) (Guardrail, error) {
 		Name:          name,
 		Type:          string(entry.Type),
 		Configuration: configuration,
-		TimeoutMS:     cmp.Or(dereference(entry.TimeoutMs), 1000),
-		OnError:       cmp.Or(string(dereference(entry.OnError)), guardrails.FailClosed),
+		TimeoutMS:     cmp.Or(promotion.ValueOf(entry.TimeoutMs), 1000),
+		OnError:       cmp.Or(string(promotion.ValueOf(entry.OnError)), guardrails.FailClosed),
 	})
 	if err != nil || guardrails.ValidateDefinition(guardrails.Revision{Type: parsed.Type, Configuration: configuration, TimeoutMS: parsed.TimeoutMS, OnError: parsed.OnError}) != nil {
 		return Guardrail{}, access.Invalid("guardrails", invalidConfiguration)
@@ -96,7 +90,7 @@ func withCredentials(g Guardrail) (Guardrail, error) {
 	if err != nil {
 		return Guardrail{}, err
 	}
-	references := kept([]reference{{promotion.Ref(c.CredentialRef), false}, {promotion.Ref(networkCredential(c)), true}}, func(r reference) bool { return r.ref != "" })
+	references := promotion.Filter([]reference{{promotion.Ref(c.CredentialRef), false}, {promotion.Ref(networkCredential(c)), true}}, func(r reference) bool { return r.ref != "" })
 	return Guardrail{Project: g.Project, Name: g.Name, Type: g.Type, Configuration: configuration, TimeoutMS: g.TimeoutMS, OnError: g.OnError, credentials: references}, nil
 }
 
@@ -117,7 +111,7 @@ func renderGuardrail(g Guardrail) (contract.ConfigurationGuardrail, error) {
 }
 
 func claims(definitions []Guardrail) []promotion.Claim {
-	return slices.Concat(mapped(definitions, func(g Guardrail) []promotion.Claim { return mapped(g.credentials, claim) })...)
+	return slices.Concat(promotion.Map(definitions, func(g Guardrail) []promotion.Claim { return promotion.Map(g.credentials, claim) })...)
 }
 
 func claim(r reference) promotion.Claim {
@@ -141,7 +135,7 @@ func planGuardrails(ctx context.Context, q access.Queryer, desired []Guardrail, 
 	if err != nil {
 		return nil, err
 	}
-	planned, err := collect(desired, func(g Guardrail) ([]promotion.Item, error) {
+	planned, err := promotion.TryMap(desired, func(g Guardrail) ([]promotion.Item, error) {
 		plugin, err := planPlugin(ctx, q, g)
 		if err != nil {
 			return nil, err
@@ -215,12 +209,16 @@ func planDefinition(ctx context.Context, q access.Queryer, directory project.Dir
 
 func GuardrailApplier(desired Section) promotion.Applier {
 	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
-		return each(desired.Guardrails, func(g Guardrail) error { return applyGuardrail(ctx, tx, p, g) })
+		directory, err := project.ReadDirectory(ctx, tx)
+		if err != nil {
+			return err
+		}
+		return promotion.Every(desired.Guardrails, func(g Guardrail) error { return applyGuardrail(ctx, tx, p, directory, g) })
 	}
 }
 
-func applyGuardrail(ctx context.Context, tx pgx.Tx, p access.Principal, g Guardrail) error {
-	project, err := projectID(ctx, tx, g.Project)
+func applyGuardrail(ctx context.Context, tx pgx.Tx, p access.Principal, directory project.Directory, g Guardrail) error {
+	project, err := projectID(directory, g.Project)
 	if err != nil {
 		return err
 	}
@@ -235,8 +233,11 @@ func applyGuardrail(ctx context.Context, tx pgx.Tx, p access.Principal, g Guardr
 	if err != nil {
 		return err
 	}
-	local := Guardrail{Configuration: configuration, TimeoutMS: g.TimeoutMS, OnError: g.OnError}
-	if current != nil && current.Name == g.Name && current.Type == g.Type && equal(Guardrail{Configuration: current.Configuration, TimeoutMS: current.TimeoutMS, OnError: current.OnError}, local) {
+	reused, err := reusable(current, g, configuration)
+	if err != nil {
+		return err
+	}
+	if reused {
 		if current.ActiveRevisionID != nil && *current.ActiveRevisionID == current.RevisionID {
 			return nil
 		}
@@ -247,6 +248,17 @@ func applyGuardrail(ctx context.Context, tx pgx.Tx, p access.Principal, g Guardr
 		return err
 	}
 	return guardrails.ActivateRevision(ctx, tx, p.UserID(), saved.ID, saved.RevisionID)
+}
+
+func reusable(current *guardrails.Definition, g Guardrail, configuration json.RawMessage) (bool, error) {
+	if current == nil || current.Name != g.Name || current.Type != g.Type {
+		return false, nil
+	}
+	stored, err := rewriteCredentials(current.Type, current.Configuration, func(id string) (string, error) { return id, nil })
+	if err != nil {
+		return false, err
+	}
+	return equal(Guardrail{Configuration: stored, TimeoutMS: current.TimeoutMS, OnError: current.OnError}, Guardrail{Configuration: configuration, TimeoutMS: g.TimeoutMS, OnError: g.OnError}), nil
 }
 
 func owner(directory project.Directory, name string) (string, bool) {
@@ -281,12 +293,4 @@ func canonical(raw json.RawMessage) ([]byte, bool) {
 	}
 	encoded, err := json.Marshal(value)
 	return encoded, err == nil
-}
-
-func dereference[T any](pointer *T) T {
-	if pointer == nil {
-		var zero T
-		return zero
-	}
-	return *pointer
 }

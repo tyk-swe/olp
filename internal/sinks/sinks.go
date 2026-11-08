@@ -33,7 +33,7 @@ func ValidateAndNormalizeSinks(s *promotion.Server, doc *promotion.Document) err
 		if e.Project != nil {
 			value := strings.TrimSpace(*e.Project)
 			e.Project = &value
-			if !promotion.GuardrailLabel(value) {
+			if !promotion.ValidLabel(value) {
 				return access.Invalid("sinks.project", "Use an owning project name.")
 			}
 		}

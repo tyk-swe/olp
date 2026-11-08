@@ -41,11 +41,7 @@ func Result(digest string, items []Item) contract.ConfigurationPlanResponse {
 }
 
 func collect(items []Item, keep func(contract.ConfigurationPlanItemAction) bool) []contract.ConfigurationPlanItem {
-	return append([]contract.ConfigurationPlanItem{}, slices.Collect(func(yield func(contract.ConfigurationPlanItem) bool) {
-		for _, item := range items {
-			if keep(item.Action) && !yield(contract.ConfigurationPlanItem{Kind: item.Kind, Key: item.Key, Action: item.Action, Detail: item.Detail}) {
-				return
-			}
-		}
-	})...)
+	return Map(Filter(items, func(item Item) bool { return keep(item.Action) }), func(item Item) contract.ConfigurationPlanItem {
+		return contract.ConfigurationPlanItem{Kind: item.Kind, Key: item.Key, Action: item.Action, Detail: item.Detail}
+	})
 }

@@ -37,7 +37,7 @@ func (s *Server) CredentialEquals(ctx context.Context, q access.Queryer, credent
 	return sha256.Sum256(current) == sha256.Sum256([]byte(secret)), nil
 }
 
-func ExternalCredentialEquals(ctx context.Context, q access.Queryer, credentialID string, reference secretstore.Reference) (bool, error) {
+func (s *Server) ExternalCredentialEquals(ctx context.Context, q access.Queryer, credentialID string, reference secretstore.Reference) (bool, error) {
 	var data []byte
 	err := q.QueryRow(ctx, "SELECT external_reference FROM olp.provider_credentials WHERE id=$1 AND revoked_at IS NULL", credentialID).Scan(&data)
 	if errors.Is(err, pgx.ErrNoRows) {

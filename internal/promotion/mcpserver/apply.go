@@ -2,7 +2,7 @@ package mcpserver
 
 import (
 	"context"
-	"encoding/json"
+	"fmt"
 	"slices"
 
 	"github.com/jackc/pgx/v5"
@@ -15,7 +15,7 @@ import (
 
 type credential struct {
 	id       *string
-	replaced json.RawMessage
+	replaced bool
 }
 
 func Applier(servers []Server, bindings promotion.Bindings, prepared Prepared, keys Keys) promotion.Applier {
@@ -27,7 +27,7 @@ func Applier(servers []Server, bindings promotion.Bindings, prepared Prepared, k
 		if err != nil {
 			return err
 		}
-		changed, err := collect(servers, func(_ int, server Server) (bool, error) {
+		changed, err := promotion.TryMap(servers, func(server Server) (bool, error) {
 			return apply(ctx, tx, p, directory, bindings, prepared, keys, server)
 		})
 		if err != nil || !slices.Contains(changed, true) {
@@ -41,7 +41,7 @@ func Applier(servers []Server, bindings promotion.Bindings, prepared Prepared, k
 func apply(ctx context.Context, tx pgx.Tx, p access.Principal, directory project.Directory, bindings promotion.Bindings, prepared Prepared, keys Keys, server Server) (bool, error) {
 	projectID, ok := directory.ID(server.Project)
 	if !ok {
-		return false, pgx.ErrNoRows
+		return false, fmt.Errorf("mcp server project %q is missing", server.Project)
 	}
 	if err := p.Project(&projectID, access.Change); err != nil {
 		return false, err
@@ -72,8 +72,9 @@ func save(ctx context.Context, tx pgx.Tx, p access.Principal, bindings promotion
 	if err != nil {
 		return err
 	}
+	retainEntra := registration.CanRetainEntraClientSecret(existing, flat.oauth)
 	next := registration.Definition{
-		EntraClientSecretID: retained(existing, registration.CanRetainEntraClientSecret(existing, flat.oauth), func(d registration.Definition) *string { return d.EntraClientSecretID }),
+		EntraClientSecretID: retained(existing, retainEntra, func(d registration.Definition) *string { return d.EntraClientSecretID }),
 		DelegationKeyID:     retained(existing, flat.delegation != nil, func(d registration.Definition) *string { return d.DelegationKeyID }),
 		Delegation:          flat.delegation, OAuth: flat.oauth, Stdio: flat.stdio,
 		ProjectID: projectID, Name: server.Name, Transport: string(flat.transport), Endpoint: flat.endpoint, Enabled: server.Enabled,
@@ -84,12 +85,12 @@ func save(ctx context.Context, tx pgx.Tx, p access.Principal, bindings promotion
 	if _, err := registration.Save(ctx, tx, p.UserID(), existing, next); err != nil {
 		return err
 	}
-	return registration.DeleteReplacedCredentials(ctx, tx, registration.Input{OAuth: flat.oauth, Delegation: flat.delegation, Credential: bearer.replaced}, existing, false)
+	return registration.DeleteReplacedCredentials(ctx, tx, existing, registration.Replaced{Credential: bearer.replaced, Delegation: flat.delegation == nil, EntraClient: !retainEntra})
 }
 
 func credentialOf(ctx context.Context, tx pgx.Tx, bindings promotion.Bindings, keys Keys, flat wire, existing *registration.Definition) (credential, error) {
 	if flat.bearer == nil {
-		return credential{replaced: json.RawMessage("null")}, nil
+		return credential{replaced: true}, nil
 	}
 	sealed, bound := bindings[*flat.bearer].(promotion.Sealed)
 	if !bound {
@@ -99,8 +100,7 @@ func credentialOf(ctx context.Context, tx pgx.Tx, bindings promotion.Bindings, k
 	if err := keys.store(ctx, tx, id, sealed.Secret); err != nil {
 		return credential{}, err
 	}
-	encoded, err := json.Marshal(sealed.Secret)
-	return credential{id: &id, replaced: encoded}, err
+	return credential{id: &id, replaced: true}, nil
 }
 
 func retained(existing *registration.Definition, keep bool, id func(registration.Definition) *string) *string {

@@ -23,26 +23,26 @@ func Upgrade(document contract.ConfigurationDocument) (contract.ConfigurationDoc
 	if document.ApiVersion != contract.OpenllmproxyDevconfigv1 {
 		return document, nil
 	}
-	if len(valueOf(document.GuardrailPolicies)) > 0 || len(valueOf(document.GuardrailAttachments)) > 0 {
+	if len(promotion.ValueOf(document.GuardrailPolicies)) > 0 || len(promotion.ValueOf(document.GuardrailAttachments)) > 0 {
 		return contract.ConfigurationDocument{}, access.Invalid("guardrails", "Version 1 cannot mix new guardrail policies with legacy content policies.")
 	}
-	if slices.ContainsFunc(valueOf(document.Guardrails), func(g contract.ConfigurationGuardrail) bool { return g.Configuration != nil }) {
+	if slices.ContainsFunc(promotion.ValueOf(document.Guardrails), func(g contract.ConfigurationGuardrail) bool { return g.Configuration != nil }) {
 		return contract.ConfigurationDocument{}, access.Invalid("guardrails", "Version 1 cannot contain typed guardrail configuration.")
 	}
-	definitions, err := collect(valueOf(document.Guardrails), upgradeGuardrail)
+	definitions, err := promotion.TryMap(promotion.ValueOf(document.Guardrails), upgradeGuardrail)
 	if err != nil {
 		return contract.ConfigurationDocument{}, err
 	}
-	routes, err := collect(document.Routes, upgradeRoute)
+	routes, err := promotion.TryMap(document.Routes, upgradeRoute)
 	if err != nil {
 		return contract.ConfigurationDocument{}, err
 	}
 	upgraded := document
 	upgraded.ApiVersion = contract.OpenllmproxyDevconfigv2
-	upgraded.Routes = mapped(document.Routes, withoutContentPolicy)
-	upgraded.Guardrails = present(slices.Concat(append([][]contract.ConfigurationGuardrail{definitions}, mapped(routes, func(c converted) []contract.ConfigurationGuardrail { return c.guardrails })...)...))
-	upgraded.GuardrailPolicies = present(slices.Concat(mapped(routes, func(c converted) []contract.ConfigurationGuardrailPolicyEntry { return c.policies })...))
-	upgraded.GuardrailAttachments = present(slices.Concat(mapped(routes, func(c converted) []contract.ConfigurationGuardrailAttachment { return c.attachments })...))
+	upgraded.Routes = promotion.Map(document.Routes, withoutContentPolicy)
+	upgraded.Guardrails = promotion.Optional(slices.Concat(definitions, slices.Concat(promotion.Map(routes, func(c converted) []contract.ConfigurationGuardrail { return c.guardrails })...)))
+	upgraded.GuardrailPolicies = promotion.Optional(slices.Concat(promotion.Map(routes, func(c converted) []contract.ConfigurationGuardrailPolicyEntry { return c.policies })...))
+	upgraded.GuardrailAttachments = promotion.Optional(slices.Concat(promotion.Map(routes, func(c converted) []contract.ConfigurationGuardrailAttachment { return c.attachments })...))
 	return upgraded, nil
 }
 
@@ -53,7 +53,7 @@ func refuseLegacy(document contract.ConfigurationDocument) error {
 	}) {
 		return access.Invalid("content_policy", "Use version 2 guardrail definitions, policies and attachments.")
 	}
-	if slices.ContainsFunc(valueOf(document.Guardrails), func(g contract.ConfigurationGuardrail) bool { return g.Policy != nil }) {
+	if slices.ContainsFunc(promotion.ValueOf(document.Guardrails), func(g contract.ConfigurationGuardrail) bool { return g.Policy != nil }) {
 		return access.Invalid("guardrails", "Use typed configuration in version 2.")
 	}
 	return nil
@@ -63,8 +63,8 @@ func upgradeGuardrail(g contract.ConfigurationGuardrail) (contract.Configuration
 	if g.Policy == nil {
 		return g, nil
 	}
-	rules := mapped(g.Policy.Rules, func(r contract.ContentPolicyRule) contentpolicy.Rule {
-		return contentpolicy.Rule{ID: r.Id, Phase: string(r.Phase), Pattern: r.Pattern, Action: string(r.Action), Replacement: dereference(r.Replacement)}
+	rules := promotion.Map(g.Policy.Rules, func(r contract.ContentPolicyRule) contentpolicy.Rule {
+		return contentpolicy.Rule{ID: r.Id, Phase: string(r.Phase), Pattern: r.Pattern, Action: string(r.Action), Replacement: promotion.ValueOf(r.Replacement)}
 	})
 	if contentpolicy.Validate(&contentpolicy.Policy{Rules: rules}) != nil {
 		return contract.ConfigurationGuardrail{}, access.Invalid("guardrails", "Use valid bounded RE2 block or redact rules.")
@@ -102,18 +102,18 @@ func legacyRoute(slug, project string, raw json.RawMessage, overallMS int64) (co
 	name := bounded("route." + slug + ".content")
 	definition := func(r contentpolicy.Rule) string { return bounded(name + "." + r.ID) }
 	return converted{
-		guardrails: mapped(policy.Rules, func(r contentpolicy.Rule) contract.ConfigurationGuardrail {
+		guardrails: promotion.Map(policy.Rules, func(r contentpolicy.Rule) contract.ConfigurationGuardrail {
 			return regexGuardrail(project, definition(r), contract.ConfigurationGuardrailTypeBuiltinRegex, []contentpolicy.Rule{r}, min(1000, overallMS))
 		}),
-		policies: []contract.ConfigurationGuardrailPolicyEntry{{Name: name, Project: project, Entries: mapped(policy.Rules, func(r contentpolicy.Rule) rule {
-			return rule{Action: contract.ConfigurationGuardrailPolicyEntryEntriesAction(r.Action), Guardrail: definition(r), Mandatory: when(true), Phase: contract.ConfigurationGuardrailPolicyEntryEntriesPhase(r.Phase)}
+		policies: []contract.ConfigurationGuardrailPolicyEntry{{Name: name, Project: project, Entries: promotion.Map(policy.Rules, func(r contentpolicy.Rule) rule {
+			return rule{Action: contract.ConfigurationGuardrailPolicyEntryEntriesAction(r.Action), Guardrail: definition(r), Mandatory: new(true), Phase: contract.ConfigurationGuardrailPolicyEntryEntriesPhase(r.Phase)}
 		})}},
-		attachments: []contract.ConfigurationGuardrailAttachment{{Scope: contract.ConfigurationGuardrailAttachmentScopeRoute, Name: filled(slug), Project: filled(project), Policy: name, PolicyProject: project}},
+		attachments: []contract.ConfigurationGuardrailAttachment{{Scope: contract.ConfigurationGuardrailAttachmentScopeRoute, Name: promotion.NonZero(slug), Project: promotion.NonZero(project), Policy: name, PolicyProject: project}},
 	}, nil
 }
 
 func regexGuardrail(project, name string, kind contract.ConfigurationGuardrailType, rules []contentpolicy.Rule, timeoutMS int64) contract.ConfigurationGuardrail {
-	configuration := map[string]any{"rules": mapped(rules, func(r contentpolicy.Rule) map[string]any {
+	configuration := map[string]any{"rules": promotion.Map(rules, func(r contentpolicy.Rule) map[string]any {
 		return map[string]any{"id": r.ID, "pattern": r.Pattern, "replacement": r.Replacement}
 	})}
 	onError := contract.ConfigurationGuardrailOnError(guardrails.FailClosed)
@@ -121,14 +121,14 @@ func regexGuardrail(project, name string, kind contract.ConfigurationGuardrailTy
 }
 
 func parseConverted(c converted) (Section, error) {
-	definitions, err := collect(c.guardrails, parseGuardrail)
+	definitions, err := promotion.TryMap(c.guardrails, parseGuardrail)
 	if err != nil {
 		return Section{}, err
 	}
-	attachments := mapped(c.attachments, func(a contract.ConfigurationGuardrailAttachment) Attachment {
-		return Attachment{Scope: Route{dereference(a.Name)}, Policy: PolicyRef{a.PolicyProject, a.Policy}, Order: a.Order}
+	attachments := promotion.Map(c.attachments, func(a contract.ConfigurationGuardrailAttachment) Attachment {
+		return Attachment{Scope: Route{promotion.ValueOf(a.Name)}, Policy: PolicyRef{a.PolicyProject, a.Policy}, Order: a.Order}
 	})
-	return Section{Guardrails: definitions, Policies: mapped(c.policies, parsePolicy), Attachments: attachments}, nil
+	return Section{Guardrails: definitions, Policies: promotion.Map(c.policies, parsePolicy), Attachments: attachments}, nil
 }
 
 func bounded(name string) string {

@@ -51,7 +51,7 @@ func Prepare(ctx context.Context, pool access.Queryer, p access.Principal, serve
 	if err != nil {
 		return Prepared{}, err
 	}
-	certifications, err := collect(servers, func(_ int, server Server) (certification, error) {
+	certifications, err := promotion.TryMap(servers, func(server Server) (certification, error) {
 		return prepare(ctx, pool, p, bindings, deps, current(active, directory, server), server)
 	})
 	if err != nil {

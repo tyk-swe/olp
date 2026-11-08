@@ -2,7 +2,6 @@ package pricing
 
 import (
 	"context"
-	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -62,8 +61,8 @@ func ownerKey(owner Owner) string {
 }
 
 func parseCards(entries []contract.ConfigurationRateCardEntry) ([]RateCard, error) {
-	cards := slices.Collect(mapped(entries, parseCard))
-	first := firstIndex(cards, func(card RateCard) Owner { return foldedOwner(card.Owner) })
+	cards := promotion.Map(entries, parseCard)
+	first := promotion.FirstIndex(cards, func(card RateCard) Owner { return foldedOwner(card.Owner) })
 	for i, card := range cards {
 		if err := validateCard(i, entries[i], card, first[foldedOwner(card.Owner)] != i); err != nil {
 			return nil, err
@@ -76,16 +75,16 @@ func parseCard(entry contract.ConfigurationRateCardEntry) RateCard {
 	return RateCard{
 		Owner:  parseOwner(entry.Owner),
 		Markup: strings.TrimSpace(entry.Markup),
-		Prices: slices.Collect(mapped(valueOf(entry.Prices), func(price contract.ConfigurationPriceEntry) usage.Price { return parsePrice(price).Rate })),
+		Prices: promotion.Map(promotion.ValueOf(entry.Prices), func(price contract.ConfigurationPriceEntry) usage.Price { return parsePrice(price).Rate }),
 	}
 }
 
 func parseOwner(owner contract.ConfigurationRateCardOwner) Owner {
 	switch owner.Kind {
 	case contract.ConfigurationRateCardOwnerKindOrganization:
-		return Organization{Name: strings.TrimSpace(valueOf(owner.Organization))}
+		return Organization{Name: strings.TrimSpace(promotion.ValueOf(owner.Organization))}
 	case contract.ConfigurationRateCardOwnerKindProject:
-		return Project{Name: strings.TrimSpace(valueOf(owner.Project))}
+		return Project{Name: strings.TrimSpace(promotion.ValueOf(owner.Project))}
 	default:
 		return Installation{}
 	}
@@ -102,7 +101,7 @@ func validateCard(i int, entry contract.ConfigurationRateCardEntry, card RateCar
 	if duplicate {
 		return access.Invalid(field+".owner", "The document owns this card twice.")
 	}
-	if j := slices.IndexFunc(valueOf(entry.Prices), func(price contract.ConfigurationPriceEntry) bool { return optional(price.Provider) != nil }); j >= 0 {
+	if j := slices.IndexFunc(promotion.ValueOf(entry.Prices), func(price contract.ConfigurationPriceEntry) bool { return promotion.Pointer(price.Provider) != nil }); j >= 0 {
 		return access.Invalid(field+".prices."+strconv.Itoa(j)+".provider", "Rate card prices cannot scope a provider.")
 	}
 	return nil
@@ -160,13 +159,13 @@ func readCards(ctx context.Context, q access.Queryer) ([]storedCard, error) {
 	if priceErr != nil {
 		return nil, priceErr
 	}
-	return slices.Collect(mapped(cards, func(card row) storedCard {
+	return promotion.Map(cards, func(card row) storedCard {
 		return storedCard{
 			id:   card.id,
 			live: card.revision != nil,
-			card: RateCard{Owner: storedOwner(card.organization, card.project), Markup: valueOf(card.markup), Prices: prices[valueOf(card.revision)]},
+			card: RateCard{Owner: storedOwner(card.organization, card.project), Markup: promotion.ValueOf(card.markup), Prices: prices[promotion.ValueOf(card.revision)]},
 		}
-	})), nil
+	}), nil
 }
 
 func storedOwner(organization, project *string) Owner {
@@ -181,21 +180,15 @@ func storedOwner(organization, project *string) Owner {
 }
 
 func liveCards(stored []storedCard) []RateCard {
-	return slices.Collect(func(yield func(RateCard) bool) {
-		for _, card := range stored {
-			if card.live && !yield(card.card) {
-				return
-			}
-		}
-	})
+	return promotion.Map(promotion.Filter(stored, func(card storedCard) bool { return card.live }), func(card storedCard) RateCard { return card.card })
 }
 
 func renderCards(cards []RateCard) []contract.ConfigurationRateCardEntry {
 	sorted := slices.SortedFunc(slices.Values(cards), func(a, b RateCard) int { return strings.Compare(ownerKey(a.Owner), ownerKey(b.Owner)) })
-	return slices.Collect(mapped(sorted, func(card RateCard) contract.ConfigurationRateCardEntry {
+	return promotion.Map(sorted, func(card RateCard) contract.ConfigurationRateCardEntry {
 		prices := unscoped(card.Prices)
-		return contract.ConfigurationRateCardEntry{Owner: renderOwner(card.Owner), Markup: card.Markup, Prices: nonNil(renderPrices(prices), len(prices) > 0)}
-	}))
+		return contract.ConfigurationRateCardEntry{Owner: renderOwner(card.Owner), Markup: card.Markup, Prices: promotion.Optional(renderPrices(prices))}
+	})
 }
 
 func renderOwner(owner Owner) contract.ConfigurationRateCardOwner {
@@ -210,25 +203,19 @@ func renderOwner(owner Owner) contract.ConfigurationRateCardOwner {
 }
 
 func unscoped(prices []usage.Price) []Price {
-	return slices.Collect(mapped(prices, func(rate usage.Price) Price { return Price{Rate: rate} }))
+	return promotion.Map(prices, func(rate usage.Price) Price { return Price{Rate: rate} })
 }
 
 func indexCards(stored []storedCard) map[Owner]storedCard {
-	return maps.Collect(func(yield func(Owner, storedCard) bool) {
-		for _, card := range stored {
-			if !yield(foldedOwner(card.card.Owner), card) {
-				return
-			}
-		}
-	})
+	return promotion.Index(stored, func(card storedCard) Owner { return foldedOwner(card.card.Owner) })
 }
 
 func cardAction(card RateCard, existing map[Owner]storedCard, currency string) contract.ConfigurationPlanItemAction {
 	current, exists := existing[foldedOwner(card.Owner)]
 	switch {
-	case !exists || !current.live:
+	case !exists:
 		return contract.ConfigurationPlanItemActionCreate
-	case decimalEqual(card.Markup, current.card.Markup) && len(card.Prices) == len(current.card.Prices) &&
+	case current.live && decimalEqual(card.Markup, current.card.Markup) && len(card.Prices) == len(current.card.Prices) &&
 		samePrices(unscoped(card.Prices), unscoped(current.card.Prices), currency):
 		return contract.ConfigurationPlanItemActionNoop
 	default:
@@ -250,9 +237,9 @@ func planCards(ctx context.Context, q access.Queryer, desired []RateCard) ([]pro
 	if err != nil {
 		return nil, err
 	}
-	return slices.Collect(mapped(desired, func(card RateCard) promotion.Item {
+	return promotion.Map(desired, func(card RateCard) promotion.Item {
 		return promotion.Item{Kind: contract.ConfigurationPlanItemKindRateCard, Key: ownerKey(card.Owner), Action: cardAction(card, existing, currency)}
-	})), nil
+	}), nil
 }
 
 func applyCards(ctx context.Context, tx pgx.Tx, principal access.Principal, desired []RateCard, at destination, vendorKind VendorKind) error {

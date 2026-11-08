@@ -41,11 +41,11 @@ func Parse(document contract.ConfigurationDocument) (Desired, error) {
 	if err != nil {
 		return Desired{}, err
 	}
-	discounts, discountErr := parseDiscounts(valueOf(document.Discounts))
+	discounts, discountErr := parseDiscounts(promotion.ValueOf(document.Discounts))
 	if discountErr != nil {
 		return Desired{}, discountErr
 	}
-	cards, cardErr := parseCards(valueOf(document.RateCards))
+	cards, cardErr := parseCards(promotion.ValueOf(document.RateCards))
 	if cardErr != nil {
 		return Desired{}, cardErr
 	}
@@ -75,14 +75,13 @@ func Read(ctx context.Context, q access.Queryer) (Desired, error) {
 func Render(state Desired) Fragment {
 	return Fragment{
 		Pricing:   promotion.Nullable(renderPricing(state.Pricing)),
-		Discounts: nonNil(renderDiscounts(state.Discounts), len(state.Discounts) > 0),
-		RateCards: nonNil(renderCards(state.RateCards), len(state.RateCards) > 0),
+		Discounts: promotion.Optional(renderDiscounts(state.Discounts)),
+		RateCards: promotion.Optional(renderCards(state.RateCards)),
 	}
 }
 
 func Planner(desired Desired, names promotion.Names) promotion.Planner {
 	return promotion.Planner{
-		Authorize: func(context.Context, access.Queryer, access.Principal) error { return nil },
 		Plan: func(ctx context.Context, q access.Queryer) ([]promotion.Item, error) {
 			destination, err := readDestination(ctx, q)
 			if err != nil {
@@ -132,7 +131,7 @@ func parsePricing(value nullable.Nullable[contract.ConfigurationPricingEntry]) (
 	if len(entry.Prices) > maxPrices {
 		return nil, access.Invalid("pricing.prices", "Declare at most "+strconv.Itoa(maxPrices)+" prices.")
 	}
-	return &Pricing{EffectiveAt: entry.EffectiveAt, Prices: slices.Collect(mapped(entry.Prices, parsePrice))}, nil
+	return &Pricing{EffectiveAt: entry.EffectiveAt, Prices: promotion.Map(entry.Prices, parsePrice)}, nil
 }
 
 func readPricing(ctx context.Context, q access.Queryer, providers directory) (*Pricing, error) {
@@ -142,9 +141,9 @@ func readPricing(ctx context.Context, q access.Queryer, providers directory) (*P
 	}
 	return &Pricing{
 		EffectiveAt: revisions[0].EffectiveAt,
-		Prices: slices.Collect(mapped(revisions[0].Prices, func(price usage.Price) Price {
+		Prices: promotion.Map(revisions[0].Prices, func(price usage.Price) Price {
 			return Price{Provider: providers.nameOf(price.ProviderID), Rate: scoped(price, nil)}
-		})),
+		}),
 	}, nil
 }
 
@@ -206,9 +205,9 @@ func resolvePrices(prices []Price, providers directory) ([]usage.Price, error) {
 	if i := slices.IndexFunc(prices, func(price Price) bool { return !providers.resolves(price.Provider) }); i >= 0 {
 		return nil, undeclaredPrice(i)
 	}
-	return slices.Collect(mapped(prices, func(price Price) usage.Price {
+	return promotion.Map(prices, func(price Price) usage.Price {
 		return scoped(price.Rate, providers.idOf(price.Provider))
-	})), nil
+	}), nil
 }
 
 func rebased(effectiveAt, now time.Time) time.Time {

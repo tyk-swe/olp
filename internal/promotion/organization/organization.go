@@ -3,7 +3,6 @@ package organization
 import (
 	"cmp"
 	"context"
-	"maps"
 	"slices"
 	"strings"
 
@@ -35,21 +34,13 @@ func Parse(document contract.ConfigurationDocument) ([]Organization, error) {
 	if err := validate(declared); err != nil {
 		return nil, err
 	}
-	return slices.SortedFunc(func(yield func(Organization) bool) {
-		for _, organization := range declared {
-			if !yield(Organization{Name: strings.TrimSpace(organization.Name), Budget: authority.NormalizedBudget(organization.Budget)}) {
-				return
-			}
-		}
-	}, byName), nil
+	return slices.SortedFunc(slices.Values(promotion.Map(declared, func(organization Organization) Organization {
+		return Organization{Name: strings.TrimSpace(organization.Name), Budget: authority.NormalizedBudget(organization.Budget)}
+	})), byName), nil
 }
 
 func Read(ctx context.Context, q access.Queryer) ([]Organization, error) {
-	rows, err := q.Query(ctx, "SELECT name,budget_policy FROM olp.organizations")
-	if err != nil {
-		return nil, err
-	}
-	organizations, err := pgx.CollectRows(rows, pgx.RowToStructByPos[Organization])
+	organizations, err := promotion.Rows(ctx, q, pgx.RowToStructByPos[Organization], "SELECT name,budget_policy FROM olp.organizations")
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +59,9 @@ func Render(organizations []Organization) (*[]contract.ConfigurationOrganization
 }
 
 func validate(organizations []Organization) error {
-	first := firstIndex(organizations)
+	first := promotion.FirstIndex(organizations, func(organization Organization) string {
+		return strings.ToLower(strings.TrimSpace(organization.Name))
+	})
 	for i, organization := range organizations {
 		name := strings.TrimSpace(organization.Name)
 		if err := access.ValidText("organizations", name, 100); err != nil {
@@ -82,16 +75,6 @@ func validate(organizations []Organization) error {
 		}
 	}
 	return nil
-}
-
-func firstIndex(organizations []Organization) map[string]int {
-	return maps.Collect(func(yield func(string, int) bool) {
-		for i, organization := range slices.Backward(organizations) {
-			if !yield(strings.ToLower(strings.TrimSpace(organization.Name)), i) {
-				return
-			}
-		}
-	})
 }
 
 func byName(a, b Organization) int {

@@ -3,7 +3,7 @@ package identity
 import (
 	"context"
 	"net/http"
-	"slices"
+	"reflect"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
@@ -12,90 +12,86 @@ import (
 	"github.com/tyk-swe/olp/internal/promotion"
 )
 
-func parseSAML(fragment nullable.Nullable[contract.ConfigurationSAML]) error {
+func parseSAML(fragment nullable.Nullable[contract.ConfigurationSAML]) (*access.SAMLDefinition, error) {
 	declared, ok := promotion.Present(fragment)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	definition, err := promotion.Convert[access.SAMLDefinition](declared)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return access.ValidateSAMLDefinition(definition)
+	if err := access.ValidateSAMLDefinition(definition); err != nil {
+		return nil, err
+	}
+	return &definition, nil
 }
 
-func readSAML(ctx context.Context, q access.Queryer) (nullable.Nullable[contract.ConfigurationSAML], error) {
+func readSAML(ctx context.Context, q access.Queryer) (*access.SAMLDefinition, error) {
 	definition, ok, err := access.ReadSAMLDefinition(ctx, q)
 	if !ok {
-		return nullable.Nullable[contract.ConfigurationSAML]{}, err
+		return nil, err
 	}
-	rendered, err := promotion.Convert[contract.ConfigurationSAML](definition)
+	return &definition, nil
+}
+
+func renderSAML(definition *access.SAMLDefinition) (nullable.Nullable[contract.ConfigurationSAML], error) {
+	if definition == nil {
+		return nullable.Nullable[contract.ConfigurationSAML]{}, nil
+	}
+	rendered, err := promotion.Convert[contract.ConfigurationSAML](*definition)
 	if err != nil {
 		return nullable.Nullable[contract.ConfigurationSAML]{}, err
 	}
 	return nullable.NewNullableWithValue(rendered), nil
 }
 
-type samlChange struct {
-	definition access.SAMLDefinition
-	exists     bool
-	same       bool
-}
-
-func compareSAML(ctx context.Context, q access.Queryer, declared contract.ConfigurationSAML) (samlChange, error) {
-	definition, err := promotion.Convert[access.SAMLDefinition](declared)
-	if err != nil {
-		return samlChange{}, err
-	}
-	current, exists, err := access.ReadSAMLDefinition(ctx, q)
-	if err != nil {
-		return samlChange{}, err
-	}
-	return samlChange{definition: definition, exists: exists, same: exists && sameSAML(current, definition)}, nil
-}
-
-func planSAML(ctx context.Context, q access.Queryer, desired nullable.Nullable[contract.ConfigurationSAML]) ([]promotion.Item, error) {
-	declared, ok := promotion.Present(desired)
-	if !ok {
+func planSAML(ctx context.Context, q access.Queryer, desired *access.SAMLDefinition) ([]promotion.Item, error) {
+	if desired == nil {
 		return nil, nil
 	}
-	change, err := compareSAML(ctx, q, declared)
+	current, exists, err := access.ReadSAMLDefinition(ctx, q)
 	if err != nil {
 		return nil, err
 	}
 	return []promotion.Item{{
 		Kind:   contract.ConfigurationPlanItemKindSaml,
 		Key:    "saml",
-		Action: action(change.exists, change.same),
+		Action: action(exists, exists && sameSAML(current, *desired)),
 		Detail: "Identity trust is portable; signing material and linked identities stay local.",
 	}}, nil
 }
 
-func SAMLApplier(d Desired, deps Deps) promotion.Applier {
+func SAMLApplier(desired Desired, deps Deps, request *http.Request) promotion.Applier {
 	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
-		declared, ok := promotion.Present(d.saml)
-		if !ok {
+		if desired.saml == nil {
 			return nil
 		}
-		change, err := compareSAML(ctx, tx, declared)
-		if err != nil || change.same {
+		current, exists, err := access.ReadSAMLDefinition(ctx, tx)
+		if err != nil || exists && sameSAML(current, *desired.saml) {
 			return err
 		}
-		stored, err := deps.Access.StoreSAMLDefinition(ctx, tx, p, change.definition, false)
+		stored, err := deps.Access.StoreSAMLDefinition(ctx, tx, p, *desired.saml, false)
 		if err != nil {
 			return err
 		}
-		return access.Audit(ctx, tx, (&http.Request{}).WithContext(ctx), p.Actor(), "saml.configuration.update", "saml_configuration", stored.ID, "success")
+		return access.Audit(ctx, tx, request, p.Actor(), "saml.configuration.update", "saml_configuration", stored.ID, "success")
 	}
 }
 
 func sameSAML(a, b access.SAMLDefinition) bool {
-	return a.Enabled == b.Enabled &&
-		a.Metadata == b.Metadata &&
-		a.EmailAttribute == b.EmailAttribute &&
-		a.GroupsAttribute == b.GroupsAttribute &&
-		a.NameAttribute == b.NameAttribute &&
-		samePointer(a.DefaultRole, b.DefaultRole) &&
-		slices.Equal(a.EmailMappings, b.EmailMappings) &&
-		slices.Equal(a.GroupMappings, b.GroupMappings)
+	return reflect.DeepEqual(canonicalSAML(a), canonicalSAML(b))
+}
+
+func canonicalSAML(d access.SAMLDefinition) access.SAMLDefinition {
+	return access.SAMLDefinition{
+		Enabled:         d.Enabled,
+		Metadata:        d.Metadata,
+		EmailAttribute:  d.EmailAttribute,
+		GroupsAttribute: d.GroupsAttribute,
+		NameAttribute:   d.NameAttribute,
+		DefaultRole:     d.DefaultRole,
+		EmailMappings:   promotion.NonNil(d.EmailMappings),
+		GroupMappings:   promotion.NonNil(d.GroupMappings),
+	}
 }

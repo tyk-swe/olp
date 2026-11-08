@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
@@ -62,28 +61,18 @@ func parseTemplates(entries *[]contract.ConfigurationTemplateEntry) ([]Template,
 	if err != nil {
 		return nil, err
 	}
-	first := firstIndex(declared, func(t Template) string { return t.Name })
-	return each(declared, func(i int, t Template) (Template, error) {
+	first := promotion.FirstIndex(declared, func(t Template) string { return t.Name })
+	return promotion.TryMapIndex(declared, func(i int, t Template) (Template, error) {
 		field := "templates." + strconv.Itoa(i)
 		if first[t.Name] != i {
 			return Template{}, access.Invalid(field+".name", "Template names must be unique.")
 		}
 		parsed, err := normalized(t)
 		if err != nil {
-			return Template{}, withFieldPrefix(err, field)
+			return Template{}, promotion.WithFieldPrefix(err, field)
 		}
 		return parsed, nil
 	})
-}
-
-func withFieldPrefix(err error, prefix string) error {
-	if validation, ok := errors.AsType[*keyauthority.ValidationError](err); ok {
-		return &keyauthority.ValidationError{Field: prefix + "." + validation.Field, Detail: validation.Detail}
-	}
-	if problem, ok := errors.AsType[*access.Problem](err); ok && problem.Field != "" {
-		return &access.Problem{Status: problem.Status, Code: problem.Code, Detail: problem.Detail, Field: prefix + "." + problem.Field}
-	}
-	return err
 }
 
 func readTemplates(ctx context.Context, q access.Queryer) ([]Template, error) {
@@ -170,7 +159,7 @@ func TemplateApplier(desired Desired) promotion.Applier {
 		if err != nil {
 			return err
 		}
-		return every(desired.Templates, func(_ int, t Template) error {
+		return promotion.Every(desired.Templates, func(t Template) error {
 			projectID, err := projectIDOf(directory, t.Project)
 			if err != nil {
 				return err

@@ -53,10 +53,10 @@ func (s *Server) storeCredentialInput(ctx context.Context, tx pgx.Tx, providerID
 	if reference == nil {
 		return s.StoreCredential(ctx, tx, providerID, *plain)
 	}
-	return StoreExternalCredential(ctx, tx, providerID, *reference)
+	return s.StoreExternalCredential(ctx, tx, providerID, *reference)
 }
 
-func StoreExternalCredential(ctx context.Context, tx pgx.Tx, providerID string, reference secretstore.Reference) (string, int, error) {
+func (s *Server) StoreExternalCredential(ctx context.Context, tx pgx.Tx, providerID string, reference secretstore.Reference) (string, int, error) {
 	data, err := json.Marshal(reference)
 	if err != nil {
 		return "", 0, err

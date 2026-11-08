@@ -163,7 +163,17 @@ func (s *Server) saveChange(ctx context.Context, tx pgx.Tx, actor string, in Inp
 	return registrationChange{id: saved.ID, etag: saved.ETag, action: action}, nil
 }
 
-func DeleteReplacedCredentials(ctx context.Context, tx pgx.Tx, in Input, current *Definition, retire bool) error {
+type Replaced struct{ Credential, Delegation, EntraClient bool }
+
+func replacedBy(in Input, retire bool) Replaced {
+	return Replaced{
+		Credential:  retire || len(in.Credential) != 0,
+		Delegation:  retire || in.Delegation == nil || in.DelegationPrivateKey != nil,
+		EntraClient: retire || in.OAuth == nil || in.OAuth.EntraOBO == nil || in.EntraClientSecret != nil,
+	}
+}
+
+func DeleteReplacedCredentials(ctx context.Context, tx pgx.Tx, current *Definition, replaced Replaced) error {
 	if current == nil {
 		return nil
 	}
@@ -172,9 +182,9 @@ func DeleteReplacedCredentials(ctx context.Context, tx pgx.Tx, in Input, current
 		replace bool
 		purpose secrets.SealPurpose
 	}{
-		{current.CredentialID, retire || len(in.Credential) != 0, secrets.MCPCredential},
-		{current.DelegationKeyID, retire || in.Delegation == nil || in.DelegationPrivateKey != nil, secrets.MCPDelegationSigning},
-		{current.EntraClientSecretID, retire || in.OAuth == nil || in.OAuth.EntraOBO == nil || in.EntraClientSecret != nil, secrets.MCPEntraClient},
+		{current.CredentialID, replaced.Credential, secrets.MCPCredential},
+		{current.DelegationKeyID, replaced.Delegation, secrets.MCPDelegationSigning},
+		{current.EntraClientSecretID, replaced.EntraClient, secrets.MCPEntraClient},
 	} {
 		if credential.id == nil || !credential.replace {
 			continue

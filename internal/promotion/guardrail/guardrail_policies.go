@@ -117,7 +117,7 @@ func ValidateGuardrailPolicies(doc *promotion.Document) error {
 	}
 	for _, p := range doc.GuardrailPolicies {
 		key := portableKey(p.Project, p.Name)
-		if _, ok := policies[key]; ok || !promotion.GuardrailLabel(p.Name) || len(p.Entries) > guardrails.MaxEntries {
+		if _, ok := policies[key]; ok || !promotion.ValidLabel(p.Name) || len(p.Entries) > guardrails.MaxEntries {
 			return access.Invalid("guardrail_policies", "Use unique bounded policy names and ordered entries.")
 		}
 		entries := []guardrails.Entry{}

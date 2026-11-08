@@ -12,12 +12,13 @@ import (
 )
 
 func Parse(document contract.ConfigurationDocument, policy *egress.Policy) ([]Publication, error) {
-	entries := valueOf(document.AgentPublications)
+	entries := promotion.ValueOf(document.AgentPublications)
 	if len(entries) > maxPublications {
 		return nil, access.Invalid("agent_publications", "Declare at most 512 publications.")
 	}
-	publications, err := collect(entries, func(index int, entry contract.ConfigurationAgentPublication) (Publication, error) {
-		return parseEntry(entry, entries[:index], policy)
+	first := promotion.FirstIndex(entries, entryKey)
+	publications, err := promotion.TryMapIndex(entries, func(index int, entry contract.ConfigurationAgentPublication) (Publication, error) {
+		return parseEntry(entry, first[entryKey(entry)] != index, policy)
 	})
 	if err != nil {
 		return nil, err
@@ -25,9 +26,9 @@ func Parse(document contract.ConfigurationDocument, policy *egress.Policy) ([]Pu
 	return slices.SortedFunc(slices.Values(publications), byKey), nil
 }
 
-func parseEntry(entry contract.ConfigurationAgentPublication, prior []contract.ConfigurationAgentPublication, policy *egress.Policy) (Publication, error) {
+func parseEntry(entry contract.ConfigurationAgentPublication, duplicate bool, policy *egress.Policy) (Publication, error) {
 	key := entryKey(entry)
-	if !promotion.GuardrailLabel(entry.Project) || slices.ContainsFunc(prior, func(other contract.ConfigurationAgentPublication) bool { return entryKey(other) == key }) {
+	if !promotion.ValidLabel(entry.Project) || duplicate {
 		return Publication{}, access.Invalid("agent_publications", "Use unique owning project/kind/name identities.")
 	}
 	draft, err := promotion.Convert[agentcontract.Draft](entry.Draft)
@@ -38,7 +39,7 @@ func parseEntry(entry contract.ConfigurationAgentPublication, prior []contract.C
 	if err != nil {
 		return Publication{}, err
 	}
-	labels, err := promotion.Convert[map[string]agentcontract.Draft](valueOf(entry.Labels))
+	labels, err := promotion.Convert[map[string]agentcontract.Draft](promotion.ValueOf(entry.Labels))
 	if err != nil {
 		return Publication{}, err
 	}
@@ -119,24 +120,4 @@ func nonEmpty[K comparable, V any](values map[K]V) map[K]V {
 		return nil
 	}
 	return values
-}
-
-func valueOf[T any](pointer *T) T {
-	if pointer == nil {
-		var zero T
-		return zero
-	}
-	return *pointer
-}
-
-func collect[A, B any](values []A, convert func(int, A) (B, error)) ([]B, error) {
-	converted := make([]B, 0, len(values))
-	for index, value := range values {
-		next, err := convert(index, value)
-		if err != nil {
-			return nil, err
-		}
-		converted = append(converted, next)
-	}
-	return converted, nil
 }

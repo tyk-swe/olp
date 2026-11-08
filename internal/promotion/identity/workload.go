@@ -22,52 +22,42 @@ const (
 	unknownProject     = "Every mapping must reference a declared or existing project."
 )
 
-type Prepared struct{ issuers []preparedIssuer }
+type Prepared struct{ etags map[string]string }
 
-type preparedIssuer struct {
-	entry contract.ConfigurationWorkloadIssuer
-	etag  string
-}
+type preparedIssuer struct{ issuer, etag string }
 
 type storedIssuer struct {
 	id, etag string
 	config   workload.Config
 }
 
-type catalog struct{ templates, groups map[string]bool }
+type catalog struct {
+	templates contract.LimitTemplates
+	groups    contract.RouteGroups
+}
+
+type storedCatalog struct {
+	id string
+	catalog
+}
 
 func parseWorkload(fragment nullable.Nullable[[]contract.ConfigurationWorkloadIssuer]) ([]contract.ConfigurationWorkloadIssuer, error) {
 	entries, _ := promotion.Present(fragment)
 	if len(entries) > 64 {
 		return nil, access.Invalid("workload_issuers", "Use at most 64 issuers.")
 	}
-	if !unique(entries, func(issuer contract.ConfigurationWorkloadIssuer) string { return issuer.Issuer }) {
+	if _, repeated := promotion.FirstRepeat(entries, func(issuer contract.ConfigurationWorkloadIssuer) string { return issuer.Issuer }); repeated {
 		return nil, access.Invalid("workload_issuers", "Issuer URLs must be unique.")
 	}
-	issuers := mapped(entries, trimmedProjects)
-	if err := firstError(issuers, validIssuer); err != nil {
+	if err := promotion.Every(entries, validIssuer); err != nil {
 		return nil, err
 	}
-	return issuers, nil
-}
-
-func trimmedProjects(issuer contract.ConfigurationWorkloadIssuer) contract.ConfigurationWorkloadIssuer {
-	return contract.ConfigurationWorkloadIssuer{
-		Algorithms: issuer.Algorithms, Audiences: issuer.Audiences, DisabledKeyIds: issuer.DisabledKeyIds, Enabled: issuer.Enabled,
-		Issuer: issuer.Issuer, JwksUrl: issuer.JwksUrl, MaxLifetimeSeconds: issuer.MaxLifetimeSeconds, Name: issuer.Name,
-		Mappings: mapped(issuer.Mappings, func(m contract.ConfigurationWorkloadMapping) contract.ConfigurationWorkloadMapping {
-			return contract.ConfigurationWorkloadMapping{
-				AgentPrincipal: m.AgentPrincipal, AllowProviderState: m.AllowProviderState, AllowedAgents: m.AllowedAgents,
-				AllowedToolsets: m.AllowedToolsets, EndUserClaim: m.EndUserClaim, LimitTemplate: m.LimitTemplate, Match: m.Match,
-				Name: m.Name, Project: strings.TrimSpace(m.Project), RouteGroups: m.RouteGroups, Scopes: m.Scopes,
-			}
-		}),
-	}
+	return entries, nil
 }
 
 func validIssuer(issuer contract.ConfigurationWorkloadIssuer) error {
-	if err := firstError(issuer.Mappings, func(m contract.ConfigurationWorkloadMapping) error {
-		return access.ValidText("workload_issuers", m.Project, 100)
+	if err := promotion.Every(issuer.Mappings, func(m contract.ConfigurationWorkloadMapping) error {
+		return access.ValidText("workload_issuers", strings.TrimSpace(m.Project), 100)
 	}); err != nil {
 		return err
 	}
@@ -75,15 +65,11 @@ func validIssuer(issuer contract.ConfigurationWorkloadIssuer) error {
 }
 
 func readWorkload(ctx context.Context, q access.Queryer, directory project.Directory) ([]contract.ConfigurationWorkloadIssuer, error) {
-	rows, err := q.Query(ctx, "SELECT document FROM olp.workload_issuers ORDER BY issuer")
+	configs, err := promotion.Rows(ctx, q, pgx.RowTo[workload.Config], "SELECT document FROM olp.workload_issuers ORDER BY issuer")
 	if err != nil {
 		return nil, err
 	}
-	configs, err := pgx.CollectRows(rows, pgx.RowTo[workload.Config])
-	if err != nil {
-		return nil, err
-	}
-	return collected(configs, func(config workload.Config) (contract.ConfigurationWorkloadIssuer, error) {
+	return promotion.TryMap(configs, func(config workload.Config) (contract.ConfigurationWorkloadIssuer, error) {
 		return entryOf(config, directory)
 	})
 }
@@ -106,7 +92,7 @@ func planWorkload(ctx context.Context, q access.Queryer, d Desired) ([]promotion
 	if err != nil {
 		return nil, err
 	}
-	return collected(d.issuers, func(issuer contract.ConfigurationWorkloadIssuer) (promotion.Item, error) {
+	return promotion.TryMap(d.issuers, func(issuer contract.ConfigurationWorkloadIssuer) (promotion.Item, error) {
 		if detail, found := issuerProblem(issuer, directory, catalogs, d.declared); found {
 			return promotion.Conflict(contract.ConfigurationPlanItemKindWorkloadIssuer, issuer.Issuer, detail), nil
 		}
@@ -124,12 +110,8 @@ func planIssuer(ctx context.Context, q access.Queryer, issuer contract.Configura
 	if !exists {
 		return issuerItem(issuer, contract.ConfigurationPlanItemActionCreate), nil
 	}
-	bindings := access.ValidateWorkloadBindings(ctx, q, current.id, config)
-	if problem, ok := errors.AsType[*access.Problem](bindings); ok {
-		return promotion.Conflict(contract.ConfigurationPlanItemKindWorkloadIssuer, issuer.Issuer, problem.Detail), nil
-	}
-	if bindings != nil {
-		return promotion.Item{}, bindings
+	if err := access.ValidateWorkloadBindings(ctx, q, current.id, config); err != nil {
+		return promotion.Item{}, err
 	}
 	return issuerItem(issuer, action(true, sameConfig(current.config, config))), nil
 }
@@ -154,7 +136,7 @@ func issuerProblem(issuer contract.ConfigurationWorkloadIssuer, directory projec
 
 func mappingProblem(enabled bool, mapping contract.ConfigurationWorkloadMapping, directory project.Directory, catalogs map[string]catalog, declared map[string]contract.ConfigurationProjectEntry) (string, bool) {
 	id, exists := directory.ID(mapping.Project)
-	entry, isDeclared := declared[folded(mapping.Project)]
+	entry, isDeclared := declared[promotion.Fold(mapping.Project)]
 	if !exists && !isDeclared {
 		return unknownProject, true
 	}
@@ -162,10 +144,13 @@ func mappingProblem(enabled bool, mapping contract.ConfigurationWorkloadMapping,
 		return "", false
 	}
 	available := effective(catalogs[id], entry, isDeclared)
-	if !available.templates[mapping.LimitTemplate] {
+	if _, ok := available.templates[mapping.LimitTemplate]; !ok {
 		return "A mapping template is absent from its project.", true
 	}
-	if slices.ContainsFunc(mapping.RouteGroups, func(group string) bool { return !available.groups[group] }) {
+	if slices.ContainsFunc(mapping.RouteGroups, func(group string) bool {
+		_, ok := available.groups[group]
+		return !ok
+	}) {
 		return "A mapping route group is absent from its project.", true
 	}
 	return "", false
@@ -178,32 +163,21 @@ func effective(stored catalog, entry contract.ConfigurationProjectEntry, declare
 	groups, _ := promotion.Present(entry.RouteGroups)
 	templates, ok := promotion.Present(entry.LimitTemplates)
 	if !ok {
-		return catalog{templates: stored.templates, groups: keys(groups)}
+		return catalog{templates: stored.templates, groups: groups}
 	}
-	return catalog{templates: keys(templates), groups: keys(groups)}
+	return catalog{templates: templates, groups: groups}
 }
 
 func readCatalogs(ctx context.Context, q access.Queryer) (map[string]catalog, error) {
-	rows, err := q.Query(ctx, "SELECT id::text,limit_templates,route_groups FROM olp.projects")
+	projects, err := promotion.Rows(ctx, q, func(row pgx.CollectableRow) (storedCatalog, error) {
+		var stored storedCatalog
+		err := row.Scan(&stored.id, &stored.templates, &stored.groups)
+		return stored, err
+	}, "SELECT id::text,limit_templates,route_groups FROM olp.projects")
 	if err != nil {
 		return nil, err
 	}
-	type row struct {
-		id        string
-		templates contract.LimitTemplates
-		groups    contract.RouteGroups
-	}
-	projects, err := pgx.CollectRows(rows, func(scanned pgx.CollectableRow) (row, error) {
-		var r row
-		err := scanned.Scan(&r.id, &r.templates, &r.groups)
-		return r, err
-	})
-	if err != nil {
-		return nil, err
-	}
-	return indexed(projects, func(r row) (string, catalog) {
-		return r.id, catalog{templates: keys(r.templates), groups: keys(r.groups)}
-	}), nil
+	return promotion.Associate(projects, func(stored storedCatalog) (string, catalog) { return stored.id, stored.catalog }), nil
 }
 
 func readIssuer(ctx context.Context, q access.Queryer, query, issuer string) (storedIssuer, bool, error) {
@@ -217,19 +191,25 @@ func readIssuer(ctx context.Context, q access.Queryer, query, issuer string) (st
 
 func (d Desired) NeedsPrepare() bool { return len(d.issuers) > 0 }
 
-func Prepare(ctx context.Context, d Desired, deps Deps) (Prepared, error) {
-	issuers, err := collected(d.issuers, func(issuer contract.ConfigurationWorkloadIssuer) (preparedIssuer, error) {
+func Prepare(ctx context.Context, desired Desired, principal access.Principal, deps Deps) (Prepared, error) {
+	if err := Authorize(desired, principal); err != nil {
+		return Prepared{}, err
+	}
+	issuers, err := promotion.TryMap(desired.issuers, func(issuer contract.ConfigurationWorkloadIssuer) (preparedIssuer, error) {
 		return prepareIssuer(ctx, deps, issuer)
 	})
-	return Prepared{issuers: issuers}, err
+	if err != nil {
+		return Prepared{}, err
+	}
+	return Prepared{etags: promotion.Associate(issuers, func(p preparedIssuer) (string, string) { return p.issuer, p.etag })}, nil
 }
 
 func prepareIssuer(ctx context.Context, deps Deps, issuer contract.ConfigurationWorkloadIssuer) (preparedIssuer, error) {
-	current, exists, err := readIssuer(ctx, deps.Pool, selectIssuer, issuer.Issuer)
+	current, exists, err := readIssuer(ctx, deps.Access.Pool, selectIssuer, issuer.Issuer)
 	if err != nil {
 		return preparedIssuer{}, err
 	}
-	prepared := preparedIssuer{entry: issuer, etag: current.etag}
+	prepared := preparedIssuer{issuer: issuer.Issuer, etag: current.etag}
 	if !issuer.Enabled || exists && current.config.Enabled && current.config.JWKSURL == issuer.JwksUrl {
 		return prepared, nil
 	}
@@ -239,40 +219,39 @@ func prepareIssuer(ctx context.Context, deps Deps, issuer contract.Configuration
 	return prepared, nil
 }
 
-func WorkloadApplier(prepared Prepared, deps Deps) promotion.Applier {
+func WorkloadApplier(desired Desired, prepared Prepared, deps Deps) promotion.Applier {
 	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
-		if len(prepared.issuers) == 0 {
+		if len(desired.issuers) == 0 {
 			return nil
 		}
 		directory, err := project.ReadDirectory(ctx, tx)
 		if err != nil {
 			return err
 		}
-		return firstError(prepared.issuers, func(issuer preparedIssuer) error {
-			return applyIssuer(ctx, tx, p, deps, directory, issuer)
+		return promotion.Every(desired.issuers, func(issuer contract.ConfigurationWorkloadIssuer) error {
+			etag, ok := prepared.etags[issuer.Issuer]
+			return applyIssuer(ctx, tx, p, deps, directory, issuer, etag, ok)
 		})
 	}
 }
 
-func applyIssuer(ctx context.Context, tx pgx.Tx, p access.Principal, deps Deps, directory project.Directory, issuer preparedIssuer) error {
-	current, exists, err := readIssuer(ctx, tx, selectIssuer+" FOR UPDATE", issuer.entry.Issuer)
+func applyIssuer(ctx context.Context, tx pgx.Tx, p access.Principal, deps Deps, directory project.Directory, issuer contract.ConfigurationWorkloadIssuer, etag string, prepared bool) error {
+	current, exists, err := readIssuer(ctx, tx, selectIssuer+" FOR UPDATE", issuer.Issuer)
 	if err != nil {
 		return err
 	}
-	if current.etag != issuer.etag {
+	if !prepared || current.etag != etag {
 		return access.Fail(409, "configuration_changed", "Workload trust changed during endpoint validation; plan and retry.")
 	}
-	if slices.ContainsFunc(issuer.entry.Mappings, func(m contract.ConfigurationWorkloadMapping) bool { return lookup(directory, m.Project) == "" }) {
+	if slices.ContainsFunc(issuer.Mappings, func(m contract.ConfigurationWorkloadMapping) bool { return lookup(directory, m.Project) == "" }) {
 		return access.Invalid("workload_issuers", unknownProject)
 	}
-	config := configOf(issuer.entry, func(name string) string { return lookup(directory, name) })
+	config := configOf(issuer, func(name string) string { return lookup(directory, name) })
 	if exists && sameConfig(current.config, config) {
 		return nil
 	}
-	if _, err := deps.Access.StoreWorkloadIssuer(ctx, tx, p, issuerID(current, exists), config, !exists); err != nil {
-		return err
-	}
-	return nil
+	_, stored := deps.Access.StoreWorkloadIssuer(ctx, tx, p, issuerID(current, exists), config, !exists)
+	return stored
 }
 
 func issuerID(current storedIssuer, exists bool) string {

@@ -79,7 +79,7 @@ func ValidateMCPServers(s *promotion.Server, doc *promotion.Document) error {
 		e.Name, e.Project = strings.TrimSpace(e.Name), strings.TrimSpace(e.Project)
 		key := promotion.MCPKey(*e)
 		digest, err := hex.DecodeString(e.CatalogDigest)
-		if !promotion.GuardrailLabel(e.Project) || seen[key] || !routing.MCPTransport(e.Transport).Valid() || err != nil || len(digest) != 32 || strings.ToLower(e.CatalogDigest) != e.CatalogDigest {
+		if !promotion.ValidLabel(e.Project) || seen[key] || !routing.MCPTransport(e.Transport).Valid() || err != nil || len(digest) != 32 || strings.ToLower(e.CatalogDigest) != e.CatalogDigest {
 			return access.Invalid("mcp_servers", "Use unique project/name pairs, a supported MCP transport and a certified catalog digest.")
 		}
 		seen[key] = true

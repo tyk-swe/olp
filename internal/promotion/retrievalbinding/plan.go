@@ -28,7 +28,7 @@ func Planner(desired Desired) promotion.Planner {
 		if err != nil {
 			return nil, err
 		}
-		return collect(desired.Bindings, func(binding Binding) (promotion.Item, error) {
+		return promotion.TryMap(desired.Bindings, func(binding Binding) (promotion.Item, error) {
 			return planBinding(ctx, q, directory, desired.stages[key(binding)], binding)
 		})
 	}}

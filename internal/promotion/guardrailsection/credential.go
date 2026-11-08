@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/promotion"
+	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -20,15 +21,19 @@ type Vault struct {
 
 func CredentialApplier(desired Section, bindings promotion.Bindings, vault Vault) promotion.Applier {
 	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
-		return each(kept(desired.Guardrails, func(g Guardrail) bool { return len(g.credentials) > 0 }), func(g Guardrail) error {
-			project, err := projectID(ctx, tx, g.Project)
+		directory, err := project.ReadDirectory(ctx, tx)
+		if err != nil {
+			return err
+		}
+		return promotion.Every(promotion.Filter(desired.Guardrails, func(g Guardrail) bool { return len(g.credentials) > 0 }), func(g Guardrail) error {
+			project, err := projectID(directory, g.Project)
 			if err != nil {
 				return err
 			}
 			if err := p.Project(project, access.Change); err != nil {
 				return err
 			}
-			return each(g.credentials, func(r reference) error { return ensureCredential(ctx, tx, p, vault, bindings[r.ref], project, r.ref) })
+			return promotion.Every(g.credentials, func(r reference) error { return ensureCredential(ctx, tx, p, vault, bindings[r.ref], project, r.ref) })
 		})
 	}
 }

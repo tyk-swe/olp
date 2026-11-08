@@ -2,9 +2,8 @@ package identity
 
 import (
 	"maps"
-	"slices"
+	"reflect"
 
-	"github.com/oapi-codegen/nullable"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
@@ -20,12 +19,12 @@ func configOf(issuer contract.ConfigurationWorkloadIssuer, projectID func(string
 		JWKSURL:            issuer.JwksUrl,
 		Enabled:            issuer.Enabled,
 		Audiences:          issuer.Audiences,
-		Algorithms:         mapped(issuer.Algorithms, func(a contract.ConfigurationWorkloadIssuerAlgorithms) string { return string(a) }),
+		Algorithms:         promotion.Map(issuer.Algorithms, func(a contract.ConfigurationWorkloadIssuerAlgorithms) string { return string(a) }),
 		MaxLifetimeSeconds: int64(issuer.MaxLifetimeSeconds),
 		DisabledKeyIDs:     issuer.DisabledKeyIds,
-		Mappings: mapped(issuer.Mappings, func(m contract.ConfigurationWorkloadMapping) workload.Mapping {
+		Mappings: promotion.Map(issuer.Mappings, func(m contract.ConfigurationWorkloadMapping) workload.Mapping {
 			return workload.Mapping{
-				AgentPrincipal:     m.AgentPrincipal != nil && *m.AgentPrincipal,
+				AgentPrincipal:     promotion.ValueOf(m.AgentPrincipal),
 				Name:               m.Name,
 				Match:              m.Match,
 				ProjectID:          projectID(m.Project),
@@ -33,23 +32,23 @@ func configOf(issuer contract.ConfigurationWorkloadIssuer, projectID func(string
 				RouteGroups:        m.RouteGroups,
 				AllowedToolsets:    identifiers(m.AllowedToolsets),
 				AllowedAgents:      identifiers(m.AllowedAgents),
-				Scopes:             mapped(m.Scopes, func(s contract.ConfigurationWorkloadMappingScopes) string { return string(s) }),
-				EndUserClaim:       optional(m.EndUserClaim),
-				AllowProviderState: m.AllowProviderState != nil && *m.AllowProviderState,
+				Scopes:             promotion.Map(m.Scopes, func(s contract.ConfigurationWorkloadMappingScopes) string { return string(s) }),
+				EndUserClaim:       promotion.Pointer(m.EndUserClaim),
+				AllowProviderState: promotion.ValueOf(m.AllowProviderState),
 			}
 		}),
 	}
 }
 
 func entryOf(config workload.Config, directory project.Directory) (contract.ConfigurationWorkloadIssuer, error) {
-	mappings, err := collected(config.Mappings, func(m workload.Mapping) (contract.ConfigurationWorkloadMapping, error) {
+	mappings, err := promotion.TryMap(config.Mappings, func(m workload.Mapping) (contract.ConfigurationWorkloadMapping, error) {
 		return mappingEntry(m, directory)
 	})
 	if err != nil {
 		return contract.ConfigurationWorkloadIssuer{}, err
 	}
 	return contract.ConfigurationWorkloadIssuer{
-		Algorithms: mapped(config.Algorithms, func(a string) contract.ConfigurationWorkloadIssuerAlgorithms {
+		Algorithms: promotion.Map(config.Algorithms, func(a string) contract.ConfigurationWorkloadIssuerAlgorithms {
 			return contract.ConfigurationWorkloadIssuerAlgorithms(a)
 		}),
 		Audiences:          config.Audiences,
@@ -77,7 +76,7 @@ func mappingEntry(m workload.Mapping, directory project.Directory) (contract.Con
 		return contract.ConfigurationWorkloadMapping{}, err
 	}
 	return contract.ConfigurationWorkloadMapping{
-		AgentPrincipal:     enabled(m.AgentPrincipal),
+		AgentPrincipal:     promotion.NonZero(m.AgentPrincipal),
 		AllowProviderState: &m.AllowProviderState,
 		AllowedAgents:      agents,
 		AllowedToolsets:    toolsets,
@@ -87,41 +86,49 @@ func mappingEntry(m workload.Mapping, directory project.Directory) (contract.Con
 		Name:               m.Name,
 		Project:            name,
 		RouteGroups:        m.RouteGroups,
-		Scopes: mapped(m.Scopes, func(s string) contract.ConfigurationWorkloadMappingScopes {
+		Scopes: promotion.Map(m.Scopes, func(s string) contract.ConfigurationWorkloadMappingScopes {
 			return contract.ConfigurationWorkloadMappingScopes(s)
 		}),
 	}, nil
 }
 
 func sameConfig(a, b workload.Config) bool {
-	return a.Name == b.Name &&
-		a.Issuer == b.Issuer &&
-		a.JWKSURL == b.JWKSURL &&
-		a.Enabled == b.Enabled &&
-		slices.Equal(a.Audiences, b.Audiences) &&
-		slices.Equal(a.Algorithms, b.Algorithms) &&
-		a.MaxLifetimeSeconds == b.MaxLifetimeSeconds &&
-		slices.Equal(a.DisabledKeyIDs, b.DisabledKeyIDs) &&
-		slices.EqualFunc(a.Mappings, b.Mappings, sameMapping)
+	return reflect.DeepEqual(canonicalConfig(a), canonicalConfig(b))
 }
 
-func sameMapping(a, b workload.Mapping) bool {
-	return a.AgentPrincipal == b.AgentPrincipal &&
-		a.Name == b.Name &&
-		maps.Equal(a.Match, b.Match) &&
-		a.ProjectID == b.ProjectID &&
-		a.LimitTemplate == b.LimitTemplate &&
-		slices.Equal(a.RouteGroups, b.RouteGroups) &&
-		slices.Equal(a.AllowedToolsets, b.AllowedToolsets) &&
-		slices.Equal(a.AllowedAgents, b.AllowedAgents) &&
-		slices.Equal(a.Scopes, b.Scopes) &&
-		samePointer(a.EndUserClaim, b.EndUserClaim) &&
-		a.AllowProviderState == b.AllowProviderState
+func canonicalConfig(c workload.Config) workload.Config {
+	return workload.Config{
+		Name:               c.Name,
+		Issuer:             c.Issuer,
+		JWKSURL:            c.JWKSURL,
+		Enabled:            c.Enabled,
+		Audiences:          promotion.NonNil(c.Audiences),
+		Algorithms:         promotion.NonNil(c.Algorithms),
+		MaxLifetimeSeconds: c.MaxLifetimeSeconds,
+		DisabledKeyIDs:     promotion.NonNil(c.DisabledKeyIDs),
+		Mappings:           promotion.Map(c.Mappings, canonicalMapping),
+	}
+}
+
+func canonicalMapping(m workload.Mapping) workload.Mapping {
+	return workload.Mapping{
+		AgentPrincipal:     m.AgentPrincipal,
+		Name:               m.Name,
+		Match:              maps.Collect(maps.All(m.Match)),
+		ProjectID:          m.ProjectID,
+		LimitTemplate:      m.LimitTemplate,
+		RouteGroups:        promotion.NonNil(m.RouteGroups),
+		AllowedToolsets:    promotion.NonNil(m.AllowedToolsets),
+		AllowedAgents:      promotion.NonNil(m.AllowedAgents),
+		Scopes:             promotion.NonNil(m.Scopes),
+		EndUserClaim:       m.EndUserClaim,
+		AllowProviderState: m.AllowProviderState,
+	}
 }
 
 func declaredProjects(projects []contract.ConfigurationProjectEntry) map[string]contract.ConfigurationProjectEntry {
-	return indexed(projects, func(entry contract.ConfigurationProjectEntry) (string, contract.ConfigurationProjectEntry) {
-		return folded(entry.Name), entry
+	return promotion.Associate(projects, func(entry contract.ConfigurationProjectEntry) (string, contract.ConfigurationProjectEntry) {
+		return promotion.Fold(entry.Name), entry
 	})
 }
 
@@ -129,7 +136,7 @@ func identifiers(values *[]openapi_types.UUID) []string {
 	if values == nil {
 		return nil
 	}
-	return mapped(*values, openapi_types.UUID.String)
+	return promotion.Map(*values, openapi_types.UUID.String)
 }
 
 func uuids(values []string) (*[]openapi_types.UUID, error) {
@@ -138,23 +145,4 @@ func uuids(values []string) (*[]openapi_types.UUID, error) {
 	}
 	parsed, err := promotion.Convert[[]openapi_types.UUID](values)
 	return &parsed, err
-}
-
-func enabled(flag bool) *bool {
-	if !flag {
-		return nil
-	}
-	return &flag
-}
-
-func optional[T any](value nullable.Nullable[T]) *T {
-	present, ok := promotion.Present(value)
-	if !ok {
-		return nil
-	}
-	return &present
-}
-
-func samePointer[T comparable](a, b *T) bool {
-	return a == b || a != nil && b != nil && *a == *b
 }

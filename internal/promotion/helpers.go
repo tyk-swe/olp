@@ -5,14 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"slices"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/secretstore"
-	"slices"
-	"strings"
-	"unicode"
-	"unicode/utf8"
 )
 
 const MaxCredentialRef = 200
@@ -74,10 +72,6 @@ func (s *Server) BindingMatches(ctx context.Context, q access.Queryer, credentia
 	}
 	defer clear(current)
 	return sha256.Sum256(current) == sha256.Sum256([]byte(binding.Secret)), nil
-}
-
-func GuardrailLabel(value string) bool {
-	return utf8.ValidString(value) && utf8.RuneCountInString(value) >= 1 && utf8.RuneCountInString(value) <= 100 && !strings.ContainsFunc(value, unicode.IsControl)
 }
 
 const GrantBindingRefused = "A grant backs this credential slot: enroll a grant for it after applying instead of binding a secret."

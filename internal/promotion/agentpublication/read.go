@@ -33,11 +33,11 @@ type storedLabel struct {
 }
 
 func Read(ctx context.Context, q access.Queryer) ([]Publication, error) {
-	records, err := query[stored](ctx, q, publicationsQuery)
+	records, err := promotion.Rows(ctx, q, pgx.RowToStructByPos[stored], publicationsQuery)
 	if err != nil {
 		return nil, err
 	}
-	labels, err := query[storedLabel](ctx, q, labelsQuery)
+	labels, err := promotion.Rows(ctx, q, pgx.RowToStructByPos[storedLabel], labelsQuery)
 	if err != nil {
 		return nil, err
 	}
@@ -48,14 +48,6 @@ func Read(ctx context.Context, q access.Queryer) ([]Publication, error) {
 			}
 		}
 	}, byKey), nil
-}
-
-func query[T any](ctx context.Context, q access.Queryer, sql string) ([]T, error) {
-	rows, err := q.Query(ctx, sql)
-	if err != nil {
-		return nil, err
-	}
-	return pgx.CollectRows(rows, pgx.RowToStructByPos[T])
 }
 
 func labelsOf(labels []storedLabel, publication string) map[string]agentcontract.Draft {
@@ -125,7 +117,7 @@ func Render(publications []Publication) (*[]contract.ConfigurationAgentPublicati
 	if len(publications) == 0 {
 		return nil, nil
 	}
-	rendered, err := collect(slices.SortedFunc(slices.Values(publications), byKey), func(_ int, publication Publication) (contract.ConfigurationAgentPublication, error) {
+	rendered, err := promotion.TryMap(slices.SortedFunc(slices.Values(publications), byKey), func(publication Publication) (contract.ConfigurationAgentPublication, error) {
 		return renderPublication(publication)
 	})
 	return &rendered, err

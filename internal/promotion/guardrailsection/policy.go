@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
+	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -34,45 +35,54 @@ type catalog struct {
 }
 
 func parsePolicies(declared []contract.ConfigurationGuardrailPolicyEntry, definitions []Guardrail) (catalog, error) {
-	byKey := indexed(definitions, func(g Guardrail) (portable, Guardrail) { return keyOf(g.Project, g.Name), g })
-	list := mapped(declared, parsePolicy)
-	keys := mapped(list, func(p Policy) portable { return keyOf(p.Project, p.Name) })
-	engines, err := collect(positions(list), func(i int) (*guardrails.Engine, error) {
-		return compilePolicy(list[i], slices.Contains(keys[:i], keys[i]), byKey)
+	type compiled struct {
+		key    portable
+		engine *guardrails.Engine
+	}
+	byKey := promotion.Index(definitions, guardrailKey)
+	list := promotion.Map(declared, parsePolicy)
+	first := promotion.FirstIndex(list, policyKey)
+	engines, err := promotion.TryMapIndex(list, func(i int, p Policy) (compiled, error) {
+		key := policyKey(p)
+		engine, err := compilePolicy(p, first[key] != i, byKey)
+		return compiled{key, engine}, err
 	})
 	if err != nil {
 		return catalog{}, err
 	}
-	return catalog{list: list, engines: indexed(positions(list), func(i int) (portable, *guardrails.Engine) { return keys[i], engines[i] })}, nil
+	return catalog{list: list, engines: promotion.Associate(engines, func(c compiled) (portable, *guardrails.Engine) { return c.key, c.engine })}, nil
 }
 
 func parsePolicy(p contract.ConfigurationGuardrailPolicyEntry) Policy {
-	return Policy{Project: p.Project, Name: p.Name, Entries: mapped(positions(p.Entries), func(i int) Entry {
-		e := p.Entries[i]
-		return Entry{Guardrail: e.Guardrail, Phase: string(e.Phase), Action: string(e.Action), Monitor: dereference(e.Monitor), Mandatory: dereference(e.Mandatory)}
+	return Policy{Project: p.Project, Name: p.Name, Entries: promotion.Map(p.Entries, func(e rule) Entry {
+		return Entry{Guardrail: e.Guardrail, Phase: string(e.Phase), Action: string(e.Action), Monitor: promotion.ValueOf(e.Monitor), Mandatory: promotion.ValueOf(e.Mandatory)}
 	})}
 }
 
 func compilePolicy(p Policy, duplicate bool, definitions map[portable]Guardrail) (*guardrails.Engine, error) {
-	if duplicate || !label(p.Name) || len(p.Entries) > guardrails.MaxEntries {
+	if duplicate || !promotion.ValidLabel(p.Name) || len(p.Entries) > guardrails.MaxEntries {
 		return nil, access.Invalid("guardrail_policies", "Use unique bounded policy names and ordered entries.")
 	}
-	resolved, err := collect(p.Entries, func(e Entry) (Guardrail, error) {
+	type resolvedEntry struct {
+		Entry
+		definition Guardrail
+	}
+	resolved, err := promotion.TryMap(p.Entries, func(e Entry) (resolvedEntry, error) {
 		g, ok := definitions[keyOf(p.Project, e.Guardrail)]
 		if !ok {
-			return Guardrail{}, access.Invalid("guardrail_policies", "Declare every referenced guardrail in the policy's project.")
+			return resolvedEntry{}, access.Invalid("guardrail_policies", "Declare every referenced guardrail in the policy's project.")
 		}
-		return g, nil
+		return resolvedEntry{e, g}, nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	revisions := indexed(resolved, func(g Guardrail) (string, guardrails.Revision) {
+	revisions := promotion.Associate(resolved, func(r resolvedEntry) (string, guardrails.Revision) {
+		g := r.definition
 		return g.Name, guardrails.Revision{ID: g.Name, GuardrailID: g.Name, Type: g.Type, Configuration: g.Configuration, TimeoutMS: g.TimeoutMS, OnError: g.OnError}
 	})
-	entries := mapped(positions(p.Entries), func(i int) guardrails.Entry {
-		e := p.Entries[i]
-		return guardrails.Entry{GuardrailID: resolved[i].Name, RevisionID: resolved[i].Name, Phase: e.Phase, Action: e.Action, Monitor: e.Monitor, Mandatory: e.Mandatory}
+	entries := promotion.Map(resolved, func(r resolvedEntry) guardrails.Entry {
+		return guardrails.Entry{GuardrailID: r.definition.Name, RevisionID: r.definition.Name, Phase: r.Phase, Action: r.Action, Monitor: r.Monitor, Mandatory: r.Mandatory}
 	})
 	engine, err := guardrails.Compile(entries, revisions, nil)
 	if err != nil {
@@ -82,13 +92,13 @@ func compilePolicy(p Policy, duplicate bool, definitions map[portable]Guardrail)
 }
 
 func checkRoutes(document contract.ConfigurationDocument, policies catalog, attachments []Attachment) error {
-	organizations := indexed(document.Projects, func(p contract.ConfigurationProjectEntry) (string, string) {
+	organizations := promotion.Associate(document.Projects, func(p contract.ConfigurationProjectEntry) (string, string) {
 		organization, _ := promotion.Present(p.Organization)
 		return strings.ToLower(p.Name), organization
 	})
-	return each(attachments, func(a Attachment) error {
+	return promotion.Every(attachments, func(a Attachment) error {
 		engine := policies.engines[keyOf(a.Policy.Project, a.Policy.Name)]
-		return each(document.Routes, func(route contract.ConfigurationRouteEntry) error {
+		return promotion.Every(document.Routes, func(route contract.ConfigurationRouteEntry) error {
 			project, _ := promotion.Present(route.Project)
 			if !applies(a, route.Slug, project, organizations[strings.ToLower(project)]) {
 				return nil
@@ -141,7 +151,7 @@ func fidelityOf(route contract.ConfigurationRouteEntry) ([]byte, error) {
 }
 
 func renderPolicy(p Policy) contract.ConfigurationGuardrailPolicyEntry {
-	return contract.ConfigurationGuardrailPolicyEntry{Name: p.Name, Project: p.Project, Entries: mapped(p.Entries, toRule)}
+	return contract.ConfigurationGuardrailPolicyEntry{Name: p.Name, Project: p.Project, Entries: promotion.Map(p.Entries, toRule)}
 }
 
 type rule = struct {
@@ -153,21 +163,14 @@ type rule = struct {
 }
 
 func toRule(e Entry) rule {
-	return rule{Action: contract.ConfigurationGuardrailPolicyEntryEntriesAction(e.Action), Guardrail: e.Guardrail, Mandatory: when(e.Mandatory), Monitor: when(e.Monitor), Phase: contract.ConfigurationGuardrailPolicyEntryEntriesPhase(e.Phase)}
-}
-
-func when(flag bool) *bool {
-	if !flag {
-		return nil
-	}
-	return &flag
+	return rule{Action: contract.ConfigurationGuardrailPolicyEntryEntriesAction(e.Action), Guardrail: e.Guardrail, Mandatory: promotion.NonZero(e.Mandatory), Monitor: promotion.NonZero(e.Monitor), Phase: contract.ConfigurationGuardrailPolicyEntryEntriesPhase(e.Phase)}
 }
 
 func planPolicies(desired, current Section) ([]promotion.Item, map[portable]bool) {
-	stored := indexed(current.Policies, func(p Policy) (portable, Policy) { return keyOf(p.Project, p.Name), p })
-	before := indexed(current.Guardrails, func(g Guardrail) (portable, Guardrail) { return keyOf(g.Project, g.Name), g })
-	after := indexed(desired.Guardrails, func(g Guardrail) (portable, Guardrail) { return keyOf(g.Project, g.Name), g })
-	actions := mapped(desired.Policies, func(p Policy) contract.ConfigurationPlanItemAction {
+	stored := promotion.Index(current.Policies, policyKey)
+	before := promotion.Index(current.Guardrails, guardrailKey)
+	after := promotion.Index(desired.Guardrails, guardrailKey)
+	action := func(p Policy) contract.ConfigurationPlanItemAction {
 		old, ok := stored[keyOf(p.Project, p.Name)]
 		if !ok {
 			return contract.ConfigurationPlanItemActionCreate
@@ -176,13 +179,12 @@ func planPolicies(desired, current Section) ([]promotion.Item, map[portable]bool
 			return contract.ConfigurationPlanItemActionRevision
 		}
 		return contract.ConfigurationPlanItemActionReuse
+	}
+	items := promotion.Map(desired.Policies, func(p Policy) promotion.Item {
+		return item(contract.ConfigurationPlanItemKindGuardrailPolicy, p.Project+"/"+p.Name, action(p), "Pin the ordered entries to immutable definition revisions.")
 	})
-	items := mapped(positions(desired.Policies), func(i int) promotion.Item {
-		p := desired.Policies[i]
-		return item(contract.ConfigurationPlanItemKindGuardrailPolicy, p.Project+"/"+p.Name, actions[i], "Pin the ordered entries to immutable definition revisions.")
-	})
-	changed := indexed(positions(desired.Policies), func(i int) (portable, bool) {
-		return keyOf(desired.Policies[i].Project, desired.Policies[i].Name), actions[i] != contract.ConfigurationPlanItemActionReuse
+	changed := promotion.Associate(desired.Policies, func(p Policy) (portable, bool) {
+		return policyKey(p), action(p) != contract.ConfigurationPlanItemActionReuse
 	})
 	return items, changed
 }
@@ -198,15 +200,15 @@ type storedPolicy struct {
 	active   *string
 }
 
-func applyPolicy(ctx context.Context, tx pgx.Tx, p access.Principal, policy Policy) error {
-	project, err := projectID(ctx, tx, policy.Project)
+func applyPolicy(ctx context.Context, tx pgx.Tx, p access.Principal, directory project.Directory, policy Policy) error {
+	project, err := projectID(directory, policy.Project)
 	if err != nil {
 		return err
 	}
 	if err := p.Project(project, access.Change); err != nil {
 		return err
 	}
-	entries, err := collect(policy.Entries, func(e Entry) (guardrails.Entry, error) { return pin(ctx, tx, project, e) })
+	entries, err := promotion.TryMap(policy.Entries, func(e Entry) (guardrails.Entry, error) { return pin(ctx, tx, project, e) })
 	if err != nil {
 		return err
 	}
@@ -249,14 +251,4 @@ func retainedName(current *storedPolicy, name string) string {
 		return name
 	}
 	return current.revision.Name
-}
-
-func positions[A any](values []A) []int {
-	return slices.Collect(func(yield func(int) bool) {
-		for i := range values {
-			if !yield(i) {
-				return
-			}
-		}
-	})
 }

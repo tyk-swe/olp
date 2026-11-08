@@ -3,7 +3,6 @@ package mcpserver
 import (
 	"context"
 	"crypto/subtle"
-	"encoding/json"
 	"reflect"
 	"slices"
 
@@ -47,7 +46,7 @@ func Planner(servers []Server, names promotion.Names, bindings promotion.Binding
 		Claims: slices.Collect(func(yield func(promotion.Claim) bool) {
 			for _, server := range servers {
 				bearer := flatten(server.Transport).bearer
-				if bearer != nil && !yield(promotion.Claim{Ref: *bearer, Accept: acceptBearer}) {
+				if bearer != nil && !yield(promotion.Claim{Ref: *bearer, Accept: promotion.AcceptBearer}) {
 					return
 				}
 			}
@@ -56,19 +55,6 @@ func Planner(servers []Server, names promotion.Names, bindings promotion.Binding
 			return plan(ctx, q, servers, names, bindings, keys)
 		},
 	}
-}
-
-func acceptBearer(credential promotion.Credential) error {
-	return promotion.SealedOnly("Static bearer material uses sealed bindings.", func(secret string) error {
-		encoded, err := json.Marshal(secret)
-		if err != nil {
-			return err
-		}
-		if _, err := secrets.ParseBearer(encoded); err != nil {
-			return access.Invalid("credential", err.Error())
-		}
-		return nil
-	})(credential)
 }
 
 func plan(ctx context.Context, q access.Queryer, servers []Server, names promotion.Names, bindings promotion.Bindings, keys Keys) ([]promotion.Item, error) {
@@ -80,7 +66,7 @@ func plan(ctx context.Context, q access.Queryer, servers []Server, names promoti
 	if err != nil {
 		return nil, err
 	}
-	plans, err := collect(servers, func(_ int, server Server) (planned, error) {
+	plans, err := promotion.TryMap(servers, func(server Server) (planned, error) {
 		return planServer(ctx, q, names, directory, bindings, keys, current(active, directory, server), server)
 	})
 	if err != nil {

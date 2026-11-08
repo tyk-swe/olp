@@ -4,7 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
-	"maps"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
+	"github.com/tyk-swe/olp/internal/promotion/project"
 )
 
 type Section struct {
@@ -32,15 +33,19 @@ func keyOf(project, name string) portable {
 	return portable{strings.ToLower(project), strings.ToLower(name)}
 }
 
+func guardrailKey(g Guardrail) portable { return keyOf(g.Project, g.Name) }
+
+func policyKey(p Policy) portable { return keyOf(p.Project, p.Name) }
+
 func Parse(document contract.ConfigurationDocument) (Section, error) {
 	if err := refuseLegacy(document); err != nil {
 		return Section{}, err
 	}
-	definitions, err := parseGuardrails(valueOf(document.Guardrails))
+	definitions, err := parseGuardrails(promotion.ValueOf(document.Guardrails))
 	if err != nil {
 		return Section{}, err
 	}
-	declared, attached := valueOf(document.GuardrailPolicies), valueOf(document.GuardrailAttachments)
+	declared, attached := promotion.ValueOf(document.GuardrailPolicies), promotion.ValueOf(document.GuardrailAttachments)
 	if len(declared) > 1000 || len(attached) > 10000 {
 		return Section{}, access.Invalid("guardrail_policies", "Too many policies or attachments.")
 	}
@@ -92,7 +97,7 @@ func Read(ctx context.Context, q access.Queryer) (Section, error) {
 }
 
 func Render(section Section) (Fragment, error) {
-	definitions, err := collect(sorted(section.Guardrails, func(g Guardrail) []string {
+	definitions, err := promotion.TryMap(sorted(section.Guardrails, func(g Guardrail) []string {
 		return []string{strings.ToLower(g.Project), strings.ToLower(g.Name), g.Project, g.Name}
 	}), renderGuardrail)
 	if err != nil {
@@ -103,27 +108,27 @@ func Render(section Section) (Fragment, error) {
 	})
 	attachments := slices.SortedFunc(slices.Values(section.Attachments), compareAttachments)
 	return Fragment{
-		Guardrails:           present(definitions),
-		GuardrailPolicies:    present(mapped(policies, renderPolicy)),
-		GuardrailAttachments: present(mapped(attachments, renderAttachment)),
+		Guardrails:           promotion.Optional(definitions),
+		GuardrailPolicies:    promotion.Optional(promotion.Map(policies, renderPolicy)),
+		GuardrailAttachments: promotion.Optional(promotion.Map(attachments, renderAttachment)),
 	}, nil
 }
 
 func merge(sections []Section) Section {
 	return Section{
-		Guardrails:  slices.Concat(mapped(sections, func(s Section) []Guardrail { return s.Guardrails })...),
-		Policies:    slices.Concat(mapped(sections, func(s Section) []Policy { return s.Policies })...),
-		Attachments: slices.Concat(mapped(sections, func(s Section) []Attachment { return s.Attachments })...),
+		Guardrails:  slices.Concat(promotion.Map(sections, func(s Section) []Guardrail { return s.Guardrails })...),
+		Policies:    slices.Concat(promotion.Map(sections, func(s Section) []Policy { return s.Policies })...),
+		Attachments: slices.Concat(promotion.Map(sections, func(s Section) []Attachment { return s.Attachments })...),
 	}
 }
 
-func projectID(ctx context.Context, q access.Queryer, name string) (*string, error) {
+func projectID(directory project.Directory, name string) (*string, error) {
 	if name == "" {
 		return nil, nil
 	}
-	var id string
-	if err := q.QueryRow(ctx, "SELECT id::text FROM olp.projects WHERE lower(name)=lower($1)", name).Scan(&id); err != nil {
-		return nil, err
+	id, ok := directory.ID(name)
+	if !ok {
+		return nil, fmt.Errorf("project %q is not present at the destination", name)
 	}
 	return &id, nil
 }
@@ -146,77 +151,8 @@ func optional[T any](ctx context.Context, q access.Queryer, scan func(pgx.Row) (
 	return &value, nil
 }
 
-func valueOf[T any](pointer *[]T) []T {
-	if pointer == nil {
-		return nil
-	}
-	return *pointer
-}
-
-func present[T any](values []T) *[]T {
-	if len(values) == 0 {
-		return nil
-	}
-	return &values
-}
-
-func collect[A, B any](values []A, convert func(A) (B, error)) ([]B, error) {
-	converted := make([]B, len(values))
-	for i, value := range values {
-		next, err := convert(value)
-		if err != nil {
-			return nil, err
-		}
-		converted[i] = next
-	}
-	return converted, nil
-}
-
-func each[A any](values []A, apply func(A) error) error {
-	for _, value := range values {
-		if err := apply(value); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func mapped[A, B any](values []A, convert func(A) B) []B {
-	return slices.Collect(func(yield func(B) bool) {
-		for _, value := range values {
-			if !yield(convert(value)) {
-				return
-			}
-		}
-	})
-}
-
-func kept[A any](values []A, keep func(A) bool) []A {
-	return slices.Collect(func(yield func(A) bool) {
-		for _, value := range values {
-			if keep(value) && !yield(value) {
-				return
-			}
-		}
-	})
-}
-
-func indexed[A any, K comparable, V any](values []A, entry func(A) (K, V)) map[K]V {
-	return maps.Collect(func(yield func(K, V) bool) {
-		for _, value := range values {
-			if !yield(entry(value)) {
-				return
-			}
-		}
-	})
-}
-
 func sorted[A any](values []A, key func(A) []string) []A {
 	return slices.SortedStableFunc(slices.Values(values), func(a, b A) int { return slices.Compare(key(a), key(b)) })
-}
-
-func duplicated[A any](values []A, key func(A) portable) bool {
-	return len(indexed(values, func(value A) (portable, bool) { return key(value), true })) != len(values)
 }
 
 func compareAttachments(a, b Attachment) int {

@@ -21,7 +21,7 @@ type planning struct {
 }
 
 func Claims(entries []Entry) []promotion.Claim {
-	return slices.Concat(mapSlice(entries, func(_ int, entry Entry) []promotion.Claim {
+	return slices.Concat(promotion.Map(entries, func(entry Entry) []promotion.Claim {
 		return slices.Concat(networkClaims(entry), billingClaims(entry), slotClaims(entry))
 	})...)
 }
@@ -45,7 +45,7 @@ func (p planning) plan(ctx context.Context, q access.Queryer, entries []Entry) (
 	if err != nil {
 		return nil, err
 	}
-	items, err := each(entries, func(_ int, entry Entry) ([]promotion.Item, error) {
+	items, err := promotion.TryMap(entries, func(entry Entry) ([]promotion.Item, error) {
 		existing, found := destinations[strings.ToLower(entry.Name)]
 		return p.planEntry(ctx, q, entry, existing, found, directory)
 	})
@@ -68,13 +68,17 @@ func (p planning) planEntry(ctx context.Context, q access.Queryer, entry Entry, 
 	if err != nil {
 		return nil, err
 	}
+	slots, err := p.slotItems(ctx, q, entry, existing)
+	if err != nil {
+		return nil, err
+	}
 	return slices.Concat(
-		when(unknownProject(entry, directory), promotion.Blocker(contract.ConfigurationPlanItemKindProvider, entry.Name, "project_unknown")),
+		promotion.When(unknownProject(entry, directory), promotion.Blocker(contract.ConfigurationPlanItemKindProvider, entry.Name, "project_unknown")),
 		plugin,
 		[]promotion.Item{provider},
 		networkItems(entry, existing, p.bindings),
 		billing,
-		p.slotItems(ctx, q, entry, existing),
+		slots,
 	), nil
 }
 
@@ -149,29 +153,32 @@ func encoded(entry Entry) ([]byte, error) {
 	return json.Marshal(rendered)
 }
 
-func (p planning) slotItems(ctx context.Context, q access.Queryer, entry Entry, existing destination) []promotion.Item {
-	return mapSlice(slices.DeleteFunc(slices.Clone(entry.Slots), func(slot Slot) bool { return !referenced(slot) }), func(_ int, slot Slot) promotion.Item {
+func (p planning) slotItems(ctx context.Context, q access.Queryer, entry Entry, existing destination) ([]promotion.Item, error) {
+	return promotion.TryMap(slices.DeleteFunc(slices.Clone(entry.Slots), func(slot Slot) bool { return !referenced(slot) }), func(slot Slot) (promotion.Item, error) {
 		return p.slotItem(ctx, q, entry, slot, existing.slots[slot.Name])
 	})
 }
 
-func (p planning) slotItem(ctx context.Context, q access.Queryer, entry Entry, slot Slot, current storedSlot) promotion.Item {
+func (p planning) slotItem(ctx context.Context, q access.Queryer, entry Entry, slot Slot, current storedSlot) (promotion.Item, error) {
 	kind := contract.ConfigurationPlanItemKindCredential
 	ref := SlotRef(entry.Name, slot.Name)
 	if credential, supplied := p.bindings[ref]; supplied {
 		same, err := p.deps.matches(ctx, q, current.credentialID, credential)
-		if err == nil && same {
-			return promotion.Item{Kind: kind, Key: string(ref), Action: contract.ConfigurationPlanItemActionReuse}
+		if err != nil {
+			return promotion.Item{}, err
 		}
-		return promotion.Item{Kind: kind, Key: string(ref), Action: contract.ConfigurationPlanItemActionBind}
+		if same {
+			return promotion.Item{Kind: kind, Key: string(ref), Action: contract.ConfigurationPlanItemActionReuse}, nil
+		}
+		return promotion.Item{Kind: kind, Key: string(ref), Action: contract.ConfigurationPlanItemActionBind}, nil
 	}
 	if current.credentialID != nil && entry.Configuration.Authenticates(current.pluginDigest, current.profileID) {
-		return promotion.Item{Kind: kind, Key: string(ref), Action: contract.ConfigurationPlanItemActionReuse}
+		return promotion.Item{Kind: kind, Key: string(ref), Action: contract.ConfigurationPlanItemActionReuse}, nil
 	}
 	if _, grant := slot.Credential.(Grant); grant {
-		return promotion.Item{Kind: kind, Key: string(ref), Action: contract.ConfigurationPlanItemActionEnroll, Detail: "grant_enrollment_required"}
+		return promotion.Item{Kind: kind, Key: string(ref), Action: contract.ConfigurationPlanItemActionEnroll, Detail: "grant_enrollment_required"}, nil
 	}
-	return promotion.Blocker(kind, string(ref), "secret_binding_required")
+	return promotion.Blocker(kind, string(ref), "secret_binding_required"), nil
 }
 
 func compareItems(a, b promotion.Item) int {

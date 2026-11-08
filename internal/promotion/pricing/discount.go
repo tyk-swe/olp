@@ -2,7 +2,6 @@ package pricing
 
 import (
 	"context"
-	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -32,15 +31,15 @@ func (s scope) key() string {
 }
 
 func parseDiscounts(entries []contract.ConfigurationDiscountEntry) ([]Discount, error) {
-	discounts := slices.Collect(mapped(entries, func(entry contract.ConfigurationDiscountEntry) Discount {
+	discounts := promotion.Map(entries, func(entry contract.ConfigurationDiscountEntry) Discount {
 		return Discount{
 			ProviderKind: strings.TrimSpace(string(entry.ProviderKind)),
-			Provider:     trimmed(entry.Provider),
-			Vendor:       trimmed(entry.VendorId),
+			Provider:     promotion.Trimmed(entry.Provider),
+			Vendor:       promotion.Trimmed(entry.VendorId),
 			Multiplier:   strings.TrimSpace(entry.Multiplier),
 		}
-	}))
-	first := firstIndex(discounts, Discount.scope)
+	})
+	first := promotion.FirstIndex(discounts, Discount.scope)
 	for i, discount := range discounts {
 		if err := validateDiscount(i, discount, first[discount.scope()] != i); err != nil {
 			return nil, err
@@ -83,24 +82,18 @@ func renderDiscounts(discounts []Discount) []contract.ConfigurationDiscountEntry
 	sorted := slices.SortedFunc(slices.Values(discounts), func(a, b Discount) int {
 		return strings.Compare(a.scope().key(), b.scope().key())
 	})
-	return slices.Collect(mapped(sorted, func(discount Discount) contract.ConfigurationDiscountEntry {
+	return promotion.Map(sorted, func(discount Discount) contract.ConfigurationDiscountEntry {
 		return contract.ConfigurationDiscountEntry{
 			ProviderKind: contract.ProviderKind(discount.ProviderKind),
 			Provider:     discount.Provider,
 			VendorId:     discount.Vendor,
 			Multiplier:   discount.Multiplier,
 		}
-	}))
+	})
 }
 
 func multipliers(discounts []Discount) map[scope]string {
-	return maps.Collect(func(yield func(scope, string) bool) {
-		for _, discount := range discounts {
-			if !yield(discount.scope(), discount.Multiplier) {
-				return
-			}
-		}
-	})
+	return promotion.Associate(discounts, func(discount Discount) (scope, string) { return discount.scope(), discount.Multiplier })
 }
 
 func discountAction(discount Discount, inForce map[scope]string) contract.ConfigurationPlanItemAction {
@@ -117,9 +110,9 @@ func planDiscounts(ctx context.Context, q access.Queryer, desired []Discount, pr
 		return nil, err
 	}
 	inForce := multipliers(current)
-	return slices.Collect(mapped(desired, func(discount Discount) promotion.Item {
+	return promotion.Map(desired, func(discount Discount) promotion.Item {
 		return promotion.Item{Kind: contract.ConfigurationPlanItemKindDiscount, Key: discount.scope().key(), Action: discountAction(discount, inForce)}
-	})), nil
+	}), nil
 }
 
 func applyDiscounts(ctx context.Context, tx pgx.Tx, principal access.Principal, desired []Discount, providers directory, vendorKind VendorKind) error {

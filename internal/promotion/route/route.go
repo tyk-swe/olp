@@ -3,13 +3,9 @@ package route
 import (
 	"bytes"
 	"encoding/json"
-	"iter"
-	"maps"
 	"slices"
 	"strconv"
 	"strings"
-
-	"github.com/oapi-codegen/nullable"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
@@ -57,8 +53,7 @@ type Configuration struct {
 
 type Desired struct {
 	Configuration
-	groups   []group
-	projects []string
+	groups []group
 }
 
 type provider struct {
@@ -75,43 +70,38 @@ func Parse(document contract.ConfigurationDocument) (Desired, error) {
 	if err != nil {
 		return Desired{}, err
 	}
-	parsed := slices.Collect(mapped(declared, trimmed))
-	groups, err := parseGroups(document.Projects, parsed)
-	if err != nil {
-		return Desired{}, err
-	}
+	parsed := promotion.Map(declared, trimmed)
 	providers := declaredProviders(document.Providers)
-	first := firstIndex(parsed, slugOf)
-	if err := every(parsed, func(i int, r Route) error { return validate(i, r, first, providers) }); err != nil {
+	first := promotion.FirstIndex(parsed, slugOf)
+	if err := promotion.EveryIndex(parsed, func(i int, r Route) error { return validate(i, r, first, providers) }); err != nil {
 		return Desired{}, err
 	}
 	templates, err := parseTemplates(document.Templates)
 	if err != nil {
 		return Desired{}, err
 	}
-	names := slices.Collect(mapped(document.Projects, func(p contract.ConfigurationProjectEntry) string { return strings.TrimSpace(p.Name) }))
-	return Desired{Configuration: Configuration{Routes: parsed, Templates: templates}, groups: groups, projects: names}, nil
+	return Desired{Configuration: Configuration{Routes: parsed, Templates: templates}, groups: groupsOf(document.Projects)}, nil
 }
 
 func trimmed(r Route) Route {
 	return Route{
-		Behavior: r.Behavior, Slug: strings.TrimSpace(r.Slug), Project: trimmedName(r.Project), Operations: r.Operations,
+		Behavior: r.Behavior, Slug: strings.TrimSpace(r.Slug), Project: promotion.Trimmed(r.Project), Operations: r.Operations,
 		OverallTimeoutMS: r.OverallTimeoutMS, MaxAttempts: r.MaxAttempts, RoutingPolicy: r.RoutingPolicy, ContentPolicy: r.ContentPolicy,
 		Fidelity: r.Fidelity, ExposeUpstreamModels: r.ExposeUpstreamModels, Retired: r.Retired,
-		Targets: slices.Collect(mapped(r.Targets, func(t Target) Target {
+		Targets: promotion.Map(r.Targets, func(t Target) Target {
 			return Target{Provider: strings.TrimSpace(t.Provider), ProviderModel: strings.TrimSpace(t.ProviderModel), Priority: t.Priority, Weight: t.Weight, TimeoutMS: t.TimeoutMS, Tags: t.Tags, Shadow: t.Shadow}
-		})),
+		}),
 	}
 }
 
 func declaredProviders(entries []contract.ConfigurationProviderEntry) map[string]provider {
-	return byKey(slices.Collect(mapped(entries, func(e contract.ConfigurationProviderEntry) provider {
+	return promotion.Index(promotion.Map(entries, func(e contract.ConfigurationProviderEntry) provider {
 		return provider{
 			name:    strings.ToLower(strings.TrimSpace(e.Name)),
-			project: presentName(e.Project),
-			models:  slices.Collect(mapped(e.Models, func(m contract.ConfigurationModelEntry) string { return strings.TrimSpace(m.UpstreamModel) })),
+			project: promotion.Trimmed(promotion.Pointer(e.Project)),
+			models:  promotion.Map(e.Models, func(m contract.ConfigurationModelEntry) string { return strings.TrimSpace(m.UpstreamModel) }),
 		}
-	})), func(p provider) string { return p.name })
+	}), func(p provider) string { return p.name })
 }
 
 func validate(i int, r Route, first map[string]int, providers map[string]provider) error {
@@ -154,7 +144,7 @@ func validate(i int, r Route, first map[string]int, providers map[string]provide
 	if err := validatePassthrough(r, fidelity); err != nil {
 		return err
 	}
-	return every(r.Targets, func(j int, t Target) error { return validateTarget(prefix, j, t, r.Project, providers) })
+	return promotion.EveryIndex(r.Targets, func(j int, t Target) error { return validateTarget(prefix, j, t, r.Project, providers) })
 }
 
 func validatePassthrough(r Route, fidelity routing.RouteFidelity) error {
@@ -164,9 +154,9 @@ func validatePassthrough(r Route, fidelity routing.RouteFidelity) error {
 	}
 	route := routing.Route{
 		Slug: r.Slug, Operations: r.Operations, OverallTimeout: int64(r.OverallTimeoutMS), MaxAttempts: r.MaxAttempts, Fidelity: fidelity, Behavior: r.Behavior, ContentPolicy: policy,
-		Targets: slices.Collect(mapped(r.Targets, func(t Target) routing.Target {
+		Targets: promotion.Map(r.Targets, func(t Target) routing.Target {
 			return routing.Target{ProviderModel: t.ProviderModel, Priority: t.Priority, Weight: t.Weight, Timeout: int64(t.TimeoutMS), Tags: t.Tags, Shadow: t.Shadow}
-		})),
+		}),
 	}
 	if err := route.ValidatePassthrough(); err != nil {
 		return routes.PassthroughAccessError(err)
@@ -197,73 +187,27 @@ func decodeContentPolicy(raw json.RawMessage) (*contentpolicy.Policy, error) {
 }
 
 func Render(c Configuration) ([]contract.ConfigurationRouteEntry, *[]contract.ConfigurationTemplateEntry, error) {
-	rendered, err := promotion.Convert[[]contract.ConfigurationRouteEntry](slices.SortedFunc(slices.Values(c.Routes), func(a, b Route) int { return strings.Compare(a.Slug, b.Slug) }))
+	sorted := slices.SortedFunc(slices.Values(c.Routes), func(a, b Route) int { return strings.Compare(a.Slug, b.Slug) })
+	converted, err := promotion.Convert[[]contract.ConfigurationRouteEntry](promotion.Map(sorted, withoutContentPolicy))
 	if err != nil {
 		return nil, nil, err
 	}
+	rendered := promotion.NonNil(converted)
 	if len(c.Templates) == 0 {
-		return slices.Concat([]contract.ConfigurationRouteEntry{}, rendered), nil, nil
+		return rendered, nil, nil
 	}
 	templates, err := promotion.Convert[[]contract.ConfigurationTemplateEntry](slices.SortedFunc(slices.Values(c.Templates), func(a, b Template) int { return strings.Compare(a.Name, b.Name) }))
 	if err != nil {
 		return nil, nil, err
 	}
-	return slices.Concat([]contract.ConfigurationRouteEntry{}, rendered), &templates, nil
+	return rendered, &templates, nil
 }
 
-func mapped[T, U any](items []T, convert func(T) U) iter.Seq[U] {
-	return func(yield func(U) bool) {
-		for _, item := range items {
-			if !yield(convert(item)) {
-				return
-			}
-		}
+func withoutContentPolicy(r Route) Route {
+	return Route{
+		Behavior: r.Behavior, Slug: r.Slug, Project: r.Project, Operations: r.Operations, OverallTimeoutMS: r.OverallTimeoutMS, MaxAttempts: r.MaxAttempts,
+		Targets: r.Targets, RoutingPolicy: r.RoutingPolicy, Fidelity: r.Fidelity, ExposeUpstreamModels: r.ExposeUpstreamModels, Retired: r.Retired,
 	}
-}
-
-type outcome[U any] struct {
-	value U
-	err   error
-}
-
-func each[T, U any](items []T, parse func(int, T) (U, error)) ([]U, error) {
-	outcomes := slices.Collect(func(yield func(outcome[U]) bool) {
-		for i, item := range items {
-			value, err := parse(i, item)
-			if !yield(outcome[U]{value: value, err: err}) || err != nil {
-				return
-			}
-		}
-	})
-	if len(outcomes) > 0 && outcomes[len(outcomes)-1].err != nil {
-		return nil, outcomes[len(outcomes)-1].err
-	}
-	return slices.Collect(mapped(outcomes, func(o outcome[U]) U { return o.value })), nil
-}
-
-func every[T any](items []T, check func(int, T) error) error {
-	_, err := each(items, func(i int, item T) (struct{}, error) { return struct{}{}, check(i, item) })
-	return err
-}
-
-func byKey[T any](items []T, key func(T) string) map[string]T {
-	return maps.Collect(func(yield func(string, T) bool) {
-		for _, item := range items {
-			if !yield(key(item), item) {
-				return
-			}
-		}
-	})
-}
-
-func firstIndex[T any](items []T, key func(T) string) map[string]int {
-	return maps.Collect(func(yield func(string, int) bool) {
-		for i := len(items) - 1; i >= 0; i-- {
-			if !yield(key(items[i]), i) {
-				return
-			}
-		}
-	})
 }
 
 func slugOf(r Route) string { return r.Slug }
@@ -273,20 +217,4 @@ func deref(value *string) string {
 		return ""
 	}
 	return *value
-}
-
-func trimmedName(value *string) *string {
-	if value == nil {
-		return nil
-	}
-	name := strings.TrimSpace(*value)
-	return &name
-}
-
-func presentName(value nullable.Nullable[string]) *string {
-	name, ok := promotion.Present(value)
-	if !ok {
-		return nil
-	}
-	return trimmedName(&name)
 }

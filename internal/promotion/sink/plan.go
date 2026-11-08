@@ -90,16 +90,14 @@ func plan(ctx context.Context, q access.Queryer, desired []Sink, names promotion
 		return nil, projectErr
 	}
 	at := destination{stored: index(current), projects: projects, names: names}
-	planned, planErr := settle(slices.Collect(func(yield func(outcome[[]promotion.Item]) bool) {
-		for i, s := range desired {
-			active := len(current) + len(slices.Collect(filtered(desired[:i+1], at.fresh)))
-			items, err := planSink(ctx, q, s, at, active, sealedBinding(bindings, s), credentials)
-			if !yield(outcome[[]promotion.Item]{items, err}) {
-				return
-			}
-		}
-	}))
-	return slices.Concat(planned...), planErr
+	planned, err := promotion.TryMapIndex(desired, func(i int, s Sink) ([]promotion.Item, error) {
+		active := len(current) + len(promotion.Filter(desired[:i+1], at.fresh))
+		return planSink(ctx, q, s, at, active, sealedBinding(bindings, s), credentials)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return slices.Concat(planned...), nil
 }
 
 type binding struct {
@@ -122,8 +120,8 @@ func planSink(ctx context.Context, q access.Queryer, s Sink, at destination, act
 		return nil, err
 	}
 	return slices.Concat(
-		when(s.Signed && !credential.bound && (!found || current.credential == nil), promotion.Blocker(kind, s.Name, "Supply the destination signing-credential binding.")),
-		when(!found && active > maxSinks, promotion.Blocker(kind, s.Name, "The destination would exceed 64 active sinks.")),
+		promotion.When(s.Signed && !credential.bound && (!found || current.credential == nil), promotion.Blocker(kind, s.Name, "Supply the destination signing-credential binding.")),
+		promotion.When(!found && active > maxSinks, promotion.Blocker(kind, s.Name, "The destination would exceed 64 active sinks.")),
 		[]promotion.Item{{Kind: kind, Key: s.Name, Action: action, Detail: detail}},
 	), nil
 }
@@ -236,11 +234,4 @@ func write(ctx context.Context, tx pgx.Tx, s Sink, projectID *string, current st
 	}
 	id := access.NewID()
 	return id, sinks.Insert(ctx, tx, id, s.spec(projectID), etag, actor)
-}
-
-func when(condition bool, item promotion.Item) []promotion.Item {
-	if !condition {
-		return nil
-	}
-	return []promotion.Item{item}
 }

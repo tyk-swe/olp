@@ -170,3 +170,14 @@ func (s *Server) connectionClient(ctx context.Context, cfg *Configuration, crede
 	scope := cfg.ProviderID + "/" + cfg.transportFingerprint() + "/" + hex.EncodeToString(digest[:])
 	return s.connections.ClientScoped(scope, *s.Egress, cfg.Options.Network, secret, probeTimeout)
 }
+
+func (c Configuration) WithNetworkCredential(credentialID string) Configuration {
+	if c.Options.Network == nil {
+		return c
+	}
+	network := *c.Options.Network
+	network.CredentialID = credentialID
+	configured := c
+	configured.Options.Network = &network
+	return configured
+}

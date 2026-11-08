@@ -68,10 +68,10 @@ func parseSlots(entry contract.ConfigurationProviderEntry, configuration provide
 		provider:      entry.Name,
 		configuration: configuration,
 		at:            at,
-		names:         firstIndex(entry.Slots, func(slot contract.ConfigurationSlotEntry) string { return slot.Name }),
-		positions:     firstIndex(entry.Slots, func(slot contract.ConfigurationSlotEntry) int32 { return slot.Position }),
+		names:         promotion.FirstIndex(entry.Slots, func(slot contract.ConfigurationSlotEntry) string { return slot.Name }),
+		positions:     promotion.FirstIndex(entry.Slots, func(slot contract.ConfigurationSlotEntry) int32 { return slot.Position }),
 	}
-	slots, err := each(entry.Slots, scope.parse)
+	slots, err := promotion.TryMapIndex(entry.Slots, scope.parse)
 	if err != nil {
 		return nil, err
 	}
@@ -104,8 +104,8 @@ func (s slotScope) parse(j int, slot contract.ConfigurationSlotEntry) (Slot, err
 		Enabled:       slot.Enabled,
 		Priority:      int(slot.Priority),
 		Weight:        int64(slot.Weight),
-		AllowedModels: orEmpty(slot.Restrictions.AllowedModels),
-		AllowedRoutes: orEmpty(slot.Restrictions.AllowedRoutes),
+		AllowedModels: promotion.NonNil(slot.Restrictions.AllowedModels),
+		AllowedRoutes: promotion.NonNil(slot.Restrictions.AllowedRoutes),
 		Limits:        limits,
 		Credential:    credential,
 	}, nil
@@ -179,8 +179,8 @@ func credentialRequirement(slots []Slot, configuration providers.Configuration, 
 }
 
 func slotReferences(entry Entry, at path) []reference {
-	return slices.Concat(mapSlice(entry.Slots, func(j int, slot Slot) []reference {
-		return when(referenced(slot), reference{SlotRef(entry.Name, slot.Name), at.at("slots", j).field("credential_ref"), "Credential references must be unique."})
+	return slices.Concat(promotion.MapIndex(entry.Slots, func(j int, slot Slot) []reference {
+		return promotion.When(referenced(slot), reference{SlotRef(entry.Name, slot.Name), at.at("slots", j).field("credential_ref"), "Credential references must be unique."})
 	})...)
 }
 
@@ -188,13 +188,13 @@ func renderSlots(entry Entry) ([]contract.ConfigurationSlotEntry, error) {
 	sorted := slices.SortedFunc(slices.Values(entry.Slots), func(a, b Slot) int {
 		return cmp.Or(cmp.Compare(a.Position, b.Position), cmp.Compare(a.Name, b.Name))
 	})
-	rendered, err := each(sorted, func(_ int, slot Slot) (contract.ConfigurationSlotEntry, error) {
+	return promotion.TryMap(sorted, func(slot Slot) (contract.ConfigurationSlotEntry, error) {
 		limits, err := promotion.Convert[contract.ConfigurationSlotLimits](slot.Limits)
 		if err != nil {
 			return contract.ConfigurationSlotEntry{}, err
 		}
 		return contract.ConfigurationSlotEntry{
-			CredentialRef: promotion.Nullable(optional(string(SlotRef(entry.Name, slot.Name)), referenced(slot))),
+			CredentialRef: promotion.Nullable(promotion.PointerIf(string(SlotRef(entry.Name, slot.Name)), referenced(slot))),
 			Enabled:       slot.Enabled,
 			IsDefault:     slot.Default,
 			Limits:        limits,
@@ -203,17 +203,16 @@ func renderSlots(entry Entry) ([]contract.ConfigurationSlotEntry, error) {
 			Priority:      int32(slot.Priority),
 			Restrictions: contract.ConfigurationSlotRestrictions{
 				AllowedApiKeys: []string{},
-				AllowedModels:  slices.Sorted(slices.Values(orEmpty(slot.AllowedModels))),
-				AllowedRoutes:  slices.Sorted(slices.Values(orEmpty(slot.AllowedRoutes))),
+				AllowedModels:  promotion.NonNil(slices.Sorted(slices.Values(slot.AllowedModels))),
+				AllowedRoutes:  promotion.NonNil(slices.Sorted(slices.Values(slot.AllowedRoutes))),
 			},
 			Weight: int32(slot.Weight),
 		}, nil
 	})
-	return orEmpty(rendered), err
 }
 
 func slotClaims(entry Entry) []promotion.Claim {
-	return slices.Concat(mapSlice(entry.Slots, func(_ int, slot Slot) []promotion.Claim {
+	return slices.Concat(promotion.Map(entry.Slots, func(slot Slot) []promotion.Claim {
 		ref := SlotRef(entry.Name, slot.Name)
 		switch slot.Credential.(type) {
 		case Bound:

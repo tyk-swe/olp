@@ -10,10 +10,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -36,10 +35,13 @@ func Read(ctx context.Context, q access.Queryer) (State, error) {
 	if err != nil {
 		return State{}, err
 	}
-	published, err := readPublished(ctx, q)
+	stored, err := routes.ReadPublishedRoutes(ctx, q)
 	if err != nil {
 		return State{}, err
 	}
+	published := promotion.Map(stored, func(r routes.PublishedRoute) Route {
+		return routeOf(r.OpenDraft, projectName(directory, r.ProjectID), r.Retired)
+	})
 	templates, err := readTemplates(ctx, q)
 	if err != nil {
 		return State{}, err
@@ -50,63 +52,19 @@ func Read(ctx context.Context, q access.Queryer) (State, error) {
 	}
 	return State{
 		Configuration: Configuration{Routes: published, Templates: templates},
-		published:     byKey(published, slugOf),
+		published:     promotion.Index(published, slugOf),
 		drafts:        indexDrafts(drafts, directory),
 		directory:     directory,
 	}, nil
-}
-
-func readPublished(ctx context.Context, q access.Queryer) ([]Route, error) {
-	rows, err := q.Query(ctx, `SELECT r.slug,pr.name,r.state='retired',v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.routing_policy,v.content_policy,v.fidelity,v.behavior,
-		COALESCE((SELECT expose_upstream_models FROM olp.model_catalog_route_settings WHERE route_id=r.id),false)
-		FROM olp.routes r JOIN olp.route_revisions v ON v.id=r.latest_revision_id LEFT JOIN olp.projects pr ON pr.id=r.project_id ORDER BY r.slug`)
-	if err != nil {
-		return nil, err
-	}
-	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Route, error) {
-		var r routes.OpenDraft
-		var project *string
-		var retired bool
-		var operations, targets, policy, behavior []byte
-		if err := row.Scan(&r.Slug, &project, &retired, &operations, &r.OverallTimeoutMS, &r.MaxAttempts, &targets, &policy, &r.ContentPolicy, &r.Fidelity, &behavior, &r.ExposeUpstreamModels); err != nil {
-			return Route{}, err
-		}
-		decodedOperations, err := decode[[]string](operations)
-		if err != nil {
-			return Route{}, err
-		}
-		decodedTargets, err := decode[[]routing.PublishedTarget](targets)
-		if err != nil {
-			return Route{}, err
-		}
-		decodedPolicy, err := routes.DecodePolicy(policy)
-		if err != nil {
-			return Route{}, err
-		}
-		decodedBehavior, err := routing.DecodeBehavior(behavior)
-		if err != nil {
-			return Route{}, err
-		}
-		return routeOf(routes.OpenDraft{
-			Slug: r.Slug, Operations: decodedOperations, OverallTimeoutMS: r.OverallTimeoutMS, MaxAttempts: r.MaxAttempts, Targets: decodedTargets,
-			ContentPolicy: r.ContentPolicy, Fidelity: r.Fidelity, Behavior: decodedBehavior, ExposeUpstreamModels: r.ExposeUpstreamModels, RoutingPolicy: decodedPolicy,
-		}, project, retired), nil
-	})
-}
-
-func decode[T any](raw []byte) (T, error) {
-	var value T
-	err := json.Unmarshal(raw, &value)
-	return value, err
 }
 
 func routeOf(d routes.OpenDraft, project *string, retired bool) Route {
 	return Route{
 		Behavior: d.Behavior, Slug: d.Slug, Project: project, Operations: d.Operations, OverallTimeoutMS: d.OverallTimeoutMS, MaxAttempts: d.MaxAttempts,
 		RoutingPolicy: d.RoutingPolicy, ContentPolicy: d.ContentPolicy, Fidelity: d.Fidelity, ExposeUpstreamModels: d.ExposeUpstreamModels, Retired: retired,
-		Targets: slices.Collect(mapped(d.Targets, func(t routing.PublishedTarget) Target {
+		Targets: promotion.Map(d.Targets, func(t routing.PublishedTarget) Target {
 			return Target{Provider: t.ProviderName, ProviderModel: t.ProviderModel, Priority: t.Priority, Weight: t.Weight, TimeoutMS: int(t.TimeoutMS), Tags: t.Tags, Shadow: t.Shadow}
-		})),
+		}),
 	}
 }
 
@@ -168,7 +126,7 @@ func (s State) unchanged(r Route) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return bytes.Equal(left, right), nil
+	return bytes.Equal(left, right) && routes.SamePolicy(r.RoutingPolicy, current.RoutingPolicy), nil
 }
 
 func canonical(r Route) ([]byte, error) {
@@ -189,12 +147,12 @@ func canonical(r Route) ([]byte, error) {
 		return nil, err
 	}
 	return json.Marshal(Route{
-		Behavior: r.Behavior, Slug: r.Slug, Operations: slices.Concat([]string{}, slices.Sorted(slices.Values(r.Operations))),
-		OverallTimeoutMS: r.OverallTimeoutMS, MaxAttempts: r.MaxAttempts, RoutingPolicy: cmp.Or(r.RoutingPolicy, &routing.Policy{}),
+		Behavior: r.Behavior, Slug: r.Slug, Operations: slices.Sorted(slices.Values(r.Operations)),
+		OverallTimeoutMS: r.OverallTimeoutMS, MaxAttempts: r.MaxAttempts,
 		ContentPolicy: encodedPolicy, Fidelity: encodedFidelity, ExposeUpstreamModels: r.ExposeUpstreamModels,
-		Targets: slices.Concat([]Target{}, slices.SortedFunc(mapped(r.Targets, canonicalTarget), func(a, b Target) int {
+		Targets: slices.SortedFunc(slices.Values(promotion.Map(r.Targets, canonicalTarget)), func(a, b Target) int {
 			return cmp.Or(strings.Compare(strings.ToLower(a.Provider), strings.ToLower(b.Provider)), strings.Compare(a.ProviderModel, b.ProviderModel), cmp.Compare(a.Priority, b.Priority))
-		})),
+		}),
 	})
 }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
+	"github.com/tyk-swe/olp/internal/promotion/project"
 )
 
 type Scope interface{ scope() }
@@ -85,8 +86,8 @@ func parseScope(kind contract.ConfigurationGuardrailAttachmentScope, name, proje
 }
 
 func parseAttachments(entries []contract.ConfigurationGuardrailAttachment, policies catalog) ([]Attachment, error) {
-	return collect(entries, func(a contract.ConfigurationGuardrailAttachment) (Attachment, error) {
-		scope, valid := parseScope(a.Scope, dereference(a.Name), dereference(a.Project))
+	return promotion.TryMap(entries, func(a contract.ConfigurationGuardrailAttachment) (Attachment, error) {
+		scope, valid := parseScope(a.Scope, promotion.ValueOf(a.Name), promotion.ValueOf(a.Project))
 		_, declared := policies.engines[keyOf(a.PolicyProject, a.Policy)]
 		if !valid || !declared || a.Order < 0 {
 			return Attachment{}, access.Invalid("guardrail_attachments", invalidAttachment)
@@ -97,18 +98,11 @@ func parseAttachments(entries []contract.ConfigurationGuardrailAttachment, polic
 
 func renderAttachment(a Attachment) contract.ConfigurationGuardrailAttachment {
 	d := describe(a.Scope)
-	return contract.ConfigurationGuardrailAttachment{Scope: d.kind, Name: filled(d.name), Project: filled(d.project), Policy: a.Policy.Name, PolicyProject: a.Policy.Project, Order: a.Order}
-}
-
-func filled(value string) *string {
-	if value == "" {
-		return nil
-	}
-	return &value
+	return contract.ConfigurationGuardrailAttachment{Scope: d.kind, Name: promotion.NonZero(d.name), Project: promotion.NonZero(d.project), Policy: a.Policy.Name, PolicyProject: a.Policy.Project, Order: a.Order}
 }
 
 func planAttachments(desired, current []Attachment, changed map[portable]bool) []promotion.Item {
-	return mapped(desired, func(a Attachment) promotion.Item {
+	return promotion.Map(desired, func(a Attachment) promotion.Item {
 		d := describe(a.Scope)
 		slot := string(d.kind) + "/" + d.name
 		index := slices.IndexFunc(current, func(old Attachment) bool { return sameSlot(old, a) })
@@ -135,16 +129,24 @@ func sameSlot(a, b Attachment) bool {
 
 func PolicyApplier(desired Section) promotion.Applier {
 	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
-		if err := each(desired.Policies, func(policy Policy) error { return applyPolicy(ctx, tx, p, policy) }); err != nil {
+		directory, err := project.ReadDirectory(ctx, tx)
+		if err != nil {
 			return err
 		}
-		return each(kept(desired.Attachments, func(a Attachment) bool { return !isToolset(a) }), func(a Attachment) error { return applyAttachment(ctx, tx, p, a) })
+		if err := promotion.Every(desired.Policies, func(policy Policy) error { return applyPolicy(ctx, tx, p, directory, policy) }); err != nil {
+			return err
+		}
+		return promotion.Every(promotion.Filter(desired.Attachments, func(a Attachment) bool { return !isToolset(a) }), func(a Attachment) error { return applyAttachment(ctx, tx, p, directory, a) })
 	}
 }
 
 func ToolsetApplier(desired Section) promotion.Applier {
 	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
-		return each(kept(desired.Attachments, isToolset), func(a Attachment) error { return applyAttachment(ctx, tx, p, a) })
+		directory, err := project.ReadDirectory(ctx, tx)
+		if err != nil {
+			return err
+		}
+		return promotion.Every(promotion.Filter(desired.Attachments, isToolset), func(a Attachment) error { return applyAttachment(ctx, tx, p, directory, a) })
 	}
 }
 
@@ -162,8 +164,8 @@ type draft struct{ id string }
 func (published) destination() {}
 func (draft) destination()     {}
 
-func applyAttachment(ctx context.Context, tx pgx.Tx, p access.Principal, a Attachment) error {
-	project, err := projectID(ctx, tx, a.Policy.Project)
+func applyAttachment(ctx context.Context, tx pgx.Tx, p access.Principal, directory project.Directory, a Attachment) error {
+	project, err := projectID(directory, a.Policy.Project)
 	if err != nil {
 		return err
 	}
@@ -171,7 +173,7 @@ func applyAttachment(ctx context.Context, tx pgx.Tx, p access.Principal, a Attac
 	if err := tx.QueryRow(ctx, "SELECT active_revision_id::text FROM olp.guardrail_policies WHERE project_id IS NOT DISTINCT FROM $1::uuid AND lower(name)=lower($2) AND retired_at IS NULL", project, a.Policy.Name).Scan(&revision); err != nil {
 		return err
 	}
-	target, err := resolveScope(ctx, tx, p, a.Scope, project)
+	target, err := resolveScope(ctx, tx, p, directory, a.Scope, project)
 	if err != nil {
 		return err
 	}
@@ -191,7 +193,7 @@ func applyAttachment(ctx context.Context, tx pgx.Tx, p access.Principal, a Attac
 	return access.Invalid("guardrail_attachments", invalidAttachment)
 }
 
-func resolveScope(ctx context.Context, tx pgx.Tx, p access.Principal, scope Scope, project *string) (destination, error) {
+func resolveScope(ctx context.Context, tx pgx.Tx, p access.Principal, directory project.Directory, scope Scope, project *string) (destination, error) {
 	switch s := scope.(type) {
 	case Installation:
 		if !p.AllProjects {
@@ -205,7 +207,7 @@ func resolveScope(ctx context.Context, tx pgx.Tx, p access.Principal, scope Scop
 		}
 		return published{&id}, p.Organization(id, access.Change)
 	case Project:
-		id, err := projectID(ctx, tx, s.Name)
+		id, err := projectID(directory, s.Name)
 		return published{id}, err
 	case Toolset:
 		id, err := optional(ctx, tx, scanText, "SELECT id::text FROM olp.agent_publications WHERE project_id IS NOT DISTINCT FROM $1::uuid AND kind='toolset' AND lower(name)=lower($2) AND NOT retired", project, s.Name)
@@ -216,7 +218,7 @@ func resolveScope(ctx context.Context, tx pgx.Tx, p access.Principal, scope Scop
 	case Route:
 		return resolveRoute(ctx, tx, s.Slug, project)
 	case APIKey:
-		return resolveKey(ctx, tx, s, project)
+		return resolveKey(ctx, tx, directory, s, project)
 	}
 	return nil, access.Invalid("guardrail_attachments", invalidAttachment)
 }
@@ -240,8 +242,8 @@ func resolveRoute(ctx context.Context, tx pgx.Tx, slug string, project *string) 
 	return published{&id}, nil
 }
 
-func resolveKey(ctx context.Context, tx pgx.Tx, key APIKey, project *string) (destination, error) {
-	owner, err := projectID(ctx, tx, key.Project)
+func resolveKey(ctx context.Context, tx pgx.Tx, directory project.Directory, key APIKey, project *string) (destination, error) {
+	owner, err := projectID(directory, key.Project)
 	if err != nil {
 		return nil, err
 	}

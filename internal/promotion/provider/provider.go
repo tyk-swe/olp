@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
 const (
@@ -35,6 +36,8 @@ type Catalogue interface {
 	StoreCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, int, error)
 	StoreNetworkCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error)
 	CredentialEquals(ctx context.Context, q access.Queryer, credentialID, secret string) (bool, error)
+	StoreExternalCredential(ctx context.Context, tx pgx.Tx, providerID string, reference secretstore.Reference) (string, int, error)
+	ExternalCredentialEquals(ctx context.Context, q access.Queryer, credentialID string, reference secretstore.Reference) (bool, error)
 }
 
 type Entry struct {
@@ -60,8 +63,8 @@ func ParseAll(entries []contract.ConfigurationProviderEntry, names promotion.Nam
 	if len(entries) > maxProviders {
 		return nil, access.Invalid("providers", "Declare at most "+strconv.Itoa(maxProviders)+" providers.")
 	}
-	first := firstIndex(entries, func(entry contract.ConfigurationProviderEntry) string { return strings.ToLower(entry.Name) })
-	parsed, err := each(entries, func(i int, entry contract.ConfigurationProviderEntry) (Entry, error) {
+	first := promotion.FirstIndex(entries, func(entry contract.ConfigurationProviderEntry) string { return strings.ToLower(entry.Name) })
+	parsed, err := promotion.TryMapIndex(entries, func(i int, entry contract.ConfigurationProviderEntry) (Entry, error) {
 		at := path("providers").index(i)
 		if first[strings.ToLower(entry.Name)] != i {
 			return Entry{}, access.Invalid(at.field("name"), "Provider names must be unique.")
@@ -71,7 +74,7 @@ func ParseAll(entries []contract.ConfigurationProviderEntry, names promotion.Nam
 	if err != nil {
 		return nil, err
 	}
-	if sum(parsed, func(entry Entry) int { return len(entry.Models) }) > maxModels {
+	if len(slices.Concat(promotion.Map(parsed, func(entry Entry) []providers.DraftModel { return entry.Models })...)) > maxModels {
 		return nil, access.Invalid("providers.models", "Declare at most "+strconv.Itoa(maxModels)+" models in total.")
 	}
 	return parsed, distinctRefs(parsed, path("providers").index)
@@ -111,7 +114,7 @@ func parse(entry contract.ConfigurationProviderEntry, at path, names promotion.N
 	}
 	return Entry{
 		Name:            entry.Name,
-		Project:         optional(project, declared),
+		Project:         promotion.PointerIf(project, declared),
 		Configuration:   validated,
 		Models:          models,
 		Slots:           slots,
@@ -129,8 +132,8 @@ func validProject(project string, declared bool, at path) error {
 }
 
 func parseModels(models []contract.ConfigurationModelEntry, at path) ([]providers.DraftModel, error) {
-	first := firstIndex(models, func(model contract.ConfigurationModelEntry) string { return model.UpstreamModel })
-	return each(models, func(j int, model contract.ConfigurationModelEntry) (providers.DraftModel, error) {
+	first := promotion.FirstIndex(models, func(model contract.ConfigurationModelEntry) string { return model.UpstreamModel })
+	return promotion.TryMapIndex(models, func(j int, model contract.ConfigurationModelEntry) (providers.DraftModel, error) {
 		field := at.at("models", j)
 		if err := providers.ValidModelName(field.field("upstream_model"), model.UpstreamModel); err != nil {
 			return providers.DraftModel{}, err
@@ -149,7 +152,7 @@ func parseModels(models []contract.ConfigurationModelEntry, at path) ([]provider
 		if _, err := providers.ValidCapabilities(capabilities); err != nil {
 			return providers.DraftModel{}, err
 		}
-		return providers.DraftModel{UpstreamModel: model.UpstreamModel, DisplayName: display, Enabled: model.Enabled, Capabilities: orEmpty(capabilities)}, nil
+		return providers.DraftModel{UpstreamModel: model.UpstreamModel, DisplayName: display, Enabled: model.Enabled, Capabilities: promotion.NonNil(capabilities)}, nil
 	})
 }
 
@@ -160,15 +163,15 @@ type reference struct {
 }
 
 func distinctRefs(entries []Entry, root func(int) path) error {
-	refs := slices.Concat(mapSlice(entries, func(i int, entry Entry) []reference {
+	refs := slices.Concat(promotion.MapIndex(entries, func(i int, entry Entry) []reference {
 		at := root(i)
 		return slices.Concat(
-			when(entry.Network, reference{NetworkRef(entry.Name), at.field("network_credential_ref"), "Credential references must be distinct."}),
-			when(entry.Billing != nil, reference{BillingRef(entry.Name), at.field("billing_import.credential_ref"), "Credential references must be distinct."}),
+			promotion.When(entry.Network, reference{NetworkRef(entry.Name), at.field("network_credential_ref"), "Credential references must be distinct."}),
+			promotion.When(entry.Billing != nil, reference{BillingRef(entry.Name), at.field("billing_import.credential_ref"), "Credential references must be distinct."}),
 			slotReferences(entry, at),
 		)
 	})...)
-	repeated, ok := firstRepeat(refs, func(ref reference) promotion.Ref { return ref.ref })
+	repeated, ok := promotion.FirstRepeat(refs, func(ref reference) promotion.Ref { return ref.ref })
 	if !ok {
 		return nil
 	}
@@ -179,8 +182,7 @@ func Render(entries []Entry) ([]contract.ConfigurationProviderEntry, error) {
 	sorted := slices.SortedFunc(slices.Values(entries), func(a, b Entry) int {
 		return cmp.Or(cmp.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)), cmp.Compare(a.Name, b.Name))
 	})
-	rendered, err := each(sorted, func(_ int, entry Entry) (contract.ConfigurationProviderEntry, error) { return render(entry) })
-	return orEmpty(rendered), err
+	return promotion.TryMap(sorted, render)
 }
 
 func render(entry Entry) (contract.ConfigurationProviderEntry, error) {
@@ -205,7 +207,7 @@ func render(entry Entry) (contract.ConfigurationProviderEntry, error) {
 	return contract.ConfigurationProviderEntry{
 		BillingImport:        billing,
 		Configuration:        configuration,
-		Models:               orEmpty(models),
+		Models:               promotion.NonNil(models),
 		Name:                 entry.Name,
 		NetworkCredentialRef: renderNetwork(entry),
 		Project:              promotion.Nullable(entry.Project),
@@ -214,14 +216,14 @@ func render(entry Entry) (contract.ConfigurationProviderEntry, error) {
 }
 
 func canonicalModels(models []providers.DraftModel) []providers.DraftModel {
-	canonical := mapSlice(models, func(_ int, model providers.DraftModel) providers.DraftModel {
+	canonical := promotion.Map(models, func(model providers.DraftModel) providers.DraftModel {
 		return providers.DraftModel{UpstreamModel: model.UpstreamModel, DisplayName: cmp.Or(model.DisplayName, model.UpstreamModel), Enabled: model.Enabled, Capabilities: canonicalCapabilities(model.Capabilities)}
 	})
 	return slices.SortedFunc(slices.Values(canonical), func(a, b providers.DraftModel) int { return cmp.Compare(a.UpstreamModel, b.UpstreamModel) })
 }
 
 func canonicalCapabilities(capabilities []providers.CapabilityInput) []providers.CapabilityInput {
-	return orEmpty(slices.SortedFunc(slices.Values(capabilities), func(a, b providers.CapabilityInput) int {
+	return promotion.NonNil(slices.SortedFunc(slices.Values(capabilities), func(a, b providers.CapabilityInput) int {
 		return cmp.Compare(a.Operation+"/"+a.Surface+"/"+a.Mode, b.Operation+"/"+b.Surface+"/"+b.Mode)
 	}))
 }

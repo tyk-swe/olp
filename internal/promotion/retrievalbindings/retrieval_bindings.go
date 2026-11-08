@@ -22,7 +22,7 @@ func ValidateAndNormalizeRetrievalBindings(doc *promotion.Document) error {
 		e := &doc.RetrievalBindings[i]
 		e.Name = strings.TrimSpace(e.Name)
 		e.Project = strings.TrimSpace(e.Project)
-		if !promotion.GuardrailLabel(e.Project) || !promotion.GuardrailLabel(e.Name) || !promotion.GuardrailLabel(e.TargetProvider) || e.Route == "" || len(e.Route) > 128 || seen[promotion.RetrievalKey(*e)] || !retrieval.ResourceValid(e.Backend, e.Resource) {
+		if !promotion.ValidLabel(e.Project) || !promotion.ValidLabel(e.Name) || !promotion.ValidLabel(e.TargetProvider) || e.Route == "" || len(e.Route) > 128 || seen[promotion.RetrievalKey(*e)] || !retrieval.ResourceValid(e.Backend, e.Resource) {
 			return access.Invalid("retrieval_bindings", "Use unique project/name pairs with an explicit route, provider and native backend resource.")
 		}
 		seen[promotion.RetrievalKey(*e)] = true
@@ -33,7 +33,7 @@ func ValidateAndNormalizeRetrievalBindings(doc *promotion.Document) error {
 			return access.Invalid("retrieval_bindings.key_grants", "Use at most 2000 explicit key names.")
 		}
 		for _, name := range e.KeyGrants {
-			if !promotion.GuardrailLabel(name) {
+			if !promotion.ValidLabel(name) {
 				return access.Invalid("retrieval_bindings.key_grants", "Use nonempty exact project-local API-key names.")
 			}
 		}

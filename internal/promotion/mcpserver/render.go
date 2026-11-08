@@ -21,7 +21,7 @@ type wire struct {
 
 func transportOf(flat wire) Transport {
 	if flat.transport == routing.MCPStdio {
-		return Stdio{Binding: valueOf(flat.stdio)}
+		return Stdio{Binding: promotion.ValueOf(flat.stdio)}
 	}
 	return HTTP{Endpoint: flat.endpoint, SSE: flat.transport == routing.MCPLegacySSE, OAuth: flat.oauth, Delegation: flat.delegation, Bearer: flat.bearer}
 }
@@ -63,7 +63,7 @@ func renderServer(server Server) contract.ConfigurationMCPServer {
 		Project:              server.Project,
 		Name:                 server.Name,
 		Transport:            contract.ConfigurationMCPServerTransport(flat.transport),
-		Endpoint:             optional(flat.endpoint),
+		Endpoint:             promotion.NonZero(flat.endpoint),
 		Stdio:                renderStdio(flat.stdio),
 		Oauth:                renderOAuth(flat.oauth),
 		Delegation:           renderDelegation(flat.delegation),
@@ -71,7 +71,7 @@ func renderServer(server Server) contract.ConfigurationMCPServer {
 		Enabled:              server.Enabled,
 		CatalogDigest:        server.CatalogDigest,
 		UnitPrice:            promotion.Nullable(server.UnitPrice),
-		ToolPrices:           optionalMap(server.ToolPrices),
+		ToolPrices:           promotion.OptionalMap(maps.Clone(server.ToolPrices)),
 		CallsPerMinute:       narrow(server.Limits.CallsPerMinute),
 		MaxConcurrency:       narrow(server.Limits.MaxConcurrency),
 		PerKeyCallsPerMinute: narrow(server.Limits.PerKeyCallsPerMinute),
@@ -101,9 +101,9 @@ func renderOAuth(oauth *routing.MCPOAuth) nullable.Nullable[contract.MCPOAuthCon
 		ClientId:                    oauth.ClientID,
 		Audience:                    oauth.Audience,
 		Scopes:                      oauth.Scopes,
-		AuthorizationEndpoint:       optional(oauth.AuthorizationEndpoint),
+		AuthorizationEndpoint:       promotion.NonZero(oauth.AuthorizationEndpoint),
 		TokenEndpoint:               oauth.TokenEndpoint,
-		DeviceAuthorizationEndpoint: optional(oauth.DeviceAuthorizationEndpoint),
+		DeviceAuthorizationEndpoint: promotion.NonZero(oauth.DeviceAuthorizationEndpoint),
 		EntraObo:                    renderEntra(oauth.EntraOBO),
 	})
 }
@@ -140,9 +140,9 @@ func oauthOf(oauth nullable.Nullable[contract.MCPOAuthConfiguration]) *routing.M
 		ClientID:                    value.ClientId,
 		Audience:                    value.Audience,
 		Scopes:                      value.Scopes,
-		AuthorizationEndpoint:       valueOf(value.AuthorizationEndpoint),
+		AuthorizationEndpoint:       promotion.ValueOf(value.AuthorizationEndpoint),
 		TokenEndpoint:               value.TokenEndpoint,
-		DeviceAuthorizationEndpoint: valueOf(value.DeviceAuthorizationEndpoint),
+		DeviceAuthorizationEndpoint: promotion.ValueOf(value.DeviceAuthorizationEndpoint),
 		EntraOBO:                    entraOf(value.EntraObo),
 	}
 }
@@ -152,14 +152,6 @@ func entraOf(entra *contract.MCPEntraOBO) *routing.MCPEntraOBO {
 		return nil
 	}
 	return &routing.MCPEntraOBO{Issuer: entra.Issuer}
-}
-
-func present(value nullable.Nullable[string]) *string {
-	text, ok := promotion.Present(value)
-	if !ok {
-		return nil
-	}
-	return &text
 }
 
 func widen(value *int) *int64 {
@@ -175,32 +167,9 @@ func narrow(value int64) *int {
 	return &short
 }
 
-func optional(value string) *string {
-	if value == "" {
-		return nil
-	}
-	return &value
-}
-
-func optionalMap(values map[string]string) *map[string]string {
-	if len(values) == 0 {
-		return nil
-	}
-	cloned := maps.Clone(values)
-	return &cloned
-}
-
 func nonNil(values map[string]string) map[string]string {
 	if values == nil {
 		return map[string]string{}
 	}
 	return values
-}
-
-func valueOf[T any](pointer *T) T {
-	if pointer == nil {
-		var zero T
-		return zero
-	}
-	return *pointer
 }

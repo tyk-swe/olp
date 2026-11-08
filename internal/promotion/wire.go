@@ -39,6 +39,14 @@ func Present[T any](value nullable.Nullable[T]) (T, bool) {
 	return present, err == nil
 }
 
+func Pointer[T any](value nullable.Nullable[T]) *T {
+	present, ok := Present(value)
+	if !ok {
+		return nil
+	}
+	return &present
+}
+
 func Nullable[T any](value *T) nullable.Nullable[T] {
 	if value == nil {
 		return nullable.NewNullNullable[T]()

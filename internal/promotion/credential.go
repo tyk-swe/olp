@@ -1,11 +1,13 @@
 package promotion
 
 import (
+	"encoding/json"
 	"maps"
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
@@ -32,8 +34,8 @@ type Claim struct {
 }
 
 func ParseBindings(request contract.ConfigurationPromotionRequest) (Bindings, error) {
-	sealed := valueOf(request.SecretBindings)
-	external := valueOf(request.ExternalCredentialBindings)
+	sealed := ValueOf(request.SecretBindings)
+	external := ValueOf(request.ExternalCredentialBindings)
 	if slices.ContainsFunc(slices.Collect(maps.Keys(external)), func(ref string) bool { _, ok := sealed[ref]; return ok }) {
 		return nil, access.Invalid("external_credential_bindings", "A reference cannot also have a plaintext binding.")
 	}
@@ -103,6 +105,19 @@ func ValidateExternal(reference secretstore.Reference) error {
 	return nil
 }
 
+func AcceptBearer(credential Credential) error {
+	return SealedOnly("Static bearer material uses sealed bindings.", func(secret string) error {
+		encoded, err := json.Marshal(secret)
+		if err != nil {
+			return err
+		}
+		if _, err := secrets.ParseBearer(encoded); err != nil {
+			return access.Invalid("credential", err.Error())
+		}
+		return nil
+	})(credential)
+}
+
 func SealedOnly(refusal string, validate func(secret string) error) func(Credential) error {
 	return func(credential Credential) error {
 		sealed, ok := credential.(Sealed)
@@ -118,15 +133,7 @@ func storeReference(reference contract.ExternalCredentialReference) secretstore.
 		Store:    string(reference.Store),
 		SecretID: reference.SecretId,
 		Version:  reference.Version,
-		Region:   valueOf(reference.Region),
-		Field:    valueOf(reference.Field),
+		Region:   ValueOf(reference.Region),
+		Field:    ValueOf(reference.Field),
 	}
-}
-
-func valueOf[T any](pointer *T) T {
-	if pointer == nil {
-		var zero T
-		return zero
-	}
-	return *pointer
 }

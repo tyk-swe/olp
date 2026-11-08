@@ -66,18 +66,23 @@ type Draft struct {
 	CreatedBy     string
 }
 
-func CreateDraft(ctx context.Context, tx pgx.Tx, draft Draft) (string, string, error) {
-	id, etag := access.NewID(), access.NewID()
+type CreatedDraft struct {
+	ID   string
+	ETag string
+}
+
+func CreateDraft(ctx context.Context, tx pgx.Tx, draft Draft) (CreatedDraft, error) {
+	created := CreatedDraft{ID: access.NewID(), ETag: access.NewID()}
 	configuration := draft.Configuration.configuration
-	if err := validateNetworkReference(ctx, tx, id, &configuration); err != nil {
-		return "", "", err
+	if err := validateNetworkReference(ctx, tx, created.ID, &configuration); err != nil {
+		return CreatedDraft{}, err
 	}
 	encoded, err := json.Marshal(configuration)
 	if err != nil {
-		return "", "", err
+		return CreatedDraft{}, err
 	}
-	if _, err := tx.Exec(ctx, "INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id) VALUES($1,$2,$3,'draft',$4,$5,$6,$7,$8)", id, draft.Name, configuration.Kind, encoded, etag, access.NewID(), draft.CreatedBy, draft.ProjectID); err != nil {
-		return "", "", err
+	if _, err := tx.Exec(ctx, "INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id) VALUES($1,$2,$3,'draft',$4,$5,$6,$7,$8)", created.ID, draft.Name, configuration.Kind, encoded, created.ETag, access.NewID(), draft.CreatedBy, draft.ProjectID); err != nil {
+		return CreatedDraft{}, err
 	}
-	return id, etag, nil
+	return created, nil
 }

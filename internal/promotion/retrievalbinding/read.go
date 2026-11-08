@@ -3,9 +3,11 @@ package retrievalbinding
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/retrieval"
 )
@@ -17,7 +19,7 @@ func Read(ctx context.Context, q access.Queryer, directory project.Directory) ([
 	if err != nil {
 		return nil, err
 	}
-	return collect(stored, func(binding retrieval.Binding) (Binding, error) {
+	return promotion.TryMap(stored, func(binding retrieval.Binding) (Binding, error) {
 		return exported(ctx, q, directory, binding)
 	})
 }
@@ -25,13 +27,13 @@ func Read(ctx context.Context, q access.Queryer, directory project.Directory) ([
 func exported(ctx context.Context, q access.Queryer, directory project.Directory, binding retrieval.Binding) (Binding, error) {
 	projectName, ok := directory.Name(binding.ProjectID)
 	if !ok {
-		return Binding{}, pgx.ErrNoRows
+		return Binding{}, fmt.Errorf("retrieval binding %s belongs to an unknown project", binding.ID)
 	}
 	var provider string
 	if err := q.QueryRow(ctx, "SELECT name FROM olp.providers WHERE id=$1", binding.ProviderID).Scan(&provider); err != nil {
 		return Binding{}, err
 	}
-	keys, err := collect(binding.KeyGrants, func(id string) (string, error) {
+	keys, err := promotion.TryMap(binding.KeyGrants, func(id string) (string, error) {
 		var name string
 		err := q.QueryRow(ctx, keyNameQuery, id, binding.ProjectID).Scan(&name)
 		if errors.Is(err, pgx.ErrNoRows) {

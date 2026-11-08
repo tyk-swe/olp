@@ -2,7 +2,6 @@ package agentpublication
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"reflect"
 	"slices"
@@ -14,7 +13,6 @@ import (
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
-	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 const planDetail = "Promote reviewed immutable configuration only; execution metadata and secrets remain local."
@@ -32,7 +30,7 @@ func Planner(desired []Publication, names promotion.Names, bindings promotion.Bi
 		Claims: slices.Collect(func(yield func(promotion.Claim) bool) {
 			for _, publication := range desired {
 				for _, ref := range publication.refs() {
-					if !yield(promotion.Claim{Ref: ref, Accept: acceptBearer}) {
+					if !yield(promotion.Claim{Ref: ref, Accept: promotion.AcceptBearer}) {
 						return
 					}
 				}
@@ -43,25 +41,12 @@ func Planner(desired []Publication, names promotion.Names, bindings promotion.Bi
 			if err != nil {
 				return nil, err
 			}
-			items, err := collect(desired, func(_ int, publication Publication) ([]promotion.Item, error) {
+			items, err := promotion.TryMap(desired, func(publication Publication) ([]promotion.Item, error) {
 				return planPublication(ctx, q, names, directory, bindings, publication)
 			})
 			return slices.Concat(items...), err
 		},
 	}
-}
-
-func acceptBearer(credential promotion.Credential) error {
-	return promotion.SealedOnly("Static bearer material uses sealed bindings.", func(secret string) error {
-		encoded, err := json.Marshal(secret)
-		if err != nil {
-			return err
-		}
-		if _, err := secrets.ParseBearer(encoded); err != nil {
-			return access.Invalid("credential", err.Error())
-		}
-		return nil
-	})(credential)
 }
 
 func planPublication(ctx context.Context, q access.Queryer, names promotion.Names, directory project.Directory, bindings promotion.Bindings, publication Publication) ([]promotion.Item, error) {

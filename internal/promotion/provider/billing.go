@@ -84,7 +84,7 @@ func (p planning) billingItems(ctx context.Context, q access.Queryer, entry Entr
 	ref := string(BillingRef(entry.Name))
 	current := importedCredential(existing)
 	if entry.Billing == nil {
-		return when(current != nil, promotion.Item{Kind: contract.ConfigurationPlanItemKindBillingImport, Key: ref, Action: contract.ConfigurationPlanItemActionDelete}), nil
+		return promotion.When(current != nil, promotion.Item{Kind: contract.ConfigurationPlanItemKindBillingImport, Key: ref, Action: contract.ConfigurationPlanItemActionDelete}), nil
 	}
 	if _, supplied := p.bindings[BillingRef(entry.Name)]; supplied {
 		return []promotion.Item{{Kind: contract.ConfigurationPlanItemKindBillingImport, Key: ref, Action: contract.ConfigurationPlanItemActionBind}}, nil

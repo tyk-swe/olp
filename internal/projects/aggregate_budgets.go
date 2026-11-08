@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/settings"
 )
 
 func (s *Server) projectBudget(r *http.Request, p access.Principal) (access.Reply, error) {
@@ -122,7 +123,7 @@ func (s *Server) writeAggregateBudget(r *http.Request, _ access.Principal, proje
 		if etag, err = SetOrganizationBudget(r.Context(), tx, id, policy); err != nil {
 			return access.Reply{}, err
 		}
-	} else if etag, err = setAggregateBudget(r.Context(), tx, level, id, "UPDATE olp.installation SET budget_policy=NULLIF($2::jsonb,'null'::jsonb),budget_etag=$3 WHERE id=$1", policy); err != nil {
+	} else if etag, err = settings.SetInstallationBudget(r.Context(), tx, id, policy); err != nil {
 		return access.Reply{}, err
 	}
 	if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
@@ -146,12 +147,8 @@ func aggregateReportSQL(level string) string {
 }
 
 func SetOrganizationBudget(ctx context.Context, tx pgx.Tx, id string, policy *authority.BudgetPolicy) (string, error) {
-	return setAggregateBudget(ctx, tx, "organization", id, "UPDATE olp.organizations SET budget_policy=NULLIF($2::jsonb,'null'::jsonb),etag=$3,updated_at=now() WHERE id=$1", policy)
-}
-
-func setAggregateBudget(ctx context.Context, tx pgx.Tx, level, id, update string, policy *authority.BudgetPolicy) (string, error) {
 	if policy.Limited() {
-		if err := limits.EnsureAggregateBudget(ctx, tx, level, id); err != nil {
+		if err := limits.EnsureAggregateBudget(ctx, tx, "organization", id); err != nil {
 			return "", err
 		}
 	}
@@ -160,7 +157,7 @@ func setAggregateBudget(ctx context.Context, tx pgx.Tx, level, id, update string
 		return "", err
 	}
 	etag := access.NewID()
-	if _, err := tx.Exec(ctx, update, id, encoded, etag); err != nil {
+	if _, err := tx.Exec(ctx, "UPDATE olp.organizations SET budget_policy=NULLIF($2::jsonb,'null'::jsonb),etag=$3,updated_at=now() WHERE id=$1", id, encoded, etag); err != nil {
 		return "", err
 	}
 	return etag, nil

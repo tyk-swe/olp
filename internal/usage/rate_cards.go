@@ -371,7 +371,7 @@ func CreateRateCard(ctx context.Context, tx pgx.Tx, actor string, organizationID
 	switch {
 	case err == nil:
 		return id, nil
-	case errors.As(err, &pgErr) && pgErr.Code == "23505" || strings.Contains(err.Error(), "rate_cards_owner_key"):
+	case errors.As(err, &pgErr) && pgErr.Code == "23505":
 		return "", access.Fail(http.StatusConflict, "rate_card_exists", "The owner already has a rate card.")
 	default:
 		return "", fmt.Errorf("store rate card: %w", err)
