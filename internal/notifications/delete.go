@@ -50,6 +50,9 @@ func (s *Server) deleteResource(r *http.Request, _ access.Principal, spec deleta
 	if err = p.Project(projectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
+	if err = p.Authorize(notificationOperation(projectID)); err != nil {
+		return access.Reply{}, err
+	}
 	if err = access.Match(r, etag); err != nil {
 		return access.Reply{}, err
 	}
