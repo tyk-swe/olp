@@ -95,7 +95,7 @@ func (s *Server) updateSetting(r *http.Request, _ access.Principal) (access.Repl
 		return access.Reply{}, err
 	}
 	if key == "auth.local_login_enabled" {
-		if err = s.access.EnsureUsableOwner(r, tx); err != nil {
+		if err = s.access.EnsureUsableOwner(r.Context(), tx); err != nil {
 			return access.Reply{}, err
 		}
 	}

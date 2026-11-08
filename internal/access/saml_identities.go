@@ -1,6 +1,7 @@
 package access
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -19,8 +20,8 @@ func samlSignInRole(c samlConfiguration, managed, assigned string, data []byte) 
 	return samlMappedRole(c, f.Email, f.Groups)
 }
 
-func (s *Server) usableSAMLOwner(r *http.Request, q Queryer) (bool, error) {
-	c, err := loadSAML(r, q)
+func (s *Server) usableSAMLOwner(ctx context.Context, q Queryer) (bool, error) {
+	c, err := loadSAML(ctx, q)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -33,7 +34,7 @@ func (s *Server) usableSAMLOwner(r *http.Request, q Queryer) (bool, error) {
 	if _, err = validateSAML(c); err != nil {
 		return false, nil
 	}
-	rows, err := q.Query(r.Context(), "SELECT u.role_management,i.role_claims FROM olp.users u JOIN olp.saml_identities i ON i.user_id=u.id WHERE u.active AND u.oidc_authorized AND u.role='owner' AND u.access_scope='global' AND i.issuer=$1", c.EntityID)
+	rows, err := q.Query(ctx, "SELECT u.role_management,i.role_claims FROM olp.users u JOIN olp.saml_identities i ON i.user_id=u.id WHERE u.active AND u.oidc_authorized AND u.role='owner' AND u.access_scope='global' AND i.issuer=$1", c.EntityID)
 	if err != nil {
 		return false, err
 	}
@@ -64,7 +65,7 @@ func (s *Server) samlIdentities(r *http.Request, p Principal) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	c, err := loadSAML(r, s.Pool)
+	c, err := loadSAML(r.Context(), s.Pool)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return Reply{}, err
 	}
@@ -111,7 +112,7 @@ func (s *Server) unlinkSAML(r *http.Request, _ Principal) (Reply, error) {
 			}
 		}
 		if len(usable) == 0 {
-			c, e := loadSAML(r, tx)
+			c, e := loadSAML(r.Context(), tx)
 			if e != nil && !errors.Is(e, pgx.ErrNoRows) {
 				return Reply{}, e
 			}
@@ -140,7 +141,7 @@ func (s *Server) unlinkSAML(r *http.Request, _ Principal) (Reply, error) {
 			}
 		}
 	}
-	if err = s.EnsureUsableOwner(r, tx); err != nil {
+	if err = s.EnsureUsableOwner(r.Context(), tx); err != nil {
 		return Reply{}, err
 	}
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET etag=$2,updated_at=now() WHERE id=$1", p.ID, NewID()); err != nil {
@@ -168,7 +169,7 @@ func (s *Server) unlinkSAML(r *http.Request, _ Principal) (Reply, error) {
 }
 
 func usableSAMLIdentities(r *http.Request, q Queryer, p Principal) ([]string, error) {
-	c, err := loadSAML(r, q)
+	c, err := loadSAML(r.Context(), q)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !c.Enabled {
 		return nil, nil
 	}

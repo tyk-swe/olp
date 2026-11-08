@@ -1,6 +1,7 @@
 package access
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -55,14 +56,23 @@ type samlSigningKey struct {
 	Certificate []byte `json:"certificate"`
 }
 
-func loadSAML(r *http.Request, q Queryer) (samlConfiguration, error) {
+func ReadSAMLDefinition(ctx context.Context, q Queryer) (SAMLDefinition, bool, error) {
+	var definition SAMLDefinition
+	err := q.QueryRow(ctx, "SELECT document FROM olp.saml_configuration WHERE singleton").Scan(&definition)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return SAMLDefinition{}, false, nil
+	}
+	return definition, err == nil, err
+}
+
+func loadSAML(ctx context.Context, q Queryer) (samlConfiguration, error) {
 	var c samlConfiguration
-	err := q.QueryRow(r.Context(), "SELECT document||jsonb_build_object('id',id,'etag',etag) FROM olp.saml_configuration WHERE singleton").Scan(&c)
+	err := q.QueryRow(ctx, "SELECT document||jsonb_build_object('id',id,'etag',etag) FROM olp.saml_configuration WHERE singleton").Scan(&c)
 	return c, err
 }
 
 func (s *Server) samlConfiguration(r *http.Request, _ Principal) (Reply, error) {
-	c, e := loadSAML(r, s.Pool)
+	c, e := loadSAML(r.Context(), s.Pool)
 	return Detail(c, c.ETag), e
 }
 
@@ -181,7 +191,7 @@ func (s *Server) putSAMLConfiguration(r *http.Request, _ Principal) (Reply, erro
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	old, err := loadSAML(r, tx)
+	old, err := loadSAML(r.Context(), tx)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return Reply{}, err
 	}
@@ -192,16 +202,19 @@ func (s *Server) putSAMLConfiguration(r *http.Request, _ Principal) (Reply, erro
 	} else if r.Header.Get("If-Match") != "" {
 		return Reply{}, Fail(412, "etag_mismatch", "No SAML configuration exists.")
 	}
-	c, err := s.StoreSAMLDefinition(r, tx, p, input.SAMLDefinition, input.Rotate)
+	c, err := s.StoreSAMLDefinition(r.Context(), tx, p, input.SAMLDefinition, input.Rotate)
 	if err != nil {
+		return Reply{}, err
+	}
+	if err = Audit(r.Context(), tx, r, p.Actor(), "saml.configuration.update", "saml_configuration", c.ID, "success"); err != nil {
 		return Reply{}, err
 	}
 	return Detail(c, c.ETag), tx.Commit(r.Context())
 }
 
 // StoreSAMLDefinition is shared by owner management and configuration promotion.
-// Callers hold the installation mutation lock and enforce their own precondition.
-func (s *Server) StoreSAMLDefinition(r *http.Request, tx pgx.Tx, p Principal, d SAMLDefinition, rotate bool) (samlConfiguration, error) {
+// Callers hold the installation mutation lock, enforce their own precondition and audit the update.
+func (s *Server) StoreSAMLDefinition(ctx context.Context, tx pgx.Tx, p Principal, d SAMLDefinition, rotate bool) (samlConfiguration, error) {
 	c := samlConfiguration{SAMLDefinition: d, ServiceProviderID: s.Origin + "/api/v1/saml/metadata"}
 	if err := p.Authorize(Access); err != nil {
 		return c, err
@@ -211,7 +224,7 @@ func (s *Server) StoreSAMLDefinition(r *http.Request, tx pgx.Tx, p Principal, d 
 		return c, err
 	}
 	c.EntityID = metadata.Entity.EntityID
-	old, err := loadSAML(r, tx)
+	old, err := loadSAML(ctx, tx)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return c, err
 	}
@@ -232,7 +245,7 @@ func (s *Server) StoreSAMLDefinition(r *http.Request, tx pgx.Tx, p Principal, d 
 		}
 		defer clear(raw)
 		defer clear(key.Private)
-		if e = s.Keys.Store(r.Context(), tx, s.Installation, c.ID, secrets.SAMLKey, raw, nil); e != nil {
+		if e = s.Keys.Store(ctx, tx, s.Installation, c.ID, secrets.SAMLKey, raw, nil); e != nil {
 			return c, e
 		}
 		c.Certificate = encodeSAMLCertificate(key.Certificate)
@@ -241,30 +254,26 @@ func (s *Server) StoreSAMLDefinition(r *http.Request, tx pgx.Tx, p Principal, d 
 	if err != nil {
 		return c, err
 	}
-	if _, err = tx.Exec(r.Context(), `INSERT INTO olp.saml_configuration(singleton,id,document,etag,updated_by) VALUES(true,$1,$2,$3,$4) ON CONFLICT(singleton) DO UPDATE SET document=excluded.document,etag=excluded.etag,updated_by=excluded.updated_by,updated_at=now()`, c.ID, raw, c.ETag, p.UserID()); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO olp.saml_configuration(singleton,id,document,etag,updated_by) VALUES(true,$1,$2,$3,$4) ON CONFLICT(singleton) DO UPDATE SET document=excluded.document,etag=excluded.etag,updated_by=excluded.updated_by,updated_at=now()`, c.ID, raw, c.ETag, p.UserID()); err != nil {
 		return c, err
 	}
 	// Role evidence comes from the IdP's signed attributes, which a new SP
 	// signing key leaves unchanged.
 	if old.EntityID != c.EntityID || old.EmailAttribute != c.EmailAttribute || old.GroupsAttribute != c.GroupsAttribute {
-		if _, err = tx.Exec(r.Context(), "UPDATE olp.saml_identities SET role_claims=NULL"); err != nil {
+		if _, err = tx.Exec(ctx, "UPDATE olp.saml_identities SET role_claims=NULL"); err != nil {
 			return c, err
 		}
 	}
-	if err = s.EnsureUsableOwner(r, tx); err != nil {
+	if err = s.EnsureUsableOwner(ctx, tx); err != nil {
 		return c, err
 	}
-	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE purpose=$1", secrets.SAMLFlow); err != nil {
+	if _, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE purpose=$1", secrets.SAMLFlow); err != nil {
 		return c, err
 	}
 	if !c.Enabled {
-		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE auth_method='saml'"); err != nil {
+		if _, err = tx.Exec(ctx, "DELETE FROM olp.sessions WHERE auth_method='saml'"); err != nil {
 			return c, err
 		}
-	}
-
-	if err = Audit(r.Context(), tx, r, p.Actor(), "saml.configuration.update", "saml_configuration", c.ID, "success"); err != nil {
-		return c, err
 	}
 	return c, nil
 }
@@ -300,7 +309,7 @@ func (s *Server) importSAMLMetadata(r *http.Request, _ Principal) (Reply, error)
 }
 
 func (s *Server) samlMetadata(w http.ResponseWriter, r *http.Request, _ Principal) error {
-	c, err := loadSAML(r, s.Pool)
+	c, err := loadSAML(r.Context(), s.Pool)
 	if err != nil {
 		return err
 	}

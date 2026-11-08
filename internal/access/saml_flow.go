@@ -80,7 +80,7 @@ func (s *Server) beginSAML(r *http.Request, kind string) (Reply, error) {
 	} else if input.Purpose != "" || input.Resource != "" {
 		return Reply{}, Invalid("purpose", "This flow has no recent-authentication purpose.")
 	}
-	c, err := loadSAML(r, s.Pool)
+	c, err := loadSAML(r.Context(), s.Pool)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -107,7 +107,7 @@ func (s *Server) beginSAML(r *http.Request, kind string) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	current, err := loadSAML(r, tx)
+	current, err := loadSAML(r.Context(), tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -182,7 +182,7 @@ func (s *Server) samlACS(r *http.Request) (Reply, error) {
 	if received != nil {
 		return Reply{}, Fail(403, "saml_flow_invalid", "This SAML response was already received.")
 	}
-	c, err := loadSAML(r, s.Pool)
+	c, err := loadSAML(r.Context(), s.Pool)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -228,7 +228,7 @@ func (s *Server) samlACS(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	current, err := loadSAML(r, tx)
+	current, err := loadSAML(r.Context(), tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -289,7 +289,7 @@ func (s *Server) completeSAML(r *http.Request) (Reply, error) {
 	if received == nil || flow.Facts == nil || !hmac.Equal(digest, s.Auth.Digest(secrets.SAMLCookieDigest, cookieValue(r, "__Host-olp_saml_"+flow.ID))) {
 		return Reply{}, Fail(403, "saml_flow_invalid", "Use the browser that started SAML sign-in.")
 	}
-	c, err := loadSAML(r, tx)
+	c, err := loadSAML(r.Context(), tx)
 	if err != nil {
 		return Reply{}, err
 	}

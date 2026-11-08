@@ -278,7 +278,7 @@ func (s *Server) writeProjectMember(r *http.Request, remove bool) (access.Reply,
 	if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
 		return access.Reply{}, err
 	}
-	if err = s.access.EnsureUsableOwner(r, tx); err != nil {
+	if err = s.access.EnsureUsableOwner(r.Context(), tx); err != nil {
 		return access.Reply{}, err
 	}
 	etag = access.NewID()

@@ -84,7 +84,7 @@ func (s *Server) scimWrite(r *http.Request, _ Principal, group bool) (Reply, err
 		}
 		return Reply{}, err
 	}
-	if err = s.EnsureUsableOwner(r, tx); err != nil {
+	if err = s.EnsureUsableOwner(r.Context(), tx); err != nil {
 		return Reply{}, err
 	}
 	if _, err = AdvanceAuthority(r.Context(), tx); err != nil {

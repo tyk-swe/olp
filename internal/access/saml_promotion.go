@@ -2,7 +2,6 @@ package access
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"reflect"
 
@@ -10,12 +9,8 @@ import (
 )
 
 func LoadSAMLDefinition(ctx context.Context, q Queryer) (*SAMLDefinition, error) {
-	var definition SAMLDefinition
-	err := q.QueryRow(ctx, "SELECT document FROM olp.saml_configuration WHERE singleton").Scan(&definition)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
+	definition, ok, err := ReadSAMLDefinition(ctx, q)
+	if !ok {
 		return nil, err
 	}
 	return &definition, nil
@@ -32,6 +27,9 @@ func (s *Server) ApplySAMLDefinition(r *http.Request, tx pgx.Tx, p Principal, de
 	if reflect.DeepEqual(current, definition) {
 		return nil
 	}
-	_, err = s.StoreSAMLDefinition(r, tx, p, *definition, false)
-	return err
+	c, err := s.StoreSAMLDefinition(r.Context(), tx, p, *definition, false)
+	if err != nil {
+		return err
+	}
+	return Audit(r.Context(), tx, r, p.Actor(), "saml.configuration.update", "saml_configuration", c.ID, "success")
 }
