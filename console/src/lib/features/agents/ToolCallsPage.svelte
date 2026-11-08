@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { formatDate, stateLabel } from '$lib/format';
-  import ScrollTable from '$lib/components/ScrollTable.svelte';
+  import { formatDate, stateLabel } from '#lib/format.js';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import { writable } from 'svelte/store';
-  import { errorMessage } from '$lib/management/http';
-  import { listProjects } from '$lib/features/access/projects/api';
-  import { projectKeys } from '$lib/features/access/projects/projectKeys';
+  import { errorMessage } from '#lib/management/http.js';
+  import { listProjects } from '#lib/features/access/projects/api.js';
+  import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
   import { agentKeys } from './agentKeys';
   import { listToolCalls } from './api';
 
@@ -99,9 +99,10 @@
               <code>{value.tool_alias}</code>
               <details>
                 <summary>Attempt {value.id}</summary>
-                <a href={resolve(`/tool-calls/${value.id}`)}
+                <a href={resolve(`tool-calls/${value.id}`)}
                   >Inspect and resolve</a
                 >
+
                 <dl class="detail-list">
                   <dt>Dispatch</dt>
                   <dd><code>{value.dispatch_id}</code></dd>

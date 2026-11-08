@@ -1,7 +1,7 @@
 import { goto } from '$app/navigation';
 import { resolve } from '$app/paths';
-import { page } from '$app/state';
-import type { Pathname } from '$app/types';
+import { page, type ReadonlyURLSearchParams } from '$app/state';
+import type { Path } from '$app/types';
 
 /**
  * How a list page maps between its URL and its in-memory state. The URL is
@@ -9,11 +9,11 @@ import type { Pathname } from '$app/types';
  * the draft form and cursor history between navigations.
  */
 export type ListUrlSpec<State extends object> = {
-  path: Pathname;
+  path: Path;
   /** The state a URL describes. */
-  state: (search: URLSearchParams) => State;
+  state: (search: ReadonlyURLSearchParams) => State;
   /** The canonical search string for a URL, or null when it is invalid. */
-  canonical: (search: URLSearchParams) => string | null;
+  canonical: (search: ReadonlyURLSearchParams) => string | null;
 };
 
 /**
@@ -34,10 +34,8 @@ export function syncListWithUrl<State extends object>(
       const suffix = canonical ? `?${canonical}` : '';
       if (search !== suffix) {
         void goto(
-          resolve(
-            `${spec.path}${options.detail?.() ?? ''}${suffix}` as Pathname
-          ),
-          { replaceState: true, keepFocus: true, noScroll: true }
+          resolve(`${spec.path}${options.detail?.() ?? ''}${suffix}` as Path),
+          { replace: true, reset: false }
         );
       }
     }
@@ -61,12 +59,8 @@ export function applyListSearch<State extends object>(
   if (search === page.url.searchParams.toString()) {
     Object.assign(listState, spec.state(page.url.searchParams));
   } else {
-    void goto(
-      resolve(`${spec.path}${search ? `?${search}` : ''}` as Pathname),
-      {
-        keepFocus: true,
-        noScroll: true
-      }
-    );
+    void goto(resolve(`${spec.path}${search ? `?${search}` : ''}` as Path), {
+      reset: false
+    });
   }
 }

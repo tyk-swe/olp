@@ -1,10 +1,10 @@
 <script lang="ts">
   import { page } from '$app/state';
-  import { syncListWithUrl } from '$lib/listing/urlSync.svelte';
+  import { syncListWithUrl } from '#lib/listing/urlSync.svelte.js';
   import {
     requestList,
     requestUrl
-  } from '$lib/features/usage/history/requestListState';
+  } from '#lib/features/usage/history/requestListState.js';
 
   let { children } = $props();
   const listState = $state(requestUrl.state(page.url.searchParams));

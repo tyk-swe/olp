@@ -1,11 +1,11 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { useQueryClient } from '@tanstack/svelte-query';
-  import { useAction } from '$lib/editing/action.svelte';
-  import { guardUnsavedChanges } from '$lib/editing/unsavedChanges';
-  import ConflictNotice from '$lib/shell/ConflictNotice.svelte';
-  import { useMutationIntent } from '$lib/editing/mutationIntent.svelte';
-  import { parseJsonObject } from '$lib/editing/json';
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
+  import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
+  import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
+  import { parseJsonObject } from '#lib/editing/json.js';
   import type { RoutingPolicy } from './api';
   import { fidelityOptions, type FidelityMode } from './routeFidelity';
   import { saveTemplate, type RouteTemplate } from './api';

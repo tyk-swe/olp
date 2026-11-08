@@ -1,15 +1,15 @@
-import { overviewKeys } from '$lib/features/overview/overviewKeys';
-import { providerKeys } from '$lib/features/providers/providerKeys';
-import { routeKeys } from '$lib/features/routes/routeKeys';
+import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
+import { providerKeys } from '#lib/features/providers/providerKeys.js';
+import { routeKeys } from '#lib/features/routes/routeKeys.js';
 import { onDestroy, untrack } from 'svelte';
 import { SvelteSet } from 'svelte/reactivity';
 import { goto } from '$app/navigation';
-import { guardUnsavedChanges } from '$lib/editing/unsavedChanges';
-import { nativeObject, parseNativeJSON } from '$lib/nativeJson';
-import type { components } from '$lib/management/schema';
+import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
+import { nativeObject, parseNativeJSON } from '#lib/nativeJson.js';
+import type { components } from '#lib/management/schema.js';
 import { resolve } from '$app/paths';
 import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-import { errorMessage, isEtagMismatch } from '$lib/management/http';
+import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
 import {
   beginReload,
   conflictNotice,
@@ -19,7 +19,7 @@ import {
   markSaved,
   reconcile,
   acceptRemote
-} from '$lib/editing/concurrentEdit';
+} from '#lib/editing/concurrentEdit.js';
 import {
   listOperationDialects,
   activateRoute,
@@ -32,17 +32,17 @@ import {
   type RouteActivation,
   type RouteDraft,
   type RouteSimulation
-} from '$lib/features/routes/api';
-import { listProviderModelInventory } from '$lib/features/providers/models';
-import { listPublications } from '$lib/features/agents/api';
-import { agentKeys } from '$lib/features/agents/agentKeys';
+} from '#lib/features/routes/api.js';
+import { listProviderModelInventory } from '#lib/features/providers/models.js';
+import { listPublications } from '#lib/features/agents/api.js';
+import { agentKeys } from '#lib/features/agents/agentKeys.js';
 import {
   discoveredOperations,
   discoveredSurfaces,
   inspectionDialects
-} from '$lib/features/routes/inspectionDialects';
-import { useRole } from '$lib/features/access/session/useRole.svelte';
-import { authLifecycle } from '$lib/features/access/session/lifecycle';
+} from '#lib/features/routes/inspectionDialects.js';
+import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
 import {
   buildCreateRouteDraftInput,
   buildReplaceRouteDraftInput,
@@ -58,8 +58,8 @@ import {
   type EditablePolicyRule,
   type EditableTarget,
   type RouteBehavior
-} from '$lib/features/routes/routeEditor';
-import { useMutationIntent } from '$lib/editing/mutationIntent.svelte';
+} from '#lib/features/routes/routeEditor.js';
+import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
 
 const simulationNotice =
   'Deterministic attempt order calculated from the saved draft.';
@@ -243,6 +243,7 @@ export class RouteDraftEditorState {
     const partition = user ? authLifecycle.principalPartition(user) : '';
     const samePrincipal = () => {
       const current = authLifecycle.snapshot().user;
+
       return (
         partition === (current ? authLifecycle.principalPartition(current) : '')
       );
@@ -345,7 +346,7 @@ export class RouteDraftEditorState {
     if (!this.canManage || this.busy) return;
     if (this.createdDraftId) {
       await this.run('open', async (isCurrent) => {
-        if (isCurrent()) await goto(resolve(`/routes/${this.createdDraftId}`));
+        if (isCurrent()) await goto(resolve(`routes/${this.createdDraftId}`));
       });
       return;
     }
@@ -376,7 +377,7 @@ export class RouteDraftEditorState {
         if (isCurrent())
           this.errorMessage = `Draft saved, but refreshing failed. ${errorMessage(cause)}`;
       }
-      if (isCurrent()) await goto(resolve(`/routes/${id}`));
+      if (isCurrent()) await goto(resolve(`routes/${id}`));
     });
   };
   save = async (current: RouteDraft) => {
@@ -505,7 +506,7 @@ export class RouteDraftEditorState {
       });
       if (!isCurrent()) return;
       this.sync = initialConcurrentEdit();
-      await goto(resolve('/routes'));
+      await goto(resolve('routes'));
     });
   };
   constructor(readRouteId: () => string | undefined) {

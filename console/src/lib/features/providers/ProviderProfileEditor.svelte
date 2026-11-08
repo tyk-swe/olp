@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
-  import { nativeEntries, nativeObject } from '$lib/nativeJson';
+  import { nativeEntries, nativeObject } from '#lib/nativeJson.js';
   import type { Provider } from './providers';
   import type { ProviderEditValues, RunProviderAction } from './providerEditor';
   import { profileScopedSettings } from './configurationDraft.svelte';

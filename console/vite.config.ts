@@ -1,3 +1,4 @@
+import adapter from '@sveltejs/adapter-static';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vitest/config';
 
@@ -26,7 +27,15 @@ export default defineConfig({
     // policy even when a small Unicode subset falls below Vite's inline limit.
     assetsInlineLimit: 0
   },
-  plugins: [sveltekit()],
+  plugins: [
+    sveltekit({
+      adapter: adapter({
+        fallback: 'index.html',
+        precompress: true,
+        strict: true
+      })
+    })
+  ],
   test: {
     allowOnly: false,
     clearMocks: true,

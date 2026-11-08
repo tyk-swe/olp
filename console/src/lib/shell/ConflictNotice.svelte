@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ConflictNoticeKind } from '$lib/editing/concurrentEdit';
+  import type { ConflictNoticeKind } from '#lib/editing/concurrentEdit.js';
 
   let {
     notice,

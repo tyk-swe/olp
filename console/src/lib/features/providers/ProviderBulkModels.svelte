@@ -1,14 +1,14 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { usePrincipalLifetime } from '$lib/editing/mutationIntent.svelte';
-  import { stringifyNativeJSON } from '$lib/nativeJson';
+  import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
+  import { stringifyNativeJSON } from '#lib/nativeJson.js';
   import { createQuery } from '@tanstack/svelte-query';
-  import { collectCursorPages } from '$lib/management/pagination';
+  import { collectCursorPages } from '#lib/management/pagination.js';
   import {
     ApiProblem,
     errorMessage,
     serializeIfMatch
-  } from '$lib/management/http';
+  } from '#lib/management/http.js';
   import { certificationPrerequisiteReady } from './providerEditor';
   import { providerKeys } from './providerKeys';
   import { getProvider, probeProvider, type Provider } from './providers';

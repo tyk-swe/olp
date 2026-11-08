@@ -1,8 +1,8 @@
 import SinksPage from './SinksPage.svelte';
 import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, getAllContexts, mount, unmount } from 'svelte';
-import { json, serve } from '$lib/management/test/transport';
-import type { ManagementOperation } from '$lib/management/requirements';
+import { json, serve } from '#lib/management/test/transport.js';
+import type { ManagementOperation } from '#lib/management/requirements.js';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import SinkEditor from './SinkEditor.svelte';
 import type { Sink } from './api';

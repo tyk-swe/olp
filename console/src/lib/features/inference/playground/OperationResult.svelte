@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { stringifyNativeJSON } from '$lib/nativeJson';
-  import { downloadBlob } from '$lib/download';
+  import { stringifyNativeJSON } from '#lib/nativeJson.js';
+  import { downloadBlob } from '#lib/download.js';
   import {
     nativeCountFields,
     rerankRows,

@@ -1,4 +1,4 @@
-import type { components } from '$lib/management/schema';
+import type { components } from '#lib/management/schema.js';
 
 export function optionalDecimal(value: string): string | null {
   const decimal = value.trim();

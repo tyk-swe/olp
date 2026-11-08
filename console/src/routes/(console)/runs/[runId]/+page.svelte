@@ -1,6 +1,6 @@
 <script lang="ts">
   import { page } from '$app/state';
-  import RunDetailPage from '$lib/features/agents/RunDetailPage.svelte';
+  import RunDetailPage from '#lib/features/agents/RunDetailPage.svelte';
 </script>
 
 {#key page.params.runId}

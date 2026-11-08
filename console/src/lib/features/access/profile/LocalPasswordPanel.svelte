@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { PASSWORD_TOO_SHORT } from '$lib/passwordPolicy';
+  import { PASSWORD_TOO_SHORT } from '#lib/passwordPolicy.js';
 
   type Props = {
     identitiesPending: boolean;

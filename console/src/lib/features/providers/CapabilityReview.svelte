@@ -1,16 +1,16 @@
 <script lang="ts">
-  import { guardUnsavedChanges } from '$lib/editing/unsavedChanges';
+  import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
   import {
     type CapabilityCertification,
     type CapabilityDeclaration,
     type ProviderModel
-  } from '$lib/features/providers/models';
+  } from '#lib/features/providers/models.js';
   import {
     capabilityLimitReached,
     MAX_REVIEWED_CAPABILITIES
-  } from '$lib/features/providers/providerEditor';
-  import ConflictNotice from '$lib/shell/ConflictNotice.svelte';
-  import { stateLabel } from '$lib/format';
+  } from '#lib/features/providers/providerEditor.js';
+  import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
+  import { stateLabel } from '#lib/format.js';
   import CapabilityEvidence from './CapabilityEvidence.svelte';
   import {
     beginReload,
@@ -19,7 +19,7 @@
     markDirty,
     markSaved,
     reconcile
-  } from '$lib/editing/concurrentEdit';
+  } from '#lib/editing/concurrentEdit.js';
 
   let {
     model,

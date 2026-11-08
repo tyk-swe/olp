@@ -3,9 +3,9 @@
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
   import { createQuery } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
-  import { listProjectMemberships } from '$lib/features/access/projects/api';
-  import { projectKeys } from '$lib/features/access/projects/projectKeys';
+  import { errorMessage } from '#lib/management/http.js';
+  import { listProjectMemberships } from '#lib/features/access/projects/api.js';
+  import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
   import {
     createInvestigation,
     type InvestigationEvidence,
@@ -74,7 +74,7 @@
     error = '';
     try {
       const saved = await createInvestigation(input, requestID);
-      await goto(resolve(`/investigations/${saved.id}`));
+      await goto(resolve(`investigations/${saved.id}`));
     } catch (cause) {
       error = errorMessage(cause);
     } finally {
@@ -84,7 +84,9 @@
 </script>
 
 <svelte:head><title>New investigation · OpenLLMProxy</title></svelte:head>
-<a class="text-button" href={resolve('/investigations')}>All investigations</a>
+
+<a class="text-button" href={resolve('investigations')}>All investigations</a>
+
 <div class="page-header">
   <div>
     <p class="eyebrow">Agents</p>
@@ -134,15 +136,19 @@
           name="max_duration_ms"
           min="0"
           step="1"
-        /></label
-      >
-      <label class="form-field"
-        >Error
-        <select name="error"
-          ><option value="">Any</option><option value="true">Error</option
-          ><option value="false">No error</option></select
-        >
+        />
       </label>
+
+      <label class="form-field">
+        Error
+
+        <select name="error">
+          <option value="">Any</option>
+          <option value="true">Error</option>
+          <option value="false">No error</option>
+        </select>
+      </label>
+
       <label class="form-field"
         >Tool <input name="tool" maxlength="256" /></label
       >

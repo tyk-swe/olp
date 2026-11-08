@@ -1,13 +1,13 @@
 <script lang="ts">
-  import ConfirmAction from '$lib/components/ConfirmAction.svelte';
+  import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
-  import ProjectScopeField from '$lib/features/access/projects/ProjectScopeField.svelte';
+  import { errorMessage } from '#lib/management/http.js';
+  import ProjectScopeField from '#lib/features/access/projects/ProjectScopeField.svelte';
   import { notificationKeys } from './notificationKeys';
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/editing/mutationIntent.svelte';
+  } from '#lib/editing/mutationIntent.svelte.js';
   import {
     createNotificationDestination,
     deleteNotificationDestination,

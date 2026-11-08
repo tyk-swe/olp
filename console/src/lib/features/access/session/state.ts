@@ -1,5 +1,5 @@
-import type { ManagementOperation } from '$lib/management/requirements';
-import type { FixedRole } from '$lib/features/access/session/authorization';
+import type { ManagementOperation } from '#lib/management/requirements.js';
+import type { FixedRole } from '#lib/features/access/session/authorization.js';
 
 export type AuthenticatedUser = {
   id: string;

@@ -3,7 +3,7 @@ import type {
   PricingSourceSnapshot,
   ReferenceCatalog
 } from './pricingSources';
-import { formatDate } from '$lib/format';
+import { formatDate } from '#lib/format.js';
 
 /** How a pricing source is read, as the console names it. */
 export function sourceFormatLabel(source: Pick<PricingSource, 'format'>) {

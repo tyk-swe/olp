@@ -1,7 +1,7 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
-  import type { UsageCompleteness } from '$lib/features/usage/usage';
-  import { presentUsageCompleteness } from '$lib/features/usage/completenessPresentation';
+  import type { UsageCompleteness } from '#lib/features/usage/usage.js';
+  import { presentUsageCompleteness } from '#lib/features/usage/completenessPresentation.js';
 
   let { completeness }: { completeness: UsageCompleteness } = $props();
   const presentation = $derived(presentUsageCompleteness(completeness));
@@ -18,7 +18,7 @@
       <strong id="completeness-title">{presentation.title}</strong>
       <p>{presentation.detail}</p>
     </div>
-    <a href={resolve('/health')}>Open health</a>
+    <a href={resolve('health')}>Open health</a>
   </section>
 {:else}
   <p class="complete-banner">

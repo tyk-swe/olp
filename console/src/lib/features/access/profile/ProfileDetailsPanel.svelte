@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { UserProfile } from '$lib/features/access/profile/api';
+  import type { UserProfile } from '#lib/features/access/profile/api.js';
 
   type Props = {
     profile: UserProfile;

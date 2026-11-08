@@ -1,7 +1,7 @@
-import { apiClient } from '$lib/management/client';
-import { ensureOk, unwrap, unwrapPage } from '$lib/management/http';
-import { collectCursorPages } from '$lib/management/pagination';
-import type { components } from '$lib/management/schema';
+import { apiClient } from '#lib/management/client.js';
+import { ensureOk, unwrap, unwrapPage } from '#lib/management/http.js';
+import { collectCursorPages } from '#lib/management/pagination.js';
+import type { components } from '#lib/management/schema.js';
 export type Organization = components['schemas']['Organization'];
 export async function listOrganizations(signal?: AbortSignal) {
   return collectCursorPages(async (cursor) =>

@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import type { Grant } from '$lib/features/access/session/authorization';
+import type { Grant } from '#lib/features/access/session/authorization.js';
 import {
   MANAGEMENT_REQUIREMENTS,
   type ManagementOperation
-} from '$lib/management/requirements';
+} from '#lib/management/requirements.js';
 import {
   isActivePath,
   NAVIGATION_GROUPS,
   navigationEntries
-} from '$lib/shell/navigation';
+} from '#lib/shell/navigation.js';
 
 const everyOperation = [
   ...new Set(

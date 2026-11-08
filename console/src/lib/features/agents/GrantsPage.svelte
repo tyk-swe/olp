@@ -1,15 +1,15 @@
 <script lang="ts">
-  import { formatDate } from '$lib/format';
-  import ScrollTable from '$lib/components/ScrollTable.svelte';
+  import { formatDate } from '#lib/format.js';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { onMount } from 'svelte';
   import { writable } from 'svelte/store';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import { errorMessage } from '#lib/management/http.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/editing/mutationIntent.svelte';
+  } from '#lib/editing/mutationIntent.svelte.js';
   import { agentKeys } from './agentKeys';
   import DelegationConsent from './DelegationConsent.svelte';
   import {

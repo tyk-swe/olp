@@ -1,4 +1,4 @@
-import { errorMessage, isEtagMismatch } from '$lib/management/http';
+import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
 import { usePrincipalLifetime } from './mutationIntent.svelte';
 
 export function useAction(refreshOnConflict?: () => Promise<void>) {

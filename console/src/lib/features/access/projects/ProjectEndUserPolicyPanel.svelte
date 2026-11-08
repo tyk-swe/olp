@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
+  import { errorMessage } from '#lib/management/http.js';
   import PolicyFields from '../end-users/PolicyFields.svelte';
   import { policyError, policyForm, policyInput } from '../end-users/policy';
   import {

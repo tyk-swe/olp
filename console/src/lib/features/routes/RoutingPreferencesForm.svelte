@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { parseJsonObject } from '$lib/editing/json';
-  import { parseManualModelNames } from '$lib/features/providers/providerEditor';
+  import { parseJsonObject } from '#lib/editing/json.js';
+  import { parseManualModelNames } from '#lib/features/providers/providerEditor.js';
   let {
     value = $bindable('{}'),
     id = 'routing-preferences',

@@ -3,15 +3,15 @@
     CapabilityCertification,
     CapabilityDeclaration,
     ProviderModel
-  } from '$lib/features/providers/models';
-  import type { Provider } from '$lib/features/providers/providers';
+  } from '#lib/features/providers/models.js';
+  import type { Provider } from '#lib/features/providers/providers.js';
   import {
     cursorPaginationProps,
     type CursorHistory
-  } from '$lib/listing/pagination';
-  import CursorPagination from '$lib/shell/CursorPagination.svelte';
-  import { formatDate } from '$lib/format';
-  import CapabilityReview from '$lib/features/providers/CapabilityReview.svelte';
+  } from '#lib/listing/pagination.js';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import { formatDate } from '#lib/format.js';
+  import CapabilityReview from '#lib/features/providers/CapabilityReview.svelte';
 
   let {
     provider,

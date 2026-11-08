@@ -1,12 +1,12 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
-  import type { Provider } from '$lib/features/providers/providers';
-  import NavIcon from '$lib/shell/NavIcon.svelte';
+  import type { Provider } from '#lib/features/providers/providers.js';
+  import NavIcon from '#lib/shell/NavIcon.svelte';
   import {
     activationReady,
     capabilitiesCertified,
     probeReady
-  } from '$lib/features/providers/providerEditor';
+  } from '#lib/features/providers/providerEditor.js';
 
   let {
     provider,
@@ -45,17 +45,19 @@
       runtime generation.
     </p>
     <div class="form-actions">
-      <a class="button button-primary" href={resolve('/routes/new')}
+      <a class="button button-primary" href={resolve('routes/new')}
         >Build default route <NavIcon name="arrow" /></a
       >
-      {#if onAddAnother}<button
+
+      {#if onAddAnother}
+        <button
           class="button button-secondary"
           type="button"
           onclick={onAddAnother}>Add another connection</button
         >{/if}
       <a
         class="button button-secondary"
-        href={resolve(`/providers/${provider?.id}`)}>View provider</a
+        href={resolve(`providers/${provider?.id}`)}>View provider</a
       >
     </div>
   </section>
@@ -84,7 +86,9 @@
           type="button"
           onclick={onBack}
           {disabled}>Back</button
-        >{/if}
+        >
+      {/if}
+
       <button
         class="button button-secondary"
         type="button"

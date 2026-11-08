@@ -1,4 +1,4 @@
-import { snapshotNativeJSON, stringifyNativeJSON } from '$lib/nativeJson';
+import { snapshotNativeJSON, stringifyNativeJSON } from '#lib/nativeJson.js';
 
 /** One form's logical submission. An unchanged retry keeps both its request
  * identity and constructed payload (including destination-generated dates).

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { errorMessage } from '$lib/management/http';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { errorMessage } from '#lib/management/http.js';
   import { getPublication, putPublication } from './api';
   import { catalogKeys } from './catalogKeys';
   let { projectId }: { projectId: string } = $props();

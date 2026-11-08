@@ -1,4 +1,4 @@
-import type { RequestQuery } from '$lib/features/usage/history/requestListState';
+import type { RequestQuery } from '#lib/features/usage/history/requestListState.js';
 
 export const requestKeys = {
   page: (applied: RequestQuery, cursor?: string) =>

@@ -2,37 +2,41 @@
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/editing/mutationIntent.svelte';
+  } from '#lib/editing/mutationIntent.svelte.js';
 
   import { currentBudgetLimit } from './budgetPresentation';
-  import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
+  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
   const services = useServiceCapabilities();
-  import { apiKeyKeys } from '$lib/features/access/api-keys/apiKeyKeys';
-  import { overviewKeys } from '$lib/features/overview/overviewKeys';
+  import { apiKeyKeys } from '#lib/features/access/api-keys/apiKeyKeys.js';
+  import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
 
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
-  import { cursorPaginationProps, resetCursor } from '$lib/listing/pagination';
+  import { errorMessage } from '#lib/management/http.js';
+  import {
+    cursorPaginationProps,
+    resetCursor
+  } from '#lib/listing/pagination.js';
+
   import {
     listApiKeyPage,
     revokeApiKey,
     rotateApiKey,
     type ApiKey,
     type ApiKeySecret
-  } from '$lib/features/access/api-keys/api';
-  import SecretDialog from '$lib/shell/SecretDialog.svelte';
-  import CursorPagination from '$lib/shell/CursorPagination.svelte';
-  import NavIcon from '$lib/shell/NavIcon.svelte';
-  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
-  import { formatBudget, formatDate } from '$lib/format';
+  } from '#lib/features/access/api-keys/api.js';
+  import SecretDialog from '#lib/shell/SecretDialog.svelte';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import NavIcon from '#lib/shell/NavIcon.svelte';
+  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import { formatBudget, formatDate } from '#lib/format.js';
   import {
     budgetState,
     budgetStateLabel
-  } from '$lib/features/access/api-keys/budgetPresentation';
-  import type { ApiKeyListState } from '$lib/features/access/api-keys/apiKeyListState';
+  } from '#lib/features/access/api-keys/budgetPresentation.js';
+  import type { ApiKeyListState } from '#lib/features/access/api-keys/apiKeyListState.js';
   import { isApiKeyExpired, isApiKeyUsable } from './apiKeyLifecycle';
 
   const revokeApiKeyIntent = useMutationIntent();
@@ -96,26 +100,26 @@
   );
 
   async function filterIssuer(value: string) {
-    const url = new URL(page.url);
+    const url = new URL(page.url.href);
     const id = value.trim().toLowerCase();
     if (id) url.searchParams.set('created_by', id);
     else url.searchParams.delete('created_by');
     const target = url.search
-      ? resolve(`/api-keys?${url.searchParams}${url.hash}`)
+      ? resolve(`api-keys?${url.searchParams}${url.hash}`)
       : url.hash
-        ? resolve(`/api-keys#${url.hash.slice(1)}`)
-        : resolve('/api-keys');
-    await goto(target, {
-      keepFocus: true,
-      noScroll: true
-    });
+        ? resolve(`api-keys#${url.hash.slice(1)}`)
+        : resolve('api-keys');
+
+    await goto(target, { reset: false });
   }
 
   async function rotate(key: ApiKey) {
     const isCurrent = captureOwner();
+
     if (!/^\d+$/.test(overlapSeconds) || Number(overlapSeconds) > 86400) {
       rotationError =
         'Overlap must be a whole number of seconds from 0 to 86400.';
+
       return;
     }
     busy = `rotate-${key.id}`;
@@ -171,10 +175,10 @@
       limits.
     </p>
   </div>
-  {#if canManage}<a
-      class="button button-primary"
-      href={resolve('/api-keys/new')}>Create key <NavIcon name="arrow" /></a
-    >{/if}
+  {#if canManage}<a class="button button-primary" href={resolve('api-keys/new')}
+      >Create key <NavIcon name="arrow" /></a
+    >
+  {/if}
 </div>
 {#if !services.limitsEnforced}<p class="muted" role="status">
     Limit and budget policies are saved but not enforced yet.
@@ -251,8 +255,9 @@
         >{/if}
       {#if canManage && !createdBy}<a
           class="button button-primary"
-          href={resolve('/api-keys/new')}>Create first key</a
-        >{/if}
+          href={resolve('api-keys/new')}>Create first key</a
+        >
+      {/if}
     </div>
   </section>
 {:else}
@@ -369,9 +374,9 @@
                 <small>No cost budget</small>
               {/if}
             </td>
-            <td
-              ><a
-                href={`${resolve('/api-keys')}?created_by=${key.created_by}`}
+            <td>
+              <a
+                href={`${resolve('api-keys')}?created_by=${key.created_by}`}
                 aria-label={`Review API keys issued by ${key.created_by_email}`}
                 >{key.created_by_email}</a
               ><br /><small>{formatDate(key.created_at)}</small></td
@@ -380,9 +385,11 @@
               ><div class="row-actions">
                 {#if services.gatewayAvailable}<a
                     class="button button-secondary"
-                    href={resolve(`/usage?api_key_id=${key.id}`)}
+                    href={resolve(`usage?api_key_id=${key.id}`)}
                     aria-label={`Usage for ${key.name}`}>Usage</a
-                  >{/if}
+                  >
+                {/if}
+
                 <button
                   class="button button-secondary"
                   type="button"

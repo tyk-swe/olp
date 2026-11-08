@@ -1,14 +1,14 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import { importSubscriptionCredentials } from '$lib/features/providers/grants';
+  import { importSubscriptionCredentials } from '#lib/features/providers/grants.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { getProvider } from '$lib/features/providers/providers';
-  import { listProviderKinds } from '$lib/features/providers/models';
-  import { providerKeys } from '$lib/features/providers/providerKeys';
-  import { requiresGrant } from '$lib/features/providers/providerEditor';
-  import { GrantEnrollmentState } from '$lib/features/providers/grantEnrollment.svelte';
-  import GrantEnrollmentPanel from '$lib/features/providers/GrantEnrollmentPanel.svelte';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import { getProvider } from '#lib/features/providers/providers.js';
+  import { listProviderKinds } from '#lib/features/providers/models.js';
+  import { providerKeys } from '#lib/features/providers/providerKeys.js';
+  import { requiresGrant } from '#lib/features/providers/providerEditor.js';
+  import { GrantEnrollmentState } from '#lib/features/providers/grantEnrollment.svelte.js';
+  import GrantEnrollmentPanel from '#lib/features/providers/GrantEnrollmentPanel.svelte';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
 
   let {
     providerId,

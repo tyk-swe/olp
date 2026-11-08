@@ -1,7 +1,7 @@
-import { parseMFAChallenge } from '$lib/features/access/mfa/api';
-import type { components } from '$lib/management/schema';
-import { apiClient } from '$lib/management/client';
-import { ensureOk, unwrap, unwrapOutcome } from '$lib/management/http';
+import { parseMFAChallenge } from '#lib/features/access/mfa/api.js';
+import type { components } from '#lib/management/schema.js';
+import { apiClient } from '#lib/management/client.js';
+import { ensureOk, unwrap, unwrapOutcome } from '#lib/management/http.js';
 
 export type UserProfile = components['schemas']['UserDetailResponse'];
 export type OidcIdentityList =

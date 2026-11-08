@@ -1,9 +1,10 @@
-import type { MediaJobFilters } from '$lib/features/media/api';
-import { MEDIA_JOB_PAGE_SIZE } from '$lib/management/pageSizes';
+import type { ReadonlyURLSearchParams } from '$app/state';
+import type { MediaJobFilters } from '#lib/features/media/api.js';
+import { MEDIA_JOB_PAGE_SIZE } from '#lib/management/pageSizes.js';
 import {
   filteredListState,
   type FilteredListState
-} from '$lib/listing/pagination';
+} from '#lib/listing/pagination.js';
 import {
   formTimeValue,
   preservedTime,
@@ -12,8 +13,8 @@ import {
   readForm,
   timeProblem,
   uuidProblem
-} from '$lib/listing/filters';
-import type { ListUrlSpec } from '$lib/listing/urlSync.svelte';
+} from '#lib/listing/filters.js';
+import type { ListUrlSpec } from '#lib/listing/urlSync.svelte.js';
 
 export type MediaJobForm = {
   route: string;
@@ -138,11 +139,15 @@ export function mediaJobProblem(
   );
 }
 
-export function readMediaJobForm(search: URLSearchParams): MediaJobForm {
+export function readMediaJobForm(
+  search: ReadonlyURLSearchParams
+): MediaJobForm {
   return readForm<MediaJobForm>(search, params);
 }
 
-export function mediaJobState(search: URLSearchParams): MediaJobListState {
+export function mediaJobState(
+  search: ReadonlyURLSearchParams
+): MediaJobListState {
   const form = readMediaJobForm(search);
   return {
     ...mediaJobList.empty(),
@@ -158,7 +163,7 @@ export function mediaJobSearch(applied: MediaJobQuery): string {
 }
 
 export const mediaJobUrl: ListUrlSpec<MediaJobListState> = {
-  path: '/media-jobs',
+  path: 'media-jobs',
   state: mediaJobState,
   canonical: (search) => {
     const form = readMediaJobForm(search);

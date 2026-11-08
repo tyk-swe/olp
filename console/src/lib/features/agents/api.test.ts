@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { json, route, serve } from '$lib/management/test/transport';
-import { ApiProblem } from '$lib/management/http';
+import { json, route, serve } from '#lib/management/test/transport.js';
+import { ApiProblem } from '#lib/management/http.js';
 import * as api from './api';
 
 const id = '0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607';

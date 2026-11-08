@@ -5,7 +5,7 @@
   } from '@tanstack/svelte-query';
   import type { ComponentProps } from 'svelte';
   import type { CodeManagementKind } from '../sections';
-  import type { CodeRoute } from '$lib/features/code-mode/api';
+  import type { CodeRoute } from '#lib/features/code-mode/api.js';
   import ClientConfiguration from '../ClientConfiguration.svelte';
   import CodeManagement from '../CodeManagement.svelte';
 

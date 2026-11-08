@@ -1,16 +1,16 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { useAction } from '$lib/editing/action.svelte';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/editing/mutationIntent.svelte';
-  import { nativeObject, parseManagementJSON } from '$lib/nativeJson';
-  import { errorMessage } from '$lib/management/http';
-  import ConfirmAction from '$lib/components/ConfirmAction.svelte';
-  import ScrollTable from '$lib/components/ScrollTable.svelte';
+  } from '#lib/editing/mutationIntent.svelte.js';
+  import { nativeObject, parseManagementJSON } from '#lib/nativeJson.js';
+  import { errorMessage } from '#lib/management/http.js';
+  import ConfirmAction from '#lib/components/ConfirmAction.svelte';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { listCredentials, createCredential, deleteCredential } from './api';
   import { guardrailKeys } from './guardrailKeys';
   let {

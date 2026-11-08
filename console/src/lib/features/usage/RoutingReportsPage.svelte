@@ -1,10 +1,10 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
-  import ScrollTable from '$lib/components/ScrollTable.svelte';
-  import { dateTimeLocalValue, formatInteger } from '$lib/format';
-  import { errorMessage } from '$lib/management/http';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
+  import { dateTimeLocalValue, formatInteger } from '#lib/format.js';
+  import { errorMessage } from '#lib/management/http.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
   import { defaultUsageState } from './usageState';
   import {
     selectorSavings,
@@ -75,10 +75,9 @@
   </div>
 </div>
 <nav class="page-tabs" aria-label="Usage reports">
-  <a href={resolve('/usage')}>Usage overview</a><a
-    aria-current="page"
-    href={resolve('/usage/routing')}>Routing reports</a
-  >
+  <a href={resolve('usage')}>Usage overview</a>
+
+  <a aria-current="page" href={resolve('usage/routing')}>Routing reports</a>
 </nav>
 <form class="card form-card" onsubmit={apply}>
   <label class="form-field"

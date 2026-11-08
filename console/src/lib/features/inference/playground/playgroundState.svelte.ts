@@ -1,18 +1,18 @@
 import { createMutation, createQuery } from '@tanstack/svelte-query';
 import { onDestroy } from 'svelte';
-import { routeKeys } from '$lib/features/routes/routeKeys';
-import { listRoutes, simulateRouting } from '$lib/features/routes/api';
-import { hasOutputRules } from '$lib/features/routes/routeEditor';
-import { inspectionDialects } from '$lib/features/routes/inspectionDialects';
-import { listApiKeys } from '$lib/features/access/api-keys/api';
-import { apiKeyKeys } from '$lib/features/access/api-keys/apiKeyKeys';
+import { routeKeys } from '#lib/features/routes/routeKeys.js';
+import { listRoutes, simulateRouting } from '#lib/features/routes/api.js';
+import { hasOutputRules } from '#lib/features/routes/routeEditor.js';
+import { inspectionDialects } from '#lib/features/routes/inspectionDialects.js';
+import { listApiKeys } from '#lib/features/access/api-keys/api.js';
+import { apiKeyKeys } from '#lib/features/access/api-keys/apiKeyKeys.js';
 import {
   nativeObject,
   parseNativeJSON,
   replaceNative,
   type NativeObject
-} from '$lib/nativeJson';
-import { abortError, errorMessage } from '$lib/management/http';
+} from '#lib/nativeJson.js';
+import { abortError, errorMessage } from '#lib/management/http.js';
 import {
   inspectRouting,
   runPlayground,

@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { formatDate, stateLabel } from '$lib/format';
-  import ScrollTable from '$lib/components/ScrollTable.svelte';
+  import { formatDate, stateLabel } from '#lib/format.js';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
   import { createQuery } from '@tanstack/svelte-query';
   import { writable } from 'svelte/store';
-  import { errorMessage } from '$lib/management/http';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import { errorMessage } from '#lib/management/http.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
   import { getRun, listRunSpans } from './api';
   import { agentKeys } from './agentKeys';
 
@@ -46,7 +46,7 @@
 </script>
 
 <svelte:head><title>Run · OpenLLMProxy</title></svelte:head>
-<a class="text-button" href={resolve('/runs')}>All runs</a>
+<a class="text-button" href={resolve('runs')}>All runs</a>
 <div class="page-header">
   <div>
     <p class="eyebrow">Agents</p>
@@ -63,7 +63,7 @@
     <p>
       <a
         class="button button-secondary"
-        href={`${resolve('/investigations/new')}?project=${encodeURIComponent(run.data.project_id)}&run=${encodeURIComponent(runID)}`}
+        href={`${resolve('investigations/new')}?project=${encodeURIComponent(run.data.project_id)}&run=${encodeURIComponent(runID)}`}
         >Save investigation</a
       >
     </p>
@@ -158,13 +158,18 @@
                     /><code>{step.tool_alias}</code>{/if}</td
                 >
                 <td><code>{step.dispatch_id}</code></td>
-                <td
-                  >{stateLabel(step.state)}{#if step.tool_status}<br />Tool: {stateLabel(
-                      step.tool_status
-                    )}{step.tool_is_error
+
+                <td>
+                  {stateLabel(step.state)}{#if step.tool_status}
+                    <br />
+                    Tool: {stateLabel(step.tool_status)}{step.tool_is_error
                       ? ' (tool error)'
-                      : ''}{/if}{#if step.bound_violation}<br />Bound exceeded{/if}</td
-                >
+                      : ''}
+                  {/if}{#if step.bound_violation}
+                    <br />Bound exceeded
+                  {/if}
+                </td>
+
                 <td>
                   {#if step.pricing_state === 'unpriced'}
                     Unknown (unpriced)

@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { useMutationIntent } from '$lib/editing/mutationIntent.svelte';
+  import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import CursorPagination from '$lib/shell/CursorPagination.svelte';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
   import PriceFields from './PriceFields.svelte';
   import {
     priceEntryFields,
@@ -10,22 +10,22 @@
     type ContainerFeeRow,
     type WindowPeriodRow
   } from './priceEntry';
-  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
+  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
   import {
     cursorPaginationProps,
     emptyCursorHistory,
     resetCursor
-  } from '$lib/listing/pagination';
-  import { errorMessage } from '$lib/management/http';
-  import { dateTimeLocalValue, formatDate } from '$lib/format';
-  import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { listProviderKinds } from '$lib/features/providers/models';
+  } from '#lib/listing/pagination.js';
+  import { errorMessage } from '#lib/management/http.js';
+  import { dateTimeLocalValue, formatDate } from '#lib/format.js';
+  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { listProviderKinds } from '#lib/features/providers/models.js';
   import {
     listProviderVendors,
     type ProviderKind
-  } from '$lib/features/providers/providers';
-  import { providerKeys } from '$lib/features/providers/providerKeys';
+  } from '#lib/features/providers/providers.js';
+  import { providerKeys } from '#lib/features/providers/providerKeys.js';
   import { operationKinds } from './history/api';
   import {
     createPricingRevision,

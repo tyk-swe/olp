@@ -1,25 +1,25 @@
 <script lang="ts">
-  import { oidcKeys } from '$lib/features/access/oidc/oidcKeys';
+  import { oidcKeys } from '#lib/features/access/oidc/oidcKeys.js';
 
   import { onDestroy } from 'svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { isEtagMismatch } from '$lib/management/http';
+  import { isEtagMismatch } from '#lib/management/http.js';
   import {
     beginOidcLink,
     getOidcConfiguration,
     putOidcConfiguration,
     type OidcConfigurationInput
-  } from '$lib/features/access/oidc/api';
+  } from '#lib/features/access/oidc/api.js';
   import {
     beginIdentityReauthentication,
     listOidcIdentities
-  } from '$lib/features/access/profile/api';
-  import { reauthenticateWithPassword } from '$lib/features/access/profile/reauthentication';
-  import { FIXED_ROLES } from '$lib/features/access/session/authorization';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import ConflictNotice from '$lib/shell/ConflictNotice.svelte';
-  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
-  import ReauthenticateDialog from '$lib/shell/ReauthenticateDialog.svelte';
+  } from '#lib/features/access/profile/api.js';
+  import { reauthenticateWithPassword } from '#lib/features/access/profile/reauthentication.js';
+  import { FIXED_ROLES } from '#lib/features/access/session/authorization.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
+  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import ReauthenticateDialog from '#lib/shell/ReauthenticateDialog.svelte';
   import {
     beginReload,
     conflictNotice,
@@ -28,9 +28,9 @@
     markDirty,
     markSaved,
     reconcile
-  } from '$lib/editing/concurrentEdit';
-  import { errorMessage } from '$lib/management/http';
-  import { parseRoleMappings } from '$lib/features/access/oidc/mappings';
+  } from '#lib/editing/concurrentEdit.js';
+  import { errorMessage } from '#lib/management/http.js';
+  import { parseRoleMappings } from '#lib/features/access/oidc/mappings.js';
 
   const queryClient = useQueryClient();
   const access = useRole();

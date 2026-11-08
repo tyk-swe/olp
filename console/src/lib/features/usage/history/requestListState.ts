@@ -1,12 +1,13 @@
+import type { ReadonlyURLSearchParams } from '$app/state';
 import {
   operationKinds,
   type RequestFilters
-} from '$lib/features/usage/history/api';
-import { REQUEST_PAGE_SIZE } from '$lib/management/pageSizes';
+} from '#lib/features/usage/history/api.js';
+import { REQUEST_PAGE_SIZE } from '#lib/management/pageSizes.js';
 import {
   filteredListState,
   type FilteredListState
-} from '$lib/listing/pagination';
+} from '#lib/listing/pagination.js';
 import {
   formTimeValue,
   preservedTime,
@@ -15,8 +16,8 @@ import {
   readForm,
   timeProblem,
   uuidProblem
-} from '$lib/listing/filters';
-import type { ListUrlSpec } from '$lib/listing/urlSync.svelte';
+} from '#lib/listing/filters.js';
+import type { ListUrlSpec } from '#lib/listing/urlSync.svelte.js';
 
 export type RequestForm = {
   route: string;
@@ -136,11 +137,13 @@ export function requestProblem(
   );
 }
 
-export function readRequestForm(search: URLSearchParams): RequestForm {
+export function readRequestForm(search: ReadonlyURLSearchParams): RequestForm {
   return readForm<RequestForm>(search, params);
 }
 
-export function requestState(search: URLSearchParams): RequestListState {
+export function requestState(
+  search: ReadonlyURLSearchParams
+): RequestListState {
   const form = readRequestForm(search);
   return {
     ...requestList.empty(),
@@ -156,7 +159,7 @@ export function requestSearch(applied: RequestQuery): string {
 }
 
 export const requestUrl: ListUrlSpec<RequestListState> = {
-  path: '/requests',
+  path: 'requests',
   state: requestState,
   canonical: (search) => {
     const form = readRequestForm(search);

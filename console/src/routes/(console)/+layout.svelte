@@ -9,14 +9,14 @@
     currentSession,
     logout,
     type AuthenticationCapabilities
-  } from '$lib/features/access/session/api';
-  import { errorMessage } from '$lib/management/http';
-  import { getSetupStatus } from '$lib/features/access/setup/api';
-  import { authLifecycle } from '$lib/features/access/session/lifecycle';
-  import { sessionKeys } from '$lib/features/access/session/sessionKeys';
-  import type { AuthenticationSnapshot } from '$lib/features/access/session/state';
-  import AppShell from '$lib/shell/AppShell.svelte';
-  import BrandMark from '$lib/shell/BrandMark.svelte';
+  } from '#lib/features/access/session/api.js';
+  import { errorMessage } from '#lib/management/http.js';
+  import { getSetupStatus } from '#lib/features/access/setup/api.js';
+  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+  import { sessionKeys } from '#lib/features/access/session/sessionKeys.js';
+  import type { AuthenticationSnapshot } from '#lib/features/access/session/state.js';
+  import AppShell from '#lib/shell/AppShell.svelte';
+  import BrandMark from '#lib/shell/BrandMark.svelte';
 
   let { children } = $props();
   const queryClient = useQueryClient();
@@ -31,7 +31,7 @@
   function loginDestination(sessionExpired = false) {
     const returnTo = page.url.pathname + page.url.search + page.url.hash;
     const expired = sessionExpired ? '&reason=expired' : '';
-    return `${resolve('/login')}?return_to=${encodeURIComponent(returnTo)}${expired}`;
+    return `${resolve('login')}?return_to=${encodeURIComponent(returnTo)}${expired}`;
   }
 
   async function signOut() {
@@ -39,10 +39,7 @@
     signingOut = true;
     signOutError = '';
     try {
-      await authLifecycle.signOut(
-        (signal) => logout(signal),
-        resolve('/login')
-      );
+      await authLifecycle.signOut((signal) => logout(signal), resolve('login'));
     } catch (error) {
       signOutError = errorMessage(
         error,
@@ -89,8 +86,9 @@
       },
       async unauthenticatedDestination(signal, sessionExpired) {
         const setup = await getSetupStatus(signal);
+
         return setup.setup_required
-          ? resolve('/setup')
+          ? resolve('setup')
           : loginDestination(sessionExpired);
       },
       loginDestination,
@@ -98,7 +96,7 @@
         // Every destination is either a resolved local route or a validated
         // same-origin relative return path constructed above.
         // eslint-disable-next-line svelte/no-navigation-without-resolve
-        await goto(destination, { replaceState: true });
+        await goto(destination, { replace: true });
       }
     });
 

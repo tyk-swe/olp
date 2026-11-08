@@ -2,9 +2,9 @@
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/editing/mutationIntent.svelte';
-  import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
-  import { invitationKeys } from '$lib/features/access/invitations/invitationKeys';
+  } from '#lib/editing/mutationIntent.svelte.js';
+  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import { invitationKeys } from '#lib/features/access/invitations/invitationKeys.js';
 
   import { createQuery } from '@tanstack/svelte-query';
   import {
@@ -13,19 +13,19 @@
     revokeInvitation,
     type Invitation,
     type InvitationSecret
-  } from '$lib/features/access/invitations/api';
-  import { copyText } from '$lib/clipboard';
-  import { errorMessage } from '$lib/management/http';
+  } from '#lib/features/access/invitations/api.js';
+  import { copyText } from '#lib/clipboard.js';
+  import { errorMessage } from '#lib/management/http.js';
   import {
     cursorPaginationProps,
     emptyCursorHistory
-  } from '$lib/listing/pagination';
-  import { FIXED_ROLES } from '$lib/features/access/session/authorization';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import CursorPagination from '$lib/shell/CursorPagination.svelte';
-  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
-  import SecretDialog from '$lib/shell/SecretDialog.svelte';
-  import { formatDate } from '$lib/format';
+  } from '#lib/listing/pagination.js';
+  import { FIXED_ROLES } from '#lib/features/access/session/authorization.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import SecretDialog from '#lib/shell/SecretDialog.svelte';
+  import { formatDate } from '#lib/format.js';
 
   const revokeInvitationIntent = useMutationIntent();
 

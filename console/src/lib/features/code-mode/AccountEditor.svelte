@@ -5,14 +5,15 @@
   import {
     getProvider,
     listProviders
-  } from '$lib/features/providers/providers';
-  import { listProviderCredentials } from '$lib/features/providers/credentials';
-  import { providerKeys } from '$lib/features/providers/providerKeys';
+  } from '#lib/features/providers/providers.js';
+  import { listProviderCredentials } from '#lib/features/providers/credentials.js';
+  import { providerKeys } from '#lib/features/providers/providerKeys.js';
   import {
     saveCodeAccount,
     type CodeAccount,
     type CodeAccountWrite
-  } from '$lib/features/code-mode/api';
+  } from '#lib/features/code-mode/api.js';
+
   import {
     extraUsageAdapterFor,
     extraUsageValue,
@@ -20,8 +21,8 @@
     providerProfilePending,
     showsExtraUsage
   } from './presentation';
-  import AccountEnrollment from './AccountEnrollment.svelte';
 
+  import AccountEnrollment from './AccountEnrollment.svelte';
   import {
     useResourceSubmission,
     type ResourceEditorProps
@@ -111,7 +112,8 @@
 
 {#snippet enrollment()}
   {#if providerId}
-    {#key providerId}<AccountEnrollment
+    {#key providerId}
+      <AccountEnrollment
         {providerId}
         allowed={allowed && !submission.busy && !submission.submitted}
         onComplete={(id) => {
@@ -119,7 +121,8 @@
           submission.markDirty();
         }}
         onBusyChange={(value) => (enrolling = value)}
-      />{/key}
+      />
+    {/key}
   {/if}
 {/snippet}
 
@@ -156,9 +159,8 @@
     {/if}
   </select>
   <p>
-    <a href={resolve('/providers')}>Manage providers and grant authentication</a
-    >. Code-mode does not require an inference probe or ordinary provider
-    activation.
+    <a href={resolve('providers')}>Manage providers and grant authentication</a>
+    . Code-mode does not require an inference probe or ordinary provider activation.
   </p>
   <label for="code-credential">Enrolled credential version</label>
   <select

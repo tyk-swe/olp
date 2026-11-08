@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { json, route, serve } from '$lib/management/test/transport';
+import { json, route, serve } from '#lib/management/test/transport.js';
 import {
   createProject,
   getProjectAttributionBudgets,

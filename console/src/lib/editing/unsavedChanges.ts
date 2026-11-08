@@ -10,6 +10,7 @@ export function confirmDiscardChanges(isDirty: boolean): boolean {
 
 export function guardUnsavedChanges(isDirty: () => boolean) {
   beforeNavigate((navigation) => {
+    if (navigation.shallow && navigation.type === 'goto') return;
     if (!isDirty()) return;
     if (decision?.navigation !== navigation) {
       decision = { navigation, discard: confirmDiscardChanges(true) };

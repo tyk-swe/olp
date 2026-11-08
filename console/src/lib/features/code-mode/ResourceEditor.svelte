@@ -3,7 +3,7 @@
     CodeAccount,
     CodePool,
     CodeRoute
-  } from '$lib/features/code-mode/api';
+  } from '#lib/features/code-mode/api.js';
   import type { PaidTargetOption, CodeEditing } from './presentation';
   import AccountEditor from './AccountEditor.svelte';
   import PoolEditor from './PoolEditor.svelte';

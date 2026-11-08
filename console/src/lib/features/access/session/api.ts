@@ -1,17 +1,17 @@
-import { parseMFAChallenge } from '$lib/features/access/mfa/api';
-import type { components } from '$lib/management/schema';
+import { parseMFAChallenge } from '#lib/features/access/mfa/api.js';
+import type { components } from '#lib/management/schema.js';
 import { withAuthenticationDeadline } from './requestDeadline';
-import { apiClient } from '$lib/management/client';
+import { apiClient } from '#lib/management/client.js';
 import {
   ApiProblem,
   ensureOk,
   unwrap,
   unwrapOutcome
-} from '$lib/management/http';
+} from '#lib/management/http.js';
 import {
   isFixedRole,
   type FixedRole
-} from '$lib/features/access/session/authorization';
+} from '#lib/features/access/session/authorization.js';
 
 type Schemas = components['schemas'];
 

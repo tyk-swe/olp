@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { useMutationIntent } from '$lib/editing/mutationIntent.svelte';
+  import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import {
     listCodeAccounts,
@@ -10,17 +10,17 @@
     type CodeRoute,
     type CodeClientConfiguration,
     type CodeClientSelection
-  } from '$lib/features/code-mode/api';
-  import { collectCursorPages } from '$lib/management/pagination';
-  import { errorMessage } from '$lib/management/http';
+  } from '#lib/features/code-mode/api.js';
+  import { collectCursorPages } from '#lib/management/pagination.js';
+  import { errorMessage } from '#lib/management/http.js';
   import {
     emptyCursorHistory,
     cursorPaginationProps
-  } from '$lib/listing/pagination';
-  import CursorPagination from '$lib/shell/CursorPagination.svelte';
-  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
+  } from '#lib/listing/pagination.js';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
   import LoadError from './LoadError.svelte';
-  import { formatDate } from '$lib/format';
+  import { formatDate } from '#lib/format.js';
   import { codeKeys } from './codeKeys';
   import {
     adapterLabel,
@@ -35,8 +35,8 @@
     tokenCount,
     type CodeEditing
   } from './presentation';
-  import { listProviders } from '$lib/features/providers/providers';
-  import { listCredentialSlots } from '$lib/features/providers/credentials';
+  import { listProviders } from '#lib/features/providers/providers.js';
+  import { listCredentialSlots } from '#lib/features/providers/credentials.js';
   import ResourceEditor from './ResourceEditor.svelte';
   import RouteRevisions from './RouteRevisions.svelte';
   import ClientConfiguration from './ClientConfiguration.svelte';

@@ -1,21 +1,21 @@
 <script lang="ts">
-  import { useMutationIntent } from '$lib/editing/mutationIntent.svelte';
-  import { routeKeys } from '$lib/features/routes/routeKeys';
+  import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
+  import { routeKeys } from '#lib/features/routes/routeKeys.js';
 
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage as message } from '$lib/management/http';
+  import { errorMessage as message } from '#lib/management/http.js';
   import {
     diffRouteRevisions,
     listRouteRevisions,
     restoreRouteRevision,
     type RouteRevision,
     type RouteRevisionDiff
-  } from '$lib/features/routes/api';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { fidelityLabel } from '$lib/features/routes/routeEditor';
-  import { formatDate, formatInteger } from '$lib/format';
+  } from '#lib/features/routes/api.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { fidelityLabel } from '#lib/features/routes/routeEditor.js';
+  import { formatDate, formatInteger } from '#lib/format.js';
 
   const restoreIntent = useMutationIntent();
 
@@ -94,7 +94,7 @@
       } catch (cause) {
         errorMessage = `Draft restored, but refreshing failed. ${message(cause)}`;
       }
-      await goto(resolve(`/routes/${restored.id}`));
+      await goto(resolve(`routes/${restored.id}`));
     });
   }
 </script>
@@ -110,7 +110,8 @@
       or provider credentials.
     </p>
   </div>
-  <a class="button button-secondary" href={resolve('/routes')}>All routes</a>
+
+  <a class="button button-secondary" href={resolve('routes')}>All routes</a>
 </div>
 {#if errorMessage}<div class="inline-problem" role="alert">
     {errorMessage}

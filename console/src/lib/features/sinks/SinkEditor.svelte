@@ -1,15 +1,15 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { useQueryClient } from '@tanstack/svelte-query';
-  import { useAction } from '$lib/editing/action.svelte';
-  import { guardUnsavedChanges } from '$lib/editing/unsavedChanges';
-  import ConflictNotice from '$lib/shell/ConflictNotice.svelte';
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
+  import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/editing/mutationIntent.svelte';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { stateLabel } from '$lib/format';
+  } from '#lib/editing/mutationIntent.svelte.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { stateLabel } from '#lib/format.js';
   import { saveSink, type Sink, type SinkInput } from './api';
   import { sinkKeys } from './sinkKeys';
   const SINK_STREAMS = [

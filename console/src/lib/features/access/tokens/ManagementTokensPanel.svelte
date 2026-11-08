@@ -2,9 +2,9 @@
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/editing/mutationIntent.svelte';
+  } from '#lib/editing/mutationIntent.svelte.js';
   import { createQuery } from '@tanstack/svelte-query';
-  import { managementTokenKeys } from '$lib/features/access/tokens/tokenKeys';
+  import { managementTokenKeys } from '#lib/features/access/tokens/tokenKeys.js';
   import {
     MANAGEMENT_TOKEN_SCOPES,
     createManagementToken,
@@ -13,20 +13,20 @@
     type ManagementToken,
     type ManagementTokenScope,
     type ManagementTokenSecret
-  } from '$lib/features/access/tokens/api';
-  import { listProjects } from '$lib/features/access/projects/api';
-  import { projectKeys } from '$lib/features/access/projects/projectKeys';
-  import { copyText } from '$lib/clipboard';
-  import { errorMessage } from '$lib/management/http';
+  } from '#lib/features/access/tokens/api.js';
+  import { listProjects } from '#lib/features/access/projects/api.js';
+  import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
+  import { copyText } from '#lib/clipboard.js';
+  import { errorMessage } from '#lib/management/http.js';
   import {
     cursorPaginationProps,
     emptyCursorHistory
-  } from '$lib/listing/pagination';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import CursorPagination from '$lib/shell/CursorPagination.svelte';
-  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
-  import SecretDialog from '$lib/shell/SecretDialog.svelte';
-  import { formatDate } from '$lib/format';
+  } from '#lib/listing/pagination.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import SecretDialog from '#lib/shell/SecretDialog.svelte';
+  import { formatDate } from '#lib/format.js';
 
   const revokeManagementTokenIntent = useMutationIntent();
 

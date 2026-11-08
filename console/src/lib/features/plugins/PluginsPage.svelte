@@ -1,14 +1,14 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage, isEtagMismatch } from '$lib/management/http';
-  import { formatBytes, formatDate } from '$lib/format';
-  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { pluginKeys } from '$lib/features/plugins/pluginKeys';
-  import UnconfinedPlugins from '$lib/features/plugins/UnconfinedPlugins.svelte';
-  import MCPExecutables from '$lib/features/plugins/MCPExecutables.svelte';
-  import PluginIndexSection from '$lib/features/plugins/PluginIndex.svelte';
-  import { indexEntryForDigest } from '$lib/features/plugins/pluginIndex';
+  import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
+  import { formatBytes, formatDate } from '#lib/format.js';
+  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { pluginKeys } from '#lib/features/plugins/pluginKeys.js';
+  import UnconfinedPlugins from '#lib/features/plugins/UnconfinedPlugins.svelte';
+  import MCPExecutables from '#lib/features/plugins/MCPExecutables.svelte';
+  import PluginIndexSection from '#lib/features/plugins/PluginIndex.svelte';
+  import { indexEntryForDigest } from '#lib/features/plugins/pluginIndex.js';
   import {
     approvePlugin,
     getPluginIndex,
@@ -19,8 +19,8 @@
     shortDigest,
     uninstallPlugin,
     type Plugin
-  } from '$lib/features/plugins/api';
-  import { providerKeys } from '$lib/features/providers/providerKeys';
+  } from '#lib/features/plugins/api.js';
+  import { providerKeys } from '#lib/features/providers/providerKeys.js';
 
   const access = useRole();
   const canManage = $derived(access.can('plugins.manage'));

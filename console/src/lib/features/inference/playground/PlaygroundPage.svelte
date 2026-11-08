@@ -1,11 +1,11 @@
 <script lang="ts">
-  import RoutingPreferencesForm from '$lib/features/routes/RoutingPreferencesForm.svelte';
-  import RoutingDecisions from '$lib/features/routes/RoutingDecisions.svelte';
-  import { decisionRows } from '$lib/features/routes/routingExplanation';
-  import { inspectionDialects } from '$lib/features/routes/inspectionDialects';
-  import SegmentedRadioGroup from '$lib/shell/SegmentedRadioGroup.svelte';
-  import { errorMessage } from '$lib/management/http';
-  import { formatInteger } from '$lib/format';
+  import RoutingPreferencesForm from '#lib/features/routes/RoutingPreferencesForm.svelte';
+  import RoutingDecisions from '#lib/features/routes/RoutingDecisions.svelte';
+  import { decisionRows } from '#lib/features/routes/routingExplanation.js';
+  import { inspectionDialects } from '#lib/features/routes/inspectionDialects.js';
+  import SegmentedRadioGroup from '#lib/shell/SegmentedRadioGroup.svelte';
+  import { errorMessage } from '#lib/management/http.js';
+  import { formatInteger } from '#lib/format.js';
   import RealtimeTrace from './RealtimeTrace.svelte';
   import OperationResult from './OperationResult.svelte';
   import StrictToolPlayground from './StrictToolPlayground.svelte';

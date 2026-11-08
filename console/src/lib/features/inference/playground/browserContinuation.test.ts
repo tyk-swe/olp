@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { gatewayFetch } from '$lib/management/gateway';
-import { stringifyNativeJSON } from '$lib/nativeJson';
+import { gatewayFetch } from '#lib/management/gateway.js';
+import { stringifyNativeJSON } from '#lib/nativeJson.js';
 import {
   continuationVersion,
   nativeChatRequest,
@@ -10,7 +10,7 @@ import {
   unaryTurn
 } from './browserContinuation';
 
-vi.mock('$lib/management/gateway', () => ({ gatewayFetch: vi.fn() }));
+vi.mock('#lib/management/gateway.js', () => ({ gatewayFetch: vi.fn() }));
 
 const submission = '123.00000000-0000-4000-8000-000000000001';
 const handle = `continuation_${'a'.repeat(32)}`;

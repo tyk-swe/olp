@@ -1,15 +1,15 @@
 <script lang="ts">
-  import ConfirmAction from '$lib/components/ConfirmAction.svelte';
+  import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/editing/mutationIntent.svelte';
+  } from '#lib/editing/mutationIntent.svelte.js';
 
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
   import ExternalReferenceEditor from './ExternalReferenceEditor.svelte';
   import { parseExternalReference } from './externalReference';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
+  import { errorMessage } from '#lib/management/http.js';
   import type { Provider } from './providers';
   import GrantEnrollmentPanel from './GrantEnrollmentPanel.svelte';
   import {

@@ -1,8 +1,8 @@
 import { login, acceptInvitation } from './authentication';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { components } from '$lib/management/schema';
-import { json, route, serve } from '$lib/management/test/transport';
-import { confirmMFA } from '$lib/features/access/mfa/prompt.svelte';
+import type { components } from '#lib/management/schema.js';
+import { json, route, serve } from '#lib/management/test/transport.js';
+import { confirmMFA } from '#lib/features/access/mfa/prompt.svelte.js';
 import {
   authenticationCapabilities,
   beginOidcLogin,
@@ -10,7 +10,7 @@ import {
   logout
 } from './api';
 
-vi.mock('$lib/features/access/mfa/prompt.svelte', () => ({
+vi.mock('#lib/features/access/mfa/prompt.svelte.js', () => ({
   confirmMFA: vi.fn()
 }));
 

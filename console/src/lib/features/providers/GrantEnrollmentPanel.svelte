@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import { copyText } from '$lib/clipboard';
-  import { formatDate } from '$lib/format';
+  import { copyText } from '#lib/clipboard.js';
+  import { formatDate } from '#lib/format.js';
   import type { GrantEnrollment } from './grants';
 
   let {

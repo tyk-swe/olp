@@ -10,7 +10,7 @@ import {
   type GrantEnrollmentStatus
 } from './grants';
 
-vi.mock('$lib/features/access/session/authMiddleware', () => ({
+vi.mock('#lib/features/access/session/authMiddleware.js', () => ({
   createAuthMiddleware: () => ({
     onRequest: ({ request }: { request: Request }) => request
   })

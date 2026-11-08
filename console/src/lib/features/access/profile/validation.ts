@@ -1,5 +1,5 @@
-import { validateDisplayName as displayNameProblem } from '$lib/displayNamePolicy';
-import { validatePasswordPolicy } from '$lib/passwordPolicy';
+import { validateDisplayName as displayNameProblem } from '#lib/displayNamePolicy.js';
+import { validatePasswordPolicy } from '#lib/passwordPolicy.js';
 
 /**
  * The profile editor surfaces a rule failure by throwing; the rule itself is

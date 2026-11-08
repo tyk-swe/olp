@@ -1,15 +1,18 @@
-import { requestNative } from '$lib/management/transport';
-import type { components } from '$lib/management/schema';
-import { apiClient } from '$lib/management/client';
+import { requestNative } from '#lib/management/transport.js';
+import type { components } from '#lib/management/schema.js';
+import { apiClient } from '#lib/management/client.js';
 import {
   type CursorPage,
   pageResult,
   unwrap,
   unwrapPage
-} from '$lib/management/http';
-import { PROVIDER_PAGE_SIZE } from '$lib/management/pageSizes';
-import { collectCursorPages } from '$lib/management/pagination';
-import type { Provider, ProviderKind } from '$lib/features/providers/providers';
+} from '#lib/management/http.js';
+import { PROVIDER_PAGE_SIZE } from '#lib/management/pageSizes.js';
+import { collectCursorPages } from '#lib/management/pagination.js';
+import type {
+  Provider,
+  ProviderKind
+} from '#lib/features/providers/providers.js';
 
 type Schemas = components['schemas'];
 

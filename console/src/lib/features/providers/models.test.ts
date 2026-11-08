@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PROVIDER_PAGE_SIZE } from '$lib/management/pageSizes';
+import { PROVIDER_PAGE_SIZE } from '#lib/management/pageSizes.js';
 import type { Provider } from './providers';
 import {
   certifyProviderModel,
@@ -14,7 +14,7 @@ import {
   type ProviderModel
 } from './models';
 
-vi.mock('$lib/features/access/session/authMiddleware', () => ({
+vi.mock('#lib/features/access/session/authMiddleware.js', () => ({
   createAuthMiddleware: () => ({
     onRequest: ({ request }: { request: Request }) => request
   })

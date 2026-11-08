@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { apiKeyList } from '$lib/features/access/api-keys/apiKeyListState';
+  import { apiKeyList } from '#lib/features/access/api-keys/apiKeyListState.js';
 
   let { children } = $props();
   // The list keeps its cursor (and filters) across this route family, so a

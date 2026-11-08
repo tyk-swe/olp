@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { ProviderModel } from './models';
-  import { formatDate } from '$lib/format';
+  import { formatDate } from '#lib/format.js';
 
   let { model }: { model: ProviderModel } = $props();
 

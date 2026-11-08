@@ -1,12 +1,12 @@
-import type { components } from '$lib/management/schema';
-import { apiClient } from '$lib/management/client';
-import { ensureOk, unwrap, unwrapPage } from '$lib/management/http';
+import type { components } from '#lib/management/schema.js';
+import { apiClient } from '#lib/management/client.js';
+import { ensureOk, unwrap, unwrapPage } from '#lib/management/http.js';
 import {
   ROUTE_PAGE_SIZE,
   ROUTE_REVISION_PAGE_SIZE
-} from '$lib/management/pageSizes';
-import { collectCursorPages } from '$lib/management/pagination';
-import { type CursorPage } from '$lib/management/http';
+} from '#lib/management/pageSizes.js';
+import { collectCursorPages } from '#lib/management/pagination.js';
+import { type CursorPage } from '#lib/management/http.js';
 
 type Schemas = components['schemas'];
 

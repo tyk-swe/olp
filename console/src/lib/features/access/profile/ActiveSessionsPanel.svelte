@@ -1,20 +1,20 @@
 <script lang="ts">
-  import { profileKeys } from '$lib/features/access/profile/profileKeys';
+  import { profileKeys } from '#lib/features/access/profile/profileKeys.js';
 
   import { createQuery } from '@tanstack/svelte-query';
-  import { logout } from '$lib/features/access/session/api';
+  import { logout } from '#lib/features/access/session/api.js';
   import {
     listSessionPage,
     revokeSession
-  } from '$lib/features/access/sessions/api';
-  import { errorMessage } from '$lib/management/http';
-  import { authLifecycle } from '$lib/features/access/session/lifecycle';
+  } from '#lib/features/access/sessions/api.js';
+  import { errorMessage } from '#lib/management/http.js';
+  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
   import {
     cursorPaginationProps,
     emptyCursorHistory
-  } from '$lib/listing/pagination';
-  import CursorPagination from '$lib/shell/CursorPagination.svelte';
-  import { formatDate } from '$lib/format';
+  } from '#lib/listing/pagination.js';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import { formatDate } from '#lib/format.js';
 
   const pagination = $state(emptyCursorHistory());
   let revoking = $state('');

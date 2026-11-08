@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { components } from '$lib/management/schema';
-  import { stateLabel } from '$lib/format';
+  import type { components } from '#lib/management/schema.js';
+  import { stateLabel } from '#lib/format.js';
 
   type Inspection = components['schemas']['InteractionInspection'];
   type Incompatibility = components['schemas']['InteractionIncompatibility'];

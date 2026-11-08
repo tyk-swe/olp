@@ -1,4 +1,4 @@
-import { nativeObject, stringifyNativeJSON } from '$lib/nativeJson';
+import { nativeObject, stringifyNativeJSON } from '#lib/nativeJson.js';
 
 function field(value: unknown, key: string): unknown {
   return nativeObject(value) && Object.hasOwn(value, key)

@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { FieldIssue } from '$lib/management/http';
-  import { stateLabel } from '$lib/format';
+  import type { FieldIssue } from '#lib/management/http.js';
+  import { stateLabel } from '#lib/format.js';
 
   // The API rejects a provider field with prose and a machine-readable code.
   // Both are shown: the prose explains, the code is what an operator quotes in
