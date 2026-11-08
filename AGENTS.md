@@ -146,18 +146,4 @@ Before adding complexity for a speculative or vanishingly unlikely race or secur
 
 ## Agent skills
 
-### Issue tracker
-
-Issues and specs live in GitHub Issues for this repo, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-The five canonical triage labels are used as-is (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Single-context, with one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
-
-### Updating skills
-
-Skills live in `.agents/skills/` as the canonical copy, with `.claude/skills/` and `.devin/skills/` symlinking to it, and Codex, OpenCode and Muse Code reading `.agents/skills/` directly. Update with `npx skills@latest update`, and re-run `npx skills@latest add mattpocock/skills` to pick up new skills. sol-loop is a local fork of t3dotgg/tstack with a Codex app-server route and no lockfile entry, so refresh it by hand from upstream and keep the fork changes. Do not also install the Claude Code or Codex plugin for these skills, or every skill will appear twice in that harness.
+Skills live in `.agents/skills/` as the canonical copy, with `.claude/skills/` and `.devin/skills/` symlinking to it, and Codex, OpenCode and Muse Code reading `.agents/skills/` directly. Update lockfile skills with `npx skills@latest update`. sol-loop is a local fork of t3dotgg/tstack with a Codex app-server route and no lockfile entry, so refresh it by hand from upstream and keep the fork changes. Do not also install the Claude Code or Codex plugin for these skills, or every skill will appear twice in that harness

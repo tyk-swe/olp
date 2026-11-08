@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, normalize, relative, sep } from 'node:path';
 
-const rootDocs = ['CHANGELOG.md', 'CONTRIBUTING.md', 'GLOSSARY.md', 'README.md', 'SECURITY.md'];
+const rootDocs = ['CHANGELOG.md', 'CONTRIBUTING.md', 'README.md', 'SECURITY.md'];
 const docDirectories = ['docs', 'docs/develop', 'docs/operate', 'docs/use', 'docs/use/providers'];
 
 export const liveProvenClaimPatterns = [

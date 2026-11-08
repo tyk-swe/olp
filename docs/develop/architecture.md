@@ -4,8 +4,7 @@ This guide maps OLP's feature ownership and explains how a request moves through
 the gateway. Production Go code lives under `internal/`, public packages live
 under capability-named top-level folders such as `plugin/`, `management/`,
 `inference/`, and `guardrails/`, and `cmd/olp` starts the binary. Folders are
-named for the module that owns the behavior, never for a layer, following
-[ADR 0004](../adr/0004-capability-named-folders.md). The console
+named for the module that owns the behavior, never for a layer. The console
 mirrors the same feature boundaries under `console/src/lib/features/`.
 PostgreSQL migrations live under `internal/database/migrations/`.
 
@@ -74,8 +73,7 @@ administrative dispatch.
 
 `grants/personal` owns personal OAuth, Entra exchange, renewal, and delegated
 signing for MCP and agent calls. Configure-time validation remains with
-registration over the shared types in `grants/config`. See
-[ADR 0003](../adr/0003-mcp-module-seams.md).
+registration over the shared types in `grants/config`.
 
 ## Runtime and immutable sources
 
