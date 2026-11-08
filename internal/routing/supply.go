@@ -111,6 +111,28 @@ type SpendCap struct {
 
 func (q SupplyQuery) empty() bool { return len(q.Slots) == 0 && len(q.Caps) == 0 }
 
+func (q SupplyQuery) detach() {
+	for i := range q.Caps {
+		q.Caps[i].Limits.DailyCostLimit = copyPointer(q.Caps[i].Limits.DailyCostLimit)
+		q.Caps[i].Limits.MonthlyCostLimit = copyPointer(q.Caps[i].Limits.MonthlyCostLimit)
+	}
+	if len(q.Slots) == 0 {
+		return
+	}
+	providers := make(map[*Provider]*Provider)
+	for i := range q.Slots {
+		slot := &q.Slots[i]
+		provider, ok := providers[slot.Provider]
+		if !ok {
+			copy := detachedProvider(*slot.Provider)
+			provider = &copy
+			providers[slot.Provider] = provider
+		}
+		slot.Provider = provider
+		slot.Slot = cloneSlot(slot.Slot)
+	}
+}
+
 // SupplyReader reads the live state a SupplyQuery asks for.
 type SupplyReader interface {
 	ReadSupply(ctx context.Context, query SupplyQuery) *SupplyState

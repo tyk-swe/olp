@@ -252,6 +252,7 @@ func Select(s selectionSource, slug, operation, surface, mode string, affinity [
 	if !query.empty() {
 		var state *SupplyState
 		if options.Supply != nil {
+			query.detach()
 			state = options.Supply.ReadSupply(cmp.Or(options.Context, context.Background()), query)
 		}
 		applySupply(route, rows, state)
@@ -340,13 +341,24 @@ func evaluateCandidates(s selectionSource, route Route, operation, surface, mode
 	rows := make([]rankedCandidate, 0, len(route.Targets))
 	for _, target := range route.Targets {
 		provider, exists := s.lookupProvider(target.ProviderID)
+		var callbackProvider Provider
+		var callbackTarget Target
+		var detached bool
+		callbackValues := func() (Provider, Target) {
+			if !detached {
+				callbackProvider = detachedProvider(provider)
+				callbackTarget = cloneTarget(target)
+				detached = true
+			}
+			return callbackProvider, callbackTarget
+		}
 		row := rankedCandidate{provider: provider, decision: Decision{TargetID: target.ID, ProviderID: target.ProviderID, UpstreamModel: target.ProviderModel, Priority: target.Priority, Strategy: policy.Strategy, Shadow: target.Shadow != nil}, order: len(policy.Preferences.Order), shadow: target.Shadow != nil}
 		if chosen.selector != nil && !row.shadow {
 			row.decision.Selector = strptr(chosen.selector.ID)
 		}
 		row.decision.Unhealthy = options.Unhealthy != nil && options.Unhealthy(target.ProviderID)
 		if provider.VendorID != "" {
-			row.decision.VendorID = &provider.VendorID
+			row.decision.VendorID = strptr(provider.VendorID)
 		}
 		metadata, _ := provider.Metadata(target.ProviderModel)
 		connectionRegion := provider.CloudRegion
@@ -361,7 +373,7 @@ func evaluateCandidates(s selectionSource, route Route, operation, surface, mode
 		row.decision.MaxOutputTokens = metadata.MaxOutputTokens
 		demand := options.TokenDemand
 		if options.Demand != nil {
-			demand = options.Demand(provider, target)
+			demand = options.Demand(callbackValues())
 		}
 		if demand != nil {
 			input := demand.EstimatedInputTokens
@@ -373,8 +385,9 @@ func evaluateCandidates(s selectionSource, route Route, operation, surface, mode
 			row.price = row.decision.Price.Scalar(operation)
 		}
 		row.attempt.Discount = options.Inputs.Discount(provider.Kind, provider.ID, provider.VendorID, now)
-		if options.EstimateCost && options.WorstCost != nil {
-			row.decision.EstimatedCost = estimatedCost(provider, row.decision.Price, row.attempt.Discount, demand, now, options.WorstCost, target)
+		if options.EstimateCost && options.WorstCost != nil && row.decision.Price != nil && demand != nil {
+			candidate, destination := callbackValues()
+			row.decision.EstimatedCost = estimatedCost(candidate, row.decision.Price, row.attempt.Discount, demand, now, options.WorstCost, destination)
 		}
 		row.decision.Performance = options.Inputs.Metrics(provider.ID, target.ProviderModel, operation, mode, now)
 		reason := ""
@@ -425,7 +438,7 @@ func evaluateCandidates(s selectionSource, route Route, operation, surface, mode
 		}
 
 		if reason == "" && options.Prepare != nil {
-			prepared, err := options.Prepare(provider, target)
+			prepared, err := options.Prepare(callbackValues())
 			if err != nil {
 				reason = "unsupported_request_semantics"
 				var detail incompatibilityError
@@ -443,14 +456,16 @@ func evaluateCandidates(s selectionSource, route Route, operation, surface, mode
 					input := prepared.Demand.EstimatedInputTokens
 					row.decision.EstimatedInputTokens = &input
 					row.decision.RequestedOutputTokens = prepared.Demand.MaxOutputTokens
-					if options.EstimateCost && options.WorstCost != nil {
-						row.decision.EstimatedCost = estimatedCost(provider, row.decision.Price, row.attempt.Discount, prepared.Demand, now, options.WorstCost, target)
+					if options.EstimateCost && options.WorstCost != nil && row.decision.Price != nil {
+						candidate, destination := callbackValues()
+						row.decision.EstimatedCost = estimatedCost(candidate, row.decision.Price, row.attempt.Discount, prepared.Demand, now, options.WorstCost, destination)
 					}
 				}
 			}
 		}
 		if reason == "" && policy.MaxCost != nil && options.WorstCost != nil && provider.CommitmentAt(now) == nil {
-			bound, ok := options.WorstCost(provider, target, row.decision.Price, row.attempt.Discount)
+			candidate, destination := callbackValues()
+			bound, ok := options.WorstCost(candidate, destination, row.decision.Price, row.attempt.Discount)
 			if !ok || !lessOrEqual(strptr(bound.String()), policy.MaxCost) {
 				reason = "cost_limit_exceeded"
 			}
@@ -552,6 +567,7 @@ func orderCandidates(rows []rankedCandidate, strategy string) {
 // addCandidates retains every eligible target for execution. Preview ordinals
 // account for credential slots; excluded credentials never spend the budget.
 func (plan *Plan) addCandidates(rows []rankedCandidate, checkSlots bool) {
+	attempts := 0
 	decisions := 0
 	for r := range rows {
 		row := &rows[r]
@@ -559,6 +575,7 @@ func (plan *Plan) addCandidates(rows []rankedCandidate, checkSlots bool) {
 			decisions++
 			continue
 		}
+		attempts++
 		if checkSlots {
 			decisions += len(row.slots)
 		} else {
@@ -566,7 +583,7 @@ func (plan *Plan) addCandidates(rows []rankedCandidate, checkSlots bool) {
 		}
 		decisions += len(row.skipped)
 	}
-	plan.Attempts = slices.Grow(plan.Attempts, len(rows))
+	plan.Attempts = slices.Grow(plan.Attempts, attempts)
 	plan.Decisions = slices.Grow(plan.Decisions, decisions)
 	ordinal := 0
 	for r := range rows {

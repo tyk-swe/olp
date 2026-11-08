@@ -2,6 +2,7 @@ package routing
 
 import (
 	"context"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -118,6 +119,59 @@ func TestCapacityStrategyOrdersSlotsAndTargetsByHeadroom(t *testing.T) {
 	}
 	if got := ArrangeSlots(s.Providers[ids[1]].Slots, plan.Attempts[0].Slots); got[0].ID != want[0] {
 		t.Fatalf("arranged slots %+v", got)
+	}
+}
+
+func TestPublishedRoutingSupplyCallbackOwnsValues(t *testing.T) {
+	snapshot, slug, ids := planningFixture()
+	route := snapshot.Routes[slug]
+	route.Targets = route.Targets[:1]
+	route.Budget = &CostLimits{DailyCostLimit: ptr("100")}
+	snapshot.Routes[slug] = route
+	provider := snapshot.Providers[ids[0]]
+	provider.AuthMode = "api_key"
+	provider.Limits = &Limits{Supply: Supply{DailyCostLimit: ptr("10")}}
+	slot := Slot{ID: uuid.NewString(), Enabled: true, Weight: 1, CredentialID: ptr(uuid.NewString()), AllowedModels: []string{"wire-model"}, Supply: Supply{DailyCostLimit: ptr("5")}}
+	provider.Slots = []Slot{slot}
+	snapshot.Providers[provider.ID] = provider
+	published, err := snapshot.CompiledView()
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, err := published.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutate := false
+	calls := 0
+	options := Options{CheckSlots: true, Preferences: &Preferences{Strategy: ptr("capacity")}, Supply: supplyFunc(func(query SupplyQuery) *SupplyState {
+		calls++
+		if mutate {
+			for _, cap := range query.Caps {
+				*cap.Limits.DailyCostLimit = "1"
+			}
+			for _, candidate := range query.Slots {
+				candidate.Provider.Capabilities[0].Operation = "changed"
+				candidate.Slot.AllowedModels[0] = "changed"
+			}
+		}
+		return &SupplyState{Headroom: map[string]float64{slot.ID: 0.5}, Spend: map[string]Spend{route.ID: SpendAvailable, provider.ID: SpendAvailable, slot.ID: SpendAvailable}}
+	})}
+	before, err := Select(published, slug, "generation", "openai", "unary", []byte("seed"), options)
+	if err != nil || len(before.Attempts) != 1 || calls != 1 {
+		t.Fatalf("initial plan %+v, callback calls %d, error %v", before, calls, err)
+	}
+	mutate = true
+	if _, err := Select(published, slug, "generation", "openai", "unary", []byte("seed"), options); err != nil {
+		t.Fatal(err)
+	}
+	mutate = false
+	after, err := Select(published, slug, "generation", "openai", "unary", []byte("seed"), options)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("callback changed later routing, plan %+v, error %v", after, err)
+	}
+	if got, err := published.Digest(); err != nil || got != digest {
+		t.Fatalf("callback changed published configuration, digest %q, error %v", got, err)
 	}
 }
 

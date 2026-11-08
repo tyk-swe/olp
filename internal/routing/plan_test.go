@@ -3,9 +3,11 @@ package routing
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -95,6 +97,78 @@ func TestPreparationRejectionsDoNotRetainUnusedSlotDecisions(t *testing.T) {
 	lateBytes := int64(afterLate) - int64(afterEarly)
 	if earlyBytes <= 0 || lateBytes > 2*earlyBytes {
 		t.Fatalf("plans retained %d bytes after early rejection and %d bytes after preparation rejection", earlyBytes, lateBytes)
+	}
+}
+
+func TestIneligibleTargetsDoNotRetainUnusedAttempts(t *testing.T) {
+	snapshot, slug, ids := planningFixture()
+	route := snapshot.Routes[slug]
+	route.Targets = route.Targets[:1]
+	provider := snapshot.Providers[ids[0]]
+	provider.AuthMode = "api_key"
+	credential := uuid.NewString()
+	for i := range 64 {
+		id := uuid.NewString()
+		if i == 0 {
+			id = credential
+		}
+		provider.Slots = append(provider.Slots, Slot{ID: uuid.NewString(), Enabled: true, Weight: 1, CredentialID: &id})
+	}
+	snapshot.Providers[provider.ID] = provider
+	snapshot.Routes[slug] = route
+	manyTargets := snapshot.Clone()
+	manyProvider := manyTargets.Providers[provider.ID]
+	manyProvider.Slots = manyProvider.Slots[:1]
+	manyTargets.Providers[provider.ID] = manyProvider
+	manyRoute := manyTargets.Routes[slug]
+	for range 63 {
+		candidate := manyRoute.Targets[0]
+		candidate.ID = uuid.NewString()
+		candidate.RoutingID = candidate.ID
+		candidate.ProviderID = uuid.NewString()
+		connection := manyProvider
+		connection.ID = candidate.ProviderID
+		connection.Enabled = false
+		manyTargets.Providers[connection.ID] = connection
+		manyRoute.Targets = append(manyRoute.Targets, candidate)
+	}
+	manyTargets.Routes[slug] = manyRoute
+	options := Options{CheckSlots: true, CredentialEligibility: func(id string) Eligibility {
+		if id == credential {
+			return Eligible
+		}
+		return Revoked
+	}}
+	makePlans := func(s *Snapshot) []Plan {
+		plans := make([]Plan, 0, 64)
+		for range 64 {
+			plan, err := Select(s, slug, "generation", "openai", "unary", []byte("seed"), options)
+			if err != nil || len(plan.Attempts) != 1 || len(plan.Decisions) != 64 {
+				t.Fatalf("unexpected plan: %d attempts, %d decisions, error %v", len(plan.Attempts), len(plan.Decisions), err)
+			}
+			plans = append(plans, plan)
+		}
+		return plans
+	}
+	heap := func() uint64 {
+		runtime.GC()
+		var stats runtime.MemStats
+		runtime.ReadMemStats(&stats)
+		return stats.HeapAlloc
+	}
+	before := heap()
+	oneTargetPlans := makePlans(&snapshot)
+	afterOne := heap()
+	manyTargetPlans := makePlans(manyTargets)
+	afterMany := heap()
+	runtime.KeepAlive(oneTargetPlans)
+	runtime.KeepAlive(manyTargetPlans)
+	runtime.KeepAlive(snapshot)
+	runtime.KeepAlive(manyTargets)
+	oneBytes := int64(afterOne) - int64(before)
+	manyBytes := int64(afterMany) - int64(afterOne)
+	if oneBytes <= 0 || manyBytes*10 > oneBytes*14 {
+		t.Fatalf("plans retained %d bytes with one target and %d bytes with mostly ineligible targets", oneBytes, manyBytes)
 	}
 }
 
@@ -332,5 +406,199 @@ func TestPublishedRoutingOwnsConfigurationAndReturnedValues(t *testing.T) {
 	after, err := Select(published, slug, "generation", "openai", "unary", []byte("seed"), options)
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatalf("borrowed values changed published routing, plan %+v, error %v", after, err)
+	}
+}
+
+func TestPublishedRoutingCandidateCallbacksOwnValues(t *testing.T) {
+	for _, name := range []string{"demand", "prepare", "cost", "estimated cost", "prepared estimated cost"} {
+		t.Run(name, func(t *testing.T) {
+			snapshot, slug, _ := planningFixture()
+			route := snapshot.Routes[slug]
+			for i := range route.Targets {
+				route.Targets[i].Tags = []string{"original"}
+			}
+			snapshot.Routes[slug] = route
+			published, err := snapshot.CompiledView()
+			if err != nil {
+				t.Fatal(err)
+			}
+			digest, err := published.Digest()
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, err := Select(published, slug, "generation", "openai", "unary", []byte("seed"), Options{})
+			if err != nil || len(before.Attempts) != 3 {
+				t.Fatalf("initial plan %+v, error %v", before, err)
+			}
+			calls := 0
+			mutate := func(provider Provider, target Target) {
+				calls++
+				provider.Capabilities[0].Operation = "changed"
+				target.Tags[0] = "changed"
+			}
+			options := Options{}
+			switch name {
+			case "demand":
+				options.Demand = func(provider Provider, target Target) *TokenDemand {
+					mutate(provider, target)
+					return nil
+				}
+			case "prepare":
+				options.Prepare = func(provider Provider, target Target) (*CandidatePreparation, error) {
+					mutate(provider, target)
+					return nil, nil
+				}
+			case "cost", "estimated cost", "prepared estimated cost":
+				options.WorstCost = func(provider Provider, target Target, _ *usage.RoutingPrice, _ *usage.RoutingDiscount) (usage.Cost, bool) {
+					mutate(provider, target)
+					return usage.Cost{}, true
+				}
+				if name == "cost" {
+					options.Preferences = &Preferences{MaxCost: ptr("100")}
+				} else {
+					now := time.Now()
+					options.Now = now
+					options.EstimateCost = true
+					options.Inputs = &usage.RoutingInputs{RefreshedAt: now, Prices: []usage.RoutingPrice{{Price: usage.Price{
+						ProviderKind: "openai", Model: "wire-model", Operation: "generation", InputPerMillion: ptr("1"), OutputPerMillion: ptr("1"), Currency: "USD",
+					}, EffectiveAt: now.Add(-time.Hour)}}}
+					demand := &TokenDemand{EstimatedInputTokens: 10}
+					if name == "estimated cost" {
+						options.TokenDemand = demand
+					} else {
+						options.Prepare = func(Provider, Target) (*CandidatePreparation, error) {
+							return &CandidatePreparation{Demand: demand}, nil
+						}
+					}
+				}
+			}
+			if _, err := Select(published, slug, "generation", "openai", "unary", []byte("seed"), options); err != nil || calls == 0 {
+				t.Fatalf("callback called %d times, error %v", calls, err)
+			}
+			after, err := Select(published, slug, "generation", "openai", "unary", []byte("seed"), Options{})
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("callback changed later routing, plan %+v, error %v", after, err)
+			}
+			if got, err := published.Digest(); err != nil || got != digest {
+				t.Fatalf("callback changed published configuration, digest %q, error %v", got, err)
+			}
+		})
+	}
+}
+
+func TestPublishedRoutingConcurrentCallbacksDoNotChangePlans(t *testing.T) {
+	snapshot, _, providers := planningFixture()
+	route := snapshot.Routes["team-model"]
+	for i := range route.Targets {
+		route.Targets[i].Tags = []string{"original"}
+	}
+	snapshot.Routes[route.Slug] = route
+	view, err := snapshot.CompiledView()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutate := func(provider Provider, target Target) {
+		provider.Capabilities[0].Operation = "changed"
+		target.Tags[0] = "changed"
+	}
+	options := Options{
+		Demand: func(provider Provider, target Target) *TokenDemand {
+			mutate(provider, target)
+			return nil
+		},
+		Prepare: func(provider Provider, target Target) (*CandidatePreparation, error) {
+			mutate(provider, target)
+			return nil, nil
+		},
+	}
+	const workers = 8
+	start := make(chan struct{})
+	results := make(chan error, workers)
+	for range workers {
+		go func() {
+			<-start
+			for range 8 {
+				plan, err := Select(view, route.Slug, "generation", "openai", "unary", nil, options)
+				if err != nil {
+					results <- err
+					return
+				}
+				if len(plan.Attempts) != len(providers) {
+					results <- fmt.Errorf("got %d attempts, want %d", len(plan.Attempts), len(providers))
+					return
+				}
+			}
+			results <- nil
+		}()
+	}
+	close(start)
+	for range workers {
+		if err := <-results; err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func TestPublishedRoutingSelectorCallbacksOwnValues(t *testing.T) {
+	for _, name := range []string{"evaluate", "permitted"} {
+		t.Run(name, func(t *testing.T) {
+			snapshot, slug, _ := planningFixture()
+			route := snapshot.Routes[slug]
+			for i := range route.Targets {
+				route.Targets[i].Tags = []string{"original"}
+			}
+			mutate := false
+			calls := 0
+			options := Options{Features: &Features{}}
+			if name == "evaluate" {
+				route.Selectors = []Selector{{ID: "selector", Tags: []string{"original"}, When: Predicate{Plugin: &PluginPredicate{Digest: strings.Repeat("a", 64)}}}}
+				options.Evaluate = func(selector Selector) PredicateResult {
+					calls++
+					if mutate {
+						selector.Tags[0] = "changed"
+						selector.When.Plugin.Digest = "changed"
+					}
+					return PredicateResult{Matched: true}
+				}
+			} else {
+				backup := route
+				backup.Slug = "backup"
+				snapshot.Routes[backup.Slug] = backup
+				route.Selectors = []Selector{{ID: "selector", Route: backup.Slug}}
+				options.Permitted = func(next Route) bool {
+					calls++
+					if mutate {
+						next.Operations[0] = "changed"
+						next.Targets[0].Tags[0] = "changed"
+					}
+					return true
+				}
+			}
+			snapshot.Routes[slug] = route
+			published, err := snapshot.CompiledView()
+			if err != nil {
+				t.Fatal(err)
+			}
+			digest, err := published.Digest()
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, err := Select(published, slug, "generation", "openai", "unary", []byte("seed"), options)
+			if err != nil || calls == 0 {
+				t.Fatalf("initial callback called %d times, error %v", calls, err)
+			}
+			mutate = true
+			if _, err := Select(published, slug, "generation", "openai", "unary", []byte("seed"), options); err != nil {
+				t.Fatal(err)
+			}
+			mutate = false
+			after, err := Select(published, slug, "generation", "openai", "unary", []byte("seed"), options)
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("callback changed later routing, plan %+v, error %v", after, err)
+			}
+			if got, err := published.Digest(); err != nil || got != digest {
+				t.Fatalf("callback changed published configuration, digest %q, error %v", got, err)
+			}
+		})
 	}
 }

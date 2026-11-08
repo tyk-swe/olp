@@ -58,16 +58,12 @@ func (v *View) HasBodyLimits() bool    { return v != nil && v.snapshot.HasBodyLi
 
 func (v *View) FindRoute(slug string) (Route, bool) {
 	route, ok := v.snapshot.Routes[slug]
-	copy := cloneRoute(route)
-	copy.compiledContentPolicy = route.compiledContentPolicy.Clone()
-	return copy, ok
+	return detachedRoute(route), ok
 }
 func (v *View) Route(slug string) Route { route, _ := v.FindRoute(slug); return route }
 func (v *View) FindProvider(id string) (Provider, bool) {
 	provider, ok := v.snapshot.Providers[id]
-	copy := cloneProvider(provider)
-	copy.metadata = provider.metadata
-	return copy, ok
+	return detachedProvider(provider), ok
 }
 func (v *View) Provider(id string) Provider { provider, _ := v.FindProvider(id); return provider }
 func (v *View) Routes() iter.Seq2[string, Route] {

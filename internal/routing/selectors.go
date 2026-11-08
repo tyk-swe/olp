@@ -67,7 +67,7 @@ func evaluateSelector(s selectionSource, selector *Selector, features Features, 
 			out.Outcome = "predicate_unavailable"
 			return out
 		}
-		result := options.Evaluate(*selector)
+		result := options.Evaluate(cloneSelector(*selector))
 		if result.Label != "" {
 			label := result.Label
 			out.Label = &label
@@ -86,7 +86,7 @@ func evaluateSelector(s selectionSource, selector *Selector, features Features, 
 		case !ok || !slices.Contains(next.Operations, features.Operation):
 			out.Outcome = "selector_route_unavailable"
 			return out
-		case options.Permitted != nil && !options.Permitted(next):
+		case options.Permitted != nil && !options.Permitted(detachedRoute(next)):
 			out.Outcome = "selector_route_forbidden"
 			return out
 		}

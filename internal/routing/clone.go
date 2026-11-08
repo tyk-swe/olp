@@ -186,13 +186,27 @@ func cloneProvider(provider Provider) Provider {
 	}
 	return p
 }
+func detachedProvider(provider Provider) Provider {
+	copy := cloneProvider(provider)
+	copy.metadata = provider.metadata
+	return copy
+}
+func cloneTarget(target Target) Target {
+	target.Tags = slices.Clone(target.Tags)
+	target.Shadow = copyPointer(target.Shadow)
+	return target
+}
+func detachedRoute(route Route) Route {
+	copy := cloneRoute(route)
+	copy.compiledContentPolicy = route.compiledContentPolicy.Clone()
+	return copy
+}
 func cloneRoute(r Route) Route {
 	r.compiledContentPolicy = nil
 	r.Operations = slices.Clone(r.Operations)
 	r.Targets = slices.Clone(r.Targets)
 	for i := range r.Targets {
-		r.Targets[i].Tags = slices.Clone(r.Targets[i].Tags)
-		r.Targets[i].Shadow = copyPointer(r.Targets[i].Shadow)
+		r.Targets[i] = cloneTarget(r.Targets[i])
 	}
 	r.Policy = r.Policy.Clone()
 	r.ProjectID = copyPointer(r.ProjectID)
@@ -217,8 +231,7 @@ func cloneBehavior(b Behavior) Behavior {
 	}
 	b.Selectors = slices.Clone(b.Selectors)
 	for i := range b.Selectors {
-		b.Selectors[i].Tags = slices.Clone(b.Selectors[i].Tags)
-		b.Selectors[i].When = clonePredicate(b.Selectors[i].When)
+		b.Selectors[i] = cloneSelector(b.Selectors[i])
 	}
 	b.Retry = maps.Clone(b.Retry)
 	b.Affinity = copyPointer(b.Affinity)
@@ -235,6 +248,11 @@ func cloneBehavior(b Behavior) Behavior {
 		b.Budget.MonthlyCostLimit = copyPointer(b.Budget.MonthlyCostLimit)
 	}
 	return b
+}
+func cloneSelector(selector Selector) Selector {
+	selector.Tags = slices.Clone(selector.Tags)
+	selector.When = clonePredicate(selector.When)
+	return selector
 }
 func clonePredicate(p Predicate) Predicate {
 	p.Operations = slices.Clone(p.Operations)
