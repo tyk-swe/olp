@@ -32,6 +32,7 @@ go test -mod=readonly -vet=off -count=1 -timeout=60s \
   ./internal/mcp/registration \
   ./internal/grants/personal \
   ./internal/gateway \
+  ./internal/telemetry \
   ./internal/codemode \
   ./internal/codeadapter \
   ./internal/codewire \

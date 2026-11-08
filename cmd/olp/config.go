@@ -257,7 +257,7 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 		}
 	}
 	if c.MetricsTenantLabels, err = telemetry.ParseMetricsTenantLabels(metricsTenantLabels); err != nil {
-		return c, err
+		return c, fmt.Errorf("OLP_METRICS_TENANT_LABELS %w", err)
 	}
 	if err = c.LogLevel.UnmarshalText([]byte(level)); err != nil {
 		return c, errors.New("OLP_LOG_LEVEL must be debug, info, warn, or error")

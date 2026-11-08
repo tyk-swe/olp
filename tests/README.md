@@ -31,7 +31,8 @@ token estimation against its oracle fixtures, catalog validation, limits,
 route planning, agent dispatch and continuation ownership, both A2A wire versions,
 publication isolation, guardrail detection, MCP registration validation, tool
 pricing and resolution, grant binding, and a reduced gateway slice for
-credential redaction, cost reservation, cache replay, and guardrail wiring.
+credential redaction, cost reservation, cache replay, and guardrail wiring,
+plus the business metric exposition in `internal/telemetry`.
 The gateway slice is the files `gateway_test.go`,
 `caller_credentials_test.go`, `cache_test.go`,
 `cost_reservation_test.go`, `credential_redaction_test.go`, and

@@ -39,15 +39,12 @@ func (m *Management) Register(mux *http.ServeMux) {
 	m.Access.Route(mux, "GET /api/v1/provider-health", m.providerHealth)
 }
 
-func (m *Management) ready(r *http.Request, _ access.Principal) (access.Reply, error) {
-	snapshot := m.Cache.Readiness()
-	if !readinessIsCurrent(snapshot, time.Now()) {
-		return access.Reply{}, access.Fail(503, "observability_snapshot_stale", "The readiness snapshot is stale.")
+func (m *Management) ready(_ *http.Request, _ access.Principal) (access.Reply, error) {
+	health, err := readyHealth(m.Cache.readinessSnapshot(), time.Now())
+	if err != nil {
+		return access.Reply{}, err
 	}
-	if snapshot.Result == nil {
-		return access.Reply{}, access.Fail(503, "observability_snapshot_unavailable", "No readiness snapshot has been collected.")
-	}
-	return access.OK(healthResponse(snapshot.Result)), nil
+	return access.OK(healthResponse(health)), nil
 }
 
 func (m *Management) providerHealth(r *http.Request, p access.Principal) (access.Reply, error) {

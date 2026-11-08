@@ -51,7 +51,7 @@ fi
 metrics=$(grep -ohE 'olp_[a-z0-9_]+' deploy/helm/templates/monitoring.yaml deploy/monitoring/grafana-dashboard.json |
   sed -E 's/_(bucket|sum|count)$//' | sort -u)
 for metric in $metrics; do
-  if ! grep -rqF --include='*.go' --exclude='*_test.go' "$metric" internal; then
+  if ! grep -rqF --include='*.go' --exclude='*_test.go' "$metric" internal cmd; then
     echo "Monitoring queries $metric, which no OLP process emits" >&2
     exit 1
   fi

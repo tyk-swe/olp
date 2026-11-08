@@ -2,47 +2,39 @@ package billing
 
 import (
 	"context"
-	"sort"
-	"strconv"
-	"strings"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shopspring/decimal"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/metric"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-// WriteMetrics emits the billing import's DB-backed series the way
-// export.WriteMetrics emits the delivery plane's.
-func WriteMetrics(ctx context.Context, q access.Queryer, importer *Importer, body *strings.Builder) {
-	rates, err := captureRates(ctx, q)
-	if err == nil && len(rates) > 0 {
-		body.WriteString("# HELP olp_billing_capture_rate Attributed-to-invoiced spend ratio per provider over the last 7 closed covered days.\n# TYPE olp_billing_capture_rate gauge\n")
-		for provider, rate := range rates {
-			body.WriteString("olp_billing_capture_rate{provider=" + strconv.Quote(provider) + "} " + rate + "\n")
-		}
+var (
+	captureRate = metric.Gauge("olp_billing_capture_rate", "Attributed-to-invoiced spend ratio per provider over the last 7 closed covered days.", "provider")
+	imports     = metric.Counter("olp_billing_imports_total", "Billing imports this process ran, by provider and outcome.", "provider", "outcome")
+)
+
+func Metrics(ctx context.Context, q access.Queryer, importer *Importer) []prometheus.Metric {
+	rates, _ := captureRates(ctx, q)
+	var metrics []prometheus.Metric
+	for provider, rate := range rates {
+		metrics = append(metrics, captureRate.Sample(rate, provider))
 	}
-	if importer != nil {
-		metrics := importer.Metrics()
-		if len(metrics) > 0 {
-			body.WriteString("# HELP olp_billing_imports_total Billing imports this process ran, by provider and outcome.\n# TYPE olp_billing_imports_total counter\n")
-			providers := make([]string, 0, len(metrics))
-			for key := range metrics {
-				providers = append(providers, key[0]+" "+key[1])
-			}
-			sort.Strings(providers)
-			for _, item := range providers {
-				parts := strings.SplitN(item, " ", 2)
-				body.WriteString("olp_billing_imports_total{provider=" + strconv.Quote(parts[0]) + ",outcome=" + strconv.Quote(parts[1]) + "} " + strconv.FormatInt(metrics[[2]string{parts[0], parts[1]}], 10) + "\n")
-			}
-		}
+	if importer == nil {
+		return metrics
 	}
+	for key, n := range importer.Metrics() {
+		metrics = append(metrics, imports.Sample(float64(n), key[0], key[1]))
+	}
+	return metrics
 }
 
 // captureRates computes each import's attributed-to-invoiced ratio over the
 // last 7 closed UTC days the import covers, or omits the provider when the
 // window is uncovered, zero-invoiced or off-currency.
-func captureRates(ctx context.Context, q access.Queryer) (map[string]string, error) {
+func captureRates(ctx context.Context, q access.Queryer) (map[string]float64, error) {
 	end := time.Now().UTC().Truncate(24 * time.Hour)
 	start := end.AddDate(0, 0, -7)
 	var providerIDs []string
@@ -107,9 +99,9 @@ func captureRates(ctx context.Context, q access.Queryer) (map[string]string, err
 			a.attributed = a.attributed.Add(v)
 		}
 	}
-	rates := map[string]string{}
+	rates := make(map[string]float64, len(byProvider))
 	for provider, a := range byProvider {
-		rates[provider] = a.attributed.Div(a.invoiced).Round(6).String()
+		rates[provider] = a.attributed.Div(a.invoiced).Round(6).InexactFloat64()
 	}
 	return rates, nil
 }

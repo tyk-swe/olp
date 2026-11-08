@@ -2,13 +2,13 @@ package observability
 
 import (
 	"context"
-	"fmt"
 	"slices"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tyk-swe/olp/internal/metric"
 	"github.com/tyk-swe/olp/internal/priority"
 )
 
@@ -202,25 +202,30 @@ func (q *queue) observe(class int, waited time.Duration) {
 	q.waitNS[class].Add(uint64(waited))
 }
 
-// metrics renders the queue's per-class series, one family at a time.
-func (q *queue) metrics(body *strings.Builder) {
+var (
+	queueDepth      = metric.Gauge("olp_admission_queue_depth", "Inference requests waiting in the admission queue.", "class")
+	queueWait       = prometheus.NewDesc("olp_admission_queue_wait_seconds", "Time admitted requests spent in the admission queue.", []string{"class"}, nil)
+	queueRejections = metric.Counter("olp_admission_queue_rejections_total", "Queued inference requests refused when their queue timeout or route deadline passed.", "class")
+)
+
+func (q *queue) samples() []prometheus.Metric {
+	if q == nil {
+		return nil
+	}
 	var depth [classCount]int
 	q.mu.Lock()
 	for class := range classCount {
 		depth[class] = len(q.lines[class])
 	}
 	q.mu.Unlock()
-	body.WriteString("# HELP olp_admission_queue_depth Inference requests waiting in the admission queue.\n# TYPE olp_admission_queue_depth gauge\n")
-	for class, priorityClass := range priority.Classes() {
-		fmt.Fprintf(body, "olp_admission_queue_depth{class=%q} %d\n", priorityClass.Name, depth[class])
+	classes := priority.Classes()
+	metrics := make([]prometheus.Metric, 0, 3*len(classes))
+	for class, priorityClass := range classes {
+		metrics = append(metrics,
+			queueDepth.Sample(float64(depth[class]), priorityClass.Name),
+			prometheus.MustNewConstSummary(queueWait, q.waits[class].Load(), time.Duration(q.waitNS[class].Load()).Seconds(), nil, priorityClass.Name),
+			queueRejections.Sample(float64(q.expired[class].Load()), priorityClass.Name),
+		)
 	}
-	body.WriteString("# HELP olp_admission_queue_wait_seconds Time admitted requests spent in the admission queue.\n# TYPE olp_admission_queue_wait_seconds summary\n")
-	for class, priorityClass := range priority.Classes() {
-		fmt.Fprintf(body, "olp_admission_queue_wait_seconds_sum{class=%q} %g\nolp_admission_queue_wait_seconds_count{class=%q} %d\n",
-			priorityClass.Name, time.Duration(q.waitNS[class].Load()).Seconds(), priorityClass.Name, q.waits[class].Load())
-	}
-	body.WriteString("# HELP olp_admission_queue_rejections_total Queued inference requests refused when their queue timeout or route deadline passed.\n# TYPE olp_admission_queue_rejections_total counter\n")
-	for class, priorityClass := range priority.Classes() {
-		fmt.Fprintf(body, "olp_admission_queue_rejections_total{class=%q} %d\n", priorityClass.Name, q.expired[class].Load())
-	}
+	return metrics
 }

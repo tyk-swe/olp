@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -47,11 +48,16 @@ type Config struct {
 type Handle struct {
 	provider    *sdktrace.TracerProvider
 	propagation Propagation
+	dropped     prometheus.Counter
 }
 
 func Install(cfg Config, lookupEnv func(string) (string, bool)) (*Handle, error) {
+	dropped := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "olp_trace_export_dropped_total",
+		Help: "Spans dropped before successful OTLP export.",
+	})
 	if cfg.Endpoint == "" {
-		return &Handle{}, nil
+		return &Handle{dropped: dropped}, nil
 	}
 	if err := validateEndpoint(cfg.Endpoint); err != nil {
 		return nil, err
@@ -76,7 +82,7 @@ func Install(cfg Config, lookupEnv func(string) (string, bool)) (*Handle, error)
 		version = "dev"
 	}
 	provider := sdktrace.NewTracerProvider(
-		sdktrace.WithSpanProcessor(newBoundedSpanProcessor(&countingExporter{inner: exporter})),
+		sdktrace.WithSpanProcessor(newBoundedSpanProcessor(&countingExporter{inner: exporter, dropped: dropped}, dropped)),
 		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(cfg.SampleRatio))),
 		sdktrace.WithResource(resource.NewSchemaless(
 			attribute.String("service.name", "openllmproxy"),
@@ -84,7 +90,7 @@ func Install(cfg Config, lookupEnv func(string) (string, bool)) (*Handle, error)
 			attribute.String("olp.process.mode", cfg.Mode),
 		)),
 	)
-	return &Handle{provider: provider, propagation: cfg.Propagation}, nil
+	return &Handle{provider: provider, propagation: cfg.Propagation, dropped: dropped}, nil
 }
 
 func (h *Handle) Middleware(installationID string) func(http.Handler) http.Handler {
@@ -95,6 +101,8 @@ func (h *Handle) Middleware(installationID string) func(http.Handler) http.Handl
 		return admittedRequest(tracerFrom(h.provider), installationID, h.propagation, next)
 	}
 }
+
+func (h *Handle) Metrics() prometheus.Collector { return h.dropped }
 
 func (h *Handle) Shutdown(ctx context.Context) error {
 	if h.provider == nil {

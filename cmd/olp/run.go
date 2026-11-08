@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/agents/a2a"
@@ -576,12 +578,10 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		},
 		MediaGaps:    func() int64 { return int64(mediaGapsTotal.Load()) },
 		LossCounters: lossCounters.Totals,
-		Business:     business,
 	}
 	if pool != nil {
-		obsState.Export = func(ctx context.Context, body *strings.Builder) {
-			export.WriteMetrics(ctx, pool, exporter, focusWorker, capturer, body)
-			billing.WriteMetrics(ctx, pool, importer, body)
+		obsState.Export = func(ctx context.Context) []prometheus.Metric {
+			return slices.Concat(export.Metrics(ctx, pool, exporter, focusWorker, capturer), billing.Metrics(ctx, pool, importer))
 		}
 	}
 	configureObservability(obsState, rt, gw, emitter, mediaSpool, &policy)
@@ -637,8 +637,15 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			prober.RunHealthProbes(probes, probeCheckpoint(pool, log, c.Region))
 		}()
 	}
-	liveMetrics := newLiveMetrics(rt, inferencePool, managementPool)
-	private := observability.NewHandler(obsCache, liveMetrics).ServeMux()
+	live := []prometheus.Collector{runtimeMetrics(rt), observability.AdmissionMetrics(inferencePool, managementPool), traces.Metrics()}
+	if business != nil {
+		live = append(live, business)
+	}
+	privateHandler, err := observability.NewHandler(obsCache, live...)
+	if err != nil {
+		return err
+	}
+	private := privateHandler.ServeMux()
 	listenerConfigs := []listenerConfig{{name: "private", address: c.ObservabilityListenAddr, handler: private}}
 	if c.Mode.Public() {
 		// Network-permitted public requests enter their surface's pool before

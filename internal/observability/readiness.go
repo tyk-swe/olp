@@ -4,14 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"slices"
-	"strings"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/media"
-	"github.com/tyk-swe/olp/internal/telemetry"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -46,8 +46,7 @@ type State struct {
 	// HardLimits reports whether any pinned key carries hard limits; only then
 	// does a limiter outage degrade gateway readiness.
 	HardLimits func() bool
-	Business   *telemetry.BusinessMetrics
-	Export     func(ctx context.Context, body *strings.Builder)
+	Export     func(context.Context) []prometheus.Metric
 }
 
 // storeQuerier is the subset of the pool the collectors use.
@@ -128,12 +127,6 @@ func LiveHealth() Health {
 		MediaReconciliation:     "not_checked",
 	}
 }
-
-// ErrSnapshotStale marks a readiness snapshot older than its freshness budget.
-var ErrSnapshotStale = errors.New("observability_snapshot_stale")
-
-// ErrSnapshotUnavailable marks a process that has never collected readiness.
-var ErrSnapshotUnavailable = errors.New("observability_snapshot_unavailable")
 
 // CollectReadiness probes every dependency and builds the readiness payload.
 // Database failure degrades honestly: a gateway with a pinned runtime may keep

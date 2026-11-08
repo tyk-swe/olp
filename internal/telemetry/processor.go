@@ -6,19 +6,19 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
-var exportDroppedTotal atomic.Uint64
-
-func ExportDroppedTotal() uint64 { return exportDroppedTotal.Load() }
-
-type countingExporter struct{ inner sdktrace.SpanExporter }
+type countingExporter struct {
+	inner   sdktrace.SpanExporter
+	dropped prometheus.Counter
+}
 
 func (c *countingExporter) ExportSpans(ctx context.Context, spans []sdktrace.ReadOnlySpan) error {
 	err := c.inner.ExportSpans(ctx, spans)
 	if err != nil {
-		exportDroppedTotal.Add(uint64(len(spans)))
+		c.dropped.Add(float64(len(spans)))
 	}
 	return err
 }
@@ -33,6 +33,7 @@ type boundedSpanProcessor struct {
 	controls chan processorControl
 	stopped  atomic.Bool
 	done     chan struct{}
+	dropped  prometheus.Counter
 }
 
 type controlKind int
@@ -47,11 +48,12 @@ type processorControl struct {
 	ack  chan error
 }
 
-func newBoundedSpanProcessor(exporter sdktrace.SpanExporter) *boundedSpanProcessor {
+func newBoundedSpanProcessor(exporter sdktrace.SpanExporter, dropped prometheus.Counter) *boundedSpanProcessor {
 	p := &boundedSpanProcessor{
 		spans:    make(chan sdktrace.ReadOnlySpan, exportQueueCapacity),
 		controls: make(chan processorControl, 16),
 		done:     make(chan struct{}),
+		dropped:  dropped,
 	}
 	go (&exportWorker{exporter: exporter, spans: p.spans, controls: p.controls, done: p.done}).run()
 	return p
@@ -66,7 +68,7 @@ func (p *boundedSpanProcessor) OnEnd(span sdktrace.ReadOnlySpan) {
 	select {
 	case p.spans <- span:
 	default:
-		exportDroppedTotal.Add(1)
+		p.dropped.Inc()
 	}
 }
 

@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"slices"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"

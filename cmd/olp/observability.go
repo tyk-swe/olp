@@ -1,11 +1,14 @@
 package main
 
 import (
+	"math"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/metric"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -56,21 +59,21 @@ func configureObservability(state *observability.State, rt *release.Manager, gw 
 	}
 }
 
-func newLiveMetrics(rt *release.Manager, inferencePool, managementPool *observability.Pool) *observability.LiveMetrics {
-	metrics := &observability.LiveMetrics{
-		InferenceAdmission:  inferencePool,
-		ManagementAdmission: managementPool,
-	}
-	if rt != nil {
-		metrics.AuthorityAge = func() *float64 {
-			status := rt.Authority()
-			if !status.Loaded || status.ReadAt.IsZero() {
-				return nil
-			}
-			age := time.Since(status.ReadAt).Seconds()
-			return &age
+var (
+	authorityAge      = metric.Gauge("olp_api_key_authority_age_seconds", "Seconds since the current authority read began; infinity before the first successful read.")
+	desiredGeneration = metric.Gauge("olp_runtime_desired_generation", "Latest observed desired runtime generation.")
+)
+
+func runtimeMetrics(rt *release.Manager) prometheus.Collector {
+	return metric.Collector(func() []prometheus.Metric {
+		if rt == nil {
+			return []prometheus.Metric{authorityAge.Sample(math.Inf(1)), desiredGeneration.Sample(0)}
 		}
-		metrics.DesiredGeneration = rt.DesiredGeneration
-	}
-	return metrics
+		status := rt.Authority()
+		age := math.Inf(1)
+		if status.Loaded && !status.ReadAt.IsZero() {
+			age = time.Since(status.ReadAt).Seconds()
+		}
+		return []prometheus.Metric{authorityAge.Sample(age), desiredGeneration.Sample(float64(rt.DesiredGeneration()))}
+	})
 }

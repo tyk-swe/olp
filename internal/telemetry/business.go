@@ -1,16 +1,20 @@
 package telemetry
 
 import (
-	"fmt"
+	"errors"
 	"math"
-	"sort"
-	"strconv"
+	"slices"
 	"strings"
 	"sync"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
-var businessLatencyBuckets = []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30}
-var businessThroughputBuckets = []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000}
+var (
+	businessLatencyBuckets    = []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30}
+	businessThroughputBuckets = []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000}
+	tenantLabelNames          = []string{"project", "key", "end_user"}
+)
 
 type BusinessLabels struct {
 	Route        string
@@ -20,37 +24,58 @@ type BusinessLabels struct {
 	EndUser      string
 }
 
-func tenantLabelValues(labels BusinessLabels) [3]struct{ name, value string } {
-	return [3]struct{ name, value string }{
-		{"project", labels.Project},
-		{"key", labels.Key},
-		{"end_user", labels.EndUser},
+func (l BusinessLabels) tenant(name string) string {
+	switch name {
+	case "project":
+		return l.Project
+	case "key":
+		return l.Key
+	default:
+		return l.EndUser
 	}
 }
 
-func tenantLabelValue(name string, labels BusinessLabels) (string, bool) {
-	for _, label := range tenantLabelValues(labels) {
-		if label.name == name {
-			return label.value, true
-		}
+type businessFamilies struct {
+	tokens, cost, firstToken, outputRate         *prometheus.Desc
+	guardrailDecisions, guardrailDuration        *prometheus.Desc
+	cacheRequests, cacheBytesStored, cacheErrors *prometheus.Desc
+	seriesActive, seriesOverflow                 *prometheus.Desc
+}
+
+func newBusinessFamilies(tenants []string) businessFamilies {
+	desc := func(name, help string, labels ...string) *prometheus.Desc {
+		return prometheus.NewDesc(name, help, append(append([]string{"route"}, labels...), tenants...), nil)
 	}
-	return "", false
+	return businessFamilies{
+		tokens:             desc("olp_tokens_total", "Observed provider attempt tokens; unknown usage is omitted.", "provider_kind", "direction"),
+		cost:               desc("olp_cost_total", "Approximate process-local cost from pinned attempt prices, not the durable ledger.", "currency"),
+		firstToken:         desc("olp_time_to_first_token_seconds", "Time to first meaningful streaming output token."),
+		outputRate:         desc("olp_output_tokens_per_second", "Observed streaming output tokens per second after first meaningful output."),
+		guardrailDecisions: desc("olp_guardrail_decisions_total", "Guardrail decisions by phase, action and outcome.", "phase", "action", "outcome"),
+		guardrailDuration:  desc("olp_guardrail_duration_seconds", "Guardrail evaluation duration by phase, action and outcome.", "phase", "action", "outcome"),
+		cacheRequests:      desc("olp_cache_requests_total", "Response cache lookups by result.", "result"),
+		cacheBytesStored:   desc("olp_cache_bytes_stored_total", "Response bytes written to the response cache."),
+		cacheErrors:        desc("olp_cache_errors_total", "Response cache operations that failed."),
+		seriesActive:       prometheus.NewDesc("olp_metrics_series_active", "Business metric sample series admitted under the cap.", nil, nil),
+		seriesOverflow:     prometheus.NewDesc("olp_metrics_series_overflow_total", "Observations refused because admitting new series would exceed the cap.", nil, nil),
+	}
 }
 
 type businessSeries struct {
-	name   string
-	labels string
-	value  float64
-	count  uint64
-	bounds []float64
-	counts []uint64
+	desc    *prometheus.Desc
+	labels  []string
+	value   float64
+	count   uint64
+	buckets []float64
+	counts  []uint64
 }
 
 type BusinessMetrics struct {
-	mu       sync.Mutex
-	cap      int
-	used     int
+	families businessFamilies
 	tenants  []string
+	cap      int
+	mu       sync.Mutex
+	used     int
 	series   map[string]*businessSeries
 	overflow uint64
 }
@@ -59,57 +84,40 @@ func ParseMetricsTenantLabels(raw string) ([]string, error) {
 	if raw == "" {
 		return nil, nil
 	}
-	seen := map[string]bool{}
-	for _, label := range strings.Split(raw, ",") {
-		label = strings.TrimSpace(label)
-		if _, valid := tenantLabelValue(label, BusinessLabels{}); !valid {
-			return nil, fmt.Errorf("OLP_METRICS_TENANT_LABELS accepts project, key and end_user")
+	labels := strings.Split(raw, ",")
+	requested := make([]string, 0, len(labels))
+	for _, label := range labels {
+		name := strings.TrimSpace(label)
+		if !slices.Contains(tenantLabelNames, name) {
+			return nil, errors.New("accepts project, key and end_user")
 		}
-		if seen[label] {
-			return nil, fmt.Errorf("OLP_METRICS_TENANT_LABELS must not repeat labels")
+		if slices.Contains(requested, name) {
+			return nil, errors.New("must not repeat labels")
 		}
-		seen[label] = true
+		requested = append(requested, name)
 	}
-	labels := make([]string, 0, len(seen))
-	for _, label := range tenantLabelValues(BusinessLabels{}) {
-		if seen[label.name] {
-			labels = append(labels, label.name)
-		}
-	}
-	return labels, nil
+	return slices.DeleteFunc(slices.Clone(tenantLabelNames), func(name string) bool { return !slices.Contains(requested, name) }), nil
 }
 
 func NewBusinessMetrics(seriesCap int, tenants []string) *BusinessMetrics {
-	if seriesCap < 1 {
-		panic("telemetry: invalid business metrics series cap")
-	}
-	return &BusinessMetrics{cap: seriesCap, tenants: append([]string(nil), tenants...), series: map[string]*businessSeries{}}
+	return &BusinessMetrics{families: newBusinessFamilies(tenants), tenants: slices.Clone(tenants), cap: seriesCap, series: map[string]*businessSeries{}}
 }
 
-func metricQuoted(s string) string {
-	s = strings.ReplaceAll(s, "\\", "\\\\")
-	s = strings.ReplaceAll(s, "\n", "\\n")
-	s = strings.ReplaceAll(s, "\"", "\\\"")
-	return "\"" + s + "\""
-}
-
-func (m *BusinessMetrics) labels(l BusinessLabels, extra ...string) string {
-	labels := []string{"route=" + metricQuoted(l.Route)}
-	labels = append(labels, extra...)
+func (m *BusinessMetrics) labelValues(l BusinessLabels, extra ...string) []string {
+	values := append([]string{l.Route}, extra...)
 	for _, tenant := range m.tenants {
-		value, _ := tenantLabelValue(tenant, l)
-		labels = append(labels, tenant+"="+metricQuoted(value))
+		values = append(values, l.tenant(tenant))
 	}
-	return strings.Join(labels, ",")
+	return values
 }
 
-func (m *BusinessMetrics) add(name, labels string, value float64, buckets []float64) {
-	if m == nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+func (m *BusinessMetrics) add(desc *prometheus.Desc, labels []string, value float64, buckets []float64) {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
 		return
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	key := name + "{" + labels + "}"
+	key := desc.String() + "\xff" + strings.Join(labels, "\xff")
 	series := m.series[key]
 	if series == nil {
 		weight := 1
@@ -120,17 +128,18 @@ func (m *BusinessMetrics) add(name, labels string, value float64, buckets []floa
 			m.overflow++
 			return
 		}
-		series = &businessSeries{name: name, labels: labels, bounds: append([]float64(nil), buckets...), counts: make([]uint64, len(buckets))}
+		series = &businessSeries{desc: desc, labels: labels, buckets: buckets, counts: make([]uint64, len(buckets))}
 		m.series[key] = series
 		m.used += weight
 	}
 	series.value += value
-	if buckets != nil {
-		series.count++
-		for i, bound := range series.bounds {
-			if value <= bound {
-				series.counts[i]++
-			}
+	if buckets == nil {
+		return
+	}
+	series.count++
+	for i, bound := range series.buckets {
+		if value <= bound {
+			series.counts[i]++
 		}
 	}
 }
@@ -144,68 +153,37 @@ func (m *BusinessMetrics) Tokens(l BusinessLabels, input, output *int64) {
 		value     *int64
 	}{{"input", input}, {"output", output}} {
 		if item.value != nil && *item.value >= 0 {
-			m.add("olp_tokens_total", m.labels(l, "provider_kind="+metricQuoted(l.ProviderKind), "direction="+metricQuoted(item.direction)), float64(*item.value), nil)
+			m.add(m.families.tokens, m.labelValues(l, l.ProviderKind, item.direction), float64(*item.value), nil)
 		}
 	}
 }
 
 func (m *BusinessMetrics) Cost(l BusinessLabels, currency string, amount float64) {
 	if m != nil && l.Route != "" && currency != "" {
-		m.add("olp_cost_total", m.labels(l, "currency="+metricQuoted(currency)), amount, nil)
+		m.add(m.families.cost, m.labelValues(l, currency), amount, nil)
 	}
 }
 
 func (m *BusinessMetrics) FirstToken(l BusinessLabels, seconds float64) {
 	if m != nil && l.Route != "" {
-		m.add("olp_time_to_first_token_seconds", m.labels(l), seconds, businessLatencyBuckets)
+		m.add(m.families.firstToken, m.labelValues(l), seconds, businessLatencyBuckets)
 	}
 }
 
 func (m *BusinessMetrics) OutputRate(l BusinessLabels, tokens int64, seconds float64) {
 	if m != nil && l.Route != "" && tokens >= 0 && seconds > 0 {
-		m.add("olp_output_tokens_per_second", m.labels(l), float64(tokens)/seconds, businessThroughputBuckets)
+		m.add(m.families.outputRate, m.labelValues(l), float64(tokens)/seconds, businessThroughputBuckets)
 	}
-}
-
-func (m *BusinessMetrics) WritePrometheus(body *strings.Builder) {
-	if m == nil {
-		return
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	body.WriteString("# HELP olp_tokens_total Observed provider attempt tokens; unknown usage is omitted.\n# TYPE olp_tokens_total counter\n")
-	body.WriteString("# HELP olp_cost_total Approximate process-local cost from pinned attempt prices, not the durable ledger.\n# TYPE olp_cost_total counter\n")
-	body.WriteString("# HELP olp_time_to_first_token_seconds Time to first meaningful streaming output token.\n# TYPE olp_time_to_first_token_seconds histogram\n")
-	body.WriteString("# HELP olp_output_tokens_per_second Observed streaming output tokens per second after first meaningful output.\n# TYPE olp_output_tokens_per_second histogram\n")
-	keys := make([]string, 0, len(m.series))
-	for key := range m.series {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		s := m.series[key]
-		if s.bounds == nil {
-			fmt.Fprintf(body, "%s{%s} %s\n", s.name, s.labels, strconv.FormatFloat(s.value, 'g', -1, 64))
-			continue
-		}
-		for i, bound := range s.bounds {
-			fmt.Fprintf(body, "%s_bucket{%s,le=\"%s\"} %d\n", s.name, s.labels, strconv.FormatFloat(bound, 'g', -1, 64), s.counts[i])
-		}
-		fmt.Fprintf(body, "%s_bucket{%s,le=\"+Inf\"} %d\n%s_sum{%s} %s\n%s_count{%s} %d\n",
-			s.name, s.labels, s.count, s.name, s.labels, strconv.FormatFloat(s.value, 'g', -1, 64), s.name, s.labels, s.count)
-	}
-	fmt.Fprintf(body, "# HELP olp_metrics_series_active Business metric sample series admitted under the cap.\n# TYPE olp_metrics_series_active gauge\nolp_metrics_series_active %d\n", m.used)
-	fmt.Fprintf(body, "# HELP olp_metrics_series_overflow_total Observations refused because admitting new series would exceed the cap.\n# TYPE olp_metrics_series_overflow_total counter\nolp_metrics_series_overflow_total %d\n", m.overflow)
 }
 
 // Guardrail records bounded execution labels; it never accepts matched values.
-func (m *BusinessMetrics) Guardrail(labels BusinessLabels, phase, action, outcome string, latencyMS int64) {
+func (m *BusinessMetrics) Guardrail(l BusinessLabels, phase, action, outcome string, latencyMS int64) {
 	if m == nil {
 		return
 	}
-	extra := m.labels(labels, "phase="+metricQuoted(phase), "action="+metricQuoted(action), "outcome="+metricQuoted(outcome))
-	m.add("olp_guardrail_decisions_total", extra, 1, nil)
-	m.add("olp_guardrail_duration_seconds", extra, float64(latencyMS)/1000, businessLatencyBuckets)
+	labels := m.labelValues(l, phase, action, outcome)
+	m.add(m.families.guardrailDecisions, labels, 1, nil)
+	m.add(m.families.guardrailDuration, labels, float64(latencyMS)/1000, businessLatencyBuckets)
 }
 
 // Cache records bounded, content-free cache outcome metrics.
@@ -213,12 +191,48 @@ func (m *BusinessMetrics) Cache(route, result string, storedBytes int, failed bo
 	if m == nil || route == "" {
 		return
 	}
-	labels := m.labels(BusinessLabels{Route: route})
-	m.add("olp_cache_requests_total", labels+",result="+metricQuoted(result), 1, nil)
+	l := BusinessLabels{Route: route}
+	m.add(m.families.cacheRequests, m.labelValues(l, result), 1, nil)
 	if storedBytes > 0 {
-		m.add("olp_cache_bytes_stored_total", labels, float64(storedBytes), nil)
+		m.add(m.families.cacheBytesStored, m.labelValues(l), float64(storedBytes), nil)
 	}
 	if failed {
-		m.add("olp_cache_errors_total", labels, 1, nil)
+		m.add(m.families.cacheErrors, m.labelValues(l), 1, nil)
 	}
+}
+
+func (m *BusinessMetrics) Describe(ch chan<- *prometheus.Desc) {
+	f := m.families
+	for _, desc := range []*prometheus.Desc{f.tokens, f.cost, f.firstToken, f.outputRate, f.guardrailDecisions, f.guardrailDuration, f.cacheRequests, f.cacheBytesStored, f.cacheErrors, f.seriesActive, f.seriesOverflow} {
+		ch <- desc
+	}
+}
+
+func (m *BusinessMetrics) Collect(ch chan<- prometheus.Metric) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, s := range m.series {
+		ch <- s.metric()
+	}
+	ch <- prometheus.MustNewConstMetric(m.families.seriesActive, prometheus.GaugeValue, float64(m.used))
+	ch <- prometheus.MustNewConstMetric(m.families.seriesOverflow, prometheus.CounterValue, float64(m.overflow))
+}
+
+func (s *businessSeries) metric() prometheus.Metric {
+	m, err := s.build()
+	if err != nil {
+		return prometheus.NewInvalidMetric(s.desc, err)
+	}
+	return m
+}
+
+func (s *businessSeries) build() (prometheus.Metric, error) {
+	if s.buckets == nil {
+		return prometheus.NewConstMetric(s.desc, prometheus.CounterValue, s.value, s.labels...)
+	}
+	buckets := make(map[float64]uint64, len(s.buckets))
+	for i, bound := range s.buckets {
+		buckets[bound] = s.counts[i]
+	}
+	return prometheus.NewConstHistogram(s.desc, s.count, s.value, buckets, s.labels...)
 }
