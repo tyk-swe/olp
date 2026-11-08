@@ -28,7 +28,7 @@ func (s *Server) mfaStatus(r *http.Request, p Principal) (Reply, error) {
 	if err = s.Pool.QueryRow(r.Context(), "SELECT (SELECT count(*) FROM olp.mfa_recovery_codes WHERE user_id=$1),mfa_revision::text FROM olp.users WHERE id=$1", p.ID).Scan(&remaining, &revision); err != nil {
 		return Reply{}, err
 	}
-	required, err := mfaRequired(r.Context(), s.Pool)
+	required, err := ReadLocalMFARequired(r.Context(), s.Pool)
 	_, webErr := s.webAuthn()
 	return Detail(map[string]any{"factors": factors, "recovery_codes_remaining": remaining, "required": required, "etag": revision, "webauthn_available": webErr == nil}, revision), err
 }
@@ -194,7 +194,7 @@ func (s *Server) mfaRemove(r *http.Request, _ Principal) (Reply, error) {
 	if err = tx.QueryRow(r.Context(), "SELECT count(*) FROM olp.mfa_factors WHERE user_id=$1", p.ID).Scan(&count); err != nil {
 		return Reply{}, err
 	}
-	required, err := mfaRequired(r.Context(), tx)
+	required, err := ReadLocalMFARequired(r.Context(), tx)
 	if err != nil {
 		return Reply{}, err
 	}

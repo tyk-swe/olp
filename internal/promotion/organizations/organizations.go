@@ -139,7 +139,7 @@ func ApplyProjectOrganization(s *promotion.Server, ctx context.Context, tx pgx.T
 		if *current == desired {
 			return nil
 		}
-		return access.Fail(409, "project_organization_immutable", "A project cannot move between ")
+		return access.Fail(409, "project_organization_immutable", "A project cannot move between organizations.")
 	}
 	if err := p.Authorize(access.Access); err != nil {
 		return err

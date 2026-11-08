@@ -68,7 +68,7 @@ func ApplyCatalogPolicies(ctx context.Context, tx pgx.Tx, p access.Principal, do
 		if enabled == project.PublicCatalog && prices == project.PublicCatalogPrices {
 			continue
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO olp.model_catalog_project_settings(project_id,enabled,prices_public,etag) VALUES($1,$2,$3,$4) ON CONFLICT(project_id) DO UPDATE SET enabled=excluded.enabled,prices_public=excluded.prices_public,etag=excluded.etag`, id, project.PublicCatalog, project.PublicCatalogPrices, access.NewID()); err != nil {
+		if _, err := SetProjectPublication(ctx, tx, id, project.PublicCatalog, project.PublicCatalogPrices); err != nil {
 			return err
 		}
 	}

@@ -87,6 +87,10 @@ func ImportedEndUserPolicy(existing *authority.EndUserPolicy, defaults *authorit
 	return &authority.EndUserPolicy{LimitTemplate: template, Defaults: values, Overrides: existing.Overrides, Blocked: existing.Blocked}
 }
 
+func (desired PolicyImport) Changes(current Policies) bool {
+	return !current.equal(desired.policies(current))
+}
+
 func (current Policies) equal(desired Policies) bool {
 	return current.AttributionBudgets.Equal(desired.AttributionBudgets) && reflect.DeepEqual(current.Templates, desired.Templates) && reflect.DeepEqual(current.EndUser, desired.EndUser) && reflect.DeepEqual(current.Attribution, desired.Attribution) && current.RouteGroups.Equal(desired.RouteGroups) && reflect.DeepEqual(current.Budget, desired.Budget)
 }

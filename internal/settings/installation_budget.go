@@ -60,3 +60,15 @@ func ApplyBudgetTimeZone(ctx context.Context, tx pgx.Tx, p access.Principal, des
 	_, err := tx.Exec(ctx, "UPDATE olp.settings SET value=$1,etag=$2,updated_by=$3,updated_at=now() WHERE key='budgets.time_zone'", *desired, access.NewID(), p.UserID())
 	return err
 }
+
+func ReadBudgetTimeZone(ctx context.Context, q access.Queryer) (string, error) {
+	var zone string
+	err := q.QueryRow(ctx, "SELECT COALESCE((SELECT value FROM olp.settings WHERE key='budgets.time_zone'),'UTC')").Scan(&zone)
+	return zone, err
+}
+
+func ReadInstallationBudget(ctx context.Context, q access.Queryer) (*authority.BudgetPolicy, error) {
+	var policy *authority.BudgetPolicy
+	err := q.QueryRow(ctx, "SELECT budget_policy FROM olp.installation WHERE singleton").Scan(&policy)
+	return policy, err
+}

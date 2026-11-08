@@ -1,0 +1,133 @@
+package organization
+
+import (
+	"context"
+	"errors"
+	"maps"
+	"reflect"
+	"slices"
+	"strings"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/projects"
+	"github.com/tyk-swe/olp/internal/promotion"
+)
+
+const detail = "Organization budget; destination memberships are preserved."
+
+type locked struct {
+	ID     string
+	Budget *authority.BudgetPolicy
+}
+
+func Planner(desired []Organization) promotion.Planner {
+	return promotion.Planner{Plan: func(ctx context.Context, q access.Queryer) ([]promotion.Item, error) {
+		current, err := Read(ctx, q)
+		if err != nil {
+			return nil, err
+		}
+		return plan(desired, current), nil
+	}}
+}
+
+func plan(desired, current []Organization) []promotion.Item {
+	existing := maps.Collect(func(yield func(string, Organization) bool) {
+		for _, organization := range current {
+			if !yield(strings.ToLower(organization.Name), organization) {
+				return
+			}
+		}
+	})
+	return slices.Collect(func(yield func(promotion.Item) bool) {
+		for _, organization := range desired {
+			if !yield(promotion.Item{Kind: contract.ConfigurationPlanItemKindOrganization, Key: organization.Name, Action: action(organization, existing), Detail: detail}) {
+				return
+			}
+		}
+	})
+}
+
+func action(desired Organization, existing map[string]Organization) contract.ConfigurationPlanItemAction {
+	current, ok := existing[strings.ToLower(desired.Name)]
+	switch {
+	case !ok:
+		return contract.ConfigurationPlanItemActionCreate
+	case reflect.DeepEqual(current.Budget, desired.Budget):
+		return contract.ConfigurationPlanItemActionReuse
+	default:
+		return contract.ConfigurationPlanItemActionReplace
+	}
+}
+
+func Applier(desired []Organization) promotion.Applier {
+	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
+		changed, err := applyAll(ctx, tx, p, desired)
+		if err != nil || !changed {
+			return err
+		}
+		if _, err := access.AdvanceAuthority(ctx, tx); err != nil {
+			return err
+		}
+		return nil
+	}
+}
+
+func applyAll(ctx context.Context, tx pgx.Tx, p access.Principal, organizations []Organization) (bool, error) {
+	if len(organizations) == 0 {
+		return false, nil
+	}
+	changed, err := apply(ctx, tx, p, organizations[0])
+	if err != nil {
+		return false, err
+	}
+	rest, err := applyAll(ctx, tx, p, organizations[1:])
+	return changed || rest, err
+}
+
+func apply(ctx context.Context, tx pgx.Tx, p access.Principal, organization Organization) (bool, error) {
+	rows, err := tx.Query(ctx, "SELECT id::text,budget_policy FROM olp.organizations WHERE lower(name)=lower($1) FOR UPDATE", organization.Name)
+	if err != nil {
+		return false, err
+	}
+	current, err := pgx.CollectOneRow(rows, pgx.RowToStructByPos[locked])
+	if errors.Is(err, pgx.ErrNoRows) {
+		return create(ctx, tx, p, organization)
+	}
+	if err != nil {
+		return false, err
+	}
+	return setBudget(ctx, tx, p, current, organization.Budget)
+}
+
+func create(ctx context.Context, tx pgx.Tx, p access.Principal, organization Organization) (bool, error) {
+	if err := p.Authorize(access.Access); err != nil {
+		return false, err
+	}
+	id, _, err := projects.CreateOrganization(ctx, tx, organization.Name, p.UserID())
+	if err != nil {
+		return false, err
+	}
+	if _, err := setBudget(ctx, tx, p, locked{ID: id}, organization.Budget); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func setBudget(ctx context.Context, tx pgx.Tx, p access.Principal, current locked, desired *authority.BudgetPolicy) (bool, error) {
+	if reflect.DeepEqual(current.Budget, desired) {
+		return false, nil
+	}
+	if err := p.Authorize(access.ManageOrganization); err != nil {
+		return false, err
+	}
+	if err := p.Organization(current.ID, access.Change); err != nil {
+		return false, err
+	}
+	if _, err := projects.SetOrganizationBudget(ctx, tx, current.ID, desired); err != nil {
+		return false, err
+	}
+	return true, nil
+}
