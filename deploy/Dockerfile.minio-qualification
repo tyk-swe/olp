@@ -1,11 +1,11 @@
 FROM golang:1-trixie AS build
 ENV CGO_ENABLED=0 GOTOOLCHAIN=local
-RUN git clone --depth 1 --branch RELEASE.2025-04-22T22-12-26Z https://github.com/minio/minio.git /src
+RUN git clone --depth 1 --branch RELEASE.2025-10-15T17-29-55Z https://github.com/minio/minio.git /src
 WORKDIR /src
-RUN test "$(git rev-parse HEAD)" = "0d7408fc9969caf07de6a8c3a84f9fbb10a6739e" && \
+RUN test "$(git rev-parse HEAD)" = "9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a" && \
     go build -mod=readonly -trimpath -o /out/minio .
 
-FROM debian:bookworm-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3
+FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl && \
     apt-get clean && rm -r /var/lib/apt/lists/*
 COPY --from=build /out/minio /usr/local/bin/minio
