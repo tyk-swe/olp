@@ -2,10 +2,12 @@ package observability
 
 import (
 	"context"
-	"fmt"
-	"strings"
+	"slices"
 	"sync/atomic"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tyk-swe/olp/internal/metric"
 )
 
 // MaxAdmissionCapacity bounds a configured admission pool.
@@ -147,30 +149,22 @@ func WithPermit(ctx context.Context, p *Permit) context.Context {
 	return context.WithValue(ctx, permitContextKey{}, p)
 }
 
-// Metrics renders the surface's admission series.
-func (p *Pool) metrics(surface string, body *strings.Builder) {
-	fmt.Fprintf(body,
-		"olp_http_admission_capacity{surface=%q} %d\n"+
-			"olp_http_admitted_requests{surface=%q} %d\n"+
-			"olp_http_admission_rejections_total{surface=%q} %d\n",
-		surface, p.Capacity(), surface, p.admitted.Load(), surface, p.rejected.Load())
+var (
+	admissionCapacity   = metric.Gauge("olp_http_admission_capacity", "Configured process-local HTTP request admission capacity.", "surface")
+	admittedRequests    = metric.Gauge("olp_http_admitted_requests", "Current process-local admitted HTTP requests whose responses have not completed.", "surface")
+	admissionRejections = metric.Counter("olp_http_admission_rejections_total", "HTTP requests rejected because the process-local admission pool was full.", "surface")
+)
+
+func (p *Pool) samples(surface string) []prometheus.Metric {
+	return []prometheus.Metric{
+		admissionCapacity.Sample(float64(p.Capacity()), surface),
+		admittedRequests.Sample(float64(p.admitted.Load()), surface),
+		admissionRejections.Sample(float64(p.rejected.Load()), surface),
+	}
 }
 
-// AdmissionMetrics renders both surfaces' admission series.
-func AdmissionMetrics(inference, management *Pool, body *strings.Builder) {
-	body.WriteString("# HELP olp_http_admission_capacity Configured process-local HTTP request admission capacity.\n" +
-		"# TYPE olp_http_admission_capacity gauge\n" +
-		"# HELP olp_http_admitted_requests Current process-local admitted HTTP requests whose responses have not completed.\n" +
-		"# TYPE olp_http_admitted_requests gauge\n" +
-		"# HELP olp_http_admission_rejections_total HTTP requests rejected because the process-local admission pool was full.\n" +
-		"# TYPE olp_http_admission_rejections_total counter\n")
-	if inference != nil {
-		inference.metrics("inference", body)
-	}
-	if management != nil {
-		management.metrics("management", body)
-	}
-	if inference != nil && inference.queue != nil {
-		inference.queue.metrics(body)
-	}
+func AdmissionMetrics(inference, management *Pool) prometheus.Collector {
+	return metric.Collector(func() []prometheus.Metric {
+		return slices.Concat(inference.samples("inference"), management.samples("management"), inference.queue.samples())
+	})
 }

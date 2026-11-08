@@ -2,18 +2,80 @@ package observability
 
 import (
 	"context"
-	"fmt"
-	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"math"
-	"strings"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/metric"
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-// successRatio is the successful fraction of total, treating "nothing
-// observed" as fully healthy so an idle window does not read as an outage.
+var (
+	providerMetricsComplete = metric.Gauge("olp_provider_metrics_complete", "Whether provider collection completed without truncation or query failure.")
+	providerMetricsEmitted  = metric.Gauge("olp_provider_metrics_emitted", "Number of providers in this snapshot.")
+	runtimeGeneration       = metric.Gauge("olp_runtime_generation", "Current immutable runtime generation.")
+
+	metadataDropped           = metric.Counter("olp_request_metadata_events_dropped_total", "Metadata events dropped from the bounded buffer.")
+	metadataAbandoned         = metric.Counter("olp_request_metadata_events_abandoned_total", "Accepted metadata events abandoned during shutdown or worker failure.")
+	metadataPending           = metric.Gauge("olp_request_metadata_events_pending", "Accepted metadata events not yet written to the stream.")
+	metadataRetrying          = metric.Gauge("olp_request_metadata_stream_retrying", "Whether the local writer is retrying Valkey.")
+	metadataSinkAvailable     = metric.Gauge("olp_request_metadata_persistence_available", "Whether a request metadata sink is active.")
+	consumerPending           = metric.Gauge("olp_request_metadata_consumer_pending_events", "Delivered request metadata events awaiting consumer acknowledgement.")
+	consumerLag               = metric.Gauge("olp_request_metadata_consumer_lag_events", "Request metadata stream events not yet delivered to the persistence consumer.")
+	consumerHeartbeatAge      = metric.Gauge("olp_request_metadata_consumer_heartbeat_age_seconds", "Age of the last durable worker checkpoint.")
+	consumerHealthy           = metric.Gauge("olp_request_metadata_consumer_healthy", "Whether the durable consumer is current and fully drained.")
+	consumerStale             = metric.Gauge("olp_request_metadata_consumer_stale", "Whether the durable consumer missed its heartbeat threshold.")
+	consumerOldestPendingAge  = metric.Gauge("olp_request_metadata_consumer_oldest_pending_age_seconds", "Age of the oldest delivered metadata entry awaiting acknowledgement.")
+	gatewayOpenEpochs         = metric.Gauge("olp_request_metadata_gateway_open_epochs", "Gateway process epochs still emitting checkpoints.")
+	gatewayUnresolvedEpochs   = metric.Gauge("olp_request_metadata_gateway_unresolved_epochs", "Unclean gateway epochs awaiting operator acknowledgement.")
+	historicalUncertainGaps   = metric.Gauge("olp_request_metadata_historical_uncertain_gaps", "Retained exactness gaps across raw and hourly evidence.")
+	unresolvedEventLowerBound = metric.Gauge("olp_request_metadata_gateway_unresolved_event_lower_bound", "Last durable in-flight event lower bound across unresolved epochs.")
+	metadataLossReported      = metric.Counter("olp_request_metadata_loss_reported_total", "Local buffer loss durably reported by the gateway checkpoint.", "kind")
+	metadataReclaimed         = metric.Counter("olp_request_metadata_events_reclaimed_total", "Metadata entries transferred from stale consumer ownership.")
+	metadataRecovered         = metric.Counter("olp_request_metadata_events_recovered_total", "Pending metadata entries durably resolved by a recovery pass.")
+	metadataDuplicates        = metric.Counter("olp_request_metadata_persistence_duplicates_total", "Duplicate metadata persistence outcomes accepted idempotently.")
+	metadataProcessed         = metric.Counter("olp_request_metadata_events_processed_total", "Stream metadata entries durably resolved by the replicated consumer group.")
+
+	limiterAvailable = metric.Gauge("olp_distributed_limiter_available", "Whether a Valkey limiter connection is installed.")
+	limitsFailOpen   = metric.Counter("olp_limits_fail_open_total", "Rate- or concurrency-limited requests admitted without a lease under the fail-open outage policy.")
+	budgetRejections = metric.Counter("olp_key_budget_rejections_total", "API-key requests rejected because a cost budget was exhausted or could not hold the request's estimated cost.", "window")
+	openCircuits     = metric.Gauge("olp_open_target_circuits", "Number of target circuits currently open or half-open.")
+	shadowRequests   = metric.Counter("olp_shadow_requests_total", "Shadow attempts mirrored, or dropped because the shadow pool was full.", "outcome")
+
+	mediaPending       = metric.Gauge("olp_media_reconciliation_pending", "Metadata-only media jobs awaiting reconciliation.")
+	mediaStale         = metric.Gauge("olp_media_reconciliation_stale", "Media reconciliation jobs past their grace period.")
+	mediaFailed        = metric.Gauge("olp_media_reconciliation_failed", "Media jobs whose latest autonomous reconciliation attempt failed.")
+	mediaGaps          = metric.Counter("olp_media_reconciliation_gaps_total", "Upstream media side effects that could not be durably recorded.")
+	mediaSpoolCapacity = metric.Gauge("olp_media_spool_capacity_bytes", "Configured capacity of the private local media spool.")
+	mediaSpoolUsed     = metric.Gauge("olp_media_spool_used_bytes", "Bytes currently reserved in the private local media spool.")
+
+	asyncObservability    = metric.Gauge("olp_async_worker_observability_available", "Whether all PostgreSQL-backed asynchronous worker summaries were available.")
+	asyncPlaneCurrent     = metric.Gauge("olp_async_plane_current", "Whether every replicated worker responsibility has a current successful checkpoint.")
+	asyncPlaneDrained     = metric.Gauge("olp_async_plane_drained", "Whether request-metadata backlogs are drained.")
+	asyncPlaneHealthy     = metric.Gauge("olp_async_plane_healthy", "Whether the asynchronous plane is both current and drained.")
+	asyncPlaneProgress    = metric.Gauge("olp_async_plane_last_progress_timestamp_seconds", "Unix time of the latest durable worker progress.")
+	workerTaskHealthy     = metric.Gauge("olp_worker_task_healthy", "Whether a fixed worker responsibility has a current successful checkpoint.", "task")
+	workerTaskHeartbeat   = metric.Gauge("olp_worker_task_heartbeat_age_seconds", "Age of the latest checkpoint for a fixed worker responsibility.", "task")
+	workerTaskLastSuccess = metric.Gauge("olp_worker_task_last_success_age_seconds", "Age of the latest successful checkpoint for a fixed worker responsibility.", "task")
+	workerTaskRuns        = metric.Counter("olp_worker_task_runs_total", "Durable checkpoint outcomes across all worker replicas.", "task", "outcome")
+
+	operationsAvailable   = metric.Gauge("olp_operational_metrics_available", "Whether the PostgreSQL operational rollup was available.")
+	requests5m            = metric.Gauge("olp_requests_5m", "Metadata requests observed during the trailing five minutes.")
+	requestSuccessRatio5m = metric.Gauge("olp_request_success_ratio_5m", "Successful request ratio during the trailing five minutes.")
+	requestLatency        = metric.Gauge("olp_request_latency_seconds", "Request latency quantiles during the trailing five minutes.", "quantile")
+	upstreamCancellations = metric.Gauge("olp_upstream_cancellations_5m", "Cancelled upstream attempts during the trailing five minutes.")
+
+	providerHealth       = metric.Gauge("olp_provider_health", "Provider health classification over the trailing fifteen minutes.", "provider_id", "provider_name", "provider_kind", "status")
+	providerAttempts     = metric.Gauge("olp_provider_attempts_15m", "Number of sampled provider attempts in the trailing fifteen minutes.", "provider_id", "provider_kind")
+	providerSuccessRatio = metric.Gauge("olp_provider_success_ratio_15m", "Provider attempt success ratio over the trailing fifteen minutes.", "provider_id", "provider_kind")
+	providerLatency      = metric.Gauge("olp_provider_latency_seconds_15m", "Provider average attempt latency over the trailing fifteen minutes.", "provider_id", "provider_kind")
+)
+
+// successRatio treats "nothing observed" as fully healthy so an idle window
+// does not read as an outage.
 func successRatio(success, total int64) float64 {
 	if total == 0 {
 		return 1.0
@@ -21,377 +83,248 @@ func successRatio(success, total int64) float64 {
 	return float64(success) / float64(total)
 }
 
-// CollectMetrics renders the process's Prometheus exposition body. Every
-// series is metadata: counts, ages, and configured capacities only.
-func CollectMetrics(ctx context.Context, s *State) (string, error) {
-	var body strings.Builder
-	body.Grow(8192)
-	var snapshot *usage.Snapshot
-	if s.Emitter != nil {
-		snapshot = s.Emitter()
+func ageSecondsOrInf(age *int64) float64 {
+	if age == nil {
+		return math.Inf(1)
 	}
+	return float64(*age)
+}
+
+func CollectMetrics(ctx context.Context, s *State) []prometheus.Metric {
+	now := time.Now()
+	providers, providersComplete, providersErr := ReadProviderHealthMetrics(ctx, s.Pool)
 	limiterConfigured, limiterHealthy := false, false
 	if s.Limiter != nil {
 		limiterConfigured, limiterHealthy = s.Limiter(ctx)
 	}
-	now := time.Now()
-	mediaResult, mediaErr := media.ReconciliationSummary(ctx, s.Pool, now)
-	mediaSummary := &mediaResult
 	consumer, consumerErr := usage.ReadConsumerStatus(ctx, s.Pool, now)
-	// Epoch health defaults to zero when the read fails: an absent epoch table
-	// must not suppress the whole exposition.
-	epochs, _ := ReadEpochHealth(ctx, s.Pool)
-	operations, operationsErr := ReadOperationsSummary(ctx, s.Pool, 5)
-	providers, providersComplete, providersErr := ReadProviderHealthMetrics(ctx, s.Pool)
-	tasks, tasksErr := ReadRegionalWorkerTaskHealth(ctx, s.Pool, s.Region)
-	counters, countersErr := ReadWorkerRecoveryCounters(ctx, s.Pool)
-
-	body.WriteString("# HELP olp_provider_metrics_complete Whether provider collection completed without truncation or query failure.\n" +
-		"# TYPE olp_provider_metrics_complete gauge\n" +
-		"# HELP olp_provider_metrics_emitted Number of providers in this snapshot.\n" +
-		"# TYPE olp_provider_metrics_emitted gauge\n")
-	fmt.Fprintf(&body, "olp_provider_metrics_complete %d\nolp_provider_metrics_emitted %d\n",
-		boolInt(providersErr == nil && providersComplete), len(providers))
-
-	// Runtime generation and metadata pipeline gauges.
-	var generation int64
-	if s.Runtime != nil {
-		if g := s.Runtime().Generation; g != nil {
-			generation = *g
-		}
-	}
-	var dropped, abandoned, pending int64
-	var retrying, sinkAvailable int
-	if snapshot != nil {
-		dropped, abandoned, pending = snapshot.Dropped, snapshot.Abandoned, snapshot.Pending()
-		retrying = boolInt(snapshot.Retrying)
-		sinkAvailable = boolInt(!snapshot.Closed)
-	}
-	body.WriteString("# HELP olp_runtime_generation Current immutable runtime generation.\n" +
-		"# TYPE olp_runtime_generation gauge\n" +
-		"# HELP olp_request_metadata_events_dropped_total Metadata events dropped from the bounded buffer.\n" +
-		"# TYPE olp_request_metadata_events_dropped_total counter\n" +
-		"# HELP olp_request_metadata_events_abandoned_total Accepted metadata events abandoned during shutdown or worker failure.\n" +
-		"# TYPE olp_request_metadata_events_abandoned_total counter\n" +
-		"# HELP olp_request_metadata_events_pending Accepted metadata events not yet written to the stream.\n" +
-		"# TYPE olp_request_metadata_events_pending gauge\n" +
-		"# HELP olp_request_metadata_stream_retrying Whether the local writer is retrying Valkey.\n" +
-		"# TYPE olp_request_metadata_stream_retrying gauge\n" +
-		"# HELP olp_request_metadata_persistence_available Whether a request metadata sink is active.\n" +
-		"# TYPE olp_request_metadata_persistence_available gauge\n" +
-		"# HELP olp_request_metadata_consumer_pending_events Delivered request metadata events awaiting consumer acknowledgement.\n" +
-		"# TYPE olp_request_metadata_consumer_pending_events gauge\n" +
-		"# HELP olp_request_metadata_consumer_lag_events Request metadata stream events not yet delivered to the persistence consumer.\n" +
-		"# TYPE olp_request_metadata_consumer_lag_events gauge\n" +
-		"# HELP olp_request_metadata_consumer_heartbeat_age_seconds Age of the last durable worker checkpoint.\n" +
-		"# TYPE olp_request_metadata_consumer_heartbeat_age_seconds gauge\n" +
-		"# HELP olp_request_metadata_consumer_healthy Whether the durable consumer is current and fully drained.\n" +
-		"# TYPE olp_request_metadata_consumer_healthy gauge\n" +
-		"# HELP olp_request_metadata_consumer_stale Whether the durable consumer missed its heartbeat threshold.\n" +
-		"# TYPE olp_request_metadata_consumer_stale gauge\n" +
-		"# HELP olp_request_metadata_gateway_open_epochs Gateway process epochs still emitting checkpoints.\n" +
-		"# TYPE olp_request_metadata_gateway_open_epochs gauge\n" +
-		"# HELP olp_request_metadata_gateway_unresolved_epochs Unclean gateway epochs awaiting operator acknowledgement.\n" +
-		"# TYPE olp_request_metadata_gateway_unresolved_epochs gauge\n" +
-		"# HELP olp_request_metadata_historical_uncertain_gaps Retained exactness gaps across raw and hourly evidence.\n" +
-		"# TYPE olp_request_metadata_historical_uncertain_gaps gauge\n" +
-		"# HELP olp_request_metadata_gateway_unresolved_event_lower_bound Last durable in-flight event lower bound across unresolved epochs.\n" +
-		"# TYPE olp_request_metadata_gateway_unresolved_event_lower_bound gauge\n")
-	var heartbeatAge int64 = int64Max
-	healthy, stale := 0, 0
 	if consumerErr != nil {
 		consumer = usage.ConsumerStatus{State: usage.ConsumerUnknown}
 	}
-	if consumerErr == nil {
-		if consumer.HeartbeatAgeSeconds != nil {
-			heartbeatAge = *consumer.HeartbeatAgeSeconds
-		}
-		healthy = boolInt(consumer.Complete())
-		stale = boolInt(consumer.State == usage.ConsumerStale)
+	tasks, tasksErr := ReadRegionalWorkerTaskHealth(ctx, s.Pool, s.Region)
+	counters, countersErr := ReadWorkerRecoveryCounters(ctx, s.Pool)
+	operations, operationsErr := ReadOperationsSummary(ctx, s.Pool, 5)
+	metrics := [][]prometheus.Metric{
+		{
+			providerMetricsComplete.Sample(metric.Flag(providersErr == nil && providersComplete)),
+			providerMetricsEmitted.Sample(float64(len(providers))),
+			runtimeGeneration.Sample(float64(currentGeneration(s))),
+			limiterAvailable.Sample(metric.Flag(limiterConfigured && limiterHealthy)),
+			asyncObservability.Sample(metric.Flag(consumerErr == nil && tasksErr == nil && countersErr == nil)),
+			operationsAvailable.Sample(metric.Flag(operationsErr == nil)),
+		},
+		metadataMetrics(ctx, s, consumer, consumerErr == nil),
+		gatewayMetrics(s),
+		mediaMetrics(ctx, s, now),
+		asyncPlaneMetrics(tasks, consumer, limiterConfigured, now),
+		providerMetrics(providers),
 	}
-	fmt.Fprintf(&body, "olp_runtime_generation %d\n"+
-		"olp_request_metadata_events_dropped_total %d\n"+
-		"olp_request_metadata_events_abandoned_total %d\n"+
-		"olp_request_metadata_events_pending %d\n"+
-		"olp_request_metadata_stream_retrying %d\n"+
-		"olp_request_metadata_persistence_available %d\n"+
-		"olp_request_metadata_consumer_pending_events %d\n"+
-		"olp_request_metadata_consumer_lag_events %d\n"+
-		"olp_request_metadata_consumer_heartbeat_age_seconds %d\n"+
-		"olp_request_metadata_consumer_healthy %d\n"+
-		"olp_request_metadata_consumer_stale %d\n"+
-		"olp_request_metadata_gateway_open_epochs %d\n"+
-		"olp_request_metadata_gateway_unresolved_epochs %d\n"+
-		"olp_request_metadata_historical_uncertain_gaps %d\n"+
-		"olp_request_metadata_gateway_unresolved_event_lower_bound %d\n",
-		generation, dropped, abandoned, pending, retrying, sinkAvailable,
-		consumer.PendingEvents, consumer.LagEvents, heartbeatAge, healthy, stale,
-		epochs.OpenEpochs, epochs.UnresolvedEpochs, epochs.HistoricalUncertainGaps,
-		epochs.UnresolvedEventLowerBound)
+	if countersErr == nil {
+		metrics = append(metrics, recoveryMetrics(counters))
+	}
+	if operationsErr == nil {
+		metrics = append(metrics, operationsMetrics(operations))
+	}
+	if s.Export != nil {
+		metrics = append(metrics, s.Export(ctx))
+	}
+	return concat(metrics)
+}
 
-	// Limiter, circuits, and media reconciliation.
-	var failOpen, dailyRejections, weeklyRejections, monthlyRejections int64
+func concat(groups [][]prometheus.Metric) []prometheus.Metric {
+	total := 0
+	for _, group := range groups {
+		total += len(group)
+	}
+	all := make([]prometheus.Metric, 0, total)
+	for _, group := range groups {
+		all = append(all, group...)
+	}
+	return all
+}
+
+func currentGeneration(s *State) int64 {
+	if s.Runtime == nil {
+		return 0
+	}
+	if g := s.Runtime().Generation; g != nil {
+		return *g
+	}
+	return 0
+}
+
+func metadataMetrics(ctx context.Context, s *State, consumer usage.ConsumerStatus, consumerRead bool) []prometheus.Metric {
+	snapshot := usage.Snapshot{Closed: true}
+	if s.Emitter != nil {
+		if current := s.Emitter(); current != nil {
+			snapshot = *current
+		}
+	}
+	// An absent epoch table reads as zero rather than suppressing the exposition.
+	epochs, _ := ReadEpochHealth(ctx, s.Pool)
+	heartbeatAge := math.Inf(1)
+	if consumerRead {
+		heartbeatAge = ageSecondsOrInf(consumer.HeartbeatAgeSeconds)
+	}
+	var events, dropped, abandoned int64
+	if s.LossCounters != nil {
+		events, dropped, abandoned = s.LossCounters()
+	}
+	return []prometheus.Metric{
+		metadataDropped.Sample(float64(snapshot.Dropped)),
+		metadataAbandoned.Sample(float64(snapshot.Abandoned)),
+		metadataPending.Sample(float64(snapshot.Pending())),
+		metadataRetrying.Sample(metric.Flag(snapshot.Retrying)),
+		metadataSinkAvailable.Sample(metric.Flag(!snapshot.Closed)),
+		consumerPending.Sample(float64(consumer.PendingEvents)),
+		consumerLag.Sample(float64(consumer.LagEvents)),
+		consumerHeartbeatAge.Sample(heartbeatAge),
+		consumerHealthy.Sample(metric.Flag(consumerRead && consumer.Complete())),
+		consumerStale.Sample(metric.Flag(consumerRead && consumer.State == usage.ConsumerStale)),
+		gatewayOpenEpochs.Sample(float64(epochs.OpenEpochs)),
+		gatewayUnresolvedEpochs.Sample(float64(epochs.UnresolvedEpochs)),
+		historicalUncertainGaps.Sample(float64(epochs.HistoricalUncertainGaps)),
+		unresolvedEventLowerBound.Sample(float64(epochs.UnresolvedEventLowerBound)),
+		// All three loss series are emitted at zero too: an absent line means
+		// the exporter is broken rather than that nothing was lost.
+		metadataLossReported.Sample(float64(events), "events"),
+		metadataLossReported.Sample(float64(dropped), "dropped"),
+		metadataLossReported.Sample(float64(abandoned), "abandoned"),
+	}
+}
+
+func gatewayMetrics(s *State) []prometheus.Metric {
+	var failOpen, daily, weekly, monthly int64
 	if s.LimiterCounts != nil {
-		failOpen, dailyRejections, weeklyRejections, monthlyRejections = s.LimiterCounts()
+		failOpen, daily, weekly, monthly = s.LimiterCounts()
 	}
 	var circuits int64
 	if s.Circuits != nil {
 		circuits = s.Circuits()
 	}
-	var mediaGaps int64
-	if s.MediaGaps != nil {
-		mediaGaps = s.MediaGaps()
-	}
-	var mediaPending, mediaStale, mediaFailed int64
-	if mediaErr == nil && mediaSummary != nil {
-		mediaPending, mediaStale, mediaFailed = mediaSummary.Pending, mediaSummary.Stale, mediaSummary.Failed
-	}
-	body.WriteString("# HELP olp_distributed_limiter_available Whether a Valkey limiter connection is installed.\n" +
-		"# TYPE olp_distributed_limiter_available gauge\n" +
-		"# HELP olp_limits_fail_open_total Rate- or concurrency-limited requests admitted without a lease under the fail-open outage policy.\n" +
-		"# TYPE olp_limits_fail_open_total counter\n" +
-		"# HELP olp_key_budget_rejections_total API-key requests rejected because a cost budget was exhausted or could not hold the request's estimated cost.\n" +
-		"# TYPE olp_key_budget_rejections_total counter\n" +
-		"# HELP olp_open_target_circuits Number of target circuits currently open or half-open.\n" +
-		"# TYPE olp_open_target_circuits gauge\n" +
-		"# HELP olp_media_reconciliation_pending Metadata-only media jobs awaiting reconciliation.\n" +
-		"# TYPE olp_media_reconciliation_pending gauge\n" +
-		"# HELP olp_media_reconciliation_stale Media reconciliation jobs past their grace period.\n" +
-		"# TYPE olp_media_reconciliation_stale gauge\n" +
-		"# HELP olp_media_reconciliation_failed Media jobs whose latest autonomous reconciliation attempt failed.\n" +
-		"# TYPE olp_media_reconciliation_failed gauge\n" +
-		"# HELP olp_media_reconciliation_gaps_total Upstream media side effects that could not be durably recorded.\n" +
-		"# TYPE olp_media_reconciliation_gaps_total counter\n")
-	fmt.Fprintf(&body, "olp_distributed_limiter_available %d\n"+
-		"olp_limits_fail_open_total %d\n"+
-		"olp_key_budget_rejections_total{window=\"daily\"} %d\n"+
-		"olp_key_budget_rejections_total{window=\"weekly\"} %d\n"+
-		"olp_key_budget_rejections_total{window=\"monthly\"} %d\n"+
-		"olp_open_target_circuits %d\n"+
-		"olp_media_reconciliation_pending %d\n"+
-		"olp_media_reconciliation_stale %d\n"+
-		"olp_media_reconciliation_failed %d\n"+
-		"olp_media_reconciliation_gaps_total %d\n",
-		boolInt(limiterConfigured && limiterHealthy), failOpen, dailyRejections, weeklyRejections, monthlyRejections,
-		circuits, mediaPending, mediaStale, mediaFailed, mediaGaps)
-
-	// Shadow traffic never delays callers, so capacity shortfalls drop mirrors
-	// and only this counter shows them.
 	var mirrored, shadowDropped int64
 	if s.Shadows != nil {
 		mirrored, shadowDropped = s.Shadows()
 	}
-	fmt.Fprintf(&body, "# HELP olp_shadow_requests_total Shadow attempts mirrored, or dropped because the shadow pool was full.\n"+
-		"# TYPE olp_shadow_requests_total counter\n"+
-		"olp_shadow_requests_total{outcome=\"mirrored\"} %d\n"+
-		"olp_shadow_requests_total{outcome=\"dropped\"} %d\n", mirrored, shadowDropped)
-
-	// Durably reported request-metadata loss totals. All three series are
-	// always emitted, including at zero: an absent line means the exporter
-	// itself is broken rather than that nothing was lost.
-	var lossEvents, lossDropped, lossAbandoned int64
-	if s.LossCounters != nil {
-		lossEvents, lossDropped, lossAbandoned = s.LossCounters()
+	return []prometheus.Metric{
+		limitsFailOpen.Sample(float64(failOpen)),
+		budgetRejections.Sample(float64(daily), "daily"),
+		budgetRejections.Sample(float64(weekly), "weekly"),
+		budgetRejections.Sample(float64(monthly), "monthly"),
+		openCircuits.Sample(float64(circuits)),
+		shadowRequests.Sample(float64(mirrored), "mirrored"),
+		shadowRequests.Sample(float64(shadowDropped), "dropped"),
 	}
-	body.WriteString("# HELP olp_request_metadata_loss_reported_total Local buffer loss durably reported by the gateway checkpoint.\n" +
-		"# TYPE olp_request_metadata_loss_reported_total counter\n")
-	fmt.Fprintf(&body, "olp_request_metadata_loss_reported_total{kind=\"events\"} %d\n"+
-		"olp_request_metadata_loss_reported_total{kind=\"dropped\"} %d\n"+
-		"olp_request_metadata_loss_reported_total{kind=\"abandoned\"} %d\n",
-		lossEvents, lossDropped, lossAbandoned)
-
-	// Media spool gauges. A deployment without a spool reports nothing: a
-	// missing series says the spool is not configured at all.
-	if s.Spool != nil {
-		capacity, used := s.Spool()
-		if capacity != nil {
-			body.WriteString("# HELP olp_media_spool_capacity_bytes Configured capacity of the private local media spool.\n" +
-				"# TYPE olp_media_spool_capacity_bytes gauge\n")
-			fmt.Fprintf(&body, "olp_media_spool_capacity_bytes %d\n", *capacity)
-		}
-		if used != nil {
-			body.WriteString("# HELP olp_media_spool_used_bytes Bytes currently reserved in the private local media spool.\n" +
-				"# TYPE olp_media_spool_used_bytes gauge\n")
-			fmt.Fprintf(&body, "olp_media_spool_used_bytes %d\n", *used)
-		}
-	}
-
-	// Asynchronous worker plane.
-	available := consumerErr == nil && tasksErr == nil && countersErr == nil
-	body.WriteString("# HELP olp_async_worker_observability_available Whether all PostgreSQL-backed asynchronous worker summaries were available.\n" +
-		"# TYPE olp_async_worker_observability_available gauge\n")
-	fmt.Fprintf(&body, "olp_async_worker_observability_available %d\n", boolInt(available))
-	if tasks != nil {
-		expected := expectedTasks(limiterConfigured)
-		current, drained := asynchronousPlaneFlags(tasks, expected, consumer)
-		var lastProgress int64
-		if at := tasks.LastProgressFor(workerhealth.WorkerTasks()); at != nil {
-			lastProgress = at.Unix()
-		}
-		body.WriteString("# HELP olp_async_plane_current Whether every replicated worker responsibility has a current successful checkpoint.\n" +
-			"# TYPE olp_async_plane_current gauge\n" +
-			"# HELP olp_async_plane_drained Whether request-metadata backlogs are drained.\n" +
-			"# TYPE olp_async_plane_drained gauge\n" +
-			"# HELP olp_async_plane_healthy Whether the asynchronous plane is both current and drained.\n" +
-			"# TYPE olp_async_plane_healthy gauge\n" +
-			"# HELP olp_async_plane_last_progress_timestamp_seconds Unix time of the latest durable worker progress.\n" +
-			"# TYPE olp_async_plane_last_progress_timestamp_seconds gauge\n" +
-			"# HELP olp_request_metadata_consumer_oldest_pending_age_seconds Age of the oldest delivered metadata entry awaiting acknowledgement.\n" +
-			"# TYPE olp_request_metadata_consumer_oldest_pending_age_seconds gauge\n")
-		var oldestPendingAge int64
-		if consumer.OldestPendingAt != nil {
-			if age := int64(now.Sub(*consumer.OldestPendingAt) / time.Second); age > 0 {
-				oldestPendingAge = age
-			}
-		}
-		fmt.Fprintf(&body, "olp_async_plane_current %d\nolp_async_plane_drained %d\nolp_async_plane_healthy %d\n"+
-			"olp_async_plane_last_progress_timestamp_seconds %d\n"+
-			"olp_request_metadata_consumer_oldest_pending_age_seconds %d\n",
-			boolInt(current), boolInt(drained), boolInt(current && drained), lastProgress, oldestPendingAge)
-		body.WriteString("# HELP olp_worker_task_healthy Whether a fixed worker responsibility has a current successful checkpoint.\n" +
-			"# TYPE olp_worker_task_healthy gauge\n" +
-			"# HELP olp_worker_task_heartbeat_age_seconds Age of the latest checkpoint for a fixed worker responsibility.\n" +
-			"# TYPE olp_worker_task_heartbeat_age_seconds gauge\n" +
-			"# HELP olp_worker_task_last_success_age_seconds Age of the latest successful checkpoint for a fixed worker responsibility.\n" +
-			"# TYPE olp_worker_task_last_success_age_seconds gauge\n" +
-			"# HELP olp_worker_task_runs_total Durable checkpoint outcomes across all worker replicas.\n" +
-			"# TYPE olp_worker_task_runs_total counter\n")
-		for _, task := range tasks.Tasks {
-			var heartbeat, lastSuccess int64 = int64Max, int64Max
-			if task.HeartbeatAgeSeconds != nil {
-				heartbeat = *task.HeartbeatAgeSeconds
-			}
-			if task.LastSuccessAgeSeconds != nil {
-				lastSuccess = *task.LastSuccessAgeSeconds
-			}
-			fmt.Fprintf(&body, "olp_worker_task_healthy{task=%q} %d\n"+
-				"olp_worker_task_heartbeat_age_seconds{task=%q} %d\n"+
-				"olp_worker_task_last_success_age_seconds{task=%q} %d\n"+
-				"olp_worker_task_runs_total{task=%q,outcome=\"success\"} %d\n"+
-				"olp_worker_task_runs_total{task=%q,outcome=\"failure\"} %d\n"+
-				"olp_worker_task_runs_total{task=%q,outcome=\"skipped\"} %d\n",
-				task.Task, boolInt(task.State == TaskStateHealthy),
-				task.Task, heartbeat, task.Task, lastSuccess,
-				task.Task, task.SuccessesTotal, task.Task, task.FailuresTotal,
-				task.Task, task.SkippedTotal)
-		}
-	}
-
-	// A failed counters read omits the series rather than publishing zeros,
-	// which Prometheus would read as a counter reset.
-	if countersErr == nil {
-		writeRecoveryCounters(&body, counters)
-	}
-
-	// Operations rollup.
-	body.WriteString("# HELP olp_operational_metrics_available Whether the PostgreSQL operational rollup was available.\n" +
-		"# TYPE olp_operational_metrics_available gauge\n")
-	fmt.Fprintf(&body, "olp_operational_metrics_available %d\n", boolInt(operationsErr == nil))
-	if operationsErr == nil {
-		body.WriteString("# HELP olp_requests_5m Metadata requests observed during the trailing five minutes.\n" +
-			"# TYPE olp_requests_5m gauge\n" +
-			"# HELP olp_request_success_ratio_5m Successful request ratio during the trailing five minutes.\n" +
-			"# TYPE olp_request_success_ratio_5m gauge\n" +
-			"# HELP olp_request_latency_seconds Request latency quantiles during the trailing five minutes.\n" +
-			"# TYPE olp_request_latency_seconds gauge\n" +
-			"# HELP olp_upstream_cancellations_5m Cancelled upstream attempts during the trailing five minutes.\n" +
-			"# TYPE olp_upstream_cancellations_5m gauge\n")
-		var p95, p99 float64
-		if operations.P95LatencyMs != nil {
-			p95 = *operations.P95LatencyMs / 1000
-		}
-		if operations.P99LatencyMs != nil {
-			p99 = *operations.P99LatencyMs / 1000
-		}
-		fmt.Fprintf(&body, "olp_requests_5m %d\n"+
-			"olp_request_success_ratio_5m %.6f\n"+
-			"olp_request_latency_seconds{quantile=\"0.95\"} %.6f\n"+
-			"olp_request_latency_seconds{quantile=\"0.99\"} %.6f\n"+
-			"olp_upstream_cancellations_5m %d\n",
-			operations.RequestCount,
-			successRatio(operations.SuccessCount, operations.RequestCount),
-			p95, p99, operations.CancelledAttempts)
-	}
-
-	// Provider health series.
-	writeProviderMetrics(&body, providers)
-
-	if s.Export != nil {
-		s.Export(ctx, &body)
-	}
-	if s.Business != nil {
-		s.Business.WritePrometheus(&body)
-	}
-
-	return body.String(), nil
 }
 
-// writeRecoveryCounters renders the durable async worker counters.
-func writeRecoveryCounters(body *strings.Builder, counters WorkerRecoveryCounters) {
-	body.WriteString("# HELP olp_request_metadata_events_reclaimed_total Metadata entries transferred from stale consumer ownership.\n" +
-		"# TYPE olp_request_metadata_events_reclaimed_total counter\n" +
-		"# HELP olp_request_metadata_events_recovered_total Pending metadata entries durably resolved by a recovery pass.\n" +
-		"# TYPE olp_request_metadata_events_recovered_total counter\n" +
-		"# HELP olp_request_metadata_persistence_duplicates_total Duplicate metadata persistence outcomes accepted idempotently.\n" +
-		"# TYPE olp_request_metadata_persistence_duplicates_total counter\n" +
-		"# HELP olp_request_metadata_events_processed_total Stream metadata entries durably resolved by the replicated consumer group.\n" +
-		"# TYPE olp_request_metadata_events_processed_total counter\n")
-	fmt.Fprintf(body, "olp_request_metadata_events_reclaimed_total %d\n"+
-		"olp_request_metadata_events_recovered_total %d\n"+
-		"olp_request_metadata_persistence_duplicates_total %d\n"+
-		"olp_request_metadata_events_processed_total %d\n",
-		counters.RequestMetadataReclaimed, counters.RequestMetadataRecovered,
-		counters.RequestMetadataDuplicates, counters.RequestMetadataProcessed)
+func mediaMetrics(ctx context.Context, s *State, now time.Time) []prometheus.Metric {
+	summary, err := media.ReconciliationSummary(ctx, s.Pool, now)
+	if err != nil {
+		summary = media.Summary{}
+	}
+	var gaps int64
+	if s.MediaGaps != nil {
+		gaps = s.MediaGaps()
+	}
+	metrics := []prometheus.Metric{
+		mediaPending.Sample(float64(summary.Pending)),
+		mediaStale.Sample(float64(summary.Stale)),
+		mediaFailed.Sample(float64(summary.Failed)),
+		mediaGaps.Sample(float64(gaps)),
+	}
+	// Without a spool the series are absent, which says no spool is configured.
+	if s.Spool == nil {
+		return metrics
+	}
+	capacity, used := s.Spool()
+	if capacity != nil {
+		metrics = append(metrics, mediaSpoolCapacity.Sample(float64(*capacity)))
+	}
+	if used != nil {
+		metrics = append(metrics, mediaSpoolUsed.Sample(float64(*used)))
+	}
+	return metrics
 }
 
-// writeProviderMetrics renders per-provider health series. Label values are
-// escaped once by prometheusLabel and written verbatim inside quotes.
-func writeProviderMetrics(body *strings.Builder, providers []ProviderHealthRecord) {
-	if len(providers) == 0 {
-		return
+func asyncPlaneMetrics(tasks *WorkerTaskHealth, consumer usage.ConsumerStatus, limiterConfigured bool, now time.Time) []prometheus.Metric {
+	if tasks == nil {
+		return nil
 	}
-	body.WriteString("# HELP olp_provider_attempts_15m Number of sampled provider attempts in the trailing fifteen minutes.\n" +
-		"# TYPE olp_provider_attempts_15m gauge\n" +
-		"# HELP olp_provider_health Provider health classification over the trailing fifteen minutes.\n" +
-		"# TYPE olp_provider_health gauge\n" +
-		"# HELP olp_provider_success_ratio_15m Provider attempt success ratio over the trailing fifteen minutes.\n" +
-		"# TYPE olp_provider_success_ratio_15m gauge\n" +
-		"# HELP olp_provider_latency_seconds_15m Provider average attempt latency over the trailing fifteen minutes.\n" +
-		"# TYPE olp_provider_latency_seconds_15m gauge\n")
-	for _, provider := range providers {
-		id := prometheusLabel(provider.ProviderID)
-		name := prometheusLabel(provider.ProviderName)
-		kind := prometheusLabel(provider.ProviderKind)
-		fmt.Fprintf(body, "olp_provider_health{provider_id=\"%s\",provider_name=\"%s\",provider_kind=\"%s\",status=\"%s\"} 1\n",
-			id, name, kind, prometheusLabel(provider.Status))
-		fmt.Fprintf(body, "olp_provider_attempts_15m{provider_id=\"%s\",provider_kind=\"%s\"} %d\n",
-			id, kind, provider.AttemptCount)
-		if provider.AttemptCount == 0 {
+	current, drained := asynchronousPlaneFlags(tasks, expectedTasks(limiterConfigured), consumer)
+	var lastProgress int64
+	if at := tasks.LastProgressFor(workerhealth.WorkerTasks()); at != nil {
+		lastProgress = at.Unix()
+	}
+	var oldestPendingAge float64
+	if consumer.OldestPendingAt != nil {
+		oldestPendingAge = max(float64(now.Sub(*consumer.OldestPendingAt)/time.Second), 0)
+	}
+	metrics := []prometheus.Metric{
+		asyncPlaneCurrent.Sample(metric.Flag(current)),
+		asyncPlaneDrained.Sample(metric.Flag(drained)),
+		asyncPlaneHealthy.Sample(metric.Flag(current && drained)),
+		asyncPlaneProgress.Sample(float64(lastProgress)),
+		consumerOldestPendingAge.Sample(oldestPendingAge),
+	}
+	for _, task := range tasks.Tasks {
+		metrics = append(metrics,
+			workerTaskHealthy.Sample(metric.Flag(task.State == TaskStateHealthy), task.Task),
+			workerTaskHeartbeat.Sample(ageSecondsOrInf(task.HeartbeatAgeSeconds), task.Task),
+			workerTaskLastSuccess.Sample(ageSecondsOrInf(task.LastSuccessAgeSeconds), task.Task),
+			workerTaskRuns.Sample(float64(task.SuccessesTotal), task.Task, "success"),
+			workerTaskRuns.Sample(float64(task.FailuresTotal), task.Task, "failure"),
+			workerTaskRuns.Sample(float64(task.SkippedTotal), task.Task, "skipped"),
+		)
+	}
+	return metrics
+}
+
+// recoveryMetrics is only called after a successful read: publishing zeros on
+// failure would read as a counter reset.
+func recoveryMetrics(counters WorkerRecoveryCounters) []prometheus.Metric {
+	return []prometheus.Metric{
+		metadataReclaimed.Sample(float64(counters.RequestMetadataReclaimed)),
+		metadataRecovered.Sample(float64(counters.RequestMetadataRecovered)),
+		metadataDuplicates.Sample(float64(counters.RequestMetadataDuplicates)),
+		metadataProcessed.Sample(float64(counters.RequestMetadataProcessed)),
+	}
+}
+
+func operationsMetrics(operations OperationsSummary) []prometheus.Metric {
+	var p95, p99 float64
+	if operations.P95LatencyMs != nil {
+		p95 = *operations.P95LatencyMs / 1000
+	}
+	if operations.P99LatencyMs != nil {
+		p99 = *operations.P99LatencyMs / 1000
+	}
+	return []prometheus.Metric{
+		requests5m.Sample(float64(operations.RequestCount)),
+		requestSuccessRatio5m.Sample(successRatio(operations.SuccessCount, operations.RequestCount)),
+		requestLatency.Sample(p95, "0.95"),
+		requestLatency.Sample(p99, "0.99"),
+		upstreamCancellations.Sample(float64(operations.CancelledAttempts)),
+	}
+}
+
+func providerMetrics(providers []ProviderHealthRecord) []prometheus.Metric {
+	metrics := make([]prometheus.Metric, 0, 4*len(providers))
+	for _, p := range providers {
+		metrics = append(metrics,
+			providerHealth.Sample(1, p.ProviderID, p.ProviderName, p.ProviderKind, p.Status),
+			providerAttempts.Sample(float64(p.AttemptCount), p.ProviderID, p.ProviderKind),
+		)
+		if p.AttemptCount == 0 {
 			continue
 		}
-		var averageLatency float64
-		if provider.AverageLatencyMs != nil {
-			averageLatency = *provider.AverageLatencyMs / 1000
+		var latency float64
+		if p.AverageLatencyMs != nil {
+			latency = *p.AverageLatencyMs / 1000
 		}
-		fmt.Fprintf(body, "olp_provider_success_ratio_15m{provider_id=\"%s\",provider_kind=\"%s\"} %.6f\n"+
-			"olp_provider_latency_seconds_15m{provider_id=\"%s\",provider_kind=\"%s\"} %.6f\n",
-			id, kind, successRatio(provider.SuccessCount, provider.AttemptCount),
-			id, kind, averageLatency)
+		metrics = append(metrics,
+			providerSuccessRatio.Sample(successRatio(p.SuccessCount, p.AttemptCount), p.ProviderID, p.ProviderKind),
+			providerLatency.Sample(latency, p.ProviderID, p.ProviderKind),
+		)
 	}
-}
-
-// prometheusLabel escapes a label value per the exposition format.
-func prometheusLabel(value string) string {
-	value = strings.ReplaceAll(value, "\\", "\\\\")
-	value = strings.ReplaceAll(value, "\n", "\\n")
-	return strings.ReplaceAll(value, "\"", "\\\"")
-}
-
-const int64Max = math.MaxInt64
-
-func boolInt(v bool) int {
-	if v {
-		return 1
-	}
-	return 0
+	return metrics
 }

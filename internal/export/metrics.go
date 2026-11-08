@@ -2,98 +2,138 @@ package export
 
 import (
 	"context"
-	"fmt"
-	"strconv"
-	"strings"
+	"slices"
+
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/metric"
 )
 
-func WriteMetrics(ctx context.Context, q access.Queryer, worker *Worker, focus *FocusWorker, capture *Manager, body *strings.Builder) {
+var (
+	exportLag              = metric.Gauge("olp_export_lag_seconds", "Age of the oldest undelivered export record per sink stream.", "sink", "stream")
+	exportDeliveries       = metric.Counter("olp_export_deliveries_total", "Export records delivered or failed per sink.", "sink", "outcome")
+	exportGap              = metric.Counter("olp_export_gap_total", "Export records retention expired before a sink delivered them.", "sink")
+	exportPending          = metric.Gauge("olp_export_pending", "Export records currently awaiting delivery.")
+	focusPendingDatasets   = metric.Gauge("olp_focus_pending_datasets", "FOCUS datasets awaiting delivery or restatement per sink.", "sink")
+	focusDatasetDeliveries = metric.Counter("olp_focus_dataset_deliveries_total", "FOCUS dataset deliveries by sink and outcome.", "sink", "outcome")
+	deliveryAttempts       = metric.Counter("olp_export_delivery_attempts_total", "Export delivery attempts claimed by this process.")
+	deliveryFailed         = metric.Counter("olp_export_delivery_failed_total", "Export delivery attempts that failed in this process.")
+	captureQueued          = metric.Counter("olp_capture_queued_total", "Payload captures accepted into the in-memory queue.")
+	captureDelivered       = metric.Counter("olp_capture_delivered_total", "Payload captures delivered to their sink.")
+	captureDropped         = metric.Counter("olp_capture_dropped_total", "Payload captures dropped by bounds or staleness.")
+	captureFailed          = metric.Counter("olp_capture_failed_total", "Payload capture deliveries that failed.")
+	captureRedactionFailed = metric.Counter("olp_capture_redaction_failed_total", "Captures refused because redaction could not apply.")
+)
+
+const focusPendingSQL = `SELECT sink_id::text, count(*) FROM olp.focus_datasets fd
+	LEFT JOIN olp.focus_dirty_days dd ON dd.day=fd.charge_date
+	WHERE fd.last_error_code IS NOT NULL OR fd.delivered_at IS NULL
+	   OR COALESCE(dd.version,0) IS DISTINCT FROM fd.dirty_version
+	GROUP BY sink_id`
+
+// Metrics skips a series whose query fails so one broken read never hides the
+// rest of the scrape.
+func Metrics(ctx context.Context, q access.Queryer, worker *Worker, focus *FocusWorker, capture *Manager) []prometheus.Metric {
+	return slices.Concat(
+		lagMetrics(ctx, q),
+		deliveryMetrics(ctx, q),
+		pendingMetrics(ctx, q),
+		focusMetrics(ctx, q, focus),
+		workerMetrics(worker),
+		captureMetrics(capture),
+	)
+}
+
+func lagMetrics(ctx context.Context, q access.Queryer) []prometheus.Metric {
 	rows, err := q.Query(ctx, exportMetricsSQL)
-	if err == nil {
-		defer rows.Close()
-		body.WriteString("# HELP olp_export_lag_seconds Age of the oldest undelivered export record per sink stream.\n# TYPE olp_export_lag_seconds gauge\n")
-		for rows.Next() {
-			var sink, stream string
-			var seconds float64
-			var delivered, failed int64
-			if err := rows.Scan(&sink, &stream, &seconds, &delivered, &failed); err == nil {
-				fmt.Fprintf(body, "olp_export_lag_seconds{sink=%s,stream=%s} %s\n", strconv.Quote(sink), strconv.Quote(stream), strconv.FormatFloat(seconds, 'g', -1, 64))
-			}
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var metrics []prometheus.Metric
+	for rows.Next() {
+		var sink, stream string
+		var seconds float64
+		var delivered, failed int64
+		if rows.Scan(&sink, &stream, &seconds, &delivered, &failed) == nil {
+			metrics = append(metrics, exportLag.Sample(seconds, sink, stream))
 		}
 	}
-	rows2, err := q.Query(ctx, exportDeliveryMetricsSQL)
-	if err == nil {
-		defer rows2.Close()
-		var sinks []struct {
-			id                        string
-			delivered, failed, gapSum int64
-		}
-		for rows2.Next() {
-			var item struct {
-				id                        string
-				delivered, failed, gapSum int64
-			}
-			if err := rows2.Scan(&item.id, &item.delivered, &item.failed, &item.gapSum); err == nil {
-				sinks = append(sinks, item)
-			}
-		}
-		body.WriteString("# HELP olp_export_deliveries_total Export records delivered or failed per sink.\n# TYPE olp_export_deliveries_total counter\n")
-		for _, item := range sinks {
-			fmt.Fprintf(body, "olp_export_deliveries_total{sink=%s,outcome=%s} %d\n", strconv.Quote(item.id), `"delivered"`, item.delivered)
-			fmt.Fprintf(body, "olp_export_deliveries_total{sink=%s,outcome=%s} %d\n", strconv.Quote(item.id), `"failed"`, item.failed)
-		}
-		body.WriteString("# HELP olp_export_gap_total Export records retention expired before a sink delivered them.\n# TYPE olp_export_gap_total counter\n")
-		for _, item := range sinks {
-			fmt.Fprintf(body, "olp_export_gap_total{sink=%s} %d\n", strconv.Quote(item.id), item.gapSum)
+	return metrics
+}
+
+func deliveryMetrics(ctx context.Context, q access.Queryer) []prometheus.Metric {
+	rows, err := q.Query(ctx, exportDeliveryMetricsSQL)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var metrics []prometheus.Metric
+	for rows.Next() {
+		var sink string
+		var delivered, failed, gap int64
+		if rows.Scan(&sink, &delivered, &failed, &gap) == nil {
+			metrics = append(metrics,
+				exportDeliveries.Sample(float64(delivered), sink, "delivered"),
+				exportDeliveries.Sample(float64(failed), sink, "failed"),
+				exportGap.Sample(float64(gap), sink),
+			)
 		}
 	}
+	return metrics
+}
+
+func pendingMetrics(ctx context.Context, q access.Queryer) []prometheus.Metric {
 	var pending int64
-	if err := q.QueryRow(ctx, exportPendingMetricsSQL).Scan(&pending); err == nil {
-		fmt.Fprintf(body, "# HELP olp_export_pending Export records currently awaiting delivery.\n# TYPE olp_export_pending gauge\nolp_export_pending %d\n", pending)
+	if q.QueryRow(ctx, exportPendingMetricsSQL).Scan(&pending) != nil {
+		return nil
 	}
-	if focus != nil {
-		// Pending datasets: any row mid-retry or restating a dirty day.
-		pending, err := q.Query(ctx, `SELECT sink_id::text, count(*) FROM olp.focus_datasets fd
-			LEFT JOIN olp.focus_dirty_days dd ON dd.day=fd.charge_date
-			WHERE fd.last_error_code IS NOT NULL OR fd.delivered_at IS NULL
-			   OR COALESCE(dd.version,0) IS DISTINCT FROM fd.dirty_version
-			GROUP BY sink_id`)
-		if err == nil {
-			type pend struct {
-				sink string
-				n    int64
-			}
-			var items []pend
-			for pending.Next() {
-				var item pend
-				if err := pending.Scan(&item.sink, &item.n); err == nil {
-					items = append(items, item)
-				}
-			}
-			pending.Close()
-			body.WriteString("# HELP olp_focus_pending_datasets FOCUS datasets awaiting delivery or restatement per sink.\n# TYPE olp_focus_pending_datasets gauge\n")
-			for _, item := range items {
-				fmt.Fprintf(body, "olp_focus_pending_datasets{sink=%s} %d\n", strconv.Quote(item.sink), item.n)
+	return []prometheus.Metric{exportPending.Sample(float64(pending))}
+}
+
+func focusMetrics(ctx context.Context, q access.Queryer, focus *FocusWorker) []prometheus.Metric {
+	if focus == nil {
+		return nil
+	}
+	var metrics []prometheus.Metric
+	if rows, err := q.Query(ctx, focusPendingSQL); err == nil {
+		for rows.Next() {
+			var sink string
+			var n int64
+			if rows.Scan(&sink, &n) == nil {
+				metrics = append(metrics, focusPendingDatasets.Sample(float64(n), sink))
 			}
 		}
-		body.WriteString("# HELP olp_focus_dataset_deliveries_total FOCUS dataset deliveries by sink and outcome.\n# TYPE olp_focus_dataset_deliveries_total counter\n")
-		for key, n := range focus.FocusMetrics() {
-			fmt.Fprintf(body, "olp_focus_dataset_deliveries_total{sink=%s,outcome=%s} %d\n", strconv.Quote(key[0]), strconv.Quote(key[1]), n)
-		}
+		rows.Close()
 	}
-	if worker != nil {
-		attempts, _, failed := worker.Metrics()
-		fmt.Fprintf(body, "# HELP olp_export_delivery_attempts_total Export delivery attempts claimed by this process.\n# TYPE olp_export_delivery_attempts_total counter\nolp_export_delivery_attempts_total %d\n", attempts)
-		fmt.Fprintf(body, "# HELP olp_export_delivery_failed_total Export delivery attempts that failed in this process.\n# TYPE olp_export_delivery_failed_total counter\nolp_export_delivery_failed_total %d\n", failed)
+	for key, n := range focus.FocusMetrics() {
+		metrics = append(metrics, focusDatasetDeliveries.Sample(float64(n), key[0], key[1]))
 	}
-	if capture != nil {
-		queued, delivered, dropped, failed, redactionFailed := capture.Metrics()
-		fmt.Fprintf(body, "# HELP olp_capture_queued_total Payload captures accepted into the in-memory queue.\n# TYPE olp_capture_queued_total counter\nolp_capture_queued_total %d\n", queued)
-		fmt.Fprintf(body, "# HELP olp_capture_delivered_total Payload captures delivered to their sink.\n# TYPE olp_capture_delivered_total counter\nolp_capture_delivered_total %d\n", delivered)
-		fmt.Fprintf(body, "# HELP olp_capture_dropped_total Payload captures dropped by bounds or staleness.\n# TYPE olp_capture_dropped_total counter\nolp_capture_dropped_total %d\n", dropped)
-		fmt.Fprintf(body, "# HELP olp_capture_failed_total Payload capture deliveries that failed.\n# TYPE olp_capture_failed_total counter\nolp_capture_failed_total %d\n", failed)
-		fmt.Fprintf(body, "# HELP olp_capture_redaction_failed_total Captures refused because redaction could not apply.\n# TYPE olp_capture_redaction_failed_total counter\nolp_capture_redaction_failed_total %d\n", redactionFailed)
+	return metrics
+}
+
+func workerMetrics(worker *Worker) []prometheus.Metric {
+	if worker == nil {
+		return nil
+	}
+	attempts, _, failed := worker.Metrics()
+	return []prometheus.Metric{
+		deliveryAttempts.Sample(float64(attempts)),
+		deliveryFailed.Sample(float64(failed)),
+	}
+}
+
+func captureMetrics(capture *Manager) []prometheus.Metric {
+	if capture == nil {
+		return nil
+	}
+	queued, delivered, dropped, failed, redactionFailed := capture.Metrics()
+	return []prometheus.Metric{
+		captureQueued.Sample(float64(queued)),
+		captureDelivered.Sample(float64(delivered)),
+		captureDropped.Sample(float64(dropped)),
+		captureFailed.Sample(float64(failed)),
+		captureRedactionFailed.Sample(float64(redactionFailed)),
 	}
 }
