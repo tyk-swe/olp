@@ -1,3 +1,4 @@
+import { setupProgress } from '#lib/features/overview/setupProgress.js';
 import { describe, expect, it } from 'vitest';
 import type { Grant } from '#lib/features/access/session/authorization.js';
 import {
@@ -44,6 +45,29 @@ describe('navigation', () => {
     expect(owningItem(href)?.label).toBe(label);
     expect(owningItem(`${href}/detail`)?.label).toBe(label);
   });
+
+  it.each([false, true])(
+    'keeps setup links aligned with navigation when completed is %s',
+    (complete) => {
+      const progress = setupProgress({
+        loading: false,
+        failed: false,
+        activeProvider: true,
+        enabledModels: complete,
+        activeRoute: true,
+        apiKey: complete,
+        grant: fullGrant
+      });
+      const entries = paletteEntries(fullGrant, true);
+      const destination = (label: string) =>
+        entries.find((entry) => entry.label === label)?.href;
+
+      expect(`/${progress.steps[2].href}`).toBe(destination('Models'));
+      expect(`/${progress.steps[4].href}`).toBe(
+        destination(complete ? 'API keys' : 'Create an API key')
+      );
+    }
+  );
 
   it('gives pages nested under another item to their own owner', () => {
     expect(owningItem('/settings/profile')).toBe(PROFILE);
