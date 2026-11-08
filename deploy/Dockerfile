@@ -41,7 +41,7 @@ COPY console ./console
 COPY management/management.json ./management/management.json
 RUN pnpm --dir console api:generate && pnpm --dir console build
 
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:c31ff9abcb1910f3ab25c7957bdaf0bfe12a01eb546e8df2282f1c8f682b606c
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:08476c244888bfb425bae1ae4dd7c17f093e972aab8426883d97f3c6f280f7c1
 ARG OLP_VERSION=0.2.0
 LABEL org.opencontainers.image.source="https://github.com/tyk-swe/olp" \
       org.opencontainers.image.title="OpenLLMProxy" \
