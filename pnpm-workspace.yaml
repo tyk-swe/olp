@@ -5,3 +5,5 @@ engineStrict: false
 
 allowBuilds:
   esbuild: true
+
+minimumReleaseAge: 1440

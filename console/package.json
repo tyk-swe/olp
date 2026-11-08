@@ -33,7 +33,7 @@
     "@sveltejs/kit": "^3.1.1",
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "eslint": "^10.14.0",
-    "eslint-plugin-svelte": "^3.24.1",
+    "eslint-plugin-svelte": "^3.24.0",
     "globals": "^17.14.0",
     "jsdom": "31.0.0",
     "openapi-typescript": "^7.13.0",
