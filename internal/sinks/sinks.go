@@ -42,8 +42,8 @@ func ValidateAndNormalizeSinks(s *promotion.Server, doc *promotion.Document) err
 			return access.Invalid("sinks", "Sink names must be unique inside each scope.")
 		}
 		seen[key] = true
-		d := Definition{Name: e.Name, ProjectID: e.Project, Type: e.Type, Destination: e.Destination, Streams: e.Streams, Enabled: e.Enabled}
-		if err := ValidateAndNormalizeDefinition(&d, s.Egress); err != nil {
+		d, err := NormalizeSpec(Spec{Name: e.Name, ProjectID: e.Project, Type: e.Type, Destination: e.Destination, Streams: e.Streams, Enabled: e.Enabled}, s.Egress)
+		if err != nil {
 			return err
 		}
 		e.Name, e.Destination, e.Streams = d.Name, d.Destination, slices.Sorted(slices.Values(d.Streams))
