@@ -12,13 +12,19 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authority"
 )
 
-// CodeWrite shares the management transaction, current authority, optimistic
-// concurrency, creation replay and audit rules with the code-mode features.
-func (s *Server) CodeWrite(r *http.Request, table, resource, project string, input any, write func(pgx.Tx, Principal, string, string) (any, error)) (Reply, error) {
-	if !slices.Contains([]string{"code_accounts", "code_pools", "code_routes", "code_token_budgets"}, table) {
-		panic("invalid code management table")
-	}
-	project, err := ParseUUID(project)
+type CodeResource struct{ table, audit string }
+
+var (
+	CodeAccounts = CodeResource{table: "code_accounts", audit: "code_account"}
+	CodePools    = CodeResource{table: "code_pools", audit: "code_pool"}
+	CodeRoutes   = CodeResource{table: "code_routes", audit: "code_route"}
+	CodeBudgets  = CodeResource{table: "code_token_budgets", audit: "code_budget"}
+)
+
+type CodeWriter func(tx pgx.Tx, p Principal, id, etag string, existing bool) (any, error)
+
+func (s *Server) CodeWrite(r *http.Request, resource CodeResource, project string, input any, write CodeWriter) (Reply, error) {
+	projectID, err := ParseUUID(project)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -27,57 +33,70 @@ func (s *Server) CodeWrite(r *http.Request, table, resource, project string, inp
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	if err = s.RequireProject(r.Context(), tx, p, &project); err != nil {
+	if err := s.RequireProject(r.Context(), tx, p, &projectID); err != nil {
 		return Reply{}, err
 	}
-	id := r.PathValue("id")
-	etag := NewID()
-	var claim ReplayClaim
-	if id == "" {
-		var replayed *Reply
-		claim, replayed, err = s.Replay(r, tx, p, input)
-		if err != nil {
-			return Reply{}, err
-		}
-		if replayed != nil {
-			return *replayed, tx.Commit(r.Context())
-		}
-		id = NewID()
-	} else {
-		id, err = ParseUUID(id)
-		if err != nil {
-			return Reply{}, err
-		}
-		var oldProject, oldETag string
-		if err = tx.QueryRow(r.Context(), `SELECT project_id::text,etag::text FROM olp.`+table+` WHERE id=$1`, id).Scan(&oldProject, &oldETag); err != nil {
-			return Reply{}, err
-		}
-		if err = p.Project(&oldProject, Change); err != nil {
-			return Reply{}, err
-		}
-		if oldProject != project {
-			return Reply{}, Invalid("project_id", "The project is immutable.")
-		}
-		if err = Match(r, oldETag); err != nil {
-			return Reply{}, err
-		}
+	if r.PathValue("id") == "" {
+		return s.codeCreate(r, tx, p, resource, input, write)
 	}
-	body, err := write(tx, p, id, etag)
+	return s.codeUpdate(r, tx, p, resource, projectID, write)
+}
+
+func (s *Server) codeCreate(r *http.Request, tx pgx.Tx, p Principal, resource CodeResource, input any, write CodeWriter) (Reply, error) {
+	claim, replayed, err := s.Replay(r, tx, p, input)
 	if err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.Actor(), resource+".write", resource, id, "success"); err != nil {
+	if replayed != nil {
+		return *replayed, tx.Commit(r.Context())
+	}
+	id, etag := NewID(), NewID()
+	body, err := codeSave(r, tx, p, resource, id, etag, false, write)
+	if err != nil {
 		return Reply{}, err
 	}
-	result := Detail(body, etag)
-	if r.PathValue("id") == "" {
-		result.Status = 201
-		result.Location = r.URL.Path + "/" + id
-		if err = s.CompleteReplay(r, tx, claim, result); err != nil {
-			return Reply{}, err
-		}
+	result := Reply{Status: http.StatusCreated, Body: body, ETag: etag, Location: r.URL.Path + "/" + id}
+	if err := s.CompleteReplay(r, tx, claim, result); err != nil {
+		return Reply{}, err
 	}
 	return result, tx.Commit(r.Context())
+}
+
+func (s *Server) codeUpdate(r *http.Request, tx pgx.Tx, p Principal, resource CodeResource, projectID string, write CodeWriter) (Reply, error) {
+	id, err := ParseUUID(r.PathValue("id"))
+	if err != nil {
+		return Reply{}, err
+	}
+	var oldProject, oldETag string
+	if err := tx.QueryRow(r.Context(), `SELECT project_id::text,etag::text FROM olp.`+resource.table+` WHERE id=$1`, id).Scan(&oldProject, &oldETag); err != nil {
+		return Reply{}, err
+	}
+	if err := p.Project(&oldProject, Change); err != nil {
+		return Reply{}, err
+	}
+	if oldProject != projectID {
+		return Reply{}, Invalid("project_id", "The project is immutable.")
+	}
+	if err := Match(r, oldETag); err != nil {
+		return Reply{}, err
+	}
+	etag := NewID()
+	body, err := codeSave(r, tx, p, resource, id, etag, true, write)
+	if err != nil {
+		return Reply{}, err
+	}
+	return Detail(body, etag), tx.Commit(r.Context())
+}
+
+func codeSave(r *http.Request, tx pgx.Tx, p Principal, resource CodeResource, id, etag string, existing bool, write CodeWriter) (any, error) {
+	body, err := write(tx, p, id, etag, existing)
+	if err != nil {
+		return nil, err
+	}
+	if err := Audit(r.Context(), tx, r, p.Actor(), resource.audit+".write", resource.audit, id, "success"); err != nil {
+		return nil, err
+	}
+	return body, nil
 }
 
 // CodeMatch matches a listing's rows to a query field by SQL other than its
@@ -190,8 +209,8 @@ func (s *Server) writeCodePool(r *http.Request, _ Principal) (Reply, error) {
 	if validationError != nil {
 		return Reply{}, validationError
 	}
-	return s.CodeWrite(r, "code_pools", "code_pool", input.ProjectID, input, func(tx pgx.Tx, p Principal, id, etag string) (any, error) {
-		return SaveCodePool(r.Context(), tx, p, id, etag, input, r.PathValue("id") != "")
+	return s.CodeWrite(r, CodePools, input.ProjectID, input, func(tx pgx.Tx, p Principal, id, etag string, existing bool) (any, error) {
+		return SaveCodePool(r.Context(), tx, p, id, etag, input, existing)
 	})
 }
 
@@ -225,8 +244,8 @@ func (s *Server) writeCodeBudget(r *http.Request, _ Principal) (Reply, error) {
 	if validationError != nil {
 		return Reply{}, validationError
 	}
-	return s.CodeWrite(r, "code_token_budgets", "code_budget", input.ProjectID, input, func(tx pgx.Tx, p Principal, id, etag string) (any, error) {
-		return SaveCodeBudget(r.Context(), tx, p, id, etag, input, r.PathValue("id") != "")
+	return s.CodeWrite(r, CodeBudgets, input.ProjectID, input, func(tx pgx.Tx, p Principal, id, etag string, existing bool) (any, error) {
+		return SaveCodeBudget(r.Context(), tx, p, id, etag, input, existing)
 	})
 }
 
