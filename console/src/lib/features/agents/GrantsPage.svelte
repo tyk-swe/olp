@@ -436,7 +436,7 @@
 />
 <DelegationConsent />
 {#if $state.error}<p class="inline-problem" role="alert">{$state.error}</p>{/if}
-{#if $state.message}<p class="success-message" role="status">
+{#if $state.message}<p class="success-banner" role="status">
     {$state.message}
   </p>{/if}
 {#if $state.handoffToken}

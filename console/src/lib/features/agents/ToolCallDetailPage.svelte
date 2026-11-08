@@ -109,5 +109,5 @@
     </form>
   {/if}
 {/if}
-{#if saved}<p class="success-message" role="status">Resolution recorded</p>{/if}
+{#if saved}<p class="success-banner" role="status">Resolution recorded</p>{/if}
 {#if action.error}<p class="inline-problem" role="alert">{action.error}</p>{/if}

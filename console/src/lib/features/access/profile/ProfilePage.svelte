@@ -477,7 +477,7 @@
   />
 {/if}
 
-{#if message}<p class="success-message" role="status">{message}</p>{/if}
+{#if message}<p class="success-banner" role="status">{message}</p>{/if}
 <ConflictNotice
   notice={profileConcurrentNotice}
   onReload={reloadProfile}

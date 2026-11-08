@@ -4,9 +4,4 @@
   let { picked }: { picked: (value: string) => void } = $props();
 </script>
 
-<EntityPicker
-  id="probe"
-  kind="person"
-  emptyLabel="Anyone"
-  onchange={picked}
-/>
+<EntityPicker id="probe" kind="person" emptyLabel="Anyone" onchange={picked} />

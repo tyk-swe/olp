@@ -71,7 +71,7 @@
       disabled={sessions.isFetching}>Refresh</button
     >
   </div>
-  {#if notice}<p class="success-message" role="status">{notice}</p>{/if}
+  {#if notice}<p class="success-banner" role="status">{notice}</p>{/if}
   {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
   {#if sessions.isPending}
     <div class="loading-state" role="status">Loading sessions…</div>

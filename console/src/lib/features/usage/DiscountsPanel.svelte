@@ -1,4 +1,5 @@
 <script lang="ts">
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import EntityPicker from '#lib/components/EntityPicker.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '#lib/shell/CursorPagination.svelte';
@@ -196,7 +197,9 @@
       >
     </div>
   {:else if (discounts.data?.items ?? []).length === 0}
-    <div class="card empty-state" role="status">No discounts published.</div>
+    <EmptyState title="No discounts yet"
+      >Add a discount to reflect negotiated provider pricing in cost reports.</EmptyState
+    >
   {:else}
     <div class="table-shell" role="region" aria-label="Discounts">
       <table class="data-table">

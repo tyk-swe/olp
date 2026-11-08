@@ -1,4 +1,5 @@
 <script lang="ts">
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import {
     useMutationIntent,
@@ -281,9 +282,9 @@
     {errorMessage(invitations.error)}
   </div>
 {:else if !invitations.data?.items.length && pagination.history.length === 0}
-  <section class="card empty-state">
-    <p>No invitations have been created.</p>
-  </section>
+  <EmptyState title="No invitations yet"
+    >Invite someone by email and choose their role.</EmptyState
+  >
 {:else}
   <div class="table-shell">
     <table class="data-table">

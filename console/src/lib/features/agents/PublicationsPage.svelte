@@ -1,4 +1,5 @@
 <script lang="ts">
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { resolve } from '$app/paths';
@@ -42,6 +43,21 @@
   const client = useQueryClient();
   const intent = useMutationIntent();
   let { kind }: { kind: Kind } = $props();
+
+  const EMPTY: Record<Kind, { title: string; body: string }> = {
+    toolsets: {
+      title: 'No toolsets yet',
+      body: 'A toolset bundles MCP tools so routes and agents can use them together.'
+    },
+    agents: {
+      title: 'No agents yet',
+      body: 'Publish an agent so other agents and API keys can delegate work to it.'
+    },
+    prompts: {
+      title: 'No prompts yet',
+      body: 'Publish a prompt so it can be reused by name.'
+    }
+  };
   let current = $state<Publication | null>(null);
   let form = $state(publicationForm());
   let editor = $state(false);
@@ -315,7 +331,7 @@
 </script>
 
 {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}{#if notice}<p
-    class="success-message"
+    class="success-banner"
     role="status"
   >
     {notice}
@@ -334,9 +350,9 @@
   </div>
   {#if items.isPending}<div class="loading-state" role="status">
       Loading publications…
-    </div>{:else if !items.data?.length}<div class="card empty-state">
-      No publications.
-    </div>{:else}<ScrollTable label="Publications">
+    </div>{:else if !items.data?.length}<EmptyState title={EMPTY[kind].title}
+      >{EMPTY[kind].body}</EmptyState
+    >{:else}<ScrollTable label="Publications">
       <table class="data-table">
         <thead
           ><tr

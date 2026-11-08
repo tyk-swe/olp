@@ -1,4 +1,5 @@
 <script lang="ts">
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
@@ -83,7 +84,9 @@
 {:else if templates.isPending}
   <div class="loading-state" role="status">Loading templates…</div>
 {:else if !templates.data?.length}
-  <div class="card empty-state">No route templates yet.</div>
+  <EmptyState title="No route templates yet"
+    >Save a route as a template to reuse its targets and settings.</EmptyState
+  >
 {:else}
   <ScrollTable label="Route templates">
     <table class="data-table">

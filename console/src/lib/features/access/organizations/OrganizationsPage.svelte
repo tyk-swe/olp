@@ -1,4 +1,5 @@
 <script lang="ts">
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import EntityPicker from '#lib/components/EntityPicker.svelte';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -387,7 +388,9 @@
         </form>{/if}
     {:else}<p>No projects in this organization.</p>{/if}
   </section>
-{:else}<p>No visible organizations.</p>{/if}
+{:else}<EmptyState title="No organizations yet"
+    >Organizations group projects and people under one owner.</EmptyState
+  >{/if}
 
 <style>
   form {

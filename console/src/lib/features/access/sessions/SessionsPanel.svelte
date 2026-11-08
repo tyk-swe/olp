@@ -1,4 +1,5 @@
 <script lang="ts">
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import { userKeys } from '#lib/features/access/users/userKeys.js';
 
@@ -108,9 +109,9 @@
     {errorMessage(sessions.error)}
   </div>
 {:else if !sessions.data?.items.length && pagination.history.length === 0}
-  <section class="card empty-state">
-    <p>No active sessions in this view.</p>
-  </section>
+  <EmptyState title="No active sessions"
+    >Nobody is signed in that matches this view.</EmptyState
+  >
 {:else}
   <div class="table-shell">
     <table class="data-table">

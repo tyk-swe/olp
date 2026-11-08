@@ -218,13 +218,6 @@ body {
   color: var(--color-void);
 }
 
-.page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1.5rem;
-}
-
 .page-actions,
 .toolbar {
   display: flex;
@@ -261,6 +254,8 @@ body {
   position: relative;
   overflow-x: auto;
   border: 1px solid var(--border-hairline);
+  max-width: 100%;
+  overscroll-behavior-inline: contain;
   border-radius: var(--radius-card);
   background: var(--surface);
 }
@@ -411,6 +406,9 @@ body {
   display: grid;
   min-height: 12rem;
   place-items: center;
+  align-content: center;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
   padding: 2rem;
   color: var(--foreground-muted);
   text-align: center;
@@ -682,7 +680,6 @@ input[type='file']::file-selector-button:hover {
 }
 
 @media (max-width: 36rem) {
-  .page-header,
   .section .section-heading {
     display: grid;
   }
@@ -1231,7 +1228,6 @@ button:not(:disabled),
 }
 
 /* Shared console rhythm keeps lists, editors, and feedback aligned. */
-.page-header > div,
 .page-heading > div,
 .form-field,
 .card,
@@ -1248,10 +1244,6 @@ button:not(:disabled),
   overflow-wrap: anywhere;
 }
 
-.page-header > .button {
-  flex-shrink: 0;
-}
-
 .form-field input:not([type='checkbox'], [type='radio']),
 .form-field select,
 .form-field textarea {
@@ -1261,13 +1253,6 @@ button:not(:disabled),
 
 .form-field :is(input, select, textarea)[aria-invalid='true'] {
   border-color: var(--danger);
-}
-
-.empty-state,
-.loading-state {
-  margin-top: 1.5rem;
-  gap: 0.75rem;
-  align-content: center;
 }
 
 .empty-state > div {
@@ -1305,11 +1290,6 @@ button:not(:disabled),
   margin-left: 0.5rem;
 }
 
-.table-shell {
-  max-width: 100%;
-  overscroll-behavior-inline: contain;
-}
-
 .data-table :is(td, th) {
   overflow-wrap: break-word;
 }
@@ -1322,8 +1302,7 @@ button:not(:disabled),
   min-width: 42rem;
 }
 
-.success-banner,
-.success-message {
+.success-banner {
   margin: 1rem 0;
   padding: 0.85rem 1rem;
   border: 1px solid var(--success);
@@ -1332,8 +1311,7 @@ button:not(:disabled),
   color: var(--foreground);
 }
 
-.success-banner strong,
-.success-message strong {
+.success-banner strong {
   color: var(--success);
 }
 
@@ -1346,7 +1324,6 @@ button:not(:disabled),
 }
 
 @media (max-width: 36rem) {
-  .page-header > .button,
   .page-actions {
     width: 100%;
   }
@@ -1381,10 +1358,6 @@ button:not(:disabled),
 .section > h2 + .scroll-table,
 .section > p + .scroll-table,
 .stack-card .scroll-table {
-  margin-top: 0.75rem;
-}
-
-.text-button + .page-header {
   margin-top: 0.75rem;
 }
 

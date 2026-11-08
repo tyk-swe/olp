@@ -140,7 +140,7 @@
   <div class="heading">
     <p class="eyebrow">Operator console</p>
     <h1>Sign in</h1>
-    <p>Choose an authentication method enabled for this installation.</p>
+    <p>Sign in to manage this installation.</p>
   </div>
 
   {#if sessionExpired}<p class="session-notice" role="status">

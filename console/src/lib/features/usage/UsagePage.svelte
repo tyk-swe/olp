@@ -1,4 +1,5 @@
 <script lang="ts">
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import SavedFilters from './SavedFilters.svelte';
   import Advanced from '#lib/components/Advanced.svelte';
   import { usageKeys } from '#lib/features/usage/usageKeys.js';
@@ -538,7 +539,9 @@
       <span class="badge">Top {usage.data.breakdown.length}</span>
     </div>
     {#if usage.data.breakdown.length === 0}
-      <div class="card empty-state">No usage in this time range.</div>
+      <EmptyState title="No usage in this time range"
+        >Try a wider date range or fewer filters.</EmptyState
+      >
     {:else}
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the table.) -->
       <div

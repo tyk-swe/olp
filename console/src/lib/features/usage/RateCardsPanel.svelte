@@ -1,4 +1,5 @@
 <script lang="ts">
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '#lib/shell/CursorPagination.svelte';
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
@@ -256,7 +257,10 @@
       >
     </div>
   {:else if (cards.data?.items ?? []).length === 0}
-    <div class="card empty-state" role="status">No rate cards.</div>
+    <EmptyState title="No rate cards yet"
+      >A rate card sets what consumers are charged, separate from what the
+      provider costs you.</EmptyState
+    >
   {:else}
     <div class="table-shell" role="region" aria-label="Rate cards">
       <table class="data-table">
