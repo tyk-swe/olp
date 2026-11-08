@@ -2,9 +2,16 @@
   import { page } from '$app/state';
   import { slidingIndicator } from '#lib/shell/indicator.js';
   import { activeTab, type NavigationLeaf } from '#lib/shell/navigation.js';
-  let { tabs, label }: { tabs: readonly NavigationLeaf[]; label: string } =
-    $props();
-  const current = $derived(activeTab(page.url.pathname, tabs)?.href);
+  let {
+    tabs,
+    label,
+    active
+  }: {
+    tabs: readonly NavigationLeaf[];
+    label: string;
+    active?: string;
+  } = $props();
+  const current = $derived(active ?? activeTab(page.url.pathname, tabs)?.href);
 </script>
 
 {#if tabs.length > 1}

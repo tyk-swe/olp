@@ -1,5 +1,7 @@
 <script lang="ts">
   import PageHeader from '#lib/components/PageHeader.svelte';
+  import Tabs from '#lib/components/Tabs.svelte';
+  import { page } from '$app/state';
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import { goto } from '$app/navigation';
   import { deleteProvider } from './providers';
@@ -62,6 +64,25 @@
   import type { RunProviderAction } from './providerEditor';
 
   let { providerId }: { providerId: string } = $props();
+
+  const VIEWS = [
+    { key: 'settings', label: 'Settings' },
+    { key: 'models', label: 'Models' },
+    { key: 'revisions', label: 'Revisions' }
+  ] as const;
+  const view = $derived(
+    VIEWS.find((item) => item.key === page.url.searchParams.get('view'))?.key ??
+      'settings'
+  );
+  const tabs = $derived(
+    VIEWS.map((item) => ({
+      label: item.label,
+      href:
+        item.key === 'settings'
+          ? resolve(`providers/${providerId}`)
+          : `${resolve(`providers/${providerId}`)}?view=${item.key}`
+    }))
+  );
 
   const queryClient = useQueryClient();
   const access = useRole();
@@ -289,6 +310,19 @@
   description={snapshot.data?.provider
     ? `Added by ${snapshot.data.provider.created_by_email ?? 'a removed account'}`
     : undefined}
+>
+  {#snippet actions()}
+    {#if canManage && snapshot.data?.provider}<a
+        class="button button-secondary"
+        href={`${resolve('providers/new')}?copy=${snapshot.data.provider.id}`}
+        >Duplicate</a
+      >{/if}
+  {/snippet}
+</PageHeader>
+<Tabs
+  label="Provider"
+  {tabs}
+  active={tabs[VIEWS.findIndex((item) => item.key === view)]?.href}
 />
 {#if saveRefreshError}
   <div class="inline-problem" role="alert">
@@ -353,20 +387,6 @@
   </div>
 {:else}
   {@const current = snapshot.data?.provider}
-  {#if current.state === 'draft' && !current.active_revision && access.allows('DELETE /api/v1/providers/{provider_id}')}<ConfirmAction
-      danger
-      label="Delete unused provider"
-      description={`Delete ${current.name} and its draft credentials. Providers referenced by routes or history cannot be deleted`}
-      identity={`${current.id}:${current.etag}`}
-      disabled={Boolean(busy)}
-      run={(requestId) => deleteProvider(current, requestId)}
-      done={async () => {
-        await queryClient.invalidateQueries({
-          queryKey: providerKeys.summaries
-        });
-        await goto(resolve('providers'));
-      }}
-    />{/if}
   {#key explicitReloadEpoch}
     {#if !canManage}<ReadOnlyNote>
         Your role can view this provider but not change, test, or activate it.
@@ -381,26 +401,88 @@
           atomically.</span
         >
       </div>{/if}
-    <div class="detail-grid">
-      <ProviderConfigurationSection
+    {#if view === 'settings'}
+      <div class="detail-grid">
+        <ProviderConfigurationSection
+          {current}
+          {providerSpec}
+          bind:editValues
+          {busy}
+          {savedDraftEpoch}
+          {canManage}
+          {run}
+          onTouch={touch}
+          dirty={sync.dirty}
+          issues={validationIssues}
+          onSave={() => saveProvider(current)}
+          onProviderChanged={providerChanged}
+          onRefetchProvider={refetchProvider}
+          onNotice={reportNotice}
+        />
+        <ProviderCredentialsSection
+          {current}
+          {providerSpec}
+          {busy}
+          {canManage}
+          {run}
+          onProviderChanged={providerChanged}
+          onResetModelPage={resetModelPage}
+          onNotice={reportNotice}
+        />
+        {#key current.id}
+          <BillingImportSection provider={current} {canManage} />
+        {/key}
+      </div>
+      <ProviderCredentialPool
+        provider={current}
+        {canManage}
+        grant={Boolean(
+          providerSpec &&
+          requiresGrant(providerSpec, current.configuration.auth_mode)
+        )}
+        onChanged={providerChanged}
+      />
+      {#if current.state === 'draft' && !current.active_revision && access.allows('DELETE /api/v1/providers/{provider_id}')}<ConfirmAction
+          danger
+          label="Delete unused provider"
+          description={`Delete ${current.name} and its draft credentials. Providers referenced by routes or history cannot be deleted`}
+          identity={`${current.id}:${current.etag}`}
+          disabled={Boolean(busy)}
+          run={(requestId) => deleteProvider(current, requestId)}
+          done={async () => {
+            await queryClient.invalidateQueries({
+              queryKey: providerKeys.summaries
+            });
+            await goto(resolve('providers'));
+          }}
+        />{/if}
+    {:else if view === 'models'}
+      <ProviderBulkModels
+        provider={current}
+        {canManage}
+        onChanged={providerChanged}
+      />
+      <ProviderModelsSection
+        modelSnapshot={snapshot.data}
+        loading={snapshot.isPending}
+        error={snapshot.error}
+        reloadModels={providerChanged}
         {current}
-        {providerSpec}
-        bind:editValues
         {busy}
-        {savedDraftEpoch}
         {canManage}
         {run}
-        onTouch={touch}
-        dirty={sync.dirty}
-        issues={validationIssues}
-        onSave={() => saveProvider(current)}
+        {reloadVersion}
+        bind:pageState={modelPageState}
         onProviderChanged={providerChanged}
-        onRefetchProvider={refetchProvider}
+        onError={reportError}
+        onConflict={() => {
+          sync = markConflict(sync);
+        }}
         onNotice={reportNotice}
       />
-      <ProviderCredentialsSection
+    {:else}
+      <ProviderRevisionsSection
         {current}
-        {providerSpec}
         {busy}
         {canManage}
         {run}
@@ -408,57 +490,7 @@
         onResetModelPage={resetModelPage}
         onNotice={reportNotice}
       />
-      {#key current.id}
-        <BillingImportSection provider={current} {canManage} />
-      {/key}
-    </div>
-    {#if canManage}<a
-        class="button button-secondary"
-        href={`${resolve('providers/new')}?copy=${current.id}`}
-        >Duplicate connection</a
-      >
     {/if}
-    <ProviderCredentialPool
-      provider={current}
-      {canManage}
-      grant={Boolean(
-        providerSpec &&
-        requiresGrant(providerSpec, current.configuration.auth_mode)
-      )}
-      onChanged={providerChanged}
-    />
-    <ProviderBulkModels
-      provider={current}
-      {canManage}
-      onChanged={providerChanged}
-    />
-    <ProviderModelsSection
-      modelSnapshot={snapshot.data}
-      loading={snapshot.isPending}
-      error={snapshot.error}
-      reloadModels={providerChanged}
-      {current}
-      {busy}
-      {canManage}
-      {run}
-      {reloadVersion}
-      bind:pageState={modelPageState}
-      onProviderChanged={providerChanged}
-      onError={reportError}
-      onConflict={() => {
-        sync = markConflict(sync);
-      }}
-      onNotice={reportNotice}
-    />
-    <ProviderRevisionsSection
-      {current}
-      {busy}
-      {canManage}
-      {run}
-      onProviderChanged={providerChanged}
-      onResetModelPage={resetModelPage}
-      onNotice={reportNotice}
-    />
   {/key}
 {/if}
 

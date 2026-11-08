@@ -1,5 +1,7 @@
 <script lang="ts">
   import PageHeader from '#lib/components/PageHeader.svelte';
+  import Tabs from '#lib/components/Tabs.svelte';
+  import { routeTabs } from './routeTabs.js';
   import RouteFidelityEditor from './RouteFidelityEditor.svelte';
   import RouteToolExecutionEditor from './RouteToolExecutionEditor.svelte';
   import RoutePassthroughEditor from './RoutePassthroughEditor.svelte';
@@ -57,6 +59,10 @@
     {/if}
   {/snippet}
 </PageHeader>
+{#if editor.resourceId}<Tabs
+    label="Route"
+    tabs={routeTabs(editor.resourceId)}
+  />{/if}
 {#if !editor.canManage}<ReadOnlyNote
     >Your role can view this route draft but not change or activate it.</ReadOnlyNote
   >{/if}

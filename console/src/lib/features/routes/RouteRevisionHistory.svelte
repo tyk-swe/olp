@@ -1,6 +1,8 @@
 <script lang="ts">
   import { confirmAction } from '#lib/components/confirm.js';
   import PageHeader from '#lib/components/PageHeader.svelte';
+  import Tabs from '#lib/components/Tabs.svelte';
+  import { routeTabs } from './routeTabs.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
   import { routeKeys } from '#lib/features/routes/routeKeys.js';
 
@@ -106,13 +108,14 @@
 <svelte:head><title>Routes · OpenLLMProxy</title></svelte:head>
 
 <PageHeader
-  title="Revision history"
-  description="Restoring history creates a new editable draft. It never rolls back keys or provider credentials."
+  title={revisions.data?.[0]?.slug ?? 'Route'}
+  description="Restoring an old revision opens it as a new draft. Keys and provider credentials are not rolled back."
 >
   {#snippet actions()}
     <a class="button button-secondary" href={resolve('routes')}>All routes</a>
   {/snippet}
 </PageHeader>
+<Tabs label="Route" tabs={routeTabs(routeId)} />
 {#if errorMessage}<div class="inline-problem" role="alert">
     {errorMessage}
   </div>{/if}
