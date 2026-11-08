@@ -81,7 +81,7 @@
         {#each tasks.data.items as task (task.id)}
           <tr>
             <td
-              ><a href={resolve(`/a2a-tasks/${task.id}`)}
+              ><a href={resolve(`a2a-tasks/${task.id}`)}
                 ><code>{task.id}</code></a
               ></td
             >

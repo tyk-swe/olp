@@ -34,7 +34,7 @@
 </script>
 
 <svelte:head><title>A2A task · OpenLLMProxy</title></svelte:head>
-<a class="text-button" href={resolve('/a2a-tasks')}>All A2A tasks</a>
+<a class="text-button" href={resolve('a2a-tasks')}>All A2A tasks</a>
 <div class="page-header">
   <div>
     <p class="eyebrow">Agents</p>
@@ -88,20 +88,21 @@
     {:else}
       <ScrollTable label="Remote message fees">
         <table class="data-table">
-          <thead
-            ><tr
-              ><th scope="col">Run</th><th scope="col">State</th><th scope="col"
-                >Observed cost / charge</th
-              ><th scope="col">Unresolved cost / charge</th><th scope="col"
-                >Started</th
-              ></tr
-            ></thead
-          >
-          <tbody
-            >{#each task.data.remote_fees as fee (fee.dispatch_id)}
-              <tr
-                ><td
-                  ><a href={resolve(`/runs/${fee.run_id}`)}
+          <thead>
+            <tr>
+              <th scope="col">Run</th>
+              <th scope="col">State</th>
+              <th scope="col">Observed cost / charge</th>
+              <th scope="col">Unresolved cost / charge</th>
+              <th scope="col">Started</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {#each task.data.remote_fees as fee (fee.dispatch_id)}
+              <tr>
+                <td
+                  ><a href={resolve(`runs/${fee.run_id}`)}
                     ><code>{fee.run_id}</code></a
                   ></td
                 >
@@ -169,23 +170,26 @@
       </p>{:else}
       <ScrollTable label="Callback tool usage">
         <table class="data-table">
-          <thead
-            ><tr
-              ><th scope="col">Run</th><th scope="col">State</th><th scope="col"
-                >Pricing</th
-              ><th scope="col">Observed cost / charge</th><th scope="col"
-                >Unresolved cost / charge</th
-              ></tr
-            ></thead
-          >
-          <tbody
-            >{#each task.data.callback_tools as tool (tool.dispatch_id)}
-              <tr
-                ><td
-                  ><a href={resolve(`/runs/${tool.run_id}`)}
+          <thead>
+            <tr>
+              <th scope="col">Run</th>
+              <th scope="col">State</th>
+              <th scope="col">Pricing</th>
+              <th scope="col">Observed cost / charge</th>
+              <th scope="col">Unresolved cost / charge</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {#each task.data.callback_tools as tool (tool.dispatch_id)}
+              <tr>
+                <td
+                  ><a href={resolve(`runs/${tool.run_id}`)}
                     ><code>{tool.run_id}</code></a
                   ></td
-                ><td>{stateLabel(tool.state)}</td><td>{tool.pricing_state}</td>
+                >
+                <td>{stateLabel(tool.state)}</td>
+                <td>{tool.pricing_state}</td>
                 <td
                   >{tool.observed_cost ?? 'Unknown'} / {tool.observed_charge ??
                     'Unknown'}
@@ -195,10 +199,10 @@
                   >{tool.remaining_cost ?? 'Unknown'} / {tool.remaining_charge ??
                     'Unknown'}
                   {tool.currency}</td
-                ></tr
-              >
-            {/each}</tbody
-          >
+                >
+              </tr>
+            {/each}
+          </tbody>
         </table>
       </ScrollTable>
     {/if}

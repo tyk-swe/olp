@@ -91,7 +91,7 @@
 <svelte:document
   onpointerdown={dismissAccountMenu}
   onkeydown={closeAccountMenuOnEscape}
-/>
+></svelte:document>
 
 <a class="skip-link" href="#main-content">Skip to main content</a>
 
@@ -114,7 +114,7 @@
       <a
         bind:this={desktopBrand}
         class="brand"
-        href={resolve('/')}
+        href={resolve('')}
         aria-label="OpenLLMProxy overview"
       >
         {#if installationLogo}<img
@@ -149,13 +149,16 @@
             <NavIcon name="chevron" size={16} />
           </summary>
           <div class="account-popover">
-            <a href={resolve('/settings/profile')} onclick={closeAccountMenu}
+            <a href={resolve('settings/profile')} onclick={closeAccountMenu}
               >Personal profile</a
             >
-            {#if can(user, 'settings.read')}<a
-                href={resolve('/settings')}
-                onclick={closeAccountMenu}>Installation settings</a
-              >{/if}
+
+            {#if can(user, 'settings.read')}
+              <a href={resolve('settings')} onclick={closeAccountMenu}
+                >Installation settings</a
+              >
+            {/if}
+
             <button
               type="button"
               onclick={onSignOut}
@@ -202,7 +205,7 @@
     <div class="drawer-heading">
       <a
         class="brand"
-        href={resolve('/')}
+        href={resolve('')}
         aria-label="OpenLLMProxy overview"
         onclick={closeNavigation}
       >

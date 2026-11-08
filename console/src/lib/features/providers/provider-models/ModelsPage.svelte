@@ -160,8 +160,9 @@
   </div>
   {#if canManage}<a
       class="button button-primary"
-      href={resolve('/providers/new')}>Discover models</a
-    >{/if}
+      href={resolve('providers/new')}>Discover models</a
+    >
+  {/if}
 </div>
 {#if !canManage}<ReadOnlyNote
     >Your role can view the model inventory but not change route eligibility.</ReadOnlyNote
@@ -186,10 +187,13 @@
   </article>
 </div>
 
-{#if mutationError}<div class="inline-problem" role="alert">
-    {mutationError}
-  </div>{/if}
-{#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
+{#if mutationError}
+  <div class="inline-problem" role="alert">{mutationError}</div>
+{/if}
+
+{#if notice}
+  <div class="success-banner" role="status">{notice}</div>
+{/if}
 
 <div class="toolbar" role="search">
   <label class="search"
@@ -250,7 +254,8 @@
     <div>
       <h2>No models discovered</h2>
       <p>Run a provider probe and capability review first.</p>
-      <a class="button button-primary" href={resolve('/providers')}
+
+      <a class="button button-primary" href={resolve('providers')}
         >Open providers</a
       >
     </div>
@@ -301,14 +306,16 @@
                         <dd>{fact.value}</dd>
                       </div>{/each}
                   </dl>
-                </details>{/if}</td
-            >
-            <td
-              ><a href={resolve(`/providers/${entry.provider_id}`)}
+                </details>
+              {/if}
+            </td>
+            <td>
+              <a href={resolve(`providers/${entry.provider_id}`)}
                 >{entry.provider_name}</a
-              ><br /><span class="badge">{stateLabel(entry.provider_kind)}</span
-              ></td
-            >
+              >
+              <br />
+              <span class="badge">{stateLabel(entry.provider_kind)}</span>
+            </td>
             <td>{formatInteger(entry.metadata.context_length)}</td>
             <td>{formatInteger(entry.metadata.max_output_tokens)}</td>
             <td

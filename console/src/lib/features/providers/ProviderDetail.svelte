@@ -23,10 +23,12 @@
     isEtagMismatch,
     type FieldIssue
   } from '#lib/management/http.js';
+
   import {
     updateProvider,
     type Provider
   } from '#lib/features/providers/providers.js';
+
   import {
     listProviderModelPage,
     listProviderKinds,
@@ -249,6 +251,7 @@
       // A deliberate confirmed configuration write starts new state actions.
       // Cache-only ETag changes must preserve an unresolved action receipt.
       savedDraftEpoch += 1;
+
       queryClient.setQueriesData<ProviderModelPage>(
         { queryKey: providerKeys.modelsOf(current.id) },
         (page) => (page ? { ...page, provider: updated } : page)
@@ -295,7 +298,8 @@
           'a removed account'}
       </p>{/if}
   </div>
-  <a class="button button-secondary" href={resolve('/providers')}
+
+  <a class="button button-secondary" href={resolve('providers')}
     >All providers</a
   >
 </div>
@@ -373,7 +377,7 @@
         await queryClient.invalidateQueries({
           queryKey: providerKeys.summaries
         });
-        await goto(resolve('/providers'));
+        await goto(resolve('providers'));
       }}
     />{/if}
   {#key explicitReloadEpoch}
@@ -423,9 +427,10 @@
     </div>
     {#if canManage}<a
         class="button button-secondary"
-        href={`${resolve('/providers/new')}?copy=${current.id}`}
+        href={`${resolve('providers/new')}?copy=${current.id}`}
         >Duplicate connection</a
-      >{/if}
+      >
+    {/if}
     <ProviderCredentialPool
       provider={current}
       {canManage}

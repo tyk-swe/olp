@@ -118,6 +118,7 @@
         !access.can('users.manage'))
     )
       return;
+
     const submittedValue = values[setting.key] ?? setting.value;
     savingKey = setting.key;
     status = error = '';
@@ -127,9 +128,11 @@
         { ...setting, etag: editEtags[setting.key] ?? setting.etag },
         submittedValue
       );
+
       queryClient.setQueryData<Setting[]>(settingsKeys.all(), (current) =>
         current?.map((item) => (item.key === updated.key ? updated : item))
       );
+
       if ((values[setting.key] ?? setting.value) === submittedValue) {
         delete values[setting.key];
         delete editEtags[setting.key];
@@ -168,7 +171,8 @@
       profile.
     </p>
   </div>
-  <a class="button button-secondary" href={resolve('/settings/profile')}
+
+  <a class="button button-secondary" href={resolve('settings/profile')}
     >Personal profile</a
   >
 </div>
@@ -301,7 +305,10 @@
                 savingPrice ||
                 (values[setting.key] ?? setting.value) === setting.value}
               >{savingKey === setting.key ? 'Saving…' : 'Save'}</button
-            >{#if fieldProblem}<small
+            >
+
+            {#if fieldProblem}
+              <small
                 class="field-error"
                 id={`setting-${setting.key}-error`}
                 role="alert">{fieldProblem}</small

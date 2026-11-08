@@ -61,9 +61,10 @@
     <h1 class="page-title">MCP servers</h1>
     <p class="page-description">
       Register and certify servers, then select their tools in
-      <a class="text-button" href={resolve('/agents')}
+      <a class="text-button" href={resolve('agents')}
         >Agent publications and toolsets</a
-      >.
+      >
+      .
     </p>
   </div>
   {#if access.allows('POST /api/v1/mcp-servers')}

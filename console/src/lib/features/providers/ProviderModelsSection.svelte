@@ -227,8 +227,8 @@
       }
       const { result } = await certifyProviderModel(provider, modelId);
       if (!isCurrent()) return;
-      certificationResults = { ...certificationResults, [modelId]: result };
 
+      certificationResults = { ...certificationResults, [modelId]: result };
       await observeChange(
         isCurrent,
         false,
@@ -253,7 +253,8 @@
       <p class="eyebrow">Discovery</p>
       <h2 id="models-heading">Models and capabilities</h2>
     </div>
-    <a class="button button-secondary" href={resolve('/provider-models')}
+
+    <a class="button button-secondary" href={resolve('provider-models')}
       >Inventory view</a
     >
   </div>
@@ -269,12 +270,13 @@
       type="button"
       onclick={discover}
       disabled={!canManage || Boolean(busy) || refreshPending || editingLocked}
-      >{busy === 'detail-discover'
+    >
+      {busy === 'detail-discover'
         ? 'Discovering…'
         : declared
           ? 'Recheck declared models'
-          : 'Run upstream discovery'}</button
-    >
+          : 'Run upstream discovery'}
+    </button>
   </div>
   {#if editingLocked}<p class="locked-note">{DISABLED_EDIT_NOTE}</p>{/if}
   <CatalogSuggestions
@@ -302,7 +304,8 @@
         ><textarea
           id="manual-models-detail"
           bind:value={manualModelNames}
-          placeholder="model-a&#10;model-b"></textarea>
+          placeholder="model-a
+model-b"></textarea>
       </div>
       <button
         class="button button-secondary"
@@ -321,16 +324,13 @@
         type="button"
         onclick={() => reloadModels()}>Retry</button
       >
-    </div>{/if}
-  {#if current.model_count === 0}<div class="empty-state">
-      <p>No models have been discovered.</p>
     </div>
-  {:else if loading && !visibleModelPage}<div
-      class="loading-state"
-      role="status"
-    >
-      Loading models…
-    </div>
+  {/if}
+
+  {#if current.model_count === 0}
+    <div class="empty-state"><p>No models have been discovered.</p></div>
+  {:else if loading && !visibleModelPage}
+    <div class="loading-state" role="status">Loading models…</div>
   {:else if visibleModelPage}
     {@const modelPage = visibleModelPage}
     <div class="table-shell">

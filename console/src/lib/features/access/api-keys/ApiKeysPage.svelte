@@ -138,7 +138,7 @@
   function dismissSecret() {
     secret = null;
     preferredRoute = undefined;
-    if (isNew) void goto(resolve('/api-keys'));
+    if (isNew) void goto(resolve('api-keys'));
   }
 </script>
 

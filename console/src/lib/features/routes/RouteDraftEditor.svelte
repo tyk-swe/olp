@@ -59,9 +59,11 @@
       </p>{/if}
   </div>
   <div class="page-actions">
-    <a class="button button-secondary" href={resolve('/routes')}
+    <a class="button button-secondary" href={resolve('routes')}
       >{editor.canManage ? 'Cancel' : 'Back to routes'}</a
-    >{#if editor.canManage && editor.resourceId && editor.draft.data}
+    >
+
+    {#if editor.canManage && editor.resourceId && editor.draft.data}
       {@const draft = editor.draft.data}
       <button
         class="button button-secondary button-danger"
@@ -178,11 +180,13 @@
           </fieldset>
         </div>
       </section>
+
       <RouteFidelityEditor {editor} />
       <RouteToolExecutionEditor {editor} />
       <RoutePassthroughEditor {editor} />
       <RouteTargets {editor} />
       <ContentPolicyEditor {editor} />
+
       <section class="card editor advanced" aria-labelledby="advanced-heading">
         <p class="eyebrow">Advanced</p>
         <h2 id="advanced-heading">Deadline and failover</h2>

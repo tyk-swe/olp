@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { replaceState } from '$app/navigation';
+  import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
@@ -58,10 +58,11 @@
   onMount(() => {
     const search = new URLSearchParams(window.location.search);
     if (search.get('reauthenticated') === 'plugin_permit') {
-      replaceState(resolve('/plugins'), {});
+      goto(resolve('plugins'), { shallow: true, replace: true });
       // The query parameter is only a hint to show; the permission itself
       // still needs the owner's review and acknowledgement.
       verified = true;
+
       notice =
         'Identity verified. Review the executable and permit it within five minutes.';
       verifiedExpiry = setTimeout(() => (verified = false), VERIFIED_FOR_MS);

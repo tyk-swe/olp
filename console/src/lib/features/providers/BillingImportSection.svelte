@@ -9,6 +9,7 @@
     useMutationIntent,
     usePrincipalLifetime
   } from '#lib/editing/mutationIntent.svelte.js';
+
   import {
     deleteBillingImport,
     getBillingImport,
@@ -146,12 +147,14 @@
     if ('payer_account_id' in scope) return '';
     if ('billing_scope' in scope)
       return (scope.subscription_ids ?? []).join('\n');
+
     const entries =
       'project_ids' in scope
         ? (scope.project_ids ?? [])
         : 'workspace_ids' in scope
           ? (scope.workspace_ids ?? [])
           : [];
+
     return entries.join('\n');
   }
 
@@ -221,10 +224,12 @@
         return 'Enter the 12-digit payer account ID';
       if (!bucket.trim() || !reportPrefix.trim() || !region.trim())
         return 'Enter the bucket, report prefix, and region';
+
       const ids = linkedAccounts
         .split('\n')
         .map((line) => line.trim())
         .filter(Boolean);
+
       if (ids.length > 100 || ids.some((id) => !/^\d{12}$/.test(id)))
         return 'Enter at most 100 12-digit linked account IDs';
       if (
@@ -233,6 +238,7 @@
         (!accessKeyId.trim() || !secretAccessKey.trim())
       )
         return 'Enter an access key ID and secret access key';
+
       return '';
     }
     const ids = scopeText
@@ -819,8 +825,8 @@
       {/if}
 
       <p class="section-help">
-        <a href={resolve('/usage')}>Reconcile billed costs</a> against attributed
-        usage on the Usage page.
+        <a href={resolve('usage')}>Reconcile billed costs</a>
+        against attributed usage on the Usage page.
       </p>
     {/if}
   </section>

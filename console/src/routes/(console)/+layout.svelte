@@ -31,7 +31,7 @@
   function loginDestination(sessionExpired = false) {
     const returnTo = page.url.pathname + page.url.search + page.url.hash;
     const expired = sessionExpired ? '&reason=expired' : '';
-    return `${resolve('/login')}?return_to=${encodeURIComponent(returnTo)}${expired}`;
+    return `${resolve('login')}?return_to=${encodeURIComponent(returnTo)}${expired}`;
   }
 
   async function signOut() {
@@ -39,10 +39,7 @@
     signingOut = true;
     signOutError = '';
     try {
-      await authLifecycle.signOut(
-        (signal) => logout(signal),
-        resolve('/login')
-      );
+      await authLifecycle.signOut((signal) => logout(signal), resolve('login'));
     } catch (error) {
       signOutError = errorMessage(
         error,
@@ -89,8 +86,9 @@
       },
       async unauthenticatedDestination(signal, sessionExpired) {
         const setup = await getSetupStatus(signal);
+
         return setup.setup_required
-          ? resolve('/setup')
+          ? resolve('setup')
           : loginDestination(sessionExpired);
       },
       loginDestination,
@@ -98,7 +96,7 @@
         // Every destination is either a resolved local route or a validated
         // same-origin relative return path constructed above.
         // eslint-disable-next-line svelte/no-navigation-without-resolve
-        await goto(destination, { replaceState: true });
+        await goto(destination, { replace: true });
       }
     });
 

@@ -13,7 +13,7 @@
   <div>
     <h2 id="not-found-title">Return to the overview</h2>
     <p>Check the address or use the primary navigation to continue.</p>
-    <a class="button button-secondary" href={resolve('/')}>Go to overview</a>
+    <a class="button button-secondary" href={resolve('')}>Go to overview</a>
   </div>
 </section>
 

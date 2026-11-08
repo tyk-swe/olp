@@ -21,11 +21,12 @@
     disabled = false,
     issues = [],
     onChange
+
+    /** Field issues the server reported, shown at the options they name. */
   }: {
     values: ProviderEditValues;
     idPrefix: string;
     disabled?: boolean;
-    /** Field issues the server reported, shown at the options they name. */
     issues?: FieldIssue[];
     onChange?: () => void;
   } = $props();
@@ -118,14 +119,17 @@
       onclick={() => profiles.refetch()}>Retry</button
     >
   </div>
-{:else if profiles.isSuccess && !groups.length}<p class="plugin-note full">
+{:else if profiles.isSuccess && !groups.length}
+  <p class="plugin-note full">
     No approved plugin offers a profile yet. An owner installs a plugin and
-    approves its origins on the <a href={resolve('/plugins')}>Plugins page</a>.
-  </p>{/if}
-{#if selected?.plugin}<section
-    class="plugin-pin full"
-    aria-label="Pinned plugin"
-  >
+    approves its origins on the
+    <a href={resolve('plugins')}>Plugins page</a>
+    .
+  </p>
+{/if}
+
+{#if selected?.plugin}
+  <section class="plugin-pin full" aria-label="Pinned plugin">
     <dl>
       <div>
         <dt>Plugin</dt>

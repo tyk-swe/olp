@@ -66,7 +66,7 @@
         login(email.trim(), password, signal)
       );
       // eslint-disable-next-line svelte/no-navigation-without-resolve -- destination() validates local paths and rejects login loops.
-      await goto(destination(), { replaceState: true, invalidateAll: true });
+      await goto(destination(), { replace: true, refreshAll: true });
     } catch (error) {
       message = errorMessage(error, 'The control API could not be reached.');
     } finally {

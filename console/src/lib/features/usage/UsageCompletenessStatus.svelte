@@ -18,7 +18,7 @@
       <strong id="completeness-title">{presentation.title}</strong>
       <p>{presentation.detail}</p>
     </div>
-    <a href={resolve('/health')}>Open health</a>
+    <a href={resolve('health')}>Open health</a>
   </section>
 {:else}
   <p class="complete-banner">

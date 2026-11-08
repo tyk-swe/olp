@@ -243,6 +243,7 @@ export class RouteDraftEditorState {
     const partition = user ? authLifecycle.principalPartition(user) : '';
     const samePrincipal = () => {
       const current = authLifecycle.snapshot().user;
+
       return (
         partition === (current ? authLifecycle.principalPartition(current) : '')
       );
@@ -345,7 +346,7 @@ export class RouteDraftEditorState {
     if (!this.canManage || this.busy) return;
     if (this.createdDraftId) {
       await this.run('open', async (isCurrent) => {
-        if (isCurrent()) await goto(resolve(`/routes/${this.createdDraftId}`));
+        if (isCurrent()) await goto(resolve(`routes/${this.createdDraftId}`));
       });
       return;
     }
@@ -376,7 +377,7 @@ export class RouteDraftEditorState {
         if (isCurrent())
           this.errorMessage = `Draft saved, but refreshing failed. ${errorMessage(cause)}`;
       }
-      if (isCurrent()) await goto(resolve(`/routes/${id}`));
+      if (isCurrent()) await goto(resolve(`routes/${id}`));
     });
   };
   save = async (current: RouteDraft) => {
@@ -505,7 +506,7 @@ export class RouteDraftEditorState {
       });
       if (!isCurrent()) return;
       this.sync = initialConcurrentEdit();
-      await goto(resolve('/routes'));
+      await goto(resolve('routes'));
     });
   };
   constructor(readRouteId: () => string | undefined) {

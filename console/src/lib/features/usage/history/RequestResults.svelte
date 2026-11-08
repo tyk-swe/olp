@@ -181,7 +181,8 @@
                 request.error_class
               )}</span
             >
-            <a href={resolve(`/requests/${request.id}${page.url.search}`)}
+
+            <a href={resolve(`requests/${request.id}${page.url.search}`)}
               >View</a
             >
           </li>
@@ -314,10 +315,10 @@
               <td
                 ><a
                   class="row-link"
-                  href={resolve(`/requests/${request.id}${page.url.search}`)}
+                  href={resolve(`requests/${request.id}${page.url.search}`)}
                   aria-label={`View request ${request.id}`}>View</a
-                ></td
-              >
+                >
+              </td>
             </tr>
           {/each}
         </tbody>
@@ -387,7 +388,7 @@
           </dl>
           <a
             class="button button-secondary"
-            href={resolve(`/requests/${request.id}${page.url.search}`)}
+            href={resolve(`requests/${request.id}${page.url.search}`)}
             aria-label={`View request ${request.id}`}>View timeline</a
           >
         </li>

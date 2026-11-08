@@ -33,6 +33,7 @@
     admissionPriorities,
     validateApiKey
   } from '#lib/features/access/api-keys/keyValidation.js';
+
   import {
     buildApiKeyPolicyInput,
     createApiKeyFormState,
@@ -84,6 +85,7 @@
     queryKey: budgetGroupKeys.list(),
     queryFn: ({ signal }) => listBudgetGroups(signal)
   }));
+
   const formProject = $derived(
     editing ? (editing.project_id ?? null) : form.projectId || null
   );
@@ -127,11 +129,14 @@
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
+
     const root =
       (event.currentTarget as HTMLFormElement).closest('main') ??
       (event.currentTarget as HTMLFormElement);
+
     if (!canManage || busy || publicationBlocked) return;
     onClearError();
+
     if (
       form.rotationIntervalDays.trim() &&
       (!/^\d+$/.test(form.rotationIntervalDays) ||
@@ -221,9 +226,10 @@
       type="button"
       disabled={Boolean(busy)}
       onclick={onCancel}>Cancel</button
-    >{:else}<a class="button button-secondary" href={resolve('/api-keys')}
-      >Cancel</a
-    >{/if}
+    >
+  {:else}
+    <a class="button button-secondary" href={resolve('api-keys')}>Cancel</a>
+  {/if}
 </div>
 {#if submitError || formError}<div
     class="inline-problem"
@@ -402,17 +408,17 @@
         aria-describedby={errors.allowedCIDRs
           ? 'key-allowed-cidrs-help key-allowed-cidrs-error'
           : 'key-allowed-cidrs-help'}
-        placeholder="192.0.2.0/24&#10;2001:db8::/32"></textarea>
+        placeholder="192.0.2.0/24
+2001:db8::/32"></textarea>
+
       <small id="key-allowed-cidrs-help"
         >One IPv4 or IPv6 CIDR range per line. Leave empty to allow any client
         address. Forwarded addresses are accepted only through configured
         trusted proxies.</small
       >
-      {#if errors.allowedCIDRs}<p
-          id="key-allowed-cidrs-error"
-          class="field-error"
-          role="alert"
-        >
+
+      {#if errors.allowedCIDRs}
+        <p id="key-allowed-cidrs-error" class="field-error" role="alert">
           {errors.allowedCIDRs}
         </p>{/if}
     </div>
@@ -513,10 +519,14 @@
                   route.slug,
                   event.currentTarget.checked
                 ))}
-            /> <code>{route.slug}</code></label
-          >{/each}{#if !routes.data?.length}<span
-            >No routes are configured yet.</span
-          >{/if}{/if}
+            />
+
+            <code>{route.slug}</code>
+          </label>
+        {/each}{#if !routes.data?.length}
+          <span>No routes are configured yet.</span>
+        {/if}
+      {/if}
     </fieldset>
     <AttributionFields
       bind:form={form.attributionPolicy}
@@ -624,16 +634,23 @@
           aria-describedby={errors.priority
             ? 'priority-error'
             : 'priority-help'}
-          ><option value="">Normal</option
-          >{#each admissionPriorities as priority (priority)}<option
-              value={priority}>{priority}</option
-            >{/each}</select
         >
+          <option value="">Normal</option>
+
+          {#each admissionPriorities as priority (priority)}
+            <option value={priority}>{priority}</option>
+          {/each}
+        </select>
+
         <small id="priority-help" class="section-help"
           >The class a saturated gateway queues this key's requests in.</small
-        >{#if errors.priority}<small class="field-error" id="priority-error"
+        >
+
+        {#if errors.priority}
+          <small class="field-error" id="priority-error"
             >{errors.priority}</small
-          >{/if}
+          >
+        {/if}
       </div>
       <div class="form-field">
         <label for="max-priority">Highest requestable priority</label><select
@@ -641,11 +658,14 @@
           bind:value={form.maxPriority}
           disabled={!canManage}
           aria-describedby="max-priority-help"
-          ><option value="">Its default</option
-          >{#each admissionPriorities as priority (priority)}<option
-              value={priority}>{priority}</option
-            >{/each}</select
         >
+          <option value="">Its default</option>
+
+          {#each admissionPriorities as priority (priority)}
+            <option value={priority}>{priority}</option>
+          {/each}
+        </select>
+
         <small id="max-priority-help" class="section-help"
           >Callers may ask for up to this class in the X-OLP-Routing header.</small
         >

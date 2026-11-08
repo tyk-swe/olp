@@ -19,7 +19,7 @@
         type="button"
         onclick={() => window.location.reload()}>Reload page</button
       >
-      <a class="button button-secondary" href={resolve('/')}
+      <a class="button button-secondary" href={resolve('')}
         >Return to overview</a
       >
     </div>

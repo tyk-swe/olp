@@ -20,7 +20,7 @@
     try {
       const status = await getSetupStatus(activeController.signal);
       if (!status.setup_required) {
-        await goto(resolve('/'), { replaceState: true });
+        await goto(resolve(''), { replace: true });
         return;
       }
       setupView = 'ready';
@@ -32,7 +32,7 @@
   }
 
   function finishSetup() {
-    void goto(resolve('/'), { replaceState: true });
+    void goto(resolve(''), { replace: true });
   }
 
   onMount(() => {

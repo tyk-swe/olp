@@ -154,8 +154,14 @@
     Your role can view members but not change roles or deactivate accounts.
   </ReadOnlyNote>
 {/if}
-{#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
-{#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
+
+{#if error}
+  <div class="inline-problem" role="alert">{error}</div>
+{/if}
+
+{#if notice}
+  <div class="success-banner" role="status">{notice}</div>
+{/if}
 
 <div class="role-guide" aria-label="Fixed role permissions">
   {#each [['owner', 'Full control, identity, and access'], ['operator', 'Gateway configuration and operations'], ['developer', 'Keys, playground, and request metadata'], ['viewer', 'Read-only monitoring']] as role (role[0])}
@@ -212,7 +218,9 @@
         disabled={!selected.length || Boolean(busy)}
         onclick={() => (selected = [])}>Clear selection</button
       >
-    </div>{/if}
+    </div>
+  {/if}
+
   <div class="table-shell">
     <table class="data-table">
       <thead
@@ -235,12 +243,19 @@
                         .filter((user) => user.id !== viewer?.id)
                         .map((user) => user.id)
                     : [])}
-              /></th
-            >{/if}<th>Member</th><th>Status</th><th>Fixed role</th><th
-            >Access scope</th
-          ><th>Joined</th><th><span class="sr-only">Actions</span></th></tr
-        ></thead
-      >
+              />
+            </th>
+          {/if}
+
+          <th>Member</th>
+          <th>Status</th>
+          <th>Fixed role</th>
+          <th>Access scope</th>
+          <th>Joined</th>
+          <th><span class="sr-only">Actions</span></th>
+        </tr>
+      </thead>
+
       <tbody>
         {#each users.data?.items ?? [] as user (user.id)}
           <tr>
@@ -318,7 +333,7 @@
                 >{/if}
               <a
                 class="button button-secondary"
-                href={`${resolve('/api-keys')}?created_by=${user.id}`}
+                href={`${resolve('api-keys')}?created_by=${user.id}`}
                 aria-label={`Review API keys issued by ${user.display_name}`}
                 >Review API keys</a
               ></td

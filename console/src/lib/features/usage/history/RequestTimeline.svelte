@@ -109,14 +109,16 @@
     {#if detail.data.attribution?.session}
       <article class="card metric-card">
         <p>Session</p>
-        <strong
-          ><a
+
+        <strong>
+          <a
             href={resolve(
-              `/requests?session_id=${encodeURIComponent(detail.data.attribution.session)}`
+              `requests?session_id=${encodeURIComponent(detail.data.attribution.session)}`
             )}
             class="mono">{detail.data.attribution.session}</a
-          ></strong
-        >
+          >
+        </strong>
+
         <span>Requests in this session</span>
       </article>
     {/if}
@@ -187,12 +189,13 @@
             class="badge"
             class:success={detail.data.usage_complete === true}
             class:warning={detail.data.usage_complete === false}
-            >{detail.data.usage_complete == null
+          >
+            {detail.data.usage_complete == null
               ? 'Unknown'
               : detail.data.usage_complete
                 ? 'Complete'
-                : 'Incomplete'}</span
-          >
+                : 'Incomplete'}
+          </span>
         </dd>
       </div>
       {#if detail.data.attribution?.session}
@@ -201,7 +204,7 @@
           <dd>
             <a
               href={resolve(
-                `/requests?session_id=${encodeURIComponent(detail.data.attribution.session)}`
+                `requests?session_id=${encodeURIComponent(detail.data.attribution.session)}`
               )}
               class="mono">{detail.data.attribution.session}</a
             >
@@ -281,10 +284,11 @@
                 <strong
                   ><a
                     class="provider-link"
-                    href={resolve(`/providers/${attempt.provider_id}`)}
+                    href={resolve(`providers/${attempt.provider_id}`)}
                     >{attempt.provider_name}</a
-                  ></strong
-                ><span class="mono">{attempt.upstream_model}</span>
+                  >
+                </strong>
+                <span class="mono">{attempt.upstream_model}</span>
               </div>
               <span
                 class="badge {statusTone(

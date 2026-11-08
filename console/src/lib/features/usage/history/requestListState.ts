@@ -1,3 +1,4 @@
+import type { ReadonlyURLSearchParams } from '$app/state';
 import {
   operationKinds,
   type RequestFilters
@@ -136,11 +137,13 @@ export function requestProblem(
   );
 }
 
-export function readRequestForm(search: URLSearchParams): RequestForm {
+export function readRequestForm(search: ReadonlyURLSearchParams): RequestForm {
   return readForm<RequestForm>(search, params);
 }
 
-export function requestState(search: URLSearchParams): RequestListState {
+export function requestState(
+  search: ReadonlyURLSearchParams
+): RequestListState {
   const form = readRequestForm(search);
   return {
     ...requestList.empty(),
@@ -156,7 +159,7 @@ export function requestSearch(applied: RequestQuery): string {
 }
 
 export const requestUrl: ListUrlSpec<RequestListState> = {
-  path: '/requests',
+  path: 'requests',
   state: requestState,
   canonical: (search) => {
     const form = readRequestForm(search);

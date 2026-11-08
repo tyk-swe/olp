@@ -43,7 +43,7 @@
   </div>
 
   {#if access.allows('POST /api/v1/investigations')}
-    <a class="button button-primary" href={resolve('/investigations/new')}
+    <a class="button button-primary" href={resolve('investigations/new')}
       >New investigation</a
     >
   {/if}
@@ -94,10 +94,11 @@
             <td
               ><a
                 class="text-button"
-                href={resolve(`/investigations/${investigation.id}`)}
+                href={resolve(`investigations/${investigation.id}`)}
                 >{investigation.summary}</a
-              ></td
-            >
+              >
+            </td>
+
             <td
               >{projects.data?.find(
                 (project) => project.id === investigation.project_id

@@ -197,8 +197,9 @@
         · {persistence.data.unpriced_count} unpriced requests. Missing or uncertain
         metadata is reported, never silently converted to zero cost.
       </p>
+
       <p>
-        <a href={resolve('/usage')}
+        <a href={resolve('usage')}
           >Open usage for priced totals and range coverage</a
         >
       </p>
@@ -396,8 +397,9 @@
       )
     )}
   </dl>
+
   <p class="section-link">
-    <a href={resolve('/media-jobs')}>Open media jobs</a>
+    <a href={resolve('media-jobs')}>Open media jobs</a>
   </p>
 </section>
 

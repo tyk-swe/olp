@@ -19,6 +19,7 @@
     cursorPaginationProps,
     resetCursor
   } from '#lib/listing/pagination.js';
+
   import {
     listApiKeyPage,
     revokeApiKey,
@@ -99,26 +100,26 @@
   );
 
   async function filterIssuer(value: string) {
-    const url = new URL(page.url);
+    const url = new URL(page.url.href);
     const id = value.trim().toLowerCase();
     if (id) url.searchParams.set('created_by', id);
     else url.searchParams.delete('created_by');
     const target = url.search
-      ? resolve(`/api-keys?${url.searchParams}${url.hash}`)
+      ? resolve(`api-keys?${url.searchParams}${url.hash}`)
       : url.hash
-        ? resolve(`/api-keys#${url.hash.slice(1)}`)
-        : resolve('/api-keys');
-    await goto(target, {
-      keepFocus: true,
-      noScroll: true
-    });
+        ? resolve(`api-keys#${url.hash.slice(1)}`)
+        : resolve('api-keys');
+
+    await goto(target, { reset: false });
   }
 
   async function rotate(key: ApiKey) {
     const isCurrent = captureOwner();
+
     if (!/^\d+$/.test(overlapSeconds) || Number(overlapSeconds) > 86400) {
       rotationError =
         'Overlap must be a whole number of seconds from 0 to 86400.';
+
       return;
     }
     busy = `rotate-${key.id}`;
@@ -174,10 +175,10 @@
       limits.
     </p>
   </div>
-  {#if canManage}<a
-      class="button button-primary"
-      href={resolve('/api-keys/new')}>Create key <NavIcon name="arrow" /></a
-    >{/if}
+  {#if canManage}<a class="button button-primary" href={resolve('api-keys/new')}
+      >Create key <NavIcon name="arrow" /></a
+    >
+  {/if}
 </div>
 {#if !services.limitsEnforced}<p class="muted" role="status">
     Limit and budget policies are saved but not enforced yet.
@@ -254,8 +255,9 @@
         >{/if}
       {#if canManage && !createdBy}<a
           class="button button-primary"
-          href={resolve('/api-keys/new')}>Create first key</a
-        >{/if}
+          href={resolve('api-keys/new')}>Create first key</a
+        >
+      {/if}
     </div>
   </section>
 {:else}
@@ -372,9 +374,9 @@
                 <small>No cost budget</small>
               {/if}
             </td>
-            <td
-              ><a
-                href={`${resolve('/api-keys')}?created_by=${key.created_by}`}
+            <td>
+              <a
+                href={`${resolve('api-keys')}?created_by=${key.created_by}`}
                 aria-label={`Review API keys issued by ${key.created_by_email}`}
                 >{key.created_by_email}</a
               ><br /><small>{formatDate(key.created_at)}</small></td
@@ -383,9 +385,11 @@
               ><div class="row-actions">
                 {#if services.gatewayAvailable}<a
                     class="button button-secondary"
-                    href={resolve(`/usage?api_key_id=${key.id}`)}
+                    href={resolve(`usage?api_key_id=${key.id}`)}
                     aria-label={`Usage for ${key.name}`}>Usage</a
-                  >{/if}
+                  >
+                {/if}
+
                 <button
                   class="button button-secondary"
                   type="button"

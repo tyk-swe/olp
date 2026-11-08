@@ -1,3 +1,4 @@
+import type { ReadonlyURLSearchParams } from '$app/state';
 import { instant } from '#lib/management/query.js';
 import { dateTimeLocalValue } from '#lib/format.js';
 
@@ -97,7 +98,7 @@ export function rangeProblem(
 
 /** Reads every form field from its query parameter, trimmed. */
 export function readForm<Form extends Record<string, string>>(
-  search: URLSearchParams,
+  search: ReadonlyURLSearchParams,
   params: { readonly [K in keyof Form]: string }
 ): Form {
   return Object.fromEntries(

@@ -99,9 +99,10 @@
               <code>{value.tool_alias}</code>
               <details>
                 <summary>Attempt {value.id}</summary>
-                <a href={resolve(`/tool-calls/${value.id}`)}
+                <a href={resolve(`tool-calls/${value.id}`)}
                   >Inspect and resolve</a
                 >
+
                 <dl class="detail-list">
                   <dt>Dispatch</dt>
                   <dd><code>{value.dispatch_id}</code></dd>

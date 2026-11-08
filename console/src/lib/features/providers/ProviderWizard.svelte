@@ -27,7 +27,8 @@
       then activate.
     </p>
   </div>
-  <a class="button button-secondary" href={resolve('/providers')}
+
+  <a class="button button-secondary" href={resolve('providers')}
     >{wizard.wizardProvider ? 'Save and exit' : 'Cancel'}</a
   >
 </div>

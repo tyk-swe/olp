@@ -74,7 +74,7 @@
     error = '';
     try {
       const saved = await createInvestigation(input, requestID);
-      await goto(resolve(`/investigations/${saved.id}`));
+      await goto(resolve(`investigations/${saved.id}`));
     } catch (cause) {
       error = errorMessage(cause);
     } finally {
@@ -84,7 +84,9 @@
 </script>
 
 <svelte:head><title>New investigation · OpenLLMProxy</title></svelte:head>
-<a class="text-button" href={resolve('/investigations')}>All investigations</a>
+
+<a class="text-button" href={resolve('investigations')}>All investigations</a>
+
 <div class="page-header">
   <div>
     <p class="eyebrow">Agents</p>
@@ -134,15 +136,19 @@
           name="max_duration_ms"
           min="0"
           step="1"
-        /></label
-      >
-      <label class="form-field"
-        >Error
-        <select name="error"
-          ><option value="">Any</option><option value="true">Error</option
-          ><option value="false">No error</option></select
-        >
+        />
       </label>
+
+      <label class="form-field">
+        Error
+
+        <select name="error">
+          <option value="">Any</option>
+          <option value="true">Error</option>
+          <option value="false">No error</option>
+        </select>
+      </label>
+
       <label class="form-field"
         >Tool <input name="tool" maxlength="256" /></label
       >

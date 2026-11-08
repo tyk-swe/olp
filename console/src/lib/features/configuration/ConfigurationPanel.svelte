@@ -249,7 +249,8 @@
     {approval ? 'awaits approval' : 'is not installed here'}: {approval
       ? 'an owner approves it'
       : 'install and approve it'} on the
-    <a href={resolve('/plugins')}>Plugins page</a>, then plan again.
+    <a href={resolve('plugins')}>Plugins page</a>
+    , then plan again.
   {/if}
 {/snippet}
 

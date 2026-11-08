@@ -13,8 +13,8 @@
     type CodePool,
     type CodePoolWrite
   } from '#lib/features/code-mode/api.js';
-  import { adapterLabel } from './presentation';
 
+  import { adapterLabel } from './presentation';
   import {
     useResourceSubmission,
     type ResourceEditorProps
@@ -114,11 +114,11 @@
     maxlength="100"
   />
   <label for="code-kind">Pool kind</label>
-  <select id="code-kind" bind:value={kind} disabled={!!current}
-    ><option value="personal">Personal</option><option value="shared"
-      >Shared</option
-    ></select
-  >
+  <select id="code-kind" bind:value={kind} disabled={!!current}>
+    <option value="personal">Personal</option>
+    <option value="shared">Shared</option>
+  </select>
+
   {#if kind === 'personal'}
     <label for="code-owner">Owner</label>
     <select id="code-owner" bind:value={owner} required disabled={!!current}>
@@ -177,18 +177,27 @@
   </fieldset>
   <fieldset>
     <legend>Explicit API-key permissions</legend>
-    {#each eligibleKeys as key (key.id)}<label class="choice"
-        ><input type="checkbox" bind:group={keyIds} value={key.id} />{key.name} ·
-        {key.created_by_email}{key.revoked_at ? ' · revoked' : ''}</label
-      >{/each}
-    {#each selectedUnavailableKeys as id (id)}<label class="choice"
-        ><input type="checkbox" bind:group={keyIds} value={id} />{id} · unavailable
-        or not owned by this owner; remove before saving</label
-      >{/each}
-    {#if !eligibleKeys.length}<p>
-        No matching keys available. <a href={resolve('/api-keys')}
-          >Manage OLP keys</a
-        >.
-      </p>{/if}
+
+    {#each eligibleKeys as key (key.id)}
+      <label class="choice">
+        <input type="checkbox" bind:group={keyIds} value={key.id} />
+        {key.name} · {key.created_by_email}{key.revoked_at ? ' · revoked' : ''}
+      </label>
+    {/each}
+
+    {#each selectedUnavailableKeys as id (id)}
+      <label class="choice">
+        <input type="checkbox" bind:group={keyIds} value={id} />
+        {id} · unavailable or not owned by this owner; remove before saving
+      </label>
+    {/each}
+
+    {#if !eligibleKeys.length}
+      <p>
+        No matching keys available.
+        <a href={resolve('api-keys')}>Manage OLP keys</a>
+        .
+      </p>
+    {/if}
   </fieldset>
 </ResourceEditorForm>

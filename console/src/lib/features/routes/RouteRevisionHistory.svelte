@@ -94,7 +94,7 @@
       } catch (cause) {
         errorMessage = `Draft restored, but refreshing failed. ${message(cause)}`;
       }
-      await goto(resolve(`/routes/${restored.id}`));
+      await goto(resolve(`routes/${restored.id}`));
     });
   }
 </script>
@@ -110,7 +110,8 @@
       or provider credentials.
     </p>
   </div>
-  <a class="button button-secondary" href={resolve('/routes')}>All routes</a>
+
+  <a class="button button-secondary" href={resolve('routes')}>All routes</a>
 </div>
 {#if errorMessage}<div class="inline-problem" role="alert">
     {errorMessage}

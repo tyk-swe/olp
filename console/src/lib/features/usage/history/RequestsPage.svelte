@@ -91,8 +91,9 @@
   </div>
   {#if requestId}<a
       class="button button-secondary"
-      href={resolve(`/requests${page.url.search}`)}>Back to requests</a
-    >{/if}
+      href={resolve(`requests${page.url.search}`)}>Back to requests</a
+    >
+  {/if}
 </div>
 
 {#if !requestId}<SavedFilters
@@ -118,7 +119,10 @@
     Request history is not retained by this installation yet, so request
     metadata cannot be explored here.
   </div>
-{:else if requestId}<RequestTimeline {detail} />{:else}<RequestResults
+{:else if requestId}
+  <RequestTimeline {detail} />
+{:else}
+  <RequestResults
     {requests}
     bind:listState
     {applyFilters}

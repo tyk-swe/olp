@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { goto, replaceState } from '$app/navigation';
+  import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { onDestroy, onMount } from 'svelte';
   import { authenticationCapabilities } from '#lib/features/access/session/api.js';
@@ -16,6 +16,7 @@
     PASSWORD_MIN_LENGTH,
     PASSWORD_TOO_SHORT
   } from '#lib/passwordPolicy.js';
+
   import {
     type InvitationAcceptanceErrors,
     type InvitationAcceptanceValues,
@@ -64,10 +65,13 @@
 
     if (token) void checkPolicy();
     else view = 'invalid';
+
     const scrub = window.setTimeout(
-      () => replaceState(resolve('/invitations/accept'), {}),
+      () =>
+        goto(resolve('invitations/accept'), { shallow: true, replace: true }),
       0
     );
+
     return () => {
       controller.abort();
       window.clearTimeout(scrub);
@@ -100,7 +104,7 @@
       token = '';
       values.password = '';
       values.confirmPassword = '';
-      await goto(resolve('/'), { replaceState: true });
+      await goto(resolve(''), { replace: true });
     } catch (error) {
       if (error instanceof ApiProblem) {
         if (error.problem.status === 410) {
@@ -142,9 +146,11 @@
         mapping and sign in with single sign-on, or enable local sign-in before
         accepting this invitation. Your invitation has not been consumed.
       </p>
-      <a class="button button-secondary" href={resolve('/login')}
+
+      <a class="button button-secondary" href={resolve('login')}
         >Go to sign in</a
       >
+
       <button
         class="button button-secondary"
         type="button"
@@ -166,7 +172,8 @@
       <p class="eyebrow">Invitation unavailable</p>
       <h1>This invitation link is incomplete.</h1>
       <p>Ask an installation owner for a fresh one-time invitation link.</p>
-      <a class="button button-secondary" href={resolve('/login')}
+
+      <a class="button button-secondary" href={resolve('login')}
         >Go to sign in</a
       >
     </div>
@@ -178,7 +185,8 @@
         It may be expired, revoked, or already accepted. Ask an installation
         owner for a new link.
       </p>
-      <a class="button button-secondary" href={resolve('/login')}
+
+      <a class="button button-secondary" href={resolve('login')}
         >Go to sign in</a
       >
     </div>

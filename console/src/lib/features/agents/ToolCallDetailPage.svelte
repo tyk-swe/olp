@@ -48,7 +48,7 @@
 </script>
 
 <svelte:head><title>Tool call · OpenLLMProxy</title></svelte:head>
-<a class="text-button" href={resolve('/tool-calls')}>All tool calls</a>
+<a class="text-button" href={resolve('tool-calls')}>All tool calls</a>
 <div class="page-header">
   <div>
     <p class="eyebrow">Agents</p>

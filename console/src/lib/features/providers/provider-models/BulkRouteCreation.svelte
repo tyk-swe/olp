@@ -254,8 +254,9 @@
         during publication.
       </p>
       <ul>
-        {#each created as route (route.id)}<li>
-            <a href={resolve(`/routes/${route.id}`)}>{route.slug}</a>
+        {#each created as route (route.id)}
+          <li>
+            <a href={resolve(`routes/${route.id}`)}>{route.slug}</a>
             {published.includes(route.id) ? 'Published' : 'Draft'}
           </li>{/each}
       </ul>

@@ -17,7 +17,9 @@
 </script>
 
 <svelte:head><title>Investigation · OpenLLMProxy</title></svelte:head>
-<a class="text-button" href={resolve('/investigations')}>All investigations</a>
+
+<a class="text-button" href={resolve('investigations')}>All investigations</a>
+
 <div class="page-header">
   <div>
     <p class="eyebrow">Agents</p>
@@ -53,9 +55,12 @@
       <dd>
         {#if item.filters.run_id}<a
             class="text-button"
-            href={resolve(`/runs/${item.filters.run_id}`)}
+            href={resolve(`runs/${item.filters.run_id}`)}
             ><code>{item.filters.run_id}</code></a
-          >{:else}Any{/if}
+          >
+        {:else}
+          Any
+        {/if}
       </dd>
       <dt>Minimum duration</dt>
       <dd>
@@ -95,27 +100,25 @@
           <li>
             {reference.kind}
             {#if reference.kind === 'run'}
-              <a class="text-button" href={resolve(`/runs/${reference.id}`)}
+              <a class="text-button" href={resolve(`runs/${reference.id}`)}
                 ><code>{reference.id}</code></a
               >
             {:else if reference.kind === 'task'}
-              <a
-                class="text-button"
-                href={resolve(`/a2a-tasks/${reference.id}`)}
+              <a class="text-button" href={resolve(`a2a-tasks/${reference.id}`)}
                 ><code>{reference.id}</code></a
               >
             {:else if reference.kind === 'delegation'}
               <a
                 class="text-button"
-                href={`${resolve('/delegations')}?project_id=${encodeURIComponent(item.project_id)}&delegation_id=${encodeURIComponent(reference.id)}`}
+                href={`${resolve('delegations')}?project_id=${encodeURIComponent(item.project_id)}&delegation_id=${encodeURIComponent(reference.id)}`}
                 ><code>{reference.id}</code></a
               >
             {:else if reference.run_id}
               <a
                 class="text-button"
                 href={reference.kind === 'step' || reference.kind === 'span'
-                  ? `${resolve(`/runs/${reference.run_id}`)}?${reference.kind}_id=${encodeURIComponent(reference.id)}`
-                  : resolve(`/runs/${reference.run_id}`)}
+                  ? `${resolve(`runs/${reference.run_id}`)}?${reference.kind}_id=${encodeURIComponent(reference.id)}`
+                  : resolve(`runs/${reference.run_id}`)}
                 ><code>{reference.id}</code></a
               >
             {:else}

@@ -75,10 +75,9 @@
   </div>
 </div>
 <nav class="page-tabs" aria-label="Usage reports">
-  <a href={resolve('/usage')}>Usage overview</a><a
-    aria-current="page"
-    href={resolve('/usage/routing')}>Routing reports</a
-  >
+  <a href={resolve('usage')}>Usage overview</a>
+
+  <a aria-current="page" href={resolve('usage/routing')}>Routing reports</a>
 </nav>
 <form class="card form-card" onsubmit={apply}>
   <label class="form-field"

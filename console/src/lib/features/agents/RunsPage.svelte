@@ -82,8 +82,7 @@
         {#each runs.data.items as run (run.id)}
           <tr>
             <td
-              ><a href={resolve(`/runs/${run.id}`)}><code>{run.id}</code></a
-              ></td
+              ><a href={resolve(`runs/${run.id}`)}><code>{run.id}</code></a></td
             >
             <td
               >{projects.data?.find((project) => project.id === run.project_id)

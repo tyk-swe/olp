@@ -63,7 +63,7 @@
 </script>
 
 <svelte:head><title>Route templates · OpenLLMProxy</title></svelte:head>
-<a class="text-button" href={resolve('/routes')}>All routes</a>
+<a class="text-button" href={resolve('routes')}>All routes</a>
 <div class="page-header">
   <div>
     <p class="eyebrow">Gateway</p>

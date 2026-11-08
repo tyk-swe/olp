@@ -1,3 +1,4 @@
+import type { ReadonlyURLSearchParams } from '$app/state';
 import type {
   AuditEvent,
   AuditFilters
@@ -108,11 +109,11 @@ export function auditProblem(
   );
 }
 
-export function readAuditForm(search: URLSearchParams): AuditForm {
+export function readAuditForm(search: ReadonlyURLSearchParams): AuditForm {
   return readForm<AuditForm>(search, params);
 }
 
-export function auditState(search: URLSearchParams): AuditListState {
+export function auditState(search: ReadonlyURLSearchParams): AuditListState {
   const form = readAuditForm(search);
   return {
     ...auditList.empty(),
@@ -128,7 +129,7 @@ export function auditSearch(applied: AuditQuery): string {
 }
 
 export const auditUrl: ListUrlSpec<AuditListState> = {
-  path: '/audit',
+  path: 'audit',
   state: auditState,
   canonical: (search) => {
     const form = readAuditForm(search);

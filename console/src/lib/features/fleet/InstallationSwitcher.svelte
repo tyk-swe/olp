@@ -67,8 +67,9 @@
 
   function switchTo(target: string) {
     if (target === origin) return;
+
     window.location.assign(
-      bookmarkOrigin(target, origin, bookmarks) + resolve('/overview')
+      bookmarkOrigin(target, origin, bookmarks) + resolve('overview')
     );
   }
 </script>
@@ -88,7 +89,7 @@
       menu.querySelector('summary')?.focus();
     }
   }}
-/>
+></svelte:document>
 
 <details class="installation-switcher" bind:this={menu}>
   <summary

@@ -1,3 +1,4 @@
+import type { ReadonlyURLSearchParams } from '$app/state';
 import { instant } from '#lib/management/query.js';
 import type {
   UsageDimension,
@@ -104,7 +105,7 @@ export function usageProblem(state: UsageState): string | null {
 }
 
 export function readUsageState(
-  search: URLSearchParams,
+  search: ReadonlyURLSearchParams,
   defaults: UsageState
 ): UsageState {
   const start = search.get('start')?.trim() || defaults.filters.start;

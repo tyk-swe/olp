@@ -6,5 +6,5 @@
   let listState = routeList.get();
 </script>
 
-<a href={resolve('/routes/templates')}>Manage route templates</a>
+<a href={resolve('routes/templates')}>Manage route templates</a>
 <RouteList bind:listState />

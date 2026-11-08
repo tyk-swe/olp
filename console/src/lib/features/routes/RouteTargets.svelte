@@ -42,9 +42,9 @@
   </div>
   {#if !editor.modelOptions.length}<div class="empty-state compact">
       <p>
-        No enabled models are available. <a href={resolve('/provider-models')}
-          >Review model eligibility</a
-        >.
+        No enabled models are available.
+        <a href={resolve('provider-models')}>Review model eligibility</a>
+        .
       </p>
     </div>{/if}
   <ol class="targets">
@@ -59,13 +59,15 @@
               bind:value={target.providerModelId}
               onchange={editor.touch}
               disabled={!editor.canManage}
-              >{#if !editor.modelOptions.some((option) => option.id === target.providerModelId)}<option
-                  value={target.providerModelId}
-                  >{storedTargetLabel(target)} — unavailable</option
-                >{/if}{#each editor.modelOptions as option (option.id)}<option
-                  value={option.id}>{option.label}</option
-                >{/each}</select
             >
+              {#if !editor.modelOptions.some((option) => option.id === target.providerModelId)}
+                <option value={target.providerModelId}
+                  >{storedTargetLabel(target)} — unavailable</option
+                >
+              {/if}{#each editor.modelOptions as option (option.id)}
+                <option value={option.id}>{option.label}</option>
+              {/each}
+            </select>
           </div>
           <div class="form-field">
             <label for={`priority-${index}`}>Priority</label><input

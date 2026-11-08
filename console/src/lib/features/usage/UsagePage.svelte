@@ -90,11 +90,10 @@
     };
   });
 
-  function showUsage(state: UsageState, replaceState = false) {
-    return goto(resolve(`/usage?${usageSearch(state)}`), {
-      replaceState,
-      keepFocus: true,
-      noScroll: true
+  function showUsage(state: UsageState, replace = false) {
+    return goto(resolve(`usage?${usageSearch(state)}`), {
+      replace,
+      reset: false
     });
   }
 
@@ -142,9 +141,8 @@
       ingestion completeness.
     </p>
     <nav class="page-tabs" aria-label="Usage reports">
-      <a aria-current="page" href={resolve('/usage')}>Usage overview</a><a
-        href={resolve('/usage/routing')}>Routing reports</a
-      >
+      <a aria-current="page" href={resolve('usage')}>Usage overview</a>
+      <a href={resolve('usage/routing')}>Routing reports</a>
     </nav>
   </div>
   <button
@@ -551,55 +549,74 @@
           <caption class="sr-only"
             >Usage breakdown by {applied.dimension}</caption
           >
-          <thead
-            ><tr
-              ><th scope="col">{applied.dimension.replace('_', ' ')}</th><th
-                scope="col">Requests</th
-              ><th scope="col">Input tokens</th><th scope="col">Cached input</th
-              ><th scope="col">Cache write</th><th scope="col">Output tokens</th
-              ><th scope="col">Audio tokens</th><th scope="col">Image tokens</th
-              ><th scope="col">Allocated commitment</th><th scope="col"
-                >Estimated / reported input</th
-              ><th scope="col">Estimate error</th><th scope="col"
-                >Estimated cost</th
-              ><th scope="col">Charge</th><th scope="col">Completeness</th></tr
-            ></thead
-          >
-          <tbody
-            >{#each usage.data.breakdown as row (row.dimension)}{@const rowEstimate =
-                presentEstimate(row)}<tr
-                ><td><strong>{row.dimension}</strong></td><td
-                  >{formatCompact(row.request_count)}</td
-                ><td>{formatCompact(row.input_tokens)}</td><td
-                  >{formatCompact(row.cached_input_tokens)}</td
-                ><td>{formatCompact(row.cache_write_input_tokens)}</td><td
-                  >{formatCompact(row.output_tokens)}</td
-                ><td
+          <thead>
+            <tr>
+              <th scope="col">{applied.dimension.replace('_', ' ')}</th>
+              <th scope="col">Requests</th>
+              <th scope="col">Input tokens</th>
+              <th scope="col">Cached input</th>
+              <th scope="col">Cache write</th>
+              <th scope="col">Output tokens</th>
+              <th scope="col">Audio tokens</th>
+              <th scope="col">Image tokens</th>
+              <th scope="col">Allocated commitment</th>
+              <th scope="col">Estimated / reported input</th>
+              <th scope="col">Estimate error</th>
+              <th scope="col">Estimated cost</th>
+              <th scope="col">Charge</th>
+              <th scope="col">Completeness</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each usage.data.breakdown as row (row.dimension)}
+              {@const rowEstimate = presentEstimate(row)}
+              <tr>
+                <td><strong>{row.dimension}</strong></td>
+                <td>{formatCompact(row.request_count)}</td>
+                <td>{formatCompact(row.input_tokens)}</td>
+                <td>{formatCompact(row.cached_input_tokens)}</td>
+                <td>{formatCompact(row.cache_write_input_tokens)}</td>
+                <td>{formatCompact(row.output_tokens)}</td>
+                <td
                   >{formatCompact(row.audio_input_tokens)} / {formatCompact(
                     row.audio_output_tokens
                   )}</td
-                ><td
+                >
+                <td
                   >{formatCompact(row.image_input_tokens)} / {formatCompact(
                     row.image_output_tokens
                   )}</td
-                ><td>{formatCost(row.allocated_commitment, row.currency)}</td
-                ><td>{rowEstimate.comparison}</td><td>{rowEstimate.error}</td
-                ><td>{formatCost(row.estimated_cost, row.currency)}</td><td
-                  >{formatCost(
+                >
+                <td>{formatCost(row.allocated_commitment, row.currency)}</td>
+                <td>{rowEstimate.comparison}</td>
+                <td>{rowEstimate.error}</td>
+                <td>{formatCost(row.estimated_cost, row.currency)}</td>
+                <td>
+                  {formatCost(
                     row.charge,
                     row.currency
-                  )}{#if row.uncharged_attempt_count > 0}&nbsp;<span
-                      class="badge warning">{row.uncharged_attempt_count}</span
-                    >{/if}</td
-                ><td
-                  >{#if row.incomplete_count > 0}<span class="badge danger"
+                  )}{#if row.uncharged_attempt_count > 0}
+                    <span class="badge warning"
+                      >{row.uncharged_attempt_count}</span
+                    >
+                  {/if}
+                </td>
+                <td>
+                  {#if row.incomplete_count > 0}
+                    <span class="badge danger"
                       >{row.incomplete_count} incomplete</span
-                    >{:else if row.unpriced_count > 0}<span
-                      class="badge warning">{row.unpriced_count} unpriced</span
-                    >{:else}<span class="badge success">Complete</span>{/if}</td
-                ></tr
-              >{/each}</tbody
-          >
+                    >
+                  {:else if row.unpriced_count > 0}
+                    <span class="badge warning"
+                      >{row.unpriced_count} unpriced</span
+                    >
+                  {:else}
+                    <span class="badge success">Complete</span>
+                  {/if}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
         </table>
       </div>
     {/if}

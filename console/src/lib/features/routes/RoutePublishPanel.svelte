@@ -32,37 +32,48 @@
     class="button button-secondary"
     type="submit"
     disabled={!editor.canManage || Boolean(editor.busy)}
-    >{editor.busy === 'save'
+  >
+    {editor.busy === 'save'
       ? 'Saving…'
       : editor.isNew
         ? 'Create draft'
-        : 'Save draft'}</button
-  >
+        : 'Save draft'}
+  </button>
+
   {#if !editor.isNew && editor.draft.data}
     {@const draft = editor.draft.data}
     <hr />
     <label for="simulation-operation">Dry-run operation</label>
-    <select id="simulation-operation" bind:value={editor.simulationOperation}
-      >{#each editor.operations as operation (operation)}<option
-          value={operation}>{operation}</option
-        >{/each}</select
-    >
+
+    <select id="simulation-operation" bind:value={editor.simulationOperation}>
+      {#each editor.operations as operation (operation)}
+        <option value={operation}>{operation}</option>
+      {/each}
+    </select>
+
     <label for="simulation-surface">Client surface</label>
-    <select id="simulation-surface" bind:value={editor.simulationSurface}
-      >{#each editor.surfaces as surface (surface)}<option value={surface}
-          >{surface}</option
-        >{/each}</select
-    >
+
+    <select id="simulation-surface" bind:value={editor.simulationSurface}>
+      {#each editor.surfaces as surface (surface)}
+        <option value={surface}>{surface}</option>
+      {/each}
+    </select>
+
     <label for="simulation-mode">Transport mode</label>
-    <select id="simulation-mode" bind:value={editor.simulationMode}
-      >{#each modesFor(editor.simulationOperation).filter((mode) => !(mode === 'streaming' && editor.outputPolicyActive)) as mode (mode)}<option
-          value={mode}>{mode}</option
-        >{/each}</select
-    >
-    {#if editor.outputPolicyActive}<p class="policy-note" role="status">
+
+    <select id="simulation-mode" bind:value={editor.simulationMode}>
+      {#each modesFor(editor.simulationOperation).filter((mode) => !(mode === 'streaming' && editor.outputPolicyActive)) as mode (mode)}
+        <option value={mode}>{mode}</option>
+      {/each}
+    </select>
+
+    {#if editor.outputPolicyActive}
+      <p class="policy-note" role="status">
         Output content-policy rules require unary buffering — streaming is
         unavailable on this route.
-      </p>{/if}
+      </p>
+    {/if}
+
     <RoutingPreferencesForm
       bind:value={editor.routingPreferences}
       id="simulation-routing"
@@ -102,6 +113,7 @@
               : (example.surface ?? 'openai');
             editor.simulationDialect =
               example.inspectDialect ?? example.nativeDialect ?? '';
+
             editor.simulationRequestJson = JSON.stringify(
               {
                 ...example.request,
@@ -161,14 +173,20 @@
       >{editor.busy === 'activate' ? 'Activating…' : 'Activate route'}</button
     >
   {/if}
-  {#if editor.activation}<div class="activation">
-      <strong>Revision {editor.activation.revision} active</strong><span
+
+  {#if editor.activation}
+    <div class="activation">
+      <strong>Revision {editor.activation.revision} active</strong>
+      <span
         >Runtime generation {editor.activation.runtime_generation
           .sequence}</span
-      ><a href={resolve(`/routes/${editor.activation.route_id}/revisions`)}
+      >
+
+      <a href={resolve(`routes/${editor.activation.route_id}/revisions`)}
         >View revision history</a
       >
-    </div>{/if}
+    </div>
+  {/if}
 </aside>
 
 <style>
