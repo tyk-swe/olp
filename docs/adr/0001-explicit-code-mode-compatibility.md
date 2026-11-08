@@ -1,3 +1,0 @@
-# Explicit code-mode compatibility
-
-The accepted [#522 target](https://github.com/tyk-swe/olp/issues/522) permits explicit protocol translation and model aliases for workflows the native-only contract blocks. Native forwarding remains the default, and published behavior changes only deliberately. Identity or prompt changes need a separate opt-in explaining their behavior and account suspension risk, authorized by the route administrator for eligible shared accounts without contributor approval. Translation reuses existing protocol primitives and preserves code-mode authority, accounting and required semantics. Paid API participation needs separate authorization and monetary policy.

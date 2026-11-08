@@ -66,7 +66,7 @@ func TestClassifyQwenRequestsRateLimitIsShortRate(t *testing.T) {
 
 func TestClassifyQwenCodingPlanAllocatedQuotaNeverClassifies(t *testing.T) {
 	// Source: https://www.alibabacloud.com/help/en/model-studio/error-code (fetched 2026-11-05), Throttling.AllocationQuota/insufficient_quota TPS/TPM messages.
-	// Source: https://www.alibabacloud.com/help/en/model-studio/coding-plan-faq via docs/research/cliproxyapi-quota-signals.md (fetched 2026-11-05), separate Coding Plan 5 hour, weekly and monthly allocated quota messages.
+	// Source: https://www.alibabacloud.com/help/en/model-studio/coding-plan-faq (fetched 2026-11-05), separate Coding Plan 5 hour, weekly and monthly allocated quota messages.
 	vendor, endpoint := qwenVendor(t)
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
 	for name, body := range map[string][]byte{
