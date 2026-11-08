@@ -2,6 +2,7 @@ package access
 
 import (
 	"bytes"
+	"encoding"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/tyk-swe/olp/internal/oif"
 )
+
+const nullablePackage = "github.com/oapi-codegen/nullable"
 
 // DecodeUnique is the bounded configuration boundary for model-significant
 // documents. Validate original members before typed maps could turn ambiguous
@@ -52,6 +55,18 @@ func canonicalMembers(value oif.Value, shape reflect.Type, fieldName string) err
 		shape = shape.Elem()
 	}
 	if shape == reflect.TypeFor[json.RawMessage]() {
+		return nil
+	}
+	if shape.PkgPath() == nullablePackage && shape.Kind() == reflect.Map {
+		if value.Kind() == oif.Null {
+			return nil
+		}
+		return canonicalMembers(value, shape.Elem(), fieldName)
+	}
+	if opaqueScalar(shape) {
+		if value.Kind() == oif.Null {
+			return errors.New("scalar cannot be null")
+		}
 		return nil
 	}
 	switch shape.Kind() {
@@ -105,6 +120,12 @@ func canonicalMembers(value oif.Value, shape reflect.Type, fieldName string) err
 		}
 	}
 	return nil
+}
+
+func opaqueScalar(shape reflect.Type) bool {
+	pointer := reflect.PointerTo(shape)
+	custom := pointer.Implements(reflect.TypeFor[json.Unmarshaler]()) || pointer.Implements(reflect.TypeFor[encoding.TextUnmarshaler]())
+	return custom && (shape.Kind() != reflect.Struct || len(canonicalFields(shape)) == 0)
 }
 
 // canonicalFields follows encoding/json's embedded-field selection: shallower

@@ -2132,6 +2132,7 @@ func (e ConfigurationPlanItemAction) Valid() bool {
 const (
 	ConfigurationPlanItemKindAgentPublication    ConfigurationPlanItemKind = "agent_publication"
 	ConfigurationPlanItemKindBillingImport       ConfigurationPlanItemKind = "billing_import"
+	ConfigurationPlanItemKindBudgetTimeZone      ConfigurationPlanItemKind = "budget_time_zone"
 	ConfigurationPlanItemKindCatalogPublication  ConfigurationPlanItemKind = "catalog_publication"
 	ConfigurationPlanItemKindCodeAccount         ConfigurationPlanItemKind = "code_account"
 	ConfigurationPlanItemKindCodeBudget          ConfigurationPlanItemKind = "code_budget"
@@ -2143,16 +2144,23 @@ const (
 	ConfigurationPlanItemKindGuardrail           ConfigurationPlanItemKind = "guardrail"
 	ConfigurationPlanItemKindGuardrailAttachment ConfigurationPlanItemKind = "guardrail_attachment"
 	ConfigurationPlanItemKindGuardrailPolicy     ConfigurationPlanItemKind = "guardrail_policy"
+	ConfigurationPlanItemKindInstallationBudget  ConfigurationPlanItemKind = "installation_budget"
 	ConfigurationPlanItemKindMcpServer           ConfigurationPlanItemKind = "mcp_server"
 	ConfigurationPlanItemKindNetworkCredential   ConfigurationPlanItemKind = "network_credential"
+	ConfigurationPlanItemKindOrganization        ConfigurationPlanItemKind = "organization"
 	ConfigurationPlanItemKindPlugin              ConfigurationPlanItemKind = "plugin"
 	ConfigurationPlanItemKindPricing             ConfigurationPlanItemKind = "pricing"
 	ConfigurationPlanItemKindProject             ConfigurationPlanItemKind = "project"
 	ConfigurationPlanItemKindProvider            ConfigurationPlanItemKind = "provider"
 	ConfigurationPlanItemKindRateCard            ConfigurationPlanItemKind = "rate_card"
+	ConfigurationPlanItemKindRequireLocalMfa     ConfigurationPlanItemKind = "require_local_mfa"
+	ConfigurationPlanItemKindRetrievalBinding    ConfigurationPlanItemKind = "retrieval_binding"
 	ConfigurationPlanItemKindRoute               ConfigurationPlanItemKind = "route"
 	ConfigurationPlanItemKindRouteTemplate       ConfigurationPlanItemKind = "route_template"
+	ConfigurationPlanItemKindSaml                ConfigurationPlanItemKind = "saml"
+	ConfigurationPlanItemKindScimGroupMapping    ConfigurationPlanItemKind = "scim_group_mapping"
 	ConfigurationPlanItemKindSink                ConfigurationPlanItemKind = "sink"
+	ConfigurationPlanItemKindWorkloadIssuer      ConfigurationPlanItemKind = "workload_issuer"
 )
 
 // Valid indicates whether the value is a known member of the ConfigurationPlanItemKind enum.
@@ -2161,6 +2169,8 @@ func (e ConfigurationPlanItemKind) Valid() bool {
 	case ConfigurationPlanItemKindAgentPublication:
 		return true
 	case ConfigurationPlanItemKindBillingImport:
+		return true
+	case ConfigurationPlanItemKindBudgetTimeZone:
 		return true
 	case ConfigurationPlanItemKindCatalogPublication:
 		return true
@@ -2184,9 +2194,13 @@ func (e ConfigurationPlanItemKind) Valid() bool {
 		return true
 	case ConfigurationPlanItemKindGuardrailPolicy:
 		return true
+	case ConfigurationPlanItemKindInstallationBudget:
+		return true
 	case ConfigurationPlanItemKindMcpServer:
 		return true
 	case ConfigurationPlanItemKindNetworkCredential:
+		return true
+	case ConfigurationPlanItemKindOrganization:
 		return true
 	case ConfigurationPlanItemKindPlugin:
 		return true
@@ -2198,11 +2212,42 @@ func (e ConfigurationPlanItemKind) Valid() bool {
 		return true
 	case ConfigurationPlanItemKindRateCard:
 		return true
+	case ConfigurationPlanItemKindRequireLocalMfa:
+		return true
+	case ConfigurationPlanItemKindRetrievalBinding:
+		return true
 	case ConfigurationPlanItemKindRoute:
 		return true
 	case ConfigurationPlanItemKindRouteTemplate:
 		return true
+	case ConfigurationPlanItemKindSaml:
+		return true
+	case ConfigurationPlanItemKindScimGroupMapping:
+		return true
 	case ConfigurationPlanItemKindSink:
+		return true
+	case ConfigurationPlanItemKindWorkloadIssuer:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConfigurationRateCardOwnerKind.
+const (
+	ConfigurationRateCardOwnerKindInstallation ConfigurationRateCardOwnerKind = "installation"
+	ConfigurationRateCardOwnerKindOrganization ConfigurationRateCardOwnerKind = "organization"
+	ConfigurationRateCardOwnerKindProject      ConfigurationRateCardOwnerKind = "project"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationRateCardOwnerKind enum.
+func (e ConfigurationRateCardOwnerKind) Valid() bool {
+	switch e {
+	case ConfigurationRateCardOwnerKindInstallation:
+		return true
+	case ConfigurationRateCardOwnerKindOrganization:
+		return true
+	case ConfigurationRateCardOwnerKindProject:
 		return true
 	default:
 		return false
@@ -9746,6 +9791,18 @@ type ConfigurationCodeRoutePolicy struct {
 	Tools nullable.Nullable[CodeResearchTools] `json:"tools,omitempty"`
 }
 
+// ConfigurationDiscountEntry A discount scope the document prices under. Scopes the document omits are left unchanged.
+type ConfigurationDiscountEntry struct {
+	Multiplier string `json:"multiplier"`
+
+	// Provider Provider name the discount is scoped to; omitted for a provider-kind scope
+	Provider *string `json:"provider,omitempty"`
+
+	// ProviderKind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
+	ProviderKind ProviderKind `json:"provider_kind"`
+	VendorId     *string      `json:"vendor_id,omitempty"`
+}
+
 // ConfigurationDocument Secret-free desired-state artifact using natural destination identities. Code UUIDs are artifact-local references, never requested destination IDs.
 type ConfigurationDocument struct {
 	AgentPublications *[]ConfigurationAgentPublication `json:"agent_publications,omitempty"`
@@ -9755,7 +9812,8 @@ type ConfigurationDocument struct {
 	BudgetTimeZone nullable.Nullable[string] `json:"budget_time_zone,omitempty"`
 
 	// Code Resource IDs are artifact-local references. Accounts resolve through explicitly bound current destination enrollments. Pools and budgets reuse validated same-project artifact IDs or standard UUIDv5 destination IDs derived from project, resource kind and artifact reference, with unique natural matches as fallback. This preserves duplicate names and exact duplicate budgets without a registry. Routes resolve through unique slug. Unrelated ambiguous identities are refused. Source credentials, health, usage windows, conversation bindings and historical revisions stay local. Destination projects and providers must be prepared and enrolled before planning. Rename globally unique slugs for same-installation cross-project promotion.
-	Code *ConfigurationCode `json:"code,omitempty"`
+	Code      *ConfigurationCode            `json:"code,omitempty"`
+	Discounts *[]ConfigurationDiscountEntry `json:"discounts,omitempty"`
 
 	// ExportedAt Informational only; excluded from the artifact digest
 	ExportedAt           *time.Time                           `json:"exported_at,omitempty"`
@@ -9772,6 +9830,7 @@ type ConfigurationDocument struct {
 	Pricing       nullable.Nullable[ConfigurationPricingEntry] `json:"pricing"`
 	Projects      []ConfigurationProjectEntry                  `json:"projects"`
 	Providers     []ConfigurationProviderEntry                 `json:"providers"`
+	RateCards     *[]ConfigurationRateCardEntry                `json:"rate_cards,omitempty"`
 
 	// RequireLocalMfa Local sign-in second-factor requirement. Omitted/null preserves destination policy. Changes additionally require installation access authority; factors, recovery codes, challenges and sessions are never portable.
 	RequireLocalMfa   nullable.Nullable[bool]          `json:"require_local_mfa,omitempty"`
@@ -10066,6 +10125,28 @@ type ConfigurationProviderEntry struct {
 	Project nullable.Nullable[string] `json:"project"`
 	Slots   []ConfigurationSlotEntry  `json:"slots"`
 }
+
+// ConfigurationRateCardEntry One owner's charge terms. Cards the document omits are left unchanged.
+type ConfigurationRateCardEntry struct {
+	// Markup Non-negative decimal markup
+	Markup string                     `json:"markup"`
+	Owner  ConfigurationRateCardOwner `json:"owner"`
+	Prices *[]ConfigurationPriceEntry `json:"prices,omitempty"`
+}
+
+// ConfigurationRateCardOwner defines model for ConfigurationRateCardOwner.
+type ConfigurationRateCardOwner struct {
+	Kind ConfigurationRateCardOwnerKind `json:"kind"`
+
+	// Organization Organization name, required when kind is organization
+	Organization *string `json:"organization,omitempty"`
+
+	// Project Project name, required when kind is project
+	Project *string `json:"project,omitempty"`
+}
+
+// ConfigurationRateCardOwnerKind defines model for ConfigurationRateCardOwner.Kind.
+type ConfigurationRateCardOwnerKind string
 
 // ConfigurationRetrievalBinding defines model for ConfigurationRetrievalBinding.
 type ConfigurationRetrievalBinding struct {

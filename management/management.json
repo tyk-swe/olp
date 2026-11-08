@@ -1715,6 +1715,18 @@
               }
             ]
           },
+          "discounts": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigurationDiscountEntry"
+            },
+            "type": "array"
+          },
+          "rate_cards": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigurationRateCardEntry"
+            },
+            "type": "array"
+          },
           "projects": {
             "items": {
               "$ref": "#/components/schemas/ConfigurationProjectEntry"
@@ -1954,7 +1966,15 @@
               "code_account",
               "code_pool",
               "code_route",
-              "code_budget"
+              "code_budget",
+              "retrieval_binding",
+              "organization",
+              "scim_group_mapping",
+              "workload_issuer",
+              "saml",
+              "require_local_mfa",
+              "budget_time_zone",
+              "installation_budget"
             ],
             "type": "string"
           }
@@ -32341,6 +32361,77 @@
           "name",
           "created_at"
         ]
+      },
+      "ConfigurationDiscountEntry": {
+        "description": "A discount scope the document prices under. Scopes the document omits are left unchanged.",
+        "properties": {
+          "provider_kind": {
+            "$ref": "#/components/schemas/ProviderKind"
+          },
+          "vendor_id": {
+            "type": "string"
+          },
+          "provider": {
+            "description": "Provider name the discount is scoped to; omitted for a provider-kind scope",
+            "type": "string"
+          },
+          "multiplier": {
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider_kind",
+          "multiplier"
+        ],
+        "type": "object"
+      },
+      "ConfigurationRateCardOwner": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "installation",
+              "organization",
+              "project"
+            ],
+            "type": "string"
+          },
+          "organization": {
+            "description": "Organization name, required when kind is organization",
+            "type": "string"
+          },
+          "project": {
+            "description": "Project name, required when kind is project",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "ConfigurationRateCardEntry": {
+        "description": "One owner's charge terms. Cards the document omits are left unchanged.",
+        "properties": {
+          "owner": {
+            "$ref": "#/components/schemas/ConfigurationRateCardOwner"
+          },
+          "markup": {
+            "description": "Non-negative decimal markup",
+            "type": "string"
+          },
+          "prices": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigurationPriceEntry"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "owner",
+          "markup"
+        ],
+        "type": "object"
       }
     },
     "securitySchemes": {
