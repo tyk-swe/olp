@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Advanced from '#lib/components/Advanced.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { validRouteSlug } from '#lib/routeIdentity.js';
   import RunLimits from '#lib/features/workflows/RunLimits.svelte';
@@ -238,8 +239,7 @@
   novalidate
 >
   <section aria-labelledby="identity-heading">
-    <p class="eyebrow">Identity</p>
-    <h2 id="identity-heading">Name and expiration</h2>
+    <h2 id="identity-heading">Basics</h2>
     <div class="form-grid">
       <div class="form-field">
         <label for="key-name">Key name</label><input
@@ -276,8 +276,7 @@
     </div>
   </section>
   <section aria-labelledby="scope-heading">
-    <p class="eyebrow">Authorization</p>
-    <h2 id="scope-heading">Scopes and route allowlist</h2>
+    <h2 id="scope-heading">What this key can reach</h2>
     <fieldset class="checks">
       <legend>Scopes</legend
       >{#each [['inference', 'Inference requests'], ['models_read', 'Model listing'], ['guardrails', 'Guardrail evaluation'], ['tools', 'Toolset access'], ['agents', 'Agent access'], ['traces_write', 'Trace ingestion'], ['delegate', 'Delegation consent']] as scope (scope[0])}<label
@@ -295,161 +294,8 @@
           {scope[1]}</label
         >{/each}
     </fieldset>
-    <div class="form-field">
-      <label for="key-toolsets">Allowed published toolset UUIDs</label><input
-        id="key-toolsets"
-        bind:value={form.allowedToolsets}
-        disabled={!canManage}
-      /><small
-        >Comma-separated; an empty list denies all toolsets. Route groups grant
-        no tool access.</small
-      >
-    </div>
-    <div class="form-field">
-      <label for="key-agents">Allowed published agent UUIDs</label><input
-        id="key-agents"
-        bind:value={form.allowedAgents}
-        disabled={!canManage}
-      /><small>Comma-separated; an empty list denies all agents.</small>
-    </div>
-    <fieldset class="checks">
-      <legend>Provider state</legend>
-      <label
-        ><input
-          type="checkbox"
-          bind:checked={form.allowProviderState}
-          disabled={!canManage}
-        />
-        Allow provider-retained state</label
-      >
-      <p class="section-help">
-        Permits stored Responses, previous_response_id chains, and lifecycle
-        access. Provider state may retain user content at the upstream provider.
-      </p>
-    </fieldset>
-    <fieldset class="checks">
-      <legend>Response metadata</legend>
-      <label
-        ><input
-          type="checkbox"
-          bind:checked={form.forbidResponseCache}
-          disabled={!canManage}
-        /> Forbid response caching for this key</label
-      >
-      <label
-        ><input
-          type="checkbox"
-          bind:checked={form.responseMetadata}
-          disabled={!canManage}
-        />
-        Add gateway metadata headers</label
-      >
-      <p class="section-help">
-        Adds X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost
-        to inference responses. The gateway names the serving provider only with
-        this opt-in; an upstream's own error message is relayed as it is.
-      </p>
-    </fieldset>
-    <fieldset class="checks">
-      <legend>End-user identity</legend>
-      <div class="form-field full">
-        <label for="key-end-user-source">Identifier source</label>
-        <select
-          id="key-end-user-source"
-          bind:value={form.endUserSource}
-          disabled={!canManage}
-          aria-describedby="key-end-user-help"
-        >
-          <option value="">Not required</option>
-          <option value="header">X-OLP-End-User header</option>
-          <option value="native">Native JSON field</option>
-        </select>
-        <small id="key-end-user-help">
-          Requires a machine token of up to 128 characters. Native fields are
-          OpenAI safety_identifier (preferred) or user, and Anthropic
-          metadata.user_id. Other surfaces require the header. Reports retain
-          only a project-scoped digest; the header is never sent upstream.
-        </small>
-      </div>
-    </fieldset>
-    <PolicyFields
-      bind:form={form.endUserPolicy}
-      prefix="key-end-user"
-      disabled={!canManage || Boolean(busy) || publicationBlocked}
-    />
-    <div class="form-field full">
-      <label for="key-allowed-cidrs">Allowed client networks</label>
-      <textarea
-        id="key-allowed-cidrs"
-        rows="3"
-        bind:value={form.allowedCIDRs}
-        disabled={!canManage || Boolean(busy)}
-        aria-invalid={!!errors.allowedCIDRs}
-        aria-describedby={errors.allowedCIDRs
-          ? 'key-allowed-cidrs-help key-allowed-cidrs-error'
-          : 'key-allowed-cidrs-help'}
-        placeholder="192.0.2.0/24
-2001:db8::/32"></textarea>
-
-      <small id="key-allowed-cidrs-help"
-        >One IPv4 or IPv6 CIDR range per line. Leave empty to allow any client
-        address. Forwarded addresses are accepted only through configured
-        trusted proxies.</small
-      >
-
-      {#if errors.allowedCIDRs}
-        <p id="key-allowed-cidrs-error" class="field-error" role="alert">
-          {errors.allowedCIDRs}
-        </p>{/if}
-    </div>
-    <div class="form-field full">
-      <label for="key-route-groups">Allowed route groups</label>
-      <input
-        id="key-route-groups"
-        bind:value={form.allowedRouteGroups}
-        disabled={!canManage || Boolean(busy)}
-        aria-describedby="key-route-groups-help"
-      />
-      <small id="key-route-groups-help"
-        >Existing group names in the selected project, separated by commas.
-        Explicit routes and group members are combined. Both lists empty allow
-        every route in the project; an empty or missing referenced group grants
-        nothing.</small
-      >
-    </div>
-    <div class="form-field full">
-      <label for="rotation-interval">Rotation reminder interval (days)</label>
-      <input
-        id="rotation-interval"
-        inputmode="numeric"
-        bind:value={form.rotationIntervalDays}
-        placeholder="No scheduled reminder"
-        disabled={!canManage || Boolean(busy)}
-        aria-describedby="rotation-interval-help"
-      />
-      <small id="rotation-interval-help"
-        >Declare 1–3650 days from creation or the last rotation. Subscribe to
-        key.expiring in Notifications to receive reminders. Secrets rotate only
-        when explicitly requested.</small
-      >
-    </div>
-    <div class="form-field full">
-      <label for="key-limit-template">Limit template</label><input
-        id="key-limit-template"
-        bind:value={form.limitTemplate}
-        maxlength="100"
-        disabled={!canManage || Boolean(busy)}
-      /><small
-        >Optional template in this key’s project. The stricter template or
-        inline limit applies. Manage templates in Project policies.</small
-      >
-    </div>
-    <RouteLimitFields
-      bind:form={form.routeLimits}
-      disabled={!canManage || Boolean(busy) || publicationBlocked}
-    />
     <fieldset class="checks routes">
-      <legend>Allowed route slugs</legend>
+      <legend>Routes</legend>
       <p>
         {services.gatewayAvailable
           ? 'Leave every route unchecked to allow all current and future routes.'
@@ -508,49 +354,207 @@
         {/if}
       {/if}
     </fieldset>
-    <AttributionFields
-      bind:form={form.attributionPolicy}
-      prefix="key-attribution"
-      disabled={!canManage || Boolean(busy)}
-    />
-    <fieldset class="checks">
-      <legend>Allowed attribution keys</legend>
-      <p>
-        Callers may attach short machine-token labels under these keys in the
-        X-OLP-Attribution header. Leave blank to reject every label.
-      </p>
-      <label for="allowed-attribution-keys"
-        >Attribution keys (comma separated)</label
-      >
-      <input
-        id="allowed-attribution-keys"
-        value={form.allowedAttributionKeys.join(', ')}
-        disabled={!canManage}
-        placeholder="team, env"
-        onchange={(event) => {
-          form.allowedAttributionKeys = [
-            ...new Set(
-              event.currentTarget.value
-                .split(',')
-                .map((key) => key.trim())
-                .filter(Boolean)
-            )
-          ];
-          touch();
-        }}
-      />
-    </fieldset>
+    <Advanced label="Advanced access rules" open={Boolean(errors.allowedCIDRs)}>
+      <div class="advanced-fields">
+        <div class="form-field">
+          <label for="key-toolsets">Allowed published toolset UUIDs</label
+          ><input
+            id="key-toolsets"
+            bind:value={form.allowedToolsets}
+            disabled={!canManage}
+          /><small
+            >Comma-separated; an empty list denies all toolsets. Route groups
+            grant no tool access.</small
+          >
+        </div>
+        <div class="form-field">
+          <label for="key-agents">Allowed published agent UUIDs</label><input
+            id="key-agents"
+            bind:value={form.allowedAgents}
+            disabled={!canManage}
+          /><small>Comma-separated; an empty list denies all agents.</small>
+        </div>
+        <fieldset class="checks">
+          <legend>Provider state</legend>
+          <label
+            ><input
+              type="checkbox"
+              bind:checked={form.allowProviderState}
+              disabled={!canManage}
+            />
+            Allow provider-retained state</label
+          >
+          <p class="section-help">
+            Permits stored Responses, previous_response_id chains, and lifecycle
+            access. Provider state may retain user content at the upstream
+            provider.
+          </p>
+        </fieldset>
+        <fieldset class="checks">
+          <legend>Response metadata</legend>
+          <label
+            ><input
+              type="checkbox"
+              bind:checked={form.forbidResponseCache}
+              disabled={!canManage}
+            /> Forbid response caching for this key</label
+          >
+          <label
+            ><input
+              type="checkbox"
+              bind:checked={form.responseMetadata}
+              disabled={!canManage}
+            />
+            Add gateway metadata headers</label
+          >
+          <p class="section-help">
+            Adds X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and
+            X-OLP-Cost to inference responses. The gateway names the serving
+            provider only with this opt-in; an upstream's own error message is
+            relayed as it is.
+          </p>
+        </fieldset>
+        <fieldset class="checks">
+          <legend>End-user identity</legend>
+          <div class="form-field full">
+            <label for="key-end-user-source">Identifier source</label>
+            <select
+              id="key-end-user-source"
+              bind:value={form.endUserSource}
+              disabled={!canManage}
+              aria-describedby="key-end-user-help"
+            >
+              <option value="">Not required</option>
+              <option value="header">X-OLP-End-User header</option>
+              <option value="native">Native JSON field</option>
+            </select>
+            <small id="key-end-user-help">
+              Requires a machine token of up to 128 characters. Native fields
+              are OpenAI safety_identifier (preferred) or user, and Anthropic
+              metadata.user_id. Other surfaces require the header. Reports
+              retain only a project-scoped digest; the header is never sent
+              upstream.
+            </small>
+          </div>
+        </fieldset>
+        <PolicyFields
+          bind:form={form.endUserPolicy}
+          prefix="key-end-user"
+          disabled={!canManage || Boolean(busy) || publicationBlocked}
+        />
+        <div class="form-field full">
+          <label for="key-allowed-cidrs">Allowed client networks</label>
+          <textarea
+            id="key-allowed-cidrs"
+            rows="3"
+            bind:value={form.allowedCIDRs}
+            disabled={!canManage || Boolean(busy)}
+            aria-invalid={!!errors.allowedCIDRs}
+            aria-describedby={errors.allowedCIDRs
+              ? 'key-allowed-cidrs-help key-allowed-cidrs-error'
+              : 'key-allowed-cidrs-help'}
+            placeholder="192.0.2.0/24
+    2001:db8::/32"></textarea>
+
+          <small id="key-allowed-cidrs-help"
+            >One IPv4 or IPv6 CIDR range per line. Leave empty to allow any
+            client address. Forwarded addresses are accepted only through
+            configured trusted proxies.</small
+          >
+
+          {#if errors.allowedCIDRs}
+            <p id="key-allowed-cidrs-error" class="field-error" role="alert">
+              {errors.allowedCIDRs}
+            </p>{/if}
+        </div>
+        <div class="form-field full">
+          <label for="key-route-groups">Allowed route groups</label>
+          <input
+            id="key-route-groups"
+            bind:value={form.allowedRouteGroups}
+            disabled={!canManage || Boolean(busy)}
+            aria-describedby="key-route-groups-help"
+          />
+          <small id="key-route-groups-help"
+            >Existing group names in the selected project, separated by commas.
+            Explicit routes and group members are combined. Both lists empty
+            allow every route in the project; an empty or missing referenced
+            group grants nothing.</small
+          >
+        </div>
+        <div class="form-field full">
+          <label for="rotation-interval"
+            >Rotation reminder interval (days)</label
+          >
+          <input
+            id="rotation-interval"
+            inputmode="numeric"
+            bind:value={form.rotationIntervalDays}
+            placeholder="No scheduled reminder"
+            disabled={!canManage || Boolean(busy)}
+            aria-describedby="rotation-interval-help"
+          />
+          <small id="rotation-interval-help"
+            >Declare 1–3650 days from creation or the last rotation. Subscribe
+            to key.expiring in Notifications to receive reminders. Secrets
+            rotate only when explicitly requested.</small
+          >
+        </div>
+        <div class="form-field full">
+          <label for="key-limit-template">Limit template</label><input
+            id="key-limit-template"
+            bind:value={form.limitTemplate}
+            maxlength="100"
+            disabled={!canManage || Boolean(busy)}
+          /><small
+            >Optional template in this key’s project. The stricter template or
+            inline limit applies. Manage templates in Project policies.</small
+          >
+        </div>
+        <RouteLimitFields
+          bind:form={form.routeLimits}
+          disabled={!canManage || Boolean(busy) || publicationBlocked}
+        />
+        <AttributionFields
+          bind:form={form.attributionPolicy}
+          prefix="key-attribution"
+          disabled={!canManage || Boolean(busy)}
+        />
+        <fieldset class="checks">
+          <legend>Allowed attribution keys</legend>
+          <p>
+            Callers may attach short machine-token labels under these keys in
+            the X-OLP-Attribution header. Leave blank to reject every label.
+          </p>
+          <label for="allowed-attribution-keys"
+            >Attribution keys (comma separated)</label
+          >
+          <input
+            id="allowed-attribution-keys"
+            value={form.allowedAttributionKeys.join(', ')}
+            disabled={!canManage}
+            placeholder="team, env"
+            onchange={(event) => {
+              form.allowedAttributionKeys = [
+                ...new Set(
+                  event.currentTarget.value
+                    .split(',')
+                    .map((key) => key.trim())
+                    .filter(Boolean)
+                )
+              ];
+              touch();
+            }}
+          />
+        </fieldset>
+      </div>
+    </Advanced>
   </section>
   <section aria-labelledby="limits-heading">
-    <p class="eyebrow">
-      {services.limitsEnforced ? 'Distributed limits' : 'Limit policy'}
-    </p>
-    <h2 id="limits-heading">
-      {services.limitsEnforced ? 'Hard runtime limits' : 'Saved limit policy'}
-    </h2>
+    <h2 id="limits-heading">Rate limits</h2>
     <p class="section-help">
       {services.limitsEnforced
-        ? "These limits follow the installation's Valkey outage policy. Leave blank for no limit."
+        ? 'Leave a field blank for no limit.'
         : 'These values are saved for future enforcement. They do not restrict requests yet. Leave blank for no limit.'}
     </p>
     <div class="form-grid limits">
@@ -605,71 +609,78 @@
             id="concurrency-error">{errors.maxConcurrency}</small
           >{/if}
       </div>
-      <div class="form-field">
-        <label for="priority">Admission priority</label><select
-          id="priority"
-          bind:value={form.priority}
-          disabled={!canManage}
-          aria-invalid={errors.priority ? 'true' : undefined}
-          aria-describedby={errors.priority
-            ? 'priority-error'
-            : 'priority-help'}
-        >
-          <option value="">Normal</option>
-
-          {#each admissionPriorities as priority (priority)}
-            <option value={priority}>{priority}</option>
-          {/each}
-        </select>
-
-        <small id="priority-help" class="section-help"
-          >The class a saturated gateway queues this key's requests in.</small
-        >
-
-        {#if errors.priority}
-          <small class="field-error" id="priority-error"
-            >{errors.priority}</small
-          >
-        {/if}
-      </div>
-      <div class="form-field">
-        <label for="max-priority">Highest requestable priority</label><select
-          id="max-priority"
-          bind:value={form.maxPriority}
-          disabled={!canManage}
-          aria-describedby="max-priority-help"
-        >
-          <option value="">Its default</option>
-
-          {#each admissionPriorities as priority (priority)}
-            <option value={priority}>{priority}</option>
-          {/each}
-        </select>
-
-        <small id="max-priority-help" class="section-help"
-          >Callers may ask for up to this class in the X-OLP-Routing header.</small
-        >
-      </div>
     </div>
-    <RunLimits
-      prefix="key-run"
-      value={form.runLimits}
-      disabled={!canManage}
-      onChange={(value) => (form.runLimits = value)}
-    />
+    <Advanced
+      label="Priority and agent run limits"
+      open={Boolean(errors.priority)}
+    >
+      <div class="advanced-fields">
+        <div class="form-grid limits">
+          <div class="form-field">
+            <label for="priority">Admission priority</label><select
+              id="priority"
+              bind:value={form.priority}
+              disabled={!canManage}
+              aria-invalid={errors.priority ? 'true' : undefined}
+              aria-describedby={errors.priority
+                ? 'priority-error'
+                : 'priority-help'}
+            >
+              <option value="">Normal</option>
+
+              {#each admissionPriorities as priority (priority)}
+                <option value={priority}>{priority}</option>
+              {/each}
+            </select>
+
+            <small id="priority-help" class="section-help"
+              >The class a saturated gateway queues this key's requests in.</small
+            >
+
+            {#if errors.priority}
+              <small class="field-error" id="priority-error"
+                >{errors.priority}</small
+              >
+            {/if}
+          </div>
+          <div class="form-field">
+            <label for="max-priority">Highest requestable priority</label
+            ><select
+              id="max-priority"
+              bind:value={form.maxPriority}
+              disabled={!canManage}
+              aria-describedby="max-priority-help"
+            >
+              <option value="">Its default</option>
+
+              {#each admissionPriorities as priority (priority)}
+                <option value={priority}>{priority}</option>
+              {/each}
+            </select>
+
+            <small id="max-priority-help" class="section-help"
+              >Callers may ask for up to this class in the X-OLP-Routing header.</small
+            >
+          </div>
+        </div>
+        <RunLimits
+          prefix="key-run"
+          value={form.runLimits}
+          disabled={!canManage}
+          onChange={(value) => (form.runLimits = value)}
+        />
+      </div>
+    </Advanced>
   </section>
   <section aria-labelledby="budget-heading">
-    <p class="eyebrow">Spend controls</p>
-    <h2 id="budget-heading">Cost budgets</h2>
+    <h2 id="budget-heading">Spending limits</h2>
     <p class="section-help">
-      {#if services.limitsEnforced}Amounts use the installation pricing
-        currency. Daily and monthly windows use the installation budget
-        timezone. Budgeted requests are refused when Valkey is unavailable. A
-        request must fit beside the spend so far and the estimated cost of
-        requests still running; unpriced attempts accrue no cost and some
-        operations are not estimated, so these are not invoice caps. Leave blank
-        for no cost budget.{:else}Save daily and monthly budget amounts for
-        future enforcement. Spending is not measured or restricted yet.{/if}
+      {#if services.limitsEnforced}Amounts use the installation currency and
+        time zone. Requests are refused once the spend so far plus requests
+        still running would pass the limit. These are estimates, so treat them
+        as guard rails rather than invoice caps.{:else}Save daily and monthly
+        budget amounts for future enforcement. Spending is not measured or
+        restricted yet.{/if}
     </p>
     <div class="form-grid budget-inputs">
       <div class="form-field">
@@ -845,6 +856,11 @@
 </form>
 
 <style>
+  .advanced-fields {
+    display: grid;
+    gap: 1.25rem;
+    padding-top: 1rem;
+  }
   h2 {
     margin: 0 0 0.75rem;
     font-size: 1rem;

@@ -25,7 +25,7 @@
   </Callout>
 {/if}
 
-<div class="card notifications-panel">
+<div class="notifications-panel">
   {#if view === 'destinations'}
     <NotificationDestinations
       {canManage}

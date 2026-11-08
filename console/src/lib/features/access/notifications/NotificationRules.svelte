@@ -1,4 +1,5 @@
 <script lang="ts">
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
@@ -277,7 +278,9 @@
 {#if error && !creating}<Callout tone="danger">{error}</Callout>{/if}
 {#if notice}<p class="section-help" role="status">{notice}</p>{/if}
 {#if canManage}<div class="toolbar">
-    <span></span>
+    <p class="section-help">
+      When a budget is close to its limit, a key expires, or deliveries fail.
+    </p>
     <div class="page-actions">
       <button
         class="button button-primary"
@@ -456,7 +459,9 @@
       >Retry</button
     ></span
   >
-{:else if !(rules.data ?? []).length}<p class="section-help">No rules yet.</p>
+{:else if !(rules.data ?? []).length}<EmptyState title="No alert rules yet"
+    >Rules decide which events send an alert, and to which destination.</EmptyState
+  >
 {:else}
   <div class="table-scroll">
     <table class="data-table">

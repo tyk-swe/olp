@@ -96,7 +96,7 @@ more detail.
 
 ## Create an API key
 
-In **Access**, create an API key in the route's project. Grant the `inference`
+In **API keys**, choose **New API key** and put it in the route's project. Grant the `inference`
 scope and permission for `assistant`, or for a route group that contains it. Add
 `models_read` only if the client needs model discovery through the gateway.
 

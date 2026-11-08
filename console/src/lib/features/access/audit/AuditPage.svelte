@@ -1,4 +1,7 @@
 <script lang="ts">
+  import Advanced from '#lib/components/Advanced.svelte';
+  import Callout from '#lib/components/Callout.svelte';
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { auditKeys } from '#lib/features/access/audit/auditKeys.js';
 
@@ -46,6 +49,12 @@
     };
   });
 
+  const hasMoreFilters = $derived(
+    Boolean(
+      listState.resourceType || listState.resourceId || listState.actorUserId
+    )
+  );
+
   function applyFilters(event: SubmitEvent) {
     event.preventDefault();
     validation = auditProblem(listState, false, listState.applied);
@@ -86,37 +95,17 @@
     /></label
   >
   <label
-    >Resource type <input
-      bind:value={listState.resourceType}
-      placeholder="All resource types"
-    /></label
-  >
-  <label
-    >Resource ID <input
-      bind:value={listState.resourceId}
-      class="mono"
-      placeholder="All resources"
-    /></label
-  >
-  <label
-    >Actor user ID <input
-      bind:value={listState.actorUserId}
-      class="mono"
-      placeholder="All actors"
-    /></label
-  >
-  <label
     >Outcome <select bind:value={listState.outcome}
       ><option value="">All outcomes</option
       >{#if listState.outcome && !['success', 'failure'].includes(listState.outcome)}<option
           value={listState.outcome}>{listState.outcome}</option
-        >{/if}<option value="success">success</option><option value="failure"
-        >failure</option
+        >{/if}<option value="success">Succeeded</option><option value="failure"
+        >Failed</option
       ></select
     ></label
   >
   <label
-    >Occurred after <input
+    >From <input
       bind:value={listState.occurredAfter}
       type={timeInputType(listState.occurredAfter)}
       aria-invalid={rangeError ? 'true' : undefined}
@@ -124,22 +113,47 @@
     /></label
   >
   <label
-    >Occurred before <input
+    >To <input
       bind:value={listState.occurredBefore}
       type={timeInputType(listState.occurredBefore)}
       aria-invalid={rangeError ? 'true' : undefined}
       aria-describedby={rangeError ? 'audit-range-error' : undefined}
     /></label
   >
+  <div class="more-filters">
+    <Advanced label="More filters" open={hasMoreFilters}>
+      <div class="more-grid">
+        <label
+          >Resource type <input
+            bind:value={listState.resourceType}
+            placeholder="All resource types"
+          /></label
+        >
+        <label
+          >Resource ID <input
+            bind:value={listState.resourceId}
+            class="mono"
+            placeholder="All resources"
+          /></label
+        >
+        <label
+          >Actor user ID <input
+            bind:value={listState.actorUserId}
+            class="mono"
+            placeholder="All actors"
+          /></label
+        >
+      </div>
+    </Advanced>
+  </div>
   {#if filterError}<p class="range-error" id="audit-range-error" role="alert">
       {filterError}
     </p>{/if}
   <div class="filter-actions">
-    <button class="button button-primary" type="submit">Apply filters</button
-    ><button
+    <button class="button button-primary" type="submit">Apply</button><button
       class="button button-secondary"
       type="button"
-      onclick={clearFilters}>Clear</button
+      onclick={clearFilters}>Reset</button
     >
   </div>
 </form>
@@ -148,22 +162,18 @@
   {#if audit.isPending}
     <div class="loading-state" role="status">Loading audit events…</div>
   {:else if audit.isError}
-    <div class="inline-problem" role="alert">
+    <Callout tone="danger">
       {errorMessage(audit.error, 'Audit events are unavailable.')}
-      <button class="text-button" onclick={() => audit.refetch()}
-        >Try again</button
-      >
-    </div>
+      {#snippet actions()}<button
+          class="text-button"
+          type="button"
+          onclick={() => audit.refetch()}>Try again</button
+        >{/snippet}
+    </Callout>
   {:else if audit.data?.items.length === 0 && listState.history.length === 0}
-    <div class="card empty-state">
-      <div>
-        <strong>No audit events</strong>
-        <p>
-          Security and configuration changes matching these filters will appear
-          here.
-        </p>
-      </div>
-    </div>
+    <EmptyState title="No audit events">
+      Security and configuration changes matching these filters show up here.
+    </EmptyState>
   {:else}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the table.) -->
     <div
@@ -217,11 +227,19 @@
 <style>
   .filters {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
     align-items: end;
     gap: 1rem;
     margin: 1.25rem 0;
-    padding: 1.5rem;
+    padding: 1.25rem;
+  }
+  .more-filters {
+    grid-column: 1 / -1;
+  }
+  .more-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    gap: 1rem;
   }
   .filters label {
     display: grid;
@@ -277,15 +295,5 @@
   td small {
     margin-top: 0.15rem;
     color: var(--foreground-muted);
-  }
-  @media (max-width: 72rem) {
-    .filters {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
-  @media (max-width: 40rem) {
-    .filters {
-      grid-template-columns: 1fr;
-    }
   }
 </style>

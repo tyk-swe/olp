@@ -65,7 +65,7 @@ promotion. Capabilities reports `management_network_restricted`.
 ## Route groups
 
 Projects replace their group map through
-`GET/PUT /api/v1/projects/{project_id}/route-groups` or Project policies.
+`GET/PUT /api/v1/projects/{project_id}/route-groups` or the project's page under Projects in the console.
 Writes require `keys`, project-manager authority and the project ETag:
 
 ```json
@@ -285,7 +285,7 @@ role/scope and up to 100 project manager/viewer grants. Highest role/global gran
 and unioned project memberships apply; removing a group removes only inherited
 grants. Reconciliation revokes affected sessions and protects the last usable owner.
 
-The SCIM provisioning page under Access and `/api/v1/scim/groups/{scim_id}/mapping` edit policy under ETag.
+The Directory sync tab under Identity in the console and `/api/v1/scim/groups/{scim_id}/mapping` edit policy under ETag.
 Directory PUT omission preserves mappings; an explicit extension replaces them.
 Portable `scim_group_mappings` use names and destination project IDs. Missing
 groups are created empty; membership/IDs stay local. Omission preserves policy;

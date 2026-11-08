@@ -51,6 +51,20 @@ repository-wide commands.
 The application is client-only: use the static adapter and avoid server routes,
 server hooks or `lib/server/`. See the [architecture map](../docs/develop/architecture.md).
 
+## Page building blocks
+
+Pages are built from the shared components in `src/lib/components/` rather than
+hand-rolled markup. A standalone page starts with `PageHeader`. A page with
+several views is a route folder whose `+layout.svelte` renders
+`SectionLayout`, which reads the title, description and tabs from
+`src/lib/shell/navigation.ts`, so each tab is its own URL. Lists open create and
+edit forms in a `Dialog` with `placement="side"`. Errors and empty
+states use `Callout` and `EmptyState`. Rarely used fields go in
+`Advanced`. Destructive or hard-to-undo actions await `confirmAction` from
+`confirm.ts`, and successful saves call `notify` from `toasts.svelte.ts` instead
+of leaving a notice on the page. A new page also needs an entry in
+`navigation.ts` so it appears in the sidebar, breadcrumbs and command palette.
+
 ## Design system
 
 The console is dark-only: black canvas, carbon surfaces and electric blue as the

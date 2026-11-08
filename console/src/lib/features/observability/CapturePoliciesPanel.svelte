@@ -1,4 +1,5 @@
 <script lang="ts">
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
@@ -337,7 +338,10 @@
 {/if}
 
 {#if canManageProjects || canManageInstallation}<div class="toolbar">
-    <span></span>
+    <p class="section-help">
+      Choose which prompts and responses are kept, for which projects, and where
+      they go.
+    </p>
     <div class="page-actions">
       <button
         class="button button-primary"
@@ -553,9 +557,10 @@
       >Retry</button
     ></span
   >
-{:else if !(policies.data ?? []).length}<p class="section-help">
-    No capture policies yet.
-  </p>
+{:else if !(policies.data ?? []).length}<EmptyState
+    title="No capture policies yet"
+    >Prompts and responses are not stored unless a policy turns capture on.</EmptyState
+  >
 {:else}
   <div class="table-scroll">
     <table class="data-table">

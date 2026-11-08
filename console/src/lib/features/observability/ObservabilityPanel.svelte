@@ -32,13 +32,7 @@
   }
 </script>
 
-<svelte:head
-  ><title
-    >{view === 'telemetry' ? 'Telemetry export' : 'Payload capture'} · OpenLLMProxy</title
-  ></svelte:head
->
-
-<div class="card observability-panel">
+<div class="observability-panel">
   {#if view === 'telemetry'}
     <ExportSinksPanel
       {canManageInstallation}

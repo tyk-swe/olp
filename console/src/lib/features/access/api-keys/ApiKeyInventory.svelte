@@ -178,7 +178,7 @@
 >
   {#snippet actions()}
     {#if canManage}<a class="button button-primary" href={resolve('keys/new')}
-        >Create key <NavIcon name="arrow" /></a
+        >New API key <NavIcon name="arrow" /></a
       >
     {/if}
   {/snippet}

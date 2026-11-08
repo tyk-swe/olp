@@ -8,10 +8,37 @@ grants authority that the API would refuse.
 [Getting Started](../getting-started.md) covers first-owner setup and the first
 provider workflow.
 
+## Layout
+
+A sidebar on the left groups every page into five sections. Build holds
+Providers, Models, Routes, Guardrails, Code mode and Plugins. Agents holds
+Agents and tools, MCP servers, Activity, Investigations and My connections.
+Access holds API keys, Projects, Organizations, Members and Identity. Spend
+holds Usage, Budgets and Pricing. Observe holds Requests, Media jobs, Provider
+resources, Notifications, Exports, Health and the Audit log. Overview and
+Playground sit above the sections, and Settings and the account menu sit at the
+bottom. On narrow screens the sidebar opens from the menu button in the top
+bar.
+
+Pages with several views show them as tabs, and every tab has its own address,
+so a link or a browser refresh returns to the same view. Breadcrumbs above the
+page title show where the page sits. The sidebar only lists pages the signed-in
+member's role can open, and tabs follow the same rule.
+
+Press Ctrl+K, or Cmd+K on macOS, to open the command palette. It searches every
+page and tab the member can open and offers create actions such as a new API
+key or a new route.
+
+Creating or editing a resource from a list opens a side panel over the list,
+so the list stays in place. Long forms keep their common fields visible and
+place specialist options under an Advanced or More options toggle. Actions that
+are hard to undo, such as changing a member's role, revoking a key or deleting a
+project, ask for confirmation in a dialog that names the consequence before
+anything is sent.
+
 ## Notifications
 
-The Notifications page under Access manages destinations, event rules and
-delivery status. Channel-specific secrets are write-only and are entered again
+Notifications under Observe has Destinations, Rules and Delivery log tabs. Channel-specific secrets are write-only and are entered again
 only when they need to be replaced. Viewers see read-only rows. Project managers
 see events only for projects they are allowed to manage. Destination and
 delivery contracts are defined in
@@ -19,8 +46,8 @@ delivery contracts are defined in
 
 ## Observability
 
-The Observability page under Settings manages export sinks and owner-enabled
-payload capture. A sink's transport, stream set, format and project scope are
+Exports under Observe manages telemetry sinks on the Telemetry tab and
+owner-enabled payload capture on the Prompt capture tab. A sink's transport, stream set, format and project scope are
 fixed when it is created. Each row shows its settings, delivery counters, safe
 error information and lag. FOCUS sinks expand into revisioned datasets. Formats,
 credentials, filters and delivery behavior are covered in
@@ -44,14 +71,14 @@ filtered history. Summary and breakdown views show consumer charge beside
 provider cost and include the month's count of attempts that could not be
 charged.
 
-The cost calculator either bounds a request against a published route or prices
+The Cost calculator tab under Usage either bounds a request against a published route or prices
 an existing usage record. Route mode simulates each target and lists its minimum
 and maximum bounds or exclusion reason. Usage mode prices an attempt's token,
 media and tool usage with the provider price, discount, commitment and
 applicable rate card. It returns the recorded components and provenance without
 writing or retaining a new accounting record.
 
-The reconciliation panel compares attributed spend with imported provider
+The Reconciliation tab under Usage compares attributed spend with imported provider
 invoices by UTC day. Its visible range is clamped to 93 days and shows
 attributed cost, invoiced cost, capture rate, unpriced share, provisional marks
 and any unavailable-data reason. It also gives covered-day totals for each
@@ -63,7 +90,7 @@ roles can inspect import status but cannot change it. See
 
 ## Installation identity
 
-The Installation identity page under Settings edits the local display name and
+The General tab under Settings edits the installation's display name and
 logo. Changes require installation-wide settings authority and the observed
 ETag. A logo must be a validated PNG or JPEG no larger than 64 KiB and 512 by
 512 pixels. Branding does not change API endpoints or portable configuration.
@@ -72,7 +99,7 @@ concurrency rules.
 
 ## Independent installations
 
-The installation label in the header opens a bookmark menu for other OLP
+The installation name at the top of the sidebar opens a bookmark menu for other OLP
 consoles. A bookmark holds only a display name and origin. HTTPS is required
 outside loopback development, at most 20 bookmarks are retained, and they live
 in the current browser's local storage. OLP makes no request to a bookmarked
@@ -93,8 +120,9 @@ PostgreSQL primary are a different topology and are covered in
 
 ## Bulk member editing
 
-The Members page under Access can apply role and active-state edits across the
-current page. Each member updates sequentially under its observed ETag, and the
+The People tab under Members can apply role and active-state edits across the
+current page. Changing one member's role or scope opens a dialog that explains
+each role, and nothing is saved until the change is confirmed. Each member updates sequentially under its observed ETag, and the
 acting member is excluded. Deactivation requires confirmation and revokes
 browser sessions without revoking API keys. Successful rows remain committed if
 another row fails. Failed rows stay selected so the operator can review fresh
@@ -116,7 +144,7 @@ show the retained console layouts.
 
 ## Model catalog
 
-The Model catalog page and `GET /api/v1/catalog` describe the published route names
+The Published catalog tab under Models and `GET /api/v1/catalog` describe the published route names
 available to the caller. Installation members and read-scoped management tokens
 see their permitted projects. Consumer API keys need `models_read` and see only
 routes admitted by their current key authority. Revoked keys and authority older
@@ -137,12 +165,12 @@ native interfaces. Streaming-only and uncertified choices do not receive a unary
 example. SDK code regions support keyboard focus and scrolling.
 
 Provider names, endpoints and upstream model names stay private by default.
-Under Catalog disclosure settings, an operator can select a published route and
+Under Catalog disclosure on that tab, an operator can select a published route and
 explicitly enable upstream model names. That choice affects both authenticated
 and public catalogs, while provider identities and credentials remain private.
 
 Installation owners can enable an anonymous catalog from the Public model
-catalog controls under Project policies. The public page is
+catalog controls on a project's page under Projects. The public page is
 `/catalog/public/{project_id}`, and `GET /api/v1/catalog/public/{project_id}`
 returns only that project's published routes. Publishing prices is a separate
 choice. Anonymous responses include `prices_visible` so clients can distinguish
@@ -160,19 +188,18 @@ choice.
 The browser-qualified [catalog example](../assets/model-catalog.png) shows the
 resulting authenticated catalog.
 
-
 ## Complete management workflows
 
 MCP server, route template and signed export editors preserve drafts across background refreshes. Saves use the version originally loaded, and Reload latest explicitly discards edits to load a newer version.
 
-MCP servers can be registered, certified, edited and retired under Agents, MCP servers. Register a server before selecting its certified tools in Agent publications. Blank pricing means unpriced, while zero means free.
+MCP servers can be registered, certified, edited and retired under Agents, MCP servers. Register a server before selecting its certified tools under Agents and tools. Blank pricing means unpriced, while zero means free.
 
 Tool call details include evidence-backed resolution for unknown outcomes. Enter the evidence digest and, for settlement, the observed amounts. Successful resolution refreshes the call and provisional exposure. A2A task detail can fetch current remote state and request cancellation separately from the locally recorded task state.
 
 Guardrails includes credential creation and metadata listing. To replace a credential, create a new named credential from the definition editor, save and activate the new definition revision, then save and activate the policy revision. Replace each attachment explicitly to adopt that revision. Attachment replacement is atomic. Existing references remain unchanged, and credentials referenced by retained revisions cannot be deleted. Definitions and policies can be retired from their editors.
 
-Routes links to template management, including explicit Apply and recorded placement outcomes. New templates leave automatic publishing disabled. Route operation and simulation choices include registered unary dialects alongside existing generation, streaming and resource operations.
+The Templates tab under Routes manages route templates, including explicit Apply and recorded placement outcomes. New templates leave automatic publishing disabled. Route operation and simulation choices include registered unary dialects alongside existing generation, streaming and resource operations.
 
-Usage includes Routing reports for selector savings and shadow comparisons. These reports filter by time range, route and project and distinguish unavailable measurements from zero values. Session and attribution filters are unavailable because the report queries do not apply them. Signed fact exports under Operations manages the scoped HTTPS export system, including credentials and delivery counters. The observability sinks under Settings remain a separate export system.
+The Routing savings tab under Usage reports selector savings and shadow comparisons. These reports filter by time range, route and project and distinguish unavailable measurements from zero values. Session and attribution filters are unavailable because the report queries do not apply them. The Signed usage records tab under Exports manages the scoped HTTPS export system, including credentials and delivery counters. Telemetry sinks on the Telemetry tab are a separate export system.
 
 Provider drafts, credential slots, projects, budget groups and notification resources expose cleanup actions where authorized. Dependency and history checks can reject cleanup, in which case the resource remains available.

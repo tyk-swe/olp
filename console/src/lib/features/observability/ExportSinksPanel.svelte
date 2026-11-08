@@ -1,4 +1,5 @@
 <script lang="ts">
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
@@ -309,7 +310,10 @@
 {#if error && !creating}<Callout tone="danger">{error}</Callout>{/if}
 {#if notice}<p class="section-help" role="status">{notice}</p>{/if}
 {#if canManageInstallation || canManageProjects}<div class="toolbar">
-    <span></span>
+    <p class="section-help">
+      Send logs, traces and metrics to an OpenTelemetry collector or another
+      endpoint.
+    </p>
     <div class="page-actions">
       <button
         class="button button-primary"
@@ -594,9 +598,9 @@
       >Retry</button
     ></span
   >
-{:else if !(sinks.data ?? []).length}<p class="section-help">
-    No export sinks yet.
-  </p>
+{:else if !(sinks.data ?? []).length}<EmptyState title="No telemetry sinks yet"
+    >Add a sink to send logs and traces to your own collector.</EmptyState
+  >
 {:else}
   <div class="table-scroll">
     <table class="data-table">

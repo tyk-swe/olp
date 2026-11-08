@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Advanced from '#lib/components/Advanced.svelte';
   import { parseJsonObject } from '#lib/editing/json.js';
   import { parseManualModelNames } from '#lib/features/providers/providerEditor.js';
   let {
@@ -65,6 +66,9 @@
         : undefined
     );
   }
+  const customised = Object.keys(read()).some(
+    (key) => key !== 'strategy' && key !== 'allow_fallbacks'
+  );
   const listFields = $derived([
     {
       key: 'only',
@@ -90,24 +94,7 @@
   ]);
 </script>
 
-<fieldset {disabled} class="preferences">
-  <legend
-    >{constraintsOnly ? 'Required constraints' : 'Routing preferences'}</legend
-  >
-  {#if !constraintsOnly}
-    <label for="{id}-strategy">Strategy</label><select
-      id="{id}-strategy"
-      value={String(current.strategy ?? '')}
-      onchange={(e) => set('strategy', e.currentTarget.value || undefined)}
-      ><option value="">Use configured default</option><option value="weighted"
-        >Weighted</option
-      ><option value="price">Price</option><option value="latency"
-        >Latency</option
-      ><option value="throughput">Throughput</option><option value="capacity"
-        >Capacity headroom</option
-      ></select
-    >
-  {/if}
+{#snippet more()}
   {#each listFields as field (field.key)}
     <label for="{id}-{field.key}">{field.label}</label><input
       id="{id}-{field.key}"
@@ -116,24 +103,6 @@
       oninput={(e) => list(field.key, e.currentTarget.value)}
     />
   {/each}
-  {#if !constraintsOnly}
-    <label for="{id}-fallbacks">Fallback attempts</label><select
-      id="{id}-fallbacks"
-      value={current.allow_fallbacks === true
-        ? 'true'
-        : current.allow_fallbacks === false
-          ? 'false'
-          : ''}
-      onchange={(e) =>
-        set(
-          'allow_fallbacks',
-          e.currentTarget.value ? e.currentTarget.value === 'true' : undefined
-        )}
-      ><option value="">Use configured default</option><option value="true"
-        >Allow fallback attempts</option
-      ><option value="false">Disable fallback</option></select
-    >
-  {/if}
   {#each [{ key: 'deny_data_collection', label: 'Require no data collection' }, { key: 'require_zero_data_retention', label: 'Require zero data retention' }, { key: 'require_parameters', label: 'Require declared parameter support' }] as field (field.key)}
     <label class="check"
       ><input
@@ -203,7 +172,7 @@
     </div>
   {/if}
   <details>
-    <summary>Advanced preferences</summary><label for="{id}-json"
+    <summary>Edit as JSON</summary><label for="{id}-json"
       >Preferences JSON</label
     ><textarea
       id="{id}-json"
@@ -216,6 +185,51 @@
       fields the form does not render.
     </p>
   </details>
+{/snippet}
+
+<fieldset {disabled} class="preferences">
+  <legend
+    >{constraintsOnly ? 'Required constraints' : 'Routing preferences'}</legend
+  >
+  {#if !constraintsOnly}
+    <label for="{id}-strategy">Strategy</label><select
+      id="{id}-strategy"
+      value={String(current.strategy ?? '')}
+      onchange={(e) => set('strategy', e.currentTarget.value || undefined)}
+      ><option value="">Use configured default</option><option value="weighted"
+        >Weighted</option
+      ><option value="price">Price</option><option value="latency"
+        >Latency</option
+      ><option value="throughput">Throughput</option><option value="capacity"
+        >Capacity headroom</option
+      ></select
+    >
+  {/if}
+  {#if !constraintsOnly}
+    <label for="{id}-fallbacks">Fallback attempts</label><select
+      id="{id}-fallbacks"
+      value={current.allow_fallbacks === true
+        ? 'true'
+        : current.allow_fallbacks === false
+          ? 'false'
+          : ''}
+      onchange={(e) =>
+        set(
+          'allow_fallbacks',
+          e.currentTarget.value ? e.currentTarget.value === 'true' : undefined
+        )}
+      ><option value="">Use configured default</option><option value="true"
+        >Allow fallback attempts</option
+      ><option value="false">Disable fallback</option></select
+    >
+  {/if}
+  {#if constraintsOnly}
+    {@render more()}
+  {:else}
+    <Advanced label="More routing options" open={customised}>
+      {@render more()}
+    </Advanced>
+  {/if}
 </fieldset>
 
 <style>

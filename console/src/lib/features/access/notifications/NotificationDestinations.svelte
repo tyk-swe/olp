@@ -1,4 +1,5 @@
 <script lang="ts">
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
@@ -189,7 +190,9 @@
 {#if error && !creating}<Callout tone="danger">{error}</Callout>{/if}
 {#if notice}<p class="section-help" role="status">{notice}</p>{/if}
 {#if canManage}<div class="toolbar">
-    <span></span>
+    <p class="section-help">
+      Where alerts are sent, such as a webhook or an email address.
+    </p>
     <div class="page-actions">
       <button
         class="button button-primary"
@@ -371,9 +374,10 @@
       onclick={() => destinations.refetch()}>Retry</button
     ></span
   >
-{:else if !(destinations.data ?? []).length}<p class="section-help">
-    No destinations yet.
-  </p>
+{:else if !(destinations.data ?? []).length}<EmptyState
+    title="No destinations yet"
+    >Add a webhook or email destination, then point rules at it.</EmptyState
+  >
 {:else}
   <div class="table-scroll">
     <table class="data-table">
