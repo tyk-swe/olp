@@ -4,14 +4,14 @@
   import ProviderProfileEditor from './ProviderProfileEditor.svelte';
   import ProviderConnectionFields from './ProviderConnectionFields.svelte';
   import PluginProfileField from './PluginProfileField.svelte';
-  import ProjectScopeField from '$lib/features/access/projects/ProjectScopeField.svelte';
-  import NavIcon from '$lib/shell/NavIcon.svelte';
-  import { stateLabel } from '$lib/format';
-  import type { FieldIssue } from '$lib/management/http';
-  import { listProviderVendors } from '$lib/features/providers/providers';
-  import { listProviderProfiles } from '$lib/features/providers/providerProfiles';
-  import { providerKeys } from '$lib/features/providers/providerKeys';
-  import type { ProviderKindCapability } from '$lib/features/providers/models';
+  import ProjectScopeField from '#lib/features/access/projects/ProjectScopeField.svelte';
+  import NavIcon from '#lib/shell/NavIcon.svelte';
+  import { stateLabel } from '#lib/format.js';
+  import type { FieldIssue } from '#lib/management/http.js';
+  import { listProviderVendors } from '#lib/features/providers/providers.js';
+  import { listProviderProfiles } from '#lib/features/providers/providerProfiles.js';
+  import { providerKeys } from '#lib/features/providers/providerKeys.js';
+  import type { ProviderKindCapability } from '#lib/features/providers/models.js';
   import {
     emptyProviderOptions,
     probeModelPrompt,
@@ -21,7 +21,7 @@
     selectProviderPreset,
     setProviderDraftKind,
     type ProviderDraft
-  } from '$lib/features/providers/providerEditor';
+  } from '#lib/features/providers/providerEditor.js';
 
   let {
     draft = $bindable(),

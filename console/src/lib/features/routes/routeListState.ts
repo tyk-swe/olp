@@ -2,7 +2,7 @@ import {
   emptyCursorHistory,
   listState,
   type CursorHistory
-} from '$lib/listing/pagination';
+} from '#lib/listing/pagination.js';
 
 export type RouteListState = {
   draft: CursorHistory;

@@ -1,6 +1,6 @@
-import type { components } from '$lib/management/schema';
-import { apiClient } from '$lib/management/client';
-import { unwrap } from '$lib/management/http';
+import type { components } from '#lib/management/schema.js';
+import { apiClient } from '#lib/management/client.js';
+import { unwrap } from '#lib/management/http.js';
 
 export type Setting = components['schemas']['SettingResponse'];
 

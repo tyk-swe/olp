@@ -1,12 +1,12 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
-  import type { Provider } from '$lib/features/providers/providers';
-  import NavIcon from '$lib/shell/NavIcon.svelte';
+  import type { Provider } from '#lib/features/providers/providers.js';
+  import NavIcon from '#lib/shell/NavIcon.svelte';
   import {
     activationReady,
     capabilitiesCertified,
     probeReady
-  } from '$lib/features/providers/providerEditor';
+  } from '#lib/features/providers/providerEditor.js';
 
   let {
     provider,

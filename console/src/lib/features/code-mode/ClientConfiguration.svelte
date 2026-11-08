@@ -1,8 +1,8 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
   import { untrack } from 'svelte';
-  import { copyText } from '$lib/clipboard';
-  import SegmentedRadioGroup from '$lib/shell/SegmentedRadioGroup.svelte';
+  import { copyText } from '#lib/clipboard.js';
+  import SegmentedRadioGroup from '#lib/shell/SegmentedRadioGroup.svelte';
   import LoadError from './LoadError.svelte';
   import type {
     CodeClient,
@@ -10,7 +10,7 @@
     CodeClientConfiguration,
     CodeClientSelection,
     CodeRoute
-  } from '$lib/features/code-mode/api';
+  } from '#lib/features/code-mode/api.js';
   import { codeKeys } from './codeKeys';
   import { adapterLabel, clientLabel } from './presentation';
 

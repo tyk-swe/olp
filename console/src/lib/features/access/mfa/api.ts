@@ -1,12 +1,12 @@
-import type { components } from '$lib/management/schema';
-import { apiClient } from '$lib/management/client';
+import type { components } from '#lib/management/schema.js';
+import { apiClient } from '#lib/management/client.js';
 import {
   ApiProblem,
   ensureOk,
   unwrap,
   unwrapOutcome,
   type ApiOutcome
-} from '$lib/management/http';
+} from '#lib/management/http.js';
 type Schemas = components['schemas'];
 export type MFAChallenge = Schemas['MFAChallenge'];
 export type MFAEnrollment = Schemas['MFAEnrollment'];

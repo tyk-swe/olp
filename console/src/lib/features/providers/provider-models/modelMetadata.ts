@@ -1,5 +1,5 @@
-import type { components } from '$lib/management/schema';
-import { formatDate } from '$lib/format';
+import type { components } from '#lib/management/schema.js';
+import { formatDate } from '#lib/format.js';
 
 type Schemas = components['schemas'];
 

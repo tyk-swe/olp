@@ -1,13 +1,13 @@
 <script lang="ts">
   import SAMLConfigurationPanel from './saml/SAMLConfigurationPanel.svelte';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import InvitationsPanel from '$lib/features/access/invitations/InvitationsPanel.svelte';
-  import OidcConfigurationPanel from '$lib/features/access/oidc/OidcConfigurationPanel.svelte';
-  import SessionsPanel from '$lib/features/access/sessions/SessionsPanel.svelte';
-  import MembersPanel from '$lib/features/access/users/MembersPanel.svelte';
-  import ManagementTokensPanel from '$lib/features/access/tokens/ManagementTokensPanel.svelte';
-  import ProjectsPanel from '$lib/features/access/projects/ProjectsPanel.svelte';
-  import { slidingIndicator } from '$lib/shell/indicator';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import InvitationsPanel from '#lib/features/access/invitations/InvitationsPanel.svelte';
+  import OidcConfigurationPanel from '#lib/features/access/oidc/OidcConfigurationPanel.svelte';
+  import SessionsPanel from '#lib/features/access/sessions/SessionsPanel.svelte';
+  import MembersPanel from '#lib/features/access/users/MembersPanel.svelte';
+  import ManagementTokensPanel from '#lib/features/access/tokens/ManagementTokensPanel.svelte';
+  import ProjectsPanel from '#lib/features/access/projects/ProjectsPanel.svelte';
+  import { slidingIndicator } from '#lib/shell/indicator.js';
 
   type Tab =
     | 'members'

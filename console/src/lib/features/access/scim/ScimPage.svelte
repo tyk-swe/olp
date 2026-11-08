@@ -1,9 +1,9 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { listProjects } from '$lib/features/access/projects/api';
-  import { projectKeys } from '$lib/features/access/projects/projectKeys';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { listProjects } from '#lib/features/access/projects/api.js';
+  import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
   import { listGroups, saveMapping, type Group, type Mapping } from './api';
   import { scimKeys } from './scimKeys';
   const access = useRole();

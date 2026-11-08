@@ -1,14 +1,14 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { useQueryClient } from '@tanstack/svelte-query';
-  import type { components } from '$lib/management/schema';
-  import { useAction } from '$lib/editing/action.svelte';
-  import { guardUnsavedChanges } from '$lib/editing/unsavedChanges';
-  import ConflictNotice from '$lib/shell/ConflictNotice.svelte';
+  import type { components } from '#lib/management/schema.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
+  import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/editing/mutationIntent.svelte';
+  } from '#lib/editing/mutationIntent.svelte.js';
   import { createServer, saveServer, type MCPServer } from './api';
   import { agentKeys } from './agentKeys';
   import {

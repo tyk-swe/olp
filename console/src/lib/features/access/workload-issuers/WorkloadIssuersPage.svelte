@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { usePrincipalLifetime } from '$lib/editing/mutationIntent.svelte';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import {
     listIssuers,
     saveIssuer,

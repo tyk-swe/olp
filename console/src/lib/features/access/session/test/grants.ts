@@ -1,6 +1,6 @@
 import golden from '../../../../../../../internal/access/testdata/authorization.golden.json';
-import type { ManagementOperation } from '$lib/management/requirements';
-import type { FixedRole } from '$lib/features/access/session/authorization';
+import type { ManagementOperation } from '#lib/management/requirements.js';
+import type { FixedRole } from '#lib/features/access/session/authorization.js';
 
 type Archetype = {
   name: string;

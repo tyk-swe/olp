@@ -1,6 +1,6 @@
 <script lang="ts">
-  import ConfirmAction from '$lib/components/ConfirmAction.svelte';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import ConfirmAction from '#lib/components/ConfirmAction.svelte';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
   import { deleteProject } from './api';
   const access = useRole();
   import AggregateBudgetPanel from '../budgets/AggregateBudgetPanel.svelte';
@@ -10,7 +10,7 @@
   import ProjectAttributionPolicyPanel from './ProjectAttributionPolicyPanel.svelte';
   import ProjectEndUserPolicyPanel from './ProjectEndUserPolicyPanel.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage, isEtagMismatch } from '$lib/management/http';
+  import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
   import {
     createProject,
     listAllProjectMembers,
@@ -22,19 +22,19 @@
     type Project,
     type ProjectMember,
     type ProjectRole
-  } from '$lib/features/access/projects/api';
-  import { listUsers } from '$lib/features/access/users/api';
-  import { userKeys } from '$lib/features/access/users/userKeys';
-  import { projectKeys } from '$lib/features/access/projects/projectKeys';
-  import { formatDate } from '$lib/format';
-  import CursorPagination from '$lib/shell/CursorPagination.svelte';
+  } from '#lib/features/access/projects/api.js';
+  import { listUsers } from '#lib/features/access/users/api.js';
+  import { userKeys } from '#lib/features/access/users/userKeys.js';
+  import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
+  import { formatDate } from '#lib/format.js';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
   import {
     cursorPaginationProps,
     emptyCursorHistory,
     resetCursor
-  } from '$lib/listing/pagination';
+  } from '#lib/listing/pagination.js';
 
-  import { useMutationIntent } from '$lib/editing/mutationIntent.svelte';
+  import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
 
   const createIntent = useMutationIntent();
 

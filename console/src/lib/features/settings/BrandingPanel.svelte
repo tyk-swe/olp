@@ -1,10 +1,10 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
+  import { errorMessage } from '#lib/management/http.js';
   import { getBranding, updateBranding } from './branding';
   import { settingsKeys } from './settingsKeys';
-  import { authLifecycle } from '$lib/features/access/session/lifecycle';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
 
   const access = useRole();
   const queryClient = useQueryClient();

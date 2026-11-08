@@ -1,30 +1,30 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import CursorPagination from '$lib/shell/CursorPagination.svelte';
-  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
   import {
     cursorPaginationProps,
     emptyCursorHistory
-  } from '$lib/listing/pagination';
-  import { errorMessage } from '$lib/management/http';
-  import { formatDate } from '$lib/format';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { useMutationIntent } from '$lib/editing/mutationIntent.svelte';
-  import { listOrganizations } from '$lib/features/access/organizations/api';
-  import { listProjects } from '$lib/features/access/projects/api';
-  import { listProviderKinds } from '$lib/features/providers/models';
-  import { listProviderVendors } from '$lib/features/providers/providers';
-  import { providerKeys } from '$lib/features/providers/providerKeys';
-  import { projectKeys } from '$lib/features/access/projects/projectKeys';
-  import { organizationKeys } from '$lib/features/access/organizations/organizationKeys';
+  } from '#lib/listing/pagination.js';
+  import { errorMessage } from '#lib/management/http.js';
+  import { formatDate } from '#lib/format.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
+  import { listOrganizations } from '#lib/features/access/organizations/api.js';
+  import { listProjects } from '#lib/features/access/projects/api.js';
+  import { listProviderKinds } from '#lib/features/providers/models.js';
+  import { listProviderVendors } from '#lib/features/providers/providers.js';
+  import { providerKeys } from '#lib/features/providers/providerKeys.js';
+  import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
+  import { organizationKeys } from '#lib/features/access/organizations/organizationKeys.js';
   import {
     createRateCard,
     createRateCardRevision,
     listRateCards,
     type CardPriceDraft,
     type RateCard
-  } from '$lib/features/usage/rateCards';
-  import { rateCardKeys } from '$lib/features/usage/discountKeys';
+  } from '#lib/features/usage/rateCards.js';
+  import { rateCardKeys } from '#lib/features/usage/discountKeys.js';
   import PriceFields from './PriceFields.svelte';
   import {
     emptyPriceFields,

@@ -2,7 +2,7 @@ import {
   can,
   type Capability,
   type Grant
-} from '$lib/features/access/session/authorization';
+} from '#lib/features/access/session/authorization.js';
 
 type SetupInput = {
   loading: boolean;

@@ -3,16 +3,16 @@
   import { replaceState } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
-  import { formatBytes } from '$lib/format';
-  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
-  import ReauthenticateDialog from '$lib/shell/ReauthenticateDialog.svelte';
+  import { errorMessage } from '#lib/management/http.js';
+  import { formatBytes } from '#lib/format.js';
+  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import ReauthenticateDialog from '#lib/shell/ReauthenticateDialog.svelte';
   import {
     beginIdentityReauthentication,
     listOidcIdentities
-  } from '$lib/features/access/profile/api';
-  import { reauthenticateWithPassword } from '$lib/features/access/profile/reauthentication';
-  import { pluginKeys } from '$lib/features/plugins/pluginKeys';
+  } from '#lib/features/access/profile/api.js';
+  import { reauthenticateWithPassword } from '#lib/features/access/profile/reauthentication.js';
+  import { pluginKeys } from '#lib/features/plugins/pluginKeys.js';
   import {
     listUnconfinedExecutables,
     needsReauthentication,
@@ -22,7 +22,7 @@
     reviewUnconfinedExecutable,
     shortDigest,
     type UnconfinedExecutableReview
-  } from '$lib/features/plugins/api';
+  } from '#lib/features/plugins/api.js';
 
   let {
     enabled,

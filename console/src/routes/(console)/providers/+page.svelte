@@ -1,6 +1,6 @@
 <script lang="ts">
-  import ProviderList from '$lib/features/providers/ProviderList.svelte';
-  import { providerList } from '$lib/features/providers/providerPagination';
+  import ProviderList from '#lib/features/providers/ProviderList.svelte';
+  import { providerList } from '#lib/features/providers/providerPagination.js';
 
   let pagination = providerList.get();
 </script>

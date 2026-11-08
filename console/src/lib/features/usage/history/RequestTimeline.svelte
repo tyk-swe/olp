@@ -1,7 +1,7 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
 
-  import { errorMessage } from '$lib/management/http';
+  import { errorMessage } from '#lib/management/http.js';
 
   import {
     formatCost,
@@ -9,13 +9,13 @@
     formatInteger,
     statusLabel,
     statusTone
-  } from '$lib/format';
+  } from '#lib/format.js';
 
   import type { CreateQueryResult } from '@tanstack/svelte-query';
   import type {
     RequestAttempt,
     RequestDetail
-  } from '$lib/features/usage/history/api';
+  } from '#lib/features/usage/history/api.js';
   let { detail }: { detail: CreateQueryResult<RequestDetail> } = $props();
 
   function chargeLabel(status: RequestAttempt['charge_status']) {

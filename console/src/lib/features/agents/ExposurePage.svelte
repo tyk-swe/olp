@@ -1,7 +1,7 @@
 <script lang="ts">
-  import ScrollTable from '$lib/components/ScrollTable.svelte';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { createQuery } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
+  import { errorMessage } from '#lib/management/http.js';
   import { listExposures } from './api';
   import { agentKeys } from './agentKeys';
   let key = $state('');

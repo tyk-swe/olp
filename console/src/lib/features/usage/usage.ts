@@ -1,8 +1,8 @@
-import type { paths } from '$lib/management/schema';
-import type { components } from '$lib/management/schema';
-import { apiClient } from '$lib/management/client';
-import { apiProblem, unwrap } from '$lib/management/http';
-import { compactQuery } from '$lib/management/query';
+import type { paths } from '#lib/management/schema.js';
+import type { components } from '#lib/management/schema.js';
+import { apiClient } from '#lib/management/client.js';
+import { apiProblem, unwrap } from '#lib/management/http.js';
+import { compactQuery } from '#lib/management/query.js';
 
 export type UsagePoint = components['schemas']['UsagePointResponse'];
 export type UsageCompleteness =

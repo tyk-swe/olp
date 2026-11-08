@@ -2,25 +2,25 @@
   import { goto, replaceState } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { onDestroy, onMount } from 'svelte';
-  import { authenticationCapabilities } from '$lib/features/access/session/api';
-  import { acceptInvitation } from '$lib/features/access/session/authentication';
+  import { authenticationCapabilities } from '#lib/features/access/session/api.js';
+  import { acceptInvitation } from '#lib/features/access/session/authentication.js';
   import {
     ApiProblem,
     applyServerFieldErrors,
     errorMessage
-  } from '$lib/management/http';
-  import { authLifecycle } from '$lib/features/access/session/lifecycle';
-  import SetupFrame from '$lib/shell/SetupFrame.svelte';
+  } from '#lib/management/http.js';
+  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+  import SetupFrame from '#lib/shell/SetupFrame.svelte';
   import {
     PASSWORD_MAX_LENGTH,
     PASSWORD_MIN_LENGTH,
     PASSWORD_TOO_SHORT
-  } from '$lib/passwordPolicy';
+  } from '#lib/passwordPolicy.js';
   import {
     type InvitationAcceptanceErrors,
     type InvitationAcceptanceValues,
     validateInvitationAcceptance
-  } from '$lib/features/access/invitations/invitationValidation';
+  } from '#lib/features/access/invitations/invitationValidation.js';
 
   let token = $state('');
   let view = $state<

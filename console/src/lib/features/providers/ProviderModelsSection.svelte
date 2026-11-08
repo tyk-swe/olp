@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { providerKeys } from '$lib/features/providers/providerKeys';
-  import { usePrincipalLifetime } from '$lib/editing/mutationIntent.svelte';
+  import { providerKeys } from '#lib/features/providers/providerKeys.js';
+  import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
 
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage, isEtagMismatch } from '$lib/management/http';
-  import CursorPagination from '$lib/shell/CursorPagination.svelte';
-  import { formatDate } from '$lib/format';
+  import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import { formatDate } from '#lib/format.js';
   import {
     certifyProviderModel,
     declareProviderModels,
@@ -16,27 +16,27 @@
     type CapabilityCertification,
     type CapabilityDeclaration,
     type ProviderModel
-  } from '$lib/features/providers/models';
+  } from '#lib/features/providers/models.js';
   import {
     probeProvider,
     type Provider
-  } from '$lib/features/providers/providers';
-  import { declaresModels } from '$lib/features/providers/profiles';
-  import { listProviderProfiles } from '$lib/features/providers/providerProfiles';
+  } from '#lib/features/providers/providers.js';
+  import { declaresModels } from '#lib/features/providers/profiles.js';
+  import { listProviderProfiles } from '#lib/features/providers/providerProfiles.js';
   import {
     cursorPaginationProps,
     resetCursor,
     type CursorHistory
-  } from '$lib/listing/pagination';
-  import CapabilityReview from '$lib/features/providers/CapabilityReview.svelte';
-  import CatalogSuggestions from '$lib/features/providers/CatalogSuggestions.svelte';
+  } from '#lib/listing/pagination.js';
+  import CapabilityReview from '#lib/features/providers/CapabilityReview.svelte';
+  import CatalogSuggestions from '#lib/features/providers/CatalogSuggestions.svelte';
   import {
     activationReady,
     certificationPrerequisiteReady,
     DISABLED_EDIT_NOTE,
     parseManualModelNames,
     providerDisabled
-  } from '$lib/features/providers/providerEditor';
+  } from '#lib/features/providers/providerEditor.js';
   import type { RunProviderAction } from './providerEditor';
   import type { ProviderModelPage } from './models';
 

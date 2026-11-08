@@ -1,7 +1,7 @@
 <script lang="ts">
   import SavedFilters from './SavedFilters.svelte';
   import ReconciliationPanel from './ReconciliationPanel.svelte';
-  import { usageKeys } from '$lib/features/usage/usageKeys';
+  import { usageKeys } from '#lib/features/usage/usageKeys.js';
 
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
@@ -11,27 +11,27 @@
     usageBreakdown,
     usageSeries,
     usageSummary
-  } from '$lib/features/usage/usage';
-  import { getApiKey } from '$lib/features/access/api-keys/api';
+  } from '#lib/features/usage/usage.js';
+  import { getApiKey } from '#lib/features/access/api-keys/api.js';
   import {
     budgetStateNote,
     budgetWindowState
-  } from '$lib/features/access/api-keys/budgetPresentation';
-  import UsageChart from '$lib/features/usage/UsageChart.svelte';
-  import CostCalculator from '$lib/features/usage/CostCalculator.svelte';
-  import { presentEstimate } from '$lib/features/usage/estimatePresentation';
-  import { completenessFromSummary } from '$lib/features/usage/completenessPresentation';
-  import UsageCompletenessStatus from '$lib/features/usage/UsageCompletenessStatus.svelte';
-  import { errorMessage } from '$lib/management/http';
-  import { downloadBlob } from '$lib/download';
-  import { exportUsageCsv } from '$lib/features/usage/usage';
+  } from '#lib/features/access/api-keys/budgetPresentation.js';
+  import UsageChart from '#lib/features/usage/UsageChart.svelte';
+  import CostCalculator from '#lib/features/usage/CostCalculator.svelte';
+  import { presentEstimate } from '#lib/features/usage/estimatePresentation.js';
+  import { completenessFromSummary } from '#lib/features/usage/completenessPresentation.js';
+  import UsageCompletenessStatus from '#lib/features/usage/UsageCompletenessStatus.svelte';
+  import { errorMessage } from '#lib/management/http.js';
+  import { downloadBlob } from '#lib/download.js';
+  import { exportUsageCsv } from '#lib/features/usage/usage.js';
   import {
     formatBudget,
     formatCompact,
     formatCost,
     formatDate,
     formatInteger
-  } from '$lib/format';
+  } from '#lib/format.js';
 
   import {
     applyUsageDraft,
@@ -42,7 +42,7 @@
     usageProblem,
     usageSearch,
     type UsageState
-  } from '$lib/features/usage/usageState';
+  } from '#lib/features/usage/usageState.js';
 
   // The default window is taken whenever the URL changes, so returning to a
   // bare /usage later shows the last 24 hours from then, not from mount.

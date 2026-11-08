@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { resolve } from '$app/paths';
-  import { errorMessage } from '$lib/management/http';
+  import { errorMessage } from '#lib/management/http.js';
   import {
     bookmarkOrigin,
     readInstallations,

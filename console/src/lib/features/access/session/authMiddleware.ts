@@ -1,5 +1,5 @@
 import type { Middleware } from 'openapi-fetch';
-import type { AuthenticationLifecycle } from '$lib/features/access/session/lifecycle';
+import type { AuthenticationLifecycle } from '#lib/features/access/session/lifecycle.js';
 
 /**
  * The transport hook that ties API requests to the authentication lifecycle:

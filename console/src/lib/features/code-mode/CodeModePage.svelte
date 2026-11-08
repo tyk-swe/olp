@@ -4,15 +4,15 @@
     CodeClientConfiguration,
     CodeClientSelection,
     CodeRoute
-  } from '$lib/features/code-mode/api';
-  import { listProjectMemberships } from '$lib/features/access/projects/api';
-  import { projectKeys } from '$lib/features/access/projects/projectKeys';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { authLifecycle } from '$lib/features/access/session/lifecycle';
+  } from '#lib/features/code-mode/api.js';
+  import { listProjectMemberships } from '#lib/features/access/projects/api.js';
+  import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
   import {
     confirmDiscardChanges,
     guardUnsavedChanges
-  } from '$lib/editing/unsavedChanges';
+  } from '#lib/editing/unsavedChanges.js';
   import CodeManagement from './CodeManagement.svelte';
   import CodeDiagnostics from './CodeDiagnostics.svelte';
   import {

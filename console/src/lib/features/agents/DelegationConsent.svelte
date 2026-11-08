@@ -1,18 +1,18 @@
 <script lang="ts">
-  import { formatDate } from '$lib/format';
+  import { formatDate } from '#lib/format.js';
   import { onMount } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
-  import { apiKeyKeys } from '$lib/features/access/api-keys/apiKeyKeys';
-  import { listApiKeys } from '$lib/features/access/api-keys/api';
-  import { profileKeys } from '$lib/features/access/profile/profileKeys';
+  import { errorMessage } from '#lib/management/http.js';
+  import { apiKeyKeys } from '#lib/features/access/api-keys/apiKeyKeys.js';
+  import { listApiKeys } from '#lib/features/access/api-keys/api.js';
+  import { profileKeys } from '#lib/features/access/profile/profileKeys.js';
   import {
     getProfile,
     beginIdentityReauthentication
-  } from '$lib/features/access/profile/api';
-  import { reauthenticateWithPassword } from '$lib/features/access/profile/reauthentication';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { usePrincipalLifetime } from '$lib/editing/mutationIntent.svelte';
+  } from '#lib/features/access/profile/api.js';
+  import { reauthenticateWithPassword } from '#lib/features/access/profile/reauthentication.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { agentKeys } from './agentKeys';
   import {
     createDelegationConsent,

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
-  import NavIcon from '$lib/shell/NavIcon.svelte';
+  import NavIcon from '#lib/shell/NavIcon.svelte';
 </script>
 
 <svelte:head><title>Page not found · OpenLLMProxy</title></svelte:head>

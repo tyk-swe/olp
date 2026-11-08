@@ -1,15 +1,15 @@
 <script lang="ts">
   import { page } from '$app/state';
-  import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
-  import type { Grant } from '$lib/features/access/session/authorization';
-  import NavIcon from '$lib/shell/NavIcon.svelte';
-  import { slidingIndicator } from '$lib/shell/indicator';
+  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import type { Grant } from '#lib/features/access/session/authorization.js';
+  import NavIcon from '#lib/shell/NavIcon.svelte';
+  import { slidingIndicator } from '#lib/shell/indicator.js';
   import {
     isActivePath,
     NAVIGATION_GROUPS,
     navigationEntries,
     visibleItems
-  } from '$lib/shell/navigation';
+  } from '#lib/shell/navigation.js';
 
   let {
     grant,

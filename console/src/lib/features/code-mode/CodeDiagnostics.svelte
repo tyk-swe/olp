@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { useMutationIntent } from '$lib/editing/mutationIntent.svelte';
+  import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import {
     listCodeBindings,
@@ -15,17 +15,17 @@
     type CodeBindingsQuery,
     type CodeAttemptsQuery,
     type CodeTokenWindowsQuery
-  } from '$lib/features/code-mode/api';
-  import { errorMessage } from '$lib/management/http';
-  import { collectCursorPages } from '$lib/management/pagination';
+  } from '#lib/features/code-mode/api.js';
+  import { errorMessage } from '#lib/management/http.js';
+  import { collectCursorPages } from '#lib/management/pagination.js';
   import {
     emptyCursorHistory,
     cursorPaginationProps,
     resetCursor
-  } from '$lib/listing/pagination';
-  import CursorPagination from '$lib/shell/CursorPagination.svelte';
+  } from '#lib/listing/pagination.js';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
   import LoadError from './LoadError.svelte';
-  import { formatDate } from '$lib/format';
+  import { formatDate } from '#lib/format.js';
   import { codeKeys } from './codeKeys';
   import {
     allowanceChargeSummary,

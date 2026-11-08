@@ -12,10 +12,10 @@
     missingTargetOperations,
     storedTargetLabel,
     targetUnavailable
-  } from '$lib/features/routes/routeEditor';
-  import type { RouteDraftEditorState } from '$lib/features/routes/routeDraftEditor.svelte';
-  import { lifecycleNotice } from '$lib/features/providers/provider-models/lifecycle';
-  import type { EditableTarget } from '$lib/features/routes/routeEditor';
+  } from '#lib/features/routes/routeEditor.js';
+  import type { RouteDraftEditorState } from '#lib/features/routes/routeDraftEditor.svelte.js';
+  import { lifecycleNotice } from '#lib/features/providers/provider-models/lifecycle.js';
+  import type { EditableTarget } from '#lib/features/routes/routeEditor.js';
   let { editor }: { editor: RouteDraftEditorState } = $props();
 
   function targetNotice(target: EditableTarget) {

@@ -1,25 +1,28 @@
 <script lang="ts">
   import ProviderBulkActions from './ProviderBulkActions.svelte';
-  import { providerKeys } from '$lib/features/providers/providerKeys';
+  import { providerKeys } from '#lib/features/providers/providerKeys.js';
 
-  import { overviewKeys } from '$lib/features/overview/overviewKeys';
+  import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
 
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
-  import NavIcon from '$lib/shell/NavIcon.svelte';
-  import CursorPagination from '$lib/shell/CursorPagination.svelte';
-  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
-  import { listProviderPage } from '$lib/features/providers/providers';
-  import { cursorPaginationProps, resetCursor } from '$lib/listing/pagination';
-  import { debouncedSearch } from '$lib/listing/search.svelte';
+  import { errorMessage } from '#lib/management/http.js';
+  import NavIcon from '#lib/shell/NavIcon.svelte';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import { listProviderPage } from '#lib/features/providers/providers.js';
+  import {
+    cursorPaginationProps,
+    resetCursor
+  } from '#lib/listing/pagination.js';
+  import { debouncedSearch } from '#lib/listing/search.svelte.js';
   import type { ProviderListState } from './providerPagination';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { formatDate, stateLabel } from '$lib/format';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { formatDate, stateLabel } from '#lib/format.js';
   import {
     providerStatus,
     providerStatusTone
-  } from '$lib/features/providers/providerEditor';
+  } from '#lib/features/providers/providerEditor.js';
 
   let { listState = $bindable() }: { listState: ProviderListState } = $props();
   const access = useRole();

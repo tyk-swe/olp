@@ -1,10 +1,10 @@
 <script lang="ts">
   import { QueryClient, QueryClientProvider } from '@tanstack/svelte-query';
   import { onDestroy, onMount } from 'svelte';
-  import { authLifecycle } from '$lib/features/access/session/lifecycle';
-  import { retryQuery } from '$lib/management/http';
+  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+  import { retryQuery } from '#lib/management/http.js';
   import '../app.css';
-  import MFAConfirmationHost from '$lib/features/access/mfa/MFAConfirmationHost.svelte';
+  import MFAConfirmationHost from '#lib/features/access/mfa/MFAConfirmationHost.svelte';
 
   let { children } = $props();
   const queryClient = new QueryClient({

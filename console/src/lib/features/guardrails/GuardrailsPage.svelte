@@ -1,15 +1,15 @@
 <script lang="ts">
-  import ConfirmAction from '$lib/components/ConfirmAction.svelte';
+  import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import CredentialsPanel from './CredentialsPanel.svelte';
   import AttachmentControls from './AttachmentControls.svelte';
-  import { nativeObject, parseManagementJSON } from '$lib/nativeJson';
+  import { nativeObject, parseManagementJSON } from '#lib/nativeJson.js';
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/editing/mutationIntent.svelte';
+  } from '#lib/editing/mutationIntent.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import { errorMessage } from '#lib/management/http.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
   import {
     listCredentials,
     retireDefinition,

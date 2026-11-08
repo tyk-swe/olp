@@ -1,13 +1,13 @@
 <script lang="ts">
-  import { mediaJobKeys } from '$lib/features/media/mediaJobKeys';
+  import { mediaJobKeys } from '#lib/features/media/mediaJobKeys.js';
 
   import { resolve } from '$app/paths';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
-  import { applyListSearch } from '$lib/listing/urlSync.svelte';
-  import { timeInputType } from '$lib/listing/filters';
+  import { applyListSearch } from '#lib/listing/urlSync.svelte.js';
+  import { timeInputType } from '#lib/listing/filters.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import CursorPagination from '$lib/shell/CursorPagination.svelte';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
   import {
     deleteMediaJob,
     downloadMediaJobContent,
@@ -15,13 +15,13 @@
     listMediaJobs,
     refreshMediaJob,
     type MediaContentVariant
-  } from '$lib/features/media/api';
-  import { errorMessage } from '$lib/management/http';
-  import { cursorPaginationProps } from '$lib/listing/pagination';
-  import { formatDate, stateLabel } from '$lib/format';
-  import { downloadBlob } from '$lib/download';
+  } from '#lib/features/media/api.js';
+  import { errorMessage } from '#lib/management/http.js';
+  import { cursorPaginationProps } from '#lib/listing/pagination.js';
+  import { formatDate, stateLabel } from '#lib/format.js';
+  import { downloadBlob } from '#lib/download.js';
   import MediaTimeline from './MediaTimeline.svelte';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
   import {
     mediaJobFilters,
     mediaJobPending,
@@ -33,7 +33,7 @@
     mediaJobLifecycles,
     readMediaJobForm,
     type MediaJobListState
-  } from '$lib/features/media/mediaJobListState';
+  } from '#lib/features/media/mediaJobListState.js';
 
   let {
     jobId = '',

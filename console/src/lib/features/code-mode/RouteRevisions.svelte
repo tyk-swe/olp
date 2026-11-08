@@ -1,13 +1,13 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
-  import { listCodeRevisions } from '$lib/features/code-mode/api';
+  import { listCodeRevisions } from '#lib/features/code-mode/api.js';
   import {
     emptyCursorHistory,
     cursorPaginationProps
-  } from '$lib/listing/pagination';
-  import CursorPagination from '$lib/shell/CursorPagination.svelte';
+  } from '#lib/listing/pagination.js';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
   import LoadError from './LoadError.svelte';
-  import { formatDate } from '$lib/format';
+  import { formatDate } from '#lib/format.js';
   import { codeKeys } from './codeKeys';
   let { id }: { id: string } = $props();
   let paging = $state(emptyCursorHistory());

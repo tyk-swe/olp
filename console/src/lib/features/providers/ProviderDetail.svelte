@@ -1,40 +1,40 @@
 <script lang="ts">
-  import ConfirmAction from '$lib/components/ConfirmAction.svelte';
+  import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import { goto } from '$app/navigation';
   import { deleteProvider } from './providers';
   import ProviderBulkModels from './ProviderBulkModels.svelte';
   import ProviderCredentialPool from './ProviderCredentialPool.svelte';
-  import { focusErrorSummary } from '$lib/editing/focusError';
+  import { focusErrorSummary } from '#lib/editing/focusError.js';
   import { refreshProviderChange } from './providerChanges';
-  import { providerKeys } from '$lib/features/providers/providerKeys';
+  import { providerKeys } from '#lib/features/providers/providerKeys.js';
 
-  import { guardUnsavedChanges } from '$lib/editing/unsavedChanges';
+  import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
   import { resolve } from '$app/paths';
   import {
     createQuery,
     keepPreviousData,
     useQueryClient
   } from '@tanstack/svelte-query';
-  import ConflictNotice from '$lib/shell/ConflictNotice.svelte';
-  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
+  import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
+  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
   import {
     errorMessage as providerDetailError,
     fieldIssues,
     isEtagMismatch,
     type FieldIssue
-  } from '$lib/management/http';
+  } from '#lib/management/http.js';
   import {
     updateProvider,
     type Provider
-  } from '$lib/features/providers/providers';
+  } from '#lib/features/providers/providers.js';
   import {
     listProviderModelPage,
     listProviderKinds,
     type ProviderModelPage
-  } from '$lib/features/providers/models';
-  import { emptyCursorHistory, resetCursor } from '$lib/listing/pagination';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { usePrincipalLifetime } from '$lib/editing/mutationIntent.svelte';
+  } from '#lib/features/providers/models.js';
+  import { emptyCursorHistory, resetCursor } from '#lib/listing/pagination.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import {
     acceptRemote,
     conflictNotice,
@@ -43,19 +43,19 @@
     markDirty,
     markSaved,
     reconcile
-  } from '$lib/editing/concurrentEdit';
-  import ProviderConfigurationSection from '$lib/features/providers/ProviderConfigurationSection.svelte';
-  import ProviderCredentialsSection from '$lib/features/providers/ProviderCredentialsSection.svelte';
-  import BillingImportSection from '$lib/features/providers/BillingImportSection.svelte';
-  import ProviderModelsSection from '$lib/features/providers/ProviderModelsSection.svelte';
-  import ProviderRevisionsSection from '$lib/features/providers/ProviderRevisionsSection.svelte';
-  import ProviderValidationIssues from '$lib/features/providers/ProviderValidationIssues.svelte';
+  } from '#lib/editing/concurrentEdit.js';
+  import ProviderConfigurationSection from '#lib/features/providers/ProviderConfigurationSection.svelte';
+  import ProviderCredentialsSection from '#lib/features/providers/ProviderCredentialsSection.svelte';
+  import BillingImportSection from '#lib/features/providers/BillingImportSection.svelte';
+  import ProviderModelsSection from '#lib/features/providers/ProviderModelsSection.svelte';
+  import ProviderRevisionsSection from '#lib/features/providers/ProviderRevisionsSection.svelte';
+  import ProviderValidationIssues from '#lib/features/providers/ProviderValidationIssues.svelte';
   import {
     buildUpdateProviderInput,
     providerEditValues,
     requiresGrant,
     type ProviderEditValues
-  } from '$lib/features/providers/providerEditor';
+  } from '#lib/features/providers/providerEditor.js';
   import type { RunProviderAction } from './providerEditor';
 
   let { providerId }: { providerId: string } = $props();

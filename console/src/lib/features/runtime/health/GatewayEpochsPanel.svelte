@@ -1,18 +1,18 @@
 <script lang="ts">
   import type { CreateQueryResult } from '@tanstack/svelte-query';
-  import CursorPagination from '$lib/shell/CursorPagination.svelte';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
   import {
     acknowledgeRequestMetadataGatewayEpoch,
     type Readiness,
     type RequestMetadataGatewayEpoch
-  } from '$lib/features/runtime/health/api';
-  import { errorMessage } from '$lib/management/http';
+  } from '#lib/features/runtime/health/api.js';
+  import { errorMessage } from '#lib/management/http.js';
   import {
     cursorPaginationProps,
     type CursorHistory
-  } from '$lib/listing/pagination';
-  import { type CursorPage } from '$lib/management/http';
-  import { formatDate } from '$lib/format';
+  } from '#lib/listing/pagination.js';
+  import { type CursorPage } from '#lib/management/http.js';
+  import { formatDate } from '#lib/format.js';
 
   let {
     epochs,

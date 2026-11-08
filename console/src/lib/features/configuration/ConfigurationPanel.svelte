@@ -2,13 +2,13 @@
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/editing/mutationIntent.svelte';
-  import { parseExternalReference } from '$lib/features/providers/externalReference';
+  } from '#lib/editing/mutationIntent.svelte.js';
+  import { parseExternalReference } from '#lib/features/providers/externalReference.js';
   import { resolve } from '$app/paths';
-  import { parseNativeJSON, stringifyNativeJSON } from '$lib/nativeJson';
-  import { ApiProblem, errorMessage } from '$lib/management/http';
-  import { copyText } from '$lib/clipboard';
-  import { downloadBlob } from '$lib/download';
+  import { parseNativeJSON, stringifyNativeJSON } from '#lib/nativeJson.js';
+  import { ApiProblem, errorMessage } from '#lib/management/http.js';
+  import { copyText } from '#lib/clipboard.js';
+  import { downloadBlob } from '#lib/download.js';
   import {
     applyConfiguration,
     isCodeBindings,
@@ -20,7 +20,7 @@
     type ConfigurationDocument,
     type ConfigurationPlan,
     type ConfigurationPlanItem
-  } from '$lib/features/configuration/api';
+  } from '#lib/features/configuration/api.js';
 
   const applyIntent = useMutationIntent();
 

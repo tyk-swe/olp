@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { playgroundTemplates } from '$lib/features/inference/playground/templates';
+  import { playgroundTemplates } from '#lib/features/inference/playground/templates.js';
   import RoutingPreferencesForm from './RoutingPreferencesForm.svelte';
   import { resolve } from '$app/paths';
-  import { modesFor } from '$lib/features/routes/routeEditor';
-  import type { RouteDraftEditorState } from '$lib/features/routes/routeDraftEditor.svelte';
+  import { modesFor } from '#lib/features/routes/routeEditor.js';
+  import type { RouteDraftEditorState } from '#lib/features/routes/routeDraftEditor.svelte.js';
   let { editor }: { editor: RouteDraftEditorState } = $props();
   const examples = $derived(
     playgroundTemplates.filter(

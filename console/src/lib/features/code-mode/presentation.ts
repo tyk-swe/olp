@@ -1,4 +1,4 @@
-import type { CredentialSlot } from '$lib/features/providers/credentials';
+import type { CredentialSlot } from '#lib/features/providers/credentials.js';
 export type PaidTargetOption = {
   id: string;
   name: string;
@@ -12,13 +12,13 @@ import type {
   CodeDecision,
   CodePool,
   CodeRoute
-} from '$lib/features/code-mode/api';
+} from '#lib/features/code-mode/api.js';
 import {
   errorMessage,
   fieldIssues,
   isEtagMismatch
-} from '$lib/management/http';
-import { formatInteger } from '$lib/format';
+} from '#lib/management/http.js';
+import { formatInteger } from '#lib/format.js';
 
 export type CodeEditing =
   | { kind: 'accounts'; current?: CodeAccount }

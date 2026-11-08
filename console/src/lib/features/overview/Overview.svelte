@@ -1,20 +1,20 @@
 <script lang="ts">
-  import { overviewKeys } from '$lib/features/overview/overviewKeys';
-  import { requestKeys } from '$lib/features/usage/history/requestKeys';
+  import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
+  import { requestKeys } from '#lib/features/usage/history/requestKeys.js';
 
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import { onMount } from 'svelte';
-  import NavIcon from '$lib/shell/NavIcon.svelte';
+  import NavIcon from '#lib/shell/NavIcon.svelte';
   import { setupProgress } from './setupProgress';
-  import SetupChecklist from '$lib/features/overview/SetupChecklist.svelte';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
-  import { copyText } from '$lib/clipboard';
-  import { getOverview } from '$lib/features/overview/api';
-  import { listRequests } from '$lib/features/usage/history/api';
-  import { errorMessage } from '$lib/management/http';
-  import { formatDate, statusLabel, statusTone } from '$lib/format';
+  import SetupChecklist from '#lib/features/overview/SetupChecklist.svelte';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import { copyText } from '#lib/clipboard.js';
+  import { getOverview } from '#lib/features/overview/api.js';
+  import { listRequests } from '#lib/features/usage/history/api.js';
+  import { errorMessage } from '#lib/management/http.js';
+  import { formatDate, statusLabel, statusTone } from '#lib/format.js';
 
   let { controlConnected = true }: { controlConnected?: boolean } = $props();
   let endpoint = $state('/v1');

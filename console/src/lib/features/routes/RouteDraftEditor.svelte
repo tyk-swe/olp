@@ -4,19 +4,22 @@
   import RoutePassthroughEditor from './RoutePassthroughEditor.svelte';
   import ContentPolicyEditor from './ContentPolicyEditor.svelte';
   import RoutingPolicyEditor from './RoutingPolicyEditor.svelte';
-  import { focusErrorSummary, focusFormError } from '$lib/editing/focusError';
-  import RouteTargets from '$lib/features/routes/RouteTargets.svelte';
+  import {
+    focusErrorSummary,
+    focusFormError
+  } from '#lib/editing/focusError.js';
+  import RouteTargets from '#lib/features/routes/RouteTargets.svelte';
   import RouteResilienceEditor from './RouteResilienceEditor.svelte';
-  import RouteCacheEditor from '$lib/features/caching/RouteCacheEditor.svelte';
-  import RoutePublishPanel from '$lib/features/routes/RoutePublishPanel.svelte';
-  import RouteSimulation from '$lib/features/routes/RouteSimulation.svelte';
+  import RouteCacheEditor from '#lib/features/caching/RouteCacheEditor.svelte';
+  import RoutePublishPanel from '#lib/features/routes/RoutePublishPanel.svelte';
+  import RouteSimulation from '#lib/features/routes/RouteSimulation.svelte';
   import { resolve } from '$app/paths';
-  import { errorMessage } from '$lib/management/http';
-  import ConflictNotice from '$lib/shell/ConflictNotice.svelte';
-  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
-  import { formatDate } from '$lib/format';
-  import { RouteDraftEditorState } from '$lib/features/routes/routeDraftEditor.svelte';
-  import ProjectScopeField from '$lib/features/access/projects/ProjectScopeField.svelte';
+  import { errorMessage } from '#lib/management/http.js';
+  import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
+  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import { formatDate } from '#lib/format.js';
+  import { RouteDraftEditorState } from '#lib/features/routes/routeDraftEditor.svelte.js';
+  import ProjectScopeField from '#lib/features/access/projects/ProjectScopeField.svelte';
   let {
     routeId
   }: {

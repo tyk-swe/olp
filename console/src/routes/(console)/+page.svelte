@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Overview from '$lib/features/overview/OverviewPage.svelte';
+  import Overview from '#lib/features/overview/OverviewPage.svelte';
 </script>
 
 <svelte:head>

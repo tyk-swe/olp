@@ -1,8 +1,8 @@
 <script lang="ts">
-  import type { RouteDraftEditorState } from '$lib/features/routes/routeDraftEditor.svelte';
-  import type { components } from '$lib/management/schema';
-  import { errorMessage } from '$lib/management/http';
-  import { listRoutes } from '$lib/features/routes/api';
+  import type { RouteDraftEditorState } from '#lib/features/routes/routeDraftEditor.svelte.js';
+  import type { components } from '#lib/management/schema.js';
+  import { errorMessage } from '#lib/management/http.js';
+  import { listRoutes } from '#lib/features/routes/api.js';
   import { cacheStatistics, purgeCache } from './api';
 
   let { editor }: { editor: RouteDraftEditorState } = $props();

@@ -2,17 +2,17 @@
   import { untrack } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
-  import { listApiKeys } from '$lib/features/access/api-keys/api';
-  import { apiKeyKeys } from '$lib/features/access/api-keys/apiKeyKeys';
-  import { listAllProjectMembers } from '$lib/features/access/projects/api';
-  import { projectKeys } from '$lib/features/access/projects/projectKeys';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import { listApiKeys } from '#lib/features/access/api-keys/api.js';
+  import { apiKeyKeys } from '#lib/features/access/api-keys/apiKeyKeys.js';
+  import { listAllProjectMembers } from '#lib/features/access/projects/api.js';
+  import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
   import {
     saveCodePool,
     type CodeAccount,
     type CodePool,
     type CodePoolWrite
-  } from '$lib/features/code-mode/api';
+  } from '#lib/features/code-mode/api.js';
   import { adapterLabel } from './presentation';
 
   import {

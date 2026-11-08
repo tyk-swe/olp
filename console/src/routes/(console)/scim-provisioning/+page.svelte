@@ -1,5 +1,5 @@
 <script lang="ts">
-  import ScimPage from '$lib/features/access/scim/ScimPage.svelte';
+  import ScimPage from '#lib/features/access/scim/ScimPage.svelte';
 </script>
 
 <ScimPage />

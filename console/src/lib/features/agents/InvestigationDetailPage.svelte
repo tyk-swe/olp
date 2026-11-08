@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { formatDate } from '$lib/format';
+  import { formatDate } from '#lib/format.js';
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
+  import { errorMessage } from '#lib/management/http.js';
   import { getInvestigation } from './api';
   import { agentKeys } from './agentKeys';
 

@@ -1,4 +1,4 @@
-import type { RecentAuthenticationPurpose } from '$lib/features/access/profile/api';
+import type { RecentAuthenticationPurpose } from '#lib/features/access/profile/api.js';
 
 export const ENROLLMENT_VERIFICATION_TTL_MS = 5 * 60 * 1000;
 export const ENROLLMENT_VERIFIED_MESSAGE =

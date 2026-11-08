@@ -1,8 +1,8 @@
 <script lang="ts">
-  import Overview from '$lib/features/overview/Overview.svelte';
-  import ControlOverview from '$lib/features/access/ControlOverview.svelte';
-  import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
-  import { errorMessage } from '$lib/management/http';
+  import Overview from '#lib/features/overview/Overview.svelte';
+  import ControlOverview from '#lib/features/access/ControlOverview.svelte';
+  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import { errorMessage } from '#lib/management/http.js';
   const services = useServiceCapabilities();
 </script>
 

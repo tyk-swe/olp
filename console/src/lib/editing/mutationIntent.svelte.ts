@@ -1,5 +1,5 @@
 import { onDestroy } from 'svelte';
-import { authLifecycle } from '$lib/features/access/session/lifecycle';
+import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
 import { MutationIntent, MutationIntents } from './mutationIntent';
 
 /** A submission belongs to its mounted form and authenticated principal. */

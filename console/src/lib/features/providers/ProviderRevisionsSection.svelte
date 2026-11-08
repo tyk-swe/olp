@@ -2,18 +2,18 @@
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/editing/mutationIntent.svelte';
-  import { providerKeys } from '$lib/features/providers/providerKeys';
+  } from '#lib/editing/mutationIntent.svelte.js';
+  import { providerKeys } from '#lib/features/providers/providerKeys.js';
 
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
+  import { errorMessage } from '#lib/management/http.js';
   import {
     cursorPaginationProps,
     emptyCursorHistory,
     resetCursor
-  } from '$lib/listing/pagination';
-  import CursorPagination from '$lib/shell/CursorPagination.svelte';
-  import SecretDialog from '$lib/shell/SecretDialog.svelte';
+  } from '#lib/listing/pagination.js';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import SecretDialog from '#lib/shell/SecretDialog.svelte';
   import {
     diffProviderRevisions,
     getProviderRevision,
@@ -21,9 +21,9 @@
     listProviderRevisionPage,
     restoreProviderRevision,
     type ProviderRevisionDiff
-  } from '$lib/features/providers/revisions';
-  import { type Provider } from '$lib/features/providers/providers';
-  import { formatDate, stateLabel } from '$lib/format';
+  } from '#lib/features/providers/revisions.js';
+  import { type Provider } from '#lib/features/providers/providers.js';
+  import { formatDate, stateLabel } from '#lib/format.js';
   import type { RunProviderAction } from './providerEditor';
 
   let {
@@ -166,7 +166,7 @@
     resetCursor(modelPagination);
     viewed = { id: revisionId, revision };
   }
-  import ProviderRevisionComparison from '$lib/features/providers/ProviderRevisionComparison.svelte';
+  import ProviderRevisionComparison from '#lib/features/providers/ProviderRevisionComparison.svelte';
 
   const restoreIntent = useMutationIntent();
 </script>

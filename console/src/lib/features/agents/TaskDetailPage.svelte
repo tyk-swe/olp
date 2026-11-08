@@ -1,16 +1,16 @@
 <script lang="ts">
-  import { formatDate, stateLabel } from '$lib/format';
-  import ScrollTable from '$lib/components/ScrollTable.svelte';
+  import { formatDate, stateLabel } from '#lib/format.js';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
+  import { errorMessage } from '#lib/management/http.js';
   import { getTask, getRemoteTask, cancelRemoteTask } from './api';
   import { agentKeys } from './agentKeys';
 
-  import ConfirmAction from '$lib/components/ConfirmAction.svelte';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { useAction } from '$lib/editing/action.svelte';
-  import { usePrincipalLifetime } from '$lib/editing/mutationIntent.svelte';
+  import ConfirmAction from '#lib/components/ConfirmAction.svelte';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   const access = useRole();
   const action = useAction();
   let remote = $state<Awaited<ReturnType<typeof getRemoteTask>> | null>(null);

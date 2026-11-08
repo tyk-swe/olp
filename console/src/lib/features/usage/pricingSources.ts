@@ -1,7 +1,7 @@
-import type { components } from '$lib/management/schema';
-import { apiClient } from '$lib/management/client';
-import { type CursorPage, unwrap, unwrapPage } from '$lib/management/http';
-import { collectCursorPages } from '$lib/management/pagination';
+import type { components } from '#lib/management/schema.js';
+import { apiClient } from '#lib/management/client.js';
+import { type CursorPage, unwrap, unwrapPage } from '#lib/management/http.js';
+import { collectCursorPages } from '#lib/management/pagination.js';
 
 type Schemas = components['schemas'];
 

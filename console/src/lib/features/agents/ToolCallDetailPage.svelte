@@ -1,11 +1,11 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { useAction } from '$lib/editing/action.svelte';
-  import { useMutationIntent } from '$lib/editing/mutationIntent.svelte';
-  import { stateLabel } from '$lib/format';
-  import { errorMessage } from '$lib/management/http';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
+  import { stateLabel } from '#lib/format.js';
+  import { errorMessage } from '#lib/management/http.js';
   import { getToolCall, resolveToolCall } from './api';
   import { agentKeys } from './agentKeys';
   let { callID }: { callID: string } = $props();

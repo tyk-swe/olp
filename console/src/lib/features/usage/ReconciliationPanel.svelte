@@ -1,16 +1,16 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
   import { SvelteMap } from 'svelte/reactivity';
-  import { formatCost } from '$lib/format';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { getReconciliation } from '$lib/features/usage/reconciliation';
-  import { usageKeys } from '$lib/features/usage/usageKeys';
-  import { listProviders } from '$lib/features/providers/providers';
-  import { providerKeys } from '$lib/features/providers/providerKeys';
+  import { formatCost } from '#lib/format.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { getReconciliation } from '#lib/features/usage/reconciliation.js';
+  import { usageKeys } from '#lib/features/usage/usageKeys.js';
+  import { listProviders } from '#lib/features/providers/providers.js';
+  import { providerKeys } from '#lib/features/providers/providerKeys.js';
   import type {
     ReconciliationItem,
     ReconciliationTotals
-  } from '$lib/features/usage/reconciliation';
+  } from '#lib/features/usage/reconciliation.js';
 
   let { start, end }: { start: string; end: string } = $props();
 

@@ -1,4 +1,4 @@
-import type { PlaygroundOperation } from '$lib/features/inference/playground/api';
+import type { PlaygroundOperation } from '#lib/features/inference/playground/api.js';
 
 export type PlaygroundTemplate = {
   key: string;

@@ -1,40 +1,40 @@
 <script lang="ts">
   import BrandingPanel from './BrandingPanel.svelte';
-  import AggregateBudgetPanel from '$lib/features/access/budgets/AggregateBudgetPanel.svelte';
-  import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
+  import AggregateBudgetPanel from '#lib/features/access/budgets/AggregateBudgetPanel.svelte';
+  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
   const services = useServiceCapabilities();
-  import RoutingPolicyEditor from '$lib/features/routes/RoutingPolicyEditor.svelte';
-  import ConfigurationPanel from '$lib/features/configuration/ConfigurationPanel.svelte';
-  import PricingSourcesPanel from '$lib/features/usage/PricingSourcesPanel.svelte';
-  import { settingsKeys } from '$lib/features/settings/settingsKeys';
-  import PricingRevisionsPanel from '$lib/features/usage/PricingRevisionsPanel.svelte';
-  import DiscountsPanel from '$lib/features/usage/DiscountsPanel.svelte';
-  import RateCardsPanel from '$lib/features/usage/RateCardsPanel.svelte';
-  import ObservabilityPanel from '$lib/features/observability/ObservabilityPanel.svelte';
+  import RoutingPolicyEditor from '#lib/features/routes/RoutingPolicyEditor.svelte';
+  import ConfigurationPanel from '#lib/features/configuration/ConfigurationPanel.svelte';
+  import PricingSourcesPanel from '#lib/features/usage/PricingSourcesPanel.svelte';
+  import { settingsKeys } from '#lib/features/settings/settingsKeys.js';
+  import PricingRevisionsPanel from '#lib/features/usage/PricingRevisionsPanel.svelte';
+  import DiscountsPanel from '#lib/features/usage/DiscountsPanel.svelte';
+  import RateCardsPanel from '#lib/features/usage/RateCardsPanel.svelte';
+  import ObservabilityPanel from '#lib/features/observability/ObservabilityPanel.svelte';
 
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
+  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
   import {
     listSettings,
     updateSetting,
     type Setting
-  } from '$lib/features/settings/api';
-  import { formatDate, stateLabel } from '$lib/format';
+  } from '#lib/features/settings/api.js';
+  import { formatDate, stateLabel } from '#lib/format.js';
   import {
     LIMITS_OUTAGE_POLICIES,
     RETENTION_MAX_DAYS,
     RETENTION_MIN_DAYS,
     isLimitsOutagePolicy,
     isRetentionKey
-  } from '$lib/features/settings/validation';
+  } from '#lib/features/settings/validation.js';
   import {
     applyServerFieldErrors,
     errorMessage,
     isEtagMismatch
-  } from '$lib/management/http';
-  import { sessionKeys } from '$lib/features/access/session/sessionKeys';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
+  } from '#lib/management/http.js';
+  import { sessionKeys } from '#lib/features/access/session/sessionKeys.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
 
   const queryClient = useQueryClient();
   const access = useRole();

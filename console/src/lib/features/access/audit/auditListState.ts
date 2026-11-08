@@ -1,9 +1,12 @@
-import type { AuditEvent, AuditFilters } from '$lib/features/access/audit/api';
-import { AUDIT_PAGE_SIZE } from '$lib/management/pageSizes';
+import type {
+  AuditEvent,
+  AuditFilters
+} from '#lib/features/access/audit/api.js';
+import { AUDIT_PAGE_SIZE } from '#lib/management/pageSizes.js';
 import {
   filteredListState,
   type FilteredListState
-} from '$lib/listing/pagination';
+} from '#lib/listing/pagination.js';
 import {
   formTimeValue,
   preservedTime,
@@ -12,8 +15,8 @@ import {
   readForm,
   timeProblem,
   uuidProblem
-} from '$lib/listing/filters';
-import type { ListUrlSpec } from '$lib/listing/urlSync.svelte';
+} from '#lib/listing/filters.js';
+import type { ListUrlSpec } from '#lib/listing/urlSync.svelte.js';
 
 export type AuditForm = {
   action: string;

@@ -1,10 +1,10 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
-  import { listRoutes } from '$lib/features/routes/api';
-  import { routeKeys } from '$lib/features/routes/routeKeys';
-  import { errorMessage } from '$lib/management/http';
-  import { parseNativeJSON, nativeObject } from '$lib/nativeJson';
+  import { listRoutes } from '#lib/features/routes/api.js';
+  import { routeKeys } from '#lib/features/routes/routeKeys.js';
+  import { errorMessage } from '#lib/management/http.js';
+  import { parseNativeJSON, nativeObject } from '#lib/nativeJson.js';
   import {
     ResourceRequestError,
     agentSubmissionFingerprint,

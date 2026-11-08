@@ -1,4 +1,4 @@
-import type { components } from '$lib/management/schema';
+import type { components } from '#lib/management/schema.js';
 
 export type OperationDialect = components['schemas']['OperationDialect'];
 import { operationOptions, surfacesFor } from './routeEditor';

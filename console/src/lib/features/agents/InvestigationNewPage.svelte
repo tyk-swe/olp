@@ -3,9 +3,9 @@
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
   import { createQuery } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
-  import { listProjectMemberships } from '$lib/features/access/projects/api';
-  import { projectKeys } from '$lib/features/access/projects/projectKeys';
+  import { errorMessage } from '#lib/management/http.js';
+  import { listProjectMemberships } from '#lib/features/access/projects/api.js';
+  import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
   import {
     createInvestigation,
     type InvestigationEvidence,

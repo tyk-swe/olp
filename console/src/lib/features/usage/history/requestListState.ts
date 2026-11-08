@@ -1,12 +1,12 @@
 import {
   operationKinds,
   type RequestFilters
-} from '$lib/features/usage/history/api';
-import { REQUEST_PAGE_SIZE } from '$lib/management/pageSizes';
+} from '#lib/features/usage/history/api.js';
+import { REQUEST_PAGE_SIZE } from '#lib/management/pageSizes.js';
 import {
   filteredListState,
   type FilteredListState
-} from '$lib/listing/pagination';
+} from '#lib/listing/pagination.js';
 import {
   formTimeValue,
   preservedTime,
@@ -15,8 +15,8 @@ import {
   readForm,
   timeProblem,
   uuidProblem
-} from '$lib/listing/filters';
-import type { ListUrlSpec } from '$lib/listing/urlSync.svelte';
+} from '#lib/listing/filters.js';
+import type { ListUrlSpec } from '#lib/listing/urlSync.svelte.js';
 
 export type RequestForm = {
   route: string;

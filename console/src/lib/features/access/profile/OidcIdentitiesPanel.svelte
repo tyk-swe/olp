@@ -1,7 +1,7 @@
 <script lang="ts">
-  import type { OidcIdentityList } from '$lib/features/access/profile/api';
-  import { formatDate } from '$lib/format';
-  import type { PendingIdentityAction } from '$lib/features/access/profile/recentAuthentication';
+  import type { OidcIdentityList } from '#lib/features/access/profile/api.js';
+  import { formatDate } from '#lib/format.js';
+  import type { PendingIdentityAction } from '#lib/features/access/profile/recentAuthentication.js';
 
   type Props = {
     identities: OidcIdentityList | undefined;

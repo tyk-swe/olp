@@ -1,29 +1,29 @@
 <script lang="ts">
   import BulkRouteCreation from './BulkRouteCreation.svelte';
-  import { overviewKeys } from '$lib/features/overview/overviewKeys';
-  import { providerKeys } from '$lib/features/providers/providerKeys';
+  import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
+  import { providerKeys } from '#lib/features/providers/providerKeys.js';
 
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import CursorPagination from '$lib/shell/CursorPagination.svelte';
-  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
   import {
     cursorPaginationProps,
     emptyCursorHistory,
     resetCursor
-  } from '$lib/listing/pagination';
-  import { debouncedSearch } from '$lib/listing/search.svelte';
-  import { getProvider } from '$lib/features/providers/providers';
+  } from '#lib/listing/pagination.js';
+  import { debouncedSearch } from '#lib/listing/search.svelte.js';
+  import { getProvider } from '#lib/features/providers/providers.js';
   import {
     listProviderModelInventoryPage,
     setProviderModel,
     type ProviderModelInventory
-  } from '$lib/features/providers/models';
-  import { errorMessage } from '$lib/management/http';
-  import { formatInteger, stateLabel } from '$lib/format';
-  import { metadataFacts } from '$lib/features/providers/provider-models/modelMetadata';
-  import { lifecycleNotice } from '$lib/features/providers/provider-models/lifecycle';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
+  } from '#lib/features/providers/models.js';
+  import { errorMessage } from '#lib/management/http.js';
+  import { formatInteger, stateLabel } from '#lib/format.js';
+  import { metadataFacts } from '#lib/features/providers/provider-models/modelMetadata.js';
+  import { lifecycleNotice } from '#lib/features/providers/provider-models/lifecycle.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
 
   const access = useRole();
   const canManage = $derived(access.can('providers.manage'));

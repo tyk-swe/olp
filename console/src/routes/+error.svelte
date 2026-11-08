@@ -1,7 +1,7 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
-  import BrandMark from '$lib/shell/BrandMark.svelte';
+  import BrandMark from '#lib/shell/BrandMark.svelte';
 </script>
 
 <main class="error-shell">

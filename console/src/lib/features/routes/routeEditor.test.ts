@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { limitForm } from '$lib/features/access/budgets/limitForm';
-import { policyError, policyForm } from '$lib/features/access/end-users/policy';
-import { templateError } from '$lib/features/access/limit-templates/policy';
-import { groupError } from '$lib/features/access/route-groups/policy';
-import { routeLimitsError } from '$lib/features/access/route-limits/policy';
+import { limitForm } from '#lib/features/access/budgets/limitForm.js';
+import {
+  policyError,
+  policyForm
+} from '#lib/features/access/end-users/policy.js';
+import { templateError } from '#lib/features/access/limit-templates/policy.js';
+import { groupError } from '#lib/features/access/route-groups/policy.js';
+import { routeLimitsError } from '#lib/features/access/route-limits/policy.js';
 
 import {
   buildCreateRouteDraftInput,

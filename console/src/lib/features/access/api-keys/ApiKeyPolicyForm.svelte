@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { validRouteSlug } from '$lib/routeIdentity';
-  import RunLimits from '$lib/features/workflows/RunLimits.svelte';
+  import { validRouteSlug } from '#lib/routeIdentity.js';
+  import RunLimits from '#lib/features/workflows/RunLimits.svelte';
   import { currentBudgetLimit } from './budgetPresentation';
   import RouteLimitFields from '../route-limits/RouteLimitFields.svelte';
   import { routeLimitsError } from '../route-limits/policy';
@@ -9,36 +9,39 @@
   import { attributionError } from '../attribution/policy';
   import PolicyFields from '../end-users/PolicyFields.svelte';
   import { policyError } from '../end-users/policy';
-  import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
+  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
   const services = useServiceCapabilities();
-  import { focusFormError, focusErrorSummary } from '$lib/editing/focusError';
-  import { routeKeys } from '$lib/features/routes/routeKeys';
+  import {
+    focusFormError,
+    focusErrorSummary
+  } from '#lib/editing/focusError.js';
+  import { routeKeys } from '#lib/features/routes/routeKeys.js';
 
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
-  import type { ApiKey } from '$lib/features/access/api-keys/api';
-  import { listRoutes } from '$lib/features/routes/api';
-  import NavIcon from '$lib/shell/NavIcon.svelte';
-  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
-  import { formatBudget, formatDate, formatInteger } from '$lib/format';
+  import type { ApiKey } from '#lib/features/access/api-keys/api.js';
+  import { listRoutes } from '#lib/features/routes/api.js';
+  import NavIcon from '#lib/shell/NavIcon.svelte';
+  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import { formatBudget, formatDate, formatInteger } from '#lib/format.js';
   import {
     budgetStateNote,
     budgetWindowState
-  } from '$lib/features/access/api-keys/budgetPresentation';
-  import { guardUnsavedChanges } from '$lib/editing/unsavedChanges';
+  } from '#lib/features/access/api-keys/budgetPresentation.js';
+  import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
   import {
     admissionPriorities,
     validateApiKey
-  } from '$lib/features/access/api-keys/keyValidation';
+  } from '#lib/features/access/api-keys/keyValidation.js';
   import {
     buildApiKeyPolicyInput,
     createApiKeyFormState,
     expiryUnchanged,
     type ApiKeyPolicyInput
-  } from '$lib/features/access/api-keys/apiKeyPolicy';
-  import ProjectScopeField from '$lib/features/access/projects/ProjectScopeField.svelte';
-  import { listBudgetGroups } from '$lib/features/access/budget-groups/api';
-  import { budgetGroupKeys } from '$lib/features/access/budget-groups/budgetGroupKeys';
+  } from '#lib/features/access/api-keys/apiKeyPolicy.js';
+  import ProjectScopeField from '#lib/features/access/projects/ProjectScopeField.svelte';
+  import { listBudgetGroups } from '#lib/features/access/budget-groups/api.js';
+  import { budgetGroupKeys } from '#lib/features/access/budget-groups/budgetGroupKeys.js';
 
   let {
     editing,

@@ -1,12 +1,12 @@
 <script lang="ts">
-  import PublicationPanel from '$lib/features/model-catalog/PublicationPanel.svelte';
+  import PublicationPanel from '#lib/features/model-catalog/PublicationPanel.svelte';
   import AggregateBudgetPanel from '../budgets/AggregateBudgetPanel.svelte';
   import ProjectLimitTemplatesPanel from './ProjectLimitTemplatesPanel.svelte';
   import ProjectAttributionBudgetsPanel from './ProjectAttributionBudgetsPanel.svelte';
   import ProjectRouteGroupsPanel from './ProjectRouteGroupsPanel.svelte';
   import ProjectAttributionPolicyPanel from './ProjectAttributionPolicyPanel.svelte';
   import { createQuery } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
+  import { errorMessage } from '#lib/management/http.js';
   import { useRole } from '../session/useRole.svelte';
   import { listProjectMemberships } from './api';
   import { projectKeys } from './projectKeys';

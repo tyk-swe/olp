@@ -2,37 +2,40 @@
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/editing/mutationIntent.svelte';
+  } from '#lib/editing/mutationIntent.svelte.js';
 
   import { currentBudgetLimit } from './budgetPresentation';
-  import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
+  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
   const services = useServiceCapabilities();
-  import { apiKeyKeys } from '$lib/features/access/api-keys/apiKeyKeys';
-  import { overviewKeys } from '$lib/features/overview/overviewKeys';
+  import { apiKeyKeys } from '#lib/features/access/api-keys/apiKeyKeys.js';
+  import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
 
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
-  import { cursorPaginationProps, resetCursor } from '$lib/listing/pagination';
+  import { errorMessage } from '#lib/management/http.js';
+  import {
+    cursorPaginationProps,
+    resetCursor
+  } from '#lib/listing/pagination.js';
   import {
     listApiKeyPage,
     revokeApiKey,
     rotateApiKey,
     type ApiKey,
     type ApiKeySecret
-  } from '$lib/features/access/api-keys/api';
-  import SecretDialog from '$lib/shell/SecretDialog.svelte';
-  import CursorPagination from '$lib/shell/CursorPagination.svelte';
-  import NavIcon from '$lib/shell/NavIcon.svelte';
-  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
-  import { formatBudget, formatDate } from '$lib/format';
+  } from '#lib/features/access/api-keys/api.js';
+  import SecretDialog from '#lib/shell/SecretDialog.svelte';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import NavIcon from '#lib/shell/NavIcon.svelte';
+  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import { formatBudget, formatDate } from '#lib/format.js';
   import {
     budgetState,
     budgetStateLabel
-  } from '$lib/features/access/api-keys/budgetPresentation';
-  import type { ApiKeyListState } from '$lib/features/access/api-keys/apiKeyListState';
+  } from '#lib/features/access/api-keys/budgetPresentation.js';
+  import type { ApiKeyListState } from '#lib/features/access/api-keys/apiKeyListState.js';
   import { isApiKeyExpired, isApiKeyUsable } from './apiKeyLifecycle';
 
   const revokeApiKeyIntent = useMutationIntent();

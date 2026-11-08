@@ -1,9 +1,9 @@
-import type { MediaJobFilters } from '$lib/features/media/api';
-import { MEDIA_JOB_PAGE_SIZE } from '$lib/management/pageSizes';
+import type { MediaJobFilters } from '#lib/features/media/api.js';
+import { MEDIA_JOB_PAGE_SIZE } from '#lib/management/pageSizes.js';
 import {
   filteredListState,
   type FilteredListState
-} from '$lib/listing/pagination';
+} from '#lib/listing/pagination.js';
 import {
   formTimeValue,
   preservedTime,
@@ -12,8 +12,8 @@ import {
   readForm,
   timeProblem,
   uuidProblem
-} from '$lib/listing/filters';
-import type { ListUrlSpec } from '$lib/listing/urlSync.svelte';
+} from '#lib/listing/filters.js';
+import type { ListUrlSpec } from '#lib/listing/urlSync.svelte.js';
 
 export type MediaJobForm = {
   route: string;

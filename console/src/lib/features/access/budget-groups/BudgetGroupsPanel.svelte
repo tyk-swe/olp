@@ -1,27 +1,27 @@
 <script lang="ts">
-  import ConfirmAction from '$lib/components/ConfirmAction.svelte';
-  import { validRouteSlug } from '$lib/routeIdentity';
+  import ConfirmAction from '#lib/components/ConfirmAction.svelte';
+  import { validRouteSlug } from '#lib/routeIdentity.js';
   import { currentBudgetLimit } from '../api-keys/budgetPresentation';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
-  import ProjectScopeField from '$lib/features/access/projects/ProjectScopeField.svelte';
+  import { errorMessage } from '#lib/management/http.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import ProjectScopeField from '#lib/features/access/projects/ProjectScopeField.svelte';
   import {
     retireBudgetGroup,
     createBudgetGroup,
     listBudgetGroups,
     updateBudgetGroup,
     type BudgetGroup
-  } from '$lib/features/access/budget-groups/api';
-  import { budgetGroupKeys } from '$lib/features/access/budget-groups/budgetGroupKeys';
-  import { formatBudget, formatDate, formatInteger } from '$lib/format';
+  } from '#lib/features/access/budget-groups/api.js';
+  import { budgetGroupKeys } from '#lib/features/access/budget-groups/budgetGroupKeys.js';
+  import { formatBudget, formatDate, formatInteger } from '#lib/format.js';
   import { limitsError } from '../budgets/limitForm';
 
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/editing/mutationIntent.svelte';
+  } from '#lib/editing/mutationIntent.svelte.js';
 
   const createIntent = useMutationIntent();
 

@@ -1,4 +1,4 @@
-import type { components } from '$lib/management/schema';
+import type { components } from '#lib/management/schema.js';
 
 export type FidelityMode = components['schemas']['RouteFidelity']['mode'];
 

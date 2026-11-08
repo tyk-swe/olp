@@ -1,9 +1,9 @@
 <script lang="ts" generics="T">
-  import { useAction } from '$lib/editing/action.svelte';
+  import { useAction } from '#lib/editing/action.svelte.js';
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/editing/mutationIntent.svelte';
+  } from '#lib/editing/mutationIntent.svelte.js';
   let {
     label,
     description,

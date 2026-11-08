@@ -1,25 +1,25 @@
 <script lang="ts">
-  import { useMutationIntent } from '$lib/editing/mutationIntent.svelte';
+  import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
 
-  import { routeKeys } from '$lib/features/routes/routeKeys';
-  import { retiringTargets } from '$lib/features/routes/routeEditor';
+  import { routeKeys } from '#lib/features/routes/routeKeys.js';
+  import { retiringTargets } from '#lib/features/routes/routeEditor.js';
 
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
-  import CursorPagination from '$lib/shell/CursorPagination.svelte';
-  import NavIcon from '$lib/shell/NavIcon.svelte';
-  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
+  import { errorMessage } from '#lib/management/http.js';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import NavIcon from '#lib/shell/NavIcon.svelte';
+  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
   import {
     listRouteDraftPage,
     listRoutePage,
     retireRoute,
     type ActiveRoute
-  } from '$lib/features/routes/api';
-  import { cursorPaginationProps } from '$lib/listing/pagination';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { formatDate, formatInteger } from '$lib/format';
-  import type { RouteListState } from '$lib/features/routes/routeListState';
+  } from '#lib/features/routes/api.js';
+  import { cursorPaginationProps } from '#lib/listing/pagination.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { formatDate, formatInteger } from '#lib/format.js';
+  import type { RouteListState } from '#lib/features/routes/routeListState.js';
 
   const retireRouteIntent = useMutationIntent();
 

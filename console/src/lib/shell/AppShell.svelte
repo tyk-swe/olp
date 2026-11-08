@@ -2,12 +2,12 @@
   import { onMount } from 'svelte';
   import { resolve } from '$app/paths';
   import type { Snippet } from 'svelte';
-  import type { SessionUser } from '$lib/features/access/session/api';
-  import { can } from '$lib/features/access/session/authorization';
-  import BrandMark from '$lib/shell/BrandMark.svelte';
-  import NavIcon from '$lib/shell/NavIcon.svelte';
-  import Navigation from '$lib/shell/Navigation.svelte';
-  import InstallationSwitcher from '$lib/features/fleet/InstallationSwitcher.svelte';
+  import type { SessionUser } from '#lib/features/access/session/api.js';
+  import { can } from '#lib/features/access/session/authorization.js';
+  import BrandMark from '#lib/shell/BrandMark.svelte';
+  import NavIcon from '#lib/shell/NavIcon.svelte';
+  import Navigation from '#lib/shell/Navigation.svelte';
+  import InstallationSwitcher from '#lib/features/fleet/InstallationSwitcher.svelte';
 
   let {
     children,

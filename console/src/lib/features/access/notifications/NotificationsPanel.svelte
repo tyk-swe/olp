@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { holds } from '$lib/features/access/session/authorization';
+  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import { holds } from '#lib/features/access/session/authorization.js';
   import NotificationDestinations from './NotificationDestinations.svelte';
   import NotificationRules from './NotificationRules.svelte';
   import NotificationDeliveries from './NotificationDeliveries.svelte';

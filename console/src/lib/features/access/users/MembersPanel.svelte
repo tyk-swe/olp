@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { userKeys } from '$lib/features/access/users/userKeys';
+  import { userKeys } from '#lib/features/access/users/userKeys.js';
 
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -7,18 +7,18 @@
     listUserPage,
     updateUser,
     type User
-  } from '$lib/features/access/users/api';
-  import type { CursorPage } from '$lib/management/http';
-  import { errorMessage } from '$lib/management/http';
+  } from '#lib/features/access/users/api.js';
+  import type { CursorPage } from '#lib/management/http.js';
+  import { errorMessage } from '#lib/management/http.js';
   import {
     cursorPaginationProps,
     emptyCursorHistory
-  } from '$lib/listing/pagination';
-  import { FIXED_ROLES } from '$lib/features/access/session/authorization';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import CursorPagination from '$lib/shell/CursorPagination.svelte';
-  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
-  import { formatDate } from '$lib/format';
+  } from '#lib/listing/pagination.js';
+  import { FIXED_ROLES } from '#lib/features/access/session/authorization.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
+  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import { formatDate } from '#lib/format.js';
   import { updateMembers } from './bulk';
 
   const queryClient = useQueryClient();

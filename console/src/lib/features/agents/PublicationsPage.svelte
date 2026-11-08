@@ -1,13 +1,13 @@
 <script lang="ts">
-  import ScrollTable from '$lib/components/ScrollTable.svelte';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import { errorMessage } from '#lib/management/http.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/editing/mutationIntent.svelte';
+  } from '#lib/editing/mutationIntent.svelte.js';
   import {
     getPublication,
     getRevision,

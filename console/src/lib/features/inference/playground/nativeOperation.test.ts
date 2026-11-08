@@ -1,10 +1,10 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { gatewayFetch } from '$lib/management/gateway';
-import { stringifyNativeJSON } from '$lib/nativeJson';
+import { gatewayFetch } from '#lib/management/gateway.js';
+import { stringifyNativeJSON } from '#lib/nativeJson.js';
 import { translateAudio } from './audioTranslation';
 import { runNativeOperation } from './nativeOperation';
 
-vi.mock('$lib/management/gateway', () => ({ gatewayFetch: vi.fn() }));
+vi.mock('#lib/management/gateway.js', () => ({ gatewayFetch: vi.fn() }));
 
 afterEach(() => vi.clearAllMocks());
 

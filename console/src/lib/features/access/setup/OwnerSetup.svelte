@@ -1,18 +1,18 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import { ApiProblem, applyServerFieldErrors } from '$lib/management/http';
-  import { createOwner } from '$lib/features/access/setup/api';
-  import { authLifecycle } from '$lib/features/access/session/lifecycle';
-  import NavIcon from '$lib/shell/NavIcon.svelte';
+  import { ApiProblem, applyServerFieldErrors } from '#lib/management/http.js';
+  import { createOwner } from '#lib/features/access/setup/api.js';
+  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+  import NavIcon from '#lib/shell/NavIcon.svelte';
   import {
     PASSWORD_MAX_LENGTH,
     PASSWORD_MIN_LENGTH
-  } from '$lib/passwordPolicy';
+  } from '#lib/passwordPolicy.js';
   import {
     type OwnerFormErrors,
     type OwnerFormValues,
     validateOwner
-  } from '$lib/features/access/setup/ownerValidation';
+  } from '#lib/features/access/setup/ownerValidation.js';
 
   let { onComplete }: { onComplete: () => void } = $props();
 

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
-  import { formatCost, formatDate } from '$lib/format';
+  import { formatCost, formatDate } from '#lib/format.js';
   import { listExportSinkFocusDatasets, listExportSinkGaps } from './api';
   import { observabilityKeys } from './observabilityKeys';
   import { focusDatasetStatus } from './presentation';

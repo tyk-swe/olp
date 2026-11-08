@@ -1,14 +1,14 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage, isEtagMismatch } from '$lib/management/http';
+  import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
   import { resolve } from '$app/paths';
-  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
-  import ConflictNotice from '$lib/shell/ConflictNotice.svelte';
-  import { formatDate } from '$lib/format';
+  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
+  import { formatDate } from '#lib/format.js';
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/editing/mutationIntent.svelte';
+  } from '#lib/editing/mutationIntent.svelte.js';
   import {
     deleteBillingImport,
     getBillingImport,
@@ -16,9 +16,9 @@
     runBillingImport,
     type BillingImport,
     type PutBillingImportInput
-  } from '$lib/features/providers/billing';
-  import { providerKeys } from '$lib/features/providers/providerKeys';
-  import type { Provider } from '$lib/features/providers/providers';
+  } from '#lib/features/providers/billing.js';
+  import { providerKeys } from '#lib/features/providers/providerKeys.js';
+  import type { Provider } from '#lib/features/providers/providers.js';
 
   let { provider, canManage }: { provider: Provider; canManage: boolean } =
     $props();

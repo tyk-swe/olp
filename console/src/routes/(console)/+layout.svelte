@@ -9,14 +9,14 @@
     currentSession,
     logout,
     type AuthenticationCapabilities
-  } from '$lib/features/access/session/api';
-  import { errorMessage } from '$lib/management/http';
-  import { getSetupStatus } from '$lib/features/access/setup/api';
-  import { authLifecycle } from '$lib/features/access/session/lifecycle';
-  import { sessionKeys } from '$lib/features/access/session/sessionKeys';
-  import type { AuthenticationSnapshot } from '$lib/features/access/session/state';
-  import AppShell from '$lib/shell/AppShell.svelte';
-  import BrandMark from '$lib/shell/BrandMark.svelte';
+  } from '#lib/features/access/session/api.js';
+  import { errorMessage } from '#lib/management/http.js';
+  import { getSetupStatus } from '#lib/features/access/setup/api.js';
+  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+  import { sessionKeys } from '#lib/features/access/session/sessionKeys.js';
+  import type { AuthenticationSnapshot } from '#lib/features/access/session/state.js';
+  import AppShell from '#lib/shell/AppShell.svelte';
+  import BrandMark from '#lib/shell/BrandMark.svelte';
 
   let { children } = $props();
   const queryClient = useQueryClient();

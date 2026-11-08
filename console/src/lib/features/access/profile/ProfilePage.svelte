@@ -1,19 +1,19 @@
 <script lang="ts">
   import SAMLIdentitiesPanel from '../saml/SAMLIdentitiesPanel.svelte';
   import { listSAMLIdentities } from '../saml/api';
-  import { oidcFailureMessage } from '$lib/features/access/login/oidcFailure';
-  import { profileKeys } from '$lib/features/access/profile/profileKeys';
-  import { userKeys } from '$lib/features/access/users/userKeys';
-  import { authLifecycle } from '$lib/features/access/session/lifecycle';
+  import { oidcFailureMessage } from '#lib/features/access/login/oidcFailure.js';
+  import { profileKeys } from '#lib/features/access/profile/profileKeys.js';
+  import { userKeys } from '#lib/features/access/users/userKeys.js';
+  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
 
   import { onMount } from 'svelte';
   import { replaceState } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage, isEtagMismatch } from '$lib/management/http';
-  import { beginOidcLink } from '$lib/features/access/oidc/api';
-  import ConflictNotice from '$lib/shell/ConflictNotice.svelte';
-  import ReauthenticateDialog from '$lib/shell/ReauthenticateDialog.svelte';
+  import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
+  import { beginOidcLink } from '#lib/features/access/oidc/api.js';
+  import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
+  import ReauthenticateDialog from '#lib/shell/ReauthenticateDialog.svelte';
   import {
     acceptRemote,
     beginReload,
@@ -23,7 +23,7 @@
     markDirty,
     markSaved,
     reconcile
-  } from '$lib/editing/concurrentEdit';
+  } from '#lib/editing/concurrentEdit.js';
   import {
     beginIdentityReauthentication,
     changePassword,
@@ -32,24 +32,24 @@
     listOidcIdentities,
     unlinkOidcIdentity,
     updateProfile
-  } from '$lib/features/access/profile/api';
-  import { reauthenticateWithPassword } from '$lib/features/access/profile/reauthentication';
-  import ActiveSessionsPanel from '$lib/features/access/profile/ActiveSessionsPanel.svelte';
-  import LocalPasswordPanel from '$lib/features/access/profile/LocalPasswordPanel.svelte';
-  import OidcIdentitiesPanel from '$lib/features/access/profile/OidcIdentitiesPanel.svelte';
-  import MFAPanel from '$lib/features/access/mfa/MFAPanel.svelte';
-  import ProfileDetailsPanel from '$lib/features/access/profile/ProfileDetailsPanel.svelte';
+  } from '#lib/features/access/profile/api.js';
+  import { reauthenticateWithPassword } from '#lib/features/access/profile/reauthentication.js';
+  import ActiveSessionsPanel from '#lib/features/access/profile/ActiveSessionsPanel.svelte';
+  import LocalPasswordPanel from '#lib/features/access/profile/LocalPasswordPanel.svelte';
+  import OidcIdentitiesPanel from '#lib/features/access/profile/OidcIdentitiesPanel.svelte';
+  import MFAPanel from '#lib/features/access/mfa/MFAPanel.svelte';
+  import ProfileDetailsPanel from '#lib/features/access/profile/ProfileDetailsPanel.svelte';
   import {
     ENROLLMENT_VERIFIED_MESSAGE,
     ENROLLMENT_VERIFICATION_TTL_MS,
     parseRecentAuthenticationCallback,
     type PendingIdentityAction
-  } from '$lib/features/access/profile/recentAuthentication';
+  } from '#lib/features/access/profile/recentAuthentication.js';
   import {
     validateDisplayName,
     validateNewPassword,
     validatePassword
-  } from '$lib/features/access/profile/validation';
+  } from '#lib/features/access/profile/validation.js';
 
   const SECURITY_OPERATION_FAILED =
     'The security operation could not be completed.';

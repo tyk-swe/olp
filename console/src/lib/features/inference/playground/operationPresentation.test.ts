@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseNativeJSON } from '$lib/nativeJson';
+import { parseNativeJSON } from '#lib/nativeJson.js';
 import {
   nativeCountFields,
   rerankRows,

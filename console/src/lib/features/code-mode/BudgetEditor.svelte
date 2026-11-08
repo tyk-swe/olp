@@ -1,15 +1,15 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
-  import { listApiKeys } from '$lib/features/access/api-keys/api';
-  import { apiKeyKeys } from '$lib/features/access/api-keys/apiKeyKeys';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import { listApiKeys } from '#lib/features/access/api-keys/api.js';
+  import { apiKeyKeys } from '#lib/features/access/api-keys/apiKeyKeys.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
   import {
     saveCodeBudget,
     type CodeBudget,
     type CodeRoute,
     type CodeBudgetWrite
-  } from '$lib/features/code-mode/api';
+  } from '#lib/features/code-mode/api.js';
   import { tokenLimit } from './presentation';
 
   import {

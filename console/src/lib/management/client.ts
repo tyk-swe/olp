@@ -1,6 +1,6 @@
 import { createManagementClient } from './transport';
-import { createAuthMiddleware } from '$lib/features/access/session/authMiddleware';
-import { authLifecycle } from '$lib/features/access/session/lifecycle';
+import { createAuthMiddleware } from '#lib/features/access/session/authMiddleware.js';
+import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
 
 export const apiClient = createManagementClient({
   origin: globalThis.location?.origin ?? 'http://127.0.0.1',

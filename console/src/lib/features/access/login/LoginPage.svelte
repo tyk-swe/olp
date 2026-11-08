@@ -7,13 +7,13 @@
     authenticationCapabilities,
     beginOidcLogin,
     type AuthenticationCapabilities
-  } from '$lib/features/access/session/api';
-  import { login } from '$lib/features/access/session/authentication';
-  import { oidcFailureMessage } from '$lib/features/access/login/oidcFailure';
-  import { errorMessage } from '$lib/management/http';
-  import { authLifecycle } from '$lib/features/access/session/lifecycle';
-  import { relativeReturnTo } from '$lib/features/access/session/relativeReturnTo';
-  import SetupFrame from '$lib/shell/SetupFrame.svelte';
+  } from '#lib/features/access/session/api.js';
+  import { login } from '#lib/features/access/session/authentication.js';
+  import { oidcFailureMessage } from '#lib/features/access/login/oidcFailure.js';
+  import { errorMessage } from '#lib/management/http.js';
+  import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
+  import { relativeReturnTo } from '#lib/features/access/session/relativeReturnTo.js';
+  import SetupFrame from '#lib/shell/SetupFrame.svelte';
 
   let email = $state('');
   let password = $state('');

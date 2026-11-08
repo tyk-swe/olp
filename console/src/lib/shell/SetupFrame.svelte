@@ -1,8 +1,8 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import type { Snippet } from 'svelte';
-  import BrandMark from '$lib/shell/BrandMark.svelte';
-  import RouteDiagram from '$lib/shell/RouteDiagram.svelte';
+  import BrandMark from '#lib/shell/BrandMark.svelte';
+  import RouteDiagram from '#lib/shell/RouteDiagram.svelte';
 
   let { children }: { children: Snippet } = $props();
   const headline = 'One control point for every model route.'.split(' ');

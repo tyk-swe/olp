@@ -1,5 +1,5 @@
-import { instant } from '$lib/management/query';
-import { dateTimeLocalValue } from '$lib/format';
+import { instant } from '#lib/management/query.js';
+import { dateTimeLocalValue } from '#lib/format.js';
 
 /** Canonical UUID text, as accepted by the identifier filters. */
 export const UUID =

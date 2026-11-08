@@ -1,34 +1,34 @@
 <script lang="ts">
-  import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
+  import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
   const services = useServiceCapabilities();
-  import RoutingPolicyEditor from '$lib/features/routes/RoutingPolicyEditor.svelte';
-  import { apiKeyKeys } from '$lib/features/access/api-keys/apiKeyKeys';
-  import { overviewKeys } from '$lib/features/overview/overviewKeys';
+  import RoutingPolicyEditor from '#lib/features/routes/RoutingPolicyEditor.svelte';
+  import { apiKeyKeys } from '#lib/features/access/api-keys/apiKeyKeys.js';
+  import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
 
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/management/http';
-  import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import { errorMessage } from '#lib/management/http.js';
+  import { useRole } from '#lib/features/access/session/useRole.svelte.js';
   import {
     createApiKey,
     updateApiKey,
     type ApiKey,
     type ApiKeySecret
-  } from '$lib/features/access/api-keys/api';
-  import ApiKeyInventory from '$lib/features/access/api-keys/ApiKeyInventory.svelte';
-  import ApiKeyPolicyForm from '$lib/features/access/api-keys/ApiKeyPolicyForm.svelte';
-  import BudgetGroupsPanel from '$lib/features/access/budget-groups/BudgetGroupsPanel.svelte';
-  import NotificationsPanel from '$lib/features/access/notifications/NotificationsPanel.svelte';
-  import ApiKeySecretDialog from '$lib/features/access/api-keys/ApiKeySecretDialog.svelte';
-  import type { ApiKeyListState } from '$lib/features/access/api-keys/apiKeyListState';
-  import type { ApiKeyPolicyInput } from '$lib/features/access/api-keys/apiKeyPolicy';
+  } from '#lib/features/access/api-keys/api.js';
+  import ApiKeyInventory from '#lib/features/access/api-keys/ApiKeyInventory.svelte';
+  import ApiKeyPolicyForm from '#lib/features/access/api-keys/ApiKeyPolicyForm.svelte';
+  import BudgetGroupsPanel from '#lib/features/access/budget-groups/BudgetGroupsPanel.svelte';
+  import NotificationsPanel from '#lib/features/access/notifications/NotificationsPanel.svelte';
+  import ApiKeySecretDialog from '#lib/features/access/api-keys/ApiKeySecretDialog.svelte';
+  import type { ApiKeyListState } from '#lib/features/access/api-keys/apiKeyListState.js';
+  import type { ApiKeyPolicyInput } from '#lib/features/access/api-keys/apiKeyPolicy.js';
   import { isApiKeyUsable } from './apiKeyLifecycle';
 
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/editing/mutationIntent.svelte';
+  } from '#lib/editing/mutationIntent.svelte.js';
 
   const createIntent = useMutationIntent();
 

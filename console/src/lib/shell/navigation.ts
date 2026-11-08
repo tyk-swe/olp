@@ -1,7 +1,10 @@
 import { resolve } from '$app/paths';
-import { allows, type Grant } from '$lib/features/access/session/authorization';
-import type { ManagementRoute } from '$lib/management/requirements';
-import type { IconName } from '$lib/shell/icons';
+import {
+  allows,
+  type Grant
+} from '#lib/features/access/session/authorization.js';
+import type { ManagementRoute } from '#lib/management/requirements.js';
+import type { IconName } from '#lib/shell/icons.js';
 
 export type NavigationItem = {
   readonly label: string;

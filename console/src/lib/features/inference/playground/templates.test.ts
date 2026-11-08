@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { inspectionDialects } from '$lib/features/routes/inspectionDialects';
+import { inspectionDialects } from '#lib/features/routes/inspectionDialects.js';
 import {
   nativeDialects,
   nativeOperationRequest,

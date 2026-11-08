@@ -2,11 +2,11 @@
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { onMount } from 'svelte';
-  import { errorMessage } from '$lib/management/http';
-  import { getSetupStatus } from '$lib/features/access/setup/api';
-  import OwnerSetup from '$lib/features/access/setup/OwnerSetup.svelte';
-  import SetupFrame from '$lib/shell/SetupFrame.svelte';
-  import BrandMark from '$lib/shell/BrandMark.svelte';
+  import { errorMessage } from '#lib/management/http.js';
+  import { getSetupStatus } from '#lib/features/access/setup/api.js';
+  import OwnerSetup from '#lib/features/access/setup/OwnerSetup.svelte';
+  import SetupFrame from '#lib/shell/SetupFrame.svelte';
+  import BrandMark from '#lib/shell/BrandMark.svelte';
 
   let setupView = $state<'checking' | 'ready' | 'error'>('checking');
   let message = $state('');

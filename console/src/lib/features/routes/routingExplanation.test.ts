@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { components } from '$lib/management/schema';
+import type { components } from '#lib/management/schema.js';
 import {
   adaptiveNotes,
   decisionRows,

@@ -5,14 +5,14 @@
   import {
     getProvider,
     listProviders
-  } from '$lib/features/providers/providers';
-  import { listProviderCredentials } from '$lib/features/providers/credentials';
-  import { providerKeys } from '$lib/features/providers/providerKeys';
+  } from '#lib/features/providers/providers.js';
+  import { listProviderCredentials } from '#lib/features/providers/credentials.js';
+  import { providerKeys } from '#lib/features/providers/providerKeys.js';
   import {
     saveCodeAccount,
     type CodeAccount,
     type CodeAccountWrite
-  } from '$lib/features/code-mode/api';
+  } from '#lib/features/code-mode/api.js';
   import {
     extraUsageAdapterFor,
     extraUsageValue,
