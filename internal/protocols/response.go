@@ -136,32 +136,36 @@ func decodeTransformed(encodedWire, target wire.Format, body []byte, route, enco
 		if len(arr(f["results"])) == 0 {
 			return nil, protocolError("missing moderation results")
 		}
+		if err := validateModerationCount(request, len(arr(f["results"]))); err != nil {
+			return nil, err
+		}
 		for _, v := range arr(f["results"]) {
 			r, e := object(v)
 			if e != nil {
 				return nil, protocolError("invalid moderation result")
 			}
 			var flagged bool
-			if json.Unmarshal(r["flagged"], &flagged) != nil {
+			if !present(r["flagged"]) || json.Unmarshal(r["flagged"], &flagged) != nil {
 				return nil, protocolError("missing moderation decision")
 			}
 			categories, e := object(r["categories"])
-			if e != nil {
+			if e != nil || len(categories) == 0 {
 				return nil, protocolError("missing moderation categories")
 			}
 			for _, v := range categories {
 				var decision bool
-				if json.Unmarshal(v, &decision) != nil {
+				if !present(v) || json.Unmarshal(v, &decision) != nil {
 					return nil, protocolError("invalid moderation category")
 				}
 			}
 			scores, e := object(r["category_scores"])
-			if e != nil {
+			if e != nil || len(scores) != len(categories) {
 				return nil, protocolError("missing moderation scores")
 			}
-			for _, v := range scores {
+			for category := range categories {
+				v := scores[category]
 				var score float64
-				if json.Unmarshal(v, &score) != nil || math.IsInf(score, 0) || math.IsNaN(score) {
+				if !present(v) || json.Unmarshal(v, &score) != nil || math.IsInf(score, 0) || math.IsNaN(score) {
 					return nil, protocolError("invalid moderation score")
 				}
 			}
@@ -880,6 +884,27 @@ func floatVector(raw json.RawMessage) ([]float64, error) {
 		}
 	}
 	return values, nil
+}
+
+func validateModerationCount(request *wire.Request, actual int) error {
+	if request == nil || request.Family != wire.Moderation {
+		return nil
+	}
+	input, exists := request.OIF().Document().Root().Lookup("input")
+	if !exists {
+		return nil
+	}
+	if actual != moderationResultCount(input) {
+		return protocolError("moderation count does not match input scope")
+	}
+	return nil
+}
+
+func moderationResultCount(input oif.Value) int {
+	if items := input.Elements(); input.Kind() == oif.Array && len(items) > 0 && items[0].Kind() == oif.String {
+		return len(items)
+	}
+	return 1
 }
 
 func validateEmbeddingCount(request *wire.Request, actual int) error {

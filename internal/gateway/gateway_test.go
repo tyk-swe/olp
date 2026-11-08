@@ -954,3 +954,60 @@ func TestBedrockStreamClassifiesRequestEndings(t *testing.T) {
 		})
 	}
 }
+
+func TestModerationRejectsIncompleteDecisions(t *testing.T) {
+	const valid = `{"flagged":false,"categories":{"fixture":false},"category_scores":{"fixture":0.01}}`
+	const batch = `["first","second"]`
+	for _, tc := range []struct {
+		name, input, results string
+		want                 int
+	}{
+		{"complete batch", batch, valid + "," + valid, http.StatusOK},
+		{"single text", `"first"`, valid, http.StatusOK},
+		{"joint multimodal", `[{"type":"text","text":"first"},{"type":"text","text":"second"}]`, valid, http.StatusOK},
+		{"missing result", batch, valid, http.StatusBadGateway},
+		{"extra result", batch, valid + "," + valid + "," + valid, http.StatusBadGateway},
+		{"null flag", batch, `{"flagged":null,"categories":{"fixture":false},"category_scores":{"fixture":0.01}},` + valid, http.StatusBadGateway},
+		{"null category", batch, `{"flagged":false,"categories":{"fixture":null},"category_scores":{"fixture":0.01}},` + valid, http.StatusBadGateway},
+		{"null score", batch, `{"flagged":false,"categories":{"fixture":false},"category_scores":{"fixture":null}},` + valid, http.StatusBadGateway},
+		{"mismatched categories", batch, `{"flagged":false,"categories":{"fixture":false},"category_scores":{"other":0.01}},` + valid, http.StatusBadGateway},
+		{"empty categories", batch, `{"flagged":false,"categories":{},"category_scores":{}},` + valid, http.StatusBadGateway},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, Config{})
+			h.republish(func(snapshot *routing.Snapshot, a, b routing.Provider) {
+				for id, provider := range snapshot.Providers {
+					provider.Kind = "openai"
+					provider.Capabilities = []routing.Capability{{Model: provider.Capabilities[0].Model, Operation: "moderation", Surface: "openai", Mode: "unary"}}
+					snapshot.Providers[id] = provider
+				}
+				route := snapshot.Routes[routeSlug]
+				route.Operations = []string{"moderation"}
+				route.MaxAttempts = 1
+				snapshot.Routes[routeSlug] = route
+			})
+			h.mock.set("a", status(http.StatusOK, `{"id":"modr-fixture","model":"model-a","results":[`+tc.results+`]}`))
+			resp := h.do(t.Context(), http.MethodPost, "/v1/moderations", fullKey, []byte(`{"model":"team-chat","input":`+tc.input+`}`), nil)
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != tc.want {
+				t.Fatalf("status %d, want %d, body %s", resp.StatusCode, tc.want, body)
+			}
+			if tc.want == http.StatusBadGateway && !strings.Contains(string(body), `"code":"provider_protocol_error"`) {
+				t.Fatalf("unexpected rejection %s", body)
+			}
+			if tc.want == http.StatusOK {
+				var result struct {
+					Results json.RawMessage `json:"results"`
+					Model   string          `json:"model"`
+				}
+				if json.Unmarshal(body, &result) != nil || string(result.Results) != "["+tc.results+"]" || result.Model != routeSlug {
+					t.Fatalf("valid decisions changed %s", body)
+				}
+			}
+		})
+	}
+}
