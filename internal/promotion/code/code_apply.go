@@ -72,7 +72,7 @@ func ApplyCode(ctx context.Context, tx pgx.Tx, p access.Principal, doc *promotio
 			return err
 		}
 		if change.PublicationChanged && e.Input.Published == nil {
-			if _, err := tx.Exec(ctx, `UPDATE olp.code_routes SET latest_revision_id=NULL WHERE id=$1`, e.ID); err != nil {
+			if err := routes.UnpublishCodeRoute(ctx, tx, e.ID); err != nil {
 				return err
 			}
 		}

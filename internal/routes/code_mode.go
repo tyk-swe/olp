@@ -196,6 +196,11 @@ func codePublication(ctx context.Context, tx pgx.Tx, poolID string) ([]byte, []c
 	return encoded, adapters, err
 }
 
+func UnpublishCodeRoute(ctx context.Context, tx pgx.Tx, id string) error {
+	_, err := tx.Exec(ctx, `UPDATE olp.code_routes SET latest_revision_id=NULL WHERE id=$1`, id)
+	return err
+}
+
 func SaveCodeRoute(ctx context.Context, tx pgx.Tx, p access.Principal, id, etag string, raw CodeRouteInput, existing bool) (*codeRoute, error) {
 	in, validationError := raw.Validated()
 	if validationError != nil {

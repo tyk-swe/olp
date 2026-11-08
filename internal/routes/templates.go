@@ -386,14 +386,11 @@ func (s *Server) generate(ctx context.Context, tx pgx.Tx, t *template, m certifi
 		return result, err
 	}
 	id, etag := access.NewID(), access.NewID()
-	operations, _ := json.Marshal(input.Operations)
-	encoded, _ := json.Marshal(targets)
-	if _, err = tx.Exec(ctx, "INSERT INTO olp.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,etag,created_by,project_id,fidelity,behavior) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)", id, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, etag, actor, input.ProjectID, input.Fidelity, input.Behavior); err != nil {
+	if err = StageDraft(ctx, tx, NewDraft{ID: id, CreatedBy: actor, ProjectID: input.ProjectID}, etag, input.Content(targets, nil)); err != nil {
 		return result, err
 	}
 	if t.RoutingPolicy != nil {
-		policy, _ := json.Marshal(t.RoutingPolicy)
-		if _, err = tx.Exec(ctx, "INSERT INTO olp.routing_policies(scope,scope_id,policy,etag,updated_by) VALUES('route-draft',$1,$2,$3,$4)", id, policy, access.NewID(), actor); err != nil {
+		if err = StageDraftPolicy(ctx, tx, id, access.NewID(), actor, t.RoutingPolicy); err != nil {
 			return result, err
 		}
 	}
@@ -606,9 +603,9 @@ func (s *Server) createTemplate(r *http.Request, _ access.Principal) (access.Rep
 // WriteTemplate inserts or replaces a validated template; a duplicate name is
 // a conflict.
 func WriteTemplate(ctx context.Context, tx pgx.Tx, id, etag, actor string, in *TemplateInput, replace bool) error {
-	var policy []byte
-	if in.RoutingPolicy != nil {
-		policy, _ = json.Marshal(in.RoutingPolicy)
+	policy, err := encodePolicy(in.RoutingPolicy)
+	if err != nil {
+		return err
 	}
 	var taken bool
 	if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.route_templates WHERE name=$1 AND id<>$2)", in.Name, id).Scan(&taken); err != nil {
@@ -623,7 +620,7 @@ func WriteTemplate(ctx context.Context, tx pgx.Tx, id, etag, actor string, in *T
 		query = "UPDATE olp.route_templates SET name=$2,provider_selector=$3,model_filter=$4,slug_pattern=$5,overall_timeout_ms=$6,max_attempts=$7,fidelity=$8,routing_policy=$9,auto_publish=$10,etag=$11,updated_at=now() WHERE id=$1"
 		args = []any{id, in.Name, in.ProviderSelector, in.ModelFilter, in.SlugPattern, in.OverallTimeoutMS, in.MaxAttempts, in.Fidelity, policy, in.AutoPublish, etag}
 	}
-	_, err := tx.Exec(ctx, query, args...)
+	_, err = tx.Exec(ctx, query, args...)
 	return err
 }
 

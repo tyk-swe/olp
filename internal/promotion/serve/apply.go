@@ -198,9 +198,7 @@ func applyDocument(s *promotion.Server, ctx context.Context, tx pgx.Tx, p access
 		if err := routes.ValidateFidelityPolicy(route.Fidelity, route.ContentPolicy); err != nil {
 			return err
 		}
-		Input := routes.DraftInput{Slug: route.Slug, Operations: route.Operations, OverallTimeoutMS: route.OverallTimeoutMS, MaxAttempts: route.MaxAttempts, ContentPolicy: route.ContentPolicy, Fidelity: route.Fidelity,
-			ToolExecution: route.ToolExecution, Toolsets: route.Toolsets, ResponsesMCPItems: route.ResponsesMCPItems, RunLimits: route.RunLimits,
-			Cache: route.Cache, PromptCache: route.PromptCache, CallerCostExempt: route.CallerCostExempt, ProviderFetchedDocuments: route.ProviderFetchedDocuments, MaxBodyBytes: route.MaxBodyBytes, Fallbacks: route.Fallbacks, Selectors: route.Selectors, Retry: route.Retry, Affinity: route.Affinity, Budget: route.Budget, Passthrough: route.Passthrough}
+		Input := routes.DraftInput{Slug: route.Slug, Operations: route.Operations, OverallTimeoutMS: route.OverallTimeoutMS, MaxAttempts: route.MaxAttempts, ContentPolicy: route.ContentPolicy, Fidelity: route.Fidelity, Behavior: route.Behavior()}
 		for _, t := range route.Targets {
 			providerID := providerIDs[strings.ToLower(t.Provider)]
 			Input.Targets = append(Input.Targets, routes.TargetInput{ProviderID: &providerID, ProviderModel: &t.ProviderModel, Priority: t.Priority, Weight: t.Weight, TimeoutMS: t.TimeoutMS, Tags: t.Tags, Shadow: t.Shadow})
