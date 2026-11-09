@@ -3,12 +3,10 @@ package code
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"maps"
 	"slices"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/management/contract"
@@ -50,12 +48,12 @@ func (c PaidConnection) credentialRefs() []string {
 }
 
 func (c PaidConnection) keyRefs() []string {
-	return slices.Concat(promotion.Map(sortedKeys(c.SlotKeyRefs), func(slot string) []string { return c.SlotKeyRefs[slot] })...)
+	return slices.Concat(promotion.Map(slices.Sorted(maps.Keys(c.SlotKeyRefs)), func(slot string) []string { return c.SlotKeyRefs[slot] })...)
 }
 
 func (r Route) validPaid() error {
 	publication := r.Published
-	for _, name := range sortedKeys(publication.PaidConnections) {
+	for _, name := range slices.Sorted(maps.Keys(publication.PaidConnections)) {
 		if err := publication.PaidConnections[name].valid(name, r.Project, publication.Policy); err != nil {
 			return err
 		}
@@ -80,7 +78,7 @@ func (c PaidConnection) valid(name, project string, policy Policy) error {
 	if name != entry.Name || entry.Project == nil || !strings.EqualFold(*entry.Project, project) || entry.Billing != nil || !policy.targets(name) {
 		return access.Invalid("code.paid_connections", "Frozen providers must name the published paid targets in the same project.")
 	}
-	for _, slot := range sortedKeys(c.SlotKeyRefs) {
+	for _, slot := range slices.Sorted(maps.Keys(c.SlotKeyRefs)) {
 		if !slices.ContainsFunc(entry.Slots, func(s provider.Slot) bool { return s.Name == slot }) {
 			return access.Invalid("code.paid_connections.slot_key_refs", "Key restrictions must name a frozen slot.")
 		}
@@ -101,19 +99,19 @@ func (c PaidConnection) render() (contract.ConfigurationCodePaidConnection, erro
 }
 
 func resolvePaid(ctx context.Context, q access.Queryer, connections map[string]PaidConnection, policy routes.CodeRouteInput, values bindings, deps provider.Deps) (map[string]routing.Provider, error) {
-	frozen, err := promotion.TryMapIndex(sortedKeys(connections), func(_ int, name string) (routing.Provider, error) {
+	frozen, err := promotion.TryMap(slices.Sorted(maps.Keys(connections)), func(name string) (routing.Provider, error) {
 		return connections[name].resolve(ctx, q, policy.ProjectID, values, deps)
 	})
 	if err != nil {
 		return nil, err
 	}
-	byProvider := keyed(promotion.Map(frozen, func(p routing.Provider) string { return p.ID }), frozen)
+	byProvider := promotion.Index(frozen, func(p routing.Provider) string { return p.ID })
 	route := paidRoute(policy)
 	if err := routes.ValidateCodePaidProviders(route, byProvider); err != nil {
 		return nil, err
 	}
 	for _, targets := range []map[string]codemode.PaidTarget{route.PaidTargets, route.PaidFallbackTargets} {
-		for _, model := range sortedKeys(targets) {
+		for _, model := range slices.Sorted(maps.Keys(targets)) {
 			target := targets[model]
 			slots := byProvider[target.ProviderID].Slots
 			at := slices.IndexFunc(slots, func(slot routing.Slot) bool { return slot.ID == target.SlotID })
@@ -133,14 +131,14 @@ func resolvePaid(ctx context.Context, q access.Queryer, connections map[string]P
 
 func (c PaidConnection) resolve(ctx context.Context, q access.Queryer, project string, values bindings, deps provider.Deps) (routing.Provider, error) {
 	entry := c.Provider
-	var current routing.ProviderRevision
-	err := q.QueryRow(ctx, `SELECT p.id::text,v.id::text,p.name,p.state,p.project_id::text,v.configuration,v.models,v.slots FROM olp.providers p JOIN olp.provider_revisions v ON v.id=p.active_revision_id WHERE lower(p.name)=lower($1) AND p.project_id=$2 AND p.state='active'`, entry.Name, project).Scan(&current.ID, &current.RevisionID, &current.Name, &current.State, &current.ProjectID, &current.Configuration, &current.Models, &current.Slots)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return routing.Provider{}, access.Invalid("code.paid_connections", "Prepare the published destination metered provider first.")
-	}
+	active, err := providers.ReadActiveRevision(ctx, q, entry.Name, project)
 	if err != nil {
 		return routing.Provider{}, err
 	}
+	if active == nil {
+		return routing.Provider{}, access.Invalid("code.paid_connections", "Prepare the published destination metered provider first.")
+	}
+	current := *active
 	var currentModels []routing.RevisionModel
 	if err := json.Unmarshal(current.Models, &currentModels); err != nil {
 		return routing.Provider{}, err
@@ -258,7 +256,7 @@ func (c PaidConnection) slotCredential(ctx context.Context, q access.Queryer, sl
 	if err != nil {
 		return nil, err
 	}
-	allowed, err := exists(ctx, q, `SELECT EXISTS(SELECT 1 FROM olp.provider_slots s JOIN olp.provider_credentials c ON c.id=s.credential_id WHERE s.id=$1 AND s.provider_id=$2 AND c.id=$3 AND c.revoked_at IS NULL AND ($4=false OR s.enabled))`, live.ID, providerID, id, slot.Enabled)
+	allowed, err := providers.SlotCredentialCurrent(ctx, q, live.ID, providerID, id, slot.Enabled)
 	if err != nil {
 		return nil, err
 	}

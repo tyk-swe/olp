@@ -3,11 +3,9 @@ package code
 import (
 	"context"
 	"encoding/json"
-	"maps"
 	"slices"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -28,13 +26,6 @@ type resolved[T any] struct {
 	input    T
 }
 
-type candidate struct {
-	ID      string
-	Project string
-	Scope   bool
-	Natural bool
-}
-
 func derivedID(kind, project, ref string) (string, error) {
 	name, err := json.Marshal([]string{namespace, "code", kind, project, ref})
 	if err != nil {
@@ -43,11 +34,16 @@ func derivedID(kind, project, ref string) (string, error) {
 	return uuid.NewSHA1(uuid.NameSpaceURL, name).String(), nil
 }
 
-func lookup(ctx context.Context, q access.Queryer, absent, sql string, args ...any) (destination, error) {
-	ids, err := promotion.Rows(ctx, q, pgx.RowTo[string], sql, args...)
-	if err != nil {
-		return destination{}, err
+func codeRef(kind, id string) string { return "code/" + kind + "/" + id }
+
+func optionalRef(kind string, id *string) *string {
+	if id == nil {
+		return nil
 	}
+	return new(codeRef(kind, *id))
+}
+
+func lookup(absent string, ids []string) (destination, error) {
 	switch len(ids) {
 	case 0:
 		return destination{id: absent}, nil
@@ -57,24 +53,20 @@ func lookup(ctx context.Context, q access.Queryer, absent, sql string, args ...a
 	return destination{}, ambiguous()
 }
 
-func mapped(ctx context.Context, q access.Queryer, ref, project, derived string, unique bool, sql string, args ...any) (destination, error) {
-	candidates, err := promotion.Rows(ctx, q, pgx.RowToStructByPos[candidate], sql, args...)
-	if err != nil {
-		return destination{}, err
-	}
-	if direct := slices.IndexFunc(candidates, func(c candidate) bool { return c.ID == ref && c.Project == project }); direct >= 0 {
-		if !candidates[direct].Scope {
+func mapped(ref, project, derived string, unique bool, candidates []access.CodeCandidate) (destination, error) {
+	if direct := slices.IndexFunc(candidates, func(c access.CodeCandidate) bool { return c.ID == ref && c.ProjectID == project }); direct >= 0 {
+		if !candidates[direct].ScopeMatches {
 			return destination{}, access.Invalid("code", "A destination artifact reference cannot change its immutable resource scope.")
 		}
 		return destination{id: ref, existing: true}, nil
 	}
-	if stable := slices.IndexFunc(candidates, func(c candidate) bool { return c.ID == derived }); stable >= 0 {
-		if candidates[stable].Project != project || !candidates[stable].Scope {
+	if stable := slices.IndexFunc(candidates, func(c access.CodeCandidate) bool { return c.ID == derived }); stable >= 0 {
+		if candidates[stable].ProjectID != project || !candidates[stable].ScopeMatches {
 			return destination{}, access.Invalid("code", "A mapped destination resource cannot change its immutable scope.")
 		}
 		return destination{id: derived, existing: true}, nil
 	}
-	natural := func(c candidate) bool { return c.Project == project && c.Natural }
+	natural := func(c access.CodeCandidate) bool { return c.ProjectID == project && c.NaturalMatches }
 	first := slices.IndexFunc(candidates, natural)
 	if first < 0 {
 		return destination{id: derived}, nil
@@ -101,13 +93,7 @@ func distinct[T any](items []resolved[T]) error {
 }
 
 func destinations[T any](items []resolved[T]) map[string]string {
-	return maps.Collect(func(yield func(string, string) bool) {
-		for _, item := range items {
-			if !yield(item.ref, item.to.id) {
-				return
-			}
-		}
-	})
+	return promotion.Associate(items, func(item resolved[T]) (string, string) { return item.ref, item.to.id })
 }
 
 func projectOf(directory project.Directory, name string) (string, error) {
@@ -133,12 +119,6 @@ func boundOr(ref *string, values map[string]string) string {
 	return values[*ref]
 }
 
-func exists(ctx context.Context, q access.Queryer, sql string, args ...any) (bool, error) {
-	var found bool
-	err := q.QueryRow(ctx, sql, args...).Scan(&found)
-	return found, err
-}
-
 func owner(ctx context.Context, q access.Queryer, ref *string, project string, users map[string]string) (*string, error) {
 	if ref == nil {
 		return nil, nil
@@ -147,7 +127,7 @@ func owner(ctx context.Context, q access.Queryer, ref *string, project string, u
 	if err != nil {
 		return nil, err
 	}
-	member, err := exists(ctx, q, `SELECT EXISTS(SELECT 1 FROM olp.effective_project_members m JOIN olp.users u ON u.id=m.user_id WHERE m.project_id=$1 AND m.user_id=$2 AND u.active)`, project, id)
+	member, err := access.ActiveProjectMember(ctx, q, project, id)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +142,7 @@ func key(ctx context.Context, q access.Queryer, ref, project string, owner *stri
 	if err != nil {
 		return "", err
 	}
-	allowed, err := exists(ctx, q, `SELECT EXISTS(SELECT 1 FROM olp.api_keys WHERE id=$1 AND project_id=$2 AND revoked_at IS NULL AND ($3::uuid IS NULL OR created_by=$3))`, id, project, owner)
+	allowed, err := access.ProjectKeyUsable(ctx, q, id, project, owner)
 	if err != nil {
 		return "", err
 	}
@@ -176,19 +156,19 @@ func keysOf(ctx context.Context, q access.Queryer, refs []string, project string
 	return promotion.TryMapIndex(refs, func(_ int, ref string) (string, error) { return key(ctx, q, ref, project, owner, keys) })
 }
 
-func compared[T any](ctx context.Context, q access.Queryer, r resolved[T], sql string) (contract.ConfigurationPlanItemAction, error) {
+func compared[T any](ctx context.Context, q access.Queryer, r resolved[T], read func(context.Context, access.Queryer, string) (T, error)) (contract.ConfigurationPlanItemAction, error) {
 	if !r.to.existing {
 		return contract.ConfigurationPlanItemActionCreate, nil
 	}
-	var current T
-	if err := q.QueryRow(ctx, sql, r.to.id).Scan(&current); err != nil {
+	current, err := read(ctx, q, r.to.id)
+	if err != nil {
 		return "", err
 	}
 	equal, err := same(current, r.input)
 	return replacement(!equal), err
 }
 
-func same(left, right any) (bool, error) {
+func same[T any](left, right T) (bool, error) {
 	a, err := json.Marshal(left)
 	if err != nil {
 		return false, err

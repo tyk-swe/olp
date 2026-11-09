@@ -2,6 +2,8 @@ package code
 
 import (
 	"context"
+	"maps"
+	"slices"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -20,26 +22,23 @@ type Publication struct {
 }
 
 type frozen struct {
-	policy      routes.CodeRouteInput
-	connections map[string]providers.Configuration
-	paid        map[string]routing.Provider
+	Policy      routes.CodeRouteInput
+	Connections map[string]providers.Configuration
+	Paid        map[string]routing.Provider
 }
 
 func parsePublication(e contract.ConfigurationCodePublication, names promotion.Names, deps provider.Deps) (Publication, error) {
-	connectionNames := sortedKeys(e.Connections)
-	connections, err := promotion.TryMapIndex(connectionNames, func(_ int, name string) (Connection, error) { return parseConnection(name, e.Connections[name]) })
+	connections, err := tryMappedValues(e.Connections, parseConnection)
 	if err != nil {
 		return Publication{}, err
 	}
-	declared := orEmpty(e.PaidConnections)
-	paidNames := sortedKeys(declared)
-	paid, err := promotion.TryMapIndex(paidNames, func(_ int, name string) (PaidConnection, error) {
-		return parsePaidConnection(declared[name], names, deps)
+	paid, err := tryMappedValues(promotion.ValueOf(e.PaidConnections), func(_ string, c contract.ConfigurationCodePaidConnection) (PaidConnection, error) {
+		return parsePaidConnection(c, names, deps)
 	})
 	if err != nil {
 		return Publication{}, err
 	}
-	return Publication{Policy: policyOf(e.Policy), Connections: keyed(connectionNames, connections), PaidConnections: keyed(paidNames, paid)}, nil
+	return Publication{Policy: policyOf(e.Policy), Connections: connections, PaidConnections: paid}, nil
 }
 
 func renderPublication(p *Publication) (*contract.ConfigurationCodePublication, error) {
@@ -50,25 +49,19 @@ func renderPublication(p *Publication) (*contract.ConfigurationCodePublication, 
 	if err != nil {
 		return nil, err
 	}
-	names := sortedKeys(p.Connections)
-	connections, err := promotion.TryMapIndex(names, func(_ int, name string) (contract.ConfigurationCodeConnection, error) {
-		return renderConnection(name, p.Connections[name])
-	})
+	connections, err := tryMappedValues(p.Connections, renderConnection)
 	if err != nil {
 		return nil, err
 	}
-	paidNames := sortedKeys(p.PaidConnections)
-	paid, err := promotion.TryMapIndex(paidNames, func(_ int, name string) (contract.ConfigurationCodePaidConnection, error) {
-		return p.PaidConnections[name].render()
-	})
+	paid, err := tryMappedValues(p.PaidConnections, func(_ string, c PaidConnection) (contract.ConfigurationCodePaidConnection, error) { return c.render() })
 	if err != nil {
 		return nil, err
 	}
-	return &contract.ConfigurationCodePublication{Policy: policy, Connections: keyed(names, connections), PaidConnections: new(keyed(paidNames, paid))}, nil
+	return &contract.ConfigurationCodePublication{Policy: policy, Connections: connections, PaidConnections: &paid}, nil
 }
 
 func (p Publication) resolve(ctx context.Context, q access.Queryer, slug, projectID string, in scope) (*frozen, error) {
-	pinned, err := promotion.TryMapIndex(sortedKeys(p.Connections), func(_ int, name string) (pin, error) {
+	pinned, err := promotion.TryMap(slices.Sorted(maps.Keys(p.Connections)), func(name string) (pin, error) {
 		return p.Connections[name].resolve(ctx, q, name, projectID, p.Policy.Pool, in)
 	})
 	if err != nil {
@@ -85,15 +78,15 @@ func (p Publication) resolve(ctx context.Context, q access.Queryer, slug, projec
 	if _, err := routes.CodePaidProviders(ctx, q, paidRoute(policy)); err != nil {
 		return nil, err
 	}
-	connections := keyed(promotion.Map(pinned, func(c pin) string { return c.provider }), promotion.Map(pinned, func(c pin) providers.Configuration { return c.configuration }))
-	return &frozen{policy: policy, connections: connections, paid: paid}, nil
+	connections := promotion.Associate(pinned, func(c pin) (string, providers.Configuration) { return c.provider, c.configuration })
+	return &frozen{Policy: policy, Connections: connections, Paid: paid}, nil
 }
 
 func (f *frozen) same(document *codemode.Route, connections map[string]providers.Configuration, paid map[string]routing.Provider) (bool, error) {
 	if f == nil || document == nil {
 		return f == nil && document == nil, nil
 	}
-	return same([]any{inputOf(*document), connections, paid}, []any{f.policy, f.connections, f.paid})
+	return same(frozen{Policy: inputOf(*document), Connections: connections, Paid: paid}, *f)
 }
 
 func portablePublication(ctx context.Context, q access.Queryer, document *codemode.Route, connections map[string]providers.Configuration, paid map[string]routing.Provider, slots map[string]PaidTarget) (*Publication, error) {

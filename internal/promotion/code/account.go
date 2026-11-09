@@ -2,9 +2,7 @@ package code
 
 import (
 	"context"
-	"errors"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -50,7 +48,13 @@ func (a Account) input(project, provider, credential string) providers.CodeAccou
 }
 
 func readAccounts(ctx context.Context, q access.Queryer) ([]Account, error) {
-	return promotion.Rows(ctx, q, pgx.RowToStructByPos[Account], `SELECT a.id::text,p.name,v.name,'code/account/'||a.id,a.name,a.enabled,a.models,a.extra_usage_enabled,a.cycle_anchor::text FROM olp.code_accounts a JOIN olp.projects p ON p.id=a.project_id JOIN olp.providers v ON v.id=a.provider_id`)
+	accounts, err := providers.ReadCodeAccounts(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	return promotion.Map(accounts, func(a providers.CodeAccount) Account {
+		return Account{ID: a.ID, Project: a.Project, Provider: a.Provider, CredentialRef: codeRef("account", a.ID), Name: a.Name, Enabled: a.Enabled, Models: a.Models, ExtraUsageEnabled: a.ExtraUsageEnabled, CycleAnchor: a.CycleAnchor}
+	}), nil
 }
 
 func renderAccount(a Account) (contract.ConfigurationCodeAccount, error) {
@@ -85,19 +89,23 @@ func resolveAccount(ctx context.Context, q access.Queryer, a Account, directory 
 	if err != nil {
 		return resolved[providers.CodeAccountInput]{}, err
 	}
-	var provider, principal string
-	switch err := q.QueryRow(ctx, `SELECT p.id::text,c.principal FROM olp.providers p JOIN olp.provider_credentials c ON c.provider_id=p.id JOIN olp.provider_grants g ON g.credential_id=c.id WHERE lower(p.name)=lower($1) AND p.project_id=$2 AND c.id=$3 AND c.principal<>'' AND c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())`, a.Provider, projectID, credential).Scan(&provider, &principal); {
-	case errors.Is(err, pgx.ErrNoRows):
-		return resolved[providers.CodeAccountInput]{}, access.Invalid("code_bindings.credentials", "Choose a current enrolled credential belonging to the destination provider and project.")
-	case err != nil:
+	granted, err := providers.ReadGrantedCredential(ctx, q, a.Provider, projectID, credential)
+	if err != nil {
 		return resolved[providers.CodeAccountInput]{}, err
 	}
-	to, err := lookup(ctx, q, access.NewID(), `SELECT id::text FROM olp.code_accounts WHERE project_id=$1 AND provider_id=$2 AND principal=$3`, projectID, provider, principal)
-	return resolved[providers.CodeAccountInput]{ref: a.ID, to: to, identity: strings.Join([]string{projectID, provider, principal}, "\x00"), input: a.input(projectID, provider, credential)}, err
+	if granted == nil {
+		return resolved[providers.CodeAccountInput]{}, access.Invalid("code_bindings.credentials", "Choose a current enrolled credential belonging to the destination provider and project.")
+	}
+	ids, err := providers.CodeAccountIDs(ctx, q, projectID, granted.ProviderID, granted.Principal)
+	if err != nil {
+		return resolved[providers.CodeAccountInput]{}, err
+	}
+	to, err := lookup(access.NewID(), ids)
+	return resolved[providers.CodeAccountInput]{ref: a.ID, to: to, identity: promotion.TupleKey(projectID, granted.ProviderID, granted.Principal), input: a.input(projectID, granted.ProviderID, credential)}, err
 }
 
 func accountChange(ctx context.Context, q access.Queryer, a resolved[providers.CodeAccountInput]) (change, error) {
-	action, err := compared(ctx, q, a, `SELECT jsonb_build_object('project_id',project_id,'provider_id',provider_id,'credential_id',credential_id,'name',name,'enabled',enabled,'models',models,'extra_usage_enabled',extra_usage_enabled,'cycle_anchor',cycle_anchor) FROM olp.code_accounts WHERE id=$1`)
+	action, err := compared(ctx, q, a, providers.ReadCodeAccountInput)
 	return change{
 		item: promotion.Item{Kind: contract.ConfigurationPlanItemKindCodeAccount, Key: a.ref, Action: action},
 		write: func(ctx context.Context, tx pgx.Tx, p access.Principal) error {

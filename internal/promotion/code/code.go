@@ -65,7 +65,7 @@ func Parse(document *contract.ConfigurationCode, declared *contract.Configuratio
 }
 
 func parseCode(document contract.ConfigurationCode, names promotion.Names, deps provider.Deps) (Code, error) {
-	accountEntries, poolEntries, routeEntries, budgetEntries := present(document.Accounts), present(document.Pools), present(document.Routes), present(document.Budgets)
+	accountEntries, poolEntries, routeEntries, budgetEntries := document.Accounts.GetOrEmpty(), document.Pools.GetOrEmpty(), document.Routes.GetOrEmpty(), document.Budgets.GetOrEmpty()
 	ids := slices.Concat(
 		promotion.Map(accountEntries, func(e contract.ConfigurationCodeAccount) string { return e.Id.String() }),
 		promotion.Map(poolEntries, func(e contract.ConfigurationCodePool) string { return e.Id.String() }),
@@ -139,19 +139,19 @@ func Render(code Code) (*contract.ConfigurationCode, error) {
 	if len(code.Accounts)+len(code.Pools)+len(code.Routes)+len(code.Budgets) == 0 {
 		return nil, nil
 	}
-	accounts, err := promotion.TryMapIndex(byID(code.Accounts, func(a Account) string { return a.ID }), func(_ int, a Account) (contract.ConfigurationCodeAccount, error) { return renderAccount(a) })
+	accounts, err := promotion.TryMap(slices.SortedFunc(slices.Values(code.Accounts), func(x, y Account) int { return cmp.Compare(x.ID, y.ID) }), renderAccount)
 	if err != nil {
 		return nil, err
 	}
-	pools, err := promotion.TryMapIndex(byID(code.Pools, func(p Pool) string { return p.ID }), func(_ int, p Pool) (contract.ConfigurationCodePool, error) { return renderPool(p) })
+	pools, err := promotion.TryMap(slices.SortedFunc(slices.Values(code.Pools), func(x, y Pool) int { return cmp.Compare(x.ID, y.ID) }), renderPool)
 	if err != nil {
 		return nil, err
 	}
-	routes, err := promotion.TryMapIndex(byID(code.Routes, func(r Route) string { return r.ID }), func(_ int, r Route) (contract.ConfigurationCodeRoute, error) { return renderRoute(r) })
+	routes, err := promotion.TryMap(slices.SortedFunc(slices.Values(code.Routes), func(x, y Route) int { return cmp.Compare(x.ID, y.ID) }), renderRoute)
 	if err != nil {
 		return nil, err
 	}
-	budgets, err := promotion.TryMapIndex(byID(code.Budgets, func(b Budget) string { return b.ID }), func(_ int, b Budget) (contract.ConfigurationCodeBudget, error) { return renderBudget(b) })
+	budgets, err := promotion.TryMap(slices.SortedFunc(slices.Values(code.Budgets), func(x, y Budget) int { return cmp.Compare(x.ID, y.ID) }), renderBudget)
 	if err != nil {
 		return nil, err
 	}

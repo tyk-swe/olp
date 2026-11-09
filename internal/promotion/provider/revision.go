@@ -22,7 +22,7 @@ func FromRevision(name string, project *string, configuration, models, slots []b
 	return fromRevision(revision{name: name, project: project, configuration: configuration, models: models, slots: slots}, nil, nil)
 }
 
-func publishedEntry(row providerRow, slots []slotRow, imported *Billing) (*Entry, error) {
+func publishedEntry(row providers.ProviderSnapshot, slots []providers.SlotSnapshot, imported *Billing) (*Entry, error) {
 	if row.RevisionConfiguration == nil {
 		return nil, nil
 	}

@@ -54,7 +54,13 @@ func (b Budget) keyRefs() []string {
 }
 
 func readBudgets(ctx context.Context, q access.Queryer) ([]Budget, error) {
-	return promotion.Rows(ctx, q, pgx.RowToStructByPos[Budget], `SELECT x.id::text,p.name,x.route_id::text,CASE WHEN x.api_key_id IS NULL THEN NULL ELSE 'code/key/'||x.api_key_id END,x.daily_tokens,x.monthly_tokens,x.enabled FROM olp.code_token_budgets x JOIN olp.projects p ON p.id=x.project_id`)
+	budgets, err := access.ReadCodeBudgets(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	return promotion.Map(budgets, func(b access.CodeBudget) Budget {
+		return Budget{ID: b.ID, Project: b.Project, Route: b.RouteID, APIKeyRef: optionalRef("key", b.APIKeyID), DailyTokens: b.DailyTokens, MonthlyTokens: b.MonthlyTokens, Enabled: b.Enabled}
+	}), nil
 }
 
 func renderBudget(b Budget) (contract.ConfigurationCodeBudget, error) {
@@ -94,7 +100,11 @@ func resolveBudget(ctx context.Context, q access.Queryer, b Budget, desired Desi
 	unique := !slices.ContainsFunc(desired.Code.Budgets, func(other Budget) bool {
 		return other.ID != b.ID && strings.EqualFold(other.Project, b.Project) && boundOr(other.Route, routeIDs) == boundOr(b.Route, routeIDs) && boundOr(other.APIKeyRef, desired.bindings.keys) == boundOr(b.APIKeyRef, desired.bindings.keys) && (other.DailyTokens != nil) == (b.DailyTokens != nil) && (other.MonthlyTokens != nil) == (b.MonthlyTokens != nil)
 	})
-	to, err := mapped(ctx, q, b.ID, projectID, derived, unique, `SELECT id::text,project_id::text,(route_id IS NOT DISTINCT FROM $2::uuid AND api_key_id IS NOT DISTINCT FROM $3::uuid),(route_id IS NOT DISTINCT FROM $2::uuid AND api_key_id IS NOT DISTINCT FROM $3::uuid AND (daily_tokens IS NOT NULL)=$4 AND (monthly_tokens IS NOT NULL)=$5) FROM olp.code_token_budgets WHERE id=$6 OR id=$7 OR (project_id=$1 AND route_id IS NOT DISTINCT FROM $2::uuid AND api_key_id IS NOT DISTINCT FROM $3::uuid AND (daily_tokens IS NOT NULL)=$4 AND (monthly_tokens IS NOT NULL)=$5)`, projectID, routeID, keyID, b.DailyTokens != nil, b.MonthlyTokens != nil, b.ID, derived)
+	candidates, err := access.CodeBudgetCandidates(ctx, q, b.ID, derived, access.CodeBudgetMatch{ProjectID: projectID, RouteID: routeID, APIKeyID: keyID, Daily: b.DailyTokens != nil, Monthly: b.MonthlyTokens != nil})
+	if err != nil {
+		return resolved[access.CodeBudgetInput]{}, err
+	}
+	to, err := mapped(b.ID, projectID, derived, unique, candidates)
 	return resolved[access.CodeBudgetInput]{ref: b.ID, to: to, input: b.input(projectID, routeID, keyID)}, err
 }
 
@@ -114,7 +124,7 @@ func destinationOf(ref *string, ids map[string]string) *string {
 }
 
 func budgetChange(ctx context.Context, q access.Queryer, b resolved[access.CodeBudgetInput]) (change, error) {
-	action, err := compared(ctx, q, b, `SELECT jsonb_build_object('project_id',project_id,'route_id',route_id,'api_key_id',api_key_id,'daily_tokens',daily_tokens,'monthly_tokens',monthly_tokens,'enabled',enabled) FROM olp.code_token_budgets WHERE id=$1`)
+	action, err := compared(ctx, q, b, access.ReadCodeBudgetInput)
 	return change{
 		item: promotion.Item{Kind: contract.ConfigurationPlanItemKindCodeBudget, Key: b.ref, Action: action},
 		write: func(ctx context.Context, tx pgx.Tx, p access.Principal) error {

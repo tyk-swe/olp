@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/billing"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -33,59 +32,6 @@ type storedSlot struct {
 	allowedAPIKeys []string
 }
 
-type providerRow struct {
-	ID                    string
-	Name                  string
-	Project               *string
-	Kind                  string
-	Configuration         []byte
-	Network               *string
-	Imported              bool
-	RevisionConfiguration []byte
-	RevisionModels        []byte
-	RevisionSlots         []byte
-}
-
-type modelRow struct {
-	ProviderID    string
-	UpstreamModel string
-	DisplayName   string
-	Enabled       bool
-	Capabilities  []byte
-}
-
-type slotRow struct {
-	ProviderID   string
-	Name         string
-	ID           string
-	Default      bool
-	Position     int
-	Enabled      bool
-	Priority     int
-	Weight       int64
-	CredentialID *string
-	Restrictions []byte
-	Limits       []byte
-	Usable       *string
-	PluginDigest string
-	ProfileID    string
-}
-
-const providersQuery = `SELECT p.id::text,p.name,pr.name,p.kind,p.configuration,
-	(SELECT c.id::text FROM olp.provider_network_credentials c WHERE c.id::text=p.configuration#>>'{options,network,credential_id}' AND c.provider_id=p.id AND c.revoked_at IS NULL),
-	EXISTS (SELECT 1 FROM olp.provider_billing_imports bi WHERE bi.provider_id=p.id),
-	r.configuration,r.models,r.slots
-	FROM olp.providers p LEFT JOIN olp.projects pr ON pr.id=p.project_id
-	LEFT JOIN olp.provider_revisions r ON r.id=p.active_revision_id AND p.state IN ('active','disabled')`
-
-const modelsQuery = `SELECT provider_id::text,upstream_model,display_name,enabled,capabilities FROM olp.provider_models ORDER BY provider_id,upstream_model`
-
-const slotsQuery = `SELECT s.provider_id::text,s.name,s.id::text,s.is_default,s.position,s.enabled,s.priority,s.weight,s.credential_id::text,s.restrictions,s.limits,
-	c.id::text,coalesce(c.plugin_digest,''),coalesce(c.profile_id,'')
-	FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id AND c.revoked_at IS NULL
-	AND NOT EXISTS (SELECT 1 FROM olp.provider_grants g WHERE g.credential_id=c.id AND g.lapsed_at IS NOT NULL)
-	ORDER BY s.provider_id,s.position`
-
 func Read(ctx context.Context, q access.Queryer) ([]Entry, error) {
 	destinations, err := readDestinations(ctx, q)
 	if err != nil {
@@ -100,20 +46,20 @@ func Read(ctx context.Context, q access.Queryer) ([]Entry, error) {
 }
 
 func readDestinations(ctx context.Context, q access.Queryer) (map[string]destination, error) {
-	rows, err := promotion.Rows(ctx, q, pgx.RowToStructByPos[providerRow], providersQuery)
+	rows, err := providers.ReadProviderSnapshots(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	models, err := promotion.Rows(ctx, q, pgx.RowToStructByPos[modelRow], modelsQuery)
+	models, err := providers.ReadModelSnapshots(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	slots, err := promotion.Rows(ctx, q, pgx.RowToStructByPos[slotRow], slotsQuery)
+	slots, err := providers.ReadSlotSnapshots(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	destinations, err := promotion.TryMap(rows, func(row providerRow) (destination, error) {
-		return readDestination(ctx, q, row, promotion.Filter(models, func(model modelRow) bool { return model.ProviderID == row.ID }), promotion.Filter(slots, func(slot slotRow) bool { return slot.ProviderID == row.ID }))
+	destinations, err := promotion.TryMap(rows, func(row providers.ProviderSnapshot) (destination, error) {
+		return readDestination(ctx, q, row, promotion.Filter(models, func(model providers.ModelSnapshot) bool { return model.ProviderID == row.ID }), promotion.Filter(slots, func(slot providers.SlotSnapshot) bool { return slot.ProviderID == row.ID }))
 	})
 	if err != nil {
 		return nil, err
@@ -127,7 +73,7 @@ func readDestinations(ctx context.Context, q access.Queryer) (map[string]destina
 	}), nil
 }
 
-func readDestination(ctx context.Context, q access.Queryer, row providerRow, models []modelRow, slots []slotRow) (destination, error) {
+func readDestination(ctx context.Context, q access.Queryer, row providers.ProviderSnapshot, models []providers.ModelSnapshot, slots []providers.SlotSnapshot) (destination, error) {
 	imported, err := readImport(ctx, q, row)
 	if err != nil {
 		return destination{}, err
@@ -136,7 +82,9 @@ func readDestination(ctx context.Context, q access.Queryer, row providerRow, mod
 	if err := json.Unmarshal(row.Configuration, &configuration); err != nil {
 		return destination{}, err
 	}
-	stored, err := promotion.TryMap(slots, func(slot slotRow) (storedPair, error) { return parseSlotRow(slot, configuration.Grant()) })
+	stored, err := promotion.TryMap(slots, func(slot providers.SlotSnapshot) (storedPair, error) {
+		return parseSlotRow(slot, configuration.Grant())
+	})
 	if err != nil {
 		return destination{}, err
 	}
@@ -160,15 +108,15 @@ func readDestination(ctx context.Context, q access.Queryer, row providerRow, mod
 	}, nil
 }
 
-func readImport(ctx context.Context, q access.Queryer, row providerRow) (*billing.ImportState, error) {
+func readImport(ctx context.Context, q access.Queryer, row providers.ProviderSnapshot) (*billing.ImportState, error) {
 	if !row.Imported {
 		return nil, nil
 	}
 	return billing.ReadImportState(ctx, q, row.ID)
 }
 
-func draftEntry(row providerRow, configuration providers.Configuration, models []modelRow, slots []storedPair, imported *Billing) (Entry, error) {
-	draftModels, err := promotion.TryMap(models, func(model modelRow) (providers.DraftModel, error) {
+func draftEntry(row providers.ProviderSnapshot, configuration providers.Configuration, models []providers.ModelSnapshot, slots []storedPair, imported *Billing) (Entry, error) {
+	draftModels, err := promotion.TryMap(models, func(model providers.ModelSnapshot) (providers.DraftModel, error) {
 		var capabilities []providers.CapabilityInput
 		if err := json.Unmarshal(model.Capabilities, &capabilities); err != nil {
 			return providers.DraftModel{}, err
@@ -195,7 +143,7 @@ type storedPair struct {
 	state storedSlot
 }
 
-func parseSlotRow(row slotRow, grant bool) (storedPair, error) {
+func parseSlotRow(row providers.SlotSnapshot, grant bool) (storedPair, error) {
 	var restrictions providers.SlotRestrictions
 	if err := json.Unmarshal(row.Restrictions, &restrictions); err != nil {
 		return storedPair{}, err
@@ -219,13 +167,7 @@ func parseSlotRow(row slotRow, grant bool) (storedPair, error) {
 }
 
 func storedSlots(pairs []storedPair) map[string]storedSlot {
-	return maps.Collect(func(yield func(string, storedSlot) bool) {
-		for _, pair := range pairs {
-			if !yield(strings.TrimSpace(pair.name), pair.state) {
-				return
-			}
-		}
-	})
+	return promotion.Associate(pairs, func(pair storedPair) (string, storedSlot) { return strings.TrimSpace(pair.name), pair.state })
 }
 
 func storedCredential(grant, stored bool) SlotCredential {

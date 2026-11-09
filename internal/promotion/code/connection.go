@@ -2,10 +2,8 @@ package code
 
 import (
 	"context"
-	"errors"
 	"slices"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -60,14 +58,14 @@ func (c Connection) resolve(ctx context.Context, q access.Queryer, name, project
 		return pin{}, err
 	}
 	configuration := prepared.Configuration()
-	var id string
-	var current providers.Configuration
-	switch err := q.QueryRow(ctx, `SELECT id::text,configuration FROM olp.providers WHERE lower(name)=lower($1) AND project_id=$2`, name, project).Scan(&id, &current); {
-	case errors.Is(err, pgx.ErrNoRows):
-		return pin{}, access.Invalid("code.routes.published.connections", "Create the destination provider before freezing its connection.")
-	case err != nil:
+	target, err := providers.ReadProjectProvider(ctx, q, name, project)
+	if err != nil {
 		return pin{}, err
 	}
+	if target == nil {
+		return pin{}, access.Invalid("code.routes.published.connections", "Create the destination provider before freezing its connection.")
+	}
+	id, current := target.ID, target.Configuration
 	if configuration.Kind != current.Kind || configuration.AuthMode != current.AuthMode || configuration.ProfileID != current.ProfileID {
 		return pin{}, access.Invalid("code.routes.published.connections", "Frozen connections must retain the destination provider's kind, authentication and profile.")
 	}
@@ -88,7 +86,7 @@ func enrolled(ctx context.Context, q access.Queryer, providerID string, configur
 		if account.input.ProviderID != providerID || !slices.Contains(members, account.to.id) {
 			continue
 		}
-		matches, err := exists(ctx, q, `SELECT coalesce(plugin_digest=$2 AND profile_id=$3,false) FROM olp.provider_credentials WHERE id=$1`, account.input.CredentialID, configuration.ProfileRevision, configuration.ProfileID)
+		matches, err := providers.CredentialEnrolledFor(ctx, q, account.input.CredentialID, configuration.ProfileRevision, configuration.ProfileID)
 		if err != nil {
 			return err
 		}

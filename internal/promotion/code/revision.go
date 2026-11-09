@@ -21,35 +21,33 @@ type portableRevision struct {
 }
 
 func portablePaid(ctx context.Context, q access.Queryer, frozen map[string]routing.Provider) (map[string]PaidConnection, error) {
-	ids := sortedKeys(frozen)
-	connections, err := promotion.TryMapIndex(ids, func(_ int, id string) (PaidConnection, error) { return portablePaidConnection(ctx, q, frozen[id]) })
+	connections, err := promotion.TryMap(slices.Sorted(maps.Keys(frozen)), func(id string) (PaidConnection, error) { return portablePaidConnection(ctx, q, frozen[id]) })
 	if err != nil {
 		return nil, err
 	}
-	return keyed(promotion.Map(connections, func(c PaidConnection) string { return c.Provider.Name }), connections), nil
+	return promotion.Index(connections, func(c PaidConnection) string { return c.Provider.Name }), nil
 }
 
 func portablePaidConnection(ctx context.Context, q access.Queryer, frozen routing.Provider) (PaidConnection, error) {
 	if frozen.PendingCommitment != nil {
 		return PaidConnection{}, access.Invalid("code.paid_connections", "Publish the pending monetary commitment before exporting this paid provider.")
 	}
-	var labels []routing.RevisionModel
-	var name, project string
-	if err := q.QueryRow(ctx, `SELECT p.name,j.name,v.models FROM olp.provider_revisions v JOIN olp.providers p ON p.id=v.provider_id JOIN olp.projects j ON j.id=p.project_id WHERE v.id=$1 AND p.id=$2`, frozen.RevisionID, frozen.ID).Scan(&name, &project, &labels); err != nil {
-		return PaidConnection{}, err
-	}
-	revision, err := revisionOf(frozen, labels)
+	labels, err := providers.ReadRevisionLabels(ctx, q, frozen.RevisionID, frozen.ID)
 	if err != nil {
 		return PaidConnection{}, err
 	}
-	entry, err := provider.FromRevision(name, &project, revision.configuration, revision.models, revision.slots)
+	revision, err := revisionOf(frozen, labels.Models)
+	if err != nil {
+		return PaidConnection{}, err
+	}
+	entry, err := provider.FromRevision(labels.Provider, &labels.Project, revision.configuration, revision.models, revision.slots)
 	if err != nil {
 		return PaidConnection{}, err
 	}
 	restricted := slices.DeleteFunc(slices.Clone(frozen.Slots), func(slot routing.Slot) bool { return len(slot.AllowedAPIKeys) == 0 })
-	refs := keyed(promotion.Map(restricted, func(slot routing.Slot) string { return slot.Name }), promotion.Map(restricted, func(slot routing.Slot) []string {
-		return promotion.Map(slot.AllowedAPIKeys, func(id string) string { return "code/key/" + id })
-	}))
+	refs := promotion.Associate(restricted, func(slot routing.Slot) (string, []string) {
+		return slot.Name, promotion.Map(slot.AllowedAPIKeys, func(id string) string { return codeRef("key", id) })
+	})
 	return PaidConnection{Provider: entry, SlotKeyRefs: refs}, nil
 }
 

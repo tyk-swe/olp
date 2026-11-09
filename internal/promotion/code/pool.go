@@ -36,9 +36,9 @@ func parsePool(e contract.ConfigurationCodePool, accounts []Account) (Pool, erro
 	if err != nil {
 		return Pool{}, err
 	}
-	keys := present(e.ApiKeyRefs)
+	keys := e.ApiKeyRefs.GetOrEmpty()
 	pool := Pool{ID: e.Id.String(), Project: e.Project, Name: e.Name, OwnerRef: owner, Accounts: weights, APIKeyRefs: promotion.NonNil(slices.Clone(keys))}
-	placeholder := access.CodePoolInput{ProjectID: pool.ID, Name: pool.Name, Kind: string(e.Kind), OwnerUserID: placeholderOf(owner, pool.ID), AccountIDs: sortedKeys(weights), AccountWeights: weights, APIKeyIDs: promotion.Map(keys, func(string) string { return pool.ID })}
+	placeholder := access.CodePoolInput{ProjectID: pool.ID, Name: pool.Name, Kind: string(e.Kind), OwnerUserID: placeholderOf(owner, pool.ID), AccountIDs: promotion.NonNil(slices.Sorted(maps.Keys(weights))), AccountWeights: weights, APIKeyIDs: promotion.Map(keys, func(string) string { return pool.ID })}
 	if err := placeholder.Validate(); err != nil {
 		return Pool{}, err
 	}
@@ -56,10 +56,10 @@ func poolAccounts(e contract.ConfigurationCodePool, accounts []Account) (map[str
 			}
 		}
 	})
-	declared := func(id string) bool {
-		return slices.ContainsFunc(accounts, func(a Account) bool { return a.ID == id && strings.EqualFold(a.Project, e.Project) })
+	undeclared := func(id string) bool {
+		return !slices.ContainsFunc(accounts, func(a Account) bool { return a.ID == id && strings.EqualFold(a.Project, e.Project) })
 	}
-	if len(weights) != len(e.Accounts) || !all(slices.Collect(maps.Keys(weights)), declared) {
+	if len(weights) != len(e.Accounts) || slices.ContainsFunc(slices.Collect(maps.Keys(weights)), undeclared) {
 		return nil, access.Invalid("code.pools.accounts", "Every account must resolve within the pool project.")
 	}
 	return weights, nil
@@ -71,10 +71,6 @@ func canonical(ref string) string {
 		return ""
 	}
 	return id
-}
-
-func all[T any](items []T, keep func(T) bool) bool {
-	return !slices.ContainsFunc(items, func(item T) bool { return !keep(item) })
 }
 
 func placeholderOf(ref *string, id string) *string {
@@ -99,7 +95,14 @@ func (p Pool) ownerRefs() []string {
 }
 
 func readPools(ctx context.Context, q access.Queryer) ([]Pool, error) {
-	return promotion.Rows(ctx, q, pgx.RowToStructByPos[Pool], `SELECT x.id::text,p.name,x.name,CASE WHEN x.owner_user_id IS NULL THEN NULL ELSE 'code/user/'||x.owner_user_id END,coalesce((SELECT jsonb_object_agg(account_id::text,weight) FROM olp.code_pool_accounts WHERE pool_id=x.id),'{}'),ARRAY(SELECT 'code/key/'||api_key_id FROM olp.code_pool_keys WHERE pool_id=x.id ORDER BY api_key_id) FROM olp.code_pools x JOIN olp.projects p ON p.id=x.project_id`)
+	pools, err := access.ReadCodePools(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	return promotion.Map(pools, func(p access.CodePool) Pool {
+		keys := promotion.Map(p.APIKeyIDs, func(id string) string { return codeRef("key", id) })
+		return Pool{ID: p.ID, Project: p.Project, Name: p.Name, OwnerRef: optionalRef("user", p.OwnerUserID), Accounts: p.AccountWeights, APIKeyRefs: keys}
+	}), nil
 }
 
 func renderPool(p Pool) (contract.ConfigurationCodePool, error) {
@@ -138,7 +141,11 @@ func resolvePool(ctx context.Context, q access.Queryer, p Pool, desired Desired,
 	unique := !slices.ContainsFunc(desired.Code.Pools, func(other Pool) bool {
 		return other.ID != p.ID && strings.EqualFold(other.Project, p.Project) && other.Name == p.Name && other.kind() == p.kind() && boundOr(other.OwnerRef, desired.bindings.users) == boundOr(p.OwnerRef, desired.bindings.users)
 	})
-	to, err := mapped(ctx, q, p.ID, projectID, derived, unique, `SELECT id::text,project_id::text,(kind=$3 AND owner_user_id IS NOT DISTINCT FROM $4::uuid),(name=$2 AND kind=$3 AND owner_user_id IS NOT DISTINCT FROM $4::uuid) FROM olp.code_pools WHERE id=$5 OR id=$6 OR (project_id=$1 AND name=$2 AND kind=$3 AND owner_user_id IS NOT DISTINCT FROM $4::uuid)`, projectID, p.Name, p.kind(), ownerID, p.ID, derived)
+	candidates, err := access.CodePoolCandidates(ctx, q, p.ID, derived, access.CodePoolMatch{ProjectID: projectID, Name: p.Name, Kind: p.kind(), OwnerUserID: ownerID})
+	if err != nil {
+		return resolved[access.CodePoolInput]{}, err
+	}
+	to, err := mapped(p.ID, projectID, derived, unique, candidates)
 	weights := maps.Collect(func(yield func(string, int64) bool) {
 		for ref, weight := range p.Accounts {
 			if !yield(accountIDs[ref], weight) {
@@ -146,12 +153,12 @@ func resolvePool(ctx context.Context, q access.Queryer, p Pool, desired Desired,
 			}
 		}
 	})
-	input := access.CodePoolInput{ProjectID: projectID, Name: p.Name, Kind: p.kind(), OwnerUserID: ownerID, AccountIDs: sortedKeys(weights), AccountWeights: weights, APIKeyIDs: promotion.NonNil(slices.Sorted(slices.Values(keys)))}
+	input := access.CodePoolInput{ProjectID: projectID, Name: p.Name, Kind: p.kind(), OwnerUserID: ownerID, AccountIDs: promotion.NonNil(slices.Sorted(maps.Keys(weights))), AccountWeights: weights, APIKeyIDs: promotion.NonNil(slices.Sorted(slices.Values(keys)))}
 	return resolved[access.CodePoolInput]{ref: p.ID, to: to, input: input}, err
 }
 
 func poolChange(ctx context.Context, q access.Queryer, p resolved[access.CodePoolInput]) (change, error) {
-	action, err := compared(ctx, q, p, `SELECT jsonb_build_object('project_id',project_id,'name',name,'kind',kind,'owner_user_id',owner_user_id,'account_ids',ARRAY(SELECT account_id FROM olp.code_pool_accounts WHERE pool_id=x.id ORDER BY account_id),'account_weights',coalesce((SELECT jsonb_object_agg(account_id::text,weight) FROM olp.code_pool_accounts WHERE pool_id=x.id),'{}'),'api_key_ids',ARRAY(SELECT api_key_id FROM olp.code_pool_keys WHERE pool_id=x.id ORDER BY api_key_id)) FROM olp.code_pools x WHERE id=$1`)
+	action, err := compared(ctx, q, p, access.ReadCodePoolInput)
 	return change{
 		item: promotion.Item{Kind: contract.ConfigurationPlanItemKindCodePool, Key: p.ref, Action: action},
 		write: func(ctx context.Context, tx pgx.Tx, principal access.Principal) error {

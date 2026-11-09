@@ -16,7 +16,6 @@ import (
 	"github.com/tyk-swe/olp/internal/promotion/provider"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routes"
-	"github.com/tyk-swe/olp/internal/routing"
 )
 
 type Route struct {
@@ -38,16 +37,6 @@ type scope struct {
 type routeInput struct {
 	draft     routes.CodeRouteInput
 	published *frozen
-}
-
-type storedRoute struct {
-	ID          string
-	Project     string
-	Slug        string
-	Draft       codemode.Route
-	Published   *codemode.Route
-	Connections map[string]providers.Configuration
-	Paid        map[string]routing.Provider
 }
 
 func parseRoute(e contract.ConfigurationCodeRoute, prior []contract.ConfigurationCodeRoute, accounts []Account, pools []Pool, names promotion.Names, deps provider.Deps) (Route, error) {
@@ -156,7 +145,7 @@ func renderRoute(r Route) (contract.ConfigurationCodeRoute, error) {
 }
 
 func readRoutes(ctx context.Context, q access.Queryer) ([]Route, error) {
-	stored, err := promotion.Rows(ctx, q, pgx.RowToStructByPos[storedRoute], `SELECT x.id::text,p.name,x.slug,x.draft,v.document,coalesce((SELECT jsonb_object_agg(p.name,c.value) FROM jsonb_each(v.connections) c JOIN olp.providers p ON p.id::text=c.key),'{}'),coalesce(v.paid_connections,'{}') FROM olp.code_routes x JOIN olp.projects p ON p.id=x.project_id LEFT JOIN olp.code_route_revisions v ON v.id=x.latest_revision_id`)
+	stored, err := routes.ReadStoredCodeRoutes(ctx, q)
 	if err != nil {
 		return nil, err
 	}
@@ -164,10 +153,10 @@ func readRoutes(ctx context.Context, q access.Queryer) ([]Route, error) {
 	if err != nil {
 		return nil, err
 	}
-	return promotion.TryMapIndex(stored, func(_ int, s storedRoute) (Route, error) { return s.portable(ctx, q, slots) })
+	return promotion.TryMap(stored, func(s routes.StoredCodeRoute) (Route, error) { return portableRoute(ctx, q, s, slots) })
 }
 
-func (s storedRoute) portable(ctx context.Context, q access.Queryer, slots map[string]PaidTarget) (Route, error) {
+func portableRoute(ctx context.Context, q access.Queryer, s routes.StoredCodeRoute, slots map[string]PaidTarget) (Route, error) {
 	draft, err := portablePolicy(s.Draft, slots)
 	if err != nil {
 		return Route{}, err
@@ -181,14 +170,18 @@ func resolveRoute(ctx context.Context, q access.Queryer, r Route, in scope) (res
 	if err != nil {
 		return resolved[routeInput]{}, err
 	}
-	taken, err := exists(ctx, q, `SELECT EXISTS(SELECT 1 FROM olp.routes WHERE slug=$1) OR EXISTS(SELECT 1 FROM olp.route_drafts WHERE slug=$1) OR EXISTS(SELECT 1 FROM olp.code_routes WHERE slug=$1 AND project_id<>$2)`, r.Slug, projectID)
+	taken, err := routes.CodeSlugTaken(ctx, q, r.Slug, projectID)
 	if err != nil {
 		return resolved[routeInput]{}, err
 	}
 	if taken {
 		return resolved[routeInput]{}, access.Invalid("code.routes.slug", "Choose an unused slug or a code route in the destination project.")
 	}
-	to, err := lookup(ctx, q, access.NewID(), `SELECT id::text FROM olp.code_routes WHERE slug=$1 AND project_id=$2`, r.Slug, projectID)
+	ids, err := routes.CodeRouteIDs(ctx, q, r.Slug, projectID)
+	if err != nil {
+		return resolved[routeInput]{}, err
+	}
+	to, err := lookup(access.NewID(), ids)
 	if err != nil {
 		return resolved[routeInput]{}, err
 	}
@@ -221,29 +214,26 @@ func routeAction(ctx context.Context, q access.Queryer, r resolved[routeInput]) 
 	if !r.to.existing {
 		return contract.ConfigurationPlanItemActionCreate, r.input.published != nil, nil
 	}
-	var draft codemode.Route
-	var document *codemode.Route
-	var connections map[string]providers.Configuration
-	var paid map[string]routing.Provider
-	if err := q.QueryRow(ctx, `SELECT x.draft,v.document,coalesce(v.connections,'{}'),coalesce(v.paid_connections,'{}') FROM olp.code_routes x LEFT JOIN olp.code_route_revisions v ON v.id=x.latest_revision_id WHERE x.id=$1`, r.to.id).Scan(&draft, &document, &connections, &paid); err != nil {
-		return "", false, err
-	}
-	sameDraft, err := same(inputOf(draft), r.input.draft)
+	current, err := routes.ReadCodeRouteState(ctx, q, r.to.id)
 	if err != nil {
 		return "", false, err
 	}
-	samePublication, err := r.input.published.same(document, connections, paid)
+	sameDraft, err := same(inputOf(current.Draft), r.input.draft)
+	if err != nil {
+		return "", false, err
+	}
+	samePublication, err := r.input.published.same(current.Published, current.Connections, current.Paid)
 	return replacement(!sameDraft || !samePublication), !samePublication, err
 }
 
 func saveRoute(ctx context.Context, tx pgx.Tx, p access.Principal, r resolved[routeInput], republished bool) error {
 	published := r.input.published
 	if republished && published != nil {
-		saved, err := routes.SaveCodeRoute(ctx, tx, p, r.to.id, access.NewID(), published.policy, r.to.existing)
+		saved, err := routes.SaveCodeRoute(ctx, tx, p, r.to.id, access.NewID(), published.Policy, r.to.existing)
 		if err != nil {
 			return err
 		}
-		if _, err := routes.SaveCodePublication(ctx, tx, p, r.to.id, saved.Route, published.connections, published.paid); err != nil {
+		if _, err := routes.SaveCodePublication(ctx, tx, p, r.to.id, saved.Route, published.Connections, published.Paid); err != nil {
 			return err
 		}
 	}

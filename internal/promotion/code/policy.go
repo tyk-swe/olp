@@ -38,10 +38,10 @@ type Policy struct {
 func policyOf(e contract.ConfigurationCodeRoutePolicy) Policy {
 	return Policy{
 		Pool: e.Pool.String(), Models: promotion.NonNil(slices.Clone(e.Models)), Enabled: e.Enabled,
-		ModelPools: maps.Clone(orEmpty(e.ModelPools)), Aliases: maps.Clone(orEmpty(e.Aliases)), InitialRecoveryAttempts: promotion.ValueOf(e.InitialRecoveryAttempts),
+		ModelPools: maps.Collect(maps.All(promotion.ValueOf(e.ModelPools))), Aliases: maps.Collect(maps.All(promotion.ValueOf(e.Aliases))), InitialRecoveryAttempts: promotion.ValueOf(e.InitialRecoveryAttempts),
 		ModelRewriting: promotion.ValueOf(e.ModelRewriting), CodexCLIIdentity: promotion.ValueOf(e.CodexCliIdentity), ChatToCodex: promotion.ValueOf(e.ChatToCodex), MessagesToCodex: promotion.ValueOf(e.MessagesToCodex),
 		ChatToAntigravity: promotion.ValueOf(e.ChatToAntigravity), AllowanceOrdering: promotion.ValueOf(e.AllowanceOrdering), PaidParticipation: promotion.ValueOf(e.PaidParticipation),
-		PaidTargets: mappedValues(orEmpty(e.PaidTargets), targetOf), PaidFallbackTargets: mappedValues(orEmpty(e.PaidFallbackTargets), targetOf),
+		PaidTargets: mappedValues(promotion.ValueOf(e.PaidTargets), targetOf), PaidFallbackTargets: mappedValues(promotion.ValueOf(e.PaidFallbackTargets), targetOf),
 		Tools: toolsOf(promotion.Pointer(e.Tools)), MaxBodyBytes: widened(promotion.Pointer(e.MaxBodyBytes)),
 	}
 }
@@ -121,7 +121,7 @@ func cloned(tools *codemode.ResearchTools) *codemode.ResearchTools {
 func (p Policy) paidTargets() iter.Seq2[string, PaidTarget] {
 	return func(yield func(string, PaidTarget) bool) {
 		for _, targets := range []map[string]PaidTarget{p.PaidTargets, p.PaidFallbackTargets} {
-			for _, model := range sortedKeys(targets) {
+			for _, model := range slices.Sorted(maps.Keys(targets)) {
 				if !yield(model, targets[model]) {
 					return
 				}
