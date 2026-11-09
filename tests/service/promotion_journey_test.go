@@ -4,6 +4,7 @@ package service_test
 
 import (
 	"encoding/json"
+	"maps"
 	"net/http"
 	"reflect"
 	"slices"
@@ -57,6 +58,32 @@ func testPromotionRoundTrip(t *testing.T, parent *service, owner *caller, fixtur
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("v1 content policy converted to %v, want %v", got, want)
 	}
+
+	s.want(operator, "POST", "/api/v1/configuration/apply", map[string]any{"document": installationPolicyDocument(document)}, idempotent(), http.StatusOK)
+	policies := items(s.want(operator, "GET", "/api/v1/guardrail-policies", nil, nil, http.StatusOK)["items"])
+	index := slices.IndexFunc(policies, func(p map[string]any) bool {
+		return p["name"] == "installation-wide" && p["project_id"] == "installation"
+	})
+	if index < 0 {
+		t.Fatalf("installation policy is not listed: %v", policies)
+	}
+	installed := policies[index]
+	s.want(operator, "POST", "/api/v1/guardrail-attachments", map[string]any{
+		"scope": "installation", "scope_id": "installation", "policy_revision_id": installed["revision_id"], "order": 1,
+	}, idempotent(), http.StatusCreated)
+}
+
+func installationPolicyDocument(exported map[string]any) map[string]any {
+	guardrails, _ := exported["guardrails"].([]any)
+	policies, _ := exported["guardrail_policies"].([]any)
+	document := maps.Clone(exported)
+	document["guardrails"] = slices.Concat([]any{map[string]any{
+		"project": "", "name": "installation-keywords", "type": "builtin.keywords", "configuration": map[string]any{"words": []any{"forbidden"}},
+	}}, guardrails)
+	document["guardrail_policies"] = slices.Concat([]any{map[string]any{
+		"project": "", "name": "installation-wide", "entries": []any{map[string]any{"guardrail": "installation-keywords", "phase": "input", "action": "block"}},
+	}}, policies)
+	return document
 }
 
 func (s *service) seedPromotion(owner *caller, fixture canaryFixture) *caller {

@@ -601,20 +601,21 @@ func (p ManagedPolicy) MarshalJSON() ([]byte, error) {
 }
 
 func validateAttachmentPolicy(ctx context.Context, tx pgx.Tx, p access.Principal, in Attachment) error {
-	var project string
+	var project *string
 	err := tx.QueryRow(ctx, "SELECT p.project_id::text FROM olp.guardrail_policies p JOIN olp.guardrail_policy_revisions v ON v.policy_id=p.id WHERE v.id=$1 AND p.retired_at IS NULL", in.PolicyRevisionID).Scan(&project)
 	if err != nil {
 		return access.Invalid("policy_revision_id", "Choose an existing policy revision.")
 	}
-	if err = p.Project(&project, access.Change); err != nil {
+	if err = p.Project(project, access.Change); err != nil {
 		return err
 	}
-	if in.Scope == "project" && project != in.ScopeID {
+	ownedBy := func(id string) bool { return project != nil && *project == id }
+	if in.Scope == "project" && !ownedBy(in.ScopeID) {
 		return access.Invalid("scope_id", "The policy must belong to this project.")
 	}
 	if in.Scope == "route" || in.Scope == "api-key" || in.Scope == "toolset" {
 		owning, ownerErr := attachmentProject(ctx, tx, in.Scope, in.ScopeID)
-		if ownerErr != nil || owning == nil || *owning != project {
+		if ownerErr != nil || owning == nil || !ownedBy(*owning) {
 			return access.Invalid("scope_id", "The policy must belong to this project.")
 		}
 		if in.Scope == "route" && in.Order == 0 {
