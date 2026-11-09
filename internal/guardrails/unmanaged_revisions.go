@@ -27,7 +27,7 @@ func ReadUnmanagedActiveRevisions(ctx context.Context, q access.Queryer) ([]Revi
 
 func ReadUnmanagedPolicyRevisions(ctx context.Context, q access.Queryer) ([]NamedPolicyRevision, error) {
 	rows, err := q.Query(ctx, `SELECT v.id::text,p.name,(v.id=p.active_revision_id) FROM olp.guardrail_policies p JOIN olp.guardrail_policy_revisions v ON v.policy_id=p.id
- WHERE p.managed_route_revision_id IS NULL AND (v.id=p.active_revision_id OR v.id IN(SELECT policy_revision_id FROM olp.guardrail_attachments UNION SELECT policy_revision_id FROM olp.guardrail_draft_attachments))`)
+ WHERE p.managed_route_revision_id IS NULL AND ((p.retired_at IS NULL AND v.id=p.active_revision_id) OR v.id IN(SELECT policy_revision_id FROM olp.guardrail_attachments UNION SELECT policy_revision_id FROM olp.guardrail_draft_attachments))`)
 	if err != nil {
 		return nil, err
 	}
