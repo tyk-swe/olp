@@ -2,7 +2,7 @@ package gateway
 
 import (
 	"bufio"
-	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/batches"
+	"github.com/tyk-swe/olp/internal/batches/upstream"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -21,108 +23,105 @@ import (
 
 var errGeminiManagedBatchState = errors.New("Gemini managed batch state is unknown")
 
-func geminiManagedBatchMetadata(body []byte, model, localInput string, manifest batchManifest, old json.RawMessage, clientMetadata json.RawMessage) (json.RawMessage, string, error) {
-	var provider map[string]json.RawMessage
-	if json.Unmarshal(body, &provider) != nil || provider == nil {
-		return nil, "", errors.New("Gemini batch object is malformed")
+type geminiManagedCounts struct {
+	Total     *int64 `json:"total,omitempty"`
+	Completed *int64 `json:"completed,omitempty"`
+	Failed    *int64 `json:"failed,omitempty"`
+}
+
+type geminiManagedRecord struct {
+	batchManifest
+	ProviderBatch    json.RawMessage      `json:"provider_batch"`
+	UpstreamModel    string               `json:"upstream_model"`
+	CompletionWindow string               `json:"completion_window"`
+	LocalInputFileID string               `json:"local_input_file_id"`
+	Status           string               `json:"status"`
+	ClientMetadata   json.RawMessage      `json:"client_metadata,omitempty"`
+	CreatedAt        *int64               `json:"created_at,omitempty"`
+	CompletedAt      *int64               `json:"completed_at,omitempty"`
+	RequestCounts    *geminiManagedCounts `json:"request_counts,omitempty"`
+	ResponsesFile    string               `json:"gemini_responses_file,omitempty"`
+}
+
+type geminiManagedState struct {
+	metadata json.RawMessage
+	status   string
+}
+
+func newGeminiManagedRecord(localInput string, manifest batchManifest, clientMetadata json.RawMessage) geminiManagedRecord {
+	record := geminiManagedRecord{batchManifest: manifest, CompletionWindow: "24h", LocalInputFileID: localInput}
+	if string(clientMetadata) != "null" {
+		record.ClientMetadata = clientMetadata
 	}
-	status, ok := batches.ManagedStatus("gemini_managed", geminiBatchState(body))
+	return record
+}
+
+func decodeGeminiManagedRecord(metadata json.RawMessage) (geminiManagedRecord, error) {
+	var record geminiManagedRecord
+	if err := json.Unmarshal(metadata, &record); err != nil {
+		return geminiManagedRecord{}, errGeminiBatchFidelity
+	}
+	return record, nil
+}
+
+func geminiManagedBatchMetadata(body []byte, model string, base geminiManagedRecord) (geminiManagedState, error) {
+	var provider struct {
+		State    string `json:"state"`
+		Metadata struct {
+			State      string            `json:"state"`
+			CreateTime json.RawMessage   `json:"createTime"`
+			EndTime    json.RawMessage   `json:"endTime"`
+			BatchStats *geminiBatchStats `json:"batchStats"`
+		} `json:"metadata"`
+		BatchStats *geminiBatchStats `json:"batchStats"`
+	}
+	if err := json.Unmarshal(body, &provider); err != nil {
+		return geminiManagedState{}, errors.New("Gemini batch object is malformed")
+	}
+	status, ok := upstream.GeminiStatus(cmp.Or(provider.Metadata.State, provider.State))
 	if !ok {
-		return nil, "", errGeminiManagedBatchState
+		return geminiManagedState{}, errGeminiManagedBatchState
 	}
-	metadata := map[string]json.RawMessage{}
-	metadata["provider_batch"] = batches.GeminiMetadata(body, model, "", "")
-	metadata["upstream_model"], _ = json.Marshal(model)
-	metadata["adapter"], _ = json.Marshal("gemini_managed")
-	metadata["endpoint"], _ = json.Marshal(manifest.Endpoint)
-	metadata["line_operation"], _ = json.Marshal(manifest.LineOperation)
-	metadata["line_count"], _ = json.Marshal(manifest.LineCount)
-	metadata["manifest_digest"], _ = json.Marshal(manifest.ManifestDigest)
-	metadata["completion_window"], _ = json.Marshal("24h")
-	metadata[batchLocalInputKey], _ = json.Marshal(localInput)
-	metadata["status"], _ = json.Marshal(status)
-	if len(clientMetadata) > 0 && string(clientMetadata) != "null" {
-		metadata["client_metadata"] = bytes.Clone(clientMetadata)
-	} else if len(old) > 0 {
-		var prior map[string]json.RawMessage
-		if json.Unmarshal(old, &prior) == nil {
-			metadata["client_metadata"] = prior["client_metadata"]
-			for _, field := range append(batchManifestFields(), "completion_window", batchLocalInputKey) {
-				if value := prior[field]; len(value) > 0 {
-					metadata[field] = value
-				}
-			}
-		}
+	lifecycle, err := upstream.GeminiMetadata(body, model, "", "")
+	if err != nil {
+		return geminiManagedState{}, err
 	}
-	var geminiMetadata map[string]json.RawMessage
-	_ = json.Unmarshal(provider["metadata"], &geminiMetadata)
-	if created, ok := providerUnix(geminiMetadata["createTime"]); ok {
-		metadata["created_at"], _ = json.Marshal(created)
-	}
-	if completed, ok := providerUnix(geminiMetadata["endTime"]); ok {
-		metadata["completed_at"], _ = json.Marshal(completed)
-	}
-	if counts := geminiManagedRequestCounts(body); counts != nil {
-		metadata["request_counts"], _ = json.Marshal(counts)
-	}
-	encoded, err := json.Marshal(metadata)
-	return encoded, status, err
+	record := base
+	record.Adapter = connectors.BatchGeminiManaged
+	record.ProviderBatch, record.UpstreamModel, record.Status = lifecycle, model, status
+	record.CreatedAt = optionalUnix(provider.Metadata.CreateTime)
+	record.CompletedAt = optionalUnix(provider.Metadata.EndTime)
+	record.RequestCounts = cmp.Or(provider.Metadata.BatchStats, provider.BatchStats).counts()
+	encoded, err := json.Marshal(record)
+	return geminiManagedState{metadata: encoded, status: status}, err
 }
 
-func geminiManagedManifest(metadata []byte) batchManifest {
-	var manifest batchManifest
-	var fields map[string]json.RawMessage
-	if json.Unmarshal(metadata, &fields) != nil {
-		return manifest
-	}
-	_ = json.Unmarshal(fields["adapter"], &manifest.Adapter)
-	_ = json.Unmarshal(fields["endpoint"], &manifest.Endpoint)
-	_ = json.Unmarshal(fields["line_operation"], &manifest.LineOperation)
-	_ = json.Unmarshal(fields["line_count"], &manifest.LineCount)
-	_ = json.Unmarshal(fields["manifest_digest"], &manifest.ManifestDigest)
-	return manifest
+type geminiBatchStats struct {
+	RequestCount *upstream.Count `json:"requestCount"`
+	Successful   *upstream.Count `json:"successfulRequestCount"`
+	Failed       *upstream.Count `json:"failedRequestCount"`
 }
 
-func geminiManagedRequestCounts(body []byte) map[string]int64 {
-	var root map[string]json.RawMessage
-	_ = json.Unmarshal(body, &root)
-	var metadata map[string]json.RawMessage
-	_ = json.Unmarshal(root["metadata"], &metadata)
-	var stats map[string]json.RawMessage
-	_ = json.Unmarshal(metadata["batchStats"], &stats)
-	if stats == nil {
-		_ = json.Unmarshal(root["batchStats"], &stats)
-	}
-	if stats == nil {
+func (s *geminiBatchStats) counts() *geminiManagedCounts {
+	if s == nil || s.RequestCount == nil && s.Successful == nil && s.Failed == nil {
 		return nil
 	}
-	counts := map[string]int64{}
-	for source, target := range map[string]string{
-		"requestCount": "total", "successfulRequestCount": "completed", "failedRequestCount": "failed",
-	} {
-		raw, present := stats[source]
-		if !present {
-			continue
-		}
-		var text string
-		if json.Unmarshal(raw, &text) == nil {
-			value, err := strconv.ParseInt(text, 10, 64)
-			if err != nil || value < 0 {
-				return nil
-			}
-			counts[target] = value
-			continue
-		}
-		var value int64
-		if json.Unmarshal(raw, &value) != nil || value < 0 {
-			return nil
-		}
-		counts[target] = value
-	}
-	if len(counts) == 0 {
+	return &geminiManagedCounts{Total: countValue(s.RequestCount), Completed: countValue(s.Successful), Failed: countValue(s.Failed)}
+}
+
+func countValue(count *upstream.Count) *int64 {
+	if count == nil {
 		return nil
 	}
-	return counts
+	return count.Int64()
+}
+
+func optionalUnix(raw json.RawMessage) *int64 {
+	seconds, ok := upstream.UnixSeconds(raw)
+	if !ok {
+		return nil
+	}
+	return &seconds
 }
 
 func (s *Server) mapGeminiManagedResultFiles(ctx context.Context, owner *resources.Resource, fileName string) (*resources.Resource, *resources.Resource, error) {
@@ -130,83 +129,68 @@ func (s *Server) mapGeminiManagedResultFiles(ctx context.Context, owner *resourc
 	if err != nil {
 		return nil, nil, errGeminiBatchFidelity
 	}
-	var ownerMetadata map[string]json.RawMessage
-	_ = json.Unmarshal(owner.Metadata, &ownerMetadata)
-	views := make([]*resources.Resource, 0, 2)
-	for _, role := range []string{"output", "error"} {
-		metadata := map[string]any{
-			"upstream_model": resourceModel(owner), "adapter": "gemini_managed", "role": role,
-			"gemini_responses_file": fileName, "provider_file": map[string]any{"filename": fileID + ".jsonl", "purpose": "batch"},
+	batch, err := decodeGeminiManagedRecord(owner.Metadata)
+	if err != nil {
+		return nil, nil, err
+	}
+	view := func(role string) *resources.Resource {
+		metadata := managedFileRecord{
+			batchManifest: batch.batchManifest.withAdapter(connectors.BatchGeminiManaged), UpstreamModel: resourceModel(owner), Role: role,
+			ResponsesFile: fileName, CompletionWindow: batch.CompletionWindow,
+			ProviderFile: managedFileObject{Filename: new(fileID + ".jsonl"), Purpose: new("batch")},
 		}
-		for _, field := range append(batchManifestFields(), "completion_window") {
-			if raw, ok := ownerMetadata[field]; ok {
-				metadata[field] = raw
-			}
-		}
-		views = append(views, &resources.Resource{
+		return &resources.Resource{
 			Kind: resources.KindFile, APIKeyID: owner.APIKeyID, RouteSlug: owner.RouteSlug,
 			ProviderID: owner.ProviderID, ProviderRevisionID: owner.ProviderRevisionID, RouteRevisionID: owner.RouteRevisionID,
 			TargetID: owner.TargetID, SlotID: owner.SlotID, CredentialID: owner.CredentialID,
 			ParentID:   new(owner.UUID),
 			UpstreamID: fileName + "#" + role, State: "processed", Metadata: mustJSON(metadata),
-		})
+		}
 	}
 	commitCtx, stop := resourceCommitContext(ctx)
 	defer stop()
-	return s.deps.Resources.EnsureGeminiResultViews(commitCtx, fileName, views[0], views[1])
+	return s.deps.Resources.EnsureGeminiResultViews(commitCtx, fileName, view("output"), view("error"))
 }
 
-func geminiManagedFileName(resource *resources.Resource) string {
-	var metadata struct {
-		ResponseFile string `json:"gemini_responses_file"`
+func geminiManagedFileName(resource *resources.Resource) (string, error) {
+	record, err := decodeManagedFileRecord(resource.Metadata)
+	if err != nil {
+		return "", err
 	}
-	_ = json.Unmarshal(resource.Metadata, &metadata)
-	if metadata.ResponseFile != "" {
-		return metadata.ResponseFile
-	}
-	return resource.UpstreamID
+	return cmp.Or(record.ResponsesFile, resource.UpstreamID), nil
 }
 
 func (s *Server) geminiManagedBatchObject(ctx context.Context, resource *resources.Resource) ([]byte, error) {
-	var metadata map[string]json.RawMessage
-	if json.Unmarshal(resource.Metadata, &metadata) != nil || metadata == nil {
+	record, err := decodeGeminiManagedRecord(resource.Metadata)
+	if err != nil || len(record.ProviderBatch) == 0 {
 		return nil, errGeminiBatchFidelity
 	}
-	var providerBatch json.RawMessage
-	if json.Unmarshal(metadata["provider_batch"], &providerBatch) != nil || len(providerBatch) == 0 {
-		return nil, errGeminiBatchFidelity
-	}
-	var status string
-	if json.Unmarshal(metadata["status"], &status) != nil || status == "" {
+	if record.Status == "" {
 		return nil, errGeminiManagedBatchState
 	}
 	object := map[string]any{
-		"id": resource.ID, "object": "batch", "endpoint": geminiRawString(metadata["endpoint"]),
-		"input_file_id": batchLocalInput(resource), "completion_window": "24h", "status": status,
+		"id": resource.ID, "object": "batch", "endpoint": record.Endpoint,
+		"input_file_id": record.LocalInputFileID, "completion_window": "24h", "status": record.Status,
 	}
-	if created, ok := providerUnix(metadata["created_at"]); ok {
-		object["created_at"] = created
+	if record.CreatedAt != nil {
+		object["created_at"] = *record.CreatedAt
 	}
-	if completed, ok := providerUnix(metadata["completed_at"]); ok {
-		object["completed_at"] = completed
+	if record.CompletedAt != nil {
+		object["completed_at"] = *record.CompletedAt
 	}
-	if len(metadata["request_counts"]) > 0 && string(metadata["request_counts"]) != "null" {
-		var counts map[string]int64
-		if json.Unmarshal(metadata["request_counts"], &counts) != nil {
+	if record.RequestCounts != nil {
+		object["request_counts"] = record.RequestCounts
+	}
+	if len(record.ClientMetadata) > 0 {
+		object["metadata"] = record.ClientMetadata
+	}
+	if wire.BatchStageOf(record.Status) == wire.BatchTerminal {
+		batch, err := upstream.DecodeGeminiBatch(record.ProviderBatch)
+		if err != nil {
 			return nil, errGeminiBatchFidelity
 		}
-		object["request_counts"] = counts
-	}
-	if raw := metadata["client_metadata"]; len(raw) > 0 && string(raw) != "null" {
-		var clientMetadata any
-		if json.Unmarshal(raw, &clientMetadata) != nil {
-			return nil, errGeminiBatchFidelity
-		}
-		object["metadata"] = clientMetadata
-	}
-	if wire.BatchStageOf(status) == wire.BatchTerminal {
-		if responsesFile := batches.GeminiOutputFile(providerBatch); responsesFile != "" {
-			outputFile, errorFile, err := s.mapGeminiManagedResultFiles(ctx, resource, responsesFile)
+		if batch.OutputFile != "" {
+			outputFile, errorFile, err := s.mapGeminiManagedResultFiles(ctx, resource, batch.OutputFile)
 			if err != nil {
 				return nil, err
 			}
@@ -216,17 +200,12 @@ func (s *Server) geminiManagedBatchObject(ctx context.Context, resource *resourc
 	return json.Marshal(object)
 }
 
-func geminiManagedFileRole(resource *resources.Resource) string {
-	var metadata struct {
-		Role string `json:"role"`
-	}
-	_ = json.Unmarshal(resource.Metadata, &metadata)
-	return metadata.Role
-}
-
 func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWriter, x *call, resource *resources.Resource, p *pin) *Error {
-	name := geminiManagedFileName(resource)
-	fileID, err := geminiFileID(name)
+	record, err := decodeManagedFileRecord(resource.Metadata)
+	if err != nil {
+		return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The Gemini file mapping is malformed.")
+	}
+	fileID, err := geminiFileID(cmp.Or(record.ResponsesFile, resource.UpstreamID))
 	if err != nil {
 		return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The Gemini file mapping is malformed.")
 	}
@@ -262,9 +241,8 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 	}
 	defer spool.Remove(raw.Handle)
 	part := &media.Part{Handle: raw.Handle, Filename: "gemini-managed-results", ContentType: raw.ContentType, Size: raw.ContentLength, Limit: limit}
-	role := geminiManagedFileRole(resource)
-	if role != "input" {
-		part, err = s.translateGeminiManagedContent(ctx, resource.RouteSlug, part, role)
+	if record.Role != "input" {
+		part, err = s.translateGeminiManagedContent(ctx, resource.RouteSlug, part, record.Role)
 		if err != nil {
 			var tooLarge *media.TooLargeError
 			if errors.As(err, &tooLarge) {
@@ -354,7 +332,7 @@ func (s *Server) translateGeminiManagedContent(ctx context.Context, routeSlug st
 						return
 					}
 					delete(fields, "id")
-					body, _ = json.Marshal(fields)
+					body = mustJSON(fields)
 				}
 				var decoded any
 				if json.Unmarshal(body, &decoded) != nil {
@@ -424,10 +402,4 @@ func (s *Server) translateGeminiManagedContent(ctx context.Context, routeSlug st
 		return nil, translateErr
 	}
 	return &media.Part{Handle: artifact.Handle, Filename: source.Filename, ContentType: artifact.ContentType, Size: artifact.ContentLength, Limit: limit}, nil
-}
-
-func geminiRawString(raw json.RawMessage) string {
-	var value string
-	_ = json.Unmarshal(raw, &value)
-	return value
 }

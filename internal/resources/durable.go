@@ -60,26 +60,9 @@ func (s *Store) PutDurableContractTx(ctx context.Context, tx pgx.Tx, r *Resource
 	return s.putDurableContractTx(ctx, tx, r, payload, true)
 }
 
-// PutRecoveredBatchContractTx adopts already-accepted work under its fenced
-// submission intent. Current caller authorization still applies to API access.
-func (s *Store) PutRecoveredBatchContractTx(ctx context.Context, tx pgx.Tx, r *Resource, payload []byte, claimID uuid.UUID) (*Resource, error) {
-	if r == nil || r.Kind != KindStrictBatch || claimID == uuid.Nil {
-		return nil, ErrContract
-	}
-	var claimed bool
-	err := tx.QueryRow(ctx, `SELECT true FROM olp.batch_settlements
-		WHERE resource_id=$1 AND api_key_id=$2 AND provider_id=$3 AND provider_revision_id=$4
-		AND route_revision_id=$5 AND target_id=$6 AND slot_id=$7
-		AND credential_id IS NOT DISTINCT FROM $8::uuid AND claim_id=$9
-		AND kind='strict_batch' AND state='submission_unknown' FOR UPDATE`,
-		r.UUID, r.APIKeyID, r.ProviderID, r.ProviderRevisionID, r.RouteRevisionID, r.TargetID, r.SlotID, r.CredentialID, claimID).Scan(&claimed)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrContract
-	}
-	if err != nil {
-		return nil, err
-	}
-	if !claimed {
+// The caller must hold the fenced batch settlement claim in tx.
+func (s *Store) PutRecoveredDurableContractTx(ctx context.Context, tx pgx.Tx, r *Resource, payload []byte) (*Resource, error) {
+	if r == nil || r.Kind != KindStrictBatch {
 		return nil, ErrContract
 	}
 	return s.putDurableContractTx(ctx, tx, r, payload, false)

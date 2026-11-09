@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -20,8 +21,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func TestAllowanceObservationMigrationBackfillsLegacyWindows(t *testing.T) {
@@ -364,4 +367,110 @@ func TestNotificationEventConstraintMatchesPublishedEvents(t *testing.T) {
 	if len(published) == 0 || !slices.Equal(allowed, published) {
 		t.Fatalf("database allows %v, API publishes %v", allowed, published)
 	}
+}
+
+func TestBatchSubmissionMigrationSplitsLegacyCursor(t *testing.T) {
+	pool, _ := newDatabase(t)
+	if err := database.Migrate(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+	created := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
+	closeAfter := created.Add(72 * time.Hour)
+	deadline := created.Add(10 * time.Minute)
+	keyID, providerID, model := uuid.NewString(), uuid.NewString(), "batch-model"
+	template, err := usage.Encode(&usage.Event{
+		EventID: uuid.NewString(), RequestID: uuid.NewString(), RuntimeGenerationID: uuid.NewString(),
+		APIKeyID: keyID, ProviderID: &providerID, RouteSlug: "batch-migration", UpstreamModel: &model,
+		Operation: "generation", Surface: "openai", RequestStartedAt: created, RequestCompletedAt: created, ObservedAt: created,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		adapter  string
+		legacy   string
+		want     batches.Submission
+		source   *string
+		deadline time.Time
+	}{
+		{"together", `{"input_file_id":"file-up","local_input_file_id":"file-local","endpoint":"/v1/chat/completions","completion_window":"24h","client_metadata":{"team":"a"},"creator_deadline":"` + deadline.Format(time.RFC3339Nano) + `"}`,
+			batches.FilesSubmission{InputFileID: "file-up", LocalInputFileID: "file-local", Endpoint: "/v1/chat/completions", CompletionWindow: "24h", ClientMetadata: json.RawMessage(`{"team":"a"}`)}, new("file-up"), deadline},
+		{"gemini_managed", `{"gemini_file":"files/managed","local_input_file_id":"file-local","endpoint":"/v1/chat/completions","gemini_metadata":{"status":"validating"},"creator_deadline":"` + created.Add(-time.Minute).Format(time.RFC3339Nano) + `"}`,
+			batches.GeminiManagedSubmission{GeminiFile: "files/managed", LocalInputFileID: "file-local", Endpoint: "/v1/chat/completions", Metadata: json.RawMessage(`{"status":"validating"}`)}, new("files/managed"), closeAfter},
+		{"gemini", `{"gemini_file":"files/native","local_input_file_id":"file-native"}`,
+			batches.GeminiFileSubmission{GeminiFile: "files/native", LocalInputFileID: "file-native"}, new("files/native"), closeAfter},
+		{"gemini", `{"gemini_inline":true}`, batches.GeminiInlineSubmission{}, nil, closeAfter},
+		{"vertex", `{"vertex_label":"0190abc"}`, batches.VertexSubmission{Label: "0190abc"}, nil, closeAfter},
+		{"bedrock", `{"bedrock_client_request_token":"token","create_body":{"jobName":"job"}}`,
+			batches.BedrockSubmission{ClientRequestToken: "token", CreateBody: json.RawMessage(`{"jobName":"job"}`)}, nil, closeAfter},
+		{"anthropic", `{"anthropic":true}`, batches.AnthropicSubmission{}, nil, closeAfter},
+	}
+	ids := make([]uuid.UUID, len(cases))
+	for i, c := range cases {
+		ids[i] = uuid.New()
+		digest := sha256.Sum256(ids[i][:])
+		if _, err := pool.Exec(t.Context(), `INSERT INTO olp.batch_settlements(
+			resource_id, kind, adapter, api_key_id, route_slug, route_revision_id, provider_id, provider_revision_id,
+			target_id, slot_id, surface, submission_digest, line_operation, template, state, cursor,
+			next_attempt_at, close_after, created_at, creator_deadline)
+			VALUES($1, 'batch', $2, $3, 'batch-migration', $4, $5, $6, 'primary', $7, 'openai', $8, 'generation', $9,
+			'submission_unknown', jsonb_build_object('phase', 'output', 'line', 3, 'submission', $10::jsonb), $11, $12, $11, $11)`,
+			ids[i], c.adapter, keyID, uuid.New(), providerID, uuid.New(), uuid.New(), digest[:], template, c.legacy, created, closeAfter); err != nil {
+			t.Fatal(err)
+		}
+	}
+	migration, err := os.ReadFile("../../internal/database/migrations/0142_batch_submission.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), string(migration)); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := batches.NewStore(pool).Claim(t.Context(), time.Now(), len(cases)+1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := make(map[uuid.UUID]batches.Settlement, len(claimed))
+	for _, settlement := range claimed {
+		byID[settlement.ResourceID] = settlement
+	}
+	for i, c := range cases {
+		got, ok := byID[ids[i]]
+		if !ok {
+			t.Fatalf("%s %s: migrated settlement was not claimable", c.adapter, c.legacy)
+		}
+		if reflect.TypeOf(got.Submission) != reflect.TypeOf(c.want) || !sameJSON(t, got.Submission, c.want) {
+			t.Errorf("%s submission = %#v, want %#v", c.adapter, got.Submission, c.want)
+		}
+		if !got.CreatorDeadline.Equal(c.deadline) {
+			t.Errorf("%s creator deadline = %s, want %s", c.adapter, got.CreatorDeadline, c.deadline)
+		}
+		if got.Cursor != (batches.Cursor{Phase: batches.PhaseOutput, Line: 3}) {
+			t.Errorf("%s cursor = %#v", c.adapter, got.Cursor)
+		}
+		var source *string
+		var legacy bool
+		if err := pool.QueryRow(t.Context(), `SELECT submission_source, cursor ? 'submission' FROM olp.batch_settlements WHERE resource_id=$1`, ids[i]).Scan(&source, &legacy); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(source, c.source) || legacy {
+			t.Errorf("%s submission_source = %v, legacy cursor kept = %v", c.adapter, source, legacy)
+		}
+	}
+}
+
+func sameJSON(t *testing.T, got, want any) bool {
+	t.Helper()
+	decode := func(value any) any {
+		raw, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded any
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		return decoded
+	}
+	return reflect.DeepEqual(decode(got), decode(want))
 }

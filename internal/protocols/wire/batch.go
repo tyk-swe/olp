@@ -39,13 +39,20 @@ func CanonicalBatchEndpoint(endpoint string) string {
 	}
 }
 
-func BatchLineOperation(endpoint string) string {
+type LineOperation string
+
+const (
+	LineGeneration LineOperation = "generation"
+	LineEmbeddings LineOperation = "embeddings"
+)
+
+func BatchLineOperation(endpoint string) (LineOperation, bool) {
 	switch CanonicalBatchEndpoint(endpoint) {
 	case "/v1/embeddings":
-		return "embeddings"
+		return LineEmbeddings, true
 	case "/v1/chat/completions", "/v1/responses", "/v1/completions":
-		return "generation"
+		return LineGeneration, true
 	default:
-		return ""
+		return "", false
 	}
 }

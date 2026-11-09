@@ -1,9 +1,9 @@
 package gateway
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
-	"math"
 	"net/http"
 	"regexp"
 	"slices"
@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/batches"
+	"github.com/tyk-swe/olp/internal/batches/upstream"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -29,7 +30,7 @@ type cloudBatchRequest struct {
 	TimeoutHours    int
 }
 
-func validateCloudBatchRequest(raw []byte, dialect string, storage *connectors.BatchStorage) (cloudBatchRequest, *Error) {
+func validateCloudBatchRequest(raw []byte, adapter connectors.BatchAdapter, storage *connectors.BatchStorage) (cloudBatchRequest, *Error) {
 	doc, err := parseObjectRequest(raw, oif.Limits{MaxBytes: 1 << 20})
 	if err != nil || doc.Root().Kind() != oif.Object {
 		return cloudBatchRequest{}, invalidRequest("invalid_json", "The batch-job body must be one JSON object.", nil)
@@ -65,7 +66,7 @@ func validateCloudBatchRequest(raw []byte, dialect string, storage *connectors.B
 		}
 	}
 	if value, ok := doc.Root().Lookup("timeout_hours"); ok {
-		if dialect != "bedrock-batch-inference" {
+		if adapter != connectors.BatchBedrock {
 			return cloudBatchRequest{}, invalidRequest("unsupported_parameter", "timeout_hours is only supported by Bedrock batch inference.", strPtr("timeout_hours"))
 		}
 		if value.Kind() != oif.Number {
@@ -80,156 +81,47 @@ func validateCloudBatchRequest(raw []byte, dialect string, storage *connectors.B
 	return input, nil
 }
 
-func projectCloudBatchJob(body []byte, localID, dialect, model, inputURI, outputPrefix string) ([]byte, error) {
-	if _, err := cloudBatchJobIdentity(body, dialect); err != nil {
-		return nil, err
-	}
-	var job map[string]json.RawMessage
-	if json.Unmarshal(body, &job) != nil {
-		return nil, errors.New("malformed cloud batch job")
-	}
-	state := ""
-	for _, key := range []string{"state", "jobStatus", "status"} {
-		if json.Unmarshal(job[key], &state) == nil && state != "" {
-			break
-		}
-	}
-	status, ok := batches.CloudBatchStatus(dialect, state)
-	if !ok {
-		return nil, errors.New("unknown cloud batch status")
-	}
-	created := job["createTime"]
-	if dialect == "bedrock-batch-inference" {
-		created = job["submitTime"]
-	}
-	createdAt, _ := cloudBatchTime(created)
-	var completed *int64
-	for _, key := range []string{"endTime", "lastModifiedTime"} {
-		if value, ok := cloudBatchTime(job[key]); ok && batches.CloudBatchTerminal(status) {
-			completed = &value
-			break
-		}
-	}
-	result := map[string]any{
-		"id": localID, "object": "batch_job", "dialect": dialect, "model": model,
-		"status": status, "input_uri": inputURI, "output_uri_prefix": outputPrefix,
-		"created_at": createdAt, "completed_at": completed, "request_counts": cloudBatchCounts(job, dialect),
-		"error": cloudBatchError(job, dialect),
-	}
-	return json.Marshal(result)
+type cloudBatchObject struct {
+	ID              string                `json:"id"`
+	Object          string                `json:"object"`
+	Dialect         string                `json:"dialect"`
+	Model           string                `json:"model"`
+	Status          upstream.CloudStatus  `json:"status"`
+	InputURI        string                `json:"input_uri"`
+	OutputURIPrefix string                `json:"output_uri_prefix"`
+	CreatedAt       int64                 `json:"created_at"`
+	CompletedAt     *int64                `json:"completed_at"`
+	RequestCounts   *upstream.CloudCounts `json:"request_counts"`
+	Error           *cloudBatchError      `json:"error"`
 }
 
-func cloudBatchJobIdentity(body []byte, dialect string) (string, error) {
-	var job struct {
-		Name string `json:"name"`
-		ARN  string `json:"jobArn"`
-	}
-	if json.Unmarshal(body, &job) != nil {
-		return "", errors.New("malformed cloud batch job")
-	}
-	if dialect == "bedrock-batch-inference" && job.ARN != "" {
-		return job.ARN, nil
-	}
-	if dialect == "vertex-batch-prediction" {
-		parts := strings.Split(job.Name, "/")
-		if len(parts) == 6 && parts[0] == "projects" && parts[1] != "" && parts[2] == "locations" && parts[3] != "" && parts[4] == "batchPredictionJobs" && parts[5] != "" {
-			return parts[5], nil
-		}
-	}
-	return "", errors.New("cloud batch job identity is missing or malformed")
+type cloudBatchError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
-func cloudBatchTime(raw json.RawMessage) (int64, bool) {
-	var text string
-	if json.Unmarshal(raw, &text) == nil {
-		at, err := time.Parse(time.RFC3339Nano, text)
-		return at.Unix(), err == nil
-	}
-	var n json.Number
-	if json.Unmarshal(raw, &n) != nil || n.String() == "" {
-		return 0, false
-	}
-	seconds, err := strconv.ParseFloat(n.String(), 64)
-	if err != nil || seconds < 0 || seconds >= float64(math.MaxInt64) {
-		return 0, false
-	}
-	return int64(seconds), true
+func projectCloudBatchJob(job upstream.CloudJob, localID string, record upstream.CloudRecord) json.RawMessage {
+	return mustJSON(cloudBatchObject{
+		ID: localID, Object: "batch_job", Dialect: record.Dialect, Model: record.RouteModel, Status: job.Status,
+		InputURI: record.InputURI, OutputURIPrefix: record.OutputURIPrefix, CreatedAt: job.CreatedAt,
+		CompletedAt: job.CompletedAt, RequestCounts: job.Counts, Error: projectCloudBatchError(job.Error),
+	})
 }
 
-func cloudBatchCounts(job map[string]json.RawMessage, dialect string) map[string]int64 {
-	var stats map[string]json.RawMessage
-	if dialect == "bedrock-batch-inference" {
-		stats = job
-	} else {
-		_ = json.Unmarshal(job["completionStats"], &stats)
-	}
-	if stats == nil {
+func projectCloudBatchError(failure *upstream.CloudError) *cloudBatchError {
+	if failure == nil {
 		return nil
 	}
-	names := map[string]string{"successfulCount": "successful", "failedCount": "failed", "incompleteCount": "incomplete"}
-	if dialect == "bedrock-batch-inference" {
-		names = map[string]string{"totalRecordCount": "total", "successRecordCount": "successful", "errorRecordCount": "failed", "processedRecordCount": "processed"}
-	}
-	out := map[string]int64{}
-	for upstream, target := range names {
-		if n, ok := cloudCount(stats[upstream]); ok {
-			out[target] = n
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
+	return &cloudBatchError{Code: failure.Code, Message: sanitizeCloudBatchMessage(failure.Message)}
 }
 
-func cloudCount(raw json.RawMessage) (int64, bool) {
-	var n int64
-	if json.Unmarshal(raw, &n) == nil && n >= 0 {
-		return n, true
-	}
-	var text string
-	if json.Unmarshal(raw, &text) == nil {
-		value, err := strconv.ParseInt(text, 10, 64)
-		return value, err == nil && value >= 0
-	}
-	return 0, false
-}
-
-func cloudBatchError(job map[string]json.RawMessage, dialect string) any {
-	if dialect == "bedrock-batch-inference" {
-		var message string
-		_ = json.Unmarshal(job["message"], &message)
-		if message == "" {
-			return nil
-		}
-		return map[string]string{"code": "provider_error", "message": sanitizeCloudBatchMessage(message)}
-	}
-	var jobError map[string]json.RawMessage
-	if json.Unmarshal(job["error"], &jobError) != nil || jobError == nil {
-		return nil
-	}
-	var message, code string
-	_ = json.Unmarshal(jobError["message"], &message)
-	if json.Unmarshal(jobError["code"], &code) != nil {
-		var number json.Number
-		if json.Unmarshal(jobError["code"], &number) == nil {
-			code = number.String()
-		}
-	}
-	if message == "" {
-		return nil
-	}
-	if code == "" {
-		code = "provider_error"
-	}
-	return map[string]string{"code": code, "message": sanitizeCloudBatchMessage(message)}
-}
+var (
+	cloudResourceARN = regexp.MustCompile(`arn:[A-Za-z0-9-:]+:[^ \t\r\n"]+`)
+	cloudResourceJob = regexp.MustCompile(`projects/[^ \t\r\n"]+/batchPredictionJobs/[^ \t\r\n"]+`)
+)
 
 func sanitizeCloudBatchMessage(message string) string {
-	arnPattern := regexp.MustCompile(`arn:[A-Za-z0-9-:]+:[^ \t\r\n"]+`)
-	message = arnPattern.ReplaceAllString(message, "[provider resource]")
-	jobPattern := regexp.MustCompile(`projects/[^ \t\r\n"]+/batchPredictionJobs/[^ \t\r\n"]+`)
-	return jobPattern.ReplaceAllString(message, "[provider resource]")
+	return cloudResourceJob.ReplaceAllString(cloudResourceARN.ReplaceAllString(message, "[provider resource]"), "[provider resource]")
 }
 
 func (s *Server) registerCloudBatchState(mux *http.ServeMux) {
@@ -283,7 +175,8 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 		s.cloudBatchFail(x, w, e)
 		return
 	}
-	if p.provider.ProfileID != dialect || dialect != "vertex-batch-prediction" && dialect != "bedrock-batch-inference" {
+	adapter, cloud := connectors.CloudBatchAdapter(dialect)
+	if p.provider.ProfileID != dialect || !cloud {
 		s.releaseHold(r.Context(), p.hold)
 		s.cloudBatchFail(x, w, notFoundError("not_found", "No matching cloud batch dialect is available."))
 		return
@@ -293,7 +186,7 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 		s.cloudBatchFail(x, w, policyUnavailable("target_capability", "Cloud batch jobs require a transformed route."))
 		return
 	}
-	input, failure := validateCloudBatchRequest(body, dialect, p.provider.BatchStorage)
+	input, failure := validateCloudBatchRequest(body, adapter, p.provider.BatchStorage)
 	if failure != nil {
 		s.releaseHold(r.Context(), p.hold)
 		s.cloudBatchFail(x, w, failure)
@@ -327,139 +220,147 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 		s.cloudBatchFail(x, w, invalidRequest("invalid_json", "The request body must be one JSON object.", nil))
 		return
 	}
-	window := 24 * time.Hour
-	if input.TimeoutHours > 0 {
-		window = time.Duration(input.TimeoutHours) * time.Hour
-	}
-	resourceID := uuid.Must(uuid.NewV7())
-	hexID := strings.ReplaceAll(resourceID.String(), "-", "")
-	display := input.DisplayName
-	if display == "" {
-		display = "olp-" + hexID
-	}
-	var requestBody []byte
-	var endpoint string
-	var cursor json.RawMessage
-	if dialect == "vertex-batch-prediction" {
-		endpoint, err = p.provider.Connector().VertexBatchJobsURL("", "")
-		requestBody, _ = json.Marshal(map[string]any{
-			"displayName": display, "model": "publishers/google/models/" + p.provider.Connector().Model(p.model),
-			"inputConfig":  map[string]any{"instancesFormat": "jsonl", "gcsSource": map[string]any{"uris": []string{input.InputURI}}},
-			"outputConfig": map[string]any{"predictionsFormat": "jsonl", "gcsDestination": map[string]string{"outputUriPrefix": input.OutputURIPrefix}},
-			"labels":       map[string]string{"olp_submission": hexID},
-		})
-		cursor = mustJSON(map[string]any{"submission": map[string]string{"vertex_label": hexID}})
-	} else {
-		endpoint, err = p.provider.Connector().BedrockBatchJobsURL("", "create")
-		requestBody, _ = json.Marshal(map[string]any{
-			"jobName": display, "roleArn": p.provider.BatchStorage.RoleARN, "modelId": p.provider.Connector().Model(p.model),
-			"inputDataConfig":        map[string]any{"s3InputDataConfig": map[string]any{"s3Uri": input.InputURI, "s3InputFormat": "JSONL"}},
-			"outputDataConfig":       map[string]any{"s3OutputDataConfig": map[string]string{"s3Uri": input.OutputURIPrefix}},
-			"timeoutDurationInHours": input.TimeoutHours, "clientRequestToken": resourceID.String(),
-		})
-		if input.TimeoutHours == 0 {
-			var fields map[string]json.RawMessage
-			_ = json.Unmarshal(requestBody, &fields)
-			delete(fields, "timeoutDurationInHours")
-			requestBody, _ = json.Marshal(fields)
-		}
-		cursor = mustJSON(map[string]any{"submission": map[string]any{"bedrock_client_request_token": resourceID.String(), "create_body": json.RawMessage(requestBody)}})
-	}
+	plan, err := planCloudBatch(p, adapter, input)
 	if err != nil {
 		s.cloudBatchFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The cloud batch control-plane URL could not be resolved."))
 		return
 	}
-	submission, e := s.prepareBatchSubmissionWithID(ctx, x, authority.ID, p, source, source.Bytes(), requestBody, oif.ServingIdentity{},
-		"", "", resources.KindCloudBatch, map[string]string{"vertex-batch-prediction": "vertex", "bedrock-batch-inference": "bedrock"}[dialect],
-		"native", "generation", window, nil, cursor, resourceID)
+	submission, e := s.beginBatch(ctx, x, authority.ID, p, batchIntent{
+		resourceID: plan.id, kind: resources.KindCloudBatch, adapter: adapter, surface: batches.SurfaceNative,
+		operation: wire.LineGeneration, window: plan.window, submission: plan.submission,
+		source: source, canonical: source.Bytes(), effective: plan.body,
+	})
 	if e != nil {
 		s.cloudBatchFail(x, w, e)
 		return
 	}
-	response, attemptFailure := s.pinnedDo(ctx, x, p, http.MethodPost, endpoint, requestBody, "application/json")
-	if attemptFailure != nil {
-		if attemptFailure.acceptance.Unresolved() {
-			unknownCtx, stop := resourceCommitContext(r.Context())
-			defer stop()
-			_ = s.deps.Batches.MarkUnknown(unknownCtx, resourceID, "submission_unknown", s.now())
-			s.cloudBatchFail(x, w, serverError(http.StatusBadGateway, "submission_unknown", "The cloud provider may have accepted the batch job."))
-			return
-		}
-		_ = s.deps.Batches.DeleteSubmission(r.Context(), resourceID)
-		s.cloudBatchFail(x, w, upstreamError(attemptFailure))
+	result, e := s.sendBatch(ctx, x, p, plan.id, plan.endpoint, plan.body)
+	if e != nil {
+		s.cloudBatchFail(x, w, e)
 		return
 	}
-	defer response.Body.Close()
-	x.dispatched = true
-	result, err := readBounded(response.Body, s.cfg.MaxResponseBytes)
+	accepted, err := acceptedCloudJob(adapter, result, s.now())
 	if err != nil {
-		s.cloudBatchFail(x, w, s.batchSubmissionUnknown(r.Context(), resourceID, "The cloud batch response could not be read; the job may have been accepted."))
+		s.cloudBatchFail(x, w, s.batchSubmissionUnknown(ctx, plan.id, "The cloud provider returned an invalid batch job; the job may have been accepted."))
 		return
 	}
-	upstreamID := ""
-	if dialect == "vertex-batch-prediction" {
-		var v struct {
-			Name string `json:"name"`
-		}
-		if json.Unmarshal(result, &v) == nil {
-			upstreamID = v.Name[strings.LastIndex(v.Name, "/")+1:]
-		}
-	} else {
-		var b struct {
-			ARN string `json:"jobArn"`
-		}
-		if json.Unmarshal(result, &b) == nil {
-			upstreamID = b.ARN
-		}
-	}
-	if upstreamID == "" {
-		unknownCtx, stop := resourceCommitContext(r.Context())
-		defer stop()
-		_ = s.deps.Batches.MarkUnknown(unknownCtx, resourceID, "submission_unknown", s.now())
-		s.cloudBatchFail(x, w, serverError(http.StatusBadGateway, "submission_unknown", "The cloud provider returned no job identity."))
-		return
-	}
-	if dialect == "bedrock-batch-inference" {
-		// CreateModelInvocationJob acknowledges acceptance with only jobArn.
-		// The worker obtains the authoritative lifecycle status on its next poll.
-		result, _ = json.Marshal(map[string]any{"jobArn": upstreamID, "status": "Submitted", "submitTime": s.now().UTC()})
-	}
-	meta := map[string]any{
-		"adapter": submission.settlement.Adapter, "dialect": dialect, "route_model": slug, "upstream_model": p.model,
-		"input_uri": input.InputURI, "output_uri_prefix": input.OutputURIPrefix,
-		"provider_job": json.RawMessage(result),
-	}
-	metadata, _ := json.Marshal(meta)
-	projection, err := projectCloudBatchJob(result, resources.LocalID(resources.KindCloudBatch, resourceID), dialect, slug, input.InputURI, input.OutputURIPrefix)
+	job, err := upstream.DecodeCloudJob(adapter, accepted)
 	if err != nil {
-		_ = s.deps.Batches.MarkUnknown(ctx, resourceID, "submission_unknown", s.now())
-		s.cloudBatchFail(x, w, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The cloud provider returned an unknown batch status."))
+		s.cloudBatchFail(x, w, s.batchSubmissionUnknown(ctx, plan.id, "The cloud provider returned an invalid batch job; the job may have been accepted."))
 		return
 	}
-	var projectedObject map[string]any
-	_ = json.Unmarshal(projection, &projectedObject)
-	submission.resource.UpstreamID, submission.resource.State, submission.resource.Metadata = upstreamID, statusOr(projectedObject["status"], "queued"), metadata
-	commitCtx, stop := resourceCommitContext(ctx)
-	defer stop()
-	tx, err := s.deps.Resources.Begin(commitCtx)
-	if err == nil {
-		_, err = s.deps.Resources.PutTx(commitCtx, tx, submission.resource)
+	record := upstream.CloudRecord{
+		Dialect: dialect, RouteModel: slug, UpstreamModel: p.model,
+		InputURI: input.InputURI, OutputURIPrefix: input.OutputURIPrefix, ProviderJob: accepted,
 	}
-	if err == nil {
-		err = s.deps.Batches.ActivateTx(commitCtx, tx, resourceID, upstreamID, nil)
-	}
-	if err == nil {
-		err = tx.Commit(commitCtx)
-	} else if tx != nil {
-		_ = tx.Rollback(commitCtx)
-	}
-	if err != nil {
-		_ = s.deps.Batches.MarkUnknown(commitCtx, resourceID, "submission_commit_unavailable", s.now())
-		s.cloudBatchFail(x, w, serverError(http.StatusBadGateway, "submission_unknown", "The cloud provider accepted the batch but local activation failed."))
+	stored, e := s.activateBatch(ctx, submission, acceptedBatch{upstreamID: job.ID, state: string(job.Status), metadata: mustJSON(record)})
+	if e != nil {
+		s.cloudBatchFail(x, w, e)
 		return
 	}
 	x.completePinned()
-	s.writeStateJSON(w, x, projection)
+	s.writeStateJSON(w, x, projectCloudBatchJob(job, stored.ID, record))
+}
+
+type cloudBatchPlan struct {
+	id         uuid.UUID
+	endpoint   string
+	body       []byte
+	window     time.Duration
+	submission batches.Submission
+}
+
+type vertexBatchJob struct {
+	DisplayName  string            `json:"displayName"`
+	Model        string            `json:"model"`
+	InputConfig  vertexBatchInput  `json:"inputConfig"`
+	OutputConfig vertexBatchOutput `json:"outputConfig"`
+	Labels       map[string]string `json:"labels"`
+}
+
+type vertexBatchInput struct {
+	InstancesFormat string `json:"instancesFormat"`
+	GCSSource       struct {
+		URIs []string `json:"uris"`
+	} `json:"gcsSource"`
+}
+
+type vertexBatchOutput struct {
+	PredictionsFormat string `json:"predictionsFormat"`
+	GCSDestination    struct {
+		OutputURIPrefix string `json:"outputUriPrefix"`
+	} `json:"gcsDestination"`
+}
+
+type bedrockBatchJob struct {
+	JobName            string `json:"jobName"`
+	RoleARN            string `json:"roleArn"`
+	ModelID            string `json:"modelId"`
+	ClientRequestToken string `json:"clientRequestToken"`
+	TimeoutHours       int    `json:"timeoutDurationInHours,omitempty"`
+	InputDataConfig    struct {
+		S3InputDataConfig struct {
+			S3URI    string `json:"s3Uri"`
+			S3Format string `json:"s3InputFormat"`
+		} `json:"s3InputDataConfig"`
+	} `json:"inputDataConfig"`
+	OutputDataConfig struct {
+		S3OutputDataConfig struct {
+			S3URI string `json:"s3Uri"`
+		} `json:"s3OutputDataConfig"`
+	} `json:"outputDataConfig"`
+}
+
+func planCloudBatch(p *pin, adapter connectors.BatchAdapter, input cloudBatchRequest) (cloudBatchPlan, error) {
+	id := uuid.Must(uuid.NewV7())
+	label := strings.ReplaceAll(id.String(), "-", "")
+	display := cmp.Or(input.DisplayName, "olp-"+label)
+	window := defaultBatchCompletionWindow
+	if input.TimeoutHours > 0 {
+		window = time.Duration(input.TimeoutHours) * time.Hour
+	}
+	cfg := p.provider.Connector()
+	if adapter == connectors.BatchVertex {
+		endpoint, err := cfg.VertexBatchJobsURL("", "")
+		job := vertexBatchJob{
+			DisplayName: display, Model: "publishers/google/models/" + cfg.Model(p.model),
+			InputConfig: vertexBatchInput{InstancesFormat: "jsonl"}, OutputConfig: vertexBatchOutput{PredictionsFormat: "jsonl"},
+			Labels: map[string]string{"olp_submission": label},
+		}
+		job.InputConfig.GCSSource.URIs = []string{input.InputURI}
+		job.OutputConfig.GCSDestination.OutputURIPrefix = input.OutputURIPrefix
+		return cloudBatchPlan{id: id, endpoint: endpoint, body: mustJSON(job), window: window, submission: batches.VertexSubmission{Label: label}}, err
+	}
+	endpoint, err := cfg.BedrockBatchJobsURL("", "create")
+	job := bedrockBatchJob{
+		JobName: display, RoleARN: p.provider.BatchStorage.RoleARN, ModelID: cfg.Model(p.model),
+		ClientRequestToken: id.String(), TimeoutHours: input.TimeoutHours,
+	}
+	job.InputDataConfig.S3InputDataConfig.S3URI = input.InputURI
+	job.InputDataConfig.S3InputDataConfig.S3Format = "JSONL"
+	job.OutputDataConfig.S3OutputDataConfig.S3URI = input.OutputURIPrefix
+	body := mustJSON(job)
+	return cloudBatchPlan{
+		id: id, endpoint: endpoint, body: body, window: window,
+		submission: batches.BedrockSubmission{ClientRequestToken: id.String(), CreateBody: body},
+	}, err
+}
+
+func acceptedCloudJob(adapter connectors.BatchAdapter, result []byte, now time.Time) ([]byte, error) {
+	if adapter != connectors.BatchBedrock {
+		return result, nil
+	}
+	var created struct {
+		ARN string `json:"jobArn"`
+	}
+	if err := json.Unmarshal(result, &created); err != nil || created.ARN == "" {
+		return nil, errors.New("bedrock create response has no job ARN")
+	}
+	return json.Marshal(struct {
+		ARN        string    `json:"jobArn"`
+		Status     string    `json:"status"`
+		SubmitTime time.Time `json:"submitTime"`
+	}{ARN: created.ARN, Status: "Submitted", SubmitTime: now.UTC()})
 }
 
 func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel bool) {
@@ -478,9 +379,13 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 		s.cloudBatchFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The cloud batch mapping could not be read."))
 		return
 	}
-	var metadata map[string]json.RawMessage
-	_ = json.Unmarshal(res.Metadata, &metadata)
-	dialect := stringFromRaw(metadata["dialect"])
+	record, recordErr := upstream.DecodeCloudRecord(res.Metadata)
+	adapter, cloud := connectors.CloudBatchAdapter(record.Dialect)
+	if recordErr != nil || !cloud {
+		s.cloudBatchFail(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The stored cloud batch mapping is malformed."))
+		return
+	}
+	dialect := record.Dialect
 	if dialect != r.PathValue("dialect") {
 		s.cloudBatchFail(x, w, notFoundError("not_found", "No cloud batch job with this ID exists for this dialect."))
 		return
@@ -527,12 +432,9 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 		s.cloudBatchFail(x, w, err)
 		return
 	}
+	cfg := p.provider.Connector()
 	if cancel {
-		action := "cancel"
-		if dialect == "bedrock-batch-inference" {
-			action = "stop"
-		}
-		endpoint, urlErr := cloudBatchControlURL(p.provider.Connector(), dialect, res.UpstreamID, action)
+		endpoint, urlErr := cloudBatchControlURL(cfg, adapter, res.UpstreamID, cloudBatchCancelAction(adapter))
 		if urlErr != nil {
 			s.cloudBatchFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The cloud control-plane URL could not be resolved."))
 			return
@@ -545,7 +447,7 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 		_ = response.Body.Close()
 		x.completePinned()
 	}
-	endpoint, urlErr := cloudBatchControlURL(p.provider.Connector(), dialect, res.UpstreamID, "")
+	endpoint, urlErr := cloudBatchControlURL(cfg, adapter, res.UpstreamID, "")
 	if urlErr != nil {
 		s.cloudBatchFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The cloud control-plane URL could not be resolved."))
 		return
@@ -561,31 +463,31 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 		s.cloudBatchFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The cloud job response could not be read."))
 		return
 	}
-	var input, output string
-	_ = json.Unmarshal(metadata["input_uri"], &input)
-	_ = json.Unmarshal(metadata["output_uri_prefix"], &output)
-	upstreamID, identityErr := cloudBatchJobIdentity(body, dialect)
-	if identityErr != nil || upstreamID != res.UpstreamID {
-		s.cloudBatchFail(x, w, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The cloud provider returned a mismatched job identity."))
-		return
-	}
-	projected, err := projectCloudBatchJob(body, res.ID, dialect, res.RouteSlug, input, output)
-	if err != nil {
+	job, err := upstream.DecodeCloudJob(adapter, body)
+	if errors.Is(err, upstream.ErrProviderConflict) {
 		s.cloudBatchFail(x, w, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The cloud provider returned an unknown job status."))
 		return
 	}
-	meta := map[string]any{"dialect": dialect, "route_model": res.RouteSlug, "input_uri": input, "output_uri_prefix": output, "provider_job": json.RawMessage(body)}
-	encoded, _ := json.Marshal(meta)
-	var projectedObject map[string]any
-	_ = json.Unmarshal(projected, &projectedObject)
+	if err != nil || job.ID != res.UpstreamID {
+		s.cloudBatchFail(x, w, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The cloud provider returned a mismatched job identity."))
+		return
+	}
+	refreshed := record.WithJob(body)
 	commit, release := resourceCommitContext(ctx)
 	defer release()
-	if err := s.deps.Resources.Update(commit, res.ID, statusOr(projectedObject["status"], "queued"), encoded, nil); err != nil {
+	if err := s.deps.Resources.Update(commit, res.ID, string(job.Status), mustJSON(refreshed), nil); err != nil {
 		s.cloudBatchFail(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The cloud job refresh could not be committed."))
 		return
 	}
 	x.completePinned()
-	s.writeStateJSON(w, x, projected)
+	s.writeStateJSON(w, x, projectCloudBatchJob(job, res.ID, refreshed))
+}
+
+func cloudBatchCancelAction(adapter connectors.BatchAdapter) string {
+	if adapter == connectors.BatchBedrock {
+		return "stop"
+	}
+	return "cancel"
 }
 
 func (s *Server) getCloudBatch(w http.ResponseWriter, r *http.Request) {
@@ -608,7 +510,7 @@ func (s *Server) listCloudBatches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dialect := r.PathValue("dialect")
-	if dialect != "vertex-batch-prediction" && dialect != "bedrock-batch-inference" {
+	if _, cloud := connectors.CloudBatchAdapter(dialect); !cloud {
 		s.cloudBatchFail(x, w, notFoundError("not_found", "Unknown cloud batch dialect."))
 		return
 	}
@@ -631,20 +533,9 @@ func (s *Server) listCloudBatches(w http.ResponseWriter, r *http.Request) {
 			s.cloudBatchFail(x, w, authErr)
 			return
 		}
-		var metadata map[string]json.RawMessage
-		_ = json.Unmarshal(row.Metadata, &metadata)
-		var input, output, dialect string
-		_ = json.Unmarshal(metadata["input_uri"], &input)
-		_ = json.Unmarshal(metadata["output_uri_prefix"], &output)
-		_ = json.Unmarshal(metadata["dialect"], &dialect)
-		upstreamID, identityErr := cloudBatchJobIdentity(metadata["provider_job"], dialect)
-		if identityErr != nil || upstreamID != row.UpstreamID {
-			s.cloudBatchFail(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A stored cloud batch has a mismatched job identity."))
-			return
-		}
-		item, err := projectCloudBatchJob(metadata["provider_job"], row.ID, dialect, row.RouteSlug, input, output)
-		if err != nil {
-			s.cloudBatchFail(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A cloud batch could not be projected."))
+		item, itemErr := listedCloudBatch(row)
+		if itemErr != nil {
+			s.cloudBatchFail(x, w, itemErr)
 			return
 		}
 		data = append(data, item)
@@ -656,25 +547,22 @@ func (s *Server) listCloudBatches(w http.ResponseWriter, r *http.Request) {
 	s.writeStateJSON(w, x, mustJSON(map[string]any{"object": "list", "data": data, "has_more": hasMore, "first_id": first, "last_id": last}))
 }
 
-func cloudBatchControlURL(cfg connectors.Config, dialect, upstreamID, action string) (string, error) {
-	if dialect == "vertex-batch-prediction" {
+func listedCloudBatch(row *resources.Resource) (json.RawMessage, *Error) {
+	record, err := upstream.DecodeCloudRecord(row.Metadata)
+	adapter, cloud := connectors.CloudBatchAdapter(record.Dialect)
+	if err != nil || !cloud {
+		return nil, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A cloud batch could not be projected.")
+	}
+	job, err := upstream.DecodeCloudJob(adapter, record.ProviderJob)
+	if err != nil || job.ID != row.UpstreamID {
+		return nil, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A stored cloud batch has a mismatched job identity.")
+	}
+	return projectCloudBatchJob(job, row.ID, record), nil
+}
+
+func cloudBatchControlURL(cfg connectors.Config, adapter connectors.BatchAdapter, upstreamID, action string) (string, error) {
+	if adapter == connectors.BatchVertex {
 		return cfg.VertexBatchJobsURL(upstreamID, action)
 	}
-	if dialect == "bedrock-batch-inference" {
-		return cfg.BedrockBatchJobsURL(upstreamID, action)
-	}
-	return "", errors.New("unknown cloud batch dialect")
-}
-
-func stringFromRaw(raw json.RawMessage) string {
-	var value string
-	_ = json.Unmarshal(raw, &value)
-	return value
-}
-
-func statusOr(value any, fallback string) string {
-	if status, ok := value.(string); ok {
-		return status
-	}
-	return fallback
+	return cfg.BedrockBatchJobsURL(upstreamID, action)
 }

@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -460,22 +462,24 @@ func (s *Server) fileObject(ctx context.Context, res *resources.Resource) ([]byt
 		}
 		return json.Marshal(map[string]any{"id": res.ID, "object": "file", "status": res.State})
 	}
+	adapter, err := resourceAdapter(res)
+	if err != nil {
+		return nil, err
+	}
+	if adapter.Managed() {
+		record, err := decodeManagedFileRecord(res.Metadata)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(struct {
+			ID     string `json:"id"`
+			Object string `json:"object"`
+			managedFileObject
+		}{ID: res.ID, Object: "file", managedFileObject: record.ProviderFile})
+	}
 	var meta map[string]json.RawMessage
 	if err := json.Unmarshal(res.Metadata, &meta); err != nil {
 		return nil, err
-	}
-	var adapter string
-	if json.Unmarshal(meta["adapter"], &adapter) == nil && (adapter == "together" || adapter == "mistral" || adapter == "gemini_managed") {
-		var fields map[string]json.RawMessage
-		_ = json.Unmarshal(meta["provider_file"], &fields)
-		obj := map[string]json.RawMessage{"object": json.RawMessage(`"file"`)}
-		for _, name := range managedFileFields() {
-			if value, ok := fields[name]; ok {
-				obj[name] = value
-			}
-		}
-		obj["id"], _ = json.Marshal(res.ID)
-		return json.Marshal(obj)
 	}
 	obj := map[string]json.RawMessage{}
 	for _, name := range resources.RetainedFileMetadataFields() {
@@ -501,18 +505,11 @@ func (s *Server) fileObject(ctx context.Context, res *resources.Resource) ([]byt
 	return json.Marshal(obj)
 }
 
-func fileAdapter(res *resources.Resource) string {
-	var metadata struct {
-		Adapter string `json:"adapter"`
-	}
-	if res != nil {
-		_ = json.Unmarshal(res.Metadata, &metadata)
-	}
-	return metadata.Adapter
-}
-
 func managedGeminiFilePath(res *resources.Resource) (string, error) {
-	name := geminiManagedFileName(res)
+	name, err := geminiManagedFileName(res)
+	if err != nil {
+		return "", err
+	}
 	id, err := geminiFileID(name)
 	if err != nil {
 		return "", err
@@ -551,53 +548,29 @@ func (s *Server) batchObject(ctx context.Context, res *resources.Resource) ([]by
 		}
 		return durableProjection(contract.Result, res.ID, files)
 	}
-	if batchAdapter(res) == "gemini_managed" {
-		return s.geminiManagedBatchObject(ctx, res)
-	}
-	var meta map[string]json.RawMessage
-	if err := json.Unmarshal(res.Metadata, &meta); err != nil {
-		return nil, err
-	}
-	obj := map[string]json.RawMessage{}
-	for name, raw := range meta {
-		if name == "upstream_model" || name == batchLocalInputKey || name == "adapter" || name == "manifest" || name == "provider_file" || name == "role" {
-			continue
-		}
-		obj[name] = raw
-	}
-	// The input file is the one the client named at create time. Projecting
-	// it from the stored local ID keeps it stable after the client deletes
-	// that file, instead of minting a new mapping for the upstream ID.
-	if local, ok := meta[batchLocalInputKey]; ok {
-		obj["input_file_id"] = local
-	}
-	// Stored provider fields are upstream identifiers, whatever their
-	// spelling. Output and error files are first seen here, so they get a
-	// mapping on demand.
-	for _, name := range batchFileFields() {
-		if name == "input_file_id" && batchLocalInput(res) != "" {
-			continue
-		}
-		raw, ok := obj[name]
-		if !ok {
-			continue
-		}
-		var upstreamID string
-		if json.Unmarshal(raw, &upstreamID) != nil || upstreamID == "" {
-			continue
-		}
-		mapped, err := s.mapUpstreamFile(ctx, res, upstreamID, strings.TrimSuffix(name, "_file_id"))
-		if err != nil {
-			return nil, err
-		}
-		encoded, _ := json.Marshal(mapped.ID)
-		obj[name] = encoded
-	}
-	encoded, err := json.Marshal(res.ID)
+	adapter, err := resourceAdapter(res)
 	if err != nil {
 		return nil, err
 	}
-	obj["id"] = encoded
+	if adapter == connectors.BatchGeminiManaged {
+		return s.geminiManagedBatchObject(ctx, res)
+	}
+	record, err := decodeBatchRecord(res)
+	if err != nil {
+		return nil, err
+	}
+	var stored map[string]json.RawMessage
+	if err := json.Unmarshal(res.Metadata, &stored); err != nil {
+		return nil, err
+	}
+	files, err := s.batchFileProjection(ctx, res, record)
+	if err != nil {
+		return nil, err
+	}
+	obj := maps.Clone(stored)
+	maps.DeleteFunc(obj, func(name string, _ json.RawMessage) bool { return slices.Contains(privateBatchFields[:], name) })
+	maps.Copy(obj, files)
+	obj["id"] = mustJSON(res.ID)
 	if _, ok := obj["object"]; !ok {
 		obj["object"] = json.RawMessage(`"batch"`)
 	}
@@ -616,12 +589,9 @@ func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 	} else if !errors.Is(err, resources.ErrNotFound) {
 		return nil, err
 	}
-	metadata := durableMetadata(resourceModel(owner))
-	var ownerMetadata map[string]json.RawMessage
-	_ = json.Unmarshal(owner.Metadata, &ownerMetadata)
-	var adapter string
-	if json.Unmarshal(ownerMetadata["adapter"], &adapter) == nil && (adapter == "together" || adapter == "mistral") {
-		metadata = managedFileMetadata(metadata, nil, adapter, batchManifest{}, role)
+	metadata, err := resultFileMetadata(owner, role)
+	if err != nil {
+		return nil, err
 	}
 	resource := &resources.Resource{
 		Kind:               kind,
@@ -646,8 +616,8 @@ func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 		version := resources.DurableContractVersion
 		resource.ContractVersion = &version
 		resource.ExpiresAt = owner.ExpiresAt
-		source, _ := json.Marshal(map[string]string{"batch_id": owner.ID, "upstream_file_id": upstreamID})
-		payload, _ := json.Marshal(durableDocument{Version: version, Source: source, Binding: resourceModel(owner), Serving: batch.Serving})
+		source := mustJSON(map[string]string{"batch_id": owner.ID, "upstream_file_id": upstreamID})
+		payload := mustJSON(durableDocument{Version: version, Source: source, Binding: resourceModel(owner), Serving: batch.Serving})
 		created, err := s.deps.Resources.PutDurableContract(ctx, resource, payload)
 		if err == nil {
 			return created, nil
@@ -702,49 +672,42 @@ func fileMetadata(body []byte, model string) (json.RawMessage, string, *time.Tim
 	return encoded, state, expires
 }
 
-// batchLocalInputKey stores the gateway file ID a transformed batch was
-// created from beside the provider's batch object.
-const batchLocalInputKey = "local_input_file_id"
+var privateBatchFields = [...]string{"upstream_model", "local_input_file_id", "adapter", "manifest", "provider_file", "role"}
 
-// batchLocalInput returns the gateway input file ID stored on a batch.
-func batchLocalInput(res *resources.Resource) string {
-	var meta map[string]json.RawMessage
-	if json.Unmarshal(res.Metadata, &meta) != nil {
-		return ""
-	}
-	var local string
-	_ = json.Unmarshal(meta[batchLocalInputKey], &local)
-	return local
+type batchRecord struct {
+	LocalInputFileID string          `json:"local_input_file_id,omitempty"`
+	CompletionWindow string          `json:"completion_window,omitempty"`
+	Metadata         json.RawMessage `json:"metadata,omitempty"`
+	InputFileID      *string         `json:"input_file_id"`
+	OutputFileID     *string         `json:"output_file_id"`
+	ErrorFileID      *string         `json:"error_file_id"`
 }
 
-func batchMetadata(body []byte, model, localInput string) (json.RawMessage, string) {
-	meta := map[string]json.RawMessage{}
-	var obj map[string]json.RawMessage
-	if json.Unmarshal(body, &obj) == nil {
-		for name, raw := range obj {
-			if name == "id" || name == batchLocalInputKey {
-				continue
-			}
-			meta[name] = raw
+func decodeBatchRecord(res *resources.Resource) (batchRecord, error) {
+	var record batchRecord
+	err := json.Unmarshal(res.Metadata, &record)
+	return record, err
+}
+
+func (s *Server) batchFileProjection(ctx context.Context, res *resources.Resource, record batchRecord) (map[string]json.RawMessage, error) {
+	upstreamFiles := map[string]*string{"output_file_id": record.OutputFileID, "error_file_id": record.ErrorFileID}
+	projected := map[string]json.RawMessage{}
+	if record.LocalInputFileID != "" {
+		projected["input_file_id"] = mustJSON(record.LocalInputFileID)
+	} else {
+		upstreamFiles["input_file_id"] = record.InputFileID
+	}
+	for name, upstreamID := range upstreamFiles {
+		if upstreamID == nil || *upstreamID == "" {
+			continue
 		}
-	}
-	if model != "" {
-		encoded, _ := json.Marshal(model)
-		meta["upstream_model"] = encoded
-	}
-	if localInput != "" {
-		encoded, _ := json.Marshal(localInput)
-		meta[batchLocalInputKey] = encoded
-	}
-	state := "validating"
-	if raw, ok := meta["status"]; ok {
-		var status string
-		if json.Unmarshal(raw, &status) == nil && status != "" {
-			state = status
+		mapped, err := s.mapUpstreamFile(ctx, res, *upstreamID, strings.TrimSuffix(name, "_file_id"))
+		if err != nil {
+			return nil, err
 		}
+		projected[name] = mustJSON(mapped.ID)
 	}
-	encoded, _ := json.Marshal(meta)
-	return encoded, state
+	return projected, nil
 }
 
 func gateError(gate gateResult) *Error {
@@ -831,29 +794,65 @@ func listBody(items []json.RawMessage, ids []string, hasMore bool) []byte {
 	return out
 }
 
-// A refresh replaces provider-derived fields while retaining the private
-// authority that determines which native operation owns subsequent file calls.
-func refreshedFileMetadata(res *resources.Resource, body []byte) (json.RawMessage, string, *time.Time) {
+func resultFileMetadata(owner *resources.Resource, role string) (json.RawMessage, error) {
+	metadata := durableMetadata(resourceModel(owner))
+	adapter, err := resourceAdapter(owner)
+	if err != nil {
+		return nil, err
+	}
+	if adapter != connectors.BatchTogether && adapter != connectors.BatchMistral {
+		return metadata, nil
+	}
+	return managedFileMetadata(metadata, nil, adapter, batchManifest{}, role)
+}
+
+type refreshedFile struct {
+	metadata json.RawMessage
+	state    string
+	expires  *time.Time
+}
+
+func refreshedFileMetadata(res *resources.Resource, body []byte) (refreshedFile, error) {
 	metadata, state, expires := fileMetadata(body, resourceModel(res))
 	if res.Kind == resources.KindStrictFile {
-		return metadata, state, expires
+		return refreshedFile{metadata: metadata, state: state, expires: expires}, nil
 	}
-	var prior map[string]json.RawMessage
-	_ = json.Unmarshal(res.Metadata, &prior)
-	var adapter, role string
-	_ = json.Unmarshal(prior["adapter"], &adapter)
-	_ = json.Unmarshal(prior["role"], &role)
-	if adapter == "together" || adapter == "mistral" || adapter == "gemini_managed" {
-		metadata = managedFileMetadata(res.Metadata, body, adapter, batchManifest{}, role)
+	adapter, err := resourceAdapter(res)
+	if err != nil {
+		return refreshedFile{}, err
+	}
+	refreshed, err := refreshedProviderMetadata(res, body, metadata, adapter)
+	if err != nil {
+		return refreshedFile{}, err
+	}
+	return refreshedFile{metadata: refreshed, state: state, expires: expires}, nil
+}
+
+func refreshedProviderMetadata(res *resources.Resource, body []byte, metadata json.RawMessage, adapter connectors.BatchAdapter) (json.RawMessage, error) {
+	var prior struct {
+		Role          string          `json:"role"`
+		BatchManifest json.RawMessage `json:"batch_manifest,omitempty"`
+		FileOperation json.RawMessage `json:"file_operation,omitempty"`
+	}
+	if err := json.Unmarshal(res.Metadata, &prior); err != nil {
+		return nil, err
+	}
+	base := metadata
+	if adapter.Managed() {
+		managed, err := managedFileMetadata(res.Metadata, body, adapter, batchManifest{}, prior.Role)
+		if err != nil {
+			return nil, err
+		}
+		base = managed
 	}
 	var fields map[string]json.RawMessage
-	_ = json.Unmarshal(metadata, &fields)
-	for _, name := range []string{"batch_manifest", "file_operation"} {
-		if value, present := prior[name]; present {
-			fields[name] = value
-		}
+	if err := json.Unmarshal(base, &fields); err != nil {
+		return nil, err
 	}
-	return mustJSON(fields), state, expires
+	retained := map[string]json.RawMessage{"batch_manifest": prior.BatchManifest, "file_operation": prior.FileOperation}
+	maps.DeleteFunc(retained, func(_ string, value json.RawMessage) bool { return len(value) == 0 })
+	maps.Copy(fields, retained)
+	return json.Marshal(fields)
 }
 
 func (x *call) completeFileControl() {
