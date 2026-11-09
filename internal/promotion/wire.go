@@ -53,3 +53,8 @@ func Nullable[T any](value *T) nullable.Nullable[T] {
 	}
 	return nullable.NewNullableWithValue(*value)
 }
+
+func TupleKey(parts ...string) string {
+	encoded, _ := json.Marshal(parts)
+	return string(encoded)
+}
