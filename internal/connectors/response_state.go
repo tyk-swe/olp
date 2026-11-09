@@ -1,6 +1,9 @@
 package connectors
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // SupportsRetainedResponses identifies the native resource-addressing contracts
 // implemented by the existing Responses resource owner. A compatible JSON
@@ -46,20 +49,72 @@ func (c Config) SupportsFilesBatches() bool {
 	return false
 }
 
-// FilesBatchesAdapter names the reviewed resource lifecycle implementation.
-func (c Config) FilesBatchesAdapter() string {
+type BatchAdapter string
+
+const (
+	BatchOpenAI        BatchAdapter = "openai"
+	BatchTogether      BatchAdapter = "together"
+	BatchMistral       BatchAdapter = "mistral"
+	BatchGeminiManaged BatchAdapter = "gemini_managed"
+	BatchAnthropic     BatchAdapter = "anthropic"
+	BatchGemini        BatchAdapter = "gemini"
+	BatchVertex        BatchAdapter = "vertex"
+	BatchBedrock       BatchAdapter = "bedrock"
+)
+
+func ParseBatchAdapter(value string) (BatchAdapter, error) {
+	switch adapter := BatchAdapter(value); adapter {
+	case BatchOpenAI, BatchTogether, BatchMistral, BatchGeminiManaged, BatchAnthropic, BatchGemini, BatchVertex, BatchBedrock:
+		return adapter, nil
+	default:
+		return "", fmt.Errorf("unknown batch adapter %q", value)
+	}
+}
+
+func (a BatchAdapter) Managed() bool {
+	return a == BatchTogether || a == BatchMistral || a == BatchGeminiManaged
+}
+
+func (c Config) FilesBatchesAdapter() (BatchAdapter, bool) {
 	if !c.SupportsFilesBatches() {
-		return ""
+		return "", false
 	}
 	if c.Kind == "gemini" {
-		return "gemini_managed"
+		return BatchGeminiManaged, true
 	}
 	switch c.ProfileID {
 	case "together-files-batches":
-		return "together"
+		return BatchTogether, true
 	case "mistral-files-batches":
-		return "mistral"
+		return BatchMistral, true
 	default:
-		return "openai"
+		return BatchOpenAI, true
+	}
+}
+
+const (
+	VertexBatchProfile  = "vertex-batch-prediction"
+	BedrockBatchProfile = "bedrock-batch-inference"
+)
+
+func CloudBatchAdapter(profileID string) (BatchAdapter, bool) {
+	switch profileID {
+	case VertexBatchProfile:
+		return BatchVertex, true
+	case BedrockBatchProfile:
+		return BatchBedrock, true
+	default:
+		return "", false
+	}
+}
+
+func (a BatchAdapter) CloudDialect() string {
+	switch a {
+	case BatchVertex:
+		return VertexBatchProfile
+	case BatchBedrock:
+		return BedrockBatchProfile
+	default:
+		return ""
 	}
 }

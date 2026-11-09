@@ -13,6 +13,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/batches"
+	"github.com/tyk-swe/olp/internal/batches/reconcile"
+	"github.com/tyk-swe/olp/internal/batches/upstream"
 	"github.com/tyk-swe/olp/internal/billing"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/codeallowance"
@@ -54,20 +56,14 @@ func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Clie
 	wg.Go(func() { mediaService.RunReconciler(ctx) })
 	batchAuth := connectors.NewAuth(policy)
 	batchAuth.Signer = pluginHost
-	batchWorker := &batches.Worker{
+	batchWorker := reconcile.New(reconcile.Deps{
 		Pool: pool, Store: batches.NewStore(pool),
 		Resources: resources.NewEncrypted(pool, installation, keys),
 		Resolver:  resources.NewResolver(pool), Credentials: mediaService.Credentials,
-		Keys: keys, Installation: installation, DigestKey: auth,
-		Readers: map[string]batches.Reader{
-			"openai":   &batches.OpenAIReader{Auth: batchAuth, Egress: policy},
-			"together": batches.NewTogetherReader(batchAuth, policy),
-			"mistral":  batches.NewMistralReader(batchAuth, policy),
-		},
-		Auth: batchAuth, Egress: policy,
+		DigestKey: auth, Readers: upstream.New(batchAuth, policy), Egress: policy,
 		Client: policy.Client(5 * time.Minute), Connections: egress.NewConnectionClientCache(128),
-		Limiter: limiter, Log: log,
-	}
+		Limiter: limiter, Log: log, Now: time.Now,
+	})
 	wg.Go(func() { batchWorker.Run(ctx) })
 	retained := &retainedworker.Worker{Store: resources.New(pool), Resolver: resources.NewResolver(pool), Credentials: mediaService.Credentials, Auth: batchAuth, Egress: policy, Log: log}
 	wg.Go(func() { retained.Run(ctx) })

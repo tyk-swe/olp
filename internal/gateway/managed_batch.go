@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -9,13 +10,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
-	"net/url"
-	"strconv"
+	"slices"
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/batches"
+	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/batches/upstream"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -30,16 +33,122 @@ const (
 	managedBatchLines     = 50000
 )
 
+const geminiNativeManifest connectors.BatchAdapter = "gemini_native"
+
 type batchManifest struct {
-	Adapter        string `json:"adapter"`
-	Endpoint       string `json:"endpoint"`
-	LineOperation  string `json:"line_operation"`
-	LineCount      int    `json:"line_count"`
-	ManifestDigest string `json:"manifest_digest"`
+	Adapter        connectors.BatchAdapter `json:"adapter,omitempty"`
+	Endpoint       string                  `json:"endpoint,omitempty"`
+	LineOperation  wire.LineOperation      `json:"line_operation,omitempty"`
+	LineCount      int                     `json:"line_count,omitempty"`
+	ManifestDigest string                  `json:"manifest_digest,omitempty"`
 }
 
-func batchManifestFields() []string {
-	return []string{"endpoint", "line_operation", "line_count", "manifest_digest"}
+func (m batchManifest) withAdapter(adapter connectors.BatchAdapter) batchManifest {
+	m.Adapter = adapter
+	return m
+}
+
+type managedFileObject struct {
+	Bytes     *upstream.Count `json:"bytes,omitempty"`
+	CreatedAt *int64          `json:"created_at,omitempty"`
+	Filename  *string         `json:"filename,omitempty"`
+	Purpose   *string         `json:"purpose,omitempty"`
+}
+
+type managedFileRecord struct {
+	batchManifest
+	UpstreamModel    string            `json:"upstream_model,omitempty"`
+	Role             string            `json:"role,omitempty"`
+	ProviderFile     managedFileObject `json:"provider_file"`
+	ResponsesFile    string            `json:"gemini_responses_file,omitempty"`
+	CompletionWindow string            `json:"completion_window,omitempty"`
+}
+
+func decodeManagedFileRecord(metadata json.RawMessage) (managedFileRecord, error) {
+	var record managedFileRecord
+	if err := json.Unmarshal(metadata, &record); err != nil {
+		return managedFileRecord{}, errGeminiBatchFidelity
+	}
+	return record, nil
+}
+
+func resourceAdapter(resource *resources.Resource) (connectors.BatchAdapter, error) {
+	var metadata struct {
+		Adapter string `json:"adapter"`
+	}
+	if err := json.Unmarshal(resource.Metadata, &metadata); err != nil {
+		return "", err
+	}
+	if metadata.Adapter == "" {
+		return connectors.BatchOpenAI, nil
+	}
+	return connectors.ParseBatchAdapter(metadata.Adapter)
+}
+
+func managedFileMetadata(prior json.RawMessage, response []byte, adapter connectors.BatchAdapter, manifest batchManifest, role string) (json.RawMessage, error) {
+	record, err := decodeManagedFileRecord(prior)
+	if err != nil {
+		return nil, err
+	}
+	file, err := decodeManagedProviderFile(adapter, response)
+	if err != nil {
+		return nil, err
+	}
+	if manifest.Adapter != "" {
+		return json.Marshal(managedFileRecord{batchManifest: manifest.withAdapter(adapter), UpstreamModel: record.UpstreamModel, Role: role, ProviderFile: file})
+	}
+	return json.Marshal(managedFileRecord{
+		batchManifest: record.batchManifest.withAdapter(adapter), UpstreamModel: record.UpstreamModel, Role: role, ProviderFile: file,
+		ResponsesFile: record.ResponsesFile,
+	})
+}
+
+func decodeManagedProviderFile(adapter connectors.BatchAdapter, response []byte) (managedFileObject, error) {
+	if len(response) == 0 {
+		return managedFileObject{}, nil
+	}
+	if adapter == connectors.BatchGeminiManaged {
+		return decodeGeminiProviderFile(response)
+	}
+	var file struct {
+		Bytes     *upstream.Count `json:"bytes"`
+		CreatedAt json.RawMessage `json:"created_at"`
+		Filename  *string         `json:"filename"`
+		Purpose   *string         `json:"purpose"`
+	}
+	if err := json.Unmarshal(response, &file); err != nil {
+		return managedFileObject{}, err
+	}
+	return managedFileObject{Bytes: file.Bytes, CreatedAt: optionalUnix(file.CreatedAt), Filename: file.Filename, Purpose: managedPurpose(adapter, file.Purpose)}, nil
+}
+
+func managedPurpose(adapter connectors.BatchAdapter, purpose *string) *string {
+	if adapter == connectors.BatchTogether && purpose != nil && strings.HasPrefix(*purpose, "batch") {
+		return new("batch")
+	}
+	return purpose
+}
+
+type geminiFileFields struct {
+	DisplayName string          `json:"displayName"`
+	Name        string          `json:"name"`
+	SizeBytes   *upstream.Count `json:"sizeBytes"`
+	CreateTime  json.RawMessage `json:"createTime"`
+}
+
+func decodeGeminiProviderFile(response []byte) (managedFileObject, error) {
+	var envelope struct {
+		File *geminiFileFields `json:"file"`
+		geminiFileFields
+	}
+	if err := json.Unmarshal(response, &envelope); err != nil {
+		return managedFileObject{}, err
+	}
+	file := cmp.Or(envelope.File, &envelope.geminiFileFields)
+	return managedFileObject{
+		Bytes: file.SizeBytes, CreatedAt: optionalUnix(file.CreateTime),
+		Filename: new(cmp.Or(file.DisplayName, strings.TrimPrefix(file.Name, "files/"))), Purpose: new("batch"),
+	}, nil
 }
 
 type managedBatchLine struct {
@@ -49,292 +158,247 @@ type managedBatchLine struct {
 	Body     json.RawMessage `json:"body"`
 }
 
-func managedFileFields() [4]string {
-	return [4]string{"bytes", "created_at", "filename", "purpose"}
+type translatedBatch struct {
+	manifest batchManifest
+	err      error
 }
 
-func managedFileMetadata(existing, response []byte, adapter string, manifest batchManifest, role string) []byte {
-	var prior map[string]json.RawMessage
-	_ = json.Unmarshal(existing, &prior)
-	meta := map[string]json.RawMessage{}
-	if value, ok := prior["upstream_model"]; ok {
-		meta["upstream_model"] = value
-	}
-	var provider map[string]json.RawMessage
-	_ = json.Unmarshal(response, &provider)
-	fields := map[string]json.RawMessage{}
-	if adapter == "gemini_managed" {
-		var file map[string]json.RawMessage
-		_ = json.Unmarshal(provider["file"], &file)
-		if file == nil {
-			file = provider
-		}
-		var filename string
-		_ = json.Unmarshal(file["displayName"], &filename)
-		if filename == "" {
-			_ = json.Unmarshal(file["name"], &filename)
-			filename = strings.TrimPrefix(filename, "files/")
-		}
-		fields["filename"], _ = json.Marshal(filename)
-		fields["purpose"], _ = json.Marshal("batch")
-		var sizeText string
-		if json.Unmarshal(file["sizeBytes"], &sizeText) == nil {
-			if size, err := strconv.ParseInt(sizeText, 10, 64); err == nil && size >= 0 {
-				fields["bytes"], _ = json.Marshal(size)
-			}
-		} else {
-			var size int64
-			if json.Unmarshal(file["sizeBytes"], &size) == nil && size >= 0 {
-				fields["bytes"], _ = json.Marshal(size)
-			}
-		}
-		var created string
-		if json.Unmarshal(file["createTime"], &created) == nil {
-			if at, err := time.Parse(time.RFC3339Nano, created); err == nil {
-				fields["created_at"], _ = json.Marshal(at.Unix())
-			}
-		}
-	} else {
-		for _, name := range managedFileFields() {
-			if value, ok := provider[name]; ok {
-				fields[name] = value
-			}
-		}
-	}
-	if purpose, ok := fields["purpose"]; ok && adapter == "together" {
-		var purposeValue string
-		if json.Unmarshal(purpose, &purposeValue) == nil && strings.HasPrefix(purposeValue, "batch") {
-			fields["purpose"], _ = json.Marshal("batch")
-		}
-	}
-	meta["adapter"], _ = json.Marshal(adapter)
-	meta["role"], _ = json.Marshal(role)
-	meta["provider_file"], _ = json.Marshal(fields)
-	if manifest.Adapter != "" {
-		meta["endpoint"], _ = json.Marshal(manifest.Endpoint)
-		meta["line_operation"], _ = json.Marshal(manifest.LineOperation)
-		meta["line_count"], _ = json.Marshal(manifest.LineCount)
-		meta["manifest_digest"], _ = json.Marshal(manifest.ManifestDigest)
-	} else {
-		for _, name := range append(batchManifestFields(), "gemini_responses_file") {
-			if value, ok := prior[name]; ok {
-				meta[name] = value
-			}
-		}
-	}
-	returnValue, _ := json.Marshal(meta)
-	return returnValue
-}
-
-func (s *Server) translateManagedBatchInput(ctx context.Context, p *pin, route *routing.Route, file *media.Part, adapter string) (*media.Part, batchManifest, *Error) {
+func (s *Server) translateManagedBatchInput(ctx context.Context, p *pin, route *routing.Route, file *media.Part, adapter connectors.BatchAdapter) (*media.Part, batchManifest, *Error) {
 	opened, err := s.transport().Spool.Open(file.Handle)
 	if err != nil {
 		return nil, batchManifest{}, serverError(http.StatusInternalServerError, "media_content_unavailable", "The uploaded batch file could not be read.")
 	}
 	defer opened.File.Close()
 	reader, writer := io.Pipe()
-	done := make(chan error, 1)
-	manifest := batchManifest{Adapter: adapter}
+	done := make(chan translatedBatch, 1)
 	go func() {
-		done <- translateManagedBatchLines(writer, opened.File, s.batchLineDigest, p, route, adapter, &manifest)
+		manifest, err := translateManagedBatchLines(writer, opened.File, s.batchLineDigest, managedLineTarget{pin: p, route: route, adapter: adapter})
+		done <- translatedBatch{manifest: manifest, err: err}
 	}()
 	artifact, spoolErr := s.transport().Spool.Put(ctx, media.Upload{
 		Filename: file.Filename, ContentType: "application/jsonl", MaximumLength: file.Limit, Body: reader,
 	})
 	_ = reader.Close()
-	translateErr := <-done
-	if spoolErr != nil || translateErr != nil {
+	translated := <-done
+	if spoolErr != nil || translated.err != nil {
 		if spoolErr == nil {
 			_ = s.transport().Spool.Remove(artifact.Handle)
 		}
-		if failure, ok := translateErr.(*Error); ok {
+		if failure, ok := translated.err.(*Error); ok {
 			return nil, batchManifest{}, failure
 		}
-		param := "file"
-		return nil, batchManifest{}, invalidRequest("unsupported_parameter", "The batch file could not be translated.", &param)
+		return nil, batchManifest{}, invalidRequest("unsupported_parameter", "The batch file could not be translated.", strPtr("file"))
 	}
 	part := &media.Part{
 		Handle: artifact.Handle, Digest: artifact.Digest, Filename: file.Filename,
 		ContentType: artifact.ContentType, Size: artifact.ContentLength, Limit: file.Limit,
 	}
-	return part, manifest, nil
+	return part, translated.manifest, nil
 }
 
-func translateManagedBatchLines(writer *io.PipeWriter, input io.Reader, digest func(string) ([]byte, bool), p *pin, route *routing.Route, adapter string, manifest *batchManifest) error {
-	fail := func(err error) error {
+type managedLineTarget struct {
+	pin     *pin
+	route   *routing.Route
+	adapter connectors.BatchAdapter
+}
+
+func batchFileError(format string, lineNumber int) *Error {
+	return invalidRequest("unsupported_parameter", fmt.Sprintf(format, lineNumber), strPtr("file"))
+}
+
+func translateManagedBatchLines(writer *io.PipeWriter, input io.Reader, digest func(string) ([]byte, bool), target managedLineTarget) (batchManifest, error) {
+	fail := func(err error) (batchManifest, error) {
 		_ = writer.CloseWithError(err)
-		return err
+		return batchManifest{}, err
 	}
 	defer writer.Close()
 	scanner := bufio.NewScanner(input)
 	scanner.Buffer(make([]byte, 64*1024), managedBatchLineLimit+2)
 	seen := map[string]struct{}{}
 	manifestHash := sha256.New()
-	var endpoint string
+	endpoint := ""
+	count := 0
 	for lineNumber := 1; scanner.Scan(); lineNumber++ {
-		raw := scanner.Bytes()
-		if lineNumber > managedBatchLines || len(raw) > managedBatchLineLimit {
-			param := "file"
-			return fail(invalidRequest("unsupported_parameter", fmt.Sprintf("Batch file line %d exceeds the supported bounds.", lineNumber), &param))
-		}
-		document, err := oif.ParseJSON(raw, oif.Limits{MaxBytes: managedBatchLineLimit})
-		if err != nil || document.Root().Kind() != oif.Object {
-			param := "file"
-			return fail(invalidRequest("unsupported_parameter", fmt.Sprintf("Batch file line %d is not a JSON object.", lineNumber), &param))
-		}
-		for _, member := range document.Root().Members() {
-			switch member.Name {
-			case "custom_id", "method", "url", "body":
-			default:
-				param := "file"
-				return fail(invalidRequest("unsupported_parameter", fmt.Sprintf("Batch file line %d has an unsupported field.", lineNumber), &param))
-			}
-		}
-		var line managedBatchLine
-		if json.Unmarshal(raw, &line) != nil || line.CustomID == "" || len([]byte(line.CustomID)) > managedCustomIDLimit(adapter) ||
-			line.Method != "POST" || len(line.Body) == 0 {
-			param := "file"
-			return fail(invalidRequest("unsupported_parameter", fmt.Sprintf("Batch file line %d has an unsupported shape.", lineNumber), &param))
+		line, encoded, err := target.translate(scanner.Bytes(), lineNumber)
+		if err != nil {
+			return fail(err)
 		}
 		if _, duplicate := seen[line.CustomID]; duplicate {
-			param := "file"
-			return fail(invalidRequest("unsupported_parameter", fmt.Sprintf("Batch file line %d repeats a custom_id.", lineNumber), &param))
+			return fail(batchFileError("Batch file line %d repeats a custom_id.", lineNumber))
 		}
-		seen[line.CustomID] = struct{}{}
-		classificationEndpoint := line.URL
-		if adapter == "openai" && p.provider.Kind == "azure_openai" {
-			classificationEndpoint = wire.CanonicalBatchEndpoint(line.URL)
-		}
-		operation, family, ok := managedBatchEndpoint(adapter, classificationEndpoint)
-		if !ok || endpoint != "" && endpoint != line.URL {
-			param := "file"
-			return fail(invalidRequest("unsupported_parameter", fmt.Sprintf("Batch file line %d has an unsupported or mixed endpoint.", lineNumber), &param))
-		}
-		endpoint = line.URL
-		var body struct {
-			Model string `json:"model"`
-		}
-		upstreamModel := p.provider.Connector().Model(p.model)
-		if json.Unmarshal(line.Body, &body) != nil || body.Model != route.Slug && body.Model != p.model && body.Model != upstreamModel {
-			param := "file"
-			return fail(invalidRequest("unsupported_parameter", fmt.Sprintf("Batch file line %d has an unsupported model.", lineNumber), &param))
-		}
-		if adapter == "openai" {
-			if p.provider.VendorID == "groq" && line.URL != "/v1/chat/completions" {
-				return fail(invalidRequest("unsupported_parameter", "Groq batch files support only /v1/chat/completions.", strPtr("file")))
-			}
-			modelJSON, _ := json.Marshal(p.provider.Connector().Model(p.model))
-			bound, err := oif.Apply(document, []oif.Change{{Pointer: "/body/model", Value: string(modelJSON), Origin: oif.ResourceBinding, Reason: "batch model affinity"}})
-			if err != nil {
-				return fail(err)
-			}
-			customIDDigest, ok := digest(line.CustomID)
-			if !ok {
-				return fail(errors.New("batch digest key is unavailable"))
-			}
-			_, _ = manifestHash.Write(customIDDigest)
-			if _, err = writer.Write(append(bound.Bytes(), '\n')); err != nil {
-				return fail(err)
-			}
-			manifest.LineCount++
-			continue
-		}
-		bodyDocument, err := oif.ParseJSON(line.Body, oif.Limits{MaxBytes: managedBatchLineLimit})
-		if err != nil {
-			return fail(err)
-		}
-		modelJSON, _ := json.Marshal(route.Slug)
-		ingress, err := oif.Apply(bodyDocument, []oif.Change{{Pointer: "/model", Value: string(modelJSON), Origin: oif.IdentityBinding, Reason: "batch ingress model alias"}})
-		if err != nil {
-			return fail(err)
-		}
-		request, err := protocols.Parse(family, ingress.Bytes(), route.Slug)
-		if err != nil || request.Stream {
-			param := "file"
-			return fail(invalidRequest("unsupported_parameter", fmt.Sprintf("Batch file line %d cannot be translated.", lineNumber), &param))
-		}
-		defaults := protocols.Object(p.provider.ParameterDefaults)
-		if p.provider.ProfileID != "" {
-			defaults, _, err = p.provider.Connector().DefaultsFor(operation, p.model)
-			if err != nil {
-				param := "file"
-				return fail(invalidRequest("unsupported_parameter", fmt.Sprintf("Batch file line %d cannot be translated.", lineNumber), &param))
-			}
-		}
-		var encoded []byte
-		if adapter == "gemini_managed" {
-			encoded, _, err = protocols.EncodeTarget(request, wire.Gemini, p.provider.Kind, p.provider.VendorID, upstreamModel, defaults)
-		} else {
-			encoded, _, err = protocols.Encode(request, p.provider.Kind, p.provider.VendorID, upstreamModel, defaults)
-		}
-		if err != nil {
-			param := "file"
-			return fail(invalidRequest("unsupported_parameter", fmt.Sprintf("Batch file line %d cannot be translated.", lineNumber), &param))
-		}
-		if adapter == "gemini_managed" {
-			document, parseErr := oif.ParseJSON(encoded, oif.Limits{MaxBytes: managedBatchLineLimit})
-			if parseErr != nil || geminiBatchHasFileReference(document.Root()) {
-				return fail(invalidRequest("unsupported_parameter", "Gemini batch input cannot use unbound file or cached-content references.", strPtr("file")))
-			}
-		}
-		if adapter == "mistral" || adapter == "gemini_managed" {
-			var fields map[string]json.RawMessage
-			if json.Unmarshal(encoded, &fields) != nil {
-				return fail(errors.New("translated batch line is malformed"))
-			}
-			delete(fields, "model")
-			encoded, _ = json.Marshal(fields)
+		if endpoint != "" && endpoint != line.URL {
+			return fail(batchFileError("Batch file line %d has an unsupported or mixed endpoint.", lineNumber))
 		}
 		customIDDigest, ok := digest(line.CustomID)
 		if !ok {
 			return fail(errors.New("batch digest key is unavailable"))
 		}
+		seen[line.CustomID], endpoint = struct{}{}, line.URL
 		_, _ = manifestHash.Write(customIDDigest)
-		resultValue := map[string]any{"custom_id": line.CustomID, "body": json.RawMessage(encoded)}
-		if adapter == "gemini_managed" {
-			resultValue = map[string]any{"key": line.CustomID, "request": json.RawMessage(encoded)}
-		}
-		result, _ := json.Marshal(resultValue)
-		if _, err = writer.Write(append(result, '\n')); err != nil {
+		if _, err := writer.Write(append(encoded, '\n')); err != nil {
 			return fail(err)
 		}
-		manifest.LineCount++
+		count++
 	}
 	if err := scanner.Err(); err != nil {
-		param := "file"
-		return fail(invalidRequest("unsupported_parameter", fmt.Sprintf("Batch file line %d exceeds the supported bounds.", manifest.LineCount+1), &param))
+		return fail(batchFileError("Batch file line %d exceeds the supported bounds.", count+1))
 	}
-	if manifest.LineCount == 0 {
-		param := "file"
-		return fail(invalidRequest("unsupported_parameter", "The batch file must contain at least one request.", &param))
+	if count == 0 {
+		return fail(invalidRequest("unsupported_parameter", "The batch file must contain at least one request.", strPtr("file")))
 	}
-	manifest.Endpoint = endpoint
-	manifest.LineOperation = wire.BatchLineOperation(endpoint)
-	manifest.ManifestDigest = hex.EncodeToString(manifestHash.Sum(nil))
-	return nil
+	operation, _ := wire.BatchLineOperation(endpoint)
+	return batchManifest{
+		Adapter: target.adapter, Endpoint: endpoint, LineOperation: operation, LineCount: count,
+		ManifestDigest: hex.EncodeToString(manifestHash.Sum(nil)),
+	}, nil
 }
 
-func managedCustomIDLimit(adapter string) int {
-	if adapter == "together" {
+func (t managedLineTarget) translate(raw []byte, lineNumber int) (managedBatchLine, []byte, error) {
+	if lineNumber > managedBatchLines || len(raw) > managedBatchLineLimit {
+		return managedBatchLine{}, nil, batchFileError("Batch file line %d exceeds the supported bounds.", lineNumber)
+	}
+	document, err := oif.ParseJSON(raw, oif.Limits{MaxBytes: managedBatchLineLimit})
+	if err != nil || document.Root().Kind() != oif.Object {
+		return managedBatchLine{}, nil, batchFileError("Batch file line %d is not a JSON object.", lineNumber)
+	}
+	for _, member := range document.Root().Members() {
+		if !slices.Contains([]string{"custom_id", "method", "url", "body"}, member.Name) {
+			return managedBatchLine{}, nil, batchFileError("Batch file line %d has an unsupported field.", lineNumber)
+		}
+	}
+	var line managedBatchLine
+	if json.Unmarshal(raw, &line) != nil || line.CustomID == "" || len(line.CustomID) > managedCustomIDLimit(t.adapter) ||
+		line.Method != "POST" || len(line.Body) == 0 {
+		return managedBatchLine{}, nil, batchFileError("Batch file line %d has an unsupported shape.", lineNumber)
+	}
+	classified := line.URL
+	if t.adapter == connectors.BatchOpenAI && t.pin.provider.Kind == "azure_openai" {
+		classified = wire.CanonicalBatchEndpoint(line.URL)
+	}
+	operation, family, ok := managedBatchEndpoint(t.adapter, classified)
+	if !ok {
+		return managedBatchLine{}, nil, batchFileError("Batch file line %d has an unsupported or mixed endpoint.", lineNumber)
+	}
+	var body struct {
+		Model string `json:"model"`
+	}
+	upstreamModel := t.pin.provider.Connector().Model(t.pin.model)
+	if json.Unmarshal(line.Body, &body) != nil || body.Model != t.route.Slug && body.Model != t.pin.model && body.Model != upstreamModel {
+		return managedBatchLine{}, nil, batchFileError("Batch file line %d has an unsupported model.", lineNumber)
+	}
+	if t.adapter == connectors.BatchOpenAI {
+		encoded, err := t.bindOpenAILine(document, line, upstreamModel)
+		return line, encoded, err
+	}
+	encoded, err := t.encodeLine(line, operation, family, upstreamModel, lineNumber)
+	return line, encoded, err
+}
+
+func (t managedLineTarget) bindOpenAILine(document oif.Document, line managedBatchLine, upstreamModel string) ([]byte, error) {
+	if t.pin.provider.VendorID == "groq" && line.URL != "/v1/chat/completions" {
+		return nil, invalidRequest("unsupported_parameter", "Groq batch files support only /v1/chat/completions.", strPtr("file"))
+	}
+	bound, err := oif.Apply(document, []oif.Change{{Pointer: "/body/model", Value: string(mustJSON(upstreamModel)), Origin: oif.ResourceBinding, Reason: "batch model affinity"}})
+	if err != nil {
+		return nil, err
+	}
+	return bound.Bytes(), nil
+}
+
+func (t managedLineTarget) encodeLine(line managedBatchLine, operation wire.LineOperation, family wire.Format, upstreamModel string, lineNumber int) ([]byte, error) {
+	untranslatable := batchFileError("Batch file line %d cannot be translated.", lineNumber)
+	bodyDocument, err := oif.ParseJSON(line.Body, oif.Limits{MaxBytes: managedBatchLineLimit})
+	if err != nil {
+		return nil, err
+	}
+	ingress, err := oif.Apply(bodyDocument, []oif.Change{{Pointer: "/model", Value: string(mustJSON(t.route.Slug)), Origin: oif.IdentityBinding, Reason: "batch ingress model alias"}})
+	if err != nil {
+		return nil, err
+	}
+	request, err := protocols.Parse(family, ingress.Bytes(), t.route.Slug)
+	if err != nil || request.Stream {
+		return nil, untranslatable
+	}
+	defaults, err := t.lineDefaults(operation)
+	if err != nil {
+		return nil, untranslatable
+	}
+	encoded, err := t.encodeRequest(request, upstreamModel, defaults)
+	if err != nil {
+		return nil, untranslatable
+	}
+	if t.adapter == connectors.BatchGeminiManaged {
+		document, err := oif.ParseJSON(encoded, oif.Limits{MaxBytes: managedBatchLineLimit})
+		if err != nil || geminiBatchHasFileReference(document.Root()) {
+			return nil, invalidRequest("unsupported_parameter", "Gemini batch input cannot use unbound file or cached-content references.", strPtr("file"))
+		}
+	}
+	encodedRequest, err := t.withoutModel(encoded)
+	if err != nil {
+		return nil, err
+	}
+	if t.adapter == connectors.BatchGeminiManaged {
+		return json.Marshal(map[string]any{"key": line.CustomID, "request": encodedRequest})
+	}
+	return json.Marshal(map[string]any{"custom_id": line.CustomID, "body": encodedRequest})
+}
+
+func (t managedLineTarget) lineDefaults(operation wire.LineOperation) (protocols.Object, error) {
+	if t.pin.provider.ProfileID == "" {
+		return protocols.Object(t.pin.provider.ParameterDefaults), nil
+	}
+	defaults, _, err := t.pin.provider.Connector().DefaultsFor(string(operation), t.pin.model)
+	return defaults, err
+}
+
+func (t managedLineTarget) encodeRequest(request *wire.Request, upstreamModel string, defaults protocols.Object) ([]byte, error) {
+	provider := t.pin.provider
+	if t.adapter == connectors.BatchGeminiManaged {
+		encoded, _, err := protocols.EncodeTarget(request, wire.Gemini, provider.Kind, provider.VendorID, upstreamModel, defaults)
+		return encoded, err
+	}
+	encoded, _, err := protocols.Encode(request, provider.Kind, provider.VendorID, upstreamModel, defaults)
+	return encoded, err
+}
+
+func (t managedLineTarget) withoutModel(encoded []byte) (json.RawMessage, error) {
+	if t.adapter != connectors.BatchMistral && t.adapter != connectors.BatchGeminiManaged {
+		return encoded, nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		return nil, errors.New("translated batch line is malformed")
+	}
+	return json.Marshal(maps.Collect(func(yield func(string, json.RawMessage) bool) {
+		for name, value := range fields {
+			if name != "model" && !yield(name, value) {
+				return
+			}
+		}
+	}))
+}
+
+func managedCustomIDLimit(adapter connectors.BatchAdapter) int {
+	if adapter == connectors.BatchTogether {
 		return 64
 	}
 	return 128
 }
 
-func managedBatchEndpoint(adapter, endpoint string) (string, wire.Format, bool) {
-	operation := wire.BatchLineOperation(endpoint)
-	if operation == "" {
+func managedBatchEndpoint(adapter connectors.BatchAdapter, endpoint string) (wire.LineOperation, wire.Format, bool) {
+	operation, ok := wire.BatchLineOperation(endpoint)
+	if !ok {
 		return "", "", false
 	}
 	switch endpoint {
 	case "/v1/chat/completions":
-		return operation, wire.Chat, adapter == "openai" || adapter == "together" || adapter == "mistral" || adapter == "gemini_managed"
+		return operation, wire.Chat, adapter == connectors.BatchOpenAI || adapter.Managed()
 	case "/v1/embeddings":
-		return operation, wire.Embeddings, adapter == "openai" || adapter == "mistral"
+		return operation, wire.Embeddings, adapter == connectors.BatchOpenAI || adapter == connectors.BatchMistral
 	case "/v1/responses":
-		return operation, wire.Responses, adapter == "openai"
+		return operation, wire.Responses, adapter == connectors.BatchOpenAI
 	case "/v1/completions":
-		return operation, wire.Completions, adapter == "openai"
+		return operation, wire.Completions, adapter == connectors.BatchOpenAI
 	default:
 		return "", "", false
 	}
@@ -350,253 +414,68 @@ func (s *Server) batchLineDigest(customID string) ([]byte, bool) {
 	return digester.Digest(secrets.BatchLineDigest, customID), true
 }
 
-func managedBatchRequestBody(source oif.Document, adapter, upstreamFileID, model string, manifest batchManifest) ([]byte, *int64, *Error) {
-	endpointValue, _ := source.Root().Lookup("endpoint")
-	endpoint, _ := endpointValue.Text()
-	if adapter == "gemini_managed" {
-		windowValue, present := source.Root().Lookup("completion_window")
-		window, valid := windowValue.Text()
-		var metadataValues map[string]string
-		if raw, ok := source.Fields()["metadata"]; ok && (json.Unmarshal(raw, &metadataValues) != nil || metadataValues == nil) {
-			param := "metadata"
-			return nil, nil, invalidRequest("invalid_request", "metadata must be a string map.", &param)
+func managedBatchRequestBody(source oif.Document, adapter connectors.BatchAdapter, endpoint string, window batchWindow, upstreamFileID, model string, manifest batchManifest, id uuid.UUID) ([]byte, *Error) {
+	metadata, err := batchClientMetadata(source)
+	if adapter == connectors.BatchGeminiManaged {
+		if err != nil {
+			return nil, invalidRequest("invalid_request", "metadata must be a string map.", strPtr("metadata"))
 		}
-		if !present || !valid || window != "24h" || endpoint != manifest.Endpoint ||
-			manifest.LineOperation != "generation" || manifest.LineCount < 1 || upstreamFileID == "" {
-			return nil, nil, invalidRequest("invalid_request", "Gemini managed batches require a matching generation manifest and completion_window=24h.", nil)
+		_, windowSupplied := source.Root().Lookup("completion_window")
+		if !windowSupplied || window.label != "24h" || endpoint != manifest.Endpoint || manifest.LineOperation != wire.LineGeneration ||
+			manifest.LineCount < 1 || upstreamFileID == "" {
+			return nil, invalidRequest("invalid_request", "Gemini managed batches require a matching generation manifest and completion_window=24h.", nil)
 		}
-		body, _ := geminiManagedBatchBody("olp-pending", upstreamFileID)
-		expected := int64(manifest.LineCount)
-		return body, &expected, nil
-	}
-	windowValue, present := source.Root().Lookup("completion_window")
-	window := "24h"
-	if present {
-		window, _ = windowValue.Text()
+		return marshalBatchBody(geminiManagedBatchBody("olp-"+strings.ReplaceAll(id.String(), "-", ""), upstreamFileID))
 	}
 	if endpoint != manifest.Endpoint {
-		param := "endpoint"
-		return nil, nil, invalidRequest("unsupported_parameter", "The batch endpoint must match the uploaded file.", &param)
+		return nil, invalidRequest("unsupported_parameter", "The batch endpoint must match the uploaded file.", strPtr("endpoint"))
 	}
-	var metadataValues map[string]string
-	if metadata, ok := source.Fields()["metadata"]; ok {
-		if json.Unmarshal(metadata, &metadataValues) != nil || metadataValues == nil {
-			param := "metadata"
-			return nil, nil, invalidRequest("unsupported_parameter", "Batch metadata must be a string map.", &param)
-		}
+	if err != nil {
+		return nil, invalidRequest("unsupported_parameter", "Batch metadata must be a string map.", strPtr("metadata"))
 	}
-	if adapter == "together" {
-		body, _ := json.Marshal(map[string]any{"endpoint": endpoint, "input_file_id": upstreamFileID, "completion_window": "24h"})
-		count := int64(manifest.LineCount)
-		return body, &count, nil
+	if adapter == connectors.BatchTogether {
+		return marshalBatchBody(map[string]any{"endpoint": endpoint, "input_file_id": upstreamFileID, "completion_window": "24h"})
 	}
-	hours, err := strconv.Atoi(strings.TrimSuffix(window, "h"))
-	if strings.HasSuffix(window, "d") {
-		days, parseErr := strconv.Atoi(strings.TrimSuffix(window, "d"))
-		if parseErr != nil {
-			hours = 0
-		} else {
-			hours = days * 24
-		}
-	} else if err != nil {
-		hours = 0
-	}
-	if hours < 1 || hours > 168 {
-		param := "completion_window"
-		return nil, nil, invalidRequest("invalid_value", "Mistral batch timeout_hours must be between 1 and 168.", &param)
-	}
-	bodyFields := map[string]any{"endpoint": endpoint, "input_files": []string{upstreamFileID}, "model": model, "timeout_hours": hours}
-	if metadataValues != nil && adapter == "mistral" {
-		bodyFields["metadata"] = metadataValues
-	}
-	body, _ := json.Marshal(bodyFields)
-	count := int64(manifest.LineCount)
-	return body, &count, nil
+	return marshalBatchBody(mistralBatchBody{
+		Endpoint: endpoint, InputFiles: []string{upstreamFileID}, Model: model,
+		TimeoutHours: int64(window.length / time.Hour), Metadata: metadata,
+	})
 }
 
-func geminiManagedBatchBody(displayName, upstreamFileName string) ([]byte, error) {
-	return json.Marshal(map[string]any{"batch": map[string]any{
+type mistralBatchBody struct {
+	Endpoint     string            `json:"endpoint"`
+	InputFiles   []string          `json:"input_files"`
+	Model        string            `json:"model"`
+	TimeoutHours int64             `json:"timeout_hours"`
+	Metadata     map[string]string `json:"metadata,omitempty"`
+}
+
+func batchClientMetadata(source oif.Document) (map[string]string, error) {
+	raw, present := source.Fields()["metadata"]
+	if !present {
+		return nil, nil
+	}
+	var values map[string]string
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return nil, err
+	}
+	if values == nil {
+		return nil, errors.New("batch metadata is null")
+	}
+	return values, nil
+}
+
+func marshalBatchBody(body any) ([]byte, *Error) {
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return nil, serverError(http.StatusInternalServerError, "internal_error", "The batch request could not be encoded.")
+	}
+	return encoded, nil
+}
+
+func geminiManagedBatchBody(displayName, upstreamFileName string) map[string]any {
+	return map[string]any{"batch": map[string]any{
 		"display_name": displayName,
 		"input_config": map[string]string{"file_name": upstreamFileName},
-	}})
-}
-
-func projectManagedBatch(body []byte, adapter, requestedWindow string) ([]byte, string, error) {
-	var root map[string]json.RawMessage
-	if json.Unmarshal(body, &root) != nil || root == nil {
-		return nil, "", errors.New("provider batch response is malformed")
-	}
-	if adapter == "together" {
-		if wrapped, ok := root["job"]; ok {
-			if json.Unmarshal(wrapped, &root) != nil || root == nil {
-				return nil, "", errors.New("Together batch job is malformed")
-			}
-		}
-	}
-	var job struct {
-		ID            string          `json:"id"`
-		Status        string          `json:"status"`
-		Endpoint      string          `json:"endpoint"`
-		InputFileID   string          `json:"input_file_id"`
-		InputFiles    []string        `json:"input_files"`
-		OutputFileID  string          `json:"output_file_id"`
-		ErrorFileID   string          `json:"error_file_id"`
-		OutputFile    string          `json:"output_file"`
-		ErrorFile     string          `json:"error_file"`
-		CreatedAt     json.RawMessage `json:"created_at"`
-		CompletedAt   json.RawMessage `json:"completed_at"`
-		TotalRequests json.RawMessage `json:"total_requests"`
-		Succeeded     json.RawMessage `json:"succeeded_requests"`
-		Failed        json.RawMessage `json:"failed_requests"`
-	}
-	jobBytes, _ := json.Marshal(root)
-	if json.Unmarshal(jobBytes, &job) != nil || job.ID == "" {
-		return nil, "", errors.New("provider batch identity is missing")
-	}
-	state, ok := batches.ManagedStatus(adapter, job.Status)
-	if !ok {
-		return nil, "", errors.New("provider batch status is unknown")
-	}
-	input := job.InputFileID
-	if input == "" && len(job.InputFiles) > 0 {
-		input = job.InputFiles[0]
-	}
-	output := job.OutputFileID
-	if output == "" {
-		output = job.OutputFile
-	}
-	errorFile := job.ErrorFileID
-	if errorFile == "" {
-		errorFile = job.ErrorFile
-	}
-	if len(job.ID) > 512 || job.Endpoint == "" || input == "" || len(input) > 512 ||
-		len(output) > 512 || len(errorFile) > 512 {
-		return nil, "", errors.New("provider batch identity is malformed")
-	}
-	projected := map[string]any{
-		"id": job.ID, "object": "batch", "endpoint": job.Endpoint,
-		"input_file_id": input, "completion_window": requestedWindow, "status": state,
-	}
-	if metadata, ok := root["metadata"]; ok {
-		projected["metadata"] = metadata
-	}
-	if output != "" {
-		projected["output_file_id"] = output
-	}
-	if errorFile != "" {
-		projected["error_file_id"] = errorFile
-	}
-	if created, ok := providerUnix(job.CreatedAt); ok {
-		projected["created_at"] = created
-	} else if strings.TrimSpace(string(job.CreatedAt)) == "null" {
-		projected["created_at"] = nil
-	}
-	if completed, ok := providerUnix(job.CompletedAt); ok {
-		projected["completed_at"] = completed
-	} else if strings.TrimSpace(string(job.CompletedAt)) == "null" {
-		projected["completed_at"] = nil
-	}
-	if adapter == "mistral" {
-		total, totalOK := providerCount(job.TotalRequests)
-		succeeded, succeededOK := providerCount(job.Succeeded)
-		failed, failedOK := providerCount(job.Failed)
-		if totalOK && succeededOK && failedOK {
-			projected["request_counts"] = map[string]int64{"total": total, "completed": succeeded, "failed": failed}
-		}
-	}
-	out, err := json.Marshal(projected)
-	return out, job.ID, err
-}
-
-func managedBatchResponse(body []byte, adapter, window string) ([]byte, string, bool) {
-	projected, upstreamID, err := projectManagedBatch(body, adapter, window)
-	return projected, upstreamID, err == nil
-}
-
-func attachBatchClientMetadata(body, metadata json.RawMessage) []byte {
-	if len(metadata) == 0 || string(metadata) == "null" {
-		return body
-	}
-	var fields map[string]json.RawMessage
-	if json.Unmarshal(body, &fields) != nil || fields == nil {
-		return body
-	}
-	fields["metadata"] = metadata
-	encoded, _ := json.Marshal(fields)
-	return encoded
-}
-
-func managedBatchMetadata(body []byte, model, localInput, adapter string) (json.RawMessage, string) {
-	metadata, state := batchMetadata(body, model, localInput)
-	var fields map[string]json.RawMessage
-	_ = json.Unmarshal(metadata, &fields)
-	if fields == nil {
-		fields = map[string]json.RawMessage{}
-	}
-	fields["adapter"], _ = json.Marshal(adapter)
-	encoded, _ := json.Marshal(fields)
-	return encoded, state
-}
-
-func batchAdapter(resource *resources.Resource) string {
-	var metadata struct {
-		Adapter string `json:"adapter"`
-	}
-	if resource != nil {
-		_ = json.Unmarshal(resource.Metadata, &metadata)
-	}
-	if metadata.Adapter == "" {
-		return "openai"
-	}
-	return metadata.Adapter
-}
-
-func managedBatchPath(resource *resources.Resource, cancel bool) string {
-	adapter := batchAdapter(resource)
-	base := "batches/"
-	if adapter == "mistral" {
-		base = "batch/jobs/"
-	}
-	path := base + url.PathEscape(resource.UpstreamID)
-	if cancel {
-		if adapter == "gemini_managed" {
-			path += ":cancel"
-		} else {
-			path += "/cancel"
-		}
-	}
-	return path
-}
-
-func providerUnix(raw json.RawMessage) (int64, bool) {
-	if strings.TrimSpace(string(raw)) == "null" {
-		return 0, false
-	}
-	var seconds int64
-	if json.Unmarshal(raw, &seconds) == nil && seconds >= 0 {
-		return seconds, true
-	}
-	var text string
-	if json.Unmarshal(raw, &text) == nil {
-		if parsed, err := time.Parse(time.RFC3339Nano, text); err == nil {
-			return parsed.Unix(), true
-		}
-	}
-	return 0, false
-}
-
-func providerCount(raw json.RawMessage) (int64, bool) {
-	if strings.TrimSpace(string(raw)) == "null" {
-		return 0, false
-	}
-	var number int64
-	if json.Unmarshal(raw, &number) == nil && number >= 0 {
-		return number, true
-	}
-	var text string
-	if json.Unmarshal(raw, &text) == nil {
-		number, err := strconv.ParseInt(text, 10, 64)
-		return number, err == nil && number >= 0
-	}
-	return 0, false
+	}}
 }

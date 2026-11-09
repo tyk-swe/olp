@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"time"
@@ -32,4 +33,9 @@ func copyResourceContent(w http.ResponseWriter, reader io.Reader, expected int64
 		err = http.NewResponseController(w).Flush()
 	}
 	return written, err
+}
+
+func mustJSON(value any) []byte {
+	out, _ := json.Marshal(value)
+	return out
 }

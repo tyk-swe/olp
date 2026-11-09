@@ -43,7 +43,7 @@ func (s *Server) prepareRetainedAccounting(x *call, p *pin, route *routing.Route
 		if e.Operation == "eval" && !retainedEvalPricingSupported(price, x.attemptCardRevisionForRoute(p.provider.ID, route, x.request.startedAt), p.provider.Kind, p.provider.VendorID, model) {
 			return policyUnavailable("unsupported_metered_operation", "Evaluation totals cannot establish per-invocation input tiers; publish prices and rate cards without those tiers.")
 		}
-		template, err := s.batchSettlementTemplate(x, &cp, e.Surface, operation, s.now())
+		template, err := s.settlementTemplate(x, &cp, e.Surface, operation, s.now())
 		if err != nil {
 			return serverError(503, "pricing_unavailable", "Retained accounting could not be pinned.")
 		}

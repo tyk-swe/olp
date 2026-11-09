@@ -601,6 +601,7 @@ func (s *Server) certifyBatch(ctx context.Context, cfg *Configuration, credentia
 		{resource: "files", array: "data", query: url.Values{"limit": {"1"}}},
 		{resource: "batches", array: "data", query: url.Values{"limit": {"1"}}},
 	}
+	adapter, _ := cfg.transport().FilesBatchesAdapter()
 	switch {
 	case cfg.Kind == KindAnthropic:
 		probes[0].query.Set("beta", "true")
@@ -610,10 +611,10 @@ func (s *Server) certifyBatch(ctx context.Context, cfg *Configuration, credentia
 			{resource: "files", array: "files", query: url.Values{"pageSize": {"1"}}, optional: true},
 			{resource: "batches", array: "operations", query: url.Values{"pageSize": {"1"}}, optional: true},
 		}
-	case cfg.transport().FilesBatchesAdapter() == "mistral":
+	case adapter == connectors.BatchMistral:
 		probes[0].query = nil
 		probes[1].resource, probes[1].query = "batch/jobs", url.Values{"page_size": {"1"}}
-	case cfg.transport().FilesBatchesAdapter() == "together":
+	case adapter == connectors.BatchTogether:
 		probes = []listingProbe{{resource: "batches"}}
 	}
 	for _, probe := range probes {

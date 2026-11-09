@@ -55,23 +55,23 @@ func (s *Store) EnsureGeminiResultViews(ctx context.Context, fileName string, ou
 }
 
 // DetachGeminiResultView removes a single projection while its sibling owns
-// the shared object. The last projection remains retryable during settlement;
-// once no reference needs the object, the caller can delete it upstream.
-func (s *Store) DetachGeminiResultView(ctx context.Context, resource *Resource, fileName string) (detached, pending bool, err error) {
+// the shared object. Otherwise the caller deletes the object upstream once no
+// settlement still needs it.
+func (s *Store) DetachGeminiResultView(ctx context.Context, resource *Resource, fileName string) (bool, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return false, false, err
+		return false, err
 	}
 	defer tx.Rollback(ctx)
 	if err = lockGeminiResult(ctx, tx, resource, fileName); err != nil {
-		return false, false, err
+		return false, err
 	}
 	var state string
 	if err = tx.QueryRow(ctx, `SELECT state FROM olp.provider_resources WHERE id=$1 AND kind='file' FOR UPDATE`, resource.UUID).Scan(&state); err != nil {
-		return false, false, err
+		return false, err
 	}
 	if state == StateDeleted {
-		return false, false, ErrNotFound
+		return false, ErrNotFound
 	}
 	var sibling bool
 	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.provider_resources
@@ -81,23 +81,13 @@ func (s *Store) DetachGeminiResultView(ctx context.Context, resource *Resource, 
 		resource.APIKeyID, resource.ProviderID, resource.SlotID, resource.CredentialID, resource.UUID,
 		[]string{fileName + "#output", fileName + "#error"}).Scan(&sibling)
 	if err != nil {
-		return false, false, err
+		return false, err
 	}
 	if sibling {
 		if _, err = tx.Exec(ctx, `UPDATE olp.provider_resources SET state=$2,updated_at=now() WHERE id=$1`, resource.UUID, StateDeleted); err != nil {
-			return false, false, err
+			return false, err
 		}
-		return true, false, tx.Commit(ctx)
+		return true, tx.Commit(ctx)
 	}
-	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.batch_settlements bs
-		JOIN olp.provider_resources r ON r.id=bs.resource_id
-		WHERE bs.adapter='gemini_managed' AND bs.closed_at IS NULL
-		AND bs.api_key_id=$1 AND bs.provider_id=$2 AND bs.slot_id=$3
-		AND bs.credential_id IS NOT DISTINCT FROM $4::uuid
-		AND ((r.metadata->'provider_batch')#>>'{metadata,output,responsesFile}'=$5
-		 OR (r.metadata->'provider_batch')#>>'{metadata,response,responsesFile}'=$5
-		 OR (r.metadata->'provider_batch')#>>'{output,responsesFile}'=$5
-		 OR (r.metadata->'provider_batch')#>>'{response,responsesFile}'=$5))`,
-		resource.APIKeyID, resource.ProviderID, resource.SlotID, resource.CredentialID, fileName).Scan(&pending)
-	return false, pending, err
+	return false, nil
 }
