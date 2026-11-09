@@ -64,13 +64,13 @@ func writePolicyHead(ctx context.Context, tx pgx.Tx, actor string, create bool, 
 	return err
 }
 
-func CreateAttachment(ctx context.Context, tx pgx.Tx, actor string, a Attachment) (Attachment, error) {
+func createAttachment(ctx context.Context, tx pgx.Tx, actor string, a Attachment) (Attachment, error) {
 	created := Attachment{ID: access.NewID(), Scope: a.Scope, ScopeID: a.ScopeID, PolicyRevisionID: a.PolicyRevisionID, Order: a.Order}
 	_, err := tx.Exec(ctx, "INSERT INTO olp.guardrail_attachments(id,scope,scope_id,policy_revision_id,position,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)", created.ID, created.Scope, projectPointer(created.ScopeID), created.PolicyRevisionID, created.Order, access.NewID(), actor)
 	return created, err
 }
 
-func ReplaceAttachment(ctx context.Context, tx pgx.Tx, id, policyRevisionID string) (string, error) {
+func repointAttachment(ctx context.Context, tx pgx.Tx, id, policyRevisionID string) (string, error) {
 	etag := access.NewID()
 	_, err := tx.Exec(ctx, "UPDATE olp.guardrail_attachments SET policy_revision_id=$2,etag=$3 WHERE id=$1", id, policyRevisionID, etag)
 	return etag, err
@@ -80,7 +80,7 @@ func PlaceAttachment(ctx context.Context, tx pgx.Tx, actor string, a Attachment)
 	var id, current string
 	err := tx.QueryRow(ctx, "SELECT id::text,policy_revision_id::text FROM olp.guardrail_attachments WHERE scope=$1 AND scope_id IS NOT DISTINCT FROM $2::uuid AND position=$3", a.Scope, projectPointer(a.ScopeID), a.Order).Scan(&id, &current)
 	if errors.Is(err, pgx.ErrNoRows) {
-		_, err := CreateAttachment(ctx, tx, actor, a)
+		_, err := createAttachment(ctx, tx, actor, a)
 		return err
 	}
 	if err != nil || current == a.PolicyRevisionID {
@@ -89,7 +89,7 @@ func PlaceAttachment(ctx context.Context, tx pgx.Tx, actor string, a Attachment)
 	if err := requireSamePolicy(ctx, tx, current, a.PolicyRevisionID, "An additive attachment cannot replace a different policy at this position."); err != nil {
 		return err
 	}
-	_, err = ReplaceAttachment(ctx, tx, id, a.PolicyRevisionID)
+	_, err = repointAttachment(ctx, tx, id, a.PolicyRevisionID)
 	return err
 }
 

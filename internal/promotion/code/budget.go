@@ -11,7 +11,6 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
-	"github.com/tyk-swe/olp/internal/promotion/project"
 )
 
 type Budget struct {
@@ -83,7 +82,7 @@ func parsedOf(value *string) (*openapi_types.UUID, error) {
 	return &id, err
 }
 
-func resolveBudget(ctx context.Context, q access.Queryer, b Budget, desired Desired, directory project.Directory, routeIDs map[string]string) (resolved[access.CodeBudgetInput], error) {
+func resolveBudget(ctx context.Context, q access.Queryer, b Budget, desired Desired, directory promotion.Directory, routeIDs map[string]string) (resolved[access.CodeBudgetInput], error) {
 	projectID, err := projectOf(directory, b.Project)
 	if err != nil {
 		return resolved[access.CodeBudgetInput]{}, err

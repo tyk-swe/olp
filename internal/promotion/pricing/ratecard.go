@@ -244,7 +244,7 @@ func cardIDFor(ctx context.Context, tx pgx.Tx, principal access.Principal, owner
 	}
 	switch owner := owner.(type) {
 	case Organization:
-		id, ok := at.organizations.id(owner.Name)
+		id, ok := at.organizations.ID(owner.Name)
 		if !ok {
 			return "", undeclaredOrganization()
 		}

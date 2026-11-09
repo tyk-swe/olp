@@ -73,7 +73,7 @@ func parseTemplates(entries *[]contract.ConfigurationTemplateEntry) ([]Template,
 	})
 }
 
-func readTemplates(ctx context.Context, q access.Queryer, directory project.Directory) ([]Template, error) {
+func readTemplates(ctx context.Context, q access.Queryer, directory promotion.Directory) ([]Template, error) {
 	stored, err := routes.ReadTemplateInputs(ctx, q)
 	if err != nil {
 		return nil, err

@@ -12,7 +12,6 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
-	"github.com/tyk-swe/olp/internal/promotion/project"
 )
 
 type Pool struct {
@@ -121,7 +120,7 @@ func renderPool(p Pool) (contract.ConfigurationCodePool, error) {
 	return contract.ConfigurationCodePool{Id: id, Project: p.Project, Name: p.Name, Kind: contract.ConfigurationCodePoolKind(p.kind()), OwnerRef: promotion.Nullable(p.OwnerRef), Accounts: accounts, ApiKeyRefs: nullable.NewNullableWithValue(promotion.NonNil(slices.Clone(keys)))}, nil
 }
 
-func resolvePool(ctx context.Context, q access.Queryer, p Pool, desired Desired, directory project.Directory, accountIDs map[string]string) (resolved[access.CodePoolInput], error) {
+func resolvePool(ctx context.Context, q access.Queryer, p Pool, desired Desired, directory promotion.Directory, accountIDs map[string]string) (resolved[access.CodePoolInput], error) {
 	projectID, err := projectOf(directory, p.Project)
 	if err != nil {
 		return resolved[access.CodePoolInput]{}, err

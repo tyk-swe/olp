@@ -28,8 +28,10 @@ type Publication struct {
 
 type Kind interface {
 	name() string
-	credentials() Agent
+	bearers() bearers
 }
+
+type bearers struct{ Credential, PublishedCredential *promotion.Ref }
 
 type Agent struct{ Credential, PublishedCredential *promotion.Ref }
 
@@ -43,9 +45,9 @@ func (Agent) name() string   { return "agent" }
 func (Prompt) name() string  { return "prompt" }
 func (Toolset) name() string { return "toolset" }
 
-func (a Agent) credentials() Agent { return a }
-func (Prompt) credentials() Agent  { return Agent{} }
-func (Toolset) credentials() Agent { return Agent{} }
+func (a Agent) bearers() bearers { return bearers{a.Credential, a.PublishedCredential} }
+func (Prompt) bearers() bearers  { return bearers{} }
+func (Toolset) bearers() bearers { return bearers{} }
 
 func kindOf(name string, labels map[string]agentcontract.Draft, credential, published *promotion.Ref) Kind {
 	switch name {
@@ -68,7 +70,7 @@ func (p Publication) labels() map[string]agentcontract.Draft {
 }
 
 func (p Publication) refs() []promotion.Ref {
-	credentials := p.Kind.credentials()
+	credentials := p.Kind.bearers()
 	return slices.Collect(func(yield func(promotion.Ref) bool) {
 		for _, ref := range []*promotion.Ref{credentials.Credential, credentials.PublishedCredential} {
 			if ref != nil && !yield(*ref) {

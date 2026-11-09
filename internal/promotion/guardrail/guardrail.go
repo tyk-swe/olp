@@ -167,7 +167,7 @@ func planPlugin(ctx context.Context, q access.Queryer, g Guardrail) ([]promotion
 	return nil, nil
 }
 
-func planDefinition(ctx context.Context, q access.Queryer, directory project.Directory, names promotion.Names, g Guardrail) (promotion.Item, error) {
+func planDefinition(ctx context.Context, q access.Queryer, directory promotion.Directory, names promotion.Names, g Guardrail) (promotion.Item, error) {
 	key := g.Project + "/" + g.Name
 	id, present := owner(directory, g.Project)
 	if !present && !names.Project(g.Project) {
@@ -207,7 +207,7 @@ func GuardrailApplier(desired Section) promotion.Applier {
 	}
 }
 
-func applyGuardrail(ctx context.Context, tx pgx.Tx, p access.Principal, directory project.Directory, g Guardrail) error {
+func applyGuardrail(ctx context.Context, tx pgx.Tx, p access.Principal, directory promotion.Directory, g Guardrail) error {
 	project, err := projectID(directory, g.Project)
 	if err != nil {
 		return err
@@ -251,7 +251,7 @@ func reusable(current *guardrails.Definition, g Guardrail, configuration json.Ra
 	return equal(Guardrail{Configuration: stored, TimeoutMS: current.TimeoutMS, OnError: current.OnError}, Guardrail{Configuration: configuration, TimeoutMS: g.TimeoutMS, OnError: g.OnError}), nil
 }
 
-func owner(directory project.Directory, name string) (string, bool) {
+func owner(directory promotion.Directory, name string) (string, bool) {
 	if name == "" {
 		return "installation", true
 	}

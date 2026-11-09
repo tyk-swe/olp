@@ -82,15 +82,16 @@ func Applier(desired Desired) promotion.Applier {
 		if err != nil {
 			return err
 		}
-		providerIDs, err := providers.IDsByName(ctx, tx)
+		names, err := providers.ReadProviderNames(ctx, tx)
 		if err != nil {
 			return err
 		}
-		return promotion.Every(desired.Routes, func(r Route) error { return stage(ctx, tx, p, r, state, providerIDs) })
+		installed := promotion.DirectoryOf(names)
+		return promotion.Every(desired.Routes, func(r Route) error { return stage(ctx, tx, p, r, state, installed) })
 	}
 }
 
-func stage(ctx context.Context, tx pgx.Tx, p access.Principal, r Route, state State, providerIDs map[string]string) error {
+func stage(ctx context.Context, tx pgx.Tx, p access.Principal, r Route, state State, installed promotion.Directory) error {
 	unchanged, err := state.unchanged(r)
 	if err != nil || unchanged {
 		return err
@@ -99,13 +100,20 @@ func stage(ctx context.Context, tx pgx.Tx, p access.Principal, r Route, state St
 	if err != nil {
 		return err
 	}
+	targetInputs, err := promotion.TryMap(r.Targets, func(t Target) (routes.TargetInput, error) {
+		providerID, ok := installed.ID(t.Provider)
+		if !ok {
+			return routes.TargetInput{}, promotion.UnknownProvider(t.Provider)
+		}
+		model := t.ProviderModel
+		return routes.TargetInput{ProviderID: &providerID, ProviderModel: &model, Priority: t.Priority, Weight: t.Weight, TimeoutMS: t.TimeoutMS, Tags: t.Tags, Shadow: t.Shadow}, nil
+	})
+	if err != nil {
+		return err
+	}
 	in := routes.DraftInput{
 		Behavior: r.Behavior, Slug: r.Slug, Operations: r.Operations, OverallTimeoutMS: r.OverallTimeoutMS, MaxAttempts: r.MaxAttempts,
-		ContentPolicy: r.ContentPolicy, Fidelity: r.Fidelity,
-		Targets: promotion.Map(r.Targets, func(t Target) routes.TargetInput {
-			providerID, model := providerIDs[strings.ToLower(t.Provider)], t.ProviderModel
-			return routes.TargetInput{ProviderID: &providerID, ProviderModel: &model, Priority: t.Priority, Weight: t.Weight, TimeoutMS: t.TimeoutMS, Tags: t.Tags, Shadow: t.Shadow}
-		}),
+		ContentPolicy: r.ContentPolicy, Fidelity: r.Fidelity, Targets: targetInputs,
 	}
 	targets, err := routes.ValidateAndNormalizeDraftInput(ctx, tx, &in, projectID, nil)
 	if err != nil {

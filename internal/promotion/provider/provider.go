@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	MaxRef       = 200
+	maxRef       = 200
 	maxProviders = 500
 	maxModels    = 10000
 )
@@ -167,7 +167,7 @@ func distinctRefs(entries []Entry, root func(int) path) error {
 		at := root(i)
 		return slices.Concat(
 			promotion.When(entry.Network, reference{NetworkRef(entry.Name), at.field("network_credential_ref"), "Credential references must be distinct."}),
-			promotion.When(entry.Billing != nil, reference{BillingRef(entry.Name), at.field("billing_import.credential_ref"), "Credential references must be distinct."}),
+			promotion.When(entry.Billing != nil, reference{billingRef(entry.Name), at.field("billing_import.credential_ref"), "Credential references must be distinct."}),
 			slotReferences(entry, at),
 		)
 	})...)

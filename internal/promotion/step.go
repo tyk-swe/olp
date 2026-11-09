@@ -89,3 +89,7 @@ func UnknownProject(name string) error {
 func UnknownOrganization(name string) error {
 	return access.Fail(http.StatusConflict, "organization_unknown", "Organization "+name+" is not in the destination.")
 }
+
+func UnknownProvider(name string) error {
+	return access.Fail(http.StatusConflict, "provider_unknown", "Provider "+name+" is not in the destination.")
+}

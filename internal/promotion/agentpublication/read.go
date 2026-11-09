@@ -126,7 +126,7 @@ func renderPublication(publication Publication) (contract.ConfigurationAgentPubl
 	if err != nil {
 		return contract.ConfigurationAgentPublication{}, err
 	}
-	credentials := publication.Kind.credentials()
+	credentials := publication.Kind.bearers()
 	return contract.ConfigurationAgentPublication{
 		Project:                publication.Project,
 		Kind:                   contract.ConfigurationAgentPublicationKind(publication.Kind.name()),

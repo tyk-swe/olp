@@ -11,7 +11,6 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
-	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/providers"
 )
 
@@ -80,7 +79,7 @@ func date(value *string) (*openapi_types.Date, error) {
 	return &openapi_types.Date{Time: parsed}, nil
 }
 
-func resolveAccount(ctx context.Context, q access.Queryer, a Account, directory project.Directory, credentials map[string]string) (resolved[providers.CodeAccountInput], error) {
+func resolveAccount(ctx context.Context, q access.Queryer, a Account, directory promotion.Directory, credentials map[string]string) (resolved[providers.CodeAccountInput], error) {
 	projectID, err := projectOf(directory, a.Project)
 	if err != nil {
 		return resolved[providers.CodeAccountInput]{}, err

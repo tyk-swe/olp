@@ -134,7 +134,7 @@ func parsePricing(value nullable.Nullable[contract.ConfigurationPricingEntry]) (
 	return &Pricing{EffectiveAt: entry.EffectiveAt, Prices: promotion.Map(entry.Prices, parsePrice)}, nil
 }
 
-func readPricing(ctx context.Context, q access.Queryer, providers directory) (*Pricing, error) {
+func readPricing(ctx context.Context, q access.Queryer, providers promotion.Directory) (*Pricing, error) {
 	revisions, _, err := usage.ListRevisions(ctx, q, nil, 1)
 	if err != nil || len(revisions) == 0 {
 		return nil, err
@@ -142,7 +142,7 @@ func readPricing(ctx context.Context, q access.Queryer, providers directory) (*P
 	return &Pricing{
 		EffectiveAt: revisions[0].EffectiveAt,
 		Prices: promotion.Map(revisions[0].Prices, func(price usage.Price) Price {
-			return Price{Provider: providers.nameOf(price.ProviderID), Rate: scoped(price, nil)}
+			return Price{Provider: nameOf(providers, price.ProviderID), Rate: scoped(price, nil)}
 		}),
 	}, nil
 }
@@ -161,7 +161,7 @@ func pricingChanged(desired, current *Pricing) bool {
 	return current == nil || len(desired.Prices) != len(current.Prices) || !samePrices(desired.Prices, current.Prices, "")
 }
 
-func planPricing(ctx context.Context, q access.Queryer, desired *Pricing, providers directory, now time.Time) ([]promotion.Item, error) {
+func planPricing(ctx context.Context, q access.Queryer, desired *Pricing, providers promotion.Directory, now time.Time) ([]promotion.Item, error) {
 	if desired == nil {
 		return nil, nil
 	}
@@ -179,7 +179,7 @@ func planPricing(ctx context.Context, q access.Queryer, desired *Pricing, provid
 	}
 }
 
-func applyPricing(ctx context.Context, tx pgx.Tx, principal access.Principal, desired *Pricing, providers directory, vendorKind VendorKind) error {
+func applyPricing(ctx context.Context, tx pgx.Tx, principal access.Principal, desired *Pricing, providers promotion.Directory, vendorKind VendorKind) error {
 	if desired == nil {
 		return nil
 	}
@@ -201,12 +201,12 @@ func applyPricing(ctx context.Context, tx pgx.Tx, principal access.Principal, de
 	return publishErr
 }
 
-func resolvePrices(prices []Price, providers directory) ([]usage.Price, error) {
-	if i := slices.IndexFunc(prices, func(price Price) bool { return !providers.resolves(price.Provider) }); i >= 0 {
+func resolvePrices(prices []Price, providers promotion.Directory) ([]usage.Price, error) {
+	if i := slices.IndexFunc(prices, func(price Price) bool { return !resolves(providers, price.Provider) }); i >= 0 {
 		return nil, undeclaredPrice(i)
 	}
 	return promotion.Map(prices, func(price Price) usage.Price {
-		return scoped(price.Rate, providers.idOf(price.Provider))
+		return scoped(price.Rate, idOf(providers, price.Provider))
 	}), nil
 }
 

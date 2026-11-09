@@ -167,7 +167,7 @@ type draft struct{ id string }
 func (published) destination() {}
 func (draft) destination()     {}
 
-func applyAttachment(ctx context.Context, tx pgx.Tx, p access.Principal, directory project.Directory, a Attachment) error {
+func applyAttachment(ctx context.Context, tx pgx.Tx, p access.Principal, directory promotion.Directory, a Attachment) error {
 	project, err := projectID(directory, a.Policy.Project)
 	if err != nil {
 		return err
@@ -196,7 +196,7 @@ func applyAttachment(ctx context.Context, tx pgx.Tx, p access.Principal, directo
 	return access.Invalid("guardrail_attachments", invalidAttachment)
 }
 
-func resolveScope(ctx context.Context, tx pgx.Tx, p access.Principal, directory project.Directory, scope Scope, project *string) (destination, error) {
+func resolveScope(ctx context.Context, tx pgx.Tx, p access.Principal, directory promotion.Directory, scope Scope, project *string) (destination, error) {
 	switch s := scope.(type) {
 	case Installation:
 		if !p.AllProjects {
@@ -243,19 +243,19 @@ func resolveRoute(ctx context.Context, tx pgx.Tx, slug string, project *string) 
 	return published{&route.RouteID}, nil
 }
 
-func resolveKey(ctx context.Context, tx pgx.Tx, directory project.Directory, key APIKey, project *string) (destination, error) {
+func resolveKey(ctx context.Context, tx pgx.Tx, directory promotion.Directory, key APIKey, project *string) (destination, error) {
 	owner, err := projectID(directory, key.Project)
 	if err != nil {
 		return nil, err
 	}
-	ids, err := access.ReadLiveAPIKeyIDs(ctx, tx, owner, key.Name)
+	keys, err := access.ReadKeysNamed(ctx, tx, owner, key.Name)
 	if err != nil {
 		return nil, err
 	}
-	if len(ids) != 1 || !sameProject(owner, project) {
+	if len(keys) != 1 || !sameProject(owner, project) {
 		return nil, access.Invalid("guardrail_attachments", "API key name must resolve uniquely in the policy project.")
 	}
-	return published{&ids[0]}, nil
+	return published{&keys[0].ID}, nil
 }
 
 func sameProject(a, b *string) bool {

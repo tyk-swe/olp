@@ -48,7 +48,7 @@ func Planner(desired []Publication, names promotion.Names, bindings promotion.Bi
 	}
 }
 
-func planPublication(ctx context.Context, q access.Queryer, names promotion.Names, directory project.Directory, bindings promotion.Bindings, publication Publication) ([]promotion.Item, error) {
+func planPublication(ctx context.Context, q access.Queryer, names promotion.Names, directory promotion.Directory, bindings promotion.Bindings, publication Publication) ([]promotion.Item, error) {
 	key := publication.key()
 	projectID, present := directory.ID(publication.Project)
 	if !present && !names.Project(publication.Project) {
@@ -62,7 +62,7 @@ func planPublication(ctx context.Context, q access.Queryer, names promotion.Name
 	if err != nil {
 		return nil, err
 	}
-	credentials := publication.Kind.credentials()
+	credentials := publication.Kind.bearers()
 	unbound := slices.Collect(func(yield func(promotion.Item) bool) {
 		for _, slot := range []slot{{credentials.Credential, &publication.Draft, draftOf(current)}, {credentials.PublishedCredential, publication.Published, previous}} {
 			if slot.ref != nil && bindings[*slot.ref] == nil && !reusableCredential(slot.prior, slot.desired) && !yield(promotion.Blocker(kind, key, "Supply the destination agent bearer credential binding for the declared definition.")) {

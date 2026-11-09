@@ -38,7 +38,7 @@ func Applier(servers []Server, bindings promotion.Bindings, prepared Prepared, k
 	}
 }
 
-func apply(ctx context.Context, tx pgx.Tx, p access.Principal, directory project.Directory, bindings promotion.Bindings, prepared Prepared, keys Keys, server Server) (bool, error) {
+func apply(ctx context.Context, tx pgx.Tx, p access.Principal, directory promotion.Directory, bindings promotion.Bindings, prepared Prepared, keys Keys, server Server) (bool, error) {
 	projectID, ok := directory.ID(server.Project)
 	if !ok {
 		return false, fmt.Errorf("mcp server project %q is missing", server.Project)

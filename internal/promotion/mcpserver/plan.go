@@ -97,7 +97,7 @@ func plan(ctx context.Context, q access.Queryer, servers []Server, names promoti
 	}), overflow), nil
 }
 
-func planServer(ctx context.Context, q access.Queryer, names promotion.Names, directory project.Directory, bindings promotion.Bindings, keys Keys, existing *registration.Definition, server Server) (planned, error) {
+func planServer(ctx context.Context, q access.Queryer, names promotion.Names, directory promotion.Directory, bindings promotion.Bindings, keys Keys, existing *registration.Definition, server Server) (planned, error) {
 	if absent(names, directory, server.Project) {
 		return planned{items: []promotion.Item{promotion.Conflict(kind, server.Name, "The owning project is not declared or present.")}}, nil
 	}
@@ -119,7 +119,7 @@ func planServer(ctx context.Context, q access.Queryer, names promotion.Names, di
 	}, nil
 }
 
-func absent(names promotion.Names, directory project.Directory, name string) bool {
+func absent(names promotion.Names, directory promotion.Directory, name string) bool {
 	_, present := directory.ID(name)
 	return !present && !names.Project(name)
 }

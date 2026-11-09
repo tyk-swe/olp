@@ -12,7 +12,6 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
-	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routes"
@@ -27,7 +26,7 @@ type Route struct {
 }
 
 type scope struct {
-	directory project.Directory
+	directory promotion.Directory
 	bindings  bindings
 	deps      provider.Deps
 	accounts  []resolved[providers.CodeAccountInput]

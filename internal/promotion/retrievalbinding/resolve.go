@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"slices"
-	"strings"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -17,8 +16,8 @@ import (
 var errProjectAbsent = errors.New("retrieval binding project is absent")
 
 type installed struct {
-	projects    project.Directory
-	providerIDs map[string]string
+	projects  promotion.Directory
+	providers promotion.Directory
 }
 
 func readInstalled(ctx context.Context, q access.Queryer) (installed, error) {
@@ -26,11 +25,11 @@ func readInstalled(ctx context.Context, q access.Queryer) (installed, error) {
 	if err != nil {
 		return installed{}, err
 	}
-	providerIDs, err := providers.IDsByName(ctx, q)
+	names, err := providers.ReadProviderNames(ctx, q)
 	if err != nil {
 		return installed{}, err
 	}
-	return installed{projects: directory, providerIDs: providerIDs}, nil
+	return installed{projects: directory, providers: promotion.DirectoryOf(names)}, nil
 }
 
 func resolve(ctx context.Context, q access.Queryer, lookup installed, binding Binding) (retrieval.Input, error) {
@@ -63,7 +62,7 @@ func resolve(ctx context.Context, q access.Queryer, lookup installed, binding Bi
 }
 
 func targetIDs(ctx context.Context, q access.Queryer, lookup installed, binding Binding, projectID string) ([]string, error) {
-	providerID, ok := lookup.providerIDs[strings.ToLower(binding.TargetProvider)]
+	providerID, ok := lookup.providers.ID(binding.TargetProvider)
 	if !ok {
 		return nil, nil
 	}
@@ -72,13 +71,21 @@ func targetIDs(ctx context.Context, q access.Queryer, lookup installed, binding 
 
 func keyIDs(ctx context.Context, q access.Queryer, projectID string, names []string) ([]string, error) {
 	return promotion.TryMap(names, func(name string) (string, error) {
-		ids, err := access.ActiveKeyIDsNamed(ctx, q, projectID, name)
+		ids, err := usableKeys(ctx, q, projectID, name)
 		if err != nil {
 			return "", err
 		}
 		if len(ids) != 1 {
 			return "", access.Invalid("retrieval_bindings.key_grants", "Each destination grant must resolve to exactly one active API key with the exact project-local name.")
 		}
-		return ids[0], nil
+		return ids[0].ID, nil
 	})
+}
+
+func usableKeys(ctx context.Context, q access.Queryer, projectID, name string) ([]access.NamedKey, error) {
+	keys, err := access.ReadKeysNamed(ctx, q, &projectID, name)
+	if err != nil {
+		return nil, err
+	}
+	return promotion.Filter(keys, func(key access.NamedKey) bool { return !key.Expired }), nil
 }

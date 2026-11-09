@@ -39,7 +39,7 @@ func Applier(desired []Project, costs Costs) promotion.Applier {
 	}
 }
 
-func imports(desired []Project, directory Directory) ([]projects.PolicyImport, error) {
+func imports(desired []Project, directory promotion.Directory) ([]projects.PolicyImport, error) {
 	return promotion.TryMap(desired, func(project Project) (projects.PolicyImport, error) {
 		id, ok := directory.ID(project.Name)
 		if !ok {

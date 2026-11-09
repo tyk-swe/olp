@@ -144,7 +144,7 @@ func scanStoredRoute(row pgx.CollectableRow) (PublishedRoute, error) {
 	if err != nil {
 		return PublishedRoute{}, err
 	}
-	routingPolicy, err := DecodePolicy(policy)
+	routingPolicy, err := decodePolicy(policy)
 	if err != nil {
 		return PublishedRoute{}, err
 	}
@@ -168,7 +168,7 @@ func encodePolicy(policy *routing.Policy) ([]byte, error) {
 	return json.Marshal(policy)
 }
 
-func DecodePolicy(raw []byte) (*routing.Policy, error) {
+func decodePolicy(raw []byte) (*routing.Policy, error) {
 	if len(raw) == 0 {
 		return nil, nil
 	}

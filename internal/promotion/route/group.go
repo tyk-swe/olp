@@ -30,7 +30,7 @@ func groupsOf(entries []contract.ConfigurationProjectEntry) []group {
 	})...)
 }
 
-func checkGroups(ctx context.Context, q access.Queryer, directory project.Directory, groups []group) error {
+func checkGroups(ctx context.Context, q access.Queryer, directory promotion.Directory, groups []group) error {
 	return promotion.Every(groups, func(g group) error {
 		owners, err := routes.SlugProjectIDs(ctx, q, g.members)
 		if err != nil {
@@ -43,9 +43,9 @@ func checkGroups(ctx context.Context, q access.Queryer, directory project.Direct
 	})
 }
 
-func ownedBy(directory project.Directory, projectID *string, name string) bool {
+func ownedBy(directory promotion.Directory, projectID *string, name string) bool {
 	owner := projectName(directory, projectID)
-	return owner != nil && strings.ToLower(*owner) == strings.ToLower(name)
+	return owner != nil && strings.EqualFold(*owner, name)
 }
 
 func GroupApplier(desired Desired) promotion.Applier {

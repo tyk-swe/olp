@@ -17,7 +17,7 @@ type Billing struct {
 	Source  string
 }
 
-func BillingRef(provider string) promotion.Ref { return promotion.Ref(provider + "/billing") }
+func billingRef(provider string) promotion.Ref { return promotion.Ref(provider + "/billing") }
 
 func parseBilling(entry contract.ConfigurationProviderEntry, kind string, at path) (*Billing, error) {
 	if entry.BillingImport == nil {
@@ -28,7 +28,7 @@ func parseBilling(entry contract.ConfigurationProviderEntry, kind string, at pat
 		return nil, access.Invalid(at.field("billing_import"), err.Error())
 	}
 	ref := entry.BillingImport.CredentialRef
-	if promotion.Ref(ref) != BillingRef(entry.Name) || len(ref) > MaxRef {
+	if promotion.Ref(ref) != billingRef(entry.Name) || len(ref) > maxRef {
 		return nil, access.Invalid(at.field("billing_import.credential_ref"), "Use the provider name followed by /billing.")
 	}
 	raw, err := promotion.Convert[json.RawMessage](entry.BillingImport.Scope)
@@ -57,7 +57,7 @@ func renderBilling(entry Entry) (*contract.ConfigurationBillingImport, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &contract.ConfigurationBillingImport{CredentialRef: string(BillingRef(entry.Name)), Enabled: entry.Billing.Enabled, Scope: scope}, nil
+	return &contract.ConfigurationBillingImport{CredentialRef: string(billingRef(entry.Name)), Enabled: entry.Billing.Enabled, Scope: scope}, nil
 }
 
 func billingClaims(entry Entry) []promotion.Claim {
@@ -66,7 +66,7 @@ func billingClaims(entry Entry) []promotion.Claim {
 	}
 	source := entry.Billing.Source
 	return []promotion.Claim{{
-		Ref: BillingRef(entry.Name),
+		Ref: billingRef(entry.Name),
 		Accept: promotion.SealedOnly("Billing credentials require sealed secret bindings.", func(secret string) error {
 			return billing.ValidateCredential(source, secret)
 		}),
@@ -81,12 +81,12 @@ func importedCredential(existing destination) *string {
 }
 
 func (p planning) billingItems(ctx context.Context, q access.Queryer, entry Entry, existing destination) ([]promotion.Item, error) {
-	ref := string(BillingRef(entry.Name))
+	ref := string(billingRef(entry.Name))
 	current := importedCredential(existing)
 	if entry.Billing == nil {
 		return promotion.When(current != nil, promotion.Item{Kind: contract.ConfigurationPlanItemKindBillingImport, Key: ref, Action: contract.ConfigurationPlanItemActionDelete}), nil
 	}
-	if _, supplied := p.bindings[BillingRef(entry.Name)]; supplied {
+	if _, supplied := p.bindings[billingRef(entry.Name)]; supplied {
 		return []promotion.Item{{Kind: contract.ConfigurationPlanItemKindBillingImport, Key: ref, Action: contract.ConfigurationPlanItemActionBind}}, nil
 	}
 	if current == nil {
@@ -123,7 +123,7 @@ func (a applying) applyBilling(ctx context.Context, tx pgx.Tx, entry Entry, targ
 
 func (a applying) billingCredential(ctx context.Context, tx pgx.Tx, entry Entry, target destination) (*string, error) {
 	current := importedCredential(target)
-	sealed, supplied := a.bindings[BillingRef(entry.Name)].(promotion.Sealed)
+	sealed, supplied := a.bindings[billingRef(entry.Name)].(promotion.Sealed)
 	if !supplied {
 		return current, nil
 	}

@@ -162,7 +162,7 @@ func SCIMApplier(d Desired, deps Deps) promotion.Applier {
 	}
 }
 
-func extension(g group, directory project.Directory) (map[string]any, error) {
+func extension(g group, directory promotion.Directory) (map[string]any, error) {
 	projects, err := promotion.TryMap(g.Projects, func(p grant) (any, error) {
 		id, ok := directory.ID(p.Project)
 		if !ok {

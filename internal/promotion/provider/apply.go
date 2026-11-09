@@ -40,7 +40,7 @@ func Applier(entries []Entry, bindings promotion.Bindings, deps Deps) promotion.
 	}
 }
 
-func (a applying) apply(ctx context.Context, tx pgx.Tx, entry Entry, existing destination, found bool, directory project.Directory) error {
+func (a applying) apply(ctx context.Context, tx pgx.Tx, entry Entry, existing destination, found bool, directory promotion.Directory) error {
 	prepared, err := providers.PrepareConfiguration(ctx, tx, a.deps.Unconfined, a.deps.Egress, entry.Configuration)
 	if err != nil {
 		return err
@@ -59,7 +59,7 @@ func (a applying) apply(ctx context.Context, tx pgx.Tx, entry Entry, existing de
 	return a.replace(ctx, tx, desired, prepared, existing)
 }
 
-func (a applying) create(ctx context.Context, tx pgx.Tx, entry Entry, prepared providers.PreparedConfiguration, directory project.Directory) error {
+func (a applying) create(ctx context.Context, tx pgx.Tx, entry Entry, prepared providers.PreparedConfiguration, directory promotion.Directory) error {
 	projectID, err := projectID(entry, directory)
 	if err != nil {
 		return err
@@ -71,7 +71,7 @@ func (a applying) create(ctx context.Context, tx pgx.Tx, entry Entry, prepared p
 	return a.replace(ctx, tx, entry, prepared, destination{id: created.ID})
 }
 
-func projectID(entry Entry, directory project.Directory) (*string, error) {
+func projectID(entry Entry, directory promotion.Directory) (*string, error) {
 	if entry.Project == nil {
 		return nil, nil
 	}

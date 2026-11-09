@@ -3,7 +3,6 @@ package pricing
 import (
 	"context"
 	"slices"
-	"strings"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/projects"
@@ -12,15 +11,10 @@ import (
 	"github.com/tyk-swe/olp/internal/providers"
 )
 
-type directory struct {
-	ids   map[string]string
-	names map[string]string
-}
-
 type destination struct {
-	providers     directory
-	organizations directory
-	projects      project.Directory
+	providers     promotion.Directory
+	organizations promotion.Directory
+	projects      promotion.Directory
 }
 
 func readDestination(ctx context.Context, q access.Queryer) (destination, error) {
@@ -38,46 +32,31 @@ func readDestination(ctx context.Context, q access.Queryer) (destination, error)
 	}
 	return destination{
 		providers:     providerDirectory,
-		organizations: directoryOf(organizations, func(o projects.Named) (string, string) { return o.ID, o.Name }),
+		organizations: promotion.DirectoryOf(organizations),
 		projects:      projectDirectory,
 	}, nil
 }
 
-func readProviders(ctx context.Context, q access.Queryer) (directory, error) {
+func readProviders(ctx context.Context, q access.Queryer) (promotion.Directory, error) {
 	names, err := providers.ReadProviderNames(ctx, q)
 	if err != nil {
-		return directory{}, err
+		return promotion.Directory{}, err
 	}
-	return directoryOf(names, func(p providers.ProviderName) (string, string) { return p.ID, p.Name }), nil
+	return promotion.DirectoryOf(names), nil
 }
 
-func directoryOf[T any](entries []T, entry func(T) (id, name string)) directory {
-	return directory{
-		ids: promotion.Associate(entries, func(e T) (string, string) {
-			id, name := entry(e)
-			return strings.ToLower(name), id
-		}),
-		names: promotion.Associate(entries, entry),
-	}
-}
-
-func (d directory) id(name string) (string, bool) {
-	id, ok := d.ids[strings.ToLower(name)]
-	return id, ok
-}
-
-func (d directory) resolves(name *string) bool {
-	_, ok := d.id(promotion.ValueOf(name))
+func resolves(d promotion.Directory, name *string) bool {
+	_, ok := d.ID(promotion.ValueOf(name))
 	return name == nil || ok
 }
 
-func (d directory) idOf(name *string) *string {
-	id, ok := d.id(promotion.ValueOf(name))
+func idOf(d promotion.Directory, name *string) *string {
+	id, ok := d.ID(promotion.ValueOf(name))
 	return promotion.PointerIf(id, name != nil && ok)
 }
 
-func (d directory) nameOf(id *string) *string {
-	name, ok := d.names[promotion.ValueOf(id)]
+func nameOf(d promotion.Directory, id *string) *string {
+	name, ok := d.Name(promotion.ValueOf(id))
 	return promotion.PointerIf(name, id != nil && ok)
 }
 
@@ -90,7 +69,7 @@ func declared(document func(string) bool, destination func(string) (string, bool
 }
 
 func checkNames(desired Desired, names promotion.Names, at destination) error {
-	providerDeclared := func(name *string) bool { return declared(names.Provider, at.providers.id, name) }
+	providerDeclared := func(name *string) bool { return declared(names.Provider, at.providers.ID, name) }
 	if i := slices.IndexFunc(promotion.ValueOf(desired.Pricing).Prices, func(price Price) bool { return !providerDeclared(price.Provider) }); i >= 0 {
 		return undeclaredPrice(i)
 	}
@@ -108,7 +87,7 @@ func checkNames(desired Desired, names promotion.Names, at destination) error {
 func ownerDeclared(owner Owner, names promotion.Names, at destination) error {
 	switch owner := owner.(type) {
 	case Organization:
-		if !declared(names.Organization, at.organizations.id, &owner.Name) {
+		if !declared(names.Organization, at.organizations.ID, &owner.Name) {
 			return undeclaredOrganization()
 		}
 	case Project:

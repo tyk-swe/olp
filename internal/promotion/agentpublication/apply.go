@@ -64,7 +64,7 @@ func toolsetsFirst(a, b Publication) int {
 	return byKey(a, b)
 }
 
-func apply(ctx context.Context, tx pgx.Tx, p access.Principal, directory project.Directory, bindings promotion.Bindings, deps Deps, publication Publication) error {
+func apply(ctx context.Context, tx pgx.Tx, p access.Principal, directory promotion.Directory, bindings promotion.Bindings, deps Deps, publication Publication) error {
 	projectID, ok := directory.ID(publication.Project)
 	if !ok {
 		return promotion.UnknownProject(publication.Project)
@@ -81,7 +81,7 @@ func apply(ctx context.Context, tx pgx.Tx, p access.Principal, directory project
 		return err
 	}
 	b := binder{tx: tx, deps: deps, project: projectID, bindings: bindings}
-	draft, err := b.bind(ctx, publication.Draft, publication.Kind.credentials().Credential, draftOf(current))
+	draft, err := b.bind(ctx, publication.Draft, publication.Kind.bearers().Credential, draftOf(current))
 	if err != nil {
 		return err
 	}
@@ -110,7 +110,7 @@ func publishDeclared(ctx context.Context, tx pgx.Tx, p access.Principal, b binde
 	if publication.Published == nil {
 		return nil, nil
 	}
-	definition, err := b.bindPublished(ctx, *publication.Published, publication.Kind.credentials(), draft, previous)
+	definition, err := b.bindPublished(ctx, *publication.Published, publication.Kind.bearers(), draft, previous)
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +164,7 @@ func priorOf(current *agentcontract.Publication, previous *agentcontract.Draft) 
 	return &agentcontract.Publication{Draft: *previous}
 }
 
-func (b binder) bindPublished(ctx context.Context, definition agentcontract.Draft, agent Agent, draft agentcontract.Draft, prior *agentcontract.Draft) (agentcontract.Draft, error) {
+func (b binder) bindPublished(ctx context.Context, definition agentcontract.Draft, agent bearers, draft agentcontract.Draft, prior *agentcontract.Draft) (agentcontract.Draft, error) {
 	if agent.PublishedCredential != nil && agent.Credential != nil && *agent.PublishedCredential == *agent.Credential {
 		return publications.WithCredential(placed(definition, b.project), credentialID(&draft)), nil
 	}

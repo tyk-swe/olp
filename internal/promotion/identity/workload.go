@@ -55,7 +55,7 @@ func validIssuer(issuer contract.ConfigurationWorkloadIssuer) error {
 	return access.ValidateWorkloadConfig(config)
 }
 
-func readWorkload(ctx context.Context, q access.Queryer, directory project.Directory) ([]contract.ConfigurationWorkloadIssuer, error) {
+func readWorkload(ctx context.Context, q access.Queryer, directory promotion.Directory) ([]contract.ConfigurationWorkloadIssuer, error) {
 	configs, err := access.ReadWorkloadIssuerDocuments(ctx, q)
 	if err != nil {
 		return nil, err
@@ -124,7 +124,7 @@ func issuerItem(issuer contract.ConfigurationWorkloadIssuer, act contract.Config
 	}
 }
 
-func issuerProblem(issuer contract.ConfigurationWorkloadIssuer, directory project.Directory, catalogs map[string]catalog, declared map[string]contract.ConfigurationProjectEntry) (string, bool) {
+func issuerProblem(issuer contract.ConfigurationWorkloadIssuer, directory promotion.Directory, catalogs map[string]catalog, declared map[string]contract.ConfigurationProjectEntry) (string, bool) {
 	for _, mapping := range issuer.Mappings {
 		if detail, found := mappingProblem(issuer.Enabled, mapping, directory, catalogs, declared); found {
 			return detail, true
@@ -133,7 +133,7 @@ func issuerProblem(issuer contract.ConfigurationWorkloadIssuer, directory projec
 	return "", false
 }
 
-func mappingProblem(enabled bool, mapping contract.ConfigurationWorkloadMapping, directory project.Directory, catalogs map[string]catalog, declared map[string]contract.ConfigurationProjectEntry) (string, bool) {
+func mappingProblem(enabled bool, mapping contract.ConfigurationWorkloadMapping, directory promotion.Directory, catalogs map[string]catalog, declared map[string]contract.ConfigurationProjectEntry) (string, bool) {
 	id, exists := directory.ID(mapping.Project)
 	entry, isDeclared := declared[promotion.Fold(mapping.Project)]
 	if !exists && !isDeclared {
@@ -223,7 +223,7 @@ func WorkloadApplier(desired Desired, prepared Prepared, deps Deps) promotion.Ap
 	}
 }
 
-func applyIssuer(ctx context.Context, tx pgx.Tx, p access.Principal, deps Deps, directory project.Directory, issuer contract.ConfigurationWorkloadIssuer, etag string, prepared bool) error {
+func applyIssuer(ctx context.Context, tx pgx.Tx, p access.Principal, deps Deps, directory promotion.Directory, issuer contract.ConfigurationWorkloadIssuer, etag string, prepared bool) error {
 	current, exists, err := access.LockWorkloadIssuer(ctx, tx, issuer.Issuer)
 	if err != nil {
 		return err

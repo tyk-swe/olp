@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"maps"
 	"net/http"
 	"time"
 
@@ -117,25 +116,6 @@ func load(ctx context.Context, q access.Queryer, id string, lock bool) (*record,
 		query += " FOR UPDATE"
 	}
 	return scanRecord(q.QueryRow(ctx, query, id))
-}
-
-func IDsByName(ctx context.Context, q access.Queryer) (map[string]string, error) {
-	rows, err := q.Query(ctx, "SELECT lower(name),id::text FROM olp.providers")
-	if err != nil {
-		return nil, err
-	}
-	type named struct{ Name, ID string }
-	entries, err := pgx.CollectRows(rows, pgx.RowToStructByPos[named])
-	if err != nil {
-		return nil, err
-	}
-	return maps.Collect(func(yield func(string, string) bool) {
-		for _, entry := range entries {
-			if !yield(entry.Name, entry.ID) {
-				return
-			}
-		}
-	}), nil
 }
 
 // visibleProvider loads a provider p may see; one outside p's scope is

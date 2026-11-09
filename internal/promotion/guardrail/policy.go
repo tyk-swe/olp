@@ -12,7 +12,6 @@ import (
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
-	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -195,7 +194,7 @@ func redefined(before, after map[portable]Guardrail, key portable) bool {
 	return !ok || old.Type != next.Type || !equal(old, next)
 }
 
-func applyPolicy(ctx context.Context, tx pgx.Tx, p access.Principal, directory project.Directory, policy Policy) error {
+func applyPolicy(ctx context.Context, tx pgx.Tx, p access.Principal, directory promotion.Directory, policy Policy) error {
 	project, err := projectID(directory, policy.Project)
 	if err != nil {
 		return err

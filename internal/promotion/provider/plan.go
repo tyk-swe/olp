@@ -55,7 +55,7 @@ func (p planning) plan(ctx context.Context, q access.Queryer, entries []Entry) (
 	return slices.Compact(slices.SortedFunc(slices.Values(slices.Concat(items...)), compareItems)), nil
 }
 
-func (p planning) planEntry(ctx context.Context, q access.Queryer, entry Entry, existing destination, found bool, directory project.Directory) ([]promotion.Item, error) {
+func (p planning) planEntry(ctx context.Context, q access.Queryer, entry Entry, existing destination, found bool, directory promotion.Directory) ([]promotion.Item, error) {
 	configuration, plugin, err := p.prepare(ctx, q, entry)
 	if err != nil {
 		return nil, err
@@ -82,7 +82,7 @@ func (p planning) planEntry(ctx context.Context, q access.Queryer, entry Entry, 
 	), nil
 }
 
-func unknownProject(entry Entry, directory project.Directory) bool {
+func unknownProject(entry Entry, directory promotion.Directory) bool {
 	if entry.Project == nil || entry.projectDeclared {
 		return false
 	}

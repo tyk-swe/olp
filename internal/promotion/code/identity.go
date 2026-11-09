@@ -9,7 +9,6 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
-	"github.com/tyk-swe/olp/internal/promotion/project"
 )
 
 const namespace = "openllmproxy.dev/config/v2"
@@ -96,7 +95,7 @@ func destinations[T any](items []resolved[T]) map[string]string {
 	return promotion.Associate(items, func(item resolved[T]) (string, string) { return item.ref, item.to.id })
 }
 
-func projectOf(directory project.Directory, name string) (string, error) {
+func projectOf(directory promotion.Directory, name string) (string, error) {
 	id, ok := directory.ID(name)
 	if !ok {
 		return "", access.Invalid("code.project", "Create the destination project and enroll its credentials before promoting code configuration.")

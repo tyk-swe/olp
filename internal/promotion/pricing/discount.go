@@ -62,13 +62,13 @@ func validateDiscount(i int, discount Discount, duplicate bool) error {
 	}
 }
 
-func readDiscounts(ctx context.Context, q access.Queryer, providers directory) ([]Discount, error) {
+func readDiscounts(ctx context.Context, q access.Queryer, providers promotion.Directory) ([]Discount, error) {
 	stored, err := usage.ReadDiscountsInForce(ctx, q)
 	if err != nil {
 		return nil, err
 	}
 	return promotion.Map(stored, func(discount usage.DiscountInForce) Discount {
-		return Discount{ProviderKind: discount.ProviderKind, Provider: providers.nameOf(discount.ProviderID), Vendor: discount.VendorID, Multiplier: discount.Multiplier}
+		return Discount{ProviderKind: discount.ProviderKind, Provider: nameOf(providers, discount.ProviderID), Vendor: discount.VendorID, Multiplier: discount.Multiplier}
 	}), nil
 }
 
@@ -98,7 +98,7 @@ func discountAction(discount Discount, inForce map[scope]string) contract.Config
 	return contract.ConfigurationPlanItemActionCreate
 }
 
-func planDiscounts(ctx context.Context, q access.Queryer, desired []Discount, providers directory) ([]promotion.Item, error) {
+func planDiscounts(ctx context.Context, q access.Queryer, desired []Discount, providers promotion.Directory) ([]promotion.Item, error) {
 	current, err := readDiscounts(ctx, q, providers)
 	if err != nil {
 		return nil, err
@@ -109,8 +109,8 @@ func planDiscounts(ctx context.Context, q access.Queryer, desired []Discount, pr
 	}), nil
 }
 
-func applyDiscounts(ctx context.Context, tx pgx.Tx, principal access.Principal, desired []Discount, providers directory, vendorKind VendorKind) error {
-	if i := slices.IndexFunc(desired, func(discount Discount) bool { return !providers.resolves(discount.Provider) }); i >= 0 {
+func applyDiscounts(ctx context.Context, tx pgx.Tx, principal access.Principal, desired []Discount, providers promotion.Directory, vendorKind VendorKind) error {
+	if i := slices.IndexFunc(desired, func(discount Discount) bool { return !resolves(providers, discount.Provider) }); i >= 0 {
 		return undeclaredDiscount(i)
 	}
 	current, err := readDiscounts(ctx, tx, providers)
@@ -128,7 +128,7 @@ func applyDiscounts(ctx context.Context, tx pgx.Tx, principal access.Principal, 
 		normalized, normalizeErr := usage.NormalizeDiscount(ctx, tx, usage.DiscountInput{
 			ProviderKind: discount.ProviderKind,
 			VendorID:     discount.Vendor,
-			ProviderID:   providers.idOf(discount.Provider),
+			ProviderID:   idOf(providers, discount.Provider),
 			Multiplier:   &discount.Multiplier,
 		}, vendorKind)
 		if normalizeErr != nil {

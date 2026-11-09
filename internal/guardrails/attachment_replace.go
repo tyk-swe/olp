@@ -48,7 +48,7 @@ func (s *Server) replaceAttachment(r *http.Request, _ access.Principal) (access.
 	if err := validateAttachmentPolicy(r.Context(), tx, p, next); err != nil {
 		return access.Reply{}, err
 	}
-	nextETag, err := ReplaceAttachment(r.Context(), tx, id, next.PolicyRevisionID)
+	nextETag, err := repointAttachment(r.Context(), tx, id, next.PolicyRevisionID)
 	if err != nil {
 		return access.Reply{}, err
 	}

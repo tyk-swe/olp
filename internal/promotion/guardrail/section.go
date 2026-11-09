@@ -10,7 +10,6 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
-	"github.com/tyk-swe/olp/internal/promotion/project"
 )
 
 type Section struct {
@@ -128,7 +127,7 @@ func merge(sections []Section) Section {
 	}
 }
 
-func projectID(directory project.Directory, name string) (*string, error) {
+func projectID(directory promotion.Directory, name string) (*string, error) {
 	if name == "" {
 		return nil, nil
 	}

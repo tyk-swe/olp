@@ -21,7 +21,7 @@ type State struct {
 	Configuration
 	published map[string]Route
 	drafts    map[string]draft
-	directory project.Directory
+	directory promotion.Directory
 }
 
 type draft struct {
@@ -67,7 +67,7 @@ func routeOf(d routes.OpenDraft, project *string, retired bool) Route {
 	}
 }
 
-func indexDrafts(drafts []routes.OpenDraft, directory project.Directory) map[string]draft {
+func indexDrafts(drafts []routes.OpenDraft, directory promotion.Directory) map[string]draft {
 	return maps.Collect(func(yield func(string, draft) bool) {
 		for _, d := range drafts {
 			name := projectName(directory, d.ProjectID)
@@ -78,7 +78,7 @@ func indexDrafts(drafts []routes.OpenDraft, directory project.Directory) map[str
 	})
 }
 
-func projectName(directory project.Directory, id *string) *string {
+func projectName(directory promotion.Directory, id *string) *string {
 	if id == nil {
 		return nil
 	}
@@ -93,7 +93,7 @@ func draftKey(slug string, project *string) string {
 	return slug + "\x00" + strings.ToLower(promotion.ValueOf(project))
 }
 
-func projectIDOf(directory project.Directory, name *string) (*string, error) {
+func projectIDOf(directory promotion.Directory, name *string) (*string, error) {
 	if name == nil {
 		return nil, nil
 	}

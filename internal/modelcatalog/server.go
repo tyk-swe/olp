@@ -243,7 +243,7 @@ func (s *Server) putExposure(r *http.Request, _ access.Principal) (access.Reply,
 	if err = access.Match(r, current.ETag); err != nil {
 		return access.Reply{}, err
 	}
-	result, err := SetRoutePublication(r.Context(), tx, id, *input.ExposeUpstreamModels)
+	result, err := setRoutePublication(r.Context(), tx, id, *input.ExposeUpstreamModels)
 	if err != nil {
 		return access.Reply{}, err
 	}

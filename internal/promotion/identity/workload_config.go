@@ -8,7 +8,6 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
-	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/workload"
 )
 
@@ -48,7 +47,7 @@ func configOf(issuer contract.ConfigurationWorkloadIssuer, projectID func(string
 	}, nil
 }
 
-func entryOf(config workload.Config, directory project.Directory) (contract.ConfigurationWorkloadIssuer, error) {
+func entryOf(config workload.Config, directory promotion.Directory) (contract.ConfigurationWorkloadIssuer, error) {
 	mappings, err := promotion.TryMap(config.Mappings, func(m workload.Mapping) (contract.ConfigurationWorkloadMapping, error) {
 		return mappingEntry(m, directory)
 	})
@@ -70,7 +69,7 @@ func entryOf(config workload.Config, directory project.Directory) (contract.Conf
 	}, nil
 }
 
-func mappingEntry(m workload.Mapping, directory project.Directory) (contract.ConfigurationWorkloadMapping, error) {
+func mappingEntry(m workload.Mapping, directory promotion.Directory) (contract.ConfigurationWorkloadMapping, error) {
 	name, ok := directory.Name(m.ProjectID)
 	if !ok {
 		return contract.ConfigurationWorkloadMapping{}, access.Invalid("workload_issuers", "A workload mapping project is no longer available.")

@@ -146,7 +146,7 @@ func pinnedName(d guardrails.Revision) string {
 	return bounded(d.Name + ".revision." + hex.EncodeToString(sum[:6]))
 }
 
-func projectNamer(directory project.Directory) namer {
+func projectNamer(directory promotion.Directory) namer {
 	return func(id string) (string, error) {
 		if id == "installation" {
 			return "", nil
@@ -192,11 +192,17 @@ func scopeName(ctx context.Context, q access.Queryer, projectName namer, a guard
 	case contract.ConfigurationGuardrailAttachmentScopeToolset:
 		return unowned(publications.ToolsetName(ctx, q, a.ScopeID))
 	case contract.ConfigurationGuardrailAttachmentScopeApiKey:
-		key, err := access.APIKeyName(ctx, q, a.ScopeID)
+		key, found, err := access.ReadAPIKey(ctx, q, a.ScopeID)
 		if err != nil {
 			return "", "", err
 		}
-		owner, err := projectName(key.ProjectID)
+		if !found {
+			return "", "", fmt.Errorf("guardrail attachment targets unknown API key %s", a.ScopeID)
+		}
+		if key.ProjectID == nil {
+			return key.Name, "", nil
+		}
+		owner, err := projectName(*key.ProjectID)
 		return key.Name, owner, err
 	}
 	return "", "", nil

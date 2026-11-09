@@ -9,7 +9,6 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
-	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/retrieval"
 )
 
@@ -45,13 +44,13 @@ func planBinding(ctx context.Context, q access.Queryer, lookup installed, routeS
 	}
 }
 
-func planStaged(ctx context.Context, q access.Queryer, directory project.Directory, routeStage staged, binding Binding) (promotion.Item, error) {
+func planStaged(ctx context.Context, q access.Queryer, directory promotion.Directory, routeStage staged, binding Binding) (promotion.Item, error) {
 	projectID, exists := directory.ID(binding.Project)
 	if !exists && (!routeStage.projectDeclared || len(binding.KeyGrants) > 0) {
 		return promotion.Blocker(kind, binding.Name, "Create the destination project and named API-key grants before promoting access."), nil
 	}
 	for _, name := range binding.KeyGrants {
-		ids, err := access.ActiveKeyIDsNamed(ctx, q, projectID, name)
+		ids, err := usableKeys(ctx, q, projectID, name)
 		if err != nil {
 			return promotion.Item{}, err
 		}

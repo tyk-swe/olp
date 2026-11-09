@@ -48,7 +48,7 @@ func SetProjectPublication(ctx context.Context, tx pgx.Tx, project string, enabl
 	return publication, nil
 }
 
-func SetRoutePublication(ctx context.Context, tx pgx.Tx, routeID string, exposeUpstreamModels bool) (Exposure, error) {
+func setRoutePublication(ctx context.Context, tx pgx.Tx, routeID string, exposeUpstreamModels bool) (Exposure, error) {
 	exposure := Exposure{ExposeUpstreamModels: exposeUpstreamModels, ETag: access.NewID()}
 	if err := routes.SetCatalogExposure(ctx, tx, routeID, exposure.ExposeUpstreamModels, exposure.ETag); err != nil {
 		return Exposure{}, err

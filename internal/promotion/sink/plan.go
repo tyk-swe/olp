@@ -55,7 +55,7 @@ func operation(owner Owner) access.Operation {
 
 type destination struct {
 	stored   map[key]stored
-	projects project.Directory
+	projects promotion.Directory
 	names    promotion.Names
 }
 
@@ -188,7 +188,7 @@ func Applier(desired []Sink, bindings promotion.Bindings, credentials sinks.Cred
 	}
 }
 
-func applySink(ctx context.Context, tx pgx.Tx, principal access.Principal, s Sink, existing map[key]stored, projects project.Directory, credential binding, credentials sinks.Credentials) error {
+func applySink(ctx context.Context, tx pgx.Tx, principal access.Principal, s Sink, existing map[key]stored, projects promotion.Directory, credential binding, credentials sinks.Credentials) error {
 	projectID, err := owningProject(s.Owner, projects, principal)
 	if err != nil {
 		return err
@@ -208,7 +208,7 @@ func applySink(ctx context.Context, tx pgx.Tx, principal access.Principal, s Sin
 	return credentials.Replace(ctx, tx, id, change.secret)
 }
 
-func owningProject(owner Owner, projects project.Directory, principal access.Principal) (*string, error) {
+func owningProject(owner Owner, projects promotion.Directory, principal access.Principal) (*string, error) {
 	scoped, ok := owner.(Project)
 	if !ok {
 		return nil, nil

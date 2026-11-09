@@ -10,11 +10,10 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/mcp/registration"
 	"github.com/tyk-swe/olp/internal/promotion"
-	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
-func Read(ctx context.Context, q access.Queryer, directory project.Directory) ([]Server, error) {
+func Read(ctx context.Context, q access.Queryer, directory promotion.Directory) ([]Server, error) {
 	active, err := registration.ListActive(ctx, q)
 	if err != nil {
 		return nil, err
@@ -44,7 +43,7 @@ func fromDefinition(definition registration.Definition, projectName string) Serv
 	}
 }
 
-func current(active []registration.Definition, directory project.Directory, server Server) *registration.Definition {
+func current(active []registration.Definition, directory promotion.Directory, server Server) *registration.Definition {
 	projectID, ok := directory.ID(server.Project)
 	if !ok {
 		return nil

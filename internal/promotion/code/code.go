@@ -250,7 +250,7 @@ func plan(ctx context.Context, q access.Queryer, desired Desired, deps provider.
 	return slices.Concat(accounts, pools, routes, budgets), nil
 }
 
-func resolve(ctx context.Context, q access.Queryer, desired Desired, directory project.Directory, deps provider.Deps) (resolution, error) {
+func resolve(ctx context.Context, q access.Queryer, desired Desired, directory promotion.Directory, deps provider.Deps) (resolution, error) {
 	accounts, err := promotion.TryMapIndex(desired.Code.Accounts, func(_ int, a Account) (resolved[providers.CodeAccountInput], error) {
 		return resolveAccount(ctx, q, a, directory, desired.bindings.credentials)
 	})

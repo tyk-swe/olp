@@ -158,8 +158,8 @@ func slotCredential(provider string, slot contract.ConfigurationSlotEntry, grant
 		return Unbound{}, nil
 	case promotion.Ref(ref) != want:
 		return nil, access.Invalid(field, "Credential references must read "+string(want)+".")
-	case len(ref) > MaxRef:
-		return nil, access.Invalid(field, "Credential references must fit within "+strconv.Itoa(MaxRef)+" bytes.")
+	case len(ref) > maxRef:
+		return nil, access.Invalid(field, "Credential references must fit within "+strconv.Itoa(maxRef)+" bytes.")
 	case grant:
 		return Grant{}, nil
 	}

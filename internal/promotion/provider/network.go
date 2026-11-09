@@ -30,7 +30,7 @@ func parseNetwork(entry contract.ConfigurationProviderEntry, configuration provi
 		return false, nil
 	}
 	ref := *entry.NetworkCredentialRef
-	if configuration.Options.Network == nil || promotion.Ref(ref) != NetworkRef(entry.Name) || len(ref) > MaxRef {
+	if configuration.Options.Network == nil || promotion.Ref(ref) != NetworkRef(entry.Name) || len(ref) > maxRef {
 		return false, access.Invalid(at.field("network_credential_ref"), "Use the provider name followed by /network and configure network options.")
 	}
 	return true, nil

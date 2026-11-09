@@ -488,7 +488,7 @@ func (s *Server) writeAttachment(r *http.Request, remove bool) (access.Reply, er
 		if err = validateAttachmentPolicy(r.Context(), tx, p, in); err != nil {
 			return access.Reply{}, err
 		}
-		in, err = CreateAttachment(r.Context(), tx, p.UserID(), in)
+		in, err = createAttachment(r.Context(), tx, p.UserID(), in)
 	}
 	if err != nil {
 		return access.Reply{}, err
