@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"regexp"
-	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -86,8 +85,6 @@ const (
 )
 
 type Kind string
-
-func (k Kind) Builtin() bool { return strings.HasPrefix(string(k), "builtin.") }
 
 var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$`)
 var categoryID = regexp.MustCompile(`^[a-z][a-z0-9_.]{0,63}$`)
@@ -182,6 +179,13 @@ type Verdict struct {
 	Action     Action      `json:"action"`
 	Categories []string    `json:"categories,omitempty"`
 	Redactions []Redaction `json:"redactions,omitempty"`
+}
+
+func blockIf(blocked bool, category string) Verdict {
+	if blocked {
+		return Verdict{Action: Block, Categories: []string{category}}
+	}
+	return Verdict{Action: Pass}
 }
 
 // Evidence deliberately has no content, offsets, patterns, or replacements.

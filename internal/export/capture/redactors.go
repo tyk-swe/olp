@@ -3,15 +3,12 @@ package capture
 import (
 	"context"
 	"errors"
-	"slices"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
-
-var detectorKinds = []guardrails.Kind{"builtin.regex", "builtin.pii", "builtin.secrets", "builtin.keywords"}
 
 var errUnbound = errors.New("capture binding unavailable")
 
@@ -59,7 +56,7 @@ func resolvedInOrder(found []candidate, names int) bool {
 		return false
 	}
 	for i, c := range found {
-		if c.position != int64(i+1) || !slices.Contains(detectorKinds, c.definition.Type) {
+		if c.position != int64(i+1) || !c.definition.Type.Redacts() {
 			return false
 		}
 	}
@@ -77,7 +74,7 @@ func compile(project string, names []string, pins []Redactor, definitions map[st
 	pinned := make(map[string]guardrails.Revision, len(pins))
 	for i, b := range pins {
 		d, ok := definitions[b.RevisionID]
-		if !ok || project == "" || d.ProjectID != project || d.GuardrailID != b.GuardrailID || b.Name != names[i] || d.Type != b.Type || !slices.Contains(detectorKinds, d.Type) {
+		if !ok || project == "" || d.ProjectID != project || d.GuardrailID != b.GuardrailID || b.Name != names[i] || d.Type != b.Type || !d.Type.Redacts() {
 			return nil, errUnbound
 		}
 		d.OnError = guardrails.FailClosed

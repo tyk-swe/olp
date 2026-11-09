@@ -2,11 +2,13 @@ package guardrails
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"hash/crc32"
+	"maps"
 	"net/netip"
 	"path"
 	"regexp"
@@ -56,114 +58,90 @@ type entityPattern struct {
 
 func (p *patternDetector) width() int { return p.maxWidth }
 
-func compileDetector(d Revision, external Evaluator) (detector, error) {
-	switch d.Type {
-	case "builtin.code_execution":
-		return compileCodeExecution(d.Configuration)
-	case "builtin.tool_permission":
-		return compileToolPermission(d.Configuration)
-	case "builtin.regex":
-		var config RegexConfig
-		if err := decodeConfig(d.Configuration, &config); err != nil {
-			return nil, err
-		}
-		if len(config.Rules) > contentpolicy.MaxRules {
-			return nil, errors.New("too many regex rules")
-		}
-		return compilePatterns(config.Rules, "regex", "")
-	case "builtin.pii", "builtin.secrets":
+func compileRegex(raw json.RawMessage) (*patternDetector, error) {
+	var config RegexConfig
+	if err := decodeConfig(raw, &config); err != nil {
+		return nil, err
+	}
+	if len(config.Rules) > contentpolicy.MaxRules {
+		return nil, errors.New("too many regex rules")
+	}
+	return compilePatterns(config.Rules, "regex", "")
+}
+
+func compileEntities(available map[string]entityTemplate) func(json.RawMessage) (*patternDetector, error) {
+	return func(raw json.RawMessage) (*patternDetector, error) {
 		var config EntityConfig
-		if err := decodeConfig(d.Configuration, &config); err != nil {
+		if err := decodeConfig(raw, &config); err != nil {
 			return nil, err
 		}
-		available := piiPatterns
-		if d.Type == "builtin.secrets" {
-			available = secretPatterns
+		categories := config.Categories
+		if len(categories) == 0 {
+			categories = slices.Sorted(maps.Keys(available))
 		}
-		if len(config.Categories) == 0 {
-			for name := range available {
-				config.Categories = append(config.Categories, name)
-			}
-			slices.Sort(config.Categories)
-		}
-		if len(config.Categories) > 32 || len(config.Replacement) > 512 || !utf8.ValidString(config.Replacement) {
+		if len(categories) > 32 || len(config.Replacement) > 512 || !utf8.ValidString(config.Replacement) {
 			return nil, errors.New("invalid entity configuration")
 		}
-		p := &patternDetector{}
-		for _, name := range config.Categories {
+		replacement := cmp.Or(config.Replacement, "[REDACTED]")
+		builtins := make([]entityPattern, 0, len(categories))
+		for _, name := range categories {
 			t, ok := available[name]
 			if !ok {
 				return nil, errors.New("unknown detector category")
 			}
-			r := entityPattern{re: regexp.MustCompile(t.pattern), category: name, replacement: config.Replacement, check: t.check}
-			if r.replacement == "" {
-				r.replacement = "[REDACTED]"
-			}
-			p.patterns = append(p.patterns, r)
+			builtins = append(builtins, entityPattern{re: regexp.MustCompile(t.pattern), category: name, replacement: replacement, check: t.check})
 		}
 		custom, err := compilePatterns(config.Patterns, "pii.custom", config.Replacement)
 		if err != nil {
 			return nil, err
 		}
-		p.patterns = append(p.patterns, custom.patterns...)
-		p.maxWidth = maximumPatternWidth(p.patterns)
-		return p, nil
-	case "builtin.keywords":
-		return compileKeywords(d.Configuration)
-	case "builtin.schema":
-		var config SchemaConfig
-		if err := decodeConfig(d.Configuration, &config); err != nil {
-			return nil, err
-		}
-		schema, err := compileSchema(config.Schema)
-		return &schemaDetector{schema: schema}, err
-	case "builtin.tools":
-		var config ToolsConfig
-		if err := decodeConfig(d.Configuration, &config); err != nil {
-			return nil, err
-		}
-		if len(config.Allow)+len(config.Deny)+len(config.Privileged)+len(config.Untrusted) > 256 || len(config.Schemas) > 128 {
-			return nil, errors.New("too many tool rules")
-		}
-		for _, group := range [][]string{config.Allow, config.Deny, config.Privileged, config.Untrusted} {
-			for _, g := range group {
-				if len(g) < 1 || len(g) > 128 {
-					return nil, errors.New("invalid tool glob")
-				}
-				if _, err := path.Match(g, ""); err != nil {
-					return nil, errors.New("invalid tool glob")
-				}
-			}
-		}
-		t := &toolsDetector{config: config, schemas: map[string]*jsonschema.Schema{}}
-		for name, raw := range config.Schemas {
-			if !identifier.MatchString(name) {
-				return nil, errors.New("invalid tool name")
-			}
-			schema, err := compileSchema(raw)
-			if err != nil {
-				return nil, err
-			}
-			t.schemas[name] = schema
-		}
-		return t, nil
-	case "typesafe":
-		return compileTypeSafe(d.Configuration)
-	default:
-		if err := ValidateExternal(d); err != nil {
-			return nil, err
-		}
-		return externalDetector{definition: d, evaluator: external}, nil
+		patterns := slices.Concat(builtins, custom.patterns)
+		return &patternDetector{patterns: patterns, maxWidth: maximumPatternWidth(patterns)}, nil
 	}
 }
 
-// ValidateDefinition validates without resolving credentials or performing I/O.
-func ValidateDefinition(d Revision) error {
-	if d.TimeoutMS < 1 || d.TimeoutMS > 300000 || (d.OnError != FailClosed && d.OnError != FailOpen) {
-		return errors.New("invalid guardrail timeout or failure policy")
+func compileSchemaDetector(raw json.RawMessage) (*schemaDetector, error) {
+	var config SchemaConfig
+	if err := decodeConfig(raw, &config); err != nil {
+		return nil, err
 	}
-	_, err := compileDetector(d, nil)
-	return err
+	schema, err := compileSchema(config.Schema)
+	if err != nil {
+		return nil, err
+	}
+	return &schemaDetector{schema: schema}, nil
+}
+
+func compileTools(raw json.RawMessage) (*toolsDetector, error) {
+	var config ToolsConfig
+	if err := decodeConfig(raw, &config); err != nil {
+		return nil, err
+	}
+	if len(config.Allow)+len(config.Deny)+len(config.Privileged)+len(config.Untrusted) > 256 || len(config.Schemas) > 128 {
+		return nil, errors.New("too many tool rules")
+	}
+	for _, group := range [][]string{config.Allow, config.Deny, config.Privileged, config.Untrusted} {
+		for _, g := range group {
+			if len(g) < 1 || len(g) > 128 {
+				return nil, errors.New("invalid tool glob")
+			}
+			if _, err := path.Match(g, ""); err != nil {
+				return nil, errors.New("invalid tool glob")
+			}
+		}
+	}
+	schemas := make(map[string]*jsonschema.Schema, len(config.Schemas))
+	for name, raw := range config.Schemas {
+		if !identifier.MatchString(name) {
+			return nil, errors.New("invalid tool name")
+		}
+		schema, err := compileSchema(raw)
+		if err != nil {
+			return nil, err
+		}
+		schemas[name] = schema
+	}
+	return &toolsDetector{config: config, schemas: schemas}, nil
 }
 
 func compilePatterns(rules []Pattern, category, replacement string) (*patternDetector, error) {

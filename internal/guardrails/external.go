@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,29 +17,8 @@ import (
 
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/guardrails/vendor"
-	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
 )
 
-type ExternalConfig struct {
-	Endpoint           string                    `json:"endpoint,omitempty"`
-	AuthEndpoint       string                    `json:"auth_endpoint,omitempty"`
-	AnonymizerEndpoint string                    `json:"anonymizer_endpoint,omitempty"`
-	CredentialRef      string                    `json:"credential_ref,omitempty"`
-	Network            *egress.ConnectionOptions `json:"network,omitempty"`
-	ContentEgress      bool                      `json:"content_egress,omitempty"`
-	Region             string                    `json:"region,omitempty"`
-	Guardrail          string                    `json:"guardrail,omitempty"`
-	Version            string                    `json:"version,omitempty"`
-	Template           string                    `json:"template,omitempty"`
-	Language           string                    `json:"language,omitempty"`
-	Threshold          int                       `json:"threshold,omitempty"`
-	Route              string                    `json:"route,omitempty"`
-	Rule               *ModelRule                `json:"rule,omitempty"`
-	Semantic           *SemanticRule             `json:"semantic,omitempty"`
-	PluginID           string                    `json:"plugin_id,omitempty"`
-	PluginVersion      string                    `json:"plugin_version,omitempty"`
-	Parameters         json.RawMessage           `json:"parameters,omitempty"`
-}
 type ModelRule struct {
 	Pointer  string          `json:"pointer"`
 	Equals   json.RawMessage `json:"equals"`
@@ -59,42 +39,9 @@ func ValidateCredential(secret []byte) error {
 	return errors.New("supply a bounded guardrail credential object")
 }
 
-func ValidateExternal(d Revision) error {
-	if _, ok := vendorInfo(d.Type); ok {
-		_, err := vendor.Parse(vendor.Type(d.Type), d.Configuration)
-		return err
-	}
-	if d.Type == "webhook" {
-		_, err := vendor.ParseConnection(d.Configuration)
-		return err
-	}
-	var c ExternalConfig
-	if err := decodeConfig(d.Configuration, &c); err != nil {
-		return err
-	}
-	switch d.Type {
-	case "plugin":
-		if !identifier.MatchString(c.PluginID) || !pluginidentity.ValidDigest(c.PluginVersion) {
-			return errors.New("pin an approved plugin version")
-		}
-		return nil
-	case "semantic_guard":
-		if !identifier.MatchString(c.Route) || c.Rule != nil {
-			return errors.New("semantic guardrails require an embedding route and semantic rule")
-		}
-		return ValidateSemantic(c.Semantic)
-	case "model", "decision_model":
-		if !identifier.MatchString(c.Route) || c.Rule == nil || !categoryID.MatchString(c.Rule.Category) || !json.Valid(c.Rule.Equals) || len(c.Rule.Pointer) > 512 || len(c.Rule.Prompt) > 8192 {
-			return errors.New("invalid model guardrail route or verdict rule")
-		}
-		return nil
-	default:
-		return errors.New("unknown guardrail type")
-	}
-}
-
 type externalDetector struct {
 	definition Revision
+	spec       Spec
 	evaluator  Evaluator
 }
 
@@ -103,12 +50,8 @@ func (d externalDetector) detect(ctx context.Context, e Evaluation) (Verdict, er
 	if d.evaluator == nil {
 		return Verdict{}, errEvaluation
 	}
-	definition := Revision{
-		LegacyRuleID: d.definition.LegacyRuleID, ID: d.definition.ID, GuardrailID: d.definition.GuardrailID,
-		ProjectID: d.definition.ProjectID, Name: d.definition.Name, Type: d.definition.Type,
-		Configuration: bytes.Clone(d.definition.Configuration), TimeoutMS: d.definition.TimeoutMS, OnError: d.definition.OnError,
-	}
-	return d.evaluator.Evaluate(ctx, definition, e)
+	r := d.definition
+	return d.evaluator.Evaluate(ctx, Revision{LegacyRuleID: r.LegacyRuleID, ID: r.ID, GuardrailID: r.GuardrailID, ProjectID: r.ProjectID, Name: r.Name, Type: r.Type, Configuration: slices.Clone(r.Configuration), TimeoutMS: r.TimeoutMS, OnError: r.OnError}, d.spec, e)
 }
 
 // ExternalRunner shares transport pools, but breakers belong to one immutable
@@ -118,8 +61,8 @@ type ExternalRunner struct {
 	Clients            *egress.ConnectionClientCache
 	Credentials        func(context.Context, string) ([]byte, error)
 	NetworkCredentials func(context.Context, string) ([]byte, error)
-	Model              Evaluator
-	Plugin             Evaluator
+	Model              func(context.Context, Revision, ModelSpec, Evaluation) (Verdict, error)
+	Plugin             func(context.Context, Revision, PluginSpec, Evaluation) (Verdict, error)
 	mu                 sync.Mutex
 	breakers           map[string]*circuit
 }
@@ -171,7 +114,7 @@ func (r *ExternalRunner) leave(id string, err error) {
 		}
 	}
 }
-func (r *ExternalRunner) Evaluate(ctx context.Context, d Revision, e Evaluation) (verdict Verdict, err error) {
+func (r *ExternalRunner) Evaluate(ctx context.Context, d Revision, spec Spec, e Evaluation) (verdict Verdict, err error) {
 	if d.TimeoutMS < 1 || d.TimeoutMS > 300000 || validateSegments(e.Segments) != nil || !e.Phase.Valid() {
 		return verdict, errEvaluation
 	}
@@ -189,45 +132,36 @@ func (r *ExternalRunner) Evaluate(ctx context.Context, d Revision, e Evaluation)
 			err = errEvaluation
 		}
 	}()
-	return r.dispatch(ctx, d, e)
+	return r.dispatch(ctx, d, spec, e)
 }
 
-func (r *ExternalRunner) dispatch(ctx context.Context, d Revision, e Evaluation) (Verdict, error) {
-	switch {
-	case isModelGuardrail(d.Type):
-		return delegate(ctx, r.Model, d, e)
-	case d.Type == "plugin":
-		return delegate(ctx, r.Plugin, d, e)
-	case d.Type == "webhook":
-		c, err := vendor.ParseConnection(d.Configuration)
+func (r *ExternalRunner) dispatch(ctx context.Context, d Revision, spec Spec, e Evaluation) (Verdict, error) {
+	switch s := spec.(type) {
+	case ModelSpec:
+		if r.Model == nil {
+			return Verdict{}, errEvaluation
+		}
+		return r.Model(ctx, d, s, e)
+	case PluginSpec:
+		if r.Plugin == nil {
+			return Verdict{}, errEvaluation
+		}
+		return r.Plugin(ctx, d, s, e)
+	case webhookSpec:
+		client, credential, err := r.connect(ctx, d, s.Connection, s.Endpoint)
 		if err != nil {
 			return Verdict{}, err
 		}
-		client, credential, err := r.connect(ctx, d, c, c.Endpoint)
+		return webhook(ctx, client, s.Endpoint, credential.SigningKey, d, e)
+	case vendorSpec:
+		client, credential, err := r.connect(ctx, d, s.Connection, s.Endpoints()...)
 		if err != nil {
 			return Verdict{}, err
 		}
-		return webhook(ctx, client, c.Endpoint, credential.SigningKey, d, e)
-	}
-	spec, err := vendor.Parse(vendor.Type(d.Type), d.Configuration)
-	if err != nil {
-		return Verdict{}, err
-	}
-	if info, _ := vendorInfo(d.Type); !info.Supports(e.Phase) {
+		return vendorVerdict(ctx, s.Spec, client, credential.Credential, e)
+	default:
 		return Verdict{}, errEvaluation
 	}
-	client, credential, err := r.connect(ctx, d, spec.Connection, spec.Endpoints()...)
-	if err != nil {
-		return Verdict{}, err
-	}
-	return vendorVerdict(ctx, spec, client, credential.Credential, e)
-}
-
-func delegate(ctx context.Context, evaluator Evaluator, d Revision, e Evaluation) (Verdict, error) {
-	if evaluator == nil {
-		return Verdict{}, errEvaluation
-	}
-	return evaluator.Evaluate(ctx, d, e)
 }
 
 func (r *ExternalRunner) connect(ctx context.Context, d Revision, c vendor.Connection, endpoints ...string) (*http.Client, externalCredential, error) {

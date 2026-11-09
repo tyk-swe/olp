@@ -70,7 +70,7 @@ func migrate(ctx context.Context, pool *pgxpool.Pool, history fs.FS) error {
 		}
 		missingSeen = true
 		if _, err = tx.Exec(ctx, string(sql)); err != nil {
-			return fmt.Errorf("migration %s failed; transaction rolled back", name)
+			return fmt.Errorf("migration %s failed, transaction rolled back: %w", name, err)
 		}
 		if _, err = tx.Exec(ctx, "INSERT INTO olp.migrations(version,checksum) VALUES($1,$2)", name, checksum[:]); err != nil {
 			return err

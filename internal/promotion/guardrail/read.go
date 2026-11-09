@@ -48,7 +48,7 @@ func readStored(ctx context.Context, q access.Queryer, projectName namer) (Secti
 		return Section{}, err
 	}
 	definitions, err := promotion.TryMap(slices.Concat(stored, platform.Guardrails), func(g Guardrail) (Guardrail, error) {
-		configuration, err := rewriteCredentials(g.Type, g.Configuration, credentialName(ctx, q))
+		configuration, err := guardrails.RenameCredentials(g.Configuration, credentialName(ctx, q))
 		return Guardrail{Project: g.Project, Name: g.Name, Type: g.Type, Configuration: configuration, TimeoutMS: g.TimeoutMS, OnError: g.OnError}, err
 	})
 	return Section{Guardrails: definitions, Policies: platform.Policies, Attachments: platform.Attachments}, err

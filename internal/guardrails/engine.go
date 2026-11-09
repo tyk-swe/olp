@@ -17,12 +17,12 @@ import (
 // Evaluator is also the shared webhook, model and confined-plugin contract.
 // Implementations must honor ctx; content-bearing diagnostics never escape it.
 type Evaluator interface {
-	Evaluate(context.Context, Revision, Evaluation) (Verdict, error)
+	Evaluate(context.Context, Revision, Spec, Evaluation) (Verdict, error)
 }
-type EvaluatorFunc func(context.Context, Revision, Evaluation) (Verdict, error)
+type EvaluatorFunc func(context.Context, Revision, Spec, Evaluation) (Verdict, error)
 
-func (f EvaluatorFunc) Evaluate(c context.Context, d Revision, e Evaluation) (Verdict, error) {
-	return f(c, d, e)
+func (f EvaluatorFunc) Evaluate(c context.Context, d Revision, s Spec, e Evaluation) (Verdict, error) {
+	return f(c, d, s, e)
 }
 
 type detector interface {
@@ -33,13 +33,14 @@ type detector interface {
 type compiledEntry struct {
 	entry      Entry
 	definition Revision
+	kind       kind
 	detector   detector
 }
 type Engine struct{ entries []compiledEntry }
 
 func (e *Engine) HasCompression() bool {
 	return e != nil && slices.ContainsFunc(e.entries, func(entry compiledEntry) bool {
-		return entry.entry.Phase == Input && !entry.entry.Monitor && compresses(entry.definition.Type)
+		return entry.entry.Phase == Input && !entry.entry.Monitor && entry.kind.compresses
 	})
 }
 
@@ -94,7 +95,7 @@ func (e *Engine) WithoutModelGuardrails() *Engine {
 	}
 	entries := make([]compiledEntry, 0, len(e.entries))
 	for _, entry := range e.entries {
-		if !isModelGuardrail(entry.definition.Type) {
+		if !entry.kind.model {
 			entries = append(entries, entry)
 		}
 	}
@@ -128,21 +129,18 @@ func Compile(entries []Entry, definitions map[string]Revision, external Evaluato
 		if entry.Action == Redact && entry.Phase == InputParallel && !entry.Monitor {
 			return nil, errors.New("parallel input cannot transform a dispatched request")
 		}
-		if info, ok := vendorInfo(d.Type); ok && !info.Supports(entry.Phase) {
-			return nil, errors.New("this vendor does not support the configured phase")
-		}
-		if !entry.Monitor && (entry.Action == Redact || entry.Action == Mask) && !supportsTransformation(d.Type) {
-			return nil, errors.New("this detector does not supply transformation spans")
-		}
-		if d.TimeoutMS < 1 || d.TimeoutMS > 300000 || (d.OnError != FailOpen && d.OnError != FailClosed) {
-			return nil, errors.New("invalid guardrail timeout or failure policy")
-		}
 		d.Configuration = slices.Clone(d.Configuration)
-		det, err := compileDetector(d, external)
+		k, spec, err := parse(d)
 		if err != nil {
 			return nil, err
 		}
-		e.entries = append(e.entries, compiledEntry{entry, d, det})
+		if !k.supports(entry.Phase) {
+			return nil, errors.New("this vendor does not support the configured phase")
+		}
+		if !entry.Monitor && (entry.Action == Redact || entry.Action == Mask) && !k.transforms {
+			return nil, errors.New("this detector does not supply transformation spans")
+		}
+		e.entries = append(e.entries, compiledEntry{entry, d, k, detectorOf(d, spec, external)})
 	}
 	return e, nil
 }
@@ -302,7 +300,7 @@ func (e *Engine) evaluate(ctx context.Context, request Evaluation, masks *Maskin
 			continue
 		}
 		ev := Evidence{GuardrailID: r.definition.GuardrailID, Revision: r.definition.ID, Phase: request.Phase, Action: r.entry.Action, Outcome: Passed}
-		if request.InternalModel && isModelGuardrail(r.definition.Type) {
+		if request.InternalModel && r.kind.model {
 			ev.Outcome = Skipped
 			result.Decisions = append(result.Decisions, ev)
 			continue
@@ -311,7 +309,7 @@ func (e *Engine) evaluate(ctx context.Context, request Evaluation, masks *Maskin
 		bounded, cancel := context.WithTimeout(ctx, time.Duration(r.definition.TimeoutMS)*time.Millisecond)
 		request.Segments = result.Segments
 		evaluation := request
-		if compresses(r.definition.Type) && len(request.CompressionExemptIDs) > 0 {
+		if r.kind.compresses && len(request.CompressionExemptIDs) > 0 {
 			evaluation.Segments = slices.Collect(func(yield func(Segment) bool) {
 				for _, segment := range result.Segments {
 					if !slices.Contains(request.CompressionExemptIDs, segment.ID) && !yield(segment) {
@@ -370,7 +368,7 @@ func (e *Engine) evaluate(ctx context.Context, request Evaluation, masks *Maskin
 				}
 				firstRecovery := len(result.Recovery)
 				originals := func() []Segment {
-					if !request.WorkflowRecovery || !compresses(r.definition.Type) {
+					if !request.WorkflowRecovery || !r.kind.compresses {
 						return nil
 					}
 					return slices.Collect(func(yield func(Segment) bool) {

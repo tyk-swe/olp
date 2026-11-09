@@ -32,7 +32,7 @@ func Save(ctx context.Context, tx pgx.Tx, actor string, current, next *Definitio
 		}
 		next.Configuration, _ = json.Marshal(map[string]any{"rules": patterns})
 	}
-	if err := ValidateDefinition(Revision{Type: next.Type, Configuration: next.Configuration, TimeoutMS: next.TimeoutMS, OnError: next.OnError}); err != nil {
+	if _, err := ParseRevision(Revision{Type: next.Type, Configuration: next.Configuration, TimeoutMS: next.TimeoutMS, OnError: next.OnError}); err != nil {
 		return access.Invalid("configuration", "Supply valid typed guardrail configuration, timeout and failure policy.")
 	}
 

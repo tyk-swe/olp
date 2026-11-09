@@ -1,7 +1,6 @@
 package guardrails
 
 import (
-	"encoding/json"
 	"errors"
 	"slices"
 	"sort"
@@ -33,13 +32,12 @@ func (r *Registry) Validate() error {
 		if id != d.ID || !identifier.MatchString(id) || !identifier.MatchString(d.GuardrailID) || !identifier.MatchString(d.ProjectID) {
 			return errors.New("invalid guardrail identity")
 		}
-		if err := ValidateDefinition(d); err != nil {
+		spec, err := ParseRevision(d)
+		if err != nil {
 			return err
 		}
-		if d.Type == "plugin" {
-			var c ExternalConfig
-			_ = json.Unmarshal(d.Configuration, &c)
-			pluginModules[c.PluginVersion] = true
+		if plugin, ok := spec.(PluginSpec); ok {
+			pluginModules[plugin.Version] = true
 			if len(pluginModules) > 16 {
 				return errors.New("at most 16 guardrail plugin modules can be pinned")
 			}

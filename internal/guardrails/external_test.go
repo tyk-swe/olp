@@ -70,8 +70,12 @@ func TestExternalDeadlineIncludesCredentialResolution(t *testing.T) {
 	}
 	config := vendorConfiguration(endpoint, "")
 	d := Revision{ID: "timeout", GuardrailID: "g", Type: "openai_moderation", Configuration: config, TimeoutMS: 5, OnError: FailClosed}
+	spec, err := ParseRevision(d)
+	if err != nil {
+		t.Fatal(err)
+	}
 	started := time.Now()
-	_, err := runner.Evaluate(t.Context(), d, Evaluation{Phase: Input, Segments: []Segment{{ID: "s", Text: "secret"}}})
+	_, err = runner.Evaluate(t.Context(), d, spec, Evaluation{Phase: Input, Segments: []Segment{{ID: "s", Text: "secret"}}})
 	if !errors.Is(err, errEvaluation) || time.Since(started) > time.Second {
 		t.Fatalf("deadline was not enforced: %v", err)
 	}
@@ -84,10 +88,10 @@ func TestModelGuardrailAliases(t *testing.T) {
 	} {
 		t.Run(tc.kind, func(t *testing.T) {
 			calls := 0
-			runner := &ExternalRunner{Model: EvaluatorFunc(func(context.Context, Revision, Evaluation) (Verdict, error) {
+			runner := &ExternalRunner{Model: func(context.Context, Revision, ModelSpec, Evaluation) (Verdict, error) {
 				calls++
 				return blockIf(true, "policy.test"), nil
-			})}
+			}}
 			engine := testEngine(t, Kind(tc.kind), tc.config, Input, Block, false, runner)
 			evaluation := Evaluation{Phase: Input, Segments: []Segment{{ID: "s", Text: "text"}}, InternalModel: true}
 			result, err := engine.Evaluate(t.Context(), evaluation, nil)
@@ -306,7 +310,11 @@ func TestVendorRequestsUseCanonicalRoles(t *testing.T) {
 				_, _ = io.WriteString(w, `{"required_action":{},"analysis_result":{}}`)
 			})
 			d := Revision{ID: "revision", GuardrailID: "guard", Type: "aim", Configuration: vendorConfiguration(endpoint, ""), TimeoutMS: 1000, OnError: FailClosed}
-			if _, err := runner.Evaluate(t.Context(), d, Evaluation{Phase: tc.phase, Segments: []Segment{{ID: "s", Role: tc.role, Text: "text"}}}); err != nil {
+			spec, err := ParseRevision(d)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := runner.Evaluate(t.Context(), d, spec, Evaluation{Phase: tc.phase, Segments: []Segment{{ID: "s", Role: tc.role, Text: "text"}}}); err != nil {
 				t.Fatal(err)
 			}
 		})

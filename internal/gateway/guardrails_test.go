@@ -76,7 +76,7 @@ func TestGuardrailMaskRestoresBeforeOutputAndRecordsOnlyMetadata(t *testing.T) {
 
 func TestGuardrailParallelRefusalAfterCommitmentIsInBand(t *testing.T) {
 	release := make(chan struct{})
-	evaluator := guardrails.EvaluatorFunc(func(ctx context.Context, _ guardrails.Revision, _ guardrails.Evaluation) (guardrails.Verdict, error) {
+	evaluator := guardrails.EvaluatorFunc(func(ctx context.Context, _ guardrails.Revision, _ guardrails.Spec, _ guardrails.Evaluation) (guardrails.Verdict, error) {
 		select {
 		case <-release:
 		case <-ctx.Done():
@@ -151,7 +151,7 @@ func TestNativeOperationOutputUnavailableIsExplicit(t *testing.T) {
 }
 
 func TestToolGuardrailEvaluationReachesConfiguredEvaluator(t *testing.T) {
-	evaluator := guardrails.EvaluatorFunc(func(_ context.Context, definition guardrails.Revision, evaluation guardrails.Evaluation) (guardrails.Verdict, error) {
+	evaluator := guardrails.EvaluatorFunc(func(_ context.Context, definition guardrails.Revision, _ guardrails.Spec, evaluation guardrails.Evaluation) (guardrails.Verdict, error) {
 		if !json.Valid(definition.Configuration) {
 			return guardrails.Verdict{}, guardrails.ErrSurface
 		}

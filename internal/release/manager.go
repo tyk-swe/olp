@@ -663,43 +663,33 @@ func (m *Manager) install(ctx context.Context, id string, sequence int64, digest
 		goruntime.AddCleanup(release, func(p *guardrailPluginPins) { p.close() }, pins)
 		pinned := map[string]bool{}
 		for _, definition := range snapshot.Guardrails.Definitions {
-			if definition.Type == "plugin" {
-				var c guardrails.ExternalConfig
-				if json.Unmarshal(definition.Configuration, &c) != nil || m.prepareGuardrailPlugin == nil {
+			spec, err := guardrails.ParseRevision(definition)
+			if err != nil {
+				return nil, errors.New("invalid guardrail configuration")
+			}
+			if plugin, ok := spec.(guardrails.PluginSpec); ok {
+				if m.prepareGuardrailPlugin == nil {
 					return nil, errors.New("guardrail plugin unavailable")
 				}
-				if !pinned[c.PluginVersion] {
-					unpin, err := m.prepareGuardrailPlugin(ctx, c.PluginVersion)
+				if !pinned[plugin.Version] {
+					unpin, err := m.prepareGuardrailPlugin(ctx, plugin.Version)
 					if err != nil {
 						return nil, errors.New("guardrail plugin could not be preloaded")
 					}
 					pins.add(unpin)
-					pinned[c.PluginVersion] = true
+					pinned[plugin.Version] = true
 				}
 			}
-			if !definition.Type.Builtin() {
-				var config guardrails.ExternalConfig
-				if err := json.Unmarshal(definition.Configuration, &config); err != nil {
-					return nil, errors.New("invalid guardrail configuration")
+			for _, id := range spec.References().IDs() {
+				var project string
+				if err := tx.QueryRow(ctx, "SELECT project_id::text FROM olp.guardrail_credentials WHERE id=$1", id).Scan(&project); err != nil || project != definition.ProjectID {
+					return nil, errors.New("guardrail credential boundary mismatch")
 				}
-				ids := []string{config.CredentialRef}
-				if config.Network != nil {
-					ids = append(ids, config.Network.CredentialID)
+				secret, err := m.keys.Read(ctx, tx, m.installation, id, secrets.GuardrailCredential)
+				if err != nil {
+					return nil, errors.New("guardrail credential unavailable")
 				}
-				for _, id := range ids {
-					if id == "" {
-						continue
-					}
-					var project string
-					if err := tx.QueryRow(ctx, "SELECT project_id::text FROM olp.guardrail_credentials WHERE id=$1", id).Scan(&project); err != nil || project != definition.ProjectID {
-						return nil, errors.New("guardrail credential boundary mismatch")
-					}
-					secret, err := m.keys.Read(ctx, tx, m.installation, id, secrets.GuardrailCredential)
-					if err != nil {
-						return nil, errors.New("guardrail credential unavailable")
-					}
-					release.credentials[id] = secret
-				}
+				release.credentials[id] = secret
 			}
 		}
 	}

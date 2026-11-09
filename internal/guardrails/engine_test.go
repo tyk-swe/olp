@@ -74,7 +74,7 @@ func TestRuleSizeLimitsAgreeWithContentPolicy(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			detectorErr := ValidateDefinition(Revision{Type: "builtin.regex", Configuration: config, TimeoutMS: 1, OnError: FailClosed})
+			_, detectorErr := ParseRevision(Revision{Type: "builtin.regex", Configuration: config, TimeoutMS: 1, OnError: FailClosed})
 			if (policyErr == nil) != tc.valid || (detectorErr == nil) != tc.valid {
 				t.Fatalf("valid=%t, policy error=%v, detector error=%v", tc.valid, policyErr, detectorErr)
 			}
@@ -139,7 +139,7 @@ func TestTypeSafeWorkflowPolicies(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			definition := Revision{Type: "typesafe", Configuration: json.RawMessage(tc.configuration), TimeoutMS: 1000, OnError: FailClosed}
-			if err := ValidateDefinition(definition); (err == nil) != tc.valid {
+			if _, err := ParseRevision(definition); (err == nil) != tc.valid {
 				t.Fatalf("valid=%t, error=%v", tc.valid, err)
 			}
 		})
@@ -192,7 +192,7 @@ func TestCompressionWorkflowRecoveryRespectsRedactionAndExemptions(t *testing.T)
 		{GuardrailID: "first", RevisionID: "first", Phase: Input, Action: Redact},
 		{GuardrailID: "second", RevisionID: "second", Phase: Input, Action: Redact},
 	}
-	evaluator := EvaluatorFunc(func(_ context.Context, definition Revision, evaluation Evaluation) (Verdict, error) {
+	evaluator := EvaluatorFunc(func(_ context.Context, definition Revision, _ Spec, evaluation Evaluation) (Verdict, error) {
 		for _, segment := range evaluation.Segments {
 			if segment.ID == "recovered" || strings.Contains(segment.Text, "private") {
 				t.Errorf("compression received protected content: %+v", segment)
@@ -250,7 +250,7 @@ func TestCompressionWorkflowRecoveryRespectsRedactionAndExemptions(t *testing.T)
 
 func TestCompressionSkipsExemptContent(t *testing.T) {
 	config := `{"endpoint":"https://guardrail.example/scan","credential_ref":"credential","content_egress":true}`
-	evaluator := EvaluatorFunc(func(context.Context, Revision, Evaluation) (Verdict, error) {
+	evaluator := EvaluatorFunc(func(context.Context, Revision, Spec, Evaluation) (Verdict, error) {
 		t.Error("exempt content was sent for compression")
 		return Verdict{Action: Pass}, nil
 	})
@@ -376,7 +376,7 @@ func TestDetectorCorpus(t *testing.T) {
 
 func TestSchemaDoesNotFetchRemoteReferences(t *testing.T) {
 	d := Revision{Type: "builtin.schema", Configuration: json.RawMessage(`{"schema":{"$ref":"https://127.0.0.1/private"}}`), TimeoutMS: 100, OnError: FailClosed}
-	if ValidateDefinition(d) == nil {
+	if _, err := ParseRevision(d); err == nil {
 		t.Fatal("accepted remote schema")
 	}
 	e := testEngine(t, "builtin.schema", `{"schema":{"type":"object","required":["ok"],"properties":{"ok":{"const":true}},"additionalProperties":false}}`, Output, Block, false, nil)

@@ -30,7 +30,8 @@ func TestSemanticInputs(t *testing.T) {
 		})
 	}
 	for _, rule := range []SemanticRule{{Category: "bad category", SimilarityThreshold: .5, Utterances: []string{"a"}}, {Category: "semantic", SimilarityThreshold: 0, Utterances: []string{"a"}}, {Category: "semantic", SimilarityThreshold: math.NaN(), Utterances: []string{"a"}}, {Category: "semantic", SimilarityThreshold: .5}, {Category: "semantic", SimilarityThreshold: .5, Utterances: []string{strings.Repeat("a", 8193)}}} {
-		if ValidateSemantic(&rule) == nil {
+		semantic, _ := json.Marshal(rule)
+		if _, err := ParseRevision(Revision{Type: "semantic_guard", Configuration: json.RawMessage(`{"route":"embeddings","semantic":` + string(semantic) + `}`), TimeoutMS: 1000, OnError: FailClosed}); err == nil {
 			t.Fatalf("invalid rule accepted: %+v", rule)
 		}
 	}
@@ -111,11 +112,15 @@ func TestSemanticExactSimilarity(t *testing.T) {
 }
 
 func TestInternalSemanticEngineKeepsLocalPolicy(t *testing.T) {
+	entry := func(phase Phase, kind Kind) compiledEntry {
+		k, _ := lookup(kind)
+		return compiledEntry{entry: Entry{Phase: phase}, definition: Revision{Type: kind}, kind: k}
+	}
 	engine := &Engine{entries: []compiledEntry{
-		{entry: Entry{Phase: Input}, definition: Revision{Type: "semantic_guard"}},
-		{entry: Entry{Phase: Output}, definition: Revision{Type: "decision_model"}},
-		{entry: Entry{Phase: InputParallel}, definition: Revision{Type: "keywords"}},
-		{entry: Entry{Phase: Input}, definition: Revision{Type: "webhook"}},
+		entry(Input, "semantic_guard"),
+		entry(Output, "decision_model"),
+		entry(InputParallel, "builtin.keywords"),
+		entry(Input, "webhook"),
 	}}
 	internal := engine.WithoutModelGuardrails()
 	if !internal.HasPhase(Input) || !internal.HasPhase(InputParallel) || internal.HasPhase(Output) || len(internal.entries) != 2 {

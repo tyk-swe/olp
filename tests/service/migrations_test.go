@@ -241,6 +241,47 @@ func TestUpgradeKeepsLegacyBillingGapsUnimported(t *testing.T) {
 	}
 }
 
+func TestUpgradeRefusesGuardrailFieldsOutsideTheirType(t *testing.T) {
+	pool, _ := newDatabase(t)
+	migrateBefore(t, pool, "0142")
+	user, guardrail, revision := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	tx, err := pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(t.Context())) }()
+	for _, statement := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO olp.users(id, email, display_name, role, etag) VALUES($1, 'stray-guardrail@example.invalid', 'Stray guardrail', 'owner', $2)`, []any{user, uuid.NewString()}},
+		{`INSERT INTO olp.guardrails(id, name, type, latest_revision_id, etag, created_by) VALUES($1, 'stray', 'lakera', $2, $3, $4)`, []any{guardrail, revision, uuid.NewString(), user}},
+		{`INSERT INTO olp.guardrail_revisions(id, guardrail_id, revision, policy, created_by, configuration, timeout_ms, on_error)
+			VALUES($1, $2, 1, '{}', $3, '{"endpoint":"https://guard.example.invalid","credential_ref":"key","content_egress":true,"threshold":0}', 1000, 'fail_closed')`, []any{revision, guardrail, user}},
+		{`UPDATE olp.guardrails SET active_revision_id=$2 WHERE id=$1`, []any{guardrail, revision}},
+	} {
+		if _, err := tx.Exec(t.Context(), statement.sql, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Migrate(t.Context(), pool); err == nil || !strings.Contains(err.Error(), guardrail+" lakera.threshold") {
+		t.Fatalf("upgrade with a stray lakera threshold: %v", err)
+	}
+	if _, err := pool.Exec(t.Context(), `WITH fixed AS (
+			INSERT INTO olp.guardrail_revisions(id, guardrail_id, revision, policy, created_by, configuration, timeout_ms, on_error)
+			SELECT $3, guardrail_id, 2, policy, created_by, configuration-'threshold', timeout_ms, on_error FROM olp.guardrail_revisions WHERE id=$2
+			RETURNING id)
+		UPDATE olp.guardrails SET active_revision_id=(SELECT id FROM fixed), latest_revision_id=(SELECT id FROM fixed) WHERE id=$1`, guardrail, revision, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Migrate(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestMigrationsApplyConcurrentlyAndRefuseChangedHistory(t *testing.T) {
 	pool, _ := newDatabase(t)
 	var group sync.WaitGroup

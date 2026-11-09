@@ -295,8 +295,10 @@ func (s *Server) write(r *http.Request, id string, retire bool) (access.Reply, e
 		}
 	}
 	if !retire && len(in.Configuration) > 0 {
-		var c ExternalConfig
-		if json.Unmarshal(in.Configuration, &c) == nil && c.ContentEgress {
+		var acknowledged struct {
+			ContentEgress bool `json:"content_egress"`
+		}
+		if json.Unmarshal(in.Configuration, &acknowledged) == nil && acknowledged.ContentEgress {
 			if err = access.Audit(r.Context(), tx, r, p.Actor(), "guardrail.content_egress_acknowledged", "guardrail", id, "success"); err != nil {
 				return access.Reply{}, err
 			}

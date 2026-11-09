@@ -47,7 +47,7 @@ func (s *Server) newGuardrailEvaluator() guardrails.Evaluator {
 	}
 	return &guardrails.ExternalRunner{
 		Egress: *s.egress, Clients: egress.NewConnectionClientCache(128), Credentials: credential, NetworkCredentials: credential,
-		Model: guardrails.EvaluatorFunc(s.modelGuardrail), Plugin: guardrails.EvaluatorFunc(s.pluginGuardrail),
+		Model: s.modelGuardrail, Plugin: s.pluginGuardrail,
 	}
 }
 
@@ -557,7 +557,7 @@ func (s *Server) evaluateGuardrails(ctx context.Context, x *call, in guardrails.
 	return result, err
 }
 
-func (s *Server) modelGuardrail(ctx context.Context, d guardrails.Revision, e guardrails.Evaluation) (verdict guardrails.Verdict, err error) {
+func (s *Server) modelGuardrail(ctx context.Context, d guardrails.Revision, spec guardrails.ModelSpec, e guardrails.Evaluation) (verdict guardrails.Verdict, err error) {
 	parent, _ := ctx.Value(guardrailCallerKey{}).(*call)
 	if parent == nil || parent.internalGuardrail || parent.request.release == nil {
 		return guardrails.Verdict{}, guardrails.ErrSurface
@@ -582,14 +582,11 @@ func (s *Server) modelGuardrail(ctx context.Context, d guardrails.Revision, e gu
 			}
 		}()
 	}
-	var config guardrails.ExternalConfig
-	semantic := d.Type == "semantic_guard"
-	if json.Unmarshal(d.Configuration, &config) != nil || (!semantic && config.Rule == nil) || (semantic && guardrails.ValidateSemantic(config.Semantic) != nil) {
-		return guardrails.Verdict{}, guardrails.ErrSurface
-	}
+	similarity, semantic := spec.Judge.(guardrails.SemanticRule)
+	rule, _ := spec.Judge.(guardrails.ModelRule)
 	// A retained serving snapshot contains only its pinned route/provider.
 	// Evaluators belong to the full release pinned at request admission.
-	route, ok := parent.request.release.Snapshot().FindRoute(config.Route)
+	route, ok := parent.request.release.Snapshot().FindRoute(spec.Route)
 	if !ok {
 		return guardrails.Verdict{}, guardrails.ErrSurface
 	}
@@ -605,7 +602,7 @@ func (s *Server) modelGuardrail(ctx context.Context, d guardrails.Revision, e gu
 		if !slices.Contains(route.Operations, "embeddings") {
 			return guardrails.Verdict{}, guardrails.ErrSurface
 		}
-		embeddingInputs, err = guardrails.SemanticInputs(e, *config.Semantic)
+		embeddingInputs, err = guardrails.SemanticInputs(e, similarity)
 		if err != nil {
 			return guardrails.Verdict{}, err
 		}
@@ -614,7 +611,7 @@ func (s *Server) modelGuardrail(ctx context.Context, d guardrails.Revision, e gu
 		}
 	} else {
 		segments, _ := json.Marshal(e.Segments)
-		text = config.Rule.Prompt + "\n" + string(segments)
+		text = rule.Prompt + "\n" + string(segments)
 	}
 	x := &call{
 		request:              request{id: uuid.Must(uuid.NewV7()).String(), minted: true, clientIP: parent.request.clientIP, startedAt: s.now(), release: parent.request.release},
@@ -735,27 +732,23 @@ func (s *Server) modelGuardrail(ctx context.Context, d guardrails.Revision, e gu
 		return guardrails.Verdict{}, out.err
 	}
 	if semantic {
-		return guardrails.SemanticVerdict(raw, *config.Semantic, len(embeddingInputs)-len(config.Semantic.Utterances))
+		return guardrails.SemanticVerdict(raw, similarity, len(embeddingInputs)-len(similarity.Utterances))
 	}
-	return guardrails.ModelVerdict(raw, *config.Rule)
+	return guardrails.ModelVerdict(raw, rule)
 }
 
-func (s *Server) pluginGuardrail(ctx context.Context, d guardrails.Revision, e guardrails.Evaluation) (guardrails.Verdict, error) {
+func (s *Server) pluginGuardrail(ctx context.Context, d guardrails.Revision, spec guardrails.PluginSpec, e guardrails.Evaluation) (guardrails.Verdict, error) {
 	host, ok := s.cfg.Predicates.(interface {
 		Guardrail(context.Context, string, abi.GuardrailRequest) (abi.GuardrailVerdict, error)
 	})
 	if !ok {
 		return guardrails.Verdict{}, guardrails.ErrSurface
 	}
-	var c guardrails.ExternalConfig
-	if json.Unmarshal(d.Configuration, &c) != nil {
-		return guardrails.Verdict{}, guardrails.ErrSurface
-	}
 	raw, _ := json.Marshal(e)
 	var in abi.GuardrailRequest
 	_ = json.Unmarshal(raw, &in)
 	in.Guardrail = d.Name
-	verdict, err := host.Guardrail(ctx, c.PluginVersion, in)
+	verdict, err := host.Guardrail(ctx, spec.Version, in)
 	if err != nil {
 		return guardrails.Verdict{}, guardrails.ErrSurface
 	}
