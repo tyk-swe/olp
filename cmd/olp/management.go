@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/tyk-swe/olp/internal/guardrails/attachment"
+
 	"github.com/tyk-swe/olp/internal/guardrails/policy"
 
 	"github.com/tyk-swe/olp/internal/codesessions"
@@ -102,7 +104,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	policy.NewAPI(m.Access, publishGuardrails, func(r *http.Request, p access.Principal, pinned guardrails.Pinned, in guardrails.Application) (guardrails.Result, error) {
 		return m.Gateway.EvaluateGuardrails(r, p, pinned, in)
 	}).Register(mux)
-	(&guardrails.Server{Access: m.Access, Publish: publishGuardrails}).Register(mux)
+	attachment.NewAPI(m.Access, publishGuardrails).Register(mux)
 	agentTasks := tasks.New(m.Access.Pool, nil, m.Access.Auth)
 	agentGrants := personal.NewStore(m.Access.Pool, m.Access.Installation, m.Access.Auth, m.Access.Keys, m.Egress)
 	agentPeers := a2a.NewPeers(m.Egress, func(ctx context.Context, id string) ([]byte, error) {

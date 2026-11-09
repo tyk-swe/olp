@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 
+	guardrailattachment "github.com/tyk-swe/olp/internal/guardrails/attachment"
+
 	guardrailpolicy "github.com/tyk-swe/olp/internal/guardrails/policy"
 
 	"github.com/jackc/pgx/v5"
@@ -188,13 +190,13 @@ func applyAttachment(ctx context.Context, tx pgx.Tx, p access.Principal, directo
 	}
 	switch t := target.(type) {
 	case draft:
-		return guardrails.StageDraftAttachment(ctx, tx, p.UserID(), t.id, revision, a.Order)
+		return guardrailattachment.Stage(ctx, tx, p.UserID(), t.id, revision, a.Order)
 	case published:
 		placed := guardrails.Attachment{Scope: guardrails.Scope(describe(a.Scope).kind), ScopeID: installationOr(t.id), PolicyRevisionID: revision, Order: a.Order}
-		if err := guardrails.AuthorizeAttachment(ctx, tx, p, placed, access.Change); err != nil {
+		if err := guardrailattachment.Authorize(ctx, tx, p, placed, access.Change); err != nil {
 			return err
 		}
-		return guardrails.PlaceAttachment(ctx, tx, p.UserID(), placed)
+		return guardrailattachment.Place(ctx, tx, p.UserID(), placed)
 	}
 	return access.Invalid("guardrail_attachments", invalidAttachment)
 }

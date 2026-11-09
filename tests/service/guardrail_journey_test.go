@@ -84,7 +84,9 @@ func testGuardrailJourney(t *testing.T, parent *service, owner *caller) {
 		t.Fatalf("evaluation = %v", evaluation)
 	}
 
-	s.want(owner, "DELETE", "/api/v1/guardrail-attachments/"+attachment["id"].(string), nil, idempotent(etag(replaced)), http.StatusNoContent)
+	detach := idempotent(etag(replaced))
+	s.want(owner, "DELETE", "/api/v1/guardrail-attachments/"+attachment["id"].(string), nil, detach, http.StatusNoContent)
+	s.want(owner, "DELETE", "/api/v1/guardrail-attachments/"+attachment["id"].(string), nil, detach, http.StatusNoContent)
 	if status, raw := s.do(owner, "GET", "/api/v1/guardrail-attachments", nil, nil); strings.Contains(string(raw), attachment["id"].(string)) {
 		t.Fatalf("detached attachment is still listed: %s", describe(status, raw))
 	}

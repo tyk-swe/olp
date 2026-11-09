@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strconv"
 
+	guardrailattachment "github.com/tyk-swe/olp/internal/guardrails/attachment"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agents/publications"
 	"github.com/tyk-swe/olp/internal/guardrails"
@@ -210,11 +212,11 @@ func scopeName(ctx context.Context, q access.Queryer, projectName namer, a guard
 }
 
 func readDrafts(ctx context.Context, q access.Queryer, policies map[string]string, reference func(string) (PolicyRef, error)) (map[slot]Attachment, error) {
-	drafts, err := guardrails.ReadDraftAttachments(ctx, q)
+	drafts, err := guardrailattachment.Drafts(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	staged, err := promotion.TryMap(drafts, func(d guardrails.DraftAttachment) (Attachment, error) {
+	staged, err := promotion.TryMap(drafts, func(d guardrailattachment.Draft) (Attachment, error) {
 		if _, ok := policies[d.PolicyRevisionID]; !ok {
 			return Attachment{}, access.Invalid("guardrails", "A staged policy is unavailable.")
 		}
