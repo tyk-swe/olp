@@ -81,7 +81,7 @@ func TestNamedVendorBContracts(t *testing.T) {
 								io.WriteString(w, decision.response)
 							})
 							config, _ := json.Marshal(ExternalConfig{Endpoint: endpoint, ContentEgress: true, CredentialRef: "secret", Parameters: json.RawMessage(tc.parameters)})
-							verdict, err := runner.Evaluate(t.Context(), Revision{ID: "revision", GuardrailID: "guard", Type: tc.kind, Configuration: config, TimeoutMS: 1000, OnError: FailClosed}, Evaluation{Phase: phase, Segments: []Segment{{ID: "segment", Text: text}}})
+							verdict, err := runner.Evaluate(t.Context(), Revision{ID: "revision", GuardrailID: "guard", Type: Kind(tc.kind), Configuration: config, TimeoutMS: 1000, OnError: FailClosed}, Evaluation{Phase: phase, Segments: []Segment{{ID: "segment", Text: text}}})
 							if decision.want == "" {
 								if err == nil {
 									t.Fatalf("invalid upstream response accepted: %+v", verdict)
@@ -145,7 +145,7 @@ func TestNamedVendorBReplacementContracts(t *testing.T) {
 						io.WriteString(w, response)
 					})
 					config, _ := json.Marshal(ExternalConfig{Endpoint: endpoint, ContentEgress: true, CredentialRef: "secret"})
-					verdict, err := runner.Evaluate(t.Context(), Revision{ID: "revision", GuardrailID: "guard", Type: tc.kind, Configuration: config, TimeoutMS: 1000, OnError: FailClosed}, Evaluation{Phase: phase, Segments: []Segment{{ID: "segment", Text: "pii é"}}})
+					verdict, err := runner.Evaluate(t.Context(), Revision{ID: "revision", GuardrailID: "guard", Type: Kind(tc.kind), Configuration: config, TimeoutMS: 1000, OnError: FailClosed}, Evaluation{Phase: phase, Segments: []Segment{{ID: "segment", Text: "pii é"}}})
 					if err != nil || len(verdict.Redactions) != 1 {
 						t.Fatalf("replacement = %+v, error = %v", verdict, err)
 					}
@@ -176,7 +176,7 @@ func TestNamedVendorBInvalidDecisions(t *testing.T) {
 		t.Run(tc.kind, func(t *testing.T) {
 			runner, endpoint := fakeRunner(t, func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, tc.response) })
 			config, _ := json.Marshal(ExternalConfig{Endpoint: endpoint, ContentEgress: true, CredentialRef: "secret", Parameters: json.RawMessage(tc.parameters)})
-			_, err := runner.Evaluate(t.Context(), Revision{ID: "revision", GuardrailID: "guard", Type: tc.kind, Configuration: config, TimeoutMS: 1000, OnError: FailClosed}, Evaluation{Phase: Input, Segments: []Segment{{ID: "segment", Text: "private"}}})
+			_, err := runner.Evaluate(t.Context(), Revision{ID: "revision", GuardrailID: "guard", Type: Kind(tc.kind), Configuration: config, TimeoutMS: 1000, OnError: FailClosed}, Evaluation{Phase: Input, Segments: []Segment{{ID: "segment", Text: "private"}}})
 			if err == nil {
 				t.Fatal("malformed native decision accepted")
 			}

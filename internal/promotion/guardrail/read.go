@@ -1,6 +1,7 @@
 package guardrail
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"crypto/sha256"
@@ -11,43 +12,27 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/agents/publications"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
+	"github.com/tyk-swe/olp/internal/routes"
 )
 
 type named struct{ id, name string }
-
-type revisionRow struct {
-	named
-	active bool
-}
-
-type draftRow struct {
-	slug, revision string
-	position       int
-}
-
-type legacyRow struct {
-	slug, project string
-	policy        json.RawMessage
-	overallMS     int64
-}
 
 type slot struct {
 	slug  string
 	order int
 }
 
-func readStored(ctx context.Context, q access.Queryer) (Section, error) {
-	active, err := promotion.Rows(ctx, q, func(row pgx.CollectableRow) (Guardrail, error) {
-		var g Guardrail
-		err := row.Scan(&g.Name, &g.Project, &g.Type, &g.Configuration, &g.TimeoutMS, &g.OnError)
-		return g, err
-	}, "SELECT g.name,COALESCE(p.name,''),g.type,v.configuration,v.timeout_ms,v.on_error FROM olp.guardrails g LEFT JOIN olp.projects p ON p.id=g.project_id JOIN olp.guardrail_revisions v ON v.id=g.active_revision_id WHERE g.retired_at IS NULL AND g.managed_route_revision_id IS NULL")
+type namer func(string) (string, error)
+
+func readStored(ctx context.Context, q access.Queryer, projectName namer) (Section, error) {
+	active, err := guardrails.ReadUnmanagedActiveRevisions(ctx, q)
 	if err != nil {
 		return Section{}, err
 	}
@@ -55,46 +40,41 @@ func readStored(ctx context.Context, q access.Queryer) (Section, error) {
 	if err != nil {
 		return Section{}, err
 	}
-	platform, err := readPlatform(ctx, q, registry)
+	platform, err := readPlatform(ctx, q, registry, projectName, active)
 	if err != nil {
 		return Section{}, err
 	}
-	definitions, err := promotion.TryMap(slices.Concat(active, platform.Guardrails), func(g Guardrail) (Guardrail, error) {
+	stored, err := promotion.TryMap(active, func(r guardrails.Revision) (Guardrail, error) { return fromRevision(projectName, r.Name, r) })
+	if err != nil {
+		return Section{}, err
+	}
+	definitions, err := promotion.TryMap(slices.Concat(stored, platform.Guardrails), func(g Guardrail) (Guardrail, error) {
 		configuration, err := rewriteCredentials(g.Type, g.Configuration, credentialName(ctx, q))
 		return Guardrail{Project: g.Project, Name: g.Name, Type: g.Type, Configuration: configuration, TimeoutMS: g.TimeoutMS, OnError: g.OnError}, err
 	})
 	return Section{Guardrails: definitions, Policies: platform.Policies, Attachments: platform.Attachments}, err
 }
 
-func readPlatform(ctx context.Context, q access.Queryer, registry *guardrails.Registry) (Section, error) {
+func fromRevision(projectName namer, name string, r guardrails.Revision) (Guardrail, error) {
+	owner, err := projectName(r.ProjectID)
+	return Guardrail{Project: owner, Name: name, Type: r.Type, Configuration: r.Configuration, TimeoutMS: r.TimeoutMS, OnError: r.OnError}, err
+}
+
+func readPlatform(ctx context.Context, q access.Queryer, registry *guardrails.Registry, projectName namer, activeRevisions []guardrails.Revision) (Section, error) {
 	if registry == nil {
 		return Section{}, nil
 	}
-	directory, err := project.ReadDirectory(ctx, q)
+	revisions, err := guardrails.ReadUnmanagedPolicyRevisions(ctx, q)
 	if err != nil {
 		return Section{}, err
 	}
-	projectName := projectNamer(directory)
-	definitionNames, err := promotion.Rows(ctx, q, scanNamed, "SELECT active_revision_id::text,name FROM olp.guardrails WHERE retired_at IS NULL AND managed_route_revision_id IS NULL AND active_revision_id IS NOT NULL")
-	if err != nil {
-		return Section{}, err
-	}
-	revisions, err := promotion.Rows(ctx, q, func(row pgx.CollectableRow) (revisionRow, error) {
-		var r revisionRow
-		err := row.Scan(&r.id, &r.name, &r.active)
-		return r, err
-	}, `SELECT v.id::text,p.name,(v.id=p.active_revision_id) FROM olp.guardrail_policies p JOIN olp.guardrail_policy_revisions v ON v.policy_id=p.id
- WHERE p.managed_route_revision_id IS NULL AND (v.id=p.active_revision_id OR v.id IN(SELECT policy_revision_id FROM olp.guardrail_attachments UNION SELECT policy_revision_id FROM olp.guardrail_draft_attachments))`)
-	if err != nil {
-		return Section{}, err
-	}
-	policyNames, err := promotion.TryMap(revisions, func(r revisionRow) (named, error) { return policyName(registry, r) })
+	policyNames, err := promotion.TryMap(revisions, func(r guardrails.NamedPolicyRevision) (named, error) { return policyName(registry, r) })
 	if err != nil {
 		return Section{}, err
 	}
 	policies := promotion.Associate(policyNames, func(n named) (string, string) { return n.id, n.name })
 	ids := slices.Sorted(maps.Keys(policies))
-	active := promotion.Associate(definitionNames, func(n named) (string, string) { return n.id, n.name })
+	active := promotion.Associate(activeRevisions, func(r guardrails.Revision) (string, string) { return r.ID, r.Name })
 	pinned := promotion.Associate(promotion.Filter(slices.Concat(promotion.Map(ids, func(id string) []string {
 		return promotion.Map(registry.Policies[id].Entries, func(e guardrails.Entry) string { return e.RevisionID })
 	})...), func(revision string) bool { _, ok := active[revision]; return !ok }), func(revision string) (string, string) {
@@ -116,9 +96,7 @@ func readPlatform(ctx context.Context, q access.Queryer, registry *guardrails.Re
 		return Section{}, err
 	}
 	definitions, err := promotion.TryMap(slices.Sorted(maps.Keys(pinned)), func(revision string) (Guardrail, error) {
-		d := registry.Definitions[revision]
-		owner, err := projectName(d.ProjectID)
-		return Guardrail{Project: owner, Name: pinned[revision], Type: d.Type, Configuration: d.Configuration, TimeoutMS: d.TimeoutMS, OnError: d.OnError}, err
+		return fromRevision(projectName, pinned[revision], registry.Definitions[revision])
 	})
 	if err != nil {
 		return Section{}, err
@@ -140,18 +118,20 @@ func readPlatform(ctx context.Context, q access.Queryer, registry *guardrails.Re
 	}, nil
 }
 
-func policyName(registry *guardrails.Registry, r revisionRow) (named, error) {
-	if r.active {
-		return r.named, nil
+func policyName(registry *guardrails.Registry, r guardrails.NamedPolicyRevision) (named, error) {
+	if r.Active {
+		return named{r.ID, r.Name}, nil
 	}
 	type portableRule struct {
-		Type                   string
-		Config                 json.RawMessage
-		Timeout                int64
-		OnError, Phase, Action string
-		Monitor, Mandatory     bool
+		Type          guardrails.Kind
+		Config        json.RawMessage
+		Timeout       int64
+		OnError       guardrails.OnError
+		Phase, Action string
+		Monitor       bool
+		Mandatory     bool
 	}
-	content, err := json.Marshal(promotion.Map(registry.Policies[r.id].Entries, func(e guardrails.Entry) portableRule {
+	content, err := json.Marshal(promotion.Map(registry.Policies[r.ID].Entries, func(e guardrails.Entry) portableRule {
 		d := registry.Definitions[e.RevisionID]
 		return portableRule{d.Type, d.Configuration, d.TimeoutMS, d.OnError, e.Phase, e.Action, e.Monitor, e.Mandatory}
 	}))
@@ -159,15 +139,15 @@ func policyName(registry *guardrails.Registry, r revisionRow) (named, error) {
 		return named{}, err
 	}
 	sum := sha256.Sum256(content)
-	return named{r.id, bounded(r.name + ".revision." + hex.EncodeToString(sum[:6]))}, nil
+	return named{r.ID, bounded(r.Name + ".revision." + hex.EncodeToString(sum[:6]))}, nil
 }
 
 func pinnedName(d guardrails.Revision) string {
-	sum := sha256.Sum256(slices.Concat([]byte(d.Type+d.OnError+strconv.FormatInt(d.TimeoutMS, 10)), d.Configuration))
+	sum := sha256.Sum256(slices.Concat([]byte(string(d.Type)+string(d.OnError)+strconv.FormatInt(d.TimeoutMS, 10)), d.Configuration))
 	return bounded(d.Name + ".revision." + hex.EncodeToString(sum[:6]))
 }
 
-func projectNamer(directory project.Directory) func(string) (string, error) {
+func projectNamer(directory project.Directory) namer {
 	return func(id string) (string, error) {
 		if id == "installation" {
 			return "", nil
@@ -180,7 +160,12 @@ func projectNamer(directory project.Directory) func(string) (string, error) {
 	}
 }
 
-func readAttachment(ctx context.Context, q access.Queryer, projectName func(string) (string, error), reference func(string) (PolicyRef, error), a guardrails.Attachment) (Attachment, error) {
+func readProjectNamer(ctx context.Context, q access.Queryer) (namer, error) {
+	directory, err := project.ReadDirectory(ctx, q)
+	return projectNamer(directory), err
+}
+
+func readAttachment(ctx context.Context, q access.Queryer, projectName namer, reference func(string) (PolicyRef, error), a guardrails.Attachment) (Attachment, error) {
 	policy, err := reference(a.PolicyRevisionID)
 	if err != nil {
 		return Attachment{}, err
@@ -196,47 +181,39 @@ func readAttachment(ctx context.Context, q access.Queryer, projectName func(stri
 	return Attachment{Scope: scope, Policy: policy, Order: a.Order}, nil
 }
 
-func scopeName(ctx context.Context, q access.Queryer, projectName func(string) (string, error), a guardrails.Attachment) (string, string, error) {
-	text := func(sql string) (string, string, error) {
-		name, err := scanText(q.QueryRow(ctx, sql, a.ScopeID))
-		return name, "", err
-	}
+func scopeName(ctx context.Context, q access.Queryer, projectName namer, a guardrails.Attachment) (string, string, error) {
+	unowned := func(name string, err error) (string, string, error) { return name, "", err }
 	switch contract.ConfigurationGuardrailAttachmentScope(a.Scope) {
 	case contract.ConfigurationGuardrailAttachmentScopeProject:
-		name, err := projectName(a.ScopeID)
-		return name, "", err
+		return unowned(projectName(a.ScopeID))
 	case contract.ConfigurationGuardrailAttachmentScopeOrganization:
-		return text("SELECT name FROM olp.organizations WHERE id=$1")
+		return unowned(projects.OrganizationName(ctx, q, a.ScopeID))
 	case contract.ConfigurationGuardrailAttachmentScopeRoute:
-		return text("SELECT slug FROM olp.routes WHERE id=$1")
+		return unowned(routes.RouteSlug(ctx, q, a.ScopeID))
 	case contract.ConfigurationGuardrailAttachmentScopeToolset:
-		return text("SELECT name FROM olp.agent_publications WHERE id=$1 AND kind='toolset'")
+		return unowned(publications.ToolsetName(ctx, q, a.ScopeID))
 	case contract.ConfigurationGuardrailAttachmentScopeApiKey:
-		var name, ownerID string
-		if err := q.QueryRow(ctx, "SELECT name,COALESCE(project_id::text,'installation') FROM olp.api_keys WHERE id=$1", a.ScopeID).Scan(&name, &ownerID); err != nil {
+		key, err := access.APIKeyName(ctx, q, a.ScopeID)
+		if err != nil {
 			return "", "", err
 		}
-		owner, err := projectName(ownerID)
-		return name, owner, err
+		owner, err := projectName(key.ProjectID)
+		return key.Name, owner, err
 	}
 	return "", "", nil
 }
 
 func readDrafts(ctx context.Context, q access.Queryer, policies map[string]string, reference func(string) (PolicyRef, error)) (map[slot]Attachment, error) {
-	drafts, err := promotion.Rows(ctx, q, func(row pgx.CollectableRow) (draftRow, error) {
-		var d draftRow
-		err := row.Scan(&d.slug, &d.revision, &d.position)
-		return d, err
-	}, "SELECT d.slug,a.policy_revision_id::text,a.position FROM olp.guardrail_draft_attachments a JOIN olp.route_drafts d ON d.id=a.draft_id ORDER BY d.updated_at,a.position")
+	drafts, err := guardrails.ReadDraftAttachments(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	staged, err := promotion.TryMap(drafts, func(d draftRow) (Attachment, error) {
-		if _, ok := policies[d.revision]; !ok {
+	staged, err := promotion.TryMap(drafts, func(d guardrails.DraftAttachment) (Attachment, error) {
+		if _, ok := policies[d.PolicyRevisionID]; !ok {
 			return Attachment{}, access.Invalid("guardrails", "A staged policy is unavailable.")
 		}
-		policy, err := reference(d.revision)
-		return Attachment{Scope: Route{d.slug}, Policy: policy, Order: d.position}, err
+		policy, err := reference(d.PolicyRevisionID)
+		return Attachment{Scope: Route{d.Slug}, Policy: policy, Order: d.Position}, err
 	})
 	return promotion.Associate(staged, func(a Attachment) (slot, Attachment) { return routeSlot(a), a }), err
 }
@@ -249,17 +226,17 @@ func routeSlot(a Attachment) slot {
 	return slot{route.Slug, a.Order}
 }
 
-func readLegacyRoutes(ctx context.Context, q access.Queryer) ([]Section, error) {
-	routes, err := promotion.Rows(ctx, q, func(row pgx.CollectableRow) (legacyRow, error) {
-		var r legacyRow
-		err := row.Scan(&r.slug, &r.project, &r.policy, &r.overallMS)
-		return r, err
-	}, "SELECT r.slug,COALESCE(pr.name,''),v.content_policy,v.overall_timeout_ms FROM olp.routes r JOIN olp.route_revisions v ON v.id=r.latest_revision_id LEFT JOIN olp.projects pr ON pr.id=r.project_id WHERE v.content_policy IS NOT NULL AND v.content_policy<>'null'::jsonb ORDER BY r.slug")
+func readLegacyRoutes(ctx context.Context, q access.Queryer, projectName namer) ([]Section, error) {
+	published, err := routes.ReadPublishedRoutes(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	return promotion.TryMap(routes, func(r legacyRow) (Section, error) {
-		c, err := legacyRoute(r.slug, r.project, r.policy, r.overallMS)
+	return promotion.TryMap(promotion.Filter(published, carriesContentPolicy), func(r routes.PublishedRoute) (Section, error) {
+		owner, err := projectName(installationOr(r.ProjectID))
+		if err != nil {
+			return Section{}, err
+		}
+		c, err := legacyRoute(r.Slug, owner, r.ContentPolicy, int64(r.OverallTimeoutMS))
 		if err != nil {
 			return Section{}, err
 		}
@@ -267,8 +244,6 @@ func readLegacyRoutes(ctx context.Context, q access.Queryer) ([]Section, error) 
 	})
 }
 
-func scanNamed(row pgx.CollectableRow) (named, error) {
-	var n named
-	err := row.Scan(&n.id, &n.name)
-	return n, err
+func carriesContentPolicy(r routes.PublishedRoute) bool {
+	return len(r.ContentPolicy) > 0 && !bytes.Equal(r.ContentPolicy, []byte("null"))
 }

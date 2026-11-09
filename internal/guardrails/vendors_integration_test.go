@@ -8,8 +8,8 @@ import (
 )
 
 func TestVendorTransformationRequiresEveryFlaggedSegment(t *testing.T) {
-	for _, failurePolicy := range []string{FailClosed, FailOpen} {
-		t.Run(failurePolicy, func(t *testing.T) {
+	for _, failurePolicy := range []OnError{FailClosed, FailOpen} {
+		t.Run(string(failurePolicy), func(t *testing.T) {
 			runner, endpoint := fakeRunner(t, func(w http.ResponseWriter, r *http.Request) {
 				var request struct {
 					Texts []string `json:"texts"`
@@ -46,8 +46,8 @@ func TestVendorTransformationRequiresEveryFlaggedSegment(t *testing.T) {
 func TestVendorInterventionWithoutReplacement(t *testing.T) {
 	for _, kind := range []string{"generic_guardrail_api", "deepkeep", "qostodian_nexus", "noma_v2", "straiker", "ovalix"} {
 		for _, action := range []string{Block, Redact} {
-			for _, policy := range []string{FailClosed, FailOpen} {
-				t.Run(kind+"/"+action+"/"+policy, func(t *testing.T) {
+			for _, policy := range []OnError{FailClosed, FailOpen} {
+				t.Run(kind+"/"+action+"/"+string(policy), func(t *testing.T) {
 					runner, endpoint := fakeRunner(t, func(w http.ResponseWriter, _ *http.Request) {
 						if kind == "ovalix" {
 							io.WriteString(w, `{"action_type":"anonymize","modified_data":{"content":"unchanged"}}`)
@@ -62,7 +62,7 @@ func TestVendorInterventionWithoutReplacement(t *testing.T) {
 						parameters = json.RawMessage(`{"application_id":"app","checkpoint_id":"checkpoint","actor":"caller"}`)
 					}
 					config, _ := json.Marshal(ExternalConfig{Endpoint: endpoint, ContentEgress: true, CredentialRef: "credential", Parameters: parameters})
-					definition := Revision{ID: "revision", GuardrailID: "guard", Type: kind, Configuration: config, TimeoutMS: 1000, OnError: policy}
+					definition := Revision{ID: "revision", GuardrailID: "guard", Type: Kind(kind), Configuration: config, TimeoutMS: 1000, OnError: policy}
 					engine, err := Compile([]Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: Input, Action: action}}, map[string]Revision{"revision": definition}, runner)
 					if err != nil {
 						t.Fatal(err)
@@ -79,8 +79,8 @@ func TestVendorInterventionWithoutReplacement(t *testing.T) {
 
 func TestConductIdentityFailuresRemainPolicyBlocks(t *testing.T) {
 	for _, reply := range []string{"error", "structured", "unavailable"} {
-		for _, policy := range []string{FailOpen, FailClosed} {
-			t.Run(reply+"/"+policy, func(t *testing.T) {
+		for _, policy := range []OnError{FailOpen, FailClosed} {
+			t.Run(reply+"/"+string(policy), func(t *testing.T) {
 				runner, endpoint := fakeRunner(t, func(w http.ResponseWriter, r *http.Request) {
 					var request map[string]any
 					_ = json.NewDecoder(r.Body).Decode(&request)
@@ -126,8 +126,8 @@ func TestLassoTransformationRequiresEveryFinding(t *testing.T) {
 		{"block_other_category", `{"pii":[{"action":"AUTO_MASKING"}],"jailbreak":[{"action":"BLOCK"}]}`, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			for _, policy := range []string{FailClosed, FailOpen} {
-				t.Run(policy, func(t *testing.T) {
+			for _, policy := range []OnError{FailClosed, FailOpen} {
+				t.Run(string(policy), func(t *testing.T) {
 					runner, endpoint := fakeRunner(t, func(w http.ResponseWriter, _ *http.Request) {
 						io.WriteString(w, `{"violations_detected":true,"findings":`+tc.findings+`,"messages":[{"content":"masked"}]}`)
 					})
@@ -173,7 +173,7 @@ func TestNamedVendorPolicyCompilation(t *testing.T) {
 			if tc.kind == "builtin.tool_permission" {
 				config = json.RawMessage(`{}`)
 			}
-			definition := Revision{ID: "revision", GuardrailID: "guard", Type: tc.kind, Configuration: config, TimeoutMS: 1000, OnError: FailClosed}
+			definition := Revision{ID: "revision", GuardrailID: "guard", Type: Kind(tc.kind), Configuration: config, TimeoutMS: 1000, OnError: FailClosed}
 			_, err := Compile([]Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: tc.phase, Action: tc.action, Monitor: tc.monitor}}, map[string]Revision{"revision": definition}, nil)
 			if (err == nil) != tc.valid {
 				t.Fatalf("valid=%t error=%v", tc.valid, err)

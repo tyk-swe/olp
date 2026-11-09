@@ -677,7 +677,7 @@ func (m *Manager) install(ctx context.Context, id string, sequence int64, digest
 					pinned[c.PluginVersion] = true
 				}
 			}
-			if !strings.HasPrefix(definition.Type, "builtin.") {
+			if !definition.Type.Builtin() {
 				var config guardrails.ExternalConfig
 				if err := json.Unmarshal(definition.Configuration, &config); err != nil {
 					return nil, errors.New("invalid guardrail configuration")

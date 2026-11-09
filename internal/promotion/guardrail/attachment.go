@@ -2,15 +2,19 @@ package guardrail
 
 import (
 	"context"
+	"net/http"
 	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/agents/publications"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
+	"github.com/tyk-swe/olp/internal/routes"
 )
 
 type Scope interface{ scope() }
@@ -169,8 +173,8 @@ func applyAttachment(ctx context.Context, tx pgx.Tx, p access.Principal, directo
 	if err != nil {
 		return err
 	}
-	var revision string
-	if err := tx.QueryRow(ctx, "SELECT active_revision_id::text FROM olp.guardrail_policies WHERE project_id IS NOT DISTINCT FROM $1::uuid AND lower(name)=lower($2) AND retired_at IS NULL", project, a.Policy.Name).Scan(&revision); err != nil {
+	revision, err := guardrails.ActivePolicyRevisionID(ctx, tx, project, a.Policy.Name)
+	if err != nil {
 		return err
 	}
 	target, err := resolveScope(ctx, tx, p, directory, a.Scope, project)
@@ -201,20 +205,26 @@ func resolveScope(ctx context.Context, tx pgx.Tx, p access.Principal, directory 
 		}
 		return published{}, nil
 	case Organization:
-		var id string
-		if err := tx.QueryRow(ctx, "SELECT id::text FROM olp.organizations WHERE lower(name)=lower($1)", s.Name).Scan(&id); err != nil {
+		id, found, err := projects.OrganizationIDByName(ctx, tx, s.Name)
+		if err != nil {
 			return nil, err
+		}
+		if !found {
+			return nil, access.Fail(http.StatusConflict, "organization_unknown", "Organization "+s.Name+" is not in the destination.")
 		}
 		return published{&id}, p.Organization(id, access.Change)
 	case Project:
 		id, err := projectID(directory, s.Name)
 		return published{id}, err
 	case Toolset:
-		id, err := optional(ctx, tx, scanText, "SELECT id::text FROM olp.agent_publications WHERE project_id IS NOT DISTINCT FROM $1::uuid AND kind='toolset' AND lower(name)=lower($2) AND NOT retired", project, s.Name)
-		if err == nil && id == nil {
+		id, found, err := publications.FindLiveToolsetID(ctx, tx, project, s.Name)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
 			return nil, access.Invalid("guardrail_attachments", "Toolset and policy must belong to the same project.")
 		}
-		return published{id}, err
+		return published{&id}, nil
 	case Route:
 		return resolveRoute(ctx, tx, s.Slug, project)
 	case APIKey:
@@ -224,22 +234,21 @@ func resolveScope(ctx context.Context, tx pgx.Tx, p access.Principal, directory 
 }
 
 func resolveRoute(ctx context.Context, tx pgx.Tx, slug string, project *string) (destination, error) {
-	staged, err := optional(ctx, tx, scanText, "SELECT id::text FROM olp.route_drafts WHERE slug=$1 AND project_id IS NOT DISTINCT FROM $2::uuid ORDER BY updated_at DESC LIMIT 1", slug, project)
+	staged, found, err := routes.FindLatestDraftID(ctx, tx, slug, project)
 	if err != nil {
 		return nil, err
 	}
-	if staged != nil {
-		return draft{*staged}, nil
+	if found {
+		return draft{staged}, nil
 	}
-	var id string
-	var owner *string
-	if err := tx.QueryRow(ctx, "SELECT id::text,project_id::text FROM olp.routes WHERE slug=$1", slug).Scan(&id, &owner); err != nil {
+	route, err := routes.RouteBySlug(ctx, tx, slug)
+	if err != nil {
 		return nil, err
 	}
-	if !sameProject(owner, project) {
+	if !sameProject(route.ProjectID, project) {
 		return nil, access.Invalid("guardrail_attachments", "Route and policy must belong to the same project.")
 	}
-	return published{&id}, nil
+	return published{&route.RouteID}, nil
 }
 
 func resolveKey(ctx context.Context, tx pgx.Tx, directory project.Directory, key APIKey, project *string) (destination, error) {
@@ -247,11 +256,7 @@ func resolveKey(ctx context.Context, tx pgx.Tx, directory project.Directory, key
 	if err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(ctx, "SELECT id::text FROM olp.api_keys WHERE project_id IS NOT DISTINCT FROM $1::uuid AND name=$2 AND revoked_at IS NULL", owner, key.Name)
-	if err != nil {
-		return nil, err
-	}
-	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	ids, err := access.ReadLiveAPIKeyIDs(ctx, tx, owner, key.Name)
 	if err != nil {
 		return nil, err
 	}

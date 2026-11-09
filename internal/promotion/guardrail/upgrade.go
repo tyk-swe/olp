@@ -81,7 +81,7 @@ func upgradeRoute(route contract.ConfigurationRouteEntry) (converted, error) {
 	if err != nil {
 		return converted{}, access.Invalid("content_policy", "Invalid legacy content policy.")
 	}
-	project, _ := promotion.Present(route.Project)
+	project := route.Project.GetOrEmpty()
 	return legacyRoute(route.Slug, project, raw, int64(route.OverallTimeoutMs))
 }
 

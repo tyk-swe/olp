@@ -10,8 +10,8 @@ import (
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
-func captureDetectorEligible(kind string) bool {
-	return slices.Contains([]string{"builtin.regex", "builtin.pii", "builtin.secrets", "builtin.keywords"}, kind)
+func captureDetectorEligible(kind guardrails.Kind) bool {
+	return slices.Contains([]guardrails.Kind{"builtin.regex", "builtin.pii", "builtin.secrets", "builtin.keywords"}, kind)
 }
 
 // Publication is explicit: creation or a PATCH containing redact, even if the

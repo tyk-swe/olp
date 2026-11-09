@@ -3,7 +3,6 @@ package guardrail
 import (
 	"context"
 	"encoding/json"
-	"errors"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
@@ -39,8 +38,8 @@ func CredentialApplier(desired Section, bindings promotion.Bindings, vault Vault
 }
 
 func ensureCredential(ctx context.Context, tx pgx.Tx, p access.Principal, vault Vault, binding promotion.Credential, project *string, ref promotion.Ref) error {
-	existing, err := optional(ctx, tx, scanText, "SELECT id::text FROM olp.guardrail_credentials WHERE project_id IS NOT DISTINCT FROM $1::uuid AND name=$2", project, string(ref))
-	if err != nil || existing != nil {
+	_, found, err := guardrails.FindCredentialID(ctx, tx, project, string(ref))
+	if err != nil || found {
 		return err
 	}
 	sealed, ok := binding.(promotion.Sealed)
@@ -55,9 +54,8 @@ type resolver func(string) (string, error)
 
 func credentialID(ctx context.Context, q access.Queryer, project *string) resolver {
 	return func(name string) (string, error) {
-		var id string
-		err := q.QueryRow(ctx, "SELECT id::text FROM olp.guardrail_credentials WHERE project_id IS NOT DISTINCT FROM $1::uuid AND name=$2", project, name).Scan(&id)
-		if errors.Is(err, pgx.ErrNoRows) {
+		id, found, err := guardrails.FindCredentialID(ctx, q, project, name)
+		if err == nil && !found {
 			return "", access.Invalid("secret_bindings", unboundCredential)
 		}
 		return id, err
@@ -65,11 +63,7 @@ func credentialID(ctx context.Context, q access.Queryer, project *string) resolv
 }
 
 func credentialName(ctx context.Context, q access.Queryer) resolver {
-	return func(id string) (string, error) {
-		var name string
-		err := q.QueryRow(ctx, "SELECT name FROM olp.guardrail_credentials WHERE id=$1", id).Scan(&name)
-		return name, err
-	}
+	return func(id string) (string, error) { return guardrails.CredentialName(ctx, q, id) }
 }
 
 type network struct {
@@ -77,8 +71,8 @@ type network struct {
 	CredentialID string `json:"credential_id,omitempty"`
 }
 
-func rewriteCredentials(kind string, configuration json.RawMessage, resolve resolver) (json.RawMessage, error) {
-	if builtin(kind) {
+func rewriteCredentials(kind guardrails.Kind, configuration json.RawMessage, resolve resolver) (json.RawMessage, error) {
+	if kind.Builtin() {
 		return configuration, nil
 	}
 	var c guardrails.ExternalConfig
@@ -116,10 +110,4 @@ func resolved(value string, resolve resolver) (string, error) {
 		return "", nil
 	}
 	return resolve(value)
-}
-
-func scanText(row pgx.Row) (string, error) {
-	var text string
-	err := row.Scan(&text)
-	return text, err
 }

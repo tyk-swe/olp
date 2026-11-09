@@ -20,11 +20,11 @@ import (
 var captureRatioPattern = regexp.MustCompile(`^(0(\.[0-9]{1,9})?|1(\.0{1,9})?)$`)
 
 type CaptureRedactor struct {
-	Name        string `json:"name"`
-	GuardrailID string `json:"guardrail_id"`
-	RevisionID  string `json:"revision_id"`
-	Revision    int64  `json:"revision"`
-	Type        string `json:"type"`
+	Name        string          `json:"name"`
+	GuardrailID string          `json:"guardrail_id"`
+	RevisionID  string          `json:"revision_id"`
+	Revision    int64           `json:"revision"`
+	Type        guardrails.Kind `json:"type"`
 }
 
 type CapturePolicy struct {

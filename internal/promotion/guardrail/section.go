@@ -3,12 +3,10 @@ package guardrail
 import (
 	"cmp"
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -74,7 +72,11 @@ func Planner(desired Section, names promotion.Names) promotion.Planner {
 			if len(desired.Policies) == 0 && len(desired.Attachments) == 0 {
 				return definitions, nil
 			}
-			current, err := readStored(ctx, q)
+			projectName, err := readProjectNamer(ctx, q)
+			if err != nil {
+				return nil, err
+			}
+			current, err := readStored(ctx, q, projectName)
 			if err != nil {
 				return nil, err
 			}
@@ -85,11 +87,15 @@ func Planner(desired Section, names promotion.Names) promotion.Planner {
 }
 
 func Read(ctx context.Context, q access.Queryer) (Section, error) {
-	stored, err := readStored(ctx, q)
+	projectName, err := readProjectNamer(ctx, q)
 	if err != nil {
 		return Section{}, err
 	}
-	legacy, err := readLegacyRoutes(ctx, q)
+	stored, err := readStored(ctx, q, projectName)
+	if err != nil {
+		return Section{}, err
+	}
+	legacy, err := readLegacyRoutes(ctx, q, projectName)
 	if err != nil {
 		return Section{}, err
 	}
@@ -97,14 +103,14 @@ func Read(ctx context.Context, q access.Queryer) (Section, error) {
 }
 
 func Render(section Section) (Fragment, error) {
-	definitions, err := promotion.TryMap(sorted(section.Guardrails, func(g Guardrail) []string {
-		return []string{strings.ToLower(g.Project), strings.ToLower(g.Name), g.Project, g.Name}
+	definitions, err := promotion.TryMap(slices.SortedStableFunc(slices.Values(section.Guardrails), func(a, b Guardrail) int {
+		return compareOwned(a.Project, a.Name, b.Project, b.Name)
 	}), renderGuardrail)
 	if err != nil {
 		return Fragment{}, err
 	}
-	policies := sorted(section.Policies, func(p Policy) []string {
-		return []string{strings.ToLower(p.Project), strings.ToLower(p.Name), p.Project, p.Name}
+	policies := slices.SortedStableFunc(slices.Values(section.Policies), func(a, b Policy) int {
+		return compareOwned(a.Project, a.Name, b.Project, b.Name)
 	})
 	attachments := slices.SortedFunc(slices.Values(section.Attachments), compareAttachments)
 	return Fragment{
@@ -140,19 +146,13 @@ func installationOr(id *string) string {
 	return *id
 }
 
-func optional[T any](ctx context.Context, q access.Queryer, scan func(pgx.Row) (T, error), sql string, args ...any) (*T, error) {
-	value, err := scan(q.QueryRow(ctx, sql, args...))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &value, nil
-}
-
-func sorted[A any](values []A, key func(A) []string) []A {
-	return slices.SortedStableFunc(slices.Values(values), func(a, b A) int { return slices.Compare(key(a), key(b)) })
+func compareOwned(aProject, aName, bProject, bName string) int {
+	return cmp.Or(
+		cmp.Compare(strings.ToLower(aProject), strings.ToLower(bProject)),
+		cmp.Compare(strings.ToLower(aName), strings.ToLower(bName)),
+		cmp.Compare(aProject, bProject),
+		cmp.Compare(aName, bName),
+	)
 }
 
 func compareAttachments(a, b Attachment) int {

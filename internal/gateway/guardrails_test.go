@@ -22,7 +22,7 @@ func installTestGuardrail(t *testing.T, h *harness, phase, action, kind, configu
 	current := h.rt.release
 	snapshot := current.Snapshot().Clone()
 	route := snapshot.Routes[routeSlug]
-	snapshot.Guardrails = &guardrails.Registry{Definitions: map[string]guardrails.Revision{"revision": {ID: "revision", GuardrailID: "guard", ProjectID: "installation", Name: "Guard", Type: kind, Configuration: json.RawMessage(configuration), TimeoutMS: 1000, OnError: guardrails.FailClosed}}, Policies: map[string]guardrails.PolicyRevision{"policy-revision": {ID: "policy-revision", PolicyID: "policy", ProjectID: "installation", Entries: []guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: phase, Action: action}}}}, Attachments: []guardrails.Attachment{{ID: "attachment", Scope: "route", ScopeID: route.ID, PolicyRevisionID: "policy-revision"}}}
+	snapshot.Guardrails = &guardrails.Registry{Definitions: map[string]guardrails.Revision{"revision": {ID: "revision", GuardrailID: "guard", ProjectID: "installation", Name: "Guard", Type: guardrails.Kind(kind), Configuration: json.RawMessage(configuration), TimeoutMS: 1000, OnError: guardrails.FailClosed}}, Policies: map[string]guardrails.PolicyRevision{"policy-revision": {ID: "policy-revision", PolicyID: "policy", ProjectID: "installation", Entries: []guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: phase, Action: action}}}}, Attachments: []guardrails.Attachment{{ID: "attachment", Scope: "route", ScopeID: route.ID, PolicyRevisionID: "policy-revision"}}}
 	credentials := map[string][]byte{}
 	for _, provider := range snapshot.Providers {
 		for _, slot := range provider.Slots {

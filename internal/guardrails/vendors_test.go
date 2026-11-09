@@ -51,7 +51,7 @@ func TestCoreVendorContracts(t *testing.T) {
 				_, _ = io.WriteString(w, tc.response)
 			})
 			config, _ := json.Marshal(ExternalConfig{Endpoint: endpoint, ContentEgress: true, CredentialRef: "credential"})
-			d := Revision{ID: tc.name, GuardrailID: "g", Type: tc.kind, Configuration: config, TimeoutMS: 1000, OnError: FailClosed}
+			d := Revision{ID: tc.name, GuardrailID: "g", Type: Kind(tc.kind), Configuration: config, TimeoutMS: 1000, OnError: FailClosed}
 			v, err := runner.Evaluate(t.Context(), d, Evaluation{Phase: tc.phase, Segments: []Segment{{ID: "s", Text: "éabc"}}})
 			if tc.action == "error" {
 				if !errors.Is(err, errEvaluation) {
@@ -78,8 +78,8 @@ func TestNamedVendorFailurePoliciesAndCircuitIsolation(t *testing.T) {
 		_, _ = io.WriteString(w, `{"content":"sensitive","results":[{}]}`)
 	})
 	config, _ := json.Marshal(ExternalConfig{Endpoint: endpoint, ContentEgress: true, CredentialRef: "credential"})
-	for _, policy := range []string{FailOpen, FailClosed} {
-		d := Revision{ID: policy, GuardrailID: "g", Type: "openai_moderation", Configuration: config, TimeoutMS: 1000, OnError: policy}
+	for _, policy := range []OnError{FailOpen, FailClosed} {
+		d := Revision{ID: string(policy), GuardrailID: "g", Type: "openai_moderation", Configuration: config, TimeoutMS: 1000, OnError: policy}
 		engine, err := Compile([]Entry{{GuardrailID: "g", RevisionID: d.ID, Phase: Input, Action: Block}}, map[string]Revision{d.ID: d}, runner)
 		if err != nil {
 			t.Fatal(err)
@@ -107,11 +107,11 @@ func TestNamedVendorNullDecisions(t *testing.T) {
 		{"microsoft_purview", `{"application_id":"app","application_name":"OLP"}`, `{"policyActions":[{"action":"restrictAccess","restrictionAction":null}]}`},
 	} {
 		t.Run(tc.kind, func(t *testing.T) {
-			for _, policy := range []string{FailOpen, FailClosed} {
-				t.Run(policy, func(t *testing.T) {
+			for _, policy := range []OnError{FailOpen, FailClosed} {
+				t.Run(string(policy), func(t *testing.T) {
 					runner, endpoint := fakeRunner(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, tc.response) })
 					config, _ := json.Marshal(ExternalConfig{Endpoint: endpoint, ContentEgress: true, CredentialRef: "credential", Parameters: json.RawMessage(tc.parameters)})
-					d := Revision{ID: "revision", GuardrailID: "guard", Type: tc.kind, Configuration: config, TimeoutMS: 1000, OnError: policy}
+					d := Revision{ID: "revision", GuardrailID: "guard", Type: Kind(tc.kind), Configuration: config, TimeoutMS: 1000, OnError: policy}
 					engine, err := Compile([]Entry{{GuardrailID: d.GuardrailID, RevisionID: d.ID, Phase: Input, Action: Block}}, map[string]Revision{d.ID: d}, runner)
 					if err != nil {
 						t.Fatal(err)
@@ -159,7 +159,7 @@ func TestModelGuardrailAliases(t *testing.T) {
 				calls++
 				return vendorBoolean(true, "policy.test"), nil
 			})}
-			engine := testEngine(t, tc.kind, tc.config, Input, Block, false, runner)
+			engine := testEngine(t, Kind(tc.kind), tc.config, Input, Block, false, runner)
 			evaluation := Evaluation{Phase: Input, Segments: []Segment{{ID: "s", Text: "text"}}, InternalModel: true}
 			result, err := engine.Evaluate(t.Context(), evaluation, nil)
 			if err != nil || calls != 0 || len(result.Decisions) != 1 || result.Decisions[0].Outcome != "skipped" {

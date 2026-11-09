@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
 )
@@ -27,10 +28,10 @@ const (
 type Guardrail struct {
 	Project       string
 	Name          string
-	Type          string
+	Type          guardrails.Kind
 	Configuration json.RawMessage
 	TimeoutMS     int64
-	OnError       string
+	OnError       guardrails.OnError
 	credentials   []reference
 }
 
@@ -38,8 +39,6 @@ type reference struct {
 	ref     promotion.Ref
 	network bool
 }
-
-func builtin(kind string) bool { return strings.HasPrefix(kind, "builtin.") }
 
 func parseGuardrails(entries []contract.ConfigurationGuardrail) ([]Guardrail, error) {
 	if len(entries) > 1000 {
@@ -67,10 +66,10 @@ func parseGuardrail(entry contract.ConfigurationGuardrail) (Guardrail, error) {
 	parsed, err := withCredentials(Guardrail{
 		Project:       project,
 		Name:          name,
-		Type:          string(entry.Type),
+		Type:          guardrails.Kind(entry.Type),
 		Configuration: configuration,
 		TimeoutMS:     cmp.Or(promotion.ValueOf(entry.TimeoutMs), 1000),
-		OnError:       cmp.Or(string(promotion.ValueOf(entry.OnError)), guardrails.FailClosed),
+		OnError:       cmp.Or(guardrails.OnError(promotion.ValueOf(entry.OnError)), guardrails.FailClosed),
 	})
 	if err != nil || guardrails.ValidateDefinition(guardrails.Revision{Type: parsed.Type, Configuration: configuration, TimeoutMS: parsed.TimeoutMS, OnError: parsed.OnError}) != nil {
 		return Guardrail{}, access.Invalid("guardrails", invalidConfiguration)
@@ -79,7 +78,7 @@ func parseGuardrail(entry contract.ConfigurationGuardrail) (Guardrail, error) {
 }
 
 func withCredentials(g Guardrail) (Guardrail, error) {
-	if builtin(g.Type) {
+	if g.Type.Builtin() {
 		return g, nil
 	}
 	var c guardrails.ExternalConfig
@@ -146,32 +145,23 @@ func planGuardrails(ctx context.Context, q access.Queryer, desired []Guardrail, 
 	return slices.Concat(planned...), err
 }
 
-type plugin struct {
-	name                       string
-	approved, confined, usable bool
-}
-
 func planPlugin(ctx context.Context, q access.Queryer, g Guardrail) ([]promotion.Item, error) {
-	if g.Type != string(contract.ConfigurationGuardrailTypePlugin) {
+	if g.Type != guardrails.Kind(contract.ConfigurationGuardrailTypePlugin) {
 		return nil, nil
 	}
 	var c guardrails.ExternalConfig
 	if err := json.Unmarshal(g.Configuration, &c); err != nil {
 		return nil, err
 	}
-	installed, err := optional(ctx, q, func(row pgx.Row) (plugin, error) {
-		var p plugin
-		err := row.Scan(&p.name, &p.approved, &p.confined, &p.usable)
-		return p, err
-	}, "SELECT manifest->>'name',approved_at IS NOT NULL,module IS NOT NULL,COALESCE((manifest->>'guardrail')::boolean,false) FROM olp.plugins WHERE digest=$1", c.PluginVersion)
+	installed, err := plugins.FindGuardrailBuild(ctx, q, c.PluginVersion)
 	switch {
 	case err != nil:
 		return nil, err
 	case installed == nil:
 		return []promotion.Item{promotion.Blocker(contract.ConfigurationPlanItemKindPlugin, c.PluginVersion, "plugin_not_installed")}, nil
-	case !installed.approved:
+	case !installed.Approved:
 		return []promotion.Item{promotion.Blocker(contract.ConfigurationPlanItemKindPlugin, c.PluginVersion, "plugin_not_approved")}, nil
-	case !installed.confined || !installed.usable || installed.name != c.PluginID:
+	case !installed.Confined || !installed.Guardrail || installed.Name != c.PluginID:
 		return []promotion.Item{promotion.Conflict(contract.ConfigurationPlanItemKindPlugin, c.PluginVersion, "A matching confined guardrail plugin is required.")}, nil
 	}
 	return nil, nil

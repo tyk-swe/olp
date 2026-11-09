@@ -3,6 +3,7 @@ package guardrail
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -93,13 +94,12 @@ func compilePolicy(p Policy, duplicate bool, definitions map[portable]Guardrail)
 
 func checkRoutes(document contract.ConfigurationDocument, policies catalog, attachments []Attachment) error {
 	organizations := promotion.Associate(document.Projects, func(p contract.ConfigurationProjectEntry) (string, string) {
-		organization, _ := promotion.Present(p.Organization)
-		return strings.ToLower(p.Name), organization
+		return strings.ToLower(p.Name), p.Organization.GetOrEmpty()
 	})
 	return promotion.Every(attachments, func(a Attachment) error {
 		engine := policies.engines[keyOf(a.Policy.Project, a.Policy.Name)]
 		return promotion.Every(document.Routes, func(route contract.ConfigurationRouteEntry) error {
-			project, _ := promotion.Present(route.Project)
+			project := route.Project.GetOrEmpty()
 			if !applies(a, route.Slug, project, organizations[strings.ToLower(project)]) {
 				return nil
 			}
@@ -195,11 +195,6 @@ func redefined(before, after map[portable]Guardrail, key portable) bool {
 	return !ok || old.Type != next.Type || !equal(old, next)
 }
 
-type storedPolicy struct {
-	revision guardrails.PolicyRevision
-	active   *string
-}
-
 func applyPolicy(ctx context.Context, tx pgx.Tx, p access.Principal, directory project.Directory, policy Policy) error {
 	project, err := projectID(directory, policy.Project)
 	if err != nil {
@@ -212,19 +207,15 @@ func applyPolicy(ctx context.Context, tx pgx.Tx, p access.Principal, directory p
 	if err != nil {
 		return err
 	}
-	current, err := optional(ctx, tx, func(row pgx.Row) (storedPolicy, error) {
-		var s storedPolicy
-		err := row.Scan(&s.revision.PolicyID, &s.revision.ID, &s.revision.Name, &s.revision.Revision, &s.revision.Entries, &s.active)
-		return s, err
-	}, "SELECT p.id::text,v.id::text,p.name,v.revision,v.entries,p.active_revision_id::text FROM olp.guardrail_policies p JOIN olp.guardrail_policy_revisions v ON v.id=p.latest_revision_id WHERE p.project_id IS NOT DISTINCT FROM $1::uuid AND lower(p.name)=lower($2) AND p.retired_at IS NULL", project, policy.Name)
+	current, err := guardrails.FindLatestPolicy(ctx, tx, project, policy.Name)
 	if err != nil {
 		return err
 	}
-	if current != nil && slices.Equal(current.revision.Entries, entries) {
-		if current.active != nil && *current.active == current.revision.ID {
+	if current != nil && slices.Equal(current.Revision.Entries, entries) {
+		if current.ActiveRevisionID != nil && *current.ActiveRevisionID == current.Revision.ID {
 			return nil
 		}
-		return guardrails.ActivatePolicy(ctx, tx, p.UserID(), current.revision.PolicyID, current.revision.ID)
+		return guardrails.ActivatePolicy(ctx, tx, p.UserID(), current.Revision.PolicyID, current.Revision.ID)
 	}
 	saved, err := guardrails.SavePolicy(ctx, tx, p.UserID(), latest(current), guardrails.PolicyRevision{ProjectID: installationOr(project), Name: retainedName(current, policy.Name), Entries: entries})
 	if err != nil {
@@ -234,21 +225,26 @@ func applyPolicy(ctx context.Context, tx pgx.Tx, p access.Principal, directory p
 }
 
 func pin(ctx context.Context, q access.Queryer, project *string, e Entry) (guardrails.Entry, error) {
-	var id, revision string
-	err := q.QueryRow(ctx, "SELECT id::text,active_revision_id::text FROM olp.guardrails WHERE project_id IS NOT DISTINCT FROM $1::uuid AND lower(name)=lower($2) AND retired_at IS NULL", project, e.Guardrail).Scan(&id, &revision)
-	return guardrails.Entry{GuardrailID: id, RevisionID: revision, Phase: e.Phase, Action: e.Action, Monitor: e.Monitor, Mandatory: e.Mandatory}, err
+	current, err := guardrails.FindActive(ctx, q, installationOr(project), e.Guardrail)
+	if err != nil {
+		return guardrails.Entry{}, err
+	}
+	if current.ActiveRevisionID == nil {
+		return guardrails.Entry{}, fmt.Errorf("guardrail %q has no active revision", e.Guardrail)
+	}
+	return guardrails.Entry{GuardrailID: current.ID, RevisionID: *current.ActiveRevisionID, Phase: e.Phase, Action: e.Action, Monitor: e.Monitor, Mandatory: e.Mandatory}, nil
 }
 
-func latest(current *storedPolicy) *guardrails.PolicyRevision {
+func latest(current *guardrails.LatestPolicy) *guardrails.PolicyRevision {
 	if current == nil {
 		return nil
 	}
-	return &current.revision
+	return &current.Revision
 }
 
-func retainedName(current *storedPolicy, name string) string {
+func retainedName(current *guardrails.LatestPolicy, name string) string {
 	if current == nil {
 		return name
 	}
-	return current.revision.Name
+	return current.Revision.Name
 }

@@ -46,7 +46,7 @@ func TestVendorContracts(t *testing.T) {
 				io.WriteString(w, tc.response)
 			})
 			config, _ := json.Marshal(ExternalConfig{Endpoint: endpoint, ContentEgress: true, CredentialRef: "credential", Region: "us-east-1", Guardrail: "id", Version: "1", Template: "projects/p/locations/us/templates/t"})
-			d := Revision{ID: "revision", GuardrailID: "guard", Type: tc.kind, Configuration: config, TimeoutMS: 1000, OnError: FailClosed}
+			d := Revision{ID: "revision", GuardrailID: "guard", Type: Kind(tc.kind), Configuration: config, TimeoutMS: 1000, OnError: FailClosed}
 			v, err := runner.Evaluate(t.Context(), d, Evaluation{Phase: Input, Segments: []Segment{{ID: "s", Text: "éabc"}}})
 			if err != nil || v.Action != "block" {
 				t.Fatal(v, err)
