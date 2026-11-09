@@ -126,7 +126,7 @@ func (r *ExternalRunner) leave(id string, err error) {
 	}
 }
 func (r *ExternalRunner) evaluate(ctx context.Context, c Caller, d Revision, spec Spec, e Evaluation) (verdict Verdict, err error) {
-	if d.TimeoutMS < 1 || d.TimeoutMS > 300000 || validateSegments(e.Segments) != nil || !e.Phase.Valid() {
+	if d.TimeoutMS < 1 || d.TimeoutMS > 300000 || ValidateSegments(e.Segments) != nil || !e.Phase.Valid() {
 		return verdict, errEvaluation
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(d.TimeoutMS)*time.Millisecond)

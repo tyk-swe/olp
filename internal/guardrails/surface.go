@@ -151,7 +151,7 @@ func NativeSurface(document oif.Document, output bool) (*Surface, error) {
 	if !recognized || s.unavailable {
 		return nil, ErrSurface
 	}
-	if err := validateSegments(s.Segments); err != nil {
+	if err := ValidateSegments(s.Segments); err != nil {
 		return nil, err
 	}
 	return s, nil

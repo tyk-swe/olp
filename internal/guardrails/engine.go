@@ -271,7 +271,7 @@ func (e *Engine) Evaluate(ctx context.Context, request Evaluation, masks *Maskin
 	if !e.HasPhase(request.Phase) {
 		return result, nil
 	}
-	if err := validateSegments(request.Segments); err != nil {
+	if err := ValidateSegments(request.Segments); err != nil {
 		return result, err
 	}
 	for _, r := range e.entries {

@@ -77,7 +77,7 @@ type Delta struct {
 // inspection buffers while retaining their shared native frame ordering.
 // Completed prefixes identify candidates whose final boundary is now known.
 func (s *Stream) PushSegments(ctx context.Context, frame []byte, segments []Delta, completed ...string) ([][]byte, error) {
-	if err := validateSegments(assistantText(segments)); err != nil {
+	if err := ValidateSegments(assistantText(segments)); err != nil {
 		return nil, err
 	}
 	if (s.engine == nil || !s.engine.HasPhase(OutputStream)) && s.masks == nil {

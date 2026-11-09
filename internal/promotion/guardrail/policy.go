@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 
+	guardrailpolicy "github.com/tyk-swe/olp/internal/guardrails/policy"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/guardrails"
@@ -207,21 +209,25 @@ func applyPolicy(ctx context.Context, tx pgx.Tx, p access.Principal, directory p
 	if err != nil {
 		return err
 	}
-	current, err := guardrails.FindLatestPolicy(ctx, tx, project, policy.Name)
+	current, err := guardrailpolicy.FindLatest(ctx, tx, project, policy.Name)
 	if err != nil {
 		return err
 	}
-	if current != nil && slices.Equal(current.Revision.Entries, entries) {
-		if current.ActiveRevisionID != nil && *current.ActiveRevisionID == current.Revision.ID {
+	if current != nil && slices.Equal(current.Entries, entries) {
+		if current.ActiveRevisionID != nil && *current.ActiveRevisionID == current.RevisionID {
 			return nil
 		}
-		return guardrails.ActivatePolicy(ctx, tx, p.UserID(), current.Revision.PolicyID, current.Revision.ID)
+		return guardrailpolicy.Activate(ctx, tx, p.UserID(), current.ID, current.RevisionID)
 	}
-	saved, err := guardrails.SavePolicy(ctx, tx, p.UserID(), latest(current), guardrails.PolicyRevision{ProjectID: installationOr(project), Name: retainedName(current, policy.Name), Entries: entries})
+	draft, err := guardrailpolicy.NewDraft(ctx, tx, installationOr(project), retainedName(current, policy.Name), entries)
 	if err != nil {
 		return err
 	}
-	return guardrails.ActivatePolicy(ctx, tx, p.UserID(), saved.PolicyID, saved.ID)
+	saved, err := guardrailpolicy.Save(ctx, tx, p.UserID(), current, draft)
+	if err != nil {
+		return err
+	}
+	return guardrailpolicy.Activate(ctx, tx, p.UserID(), saved.ID, saved.RevisionID)
 }
 
 func pin(ctx context.Context, q access.Queryer, project *string, e Entry) (guardrails.Entry, error) {
@@ -238,16 +244,9 @@ func pin(ctx context.Context, q access.Queryer, project *string, e Entry) (guard
 	return guardrails.Entry{GuardrailID: current.ID, RevisionID: *current.ActiveRevisionID, Phase: e.Phase, Action: e.Action, Monitor: e.Monitor, Mandatory: e.Mandatory}, nil
 }
 
-func latest(current *guardrails.LatestPolicy) *guardrails.PolicyRevision {
-	if current == nil {
-		return nil
-	}
-	return &current.Revision
-}
-
-func retainedName(current *guardrails.LatestPolicy, name string) string {
+func retainedName(current *guardrailpolicy.Policy, name string) string {
 	if current == nil {
 		return name
 	}
-	return current.Revision.Name
+	return current.Name
 }

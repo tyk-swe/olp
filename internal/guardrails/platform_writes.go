@@ -2,55 +2,11 @@ package guardrails
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 )
-
-func ActivatePolicy(ctx context.Context, tx pgx.Tx, actor, policyID, revisionID string) error {
-	tag, err := tx.Exec(ctx, "UPDATE olp.guardrail_policies SET active_revision_id=$2,etag=$3 WHERE id=$1 AND EXISTS(SELECT 1 FROM olp.guardrail_policy_revisions WHERE id=$2 AND policy_id=$1)", policyID, revisionID, access.NewID())
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return ActivationRefused()
-	}
-	_, err = tx.Exec(ctx, "INSERT INTO olp.guardrail_policy_revision_activations(revision_id,activated_by) VALUES($1,$2) ON CONFLICT DO NOTHING", revisionID, actor)
-	return err
-}
-
-func SavePolicy(ctx context.Context, tx pgx.Tx, actor string, current *PolicyRevision, next PolicyRevision) (PolicyRevision, error) {
-	entries, err := json.Marshal(next.Entries)
-	if err != nil {
-		return PolicyRevision{}, err
-	}
-	saved := followingRevision(current, next)
-	if err := writePolicyHead(ctx, tx, actor, current == nil, saved); err != nil {
-		return PolicyRevision{}, err
-	}
-	if _, err := tx.Exec(ctx, "INSERT INTO olp.guardrail_policy_revisions(id,policy_id,revision,entries,created_by) VALUES($1,$2,$3,$4,$5)", saved.ID, saved.PolicyID, saved.Revision, entries, actor); err != nil {
-		return PolicyRevision{}, err
-	}
-	return saved, nil
-}
-
-func followingRevision(current *PolicyRevision, next PolicyRevision) PolicyRevision {
-	if current == nil {
-		return PolicyRevision{ID: access.NewID(), PolicyID: access.NewID(), ProjectID: next.ProjectID, Name: next.Name, Revision: 1, Entries: next.Entries}
-	}
-	return PolicyRevision{ID: access.NewID(), PolicyID: current.PolicyID, ProjectID: current.ProjectID, Name: next.Name, Revision: current.Revision + 1, Entries: next.Entries}
-}
-
-func writePolicyHead(ctx context.Context, tx pgx.Tx, actor string, create bool, saved PolicyRevision) error {
-	if create {
-		_, err := tx.Exec(ctx, "INSERT INTO olp.guardrail_policies(id,project_id,name,latest_revision_id,etag,created_by) VALUES($1,$2,$3,$4,$5,$6)", saved.PolicyID, ProjectPointer(saved.ProjectID), saved.Name, saved.ID, access.NewID(), actor)
-		return err
-	}
-	_, err := tx.Exec(ctx, "UPDATE olp.guardrail_policies SET name=$2,latest_revision_id=$3,etag=$4 WHERE id=$1", saved.PolicyID, saved.Name, saved.ID, access.NewID())
-	return err
-}
 
 func createAttachment(ctx context.Context, tx pgx.Tx, actor string, a Attachment) (Attachment, error) {
 	created := Attachment{ID: access.NewID(), Scope: a.Scope, ScopeID: a.ScopeID, PolicyRevisionID: a.PolicyRevisionID, Order: a.Order}

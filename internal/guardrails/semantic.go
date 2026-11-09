@@ -43,7 +43,7 @@ func validateSemantic(rule SemanticRule) error {
 // It returns no inputs when there is no text to evaluate. The response indexes
 // are checked against this exact order by SemanticVerdict.
 func SemanticInputs(e Evaluation, rule SemanticRule) ([]string, error) {
-	if validateSegments(e.Segments) != nil || len(e.Segments) > MaxSemanticSegments {
+	if ValidateSegments(e.Segments) != nil || len(e.Segments) > MaxSemanticSegments {
 		return nil, errEvaluation
 	}
 	inputs := make([]string, 0, len(e.Segments)+len(rule.Utterances))

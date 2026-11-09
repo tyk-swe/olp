@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/tyk-swe/olp/internal/guardrails/policy"
+
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/guardrails/credential"
 	"github.com/tyk-swe/olp/internal/guardrails/definition"
@@ -97,9 +99,10 @@ func (m Management) Register(mux *http.ServeMux) {
 	}
 	credential.NewAPI(m.Access).Register(mux)
 	definition.NewAPI(m.Access, publishGuardrails).Register(mux)
-	(&guardrails.Server{Access: m.Access, Publish: publishGuardrails, Evaluate: func(r *http.Request, p access.Principal, in guardrails.ApplyInput) (guardrails.Result, error) {
-		return m.Gateway.EvaluateGuardrails(r, p, in)
-	}}).Register(mux)
+	policy.NewAPI(m.Access, publishGuardrails, func(r *http.Request, p access.Principal, pinned guardrails.Pinned, in guardrails.Application) (guardrails.Result, error) {
+		return m.Gateway.EvaluateGuardrails(r, p, pinned, in)
+	}).Register(mux)
+	(&guardrails.Server{Access: m.Access, Publish: publishGuardrails}).Register(mux)
 	agentTasks := tasks.New(m.Access.Pool, nil, m.Access.Auth)
 	agentGrants := personal.NewStore(m.Access.Pool, m.Access.Installation, m.Access.Auth, m.Access.Keys, m.Egress)
 	agentPeers := a2a.NewPeers(m.Egress, func(ctx context.Context, id string) ([]byte, error) {

@@ -271,6 +271,22 @@ type Result struct {
 	Recovery  []Segment
 }
 
+type Application struct {
+	PolicyRevisionID string    `json:"policy_revision_id"`
+	Phase            Phase     `json:"phase"`
+	Segments         []Segment `json:"segments"`
+}
+
+type Pinned struct {
+	Policy      PolicyRevision
+	Definitions map[string]Revision
+}
+
+func (p Pinned) Compile() (PolicyRevision, *Engine, error) {
+	engine, err := Compile(p.Policy.Entries, p.Definitions)
+	return p.Policy, engine, err
+}
+
 type AppliedResult struct {
 	Segments  []Segment  `json:"segments"`
 	Decisions []Evidence `json:"decisions"`
@@ -364,7 +380,7 @@ func MergeEvidence(decisions, values []Evidence) []Evidence {
 	return merged
 }
 
-func validateSegments(segments []Segment) error {
+func ValidateSegments(segments []Segment) error {
 	if len(segments) > MaxSegments {
 		return ErrSurface
 	}

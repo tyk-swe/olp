@@ -2,8 +2,11 @@ package guardrail
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
+
+	guardrailpolicy "github.com/tyk-swe/olp/internal/guardrails/policy"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
@@ -172,7 +175,7 @@ func applyAttachment(ctx context.Context, tx pgx.Tx, p access.Principal, directo
 	if err != nil {
 		return err
 	}
-	revision, err := guardrails.ActivePolicyRevisionID(ctx, tx, project, a.Policy.Name)
+	revision, err := activeRevision(ctx, tx, project, a.Policy.Name)
 	if err != nil {
 		return err
 	}
@@ -281,4 +284,15 @@ func resolveToolset(ctx context.Context, tx pgx.Tx, name string, project *string
 
 func toolsetOutsideProject() error {
 	return access.Invalid("guardrail_attachments", "Toolset and policy must belong to the same project.")
+}
+
+func activeRevision(ctx context.Context, q access.Queryer, project *string, name string) (string, error) {
+	current, err := guardrailpolicy.FindLatest(ctx, q, project, name)
+	if err != nil {
+		return "", err
+	}
+	if current == nil || current.ActiveRevisionID == nil {
+		return "", fmt.Errorf("guardrail policy %q has no active revision: %w", name, pgx.ErrNoRows)
+	}
+	return *current.ActiveRevisionID, nil
 }

@@ -414,13 +414,15 @@ func (s *Server) applyGuardrails(w http.ResponseWriter, r *http.Request) {
 		writeError(w, e)
 		return
 	}
-	var in guardrails.ApplyInput
+	var in guardrails.Application
 	if err := access.DecodeUnique(r, &in, guardrails.MaxContentBytes); err != nil {
 		writeError(w, invalidRequest("invalid_request", "Supply a policy revision, phase and bounded text segments.", nil))
 		return
 	}
 	x := &call{request: req, actor: "api_key", keyID: authority.ID, authority: authority, budgetGroupID: authority.BudgetGroupID, attribution: authority.Attribution, family: wire.Chat, operationOverride: "guardrail"}
-	result, err := s.evaluateGuardrails(r.Context(), x, in)
+	result, err := s.evaluateGuardrails(r.Context(), x, in, func(view *routing.View) (guardrails.PolicyRevision, *guardrails.Engine, error) {
+		return view.CompileGuardrailPolicy(in.PolicyRevisionID)
+	})
 	status := 200
 	out := &outcome{}
 	if err != nil && !errors.Is(err, guardrails.ErrBlocked) {
@@ -453,7 +455,7 @@ func (s *Server) EvaluateToolGuardrails(ctx context.Context, authority keyauthor
 	return s.boundGuardrails(parent, engine).Evaluate(ctx, evaluation, masks)
 }
 
-func (s *Server) EvaluateGuardrails(r *http.Request, p access.Principal, in guardrails.ApplyInput) (guardrails.Result, error) {
+func (s *Server) EvaluateGuardrails(r *http.Request, p access.Principal, pinned guardrails.Pinned, in guardrails.Application) (guardrails.Result, error) {
 	if s == nil || s.deps.Runtime == nil {
 		return guardrails.Result{}, access.Fail(503, "guardrails_unavailable", "The evaluator is unavailable.")
 	}
@@ -471,7 +473,9 @@ func (s *Server) EvaluateGuardrails(r *http.Request, p access.Principal, in guar
 		}
 		return nil
 	}
-	result, err := s.evaluateGuardrails(r.Context(), x, in)
+	result, err := s.evaluateGuardrails(r.Context(), x, in, func(*routing.View) (guardrails.PolicyRevision, *guardrails.Engine, error) {
+		return pinned.Compile()
+	})
 	s.settleAdmission(context.WithoutCancel(r.Context()), x)
 	if err == nil || errors.Is(err, guardrails.ErrBlocked) {
 		s.finish(x, &outcome{}, 200)
@@ -481,22 +485,14 @@ func (s *Server) EvaluateGuardrails(r *http.Request, p access.Principal, in guar
 	s.finish(x, &outcome{err: failure}, failure.Status)
 	return result, access.Fail(failure.Status, failure.Code, "The guardrail could not be evaluated.")
 }
-func appliedPolicy(view *routing.View, in guardrails.ApplyInput) (guardrails.PolicyRevision, *guardrails.Engine, error) {
-	if in.Policy == nil {
-		return view.CompileGuardrailPolicy(in.PolicyRevisionID)
-	}
-	engine, err := guardrails.Compile(in.Policy.Entries, in.Definitions)
-	return *in.Policy, engine, err
-}
-
-func (s *Server) evaluateGuardrails(ctx context.Context, x *call, in guardrails.ApplyInput) (guardrails.Result, error) {
+func (s *Server) evaluateGuardrails(ctx context.Context, x *call, in guardrails.Application, policy func(*routing.View) (guardrails.PolicyRevision, *guardrails.Engine, error)) (guardrails.Result, error) {
 	x.route = &routing.Route{Slug: "guardrails", OverallTimeout: 30000, MaxAttempts: 1}
 	x.primary = x.route
 	x.mode = "unary"
-	if x.request.release == nil || (!x.snapshot().HasGuardrails() && in.Policy == nil) {
+	if x.request.release == nil {
 		return guardrails.Result{}, guardrails.ErrSurface
 	}
-	p, compiled, err := appliedPolicy(x.snapshot(), in)
+	p, compiled, err := policy(x.snapshot())
 	if err != nil {
 		return guardrails.Result{}, err
 	}
