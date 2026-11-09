@@ -489,7 +489,9 @@ func (s *Server) replayCache(ctx context.Context, x *call) *outcome {
 			if err := x.generation.emit(frame); err != nil {
 				return &outcome{err: (&attemptFailure{class: classCancelled}).toError(), committed: true, cancelled: true}
 			}
-			x.captureDeliveredFrame(frame)
+			if x.capture != nil {
+				x.capture.CaptureStreamFrame(x.family, frame)
+			}
 		}
 		return &outcome{committed: true}
 	}

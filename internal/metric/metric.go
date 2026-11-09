@@ -1,6 +1,12 @@
 package metric
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"context"
+	"slices"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/prometheus/client_golang/prometheus"
+)
 
 type Family struct {
 	desc *prometheus.Desc
@@ -40,4 +46,20 @@ func (c Collector) Collect(ch chan<- prometheus.Metric) {
 	for _, m := range c() {
 		ch <- m
 	}
+}
+
+type Querier interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}
+
+func Rows(ctx context.Context, q Querier, sql string, scan func(pgx.CollectableRow) ([]prometheus.Metric, error)) []prometheus.Metric {
+	rows, err := q.Query(ctx, sql)
+	if err != nil {
+		return nil
+	}
+	series, err := pgx.CollectRows(rows, scan)
+	if err != nil {
+		return nil
+	}
+	return slices.Concat(series...)
 }

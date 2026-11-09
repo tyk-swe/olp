@@ -221,7 +221,7 @@ func codeScoped(ctx context.Context, tx pgx.Tx, table, id, project string) error
 		return err
 	}
 	if !matches {
-		return notFound
+		return NotFound
 	}
 	return nil
 }

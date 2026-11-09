@@ -33,7 +33,10 @@ import (
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/export"
+	"github.com/tyk-swe/olp/internal/export/capture"
+	"github.com/tyk-swe/olp/internal/export/destination"
+	"github.com/tyk-swe/olp/internal/export/focus"
+	"github.com/tyk-swe/olp/internal/export/stream"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/grants/personal"
 	"github.com/tyk-swe/olp/internal/guardrails"
@@ -210,10 +213,10 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 	var policy egress.Policy
 	var auth *secrets.AuthKey
 	var business *telemetry.BusinessMetrics
-	var exporter *export.Worker
-	var capturer *export.Manager
+	var exporter *stream.Worker
+	var capturer *capture.Manager
 	var importer *billing.Importer
-	var focusWorker *export.FocusWorker
+	var focusWorker *focus.Worker
 	// The public listener's process-local admission pools. The inference pool
 	// is shared with the gateway so middleware and direct handler calls bound
 	// one capacity; media reconciliation gaps and durable metadata loss are
@@ -251,12 +254,10 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			responseCache = &cache.Store{Client: remote, Keys: keys, Auth: auth, Installation: installation}
 		}
 
-		sender := export.NewSender(&policy, os.Getenv)
-		sender.Installation = installation
-		exporter = &export.Worker{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Log: log}
-		export.FocusGeneratorVersion = Version
-		focusWorker = &export.FocusWorker{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Log: log}
-		capturer = &export.Manager{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Log: log}
+		sender := destination.NewSender(&policy, os.Getenv, installation)
+		exporter = &stream.Worker{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Log: log}
+		focusWorker = &focus.Worker{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Version: Version, Log: log, Now: time.Now}
+		capturer = capture.NewManager(pool, keys, installation, sender, log)
 		importer = &billing.Importer{Pool: pool, Keys: keys, Installation: installation, Egress: &policy, Log: log}
 		var mounted map[string]release.MountedProvider
 		if c.ConnectorConfigFile != "" {
@@ -582,7 +583,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		mediaGaps:     &mediaGapsTotal,
 		loss:          lossCounters,
 		export: func(ctx context.Context) []prometheus.Metric {
-			return slices.Concat(export.Metrics(ctx, pool, exporter, focusWorker, capturer), billing.Metrics(ctx, pool, importer))
+			return slices.Concat(exporter.Metrics(ctx), focusWorker.Metrics(ctx), capturer.Metrics(), billing.Metrics(ctx, pool, importer))
 		},
 	})
 	background.Go(func() { obsCache.Run(auxiliary, obsSources, log) })
@@ -604,9 +605,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		})
 		delivered.Go(func() { usage.RunLossReporter(delivery, pool, emitter, instance, lossCounters, log) })
 	}
-	if capturer != nil {
-		delivered.Go(func() { capturer.Run(delivery) })
-	}
+	delivered.Go(func() { capturer.Run(delivery) })
 	if outage != nil {
 		background.Go(func() { outage.run(auxiliary) })
 	}

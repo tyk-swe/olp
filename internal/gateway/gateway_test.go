@@ -126,20 +126,24 @@ func (f *fakeRuntime) CredentialRefused(id string, generation int64) {
 	f.refusedGenerations = append(f.refusedGenerations, generation)
 }
 
-type capture struct {
+type envelopes struct {
 	mu   sync.Mutex
 	envs []Envelope
 }
 
-func (c *capture) Terminal(e Envelope) { c.mu.Lock(); defer c.mu.Unlock(); c.envs = append(c.envs, e) }
+func (c *envelopes) Terminal(e Envelope) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.envs = append(c.envs, e)
+}
 
-func (c *capture) last(t *testing.T) Envelope {
+func (c *envelopes) last(t *testing.T) Envelope {
 	t.Helper()
 	envs := c.await(t, 1)
 	return envs[len(envs)-1]
 }
 
-func (c *capture) await(t *testing.T, n int) []Envelope {
+func (c *envelopes) await(t *testing.T, n int) []Envelope {
 	t.Helper()
 	// Reading a known-length HTTP response can finish before the serving
 	// goroutine records its terminal event. Await that event explicitly.
@@ -205,7 +209,7 @@ type harness struct {
 	t        *testing.T
 	rt       *fakeRuntime
 	mock     *mock
-	sink     *capture
+	sink     *envelopes
 	gateway  *Server
 	server   *httptest.Server
 	keyID    string
@@ -275,7 +279,7 @@ func newHarnessWrapped(t *testing.T, cfg Config, wrap func(http.Handler) http.Ha
 	if cfg.MaxEventBytes == 0 {
 		cfg.MaxEventBytes = 4096
 	}
-	sink := &capture{}
+	sink := &envelopes{}
 	dependencies := Dependencies{}
 	if len(extra) > 0 {
 		dependencies = extra[0]

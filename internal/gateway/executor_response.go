@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/export"
+	"github.com/tyk-swe/olp/internal/export/capture"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -176,21 +176,17 @@ func (s *Server) finish(x *call, out *outcome, status int) {
 		}
 		if x.capture != nil {
 			x.capture.CaptureDocument(x.captureInputDocument())
-			mode := "unary"
-			if x.generation.parsed != nil && x.generation.parsed.Stream {
-				mode = "streaming"
-			} else if out != nil && out.completion != nil && len(out.completion.Body) != 0 {
-				x.capture.CaptureResponse(x.family, out.completion.Body)
-			} else {
-				x.capture.CaptureResponse(x.family, nil)
+			streaming := x.generation.parsed != nil && x.generation.parsed.Stream
+			if !streaming {
+				x.capture.CaptureResponse(x.family, completionBody(out))
 			}
 			var traceID, spanID string
 			if context := x.request.trace.SpanContext(); context.IsValid() {
 				traceID, spanID = context.TraceID().String(), context.SpanID().String()
 			}
-			env.PayloadCaptured = x.capture.FinishContext(x.captureContext, export.CaptureIdentity{
+			env.PayloadCaptured = x.capture.Finish(x.captureContext, capture.Identity{
 				Route: env.Route, ProjectID: x.captureProject(), KeyID: env.KeyID, EndUserDigest: env.EndUserDigest,
-				TraceID: traceID, SpanID: spanID, Outcome: env.Outcome, Mode: mode,
+				TraceID: traceID, SpanID: spanID, Outcome: env.Outcome, Mode: capture.ModeOf(streaming),
 			}, completedAt)
 		}
 		s.finalizeGenerationHTTP(x, env)
@@ -307,6 +303,9 @@ func credentialHealthKey(slot *routing.Slot, generation int64) string {
 	return "credential:ambient"
 }
 
-func (x *call) captureDeliveredFrame(frame []byte) {
-	x.capture.CaptureStreamFrame(x.family, frame)
+func completionBody(out *outcome) []byte {
+	if out == nil || out.completion == nil || len(out.completion.Body) == 0 {
+		return nil
+	}
+	return out.completion.Body
 }
