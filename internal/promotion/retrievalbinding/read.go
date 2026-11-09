@@ -2,44 +2,48 @@ package retrievalbinding
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
+	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/retrieval"
 )
-
-const keyNameQuery = "SELECT name FROM olp.api_keys WHERE id=$1 AND project_id=$2 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>now())"
 
 func Read(ctx context.Context, q access.Queryer, directory project.Directory) ([]Binding, error) {
 	stored, err := retrieval.List(ctx, q)
 	if err != nil {
 		return nil, err
 	}
+	named, err := providers.ReadProviderNames(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	providerNames := promotion.Associate(named, func(p providers.ProviderName) (string, string) { return p.ID, p.Name })
 	return promotion.TryMap(stored, func(binding retrieval.Binding) (Binding, error) {
-		return exported(ctx, q, directory, binding)
+		return exported(ctx, q, directory, providerNames, binding)
 	})
 }
 
-func exported(ctx context.Context, q access.Queryer, directory project.Directory, binding retrieval.Binding) (Binding, error) {
+func exported(ctx context.Context, q access.Queryer, directory project.Directory, providerNames map[string]string, binding retrieval.Binding) (Binding, error) {
 	projectName, ok := directory.Name(binding.ProjectID)
 	if !ok {
 		return Binding{}, fmt.Errorf("retrieval binding %s belongs to an unknown project", binding.ID)
 	}
-	var provider string
-	if err := q.QueryRow(ctx, "SELECT name FROM olp.providers WHERE id=$1", binding.ProviderID).Scan(&provider); err != nil {
-		return Binding{}, err
+	provider, ok := providerNames[binding.ProviderID]
+	if !ok {
+		return Binding{}, fmt.Errorf("retrieval binding %s targets an unknown provider", binding.ID)
 	}
 	keys, err := promotion.TryMap(binding.KeyGrants, func(id string) (string, error) {
-		var name string
-		err := q.QueryRow(ctx, keyNameQuery, id, binding.ProjectID).Scan(&name)
-		if errors.Is(err, pgx.ErrNoRows) {
+		name, active, err := access.ActiveKeyName(ctx, q, id, binding.ProjectID)
+		if err != nil {
+			return "", err
+		}
+		if !active {
 			return "", access.Invalid("retrieval_bindings.key_grants", "Remove inactive API-key grants before exporting retrieval bindings.")
 		}
-		return name, err
+		return name, nil
 	})
 	if err != nil {
 		return Binding{}, err

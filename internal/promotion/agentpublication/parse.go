@@ -46,7 +46,7 @@ func parseEntry(entry contract.ConfigurationAgentPublication, duplicate bool, po
 	if err := refuseShape(entry, derivedRef(key), draft, published, labels); err != nil {
 		return Publication{}, err
 	}
-	publication := Publication{Project: entry.Project, Draft: draft, Published: published, Kind: kindOf(string(entry.Kind), nonEmpty(labels), refOf(entry.CredentialRef), refOf(entry.PublishedCredentialRef))}
+	publication := Publication{Project: entry.Project, Draft: draft, Published: published, Kind: kindOf(string(entry.Kind), labels, refOf(entry.CredentialRef), refOf(entry.PublishedCredentialRef))}
 	for _, definition := range publication.definitions() {
 		if err := validateDefinition(definition, string(entry.Kind), policy); err != nil {
 			return Publication{}, err
@@ -113,11 +113,4 @@ func convertOptional(draft *contract.ConfigurationAgentDraft) (*agentcontract.Dr
 
 func placed(definition agentcontract.Draft, project string) agentcontract.Draft {
 	return agentcontract.Draft{ProjectID: project, Name: definition.Name, Toolset: definition.Toolset, Agent: definition.Agent, Prompt: definition.Prompt}
-}
-
-func nonEmpty[K comparable, V any](values map[K]V) map[K]V {
-	if len(values) == 0 {
-		return nil
-	}
-	return values
 }

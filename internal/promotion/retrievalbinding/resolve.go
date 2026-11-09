@@ -4,32 +4,41 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
+	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/retrieval"
+	"github.com/tyk-swe/olp/internal/routes"
 )
 
 var errProjectAbsent = errors.New("retrieval binding project is absent")
 
-const targetQuery = `SELECT DISTINCT t->>'id' FROM (
- SELECT d.targets,0 AS priority FROM olp.route_drafts d WHERE d.slug=$1 AND d.project_id=$2 AND d.state='draft'
- UNION ALL SELECT v.targets,1 AS priority FROM olp.routes r JOIN olp.route_revisions v ON v.id=r.latest_revision_id WHERE r.slug=$1 AND r.project_id=$2 AND r.state='active'
- ) r CROSS JOIN LATERAL jsonb_array_elements(r.targets) t JOIN olp.providers p ON p.id=(t->>'provider_id')::uuid
- WHERE lower(p.name)=lower($3) AND t->>'provider_model'=$4 AND r.priority=(SELECT min(priority) FROM (
- SELECT 0 AS priority FROM olp.route_drafts d WHERE d.slug=$1 AND d.project_id=$2 AND d.state='draft'
- UNION ALL SELECT 1 FROM olp.routes r WHERE r.slug=$1 AND r.project_id=$2 AND r.state='active') priorities)`
+type installed struct {
+	projects    project.Directory
+	providerIDs map[string]string
+}
 
-const activeKeysQuery = "SELECT id::text FROM olp.api_keys WHERE project_id=$1 AND name=$2 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>now())"
+func readInstalled(ctx context.Context, q access.Queryer) (installed, error) {
+	directory, err := project.ReadDirectory(ctx, q)
+	if err != nil {
+		return installed{}, err
+	}
+	providerIDs, err := providers.IDsByName(ctx, q)
+	if err != nil {
+		return installed{}, err
+	}
+	return installed{projects: directory, providerIDs: providerIDs}, nil
+}
 
-func resolve(ctx context.Context, q access.Queryer, directory project.Directory, binding Binding) (retrieval.Input, error) {
-	projectID, ok := directory.ID(binding.Project)
+func resolve(ctx context.Context, q access.Queryer, lookup installed, binding Binding) (retrieval.Input, error) {
+	projectID, ok := lookup.projects.ID(binding.Project)
 	if !ok {
 		return retrieval.Input{}, errProjectAbsent
 	}
-	targets, err := promotion.Rows(ctx, q, pgx.RowTo[string], targetQuery, binding.Route, projectID, binding.TargetProvider, binding.Resource)
+	targets, err := targetIDs(ctx, q, lookup, binding, projectID)
 	if err != nil {
 		return retrieval.Input{}, err
 	}
@@ -53,9 +62,17 @@ func resolve(ctx context.Context, q access.Queryer, directory project.Directory,
 	}, nil
 }
 
+func targetIDs(ctx context.Context, q access.Queryer, lookup installed, binding Binding, projectID string) ([]string, error) {
+	providerID, ok := lookup.providerIDs[strings.ToLower(binding.TargetProvider)]
+	if !ok {
+		return nil, nil
+	}
+	return routes.CurrentTargetIDs(ctx, q, binding.Route, projectID, providerID, binding.Resource)
+}
+
 func keyIDs(ctx context.Context, q access.Queryer, projectID string, names []string) ([]string, error) {
 	return promotion.TryMap(names, func(name string) (string, error) {
-		ids, err := promotion.Rows(ctx, q, pgx.RowTo[string], activeKeysQuery, projectID, name)
+		ids, err := access.ActiveKeyIDsNamed(ctx, q, projectID, name)
 		if err != nil {
 			return "", err
 		}
@@ -64,9 +81,4 @@ func keyIDs(ctx context.Context, q access.Queryer, projectID string, names []str
 		}
 		return ids[0], nil
 	})
-}
-
-func activeKeyCount(ctx context.Context, q access.Queryer, projectID, name string) (int, error) {
-	ids, err := promotion.Rows(ctx, q, pgx.RowTo[string], activeKeysQuery, projectID, name)
-	return len(ids), err
 }

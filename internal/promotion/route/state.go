@@ -5,8 +5,8 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
-	"fmt"
 	"maps"
+	"net/http"
 	"slices"
 	"strings"
 
@@ -42,7 +42,7 @@ func Read(ctx context.Context, q access.Queryer) (State, error) {
 	published := promotion.Map(stored, func(r routes.PublishedRoute) Route {
 		return routeOf(r.OpenDraft, projectName(directory, r.ProjectID), r.Retired)
 	})
-	templates, err := readTemplates(ctx, q)
+	templates, err := readTemplates(ctx, q, directory)
 	if err != nil {
 		return State{}, err
 	}
@@ -91,7 +91,7 @@ func projectName(directory project.Directory, id *string) *string {
 }
 
 func draftKey(slug string, project *string) string {
-	return slug + "\x00" + strings.ToLower(deref(project))
+	return slug + "\x00" + strings.ToLower(promotion.ValueOf(project))
 }
 
 func projectIDOf(directory project.Directory, name *string) (*string, error) {
@@ -100,7 +100,7 @@ func projectIDOf(directory project.Directory, name *string) (*string, error) {
 	}
 	id, ok := directory.ID(*name)
 	if !ok {
-		return nil, fmt.Errorf("project %q is not installed", *name)
+		return nil, access.Fail(http.StatusConflict, "project_unknown", "Project "+*name+" is not installed.")
 	}
 	return &id, nil
 }

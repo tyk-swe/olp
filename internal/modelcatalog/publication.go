@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/routes"
 )
 
 type projectPublication struct {
@@ -49,7 +50,7 @@ func SetProjectPublication(ctx context.Context, tx pgx.Tx, project string, enabl
 
 func SetRoutePublication(ctx context.Context, tx pgx.Tx, routeID string, exposeUpstreamModels bool) (Exposure, error) {
 	exposure := Exposure{ExposeUpstreamModels: exposeUpstreamModels, ETag: access.NewID()}
-	if _, err := tx.Exec(ctx, `INSERT INTO olp.model_catalog_route_settings(route_id,expose_upstream_models,etag) VALUES($1,$2,$3) ON CONFLICT(route_id) DO UPDATE SET expose_upstream_models=excluded.expose_upstream_models,etag=excluded.etag`, routeID, exposure.ExposeUpstreamModels, exposure.ETag); err != nil {
+	if err := routes.SetCatalogExposure(ctx, tx, routeID, exposure.ExposeUpstreamModels, exposure.ETag); err != nil {
 		return Exposure{}, err
 	}
 	return exposure, nil

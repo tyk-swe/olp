@@ -173,7 +173,7 @@ func validateTarget(prefix string, j int, t Target, project *string, providers m
 	if !slices.Contains(declared.models, t.ProviderModel) {
 		return access.Invalid(field+".provider_model", "Target "+index+" names a model the provider does not declare.")
 	}
-	if !strings.EqualFold(deref(project), deref(declared.project)) {
+	if !strings.EqualFold(promotion.ValueOf(project), promotion.ValueOf(declared.project)) {
 		return access.Fail(422, "target_project_mismatch", "Target "+index+" belongs to a different project than the route.")
 	}
 	return nil
@@ -211,10 +211,3 @@ func withoutContentPolicy(r Route) Route {
 }
 
 func slugOf(r Route) string { return r.Slug }
-
-func deref(value *string) string {
-	if value == nil {
-		return ""
-	}
-	return *value
-}

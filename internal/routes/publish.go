@@ -329,7 +329,7 @@ func (s *Server) promote(ctx context.Context, tx pgx.Tx, current *draft, actor s
 		return promotion{}, err
 	}
 	if exposure != nil {
-		if _, err = tx.Exec(ctx, `INSERT INTO olp.model_catalog_route_settings(route_id,expose_upstream_models,etag) VALUES($1,$2,$3) ON CONFLICT(route_id) DO UPDATE SET expose_upstream_models=excluded.expose_upstream_models,etag=excluded.etag`, routeID, *exposure, access.NewID()); err != nil {
+		if err = SetCatalogExposure(ctx, tx, routeID, *exposure, access.NewID()); err != nil {
 			return promotion{}, err
 		}
 		if _, err = tx.Exec(ctx, "UPDATE olp.route_drafts SET catalog_expose_upstream_models=NULL WHERE id=$1", current.ID); err != nil {

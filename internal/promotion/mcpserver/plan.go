@@ -102,7 +102,7 @@ func planServer(ctx context.Context, q access.Queryer, names promotion.Names, di
 		return planned{items: []promotion.Item{promotion.Conflict(kind, server.Name, "The owning project is not declared or present.")}}, nil
 	}
 	flat := flatten(server.Transport)
-	entra := when(unretainedEntra(flat, existing), promotion.Conflict(kind, server.Name, entraDetail))
+	entra := promotion.When(unretainedEntra(flat, existing), promotion.Conflict(kind, server.Name, entraDetail))
 	if flat.delegation != nil && (existing == nil || existing.DelegationKeyID == nil) {
 		return planned{items: slices.Concat(entra, []promotion.Item{promotion.Conflict(kind, server.Name, "Install this server's delegation signing key locally before applying its metadata.")})}, nil
 	}
@@ -112,7 +112,7 @@ func planServer(ctx context.Context, q access.Queryer, names promotion.Names, di
 		return planned{}, err
 	}
 	return planned{
-		items: slices.Concat(entra, when(unbound, promotion.Blocker(kind, server.Name, "Supply the destination MCP bearer binding.")), []promotion.Item{
+		items: slices.Concat(entra, promotion.When(unbound, promotion.Blocker(kind, server.Name, "Supply the destination MCP bearer binding.")), []promotion.Item{
 			{Kind: kind, Key: server.Name, Action: action, Detail: planDetail},
 		}),
 		creates: existing == nil,
@@ -140,9 +140,8 @@ func actionOf(ctx context.Context, q access.Queryer, bindings promotion.Bindings
 }
 
 func matches(ctx context.Context, q access.Queryer, bindings promotion.Bindings, keys Keys, existing registration.Definition, server Server) (bool, error) {
-	stored, err := fromDefinition(existing, server.Project)
-	if err != nil || !reflect.DeepEqual(stored, server) {
-		return false, err
+	if !reflect.DeepEqual(fromDefinition(existing, server.Project), server) {
+		return false, nil
 	}
 	bearer := flatten(server.Transport).bearer
 	if bearer == nil {
@@ -158,11 +157,4 @@ func matches(ctx context.Context, q access.Queryer, bindings promotion.Bindings,
 	}
 	defer clear(secret)
 	return subtle.ConstantTimeCompare(secret, []byte(sealed.Secret)) == 1, nil
-}
-
-func when(condition bool, item promotion.Item) []promotion.Item {
-	if !condition {
-		return nil
-	}
-	return []promotion.Item{item}
 }

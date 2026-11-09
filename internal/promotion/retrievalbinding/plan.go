@@ -24,24 +24,24 @@ func Planner(desired Desired) promotion.Planner {
 		return promotion.Planner{}
 	}
 	return promotion.Planner{Plan: func(ctx context.Context, q access.Queryer) ([]promotion.Item, error) {
-		directory, err := project.ReadDirectory(ctx, q)
+		lookup, err := readInstalled(ctx, q)
 		if err != nil {
 			return nil, err
 		}
 		return promotion.TryMap(desired.Bindings, func(binding Binding) (promotion.Item, error) {
-			return planBinding(ctx, q, directory, desired.stages[key(binding)], binding)
+			return planBinding(ctx, q, lookup, desired.stages[key(binding)], binding)
 		})
 	}}
 }
 
-func planBinding(ctx context.Context, q access.Queryer, directory project.Directory, routeStage stage, binding Binding) (promotion.Item, error) {
+func planBinding(ctx context.Context, q access.Queryer, lookup installed, routeStage stage, binding Binding) (promotion.Item, error) {
 	switch routeStage := routeStage.(type) {
 	case misstaged:
 		return promotion.Blocker(kind, binding.Name, routeStage.detail), nil
 	case staged:
-		return planStaged(ctx, q, directory, routeStage, binding)
+		return planStaged(ctx, q, lookup.projects, routeStage, binding)
 	default:
-		return planStored(ctx, q, directory, binding)
+		return planStored(ctx, q, lookup, binding)
 	}
 }
 
@@ -51,19 +51,19 @@ func planStaged(ctx context.Context, q access.Queryer, directory project.Directo
 		return promotion.Blocker(kind, binding.Name, "Create the destination project and named API-key grants before promoting access."), nil
 	}
 	for _, name := range binding.KeyGrants {
-		count, err := activeKeyCount(ctx, q, projectID, name)
+		ids, err := access.ActiveKeyIDsNamed(ctx, q, projectID, name)
 		if err != nil {
 			return promotion.Item{}, err
 		}
-		if count != 1 {
+		if len(ids) != 1 {
 			return promotion.Blocker(kind, binding.Name, "Each grant must resolve to exactly one active destination API key by its project-local name."), nil
 		}
 	}
 	return promotion.Item{Kind: kind, Key: binding.Name, Action: contract.ConfigurationPlanItemActionStage, Detail: stagedDetail}, nil
 }
 
-func planStored(ctx context.Context, q access.Queryer, directory project.Directory, binding Binding) (promotion.Item, error) {
-	in, err := resolve(ctx, q, directory, binding)
+func planStored(ctx context.Context, q access.Queryer, lookup installed, binding Binding) (promotion.Item, error) {
+	in, err := resolve(ctx, q, lookup, binding)
 	if errors.Is(err, errProjectAbsent) {
 		return promotion.Blocker(kind, binding.Name, "Create the destination project and named API-key grants before applying this binding."), nil
 	}

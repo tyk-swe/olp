@@ -24,15 +24,12 @@ func Read(ctx context.Context, q access.Queryer, directory project.Directory) ([
 		if !ok {
 			return Server{}, fmt.Errorf("mcp server %s belongs to an unknown project", definition.ID)
 		}
-		return fromDefinition(definition, name)
+		return fromDefinition(definition, name), nil
 	})
 }
 
-func fromDefinition(definition registration.Definition, projectName string) (Server, error) {
-	ref, err := refOf(keyOf(projectName, definition.Name))
-	if err != nil {
-		return Server{}, err
-	}
+func fromDefinition(definition registration.Definition, projectName string) Server {
+	ref := refOf(keyOf(projectName, definition.Name))
 	return Server{
 		Project: projectName, Name: definition.Name, Enabled: definition.Enabled, CatalogDigest: definition.Catalog.Digest,
 		Transport: transportOf(wire{
@@ -44,7 +41,7 @@ func fromDefinition(definition registration.Definition, projectName string) (Ser
 			CallsPerMinute: definition.CallsPerMinute, MaxConcurrency: definition.MaxConcurrency,
 			PerKeyCallsPerMinute: definition.PerKeyCallsPerMinute, PerKeyMaxConcurrency: definition.PerKeyMaxConcurrency,
 		},
-	}, nil
+	}
 }
 
 func current(active []registration.Definition, directory project.Directory, server Server) *registration.Definition {

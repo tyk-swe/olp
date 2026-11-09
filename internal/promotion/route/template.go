@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"slices"
 	"strconv"
 	"strings"
@@ -74,24 +73,14 @@ func parseTemplates(entries *[]contract.ConfigurationTemplateEntry) ([]Template,
 	})
 }
 
-func readTemplates(ctx context.Context, q access.Queryer) ([]Template, error) {
-	rows, err := q.Query(ctx, `SELECT t.name,pr.name,t.provider_selector,t.model_filter,t.slug_pattern,t.overall_timeout_ms,t.max_attempts,t.fidelity,t.routing_policy,t.auto_publish
-		FROM olp.route_templates t LEFT JOIN olp.projects pr ON pr.id=t.project_id ORDER BY t.name`)
+func readTemplates(ctx context.Context, q access.Queryer, directory project.Directory) ([]Template, error) {
+	stored, err := routes.ReadTemplateInputs(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Template, error) {
-		var t Template
-		var policy []byte
-		if err := row.Scan(&t.Name, &t.Project, &t.ProviderSelector, &t.ModelFilter, &t.SlugPattern, &t.OverallTimeoutMS, &t.MaxAttempts, &t.Fidelity, &policy, &t.AutoPublish); err != nil {
-			return Template{}, err
-		}
-		decoded, err := routes.DecodePolicy(policy)
-		return Template{
-			Name: t.Name, Project: t.Project, ProviderSelector: t.ProviderSelector, ModelFilter: t.ModelFilter, SlugPattern: t.SlugPattern,
-			OverallTimeoutMS: t.OverallTimeoutMS, MaxAttempts: t.MaxAttempts, Fidelity: t.Fidelity, RoutingPolicy: decoded, AutoPublish: t.AutoPublish,
-		}, err
-	})
+	return promotion.Map(stored, func(in routes.TemplateInput) Template {
+		return templateOf(in, projectName(directory, in.ProjectID))
+	}), nil
 }
 
 func planTemplate(t Template, current map[string]Template, known func(string) bool) ([]promotion.Item, error) {
@@ -107,7 +96,7 @@ func templateChange(t Template, current map[string]Template) (promotion.Item, er
 	if !ok {
 		return templateItem(t.Name, contract.ConfigurationPlanItemActionCreate), nil
 	}
-	if !strings.EqualFold(deref(found.Project), deref(t.Project)) {
+	if !strings.EqualFold(promotion.ValueOf(found.Project), promotion.ValueOf(t.Project)) {
 		return promotion.Conflict(contract.ConfigurationPlanItemKindRouteTemplate, t.Name, "route_template_project_mismatch"), nil
 	}
 	same, err := sameTemplate(t, found)
@@ -147,11 +136,6 @@ func sameTemplate(desired, current Template) (bool, error) {
 	return bytes.Equal(left, right), nil
 }
 
-type storedTemplate struct {
-	id        string
-	projectID *string
-}
-
 func TemplateApplier(desired Desired) promotion.Applier {
 	return func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
 		directory, err := project.ReadDirectory(ctx, tx)
@@ -163,27 +147,18 @@ func TemplateApplier(desired Desired) promotion.Applier {
 			if err != nil {
 				return err
 			}
-			stored, found, err := lockTemplate(ctx, tx, t.Name)
+			stored, found, err := routes.LockTemplateNamed(ctx, tx, t.Name)
 			if err != nil {
 				return err
 			}
-			if found && deref(stored.projectID) != deref(projectID) {
+			if found && promotion.ValueOf(stored.ProjectID) != promotion.ValueOf(projectID) {
 				return access.Fail(409, "route_template_project_mismatch", "Route template "+t.Name+" belongs to a different project.")
 			}
 			in := t.input(projectID)
 			if !found {
 				return routes.WriteTemplate(ctx, tx, access.NewID(), access.NewID(), p.UserID(), &in, false)
 			}
-			return routes.WriteTemplate(ctx, tx, stored.id, access.NewID(), p.UserID(), &in, true)
+			return routes.WriteTemplate(ctx, tx, stored.ID, access.NewID(), p.UserID(), &in, true)
 		})
 	}
-}
-
-func lockTemplate(ctx context.Context, tx pgx.Tx, name string) (storedTemplate, bool, error) {
-	var stored storedTemplate
-	err := tx.QueryRow(ctx, "SELECT id::text,project_id::text FROM olp.route_templates WHERE name=$1 FOR UPDATE", name).Scan(&stored.id, &stored.projectID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return storedTemplate{}, false, nil
-	}
-	return stored, err == nil, err
 }

@@ -2,69 +2,59 @@ package agentpublication
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"slices"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/agents/publications"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
+	"github.com/tyk-swe/olp/internal/promotion/project"
 )
-
-const (
-	publicationsQuery = `SELECT p.id::text,pr.name,p.kind,p.draft,v.definition FROM olp.agent_publications p JOIN olp.projects pr ON pr.id=p.project_id LEFT JOIN olp.agent_publication_revisions v ON v.id=p.latest_revision_id WHERE NOT p.retired`
-	labelsQuery       = `SELECT l.publication_id::text,l.label,v.definition FROM olp.prompt_labels l JOIN olp.agent_publication_revisions v ON v.id=l.revision_id JOIN olp.agent_publications p ON p.id=l.publication_id WHERE NOT p.retired AND p.kind='prompt'`
-)
-
-type stored struct {
-	ID        string
-	Project   string
-	Kind      string
-	Draft     agentcontract.Draft
-	Published *agentcontract.Draft
-}
-
-type storedLabel struct {
-	Publication string
-	Name        string
-	Draft       agentcontract.Draft
-}
 
 func Read(ctx context.Context, q access.Queryer) ([]Publication, error) {
-	records, err := promotion.Rows(ctx, q, pgx.RowToStructByPos[stored], publicationsQuery)
+	directory, err := project.ReadDirectory(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	labels, err := promotion.Rows(ctx, q, pgx.RowToStructByPos[storedLabel], labelsQuery)
+	records, err := publications.ReadActive(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	return slices.SortedFunc(func(yield func(Publication) bool) {
-		for _, record := range records {
-			if !yield(exported(record, labelsOf(labels, record.ID))) {
-				return
-			}
+	labels, err := publications.ReadActivePromptLabels(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	exports, err := promotion.TryMap(records, func(record publications.ActivePublication) (Publication, error) {
+		name, ok := directory.Name(record.ProjectID)
+		if !ok {
+			return Publication{}, fmt.Errorf("agent publication %s belongs to an unknown project", record.ID)
 		}
-	}, byKey), nil
+		return exported(record, name, labelsOf(labels, record.ID)), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return slices.SortedFunc(slices.Values(exports), byKey), nil
 }
 
-func labelsOf(labels []storedLabel, publication string) map[string]agentcontract.Draft {
-	return nonEmpty(maps.Collect(func(yield func(string, agentcontract.Draft) bool) {
+func labelsOf(labels []publications.PromptLabel, publication string) map[string]agentcontract.Draft {
+	return maps.Collect(func(yield func(string, agentcontract.Draft) bool) {
 		for _, label := range labels {
-			if label.Publication == publication && !yield(label.Name, exportDraft(label.Draft)) {
+			if label.PublicationID == publication && !yield(label.Label, exportDraft(label.Definition)) {
 				return
 			}
 		}
-	}))
+	})
 }
 
-func exported(record stored, labels map[string]agentcontract.Draft) Publication {
-	ref := derivedRef(keyOf(record.Project, record.Kind, record.Draft.Name))
+func exported(record publications.ActivePublication, projectName string, labels map[string]agentcontract.Draft) Publication {
+	ref := derivedRef(keyOf(projectName, record.Kind, record.Draft.Name))
 	credential := credentialRef(record.Draft, ref)
 	return Publication{
-		Project:   record.Project,
+		Project:   projectName,
 		Draft:     exportDraft(record.Draft),
 		Published: exportOptional(record.Published),
 		Kind:      kindOf(record.Kind, labels, credential, publishedRef(record, ref, credential)),
@@ -78,7 +68,7 @@ func credentialRef(draft agentcontract.Draft, ref promotion.Ref) *promotion.Ref 
 	return &ref
 }
 
-func publishedRef(record stored, ref promotion.Ref, credential *promotion.Ref) *promotion.Ref {
+func publishedRef(record publications.ActivePublication, ref promotion.Ref, credential *promotion.Ref) *promotion.Ref {
 	published := credentialID(record.Published)
 	if published == nil {
 		return nil
@@ -132,19 +122,19 @@ func renderPublication(publication Publication) (contract.ConfigurationAgentPubl
 	if err != nil {
 		return contract.ConfigurationAgentPublication{}, err
 	}
-	labels, err := promotion.Convert[*map[string]contract.ConfigurationAgentDraft](nonEmpty(publication.labels()))
+	labels, err := promotion.Convert[*map[string]contract.ConfigurationAgentDraft](promotion.OptionalMap(publication.labels()))
 	if err != nil {
 		return contract.ConfigurationAgentPublication{}, err
 	}
-	agent, _ := publication.Kind.(Agent)
+	credentials := publication.Kind.credentials()
 	return contract.ConfigurationAgentPublication{
 		Project:                publication.Project,
 		Kind:                   contract.ConfigurationAgentPublicationKind(publication.Kind.name()),
 		Draft:                  draft,
 		Published:              published,
 		Labels:                 labels,
-		CredentialRef:          text(agent.Credential),
-		PublishedCredentialRef: text(agent.PublishedCredential),
+		CredentialRef:          text(credentials.Credential),
+		PublishedCredentialRef: text(credentials.PublishedCredential),
 	}, nil
 }
 

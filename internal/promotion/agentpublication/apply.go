@@ -2,8 +2,7 @@ package agentpublication
 
 import (
 	"context"
-	"errors"
-	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 
@@ -69,7 +68,7 @@ func toolsetsFirst(a, b Publication) int {
 func apply(ctx context.Context, tx pgx.Tx, p access.Principal, directory project.Directory, bindings promotion.Bindings, deps Deps, publication Publication) error {
 	projectID, ok := directory.ID(publication.Project)
 	if !ok {
-		return fmt.Errorf("agent publication project %q is missing", publication.Project)
+		return access.Fail(http.StatusConflict, "project_unknown", "Agent publication project "+publication.Project+" is not installed.")
 	}
 	if err := p.Project(&projectID, access.Change); err != nil {
 		return err
@@ -83,8 +82,7 @@ func apply(ctx context.Context, tx pgx.Tx, p access.Principal, directory project
 		return err
 	}
 	b := binder{tx: tx, deps: deps, project: projectID, bindings: bindings}
-	agent, _ := publication.Kind.(Agent)
-	draft, err := b.bind(ctx, publication.Draft, agent.Credential, draftOf(current))
+	draft, err := b.bind(ctx, publication.Draft, publication.Kind.credentials().Credential, draftOf(current))
 	if err != nil {
 		return err
 	}
@@ -113,8 +111,7 @@ func publishDeclared(ctx context.Context, tx pgx.Tx, p access.Principal, b binde
 	if publication.Published == nil {
 		return nil, nil
 	}
-	agent, _ := publication.Kind.(Agent)
-	definition, err := b.bindPublished(ctx, *publication.Published, agent, draft, previous)
+	definition, err := b.bindPublished(ctx, *publication.Published, publication.Kind.credentials(), draft, previous)
 	if err != nil {
 		return nil, err
 	}
@@ -151,13 +148,12 @@ func applyLabels(ctx context.Context, tx pgx.Tx, p access.Principal, next agentc
 
 func publishDefinition(ctx context.Context, tx pgx.Tx, actor string, p agentcontract.Publication, definition agentcontract.Draft) (agentcontract.Publication, error) {
 	draft := agentcontract.NormalizeDraft(definition)
-	var id string
-	err := tx.QueryRow(ctx, `SELECT id::text FROM olp.agent_publication_revisions WHERE publication_id=$1 AND digest=$2`, p.ID, agentcontract.DraftDigest(draft)).Scan(&id)
-	if err == nil {
-		return agentcontract.Publication{ID: p.ID, Kind: p.Kind, ProjectID: p.ProjectID, Name: p.Name, ETag: p.ETag, Draft: draft, RevisionID: &id, Retired: p.Retired}, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
+	id, found, err := publications.RevisionIDByDigest(ctx, tx, p.ID, agentcontract.DraftDigest(draft))
+	if err != nil {
 		return agentcontract.Publication{}, err
+	}
+	if found {
+		return agentcontract.Publication{ID: p.ID, Kind: p.Kind, ProjectID: p.ProjectID, Name: p.Name, ETag: p.ETag, Draft: draft, RevisionID: &id, Retired: p.Retired}, nil
 	}
 	return publications.Publish(ctx, tx, actor, agentcontract.Publication{ID: p.ID, Kind: p.Kind, ProjectID: p.ProjectID, Name: p.Name, ETag: p.ETag, Draft: draft, RevisionID: p.RevisionID, Retired: p.Retired})
 }

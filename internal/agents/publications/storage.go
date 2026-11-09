@@ -158,13 +158,9 @@ func Publish(ctx context.Context, tx pgx.Tx, actor string, publication agentcont
 }
 func publishRevision(ctx context.Context, tx pgx.Tx, actor string, p agentcontract.Publication, draft agentcontract.Draft) (string, error) {
 	digest := agentcontract.DraftDigest(draft)
-	var existing string
-	err := tx.QueryRow(ctx, `SELECT id::text FROM olp.agent_publication_revisions WHERE publication_id=$1 AND digest=$2`, p.ID, digest).Scan(&existing)
-	if err == nil {
-		return existing, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return "", err
+	existing, found, err := RevisionIDByDigest(ctx, tx, p.ID, digest)
+	if err != nil || found {
+		return existing, err
 	}
 	var count int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM olp.agent_publication_revisions WHERE publication_id=$1`, p.ID).Scan(&count); err != nil {

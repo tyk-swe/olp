@@ -3,7 +3,6 @@ package agentpublication
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"slices"
 	"strings"
 
@@ -27,7 +26,10 @@ type Publication struct {
 	Kind      Kind
 }
 
-type Kind interface{ name() string }
+type Kind interface {
+	name() string
+	credentials() Agent
+}
 
 type Agent struct{ Credential, PublishedCredential *promotion.Ref }
 
@@ -40,6 +42,10 @@ type Toolset struct{}
 func (Agent) name() string   { return "agent" }
 func (Prompt) name() string  { return "prompt" }
 func (Toolset) name() string { return "toolset" }
+
+func (a Agent) credentials() Agent { return a }
+func (Prompt) credentials() Agent  { return Agent{} }
+func (Toolset) credentials() Agent { return Agent{} }
 
 func kindOf(name string, labels map[string]agentcontract.Draft, credential, published *promotion.Ref) Kind {
 	switch name {
@@ -62,27 +68,32 @@ func (p Publication) labels() map[string]agentcontract.Draft {
 }
 
 func (p Publication) refs() []promotion.Ref {
-	agent, ok := p.Kind.(Agent)
-	if !ok {
-		return nil
-	}
-	return slices.Concat(optional(agent.Credential), optional(agent.PublishedCredential))
+	credentials := p.Kind.credentials()
+	return slices.Collect(func(yield func(promotion.Ref) bool) {
+		for _, ref := range []*promotion.Ref{credentials.Credential, credentials.PublishedCredential} {
+			if ref != nil && !yield(*ref) {
+				return
+			}
+		}
+	})
 }
 
 func (p Publication) definitions() []agentcontract.Draft {
 	labels := p.labels()
-	return slices.Concat([]agentcontract.Draft{p.Draft}, optional(p.Published), slices.Collect(func(yield func(agentcontract.Draft) bool) {
+	return slices.Collect(func(yield func(agentcontract.Draft) bool) {
+		if !yield(p.Draft) || (p.Published != nil && !yield(*p.Published)) {
+			return
+		}
 		for _, label := range labelNames {
 			if draft, ok := labels[label]; ok && !yield(draft) {
 				return
 			}
 		}
-	}))
+	})
 }
 
 func keyOf(project, kindName, name string) string {
-	encoded, _ := json.Marshal([3]string{strings.ToLower(project), kindName, strings.ToLower(name)})
-	return string(encoded)
+	return promotion.TupleKey(strings.ToLower(project), kindName, strings.ToLower(name))
 }
 
 func byKey(a, b Publication) int { return strings.Compare(a.key(), b.key()) }
@@ -98,11 +109,4 @@ func refOf(value *string) *promotion.Ref {
 	}
 	ref := promotion.Ref(*value)
 	return &ref
-}
-
-func optional[T any](value *T) []T {
-	if value == nil {
-		return nil
-	}
-	return []T{*value}
 }

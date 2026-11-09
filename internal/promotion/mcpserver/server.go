@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"slices"
 	"strings"
 
@@ -83,10 +82,7 @@ func parseEntry(entry contract.ConfigurationMCPServer, prior []contract.Configur
 	if prepared.Stdio != nil && entry.CredentialRef != nil {
 		return Server{}, access.Invalid("stdio", "Pin an installed executable and digest without HTTP credentials or endpoint.")
 	}
-	ref, err := refOf(identity)
-	if err != nil {
-		return Server{}, err
-	}
+	ref := refOf(identity)
 	if entry.CredentialRef != nil && promotion.Ref(*entry.CredentialRef) != ref {
 		return Server{}, access.Invalid("mcp_servers.credential_ref", "Use the deterministic exported MCP credential reference.")
 	}
@@ -121,13 +117,9 @@ func byKey(a, b Server) int {
 	return cmp.Or(cmp.Compare(a.key()[0], b.key()[0]), cmp.Compare(a.key()[1], b.key()[1]))
 }
 
-func refOf(identity key) (promotion.Ref, error) {
-	encoded, err := json.Marshal(identity)
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256(encoded)
-	return promotion.Ref("mcp/" + hex.EncodeToString(sum[:])), nil
+func refOf(identity key) promotion.Ref {
+	sum := sha256.Sum256([]byte(promotion.TupleKey(identity[:]...)))
+	return promotion.Ref("mcp/" + hex.EncodeToString(sum[:]))
 }
 
 func bearerOf(bound bool, ref promotion.Ref) *promotion.Ref {

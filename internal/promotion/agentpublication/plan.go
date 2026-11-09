@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"slices"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/agents/publications"
@@ -63,9 +62,9 @@ func planPublication(ctx context.Context, q access.Queryer, names promotion.Name
 	if err != nil {
 		return nil, err
 	}
-	agent, _ := publication.Kind.(Agent)
+	credentials := publication.Kind.credentials()
 	unbound := slices.Collect(func(yield func(promotion.Item) bool) {
-		for _, slot := range []slot{{agent.Credential, &publication.Draft, draftOf(current)}, {agent.PublishedCredential, publication.Published, previous}} {
+		for _, slot := range []slot{{credentials.Credential, &publication.Draft, draftOf(current)}, {credentials.PublishedCredential, publication.Published, previous}} {
 			if slot.ref != nil && bindings[*slot.ref] == nil && !reusableCredential(slot.prior, slot.desired) && !yield(promotion.Blocker(kind, key, "Supply the destination agent bearer credential binding for the declared definition.")) {
 				return
 			}
@@ -75,7 +74,7 @@ func planPublication(ctx context.Context, q access.Queryer, names promotion.Name
 	if err != nil {
 		return nil, err
 	}
-	return slices.Concat(unbound, when(blocked, promotion.Blocker(kind, key, "Rebind missing immutable destination references explicitly.")), []promotion.Item{
+	return slices.Concat(unbound, promotion.When(blocked, promotion.Blocker(kind, key, "Rebind missing immutable destination references explicitly.")), []promotion.Item{
 		{Kind: kind, Key: key, Action: actionOf(current, publication, bindings), Detail: planDetail},
 	}), nil
 }
@@ -132,12 +131,8 @@ func findPresent(ctx context.Context, q access.Queryer, projectID string, presen
 }
 
 func find(ctx context.Context, q access.Queryer, projectID string, publication Publication, lock bool) (*agentcontract.Publication, error) {
-	var id string
-	err := q.QueryRow(ctx, `SELECT id::text FROM olp.agent_publications WHERE NOT retired AND project_id=$1 AND kind=$2 AND lower(name)=lower($3)`, projectID, publication.Kind.name(), publication.Draft.Name).Scan(&id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
+	id, found, err := publications.ActiveID(ctx, q, projectID, publication.Kind.name(), publication.Draft.Name)
+	if err != nil || !found {
 		return nil, err
 	}
 	return publications.Load(ctx, q, id, publication.Kind.name(), lock)
@@ -158,14 +153,11 @@ func retainedDigests(ctx context.Context, q access.Queryer, current *agentcontra
 	if current == nil {
 		return nil, nil
 	}
-	rows, err := q.Query(ctx, `SELECT definition FROM olp.agent_publication_revisions WHERE publication_id=$1`, current.ID)
+	definitions, err := publications.RevisionDefinitions(ctx, q, current.ID)
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (string, error) {
-		definition, err := pgx.RowTo[agentcontract.Draft](row)
-		return exportedDigest(definition), err
-	})
+	return promotion.Map(definitions, exportedDigest), nil
 }
 
 func draftOf(current *agentcontract.Publication) *agentcontract.Draft {
@@ -180,11 +172,4 @@ func referenceProject(projectID string, present bool) string {
 		return placeholderProject
 	}
 	return projectID
-}
-
-func when(condition bool, item promotion.Item) []promotion.Item {
-	if !condition {
-		return nil
-	}
-	return []promotion.Item{item}
 }

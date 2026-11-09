@@ -15,11 +15,11 @@ import (
 
 func Planner(desired Desired, names promotion.Names) promotion.Planner {
 	return promotion.Planner{Plan: func(ctx context.Context, q access.Queryer) ([]promotion.Item, error) {
-		if err := checkGroups(ctx, q, desired.groups); err != nil {
-			return nil, err
-		}
 		state, err := Read(ctx, q)
 		if err != nil {
+			return nil, err
+		}
+		if err := checkGroups(ctx, q, state.directory, desired.groups); err != nil {
 			return nil, err
 		}
 		known := func(name string) bool {
@@ -66,7 +66,7 @@ func lifecycle(r Route, state State) []promotion.Item {
 	switch {
 	case !ok:
 		return nil
-	case !strings.EqualFold(deref(existing.Project), deref(r.Project)):
+	case !strings.EqualFold(promotion.ValueOf(existing.Project), promotion.ValueOf(r.Project)):
 		return []promotion.Item{promotion.Conflict(contract.ConfigurationPlanItemKindRoute, r.Slug, "route_project_mismatch")}
 	case r.Retired && !existing.Retired:
 		return []promotion.Item{promotion.Blocker(contract.ConfigurationPlanItemKindRoute, r.Slug, "route_lifecycle_requires_retirement")}

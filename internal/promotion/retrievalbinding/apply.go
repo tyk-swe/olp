@@ -7,7 +7,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/promotion"
-	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/retrieval"
 )
 
@@ -16,12 +15,12 @@ func Applier(desired Desired) promotion.Applier {
 		if len(desired.Bindings) == 0 {
 			return nil
 		}
-		directory, err := project.ReadDirectory(ctx, tx)
+		lookup, err := readInstalled(ctx, tx)
 		if err != nil {
 			return err
 		}
 		for _, binding := range desired.Bindings {
-			if err := apply(ctx, tx, p, directory, binding); err != nil {
+			if err := apply(ctx, tx, p, lookup, binding); err != nil {
 				return err
 			}
 		}
@@ -30,8 +29,8 @@ func Applier(desired Desired) promotion.Applier {
 	}
 }
 
-func apply(ctx context.Context, tx pgx.Tx, p access.Principal, directory project.Directory, binding Binding) error {
-	in, err := resolve(ctx, tx, directory, binding)
+func apply(ctx context.Context, tx pgx.Tx, p access.Principal, lookup installed, binding Binding) error {
+	in, err := resolve(ctx, tx, lookup, binding)
 	if err != nil {
 		return err
 	}
