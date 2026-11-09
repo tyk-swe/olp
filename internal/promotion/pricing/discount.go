@@ -63,19 +63,13 @@ func validateDiscount(i int, discount Discount, duplicate bool) error {
 }
 
 func readDiscounts(ctx context.Context, q access.Queryer, providers directory) ([]Discount, error) {
-	rows, err := q.Query(ctx, `SELECT DISTINCT ON (provider_kind,COALESCE(vendor_id,''),COALESCE(provider_id::text,''))
- provider_kind,vendor_id,provider_id::text,multiplier::text
- FROM olp.pricing_discounts WHERE effective_at<=now()
- ORDER BY provider_kind,COALESCE(vendor_id,''),COALESCE(provider_id::text,''),effective_at DESC,created_at DESC,id DESC`)
+	stored, err := usage.ReadDiscountsInForce(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Discount, error) {
-		var kind, multiplier string
-		var vendor, providerID *string
-		err := row.Scan(&kind, &vendor, &providerID, &multiplier)
-		return Discount{ProviderKind: kind, Provider: providers.nameOf(providerID), Vendor: vendor, Multiplier: multiplier}, err
-	})
+	return promotion.Map(stored, func(discount usage.DiscountInForce) Discount {
+		return Discount{ProviderKind: discount.ProviderKind, Provider: providers.nameOf(discount.ProviderID), Vendor: discount.VendorID, Multiplier: discount.Multiplier}
+	}), nil
 }
 
 func renderDiscounts(discounts []Discount) []contract.ConfigurationDiscountEntry {

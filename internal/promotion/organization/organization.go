@@ -6,10 +6,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/internal/promotion"
 )
 
@@ -40,10 +40,13 @@ func Parse(document contract.ConfigurationDocument) ([]Organization, error) {
 }
 
 func Read(ctx context.Context, q access.Queryer) ([]Organization, error) {
-	organizations, err := promotion.Rows(ctx, q, pgx.RowToStructByPos[Organization], "SELECT name,budget_policy FROM olp.organizations")
+	stored, err := projects.ReadOrganizationBudgets(ctx, q)
 	if err != nil {
 		return nil, err
 	}
+	organizations := promotion.Map(stored, func(organization projects.OrganizationBudget) Organization {
+		return Organization{Name: organization.Name, Budget: organization.Budget}
+	})
 	return slices.SortedFunc(slices.Values(organizations), byName), nil
 }
 

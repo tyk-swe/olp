@@ -5,11 +5,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"slices"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
@@ -51,8 +49,7 @@ func (s Sink) key() key {
 
 func (s Sink) ref() promotion.Ref {
 	k := s.key()
-	encoded, _ := json.Marshal([2]string{k.project, k.name})
-	sum := sha256.Sum256(encoded)
+	sum := sha256.Sum256([]byte(promotion.TupleKey(k.project, k.name)))
 	return promotion.Ref("sink/" + hex.EncodeToString(sum[:]))
 }
 
@@ -144,21 +141,20 @@ func Read(ctx context.Context, q access.Queryer) ([]Sink, error) {
 }
 
 func readStored(ctx context.Context, q access.Queryer) ([]stored, error) {
-	return promotion.Rows(ctx, q, func(row pgx.CollectableRow) (stored, error) {
-		var id, name, destination string
-		var credential, project *string
-		var streams []string
-		var enabled bool
-		scanErr := row.Scan(&id, &credential, &name, &project, &destination, &streams, &enabled)
-		return stored{id: id, credential: credential, sink: Sink{
-			Owner:       ownerOf(promotion.ValueOf(project), project != nil),
-			Name:        name,
-			Destination: destination,
-			Streams:     slices.Sorted(slices.Values(streams)),
-			Enabled:     enabled,
-			Signed:      credential != nil,
-		}}, scanErr
-	}, "SELECT s.id::text,s.credential_id::text,s.name,p.name,s.destination,s.streams,s.enabled FROM olp.managed_export_sinks s LEFT JOIN olp.projects p ON p.id=s.project_id WHERE s.retired_at IS NULL")
+	active, err := sinks.ReadActiveSinks(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	return promotion.Map(active, func(s sinks.ActiveSink) stored {
+		return stored{id: s.ID, credential: s.CredentialID, sink: Sink{
+			Owner:       ownerOf(promotion.ValueOf(s.Project), s.Project != nil),
+			Name:        s.Name,
+			Destination: s.Destination,
+			Streams:     slices.Sorted(slices.Values(s.Streams)),
+			Enabled:     s.Enabled,
+			Signed:      s.CredentialID != nil,
+		}}
+	}), nil
 }
 
 func index(current []stored) map[key]stored {

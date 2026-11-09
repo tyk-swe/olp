@@ -11,7 +11,6 @@ import (
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
-	"github.com/tyk-swe/olp/internal/scim"
 )
 
 type grant = struct {
@@ -22,13 +21,12 @@ type grant = struct {
 type group = contract.ConfigurationSCIMGroupMapping
 
 const (
-	readGroups     = `SELECT g.document->>'displayName',g.document->'` + scim.GroupExtension + `'->>'role',COALESCE(g.document->'` + scim.GroupExtension + `'->>'accessScope','assigned'),COALESCE((SELECT jsonb_agg(jsonb_build_object('project',p.name,'role',m.role) ORDER BY p.name) FROM olp.scim_group_projects m JOIN olp.projects p ON p.id=m.project_id WHERE m.group_id=g.id),'[]'::jsonb) FROM olp.scim_groups g ORDER BY lower(g.document->>'displayName')`
 	missingProject = "Every mapped project must exist or be declared."
 	invalidName    = "Use unique nonempty group names up to 100 characters."
 )
 
 func parseSCIM(fragment nullable.Nullable[[]group]) ([]group, error) {
-	entries, _ := promotion.Present(fragment)
+	entries := fragment.GetOrEmpty()
 	if len(entries) > 1000 {
 		return nil, access.Invalid("scim_group_mappings", "At most 1000 group mappings are supported.")
 	}
@@ -75,18 +73,20 @@ func invalidGrant(p grant) bool {
 }
 
 func readSCIM(ctx context.Context, q access.Queryer) ([]group, error) {
-	return promotion.Rows(ctx, q, func(row pgx.CollectableRow) (group, error) {
-		var name, scope string
-		var role *string
-		var projects []grant
-		err := row.Scan(&name, &role, &scope, &projects)
+	stored, err := access.ReadSCIMGroupMappings(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	return promotion.Map(stored, func(mapping access.SCIMGroupMapping) group {
 		return group{
-			Name:        name,
-			Role:        promotion.Nullable((*contract.ConfigurationSCIMGroupMappingRole)(role)),
-			AccessScope: contract.ConfigurationSCIMGroupMappingAccessScope(scope),
-			Projects:    projects,
-		}, err
-	}, readGroups)
+			Name:        mapping.Name,
+			Role:        promotion.Nullable((*contract.ConfigurationSCIMGroupMappingRole)(mapping.Role)),
+			AccessScope: contract.ConfigurationSCIMGroupMappingAccessScope(mapping.AccessScope),
+			Projects: promotion.Map(mapping.Projects, func(g access.SCIMProjectGrant) grant {
+				return grant{Project: g.Project, Role: contract.ConfigurationSCIMGroupMappingProjectsRole(g.Role)}
+			}),
+		}
+	}), nil
 }
 
 func renderSCIM(groups []group) []group {
@@ -153,23 +153,31 @@ func SCIMApplier(d Desired, deps Deps) promotion.Applier {
 			if stored, exists := existing[promotion.Fold(g.Name)]; exists && sameGroup(stored, g) {
 				return nil
 			}
-			if slices.ContainsFunc(g.Projects, func(p grant) bool { return lookup(directory, p.Project) == "" }) {
-				return access.Invalid("scim_group_mappings", missingProject)
+			mapping, err := extension(g, directory)
+			if err != nil {
+				return err
 			}
-			return deps.Access.StoreSCIMMapping(ctx, tx, p, g.Name, extension(g, directory))
+			return deps.Access.StoreSCIMMapping(ctx, tx, p, g.Name, mapping)
 		})
 	}
 }
 
-func extension(g group, directory project.Directory) map[string]any {
-	projects := promotion.Map(g.Projects, func(p grant) any {
-		return map[string]any{"value": lookup(directory, p.Project), "role": string(p.Role)}
+func extension(g group, directory project.Directory) (map[string]any, error) {
+	projects, err := promotion.TryMap(g.Projects, func(p grant) (any, error) {
+		id, ok := directory.ID(p.Project)
+		if !ok {
+			return nil, access.Invalid("scim_group_mappings", missingProject)
+		}
+		return map[string]any{"value": id, "role": string(p.Role)}, nil
 	})
+	if err != nil {
+		return nil, err
+	}
 	role, ok := promotion.Present(g.Role)
 	if !ok {
-		return map[string]any{"accessScope": string(g.AccessScope), "projects": projects}
+		return map[string]any{"accessScope": string(g.AccessScope), "projects": projects}, nil
 	}
-	return map[string]any{"accessScope": string(g.AccessScope), "role": string(role), "projects": projects}
+	return map[string]any{"accessScope": string(g.AccessScope), "role": string(role), "projects": projects}, nil
 }
 
 func sameGroup(a, b group) bool {

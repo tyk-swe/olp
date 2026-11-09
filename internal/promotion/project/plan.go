@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/internal/promotion"
+	"github.com/tyk-swe/olp/internal/routes"
 )
 
 func Planner(desired []Project, names promotion.Names) promotion.Planner {
@@ -46,8 +47,8 @@ func checkOrganizations(ctx context.Context, q access.Queryer, desired []Project
 		if project.Organization == nil || names.Organization(*project.Organization) {
 			continue
 		}
-		var exists bool
-		if err := q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.organizations WHERE lower(name)=lower($1))", *project.Organization).Scan(&exists); err != nil {
+		_, exists, err := projects.OrganizationIDByName(ctx, q, *project.Organization)
+		if err != nil {
 			return err
 		}
 		if !exists {
@@ -60,8 +61,8 @@ func checkOrganizations(ctx context.Context, q access.Queryer, desired []Project
 func checkRouteGroups(ctx context.Context, q access.Queryer, desired []Project) error {
 	for _, project := range desired {
 		for _, group := range slices.Sorted(maps.Keys(project.RouteGroups)) {
-			var foreign bool
-			if err := q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM (SELECT slug,project_id FROM olp.routes UNION ALL SELECT slug,project_id FROM olp.code_routes) r LEFT JOIN olp.projects p ON p.id=r.project_id WHERE r.slug=ANY($1::text[]) AND lower(p.name) IS DISTINCT FROM lower($2::text))`, project.RouteGroups[group], project.Name).Scan(&foreign); err != nil {
+			foreign, err := routes.SlugsOwnedOutsideProject(ctx, q, project.RouteGroups[group], project.Name)
+			if err != nil {
 				return err
 			}
 			if foreign {
@@ -87,12 +88,8 @@ func moves(desired Project, current Current) bool {
 }
 
 func projectItems(desired []Project, current State) []promotion.Item {
-	return slices.Collect(func(yield func(promotion.Item) bool) {
-		for _, project := range desired {
-			if !yield(promotion.Item{Kind: contract.ConfigurationPlanItemKindProject, Key: project.Name, Action: action(project, current)}) {
-				return
-			}
-		}
+	return promotion.Map(desired, func(project Project) promotion.Item {
+		return promotion.Item{Kind: contract.ConfigurationPlanItemKindProject, Key: project.Name, Action: action(project, current)}
 	})
 }
 
@@ -109,12 +106,8 @@ func action(desired Project, state State) contract.ConfigurationPlanItemAction {
 }
 
 func catalogItems(desired []Project, current State) []promotion.Item {
-	return slices.Collect(func(yield func(promotion.Item) bool) {
-		for _, project := range publishing(desired, current) {
-			if !yield(promotion.Item{Kind: contract.ConfigurationPlanItemKindCatalogPublication, Key: project.Name, Action: contract.ConfigurationPlanItemActionReplace}) {
-				return
-			}
-		}
+	return promotion.Map(publishing(desired, current), func(project Project) promotion.Item {
+		return promotion.Item{Kind: contract.ConfigurationPlanItemKindCatalogPublication, Key: project.Name, Action: contract.ConfigurationPlanItemActionReplace}
 	})
 }
 
@@ -126,13 +119,12 @@ func authorizeCatalog(p access.Principal, desired []Project, current State) erro
 }
 
 func publishing(desired []Project, state State) []Project {
-	return slices.Collect(func(yield func(Project) bool) {
-		for _, project := range desired {
-			current, _ := state.Project(project.Name)
-			if (current.Catalog.Enabled != project.PublicCatalog || current.Catalog.PricesPublic != project.PublicCatalogPrices) && !yield(project) {
-				return
-			}
+	return promotion.Filter(desired, func(project Project) bool {
+		current, ok := state.Project(project.Name)
+		if !ok {
+			return project.PublicCatalog || project.PublicCatalogPrices
 		}
+		return current.Catalog.Enabled != project.PublicCatalog || current.Catalog.PricesPublic != project.PublicCatalogPrices
 	})
 }
 

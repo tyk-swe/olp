@@ -2,7 +2,7 @@ package project
 
 import (
 	"context"
-	"slices"
+	"net/http"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
@@ -25,7 +25,11 @@ func Applier(desired []Project, costs Costs) promotion.Applier {
 		if err != nil {
 			return err
 		}
-		changed, err := projects.ApplyPolicies(ctx, tx, p, imports(desired, directory))
+		imported, err := imports(desired, directory)
+		if err != nil {
+			return err
+		}
+		changed, err := projects.ApplyPolicies(ctx, tx, p, imported)
 		if err != nil || !changed {
 			return err
 		}
@@ -36,14 +40,13 @@ func Applier(desired []Project, costs Costs) promotion.Applier {
 	}
 }
 
-func imports(desired []Project, directory Directory) []projects.PolicyImport {
-	return slices.Collect(func(yield func(projects.PolicyImport) bool) {
-		for _, project := range desired {
-			id, _ := directory.ID(project.Name)
-			if !yield(project.imported(id)) {
-				return
-			}
+func imports(desired []Project, directory Directory) ([]projects.PolicyImport, error) {
+	return promotion.TryMap(desired, func(project Project) (projects.PolicyImport, error) {
+		id, ok := directory.ID(project.Name)
+		if !ok {
+			return projects.PolicyImport{}, unknown(project.Name)
 		}
+		return project.imported(id), nil
 	})
 }
 
@@ -88,8 +91,8 @@ func assign(ctx context.Context, tx pgx.Tx, p access.Principal, costs Costs, pro
 	if err != nil {
 		return err
 	}
-	var current *string
-	if err := tx.QueryRow(ctx, "SELECT organization_id::text FROM olp.projects WHERE id=$1 FOR UPDATE", project).Scan(&current); err != nil {
+	current, err := projects.LockProjectOrganization(ctx, tx, project)
+	if err != nil {
 		return err
 	}
 	if current != nil && *current == organization {
@@ -109,7 +112,13 @@ func assign(ctx context.Context, tx pgx.Tx, p access.Principal, costs Costs, pro
 }
 
 func organizationID(ctx context.Context, q access.Queryer, name string) (string, error) {
-	var id string
-	err := q.QueryRow(ctx, "SELECT id::text FROM olp.organizations WHERE lower(name)=lower($1)", name).Scan(&id)
-	return id, err
+	id, found, err := projects.OrganizationIDByName(ctx, q, name)
+	if err != nil || found {
+		return id, err
+	}
+	return "", access.Fail(http.StatusConflict, "organization_unknown", "Organization "+name+" is not in the destination.")
+}
+
+func unknown(name string) error {
+	return access.Fail(http.StatusConflict, "project_unknown", "Project "+name+" is not in the destination.")
 }

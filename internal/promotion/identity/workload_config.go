@@ -12,7 +12,29 @@ import (
 	"github.com/tyk-swe/olp/internal/workload"
 )
 
-func configOf(issuer contract.ConfigurationWorkloadIssuer, projectID func(string) string) workload.Config {
+func configOf(issuer contract.ConfigurationWorkloadIssuer, projectID func(string) (string, error)) (workload.Config, error) {
+	mappings, err := promotion.TryMap(issuer.Mappings, func(m contract.ConfigurationWorkloadMapping) (workload.Mapping, error) {
+		id, err := projectID(m.Project)
+		if err != nil {
+			return workload.Mapping{}, err
+		}
+		return workload.Mapping{
+			AgentPrincipal:     promotion.ValueOf(m.AgentPrincipal),
+			Name:               m.Name,
+			Match:              m.Match,
+			ProjectID:          id,
+			LimitTemplate:      m.LimitTemplate,
+			RouteGroups:        m.RouteGroups,
+			AllowedToolsets:    identifiers(m.AllowedToolsets),
+			AllowedAgents:      identifiers(m.AllowedAgents),
+			Scopes:             promotion.Map(m.Scopes, func(s contract.ConfigurationWorkloadMappingScopes) string { return string(s) }),
+			EndUserClaim:       promotion.Pointer(m.EndUserClaim),
+			AllowProviderState: promotion.ValueOf(m.AllowProviderState),
+		}, nil
+	})
+	if err != nil {
+		return workload.Config{}, err
+	}
 	return workload.Config{
 		Name:               issuer.Name,
 		Issuer:             issuer.Issuer,
@@ -22,22 +44,8 @@ func configOf(issuer contract.ConfigurationWorkloadIssuer, projectID func(string
 		Algorithms:         promotion.Map(issuer.Algorithms, func(a contract.ConfigurationWorkloadIssuerAlgorithms) string { return string(a) }),
 		MaxLifetimeSeconds: int64(issuer.MaxLifetimeSeconds),
 		DisabledKeyIDs:     issuer.DisabledKeyIds,
-		Mappings: promotion.Map(issuer.Mappings, func(m contract.ConfigurationWorkloadMapping) workload.Mapping {
-			return workload.Mapping{
-				AgentPrincipal:     promotion.ValueOf(m.AgentPrincipal),
-				Name:               m.Name,
-				Match:              m.Match,
-				ProjectID:          projectID(m.Project),
-				LimitTemplate:      m.LimitTemplate,
-				RouteGroups:        m.RouteGroups,
-				AllowedToolsets:    identifiers(m.AllowedToolsets),
-				AllowedAgents:      identifiers(m.AllowedAgents),
-				Scopes:             promotion.Map(m.Scopes, func(s contract.ConfigurationWorkloadMappingScopes) string { return string(s) }),
-				EndUserClaim:       promotion.Pointer(m.EndUserClaim),
-				AllowProviderState: promotion.ValueOf(m.AllowProviderState),
-			}
-		}),
-	}
+		Mappings:           mappings,
+	}, nil
 }
 
 func entryOf(config workload.Config, directory project.Directory) (contract.ConfigurationWorkloadIssuer, error) {

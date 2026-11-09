@@ -3,7 +3,7 @@ package identity
 import (
 	"cmp"
 	"context"
-	"errors"
+	"maps"
 	"slices"
 	"strings"
 
@@ -11,6 +11,7 @@ import (
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/workload"
@@ -18,7 +19,6 @@ import (
 
 const (
 	placeholderProject = "00000000-0000-0000-0000-000000000001"
-	selectIssuer       = "SELECT id::text,document,etag::text FROM olp.workload_issuers WHERE issuer=$1"
 	unknownProject     = "Every mapping must reference a declared or existing project."
 )
 
@@ -26,23 +26,10 @@ type Prepared struct{ etags map[string]string }
 
 type preparedIssuer struct{ issuer, etag string }
 
-type storedIssuer struct {
-	id, etag string
-	config   workload.Config
-}
-
-type catalog struct {
-	templates contract.LimitTemplates
-	groups    contract.RouteGroups
-}
-
-type storedCatalog struct {
-	id string
-	catalog
-}
+type catalog struct{ templates, groups []string }
 
 func parseWorkload(fragment nullable.Nullable[[]contract.ConfigurationWorkloadIssuer]) ([]contract.ConfigurationWorkloadIssuer, error) {
-	entries, _ := promotion.Present(fragment)
+	entries := fragment.GetOrEmpty()
 	if len(entries) > 64 {
 		return nil, access.Invalid("workload_issuers", "Use at most 64 issuers.")
 	}
@@ -61,11 +48,15 @@ func validIssuer(issuer contract.ConfigurationWorkloadIssuer) error {
 	}); err != nil {
 		return err
 	}
-	return access.ValidateWorkloadConfig(configOf(issuer, func(string) string { return placeholderProject }))
+	config, err := configOf(issuer, func(string) (string, error) { return placeholderProject, nil })
+	if err != nil {
+		return err
+	}
+	return access.ValidateWorkloadConfig(config)
 }
 
 func readWorkload(ctx context.Context, q access.Queryer, directory project.Directory) ([]contract.ConfigurationWorkloadIssuer, error) {
-	configs, err := promotion.Rows(ctx, q, pgx.RowTo[workload.Config], "SELECT document FROM olp.workload_issuers ORDER BY issuer")
+	configs, err := access.ReadWorkloadIssuerDocuments(ctx, q)
 	if err != nil {
 		return nil, err
 	}
@@ -96,24 +87,32 @@ func planWorkload(ctx context.Context, q access.Queryer, d Desired) ([]promotion
 		if detail, found := issuerProblem(issuer, directory, catalogs, d.declared); found {
 			return promotion.Conflict(contract.ConfigurationPlanItemKindWorkloadIssuer, issuer.Issuer, detail), nil
 		}
-		return planIssuer(ctx, q, issuer, configOf(issuer, func(name string) string {
-			return cmp.Or(lookup(directory, name), placeholderProject)
-		}))
+		config, err := configOf(issuer, func(name string) (string, error) {
+			id, ok := directory.ID(name)
+			if !ok {
+				return placeholderProject, nil
+			}
+			return id, nil
+		})
+		if err != nil {
+			return promotion.Item{}, err
+		}
+		return planIssuer(ctx, q, issuer, config)
 	})
 }
 
 func planIssuer(ctx context.Context, q access.Queryer, issuer contract.ConfigurationWorkloadIssuer, config workload.Config) (promotion.Item, error) {
-	current, exists, err := readIssuer(ctx, q, selectIssuer, issuer.Issuer)
+	current, exists, err := access.FindWorkloadIssuer(ctx, q, issuer.Issuer)
 	if err != nil {
 		return promotion.Item{}, err
 	}
 	if !exists {
 		return issuerItem(issuer, contract.ConfigurationPlanItemActionCreate), nil
 	}
-	if err := access.ValidateWorkloadBindings(ctx, q, current.id, config); err != nil {
+	if err := access.ValidateWorkloadBindings(ctx, q, current.ID, config); err != nil {
 		return promotion.Item{}, err
 	}
-	return issuerItem(issuer, action(true, sameConfig(current.config, config))), nil
+	return issuerItem(issuer, action(true, sameConfig(current.Config, config))), nil
 }
 
 func issuerItem(issuer contract.ConfigurationWorkloadIssuer, act contract.ConfigurationPlanItemAction) promotion.Item {
@@ -144,13 +143,10 @@ func mappingProblem(enabled bool, mapping contract.ConfigurationWorkloadMapping,
 		return "", false
 	}
 	available := effective(catalogs[id], entry, isDeclared)
-	if _, ok := available.templates[mapping.LimitTemplate]; !ok {
+	if !slices.Contains(available.templates, mapping.LimitTemplate) {
 		return "A mapping template is absent from its project.", true
 	}
-	if slices.ContainsFunc(mapping.RouteGroups, func(group string) bool {
-		_, ok := available.groups[group]
-		return !ok
-	}) {
+	if slices.ContainsFunc(mapping.RouteGroups, func(group string) bool { return !slices.Contains(available.groups, group) }) {
 		return "A mapping route group is absent from its project.", true
 	}
 	return "", false
@@ -160,33 +156,25 @@ func effective(stored catalog, entry contract.ConfigurationProjectEntry, declare
 	if !declared {
 		return stored
 	}
-	groups, _ := promotion.Present(entry.RouteGroups)
+	groups := slices.Collect(maps.Keys(entry.RouteGroups.GetOrEmpty()))
 	templates, ok := promotion.Present(entry.LimitTemplates)
 	if !ok {
 		return catalog{templates: stored.templates, groups: groups}
 	}
-	return catalog{templates: templates, groups: groups}
+	return catalog{templates: slices.Collect(maps.Keys(templates)), groups: groups}
 }
 
 func readCatalogs(ctx context.Context, q access.Queryer) (map[string]catalog, error) {
-	projects, err := promotion.Rows(ctx, q, func(row pgx.CollectableRow) (storedCatalog, error) {
-		var stored storedCatalog
-		err := row.Scan(&stored.id, &stored.templates, &stored.groups)
-		return stored, err
-	}, "SELECT id::text,limit_templates,route_groups FROM olp.projects")
+	stored, err := projects.ReadProjectPolicies(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	return promotion.Associate(projects, func(stored storedCatalog) (string, catalog) { return stored.id, stored.catalog }), nil
-}
-
-func readIssuer(ctx context.Context, q access.Queryer, query, issuer string) (storedIssuer, bool, error) {
-	var current storedIssuer
-	err := q.QueryRow(ctx, query, issuer).Scan(&current.id, &current.config, &current.etag)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return storedIssuer{}, false, nil
-	}
-	return current, err == nil, err
+	return promotion.Associate(stored, func(project projects.ProjectPolicies) (string, catalog) {
+		return project.ID, catalog{
+			templates: slices.Collect(maps.Keys(project.Policies.Templates)),
+			groups:    slices.Collect(maps.Keys(project.Policies.RouteGroups)),
+		}
+	}), nil
 }
 
 func (d Desired) NeedsPrepare() bool { return len(d.issuers) > 0 }
@@ -205,12 +193,12 @@ func Prepare(ctx context.Context, desired Desired, principal access.Principal, d
 }
 
 func prepareIssuer(ctx context.Context, deps Deps, issuer contract.ConfigurationWorkloadIssuer) (preparedIssuer, error) {
-	current, exists, err := readIssuer(ctx, deps.Access.Pool, selectIssuer, issuer.Issuer)
+	current, exists, err := access.FindWorkloadIssuer(ctx, deps.Access.Pool, issuer.Issuer)
 	if err != nil {
 		return preparedIssuer{}, err
 	}
-	prepared := preparedIssuer{issuer: issuer.Issuer, etag: current.etag}
-	if !issuer.Enabled || exists && current.config.Enabled && current.config.JWKSURL == issuer.JwksUrl {
+	prepared := preparedIssuer{issuer: issuer.Issuer, etag: current.ETag}
+	if !issuer.Enabled || exists && current.Config.Enabled && current.Config.JWKSURL == issuer.JwksUrl {
 		return prepared, nil
 	}
 	if _, err := workload.Fetch(ctx, deps.Identity, issuer.JwksUrl); err != nil {
@@ -236,32 +224,33 @@ func WorkloadApplier(desired Desired, prepared Prepared, deps Deps) promotion.Ap
 }
 
 func applyIssuer(ctx context.Context, tx pgx.Tx, p access.Principal, deps Deps, directory project.Directory, issuer contract.ConfigurationWorkloadIssuer, etag string, prepared bool) error {
-	current, exists, err := readIssuer(ctx, tx, selectIssuer+" FOR UPDATE", issuer.Issuer)
+	current, exists, err := access.LockWorkloadIssuer(ctx, tx, issuer.Issuer)
 	if err != nil {
 		return err
 	}
-	if !prepared || current.etag != etag {
+	if !prepared || current.ETag != etag {
 		return access.Fail(409, "configuration_changed", "Workload trust changed during endpoint validation; plan and retry.")
 	}
-	if slices.ContainsFunc(issuer.Mappings, func(m contract.ConfigurationWorkloadMapping) bool { return lookup(directory, m.Project) == "" }) {
-		return access.Invalid("workload_issuers", unknownProject)
+	config, err := configOf(issuer, func(name string) (string, error) {
+		id, ok := directory.ID(name)
+		if !ok {
+			return "", access.Invalid("workload_issuers", unknownProject)
+		}
+		return id, nil
+	})
+	if err != nil {
+		return err
 	}
-	config := configOf(issuer, func(name string) string { return lookup(directory, name) })
-	if exists && sameConfig(current.config, config) {
+	if exists && sameConfig(current.Config, config) {
 		return nil
 	}
 	_, stored := deps.Access.StoreWorkloadIssuer(ctx, tx, p, issuerID(current, exists), config, !exists)
 	return stored
 }
 
-func issuerID(current storedIssuer, exists bool) string {
+func issuerID(current access.StoredWorkloadIssuer, exists bool) string {
 	if exists {
-		return current.id
+		return current.ID
 	}
 	return access.NewID()
-}
-
-func lookup(directory project.Directory, name string) string {
-	id, _ := directory.ID(name)
-	return id
 }

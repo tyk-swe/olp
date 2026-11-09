@@ -2,15 +2,14 @@ package project
 
 import (
 	"context"
-	"maps"
 	"slices"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/modelcatalog"
 	"github.com/tyk-swe/olp/internal/projects"
+	"github.com/tyk-swe/olp/internal/promotion"
 )
 
 type Current struct {
@@ -27,15 +26,7 @@ type State struct {
 }
 
 func Read(ctx context.Context, q access.Queryer) (State, error) {
-	rows, err := q.Query(ctx, `SELECT id::text,name,(SELECT name FROM olp.organizations WHERE id=organization_id),end_user_policy,attribution_policy,route_groups,budget_policy,limit_templates,attribution_budgets FROM olp.projects`)
-	if err != nil {
-		return State{}, err
-	}
-	scanned, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Current, error) {
-		var current Current
-		err := row.Scan(&current.ID, &current.Name, &current.Organization, &current.Policies.EndUser, &current.Policies.Attribution, &current.Policies.RouteGroups, &current.Policies.Budget, &current.Policies.Templates, &current.Policies.AttributionBudgets)
-		return current, err
-	})
+	stored, err := projects.ReadProjectPolicies(ctx, q)
 	if err != nil {
 		return State{}, err
 	}
@@ -43,23 +34,11 @@ func Read(ctx context.Context, q access.Queryer) (State, error) {
 	if err != nil {
 		return State{}, err
 	}
-	return stateOf(slices.SortedFunc(func(yield func(Current) bool) {
-		for _, current := range scanned {
-			if !yield(Current{ID: current.ID, Name: current.Name, Organization: current.Organization, Policies: current.Policies, Catalog: publications[current.ID]}) {
-				return
-			}
-		}
-	}, func(a, b Current) int { return byName(Project{Name: a.Name}, Project{Name: b.Name}) })), nil
-}
-
-func stateOf(current []Current) State {
-	return State{projects: current, byName: maps.Collect(func(yield func(string, Current) bool) {
-		for _, project := range current {
-			if !yield(strings.ToLower(project.Name), project) {
-				return
-			}
-		}
-	})}
+	current := promotion.Map(stored, func(project projects.ProjectPolicies) Current {
+		return Current{ID: project.ID, Name: project.Name, Organization: project.Organization, Policies: project.Policies, Catalog: publications[project.ID]}
+	})
+	sorted := slices.SortedFunc(slices.Values(current), func(a, b Current) int { return byName(Project{Name: a.Name}, Project{Name: b.Name}) })
+	return State{projects: sorted, byName: promotion.Index(sorted, func(project Current) string { return strings.ToLower(project.Name) })}, nil
 }
 
 func (s State) Project(name string) (Current, bool) {
@@ -68,13 +47,7 @@ func (s State) Project(name string) (Current, bool) {
 }
 
 func (s State) Projects() []Project {
-	return slices.Collect(func(yield func(Project) bool) {
-		for _, current := range s.projects {
-			if !yield(current.exported()) {
-				return
-			}
-		}
-	})
+	return promotion.Map(s.projects, Current.exported)
 }
 
 func (c Current) exported() Project {

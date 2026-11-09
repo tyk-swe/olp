@@ -2,7 +2,6 @@ package organization
 
 import (
 	"context"
-	"errors"
 	"reflect"
 	"strings"
 
@@ -15,11 +14,6 @@ import (
 )
 
 const detail = "Organization budget; destination memberships are preserved."
-
-type locked struct {
-	ID     string
-	Budget *authority.BudgetPolicy
-}
 
 func Planner(desired []Organization) promotion.Planner {
 	return promotion.Planner{Plan: func(ctx context.Context, q access.Queryer) ([]promotion.Item, error) {
@@ -76,16 +70,12 @@ func applyAll(ctx context.Context, tx pgx.Tx, p access.Principal, organizations 
 }
 
 func apply(ctx context.Context, tx pgx.Tx, p access.Principal, organization Organization) (bool, error) {
-	rows, err := tx.Query(ctx, "SELECT id::text,budget_policy FROM olp.organizations WHERE lower(name)=lower($1) FOR UPDATE", organization.Name)
+	current, found, err := projects.LockOrganizationByName(ctx, tx, organization.Name)
 	if err != nil {
 		return false, err
 	}
-	current, err := pgx.CollectOneRow(rows, pgx.RowToStructByPos[locked])
-	if errors.Is(err, pgx.ErrNoRows) {
+	if !found {
 		return create(ctx, tx, p, organization)
-	}
-	if err != nil {
-		return false, err
 	}
 	return setBudget(ctx, tx, p, current, organization.Budget)
 }
@@ -98,13 +88,13 @@ func create(ctx context.Context, tx pgx.Tx, p access.Principal, organization Org
 	if err != nil {
 		return false, err
 	}
-	if _, err := setBudget(ctx, tx, p, locked{ID: id}, organization.Budget); err != nil {
+	if _, err := setBudget(ctx, tx, p, projects.LockedOrganization{ID: id}, organization.Budget); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-func setBudget(ctx context.Context, tx pgx.Tx, p access.Principal, current locked, desired *authority.BudgetPolicy) (bool, error) {
+func setBudget(ctx context.Context, tx pgx.Tx, p access.Principal, current projects.LockedOrganization, desired *authority.BudgetPolicy) (bool, error) {
 	if reflect.DeepEqual(current.Budget, desired) {
 		return false, nil
 	}

@@ -123,47 +123,20 @@ func validateOwner(field string, entry contract.ConfigurationRateCardOwner, owne
 }
 
 func readCards(ctx context.Context, q access.Queryer) ([]storedCard, error) {
-	type row struct {
-		id                                      string
-		organization, project, revision, markup *string
-	}
-	rows, err := q.Query(ctx, `SELECT c.id::text,
- (SELECT name FROM olp.organizations WHERE id=c.organization_id),
- (SELECT name FROM olp.projects WHERE id=c.project_id),
- rev.id::text, rev.markup::text
- FROM olp.rate_cards c
- LEFT JOIN LATERAL (
-  SELECT r.id, r.markup FROM olp.rate_card_revisions r
-  WHERE r.rate_card_id=c.id AND r.effective_at<=now()
-  ORDER BY r.effective_at DESC,r.revision DESC LIMIT 1
- ) rev ON true
- ORDER BY c.id`)
+	cards, err := usage.ReadCardsInForce(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	cards, collectErr := pgx.CollectRows(rows, func(scanned pgx.CollectableRow) (row, error) {
-		var card row
-		err := scanned.Scan(&card.id, &card.organization, &card.project, &card.revision, &card.markup)
-		return card, err
-	})
-	if collectErr != nil {
-		return nil, collectErr
-	}
-	prices, priceErr := usage.LoadCardPricesByRevisions(ctx, q, slices.Collect(func(yield func(string) bool) {
-		for _, card := range cards {
-			if card.revision != nil && !yield(*card.revision) {
-				return
-			}
-		}
-	}))
+	live := promotion.Filter(cards, func(card usage.CardInForce) bool { return card.RevisionID != nil })
+	prices, priceErr := usage.LoadCardPricesByRevisions(ctx, q, promotion.Map(live, func(card usage.CardInForce) string { return *card.RevisionID }))
 	if priceErr != nil {
 		return nil, priceErr
 	}
-	return promotion.Map(cards, func(card row) storedCard {
+	return promotion.Map(cards, func(card usage.CardInForce) storedCard {
 		return storedCard{
-			id:   card.id,
-			live: card.revision != nil,
-			card: RateCard{Owner: storedOwner(card.organization, card.project), Markup: promotion.ValueOf(card.markup), Prices: prices[promotion.ValueOf(card.revision)]},
+			id:   card.ID,
+			live: card.RevisionID != nil,
+			card: RateCard{Owner: storedOwner(card.Organization, card.Project), Markup: promotion.ValueOf(card.Markup), Prices: prices[promotion.ValueOf(card.RevisionID)]},
 		}
 	}), nil
 }

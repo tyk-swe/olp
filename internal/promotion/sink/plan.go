@@ -19,12 +19,8 @@ const (
 
 func Planner(desired []Sink, names promotion.Names, bindings promotion.Bindings, credentials sinks.Credentials) promotion.Planner {
 	return promotion.Planner{
-		Claims: slices.Collect(func(yield func(promotion.Claim) bool) {
-			for _, s := range desired {
-				if s.Signed && !yield(promotion.Claim{Ref: s.ref(), Accept: acceptCredential}) {
-					return
-				}
-			}
+		Claims: promotion.Map(promotion.Filter(desired, func(s Sink) bool { return s.Signed }), func(s Sink) promotion.Claim {
+			return promotion.Claim{Ref: s.ref(), Accept: acceptCredential}
 		}),
 		Authorize: func(_ context.Context, _ access.Queryer, principal access.Principal) error {
 			for _, s := range desired {

@@ -2,22 +2,20 @@ package pricing
 
 import (
 	"context"
-	"maps"
 	"slices"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
+	"github.com/tyk-swe/olp/internal/providers"
 )
 
 type directory struct {
 	ids   map[string]string
 	names map[string]string
 }
-
-type named struct{ id, name string }
 
 type destination struct {
 	providers     directory
@@ -26,50 +24,41 @@ type destination struct {
 }
 
 func readDestination(ctx context.Context, q access.Queryer) (destination, error) {
-	providers, err := readDirectory(ctx, q, "SELECT id::text,name FROM olp.providers")
+	providerDirectory, err := readProviders(ctx, q)
 	if err != nil {
 		return destination{}, err
 	}
-	organizations, organizationErr := readDirectory(ctx, q, "SELECT id::text,name FROM olp.organizations")
+	organizations, organizationErr := projects.ReadOrganizationNames(ctx, q)
 	if organizationErr != nil {
 		return destination{}, organizationErr
 	}
-	projects, projectErr := project.ReadDirectory(ctx, q)
+	projectDirectory, projectErr := project.ReadDirectory(ctx, q)
 	if projectErr != nil {
 		return destination{}, projectErr
 	}
-	return destination{providers: providers, organizations: organizations, projects: projects}, nil
+	return destination{
+		providers:     providerDirectory,
+		organizations: directoryOf(organizations, func(o projects.Named) (string, string) { return o.ID, o.Name }),
+		projects:      projectDirectory,
+	}, nil
 }
 
-func readDirectory(ctx context.Context, q access.Queryer, query string) (directory, error) {
-	rows, err := q.Query(ctx, query)
+func readProviders(ctx context.Context, q access.Queryer) (directory, error) {
+	names, err := providers.ReadProviderNames(ctx, q)
 	if err != nil {
 		return directory{}, err
 	}
-	entries, collectErr := pgx.CollectRows(rows, func(row pgx.CollectableRow) (named, error) {
-		var entry named
-		err := row.Scan(&entry.id, &entry.name)
-		return entry, err
-	})
-	if collectErr != nil {
-		return directory{}, collectErr
-	}
+	return directoryOf(names, func(p providers.ProviderName) (string, string) { return p.ID, p.Name }), nil
+}
+
+func directoryOf[T any](entries []T, entry func(T) (id, name string)) directory {
 	return directory{
-		ids: maps.Collect(func(yield func(string, string) bool) {
-			for _, entry := range entries {
-				if !yield(strings.ToLower(entry.name), entry.id) {
-					return
-				}
-			}
+		ids: promotion.Associate(entries, func(e T) (string, string) {
+			id, name := entry(e)
+			return strings.ToLower(name), id
 		}),
-		names: maps.Collect(func(yield func(string, string) bool) {
-			for _, entry := range entries {
-				if !yield(entry.id, entry.name) {
-					return
-				}
-			}
-		}),
-	}, nil
+		names: promotion.Associate(entries, entry),
+	}
 }
 
 func (d directory) id(name string) (string, bool) {

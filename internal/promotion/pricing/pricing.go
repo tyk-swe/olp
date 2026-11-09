@@ -53,7 +53,7 @@ func Parse(document contract.ConfigurationDocument) (Desired, error) {
 }
 
 func Read(ctx context.Context, q access.Queryer) (Desired, error) {
-	providers, err := readDirectory(ctx, q, "SELECT id::text,name FROM olp.providers")
+	providers, err := readProviders(ctx, q)
 	if err != nil {
 		return Desired{}, err
 	}
