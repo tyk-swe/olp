@@ -7,15 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/secrets"
 )
-
-type NewCredential struct {
-	ProjectID *string
-	Name      string
-	Secret    []byte
-	CreatedBy string
-}
 
 func ActivateRevision(ctx context.Context, tx pgx.Tx, actor, guardrailID, revisionID string) error {
 	return activate(ctx, tx, "guardrails", "guardrail_revision_activations", actor, guardrailID, revisionID)
@@ -117,13 +109,4 @@ func requireSamePolicy(ctx context.Context, tx pgx.Tx, current, next, refusal st
 		return access.Invalid("guardrail_attachments", refusal)
 	}
 	return nil
-}
-
-func CreateCredential(ctx context.Context, tx pgx.Tx, keys *secrets.KeyRing, installation string, in NewCredential) (string, error) {
-	id := access.NewID()
-	if err := keys.Store(ctx, tx, installation, id, secrets.GuardrailCredential, in.Secret, nil); err != nil {
-		return "", err
-	}
-	_, err := tx.Exec(ctx, "INSERT INTO olp.guardrail_credentials(id,project_id,name,created_by) VALUES($1,$2,$3,$4)", id, in.ProjectID, in.Name, in.CreatedBy)
-	return id, err
 }

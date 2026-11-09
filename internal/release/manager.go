@@ -19,6 +19,7 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/guardrails/credential"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -681,13 +682,9 @@ func (m *Manager) install(ctx context.Context, id string, sequence int64, digest
 				}
 			}
 			for _, id := range spec.References().IDs() {
-				var project string
-				if err := tx.QueryRow(ctx, "SELECT project_id::text FROM olp.guardrail_credentials WHERE id=$1", id).Scan(&project); err != nil || project != definition.ProjectID {
-					return nil, errors.New("guardrail credential boundary mismatch")
-				}
-				secret, err := m.keys.Read(ctx, tx, m.installation, id, secrets.GuardrailCredential)
+				secret, err := credential.Load(ctx, tx, m.keys, m.installation, definition.ProjectID, id)
 				if err != nil {
-					return nil, errors.New("guardrail credential unavailable")
+					return nil, err
 				}
 				release.credentials[id] = secret
 			}

@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
-	"github.com/tyk-swe/olp/internal/codesessions"
 	"log/slog"
 	"net/http"
+
+	"github.com/tyk-swe/olp/internal/codesessions"
+	"github.com/tyk-swe/olp/internal/guardrails/credential"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
@@ -88,6 +90,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	(&release.DelegationManagement{Access: m.Access, Manager: m.Runtime}).Register(mux)
 	(&gateway.CacheManagement{Access: m.Access, Gateway: m.Gateway}).Register(mux)
 	(&branding.Server{Access: m.Access}).Register(mux)
+	credential.NewAPI(m.Access).Register(mux)
 	(&guardrails.Server{Access: m.Access, Publish: func(ctx context.Context, tx pgx.Tx, actor string) error {
 		_, err := release.Publish(ctx, tx, actor)
 		return err

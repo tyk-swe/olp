@@ -45,11 +45,7 @@ func (s *Server) registerPlatform(mux *http.ServeMux) {
 	a.Route(mux, "POST /api/v1/guardrail-attachments", s.attach)
 	a.Route(mux, "DELETE /api/v1/guardrail-attachments/{attachment_id}", s.detach)
 	a.Route(mux, "POST /api/v1/guardrails/evaluate", s.evaluate, access.MaxBody(MaxContentBytes))
-	a.Route(mux, "GET /api/v1/guardrail-credentials", s.listCredentials)
-	a.Route(mux, "GET /api/v1/guardrail-credentials/{credential_id}", s.getCredential)
-	a.Route(mux, "DELETE /api/v1/guardrail-credentials/{credential_id}", s.deleteCredential)
 	a.Route(mux, "PUT /api/v1/guardrail-attachments/{attachment_id}", s.replaceAttachment)
-	a.Route(mux, "POST /api/v1/guardrail-credentials", s.createCredential, access.MaxBody(256<<10))
 }
 func (s *Server) publish(ctx context.Context, tx pgx.Tx, actor string) error {
 	if s.Publish != nil {
@@ -556,47 +552,6 @@ func (s *Server) evaluate(r *http.Request, p access.Principal) (access.Reply, er
 	}
 	return access.Reply{Status: 200, Body: Applied(result, err)}, nil
 }
-func (s *Server) createCredential(r *http.Request, _ access.Principal) (access.Reply, error) {
-	var in struct {
-		ProjectID  string          `json:"project_id"`
-		Name       string          `json:"name"`
-		Credential json.RawMessage `json:"credential"`
-	}
-	if err := access.DecodeUnique(r, &in, 256<<10); err != nil {
-		return access.Reply{}, err
-	}
-	if ValidateCredential(in.Credential) != nil || in.Name == "" || len(in.Name) > 100 {
-		return access.Reply{}, access.Invalid("credential", "Supply a named credential object.")
-	}
-	tx, p, err := s.Access.BeginMutation(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err = s.Access.RequireProject(r.Context(), tx, p, &in.ProjectID); err != nil {
-		return access.Reply{}, err
-	}
-	claim, replayed, err := s.Access.Replay(r, tx, p, in)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if replayed != nil {
-		return *replayed, tx.Commit(r.Context())
-	}
-	id, err := CreateCredential(r.Context(), tx, s.Access.Keys, s.Access.Installation, NewCredential{ProjectID: &in.ProjectID, Name: in.Name, Secret: in.Credential, CreatedBy: p.UserID()})
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "guardrail.credential.create", "guardrail_credential", id, "success"); err != nil {
-		return access.Reply{}, err
-	}
-	reply := access.Reply{Status: 201, Body: map[string]string{"id": id, "name": in.Name, "project_id": in.ProjectID}}
-	if err = s.Access.CompleteReplay(r, tx, claim, reply); err != nil {
-		return access.Reply{}, err
-	}
-	return reply, tx.Commit(r.Context())
-}
-
 func (p ManagedPolicy) MarshalJSON() ([]byte, error) {
 	return json.Marshal(map[string]any{"id": p.PolicyID, "policy_id": p.PolicyID, "revision_id": p.ID, "project_id": p.ProjectID, "name": p.Name, "revision": p.Revision, "entries": p.Entries, "etag": p.ETag, "active_revision_id": p.ActiveRevisionID, "retired_at": p.RetiredAt})
 }

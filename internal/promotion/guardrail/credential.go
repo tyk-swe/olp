@@ -5,7 +5,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/guardrails/credential"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -36,7 +36,7 @@ func CredentialApplier(desired Section, bindings promotion.Bindings, vault Vault
 }
 
 func ensureCredential(ctx context.Context, tx pgx.Tx, p access.Principal, vault Vault, binding promotion.Credential, project *string, ref promotion.Ref) error {
-	_, found, err := guardrails.FindCredentialID(ctx, tx, project, string(ref))
+	_, found, err := credential.FindID(ctx, tx, project, string(ref))
 	if err != nil || found {
 		return err
 	}
@@ -44,7 +44,7 @@ func ensureCredential(ctx context.Context, tx pgx.Tx, p access.Principal, vault 
 	if !ok {
 		return access.Invalid("secret_bindings", unboundCredential)
 	}
-	_, err = guardrails.CreateCredential(ctx, tx, vault.Keys, vault.Installation, guardrails.NewCredential{ProjectID: project, Name: string(ref), Secret: []byte(sealed.Secret), CreatedBy: p.UserID()})
+	_, err = credential.Create(ctx, tx, vault.Keys, vault.Installation, credential.New{ProjectID: project, Name: string(ref), Secret: []byte(sealed.Secret), CreatedBy: p.UserID()})
 	return err
 }
 
@@ -52,7 +52,7 @@ type resolver func(string) (string, error)
 
 func credentialID(ctx context.Context, q access.Queryer, project *string) resolver {
 	return func(name string) (string, error) {
-		id, found, err := guardrails.FindCredentialID(ctx, q, project, name)
+		id, found, err := credential.FindID(ctx, q, project, name)
 		if err == nil && !found {
 			return "", access.Invalid("secret_bindings", unboundCredential)
 		}
@@ -61,5 +61,5 @@ func credentialID(ctx context.Context, q access.Queryer, project *string) resolv
 }
 
 func credentialName(ctx context.Context, q access.Queryer) resolver {
-	return func(id string) (string, error) { return guardrails.CredentialName(ctx, q, id) }
+	return func(id string) (string, error) { return credential.Name(ctx, q, id) }
 }
