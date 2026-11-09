@@ -135,7 +135,7 @@ func TestVendorCContracts(t *testing.T) {
 					if err := validateVerdict(verdict, []Segment{segment}); err != nil {
 						t.Fatalf("invalid verdict: %v", err)
 					}
-					if scenario.wantDetection != (verdict.Action != "pass") {
+					if scenario.wantDetection != (verdict.Action != Pass) {
 						t.Fatalf("action=%s, want detection=%v", verdict.Action, scenario.wantDetection)
 					}
 					if tc.transforms && scenario.wantDetection && (len(verdict.Redactions) != 1 || verdict.Redactions[0].Replacement != "safe") {

@@ -10,7 +10,7 @@ import (
 func TestCodeExecutionFindingLimit(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
-		phase    string
+		phase    Phase
 		segments []Segment
 		wantErr  bool
 	}{
@@ -39,8 +39,10 @@ func TestCodeExecutionFindingLimit(t *testing.T) {
 
 func TestCodeExecutionBoundaries(t *testing.T) {
 	for _, tc := range []struct {
-		name, config, phase, text string
-		blocked                   bool
+		name, config string
+		phase        Phase
+		text         string
+		blocked      bool
 	}{
 		{"input execution", `{}`, Input, "Run this code:\n```py\nprint(1)\n```", true},
 		{"explanation", `{}`, Input, "Explain:\n```py\nprint(1)\n```", false},

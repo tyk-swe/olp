@@ -33,15 +33,16 @@ func TestNamedVendorBContracts(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.kind, func(t *testing.T) {
-			for _, phase := range []string{Input, Output} {
+			for _, phase := range []Phase{Input, Output} {
 				if phase == Output && tc.output == "" {
 					continue
 				}
-				t.Run(phase, func(t *testing.T) {
+				t.Run(string(phase), func(t *testing.T) {
 					for _, decision := range []struct {
-						name, response, want string
-						status               int
-					}{{"allow", tc.allow, "pass", 200}, {"block", tc.block, Block, 200}, {"malformed", `{}`, "", 200}, {"unavailable", tc.allow, "", 503}} {
+						name, response string
+						want           Action
+						status         int
+					}{{"allow", tc.allow, Pass, 200}, {"block", tc.block, Block, 200}, {"malformed", `{}`, "", 200}, {"unavailable", tc.allow, "", 503}} {
 						t.Run(decision.name, func(t *testing.T) {
 							runner, endpoint := fakeRunner(t, func(w http.ResponseWriter, r *http.Request) {
 								if r.Method != http.MethodPost {
@@ -135,8 +136,8 @@ func TestNamedVendorBReplacementContracts(t *testing.T) {
 		{"prompt_security", `{"result":{"prompt":{"action":"modify","modified_messages":[{"role":"user","content":"[redacted]"}]}}}`, `{"result":{"response":{"action":"modify","modified_text":"[redacted]"}}}`},
 	} {
 		t.Run(tc.kind, func(t *testing.T) {
-			for _, phase := range []string{Input, Output} {
-				t.Run(phase, func(t *testing.T) {
+			for _, phase := range []Phase{Input, Output} {
+				t.Run(string(phase), func(t *testing.T) {
 					runner, endpoint := fakeRunner(t, func(w http.ResponseWriter, r *http.Request) {
 						response := tc.input
 						if phase == Output {
@@ -237,7 +238,7 @@ func TestNamedVendorBIBMOrchestrator(t *testing.T) {
 	})
 	config, _ := json.Marshal(ExternalConfig{Endpoint: endpoint, ContentEgress: true, CredentialRef: "secret", Parameters: json.RawMessage(`{"detector_id":"pii","orchestrator":true,"score_threshold":0.5,"detector_params":{"language":"en"}}`)})
 	verdict, err := runner.Evaluate(t.Context(), Revision{ID: "revision", GuardrailID: "guard", Type: "ibm_guardrails", Configuration: config, TimeoutMS: 1000, OnError: FailClosed}, Evaluation{Phase: Input, Segments: []Segment{{ID: "segment", Text: "private"}}})
-	if err != nil || verdict.Action != "pass" {
+	if err != nil || verdict.Action != Pass {
 		t.Fatalf("threshold ignored: %+v, %v", verdict, err)
 	}
 }

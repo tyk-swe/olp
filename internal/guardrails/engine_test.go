@@ -89,8 +89,8 @@ func TestToolJSONGuardrailsInspectDecodedValuesAndPreserveOtherContent(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, phase := range []string{Input, Output} {
-		t.Run(phase, func(t *testing.T) {
+	for _, phase := range []Phase{Input, Output} {
+		t.Run(string(phase), func(t *testing.T) {
 			document, err := oif.ParseJSON([]byte(original), oif.Limits{})
 			if err != nil {
 				t.Fatal(err)
@@ -200,7 +200,7 @@ func TestCompressionWorkflowRecoveryRespectsRedactionAndExemptions(t *testing.T)
 		}
 		index := slices.IndexFunc(evaluation.Segments, func(segment Segment) bool { return segment.ID == definition.ID })
 		if index < 0 {
-			return Verdict{Action: "pass"}, nil
+			return Verdict{Action: Pass}, nil
 		}
 		segment := evaluation.Segments[index]
 		return Verdict{Action: Redact, Redactions: []Redaction{{Segment: segment.ID, Start: 0, End: len(segment.Text), Replacement: definition.ID + " summary"}}}, nil
@@ -252,7 +252,7 @@ func TestCompressionSkipsExemptContent(t *testing.T) {
 	config := `{"endpoint":"https://guardrail.example/scan","credential_ref":"credential","content_egress":true}`
 	evaluator := EvaluatorFunc(func(context.Context, Revision, Evaluation) (Verdict, error) {
 		t.Error("exempt content was sent for compression")
-		return Verdict{Action: "pass"}, nil
+		return Verdict{Action: Pass}, nil
 	})
 	engine := testEngine(t, "headroom", config, Input, Redact, false, evaluator)
 	result, err := engine.Evaluate(t.Context(), Evaluation{
@@ -324,7 +324,7 @@ func TestNativeToolArgumentReplacementPreservesSignedContent(t *testing.T) {
 	}
 }
 
-func testEngine(t testing.TB, kind Kind, config string, phase, action string, monitor bool, external Evaluator) *Engine {
+func testEngine(t testing.TB, kind Kind, config string, phase Phase, action Action, monitor bool, external Evaluator) *Engine {
 	t.Helper()
 	d := Revision{ID: "revision", GuardrailID: "guard", ProjectID: "project", Type: kind, Configuration: json.RawMessage(config), TimeoutMS: 1000, OnError: FailClosed}
 	e, err := Compile([]Entry{{GuardrailID: d.GuardrailID, RevisionID: d.ID, Phase: phase, Action: action, Monitor: monitor}}, map[string]Revision{d.ID: d}, external)
@@ -333,7 +333,7 @@ func testEngine(t testing.TB, kind Kind, config string, phase, action string, mo
 	}
 	return e
 }
-func evaluateText(t testing.TB, e *Engine, text, phase string, m *Masking) (Result, error) {
+func evaluateText(t testing.TB, e *Engine, text string, phase Phase, m *Masking) (Result, error) {
 	t.Helper()
 	return e.Evaluate(context.Background(), Evaluation{Phase: phase, Segments: []Segment{{ID: "text", Text: text}}}, m)
 }

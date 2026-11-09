@@ -23,8 +23,8 @@ type Policy struct {
 
 type Entry struct {
 	Guardrail string
-	Phase     string
-	Action    string
+	Phase     guardrails.Phase
+	Action    guardrails.Action
 	Monitor   bool
 	Mandatory bool
 }
@@ -55,7 +55,7 @@ func parsePolicies(declared []contract.ConfigurationGuardrailPolicyEntry, defini
 
 func parsePolicy(p contract.ConfigurationGuardrailPolicyEntry) Policy {
 	return Policy{Project: p.Project, Name: p.Name, Entries: promotion.Map(p.Entries, func(e rule) Entry {
-		return Entry{Guardrail: e.Guardrail, Phase: string(e.Phase), Action: string(e.Action), Monitor: promotion.ValueOf(e.Monitor), Mandatory: promotion.ValueOf(e.Mandatory)}
+		return Entry{Guardrail: e.Guardrail, Phase: guardrails.Phase(e.Phase), Action: guardrails.Action(e.Action), Monitor: promotion.ValueOf(e.Monitor), Mandatory: promotion.ValueOf(e.Mandatory)}
 	})}
 }
 

@@ -117,7 +117,7 @@ func (d *toolPermissionDetector) detect(ctx context.Context, evaluation Evaluati
 		if err := ctx.Err(); err != nil {
 			return Verdict{}, err
 		}
-		if segment.Kind != "tool_call" && segment.Kind != "tool_definition" {
+		if segment.Kind != ToolCall && segment.Kind != ToolDefinition {
 			continue
 		}
 		allowed := d.defaultAllow
@@ -131,7 +131,7 @@ func (d *toolPermissionDetector) detect(ctx context.Context, evaluation Evaluati
 			if rule.name != nil && !rule.name.MatchString(segment.ToolName) || rule.kind != nil && !rule.kind.MatchString("function") {
 				continue
 			}
-			if segment.Kind == "tool_call" && len(rule.parameters) > 0 {
+			if segment.Kind == ToolCall && len(rule.parameters) > 0 {
 				if values == nil {
 					var err error
 					values, err = toolPermissionValues(segment.Text)
@@ -170,7 +170,7 @@ func (d *toolPermissionDetector) detect(ctx context.Context, evaluation Evaluati
 			return vendorBoolean(true, "tool.denied"), nil
 		}
 	}
-	return Verdict{Action: "pass"}, nil
+	return Verdict{Action: Pass}, nil
 }
 
 // Argument paths use the native dotted object/[] array notation. Every leaf

@@ -12,7 +12,7 @@ import (
 type Failure struct {
 	Code      string
 	Message   string
-	Guardrail *guardrails.Error
+	Guardrail guardrails.Failure
 }
 
 func refusal(code, message string) *Failure { return &Failure{Code: code, Message: message} }

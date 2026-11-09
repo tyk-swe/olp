@@ -93,12 +93,12 @@ func (r *Registry) Validate() error {
 	return nil
 }
 
-func ValidAttachmentScope(scope string) bool {
+func ValidAttachmentScope(scope Scope) bool {
 	_, valid := attachmentScopeRank(scope)
 	return valid
 }
 
-func attachmentScopeRank(scope string) (int, bool) {
+func attachmentScopeRank(scope Scope) (int, bool) {
 	switch scope {
 	case "installation":
 		return 0, true

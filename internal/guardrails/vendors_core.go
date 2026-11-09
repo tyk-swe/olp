@@ -21,7 +21,7 @@ type moderationParameters struct {
 	Model string `json:"model,omitempty"`
 }
 
-func evaluateOpenAIModeration(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, _ string, s Segment) (Verdict, error) {
+func evaluateOpenAIModeration(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, _ Phase, s Segment) (Verdict, error) {
 	var params moderationParameters
 	if err := decodeVendorParameters(c.Parameters, &params); err != nil {
 		return Verdict{}, err
@@ -45,9 +45,9 @@ func evaluateOpenAIModeration(ctx context.Context, client *http.Client, c Extern
 	return vendorBoolean(*response.Results[0].Flagged, "vendor.openai_moderation"), nil
 }
 
-func evaluateGenericGuardrail(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, phase string, s Segment) (Verdict, error) {
+func evaluateGenericGuardrail(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, phase Phase, s Segment) (Verdict, error) {
 	inputType := "request"
-	if phase == Output || phase == OutputStream {
+	if OutputPhase(phase) {
 		inputType = "response"
 	}
 	body := map[string]any{"texts": []string{s.Text}, "input_type": inputType, "additional_provider_specific_params": map[string]any{}}

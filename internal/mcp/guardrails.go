@@ -25,9 +25,9 @@ type toolGuardrailState struct {
 }
 
 func guardrailRefusal(err error) *Failure {
-	var policyFailure *guardrails.Error
+	var policyFailure guardrails.Failure
 	if errors.As(err, &policyFailure) {
-		return &Failure{Code: policyFailure.Code, Message: "The tool call could not satisfy the configured guardrails.", Guardrail: policyFailure}
+		return &Failure{Code: string(policyFailure), Message: "The tool call could not satisfy the configured guardrails.", Guardrail: policyFailure}
 	}
 	return refusal("guardrail_unavailable", "The guardrail could not be evaluated.")
 }
@@ -50,7 +50,7 @@ func stateDecisions(state *toolGuardrailState) []guardrails.Evidence {
 	return slices.Clone(state.decisions)
 }
 
-func (s *Executor) evaluateToolPhase(ctx context.Context, in CallRequest, reservation *accounting.Reservation, state *toolGuardrailState, phase string, segments []guardrails.Segment) (guardrails.Result, error) {
+func (s *Executor) evaluateToolPhase(ctx context.Context, in CallRequest, reservation *accounting.Reservation, state *toolGuardrailState, phase guardrails.Phase, segments []guardrails.Segment) (guardrails.Result, error) {
 	if s.guardrails == nil {
 		return state.engine.Unavailable(phase)
 	}
@@ -72,7 +72,7 @@ func (s *Executor) refuseGuardedCall(ctx context.Context, in CallRequest, reserv
 	}
 }
 
-func unsupportedToolPhases(engine *guardrails.Engine, phases []string) ([]guardrails.Evidence, error) {
+func unsupportedToolPhases(engine *guardrails.Engine, phases []guardrails.Phase) ([]guardrails.Evidence, error) {
 	if len(phases) == 0 {
 		return nil, nil
 	}
@@ -88,7 +88,7 @@ func (s *Executor) guardArguments(ctx context.Context, in CallRequest, reservati
 	if state == nil {
 		return in.Arguments, nil, nil
 	}
-	unavailable, failure := unsupportedToolPhases(state.engine, []string{guardrails.InputParallel, guardrails.OutputStream})
+	unavailable, failure := unsupportedToolPhases(state.engine, []guardrails.Phase{guardrails.InputParallel, guardrails.OutputStream})
 	if failure != nil {
 		refused := &toolGuardrailState{engine: state.engine, masks: state.masks, decisions: unavailable}
 		s.refuseGuardedCall(ctx, in, reservation, refused)

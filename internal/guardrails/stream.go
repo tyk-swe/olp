@@ -64,7 +64,7 @@ func NewStream(engine *Engine, request Evaluation, window int) (*Stream, error) 
 // Push returns only frames proven safe to release. A frame carrying a tool
 // call must be assembled and schema-checked by the native adapter beforehand.
 func (s *Stream) Push(ctx context.Context, frame []byte, text string) ([][]byte, error) {
-	return s.PushSegments(ctx, frame, []Segment{{ID: "stream", Role: "assistant", Text: text}})
+	return s.PushSegments(ctx, frame, []Segment{{ID: "stream", Role: Assistant, Text: text}})
 }
 
 // PushSegments keeps independent candidates and text fields in separate
@@ -145,7 +145,7 @@ func (s *Stream) inspect(ctx context.Context) error {
 		if s.masks != nil {
 			text = s.masks.Restore(text)
 		}
-		s.request.Segments = append(s.request.Segments, Segment{ID: id, Role: "assistant", Text: text})
+		s.request.Segments = append(s.request.Segments, Segment{ID: id, Role: Assistant, Text: text})
 	}
 	result, err := s.engine.Evaluate(ctx, s.request, nil)
 	for _, d := range result.Decisions {

@@ -245,7 +245,7 @@ func (s *Server) recordBusiness(env Envelope, x *call) {
 		s.deps.Business.Cache(env.Route, x.cache.result, x.cache.storedBytes, x.cache.reason != "")
 	}
 	for _, decision := range env.GuardrailDecisions {
-		s.deps.Business.Guardrail(telemetry.BusinessLabels{Route: env.Route, Project: project, Key: env.KeyID}, decision.Phase, decision.Action, decision.Outcome, decision.LatencyMS)
+		s.deps.Business.Guardrail(telemetry.BusinessLabels{Route: env.Route, Project: project, Key: env.KeyID}, string(decision.Phase), string(decision.Action), string(decision.Outcome), decision.LatencyMS)
 	}
 	var snapshot *routing.View
 	if x.historicalSnapshot != nil {

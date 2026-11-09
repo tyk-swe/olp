@@ -271,7 +271,7 @@ func regexpWidth(r *syntax.Regexp) int {
 	}
 }
 func (p *patternDetector) detect(ctx context.Context, e Evaluation) (Verdict, error) {
-	v := Verdict{Action: "pass"}
+	v := Verdict{Action: Pass}
 	for _, s := range e.Segments {
 		hasDigits := strings.ContainsAny(s.Text, "0123456789")
 		for _, r := range p.patterns {
@@ -495,7 +495,7 @@ func (d *schemaDetector) detect(ctx context.Context, e Evaluation) (Verdict, err
 			return Verdict{Action: Block, Categories: []string{"schema.invalid"}}, nil
 		}
 	}
-	return Verdict{Action: "pass"}, nil
+	return Verdict{Action: Pass}, nil
 }
 
 type toolsDetector struct {
@@ -519,7 +519,7 @@ func (d *toolsDetector) detect(ctx context.Context, e Evaluation) (Verdict, erro
 	}
 	untrusted := false
 	for _, s := range segments {
-		if s.Kind == "tool_result" && (s.Untrusted || globsMatch(d.config.Untrusted, s.ToolName)) {
+		if s.Kind == ToolResult && (s.Untrusted || globsMatch(d.config.Untrusted, s.ToolName)) {
 			untrusted = true
 		}
 	}
@@ -527,7 +527,7 @@ func (d *toolsDetector) detect(ctx context.Context, e Evaluation) (Verdict, erro
 		if err := ctx.Err(); err != nil {
 			return Verdict{}, err
 		}
-		if s.Kind != "tool_call" && s.Kind != "tool_definition" {
+		if s.Kind != ToolCall && s.Kind != ToolDefinition {
 			continue
 		}
 		category := ""
@@ -542,14 +542,14 @@ func (d *toolsDetector) detect(ctx context.Context, e Evaluation) (Verdict, erro
 		if category != "" {
 			return Verdict{Action: Block, Categories: []string{category}}, nil
 		}
-		if schema := d.schemas[s.ToolName]; schema != nil && s.Kind == "tool_call" {
+		if schema := d.schemas[s.ToolName]; schema != nil && s.Kind == ToolCall {
 			v, err := jsonschema.UnmarshalJSON(strings.NewReader(s.Text))
 			if err != nil || schema.Validate(v) != nil {
 				return Verdict{Action: Block, Categories: []string{"tool.schema_invalid"}}, nil
 			}
 		}
 	}
-	return Verdict{Action: "pass"}, nil
+	return Verdict{Action: Pass}, nil
 }
 
 // Word characters include letters and numbers in every script.

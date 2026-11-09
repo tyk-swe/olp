@@ -26,7 +26,7 @@ type ApplyInput struct {
 	Policy           *PolicyRevision     `json:"-"`
 	Definitions      map[string]Revision `json:"-"`
 	PolicyRevisionID string              `json:"policy_revision_id"`
-	Phase            string              `json:"phase"`
+	Phase            Phase               `json:"phase"`
 	Segments         []Segment           `json:"segments"`
 }
 
@@ -385,11 +385,11 @@ func AuthorizeAttachment(ctx context.Context, q access.Queryer, p access.Princip
 	}
 }
 
-func attachmentProject(ctx context.Context, q access.Queryer, scope, id string) (*string, error) {
-	queries := map[string]string{
-		"route":   "SELECT project_id::text FROM olp.routes WHERE id=$1",
-		"api-key": "SELECT project_id::text FROM olp.api_keys WHERE id=$1",
-		"toolset": "SELECT project_id::text FROM olp.agent_publications WHERE id=$1 AND kind='toolset'",
+func attachmentProject(ctx context.Context, q access.Queryer, scope Scope, id string) (*string, error) {
+	queries := map[Scope]string{
+		RouteScope:   "SELECT project_id::text FROM olp.routes WHERE id=$1",
+		KeyScope:     "SELECT project_id::text FROM olp.api_keys WHERE id=$1",
+		ToolsetScope: "SELECT project_id::text FROM olp.agent_publications WHERE id=$1 AND kind='toolset'",
 	}
 	query, ok := queries[scope]
 	if !ok {
@@ -517,7 +517,7 @@ func (s *Server) evaluate(r *http.Request, p access.Principal) (access.Reply, er
 	if err := access.DecodeUnique(r, &in, MaxContentBytes); err != nil {
 		return access.Reply{}, err
 	}
-	if !validPhase(in.Phase) {
+	if !in.Phase.Valid() {
 		return access.Reply{}, access.Invalid("phase", "Choose a supported evaluation phase.")
 	}
 	if err := validateSegments(in.Segments); err != nil {

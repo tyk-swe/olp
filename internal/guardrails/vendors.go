@@ -12,9 +12,9 @@ import (
 // before publication; endpoint, credentials and transport remain shared.
 type namedVendor struct {
 	validate   func(json.RawMessage) error
-	evaluate   func(context.Context, *http.Client, ExternalConfig, externalCredential, string, Segment) (Verdict, error)
+	evaluate   func(context.Context, *http.Client, ExternalConfig, externalCredential, Phase, Segment) (Verdict, error)
 	transforms bool
-	phases     []string
+	phases     []Phase
 }
 
 func isModelGuardrail(kind Kind) bool {
@@ -51,7 +51,7 @@ func vendorBoolean(blocked bool, category string) Verdict {
 	if blocked {
 		return Verdict{Action: Block, Categories: []string{category}}
 	}
-	return Verdict{Action: "pass"}
+	return Verdict{Action: Pass}
 }
 
 func vendorReplacement(segment Segment, replacement, category string) (Verdict, error) {

@@ -18,7 +18,7 @@ var namedVendorsA = map[string]namedVendor{
 	"aporia":           {validate: aNoParameters, evaluate: aAporia},
 	"dynamoai":         {validate: aValidateDynamo, evaluate: aDynamo},
 	"guardrails_ai":    {validate: aNoParameters, evaluate: aGuardrailsAI, transforms: true},
-	"lakera_v1":        {validate: aValidateLakera, evaluate: aLakera, phases: []string{Input, InputParallel}},
+	"lakera_v1":        {validate: aValidateLakera, evaluate: aLakera, phases: []Phase{Input, InputParallel}},
 	"hiddenlayer":      {validate: aValidateHiddenlayer, evaluate: aHiddenlayer, transforms: true},
 	"aim":              {validate: aNoParameters, evaluate: aAim, transforms: true},
 	"cato_networks":    {validate: aNoParameters, evaluate: aCato, transforms: true},
@@ -31,18 +31,18 @@ var namedVendorsA = map[string]namedVendor{
 
 func aNoParameters(raw json.RawMessage) error { return decodeVendorParameters(raw, &struct{}{}) }
 
-func aOutput(phase string) bool { return phase == Output || phase == OutputStream }
-func aRole(phase string, s Segment) string {
+func aOutput(phase Phase) bool { return OutputPhase(phase) }
+func aRole(phase Phase, s Segment) string {
 	if aOutput(phase) {
 		return "assistant"
 	}
 	switch s.Role {
 	case "system", "user", "assistant":
-		return s.Role
+		return string(s.Role)
 	}
 	return "user"
 }
-func aMessages(phase string, s Segment) []map[string]string {
+func aMessages(phase Phase, s Segment) []map[string]string {
 	return []map[string]string{{"role": aRole(phase, s), "content": s.Text}}
 }
 func aRead(raw []byte, target any) error {
@@ -75,7 +75,7 @@ func aReplacement(messages []aMessage, s Segment, category string) (Verdict, err
 	return vendorReplacement(s, *messages[0].Content, category)
 }
 
-func aAporia(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase string, s Segment) (Verdict, error) {
+func aAporia(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase Phase, s Segment) (Verdict, error) {
 	body := map[string]any{"messages": aMessages(phase, s), "validation_target": "prompt"}
 	if aOutput(phase) {
 		body = map[string]any{"response": s.Text, "validation_target": "response"}
@@ -113,7 +113,7 @@ func aValidateDynamo(raw json.RawMessage) error {
 	}
 	return nil
 }
-func aDynamo(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase string, s Segment) (Verdict, error) {
+func aDynamo(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase Phase, s Segment) (Verdict, error) {
 	var p aDynamoParameters
 	if decodeVendorParameters(c.Parameters, &p) != nil {
 		return Verdict{}, errEvaluation
@@ -144,7 +144,7 @@ func aDynamo(ctx context.Context, client *http.Client, c ExternalConfig, cred ex
 	return Verdict{}, errEvaluation
 }
 
-func aGuardrailsAI(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, _ string, s Segment) (Verdict, error) {
+func aGuardrailsAI(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, _ Phase, s Segment) (Verdict, error) {
 	raw, err := vendorJSON(ctx, client, c.Endpoint, map[string]string{"llmOutput": s.Text}, cred, "Authorization", "Bearer ")
 	if err != nil {
 		return Verdict{}, err
@@ -181,7 +181,7 @@ func aValidateLakera(raw json.RawMessage) error {
 	}
 	return nil
 }
-func aLakera(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase string, s Segment) (Verdict, error) {
+func aLakera(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase Phase, s Segment) (Verdict, error) {
 	if aOutput(phase) {
 		return Verdict{}, errEvaluation
 	}
@@ -228,7 +228,7 @@ func aValidateHiddenlayer(raw json.RawMessage) error {
 	}
 	return nil
 }
-func aHiddenlayer(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase string, s Segment) (Verdict, error) {
+func aHiddenlayer(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase Phase, s Segment) (Verdict, error) {
 	var p aHiddenlayerParameters
 	if decodeVendorParameters(c.Parameters, &p) != nil {
 		return Verdict{}, errEvaluation
@@ -313,13 +313,13 @@ func aHiddenlayer(ctx context.Context, client *http.Client, c ExternalConfig, cr
 	return Verdict{}, errEvaluation
 }
 
-func aAim(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase string, s Segment) (Verdict, error) {
+func aAim(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase Phase, s Segment) (Verdict, error) {
 	return aAnalyze(ctx, client, c, cred, phase, s, "aim")
 }
-func aCato(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase string, s Segment) (Verdict, error) {
+func aCato(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase Phase, s Segment) (Verdict, error) {
 	return aAnalyze(ctx, client, c, cred, phase, s, "cato")
 }
-func aAnalyze(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase string, s Segment, vendor string) (Verdict, error) {
+func aAnalyze(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase Phase, s Segment, vendor string) (Verdict, error) {
 	raw, err := externalJSON(ctx, client, c.Endpoint, map[string]any{"messages": aMessages(phase, s)}, func(req *http.Request, _ []byte) error {
 		if cred.APIKey == "" {
 			return errEvaluation
@@ -379,7 +379,7 @@ func aValidatePangea(raw json.RawMessage) error {
 	}
 	return nil
 }
-func aPangea(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase string, s Segment) (Verdict, error) {
+func aPangea(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase Phase, s Segment) (Verdict, error) {
 	var p aPangeaParameters
 	if decodeVendorParameters(c.Parameters, &p) != nil {
 		return Verdict{}, errEvaluation
@@ -441,7 +441,7 @@ func aValidateCrowdstrike(raw json.RawMessage) error {
 	}
 	return nil
 }
-func aCrowdstrike(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase string, s Segment) (Verdict, error) {
+func aCrowdstrike(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase Phase, s Segment) (Verdict, error) {
 	var p aCrowdstrikeParameters
 	if decodeVendorParameters(c.Parameters, &p) != nil {
 		return Verdict{}, errEvaluation
@@ -494,7 +494,7 @@ func aValidateLasso(raw json.RawMessage) error {
 	}
 	return nil
 }
-func aLasso(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase string, s Segment) (Verdict, error) {
+func aLasso(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase Phase, s Segment) (Verdict, error) {
 	var p aLassoParameters
 	if decodeVendorParameters(c.Parameters, &p) != nil {
 		return Verdict{}, errEvaluation
@@ -572,7 +572,7 @@ func aValidatePillar(raw json.RawMessage) error {
 	}
 	return nil
 }
-func aPillar(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase string, s Segment) (Verdict, error) {
+func aPillar(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase Phase, s Segment) (Verdict, error) {
 	var p aPillarParameters
 	if decodeVendorParameters(c.Parameters, &p) != nil {
 		return Verdict{}, errEvaluation
@@ -622,7 +622,7 @@ func aValidateGrayswan(raw json.RawMessage) error {
 	}
 	return nil
 }
-func aGrayswan(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase string, s Segment) (Verdict, error) {
+func aGrayswan(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase Phase, s Segment) (Verdict, error) {
 	var p aGrayswanParameters
 	if decodeVendorParameters(c.Parameters, &p) != nil {
 		return Verdict{}, errEvaluation

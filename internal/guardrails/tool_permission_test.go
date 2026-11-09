@@ -13,8 +13,10 @@ func TestToolPermissionOrderedRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
-		name, tool, kind, args string
-		blocked                bool
+		name, tool string
+		kind       SegmentKind
+		args       string
+		blocked    bool
 	}{
 		{"allow", "read_file", "tool_call", `{"path":"/safe/file","options":{"scopes":["read","list"]}}`, false},
 		{"deny-path", "read_file", "tool_call", `{"path":"/etc/passwd","options":{"scopes":["read"]}}`, true},
@@ -76,7 +78,7 @@ func TestToolPermissionParameterRulesAcrossSegments(t *testing.T) {
 	}
 	segments := []Segment{{ID: "s0", Kind: "tool_call", ToolName: "tool", Text: `{"value":"no"}`}, {ID: "s1", Kind: "tool_call", ToolName: "tool", Text: `{"value":"yes"}`}}
 	verdict, err := detector.detect(t.Context(), Evaluation{Segments: segments})
-	if err != nil || verdict.Action != "pass" {
+	if err != nil || verdict.Action != Pass {
 		t.Fatalf("parameter fallback failed: %+v error=%v", verdict, err)
 	}
 	segments[1].Text = `{"value":"other"}`

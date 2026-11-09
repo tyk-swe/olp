@@ -20,7 +20,7 @@ var namedVendorsB = map[string]namedVendor{
 	"noma":             {validate: validateNomaV1, evaluate: evaluateNoma, transforms: true},
 	"noma_v2":          {validate: validateNoma, evaluate: evaluateNomaV2, transforms: true},
 	"zscaler_ai_guard": {validate: validateZscaler, evaluate: evaluateZscaler},
-	"javelin":          {validate: validateJavelin, evaluate: evaluateJavelin, phases: []string{Input, InputParallel}},
+	"javelin":          {validate: validateJavelin, evaluate: evaluateJavelin, phases: []Phase{Input, InputParallel}},
 	"enkryptai":        {validate: validateEnkrypt, evaluate: evaluateEnkrypt},
 	"ibm_guardrails":   {validate: validateIBM, evaluate: evaluateIBM},
 	"onyx":             {validate: validateBEmpty, evaluate: evaluateOnyx},
@@ -33,14 +33,14 @@ func validateBEmpty(raw json.RawMessage) error { return decodeVendorParameters(r
 func bString(value string) bool {
 	return len(value) <= 512 && utf8.ValidString(value) && !strings.ContainsAny(value, "\r\n\x00")
 }
-func bOutput(phase string) bool { return phase == Output || phase == OutputStream }
-func bDirection(phase string) string {
+func bOutput(phase Phase) bool { return OutputPhase(phase) }
+func bDirection(phase Phase) string {
 	if bOutput(phase) {
 		return "response"
 	}
 	return "request"
 }
-func bRole(phase string, s Segment) string {
+func bRole(phase Phase, s Segment) string {
 	if bOutput(phase) {
 		return "assistant"
 	}
@@ -49,7 +49,7 @@ func bRole(phase string, s Segment) string {
 	}
 	return "user"
 }
-func bMessages(phase string, s Segment) []map[string]string {
+func bMessages(phase Phase, s Segment) []map[string]string {
 	return []map[string]string{{"role": bRole(phase, s), "content": s.Text}}
 }
 func bAction(action, category string) (Verdict, error) {
@@ -75,7 +75,7 @@ func validatePANW(raw json.RawMessage) error {
 	}
 	return nil
 }
-func evaluatePANW(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase string, s Segment) (Verdict, error) {
+func evaluatePANW(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase Phase, s Segment) (Verdict, error) {
 	var p panwParameters
 	if err := decodeVendorParameters(c.Parameters, &p); err != nil {
 		return Verdict{}, err
@@ -161,7 +161,7 @@ func validateCisco(raw json.RawMessage) error {
 	}
 	return nil
 }
-func evaluateCisco(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase string, s Segment) (Verdict, error) {
+func evaluateCisco(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase Phase, s Segment) (Verdict, error) {
 	var p ciscoParameters
 	if err := decodeVendorParameters(c.Parameters, &p); err != nil {
 		return Verdict{}, err
@@ -282,7 +282,7 @@ func nomaSensitiveOnly(results map[string]json.RawMessage) (bool, error) {
 	return sensitive && !other, nil
 }
 
-func evaluateNoma(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase string, s Segment) (Verdict, error) {
+func evaluateNoma(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase Phase, s Segment) (Verdict, error) {
 	var p nomaParameters
 	if err := decodeVendorParameters(c.Parameters, &p); err != nil {
 		return Verdict{}, err
@@ -341,7 +341,7 @@ func evaluateNoma(ctx context.Context, client *http.Client, c ExternalConfig, cr
 	return vendorBoolean(*out.Blocked, "noma.policy"), nil
 }
 
-func evaluateNomaV2(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase string, s Segment) (Verdict, error) {
+func evaluateNomaV2(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase Phase, s Segment) (Verdict, error) {
 	var p nomaParameters
 	if err := decodeVendorParameters(c.Parameters, &p); err != nil {
 		return Verdict{}, err
@@ -389,7 +389,7 @@ func validateZscaler(raw json.RawMessage) error {
 	}
 	return nil
 }
-func evaluateZscaler(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase string, s Segment) (Verdict, error) {
+func evaluateZscaler(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase Phase, s Segment) (Verdict, error) {
 	var p zscalerParameters
 	if err := decodeVendorParameters(c.Parameters, &p); err != nil {
 		return Verdict{}, err
@@ -442,7 +442,7 @@ func validateJavelin(raw json.RawMessage) error {
 	}
 	return nil
 }
-func evaluateJavelin(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase string, s Segment) (Verdict, error) {
+func evaluateJavelin(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase Phase, s Segment) (Verdict, error) {
 	if bOutput(phase) {
 		return Verdict{}, errEvaluation
 	}
@@ -501,7 +501,7 @@ func validateEnkrypt(raw json.RawMessage) error {
 	}
 	return nil
 }
-func evaluateEnkrypt(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, _ string, s Segment) (Verdict, error) {
+func evaluateEnkrypt(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, _ Phase, s Segment) (Verdict, error) {
 	var p enkryptParameters
 	if err := decodeVendorParameters(c.Parameters, &p); err != nil {
 		return Verdict{}, err
@@ -567,7 +567,7 @@ func validateIBM(raw json.RawMessage) error {
 	}
 	return nil
 }
-func evaluateIBM(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, _ string, s Segment) (Verdict, error) {
+func evaluateIBM(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, _ Phase, s Segment) (Verdict, error) {
 	var p ibmParameters
 	if err := decodeVendorParameters(c.Parameters, &p); err != nil {
 		return Verdict{}, err
@@ -626,7 +626,7 @@ func evaluateIBM(ctx context.Context, client *http.Client, c ExternalConfig, cre
 	return vendorBoolean(blocked, "ibm_guardrails.policy"), nil
 }
 
-func evaluateOnyx(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase string, s Segment) (Verdict, error) {
+func evaluateOnyx(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase Phase, s Segment) (Verdict, error) {
 	if cred.APIKey == "" {
 		return Verdict{}, errEvaluation
 	}
@@ -648,7 +648,7 @@ func evaluateOnyx(ctx context.Context, client *http.Client, c ExternalConfig, cr
 	}
 	return vendorBoolean(!*out.Allowed, "onyx.policy"), nil
 }
-func evaluatePromptGuard(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase string, s Segment) (Verdict, error) {
+func evaluatePromptGuard(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase Phase, s Segment) (Verdict, error) {
 	direction := "input"
 	if bOutput(phase) {
 		direction = "output"
@@ -693,7 +693,7 @@ func validateXecguard(raw json.RawMessage) error {
 	}
 	return nil
 }
-func evaluateXecguard(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase string, s Segment) (Verdict, error) {
+func evaluateXecguard(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase Phase, s Segment) (Verdict, error) {
 	var p xecguardParameters
 	if err := decodeVendorParameters(c.Parameters, &p); err != nil {
 		return Verdict{}, err
@@ -739,7 +739,7 @@ func validatePromptSecurity(raw json.RawMessage) error {
 	}
 	return nil
 }
-func evaluatePromptSecurity(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase string, s Segment) (Verdict, error) {
+func evaluatePromptSecurity(ctx context.Context, client *http.Client, c ExternalConfig, cred externalCredential, phase Phase, s Segment) (Verdict, error) {
 	var p promptSecurityParameters
 	if err := decodeVendorParameters(c.Parameters, &p); err != nil {
 		return Verdict{}, err

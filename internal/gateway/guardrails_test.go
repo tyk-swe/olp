@@ -17,12 +17,12 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
-func installTestGuardrail(t *testing.T, h *harness, phase, action, kind, configuration string) {
+func installTestGuardrail(t *testing.T, h *harness, phase guardrails.Phase, action guardrails.Action, kind guardrails.Kind, configuration string) {
 	t.Helper()
 	current := h.rt.release
 	snapshot := current.Snapshot().Clone()
 	route := snapshot.Routes[routeSlug]
-	snapshot.Guardrails = &guardrails.Registry{Definitions: map[string]guardrails.Revision{"revision": {ID: "revision", GuardrailID: "guard", ProjectID: "installation", Name: "Guard", Type: guardrails.Kind(kind), Configuration: json.RawMessage(configuration), TimeoutMS: 1000, OnError: guardrails.FailClosed}}, Policies: map[string]guardrails.PolicyRevision{"policy-revision": {ID: "policy-revision", PolicyID: "policy", ProjectID: "installation", Entries: []guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: phase, Action: action}}}}, Attachments: []guardrails.Attachment{{ID: "attachment", Scope: "route", ScopeID: route.ID, PolicyRevisionID: "policy-revision"}}}
+	snapshot.Guardrails = &guardrails.Registry{Definitions: map[string]guardrails.Revision{"revision": {ID: "revision", GuardrailID: "guard", ProjectID: "installation", Name: "Guard", Type: kind, Configuration: json.RawMessage(configuration), TimeoutMS: 1000, OnError: guardrails.FailClosed}}, Policies: map[string]guardrails.PolicyRevision{"policy-revision": {ID: "policy-revision", PolicyID: "policy", ProjectID: "installation", Entries: []guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: phase, Action: action}}}}, Attachments: []guardrails.Attachment{{ID: "attachment", Scope: "route", ScopeID: route.ID, PolicyRevisionID: "policy-revision"}}}
 	credentials := map[string][]byte{}
 	for _, provider := range snapshot.Providers {
 		for _, slot := range provider.Slots {
@@ -134,7 +134,7 @@ func TestGuardrailToolArgumentsBufferedBeforeDeny(t *testing.T) {
 }
 
 func TestNativeOperationOutputUnavailableIsExplicit(t *testing.T) {
-	for _, phase := range []string{guardrails.Input, guardrails.Output} {
+	for _, phase := range []guardrails.Phase{guardrails.Input, guardrails.Output} {
 		h := strictHarness(t, strictEmbeddings)
 		installTestGuardrail(t, h, phase, guardrails.Block, "builtin.keywords", `{"words":["forbidden"]}`)
 		h.mock.set("a", status(200, `{"object":"list","model":"model-a","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2]}],"usage":{"prompt_tokens":2,"total_tokens":2}}`))
@@ -162,7 +162,7 @@ func TestToolGuardrailEvaluationReachesConfiguredEvaluator(t *testing.T) {
 		if strings.Contains(evaluation.Segments[0].Text, "bad") {
 			return guardrails.Verdict{Action: "block", Categories: []string{"test.block"}}, nil
 		}
-		return guardrails.Verdict{Action: "pass"}, nil
+		return guardrails.Verdict{Action: guardrails.Pass}, nil
 	})
 	h := newHarness(t, Config{}, Dependencies{GuardrailEvaluator: evaluator})
 	authority, err := h.rt.Authenticate(fullKey)
@@ -186,8 +186,7 @@ func TestToolGuardrailEvaluationReachesConfiguredEvaluator(t *testing.T) {
 	if !blocked.Blocked || err == nil {
 		t.Fatalf("evaluator verdict did not block tool arguments: %+v %v", blocked, err)
 	}
-	var refusal *guardrails.Error
-	if !errors.As(err, &refusal) || refusal.Code != "guardrail_blocked" {
+	if !errors.Is(err, guardrails.ErrBlocked) {
 		t.Fatalf("tool evaluation returned the wrong refusal: %v", err)
 	}
 	if len(blocked.Decisions) != 1 || blocked.Decisions[0].Outcome != "blocked" {

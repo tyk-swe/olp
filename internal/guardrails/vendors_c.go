@@ -21,7 +21,7 @@ var namedVendorsC = func() map[string]namedVendor {
 	for _, kind := range []string{"qualifire", "ovalix", "microsoft_purview", "akto", "deepkeep", "qostodian_nexus", "rubrik", "vigil_guard", "repelloai", "singulr", "headroom", "compresr", "straiker", "alice", "conduct"} {
 		result[kind] = namedVendor{
 			validate: func(raw json.RawMessage) error { return validateVendorC(kind, raw) },
-			evaluate: func(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, phase string, segment Segment) (Verdict, error) {
+			evaluate: func(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, phase Phase, segment Segment) (Verdict, error) {
 				return evaluateVendorC(ctx, client, c, credential, kind, phase, segment)
 			},
 		}
@@ -33,11 +33,11 @@ var namedVendorsC = func() map[string]namedVendor {
 	}
 	for _, kind := range []string{"headroom", "compresr"} {
 		adapter := result[kind]
-		adapter.phases = []string{Input}
+		adapter.phases = []Phase{Input}
 		result[kind] = adapter
 	}
 	conduct := result["conduct"]
-	conduct.phases = []string{Input, InputParallel}
+	conduct.phases = []Phase{Input, InputParallel}
 	result["conduct"] = conduct
 	return result
 }()
@@ -226,14 +226,14 @@ func vendorCID(value string) bool {
 	return len(value) > 0 && len(value) <= 256 && !strings.ContainsAny(value, "\r\n\x00")
 }
 
-func vendorCInputType(phase string) string {
-	if phase == Output || phase == OutputStream {
+func vendorCInputType(phase Phase) string {
+	if OutputPhase(phase) {
 		return "response"
 	}
 	return "request"
 }
 
-func vendorCMessage(segment Segment, phase string) map[string]string {
+func vendorCMessage(segment Segment, phase Phase) map[string]string {
 	role := segment.Role
 	if role == "" {
 		role = "user"
@@ -241,10 +241,10 @@ func vendorCMessage(segment Segment, phase string) map[string]string {
 			role = "assistant"
 		}
 	}
-	return map[string]string{"role": role, "content": segment.Text}
+	return map[string]string{"role": string(role), "content": segment.Text}
 }
 
-func evaluateVendorC(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, kind, phase string, s Segment) (Verdict, error) {
+func evaluateVendorC(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, kind string, phase Phase, s Segment) (Verdict, error) {
 	if err := validateVendorC(kind, c.Parameters); err != nil {
 		return Verdict{}, err
 	}
@@ -279,7 +279,7 @@ func evaluateVendorC(ctx context.Context, client *http.Client, c ExternalConfig,
 	return Verdict{}, errEvaluation
 }
 
-func evaluateQualifire(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, phase string, s Segment) (Verdict, error) {
+func evaluateQualifire(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, phase Phase, s Segment) (Verdict, error) {
 	var p qualifireParameters
 	_ = decodeVendorParameters(c.Parameters, &p)
 	encoded, _ := json.Marshal(p)
@@ -325,7 +325,7 @@ func evaluateQualifire(ctx context.Context, client *http.Client, c ExternalConfi
 	return vendorBoolean(blocked, "qualifire.policy"), nil
 }
 
-func evaluateOvalix(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, phase string, s Segment) (Verdict, error) {
+func evaluateOvalix(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, phase Phase, s Segment) (Verdict, error) {
 	var p ovalixParameters
 	_ = decodeVendorParameters(c.Parameters, &p)
 	body := map[string]any{"application_id": p.ApplicationID, "checkpoint_id": p.CheckpointID, "actor": p.Actor, "session_id": uuid.NewString(), "data_type": "TEXT", "data": map[string]string{"content": s.Text}}
@@ -355,10 +355,10 @@ func evaluateOvalix(ctx context.Context, client *http.Client, c ExternalConfig, 
 	if response.Action == "anonymize" && (response.Modified == nil || response.Modified.Content == nil) {
 		return Verdict{}, errEvaluation
 	}
-	return Verdict{Action: "pass"}, nil
+	return Verdict{Action: Pass}, nil
 }
 
-func evaluatePurview(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, phase string, s Segment) (Verdict, error) {
+func evaluatePurview(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, phase Phase, s Segment) (Verdict, error) {
 	var p purviewParameters
 	_ = decodeVendorParameters(c.Parameters, &p)
 	activity := "uploadText"
@@ -403,7 +403,7 @@ func evaluatePurview(ctx context.Context, client *http.Client, c ExternalConfig,
 	return vendorBoolean(blocked, "microsoft_purview.policy"), nil
 }
 
-func evaluateAkto(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, phase string, s Segment) (Verdict, error) {
+func evaluateAkto(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, phase Phase, s Segment) (Verdict, error) {
 	var p aktoParameters
 	_ = decodeVendorParameters(c.Parameters, &p)
 	requestBody, _ := json.Marshal(map[string]any{"messages": []any{vendorCMessage(s, phase)}})
@@ -441,7 +441,7 @@ func evaluateAkto(ctx context.Context, client *http.Client, c ExternalConfig, cr
 	return vendorBoolean(!*response.Data.GuardrailsResult.Allowed, "akto.policy"), nil
 }
 
-func evaluateTextAPI(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, kind, phase string, s Segment) (Verdict, error) {
+func evaluateTextAPI(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, kind string, phase Phase, s Segment) (Verdict, error) {
 	body := map[string]any{"texts": []string{s.Text}, "input_type": vendorCInputType(phase), "request_data": map[string]any{}, "litellm_call_id": nil, "litellm_trace_id": nil, "litellm_version": "1.105.0", "images": nil, "tools": nil, "structured_messages": nil, "tool_calls": nil, "model": nil, "additional_provider_specific_params": map[string]any{}}
 	if kind == "deepkeep" {
 		var p deepkeepParameters
@@ -496,7 +496,7 @@ func evaluateTextAPI(ctx context.Context, client *http.Client, c ExternalConfig,
 	}
 }
 
-func evaluateRubrik(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, phase string, s Segment) (Verdict, error) {
+func evaluateRubrik(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, phase Phase, s Segment) (Verdict, error) {
 	body := map[string]any{"model": "", "messages": []any{vendorCMessage(s, phase)}}
 	output := vendorCInputType(phase) == "response"
 	if output {
@@ -524,7 +524,7 @@ func evaluateRubrik(ctx context.Context, client *http.Client, c ExternalConfig, 
 		if json.Unmarshal(raw, &object) != nil || object == nil {
 			return Verdict{}, errEvaluation
 		}
-		return Verdict{Action: "pass"}, nil
+		return Verdict{Action: Pass}, nil
 	}
 	if response.Choices == nil || len(*response.Choices) != 1 || (*response.Choices)[0].Message == nil || (*response.Choices)[0].Message.Content == nil {
 		return Verdict{}, errEvaluation
@@ -535,7 +535,7 @@ func evaluateRubrik(ctx context.Context, client *http.Client, c ExternalConfig, 
 	return vendorBoolean(*(*response.Choices)[0].Message.Content != s.Text, "rubrik.policy"), nil
 }
 
-func evaluateVigil(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, phase string, s Segment) (Verdict, error) {
+func evaluateVigil(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, phase Phase, s Segment) (Verdict, error) {
 	source := "user_input"
 	if vendorCInputType(phase) == "response" {
 		source = "model_output"
@@ -555,7 +555,7 @@ func evaluateVigil(ctx context.Context, client *http.Client, c ExternalConfig, c
 	}
 	switch response.Decision {
 	case "ALLOWED":
-		return Verdict{Action: "pass"}, nil
+		return Verdict{Action: Pass}, nil
 	case "BLOCKED":
 		return vendorBoolean(true, "vigil_guard.policy"), nil
 	case "SANITIZED":
@@ -569,7 +569,7 @@ func evaluateVigil(ctx context.Context, client *http.Client, c ExternalConfig, c
 	return Verdict{}, errEvaluation
 }
 
-func evaluateRepello(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, phase string, s Segment) (Verdict, error) {
+func evaluateRepello(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, phase Phase, s Segment) (Verdict, error) {
 	var p repelloParameters
 	_ = decodeVendorParameters(c.Parameters, &p)
 	stage := "prompt"
@@ -593,12 +593,12 @@ func evaluateRepello(ctx context.Context, client *http.Client, c ExternalConfig,
 	case "flagged":
 		return Verdict{Action: Annotate, Categories: []string{"repelloai.policy"}}, nil
 	case "passed":
-		return Verdict{Action: "pass"}, nil
+		return Verdict{Action: Pass}, nil
 	}
 	return Verdict{}, errEvaluation
 }
 
-func evaluateSingulr(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, phase string, s Segment) (Verdict, error) {
+func evaluateSingulr(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, phase Phase, s Segment) (Verdict, error) {
 	var p singulrParameters
 	_ = decodeVendorParameters(c.Parameters, &p)
 	body := map[string]any{"guardrail_scope": vendorCInputType(phase)}
@@ -686,12 +686,12 @@ func evaluateCompression(ctx context.Context, client *http.Client, c ExternalCon
 		return Verdict{}, errEvaluation
 	}
 	if *replacement == s.Text {
-		return Verdict{Action: "pass"}, nil
+		return Verdict{Action: Pass}, nil
 	}
 	return vendorReplacement(s, *replacement, kind+".compression")
 }
 
-func evaluateStraiker(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, phase string, s Segment) (Verdict, error) {
+func evaluateStraiker(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, phase Phase, s Segment) (Verdict, error) {
 	var p straikerParameters
 	_ = decodeVendorParameters(c.Parameters, &p)
 	if p.Source == "" {
@@ -725,7 +725,7 @@ func evaluateStraiker(ctx context.Context, client *http.Client, c ExternalConfig
 	case "BLOCKED":
 		return vendorBoolean(true, "straiker.policy"), nil
 	case "NONE":
-		return Verdict{Action: "pass"}, nil
+		return Verdict{Action: Pass}, nil
 	case "GUARDRAIL_INTERVENED":
 		if response.Texts == nil || len(*response.Texts) != 1 || (*response.Texts)[0] == nil {
 			return Verdict{}, errEvaluation
@@ -735,7 +735,7 @@ func evaluateStraiker(ctx context.Context, client *http.Client, c ExternalConfig
 	return Verdict{}, errEvaluation
 }
 
-func evaluateAlice(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, phase string, s Segment) (Verdict, error) {
+func evaluateAlice(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, phase Phase, s Segment) (Verdict, error) {
 	body := map[string]any{"input_type": vendorCInputType(phase), "inputs": map[string]any{"texts": []string{s.Text}}, "request_data": map[string]any{}}
 	raw, err := vendorJSON(ctx, client, c.Endpoint, body, credential, "af-api-key", "")
 	if err != nil {
@@ -753,7 +753,7 @@ func evaluateAlice(ctx context.Context, client *http.Client, c ExternalConfig, c
 	}
 	switch response.Verdict {
 	case "ALLOW":
-		return Verdict{Action: "pass"}, nil
+		return Verdict{Action: Pass}, nil
 	case "DETECT":
 		return Verdict{Action: Annotate, Categories: []string{"alice.policy"}}, nil
 	case "BLOCK":
@@ -840,7 +840,7 @@ func evaluateConduct(ctx context.Context, client *http.Client, c ExternalConfig,
 		case strings.HasPrefix(text, "BLOCKED"), strings.HasPrefix(text, "PENDING approval"):
 			return vendorBoolean(true, "conduct.policy"), nil
 		case text == "ok" || strings.HasPrefix(text, "ok "):
-			return Verdict{Action: "pass"}, nil
+			return Verdict{Action: Pass}, nil
 		case strings.HasPrefix(text, "advisory"), strings.HasPrefix(text, "WARNING"):
 			return Verdict{Action: Annotate, Categories: []string{"conduct.policy"}}, nil
 		}

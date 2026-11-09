@@ -500,7 +500,7 @@ func routingPreferences(r *http.Request) (*routing.Preferences, *Error) {
 	return p, nil
 }
 func requestError(err error) *Error {
-	var guard *guardrails.Error
+	var guard guardrails.Failure
 	if errors.As(err, &guard) {
 		return guardrailError(guard)
 	}

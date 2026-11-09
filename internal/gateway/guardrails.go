@@ -50,6 +50,9 @@ func (s *Server) newGuardrailEvaluator() guardrails.Evaluator {
 		Model: guardrails.EvaluatorFunc(s.modelGuardrail), Plugin: guardrails.EvaluatorFunc(s.pluginGuardrail),
 	}
 }
+
+const errContentPolicyBlocked guardrails.Failure = "content_policy_blocked"
+
 func guardrailError(err error) *Error {
 	if err == nil {
 		return nil
@@ -58,12 +61,20 @@ func guardrailError(err error) *Error {
 	if errors.As(err, &existing) {
 		return existing
 	}
-	var e *guardrails.Error
-	if errors.As(err, &e) {
-		return &Error{Status: e.Status, Type: "invalid_request_error", Code: e.Code, Message: "The request could not satisfy the configured guardrails."}
+	var failure guardrails.Failure
+	if errors.As(err, &failure) {
+		return &Error{Status: guardrailStatus(failure), Type: "invalid_request_error", Code: string(failure), Message: "The request could not satisfy the configured guardrails."}
 	}
 	return serverError(500, "guardrail_unavailable", "The guardrail could not be evaluated.")
 }
+
+func guardrailStatus(failure guardrails.Failure) int {
+	if failure == guardrails.ErrSurface {
+		return http.StatusUnprocessableEntity
+	}
+	return http.StatusBadRequest
+}
+
 func (s *Server) bindGuardrails(ctx context.Context, x *call) *Error {
 	x.guardrailMetadata = x.request.guardrailMetadata
 	x.guardrailEngine = x.snapshot().GuardrailEngine(x.route.Slug, x.keyID).WithEvaluator(s.deps.GuardrailEvaluator)
@@ -76,7 +87,7 @@ func (s *Server) bindGuardrails(ctx context.Context, x *call) *Error {
 	// Unary operation codecs expose inspection text but cannot apply rewritten
 	// segments to their typed request and result documents.
 	if x.unary != nil {
-		for _, phase := range []string{guardrails.Input, guardrails.Output, guardrails.OutputStream} {
+		for _, phase := range []guardrails.Phase{guardrails.Input, guardrails.Output, guardrails.OutputStream} {
 			if x.guardrailEngine.HasAction(phase, guardrails.Redact) || x.guardrailEngine.HasAction(phase, guardrails.Mask) {
 				return guardrailError(guardrails.ErrSurface)
 			}
@@ -106,7 +117,7 @@ func (s *Server) bindGuardrails(ctx context.Context, x *call) *Error {
 		}
 	}
 	if opaqueInput {
-		for _, phase := range []string{guardrails.Input, guardrails.InputParallel} {
+		for _, phase := range []guardrails.Phase{guardrails.Input, guardrails.InputParallel} {
 			result, err := x.guardrailEngine.Unavailable(phase)
 			x.recordGuardrails(result.Decisions)
 			if err != nil {
@@ -443,7 +454,7 @@ func (s *Server) applyGuardrails(w http.ResponseWriter, r *http.Request) {
 	s.settleAdmission(context.WithoutCancel(r.Context()), x)
 	s.finish(x, out, status)
 }
-func (s *Server) EvaluateToolGuardrails(ctx context.Context, authority keyauthority.Authority, release *release.Release, engine *guardrails.Engine, requestID, phase string, segments []guardrails.Segment, masks *guardrails.Masking) (guardrails.Result, error) {
+func (s *Server) EvaluateToolGuardrails(ctx context.Context, authority keyauthority.Authority, release *release.Release, engine *guardrails.Engine, requestID string, phase guardrails.Phase, segments []guardrails.Segment, masks *guardrails.Masking) (guardrails.Result, error) {
 	if s == nil || release == nil || release.Snapshot() == nil {
 		return guardrails.Result{Segments: segments}, guardrails.ErrSurface
 	}
@@ -599,7 +610,7 @@ func (s *Server) modelGuardrail(ctx context.Context, d guardrails.Revision, e gu
 			return guardrails.Verdict{}, err
 		}
 		if len(embeddingInputs) == 0 {
-			return guardrails.Verdict{Action: "pass"}, nil
+			return guardrails.Verdict{Action: guardrails.Pass}, nil
 		}
 	} else {
 		segments, _ := json.Marshal(e.Segments)
@@ -767,8 +778,8 @@ func (x *call) guardrailHeaders(h http.Header, streamed, trailers bool) {
 	decisions := x.guardrailEvidence()
 	values := []string{}
 	for _, d := range decisions {
-		if d.Outcome != "passed" && d.Outcome != "skipped" {
-			values = append(values, d.GuardrailID+"@"+d.Revision+":"+d.Outcome)
+		if d.Outcome != guardrails.Passed && d.Outcome != guardrails.Skipped {
+			values = append(values, d.GuardrailID+"@"+d.Revision+":"+string(d.Outcome))
 		}
 	}
 	if len(values) > 0 {
@@ -808,14 +819,14 @@ func (x *call) legacyGuardrailError(result guardrails.Result, err error) error {
 		if d.LegacyRuleID == "" {
 			continue
 		}
-		if evidence.Outcome == "blocked" || evidence.Outcome == "redacted" {
-			recordDecision(x, contentpolicy.Decision{RuleID: d.LegacyRuleID, Phase: evidence.Phase, Action: evidence.Action, Outcome: evidence.Outcome})
+		if evidence.Outcome == guardrails.Blocked || evidence.Outcome == guardrails.Redacted {
+			recordDecision(x, contentpolicy.Decision{RuleID: d.LegacyRuleID, Phase: string(evidence.Phase), Action: string(evidence.Action), Outcome: string(evidence.Outcome)})
 		}
 	}
 	if errors.Is(err, guardrails.ErrBlocked) && len(result.Decisions) > 0 {
 		last := result.Decisions[len(result.Decisions)-1]
 		if x.snapshot().GuardrailDefinition(last.Revision).LegacyRuleID != "" {
-			return &guardrails.Error{Code: "content_policy_blocked", Status: 400}
+			return errContentPolicyBlocked
 		}
 	}
 	return err

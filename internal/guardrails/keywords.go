@@ -80,7 +80,7 @@ func compileKeywords(raw json.RawMessage) (*keywordDetector, error) {
 	return k, nil
 }
 func (k *keywordDetector) detect(ctx context.Context, e Evaluation) (Verdict, error) {
-	v := Verdict{Action: "pass"}
+	v := Verdict{Action: Pass}
 	// Retain only the source starts a match can reference. ASCII folding does
 	// no allocation; full Unicode folding uses reusable stack buffers.
 	starts := make([]int, k.maxRunes+1)

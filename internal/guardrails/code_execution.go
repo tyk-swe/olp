@@ -69,7 +69,7 @@ func normalizeCodeLanguage(language string) string {
 func (d codeExecutionDetector) width() int { return 0 }
 
 func (d codeExecutionDetector) detect(ctx context.Context, evaluation Evaluation) (Verdict, error) {
-	verdict := Verdict{Action: "pass"}
+	verdict := Verdict{Action: Pass}
 	for _, segment := range evaluation.Segments {
 		if err := ctx.Err(); err != nil {
 			return Verdict{}, err

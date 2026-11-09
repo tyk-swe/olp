@@ -212,7 +212,7 @@ func (r *ExternalRunner) leave(id string, err error) {
 }
 func (r *ExternalRunner) Evaluate(ctx context.Context, d Revision, e Evaluation) (verdict Verdict, err error) {
 	// One deadline covers credential resolution and every segment/vendor call.
-	if d.TimeoutMS < 1 || d.TimeoutMS > 300000 || validateSegments(e.Segments) != nil || !validPhase(e.Phase) {
+	if d.TimeoutMS < 1 || d.TimeoutMS > 300000 || validateSegments(e.Segments) != nil || !e.Phase.Valid() {
 		return verdict, errEvaluation
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(d.TimeoutMS)*time.Millisecond)
@@ -311,7 +311,7 @@ func (r *ExternalRunner) Evaluate(ctx context.Context, d Revision, e Evaluation)
 		err = decodeConfig(raw, &verdict)
 		return
 	}
-	verdict = Verdict{Action: "pass"}
+	verdict = Verdict{Action: Pass}
 	missingReplacement := false
 	for _, segment := range e.Segments {
 		var part Verdict
@@ -322,7 +322,7 @@ func (r *ExternalRunner) Evaluate(ctx context.Context, d Revision, e Evaluation)
 		if err = validateVerdict(part, []Segment{segment}); err != nil {
 			return
 		}
-		if part.Action != "pass" {
+		if part.Action != Pass {
 			missingReplacement = missingReplacement || len(part.Redactions) == 0
 			verdict.Action = Block
 			for _, category := range part.Categories {
@@ -378,7 +378,7 @@ func externalJSON(ctx context.Context, client *http.Client, endpoint string, bod
 	}
 	return raw, nil
 }
-func (r *ExternalRunner) vendor(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, kind Kind, phase string, s Segment) (Verdict, error) {
+func (r *ExternalRunner) vendor(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, kind Kind, phase Phase, s Segment) (Verdict, error) {
 	if vendor, ok := lookupNamedVendor(kind); ok {
 		return vendor.evaluate(ctx, client, c, credential, phase, s)
 	}
@@ -395,7 +395,7 @@ func (r *ExternalRunner) vendor(ctx context.Context, client *http.Client, c Exte
 	case "bedrock":
 		endpoint += "/guardrail/" + url.PathEscape(c.Guardrail) + "/version/" + url.PathEscape(c.Version) + "/apply"
 		source := "INPUT"
-		if phase == Output || phase == OutputStream {
+		if OutputPhase(phase) {
 			source = "OUTPUT"
 		}
 		body = map[string]any{"source": source, "content": []any{map[string]any{"text": map[string]string{"text": s.Text}}}}
@@ -409,7 +409,7 @@ func (r *ExternalRunner) vendor(ctx context.Context, client *http.Client, c Exte
 	case "azure.prompt_shields":
 		endpoint += "/contentsafety/text:shieldPrompt?api-version=2024-09-01"
 		body = map[string]any{"userPrompt": s.Text, "documents": []string{}}
-		if s.Kind == "tool_result" {
+		if s.Kind == ToolResult {
 			body = map[string]any{"documents": []string{s.Text}}
 		}
 	case "azure.content_safety":
@@ -418,7 +418,7 @@ func (r *ExternalRunner) vendor(ctx context.Context, client *http.Client, c Exte
 	case "model_armor":
 		method := "sanitizeUserPrompt"
 		field := "userPromptData"
-		if phase == Output || phase == OutputStream {
+		if OutputPhase(phase) {
 			method = "sanitizeModelResponse"
 			field = "modelResponseData"
 		}
@@ -430,7 +430,7 @@ func (r *ExternalRunner) vendor(ctx context.Context, client *http.Client, c Exte
 		if role != "system" && role != "assistant" && role != "tool" {
 			role = "user"
 		}
-		body = map[string]any{"messages": []any{map[string]string{"role": role, "content": s.Text}}}
+		body = map[string]any{"messages": []any{map[string]string{"role": string(role), "content": s.Text}}}
 	case "presidio":
 		endpoint += "/analyze"
 		language := c.Language
@@ -454,7 +454,7 @@ func (r *ExternalRunner) vendor(ctx context.Context, client *http.Client, c Exte
 	if err != nil {
 		return Verdict{}, err
 	}
-	v := Verdict{Action: "pass"}
+	v := Verdict{Action: Pass}
 	block := func(category string) { v.Action = Block; v.Categories = appendCategory(v.Categories, category) }
 	switch kind {
 	case "bedrock":
@@ -486,7 +486,7 @@ func (r *ExternalRunner) vendor(ctx context.Context, client *http.Client, c Exte
 				Attack *bool `json:"attackDetected"`
 			} `json:"documentsAnalysis"`
 		}
-		if json.Unmarshal(raw, &response) != nil || (s.Kind != "tool_result" && (response.User == nil || response.User.Attack == nil)) || (s.Kind == "tool_result" && len(response.Documents) != 1) {
+		if json.Unmarshal(raw, &response) != nil || (s.Kind != ToolResult && (response.User == nil || response.User.Attack == nil)) || (s.Kind == ToolResult && len(response.Documents) != 1) {
 			return v, errEvaluation
 		}
 		if response.User != nil && response.User.Attack != nil && *response.User.Attack {
@@ -640,5 +640,5 @@ func ModelVerdict(raw []byte, rule ModelRule) (Verdict, error) {
 	if bytes.Equal(encoded, canonical) {
 		return Verdict{Action: Block, Categories: []string{rule.Category}}, nil
 	}
-	return Verdict{Action: "pass"}, nil
+	return Verdict{Action: Pass}, nil
 }

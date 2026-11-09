@@ -12,7 +12,7 @@ func TestAdditiveScopeOrderAndIsolation(t *testing.T) {
 		r.Definitions[d.ID] = d
 		r.Policies[scope] = PolicyRevision{ID: scope, PolicyID: scope, ProjectID: "p", Entries: []Entry{{GuardrailID: scope, RevisionID: scope, Phase: Input, Action: Block, Mandatory: true}}}
 		ids := map[string]string{"installation": "installation", "organization": "o", "project": "p", "route": "r", "api-key": "k"}
-		r.Attachments = append(r.Attachments, Attachment{ID: scope, Scope: scope, ScopeID: ids[scope], PolicyRevisionID: scope})
+		r.Attachments = append(r.Attachments, Attachment{ID: scope, Scope: Scope(scope), ScopeID: ids[scope], PolicyRevisionID: scope})
 	}
 	if err := r.Validate(); err != nil {
 		t.Fatal(err)
@@ -42,7 +42,7 @@ func TestToolsetBoundaryRunsToolsetScopeAndSkipsRoutes(t *testing.T) {
 	attach := func(name, scope, scopeID string) {
 		r.Definitions[name] = Revision{ID: name, GuardrailID: name, ProjectID: "p", Type: "builtin.keywords", Configuration: json.RawMessage(`{"words":["private"]}`), TimeoutMS: 100, OnError: FailClosed}
 		r.Policies[name] = PolicyRevision{ID: name, PolicyID: name, ProjectID: "p", Entries: []Entry{{GuardrailID: name, RevisionID: name, Phase: Input, Action: Block, Mandatory: true}}}
-		r.Attachments = append(r.Attachments, Attachment{ID: name, Scope: scope, ScopeID: scopeID, PolicyRevisionID: name})
+		r.Attachments = append(r.Attachments, Attachment{ID: name, Scope: Scope(scope), ScopeID: scopeID, PolicyRevisionID: name})
 	}
 	attach("on-route", "route", "r")
 	attach("on-project", "project", "p")

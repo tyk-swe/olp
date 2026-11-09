@@ -122,13 +122,14 @@ func policyName(registry *guardrails.Registry, r guardrails.NamedPolicyRevision)
 		return named{r.ID, r.Name}, nil
 	}
 	type portableRule struct {
-		Type          guardrails.Kind
-		Config        json.RawMessage
-		Timeout       int64
-		OnError       guardrails.OnError
-		Phase, Action string
-		Monitor       bool
-		Mandatory     bool
+		Type      guardrails.Kind
+		Config    json.RawMessage
+		Timeout   int64
+		OnError   guardrails.OnError
+		Phase     guardrails.Phase
+		Action    guardrails.Action
+		Monitor   bool
+		Mandatory bool
 	}
 	content, err := json.Marshal(promotion.Map(registry.Policies[r.ID].Entries, func(e guardrails.Entry) portableRule {
 		d := registry.Definitions[e.RevisionID]

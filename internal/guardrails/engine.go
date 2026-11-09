@@ -119,7 +119,7 @@ func Compile(entries []Entry, definitions map[string]Revision, external Evaluato
 	e := &Engine{}
 	for _, entry := range entries {
 		d, ok := definitions[entry.RevisionID]
-		if !ok || d.ID != entry.RevisionID || d.GuardrailID != entry.GuardrailID || !validPhase(entry.Phase) || !validAction(entry.Action) {
+		if !ok || d.ID != entry.RevisionID || d.GuardrailID != entry.GuardrailID || !entry.Phase.Valid() || !entry.Action.Valid() {
 			return nil, errors.New("invalid guardrail revision or policy entry")
 		}
 		if entry.Action == Mask && entry.Phase != Input {
@@ -147,7 +147,7 @@ func Compile(entries []Entry, definitions map[string]Revision, external Evaluato
 	return e, nil
 }
 
-func (e *Engine) HasPhase(phase string) bool {
+func (e *Engine) HasPhase(phase Phase) bool {
 	if e != nil {
 		for _, r := range e.entries {
 			if r.entry.Phase == phase {
@@ -158,7 +158,7 @@ func (e *Engine) HasPhase(phase string) bool {
 	return false
 }
 
-func (e *Engine) HasAction(phase, action string) bool {
+func (e *Engine) HasAction(phase Phase, action Action) bool {
 	if e != nil {
 		for _, r := range e.entries {
 			if r.entry.Phase == phase && r.entry.Action == action && !r.entry.Monitor {
@@ -171,7 +171,7 @@ func (e *Engine) HasAction(phase, action string) bool {
 
 // Unavailable records an explicit lack of coverage. Monitoring and annotation
 // cannot change the invocation; enforcing entries require a 422 refusal.
-func (e *Engine) Unavailable(phase string) (Result, error) {
+func (e *Engine) Unavailable(phase Phase) (Result, error) {
 	var result Result
 	var err error
 	if e != nil {
@@ -179,9 +179,9 @@ func (e *Engine) Unavailable(phase string) (Result, error) {
 			if phase != "" && r.entry.Phase != phase {
 				continue
 			}
-			outcome := "failed_open"
+			outcome := FailedOpen
 			if !r.entry.Monitor && r.entry.Action != Annotate {
-				outcome = "failed_closed"
+				outcome = FailedClosed
 				err = ErrSurface
 			}
 			result.Decisions = append(result.Decisions, Evidence{GuardrailID: r.definition.GuardrailID, Revision: r.definition.ID, Phase: r.entry.Phase, Action: r.entry.Action, Outcome: outcome, Categories: []string{"surface.unavailable"}})
@@ -288,7 +288,7 @@ func (e *Engine) Evaluate(ctx context.Context, request Evaluation, masks *Maskin
 
 func (e *Engine) evaluate(ctx context.Context, request Evaluation, masks *Masking) (Result, error) {
 	result := Result{Segments: request.Segments}
-	if !validPhase(request.Phase) {
+	if !request.Phase.Valid() {
 		return result, ErrSurface
 	}
 	if !e.HasPhase(request.Phase) {
@@ -301,9 +301,9 @@ func (e *Engine) evaluate(ctx context.Context, request Evaluation, masks *Maskin
 		if r.entry.Phase != request.Phase {
 			continue
 		}
-		ev := Evidence{GuardrailID: r.definition.GuardrailID, Revision: r.definition.ID, Phase: request.Phase, Action: r.entry.Action, Outcome: "passed"}
+		ev := Evidence{GuardrailID: r.definition.GuardrailID, Revision: r.definition.ID, Phase: request.Phase, Action: r.entry.Action, Outcome: Passed}
 		if request.InternalModel && isModelGuardrail(r.definition.Type) {
-			ev.Outcome = "skipped"
+			ev.Outcome = Skipped
 			result.Decisions = append(result.Decisions, ev)
 			continue
 		}
@@ -321,7 +321,7 @@ func (e *Engine) evaluate(ctx context.Context, request Evaluation, masks *Maskin
 			})
 			if len(evaluation.Segments) == 0 {
 				cancel()
-				ev.Outcome = "skipped"
+				ev.Outcome = Skipped
 				result.Decisions = append(result.Decisions, ev)
 				continue
 			}
@@ -339,9 +339,9 @@ func (e *Engine) evaluate(ctx context.Context, request Evaluation, masks *Maskin
 			err = validateVerdict(verdict, evaluation.Segments)
 		}
 		if err != nil {
-			ev.Outcome = "failed_open"
+			ev.Outcome = FailedOpen
 			if r.definition.OnError == FailClosed && !r.entry.Monitor {
-				ev.Outcome = "failed_closed"
+				ev.Outcome = FailedClosed
 				result.Blocked = true
 			}
 			result.Decisions = append(result.Decisions, ev)
@@ -353,18 +353,18 @@ func (e *Engine) evaluate(ctx context.Context, request Evaluation, masks *Maskin
 		ev.Categories = slices.Clone(verdict.Categories)
 		slices.Sort(ev.Categories)
 		ev.Categories = slices.Compact(ev.Categories)
-		if verdict.Action != "pass" {
+		if verdict.Action != Pass {
 			switch {
 			case r.entry.Monitor:
-				ev.Outcome = "monitored"
+				ev.Outcome = Monitored
 			case r.entry.Action == Annotate:
-				ev.Outcome = "annotated"
+				ev.Outcome = Annotated
 			case r.entry.Action == Block:
-				ev.Outcome = "blocked"
+				ev.Outcome = Blocked
 				result.Blocked = true
 			default:
 				if len(verdict.Redactions) == 0 {
-					ev.Outcome = "failed_closed"
+					ev.Outcome = FailedClosed
 					result.Blocked = true
 					break
 				}
@@ -385,7 +385,7 @@ func (e *Engine) evaluate(ctx context.Context, request Evaluation, masks *Maskin
 					result.Segments = slices.Clone(result.Segments)
 				}
 				if err = transform(result.Segments, verdict.Redactions, r.entry.Action, masks); err != nil {
-					ev.Outcome = "failed_closed"
+					ev.Outcome = FailedClosed
 					result.Blocked = true
 					break
 				}
@@ -407,9 +407,9 @@ func (e *Engine) evaluate(ctx context.Context, request Evaluation, masks *Maskin
 					})
 				}
 				result.Changed = true
-				ev.Outcome = "redacted"
+				ev.Outcome = Redacted
 				if r.entry.Action == Mask {
-					ev.Outcome = "masked"
+					ev.Outcome = Masked
 				}
 			}
 		}
@@ -422,7 +422,7 @@ func (e *Engine) evaluate(ctx context.Context, request Evaluation, masks *Maskin
 }
 
 func validateVerdict(v Verdict, segments []Segment) error {
-	if !slices.Contains([]string{"pass", Block, Redact, Mask, Annotate}, v.Action) || len(v.Categories) > 32 || len(v.Redactions) > MaxFindings {
+	if !slices.Contains([]Action{Pass, Block, Redact, Mask, Annotate}, v.Action) || len(v.Categories) > 32 || len(v.Redactions) > MaxFindings {
 		return errEvaluation
 	}
 	for _, c := range v.Categories {
@@ -430,7 +430,7 @@ func validateVerdict(v Verdict, segments []Segment) error {
 			return errEvaluation
 		}
 	}
-	if v.Action == "pass" && (len(v.Redactions) != 0 || len(v.Categories) != 0) {
+	if v.Action == Pass && (len(v.Redactions) != 0 || len(v.Categories) != 0) {
 		return errEvaluation
 	}
 	texts := make(map[string]string, len(segments))
@@ -455,7 +455,7 @@ func validateVerdict(v Verdict, segments []Segment) error {
 	return nil
 }
 
-func transform(segments []Segment, edits []Redaction, action string, masks *Masking) error {
+func transform(segments []Segment, edits []Redaction, action Action, masks *Masking) error {
 	edits = slices.Clone(edits)
 	sort.SliceStable(edits, func(i, j int) bool { return edits[i].Start > edits[j].Start })
 	for i := range segments {

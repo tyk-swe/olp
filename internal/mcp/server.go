@@ -57,7 +57,7 @@ type GuardrailEvaluation struct {
 	Release   *release.Release
 	Engine    *guardrails.Engine
 	RequestID string
-	Phase     string
+	Phase     guardrails.Phase
 	Segments  []guardrails.Segment
 	Masks     *guardrails.Masking
 }

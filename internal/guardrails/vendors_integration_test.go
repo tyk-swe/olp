@@ -45,9 +45,9 @@ func TestVendorTransformationRequiresEveryFlaggedSegment(t *testing.T) {
 
 func TestVendorInterventionWithoutReplacement(t *testing.T) {
 	for _, kind := range []string{"generic_guardrail_api", "deepkeep", "qostodian_nexus", "noma_v2", "straiker", "ovalix"} {
-		for _, action := range []string{Block, Redact} {
+		for _, action := range []Action{Block, Redact} {
 			for _, policy := range []OnError{FailClosed, FailOpen} {
-				t.Run(kind+"/"+action+"/"+string(policy), func(t *testing.T) {
+				t.Run(kind+"/"+string(action)+"/"+string(policy), func(t *testing.T) {
 					runner, endpoint := fakeRunner(t, func(w http.ResponseWriter, _ *http.Request) {
 						if kind == "ovalix" {
 							io.WriteString(w, `{"action_type":"anonymize","modified_data":{"content":"unchanged"}}`)
@@ -153,8 +153,10 @@ func TestLassoTransformationRequiresEveryFinding(t *testing.T) {
 
 func TestNamedVendorPolicyCompilation(t *testing.T) {
 	for _, tc := range []struct {
-		name, kind, phase, action string
-		monitor, valid            bool
+		name, kind     string
+		phase          Phase
+		action         Action
+		monitor, valid bool
 	}{
 		{"moderation_blocks", "openai_moderation", Input, Block, false, true},
 		{"moderation_cannot_rewrite", "openai_moderation", Input, Redact, false, false},
@@ -183,7 +185,11 @@ func TestNamedVendorPolicyCompilation(t *testing.T) {
 }
 
 func TestCodeExecutionNativeIntentAndUnlabelledFence(t *testing.T) {
-	for _, tc := range []struct{ name, phase, text string }{
+	for _, tc := range []struct {
+		name  string
+		phase Phase
+		text  string
+	}{
 		{"shell_request", Input, "please run `whoami`"},
 		{"shell_request_with_fence", Input, "run `python` with this code:\n```python\nprint(1)\n```"},
 		{"unlabelled_output", Output, "```\nprint(1)\n```"},

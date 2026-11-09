@@ -6,21 +6,55 @@ import (
 	"errors"
 	"io"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/tyk-swe/olp/internal/management/contract"
+)
+
+type (
+	Phase   = contract.GuardrailPolicyEntryPhase
+	Action  = contract.GuardrailPolicyEntryAction
+	Outcome = contract.GuardrailEvidenceOutcome
+	Scope   = contract.GuardrailAttachmentScope
+	OnError = contract.CreateGuardrailRequestOnError
 )
 
 const (
-	Input              = "input"
-	InputParallel      = "input_parallel"
-	Output             = "output"
-	OutputStream       = "output_stream"
-	Block              = "block"
-	Redact             = "redact"
-	Mask               = "mask"
-	Annotate           = "annotate"
+	Input         = contract.GuardrailPolicyEntryPhaseInput
+	InputParallel = contract.GuardrailPolicyEntryPhaseInputParallel
+	Output        = contract.GuardrailPolicyEntryPhaseOutput
+	OutputStream  = contract.GuardrailPolicyEntryPhaseOutputStream
+
+	Block    = contract.GuardrailPolicyEntryActionBlock
+	Redact   = contract.GuardrailPolicyEntryActionRedact
+	Mask     = contract.GuardrailPolicyEntryActionMask
+	Annotate = contract.GuardrailPolicyEntryActionAnnotate
+	Pass     = Action("pass")
+
+	FailClosed = contract.CreateGuardrailRequestOnErrorFailClosed
+	FailOpen   = contract.CreateGuardrailRequestOnErrorFailOpen
+
+	Passed       = contract.GuardrailEvidenceOutcomePassed
+	Blocked      = contract.GuardrailEvidenceOutcomeBlocked
+	Redacted     = contract.GuardrailEvidenceOutcomeRedacted
+	Masked       = contract.GuardrailEvidenceOutcomeMasked
+	Annotated    = contract.GuardrailEvidenceOutcomeAnnotated
+	Monitored    = contract.GuardrailEvidenceOutcomeMonitored
+	FailedOpen   = contract.GuardrailEvidenceOutcomeFailedOpen
+	FailedClosed = contract.GuardrailEvidenceOutcomeFailedClosed
+	Skipped      = contract.GuardrailEvidenceOutcomeSkipped
+
+	InstallationScope = contract.GuardrailAttachmentScopeInstallation
+	OrganizationScope = contract.GuardrailAttachmentScopeOrganization
+	ProjectScope      = contract.GuardrailAttachmentScopeProject
+	RouteScope        = contract.GuardrailAttachmentScopeRoute
+	ToolsetScope      = contract.GuardrailAttachmentScopeToolset
+	KeyScope          = contract.GuardrailAttachmentScopeApiKey
+)
+
+const (
 	MaxEntries         = 128
 	MaxSegments        = 2048
 	MaxContentBytes    = 8 << 20
@@ -30,16 +64,29 @@ const (
 	MaxWindowBytes     = 1 << 20
 )
 
+func OutputPhase(p Phase) bool { return p == Output || p == OutputStream }
+
+type Role string
+
+const (
+	System    Role = "system"
+	User      Role = "user"
+	Assistant Role = "assistant"
+	Tool      Role = "tool"
+)
+
+type SegmentKind string
+
+const (
+	Text           SegmentKind = ""
+	ToolCall       SegmentKind = "tool_call"
+	ToolResult     SegmentKind = "tool_result"
+	ToolDefinition SegmentKind = "tool_definition"
+)
+
 type Kind string
 
 func (k Kind) Builtin() bool { return strings.HasPrefix(string(k), "builtin.") }
-
-type OnError string
-
-const (
-	FailClosed OnError = "fail_closed"
-	FailOpen   OnError = "fail_open"
-)
 
 var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$`)
 var categoryID = regexp.MustCompile(`^[a-z][a-z0-9_.]{0,63}$`)
@@ -61,8 +108,8 @@ type Revision struct {
 type Entry struct {
 	GuardrailID string `json:"guardrail_id"`
 	RevisionID  string `json:"revision_id"`
-	Phase       string `json:"phase"`
-	Action      string `json:"action"`
+	Phase       Phase  `json:"phase"`
+	Action      Action `json:"action"`
 	Monitor     bool   `json:"monitor,omitempty"`
 	Mandatory   bool   `json:"mandatory,omitempty"`
 }
@@ -78,7 +125,7 @@ type PolicyRevision struct {
 
 type Attachment struct {
 	ID               string `json:"id"`
-	Scope            string `json:"scope"`
+	Scope            Scope  `json:"scope"`
 	ScopeID          string `json:"scope_id"`
 	PolicyRevisionID string `json:"policy_revision_id"`
 	Order            int    `json:"order"`
@@ -87,13 +134,13 @@ type Attachment struct {
 type Boundary struct{ OrganizationID, ProjectID, RouteID, ToolsetID, KeyID string }
 
 type Segment struct {
-	ID         string `json:"id"`
-	Role       string `json:"role,omitempty"`
-	Text       string `json:"text"`
-	Kind       string `json:"kind,omitempty"`
-	ToolName   string `json:"tool_name,omitempty"`
-	ToolCallID string `json:"-"`
-	Untrusted  bool   `json:"untrusted,omitempty"`
+	ID         string      `json:"id"`
+	Role       Role        `json:"role,omitempty"`
+	Text       string      `json:"text"`
+	Kind       SegmentKind `json:"kind,omitempty"`
+	ToolName   string      `json:"tool_name,omitempty"`
+	ToolCallID string      `json:"-"`
+	Untrusted  bool        `json:"untrusted,omitempty"`
 	toolJSON   *JSONSurface
 }
 
@@ -108,7 +155,7 @@ func (s Segment) withText(text string) Segment {
 type Evaluation struct {
 	RequestID            string    `json:"request_id"`
 	Route                string    `json:"route,omitempty"`
-	Phase                string    `json:"phase"`
+	Phase                Phase     `json:"phase"`
 	Segments             []Segment `json:"segments"`
 	CompressionExemptIDs []string  `json:"-"`
 	WorkflowRecovery     bool      `json:"-"`
@@ -131,7 +178,7 @@ type Redaction struct {
 }
 
 type Verdict struct {
-	Action     string      `json:"action"`
+	Action     Action      `json:"action"`
 	Categories []string    `json:"categories,omitempty"`
 	Redactions []Redaction `json:"redactions,omitempty"`
 }
@@ -140,9 +187,9 @@ type Verdict struct {
 type Evidence struct {
 	GuardrailID string   `json:"guardrail_id"`
 	Revision    string   `json:"revision"`
-	Phase       string   `json:"phase"`
-	Action      string   `json:"action"`
-	Outcome     string   `json:"outcome"`
+	Phase       Phase    `json:"phase"`
+	Action      Action   `json:"action"`
+	Outcome     Outcome  `json:"outcome"`
 	Categories  []string `json:"categories,omitempty"`
 	LatencyMS   int64    `json:"latency_ms"`
 }
@@ -155,15 +202,15 @@ type Result struct {
 	Recovery  []Segment  `json:"-"`
 }
 
-type Error struct {
-	Code   string
-	Status int
-}
+type Failure string
 
-func (e *Error) Error() string { return e.Code }
+func (f Failure) Error() string { return string(f) }
 
-var ErrBlocked = &Error{Code: "guardrail_blocked", Status: 400}
-var ErrSurface = &Error{Code: "guardrail_surface_unavailable", Status: 422}
+const (
+	ErrBlocked Failure = "guardrail_blocked"
+	ErrSurface Failure = "guardrail_surface_unavailable"
+)
+
 var errEvaluation = errors.New("guardrail evaluation failed")
 
 func decodeConfig(raw json.RawMessage, into any) error {
@@ -181,20 +228,15 @@ func decodeConfig(raw json.RawMessage, into any) error {
 	return nil
 }
 
-func validPhase(p string) bool {
-	return slices.Contains([]string{Input, InputParallel, Output, OutputStream}, p)
-}
-func validAction(a string) bool { return slices.Contains([]string{Block, Redact, Mask, Annotate}, a) }
-
 func ValidateEvidence(values []Evidence) error {
 	if len(values) > MaxEntries*4 {
 		return errors.New("too many guardrail decisions")
 	}
 	for _, e := range values {
-		if !identifier.MatchString(e.GuardrailID) || !identifier.MatchString(e.Revision) || !validPhase(e.Phase) || !validAction(e.Action) || e.LatencyMS < 0 || e.LatencyMS > int64((24*time.Hour)/time.Millisecond) || len(e.Categories) > 32 {
+		if !identifier.MatchString(e.GuardrailID) || !identifier.MatchString(e.Revision) || !e.Phase.Valid() || !e.Action.Valid() || e.LatencyMS < 0 || e.LatencyMS > int64((24*time.Hour)/time.Millisecond) || len(e.Categories) > 32 {
 			return errors.New("invalid guardrail evidence")
 		}
-		if !slices.Contains([]string{"passed", "blocked", "redacted", "masked", "annotated", "monitored", "failed_open", "failed_closed", "skipped"}, e.Outcome) {
+		if !e.Outcome.Valid() {
 			return errors.New("invalid guardrail outcome")
 		}
 		for _, c := range e.Categories {

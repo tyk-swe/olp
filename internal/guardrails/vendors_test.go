@@ -14,14 +14,18 @@ import (
 
 func TestCoreVendorContracts(t *testing.T) {
 	for _, tc := range []struct {
-		name, kind, phase, response, action, replacement string
+		name, kind  string
+		phase       Phase
+		response    string
+		action      Action
+		replacement string
 	}{
 		{"moderation_block", "openai_moderation", Input, `{"results":[{"flagged":true}]}`, Block, ""},
-		{"moderation_pass", "openai_moderation", Output, `{"results":[{"flagged":false}]}`, "pass", ""},
+		{"moderation_pass", "openai_moderation", Output, `{"results":[{"flagged":false}]}`, Pass, ""},
 		{"moderation_missing", "openai_moderation", Input, `{"results":[{}]}`, "error", ""},
 		{"moderation_null", "openai_moderation", Input, `null`, "error", ""},
 		{"generic_block", "generic_guardrail_api", Input, `{"action":"BLOCKED","texts":["replacement"]}`, Block, ""},
-		{"generic_pass", "generic_guardrail_api", Input, `{"action":"NONE"}`, "pass", ""},
+		{"generic_pass", "generic_guardrail_api", Input, `{"action":"NONE"}`, Pass, ""},
 		{"generic_replace", "generic_guardrail_api", Output, `{"action":"GUARDRAIL_INTERVENED","texts":["safe"]}`, Block, "safe"},
 		{"generic_empty_replace", "generic_guardrail_api", Output, `{"action":"GUARDRAIL_INTERVENED","texts":[""]}`, Block, ""},
 		{"generic_missing", "generic_guardrail_api", Input, `{}`, "error", ""},
@@ -117,9 +121,9 @@ func TestNamedVendorNullDecisions(t *testing.T) {
 						t.Fatal(err)
 					}
 					result, err := engine.Evaluate(t.Context(), Evaluation{Phase: Input, Segments: []Segment{{ID: "s", Text: "private"}}}, nil)
-					wantOutcome := "failed_open"
+					wantOutcome := FailedOpen
 					if policy == FailClosed {
-						wantOutcome = "failed_closed"
+						wantOutcome = FailedClosed
 					}
 					if (policy == FailClosed) != errors.Is(err, ErrBlocked) || len(result.Decisions) != 1 || result.Decisions[0].Outcome != wantOutcome {
 						t.Fatalf("result=%+v error=%v, want %s", result, err, wantOutcome)
