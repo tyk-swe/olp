@@ -223,7 +223,7 @@ confined plugin contract.
 
 Evidence keys:
 
-- **V**: [`TestVendorContracts`](../../internal/guardrails/external_test.go), six local
+- **V**: [`TestCloudContracts`](../../internal/guardrails/vendor/cloud_test.go), six local
   fake request/auth/verdict contracts; transformations still require valid spans.
 - **B**: [`engine_test.go`](../../internal/guardrails/engine_test.go) and
   [`registry_test.go`](../../internal/guardrails/registry_test.go), bounded built-in
@@ -234,10 +234,8 @@ Evidence keys:
 - **W**: [`external.go`](../../internal/guardrails/external.go), inspected shared
   webhook implementation; [`guardrails_test.go`](../../internal/gateway/guardrails_test.go)
   has a parallel evaluation fixture. No named third-party API compatibility proof.
-- **N**: [`vendors_a_test.go`](../../internal/guardrails/vendors_a_test.go),
-  [`vendors_b_test.go`](../../internal/guardrails/vendors_b_test.go),
-  [`vendors_c_test.go`](../../internal/guardrails/vendors_c_test.go), and
-  [`vendors_test.go`](../../internal/guardrails/vendors_test.go): native HTTP
+- **N**: [`vendor_test.go`](../../internal/guardrails/vendor/vendor_test.go) and the
+  family tests beside it in [`vendor`](../../internal/guardrails/vendor): native HTTP
   authentication, phase, request, verdict, replacement and malformed-response
   fixtures. These are local contracts, not live qualification.
 - **L**: [`tool_permission_test.go`](../../internal/guardrails/tool_permission_test.go)

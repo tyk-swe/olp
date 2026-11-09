@@ -123,16 +123,16 @@ func SemanticVerdict(raw []byte, rule SemanticRule, segmentCount int) (Verdict, 
 			// Identical normalized directions have cosine 1, even when summing
 			// their squared components rounds slightly below that boundary.
 			if slices.Equal(query, reference) {
-				return vendorBoolean(true, rule.Category), nil
+				return blockIf(true, rule.Category), nil
 			}
 			similarity := 0.0
 			for i, value := range query {
 				similarity += value * reference[i]
 			}
 			if similarity >= rule.SimilarityThreshold {
-				return vendorBoolean(true, rule.Category), nil
+				return blockIf(true, rule.Category), nil
 			}
 		}
 	}
-	return vendorBoolean(false, rule.Category), nil
+	return blockIf(false, rule.Category), nil
 }

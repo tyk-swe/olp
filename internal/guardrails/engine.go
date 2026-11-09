@@ -39,7 +39,7 @@ type Engine struct{ entries []compiledEntry }
 
 func (e *Engine) HasCompression() bool {
 	return e != nil && slices.ContainsFunc(e.entries, func(entry compiledEntry) bool {
-		return entry.entry.Phase == Input && !entry.entry.Monitor && slices.Contains([]Kind{"headroom", "compresr"}, entry.definition.Type)
+		return entry.entry.Phase == Input && !entry.entry.Monitor && compresses(entry.definition.Type)
 	})
 }
 
@@ -128,7 +128,7 @@ func Compile(entries []Entry, definitions map[string]Revision, external Evaluato
 		if entry.Action == Redact && entry.Phase == InputParallel && !entry.Monitor {
 			return nil, errors.New("parallel input cannot transform a dispatched request")
 		}
-		if vendor, ok := lookupNamedVendor(d.Type); ok && len(vendor.phases) > 0 && !slices.Contains(vendor.phases, entry.Phase) {
+		if info, ok := vendorInfo(d.Type); ok && !info.Supports(entry.Phase) {
 			return nil, errors.New("this vendor does not support the configured phase")
 		}
 		if !entry.Monitor && (entry.Action == Redact || entry.Action == Mask) && !supportsTransformation(d.Type) {
@@ -311,7 +311,7 @@ func (e *Engine) evaluate(ctx context.Context, request Evaluation, masks *Maskin
 		bounded, cancel := context.WithTimeout(ctx, time.Duration(r.definition.TimeoutMS)*time.Millisecond)
 		request.Segments = result.Segments
 		evaluation := request
-		if slices.Contains([]Kind{"headroom", "compresr"}, r.definition.Type) && len(request.CompressionExemptIDs) > 0 {
+		if compresses(r.definition.Type) && len(request.CompressionExemptIDs) > 0 {
 			evaluation.Segments = slices.Collect(func(yield func(Segment) bool) {
 				for _, segment := range result.Segments {
 					if !slices.Contains(request.CompressionExemptIDs, segment.ID) && !yield(segment) {
@@ -370,7 +370,7 @@ func (e *Engine) evaluate(ctx context.Context, request Evaluation, masks *Maskin
 				}
 				firstRecovery := len(result.Recovery)
 				originals := func() []Segment {
-					if !request.WorkflowRecovery || !slices.Contains([]Kind{"headroom", "compresr"}, r.definition.Type) {
+					if !request.WorkflowRecovery || !compresses(r.definition.Type) {
 						return nil
 					}
 					return slices.Collect(func(yield func(Segment) bool) {

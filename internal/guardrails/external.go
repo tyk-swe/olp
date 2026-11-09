@@ -8,19 +8,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
-	"net/url"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/guardrails/vendor"
 	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
 )
 
@@ -65,66 +60,37 @@ func ValidateCredential(secret []byte) error {
 }
 
 func ValidateExternal(d Revision) error {
+	if _, ok := vendorInfo(d.Type); ok {
+		_, err := vendor.Parse(vendor.Type(d.Type), d.Configuration)
+		return err
+	}
+	if d.Type == "webhook" {
+		_, err := vendor.ParseConnection(d.Configuration)
+		return err
+	}
 	var c ExternalConfig
 	if err := decodeConfig(d.Configuration, &c); err != nil {
 		return err
 	}
-	if d.Type == "plugin" {
+	switch d.Type {
+	case "plugin":
 		if !identifier.MatchString(c.PluginID) || !pluginidentity.ValidDigest(c.PluginVersion) {
 			return errors.New("pin an approved plugin version")
 		}
 		return nil
-	}
-	if d.Type == "semantic_guard" {
+	case "semantic_guard":
 		if !identifier.MatchString(c.Route) || c.Rule != nil {
 			return errors.New("semantic guardrails require an embedding route and semantic rule")
 		}
 		return ValidateSemantic(c.Semantic)
-	}
-	if d.Type == "model" || d.Type == "decision_model" {
+	case "model", "decision_model":
 		if !identifier.MatchString(c.Route) || c.Rule == nil || !categoryID.MatchString(c.Rule.Category) || !json.Valid(c.Rule.Equals) || len(c.Rule.Pointer) > 512 || len(c.Rule.Prompt) > 8192 {
 			return errors.New("invalid model guardrail route or verdict rule")
 		}
 		return nil
+	default:
+		return errors.New("unknown guardrail type")
 	}
-	u, err := url.Parse(c.Endpoint)
-	if !c.ContentEgress || err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || len(c.Endpoint) > 2048 {
-		return errors.New("external guardrails require an endpoint and explicit content egress acknowledgement")
-	}
-	if len(c.CredentialRef) < 1 || len(c.CredentialRef) > 100 || strings.ContainsAny(c.CredentialRef, "\r\n\x00") {
-		return errors.New("external guardrails require a credential reference")
-	}
-	if c.AuthEndpoint != "" {
-		u, e := url.Parse(c.AuthEndpoint)
-		if d.Type != "hiddenlayer" || e != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || len(c.AuthEndpoint) > 2048 {
-			return errors.New("invalid guardrail authentication endpoint")
-		}
-	}
-	if c.AnonymizerEndpoint != "" {
-		u, e := url.Parse(c.AnonymizerEndpoint)
-		if d.Type != "presidio" || e != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || len(c.AnonymizerEndpoint) > 2048 {
-			return errors.New("invalid Presidio anonymizer endpoint")
-		}
-	}
-	if c.Threshold < 0 || c.Threshold > 7 {
-		return errors.New("invalid content safety threshold")
-	}
-	if d.Type == "bedrock" && (c.Region == "" || !identifier.MatchString(c.Guardrail) || !identifier.MatchString(c.Version)) {
-		return errors.New("Bedrock requires region, guardrail and version")
-	}
-	if d.Type == "model_armor" && (!strings.HasPrefix(c.Template, "projects/") || strings.Contains(c.Template, "..")) {
-		return errors.New("Model Armor requires a template resource")
-	}
-	if vendor, ok := lookupNamedVendor(d.Type); ok {
-		if vendor.validate != nil {
-			return vendor.validate(c.Parameters)
-		}
-		return decodeVendorParameters(c.Parameters, &struct{}{})
-	}
-	if len(c.Parameters) != 0 {
-		return errors.New("this guardrail does not accept vendor parameters")
-	}
-	return nil
 }
 
 type externalDetector struct {
@@ -163,13 +129,8 @@ type circuit struct {
 	probe    bool
 }
 type externalCredential struct {
-	APIKey          string `json:"api_key"`
-	ClientID        string `json:"client_id"`
-	ClientSecret    string `json:"client_secret"`
-	SigningKey      string `json:"signing_key"`
-	AccessKeyID     string `json:"access_key_id"`
-	SecretAccessKey string `json:"secret_access_key"`
-	SessionToken    string `json:"session_token"`
+	vendor.Credential
+	SigningKey string `json:"signing_key"`
 }
 
 func (r *ExternalRunner) enter(id string) bool {
@@ -211,7 +172,6 @@ func (r *ExternalRunner) leave(id string, err error) {
 	}
 }
 func (r *ExternalRunner) Evaluate(ctx context.Context, d Revision, e Evaluation) (verdict Verdict, err error) {
-	// One deadline covers credential resolution and every segment/vendor call.
 	if d.TimeoutMS < 1 || d.TimeoutMS > 300000 || validateSegments(e.Segments) != nil || !e.Phase.Valid() {
 		return verdict, errEvaluation
 	}
@@ -229,115 +189,163 @@ func (r *ExternalRunner) Evaluate(ctx context.Context, d Revision, e Evaluation)
 			err = errEvaluation
 		}
 	}()
-	var c ExternalConfig
-	if err = decodeConfig(d.Configuration, &c); err != nil {
-		return
-	}
-	if vendor, ok := lookupNamedVendor(d.Type); ok {
-		if err = ValidateExternal(d); err != nil {
-			return
+	return r.dispatch(ctx, d, e)
+}
+
+func (r *ExternalRunner) dispatch(ctx context.Context, d Revision, e Evaluation) (Verdict, error) {
+	switch {
+	case isModelGuardrail(d.Type):
+		return delegate(ctx, r.Model, d, e)
+	case d.Type == "plugin":
+		return delegate(ctx, r.Plugin, d, e)
+	case d.Type == "webhook":
+		c, err := vendor.ParseConnection(d.Configuration)
+		if err != nil {
+			return Verdict{}, err
 		}
-		if len(vendor.phases) > 0 && !slices.Contains(vendor.phases, e.Phase) {
-			return verdict, errEvaluation
+		client, credential, err := r.connect(ctx, d, c, c.Endpoint)
+		if err != nil {
+			return Verdict{}, err
+		}
+		return webhook(ctx, client, c.Endpoint, credential.SigningKey, d, e)
+	}
+	spec, err := vendor.Parse(vendor.Type(d.Type), d.Configuration)
+	if err != nil {
+		return Verdict{}, err
+	}
+	if info, _ := vendorInfo(d.Type); !info.Supports(e.Phase) {
+		return Verdict{}, errEvaluation
+	}
+	client, credential, err := r.connect(ctx, d, spec.Connection, spec.Endpoints()...)
+	if err != nil {
+		return Verdict{}, err
+	}
+	return vendorVerdict(ctx, spec, client, credential.Credential, e)
+}
+
+func delegate(ctx context.Context, evaluator Evaluator, d Revision, e Evaluation) (Verdict, error) {
+	if evaluator == nil {
+		return Verdict{}, errEvaluation
+	}
+	return evaluator.Evaluate(ctx, d, e)
+}
+
+func (r *ExternalRunner) connect(ctx context.Context, d Revision, c vendor.Connection, endpoints ...string) (*http.Client, externalCredential, error) {
+	for _, endpoint := range endpoints {
+		if _, err := r.Egress.ValidateEndpoint(endpoint); err != nil {
+			return nil, externalCredential{}, err
 		}
 	}
-	if isModelGuardrail(d.Type) {
-		if r.Model == nil {
-			return verdict, errEvaluation
-		}
-		return r.Model.Evaluate(ctx, d, e)
-	}
-	if d.Type == "plugin" {
-		if r.Plugin == nil {
-			return verdict, errEvaluation
-		}
-		return r.Plugin.Evaluate(ctx, d, e)
-	}
-	if _, err = r.Egress.ValidateEndpoint(c.Endpoint); err != nil {
-		return
-	}
-	if c.AuthEndpoint != "" {
-		if _, err = r.Egress.ValidateEndpoint(c.AuthEndpoint); err != nil {
-			return
-		}
-	}
-	if c.AnonymizerEndpoint != "" {
-		if _, err = r.Egress.ValidateEndpoint(c.AnonymizerEndpoint); err != nil {
-			return
-		}
-	}
-	if err = r.Egress.ValidateConnection(c.Network); err != nil {
-		return
+	if err := r.Egress.ValidateConnection(c.Network); err != nil {
+		return nil, externalCredential{}, err
 	}
 	if r.Credentials == nil || r.Clients == nil {
-		return verdict, errEvaluation
+		return nil, externalCredential{}, errEvaluation
 	}
-	var secret []byte
-	secret, err = r.Credentials(ctx, c.CredentialRef)
+	secret, err := r.Credentials(ctx, c.CredentialRef)
 	if err != nil {
-		return
+		return nil, externalCredential{}, err
 	}
 	var credential externalCredential
-	if err = json.Unmarshal(secret, &credential); err != nil {
-		return
+	if err := json.Unmarshal(secret, &credential); err != nil {
+		return nil, externalCredential{}, err
 	}
-	var network []byte
-	if c.Network != nil && c.Network.CredentialID != "" {
-		if r.NetworkCredentials == nil {
-			return verdict, errEvaluation
-		}
-		network, err = r.NetworkCredentials(ctx, c.Network.CredentialID)
-		if err != nil {
-			return
-		}
-	}
-	var client *http.Client
-	client, err = r.Clients.ClientScoped("guardrail/"+d.GuardrailID+"/"+d.ID, r.Egress, c.Network, network, time.Duration(d.TimeoutMS)*time.Millisecond)
+	network, err := r.networkSecret(ctx, c.Network)
 	if err != nil {
-		return
+		return nil, externalCredential{}, err
 	}
-	if d.Type == "webhook" {
-		if len(credential.SigningKey) < 32 {
-			return verdict, errEvaluation
+	client, err := r.Clients.ClientScoped("guardrail/"+d.GuardrailID+"/"+d.ID, r.Egress, c.Network, network, time.Duration(d.TimeoutMS)*time.Millisecond)
+	return client, credential, err
+}
+
+func (r *ExternalRunner) networkSecret(ctx context.Context, network *egress.ConnectionOptions) ([]byte, error) {
+	if network == nil || network.CredentialID == "" {
+		return nil, nil
+	}
+	if r.NetworkCredentials == nil {
+		return nil, errEvaluation
+	}
+	return r.NetworkCredentials(ctx, network.CredentialID)
+}
+
+func webhook(ctx context.Context, client *http.Client, endpoint, key string, d Revision, e Evaluation) (Verdict, error) {
+	if len(key) < 32 {
+		return Verdict{}, errEvaluation
+	}
+	body := map[string]any{"guardrail": d.Name, "phase": e.Phase, "request_id": e.RequestID, "route": e.Route, "segments": e.Segments}
+	raw, err := vendor.PostJSON(ctx, client, endpoint, body, func(req *http.Request, encoded []byte) error {
+		req.Header.Set("X-OLP-Signature", Signature([]byte(key), time.Now(), encoded))
+		return nil
+	})
+	if err != nil {
+		return Verdict{}, err
+	}
+	var verdict Verdict
+	if err := decodeConfig(raw, &verdict); err != nil {
+		return Verdict{}, err
+	}
+	return verdict, nil
+}
+
+type finding struct {
+	segment  string
+	decision vendor.Decision
+}
+
+func vendorVerdict(ctx context.Context, spec vendor.Spec, client *http.Client, credential vendor.Credential, e Evaluation) (Verdict, error) {
+	var findings []finding
+	for _, s := range e.Segments {
+		decision, err := spec.Call(ctx, client, credential, vendorRequest(e.Phase, s))
+		if err != nil {
+			return Verdict{}, err
 		}
-		var raw []byte
-		raw, err = externalJSON(ctx, client, c.Endpoint, map[string]any{"guardrail": d.Name, "phase": e.Phase, "request_id": e.RequestID, "route": e.Route, "segments": e.Segments}, func(req *http.Request, body []byte) error {
-			req.Header.Set("X-OLP-Signature", Signature([]byte(credential.SigningKey), time.Now(), body))
+		if decision.Flagged() {
+			findings = append(findings, finding{segment: s.ID, decision: decision})
+		}
+	}
+	if len(findings) == 0 {
+		return Verdict{Action: Pass}, nil
+	}
+	return Verdict{Action: Block, Categories: findingCategories(findings), Redactions: completeRepairs(findings)}, nil
+}
+
+func vendorRequest(phase Phase, s Segment) vendor.Request {
+	return vendor.Request{Output: OutputPhase(phase), Document: s.Kind == ToolResult, Role: vendorRole(phase, s.Role), Text: s.Text}
+}
+
+func vendorRole(phase Phase, role Role) vendor.Role {
+	switch {
+	case OutputPhase(phase) || role == Assistant:
+		return vendor.Assistant
+	case role == System || role == Developer:
+		return vendor.System
+	default:
+		return vendor.User
+	}
+}
+
+func findingCategories(findings []finding) []string {
+	var categories []string
+	for _, f := range findings {
+		for _, category := range f.decision.Categories() {
+			categories = appendCategory(categories, category)
+		}
+	}
+	return categories
+}
+
+func completeRepairs(findings []finding) []Redaction {
+	var redactions []Redaction
+	for _, f := range findings {
+		spans := f.decision.Spans()
+		if len(spans) == 0 {
 			return nil
-		})
-		if err != nil {
-			return
 		}
-		err = decodeConfig(raw, &verdict)
-		return
-	}
-	verdict = Verdict{Action: Pass}
-	missingReplacement := false
-	for _, segment := range e.Segments {
-		var part Verdict
-		part, err = r.vendor(ctx, client, c, credential, d.Type, e.Phase, segment)
-		if err != nil {
-			return
-		}
-		if err = validateVerdict(part, []Segment{segment}); err != nil {
-			return
-		}
-		if part.Action != Pass {
-			missingReplacement = missingReplacement || len(part.Redactions) == 0
-			verdict.Action = Block
-			for _, category := range part.Categories {
-				verdict.Categories = appendCategory(verdict.Categories, category)
-			}
-			verdict.Redactions = append(verdict.Redactions, part.Redactions...)
+		for _, span := range spans {
+			redactions = append(redactions, Redaction{Segment: f.segment, Start: span.Start, End: span.End, Replacement: span.Replacement})
 		}
 	}
-	// A transformation is safe only if every detected segment is repaired.
-	// Keep the finding, but omit partial repairs so the engine refuses it even
-	// when the definition's service-error policy is fail_open.
-	if missingReplacement {
-		verdict.Redactions = nil
-	}
-	return
+	return mergeRedactions(redactions)
 }
 
 // Signature authenticates a timestamp and the exact transmitted bytes. Receivers
@@ -349,255 +357,6 @@ func Signature(key []byte, now time.Time, body []byte) string {
 	mac.Write([]byte(timestamp + "."))
 	mac.Write(body)
 	return "t=" + timestamp + ",v1=" + hex.EncodeToString(mac.Sum(nil))
-}
-func externalJSON(ctx context.Context, client *http.Client, endpoint string, body any, auth func(*http.Request, []byte) error) ([]byte, error) {
-	encoded, err := json.Marshal(body)
-	if err != nil || len(encoded) > MaxContentBytes {
-		return nil, errEvaluation
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(encoded))
-	if err != nil {
-		return nil, errEvaluation
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	if err = auth(req, encoded); err != nil {
-		return nil, errEvaluation
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, errEvaluation
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, errEvaluation
-	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20+1))
-	if err != nil || len(raw) > 1<<20 || !json.Valid(raw) {
-		return nil, errEvaluation
-	}
-	return raw, nil
-}
-func (r *ExternalRunner) vendor(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, kind Kind, phase Phase, s Segment) (Verdict, error) {
-	if vendor, ok := lookupNamedVendor(kind); ok {
-		return vendor.evaluate(ctx, client, c, credential, phase, s)
-	}
-	endpoint := strings.TrimRight(c.Endpoint, "/")
-	var body any
-	auth := func(req *http.Request, _ []byte) error {
-		if credential.APIKey == "" {
-			return errEvaluation
-		}
-		req.Header.Set("Authorization", "Bearer "+credential.APIKey)
-		return nil
-	}
-	switch kind {
-	case "bedrock":
-		endpoint += "/guardrail/" + url.PathEscape(c.Guardrail) + "/version/" + url.PathEscape(c.Version) + "/apply"
-		source := "INPUT"
-		if OutputPhase(phase) {
-			source = "OUTPUT"
-		}
-		body = map[string]any{"source": source, "content": []any{map[string]any{"text": map[string]string{"text": s.Text}}}}
-		auth = func(req *http.Request, encoded []byte) error {
-			if credential.AccessKeyID == "" || credential.SecretAccessKey == "" {
-				return errEvaluation
-			}
-			hash := sha256.Sum256(encoded)
-			return v4.NewSigner().SignHTTP(ctx, aws.Credentials{AccessKeyID: credential.AccessKeyID, SecretAccessKey: credential.SecretAccessKey, SessionToken: credential.SessionToken}, req, hex.EncodeToString(hash[:]), "bedrock", c.Region, time.Now())
-		}
-	case "azure.prompt_shields":
-		endpoint += "/contentsafety/text:shieldPrompt?api-version=2024-09-01"
-		body = map[string]any{"userPrompt": s.Text, "documents": []string{}}
-		if s.Kind == ToolResult {
-			body = map[string]any{"documents": []string{s.Text}}
-		}
-	case "azure.content_safety":
-		endpoint += "/contentsafety/text:analyze?api-version=2024-09-01"
-		body = map[string]any{"text": s.Text, "outputType": "EightSeverityLevels"}
-	case "model_armor":
-		method := "sanitizeUserPrompt"
-		field := "userPromptData"
-		if OutputPhase(phase) {
-			method = "sanitizeModelResponse"
-			field = "modelResponseData"
-		}
-		endpoint += "/v1/" + c.Template + ":" + method
-		body = map[string]any{field: map[string]string{"text": s.Text}}
-	case "lakera":
-		endpoint += "/v2/guard"
-		role := s.Role
-		if role != "system" && role != "assistant" && role != "tool" {
-			role = "user"
-		}
-		body = map[string]any{"messages": []any{map[string]string{"role": string(role), "content": s.Text}}}
-	case "presidio":
-		endpoint += "/analyze"
-		language := c.Language
-		if language == "" {
-			language = "en"
-		}
-		body = map[string]any{"text": s.Text, "language": language}
-	default:
-		return Verdict{}, errEvaluation
-	}
-	if strings.HasPrefix(string(kind), "azure.") {
-		auth = func(req *http.Request, _ []byte) error {
-			if credential.APIKey == "" {
-				return errEvaluation
-			}
-			req.Header.Set("Ocp-Apim-Subscription-Key", credential.APIKey)
-			return nil
-		}
-	}
-	raw, err := externalJSON(ctx, client, endpoint, body, auth)
-	if err != nil {
-		return Verdict{}, err
-	}
-	v := Verdict{Action: Pass}
-	block := func(category string) { v.Action = Block; v.Categories = appendCategory(v.Categories, category) }
-	switch kind {
-	case "bedrock":
-		var response struct {
-			Action  string `json:"action"`
-			Outputs []struct {
-				Text string `json:"text"`
-			} `json:"outputs"`
-		}
-		if json.Unmarshal(raw, &response) != nil {
-			return v, errEvaluation
-		}
-		switch response.Action {
-		case "GUARDRAIL_INTERVENED":
-			block("vendor.bedrock")
-			if len(response.Outputs) == 1 && len(s.Text) > 0 {
-				v.Redactions = []Redaction{{s.ID, 0, len(s.Text), response.Outputs[0].Text}}
-			}
-		case "NONE":
-		default:
-			return v, errEvaluation
-		}
-	case "azure.prompt_shields":
-		var response struct {
-			User *struct {
-				Attack *bool `json:"attackDetected"`
-			} `json:"userPromptAnalysis"`
-			Documents []struct {
-				Attack *bool `json:"attackDetected"`
-			} `json:"documentsAnalysis"`
-		}
-		if json.Unmarshal(raw, &response) != nil || (s.Kind != ToolResult && (response.User == nil || response.User.Attack == nil)) || (s.Kind == ToolResult && len(response.Documents) != 1) {
-			return v, errEvaluation
-		}
-		if response.User != nil && response.User.Attack != nil && *response.User.Attack {
-			block("vendor.prompt_attack")
-		}
-		for _, d := range response.Documents {
-			if d.Attack == nil {
-				return v, errEvaluation
-			}
-			if *d.Attack {
-				block("vendor.document_attack")
-			}
-		}
-	case "azure.content_safety":
-		var response struct {
-			Categories []struct {
-				Category string `json:"category"`
-				Severity *int   `json:"severity"`
-			} `json:"categoriesAnalysis"`
-		}
-		if json.Unmarshal(raw, &response) != nil || len(response.Categories) != 4 {
-			return v, errEvaluation
-		}
-		seen := map[string]bool{}
-		for _, categ := range response.Categories {
-			if seen[categ.Category] || !slices.Contains([]string{"Hate", "SelfHarm", "Sexual", "Violence"}, categ.Category) || categ.Severity == nil || *categ.Severity < 0 || *categ.Severity > 7 {
-				return v, errEvaluation
-			}
-			seen[categ.Category] = true
-			if *categ.Severity > c.Threshold {
-				block("vendor.content_safety")
-			}
-		}
-	case "model_armor":
-		var response struct {
-			Result *struct {
-				State      string `json:"filterMatchState"`
-				Invocation string `json:"invocationResult"`
-			} `json:"sanitizationResult"`
-		}
-		if json.Unmarshal(raw, &response) != nil || response.Result == nil {
-			return v, errEvaluation
-		}
-		if response.Result.Invocation != "" && response.Result.Invocation != "SUCCESS" {
-			return v, errEvaluation
-		}
-		switch response.Result.State {
-		case "MATCH_FOUND":
-			block("vendor.model_armor")
-		case "NO_MATCH_FOUND":
-		default:
-			return v, errEvaluation
-		}
-	case "lakera":
-		var response struct {
-			Flagged *bool `json:"flagged"`
-		}
-		if json.Unmarshal(raw, &response) != nil || response.Flagged == nil {
-			return v, errEvaluation
-		}
-		if *response.Flagged {
-			block("vendor.lakera")
-		}
-	case "presidio":
-		var response []struct {
-			Type  string  `json:"entity_type"`
-			Start int     `json:"start"`
-			End   int     `json:"end"`
-			Score float64 `json:"score"`
-		}
-		if json.Unmarshal(raw, &response) != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-			return v, errEvaluation
-		}
-		for _, entity := range response {
-			start, end := runeOffset(s.Text, entity.Start), runeOffset(s.Text, entity.End)
-			if start < 0 || end <= start || entity.Type == "" || entity.Score < 0 || entity.Score > 1 {
-				return v, errEvaluation
-			}
-			block("vendor.presidio")
-			v.Redactions = append(v.Redactions, Redaction{s.ID, start, end, "[REDACTED]"})
-		}
-		v.Redactions = mergeRedactions(v.Redactions)
-		if len(response) > 0 && c.AnonymizerEndpoint != "" {
-			raw, err := externalJSON(ctx, client, strings.TrimRight(c.AnonymizerEndpoint, "/")+"/anonymize", map[string]any{"text": s.Text, "analyzer_results": response, "anonymizers": map[string]any{"DEFAULT": map[string]string{"type": "replace", "new_value": "[REDACTED]"}}}, auth)
-			if err != nil {
-				return v, err
-			}
-			var result struct {
-				Text *string `json:"text"`
-			}
-			if json.Unmarshal(raw, &result) != nil || result.Text == nil || !utf8.ValidString(*result.Text) {
-				return v, errEvaluation
-			}
-			v.Redactions = []Redaction{{s.ID, 0, len(s.Text), *result.Text}}
-		}
-	}
-	return v, nil
-}
-func runeOffset(text string, index int) int {
-	if index < 0 {
-		return -1
-	}
-	offset := 0
-	for i := 0; i < index; i++ {
-		if offset >= len(text) {
-			return -1
-		}
-		_, n := utf8.DecodeRuneInString(text[offset:])
-		offset += n
-	}
-	return offset
 }
 
 // ModelVerdict decodes a configured JSON pointer without evaluating code or

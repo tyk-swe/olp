@@ -24,6 +24,7 @@ go test -mod=readonly -vet=off -count=1 -timeout=60s \
   ./internal/release \
   ./internal/routing \
   ./internal/guardrails \
+  ./internal/guardrails/vendor \
   ./internal/signing \
   ./internal/mcp \
   ./internal/mcp/messages \

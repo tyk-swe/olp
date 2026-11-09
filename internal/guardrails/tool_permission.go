@@ -139,7 +139,7 @@ func (d *toolPermissionDetector) detect(ctx context.Context, evaluation Evaluati
 						return Verdict{}, ctxErr
 					}
 					if err != nil {
-						return vendorBoolean(true, "tool.arguments_invalid"), nil
+						return blockIf(true, "tool.arguments_invalid"), nil
 					}
 				}
 				matches := true
@@ -167,7 +167,7 @@ func (d *toolPermissionDetector) detect(ctx context.Context, evaluation Evaluati
 			break
 		}
 		if !allowed {
-			return vendorBoolean(true, "tool.denied"), nil
+			return blockIf(true, "tool.denied"), nil
 		}
 	}
 	return Verdict{Action: Pass}, nil

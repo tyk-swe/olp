@@ -149,19 +149,11 @@ func compileDetector(d Revision, external Evaluator) (detector, error) {
 		return t, nil
 	case "typesafe":
 		return compileTypeSafe(d.Configuration)
-	case "webhook", "bedrock", "azure.content_safety", "azure.prompt_shields", "model_armor", "lakera", "presidio", "model", "semantic_guard", "decision_model", "plugin":
+	default:
 		if err := ValidateExternal(d); err != nil {
 			return nil, err
 		}
 		return externalDetector{definition: d, evaluator: external}, nil
-	default:
-		if _, ok := lookupNamedVendor(d.Type); ok {
-			if err := ValidateExternal(d); err != nil {
-				return nil, err
-			}
-			return externalDetector{definition: d, evaluator: external}, nil
-		}
-		return nil, errors.New("unknown guardrail type")
 	}
 }
 

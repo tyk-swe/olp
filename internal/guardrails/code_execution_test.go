@@ -2,6 +2,7 @@ package guardrails
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -96,6 +97,29 @@ func TestCodeExecutionRedaction(t *testing.T) {
 			}
 			if strings.Contains(result.Segments[0].Text, "secret") {
 				t.Fatal("code was retained")
+			}
+		})
+	}
+}
+
+func TestCodeExecutionNativeIntentAndUnlabelledFence(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		phase Phase
+		text  string
+	}{
+		{"shell_request", Input, "please run `whoami`"},
+		{"shell_request_with_fence", Input, "run `python` with this code:\n```python\nprint(1)\n```"},
+		{"unlabelled_output", Output, "```\nprint(1)\n```"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			detector, err := compileCodeExecution(json.RawMessage(`{"confidence_threshold":0.8}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			verdict, err := detector.detect(t.Context(), Evaluation{Phase: tc.phase, Segments: []Segment{{ID: "s", Text: tc.text}}})
+			if err != nil || verdict.Action != Block {
+				t.Fatalf("execution escaped: %+v error=%v", verdict, err)
 			}
 		})
 	}

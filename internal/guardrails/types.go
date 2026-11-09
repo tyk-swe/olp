@@ -73,6 +73,7 @@ const (
 	User      Role = "user"
 	Assistant Role = "assistant"
 	Tool      Role = "tool"
+	Developer Role = "developer"
 )
 
 type SegmentKind string
