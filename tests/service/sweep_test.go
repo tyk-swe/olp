@@ -14,8 +14,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/promotion"
 )
 
 // readinessRoute reports 503 by design until a process has a fresh snapshot.
@@ -220,10 +218,9 @@ func TestManagementIsolationSweep(t *testing.T) {
 			}}, etag(current), http.StatusOK)
 		}
 		live := s.want(owner, "GET", path+"/end-user-policy", nil, nil, http.StatusOK)
-		limit := int64(11)
-		document := promotion.Document{APIVersion: promotion.APIVersion, Projects: []promotion.ProjectEntry{
-			{Name: project["name"].(string), EndUserDefaults: &authority.AdmissionLimits{RequestsPerMinute: &limit}},
-			{Name: other["name"].(string), EndUserDefaults: &authority.AdmissionLimits{RequestsPerMinute: &limit}},
+		document := map[string]any{"api_version": "openllmproxy.dev/config/v2", "projects": []map[string]any{
+			{"name": project["name"], "end_user_defaults": map[string]any{"requests_per_minute": 11}},
+			{"name": other["name"], "end_user_defaults": map[string]any{"requests_per_minute": 11}},
 		}}
 		s.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idempotent(), http.StatusOK)
 		liveAfter := s.want(owner, "GET", path+"/end-user-policy", nil, nil, http.StatusOK)
@@ -239,11 +236,9 @@ func TestManagementIsolationSweep(t *testing.T) {
 		if string(livePolicy) != string(promotedPolicy) {
 			t.Fatalf("promoted policy = %s, live policy = %s", promotedPolicy, livePolicy)
 		}
-		emptyTemplates := authority.LimitTemplates{}
-		changedLimit := int64(17)
-		invalid := promotion.Document{APIVersion: promotion.APIVersion, Projects: []promotion.ProjectEntry{
-			{Name: other["name"].(string), EndUserDefaults: &authority.AdmissionLimits{RequestsPerMinute: &changedLimit}},
-			{Name: project["name"].(string), EndUserDefaults: &authority.AdmissionLimits{RequestsPerMinute: &changedLimit}, LimitTemplates: &emptyTemplates},
+		invalid := map[string]any{"api_version": "openllmproxy.dev/config/v2", "projects": []map[string]any{
+			{"name": other["name"], "end_user_defaults": map[string]any{"requests_per_minute": 17}},
+			{"name": project["name"], "end_user_defaults": map[string]any{"requests_per_minute": 17}, "limit_templates": map[string]any{}},
 		}}
 		problem := s.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": invalid}, idempotent(), http.StatusConflict)
 		if problem["type"] != "https://openllmproxy.dev/problems/template_in_use" {
@@ -318,5 +313,8 @@ func TestManagementIsolationSweep(t *testing.T) {
 		if string(beforeJSON) != string(afterJSON) {
 			t.Fatalf("denied mutation changed the project policy: before %s, after %s", beforeJSON, afterJSON)
 		}
+	})
+	t.Run("promotion_round_trip", func(t *testing.T) {
+		testPromotionRoundTrip(t, s, owner, fixture)
 	})
 }

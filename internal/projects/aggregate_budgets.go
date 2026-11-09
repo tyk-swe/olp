@@ -2,12 +2,15 @@ package projects
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/settings"
 )
 
 func (s *Server) projectBudget(r *http.Request, p access.Principal) (access.Reply, error) {
@@ -116,24 +119,12 @@ func (s *Server) writeAggregateBudget(r *http.Request, _ access.Principal, proje
 		if err != nil {
 			return access.Reply{}, err
 		}
-	} else {
-		if policy.Limited() {
-			if err = limits.EnsureAggregateBudget(r.Context(), tx, level, id); err != nil {
-				return access.Reply{}, err
-			}
-		}
-		encoded, err := json.Marshal(policy)
-		if err != nil {
+	} else if level == "organization" {
+		if etag, err = SetOrganizationBudget(r.Context(), tx, id, policy); err != nil {
 			return access.Reply{}, err
 		}
-		etag = access.NewID()
-		extra := ""
-		if level != "installation" {
-			extra = ",updated_at=now()"
-		}
-		if _, err = tx.Exec(r.Context(), "UPDATE "+table+" SET budget_policy=NULLIF($2::jsonb,'null'::jsonb),"+column+"=$3"+extra+" WHERE id=$1", id, encoded, etag); err != nil {
-			return access.Reply{}, err
-		}
+	} else if etag, err = settings.SetInstallationBudget(r.Context(), tx, id, policy); err != nil {
+		return access.Reply{}, err
 	}
 	if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
 		return access.Reply{}, err
@@ -153,4 +144,21 @@ func aggregateReportSQL(level string) string {
 		return limits.OrganizationBudgetSQL
 	}
 	return limits.AggregateBudgetSQL(level == "project")
+}
+
+func SetOrganizationBudget(ctx context.Context, tx pgx.Tx, id string, policy *authority.BudgetPolicy) (string, error) {
+	if policy.Limited() {
+		if err := limits.EnsureAggregateBudget(ctx, tx, "organization", id); err != nil {
+			return "", err
+		}
+	}
+	encoded, err := json.Marshal(policy)
+	if err != nil {
+		return "", err
+	}
+	etag := access.NewID()
+	if _, err := tx.Exec(ctx, "UPDATE olp.organizations SET budget_policy=NULLIF($2::jsonb,'null'::jsonb),etag=$3,updated_at=now() WHERE id=$1", id, encoded, etag); err != nil {
+		return "", err
+	}
+	return etag, nil
 }

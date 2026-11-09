@@ -15,29 +15,39 @@ func ApplyInstallationBudget(ctx context.Context, tx pgx.Tx, p access.Principal,
 	if desired == nil {
 		return false, nil
 	}
-	desired = authority.NormalizedBudget(desired)
+	normalized := authority.NormalizedBudget(desired)
 	var id string
 	var current *authority.BudgetPolicy
 	if err := tx.QueryRow(ctx, "SELECT id::text,budget_policy FROM olp.installation WHERE singleton FOR UPDATE").Scan(&id, &current); err != nil {
 		return false, err
 	}
-	if reflect.DeepEqual(current, desired) {
+	if reflect.DeepEqual(authority.NormalizedBudget(current), normalized) {
 		return false, nil
 	}
 	if err := p.Authorize(access.Settings); err != nil {
 		return false, err
 	}
-	if desired.Limited() {
-		if err := limits.EnsureAggregateBudget(ctx, tx, "installation", id); err != nil {
-			return false, err
-		}
-	}
-	encoded, err := json.Marshal(desired)
-	if err != nil {
+	if _, err := SetInstallationBudget(ctx, tx, id, normalized); err != nil {
 		return false, err
 	}
-	_, err = tx.Exec(ctx, "UPDATE olp.installation SET budget_policy=NULLIF($1::jsonb,'null'::jsonb),budget_etag=$2 WHERE singleton", encoded, access.NewID())
-	return err == nil, err
+	return true, nil
+}
+
+func SetInstallationBudget(ctx context.Context, tx pgx.Tx, id string, policy *authority.BudgetPolicy) (string, error) {
+	if policy.Limited() {
+		if err := limits.EnsureAggregateBudget(ctx, tx, "installation", id); err != nil {
+			return "", err
+		}
+	}
+	encoded, err := json.Marshal(policy)
+	if err != nil {
+		return "", err
+	}
+	etag := access.NewID()
+	if _, err := tx.Exec(ctx, "UPDATE olp.installation SET budget_policy=NULLIF($2::jsonb,'null'::jsonb),budget_etag=$3 WHERE id=$1", id, encoded, etag); err != nil {
+		return "", err
+	}
+	return etag, nil
 }
 
 func ApplyBudgetTimeZone(ctx context.Context, tx pgx.Tx, p access.Principal, desired *string) error {
@@ -59,4 +69,16 @@ func ApplyBudgetTimeZone(ctx context.Context, tx pgx.Tx, p access.Principal, des
 	}
 	_, err := tx.Exec(ctx, "UPDATE olp.settings SET value=$1,etag=$2,updated_by=$3,updated_at=now() WHERE key='budgets.time_zone'", *desired, access.NewID(), p.UserID())
 	return err
+}
+
+func ReadBudgetTimeZone(ctx context.Context, q access.Queryer) (string, error) {
+	var zone string
+	err := q.QueryRow(ctx, "SELECT COALESCE((SELECT value FROM olp.settings WHERE key='budgets.time_zone'),'UTC')").Scan(&zone)
+	return zone, err
+}
+
+func ReadInstallationBudget(ctx context.Context, q access.Queryer) (*authority.BudgetPolicy, error) {
+	var policy *authority.BudgetPolicy
+	err := q.QueryRow(ctx, "SELECT budget_policy FROM olp.installation WHERE singleton").Scan(&policy)
+	return policy, err
 }

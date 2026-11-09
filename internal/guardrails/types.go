@@ -7,6 +7,7 @@ import (
 	"io"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -20,8 +21,6 @@ const (
 	Redact             = "redact"
 	Mask               = "mask"
 	Annotate           = "annotate"
-	FailClosed         = "fail_closed"
-	FailOpen           = "fail_open"
 	MaxEntries         = 128
 	MaxSegments        = 2048
 	MaxContentBytes    = 8 << 20
@@ -29,6 +28,17 @@ const (
 	MaxEvidenceBytes   = 256 << 10
 	DefaultWindowBytes = 64 << 10
 	MaxWindowBytes     = 1 << 20
+)
+
+type Kind string
+
+func (k Kind) Builtin() bool { return strings.HasPrefix(string(k), "builtin.") }
+
+type OnError string
+
+const (
+	FailClosed OnError = "fail_closed"
+	FailOpen   OnError = "fail_open"
 )
 
 var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$`)
@@ -42,10 +52,10 @@ type Revision struct {
 	GuardrailID   string          `json:"guardrail_id"`
 	ProjectID     string          `json:"project_id"`
 	Name          string          `json:"name"`
-	Type          string          `json:"type"`
+	Type          Kind            `json:"type"`
 	Configuration json.RawMessage `json:"configuration"`
 	TimeoutMS     int64           `json:"timeout_ms"`
-	OnError       string          `json:"on_error"`
+	OnError       OnError         `json:"on_error"`
 }
 
 type Entry struct {

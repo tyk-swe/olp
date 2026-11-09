@@ -9,7 +9,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 type ManagedPolicy struct {
@@ -63,6 +62,20 @@ func projectPointer(project string) *string {
 		return nil
 	}
 	return &project
+}
+
+func latestRevision(current *ManagedPolicy) *PolicyRevision {
+	if current == nil {
+		return nil
+	}
+	return &current.PolicyRevision
+}
+
+func activation(policy bool) func(context.Context, pgx.Tx, string, string, string) error {
+	if policy {
+		return ActivatePolicy
+	}
+	return ActivateRevision
 }
 
 func loadPolicy(ctx context.Context, q access.Queryer, id string, lock bool) (*ManagedPolicy, error) {
@@ -224,18 +237,9 @@ func (s *Server) writePolicy(r *http.Request, id string, retire bool) (access.Re
 		if _, err = Compile(in.Entries, definitions, nil); err != nil {
 			return access.Reply{}, access.Invalid("entries", "Supply valid phases, actions and pinned revisions.")
 		}
-		rid, etag, version := access.NewID(), access.NewID(), int64(1)
-		if current == nil {
-			id = access.NewID()
-			_, err = tx.Exec(r.Context(), "INSERT INTO olp.guardrail_policies(id,project_id,name,latest_revision_id,etag,created_by) VALUES($1,$2,$3,$4,$5,$6)", id, in.ProjectID, in.Name, rid, etag, p.UserID())
-		} else {
-			version = current.Revision + 1
-			_, err = tx.Exec(r.Context(), "UPDATE olp.guardrail_policies SET name=$2,latest_revision_id=$3,etag=$4 WHERE id=$1", id, in.Name, rid, etag)
-		}
-		if err == nil {
-			raw, _ := json.Marshal(in.Entries)
-			_, err = tx.Exec(r.Context(), "INSERT INTO olp.guardrail_policy_revisions(id,policy_id,revision,entries,created_by) VALUES($1,$2,$3,$4,$5)", rid, id, version, raw, p.UserID())
-		}
+		var saved PolicyRevision
+		saved, err = SavePolicy(r.Context(), tx, p.UserID(), latestRevision(current), PolicyRevision{ProjectID: in.ProjectID, Name: in.Name, Entries: in.Entries})
+		id = saved.PolicyID
 	}
 	if err != nil {
 		return access.Reply{}, err
@@ -327,15 +331,7 @@ func (s *Server) activate(r *http.Request, id string, policy bool) (access.Reply
 	if !exists {
 		return access.Reply{}, access.Invalid("revision_id", "Choose a revision owned by this resource.")
 	}
-	activationTable := "guardrail_revision_activations"
-	if policy {
-		activationTable = "guardrail_policy_revision_activations"
-	}
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp."+activationTable+"(revision_id,activated_by) VALUES($1,$2) ON CONFLICT DO NOTHING", in.RevisionID, p.UserID()); err != nil {
-		return access.Reply{}, err
-	}
-	_, err = tx.Exec(r.Context(), "UPDATE olp."+table+" SET active_revision_id=$2,etag=$3 WHERE id=$1", id, in.RevisionID, access.NewID())
-	if err != nil {
+	if err = activation(policy)(r.Context(), tx, p.UserID(), id, in.RevisionID); err != nil {
 		return access.Reply{}, err
 	}
 	if err = s.publish(r.Context(), tx, p.UserID()); err != nil {
@@ -492,8 +488,7 @@ func (s *Server) writeAttachment(r *http.Request, remove bool) (access.Reply, er
 		if err = validateAttachmentPolicy(r.Context(), tx, p, in); err != nil {
 			return access.Reply{}, err
 		}
-		in.ID = access.NewID()
-		_, err = tx.Exec(r.Context(), "INSERT INTO olp.guardrail_attachments(id,scope,scope_id,policy_revision_id,position,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)", in.ID, in.Scope, projectPointer(in.ScopeID), in.PolicyRevisionID, in.Order, access.NewID(), p.UserID())
+		in, err = createAttachment(r.Context(), tx, p.UserID(), in)
 	}
 	if err != nil {
 		return access.Reply{}, err
@@ -587,11 +582,7 @@ func (s *Server) createCredential(r *http.Request, _ access.Principal) (access.R
 	if replayed != nil {
 		return *replayed, tx.Commit(r.Context())
 	}
-	id := access.NewID()
-	if err = s.Access.Keys.Store(r.Context(), tx, s.Access.Installation, id, secrets.GuardrailCredential, in.Credential, nil); err != nil {
-		return access.Reply{}, err
-	}
-	_, err = tx.Exec(r.Context(), "INSERT INTO olp.guardrail_credentials(id,project_id,name,created_by) VALUES($1,$2,$3,$4)", id, in.ProjectID, in.Name, p.UserID())
+	id, err := CreateCredential(r.Context(), tx, s.Access.Keys, s.Access.Installation, NewCredential{ProjectID: &in.ProjectID, Name: in.Name, Secret: in.Credential, CreatedBy: p.UserID()})
 	if err != nil {
 		return access.Reply{}, err
 	}

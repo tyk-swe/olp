@@ -53,12 +53,16 @@ func (s *Server) storeCredentialInput(ctx context.Context, tx pgx.Tx, providerID
 	if reference == nil {
 		return s.StoreCredential(ctx, tx, providerID, *plain)
 	}
-	id := access.NewID()
-	var version int
+	return s.StoreExternalCredential(ctx, tx, providerID, *reference)
+}
+
+func (s *Server) StoreExternalCredential(ctx context.Context, tx pgx.Tx, providerID string, reference secretstore.Reference) (string, int, error) {
 	data, err := json.Marshal(reference)
 	if err != nil {
 		return "", 0, err
 	}
+	id := access.NewID()
+	var version int
 	err = tx.QueryRow(ctx, "INSERT INTO olp.provider_credentials(id,provider_id,version,external_reference) VALUES($1,$2,(SELECT coalesce(max(version),0)+1 FROM olp.provider_credentials WHERE provider_id=$2),$3) RETURNING version", id, providerID, data).Scan(&version)
 	return id, version, err
 }

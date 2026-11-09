@@ -17,13 +17,13 @@ type namedVendor struct {
 	phases     []string
 }
 
-func isModelGuardrail(kind string) bool {
+func isModelGuardrail(kind Kind) bool {
 	return kind == "model" || kind == "semantic_guard" || kind == "decision_model" || kind == "typesafe"
 }
 
-func lookupNamedVendor(kind string) (namedVendor, bool) {
+func lookupNamedVendor(kind Kind) (namedVendor, bool) {
 	for _, group := range []map[string]namedVendor{namedVendorsA, namedVendorsB, namedVendorsC, namedVendorsCore} {
-		if vendor, ok := group[kind]; ok {
+		if vendor, ok := group[string(kind)]; ok {
 			return vendor, true
 		}
 	}
@@ -65,7 +65,7 @@ func vendorReplacement(segment Segment, replacement, category string) (Verdict, 
 	return verdict, nil
 }
 
-func supportsTransformation(kind string) bool {
+func supportsTransformation(kind Kind) bool {
 	if vendor, ok := lookupNamedVendor(kind); ok {
 		return vendor.transforms
 	}

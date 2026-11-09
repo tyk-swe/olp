@@ -173,8 +173,7 @@ func (s *Server) putPublication(r *http.Request, _ access.Principal) (access.Rep
 	if err = access.Match(r, current.ETag); err != nil {
 		return access.Reply{}, err
 	}
-	result := Publication{Enabled: *input.Enabled, PricesPublic: *input.PricesPublic, ETag: access.NewID()}
-	_, err = tx.Exec(r.Context(), `INSERT INTO olp.model_catalog_project_settings(project_id,enabled,prices_public,etag) VALUES($1,$2,$3,$4) ON CONFLICT(project_id) DO UPDATE SET enabled=excluded.enabled,prices_public=excluded.prices_public,etag=excluded.etag`, id, result.Enabled, result.PricesPublic, result.ETag)
+	result, err := SetProjectPublication(r.Context(), tx, id, *input.Enabled, *input.PricesPublic)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -244,8 +243,7 @@ func (s *Server) putExposure(r *http.Request, _ access.Principal) (access.Reply,
 	if err = access.Match(r, current.ETag); err != nil {
 		return access.Reply{}, err
 	}
-	result := Exposure{ExposeUpstreamModels: *input.ExposeUpstreamModels, ETag: access.NewID()}
-	_, err = tx.Exec(r.Context(), `INSERT INTO olp.model_catalog_route_settings(route_id,expose_upstream_models,etag) VALUES($1,$2,$3) ON CONFLICT(route_id) DO UPDATE SET expose_upstream_models=excluded.expose_upstream_models,etag=excluded.etag`, id, result.ExposeUpstreamModels, result.ETag)
+	result, err := setRoutePublication(r.Context(), tx, id, *input.ExposeUpstreamModels)
 	if err != nil {
 		return access.Reply{}, err
 	}

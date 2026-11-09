@@ -39,7 +39,7 @@ type Engine struct{ entries []compiledEntry }
 
 func (e *Engine) HasCompression() bool {
 	return e != nil && slices.ContainsFunc(e.entries, func(entry compiledEntry) bool {
-		return entry.entry.Phase == Input && !entry.entry.Monitor && slices.Contains([]string{"headroom", "compresr"}, entry.definition.Type)
+		return entry.entry.Phase == Input && !entry.entry.Monitor && slices.Contains([]Kind{"headroom", "compresr"}, entry.definition.Type)
 	})
 }
 
@@ -311,7 +311,7 @@ func (e *Engine) evaluate(ctx context.Context, request Evaluation, masks *Maskin
 		bounded, cancel := context.WithTimeout(ctx, time.Duration(r.definition.TimeoutMS)*time.Millisecond)
 		request.Segments = result.Segments
 		evaluation := request
-		if slices.Contains([]string{"headroom", "compresr"}, r.definition.Type) && len(request.CompressionExemptIDs) > 0 {
+		if slices.Contains([]Kind{"headroom", "compresr"}, r.definition.Type) && len(request.CompressionExemptIDs) > 0 {
 			evaluation.Segments = slices.Collect(func(yield func(Segment) bool) {
 				for _, segment := range result.Segments {
 					if !slices.Contains(request.CompressionExemptIDs, segment.ID) && !yield(segment) {
@@ -370,7 +370,7 @@ func (e *Engine) evaluate(ctx context.Context, request Evaluation, masks *Maskin
 				}
 				firstRecovery := len(result.Recovery)
 				originals := func() []Segment {
-					if !request.WorkflowRecovery || !slices.Contains([]string{"headroom", "compresr"}, r.definition.Type) {
+					if !request.WorkflowRecovery || !slices.Contains([]Kind{"headroom", "compresr"}, r.definition.Type) {
 						return nil
 					}
 					return slices.Collect(func(yield func(Segment) bool) {

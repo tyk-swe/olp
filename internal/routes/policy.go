@@ -29,7 +29,7 @@ func normalizedPolicy(p *routing.Policy) map[string]any {
 	_ = json.Unmarshal(body, &result)
 	return result
 }
-func samePolicy(a, b *routing.Policy) bool {
+func SamePolicy(a, b *routing.Policy) bool {
 	return reflect.DeepEqual(normalizedPolicy(a), normalizedPolicy(b))
 }
 

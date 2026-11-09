@@ -29,12 +29,12 @@ type Server struct {
 type Definition struct {
 	Configuration    json.RawMessage       `json:"configuration"`
 	TimeoutMS        int64                 `json:"timeout_ms"`
-	OnError          string                `json:"on_error"`
+	OnError          OnError               `json:"on_error"`
 	ActiveRevisionID *string               `json:"active_revision_id"`
 	ID               string                `json:"id"`
 	ProjectID        string                `json:"project_id"`
 	Name             string                `json:"name"`
-	Type             string                `json:"type"`
+	Type             Kind                  `json:"type"`
 	ETag             string                `json:"etag"`
 	RevisionID       string                `json:"revision_id"`
 	Revision         int64                 `json:"revision"`
@@ -45,9 +45,9 @@ type Definition struct {
 type input struct {
 	Configuration json.RawMessage `json:"configuration,omitempty"`
 	TimeoutMS     int64           `json:"timeout_ms,omitempty"`
-	OnError       string          `json:"on_error,omitempty"`
+	OnError       OnError         `json:"on_error,omitempty"`
 	Name          string          `json:"name"`
-	Type          string          `json:"type,omitempty"`
+	Type          Kind            `json:"type,omitempty"`
 	ProjectID     *string         `json:"project_id,omitempty"`
 	Policy        json.RawMessage `json:"policy"`
 }

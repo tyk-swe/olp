@@ -378,7 +378,7 @@ func externalJSON(ctx context.Context, client *http.Client, endpoint string, bod
 	}
 	return raw, nil
 }
-func (r *ExternalRunner) vendor(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, kind, phase string, s Segment) (Verdict, error) {
+func (r *ExternalRunner) vendor(ctx context.Context, client *http.Client, c ExternalConfig, credential externalCredential, kind Kind, phase string, s Segment) (Verdict, error) {
 	if vendor, ok := lookupNamedVendor(kind); ok {
 		return vendor.evaluate(ctx, client, c, credential, phase, s)
 	}
@@ -441,7 +441,7 @@ func (r *ExternalRunner) vendor(ctx context.Context, client *http.Client, c Exte
 	default:
 		return Verdict{}, errEvaluation
 	}
-	if strings.HasPrefix(kind, "azure.") {
+	if strings.HasPrefix(string(kind), "azure.") {
 		auth = func(req *http.Request, _ []byte) error {
 			if credential.APIKey == "" {
 				return errEvaluation

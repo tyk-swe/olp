@@ -101,7 +101,7 @@ func (s *Server) provisionUser(r *http.Request, _ Principal) (Reply, error) {
 			return Reply{}, err
 		}
 	}
-	if err = s.EnsureUsableOwner(r, tx); err != nil {
+	if err = s.EnsureUsableOwner(r.Context(), tx); err != nil {
 		return Reply{}, err
 	}
 	if err = Audit(r.Context(), tx, r, p.Actor(), "user.provision", "user", userID, "success"); err != nil {
@@ -144,7 +144,7 @@ func (s *Server) deprovisionUser(r *http.Request, _ Principal) (Reply, error) {
 	if err = retireIssuedInvitations(r, tx, userID, p.Actor(), p.UserID()); err != nil {
 		return Reply{}, err
 	}
-	if err = s.EnsureUsableOwner(r, tx); err != nil {
+	if err = s.EnsureUsableOwner(r.Context(), tx); err != nil {
 		return Reply{}, err
 	}
 	if err = Audit(r.Context(), tx, r, p.Actor(), "user.deprovision", "user", userID, "success"); err != nil {

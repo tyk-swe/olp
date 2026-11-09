@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
-	"strings"
 
 	"github.com/tyk-swe/olp/internal/access"
 )
@@ -49,7 +48,7 @@ func ReadRegistry(ctx context.Context, q access.Queryer) (*Registry, error) {
 		return nil, err
 	}
 	for _, d := range r.Definitions {
-		if strings.HasPrefix(d.Type, "builtin.") {
+		if d.Type.Builtin() {
 			continue
 		}
 		var c ExternalConfig

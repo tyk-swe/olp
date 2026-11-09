@@ -54,7 +54,7 @@ func TestNamedVendorAContracts(t *testing.T) {
 						io.WriteString(w, result.response)
 					})
 					config, _ := json.Marshal(ExternalConfig{Endpoint: endpoint + "/native-operation", CredentialRef: "credential", ContentEgress: true, Parameters: tc.parameters})
-					d := Revision{ID: "revision", GuardrailID: "guard", ProjectID: "project", Type: tc.kind, Configuration: config, TimeoutMS: 1000, OnError: FailClosed}
+					d := Revision{ID: "revision", GuardrailID: "guard", ProjectID: "project", Type: Kind(tc.kind), Configuration: config, TimeoutMS: 1000, OnError: FailClosed}
 					if err := ValidateDefinition(d); err != nil {
 						t.Fatal(err)
 					}
@@ -92,7 +92,7 @@ func TestNamedVendorATransformations(t *testing.T) {
 		t.Run(tc.kind, func(t *testing.T) {
 			runner, endpoint := fakeRunner(t, func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, tc.response) })
 			config, _ := json.Marshal(ExternalConfig{Endpoint: endpoint, CredentialRef: "credential", ContentEgress: true, Parameters: tc.parameters})
-			d := Revision{ID: "revision", GuardrailID: "guard", Type: tc.kind, Configuration: config, TimeoutMS: 1000, OnError: FailClosed}
+			d := Revision{ID: "revision", GuardrailID: "guard", Type: Kind(tc.kind), Configuration: config, TimeoutMS: 1000, OnError: FailClosed}
 			got, err := runner.Evaluate(t.Context(), d, Evaluation{Phase: Input, Segments: []Segment{{ID: "text", Text: "é private"}}})
 			if err != nil || len(got.Redactions) != 1 || got.Redactions[0].End != len("é private") || got.Redactions[0].Replacement != "safe" {
 				t.Fatalf("%+v %v", got, err)

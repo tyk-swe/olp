@@ -16,14 +16,18 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/oapi-codegen/nullable"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codeallowance"
 	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	codepromotion "github.com/tyk-swe/olp/internal/promotion/code"
+	providerpromotion "github.com/tyk-swe/olp/internal/promotion/provider"
 	"github.com/tyk-swe/olp/internal/providers"
 )
 
@@ -1528,11 +1532,11 @@ func TestCodeAccountExtraUsageRoundTripsAndRefusesNonKimiAccounts(t *testing.T) 
 	if _, err := save(kimiAccount, kimiInput, true); err != nil {
 		t.Fatal(err)
 	}
-	exported, err := codepromotion.ExportCode(t.Context(), pool)
+	exported, err := codepromotion.Read(t.Context(), pool)
 	if err != nil {
 		t.Fatal(err)
 	}
-	index := slices.IndexFunc(exported.Accounts, func(entry promotion.CodeAccountEntry) bool { return entry.ID == kimiAccount })
+	index := slices.IndexFunc(exported.Accounts, func(entry codepromotion.Account) bool { return entry.ID == kimiAccount })
 	if index < 0 || exported.Accounts[index].ExtraUsageEnabled == nil || !*exported.Accounts[index].ExtraUsageEnabled {
 		t.Fatalf("exported accounts = %+v, want the kimi account carrying extra usage on", exported.Accounts)
 	}
@@ -1560,14 +1564,22 @@ func TestCodeAccountPromotionCycleAnchor(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	date := func(value string) nullable.Nullable[openapi_types.Date] {
+		parsed, err := time.Parse(time.DateOnly, value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return nullable.NewNullableWithValue(openapi_types.Date{Time: parsed})
+	}
 	for _, tc := range []struct {
-		name   string
-		anchor *string
-		action string
+		name     string
+		declared nullable.Nullable[openapi_types.Date]
+		anchor   *string
+		action   contract.ConfigurationPlanItemAction
 	}{
-		{"unchanged", &anchor, "noop"},
-		{"cleared", nil, "replace"},
-		{"changed", &changedAnchor, "replace"},
+		{"unchanged", date(anchor), &anchor, contract.ConfigurationPlanItemActionNoop},
+		{"cleared", nullable.NewNullNullable[openapi_types.Date](), nil, contract.ConfigurationPlanItemActionReplace},
+		{"changed", date(changedAnchor), &changedAnchor, contract.ConfigurationPlanItemActionReplace},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tx, err := pool.Begin(t.Context())
@@ -1575,19 +1587,21 @@ func TestCodeAccountPromotionCycleAnchor(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer tx.Rollback(t.Context())
-			doc := &promotion.Document{
-				Code:         &promotion.CodeConfiguration{Accounts: []promotion.CodeAccountEntry{{ID: account, Project: "cycle-anchor-journey", Provider: "cycle-anchor-provider", CredentialRef: "account-credential", Name: "cycle-anchor-account", Enabled: true, Models: []string{"model"}, CycleAnchor: tc.anchor}}},
-				CodeBindings: promotion.CodeBindings{Credentials: map[string]string{"account-credential": credential}},
-			}
-			var plan promotion.PlanResult
-			if err := codepromotion.PlanCode(t.Context(), tx, doc, &plan); err != nil {
+			document := &contract.ConfigurationCode{Accounts: nullable.NewNullableWithValue([]contract.ConfigurationCodeAccount{{Id: uuid.MustParse(account), Project: "cycle-anchor-journey", Provider: "cycle-anchor-provider", CredentialRef: "account-credential", Name: "cycle-anchor-account", Enabled: true, Models: []string{"model"}, CycleAnchor: tc.declared}})}
+			bindings := &contract.ConfigurationCodeBindings{Credentials: &map[string]openapi_types.UUID{"account-credential": uuid.MustParse(credential)}}
+			desired, err := codepromotion.Parse(document, bindings, promotion.Names{}, providerpromotion.Deps{})
+			if err != nil {
 				t.Fatal(err)
 			}
-			if len(plan.Actions) != 1 || plan.Actions[0].Kind != "code_account" || plan.Actions[0].Action != tc.action {
-				t.Fatalf("promotion plan = %+v, want one account %s", plan.Actions, tc.action)
+			items, err := codepromotion.Planner(desired, providerpromotion.Deps{}).Plan(t.Context(), tx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(items) != 1 || items[0].Kind != contract.ConfigurationPlanItemKindCodeAccount || items[0].Action != tc.action {
+				t.Fatalf("promotion plan = %+v, want one account %s", items, tc.action)
 			}
 			operator := access.Principal{User: access.User{ID: user}, AllProjects: true}
-			if err := codepromotion.ApplyCode(t.Context(), tx, operator, doc); err != nil {
+			if err := codepromotion.Applier(desired, providerpromotion.Deps{})(t.Context(), tx, operator); err != nil {
 				t.Fatal(err)
 			}
 			var storedAnchor *string
@@ -1598,7 +1612,7 @@ func TestCodeAccountPromotionCycleAnchor(t *testing.T) {
 			if (storedAnchor == nil) != (tc.anchor == nil) || storedAnchor != nil && tc.anchor != nil && *storedAnchor != *tc.anchor {
 				t.Fatalf("stored cycle anchor = %v, want %v", storedAnchor, tc.anchor)
 			}
-			if tc.action == "noop" && storedETag != etag {
+			if tc.action == contract.ConfigurationPlanItemActionNoop && storedETag != etag {
 				t.Fatal("unchanged account was replaced")
 			}
 		})

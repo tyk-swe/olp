@@ -78,7 +78,7 @@ func (s *Server) scimGroupMapping(r *http.Request, _ Principal) (Reply, error) {
 	if err = keepSCIMManagers(r, tx, managed); err != nil {
 		return Reply{}, err
 	}
-	if err = s.EnsureUsableOwner(r, tx); err != nil {
+	if err = s.EnsureUsableOwner(r.Context(), tx); err != nil {
 		return Reply{}, err
 	}
 	if _, err = AdvanceAuthority(r.Context(), tx); err != nil {
@@ -147,7 +147,7 @@ func (s *Server) StoreSCIMMapping(ctx context.Context, tx pgx.Tx, p Principal, n
 	if err = keepSCIMManagers(r, tx, managed); err != nil {
 		return err
 	}
-	if err = s.EnsureUsableOwner(r, tx); err != nil {
+	if err = s.EnsureUsableOwner(ctx, tx); err != nil {
 		return err
 	}
 	_, err = AdvanceAuthority(ctx, tx)

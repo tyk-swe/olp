@@ -21,10 +21,16 @@ type Policies struct {
 	AttributionBudgets authority.AttributionBudgets
 }
 
+const policyColumns = "end_user_policy,attribution_policy,route_groups,budget_policy,limit_templates,attribution_budgets"
+
+func (p *Policies) targets() []any {
+	return []any{&p.EndUser, &p.Attribution, &p.RouteGroups, &p.Budget, &p.Templates, &p.AttributionBudgets}
+}
+
 func ReadPolicies(ctx context.Context, tx pgx.Tx, id string) (Policies, string, error) {
 	var current Policies
 	var etag string
-	err := tx.QueryRow(ctx, `SELECT end_user_policy,attribution_policy,route_groups,budget_policy,limit_templates,attribution_budgets,etag::text FROM olp.projects WHERE id=$1 FOR UPDATE`, id).Scan(&current.EndUser, &current.Attribution, &current.RouteGroups, &current.Budget, &current.Templates, &current.AttributionBudgets, &etag)
+	err := tx.QueryRow(ctx, "SELECT "+policyColumns+",etag::text FROM olp.projects WHERE id=$1 FOR UPDATE", id).Scan(append(current.targets(), &etag)...)
 	return current, etag, err
 }
 
@@ -85,6 +91,10 @@ func ImportedEndUserPolicy(existing *authority.EndUserPolicy, defaults *authorit
 		return &authority.EndUserPolicy{LimitTemplate: template, Defaults: values}
 	}
 	return &authority.EndUserPolicy{LimitTemplate: template, Defaults: values, Overrides: existing.Overrides, Blocked: existing.Blocked}
+}
+
+func (desired PolicyImport) Changes(current Policies) bool {
+	return !current.equal(desired.policies(current))
 }
 
 func (current Policies) equal(desired Policies) bool {

@@ -53,10 +53,10 @@ type oidcConfiguration struct {
 	UpdatedByEmail   string        `json:"updated_by_email"`
 }
 
-func loadOIDC(r *http.Request, q Queryer) (oidcConfiguration, error) {
+func loadOIDC(ctx context.Context, q Queryer) (oidcConfiguration, error) {
 	var c oidcConfiguration
 	var data []byte
-	err := q.QueryRow(r.Context(), "SELECT c.document||jsonb_build_object('id',c.id,'etag',c.etag,'updated_by_email',u.email,'has_client_secret',EXISTS(SELECT 1 FROM olp.secrets s WHERE s.id=c.id AND s.purpose=$1)) FROM olp.oidc_configuration c JOIN olp.users u ON u.id=c.updated_by WHERE singleton", secrets.OIDCClientSecret).Scan(&data)
+	err := q.QueryRow(ctx, "SELECT c.document||jsonb_build_object('id',c.id,'etag',c.etag,'updated_by_email',u.email,'has_client_secret',EXISTS(SELECT 1 FROM olp.secrets s WHERE s.id=c.id AND s.purpose=$1)) FROM olp.oidc_configuration c JOIN olp.users u ON u.id=c.updated_by WHERE singleton", secrets.OIDCClientSecret).Scan(&data)
 	if err != nil {
 		return c, err
 	}
@@ -64,7 +64,7 @@ func loadOIDC(r *http.Request, q Queryer) (oidcConfiguration, error) {
 	return c, err
 }
 func (s *Server) oidcConfiguration(r *http.Request, _ Principal) (Reply, error) {
-	c, err := loadOIDC(r, s.Pool)
+	c, err := loadOIDC(r.Context(), s.Pool)
 	c.DiscoveryBinding = ""
 	return Detail(c, c.ETag), err
 }
@@ -205,7 +205,7 @@ func (s *Server) putOIDCConfiguration(r *http.Request, _ Principal) (Reply, erro
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	old, err := loadOIDC(r, tx)
+	old, err := loadOIDC(r.Context(), tx)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return Reply{}, err
 	}
@@ -257,7 +257,7 @@ func (s *Server) putOIDCConfiguration(r *http.Request, _ Principal) (Reply, erro
 	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.oidc_configuration(singleton,id,document,etag,updated_by) VALUES(true,$1,$2,$3,$4) ON CONFLICT(singleton) DO UPDATE SET document=excluded.document,etag=excluded.etag,updated_by=excluded.updated_by", c.ID, data, c.ETag, p.UserID()); err != nil {
 		return Reply{}, err
 	}
-	if err = s.EnsureUsableOwner(r, tx); err != nil {
+	if err = s.EnsureUsableOwner(r.Context(), tx); err != nil {
 		return Reply{}, err
 	}
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE purpose=$1", secrets.OIDCFlow); err != nil {
@@ -309,7 +309,7 @@ func (s *Server) beginOIDC(r *http.Request, kind string) (Reply, error) {
 			return Reply{}, err
 		}
 	}
-	c, err := loadOIDC(r, s.Pool)
+	c, err := loadOIDC(r.Context(), s.Pool)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -325,7 +325,7 @@ func (s *Server) beginOIDC(r *http.Request, kind string) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	current, err := loadOIDC(r, tx)
+	current, err := loadOIDC(r.Context(), tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -422,7 +422,7 @@ func (s *Server) consumeFlow(r *http.Request) (oidcFlow, oidcConfiguration, erro
 		return flow, config, err
 	}
 	flow.ID = id
-	config, err = loadOIDC(r, tx)
+	config, err = loadOIDC(r.Context(), tx)
 	if err != nil {
 		return flow, config, err
 	}
@@ -523,7 +523,7 @@ func (s *Server) oidcCallback(r *http.Request) (reply Reply, callbackErr error) 
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	current, err := loadOIDC(r, tx)
+	current, err := loadOIDC(r.Context(), tx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -714,7 +714,7 @@ func oidcSignInRole(c oidcConfiguration, locallyManaged bool, role string, data 
 }
 
 func usableOIDCIdentities(r *http.Request, q Queryer, p Principal, local bool) (map[string]bool, error) {
-	c, err := loadOIDC(r, q)
+	c, err := loadOIDC(r.Context(), q)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !c.Enabled {
 		return nil, nil
 	}
@@ -822,7 +822,7 @@ func (s *Server) unlinkOIDCIdentity(r *http.Request, _ Principal) (Reply, error)
 			return Reply{}, Fail(409, "last_sign_in_method", "Keep at least one usable sign-in method.")
 		}
 	}
-	if err = s.EnsureUsableOwner(r, tx); err != nil {
+	if err = s.EnsureUsableOwner(r.Context(), tx); err != nil {
 		return Reply{}, err
 	}
 	if err = Audit(r.Context(), tx, r, p.Actor(), "oidc.unlink", "oidc_identity", id, "success"); err != nil {

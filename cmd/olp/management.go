@@ -34,7 +34,7 @@ import (
 	"github.com/tyk-swe/olp/internal/pluginindex"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/projects"
-	"github.com/tyk-swe/olp/internal/promotion"
+	"github.com/tyk-swe/olp/internal/promotion/project"
 	promotionserve "github.com/tyk-swe/olp/internal/promotion/serve"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/release"
@@ -157,17 +157,13 @@ func (m Management) Register(mux *http.ServeMux) {
 	(&usage.Server{Access: m.Access, VendorKind: providers.VendorKind, Egress: m.Egress, Catalog: m.Catalog, CatalogKeys: m.CatalogKeys}).Register(mux)
 	(&export.Management{Access: m.Access, Pool: m.Access.Pool, Keys: m.Access.Keys, Installation: m.Access.Installation, Egress: m.Egress}).Register(mux)
 	(&billing.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
-	promotionserve.Register(&promotion.Server{
-		Limiter:                m.Limiter,
-		IdentityClient:         m.IdentityClient,
-		Access:                 m.Access,
-		Egress:                 m.Egress,
-		Unconfined:             m.Unconfined,
-		VendorKind:             providers.VendorKind,
-		StoreNetworkCredential: catalogue.StoreNetworkCredential,
-		StoreCredential: func(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error) {
-			id, _, err := catalogue.StoreCredential(ctx, tx, providerID, secret)
-			return id, err
-		},
-	}, mux)
+	promotionserve.Register(mux, promotionserve.Deps{
+		Access:     m.Access,
+		Egress:     m.Egress,
+		Unconfined: m.Unconfined,
+		Identity:   m.IdentityClient,
+		Costs:      project.CostsOf(m.Limiter),
+		VendorKind: providers.VendorKind,
+		Catalogue:  catalogue,
+	})
 }

@@ -34,3 +34,11 @@ func PrepareConfiguration(ctx context.Context, q access.Queryer, unconfined *plu
 	}
 	return PreparedConfiguration{configuration: configuration}, nil
 }
+
+func (p PreparedConfiguration) Configuration() Configuration {
+	return p.configuration
+}
+
+func (p PreparedConfiguration) WithNetworkCredential(credentialID string) PreparedConfiguration {
+	return PreparedConfiguration{configuration: p.configuration.WithNetworkCredential(credentialID)}
+}

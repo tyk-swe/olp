@@ -48,8 +48,8 @@ func (s *Server) replaceAttachment(r *http.Request, _ access.Principal) (access.
 	if err := validateAttachmentPolicy(r.Context(), tx, p, next); err != nil {
 		return access.Reply{}, err
 	}
-	nextETag := access.NewID()
-	if _, err := tx.Exec(r.Context(), "UPDATE olp.guardrail_attachments SET policy_revision_id=$2,etag=$3 WHERE id=$1", id, next.PolicyRevisionID, nextETag); err != nil {
+	nextETag, err := repointAttachment(r.Context(), tx, id, next.PolicyRevisionID)
+	if err != nil {
 		return access.Reply{}, err
 	}
 	if err := s.publish(r.Context(), tx, p.UserID()); err != nil {

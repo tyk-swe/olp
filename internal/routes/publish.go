@@ -329,7 +329,7 @@ func (s *Server) promote(ctx context.Context, tx pgx.Tx, current *draft, actor s
 		return promotion{}, err
 	}
 	if exposure != nil {
-		if _, err = tx.Exec(ctx, `INSERT INTO olp.model_catalog_route_settings(route_id,expose_upstream_models,etag) VALUES($1,$2,$3) ON CONFLICT(route_id) DO UPDATE SET expose_upstream_models=excluded.expose_upstream_models,etag=excluded.etag`, routeID, *exposure, access.NewID()); err != nil {
+		if err = SetCatalogExposure(ctx, tx, routeID, *exposure, access.NewID()); err != nil {
 			return promotion{}, err
 		}
 		if _, err = tx.Exec(ctx, "UPDATE olp.route_drafts SET catalog_expose_upstream_models=NULL WHERE id=$1", current.ID); err != nil {
@@ -694,7 +694,7 @@ func (s *Server) revisionDiff(r *http.Request, p access.Principal) (access.Reply
 		"slug_changed": from.Slug != to.Slug, "timeout_changed": from.OverallTimeoutMS != to.OverallTimeoutMS, "max_attempts_changed": from.MaxAttempts != to.MaxAttempts,
 		"operations_added": opsAdded, "operations_removed": opsRemoved,
 		"targets_added": added, "targets_removed": removed, "targets_changed": changed,
-		"routing_policy_changed": !samePolicy(from.Policy, to.Policy), "routing_policy_before": policyOrDefault(from.Policy), "routing_policy_after": policyOrDefault(to.Policy),
+		"routing_policy_changed": !SamePolicy(from.Policy, to.Policy), "routing_policy_before": policyOrDefault(from.Policy), "routing_policy_after": policyOrDefault(to.Policy),
 		"content_policy_changed": !bytes.Equal(bytes.TrimSpace(from.ContentPolicy), bytes.TrimSpace(to.ContentPolicy)),
 		"fidelity_changed":       !bytes.Equal(bytes.TrimSpace(from.Fidelity), bytes.TrimSpace(to.Fidelity)), "fidelity_before": json.RawMessage(from.Fidelity), "fidelity_after": json.RawMessage(to.Fidelity),
 		"behavior_changed": !sameBehavior(from.Behavior, to.Behavior), "behavior_before": behaviorJSON(map[string]any{}, from.Behavior), "behavior_after": behaviorJSON(map[string]any{}, to.Behavior),
@@ -733,21 +733,24 @@ func (s *Server) restoreRevision(r *http.Request, _ access.Principal) (access.Re
 	if err != nil {
 		return access.Reply{}, err
 	}
+	behavior, err := routing.DecodeBehavior(v.Behavior)
+	if err != nil {
+		return access.Reply{}, err
+	}
 	draftID, etag := access.NewID(), access.NewID()
-	operations, _ := json.Marshal(v.Operations)
 	targets := slices.Clone(v.Targets)
 	for i := range targets {
 		targets[i].ID = access.NewID()
 	}
-	encoded, _ := json.Marshal(targets)
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,based_on_revision_id,etag,created_by,project_id,fidelity,behavior) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)", draftID, v.Slug, operations, v.OverallTimeoutMS, v.MaxAttempts, encoded, v.ContentPolicy, v.ID, etag, p.UserID(), project, v.Fidelity, v.Behavior); err != nil {
+	content := DraftContent{
+		Slug: v.Slug, Operations: v.Operations, OverallTimeoutMS: v.OverallTimeoutMS, MaxAttempts: v.MaxAttempts, Targets: targets,
+		ContentPolicy: v.ContentPolicy, Fidelity: v.Fidelity, Behavior: behavior,
+	}
+	if err = StageDraft(r.Context(), tx, NewDraft{ID: draftID, CreatedBy: p.UserID(), ProjectID: project, BasedOn: &v.ID}, etag, content); err != nil {
 		return access.Reply{}, err
 	}
-	if v.Policy != nil {
-		policy, _ := json.Marshal(v.Policy)
-		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.routing_policies(scope,scope_id,policy,etag,updated_by) VALUES('route-draft',$1,$2,$3,$4)", draftID, policy, etag, p.UserID()); err != nil {
-			return access.Reply{}, err
-		}
+	if err = StageDraftPolicy(r.Context(), tx, draftID, etag, p.UserID(), v.Policy); err != nil {
+		return access.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route_draft.restore", "route_draft", draftID, "success"); err != nil {
 		return access.Reply{}, err

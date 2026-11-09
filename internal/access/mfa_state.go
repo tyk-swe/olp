@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -96,7 +97,7 @@ func mfaConfigured(ctx context.Context, q Queryer, user string) (bool, error) {
 	return enabled, err
 }
 
-func mfaRequired(ctx context.Context, q Queryer) (bool, error) {
+func ReadLocalMFARequired(ctx context.Context, q Queryer) (bool, error) {
 	var value string
 	if err := q.QueryRow(ctx, "SELECT COALESCE((SELECT value FROM olp.settings WHERE key='auth.mfa_required'),'false')").Scan(&value); err != nil {
 		return false, err
@@ -109,6 +110,22 @@ func mfaRequired(ctx context.Context, q Queryer) (bool, error) {
 	default:
 		return false, errors.New("invalid local MFA policy")
 	}
+}
+
+func SetLocalMFARequired(ctx context.Context, tx pgx.Tx, p Principal, required bool) error {
+	var current string
+	if err := tx.QueryRow(ctx, "SELECT value FROM olp.settings WHERE key='auth.mfa_required' FOR UPDATE").Scan(&current); err != nil {
+		return err
+	}
+	desired := strconv.FormatBool(required)
+	if current == desired {
+		return nil
+	}
+	if err := p.Authorize(Access); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, "UPDATE olp.settings SET value=$1,etag=$2,updated_by=$3,updated_at=now() WHERE key='auth.mfa_required'", desired, NewID(), p.UserID())
+	return err
 }
 
 func (s *Server) storeMFAFlow(r *http.Request, tx pgx.Tx, f mfaFlow) (string, time.Time, error) {
@@ -197,7 +214,7 @@ func (s *Server) localSession(r *http.Request, tx pgx.Tx, userID string) (Reply,
 	if err != nil {
 		return Reply{}, err
 	}
-	required, err := mfaRequired(r.Context(), tx)
+	required, err := ReadLocalMFARequired(r.Context(), tx)
 	if err != nil {
 		return Reply{}, err
 	}

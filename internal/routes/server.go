@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/tyk-swe/olp/internal/cache"
 	"net/http"
 	"slices"
 	"strconv"
@@ -20,7 +19,6 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
-	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/release"
@@ -281,35 +279,15 @@ type TargetInput struct {
 }
 
 type DraftInput struct {
-	RunLimits                *limits.WorkflowBounds     `json:"run_limits,omitempty"`
-	ToolExecution            string                     `json:"tool_execution,omitempty"`
-	Toolsets                 []string                   `json:"toolsets,omitempty"`
-	ResponsesMCPItems        bool                       `json:"responses_mcp_items,omitempty"`
-	Cache                    *cache.Policy              `json:"cache,omitempty"`
-	PromptCache              *cache.PromptPolicy        `json:"prompt_cache,omitempty"`
-	CallerCostExempt         bool                       `json:"caller_cost_exempt,omitempty"`
-	ProviderFetchedDocuments bool                       `json:"provider_fetched_documents,omitempty"`
-	MaxBodyBytes             *int64                     `json:"max_body_bytes,omitempty"`
-	Slug                     string                     `json:"slug"`
-	Operations               []string                   `json:"operations"`
-	OverallTimeoutMS         int                        `json:"overall_timeout_ms"`
-	MaxAttempts              int                        `json:"max_attempts"`
-	Targets                  []TargetInput              `json:"targets"`
-	ContentPolicy            json.RawMessage            `json:"content_policy"`
-	Fidelity                 json.RawMessage            `json:"fidelity,omitempty"`
-	ProjectID                *string                    `json:"project_id"`
-	Fallbacks                []routing.Fallback         `json:"fallbacks,omitempty"`
-	Selectors                []routing.Selector         `json:"selectors,omitempty"`
-	Retry                    routing.Retry              `json:"retry,omitempty"`
-	Affinity                 *routing.Affinity          `json:"affinity,omitempty"`
-	Budget                   *routing.CostLimits        `json:"budget,omitempty"`
-	Passthrough              *routing.PassthroughConfig `json:"passthrough,omitempty"`
-	// Behavior is the validated, stored form of the adaptive routing fields.
-	Behavior []byte `json:"-"`
-}
-
-func (in *DraftInput) behavior() routing.Behavior {
-	return routing.Behavior{RunLimits: in.RunLimits, ToolExecution: in.ToolExecution, Toolsets: in.Toolsets, ResponsesMCPItems: in.ResponsesMCPItems, Cache: in.Cache, PromptCache: in.PromptCache, CallerCostExempt: in.CallerCostExempt, ProviderFetchedDocuments: in.ProviderFetchedDocuments, MaxBodyBytes: in.MaxBodyBytes, Fallbacks: in.Fallbacks, Selectors: in.Selectors, Retry: in.Retry, Affinity: in.Affinity, Budget: in.Budget, Passthrough: in.Passthrough}
+	routing.Behavior
+	Slug             string          `json:"slug"`
+	Operations       []string        `json:"operations"`
+	OverallTimeoutMS int             `json:"overall_timeout_ms"`
+	MaxAttempts      int             `json:"max_attempts"`
+	Targets          []TargetInput   `json:"targets"`
+	ContentPolicy    json.RawMessage `json:"content_policy"`
+	Fidelity         json.RawMessage `json:"fidelity,omitempty"`
+	ProjectID        *string         `json:"project_id"`
 }
 
 func sameProject(a, b *string) bool {
@@ -343,7 +321,11 @@ func ValidateAndNormalizeDraftInput(ctx context.Context, q access.Queryer, in *D
 		if err != nil {
 			return nil, access.Invalid("content_policy", err.Error())
 		}
-		in.ContentPolicy, _ = json.Marshal(policy)
+		encoded, err := json.Marshal(policy)
+		if err != nil {
+			return nil, err
+		}
+		in.ContentPolicy = encoded
 	} else {
 		in.ContentPolicy = nil
 	}
@@ -419,7 +401,7 @@ func ValidateAndNormalizeDraftInput(ctx context.Context, q access.Queryer, in *D
 	if serving < 0 {
 		return nil, access.Invalid("targets", "Declare at least one target that serves callers rather than shadowing them.")
 	}
-	behavior := in.behavior()
+	behavior := in.Behavior
 	fidelity, _ := routing.DecodeFidelity(in.Fidelity)
 	if err := (routing.Route{Fidelity: fidelity, Behavior: behavior}).ValidateCaching(); err != nil {
 		return nil, access.Invalid("cache", err.Error())
@@ -447,7 +429,6 @@ func ValidateAndNormalizeDraftInput(ctx context.Context, q access.Queryer, in *D
 	if err := route.ValidatePassthrough(); err != nil {
 		return nil, PassthroughAccessError(err)
 	}
-	in.Behavior, _ = json.Marshal(behavior)
 	if err := reserveOrdinarySlug(ctx, q, in.Slug); err != nil {
 		return nil, err
 	}
@@ -553,9 +534,7 @@ func (s *Server) createDraft(r *http.Request, _ access.Principal) (access.Reply,
 		return access.Reply{}, err
 	}
 	id, etag := access.NewID(), access.NewID()
-	operations, _ := json.Marshal(input.Operations)
-	encoded, _ := json.Marshal(targets)
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,etag,created_by,project_id,fidelity,behavior) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)", id, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, etag, p.UserID(), input.ProjectID, input.Fidelity, input.Behavior); err != nil {
+	if err = StageDraft(r.Context(), tx, NewDraft{ID: id, CreatedBy: p.UserID(), ProjectID: input.ProjectID}, etag, input.Content(targets, nil)); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route_draft.create", "route_draft", id, "success"); err != nil {
@@ -601,9 +580,7 @@ func (s *Server) replaceDraft(r *http.Request, _ access.Principal) (access.Reply
 		return access.Reply{}, err
 	}
 	etag := access.NewID()
-	operations, _ := json.Marshal(input.Operations)
-	encoded, _ := json.Marshal(targets)
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.route_drafts SET slug=$2,state='draft',operations=$3,overall_timeout_ms=$4,max_attempts=$5,targets=$6,content_policy=$7,etag=$8,fidelity=$9,behavior=$10,updated_at=now() WHERE id=$1", id, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, etag, input.Fidelity, input.Behavior); err != nil {
+	if err = StageDraft(r.Context(), tx, ExistingDraft{ID: id}, etag, input.Content(targets, nil)); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route_draft.update", "route_draft", id, "success"); err != nil {

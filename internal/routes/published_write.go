@@ -1,7 +1,6 @@
 package routes
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/tyk-swe/olp/internal/routing"
@@ -84,15 +83,11 @@ func (s *Server) writePublished(r *http.Request, id string) (access.Reply, error
 		return access.Reply{}, err
 	}
 	draftID, draftETag := access.NewID(), access.NewID()
-	operations, _ := json.Marshal(input.Operations)
-	encoded, _ := json.Marshal(targets)
-	if _, err = tx.Exec(r.Context(), `INSERT INTO olp.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,etag,created_by,project_id,fidelity,behavior)
-		VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, draftID, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, draftETag, p.UserID(), input.ProjectID, input.Fidelity, input.Behavior); err != nil {
+	if err = StageDraft(r.Context(), tx, NewDraft{ID: draftID, CreatedBy: p.UserID(), ProjectID: input.ProjectID}, draftETag, input.Content(targets, nil)); err != nil {
 		return access.Reply{}, err
 	}
 	if previous != nil {
-		policy, _ := json.Marshal(policyOrDefault(previous.Latest.Policy))
-		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.routing_policies(scope,scope_id,policy,etag,updated_by) VALUES('route-draft',$1,$2,$3,$4)", draftID, policy, draftETag, p.UserID()); err != nil {
+		if err = StageDraftPolicy(r.Context(), tx, draftID, draftETag, p.UserID(), policyOrDefault(previous.Latest.Policy)); err != nil {
 			return access.Reply{}, err
 		}
 	}

@@ -580,6 +580,18 @@
                 }
               ]
             },
+            "discounts": {
+              "items": {
+                "$ref": "#/$defs/ConfigurationDiscountEntry"
+              },
+              "type": "array"
+            },
+            "rate_cards": {
+              "items": {
+                "$ref": "#/$defs/ConfigurationRateCardEntry"
+              },
+              "type": "array"
+            },
             "projects": {
               "items": {
                 "$ref": "#/$defs/ConfigurationProjectEntry"
@@ -1559,6 +1571,94 @@
           ],
           "type": "object"
         },
+        "ConfigurationDiscountEntry": {
+          "description": "A discount scope the document prices under. Scopes the document omits are left unchanged.",
+          "properties": {
+            "provider_kind": {
+              "$ref": "#/$defs/ProviderKind"
+            },
+            "vendor_id": {
+              "type": "string"
+            },
+            "provider": {
+              "description": "Provider name the discount is scoped to; omitted for a provider-kind scope",
+              "type": "string"
+            },
+            "multiplier": {
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "provider_kind",
+            "multiplier"
+          ],
+          "type": "object"
+        },
+        "ProviderKind": {
+          "enum": [
+            "openai",
+            "anthropic",
+            "gemini",
+            "vertex_ai",
+            "bedrock",
+            "sagemaker",
+            "watsonx",
+            "azure_openai",
+            "openai_compatible",
+            "plugin",
+            "azure_ai_search"
+          ],
+          "type": "string",
+          "description": "Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it."
+        },
+        "ConfigurationRateCardEntry": {
+          "description": "One owner's charge terms. Cards the document omits are left unchanged.",
+          "properties": {
+            "owner": {
+              "$ref": "#/$defs/ConfigurationRateCardOwner"
+            },
+            "markup": {
+              "description": "Non-negative decimal markup",
+              "type": "string"
+            },
+            "prices": {
+              "items": {
+                "$ref": "#/$defs/ConfigurationPriceEntry"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "owner",
+            "markup"
+          ],
+          "type": "object"
+        },
+        "ConfigurationRateCardOwner": {
+          "properties": {
+            "kind": {
+              "enum": [
+                "installation",
+                "organization",
+                "project"
+              ],
+              "type": "string"
+            },
+            "organization": {
+              "description": "Organization name, required when kind is organization",
+              "type": "string"
+            },
+            "project": {
+              "description": "Project name, required when kind is project",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
         "ConfigurationProjectEntry": {
           "properties": {
             "name": {
@@ -1969,23 +2069,6 @@
           ],
           "type": "string",
           "description": "How a provider authenticates. `ibm_iam` exchanges an IBM Cloud API key for IAM access tokens. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin."
-        },
-        "ProviderKind": {
-          "enum": [
-            "openai",
-            "anthropic",
-            "gemini",
-            "vertex_ai",
-            "bedrock",
-            "sagemaker",
-            "watsonx",
-            "azure_openai",
-            "openai_compatible",
-            "plugin",
-            "azure_ai_search"
-          ],
-          "type": "string",
-          "description": "Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it."
         },
         "ConnectionOptions": {
           "additionalProperties": false,
@@ -26455,6 +26538,18 @@
                 }
               ]
             },
+            "discounts": {
+              "items": {
+                "$ref": "#/$defs/ConfigurationDiscountEntry"
+              },
+              "type": "array"
+            },
+            "rate_cards": {
+              "items": {
+                "$ref": "#/$defs/ConfigurationRateCardEntry"
+              },
+              "type": "array"
+            },
             "projects": {
               "items": {
                 "$ref": "#/$defs/ConfigurationProjectEntry"
@@ -27434,6 +27529,94 @@
           ],
           "type": "object"
         },
+        "ConfigurationDiscountEntry": {
+          "description": "A discount scope the document prices under. Scopes the document omits are left unchanged.",
+          "properties": {
+            "provider_kind": {
+              "$ref": "#/$defs/ProviderKind"
+            },
+            "vendor_id": {
+              "type": "string"
+            },
+            "provider": {
+              "description": "Provider name the discount is scoped to; omitted for a provider-kind scope",
+              "type": "string"
+            },
+            "multiplier": {
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "provider_kind",
+            "multiplier"
+          ],
+          "type": "object"
+        },
+        "ProviderKind": {
+          "enum": [
+            "openai",
+            "anthropic",
+            "gemini",
+            "vertex_ai",
+            "bedrock",
+            "sagemaker",
+            "watsonx",
+            "azure_openai",
+            "openai_compatible",
+            "plugin",
+            "azure_ai_search"
+          ],
+          "type": "string",
+          "description": "Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it."
+        },
+        "ConfigurationRateCardEntry": {
+          "description": "One owner's charge terms. Cards the document omits are left unchanged.",
+          "properties": {
+            "owner": {
+              "$ref": "#/$defs/ConfigurationRateCardOwner"
+            },
+            "markup": {
+              "description": "Non-negative decimal markup",
+              "type": "string"
+            },
+            "prices": {
+              "items": {
+                "$ref": "#/$defs/ConfigurationPriceEntry"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "owner",
+            "markup"
+          ],
+          "type": "object"
+        },
+        "ConfigurationRateCardOwner": {
+          "properties": {
+            "kind": {
+              "enum": [
+                "installation",
+                "organization",
+                "project"
+              ],
+              "type": "string"
+            },
+            "organization": {
+              "description": "Organization name, required when kind is organization",
+              "type": "string"
+            },
+            "project": {
+              "description": "Project name, required when kind is project",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
         "ConfigurationProjectEntry": {
           "properties": {
             "name": {
@@ -27844,23 +28027,6 @@
           ],
           "type": "string",
           "description": "How a provider authenticates. `ibm_iam` exchanges an IBM Cloud API key for IAM access tokens. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin."
-        },
-        "ProviderKind": {
-          "enum": [
-            "openai",
-            "anthropic",
-            "gemini",
-            "vertex_ai",
-            "bedrock",
-            "sagemaker",
-            "watsonx",
-            "azure_openai",
-            "openai_compatible",
-            "plugin",
-            "azure_ai_search"
-          ],
-          "type": "string",
-          "description": "Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it."
         },
         "ConnectionOptions": {
           "additionalProperties": false,

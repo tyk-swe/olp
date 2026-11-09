@@ -72,7 +72,7 @@ func (s *Server) apply(r *http.Request, tx pgx.Tx, p access.Principal, current *
 		if err != nil {
 			return agentcontract.Publication{}, err
 		}
-		draft := draftWithCredential(input.draft.Draft, credentialID)
+		draft := WithCredential(input.draft.Draft, credentialID)
 		if err := AuthorizeTrustChange(p, current, draft); err != nil {
 			return agentcontract.Publication{}, err
 		}

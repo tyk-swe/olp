@@ -394,7 +394,7 @@ func (s *Server) write(r *http.Request, _ access.Principal, id string, retire bo
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err := deleteReplacedCredentials(r.Context(), tx, in, current, retire); err != nil {
+	if err := DeleteReplacedCredentials(r.Context(), tx, current, replacedBy(in, retire)); err != nil {
 		return access.Reply{}, err
 	}
 	if err := access.Audit(r.Context(), tx, r, principal.Actor(), change.action, "mcp_server", change.id, "success"); err != nil {

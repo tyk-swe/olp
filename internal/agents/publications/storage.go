@@ -158,13 +158,9 @@ func Publish(ctx context.Context, tx pgx.Tx, actor string, publication agentcont
 }
 func publishRevision(ctx context.Context, tx pgx.Tx, actor string, p agentcontract.Publication, draft agentcontract.Draft) (string, error) {
 	digest := agentcontract.DraftDigest(draft)
-	var existing string
-	err := tx.QueryRow(ctx, `SELECT id::text FROM olp.agent_publication_revisions WHERE publication_id=$1 AND digest=$2`, p.ID, digest).Scan(&existing)
-	if err == nil {
-		return existing, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return "", err
+	existing, found, err := RevisionIDByDigest(ctx, tx, p.ID, digest)
+	if err != nil || found {
+		return existing, err
 	}
 	var count int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM olp.agent_publication_revisions WHERE publication_id=$1`, p.ID).Scan(&count); err != nil {
@@ -197,6 +193,16 @@ func SetLabel(ctx context.Context, tx pgx.Tx, p agentcontract.Publication, label
 		return access.Invalid("revision_id", "Use a revision of this prompt.")
 	}
 	_, err := tx.Exec(ctx, `INSERT INTO olp.prompt_labels(publication_id,label,revision_id,etag) VALUES($1,$2,$3,$4) ON CONFLICT(publication_id,label) DO UPDATE SET revision_id=EXCLUDED.revision_id,etag=EXCLUDED.etag`, p.ID, label, revision, etag)
+	return err
+}
+
+func ClearLabels(ctx context.Context, tx pgx.Tx, publication string) error {
+	_, err := tx.Exec(ctx, `DELETE FROM olp.prompt_labels WHERE publication_id=$1`, publication)
+	return err
+}
+
+func SetLatestRevision(ctx context.Context, tx pgx.Tx, publication string, revision *string) error {
+	_, err := tx.Exec(ctx, `UPDATE olp.agent_publications SET latest_revision_id=$2 WHERE id=$1`, publication, revision)
 	return err
 }
 

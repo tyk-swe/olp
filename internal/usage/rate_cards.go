@@ -362,6 +362,29 @@ func loadCardRevisionSummariesByCards(ctx context.Context, q access.Queryer, car
 	return byCard, rows.Err()
 }
 
+func CreateRateCard(ctx context.Context, tx pgx.Tx, actor string, organizationID, projectID *string) (string, error) {
+	id := access.NewID()
+	_, err := tx.Exec(ctx, `INSERT INTO olp.rate_cards
+        (id, organization_id, project_id, created_by) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid)`,
+		id, organizationID, projectID, actor)
+	var pgErr *pgconn.PgError
+	switch {
+	case err == nil:
+		return id, nil
+	case errors.As(err, &pgErr) && pgErr.Code == "23505":
+		return "", access.Fail(http.StatusConflict, "rate_card_exists", "The owner already has a rate card.")
+	default:
+		return "", fmt.Errorf("store rate card: %w", err)
+	}
+}
+
+func InstallationCurrency(ctx context.Context, q access.Queryer) (string, error) {
+	var currency string
+	err := q.QueryRow(ctx,
+		"SELECT COALESCE((SELECT btrim(currency) FROM olp.pricing_currency WHERE singleton), 'USD')").Scan(&currency)
+	return currency, err
+}
+
 func (s *Server) createRateCard(r *http.Request, _ access.Principal) (access.Reply, error) {
 	var input rateCardInput
 	if err := access.Decode(r, &input); err != nil {
@@ -410,16 +433,9 @@ func (s *Server) createRateCard(r *http.Request, _ access.Principal) (access.Rep
 	default:
 		return access.Reply{}, access.Invalid("owner.kind", "Use installation, organization or project.")
 	}
-	id := access.NewID()
-	if _, err = tx.Exec(r.Context(), `INSERT INTO olp.rate_cards
-        (id, organization_id, project_id, created_by) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid)`,
-		id, organizationID, projectID, principal.UserID()); err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" || strings.Contains(err.Error(), "rate_cards_owner_key") {
-			return access.Reply{}, access.Fail(http.StatusConflict, "rate_card_exists",
-				"The owner already has a rate card.")
-		}
-		return access.Reply{}, fmt.Errorf("store rate card: %w", err)
+	id, err := CreateRateCard(r.Context(), tx, principal.UserID(), organizationID, projectID)
+	if err != nil {
+		return access.Reply{}, err
 	}
 	card, err := scanCard(tx.QueryRow(r.Context(), cardColumns+" WHERE c.id=$1::uuid", id))
 	if err != nil {
@@ -553,9 +569,8 @@ func (s *Server) createRateCardRevision(r *http.Request, _ access.Principal) (ac
 				"Choose an effective time now or in the future.")
 		}
 	}
-	var currency string
-	if err = tx.QueryRow(r.Context(),
-		"SELECT COALESCE((SELECT btrim(currency) FROM olp.pricing_currency WHERE singleton), 'USD')").Scan(&currency); err != nil {
+	currency, err := InstallationCurrency(r.Context(), tx)
+	if err != nil {
 		return access.Reply{}, err
 	}
 	revision, err := CreateCardRevision(r.Context(), tx, principal.UserID(), cardID, *input.Markup, effectiveAt, input.Prices, currency, s.VendorKind)

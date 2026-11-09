@@ -58,3 +58,31 @@ func StoreDraftConfiguration(ctx context.Context, tx pgx.Tx, id, name string, pr
 	_, err = tx.Exec(ctx, "UPDATE olp.providers SET name=$2,kind=$3,configuration=$4,etag=$5,draft_dirty=true,updated_at=now() WHERE id=$1", id, name, next.Kind, after, access.NewID())
 	return err
 }
+
+type Draft struct {
+	Name          string
+	ProjectID     *string
+	Configuration PreparedConfiguration
+	CreatedBy     string
+}
+
+type CreatedDraft struct {
+	ID   string
+	ETag string
+}
+
+func CreateDraft(ctx context.Context, tx pgx.Tx, draft Draft) (CreatedDraft, error) {
+	created := CreatedDraft{ID: access.NewID(), ETag: access.NewID()}
+	configuration := draft.Configuration.configuration
+	if err := validateNetworkReference(ctx, tx, created.ID, &configuration); err != nil {
+		return CreatedDraft{}, err
+	}
+	encoded, err := json.Marshal(configuration)
+	if err != nil {
+		return CreatedDraft{}, err
+	}
+	if _, err := tx.Exec(ctx, "INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id) VALUES($1,$2,$3,'draft',$4,$5,$6,$7,$8)", created.ID, draft.Name, configuration.Kind, encoded, created.ETag, access.NewID(), draft.CreatedBy, draft.ProjectID); err != nil {
+		return CreatedDraft{}, err
+	}
+	return created, nil
+}

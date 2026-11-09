@@ -324,7 +324,7 @@ func TestNativeToolArgumentReplacementPreservesSignedContent(t *testing.T) {
 	}
 }
 
-func testEngine(t testing.TB, kind string, config string, phase, action string, monitor bool, external Evaluator) *Engine {
+func testEngine(t testing.TB, kind Kind, config string, phase, action string, monitor bool, external Evaluator) *Engine {
 	t.Helper()
 	d := Revision{ID: "revision", GuardrailID: "guard", ProjectID: "project", Type: kind, Configuration: json.RawMessage(config), TimeoutMS: 1000, OnError: FailClosed}
 	e, err := Compile([]Entry{{GuardrailID: d.GuardrailID, RevisionID: d.ID, Phase: phase, Action: action, Monitor: monitor}}, map[string]Revision{d.ID: d}, external)
@@ -361,7 +361,7 @@ func TestDetectorCorpus(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.category, func(t *testing.T) {
 			config, _ := json.Marshal(EntityConfig{Categories: []string{tc.category}})
-			e := testEngine(t, tc.kind, string(config), Input, Block, false, nil)
+			e := testEngine(t, Kind(tc.kind), string(config), Input, Block, false, nil)
 			positive, err := evaluateText(t, e, tc.positive, Input, nil)
 			if !errors.Is(err, ErrBlocked) || !positive.Blocked {
 				t.Fatalf("missed positive: %s %+v", tc.category, positive)

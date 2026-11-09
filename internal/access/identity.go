@@ -1,6 +1,7 @@
 package access
 
 import (
+	"context"
 	"crypto/hmac"
 	"encoding/json"
 	"errors"
@@ -314,7 +315,7 @@ func (s *Server) updateUser(r *http.Request, _ Principal) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET role=$1,active=$2,access_scope=$3,etag=$4,updated_at=now(),role_management=CASE WHEN role_management='provisioned' THEN 'local' ELSE role_management END WHERE id=$5", u.Role, u.Active, u.AccessScope, u.ETag, id); err != nil {
 		return Reply{}, err
 	}
-	if err = s.EnsureUsableOwner(r, tx); err != nil {
+	if err = s.EnsureUsableOwner(r.Context(), tx); err != nil {
 		return Reply{}, err
 	}
 	if err = keepSCIMManagers(r, tx, managed); err != nil {
@@ -343,9 +344,9 @@ func (s *Server) updateUser(r *http.Request, _ Principal) (Reply, error) {
 	return Detail(u, u.ETag), tx.Commit(r.Context())
 }
 
-func (s *Server) EnsureUsableOwner(r *http.Request, tx pgx.Tx) error {
+func (s *Server) EnsureUsableOwner(ctx context.Context, tx pgx.Tx) error {
 	var exists bool
-	err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM olp.users WHERE active AND oidc_authorized AND role='owner'
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.users WHERE active AND oidc_authorized AND role='owner'
         AND access_scope='global' AND password_hash IS NOT NULL AND $1 AND COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true))`, !s.localLoginDisabled).Scan(&exists)
 	if err != nil {
 		return err
@@ -353,20 +354,20 @@ func (s *Server) EnsureUsableOwner(r *http.Request, tx pgx.Tx) error {
 	if exists {
 		return nil
 	}
-	if usable, e := s.usableSAMLOwner(r, tx); e != nil {
+	if usable, e := s.usableSAMLOwner(ctx, tx); e != nil {
 		return e
 	} else if usable {
 		return nil
 	}
 	missing := Fail(409, "last_usable_owner", "Keep at least one active owner with a usable sign-in method and an owner role after sign-in.")
-	c, err := loadOIDC(r, tx)
+	c, err := loadOIDC(ctx, tx)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !c.Enabled {
 		return missing
 	}
 	if err != nil {
 		return err
 	}
-	rows, err := tx.Query(r.Context(), `SELECT u.role_management<>'oidc',i.role_claims
+	rows, err := tx.Query(ctx, `SELECT u.role_management<>'oidc',i.role_claims
         FROM olp.users u JOIN olp.oidc_identities i ON i.user_id=u.id
         WHERE u.active AND u.oidc_authorized AND u.role='owner' AND u.access_scope='global' AND i.issuer=$1`, c.Issuer)
 	if err != nil {

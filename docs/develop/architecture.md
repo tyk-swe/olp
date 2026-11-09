@@ -23,7 +23,7 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Accounting, pricing, billing and exports | `internal/usage/`, `internal/billing/`, `internal/export/`; console usage/observability |
 | Plugins and guardrails | `internal/plugins/`, `plugin/`, `internal/guardrails/`, `internal/contentpolicy/`; matching console features |
 | MCP registration, tool execution and personal grants | `internal/mcp/`, `internal/grants/personal/`; console `plugins/`, `agents/` |
-| Promotion and process lifetime | `internal/promotion/` with its domain packages and `internal/promotion/serve/`, `cmd/olp/`, `internal/database/` |
+| Promotion and process lifetime | `internal/promotion/` kernel, one `internal/promotion/<section>/` package per document section, `internal/promotion/serve/`, `cmd/olp/`, `internal/database/` |
 | Egress, secrets and telemetry | `internal/egress/`, `internal/secrets/`, `internal/observability/`, `internal/telemetry/` |
 
 ## Contracts and feature ownership
@@ -50,6 +50,13 @@ serialization protects reauthorization, replay, publication and atomic audit.
 `access.BeginMutation` acquires that lock and refreshes authorization before
 feature commands run. Project-policy batches and billing-import writes share
 their feature-owned persistence commands with promotion.
+
+Each promotion section parses its part of the generated contract document once at
+the request boundary, reads and renders destination state, and contributes a
+planner and ordered appliers. Plan, apply and export run the same section code, and
+the document digest is computed over the rendered canonical document. Every
+credential binding must be claimed by a section reference, and unclaimed bindings
+are refused before any planner runs.
 
 Provider configuration identity and connector projection live in `providerconfig`.
 Provider mutations accept a prepared configuration whose constructor owns
