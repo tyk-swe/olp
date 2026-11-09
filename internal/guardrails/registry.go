@@ -196,6 +196,24 @@ func (r *Registry) Window() int {
 	return DefaultWindowBytes
 }
 
+func (r *Registry) WithStaged(staged []Attachment) (*Registry, error) {
+	if len(staged) == 0 {
+		return r, nil
+	}
+	if r == nil {
+		return nil, errors.New("draft guardrail policy is unavailable")
+	}
+	out := r.Clone()
+	out.Attachments = slices.Concat(slices.DeleteFunc(out.Attachments, func(a Attachment) bool {
+		return slices.ContainsFunc(staged, a.sameSlot)
+	}), staged)
+	return out, nil
+}
+
+func (a Attachment) sameSlot(b Attachment) bool {
+	return a.Scope == b.Scope && a.ScopeID == b.ScopeID && a.Order == b.Order
+}
+
 // Clone makes the publication independent of drafts retained by its caller.
 func (r *Registry) Clone() *Registry {
 	if r == nil {

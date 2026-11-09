@@ -19,12 +19,6 @@ const (
 	ownerColumns = "o.project_id::text,o.found IS NOT NULL"
 )
 
-type Draft struct {
-	Slug             string
-	PolicyRevisionID string
-	Position         int
-}
-
 func Authorize(ctx context.Context, q access.Queryer, p access.Principal, a guardrails.Attachment, need access.Need) error {
 	t, err := locate(ctx, q, a)
 	if err != nil {
@@ -139,21 +133,6 @@ func Place(ctx context.Context, tx pgx.Tx, actor string, a guardrails.Attachment
 	return err
 }
 
-func Stage(ctx context.Context, tx pgx.Tx, actor, draftID, revisionID string, position int) error {
-	var current string
-	err := tx.QueryRow(ctx, "SELECT policy_revision_id::text FROM olp.guardrail_draft_attachments WHERE draft_id=$1 AND position=$2", draftID, position).Scan(&current)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return err
-	}
-	if current != "" && current != revisionID {
-		if err := requireSamePolicy(ctx, tx, current, revisionID, "A draft attachment cannot remove a different policy at this position."); err != nil {
-			return err
-		}
-	}
-	_, err = tx.Exec(ctx, "INSERT INTO olp.guardrail_draft_attachments(draft_id,policy_revision_id,position,created_by) VALUES($1,$2,$3,$4) ON CONFLICT(draft_id,position) DO UPDATE SET policy_revision_id=excluded.policy_revision_id", draftID, revisionID, position, actor)
-	return err
-}
-
 func requireSamePolicy(ctx context.Context, tx pgx.Tx, current, next, refusal string) error {
 	var same bool
 	if err := tx.QueryRow(ctx, "SELECT a.policy_id=b.policy_id FROM olp.guardrail_policy_revisions a,olp.guardrail_policy_revisions b WHERE a.id=$1 AND b.id=$2", current, next).Scan(&same); err != nil {
@@ -163,12 +142,4 @@ func requireSamePolicy(ctx context.Context, tx pgx.Tx, current, next, refusal st
 		return access.Invalid("guardrail_attachments", refusal)
 	}
 	return nil
-}
-
-func Drafts(ctx context.Context, q access.Queryer) ([]Draft, error) {
-	rows, err := q.Query(ctx, "SELECT d.slug,a.policy_revision_id::text,a.position FROM olp.guardrail_draft_attachments a JOIN olp.route_drafts d ON d.id=a.draft_id ORDER BY d.updated_at,a.position")
-	if err != nil {
-		return nil, err
-	}
-	return pgx.CollectRows(rows, pgx.RowToStructByPos[Draft])
 }

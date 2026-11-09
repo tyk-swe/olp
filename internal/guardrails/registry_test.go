@@ -2,6 +2,7 @@ package guardrails
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 )
 
@@ -80,5 +81,26 @@ func TestToolsetBoundaryRunsToolsetScopeAndSkipsRoutes(t *testing.T) {
 		if entry.GuardrailID == "on-toolset" {
 			t.Fatal("a toolset policy reached a different toolset")
 		}
+	}
+}
+
+func TestStagedAttachmentsReplaceOnlyTheirSlot(t *testing.T) {
+	kept := Attachment{ID: "kept", Scope: RouteScope, ScopeID: "r", PolicyRevisionID: "a", Order: 1}
+	replaced := Attachment{ID: "replaced", Scope: RouteScope, ScopeID: "r", PolicyRevisionID: "a", Order: 0}
+	other := Attachment{ID: "other", Scope: RouteScope, ScopeID: "s", PolicyRevisionID: "a", Order: 0}
+	published := &Registry{Attachments: []Attachment{replaced, kept, other}}
+	staged := Attachment{ID: "b", Scope: RouteScope, ScopeID: "r", PolicyRevisionID: "b", Order: 0}
+	merged, err := published.WithStaged([]Attachment{staged})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(merged.Attachments, []Attachment{kept, other, staged}) {
+		t.Fatalf("merged = %+v", merged.Attachments)
+	}
+	if !slices.Equal(published.Attachments, []Attachment{replaced, kept, other}) {
+		t.Fatalf("published registry changed: %+v", published.Attachments)
+	}
+	if _, err := (*Registry)(nil).WithStaged([]Attachment{staged}); err == nil {
+		t.Fatal("staged attachments without a published registry were accepted")
 	}
 }
