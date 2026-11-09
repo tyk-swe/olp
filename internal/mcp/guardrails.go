@@ -72,25 +72,13 @@ func (s *Executor) refuseGuardedCall(ctx context.Context, in CallRequest, reserv
 	}
 }
 
-func unsupportedToolPhases(engine *guardrails.Engine, phases []guardrails.Phase) ([]guardrails.Evidence, error) {
-	if len(phases) == 0 {
-		return nil, nil
-	}
-	result, err := engine.Unavailable(phases[0])
-	if err != nil {
-		return result.Decisions, err
-	}
-	next, failure := unsupportedToolPhases(engine, phases[1:])
-	return slices.Concat(result.Decisions, next), failure
-}
-
 func (s *Executor) guardArguments(ctx context.Context, in CallRequest, reservation *accounting.Reservation, state *toolGuardrailState) (json.RawMessage, *toolGuardrailState, *Failure) {
 	if state == nil {
 		return in.Arguments, nil, nil
 	}
-	unavailable, failure := unsupportedToolPhases(state.engine, []guardrails.Phase{guardrails.InputParallel, guardrails.OutputStream})
+	unavailable, failure := state.engine.Unavailable(guardrails.InputParallel, guardrails.OutputStream)
 	if failure != nil {
-		refused := &toolGuardrailState{engine: state.engine, masks: state.masks, decisions: unavailable}
+		refused := &toolGuardrailState{engine: state.engine, masks: state.masks, decisions: unavailable.Decisions}
 		s.refuseGuardedCall(ctx, in, reservation, refused)
 		return nil, refused, guardrailRefusal(failure)
 	}
@@ -101,7 +89,7 @@ func (s *Executor) guardArguments(ctx context.Context, in CallRequest, reservati
 	}
 	surface := guardrails.ToolJSONSurface(document, in.Tool.Alias, false)
 	result, err := s.evaluateToolPhase(ctx, in, reservation, state, guardrails.Input, surface.Segments())
-	guarded := &toolGuardrailState{engine: state.engine, masks: state.masks, decisions: slices.Concat(unavailable, result.Decisions)}
+	guarded := &toolGuardrailState{engine: state.engine, masks: state.masks, decisions: slices.Concat(unavailable.Decisions, result.Decisions)}
 	if err != nil {
 		s.refuseGuardedCall(ctx, in, reservation, guarded)
 		return nil, guarded, guardrailRefusal(err)

@@ -138,13 +138,6 @@ func projectID(directory promotion.Directory, name string) (*string, error) {
 	return &id, nil
 }
 
-func installationOr(id *string) string {
-	if id == nil {
-		return "installation"
-	}
-	return *id
-}
-
 func compareOwned(aProject, aName, bProject, bName string) int {
 	return cmp.Or(
 		cmp.Compare(strings.ToLower(aProject), strings.ToLower(bProject)),

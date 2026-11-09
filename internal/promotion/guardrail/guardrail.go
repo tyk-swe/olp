@@ -195,7 +195,7 @@ func applyGuardrail(ctx context.Context, tx pgx.Tx, p access.Principal, director
 	if err != nil {
 		return err
 	}
-	current, err := definition.FindActive(ctx, tx, installationOr(project), g.Name)
+	current, err := definition.FindActive(ctx, tx, guardrails.ProjectOf(project), g.Name)
 	if err != nil {
 		return err
 	}
@@ -205,7 +205,7 @@ func applyGuardrail(ctx context.Context, tx pgx.Tx, p access.Principal, director
 		}
 		return definition.Activate(ctx, tx, p.UserID(), current.ID, current.RevisionID)
 	}
-	draft, err := definition.NewDraft(installationOr(project), g.Name, g.Type, configuration, g.TimeoutMS, g.OnError)
+	draft, err := definition.NewDraft(guardrails.ProjectOf(project), g.Name, g.Type, configuration, g.TimeoutMS, g.OnError)
 	if err != nil {
 		return err
 	}
@@ -222,7 +222,7 @@ func reusable(current *definition.Definition, g Guardrail, configuration json.Ra
 
 func owner(directory promotion.Directory, name string) (string, bool) {
 	if name == "" {
-		return "installation", true
+		return guardrails.InstallationProject, true
 	}
 	return directory.ID(name)
 }

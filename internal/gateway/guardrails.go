@@ -233,7 +233,7 @@ func (x *call) evaluateGuardrailInput(ctx context.Context, document oif.Document
 	}
 	surface, err := guardrails.NativeSurface(document, false)
 	if err != nil {
-		result, e := x.guardrailEngine.Unavailable("")
+		result, e := x.guardrailEngine.Unavailable()
 		return guardrailInput{document: document, decisions: result.Decisions}, e
 	}
 	evaluation := guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.route.Slug, Phase: guardrails.Input, Segments: surface.Segments, InternalModel: x.internalGuardrail, WorkflowRecovery: recoverable && x.workflow != nil}
@@ -755,7 +755,7 @@ func (x *call) guardrailSurfaceGate(route *routing.Route) *Error {
 	if engine := x.snapshot().GuardrailEngine(route.Slug, x.keyID); engine != nil {
 		x.guardrailEngine = engine
 		x.guardrailMetadata = x.request.guardrailMetadata
-		result, err := engine.Unavailable("")
+		result, err := engine.Unavailable()
 		x.recordGuardrails(result.Decisions)
 		if err != nil {
 			if legacy := policySurfaceGate(route); legacy != nil {

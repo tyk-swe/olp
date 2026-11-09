@@ -124,13 +124,13 @@ func (s *Server) pruneWorkflowPolicies(ctx context.Context, x *call, request *wi
 func (x *call) pruningInput(ctx context.Context, request *wire.Request) (*wire.Request, []string, *Error) {
 	document := request.OIF().Document()
 	if interaction.CheckGuardrailCoverage(request.Family, document) != nil && !x.guardrailEngine.OnlyTypeSafe() {
-		result, err := x.guardrailEngine.Unavailable("")
+		result, err := x.guardrailEngine.Unavailable()
 		x.recordGuardrails(result.Decisions)
 		return nil, nil, guardrailError(err)
 	}
 	surface, err := guardrails.NativeSurface(document, false)
 	if err != nil {
-		result, failure := x.guardrailEngine.Unavailable("")
+		result, failure := x.guardrailEngine.Unavailable()
 		x.recordGuardrails(result.Decisions)
 		return nil, nil, guardrailError(failure)
 	}

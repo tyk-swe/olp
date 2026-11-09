@@ -151,7 +151,7 @@ func pinnedName(d guardrails.Revision) string {
 
 func projectNamer(directory promotion.Directory) namer {
 	return func(id string) (string, error) {
-		if id == "installation" {
+		if id == guardrails.InstallationProject {
 			return "", nil
 		}
 		name, ok := directory.Name(id)
@@ -240,7 +240,7 @@ func readLegacyRoutes(ctx context.Context, q access.Queryer, projectName namer) 
 		return nil, err
 	}
 	return promotion.TryMap(legacy, func(r routes.LegacyContentPolicy) (Section, error) {
-		owner, err := projectName(installationOr(r.ProjectID))
+		owner, err := projectName(guardrails.ProjectOf(r.ProjectID))
 		if err != nil {
 			return Section{}, err
 		}

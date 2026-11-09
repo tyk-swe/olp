@@ -152,12 +152,12 @@ func (e *Engine) HasAction(phase Phase, action Action) bool {
 
 // Unavailable records an explicit lack of coverage. Monitoring and annotation
 // cannot change the invocation; enforcing entries require a 422 refusal.
-func (e *Engine) Unavailable(phase Phase) (Result, error) {
+func (e *Engine) Unavailable(phases ...Phase) (Result, error) {
 	var result Result
 	var err error
 	if e != nil {
 		for _, r := range e.entries {
-			if phase != "" && r.entry.Phase != phase {
+			if len(phases) > 0 && !slices.Contains(phases, r.entry.Phase) {
 				continue
 			}
 			outcome := FailedOpen

@@ -219,7 +219,7 @@ func applyPolicy(ctx context.Context, tx pgx.Tx, p access.Principal, directory p
 		}
 		return guardrailpolicy.Activate(ctx, tx, p.UserID(), current.ID, current.RevisionID)
 	}
-	draft, err := guardrailpolicy.NewDraft(ctx, tx, installationOr(project), retainedName(current, policy.Name), entries)
+	draft, err := guardrailpolicy.NewDraft(ctx, tx, guardrails.ProjectOf(project), retainedName(current, policy.Name), entries)
 	if err != nil {
 		return err
 	}
@@ -231,7 +231,7 @@ func applyPolicy(ctx context.Context, tx pgx.Tx, p access.Principal, directory p
 }
 
 func pin(ctx context.Context, q access.Queryer, project *string, e Entry) (guardrails.Entry, error) {
-	current, err := definition.FindActive(ctx, q, installationOr(project), e.Guardrail)
+	current, err := definition.FindActive(ctx, q, guardrails.ProjectOf(project), e.Guardrail)
 	if err != nil {
 		return guardrails.Entry{}, err
 	}
