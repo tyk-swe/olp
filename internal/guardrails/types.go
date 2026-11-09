@@ -59,6 +59,7 @@ const (
 	MaxContentBytes    = 8 << 20
 	MaxFindings        = 4096
 	MaxEvidenceBytes   = 256 << 10
+	MaxCategories      = 32
 	DefaultWindowBytes = 64 << 10
 	MaxWindowBytes     = 1 << 20
 )
@@ -328,7 +329,7 @@ func ValidateEvidence(values []Evidence) error {
 		return errors.New("too many guardrail decisions")
 	}
 	for _, e := range values {
-		if !identifier.MatchString(e.GuardrailID) || !identifier.MatchString(e.Revision) || !e.Phase.Valid() || !e.Action.Valid() || e.LatencyMS < 0 || e.LatencyMS > int64((24*time.Hour)/time.Millisecond) || len(e.Categories) > 32 {
+		if !identifier.MatchString(e.GuardrailID) || !identifier.MatchString(e.Revision) || !e.Phase.Valid() || !e.Action.Valid() || e.LatencyMS < 0 || e.LatencyMS > int64((24*time.Hour)/time.Millisecond) || len(e.Categories) > MaxCategories {
 			return errors.New("invalid guardrail evidence")
 		}
 		if !e.Outcome.Valid() {
@@ -372,7 +373,7 @@ func MergeEvidence(decisions, values []Evidence) []Evidence {
 		next := merged[i]
 		next.LatencyMS += v.LatencyMS
 		next.Categories = slices.Compact(slices.Sorted(slices.Values(slices.Concat(next.Categories, v.Categories))))
-		if grown := EvidenceSize(next) - EvidenceSize(merged[i]); size+grown <= MaxEvidenceBytes {
+		if grown := EvidenceSize(next) - EvidenceSize(merged[i]); len(next.Categories) <= MaxCategories && size+grown <= MaxEvidenceBytes {
 			merged[i] = next
 			size += grown
 		}
