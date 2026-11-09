@@ -77,7 +77,7 @@ func (r Route) validPolicy(policy Policy, accounts []Account, pools []Pool) erro
 		}
 	}
 	placeholder := func(targets map[string]PaidTarget) map[string]codemode.PaidTarget {
-		return mappedValues(targets, func(PaidTarget) codemode.PaidTarget { return codemode.PaidTarget{ProviderID: r.ID, SlotID: r.ID} })
+		return promotion.MapValues(targets, func(PaidTarget) codemode.PaidTarget { return codemode.PaidTarget{ProviderID: r.ID, SlotID: r.ID} })
 	}
 	return policy.input(r.ID, r.Slug, policy.Pool, policy.Tools, placeholder(policy.PaidTargets), placeholder(policy.PaidFallbackTargets)).Validate()
 }

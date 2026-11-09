@@ -41,7 +41,7 @@ func policyOf(e contract.ConfigurationCodeRoutePolicy) Policy {
 		ModelPools: maps.Collect(maps.All(promotion.ValueOf(e.ModelPools))), Aliases: maps.Collect(maps.All(promotion.ValueOf(e.Aliases))), InitialRecoveryAttempts: promotion.ValueOf(e.InitialRecoveryAttempts),
 		ModelRewriting: promotion.ValueOf(e.ModelRewriting), CodexCLIIdentity: promotion.ValueOf(e.CodexCliIdentity), ChatToCodex: promotion.ValueOf(e.ChatToCodex), MessagesToCodex: promotion.ValueOf(e.MessagesToCodex),
 		ChatToAntigravity: promotion.ValueOf(e.ChatToAntigravity), AllowanceOrdering: promotion.ValueOf(e.AllowanceOrdering), PaidParticipation: promotion.ValueOf(e.PaidParticipation),
-		PaidTargets: mappedValues(promotion.ValueOf(e.PaidTargets), targetOf), PaidFallbackTargets: mappedValues(promotion.ValueOf(e.PaidFallbackTargets), targetOf),
+		PaidTargets: promotion.MapValues(promotion.ValueOf(e.PaidTargets), targetOf), PaidFallbackTargets: promotion.MapValues(promotion.ValueOf(e.PaidFallbackTargets), targetOf),
 		Tools: toolsOf(promotion.Pointer(e.Tools)), MaxBodyBytes: widened(promotion.Pointer(e.MaxBodyBytes)),
 	}
 }
@@ -153,7 +153,7 @@ func renderPolicy(p Policy) (contract.ConfigurationCodeRoutePolicy, error) {
 		ModelPools: new(maps.Collect(maps.All(p.ModelPools))), Aliases: new(maps.Collect(maps.All(p.Aliases))), InitialRecoveryAttempts: new(p.InitialRecoveryAttempts),
 		ModelRewriting: new(p.ModelRewriting), CodexCliIdentity: new(p.CodexCLIIdentity), ChatToCodex: new(p.ChatToCodex), MessagesToCodex: new(p.MessagesToCodex),
 		ChatToAntigravity: new(p.ChatToAntigravity), AllowanceOrdering: new(p.AllowanceOrdering), PaidParticipation: new(p.PaidParticipation),
-		PaidTargets: new(mappedValues(p.PaidTargets, PaidTarget.render)), PaidFallbackTargets: new(mappedValues(p.PaidFallbackTargets, PaidTarget.render)),
+		PaidTargets: new(promotion.MapValues(p.PaidTargets, PaidTarget.render)), PaidFallbackTargets: new(promotion.MapValues(p.PaidFallbackTargets, PaidTarget.render)),
 		Tools: tools, MaxBodyBytes: narrowed(p.MaxBodyBytes),
 	}, nil
 }

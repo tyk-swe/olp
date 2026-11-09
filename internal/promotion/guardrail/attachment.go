@@ -2,7 +2,6 @@ package guardrail
 
 import (
 	"context"
-	"net/http"
 	"slices"
 	"strings"
 
@@ -210,21 +209,14 @@ func resolveScope(ctx context.Context, tx pgx.Tx, p access.Principal, directory 
 			return nil, err
 		}
 		if !found {
-			return nil, access.Fail(http.StatusConflict, "organization_unknown", "Organization "+s.Name+" is not in the destination.")
+			return nil, promotion.UnknownOrganization(s.Name)
 		}
 		return published{&id}, p.Organization(id, access.Change)
 	case Project:
 		id, err := projectID(directory, s.Name)
 		return published{id}, err
 	case Toolset:
-		id, found, err := publications.FindLiveToolsetID(ctx, tx, project, s.Name)
-		if err != nil {
-			return nil, err
-		}
-		if !found {
-			return nil, access.Invalid("guardrail_attachments", "Toolset and policy must belong to the same project.")
-		}
-		return published{&id}, nil
+		return resolveToolset(ctx, tx, s.Name, project)
 	case Route:
 		return resolveRoute(ctx, tx, s.Slug, project)
 	case APIKey:
@@ -271,4 +263,22 @@ func sameProject(a, b *string) bool {
 		return a == b
 	}
 	return *a == *b
+}
+
+func resolveToolset(ctx context.Context, tx pgx.Tx, name string, project *string) (destination, error) {
+	if project == nil {
+		return nil, toolsetOutsideProject()
+	}
+	id, found, err := publications.ActiveID(ctx, tx, *project, "toolset", name)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, toolsetOutsideProject()
+	}
+	return published{&id}, nil
+}
+
+func toolsetOutsideProject() error {
+	return access.Invalid("guardrail_attachments", "Toolset and policy must belong to the same project.")
 }

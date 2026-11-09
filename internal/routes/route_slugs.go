@@ -2,6 +2,7 @@ package routes
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/jackc/pgx/v5"
@@ -32,4 +33,27 @@ func FindLatestDraftID(ctx context.Context, q access.Queryer, slug string, proje
 		return "", false, nil
 	}
 	return id, err == nil, err
+}
+
+func SlugProjectIDs(ctx context.Context, q access.Queryer, slugs []string) ([]*string, error) {
+	rows, err := q.Query(ctx, `SELECT r.project_id::text FROM (SELECT slug,project_id FROM olp.routes UNION ALL SELECT slug,project_id FROM olp.code_routes) r WHERE r.slug=ANY($1::text[])`, slugs)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[*string])
+}
+
+type LegacyContentPolicy struct {
+	Slug             string
+	ProjectID        *string
+	ContentPolicy    json.RawMessage
+	OverallTimeoutMS int
+}
+
+func ReadLegacyContentPolicies(ctx context.Context, q access.Queryer) ([]LegacyContentPolicy, error) {
+	rows, err := q.Query(ctx, "SELECT r.slug,r.project_id::text,v.content_policy,v.overall_timeout_ms FROM olp.routes r JOIN olp.route_revisions v ON v.id=r.latest_revision_id WHERE v.content_policy IS NOT NULL AND v.content_policy<>'null'::jsonb ORDER BY r.slug")
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowToStructByPos[LegacyContentPolicy])
 }

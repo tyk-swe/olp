@@ -2,7 +2,6 @@ package agentpublication
 
 import (
 	"context"
-	"net/http"
 	"slices"
 	"strings"
 
@@ -68,7 +67,7 @@ func toolsetsFirst(a, b Publication) int {
 func apply(ctx context.Context, tx pgx.Tx, p access.Principal, directory project.Directory, bindings promotion.Bindings, deps Deps, publication Publication) error {
 	projectID, ok := directory.ID(publication.Project)
 	if !ok {
-		return access.Fail(http.StatusConflict, "project_unknown", "Agent publication project "+publication.Project+" is not installed.")
+		return promotion.UnknownProject(publication.Project)
 	}
 	if err := p.Project(&projectID, access.Change); err != nil {
 		return err

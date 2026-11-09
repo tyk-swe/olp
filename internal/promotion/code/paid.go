@@ -94,7 +94,7 @@ func (c PaidConnection) render() (contract.ConfigurationCodePaidConnection, erro
 	if err != nil {
 		return contract.ConfigurationCodePaidConnection{}, err
 	}
-	refs := mappedValues(c.SlotKeyRefs, func(refs []string) []string { return promotion.NonNil(slices.Clone(refs)) })
+	refs := promotion.MapValues(c.SlotKeyRefs, func(refs []string) []string { return promotion.NonNil(slices.Clone(refs)) })
 	return contract.ConfigurationCodePaidConnection{Provider: entries[0], SlotKeyRefs: refs}, nil
 }
 

@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"maps"
-	"net/http"
 	"slices"
 	"strings"
 
@@ -100,7 +99,7 @@ func projectIDOf(directory project.Directory, name *string) (*string, error) {
 	}
 	id, ok := directory.ID(*name)
 	if !ok {
-		return nil, access.Fail(http.StatusConflict, "project_unknown", "Project "+*name+" is not installed.")
+		return nil, promotion.UnknownProject(*name)
 	}
 	return &id, nil
 }

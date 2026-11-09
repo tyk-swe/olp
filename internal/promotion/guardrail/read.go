@@ -1,7 +1,6 @@
 package guardrail
 
 import (
-	"bytes"
 	"cmp"
 	"context"
 	"crypto/sha256"
@@ -227,11 +226,11 @@ func routeSlot(a Attachment) slot {
 }
 
 func readLegacyRoutes(ctx context.Context, q access.Queryer, projectName namer) ([]Section, error) {
-	published, err := routes.ReadPublishedRoutes(ctx, q)
+	legacy, err := routes.ReadLegacyContentPolicies(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	return promotion.TryMap(promotion.Filter(published, carriesContentPolicy), func(r routes.PublishedRoute) (Section, error) {
+	return promotion.TryMap(legacy, func(r routes.LegacyContentPolicy) (Section, error) {
 		owner, err := projectName(installationOr(r.ProjectID))
 		if err != nil {
 			return Section{}, err
@@ -242,8 +241,4 @@ func readLegacyRoutes(ctx context.Context, q access.Queryer, projectName namer) 
 		}
 		return parseConverted(c)
 	})
-}
-
-func carriesContentPolicy(r routes.PublishedRoute) bool {
-	return len(r.ContentPolicy) > 0 && !bytes.Equal(r.ContentPolicy, []byte("null"))
 }

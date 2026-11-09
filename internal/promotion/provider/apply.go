@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"net/http"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -78,7 +77,7 @@ func projectID(entry Entry, directory project.Directory) (*string, error) {
 	}
 	id, known := directory.ID(*entry.Project)
 	if !known {
-		return nil, access.Fail(http.StatusConflict, "project_unknown", "Provider "+entry.Name+" references an unknown project.")
+		return nil, promotion.UnknownProject(*entry.Project)
 	}
 	return &id, nil
 }

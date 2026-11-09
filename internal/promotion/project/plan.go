@@ -2,7 +2,6 @@ package project
 
 import (
 	"context"
-	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -11,7 +10,6 @@ import (
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/internal/promotion"
-	"github.com/tyk-swe/olp/internal/routes"
 )
 
 func Planner(desired []Project, names promotion.Names) promotion.Planner {
@@ -25,9 +23,6 @@ func Planner(desired []Project, names promotion.Names) promotion.Planner {
 		},
 		Plan: func(ctx context.Context, q access.Queryer) ([]promotion.Item, error) {
 			if err := checkOrganizations(ctx, q, desired, names); err != nil {
-				return nil, err
-			}
-			if err := checkRouteGroups(ctx, q, desired); err != nil {
 				return nil, err
 			}
 			current, err := Read(ctx, q)
@@ -53,21 +48,6 @@ func checkOrganizations(ctx context.Context, q access.Queryer, desired []Project
 		}
 		if !exists {
 			return access.Invalid("organization", "Reference an organization in the document or destination.")
-		}
-	}
-	return nil
-}
-
-func checkRouteGroups(ctx context.Context, q access.Queryer, desired []Project) error {
-	for _, project := range desired {
-		for _, group := range slices.Sorted(maps.Keys(project.RouteGroups)) {
-			foreign, err := routes.SlugsOwnedOutsideProject(ctx, q, project.RouteGroups[group], project.Name)
-			if err != nil {
-				return err
-			}
-			if foreign {
-				return foreignRoutes()
-			}
 		}
 	}
 	return nil

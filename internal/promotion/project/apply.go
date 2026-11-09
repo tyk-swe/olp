@@ -2,7 +2,6 @@ package project
 
 import (
 	"context"
-	"net/http"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
@@ -44,7 +43,7 @@ func imports(desired []Project, directory Directory) ([]projects.PolicyImport, e
 	return promotion.TryMap(desired, func(project Project) (projects.PolicyImport, error) {
 		id, ok := directory.ID(project.Name)
 		if !ok {
-			return projects.PolicyImport{}, unknown(project.Name)
+			return projects.PolicyImport{}, promotion.UnknownProject(project.Name)
 		}
 		return project.imported(id), nil
 	})
@@ -116,9 +115,5 @@ func organizationID(ctx context.Context, q access.Queryer, name string) (string,
 	if err != nil || found {
 		return id, err
 	}
-	return "", access.Fail(http.StatusConflict, "organization_unknown", "Organization "+name+" is not in the destination.")
-}
-
-func unknown(name string) error {
-	return access.Fail(http.StatusConflict, "project_unknown", "Project "+name+" is not in the destination.")
+	return "", promotion.UnknownOrganization(name)
 }

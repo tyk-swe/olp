@@ -27,7 +27,7 @@ func (t PaidTarget) render() contract.ConfigurationCodePaidTarget {
 }
 
 func resolveTargets(ctx context.Context, q access.Queryer, targets map[string]PaidTarget, project string, credentials map[string]string) (map[string]codemode.PaidTarget, error) {
-	return tryMappedValues(targets, func(_ string, t PaidTarget) (codemode.PaidTarget, error) {
+	return promotion.TryMapValues(targets, func(_ string, t PaidTarget) (codemode.PaidTarget, error) {
 		return resolveTarget(ctx, q, t, project, credentials)
 	})
 }
@@ -71,7 +71,7 @@ func readSlotNames(ctx context.Context, q access.Queryer) (map[string]PaidTarget
 }
 
 func portableTargets(targets map[string]codemode.PaidTarget, names map[string]PaidTarget) (map[string]PaidTarget, error) {
-	return tryMappedValues(targets, func(_ string, t codemode.PaidTarget) (PaidTarget, error) {
+	return promotion.TryMapValues(targets, func(_ string, t codemode.PaidTarget) (PaidTarget, error) {
 		target, ok := names[slotKey(t.ProviderID, t.SlotID)]
 		if !ok {
 			return PaidTarget{}, access.Invalid("code.paid_targets", "A paid target no longer has a portable provider and slot reference.")

@@ -28,11 +28,11 @@ type frozen struct {
 }
 
 func parsePublication(e contract.ConfigurationCodePublication, names promotion.Names, deps provider.Deps) (Publication, error) {
-	connections, err := tryMappedValues(e.Connections, parseConnection)
+	connections, err := promotion.TryMapValues(e.Connections, parseConnection)
 	if err != nil {
 		return Publication{}, err
 	}
-	paid, err := tryMappedValues(promotion.ValueOf(e.PaidConnections), func(_ string, c contract.ConfigurationCodePaidConnection) (PaidConnection, error) {
+	paid, err := promotion.TryMapValues(promotion.ValueOf(e.PaidConnections), func(_ string, c contract.ConfigurationCodePaidConnection) (PaidConnection, error) {
 		return parsePaidConnection(c, names, deps)
 	})
 	if err != nil {
@@ -49,11 +49,11 @@ func renderPublication(p *Publication) (*contract.ConfigurationCodePublication, 
 	if err != nil {
 		return nil, err
 	}
-	connections, err := tryMappedValues(p.Connections, renderConnection)
+	connections, err := promotion.TryMapValues(p.Connections, renderConnection)
 	if err != nil {
 		return nil, err
 	}
-	paid, err := tryMappedValues(p.PaidConnections, func(_ string, c PaidConnection) (contract.ConfigurationCodePaidConnection, error) { return c.render() })
+	paid, err := promotion.TryMapValues(p.PaidConnections, func(_ string, c PaidConnection) (contract.ConfigurationCodePaidConnection, error) { return c.render() })
 	if err != nil {
 		return nil, err
 	}
@@ -101,5 +101,5 @@ func portablePublication(ctx context.Context, q access.Queryer, document *codemo
 	if err != nil {
 		return nil, err
 	}
-	return &Publication{Policy: policy, Connections: mappedValues(connections, portableConnection), PaidConnections: portable}, nil
+	return &Publication{Policy: policy, Connections: promotion.MapValues(connections, portableConnection), PaidConnections: portable}, nil
 }

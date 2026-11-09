@@ -22,7 +22,7 @@ func CatalogApplier(desired []Project) promotion.Applier {
 		for _, project := range publishing(desired, current) {
 			existing, ok := current.Project(project.Name)
 			if !ok {
-				return unknown(project.Name)
+				return promotion.UnknownProject(project.Name)
 			}
 			if _, err := modelcatalog.SetProjectPublication(ctx, tx, existing.ID, project.PublicCatalog, project.PublicCatalogPrices); err != nil {
 				return err
@@ -41,7 +41,7 @@ func TemplateApplier(desired []Project) promotion.Applier {
 		for _, project := range desired {
 			existing, ok := current.Project(project.Name)
 			if !ok {
-				return unknown(project.Name)
+				return promotion.UnknownProject(project.Name)
 			}
 			if err := projects.ValidateTemplateReferences(ctx, tx, existing.ID, existing.Policies.Templates); err != nil {
 				return err

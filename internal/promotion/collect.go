@@ -1,12 +1,9 @@
 package promotion
 
 import (
-	"context"
+	"cmp"
 	"maps"
 	"slices"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 )
 
 func ValueOf[T any](pointer *T) T {
@@ -160,10 +157,27 @@ func FirstRepeat[T any, K comparable](values []T, key func(T) K) (T, bool) {
 	return *new(T), false
 }
 
-func Rows[T any](ctx context.Context, q access.Queryer, scan pgx.RowToFunc[T], sql string, args ...any) ([]T, error) {
-	rows, err := q.Query(ctx, sql, args...)
+func MapValues[K comparable, V, W any](values map[K]V, convert func(V) W) map[K]W {
+	return maps.Collect(func(yield func(K, W) bool) {
+		for key, value := range values {
+			if !yield(key, convert(value)) {
+				return
+			}
+		}
+	})
+}
+
+func TryMapValues[K cmp.Ordered, V, W any](values map[K]V, convert func(K, V) (W, error)) (map[K]W, error) {
+	keys := slices.Sorted(maps.Keys(values))
+	converted, err := TryMap(keys, func(key K) (W, error) { return convert(key, values[key]) })
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, scan)
+	return maps.Collect(func(yield func(K, W) bool) {
+		for i, key := range keys {
+			if !yield(key, converted[i]) {
+				return
+			}
+		}
+	}), nil
 }

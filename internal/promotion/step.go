@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"net/http"
 	"slices"
 	"strings"
 	"unicode"
@@ -79,4 +80,12 @@ func WithFieldPrefix(err error, prefix string) error {
 		return &access.Problem{Status: problem.Status, Code: problem.Code, Detail: problem.Detail, Field: prefix + "." + problem.Field}
 	}
 	return err
+}
+
+func UnknownProject(name string) error {
+	return access.Fail(http.StatusConflict, "project_unknown", "Project "+name+" is not in the destination.")
+}
+
+func UnknownOrganization(name string) error {
+	return access.Fail(http.StatusConflict, "organization_unknown", "Organization "+name+" is not in the destination.")
 }
