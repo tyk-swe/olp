@@ -25,9 +25,9 @@ type toolGuardrailState struct {
 }
 
 func guardrailRefusal(err error) *Failure {
-	var policyFailure *guardrails.Error
+	var policyFailure guardrails.Failure
 	if errors.As(err, &policyFailure) {
-		return &Failure{Code: policyFailure.Code, Message: "The tool call could not satisfy the configured guardrails.", Guardrail: policyFailure}
+		return &Failure{Code: string(policyFailure), Message: "The tool call could not satisfy the configured guardrails.", Guardrail: policyFailure}
 	}
 	return refusal("guardrail_unavailable", "The guardrail could not be evaluated.")
 }
@@ -50,7 +50,7 @@ func stateDecisions(state *toolGuardrailState) []guardrails.Evidence {
 	return slices.Clone(state.decisions)
 }
 
-func (s *Executor) evaluateToolPhase(ctx context.Context, in CallRequest, reservation *accounting.Reservation, state *toolGuardrailState, phase string, segments []guardrails.Segment) (guardrails.Result, error) {
+func (s *Executor) evaluateToolPhase(ctx context.Context, in CallRequest, reservation *accounting.Reservation, state *toolGuardrailState, phase guardrails.Phase, segments []guardrails.Segment) (guardrails.Result, error) {
 	if s.guardrails == nil {
 		return state.engine.Unavailable(phase)
 	}
@@ -72,25 +72,13 @@ func (s *Executor) refuseGuardedCall(ctx context.Context, in CallRequest, reserv
 	}
 }
 
-func unsupportedToolPhases(engine *guardrails.Engine, phases []string) ([]guardrails.Evidence, error) {
-	if len(phases) == 0 {
-		return nil, nil
-	}
-	result, err := engine.Unavailable(phases[0])
-	if err != nil {
-		return result.Decisions, err
-	}
-	next, failure := unsupportedToolPhases(engine, phases[1:])
-	return slices.Concat(result.Decisions, next), failure
-}
-
 func (s *Executor) guardArguments(ctx context.Context, in CallRequest, reservation *accounting.Reservation, state *toolGuardrailState) (json.RawMessage, *toolGuardrailState, *Failure) {
 	if state == nil {
 		return in.Arguments, nil, nil
 	}
-	unavailable, failure := unsupportedToolPhases(state.engine, []string{guardrails.InputParallel, guardrails.OutputStream})
+	unavailable, failure := state.engine.Unavailable(guardrails.InputParallel, guardrails.OutputStream)
 	if failure != nil {
-		refused := &toolGuardrailState{engine: state.engine, masks: state.masks, decisions: unavailable}
+		refused := &toolGuardrailState{engine: state.engine, masks: state.masks, decisions: unavailable.Decisions}
 		s.refuseGuardedCall(ctx, in, reservation, refused)
 		return nil, refused, guardrailRefusal(failure)
 	}
@@ -101,7 +89,7 @@ func (s *Executor) guardArguments(ctx context.Context, in CallRequest, reservati
 	}
 	surface := guardrails.ToolJSONSurface(document, in.Tool.Alias, false)
 	result, err := s.evaluateToolPhase(ctx, in, reservation, state, guardrails.Input, surface.Segments())
-	guarded := &toolGuardrailState{engine: state.engine, masks: state.masks, decisions: slices.Concat(unavailable, result.Decisions)}
+	guarded := &toolGuardrailState{engine: state.engine, masks: state.masks, decisions: slices.Concat(unavailable.Decisions, result.Decisions)}
 	if err != nil {
 		s.refuseGuardedCall(ctx, in, reservation, guarded)
 		return nil, guarded, guardrailRefusal(err)
@@ -132,7 +120,7 @@ func projectToolResult(in CallRequest, result upstream.ToolResult) (toolResultSu
 	content := slices.Collect(func(yield func(guardrails.Segment) bool) {
 		for index, block := range result.Content {
 			if block.Type == "text" && !yield(guardrails.Segment{
-				ID: "content" + strconv.Itoa(index), Kind: "tool_result",
+				ID: "content" + strconv.Itoa(index), Kind: guardrails.ToolResult,
 				ToolName: in.Tool.Alias, Untrusted: true, Text: block.Text,
 			}) {
 				return

@@ -7,9 +7,9 @@ import (
 )
 
 func TestStreamKeywordWaitsForWordBoundary(t *testing.T) {
-	for _, action := range []string{Block, Redact} {
+	for _, action := range []Action{Block, Redact} {
 		for _, suffix := range []string{"alogue", "é", "_name", "1", ""} {
-			t.Run(action+"/"+suffix, func(t *testing.T) {
+			t.Run(string(action)+"/"+suffix, func(t *testing.T) {
 				engine := testEngine(t, "builtin.keywords", `{"words":["cat"]}`, OutputStream, action, false, nil)
 				stream, err := NewStream(engine, Evaluation{}, 1024)
 				if err != nil {

@@ -55,11 +55,11 @@ func TestPluginDigestAgreesAcrossIndexAndConsumers(t *testing.T) {
 				Name: "sample", Description: "sample", Maintainer: "sample", DocumentationURL: "https://example.test/docs", Repository: "https://example.test/repo", Path: "sample",
 				Releases: []pluginindex.Release{{Version: "1.0.0", Digest: tc.digest, ABIVersion: 1, SizeBytes: 1, Commit: strings.Repeat("a", 40), ReviewedAt: publishedAt, Origins: []string{"https://example.test"}, Profiles: []string{"sample"}}},
 			}}}
-			configuration, err := json.Marshal(guardrails.ExternalConfig{PluginID: "sample", PluginVersion: tc.digest})
+			configuration, err := json.Marshal(guardrails.PluginSpec{ID: "sample", Version: tc.digest})
 			if err != nil {
 				t.Fatal(err)
 			}
-			guardrailErr := guardrails.ValidateExternal(guardrails.Revision{Type: "plugin", Configuration: configuration})
+			_, guardrailErr := guardrails.ParseRevision(guardrails.Revision{Type: "plugin", Configuration: configuration, TimeoutMS: 1000, OnError: guardrails.FailClosed})
 			behavior := Behavior{Selectors: []Selector{{ID: "selector", Route: "other", When: Predicate{Plugin: &PluginPredicate{Digest: tc.digest}}}}}
 			routeErr := behavior.Validate("route", nil)
 			indexErr := index.Validate()

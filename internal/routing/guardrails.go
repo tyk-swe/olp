@@ -2,6 +2,8 @@ package routing
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
@@ -10,66 +12,40 @@ func (s *Snapshot) compileGuardrails() error {
 	if s.Guardrails == nil {
 		return nil
 	}
-	s.guardrailEngines = map[string]*guardrails.Engine{}
+	routes := map[string]*guardrails.Engine{}
 	for slug, route := range s.Routes {
-		project := "installation"
-		if route.ProjectID != nil {
-			project = *route.ProjectID
+		engines, err := s.Guardrails.Engines(guardrails.Boundary{ProjectID: guardrails.ProjectOf(route.ProjectID), RouteID: route.ID})
+		if err != nil {
+			return err
 		}
-		boundary := guardrails.Boundary{RouteID: route.ID, ProjectID: project, OrganizationID: s.Guardrails.ProjectOrganizations[project]}
-		keys := []string{""}
-		for _, a := range s.Guardrails.Attachments {
-			if a.Scope == "api-key" && s.Guardrails.Policies[a.PolicyRevisionID].ProjectID == project {
-				keys = append(keys, a.ScopeID)
-			}
-		}
-		for _, key := range keys {
-			boundary.KeyID = key
-			e, err := s.Guardrails.Compile(boundary, nil)
-			if err != nil {
-				return err
-			}
+		for _, key := range slices.Sorted(maps.Keys(engines)) {
+			e := engines[key]
 			if err = e.ValidateRoute(route.Fidelity.Strict(), route.OverallTimeout); err != nil {
 				return fmt.Errorf("route %q guardrails: %w", slug, err)
 			}
-			if e != nil && route.IsPassthrough() {
+			if route.IsPassthrough() {
 				return &Refusal{Code: "passthrough_conflict", Message: "A pass-through route cannot carry guardrails."}
 			}
-			if e != nil {
-				s.guardrailEngines[slug+"\x00"+key] = e
-			}
+			routes[slug+"\x00"+key] = e
 		}
 	}
-	return s.compileToolGuardrails()
-}
-
-func (s *Snapshot) compileToolGuardrails() error {
-	s.toolGuardrailEngines = map[string]*guardrails.Engine{}
-	projects := map[string]string{}
+	toolsets := map[string]string{}
 	for _, revision := range s.AgentPublications {
 		if revision.Kind == "toolset" {
-			projects[revision.PublicationID] = revision.ProjectID
+			toolsets[revision.PublicationID] = revision.ProjectID
 		}
 	}
-	for toolsetID, project := range projects {
-		boundary := guardrails.Boundary{ToolsetID: toolsetID, ProjectID: project, OrganizationID: s.Guardrails.ProjectOrganizations[project]}
-		keys := []string{""}
-		for _, a := range s.Guardrails.Attachments {
-			if a.Scope == "api-key" && s.Guardrails.Policies[a.PolicyRevisionID].ProjectID == project {
-				keys = append(keys, a.ScopeID)
-			}
+	tools := map[string]*guardrails.Engine{}
+	for toolset, project := range toolsets {
+		engines, err := s.Guardrails.Engines(guardrails.Boundary{ProjectID: project, ToolsetID: toolset})
+		if err != nil {
+			return fmt.Errorf("toolset %q guardrails: %w", toolset, err)
 		}
-		for _, key := range keys {
-			boundary.KeyID = key
-			e, err := s.Guardrails.Compile(boundary, nil)
-			if err != nil {
-				return fmt.Errorf("toolset %q guardrails: %w", toolsetID, err)
-			}
-			if e != nil {
-				s.toolGuardrailEngines[toolsetID+"\x00"+key] = e
-			}
+		for key, e := range engines {
+			tools[toolset+"\x00"+key] = e
 		}
 	}
+	s.guardrailEngines, s.toolGuardrailEngines = routes, tools
 	return nil
 }
 

@@ -156,6 +156,6 @@ func (x *call) requiresParameters() bool {
 }
 
 func (x *call) recordPreparationGuardrails(record *targetPreparation, decisions []guardrails.Evidence) {
-	record.guardrailDecisions = appendGuardrailEvidence(record.guardrailDecisions, decisions)
+	record.guardrailDecisions = guardrails.MergeEvidence(record.guardrailDecisions, decisions)
 	x.recordGuardrails(decisions)
 }

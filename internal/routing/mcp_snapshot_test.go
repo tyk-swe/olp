@@ -344,7 +344,7 @@ func TestSnapshotCompilesToolGuardrailEnginesPerToolsetAndKey(t *testing.T) {
 	definition := func(id string) guardrails.Revision {
 		return guardrails.Revision{ID: id, GuardrailID: id, ProjectID: mcpProject, Type: "builtin.keywords", Configuration: json.RawMessage(`{"words":["private"]}`), TimeoutMS: 100, OnError: guardrails.FailClosed}
 	}
-	policy := func(id, definitionID, phase string) guardrails.PolicyRevision {
+	policy := func(id, definitionID string, phase guardrails.Phase) guardrails.PolicyRevision {
 		return guardrails.PolicyRevision{ID: id, PolicyID: id, ProjectID: mcpProject, Entries: []guardrails.Entry{{GuardrailID: definitionID, RevisionID: definitionID, Phase: phase, Action: guardrails.Block, Mandatory: true}}}
 	}
 	const (

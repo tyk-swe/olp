@@ -124,19 +124,19 @@ func (s *Server) pruneWorkflowPolicies(ctx context.Context, x *call, request *wi
 func (x *call) pruningInput(ctx context.Context, request *wire.Request) (*wire.Request, []string, *Error) {
 	document := request.OIF().Document()
 	if interaction.CheckGuardrailCoverage(request.Family, document) != nil && !x.guardrailEngine.OnlyTypeSafe() {
-		result, err := x.guardrailEngine.Unavailable("")
+		result, err := x.guardrailEngine.Unavailable()
 		x.recordGuardrails(result.Decisions)
 		return nil, nil, guardrailError(err)
 	}
 	surface, err := guardrails.NativeSurface(document, false)
 	if err != nil {
-		result, failure := x.guardrailEngine.Unavailable("")
+		result, failure := x.guardrailEngine.Unavailable()
 		x.recordGuardrails(result.Decisions)
 		return nil, nil, guardrailError(failure)
 	}
 	segments := slices.Clone(surface.Segments)
 	for index, segment := range segments {
-		if segment.Kind == "tool_result" && slices.Contains(x.workflowRecoveryCalls, segment.ToolCallID) {
+		if segment.Kind == guardrails.ToolResult && slices.Contains(x.workflowRecoveryCalls, segment.ToolCallID) {
 			segments[index].Text = surface.Replacement(index, "[recovered content omitted]")
 		}
 	}
@@ -167,7 +167,7 @@ func (x *call) pruningInput(ctx context.Context, request *wire.Request) (*wire.R
 	if err != nil {
 		return nil, nil, guardrailError(err)
 	}
-	document, segments, err = x.inspectGuardrailInputWithRecovery(context.WithValue(ctx, guardrailCallerKey{}, x), document, false)
+	document, segments, err = x.inspectGuardrailInputWithRecovery(ctx, document, false)
 	if err != nil {
 		return nil, nil, guardrailError(err)
 	}

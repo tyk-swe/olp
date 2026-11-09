@@ -2,11 +2,13 @@ package guardrails
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"hash/crc32"
+	"maps"
 	"net/netip"
 	"path"
 	"regexp"
@@ -56,122 +58,90 @@ type entityPattern struct {
 
 func (p *patternDetector) width() int { return p.maxWidth }
 
-func compileDetector(d Revision, external Evaluator) (detector, error) {
-	switch d.Type {
-	case "builtin.code_execution":
-		return compileCodeExecution(d.Configuration)
-	case "builtin.tool_permission":
-		return compileToolPermission(d.Configuration)
-	case "builtin.regex":
-		var config RegexConfig
-		if err := decodeConfig(d.Configuration, &config); err != nil {
-			return nil, err
-		}
-		if len(config.Rules) > contentpolicy.MaxRules {
-			return nil, errors.New("too many regex rules")
-		}
-		return compilePatterns(config.Rules, "regex", "")
-	case "builtin.pii", "builtin.secrets":
+func compileRegex(raw json.RawMessage) (*patternDetector, error) {
+	var config RegexConfig
+	if err := decodeConfig(raw, &config); err != nil {
+		return nil, err
+	}
+	if len(config.Rules) > contentpolicy.MaxRules {
+		return nil, errors.New("too many regex rules")
+	}
+	return compilePatterns(config.Rules, "regex", "")
+}
+
+func compileEntities(available map[string]entityTemplate) func(json.RawMessage) (*patternDetector, error) {
+	return func(raw json.RawMessage) (*patternDetector, error) {
 		var config EntityConfig
-		if err := decodeConfig(d.Configuration, &config); err != nil {
+		if err := decodeConfig(raw, &config); err != nil {
 			return nil, err
 		}
-		available := piiPatterns
-		if d.Type == "builtin.secrets" {
-			available = secretPatterns
+		categories := config.Categories
+		if len(categories) == 0 {
+			categories = slices.Sorted(maps.Keys(available))
 		}
-		if len(config.Categories) == 0 {
-			for name := range available {
-				config.Categories = append(config.Categories, name)
-			}
-			slices.Sort(config.Categories)
-		}
-		if len(config.Categories) > 32 || len(config.Replacement) > 512 || !utf8.ValidString(config.Replacement) {
+		if len(categories) > 32 || len(config.Replacement) > 512 || !utf8.ValidString(config.Replacement) {
 			return nil, errors.New("invalid entity configuration")
 		}
-		p := &patternDetector{}
-		for _, name := range config.Categories {
+		replacement := cmp.Or(config.Replacement, "[REDACTED]")
+		builtins := make([]entityPattern, 0, len(categories))
+		for _, name := range categories {
 			t, ok := available[name]
 			if !ok {
 				return nil, errors.New("unknown detector category")
 			}
-			r := entityPattern{re: regexp.MustCompile(t.pattern), category: name, replacement: config.Replacement, check: t.check}
-			if r.replacement == "" {
-				r.replacement = "[REDACTED]"
-			}
-			p.patterns = append(p.patterns, r)
+			builtins = append(builtins, entityPattern{re: t.re, category: name, replacement: replacement, check: t.check})
 		}
 		custom, err := compilePatterns(config.Patterns, "pii.custom", config.Replacement)
 		if err != nil {
 			return nil, err
 		}
-		p.patterns = append(p.patterns, custom.patterns...)
-		p.maxWidth = maximumPatternWidth(p.patterns)
-		return p, nil
-	case "builtin.keywords":
-		return compileKeywords(d.Configuration)
-	case "builtin.schema":
-		var config SchemaConfig
-		if err := decodeConfig(d.Configuration, &config); err != nil {
-			return nil, err
-		}
-		schema, err := compileSchema(config.Schema)
-		return &schemaDetector{schema: schema}, err
-	case "builtin.tools":
-		var config ToolsConfig
-		if err := decodeConfig(d.Configuration, &config); err != nil {
-			return nil, err
-		}
-		if len(config.Allow)+len(config.Deny)+len(config.Privileged)+len(config.Untrusted) > 256 || len(config.Schemas) > 128 {
-			return nil, errors.New("too many tool rules")
-		}
-		for _, group := range [][]string{config.Allow, config.Deny, config.Privileged, config.Untrusted} {
-			for _, g := range group {
-				if len(g) < 1 || len(g) > 128 {
-					return nil, errors.New("invalid tool glob")
-				}
-				if _, err := path.Match(g, ""); err != nil {
-					return nil, errors.New("invalid tool glob")
-				}
-			}
-		}
-		t := &toolsDetector{config: config, schemas: map[string]*jsonschema.Schema{}}
-		for name, raw := range config.Schemas {
-			if !identifier.MatchString(name) {
-				return nil, errors.New("invalid tool name")
-			}
-			schema, err := compileSchema(raw)
-			if err != nil {
-				return nil, err
-			}
-			t.schemas[name] = schema
-		}
-		return t, nil
-	case "typesafe":
-		return compileTypeSafe(d.Configuration)
-	case "webhook", "bedrock", "azure.content_safety", "azure.prompt_shields", "model_armor", "lakera", "presidio", "model", "semantic_guard", "decision_model", "plugin":
-		if err := ValidateExternal(d); err != nil {
-			return nil, err
-		}
-		return externalDetector{definition: d, evaluator: external}, nil
-	default:
-		if _, ok := lookupNamedVendor(d.Type); ok {
-			if err := ValidateExternal(d); err != nil {
-				return nil, err
-			}
-			return externalDetector{definition: d, evaluator: external}, nil
-		}
-		return nil, errors.New("unknown guardrail type")
+		patterns := slices.Concat(builtins, custom.patterns)
+		return &patternDetector{patterns: patterns, maxWidth: maximumPatternWidth(patterns)}, nil
 	}
 }
 
-// ValidateDefinition validates without resolving credentials or performing I/O.
-func ValidateDefinition(d Revision) error {
-	if d.TimeoutMS < 1 || d.TimeoutMS > 300000 || (d.OnError != FailClosed && d.OnError != FailOpen) {
-		return errors.New("invalid guardrail timeout or failure policy")
+func compileSchemaDetector(raw json.RawMessage) (*schemaDetector, error) {
+	var config SchemaConfig
+	if err := decodeConfig(raw, &config); err != nil {
+		return nil, err
 	}
-	_, err := compileDetector(d, nil)
-	return err
+	schema, err := compileSchema(config.Schema)
+	if err != nil {
+		return nil, err
+	}
+	return &schemaDetector{schema: schema}, nil
+}
+
+func compileTools(raw json.RawMessage) (*toolsDetector, error) {
+	var config ToolsConfig
+	if err := decodeConfig(raw, &config); err != nil {
+		return nil, err
+	}
+	if len(config.Allow)+len(config.Deny)+len(config.Privileged)+len(config.Untrusted) > 256 || len(config.Schemas) > 128 {
+		return nil, errors.New("too many tool rules")
+	}
+	for _, group := range [][]string{config.Allow, config.Deny, config.Privileged, config.Untrusted} {
+		for _, g := range group {
+			if len(g) < 1 || len(g) > 128 {
+				return nil, errors.New("invalid tool glob")
+			}
+			if _, err := path.Match(g, ""); err != nil {
+				return nil, errors.New("invalid tool glob")
+			}
+		}
+	}
+	schemas := make(map[string]*jsonschema.Schema, len(config.Schemas))
+	for name, raw := range config.Schemas {
+		if !identifier.MatchString(name) {
+			return nil, errors.New("invalid tool name")
+		}
+		schema, err := compileSchema(raw)
+		if err != nil {
+			return nil, err
+		}
+		schemas[name] = schema
+	}
+	return &toolsDetector{config: config, schemas: schemas}, nil
 }
 
 func compilePatterns(rules []Pattern, category, replacement string) (*patternDetector, error) {
@@ -271,7 +241,8 @@ func regexpWidth(r *syntax.Regexp) int {
 	}
 }
 func (p *patternDetector) detect(ctx context.Context, e Evaluation) (Verdict, error) {
-	v := Verdict{Action: "pass"}
+	var categories []string
+	var redactions []Redaction
 	for _, s := range e.Segments {
 		hasDigits := strings.ContainsAny(s.Text, "0123456789")
 		for _, r := range p.patterns {
@@ -282,11 +253,11 @@ func (p *patternDetector) detect(ctx context.Context, e Evaluation) (Verdict, er
 				continue
 			}
 			if err := ctx.Err(); err != nil {
-				return v, err
+				return Verdict{}, err
 			}
 			matches := r.re.FindAllStringIndex(s.Text, MaxFindings+1)
 			if len(matches) > MaxFindings {
-				return v, errEvaluation
+				return Verdict{}, errEvaluation
 			}
 			for _, span := range matches {
 				value := s.Text[span[0]:span[1]]
@@ -305,19 +276,17 @@ func (p *patternDetector) detect(ctx context.Context, e Evaluation) (Verdict, er
 						continue
 					}
 				}
-				v.Action = Redact
-				v.Categories = appendCategory(v.Categories, r.category)
-				v.Redactions = append(v.Redactions, Redaction{s.ID, span[0], span[1], r.replacement})
-				if len(v.Redactions) > MaxFindings {
-					return v, errEvaluation
+				categories = appendCategory(categories, r.category)
+				redactions = append(redactions, Redaction{s.ID, span[0], span[1], r.replacement})
+				if len(redactions) > MaxFindings {
+					return Verdict{}, errEvaluation
 				}
 			}
 		}
 	}
 	// Detectors can overlap (a national phone number may also be a card). Merge
 	// overlapping spans before applying replacements and retain every category.
-	v.Redactions = mergeRedactions(v.Redactions)
-	return v, nil
+	return Redacting(mergeRedactions(redactions), categories...), nil
 }
 func appendCategory(categories []string, c string) []string {
 	if !slices.Contains(categories, c) {
@@ -347,30 +316,30 @@ func mergeRedactions(values []Redaction) []Redaction {
 }
 
 type entityTemplate struct {
-	pattern string
-	check   func(string) bool
+	re    *regexp.Regexp
+	check func(string) bool
 }
 
 var piiPatterns = map[string]entityTemplate{
-	"pii.email":        {`[\p{L}\p{N}.!#$%&'*+/=?^_` + "`" + `{|}~-]{1,64}@[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?(?:\.[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?){1,10}`, nil},
-	"pii.phone":        {`\+?[0-9(][0-9() .-]{5,28}[0-9]`, validPhone},
-	"pii.payment_card": {`[0-9](?:[ -]?[0-9]){12,18}`, validLuhn},
-	"pii.iban":         {`[A-Z]{2}[0-9]{2}(?: ?[A-Z0-9]){11,30}`, validIBAN},
-	"pii.us_ssn":       {`[0-9]{3}[- ]?[0-9]{2}[- ]?[0-9]{4}`, validSSN},
-	"pii.ip_address":   {`(?:[0-9]{1,3}\.){3}[0-9]{1,3}|[0-9A-Fa-f]{0,4}:[0-9A-Fa-f:]{1,40}`, func(v string) bool { _, err := netip.ParseAddr(v); return err == nil }},
+	"pii.email":        {regexp.MustCompile(`[\p{L}\p{N}.!#$%&'*+/=?^_` + "`" + `{|}~-]{1,64}@[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?(?:\.[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?){1,10}`), nil},
+	"pii.phone":        {regexp.MustCompile(`\+?[0-9(][0-9() .-]{5,28}[0-9]`), validPhone},
+	"pii.payment_card": {regexp.MustCompile(`[0-9](?:[ -]?[0-9]){12,18}`), validLuhn},
+	"pii.iban":         {regexp.MustCompile(`[A-Z]{2}[0-9]{2}(?: ?[A-Z0-9]){11,30}`), validIBAN},
+	"pii.us_ssn":       {regexp.MustCompile(`[0-9]{3}[- ]?[0-9]{2}[- ]?[0-9]{4}`), validSSN},
+	"pii.ip_address":   {regexp.MustCompile(`(?:[0-9]{1,3}\.){3}[0-9]{1,3}|[0-9A-Fa-f]{0,4}:[0-9A-Fa-f:]{1,40}`), func(v string) bool { _, err := netip.ParseAddr(v); return err == nil }},
 }
 var secretPatterns = map[string]entityTemplate{
-	"secret.private_key":    {`-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----[\s\S]+?-----END (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----`, nil},
-	"secret.jwt":            {`eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`, validJWT},
-	"secret.aws_access_key": {`(?:AKIA|ASIA|AIDA|AROA)[A-Z0-9]{16}`, nil},
-	"secret.google_cloud":   {`AIza[0-9A-Za-z_-]{35}`, nil},
-	"secret.azure":          {`(?i)(?:AccountKey=[A-Za-z0-9+/]{86}==|SharedAccessSignature[ =][^\r\n]+|[?&]sig=[A-Za-z0-9%+/=_-]{20,256})`, nil},
-	"secret.github":         {`(?:ghs_[0-9]+_eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{82})`, validGitHub},
-	"secret.gitlab":         {`glpat-[A-Za-z0-9_-]{20,300}(?:\.[0-9a-z]{2}\.[0-9a-z]{9})?`, validGitLab},
-	"secret.slack":          {`(?:xox[baprs]-[A-Za-z0-9-]{10,200}|xapp-[A-Za-z0-9-]{10,200})`, nil},
-	"secret.stripe":         {`(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,128}`, nil},
-	"secret.openai":         {`sk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{20,200}`, func(v string) bool { return !strings.HasPrefix(v, "sk-ant-") }},
-	"secret.anthropic":      {`sk-ant-(?:api[0-9]{2}-)?[A-Za-z0-9_-]{20,200}`, nil},
+	"secret.private_key":    {regexp.MustCompile(`-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----[\s\S]+?-----END (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----`), nil},
+	"secret.jwt":            {regexp.MustCompile(`eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`), validJWT},
+	"secret.aws_access_key": {regexp.MustCompile(`(?:AKIA|ASIA|AIDA|AROA)[A-Z0-9]{16}`), nil},
+	"secret.google_cloud":   {regexp.MustCompile(`AIza[0-9A-Za-z_-]{35}`), nil},
+	"secret.azure":          {regexp.MustCompile(`(?i)(?:AccountKey=[A-Za-z0-9+/]{86}==|SharedAccessSignature[ =][^\r\n]+|[?&]sig=[A-Za-z0-9%+/=_-]{20,256})`), nil},
+	"secret.github":         {regexp.MustCompile(`(?:ghs_[0-9]+_eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{82})`), validGitHub},
+	"secret.gitlab":         {regexp.MustCompile(`glpat-[A-Za-z0-9_-]{20,300}(?:\.[0-9a-z]{2}\.[0-9a-z]{9})?`), validGitLab},
+	"secret.slack":          {regexp.MustCompile(`(?:xox[baprs]-[A-Za-z0-9-]{10,200}|xapp-[A-Za-z0-9-]{10,200})`), nil},
+	"secret.stripe":         {regexp.MustCompile(`(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,128}`), nil},
+	"secret.openai":         {regexp.MustCompile(`sk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{20,200}`), func(v string) bool { return !strings.HasPrefix(v, "sk-ant-") }},
+	"secret.anthropic":      {regexp.MustCompile(`sk-ant-(?:api[0-9]{2}-)?[A-Za-z0-9_-]{20,200}`), nil},
 }
 
 func digits(v string) string {
@@ -484,7 +453,7 @@ func (d *schemaDetector) detect(ctx context.Context, e Evaluation) (Verdict, err
 		return Verdict{}, projectionErr
 	}
 	if len(segments) == 0 {
-		return Verdict{Action: Block, Categories: []string{"schema.invalid"}}, nil
+		return Flag("schema.invalid"), nil
 	}
 	for _, s := range segments {
 		if err := ctx.Err(); err != nil {
@@ -492,10 +461,10 @@ func (d *schemaDetector) detect(ctx context.Context, e Evaluation) (Verdict, err
 		}
 		v, err := jsonschema.UnmarshalJSON(strings.NewReader(s.Text))
 		if err != nil || d.schema.Validate(v) != nil {
-			return Verdict{Action: Block, Categories: []string{"schema.invalid"}}, nil
+			return Flag("schema.invalid"), nil
 		}
 	}
-	return Verdict{Action: "pass"}, nil
+	return Verdict{}, nil
 }
 
 type toolsDetector struct {
@@ -519,7 +488,7 @@ func (d *toolsDetector) detect(ctx context.Context, e Evaluation) (Verdict, erro
 	}
 	untrusted := false
 	for _, s := range segments {
-		if s.Kind == "tool_result" && (s.Untrusted || globsMatch(d.config.Untrusted, s.ToolName)) {
+		if s.Kind == ToolResult && (s.Untrusted || globsMatch(d.config.Untrusted, s.ToolName)) {
 			untrusted = true
 		}
 	}
@@ -527,7 +496,7 @@ func (d *toolsDetector) detect(ctx context.Context, e Evaluation) (Verdict, erro
 		if err := ctx.Err(); err != nil {
 			return Verdict{}, err
 		}
-		if s.Kind != "tool_call" && s.Kind != "tool_definition" {
+		if s.Kind != ToolCall && s.Kind != ToolDefinition {
 			continue
 		}
 		category := ""
@@ -540,16 +509,16 @@ func (d *toolsDetector) detect(ctx context.Context, e Evaluation) (Verdict, erro
 			category = "tool.untrusted_to_privileged"
 		}
 		if category != "" {
-			return Verdict{Action: Block, Categories: []string{category}}, nil
+			return Flag(category), nil
 		}
-		if schema := d.schemas[s.ToolName]; schema != nil && s.Kind == "tool_call" {
+		if schema := d.schemas[s.ToolName]; schema != nil && s.Kind == ToolCall {
 			v, err := jsonschema.UnmarshalJSON(strings.NewReader(s.Text))
 			if err != nil || schema.Validate(v) != nil {
-				return Verdict{Action: Block, Categories: []string{"tool.schema_invalid"}}, nil
+				return Flag("tool.schema_invalid"), nil
 			}
 		}
 	}
-	return Verdict{Action: "pass"}, nil
+	return Verdict{}, nil
 }
 
 // Word characters include letters and numbers in every script.

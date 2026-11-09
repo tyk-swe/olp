@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strconv"
 
+	guardrailattachment "github.com/tyk-swe/olp/internal/guardrails/attachment"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agents/publications"
 	"github.com/tyk-swe/olp/internal/guardrails"
@@ -48,7 +50,7 @@ func readStored(ctx context.Context, q access.Queryer, projectName namer) (Secti
 		return Section{}, err
 	}
 	definitions, err := promotion.TryMap(slices.Concat(stored, platform.Guardrails), func(g Guardrail) (Guardrail, error) {
-		configuration, err := rewriteCredentials(g.Type, g.Configuration, credentialName(ctx, q))
+		configuration, err := guardrails.RenameCredentials(g.Configuration, credentialName(ctx, q))
 		return Guardrail{Project: g.Project, Name: g.Name, Type: g.Type, Configuration: configuration, TimeoutMS: g.TimeoutMS, OnError: g.OnError}, err
 	})
 	return Section{Guardrails: definitions, Policies: platform.Policies, Attachments: platform.Attachments}, err
@@ -122,13 +124,14 @@ func policyName(registry *guardrails.Registry, r guardrails.NamedPolicyRevision)
 		return named{r.ID, r.Name}, nil
 	}
 	type portableRule struct {
-		Type          guardrails.Kind
-		Config        json.RawMessage
-		Timeout       int64
-		OnError       guardrails.OnError
-		Phase, Action string
-		Monitor       bool
-		Mandatory     bool
+		Type      guardrails.Kind
+		Config    json.RawMessage
+		Timeout   int64
+		OnError   guardrails.OnError
+		Phase     guardrails.Phase
+		Action    guardrails.Action
+		Monitor   bool
+		Mandatory bool
 	}
 	content, err := json.Marshal(promotion.Map(registry.Policies[r.ID].Entries, func(e guardrails.Entry) portableRule {
 		d := registry.Definitions[e.RevisionID]
@@ -148,7 +151,7 @@ func pinnedName(d guardrails.Revision) string {
 
 func projectNamer(directory promotion.Directory) namer {
 	return func(id string) (string, error) {
-		if id == "installation" {
+		if id == guardrails.InstallationProject {
 			return "", nil
 		}
 		name, ok := directory.Name(id)
@@ -209,11 +212,11 @@ func scopeName(ctx context.Context, q access.Queryer, projectName namer, a guard
 }
 
 func readDrafts(ctx context.Context, q access.Queryer, policies map[string]string, reference func(string) (PolicyRef, error)) (map[slot]Attachment, error) {
-	drafts, err := guardrails.ReadDraftAttachments(ctx, q)
+	drafts, err := guardrailattachment.Drafts(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	staged, err := promotion.TryMap(drafts, func(d guardrails.DraftAttachment) (Attachment, error) {
+	staged, err := promotion.TryMap(drafts, func(d guardrailattachment.Draft) (Attachment, error) {
 		if _, ok := policies[d.PolicyRevisionID]; !ok {
 			return Attachment{}, access.Invalid("guardrails", "A staged policy is unavailable.")
 		}
@@ -237,7 +240,7 @@ func readLegacyRoutes(ctx context.Context, q access.Queryer, projectName namer) 
 		return nil, err
 	}
 	return promotion.TryMap(legacy, func(r routes.LegacyContentPolicy) (Section, error) {
-		owner, err := projectName(installationOr(r.ProjectID))
+		owner, err := projectName(guardrails.ProjectOf(r.ProjectID))
 		if err != nil {
 			return Section{}, err
 		}

@@ -34,7 +34,7 @@ type workflowRecoveryResult struct {
 func (s *Server) recoverWorkflowContent(ctx context.Context, x *call, authority keyauthority.Authority, callID string, arguments json.RawMessage) (json.RawMessage, error) {
 	surface, err := guardrails.NativeSurface(x.generation.parsed.OIF().Document(), false)
 	if err != nil || callID == "" || slices.Contains(x.workflowRecoveryCalls, callID) || slices.ContainsFunc(surface.Segments, func(segment guardrails.Segment) bool {
-		return segment.Kind == "tool_result" && segment.ToolCallID == callID
+		return segment.Kind == guardrails.ToolResult && segment.ToolCallID == callID
 	}) {
 		return nil, &mcp.WorkflowError{Status: 400, Code: "invalid_tool_call", Message: "The recovery call identifier is invalid."}
 	}

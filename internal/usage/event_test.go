@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/cache"
+	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
@@ -216,6 +217,12 @@ func TestValidateRejectsMalformedEnvelopesAndAttempts(t *testing.T) {
 		}},
 		{"malformed model family", func(e *Event) { e.Attempts[1].ModelFamily = "OpenAI o200k" }},
 		{"oversized model family", func(e *Event) { e.Attempts[1].ModelFamily = "f" + strings.Repeat("a", 64) }},
+		{"malformed request guardrail evidence", func(e *Event) {
+			e.GuardrailDecisions = []guardrails.Evidence{{GuardrailID: "g", Revision: "r", Phase: guardrails.Input, Action: guardrails.Block, Outcome: "maybe"}}
+		}},
+		{"malformed attempt guardrail evidence", func(e *Event) {
+			e.Attempts[1].GuardrailDecisions = []guardrails.Evidence{{GuardrailID: "g", Revision: "r", Phase: guardrails.Input, Action: guardrails.Block, Outcome: "maybe"}}
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -307,11 +308,7 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *Error {
 	} else if c.policy.Scope == "route" {
 		scope = x.route.ID
 	}
-	guardrailProject := project
-	if guardrailProject == "" {
-		guardrailProject = "installation"
-	}
-	entries, guardrailErr := x.snapshot().GuardrailEntries(guardrailProject, x.route.ID, x.keyID)
+	entries, guardrailErr := x.snapshot().GuardrailEntries(guardrails.Boundary{ProjectID: cmp.Or(project, guardrails.InstallationProject), RouteID: x.route.ID, KeyID: x.keyID})
 	if guardrailErr != nil {
 		c.result = "bypass"
 		return nil

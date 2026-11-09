@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -74,7 +75,7 @@ func TestRuleSizeLimitsAgreeWithContentPolicy(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			detectorErr := ValidateDefinition(Revision{Type: "builtin.regex", Configuration: config, TimeoutMS: 1, OnError: FailClosed})
+			_, detectorErr := ParseRevision(Revision{Type: "builtin.regex", Configuration: config, TimeoutMS: 1, OnError: FailClosed})
 			if (policyErr == nil) != tc.valid || (detectorErr == nil) != tc.valid {
 				t.Fatalf("valid=%t, policy error=%v, detector error=%v", tc.valid, policyErr, detectorErr)
 			}
@@ -89,15 +90,15 @@ func TestToolJSONGuardrailsInspectDecodedValuesAndPreserveOtherContent(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, phase := range []string{Input, Output} {
-		t.Run(phase, func(t *testing.T) {
+	for _, phase := range []Phase{Input, Output} {
+		t.Run(string(phase), func(t *testing.T) {
 			document, err := oif.ParseJSON([]byte(original), oif.Limits{})
 			if err != nil {
 				t.Fatal(err)
 			}
 			surface := ToolJSONSurface(document, "read", phase == Output)
-			blocked, blockErr := testEngine(t, "builtin.keywords", string(configuration), phase, Block, false, nil).Evaluate(t.Context(), Evaluation{Phase: phase, Segments: surface.Segments()}, nil)
-			if !errors.Is(blockErr, ErrBlocked) || !blocked.Blocked {
+			_, blockErr := testEngine(t, "builtin.keywords", string(configuration), phase, Block, false, nil).Evaluate(t.Context(), Evaluation{Phase: phase, Segments: surface.Segments()}, nil)
+			if !errors.Is(blockErr, ErrBlocked) {
 				t.Fatalf("escaped blocked text was allowed: %v", blockErr)
 			}
 			redacted, redactErr := testEngine(t, "builtin.keywords", string(configuration), phase, Redact, false, nil).Evaluate(t.Context(), Evaluation{Phase: phase, Segments: surface.Segments()}, nil)
@@ -139,7 +140,7 @@ func TestTypeSafeWorkflowPolicies(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			definition := Revision{Type: "typesafe", Configuration: json.RawMessage(tc.configuration), TimeoutMS: 1000, OnError: FailClosed}
-			if err := ValidateDefinition(definition); (err == nil) != tc.valid {
+			if _, err := ParseRevision(definition); (err == nil) != tc.valid {
 				t.Fatalf("valid=%t, error=%v", tc.valid, err)
 			}
 		})
@@ -157,7 +158,7 @@ func TestTypeSafeWorkflowPolicies(t *testing.T) {
 		{GuardrailID: "output", RevisionID: "output", Phase: Output, Action: Block},
 		{GuardrailID: "keyword", RevisionID: "keyword", Phase: Input, Action: Block},
 	}
-	engine, err := Compile(entries, definitions, nil)
+	engine, err := Compile(entries, definitions)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +177,7 @@ func TestTypeSafeWorkflowPolicies(t *testing.T) {
 		t.Fatal("TypeSafe was not isolated from recursive model evaluations")
 	}
 	result, err := only.Evaluate(t.Context(), Evaluation{Phase: Input, Segments: []Segment{{ID: "user", Text: "request"}}, InternalModel: true}, nil)
-	if err != nil || result.Blocked || len(result.Decisions) != 1 || result.Decisions[0].Outcome != "skipped" {
+	if err != nil || len(result.Decisions) != 1 || result.Decisions[0].Outcome != "skipped" {
 		t.Fatalf("internal model unexpectedly evaluated TypeSafe: %+v, %v", result, err)
 	}
 }
@@ -192,7 +193,7 @@ func TestCompressionWorkflowRecoveryRespectsRedactionAndExemptions(t *testing.T)
 		{GuardrailID: "first", RevisionID: "first", Phase: Input, Action: Redact},
 		{GuardrailID: "second", RevisionID: "second", Phase: Input, Action: Redact},
 	}
-	evaluator := EvaluatorFunc(func(_ context.Context, definition Revision, evaluation Evaluation) (Verdict, error) {
+	evaluator := EvaluatorFunc(func(_ context.Context, definition Revision, _ Spec, evaluation Evaluation) (Verdict, error) {
 		for _, segment := range evaluation.Segments {
 			if segment.ID == "recovered" || strings.Contains(segment.Text, "private") {
 				t.Errorf("compression received protected content: %+v", segment)
@@ -200,12 +201,12 @@ func TestCompressionWorkflowRecoveryRespectsRedactionAndExemptions(t *testing.T)
 		}
 		index := slices.IndexFunc(evaluation.Segments, func(segment Segment) bool { return segment.ID == definition.ID })
 		if index < 0 {
-			return Verdict{Action: "pass"}, nil
+			return Verdict{}, nil
 		}
 		segment := evaluation.Segments[index]
-		return Verdict{Action: Redact, Redactions: []Redaction{{Segment: segment.ID, Start: 0, End: len(segment.Text), Replacement: definition.ID + " summary"}}}, nil
+		return Redacting([]Redaction{{Segment: segment.ID, Start: 0, End: len(segment.Text), Replacement: definition.ID + " summary"}}), nil
 	})
-	engine, err := Compile(entries, definitions, evaluator)
+	engine, err := compileBound(entries, definitions, evaluator)
 	if err != nil || !engine.HasCompression() {
 		t.Fatalf("compression policy was not available: %v", err)
 	}
@@ -225,7 +226,7 @@ func TestCompressionWorkflowRecoveryRespectsRedactionAndExemptions(t *testing.T)
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result, err := engine.Evaluate(t.Context(), Evaluation{Phase: Input, Segments: segments, CompressionExemptIDs: []string{"recovered"}, WorkflowRecovery: tc.recovery}, nil)
-			if err != nil || result.Blocked || !result.Changed || len(result.Segments) != 3 {
+			if err != nil || !result.Changed || len(result.Segments) != 3 {
 				t.Fatalf("evaluation failed: %+v, %v", result, err)
 			}
 			if result.Segments[0].Text != tc.first || result.Segments[1].Text != "recovered [REDACTED] details" || result.Segments[2].Text != tc.second {
@@ -237,7 +238,7 @@ func TestCompressionWorkflowRecoveryRespectsRedactionAndExemptions(t *testing.T)
 			if tc.recovery && (result.Recovery[0].Text != "first [REDACTED] details" || result.Recovery[1].Text != "second [REDACTED] details") {
 				t.Fatalf("recovery did not retain redacted originals: %+v", result.Recovery)
 			}
-			encoded, err := json.Marshal(result)
+			encoded, err := json.Marshal(Applied(result, nil))
 			if err != nil || strings.Contains(string(encoded), "first [REDACTED] details") || strings.Contains(string(encoded), "second [REDACTED] details") || strings.Contains(string(encoded), "recover-call") {
 				t.Fatalf("private recovery data was serialized: %s, %v", encoded, err)
 			}
@@ -250,9 +251,9 @@ func TestCompressionWorkflowRecoveryRespectsRedactionAndExemptions(t *testing.T)
 
 func TestCompressionSkipsExemptContent(t *testing.T) {
 	config := `{"endpoint":"https://guardrail.example/scan","credential_ref":"credential","content_egress":true}`
-	evaluator := EvaluatorFunc(func(context.Context, Revision, Evaluation) (Verdict, error) {
+	evaluator := EvaluatorFunc(func(context.Context, Revision, Spec, Evaluation) (Verdict, error) {
 		t.Error("exempt content was sent for compression")
-		return Verdict{Action: "pass"}, nil
+		return Verdict{}, nil
 	})
 	engine := testEngine(t, "headroom", config, Input, Redact, false, evaluator)
 	result, err := engine.Evaluate(t.Context(), Evaluation{
@@ -324,16 +325,24 @@ func TestNativeToolArgumentReplacementPreservesSignedContent(t *testing.T) {
 	}
 }
 
-func testEngine(t testing.TB, kind Kind, config string, phase, action string, monitor bool, external Evaluator) *Engine {
+func testEngine(t testing.TB, kind Kind, config string, phase Phase, action Action, monitor bool, external Evaluator) *Engine {
 	t.Helper()
 	d := Revision{ID: "revision", GuardrailID: "guard", ProjectID: "project", Type: kind, Configuration: json.RawMessage(config), TimeoutMS: 1000, OnError: FailClosed}
-	e, err := Compile([]Entry{{GuardrailID: d.GuardrailID, RevisionID: d.ID, Phase: phase, Action: action, Monitor: monitor}}, map[string]Revision{d.ID: d}, external)
+	e, err := compileBound([]Entry{{GuardrailID: d.GuardrailID, RevisionID: d.ID, Phase: phase, Action: action, Monitor: monitor}}, map[string]Revision{d.ID: d}, external)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return e
 }
-func evaluateText(t testing.TB, e *Engine, text, phase string, m *Masking) (Result, error) {
+
+func compileBound(entries []Entry, definitions map[string]Revision, external Evaluator) (*Engine, error) {
+	engine, err := Compile(entries, definitions)
+	if err != nil {
+		return nil, err
+	}
+	return engine.Bind(external), nil
+}
+func evaluateText(t testing.TB, e *Engine, text string, phase Phase, m *Masking) (Result, error) {
 	t.Helper()
 	return e.Evaluate(context.Background(), Evaluation{Phase: phase, Segments: []Segment{{ID: "text", Text: text}}}, m)
 }
@@ -363,12 +372,12 @@ func TestDetectorCorpus(t *testing.T) {
 			config, _ := json.Marshal(EntityConfig{Categories: []string{tc.category}})
 			e := testEngine(t, Kind(tc.kind), string(config), Input, Block, false, nil)
 			positive, err := evaluateText(t, e, tc.positive, Input, nil)
-			if !errors.Is(err, ErrBlocked) || !positive.Blocked {
+			if !errors.Is(err, ErrBlocked) {
 				t.Fatalf("missed positive: %s %+v", tc.category, positive)
 			}
 			negative, err := evaluateText(t, e, tc.negative, Input, nil)
-			if err != nil || negative.Blocked {
-				t.Fatalf("false positive: %s", tc.category)
+			if err != nil {
+				t.Fatalf("false positive: %s %+v", tc.category, negative)
 			}
 		})
 	}
@@ -376,7 +385,7 @@ func TestDetectorCorpus(t *testing.T) {
 
 func TestSchemaDoesNotFetchRemoteReferences(t *testing.T) {
 	d := Revision{Type: "builtin.schema", Configuration: json.RawMessage(`{"schema":{"$ref":"https://127.0.0.1/private"}}`), TimeoutMS: 100, OnError: FailClosed}
-	if ValidateDefinition(d) == nil {
+	if _, err := ParseRevision(d); err == nil {
 		t.Fatal("accepted remote schema")
 	}
 	e := testEngine(t, "builtin.schema", `{"schema":{"type":"object","required":["ok"],"properties":{"ok":{"const":true}},"additionalProperties":false}}`, Output, Block, false, nil)
@@ -448,5 +457,34 @@ func BenchmarkGuardrailStreaming(b *testing.B) {
 		if _, err = stream.Finish(b.Context()); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+func TestMergeEvidenceFoldsRepeatsWithinLimits(t *testing.T) {
+	first := []Evidence{{GuardrailID: "g", Revision: "1", Phase: Output, Action: Block, Outcome: Blocked, Categories: []string{"b"}, LatencyMS: 2}}
+	merged := MergeEvidence(first, []Evidence{{GuardrailID: "g", Revision: "1", Phase: Output, Action: Block, Outcome: Blocked, Categories: []string{"a", "b"}, LatencyMS: 3}})
+	if len(merged) != 1 || merged[0].LatencyMS != 5 || !slices.Equal(merged[0].Categories, []string{"a", "b"}) || first[0].LatencyMS != 2 {
+		t.Fatalf("repeated evaluations were not folded into one record: %+v (input %+v)", merged, first)
+	}
+	categories := func(prefix string) []string {
+		values := make([]string, MaxCategories)
+		for i := range values {
+			values[i] = prefix + strconv.Itoa(i)
+		}
+		return values
+	}
+	repeated := MergeEvidence(first, []Evidence{{GuardrailID: "g", Revision: "1", Phase: Output, Action: Block, Outcome: Blocked, Categories: categories("c")}})
+	if err := ValidateEvidence(repeated); err != nil {
+		t.Fatalf("folding repeats produced evidence usage would drop: %v", err)
+	}
+	wide := []string{strings.Repeat("c", 1024)}
+	values := make([]Evidence, MaxEntries*4)
+	for i := range values {
+		values[i] = Evidence{GuardrailID: strconv.Itoa(i), Revision: "1", Phase: Input, Action: Block, Outcome: Blocked, Categories: wide}
+	}
+	bounded := MergeEvidence(nil, values)
+	raw, err := json.Marshal(bounded)
+	if err != nil || len(bounded) == 0 || len(bounded) == len(values) || len(raw) > MaxEvidenceBytes {
+		t.Fatalf("evidence escaped the byte limit: %d records, %d bytes", len(bounded), len(raw))
 	}
 }

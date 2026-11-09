@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/tyk-swe/olp/internal/routing"
-
 	"github.com/jackc/pgx/v5"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
-	"github.com/tyk-swe/olp/internal/guardrails"
+	guardrailattachment "github.com/tyk-swe/olp/internal/guardrails/attachment"
 	"github.com/tyk-swe/olp/internal/release"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 // normalizedFidelity stores every draft with an explicit mode. Omission, null
@@ -66,33 +66,11 @@ func compileDraftExecution(ctx context.Context, tx pgx.Tx, d *draft) error {
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
-	rows, err := tx.Query(ctx, "SELECT policy_revision_id::text,position FROM olp.guardrail_draft_attachments WHERE draft_id=$1 ORDER BY position", d.ID)
+	staged, err := guardrailattachment.Staged(ctx, tx, d.ID, route.ID)
 	if err != nil {
 		return err
 	}
-	for rows.Next() {
-		var revisionID string
-		var position int
-		if err = rows.Scan(&revisionID, &position); err != nil {
-			rows.Close()
-			return err
-		}
-		if snapshot.Guardrails == nil {
-			rows.Close()
-			return errors.New("draft guardrail policy is unavailable")
-		}
-		// Replace only the staged revision of the same additive slot for this
-		// read-only validation; promotion checks policy identity before writing.
-		attachments := snapshot.Guardrails.Attachments[:0]
-		for _, a := range snapshot.Guardrails.Attachments {
-			if a.Scope != "route" || a.ScopeID != route.ID || a.Order != position {
-				attachments = append(attachments, a)
-			}
-		}
-		snapshot.Guardrails.Attachments = append(attachments, guardrails.Attachment{ID: revisionID, Scope: "route", ScopeID: route.ID, PolicyRevisionID: revisionID, Order: position})
-	}
-	rows.Close()
-	if err = rows.Err(); err != nil {
+	if snapshot.Guardrails, err = snapshot.Guardrails.WithStaged(staged); err != nil {
 		return err
 	}
 	if len(d.ContentPolicy) > 0 {

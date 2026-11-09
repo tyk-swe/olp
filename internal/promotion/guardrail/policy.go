@@ -7,9 +7,12 @@ import (
 	"slices"
 	"strings"
 
+	guardrailpolicy "github.com/tyk-swe/olp/internal/guardrails/policy"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/guardrails/definition"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -23,8 +26,8 @@ type Policy struct {
 
 type Entry struct {
 	Guardrail string
-	Phase     string
-	Action    string
+	Phase     guardrails.Phase
+	Action    guardrails.Action
 	Monitor   bool
 	Mandatory bool
 }
@@ -55,7 +58,7 @@ func parsePolicies(declared []contract.ConfigurationGuardrailPolicyEntry, defini
 
 func parsePolicy(p contract.ConfigurationGuardrailPolicyEntry) Policy {
 	return Policy{Project: p.Project, Name: p.Name, Entries: promotion.Map(p.Entries, func(e rule) Entry {
-		return Entry{Guardrail: e.Guardrail, Phase: string(e.Phase), Action: string(e.Action), Monitor: promotion.ValueOf(e.Monitor), Mandatory: promotion.ValueOf(e.Mandatory)}
+		return Entry{Guardrail: e.Guardrail, Phase: guardrails.Phase(e.Phase), Action: guardrails.Action(e.Action), Monitor: promotion.ValueOf(e.Monitor), Mandatory: promotion.ValueOf(e.Mandatory)}
 	})}
 }
 
@@ -84,7 +87,7 @@ func compilePolicy(p Policy, duplicate bool, definitions map[portable]Guardrail)
 	entries := promotion.Map(resolved, func(r resolvedEntry) guardrails.Entry {
 		return guardrails.Entry{GuardrailID: r.definition.Name, RevisionID: r.definition.Name, Phase: r.Phase, Action: r.Action, Monitor: r.Monitor, Mandatory: r.Mandatory}
 	})
-	engine, err := guardrails.Compile(entries, revisions, nil)
+	engine, err := guardrails.Compile(entries, revisions)
 	if err != nil {
 		return nil, access.Invalid("guardrail_policies", "Invalid guardrail entries.")
 	}
@@ -206,27 +209,34 @@ func applyPolicy(ctx context.Context, tx pgx.Tx, p access.Principal, directory p
 	if err != nil {
 		return err
 	}
-	current, err := guardrails.FindLatestPolicy(ctx, tx, project, policy.Name)
+	current, err := guardrailpolicy.FindLatest(ctx, tx, project, policy.Name)
 	if err != nil {
 		return err
 	}
-	if current != nil && slices.Equal(current.Revision.Entries, entries) {
-		if current.ActiveRevisionID != nil && *current.ActiveRevisionID == current.Revision.ID {
+	if current != nil && slices.Equal(current.Entries, entries) {
+		if current.ActiveRevisionID != nil && *current.ActiveRevisionID == current.RevisionID {
 			return nil
 		}
-		return guardrails.ActivatePolicy(ctx, tx, p.UserID(), current.Revision.PolicyID, current.Revision.ID)
+		return guardrailpolicy.Activate(ctx, tx, p.UserID(), current.ID, current.RevisionID)
 	}
-	saved, err := guardrails.SavePolicy(ctx, tx, p.UserID(), latest(current), guardrails.PolicyRevision{ProjectID: installationOr(project), Name: retainedName(current, policy.Name), Entries: entries})
+	draft, err := guardrailpolicy.NewDraft(ctx, tx, guardrails.ProjectOf(project), retainedName(current, policy.Name), entries)
 	if err != nil {
 		return err
 	}
-	return guardrails.ActivatePolicy(ctx, tx, p.UserID(), saved.PolicyID, saved.ID)
+	saved, err := guardrailpolicy.Save(ctx, tx, p.UserID(), current, draft)
+	if err != nil {
+		return err
+	}
+	return guardrailpolicy.Activate(ctx, tx, p.UserID(), saved.ID, saved.RevisionID)
 }
 
 func pin(ctx context.Context, q access.Queryer, project *string, e Entry) (guardrails.Entry, error) {
-	current, err := guardrails.FindActive(ctx, q, installationOr(project), e.Guardrail)
+	current, err := definition.FindActive(ctx, q, guardrails.ProjectOf(project), e.Guardrail)
 	if err != nil {
 		return guardrails.Entry{}, err
+	}
+	if current == nil {
+		return guardrails.Entry{}, fmt.Errorf("guardrail %q is not defined: %w", e.Guardrail, pgx.ErrNoRows)
 	}
 	if current.ActiveRevisionID == nil {
 		return guardrails.Entry{}, fmt.Errorf("guardrail %q has no active revision", e.Guardrail)
@@ -234,16 +244,9 @@ func pin(ctx context.Context, q access.Queryer, project *string, e Entry) (guard
 	return guardrails.Entry{GuardrailID: current.ID, RevisionID: *current.ActiveRevisionID, Phase: e.Phase, Action: e.Action, Monitor: e.Monitor, Mandatory: e.Mandatory}, nil
 }
 
-func latest(current *guardrails.LatestPolicy) *guardrails.PolicyRevision {
-	if current == nil {
-		return nil
-	}
-	return &current.Revision
-}
-
-func retainedName(current *guardrails.LatestPolicy, name string) string {
+func retainedName(current *guardrailpolicy.Policy, name string) string {
 	if current == nil {
 		return name
 	}
-	return current.Revision.Name
+	return current.Name
 }

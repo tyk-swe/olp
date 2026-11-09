@@ -102,24 +102,24 @@ type Runtime interface {
 }
 
 type Dependencies struct {
-	Egress             *egress.Policy
-	Log                *slog.Logger
-	Cache              *cache.Store
-	GuardrailEvaluator guardrails.Evaluator
-	CodeLedger         CodeLedger
-	CodeAuthorizer     CodeAuthorizer
-	CodeResearch       ResearchLedger
-	ResearchAuth       ResearchAuthorizer
-	Runtime            Runtime
-	Sink               Sink
-	Admission          *Admission
-	Debits             SessionDebitLedger
-	WorkflowRuns       WorkflowRunStore
-	WorkflowTools      WorkflowToolRunner
-	Traces             *TraceDeps
-	Media              *MediaDeps
-	Capture            *capture.Manager
-	Business           *telemetry.BusinessMetrics
+	Egress         *egress.Policy
+	Log            *slog.Logger
+	Cache          *cache.Store
+	Guardrails     func(guardrails.Caller) guardrails.Evaluator
+	CodeLedger     CodeLedger
+	CodeAuthorizer CodeAuthorizer
+	CodeResearch   ResearchLedger
+	ResearchAuth   ResearchAuthorizer
+	Runtime        Runtime
+	Sink           Sink
+	Admission      *Admission
+	Debits         SessionDebitLedger
+	WorkflowRuns   WorkflowRunStore
+	WorkflowTools  WorkflowToolRunner
+	Traces         *TraceDeps
+	Media          *MediaDeps
+	Capture        *capture.Manager
+	Business       *telemetry.BusinessMetrics
 
 	Resources *resources.Store
 	Batches   *batches.Store
@@ -183,9 +183,6 @@ func New(deps Dependencies, cfg Config) *Server {
 		unhealthy:   fleet.unhealthy,
 		shadows:     newShadowing(config.MaxShadowInFlight),
 		now:         time.Now, deps: normalizedDependencies(deps),
-	}
-	if server.deps.GuardrailEvaluator == nil {
-		server.deps.GuardrailEvaluator = server.newGuardrailEvaluator()
 	}
 	return server
 }
@@ -500,7 +497,7 @@ func routingPreferences(r *http.Request) (*routing.Preferences, *Error) {
 	return p, nil
 }
 func requestError(err error) *Error {
-	var guard *guardrails.Error
+	var guard guardrails.Failure
 	if errors.As(err, &guard) {
 		return guardrailError(guard)
 	}
@@ -1323,7 +1320,7 @@ func inferencePool(cfg Config) *admission.Pool {
 
 func normalizedDependencies(deps Dependencies) Dependencies {
 	return Dependencies{
-		Egress: deps.Egress, Log: deps.Log, Cache: deps.Cache, GuardrailEvaluator: deps.GuardrailEvaluator,
+		Egress: deps.Egress, Log: deps.Log, Cache: deps.Cache, Guardrails: guardrailRunner(deps),
 		CodeLedger: deps.CodeLedger, CodeAuthorizer: deps.CodeAuthorizer, CodeResearch: deps.CodeResearch, ResearchAuth: deps.ResearchAuth,
 		Runtime: deps.Runtime, Sink: configuredSink(deps.Sink, deps.Log), Admission: deps.Admission, Debits: deps.Debits, WorkflowRuns: deps.WorkflowRuns, WorkflowTools: deps.WorkflowTools,
 		Traces: deps.Traces, Media: deps.Media, Capture: deps.Capture, Business: deps.Business, Resources: deps.Resources, Batches: deps.Batches, Resolver: deps.Resolver,

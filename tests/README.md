@@ -63,8 +63,9 @@ deployment runs. Each test gets its own database and process.
 The suite covers what the net cannot reach without a database: migrations
 applying concurrently and refusing changed history, the process running under
 the restricted runtime role, every secured management read answering without a
-server error, cross-project isolation of those reads, and one request travelling
-from route publication to durable usage.
+server error, cross-project isolation of those reads, one guardrail definition, policy,
+attachment and credential lifecycle with its audit trail, and one request
+travelling from route publication to durable usage.
 
 `scripts/test-service.sh` fails when the tests take longer than its budget. The
 budget and admission rules match the net: a test enters only when the suite

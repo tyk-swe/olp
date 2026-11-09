@@ -64,14 +64,20 @@ func NewStream(engine *Engine, request Evaluation, window int) (*Stream, error) 
 // Push returns only frames proven safe to release. A frame carrying a tool
 // call must be assembled and schema-checked by the native adapter beforehand.
 func (s *Stream) Push(ctx context.Context, frame []byte, text string) ([][]byte, error) {
-	return s.PushSegments(ctx, frame, []Segment{{ID: "stream", Role: "assistant", Text: text}})
+	return s.PushSegments(ctx, frame, []Delta{{ID: "stream", Text: text}})
+}
+
+// Delta is new assistant text for one streamed field.
+type Delta struct {
+	ID   string
+	Text string
 }
 
 // PushSegments keeps independent candidates and text fields in separate
 // inspection buffers while retaining their shared native frame ordering.
 // Completed prefixes identify candidates whose final boundary is now known.
-func (s *Stream) PushSegments(ctx context.Context, frame []byte, segments []Segment, completed ...string) ([][]byte, error) {
-	if err := validateSegments(segments); err != nil {
+func (s *Stream) PushSegments(ctx context.Context, frame []byte, segments []Delta, completed ...string) ([][]byte, error) {
+	if err := ValidateSegments(assistantText(segments)); err != nil {
 		return nil, err
 	}
 	if (s.engine == nil || !s.engine.HasPhase(OutputStream)) && s.masks == nil {
@@ -138,19 +144,25 @@ func (s *Stream) PushSegments(ctx context.Context, frame []byte, segments []Segm
 	}
 	return out, nil
 }
+func assistantText(deltas []Delta) []Segment {
+	segments := make([]Segment, len(deltas))
+	for i, d := range deltas {
+		segments[i] = Segment{ID: d.ID, Role: Assistant, Text: d.Text}
+	}
+	return segments
+}
+
 func (s *Stream) inspect(ctx context.Context) error {
-	s.request.Segments = make([]Segment, 0, len(s.ids))
-	for _, id := range s.ids {
-		text := s.texts[id]
-		if s.masks != nil {
-			text = s.masks.Restore(text)
+	request := s.request
+	request.Segments = assistantText(slices.Collect(func(yield func(Delta) bool) {
+		for _, id := range s.ids {
+			if !yield(Delta{ID: id, Text: s.masks.Restore(s.texts[id])}) {
+				return
+			}
 		}
-		s.request.Segments = append(s.request.Segments, Segment{ID: id, Role: "assistant", Text: text})
-	}
-	result, err := s.engine.Evaluate(ctx, s.request, nil)
-	for _, d := range result.Decisions {
-		s.record(d)
-	}
+	}))
+	result, err := s.engine.Evaluate(ctx, request, nil)
+	s.decisions = MergeEvidence(s.decisions, result.Decisions)
 	changed := map[string]string{}
 	for _, segment := range result.Segments {
 		if segment.Text != s.texts[segment.ID] {
@@ -193,20 +205,6 @@ func (s *Stream) inspect(ctx context.Context) error {
 		}
 	}
 	return err
-}
-func (s *Stream) record(d Evidence) {
-	for i, v := range s.decisions {
-		if v.GuardrailID == d.GuardrailID && v.Revision == d.Revision && v.Phase == d.Phase && v.Action == d.Action && v.Outcome == d.Outcome {
-			s.decisions[i].LatencyMS += d.LatencyMS
-			for _, c := range d.Categories {
-				s.decisions[i].Categories = appendCategory(s.decisions[i].Categories, c)
-			}
-			return
-		}
-	}
-	if len(s.decisions) < MaxEntries*4 {
-		s.decisions = append(s.decisions, d)
-	}
 }
 func (s *Stream) Finish(ctx context.Context) ([][]byte, error) {
 	s.request.Partial = false

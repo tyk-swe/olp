@@ -7,39 +7,85 @@ import (
 	"io"
 	"regexp"
 	"slices"
-	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/tyk-swe/olp/internal/management/contract"
+)
+
+type (
+	Phase   = contract.GuardrailPolicyEntryPhase
+	Action  = contract.GuardrailPolicyEntryAction
+	Outcome = contract.GuardrailEvidenceOutcome
+	Scope   = contract.GuardrailAttachmentScope
+	OnError = contract.CreateGuardrailRequestOnError
 )
 
 const (
-	Input              = "input"
-	InputParallel      = "input_parallel"
-	Output             = "output"
-	OutputStream       = "output_stream"
-	Block              = "block"
-	Redact             = "redact"
-	Mask               = "mask"
-	Annotate           = "annotate"
+	Input         = contract.GuardrailPolicyEntryPhaseInput
+	InputParallel = contract.GuardrailPolicyEntryPhaseInputParallel
+	Output        = contract.GuardrailPolicyEntryPhaseOutput
+	OutputStream  = contract.GuardrailPolicyEntryPhaseOutputStream
+
+	Block    = contract.GuardrailPolicyEntryActionBlock
+	Redact   = contract.GuardrailPolicyEntryActionRedact
+	Mask     = contract.GuardrailPolicyEntryActionMask
+	Annotate = contract.GuardrailPolicyEntryActionAnnotate
+
+	FailClosed = contract.CreateGuardrailRequestOnErrorFailClosed
+	FailOpen   = contract.CreateGuardrailRequestOnErrorFailOpen
+
+	Passed       = contract.GuardrailEvidenceOutcomePassed
+	Blocked      = contract.GuardrailEvidenceOutcomeBlocked
+	Redacted     = contract.GuardrailEvidenceOutcomeRedacted
+	Masked       = contract.GuardrailEvidenceOutcomeMasked
+	Annotated    = contract.GuardrailEvidenceOutcomeAnnotated
+	Monitored    = contract.GuardrailEvidenceOutcomeMonitored
+	FailedOpen   = contract.GuardrailEvidenceOutcomeFailedOpen
+	FailedClosed = contract.GuardrailEvidenceOutcomeFailedClosed
+	Skipped      = contract.GuardrailEvidenceOutcomeSkipped
+
+	InstallationScope = contract.GuardrailAttachmentScopeInstallation
+	OrganizationScope = contract.GuardrailAttachmentScopeOrganization
+	ProjectScope      = contract.GuardrailAttachmentScopeProject
+	RouteScope        = contract.GuardrailAttachmentScopeRoute
+	ToolsetScope      = contract.GuardrailAttachmentScopeToolset
+	KeyScope          = contract.GuardrailAttachmentScopeApiKey
+)
+
+const (
 	MaxEntries         = 128
 	MaxSegments        = 2048
 	MaxContentBytes    = 8 << 20
 	MaxFindings        = 4096
 	MaxEvidenceBytes   = 256 << 10
+	MaxCategories      = 32
 	DefaultWindowBytes = 64 << 10
 	MaxWindowBytes     = 1 << 20
 )
 
-type Kind string
+func OutputPhase(p Phase) bool { return p == Output || p == OutputStream }
 
-func (k Kind) Builtin() bool { return strings.HasPrefix(string(k), "builtin.") }
-
-type OnError string
+type Role string
 
 const (
-	FailClosed OnError = "fail_closed"
-	FailOpen   OnError = "fail_open"
+	System    Role = "system"
+	User      Role = "user"
+	Assistant Role = "assistant"
+	Tool      Role = "tool"
+	Developer Role = "developer"
 )
+
+type SegmentKind string
+
+const (
+	Text           SegmentKind = ""
+	ToolCall       SegmentKind = "tool_call"
+	ToolResult     SegmentKind = "tool_result"
+	ToolDefinition SegmentKind = "tool_definition"
+)
+
+type Kind string
 
 var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$`)
 var categoryID = regexp.MustCompile(`^[a-z][a-z0-9_.]{0,63}$`)
@@ -61,8 +107,8 @@ type Revision struct {
 type Entry struct {
 	GuardrailID string `json:"guardrail_id"`
 	RevisionID  string `json:"revision_id"`
-	Phase       string `json:"phase"`
-	Action      string `json:"action"`
+	Phase       Phase  `json:"phase"`
+	Action      Action `json:"action"`
 	Monitor     bool   `json:"monitor,omitempty"`
 	Mandatory   bool   `json:"mandatory,omitempty"`
 }
@@ -78,22 +124,38 @@ type PolicyRevision struct {
 
 type Attachment struct {
 	ID               string `json:"id"`
-	Scope            string `json:"scope"`
+	Scope            Scope  `json:"scope"`
 	ScopeID          string `json:"scope_id"`
 	PolicyRevisionID string `json:"policy_revision_id"`
 	Order            int    `json:"order"`
 }
 
-type Boundary struct{ OrganizationID, ProjectID, RouteID, ToolsetID, KeyID string }
+const InstallationProject = "installation"
+
+type Boundary struct{ ProjectID, RouteID, ToolsetID, KeyID string }
+
+func ProjectPointer(project string) *string {
+	if project == InstallationProject || project == "" {
+		return nil
+	}
+	return &project
+}
+
+func ProjectOf(project *string) string {
+	if project == nil {
+		return InstallationProject
+	}
+	return *project
+}
 
 type Segment struct {
-	ID         string `json:"id"`
-	Role       string `json:"role,omitempty"`
-	Text       string `json:"text"`
-	Kind       string `json:"kind,omitempty"`
-	ToolName   string `json:"tool_name,omitempty"`
-	ToolCallID string `json:"-"`
-	Untrusted  bool   `json:"untrusted,omitempty"`
+	ID         string      `json:"id"`
+	Role       Role        `json:"role,omitempty"`
+	Text       string      `json:"text"`
+	Kind       SegmentKind `json:"kind,omitempty"`
+	ToolName   string      `json:"tool_name,omitempty"`
+	ToolCallID string      `json:"-"`
+	Untrusted  bool        `json:"untrusted,omitempty"`
 	toolJSON   *JSONSurface
 }
 
@@ -105,10 +167,22 @@ func (s Segment) withText(text string) Segment {
 	return Segment{ID: s.ID, Role: s.Role, Text: text, Kind: s.Kind, ToolName: s.ToolName, ToolCallID: s.ToolCallID, Untrusted: s.Untrusted, toolJSON: s.toolJSON}
 }
 
+// InputProvenance keeps request tool results visible to output governance
+// under IDs that cannot collide with output segments.
+func InputProvenance(input []Segment) []Segment {
+	return slices.Collect(func(yield func(Segment) bool) {
+		for _, s := range input {
+			if s.Kind == ToolResult && !yield(Segment{ID: "input_" + s.ID, Role: s.Role, Text: s.Text, Kind: s.Kind, ToolName: s.ToolName, ToolCallID: s.ToolCallID, Untrusted: s.Untrusted, toolJSON: s.toolJSON}) {
+				return
+			}
+		}
+	})
+}
+
 type Evaluation struct {
 	RequestID            string    `json:"request_id"`
 	Route                string    `json:"route,omitempty"`
-	Phase                string    `json:"phase"`
+	Phase                Phase     `json:"phase"`
 	Segments             []Segment `json:"segments"`
 	CompressionExemptIDs []string  `json:"-"`
 	WorkflowRecovery     bool      `json:"-"`
@@ -130,40 +204,109 @@ type Redaction struct {
 	Replacement string `json:"replacement"`
 }
 
+// Verdict is one guardrail's finding over the segments it evaluated. The zero
+// Verdict passes.
 type Verdict struct {
+	flagged    bool
+	categories []string
+	redactions []Redaction
+}
+
+func Flag(categories ...string) Verdict { return Verdict{flagged: true, categories: categories} }
+
+// Redacting flags the spans it replaces and passes when there are none.
+func Redacting(redactions []Redaction, categories ...string) Verdict {
+	if len(redactions) == 0 {
+		return Verdict{}
+	}
+	return Verdict{flagged: true, categories: categories, redactions: redactions}
+}
+
+func flagIf(flagged bool, category string) Verdict {
+	if flagged {
+		return Flag(category)
+	}
+	return Verdict{}
+}
+
+func (v Verdict) Flagged() bool           { return v.flagged }
+func (v Verdict) Categories() []string    { return v.categories }
+func (v Verdict) Redactions() []Redaction { return v.redactions }
+
+// WireVerdict is the verdict webhooks and plugins return. Every action other
+// than pass flags the content, and the entry's own action decides the outcome.
+type WireVerdict struct {
 	Action     string      `json:"action"`
 	Categories []string    `json:"categories,omitempty"`
 	Redactions []Redaction `json:"redactions,omitempty"`
+}
+
+func (w WireVerdict) Verdict() (Verdict, error) {
+	switch Action(w.Action) {
+	case "pass":
+		if len(w.Categories) > 0 || len(w.Redactions) > 0 {
+			return Verdict{}, errEvaluation
+		}
+		return Verdict{}, nil
+	case Block, Redact, Mask, Annotate:
+		return Verdict{flagged: true, categories: w.Categories, redactions: w.Redactions}, nil
+	}
+	return Verdict{}, errEvaluation
 }
 
 // Evidence deliberately has no content, offsets, patterns, or replacements.
 type Evidence struct {
 	GuardrailID string   `json:"guardrail_id"`
 	Revision    string   `json:"revision"`
-	Phase       string   `json:"phase"`
-	Action      string   `json:"action"`
-	Outcome     string   `json:"outcome"`
+	Phase       Phase    `json:"phase"`
+	Action      Action   `json:"action"`
+	Outcome     Outcome  `json:"outcome"`
 	Categories  []string `json:"categories,omitempty"`
 	LatencyMS   int64    `json:"latency_ms"`
 }
 
 type Result struct {
+	Segments  []Segment
+	Decisions []Evidence
+	Changed   bool
+	Recovery  []Segment
+}
+
+type Application struct {
+	PolicyRevisionID string    `json:"policy_revision_id"`
+	Phase            Phase     `json:"phase"`
+	Segments         []Segment `json:"segments"`
+}
+
+type Pinned struct {
+	Policy      PolicyRevision
+	Definitions map[string]Revision
+}
+
+func (p Pinned) Compile() (PolicyRevision, *Engine, error) {
+	engine, err := Compile(p.Policy.Entries, p.Definitions)
+	return p.Policy, engine, err
+}
+
+type AppliedResult struct {
 	Segments  []Segment  `json:"segments"`
 	Decisions []Evidence `json:"decisions"`
 	Blocked   bool       `json:"blocked"`
-	Changed   bool       `json:"-"`
-	Recovery  []Segment  `json:"-"`
 }
 
-type Error struct {
-	Code   string
-	Status int
+func Applied(result Result, err error) AppliedResult {
+	return AppliedResult{Segments: result.Segments, Decisions: result.Decisions, Blocked: errors.Is(err, ErrBlocked)}
 }
 
-func (e *Error) Error() string { return e.Code }
+type Failure string
 
-var ErrBlocked = &Error{Code: "guardrail_blocked", Status: 400}
-var ErrSurface = &Error{Code: "guardrail_surface_unavailable", Status: 422}
+func (f Failure) Error() string { return string(f) }
+
+const (
+	ErrBlocked Failure = "guardrail_blocked"
+	ErrSurface Failure = "guardrail_surface_unavailable"
+)
+
 var errEvaluation = errors.New("guardrail evaluation failed")
 
 func decodeConfig(raw json.RawMessage, into any) error {
@@ -181,20 +324,15 @@ func decodeConfig(raw json.RawMessage, into any) error {
 	return nil
 }
 
-func validPhase(p string) bool {
-	return slices.Contains([]string{Input, InputParallel, Output, OutputStream}, p)
-}
-func validAction(a string) bool { return slices.Contains([]string{Block, Redact, Mask, Annotate}, a) }
-
 func ValidateEvidence(values []Evidence) error {
 	if len(values) > MaxEntries*4 {
 		return errors.New("too many guardrail decisions")
 	}
 	for _, e := range values {
-		if !identifier.MatchString(e.GuardrailID) || !identifier.MatchString(e.Revision) || !validPhase(e.Phase) || !validAction(e.Action) || e.LatencyMS < 0 || e.LatencyMS > int64((24*time.Hour)/time.Millisecond) || len(e.Categories) > 32 {
+		if !identifier.MatchString(e.GuardrailID) || !identifier.MatchString(e.Revision) || !e.Phase.Valid() || !e.Action.Valid() || e.LatencyMS < 0 || e.LatencyMS > int64((24*time.Hour)/time.Millisecond) || len(e.Categories) > MaxCategories {
 			return errors.New("invalid guardrail evidence")
 		}
-		if !slices.Contains([]string{"passed", "blocked", "redacted", "masked", "annotated", "monitored", "failed_open", "failed_closed", "skipped"}, e.Outcome) {
+		if !e.Outcome.Valid() {
 			return errors.New("invalid guardrail outcome")
 		}
 		for _, c := range e.Categories {
@@ -215,7 +353,35 @@ func ValidateEvidence(values []Evidence) error {
 // EvidenceSize gives the conservative JSON size, including an array separator.
 func EvidenceSize(value Evidence) int { raw, _ := json.Marshal(value); return len(raw) + 1 }
 
-func validateSegments(segments []Segment) error {
+func MergeEvidence(decisions, values []Evidence) []Evidence {
+	merged := slices.Clone(decisions)
+	size := 2
+	for _, d := range merged {
+		size += EvidenceSize(d)
+	}
+	for _, v := range values {
+		i := slices.IndexFunc(merged, func(d Evidence) bool {
+			return d.GuardrailID == v.GuardrailID && d.Revision == v.Revision && d.Phase == v.Phase && d.Action == v.Action && d.Outcome == v.Outcome
+		})
+		if i < 0 {
+			if len(merged) < MaxEntries*4 && size+EvidenceSize(v) <= MaxEvidenceBytes {
+				merged = append(merged, v)
+				size += EvidenceSize(v)
+			}
+			continue
+		}
+		next := merged[i]
+		next.LatencyMS += v.LatencyMS
+		next.Categories = slices.Compact(slices.Sorted(slices.Values(slices.Concat(next.Categories, v.Categories))))
+		if grown := EvidenceSize(next) - EvidenceSize(merged[i]); len(next.Categories) <= MaxCategories && size+grown <= MaxEvidenceBytes {
+			merged[i] = next
+			size += grown
+		}
+	}
+	return merged
+}
+
+func ValidateSegments(segments []Segment) error {
 	if len(segments) > MaxSegments {
 		return ErrSurface
 	}

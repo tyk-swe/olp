@@ -80,7 +80,7 @@ func compileKeywords(raw json.RawMessage) (*keywordDetector, error) {
 	return k, nil
 }
 func (k *keywordDetector) detect(ctx context.Context, e Evaluation) (Verdict, error) {
-	v := Verdict{Action: "pass"}
+	var redactions []Redaction
 	// Retain only the source starts a match can reference. ASCII folding does
 	// no allocation; full Unicode folding uses reusable stack buffers.
 	starts := make([]int, k.maxRunes+1)
@@ -111,12 +111,8 @@ func (k *keywordDetector) detect(ctx context.Context, e Evaluation) (Verdict, er
 						continue
 					}
 				}
-				v.Action = Redact
-				if len(v.Categories) == 0 {
-					v.Categories = []string{"keyword.match"}
-				}
-				v.Redactions = append(v.Redactions, Redaction{s.ID, start, end, k.config.Replacement})
-				if len(v.Redactions) > MaxFindings {
+				redactions = append(redactions, Redaction{s.ID, start, end, k.config.Replacement})
+				if len(redactions) > MaxFindings {
 					return errEvaluation
 				}
 			}
@@ -127,7 +123,7 @@ func (k *keywordDetector) detect(ctx context.Context, e Evaluation) (Verdict, er
 			if offset-lastCheck >= 1024 {
 				lastCheck = offset
 				if err := ctx.Err(); err != nil {
-					return v, err
+					return Verdict{}, err
 				}
 			}
 			if r < utf8.RuneSelf {
@@ -135,7 +131,7 @@ func (k *keywordDetector) detect(ctx context.Context, e Evaluation) (Verdict, er
 					r += 'a' - 'A'
 				}
 				if err := consume(r, offset, offset+1, true); err != nil {
-					return v, err
+					return Verdict{}, err
 				}
 				continue
 			}
@@ -143,17 +139,16 @@ func (k *keywordDetector) detect(ctx context.Context, e Evaluation) (Verdict, er
 			fold.Reset()
 			size, read, err := fold.Transform(folded[:], source[:n], true)
 			if err != nil || read != n {
-				return v, errEvaluation
+				return Verdict{}, errEvaluation
 			}
 			for i := 0; i < size; {
 				foldedRune, width := utf8.DecodeRune(folded[i:size])
 				if err := consume(foldedRune, offset, offset+n, i+width == size); err != nil {
-					return v, err
+					return Verdict{}, err
 				}
 				i += width
 			}
 		}
 	}
-	v.Redactions = mergeRedactions(v.Redactions)
-	return v, nil
+	return Redacting(mergeRedactions(redactions), "keyword.match"), nil
 }

@@ -69,7 +69,7 @@ func normalizeCodeLanguage(language string) string {
 func (d codeExecutionDetector) width() int { return 0 }
 
 func (d codeExecutionDetector) detect(ctx context.Context, evaluation Evaluation) (Verdict, error) {
-	verdict := Verdict{Action: "pass"}
+	var redactions []Redaction
 	for _, segment := range evaluation.Segments {
 		if err := ctx.Err(); err != nil {
 			return Verdict{}, err
@@ -103,24 +103,20 @@ func (d codeExecutionDetector) detect(ctx context.Context, evaluation Evaluation
 				}
 			}
 			if confidence >= d.threshold {
-				if len(verdict.Redactions) >= MaxFindings {
+				if len(redactions) >= MaxFindings {
 					return Verdict{}, errEvaluation
 				}
-				verdict.Action = Block
-				verdict.Categories = []string{"code.execution"}
-				verdict.Redactions = append(verdict.Redactions, Redaction{Segment: segment.ID, Start: span[0], End: span[1], Replacement: "[CODE BLOCKED]"})
+				redactions = append(redactions, Redaction{Segment: segment.ID, Start: span[0], End: span[1], Replacement: "[CODE BLOCKED]"})
 			}
 		}
 		if input && d.intent && intent && len(spans) == 0 {
-			if len(verdict.Redactions) >= MaxFindings {
+			if len(redactions) >= MaxFindings {
 				return Verdict{}, errEvaluation
 			}
-			verdict.Action = Block
-			verdict.Categories = []string{"code.execution"}
-			verdict.Redactions = append(verdict.Redactions, Redaction{Segment: segment.ID, Start: 0, End: len(segment.Text), Replacement: "[CODE BLOCKED]"})
+			redactions = append(redactions, Redaction{Segment: segment.ID, Start: 0, End: len(segment.Text), Replacement: "[CODE BLOCKED]"})
 		}
 	}
-	return verdict, nil
+	return Redacting(redactions, "code.execution"), nil
 }
 
 // Execution phrases follow the pinned inventory reference. Matching these

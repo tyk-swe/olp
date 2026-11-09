@@ -14,9 +14,10 @@ import (
 // Surface retains exact JSON pointers while detectors see decoded text. The
 // source remains immutable unless a declared transformation actually acts.
 type Surface struct {
-	Segments []Segment
-	slots    []surfaceSlot
-	document oif.Document
+	Segments    []Segment
+	unavailable bool
+	slots       []surfaceSlot
+	document    oif.Document
 }
 type surfaceSlot struct {
 	pointer string
@@ -76,9 +77,9 @@ func (s *JSONSurface) Segments() []Segment {
 
 func (s *JSONSurface) segment(index int, text string) Segment {
 	if s.output {
-		return Segment{ID: "json" + strconv.Itoa(index), Text: text, Kind: "tool_result", ToolName: s.name, Untrusted: true, toolJSON: s}
+		return Segment{ID: "json" + strconv.Itoa(index), Text: text, Kind: ToolResult, ToolName: s.name, Untrusted: true, toolJSON: s}
 	}
-	return Segment{ID: "json" + strconv.Itoa(index), Text: text, Kind: "tool_call", ToolName: s.name, toolJSON: s}
+	return Segment{ID: "json" + strconv.Itoa(index), Text: text, Kind: ToolCall, ToolName: s.name, toolJSON: s}
 }
 
 func (s *JSONSurface) Apply(segments []Segment) (oif.Document, error) {
@@ -144,42 +145,49 @@ func NativeSurface(document oif.Document, output bool) (*Surface, error) {
 				}
 			}
 			recognized = true
-			s.walk(v, oif.Pointer("", field), "", "", "", "")
+			s.walk(v, oif.Pointer("", field), "", Text, "", "")
 		}
 	}
-	if !recognized {
+	if !recognized || s.unavailable {
 		return nil, ErrSurface
 	}
-	if err := validateSegments(s.Segments); err != nil {
+	if err := ValidateSegments(s.Segments); err != nil {
 		return nil, err
 	}
 	return s, nil
 }
-func (s *Surface) add(v oif.Value, pointer, role, kind, name, callID string) {
-	text, ok := v.Text()
-	if !ok {
+func (s *Surface) add(v oif.Value, pointer string, role Role, kind SegmentKind, name, callID string) {
+	raw, isText := v.Text()
+	text := raw
+	if !isText {
 		text = v.Raw()
 	}
-	if !ok || kind == "tool_call" {
-		// Decode JSON escape sequences before text detectors see arguments.
-		// UseNumber preserves native integers and decimals during inspection;
-		// the original document is retained unless a transformation acts.
-		decoder := json.NewDecoder(strings.NewReader(text))
-		decoder.UseNumber()
-		var value any
-		if json.Valid([]byte(text)) && decoder.Decode(&value) == nil {
-			var b bytes.Buffer
-			encoder := json.NewEncoder(&b)
-			encoder.SetEscapeHTML(false)
-			if encoder.Encode(value) == nil {
-				text = strings.TrimSuffix(b.String(), "\n")
-			}
-		}
+	if !isText || kind == ToolCall {
+		text = canonicalJSON(text)
 	}
-	s.Segments = append(s.Segments, Segment{ID: "s" + strconv.Itoa(len(s.Segments)), Text: text, Role: role, Kind: kind, ToolName: name, ToolCallID: callID, Untrusted: kind == "tool_result" && name == ""})
-	s.slots = append(s.slots, surfaceSlot{pointer: pointer, rawJSON: !ok})
+	s.Segments = append(s.Segments, Segment{ID: "s" + strconv.Itoa(len(s.Segments)), Text: text, Role: role, Kind: kind, ToolName: name, ToolCallID: callID, Untrusted: kind == ToolResult && name == ""})
+	s.slots = append(s.slots, surfaceSlot{pointer: pointer, rawJSON: !isText})
 }
-func (s *Surface) walk(v oif.Value, pointer, role, kind, name, callID string) {
+
+// canonicalJSON decodes escape sequences so text detectors see tool
+// arguments as written. UseNumber keeps native integers and decimals.
+func canonicalJSON(text string) string {
+	decoder := json.NewDecoder(strings.NewReader(text))
+	decoder.UseNumber()
+	var value any
+	if !json.Valid([]byte(text)) || decoder.Decode(&value) != nil {
+		return text
+	}
+	var b bytes.Buffer
+	encoder := json.NewEncoder(&b)
+	encoder.SetEscapeHTML(false)
+	if encoder.Encode(value) != nil {
+		return text
+	}
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+func (s *Surface) walk(v oif.Value, pointer string, role Role, kind SegmentKind, name, callID string) {
 	switch v.Kind() {
 	case oif.String:
 		s.add(v, pointer, role, kind, name, callID)
@@ -188,72 +196,86 @@ func (s *Surface) walk(v oif.Value, pointer, role, kind, name, callID string) {
 			s.walk(item, oif.Pointer(pointer, strconv.Itoa(i)), role, kind, name, callID)
 		}
 	case oif.Object:
-		if member, ok := v.Lookup("role"); ok {
-			role, _ = member.Text()
-		}
-		typeValue, _ := v.Lookup("type")
-		typ, _ := typeValue.Text()
-		if n, ok := v.Lookup("name"); ok {
-			name, _ = n.Text()
-		}
-		if typ == "tool_result" || typ == "function_call_output" || role == "tool" {
-			kind = "tool_result"
-		}
-		if typ == "tool_use" || typ == "function_call" {
-			kind = "tool_call"
-		}
-		resultCallID := toolResultCallID(v, kind, callID)
-		for _, m := range v.Members() {
-			p := oif.Pointer(pointer, m.Name)
-			switch m.Name {
-			case "role", "type", "id", "call_id", "tool_call_id", "tool_use_id", "status", "index", "finish_reason", "stop_reason", "signature", "thoughtSignature", "encrypted_content":
+		objectRole := Role(memberText(v, "role", string(role)))
+		objectKind := segmentKindOf(v, objectRole, kind)
+		s.walkObject(v, pointer, objectRole, objectKind, memberText(v, "name", name), toolResultCallID(v, objectKind, callID))
+	}
+}
+
+func (s *Surface) walkObject(v oif.Value, pointer string, role Role, kind SegmentKind, name, callID string) {
+	for _, m := range v.Members() {
+		p := oif.Pointer(pointer, m.Name)
+		switch m.Name {
+		case "role", "type", "id", "call_id", "tool_call_id", "tool_use_id", "status", "index", "finish_reason", "stop_reason", "signature", "thoughtSignature", "encrypted_content":
+			continue
+		case "image_url", "inlineData", "inline_data", "fileData", "input_audio", "redacted_thinking":
+			// No canonical text contract exists for these bodies. Refuse at
+			// admission instead of pretending they were inspected.
+			s.unavailable = true
+		case "function":
+			s.walk(m.Value, p, role, functionKind(m.Value), name, callID)
+		case "function_call", "functionCall", "toolUse":
+			s.walk(m.Value, p, role, ToolCall, name, callID)
+		case "functionResponse", "toolResult":
+			s.walk(m.Value, p, role, ToolResult, name, callID)
+		case "arguments", "args":
+			s.add(m.Value, p, role, ToolCall, name, callID)
+		case "input":
+			if kind == ToolCall {
+				s.add(m.Value, p, role, kind, name, callID)
 				continue
-			case "image_url", "inlineData", "inline_data", "fileData", "input_audio", "redacted_thinking":
-				// No canonical text contract exists for these bodies. Refuse at
-				// admission instead of pretending they were inspected.
-				s.Segments = append(s.Segments, Segment{ID: "!unavailable"})
-				continue
-			case "function":
-				// Chat declarations and invocations both use a function wrapper.
-				// Only invocations carry arguments; a name alone declares a tool.
-				functionKind := "tool_definition"
-				if _, ok := m.Value.Lookup("arguments"); ok {
-					functionKind = "tool_call"
-				}
-				s.walk(m.Value, p, role, functionKind, name, resultCallID)
-			case "function_call", "functionCall", "toolUse":
-				s.walk(m.Value, p, role, "tool_call", name, resultCallID)
-			case "functionResponse", "toolResult":
-				s.walk(m.Value, p, role, "tool_result", name, resultCallID)
-			case "arguments", "args":
-				s.add(m.Value, p, role, "tool_call", name, resultCallID)
-			case "input":
-				if kind == "tool_call" {
-					s.add(m.Value, p, role, kind, name, resultCallID)
-				} else {
-					s.walk(m.Value, p, role, kind, name, resultCallID)
-				}
-			case "parameters", "input_schema", "inputSchema", "parametersJsonSchema":
-				s.add(m.Value, p, role, "tool_definition", name, resultCallID)
-			case "name":
-				if kind == "" || kind == "tool_definition" {
-					s.add(m.Value, p, role, "tool_definition", name, resultCallID)
-				}
-			default:
-				s.walk(m.Value, p, role, kind, name, resultCallID)
 			}
+			s.walk(m.Value, p, role, kind, name, callID)
+		case "parameters", "input_schema", "inputSchema", "parametersJsonSchema":
+			s.add(m.Value, p, role, ToolDefinition, name, callID)
+		case "name":
+			if kind == Text || kind == ToolDefinition {
+				s.add(m.Value, p, role, ToolDefinition, name, callID)
+			}
+		default:
+			s.walk(m.Value, p, role, kind, name, callID)
 		}
 	}
 }
-func toolResultCallID(value oif.Value, kind, inherited string) string {
-	if kind != "tool_result" {
+
+func memberText(v oif.Value, field, inherited string) string {
+	member, ok := v.Lookup(field)
+	if !ok {
+		return inherited
+	}
+	text, _ := member.Text()
+	return text
+}
+
+func segmentKindOf(v oif.Value, role Role, inherited SegmentKind) SegmentKind {
+	switch memberText(v, "type", "") {
+	case "tool_use", "function_call":
+		return ToolCall
+	case "tool_result", "function_call_output":
+		return ToolResult
+	}
+	if role == Tool {
+		return ToolResult
+	}
+	return inherited
+}
+
+// functionKind tells chat declarations from invocations, which share a
+// function wrapper. Only invocations carry arguments.
+func functionKind(v oif.Value) SegmentKind {
+	if _, ok := v.Lookup("arguments"); ok {
+		return ToolCall
+	}
+	return ToolDefinition
+}
+
+func toolResultCallID(value oif.Value, kind SegmentKind, inherited string) string {
+	if kind != ToolResult {
 		return inherited
 	}
 	for _, field := range []string{"tool_call_id", "tool_use_id", "call_id", "id"} {
-		if member, ok := value.Lookup(field); ok {
-			if id, ok := member.Text(); ok && id != "" {
-				return id
-			}
+		if id := memberText(value, field, ""); id != "" {
+			return id
 		}
 	}
 	return inherited

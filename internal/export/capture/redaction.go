@@ -65,7 +65,7 @@ func redact(ctx context.Context, engine *guardrails.Engine, c content) (content,
 		return content{}, err
 	}
 	evaluated, err := engine.Evaluate(ctx, guardrails.Evaluation{Phase: guardrails.Input, Segments: segments}, nil)
-	if err != nil || evaluated.Blocked || ctx.Err() != nil || len(evaluated.Segments) != len(segments) {
+	if err != nil || ctx.Err() != nil || len(evaluated.Segments) != len(segments) {
 		return content{}, errRedaction
 	}
 	next := 0

@@ -5,7 +5,6 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
-	"errors"
 	"slices"
 	"strings"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/guardrails/definition"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -32,6 +32,7 @@ type Guardrail struct {
 	Configuration json.RawMessage
 	TimeoutMS     int64
 	OnError       guardrails.OnError
+	spec          guardrails.Spec
 	credentials   []reference
 }
 
@@ -63,41 +64,19 @@ func parseGuardrail(entry contract.ConfigurationGuardrail) (Guardrail, error) {
 	if err != nil {
 		return Guardrail{}, access.Invalid("guardrails", invalidConfiguration)
 	}
-	parsed, err := withCredentials(Guardrail{
-		Project:       project,
-		Name:          name,
+	revision := guardrails.Revision{
 		Type:          guardrails.Kind(entry.Type),
 		Configuration: configuration,
 		TimeoutMS:     cmp.Or(promotion.ValueOf(entry.TimeoutMs), 1000),
 		OnError:       cmp.Or(guardrails.OnError(promotion.ValueOf(entry.OnError)), guardrails.FailClosed),
-	})
-	if err != nil || guardrails.ValidateDefinition(guardrails.Revision{Type: parsed.Type, Configuration: configuration, TimeoutMS: parsed.TimeoutMS, OnError: parsed.OnError}) != nil {
+	}
+	spec, err := guardrails.ParseRevision(revision)
+	if err != nil {
 		return Guardrail{}, access.Invalid("guardrails", invalidConfiguration)
 	}
-	return parsed, nil
-}
-
-func withCredentials(g Guardrail) (Guardrail, error) {
-	if g.Type.Builtin() {
-		return g, nil
-	}
-	var c guardrails.ExternalConfig
-	if err := json.Unmarshal(g.Configuration, &c); err != nil {
-		return Guardrail{}, err
-	}
-	configuration, err := json.Marshal(c)
-	if err != nil {
-		return Guardrail{}, err
-	}
-	references := promotion.Filter([]reference{{promotion.Ref(c.CredentialRef), false}, {promotion.Ref(networkCredential(c)), true}}, func(r reference) bool { return r.ref != "" })
-	return Guardrail{Project: g.Project, Name: g.Name, Type: g.Type, Configuration: configuration, TimeoutMS: g.TimeoutMS, OnError: g.OnError, credentials: references}, nil
-}
-
-func networkCredential(c guardrails.ExternalConfig) string {
-	if c.Network == nil {
-		return ""
-	}
-	return c.Network.CredentialID
+	refs := spec.References()
+	credentials := promotion.Filter([]reference{{promotion.Ref(refs.Credential), false}, {promotion.Ref(refs.Network), true}}, func(r reference) bool { return r.ref != "" })
+	return Guardrail{Project: project, Name: name, Type: revision.Type, Configuration: configuration, TimeoutMS: revision.TimeoutMS, OnError: revision.OnError, spec: spec, credentials: credentials}, nil
 }
 
 func renderGuardrail(g Guardrail) (contract.ConfigurationGuardrail, error) {
@@ -146,23 +125,20 @@ func planGuardrails(ctx context.Context, q access.Queryer, desired []Guardrail, 
 }
 
 func planPlugin(ctx context.Context, q access.Queryer, g Guardrail) ([]promotion.Item, error) {
-	if g.Type != guardrails.Kind(contract.ConfigurationGuardrailTypePlugin) {
+	c, ok := g.spec.(guardrails.PluginSpec)
+	if !ok {
 		return nil, nil
 	}
-	var c guardrails.ExternalConfig
-	if err := json.Unmarshal(g.Configuration, &c); err != nil {
-		return nil, err
-	}
-	installed, err := plugins.FindGuardrailBuild(ctx, q, c.PluginVersion)
+	installed, err := plugins.FindGuardrailBuild(ctx, q, c.Version)
 	switch {
 	case err != nil:
 		return nil, err
 	case installed == nil:
-		return []promotion.Item{promotion.Blocker(contract.ConfigurationPlanItemKindPlugin, c.PluginVersion, "plugin_not_installed")}, nil
+		return []promotion.Item{promotion.Blocker(contract.ConfigurationPlanItemKindPlugin, c.Version, "plugin_not_installed")}, nil
 	case !installed.Approved:
-		return []promotion.Item{promotion.Blocker(contract.ConfigurationPlanItemKindPlugin, c.PluginVersion, "plugin_not_approved")}, nil
-	case !installed.Confined || !installed.Guardrail || installed.Name != c.PluginID:
-		return []promotion.Item{promotion.Conflict(contract.ConfigurationPlanItemKindPlugin, c.PluginVersion, "A matching confined guardrail plugin is required.")}, nil
+		return []promotion.Item{promotion.Blocker(contract.ConfigurationPlanItemKindPlugin, c.Version, "plugin_not_approved")}, nil
+	case !installed.Confined || !installed.Guardrail || installed.Name != c.ID:
+		return []promotion.Item{promotion.Conflict(contract.ConfigurationPlanItemKindPlugin, c.Version, "A matching confined guardrail plugin is required.")}, nil
 	}
 	return nil, nil
 }
@@ -176,7 +152,7 @@ func planDefinition(ctx context.Context, q access.Queryer, directory promotion.D
 	if !present {
 		return item(contract.ConfigurationPlanItemKindGuardrail, key, contract.ConfigurationPlanItemActionCreate, "Publish a reusable bounded content-policy definition."), nil
 	}
-	current, err := findActive(ctx, q, id, g.Name)
+	current, err := definition.FindActive(ctx, q, id, g.Name)
 	if err != nil {
 		return promotion.Item{}, err
 	}
@@ -187,7 +163,7 @@ func planDefinition(ctx context.Context, q access.Queryer, directory promotion.D
 	if current.Type != g.Type {
 		return promotion.Conflict(contract.ConfigurationPlanItemKindGuardrail, key, "A definition type is immutable; use a new name."), nil
 	}
-	configuration, err := rewriteCredentials(current.Type, current.Configuration, credentialName(ctx, q))
+	configuration, err := guardrails.RenameCredentials(current.Configuration, credentialName(ctx, q))
 	if err != nil {
 		return promotion.Item{}, err
 	}
@@ -215,59 +191,44 @@ func applyGuardrail(ctx context.Context, tx pgx.Tx, p access.Principal, director
 	if err := p.Project(project, access.Change); err != nil {
 		return err
 	}
-	configuration, err := rewriteCredentials(g.Type, g.Configuration, credentialID(ctx, tx, project))
+	configuration, err := guardrails.RenameCredentials(g.Configuration, credentialID(ctx, tx, project))
 	if err != nil {
 		return err
 	}
-	current, err := findActive(ctx, tx, installationOr(project), g.Name)
+	current, err := definition.FindActive(ctx, tx, guardrails.ProjectOf(project), g.Name)
 	if err != nil {
 		return err
 	}
-	reused, err := reusable(current, g, configuration)
-	if err != nil {
-		return err
-	}
-	if reused {
+	if reusable(current, g, configuration) {
 		if current.ActiveRevisionID != nil && *current.ActiveRevisionID == current.RevisionID {
 			return nil
 		}
-		return guardrails.ActivateRevision(ctx, tx, p.UserID(), current.ID, current.RevisionID)
+		return definition.Activate(ctx, tx, p.UserID(), current.ID, current.RevisionID)
 	}
-	saved := &guardrails.Definition{ProjectID: installationOr(project), Name: g.Name, Type: g.Type, Configuration: configuration, TimeoutMS: g.TimeoutMS, OnError: g.OnError}
-	if err := guardrails.Save(ctx, tx, p.UserID(), current, saved); err != nil {
+	draft, err := definition.NewDraft(guardrails.ProjectOf(project), g.Name, g.Type, configuration, g.TimeoutMS, g.OnError)
+	if err != nil {
 		return err
 	}
-	return guardrails.ActivateRevision(ctx, tx, p.UserID(), saved.ID, saved.RevisionID)
+	saved, err := definition.Save(ctx, tx, p.UserID(), current, draft)
+	if err != nil {
+		return err
+	}
+	return definition.Activate(ctx, tx, p.UserID(), saved.ID, saved.RevisionID)
 }
 
-func reusable(current *guardrails.Definition, g Guardrail, configuration json.RawMessage) (bool, error) {
-	if current == nil || current.Name != g.Name || current.Type != g.Type {
-		return false, nil
-	}
-	stored, err := rewriteCredentials(current.Type, current.Configuration, func(id string) (string, error) { return id, nil })
-	if err != nil {
-		return false, err
-	}
-	return equal(Guardrail{Configuration: stored, TimeoutMS: current.TimeoutMS, OnError: current.OnError}, Guardrail{Configuration: configuration, TimeoutMS: g.TimeoutMS, OnError: g.OnError}), nil
+func reusable(current *definition.Definition, g Guardrail, configuration json.RawMessage) bool {
+	return current != nil && current.Name == g.Name && current.Type == g.Type && equal(Guardrail{Configuration: current.Configuration, TimeoutMS: current.TimeoutMS, OnError: current.OnError}, Guardrail{Configuration: configuration, TimeoutMS: g.TimeoutMS, OnError: g.OnError})
 }
 
 func owner(directory promotion.Directory, name string) (string, bool) {
 	if name == "" {
-		return "installation", true
+		return guardrails.InstallationProject, true
 	}
 	return directory.ID(name)
 }
 
 func item(kind contract.ConfigurationPlanItemKind, key string, action contract.ConfigurationPlanItemAction, detail string) promotion.Item {
 	return promotion.Item{Kind: kind, Key: key, Action: action, Detail: detail}
-}
-
-func findActive(ctx context.Context, q access.Queryer, projectID, name string) (*guardrails.Definition, error) {
-	current, err := guardrails.FindActive(ctx, q, projectID, name)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	return current, err
 }
 
 func equal(a, b Guardrail) bool {

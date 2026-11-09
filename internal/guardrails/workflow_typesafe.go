@@ -35,7 +35,7 @@ func compileTypeSafe(raw json.RawMessage) (detector, error) {
 func (typeSafeDetector) width() int { return 0 }
 
 func (typeSafeDetector) detect(context.Context, Evaluation) (Verdict, error) {
-	return Verdict{Action: "pass"}, nil
+	return Verdict{}, nil
 }
 
 func (e *Engine) TypeSafePolicies() []TypeSafePolicy {

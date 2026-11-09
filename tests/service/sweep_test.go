@@ -314,6 +314,9 @@ func TestManagementIsolationSweep(t *testing.T) {
 			t.Fatalf("denied mutation changed the project policy: before %s, after %s", beforeJSON, afterJSON)
 		}
 	})
+	t.Run("guardrail_journey", func(t *testing.T) {
+		testGuardrailJourney(t, s, owner)
+	})
 	t.Run("promotion_round_trip", func(t *testing.T) {
 		testPromotionRoundTrip(t, s, owner, fixture)
 	})

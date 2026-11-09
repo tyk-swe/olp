@@ -22,8 +22,8 @@ type SemanticRule struct {
 	Utterances          []string `json:"utterances"`
 }
 
-func ValidateSemantic(rule *SemanticRule) error {
-	if rule == nil || !categoryID.MatchString(rule.Category) || math.IsNaN(rule.SimilarityThreshold) || math.IsInf(rule.SimilarityThreshold, 0) || rule.SimilarityThreshold <= 0 || rule.SimilarityThreshold > 1 || len(rule.Utterances) == 0 || len(rule.Utterances) > MaxSemanticReferences {
+func validateSemantic(rule SemanticRule) error {
+	if !categoryID.MatchString(rule.Category) || math.IsNaN(rule.SimilarityThreshold) || math.IsInf(rule.SimilarityThreshold, 0) || rule.SimilarityThreshold <= 0 || rule.SimilarityThreshold > 1 || len(rule.Utterances) == 0 || len(rule.Utterances) > MaxSemanticReferences {
 		return errEvaluation
 	}
 	size := 0
@@ -43,7 +43,7 @@ func ValidateSemantic(rule *SemanticRule) error {
 // It returns no inputs when there is no text to evaluate. The response indexes
 // are checked against this exact order by SemanticVerdict.
 func SemanticInputs(e Evaluation, rule SemanticRule) ([]string, error) {
-	if ValidateSemantic(&rule) != nil || validateSegments(e.Segments) != nil || len(e.Segments) > MaxSemanticSegments {
+	if ValidateSegments(e.Segments) != nil || len(e.Segments) > MaxSemanticSegments {
 		return nil, errEvaluation
 	}
 	inputs := make([]string, 0, len(e.Segments)+len(rule.Utterances))
@@ -71,7 +71,7 @@ func SemanticInputs(e Evaluation, rule SemanticRule) ([]string, error) {
 // SemanticVerdict validates the entire embedding result before comparing any
 // vectors. A malformed later item cannot be hidden behind an earlier match.
 func SemanticVerdict(raw []byte, rule SemanticRule, segmentCount int) (Verdict, error) {
-	if ValidateSemantic(&rule) != nil || segmentCount < 1 || segmentCount > MaxSemanticSegments {
+	if segmentCount < 1 || segmentCount > MaxSemanticSegments {
 		return Verdict{}, errEvaluation
 	}
 	var response struct {
@@ -123,16 +123,16 @@ func SemanticVerdict(raw []byte, rule SemanticRule, segmentCount int) (Verdict, 
 			// Identical normalized directions have cosine 1, even when summing
 			// their squared components rounds slightly below that boundary.
 			if slices.Equal(query, reference) {
-				return vendorBoolean(true, rule.Category), nil
+				return flagIf(true, rule.Category), nil
 			}
 			similarity := 0.0
 			for i, value := range query {
 				similarity += value * reference[i]
 			}
 			if similarity >= rule.SimilarityThreshold {
-				return vendorBoolean(true, rule.Category), nil
+				return flagIf(true, rule.Category), nil
 			}
 		}
 	}
-	return vendorBoolean(false, rule.Category), nil
+	return flagIf(false, rule.Category), nil
 }

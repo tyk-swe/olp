@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -145,8 +146,11 @@ func writeSessionRepeat(w http.ResponseWriter, id json.RawMessage, outcome Repla
 }
 
 func apiFailure(failure *Failure) *apiError {
-	if failure.Guardrail != nil {
-		return fail(failure.Guardrail.Status, failure.Code, "invalid_request_error", failure.Message)
+	switch failure.Guardrail {
+	case guardrails.ErrBlocked:
+		return fail(http.StatusBadRequest, failure.Code, "invalid_request_error", failure.Message)
+	case guardrails.ErrSurface:
+		return fail(http.StatusUnprocessableEntity, failure.Code, "invalid_request_error", failure.Message)
 	}
 	switch failure.Code {
 	case "permission_denied", "user_grant_required", "delegation_unavailable":

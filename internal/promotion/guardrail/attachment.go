@@ -2,8 +2,13 @@ package guardrail
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
+
+	guardrailattachment "github.com/tyk-swe/olp/internal/guardrails/attachment"
+
+	guardrailpolicy "github.com/tyk-swe/olp/internal/guardrails/policy"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
@@ -172,7 +177,7 @@ func applyAttachment(ctx context.Context, tx pgx.Tx, p access.Principal, directo
 	if err != nil {
 		return err
 	}
-	revision, err := guardrails.ActivePolicyRevisionID(ctx, tx, project, a.Policy.Name)
+	revision, err := activeRevision(ctx, tx, project, a.Policy.Name)
 	if err != nil {
 		return err
 	}
@@ -185,13 +190,13 @@ func applyAttachment(ctx context.Context, tx pgx.Tx, p access.Principal, directo
 	}
 	switch t := target.(type) {
 	case draft:
-		return guardrails.StageDraftAttachment(ctx, tx, p.UserID(), t.id, revision, a.Order)
+		return guardrailattachment.Stage(ctx, tx, p.UserID(), t.id, revision, a.Order)
 	case published:
-		placed := guardrails.Attachment{Scope: string(describe(a.Scope).kind), ScopeID: installationOr(t.id), PolicyRevisionID: revision, Order: a.Order}
-		if err := guardrails.AuthorizeAttachment(ctx, tx, p, placed, access.Change); err != nil {
+		placed := guardrails.Attachment{Scope: guardrails.Scope(describe(a.Scope).kind), ScopeID: guardrails.ProjectOf(t.id), PolicyRevisionID: revision, Order: a.Order}
+		if err := guardrailattachment.Authorize(ctx, tx, p, placed, access.Change); err != nil {
 			return err
 		}
-		return guardrails.PlaceAttachment(ctx, tx, p.UserID(), placed)
+		return guardrailattachment.Place(ctx, tx, p.UserID(), placed)
 	}
 	return access.Invalid("guardrail_attachments", invalidAttachment)
 }
@@ -281,4 +286,15 @@ func resolveToolset(ctx context.Context, tx pgx.Tx, name string, project *string
 
 func toolsetOutsideProject() error {
 	return access.Invalid("guardrail_attachments", "Toolset and policy must belong to the same project.")
+}
+
+func activeRevision(ctx context.Context, q access.Queryer, project *string, name string) (string, error) {
+	current, err := guardrailpolicy.FindLatest(ctx, q, project, name)
+	if err != nil {
+		return "", err
+	}
+	if current == nil || current.ActiveRevisionID == nil {
+		return "", fmt.Errorf("guardrail policy %q has no active revision: %w", name, pgx.ErrNoRows)
+	}
+	return *current.ActiveRevisionID, nil
 }

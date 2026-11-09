@@ -218,7 +218,7 @@ func (f *attemptFailure) toError() (result *Error) {
 	if f.contractCode != "" {
 		return serverError(http.StatusBadGateway, f.contractCode, "The provider result did not satisfy the admitted interaction contract.")
 	}
-	if f.policyCode == "guardrail_surface_unavailable" {
+	if f.policyCode == string(guardrails.ErrSurface) {
 		return guardrailError(guardrails.ErrSurface)
 	}
 	if f.policyCode != "" {
@@ -407,7 +407,7 @@ func (s *Server) slotAvailable(x *call, attempt routing.Attempt, slot *routing.S
 // attempt performs one upstream call with one credential.
 func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, *wire.Completion, *attemptFailure) {
 	if x.guardrailEngine != nil {
-		x.guardrailCtx = context.WithValue(ctx, guardrailCallerKey{}, x)
+		x.guardrailCtx = ctx
 	}
 	cfg := provider.Connector()
 	fact.Carried = cfg.CarriedByPlugin()
@@ -908,12 +908,12 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 			}
 			return fail(classAmbiguous, f)
 		}
-		var guardFailure *guardrails.Error
+		var guardFailure guardrails.Failure
 		var ue *wire.UpstreamError
 		var violation *oif.Incompatibility
 		switch {
 		case errors.As(err, &guardFailure):
-			f.policyCode = guardFailure.Code
+			f.policyCode = string(guardFailure)
 			f.overall = true
 			f.noRetry = true
 			return fail(classPolicy, f)

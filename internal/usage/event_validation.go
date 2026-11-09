@@ -88,7 +88,7 @@ func Validate(e *Event) (*Validated, error) {
 		return nil, fmt.Errorf("%w: attribution %w", ErrInvalidEvent, err)
 	}
 	if err := guardrails.ValidateEvidence(e.GuardrailDecisions); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrInvalidEvent, err)
 	}
 	if err := contentpolicy.ValidateDecisions(e.PolicyDecisions); err != nil {
 		return nil, fmt.Errorf("%w: policy decisions %w", ErrInvalidEvent, err)
@@ -129,6 +129,9 @@ func Validate(e *Event) (*Validated, error) {
 func validateAttempt(attempt *Attempt, index int) (*ValidatedAttempt, error) {
 	if err := attempt.Execution.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidEvent, err)
+	}
+	if err := guardrails.ValidateEvidence(attempt.GuardrailDecisions); err != nil {
+		return nil, fmt.Errorf("%w: attempt %d %w", ErrInvalidEvent, index, err)
 	}
 	if attempt.Routing != nil {
 		if err := attempt.Routing.Prompt.validate(); err != nil {
