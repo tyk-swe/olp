@@ -3,9 +3,6 @@ package notifications
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -113,9 +110,7 @@ func (w webhook) bind(_ *egress.Policy, secret []byte) (channel, error) {
 func (w webhook) send(ctx context.Context, s *Sender, m message) error {
 	header := make(http.Header)
 	if len(w.key) != 0 {
-		sum := hmac.New(sha256.New, w.key)
-		_, _ = sum.Write(m.body)
-		header.Set("X-OLP-Signature", "sha256="+hex.EncodeToString(sum.Sum(nil)))
+		egress.SignBody(header, w.key, m.body)
 	}
 	status, _, err := post(ctx, s.webhooks, webhookTimeout, w.url, header, m.body)
 	if err != nil {

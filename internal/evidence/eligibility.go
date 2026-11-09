@@ -60,3 +60,13 @@ func Eligible(ctx context.Context, q access.Queryer, stream Stream, sourceID, pr
 	principal := access.Principal{AllProjects: current.Scope == "global", Projects: projectMembership(projectID, current.ProjectRole)}
 	return current.SourceLive && principal.Project(&projectID, access.View) == nil, nil
 }
+
+func Admit(ctx context.Context, q access.Queryer, stream string, sourceID, projectID *string, creatorID string) (bool, error) {
+	if stream != string(Runs) && stream != string(TraceSpans) {
+		return true, nil
+	}
+	if sourceID == nil || projectID == nil {
+		return false, nil
+	}
+	return Eligible(ctx, q, Stream(stream), *sourceID, *projectID, creatorID)
+}
