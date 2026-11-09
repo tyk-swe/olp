@@ -3,6 +3,7 @@ package guardrails
 import (
 	"encoding/json"
 	"math"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -41,13 +42,13 @@ func TestSemanticVerdict(t *testing.T) {
 	rule := SemanticRule{Category: "semantic.prompt_injection", SimilarityThreshold: 0.8, Utterances: []string{"reference"}}
 	for _, tc := range []struct {
 		name, raw string
-		want      Action
+		want      string
 	}{
-		{"match", `{"data":[{"index":0,"embedding":[0.8,0.6]},{"index":1,"embedding":[1,0]}]}`, Block},
-		{"different", `{"data":[{"index":0,"embedding":[0,1]},{"index":1,"embedding":[1,0]}]}`, Pass},
-		{"opposite", `{"data":[{"index":0,"embedding":[-1,0]},{"index":1,"embedding":[1,0]}]}`, Pass},
-		{"reordered", `{"data":[{"index":1,"embedding":[1,0]},{"index":0,"embedding":[1,0]}]}`, Block},
-		{"large_vectors", `{"data":[{"index":0,"embedding":[1e308,1e308]},{"index":1,"embedding":[1e308,1e308]}]}`, Block},
+		{"match", `{"data":[{"index":0,"embedding":[0.8,0.6]},{"index":1,"embedding":[1,0]}]}`, "flagged"},
+		{"different", `{"data":[{"index":0,"embedding":[0,1]},{"index":1,"embedding":[1,0]}]}`, "passed"},
+		{"opposite", `{"data":[{"index":0,"embedding":[-1,0]},{"index":1,"embedding":[1,0]}]}`, "passed"},
+		{"reordered", `{"data":[{"index":1,"embedding":[1,0]},{"index":0,"embedding":[1,0]}]}`, "flagged"},
+		{"large_vectors", `{"data":[{"index":0,"embedding":[1e308,1e308]},{"index":1,"embedding":[1e308,1e308]}]}`, "flagged"},
 		{"missing_index", `{"data":[{"embedding":[1,0]},{"index":1,"embedding":[1,0]}]}`, "error"},
 		{"duplicate_index", `{"data":[{"index":0,"embedding":[1,0]},{"index":0,"embedding":[1,0]}]}`, "error"},
 		{"extra_index", `{"data":[{"index":0,"embedding":[1,0]},{"index":2,"embedding":[1,0]}]}`, "error"},
@@ -65,10 +66,10 @@ func TestSemanticVerdict(t *testing.T) {
 				}
 				return
 			}
-			if err != nil || verdict.Action != tc.want {
+			if err != nil || verdict.Flagged() != (tc.want == "flagged") {
 				t.Fatalf("verdict=%+v err=%v", verdict, err)
 			}
-			if verdict.Action == Block && (len(verdict.Categories) != 1 || verdict.Categories[0] != rule.Category) {
+			if verdict.Flagged() && !slices.Equal(verdict.Categories(), []string{rule.Category}) {
 				t.Fatal("category was not preserved")
 			}
 		})
@@ -87,13 +88,13 @@ func TestSemanticExactSimilarity(t *testing.T) {
 		name      string
 		query     []float64
 		reference []float64
-		want      Action
+		flagged   bool
 	}{
-		{"identical diagonal", []float64{1, 1}, []float64{1, 1}, Block},
-		{"identical mixed components", []float64{1, -2, 3}, []float64{1, -2, 3}, Block},
-		{"same direction", []float64{1, 1}, []float64{2, 2}, Block},
-		{"nearby distinct direction", []float64{1, 1}, []float64{1, 1.000001}, Pass},
-		{"opposite direction", []float64{1, 1}, []float64{-1, -1}, Pass},
+		{"identical diagonal", []float64{1, 1}, []float64{1, 1}, true},
+		{"identical mixed components", []float64{1, -2, 3}, []float64{1, -2, 3}, true},
+		{"same direction", []float64{1, 1}, []float64{2, 2}, true},
+		{"nearby distinct direction", []float64{1, 1}, []float64{1, 1.000001}, false},
+		{"opposite direction", []float64{1, 1}, []float64{-1, -1}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raw, err := json.Marshal(map[string]any{"data": []any{
@@ -104,8 +105,8 @@ func TestSemanticExactSimilarity(t *testing.T) {
 				t.Fatal(err)
 			}
 			verdict, err := SemanticVerdict(raw, rule, 1)
-			if err != nil || verdict.Action != tc.want {
-				t.Fatalf("verdict=%+v err=%v, want %s", verdict, err, tc.want)
+			if err != nil || verdict.Flagged() != tc.flagged {
+				t.Fatalf("verdict=%+v err=%v, want flagged=%v", verdict, err, tc.flagged)
 			}
 		})
 	}

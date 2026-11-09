@@ -25,7 +25,7 @@ func (s *Snapshot) compileGuardrails() error {
 		}
 		for _, key := range keys {
 			boundary.KeyID = key
-			e, err := s.Guardrails.Compile(boundary, nil)
+			e, err := s.Guardrails.Compile(boundary)
 			if err != nil {
 				return err
 			}
@@ -61,7 +61,7 @@ func (s *Snapshot) compileToolGuardrails() error {
 		}
 		for _, key := range keys {
 			boundary.KeyID = key
-			e, err := s.Guardrails.Compile(boundary, nil)
+			e, err := s.Guardrails.Compile(boundary)
 			if err != nil {
 				return fmt.Errorf("toolset %q guardrails: %w", toolsetID, err)
 			}

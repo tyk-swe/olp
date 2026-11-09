@@ -271,7 +271,7 @@ func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
 		}
 		x.generation.parsed = parsed
 		if x.guardrailEngine != nil && x.guardrailEngine.HasCompression() {
-			x.guardrailCtx = context.WithValue(ctx, guardrailCallerKey{}, x)
+			x.guardrailCtx = ctx
 			if _, _, err := x.inspectGuardrailInput(parsed.OIF().Document()); err != nil {
 				return 0, guardrailError(err)
 			}

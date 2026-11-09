@@ -66,7 +66,7 @@ type attemptOutcome[Result any] struct {
 // attempt budget.
 func runAttempts[Result any](ctx context.Context, s *Server, x *call, adapter attemptAdapter[Result]) attemptOutcome[Result] {
 	if x.guardrailEngine != nil {
-		x.guardrailCtx = context.WithValue(ctx, guardrailCallerKey{}, x)
+		x.guardrailCtx = ctx
 	}
 	var generation string
 	if x.request.release != nil && x.request.release.Snapshot() != nil {

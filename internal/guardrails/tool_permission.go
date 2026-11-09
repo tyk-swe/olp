@@ -139,7 +139,7 @@ func (d *toolPermissionDetector) detect(ctx context.Context, evaluation Evaluati
 						return Verdict{}, ctxErr
 					}
 					if err != nil {
-						return blockIf(true, "tool.arguments_invalid"), nil
+						return flagIf(true, "tool.arguments_invalid"), nil
 					}
 				}
 				matches := true
@@ -167,10 +167,10 @@ func (d *toolPermissionDetector) detect(ctx context.Context, evaluation Evaluati
 			break
 		}
 		if !allowed {
-			return blockIf(true, "tool.denied"), nil
+			return flagIf(true, "tool.denied"), nil
 		}
 	}
-	return Verdict{Action: Pass}, nil
+	return Verdict{}, nil
 }
 
 // Argument paths use the native dotted object/[] array notation. Every leaf

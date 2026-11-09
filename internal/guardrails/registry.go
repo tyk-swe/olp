@@ -53,7 +53,7 @@ func (r *Registry) Validate() error {
 				return errors.New("guardrail policy crosses a project boundary")
 			}
 		}
-		if _, err := Compile(p.Entries, r.Definitions, nil); err != nil {
+		if _, err := Compile(p.Entries, r.Definitions); err != nil {
 			return err
 		}
 	}
@@ -160,7 +160,7 @@ func (r *Registry) Entries(b Boundary) ([]Entry, error) {
 	}
 	return entries, nil
 }
-func (r *Registry) Compile(b Boundary, external Evaluator) (*Engine, error) {
+func (r *Registry) Compile(b Boundary) (*Engine, error) {
 	if r == nil {
 		return nil, nil
 	}
@@ -168,7 +168,7 @@ func (r *Registry) Compile(b Boundary, external Evaluator) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	return Compile(entries, r.Definitions, external)
+	return Compile(entries, r.Definitions)
 }
 func (r *Registry) Window() int {
 	if r != nil && r.WindowBytes > 0 {

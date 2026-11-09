@@ -317,7 +317,7 @@ func newExecutionFixture(t *testing.T, scenario executionScenario) executionFixt
 		}
 		engine, err := guardrails.Compile([]guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrails.Output, Action: guardrails.Redact}}, map[string]guardrails.Revision{
 			"revision": {ID: "revision", GuardrailID: "guard", Type: "builtin.keywords", Configuration: json.RawMessage(`{"words":["original"]}`), TimeoutMS: 1000, OnError: guardrails.FailClosed},
-		}, nil)
+		})
 		if err != nil {
 			t.Fatal(err)
 		}

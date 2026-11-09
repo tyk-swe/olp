@@ -84,7 +84,7 @@ func compilePolicy(p Policy, duplicate bool, definitions map[portable]Guardrail)
 	entries := promotion.Map(resolved, func(r resolvedEntry) guardrails.Entry {
 		return guardrails.Entry{GuardrailID: r.definition.Name, RevisionID: r.definition.Name, Phase: r.Phase, Action: r.Action, Monitor: r.Monitor, Mandatory: r.Mandatory}
 	})
-	engine, err := guardrails.Compile(entries, revisions, nil)
+	engine, err := guardrails.Compile(entries, revisions)
 	if err != nil {
 		return nil, access.Invalid("guardrail_policies", "Invalid guardrail entries.")
 	}

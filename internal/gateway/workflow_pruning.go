@@ -136,7 +136,7 @@ func (x *call) pruningInput(ctx context.Context, request *wire.Request) (*wire.R
 	}
 	segments := slices.Clone(surface.Segments)
 	for index, segment := range segments {
-		if segment.Kind == "tool_result" && slices.Contains(x.workflowRecoveryCalls, segment.ToolCallID) {
+		if segment.Kind == guardrails.ToolResult && slices.Contains(x.workflowRecoveryCalls, segment.ToolCallID) {
 			segments[index].Text = surface.Replacement(index, "[recovered content omitted]")
 		}
 	}
@@ -167,7 +167,7 @@ func (x *call) pruningInput(ctx context.Context, request *wire.Request) (*wire.R
 	if err != nil {
 		return nil, nil, guardrailError(err)
 	}
-	document, segments, err = x.inspectGuardrailInputWithRecovery(context.WithValue(ctx, guardrailCallerKey{}, x), document, false)
+	document, segments, err = x.inspectGuardrailInputWithRecovery(ctx, document, false)
 	if err != nil {
 		return nil, nil, guardrailError(err)
 	}

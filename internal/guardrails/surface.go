@@ -14,9 +14,10 @@ import (
 // Surface retains exact JSON pointers while detectors see decoded text. The
 // source remains immutable unless a declared transformation actually acts.
 type Surface struct {
-	Segments []Segment
-	slots    []surfaceSlot
-	document oif.Document
+	Segments    []Segment
+	unavailable bool
+	slots       []surfaceSlot
+	document    oif.Document
 }
 type surfaceSlot struct {
 	pointer string
@@ -147,7 +148,7 @@ func NativeSurface(document oif.Document, output bool) (*Surface, error) {
 			s.walk(v, oif.Pointer("", field), "", Text, "", "")
 		}
 	}
-	if !recognized {
+	if !recognized || s.unavailable {
 		return nil, ErrSurface
 	}
 	if err := validateSegments(s.Segments); err != nil {
@@ -210,7 +211,7 @@ func (s *Surface) walkObject(v oif.Value, pointer string, role Role, kind Segmen
 		case "image_url", "inlineData", "inline_data", "fileData", "input_audio", "redacted_thinking":
 			// No canonical text contract exists for these bodies. Refuse at
 			// admission instead of pretending they were inspected.
-			s.Segments = append(s.Segments, Segment{ID: "!unavailable"})
+			s.unavailable = true
 		case "function":
 			s.walk(m.Value, p, role, functionKind(m.Value), name, callID)
 		case "function_call", "functionCall", "toolUse":

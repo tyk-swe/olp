@@ -36,7 +36,7 @@ func TestToolPermissionOrderedRules(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result, err := detector.detect(t.Context(), Evaluation{Segments: []Segment{{ID: "tool", Kind: tc.kind, ToolName: tc.tool, Text: tc.args}}})
-			if err != nil || (result.Action == Block) != tc.blocked {
+			if err != nil || result.Flagged() != tc.blocked {
 				t.Fatalf("result=%+v error=%v", result, err)
 			}
 		})
@@ -65,7 +65,7 @@ func TestToolPermissionDefaultsAndRuleFallback(t *testing.T) {
 			t.Fatal(err)
 		}
 		result, err := detector.detect(t.Context(), Evaluation{Segments: []Segment{{Kind: "tool_call", ToolName: "danger", Text: tc.args}}})
-		if err != nil || (result.Action == Block) != tc.blocked {
+		if err != nil || result.Flagged() != tc.blocked {
 			t.Fatalf("config=%s args=%s result=%+v error=%v", tc.config, tc.args, result, err)
 		}
 	}
@@ -78,12 +78,12 @@ func TestToolPermissionParameterRulesAcrossSegments(t *testing.T) {
 	}
 	segments := []Segment{{ID: "s0", Kind: "tool_call", ToolName: "tool", Text: `{"value":"no"}`}, {ID: "s1", Kind: "tool_call", ToolName: "tool", Text: `{"value":"yes"}`}}
 	verdict, err := detector.detect(t.Context(), Evaluation{Segments: segments})
-	if err != nil || verdict.Action != Pass {
+	if err != nil || verdict.Flagged() {
 		t.Fatalf("parameter fallback failed: %+v error=%v", verdict, err)
 	}
 	segments[1].Text = `{"value":"other"}`
 	verdict, err = detector.detect(t.Context(), Evaluation{Segments: segments})
-	if err != nil || verdict.Action != Block {
+	if err != nil || !verdict.Flagged() {
 		t.Fatalf("arguments from another segment were reused: %+v error=%v", verdict, err)
 	}
 }

@@ -55,17 +55,28 @@ func (d externalDetector) detect(ctx context.Context, e Evaluation) (Verdict, er
 }
 
 // ExternalRunner shares transport pools, but breakers belong to one immutable
-// guardrail revision. Credentials come from the pinned release authority.
+// guardrail revision.
 type ExternalRunner struct {
-	Egress             egress.Policy
-	Clients            *egress.ConnectionClientCache
-	Credentials        func(context.Context, string) ([]byte, error)
-	NetworkCredentials func(context.Context, string) ([]byte, error)
-	Model              func(context.Context, Revision, ModelSpec, Evaluation) (Verdict, error)
-	Plugin             func(context.Context, Revision, PluginSpec, Evaluation) (Verdict, error)
-	mu                 sync.Mutex
-	breakers           map[string]*circuit
+	Egress   egress.Policy
+	Clients  *egress.ConnectionClientCache
+	mu       sync.Mutex
+	breakers map[string]*circuit
 }
+
+// Caller carries what one admitted request may reach: credentials from its
+// pinned release and the model and plugin evaluators acting on its behalf.
+type Caller struct {
+	Credential func(context.Context, string) ([]byte, error)
+	Model      func(context.Context, Revision, ModelSpec, Evaluation) (Verdict, error)
+	Plugin     func(context.Context, Revision, PluginSpec, Evaluation) (Verdict, error)
+}
+
+func (r *ExternalRunner) For(c Caller) Evaluator {
+	return EvaluatorFunc(func(ctx context.Context, d Revision, spec Spec, e Evaluation) (Verdict, error) {
+		return r.evaluate(ctx, c, d, spec, e)
+	})
+}
+
 type circuit struct {
 	failures int
 	until    time.Time
@@ -114,7 +125,7 @@ func (r *ExternalRunner) leave(id string, err error) {
 		}
 	}
 }
-func (r *ExternalRunner) Evaluate(ctx context.Context, d Revision, spec Spec, e Evaluation) (verdict Verdict, err error) {
+func (r *ExternalRunner) evaluate(ctx context.Context, c Caller, d Revision, spec Spec, e Evaluation) (verdict Verdict, err error) {
 	if d.TimeoutMS < 1 || d.TimeoutMS > 300000 || validateSegments(e.Segments) != nil || !e.Phase.Valid() {
 		return verdict, errEvaluation
 	}
@@ -132,29 +143,29 @@ func (r *ExternalRunner) Evaluate(ctx context.Context, d Revision, spec Spec, e 
 			err = errEvaluation
 		}
 	}()
-	return r.dispatch(ctx, d, spec, e)
+	return r.dispatch(ctx, c, d, spec, e)
 }
 
-func (r *ExternalRunner) dispatch(ctx context.Context, d Revision, spec Spec, e Evaluation) (Verdict, error) {
+func (r *ExternalRunner) dispatch(ctx context.Context, c Caller, d Revision, spec Spec, e Evaluation) (Verdict, error) {
 	switch s := spec.(type) {
 	case ModelSpec:
-		if r.Model == nil {
+		if c.Model == nil {
 			return Verdict{}, errEvaluation
 		}
-		return r.Model(ctx, d, s, e)
+		return c.Model(ctx, d, s, e)
 	case PluginSpec:
-		if r.Plugin == nil {
+		if c.Plugin == nil {
 			return Verdict{}, errEvaluation
 		}
-		return r.Plugin(ctx, d, s, e)
+		return c.Plugin(ctx, d, s, e)
 	case webhookSpec:
-		client, credential, err := r.connect(ctx, d, s.Connection, s.Endpoint)
+		client, credential, err := r.connect(ctx, c, d, s.Connection, s.Endpoint)
 		if err != nil {
 			return Verdict{}, err
 		}
 		return webhook(ctx, client, s.Endpoint, credential.SigningKey, d, e)
 	case vendorSpec:
-		client, credential, err := r.connect(ctx, d, s.Connection, s.Endpoints()...)
+		client, credential, err := r.connect(ctx, c, d, s.Connection, s.Endpoints()...)
 		if err != nil {
 			return Verdict{}, err
 		}
@@ -164,7 +175,7 @@ func (r *ExternalRunner) dispatch(ctx context.Context, d Revision, spec Spec, e 
 	}
 }
 
-func (r *ExternalRunner) connect(ctx context.Context, d Revision, c vendor.Connection, endpoints ...string) (*http.Client, externalCredential, error) {
+func (r *ExternalRunner) connect(ctx context.Context, caller Caller, d Revision, c vendor.Connection, endpoints ...string) (*http.Client, externalCredential, error) {
 	for _, endpoint := range endpoints {
 		if _, err := r.Egress.ValidateEndpoint(endpoint); err != nil {
 			return nil, externalCredential{}, err
@@ -173,10 +184,10 @@ func (r *ExternalRunner) connect(ctx context.Context, d Revision, c vendor.Conne
 	if err := r.Egress.ValidateConnection(c.Network); err != nil {
 		return nil, externalCredential{}, err
 	}
-	if r.Credentials == nil || r.Clients == nil {
+	if caller.Credential == nil || r.Clients == nil {
 		return nil, externalCredential{}, errEvaluation
 	}
-	secret, err := r.Credentials(ctx, c.CredentialRef)
+	secret, err := caller.Credential(ctx, c.CredentialRef)
 	if err != nil {
 		return nil, externalCredential{}, err
 	}
@@ -184,7 +195,7 @@ func (r *ExternalRunner) connect(ctx context.Context, d Revision, c vendor.Conne
 	if err := json.Unmarshal(secret, &credential); err != nil {
 		return nil, externalCredential{}, err
 	}
-	network, err := r.networkSecret(ctx, c.Network)
+	network, err := networkSecret(ctx, caller, c.Network)
 	if err != nil {
 		return nil, externalCredential{}, err
 	}
@@ -192,14 +203,11 @@ func (r *ExternalRunner) connect(ctx context.Context, d Revision, c vendor.Conne
 	return client, credential, err
 }
 
-func (r *ExternalRunner) networkSecret(ctx context.Context, network *egress.ConnectionOptions) ([]byte, error) {
+func networkSecret(ctx context.Context, caller Caller, network *egress.ConnectionOptions) ([]byte, error) {
 	if network == nil || network.CredentialID == "" {
 		return nil, nil
 	}
-	if r.NetworkCredentials == nil {
-		return nil, errEvaluation
-	}
-	return r.NetworkCredentials(ctx, network.CredentialID)
+	return caller.Credential(ctx, network.CredentialID)
 }
 
 func webhook(ctx context.Context, client *http.Client, endpoint, key string, d Revision, e Evaluation) (Verdict, error) {
@@ -214,11 +222,11 @@ func webhook(ctx context.Context, client *http.Client, endpoint, key string, d R
 	if err != nil {
 		return Verdict{}, err
 	}
-	var verdict Verdict
+	var verdict WireVerdict
 	if err := decodeConfig(raw, &verdict); err != nil {
 		return Verdict{}, err
 	}
-	return verdict, nil
+	return verdict.Verdict()
 }
 
 type finding struct {
@@ -238,9 +246,9 @@ func vendorVerdict(ctx context.Context, spec vendor.Spec, client *http.Client, c
 		}
 	}
 	if len(findings) == 0 {
-		return Verdict{Action: Pass}, nil
+		return Verdict{}, nil
 	}
-	return Verdict{Action: Block, Categories: findingCategories(findings), Redactions: completeRepairs(findings)}, nil
+	return Verdict{flagged: true, categories: findingCategories(findings), redactions: completeRepairs(findings)}, nil
 }
 
 func vendorRequest(phase Phase, s Segment) vendor.Request {
@@ -331,7 +339,7 @@ func ModelVerdict(raw []byte, rule ModelRule) (Verdict, error) {
 	}
 	canonical, _ := json.Marshal(expected)
 	if bytes.Equal(encoded, canonical) {
-		return Verdict{Action: Block, Categories: []string{rule.Category}}, nil
+		return Flag(rule.Category), nil
 	}
-	return Verdict{Action: Pass}, nil
+	return Verdict{}, nil
 }

@@ -18,7 +18,7 @@ import (
 
 func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, operationplan.Result, *attemptFailure) {
 	if x.guardrailEngine != nil {
-		x.guardrailCtx = context.WithValue(ctx, guardrailCallerKey{}, x)
+		x.guardrailCtx = ctx
 	}
 	state := &attemptState{parent: ctx, classifier: upstream.Classifier{ContextWindow: true, AtMostOnce: true}}
 	var parallel *parallelGuardrail

@@ -132,7 +132,7 @@ func projectToolResult(in CallRequest, result upstream.ToolResult) (toolResultSu
 	content := slices.Collect(func(yield func(guardrails.Segment) bool) {
 		for index, block := range result.Content {
 			if block.Type == "text" && !yield(guardrails.Segment{
-				ID: "content" + strconv.Itoa(index), Kind: "tool_result",
+				ID: "content" + strconv.Itoa(index), Kind: guardrails.ToolResult,
 				ToolName: in.Tool.Alias, Untrusted: true, Text: block.Text,
 			}) {
 				return

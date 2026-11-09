@@ -407,7 +407,7 @@ func (s *Server) slotAvailable(x *call, attempt routing.Attempt, slot *routing.S
 // attempt performs one upstream call with one credential.
 func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, *wire.Completion, *attemptFailure) {
 	if x.guardrailEngine != nil {
-		x.guardrailCtx = context.WithValue(ctx, guardrailCallerKey{}, x)
+		x.guardrailCtx = ctx
 	}
 	cfg := provider.Connector()
 	fact.Carried = cfg.CarriedByPlugin()

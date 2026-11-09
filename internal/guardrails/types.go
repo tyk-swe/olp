@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"regexp"
+	"slices"
 	"time"
 	"unicode/utf8"
 
@@ -30,7 +31,6 @@ const (
 	Redact   = contract.GuardrailPolicyEntryActionRedact
 	Mask     = contract.GuardrailPolicyEntryActionMask
 	Annotate = contract.GuardrailPolicyEntryActionAnnotate
-	Pass     = Action("pass")
 
 	FailClosed = contract.CreateGuardrailRequestOnErrorFailClosed
 	FailOpen   = contract.CreateGuardrailRequestOnErrorFailOpen
@@ -150,6 +150,18 @@ func (s Segment) withText(text string) Segment {
 	return Segment{ID: s.ID, Role: s.Role, Text: text, Kind: s.Kind, ToolName: s.ToolName, ToolCallID: s.ToolCallID, Untrusted: s.Untrusted, toolJSON: s.toolJSON}
 }
 
+// InputProvenance keeps request tool results visible to output governance
+// under IDs that cannot collide with output segments.
+func InputProvenance(input []Segment) []Segment {
+	return slices.Collect(func(yield func(Segment) bool) {
+		for _, s := range input {
+			if s.Kind == ToolResult && !yield(Segment{ID: "input_" + s.ID, Role: s.Role, Text: s.Text, Kind: s.Kind, ToolName: s.ToolName, ToolCallID: s.ToolCallID, Untrusted: s.Untrusted, toolJSON: s.toolJSON}) {
+				return
+			}
+		}
+	})
+}
+
 type Evaluation struct {
 	RequestID            string    `json:"request_id"`
 	Route                string    `json:"route,omitempty"`
@@ -175,17 +187,54 @@ type Redaction struct {
 	Replacement string `json:"replacement"`
 }
 
+// Verdict is one guardrail's finding over the segments it evaluated. The zero
+// Verdict passes.
 type Verdict struct {
-	Action     Action      `json:"action"`
+	flagged    bool
+	categories []string
+	redactions []Redaction
+}
+
+func Flag(categories ...string) Verdict { return Verdict{flagged: true, categories: categories} }
+
+// Redacting flags the spans it replaces and passes when there are none.
+func Redacting(redactions []Redaction, categories ...string) Verdict {
+	if len(redactions) == 0 {
+		return Verdict{}
+	}
+	return Verdict{flagged: true, categories: categories, redactions: redactions}
+}
+
+func flagIf(flagged bool, category string) Verdict {
+	if flagged {
+		return Flag(category)
+	}
+	return Verdict{}
+}
+
+func (v Verdict) Flagged() bool           { return v.flagged }
+func (v Verdict) Categories() []string    { return v.categories }
+func (v Verdict) Redactions() []Redaction { return v.redactions }
+
+// WireVerdict is the verdict webhooks and plugins return. Every action other
+// than pass flags the content, and the entry's own action decides the outcome.
+type WireVerdict struct {
+	Action     string      `json:"action"`
 	Categories []string    `json:"categories,omitempty"`
 	Redactions []Redaction `json:"redactions,omitempty"`
 }
 
-func blockIf(blocked bool, category string) Verdict {
-	if blocked {
-		return Verdict{Action: Block, Categories: []string{category}}
+func (w WireVerdict) Verdict() (Verdict, error) {
+	switch Action(w.Action) {
+	case "pass":
+		if len(w.Categories) > 0 || len(w.Redactions) > 0 {
+			return Verdict{}, errEvaluation
+		}
+		return Verdict{}, nil
+	case Block, Redact, Mask, Annotate:
+		return Verdict{flagged: true, categories: w.Categories, redactions: w.Redactions}, nil
 	}
-	return Verdict{Action: Pass}
+	return Verdict{}, errEvaluation
 }
 
 // Evidence deliberately has no content, offsets, patterns, or replacements.
@@ -200,11 +249,20 @@ type Evidence struct {
 }
 
 type Result struct {
+	Segments  []Segment
+	Decisions []Evidence
+	Changed   bool
+	Recovery  []Segment
+}
+
+type AppliedResult struct {
 	Segments  []Segment  `json:"segments"`
 	Decisions []Evidence `json:"decisions"`
 	Blocked   bool       `json:"blocked"`
-	Changed   bool       `json:"-"`
-	Recovery  []Segment  `json:"-"`
+}
+
+func Applied(result Result, err error) AppliedResult {
+	return AppliedResult{Segments: result.Segments, Decisions: result.Decisions, Blocked: errors.Is(err, ErrBlocked)}
 }
 
 type Failure string
@@ -261,6 +319,34 @@ func ValidateEvidence(values []Evidence) error {
 
 // EvidenceSize gives the conservative JSON size, including an array separator.
 func EvidenceSize(value Evidence) int { raw, _ := json.Marshal(value); return len(raw) + 1 }
+
+func MergeEvidence(decisions, values []Evidence) []Evidence {
+	merged := slices.Clone(decisions)
+	size := 2
+	for _, d := range merged {
+		size += EvidenceSize(d)
+	}
+	for _, v := range values {
+		i := slices.IndexFunc(merged, func(d Evidence) bool {
+			return d.GuardrailID == v.GuardrailID && d.Revision == v.Revision && d.Phase == v.Phase && d.Action == v.Action && d.Outcome == v.Outcome
+		})
+		if i < 0 {
+			if len(merged) < MaxEntries*4 && size+EvidenceSize(v) <= MaxEvidenceBytes {
+				merged = append(merged, v)
+				size += EvidenceSize(v)
+			}
+			continue
+		}
+		next := merged[i]
+		next.LatencyMS += v.LatencyMS
+		next.Categories = slices.Compact(slices.Sorted(slices.Values(slices.Concat(next.Categories, v.Categories))))
+		if grown := EvidenceSize(next) - EvidenceSize(merged[i]); size+grown <= MaxEvidenceBytes {
+			merged[i] = next
+			size += grown
+		}
+	}
+	return merged
+}
 
 func validateSegments(segments []Segment) error {
 	if len(segments) > MaxSegments {

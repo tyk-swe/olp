@@ -81,7 +81,7 @@ func compile(project string, names []string, pins []Redactor, definitions map[st
 		pinned[d.ID] = d
 		entries[i] = guardrails.Entry{GuardrailID: d.GuardrailID, RevisionID: d.ID, Phase: guardrails.Input, Action: guardrails.Redact}
 	}
-	return guardrails.Compile(entries, pinned, nil)
+	return guardrails.Compile(entries, pinned)
 }
 
 func storePins(ctx context.Context, tx pgx.Tx, policyID string, pins []Redactor) error {

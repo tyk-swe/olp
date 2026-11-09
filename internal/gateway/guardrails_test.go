@@ -82,9 +82,9 @@ func TestGuardrailParallelRefusalAfterCommitmentIsInBand(t *testing.T) {
 		case <-ctx.Done():
 			return guardrails.Verdict{}, ctx.Err()
 		}
-		return guardrails.Verdict{Action: "block"}, nil
+		return guardrails.Flag(), nil
 	})
-	h := newHarness(t, Config{}, Dependencies{GuardrailEvaluator: evaluator})
+	h := newHarness(t, Config{}, Dependencies{Guardrails: func(guardrails.Caller) guardrails.Evaluator { return evaluator }})
 	installTestGuardrail(t, h, guardrails.InputParallel, guardrails.Block, "webhook", `{"endpoint":"https://example.com","credential_ref":"key","content_egress":true}`)
 	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 		io.Copy(io.Discard, r.Body)
@@ -160,17 +160,17 @@ func TestToolGuardrailEvaluationReachesConfiguredEvaluator(t *testing.T) {
 			return guardrails.Verdict{}, guardrails.ErrSurface
 		}
 		if strings.Contains(evaluation.Segments[0].Text, "bad") {
-			return guardrails.Verdict{Action: "block", Categories: []string{"test.block"}}, nil
+			return guardrails.Flag("test.block"), nil
 		}
-		return guardrails.Verdict{Action: guardrails.Pass}, nil
+		return guardrails.Verdict{}, nil
 	})
-	h := newHarness(t, Config{}, Dependencies{GuardrailEvaluator: evaluator})
+	h := newHarness(t, Config{}, Dependencies{Guardrails: func(guardrails.Caller) guardrails.Evaluator { return evaluator }})
 	authority, err := h.rt.Authenticate(fullKey)
 	if err != nil {
 		t.Fatal(err)
 	}
 	definition := guardrails.Revision{ID: "revision", GuardrailID: "guard", ProjectID: "installation", Name: "Guard", Type: "webhook", Configuration: json.RawMessage(`{"endpoint":"https://example.com","credential_ref":"key","content_egress":true}`), TimeoutMS: 1000, OnError: guardrails.FailClosed}
-	engine, err := guardrails.Compile([]guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrails.Input, Action: guardrails.Block, Mandatory: true}}, map[string]guardrails.Revision{"revision": definition}, nil)
+	engine, err := guardrails.Compile([]guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrails.Input, Action: guardrails.Block, Mandatory: true}}, map[string]guardrails.Revision{"revision": definition})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,15 +179,12 @@ func TestToolGuardrailEvaluationReachesConfiguredEvaluator(t *testing.T) {
 		return h.gateway.EvaluateToolGuardrails(t.Context(), *authority, h.rt.release, engine, "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50901", guardrails.Input, []guardrails.Segment{{ID: "arguments", Kind: "tool_call", ToolName: "t_alias", Text: text}}, &guardrails.Masking{})
 	}
 	passed, err := evaluate(`{"query":"hello"}`)
-	if err != nil || passed.Blocked || len(passed.Decisions) != 1 || passed.Decisions[0].Outcome != "passed" {
+	if err != nil || len(passed.Decisions) != 1 || passed.Decisions[0].Outcome != "passed" {
 		t.Fatalf("clean tool arguments did not pass through the evaluator: %+v %v", passed, err)
 	}
 	blocked, err := evaluate(`{"query":"bad"}`)
-	if !blocked.Blocked || err == nil {
-		t.Fatalf("evaluator verdict did not block tool arguments: %+v %v", blocked, err)
-	}
 	if !errors.Is(err, guardrails.ErrBlocked) {
-		t.Fatalf("tool evaluation returned the wrong refusal: %v", err)
+		t.Fatalf("evaluator verdict did not block tool arguments: %+v %v", blocked, err)
 	}
 	if len(blocked.Decisions) != 1 || blocked.Decisions[0].Outcome != "blocked" {
 		t.Fatalf("blocked tool arguments kept no decision evidence: %+v", blocked.Decisions)

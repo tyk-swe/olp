@@ -159,9 +159,9 @@ func parseSemantic(raw json.RawMessage) (Spec, error) {
 	return ModelSpec{Route: c.Route, Judge: *c.Semantic}, nil
 }
 
-func detectorOf(d Revision, spec Spec, external Evaluator) detector {
+func detectorOf(d Revision, spec Spec) detector {
 	if b, ok := spec.(builtinSpec); ok {
 		return b.detector
 	}
-	return externalDetector{definition: d, spec: spec, evaluator: external}
+	return externalDetector{definition: d, spec: spec}
 }

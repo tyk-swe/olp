@@ -3,6 +3,7 @@ package guardrails
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -234,7 +235,7 @@ func (s *Server) writePolicy(r *http.Request, id string, retire bool) (access.Re
 			}
 			definitions[d.ID] = d
 		}
-		if _, err = Compile(in.Entries, definitions, nil); err != nil {
+		if _, err = Compile(in.Entries, definitions); err != nil {
 			return access.Reply{}, access.Invalid("entries", "Supply valid phases, actions and pinned revisions.")
 		}
 		var saved PolicyRevision
@@ -550,10 +551,10 @@ func (s *Server) evaluate(r *http.Request, p access.Principal) (access.Reply, er
 		return access.Reply{}, access.Fail(503, "guardrails_unavailable", "The evaluator is unavailable.")
 	}
 	result, err := s.Evaluate(r, p, in)
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrBlocked) {
 		return access.Reply{}, err
 	}
-	return access.Reply{Status: 200, Body: result}, nil
+	return access.Reply{Status: 200, Body: Applied(result, err)}, nil
 }
 func (s *Server) createCredential(r *http.Request, _ access.Principal) (access.Reply, error) {
 	var in struct {

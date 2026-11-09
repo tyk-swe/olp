@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/guardrails"
@@ -63,15 +64,9 @@ func (g *guardrailStream) push(ctx context.Context, frame []byte) ([][]byte, err
 			}
 			canonical, _ := json.Marshal(data)
 			arguments := g.x.guardrailMasks.Restore(string(canonical))
-			segments = append(segments, guardrails.Segment{ID: "tool_" + id, Kind: "tool_call", ToolName: call.name, Text: arguments, Role: "assistant"})
+			segments = append(segments, guardrails.Segment{ID: "tool_" + id, Kind: guardrails.ToolCall, ToolName: call.name, Text: arguments, Role: guardrails.Assistant})
 		}
-		for _, segment := range g.x.guardrailInput {
-			if segment.Kind == "tool_result" {
-				segment.ID = "input_" + segment.ID
-				segments = append(segments, segment)
-			}
-		}
-		result, err := g.x.guardrailEngine.Evaluate(g.x.guardrailCtx, guardrails.Evaluation{RequestID: g.x.request.accountingID(), Route: g.x.route.Slug, Phase: guardrails.OutputStream, Segments: segments, InternalModel: g.x.internalGuardrail}, g.x.guardrailMasks)
+		result, err := g.x.guardrailEngine.Evaluate(g.x.guardrailCtx, guardrails.Evaluation{RequestID: g.x.request.accountingID(), Route: g.x.route.Slug, Phase: guardrails.OutputStream, Segments: slices.Concat(segments, guardrails.InputProvenance(g.x.guardrailInput)), InternalModel: g.x.internalGuardrail}, g.x.guardrailMasks)
 		g.x.recordGuardrails(result.Decisions)
 		if err != nil {
 			return nil, err
@@ -120,7 +115,8 @@ func (g *guardrailStream) pushText(ctx context.Context, frame []byte) ([][]byte,
 	if err != nil {
 		return nil, err
 	}
-	var deltas, snapshots []guardrails.Segment
+	var deltas []guardrails.Delta
+	var snapshots []guardrails.Segment
 	var completed []string
 	originals := map[string]string{}
 	for _, field := range fields {
@@ -130,13 +126,11 @@ func (g *guardrailStream) pushText(ctx context.Context, frame []byte) ([][]byte,
 				continue
 			}
 		}
-		segment := guardrails.Segment{ID: field.id, Role: "assistant", Text: field.text}
 		if field.snapshot {
 			originals[field.id] = field.text
-			segment.Text = g.x.guardrailMasks.Restore(segment.Text)
-			snapshots = append(snapshots, segment)
+			snapshots = append(snapshots, guardrails.Segment{ID: field.id, Role: guardrails.Assistant, Text: g.x.guardrailMasks.Restore(field.text)})
 		} else {
-			deltas = append(deltas, segment)
+			deltas = append(deltas, guardrails.Delta{ID: field.id, Text: field.text})
 		}
 	}
 	if len(snapshots) > 0 {

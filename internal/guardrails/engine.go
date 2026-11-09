@@ -44,46 +44,41 @@ func (e *Engine) HasCompression() bool {
 	})
 }
 
-func (e *Engine) HasLegacyInput() bool {
-	if e != nil {
-		for _, r := range e.entries {
-			if r.definition.LegacyRuleID != "" && r.entry.Phase == Input && r.entry.Action == Block {
-				return true
-			}
-		}
-	}
-	return false
+func (r compiledEntry) legacyInput() bool {
+	return r.definition.LegacyRuleID != "" && r.entry.Phase == Input && r.entry.Action == Block
 }
+
+func (r compiledEntry) bound(external Evaluator) compiledEntry {
+	d, ok := r.detector.(externalDetector)
+	if !ok {
+		return r
+	}
+	return compiledEntry{r.entry, r.definition, r.kind, externalDetector{definition: d.definition, spec: d.spec, evaluator: external}}
+}
+
+func (e *Engine) entriesWhere(match func(compiledEntry) bool) bool {
+	return e != nil && slices.ContainsFunc(e.entries, match)
+}
+
+func (e *Engine) HasLegacyInput() bool { return e.entriesWhere(compiledEntry.legacyInput) }
 
 func (e *Engine) HasLegacyOutput() bool {
-	if e != nil {
-		for _, r := range e.entries {
-			if r.definition.LegacyRuleID != "" && r.entry.Phase == Output {
-				return true
-			}
-		}
-	}
-	return false
+	return e.entriesWhere(func(r compiledEntry) bool { return r.definition.LegacyRuleID != "" && r.entry.Phase == Output })
 }
 
-func (e *Engine) WithEvaluator(external Evaluator) *Engine {
-	if e == nil {
-		return nil
+// Bind returns an engine whose external entries evaluate through external.
+// An engine without external entries is returned unchanged.
+func (e *Engine) Bind(external Evaluator) *Engine {
+	if !e.entriesWhere(func(r compiledEntry) bool { _, ok := r.detector.(externalDetector); return ok }) {
+		return e
 	}
-	var out *Engine
-	for i, entry := range e.entries {
-		if detector, ok := entry.detector.(externalDetector); ok {
-			if out == nil {
-				out = &Engine{entries: slices.Clone(e.entries)}
+	return &Engine{entries: slices.Collect(func(yield func(compiledEntry) bool) {
+		for _, r := range e.entries {
+			if !yield(r.bound(external)) {
+				return
 			}
-			detector.evaluator = external
-			out.entries[i].detector = detector
 		}
-	}
-	if out != nil {
-		return out
-	}
-	return e
+	})}
 }
 
 // WithoutModelGuardrails removes recursive evaluator calls before the gateway
@@ -110,7 +105,7 @@ func (e *Engine) WithoutModelGuardrails() *Engine {
 
 // Compile copies configuration before compiling it. No live management object
 // or PostgreSQL handle is reachable from a compiled engine.
-func Compile(entries []Entry, definitions map[string]Revision, external Evaluator) (*Engine, error) {
+func Compile(entries []Entry, definitions map[string]Revision) (*Engine, error) {
 	if len(entries) == 0 {
 		return nil, nil
 	}
@@ -140,31 +135,19 @@ func Compile(entries []Entry, definitions map[string]Revision, external Evaluato
 		if !entry.Monitor && (entry.Action == Redact || entry.Action == Mask) && !k.transforms {
 			return nil, errors.New("this detector does not supply transformation spans")
 		}
-		e.entries = append(e.entries, compiledEntry{entry, d, k, detectorOf(d, spec, external)})
+		e.entries = append(e.entries, compiledEntry{entry, d, k, detectorOf(d, spec)})
 	}
 	return e, nil
 }
 
 func (e *Engine) HasPhase(phase Phase) bool {
-	if e != nil {
-		for _, r := range e.entries {
-			if r.entry.Phase == phase {
-				return true
-			}
-		}
-	}
-	return false
+	return e.entriesWhere(func(r compiledEntry) bool { return r.entry.Phase == phase })
 }
 
 func (e *Engine) HasAction(phase Phase, action Action) bool {
-	if e != nil {
-		for _, r := range e.entries {
-			if r.entry.Phase == phase && r.entry.Action == action && !r.entry.Monitor {
-				return true
-			}
-		}
-	}
-	return false
+	return e.entriesWhere(func(r compiledEntry) bool {
+		return r.entry.Phase == phase && r.entry.Action == action && !r.entry.Monitor
+	})
 }
 
 // Unavailable records an explicit lack of coverage. Monitoring and annotation
@@ -278,14 +261,10 @@ func (m *Masking) Restore(text string) string {
 }
 
 func (e *Engine) Evaluate(ctx context.Context, request Evaluation, masks *Masking) (Result, error) {
-	if e == nil {
-		return Result{Segments: request.Segments}, nil
-	}
-	return e.evaluate(ctx, request, masks)
-}
-
-func (e *Engine) evaluate(ctx context.Context, request Evaluation, masks *Masking) (Result, error) {
 	result := Result{Segments: request.Segments}
+	if e == nil {
+		return result, nil
+	}
 	if !request.Phase.Valid() {
 		return result, ErrSurface
 	}
@@ -307,8 +286,8 @@ func (e *Engine) evaluate(ctx context.Context, request Evaluation, masks *Maskin
 		}
 		started := time.Now()
 		bounded, cancel := context.WithTimeout(ctx, time.Duration(r.definition.TimeoutMS)*time.Millisecond)
-		request.Segments = result.Segments
 		evaluation := request
+		evaluation.Segments = result.Segments
 		if r.kind.compresses && len(request.CompressionExemptIDs) > 0 {
 			evaluation.Segments = slices.Collect(func(yield func(Segment) bool) {
 				for _, segment := range result.Segments {
@@ -324,7 +303,7 @@ func (e *Engine) evaluate(ctx context.Context, request Evaluation, masks *Maskin
 				continue
 			}
 		}
-		if r.definition.LegacyRuleID != "" && r.entry.Phase == Input && r.entry.Action == Block && request.LegacyInput != nil {
+		if r.legacyInput() && request.LegacyInput != nil {
 			evaluation.Segments = request.LegacyInput
 		}
 		verdict, err := r.detector.detect(bounded, evaluation)
@@ -340,18 +319,15 @@ func (e *Engine) evaluate(ctx context.Context, request Evaluation, masks *Maskin
 			ev.Outcome = FailedOpen
 			if r.definition.OnError == FailClosed && !r.entry.Monitor {
 				ev.Outcome = FailedClosed
-				result.Blocked = true
 			}
 			result.Decisions = append(result.Decisions, ev)
-			if result.Blocked {
+			if blocks(ev.Outcome) {
 				return result, ErrBlocked
 			}
 			continue
 		}
-		ev.Categories = slices.Clone(verdict.Categories)
-		slices.Sort(ev.Categories)
-		ev.Categories = slices.Compact(ev.Categories)
-		if verdict.Action != Pass {
+		ev.Categories = slices.Compact(slices.Sorted(slices.Values(verdict.Categories())))
+		if verdict.Flagged() {
 			switch {
 			case r.entry.Monitor:
 				ev.Outcome = Monitored
@@ -359,11 +335,9 @@ func (e *Engine) evaluate(ctx context.Context, request Evaluation, masks *Maskin
 				ev.Outcome = Annotated
 			case r.entry.Action == Block:
 				ev.Outcome = Blocked
-				result.Blocked = true
 			default:
-				if len(verdict.Redactions) == 0 {
+				if len(verdict.Redactions()) == 0 {
 					ev.Outcome = FailedClosed
-					result.Blocked = true
 					break
 				}
 				firstRecovery := len(result.Recovery)
@@ -373,7 +347,7 @@ func (e *Engine) evaluate(ctx context.Context, request Evaluation, masks *Maskin
 					}
 					return slices.Collect(func(yield func(Segment) bool) {
 						for _, segment := range result.Segments {
-							if slices.ContainsFunc(verdict.Redactions, func(redaction Redaction) bool { return redaction.Segment == segment.ID }) && !yield(segment) {
+							if slices.ContainsFunc(verdict.Redactions(), func(redaction Redaction) bool { return redaction.Segment == segment.ID }) && !yield(segment) {
 								return
 							}
 						}
@@ -382,9 +356,8 @@ func (e *Engine) evaluate(ctx context.Context, request Evaluation, masks *Maskin
 				if !result.Changed {
 					result.Segments = slices.Clone(result.Segments)
 				}
-				if err = transform(result.Segments, verdict.Redactions, r.entry.Action, masks); err != nil {
+				if err = transform(result.Segments, verdict.Redactions(), r.entry.Action, masks); err != nil {
 					ev.Outcome = FailedClosed
-					result.Blocked = true
 					break
 				}
 				result.Recovery = slices.Concat(result.Recovery, originals)
@@ -412,31 +385,30 @@ func (e *Engine) evaluate(ctx context.Context, request Evaluation, masks *Maskin
 			}
 		}
 		result.Decisions = append(result.Decisions, ev)
-		if result.Blocked {
+		if blocks(ev.Outcome) {
 			return result, ErrBlocked
 		}
 	}
 	return result, nil
 }
 
+func blocks(outcome Outcome) bool { return outcome == Blocked || outcome == FailedClosed }
+
 func validateVerdict(v Verdict, segments []Segment) error {
-	if !slices.Contains([]Action{Pass, Block, Redact, Mask, Annotate}, v.Action) || len(v.Categories) > 32 || len(v.Redactions) > MaxFindings {
+	if len(v.categories) > 32 || len(v.redactions) > MaxFindings {
 		return errEvaluation
 	}
-	for _, c := range v.Categories {
+	for _, c := range v.categories {
 		if !categoryID.MatchString(c) {
 			return errEvaluation
 		}
-	}
-	if v.Action == Pass && (len(v.Redactions) != 0 || len(v.Categories) != 0) {
-		return errEvaluation
 	}
 	texts := make(map[string]string, len(segments))
 	for _, s := range segments {
 		texts[s.ID] = s.Text
 	}
 	last := map[string]int{}
-	redactions := slices.Clone(v.Redactions)
+	redactions := slices.Clone(v.redactions)
 	sort.SliceStable(redactions, func(i, j int) bool {
 		if redactions[i].Segment == redactions[j].Segment {
 			return redactions[i].Start < redactions[j].Start

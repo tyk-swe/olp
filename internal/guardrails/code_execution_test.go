@@ -29,10 +29,10 @@ func TestCodeExecutionFindingLimit(t *testing.T) {
 			verdict, err := detector.detect(context.Background(), Evaluation{Phase: tc.phase, Segments: tc.segments})
 			if tc.wantErr {
 				if !errors.Is(err, errEvaluation) {
-					t.Fatalf("expected finding limit error, got %v with %d redactions", err, len(verdict.Redactions))
+					t.Fatalf("expected finding limit error, got %v with %d redactions", err, len(verdict.Redactions()))
 				}
-			} else if err != nil || len(verdict.Redactions) != MaxFindings {
-				t.Fatalf("expected %d findings, got %d with error %v", MaxFindings, len(verdict.Redactions), err)
+			} else if err != nil || len(verdict.Redactions()) != MaxFindings {
+				t.Fatalf("expected %d findings, got %d with error %v", MaxFindings, len(verdict.Redactions()), err)
 			}
 		})
 	}
@@ -66,8 +66,8 @@ func TestCodeExecutionBoundaries(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			engine := testEngine(t, "builtin.code_execution", tc.config, tc.phase, Block, false, nil)
 			result, err := evaluateText(t, engine, tc.text, tc.phase, nil)
-			if result.Blocked != tc.blocked || errors.Is(err, ErrBlocked) != tc.blocked {
-				t.Fatalf("blocked=%v error=%v", result.Blocked, err)
+			if errors.Is(err, ErrBlocked) != tc.blocked {
+				t.Fatalf("result=%+v error=%v", result, err)
 			}
 		})
 	}
@@ -118,7 +118,7 @@ func TestCodeExecutionNativeIntentAndUnlabelledFence(t *testing.T) {
 				t.Fatal(err)
 			}
 			verdict, err := detector.detect(t.Context(), Evaluation{Phase: tc.phase, Segments: []Segment{{ID: "s", Text: tc.text}}})
-			if err != nil || verdict.Action != Block {
+			if err != nil || !verdict.Flagged() {
 				t.Fatalf("execution escaped: %+v error=%v", verdict, err)
 			}
 		})
