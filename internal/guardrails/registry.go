@@ -1,9 +1,10 @@
 package guardrails
 
 import (
+	"cmp"
 	"errors"
 	"slices"
-	"sort"
+	"strings"
 )
 
 // Registry is serialized into the immutable runtime release. Policy entries
@@ -68,19 +69,19 @@ func (r *Registry) Validate() error {
 			return errors.New("guardrail attachment has no policy revision")
 		}
 		switch a.Scope {
-		case "installation":
-			if a.ScopeID != "installation" {
+		case InstallationScope:
+			if a.ScopeID != InstallationProject {
 				return errors.New("invalid installation attachment")
 			}
-		case "organization":
+		case OrganizationScope:
 			if r.ProjectOrganizations[p.ProjectID] != a.ScopeID {
 				return errors.New("organization attachment crosses a project boundary")
 			}
-		case "project":
+		case ProjectScope:
 			if a.ScopeID != p.ProjectID {
 				return errors.New("project attachment crosses a project boundary")
 			}
-		case "route", "toolset", "api-key":
+		case RouteScope, ToolsetScope, KeyScope:
 			if !identifier.MatchString(a.ScopeID) {
 				return errors.New("invalid attachment scope identity")
 			}
@@ -91,25 +92,24 @@ func (r *Registry) Validate() error {
 	return nil
 }
 
-func ValidAttachmentScope(scope Scope) bool {
-	_, valid := attachmentScopeRank(scope)
-	return valid
-}
+var scopeRanks = map[Scope]int{InstallationScope: 0, OrganizationScope: 1, ProjectScope: 2, RouteScope: 3, ToolsetScope: 3, KeyScope: 4}
 
-func attachmentScopeRank(scope Scope) (int, bool) {
-	switch scope {
-	case "installation":
-		return 0, true
-	case "organization":
-		return 1, true
-	case "project":
-		return 2, true
-	case "route", "toolset":
-		return 3, true
-	case "api-key":
-		return 4, true
+func (b Boundary) matches(a Attachment, organization string) bool {
+	switch a.Scope {
+	case InstallationScope:
+		return true
+	case OrganizationScope:
+		return a.ScopeID == organization
+	case ProjectScope:
+		return a.ScopeID == b.ProjectID
+	case RouteScope:
+		return a.ScopeID == b.RouteID
+	case ToolsetScope:
+		return a.ScopeID == b.ToolsetID
+	case KeyScope:
+		return a.ScopeID == b.KeyID
 	}
-	return 5, false
+	return false
 }
 
 // Entries only adds policies. There is deliberately no overriding or exclusion
@@ -118,29 +118,15 @@ func (r *Registry) Entries(b Boundary) ([]Entry, error) {
 	if r == nil {
 		return nil, nil
 	}
-	attachments := []Attachment{}
-	for _, a := range r.Attachments {
-		matches := a.Scope == "installation" || (a.Scope == "organization" && a.ScopeID == b.OrganizationID) || (a.Scope == "project" && a.ScopeID == b.ProjectID) || (a.Scope == "route" && a.ScopeID == b.RouteID) || (a.Scope == "toolset" && a.ScopeID == b.ToolsetID) || (a.Scope == "api-key" && a.ScopeID == b.KeyID)
-		if matches {
-			attachments = append(attachments, a)
+	organization := r.ProjectOrganizations[b.ProjectID]
+	legacyFirst := func(a Attachment) int {
+		if a.Scope == RouteScope && r.MigratedRoutes[a.ScopeID] && r.Policies[a.PolicyRevisionID].PolicyID == a.ID {
+			return 0
 		}
+		return 1
 	}
-	sort.SliceStable(attachments, func(i, j int) bool {
-		x, y := attachments[i], attachments[j]
-		xRank, _ := attachmentScopeRank(x.Scope)
-		yRank, _ := attachmentScopeRank(y.Scope)
-		if xRank != yRank {
-			return xRank < yRank
-		}
-		xLegacy := x.Scope == "route" && r.MigratedRoutes[x.ScopeID] && r.Policies[x.PolicyRevisionID].PolicyID == x.ID
-		yLegacy := y.Scope == "route" && r.MigratedRoutes[y.ScopeID] && r.Policies[y.PolicyRevisionID].PolicyID == y.ID
-		if xLegacy != yLegacy {
-			return xLegacy
-		}
-		if x.Order != y.Order {
-			return x.Order < y.Order
-		}
-		return x.ID < y.ID
+	attachments := slices.SortedStableFunc(slices.Values(slices.DeleteFunc(slices.Clone(r.Attachments), func(a Attachment) bool { return !b.matches(a, organization) })), func(x, y Attachment) int {
+		return cmp.Or(cmp.Compare(scopeRanks[x.Scope], scopeRanks[y.Scope]), cmp.Compare(legacyFirst(x), legacyFirst(y)), cmp.Compare(x.Order, y.Order), strings.Compare(x.ID, y.ID))
 	})
 	var entries []Entry
 	for _, a := range attachments {
@@ -150,7 +136,7 @@ func (r *Registry) Entries(b Boundary) ([]Entry, error) {
 		}
 		// Installation policies are deliberately global. Every narrower policy
 		// must belong to the request project, including key/route attachments.
-		if a.Scope != "installation" && a.Scope != "organization" && p.ProjectID != b.ProjectID {
+		if a.Scope != InstallationScope && a.Scope != OrganizationScope && p.ProjectID != b.ProjectID {
 			return nil, errors.New("guardrail attachment crosses request project")
 		}
 		entries = append(entries, p.Entries...)
@@ -160,15 +146,48 @@ func (r *Registry) Entries(b Boundary) ([]Entry, error) {
 	}
 	return entries, nil
 }
-func (r *Registry) Compile(b Boundary) (*Engine, error) {
+
+func (r *Registry) Engines(b Boundary) (map[string]*Engine, error) {
 	if r == nil {
 		return nil, nil
 	}
-	entries, err := r.Entries(b)
-	if err != nil {
-		return nil, err
+	keys := slices.Collect(func(yield func(string) bool) {
+		if !yield("") {
+			return
+		}
+		for _, a := range r.Attachments {
+			if a.Scope == KeyScope && r.Policies[a.PolicyRevisionID].ProjectID == b.ProjectID && !yield(a.ScopeID) {
+				return
+			}
+		}
+	})
+	engines := make(map[string]*Engine, len(keys))
+	for _, key := range keys {
+		entries, err := r.Entries(Boundary{ProjectID: b.ProjectID, RouteID: b.RouteID, ToolsetID: b.ToolsetID, KeyID: key})
+		if err != nil {
+			return nil, err
+		}
+		engine, err := Compile(entries, r.Definitions)
+		if err != nil {
+			return nil, err
+		}
+		if engine != nil {
+			engines[key] = engine
+		}
 	}
-	return Compile(entries, r.Definitions)
+	return engines, nil
+}
+
+func (r *Registry) CompilePolicy(id string) (PolicyRevision, *Engine, error) {
+	if r == nil {
+		return PolicyRevision{}, nil, ErrSurface
+	}
+	p, ok := r.Policies[id]
+	if !ok {
+		return PolicyRevision{}, nil, ErrSurface
+	}
+	engine, err := Compile(p.Entries, r.Definitions)
+	return p, engine, err
 }
 func (r *Registry) Window() int {
 	if r != nil && r.WindowBytes > 0 {

@@ -59,7 +59,7 @@ func (s *Server) publish(ctx context.Context, tx pgx.Tx, actor string) error {
 	return err
 }
 func projectPointer(project string) *string {
-	if project == "installation" || project == "" {
+	if project == InstallationProject || project == "" {
 		return nil
 	}
 	return &project
@@ -354,11 +354,11 @@ func AuthorizeAttachment(ctx context.Context, q access.Queryer, p access.Princip
 	if need == access.Change {
 		op := access.Configure
 		switch a.Scope {
-		case "installation":
+		case InstallationScope:
 			op = access.Settings
-		case "organization":
+		case OrganizationScope:
 			op = access.ManageOrganization
-		case "api-key":
+		case KeyScope:
 			op = access.Keys
 		}
 		if err := p.Authorize(op); err != nil {
@@ -366,16 +366,16 @@ func AuthorizeAttachment(ctx context.Context, q access.Queryer, p access.Princip
 		}
 	}
 	switch a.Scope {
-	case "installation":
+	case InstallationScope:
 		if !p.AllProjects {
 			return access.Forbidden()
 		}
 		return p.Project(nil, need)
-	case "organization":
+	case OrganizationScope:
 		return p.Organization(a.ScopeID, need)
-	case "project":
+	case ProjectScope:
 		return p.Project(&a.ScopeID, need)
-	case "route", "api-key", "toolset":
+	case RouteScope, KeyScope, ToolsetScope:
 		project, err := attachmentProject(ctx, q, a.Scope, a.ScopeID)
 		if err != nil {
 			return err
@@ -450,7 +450,7 @@ func (s *Server) writeAttachment(r *http.Request, remove bool) (access.Reply, er
 		if in.ID != "" || in.Order < 0 {
 			return access.Reply{}, access.Invalid("attachment", "The server assigns identities; position must be nonnegative.")
 		}
-		if !ValidAttachmentScope(in.Scope) {
+		if !in.Scope.Valid() {
 			return access.Reply{}, access.Invalid("scope", "Choose installation, organization, project, route, toolset or api-key.")
 		}
 	}
@@ -611,15 +611,15 @@ func validateAttachmentPolicy(ctx context.Context, tx pgx.Tx, p access.Principal
 		return err
 	}
 	ownedBy := func(id string) bool { return project != nil && *project == id }
-	if in.Scope == "project" && !ownedBy(in.ScopeID) {
+	if in.Scope == ProjectScope && !ownedBy(in.ScopeID) {
 		return access.Invalid("scope_id", "The policy must belong to this project.")
 	}
-	if in.Scope == "route" || in.Scope == "api-key" || in.Scope == "toolset" {
+	if in.Scope == RouteScope || in.Scope == KeyScope || in.Scope == ToolsetScope {
 		owning, ownerErr := attachmentProject(ctx, tx, in.Scope, in.ScopeID)
 		if ownerErr != nil || owning == nil || !ownedBy(*owning) {
 			return access.Invalid("scope_id", "The policy must belong to this project.")
 		}
-		if in.Scope == "route" && in.Order == 0 {
+		if in.Scope == RouteScope && in.Order == 0 {
 			var legacy bool
 			if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.guardrail_policies p JOIN olp.routes r ON r.latest_revision_id=p.managed_route_revision_id WHERE r.id=$1)", in.ScopeID).Scan(&legacy); err != nil {
 				return err

@@ -114,7 +114,7 @@ func ReadRegistry(ctx context.Context, q access.Queryer) (*Registry, error) {
 	}
 	for rows.Next() {
 		var a Attachment
-		a.Scope = "route"
+		a.Scope = RouteScope
 		if err = rows.Scan(&a.ID, &a.ScopeID, &a.PolicyRevisionID); err != nil {
 			rows.Close()
 			return nil, err

@@ -481,6 +481,14 @@ func (s *Server) EvaluateGuardrails(r *http.Request, p access.Principal, in guar
 	s.finish(x, &outcome{err: failure}, failure.Status)
 	return result, access.Fail(failure.Status, failure.Code, "The guardrail could not be evaluated.")
 }
+func appliedPolicy(view *routing.View, in guardrails.ApplyInput) (guardrails.PolicyRevision, *guardrails.Engine, error) {
+	if in.Policy == nil {
+		return view.CompileGuardrailPolicy(in.PolicyRevisionID)
+	}
+	engine, err := guardrails.Compile(in.Policy.Entries, in.Definitions)
+	return *in.Policy, engine, err
+}
+
 func (s *Server) evaluateGuardrails(ctx context.Context, x *call, in guardrails.ApplyInput) (guardrails.Result, error) {
 	x.route = &routing.Route{Slug: "guardrails", OverallTimeout: 30000, MaxAttempts: 1}
 	x.primary = x.route
@@ -488,28 +496,12 @@ func (s *Server) evaluateGuardrails(ctx context.Context, x *call, in guardrails.
 	if x.request.release == nil || (!x.snapshot().HasGuardrails() && in.Policy == nil) {
 		return guardrails.Result{}, guardrails.ErrSurface
 	}
-	registry := x.snapshot().Guardrails()
-	var p guardrails.PolicyRevision
-	var ok bool
-	var definitions map[string]guardrails.Revision
-	if registry != nil {
-		p, ok = registry.Policies[in.PolicyRevisionID]
-		definitions = registry.Definitions
-	}
-	if in.Policy != nil {
-		p = *in.Policy
-		ok = true
-		definitions = in.Definitions
-	}
-	if !ok {
-		return guardrails.Result{}, guardrails.ErrSurface
+	p, compiled, err := appliedPolicy(x.snapshot(), in)
+	if err != nil {
+		return guardrails.Result{}, err
 	}
 	if x.keyID != "" && (x.authority.ProjectID == nil || *x.authority.ProjectID != p.ProjectID) {
 		return guardrails.Result{}, guardrails.ErrSurface
-	}
-	compiled, err := guardrails.Compile(p.Entries, definitions)
-	if err != nil {
-		return guardrails.Result{}, err
 	}
 	engine := s.boundGuardrails(x, compiled)
 	x.guardrailEngine = engine

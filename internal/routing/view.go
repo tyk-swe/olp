@@ -233,20 +233,18 @@ func (v *View) WithRoute(route Route) *View {
 	return &View{snapshot: &snapshot}
 }
 
-func (v *View) HasGuardrails() bool              { return v.snapshot.Guardrails != nil }
-func (v *View) Guardrails() *guardrails.Registry { return v.snapshot.Guardrails.Clone() }
-func (v *View) GuardrailWindow() int             { return v.snapshot.Guardrails.Window() }
+func (v *View) HasGuardrails() bool  { return v.snapshot.Guardrails != nil }
+func (v *View) GuardrailWindow() int { return v.snapshot.Guardrails.Window() }
 func (v *View) GuardrailDefinition(revision string) guardrails.Revision {
 	definition := v.snapshot.Guardrails.Definitions[revision]
 	definition.Configuration = slices.Clone(definition.Configuration)
 	return definition
 }
-func (v *View) GuardrailEntries(project, route, key string) ([]guardrails.Entry, error) {
-	registry := v.snapshot.Guardrails
-	if registry == nil {
-		return nil, nil
-	}
-	return registry.Entries(guardrails.Boundary{ProjectID: project, OrganizationID: registry.ProjectOrganizations[project], RouteID: route, KeyID: key})
+func (v *View) GuardrailEntries(b guardrails.Boundary) ([]guardrails.Entry, error) {
+	return v.snapshot.Guardrails.Entries(b)
+}
+func (v *View) CompileGuardrailPolicy(id string) (guardrails.PolicyRevision, *guardrails.Engine, error) {
+	return v.snapshot.Guardrails.CompilePolicy(id)
 }
 
 func (s *Snapshot) CompiledView() (*View, error) {

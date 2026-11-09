@@ -129,7 +129,16 @@ type Attachment struct {
 	Order            int    `json:"order"`
 }
 
-type Boundary struct{ OrganizationID, ProjectID, RouteID, ToolsetID, KeyID string }
+const InstallationProject = "installation"
+
+type Boundary struct{ ProjectID, RouteID, ToolsetID, KeyID string }
+
+func ProjectOf(project *string) string {
+	if project == nil {
+		return InstallationProject
+	}
+	return *project
+}
 
 type Segment struct {
 	ID         string      `json:"id"`
