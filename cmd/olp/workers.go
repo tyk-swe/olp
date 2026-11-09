@@ -19,7 +19,8 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/export"
+	"github.com/tyk-swe/olp/internal/export/focus"
+	"github.com/tyk-swe/olp/internal/export/stream"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
@@ -46,7 +47,7 @@ import (
 // returned function waits for all of them to have stopped.
 // vk is the consumer's own Valkey client: its blocking stream reads would
 // otherwise stall every command the gateway sends on a shared connection.
-func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Client, limiter *limits.Limiter, stream string, mediaService *media.Service, pluginHost *plugins.Host, keys *secrets.KeyRing, auth *secrets.AuthKey, installation, region, hostname string, policy *egress.Policy, log *slog.Logger, exporter *export.Worker, focusWorker *export.FocusWorker, importer *billing.Importer, reference *catalog.Signed) func() {
+func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Client, limiter *limits.Limiter, stream string, mediaService *media.Service, pluginHost *plugins.Host, keys *secrets.KeyRing, auth *secrets.AuthKey, installation, region, hostname string, policy *egress.Policy, log *slog.Logger, exporter *stream.Worker, focusWorker *focus.Worker, importer *billing.Importer, reference *catalog.Signed) func() {
 	var wg sync.WaitGroup
 	managedExporter := &sinks.Worker{Pool: pool, Keys: keys, Installation: installation, Egress: policy}
 	wg.Go(func() { managedExporter.Run(ctx, log) })
@@ -79,12 +80,8 @@ func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Clie
 		Client:     policy.Client(30 * time.Second), Log: log,
 	}
 	wg.Go(func() { allowanceReader.Run(ctx) })
-	if exporter != nil {
-		wg.Go(func() { exporter.Run(ctx) })
-	}
-	if focusWorker != nil {
-		wg.Go(func() { focusWorker.Run(ctx) })
-	}
+	wg.Go(func() { exporter.Run(ctx) })
+	wg.Go(func() { focusWorker.Run(ctx) })
 	// The billing importer needs only PostgreSQL and provider egress, so it
 	// runs on every worker replica, coordination store or not.
 	if importer != nil {

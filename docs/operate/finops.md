@@ -281,10 +281,7 @@ retains incomplete coverage when evidence cannot be reconstructed.
 
 ### Conformance
 
-`internal/export/focusspec` interprets every Static rule of the FOCUS 1.4
-requirements model (upstream asset sha256
-`3dd2c0c6fcc2c3d1792060fcbebba4ae074cd4dade8cde72958bd37a9a8b183f`) under the
-declared applicability criteria:
+Every manifest declares these FOCUS 1.4 applicability criteria:
 
 ```
 ACCOUNT_NAMING_SUPPORTED, COMMITMENT_DISCOUNT_SUPPORTED,
@@ -293,15 +290,10 @@ PUBLIC_PRICE_LIST_SUPPORTED, SUB_ACCOUNT_SUPPORTED, TAGGING_SUPPORTED,
 UNIT_PRICING_SUPPORTED, USAGE_MEASUREMENT_SUPPORTED
 ```
 
-The integration suite validates generated parts against the pinned static
-model, including unused rows and resource fields. Explicit cross-row checks also
-verify exact period reconciliation and `CAU-CostAndUsage-D-082-C`; other dynamic
-rules still require qualification. The checker skips the deprecated ProviderName/PublisherName
-presence rules the 1.4 model still ships and applies null-safe requirement
-comparisons. The official focus-validator 2.2.1 cannot validate these
-datasets: it crashes on a dependency cycle through the Dynamic
-CommitmentDiscountQuantity rules and mis-evaluates removed and conditional
-rules, so the in-repo interpreter is the conformance authority.
+The repository does not ship a FOCUS conformance checker. The official
+focus-validator 2.2.1 cannot validate these datasets because it crashes on a
+dependency cycle through the Dynamic CommitmentDiscountQuantity rules and
+mis-evaluates removed and conditional rules.
 
 ## Invoice reconciliation
 

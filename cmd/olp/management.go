@@ -18,7 +18,9 @@ import (
 	"github.com/tyk-swe/olp/internal/branding"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/export"
+	"github.com/tyk-swe/olp/internal/export/capture"
+	"github.com/tyk-swe/olp/internal/export/destination"
+	"github.com/tyk-swe/olp/internal/export/focus"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/grants/personal"
 	"github.com/tyk-swe/olp/internal/guardrails"
@@ -155,7 +157,9 @@ func (m Management) Register(mux *http.ServeMux) {
 	// of the management surface; their patterns are more specific than
 	// its catch-all, which answers everything no surface claims.
 	(&usage.Server{Access: m.Access, VendorKind: providers.VendorKind, Egress: m.Egress, Catalog: m.Catalog, CatalogKeys: m.CatalogKeys}).Register(mux)
-	(&export.Management{Access: m.Access, Pool: m.Access.Pool, Keys: m.Access.Keys, Installation: m.Access.Installation, Egress: m.Egress}).Register(mux)
+	destination.NewAPI(m.Access, m.Egress).Register(mux)
+	focus.NewAPI(m.Access).Register(mux)
+	capture.NewAPI(m.Access).Register(mux)
 	(&billing.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
 	promotionserve.Register(mux, promotionserve.Deps{
 		Access:     m.Access,

@@ -470,26 +470,34 @@ type Pagination struct {
 }
 
 func Page(r *http.Request) (Pagination, error) {
-	p := Pagination{Limit: 50, Before: "ffffffff-ffff-ffff-ffff-ffffffffffff"}
+	return PageBy(r, "ffffffff-ffff-ffff-ffff-ffffffffffff", func(raw string) (string, error) {
+		v, err := uuid.Parse(raw)
+		return v.String(), err
+	})
+}
+
+func PageBy(r *http.Request, first string, cursor func(string) (string, error)) (Pagination, error) {
+	limit := 50
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 || n > 200 {
-			return p, Invalid("limit", "Use a page size from 1 to 200.")
+			return Pagination{}, Invalid("limit", "Use a page size from 1 to 200.")
 		}
-		p.Limit = n
+		limit = n
 	}
-	if raw := r.URL.Query().Get("cursor"); raw != "" {
-		b, err := base64.RawURLEncoding.DecodeString(raw)
-		if err != nil {
-			return p, Invalid("cursor", "Invalid pagination cursor.")
-		}
-		v, err := uuid.Parse(string(b))
-		if err != nil {
-			return p, Invalid("cursor", "Invalid pagination cursor.")
-		}
-		p.Before = v.String()
+	raw := r.URL.Query().Get("cursor")
+	if raw == "" {
+		return Pagination{Limit: limit, Before: first}, nil
 	}
-	return p, nil
+	b, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return Pagination{}, Invalid("cursor", "Invalid pagination cursor.")
+	}
+	before, err := cursor(string(b))
+	if err != nil {
+		return Pagination{}, Invalid("cursor", "Invalid pagination cursor.")
+	}
+	return Pagination{Limit: limit, Before: before}, nil
 }
 func ListReply(items []map[string]any, p Pagination) Reply {
 	return ListReplyBy(items, p, func(item map[string]any) string { return item["id"].(string) })

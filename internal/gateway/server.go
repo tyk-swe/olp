@@ -29,7 +29,7 @@ import (
 	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/export"
+	"github.com/tyk-swe/olp/internal/export/capture"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
@@ -118,7 +118,7 @@ type Dependencies struct {
 	WorkflowTools      WorkflowToolRunner
 	Traces             *TraceDeps
 	Media              *MediaDeps
-	Capture            *export.Manager
+	Capture            *capture.Manager
 	Business           *telemetry.BusinessMetrics
 
 	Resources *resources.Store

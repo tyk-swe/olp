@@ -11,7 +11,7 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/export"
+	"github.com/tyk-swe/olp/internal/export/capture"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
@@ -105,7 +105,7 @@ type call struct {
 	policyDecisions           []contentpolicy.Decision
 
 	captureContext context.Context
-	capture        *export.Collector
+	capture        *capture.Collector
 	estimate       int64
 	sizedInput     *int64
 

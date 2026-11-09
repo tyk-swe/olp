@@ -659,7 +659,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 			}
 			err := x.generation.emit(frame)
 			if err == nil && x.capture != nil {
-				x.captureDeliveredFrame(frame)
+				x.capture.CaptureStreamFrame(x.family, frame)
 			}
 			if fact.Interaction != nil {
 				if fact.Interaction.ClientState == usage.ClientUnobserved {

@@ -12,7 +12,7 @@ func (p Principal) Organization(id string, need Need) error {
 	}
 	role, ok := p.Organizations[id]
 	if !ok {
-		return notFound
+		return NotFound
 	}
 	if need == Change && role != "manager" {
 		return Forbidden()

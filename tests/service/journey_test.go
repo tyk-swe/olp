@@ -24,7 +24,8 @@ import (
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/export"
+	"github.com/tyk-swe/olp/internal/export/destination"
+	"github.com/tyk-swe/olp/internal/export/focus"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/notifications"
@@ -922,8 +923,8 @@ func TestFocusExportsHonorDefaultAndExplicitStartDates(t *testing.T) {
 	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/manifest.json") {
 			var manifest struct {
-				ChargeDate       string                   `json:"charge_date"`
-				CommitmentTotals *export.CommitmentTotals `json:"commitment_totals"`
+				ChargeDate       string                  `json:"charge_date"`
+				CommitmentTotals *focus.CommitmentTotals `json:"commitment_totals"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&manifest); err != nil {
 				w.WriteHeader(http.StatusBadRequest)
@@ -970,7 +971,7 @@ func TestFocusExportsHonorDefaultAndExplicitStartDates(t *testing.T) {
 		}
 	}
 	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
-	worker := export.FocusWorker{Pool: pool, Keys: ring, Installation: installation, Sender: export.NewSender(policy, func(string) string { return "" }), Now: func() time.Time { return today.Add(12 * time.Hour) }}
+	worker := focus.Worker{Pool: pool, Keys: ring, Installation: installation, Sender: destination.NewSender(policy, func(string) string { return "" }, installation), Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: func() time.Time { return today.Add(12 * time.Hour) }}
 	if _, err := worker.Pass(t.Context()); err != nil {
 		t.Fatal(err)
 	}

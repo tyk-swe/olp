@@ -13,6 +13,7 @@ go test -mod=readonly -vet=off -count=1 -timeout=60s \
   ./internal/notifications \
   ./internal/billing \
   ./internal/usage \
+  ./internal/export/focus \
   ./internal/protocols \
   ./internal/protocols/wire \
   ./internal/protocols/openai \

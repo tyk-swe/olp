@@ -3,9 +3,6 @@ package sinks
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"github.com/tyk-swe/olp/internal/observability/workerhealth"
@@ -230,22 +227,15 @@ func (w *Worker) send(ctx context.Context, d *delivery) string {
 		if err != nil {
 			return "credential_unavailable"
 		}
-		sum := hmac.New(sha256.New, secret)
-		_, _ = sum.Write(body)
+		egress.SignBody(req.Header, secret, body)
 		clear(secret)
-		req.Header.Set("X-OLP-Signature", "sha256="+hex.EncodeToString(sum.Sum(nil)))
 	}
-	if d.stream == string(evidence.Runs) || d.stream == string(evidence.TraceSpans) {
-		if d.sourceID == nil || d.projectID == nil {
-			return "evidence_ineligible"
-		}
-		eligible, err := evidence.Eligible(bounded, w.Pool, evidence.Stream(d.stream), *d.sourceID, *d.projectID, d.creatorID)
-		if err != nil {
-			return "evidence_unavailable"
-		}
-		if !eligible {
-			return "evidence_ineligible"
-		}
+	admitted, err := evidence.Admit(bounded, w.Pool, d.stream, d.sourceID, d.projectID, d.creatorID)
+	if err != nil {
+		return "evidence_unavailable"
+	}
+	if !admitted {
+		return "evidence_ineligible"
 	}
 	w.clientOnce.Do(func() { w.client = w.Egress.Client(deliveryTimeout) })
 	response, err := w.client.Do(req)

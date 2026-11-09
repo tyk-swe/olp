@@ -2,7 +2,10 @@ package access
 
 import (
 	"context"
+	"errors"
 	"slices"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // Need is how a principal uses a project-bound resource.
@@ -15,7 +18,7 @@ const (
 	Change
 )
 
-var notFound = Fail(404, "not_found", "The resource was not found.")
+var NotFound = Fail(404, "not_found", "The resource was not found.")
 
 // Project decides p's access to a resource in projectID, where nil is the
 // unassigned boundary only installation-wide principals reach. A resource
@@ -27,11 +30,11 @@ func (p Principal) Project(projectID *string, need Need) error {
 		return nil
 	}
 	if projectID == nil {
-		return notFound
+		return NotFound
 	}
 	role, ok := p.Projects[*projectID]
 	if !ok {
-		return notFound
+		return NotFound
 	}
 	if need == Change && role != "manager" {
 		return Forbidden()
@@ -68,7 +71,14 @@ func (s *Server) RequireProject(ctx context.Context, q Queryer, p Principal, pro
 		return err
 	}
 	if !exists {
-		return notFound
+		return NotFound
 	}
 	return p.Project(projectID, Change)
+}
+
+func NotFoundOr(err error) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return NotFound
+	}
+	return err
 }
