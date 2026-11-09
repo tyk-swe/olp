@@ -5,7 +5,6 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
-	"errors"
 	"slices"
 	"strings"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/guardrails/definition"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -152,7 +152,7 @@ func planDefinition(ctx context.Context, q access.Queryer, directory promotion.D
 	if !present {
 		return item(contract.ConfigurationPlanItemKindGuardrail, key, contract.ConfigurationPlanItemActionCreate, "Publish a reusable bounded content-policy definition."), nil
 	}
-	current, err := findActive(ctx, q, id, g.Name)
+	current, err := definition.FindActive(ctx, q, id, g.Name)
 	if err != nil {
 		return promotion.Item{}, err
 	}
@@ -195,7 +195,7 @@ func applyGuardrail(ctx context.Context, tx pgx.Tx, p access.Principal, director
 	if err != nil {
 		return err
 	}
-	current, err := findActive(ctx, tx, installationOr(project), g.Name)
+	current, err := definition.FindActive(ctx, tx, installationOr(project), g.Name)
 	if err != nil {
 		return err
 	}
@@ -203,16 +203,20 @@ func applyGuardrail(ctx context.Context, tx pgx.Tx, p access.Principal, director
 		if current.ActiveRevisionID != nil && *current.ActiveRevisionID == current.RevisionID {
 			return nil
 		}
-		return guardrails.ActivateRevision(ctx, tx, p.UserID(), current.ID, current.RevisionID)
+		return definition.Activate(ctx, tx, p.UserID(), current.ID, current.RevisionID)
 	}
-	saved := &guardrails.Definition{ProjectID: installationOr(project), Name: g.Name, Type: g.Type, Configuration: configuration, TimeoutMS: g.TimeoutMS, OnError: g.OnError}
-	if err := guardrails.Save(ctx, tx, p.UserID(), current, saved); err != nil {
+	draft, err := definition.NewDraft(installationOr(project), g.Name, g.Type, configuration, g.TimeoutMS, g.OnError)
+	if err != nil {
 		return err
 	}
-	return guardrails.ActivateRevision(ctx, tx, p.UserID(), saved.ID, saved.RevisionID)
+	saved, err := definition.Save(ctx, tx, p.UserID(), current, draft)
+	if err != nil {
+		return err
+	}
+	return definition.Activate(ctx, tx, p.UserID(), saved.ID, saved.RevisionID)
 }
 
-func reusable(current *guardrails.Definition, g Guardrail, configuration json.RawMessage) bool {
+func reusable(current *definition.Definition, g Guardrail, configuration json.RawMessage) bool {
 	return current != nil && current.Name == g.Name && current.Type == g.Type && equal(Guardrail{Configuration: current.Configuration, TimeoutMS: current.TimeoutMS, OnError: current.OnError}, Guardrail{Configuration: configuration, TimeoutMS: g.TimeoutMS, OnError: g.OnError})
 }
 
@@ -225,14 +229,6 @@ func owner(directory promotion.Directory, name string) (string, bool) {
 
 func item(kind contract.ConfigurationPlanItemKind, key string, action contract.ConfigurationPlanItemAction, detail string) promotion.Item {
 	return promotion.Item{Kind: kind, Key: key, Action: action, Detail: detail}
-}
-
-func findActive(ctx context.Context, q access.Queryer, projectID, name string) (*guardrails.Definition, error) {
-	current, err := guardrails.FindActive(ctx, q, projectID, name)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	return current, err
 }
 
 func equal(a, b Guardrail) bool {

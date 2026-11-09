@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/guardrails/definition"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -224,9 +225,12 @@ func applyPolicy(ctx context.Context, tx pgx.Tx, p access.Principal, directory p
 }
 
 func pin(ctx context.Context, q access.Queryer, project *string, e Entry) (guardrails.Entry, error) {
-	current, err := guardrails.FindActive(ctx, q, installationOr(project), e.Guardrail)
+	current, err := definition.FindActive(ctx, q, installationOr(project), e.Guardrail)
 	if err != nil {
 		return guardrails.Entry{}, err
+	}
+	if current == nil {
+		return guardrails.Entry{}, fmt.Errorf("guardrail %q is not defined: %w", e.Guardrail, pgx.ErrNoRows)
 	}
 	if current.ActiveRevisionID == nil {
 		return guardrails.Entry{}, fmt.Errorf("guardrail %q has no active revision", e.Guardrail)

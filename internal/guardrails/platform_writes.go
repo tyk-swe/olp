@@ -9,19 +9,15 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 )
 
-func ActivateRevision(ctx context.Context, tx pgx.Tx, actor, guardrailID, revisionID string) error {
-	return activate(ctx, tx, "guardrails", "guardrail_revision_activations", actor, guardrailID, revisionID)
-}
-
 func ActivatePolicy(ctx context.Context, tx pgx.Tx, actor, policyID, revisionID string) error {
-	return activate(ctx, tx, "guardrail_policies", "guardrail_policy_revision_activations", actor, policyID, revisionID)
-}
-
-func activate(ctx context.Context, tx pgx.Tx, table, log, actor, id, revisionID string) error {
-	if _, err := tx.Exec(ctx, "INSERT INTO olp."+log+"(revision_id,activated_by) VALUES($1,$2) ON CONFLICT DO NOTHING", revisionID, actor); err != nil {
+	tag, err := tx.Exec(ctx, "UPDATE olp.guardrail_policies SET active_revision_id=$2,etag=$3 WHERE id=$1 AND EXISTS(SELECT 1 FROM olp.guardrail_policy_revisions WHERE id=$2 AND policy_id=$1)", policyID, revisionID, access.NewID())
+	if err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, "UPDATE olp."+table+" SET active_revision_id=$2,etag=$3 WHERE id=$1", id, revisionID, access.NewID())
+	if tag.RowsAffected() == 0 {
+		return ActivationRefused()
+	}
+	_, err = tx.Exec(ctx, "INSERT INTO olp.guardrail_policy_revision_activations(revision_id,activated_by) VALUES($1,$2) ON CONFLICT DO NOTHING", revisionID, actor)
 	return err
 }
 
@@ -49,7 +45,7 @@ func followingRevision(current *PolicyRevision, next PolicyRevision) PolicyRevis
 
 func writePolicyHead(ctx context.Context, tx pgx.Tx, actor string, create bool, saved PolicyRevision) error {
 	if create {
-		_, err := tx.Exec(ctx, "INSERT INTO olp.guardrail_policies(id,project_id,name,latest_revision_id,etag,created_by) VALUES($1,$2,$3,$4,$5,$6)", saved.PolicyID, projectPointer(saved.ProjectID), saved.Name, saved.ID, access.NewID(), actor)
+		_, err := tx.Exec(ctx, "INSERT INTO olp.guardrail_policies(id,project_id,name,latest_revision_id,etag,created_by) VALUES($1,$2,$3,$4,$5,$6)", saved.PolicyID, ProjectPointer(saved.ProjectID), saved.Name, saved.ID, access.NewID(), actor)
 		return err
 	}
 	_, err := tx.Exec(ctx, "UPDATE olp.guardrail_policies SET name=$2,latest_revision_id=$3,etag=$4 WHERE id=$1", saved.PolicyID, saved.Name, saved.ID, access.NewID())
@@ -58,7 +54,7 @@ func writePolicyHead(ctx context.Context, tx pgx.Tx, actor string, create bool, 
 
 func createAttachment(ctx context.Context, tx pgx.Tx, actor string, a Attachment) (Attachment, error) {
 	created := Attachment{ID: access.NewID(), Scope: a.Scope, ScopeID: a.ScopeID, PolicyRevisionID: a.PolicyRevisionID, Order: a.Order}
-	_, err := tx.Exec(ctx, "INSERT INTO olp.guardrail_attachments(id,scope,scope_id,policy_revision_id,position,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)", created.ID, created.Scope, projectPointer(created.ScopeID), created.PolicyRevisionID, created.Order, access.NewID(), actor)
+	_, err := tx.Exec(ctx, "INSERT INTO olp.guardrail_attachments(id,scope,scope_id,policy_revision_id,position,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)", created.ID, created.Scope, ProjectPointer(created.ScopeID), created.PolicyRevisionID, created.Order, access.NewID(), actor)
 	return created, err
 }
 
@@ -70,7 +66,7 @@ func repointAttachment(ctx context.Context, tx pgx.Tx, id, policyRevisionID stri
 
 func PlaceAttachment(ctx context.Context, tx pgx.Tx, actor string, a Attachment) error {
 	var id, current string
-	err := tx.QueryRow(ctx, "SELECT id::text,policy_revision_id::text FROM olp.guardrail_attachments WHERE scope=$1 AND scope_id IS NOT DISTINCT FROM $2::uuid AND position=$3", a.Scope, projectPointer(a.ScopeID), a.Order).Scan(&id, &current)
+	err := tx.QueryRow(ctx, "SELECT id::text,policy_revision_id::text FROM olp.guardrail_attachments WHERE scope=$1 AND scope_id IS NOT DISTINCT FROM $2::uuid AND position=$3", a.Scope, ProjectPointer(a.ScopeID), a.Order).Scan(&id, &current)
 	if errors.Is(err, pgx.ErrNoRows) {
 		_, err := createAttachment(ctx, tx, actor, a)
 		return err

@@ -54,7 +54,7 @@ func ReadRegistry(ctx context.Context, q access.Queryer) (*Registry, error) {
 		}
 		for _, id := range spec.References().IDs() {
 			var owned bool
-			if err = q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.guardrail_credentials WHERE id=$1 AND project_id IS NOT DISTINCT FROM $2::uuid)", id, projectPointer(d.ProjectID)).Scan(&owned); err != nil {
+			if err = q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.guardrail_credentials WHERE id=$1 AND project_id IS NOT DISTINCT FROM $2::uuid)", id, ProjectPointer(d.ProjectID)).Scan(&owned); err != nil {
 				return nil, err
 			}
 			if !owned {

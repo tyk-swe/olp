@@ -31,15 +31,20 @@ type ApplyInput struct {
 	Segments         []Segment           `json:"segments"`
 }
 
-func (s *Server) registerPlatform(mux *http.ServeMux) {
+type Server struct {
+	Access   *access.Server
+	Publish  Publisher
+	Evaluate func(*http.Request, access.Principal, ApplyInput) (Result, error)
+}
+
+func (s *Server) Register(mux *http.ServeMux) {
 	a := s.Access
-	a.Route(mux, "POST /api/v1/guardrails/{guardrail_id}/activate", s.activateDefinition)
 	a.Route(mux, "GET /api/v1/guardrail-policies", s.listPolicies)
 	a.Route(mux, "POST /api/v1/guardrail-policies", s.createPolicy, access.MaxBody(128<<10))
 	a.Route(mux, "GET /api/v1/guardrail-policies/{policy_id}", s.getPolicy)
 	a.Route(mux, "PUT /api/v1/guardrail-policies/{policy_id}", s.updatePolicy, access.MaxBody(128<<10))
 	a.Route(mux, "DELETE /api/v1/guardrail-policies/{policy_id}", s.retirePolicy)
-	a.Route(mux, "POST /api/v1/guardrail-policies/{policy_id}/activate", s.activatePolicy)
+	a.Route(mux, "POST /api/v1/guardrail-policies/{policy_id}/activate", Activation(a, s.Publish, policyLineage{}, "policy_id", "guardrail_policies"))
 	a.Route(mux, "GET /api/v1/guardrail-policies/{policy_id}/revisions/{revision_id}", s.policyRevision)
 	a.Route(mux, "GET /api/v1/guardrail-attachments", s.listAttachments)
 	a.Route(mux, "POST /api/v1/guardrail-attachments", s.attach)
@@ -48,17 +53,7 @@ func (s *Server) registerPlatform(mux *http.ServeMux) {
 	a.Route(mux, "PUT /api/v1/guardrail-attachments/{attachment_id}", s.replaceAttachment)
 }
 func (s *Server) publish(ctx context.Context, tx pgx.Tx, actor string) error {
-	if s.Publish != nil {
-		return s.Publish(ctx, tx, actor)
-	}
-	_, err := ReadRegistry(ctx, tx)
-	return err
-}
-func projectPointer(project string) *string {
-	if project == InstallationProject || project == "" {
-		return nil
-	}
-	return &project
+	return s.Publish(ctx, tx, actor)
 }
 
 func latestRevision(current *ManagedPolicy) *PolicyRevision {
@@ -66,13 +61,6 @@ func latestRevision(current *ManagedPolicy) *PolicyRevision {
 		return nil
 	}
 	return &current.PolicyRevision
-}
-
-func activation(policy bool) func(context.Context, pgx.Tx, string, string, string) error {
-	if policy {
-		return ActivatePolicy
-	}
-	return ActivateRevision
 }
 
 func loadPolicy(ctx context.Context, q access.Queryer, id string, lock bool) (*ManagedPolicy, error) {
@@ -126,7 +114,7 @@ func (s *Server) getPolicy(r *http.Request, p access.Principal) (access.Reply, e
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err = p.Project(projectPointer(v.ProjectID), access.View); err != nil {
+	if err = p.Project(ProjectPointer(v.ProjectID), access.View); err != nil {
 		return access.Reply{}, err
 	}
 	return access.Detail(v, v.ETag), nil
@@ -140,7 +128,7 @@ func (s *Server) policyRevision(r *http.Request, p access.Principal) (access.Rep
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err = p.Project(projectPointer(v.ProjectID), access.View); err != nil {
+	if err = p.Project(ProjectPointer(v.ProjectID), access.View); err != nil {
 		return access.Reply{}, err
 	}
 	rid, err := access.IDParam(r, "revision_id")
@@ -189,7 +177,7 @@ func (s *Server) writePolicy(r *http.Request, id string, retire bool) (access.Re
 		if err != nil {
 			return access.Reply{}, err
 		}
-		if err = p.Project(projectPointer(current.ProjectID), access.Change); err != nil {
+		if err = p.Project(ProjectPointer(current.ProjectID), access.Change); err != nil {
 			return access.Reply{}, err
 		}
 	} else {
@@ -268,80 +256,17 @@ func (s *Server) writePolicy(r *http.Request, id string, retire bool) (access.Re
 	}
 	return reply, tx.Commit(r.Context())
 }
-func (s *Server) activateDefinition(r *http.Request, _ access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "guardrail_id")
-	if err != nil {
-		return access.Reply{}, err
-	}
-	return s.activate(r, id, false)
+
+type policyLineage struct{}
+
+func (policyLineage) Lock(ctx context.Context, tx pgx.Tx, id string) (Head, error) {
+	var head Head
+	err := tx.QueryRow(ctx, "SELECT COALESCE(project_id::text,'installation'),etag::text,retired_at IS NOT NULL FROM olp.guardrail_policies WHERE id=$1 FOR UPDATE", id).Scan(&head.Project, &head.ETag, &head.Retired)
+	return head, err
 }
-func (s *Server) activatePolicy(r *http.Request, _ access.Principal) (access.Reply, error) {
-	id, err := access.IDParam(r, "policy_id")
-	if err != nil {
-		return access.Reply{}, err
-	}
-	return s.activate(r, id, true)
-}
-func (s *Server) activate(r *http.Request, id string, policy bool) (access.Reply, error) {
-	var in struct {
-		RevisionID string `json:"revision_id"`
-	}
-	if err := access.DecodeUnique(r, &in, 65536); err != nil {
-		return access.Reply{}, err
-	}
-	tx, p, err := s.Access.BeginMutation(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	table, revisionTable, owner := "guardrails", "guardrail_revisions", "guardrail_id"
-	if policy {
-		table, revisionTable, owner = "guardrail_policies", "guardrail_policy_revisions", "policy_id"
-	}
-	var project, etag string
-	var retired *time.Time
-	err = tx.QueryRow(r.Context(), "SELECT COALESCE(project_id::text,'installation'),etag::text,retired_at FROM olp."+table+" WHERE id=$1 FOR UPDATE", id).Scan(&project, &etag, &retired)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err = p.Project(projectPointer(project), access.Change); err != nil {
-		return access.Reply{}, err
-	}
-	claim, replayed, err := s.Access.Replay(r, tx, p, in)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if replayed != nil {
-		return *replayed, tx.Commit(r.Context())
-	}
-	if err = access.Match(r, etag); err != nil {
-		return access.Reply{}, err
-	}
-	if retired != nil {
-		return access.Reply{}, access.Fail(409, "guardrail_retired", "A retired resource cannot be activated.")
-	}
-	var exists bool
-	err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp."+revisionTable+" WHERE id=$1 AND "+owner+"=$2)", in.RevisionID, id).Scan(&exists)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if !exists {
-		return access.Reply{}, access.Invalid("revision_id", "Choose a revision owned by this resource.")
-	}
-	if err = activation(policy)(r.Context(), tx, p.UserID(), id, in.RevisionID); err != nil {
-		return access.Reply{}, err
-	}
-	if err = s.publish(r.Context(), tx, p.UserID()); err != nil {
-		return access.Reply{}, access.Invalid("revision_id", "This activation is incompatible with a published route or attachment.")
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "guardrail.activate", table, id, "success"); err != nil {
-		return access.Reply{}, err
-	}
-	reply := access.Reply{Status: 204}
-	if err = s.Access.CompleteReplay(r, tx, claim, reply); err != nil {
-		return access.Reply{}, err
-	}
-	return reply, tx.Commit(r.Context())
+
+func (policyLineage) Activate(ctx context.Context, tx pgx.Tx, actor, id, revisionID string) error {
+	return ActivatePolicy(ctx, tx, actor, id, revisionID)
 }
 
 // AuthorizeAttachment preserves the authority of the resource being changed.
@@ -524,7 +449,7 @@ func (s *Server) evaluate(r *http.Request, p access.Principal) (access.Reply, er
 	if err := s.Access.Pool.QueryRow(r.Context(), "SELECT COALESCE(p.project_id::text,'installation') FROM olp.guardrail_policy_revisions v JOIN olp.guardrail_policies p ON p.id=v.policy_id WHERE v.id=$1", in.PolicyRevisionID).Scan(&project); err != nil {
 		return access.Reply{}, err
 	}
-	if err := p.Project(projectPointer(project), access.View); err != nil {
+	if err := p.Project(ProjectPointer(project), access.View); err != nil {
 		return access.Reply{}, err
 	}
 	var selected PolicyRevision

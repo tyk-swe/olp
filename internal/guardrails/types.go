@@ -133,6 +133,13 @@ const InstallationProject = "installation"
 
 type Boundary struct{ ProjectID, RouteID, ToolsetID, KeyID string }
 
+func ProjectPointer(project string) *string {
+	if project == InstallationProject || project == "" {
+		return nil
+	}
+	return &project
+}
+
 func ProjectOf(project *string) string {
 	if project == nil {
 		return InstallationProject
