@@ -143,9 +143,13 @@ func (s *Server) stageCredentialImport(request *http.Request, current *record, s
 	if err != nil {
 		return access.Reply{}, err
 	}
-	return s.bindGrant(r, tx, p.Actor(), grantBinding{ProviderID: current.ID, SlotID: slot.ID, ExpectedCredentialID: slot.CredentialID,
+	completed, err := s.Catalogue.bindGrant(ctx, tx, s.enrollmentAuthority(r), p.Actor(), grantBinding{ProviderID: current.ID, SlotID: slot.ID, ExpectedCredentialID: slot.CredentialID,
 		Credential: grants.Credential{ID: credentialID, Version: version, Principal: grant.Principal}, Action: "provider.grant.import"},
 		access.Fail(409, string(adapter)+"_import_stale", "The credential slot changed during import. Reload before retrying."))
+	if err != nil {
+		return access.Reply{}, err
+	}
+	return access.Reply{Status: 201, ETag: completed.ETag, Body: completed}, tx.Commit(ctx)
 }
 
 type importedCredential struct {

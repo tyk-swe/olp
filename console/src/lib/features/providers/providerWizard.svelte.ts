@@ -1,7 +1,7 @@
 import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
 import { snapshotNativeJSON, stringifyNativeJSON } from '#lib/nativeJson.js';
 import { networkCredentialPath } from './configurationDraft.svelte';
-import { refreshProviderChange } from './providerChanges';
+import { refreshProviderReceipt } from './providerChanges';
 import { providerKeys } from '#lib/features/providers/providerKeys.js';
 import { createQuery, skipToken, useQueryClient } from '@tanstack/svelte-query';
 import { onDestroy } from 'svelte';
@@ -404,17 +404,21 @@ export class ProviderWizardState {
       this.providerId = submission.id;
       this.notice =
         'Provider saved. Connection testing remains a separate step.';
-      const snapshot = await this.refetchWizardModels();
-      if (!isCurrent()) return;
-      const refreshed = await refreshProviderChange(this.queryClient, {
-        kind: 'connection'
-      });
-      if (!isCurrent()) return;
+      const refreshed = await refreshProviderReceipt(
+        this.queryClient,
+        {
+          change: { kind: 'connection' },
+          notice: this.notice
+        },
+        this.refetchWizardModels,
+        isCurrent
+      );
+      if (refreshed.kind === 'stale') return;
       if (refreshed.kind === 'refresh-failed') {
         this.errorMessage = `The provider change succeeded, but refreshing failed. ${refreshed.message}`;
         return;
       }
-      if (!isCurrent()) return;
+      const snapshot = refreshed.value;
       if (this.grantRequired) {
         const enrolled = await this.holdsLiveGrant(snapshot.provider);
         if (!isCurrent()) return;
@@ -696,15 +700,24 @@ export class ProviderWizardState {
       const committed = await activate();
       if (!committed || !isCurrent()) return;
       this.notice = `Provider activated in runtime generation ${committed.generation}.`;
-      await this.refetchWizardModels();
-      if (!isCurrent()) return;
-      this.wizardStep = 3;
-      const refreshed = await refreshProviderChange(this.queryClient, {
-        kind: 'activation',
-        id: provider.id
-      });
-      if (isCurrent() && refreshed.kind === 'refresh-failed')
+      const refreshed = await refreshProviderReceipt(
+        this.queryClient,
+        {
+          change: { kind: 'activation', id: provider.id },
+          notice: this.notice
+        },
+        async () => {
+          const snapshot = await this.refetchWizardModels();
+          if (isCurrent()) this.wizardStep = 3;
+          return snapshot;
+        },
+        isCurrent
+      );
+      if (refreshed.kind === 'stale') return;
+      if (refreshed.kind === 'refresh-failed') {
         this.errorMessage = `The provider change succeeded, but refreshing failed. ${refreshed.message}`;
+        return;
+      }
     });
   };
   constructor() {

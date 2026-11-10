@@ -6,49 +6,25 @@
   import type { Provider } from '#lib/features/providers/providers.js';
   import type { ProviderKindCapability } from '#lib/features/providers/models.js';
   import ProviderActivationControls from '#lib/features/providers/ProviderActivationControls.svelte';
-  import type { RunProviderAction } from './providerEditor';
-  import type { FieldIssue } from '#lib/management/http.js';
   import {
     providerStatus,
-    providerStatusTone,
-    type ProviderEditValues
+    providerStatusTone
   } from '#lib/features/providers/providerEditor.js';
 
+  import type { ProviderEditor } from './providerEditor.svelte';
   let {
     current,
     providerSpec,
-    editValues = $bindable(),
-    busy,
-    savedDraftEpoch = 0,
-    canManage,
-    run,
-    onTouch,
-    dirty = false,
-    issues = [],
-    onSave,
-    onProviderChanged,
-    onRefetchProvider,
-    onNotice
+    editor
   }: {
     current: Provider;
     providerSpec: ProviderKindCapability | undefined;
-    editValues: ProviderEditValues;
-    busy: string;
-    savedDraftEpoch?: number;
-    canManage: boolean;
-    run: RunProviderAction;
-    onTouch: () => void;
-    dirty?: boolean;
-    /** Field issues the server reported for the last change. */
-    issues?: FieldIssue[];
-    onSave: () => void;
-    onProviderChanged: (mutation?: {
-      previousEtag: string;
-      etag: string;
-    }) => Promise<void>;
-    onRefetchProvider: () => Promise<boolean>;
-    onNotice: (message: string) => void;
+    editor: ProviderEditor;
   } = $props();
+  const editorView = $derived(editor.view);
+  const editValues = $derived(editorView.draft);
+  const busy = $derived(editorView.busy);
+  const canManage = $derived(editor.canManage);
 </script>
 
 <section class="card editor" aria-labelledby="configuration-heading">
@@ -69,50 +45,39 @@
   <div class="form-grid">
     {#if providerSpec}
       <ProviderConnectionFields
-        bind:values={editValues}
+        values={editValues}
         spec={providerSpec}
         idPrefix="detail"
         disabled={!canManage}
-        onChange={onTouch}
+        onChange={editor.touch}
       />
       <ProviderCommitmentEditor
-        bind:values={editValues}
+        values={editValues}
         idPrefix="detail"
         disabled={!canManage}
-        onChange={onTouch}
+        onChange={editor.touch}
       />
     {/if}
     {#if current.configuration.kind === 'plugin'}<PluginProfileField
         values={editValues}
         idPrefix="detail"
         disabled={!canManage || Boolean(busy) || current.state === 'disabled'}
-        {issues}
-        onChange={onTouch}
+        issues={editorView.validationIssues}
+        onChange={editor.touch}
       />{/if}
   </div>
   <ProviderProfileEditor
     values={editValues}
     idPrefix="detail"
-    provider={current}
+    {editor}
     disabled={!canManage || Boolean(busy) || current.state === 'disabled'}
-    {run}
-    {onProviderChanged}
-    onChange={onTouch}
+    onChange={editor.touch}
   />
-  {#key savedDraftEpoch}
-    <ProviderActivationControls
-      {current}
-      {busy}
-      {canManage}
-      canSave={Boolean(providerSpec) && !editValues.document?.issue}
-      {dirty}
-      {run}
-      {onSave}
-      {onProviderChanged}
-      {onRefetchProvider}
-      {onNotice}
-    />
-  {/key}
+  <ProviderActivationControls
+    {current}
+    {editor}
+    canSave={Boolean(providerSpec) && !editValues.document?.issue}
+  />
 </section>
 
 <style>

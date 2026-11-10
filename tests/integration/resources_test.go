@@ -196,3 +196,50 @@ func TestDurableContractsAreSealedForTheirOwner(t *testing.T) {
 		t.Fatalf("a revoked key reading its payload: %q, %v, want %v", got, err, resources.ErrNotFound)
 	}
 }
+
+func TestStoredCreationKeepsOneIdentityAcrossReplayAndChildren(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool, _ := harness.Database(t)
+	fixture := newUsageFixture(t, pool)
+	store := resources.New(pool)
+	candidate := fixture.resource(resources.KindFile, fixture.keyID, "")
+	submission := resources.Submission{Operation: "batch:file", Key: uuid.NewString(), Digest: bytes.Repeat([]byte{1}, 32)}
+	creation, err := store.BeginCreate(ctx, candidate, submission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := creation.Dispatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := creation.AcceptCreated(ctx, resources.CreationResult{IDs: []string{"first-file", "second-file"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := creation.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	replayedCandidate := *candidate
+	replayed, err := store.BeginCreate(ctx, &replayedCandidate, submission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !replayed.Existing() || replayed.Resource().ID != accepted.ID || replayed.Resource().UpstreamID != "first-file" {
+		t.Fatalf("replay lost the accepted identity: %+v", replayed.Resource())
+	}
+	if err := replayed.Dispatch(ctx); !errors.Is(err, resources.ErrSubmissionConflict) {
+		t.Fatalf("replay could dispatch another creation: %v", err)
+	}
+	listed, err := store.List(ctx, resources.KindFile, fixture.keyID, 10, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 2 || listed[0].UpstreamID == listed[1].UpstreamID {
+		t.Fatalf("created native identities were lost: %+v", listed)
+	}
+	for _, child := range listed {
+		if child.State != "active" || child.ProviderID != accepted.ProviderID || child.RouteRevisionID != accepted.RouteRevisionID || child.APIKeyID != fixture.keyID {
+			t.Fatalf("created identity lost its ownership: %+v", child)
+		}
+	}
+}

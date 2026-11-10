@@ -2,6 +2,7 @@ import { apiClient } from '#lib/management/client.js';
 import type { components } from '#lib/management/schema.js';
 import { ensureOk, unwrap, unwrapPage } from '#lib/management/http.js';
 import { collectCursorPages } from '#lib/management/pagination.js';
+import type { PublicationCommand, PublicationIdentity } from './form';
 
 export type Kind = 'toolsets' | 'agents' | 'prompts';
 export type Publication = components['schemas']['AgentPublication'];
@@ -233,7 +234,7 @@ export const listToolCalls = async (
 
 export async function savePublication(
   kind: Kind,
-  current: Publication | null,
+  current: PublicationIdentity | null,
   input: Draft,
   requestId: string
 ) {
@@ -259,7 +260,7 @@ export async function savePublication(
 }
 export async function publish(
   kind: Kind,
-  current: Publication,
+  current: PublicationIdentity,
   requestId: string
 ) {
   return unwrap(
@@ -276,7 +277,7 @@ export async function publish(
 }
 export async function retire(
   kind: Kind,
-  current: Publication,
+  current: PublicationIdentity,
   requestId: string
 ) {
   ensureOk(
@@ -292,7 +293,7 @@ export async function retire(
   );
 }
 export async function setLabel(
-  current: Publication,
+  current: PublicationIdentity,
   label: 'production' | 'staging',
   revision: string,
   requestId: string
@@ -309,6 +310,54 @@ export async function setLabel(
       body: { revision_id: revision }
     })
   );
+}
+
+export type PublicationReceipt =
+  | { kind: 'updated'; publication: Publication; notice: string }
+  | { kind: 'retired'; id: string; notice: string };
+
+export async function executePublication(
+  command: PublicationCommand,
+  requestId: string
+): Promise<PublicationReceipt> {
+  switch (command.action) {
+    case 'create':
+    case 'update':
+      return {
+        kind: 'updated',
+        publication: await savePublication(
+          command.kind,
+          command.action === 'create' ? null : command.observed,
+          command.input,
+          requestId
+        ),
+        notice: 'Draft saved. Publication is a separate action.'
+      };
+    case 'publish':
+      return {
+        kind: 'updated',
+        publication: await publish(command.kind, command.observed, requestId),
+        notice: 'Publication configuration updated.'
+      };
+    case 'retire':
+      await retire(command.kind, command.observed, requestId);
+      return {
+        kind: 'retired',
+        id: command.observed.id,
+        notice: 'Publication configuration updated.'
+      };
+    case 'label':
+      return {
+        kind: 'updated',
+        publication: await setLabel(
+          command.observed,
+          command.label,
+          command.revision,
+          requestId
+        ),
+        notice: 'Publication configuration updated.'
+      };
+  }
 }
 
 export type MCPGrantStanding = components['schemas']['MCPUserGrantStanding'];

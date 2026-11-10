@@ -340,8 +340,7 @@ func (s *Store) applyRetainedEvidenceTx(ctx context.Context, tx pgx.Tx, id uuid.
 			event.Attempts[0].ID = uuid.NewSHA1(uuid.NameSpaceOID, []byte(identity+":attempt")).String()
 			// Keep the accepted pricing timestamp, including time-window tariffs.
 			event.Attempts[0].CompletedAt = event.Attempts[0].StartedAt
-			setPendingUsage(event, line.Usage)
-			accepted, e := usage.NewAccountingEvent(event)
+			accepted, e := usage.NewAccountingEvent(event.WithFinalUsage(line.Usage))
 			if e != nil {
 				return result, e
 			}

@@ -2,19 +2,12 @@ package reconcile
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"maps"
-	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/batches/upstream"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
 )
-
-var errStrictEvidence = errors.New("strict batch reconciliation evidence is invalid")
 
 func (w *Worker) reconcileSubmission(ctx context.Context, settlement batches.Settlement, reader upstream.Reader, target upstream.Target) outcome {
 	matches, err := reader.Reconcile(ctx, settlement, target, w.knownBatch(settlement))
@@ -56,12 +49,12 @@ func (w *Worker) adopt(ctx context.Context, settlement batches.Settlement, reade
 	if err != nil {
 		return w.failure(ctx, settlement, err, errorAdoptionUnavailable)
 	}
-	put, err := w.adoptedResource(ctx, settlement, snapshot, adoption)
+	recovery, err := w.adoptedResource(ctx, settlement, snapshot, adoption)
 	if err != nil {
 		return w.failOrClose(ctx, settlement, errorAdoptionUnavailable)
 	}
 	expected := adoptedExpected(settlement, snapshot)
-	err = w.deps.Store.Adopt(ctx, settlement, snapshot.ID, expected, put)
+	err = w.deps.Store.Adopt(ctx, settlement, recovery, expected)
 	if errors.Is(err, batches.ErrSubmissionAmbiguous) {
 		return w.failOrClose(ctx, settlement, errorSubmissionAmbiguous)
 	}
@@ -82,61 +75,15 @@ func adoptedExpected(settlement batches.Settlement, snapshot upstream.Snapshot) 
 	}
 }
 
-func (w *Worker) adoptedResource(ctx context.Context, settlement batches.Settlement, snapshot upstream.Snapshot, adoption upstream.Adoption) (func(context.Context, pgx.Tx) error, error) {
+func (w *Worker) adoptedResource(ctx context.Context, settlement batches.Settlement, snapshot upstream.Snapshot, adoption upstream.Adoption) (resources.BatchRecovery, error) {
 	resource := settlement.Binding.Resource(settlement.ResourceID, snapshot.ID)
-	if settlement.Binding.Kind != resources.KindStrictBatch {
-		resource.State, resource.Metadata = adoption.State, adoption.Metadata
-		return func(ctx context.Context, tx pgx.Tx) error {
-			_, err := w.deps.Resources.PutTx(ctx, tx, &resource)
-			return err
-		}, nil
+	submission, isFiles := settlement.Submission.(batches.FilesSubmission)
+	if settlement.Binding.Kind == resources.KindStrictBatch && !isFiles {
+		return resources.BatchRecovery{}, resources.ErrContract
 	}
-	payload, err := w.strictContract(ctx, settlement, snapshot)
-	if err != nil {
-		return nil, err
-	}
-	metadata, err := json.Marshal(map[string]string{"upstream_model": settlement.Model()})
-	if err != nil {
-		return nil, err
-	}
-	version := resources.DurableContractVersion
-	expires := settlement.CreatedAt.Add(resources.DurableLifetime - time.Second)
-	resource.State, resource.Metadata = adoption.State, metadata
-	resource.ContractVersion, resource.ExpiresAt = &version, &expires
-	return func(ctx context.Context, tx pgx.Tx) error {
-		_, err := w.deps.Resources.PutRecoveredDurableContractTx(ctx, tx, &resource, payload)
-		return err
-	}, nil
-}
-
-func (w *Worker) strictContract(ctx context.Context, settlement batches.Settlement, snapshot upstream.Snapshot) ([]byte, error) {
-	submission, ok := settlement.Submission.(batches.FilesSubmission)
-	if !ok || snapshot.ID == "" || snapshot.InputFileID != submission.InputFileID || wire.BatchStageOf(snapshot.Status) == wire.BatchUnknown {
-		return nil, errStrictEvidence
-	}
-	staged, err := w.deps.Resources.ReadStagedDurableContract(ctx, settlement.ResourceID)
-	if err != nil {
-		return nil, err
-	}
-	var document map[string]json.RawMessage
-	if err = json.Unmarshal(staged, &document); err != nil {
-		return nil, err
-	}
-	var effective []byte
-	if err = json.Unmarshal(document["effective"], &effective); err != nil {
-		return nil, err
-	}
-	var request struct {
-		InputFileID string `json:"input_file_id"`
-	}
-	if err = json.Unmarshal(effective, &request); err != nil || request.InputFileID != submission.InputFileID {
-		return nil, errStrictEvidence
-	}
-	result, err := json.Marshal(snapshot.Body)
-	if err != nil {
-		return nil, err
-	}
-	merged := maps.Clone(document)
-	merged["result"] = result
-	return json.Marshal(merged)
+	return w.deps.Resources.PrepareBatchRecovery(ctx, resource, resources.BatchRecoveryEvidence{
+		State: adoption.State, Metadata: adoption.Metadata, Model: settlement.Model(), CreatedAt: settlement.CreatedAt,
+		SubmittedFileID: submission.InputFileID, ObservedFileID: snapshot.InputFileID,
+		NativeStatus: snapshot.Status, Result: snapshot.Body,
+	})
 }

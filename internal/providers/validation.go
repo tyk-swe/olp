@@ -74,7 +74,7 @@ func (row *slotRow) certificationTime(cfg *Configuration, models []storedModel) 
 	return at
 }
 
-func (s *Server) validateModelAccess(ctx context.Context, cfg *Configuration, credential []byte, row *slotRow, models []storedModel) error {
+func (s *Catalogue) validateModelAccess(ctx context.Context, cfg *Configuration, credential []byte, row *slotRow, models []storedModel) error {
 	ctx, cancel := probeBudget(ctx)
 	defer cancel()
 	checked := 0

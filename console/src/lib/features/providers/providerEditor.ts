@@ -708,8 +708,3 @@ export function providerStatusTone(
   if (current.pending_activation) return 'warning';
   return current.active_revision != null ? 'success' : 'warning';
 }
-
-export type RunProviderAction = (
-  label: string,
-  action: (isCurrent: () => boolean) => Promise<void>
-) => Promise<boolean>;

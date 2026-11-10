@@ -71,29 +71,24 @@ func (s *Server) observeRetainedSettlement(ctx context.Context, r *resources.Res
 	return s.deps.Resources.RecordRetainedObservation(ctx, r, observation, nil)
 }
 
-func (s *Server) fenceRetainedMutation(ctx context.Context, r *http.Request, x *call, e retainedapi.Endpoint, resource *resources.Resource, body []byte) (func(), *Error) {
-	noop := func() {}
+func (s *Server) fenceRetainedMutation(ctx context.Context, r *http.Request, x *call, e retainedapi.Endpoint, resource *resources.Resource, body []byte) (*resources.Lifecycle, *Error) {
 	if !e.Metered || (e.Action != "update" && e.Action != "patch") {
-		return noop, nil
+		return nil, nil
 	}
 	key := r.Header.Get("Idempotency-Key")
 	if key == "" || len(key) > 128 {
-		return noop, invalidRequest("invalid_idempotency_key", "Idempotency-Key of at most 128 bytes is required for a paid mutation.", nil)
+		return nil, invalidRequest("invalid_idempotency_key", "Idempotency-Key of at most 128 bytes is required for a paid mutation.", nil)
 	}
 	payload := append([]byte(e.Method+":"+e.Pattern+":"+resource.ID+":"+r.URL.RawQuery+":"), body...)
 	digest := sha256.Sum256(payload)
-	err := s.deps.Resources.PrepareRetainedMutation(ctx, resource, e.Operation+":"+e.Action, key, digest[:])
+	lifecycle, err := s.deps.Resources.BeginMutation(ctx, resource, resources.Submission{Operation: e.Operation + ":" + e.Action, Key: key, Digest: digest[:]})
 	if err != nil {
 		if errors.Is(err, resources.ErrSubmissionConflict) {
-			return noop, serverError(409, "idempotency_conflict", "This mutation identity already exists or conflicts with its original request.")
+			return nil, serverError(409, "idempotency_conflict", "This mutation identity already exists or conflicts with its original request.")
 		}
-		return noop, serverError(503, "provider_state_unavailable", "The paid mutation could not be fenced.")
+		return nil, serverError(503, "provider_state_unavailable", "The paid mutation could not be fenced.")
 	}
-	return func() {
-		commit, cancel := resourceCommitContext(ctx)
-		defer cancel()
-		_ = s.deps.Resources.UnknownRetainedMutation(commit, resource.UUID, key, e.Operation+":"+e.Action)
-	}, nil
+	return lifecycle, nil
 }
 
 func (s *Server) retainedUnboundedLimits(x *call, p *pin) *Error {

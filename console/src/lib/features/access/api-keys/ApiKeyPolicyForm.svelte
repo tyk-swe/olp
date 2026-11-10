@@ -1,16 +1,11 @@
 <script lang="ts">
   import Advanced from '#lib/components/Advanced.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
-  import { validRouteSlug } from '#lib/routeIdentity.js';
   import RunLimits from '#lib/features/workflows/RunLimits.svelte';
   import { currentBudgetLimit } from './budgetPresentation';
   import RouteLimitFields from '../route-limits/RouteLimitFields.svelte';
-  import { routeLimitsError } from '../route-limits/policy';
-  import { groupNames, groupNamesError } from '../route-groups/policy';
   import AttributionFields from '../attribution/AttributionFields.svelte';
-  import { attributionError } from '../attribution/policy';
   import PolicyFields from '../end-users/PolicyFields.svelte';
-  import { policyError } from '../end-users/policy';
   import { useServiceCapabilities } from '#lib/features/access/session/serviceCapabilities.svelte.js';
   const services = useServiceCapabilities();
   import {
@@ -30,16 +25,12 @@
     budgetWindowState
   } from '#lib/features/access/api-keys/budgetPresentation.js';
   import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
-  import {
-    admissionPriorities,
-    validateApiKey
-  } from '#lib/features/access/api-keys/keyValidation.js';
+  import { admissionPriorities } from '#lib/features/access/api-keys/keyValidation.js';
 
   import {
-    buildApiKeyPolicyInput,
+    compileApiKeyPolicy,
     createApiKeyFormState,
-    expiryUnchanged,
-    type ApiKeyPolicyInput
+    type ApiKeyPolicyCommand
   } from '#lib/features/access/api-keys/apiKeyPolicy.js';
   import ProjectScopeField from '#lib/features/access/projects/ProjectScopeField.svelte';
   import { listBudgetGroups } from '#lib/features/access/budget-groups/api.js';
@@ -61,7 +52,7 @@
     canManage: boolean;
     publicationBlocked?: boolean;
     onSubmit: (
-      input: ApiKeyPolicyInput,
+      command: ApiKeyPolicyCommand,
       preferredRoute?: string
     ) => boolean | Promise<boolean>;
     onCancel: () => void;
@@ -122,12 +113,6 @@
       : list.filter((item) => item !== value);
   }
 
-  // Keep numeric controls as strings via oninput: bind:value on type="number"
-  // coerces zero to a number, which would be mistaken for an omitted limit.
-  function numberValue(value: string) {
-    return value ? Number(value) : undefined;
-  }
-
   async function submit(event: SubmitEvent) {
     event.preventDefault();
 
@@ -138,67 +123,20 @@
     if (!canManage || busy || publicationBlocked) return;
     onClearError();
 
-    if (
-      form.rotationIntervalDays.trim() &&
-      (!/^\d+$/.test(form.rotationIntervalDays) ||
-        Number(form.rotationIntervalDays) < 1 ||
-        Number(form.rotationIntervalDays) > 3650)
-    ) {
-      formError =
-        'Rotation interval must be a whole number of days from 1 to 3650.';
-      await focusErrorSummary(root);
+    const result = compileApiKeyPolicy(
+      form,
+      editing ? { kind: 'update', key: editing } : { kind: 'create' },
+      new Date()
+    );
+    if (!result.ok) {
+      errors = result.errors;
+      formError = result.formError;
+      await focusFormError(root);
       return;
     }
+    errors = {};
     formError = '';
-    errors = validateApiKey({
-      name: form.name,
-      allowedCIDRs: form.allowedCIDRs,
-      requestsPerMinute: numberValue(form.requestsPerMinute),
-      tokensPerMinute: numberValue(form.tokensPerMinute),
-      maxConcurrency: numberValue(form.maxConcurrency),
-      dailyCostLimit: form.dailyCostLimit,
-      monthlyCostLimit: form.monthlyCostLimit,
-      weeklyCostLimit: form.weeklyCostLimit,
-      // An untouched expiry is not re-sent, so it needs no future check.
-      expiresAt: expiryUnchanged(form, editing) ? undefined : form.expiresAt,
-      priority: form.priority,
-      maxPriority: form.maxPriority
-    });
-    formError =
-      routeLimitsError(form.routeLimits) ||
-      policyError(form.endUserPolicy) ||
-      attributionError(form.attributionPolicy) ||
-      groupNamesError(groupNames(form.allowedRouteGroups));
-    if (
-      !formError &&
-      groupNames(form.allowedRouteGroups).length &&
-      !formProject
-    )
-      formError = 'Route groups require a project-scoped key.';
-    if (form.endUserPolicy.enabled && !form.endUserSource)
-      formError =
-        'Choose an identifier source before enabling end-user limits.';
-    if (
-      form.limitTemplate &&
-      (!formProject || !validRouteSlug(form.limitTemplate.trim()))
-    )
-      formError = 'Choose a project and a valid limit template name.';
-    if (formError) {
-      await focusFormError(root);
-      return;
-    }
-    if (Object.keys(errors).length) {
-      await focusFormError(root);
-      return;
-    }
-    if (!form.scopes.length) {
-      formError = 'Select at least one scope.';
-      await focusFormError(root);
-      return;
-    }
-    const input = buildApiKeyPolicyInput(form, editing);
-    if (editing) delete input.project_id;
-    const saved = await onSubmit(input, form.allowedRoutes[0]);
+    const saved = await onSubmit(result.command, form.allowedRoutes[0]);
     if (saved) dirty = false;
     else await focusFormError(root);
   }

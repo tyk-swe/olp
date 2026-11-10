@@ -14,7 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/providerinvoke"
 )
 
-func (s *Server) certifyToolCalls(ctx context.Context, cfg *Configuration, credential []byte, model string, stream bool) error {
+func (s *Catalogue) certifyToolCalls(ctx context.Context, cfg *Configuration, credential []byte, model string, stream bool) error {
 	transport := cfg.transport()
 	parsed, err := toolCallProbeRequest(transport, stream)
 	if err != nil {

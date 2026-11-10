@@ -104,7 +104,7 @@ func probeable(cfg *Configuration, tuple CapabilityInput) bool {
 	return configurationCertifiable(cfg, tuple) && cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
 }
 
-func (s *Server) certifyOperation(ctx context.Context, cfg *Configuration, credential []byte, model string, tuple CapabilityInput, codec operations.Dialect) error {
+func (s *Catalogue) certifyOperation(ctx context.Context, cfg *Configuration, credential []byte, model string, tuple CapabilityInput, codec operations.Dialect) error {
 	template, err := operationplan.Compile(operationplan.Config{Provider: cfg.transport(), Model: model, Operation: tuple.Operation})
 	if err != nil {
 		return &probeError{Code: "capability_unavailable", Detail: "The native operation contract could not be compiled."}
@@ -141,7 +141,7 @@ func (s *Server) certifyOperation(ctx context.Context, cfg *Configuration, crede
 	return nil
 }
 
-func (s *Server) pollOperation(ctx context.Context, cfg *Configuration, credential []byte, plan *operationplan.Plan, submit string, header http.Header) ([]byte, error) {
+func (s *Catalogue) pollOperation(ctx context.Context, cfg *Configuration, credential []byte, plan *operationplan.Plan, submit string, header http.Header) ([]byte, error) {
 	location, err := plan.PollLocation(submit, header)
 	if err != nil {
 		return nil, &probeError{Code: "provider_protocol_error", Detail: "The upstream polling location is invalid."}
@@ -192,7 +192,7 @@ func (s *Server) pollOperation(ctx context.Context, cfg *Configuration, credenti
 	return nil, &probeError{Code: "gateway_timeout", Detail: "The upstream operation did not finish within the probe deadline."}
 }
 
-func (s *Server) cancelOperationPoll(cfg *Configuration, credential []byte, plan *operationplan.Plan, location string) {
+func (s *Catalogue) cancelOperationPoll(cfg *Configuration, credential []byte, plan *operationplan.Plan, location string) {
 	method, target, ok := plan.CancelPoll(location)
 	if !ok || method == "" || target == "" {
 		return

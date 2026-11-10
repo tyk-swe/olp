@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/transport"
+	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/staging"
@@ -68,6 +69,8 @@ func (s *Service) Target(ctx context.Context, record Record) (Resolved, error) {
 		return Resolved{}, runtimeUnavailable
 	}
 	provider, slot := pin.Provider, pin.Slot
+	target := providerinvoke.Target{Provider: provider, Slot: slot, Model: record.UpstreamModel}
+	binding := (providerinvoke.Resolver{Credentials: s.credentials}).Bind(nil, target, nil)
 	config := provider.Connector()
 	owned := provider.CredentialSource != "caller"
 	if owned && record.CredentialVersionID != nil {
@@ -80,25 +83,23 @@ func (s *Service) Target(ctx context.Context, record Record) (Resolved, error) {
 		if record.CredentialVersionID == nil {
 			return Resolved{}, runtimeUnavailable
 		}
-		secret, _, err = s.credentials.Secret(ctx, nil, *record.CredentialVersionID)
-		if err != nil || len(secret) == 0 {
+		credential, credentialErr := binding.Credential(ctx)
+		if credentialErr != nil || len(credential.Secret) == 0 {
 			return Resolved{}, runtimeUnavailable
 		}
+		secret = credential.Secret
 	}
 	var networkSecret []byte
 	if config.Network != nil && config.Network.CredentialID != "" {
-		networkSecret, err = s.credentials.NetworkSecret(ctx, nil, provider.ID, config.Network.CredentialID)
+		networkSecret, err = binding.NetworkSecret(ctx)
 		if err != nil {
 			return Resolved{}, &Unavailable{Code: "media_job_network_credential_unavailable"}
 		}
 	}
-	credential := "none"
-	if slot.CredentialID != nil {
-		credential = *slot.CredentialID
-	}
+
 	return Resolved{
 		Target: transport.Target{Config: config, Model: config.Model(record.UpstreamModel), Secret: secret,
-			NetworkSecret: networkSecret, ConnectionScope: provider.ID + "/" + provider.RevisionID + "/" + slot.ID + "/" + credential},
+			NetworkSecret: networkSecret, ConnectionScope: target.ConnectionScope()},
 		Provider: provider,
 		Slot:     slot,
 		Timeout:  time.Duration(pin.Route.OverallTimeout) * time.Millisecond,

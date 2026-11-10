@@ -19,6 +19,7 @@ import (
 	"github.com/tyk-swe/olp/internal/promotion/pricing"
 	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
+	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/sinks"
 )
 
@@ -31,7 +32,7 @@ type Deps struct {
 	Identity   *http.Client
 	Costs      project.Costs
 	VendorKind pricing.VendorKind
-	Catalogue  provider.Catalogue
+	Catalogue  *providers.Catalogue
 }
 
 type server struct {

@@ -1,7 +1,10 @@
 package providers
 
 import (
+	"context"
 	"net/http"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -87,22 +90,8 @@ func (s *Server) deleteSlot(r *http.Request, _ access.Principal) (access.Reply, 
 	if err = matchSlot(r, current, slot); err != nil {
 		return access.Reply{}, err
 	}
-	if slot.Default {
-		return access.Reply{}, access.Fail(409, "default_slot_required", "The default credential slot cannot be deleted.")
-	}
-	// Immutable credential versions and published revision slots survive draft
-	// removal. Only pending enrollment state belongs exclusively to this slot.
-	if _, err = tx.Exec(r.Context(), `DELETE FROM olp.secrets WHERE purpose=$3 AND id IN (SELECT id FROM olp.grant_enrollments WHERE slot_id=$1 AND provider_id=$2)`, slotID, providerID, secrets.GrantEnrollment); err != nil {
-		return access.Reply{}, err
-	}
-	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.provider_slots WHERE id=$1 AND provider_id=$2", slotID, providerID); err != nil {
-		return access.Reply{}, err
-	}
-	etag, err := touch(r.Context(), tx, providerID)
+	etag, err := s.deleteDraftSlot(r.Context(), tx, providerID, slotID, slot)
 	if err != nil {
-		return access.Reply{}, err
-	}
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.providers SET slots_etag=$2 WHERE id=$1", providerID, access.NewID()); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.slot.delete", "provider_slot", slotID, "success"); err != nil {
@@ -113,4 +102,27 @@ func (s *Server) deleteSlot(r *http.Request, _ access.Principal) (access.Reply, 
 		return access.Reply{}, err
 	}
 	return result, tx.Commit(r.Context())
+}
+
+func (s *Catalogue) deleteDraftSlot(ctx context.Context, tx pgx.Tx, providerID, slotID string, slot *slotRow) (string, error) {
+	var err error
+	if slot.Default {
+		return "", access.Fail(409, "default_slot_required", "The default credential slot cannot be deleted.")
+	}
+	// Immutable credential versions and published revision slots survive draft
+	// removal. Only pending enrollment state belongs exclusively to this slot.
+	if _, err = tx.Exec(ctx, `DELETE FROM olp.secrets WHERE purpose=$3 AND id IN (SELECT id FROM olp.grant_enrollments WHERE slot_id=$1 AND provider_id=$2)`, slotID, providerID, secrets.GrantEnrollment); err != nil {
+		return "", err
+	}
+	if _, err = tx.Exec(ctx, "DELETE FROM olp.provider_slots WHERE id=$1 AND provider_id=$2", slotID, providerID); err != nil {
+		return "", err
+	}
+	etag, err := touch(ctx, tx, providerID)
+	if err != nil {
+		return "", err
+	}
+	if _, err = tx.Exec(ctx, "UPDATE olp.providers SET slots_etag=$2 WHERE id=$1", providerID, access.NewID()); err != nil {
+		return "", err
+	}
+	return etag, nil
 }

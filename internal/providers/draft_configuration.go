@@ -13,7 +13,7 @@ import (
 // after a caller has acquired the installation lock and current authorization.
 // Both ordinary edits and promotion use the stored full configuration as the
 // evidence boundary; a portable document cannot stand in for that identity.
-func StoreDraftConfiguration(ctx context.Context, tx pgx.Tx, id, name string, prepared PreparedConfiguration) error {
+func (s *Catalogue) StoreDraftConfiguration(ctx context.Context, tx pgx.Tx, id, name string, prepared PreparedConfiguration) error {
 	next := prepared.configuration
 	if next.Endpoint == nil {
 		return access.Invalid("configuration", "Prepare a valid provider configuration before saving it.")
@@ -71,7 +71,7 @@ type CreatedDraft struct {
 	ETag string
 }
 
-func CreateDraft(ctx context.Context, tx pgx.Tx, draft Draft) (CreatedDraft, error) {
+func (s *Catalogue) CreateDraft(ctx context.Context, tx pgx.Tx, draft Draft) (CreatedDraft, error) {
 	created := CreatedDraft{ID: access.NewID(), ETag: access.NewID()}
 	configuration := draft.Configuration.configuration
 	if err := validateNetworkReference(ctx, tx, created.ID, &configuration); err != nil {

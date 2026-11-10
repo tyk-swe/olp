@@ -27,7 +27,7 @@ type observed struct {
 	runtime       *release.Manager
 	policy        *egress.Policy
 	gateway       *gateway.Server
-	emitter       *usage.Emitter
+	accounting    *usage.Delivery
 	spool         *staging.Spool
 	media         *jobs.Store
 	mediaGaps     *atomic.Uint64
@@ -54,8 +54,8 @@ func observabilitySources(o observed) *observability.Sources {
 	if o.gateway != nil {
 		sources.Gateway = o.gateway
 	}
-	if o.emitter != nil {
-		sources.Emitter = o.emitter
+	if o.accounting != nil {
+		sources.Emitter = o.accounting
 	}
 	if o.spool != nil {
 		sources.Spool = o.spool

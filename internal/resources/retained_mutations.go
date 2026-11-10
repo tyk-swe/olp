@@ -9,21 +9,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// A dispatched paid mutation never acquires dispatch rights again, even if its
-// caller or process disappeared before acceptance could be recorded.
-func (s *Store) PrepareRetainedMutation(ctx context.Context, r *Resource, operation, key string, digest []byte) error {
-	return s.prepareRetainedMutation(ctx, r, operation, key, digest, true)
-}
-
-// Deletion can shorten the billable cache lifetime. Its dispatch must remain
-// durable even when the response is lost; housekeeping is allowed after closure.
-func (s *Store) PrepareRetainedDeletion(ctx context.Context, r *Resource, key string, digest []byte) error {
-	if r == nil || r.Kind != "context_cache" {
-		return ErrContract
-	}
-	return s.prepareRetainedMutation(ctx, r, "context_cache:delete", key, digest, false)
-}
-
 func (s *Store) prepareRetainedMutation(ctx context.Context, r *Resource, operation, key string, digest []byte, paid bool) error {
 	if len(key) < 1 || len(key) > 128 || len(digest) != 32 {
 		return ErrSubmissionConflict
@@ -72,11 +57,11 @@ func (s *Store) prepareRetainedMutation(ctx context.Context, r *Resource, operat
 	r.MutationVersion = version
 	return nil
 }
-func (s *Store) UnknownRetainedMutation(ctx context.Context, id uuid.UUID, key, operation string) error {
+func (s *Store) unknownRetainedMutation(ctx context.Context, id uuid.UUID, key, operation string) error {
 	_, err := s.pool.Exec(ctx, `UPDATE olp.retained_mutations SET state='submission_unknown',updated_at=now() WHERE resource_id=$1 AND submission_key=$2 AND operation=$3 AND state='dispatched'`, id, key, operation)
 	return err
 }
-func (s *Store) AcceptRetainedMutation(ctx context.Context, id uuid.UUID, key, operation string) error {
+func (s *Store) acceptRetainedMutation(ctx context.Context, id uuid.UUID, key, operation string) error {
 	tag, err := s.pool.Exec(ctx, `UPDATE olp.retained_mutations SET state='accepted',updated_at=now() WHERE resource_id=$1 AND submission_key=$2 AND operation=$3 AND state='dispatched'`, id, key, operation)
 	if err != nil {
 		return err
@@ -124,10 +109,10 @@ func (s *Store) HasUnresolvedRetainedMutations(ctx context.Context, id uuid.UUID
 	return pending, err
 }
 
-// RejectRetained records definitive transport/provider non-acceptance, never a
+// rejectRetained records definitive transport/provider non-acceptance, never a
 // timeout or an ambiguous server failure. Only the original dispatch owner calls
 // it, before returning the provider's rejection to the client.
-func (s *Store) RejectRetained(ctx context.Context, r *Resource, key, operation string, create bool) error {
+func (s *Store) rejectRetained(ctx context.Context, r *Resource, key, operation string, create bool) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err

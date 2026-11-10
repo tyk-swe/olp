@@ -10,7 +10,7 @@ import (
 // A successful live proof clears the shared rejection for the exact version
 // and logical slot. Serving processes consult this authority without a stale
 // local shadow when distributed coordination is available.
-func (s *Server) clearValidatedCooldowns(ctx context.Context, providerID string, slot slotRow) {
+func (s *Catalogue) clearValidatedCooldowns(ctx context.Context, providerID string, slot slotRow) {
 	if s.Quotas == nil {
 		return
 	}

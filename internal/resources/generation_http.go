@@ -34,14 +34,15 @@ func (s *Store) CompleteGenerationHTTP(ctx context.Context, localID string, comp
 		return fmt.Errorf("%w: original HTTP completion has a different resource owner", ErrContract)
 	}
 	if err == nil && len(raw) != 0 && string(raw) != "null" {
-		event, err := decodePendingUsage(raw)
+		pending, err := usage.DecodePendingGeneration(raw)
 		if err != nil {
 			return err
 		}
-		if err = usage.CompletePendingHTTP(event, completion); err != nil {
+		completed, err := pending.CompleteHTTP(completion)
+		if err != nil {
 			return err
 		}
-		encoded, err := usage.Encode(event)
+		encoded, err := completed.Encode()
 		if err != nil {
 			return err
 		}

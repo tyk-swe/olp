@@ -6,14 +6,11 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"net/http/httptrace"
-	"net/url"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operations"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/upstream"
 )
 
@@ -31,28 +28,16 @@ type unaryFailure struct {
 }
 
 type unaryExchange struct {
-	server   *Server
-	ctx      context.Context
-	x        *call
-	state    *attemptState
-	plan     *operationplan.Plan
-	client   *http.Client
-	slot     routing.Slot
-	provider *routing.Provider
-	model    string
-	fact     *AttemptFact
-	bodyCap  int
-	inject   func(http.Header)
-}
-
-func (s *Server) validateUnaryEndpoint(raw string) error {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return err
-	}
-	u.RawQuery, u.Fragment, u.RawFragment = "", "", ""
-	_, err = s.egress.ValidateEndpoint(u.String())
-	return err
+	server  *Server
+	ctx     context.Context
+	x       *call
+	state   *attemptState
+	plan    *operationplan.Plan
+	client  *http.Client
+	bound   *boundExchange
+	fact    *AttemptFact
+	bodyCap int
+	inject  func(http.Header)
 }
 
 func (e *unaryExchange) do(method, target string, body []byte) (*http.Response, *unaryFailure) {
@@ -60,7 +45,7 @@ func (e *unaryExchange) do(method, target string, body []byte) (*http.Response, 
 	if body != nil {
 		reader = bytes.NewReader(body)
 	}
-	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(e.ctx, e.state.trace()), method, target, reader)
+	req, err := e.bound.request(e.ctx, method, target, reader, make(http.Header))
 	if err != nil {
 		return nil, &unaryFailure{class: classConnect}
 	}
@@ -70,7 +55,7 @@ func (e *unaryExchange) do(method, target string, body []byte) (*http.Response, 
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "olp/gateway")
-	if err := e.server.applySlotCredential(e.ctx, e.x, req, e.plan.Config(), e.slot, body, e.provider, e.model); err != nil {
+	if err := e.bound.authenticate(e.ctx, req, body); err != nil {
 		if e.ctx.Err() != nil {
 			return nil, &unaryFailure{class: e.state.classify(err, false)}
 		}
@@ -81,7 +66,7 @@ func (e *unaryExchange) do(method, target string, body []byte) (*http.Response, 
 			return nil, &unaryFailure{class: classConnect, failure: &attemptFailure{contractCode: failure.Code, noRetry: true}}
 		}
 	}
-	response, err := e.client.Do(req)
+	response, err := e.bound.do(e.client, req)
 	if err != nil {
 		return nil, &unaryFailure{class: e.state.classify(err, false)}
 	}
@@ -151,7 +136,7 @@ func (e *unaryExchange) run(method, submit string, body []byte) ([]byte, *unaryF
 	if err != nil {
 		return nil, &unaryFailure{class: classProtocol, failure: &attemptFailure{contractCode: "fidelity_protocol_violation"}}
 	}
-	if err := e.server.validateUnaryEndpoint(location); err != nil {
+	if err := e.bound.validateEndpoint(location); err != nil {
 		return nil, &unaryFailure{class: classProtocol, failure: &attemptFailure{contractCode: "fidelity_protocol_violation"}}
 	}
 	return e.poll(location)
@@ -243,17 +228,17 @@ func (e *unaryExchange) cancelPoll(location string) {
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(e.ctx), pollCancelBound)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, method, target, nil)
+	req, err := e.bound.request(ctx, method, target, nil, make(http.Header))
 	if err != nil {
 		return
 	}
 	e.inject(req.Header)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "olp/gateway")
-	if err := e.server.applySlotCredential(ctx, e.x, req, e.plan.Config(), e.slot, nil, e.provider, e.model); err != nil {
+	if err := e.bound.authenticate(ctx, req, nil); err != nil {
 		return
 	}
-	response, err := e.client.Do(req)
+	response, err := e.bound.do(e.client, req)
 	if err != nil {
 		return
 	}

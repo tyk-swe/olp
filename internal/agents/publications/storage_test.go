@@ -59,3 +59,50 @@ func TestSavingAndPublishingOwnTheirDrafts(t *testing.T) {
 		t.Fatal("saved draft retained caller-owned input")
 	}
 }
+
+type retainedRevisionTx struct {
+	pgx.Tx
+	revision string
+	latest   string
+}
+
+func (tx *retainedRevisionTx) QueryRow(context.Context, string, ...any) pgx.Row {
+	return retainedRevisionRow{revision: tx.revision}
+}
+
+func (tx *retainedRevisionTx) Exec(_ context.Context, _ string, args ...any) (pgconn.CommandTag, error) {
+	tx.latest = args[1].(string)
+	return pgconn.NewCommandTag("UPDATE 1"), nil
+}
+
+type retainedRevisionRow struct{ revision string }
+
+func (row retainedRevisionRow) Scan(dest ...any) error {
+	if len(dest) != 1 {
+		return pgx.ErrNoRows
+	}
+	*dest[0].(*string) = row.revision
+	return nil
+}
+
+func TestRetainedRevisionReusePreservesSelectionAndPublishRevalidates(t *testing.T) {
+	id := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607"
+	retained := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50608"
+	latest := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50609"
+	tool := agentcontract.Tool{ServerID: id, RevisionID: retained, CatalogDigest: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", Name: "lookup", Alias: agentcontract.ToolAlias(id, "lookup")}
+	publication := agentcontract.Publication{ID: id, ProjectID: id, Kind: "toolset", Name: "tools", ETag: "original", RevisionID: &latest, Draft: agentcontract.Draft{ProjectID: id, Name: "tools", Toolset: &agentcontract.Toolset{Tools: []agentcontract.Tool{tool}}}}
+	tx := &retainedRevisionTx{revision: retained, latest: latest}
+	selected, err := publications.EnsureRetainedRevision(t.Context(), tx, "actor", publication)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.RevisionID == nil || *selected.RevisionID != retained || selected.ETag != publication.ETag || tx.latest != latest {
+		t.Fatal("selecting retained content changed the publication's current revision or ETag")
+	}
+	if _, err := publications.Publish(t.Context(), tx, "actor", publication); err == nil {
+		t.Fatal("publishing reused a retained revision whose pinned server is unavailable")
+	}
+	if tx.latest != latest {
+		t.Fatal("a rejected publication changed the current revision")
+	}
+}

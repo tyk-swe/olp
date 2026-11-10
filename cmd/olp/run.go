@@ -42,7 +42,7 @@ import (
 	limitadmission "github.com/tyk-swe/olp/internal/limits/admission"
 	limitdebits "github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/mcp"
-	"github.com/tyk-swe/olp/internal/mcp/accounting"
+	mcpaccounting "github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/mcp/registration"
 	"github.com/tyk-swe/olp/internal/mcp/sessions"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
@@ -206,11 +206,13 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			}
 		}
 	}
-	var emitter *usage.Emitter
-	var gatewayInstance string
+	var accounting *usage.Delivery
 	var rt *release.Manager
 	var gw *gateway.Server
 	var agentMonitor *agents.TaskMonitor
+	var agentTasks *tasks.Store
+	var agentPeers *a2a.Peers
+	var grantStore *personal.Store
 	var mediaService *jobs.Service
 	var mediaTransport *transport.Transport
 	var mediaSpool *staging.Spool
@@ -370,6 +372,17 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 				Now:         time.Now,
 			})
 		}
+		if c.Mode.Management() || c.Mode.Inference() {
+			grantStore = personal.NewStore(pool, installation, auth, keys, &policy)
+			taskLimits := tasks.Limits{Debits: debitStore}
+			if shared != nil {
+				taskLimits = tasks.Limits{Debits: debitStore, Syncer: shared.Syncer, Limiter: limiter}
+			}
+			agentTasks = tasks.New(pool, taskLimits, auth)
+			agentPeers = a2a.NewPeers(&policy, func(ctx context.Context, id string) ([]byte, error) {
+				return keys.Read(ctx, pool, installation, id, secrets.AgentCredential)
+			})
+		}
 		if c.Mode.Inference() {
 			gatewayDeps.Capture = capturer
 			gatewayDeps.Media = &gateway.MediaDeps{Transport: mediaTransport, Jobs: mediaService, Store: jobs.NewStore(pool)}
@@ -383,22 +396,14 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 				gatewayDeps.Resources = resources.NewEncrypted(pool, installation, keys)
 				gatewayDeps.Resolver = resources.NewResolver(pool)
 			}
-			grantStore := personal.NewStore(pool, installation, auth, keys, &policy)
-			taskLimits := tasks.Limits{Debits: debitStore}
-			if shared != nil {
-				taskLimits = tasks.Limits{Debits: debitStore, Syncer: shared.Syncer, Limiter: limiter}
-			}
-			agentTasks := tasks.New(pool, taskLimits, auth)
-			agentPeers := a2a.NewPeers(&policy, func(ctx context.Context, id string) ([]byte, error) {
-				return keys.Read(ctx, pool, installation, id, secrets.AgentCredential)
-			})
+
 			agentExecutor := agents.New(agents.Options{Tasks: agentTasks, Peers: agentPeers, Grants: grantStore, Entra: rt})
 			agentServer := a2a.New(a2a.Options{Runtime: rt, Executor: agentExecutor, Peers: agentPeers, Grants: grantStore, TrustedProxies: c.TrustedProxyCIDRs, PublicOrigin: c.PublicOrigin})
 			agentServer.Register(public)
 			agentMonitor = agents.NewMonitor(agentTasks, agents.NewTaskOperations(agentTasks, agentPeers, grantStore), rt, log)
-			var toolLedger accounting.Ledger
+			var toolLedger mcpaccounting.Ledger
 			if limiter != nil {
-				toolLedger = accounting.NewDurableLedger(pool, debitStore, shared.Syncer, auth)
+				toolLedger = mcpaccounting.NewDurableLedger(pool, debitStore, shared.Syncer, auth)
 			}
 			var sessionStore *sessions.Store
 			if vk != nil {
@@ -435,8 +440,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		// health probes. No producer may log and forget a failed ledger write.
 		// Without shared state, hard limits are refused and metadata stays logged.
 		if limiter != nil {
-			emitter = usage.NewEmitter(metadataBuffer)
-			gatewayInstance = usage.GatewayInstance(c.Hostname)
+			accounting = usage.NewDelivery(pool, usage.GatewayInstance(c.Hostname), metadataBuffer, lossCounters, log)
 			for _, server := range []*gateway.Dependencies{&gatewayDeps, &probeDeps} {
 				if server.Admission == nil {
 					continue
@@ -444,13 +448,8 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 				server.Debits = gateway.DurableSessionDebits(pool, debitStore, shared.Syncer)
 				server.Admission.PendingCostAccountingReady = shared.Syncer.CheckOwnerAccounting
 				server.Admission.PendingTokenAccountingReady = resources.New(pool).CheckPendingTokenOwner
-				server.Admission.CostAccountingReady = func(ctx context.Context) error {
-					return usage.CheckBudgetAccounting(ctx, pool, emitter)
-				}
-				server.Sink = &gateway.AccountingSink{Emitter: emitter, Log: log, Next: server.Sink,
-					RecordLoss: func(ctx context.Context, requestID string) error {
-						return usage.RecordBudgetLoss(ctx, pool, emitter, gatewayInstance, lossCounters)
-					}}
+				server.Admission.CostAccountingReady = accounting.Check
+				server.Sink = &gateway.AccountingSink{Delivery: accounting, Next: server.Sink}
 			}
 		}
 		if c.Mode.Management() || c.Mode.Inference() {
@@ -485,7 +484,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 				return err
 			}
 			defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "management plugin runtime", pluginRuntime.Close)
-			Management{Getenv: os.Getenv, Access: control, IdentityClient: identityClient, Egress: &policy, Limits: shared, Runtime: rt, Gateway: gw, Media: mediaService, Spool: mediaSpool, Health: obsCache, Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog, CatalogKeys: catalogKeys, PluginIndex: pluginIndex}.Register(public)
+			Management{AgentTasks: agentTasks, AgentPeers: agentPeers, AgentGrants: grantStore, Getenv: os.Getenv, Access: control, IdentityClient: identityClient, Egress: &policy, Limits: shared, Runtime: rt, Gateway: gw, Media: mediaService, Spool: mediaSpool, Health: obsCache, Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog, CatalogKeys: catalogKeys, PluginIndex: pluginIndex}.Register(public)
 		}
 	}
 	if err := startup.Err(); err != nil {
@@ -510,7 +509,8 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 	probes, stopProbes := context.WithCancel(context.WithoutCancel(ctx))
 	requestContext, cancelRequests := context.WithCancel(context.WithoutCancel(ctx))
 	var background, delivered sync.WaitGroup
-	var writerDone, probesStopped chan struct{}
+	var metadata *usage.DeliveryRun
+	var probesStopped chan struct{}
 	var workersStopped func()
 	var listeners []boundListener
 	defer func() {
@@ -519,17 +519,17 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		shutdown, cancel := context.WithDeadline(context.Background(), shutdownDeadline)
 		defer cancel()
 		stopAuxiliary()
-		drainListeners(shutdown, listeners, emitter)
+		drainListeners(shutdown, listeners, accounting)
 		cancelRequests()
 		if gw != nil {
 			if err := gw.DrainShadows(shutdown); err != nil {
 				log.Warn("shutdown budget reached before shadows drained", "error", err)
-				if emitter != nil {
-					emitter.MarkUnclean()
+				if accounting != nil {
+					accounting.MarkUnclean()
 				}
 			}
 		}
-		drainProbes(shutdown, stopProbes, probesStopped, emitter, log)
+		drainProbes(shutdown, stopProbes, probesStopped, accounting, log)
 		// Accepted requests and probes have stopped producing while their live
 		// authority remained available. Runtime joins against the same budget.
 		if rt != nil {
@@ -537,10 +537,9 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 				log.Warn("shutdown budget reached before runtime stopped", "error", err)
 			}
 		}
-		if emitter != nil {
-			emitter.Close()
-			if writerDone != nil {
-				awaitPlane(shutdown, func() { <-writerDone }, log, "request metadata flush")
+		if metadata != nil {
+			if err := metadata.Drain(shutdown); err != nil {
+				log.Warn("shutdown budget reached before request metadata drained", "error", err)
 			}
 		}
 		stopDelivery()
@@ -585,7 +584,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		runtime:       rt,
 		policy:        &policy,
 		gateway:       gw,
-		emitter:       emitter,
+		accounting:    accounting,
 		spool:         mediaSpool,
 		media:         jobs.NewStore(pool),
 		mediaGaps:     &mediaGapsTotal,
@@ -598,20 +597,11 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 	// The delivery plane outlives the listeners: it is cancelled only once the
 	// producers have drained, so every emitted event is written and this
 	// process's epoch is closed against what it actually delivered.
-	if emitter != nil {
-		stream, instance := usage.StreamName(prefix), gatewayInstance
-		// Register before listeners bind or probes start: even a crash before
-		// the first tick must leave an epoch that recovery can detect.
-		if _, err := usage.CheckpointEpoch(startup, pool, instance, emitter.Snapshot(), false); err != nil {
+	if accounting != nil {
+		metadata, err = accounting.Start(startup, vk, usage.StreamName(prefix))
+		if err != nil {
 			return err
 		}
-		log.Info("request metadata gateway registered", "gateway_instance", instance)
-		writerDone = make(chan struct{})
-		delivered.Go(func() {
-			defer close(writerDone)
-			emitter.RunWriter(delivery, vk, stream, log)
-		})
-		delivered.Go(func() { usage.RunLossReporter(delivery, pool, emitter, instance, lossCounters, log) })
 	}
 	delivered.Go(func() { capturer.Run(delivery) })
 	if outage != nil {
@@ -705,10 +695,10 @@ func reservePublicPaths(public *http.ServeMux, mode Mode) {
 // drainProbes stops synthetic request production before metadata intake closes.
 // A producer that exceeds the drain budget leaves its epoch open because a
 // terminal event may still arrive after delivery stops.
-func drainProbes(ctx context.Context, stop context.CancelFunc, stopped <-chan struct{}, emitter *usage.Emitter, log *slog.Logger) {
+func drainProbes(ctx context.Context, stop context.CancelFunc, stopped <-chan struct{}, accounting *usage.Delivery, log *slog.Logger) {
 	stop()
-	if stopped != nil && !awaitPlane(ctx, func() { <-stopped }, log, "health probes") && emitter != nil {
-		emitter.MarkUnclean()
+	if stopped != nil && !awaitPlane(ctx, func() { <-stopped }, log, "health probes") && accounting != nil {
+		accounting.MarkUnclean()
 	}
 }
 

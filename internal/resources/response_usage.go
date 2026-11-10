@@ -53,14 +53,15 @@ func (s *Store) ObserveResponseUsage(ctx context.Context, localID, status string
 		}
 		settled = true
 	} else if len(raw) != 0 && string(raw) != "null" && !currentTerminal && evidence.Observed {
-		event, err := decodePendingUsage(raw)
+		pending, err := usage.DecodePendingGeneration(raw)
 		if err != nil {
 			return usage.Persisted{}, err
 		}
-		if err := observePendingUsage(event, evidence, false); err != nil {
+		observed, err := pending.Observe(evidence, usage.GenerationPending)
+		if err != nil {
 			return usage.Persisted{}, err
 		}
-		encoded, err = usage.Encode(event)
+		encoded, err = observed.Encode()
 		if err != nil {
 			return usage.Persisted{}, err
 		}
@@ -86,45 +87,21 @@ func persistPendingUsage(ctx context.Context, tx pgx.Tx, raw []byte, evidence us
 	if len(raw) == 0 || string(raw) == "null" {
 		return usage.Persisted{Outcome: usage.PersistOutcomeDuplicate}, nil
 	}
-	ev, err := decodePendingUsage(raw)
+	pending, err := usage.DecodePendingGeneration(raw)
 	if err != nil {
 		return usage.Persisted{}, err
 	}
-	if len(ev.Attempts) == 0 {
-		return usage.Persisted{}, errors.New("deferred generation has no attempt")
+	state := usage.GenerationUnknown
+	if terminal {
+		state = usage.GenerationTerminal
 	}
-	if err := observePendingUsage(ev, evidence, terminal); err != nil {
+	observed, err := pending.Observe(evidence, state)
+	if err != nil {
 		return usage.Persisted{}, err
 	}
-	// The resource outlives the submission exchange. Delayed observation must
-	// not turn its captured acceptance into a days-long HTTP request or rewrite
-	// that exchange's outcome. The resource state owns native terminal timing.
-	ev.ObservedAt = now
-	final := &ev.Attempts[len(ev.Attempts)-1]
-	if final.Routing != nil && final.Routing.Interaction != nil {
-		if terminal {
-			final.Routing.Interaction.UpstreamState = usage.UpstreamTerminal
-		} else {
-			final.Routing.Interaction.UpstreamState = usage.UpstreamUnknown
-		}
-	}
-	accepted, err := usage.NewAccountingEvent(ev)
+	accepted, err := observed.AccountingEvent(now, state)
 	if err != nil {
 		return usage.Persisted{}, err
 	}
 	return usage.PersistEventTx(ctx, tx, accepted)
-}
-
-// Pending owners retain exactly the current versioned accounting envelope.
-// Unknown versions or absent required evidence may not be reinterpreted before
-// deleting their only owner.
-func decodePendingUsage(raw []byte) (*usage.Event, error) {
-	event, err := usage.Decode(raw)
-	if err != nil {
-		return nil, err
-	}
-	if _, err = usage.Validate(event); err != nil {
-		return nil, err
-	}
-	return event, nil
 }

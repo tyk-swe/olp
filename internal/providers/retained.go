@@ -11,7 +11,7 @@ import (
 
 // certifyRetained proves a retained family with one authenticated,
 // read-only collection request, mirroring the agent-resource probe.
-func (s *Server) certifyRetained(ctx context.Context, cfg *Configuration, credential []byte, model string, tuple CapabilityInput) error {
+func (s *Catalogue) certifyRetained(ctx context.Context, cfg *Configuration, credential []byte, model string, tuple CapabilityInput) error {
 	if tuple.Operation == "retrieval" && cfg.transport().RetrievalBackend() != "" {
 		return s.certifyRetrieval(ctx, cfg, credential, model)
 	}
@@ -86,7 +86,7 @@ func (s *Server) certifyRetained(ctx context.Context, cfg *Configuration, creden
 
 // Certification reads the native collection; it never creates a billable
 // resource or infers support from a generic 404 response.
-func (s *Server) certifyAgentResources(ctx context.Context, cfg *Configuration, credential []byte, model string) error {
+func (s *Catalogue) certifyAgentResources(ctx context.Context, cfg *Configuration, credential []byte, model string) error {
 	endpoint, err := cfg.transport().ResourceURL(model, "agents", url.Values{"page_size": {"1"}})
 	if err != nil {
 		return err

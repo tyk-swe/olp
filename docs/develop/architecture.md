@@ -40,7 +40,11 @@ generation; integration tests enforce contract/handler parity.
 Callers own logical mutation identity. Console drafts retain submitted payload,
 ETag and Idempotency-Key through ambiguous retries, retire secrets on abandonment/
 resource/principal changes and fence stale callbacks. A confirmed write is not
-repeated because refresh failed.
+repeated because refresh failed. Provider detail state owns draft reconciliation
+and semantic commands, while the wizard retains its onboarding phases. Personal
+grant state owns enrollment lifetime and stale-response rejection. API key and
+publication form modules compile typed commands. Playground rendering, inspection
+and submission consume the same resolved execution plan.
 
 Configuration promotion owns portable intent and destination bindings, not feature
 validation. Direct and promoted provider edits share credential-boundary,
@@ -57,6 +61,18 @@ planner and ordered appliers. Plan, apply and export run the same section code, 
 the document digest is computed over the rendered canonical document. Every
 credential binding must be claimed by a section reference, and unclaimed bindings
 are refused before any planner runs.
+
+`providers.Catalogue` owns provider draft, slot, credential, certification and
+activation changes for both HTTP and promotion. `providers.Enrollments` owns
+provider grant claims, remote exchanges and completion checks. Network steps run
+outside mutation locks, with authority and slot identity checked again before
+commit. Personal grant enrollment remains a separate protocol.
+
+Publication keeps two commands. `Publish` validates current references even when
+the draft digest already exists. Promotion uses `EnsureRetainedRevision` to reuse
+retained definitions without revalidating changed dependencies. Revision
+retention, labels, final selection, authority and runtime publication remain in
+one transaction.
 
 Provider configuration identity and connector projection live in `providerconfig`.
 Provider mutations accept a prepared configuration whose constructor owns
@@ -112,7 +128,11 @@ can report without depending on provider management.
 exact historical provider/route/target/slot/credential identity for retained/media
 work. Ambiguous migration backfills remain null and refuse, never substitute current
 configuration. Runtime credential source owns current and historical resolution;
-grant eligibility remains live.
+grant eligibility remains live. `resources.Resolver` returns the proved historical
+target as one value. `providerinvoke` binds that target to current credentials,
+network secrets and its connection scope. Resource revision and release-snapshot
+decoders remain separate, as do consumer-specific eligibility and timeout rules.
+Caller credentials use ephemeral connections.
 
 OIF sources retain immutable JSON spans, presence and numeric provenance without
 provider/storage dependencies. `wire` owns neutral envelopes and format names;
@@ -136,7 +156,16 @@ Strict contracts are per-target and operation-owned; transformed preparation own
 declared defaults/translation. A gateway `call` owns authority, deadlines, financial
 state and the shared attempt loop. Its `routeLeg` owns selection and preparation;
 `generationCall` and `unaryCall` own their respective source and operation state.
-Media and code-mode lifetimes remain with their existing owners.
+Media and code-mode lifetimes remain with their existing owners. A planning
+session owns selection, delegation and plan adoption across operation adapters.
+The admitted-attempt lease owns final authority checks, reservations and typed
+completion. The attempt loop owns retries and fallback.
+
+The bound exchange owns endpoint validation, authentication, signing, redaction
+and transmission evidence. A prepared protocol response codec uses the exact
+dispatched request. The provider response reader adds hosting envelopes, media
+types and forced-stream aggregation. Guardrails, durable persistence and client
+delivery remain gateway responsibilities.
 
 Each preparation record belongs to one immutable source and route leg, keyed by
 target ID, provider ID, provider revision and model. Template lookup uses the exact
@@ -228,6 +257,12 @@ one `worker` replica for accounting, budget reconciliation, retention, media job
 polling, and plugin grant refresh to happen at all. Gateway readiness on the
 private `GET /health/ready` listener fails while the key-authority snapshot is
 missing or stale.
+
+`usage.Delivery` owns one producer identity, bounded intake, durable registration,
+writer, loss reporting and accounting readiness. Startup registers it before
+spending producers run. Shutdown drains requests and probes while runtime
+authority remains available, then closes and flushes delivery before stopping
+consumers. Failed producer drains mark the epoch unclean.
 
 ## Runtime publication and authority
 
@@ -539,6 +574,18 @@ completeness and shutdown. Keep health/metrics private; `olp health-probe` fails
 unless ready. Deterministic [tests](../../tests/README.md) are not live-provider proof.
 
 ## Retained generation accounting
+
+`resources.Lifecycle` owns creation replay, dispatch fences, uncertain completion,
+paid mutations and atomic creation of returned identities. HTTP adapters validate
+native requests and responses before passing typed results to it. Batch recovery
+passes a resource-owned recovery value into settlement adoption so both records
+commit together without a persistence callback.
+
+`usage.PendingGeneration` owns deferred envelope validation, independent evidence
+snapshots and HTTP completion. It chooses whole provider snapshots instead of
+combining independent maxima, preserves missing values and explicit zero, and
+keeps the original financial identity. Retained resource storage retains its
+existing encoded representation.
 
 Response/strict Response/Interaction mappings own content-free original
 accounting with creator identity/labels/prices. Retrieval/cancel/delete/input-item

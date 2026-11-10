@@ -1,8 +1,12 @@
+import { PersonalGrantEnrollment } from './grantEnrollment.svelte';
+import { authLifecycle } from '#lib/features/access/session/lifecycle.js';
 import { useQueryClient } from '@tanstack/svelte-query';
 import { SvelteMap } from 'svelte/reactivity';
 import MCPServersPage from './MCPServersPage.svelte';
 import { agentKeys } from './agentKeys';
-import type { MCPServer } from './api';
+import type { MCPServer, Publication } from './api';
+import PublicationsPage from './PublicationsPage.svelte';
+import GrantsPage from './GrantsPage.svelte';
 import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, getAllContexts, mount, unmount } from 'svelte';
 import { json, serve } from '#lib/management/test/transport.js';
@@ -648,4 +652,259 @@ it('keeps an edited server draft when the operator declines to discard it', asyn
 
   expect(decline).toHaveBeenCalledOnce();
   expect(name().value).toBe('My draft');
+});
+
+it('retries publication refresh after a saved write without submitting the write again', async () => {
+  const publication: Publication = {
+    id: 'prompt',
+    project_id: 'project',
+    kind: 'prompt',
+    name: 'Original',
+    etag: 'before',
+    revision_id: null,
+    retired: false,
+    draft: {
+      project_id: 'project',
+      name: 'Original',
+      prompt: { template: 'Hello', variables: [] }
+    }
+  };
+  const writes = vi.fn();
+  const recovered = vi.fn();
+  serve(
+    async (request) => {
+      const path = new URL(request.url).pathname;
+      if (path.endsWith('/projects'))
+        return json({ items: [{ id: 'project', name: 'Project' }] });
+      if (request.method === 'PUT') {
+        const input = await request.json();
+        writes(input);
+        return json({
+          ...publication,
+          name: 'Saved',
+          etag: 'after',
+          draft: input
+        });
+      }
+      if (path.endsWith('/prompt')) return json(publication);
+      if (writes.mock.calls.length && !recovered.mock.calls.length)
+        return json({ status: 503, title: 'Refresh unavailable' }, 503);
+      return json({ items: [publication] });
+    },
+    ['read', 'configure']
+  );
+  const target = document.createElement('div');
+  const setup = vi.fn(() => {
+    useQueryClient().setQueryDefaults(agentKeys.publications, { retry: false });
+    return mount(PublicationsPage, {
+      target,
+      props: { kind: 'prompts' },
+      context: getAllContexts()
+    });
+  });
+  const harness = mount(StateHarness, { target, props: { setup } });
+  onTestFinished(async () => {
+    await unmount(setup.mock.results[0].value);
+    await unmount(harness);
+  });
+  const button = (name: string) =>
+    [...target.querySelectorAll('button')].find(
+      (item) => item.textContent?.trim() === name
+    );
+  await vi.waitFor(() => expect(button('Open')).toBeDefined());
+  button('Open')?.click();
+  await vi.waitFor(() => expect(target.querySelector('form')).not.toBeNull());
+  const name = target.querySelector<HTMLInputElement>('form input');
+  expect(name).not.toBeNull();
+  if (!name) return;
+  name.value = 'Saved';
+  name.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+  target
+    .querySelector('form')
+    ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await vi.waitFor(() => expect(button('Retry refresh')?.disabled).toBe(false));
+  expect(writes).toHaveBeenCalledOnce();
+  expect(name.value).toBe('Saved');
+  expect(target.textContent).toContain('Draft saved.');
+  recovered();
+  button('Retry refresh')?.click();
+  await vi.waitFor(() => expect(button('Retry refresh')).toBeUndefined());
+  expect(writes).toHaveBeenCalledOnce();
+  expect(target.textContent).not.toContain(
+    'Write saved, but refreshing failed.'
+  );
+});
+
+function personalEnrollment() {
+  const ready = vi.fn(() => new PersonalGrantEnrollment());
+  const component = mount(StateHarness, {
+    target: document.createElement('div'),
+    props: { setup: ready }
+  });
+  onTestFinished(() => unmount(component));
+  flushSync();
+  return ready.mock.results[0].value;
+}
+
+it('consumes and clears handoff and callback secrets after their confirmed writes', async () => {
+  const writes = vi.fn();
+  serve(
+    async (request) => {
+      writes(new URL(request.url).pathname, await request.json());
+      if (new URL(request.url).pathname.endsWith('/claim'))
+        return json({ enrollment: { id: 'grant' }, state: 'pending' });
+      return json({ state: 'active' });
+    },
+    ['read', 'configure']
+  );
+  const state = personalEnrollment();
+  expect(
+    state.consumeLocation(
+      new URL('https://console.example.test/grants?tab=mine#grant.token')
+    )
+  ).toBe('/grants?tab=mine');
+  await state.claim();
+  expect(writes).toHaveBeenCalledWith('/api/v1/mcp-grant-enrollments/claim', {
+    enrollment_id: 'grant',
+    handoff_token: 'token'
+  });
+  expect(state.view.phase.kind).toBe('claimed');
+  expect(state.view.handoffToken).toBe('');
+  expect(
+    state.consumeLocation(
+      new URL(
+        'https://console.example.test/grants?code=secret-code&state=grant.signature'
+      )
+    )
+  ).toBe('/grants');
+  await state.completeCallback();
+  expect(writes).toHaveBeenCalledWith(
+    '/api/v1/mcp-grant-enrollments/grant/complete',
+    { code: 'secret-code', state: 'grant.signature' }
+  );
+  expect(state.view.callbackCode).toBe('');
+  expect(state.view.authorization?.state).toBe('active');
+});
+
+it('ignores an obsolete enrollment response after consuming another handoff', async () => {
+  const response = Promise.withResolvers<Response>();
+  serve(() => response.promise, ['read', 'configure']);
+  const state = personalEnrollment();
+  const pending = state.begin({ kind: 'server', id: 'server', keyId: 'key' });
+  state.consumeLocation(
+    new URL('https://console.example.test/grants#new.token')
+  );
+  response.resolve(
+    json({ enrollment_url: 'https://console.example.test/grants#old.token' })
+  );
+  await pending;
+  expect(state.view.enrollmentID).toBe('new');
+  expect(state.view.handoffToken).toBe('token');
+  expect(state.view.enrollmentURL).toBe('');
+  expect(state.view.busy).toBe(false);
+});
+
+it('retires a pending authorization and its secrets when the principal changes', async () => {
+  const response = Promise.withResolvers<Response>();
+  serve(() => response.promise, ['read', 'configure']);
+  const state = personalEnrollment();
+  state.consumeLocation(
+    new URL(
+      'https://console.example.test/grants?code=secret&state=grant.signature'
+    )
+  );
+  const pending = state.completeCallback();
+  authLifecycle.establishSession({
+    user: {
+      id: 'other',
+      email: 'other@example.test',
+      display_name: 'Other',
+      role: 'owner',
+      access_scope: 'global',
+      operations: ['read', 'configure']
+    },
+    csrf_token: 'other-csrf'
+  });
+  response.resolve(json({ state: 'active' }));
+  await pending;
+  expect(state.view.phase.kind).toBe('idle');
+  expect(state.view.callbackCode).toBe('');
+  expect(state.view.authorization).toBeUndefined();
+});
+
+it('shows the latest personal grant result after saving authorization settings', async () => {
+  const configured: MCPServer = {
+    ...server,
+    oauth: {
+      client_id: 'client',
+      audience: 'audience',
+      scopes: ['read'],
+      authorization_endpoint: 'https://auth.example.test/authorize',
+      token_endpoint: 'https://auth.example.test/token'
+    }
+  };
+  serve(
+    async (request) => {
+      const path = new URL(request.url).pathname;
+      if (path === '/api/v1/mcp-servers/server') return json(configured);
+      if (path === '/api/v1/mcp-servers') return json({ items: [configured] });
+      if (path === '/api/v1/mcp-grant-enrollments/claim')
+        return json({ enrollment: { id: 'grant' }, state: 'pending' });
+      return json({ items: [] });
+    },
+    ['read', 'configure', 'keys', 'self']
+  );
+  const originalURL = window.location.href;
+  window.history.replaceState(null, '', window.location.pathname);
+  const target = document.createElement('div');
+  const setup = vi.fn(() =>
+    mount(GrantsPage, {
+      target,
+      context: getAllContexts()
+    })
+  );
+  const harness = mount(StateHarness, { target, props: { setup } });
+  onTestFinished(async () => {
+    await unmount(setup.mock.results[0].value);
+    await unmount(harness);
+    window.history.replaceState(null, '', originalURL);
+  });
+  const button = (label: string) =>
+    [...target.querySelectorAll('button')].find(
+      (item) => item.textContent?.trim() === label
+    );
+  await vi.waitFor(() =>
+    expect(target.querySelector('select option[value="server"]')).not.toBeNull()
+  );
+  const selection = target
+    .querySelector('select option[value="server"]')
+    ?.closest<HTMLSelectElement>('select');
+  expect(selection).not.toBeNull();
+  if (!selection) return;
+  selection.value = configured.id;
+  selection.dispatchEvent(new Event('change', { bubbles: true }));
+  await vi.waitFor(() =>
+    expect(button('Save authorization settings')).toBeDefined()
+  );
+  button('Save authorization settings')
+    ?.closest('form')
+    ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await vi.waitFor(() =>
+    expect(target.textContent).toContain(
+      'Personal authorization configuration saved'
+    )
+  );
+  window.history.replaceState(null, '', '#grant.token');
+  window.dispatchEvent(new HashChangeEvent('hashchange'));
+  await vi.waitFor(() => expect(button('Claim enrollment')).toBeDefined());
+  button('Claim enrollment')?.click();
+  await vi.waitFor(() =>
+    expect(target.textContent).toContain(
+      'Enrollment claimed. Authorization is pending'
+    )
+  );
+  expect(target.textContent).not.toContain(
+    'Personal authorization configuration saved'
+  );
 });

@@ -117,7 +117,7 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *c
 	version := retainedapi.Revision
 	meta, _ := json.Marshal(map[string]any{"upstream_model": p.model, "file_operation": operation, "purpose": purpose, "bytes": file.Size, "filename": file.Filename, "upload_digest": file.Digest})
 	candidate := &resources.Resource{Kind: resources.KindFile, APIKeyID: x.keyID, RouteSlug: route.Slug, RouteRevisionID: route.RevisionID, ProviderID: p.provider.ID, ProviderRevisionID: p.provider.RevisionID, TargetID: p.target.ID, SlotID: p.slot.ID, CredentialID: p.slot.CredentialID, ContractVersion: &version, Metadata: meta}
-	resource, fresh, prepareErr := s.deps.Resources.PrepareLifecycle(ctx, candidate, operation+":file", idempotency, digest)
+	lifecycle, prepareErr := s.deps.Resources.BeginCreate(ctx, candidate, resources.Submission{Operation: operation + ":file", Key: idempotency, Digest: digest})
 	if errors.Is(prepareErr, resources.ErrSubmissionConflict) {
 		fail(serverError(409, "idempotency_conflict", "This submission identity is already bound to another upload."))
 		return
@@ -126,8 +126,9 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *c
 		fail(serverError(503, "provider_state_unavailable", "The file submission could not be committed."))
 		return
 	}
+	resource := lifecycle.Resource()
 	w.Header().Set("X-OLP-Resource-ID", resource.ID)
-	if !fresh {
+	if lifecycle.Existing() {
 		fail(serverError(409, "submission_exists", "This upload already exists; inspect X-OLP-Resource-ID instead of recreating it."))
 		return
 	}
@@ -136,16 +137,16 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *c
 		fail(pinUnavailable())
 		return
 	}
-	if err := s.deps.Resources.DispatchLifecycle(ctx, resource.UUID); err != nil {
+	if err := lifecycle.Dispatch(ctx); err != nil {
 		fail(serverError(503, "provider_state_unavailable", "The file submission could not be fenced."))
 		return
 	}
 	defer func() {
 		commitCtx, cancel := resourceCommitContext(r.Context())
 		defer cancel()
-		_ = s.deps.Resources.UnknownLifecycle(commitCtx, resource.UUID)
+		_ = lifecycle.Close(commitCtx)
 	}()
-	status = s.retainedDispatch(w, r.WithContext(ctx), x, p, e, resource, endpoint, body, contentType, true, fail)
+	status = s.retainedDispatch(w, r.WithContext(ctx), x, p, e, resource, endpoint, body, contentType, lifecycle, fail)
 }
 
 func (s *Server) retainedUploadBody(file *staging.Part, purpose string) ([]byte, string, error) {

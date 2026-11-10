@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
+  publicationCommand,
   publicationForm,
   publicationInput,
   serverPricingForm,
@@ -588,4 +589,55 @@ describe('pricing editor feedback', () => {
     expect(form.tools).toEqual([result.pin]);
     expect(publicationInput('toolsets', form)).toEqual(draft);
   });
+});
+
+it('compiles publication actions without carrying form credentials into publication or label requests', () => {
+  const draft = publicationInput('prompts', {
+    ...publicationForm(),
+    project: id,
+    name: 'Prompt',
+    template: 'Original'
+  });
+  const current: Publication = {
+    id,
+    project_id: id,
+    kind: 'prompt',
+    name: 'Prompt',
+    etag: 'observed',
+    revision_id: 'prior',
+    retired: false,
+    draft
+  };
+  const edits: Parameters<typeof publicationCommand>[0] = {
+    kind: 'prompts',
+    current,
+    action: 'publish',
+    form: { ...publicationForm(current), template: 'Unsaved' },
+    credential: 'private-bearer',
+    entraClientSecret: 'private-client-secret',
+    removeCredential: false,
+    revision: 'selected'
+  };
+  expect(publicationCommand(edits)).toEqual({
+    ok: true,
+    command: {
+      action: 'publish',
+      kind: 'prompts',
+      observed: { id, etag: 'observed' }
+    }
+  });
+  expect(publicationCommand({ ...edits, action: 'production' })).toEqual({
+    ok: true,
+    command: {
+      action: 'label',
+      observed: { id, etag: 'observed' },
+      label: 'production',
+      revision: 'selected'
+    }
+  });
+  expect(publicationCommand({ ...edits, current: null }).ok).toBe(false);
+  const saved = publicationCommand({ ...edits, action: 'save' });
+  expect(
+    saved.ok && saved.command.action === 'update' && saved.command.input
+  ).toEqual({ ...draft, prompt: { template: 'Unsaved', variables: [] } });
 });

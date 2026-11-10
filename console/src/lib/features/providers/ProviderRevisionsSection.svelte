@@ -1,12 +1,8 @@
 <script lang="ts">
   import { confirmAction } from '#lib/components/confirm.js';
-  import {
-    useMutationIntent,
-    usePrincipalLifetime
-  } from '#lib/editing/mutationIntent.svelte.js';
   import { providerKeys } from '#lib/features/providers/providerKeys.js';
 
-  import { createQuery, useQueryClient } from '@tanstack/svelte-query';
+  import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import {
     cursorPaginationProps,
@@ -16,36 +12,21 @@
   import CursorPagination from '#lib/shell/CursorPagination.svelte';
   import SecretDialog from '#lib/shell/SecretDialog.svelte';
   import {
-    diffProviderRevisions,
     getProviderRevision,
     listProviderRevisionModelPage,
     listProviderRevisionPage,
-    restoreProviderRevision,
     type ProviderRevisionDiff
   } from '#lib/features/providers/revisions.js';
   import { type Provider } from '#lib/features/providers/providers.js';
   import { formatDate, stateLabel } from '#lib/format.js';
-  import type { RunProviderAction } from './providerEditor';
+  import type { ProviderEditor } from './providerEditor.svelte';
 
-  let {
-    current,
-    busy,
-    canManage,
-    run,
-    onProviderChanged,
-    onResetModelPage,
-    onNotice
-  }: {
-    current: Provider;
-    busy: string;
-    canManage: boolean;
-    run: RunProviderAction;
-    onProviderChanged: () => Promise<void>;
-    onResetModelPage: () => void;
-    onNotice: (message: string) => void;
-  } = $props();
-
-  const queryClient = useQueryClient();
+  let { current, editor }: { current: Provider; editor: ProviderEditor } =
+    $props();
+  const editorView = $derived(editor.view);
+  const busy = $derived(editorView.busy);
+  const canManage = $derived(editor.canManage);
+  const refreshPending = $derived(editorView.refreshPending);
   const pagination = $state(emptyCursorHistory());
   const modelPagination = $state(emptyCursorHistory());
   let viewed = $state<{ id: string; revision: number } | null>(null);
@@ -54,10 +35,6 @@
   let revisionTo = $state('');
   let revisionDiff = $state<ProviderRevisionDiff | null>(null);
   let comparisonError = $state('');
-  let refreshPending = $state(false);
-  usePrincipalLifetime(() => {
-    refreshPending = false;
-  });
   const revisions = createQuery(() => ({
     queryKey: providerKeys.revisions(current.id, pagination.cursor),
     queryFn: ({ signal }) =>
@@ -96,14 +73,8 @@
       return;
     }
     comparisonError = '';
-    await run('revision-diff', async (isCurrent) => {
-      const result = await diffProviderRevisions(
-        current.id,
-        revisionFrom,
-        revisionTo
-      );
-      if (isCurrent()) revisionDiff = result;
-    });
+    const result = await editor.compareRevisions(revisionFrom, revisionTo);
+    if (result) revisionDiff = result;
   }
 
   async function restore(revisionId: string, revision: number) {
@@ -116,48 +87,7 @@
       }))
     )
       return;
-    await run('revision-restore', async (isCurrent) => {
-      const submission = restoreIntent.prepare(
-        { providerId: current.id, revisionId },
-        () => ({ provider: { id: current.id, etag: current.etag }, revisionId })
-      );
-      await restoreProviderRevision(
-        submission.input.provider,
-        submission.input.revisionId,
-        submission.requestId
-      );
-      if (!isCurrent()) return;
-      restoreIntent.reset();
-      refreshPending = true;
-      onNotice(
-        `Revision ${revision} restored as a new draft. No historical credential was restored; the current credential selection was preserved. Test and certify before activation.`
-      );
-      revisionDiff = null;
-      onResetModelPage();
-      try {
-        await refreshRestoredDraft(isCurrent);
-      } catch (cause) {
-        throw new Error(
-          `Draft restored, but refreshing failed. ${errorMessage(cause)}`,
-          { cause }
-        );
-      }
-    });
-  }
-
-  async function refreshRestoredDraft(isCurrent: () => boolean) {
-    if (!isCurrent()) return;
-    await onProviderChanged();
-    if (!isCurrent()) return;
-    await queryClient.invalidateQueries(
-      { queryKey: providerKeys.summaries },
-      { throwOnError: true }
-    );
-    if (isCurrent()) refreshPending = false;
-  }
-
-  async function retryRefresh() {
-    await run('revision-refresh', refreshRestoredDraft);
+    if (await editor.restoreRevision(revisionId, revision)) revisionDiff = null;
   }
 
   function resetComparison() {
@@ -170,8 +100,6 @@
     viewed = { id: revisionId, revision };
   }
   import ProviderRevisionComparison from '#lib/features/providers/ProviderRevisionComparison.svelte';
-
-  const restoreIntent = useMutationIntent();
 </script>
 
 <section
@@ -184,7 +112,7 @@
         type="button"
         class="button button-secondary"
         disabled={Boolean(busy)}
-        onclick={retryRefresh}>Retry refresh</button
+        onclick={editor.retryRefresh}>Retry refresh</button
       >
     </p>{/if}
   <div class="section-heading">

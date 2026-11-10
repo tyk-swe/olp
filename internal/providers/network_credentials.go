@@ -15,7 +15,7 @@ import (
 
 // StoreNetworkCredential uses the existing encryption authority, but a distinct
 // provider-owned reference table so API credential slots cannot select TLS keys.
-func (s *Server) StoreNetworkCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error) {
+func (s *Catalogue) StoreNetworkCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error) {
 	if len(secret) > maxCredentialBytes {
 		return "", access.Invalid("credential", "Network credentials must fit within 64 KiB.")
 	}
@@ -88,18 +88,14 @@ func (s *Server) createNetworkCredential(r *http.Request, _ access.Principal) (a
 	if err := access.Match(r, provider.ETag); err != nil {
 		return access.Reply{}, err
 	}
-	credentialID, err := s.StoreNetworkCredential(r.Context(), tx, id, input.Credential)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	etag, err := touch(r.Context(), tx, id)
+	created, err := s.createNetworkCredentialVersion(r.Context(), tx, id, input.Credential)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	if err := access.Audit(r.Context(), tx, r, principal.Actor(), "provider.network_credential.create", "provider", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	result := access.Reply{Status: http.StatusCreated, ETag: etag, Body: map[string]any{"provider_id": id, "credential_id": credentialID, "etag": etag}}
+	result := access.Reply{Status: http.StatusCreated, ETag: created.ETag, Body: map[string]any{"provider_id": id, "credential_id": created.ID, "etag": created.ETag}}
 	if err := s.Access.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
@@ -112,19 +108,11 @@ func (s *Server) revokeNetworkCredential(r *http.Request, _ access.Principal) (a
 		if err != nil {
 			return access.Reply{}, err
 		}
-		var version int
-		if err := tx.QueryRow(ctx, "UPDATE olp.provider_network_credentials SET revoked_at=now() WHERE id=$1 AND provider_id=$2 AND revoked_at IS NULL RETURNING version", id, current.ID).Scan(&version); err != nil {
-			return access.Reply{}, err
-		}
-		generation, err := access.AdvanceAuthority(ctx, tx)
+		revoked, err := s.revokeNetworkCredentialVersion(ctx, tx, current, id)
 		if err != nil {
 			return access.Reply{}, err
 		}
-		etag, err := touch(ctx, tx, current.ID)
-		if err != nil {
-			return access.Reply{}, err
-		}
-		return access.Detail(map[string]any{"provider_id": current.ID, "credential_id": id, "etag": etag, "runtime_generation": generation}, etag), nil
+		return access.Detail(map[string]any{"provider_id": current.ID, "credential_id": id, "etag": revoked.ETag, "runtime_generation": revoked.Generation}, revoked.ETag), nil
 	})
 }
 
@@ -140,7 +128,7 @@ func validateNetworkReference(ctx context.Context, q access.Queryer, providerID 
 	return err
 }
 
-func (s *Server) networkSecret(ctx context.Context, cfg *Configuration) ([]byte, error) {
+func (s *Catalogue) networkSecret(ctx context.Context, cfg *Configuration) ([]byte, error) {
 	if cfg.Options.Network == nil || cfg.Options.Network.CredentialID == "" {
 		return nil, nil
 	}
@@ -155,7 +143,7 @@ func (s *Server) networkSecret(ctx context.Context, cfg *Configuration) ([]byte,
 	return s.Access.Keys.Read(ctx, tx, s.Access.Installation, cfg.Options.Network.CredentialID, secrets.ProviderCredential)
 }
 
-func (s *Server) connectionClient(ctx context.Context, cfg *Configuration, credential []byte) (*http.Client, error) {
+func (s *Catalogue) connectionClient(ctx context.Context, cfg *Configuration, credential []byte) (*http.Client, error) {
 	if cfg.Options.Network == nil && cfg.ProfileID == "" {
 		return s.client, nil
 	}
@@ -180,4 +168,37 @@ func (c Configuration) WithNetworkCredential(credentialID string) Configuration 
 	configured := c
 	configured.Options.Network = &network
 	return configured
+}
+
+func (s *Catalogue) revokeNetworkCredentialVersion(ctx context.Context, tx pgx.Tx, current *record, id string) (revokedCredential, error) {
+	var version int
+	if err := tx.QueryRow(ctx, "UPDATE olp.provider_network_credentials SET revoked_at=now() WHERE id=$1 AND provider_id=$2 AND revoked_at IS NULL RETURNING version", id, current.ID).Scan(&version); err != nil {
+		return revokedCredential{}, err
+	}
+	generation, err := access.AdvanceAuthority(ctx, tx)
+	if err != nil {
+		return revokedCredential{}, err
+	}
+	etag, err := touch(ctx, tx, current.ID)
+	if err != nil {
+		return revokedCredential{}, err
+	}
+	return revokedCredential{Version: version, Generation: generation, ETag: etag}, nil
+}
+
+type createdNetworkCredential struct {
+	ID   string
+	ETag string
+}
+
+func (s *Catalogue) createNetworkCredentialVersion(ctx context.Context, tx pgx.Tx, providerID, credential string) (createdNetworkCredential, error) {
+	id, err := s.StoreNetworkCredential(ctx, tx, providerID, credential)
+	if err != nil {
+		return createdNetworkCredential{}, err
+	}
+	etag, err := touch(ctx, tx, providerID)
+	if err != nil {
+		return createdNetworkCredential{}, err
+	}
+	return createdNetworkCredential{ID: id, ETag: etag}, nil
 }

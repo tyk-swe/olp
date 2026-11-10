@@ -82,7 +82,7 @@ func (a applying) bindNetwork(ctx context.Context, tx pgx.Tx, entry Entry, prepa
 	if err != nil || (same && !rotated) {
 		return err
 	}
-	return providers.StoreDraftConfiguration(ctx, tx, target.id, entry.Name, configured)
+	return a.deps.Catalogue.StoreDraftConfiguration(ctx, tx, target.id, entry.Name, configured)
 }
 
 func (a applying) networkConfiguration(ctx context.Context, tx pgx.Tx, entry Entry, prepared providers.PreparedConfiguration, target destination) (providers.PreparedConfiguration, bool, error) {

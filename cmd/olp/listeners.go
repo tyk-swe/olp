@@ -73,13 +73,13 @@ func serveListeners(ctx context.Context, listeners []boundListener, mode Mode, l
 
 // Both listeners drain against the same deadline. Forced connection closure
 // does not prove that every handler has finished producing metadata.
-func drainListeners(ctx context.Context, listeners []boundListener, emitter *usage.Emitter) {
+func drainListeners(ctx context.Context, listeners []boundListener, accounting *usage.Delivery) {
 	var wg sync.WaitGroup
 	for _, listener := range listeners {
 		wg.Go(func() {
 			if err := listener.server.Shutdown(ctx); err != nil {
-				if emitter != nil && listener.name == "public" {
-					emitter.MarkUnclean()
+				if accounting != nil && listener.name == "public" {
+					accounting.MarkUnclean()
 				}
 			}
 			// A bound socket also belongs to this cleanup if serving never

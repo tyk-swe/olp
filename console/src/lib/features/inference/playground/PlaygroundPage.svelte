@@ -3,7 +3,6 @@
   import RoutingPreferencesForm from '#lib/features/routes/RoutingPreferencesForm.svelte';
   import RoutingDecisions from '#lib/features/routes/RoutingDecisions.svelte';
   import { decisionRows } from '#lib/features/routes/routingExplanation.js';
-  import { inspectionDialects } from '#lib/features/routes/inspectionDialects.js';
   import SegmentedRadioGroup from '#lib/shell/SegmentedRadioGroup.svelte';
   import { errorMessage } from '#lib/management/http.js';
   import { formatInteger } from '#lib/format.js';
@@ -12,11 +11,6 @@
   import StrictToolPlayground from './StrictToolPlayground.svelte';
   import NativeOperationPlayground from './NativeOperationPlayground.svelte';
   import AudioTranslationPlayground from './AudioTranslationPlayground.svelte';
-  import {
-    nativeDialects,
-    publicNativeOperations,
-    type NativeOperation
-  } from './nativeOperation';
   import { playgroundTemplates } from './templates';
   import { PlaygroundState } from './playgroundState.svelte';
 
@@ -316,23 +310,15 @@
           <label for="playground-inspect-dialect">Native request dialect</label>
           <select
             id="playground-inspect-dialect"
-            value={(playground.strictSelected ||
-              publicNativeOperations.has(playground.operation)) &&
-            nativeDialects(playground.operation).length
-              ? playground.currentNativeDialect()
-              : (playground.currentInspectDialect() ?? '')}
+            value={playground.plan.inspection.dialect ?? ''}
             onchange={(event) => {
-              if (
-                (playground.strictSelected ||
-                  publicNativeOperations.has(playground.operation)) &&
-                nativeDialects(playground.operation).length
-              )
+              if (playground.plan.inspection.registeredNative)
                 playground.nativeDialect = event.currentTarget.value;
               else playground.inspectDialect = event.currentTarget.value;
             }}
           >
             <option value="">Default for operation and surface</option>
-            {#each (playground.strictSelected || publicNativeOperations.has(playground.operation)) && nativeDialects(playground.operation).length ? nativeDialects(playground.operation) : inspectionDialects(playground.operation, playground.surface) as dialect (dialect)}
+            {#each playground.plan.inspection.dialects as dialect (dialect)}
               <option value={dialect}>{dialect}</option>
             {/each}
           </select>
@@ -397,10 +383,7 @@
         type="submit"
         disabled={playground.mutation.isPending ||
           playground.streaming ||
-          playground.strictSelected ||
-          playground.activeOperation === 'realtime' ||
-          playground.activeOperation === 'translation' ||
-          (playground.composer === 'advanced' && !playground.operationKnown)}
+          Boolean(playground.plan.submissionError)}
         >{playground.mutation.isPending || playground.streaming
           ? 'Running…'
           : 'Run test'}</button
@@ -584,48 +567,33 @@
   </section>
 </div>
 
-{#if (playground.strictSelected || publicNativeOperations.has(playground.activeOperation)) && playground.activeOperation !== 'translation'}
-  {#if playground.composer === 'advanced' && playground.operation === 'generation' && playground.surface === 'openai' && playground.templateKey === 'legacy-completions'}
-    {#key playground.model.trim()}
-      <NativeOperationPlayground
-        route={playground.model.trim()}
-        operation="completions"
-        requestText={playground.rawJson}
-        dialect="openai-completions"
-      />
-    {/key}
-  {:else if playground.composer === 'advanced' && playground.operation === 'generation' && playground.surface === 'openai'}
-    {#key playground.model.trim()}
-      <StrictToolPlayground
-        route={playground.model.trim()}
-        requestText={playground.rawJson}
-      />
-    {/key}
-  {:else if playground.composer === 'advanced' && nativeDialects(playground.operation).length}
-    {#key `${playground.model.trim()}:${playground.operation}:${playground.templateKey}`}
-      <NativeOperationPlayground
-        route={playground.model.trim()}
-        operation={playground.operation as NativeOperation}
-        requestText={playground.rawJson}
-        bind:dialect={playground.nativeDialect}
-      />
-    {/key}
-  {:else if playground.activeOperation !== 'realtime'}
-    <section class="card strict-client-unavailable" role="status">
-      This route needs a native or negotiated public client. Choose Advanced,
-      Generation, OpenAI and the negotiated tool template for the currently
-      qualified tool workflow.
-    </section>
-  {/if}
-{/if}
-
-{#if playground.composer === 'advanced' && playground.operation === 'translation'}
+{#if playground.plan.kind === 'native'}
+  {#key `${playground.model.trim()}:${playground.plan.operation}:${playground.templateKey}`}
+    <NativeOperationPlayground
+      route={playground.model.trim()}
+      operation={playground.plan.operation}
+      requestText={playground.rawJson}
+      bind:dialect={playground.nativeDialect}
+    />
+  {/key}
+{:else if playground.plan.kind === 'strict'}
+  {#key playground.model.trim()}
+    <StrictToolPlayground
+      route={playground.model.trim()}
+      requestText={playground.rawJson}
+    />
+  {/key}
+{:else if playground.plan.kind === 'unavailable'}
+  <section class="card strict-client-unavailable" role="status">
+    This route needs a native or negotiated public client. Choose Advanced,
+    Generation, OpenAI and the negotiated tool template for the currently
+    qualified tool workflow.
+  </section>
+{:else if playground.plan.kind === 'audio'}
   {#key playground.model.trim()}<AudioTranslationPlayground
       route={playground.model.trim()}
     />{/key}
-{/if}
-
-{#if playground.composer === 'advanced' && playground.operation === 'realtime'}
+{:else if playground.plan.kind === 'realtime'}
   <RealtimeTrace />
 {/if}
 

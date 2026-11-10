@@ -188,22 +188,11 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 	if locked.ETag != current.ETag {
 		return access.Reply{}, access.Fail(412, "etag_mismatch", "The connection changed during validation; reload and retry.")
 	}
-	credentialID, version, err := s.storeCredentialInput(r.Context(), tx, id, plain, input.CredentialReference)
+	rotated, err := s.rotateCredential(r.Context(), tx, current, models, defaultSlot, validatedAt, plain, input.CredentialReference)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	defaultSlot.CredentialID = &credentialID
-	fingerprint := defaultSlot.validationFingerprint(&current.Configuration, models)
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.provider_slots SET credential_id=$2,validated_at=$4,validated_fingerprint=$3 WHERE provider_id=$1 AND is_default", id, credentialID, fingerprint, validatedAt); err != nil {
-		return access.Reply{}, err
-	}
-	etag, err := touch(r.Context(), tx, id)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.providers SET slots_etag=$2 WHERE id=$1", id, access.NewID()); err != nil {
-		return access.Reply{}, err
-	}
+	credentialID, version, etag := rotated.ID, rotated.Version, rotated.ETag
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.credential.rotate", "provider_credential", credentialID, "success"); err != nil {
 		return access.Reply{}, err
 	}
@@ -223,37 +212,11 @@ func (s *Server) revoke(r *http.Request, _ access.Principal) (access.Reply, erro
 		if err != nil {
 			return access.Reply{}, err
 		}
-		var version int
-		err = tx.QueryRow(ctx, "UPDATE olp.provider_credentials SET revoked_at=now() WHERE id=$1 AND provider_id=$2 AND revoked_at IS NULL RETURNING version", credentialID, current.ID).Scan(&version)
-		if errors.Is(err, pgx.ErrNoRows) {
-			var exists bool
-			if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.provider_credentials WHERE id=$1 AND provider_id=$2)", credentialID, current.ID).Scan(&exists); err != nil {
-				return access.Reply{}, err
-			}
-			if !exists {
-				return access.Reply{}, pgx.ErrNoRows
-			}
-			return access.Reply{}, access.Fail(409, "already_revoked", "This credential version is already revoked.")
-		}
+		revoked, err := s.revokeCredential(ctx, tx, current, credentialID)
 		if err != nil {
 			return access.Reply{}, err
 		}
-		if err = grants.Revoke(ctx, tx, credentialID); err != nil {
-			return access.Reply{}, err
-		}
-		generation, err := access.AdvanceAuthority(ctx, tx)
-		if err != nil {
-			return access.Reply{}, err
-		}
-		var referenced bool
-		if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.provider_slots WHERE provider_id=$1 AND credential_id=$2)", current.ID, credentialID).Scan(&referenced); err != nil {
-			return access.Reply{}, err
-		}
-		etag := access.NewID()
-		if _, err = tx.Exec(ctx, "UPDATE olp.providers SET etag=$2,slots_etag=$3,draft_dirty=draft_dirty OR $4,updated_at=now() WHERE id=$1", current.ID, etag, access.NewID(), referenced); err != nil {
-			return access.Reply{}, err
-		}
-		return access.Detail(map[string]any{"provider_id": current.ID, "etag": etag, "credential_id": credentialID, "credential_version": version, "runtime_generation": generation}, etag), nil
+		return access.Detail(map[string]any{"provider_id": current.ID, "etag": revoked.ETag, "credential_id": credentialID, "credential_version": revoked.Version, "runtime_generation": revoked.Generation}, revoked.ETag), nil
 	})
 }
 
@@ -530,68 +493,7 @@ func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, e
 	if err = matchSlot(r, current, existing); err != nil {
 		return access.Reply{}, err
 	}
-	if existing == nil && len(slots) >= maxSlots {
-		return access.Reply{}, access.Fail(422, "slot_limit", "A connection can hold at most 64 credential slots.")
-	}
-	enabled, priority, weight := true, 0, int64(1)
-	if input.Slot.Enabled != nil {
-		enabled = *input.Slot.Enabled
-	}
-	if input.Slot.Priority != nil {
-		priority = *input.Slot.Priority
-	}
-	if input.Slot.Weight != nil {
-		weight = *input.Slot.Weight
-	}
-	var credentialID *string
-	switch {
-	case input.Credential != nil || input.CredentialReference != nil:
-		if !current.Configuration.CredentialRequired() {
-			return access.Reply{}, access.Fail(422, "credential_forbidden", "This authentication mode takes no stored credential.")
-		}
-		if current.Configuration.Grant() {
-			return access.Reply{}, access.Fail(422, "credential_forbidden", grantEnrollmentOnly)
-		}
-		stored, _, err := s.storeCredentialInput(r.Context(), tx, id, input.Credential, input.CredentialReference)
-		if err != nil {
-			return access.Reply{}, err
-		}
-		credentialID = &stored
-	case input.Slot.CredentialVersionID != nil:
-		var revoked, lapsed bool
-		err = tx.QueryRow(r.Context(), "SELECT c.revoked_at IS NOT NULL,g.lapsed_at IS NOT NULL FROM olp.provider_credentials c LEFT JOIN olp.provider_grants g ON g.credential_id=c.id WHERE c.id=$1 AND c.provider_id=$2", *input.Slot.CredentialVersionID, id).Scan(&revoked, &lapsed)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return access.Reply{}, access.Invalid("slot.credential_version_id", "Unknown credential for this connection.")
-		}
-		if err != nil {
-			return access.Reply{}, err
-		}
-		if revoked {
-			return access.Reply{}, access.Fail(422, "credential_revoked", "That credential version is revoked.")
-		}
-		if lapsed {
-			return access.Reply{}, access.Fail(422, "credential_lapsed", "That credential version's grant lapsed. Enroll a new grant.")
-		}
-		credentialID = input.Slot.CredentialVersionID
-	case existing != nil:
-		credentialID = existing.CredentialID
-	}
-	restrictions, _ := json.Marshal(SlotRestrictions{AllowedAPIKeys: orEmpty(input.Slot.AllowedAPIKeys), AllowedModels: orEmpty(input.Slot.AllowedModels), AllowedRoutes: orEmpty(input.Slot.AllowedRoutes)})
-	limits, _ := json.Marshal(input.Slot.limits())
-	if existing == nil {
-		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.provider_slots(id,provider_id,is_default,position,name,enabled,priority,weight,credential_id,restrictions,limits) VALUES($1,$2,false,(SELECT coalesce(max(position),0)+1 FROM olp.provider_slots WHERE provider_id=$2),$3,$4,$5,$6,$7,$8,$9)", slotID, id, input.Slot.Name, enabled, priority, weight, credentialID, restrictions, limits); err != nil {
-			return access.Reply{}, err
-		}
-	} else {
-		keepValidation := deref(existing.CredentialID) == deref(credentialID)
-		if _, err = tx.Exec(r.Context(), "UPDATE olp.provider_slots SET name=$3,enabled=$4,priority=$5,weight=$6,credential_id=$7,restrictions=$8,limits=$9,validated_at=CASE WHEN $10 THEN validated_at END,validated_fingerprint=CASE WHEN $10 THEN validated_fingerprint END WHERE id=$1 AND provider_id=$2", slotID, id, input.Slot.Name, enabled, priority, weight, credentialID, restrictions, limits, keepValidation); err != nil {
-			return access.Reply{}, err
-		}
-	}
-	if _, err = touch(r.Context(), tx, id); err != nil {
-		return access.Reply{}, err
-	}
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.providers SET slots_etag=$2 WHERE id=$1", id, access.NewID()); err != nil {
+	if err := s.saveDraftSlot(r.Context(), tx, current, slotID, input, existing, len(slots)); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.slot.update", "provider_slot", slotID, "success"); err != nil {
@@ -697,13 +599,7 @@ func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply
 	if locked.ETag != current.ETag {
 		return access.Reply{}, access.Fail(412, "etag_mismatch", "The connection changed during validation; reload and retry.")
 	}
-	var validatedAt *time.Time
-	var fingerprint *string
-	if probeErr == nil {
-		validatedAt = new(time.Now().UTC())
-		fingerprint = new(slot.validationFingerprint(&current.Configuration, models))
-	}
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.provider_slots SET validated_at=$2,validated_fingerprint=$3 WHERE id=$1", slotID, validatedAt, fingerprint); err != nil {
+	if err := s.storeSlotValidation(r.Context(), tx, current, slot, models, probeErr == nil); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.slot.validate", "provider_slot", slotID, auditOutcome(probeErr == nil)); err != nil {
@@ -721,4 +617,155 @@ func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply
 		err = access.Fail(422, "slot_validation_failed", classify(probeErr).Detail)
 	}
 	return result, err
+}
+
+func (s *Catalogue) saveDraftSlot(ctx context.Context, tx pgx.Tx, current *record, slotID string, input slotWrite, existing *slotRow, slotCount int) error {
+	id := current.ID
+	var err error
+	if existing == nil && slotCount >= maxSlots {
+		return access.Fail(422, "slot_limit", "A connection can hold at most 64 credential slots.")
+	}
+	enabled, priority, weight := true, 0, int64(1)
+	if input.Slot.Enabled != nil {
+		enabled = *input.Slot.Enabled
+	}
+	if input.Slot.Priority != nil {
+		priority = *input.Slot.Priority
+	}
+	if input.Slot.Weight != nil {
+		weight = *input.Slot.Weight
+	}
+	var credentialID *string
+	switch {
+	case input.Credential != nil || input.CredentialReference != nil:
+		if !current.Configuration.CredentialRequired() {
+			return access.Fail(422, "credential_forbidden", "This authentication mode takes no stored credential.")
+		}
+		if current.Configuration.Grant() {
+			return access.Fail(422, "credential_forbidden", grantEnrollmentOnly)
+		}
+		stored, _, err := s.storeCredentialInput(ctx, tx, id, input.Credential, input.CredentialReference)
+		if err != nil {
+			return err
+		}
+		credentialID = &stored
+	case input.Slot.CredentialVersionID != nil:
+		var revoked, lapsed bool
+		err = tx.QueryRow(ctx, "SELECT c.revoked_at IS NOT NULL,g.lapsed_at IS NOT NULL FROM olp.provider_credentials c LEFT JOIN olp.provider_grants g ON g.credential_id=c.id WHERE c.id=$1 AND c.provider_id=$2", *input.Slot.CredentialVersionID, id).Scan(&revoked, &lapsed)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return access.Invalid("slot.credential_version_id", "Unknown credential for this connection.")
+		}
+		if err != nil {
+			return err
+		}
+		if revoked {
+			return access.Fail(422, "credential_revoked", "That credential version is revoked.")
+		}
+		if lapsed {
+			return access.Fail(422, "credential_lapsed", "That credential version's grant lapsed. Enroll a new grant.")
+		}
+		credentialID = input.Slot.CredentialVersionID
+	case existing != nil:
+		credentialID = existing.CredentialID
+	}
+	restrictions, _ := json.Marshal(SlotRestrictions{AllowedAPIKeys: orEmpty(input.Slot.AllowedAPIKeys), AllowedModels: orEmpty(input.Slot.AllowedModels), AllowedRoutes: orEmpty(input.Slot.AllowedRoutes)})
+	limits, _ := json.Marshal(input.Slot.limits())
+	if existing == nil {
+		if _, err = tx.Exec(ctx, "INSERT INTO olp.provider_slots(id,provider_id,is_default,position,name,enabled,priority,weight,credential_id,restrictions,limits) VALUES($1,$2,false,(SELECT coalesce(max(position),0)+1 FROM olp.provider_slots WHERE provider_id=$2),$3,$4,$5,$6,$7,$8,$9)", slotID, id, input.Slot.Name, enabled, priority, weight, credentialID, restrictions, limits); err != nil {
+			return err
+		}
+	} else {
+		keepValidation := deref(existing.CredentialID) == deref(credentialID)
+		if _, err = tx.Exec(ctx, "UPDATE olp.provider_slots SET name=$3,enabled=$4,priority=$5,weight=$6,credential_id=$7,restrictions=$8,limits=$9,validated_at=CASE WHEN $10 THEN validated_at END,validated_fingerprint=CASE WHEN $10 THEN validated_fingerprint END WHERE id=$1 AND provider_id=$2", slotID, id, input.Slot.Name, enabled, priority, weight, credentialID, restrictions, limits, keepValidation); err != nil {
+			return err
+		}
+	}
+	if _, err = touch(ctx, tx, id); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, "UPDATE olp.providers SET slots_etag=$2 WHERE id=$1", id, access.NewID()); err != nil {
+		return err
+	}
+	return nil
+}
+
+type credentialRotation struct {
+	ID      string
+	Version int
+	ETag    string
+}
+
+func (s *Catalogue) rotateCredential(ctx context.Context, tx pgx.Tx, current *record, models []storedModel, defaultSlot slotRow, validatedAt *time.Time, plain *string, reference *secretstore.Reference) (credentialRotation, error) {
+	id := current.ID
+	credentialID, version, err := s.storeCredentialInput(ctx, tx, id, plain, reference)
+	if err != nil {
+		return credentialRotation{}, err
+	}
+	defaultSlot.CredentialID = &credentialID
+	fingerprint := defaultSlot.validationFingerprint(&current.Configuration, models)
+	if _, err = tx.Exec(ctx, "UPDATE olp.provider_slots SET credential_id=$2,validated_at=$4,validated_fingerprint=$3 WHERE provider_id=$1 AND is_default", id, credentialID, fingerprint, validatedAt); err != nil {
+		return credentialRotation{}, err
+	}
+	etag, err := touch(ctx, tx, id)
+	if err != nil {
+		return credentialRotation{}, err
+	}
+	if _, err = tx.Exec(ctx, "UPDATE olp.providers SET slots_etag=$2 WHERE id=$1", id, access.NewID()); err != nil {
+		return credentialRotation{}, err
+	}
+	return credentialRotation{ID: credentialID, Version: version, ETag: etag}, nil
+}
+
+type revokedCredential struct {
+	Version    int
+	Generation access.AuthorityGeneration
+	ETag       string
+}
+
+func (s *Catalogue) revokeCredential(ctx context.Context, tx pgx.Tx, current *record, credentialID string) (revokedCredential, error) {
+	var version int
+	err := tx.QueryRow(ctx, "UPDATE olp.provider_credentials SET revoked_at=now() WHERE id=$1 AND provider_id=$2 AND revoked_at IS NULL RETURNING version", credentialID, current.ID).Scan(&version)
+	if errors.Is(err, pgx.ErrNoRows) {
+		var exists bool
+		if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.provider_credentials WHERE id=$1 AND provider_id=$2)", credentialID, current.ID).Scan(&exists); err != nil {
+			return revokedCredential{}, err
+		}
+		if !exists {
+			return revokedCredential{}, pgx.ErrNoRows
+		}
+		return revokedCredential{}, access.Fail(409, "already_revoked", "This credential version is already revoked.")
+	}
+	if err != nil {
+		return revokedCredential{}, err
+	}
+	if err = grants.Revoke(ctx, tx, credentialID); err != nil {
+		return revokedCredential{}, err
+	}
+	generation, err := access.AdvanceAuthority(ctx, tx)
+	if err != nil {
+		return revokedCredential{}, err
+	}
+	var referenced bool
+	if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.provider_slots WHERE provider_id=$1 AND credential_id=$2)", current.ID, credentialID).Scan(&referenced); err != nil {
+		return revokedCredential{}, err
+	}
+	etag := access.NewID()
+	if _, err = tx.Exec(ctx, "UPDATE olp.providers SET etag=$2,slots_etag=$3,draft_dirty=draft_dirty OR $4,updated_at=now() WHERE id=$1", current.ID, etag, access.NewID(), referenced); err != nil {
+		return revokedCredential{}, err
+	}
+	return revokedCredential{Version: version, Generation: generation, ETag: etag}, nil
+}
+
+func (s *Catalogue) storeSlotValidation(ctx context.Context, tx pgx.Tx, current *record, slot *slotRow, models []storedModel, succeeded bool) error {
+	slotID := slot.ID
+	var validatedAt *time.Time
+	var fingerprint *string
+	if succeeded {
+		validatedAt = new(time.Now().UTC())
+		fingerprint = new(slot.validationFingerprint(&current.Configuration, models))
+	}
+	if _, err := tx.Exec(ctx, "UPDATE olp.provider_slots SET validated_at=$2,validated_fingerprint=$3 WHERE id=$1", slotID, validatedAt, fingerprint); err != nil {
+		return err
+	}
+	return nil
 }

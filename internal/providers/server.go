@@ -29,39 +29,51 @@ type QuotaSource interface {
 	Cooldown(ctx context.Context, scope string, d time.Duration) error
 }
 
-// Server serves the provider management surface.
-type Server struct {
+type CatalogueOptions struct {
+	ExternalSecrets release.ExternalSecrets
+	Unconfined      *plugins.Unconfined
+	Quotas          QuotaSource
+	Plugins         *plugins.Host
+	Catalog         *catalog.Signed
+	Activated       func(context.Context, pgx.Tx, string, string) error
+	Log             *slog.Logger
+}
+
+type Catalogue struct {
 	Access          *access.Server
 	Egress          *egress.Policy
 	ExternalSecrets release.ExternalSecrets
-	// Unconfined is the deployment's unconfined plugin tier, or nil where it
-	// enables none: providers may pin unconfined plugins only where it does.
-	Unconfined *plugins.Unconfined
-	Quotas     QuotaSource
-	// Plugins runs plugins' grant enrollment steps, and carries the probes of
-	// profiles whose unconfined plugin carries their traffic.
-	Plugins *plugins.Host
-	// Catalog is the reference catalog this release ships, whose facts
-	// discovery offers beside a provider's models.
-	Catalog *catalog.Signed
-	// Activated runs inside a provider activation's transaction, after the
-	// new revision is recorded and before the release is published, so
-	// route templates can place the models it certified.
-	Activated   func(ctx context.Context, tx pgx.Tx, providerID, actor string) error
-	Log         *slog.Logger
-	client      *http.Client
-	connections *egress.ConnectionClientCache
-	auth        *connectors.Auth
-	probes      chan struct{}
+	Unconfined      *plugins.Unconfined
+	Quotas          QuotaSource
+	Plugins         *plugins.Host
+	Catalog         *catalog.Signed
+	Activated       func(context.Context, pgx.Tx, string, string) error
+	Log             *slog.Logger
+	client          *http.Client
+	connections     *egress.ConnectionClientCache
+	auth            *connectors.Auth
+	probes          chan struct{}
 }
 
-// New prepares the provider surface with a bounded upstream client and at
-// most four concurrent probes. signer runs the signing hooks of plugin
-// profiles.
-func New(a *access.Server, policy *egress.Policy, signer connectors.Signer, getenv func(string) string) *Server {
+type Server struct {
+	*Catalogue
+	enrollments *Enrollments
+}
+
+func NewCatalogue(a *access.Server, policy *egress.Policy, signer connectors.Signer, getenv func(string) string, options CatalogueOptions) *Catalogue {
 	auth := connectors.NewAuth(policy)
 	auth.Signer = signer
-	return &Server{connections: egress.NewConnectionClientCache(128), Access: a, Egress: policy, ExternalSecrets: secretstore.New(*policy, getenv), client: policy.Client(probeTimeout), auth: auth, probes: make(chan struct{}, 4)}
+	external := options.ExternalSecrets
+	if external == nil {
+		external = secretstore.New(*policy, getenv)
+	}
+	return &Catalogue{Access: a, Egress: policy, ExternalSecrets: external, Unconfined: options.Unconfined, Quotas: options.Quotas,
+		Plugins: options.Plugins, Catalog: options.Catalog, Activated: options.Activated, Log: options.Log,
+		connections: egress.NewConnectionClientCache(128), client: policy.Client(probeTimeout), auth: auth, probes: make(chan struct{}, 4)}
+}
+
+func New(catalogue *Catalogue) *Server {
+	return &Server{Catalogue: catalogue, enrollments: NewEnrollments(catalogue)}
 }
 
 type record struct {
@@ -191,7 +203,7 @@ const detailQuery = "SELECT " + recordColumns + ",pr.name,u.email," +
 	" LEFT JOIN olp.provider_revisions r ON r.id=p.active_revision_id" +
 	" LEFT JOIN olp.provider_credentials rc ON rc.provider_id=p.id AND rc.version=r.credential_version"
 
-func (s *Server) scanDetail(row pgx.Row) (*detail, error) {
+func (s *Catalogue) scanDetail(row pgx.Row) (*detail, error) {
 	var p record
 	var configuration, plugin []byte
 	var d detail
@@ -221,7 +233,7 @@ func (s *Server) scanDetail(row pgx.Row) (*detail, error) {
 	return &d, nil
 }
 
-func (s *Server) detail(ctx context.Context, q access.Queryer, id string) (*detail, error) {
+func (s *Catalogue) detail(ctx context.Context, q access.Queryer, id string) (*detail, error) {
 	return s.scanDetail(q.QueryRow(ctx, detailQuery+" WHERE p.id=$1", id))
 }
 

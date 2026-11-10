@@ -38,7 +38,7 @@ type DraftSlot struct {
 // identities survive staging; retained slots preserve pending enrollments and
 // fingerprint-bound validation. Omitted slots discard their encrypted pending
 // enrollment state. Every replacement advances parent/collection preconditions.
-func StageDraftInventory(ctx context.Context, tx pgx.Tx, providerID string, models []DraftModel, slots []DraftSlot) error {
+func (s *Catalogue) StageDraftInventory(ctx context.Context, tx pgx.Tx, providerID string, models []DraftModel, slots []DraftSlot) error {
 	desired := make([]string, 0, len(models))
 	for _, model := range models {
 		desired = append(desired, model.UpstreamModel)

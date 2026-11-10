@@ -3,14 +3,163 @@ package resources
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/retainedapi"
 )
 
 var ErrSubmissionConflict = errors.New("retained submission identity conflicts")
+
+var ErrRetainedMetadata = errors.New("retained creation metadata is invalid")
+
+type CreationObservation struct {
+	Endpoint retainedapi.Endpoint
+	Document oif.Document
+	At       time.Time
+}
+
+type CreationResult struct {
+	IDs         []string
+	Observation *CreationObservation
+}
+
+type Submission struct {
+	Operation string
+	Key       string
+	Digest    []byte
+}
+
+type lifecycleAction uint8
+
+const (
+	lifecycleRead lifecycleAction = iota
+	lifecycleCreate
+	lifecycleMutation
+)
+
+type Lifecycle struct {
+	store      *Store
+	resource   *Resource
+	submission Submission
+	action     lifecycleAction
+	fresh      bool
+}
+
+func (s *Store) BeginCreate(ctx context.Context, candidate *Resource, submission Submission) (*Lifecycle, error) {
+	resource, fresh, err := s.prepareLifecycle(ctx, candidate, submission.Operation, submission.Key, submission.Digest)
+	if err != nil {
+		return nil, err
+	}
+	return &Lifecycle{store: s, resource: resource, submission: submission, action: lifecycleCreate, fresh: fresh}, nil
+}
+
+func (s *Store) BeginMutation(ctx context.Context, resource *Resource, submission Submission) (*Lifecycle, error) {
+	if err := s.prepareRetainedMutation(ctx, resource, submission.Operation, submission.Key, submission.Digest, true); err != nil {
+		return nil, err
+	}
+	return &Lifecycle{store: s, resource: resource, submission: submission, action: lifecycleMutation}, nil
+}
+
+func (s *Store) BeginDeletion(ctx context.Context, resource *Resource) (*Lifecycle, error) {
+	if resource == nil || resource.Kind != "context_cache" {
+		return nil, ErrContract
+	}
+	identity, err := uuid.NewV7()
+	if err != nil {
+		return nil, err
+	}
+	key := identity.String()
+	digest := sha256.Sum256([]byte(resource.ID + ":delete:" + key))
+	lifecycle := &Lifecycle{store: s, resource: resource, action: lifecycleMutation,
+		submission: Submission{Operation: "context_cache:delete", Key: key, Digest: digest[:]},
+	}
+	return lifecycle, s.prepareRetainedMutation(ctx, resource, "context_cache:delete", key, digest[:], false)
+}
+
+func (s *Store) OpenOwned(ctx context.Context, kind, owner, id string) (*Lifecycle, error) {
+	resource, err := s.Get(ctx, kind, owner, id)
+	if err != nil {
+		return nil, err
+	}
+	return &Lifecycle{store: s, resource: resource}, nil
+}
+
+func (l *Lifecycle) Resource() *Resource { return l.resource }
+
+func (l *Lifecycle) Existing() bool { return l.action == lifecycleCreate && !l.fresh }
+
+func (l *Lifecycle) Dispatch(ctx context.Context) error {
+	if l.action != lifecycleCreate || !l.fresh {
+		return ErrSubmissionConflict
+	}
+	return l.store.dispatchLifecycle(ctx, l.resource.UUID)
+}
+
+func (l *Lifecycle) Close(ctx context.Context) error {
+	if l == nil {
+		return nil
+	}
+	switch l.action {
+	case lifecycleCreate:
+		return l.store.unknownLifecycle(ctx, l.resource.UUID)
+	case lifecycleMutation:
+		return l.store.unknownRetainedMutation(ctx, l.resource.UUID, l.submission.Key, l.submission.Operation)
+	default:
+		return nil
+	}
+}
+
+func (l *Lifecycle) Reject(ctx context.Context) error {
+	if l == nil || l.action == lifecycleRead {
+		return nil
+	}
+	return l.store.rejectRetained(ctx, l.resource, l.submission.Key, l.submission.Operation, l.action == lifecycleCreate)
+}
+
+func (l *Lifecycle) AcceptMutation(ctx context.Context) error {
+	if l == nil || l.action == lifecycleRead {
+		return nil
+	}
+	if l.action != lifecycleMutation {
+		return ErrSubmissionConflict
+	}
+	return l.store.acceptRetainedMutation(ctx, l.resource.UUID, l.submission.Key, l.submission.Operation)
+}
+
+func (l *Lifecycle) AcceptCreated(ctx context.Context, result CreationResult) (*Resource, error) {
+	if l == nil || l.action != lifecycleCreate {
+		return nil, ErrSubmissionConflict
+	}
+	resource := *l.resource
+	resource.State = "active"
+	var children []*Resource
+	if len(result.IDs) == 0 {
+		resource.UpstreamID, resource.State = "empty:"+resource.UUID.String(), StateDeleted
+	} else {
+		resource.UpstreamID = result.IDs[0]
+		for _, id := range result.IDs[1:] {
+			child := resource
+			child.UUID, child.ID, child.UpstreamID = uuid.Nil, "", id
+			child.SubmissionID = nil
+			children = append(children, &child)
+		}
+	}
+	if observation := result.Observation; observation != nil {
+		if err := EnrichRetained(&resource, observation.Endpoint, observation.Document, observation.At); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrRetainedMetadata, err)
+		}
+	}
+	if err := l.store.completeLifecycleChildren(ctx, &resource, children); err != nil {
+		return nil, err
+	}
+	return &resource, nil
+}
 
 // LookupLifecycle resolves the caller's original submission before any fresh
 // target selection. The stored digest describes caller input, not its binding.
@@ -37,9 +186,9 @@ func lookupLifecycle(ctx context.Context, query resourceRowQuerier, owner, opera
 	return scan(query.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources WHERE id=$1 AND api_key_id=$2`, id, owner))
 }
 
-// PrepareLifecycle atomically creates the owner mapping and submission fence.
+// prepareLifecycle atomically creates the owner mapping and submission fence.
 // A replay can inspect its original resource, but never acquires dispatch rights.
-func (s *Store) PrepareLifecycle(ctx context.Context, resource *Resource, operation, key string, digest []byte) (*Resource, bool, error) {
+func (s *Store) prepareLifecycle(ctx context.Context, resource *Resource, operation, key string, digest []byte) (*Resource, bool, error) {
 	if len(key) < 1 || len(key) > 128 || len(digest) != 32 {
 		return nil, false, ErrSubmissionConflict
 	}
@@ -80,7 +229,7 @@ func (s *Store) PrepareLifecycle(ctx context.Context, resource *Resource, operat
 	return out, true, nil
 }
 
-func (s *Store) DispatchLifecycle(ctx context.Context, id uuid.UUID) error {
+func (s *Store) dispatchLifecycle(ctx context.Context, id uuid.UUID) error {
 	tag, err := s.pool.Exec(ctx, `UPDATE olp.retained_submissions SET state='dispatched',updated_at=now() WHERE resource_id=$1 AND state='prepared'`, id)
 	if err != nil {
 		return err
@@ -91,18 +240,14 @@ func (s *Store) DispatchLifecycle(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func (s *Store) UnknownLifecycle(ctx context.Context, id uuid.UUID) error {
+func (s *Store) unknownLifecycle(ctx context.Context, id uuid.UUID) error {
 	_, err := s.pool.Exec(ctx, `WITH changed AS (UPDATE olp.retained_submissions SET state='submission_unknown',updated_at=now() WHERE resource_id=$1 AND state='dispatched' RETURNING resource_id) UPDATE olp.provider_resources SET state='submission_unknown',updated_at=now() WHERE id IN (SELECT resource_id FROM changed)`, id)
 	return err
 }
 
-func (s *Store) CompleteLifecycle(ctx context.Context, r *Resource) error {
-	return s.CompleteLifecycleChildren(ctx, r, nil)
-}
-
-// CompleteLifecycleChildren commits multi-object create results under the same
+// completeLifecycleChildren commits multi-object create results under the same
 // submission fence. The primary identity and all siblings become visible at once.
-func (s *Store) CompleteLifecycleChildren(ctx context.Context, r *Resource, children []*Resource) error {
+func (s *Store) completeLifecycleChildren(ctx context.Context, r *Resource, children []*Resource) error {
 	if r.UpstreamID == "" || len(r.UpstreamID) > 512 || len(r.Metadata) > metadataLimit {
 		return ErrContract
 	}

@@ -289,7 +289,6 @@ type candidatePreparation struct {
 type generationRequest struct {
 	document          oif.Document
 	wire              wire.Format
-	candidates        int64
 	config            connectors.Config
 	plan              *interaction.Plan
 	policyDecisions   []contentpolicy.Decision
@@ -336,7 +335,7 @@ func (x *call) generationRequest(provider *routing.Provider, targetID, model str
 			return x.buildEncoding(provider, model)
 		})
 		return generationRequest{
-			document: encoded.document, wire: encoded.wire, candidates: encoded.output.candidates,
+			document: encoded.document, wire: encoded.wire,
 			config: provider.Connector(),
 		}, err
 	}
@@ -344,17 +343,12 @@ func (x *call) generationRequest(provider *routing.Provider, targetID, model str
 	if err != nil {
 		return generationRequest{}, err
 	}
-	native, err := wire.NewRequest(prepared.invocation.Wire, x.generation.parsed.Route, x.generation.parsed.Stream, prepared.invocation.Prepared.Document())
-	if err != nil {
-		return generationRequest{}, err
-	}
-	_, candidates := estimate.OutputBounds(native, nil)
 	config := provider.Connector()
 	if prepared.plan != nil {
 		config = prepared.plan.Config()
 	}
 	return generationRequest{
-		document: prepared.invocation.Prepared.Document(), wire: prepared.invocation.Wire, candidates: candidates,
+		document: prepared.invocation.Prepared.Document(), wire: prepared.invocation.Wire,
 		config: config, plan: prepared.plan, policyDecisions: prepared.policyDecisions, guardrailSegments: prepared.guardrailSegments,
 	}, nil
 }

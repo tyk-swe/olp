@@ -4,67 +4,36 @@
   import { page } from '$app/state';
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import { goto } from '$app/navigation';
+  import { resolve } from '$app/paths';
+  import { useQueryClient } from '@tanstack/svelte-query';
   import { deleteProvider } from './providers';
   import ProviderBulkModels from './ProviderBulkModels.svelte';
   import ProviderCredentialPool from './ProviderCredentialPool.svelte';
   import { focusErrorSummary } from '#lib/editing/focusError.js';
-  import { refreshProviderChange } from './providerChanges';
-  import { providerKeys } from '#lib/features/providers/providerKeys.js';
-
+  import { providerKeys } from './providerKeys';
   import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
-  import { resolve } from '$app/paths';
-  import {
-    createQuery,
-    keepPreviousData,
-    useQueryClient
-  } from '@tanstack/svelte-query';
   import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
   import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
-  import {
-    errorMessage as providerDetailError,
-    fieldIssues,
-    isEtagMismatch,
-    type FieldIssue
-  } from '#lib/management/http.js';
-
-  import {
-    updateProvider,
-    type Provider
-  } from '#lib/features/providers/providers.js';
-
-  import {
-    listProviderModelPage,
-    listProviderKinds,
-    type ProviderModelPage
-  } from '#lib/features/providers/models.js';
-  import { emptyCursorHistory, resetCursor } from '#lib/listing/pagination.js';
+  import { errorMessage as providerDetailError } from '#lib/management/http.js';
   import { useRole } from '#lib/features/access/session/useRole.svelte.js';
-  import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
-  import {
-    acceptRemote,
-    conflictNotice,
-    initialConcurrentEdit,
-    markConflict,
-    markDirty,
-    markSaved,
-    reconcile
-  } from '#lib/editing/concurrentEdit.js';
-  import ProviderConfigurationSection from '#lib/features/providers/ProviderConfigurationSection.svelte';
-  import ProviderCredentialsSection from '#lib/features/providers/ProviderCredentialsSection.svelte';
-  import BillingImportSection from '#lib/features/providers/BillingImportSection.svelte';
-  import ProviderModelsSection from '#lib/features/providers/ProviderModelsSection.svelte';
-  import ProviderRevisionsSection from '#lib/features/providers/ProviderRevisionsSection.svelte';
-  import ProviderValidationIssues from '#lib/features/providers/ProviderValidationIssues.svelte';
-  import {
-    buildUpdateProviderInput,
-    providerEditValues,
-    requiresGrant,
-    type ProviderEditValues
-  } from '#lib/features/providers/providerEditor.js';
-  import type { RunProviderAction } from './providerEditor';
-
+  import ProviderConfigurationSection from './ProviderConfigurationSection.svelte';
+  import ProviderCredentialsSection from './ProviderCredentialsSection.svelte';
+  import BillingImportSection from './BillingImportSection.svelte';
+  import ProviderModelsSection from './ProviderModelsSection.svelte';
+  import ProviderRevisionsSection from './ProviderRevisionsSection.svelte';
+  import ProviderValidationIssues from './ProviderValidationIssues.svelte';
+  import { requiresGrant } from './providerEditor';
+  import { ProviderEditor } from './providerEditor.svelte';
   let { providerId }: { providerId: string } = $props();
-
+  const editor = new ProviderEditor(() => providerId);
+  const queryClient = useQueryClient();
+  const access = useRole();
+  const canManage = $derived(editor.canManage);
+  const snapshot = editor.snapshot;
+  const providerKinds = editor.providerKinds;
+  const providerSpec = $derived(editor.providerSpec);
+  const editorView = $derived(editor.view);
+  const busy = $derived(editorView.busy);
   const VIEWS = [
     { key: 'settings', label: 'Settings' },
     { key: 'models', label: 'Models' },
@@ -83,226 +52,7 @@
           : `${resolve(`providers/${providerId}`)}?view=${item.key}`
     }))
   );
-
-  const queryClient = useQueryClient();
-  const access = useRole();
-  const canManage = $derived(access.can('providers.manage'));
-  let modelPageState = $state(emptyCursorHistory());
-  const snapshot = createQuery(() => ({
-    queryKey: providerKeys.models(providerId, modelPageState.cursor),
-    queryFn: ({ signal }) =>
-      listProviderModelPage(providerId, modelPageState.cursor, signal),
-    enabled: Boolean(providerId),
-    placeholderData: keepPreviousData
-  }));
-  const providerKinds = createQuery(() => ({
-    queryKey: providerKeys.kinds(),
-    queryFn: ({ signal }) => listProviderKinds(signal)
-  }));
-  const providerSpec = $derived.by(() => {
-    const kind = snapshot.data?.provider?.configuration.kind;
-    const kinds = providerKinds.data;
-    return kinds?.find((candidate) => candidate.kind === kind);
-  });
-
-  let busy = $state('');
-  let editVersion = 0;
-  let errorMessage = $state('');
-  let saveRefreshError = $state('');
-  let validationIssues = $state<FieldIssue[]>([]);
-  let notice = $state('');
-  let reloadVersion = $state(0);
-  let explicitReloadEpoch = $state(0);
-  let savedDraftEpoch = $state(0);
-  let editValues = $state<ProviderEditValues>({
-    name: '',
-    endpoint: '',
-    apiVersion: '',
-    cloudRegion: '',
-    cloudProject: '',
-    deployment: '',
-    authMode: 'api_key'
-  });
-  let sync = $state(initialConcurrentEdit());
-  const concurrentNotice = $derived(conflictNotice(sync));
-  const captureActionOwner = usePrincipalLifetime(() => {
-    busy = '';
-    errorMessage = notice = saveRefreshError = '';
-    validationIssues = [];
-  });
-
-  function captureOwner() {
-    const principalCurrent = captureActionOwner();
-    const ownedProviderId = providerId;
-    const ownedReloadEpoch = explicitReloadEpoch;
-    return () =>
-      principalCurrent() &&
-      providerId === ownedProviderId &&
-      explicitReloadEpoch === ownedReloadEpoch;
-  }
-
-  $effect(() => {
-    const value = snapshot.data?.provider;
-    if (!value || !providerSpec) return;
-    const next = reconcile(sync, value.etag);
-    if (next.state !== sync) sync = next.state;
-    if (next.hydrate) editValues = providerEditValues(value, providerSpec);
-  });
-
-  const run: RunProviderAction = async (label, action) => {
-    if (busy) return false;
-    const isCurrent = captureOwner();
-    busy = label;
-    errorMessage = notice = '';
-    validationIssues = [];
-    try {
-      await action(isCurrent);
-      return isCurrent();
-    } catch (error) {
-      if (!isCurrent()) return false;
-      if (isEtagMismatch(error)) sync = markConflict(sync);
-      else {
-        errorMessage = providerDetailError(error);
-        validationIssues = fieldIssues(error);
-      }
-      return false;
-    } finally {
-      if (isCurrent()) busy = '';
-    }
-  };
-
-  function touch() {
-    editVersion += 1;
-    sync = markDirty(sync);
-  }
-
-  guardUnsavedChanges(() => sync.dirty);
-
-  async function providerChanged(mutation?: {
-    previousEtag: string;
-    etag: string;
-  }) {
-    const isCurrent = captureOwner();
-    const acknowledged =
-      mutation &&
-      !sync.conflict &&
-      sync.snapshotEtag === mutation.previousEtag &&
-      sync.remoteEtag === mutation.previousEtag;
-    const result = await snapshot.refetch();
-    if (!isCurrent()) return;
-    if (result.error) throw result.error;
-    if (!result.data) throw new Error('The provider snapshot is unavailable.');
-    // A successful owned credential mutation advances the provider ETag. Query
-    // effects may observe it while refetching; acknowledge only the exact
-    // returned version, retaining any local configuration edits.
-    sync =
-      acknowledged && result.data.provider.etag === mutation?.etag
-        ? markSaved(mutation.etag, sync.dirty)
-        : acceptRemote(sync, result.data.provider.etag);
-    const refreshed = await refreshProviderChange(queryClient, {
-      kind: 'details'
-    });
-    if (isCurrent() && refreshed.kind === 'refresh-failed')
-      throw new Error(refreshed.message);
-  }
-
-  function reportError(message: string) {
-    errorMessage = message;
-    validationIssues = [];
-    notice = '';
-  }
-
-  function reportNotice(message: string) {
-    errorMessage = '';
-    validationIssues = [];
-    notice = message;
-  }
-
-  function resetModelPage() {
-    resetCursor(modelPageState);
-  }
-
-  async function refetchProvider(): Promise<boolean> {
-    const isCurrent = captureOwner();
-    const result = await snapshot.refetch();
-    if (!isCurrent()) return false;
-    if (result.error || !result.data) return false;
-    sync = acceptRemote(sync, result.data.provider.etag);
-    return true;
-  }
-
-  async function reload() {
-    if (busy) return;
-    const isCurrent = captureOwner();
-    busy = 'reload';
-    errorMessage = notice = '';
-    validationIssues = [];
-    try {
-      const result = await snapshot.refetch();
-      if (!isCurrent()) return;
-      if (result.error) throw result.error;
-      if (!result.data)
-        throw new Error('The provider snapshot is unavailable.');
-      // An explicit successful reload discards the local draft and conflict.
-      sync = markSaved(result.data.provider.etag, false);
-      if (providerSpec)
-        editValues = providerEditValues(result.data.provider, providerSpec);
-      busy = '';
-      explicitReloadEpoch += 1;
-      reloadVersion += 1;
-    } catch (error) {
-      if (isCurrent()) errorMessage = providerDetailError(error);
-    } finally {
-      if (isCurrent()) busy = '';
-    }
-  }
-
-  async function saveProvider(current: Provider) {
-    if (!providerSpec || !canManage || busy) return;
-    await run('save', async (isCurrent) => {
-      if (!sync.snapshotEtag)
-        throw new Error('Reload the provider before saving.');
-      const submittedVersion = editVersion;
-      const updated = await updateProvider(
-        current.id,
-        sync.snapshotEtag,
-        buildUpdateProviderInput(editValues, providerSpec)
-      );
-      if (!isCurrent()) return;
-      sync = markSaved(updated.etag, editVersion !== submittedVersion);
-      // A deliberate confirmed configuration write starts new state actions.
-      // Cache-only ETag changes must preserve an unresolved action receipt.
-      savedDraftEpoch += 1;
-
-      queryClient.setQueriesData<ProviderModelPage>(
-        { queryKey: providerKeys.modelsOf(current.id) },
-        (page) => (page ? { ...page, provider: updated } : page)
-      );
-      resetModelPage();
-      await refreshSavedProvider();
-    });
-  }
-
-  async function refreshSavedProvider() {
-    const isCurrent = captureOwner();
-    saveRefreshError = '';
-    try {
-      await providerChanged();
-      if (!isCurrent()) return;
-      await queryClient.invalidateQueries({
-        queryKey: providerKeys.summaries
-      });
-    } catch (error) {
-      if (!isCurrent()) return;
-      saveRefreshError = providerDetailError(error);
-    }
-    if (!isCurrent()) return;
-    reportNotice(
-      sync.dirty
-        ? 'Draft saved. You have additional unsaved changes.'
-        : 'Provider draft settings saved.'
-    );
-  }
+  guardUnsavedChanges(() => editorView.dirty);
 </script>
 
 <PageHeader
@@ -324,31 +74,35 @@
   {tabs}
   active={tabs[VIEWS.findIndex((item) => item.key === view)]?.href}
 />
-{#if saveRefreshError}
+{#if editorView.refreshError}
   <div class="inline-problem" role="alert">
-    <p>Draft saved, but refreshing failed. {saveRefreshError}</p>
+    <p>
+      The provider change succeeded, but refreshing failed. {editorView.refreshError}
+    </p>
     <button
       class="button button-secondary"
       type="button"
       disabled={Boolean(busy)}
-      onclick={() => run('refresh', refreshSavedProvider)}>Retry refresh</button
+      onclick={editor.retryRefresh}>Retry refresh</button
     >
   </div>
 {/if}
 
-{#if errorMessage}<div
+{#if editorView.error}<div
     class="inline-problem"
     role="alert"
     tabindex="-1"
     use:focusErrorSummary
   >
-    {errorMessage}
-    <ProviderValidationIssues issues={validationIssues} />
+    {editorView.error}
+    <ProviderValidationIssues issues={editorView.validationIssues} />
   </div>{/if}
-{#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
+{#if editorView.notice}<div class="success-banner" role="status">
+    {editorView.notice}
+  </div>{/if}
 <ConflictNotice
-  notice={concurrentNotice}
-  onReload={reload}
+  notice={editorView.concurrentNotice}
+  onReload={editor.reload}
   disabled={Boolean(busy)}
 />
 
@@ -362,7 +116,7 @@
     >
   </div>
 {/if}
-{#if snapshot.isError && snapshot.data?.provider && !saveRefreshError}
+{#if snapshot.isError && snapshot.data?.provider && !editorView.refreshError}
   <div class="inline-problem" role="alert">
     {providerDetailError(snapshot.error)} The last loaded provider remains available
     below.
@@ -374,7 +128,7 @@
   </div>
 {/if}
 
-{#if providerKinds.isPending || (snapshot.isPending && !snapshot.data)}
+{#if providerKinds.isPending || (snapshot.isPending && !snapshot.data) || (snapshot.data && snapshot.data.provider.id !== providerId)}
   <div class="loading-state" role="status">Loading provider…</div>
 {:else if !snapshot.data?.provider}
   <div class="inline-problem" role="alert">
@@ -387,7 +141,7 @@
   </div>
 {:else}
   {@const current = snapshot.data?.provider}
-  {#key explicitReloadEpoch}
+  {#key editorView.explicitReloadEpoch}
     {#if !canManage}<ReadOnlyNote>
         Your role can view this provider but not change, test, or activate it.
       </ReadOnlyNote>{/if}
@@ -403,32 +157,8 @@
       </div>{/if}
     {#if view === 'settings'}
       <div class="detail-grid">
-        <ProviderConfigurationSection
-          {current}
-          {providerSpec}
-          bind:editValues
-          {busy}
-          {savedDraftEpoch}
-          {canManage}
-          {run}
-          onTouch={touch}
-          dirty={sync.dirty}
-          issues={validationIssues}
-          onSave={() => saveProvider(current)}
-          onProviderChanged={providerChanged}
-          onRefetchProvider={refetchProvider}
-          onNotice={reportNotice}
-        />
-        <ProviderCredentialsSection
-          {current}
-          {providerSpec}
-          {busy}
-          {canManage}
-          {run}
-          onProviderChanged={providerChanged}
-          onResetModelPage={resetModelPage}
-          onNotice={reportNotice}
-        />
+        <ProviderConfigurationSection {current} {providerSpec} {editor} />
+        <ProviderCredentialsSection {current} {providerSpec} {editor} />
         {#key current.id}
           <BillingImportSection provider={current} {canManage} />
         {/key}
@@ -440,7 +170,7 @@
           providerSpec &&
           requiresGrant(providerSpec, current.configuration.auth_mode)
         )}
-        onChanged={providerChanged}
+        onChanged={editor.refresh}
       />
       {#if current.state === 'draft' && !current.active_revision && access.allows('DELETE /api/v1/providers/{provider_id}')}<ConfirmAction
           danger
@@ -460,36 +190,11 @@
       <ProviderBulkModels
         provider={current}
         {canManage}
-        onChanged={providerChanged}
+        onChanged={editor.refresh}
       />
-      <ProviderModelsSection
-        modelSnapshot={snapshot.data}
-        loading={snapshot.isPending}
-        error={snapshot.error}
-        reloadModels={providerChanged}
-        {current}
-        {busy}
-        {canManage}
-        {run}
-        {reloadVersion}
-        bind:pageState={modelPageState}
-        onProviderChanged={providerChanged}
-        onError={reportError}
-        onConflict={() => {
-          sync = markConflict(sync);
-        }}
-        onNotice={reportNotice}
-      />
+      <ProviderModelsSection {current} {editor} />
     {:else}
-      <ProviderRevisionsSection
-        {current}
-        {busy}
-        {canManage}
-        {run}
-        onProviderChanged={providerChanged}
-        onResetModelPage={resetModelPage}
-        onNotice={reportNotice}
-      />
+      <ProviderRevisionsSection {current} {editor} />
     {/if}
   {/key}
 {/if}

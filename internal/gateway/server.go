@@ -27,7 +27,6 @@ import (
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/consumerauth"
-	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export/capture"
 	"github.com/tyk-swe/olp/internal/guardrails"
@@ -981,8 +980,6 @@ func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
 	if e := s.checkRouteFidelity(ctx, x.route); e != nil {
 		return e
 	}
-	snapshot := x.snapshot()
-	route := *x.route
 	if x.strict() {
 		if x.actor == "playground" {
 			param := "client_contract"
@@ -999,8 +996,7 @@ func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
 	if e := x.checkAnthropicBeta(); e != nil {
 		return e
 	}
-	var semantic error
-	var policyDecisions []contentpolicy.Decision
+	session := s.planning(x, canonicalPlanning, x.route, x.family.Operation(), x.family.Surface(), x.mode)
 	source := x.summarizeSource()
 	options := s.selectionOptions(ctx, x)
 	// A target's context window is weighed against the request as the model that
@@ -1024,58 +1020,27 @@ func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
 			return nil, errors.New("connector capability unavailable")
 		}
 		if x.providerState && !stateQualified(&p, t.ProviderModel, x.family.Operation(), x.mode) {
-			semantic = errors.New("provider-state capability unavailable")
-			return nil, semantic
+			session.semantic = errors.New("provider-state capability unavailable")
+			return nil, session.semantic
 		}
 		if !x.strict() && protocols.StructuredOutputRequested(x.generation.parsed) {
 			metadata, _ := p.Metadata(t.ProviderModel)
 			if metadata.SupportedParameters == nil || !slices.Contains(*metadata.SupportedParameters, "response_format") {
-				semantic = errors.New("model does not declare structured-output support")
-				return nil, semantic
+				session.semantic = errors.New("model does not declare structured-output support")
+				return nil, session.semantic
 			}
 		}
 		prepared, err := x.prepareCandidate(&p, t.ID, t.ProviderModel)
 		if err != nil {
-			semantic, policyDecisions = err, prepared.policyDecisions
+			session.semantic, session.decisions = err, prepared.policyDecisions
 			return nil, err
 		}
 		return prepared.candidate, nil
 	}
 	options.Preferences = x.legPreferences()
-	plan, err := routing.Select(snapshot, route.Slug, x.family.Operation(), x.family.Surface(), x.mode, x.affinity, options)
-	if err != nil {
-		var se *routing.SelectionError
-		if errors.As(err, &se) && se.Code != routing.NoEligibleTargets && se.Code != "attempt_budget_increase_forbidden" {
-			return selectionError(err, route.Slug)
-		}
-		return requestError(err)
-	}
-	if plan.Delegate != "" {
-		return s.delegate(ctx, x, plan)
-	}
-	x.adoptPlan(plan)
-	if len(plan.Attempts) == 0 {
-		if semantic != nil {
-			for _, decision := range policyDecisions {
-				recordDecision(x, decision)
-			}
-			return requestError(semantic)
-		}
-		if x.strict() {
-			for _, decision := range plan.Decisions {
-				if decision.Reason != nil && (*decision.Reason == "max_output_tokens_exceeded" || *decision.Reason == "context_length_exceeded") {
-					return invalidRequest(*decision.Reason, "The effective invocation exceeds a declared model limit; its controls were not reduced.", nil)
-				}
-			}
-		}
-		x.noteCostExceeded(plan)
-		if x.costExcluded {
-			return costLimitExceeded()
-		}
-		return selectionError(&routing.SelectionError{Code: routing.NoEligibleTargets}, route.Slug)
-	}
-	if x.pin != nil {
-		x.budget, x.allowance = x.spent+1, x.spent+1
+	_, delegated, failure := session.selectPlan(ctx, options)
+	if failure != nil || delegated {
+		return failure
 	}
 	return s.enforceContentPolicy(x)
 }

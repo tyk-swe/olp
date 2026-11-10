@@ -70,9 +70,9 @@ func (c HTTPCompletion) validate() error {
 	return nil
 }
 
-// CompletePendingHTTP changes only HTTP metadata under the resource owner's
+// completePendingHTTP changes only HTTP metadata under the resource owner's
 // lock. Resource observations continue to own upstream phase and usage.
-func CompletePendingHTTP(event *Event, c HTTPCompletion) error {
+func completePendingHTTP(event *Event, c HTTPCompletion) error {
 	if err := c.validate(); err != nil {
 		return err
 	}

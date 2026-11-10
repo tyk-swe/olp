@@ -908,11 +908,33 @@ func moderationResultCount(input oif.Value) int {
 }
 
 func validateEmbeddingCount(request *wire.Request, actual int) error {
-	if request == nil || request.Family != wire.Embeddings {
+	if request == nil {
 		return nil
 	}
-	inputs, err := textInputs(request.Field("input"))
-	if err != nil || len(inputs) != actual {
+	expected := 0
+	switch request.Family {
+	case wire.Embeddings:
+		inputs, err := textInputs(request.Field("input"))
+		if err != nil {
+			return protocolError("embedding count does not match input count")
+		}
+		expected = len(inputs)
+	case wire.GeminiEmbeddingsBatch:
+		if len(request.Field("requests")) == 0 {
+			return nil
+		}
+		expected = len(arr(request.Field("requests")))
+	case wire.VertexEmbeddings:
+		if len(request.Field("instances")) == 0 {
+			return nil
+		}
+		expected = len(arr(request.Field("instances")))
+	case wire.GeminiEmbeddings, wire.BedrockEmbeddings:
+		expected = 1
+	default:
+		return nil
+	}
+	if expected != actual {
 		return protocolError("embedding count does not match input count")
 	}
 	return nil

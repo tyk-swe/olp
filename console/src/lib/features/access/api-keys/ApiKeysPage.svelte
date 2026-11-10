@@ -23,7 +23,7 @@
   import { notify } from '#lib/components/toasts.svelte.js';
   import ApiKeySecretDialog from '#lib/features/access/api-keys/ApiKeySecretDialog.svelte';
   import type { ApiKeyListState } from '#lib/features/access/api-keys/apiKeyListState.js';
-  import type { ApiKeyPolicyInput } from '#lib/features/access/api-keys/apiKeyPolicy.js';
+  import type { ApiKeyPolicyCommand } from '#lib/features/access/api-keys/apiKeyPolicy.js';
   import { isApiKeyUsable } from './apiKeyLifecycle';
 
   import {
@@ -86,15 +86,15 @@
     void goto(resolve('keys'));
   }
 
-  async function submit(input: ApiKeyPolicyInput, route?: string) {
+  async function submit(command: ApiKeyPolicyCommand, route?: string) {
     if (!canManage || busy || policyDirty || policyBusy) return false;
     const isCurrent = captureOwner();
-    busy = editing ? 'update' : 'create';
+    busy = command.kind;
     submitError = '';
     try {
-      if (editing) {
-        const keyName = editing.name;
-        await updateApiKey(editing, input);
+      if (command.kind === 'update') {
+        const keyName = command.key.name;
+        await updateApiKey(command.key, command.input);
         if (!isCurrent()) return false;
         notify(
           services.gatewayAvailable
@@ -103,8 +103,9 @@
         );
         void goto(resolve('keys'));
       } else {
-        const submission =
-          createIntent.prepare<Parameters<typeof createApiKey>[0]>(input);
+        const submission = createIntent.prepare<
+          Parameters<typeof createApiKey>[0]
+        >(command.input);
         const result = await createApiKey(
           submission.input,
           submission.requestId

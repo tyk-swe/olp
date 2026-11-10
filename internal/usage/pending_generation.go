@@ -1,17 +1,18 @@
-package resources
+package usage
 
 import (
+	"maps"
 	"math/big"
-
-	"github.com/tyk-swe/olp/internal/usage"
+	"slices"
+	"time"
 )
 
 // observePendingUsage keeps one provider-reported snapshot, never a tuple made
 // from maxima across different observations. Native complete evidence is the
 // protocol owner's authority; earlier snapshots are provisional lower bounds.
-func observePendingUsage(event *usage.Event, evidence usage.AttemptUsage, terminal bool) error {
+func observePendingUsage(event *Event, evidence AttemptUsage, terminal bool) error {
 	if len(event.Attempts) == 0 {
-		return ErrContract
+		return ErrInvalidEvent
 	}
 	if !terminal {
 		evidence.Complete, evidence.BillingUncertain = false, true
@@ -19,9 +20,9 @@ func observePendingUsage(event *usage.Event, evidence usage.AttemptUsage, termin
 	// Validate the incoming evidence even if selection will discard it. A stale
 	// observation must not conceal malformed accounting state.
 	candidate := *event
-	candidate.Attempts = append([]usage.Attempt(nil), event.Attempts...)
+	candidate.Attempts = append([]Attempt(nil), event.Attempts...)
 	setPendingUsage(&candidate, evidence)
-	if _, err := usage.Validate(&candidate); err != nil {
+	if _, err := Validate(&candidate); err != nil {
 		return err
 	}
 	if !terminal || !evidence.Observed || !evidence.Complete || evidence.BillingUncertain {
@@ -31,11 +32,11 @@ func observePendingUsage(event *usage.Event, evidence usage.AttemptUsage, termin
 		}
 		evidence.Complete, evidence.BillingUncertain = false, true
 	}
-	setPendingUsage(event, evidence)
+	setPendingUsage(event, clonePendingUsage(evidence))
 	return nil
 }
 
-func setPendingUsage(event *usage.Event, evidence usage.AttemptUsage) {
+func setPendingUsage(event *Event, evidence AttemptUsage) {
 	event.Attempts[len(event.Attempts)-1].Usage = &evidence
 	event.InputTokens, event.OutputTokens = evidence.InputTokens, evidence.OutputTokens
 	event.CachedInputTokens, event.CacheWriteInputTokens = evidence.CachedInputTokens, evidence.CacheWriteInputTokens
@@ -54,7 +55,7 @@ func setPendingUsage(event *usage.Event, evidence usage.AttemptUsage) {
 // A partial snapshot covers another only if it preserves each known dimension
 // and does not reduce a known cache partition. Missing fields are unknown;
 // explicit zero remains evidence. This comparison never changes either tuple.
-func usageSnapshotDominates(next, previous usage.AttemptUsage) bool {
+func usageSnapshotDominates(next, previous AttemptUsage) bool {
 	nextCounts := [...]*int64{next.InputTokens, next.OutputTokens, next.CachedInputTokens,
 		next.CacheWriteInputTokens, next.CacheWrite5MInputTokens, next.CacheWrite1HInputTokens,
 		next.AudioInputTokens, next.CachedAudioInputTokens, next.AudioOutputTokens,
@@ -112,7 +113,7 @@ func usageSnapshotDominates(next, previous usage.AttemptUsage) bool {
 
 // Each row is a total followed by disjoint shares. The residuals cover text,
 // cached text, noncached audio/image, and cache writes without a known lifetime.
-func usagePartitions(u usage.AttemptUsage) [7][5]*int64 {
+func usagePartitions(u AttemptUsage) [7][5]*int64 {
 	noncached := func(total, cached *int64) *int64 {
 		if total == nil || cached == nil {
 			return nil
@@ -129,5 +130,119 @@ func usagePartitions(u usage.AttemptUsage) [7][5]*int64 {
 		{u.AudioInputTokens, u.CachedAudioInputTokens},
 		{u.ImageInputTokens, u.CachedImageInputTokens},
 		{u.CacheWriteInputTokens, u.CacheWrite5MInputTokens, u.CacheWrite1HInputTokens},
+	}
+}
+
+type GenerationState uint8
+
+const (
+	GenerationPending GenerationState = iota
+	GenerationTerminal
+	GenerationUnknown
+)
+
+type PendingGeneration struct {
+	event *Event
+}
+
+func DecodePendingGeneration(raw []byte) (PendingGeneration, error) {
+	event, err := Decode(raw)
+	if err != nil {
+		return PendingGeneration{}, err
+	}
+	if _, err := Validate(event); err != nil {
+		return PendingGeneration{}, err
+	}
+	if len(event.Attempts) == 0 {
+		return PendingGeneration{}, ErrInvalidEvent
+	}
+	return PendingGeneration{event: event}, nil
+}
+
+func (p PendingGeneration) copyEvent() *Event {
+	event := *p.event
+	event.Attempts = slices.Clone(p.event.Attempts)
+	final := &event.Attempts[len(event.Attempts)-1]
+	if final.Routing != nil {
+		routing := *final.Routing
+		final.Routing = &routing
+		if routing.Interaction != nil {
+			interaction := *routing.Interaction
+			routing.Interaction = &interaction
+		}
+	}
+	return &event
+}
+
+func (p PendingGeneration) Observe(evidence AttemptUsage, state GenerationState) (PendingGeneration, error) {
+	event := p.copyEvent()
+	if err := observePendingUsage(event, evidence, state == GenerationTerminal); err != nil {
+		return PendingGeneration{}, err
+	}
+	return PendingGeneration{event: event}, nil
+}
+
+func (p PendingGeneration) CompleteHTTP(completion HTTPCompletion) (PendingGeneration, error) {
+	event := p.copyEvent()
+	if err := completePendingHTTP(event, completion); err != nil {
+		return PendingGeneration{}, err
+	}
+	return PendingGeneration{event: event}, nil
+}
+
+func (p PendingGeneration) Encode() ([]byte, error) { return Encode(p.event) }
+
+func (p PendingGeneration) AccountingEvent(now time.Time, state GenerationState) (AccountingEvent, error) {
+	event := p.copyEvent()
+	event.ObservedAt = now
+	final := event.Attempts[len(event.Attempts)-1]
+	if final.Routing != nil && final.Routing.Interaction != nil {
+		if state == GenerationTerminal {
+			final.Routing.Interaction.UpstreamState = UpstreamTerminal
+		} else {
+			final.Routing.Interaction.UpstreamState = UpstreamUnknown
+		}
+	}
+	return NewAccountingEvent(event)
+}
+
+func (event Event) WithFinalUsage(evidence AttemptUsage) *Event {
+	owned := event
+	owned.Attempts = slices.Clone(event.Attempts)
+	setPendingUsage(&owned, clonePendingUsage(evidence))
+	return &owned
+}
+
+func clonePendingQuantity[T int64 | string](value *T) *T {
+	if value == nil {
+		return nil
+	}
+	return new(*value)
+}
+
+func clonePendingUsage(evidence AttemptUsage) AttemptUsage {
+	return AttemptUsage{Observed: evidence.Observed, Complete: evidence.Complete,
+		BillingUncertain: evidence.BillingUncertain, Deferred: evidence.Deferred,
+		UsageQuantities: UsageQuantities{
+			InvocationCount:         clonePendingQuantity(evidence.InvocationCount),
+			TrainingTokens:          clonePendingQuantity(evidence.TrainingTokens),
+			StorageByteSeconds:      clonePendingQuantity(evidence.StorageByteSeconds),
+			CacheTokenSeconds:       clonePendingQuantity(evidence.CacheTokenSeconds),
+			ContainerSessions:       maps.Clone(evidence.ContainerSessions),
+			InputTokens:             clonePendingQuantity(evidence.InputTokens),
+			OutputTokens:            clonePendingQuantity(evidence.OutputTokens),
+			CachedInputTokens:       clonePendingQuantity(evidence.CachedInputTokens),
+			CacheWriteInputTokens:   clonePendingQuantity(evidence.CacheWriteInputTokens),
+			CacheWrite5MInputTokens: clonePendingQuantity(evidence.CacheWrite5MInputTokens),
+			CacheWrite1HInputTokens: clonePendingQuantity(evidence.CacheWrite1HInputTokens),
+			AudioInputTokens:        clonePendingQuantity(evidence.AudioInputTokens),
+			CachedAudioInputTokens:  clonePendingQuantity(evidence.CachedAudioInputTokens),
+			AudioOutputTokens:       clonePendingQuantity(evidence.AudioOutputTokens),
+			ImageInputTokens:        clonePendingQuantity(evidence.ImageInputTokens),
+			CachedImageInputTokens:  clonePendingQuantity(evidence.CachedImageInputTokens),
+			ImageOutputTokens:       clonePendingQuantity(evidence.ImageOutputTokens),
+			MediaUnits:              clonePendingQuantity(evidence.MediaUnits),
+			ToolCalls:               maps.Clone(evidence.ToolCalls), Batch: evidence.Batch,
+		},
 	}
 }

@@ -184,49 +184,56 @@ func (s *Server) acceptCatalogSuggestions(r *http.Request, _ access.Principal) (
 		return access.Reply{}, access.Invalid("upstream_models", "Name 1–2000 models to accept catalog facts for.")
 	}
 	return s.mutationWith(r, "provider.catalog_facts.accept", input, func(ctx context.Context, tx pgx.Tx, _ access.Principal, current *record) (access.Reply, error) {
-		if input.CatalogSHA256 != s.Catalog.SHA256 {
-			return access.Reply{}, access.Fail(409, "catalog_changed", "The reference catalog changed since these suggestions were reviewed; review them again.")
-		}
-		models, err := loadModels(ctx, tx, current.ID, false)
-		if err != nil {
-			return access.Reply{}, err
-		}
-		suggestions, err := suggestionsFor(s.Catalog, &current.Configuration, models)
-		if err != nil {
-			return access.Reply{}, err
-		}
-		byModel := make(map[string]*catalogSuggestion, len(suggestions))
-		for i := range suggestions {
-			if _, seen := byModel[suggestions[i].UpstreamModel]; !seen {
-				byModel[suggestions[i].UpstreamModel] = &suggestions[i]
-			}
-		}
-		next := current.Configuration
-		next.Options.Models = maps.Clone(current.Configuration.Options.Models)
-		if next.Options.Models == nil {
-			next.Options.Models = map[string]json.RawMessage{}
-		}
-		for _, name := range input.UpstreamModels {
-			suggestion := byModel[name]
-			switch {
-			case suggestion == nil:
-				return access.Reply{}, access.Fail(422, "catalog_model_unmatched", "The reference catalog has no facts for "+name+".")
-			case suggestion.Conflict != nil:
-				return access.Reply{}, access.Fail(422, "privacy_evidence", "The facts of "+name+" attest a privacy declaration; keep them and edit the model's facts instead.")
-			}
-			merged, _, err := applyCatalogFacts(next.Options.Models[name], suggestion.Facts)
-			if err != nil {
-				return access.Reply{}, err
-			}
-			next.Options.Models[name] = merged
-		}
-		prepared, err := PrepareConfiguration(ctx, tx, s.Unconfined, s.Egress, next)
-		if err != nil {
-			return access.Reply{}, err
-		}
-		if err = StoreDraftConfiguration(ctx, tx, current.ID, current.Name, prepared); err != nil {
+		if err := s.acceptCatalogFacts(ctx, tx, current, input); err != nil {
 			return access.Reply{}, err
 		}
 		return s.detailReply(ctx, tx, current.ID)
 	})
+}
+
+func (s *Catalogue) acceptCatalogFacts(ctx context.Context, tx pgx.Tx, current *record, input acceptCatalogRequest) error {
+	if input.CatalogSHA256 != s.Catalog.SHA256 {
+		return access.Fail(409, "catalog_changed", "The reference catalog changed since these suggestions were reviewed; review them again.")
+	}
+	models, err := loadModels(ctx, tx, current.ID, false)
+	if err != nil {
+		return err
+	}
+	suggestions, err := suggestionsFor(s.Catalog, &current.Configuration, models)
+	if err != nil {
+		return err
+	}
+	byModel := make(map[string]*catalogSuggestion, len(suggestions))
+	for i := range suggestions {
+		if _, seen := byModel[suggestions[i].UpstreamModel]; !seen {
+			byModel[suggestions[i].UpstreamModel] = &suggestions[i]
+		}
+	}
+	next := current.Configuration
+	next.Options.Models = maps.Clone(current.Configuration.Options.Models)
+	if next.Options.Models == nil {
+		next.Options.Models = map[string]json.RawMessage{}
+	}
+	for _, name := range input.UpstreamModels {
+		suggestion := byModel[name]
+		switch {
+		case suggestion == nil:
+			return access.Fail(422, "catalog_model_unmatched", "The reference catalog has no facts for "+name+".")
+		case suggestion.Conflict != nil:
+			return access.Fail(422, "privacy_evidence", "The facts of "+name+" attest a privacy declaration; keep them and edit the model's facts instead.")
+		}
+		merged, _, err := applyCatalogFacts(next.Options.Models[name], suggestion.Facts)
+		if err != nil {
+			return err
+		}
+		next.Options.Models[name] = merged
+	}
+	prepared, err := s.PrepareConfiguration(ctx, tx, next)
+	if err != nil {
+		return err
+	}
+	if err = s.StoreDraftConfiguration(ctx, tx, current.ID, current.Name, prepared); err != nil {
+		return err
+	}
+	return nil
 }

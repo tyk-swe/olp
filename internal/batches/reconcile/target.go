@@ -3,13 +3,12 @@ package reconcile
 import (
 	"context"
 	"errors"
-	"net/http"
-	"slices"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/batches/upstream"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -30,81 +29,33 @@ func targetFailure(err error) batches.ErrorClass {
 
 func (w *Worker) target(ctx context.Context, settlement batches.Settlement) (upstream.Target, error) {
 	resource := settlement.Binding.Resource(settlement.ResourceID, settlement.UpstreamID)
-	provider, route, slot, err := w.deps.Resolver.ResolveCurrent(ctx, &resource, "batch")
+	pin, err := w.deps.Resolver.ResolveCurrent(ctx, &resource, "batch")
 	if errors.Is(err, resources.ErrUnavailable) {
 		return upstream.Target{}, errCredentialUnavailable
 	}
 	if err != nil {
 		return upstream.Target{}, errRuntimeUnavailable
 	}
-	index := slices.IndexFunc(route.Targets, func(target routing.Target) bool {
-		return target.ID == settlement.Binding.TargetID && target.ProviderID == settlement.Binding.ProviderID
-	})
-	if index < 0 || route.Targets[index].ProviderModel == "" {
-		return upstream.Target{}, errRuntimeUnavailable
-	}
+	provider, slot := pin.Invocation.Provider, pin.Invocation.Slot
 	config := provider.Connector()
 	if config.CredentialSource == "caller" {
 		return upstream.Target{}, errCredentialUnavailable
 	}
-	secret, err := w.slotSecret(ctx, slot, config)
-	if err != nil {
-		return upstream.Target{}, err
+	if slot.CredentialID == nil && connectors.SecretRequired(config.AuthMode) || slot.CredentialID != nil && w.deps.Credentials.Eligibility(*slot.CredentialID) != routing.Eligible {
+		return upstream.Target{}, errCredentialUnavailable
 	}
-	client, err := w.client(ctx, provider, slot)
-	if err != nil {
-		return upstream.Target{}, err
+	if provider.Network != nil && provider.Network.CredentialID != "" && w.deps.Credentials.Eligibility(provider.Network.CredentialID) != routing.Eligible {
+		return upstream.Target{}, errCredentialUnavailable
 	}
-	return upstream.Target{Config: config, Model: route.Targets[index].ProviderModel, Secret: secret, Client: client}, nil
-}
-
-func (w *Worker) slotSecret(ctx context.Context, slot *routing.Slot, config connectors.Config) ([]byte, error) {
-	if slot.CredentialID == nil {
-		if connectors.SecretRequired(config.AuthMode) {
-			return nil, errCredentialUnavailable
+	resolver := providerinvoke.Resolver{Credentials: w.deps.Credentials, Policy: w.deps.Egress,
+		Connections: w.deps.Connections, DefaultClient: w.deps.Client, HeaderTimeout: clientTimeout}
+	target, err := resolver.Bind(nil, pin.Invocation, nil).Resolve(ctx)
+	if err != nil {
+		var failure *providerinvoke.ResolutionError
+		if errors.As(err, &failure) && failure.Stage != providerinvoke.ConnectionResolution {
+			return upstream.Target{}, errors.Join(errCredentialUnavailable, err)
 		}
-		return nil, nil
+		return upstream.Target{}, errors.Join(errRuntimeUnavailable, err)
 	}
-	if w.deps.Credentials.Eligibility(*slot.CredentialID) != routing.Eligible {
-		return nil, errCredentialUnavailable
-	}
-	secret, _, err := w.deps.Credentials.Secret(ctx, nil, *slot.CredentialID)
-	if err != nil {
-		return nil, errors.Join(errCredentialUnavailable, err)
-	}
-	return secret, nil
-}
-
-func (w *Worker) client(ctx context.Context, provider *routing.Provider, slot *routing.Slot) (*http.Client, error) {
-	if provider.Network == nil && provider.ProfileID == "" {
-		return w.deps.Client, nil
-	}
-	networkSecret, err := w.networkSecret(ctx, provider)
-	if err != nil {
-		return nil, err
-	}
-	credentialID := "none"
-	if slot.CredentialID != nil {
-		credentialID = *slot.CredentialID
-	}
-	scope := provider.ID + "/" + provider.RevisionID + "/" + slot.ID + "/" + credentialID
-	client, err := w.deps.Connections.ClientScoped(scope, *w.deps.Egress, provider.Network, networkSecret, clientTimeout)
-	if err != nil {
-		return nil, errors.Join(errRuntimeUnavailable, err)
-	}
-	return client, nil
-}
-
-func (w *Worker) networkSecret(ctx context.Context, provider *routing.Provider) ([]byte, error) {
-	if provider.Network == nil || provider.Network.CredentialID == "" {
-		return nil, nil
-	}
-	if w.deps.Credentials.Eligibility(provider.Network.CredentialID) != routing.Eligible {
-		return nil, errCredentialUnavailable
-	}
-	secret, err := w.deps.Credentials.NetworkSecret(ctx, nil, provider.ID, provider.Network.CredentialID)
-	if err != nil {
-		return nil, errors.Join(errCredentialUnavailable, err)
-	}
-	return secret, nil
+	return upstream.Target{Config: config, Model: pin.Invocation.Model, Secret: target.Credential.Secret, Client: target.Client}, nil
 }

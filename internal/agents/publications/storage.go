@@ -139,29 +139,65 @@ func ValidateReferences(ctx context.Context, tx access.Queryer, kind string, d a
 
 func Publish(ctx context.Context, tx pgx.Tx, actor string, publication agentcontract.Publication) (agentcontract.Publication, error) {
 	draft := agentcontract.NormalizeDraft(publication.Draft)
-	if publication.Retired {
-		return agentcontract.Publication{}, access.Fail(409, "publication_retired", "Retired publications cannot be promoted.")
-	}
-	if draft.Agent != nil && draft.Agent.OAuth != nil && draft.Agent.OAuth.EntraOBO != nil && draft.Agent.CredentialID == nil {
-		return agentcontract.Publication{}, access.Invalid("entra_client_secret", "Supply the Entra client secret before publishing.")
-	}
-	if err := ValidateReferences(ctx, tx, publication.Kind, draft); err != nil {
+	if err := validatePublication(ctx, tx, publication, draft); err != nil {
 		return agentcontract.Publication{}, err
 	}
 	revision, err := publishRevision(ctx, tx, actor, publication, draft)
 	if err != nil {
 		return agentcontract.Publication{}, err
 	}
-	next := agentcontract.Publication{ID: publication.ID, Kind: publication.Kind, ProjectID: publication.ProjectID, Name: publication.Name, Draft: draft, ETag: access.NewID(), RevisionID: &revision}
+	next := selectedRevision(publication, draft, revision, access.NewID())
 	_, updateErr := tx.Exec(ctx, `UPDATE olp.agent_publications SET latest_revision_id=$2,etag=$3 WHERE id=$1`, next.ID, revision, next.ETag)
 	return next, updateErr
 }
+
+func EnsureRetainedRevision(ctx context.Context, tx pgx.Tx, actor string, publication agentcontract.Publication) (agentcontract.Publication, error) {
+	draft := agentcontract.NormalizeDraft(publication.Draft)
+	if publication.Retired {
+		return agentcontract.Publication{}, access.Fail(409, "publication_retired", "Retired publications cannot be promoted.")
+	}
+	existing, found, err := RevisionIDByDigest(ctx, tx, publication.ID, agentcontract.DraftDigest(draft))
+	if err != nil {
+		return agentcontract.Publication{}, err
+	}
+	if found {
+		return selectedRevision(publication, draft, existing, publication.ETag), nil
+	}
+	if err := validatePublication(ctx, tx, publication, draft); err != nil {
+		return agentcontract.Publication{}, err
+	}
+	revision, err := insertRevision(ctx, tx, actor, publication, draft)
+	if err != nil {
+		return agentcontract.Publication{}, err
+	}
+	return selectedRevision(publication, draft, revision, publication.ETag), nil
+}
+
+func selectedRevision(publication agentcontract.Publication, draft agentcontract.Draft, revision, etag string) agentcontract.Publication {
+	return agentcontract.Publication{ID: publication.ID, Kind: publication.Kind, ProjectID: publication.ProjectID, Name: publication.Name, Draft: draft, ETag: etag, RevisionID: &revision, Retired: publication.Retired}
+}
+
+func validatePublication(ctx context.Context, tx pgx.Tx, publication agentcontract.Publication, draft agentcontract.Draft) error {
+	if publication.Retired {
+		return access.Fail(409, "publication_retired", "Retired publications cannot be promoted.")
+	}
+	if draft.Agent != nil && draft.Agent.OAuth != nil && draft.Agent.OAuth.EntraOBO != nil && draft.Agent.CredentialID == nil {
+		return access.Invalid("entra_client_secret", "Supply the Entra client secret before publishing.")
+	}
+	return ValidateReferences(ctx, tx, publication.Kind, draft)
+}
+
 func publishRevision(ctx context.Context, tx pgx.Tx, actor string, p agentcontract.Publication, draft agentcontract.Draft) (string, error) {
 	digest := agentcontract.DraftDigest(draft)
 	existing, found, err := RevisionIDByDigest(ctx, tx, p.ID, digest)
 	if err != nil || found {
 		return existing, err
 	}
+	return insertRevision(ctx, tx, actor, p, draft)
+}
+
+func insertRevision(ctx context.Context, tx pgx.Tx, actor string, p agentcontract.Publication, draft agentcontract.Draft) (string, error) {
+	digest := agentcontract.DraftDigest(draft)
 	var count int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM olp.agent_publication_revisions WHERE publication_id=$1`, p.ID).Scan(&count); err != nil {
 		return "", err
@@ -194,6 +230,23 @@ func SetLabel(ctx context.Context, tx pgx.Tx, p agentcontract.Publication, label
 	}
 	_, err := tx.Exec(ctx, `INSERT INTO olp.prompt_labels(publication_id,label,revision_id,etag) VALUES($1,$2,$3,$4) ON CONFLICT(publication_id,label) DO UPDATE SET revision_id=EXCLUDED.revision_id,etag=EXCLUDED.etag`, p.ID, label, revision, etag)
 	return err
+}
+
+type LabelSelection struct {
+	Label      string
+	RevisionID string
+}
+
+func ReplaceLabels(ctx context.Context, tx pgx.Tx, publication agentcontract.Publication, labels []LabelSelection) error {
+	if err := ClearLabels(ctx, tx, publication.ID); err != nil {
+		return err
+	}
+	for _, label := range labels {
+		if err := SetLabel(ctx, tx, publication, label.Label, label.RevisionID, access.NewID()); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func ClearLabels(ctx context.Context, tx pgx.Tx, publication string) error {

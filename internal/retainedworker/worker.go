@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
@@ -132,48 +133,32 @@ func (w *Worker) poll(ctx context.Context, c resources.RetainedClaim) string {
 	if err != nil {
 		return "resource_unavailable"
 	}
-	provider, route, slot, err := w.Resolver.ResolveCurrent(ctx, r, c.Operation)
+	pin, err := w.Resolver.ResolveCurrent(ctx, r, c.Operation)
 	if err != nil {
 		return "credential_or_pin_unavailable"
 	}
 	if w.Egress == nil || w.Auth == nil {
 		return "connection_unavailable"
 	}
+	provider, slot := pin.Invocation.Provider, pin.Invocation.Slot
 	config := provider.Connector()
-	var secret, networkSecret []byte
-	if slot.CredentialID != nil {
-		if w.Credentials == nil || w.Credentials.Eligibility(*slot.CredentialID) != routing.Eligible {
-			return "credential_unavailable"
-		}
-		secret, _, err = w.Credentials.Secret(ctx, nil, *slot.CredentialID)
-		if err != nil {
-			return "credential_unavailable"
-		}
-	} else if connectors.SecretRequired(config.AuthMode) {
+	if slot.CredentialID != nil && (w.Credentials == nil || w.Credentials.Eligibility(*slot.CredentialID) != routing.Eligible) || slot.CredentialID == nil && connectors.SecretRequired(config.AuthMode) {
 		return "credential_unavailable"
 	}
-	if provider.Network != nil && provider.Network.CredentialID != "" {
-		if w.Credentials == nil || w.Credentials.Eligibility(provider.Network.CredentialID) != routing.Eligible {
-			return "credential_unavailable"
-		}
-		networkSecret, err = w.Credentials.NetworkSecret(ctx, nil, provider.ID, provider.Network.CredentialID)
-		if err != nil {
-			return "credential_unavailable"
-		}
+	if provider.Network != nil && provider.Network.CredentialID != "" && (w.Credentials == nil || w.Credentials.Eligibility(provider.Network.CredentialID) != routing.Eligible) {
+		return "credential_unavailable"
 	}
-	client, err := w.Connections.ClientScoped(provider.ID+"/"+provider.RevisionID+"/"+slot.ID, *w.Egress, provider.Network, networkSecret, 2*time.Minute)
+	resolver := providerinvoke.Resolver{Credentials: w.Credentials, Policy: w.Egress, Connections: w.Connections,
+		HeaderTimeout: 2 * time.Minute, Scope: provider.ID + "/" + provider.RevisionID + "/" + slot.ID}
+	target, err := resolver.Bind(nil, pin.Invocation, nil).Resolve(ctx)
 	if err != nil {
+		var failure *providerinvoke.ResolutionError
+		if errors.As(err, &failure) && failure.Stage != providerinvoke.ConnectionResolution {
+			return "credential_unavailable"
+		}
 		return "connection_unavailable"
 	}
-	model := ""
-	for _, target := range route.Targets {
-		if target.ID == r.TargetID {
-			model = target.ProviderModel
-		}
-	}
-	if model == "" {
-		return "pin_unavailable"
-	}
+	model, secret, client := pin.Invocation.Model, target.Credential.Secret, target.Client
 	upstream := r.UpstreamID
 	adopt := strings.HasPrefix(upstream, "pending:")
 	if adopt {

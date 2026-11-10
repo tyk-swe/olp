@@ -14,21 +14,18 @@
   import { agentKeys } from './agentKeys';
   import DelegationConsent from './DelegationConsent.svelte';
   import {
-    claimMCPGrant,
-    authorizeMCPGrant,
-    completeMCPGrant,
-    pollMCPGrant,
-    type MCPGrantAuthorization,
     getServer,
     listMCPGrants,
     listPublications,
     listServers,
     revokeMCPGrant,
     saveServer,
-    startMCPGrant,
-    startAgentGrant,
     type MCPServer
   } from './api';
+
+  import { PersonalGrantEnrollment } from './grantEnrollment.svelte';
+  const enrollment = new PersonalGrantEnrollment();
+  const grantView = $derived(enrollment.view);
 
   type Fields = {
     delegatedIssuer: string;
@@ -50,12 +47,6 @@
     agentKeyID: string;
     server: MCPServer | null;
     fields: Fields;
-    enrollmentID: string;
-    handoffToken: string;
-    callbackCode: string;
-    callbackState: string;
-    authorization: MCPGrantAuthorization | undefined;
-    enrollmentURL: string;
     busy: boolean;
     message: string;
     error: string;
@@ -79,12 +70,6 @@
       deviceEndpoint: '',
       keyID: ''
     },
-    enrollmentID: '',
-    handoffToken: '',
-    callbackCode: '',
-    callbackState: '',
-    authorization: undefined,
-    enrollmentURL: '',
     busy: false,
     message: '',
     error: ''
@@ -92,6 +77,7 @@
   const state = writable(initialState());
   const access = useRole();
   const client = useQueryClient();
+  const working = $derived($state.busy || grantView.busy);
   const intent = useMutationIntent();
   const grants = createQuery(() => ({
     queryKey: agentKeys.grants(),
@@ -122,46 +108,20 @@
       fields: { ...current.fields, [field]: value }
     }));
 
-  function consumeEnrollment(fragment: string) {
-    const [id, token] = fragment.split('.');
-    if (!id || !token) return;
-    patch({
-      enrollmentID: id,
-      handoffToken: token,
-      callbackCode: '',
-      callbackState: '',
-      authorization: undefined,
-      enrollmentURL: '',
-      error: '',
-      message: '',
-      busy: false
-    });
-    window.history.replaceState(
-      null,
-      '',
-      window.location.pathname + window.location.search
-    );
-  }
-  onMount(() => {
-    const callback = new URL(window.location.href);
-    const code = callback.searchParams.get('code');
-    const callbackState = callback.searchParams.get('state');
-    if (code && callbackState) {
-      patch({
-        enrollmentID: callbackState.split('.')[0] ?? '',
-        callbackCode: code,
-        callbackState
-      });
-      window.history.replaceState(null, '', window.location.pathname);
-      return;
+  function consumeLocation(location: URL) {
+    const sanitized = enrollment.consumeLocation(location);
+    if (sanitized !== null) {
+      patch({ error: '', message: '' });
+      window.history.replaceState(null, '', sanitized);
     }
-    consumeEnrollment(window.location.hash.slice(1));
-  });
+  }
+  onMount(() => consumeLocation(new URL(window.location.href)));
 
   async function loadServer(requested: string) {
     const owner = captureOwner();
     const selection = { id: requested };
     intent.reset();
+    enrollment.reset();
     state.set({ ...initialState(), selection });
     if (!requested) return;
     try {
@@ -279,136 +239,27 @@
   }
 
   async function startEnrollment() {
-    const observed = $state;
-    if (!observed.server || observed.busy) return;
-    const owner = captureOwner();
-    const active = () =>
-      owner() &&
-      $state.selection === observed.selection &&
-      $state.enrollmentID === observed.enrollmentID;
-    patch({ busy: true, error: '', enrollmentURL: '' });
-    try {
-      const result = await startMCPGrant(
-        observed.server.id,
-        observed.fields.keyID.trim()
-      );
-      if (active()) patch({ enrollmentURL: result.enrollment_url });
-    } catch (cause) {
-      if (active()) patch({ error: errorMessage(cause) });
-    } finally {
-      if (active()) patch({ busy: false });
-    }
+    if (!$state.server || working) return;
+    patch({ error: '', message: '' });
+    await enrollment.begin({
+      kind: 'server',
+      id: $state.server.id,
+      keyId: $state.fields.keyID
+    });
   }
-
-  async function claimEnrollment() {
-    const observed = $state;
-    if (!observed.enrollmentID || !observed.handoffToken || observed.busy)
-      return;
-    const owner = captureOwner();
-    const active = () =>
-      owner() &&
-      $state.selection === observed.selection &&
-      $state.enrollmentID === observed.enrollmentID;
-    patch({ busy: true, error: '' });
-    try {
-      const claimed = await claimMCPGrant(
-        observed.enrollmentID,
-        observed.handoffToken
-      );
-      if (!active() || $state.handoffToken !== observed.handoffToken) return;
-      patch({
-        handoffToken: '',
-        enrollmentID: claimed.enrollment.id,
-        message: 'Enrollment claimed. Authorization is pending'
-      });
-      await refresh(agentKeys.grants(), active);
-    } catch (cause) {
-      if (active() && $state.handoffToken === observed.handoffToken)
-        patch({ error: errorMessage(cause) });
-    } finally {
-      if (active()) patch({ busy: false });
-    }
-  }
-
   async function startAgentEnrollment() {
-    const observed = $state;
-    if (!observed.agentID || !observed.agentKeyID.trim() || observed.busy)
-      return;
-    const owner = captureOwner();
-    const active = () =>
-      owner() &&
-      $state.agentID === observed.agentID &&
-      $state.agentKeyID === observed.agentKeyID &&
-      $state.enrollmentID === observed.enrollmentID;
-    patch({ busy: true, error: '', enrollmentURL: '' });
-    try {
-      const result = await startAgentGrant(
-        observed.agentID,
-        observed.agentKeyID.trim()
-      );
-      if (active()) patch({ enrollmentURL: result.enrollment_url });
-    } catch (cause) {
-      if (active()) patch({ error: errorMessage(cause) });
-    } finally {
-      if (active()) patch({ busy: false });
-    }
+    if (working) return;
+    patch({ error: '', message: '' });
+    await enrollment.begin({
+      kind: 'agent',
+      id: $state.agentID,
+      keyId: $state.agentKeyID
+    });
   }
 
-  async function authorize(flow: 'authorization_code' | 'device_code') {
-    const observed = $state;
-    if (observed.busy) return;
-    const owner = captureOwner();
-    const active = () =>
-      owner() &&
-      $state.selection === observed.selection &&
-      $state.enrollmentID === observed.enrollmentID;
-    patch({ busy: true, error: '', message: '' });
-    try {
-      const authorization = await authorizeMCPGrant(
-        observed.enrollmentID,
-        flow
-      );
-      if (active()) patch({ authorization });
-    } catch (cause) {
-      if (active()) patch({ error: errorMessage(cause) });
-    } finally {
-      if (active()) patch({ busy: false });
-    }
-  }
-
-  async function finish(poll: boolean) {
-    const observed = $state;
-    if (observed.busy) return;
-    const owner = captureOwner();
-    const active = () =>
-      owner() &&
-      $state.selection === observed.selection &&
-      $state.enrollmentID === observed.enrollmentID;
-    patch({ busy: true, error: '', message: '' });
-    try {
-      const authorization = poll
-        ? await pollMCPGrant(observed.enrollmentID)
-        : await completeMCPGrant(
-            observed.enrollmentID,
-            observed.callbackCode,
-            observed.callbackState
-          );
-      if (!active()) return;
-      patch({
-        authorization: { ...observed.authorization, ...authorization },
-        callbackCode: '',
-        callbackState: '',
-        message:
-          authorization.state === 'active'
-            ? 'Personal authorization is active'
-            : `Personal authorization is ${authorization.state}`
-      });
-      await refresh(agentKeys.grants(), active);
-    } catch (cause) {
-      if (active()) patch({ error: errorMessage(cause) });
-    } finally {
-      if (active()) patch({ busy: false });
-    }
+  async function runEnrollment(action: () => Promise<void>) {
+    patch({ error: '', message: '' });
+    await action();
   }
 
   async function revoke(grantID: string) {
@@ -426,7 +277,7 @@
 </script>
 
 <svelte:window
-  onhashchange={() => consumeEnrollment(window.location.hash.slice(1))}
+  onhashchange={() => consumeLocation(new URL(window.location.href))}
 />
 
 <svelte:head><title>Personal tool grants · OpenLLMProxy</title></svelte:head>
@@ -435,61 +286,69 @@
   description="Grant standing is bound to one individual and the resource's authorization settings."
 />
 <DelegationConsent />
-{#if $state.error}<p class="inline-problem" role="alert">{$state.error}</p>{/if}
-{#if $state.message}<p class="success-banner" role="status">
-    {$state.message}
+{#if $state.error || grantView.error}<p class="inline-problem" role="alert">
+    {$state.error || grantView.error}
   </p>{/if}
-{#if $state.handoffToken}
+{#if $state.message || grantView.message}<p
+    class="success-banner"
+    role="status"
+  >
+    {$state.message || grantView.message}
+  </p>{/if}
+{#if grantView.handoffToken}
   <section class="section">
     <h2>Claim enrollment</h2>
     <p>This one-use link binds enrollment to your signed-in account</p>
     <button
       class="button button-secondary"
-      disabled={$state.busy}
-      onclick={claimEnrollment}>Claim enrollment</button
+      disabled={working}
+      onclick={() => runEnrollment(enrollment.claim)}>Claim enrollment</button
     >
   </section>
 {/if}
-{#if $state.enrollmentID && !$state.handoffToken && $state.authorization?.state !== 'active'}
+{#if grantView.enrollmentID && !grantView.handoffToken && grantView.authorization?.state !== 'active'}
   <section class="section">
     <h2>Authorize personal access</h2>
-    {#if $state.callbackCode}
+    {#if grantView.callbackCode}
       <button
         class="button button-secondary"
-        disabled={$state.busy}
-        onclick={() => finish(false)}>Complete authorization</button
+        disabled={working}
+        onclick={() => runEnrollment(enrollment.completeCallback)}
+        >Complete authorization</button
       >
-    {:else if $state.authorization?.device}
+    {:else if grantView.authorization?.device}
       <p>
-        Enter {$state.authorization.device.user_code} at
+        Enter {grantView.authorization.device.user_code} at
         <a
-          href={$state.authorization.device.verification_url}
+          href={grantView.authorization.device.verification_url}
           target="_blank"
           rel="noreferrer">the authorization page</a
         >
       </p>
-      <p>Check again after {$state.authorization.device.interval} seconds</p>
+      <p>Check again after {grantView.authorization.device.interval} seconds</p>
       <button
         class="button button-secondary"
-        disabled={$state.busy}
-        onclick={() => finish(true)}>Check device approval</button
+        disabled={working}
+        onclick={() => runEnrollment(enrollment.poll)}
+        >Check device approval</button
       >
-    {:else if $state.authorization?.authorization_url}
+    {:else if grantView.authorization?.authorization_url}
       <a
         class="button button-primary"
-        href={$state.authorization.authorization_url}>Sign in upstream</a
+        href={grantView.authorization.authorization_url}>Sign in upstream</a
       >
     {:else}
       <button
         class="button button-secondary"
-        disabled={$state.busy}
-        onclick={() => authorize('authorization_code')}
+        disabled={working}
+        onclick={() =>
+          runEnrollment(() => enrollment.authorize('authorization_code'))}
         >Authorize in browser</button
       >
       <button
         class="button button-secondary"
-        disabled={$state.busy}
-        onclick={() => authorize('device_code')}
+        disabled={working}
+        onclick={() => runEnrollment(() => enrollment.authorize('device_code'))}
         >Use device authorization</button
       >
     {/if}
@@ -627,7 +486,7 @@
             ></textarea></label
           >
         </fieldset>
-        <button class="button button-secondary" disabled={$state.busy}
+        <button class="button button-secondary" disabled={working}
           >Save authorization settings</button
         >
       </form>
@@ -650,7 +509,7 @@
         >
         <button
           class="button button-secondary"
-          disabled={$state.busy ||
+          disabled={working ||
             !$state.server.oauth ||
             Boolean($state.server.oauth.entra_obo)}>Start key enrollment</button
         >
@@ -670,9 +529,11 @@
       <label class="form-field"
         >Published agent <select
           value={$state.agentID}
-          disabled={$state.busy}
-          onchange={(event) =>
-            patch({ agentID: event.currentTarget.value, enrollmentURL: '' })}
+          disabled={working}
+          onchange={(event) => {
+            enrollment.reset();
+            patch({ agentID: event.currentTarget.value });
+          }}
           required
         >
           <option value="">Select an agent</option>
@@ -684,25 +545,29 @@
       <label class="form-field"
         >Agent API key UUID <input
           value={$state.agentKeyID}
-          disabled={$state.busy}
+          disabled={working}
           oninput={(event) => patch({ agentKeyID: event.currentTarget.value })}
           required
         /></label
       >
       <button
         class="button button-secondary"
-        disabled={$state.busy || !$state.agentID}
-        >Start agent key enrollment</button
+        disabled={working || !$state.agentID}>Start agent key enrollment</button
       >
     </form>
   </section>
 {/if}
-{#if $state.enrollmentURL}<p>
+{#if grantView.enrollmentURL}<p>
     <a
-      href={$state.enrollmentURL}
+      href={grantView.enrollmentURL}
       onclick={(event) => {
         event.preventDefault();
-        consumeEnrollment($state.enrollmentURL.split('#')[1] ?? '');
+        consumeLocation(
+          new URL(
+            new URL(grantView.enrollmentURL, window.location.href).hash,
+            window.location.href
+          )
+        );
       }}>Continue personal enrollment</a
     >
   </p>{/if}
@@ -749,7 +614,7 @@
               <td
                 >{#if grant.grant_id && grant.state !== 'revoked'}<button
                     class="button button-secondary"
-                    disabled={$state.busy}
+                    disabled={working}
                     onclick={() => revoke(grant.grant_id!)}>Revoke</button
                   >{/if}</td
               >

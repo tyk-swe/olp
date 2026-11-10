@@ -211,7 +211,8 @@ func (s *Server) planUnary(ctx context.Context, x *call) *Error {
 			return err
 		}
 	}
-	var incompatible error
+	session := s.planning(x, unaryPlanning, x.route, x.operationName(), x.surfaceName(), "unary")
+	session.unbounded = !operationregistry.PolicyFor(x.operationName()).BoundedWork
 	options := s.selectionOptions(ctx, x)
 	options.Prepare = func(p routing.Provider, t routing.Target) (*routing.CandidatePreparation, error) {
 		// Decisions does not expose a provider-enforced output bound. An input
@@ -219,7 +220,7 @@ func (s *Server) planUnary(ctx context.Context, x *call) *Error {
 		if !operationregistry.PolicyFor(x.operationName()).BoundedWork {
 			authority := x.admissionAuthority(x.authority)
 			if err := unboundedWorkLimits(authority, &p, nil, &budgetRoute, x.limitRoute()); err != nil {
-				incompatible = err
+				session.semantic = err
 				return nil, err
 			}
 			for _, slot := range routing.SelectSlots(p, t.ProviderModel, *x.route, x.keyID, x.operationName(), x.surfaceName(), x.mode, x.affinity) {
@@ -227,41 +228,20 @@ func (s *Server) planUnary(ctx context.Context, x *call) *Error {
 					continue
 				}
 				if err := unboundedWorkLimits(authority, &p, &slot, &budgetRoute, x.limitRoute()); err != nil {
-					incompatible = err
+					session.semantic = err
 					return nil, err
 				}
 			}
 		}
 		prepared, err := x.prepareCandidate(&p, t.ID, t.ProviderModel)
 		if err != nil {
-			incompatible = err
+			session.semantic = err
 			return nil, err
 		}
 		return prepared.candidate, nil
 	}
-	plan, err := routing.Select(x.snapshot(), x.route.Slug, x.operationName(), x.surfaceName(), "unary", x.affinity, options)
-	if err != nil {
-		return requestError(err)
-	}
-	if plan.Delegate != "" {
-		return s.delegate(ctx, x, plan)
-	}
-	x.adoptPlan(plan)
-	if len(plan.Attempts) == 0 {
-		if incompatible != nil {
-			problem := requestError(incompatible)
-			if !operationregistry.PolicyFor(x.operationName()).BoundedWork && problem.Code == "target_capability" {
-				problem.Status = http.StatusUnprocessableEntity
-			}
-			return problem
-		}
-		x.noteCostExceeded(plan)
-		if x.costExcluded {
-			return costLimitExceeded()
-		}
-		return selectionError(&routing.SelectionError{Code: routing.NoEligibleTargets}, x.route.Slug)
-	}
-	return nil
+	_, _, failure := session.selectPlan(ctx, options)
+	return failure
 }
 func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *call, body []byte) (*outcome, int) {
 	fail := func(e *Error) (*outcome, int) {

@@ -1,9 +1,13 @@
+import { useQueryClient } from '@tanstack/svelte-query';
+import { providerKeys } from './providerKeys';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { json, route, serve } from '#lib/management/test/transport.js';
 import type { ProviderKindCapability } from './models';
 import type { Provider, ProviderProbe } from './providers';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
+import { networkCredentialPath } from './configurationDraft.svelte';
+import { ProviderEditor } from './providerEditor.svelte';
 import { ProviderWizardState } from './providerWizard.svelte';
 
 const spec: ProviderKindCapability = {
@@ -380,4 +384,182 @@ describe('provider wizard', () => {
     expect(state.wizardStep).toBe(3);
     expect(state.errorMessage).toBe('');
   });
+});
+
+const editorProvider: Provider = {
+  id: 'provider',
+  etag: 'original',
+  name: 'Service',
+  configuration: {
+    kind: 'openai_compatible',
+    auth_mode: 'api_key',
+    endpoint: 'https://editorProvider.example.test'
+  },
+  capability_count: 0,
+  certified_capability_count: 0,
+  enabled_model_count: 0,
+  model_count: 0,
+  connector_ready: false,
+  pending_activation: true,
+  project_id: null,
+  project_name: null,
+  state: 'draft',
+  created_at: '2026-01-01T00:00:00Z',
+  updated_at: '2026-01-01T00:00:00Z'
+};
+const editorSpec: ProviderKindCapability = {
+  kind: 'openai_compatible',
+  label: 'Compatible',
+  description: '',
+  default_auth_mode: 'api_key',
+  auth_modes: [{ mode: 'api_key', label: 'API key', credential: 'required' }],
+  fields: [{ field: 'endpoint', label: 'Endpoint', required: true }],
+  presets: []
+};
+
+async function providerEditorState() {
+  const ready = vi.fn(() => {
+    useQueryClient().setQueryDefaults(
+      providerKeys.modelsOf(editorProvider.id),
+      { retry: false }
+    );
+    return new ProviderEditor(() => editorProvider.id);
+  });
+  const component = mount(StateHarness, {
+    target: document.createElement('div'),
+    props: { setup: ready }
+  });
+  onTestFinished(() => unmount(component));
+  flushSync();
+  const state = ready.mock.results[0].value;
+  await vi.waitFor(() =>
+    expect(state.view.draft.name).toBe(editorProvider.name)
+  );
+  return state;
+}
+
+it('retains a confirmed activation receipt and retries only reads after a refresh failure', async () => {
+  const activate = vi.fn();
+  let refuseRead = false;
+  serve(
+    (request) => {
+      const path = new URL(request.url).pathname;
+      if (path === '/api/v1/provider-kinds')
+        return json({ items: [editorSpec] });
+      if (path.endsWith('/activate')) {
+        activate(request.headers.get('Idempotency-Key'));
+        refuseRead = true;
+        return json({ runtime_generation: { sequence: 3 } });
+      }
+      if (refuseRead) return json({ message: 'Read unavailable' }, 503);
+      return json({ provider: editorProvider, items: [], next_cursor: null });
+    },
+    ['read', 'configure']
+  );
+  const state = await providerEditorState();
+  await state.activate();
+  expect(state.view.refreshPending).toBe(true);
+  expect(state.view.notice).toContain('runtime generation 3');
+  expect(state.view.refreshError).not.toBe('');
+  await state.activate();
+  expect(activate).toHaveBeenCalledTimes(1);
+  refuseRead = false;
+  await state.retryRefresh();
+  expect(state.view.refreshPending).toBe(false);
+  expect(state.view.refreshError).toBe('');
+  expect(activate).toHaveBeenCalledTimes(1);
+});
+
+it('keeps an uncertain activation request identity when retrying', async () => {
+  const activate = vi.fn();
+  serve(
+    (request) => {
+      const path = new URL(request.url).pathname;
+      if (path === '/api/v1/provider-kinds')
+        return json({ items: [editorSpec] });
+      if (path.endsWith('/activate')) {
+        activate(
+          request.headers.get('Idempotency-Key'),
+          request.headers.get('If-Match')
+        );
+        if (activate.mock.calls.length === 1)
+          return json({ message: 'Uncertain response' }, 503);
+        return json({ runtime_generation: { sequence: 4 } });
+      }
+      return json({ provider: editorProvider, items: [], next_cursor: null });
+    },
+    ['read', 'configure']
+  );
+  const state = await providerEditorState();
+  await state.activate();
+  await state.activate();
+  expect(activate).toHaveBeenCalledTimes(2);
+  expect(activate.mock.calls[0][0]).toBeTruthy();
+  expect(activate.mock.calls[1]).toEqual(activate.mock.calls[0]);
+});
+
+it('preserves a dirty draft while acknowledging its own network credential write', async () => {
+  let etag = editorProvider.etag;
+  serve(
+    (request) => {
+      const path = new URL(request.url).pathname;
+      if (path === '/api/v1/provider-kinds')
+        return json({ items: [editorSpec] });
+      if (path.endsWith('/network-credentials') && request.method === 'POST') {
+        etag = 'credential-saved';
+        return json({ credential_id: 'network-credential', etag });
+      }
+      return json({
+        provider: { ...editorProvider, etag },
+        items: [],
+        next_cursor: null
+      });
+    },
+    ['read', 'configure']
+  );
+  const state = await providerEditorState();
+  state.view.draft.name = 'Unsaved name';
+  state.touch();
+  await state.stageNetworkCredential('{"password":"secret"}');
+  expect(state.view.draft.name).toBe('Unsaved name');
+  expect(state.view.draft.document?.text(networkCredentialPath)).toBe(
+    'network-credential'
+  );
+  expect(state.view.dirty).toBe(true);
+  expect(state.view.concurrentNotice).toBeNull();
+});
+
+it('uses the reloaded version and a fresh request identity after explicitly discarding an uncertain activation', async () => {
+  let etag = editorProvider.etag;
+  const activate = vi.fn();
+  serve(
+    (request) => {
+      const path = new URL(request.url).pathname;
+      if (path === '/api/v1/provider-kinds')
+        return json({ items: [editorSpec] });
+      if (path.endsWith('/activate')) {
+        activate(
+          request.headers.get('Idempotency-Key'),
+          request.headers.get('If-Match')
+        );
+        if (activate.mock.calls.length === 1)
+          return json({ message: 'Uncertain response' }, 503);
+        return json({ runtime_generation: { sequence: 5 } });
+      }
+      return json({
+        provider: { ...editorProvider, etag },
+        items: [],
+        next_cursor: null
+      });
+    },
+    ['read', 'configure']
+  );
+  const state = await providerEditorState();
+  await state.activate();
+  etag = 'reloaded-version';
+  await state.reload();
+  await state.activate();
+  expect(activate).toHaveBeenCalledTimes(2);
+  expect(activate.mock.calls[1][0]).not.toBe(activate.mock.calls[0][0]);
+  expect(activate.mock.calls[1][1]).toBe(etag);
 });

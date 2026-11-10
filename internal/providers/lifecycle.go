@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -48,7 +49,7 @@ func ValidCredential(value string) error {
 	return nil
 }
 
-func (s *Server) StoreCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (id string, version int, err error) {
+func (s *Catalogue) StoreCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (id string, version int, err error) {
 	id = access.NewID()
 	if err = tx.QueryRow(ctx, "INSERT INTO olp.provider_credentials(id,provider_id,version) VALUES($1,$2,(SELECT coalesce(max(version),0)+1 FROM olp.provider_credentials WHERE provider_id=$2)) RETURNING version", id, providerID).Scan(&version); err != nil {
 		return "", 0, err
@@ -122,104 +123,15 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 		}
 		return *replayed, tx.Commit(r.Context())
 	}
-	if err = access.ValidText("name", input.Name, 100); err != nil {
-		return access.Reply{}, err
-	}
-	prepared, err := PrepareConfiguration(r.Context(), tx, s.Unconfined, s.Egress, input.Configuration)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	configuration := prepared.configuration
-	switch cfg := &configuration; {
-	case cfg.Grant() && (input.Credential != nil || input.CredentialReference != nil):
-		return access.Reply{}, access.Invalid("credential", grantEnrollmentOnly)
-	case cfg.CredentialRequired() && !cfg.Grant() && input.Credential == nil && input.CredentialReference == nil:
-		return access.Reply{}, access.Invalid("credential", "This authentication mode requires a credential.")
-	case !cfg.CredentialRequired() && (input.Credential != nil || input.CredentialReference != nil):
-		return access.Reply{}, access.Invalid("credential", "This authentication mode takes no stored credential.")
-	}
-	if err = validateCredentialInput(input.Credential, input.CredentialReference); err != nil {
-		return access.Reply{}, err
-	}
-	if input.Model != nil {
-		if err = ValidModelName("model", *input.Model); err != nil {
-			return access.Reply{}, err
-		}
-		if input.DisplayName == nil || *input.DisplayName == "" {
-			input.DisplayName = input.Model
-		}
-		if err = ValidModelName("display_name", *input.DisplayName); err != nil {
-			return access.Reply{}, err
-		}
-	}
-	if err = a.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
-		return access.Reply{}, err
-	}
-	created, err := CreateDraft(r.Context(), tx, Draft{Name: input.Name, ProjectID: input.ProjectID, Configuration: prepared, CreatedBy: p.UserID()})
+	created, err := s.createDraft(r.Context(), tx, p, input)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	id, etag := created.ID, created.ETag
-	var credentialID *string
-	if input.Credential != nil || input.CredentialReference != nil {
-		stored, _, err := s.storeCredentialInput(r.Context(), tx, id, input.Credential, input.CredentialReference)
-		if err != nil {
-			return access.Reply{}, err
-		}
-		credentialID = &stored
-	}
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.provider_slots(id,provider_id,is_default,position,name,credential_id) VALUES($1,$2,true,0,'default',$3)", access.NewID(), id, credentialID); err != nil {
-		return access.Reply{}, err
-	}
-	if input.Model != nil {
-		surface, operation := "openai", probeOperation(&configuration)
-		switch configuration.Kind {
-		case KindAnthropic:
-			surface = "anthropic"
-		case KindGemini, KindVertex:
-			surface = "gemini"
-		}
-		if configuration.ProfileID != "" {
-			profile, _ := configuration.transport().Profile()
-			if _, native := protocols.NativeGenerationFamily(profile.OperationDialect("generation")); native && operation == "generation" {
-				surface = "native"
-			}
-			switch profile.Dialect {
-			case "openai-chat", "openai-responses":
-				// Vertex's OpenAI-compatible profile speaks OpenAI, whatever
-				// its kind's native surface.
-				surface = "openai"
-			case "anthropic-messages":
-				surface = "anthropic"
-			case "gemini-generate-content":
-				surface = "gemini"
-			case "bedrock-converse":
-				surface = "bedrock"
-			case "bedrock-invoke":
-				surface, operation = "bedrock", "bedrock_invoke"
-			}
-		}
-		// A dedicated operation profile, such as an embeddings or rerank
-		// dialect, declares the tuple it can actually certify.
-		mode := ModeUnary
-		if configuration.ProfileID != "" && !probeable(&configuration, CapabilityInput{Operation: operation, Surface: surface, Mode: mode}) {
-			if tuple := defaultProbeTuple(&configuration); probeable(&configuration, tuple) {
-				operation, surface, mode = tuple.Operation, tuple.Surface, tuple.Mode
-			}
-		}
-		capabilities := []storedCapability{{Operation: operation, Surface: surface, Mode: mode, Source: "declared"}}
-		if operation == "generation" {
-			capabilities = append(capabilities, storedCapability{Operation: operation, Surface: surface, Mode: ModeStreaming, Source: "declared"})
-		}
-		declared, _ := json.Marshal(capabilities)
-		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities) VALUES($1,$2,$3,$4,true,$5)", access.NewID(), id, *input.Model, *input.DisplayName, declared); err != nil {
-			return access.Reply{}, err
-		}
-	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.create", "provider", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	result := access.Reply{Status: 201, Location: "/api/v1/providers/" + id, ETag: etag, Body: map[string]any{"id": id, "name": input.Name, "kind": configuration.Kind, "state": "draft", "etag": etag, "model": input.Model, "project_id": input.ProjectID}}
+	result := access.Reply{Status: 201, Location: "/api/v1/providers/" + id, ETag: etag, Body: map[string]any{"id": id, "name": input.Name, "kind": created.Kind, "state": "draft", "etag": etag, "model": input.Model, "project_id": input.ProjectID}}
 	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
@@ -262,11 +174,11 @@ func (s *Server) updateProvider(r *http.Request, _ access.Principal) (access.Rep
 	if err = access.ValidText("name", input.Name, 100); err != nil {
 		return access.Reply{}, err
 	}
-	prepared, err := PrepareConfiguration(r.Context(), tx, s.Unconfined, s.Egress, input.Configuration)
+	prepared, err := s.PrepareConfiguration(r.Context(), tx, input.Configuration)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err = StoreDraftConfiguration(r.Context(), tx, id, input.Name, prepared); err != nil {
+	if err = s.StoreDraftConfiguration(r.Context(), tx, id, input.Name, prepared); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.update", "provider", id, "success"); err != nil {
@@ -517,108 +429,21 @@ func (row *slotRow) published(authMode string) routing.RevisionSlot {
 
 func (s *Server) activateProvider(r *http.Request, _ access.Principal) (access.Reply, error) {
 	return s.mutation(r, "provider.activate", func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
-		// The plugin a draft pinned may since have become unusable, such as
-		// an unconfined plugin in a deployment that no longer enables them.
-		prepared, err := PrepareConfiguration(ctx, tx, s.Unconfined, s.Egress, current.Configuration)
+		activated, err := s.activateDraft(ctx, tx, p, current)
 		if err != nil {
 			return access.Reply{}, err
 		}
-		configuration := prepared.configuration
-		if err := validateNetworkReference(ctx, tx, current.ID, &configuration); err != nil {
-			return access.Reply{}, err
-		}
-		if _, _, err := s.credentialFor(ctx, tx, current); err != nil {
-			return access.Reply{}, err
-		}
-		models, err := loadModels(ctx, tx, current.ID, true)
-		if err != nil {
-			return access.Reply{}, err
-		}
-		if len(models) == 0 {
-			return access.Reply{}, access.Fail(422, "no_enabled_models", "Enable and certify at least one model before activating.")
-		}
-		published := make([]routing.RevisionModel, 0, len(models))
-		for _, m := range models {
-			if len(m.Capabilities) == 0 {
-				return access.Reply{}, access.Fail(422, "certification_required", "Model "+m.UpstreamModel+" declares no capabilities.")
-			}
-			rm := routing.RevisionModel{ID: m.ID, UpstreamModel: m.UpstreamModel, DisplayName: m.DisplayName}
-			for _, c := range m.Capabilities {
-				if c.Source != "certified" {
-					return access.Reply{}, access.Fail(422, "certification_required", "Model "+m.UpstreamModel+" has an uncertified "+c.Operation+"/"+c.Surface+"/"+c.Mode+" capability.")
-				}
-				rm.Capabilities = append(rm.Capabilities, routing.RevisionCapability{Operation: c.Operation, Surface: c.Surface, Mode: c.Mode, Source: c.Source, CertifiedAt: c.CertifiedAt, ToolCalls: c.ToolCalls})
-			}
-			published = append(published, rm)
-		}
-		slots, err := loadSlots(ctx, tx, current.ID)
-		if err != nil {
-			return access.Reply{}, err
-		}
-		if err = onePrincipal(slots, &configuration); err != nil {
-			return access.Reply{}, err
-		}
-		var credentialVersion *int
-		revisionSlots := make([]routing.RevisionSlot, 0, len(slots))
-		for i := range slots {
-			slot := slots[i].published(configuration.AuthMode)
-			if err := slots[i].credentialFits(&configuration); err != nil {
-				return access.Reply{}, err
-			}
-			if slot.Enabled && configuration.CredentialRequired() && slots[i].validationFingerprint(&configuration, models) != "" {
-				if slot.CredentialID == nil {
-					return access.Reply{}, access.Fail(422, "credential_required", "Slot "+slot.Name+" has no credential.")
-				}
-				if slots[i].validationTime(&configuration, models) == nil {
-					return access.Reply{}, access.Fail(422, "slot_validation_required", "Validate slot "+slot.Name+" for its enabled models before activating.")
-				}
-			}
-			if slot.Default {
-				credentialVersion = slot.CredentialVersion
-			}
-			revisionSlots = append(revisionSlots, slot)
-		}
-		modelsJSON, _ := json.Marshal(published)
-		slotsJSON, _ := json.Marshal(revisionSlots)
-		configurationJSON, err := json.Marshal(configuration)
-		if err != nil {
-			return access.Reply{}, err
-		}
-		revisionID, etag := access.NewID(), access.NewID()
-		var revision int
-		if err = tx.QueryRow(ctx, "INSERT INTO olp.provider_revisions(id,provider_id,revision,name,configuration,models,slots,credential_version,source_etag,activated_by) VALUES($1,$2,(SELECT coalesce(max(revision),0)+1 FROM olp.provider_revisions WHERE provider_id=$2),$3,$4,$5,$6,$7,$8,$9) RETURNING revision", revisionID, current.ID, current.Name, configurationJSON, modelsJSON, slotsJSON, credentialVersion, current.ETag, p.UserID()).Scan(&revision); err != nil {
-			return access.Reply{}, err
-		}
-		if _, err = tx.Exec(ctx, "UPDATE olp.providers SET state='active',active_revision=$2,active_revision_id=$3,draft_dirty=false,etag=$4,updated_at=now() WHERE id=$1", current.ID, revision, revisionID, etag); err != nil {
-			return access.Reply{}, err
-		}
-		if s.Activated != nil {
-			if err = s.Activated(ctx, tx, current.ID, p.UserID()); err != nil {
-				return access.Reply{}, err
-			}
-		}
-		generation, err := release.Publish(ctx, tx, p.UserID())
-		if err != nil {
-			return access.Reply{}, err
-		}
-		return access.Detail(map[string]any{"id": current.ID, "state": "active", "etag": etag, "runtime_generation": generation}, etag), nil
+		return access.Detail(map[string]any{"id": current.ID, "state": "active", "etag": activated.ETag, "runtime_generation": activated.Generation}, activated.ETag), nil
 	})
 }
 
 func (s *Server) disableProvider(r *http.Request, _ access.Principal) (access.Reply, error) {
 	return s.mutation(r, "provider.disable", func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
-		if current.State != "active" {
-			return access.Reply{}, access.Fail(409, "invalid_state", "Only active connections can be disabled.")
-		}
-		etag := access.NewID()
-		if _, err := tx.Exec(ctx, "UPDATE olp.providers SET state='disabled',etag=$2,updated_at=now() WHERE id=$1", current.ID, etag); err != nil {
-			return access.Reply{}, err
-		}
-		generation, err := release.Publish(ctx, tx, p.UserID())
+		disabled, err := s.disable(ctx, tx, p, current)
 		if err != nil {
 			return access.Reply{}, err
 		}
-		return access.Detail(map[string]any{"provider_id": current.ID, "etag": etag, "credential_id": nil, "credential_version": nil, "runtime_generation": generation}, etag), nil
+		return access.Detail(map[string]any{"provider_id": current.ID, "etag": disabled.ETag, "credential_id": nil, "credential_version": nil, "runtime_generation": disabled.Generation}, disabled.ETag), nil
 	})
 }
 
@@ -873,7 +698,7 @@ func deref[T comparable](v *T) T {
 
 // restoreDraft rewrites the draft configuration and models from a revision.
 // Credentials are never restored; the draft keeps its current slots.
-func (s *Server) restoreDraft(ctx context.Context, tx pgx.Tx, current *record, v *revisionRow) (string, error) {
+func (s *Catalogue) restoreDraft(ctx context.Context, tx pgx.Tx, current *record, v *revisionRow) (string, error) {
 	if err := PreserveCredentialBoundary(ctx, tx, current.ID, &current.Configuration, &v.Configuration); err != nil {
 		return "", err
 	}
@@ -973,4 +798,214 @@ func sameJSON(a, b any) bool {
 	left, _ := json.Marshal(a)
 	right, _ := json.Marshal(b)
 	return string(left) == string(right)
+}
+
+type createdProvider struct {
+	CreatedDraft
+	Kind string
+}
+
+func (s *Catalogue) createDraft(ctx context.Context, tx pgx.Tx, p access.Principal, input createRequest) (createdProvider, error) {
+	var err error
+	if err = access.ValidText("name", input.Name, 100); err != nil {
+		return createdProvider{}, err
+	}
+	prepared, err := s.PrepareConfiguration(ctx, tx, input.Configuration)
+	if err != nil {
+		return createdProvider{}, err
+	}
+	configuration := prepared.configuration
+	switch cfg := &configuration; {
+	case cfg.Grant() && (input.Credential != nil || input.CredentialReference != nil):
+		return createdProvider{}, access.Invalid("credential", grantEnrollmentOnly)
+	case cfg.CredentialRequired() && !cfg.Grant() && input.Credential == nil && input.CredentialReference == nil:
+		return createdProvider{}, access.Invalid("credential", "This authentication mode requires a credential.")
+	case !cfg.CredentialRequired() && (input.Credential != nil || input.CredentialReference != nil):
+		return createdProvider{}, access.Invalid("credential", "This authentication mode takes no stored credential.")
+	}
+	if err = validateCredentialInput(input.Credential, input.CredentialReference); err != nil {
+		return createdProvider{}, err
+	}
+	displayName := cmp.Or(deref(input.DisplayName), deref(input.Model))
+	if input.Model != nil {
+		if err = ValidModelName("model", *input.Model); err != nil {
+			return createdProvider{}, err
+		}
+		if err = ValidModelName("display_name", displayName); err != nil {
+			return createdProvider{}, err
+		}
+	}
+	if err = s.Access.RequireProject(ctx, tx, p, input.ProjectID); err != nil {
+		return createdProvider{}, err
+	}
+	created, err := s.CreateDraft(ctx, tx, Draft{Name: input.Name, ProjectID: input.ProjectID, Configuration: prepared, CreatedBy: p.UserID()})
+	if err != nil {
+		return createdProvider{}, err
+	}
+	id := created.ID
+	var credentialID *string
+	if input.Credential != nil || input.CredentialReference != nil {
+		stored, _, err := s.storeCredentialInput(ctx, tx, id, input.Credential, input.CredentialReference)
+		if err != nil {
+			return createdProvider{}, err
+		}
+		credentialID = &stored
+	}
+	if _, err = tx.Exec(ctx, "INSERT INTO olp.provider_slots(id,provider_id,is_default,position,name,credential_id) VALUES($1,$2,true,0,'default',$3)", access.NewID(), id, credentialID); err != nil {
+		return createdProvider{}, err
+	}
+	if input.Model != nil {
+		surface, operation := "openai", probeOperation(&configuration)
+		switch configuration.Kind {
+		case KindAnthropic:
+			surface = "anthropic"
+		case KindGemini, KindVertex:
+			surface = "gemini"
+		}
+		if configuration.ProfileID != "" {
+			profile, _ := configuration.transport().Profile()
+			if _, native := protocols.NativeGenerationFamily(profile.OperationDialect("generation")); native && operation == "generation" {
+				surface = "native"
+			}
+			switch profile.Dialect {
+			case "openai-chat", "openai-responses":
+				// Vertex's OpenAI-compatible profile speaks OpenAI, whatever
+				// its kind's native surface.
+				surface = "openai"
+			case "anthropic-messages":
+				surface = "anthropic"
+			case "gemini-generate-content":
+				surface = "gemini"
+			case "bedrock-converse":
+				surface = "bedrock"
+			case "bedrock-invoke":
+				surface, operation = "bedrock", "bedrock_invoke"
+			}
+		}
+		// A dedicated operation profile, such as an embeddings or rerank
+		// dialect, declares the tuple it can actually certify.
+		mode := ModeUnary
+		if configuration.ProfileID != "" && !probeable(&configuration, CapabilityInput{Operation: operation, Surface: surface, Mode: mode}) {
+			if tuple := defaultProbeTuple(&configuration); probeable(&configuration, tuple) {
+				operation, surface, mode = tuple.Operation, tuple.Surface, tuple.Mode
+			}
+		}
+		capabilities := []storedCapability{{Operation: operation, Surface: surface, Mode: mode, Source: "declared"}}
+		if operation == "generation" {
+			capabilities = append(capabilities, storedCapability{Operation: operation, Surface: surface, Mode: ModeStreaming, Source: "declared"})
+		}
+		declared, _ := json.Marshal(capabilities)
+		if _, err = tx.Exec(ctx, "INSERT INTO olp.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities) VALUES($1,$2,$3,$4,true,$5)", access.NewID(), id, *input.Model, displayName, declared); err != nil {
+			return createdProvider{}, err
+		}
+	}
+	return createdProvider{CreatedDraft: created, Kind: configuration.Kind}, nil
+}
+
+type activatedProvider struct {
+	ETag       string
+	Generation release.Published
+}
+
+func (s *Catalogue) activateDraft(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (activatedProvider, error) {
+	// The plugin a draft pinned may since have become unusable, such as
+	// an unconfined plugin in a deployment that no longer enables them.
+	prepared, err := s.PrepareConfiguration(ctx, tx, current.Configuration)
+	if err != nil {
+		return activatedProvider{}, err
+	}
+	configuration := prepared.configuration
+	if err := validateNetworkReference(ctx, tx, current.ID, &configuration); err != nil {
+		return activatedProvider{}, err
+	}
+	if _, _, err := s.credentialFor(ctx, tx, current); err != nil {
+		return activatedProvider{}, err
+	}
+	models, err := loadModels(ctx, tx, current.ID, true)
+	if err != nil {
+		return activatedProvider{}, err
+	}
+	if len(models) == 0 {
+		return activatedProvider{}, access.Fail(422, "no_enabled_models", "Enable and certify at least one model before activating.")
+	}
+	published := make([]routing.RevisionModel, 0, len(models))
+	for _, m := range models {
+		if len(m.Capabilities) == 0 {
+			return activatedProvider{}, access.Fail(422, "certification_required", "Model "+m.UpstreamModel+" declares no capabilities.")
+		}
+		rm := routing.RevisionModel{ID: m.ID, UpstreamModel: m.UpstreamModel, DisplayName: m.DisplayName}
+		for _, c := range m.Capabilities {
+			if c.Source != "certified" {
+				return activatedProvider{}, access.Fail(422, "certification_required", "Model "+m.UpstreamModel+" has an uncertified "+c.Operation+"/"+c.Surface+"/"+c.Mode+" capability.")
+			}
+			rm.Capabilities = append(rm.Capabilities, routing.RevisionCapability{Operation: c.Operation, Surface: c.Surface, Mode: c.Mode, Source: c.Source, CertifiedAt: c.CertifiedAt, ToolCalls: c.ToolCalls})
+		}
+		published = append(published, rm)
+	}
+	slots, err := loadSlots(ctx, tx, current.ID)
+	if err != nil {
+		return activatedProvider{}, err
+	}
+	if err = onePrincipal(slots, &configuration); err != nil {
+		return activatedProvider{}, err
+	}
+	var credentialVersion *int
+	revisionSlots := make([]routing.RevisionSlot, 0, len(slots))
+	for i := range slots {
+		slot := slots[i].published(configuration.AuthMode)
+		if err := slots[i].credentialFits(&configuration); err != nil {
+			return activatedProvider{}, err
+		}
+		if slot.Enabled && configuration.CredentialRequired() && slots[i].validationFingerprint(&configuration, models) != "" {
+			if slot.CredentialID == nil {
+				return activatedProvider{}, access.Fail(422, "credential_required", "Slot "+slot.Name+" has no credential.")
+			}
+			if slots[i].validationTime(&configuration, models) == nil {
+				return activatedProvider{}, access.Fail(422, "slot_validation_required", "Validate slot "+slot.Name+" for its enabled models before activating.")
+			}
+		}
+		if slot.Default {
+			credentialVersion = slot.CredentialVersion
+		}
+		revisionSlots = append(revisionSlots, slot)
+	}
+	modelsJSON, _ := json.Marshal(published)
+	slotsJSON, _ := json.Marshal(revisionSlots)
+	configurationJSON, err := json.Marshal(configuration)
+	if err != nil {
+		return activatedProvider{}, err
+	}
+	revisionID, etag := access.NewID(), access.NewID()
+	var revision int
+	if err = tx.QueryRow(ctx, "INSERT INTO olp.provider_revisions(id,provider_id,revision,name,configuration,models,slots,credential_version,source_etag,activated_by) VALUES($1,$2,(SELECT coalesce(max(revision),0)+1 FROM olp.provider_revisions WHERE provider_id=$2),$3,$4,$5,$6,$7,$8,$9) RETURNING revision", revisionID, current.ID, current.Name, configurationJSON, modelsJSON, slotsJSON, credentialVersion, current.ETag, p.UserID()).Scan(&revision); err != nil {
+		return activatedProvider{}, err
+	}
+	if _, err = tx.Exec(ctx, "UPDATE olp.providers SET state='active',active_revision=$2,active_revision_id=$3,draft_dirty=false,etag=$4,updated_at=now() WHERE id=$1", current.ID, revision, revisionID, etag); err != nil {
+		return activatedProvider{}, err
+	}
+	if s.Activated != nil {
+		if err = s.Activated(ctx, tx, current.ID, p.UserID()); err != nil {
+			return activatedProvider{}, err
+		}
+	}
+	generation, err := release.Publish(ctx, tx, p.UserID())
+	if err != nil {
+		return activatedProvider{}, err
+	}
+	return activatedProvider{ETag: etag, Generation: generation}, nil
+}
+
+func (s *Catalogue) disable(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (activatedProvider, error) {
+	if current.State != "active" {
+		return activatedProvider{}, access.Fail(409, "invalid_state", "Only active connections can be disabled.")
+	}
+	etag := access.NewID()
+	if _, err := tx.Exec(ctx, "UPDATE olp.providers SET state='disabled',etag=$2,updated_at=now() WHERE id=$1", current.ID, etag); err != nil {
+		return activatedProvider{}, err
+	}
+	generation, err := release.Publish(ctx, tx, p.UserID())
+	if err != nil {
+		return activatedProvider{}, err
+	}
+	return activatedProvider{ETag: etag, Generation: generation}, nil
 }

@@ -64,7 +64,8 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 	if err != nil {
 		return fail(classProtocol, nil)
 	}
-	if err := s.validateUnaryEndpoint(submit); err != nil {
+	bound := s.bindExchange(x, provider, slot, a.UpstreamModel, plan.Config(), state)
+	if err := bound.validateEndpoint(submit); err != nil {
 		return fail(classConnect, nil)
 	}
 	deadline, _ := ctx.Deadline()
@@ -76,7 +77,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 	defer cancel()
 	timer := time.AfterFunc(min(a.Timeout, remaining), func() { state.reason.CompareAndSwap(0, 1); cancel() })
 	defer timer.Stop()
-	client, err := s.providerClient(actx, x.request.release, provider, slot)
+	client, err := bound.client(actx)
 	if err != nil {
 		return fail(classCredential, nil)
 	}
@@ -88,7 +89,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 	if s.cfg.MaxResponseBytes > 0 {
 		cap = min(cap, int(s.cfg.MaxResponseBytes))
 	}
-	exchange := &unaryExchange{server: s, ctx: actx, x: x, state: state, plan: plan, client: client, slot: slot, provider: provider, model: a.UpstreamModel, fact: &fact, bodyCap: cap, inject: trace.InjectUpstream}
+	exchange := &unaryExchange{server: s, ctx: actx, x: x, state: state, plan: plan, client: client, bound: bound, fact: &fact, bodyCap: cap, inject: trace.InjectUpstream}
 	raw, failure := exchange.run(plan.Method(), submit, plan.WireBody())
 	if failure != nil {
 		return fail(failure.class, failure.failure)

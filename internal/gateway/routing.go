@@ -2,7 +2,10 @@ package gateway
 
 import (
 	"context"
+	"errors"
+	"net/http"
 
+	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/tyk-swe/olp/internal/usage"
@@ -52,4 +55,84 @@ func (x *call) features() *routing.Features {
 		return routing.DescribeRequest(x.operationName(), nil, nil)
 	}
 	return routing.DescribeRequest(x.operationName(), x.generation.parsed, x.sourceDemand(""))
+}
+
+type planningKind uint8
+
+const (
+	canonicalPlanning planningKind = iota
+	unaryPlanning
+	mediaPlanning
+	pinnedPlanning
+)
+
+type planningSession struct {
+	server    *Server
+	call      *call
+	route     *routing.Route
+	kind      planningKind
+	operation string
+	surface   string
+	mode      string
+	semantic  error
+	decisions []contentpolicy.Decision
+	unbounded bool
+}
+
+func (s *Server) planning(x *call, kind planningKind, route *routing.Route, operation, surface, mode string) *planningSession {
+	return &planningSession{server: s, call: x, kind: kind, route: route, operation: operation, surface: surface, mode: mode}
+}
+
+func (p *planningSession) selectPlan(ctx context.Context, options routing.Options) (routing.Plan, bool, *Error) {
+	x := p.call
+	plan, err := routing.Select(x.snapshot(), p.route.Slug, p.operation, p.surface, p.mode, x.affinity, options)
+	if err != nil {
+		if p.kind == canonicalPlanning || p.kind == mediaPlanning {
+			var selection *routing.SelectionError
+			if errors.As(err, &selection) && selection.Code != routing.NoEligibleTargets && selection.Code != "attempt_budget_increase_forbidden" {
+				return plan, false, selectionError(err, p.route.Slug)
+			}
+		}
+		return plan, false, requestError(err)
+	}
+	if plan.Delegate != "" && p.kind != pinnedPlanning {
+		return plan, true, p.server.delegate(ctx, x, plan)
+	}
+	if p.kind != pinnedPlanning {
+		x.adoptPlan(plan)
+	}
+	if len(plan.Attempts) != 0 {
+		if p.kind == canonicalPlanning && x.pin != nil {
+			x.budget, x.allowance = x.spent+1, x.spent+1
+		}
+		return plan, false, nil
+	}
+	if p.semantic != nil {
+		for _, decision := range p.decisions {
+			recordDecision(x, decision)
+		}
+		problem := requestError(p.semantic)
+		if p.unbounded && problem.Code == "target_capability" {
+			problem.Status = http.StatusUnprocessableEntity
+		}
+		return plan, false, problem
+	}
+	if p.kind == canonicalPlanning && x.strict() {
+		for _, decision := range plan.Decisions {
+			if decision.Reason != nil && (*decision.Reason == "max_output_tokens_exceeded" || *decision.Reason == "context_length_exceeded") {
+				return plan, false, invalidRequest(*decision.Reason, "The effective invocation exceeds a declared model limit; its controls were not reduced.", nil)
+			}
+		}
+	}
+	x.noteCostExceeded(plan)
+	if x.costExcluded {
+		return plan, false, costLimitExceeded()
+	}
+	return plan, false, selectionError(&routing.SelectionError{Code: routing.NoEligibleTargets}, p.route.Slug)
+}
+
+func (p *planningSession) adoptPin(plan routing.Plan) {
+	p.call.decisions, p.call.policy = plan.Decisions, plan.Policy
+	p.call.budget = 1
+	p.call.attempts = plan.Attempts[:1]
 }

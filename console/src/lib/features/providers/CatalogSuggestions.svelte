@@ -1,11 +1,6 @@
 <script lang="ts">
-  import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
-
   import { createQuery } from '@tanstack/svelte-query';
-  import {
-    acceptCatalogSuggestions,
-    listCatalogSuggestions
-  } from '#lib/features/providers/catalog.js';
+  import { listCatalogSuggestions } from '#lib/features/providers/catalog.js';
   import type { Provider } from '#lib/features/providers/providers.js';
   import { providerKeys } from '#lib/features/providers/providerKeys.js';
   import {
@@ -16,29 +11,16 @@
   import { lifecycleNotice } from '#lib/features/providers/provider-models/lifecycle.js';
   import { metadataFacts } from '#lib/features/providers/provider-models/modelMetadata.js';
   import { formatDate, stateLabel } from '#lib/format.js';
-  import type { RunProviderAction } from './providerEditor';
-
-  const acceptCatalogSuggestionsIntent = useMutationIntent();
+  import type { ProviderEditor } from './providerEditor.svelte';
 
   let {
     current,
-    canManage,
-    locked,
-    busy,
-    run,
-    onProviderChanged,
-    onNotice
-  }: {
-    current: Provider;
-    canManage: boolean;
-    /** Set while the provider cannot be edited, such as when disabled. */
-    locked: boolean;
-    busy: string;
-    run: RunProviderAction;
-    onProviderChanged: () => Promise<void>;
-    onNotice: (message: string) => void;
-  } = $props();
-
+    editor,
+    locked
+  }: { current: Provider; editor: ProviderEditor; locked: boolean } = $props();
+  const editorView = $derived(editor.view);
+  const canManage = $derived(editor.canManage);
+  const busy = $derived(editorView.busy);
   const suggestions = createQuery(() => ({
     queryKey: providerKeys.catalogSuggestions(current.id, current.etag),
     queryFn: ({ signal }) => listCatalogSuggestions(current.id, signal)
@@ -51,32 +33,7 @@
   async function accept() {
     const catalog = suggestions.data?.catalog;
     if (!canManage || locked || !catalog || !selected.length) return;
-    await run('catalog-accept', async (isCurrent) => {
-      const submission = acceptCatalogSuggestionsIntent.prepare(
-        { providerId: current.id, digest: catalog.sha256, models: selected },
-        () =>
-          [
-            { id: current.id, etag: current.etag },
-            catalog.sha256,
-            selected
-          ] as const
-      );
-      await acceptCatalogSuggestions(...submission.input, submission.requestId);
-      if (!isCurrent()) return;
-      acceptCatalogSuggestionsIntent.reset();
-      const count = submission.input[2].length;
-      selected = [];
-      onNotice(
-        `Catalog facts stored for ${count} model${count === 1 ? '' : 's'}. Certify the provider's capabilities again before activation.`
-      );
-      try {
-        await onProviderChanged();
-      } catch (cause) {
-        throw new Error('Catalog facts stored, but refreshing failed.', {
-          cause
-        });
-      }
-    });
+    if (await editor.acceptCatalog(catalog.sha256, selected)) selected = [];
   }
 </script>
 
@@ -157,7 +114,10 @@
     {#if canManage}<button
         class="button button-secondary"
         type="button"
-        disabled={locked || !selected.length || Boolean(busy)}
+        disabled={locked ||
+          editorView.refreshPending ||
+          !selected.length ||
+          Boolean(busy)}
         onclick={accept}
         >{busy === 'catalog-accept'
           ? 'Storing facts…'

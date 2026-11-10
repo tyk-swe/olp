@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/http/httptrace"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -19,6 +18,7 @@ type pinnedExchange struct {
 	state    attemptState
 	index    int
 	billable bool
+	bound    *boundExchange
 }
 
 func (s *Server) beginPinned(ctx context.Context, x *call, p *pin, method string) *pinnedExchange {
@@ -37,6 +37,7 @@ func (s *Server) beginPinned(ctx context.Context, x *call, p *pin, method string
 		state: attemptState{parent: ctx, classifier: upstream.Classifier{AtMostOnce: method == http.MethodPost, Declared: p.provider.Connector().Classification()}},
 		index: len(x.facts), billable: retainedBillable || nativeBillable,
 	}
+	exchange.bound = s.bindExchange(x, &p.provider, p.slot, p.model, p.provider.Connector(), &exchange.state)
 	x.facts = append(x.facts, fact)
 	x.exchange = exchange
 	return exchange
@@ -64,17 +65,11 @@ func (e *pinnedExchange) fail(s *Server, x *call, class string, failure *attempt
 }
 
 func (s *Server) doPinnedRequest(ctx context.Context, x *call, p *pin, exchange *pinnedExchange, req *http.Request, decodeError func([]byte) *wire.UpstreamError) (*http.Response, *attemptFailure) {
-	client, err := s.providerClient(ctx, x.request.release, &p.provider, p.slot)
+	client, err := exchange.bound.client(ctx)
 	if err != nil {
 		return nil, exchange.fail(s, x, classCredential, nil)
 	}
-	req = req.WithContext(httptrace.WithClientTrace(req.Context(), exchange.state.trace()))
-	resp, err := client.Do(req)
-	if resp != nil {
-		// A custom RoundTripper may not invoke httptrace; an HTTP response
-		// independently proves transmission.
-		exchange.state.dispatched.Store(true)
-	}
+	resp, err := exchange.bound.do(client, req)
 	x.dispatched = x.dispatched || exchange.state.dispatched.Load()
 	if exchange.state.dispatched.Load() && p.hold != nil {
 		x.spendCaps(p.hold.budgets, p.attempt)

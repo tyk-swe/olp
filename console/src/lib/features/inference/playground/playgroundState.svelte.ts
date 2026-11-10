@@ -25,7 +25,8 @@ import {
 import {
   nativeDialects,
   nativeOperationRequest,
-  publicNativeOperations
+  publicNativeOperations,
+  type NativeOperation
 } from './nativeOperation';
 import { playgroundTemplates, templateFor } from './templates';
 import {
@@ -38,8 +39,122 @@ import {
 type Mode = 'text' | 'tools' | 'structured';
 type Composer = 'basic' | 'advanced';
 
-// Create during component initialization so queries, effects, and cancellation
-// share the lifetime of one mounted playground page.
+type PlaygroundPlanInput = {
+  composer: Composer;
+  operation: PlaygroundOperation;
+  surface: 'openai' | 'anthropic' | 'gemini';
+  strict: boolean;
+  template: string;
+  nativeDialect: string;
+  inspectDialect: string;
+  stream: boolean;
+  operationKnown: boolean;
+};
+type PlaygroundClient =
+  | { kind: 'composer'; advanced: boolean }
+  | { kind: 'native'; operation: NativeOperation; dialect: string }
+  | { kind: 'strict' }
+  | { kind: 'audio' }
+  | { kind: 'realtime' }
+  | { kind: 'unavailable' };
+export type PlaygroundPlan = PlaygroundClient & {
+  activeOperation: PlaygroundOperation;
+  submissionError: string | null;
+  inspection: {
+    surface: InspectRoutingInput['surface'];
+    mode: InspectRoutingInput['mode'];
+    dialect: InspectRoutingInput['dialect'] | undefined;
+    registeredNative: boolean;
+    clientContract: string | undefined;
+    dialects: readonly string[];
+  };
+};
+
+export function resolvePlaygroundPlan(
+  input: PlaygroundPlanInput
+): PlaygroundPlan {
+  const advanced = input.composer === 'advanced';
+  const operation = advanced ? input.operation : 'generation';
+  const options = nativeDialects(operation);
+  const nativeDialect = options.includes(input.nativeDialect)
+    ? input.nativeDialect
+    : (options[0] ?? '');
+  const registeredNative =
+    advanced &&
+    (input.strict || publicNativeOperations.has(operation)) &&
+    options.length > 0;
+  const inspectOptions = inspectionDialects(operation, input.surface);
+  const dialect = registeredNative
+    ? nativeDialect
+    : advanced &&
+        (inspectOptions as readonly string[]).includes(input.inspectDialect)
+      ? input.inspectDialect
+      : undefined;
+  const client: PlaygroundClient =
+    operation === 'realtime'
+      ? { kind: 'realtime' }
+      : operation === 'translation'
+        ? { kind: 'audio' }
+        : input.strict || publicNativeOperations.has(operation)
+          ? advanced && operation === 'generation' && input.surface === 'openai'
+            ? input.template === 'legacy-completions'
+              ? {
+                  kind: 'native',
+                  operation: 'completions',
+                  dialect: 'openai-completions'
+                }
+              : { kind: 'strict' }
+            : advanced && options.length > 0
+              ? {
+                  kind: 'native',
+                  operation: operation as NativeOperation,
+                  dialect: nativeDialect
+                }
+              : { kind: 'unavailable' }
+          : { kind: 'composer', advanced };
+  const submissionError =
+    advanced && !input.operationKnown
+      ? `The route does not offer the ${operation} operation.`
+      : input.strict && operation !== 'realtime'
+        ? 'Use the qualified public client below for this strict route.'
+        : client.kind === 'audio'
+          ? 'Use the audio upload form below.'
+          : client.kind === 'realtime'
+            ? 'Use the local realtime event viewer below; it does not open a provider session.'
+            : client.kind !== 'composer' ||
+                operation === 'classification' ||
+                operation === 'scoring'
+              ? 'Use the public native client below with a route certified for this operation.'
+              : null;
+  return {
+    ...client,
+    activeOperation: operation,
+    submissionError,
+    inspection: {
+      surface: publicNativeOperations.has(operation)
+        ? 'openai'
+        : registeredNative
+          ? 'native'
+          : input.surface,
+      mode:
+        operation === 'realtime'
+          ? 'realtime'
+          : registeredNative
+            ? 'unary'
+            : input.stream
+              ? 'streaming'
+              : 'unary',
+      dialect: dialect as InspectRoutingInput['dialect'] | undefined,
+      registeredNative,
+      clientContract:
+        registeredNative && operation === 'embeddings'
+          ? 'raw-vector-storage/1'
+          : undefined,
+      dialects: registeredNative ? options : inspectOptions
+    }
+  };
+}
+
 export class PlaygroundState {
   routing = $state('{}');
   mode = $state<Mode>('text');
@@ -97,14 +212,26 @@ export class PlaygroundState {
   routeOperations = $derived(
     this.selectedRoute?.latest_revision?.operations ?? null
   );
-  // Basic mode always composes a generation request; the Advanced operation is
-  // kept for when the operator switches back.
   activeOperation = $derived<PlaygroundOperation>(
     this.composer === 'advanced' ? this.operation : 'generation'
   );
   operationKnown = $derived(
     this.routeOperations == null ||
-      this.routeOperations.includes(this.operation)
+      this.routeOperations.includes(this.activeOperation)
+  );
+  inspectDialect = $state('');
+  plan = $derived(
+    resolvePlaygroundPlan({
+      composer: this.composer,
+      operation: this.operation,
+      surface: this.surface,
+      strict: this.strictSelected,
+      template: this.templateKey,
+      nativeDialect: this.nativeDialect,
+      inspectDialect: this.inspectDialect,
+      stream: this.streamEnabled,
+      operationKnown: this.operationKnown
+    })
   );
   streamSelectable = $derived(
     this.activeOperation === 'generation' && !this.outputPolicyActive
@@ -115,7 +242,6 @@ export class PlaygroundState {
   }));
   simulateKeyId = $state('');
   simulateSeed = $state('');
-  inspectDialect = $state('');
   private inspectedInputs = $state('');
   simulationError = $state('');
   // A dry run is the most recent action when its inputs still match; a run resets it.
@@ -269,45 +395,24 @@ export class PlaygroundState {
     }
     try {
       const version = this.inspectionInputs();
-      const registeredNative =
-        (this.strictSelected || publicNativeOperations.has(this.operation)) &&
-        this.composer === 'advanced' &&
-        nativeDialects(this.operation).length > 0;
-      const selectedDialect = registeredNative
-        ? this.currentNativeDialect()
-        : this.currentInspectDialect();
+      const plan = this.plan;
       const input: InspectRoutingInput = {
         route: this.model.trim(),
         operation: this.activeOperation,
-        surface: publicNativeOperations.has(this.activeOperation)
-          ? 'openai'
-          : registeredNative
-            ? 'native'
-            : this.surface,
-        mode:
-          this.activeOperation === 'realtime'
-            ? 'realtime'
-            : registeredNative
-              ? 'unary'
-              : this.streamEnabled
-                ? 'streaming'
-                : 'unary',
+        surface: plan.inspection.surface,
+        mode: plan.inspection.mode,
         preferences: JSON.parse(this.routing),
         apiKeyId: this.simulateKeyId || null,
         seed: this.simulateSeed,
-        clientContract:
-          registeredNative && this.operation === 'embeddings'
-            ? 'raw-vector-storage/1'
-            : undefined,
-        ...(this.composer === 'advanced' && this.operation !== 'realtime'
+        clientContract: plan.inspection.clientContract,
+        ...(this.composer === 'advanced' && plan.kind !== 'realtime'
           ? {
-              request: registeredNative
-                ? this.inspectionNativeRequest(selectedDialect ?? '')
-                : selectedDialect === 'openai-completions'
-                  ? this.inspectionNativeRequest(selectedDialect)
+              request:
+                plan.inspection.registeredNative ||
+                plan.inspection.dialect === 'openai-completions'
+                  ? this.inspectionNativeRequest(plan.inspection.dialect ?? '')
                   : this.advancedRequest(),
-              dialect: selectedDialect as
-                InspectRoutingInput['dialect'] | undefined
+              dialect: plan.inspection.dialect
             }
           : {})
       };
@@ -376,8 +481,9 @@ export class PlaygroundState {
       this.validationError = 'Enter an active route slug.';
       return;
     }
-    if (this.composer === 'advanced' && !this.operationKnown) {
-      this.validationError = `The route does not offer the ${this.operation} operation.`;
+    const plan = this.plan;
+    if (plan.submissionError) {
+      this.validationError = plan.submissionError;
       return;
     }
     if (this.streamEnabled && this.streamCheck !== 'ok') {
@@ -385,32 +491,9 @@ export class PlaygroundState {
         'Streaming has not been verified as available for this route.';
       return;
     }
-    if (this.strictSelected) {
-      this.validationError =
-        'Use the qualified public client below for this strict route.';
-      return;
-    }
-    if (this.activeOperation === 'translation') {
-      this.validationError = 'Use the audio upload form below.';
-      return;
-    }
-    if (this.activeOperation === 'realtime') {
-      this.validationError =
-        'Use the local realtime event viewer below; it does not open a provider session.';
-      return;
-    }
-    if (
-      publicNativeOperations.has(this.activeOperation) ||
-      this.activeOperation === 'classification' ||
-      this.activeOperation === 'scoring'
-    ) {
-      this.validationError =
-        'Use the public native client below with a route certified for this operation.';
-      return;
-    }
     let request: PlaygroundRequest;
     try {
-      if (this.composer === 'advanced') {
+      if (plan.kind === 'composer' && plan.advanced) {
         request = {
           routing: JSON.parse(this.routing),
           model: this.model.trim(),

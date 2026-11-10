@@ -3,85 +3,46 @@
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
 
   import { resolve } from '$app/paths';
-  import { createQuery, useQueryClient } from '@tanstack/svelte-query';
+  import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
   import CursorPagination from '#lib/shell/CursorPagination.svelte';
   import { formatDate } from '#lib/format.js';
   import {
-    certifyProviderModel,
-    declareProviderModels,
-    discoverProviderModels,
     getProviderCapabilityOptions,
-    setProviderModel,
     type CapabilityCertification,
     type CapabilityDeclaration,
     type ProviderModel
   } from '#lib/features/providers/models.js';
-  import {
-    probeProvider,
-    type Provider
-  } from '#lib/features/providers/providers.js';
+  import type { Provider } from '#lib/features/providers/providers.js';
   import { declaresModels } from '#lib/features/providers/profiles.js';
   import { listProviderProfiles } from '#lib/features/providers/providerProfiles.js';
-  import {
-    cursorPaginationProps,
-    resetCursor,
-    type CursorHistory
-  } from '#lib/listing/pagination.js';
+  import { cursorPaginationProps } from '#lib/listing/pagination.js';
   import CapabilityReview from '#lib/features/providers/CapabilityReview.svelte';
   import CatalogSuggestions from '#lib/features/providers/CatalogSuggestions.svelte';
   import {
     activationReady,
-    certificationPrerequisiteReady,
     DISABLED_EDIT_NOTE,
-    parseManualModelNames,
     providerDisabled
   } from '#lib/features/providers/providerEditor.js';
-  import type { RunProviderAction } from './providerEditor';
-  import type { ProviderModelPage } from './models';
+  import type { ProviderEditor } from './providerEditor.svelte';
 
-  let {
-    current,
-    modelSnapshot,
-    loading,
-    error,
-    reloadModels,
-    busy,
-    canManage,
-    run,
-    reloadVersion,
-    pageState = $bindable(),
-    onProviderChanged,
-    onError,
-    onConflict,
-    onNotice
-  }: {
-    current: Provider;
-    modelSnapshot: ProviderModelPage | undefined;
-    loading: boolean;
-    error: unknown;
-    reloadModels: () => Promise<void>;
-    busy: string;
-    canManage: boolean;
-    run: RunProviderAction;
-    reloadVersion: number;
-    pageState: CursorHistory;
-    onProviderChanged: () => Promise<void>;
-    onError: (message: string) => void;
-    onConflict: () => void;
-    onNotice: (message: string) => void;
-  } = $props();
-
-  const queryClient = useQueryClient();
+  let { current, editor }: { current: Provider; editor: ProviderEditor } =
+    $props();
+  const editorView = $derived(editor.view);
+  const busy = $derived(editorView.busy);
+  const canManage = $derived(editor.canManage);
+  const refreshPending = $derived(editorView.refreshPending);
+  const modelSnapshot = $derived(editor.snapshot.data);
+  const loading = $derived(editor.snapshot.isPending);
+  const error = $derived(editor.snapshot.error);
+  const reloadVersion = $derived(editorView.reloadVersion);
+  const pageState = $derived(editor.modelPageState);
   let manualModelNames = $state('');
   let certificationResults = $state<Record<string, CapabilityCertification>>(
     {}
   );
   let previousProviderEtag = $state('');
-  let refreshPending = $state(false);
-  let pendingResetPage = false;
-  const captureOwner = usePrincipalLifetime(() => {
-    refreshPending = false;
+  usePrincipalLifetime(() => {
     manualModelNames = '';
     certificationResults = {};
   });
@@ -105,7 +66,7 @@
   }));
   const visibleModelPage = $derived(modelSnapshot);
   $effect(() => {
-    if (isEtagMismatch(error)) onConflict();
+    if (isEtagMismatch(error)) editor.markConflict();
   });
 
   $effect(() => {
@@ -114,78 +75,18 @@
     certificationResults = {};
   });
 
-  async function refresh(resetToFirstPage: boolean) {
-    if (resetToFirstPage) resetCursor(pageState);
-    await onProviderChanged();
-  }
-
-  async function refreshConfirmedChange(isCurrent: () => boolean) {
-    if (!isCurrent()) return;
-    await refresh(pendingResetPage);
-    if (!isCurrent()) return;
-    await queryClient.invalidateQueries(
-      { queryKey: providerKeys.summaries },
-      { throwOnError: true }
-    );
-    if (isCurrent()) refreshPending = false;
-  }
-
-  async function observeChange(
-    isCurrent: () => boolean,
-    resetPage: boolean,
-    notice: string
-  ) {
-    if (!isCurrent()) return;
-    pendingResetPage = resetPage;
-    refreshPending = true;
-    onNotice(notice);
-    try {
-      await refreshConfirmedChange(isCurrent);
-    } catch (cause) {
-      if (!isCurrent()) return;
-      throw new Error('The model change succeeded, but refreshing failed.', {
-        cause
-      });
-    }
-  }
-
-  async function retryRefresh() {
-    await run('models-refresh', refreshConfirmedChange);
-  }
-
   async function discover() {
     if (!canManage || editingLocked || refreshPending) return;
-    await run('detail-discover', async (isCurrent) => {
-      const updated = await discoverProviderModels(current);
-      if (!isCurrent()) return;
-      certificationResults = {};
-      await observeChange(
-        isCurrent,
-        true,
-        `${updated.model_count} model${updated.model_count === 1 ? '' : 's'} discovered. Review capabilities before activation.`
-      );
-    });
+    if (await editor.discoverModels()) certificationResults = {};
   }
 
   async function declareModels() {
     if (!canManage || editingLocked || refreshPending) return;
-    const submittedModelNames = manualModelNames;
-    const names = parseManualModelNames(submittedModelNames);
-    if (!names.length) {
-      onError('Enter at least one upstream model identifier.');
-      return;
-    }
-    await run('detail-declare', async (isCurrent) => {
-      const updated = await declareProviderModels(current, names);
-      if (!isCurrent()) return;
-      if (manualModelNames === submittedModelNames) manualModelNames = '';
+    const submitted = manualModelNames;
+    if (await editor.declareModels(submitted)) {
+      if (manualModelNames === submitted) manualModelNames = '';
       certificationResults = {};
-      await observeChange(
-        isCurrent,
-        true,
-        `${updated.model_count} manually declared model${updated.model_count === 1 ? '' : 's'} ready for capability review.`
-      );
-    });
+    }
   }
 
   async function reviewModel(
@@ -194,47 +95,20 @@
     enabled: boolean,
     capabilities: CapabilityDeclaration[]
   ) {
-    if (refreshPending) return false;
-    const owned = captureOwner();
-    let confirmed = false;
-    await run(`model-${model.id}`, async (isCurrent) => {
-      await setProviderModel(provider, model.id, enabled, capabilities);
-      if (!isCurrent()) return;
-      confirmed = true;
-      certificationResults = {};
-      await observeChange(
-        isCurrent,
-        false,
-        'Capability review saved with declared provenance.'
-      );
-    });
-    return confirmed && owned();
+    const confirmed = await editor.reviewModel(
+      provider,
+      model.id,
+      enabled,
+      capabilities
+    );
+    if (confirmed) certificationResults = {};
+    return Boolean(confirmed);
   }
 
   async function certifyModel(provider: Provider, modelId: string) {
-    if (refreshPending) return;
-    await run(`certify-${modelId}`, async (isCurrent) => {
-      if (!certificationPrerequisiteReady(provider)) {
-        const { result: probe } = await probeProvider(provider);
-        if (!isCurrent()) return;
-        if (!probe.succeeded) throw new Error(probe.detail);
-        provider = {
-          ...provider,
-          last_probe_at: probe.checked_at,
-          last_probe_status: 'succeeded',
-          last_probe_detail: probe.detail
-        };
-      }
-      const { result } = await certifyProviderModel(provider, modelId);
-      if (!isCurrent()) return;
-
+    const result = await editor.certifyModel(provider, modelId);
+    if (result)
       certificationResults = { ...certificationResults, [modelId]: result };
-      await observeChange(
-        isCurrent,
-        false,
-        `${result.certified_count} of ${result.attempted_count} reviewed tuples passed server certification. Test the completed draft before activation.`
-      );
-    });
   }
 </script>
 
@@ -245,7 +119,7 @@
         type="button"
         class="button button-secondary"
         disabled={Boolean(busy)}
-        onclick={retryRefresh}>Retry refresh</button
+        onclick={editor.retryRefresh}>Retry refresh</button
       >
     </p>{/if}
   <div class="section-heading">
@@ -279,15 +153,7 @@
     </button>
   </div>
   {#if editingLocked}<p class="locked-note">{DISABLED_EDIT_NOTE}</p>{/if}
-  <CatalogSuggestions
-    {current}
-    {canManage}
-    locked={editingLocked}
-    {busy}
-    {run}
-    onProviderChanged={() => refresh(false)}
-    {onNotice}
-  />
+  <CatalogSuggestions {current} {editor} locked={editingLocked} />
   {#if canManage && !editingLocked && (declared || current.configuration.kind === 'openai_compatible')}<details
       class="manual-fallback"
       open={declared}
@@ -322,7 +188,7 @@ model-b"></textarea>
       <button
         class="button button-secondary"
         type="button"
-        onclick={() => reloadModels()}>Retry</button
+        onclick={() => editor.snapshot.refetch()}>Retry</button
       >
     </div>
   {/if}

@@ -8,6 +8,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 )
@@ -119,7 +121,7 @@ func (s *Server) recordProbe(r *http.Request, action, id string, at time.Time, s
 	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.providers SET last_probe_at=$2,last_probe_status=$3,last_probe_detail=$4 WHERE id=$1", id, at, probeStatus(succeeded), detail); err != nil {
+	if err := s.storeProbe(r.Context(), tx, id, at, succeeded, detail); err != nil {
 		return err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), action, "provider", id, auditOutcome(succeeded)); err != nil {
@@ -163,11 +165,7 @@ func (s *Server) discover(r *http.Request, p access.Principal) (access.Reply, er
 	if len(input.Models) > 2000 {
 		return access.Reply{}, access.Invalid("models", "Declare at most 2000 models per request.")
 	}
-	type declared struct {
-		upstream, display string
-		metadata          map[string]json.RawMessage
-	}
-	var models []declared
+	var models []discoveredModel
 	seen := map[string]bool{}
 	for _, m := range input.Models {
 		if err = ValidModelName("models.upstream_model", m.UpstreamModel); err != nil {
@@ -181,7 +179,7 @@ func (s *Server) discover(r *http.Request, p access.Principal) (access.Reply, er
 		}
 		if !seen[m.UpstreamModel] {
 			seen[m.UpstreamModel] = true
-			models = append(models, declared{m.UpstreamModel, m.DisplayName, nil})
+			models = append(models, discoveredModel{m.UpstreamModel, m.DisplayName, nil})
 		}
 	}
 	current, credential, err := s.prepare(r, p, id)
@@ -200,7 +198,7 @@ func (s *Server) discover(r *http.Request, p access.Principal) (access.Reply, er
 			return access.Reply{}, access.Fail(422, "discovery_failed", pe.Detail)
 		}
 		for _, name := range listed {
-			models = append(models, declared{name.Name, name.Display, name.Metadata})
+			models = append(models, discoveredModel{name.Name, name.Display, name.Metadata})
 		}
 	}
 	tx, p, err := a.BeginMutation(r)
@@ -218,22 +216,7 @@ func (s *Server) discover(r *http.Request, p access.Principal) (access.Reply, er
 	if locked.ETag != current.ETag {
 		return access.Reply{}, access.Fail(412, "etag_mismatch", "The connection changed during discovery; reload and retry.")
 	}
-	for _, m := range models {
-		mergeDiscoveredFacts(&locked.Configuration, m.upstream, m.metadata)
-		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities,discovered_at) VALUES($1,$2,$3,$4,false,'[]',$5) ON CONFLICT(provider_id,upstream_model) DO UPDATE SET display_name=excluded.display_name,discovered_at=excluded.discovered_at", access.NewID(), id, m.upstream, m.display, at); err != nil {
-			return access.Reply{}, err
-		}
-	}
-	config, _ := json.Marshal(locked.Configuration)
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.providers SET configuration=$2 WHERE id=$1", id, config); err != nil {
-		return access.Reply{}, err
-	}
-	if upstream {
-		if _, err = tx.Exec(r.Context(), "UPDATE olp.providers SET last_probe_at=$2,last_probe_status='succeeded',last_probe_detail=$3 WHERE id=$1", id, at, fmt.Sprintf("Discovered %d models.", len(models))); err != nil {
-			return access.Reply{}, err
-		}
-	}
-	if _, err = touch(r.Context(), tx, id); err != nil {
+	if err := s.storeDiscoveredModels(r.Context(), tx, locked, models, upstream, at); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.discover", "provider", id, "success"); err != nil {
@@ -363,37 +346,7 @@ func (s *Server) setModel(r *http.Request, _ access.Principal) (access.Reply, er
 	if err = access.Match(r, current.ETag); err != nil {
 		return access.Reply{}, err
 	}
-	m, err := loadModel(r.Context(), tx, id, modelID, true)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	capabilities := m.Capabilities
-	if input.Capabilities != nil {
-		requested, err := ValidCapabilities(*input.Capabilities)
-		if err != nil {
-			return access.Reply{}, err
-		}
-		existing := map[CapabilityInput]storedCapability{}
-		for _, c := range m.Capabilities {
-			existing[CapabilityInput{c.Operation, c.Surface, c.Mode}] = c
-		}
-		capabilities = make([]storedCapability, 0, len(requested))
-		for _, c := range requested {
-			if !configurationCertifiable(&current.Configuration, c) {
-				return access.Reply{}, access.Fail(422, "capability_unavailable", "This connector cannot certify the requested tuple.")
-			}
-			if kept, ok := existing[c]; ok {
-				capabilities = append(capabilities, kept)
-				continue
-			}
-			capabilities = append(capabilities, storedCapability{Operation: c.Operation, Surface: c.Surface, Mode: c.Mode, Source: "declared"})
-		}
-	}
-	encoded, _ := json.Marshal(capabilities)
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.provider_models SET enabled=$3,capabilities=$4 WHERE provider_id=$1 AND id=$2", id, modelID, input.Enabled, encoded); err != nil {
-		return access.Reply{}, err
-	}
-	if _, err = touch(r.Context(), tx, id); err != nil {
+	if err := s.setDraftModel(r.Context(), tx, current, modelID, input); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.model.update", "provider_model", modelID, "success"); err != nil {
@@ -485,25 +438,7 @@ func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, err
 	if locked.ETag != current.ETag {
 		return access.Reply{}, access.Fail(412, "etag_mismatch", "The connection changed during certification; reload and retry.")
 	}
-	encoded, _ := json.Marshal(m.Capabilities)
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.provider_models SET capabilities=$3 WHERE provider_id=$1 AND id=$2", id, modelID, encoded); err != nil {
-		return access.Reply{}, err
-	}
-	models, err := loadModels(r.Context(), tx, id, true)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if validatedAt := defaultSlot.certificationTime(&current.Configuration, models); validatedAt != nil {
-		fingerprint := defaultSlot.validationFingerprint(&current.Configuration, models)
-		if _, err = tx.Exec(r.Context(), "UPDATE olp.provider_slots SET validated_at=$2,validated_fingerprint=$3 WHERE id=$1", defaultSlot.ID, validatedAt, fingerprint); err != nil {
-			return access.Reply{}, err
-		}
-	}
-	detail := fmt.Sprintf("Certified %d of %d capabilities for %s.", certified, len(m.Capabilities), m.UpstreamModel)
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.providers SET last_probe_at=$2,last_probe_status=$3,last_probe_detail=$4 WHERE id=$1", id, at, probeStatus(certified > 0), detail); err != nil {
-		return access.Reply{}, err
-	}
-	etag, err := touch(r.Context(), tx, id)
+	etag, err := s.storeCertification(r.Context(), tx, current, m, defaultSlot, certified, at)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -516,4 +451,96 @@ func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, err
 		s.clearValidatedCooldowns(r.Context(), id, defaultSlot)
 	}
 	return reply, err
+}
+
+func (s *Catalogue) setDraftModel(ctx context.Context, tx pgx.Tx, current *record, modelID string, input setModelRequest) error {
+	m, err := loadModel(ctx, tx, current.ID, modelID, true)
+	if err != nil {
+		return err
+	}
+	capabilities := m.Capabilities
+	if input.Capabilities != nil {
+		requested, err := ValidCapabilities(*input.Capabilities)
+		if err != nil {
+			return err
+		}
+		existing := map[CapabilityInput]storedCapability{}
+		for _, c := range m.Capabilities {
+			existing[CapabilityInput{c.Operation, c.Surface, c.Mode}] = c
+		}
+		capabilities = make([]storedCapability, 0, len(requested))
+		for _, c := range requested {
+			if !configurationCertifiable(&current.Configuration, c) {
+				return access.Fail(422, "capability_unavailable", "This connector cannot certify the requested tuple.")
+			}
+			if kept, ok := existing[c]; ok {
+				capabilities = append(capabilities, kept)
+				continue
+			}
+			capabilities = append(capabilities, storedCapability{Operation: c.Operation, Surface: c.Surface, Mode: c.Mode, Source: "declared"})
+		}
+	}
+	encoded, _ := json.Marshal(capabilities)
+	if _, err = tx.Exec(ctx, "UPDATE olp.provider_models SET enabled=$3,capabilities=$4 WHERE provider_id=$1 AND id=$2", current.ID, modelID, input.Enabled, encoded); err != nil {
+		return err
+	}
+	if _, err = touch(ctx, tx, current.ID); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Catalogue) storeDiscoveredModels(ctx context.Context, tx pgx.Tx, current *record, models []discoveredModel, upstream bool, at time.Time) error {
+	var err error
+	for _, m := range models {
+		mergeDiscoveredFacts(&current.Configuration, m.Name, m.Metadata)
+		if _, err = tx.Exec(ctx, "INSERT INTO olp.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities,discovered_at) VALUES($1,$2,$3,$4,false,'[]',$5) ON CONFLICT(provider_id,upstream_model) DO UPDATE SET display_name=excluded.display_name,discovered_at=excluded.discovered_at", access.NewID(), current.ID, m.Name, m.Display, at); err != nil {
+			return err
+		}
+	}
+	config, _ := json.Marshal(current.Configuration)
+	if _, err = tx.Exec(ctx, "UPDATE olp.providers SET configuration=$2 WHERE id=$1", current.ID, config); err != nil {
+		return err
+	}
+	if upstream {
+		if _, err = tx.Exec(ctx, "UPDATE olp.providers SET last_probe_at=$2,last_probe_status='succeeded',last_probe_detail=$3 WHERE id=$1", current.ID, at, fmt.Sprintf("Discovered %d models.", len(models))); err != nil {
+			return err
+		}
+	}
+	if _, err = touch(ctx, tx, current.ID); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Catalogue) storeCertification(ctx context.Context, tx pgx.Tx, current *record, model *storedModel, defaultSlot slotRow, certified int, at time.Time) (string, error) {
+	var err error
+	encoded, _ := json.Marshal(model.Capabilities)
+	if _, err = tx.Exec(ctx, "UPDATE olp.provider_models SET capabilities=$3 WHERE provider_id=$1 AND id=$2", current.ID, model.ID, encoded); err != nil {
+		return "", err
+	}
+	models, err := loadModels(ctx, tx, current.ID, true)
+	if err != nil {
+		return "", err
+	}
+	if validatedAt := defaultSlot.certificationTime(&current.Configuration, models); validatedAt != nil {
+		fingerprint := defaultSlot.validationFingerprint(&current.Configuration, models)
+		if _, err = tx.Exec(ctx, "UPDATE olp.provider_slots SET validated_at=$2,validated_fingerprint=$3 WHERE id=$1", defaultSlot.ID, validatedAt, fingerprint); err != nil {
+			return "", err
+		}
+	}
+	detail := fmt.Sprintf("Certified %d of %d capabilities for %s.", certified, len(model.Capabilities), model.UpstreamModel)
+	if _, err = tx.Exec(ctx, "UPDATE olp.providers SET last_probe_at=$2,last_probe_status=$3,last_probe_detail=$4 WHERE id=$1", current.ID, at, probeStatus(certified > 0), detail); err != nil {
+		return "", err
+	}
+	etag, err := touch(ctx, tx, current.ID)
+	if err != nil {
+		return "", err
+	}
+	return etag, nil
+}
+
+func (s *Catalogue) storeProbe(ctx context.Context, tx pgx.Tx, id string, at time.Time, succeeded bool, detail string) error {
+	_, err := tx.Exec(ctx, "UPDATE olp.providers SET last_probe_at=$2,last_probe_status=$3,last_probe_detail=$4 WHERE id=$1", id, at, probeStatus(succeeded), detail)
+	return err
 }

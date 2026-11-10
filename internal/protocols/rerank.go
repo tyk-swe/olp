@@ -26,7 +26,7 @@ func rerankDocuments(r *wire.Request) int {
 	if r == nil {
 		return -1
 	}
-	return len(arr(r.Field("documents")))
+	return len(rerankDocumentTexts(r))
 }
 
 // rerankDocumentTexts returns the request's documents, which the OpenAI rerank
@@ -34,6 +34,18 @@ func rerankDocuments(r *wire.Request) int {
 func rerankDocumentTexts(r *wire.Request) []string {
 	if r == nil {
 		return nil
+	}
+	if r.Family == wire.BedrockRerank {
+		sources, _ := r.OIF().Document().Lookup("/sources")
+		documents := make([]string, 0, len(sources.Elements()))
+		for _, source := range sources.Elements() {
+			inline, _ := source.Lookup("inlineDocumentSource")
+			document, _ := inline.Lookup("textDocument")
+			text, _ := document.Lookup("text")
+			value, _ := text.Text()
+			documents = append(documents, value)
+		}
+		return documents
 	}
 	var texts []string
 	if json.Unmarshal(r.Field("documents"), &texts) != nil {

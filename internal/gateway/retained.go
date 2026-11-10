@@ -33,11 +33,11 @@ func (s *Server) authorizeListedResource(ctx context.Context, authority keyautho
 	if res.Kind == resources.KindFile {
 		operation = retainedFileOperation(res)
 	}
-	_, route, _, err := s.deps.Resolver.ResolveCurrent(ctx, res, operation)
+	resolved, err := s.deps.Resolver.ResolveCurrent(ctx, res, operation)
 	if err != nil {
 		return pinUnavailable()
 	}
-	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
+	if !authority.Allows("inference", resolved.Route.Slug, resolved.Route.ProjectID, s.now()) {
 		return notFoundError("not_found", "No "+res.Kind+" with this identifier exists for this key.")
 	}
 	return nil
@@ -129,13 +129,14 @@ func (s *Server) resolveResource(ctx context.Context, x *call, authority keyauth
 	if s.deps.Resolver == nil || s.deps.Resources == nil {
 		return nil, nil, serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Provider state is not configured on this installation.")
 	}
-	provider, route, slot, err := s.deps.Resolver.ResolveCurrent(ctx, res, operation)
+	resolved, err := s.deps.Resolver.ResolveCurrent(ctx, res, operation)
 	if errors.Is(err, resources.ErrUnavailable) || errors.Is(err, resources.ErrNoRows) {
 		return nil, nil, pinUnavailable()
 	}
 	if err != nil {
 		return nil, nil, serverError(http.StatusInternalServerError, "internal_error", "The stored target could not be rebuilt.")
 	}
+	provider, route, slot := &resolved.Invocation.Provider, &resolved.Route, &resolved.Invocation.Slot
 	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
 		return nil, nil, notFoundError("not_found", "No "+res.Kind+" with this identifier exists for this key.")
 	}
@@ -155,17 +156,8 @@ func (s *Server) resolveResource(ctx context.Context, x *call, authority keyauth
 	if e := x.checkBody(route); e != nil {
 		return nil, nil, e
 	}
-	var target *routing.Target
-	for i := range route.Targets {
-		if res.TargetID == "" || route.Targets[i].ID != res.TargetID || route.Targets[i].ProviderID != provider.ID || route.Targets[i].ProviderModel != resourceModel(res) {
-			continue
-		}
-		if target != nil {
-			return nil, nil, pinUnavailable()
-		}
-		target = &route.Targets[i]
-	}
-	if target == nil {
+	target := &resolved.Target
+	if target.ProviderModel != resourceModel(res) {
 		return nil, nil, pinUnavailable()
 	}
 	if use == retainedNewWork {

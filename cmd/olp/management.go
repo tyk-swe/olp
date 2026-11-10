@@ -51,7 +51,6 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retrieval"
 	"github.com/tyk-swe/olp/internal/routes"
-	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/settings"
 	"github.com/tyk-swe/olp/internal/signing"
 	"github.com/tyk-swe/olp/internal/sinks"
@@ -62,6 +61,9 @@ import (
 // and integration tests mount it the same way, so neither can drift from the
 // routes the contract declares.
 type Management struct {
+	AgentTasks     *tasks.Store
+	AgentPeers     *a2a.Peers
+	AgentGrants    *personal.Store
 	IdentityClient *http.Client
 	Getenv         func(string) string
 	Access         *access.Server
@@ -107,13 +109,8 @@ func (m Management) Register(mux *http.ServeMux) {
 		return m.Gateway.EvaluateGuardrails(r, p, pinned, in)
 	}).Register(mux)
 	attachment.NewAPI(m.Access, publishGuardrails).Register(mux)
-	agentTasks := tasks.New(m.Access.Pool, tasks.Limits{}, m.Access.Auth)
-	agentGrants := personal.NewStore(m.Access.Pool, m.Access.Installation, m.Access.Auth, m.Access.Keys, m.Egress)
-	agentPeers := a2a.NewPeers(m.Egress, func(ctx context.Context, id string) ([]byte, error) {
-		return m.Access.Keys.Read(ctx, m.Access.Pool, m.Access.Installation, id, secrets.AgentCredential)
-	})
-	a2a.NewManagement(m.Access, agentTasks, agents.NewTaskOperations(agentTasks, agentPeers, agentGrants)).Register(mux)
-	publications.New(m.Access, m.Egress, agentPeers.ValidateCard).Register(mux)
+	a2a.NewManagement(m.Access, m.AgentTasks, agents.NewTaskOperations(m.AgentTasks, m.AgentPeers, m.AgentGrants)).Register(mux)
+	publications.New(m.Access, m.Egress, m.AgentPeers.ValidateCard).Register(mux)
 	runs.NewManagement(m.Access).Register(mux)
 	tasks.NewManagement(m.Access).Register(mux)
 	investigations.NewManagement(m.Access).Register(mux)
@@ -123,15 +120,6 @@ func (m Management) Register(mux *http.ServeMux) {
 	(&retrieval.Server{Access: m.Access}).Register(mux)
 	(&sinks.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
 	(&modelcatalog.Server{Access: m.Access, Runtime: m.Runtime, Gateway: m.Gateway, Origin: m.Access.Origin}).Register(mux)
-	catalogue := providers.New(m.Access, m.Egress, m.PluginHost, m.Getenv)
-	catalogue.Unconfined = m.Unconfined
-	catalogue.Log = m.Log
-	catalogue.Plugins = m.PluginHost
-	catalogue.Catalog = m.Catalog
-	if m.Limits != nil {
-		catalogue.Quotas = m.Limits.Fleet
-	}
-	catalogue.Register(mux)
 	routeServer := routes.New(m.Access)
 	routeServer.WorkflowTools = func() mcp.WorkflowResolver {
 		if m.Gateway == nil {
@@ -153,7 +141,17 @@ func (m Management) Register(mux *http.ServeMux) {
 		routeServer.Supply = gateway.NewAdmission(m.Limits.Limiter, m.Limits.Fleet, nil, m.Log)
 		routeServer.Fleet = m.Limits.Fleet
 	}
-	catalogue.Activated = routeServer.Activated
+	catalogue := providers.NewCatalogue(m.Access, m.Egress, m.PluginHost, m.Getenv, providers.CatalogueOptions{
+		Unconfined: m.Unconfined, Log: m.Log, Plugins: m.PluginHost, Catalog: m.Catalog,
+		Activated: routeServer.Activated,
+		Quotas: func() providers.QuotaSource {
+			if m.Limits == nil {
+				return nil
+			}
+			return m.Limits.Fleet
+		}(),
+	})
+	providers.New(catalogue).Register(mux)
 	routeServer.Register(mux)
 	(&gateway.Playground{Access: m.Access, Gateway: m.Gateway}).Register(mux)
 	(&jobs.API{Access: m.Access, Jobs: m.Media, Spool: m.Spool, Log: m.Log}).Register(mux)

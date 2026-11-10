@@ -2,6 +2,7 @@ package protocols
 
 import (
 	"encoding/json"
+	"github.com/tyk-swe/olp/internal/oif"
 	"strings"
 	"testing"
 
@@ -147,5 +148,41 @@ func TestEmbeddingDecodePreservesInputCorrespondence(t *testing.T) {
 		if c, err := Decode(wire.Embeddings, wire.Embeddings, []byte(body), "route", "float"); err == nil {
 			t.Fatalf("null coordinate accepted %s", c.Body)
 		}
+	}
+}
+
+func TestPreparedResponseUsesDispatchedInputsAndCallerProjection(t *testing.T) {
+	caller := parseEmbeddings(t, `{"model":"route","input":["before","before","before"]}`)
+	nativeDocument, err := oif.ParseJSON([]byte(`{"requests":[{"content":{"parts":[{"text":"first"}]}},{"content":{"parts":[{"text":"second"}]}}]}`), oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	native, err := wire.NewRequest(wire.GeminiEmbeddingsBatch, "route", false, nativeDocument)
+	if err != nil {
+		t.Fatal(err)
+	}
+	codec := PrepareResponse(native, caller, "route", "float")
+	if _, err := codec.Project([]byte(`{"embeddings":[{"values":[1]},{"values":[2]}]}`)); err != nil {
+		t.Fatalf("rejected vectors matching dispatched inputs: %v", err)
+	}
+	if _, err := codec.Project([]byte(`{"embeddings":[{"values":[1]},{"values":[2]},{"values":[3]}]}`)); err == nil {
+		t.Fatal("accepted vectors matching stale caller inputs")
+	}
+	rerankCaller := parseRerank(t, `{"model":"route","query":"q","documents":["original"],"return_documents":true}`)
+	rerankDocument, err := oif.ParseJSON([]byte(`{"query":"q","documents":["filtered"]}`), oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rerankNative, err := wire.NewRequest(wire.Rerank, "route", false, rerankDocument)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rerankCodec := PrepareResponse(rerankNative, rerankCaller, "route", "")
+	projected, err := rerankCodec.Project([]byte(`{"results":[{"index":0,"relevance_score":0.5}]}`))
+	if err != nil || !strings.Contains(string(projected.Body), `"document":"filtered"`) {
+		t.Fatalf("caller projection lost dispatched document: %+v %v", projected, err)
+	}
+	if _, err := rerankCodec.Project([]byte(`{"results":[{"index":0,"relevance_score":0.5,"document":"original"}]}`)); err == nil {
+		t.Fatal("accepted an echoed document absent from dispatched inputs")
 	}
 }

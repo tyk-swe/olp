@@ -42,3 +42,7 @@ func (p PreparedConfiguration) Configuration() Configuration {
 func (p PreparedConfiguration) WithNetworkCredential(credentialID string) PreparedConfiguration {
 	return PreparedConfiguration{configuration: p.configuration.WithNetworkCredential(credentialID)}
 }
+
+func (s *Catalogue) PrepareConfiguration(ctx context.Context, q access.Queryer, input Configuration) (PreparedConfiguration, error) {
+	return PrepareConfiguration(ctx, q, s.Unconfined, s.Egress, input)
+}

@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -168,6 +167,7 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 
 	var route *routing.Route
 	var resource *resources.Resource
+	var lifecycle *resources.Lifecycle
 	var err *Error
 
 	if e.Action == "create" {
@@ -310,13 +310,12 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 			candidateRes.ParentID = &parent.UUID
 			candidateRes.RouteRevisionID = parent.RouteRevisionID
 		}
-		var fresh bool
 		var prepareErr error
 		if err := s.prepareRetainedAccounting(x, p, route, candidateRes, e, source); err != nil {
 			fail(err)
 			return
 		}
-		resource, fresh, prepareErr = s.deps.Resources.PrepareLifecycle(ctx, candidateRes, e.Operation, idempotency, digest)
+		lifecycle, prepareErr = s.deps.Resources.BeginCreate(ctx, candidateRes, resources.Submission{Operation: e.Operation, Key: idempotency, Digest: digest})
 		if errors.Is(prepareErr, resources.ErrSubmissionConflict) {
 			fail(serverError(409, "idempotency_conflict", "This submission identity is already bound to another request."))
 			return
@@ -325,8 +324,9 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 			fail(serverError(503, "provider_state_unavailable", "The submission could not be persisted."))
 			return
 		}
+		resource = lifecycle.Resource()
 		w.Header().Set("X-OLP-Resource-ID", resource.ID)
-		if !fresh {
+		if lifecycle.Existing() {
 			fail(serverError(409, "submission_exists", "This submission already exists; inspect X-OLP-Resource-ID instead of recreating it."))
 			return
 		}
@@ -335,16 +335,16 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 			fail(invalidRequest("invalid_request", "The resource correlation metadata could not be bound.", nil))
 			return
 		}
-		if prepareErr = s.deps.Resources.DispatchLifecycle(ctx, resource.UUID); prepareErr != nil {
+		if prepareErr = lifecycle.Dispatch(ctx); prepareErr != nil {
 			fail(serverError(503, "provider_state_unavailable", "The submission could not be fenced."))
 			return
 		}
 		defer func() {
 			commitCtx, cancel := resourceCommitContext(r.Context())
 			defer cancel()
-			_ = s.deps.Resources.UnknownLifecycle(commitCtx, resource.UUID)
+			_ = lifecycle.Close(commitCtx)
 		}()
-		status = s.retainedDispatch(w, r.WithContext(ctx), x, p, e, resource, endpoint, body, contentType, true, fail)
+		status = s.retainedDispatch(w, r.WithContext(ctx), x, p, e, resource, endpoint, body, contentType, lifecycle, fail)
 		return
 	}
 
@@ -357,11 +357,12 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 		resource = parent
 	} else {
 		var getErr error
-		resource, getErr = s.deps.Resources.Get(r.Context(), e.Kind, x.keyID, r.PathValue("id"))
+		lifecycle, getErr = s.deps.Resources.OpenOwned(r.Context(), e.Kind, x.keyID, r.PathValue("id"))
 		if getErr != nil {
 			fail(notFoundError("not_found", "No resource with this identifier exists for this key."))
 			return
 		}
+		resource = lifecycle.Resource()
 		if parent != nil && (resource.ParentID == nil || *resource.ParentID != parent.UUID) {
 			fail(notFoundError("not_found", "No resource with this identifier exists for this key."))
 			return
@@ -448,19 +449,24 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 		fail(fenceErr)
 		return
 	}
-	defer mutation()
-	status = s.retainedDispatch(w, r.WithContext(ctx), x, p, e, resource, endpoint, body, contentType, false, fail)
+	defer func() {
+		commit, cancel := resourceCommitContext(ctx)
+		defer cancel()
+		_ = mutation.Close(commit)
+	}()
+	status = s.retainedDispatch(w, r.WithContext(ctx), x, p, e, resource, endpoint, body, contentType, mutation, fail)
 }
 
 // retainedDispatch performs the pinned call and projects identities.
-func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *call, p *pin, e retainedapi.Endpoint, resource *resources.Resource, endpoint string, body []byte, contentType string, isCreate bool, fail func(*Error)) int {
-	deletionKey := ""
-	if e.Action == "delete" && resource.Kind == "context_cache" {
-		deletionKey = uuid.Must(uuid.NewV7()).String()
-		digest := sha256.Sum256([]byte(resource.ID + ":delete:" + deletionKey))
-		if err := s.deps.Resources.PrepareRetainedDeletion(r.Context(), resource, deletionKey, digest[:]); err != nil {
+func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *call, p *pin, e retainedapi.Endpoint, resource *resources.Resource, endpoint string, body []byte, contentType string, lifecycle *resources.Lifecycle, fail func(*Error)) int {
+	isCreate := e.Action == "create"
+	deletion := e.Action == "delete" && resource.Kind == "context_cache"
+	if deletion {
+		deletionLifecycle, err := s.deps.Resources.BeginDeletion(r.Context(), resource)
+		lifecycle = deletionLifecycle
+		if err != nil {
 			commit, cancel := resourceCommitContext(r.Context())
-			_ = s.deps.Resources.RejectRetained(commit, resource, deletionKey, "context_cache:delete", false)
+			_ = lifecycle.Reject(commit)
 			cancel()
 			fail(serverError(503, "provider_state_unavailable", "The deletion intent could not be committed."))
 			return 503
@@ -468,18 +474,15 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *cal
 		defer func() {
 			commit, cancel := resourceCommitContext(r.Context())
 			defer cancel()
-			_ = s.deps.Resources.UnknownRetainedMutation(commit, resource.UUID, deletionKey, "context_cache:delete")
+			_ = lifecycle.Close(commit)
 		}()
 	}
+
 	native, failure := s.pinnedDo(r.Context(), x, p, e.Method, endpoint, body, contentType)
 	if failure != nil {
-		if resource != nil && (isCreate || deletionKey != "" || e.Metered && (e.Action == "update" || e.Action == "patch")) && retainedRejectedWithoutWork(failure) {
+		if resource != nil && (isCreate || deletion || e.Metered && (e.Action == "update" || e.Action == "patch")) && retainedRejectedWithoutWork(failure) {
 			commit, cancel := resourceCommitContext(r.Context())
-			key := r.Header.Get("Idempotency-Key")
-			if deletionKey != "" {
-				key = deletionKey
-			}
-			rejectErr := s.deps.Resources.RejectRetained(commit, resource, key, e.Operation+":"+e.Action, isCreate)
+			rejectErr := lifecycle.Reject(commit)
 			cancel()
 			if rejectErr != nil {
 				fail(serverError(503, "provider_state_unavailable", "Provider rejection could not be committed."))
@@ -511,8 +514,8 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *cal
 			fail(serverError(503, "provider_state_unavailable", "Deletion was accepted but its local record could not be updated."))
 			return 503
 		}
-		if deletionKey != "" {
-			if err := s.deps.Resources.AcceptRetainedMutation(commitCtx, resource.UUID, deletionKey, "context_cache:delete"); err != nil {
+		if deletion {
+			if err := lifecycle.AcceptMutation(commitCtx); err != nil {
 				fail(serverError(503, "provider_state_unavailable", "The accepted deletion could not be committed."))
 				return 503
 			}
@@ -574,27 +577,18 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *cal
 			fail(serverError(502, "provider_protocol_error", "The provider response omitted a valid resource identity."))
 			return 502
 		}
-		resource.State = "active"
-		var children []*resources.Resource
-		if len(ids) == 0 {
-			resource.UpstreamID, resource.State = "empty:"+resource.UUID.String(), resources.StateDeleted
-		} else {
-			resource.UpstreamID = ids[0]
-			for _, id := range ids[1:] {
-				child := *resource
-				child.UUID, child.ID, child.UpstreamID = [16]byte{}, "", id
-				child.SubmissionID = nil
-				children = append(children, &child)
-			}
-		}
-		if err := resources.EnrichRetained(resource, e, parsed, s.now()); err != nil {
+		accepted, putErr := lifecycle.AcceptCreated(commitCtx, resources.CreationResult{
+			IDs: ids, Observation: &resources.CreationObservation{Endpoint: e, Document: parsed, At: s.now()},
+		})
+		if errors.Is(putErr, resources.ErrRetainedMetadata) {
 			fail(serverError(502, "provider_protocol_error", "The provider returned invalid resource billing metadata."))
 			return 502
 		}
-		if putErr := s.deps.Resources.CompleteLifecycleChildren(commitCtx, resource, children); putErr != nil {
+		if putErr != nil {
 			fail(serverError(503, "provider_state_unavailable", "The provider accepted creation but its resource identities could not be committed."))
 			return 503
 		}
+		resource = accepted
 	}
 	if err := s.retainedNativeResult(commitCtx, resource, e, parsed, true); err != nil {
 		fail(serverError(503, "provider_state_unavailable", "Resource billing metadata could not be committed."))
@@ -610,7 +604,7 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *cal
 		return 503
 	}
 	if e.Metered && (e.Action == "update" || e.Action == "patch") {
-		if err := s.deps.Resources.AcceptRetainedMutation(commitCtx, resource.UUID, r.Header.Get("Idempotency-Key"), e.Operation+":"+e.Action); err != nil {
+		if err := lifecycle.AcceptMutation(commitCtx); err != nil {
 			fail(serverError(503, "provider_state_unavailable", "The accepted mutation could not be committed."))
 			return 503
 		}

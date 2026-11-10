@@ -6,7 +6,7 @@ import (
 	"net/http"
 )
 
-func (s *Server) certifyRetrieval(ctx context.Context, cfg *Configuration, credential []byte, model string) error {
+func (s *Catalogue) certifyRetrieval(ctx context.Context, cfg *Configuration, credential []byte, model string) error {
 	endpoint, err := cfg.transport().RetrievalProbeURL(cfg.transport().Model(model))
 	if err != nil {
 		return &probeError{Code: "capability_unavailable", Detail: "This binding cannot establish a cost-free native resource metadata probe."}

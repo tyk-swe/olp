@@ -6,9 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"mime"
 	"net/http"
-	"net/http/httptrace"
 	"strconv"
 	"time"
 
@@ -20,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/upstream"
@@ -60,14 +59,6 @@ const (
 	maxStreamDuration = time.Hour
 	errorBodyLimit    = 64 * 1024
 )
-
-// applyCredentials authenticates an upstream request and records the credential
-// values that must be redacted from provider errors.
-func (s *Server) applyCredentials(ctx context.Context, x *call, req *http.Request, cfg connectors.Config, secret, body []byte) error {
-	applied, err := s.auth.Apply(ctx, req, cfg, secret, body)
-	x.sensitive.Include(applied)
-	return err
-}
 
 // redacted removes this execution's applied credentials from every field of a
 // provider error before it can reach a client, a log, or accounting.
@@ -475,8 +466,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 		return fact, nil, f
 	}
 
-	_, err := s.egress.ValidateEndpoint(provider.Endpoint)
-	if err != nil {
+	if err := s.bindExchange(x, provider, slot, a.UpstreamModel, cfg, st).validateBaseEndpoint(provider.Endpoint); err != nil {
 		return fail(classConnect, nil)
 	}
 	prepared, err := x.generationRequest(provider, a.TargetID, a.UpstreamModel)
@@ -489,10 +479,13 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 	}
 	cfg = prepared.config
 	body := cfg.WrapRequest(prepared.document.Bytes(), a.UpstreamModel)
-	encodedWire, streamCandidates, contract := prepared.wire, prepared.candidates, prepared.plan
-	// A profile that forces streaming streams every request, and the gateway
-	// aggregates the stream for a caller that did not ask for one.
-	aggregated := !x.generation.parsed.Stream && cfg.ForcesStreaming()
+	encodedWire, contract := prepared.wire, prepared.plan
+	responseReader := providerinvoke.NewResponseReader(cfg, encodedWire, x.generation.parsed.Stream, int(s.cfg.MaxEventBytes), s.cfg.MaxResponseBytes)
+	responseRequest, err := wire.NewRequest(encodedWire, x.generation.parsed.Route, responseReader.Streaming(), prepared.document)
+	if err != nil {
+		return fail(classProtocol, nil)
+	}
+	responseCodec := protocols.PrepareResponse(responseRequest, x.generation.parsed, x.named().Slug, protocols.EmbeddingEncoding(x.generation.parsed, provider.ParameterDefaults))
 	deadline, _ := ctx.Deadline()
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
@@ -505,28 +498,24 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 	firstByte := time.AfterFunc(timeout, func() { st.reason.CompareAndSwap(0, 1); cancel() })
 	defer firstByte.Stop()
 
-	endpoint, err := cfg.URL(encodedWire, a.UpstreamModel, x.generation.parsed.Stream || aggregated)
+	endpoint, err := cfg.URL(encodedWire, a.UpstreamModel, responseReader.Streaming())
 	if err != nil {
 		return fail(classProtocol, nil)
 	}
-	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(actx, st.trace()), http.MethodPost, endpoint, bytes.NewReader(body))
+	exchange := s.bindExchange(x, provider, slot, a.UpstreamModel, cfg, st)
+	req, err := exchange.request(actx, http.MethodPost, endpoint, bytes.NewReader(body), make(http.Header))
 	if err != nil {
 		return fail(classConnect, nil)
 	}
 	atr.InjectUpstream(req.Header)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "olp/gateway")
-	req.Header.Set("Accept", "application/json")
-	if x.generation.parsed.Stream || aggregated {
-		req.Header.Set("Accept", "text/event-stream")
-		if encodedWire == "bedrock" || cfg.EventStream() {
-			req.Header.Set("Accept", "application/vnd.amazon.eventstream")
-		}
-	}
+	req.Header.Set("Accept", responseReader.Accept())
 	if contract == nil {
 		cfg = forwardAnthropicBeta(req.Header, x, encodedWire, cfg)
 	}
-	if err := s.applySlotCredential(actx, x, req, cfg, slot, body, provider, a.UpstreamModel); err != nil {
+	exchange.config = cfg
+	if err := exchange.authenticate(actx, req, body); err != nil {
 		switch {
 		case actx.Err() != nil:
 			return fail(st.classify(err, false), nil)
@@ -539,10 +528,8 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 		return fail(classCredential, nil)
 	}
 
-	var client *http.Client
-	if cfg.CarriedByPlugin() {
-		client = cfg.CarrierClient(s.cfg.Carrier, x.sensitive.Values())
-	} else if client, err = s.providerClient(actx, x.request.release, provider, slot); err != nil {
+	client, err := exchange.dispatchClient(actx)
+	if err != nil {
 		return fail(classCredential, nil)
 	}
 	if contract != nil && contract.ToolContinuation() {
@@ -559,13 +546,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 			return fail(classConnect, &attemptFailure{contractCode: e.Code, noRetry: true})
 		}
 	}
-	resp, err := client.Do(req)
-	if cfg.CarriedByPlugin() {
-		// The plugin reports whether it sent a request it failed; any other
-		// failure may have reached the upstream.
-		st.dispatched.Store(!errors.Is(err, connectors.ErrNotSent))
-		st.notSent.Store(errors.Is(err, connectors.ErrNotSent))
-	}
+	resp, err := exchange.do(client, req)
 	if err != nil {
 		return fail(st.classify(err, false), nil)
 	}
@@ -590,8 +571,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 	committed := false
 	actionable := false
 	if x.generation.parsed.Stream {
-		mediaType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-		if mediaType != "text/event-stream" && !((encodedWire == "bedrock" || cfg.EventStream()) && mediaType == "application/vnd.amazon.eventstream") {
+		if err := responseReader.ValidateStream(resp.Header); err != nil {
 			return fail(classProtocol, &attemptFailure{status: resp.StatusCode})
 		}
 		streamCap := time.AfterFunc(maxStreamDuration, func() { st.reason.CompareAndSwap(0, 3); cancel() })
@@ -711,7 +691,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 			var projection *interaction.ToolProjection
 			projection, err = contract.NewToolProjection(min(resources.MaxContinuationBytes, int(s.cfg.MaxResponseBytes)))
 			if err == nil {
-				completion, err = protocols.StreamWithEvents(encodedWire, encodedWire, cfg.StreamPayload(resp.Body, int(s.cfg.MaxEventBytes)), int(s.cfg.MaxEventBytes), x.named().Slug, true, func([]byte) error { return nil }, func(event oif.Event) error {
+				completion, err = responseCodec.StreamNative(responseReader.Stream(resp.Body), int(s.cfg.MaxEventBytes), func([]byte) error { return nil }, func(event oif.Event) error {
 					frames, e := projection.Observe(event)
 					if e != nil {
 						return e
@@ -752,7 +732,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 				}
 			}
 		} else {
-			completion, err = protocols.StreamWithEvents(encodedWire, x.family, cfg.StreamPayload(resp.Body, int(s.cfg.MaxEventBytes)), int(s.cfg.MaxEventBytes), x.named().Slug, x.generation.parsed.IncludeUsage, emit, observe, streamCandidates)
+			completion, err = responseCodec.Stream(responseReader.Stream(resp.Body), int(s.cfg.MaxEventBytes), emit, observe)
 		}
 		if guarded != nil {
 			if err == nil {
@@ -773,23 +753,23 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 			err = &wire.ProtocolError{Detail: "strict Responses stream ended incomplete"}
 		}
 	} else {
-		var raw []byte
-		if aggregated {
-			raw, err = s.aggregate(&fact, resp, cfg, encodedWire)
-		} else if raw, err = io.ReadAll(&countingReader{r: resp.Body, limit: s.cfg.MaxResponseBytes}); err == nil {
-			raw = cfg.UnwrapResponse(raw)
+		read, readErr := responseReader.Read(resp)
+		raw := read.Body
+		err = readErr
+		if responseReader.Aggregated() {
+			fact.observeUsage(read.Usage, read.UsageComplete)
 		}
 		if err == nil {
-			if contract != nil {
-				var native *wire.Completion
-				native, err = protocols.DecodeRequest(encodedWire, encodedWire, raw, x.named().Slug, "", contract.EffectiveRequest())
-				if native != nil {
-					if encodedWire == wire.Responses {
-						fact.observeUsage(native.Usage, native.UsageComplete)
-					} else {
-						fact.Usage = native.Usage
-					}
+			native, nativeErr := responseCodec.Native(raw)
+			if native != nil {
+				if encodedWire == wire.Responses {
+					fact.observeUsage(native.Usage, native.UsageComplete)
+				} else if !responseReader.Aggregated() {
+					fact.Usage = native.Usage
 				}
+			}
+			if contract != nil {
+				err = nativeErr
 				if err == nil {
 					st.settled = true
 					err = contract.ValidateResult(native.Native)
@@ -827,7 +807,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 				}
 			}
 			if err == nil && completion == nil {
-				completion, err = protocols.DecodeRequest(encodedWire, x.family, raw, x.named().Slug, protocols.EmbeddingEncoding(x.generation.parsed, provider.ParameterDefaults), x.generation.parsed)
+				completion, err = responseCodec.ProjectDecoded(raw, native)
 			}
 		}
 	}

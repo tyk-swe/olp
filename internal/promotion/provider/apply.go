@@ -41,7 +41,7 @@ func Applier(entries []Entry, bindings promotion.Bindings, deps Deps) promotion.
 }
 
 func (a applying) apply(ctx context.Context, tx pgx.Tx, entry Entry, existing destination, found bool, directory promotion.Directory) error {
-	prepared, err := providers.PrepareConfiguration(ctx, tx, a.deps.Unconfined, a.deps.Egress, entry.Configuration)
+	prepared, err := a.deps.Catalogue.PrepareConfiguration(ctx, tx, entry.Configuration)
 	if err != nil {
 		return err
 	}
@@ -64,7 +64,7 @@ func (a applying) create(ctx context.Context, tx pgx.Tx, entry Entry, prepared p
 	if err != nil {
 		return err
 	}
-	created, err := providers.CreateDraft(ctx, tx, providers.Draft{Name: entry.Name, ProjectID: projectID, Configuration: prepared, CreatedBy: a.createdBy})
+	created, err := a.deps.Catalogue.CreateDraft(ctx, tx, providers.Draft{Name: entry.Name, ProjectID: projectID, Configuration: prepared, CreatedBy: a.createdBy})
 	if err != nil {
 		return err
 	}
@@ -103,7 +103,7 @@ func (a applying) rebindSlot(ctx context.Context, tx pgx.Tx, entry Entry, slot S
 	if err != nil || fresh == nil {
 		return err
 	}
-	return providers.BindDraftCredential(ctx, tx, target.id, current.id, *fresh)
+	return a.deps.Catalogue.BindDraftCredential(ctx, tx, target.id, current.id, *fresh)
 }
 
 func (a applying) replace(ctx context.Context, tx pgx.Tx, entry Entry, prepared providers.PreparedConfiguration, target destination) error {
@@ -119,7 +119,7 @@ func (a applying) replace(ctx context.Context, tx pgx.Tx, entry Entry, prepared 
 	if err != nil {
 		return err
 	}
-	return providers.StageDraftInventory(ctx, tx, target.id, entry.Models, slots)
+	return a.deps.Catalogue.StageDraftInventory(ctx, tx, target.id, entry.Models, slots)
 }
 
 func (a applying) resolveSlot(ctx context.Context, tx pgx.Tx, entry Entry, slot Slot, target destination) (providers.DraftSlot, error) {

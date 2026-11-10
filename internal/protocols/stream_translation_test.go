@@ -440,3 +440,25 @@ func TestGeminiIncompleteFunctionArgumentsRemainRefused(t *testing.T) {
 		}
 	}
 }
+
+func TestPreparedStreamRequiresEveryDispatchedCandidate(t *testing.T) {
+	caller, err := Parse(wire.Chat, []byte(`{"model":"route","messages":[{"role":"user","content":"hello"}],"stream":true}`), "route")
+	if err != nil {
+		t.Fatal(err)
+	}
+	native, err := Parse(wire.Gemini, []byte(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}],"generationConfig":{"candidateCount":2}}`), "route")
+	if err != nil {
+		t.Fatal(err)
+	}
+	codec := PrepareResponse(native, caller, "route", "")
+	incomplete := `{"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"one"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":2,"totalTokenCount":3}}`
+	result, err := codec.Stream(strings.NewReader("data: "+incomplete+"\n\n"), 8192, func([]byte) error { return nil }, nil)
+	if err == nil || result == nil || result.Usage == nil || result.Usage.TotalTokens != 3 || result.UsageComplete {
+		t.Fatalf("incomplete candidate set lost accounting or completed: %+v %v", result, err)
+	}
+	complete := `{"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"one"}]},"finishReason":"STOP"},{"index":1,"content":{"role":"model","parts":[{"text":"two"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":2,"totalTokenCount":3}}`
+	result, err = codec.Stream(strings.NewReader("data: "+complete+"\n\n"), 8192, func([]byte) error { return nil }, nil)
+	if err != nil || result == nil || !result.UsageComplete {
+		t.Fatalf("complete dispatched candidate set refused: %+v %v", result, err)
+	}
+}

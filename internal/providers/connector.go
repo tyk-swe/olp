@@ -85,23 +85,23 @@ func classify(err error) *probeError {
 
 // call performs one bounded upstream request. The body is capped and never
 // retained beyond the caller's parsing.
-func (s *Server) call(ctx context.Context, cfg *Configuration, credential []byte, method, path string, body []byte) (int, []byte, error) {
+func (s *Catalogue) call(ctx context.Context, cfg *Configuration, credential []byte, method, path string, body []byte) (int, []byte, error) {
 	return s.callAs(ctx, cfg, credential, method, path, body, "application/json", "")
 }
 
 // callAs is call with a body of another content type, such as a form, signed
 // for another AWS service of the connector's cloud when signingService names
 // one.
-func (s *Server) callAs(ctx context.Context, cfg *Configuration, credential []byte, method, path string, body []byte, contentType, signingService string) (int, []byte, error) {
+func (s *Catalogue) callAs(ctx context.Context, cfg *Configuration, credential []byte, method, path string, body []byte, contentType, signingService string) (int, []byte, error) {
 	status, _, data, err := s.callAsWithHeaders(ctx, cfg, credential, method, path, body, contentType, signingService)
 	return status, data, err
 }
 
-func (s *Server) callWithHeaders(ctx context.Context, cfg *Configuration, credential []byte, method, path string, body []byte) (int, http.Header, []byte, error) {
+func (s *Catalogue) callWithHeaders(ctx context.Context, cfg *Configuration, credential []byte, method, path string, body []byte) (int, http.Header, []byte, error) {
 	return s.callAsWithHeaders(ctx, cfg, credential, method, path, body, "application/json", "")
 }
 
-func (s *Server) callAsWithHeaders(ctx context.Context, cfg *Configuration, credential []byte, method, path string, body []byte, contentType, signingService string) (int, http.Header, []byte, error) {
+func (s *Catalogue) callAsWithHeaders(ctx context.Context, cfg *Configuration, credential []byte, method, path string, body []byte, contentType, signingService string) (int, http.Header, []byte, error) {
 	base, err := s.Egress.ValidateEndpoint(providerconfig.Value(cfg.Endpoint))
 	if err != nil {
 		return 0, nil, nil, &probeError{Code: "invalid_endpoint", Detail: err.Error()}
@@ -206,7 +206,7 @@ func statusError(cfg *Configuration, status int, body []byte) *probeError {
 }
 
 // listModels asks the upstream for its model identifiers.
-func (s *Server) listModels(ctx context.Context, cfg *Configuration, credential []byte) ([]string, error) {
+func (s *Catalogue) listModels(ctx context.Context, cfg *Configuration, credential []byte) ([]string, error) {
 	models, err := s.listModelFacts(ctx, cfg, credential)
 	if err != nil {
 		return nil, err
@@ -289,7 +289,7 @@ func listingFor(cfg *Configuration) (modelListing, bool, error) {
 	return listing, true, nil
 }
 
-func (s *Server) listModelFacts(ctx context.Context, cfg *Configuration, credential []byte) ([]discoveredModel, error) {
+func (s *Catalogue) listModelFacts(ctx context.Context, cfg *Configuration, credential []byte) ([]discoveredModel, error) {
 	listing, discovery, err := listingFor(cfg)
 	if err != nil {
 		return nil, err
@@ -413,7 +413,7 @@ func (l modelListing) next(page map[string]json.RawMessage) (string, error) {
 }
 
 // certifyTuple uses a bounded live probe or authenticated native media discovery.
-func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credential []byte, model string, tuple CapabilityInput, maxEventBytes int) error {
+func (s *Catalogue) certifyTuple(ctx context.Context, cfg *Configuration, credential []byte, model string, tuple CapabilityInput, maxEventBytes int) error {
 	if !configurationCertifiable(cfg, tuple) || !cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode) {
 		return &probeError{Code: "capability_unavailable", Detail: "This connector cannot certify the requested tuple."}
 	}
@@ -556,7 +556,7 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 	return nil
 }
 
-func (s *Server) certifyBatch(ctx context.Context, cfg *Configuration, credential []byte) error {
+func (s *Catalogue) certifyBatch(ctx context.Context, cfg *Configuration, credential []byte) error {
 	if cfg.ProfileID == "vertex-batch-prediction" {
 		endpoint, err := cfg.transport().VertexBatchJobsURL("", "")
 		if err != nil {
@@ -655,7 +655,7 @@ func validBatchListing(data []byte, field string, optional bool) bool {
 	return json.Unmarshal(array, &items) == nil && items != nil
 }
 
-func (s *Server) certifyRealtime(ctx context.Context, cfg *Configuration, credential []byte, model string) error {
+func (s *Catalogue) certifyRealtime(ctx context.Context, cfg *Configuration, credential []byte, model string) error {
 	endpoint, err := cfg.transport().RealtimeURL(model)
 	if err != nil {
 		return &probeError{Code: "invalid_endpoint", Detail: "The selected profile cannot address this realtime model."}
@@ -663,7 +663,7 @@ func (s *Server) certifyRealtime(ctx context.Context, cfg *Configuration, creden
 	return s.certifyWebSocketDial(ctx, cfg, credential, endpoint, nil)
 }
 
-func (s *Server) certifyNativeDuplex(ctx context.Context, cfg *Configuration, credential []byte, model string) error {
+func (s *Catalogue) certifyNativeDuplex(ctx context.Context, cfg *Configuration, credential []byte, model string) error {
 	transport := cfg.transport()
 	template, err := duplexcontract.Compile(duplexcontract.Config{Provider: transport, Model: model})
 	if err != nil {
@@ -708,7 +708,7 @@ func (s *Server) certifyNativeDuplex(ctx context.Context, cfg *Configuration, cr
 	return &probeError{Code: "capability_unavailable", Detail: "The native duplex transport cannot be certified."}
 }
 
-func (s *Server) certifyWebSocketDial(ctx context.Context, cfg *Configuration, credential []byte, endpoint string, exchange func(context.Context, *websocket.Conn) error) error {
+func (s *Catalogue) certifyWebSocketDial(ctx context.Context, cfg *Configuration, credential []byte, endpoint string, exchange func(context.Context, *websocket.Conn) error) error {
 	transport := cfg.transport()
 	check := strings.Replace(endpoint, "wss://", "https://", 1)
 	check = strings.Replace(check, "ws://", "http://", 1)
@@ -812,7 +812,7 @@ const webrtcProbeSDP = "v=0\r\n" +
 	"a=mid:1\r\n" +
 	"a=sctp-port:5000\r\n"
 
-func (s *Server) certifyWebRTC(ctx context.Context, cfg *Configuration, credential []byte, model string) error {
+func (s *Catalogue) certifyWebRTC(ctx context.Context, cfg *Configuration, credential []byte, model string) error {
 	transport := cfg.transport()
 	endpoint, err := transport.RealtimeCallsURL(model)
 	if err != nil {
@@ -896,7 +896,7 @@ func (s *Server) certifyWebRTC(ctx context.Context, cfg *Configuration, credenti
 	return errors.Join(controlErr, hangupErr)
 }
 
-func (s *Server) certifyWebRTCControl(ctx context.Context, cfg *Configuration, credential []byte, model, callID string, client *http.Client) error {
+func (s *Catalogue) certifyWebRTCControl(ctx context.Context, cfg *Configuration, credential []byte, model, callID string, client *http.Client) error {
 	control, err := cfg.transport().RealtimeControlURL(model, callID)
 	if err != nil {
 		return &probeError{Code: "control_unavailable", Detail: "The provider returned no controllable session identity."}
@@ -919,7 +919,7 @@ func (s *Server) certifyWebRTCControl(ctx context.Context, cfg *Configuration, c
 	return nil
 }
 
-func (s *Server) hangupWebRTCProbe(ctx context.Context, cfg *Configuration, credential []byte, model, callID string, client *http.Client) error {
+func (s *Catalogue) hangupWebRTCProbe(ctx context.Context, cfg *Configuration, credential []byte, model, callID string, client *http.Client) error {
 	hangupURL, err := cfg.transport().RealtimeHangupURL(model, callID)
 	if err != nil {
 		return &probeError{Code: "control_unavailable", Detail: "The provider returned no controllable session identity."}
@@ -943,7 +943,7 @@ func (s *Server) hangupWebRTCProbe(ctx context.Context, cfg *Configuration, cred
 	return nil
 }
 
-func (s *Server) certifyBedrockIngress(ctx context.Context, cfg *Configuration, credential []byte, model string, tuple CapabilityInput, maxEventBytes int) error {
+func (s *Catalogue) certifyBedrockIngress(ctx context.Context, cfg *Configuration, credential []byte, model string, tuple CapabilityInput, maxEventBytes int) error {
 	upstream := cfg.transport().Model(model)
 	if upstream == "" {
 		upstream = model
@@ -987,7 +987,7 @@ func (s *Server) certifyBedrockIngress(ctx context.Context, cfg *Configuration, 
 	})
 }
 
-func (s *Server) bedrockProbe(ctx context.Context, cfg *Configuration, credential []byte, path string, body []byte, validate func([]byte) error) error {
+func (s *Catalogue) bedrockProbe(ctx context.Context, cfg *Configuration, credential []byte, path string, body []byte, validate func([]byte) error) error {
 	status, data, err := s.call(ctx, cfg, credential, http.MethodPost, path, body)
 	if err != nil {
 		return err
@@ -1050,7 +1050,7 @@ func readBedrockProbeStream(data []byte, limit int) error {
 }
 
 // credentialFor prefers the enabled default slot, then another enabled slot.
-func (s *Server) credentialFor(ctx context.Context, tx pgx.Tx, p *record) ([]byte, *credentialState, error) {
+func (s *Catalogue) credentialFor(ctx context.Context, tx pgx.Tx, p *record) ([]byte, *credentialState, error) {
 	slots, err := loadSlots(ctx, tx, p.ID)
 	if err != nil {
 		return nil, nil, err
@@ -1110,7 +1110,7 @@ func selectProbeSlot(slots []slotRow, cfg *Configuration) *slotRow {
 // unrelated chat success or a self-reported model list as media evidence.
 // Vertex, Bedrock and Azure offer no costless proof, so their media
 // certifies by the smallest real call of the operation.
-func (s *Server) certifyNativeMedia(ctx context.Context, cfg *Configuration, credential []byte, model string, tuple CapabilityInput) error {
+func (s *Catalogue) certifyNativeMedia(ctx context.Context, cfg *Configuration, credential []byte, model string, tuple CapabilityInput) error {
 	vendor := providerconfig.Value(cfg.Options.VendorID)
 	if mediaByCall(cfg.Kind, vendor, tuple.Operation) {
 		return s.certifyMediaCall(ctx, cfg, credential, model, tuple.Operation)
@@ -1129,7 +1129,7 @@ func (s *Server) certifyNativeMedia(ctx context.Context, cfg *Configuration, cre
 }
 
 // certifyListedModel proves the credential can discover the media model.
-func (s *Server) certifyListedModel(ctx context.Context, cfg *Configuration, credential []byte, model string) error {
+func (s *Catalogue) certifyListedModel(ctx context.Context, cfg *Configuration, credential []byte, model string) error {
 	models, err := s.listModels(ctx, cfg, credential)
 	if err != nil {
 		return err
@@ -1154,7 +1154,7 @@ func mediaByCall(kind, vendor, operation string) bool {
 	return op == media.OpImageGeneration || kind == KindAzure || vendors.MediaWire(vendor, operation) != ""
 }
 
-func (s *Server) certifyMediaCall(ctx context.Context, cfg *Configuration, credential []byte, model, operation string) error {
+func (s *Catalogue) certifyMediaCall(ctx context.Context, cfg *Configuration, credential []byte, model, operation string) error {
 	transport := cfg.transport()
 	if cfg.Kind == KindAzure && transport.Hosting() == "azure-v1" {
 		return &probeError{Code: "capability_unavailable", Detail: "Azure OpenAI serves media through deployments; its v1 API offers none."}
@@ -1282,7 +1282,7 @@ func decodeMediaProbe(response media.Response, data []byte) *media.Error {
 // the vendor's listing, or else the vendor's account probe, proves the
 // credential reaches it. Without a listing, the model is the operator's
 // declaration, as for any upstream that lists none.
-func (s *Server) certifyVendorMedia(ctx context.Context, cfg *Configuration, credential []byte, model, vendor string) error {
+func (s *Catalogue) certifyVendorMedia(ctx context.Context, cfg *Configuration, credential []byte, model, vendor string) error {
 	contract, _ := vendors.Lookup(vendor)
 	if contract.AccountProbe == "" {
 		return s.certifyListedModel(ctx, cfg, credential, model)

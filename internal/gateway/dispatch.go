@@ -2,9 +2,12 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -124,6 +127,117 @@ func (s *Server) settlePinHold(ctx context.Context, x *call, hold *dispatchHold,
 	s.health.releaseProbe(hold.provider)
 }
 
+type attemptCompletion struct {
+	fact        AttemptFact
+	failure     *attemptFailure
+	authority   *Error
+	attempt     routing.Attempt
+	estimate    int64
+	finishLease func() *Error
+}
+
+func (h *dispatchHold) begin(ctx context.Context, s *Server, x *call, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot) (bool, *Error) {
+	if !x.servingAllowed(provider, attempt.TargetID, attempt.UpstreamModel, slot, true) {
+		s.releaseHold(ctx, h)
+		return false, nil
+	}
+	if x.workflow == nil {
+		return true, nil
+	}
+	authority, err := s.workflowAuthority(ctx, x, x.route, "")
+	if err != nil {
+		s.releaseHold(ctx, h)
+		return false, err
+	}
+	x.sessionDebit = nil
+	caps := attemptCaps(x.route, provider, &slot)
+	if x.callerCostExempt() && provider.CredentialSource == "caller" {
+		caps = [3]cappedOwner{}
+	}
+	if err := s.reserveSessionDebit(ctx, x, *authority, attempt, caps[:]); err != nil {
+		s.releaseHold(ctx, h)
+		return false, err
+	}
+	return true, nil
+}
+
+func (h *dispatchHold) authorize(ctx context.Context, s *Server, x *call) (context.Context, func() *Error, *Error) {
+	if x.authority.TaskCapability != nil {
+		admitter, ok := s.deps.Runtime.(interface {
+			AdmitTaskCapabilityAttempt(context.Context, keyauthority.Authority, string, string, string, *string, string) error
+		})
+		var err error
+		if ok {
+			err = admitter.AdmitTaskCapabilityAttempt(ctx, x.authority, "inference", x.route.Slug, x.route.RevisionID, x.route.ProjectID, x.request.accountingID())
+		}
+		if !ok || err != nil {
+			if errors.Is(err, release.ErrTaskAttemptLimit) {
+				return ctx, nil, &Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "task_limit_exceeded", Message: "The task attempt limit was exceeded."}
+			}
+			return ctx, nil, permissionError("permission_denied", "The task capability is no longer authorized.")
+		}
+	}
+	if x.workflow == nil {
+		return ctx, func() *Error { return nil }, nil
+	}
+	dispatchCtx, finish := s.monitorWorkflowAuthority(ctx, x, "")
+	return dispatchCtx, finish, nil
+}
+
+func (h *dispatchHold) dispatchContext(ctx context.Context, s *Server, x *call) (context.Context, func() *Error) {
+	if x.workflow == nil {
+		return ctx, func() *Error { return nil }
+	}
+	return s.monitorWorkflowModelLease(ctx, x.sessionDebit)
+}
+
+func (h *dispatchHold) complete(ctx context.Context, s *Server, x *call, completion attemptCompletion) (*Error, bool) {
+	dispatched := completion.failure == nil || completion.failure.dispatched
+	x.dispatched = x.dispatched || dispatched
+	x.stepDispatched = x.stepDispatched || dispatched
+	h.settle(ctx, dispatched, settledAttemptTokens(&completion.fact, completion.estimate))
+	if dispatched {
+		x.spendCaps(h.budgets, completion.attempt)
+	}
+	x.facts = append(x.facts, completion.fact)
+	s.health.record(h.provider, completion.fact, h.probed)
+	h.probed = false
+	if x.workflow == nil {
+		return completion.authority, false
+	}
+	if completion.failure == nil {
+		settlementErr := s.settleWorkflowModelAttempt(ctx, x, completion.fact)
+		leaseErr := completion.finishLease()
+		if settlementErr != nil {
+			return settlementErr, false
+		}
+		if leaseErr != nil {
+			return leaseErr, false
+		}
+		return completion.authority, false
+	}
+	var releaseErr *Error
+	if completion.failure.dispatched {
+		s.markSessionUnknown(ctx, x)
+	} else {
+		releaseErr = s.abandonWorkflowDebit(ctx, x)
+	}
+	leaseErr := completion.finishLease()
+	if releaseErr != nil {
+		return releaseErr, false
+	}
+	if leaseErr != nil {
+		return leaseErr, false
+	}
+	if completion.authority != nil {
+		return completion.authority, false
+	}
+	if completion.failure.dispatched {
+		return completion.failure.toError(), completion.failure.class == classCancelled
+	}
+	return nil, false
+}
+
 // cooling reports whether a candidate slot is parked: the shared credential
 // or slot cooldown when distributed coordination is configured, or this
 // replica's local cooldown when it is not.
@@ -173,6 +287,10 @@ func (s *Server) gateSlot(ctx context.Context, provider *routing.Provider, slot 
 	if s.cooling(ctx, provider.ID, slot) {
 		return gateResult{verdict: gateSkip}
 	}
+	return acquireDispatchHold(ctx, s, provider, slot, estimate, ttl, priority)
+}
+
+func acquireDispatchHold(ctx context.Context, s *Server, provider *routing.Provider, slot *routing.Slot, estimate int64, ttl time.Duration, priority string) gateResult {
 	reservation, rejection, skip := s.deps.Admission.reserveTarget(ctx, provider, slot, estimate, ttl, priority)
 	if skip {
 		return gateResult{verdict: gateUnmeterable}

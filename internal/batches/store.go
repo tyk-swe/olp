@@ -196,7 +196,7 @@ func (s *Store) ActivateTx(ctx context.Context, tx pgx.Tx, resourceID uuid.UUID,
 	return nil
 }
 
-func (s *Store) Adopt(ctx context.Context, settlement Settlement, upstreamID string, expected *int64, put func(context.Context, pgx.Tx) error) error {
+func (s *Store) Adopt(ctx context.Context, settlement Settlement, recovery resources.BatchRecovery, expected *int64) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -214,17 +214,17 @@ func (s *Store) Adopt(ctx context.Context, settlement Settlement, upstreamID str
 	if err != nil {
 		return err
 	}
-	competing, err := competingSubmissionTx(ctx, tx, settlement, upstreamID)
+	competing, err := competingSubmissionTx(ctx, tx, settlement, recovery.UpstreamID())
 	if err != nil {
 		return err
 	}
 	if competing {
 		return ErrSubmissionAmbiguous
 	}
-	if err = put(ctx, tx); err != nil {
+	if err = recovery.Persist(ctx, tx); err != nil {
 		return err
 	}
-	if err = s.ActivateTx(ctx, tx, settlement.ResourceID, upstreamID, expected); err != nil {
+	if err = s.ActivateTx(ctx, tx, settlement.ResourceID, recovery.UpstreamID(), expected); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

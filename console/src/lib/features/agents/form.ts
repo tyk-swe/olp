@@ -199,9 +199,12 @@ export function publicationForm(
   };
 }
 export function publicationInput(kind: Kind, form: PublicationForm): Draft {
-  const d: Draft = { project_id: form.project, name: form.name.trim() };
+  const base = { project_id: form.project, name: form.name.trim() };
   if (kind === 'toolsets')
-    d.toolset = { tools: form.tools.map((tool) => ({ ...tool })) };
+    return {
+      ...base,
+      toolset: { tools: form.tools.map((tool) => ({ ...tool })) }
+    };
   if (kind === 'prompts') {
     const names = resourceIDs(form.variables);
     const defaults = {
@@ -213,7 +216,7 @@ export function publicationInput(kind: Kind, form: PublicationForm): Draft {
         ? { max_output_tokens: Number(form.maxOutputTokens) }
         : {})
     };
-    d.prompt =
+    const prompt: NonNullable<Draft['prompt']> =
       form.promptMode === 'messages'
         ? {
             messages: form.messages.map((message) => ({ ...message })),
@@ -236,9 +239,11 @@ export function publicationInput(kind: Kind, form: PublicationForm): Draft {
               ? { default_parameters: defaults }
               : {})
           };
+    return { ...base, prompt };
   }
-  if (kind === 'agents')
-    d.agent = {
+  return {
+    ...base,
+    agent: {
       protocol: form.protocol,
       endpoint: form.endpoint.trim(),
       card_digest: form.cardDigest.trim(),
@@ -284,9 +289,92 @@ export function publicationInput(kind: Kind, form: PublicationForm): Draft {
         : {}),
       toolset_revisions: resourceIDs(form.toolsetRevisions),
       route_revisions: resourceIDs(form.routeRevisions)
-    };
-  return d;
+    }
+  };
 }
+export type PublicationIdentity = Pick<Publication, 'id' | 'etag'>;
+export type PublicationAction =
+  'save' | 'publish' | 'retire' | 'production' | 'staging';
+export type PublicationCommand =
+  | { action: 'create'; kind: Kind; input: Draft }
+  | {
+      action: 'update';
+      kind: Kind;
+      observed: PublicationIdentity;
+      input: Draft;
+    }
+  | { action: 'publish' | 'retire'; kind: Kind; observed: PublicationIdentity }
+  | {
+      action: 'label';
+      observed: PublicationIdentity;
+      label: 'production' | 'staging';
+      revision: string;
+    };
+export type PublicationCommandResult =
+  { ok: true; command: PublicationCommand } | { ok: false; message: string };
+
+type PublicationEdits = {
+  kind: Kind;
+  current: Publication | null;
+  action: PublicationAction;
+  form: PublicationForm;
+  credential: string;
+  entraClientSecret: string;
+  removeCredential: boolean;
+  revision: string;
+};
+
+export function publicationCommand(
+  edits: PublicationEdits
+): PublicationCommandResult {
+  const { kind, current, action, form } = edits;
+  if (action === 'save') {
+    const draft = publicationInput(kind, form);
+    const input: Draft =
+      kind !== 'agents'
+        ? draft
+        : {
+            ...draft,
+            ...(form.oauthEnabled || edits.removeCredential
+              ? { credential: null }
+              : edits.credential
+                ? { credential: edits.credential }
+                : {}),
+            ...(form.oauthEnabled && form.oauthEntra && edits.entraClientSecret
+              ? { entra_client_secret: edits.entraClientSecret }
+              : {})
+          };
+    return {
+      ok: true,
+      command: current
+        ? {
+            action: 'update',
+            kind,
+            observed: { id: current.id, etag: current.etag },
+            input
+          }
+        : { action: 'create', kind, input }
+    };
+  }
+  if (!current) return { ok: false, message: 'Save the draft first.' };
+  const observed = { id: current.id, etag: current.etag };
+  if (action === 'publish' || action === 'retire')
+    return { ok: true, command: { action, kind, observed } };
+  if (kind !== 'prompts')
+    return { ok: false, message: 'Only prompts have publication labels.' };
+  if (!edits.revision)
+    return { ok: false, message: 'Choose a revision first.' };
+  return {
+    ok: true,
+    command: {
+      action: 'label',
+      observed,
+      label: action,
+      revision: edits.revision
+    }
+  };
+}
+
 export type ToolPinResult =
   { ok: true; pin: ToolPin } | { ok: false; message: string };
 export async function toolPin(

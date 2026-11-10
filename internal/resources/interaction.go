@@ -141,17 +141,15 @@ func (s *Store) ObserveInteraction(ctx context.Context, owner, localID, status s
 	} else if geminilifecycle.InteractionTurnFinished(current) {
 		status = current
 	} else if evidence.Observed && len(pending) != 0 && string(pending) != "null" {
-		event, decodeErr := decodePendingUsage(pending)
+		generation, decodeErr := usage.DecodePendingGeneration(pending)
 		if decodeErr != nil {
 			return usage.Persisted{}, decodeErr
 		}
-		if len(event.Attempts) == 0 {
-			return usage.Persisted{}, ErrContract
+		observed, observeErr := generation.Observe(evidence, usage.GenerationPending)
+		if observeErr != nil {
+			return usage.Persisted{}, observeErr
 		}
-		if err := observePendingUsage(event, evidence, false); err != nil {
-			return usage.Persisted{}, err
-		}
-		encoded, encodeErr := usage.Encode(event)
+		encoded, encodeErr := observed.Encode()
 		if encodeErr != nil {
 			return usage.Persisted{}, encodeErr
 		}

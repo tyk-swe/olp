@@ -2,12 +2,10 @@ package provider
 
 import (
 	"cmp"
-	"context"
 	"slices"
 	"strconv"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/management/contract"
@@ -15,7 +13,6 @@ import (
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/secrets"
-	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
 const (
@@ -29,15 +26,7 @@ type Deps struct {
 	Unconfined   *plugins.Unconfined
 	Keys         *secrets.KeyRing
 	Installation string
-	Catalogue    Catalogue
-}
-
-type Catalogue interface {
-	StoreCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, int, error)
-	StoreNetworkCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error)
-	CredentialEquals(ctx context.Context, q access.Queryer, credentialID, secret string) (bool, error)
-	StoreExternalCredential(ctx context.Context, tx pgx.Tx, providerID string, reference secretstore.Reference) (string, int, error)
-	ExternalCredentialEquals(ctx context.Context, q access.Queryer, credentialID string, reference secretstore.Reference) (bool, error)
+	Catalogue    *providers.Catalogue
 }
 
 type Entry struct {

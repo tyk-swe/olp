@@ -18,12 +18,9 @@
     listProjects,
     listPublications,
     listServers,
-    publish,
-    retire,
-    savePublication,
+    executePublication,
     saveServer,
-    setLabel,
-    type Draft,
+    type PublicationReceipt,
     type Kind,
     type MCPServer,
     type Publication,
@@ -31,11 +28,13 @@
   } from './api';
   import { agentKeys } from './agentKeys';
   import {
+    publicationCommand,
     publicationForm,
     publicationInput,
     serverPricingForm,
     serverPricingInput,
     toolPin,
+    type PublicationAction,
     type ServerPricingForm
   } from './form';
 
@@ -64,6 +63,7 @@
   let busy = $state(false);
   let error = $state('');
   let notice = $state('');
+  let pendingReceipt = $state<PublicationReceipt | null>(null);
   let credential = $state('');
   let entraClientSecret = $state('');
   let removeCredential = $state(false);
@@ -88,6 +88,7 @@
     busy = false;
     error = '';
     notice = '';
+    pendingReceipt = null;
   });
   const items = createQuery(() => ({
     queryKey: agentKeys.publication(kind),
@@ -131,6 +132,7 @@
     serverID = '';
     error = '';
     confirmRetire = false;
+    pendingReceipt = null;
   }
   async function edit(id?: string) {
     abandon();
@@ -255,77 +257,73 @@
       if (isCurrent() && version === epoch) error = errorMessage(cause);
     }
   }
-  async function write(
-    action: 'save' | 'publish' | 'retire' | 'production' | 'staging'
+  async function refreshReceipt(
+    receipt: PublicationReceipt,
+    isCurrent: () => boolean
   ) {
-    const version = epoch;
-    const isCurrent = captureOwner();
-    const observed = current;
-    const selectedKind = kind;
-    const input: Draft = publicationInput(kind, form);
-    if (kind === 'agents') {
-      if (form.oauthEnabled || removeCredential) input.credential = null;
-      else if (credential) input.credential = credential;
-      if (form.oauthEnabled && form.oauthEntra && entraClientSecret)
-        input.entra_client_secret = entraClientSecret;
+    pendingReceipt = receipt;
+    try {
+      await client.invalidateQueries(
+        { queryKey: agentKeys.publications },
+        { throwOnError: true }
+      );
+      if (isCurrent()) pendingReceipt = null;
+    } catch (cause) {
+      if (isCurrent())
+        error = `Write saved, but refreshing failed. ${errorMessage(cause)}`;
     }
+  }
+  async function retryRefresh() {
+    const receipt = pendingReceipt;
+    if (!receipt || busy) return;
+    const version = epoch;
+    const owner = captureOwner();
+    const isCurrent = () => owner() && version === epoch;
+    busy = true;
+    error = '';
+    await refreshReceipt(receipt, isCurrent);
+    if (isCurrent()) busy = false;
+  }
+  async function write(action: PublicationAction) {
+    const compiled = publicationCommand({
+      kind,
+      current,
+      action,
+      form,
+      credential,
+      entraClientSecret,
+      removeCredential,
+      revision: revisionID
+    });
+    if (!compiled.ok) {
+      error = compiled.message;
+      return;
+    }
+    const version = epoch;
+    const owner = captureOwner();
+    const isCurrent = () => owner() && version === epoch;
     busy = true;
     error = '';
     notice = '';
     try {
-      const result = await intent.submit(
-        { action, kind: selectedKind, observed, input, revision: revisionID },
-        async (submission, requestId) => {
-          if (submission.action === 'save')
-            return savePublication(
-              submission.kind,
-              submission.observed,
-              submission.input,
-              requestId
-            );
-          if (!submission.observed) throw new Error('Save the draft first.');
-          if (submission.action === 'publish')
-            return publish(submission.kind, submission.observed, requestId);
-          if (submission.action === 'retire') {
-            await retire(submission.kind, submission.observed, requestId);
-            return null;
-          }
-          return setLabel(
-            submission.observed,
-            submission.action,
-            submission.revision,
-            requestId
-          );
-        }
-      );
-      if (!isCurrent() || version !== epoch) return;
+      const receipt = await intent.submit(compiled.command, executePublication);
+      if (!isCurrent()) return;
       credential = '';
       entraClientSecret = '';
       removeCredential = false;
-      current = result;
+      current = receipt.kind === 'updated' ? receipt.publication : null;
       inspected = null;
       confirmRetire = false;
-      if (result) {
-        form = publicationForm(result);
-        revisionID = result.revision_id ?? '';
+      if (current) {
+        form = publicationForm(current);
+        revisionID = current.revision_id ?? '';
       } else editor = false;
-      notice =
-        action === 'save'
-          ? 'Draft saved. Publication is a separate action.'
-          : 'Publication configuration updated.';
-      try {
-        await client.invalidateQueries(
-          { queryKey: agentKeys.publications },
-          { throwOnError: true }
-        );
-      } catch (cause) {
-        if (isCurrent() && version === epoch)
-          error = `Write saved, but refreshing failed. ${errorMessage(cause)}`;
-      }
+      notice = receipt.notice;
+      await refreshReceipt(receipt, isCurrent);
     } catch (cause) {
-      if (isCurrent() && version === epoch) error = errorMessage(cause);
+      if (isCurrent()) error = errorMessage(cause);
     } finally {
-      if (isCurrent() && version === epoch) busy = false;
+      if (isCurrent()) busy = false;
     }
   }
 </script>
@@ -339,6 +337,12 @@
 {#if items.error}<p class="inline-problem" role="alert">
     {errorMessage(items.error)}
   </p>{/if}
+{#if pendingReceipt}<button
+    class="button button-secondary"
+    type="button"
+    disabled={busy}
+    onclick={retryRefresh}>Retry refresh</button
+  >{/if}
 <section class="section" aria-label="Publications">
   <div class="page-actions">
     <button

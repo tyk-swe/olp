@@ -1,8 +1,8 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
   import { nativeEntries, nativeObject } from '#lib/nativeJson.js';
-  import type { Provider } from './providers';
-  import type { ProviderEditValues, RunProviderAction } from './providerEditor';
+  import type { ProviderEditValues } from './providerEditor';
+  import type { ProviderEditor } from './providerEditor.svelte';
   import { profileScopedSettings } from './configurationDraft.svelte';
   import {
     getConfigurationSchemas,
@@ -20,20 +20,13 @@
     values,
     idPrefix,
     disabled = false,
-    provider,
-    run,
-    onProviderChanged,
+    editor,
     onChange
   }: {
     values: ProviderEditValues;
     idPrefix: string;
     disabled?: boolean;
-    provider?: Provider;
-    run?: RunProviderAction;
-    onProviderChanged?: (mutation?: {
-      previousEtag: string;
-      etag: string;
-    }) => Promise<void>;
+    editor?: ProviderEditor;
     onChange: () => void;
   } = $props();
   const profiles = createQuery(() => ({
@@ -270,14 +263,12 @@
             {onChange}
           />{/each}
       </div>
-      {#if provider && run && onProviderChanged}<NetworkCredentialsEditor
-          {provider}
+      {#if editor}<NetworkCredentialsEditor
+          {editor}
           {draft}
           {idPrefix}
           disabled={editDisabled}
-          {run}
           {onChange}
-          {onProviderChanged}
         />{:else}<p class="muted">
           Save the connection before adding encrypted proxy or
           client-certificate credentials.

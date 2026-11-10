@@ -254,7 +254,7 @@ func (s *Server) planMedia(ctx context.Context, x *call) *Error {
 	if video && !videoLifecycle(func(op string) bool { return slices.Contains(route.Operations, op) }) {
 		return invalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow video lifecycle operations.", nil)
 	}
-	var semantic error
+	session := s.planning(x, mediaPlanning, x.route, string(request.Op()), "openai", x.mode)
 	options := s.selectionOptions(ctx, x)
 	options.Parameters = routing.Listed(request.ParameterNames())
 	options.Prepare = func(p routing.Provider, t routing.Target) (*routing.CandidatePreparation, error) {
@@ -266,7 +266,7 @@ func (s *Server) planMedia(ctx context.Context, x *call) *Error {
 		}
 		encoded, err := x.encodeMedia(snapshot, p, t.ID, t.ProviderModel)
 		if err != nil {
-			semantic = err
+			session.semantic = err
 			return nil, err
 		}
 		if p.ProfileID == "" {
@@ -274,34 +274,13 @@ func (s *Server) planMedia(ctx context.Context, x *call) *Error {
 		}
 		parameters, err := media.OutboundParameterNames(encoded.call, encoded.effective)
 		if err != nil {
-			semantic = err
+			session.semantic = err
 			return nil, err
 		}
 		return &routing.CandidatePreparation{Parameters: routing.Listed(parameters)}, nil
 	}
-	plan, err := routing.Select(snapshot, route.Slug, string(request.Op()), "openai", x.mode, x.affinity, options)
-	if err != nil {
-		var se *routing.SelectionError
-		if errors.As(err, &se) && se.Code != routing.NoEligibleTargets && se.Code != "attempt_budget_increase_forbidden" {
-			return selectionError(err, route.Slug)
-		}
-		return requestError(err)
-	}
-	if plan.Delegate != "" {
-		return s.delegate(ctx, x, plan)
-	}
-	x.adoptPlan(plan)
-	if len(plan.Attempts) == 0 {
-		if semantic != nil {
-			return requestError(semantic)
-		}
-		x.noteCostExceeded(plan)
-		if x.costExcluded {
-			return costLimitExceeded()
-		}
-		return selectionError(&routing.SelectionError{Code: routing.NoEligibleTargets}, route.Slug)
-	}
-	return nil
+	_, _, failure := session.selectPlan(ctx, options)
+	return failure
 }
 
 func strictMediaContext(x *call) *Error {

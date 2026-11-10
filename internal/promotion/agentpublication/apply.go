@@ -126,35 +126,22 @@ func applyLabels(ctx context.Context, tx pgx.Tx, p access.Principal, next agentc
 	if !ok {
 		return nil
 	}
-	if err := publications.ClearLabels(ctx, tx, next.ID); err != nil {
+	declared := promotion.Filter(labelNames, func(label string) bool { _, ok := prompt.Labels[label]; return ok })
+	labels, err := promotion.TryMap(declared, func(label string) (publications.LabelSelection, error) {
+		labeled, err := publishDefinition(ctx, tx, p.UserID(), next, placed(prompt.Labels[label], projectID))
+		if err != nil {
+			return publications.LabelSelection{}, err
+		}
+		return publications.LabelSelection{Label: label, RevisionID: *labeled.RevisionID}, nil
+	})
+	if err != nil {
 		return err
 	}
-	for _, label := range labelNames {
-		definition, declared := prompt.Labels[label]
-		if !declared {
-			continue
-		}
-		labeled, err := publishDefinition(ctx, tx, p.UserID(), next, placed(definition, projectID))
-		if err != nil {
-			return err
-		}
-		if err := publications.SetLabel(ctx, tx, labeled, label, *labeled.RevisionID, access.NewID()); err != nil {
-			return err
-		}
-	}
-	return nil
+	return publications.ReplaceLabels(ctx, tx, next, labels)
 }
 
 func publishDefinition(ctx context.Context, tx pgx.Tx, actor string, p agentcontract.Publication, definition agentcontract.Draft) (agentcontract.Publication, error) {
-	draft := agentcontract.NormalizeDraft(definition)
-	id, found, err := publications.RevisionIDByDigest(ctx, tx, p.ID, agentcontract.DraftDigest(draft))
-	if err != nil {
-		return agentcontract.Publication{}, err
-	}
-	if found {
-		return agentcontract.Publication{ID: p.ID, Kind: p.Kind, ProjectID: p.ProjectID, Name: p.Name, ETag: p.ETag, Draft: draft, RevisionID: &id, Retired: p.Retired}, nil
-	}
-	return publications.Publish(ctx, tx, actor, agentcontract.Publication{ID: p.ID, Kind: p.Kind, ProjectID: p.ProjectID, Name: p.Name, ETag: p.ETag, Draft: draft, RevisionID: p.RevisionID, Retired: p.Retired})
+	return publications.EnsureRetainedRevision(ctx, tx, actor, agentcontract.Publication{ID: p.ID, Kind: p.Kind, ProjectID: p.ProjectID, Name: p.Name, ETag: p.ETag, Draft: definition, RevisionID: p.RevisionID, Retired: p.Retired})
 }
 
 func priorOf(current *agentcontract.Publication, previous *agentcontract.Draft) *agentcontract.Publication {

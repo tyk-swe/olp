@@ -1,59 +1,40 @@
 <script lang="ts">
   import { confirmAction } from '#lib/components/confirm.js';
-  import {
-    useMutationIntent,
-    usePrincipalLifetime
-  } from '#lib/editing/mutationIntent.svelte.js';
+  import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { createQuery } from '@tanstack/svelte-query';
-  import type { Provider } from './providers';
   import { providerKeys } from './providerKeys';
   import {
     networkCredentialPath,
     type ConfigurationDraft
   } from './configurationDraft.svelte';
-  import type { RunProviderAction } from './providerEditor';
-  import {
-    createNetworkCredential,
-    listNetworkCredentials,
-    revokeNetworkCredential
-  } from './providerProfiles';
+  import type { ProviderEditor } from './providerEditor.svelte';
+  import { listNetworkCredentials } from './providerProfiles';
   import { formatDate } from '#lib/format.js';
-  import { parseNativeJSON, nativeObject } from '#lib/nativeJson.js';
 
-  const createNetworkCredentialIntent = useMutationIntent();
-  const revokeNetworkCredentialIntent = useMutationIntent();
   let {
-    provider,
+    editor,
     draft,
     idPrefix,
     disabled,
-    run,
-    onChange,
-    onProviderChanged
+    onChange
   }: {
-    provider: Provider;
+    editor: ProviderEditor;
     draft: ConfigurationDraft;
     idPrefix: string;
     disabled: boolean;
-    run: RunProviderAction;
     onChange: () => void;
-    onProviderChanged: (mutation?: {
-      previousEtag: string;
-      etag: string;
-    }) => Promise<void>;
   } = $props();
+  const editorView = $derived(editor.view);
+  const provider = $derived(editor.snapshot.data?.provider);
   let secret = $state('');
-  let pendingMutation = $state<{ previousEtag: string; etag: string } | null>(
-    null
-  );
-  const editingDisabled = $derived(disabled || Boolean(pendingMutation));
+  const editingDisabled = $derived(disabled || editorView.refreshPending);
   usePrincipalLifetime(() => {
     secret = '';
-    pendingMutation = null;
   });
   const credentials = createQuery(() => ({
-    queryKey: providerKeys.networkCredentials(provider.id),
-    queryFn: ({ signal }) => listNetworkCredentials(provider.id, signal)
+    queryKey: providerKeys.networkCredentials(provider?.id ?? ''),
+    queryFn: ({ signal }) => listNetworkCredentials(provider?.id ?? '', signal),
+    enabled: Boolean(provider)
   }));
   const selected = $derived(draft.text(networkCredentialPath));
   const missing = $derived(
@@ -62,28 +43,10 @@
   );
   async function create() {
     if (editingDisabled) return;
-    await run('network-credential', async (isCurrent) => {
-      if (!nativeObject(parseNativeJSON(secret)))
-        throw new Error('Enter a network credential JSON object.');
-      const submission = createNetworkCredentialIntent.prepare(
-        { providerId: provider.id, secret },
-        () => [provider.id, provider.etag, secret] as const
-      );
-      const created = await createNetworkCredential(
-        ...submission.input,
-        submission.requestId
-      );
-      if (!isCurrent()) return;
-      createNetworkCredentialIntent.reset();
-      secret = '';
-      draft.set(networkCredentialPath, created.credential_id);
-      onChange();
-      pendingMutation = {
-        previousEtag: submission.input[1],
-        etag: created.etag
-      };
-      await refreshNetworkCredentials(isCurrent);
-    });
+    const submitted = secret;
+    if (await editor.stageNetworkCredential(submitted)) {
+      if (secret === submitted) secret = '';
+    }
   }
   async function revoke(id: string) {
     if (editingDisabled) return;
@@ -96,47 +59,19 @@
       }))
     )
       return;
-    await run('revoke-network-credential', async (isCurrent) => {
-      const submission = revokeNetworkCredentialIntent.prepare(
-        { providerId: provider.id, credentialId: id },
-        () => [provider.id, provider.etag, id] as const
-      );
-      const revoked = await revokeNetworkCredential(
-        ...submission.input,
-        submission.requestId
-      );
-      if (!isCurrent()) return;
-      revokeNetworkCredentialIntent.reset();
-      pendingMutation = {
-        previousEtag: submission.input[1],
-        etag: revoked.etag
-      };
-      await refreshNetworkCredentials(isCurrent);
-    });
-  }
-
-  async function refreshNetworkCredentials(isCurrent: () => boolean) {
-    if (!isCurrent() || !pendingMutation) return;
-    await onProviderChanged(pendingMutation);
-    if (!isCurrent()) return;
-    await credentials.refetch({ throwOnError: true });
-    if (isCurrent()) pendingMutation = null;
-  }
-
-  async function retryRefresh() {
-    await run('network-credential-refresh', refreshNetworkCredentials);
+    await editor.revokeNetworkCredential(id);
   }
 </script>
 
 <div class="network-credentials">
-  {#if pendingMutation}<p class="inline-problem" role="status">
+  {#if editorView.refreshPending}<p class="inline-problem" role="status">
       The network credential change succeeded. Refresh the view before another
       change.
       <button
         type="button"
         class="button button-secondary"
         {disabled}
-        onclick={retryRefresh}>Retry refresh</button
+        onclick={editor.retryRefresh}>Retry refresh</button
       >
     </p>{/if}
   <div class="form-field">

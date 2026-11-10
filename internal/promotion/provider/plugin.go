@@ -36,7 +36,7 @@ func validated(configuration providers.Configuration, policy *egress.Policy) (pr
 }
 
 func (p planning) prepare(ctx context.Context, q access.Queryer, entry Entry) (providers.Configuration, []promotion.Item, error) {
-	prepared, err := providers.PrepareConfiguration(ctx, q, p.deps.Unconfined, p.deps.Egress, entry.Configuration)
+	prepared, err := p.deps.Catalogue.PrepareConfiguration(ctx, q, entry.Configuration)
 	if code, refused := Refusal(err); refused {
 		return entry.Configuration, []promotion.Item{promotion.Blocker(contract.ConfigurationPlanItemKindPlugin, entry.Configuration.ProfileRevision, code)}, nil
 	}

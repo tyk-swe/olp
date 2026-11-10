@@ -1,17 +1,25 @@
+import { validRouteSlug } from '#lib/routeIdentity.js';
 import {
   routeLimitForm,
   routeLimitsInput,
+  routeLimitsError,
   type RouteLimitForm
 } from '../route-limits/policy';
-import { groupNames } from '../route-groups/policy';
+import { groupNames, groupNamesError } from '../route-groups/policy';
 import {
   attributionForm,
   attributionInput,
+  attributionError,
   type AttributionForm
 } from '../attribution/policy';
 import { keyCIDRs } from './keyNetwork';
-import type { admissionPriorities } from './keyValidation';
-import { policyForm, policyInput, type PolicyForm } from '../end-users/policy';
+import { validateApiKey, type admissionPriorities } from './keyValidation';
+import {
+  policyForm,
+  policyInput,
+  policyError,
+  type PolicyForm
+} from '../end-users/policy';
 import type {
   ApiKey,
   CreateApiKeyInput,
@@ -177,4 +185,85 @@ export function buildApiKeyPolicyInput(
   };
   if (expiryUnchanged(state, editing)) delete input.expires_at;
   return input;
+}
+
+export type ApiKeyPolicyContext =
+  | { readonly kind: 'create' }
+  | { readonly kind: 'update'; readonly key: ApiKey };
+export type ApiKeyPolicyCommand =
+  | { readonly kind: 'create'; readonly input: CreateApiKeyInput }
+  | {
+      readonly kind: 'update';
+      readonly key: ApiKey;
+      readonly input: UpdateApiKeyInput;
+    };
+export type ApiKeyPolicyResult =
+  | { readonly ok: true; readonly command: ApiKeyPolicyCommand }
+  | {
+      readonly ok: false;
+      readonly errors: Record<string, string>;
+      readonly formError: string;
+    };
+
+export function compileApiKeyPolicy(
+  form: ApiKeyFormState,
+  context: ApiKeyPolicyContext,
+  now: Date
+): ApiKeyPolicyResult {
+  const editing = context.kind === 'update' ? context.key : null;
+  const project = editing ? editing.project_id : form.projectId || null;
+  const numericValue = (raw: string): number | undefined =>
+    raw ? Number(raw) : undefined;
+  const validated = validateApiKey({
+    name: form.name,
+    allowedCIDRs: form.allowedCIDRs,
+    requestsPerMinute: numericValue(form.requestsPerMinute),
+    tokensPerMinute: numericValue(form.tokensPerMinute),
+    maxConcurrency: numericValue(form.maxConcurrency),
+    dailyCostLimit: form.dailyCostLimit,
+    monthlyCostLimit: form.monthlyCostLimit,
+    weeklyCostLimit: form.weeklyCostLimit,
+    expiresAt: expiryUnchanged(form, editing) ? undefined : form.expiresAt,
+    priority: form.priority,
+    maxPriority: form.maxPriority,
+    now
+  });
+  const numericErrors = Object.fromEntries(
+    (['requestsPerMinute', 'tokensPerMinute', 'maxConcurrency'] as const)
+      .filter(
+        (field) => form[field] && !Number.isSafeInteger(Number(form[field]))
+      )
+      .map((field) => [field, 'Use a positive whole number.'])
+  );
+  const errors = { ...validated, ...numericErrors };
+  const formError =
+    form.rotationIntervalDays.trim() &&
+    (!/^\d+$/.test(form.rotationIntervalDays) ||
+      Number(form.rotationIntervalDays) < 1 ||
+      Number(form.rotationIntervalDays) > 3650)
+      ? 'Rotation interval must be a whole number of days from 1 to 3650.'
+      : form.limitTemplate &&
+          (!project || !validRouteSlug(form.limitTemplate.trim()))
+        ? 'Choose a project and a valid limit template name.'
+        : form.endUserPolicy.enabled && !form.endUserSource
+          ? 'Choose an identifier source before enabling end-user limits.'
+          : routeLimitsError(form.routeLimits) ||
+            policyError(form.endUserPolicy) ||
+            attributionError(form.attributionPolicy) ||
+            groupNamesError(groupNames(form.allowedRouteGroups)) ||
+            (groupNames(form.allowedRouteGroups).length && !project
+              ? 'Route groups require a project-scoped key.'
+              : '') ||
+            (form.scopes.length ? '' : 'Select at least one scope.');
+  if (formError || Object.keys(errors).length)
+    return { ok: false, errors, formError };
+  const input = buildApiKeyPolicyInput(form, editing);
+  if (context.kind === 'create')
+    return { ok: true, command: { kind: 'create', input } };
+  const { project_id: _project, ...update } = input;
+  void _project;
+  return {
+    ok: true,
+    command: { kind: 'update', key: context.key, input: update }
+  };
 }

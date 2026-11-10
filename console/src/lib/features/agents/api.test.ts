@@ -420,3 +420,36 @@ it('fetches remote task state and cancels through the pinned task operations', a
     problem: { status: 502 }
   });
 });
+
+it('returns publication receipts after the captured command commits', async () => {
+  const observed = { id, etag: publication.etag };
+  const input = { ...publication.draft, name: 'Saved command' };
+  const committed = { ...publication, name: input.name, etag: 'committed' };
+  serve(async (request) => {
+    route(request, 'PUT', `/api/v1/toolsets/${id}`);
+    expect(request.headers.get('If-Match')).toBe('"before"');
+    expect(request.headers.get('Idempotency-Key')).toBe('command-write');
+    expect(await request.json()).toEqual(input);
+    return json(committed);
+  });
+  const receipt = await api.executePublication(
+    { action: 'update', kind: 'toolsets', observed, input },
+    'command-write'
+  );
+  expect(receipt).toMatchObject({ kind: 'updated', publication: committed });
+  serve((request) => {
+    route(request, 'DELETE', `/api/v1/toolsets/${id}`);
+    expect(request.headers.get('If-Match')).toBe('"committed"');
+    return new Response(null, { status: 204 });
+  });
+  expect(
+    await api.executePublication(
+      {
+        action: 'retire',
+        kind: 'toolsets',
+        observed: { id, etag: committed.etag }
+      },
+      'retirement-write'
+    )
+  ).toMatchObject({ kind: 'retired', id });
+});

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/jackc/pgx/v5"
@@ -23,6 +24,12 @@ var (
 
 // Resolver rebuilds the historical provider pin that owns a retained
 // resource. Its credential's secret comes from the credential source.
+type ResolvedPin struct {
+	Invocation providerinvoke.Target
+	Route      routing.Route
+	Target     routing.Target
+}
+
 type Resolver struct {
 	pool *pgxpool.Pool
 }
@@ -34,45 +41,44 @@ func NewResolver(pool *pgxpool.Pool) *Resolver {
 // ResolveCurrent reads historical revisions and current revocation through
 // one connection. READ COMMITTED already gives each SELECT a fresh snapshot,
 // so this read-only path does not need an explicit transaction round trip.
-func (r *Resolver) ResolveCurrent(ctx context.Context, res *Resource, operation string) (*routing.Provider, *routing.Route, *routing.Slot, error) {
+func (r *Resolver) ResolveCurrent(ctx context.Context, res *Resource, operation string) (ResolvedPin, error) {
 	conn, err := r.pool.Acquire(ctx)
 	if err != nil {
-		return nil, nil, nil, err
+		return ResolvedPin{}, err
 	}
 	defer conn.Release()
 	return r.resolve(ctx, conn, res, operation)
 }
 
-func (r *Resolver) Resolve(ctx context.Context, tx pgx.Tx, res *Resource, operation string) (*routing.Provider, *routing.Route, *routing.Slot, error) {
+func (r *Resolver) Resolve(ctx context.Context, tx pgx.Tx, res *Resource, operation string) (ResolvedPin, error) {
 	return r.resolve(ctx, tx, res, operation)
 }
 
-func (r *Resolver) resolve(ctx context.Context, query secrets.RowQuerier, res *Resource, operation string) (*routing.Provider, *routing.Route, *routing.Slot, error) {
+func (r *Resolver) resolve(ctx context.Context, query secrets.RowQuerier, res *Resource, operation string) (ResolvedPin, error) {
 	providerRevision := routing.ProviderRevision{RevisionID: res.ProviderRevisionID}
 	err := query.QueryRow(ctx,
 		"SELECT r.provider_id::text,r.configuration,r.models,r.slots,r.name,p.state,p.project_id::text,"+release.PluginColumn+" FROM olp.provider_revisions r JOIN olp.providers p ON p.id=r.provider_id WHERE r.id=$1",
 		res.ProviderRevisionID).Scan(&providerRevision.ID, &providerRevision.Configuration, &providerRevision.Models, &providerRevision.Slots, &providerRevision.Name, &providerRevision.State, &providerRevision.ProjectID, &providerRevision.InstalledPlugin)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil, nil, fmt.Errorf("provider revision %s: %w", res.ProviderRevisionID, ErrNoRows)
+		return ResolvedPin{}, fmt.Errorf("provider revision %s: %w", res.ProviderRevisionID, ErrNoRows)
 	}
 	if err != nil {
-		return nil, nil, nil, err
+		return ResolvedPin{}, err
 	}
 	if providerRevision.ID != res.ProviderID {
-		return nil, nil, nil, fmt.Errorf("provider revision %s belongs to %s, not %s: %w",
+		return ResolvedPin{}, fmt.Errorf("provider revision %s belongs to %s, not %s: %w",
 			res.ProviderRevisionID, providerRevision.ID, res.ProviderID, ErrNoRows)
 	}
 
 	provider, err := routing.DecodeProviderRevision(providerRevision)
 	if err != nil {
-		return nil, nil, nil, err
+		return ResolvedPin{}, err
 	}
 
 	selected, ok := routing.PinnedSlot(&provider, res.SlotID, res.CredentialID)
 	if !ok {
-		return nil, nil, nil, fmt.Errorf("slot %s or credential absent from provider revision %s: %w", res.SlotID, res.ProviderRevisionID, ErrNoRows)
+		return ResolvedPin{}, fmt.Errorf("slot %s or credential absent from provider revision %s: %w", res.SlotID, res.ProviderRevisionID, ErrNoRows)
 	}
-	slot := &selected
 
 	routeRevision := routing.RouteRevision{RevisionID: res.RouteRevisionID}
 	err = query.QueryRow(ctx,
@@ -81,30 +87,32 @@ func (r *Resolver) resolve(ctx context.Context, query secrets.RowQuerier, res *R
 		res.RouteRevisionID).Scan(&routeRevision.ID, &routeRevision.Slug, &routeRevision.Revision, &routeRevision.Operations,
 		&routeRevision.OverallTimeout, &routeRevision.MaxAttempts, &routeRevision.Targets, &routeRevision.PublishedAt, &routeRevision.Policy, &routeRevision.ProjectID, &routeRevision.Fidelity, &routeRevision.ContentPolicy, &routeRevision.Behavior)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil, nil, fmt.Errorf("route revision %s: %w", res.RouteRevisionID, ErrNoRows)
+		return ResolvedPin{}, fmt.Errorf("route revision %s: %w", res.RouteRevisionID, ErrNoRows)
 	}
 	if err != nil {
-		return nil, nil, nil, err
+		return ResolvedPin{}, err
 	}
 	if routeRevision.Slug != res.RouteSlug {
-		return nil, nil, nil, fmt.Errorf("route revision %s is slug %s, not %s: %w",
+		return ResolvedPin{}, fmt.Errorf("route revision %s is slug %s, not %s: %w",
 			res.RouteRevisionID, routeRevision.Slug, res.RouteSlug, ErrNoRows)
 	}
 	route, err := routing.DecodeRouteRevision(routeRevision)
 	if err != nil {
-		return nil, nil, nil, err
+		return ResolvedPin{}, err
 	}
 	if !slices.Contains(route.Operations, operation) {
-		return nil, nil, nil, fmt.Errorf("route %s revision does not allow %s: %w", route.Slug, operation, ErrNoRows)
+		return ResolvedPin{}, fmt.Errorf("route %s revision does not allow %s: %w", route.Slug, operation, ErrNoRows)
 	}
 	matched := 0
+	var matchedTarget routing.Target
 	for _, target := range route.Targets {
 		if res.TargetID != "" && target.ID == res.TargetID && target.ProviderID == provider.ID && target.ProviderModel != "" {
 			matched++
+			matchedTarget = target
 		}
 	}
 	if matched != 1 {
-		return nil, nil, nil, fmt.Errorf("target %s is not proved by route revision %s: %w", res.TargetID, res.RouteRevisionID, ErrNoRows)
+		return ResolvedPin{}, fmt.Errorf("target %s is not proved by route revision %s: %w", res.TargetID, res.RouteRevisionID, ErrNoRows)
 	}
 
 	if res.CredentialID != nil {
@@ -113,11 +121,11 @@ func (r *Resolver) resolve(ctx context.Context, query secrets.RowQuerier, res *R
 			"SELECT revoked_at IS NOT NULL FROM olp.provider_credentials WHERE id=$1",
 			*res.CredentialID).Scan(&revoked)
 		if errors.Is(err, pgx.ErrNoRows) || (err == nil && revoked) {
-			return nil, nil, nil, fmt.Errorf("credential %s: %w", *res.CredentialID, ErrUnavailable)
+			return ResolvedPin{}, fmt.Errorf("credential %s: %w", *res.CredentialID, ErrUnavailable)
 		}
 		if err != nil {
-			return nil, nil, nil, err
+			return ResolvedPin{}, err
 		}
 	}
-	return &provider, &route, slot, nil
+	return ResolvedPin{Invocation: providerinvoke.Target{Provider: provider, Slot: selected, Model: matchedTarget.ProviderModel}, Route: route, Target: matchedTarget}, nil
 }

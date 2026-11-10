@@ -191,16 +191,10 @@ func (s *Server) selectBoundPinSurface(ctx context.Context, x *call, route *rout
 		}
 		return nil, nil
 	}
-	plan, err := routing.Select(snapshot, route.Slug, operation, surface, mode, x.affinity, options)
-	if err != nil {
-		return nil, requestError(err)
-	}
-	if len(plan.Attempts) == 0 {
-		x.noteCostExceeded(plan)
-		if x.costExcluded {
-			return nil, costLimitExceeded()
-		}
-		return nil, selectionError(&routing.SelectionError{Code: routing.NoEligibleTargets}, route.Slug)
+	session := s.planning(x, pinnedPlanning, route, operation, surface, mode)
+	plan, _, failure := session.selectPlan(ctx, options)
+	if failure != nil {
+		return nil, failure
 	}
 	attempt := plan.Attempts[0]
 	provider, ok := snapshot.FindProvider(attempt.ProviderID)
@@ -220,10 +214,7 @@ func (s *Server) selectBoundPinSurface(ctx context.Context, x *call, route *rout
 	if target.ID == "" {
 		return nil, selectionError(&routing.SelectionError{Code: routing.NoEligibleTargets}, route.Slug)
 	}
-	x.decisions = plan.Decisions
-	x.policy = plan.Policy
-	x.budget = 1
-	x.attempts = plan.Attempts[:1]
+	session.adoptPin(plan)
 	deadline := s.now().Add(time.Duration(route.OverallTimeout) * time.Millisecond)
 	if mode == "realtime" || mode == "webrtc" {
 		var ok bool
@@ -258,19 +249,14 @@ func (s *Server) selectBoundPinSurface(ctx context.Context, x *call, route *rout
 
 func (s *Server) pinnedDo(ctx context.Context, x *call, p *pin, method, endpoint string, body []byte, contentType string) (*http.Response, *attemptFailure) {
 	exchange := s.beginPinned(ctx, x, p, method)
-	parsed, err := url.Parse(endpoint)
-	if err != nil {
-		return nil, exchange.fail(s, x, classConnect, nil)
-	}
-	parsed.RawQuery, parsed.Fragment = "", ""
-	if _, err := s.egress.ValidateEndpoint(parsed.String()); err != nil {
+	if err := exchange.bound.validateEndpoint(endpoint); err != nil {
 		return nil, exchange.fail(s, x, classConnect, nil)
 	}
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, endpoint, reader)
+	req, err := exchange.bound.request(ctx, method, endpoint, reader, make(http.Header))
 	if err != nil {
 		return nil, exchange.fail(s, x, classConnect, nil)
 	}
@@ -286,7 +272,7 @@ func (s *Server) pinnedDo(ctx context.Context, x *call, p *pin, method, endpoint
 	if x.mode == "streaming" && (x.family == wire.GeminiInteractions || x.family == wire.Responses) {
 		req.Header.Set("Accept", "text/event-stream")
 	}
-	if err := s.applySlotCredential(ctx, x, req, p.provider.Connector(), p.slot, body, &p.provider, p.model); err != nil {
+	if err := exchange.bound.authenticate(ctx, req, body); err != nil {
 		if ctx.Err() != nil {
 			return nil, exchange.fail(s, x, classCancelled, nil)
 		}

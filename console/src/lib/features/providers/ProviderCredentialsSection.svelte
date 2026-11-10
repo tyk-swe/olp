@@ -1,57 +1,39 @@
 <script lang="ts">
   import { confirmAction } from '#lib/components/confirm.js';
-  import {
-    useMutationIntent,
-    usePrincipalLifetime
-  } from '#lib/editing/mutationIntent.svelte.js';
-
+  import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import ExternalReferenceEditor from './ExternalReferenceEditor.svelte';
   import { parseExternalReference } from './externalReference';
-  import { providerKeys } from '#lib/features/providers/providerKeys.js';
-
-  import { createQuery, useQueryClient } from '@tanstack/svelte-query';
+  import { providerKeys } from './providerKeys';
+  import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import { type Provider } from '#lib/features/providers/providers.js';
+  import type { Provider } from './providers';
   import {
     listProviderCredentials,
-    revokeProviderCredential,
-    rotateProviderCredential,
     type ProviderCredential
-  } from '#lib/features/providers/credentials.js';
-  import { type ProviderKindCapability } from '#lib/features/providers/models.js';
+  } from './credentials';
+  import type { ProviderKindCapability } from './models';
+  import type { ProviderEditor } from './providerEditor.svelte';
   import { formatDate } from '#lib/format.js';
   import {
     DISABLED_EDIT_NOTE,
     providerDisabled,
     requiresCredential,
     requiresGrant
-  } from '#lib/features/providers/providerEditor.js';
-  import type { RunProviderAction } from './providerEditor';
-
-  const rotateProviderCredentialIntent = useMutationIntent();
-  const revokeProviderCredentialIntent = useMutationIntent();
-
+  } from './providerEditor';
   let {
     current,
     providerSpec,
-    busy,
-    canManage,
-    run,
-    onProviderChanged,
-    onResetModelPage,
-    onNotice
+    editor
   }: {
     current: Provider;
     providerSpec: ProviderKindCapability | undefined;
-    busy: string;
-    canManage: boolean;
-    run: RunProviderAction;
-    onProviderChanged: () => Promise<void>;
-    onResetModelPage: () => void;
-    onNotice: (message: string) => void;
+    editor: ProviderEditor;
   } = $props();
-
-  const queryClient = useQueryClient();
+  const editorView = $derived(editor.view);
+  const busy = $derived(editorView.busy);
+  const canManage = $derived(editor.canManage);
+  const refreshPending = $derived(editorView.refreshPending);
+  const editingLocked = $derived(providerDisabled(current));
   const credentials = createQuery(() => ({
     queryKey: providerKeys.credentials(current.id),
     queryFn: ({ signal }) => listProviderCredentials(current.id, signal)
@@ -59,36 +41,10 @@
   let credentialValue = $state('');
   let useExternal = $state(false);
   let externalValue = $state('');
-  let refreshPending = $state(false);
-  // The store refuses a rotation on a disabled provider with the same 409 that
-  // Save draft returns, so the form is locked until it is restored as a draft.
-  const editingLocked = $derived(providerDisabled(current));
-
   const captureOwner = usePrincipalLifetime(() => {
-    credentialValue = '';
-    externalValue = '';
+    credentialValue = externalValue = '';
     useExternal = false;
-    refreshPending = false;
   });
-
-  async function refreshCredentials(isCurrent: () => boolean) {
-    if (!isCurrent()) return;
-    await credentials.refetch({ throwOnError: true });
-    if (!isCurrent()) return;
-    onResetModelPage();
-    await onProviderChanged();
-    if (!isCurrent()) return;
-    await queryClient.invalidateQueries(
-      { queryKey: providerKeys.summaries },
-      { throwOnError: true }
-    );
-    if (isCurrent()) refreshPending = false;
-  }
-
-  async function retryRefresh() {
-    await run('credential-refresh', refreshCredentials);
-  }
-
   async function rotate(event: SubmitEvent) {
     event.preventDefault();
     if (
@@ -98,33 +54,20 @@
       refreshPending
     )
       return;
-    const submittedCredential = credentialValue;
-    const secretCurrent = captureOwner();
-    await run('rotate-credential', async (isCurrent) => {
-      const credential = useExternal
-        ? parseExternalReference(externalValue)
-        : submittedCredential;
-      const submission = rotateProviderCredentialIntent.prepare(
-        { providerId: current.id, credential },
-        () => [{ id: current.id, etag: current.etag }, credential] as const
+    const isCurrent = captureOwner();
+    const submitted = credentialValue;
+    const external = externalValue;
+    try {
+      const confirmed = await editor.stageCredential(
+        useExternal ? parseExternalReference(external) : submitted
       );
-      await rotateProviderCredential(...submission.input, submission.requestId);
-      if (!isCurrent() || !secretCurrent()) return;
-      rotateProviderCredentialIntent.reset();
-      refreshPending = true;
-      externalValue = '';
-      if (credentialValue === submittedCredential) credentialValue = '';
-      onNotice(
-        'Credential version staged. Test and activate the provider to publish it; the current runtime credential remains live until then.'
-      );
-      try {
-        await refreshCredentials(isCurrent);
-      } catch (cause) {
-        throw new Error('Credential staged, but refreshing failed.', { cause });
-      }
-    });
+      if (!confirmed || !isCurrent()) return;
+      if (credentialValue === submitted) credentialValue = '';
+      if (externalValue === external) externalValue = '';
+    } catch (error) {
+      if (isCurrent()) editor.reportError(errorMessage(error));
+    }
   }
-
   async function revoke(credential: ProviderCredential) {
     if (refreshPending) return;
     if (
@@ -136,24 +79,7 @@
       }))
     )
       return;
-    await run(`revoke-${credential.id}`, async (isCurrent) => {
-      const submission = revokeProviderCredentialIntent.prepare(
-        { providerId: current.id, credentialId: credential.id },
-        () => [{ id: current.id, etag: current.etag }, credential.id] as const
-      );
-      await revokeProviderCredential(...submission.input, submission.requestId);
-      if (!isCurrent()) return;
-      revokeProviderCredentialIntent.reset();
-      refreshPending = true;
-      onNotice(`Credential version ${credential.version} revoked.`);
-      try {
-        await refreshCredentials(isCurrent);
-      } catch (cause) {
-        throw new Error('Credential revoked, but refreshing failed.', {
-          cause
-        });
-      }
-    });
+    await editor.revokeCredential(credential);
   }
 </script>
 
@@ -164,7 +90,7 @@
         type="button"
         class="button button-secondary"
         disabled={Boolean(busy)}
-        onclick={retryRefresh}>Retry refresh</button
+        onclick={editor.retryRefresh}>Retry refresh</button
       >
     </p>{/if}
   <p class="eyebrow">Secrets</p>

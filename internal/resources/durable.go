@@ -2,7 +2,9 @@ package resources
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"maps"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,6 +18,84 @@ const (
 	DurableContractVersion = "native-durable-v1"
 	DurableLifetime        = 7 * 24 * time.Hour
 )
+
+type BatchRecoveryEvidence struct {
+	State           string
+	Metadata        json.RawMessage
+	Model           string
+	CreatedAt       time.Time
+	SubmittedFileID string
+	ObservedFileID  string
+	NativeStatus    string
+	Result          []byte
+}
+
+type BatchRecovery struct {
+	store    *Store
+	resource Resource
+	payload  []byte
+}
+
+func (r BatchRecovery) UpstreamID() string { return r.resource.UpstreamID }
+
+func (r BatchRecovery) Persist(ctx context.Context, tx pgx.Tx) error {
+	if r.resource.Kind == KindStrictBatch {
+		_, err := r.store.PutRecoveredDurableContractTx(ctx, tx, &r.resource, r.payload)
+		return err
+	}
+	_, err := r.store.PutTx(ctx, tx, &r.resource)
+	return err
+}
+
+func (s *Store) PrepareBatchRecovery(ctx context.Context, candidate Resource, evidence BatchRecoveryEvidence) (BatchRecovery, error) {
+	resource := candidate
+	resource.State, resource.Metadata = evidence.State, evidence.Metadata
+	if candidate.Kind != KindStrictBatch {
+		return BatchRecovery{store: s, resource: resource}, nil
+	}
+	if evidence.SubmittedFileID == "" || candidate.UpstreamID == "" || evidence.ObservedFileID != evidence.SubmittedFileID || wire.BatchStageOf(evidence.NativeStatus) == wire.BatchUnknown {
+		return BatchRecovery{}, ErrContract
+	}
+	staged, err := s.ReadStagedDurableContract(ctx, candidate.UUID)
+	if err != nil {
+		return BatchRecovery{}, err
+	}
+	payload, err := recoverBatchContract(staged, evidence.SubmittedFileID, evidence.Result)
+	if err != nil {
+		return BatchRecovery{}, err
+	}
+	metadata, err := json.Marshal(map[string]string{"upstream_model": evidence.Model})
+	if err != nil {
+		return BatchRecovery{}, err
+	}
+	version, expires := DurableContractVersion, evidence.CreatedAt.Add(DurableLifetime-time.Second)
+	resource.Metadata, resource.ContractVersion, resource.ExpiresAt = metadata, &version, &expires
+	return BatchRecovery{store: s, resource: resource, payload: payload}, nil
+}
+
+func recoverBatchContract(staged []byte, inputFileID string, body []byte) ([]byte, error) {
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(staged, &document); err != nil {
+		return nil, err
+	}
+	var effective []byte
+	if err := json.Unmarshal(document["effective"], &effective); err != nil {
+		return nil, err
+	}
+	var request struct {
+		InputFileID string `json:"input_file_id"`
+	}
+	if err := json.Unmarshal(effective, &request); err != nil || request.InputFileID != inputFileID {
+		return nil, ErrContract
+	}
+	result, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	merged := maps.Clone(document)
+	merged["result"] = result
+	return json.Marshal(merged)
+}
 
 func durableKind(kind string) bool { return kind == KindStrictFile || kind == KindStrictBatch }
 

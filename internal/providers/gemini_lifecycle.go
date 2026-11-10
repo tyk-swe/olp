@@ -15,7 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 )
 
-func (s *Server) certifyGeminiInteraction(ctx context.Context, cfg *Configuration, credential []byte, model, mode string, maxEventBytes int) error {
+func (s *Catalogue) certifyGeminiInteraction(ctx context.Context, cfg *Configuration, credential []byte, model, mode string, maxEventBytes int) error {
 	if mode != ModeUnary && mode != ModeStreaming {
 		return &probeError{Code: "capability_unavailable", Detail: "Gemini Interactions profile supports unary and streaming calls."}
 	}
@@ -56,7 +56,7 @@ func (s *Server) certifyGeminiInteraction(ctx context.Context, cfg *Configuratio
 	return nil
 }
 
-func (s *Server) certifyGeminiLive(ctx context.Context, cfg *Configuration, credential []byte, model string, maxEventBytes int) error {
+func (s *Catalogue) certifyGeminiLive(ctx context.Context, cfg *Configuration, credential []byte, model string, maxEventBytes int) error {
 	endpoint, err := cfg.transport().GeminiLiveURL()
 	if err != nil {
 		return &probeError{Code: "invalid_endpoint", Detail: "The Live profile cannot address this endpoint."}

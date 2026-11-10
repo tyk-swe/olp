@@ -94,6 +94,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 	}
 	var route *routing.Route
 	var resource *resources.Resource
+	var lifecycle *resources.Lifecycle
 	var err *Error
 	var idempotency string
 	var digest []byte
@@ -188,11 +189,12 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 		body = source.Bytes()
 	} else {
 		var getErr error
-		resource, getErr = s.deps.Resources.Get(r.Context(), e.Kind, x.keyID, r.PathValue("id"))
+		lifecycle, getErr = s.deps.Resources.OpenOwned(r.Context(), e.Kind, x.keyID, r.PathValue("id"))
 		if getErr != nil {
 			fail(notFoundError("not_found", "No resource with this identifier exists for this key."))
 			return
 		}
+		resource = lifecycle.Resource()
 		if resource.ContractVersion == nil || *resource.ContractVersion != retainedapi.Revision {
 			fail(pinUnavailable())
 			return
@@ -249,9 +251,8 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 		meta, _ := json.Marshal(map[string]string{"upstream_model": p.model, "contract_revision": retainedapi.Revision})
 		version := retainedapi.Revision
 		candidate := &resources.Resource{Kind: e.Kind, APIKeyID: x.keyID, RouteSlug: route.Slug, ProviderID: p.provider.ID, ProviderRevisionID: p.provider.RevisionID, RouteRevisionID: route.RevisionID, TargetID: p.target.ID, SlotID: p.slot.ID, CredentialID: p.slot.CredentialID, Metadata: meta, ContractVersion: &version}
-		var fresh bool
 		var prepareErr error
-		resource, fresh, prepareErr = s.deps.Resources.PrepareLifecycle(ctx, candidate, e.Operation, idempotency, digest)
+		lifecycle, prepareErr = s.deps.Resources.BeginCreate(ctx, candidate, resources.Submission{Operation: e.Operation, Key: idempotency, Digest: digest})
 		if errors.Is(prepareErr, resources.ErrSubmissionConflict) {
 			fail(serverError(409, "idempotency_conflict", "This submission identity is already bound to another request."))
 			return
@@ -260,19 +261,20 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 			fail(serverError(503, "provider_state_unavailable", "The submission could not be persisted."))
 			return
 		}
+		resource = lifecycle.Resource()
 		w.Header().Set("X-OLP-Resource-ID", resource.ID)
-		if !fresh {
+		if lifecycle.Existing() {
 			fail(serverError(409, "submission_exists", "This submission already exists; inspect X-OLP-Resource-ID instead of recreating it."))
 			return
 		}
-		if prepareErr = s.deps.Resources.DispatchLifecycle(ctx, resource.UUID); prepareErr != nil {
+		if prepareErr = lifecycle.Dispatch(ctx); prepareErr != nil {
 			fail(serverError(503, "provider_state_unavailable", "The submission could not be fenced."))
 			return
 		}
 		defer func() {
 			commitCtx, cancel := resourceCommitContext(r.Context())
 			defer cancel()
-			_ = s.deps.Resources.UnknownLifecycle(commitCtx, resource.UUID)
+			_ = lifecycle.Close(commitCtx)
 		}()
 	}
 	native, failure := s.pinnedDo(ctx, x, p, e.Method, endpoint, body, "application/json")
@@ -323,12 +325,12 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 		return
 	}
 	if e.Action == "create" {
-		resource.UpstreamID = nativeID
-		resource.State = "active"
-		if putErr := s.deps.Resources.CompleteLifecycle(commitCtx, resource); putErr != nil {
+		accepted, putErr := lifecycle.AcceptCreated(commitCtx, resources.CreationResult{IDs: []string{nativeID}})
+		if putErr != nil {
 			fail(serverError(503, "provider_state_unavailable", "The provider accepted creation but its resource identity could not be committed."))
 			return
 		}
+		resource = accepted
 	} else if nativeID != resource.UpstreamID {
 		fail(serverError(502, "provider_protocol_error", "The provider returned a mismatched resource identity."))
 		return

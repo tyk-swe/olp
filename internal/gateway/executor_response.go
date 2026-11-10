@@ -2,74 +2,17 @@ package gateway
 
 import (
 	"encoding/json"
-	"errors"
-	"io"
-	"mime"
-	"net/http"
 	"strconv"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/export/capture"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/telemetry"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-// aggregate reads the stream that an upstream serving only streams answers a
-// non-streaming request with, and returns the dialect's non-streaming result.
-// The attempt records the usage the stream stated, also when it fails, as it
-// would for a streaming caller.
-func (s *Server) aggregate(fact *AttemptFact, resp *http.Response, cfg connectors.Config, encodedWire wire.Format) ([]byte, error) {
-	if mediaType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type")); mediaType != "text/event-stream" {
-		return nil, &wire.ProtocolError{Detail: "the forced stream is not an event stream"}
-	}
-	limit := int(s.cfg.MaxEventBytes)
-	streamed, err := openai.Aggregate(encodedWire, cfg.StreamPayload(resp.Body, limit), limit, int(s.cfg.MaxResponseBytes))
-	if streamed == nil {
-		return nil, err
-	}
-	fact.observeUsage(streamed.Usage, streamed.UsageComplete)
-	return streamed.Body, err
-}
-
-// countingReader enforces the buffered unary response byte limit.
-type countingReader struct {
-	r        io.Reader
-	limit    int64
-	read     int64
-	exceeded bool
-}
-
-var errResponseTooLarge = errors.New("upstream response exceeds byte limit")
-
-func (c *countingReader) Read(p []byte) (int, error) {
-	if len(p) == 0 {
-		return 0, nil
-	}
-	if c.exceeded {
-		return 0, errResponseTooLarge
-	}
-	if c.read == c.limit {
-		// Reaching the limit is valid if the upstream ends here. Read at most
-		// one additional byte to distinguish EOF from an oversized response.
-		var extra [1]byte
-		n, err := c.r.Read(extra[:])
-		if n > 0 {
-			c.exceeded = true
-			return 0, errResponseTooLarge
-		}
-		return 0, err
-	}
-	if int64(len(p)) > c.limit-c.read {
-		p = p[:c.limit-c.read]
-	}
-	n, err := c.r.Read(p)
-	c.read += int64(n)
-	return n, err
-}
+var errResponseTooLarge = providerinvoke.ErrResponseTooLarge
 
 // finish emits the terminal envelope exactly once.
 func (s *Server) finish(x *call, out *outcome, status int) {

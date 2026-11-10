@@ -4,26 +4,28 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/tyk-swe/olp/internal/routing"
-
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/release"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
-// slotSecret asks for a credential slot's usable secret and remembers its
-// grant generation for this attempt. A slot without a credential version
-// authenticates without one.
+func (s *Server) targetResolver() providerinvoke.Resolver {
+	return providerinvoke.Resolver{Credentials: s.deps.Runtime, Policy: s.egress, Connections: s.connections, DefaultClient: s.client, HeaderTimeout: UpstreamHeaderTimeout}
+}
+
+func (s *Server) targetBinding(x *call, provider *routing.Provider, slot routing.Slot, model string) providerinvoke.Binding {
+	var caller providerinvoke.CallerCredential
+	if x.origin != "probe" {
+		caller = x.callerSecret
+	}
+	return s.targetResolver().Bind(x.request.release, providerinvoke.Target{Provider: *provider, Slot: slot, Model: model}, caller)
+}
+
 func (s *Server) slotSecret(ctx context.Context, x *call, slot routing.Slot, provider *routing.Provider, model string) ([]byte, error) {
-	x.grantGeneration = 0
-	if provider.CredentialSource == "caller" && x.origin != "probe" {
-		return x.callerSecret(provider.ID, model)
-	}
-	if slot.CredentialID == nil {
-		return nil, nil
-	}
-	secret, generation, err := s.deps.Runtime.Secret(ctx, x.request.release, *slot.CredentialID)
-	x.grantGeneration = generation
-	return secret, err
+	credential, err := s.targetBinding(x, provider, slot, model).Credential(ctx)
+	x.grantGeneration = credential.Generation
+	return credential.Secret, err
 }
 
 // applySlotCredential prepares an upstream request with a credential slot:
@@ -32,22 +34,11 @@ func (s *Server) slotSecret(ctx context.Context, x *call, slot routing.Slot, pro
 // caller classifies a failure of either step alike, so a secret read the
 // context interrupted is not blamed on the credential.
 func (s *Server) applySlotCredential(ctx context.Context, x *call, req *http.Request, cfg connectors.Config, slot routing.Slot, body []byte, provider *routing.Provider, model string) error {
-	secret, err := s.slotSecret(ctx, x, slot, provider, model)
-	if err != nil {
-		return err
-	}
-	return s.applyCredentials(ctx, x, req, cfg, secret, body)
+	return s.bindExchange(x, provider, slot, model, cfg, nil).authenticate(ctx, req, body)
 }
 
-// providerNetworkSecret asks the credential source for the provider's network
-// credential. A resource can retain a compatible historical profile and
-// network credential after the current release changed; current revocation
-// still wins.
-func (s *Server) providerNetworkSecret(ctx context.Context, release *release.Release, provider *routing.Provider) ([]byte, error) {
-	if provider.Network == nil || provider.Network.CredentialID == "" {
-		return nil, nil
-	}
-	return s.deps.Runtime.NetworkSecret(ctx, release, provider.ID, provider.Network.CredentialID)
+func (s *Server) providerNetworkSecret(ctx context.Context, pinned *release.Release, provider *routing.Provider) ([]byte, error) {
+	return s.targetResolver().Bind(pinned, providerinvoke.Target{Provider: *provider}, nil).NetworkSecret(ctx)
 }
 
 // pinEligibility reports whether a pinned slot's credential version and its
@@ -65,27 +56,9 @@ func (s *Server) pinEligibility(p *pin) routing.Eligibility {
 }
 
 func providerConnectionScope(provider *routing.Provider, slot routing.Slot) string {
-	credential := "none"
-	if slot.CredentialID != nil {
-		credential = *slot.CredentialID
-	}
-	return provider.ID + "/" + provider.RevisionID + "/" + slot.ID + "/" + credential
+	return (providerinvoke.Target{Provider: *provider, Slot: slot}).ConnectionScope()
 }
 
-func (s *Server) providerClient(ctx context.Context, release *release.Release, provider *routing.Provider, slot routing.Slot) (*http.Client, error) {
-	if provider.CredentialSource == "caller" {
-		secret, err := s.providerNetworkSecret(ctx, release, provider)
-		if err != nil {
-			return nil, err
-		}
-		return s.egress.EphemeralClient(provider.Network, secret, UpstreamHeaderTimeout)
-	}
-	if provider.Network == nil && provider.ProfileID == "" {
-		return s.client, nil
-	}
-	secret, err := s.providerNetworkSecret(ctx, release, provider)
-	if err != nil {
-		return nil, err
-	}
-	return s.connections.ClientScoped(providerConnectionScope(provider, slot), *s.egress, provider.Network, secret, UpstreamHeaderTimeout)
+func (s *Server) providerClient(ctx context.Context, pinned *release.Release, provider *routing.Provider, slot routing.Slot) (*http.Client, error) {
+	return s.targetResolver().Bind(pinned, providerinvoke.Target{Provider: *provider, Slot: slot}, nil).Client(ctx)
 }

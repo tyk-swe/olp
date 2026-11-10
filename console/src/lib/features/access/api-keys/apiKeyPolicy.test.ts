@@ -1,6 +1,10 @@
 import { expect, it } from 'vitest';
 import type { ApiKey } from './api';
-import { buildApiKeyPolicyInput, createApiKeyFormState } from './apiKeyPolicy';
+import {
+  buildApiKeyPolicyInput,
+  compileApiKeyPolicy,
+  createApiKeyFormState
+} from './apiKeyPolicy';
 import { validateApiKey } from './keyValidation';
 
 it('checks the default priority against the highest permitted priority', () => {
@@ -189,6 +193,18 @@ it('preserves configured key permissions, spending limits and expiry when editin
     run_limits: key.run_limits
   });
   expect(saved).not.toHaveProperty('expires_at');
+  const compiled = compileApiKeyPolicy(
+    state,
+    { kind: 'update', key },
+    new Date('2040-01-01')
+  );
+  expect(compiled.ok).toBe(true);
+  if (compiled.ok && compiled.command.kind === 'update') {
+    expect(compiled.command.key).toBe(key);
+    expect(compiled.command.input).not.toHaveProperty('project_id');
+    expect(compiled.command.input).not.toHaveProperty('expires_at');
+    expect(compiled.command.input.scopes).toEqual(key.scopes);
+  }
   const changed = { ...state, expiresAt: '2031-02-04T03:30' };
   expect(buildApiKeyPolicyInput(changed, key).expires_at).toBe(
     new Date(changed.expiresAt).toISOString()
@@ -313,5 +329,52 @@ it('reports network and limit errors together so the form can correct them', () 
     name: 'Enter a name.',
     allowedCIDRs: expect.stringContaining('Use IPv4 or IPv6 CIDR ranges'),
     requestsPerMinute: 'Use a positive whole number.'
+  });
+});
+
+it('compiles only valid project-scoped policies into creation commands', () => {
+  const form = {
+    ...createApiKeyFormState(),
+    name: 'Key',
+    allowedRouteGroups: 'research'
+  };
+  const now = new Date('2030-01-01T00:00:00Z');
+  const invalid = compileApiKeyPolicy(form, { kind: 'create' }, now);
+  expect(invalid).toMatchObject({
+    ok: false,
+    formError: 'Route groups require a project-scoped key.'
+  });
+  const valid = compileApiKeyPolicy(
+    { ...form, projectId: 'project' },
+    { kind: 'create' },
+    now
+  );
+  expect(valid).toMatchObject({
+    ok: true,
+    command: {
+      kind: 'create',
+      input: { project_id: 'project', allowed_route_groups: ['research'] }
+    }
+  });
+});
+
+it('returns field errors for invalid expiry and numeric values before serialization', () => {
+  const form = {
+    ...createApiKeyFormState(),
+    name: 'Key',
+    expiresAt: 'invalid',
+    requestsPerMinute: '9007199254740993'
+  };
+  const invalid = compileApiKeyPolicy(
+    form,
+    { kind: 'create' },
+    new Date('2030-01-01T00:00:00Z')
+  );
+  expect(invalid).toMatchObject({
+    ok: false,
+    errors: {
+      expiresAt: 'Enter a valid expiry date and time.',
+      requestsPerMinute: 'Use a positive whole number.'
+    }
   });
 });

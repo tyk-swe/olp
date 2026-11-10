@@ -22,10 +22,8 @@ var uuidNewV7 = uuid.NewV7
 // bounded handoff. A rejected event checkpoints its loss with a bounded write
 // so other replicas can refuse admission against incomplete cost accounting.
 type AccountingSink struct {
-	RecordLoss func(context.Context, string) error
-	Emitter    *usage.Emitter
-	Log        *slog.Logger
-	Next       Sink
+	Delivery *usage.Delivery
+	Next     Sink
 }
 
 // Terminal records one finished request.
@@ -33,49 +31,18 @@ func (a *AccountingSink) Terminal(e Envelope) {
 	if a.Next != nil {
 		a.Next.Terminal(e)
 	}
-	if a.Emitter == nil {
+	if a.Delivery == nil {
 		return
 	}
 	event, err := accountingEvent(e)
 	if err != nil {
-		a.drop(e.RequestID, err)
+		a.Delivery.Reject(e.RequestID, err)
 		return
 	}
 	if event == nil {
 		return
 	}
-	if _, err := usage.Validate(event); err != nil {
-		a.drop(e.RequestID, err)
-		return
-	}
-	if err := a.Emitter.Emit(*event); err != nil {
-		a.recordLoss(e.RequestID)
-		a.logger().Warn("usage event not queued", "request_id", e.RequestID, "error", err.Error())
-	}
-}
-
-func (a *AccountingSink) drop(requestID string, err error) {
-	a.Emitter.Drop()
-	a.recordLoss(requestID)
-	a.logger().Warn("usage event dropped", "request_id", requestID, "error", err.Error())
-}
-
-func (a *AccountingSink) recordLoss(requestID string) {
-	if a.RecordLoss == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if err := a.RecordLoss(ctx, requestID); err != nil {
-		a.logger().Error("accounting loss checkpoint failed", "request_id", requestID, "error", err)
-	}
-}
-
-func (a *AccountingSink) logger() *slog.Logger {
-	if a.Log == nil {
-		return slog.Default()
-	}
-	return a.Log
+	_ = a.Delivery.Emit(*event)
 }
 
 // PersistingSink records terminal events directly for explicit persistence
