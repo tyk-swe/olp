@@ -93,6 +93,13 @@ func (f billingFixture) enable(t *testing.T, source, scope, storedCredential str
 	}
 }
 
+func (f billingFixture) retainUsage(t *testing.T, days int) {
+	t.Helper()
+	if _, err := f.pool.Exec(t.Context(), `UPDATE olp.settings SET value=$1 WHERE key='retention.usage_days'`, strconv.Itoa(days)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func (f billingFixture) importDue(t *testing.T, s3Endpoint string) {
 	t.Helper()
 	if _, err := f.pool.Exec(t.Context(), `UPDATE olp.provider_billing_imports SET next_import_at=now() WHERE provider_id=$1::uuid`, f.providerID); err != nil {
@@ -239,11 +246,11 @@ func TestBillingImportReadsBedrockLinesFromAnAWSCostReport(t *testing.T) {
 	const payer, bucket, prefix = "123456789012", "olp-cur", "cur/olp"
 	today := time.Now().UTC().Truncate(24 * time.Hour)
 	earliest := today.AddDate(0, 0, -15)
-	server := httptest.NewServer(fakeCostReportBucket(t, bucket, prefix, payer, earliest, today))
+	bucketHandler, _ := fakeCostReportBucket(t, bucket, prefix, payer, earliest, today)
+	server := httptest.NewServer(bucketHandler)
 	t.Cleanup(server.Close)
 	f := newBillingFixture(t, "bedrock", `{"kind":"bedrock"}`)
-	f.enable(t, "aws_cur", fmt.Sprintf(`{"payer_account_id":%q,"bucket":%q,"report_prefix":%q,"region":"us-east-1"}`, payer, bucket, prefix),
-		"{\n  \"source\": \"aws_cur\",\n  \"auth_mode\": \"static\",\n  \"access_key_id\": \"AKIAIOSFODNN7EXAMPLE\",\n  \"secret_access_key\": \"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\"\n}")
+	f.enable(t, "aws_cur", fmt.Sprintf(`{"payer_account_id":%q,"bucket":%q,"report_prefix":%q,"region":"us-east-1"}`, payer, bucket, prefix), staticAWSCredential)
 
 	f.importDue(t, server.URL)
 	status := f.status(t)
@@ -260,8 +267,46 @@ func TestBillingImportReadsBedrockLinesFromAnAWSCostReport(t *testing.T) {
 	}
 }
 
-func fakeCostReportBucket(t *testing.T, bucket, prefix, payer string, earliest, today time.Time) http.Handler {
+func TestBillingImportRereadsOnlyTheOpenMonthsOnceOlderMonthsAreCovered(t *testing.T) {
+	t.Parallel()
+	const payer, bucket, prefix = "123456789012", "olp-cur", "cur/olp"
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	earliest := today.AddDate(0, 0, -100)
+	bucketHandler, listed := fakeCostReportBucket(t, bucket, prefix, payer, earliest, today)
+	server := httptest.NewServer(bucketHandler)
+	t.Cleanup(server.Close)
+	f := newBillingFixture(t, "bedrock", `{"kind":"bedrock"}`)
+	f.retainUsage(t, 100)
+	f.enable(t, "aws_cur", fmt.Sprintf(`{"payer_account_id":%q,"bucket":%q,"report_prefix":%q,"region":"us-east-1"}`, payer, bucket, prefix), staticAWSCredential)
+
+	f.importDue(t, server.URL)
+	backfilled := listed()
+	f.importDue(t, server.URL)
+	reread := slices.Sorted(slices.Values(listed()[len(backfilled):]))
+
+	current := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
+	period := func(month time.Time) string {
+		return month.Format("20060102") + "-" + month.AddDate(0, 1, 0).Format("20060102")
+	}
+	if want := []string{period(current.AddDate(0, -1, 0)), period(current)}; len(backfilled) < 4 || !slices.Equal(reread, want) {
+		t.Fatalf("listed %q on backfill and %q on the next pass, want only %q on the next pass", backfilled, reread, want)
+	}
+	if status := f.status(t); !status.succeeded || status.from != day(earliest) || status.through != day(today.AddDate(0, 0, -1)) {
+		t.Fatalf("import status %+v, want success covering %s to yesterday", status, day(earliest))
+	}
+}
+
+const staticAWSCredential = "{\n  \"source\": \"aws_cur\",\n  \"auth_mode\": \"static\",\n  \"access_key_id\": \"AKIAIOSFODNN7EXAMPLE\",\n  \"secret_access_key\": \"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\"\n}"
+
+func fakeCostReportBucket(t *testing.T, bucket, prefix, payer string, earliest, today time.Time) (http.Handler, func() []string) {
 	t.Helper()
+	var mu sync.Mutex
+	var listed []string
+	snapshot := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(listed)
+	}
 	const manifestTime = "20060102T150405.000Z"
 	delivered := time.Now().UTC().Add(-time.Minute)
 	month := func(period string) (time.Time, time.Time) {
@@ -294,6 +339,9 @@ func fakeCostReportBucket(t *testing.T, bucket, prefix, payer string, earliest, 
 		case r.URL.Path == "/"+bucket && r.URL.Query().Get("list-type") == "2":
 			listPrefix := r.URL.Query().Get("prefix")
 			period := strings.TrimSuffix(strings.TrimPrefix(listPrefix, prefix+"/"), "/")
+			mu.Lock()
+			listed = append(listed, period)
+			mu.Unlock()
 			w.Header().Set("Content-Type", "application/xml")
 			fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?><ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Name>%s</Name><Prefix>%s</Prefix><KeyCount>1</KeyCount><MaxKeys>1000</MaxKeys><IsTruncated>false</IsTruncated><Contents><Key>%s</Key><LastModified>%s</LastModified><Size>1</Size></Contents></ListBucketResult>`,
 				bucket, listPrefix, listPrefix+"assembly-"+period+"/olp-Manifest.json", delivered.Format("2006-01-02T15:04:05.000Z"))
@@ -317,5 +365,5 @@ func fakeCostReportBucket(t *testing.T, bucket, prefix, payer string, earliest, 
 		default:
 			http.NotFound(w, r)
 		}
-	})
+	}), snapshot
 }

@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"net"
 	"net/http"
 	"path"
@@ -172,14 +171,14 @@ func fetchAzureSource(ctx context.Context, in *fetchInput, emit func(periodDays)
 		return err
 	}
 	earliest := today.AddDate(0, 0, -retention)
-	completed, err := in.importer.completedCloudPeriods(ctx, in.row, earliest, today)
+	completed, err := in.importer.completedMonths(ctx, in.row, earliest, today)
 	if err != nil {
 		return err
 	}
-	return fetchAzure(ctx, client, connectors.NewBillingAuth(in.importer.Egress, authClient), endpoint, scope, in.key, earliest, today, completed, in.row, emit)
+	return fetchAzure(ctx, client, connectors.NewBillingAuth(in.importer.Egress, authClient), endpoint, scope, in.key, earliest, today, pendingMonths(earliest, today, completed), in.row, emit)
 }
 
-func fetchAzure(ctx context.Context, client *http.Client, auth *connectors.Auth, endpoint string, scope azureScope, key []byte, earliest, today time.Time, completed map[string]struct{}, row *importRow, store func(periodDays) error) error {
+func fetchAzure(ctx context.Context, client *http.Client, auth *connectors.Auth, endpoint string, scope azureScope, key []byte, earliest, today time.Time, pending []time.Time, row *importRow, store func(periodDays) error) error {
 	var credential azureCredential
 	if err := json.Unmarshal(key, &credential); err != nil {
 		return failFetch("credential", errors.New("invalid credential"))
@@ -205,42 +204,24 @@ func fetchAzure(ctx context.Context, client *http.Client, auth *connectors.Auth,
 		return failFetch("endpoint", errors.New("invalid Azure storage endpoint"))
 	}
 	reader := azureReader{container: storage.ServiceClient().NewContainerClient(scope.Container), scope: scope}
-	names, err := reader.list(fetchCtx, earliest, today, completed)
+	names, err := reader.list(fetchCtx, pending)
 	if err != nil {
 		return err
 	}
 	if len(names) == 0 {
 		return failFetch("response", errors.New("no Azure export manifests found"))
 	}
-	groups := map[string][]string{}
-	base := strings.Trim(strings.Join([]string{scope.Prefix, scope.ExportName}, "/"), "/") + "/"
-	for _, name := range names {
-		period := strings.SplitN(strings.TrimPrefix(name, base), "/", 2)[0]
-		groups[period] = append(groups[period], name)
+	inMonth := func(month time.Time) func(name string) bool {
+		return func(name string) bool { return strings.HasPrefix(name, reader.monthPrefix(month)) }
 	}
-	periods := cloudPeriodOrder(row, slices.Sorted(maps.Keys(groups)))
+	months := slices.DeleteFunc(slices.Clone(pending), func(month time.Time) bool { return !slices.ContainsFunc(names, inMonth(month)) })
 	var totals azureTotals
 	var aggregates int
-	var failure error
-	completedCount := 0
-	for periodIndex, period := range periods {
-		var candidates []azureRun
-		valid := true
-		for _, name := range groups[period] {
-			run, err := reader.manifest(fetchCtx, name)
-			if err != nil {
-				if failure == nil {
-					failure = err
-				}
-				valid = false
-				break
-			}
-			candidates = append(candidates, run)
+	return walkMonths(row, months, len(months), func(month time.Time) error {
+		candidates, err := reader.runs(fetchCtx, slices.DeleteFunc(slices.Clone(names), func(name string) bool { return !inMonth(month)(name) }))
+		if err != nil {
+			return err
 		}
-		if !valid {
-			continue
-		}
-		slices.SortFunc(candidates, func(a, b azureRun) int { return b.submitted.Compare(a.submitted) })
 		for index, run := range candidates {
 			days, nextTotals, err := reader.readRun(fetchCtx, run, totals, azureMaxAggregates-aggregates, earliest, today)
 			totals = nextTotals
@@ -248,31 +229,35 @@ func fetchAzure(ctx context.Context, client *http.Client, auth *connectors.Auth,
 				continue
 			}
 			if err != nil {
-				if errors.Is(err, errCloudBudget) && completedCount > 0 && failure == nil {
-					return &cloudContinuation{next: period, remaining: len(periods) - periodIndex}
-				}
-				if failure == nil {
-					failure = err
-				}
-				break
+				return err
 			}
 			for _, lines := range days {
 				aggregates += len(lines)
 			}
 			if aggregates > azureMaxAggregates {
-				if failure == nil {
-					failure = failFetch("response", errors.New("too many aggregates"))
-				}
-				break
+				return failFetch("response", errors.New("too many aggregates"))
 			}
-			if err := store(periodDays{start: run.start.Format(dayFormat), revision: &sourceRevision{id: run.manifest.RunInfo.RunID, orderingAt: run.submitted}, days: days}); err != nil {
-				return err
-			}
-			completedCount++
-			break
+			return store(periodDays{start: run.start.Format(dayFormat), revision: &sourceRevision{id: run.manifest.RunInfo.RunID, orderingAt: run.submitted}, days: days})
 		}
+		return nil
+	})
+}
+
+func (a *azureReader) runs(ctx context.Context, names []string) ([]azureRun, error) {
+	candidates := make([]azureRun, 0, len(names))
+	for _, name := range names {
+		run, err := a.manifest(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, run)
 	}
-	return failure
+	slices.SortFunc(candidates, func(a, b azureRun) int { return b.submitted.Compare(a.submitted) })
+	return candidates, nil
+}
+
+func (a *azureReader) monthPrefix(month time.Time) string {
+	return strings.Trim(strings.Join([]string{a.scope.Prefix, a.scope.ExportName}, "/"), "/") + "/" + month.Format("20060102") + "-"
 }
 
 func (a *azureReader) document(ctx context.Context, name string) (azureManifest, error) {
@@ -292,16 +277,10 @@ func (a *azureReader) document(ctx context.Context, name string) (azureManifest,
 	return manifest, nil
 }
 
-func (a *azureReader) list(ctx context.Context, earliest, today time.Time, completed map[string]struct{}) ([]string, error) {
-	base := strings.Trim(strings.Join([]string{a.scope.Prefix, a.scope.ExportName}, "/"), "/") + "/"
-	first := time.Date(earliest.Year(), earliest.Month(), 1, 0, 0, 0, 0, time.UTC)
+func (a *azureReader) list(ctx context.Context, months []time.Time) ([]string, error) {
 	names := []string{}
-	for month := first; !month.After(today); month = month.AddDate(0, 1, 0) {
-		period := month.Format("20060102") + "-" + month.AddDate(0, 1, 0).Format("20060102")
-		if _, done := completed[period]; done {
-			continue
-		}
-		prefix := base + month.Format("20060102") + "-"
+	for _, month := range months {
+		prefix := a.monthPrefix(month)
 		pager := a.container.NewListBlobsFlatPager(&container.ListBlobsFlatOptions{Prefix: &prefix})
 		pages := 0
 		for pager.More() {

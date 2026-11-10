@@ -193,8 +193,8 @@ func (i *Importer) pass(ctx context.Context) (bool, error) {
 			i.outcome(row.ProviderID, code)
 			i.log().Warn("billing import failed", "provider", row.ProviderID, "code", code)
 		} else {
-			if row.CloudNextPeriod != nil {
-				if _, err := i.Pool.Exec(ctx, `UPDATE olp.provider_billing_imports SET cloud_next_period=NULL,cloud_periods_remaining=0
+			if row.ResumePeriod != nil {
+				if _, err := i.Pool.Exec(ctx, `UPDATE olp.provider_billing_imports SET resume_period=NULL,resume_remaining=0
 					WHERE provider_id=$1::uuid AND etag=$2::uuid`, row.ProviderID, row.ETag); err != nil {
 					return true, err
 				}
@@ -207,10 +207,10 @@ func (i *Importer) pass(ctx context.Context) (bool, error) {
 
 func (i *Importer) recordContinuation(ctx context.Context, row *importRow, continuation *cloudContinuation) error {
 	_, err := i.Pool.Exec(ctx, `UPDATE olp.provider_billing_imports SET
-		cloud_next_period=$3,cloud_periods_remaining=$4,next_import_at=now()+$5::interval,
+		resume_period=$3::date,resume_remaining=$4,next_import_at=now()+$5::interval,
 		last_error_code=NULL,consecutive_failures=0,updated_at=now()
 		WHERE provider_id=$1::uuid AND etag=$2::uuid`, row.ProviderID, row.ETag,
-		continuation.next, continuation.remaining, ImportInterval.String())
+		continuation.next.Format(dayFormat), continuation.remaining, ImportInterval.String())
 	return err
 }
 
@@ -232,31 +232,21 @@ func window(through *string, today time.Time) (start, end time.Time, err error) 
 	return refresh, today, nil
 }
 
-func (i *Importer) completedCloudPeriods(ctx context.Context, row *importRow, earliest, today time.Time) (map[string]struct{}, error) {
-	rows, err := i.Pool.Query(ctx, `SELECT period_start FROM (
-			SELECT date_trunc('month',day)::date AS period_start FROM olp.provider_billing_days
-			WHERE provider_id=$1::uuid AND source=$2 AND scope=$3::jsonb
-			AND day >= $4::date AND day < date_trunc('month', $5::date) - interval '1 month'
-		) days GROUP BY period_start
-		HAVING COUNT(*) = (period_start + interval '1 month')::date - GREATEST(period_start,$4::date)`,
-		row.ProviderID, row.Source, row.Scope, earliest.Format(dayFormat), today.Format(dayFormat))
+func (i *Importer) completedMonths(ctx context.Context, row *importRow, earliest, today time.Time) ([]time.Time, error) {
+	digest, err := scopeDigest(row.Source, row.Scope)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	completed := map[string]struct{}{}
-	for rows.Next() {
-		var month time.Time
-		if err := rows.Scan(&month); err != nil {
-			return nil, err
-		}
-		period := month.Format("20060102") + "-" + month.AddDate(0, 1, 0).Format("20060102")
-		completed[period] = struct{}{}
-	}
-	if err := rows.Err(); err != nil {
+	rows, err := i.Pool.Query(ctx, `SELECT period_start FROM olp.provider_billing_revisions
+		WHERE provider_id=$1::uuid AND source=$2 AND scope_digest=$3
+		AND period_start < date_trunc('month', $5::date) - interval '1 month'
+		AND covered_from <= GREATEST(period_start, $4::date)
+		AND covered_through >= (period_start + interval '1 month' - interval '1 day')::date`,
+		row.ProviderID, row.Source, digest[:], earliest.Format(dayFormat), today.Format(dayFormat))
+	if err != nil {
 		return nil, err
 	}
-	return completed, nil
+	return pgx.CollectRows(rows, pgx.RowTo[time.Time])
 }
 
 func (i *Importer) importOne(ctx context.Context, row *importRow) error {
@@ -365,10 +355,7 @@ func (i *Importer) storeDays(ctx context.Context, row *importRow, period periodD
 		return nil
 	}
 	daysList := slices.Sorted(maps.Keys(period.days))
-	var minDay, maxDay *string
-	if len(daysList) > 0 {
-		minDay, maxDay = &daysList[0], &daysList[len(daysList)-1]
-	}
+	minDay, maxDay := period.coverage(daysList)
 	var appliedRevision *string
 	if revision := period.revision; revision != nil {
 		digest, err := scopeDigest(row.Source, row.Scope)
@@ -477,7 +464,7 @@ func (i *Importer) recordFailure(ctx context.Context, row *importRow, code strin
 		delay = maxBackoff
 	}
 	_, err := i.Pool.Exec(ctx, `UPDATE olp.provider_billing_imports SET
-		last_import_at=now(),last_error_code=$2,consecutive_failures=$3,cloud_next_period=NULL,cloud_periods_remaining=0,
+		last_import_at=now(),last_error_code=$2,consecutive_failures=$3,resume_period=NULL,resume_remaining=0,
 		next_import_at=now()+$4::interval,updated_at=now()
 		WHERE provider_id=$1::uuid AND etag=$5`, row.ProviderID, code, failures, delay.String(), row.ETag)
 	return err
@@ -577,7 +564,7 @@ func syncImportRevision(ctx context.Context, tx pgx.Tx, providerID, source strin
 		}
 		_, err := tx.Exec(ctx, `UPDATE olp.provider_billing_imports SET
 			imported_from=NULL,imported_through=NULL,source_revision=NULL,last_success_at=NULL,
-			cloud_next_period=NULL,cloud_periods_remaining=0 WHERE provider_id=$1::uuid`, providerID)
+			resume_period=NULL,resume_remaining=0 WHERE provider_id=$1::uuid`, providerID)
 		return err
 	}
 	if err := refreshImportCoverage(ctx, tx, providerID, source, scope); err != nil {

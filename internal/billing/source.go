@@ -31,6 +31,20 @@ type dayWindow struct {
 	to   time.Time
 }
 
+func (p periodDays) coverage(days []string) (from, through *string) {
+	if p.replaces != nil {
+		if !p.replaces.from.Before(p.replaces.to) {
+			return nil, nil
+		}
+		first, last := p.replaces.from.Format(dayFormat), p.replaces.to.AddDate(0, 0, -1).Format(dayFormat)
+		return &first, &last
+	}
+	if len(days) == 0 {
+		return nil, nil
+	}
+	return &days[0], &days[len(days)-1]
+}
+
 type fetchInput struct {
 	importer *Importer
 	row      *importRow

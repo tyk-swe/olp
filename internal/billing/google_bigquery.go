@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -27,6 +28,7 @@ const (
 	googleMaximumBytes     = 1 << 30
 	googleMaximumRows      = 200000
 	googleImportTimeout    = 45 * time.Second
+	googleQueriesPerPass   = 3
 	googleQueryTimeout     = 20 * time.Second
 )
 
@@ -104,91 +106,13 @@ func (i *Importer) importGoogle(ctx context.Context, row *importRow, client *htt
 		return err
 	}
 	earliest := today.AddDate(0, 0, -retention)
-	current := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
-	historical, phase, err := i.nextGoogleHistoricalPeriod(importCtx, row, earliest, current)
+	completed, err := i.completedMonths(importCtx, row, earliest, today)
 	if err != nil {
 		return err
 	}
-	periods := googlePeriodOrder(historical, current, phase)
-	if err := i.importGooglePeriods(importCtx, row, client, auth, key, earliest, today, periods[:], emit); err != nil {
-		return err
-	}
-	return i.scheduleGoogleBackfill(importCtx, row, earliest, current)
-}
-
-func (i *Importer) scheduleGoogleBackfill(ctx context.Context, row *importRow, earliest, current time.Time) error {
-	digest, err := scopeDigest(row.Source, row.Scope)
-	if err != nil {
-		return err
-	}
-	if _, err := i.Pool.Exec(ctx, `UPDATE olp.provider_billing_imports SET next_import_at=LEAST(next_import_at,now()+interval '1 minute')
-		WHERE provider_id=$1::uuid AND etag=$2::uuid AND EXISTS (
-			SELECT 1 FROM generate_series(date_trunc('month',$5::date),$6::date - interval '2 months',interval '1 month') AS period(start)
-			WHERE NOT EXISTS (SELECT 1 FROM olp.provider_billing_revisions
-				WHERE provider_id=$1::uuid AND source=$3 AND scope_digest=$4 AND period_start=period.start::date)
-		)`, row.ProviderID, row.ETag, row.Source, digest[:], earliest.Format(dayFormat), current.Format(dayFormat)); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (i *Importer) nextGoogleHistoricalPeriod(ctx context.Context, row *importRow, earliest, current time.Time) (time.Time, int, error) {
-	first := time.Date(earliest.Year(), earliest.Month(), 1, 0, 0, 0, 0, time.UTC)
-	last := current.AddDate(0, -2, 0)
-	var cursor *time.Time
-	var phase int
-	if err := i.Pool.QueryRow(ctx, `SELECT google_next_period, google_period_phase FROM olp.provider_billing_imports
-		WHERE provider_id=$1::uuid AND etag=$2::uuid`, row.ProviderID, row.ETag).Scan(&cursor, &phase); err != nil {
-		return time.Time{}, 0, err
-	}
-	selected := googlePeriodCursor(cursor, first, last)
-	prior := selected.AddDate(0, -1, 0)
-	next := googlePeriodCursor(&prior, first, last)
-	if _, err := i.Pool.Exec(ctx, `UPDATE olp.provider_billing_imports SET google_next_period=$3::date, google_period_phase=$4
-		WHERE provider_id=$1::uuid AND etag=$2::uuid`, row.ProviderID, row.ETag, googlePeriodDate(next), (phase+1)%3); err != nil {
-		return time.Time{}, 0, err
-	}
-	return selected, phase, nil
-}
-
-func googlePeriodDate(value time.Time) *string {
-	if value.IsZero() {
-		return nil
-	}
-	date := value.Format(dayFormat)
-	return &date
-}
-
-func googlePeriodOrder(historical, current time.Time, phase int) [3]time.Time {
-	previous := current.AddDate(0, -1, 0)
-	switch phase {
-	case 1:
-		return [3]time.Time{current, historical, previous}
-	case 2:
-		return [3]time.Time{previous, historical, current}
-	default:
-		return [3]time.Time{historical, previous, current}
-	}
-}
-
-func (i *Importer) importGooglePeriods(ctx context.Context, row *importRow, client *http.Client, auth *connectors.Auth, key []byte, earliest, today time.Time, periods []time.Time, emit func(periodDays) error) error {
-	if len(periods) == 0 {
-		return nil
-	}
-	return errors.Join(
-		i.importGooglePeriod(ctx, row, client, auth, key, earliest, today, periods[0], emit),
-		i.importGooglePeriods(ctx, row, client, auth, key, earliest, today, periods[1:], emit),
-	)
-}
-
-func googlePeriodCursor(cursor *time.Time, first, last time.Time) time.Time {
-	if last.Before(first) {
-		return time.Time{}
-	}
-	if cursor == nil || cursor.Before(first) || cursor.After(last) {
-		return last
-	}
-	return cursor.UTC()
+	return walkMonths(row, pendingMonths(earliest, today, completed), googleQueriesPerPass, func(month time.Time) error {
+		return i.importGooglePeriod(importCtx, row, client, auth, key, earliest, today, month, emit)
+	})
 }
 
 func googlePeriodBounds(month, earliest, today time.Time) (time.Time, time.Time) {
@@ -206,9 +130,6 @@ func googlePeriodBounds(month, earliest, today time.Time) (time.Time, time.Time)
 }
 
 func (i *Importer) importGooglePeriod(ctx context.Context, row *importRow, client *http.Client, auth *connectors.Auth, key []byte, earliest, today, month time.Time, emit func(periodDays) error) error {
-	if month.IsZero() {
-		return nil
-	}
 	start, end := googlePeriodBounds(month, earliest, today)
 	if !start.Before(end) {
 		return nil
@@ -217,7 +138,8 @@ func (i *Importer) importGooglePeriod(ctx context.Context, row *importRow, clien
 	if err != nil {
 		return err
 	}
-	return emit(periodDays{start: month.Format(dayFormat), revision: revision, days: days, replaces: &dayWindow{from: start, to: end}})
+	watermark := revision.orderingAt.UTC().Truncate(24 * time.Hour)
+	return emit(periodDays{start: month.Format(dayFormat), revision: revision, days: days, replaces: &dayWindow{from: start, to: slices.MinFunc([]time.Time{end, watermark}, time.Time.Compare)}})
 }
 
 func fetchGoogle(ctx context.Context, client *http.Client, auth *connectors.Auth, rawScope json.RawMessage, rawCredential []byte, start, end time.Time) (map[string]map[lineKey]lineSum, *sourceRevision, error) {

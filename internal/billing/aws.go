@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"path"
 	"slices"
 	"strings"
@@ -46,7 +45,7 @@ type awsManifest struct {
 type awsDelivery struct {
 	key      string
 	modified time.Time
-	period   string
+	month    time.Time
 }
 
 func awsCostSource() costSource {
@@ -109,11 +108,12 @@ func (i *Importer) importAWS(ctx context.Context, row *importRow, cfg *providerC
 		return err
 	}
 	earliest := today.AddDate(0, 0, -retention)
-	completed, err := i.completedCloudPeriods(fetchCtx, row, earliest, today)
+	completed, err := i.completedMonths(fetchCtx, row, earliest, today)
 	if err != nil {
 		return err
 	}
-	deliveries, err := awsDeliveries(fetchCtx, client, scope, earliest, today, completed)
+	pending := pendingMonths(earliest, today, completed)
+	deliveries, err := awsDeliveries(fetchCtx, client, scope, pending)
 	if err != nil {
 		return err
 	}
@@ -121,38 +121,21 @@ func (i *Importer) importAWS(ctx context.Context, row *importRow, cfg *providerC
 		return failFetch("status", errors.New("AWS report has no deliveries"))
 	}
 	budget := awsBudget{}
-	groups := map[string][]awsDelivery{}
-	for _, delivery := range deliveries {
-		groups[delivery.period] = append(groups[delivery.period], delivery)
-	}
-	periods := cloudPeriodOrder(row, slices.Sorted(maps.Keys(groups)))
-	var failure error
-	completedCount := 0
-	for index, period := range periods {
-		complete := false
-		for _, delivery := range groups[period] {
-			err := i.importAWSDelivery(fetchCtx, row, client, scope, delivery, earliest, today, &budget, emit)
-			if errors.Is(err, errAWSIncomplete) {
+	months := slices.DeleteFunc(slices.Clone(pending), func(month time.Time) bool {
+		return !slices.ContainsFunc(deliveries, func(delivery awsDelivery) bool { return delivery.month.Equal(month) })
+	})
+	return walkMonths(row, months, len(months), func(month time.Time) error {
+		for _, delivery := range deliveries {
+			if !delivery.month.Equal(month) {
 				continue
 			}
-			if err != nil {
-				if errors.Is(err, errCloudBudget) && completedCount > 0 && failure == nil {
-					return &cloudContinuation{next: period, remaining: len(periods) - index}
-				}
-				if failure == nil {
-					failure = err
-				}
-				break
+			err := i.importAWSDelivery(fetchCtx, row, client, scope, delivery, earliest, today, &budget, emit)
+			if !errors.Is(err, errAWSIncomplete) {
+				return err
 			}
-			complete = true
-			completedCount++
-			break
 		}
-		if !complete && failure == nil {
-			failure = failFetch("status", errAWSIncomplete)
-		}
-	}
-	return failure
+		return failFetch("status", errAWSIncomplete)
+	})
 }
 
 func (i *Importer) importAWSDelivery(ctx context.Context, row *importRow, client *s3.Client, scope awsScope, delivery awsDelivery, earliest, today time.Time, budget *awsBudget, emit func(periodDays) error) error {
@@ -168,7 +151,7 @@ func (i *Importer) importAWSDelivery(ctx context.Context, row *importRow, client
 	if err != nil || !end.After(start) {
 		return failFetch("response", errors.New("invalid AWS billing period"))
 	}
-	if start.UTC().Format("20060102")+"-"+end.UTC().Format("20060102") != delivery.period {
+	if !start.UTC().Truncate(24*time.Hour).Equal(delivery.month) || !end.UTC().Truncate(24*time.Hour).Equal(delivery.month.AddDate(0, 1, 0)) {
 		return failFetch("response", errors.New("AWS billing period does not match delivery"))
 	}
 	days := reportAccumulator{}
@@ -190,16 +173,11 @@ func (i *Importer) importAWSDelivery(ctx context.Context, row *importRow, client
 	return nil
 }
 
-func awsDeliveries(ctx context.Context, client *s3.Client, scope awsScope, earliest, today time.Time, completed map[string]struct{}) ([]awsDelivery, error) {
+func awsDeliveries(ctx context.Context, client *s3.Client, scope awsScope, months []time.Time) ([]awsDelivery, error) {
 	deliveries := []awsDelivery{}
 	seen := 0
-	firstMonth := time.Date(earliest.Year(), earliest.Month(), 1, 0, 0, 0, 0, time.UTC)
-	for month := firstMonth; !month.After(today); month = month.AddDate(0, 1, 0) {
-		period := month.Format("20060102") + "-" + month.AddDate(0, 1, 0).Format("20060102")
-		if _, done := completed[period]; done {
-			continue
-		}
-		prefix := scope.ReportPrefix + "/" + period + "/"
+	for _, month := range months {
+		prefix := scope.ReportPrefix + "/" + month.Format("20060102") + "-" + month.AddDate(0, 1, 0).Format("20060102") + "/"
 		paginator := s3.NewListObjectsV2Paginator(client, &s3.ListObjectsV2Input{Bucket: aws.String(scope.Bucket), Prefix: aws.String(prefix)})
 		for paginator.HasMorePages() {
 			page, err := paginator.NextPage(ctx)
@@ -216,20 +194,19 @@ func awsDeliveries(ctx context.Context, client *s3.Client, scope awsScope, earli
 				if len(pieces) != 2 || !strings.HasSuffix(pieces[1], "-Manifest.json") || object.LastModified == nil {
 					continue
 				}
-				deliveries = append(deliveries, awsDelivery{key: key, modified: *object.LastModified, period: period})
+				deliveries = append(deliveries, awsDelivery{key: key, modified: *object.LastModified, month: month})
 			}
 		}
 	}
-
-	slices.SortFunc(deliveries, func(a, b awsDelivery) int {
-		if order := strings.Compare(a.period, b.period); order != 0 {
+	slices.SortStableFunc(deliveries, func(a, b awsDelivery) int {
+		if order := b.month.Compare(a.month); order != 0 {
 			return order
 		}
 		return b.modified.Compare(a.modified)
 	})
 	for index := 1; index < len(deliveries); index++ {
 		previous, current := deliveries[index-1], deliveries[index]
-		if previous.period == current.period && previous.modified.Equal(current.modified) && previous.key != current.key {
+		if previous.month.Equal(current.month) && previous.modified.Equal(current.modified) && previous.key != current.key {
 			return nil, failFetch("response", errors.New("ambiguous AWS deliveries"))
 		}
 	}
