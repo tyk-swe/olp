@@ -43,10 +43,13 @@ func encodeSpeech(r *Request, p Speech, _ connectors.Config, model string) (*Ups
 	if failure != nil {
 		return nil, failure
 	}
-	kind := ResponseBinary
-	if p.streaming() {
-		kind = ResponseSSE
+	return &UpstreamCall{Method: "POST", Endpoint: Path{Path: "audio/speech"}, Accept: "application/json",
+		Body: JSONBody(body), Response: audioReply(p.streaming()), Ambiguous: true}, nil
+}
+
+func audioReply(stream bool) Response {
+	if stream {
+		return EventReply{}
 	}
-	return &UpstreamCall{Method: "POST", Path: "audio/speech", Accept: "application/json",
-		JSON: body, Stream: p.streaming(), Kind: kind, Ambiguous: true}, nil
+	return AudioReply{}
 }

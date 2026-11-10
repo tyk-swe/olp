@@ -12,7 +12,7 @@ func ContractInput(request *Request, call *UpstreamCall, effective *Request, bud
 	for _, handle := range request.Uploads() {
 		owned[handle] = true
 	}
-	parts, err := contractParts(call.Fields, owned)
+	parts, err := contractParts(call.fields(), owned)
 	if err != nil {
 		return mediacontract.Input{}, err
 	}
@@ -26,7 +26,7 @@ func ContractInput(request *Request, call *UpstreamCall, effective *Request, bud
 		Route:        request.route,
 		Mode:         effective.Mode(),
 		Source:       document.Document,
-		JSON:         call.JSON,
+		JSON:         call.json(),
 		Parts:        parts,
 		CallerParts:  callerParts,
 		PolicyBudget: budget,

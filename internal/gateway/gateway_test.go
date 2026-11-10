@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/codesessions"
+	"github.com/tyk-swe/olp/internal/media/transport"
 	"github.com/tyk-swe/olp/internal/staging"
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
@@ -783,10 +784,10 @@ func TestTransformedMediaPreservesUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = spool.Close() })
-	h.gateway.deps.Media = &MediaDeps{Transport: &media.Transport{
+	h.gateway.deps.Media = &MediaDeps{Transport: transport.New(transport.Deps{
 		Client: h.gateway.client, Auth: h.gateway.auth, Egress: h.gateway.egress,
-		Spool: spool, MaxResponseBytes: 1 << 20,
-	}}
+		Spool: spool, MaxResponseBytes: 1 << 20, Log: h.gateway.log,
+	})}
 	h.gateway.deps.Staging = spool
 	h.gateway.deps.Uploads = staging.NewAdmission(spool.CapacityBytes())
 	h.republish(func(snapshot *routing.Snapshot, a, b routing.Provider) {

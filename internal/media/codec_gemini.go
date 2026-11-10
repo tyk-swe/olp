@@ -44,7 +44,8 @@ func encodeGeminiImage(r *Request, p ImageGeneration, _ connectors.Config, model
 	if err != nil {
 		return nil, invalidMedia("The image request could not be encoded.")
 	}
-	return &UpstreamCall{Method: http.MethodPost, Path: generateContent(model), JSON: body, Kind: ResponseImages, Ambiguous: true, DecodeImages: decodeGeminiImage}, nil
+	return &UpstreamCall{Method: http.MethodPost, Endpoint: Path{Path: generateContent(model)}, Body: JSONBody(body),
+		Response: ImageReply{Decode: decodeGeminiImage}, Ambiguous: true}, nil
 }
 
 type geminiResult struct {
@@ -77,13 +78,13 @@ type geminiResult struct {
 func readGemini(body []byte) (*geminiResult, *Error) {
 	var result geminiResult
 	if json.Unmarshal(body, &result) != nil {
-		return nil, protocolError("The provider result is not valid JSON.")
+		return nil, ProtocolError("The provider result is not valid JSON.")
 	}
 	if result.PromptFeedback != nil && result.PromptFeedback.BlockReason != "" {
 		return nil, Fail(http.StatusBadRequest, "content_filter", "The provider's content filter refused the request.")
 	}
 	if len(result.Candidates) == 0 {
-		return nil, protocolError("The provider result has no candidate.")
+		return nil, ProtocolError("The provider result has no candidate.")
 	}
 	switch reason := result.Candidates[0].FinishReason; {
 	case reason == "SAFETY" || strings.HasPrefix(reason, "IMAGE_") || reason == "PROHIBITED_CONTENT" || reason == "BLOCKLIST" || reason == "RECITATION":
@@ -133,7 +134,7 @@ func modalityCounts(detail []geminiModalityCount) (audio, image int64) {
 	return audio, image
 }
 
-func decodeGeminiImage(body []byte, stage func(string, int) (*staging.Artifact, *Error)) (*ImageResult, *Error) {
+func decodeGeminiImage(body []byte, stage StageImage) (*ImageResult, *Error) {
 	result, failure := readGemini(body)
 	if failure != nil {
 		return nil, failure
@@ -169,8 +170,8 @@ func encodeGeminiSpeech(r *Request, p Speech, _ connectors.Config, model string)
 	if err != nil {
 		return nil, invalidMedia("The speech request could not be encoded.")
 	}
-	return &UpstreamCall{Method: http.MethodPost, Path: generateContent(model), JSON: body, Kind: ResponseBinary, Ambiguous: true,
-		DecodeAudio: func(body []byte) (*AudioResult, *Error) { return decodeGeminiSpeech(body, format) }}, nil
+	return &UpstreamCall{Method: http.MethodPost, Endpoint: Path{Path: generateContent(model)}, Body: JSONBody(body), Ambiguous: true,
+		Response: InlineAudioReply{Decode: func(body []byte) (*AudioResult, *Error) { return decodeGeminiSpeech(body, format) }}}, nil
 }
 
 func decodeGeminiSpeech(body []byte, format string) (*AudioResult, *Error) {
@@ -184,27 +185,27 @@ func decodeGeminiSpeech(body []byte, format string) (*AudioResult, *Error) {
 		}
 		audio, err := base64.StdEncoding.DecodeString(part.InlineData.Data)
 		if err != nil {
-			return nil, protocolError("The provider audio is not valid base64.")
+			return nil, ProtocolError("The provider audio is not valid base64.")
 		}
 		mediaType, params, err := mime.ParseMediaType(part.InlineData.MimeType)
 		if err != nil {
-			return nil, protocolError("The provider audio names an invalid type.")
+			return nil, ProtocolError("The provider audio names an invalid type.")
 		}
 		wav := mediaType == "audio/wav" || mediaType == "audio/x-wav"
 		switch {
 		case wav && format == "pcm":
 			if len(audio) < 44 || string(audio[:4]) != "RIFF" {
-				return nil, protocolError("The provider WAV audio is malformed.")
+				return nil, ProtocolError("The provider WAV audio is malformed.")
 			}
 			audio = audio[44:]
 		case !wav && format == "wav":
 			rate, err := strconv.Atoi(params["rate"])
 			if !strings.EqualFold(mediaType, "audio/l16") || err != nil || rate < 8000 {
-				return nil, protocolError("The provider audio is not 16-bit PCM of a known rate.")
+				return nil, ProtocolError("The provider audio is not 16-bit PCM of a known rate.")
 			}
 			audio = wavFromPCM(audio, rate)
 		case !wav && !strings.EqualFold(mediaType, "audio/l16"):
-			return nil, protocolError("The provider audio is neither WAV nor PCM.")
+			return nil, ProtocolError("The provider audio is neither WAV nor PCM.")
 		}
 		contentType := "audio/wav"
 		if format == "pcm" {
@@ -212,7 +213,7 @@ func decodeGeminiSpeech(body []byte, format string) (*AudioResult, *Error) {
 		}
 		return &AudioResult{Audio: audio, ContentType: contentType, Tokens: result.tokens()}, nil
 	}
-	return nil, protocolError("The model answered without audio.")
+	return nil, ProtocolError("The model answered without audio.")
 }
 
 func encodeGeminiTranscription(r *Request, p Transcription, _ connectors.Config, model string) (*UpstreamCall, *Error) {
@@ -229,9 +230,9 @@ func encodeGeminiTranscription(r *Request, p Transcription, _ connectors.Config,
 	if p.Temperature != nil {
 		config["temperature"] = *p.Temperature
 	}
-	file := &p.File
-	return &UpstreamCall{Method: http.MethodPost, Path: generateContent(model), Kind: ResponseTranscription, Ambiguous: true,
-		JSONFrom: func(read func(*staging.Part) ([]byte, *Error)) ([]byte, *Error) {
+	file := p.File
+	return &UpstreamCall{Method: http.MethodPost, Endpoint: Path{Path: generateContent(model)}, Ambiguous: true,
+		Body: InlineBody(func(read func(staging.Part) ([]byte, *Error)) ([]byte, *Error) {
 			audio, failure := read(file)
 			if failure != nil {
 				return nil, failure
@@ -247,8 +248,8 @@ func encodeGeminiTranscription(r *Request, p Transcription, _ connectors.Config,
 				return nil, invalidMedia("The transcription request could not be encoded.")
 			}
 			return body, nil
-		},
-		DecodeTranscription: func(body []byte) (*TranscriptionResult, *Error) {
+		}),
+		Response: TranscriptReply{Format: format, Decode: func(body []byte) (*TranscriptionResult, *Error) {
 			result, failure := readGemini(body)
 			if failure != nil {
 				return nil, failure
@@ -260,5 +261,5 @@ func encodeGeminiTranscription(r *Request, p Transcription, _ connectors.Config,
 				}
 			}
 			return &TranscriptionResult{Text: strings.TrimSpace(text.String()), Tokens: result.tokens()}, nil
-		}}, nil
+		}}}, nil
 }

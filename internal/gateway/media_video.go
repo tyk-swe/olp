@@ -11,8 +11,8 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/jobs"
+	"github.com/tyk-swe/olp/internal/media/transport"
 	"github.com/tyk-swe/olp/internal/mediacontract"
-	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -212,9 +212,9 @@ func (s *Server) videoAdmissionError(ctx context.Context, x *call, last *attempt
 	return serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider credential is currently able to serve `"+x.route.Slug+"`.")
 }
 
-func (s *Server) attachCreated(ctx context.Context, x *call, reserved jobs.Record, result *media.Result) *mediaOutcome {
+func (s *Server) attachCreated(ctx context.Context, x *call, reserved jobs.Record, result *transport.Result) *mediaOutcome {
 	out := &mediaOutcome{result: result, committed: true, status: http.StatusCreated, localJob: reserved.ID}
-	err := s.deps.Media.Jobs.Attach(ctx, reserved, result.Video, &jobs.Caller{Secret: x.callerSecret, Sensitive: &x.sensitive})
+	err := s.deps.Media.Jobs.Attach(ctx, reserved, mediaVideo(result), &jobs.Caller{Secret: x.callerSecret, Sensitive: &x.sensitive})
 	rejected, isRejected := errors.AsType[*jobs.Rejected](err)
 	switch {
 	case isRejected:
@@ -338,7 +338,7 @@ func (s *Server) admitVideoRequest(parent context.Context, x *call, authority ke
 // returns the attempt fact for the caller to record.
 // videoJobCall makes one call on an existing job, encoded in the wire of the
 // vendor the job's pinned provider revision names.
-func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record, job media.JobCall) (*media.Result, *attemptFailure, AttemptFact) {
+func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record, job media.JobCall) (*transport.Result, *attemptFailure, AttemptFact) {
 	fact := AttemptFact{
 		TargetID:           record.ID,
 		ProviderID:         record.ProviderID,
@@ -408,7 +408,6 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record,
 			fact.recordEvidence(false)
 			return nil, &attemptFailure{class: classProtocol}, fact
 		}
-		call.Strict = true
 	}
 	if current, ok := x.request.release.Snapshot().FindProvider(provider.ID); ok {
 		provider.Limits = current.Limits
@@ -443,12 +442,12 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record,
 		}
 	}
 	attemptCtx, atr := x.request.trace.Attempt(ctx, string(target.Config.Kind), record.ProviderRevisionID, record.UpstreamModel)
-	call.Inject = http.Header{}
-	atr.InjectUpstream(call.Inject)
+	headers := http.Header{}
+	atr.InjectUpstream(headers)
 	callCtx, cancel := context.WithTimeout(attemptCtx, target.Timeout+jobs.LeaseSlack)
 	defer cancel()
 	target.Sensitive = &sensitive
-	result, failure := s.deps.Media.Transport.Do(callCtx, target.Target, call, nil)
+	result, failure := s.deps.Media.Transport.Do(callCtx, target.Target, call, transport.Options{Strict: strictTemplate != nil, Headers: headers})
 	dispatched = failure == nil || failure.Dispatched
 	fact.Duration = s.now().Sub(fact.StartedAt)
 	if failure != nil {
@@ -488,23 +487,17 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record,
 				}
 			}
 		case media.VideoContent:
-			if result.Artifact == nil {
+			if artifact := mediaArtifact(result.Payload); artifact == nil {
 				contractErr = errors.New("native video content is unavailable")
 			} else {
-				var blob oif.BlobReference
-				blob, contractErr = result.Artifact.BlobReference()
-				if contractErr == nil {
-					var envelope oif.BlobResult
-					envelope, contractErr = oif.NewBlobResult(strictTemplate.Descriptor("unary"), blob, oif.Complete)
-					if contractErr == nil {
-						result.BlobSource = &envelope
-					}
-				}
+				contractErr = strictBlob(strictTemplate.Descriptor("unary"), artifact)
 			}
 		}
 		if contractErr != nil {
-			if result.Artifact != nil {
-				_ = s.deps.Staging.Remove(result.Artifact.Handle)
+			if artifact := mediaArtifact(result.Payload); artifact != nil {
+				if err := s.deps.Staging.Remove(artifact.Handle); err != nil {
+					s.log.Warn("staged video content cleanup failed", "error", err)
+				}
 			}
 			fact.Class = classProtocol
 			fact.Duration = s.now().Sub(fact.StartedAt)
@@ -658,7 +651,7 @@ func (s *Server) refreshListRecord(ctx context.Context, x *call, record jobs.Rec
 		}
 		return record, &fact, transportFailure.dispatched, nil
 	}
-	update, ok := jobs.Observe(result.Video, s.now())
+	update, ok := jobs.Observe(mediaVideo(result), s.now())
 	if !ok {
 		return record, &fact, true, nil
 	}
@@ -707,7 +700,7 @@ func (s *Server) videoGet(w http.ResponseWriter, r *http.Request) {
 		s.mediaFailOutcome(x, w, transportFailure)
 		return
 	}
-	update, ok := jobs.Observe(result.Video, s.now())
+	update, ok := jobs.Observe(mediaVideo(result), s.now())
 	if !ok {
 		s.mediaFailOutcome(x, w, &attemptFailure{class: classProtocol})
 		return
@@ -717,14 +710,12 @@ func (s *Server) videoGet(w http.ResponseWriter, r *http.Request) {
 		s.mediaFailOutcome(x, w, &attemptFailure{class: classConnect})
 		return
 	}
-	result.Video.ID = updated.ID
-	result.Video.Route = updated.RouteSlug
 	var body []byte
 	var renderFailure *media.Error
 	if record.StrictContract {
 		body, renderFailure = media.EncodeStrictVideoObject(result.Source, upstream, updated.ID, updated.RouteSlug)
 	} else {
-		body, renderFailure = media.EncodeVideoObject(result.Video, updated.ID, updated.RouteSlug)
+		body, renderFailure = media.EncodeVideoObject(mediaVideo(result), updated.ID, updated.RouteSlug)
 	}
 	if renderFailure != nil {
 		s.mediaFailOutcome(x, w, &attemptFailure{class: classProtocol})
@@ -778,12 +769,13 @@ func (s *Server) videoContent(w http.ResponseWriter, r *http.Request) {
 		s.mediaFailOutcome(x, w, transportFailure)
 		return
 	}
-	if result.Artifact == nil {
+	artifact := mediaArtifact(result.Payload)
+	if artifact == nil {
 		s.mediaFailOutcome(x, w, &attemptFailure{class: classProtocol})
 		return
 	}
 	out := &mediaOutcome{result: result, committed: true, status: http.StatusOK}
-	s.streamArtifact(w, x, out)
+	s.streamArtifact(w, x, out, artifact)
 	s.finishMedia(x, out, out.status)
 }
 
@@ -845,11 +837,12 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 		}
 		deleted = true
 	} else {
-		if result.Deleted == nil {
+		receipt := mediaDeleted(result)
+		if receipt == nil {
 			s.mediaFailOutcome(x, w, &attemptFailure{class: classProtocol})
 			return
 		}
-		deleted = result.Deleted.Deleted
+		deleted = receipt.Deleted
 	}
 	if !deleted {
 		s.mediaFailOutcome(x, w, &attemptFailure{class: classUpstreamClient, status: http.StatusBadGateway})
@@ -879,8 +872,8 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 	} else {
 		local := ""
 		var extra map[string]any
-		if result != nil && result.Deleted != nil {
-			extra = result.Deleted.Extra
+		if receipt := mediaDeleted(result); receipt != nil {
+			extra = receipt.Extra
 		}
 		body, renderFailure = media.EncodeVideoDeleteResponse(&media.VideoDeleteResult{ID: local, Deleted: true, Extra: extra}, record.ID)
 	}

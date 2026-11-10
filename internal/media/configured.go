@@ -52,21 +52,19 @@ func EncodeConfigured(request *Request, cfg connectors.Config, model string) (*U
 	if failure != nil {
 		return nil, nil, failure
 	}
-	call.JSON = body
-	return call, effective, nil
+	return call.withBody(JSONBody(body)), effective, nil
 }
 
 func EncodeStrictConfigured(request *Request, cfg connectors.Config, model string) (*UpstreamCall, *Request, *Error) {
 	call, effective, failure := EncodeConfigured(request, cfg, model)
-	if failure != nil || len(call.Fields) == 0 {
+	if failure != nil || len(call.fields()) == 0 {
 		return call, effective, failure
 	}
 	source, form := effective.Source().(FormSource)
 	if !form || source.Normalized {
 		return nil, nil, configuredFailure("multipart", "has a caller source that cannot be preserved exactly")
 	}
-	call.Fields = exactParts(source.Parts, cfg.Model(model))
-	return call, effective, nil
+	return call.withBody(FormBody(exactParts(source.Parts, cfg.Model(model)))), effective, nil
 }
 
 func profileDefaults(op Operation, cfg connectors.Config, model string) (map[string]json.RawMessage, *Error) {

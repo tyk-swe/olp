@@ -51,8 +51,8 @@ func encodeElevenLabsSpeech(r *Request, p Speech, _ connectors.Config, model str
 	if err != nil {
 		return nil, invalidMedia("The speech request could not be encoded.")
 	}
-	return &UpstreamCall{Method: http.MethodPost, Path: "text-to-speech/" + url.PathEscape(p.Voice), Query: url.Values{"output_format": {format}},
-		JSON: body, Kind: ResponseBinary, Ambiguous: true, CharacterHeader: "Character-Cost"}, nil
+	return &UpstreamCall{Method: http.MethodPost, Endpoint: Path{Path: "text-to-speech/" + url.PathEscape(p.Voice), Query: url.Values{"output_format": {format}}},
+		Body: JSONBody(body), Response: AudioReply{CharacterHeader: "Character-Cost"}, Ambiguous: true}, nil
 }
 
 func vendorTranscriptFormat(r *Request, p Transcription, vendor string, formats ...string) (string, *Error) {
@@ -95,8 +95,8 @@ func encodeElevenLabsTranscription(r *Request, p Transcription, _ connectors.Con
 	fields := textValue(nil, "model_id", model)
 	fields = append(fields, staging.Field{Name: "file", Value: p.File})
 	fields = textField(fields, "language_code", p.Language)
-	return &UpstreamCall{Method: http.MethodPost, Path: "speech-to-text", Accept: "application/json", Fields: fields, Kind: ResponseTranscription, Ambiguous: true,
-		DecodeTranscription: func(body []byte) (*TranscriptionResult, *Error) {
+	return &UpstreamCall{Method: http.MethodPost, Endpoint: Path{Path: "speech-to-text"}, Accept: "application/json", Body: FormBody(fields), Ambiguous: true,
+		Response: TranscriptReply{Format: format, Decode: func(body []byte) (*TranscriptionResult, *Error) {
 			var encodedWire struct {
 				Text     *string  `json:"text"`
 				Language *string  `json:"language_code"`
@@ -109,7 +109,7 @@ func encodeElevenLabsTranscription(r *Request, p Transcription, _ connectors.Con
 				} `json:"words"`
 			}
 			if json.Unmarshal(body, &encodedWire) != nil || encodedWire.Text == nil {
-				return nil, protocolError("The provider transcript is malformed.")
+				return nil, ProtocolError("The provider transcript is malformed.")
 			}
 			var words []transcriptWord
 			for _, word := range encodedWire.Words {
@@ -118,7 +118,7 @@ func encodeElevenLabsTranscription(r *Request, p Transcription, _ connectors.Con
 				}
 			}
 			return vendorTranscript(format, *encodedWire.Text, encodedWire.Language, encodedWire.Duration, words), nil
-		}}, nil
+		}}}, nil
 }
 
 var deepgramEncodings = map[string]url.Values{
@@ -152,7 +152,8 @@ func encodeDeepgramSpeech(r *Request, p Speech, _ connectors.Config, model strin
 	if err != nil {
 		return nil, invalidMedia("The speech request could not be encoded.")
 	}
-	return &UpstreamCall{Method: http.MethodPost, Path: "speak", Query: query, JSON: body, Kind: ResponseBinary, Ambiguous: true, CharacterHeader: "Dg-Char-Count"}, nil
+	return &UpstreamCall{Method: http.MethodPost, Endpoint: Path{Path: "speak", Query: query}, Body: JSONBody(body),
+		Response: AudioReply{CharacterHeader: "Dg-Char-Count"}, Ambiguous: true}, nil
 }
 
 func encodeDeepgramTranscription(r *Request, p Transcription, _ connectors.Config, model string) (*UpstreamCall, *Error) {
@@ -167,8 +168,8 @@ func encodeDeepgramTranscription(r *Request, p Transcription, _ connectors.Confi
 	if p.Language != nil {
 		query.Set("language", *p.Language)
 	}
-	return &UpstreamCall{Method: http.MethodPost, Path: "listen", Query: query, Accept: "application/json", Upload: &p.File, Kind: ResponseTranscription, Ambiguous: true,
-		DecodeTranscription: func(body []byte) (*TranscriptionResult, *Error) {
+	return &UpstreamCall{Method: http.MethodPost, Endpoint: Path{Path: "listen", Query: query}, Accept: "application/json", Body: UploadBody(p.File), Ambiguous: true,
+		Response: TranscriptReply{Format: format, Decode: func(body []byte) (*TranscriptionResult, *Error) {
 			var encodedWire struct {
 				Metadata struct {
 					Duration *float64 `json:"duration"`
@@ -188,7 +189,7 @@ func encodeDeepgramTranscription(r *Request, p Transcription, _ connectors.Confi
 				} `json:"results"`
 			}
 			if json.Unmarshal(body, &encodedWire) != nil || len(encodedWire.Results.Channels) == 0 || len(encodedWire.Results.Channels[0].Alternatives) == 0 || encodedWire.Results.Channels[0].Alternatives[0].Transcript == nil {
-				return nil, protocolError("The provider transcript is malformed.")
+				return nil, ProtocolError("The provider transcript is malformed.")
 			}
 			channel := encodedWire.Results.Channels[0]
 			best := channel.Alternatives[0]
@@ -201,7 +202,7 @@ func encodeDeepgramTranscription(r *Request, p Transcription, _ connectors.Confi
 				language = p.Language
 			}
 			return vendorTranscript(format, *best.Transcript, language, encodedWire.Metadata.Duration, words), nil
-		}}, nil
+		}}}, nil
 }
 
 var pollyFormats = map[string]string{"mp3": "mp3", "opus": "ogg_opus"}
@@ -229,11 +230,17 @@ func encodePollySpeech(r *Request, p Speech, cfg connectors.Config, model string
 	if err != nil {
 		return nil, invalidMedia("The speech request could not be encoded.")
 	}
-	return &UpstreamCall{Method: http.MethodPost, URL: endpoint + "/v1/speech", SigningService: "polly", JSON: body, Kind: ResponseBinary, Ambiguous: true,
-		CharacterHeader: "X-Amzn-Requestcharacters"}, nil
+	return &UpstreamCall{Method: http.MethodPost, Endpoint: Absolute{URL: endpoint + "/v1/speech", SigningService: "polly"}, Body: JSONBody(body),
+		Response: AudioReply{CharacterHeader: "X-Amzn-Requestcharacters"}, Ambiguous: true}, nil
 }
 
 const assemblyAIPoll = time.Second
+
+type assemblyAISubmission struct {
+	SpeechModels []string `json:"speech_models"`
+	LanguageCode *string  `json:"language_code,omitempty"`
+	AudioURL     string   `json:"audio_url"`
+}
 
 func encodeAssemblyAI(r *Request, p Transcription, cfg connectors.Config, model string) (*UpstreamCall, *Error) {
 	format, failure := vendorTranscriptFormat(r, p, "AssemblyAI", "json", "verbose_json", "text")
@@ -244,43 +251,33 @@ func encodeAssemblyAI(r *Request, p Transcription, cfg connectors.Config, model 
 		return nil, invalidMedia("AssemblyAI transcription takes no prompt.")
 	}
 	base := strings.TrimRight(cfg.Endpoint, "/")
-	submission := map[string]any{"speech_models": []string{model}}
-	if p.Language != nil {
-		submission["language_code"] = *p.Language
-	}
-	var transcript string
-	next := func(body []byte) (*Step, *Error) {
+	next := func(body []byte) (Step, *Error) {
 		var encodedWire struct {
 			UploadURL string `json:"upload_url"`
 			ID        string `json:"id"`
 			Status    string `json:"status"`
 		}
 		if json.Unmarshal(body, &encodedWire) != nil {
-			return nil, protocolError("The provider's transcription answered with invalid JSON.")
+			return nil, ProtocolError("The provider's transcription answered with invalid JSON.")
 		}
 		switch {
 		case encodedWire.UploadURL != "" && encodedWire.Status == "":
-			submission["audio_url"] = encodedWire.UploadURL
-			submit, err := json.Marshal(submission)
+			submit, err := json.Marshal(assemblyAISubmission{SpeechModels: []string{model}, LanguageCode: p.Language, AudioURL: encodedWire.UploadURL})
 			if err != nil {
 				return nil, invalidMedia("The transcription request could not be encoded.")
 			}
-			return &Step{Method: http.MethodPost, URL: base + "/v2/transcript", JSON: submit, Credentials: true}, nil
+			return Visit{Method: http.MethodPost, URL: base + "/v2/transcript", JSON: submit, Credentials: true}, nil
 		case encodedWire.ID == "" || strings.ContainsAny(encodedWire.ID, "/?#"):
-			return nil, protocolError("The provider's transcript names no identity.")
+			return nil, ProtocolError("The provider's transcript names no identity.")
 		case encodedWire.Status == "completed":
-			return &Step{Done: true, Cleanup: &Step{Method: http.MethodDelete, URL: base + "/v2/transcript/" + url.PathEscape(encodedWire.ID), Credentials: true}}, nil
+			return Finished{Cleanup: &Visit{Method: http.MethodDelete, URL: base + "/v2/transcript/" + url.PathEscape(encodedWire.ID), Credentials: true}}, nil
 		case encodedWire.Status == "error":
 			return nil, Fail(http.StatusBadRequest, "transcription_failed", "The provider could not transcribe the audio.")
-		case transcript == "":
-			transcript = base + "/v2/transcript/" + url.PathEscape(encodedWire.ID)
-			return &Step{URL: transcript, Wait: assemblyAIPoll, Credentials: true}, nil
 		}
-		return nil, nil
+		return Visit{URL: base + "/v2/transcript/" + url.PathEscape(encodedWire.ID), Wait: assemblyAIPoll, Credentials: true}, nil
 	}
-	return &UpstreamCall{Method: http.MethodPost, Path: "v2/upload", Accept: "application/json", Upload: &p.File, Kind: ResponseTranscription, Ambiguous: true,
-		Next: next, StepDomains: []string{"assemblyai.com"},
-		DecodeTranscription: func(body []byte) (*TranscriptionResult, *Error) {
+	return &UpstreamCall{Method: http.MethodPost, Endpoint: Path{Path: "v2/upload"}, Accept: "application/json", Body: UploadBody(p.File), Ambiguous: true,
+		Response: TranscriptReply{Format: format, Poll: &Poll{Next: next, Domains: []string{"assemblyai.com"}}, Decode: func(body []byte) (*TranscriptionResult, *Error) {
 			var encodedWire struct {
 				Text     *string  `json:"text"`
 				Language *string  `json:"language_code"`
@@ -292,12 +289,12 @@ func encodeAssemblyAI(r *Request, p Transcription, cfg connectors.Config, model 
 				} `json:"words"`
 			}
 			if json.Unmarshal(body, &encodedWire) != nil || encodedWire.Text == nil {
-				return nil, protocolError("The provider transcript is malformed.")
+				return nil, ProtocolError("The provider transcript is malformed.")
 			}
 			words := []transcriptWord{}
 			for _, word := range encodedWire.Words {
 				words = append(words, transcriptWord{Word: word.Text, Start: word.Start / 1000, End: word.End / 1000})
 			}
 			return vendorTranscript(format, *encodedWire.Text, encodedWire.Language, encodedWire.Duration, words), nil
-		}}, nil
+		}}}, nil
 }

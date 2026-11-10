@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/media/transport"
 	"github.com/tyk-swe/olp/internal/observability/workerhealth"
+	"github.com/tyk-swe/olp/internal/upstream"
 )
 
 const (
@@ -181,10 +183,10 @@ func failureCode(err error) error {
 		return err
 	}
 	switch failure.Class {
-	case media.ClassProtocol:
+	case upstream.Protocol:
 		return code("provider_protocol_error")
-	case media.ClassTimeout, media.ClassRateLimit, media.ClassUpstreamServer, media.ClassUpstreamClient,
-		media.ClassCredential, media.ClassCancelled:
+	case upstream.Timeout, upstream.RateLimit, upstream.ServerError, upstream.ClientError,
+		upstream.Credential, upstream.Cancelled:
 		return code(failure.Class)
 	}
 	return code("connect")
@@ -224,7 +226,8 @@ func (s *Service) execute(ctx context.Context, job Claimed, record Record) (Reco
 	if record.StrictContract && !media.ValidStrictVideoJobSource(result.Source, upstream, record.UpstreamModel) {
 		return Record{}, code("provider_protocol_error")
 	}
-	update, ok := Observe(result.Video, s.now())
+	video, _ := result.Payload.(transport.Video)
+	update, ok := Observe(video.VideoJobResult, s.now())
 	if !ok {
 		return Record{}, code("provider_protocol_error")
 	}

@@ -47,9 +47,16 @@ func groqWireFormat(format string) *string {
 
 func groqCall(format string) func(*UpstreamCall, *Error) (*UpstreamCall, *Error) {
 	return func(call *UpstreamCall, failure *Error) (*UpstreamCall, *Error) {
-		if failure == nil && format == "json" {
-			call.DecodeTranscription = DecodeTranscriptionJSON
+		if failure != nil {
+			return nil, failure
 		}
-		return call, failure
+		return call.withResponse(groqReply(format)), nil
 	}
+}
+
+func groqReply(format string) TranscriptReply {
+	if format == "json" {
+		return TranscriptReply{Format: format, Decode: DecodeTranscriptionJSON}
+	}
+	return TranscriptReply{Format: format}
 }

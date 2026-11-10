@@ -145,12 +145,8 @@ func encodeTranscription(r *Request, p Transcription, _ connectors.Config, model
 		fields = textValue(fields, "known_speaker_references[]", p.KnownSpeakerReferences[i])
 	}
 	fields = textValue(fields, "stream", strconv.FormatBool(p.Stream))
-	kind := ResponseTranscription
-	if p.Stream {
-		kind = ResponseSSE
-	}
-	return &UpstreamCall{Method: "POST", Path: "audio/transcriptions", Accept: "application/json",
-		Fields: extraFields(fields, r.Extra()), Stream: p.Stream, Kind: kind, Ambiguous: true}, nil
+	return &UpstreamCall{Method: "POST", Endpoint: Path{Path: "audio/transcriptions"}, Accept: "application/json",
+		Body: FormBody(extraFields(fields, r.Extra())), Response: transcriptReply(p.Stream, valueOr(p.Format, "json")), Ambiguous: true}, nil
 }
 
 func encodeTranslation(r *Request, p Translation, _ connectors.Config, model string) (*UpstreamCall, *Error) {
@@ -159,8 +155,8 @@ func encodeTranslation(r *Request, p Translation, _ connectors.Config, model str
 	fields = textField(fields, "prompt", p.Prompt)
 	fields = textField(fields, "response_format", p.Format)
 	fields = textField(fields, "temperature", float64Text(p.Temperature))
-	return &UpstreamCall{Method: "POST", Path: "audio/translations", Accept: "application/json",
-		Fields: extraFields(fields, r.Extra()), Kind: ResponseTranscription, Ambiguous: true}, nil
+	return &UpstreamCall{Method: "POST", Endpoint: Path{Path: "audio/translations"}, Accept: "application/json",
+		Body: FormBody(extraFields(fields, r.Extra())), Response: TranscriptReply{Format: valueOr(p.Format, "json")}, Ambiguous: true}, nil
 }
 
 func (p Transcription) withFormat(format *string) Transcription {
@@ -171,4 +167,11 @@ func (p Transcription) withFormat(format *string) Transcription {
 func (p Translation) withFormat(format *string) Translation {
 	p.Format = format
 	return p
+}
+
+func transcriptReply(stream bool, format string) Response {
+	if stream {
+		return EventReply{}
+	}
+	return TranscriptReply{Format: format}
 }

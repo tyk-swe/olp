@@ -146,8 +146,8 @@ func encodeImageGeneration(r *Request, p ImageGeneration, cfg connectors.Config,
 	if failure != nil {
 		return nil, failure
 	}
-	return &UpstreamCall{Method: "POST", Path: "images/generations", Accept: "application/json",
-		JSON: body, Stream: p.Stream, Kind: imagesKind(p.Stream), Ambiguous: true}, nil
+	return &UpstreamCall{Method: "POST", Endpoint: Path{Path: "images/generations"}, Accept: "application/json",
+		Body: JSONBody(body), Response: imageReply(p.Stream), Ambiguous: true}, nil
 }
 
 func encodeImageEdit(r *Request, p ImageEdit, _ connectors.Config, model string) (*UpstreamCall, *Error) {
@@ -174,8 +174,8 @@ func encodeImageEdit(r *Request, p ImageEdit, _ connectors.Config, model string)
 	fields = textField(fields, "output_compression", int64Text(p.OutputCompression))
 	fields = textField(fields, "output_format", p.OutputFormat)
 	fields = textField(fields, "partial_images", int64Text(p.PartialImages))
-	return &UpstreamCall{Method: "POST", Path: "images/edits", Accept: "application/json",
-		Fields: extraFields(fields, r.Extra()), Stream: p.Stream, Kind: imagesKind(p.Stream), Ambiguous: true}, nil
+	return &UpstreamCall{Method: "POST", Endpoint: Path{Path: "images/edits"}, Accept: "application/json",
+		Body: FormBody(extraFields(fields, r.Extra())), Response: imageReply(p.Stream), Ambiguous: true}, nil
 }
 
 func encodeImageVariation(r *Request, p ImageVariation, _ connectors.Config, model string) (*UpstreamCall, *Error) {
@@ -185,15 +185,15 @@ func encodeImageVariation(r *Request, p ImageVariation, _ connectors.Config, mod
 	fields = textField(fields, "size", p.Size)
 	fields = textField(fields, "response_format", p.Format)
 	fields = textField(fields, "user", p.User)
-	return &UpstreamCall{Method: "POST", Path: "images/variations", Accept: "application/json",
-		Fields: extraFields(fields, r.Extra()), Kind: ResponseImages, Ambiguous: true}, nil
+	return &UpstreamCall{Method: "POST", Endpoint: Path{Path: "images/variations"}, Accept: "application/json",
+		Body: FormBody(extraFields(fields, r.Extra())), Response: ImageReply{}, Ambiguous: true}, nil
 }
 
-func imagesKind(stream bool) ResponseKind {
+func imageReply(stream bool) Response {
 	if stream {
-		return ResponseSSE
+		return EventReply{}
 	}
-	return ResponseImages
+	return ImageReply{}
 }
 
 var squareAspectRatios = map[string]string{"1024x1024": "1:1", "1536x1024": "3:2", "1024x1536": "2:3"}
@@ -220,8 +220,8 @@ func encodeVertexImage(r *Request, p ImageGeneration, model string) (*UpstreamCa
 	if err != nil {
 		return nil, invalidMedia("The native image request could not be encoded.")
 	}
-	return &UpstreamCall{Method: http.MethodPost, Path: "models/" + url.PathEscape(model) + ":predict",
-		JSON: body, Kind: ResponseImages, Native: "vertex_ai", Ambiguous: true}, nil
+	return &UpstreamCall{Method: http.MethodPost, Endpoint: Path{Path: "models/" + url.PathEscape(model) + ":predict"},
+		Body: NativeJSON(body), Response: ImageReply{Decode: vertexImages(imageCount(p.Count))}, Ambiguous: true}, nil
 }
 
 var bedrockStabilityImageModels = []string{"stability.sd3-5-large-", "stability.stable-image-core-", "stability.stable-image-ultra-"}
@@ -254,8 +254,8 @@ func encodeBedrockImage(r *Request, p ImageGeneration, model string) (*UpstreamC
 	if err != nil {
 		return nil, invalidMedia("The native image request could not be encoded.")
 	}
-	return &UpstreamCall{Method: http.MethodPost, Path: "model/" + url.PathEscape(model) + "/invoke",
-		JSON: body, Kind: ResponseImages, Native: "bedrock", Ambiguous: true}, nil
+	return &UpstreamCall{Method: http.MethodPost, Endpoint: Path{Path: "model/" + url.PathEscape(model) + "/invoke"},
+		Body: NativeJSON(body), Response: ImageReply{Decode: bedrockImages(imageCount(p.Count))}, Ambiguous: true}, nil
 }
 
 func encodeBedrockStabilityImage(r *Request, p ImageGeneration, model string) (*UpstreamCall, *Error) {
@@ -285,8 +285,8 @@ func encodeBedrockStabilityImage(r *Request, p ImageGeneration, model string) (*
 	if err != nil {
 		return nil, invalidMedia("The native image request could not be encoded.")
 	}
-	return &UpstreamCall{Method: http.MethodPost, Path: "model/" + url.PathEscape(model) + "/invoke",
-		JSON: body, Kind: ResponseImages, Native: "bedrock", Ambiguous: true}, nil
+	return &UpstreamCall{Method: http.MethodPost, Endpoint: Path{Path: "model/" + url.PathEscape(model) + "/invoke"},
+		Body: NativeJSON(body), Response: ImageReply{Decode: bedrockImages(imageCount(p.Count))}, Ambiguous: true}, nil
 }
 
 func rejectNativeImageFields(r *Request, p ImageGeneration) *Error {

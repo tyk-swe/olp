@@ -3,13 +3,11 @@ package media
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/url"
 	"reflect"
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/staging"
@@ -22,60 +20,10 @@ const (
 	MaxVideoPromptLength             = 32000
 )
 
-type ResponseKind int
-
-const (
-	ResponseImages ResponseKind = iota
-	ResponseBinary
-	ResponseVideoJob
-	ResponseVideoContent
-	ResponseVideoDelete
-	ResponseTranscription
-	ResponseSSE
-)
-
-type UpstreamCall struct {
-	Method              string
-	Path                string
-	URL                 string
-	SigningService      string
-	Query               url.Values
-	Accept              string
-	JSON                []byte
-	Fields              []staging.Field
-	Upload              *staging.Part
-	Stream              bool
-	Kind                ResponseKind
-	Native              string
-	Strict              bool
-	Ambiguous           bool
-	DecodeImages        func(body []byte, stage func(b64 string, index int) (*staging.Artifact, *Error)) (*ImageResult, *Error)
-	DecodeTranscription func(body []byte) (*TranscriptionResult, *Error)
-	DecodeVideo         func(body []byte) (*VideoJobResult, *Error)
-	NoContent           bool
-	DecodeAudio         func(body []byte) (*AudioResult, *Error)
-	JSONFrom            func(read func(*staging.Part) ([]byte, *Error)) ([]byte, *Error)
-	CharacterHeader     string
-	Next                func(body []byte) (*Step, *Error)
-	StepDomains         []string
-	Inject              http.Header
-}
-
 type AudioResult struct {
 	Audio       []byte
 	ContentType string
 	Tokens      *ImageUsage
-}
-
-type Step struct {
-	Method      string
-	URL         string
-	JSON        []byte
-	Wait        time.Duration
-	Credentials bool
-	Asset       string
-	Done        bool
-	Cleanup     *Step
 }
 
 func jsonDoc(fields map[string]any, extra map[string]any) ([]byte, *Error) {

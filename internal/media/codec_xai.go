@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/staging"
 )
 
 var xaiImagesCodec = codec{imageGeneration: encodeXAIImage}
@@ -37,11 +36,11 @@ func encodeXAIImage(r *Request, p ImageGeneration, _ connectors.Config, model st
 	if failure != nil {
 		return nil, failure
 	}
-	return &UpstreamCall{Method: http.MethodPost, Path: "images/generations", JSON: body, Kind: ResponseImages, Ambiguous: true,
-		DecodeImages: decodeXAIImages}, nil
+	return &UpstreamCall{Method: http.MethodPost, Endpoint: Path{Path: "images/generations"}, Body: JSONBody(body),
+		Response: ImageReply{Decode: decodeXAIImages}, Ambiguous: true}, nil
 }
 
-func decodeXAIImages(body []byte, stage func(string, int) (*staging.Artifact, *Error)) (*ImageResult, *Error) {
+func decodeXAIImages(body []byte, stage StageImage) (*ImageResult, *Error) {
 	result, failure := DecodeImageResponse(body, stage)
 	if failure == nil && result.CreatedAt == 0 {
 		result.CreatedAt = time.Now().Unix()

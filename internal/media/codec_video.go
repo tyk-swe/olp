@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -59,27 +60,28 @@ func encodeRunwayCreate(r *Request, p VideoCreate, _ connectors.Config, model st
 			ID string `json:"id"`
 		}
 		if json.Unmarshal(body, &encodedWire) != nil || encodedWire.ID == "" {
-			return nil, protocolError("The provider created no video task.")
+			return nil, ProtocolError("The provider created no video task.")
 		}
 		now := time.Now().Unix()
 		return &VideoJobResult{ID: encodedWire.ID, Status: "queued", CreatedAt: &now, Prompt: &p.Prompt, Seconds: &duration, Size: p.Size}, nil
 	}
-	call := &UpstreamCall{Method: http.MethodPost, Path: path, Kind: ResponseVideoJob, Ambiguous: true, DecodeVideo: created}
-	call.JSONFrom = func(read func(*staging.Part) ([]byte, *Error)) ([]byte, *Error) {
+	inline := func(read func(staging.Part) ([]byte, *Error)) ([]byte, *Error) {
+		document := maps.Clone(fields)
 		if reference != nil {
-			image, failure := read(reference)
+			image, failure := read(*reference)
 			if failure != nil {
 				return nil, failure
 			}
-			fields["promptImage"] = "data:" + reference.ContentType + ";base64," + base64.StdEncoding.EncodeToString(image)
+			document["promptImage"] = "data:" + reference.ContentType + ";base64," + base64.StdEncoding.EncodeToString(image)
 		}
-		body, err := json.Marshal(fields)
+		body, err := json.Marshal(document)
 		if err != nil {
 			return nil, invalidMedia("The video request could not be encoded.")
 		}
 		return body, nil
 	}
-	return call, nil
+	return &UpstreamCall{Method: http.MethodPost, Endpoint: Path{Path: path}, Body: InlineBody(inline),
+		Response: VideoJobReply{Decode: created}, Ambiguous: true}, nil
 }
 
 func runwayTaskObject(body []byte) (*VideoJobResult, *Error) {
@@ -92,12 +94,12 @@ func runwayTaskObject(body []byte) (*VideoJobResult, *Error) {
 		FailureCode *string  `json:"failureCode"`
 	}
 	if json.Unmarshal(body, &encodedWire) != nil || encodedWire.ID == "" {
-		return nil, protocolError("The provider video task is malformed.")
+		return nil, ProtocolError("The provider video task is malformed.")
 	}
 	statuses := map[string]string{"PENDING": "queued", "THROTTLED": "queued", "RUNNING": "in_progress", "SUCCEEDED": "completed", "FAILED": "failed", "CANCELLED": "failed"}
 	status, ok := statuses[encodedWire.Status]
 	if !ok {
-		return nil, protocolError("The provider video task has an unknown status.")
+		return nil, ProtocolError("The provider video task has an unknown status.")
 	}
 	result := &VideoJobResult{ID: encodedWire.ID, Status: status, ErrorCode: encodedWire.FailureCode, ErrorMessage: encodedWire.Failure}
 	if encodedWire.Progress != nil {
@@ -119,7 +121,7 @@ func encodeRunwayGet(job VideoGet) (*UpstreamCall, *Error) {
 	if failure != nil {
 		return nil, failure
 	}
-	return &UpstreamCall{Method: http.MethodGet, Path: path, Accept: "application/json", Kind: ResponseVideoJob, DecodeVideo: runwayTaskObject}, nil
+	return &UpstreamCall{Method: http.MethodGet, Endpoint: Path{Path: path}, Accept: "application/json", Response: VideoJobReply{Decode: runwayTaskObject}}, nil
 }
 
 func encodeRunwayContent(job VideoContent) (*UpstreamCall, *Error) {
@@ -130,20 +132,20 @@ func encodeRunwayContent(job VideoContent) (*UpstreamCall, *Error) {
 	if failure != nil {
 		return nil, failure
 	}
-	return &UpstreamCall{Method: http.MethodGet, Path: path, Accept: "application/json", Kind: ResponseVideoContent,
-		Next: func(body []byte) (*Step, *Error) {
+	return &UpstreamCall{Method: http.MethodGet, Endpoint: Path{Path: path}, Accept: "application/json", Response: VideoContentReply{Poll: &Poll{
+		Next: func(body []byte) (Step, *Error) {
 			var encodedWire struct {
 				Status string   `json:"status"`
 				Output []string `json:"output"`
 			}
 			if json.Unmarshal(body, &encodedWire) != nil {
-				return nil, protocolError("The provider video task is malformed.")
+				return nil, ProtocolError("The provider video task is malformed.")
 			}
 			if encodedWire.Status != "SUCCEEDED" || len(encodedWire.Output) == 0 {
 				return nil, Fail(http.StatusConflict, "video_not_ready", "The video has no content yet.")
 			}
-			return &Step{URL: encodedWire.Output[0], Asset: "video/"}, nil
-		}}, nil
+			return Fetch{URL: encodedWire.Output[0], Prefix: "video/"}, nil
+		}}}}, nil
 }
 
 func encodeRunwayDelete(job VideoDelete) (*UpstreamCall, *Error) {
@@ -151,5 +153,5 @@ func encodeRunwayDelete(job VideoDelete) (*UpstreamCall, *Error) {
 	if failure != nil {
 		return nil, failure
 	}
-	return &UpstreamCall{Method: http.MethodDelete, Path: path, Kind: ResponseVideoDelete, NoContent: true}, nil
+	return &UpstreamCall{Method: http.MethodDelete, Endpoint: Path{Path: path}, Response: VideoDeletedReply{NoContent: true}}, nil
 }

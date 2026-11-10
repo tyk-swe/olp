@@ -27,6 +27,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/media/transport"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/staging"
 )
@@ -203,10 +204,10 @@ func runMediaCase(t *testing.T, tc mediaCase) mediaRecord {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = spool.Close() })
-	h.gateway.deps.Media = &MediaDeps{Transport: &media.Transport{
+	h.gateway.deps.Media = &MediaDeps{Transport: transport.New(transport.Deps{
 		Client: h.gateway.client, Auth: h.gateway.auth, Egress: h.gateway.egress,
-		Spool: spool, MaxResponseBytes: 1 << 20,
-	}}
+		Spool: spool, MaxResponseBytes: 1 << 20, Log: h.gateway.log,
+	})}
 	h.gateway.deps.Staging = spool
 	h.gateway.deps.Uploads = staging.NewAdmission(spool.CapacityBytes())
 	mode := tc.mode

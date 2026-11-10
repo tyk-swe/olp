@@ -1162,7 +1162,6 @@ func (s *Server) certifyMediaCall(ctx context.Context, cfg *Configuration, crede
 	if cfg.Kind == KindAzure && transport.Hosting() == "azure-v1" {
 		return &probeError{Code: "capability_unavailable", Detail: "Azure OpenAI serves media through deployments; its v1 API offers none."}
 	}
-	silence := media.SilentWAV(100)
 	request, failure := mediaProbeRequest(cfg.Kind, operation)
 	if failure != nil {
 		return &probeError{Code: "capability_unavailable", Detail: failure.Message}
@@ -1171,43 +1170,22 @@ func (s *Server) certifyMediaCall(ctx context.Context, cfg *Configuration, crede
 	if failure != nil {
 		return &probeError{Code: "capability_unavailable", Detail: failure.Message}
 	}
-	body, contentType := call.JSON, "application/json"
-	switch {
-	case call.JSONFrom != nil:
-		var mErr *media.Error
-		if body, mErr = call.JSONFrom(func(*staging.Part) ([]byte, *media.Error) { return silence, nil }); mErr != nil {
-			return &probeError{Code: "capability_unavailable", Detail: mErr.Message}
-		}
-	case len(call.Fields) > 0:
-		var form bytes.Buffer
-		writer := multipart.NewWriter(&form)
-		for _, field := range call.Fields {
-			switch value := field.Value.(type) {
-			case staging.Part:
-				part, _ := writer.CreateFormFile(field.Name, "silence.wav")
-				_, _ = part.Write(silence)
-			case staging.Text:
-				_ = writer.WriteField(field.Name, string(value))
-			}
-		}
-		_ = writer.Close()
-		body, contentType = form.Bytes(), writer.FormDataContentType()
+	body, contentType, failure := mediaProbeBody(call.Body, media.SilentWAV(100))
+	if failure != nil {
+		return &probeError{Code: "capability_unavailable", Detail: failure.Message}
 	}
-	endpoint, err := transport.MediaURL(call.Path, model, call.Query)
-	if call.URL != "" {
-		endpoint, err = call.URL, nil
-	}
+	endpoint, signed, err := media.Resolve(call.Endpoint, transport, model)
 	if err != nil {
 		return &probeError{Code: "capability_unavailable", Detail: "The media probe endpoint could not be built."}
 	}
-	status, data, err := s.callAs(ctx, cfg, credential, call.Method, endpoint, body, contentType, call.SigningService)
+	status, data, err := s.callAs(ctx, cfg, credential, call.Method, endpoint, body, contentType, signed.SigningService)
 	if err != nil {
 		return err
 	}
 	if status != http.StatusOK {
 		return statusError(cfg, status, data)
 	}
-	if mErr := decodeMediaProbe(call, operation, data); mErr != nil {
+	if mErr := decodeMediaProbe(call.Response, data); mErr != nil {
 		return &probeError{Code: "provider_protocol_error", Detail: "The upstream did not satisfy the requested native codec contract."}
 	}
 	return nil
@@ -1252,34 +1230,54 @@ func decodeProbe(probe mediaProbe, decode func([]byte) (*media.Request, *media.E
 	return decode(body)
 }
 
-func decodeMediaProbe(call *media.UpstreamCall, operation string, data []byte) *media.Error {
+func mediaProbeBody(body media.Body, silence []byte) ([]byte, string, *media.Error) {
+	switch body := body.(type) {
+	case media.JSONBody:
+		return body, "application/json", nil
+	case media.NativeJSON:
+		return body, "application/json", nil
+	case media.InlineBody:
+		encoded, failure := body(func(staging.Part) ([]byte, *media.Error) { return silence, nil })
+		return encoded, "application/json", failure
+	case media.UploadBody:
+		return silence, "audio/wav", nil
+	case media.FormBody:
+		var form bytes.Buffer
+		writer := multipart.NewWriter(&form)
+		open := func(staging.Part) (io.ReadCloser, staging.Part, error) {
+			return io.NopCloser(bytes.NewReader(silence)), staging.Part{Filename: "silence.wav", ContentType: "audio/wav"}, nil
+		}
+		if err := media.WriteForm(writer, body, open); err != nil {
+			return nil, "", media.Fail(400, "capability_unavailable", "The media probe could not be encoded.")
+		}
+		return form.Bytes(), writer.FormDataContentType(), nil
+	}
+	return nil, "", media.Fail(400, "capability_unavailable", "The media probe has no body.")
+}
+
+func decodeMediaProbe(response media.Response, data []byte) *media.Error {
 	stage := func(b64 string, index int) (*staging.Artifact, *media.Error) {
 		if _, err := base64.StdEncoding.DecodeString(b64); err != nil {
-			return nil, media.Fail(502, "provider_protocol_error", "The provider image payload is not valid base64.")
+			return nil, media.ProtocolError("The provider image payload is not valid base64.")
 		}
 		return &staging.Artifact{}, nil
 	}
-	var mErr *media.Error
-	switch operation {
-	case "image_generation":
-		switch {
-		case call.DecodeImages != nil:
-			_, mErr = call.DecodeImages(data, stage)
-		case call.Native != "":
-			_, mErr = media.DecodeNativeImageResponse(call.Native, data, 1, stage)
-		default:
-			_, mErr = media.DecodeImageResponse(data, stage)
+	switch reply := response.(type) {
+	case media.ImageReply:
+		_, failure := reply.Images(data, stage)
+		return failure
+	case media.InlineAudioReply:
+		_, failure := reply.Decode(data)
+		return failure
+	case media.AudioReply:
+		if len(data) == 0 {
+			return media.ProtocolError("The upstream returned no audio.")
 		}
-	case "speech":
-		if call.DecodeAudio != nil {
-			_, mErr = call.DecodeAudio(data)
-		} else if len(data) == 0 {
-			mErr = media.Fail(502, "provider_protocol_error", "The upstream returned no audio.")
-		}
-	case "transcription":
-		_, mErr = media.DecodeTranscript(call, "json", data)
+	case media.TranscriptReply:
+		_, failure := reply.Transcript(data)
+		return failure
 	}
-	return mErr
+	return nil
 }
 
 // certifyVendorMedia proves a reviewed vendor's media operation without

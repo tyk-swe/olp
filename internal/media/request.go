@@ -314,13 +314,6 @@ func valueOf[T any](value *T) T {
 	return valueOr(value, zero)
 }
 
-func (r *Request) spoolName(fallback string) string {
-	if r == nil {
-		return fallback
-	}
-	return string(r.Op()) + "-response"
-}
-
 func (r *Request) TranscriptFormat() string {
 	if r == nil {
 		return "json"
@@ -332,19 +325,4 @@ func (r *Request) TranscriptFormat() string {
 		return valueOr(p.Format, "json")
 	}
 	return "json"
-}
-
-func (r *Request) expectedImages() int64 {
-	if r == nil {
-		return 1
-	}
-	switch p := r.params.(type) {
-	case ImageGeneration:
-		return imageCount(p.Count)
-	case ImageEdit:
-		return imageCount(p.Count)
-	case ImageVariation:
-		return imageCount(p.Count)
-	}
-	return 1
 }

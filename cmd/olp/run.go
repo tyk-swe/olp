@@ -46,8 +46,8 @@ import (
 	"github.com/tyk-swe/olp/internal/mcp/registration"
 	"github.com/tyk-swe/olp/internal/mcp/sessions"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
-	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/jobs"
+	"github.com/tyk-swe/olp/internal/media/transport"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/pluginindex"
@@ -212,7 +212,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 	var gw *gateway.Server
 	var agentMonitor *agents.TaskMonitor
 	var mediaService *jobs.Service
-	var mediaTransport *media.Transport
+	var mediaTransport *transport.Transport
 	var mediaSpool *staging.Spool
 	var pluginHost *plugins.Host
 	var policy egress.Policy
@@ -353,13 +353,14 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			}
 			mediaSpool = spool
 			defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "media spool", func(context.Context) error { return spool.Close() })
-			mediaTransport = &media.Transport{
+			mediaTransport = transport.New(transport.Deps{
 				Client:           policy.Client(gateway.UpstreamHeaderTimeout),
 				Auth:             connectors.NewAuth(&policy),
 				Egress:           &policy,
 				Spool:            spool,
 				MaxResponseBytes: c.ProviderMaxResponseBytes,
-			}
+				Log:              log,
+			})
 			mediaService = jobs.New(jobs.Deps{
 				Store:       jobs.NewStore(pool),
 				Transport:   mediaTransport,

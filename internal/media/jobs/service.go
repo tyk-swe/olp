@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/media/transport"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/staging"
@@ -19,7 +20,7 @@ const LeaseSlack = 60 * time.Second
 
 type Deps struct {
 	Store       *Store
-	Transport   *media.Transport
+	Transport   *transport.Transport
 	Credentials release.Credentials
 	Gaps        *atomic.Uint64
 	Log         *slog.Logger
@@ -28,7 +29,7 @@ type Deps struct {
 
 type Service struct {
 	store       *Store
-	transport   *media.Transport
+	transport   *transport.Transport
 	credentials release.Credentials
 	gaps        *atomic.Uint64
 	log         *slog.Logger
@@ -43,7 +44,7 @@ func New(deps Deps) *Service {
 func (s *Service) RecordGap() { s.gaps.Add(1) }
 
 type Resolved struct {
-	media.Target
+	transport.Target
 	Provider routing.Provider
 	Slot     routing.Slot
 	Timeout  time.Duration
@@ -96,7 +97,7 @@ func (s *Service) Target(ctx context.Context, record Record) (Resolved, error) {
 		credential = *slot.CredentialID
 	}
 	return Resolved{
-		Target: media.Target{Config: config, Model: config.Model(record.UpstreamModel), Secret: secret,
+		Target: transport.Target{Config: config, Model: config.Model(record.UpstreamModel), Secret: secret,
 			NetworkSecret: networkSecret, ConnectionScope: provider.ID + "/" + provider.RevisionID + "/" + slot.ID + "/" + credential},
 		Provider: provider,
 		Slot:     slot,
@@ -116,30 +117,29 @@ func (s *Service) bind(resolved Resolved, record Record, caller *Caller) (Resolv
 	if err != nil {
 		return Resolved{}, unavailable
 	}
-	resolved.Secret, resolved.CallerCredential, resolved.Sensitive = secret, true, caller.Sensitive
-	return resolved, nil
+	return Resolved{Target: resolved.WithCaller(secret, caller.Sensitive), Provider: resolved.Provider,
+		Slot: resolved.Slot, Timeout: resolved.Timeout}, nil
 }
 
-type upstreamFailure struct{ *media.Failure }
+type upstreamFailure struct{ *transport.Failure }
 
 func (f upstreamFailure) Error() string { return "media job upstream call failed: " + string(f.Class) }
 
-func (s *Service) send(ctx context.Context, resolved Resolved, record Record, job media.JobCall) (*media.Result, error) {
+func (s *Service) send(ctx context.Context, resolved Resolved, record Record, job media.JobCall) (*transport.Result, error) {
 	call, encodeFailure := media.EncodeJob(job, resolved.Config)
 	if encodeFailure != nil {
 		return nil, &Unavailable{Code: "media_job_operation_invalid"}
 	}
-	call.Strict = record.StrictContract
 	ctx, cancel := context.WithTimeout(ctx, resolved.Timeout+LeaseSlack)
 	defer cancel()
-	result, failure := s.transport.Do(ctx, resolved.Target, call, nil)
+	result, failure := s.transport.Do(ctx, resolved.Target, call, transport.Options{Strict: record.StrictContract})
 	if failure != nil {
 		return nil, upstreamFailure{failure}
 	}
 	return result, nil
 }
 
-func (s *Service) dispatch(ctx context.Context, record Record, job media.JobCall, caller *Caller) (*media.Result, error) {
+func (s *Service) dispatch(ctx context.Context, record Record, job media.JobCall, caller *Caller) (*transport.Result, error) {
 	resolved, err := s.Target(ctx, record)
 	if err != nil {
 		return nil, err
@@ -151,11 +151,15 @@ func (s *Service) dispatch(ctx context.Context, record Record, job media.JobCall
 	return s.send(ctx, resolved, record, job)
 }
 
-func deleteConfirmed(result *media.Result, err error) bool {
+func deleteConfirmed(result *transport.Result, err error) bool {
 	if failure, ok := errors.AsType[upstreamFailure](err); ok {
 		return failure.Status == 404
 	}
-	return err == nil && result.Deleted != nil && result.Deleted.Deleted
+	if err != nil {
+		return false
+	}
+	deleted, ok := result.Payload.(transport.Deleted)
+	return ok && deleted.VideoDeleteResult != nil && deleted.Deleted
 }
 
 func (s *Service) gap(message string, args ...any) {
@@ -313,8 +317,9 @@ func (s *Service) Content(ctx context.Context, record Record, variant string) (*
 	if err != nil {
 		return nil, err
 	}
-	if result.Artifact == nil {
+	content, ok := result.Payload.(transport.Content)
+	if !ok || content.Artifact == nil {
 		return nil, ErrNoContent
 	}
-	return result.Artifact, nil
+	return content.Artifact, nil
 }

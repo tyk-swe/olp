@@ -39,7 +39,7 @@ type ImageUsage struct {
 	ImageOutputTokens *int64
 }
 
-func DecodeImageResponse(body []byte, stage func(b64 string, index int) (*staging.Artifact, *Error)) (*ImageResult, *Error) {
+func DecodeImageResponse(body []byte, stage StageImage) (*ImageResult, *Error) {
 	var encodedWire struct {
 		Created int64 `json:"created"`
 		Data    []struct {
@@ -61,12 +61,12 @@ func DecodeImageResponse(body []byte, stage func(b64 string, index int) (*stagin
 	}
 	var doc map[string]any
 	if err := json.Unmarshal(body, &doc); err != nil {
-		return nil, protocolError("The provider image response is not valid JSON.")
+		return nil, ProtocolError("The provider image response is not valid JSON.")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
 	if err := decoder.Decode(&encodedWire); err != nil {
-		return nil, protocolError("The provider image response is not valid JSON.")
+		return nil, ProtocolError("The provider image response is not valid JSON.")
 	}
 	extra := diffFields(doc, "created", "data", "usage")
 	result := &ImageResult{CreatedAt: encodedWire.Created, Extra: extra}
@@ -94,7 +94,7 @@ func DecodeImageResponse(body []byte, stage func(b64 string, index int) (*stagin
 			handle := staged.Handle
 			artifact.Handle = &handle
 		default:
-			return nil, protocolError("The provider image result must carry exactly one of url or b64_json.")
+			return nil, ProtocolError("The provider image result must carry exactly one of url or b64_json.")
 		}
 		result.Images = append(result.Images, artifact)
 	}
@@ -117,69 +117,91 @@ func DecodeImageResponse(body []byte, stage func(b64 string, index int) (*stagin
 	return result, nil
 }
 
-func DecodeNativeImageResponse(kind string, body []byte, expected int64, stage func(b64 string, index int) (*staging.Artifact, *Error)) (*ImageResult, *Error) {
-	var encodedWire struct {
-		Predictions []struct {
-			BytesBase64Encoded string `json:"bytesBase64Encoded"`
-			MIMEType           string `json:"mimeType"`
-		} `json:"predictions"`
-		Images        []string  `json:"images"`
-		Error         *string   `json:"error"`
-		FinishReasons []*string `json:"finish_reasons"`
-	}
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.UseNumber()
-	if err := decoder.Decode(&encodedWire); err != nil {
-		return nil, protocolError("The provider image response is not valid JSON.")
-	}
-	if encodedWire.Error != nil && *encodedWire.Error != "" {
-		return nil, protocolError("The provider returned an image error.")
-	}
-	var encoded []string
-	switch kind {
-	case "vertex_ai":
+type nativeImages func(body []byte, stage StageImage) (*ImageResult, *Error)
+
+func vertexImages(expected int64) nativeImages {
+	return func(body []byte, stage StageImage) (*ImageResult, *Error) {
+		var encodedWire struct {
+			Predictions []struct {
+				BytesBase64Encoded string `json:"bytesBase64Encoded"`
+				MIMEType           string `json:"mimeType"`
+			} `json:"predictions"`
+			Error *string `json:"error"`
+		}
+		if failure := decodeNativeImages(body, &encodedWire); failure != nil {
+			return nil, failure
+		}
+		if encodedWire.Error != nil && *encodedWire.Error != "" {
+			return nil, ProtocolError("The provider returned an image error.")
+		}
 		if encodedWire.Predictions == nil {
-			return nil, protocolError("The provider image response has no predictions.")
+			return nil, ProtocolError("The provider image response has no predictions.")
 		}
-		for _, prediction := range encodedWire.Predictions {
+		encoded := make([]string, len(encodedWire.Predictions))
+		for i, prediction := range encodedWire.Predictions {
 			if prediction.MIMEType != "" && !strings.HasPrefix(prediction.MIMEType, "image/") {
-				return nil, protocolError("The provider image response carries an invalid MIME type.")
+				return nil, ProtocolError("The provider image response carries an invalid MIME type.")
 			}
-			encoded = append(encoded, prediction.BytesBase64Encoded)
+			encoded[i] = prediction.BytesBase64Encoded
 		}
-	case "bedrock":
+		return stageNativeImages(encoded, expected, stage)
+	}
+}
+
+func bedrockImages(expected int64) nativeImages {
+	return func(body []byte, stage StageImage) (*ImageResult, *Error) {
+		var encodedWire struct {
+			Images        []string  `json:"images"`
+			Error         *string   `json:"error"`
+			FinishReasons []*string `json:"finish_reasons"`
+		}
+		if failure := decodeNativeImages(body, &encodedWire); failure != nil {
+			return nil, failure
+		}
+		if encodedWire.Error != nil && *encodedWire.Error != "" {
+			return nil, ProtocolError("The provider returned an image error.")
+		}
 		for _, reason := range encodedWire.FinishReasons {
 			switch {
 			case reason == nil:
 			case strings.HasPrefix(*reason, "Filter reason:"):
 				return nil, Fail(http.StatusBadRequest, "content_filter", "The provider's content filter refused the image request.")
 			default:
-				return nil, protocolError("The provider reported an image inference error.")
+				return nil, ProtocolError("The provider reported an image inference error.")
 			}
 		}
 		if encodedWire.Images == nil {
-			return nil, protocolError("The provider image response has no images.")
+			return nil, ProtocolError("The provider image response has no images.")
 		}
-		encoded = encodedWire.Images
-	default:
-		return nil, protocolError("The native image response kind is not supported.")
+		return stageNativeImages(encodedWire.Images, expected, stage)
 	}
+}
+
+func decodeNativeImages(body []byte, target any) *Error {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	if decoder.Decode(target) != nil {
+		return ProtocolError("The provider image response is not valid JSON.")
+	}
+	return nil
+}
+
+func stageNativeImages(encoded []string, expected int64, stage StageImage) (*ImageResult, *Error) {
 	if int64(len(encoded)) != expected {
-		return nil, protocolError("The provider image response did not match the requested count.")
+		return nil, ProtocolError("The provider image response did not match the requested count.")
 	}
-	result := &ImageResult{CreatedAt: time.Now().Unix()}
+	images := make([]ImageArtifact, len(encoded))
 	for i, value := range encoded {
 		if value == "" {
-			return nil, protocolError("The provider image response carries an empty payload.")
+			return nil, ProtocolError("The provider image response carries an empty payload.")
 		}
-		staged, err := stage(value, i)
-		if err != nil {
-			return nil, err
+		staged, failure := stage(value, i)
+		if failure != nil {
+			return nil, failure
 		}
-		handle := staged.Handle
-		result.Images = append(result.Images, ImageArtifact{Handle: &handle})
+		images[i] = ImageArtifact{Handle: &staged.Handle}
 	}
-	return result, nil
+	return &ImageResult{CreatedAt: time.Now().Unix(), Images: images}, nil
 }
 
 func diffFields(doc map[string]any, known ...string) map[string]any {
@@ -209,7 +231,7 @@ func EncodeImageResponse(result *ImageResult) ([]byte, []string, *Error) {
 			item["b64_json"] = marker
 			markers = append(markers, marker)
 		default:
-			return nil, nil, protocolError("The provider image result carries no payload.")
+			return nil, nil, ProtocolError("The provider image result carries no payload.")
 		}
 		if image.RevisedPrompt != nil {
 			item["revised_prompt"] = *image.RevisedPrompt
@@ -244,7 +266,7 @@ func EncodeImageResponse(result *ImageResult) ([]byte, []string, *Error) {
 	}
 	body, err := json.Marshal(doc)
 	if err != nil {
-		return nil, nil, protocolError("The provider image metadata could not be encoded.")
+		return nil, nil, ProtocolError("The provider image metadata could not be encoded.")
 	}
 	return body, markers, nil
 }
@@ -302,15 +324,15 @@ func DecodeVideoObject(body []byte) (*VideoJobResult, *Error) {
 	}
 	var doc map[string]any
 	if err := json.Unmarshal(body, &doc); err != nil {
-		return nil, protocolError("The provider video response is not valid JSON.")
+		return nil, ProtocolError("The provider video response is not valid JSON.")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
 	if err := decoder.Decode(&encodedWire); err != nil {
-		return nil, protocolError("The provider video response is not valid JSON.")
+		return nil, ProtocolError("The provider video response is not valid JSON.")
 	}
 	if encodedWire.Object != "video" {
-		return nil, protocolError("The provider returned an unexpected video object type.")
+		return nil, ProtocolError("The provider returned an unexpected video object type.")
 	}
 	result := &VideoJobResult{
 		ID: encodedWire.ID, Status: encodedWire.Status, Progress: encodedWire.Progress,
@@ -368,19 +390,19 @@ func EncodeVideoObject(result *VideoJobResult, localID, route string) ([]byte, *
 	}
 	body, err := json.Marshal(doc)
 	if err != nil {
-		return nil, protocolError("The provider video metadata could not be encoded.")
+		return nil, ProtocolError("The provider video metadata could not be encoded.")
 	}
 	return body, nil
 }
 
 func EncodeStrictVideoObject(source oif.Document, upstreamID, localID, route string) ([]byte, *Error) {
 	if !source.Valid() || source.Root().Kind() != oif.Object {
-		return nil, protocolError("The native video metadata is unavailable.")
+		return nil, ProtocolError("The native video metadata is unavailable.")
 	}
 	id, ok := source.Root().Lookup("id")
 	actual, valid := id.Text()
 	if !ok || !valid || actual != upstreamID {
-		return nil, protocolError("The native video identity changed.")
+		return nil, ProtocolError("The native video identity changed.")
 	}
 	localJSON, _ := json.Marshal(localID)
 	changes := []oif.Change{{Pointer: "/id", Value: string(localJSON), Origin: oif.ResourceBinding, Reason: "owned local video job identity"}}
@@ -390,7 +412,7 @@ func EncodeStrictVideoObject(source oif.Document, upstreamID, localID, route str
 	}
 	client, err := oif.Apply(source, changes)
 	if err != nil {
-		return nil, protocolError("The native video metadata could not be projected.")
+		return nil, ProtocolError("The native video metadata could not be projected.")
 	}
 	return client.Bytes(), nil
 }
@@ -423,7 +445,7 @@ func EncodeVideoListResponse(result *VideoListResult, fallback string) ([]byte, 
 		}
 		var item any
 		if err := json.Unmarshal(encoded, &item); err != nil {
-			return nil, protocolError("The provider video metadata could not be encoded.")
+			return nil, ProtocolError("The provider video metadata could not be encoded.")
 		}
 		data[i] = item
 	}
@@ -441,7 +463,7 @@ func EncodeVideoListResponse(result *VideoListResult, fallback string) ([]byte, 
 	}
 	body, err := json.Marshal(doc)
 	if err != nil {
-		return nil, protocolError("The provider video list could not be encoded.")
+		return nil, ProtocolError("The provider video list could not be encoded.")
 	}
 	return body, nil
 }
@@ -461,12 +483,12 @@ func DecodeVideoDeleteResponse(body []byte) (*VideoDeleteResult, *Error) {
 	}
 	var doc map[string]any
 	if err := json.Unmarshal(body, &doc); err != nil {
-		return nil, protocolError("The provider video delete response is not valid JSON.")
+		return nil, ProtocolError("The provider video delete response is not valid JSON.")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
 	if err := decoder.Decode(&encodedWire); err != nil {
-		return nil, protocolError("The provider video delete response is not valid JSON.")
+		return nil, ProtocolError("The provider video delete response is not valid JSON.")
 	}
 	return &VideoDeleteResult{
 		ID: encodedWire.ID, Deleted: encodedWire.Deleted, Object: encodedWire.Object,
@@ -487,7 +509,7 @@ func EncodeVideoDeleteResponse(result *VideoDeleteResult, localID string) ([]byt
 	}
 	body, err := json.Marshal(doc)
 	if err != nil {
-		return nil, protocolError("The provider video deletion receipt could not be encoded.")
+		return nil, ProtocolError("The provider video deletion receipt could not be encoded.")
 	}
 	return body, nil
 }
@@ -539,12 +561,12 @@ func DecodeTranscriptionJSON(body []byte) (*TranscriptionResult, *Error) {
 	}
 	var doc map[string]any
 	if err := json.Unmarshal(body, &doc); err != nil {
-		return nil, protocolError("The provider transcription is not valid JSON.")
+		return nil, ProtocolError("The provider transcription is not valid JSON.")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
 	if err := decoder.Decode(&encodedWire); err != nil {
-		return nil, protocolError("The provider transcription is not valid JSON.")
+		return nil, ProtocolError("The provider transcription is not valid JSON.")
 	}
 	for _, segment := range encodedWire.Segments {
 		if len(segment.ID) == 0 || string(segment.ID) == "null" {
@@ -556,7 +578,7 @@ func DecodeTranscriptionJSON(body []byte) (*TranscriptionResult, *Error) {
 		}
 		var number int64
 		if err := json.Unmarshal(segment.ID, &number); err != nil {
-			return nil, protocolError("The provider transcription segment ID must be a string or integer.")
+			return nil, ProtocolError("The provider transcription segment ID must be a string or integer.")
 		}
 	}
 	result := &TranscriptionResult{
@@ -600,7 +622,7 @@ func EncodeTranscriptionJSON(result *TranscriptionResult) ([]byte, *Error) {
 	if result.TextOnly {
 		body, err := json.Marshal(doc)
 		if err != nil {
-			return nil, protocolError("The provider transcription could not be encoded.")
+			return nil, ProtocolError("The provider transcription could not be encoded.")
 		}
 		return body, nil
 	}
@@ -636,7 +658,7 @@ func EncodeTranscriptionJSON(result *TranscriptionResult) ([]byte, *Error) {
 	}
 	body, err := json.Marshal(doc)
 	if err != nil {
-		return nil, protocolError("The provider transcription could not be encoded.")
+		return nil, ProtocolError("The provider transcription could not be encoded.")
 	}
 	return body, nil
 }
@@ -732,7 +754,7 @@ func IsMediaTerminal(event string) bool {
 		event == "speech.audio.done" || event == "error" || event == "done"
 }
 
-func protocolError(message string) *Error {
+func ProtocolError(message string) *Error {
 	return Fail(502, "provider_protocol_error", message)
 }
 
