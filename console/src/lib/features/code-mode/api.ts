@@ -46,7 +46,6 @@ type CollectionPath =
   | '/api/v1/code/budgets'
   | '/api/v1/code/bindings'
   | '/api/v1/code/attempts'
-  | '/api/v1/code/decisions'
   | '/api/v1/code/refusals'
   | '/api/v1/code/token-windows';
 
@@ -60,7 +59,6 @@ export type CodeRoutesQuery = QueryOf<'/api/v1/code/routes'>;
 export type CodeBudgetsQuery = QueryOf<'/api/v1/code/budgets'>;
 export type CodeBindingsQuery = QueryOf<'/api/v1/code/bindings'>;
 export type CodeAttemptsQuery = QueryOf<'/api/v1/code/attempts'>;
-export type CodeDecisionsQuery = QueryOf<'/api/v1/code/decisions'>;
 export type CodeRefusalsQuery = QueryOf<'/api/v1/code/refusals'>;
 export type CodeTokenWindowsQuery = QueryOf<'/api/v1/code/token-windows'>;
 
@@ -71,7 +69,6 @@ export type CodeFilters =
   | CodeBudgetsQuery
   | CodeBindingsQuery
   | CodeAttemptsQuery
-  | CodeDecisionsQuery
   | CodeRefusalsQuery
   | CodeTokenWindowsQuery;
 
@@ -234,17 +231,6 @@ export function listCodeAttempts(
 ) {
   return fetchPage(
     (opts) => apiClient.GET('/api/v1/code/attempts', opts),
-    filters,
-    signal
-  );
-}
-
-export function listCodeDecisions(
-  filters: CodeDecisionsQuery = {},
-  signal?: AbortSignal
-) {
-  return fetchPage(
-    (opts) => apiClient.GET('/api/v1/code/decisions', opts),
     filters,
     signal
   );
