@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/metric"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/release"
@@ -28,6 +29,7 @@ type observed struct {
 	gateway       *gateway.Server
 	emitter       *usage.Emitter
 	spool         *staging.Spool
+	media         *jobs.Store
 	mediaGaps     *atomic.Uint64
 	loss          *usage.LossCounters
 	export        func(context.Context) []prometheus.Metric
@@ -38,6 +40,7 @@ func observabilitySources(o observed) *observability.Sources {
 		Region:        o.region,
 		Store:         o.pool,
 		ServesGateway: o.servesGateway,
+		Media:         o.media,
 		MediaGaps:     o.mediaGaps,
 		Loss:          o.loss,
 		Export:        o.export,

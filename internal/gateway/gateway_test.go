@@ -783,12 +783,10 @@ func TestTransformedMediaPreservesUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = spool.Close() })
-	h.gateway.deps.Media = &MediaDeps{
-		Jobs: &media.Service{Transport: &media.Transport{
-			Client: h.gateway.client, Auth: h.gateway.auth, Egress: h.gateway.egress,
-			Spool: spool, MaxResponseBytes: 1 << 20,
-		}},
-	}
+	h.gateway.deps.Media = &MediaDeps{Transport: &media.Transport{
+		Client: h.gateway.client, Auth: h.gateway.auth, Egress: h.gateway.egress,
+		Spool: spool, MaxResponseBytes: 1 << 20,
+	}}
 	h.gateway.deps.Staging = spool
 	h.gateway.deps.Uploads = staging.NewAdmission(spool.CapacityBytes())
 	h.republish(func(snapshot *routing.Snapshot, a, b routing.Provider) {

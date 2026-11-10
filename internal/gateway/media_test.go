@@ -203,12 +203,10 @@ func runMediaCase(t *testing.T, tc mediaCase) mediaRecord {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = spool.Close() })
-	h.gateway.deps.Media = &MediaDeps{
-		Jobs: &media.Service{Transport: &media.Transport{
-			Client: h.gateway.client, Auth: h.gateway.auth, Egress: h.gateway.egress,
-			Spool: spool, MaxResponseBytes: 1 << 20,
-		}},
-	}
+	h.gateway.deps.Media = &MediaDeps{Transport: &media.Transport{
+		Client: h.gateway.client, Auth: h.gateway.auth, Egress: h.gateway.egress,
+		Spool: spool, MaxResponseBytes: 1 << 20,
+	}}
 	h.gateway.deps.Staging = spool
 	h.gateway.deps.Uploads = staging.NewAdmission(spool.CapacityBytes())
 	mode := tc.mode

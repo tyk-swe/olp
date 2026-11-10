@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/staging"
 )
 
@@ -435,7 +436,7 @@ func ValidStrictVideoJobSource(source oif.Document, upstreamID, model string) bo
 	gotModel, modelText := modelValue.Text()
 	gotObject, objectText := object.Text()
 	gotStatus, statusText := status.Text()
-	_, validStatus := VideoState(gotStatus)
+	_, validStatus := wire.VideoJobStateOf(gotStatus)
 	return idOK && idText && gotID == upstreamID && modelOK && modelText && gotModel == model &&
 		objectOK && objectText && gotObject == "video" && statusOK && statusText &&
 		validStatus

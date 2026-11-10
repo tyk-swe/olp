@@ -4,13 +4,13 @@ package integration_test
 
 import (
 	"encoding/json"
-	"errors"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/tests/harness"
 )
 
@@ -35,8 +35,8 @@ type seededJob struct {
 	key       string
 	route     string
 	revision  string
-	state     media.State
-	lifecycle media.Lifecycle
+	state     jobs.State
+	lifecycle jobs.Lifecycle
 	upstream  string
 	createdAt time.Time
 }
@@ -102,11 +102,11 @@ func newVideoFixture(t *testing.T) videoFixture {
 	return f
 }
 
-func (f videoFixture) reservation() media.Reservation {
-	return media.Reservation{
+func (f videoFixture) reservation() jobs.Reservation {
+	return jobs.Reservation{
 		ID: uuid.NewString(), RuntimeGenerationID: f.generationID, ProviderRevisionID: f.revisionID,
 		APIKeyID: f.keyID, ProviderID: f.providerID, UpstreamModel: videoModel, RouteSlug: "studio",
-		Operation: "video_create", Surface: "openai", CredentialVersionID: &f.credentialID, SlotID: f.slotID,
+		Surface: "openai", CredentialVersionID: &f.credentialID, SlotID: f.slotID,
 	}
 }
 
@@ -145,13 +145,22 @@ func (f videoFixture) seed(t *testing.T, job seededJob) string {
 	return id
 }
 
-func jobErrorKind(t *testing.T, err error) media.JobErrorKind {
+func jobKind(t *testing.T, err error) jobs.Kind {
 	t.Helper()
-	var job *media.JobError
-	if !errors.As(err, &job) {
+	kind, ok := jobs.KindOf(err)
+	if !ok {
 		t.Fatalf("error %v is not a media job error", err)
 	}
-	return job.Kind
+	return kind
+}
+
+func observed(t *testing.T, at time.Time, video media.VideoJobResult) jobs.Update {
+	t.Helper()
+	update, ok := jobs.Observe(&video, at)
+	if !ok {
+		t.Fatalf("the poll %+v was refused", video)
+	}
+	return update
 }
 
 func float32Pointer(value float32) *float32 { return &value }
@@ -160,108 +169,101 @@ func TestVideoJobLifecycleRunsFromReservationToTombstone(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	f := newVideoFixture(t)
+	store := jobs.NewStore(f.pool)
 
 	stray := f.reservation()
 	stray.UpstreamModel = "not-certified"
-	if _, err := media.ReserveJob(ctx, f.pool, stray); jobErrorKind(t, err) != media.JobErrorInvalid {
+	if _, err := store.Reserve(ctx, stray); jobKind(t, err) != jobs.KindInvalid {
 		t.Fatalf("a model outside the pinned release reserved a job: %v", err)
 	}
-	reserved, err := media.ReserveJob(ctx, f.pool, f.reservation())
+	reserved, err := store.Reserve(ctx, f.reservation())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reserved.Lifecycle != media.LifecycleCreating || reserved.State != media.StateQueued || reserved.UpstreamJobID != nil || reserved.ProviderName != "video" {
+	if reserved.Lifecycle != jobs.Creating || reserved.State != jobs.Queued || reserved.UpstreamJobID != nil ||
+		reserved.ProviderName != "video" || reserved.ProjectID == nil || *reserved.ProjectID != f.projectID {
 		t.Fatalf("reserved job = %+v", reserved)
 	}
 
 	started := time.Now().UTC()
-	if _, err = media.AttachUpstream(ctx, f.pool, reserved.ID, " vid_1", media.JobUpdate{State: media.StateQueued, LastPolledAt: started}); jobErrorKind(t, err) != media.JobErrorInvalid {
+	queued := observed(t, started, media.VideoJobResult{Status: "queued"})
+	if _, err = store.Attach(ctx, reserved.ID, " vid_1", queued); jobKind(t, err) != jobs.KindInvalid {
 		t.Fatalf("a padded upstream identity attached: %v", err)
 	}
-	if _, err = media.AttachUpstream(ctx, f.pool, reserved.ID, "vid_1", media.JobUpdate{State: media.StateQueued, ContentAvailable: true, LastPolledAt: started}); jobErrorKind(t, err) != media.JobErrorInvalid {
-		t.Fatalf("a queued job attached with content: %v", err)
-	}
-	attached, err := media.AttachUpstream(ctx, f.pool, reserved.ID, "vid_1", media.JobUpdate{State: media.StateQueued, LastPolledAt: started})
+	attached, err := store.Attach(ctx, reserved.ID, "vid_1", queued)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if attached.Lifecycle != media.LifecycleActive || attached.UpstreamJobID == nil || *attached.UpstreamJobID != "vid_1" || attached.ETag == reserved.ETag {
+	if attached.Lifecycle != jobs.Active || attached.UpstreamJobID == nil || *attached.UpstreamJobID != "vid_1" || attached.ETag == reserved.ETag {
 		t.Fatalf("attached job = %+v", attached)
 	}
-	if retried, err := media.AttachUpstream(ctx, f.pool, reserved.ID, "vid_1", media.JobUpdate{State: media.StateQueued, LastPolledAt: started}); err != nil || retried.ID != reserved.ID {
+	if retried, err := store.Attach(ctx, reserved.ID, "vid_1", queued); err != nil || retried.ID != reserved.ID {
 		t.Fatalf("an ambiguous attach retry with the same identity: %+v, %v", retried, err)
 	}
-	if _, err = media.AttachUpstream(ctx, f.pool, reserved.ID, "vid_2", media.JobUpdate{State: media.StateQueued, LastPolledAt: started}); jobErrorKind(t, err) != media.JobErrorPrecondition {
+	if _, err = store.Attach(ctx, reserved.ID, "vid_2", queued); jobKind(t, err) != jobs.KindChanged {
 		t.Fatalf("an attached job took a second identity: %v", err)
 	}
-	twin, err := media.ReserveJob(ctx, f.pool, f.reservation())
+	twin, err := store.Reserve(ctx, f.reservation())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = media.AttachUpstream(ctx, f.pool, twin.ID, "vid_1", media.JobUpdate{State: media.StateQueued, LastPolledAt: started}); jobErrorKind(t, err) != media.JobErrorUpstreamIdentityConflict {
+	if _, err = store.Attach(ctx, twin.ID, "vid_1", queued); jobKind(t, err) != jobs.KindConflict {
 		t.Fatalf("two jobs share one upstream identity: %v", err)
 	}
 
-	refresh := func(at time.Duration, update media.JobUpdate) media.JobRecord {
+	if _, ok := jobs.Observe(&media.VideoJobResult{Status: "in_progress", Progress: float32Pointer(101)}, started); ok {
+		t.Fatal("a poll with progress above 100 was accepted")
+	}
+	refresh := func(at time.Duration, video media.VideoJobResult) jobs.Record {
 		t.Helper()
-		update.LastPolledAt = started.Add(at)
-		record, err := media.RefreshJob(ctx, f.pool, reserved.ID, update)
+		record, err := store.Refresh(ctx, reserved.ID, jobs.Unfenced, observed(t, started.Add(at), video))
 		if err != nil {
 			t.Fatal(err)
 		}
 		return record
 	}
-	if _, err = media.RefreshJob(ctx, f.pool, reserved.ID, media.JobUpdate{State: media.StateRunning, ProgressPercent: float32Pointer(101), LastPolledAt: started}); jobErrorKind(t, err) != media.JobErrorInvalid {
-		t.Fatalf("progress above 100 was stored: %v", err)
-	}
-	if got := refresh(2*time.Second, media.JobUpdate{State: media.StateRunning, ProgressPercent: float32Pointer(40)}); got.State != media.StateRunning || got.ProgressPercent == nil || *got.ProgressPercent != 40 {
+	if got := refresh(2*time.Second, media.VideoJobResult{Status: "in_progress", Progress: float32Pointer(40)}); got.State != jobs.Running || got.ProgressPercent == nil || *got.ProgressPercent != 40 {
 		t.Fatalf("running poll = %+v", got)
 	}
-	if got := refresh(time.Second, media.JobUpdate{State: media.StateSucceeded, ContentAvailable: true}); got.State != media.StateRunning {
+	if got := refresh(time.Second, media.VideoJobResult{Status: "completed"}); got.State != jobs.Running {
 		t.Fatalf("a poll older than the stored one applied: %+v", got)
 	}
-	if got := refresh(3*time.Second, media.JobUpdate{State: media.StateQueued, ProgressPercent: float32Pointer(10)}); got.State != media.StateRunning || *got.ProgressPercent != 40 {
+	if got := refresh(3*time.Second, media.VideoJobResult{Status: "queued", Progress: float32Pointer(10)}); got.State != jobs.Running || *got.ProgressPercent != 40 {
 		t.Fatalf("a state regression applied: %+v", got)
 	}
-	if got := refresh(4*time.Second, media.JobUpdate{State: media.StateRunning, ProgressPercent: float32Pointer(20)}); *got.ProgressPercent != 40 {
+	if got := refresh(4*time.Second, media.VideoJobResult{Status: "in_progress", Progress: float32Pointer(20)}); *got.ProgressPercent != 40 {
 		t.Fatalf("progress went backwards: %+v", got)
 	}
-	succeeded := refresh(5*time.Second, media.JobUpdate{State: media.StateSucceeded, ProgressPercent: float32Pointer(100), ContentAvailable: true})
-	if succeeded.State != media.StateSucceeded || !succeeded.ContentAvailable || succeeded.CompletedAt == nil {
+	succeeded := refresh(5*time.Second, media.VideoJobResult{Status: "completed", Progress: float32Pointer(100)})
+	if succeeded.State != jobs.Succeeded || !succeeded.ContentAvailable() || succeeded.CompletedAt == nil {
 		t.Fatalf("succeeded poll = %+v", succeeded)
 	}
 	failed := "upstream_failed"
-	if got := refresh(6*time.Second, media.JobUpdate{State: media.StateFailed, ErrorClass: &failed}); got.State != media.StateSucceeded || got.ErrorClass != nil {
+	if got := refresh(6*time.Second, media.VideoJobResult{Status: "failed", ErrorCode: &failed}); got.State != jobs.Succeeded || got.ErrorClass != nil {
 		t.Fatalf("a terminal job changed state: %+v", got)
 	}
 
-	pending, err := media.BeginDeletion(ctx, f.pool, reserved.ID)
-	if err != nil || pending.Lifecycle != media.LifecycleDeletePending {
+	pending, err := store.BeginDeletion(ctx, reserved.ID, jobs.Unfenced)
+	if err != nil || pending.Lifecycle != jobs.DeletePending {
 		t.Fatalf("begin deletion = %+v, %v", pending, err)
 	}
-	if again, err := media.BeginDeletion(ctx, f.pool, reserved.ID); err != nil || again.Lifecycle != media.LifecycleDeletePending {
+	if again, err := store.BeginDeletion(ctx, reserved.ID, jobs.Unfenced); err != nil || again.Lifecycle != jobs.DeletePending {
 		t.Fatalf("a repeated delete = %+v, %v", again, err)
 	}
-	if got := refresh(7*time.Second, media.JobUpdate{State: media.StateSucceeded}); got.Lifecycle != media.LifecycleDeletePending {
+	if got := refresh(7*time.Second, media.VideoJobResult{Status: "completed"}); got.Lifecycle != jobs.DeletePending {
 		t.Fatalf("a late poll undid delete intent: %+v", got)
 	}
-	if finalized, err := media.FinalizeDeletion(ctx, f.pool, reserved.ID); err != nil || !finalized {
-		t.Fatalf("finalize = %v, %v", finalized, err)
+	tombstone, err := store.Finalize(ctx, reserved.ID, jobs.Unfenced)
+	if err != nil || tombstone.Lifecycle != jobs.Deleted || tombstone.DeletedAt == nil || tombstone.ContentAvailable() {
+		t.Fatalf("tombstone = %+v, %v", tombstone, err)
 	}
-	if finalized, err := media.FinalizeDeletion(ctx, f.pool, reserved.ID); err != nil || finalized {
-		t.Fatalf("a second finalize = %v, %v", finalized, err)
+	if again, err := store.Finalize(ctx, reserved.ID, jobs.Unfenced); err != nil || again.Lifecycle != jobs.Deleted || !again.DeletedAt.Equal(*tombstone.DeletedAt) {
+		t.Fatalf("a second finalize = %+v, %v", again, err)
 	}
-	tombstone, err := media.Job(ctx, f.pool, reserved.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if tombstone.Lifecycle != media.LifecycleDeleted || tombstone.DeletedAt == nil || tombstone.ContentAvailable {
-		t.Fatalf("tombstone = %+v", tombstone)
-	}
-	if again, err := media.BeginDeletion(ctx, f.pool, reserved.ID); err != nil || again.Lifecycle != media.LifecycleDeleted {
+	if again, err := store.BeginDeletion(ctx, reserved.ID, jobs.Unfenced); err != nil || again.Lifecycle != jobs.Deleted {
 		t.Fatalf("deleting a tombstone = %+v, %v", again, err)
 	}
-	if _, err = media.Job(ctx, f.pool, uuid.NewString()); jobErrorKind(t, err) != media.JobErrorNotFound {
+	if _, err = store.Get(ctx, uuid.NewString()); jobKind(t, err) != jobs.KindNotFound {
 		t.Fatalf("an unknown job: %v", err)
 	}
 }
@@ -270,37 +272,38 @@ func TestAbandonedVideoCreatesWaitForUpstreamCleanup(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	f := newVideoFixture(t)
-	creating := f.seed(t, seededJob{state: media.StateQueued, lifecycle: media.LifecycleCreating})
+	store := jobs.NewStore(f.pool)
+	creating := f.seed(t, seededJob{state: jobs.Queued, lifecycle: jobs.Creating})
 
-	ambiguous, err := media.MarkCreateAmbiguous(ctx, f.pool, creating, "timeout")
-	if err != nil || ambiguous.Lifecycle != media.LifecycleCreateAmbiguous || ambiguous.ReconciliationError == nil || *ambiguous.ReconciliationError != "timeout" {
+	ambiguous, err := store.MarkAmbiguous(ctx, creating, jobs.Unfenced, "timeout")
+	if err != nil || ambiguous.Lifecycle != jobs.CreateAmbiguous || ambiguous.ReconciliationError == nil || *ambiguous.ReconciliationError != "timeout" {
 		t.Fatalf("mark ambiguous = %+v, %v", ambiguous, err)
 	}
-	if _, err = media.MarkCreateCleanupPending(ctx, f.pool, creating, " ", "attach_failed"); jobErrorKind(t, err) != media.JobErrorInvalid {
+	if _, err = store.MarkCleanup(ctx, creating, jobs.Unfenced, " ", "attach_failed"); jobKind(t, err) != jobs.KindInvalid {
 		t.Fatalf("cleanup without an upstream identity: %v", err)
 	}
-	cleanup, err := media.MarkCreateCleanupPending(ctx, f.pool, creating, "vid_orphan", "attach_failed")
-	if err != nil || cleanup.Lifecycle != media.LifecycleCreateCleanupPending || cleanup.UpstreamJobID == nil || *cleanup.UpstreamJobID != "vid_orphan" {
+	cleanup, err := store.MarkCleanup(ctx, creating, jobs.Unfenced, "vid_orphan", "attach_failed")
+	if err != nil || cleanup.Lifecycle != jobs.CleanupPending || cleanup.UpstreamJobID == nil || *cleanup.UpstreamJobID != "vid_orphan" {
 		t.Fatalf("mark cleanup = %+v, %v", cleanup, err)
 	}
-	if _, err = media.MarkCreateAmbiguous(ctx, f.pool, creating, "timeout"); jobErrorKind(t, err) != media.JobErrorPrecondition {
+	if _, err = store.MarkAmbiguous(ctx, creating, jobs.Unfenced, "timeout"); jobKind(t, err) != jobs.KindChanged {
 		t.Fatalf("a cleanup job went back to ambiguous: %v", err)
 	}
-	if _, err = media.AttachUpstream(ctx, f.pool, creating, "vid_orphan", media.JobUpdate{State: media.StateQueued, LastPolledAt: time.Now()}); jobErrorKind(t, err) != media.JobErrorPrecondition {
+	if _, err = store.Attach(ctx, creating, "vid_orphan", observed(t, time.Now(), media.VideoJobResult{Status: "queued"})); jobKind(t, err) != jobs.KindChanged {
 		t.Fatalf("a cleanup job became active: %v", err)
 	}
-	if _, err = media.MarkCreateAmbiguous(ctx, f.pool, uuid.NewString(), "timeout"); jobErrorKind(t, err) != media.JobErrorNotFound {
+	if _, err = store.MarkAmbiguous(ctx, uuid.NewString(), jobs.Unfenced, "timeout"); jobKind(t, err) != jobs.KindNotFound {
 		t.Fatalf("an unknown job: %v", err)
 	}
-	active := f.seed(t, seededJob{state: media.StateRunning, lifecycle: media.LifecycleActive, upstream: "vid_live"})
-	if _, err = media.BeginDeletion(ctx, f.pool, creating); jobErrorKind(t, err) != media.JobErrorPrecondition {
+	active := f.seed(t, seededJob{state: jobs.Running, lifecycle: jobs.Active, upstream: "vid_live"})
+	if _, err = store.BeginDeletion(ctx, creating, jobs.Unfenced); jobKind(t, err) != jobs.KindChanged {
 		t.Fatalf("a client delete of an unattached job: %v", err)
 	}
-	if finalized, err := media.FinalizeDeletion(ctx, f.pool, active); err != nil || finalized {
-		t.Fatalf("an active job was tombstoned without delete intent: %v, %v", finalized, err)
+	if kept, err := store.Finalize(ctx, active, jobs.Unfenced); err != nil || kept.Lifecycle != jobs.Active {
+		t.Fatalf("an active job was tombstoned without delete intent: %+v, %v", kept, err)
 	}
-	if finalized, err := media.FinalizeDeletion(ctx, f.pool, creating); err != nil || !finalized {
-		t.Fatalf("finalize cleanup = %v, %v", finalized, err)
+	if finalized, err := store.Finalize(ctx, creating, jobs.Unfenced); err != nil || finalized.Lifecycle != jobs.Deleted {
+		t.Fatalf("finalize cleanup = %+v, %v", finalized, err)
 	}
 }
 
@@ -308,60 +311,66 @@ func TestVideoJobClaimsFenceConcurrentWorkers(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	f := newVideoFixture(t)
-	ambiguous := f.seed(t, seededJob{state: media.StateQueued, lifecycle: media.LifecycleCreateAmbiguous})
-	polling := f.seed(t, seededJob{state: media.StateRunning, lifecycle: media.LifecycleActive, upstream: "vid_poll"})
-	f.seed(t, seededJob{state: media.StateSucceeded, lifecycle: media.LifecycleActive, upstream: "vid_done"})
-	f.seed(t, seededJob{state: media.StateQueued, lifecycle: media.LifecycleDeleted})
-	f.seed(t, seededJob{state: media.StateQueued, lifecycle: media.LifecycleCreateAmbiguous, revision: f.callerRevisionID})
+	store := jobs.NewStore(f.pool)
+	ambiguous := f.seed(t, seededJob{state: jobs.Queued, lifecycle: jobs.CreateAmbiguous})
+	polling := f.seed(t, seededJob{state: jobs.Running, lifecycle: jobs.Active, upstream: "vid_poll"})
+	f.seed(t, seededJob{state: jobs.Succeeded, lifecycle: jobs.Active, upstream: "vid_done"})
+	f.seed(t, seededJob{state: jobs.Queued, lifecycle: jobs.Deleted})
+	caller := f.seed(t, seededJob{state: jobs.Queued, lifecycle: jobs.CreateAmbiguous, revision: f.callerRevisionID})
 	now := time.Now().Add(time.Minute)
 
-	summary, err := media.ReconciliationSummary(ctx, f.pool, now)
+	summary, err := store.Summary(ctx, now)
 	if err != nil || summary.Pending != 1 || summary.OldestPendingAt == nil {
 		t.Fatalf("summary = %+v, %v", summary, err)
 	}
-	claimed, err := media.ClaimJobs(ctx, f.pool, now, 10)
+	claimed, err := store.Claim(ctx, now, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(claimed) != 2 || claimed[0].ID != ambiguous || claimed[1].ID != polling {
 		t.Fatalf("claimed = %+v", claimed)
 	}
-	claimID := *claimed[0].ReconciliationClaimID
-	if again, err := media.ClaimJobs(ctx, f.pool, now, 10); err != nil || len(again) != 0 {
+	if again, err := store.Claim(ctx, now, 10); err != nil || len(again) != 0 {
 		t.Fatalf("a second worker claimed leased jobs: %+v, %v", again, err)
 	}
-	if _, ok, err := media.ClaimJob(ctx, f.pool, ambiguous, now); err != nil || ok {
+	if _, ok, err := store.ClaimOne(ctx, ambiguous, now); err != nil || ok {
 		t.Fatalf("a management refresh claimed a leased job: %v, %v", ok, err)
 	}
-	stranger := uuid.NewString()
-	if extended, err := media.ExtendClaim(ctx, f.pool, ambiguous, stranger, now.Add(time.Minute)); err != nil || extended {
-		t.Fatalf("a stranger extended the lease: %v, %v", extended, err)
+	if _, ok, err := store.ClaimOne(ctx, caller, now); err != nil || ok {
+		t.Fatalf("a management refresh claimed a job that only the caller's credential can reach: %v, %v", ok, err)
 	}
-	if extended, err := media.ExtendClaim(ctx, f.pool, ambiguous, claimID, now.Add(time.Minute)); err != nil || !extended {
+	first := claimed[0]
+	if extended, err := store.Extend(ctx, first, now.Add(time.Minute)); err != nil || !extended {
 		t.Fatalf("the owner extended the lease: %v, %v", extended, err)
 	}
-	if err = media.FinishReconciliation(ctx, f.pool, ambiguous, stranger, now, nil); jobErrorKind(t, err) != media.JobErrorPrecondition {
-		t.Fatalf("a stranger released the lease: %v", err)
-	}
 	failure := "upstream_timeout"
-	if err = media.FinishReconciliation(ctx, f.pool, ambiguous, claimID, now, &failure); err != nil {
+	if err = store.Finish(ctx, first, now, &failure); err != nil {
 		t.Fatal(err)
 	}
-	record, err := media.Job(ctx, f.pool, ambiguous)
+	record, err := store.Get(ctx, ambiguous)
 	if err != nil || record.ReconciliationClaimID != nil || record.ReconciliationError == nil || *record.ReconciliationError != failure || record.ReconciliationAttempts != 1 {
 		t.Fatalf("released job = %+v, %v", record, err)
 	}
-	if summary, err = media.ReconciliationSummary(ctx, f.pool, now.Add(2*time.Minute)); err != nil || summary.Failed != 1 || summary.Stale != 1 {
+	if summary, err = store.Summary(ctx, now.Add(2*time.Minute)); err != nil || summary.Failed != 1 || summary.Stale != 1 {
 		t.Fatalf("summary after a failure = %+v, %v", summary, err)
 	}
-	reclaimed, ok, err := media.ClaimJob(ctx, f.pool, ambiguous, now)
-	if err != nil || !ok || reclaimed.ReconciliationClaimID == nil || *reclaimed.ReconciliationClaimID == claimID || reclaimed.ReconciliationAttempts != 2 {
+	reclaimed, ok, err := store.ClaimOne(ctx, ambiguous, now)
+	if err != nil || !ok || reclaimed.ReconciliationClaimID == nil || *reclaimed.ReconciliationClaimID == *first.ReconciliationClaimID || reclaimed.ReconciliationAttempts != 2 {
 		t.Fatalf("reclaim = %+v, %v, %v", reclaimed, ok, err)
 	}
-	if err = media.FinishReconciliation(ctx, f.pool, ambiguous, *reclaimed.ReconciliationClaimID, now, nil); err != nil {
+	if extended, err := store.Extend(ctx, first, now.Add(time.Hour)); err != nil || extended {
+		t.Fatalf("a stale claim extended the new lease: %v, %v", extended, err)
+	}
+	if _, err = store.MarkCleanup(ctx, ambiguous, first.Fence(), "vid_stale", "stale"); err == nil {
+		t.Fatal("a stale claim moved the job")
+	}
+	if err = store.Finish(ctx, first, now, nil); jobKind(t, err) != jobs.KindChanged {
+		t.Fatalf("a stale claim released the new lease: %v", err)
+	}
+	if err = store.Finish(ctx, reclaimed, now, nil); err != nil {
 		t.Fatal(err)
 	}
-	if record, err = media.Job(ctx, f.pool, ambiguous); err != nil || record.ReconciliationError != nil || record.ReconciliationAttempts != 0 {
+	if record, err = store.Get(ctx, ambiguous); err != nil || record.Lifecycle != jobs.CreateAmbiguous || record.ReconciliationError != nil || record.ReconciliationAttempts != 0 {
 		t.Fatalf("a clean release = %+v, %v", record, err)
 	}
 }
@@ -370,20 +379,26 @@ func TestVideoJobListingsHonorScopesAndCursors(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	f := newVideoFixture(t)
+	store := jobs.NewStore(f.pool)
 	base := time.Now().Add(-time.Hour)
 	ids := make([]string, 4)
 	for i := range ids {
-		ids[i] = f.seed(t, seededJob{state: media.StateRunning, lifecycle: media.LifecycleActive, upstream: "vid_" + uuid.NewString(), createdAt: base.Add(time.Duration(i) * time.Minute)})
+		ids[i] = f.seed(t, seededJob{state: jobs.Running, lifecycle: jobs.Active, upstream: "vid_" + uuid.NewString(), createdAt: base.Add(time.Duration(i) * time.Minute)})
 	}
-	f.seed(t, seededJob{state: media.StateQueued, lifecycle: media.LifecycleCreating, createdAt: base.Add(10 * time.Minute)})
-	f.seed(t, seededJob{state: media.StateRunning, lifecycle: media.LifecycleActive, upstream: "vid_side", route: "side", createdAt: base.Add(11 * time.Minute)})
-	foreign := f.seed(t, seededJob{state: media.StateRunning, lifecycle: media.LifecycleActive, upstream: "vid_foreign", key: f.otherKeyID, createdAt: base.Add(12 * time.Minute)})
-	listed := func(page media.Page) []string {
+	f.seed(t, seededJob{state: jobs.Queued, lifecycle: jobs.Creating, createdAt: base.Add(10 * time.Minute)})
+	f.seed(t, seededJob{state: jobs.Running, lifecycle: jobs.Active, upstream: "vid_side", route: "side", createdAt: base.Add(11 * time.Minute)})
+	foreign := f.seed(t, seededJob{state: jobs.Running, lifecycle: jobs.Active, upstream: "vid_foreign", key: f.otherKeyID, createdAt: base.Add(12 * time.Minute)})
+	list := func(q jobs.Query) ([]string, bool) {
+		t.Helper()
+		page, err := store.List(ctx, q)
+		if err != nil {
+			t.Fatal(err)
+		}
 		out := make([]string, len(page.Items))
 		for i, item := range page.Items {
 			out[i] = item.ID
 		}
-		return out
+		return out, page.More
 	}
 	same := func(what string, got []string, want ...string) {
 		t.Helper()
@@ -397,60 +412,60 @@ func TestVideoJobListingsHonorScopesAndCursors(t *testing.T) {
 		}
 	}
 
-	all, err := media.Jobs(ctx, f.pool, media.Filters{AllProjects: true}, nil, 50)
-	if err != nil || len(all.Items) != 7 || all.Items[0].ID != foreign || all.NextCursor != nil {
-		t.Fatalf("all projects = %d items, %v", len(all.Items), err)
+	if all, more := list(jobs.Query{Limit: 50}); len(all) != 7 || all[0] != foreign || more {
+		t.Fatalf("all projects = %v, %v", all, more)
 	}
-	scoped, err := media.Jobs(ctx, f.pool, media.Filters{AllowedProjects: []string{f.otherProjectID}}, nil, 50)
-	if err != nil {
-		t.Fatal(err)
+	scoped, _ := list(jobs.Query{Projects: jobs.Only([]string{f.otherProjectID}), Limit: 50})
+	same("one project", scoped, foreign)
+	if denied, _ := list(jobs.Query{Routes: jobs.Only(nil), Limit: 50}); len(denied) != 0 {
+		t.Fatalf("an empty route allowlist = %v", denied)
 	}
-	same("one project", listed(scoped), foreign)
-	if denied, err := media.Jobs(ctx, f.pool, media.Filters{AllProjects: true, RouteSlugs: []string{}}, nil, 50); err != nil || len(denied.Items) != 0 {
-		t.Fatalf("an empty route allowlist = %d items, %v", len(denied.Items), err)
+	if side, _ := list(jobs.Query{Routes: jobs.Only([]string{"side"}), Limit: 50}); len(side) != 1 {
+		t.Fatalf("one route = %v", side)
 	}
-	route := "side"
-	if side, err := media.Jobs(ctx, f.pool, media.Filters{AllProjects: true, RouteSlug: &route}, nil, 50); err != nil || len(side.Items) != 1 {
-		t.Fatalf("one route = %d items, %v", len(side.Items), err)
-	}
-	lifecycle := media.LifecycleCreating
-	if creating, err := media.Jobs(ctx, f.pool, media.Filters{AllProjects: true, Lifecycle: &lifecycle}, nil, 50); err != nil || len(creating.Items) != 1 {
-		t.Fatalf("one lifecycle = %d items, %v", len(creating.Items), err)
+	lifecycle := jobs.Creating
+	if creating, _ := list(jobs.Query{Lifecycle: &lifecycle, Limit: 50}); len(creating) != 1 {
+		t.Fatalf("one lifecycle = %v", creating)
 	}
 
-	key, studio := f.keyID, []string{"studio"}
-	filters := media.Filters{AllProjects: true, APIKeyID: &key, RouteSlugs: studio}
-	first, err := media.Jobs(ctx, f.pool, filters, nil, 3)
-	if err != nil || first.NextCursor == nil {
-		t.Fatalf("first management page = %+v, %v", first, err)
+	key, studio := f.keyID, jobs.Only([]string{"studio"})
+	page, err := store.List(ctx, jobs.Query{APIKeyID: &key, Routes: studio, Limit: 3})
+	if err != nil || !page.More {
+		t.Fatalf("first management page = %+v, %v", page, err)
 	}
-	cursor, err := media.DecodeCursor(*first.NextCursor)
-	if err != nil {
-		t.Fatal(err)
+	last := page.Items[len(page.Items)-1]
+	second, more := list(jobs.Query{APIKeyID: &key, Routes: studio, Limit: 3, After: &jobs.Position{CreatedAt: last.CreatedAt, ID: last.ID}})
+	if more {
+		t.Fatal("the second management page reported more")
 	}
-	second, err := media.Jobs(ctx, f.pool, filters, cursor, 3)
-	if err != nil || second.NextCursor != nil {
-		t.Fatalf("second management page = %+v, %v", second, err)
-	}
-	same("management pages", append(listed(first), listed(second)...), append([]string{listed(first)[0]}, ids[3], ids[2], ids[1], ids[0])...)
+	same("management pages", append([]string{page.Items[0].ID, page.Items[1].ID, last.ID}, second...), page.Items[0].ID, ids[3], ids[2], ids[1], ids[0])
 
-	client := media.Filters{APIKeyID: &key, RouteSlugs: studio}
-	newest, err := media.JobsAfterID(ctx, f.pool, client, nil, media.OrderDescending, 2)
-	if err != nil || newest.NextCursor == nil {
-		t.Fatalf("first client page = %+v, %v", newest, err)
+	active := jobs.Active
+	client := jobs.Query{APIKeyID: &key, Routes: studio, Lifecycle: &active, Order: media.OrderDescending, Limit: 2}
+	newest, more := list(client)
+	if !more {
+		t.Fatal("the first client page reported no more")
 	}
-	same("newest client page", listed(newest), ids[3], ids[2])
-	older, err := media.JobsAfterID(ctx, f.pool, client, newest.NextCursor, media.OrderDescending, 2)
-	if err != nil || older.NextCursor != nil {
-		t.Fatalf("second client page = %+v, %v", older, err)
+	same("newest client page", newest, ids[3], ids[2])
+	after := func(id string, q jobs.Query) jobs.Query {
+		t.Helper()
+		position, err := store.Position(ctx, &id, q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		q.After = position
+		return q
 	}
-	same("older client page", listed(older), ids[1], ids[0])
-	oldest, err := media.JobsAfterID(ctx, f.pool, client, &ids[1], media.OrderAscending, 10)
-	if err != nil {
-		t.Fatal(err)
+	older, more := list(after(newest[1], client))
+	if more {
+		t.Fatal("the second client page reported more")
 	}
-	same("ascending client page", listed(oldest), ids[2], ids[3])
-	if _, err = media.JobsAfterID(ctx, f.pool, client, &foreign, media.OrderDescending, 10); jobErrorKind(t, err) != media.JobErrorInvalid {
+	same("older client page", older, ids[1], ids[0])
+	ascending := client
+	ascending.Order, ascending.Limit = media.OrderAscending, 10
+	oldest, _ := list(after(ids[1], ascending))
+	same("ascending client page", oldest, ids[2], ids[3])
+	if _, err = store.Position(ctx, &foreign, client); jobKind(t, err) != jobs.KindInvalid {
 		t.Fatalf("another key's job worked as a cursor: %v", err)
 	}
 }

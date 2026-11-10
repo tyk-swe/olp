@@ -10,6 +10,7 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/mediacontract"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
@@ -44,7 +45,13 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	defer s.release(r.Context())
 	defer s.cleanupUploads(request)
 
-	localJobID := uuid.Must(uuid.NewV7()).String()
+	jobID, err := uuid.NewV7()
+	if err != nil {
+		form.Cleanup()
+		s.mediaFail(x, w, jobError(err))
+		return
+	}
+	localJobID := jobID.String()
 	x.affinity = []byte(localJobID)
 	if e := s.prepareMedia(r.Context(), x, authority); e != nil {
 		form.Cleanup()
@@ -94,7 +101,7 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { hold.settle(ctx, x.dispatched, x.settledTokens()) }()
 
-	reserved, jobErr := media.ReserveJob(ctx, s.deps.Media.Jobs.Pool, media.Reservation{
+	reserved, jobErr := s.deps.Media.Store.Reserve(ctx, jobs.Reservation{
 		ID:                  localJobID,
 		StrictContract:      x.strict(),
 		RuntimeGenerationID: x.request.release.Snapshot().Generation().ID,
@@ -103,18 +110,14 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 		ProviderID:          attempt.ProviderID,
 		UpstreamModel:       attempt.UpstreamModel,
 		RouteSlug:           x.route.Slug,
-		Operation:           media.OpVideoCreate,
 		Surface:             "openai",
 		CredentialVersionID: slot.CredentialID,
 		SlotID:              slot.ID,
-		// The detached create dispatch may run until the route deadline.
-		StaleAfter: deadline.Add(media.ReconciliationLeaseSlack),
+		StaleAfter:          deadline.Add(jobs.LeaseSlack),
 	})
 	if jobErr != nil {
-		// A local persistence failure before dispatch refunds the quota
-		// reservation and returns any half-open probe it holds.
 		s.releaseHold(ctx, hold)
-		s.mediaFail(x, w, mediaError(media.JobHTTPError(jobErr)))
+		s.mediaFail(x, w, jobError(jobErr))
 		return
 	}
 
@@ -137,13 +140,13 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	commitCtx, stopCommit := resourceCommitContext(ctx)
 	defer stopCommit()
 	if dispatchFailure != nil {
-		s.retireFailedCreate(commitCtx, reserved.ID, dispatchFailure)
+		s.deps.Media.Jobs.Abandon(commitCtx, reserved.ID, dispatchFailure.class == classAmbiguous)
 		out := &mediaOutcome{err: dispatchFailure.toError(), committed: dispatchFailure.committed, cancelled: dispatchFailure.class == classCancelled}
 		s.finishMedia(x, out, out.err.Status)
 		writeSurfaceError(w, out.err, "openai")
 		return
 	}
-	out := s.attachCreated(commitCtx, x, reserved, result, localJobID)
+	out := s.attachCreated(commitCtx, x, reserved, result)
 	if out.err != nil {
 		s.finishMedia(x, out, out.err.Status)
 		writeSurfaceError(w, out.err, "openai")
@@ -209,159 +212,56 @@ func (s *Server) videoAdmissionError(ctx context.Context, x *call, last *attempt
 	return serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider credential is currently able to serve `"+x.route.Slug+"`.")
 }
 
-// retireFailedCreate maps a failed create dispatch onto the reservation: an
-// ambiguous outcome waits for reconciliation, a definitive rejection retires
-// the row immediately.
-func (s *Server) retireFailedCreate(ctx context.Context, id string, failure *attemptFailure) {
-	if failure.class == classAmbiguous {
-		if _, err := media.MarkCreateAmbiguous(ctx, s.deps.Media.Jobs.Pool, id, "upstream_create_result_ambiguous"); err != nil {
-			s.deps.Media.Jobs.Log.Error("failed to mark ambiguous video creation", "job_id", id, "error", err)
-		}
-		return
+func (s *Server) attachCreated(ctx context.Context, x *call, reserved jobs.Record, result *media.Result) *mediaOutcome {
+	out := &mediaOutcome{result: result, committed: true, status: http.StatusCreated, localJob: reserved.ID}
+	err := s.deps.Media.Jobs.Attach(ctx, reserved, result.Video, &jobs.Caller{Secret: x.callerSecret, Sensitive: &x.sensitive})
+	rejected, isRejected := errors.AsType[*jobs.Rejected](err)
+	switch {
+	case isRejected:
+		out.err = serverError(http.StatusBadGateway, "provider_protocol_error", rejected.Message)
+	case err != nil:
+		out.err = serverError(http.StatusServiceUnavailable, "media_job_create_reconciliation_pending", "The video creation is being reconciled; check the job status shortly.")
 	}
-	finalized, err := s.deps.Media.Jobs.FinalizeDeletion(ctx, id)
-	if err != nil || !finalized {
-		s.deps.Media.Jobs.RecordGap()
-		s.deps.Media.Jobs.Log.Error("abandoned video reservation was not finalized", "job_id", id, "error", err)
-	}
+	return out
 }
 
-// attachCreated validates the provider reply and binds the upstream identity.
-func (s *Server) attachCreated(ctx context.Context, x *call, reserved media.JobRecord, result *media.Result, localJobID string) *mediaOutcome {
-	out := &mediaOutcome{result: result, committed: true, status: http.StatusCreated, localJob: localJobID}
-	protocol := func(message string) *mediaOutcome {
-		out.err = serverError(http.StatusBadGateway, "provider_protocol_error", message)
-		return out
-	}
-	if result.Video == nil {
-		if _, err := media.MarkCreateAmbiguous(ctx, s.deps.Media.Jobs.Pool, reserved.ID, "upstream_create_response_missing_job_identity"); err != nil {
-			s.deps.Media.Jobs.RecordGap()
-			s.deps.Media.Jobs.Log.Error("failed to retire malformed video reservation", "job_id", reserved.ID, "error", err)
-		}
-		return protocol("The provider returned an incompatible video creation response.")
-	}
-	upstreamID := result.Video.ID
-	if !media.ValidUpstreamJobID(upstreamID) {
-		if _, err := media.MarkCreateAmbiguous(ctx, s.deps.Media.Jobs.Pool, reserved.ID, "upstream_create_response_invalid_job_identity"); err != nil {
-			s.deps.Media.Jobs.RecordGap()
-			s.deps.Media.Jobs.Log.Error("failed to retire invalid video reservation", "job_id", reserved.ID, "error", err)
-		}
-		return protocol("The provider returned an invalid video job identity.")
-	}
-	state, ok := media.VideoState(result.Video.Status)
+func jobError(err error) *Error {
+	failure, ok := errors.AsType[*jobs.Error](err)
 	if !ok {
-		if _, err := media.MarkCreateCleanupPending(ctx, s.deps.Media.Jobs.Pool, reserved.ID, upstreamID, "upstream_create_response_invalid_status"); err != nil {
-			s.deps.Media.Jobs.RecordGap()
-			s.deps.Media.Jobs.Log.Error("failed to schedule malformed video cleanup", "job_id", reserved.ID, "error", err)
-		}
-		return protocol("The provider returned an unsupported video status.")
+		return mediaError(media.Fail(http.StatusServiceUnavailable, "media_job_unavailable", "The media job store is unavailable."))
 	}
-	update := media.JobUpdate{
-		State:            state,
-		ProgressPercent:  result.Video.Progress,
-		ContentAvailable: result.Video.Status == "completed",
-		ExpiresAt:        media.UnixTime(result.Video.ExpiresAt),
-		ErrorClass:       result.Video.ErrorCode,
-		LastPolledAt:     s.now(),
+	switch failure.Kind {
+	case jobs.KindNotFound:
+		return mediaError(media.Fail(http.StatusNotFound, "media_job_not_found", "The media job does not exist."))
+	case jobs.KindChanged:
+		return mediaError(media.Fail(http.StatusConflict, "media_job_changed", "The media job changed; refresh and retry."))
+	case jobs.KindConflict:
+		return mediaError(media.Fail(http.StatusConflict, "media_job_upstream_conflict", "The upstream media job identity conflicts with stored metadata."))
+	case jobs.KindInvalid:
+		return mediaError(media.Fail(http.StatusBadRequest, "invalid_request", failure.Message))
 	}
-	// Native provider documents may echo prompts or arbitrary output fields.
-	// Keep them transient; lifecycle recovery needs only the typed job metadata.
-	if _, err := s.deps.Media.Jobs.AttachWithRetry(ctx, reserved.ID, upstreamID, update); err != nil {
-		return s.handleFailedAttachment(ctx, x, reserved, upstreamID, result, err, out)
-	}
-	return out
-}
-
-// handleFailedAttachment persists cleanup intent, runs the compensation
-// delete, and finalizes the tombstone when the provider confirms.
-func (s *Server) handleFailedAttachment(ctx context.Context, x *call, reservedRecord media.JobRecord, upstreamID string, result *media.Result, attachErr error, out *mediaOutcome) *mediaOutcome {
-	conflict := false
-	var jobErr *media.JobError
-	if errors.As(attachErr, &jobErr) && jobErr.Kind == media.JobErrorUpstreamIdentityConflict {
-		conflict = true
-	}
-	intentPersisted := false
-	if !conflict {
-		if record, err := media.MarkCreateCleanupPending(ctx, s.deps.Media.Jobs.Pool, reservedRecord.ID, upstreamID, "upstream_created_local_attach_failed"); err == nil &&
-			record.Lifecycle == media.LifecycleCreateCleanupPending &&
-			record.UpstreamJobID != nil && *record.UpstreamJobID == upstreamID {
-			intentPersisted = true
-		} else if err != nil {
-			s.deps.Media.Jobs.Log.Error("failed to persist video cleanup metadata", "job_id", reservedRecord.ID, "error", err)
-		}
-	}
-	compensated := false
-	if intentPersisted {
-		compensated = s.compensateCreate(ctx, x, reservedRecord, upstreamID)
-	}
-	if compensated {
-		// The compensating delete may outlast the caller's commit bound.
-		finalizeCtx, stopFinalize := resourceCommitContext(ctx)
-		defer stopFinalize()
-		finalized, err := s.deps.Media.Jobs.FinalizeDeletion(finalizeCtx, reservedRecord.ID)
-		if err != nil || !finalized {
-			s.deps.Media.Jobs.RecordGap()
-			s.deps.Media.Jobs.Log.Error("upstream cleanup succeeded but tombstone was not finalized", "job_id", reservedRecord.ID, "error", err)
-		}
-	} else {
-		s.deps.Media.Jobs.RecordGap()
-		s.deps.Media.Jobs.Log.Error("video create reconciliation gap requires operator attention",
-			"job_id", reservedRecord.ID, "upstream_job_id", upstreamID, "provider_id", x.media.Route)
-	}
-	out.err = serverError(http.StatusServiceUnavailable, "media_job_create_reconciliation_pending", "The video creation is being reconciled; check the job status shortly.")
-	return out
-}
-
-// compensateCreate issues the upstream delete that retires an orphaned job.
-// A missing upstream object is a successful compensation.
-func (s *Server) compensateCreate(ctx context.Context, x *call, reserved media.JobRecord, upstreamID string) bool {
-	target, routeTimeout, _ := s.deps.Media.Jobs.JobTarget(ctx, &reserved)
-	if target == nil {
-		return false
-	}
-	if target.Provider.CredentialSource == "caller" {
-		secret, err := x.callerSecret(target.Provider.ID, target.Model)
-		if err != nil {
-			return false
-		}
-		target.Secret, target.CallerCredential = secret, true
-	}
-
-	call, failure := media.EncodeJob(&media.Request{Op: media.OpVideoDelete, JobID: upstreamID, Route: reserved.RouteSlug}, target.Target.Config, target.Model)
-	if failure != nil {
-		return false
-	}
-	// The delete is bounded by the route timeout, not by the caller's
-	// persistence deadline, which a slow provider would otherwise outlive.
-	callCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), routeTimeout+media.ReconciliationLeaseSlack)
-	defer cancel()
-	target.Sensitive = &x.sensitive
-	result, transportFailure := s.deps.Media.Jobs.Transport.Do(callCtx, target.Target, call, nil)
-	if transportFailure != nil {
-		return transportFailure.Status == 404
-	}
-	return result.Deleted != nil && result.Deleted.Deleted
+	return mediaError(media.Fail(http.StatusServiceUnavailable, "media_job_unavailable", "The media job store is unavailable."))
 }
 
 // ownedJob loads a media job the caller is allowed to see, enforcing
 // ownership, lifecycle visibility, and the route permission.
-func (s *Server) ownedJob(ctx context.Context, authority keyauthority.Authority, videoID, op string) (*media.JobRecord, *Error) {
+func (s *Server) ownedJob(ctx context.Context, authority keyauthority.Authority, videoID, op string) (*jobs.Record, *Error) {
 	id, err := uuid.Parse(videoID)
 	if err != nil {
 		return nil, notFoundError("video_not_found", "The video job does not exist.")
 	}
-	record, err := media.Job(ctx, s.deps.Media.Jobs.Pool, id.String())
+	record, err := s.deps.Media.Store.Get(ctx, id.String())
 	if err != nil {
-		return nil, mediaError(media.JobHTTPError(err))
+		return nil, jobError(err)
 	}
 	if record.APIKeyID != authority.ID {
 		return nil, notFoundError("video_not_found", "The video job does not exist.")
 	}
-	if record.Lifecycle == media.LifecycleDeleted && op != media.OpVideoDelete {
+	if record.Lifecycle == jobs.Deleted && op != media.OpVideoDelete {
 		return nil, notFoundError("video_not_found", "The video job does not exist.")
 	}
 	switch record.Lifecycle {
-	case media.LifecycleActive, media.LifecycleDeletePending, media.LifecycleDeleted:
+	case jobs.Active, jobs.DeletePending, jobs.Deleted:
 	default:
 		return nil, serverError(http.StatusServiceUnavailable, "media_job_reconciliation_pending", "The video job is being reconciled; retry shortly.")
 	}
@@ -384,34 +284,15 @@ func (s *Server) ownedJob(ctx context.Context, authority keyauthority.Authority,
 	return &record, nil
 }
 
-// jobRoute reads the project and current fidelity of a video job's route.
-// Retired routes can still own live jobs, so it reads the durable route rather
-// than requiring the route to remain in the active snapshot.
 func (s *Server) jobRoute(ctx context.Context, slug string) (*string, routing.RouteFidelity, *Error) {
-	var projectID *string
-	var fidelity []byte
-	err := s.deps.Media.Jobs.Pool.QueryRow(ctx, `SELECT r.project_id::text,v.fidelity FROM olp.routes r
-        JOIN olp.route_revisions v ON v.id=r.latest_revision_id WHERE r.slug=$1`, slug).Scan(&projectID, &fidelity)
-	var current routing.RouteFidelity
-	if err == nil {
-		current, err = routing.DecodeFidelity(fidelity)
-	}
+	projectID, current, err := s.deps.Media.Store.RouteAuthority(ctx, slug)
 	if err != nil {
 		return nil, routing.RouteFidelity{}, serverError(http.StatusServiceUnavailable, "route_unavailable", "The video job's route could not be read.")
 	}
 	return projectID, current, nil
 }
 
-// jobTarget resolves the pinned upstream target for a media job operation.
-func (s *Server) jobTarget(ctx context.Context, record *media.JobRecord) (*media.JobTarget, time.Duration, *Error) {
-	target, timeout, code := s.deps.Media.Jobs.JobTarget(ctx, record)
-	if target == nil {
-		return nil, 0, serverError(http.StatusServiceUnavailable, code, "The media job's provider target is unavailable.")
-	}
-	return target, timeout, nil
-}
-
-func strictVideoResourceContext(x *call, record *media.JobRecord, allowVariant bool) *Error {
+func strictVideoResourceContext(x *call, record *jobs.Record, allowVariant bool) *Error {
 	if !record.StrictContract {
 		return nil
 	}
@@ -424,7 +305,7 @@ func strictVideoResourceContext(x *call, record *media.JobRecord, allowVariant b
 	return nil
 }
 
-func videoJobRoute(record *media.JobRecord) *routing.Route {
+func videoJobRoute(record *jobs.Record) *routing.Route {
 	route := &routing.Route{Slug: record.RouteSlug, Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed}}
 	if record.StrictContract {
 		route.Fidelity.Mode = routing.FidelityStrict
@@ -436,7 +317,7 @@ func videoJobRoute(record *media.JobRecord) *routing.Route {
 // mutation. A call on a retained job admits once the job names its route, so
 // the route's limits and caller-paid policy apply.
 func (s *Server) admitVideoRequest(parent context.Context, x *call, authority keyauthority.Authority) (context.Context, func(), *Error) {
-	ttl := maxStreamDuration + media.ReconciliationLeaseSlack
+	ttl := maxStreamDuration + jobs.LeaseSlack
 	x.budgetGroupID = authority.BudgetGroupID
 	ctx, cancel := context.WithTimeout(parent, ttl)
 	var e *Error
@@ -457,7 +338,7 @@ func (s *Server) admitVideoRequest(parent context.Context, x *call, authority ke
 // returns the attempt fact for the caller to record.
 // videoJobCall makes one call on an existing job, encoded in the wire of the
 // vendor the job's pinned provider revision names.
-func (s *Server) videoJobCall(ctx context.Context, x *call, record *media.JobRecord, request *media.Request) (*media.Result, *attemptFailure, AttemptFact) {
+func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record, request *media.Request) (*media.Result, *attemptFailure, AttemptFact) {
 	fact := AttemptFact{
 		TargetID:           record.ID,
 		ProviderID:         record.ProviderID,
@@ -470,8 +351,8 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *media.JobRec
 	if record.CredentialVersionID != nil {
 		fact.CredentialID = *record.CredentialVersionID
 	}
-	target, timeout, e := s.jobTarget(ctx, record)
-	if e != nil {
+	target, err := s.deps.Media.Jobs.Target(ctx, *record)
+	if err != nil {
 		fact.Class = classConnect
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		fact.recordEvidence(false)
@@ -541,7 +422,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *media.JobRec
 		}
 	}
 	fact.SlotID = slot.ID
-	reservation, rejection, skip := s.deps.Admission.reserveTarget(ctx, &provider, &slot, 0, timeout+media.ReconciliationLeaseSlack, "")
+	reservation, rejection, skip := s.deps.Admission.reserveTarget(ctx, &provider, &slot, 0, target.Timeout+jobs.LeaseSlack, "")
 	if skip {
 		rejection = &attemptFailure{class: classLimitsUnavailable}
 	}
@@ -554,7 +435,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *media.JobRec
 	dispatched := false
 	defer func() { reservation.settle(ctx, dispatched, nil) }()
 	if request.Op == media.OpVideoDelete {
-		if _, err := media.BeginDeletion(ctx, s.deps.Media.Jobs.Pool, record.ID); err != nil {
+		if _, err := s.deps.Media.Store.BeginDeletion(ctx, record.ID, jobs.Unfenced); err != nil {
 			fact.Class = classConnect
 			fact.Duration = s.now().Sub(fact.StartedAt)
 			fact.recordEvidence(false)
@@ -564,10 +445,10 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *media.JobRec
 	attemptCtx, atr := x.request.trace.Attempt(ctx, string(target.Config.Kind), record.ProviderRevisionID, record.UpstreamModel)
 	call.Inject = http.Header{}
 	atr.InjectUpstream(call.Inject)
-	callCtx, cancel := context.WithTimeout(attemptCtx, timeout+media.ReconciliationLeaseSlack)
+	callCtx, cancel := context.WithTimeout(attemptCtx, target.Timeout+jobs.LeaseSlack)
 	defer cancel()
 	target.Sensitive = &sensitive
-	result, failure := s.deps.Media.Jobs.Transport.Do(callCtx, target.Target, call, request)
+	result, failure := s.deps.Media.Transport.Do(callCtx, target.Target, call, request)
 	dispatched = failure == nil || failure.Dispatched
 	fact.Duration = s.now().Sub(fact.StartedAt)
 	if failure != nil {
@@ -693,17 +574,27 @@ func (s *Server) videoList(w http.ResponseWriter, r *http.Request) {
 		s.mediaFail(x, w, mediaError(failure))
 		return
 	}
-	page, err := media.JobsAfterID(r.Context(), s.deps.Media.Jobs.Pool, media.Filters{
-		APIKeyID:   &authority.ID,
-		RouteSlugs: authority.RouteAllowlist(),
-		Operation:  new(media.OpVideoCreate),
-		Surface:    new("openai"),
-	}, cursorUUID(query.After), query.Order, query.Limit)
+	routes := jobs.Everything
+	if allowed := authority.RouteAllowlist(); allowed != nil {
+		routes = jobs.Only(allowed)
+	}
+	listing := jobs.Query{
+		Projects: jobs.Everything, Routes: routes, APIKeyID: &authority.ID,
+		Operation: new(media.OpVideoCreate), Surface: new("openai"), Lifecycle: new(jobs.Active),
+		Order: query.Order, Limit: query.Limit,
+	}
+	after, err := s.deps.Media.Store.Position(r.Context(), cursorUUID(query.After), listing)
 	if err != nil {
-		s.mediaFail(x, w, mediaError(media.JobHTTPError(err)))
+		s.mediaFail(x, w, jobError(err))
 		return
 	}
-	refreshed := make([]media.JobRecord, 0, len(page.Items))
+	listing.After = after
+	page, err := s.deps.Media.Store.List(r.Context(), listing)
+	if err != nil {
+		s.mediaFail(x, w, jobError(err))
+		return
+	}
+	refreshed := make([]jobs.Record, 0, len(page.Items))
 	var refreshError *Error
 	// This request holds one process admission permit. Poll serially so a
 	// caller-controlled page cannot multiply that permit into 100 requests.
@@ -724,17 +615,17 @@ func (s *Server) videoList(w http.ResponseWriter, r *http.Request) {
 		s.mediaFail(x, w, refreshError)
 		return
 	}
-	jobs := make([]media.VideoJobResult, 0, len(refreshed))
+	results := make([]media.VideoJobResult, 0, len(refreshed))
 	for _, record := range refreshed {
-		jobs = append(jobs, mediaJobResult(&record))
+		results = append(results, mediaJobResult(&record))
 	}
 	var firstID, lastID *string
-	if len(jobs) > 0 {
-		first := jobs[0].ID
-		last := jobs[len(jobs)-1].ID
+	if len(results) > 0 {
+		first := results[0].ID
+		last := results[len(results)-1].ID
 		firstID, lastID = &first, &last
 	}
-	list := &media.VideoListResult{Jobs: jobs, FirstID: firstID, LastID: lastID, HasMore: page.NextCursor != nil}
+	list := &media.VideoListResult{Jobs: results, FirstID: firstID, LastID: lastID, HasMore: page.More}
 	body, failure := media.EncodeVideoListResponse(list, "video")
 	if failure != nil {
 		s.mediaFail(x, w, serverError(http.StatusBadGateway, failure.Code, failure.Message))
@@ -748,11 +639,9 @@ func (s *Server) videoList(w http.ResponseWriter, r *http.Request) {
 
 // refreshListRecord polls a non-terminal job during a client list. The fact
 // and the dispatch flag are returned for the serial collector to record.
-func (s *Server) refreshListRecord(ctx context.Context, x *call, record media.JobRecord) (media.JobRecord, *AttemptFact, bool, *Error) {
-	if record.State != media.StateQueued && record.State != media.StateRunning {
-		return record, nil, false, nil
-	}
-	if record.UpstreamJobID == nil || !media.ValidUpstreamJobID(*record.UpstreamJobID) {
+func (s *Server) refreshListRecord(ctx context.Context, x *call, record jobs.Record) (jobs.Record, *AttemptFact, bool, *Error) {
+	upstream, ok := record.Upstream()
+	if !record.State.Polling() || !ok {
 		return record, nil, false, nil
 	}
 	// A poll retrieves the job, so a job its route no longer serves is listed
@@ -762,28 +651,18 @@ func (s *Server) refreshListRecord(ctx context.Context, x *call, record media.Jo
 			return record, nil, false, nil
 		}
 	}
-	result, transportFailure, fact := s.videoJobCall(ctx, x, &record, &media.Request{Op: media.OpVideoGet, JobID: *record.UpstreamJobID, Route: record.RouteSlug})
+	result, transportFailure, fact := s.videoJobCall(ctx, x, &record, &media.Request{Op: media.OpVideoGet, JobID: upstream, Route: record.RouteSlug})
 	if transportFailure != nil {
 		if transportFailure.quota != "" || transportFailure.class == classLimitsUnavailable {
 			return record, &fact, false, transportFailure.toError()
 		}
 		return record, &fact, transportFailure.dispatched, nil
 	}
-	if result == nil || result.Video == nil {
-		return record, &fact, true, nil
-	}
-	state, ok := media.VideoState(result.Video.Status)
+	update, ok := jobs.Observe(result.Video, s.now())
 	if !ok {
 		return record, &fact, true, nil
 	}
-	updated, err := media.RefreshJob(ctx, s.deps.Media.Jobs.Pool, record.ID, media.JobUpdate{
-		State:            state,
-		ProgressPercent:  result.Video.Progress,
-		ContentAvailable: result.Video.Status == "completed",
-		ExpiresAt:        media.UnixTime(result.Video.ExpiresAt),
-		ErrorClass:       result.Video.ErrorCode,
-		LastPolledAt:     s.now(),
-	})
+	updated, err := s.deps.Media.Store.Refresh(ctx, record.ID, jobs.Unfenced, update)
 	if err != nil {
 		return record, &fact, true, nil
 	}
@@ -816,34 +695,24 @@ func (s *Server) videoGet(w http.ResponseWriter, r *http.Request) {
 	}
 	defer complete()
 	r = r.WithContext(ctx)
-	if record.UpstreamJobID == nil || !media.ValidUpstreamJobID(*record.UpstreamJobID) {
+	upstream, ok := record.Upstream()
+	if !ok {
 		s.mediaFail(x, w, serverError(http.StatusServiceUnavailable, "media_job_upstream_id_unavailable", "The video job's upstream identity is unavailable."))
 		return
 	}
-	result, transportFailure, fact := s.videoJobCall(r.Context(), x, record, &media.Request{Op: media.OpVideoGet, JobID: *record.UpstreamJobID, Route: record.RouteSlug})
+	result, transportFailure, fact := s.videoJobCall(r.Context(), x, record, &media.Request{Op: media.OpVideoGet, JobID: upstream, Route: record.RouteSlug})
 	x.dispatched = transportFailure == nil || transportFailure.dispatched
 	x.noteJobAttempt(fact)
 	if transportFailure != nil {
 		s.mediaFailOutcome(x, w, transportFailure)
 		return
 	}
-	if result.Video == nil {
-		s.mediaFailOutcome(x, w, &attemptFailure{class: classProtocol})
-		return
-	}
-	state, ok := media.VideoState(result.Video.Status)
+	update, ok := jobs.Observe(result.Video, s.now())
 	if !ok {
 		s.mediaFailOutcome(x, w, &attemptFailure{class: classProtocol})
 		return
 	}
-	updated, err := media.RefreshJob(r.Context(), s.deps.Media.Jobs.Pool, record.ID, media.JobUpdate{
-		State:            state,
-		ProgressPercent:  result.Video.Progress,
-		ContentAvailable: result.Video.Status == "completed",
-		ExpiresAt:        media.UnixTime(result.Video.ExpiresAt),
-		ErrorClass:       result.Video.ErrorCode,
-		LastPolledAt:     s.now(),
-	})
+	updated, err := s.deps.Media.Store.Refresh(r.Context(), record.ID, jobs.Unfenced, update)
 	if err != nil {
 		s.mediaFailOutcome(x, w, &attemptFailure{class: classConnect})
 		return
@@ -853,7 +722,7 @@ func (s *Server) videoGet(w http.ResponseWriter, r *http.Request) {
 	var body []byte
 	var renderFailure *media.Error
 	if record.StrictContract {
-		body, renderFailure = media.EncodeStrictVideoObject(result.Source, *record.UpstreamJobID, updated.ID, updated.RouteSlug)
+		body, renderFailure = media.EncodeStrictVideoObject(result.Source, upstream, updated.ID, updated.RouteSlug)
 	} else {
 		body, renderFailure = media.EncodeVideoObject(result.Video, updated.ID, updated.RouteSlug)
 	}
@@ -897,11 +766,12 @@ func (s *Server) videoContent(w http.ResponseWriter, r *http.Request) {
 		s.mediaFail(x, w, mediaError(failure))
 		return
 	}
-	if record.UpstreamJobID == nil || !media.ValidUpstreamJobID(*record.UpstreamJobID) {
+	upstream, ok := record.Upstream()
+	if !ok {
 		s.mediaFail(x, w, serverError(http.StatusServiceUnavailable, "media_job_upstream_id_unavailable", "The video job's upstream identity is unavailable."))
 		return
 	}
-	result, transportFailure, fact := s.videoJobCall(r.Context(), x, record, &media.Request{Op: media.OpVideoContent, JobID: *record.UpstreamJobID, Variant: variant, Route: record.RouteSlug})
+	result, transportFailure, fact := s.videoJobCall(r.Context(), x, record, &media.Request{Op: media.OpVideoContent, JobID: upstream, Variant: variant, Route: record.RouteSlug})
 	x.dispatched = transportFailure == nil || transportFailure.dispatched
 	x.noteJobAttempt(fact)
 	if transportFailure != nil {
@@ -945,7 +815,7 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 	defer complete()
 	r = r.WithContext(ctx)
 	record := *loaded
-	if record.Lifecycle == media.LifecycleDeleted {
+	if record.Lifecycle == jobs.Deleted {
 		if record.StrictContract {
 			s.mediaFail(x, w, notFoundError("video_not_found", "The video job does not exist."))
 			return
@@ -957,11 +827,12 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 		s.finishMedia(x, out, out.status)
 		return
 	}
-	if record.UpstreamJobID == nil || !media.ValidUpstreamJobID(*record.UpstreamJobID) {
+	upstream, ok := record.Upstream()
+	if !ok {
 		s.mediaFail(x, w, serverError(http.StatusServiceUnavailable, "media_job_upstream_id_unavailable", "The video job's upstream identity is unavailable."))
 		return
 	}
-	result, transportFailure, fact := s.videoJobCall(r.Context(), x, &record, &media.Request{Op: media.OpVideoDelete, JobID: *record.UpstreamJobID, Route: record.RouteSlug})
+	result, transportFailure, fact := s.videoJobCall(r.Context(), x, &record, &media.Request{Op: media.OpVideoDelete, JobID: upstream, Route: record.RouteSlug})
 	x.dispatched = transportFailure == nil || transportFailure.dispatched
 	x.noteJobAttempt(fact)
 	deleted := false
@@ -984,12 +855,12 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 		s.mediaFailOutcome(x, w, &attemptFailure{class: classUpstreamClient, status: http.StatusBadGateway})
 		return
 	}
-	finalized, err := s.deps.Media.Jobs.FinalizeDeletion(r.Context(), record.ID)
+	finalized, err := s.deps.Media.Store.Finalize(r.Context(), record.ID, jobs.Unfenced)
 	if err != nil {
-		s.mediaFail(x, w, mediaError(media.JobHTTPError(err)))
+		s.mediaFail(x, w, jobError(err))
 		return
 	}
-	if !finalized {
+	if finalized.Lifecycle != jobs.Deleted {
 		s.deps.Media.Jobs.RecordGap()
 		s.mediaFailOutcome(x, w, &attemptFailure{class: classConnect})
 		return
@@ -1004,7 +875,7 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 	var body []byte
 	var renderFailure *media.Error
 	if record.StrictContract {
-		body, renderFailure = media.EncodeStrictVideoObject(result.Source, *record.UpstreamJobID, record.ID, "")
+		body, renderFailure = media.EncodeStrictVideoObject(result.Source, upstream, record.ID, "")
 	} else {
 		local := ""
 		var extra map[string]any
@@ -1030,16 +901,16 @@ func (s *Server) mediaFailOutcome(x *call, w http.ResponseWriter, failure *attem
 }
 
 // mediaJobResult renders a stored record as the client-facing video object.
-func mediaJobResult(record *media.JobRecord) media.VideoJobResult {
+func mediaJobResult(record *jobs.Record) media.VideoJobResult {
 	status := "queued"
 	switch record.State {
-	case media.StateRunning:
+	case jobs.Running:
 		status = "in_progress"
-	case media.StateSucceeded:
+	case jobs.Succeeded:
 		status = "completed"
-	case media.StateFailed:
+	case jobs.Failed:
 		status = "failed"
-	case media.StateCancelled:
+	case jobs.Cancelled:
 		status = "cancelled"
 	}
 	result := media.VideoJobResult{

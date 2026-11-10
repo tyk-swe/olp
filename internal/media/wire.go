@@ -694,7 +694,15 @@ func DecodeVideoCreate(form *staging.Form) (*Request, *Error) {
 	}, nil
 }
 
-// ListQuery is the validated video list page request.
+type Order int
+
+const (
+	OrderDescending Order = iota
+	OrderAscending
+)
+
+const MaxNativeVideoSourceBytes = 1 << 20
+
 type ListQuery struct {
 	After *uuid.UUID
 	Order Order

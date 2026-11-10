@@ -17,6 +17,7 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/mediacontract"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
@@ -29,7 +30,9 @@ import (
 )
 
 type MediaDeps struct {
-	Jobs *media.Service
+	Transport *media.Transport
+	Jobs      *jobs.Service
+	Store     *jobs.Store
 }
 
 // multipartParseDeadline bounds one inbound multipart body.
@@ -644,7 +647,7 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *cal
 		return fail(classCredential, nil)
 	}
 	target := media.Target{Sensitive: &x.sensitive, CallerCredential: provider.CredentialSource == "caller" && x.origin != "probe", Config: cfg, Model: cfg.Model(a.UpstreamModel), Secret: secret, NetworkSecret: networkSecret, ConnectionScope: providerConnectionScope(provider, slot)}
-	result, failure := s.deps.Media.Jobs.Transport.Do(actx, target, call, effective)
+	result, failure := s.deps.Media.Transport.Do(actx, target, call, effective)
 	if failure != nil {
 		fact.Status = failure.Status
 		return fail(mediaClass(failure), &attemptFailure{
