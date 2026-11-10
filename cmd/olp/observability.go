@@ -11,10 +11,10 @@ import (
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/gateway"
-	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/metric"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/release"
+	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -27,7 +27,7 @@ type observed struct {
 	policy        *egress.Policy
 	gateway       *gateway.Server
 	emitter       *usage.Emitter
-	spool         *media.Spool
+	spool         *staging.Spool
 	mediaGaps     *atomic.Uint64
 	loss          *usage.LossCounters
 	export        func(context.Context) []prometheus.Metric

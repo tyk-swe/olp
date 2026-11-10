@@ -3,6 +3,8 @@ package media
 import (
 	"net/http"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/staging"
 )
 
 // The xai-images wire is xAI's image generation API, which takes an aspect
@@ -46,7 +48,7 @@ func encodeXAIImage(r *Request, model string) (*UpstreamCall, *Error) {
 }
 
 // decodeXAIImages reads xAI's result, which names no creation time.
-func decodeXAIImages(body []byte, stage func(string, int) (*Artifact, *Error)) (*ImageResult, *Error) {
+func decodeXAIImages(body []byte, stage func(string, int) (*staging.Artifact, *Error)) (*ImageResult, *Error) {
 	result, failure := DecodeImageResponse(body, stage)
 	if failure == nil && result.CreatedAt == 0 {
 		result.CreatedAt = time.Now().Unix()

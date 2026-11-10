@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -59,6 +58,7 @@ import (
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/secretstore"
 	"github.com/tyk-swe/olp/internal/signing"
+	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/surface"
 	"github.com/tyk-swe/olp/internal/telemetry"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -211,7 +211,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 	var gw *gateway.Server
 	var agentMonitor *agents.TaskMonitor
 	var mediaService *media.Service
-	var mediaSpool *media.Spool
+	var mediaSpool *staging.Spool
 	var pluginHost *plugins.Host
 	var policy egress.Policy
 	var auth *secrets.AuthKey
@@ -345,11 +345,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			probeDeps.Admission = gateway.NewAdmission(limiter, shared.Fleet, nil, log)
 		}
 		if c.Mode.Management() || c.Mode.Inference() || c.Mode == Worker {
-			spoolDir := c.MediaSpoolDir
-			if spoolDir == "" {
-				spoolDir = filepath.Join(os.TempDir(), "olp-media-spool")
-			}
-			spool, err := media.NewSpool(spoolDir, c.MediaSpoolCapacityBytes, log)
+			spool, err := staging.NewSpool(c.spoolDirectory(), c.MediaSpoolCapacityBytes, log)
 			if err != nil {
 				return err
 			}
@@ -371,7 +367,9 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		}
 		if c.Mode.Inference() {
 			gatewayDeps.Capture = capturer
-			gatewayDeps.Media = &gateway.MediaDeps{Jobs: mediaService, Admission: media.NewAdmissionState(c.MediaSpoolCapacityBytes)}
+			gatewayDeps.Media = &gateway.MediaDeps{Jobs: mediaService}
+			gatewayDeps.Staging = mediaSpool
+			gatewayDeps.Uploads = staging.NewAdmission(mediaSpool.CapacityBytes())
 			if pool != nil {
 				gatewayDeps.CodeLedger = codesessions.New(pool)
 				gatewayDeps.CodeAuthorizer = &providers.CodeAuthorizer{Pool: pool, Credentials: rt, Plugins: pluginHost}

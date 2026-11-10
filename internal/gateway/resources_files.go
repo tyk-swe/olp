@@ -17,12 +17,12 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/staging"
 )
 
 func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
@@ -61,23 +61,15 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer form.Cleanup()
-	purpose, mErr := form.Required("purpose")
-	if mErr != nil {
-		s.stateFail(x, w, mediaError(mErr), x.family)
-		return
-	}
-	file, mErr := form.TakeSingleFile("file")
-	if mErr != nil {
-		s.stateFail(x, w, mediaError(mErr), x.family)
+	purpose := form.Required("purpose")
+	file := form.TakeSingleFile("file")
+	extra := form.TakeExtensions()
+	if err := form.Err(); err != nil {
+		s.stateFail(x, w, invalidRequest("invalid_request", err.Error(), nil), x.family)
 		return
 	}
 	if file == nil {
 		s.stateFail(x, w, invalidRequest("missing_required_parameter", "The file field must carry one file.", nil), x.family)
-		return
-	}
-	extra, mErr := form.TakeExtensions()
-	if mErr != nil {
-		s.stateFail(x, w, mediaError(mErr), x.family)
 		return
 	}
 	if purpose != "batch" {
@@ -96,9 +88,8 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	fileFirst := false
 	if x.strict() {
 		fields, normalized := form.SourceFields()
-		fileFirst = len(fields) == 2 && fields[0].Name == "file" && fields[0].File != nil && fields[1].Name == "purpose" && fields[1].Text != nil
-		purposeFirst := len(fields) == 2 && fields[0].Name == "purpose" && fields[0].Text != nil && fields[1].Name == "file" && fields[1].File != nil
-		if normalized || !purposeFirst && !fileFirst || len(extra) != 0 || purpose != "batch" ||
+		fileFirst = len(fields) == 2 && fields[0].Name == "file"
+		if normalized || len(fields) != 2 || len(extra) != 0 || purpose != "batch" ||
 			file.ContentType == "" || strings.ContainsAny(file.Filename, "\"\\\r\n") || r.Header.Get("Idempotency-Key") != "" {
 			s.stateFail(x, w, invalidRequest("target_capability", "Strict batch file upload requires one purpose=batch and one typed file field without unqualified options.", nil), x.family)
 			return
@@ -110,8 +101,8 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		}
 		ordered := make([]sourceField, 0, 2)
 		for _, field := range fields {
-			if field.Text != nil {
-				ordered = append(ordered, sourceField{Name: field.Name, Value: *field.Text})
+			if text, ok := field.Value.(staging.Text); ok {
+				ordered = append(ordered, sourceField{Name: field.Name, Value: string(text)})
 			} else {
 				ordered = append(ordered, sourceField{Name: field.Name, Asset: &durableAsset{SHA256: file.Digest, Filename: file.Filename, ContentType: file.ContentType, Size: file.Size}})
 			}
@@ -120,7 +111,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 	form.Disarm()
 	defer func() {
-		if err := s.transport().Spool.Remove(file.Handle); err != nil {
+		if err := s.deps.Staging.Remove(file.Handle); err != nil {
 			s.log.Warn("file upload cleanup failed", "error", err)
 		}
 	}()
@@ -156,7 +147,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 			s.stateFail(x, w, invalidRequest("unsupported_parameter", "Managed batch uploads require purpose=batch and no extra fields.", &param), x.family)
 			return
 		}
-		var translated *media.Part
+		var translated *staging.Part
 		translated, manifest, e = s.translateManagedBatchInput(r.Context(), p, &route, file, adapter)
 		if e != nil {
 			s.releaseHold(r.Context(), p.hold)
@@ -165,7 +156,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		}
 		uploadFile = translated
 		defer func() {
-			if err := s.transport().Spool.Remove(translated.Handle); err != nil {
+			if err := s.deps.Staging.Remove(translated.Handle); err != nil {
 				s.log.Warn("translated batch spool cleanup failed", "error", err)
 			}
 		}()
@@ -310,7 +301,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	s.writeStateJSON(w, x, out)
 }
 
-func (s *Server) uploadMultipart(ctx context.Context, x *call, p *pin, endpoint, purpose string, extra map[string]string, file *media.Part, fileFirst bool) (*http.Response, *attemptFailure) {
+func (s *Server) uploadMultipart(ctx context.Context, x *call, p *pin, endpoint, purpose string, extra map[string]string, file *staging.Part, fileFirst bool) (*http.Response, *attemptFailure) {
 	pipeR, pipeW := io.Pipe()
 	form := multipart.NewWriter(pipeW)
 	sendDone := make(chan error, 1)
@@ -320,7 +311,7 @@ func (s *Server) uploadMultipart(ctx context.Context, x *call, p *pin, endpoint,
 			return err
 		}
 		writeFile := func() error {
-			opened, err := s.transport().Spool.Open(file.Handle)
+			opened, err := s.deps.Staging.Open(file.Handle)
 			if err != nil {
 				return err
 			}
@@ -636,11 +627,11 @@ func (s *Server) fileContent(w http.ResponseWriter, r *http.Request) {
 		if contentType == "" {
 			contentType = "application/octet-stream"
 		}
-		spool := s.transport().Spool
+		spool := s.deps.Staging
 		if spool == nil {
 			return serverError(http.StatusServiceUnavailable, "media_content_unavailable", "The bounded file spool is unavailable.")
 		}
-		artifact, err := spool.Put(ctx, media.Upload{
+		artifact, err := spool.Put(ctx, staging.Upload{
 			Filename: "file-content", ContentType: contentType,
 			MaximumLength: s.cfg.MaxResponseBytes, Body: resp.Body,
 		})
@@ -649,7 +640,7 @@ func (s *Server) fileContent(w http.ResponseWriter, r *http.Request) {
 				fact := &x.facts[len(x.facts)-1]
 				fact.Class = classProtocol
 			}
-			var tooLarge *media.TooLargeError
+			var tooLarge *staging.TooLargeError
 			if errors.As(err, &tooLarge) {
 				return serverError(http.StatusBadGateway, "upstream_response_too_large", "The provider file exceeded the configured response bound.")
 			}

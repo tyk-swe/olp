@@ -623,7 +623,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *media.JobRec
 		}
 		if contractErr != nil {
 			if result.Artifact != nil {
-				_ = s.deps.Media.Jobs.Transport.Spool.Remove(result.Artifact.Handle)
+				_ = s.deps.Staging.Remove(result.Artifact.Handle)
 			}
 			fact.Class = classProtocol
 			fact.Duration = s.now().Sub(fact.StartedAt)

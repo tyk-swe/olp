@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/staging"
 )
 
 // The runway wire is Runway's task API: a video creation is a task, polled by
@@ -72,7 +74,7 @@ func encodeRunwayCreate(r *Request, model string) (*UpstreamCall, *Error) {
 		return &VideoJobResult{ID: encodedWire.ID, Status: "queued", CreatedAt: &now, Prompt: &r.Prompt, Seconds: &duration, Size: r.Size}, nil
 	}
 	call := &UpstreamCall{Method: http.MethodPost, Path: path, Kind: ResponseVideoJob, Ambiguous: true, DecodeVideo: created}
-	call.JSONFrom = func(read func(*Part) ([]byte, *Error)) ([]byte, *Error) {
+	call.JSONFrom = func(read func(*staging.Part) ([]byte, *Error)) ([]byte, *Error) {
 		if reference != nil {
 			image, failure := read(reference)
 			if failure != nil {

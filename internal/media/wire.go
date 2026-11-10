@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/staging"
 )
 
 // Operation tags match the runtime selection registry.
@@ -64,7 +65,7 @@ const (
 type Field struct {
 	Name string
 	Text *string
-	File *Part
+	File *staging.Part
 	Raw  bool // Text holds an already-encoded JSON document
 }
 
@@ -80,10 +81,10 @@ type UpstreamCall struct {
 	Query          url.Values
 	Accept         string
 	JSON           []byte
-	Fields         []Field
+	Fields         []staging.Field
 	// Upload is a staged file sent as the whole request body, for vendors
 	// that take raw audio rather than a multipart form.
-	Upload    *Part
+	Upload    *staging.Part
 	Stream    bool
 	Kind      ResponseKind
 	Native    string
@@ -91,7 +92,7 @@ type UpstreamCall struct {
 	Ambiguous bool // the request is not idempotent; post-dispatch failure is ambiguous
 	// DecodeImages and DecodeTranscription read a vendor wire's JSON result
 	// in place of the OpenAI decoders.
-	DecodeImages        func(body []byte, stage func(b64 string, index int) (*Artifact, *Error)) (*ImageResult, *Error)
+	DecodeImages        func(body []byte, stage func(b64 string, index int) (*staging.Artifact, *Error)) (*ImageResult, *Error)
 	DecodeTranscription func(body []byte) (*TranscriptionResult, *Error)
 	// DecodeVideo reads a vendor's video job object, and NoContent marks a
 	// call the vendor answers with 204 and no body, such as a deletion.
@@ -102,7 +103,7 @@ type UpstreamCall struct {
 	DecodeAudio func(body []byte) (*AudioResult, *Error)
 	// JSONFrom builds a JSON body that inlines uploaded files, whose bytes
 	// read returns, in place of JSON.
-	JSONFrom func(read func(*Part) ([]byte, *Error)) ([]byte, *Error)
+	JSONFrom func(read func(*staging.Part) ([]byte, *Error)) ([]byte, *Error)
 	// CharacterHeader names the response header in which a vendor reports
 	// the characters a speech call bills.
 	CharacterHeader string
@@ -179,11 +180,11 @@ type Request struct {
 	KnownSpeakerReferences []string
 	Seconds                *string
 
-	Images   []Part // image edit uploads in array order
-	Mask     *Part
-	Image    *Part // variation upload
-	File     *Part // transcription upload
-	InputRef *Part // video input_reference upload
+	Images   []staging.Part // image edit uploads in array order
+	Mask     *staging.Part
+	Image    *staging.Part // variation upload
+	File     *staging.Part // transcription upload
+	InputRef *staging.Part // video input_reference upload
 
 	Extra map[string]any
 
@@ -191,8 +192,8 @@ type Request struct {
 	// Multipart requests use their explicit typed fields and staged parts instead.
 	SourceFields     map[string]json.RawMessage
 	sourceDocument   oif.Document
-	SourceParts      []Field // original accepted multipart member order
-	SourceNormalized bool    // caller multipart text or metadata was normalized
+	SourceParts      []staging.Field // original accepted multipart member order
+	SourceNormalized bool            // caller multipart text or metadata was normalized
 
 	// Video job operations.
 	JobID           string
@@ -210,9 +211,9 @@ func (r *Request) SourceDocument() oif.Document {
 }
 
 // Uploads returns the staged handles this request owns.
-func (r *Request) Uploads() []Handle {
-	var handles []Handle
-	appendParts := func(parts []Part) {
+func (r *Request) Uploads() []staging.Handle {
+	var handles []staging.Handle
+	appendParts := func(parts []staging.Part) {
 		for _, part := range parts {
 			handles = append(handles, part.Handle)
 		}
@@ -262,10 +263,6 @@ func (r *Request) SeedMediaUnits() *string {
 	return nil
 }
 
-func invalidMedia(message string) *Error {
-	return Fail(400, "invalid_request", message)
-}
-
 func validRouteSlug(value string) bool {
 	if value == "" || len(value) > 100 {
 		return false
@@ -307,20 +304,20 @@ func jsonDoc(fields map[string]any, extra map[string]any) ([]byte, *Error) {
 }
 
 // textField appends a text field to a multipart field list.
-func textField(fields []Field, name string, value *string) []Field {
+func textField(fields []staging.Field, name string, value *string) []staging.Field {
 	if value == nil {
 		return fields
 	}
-	return append(fields, Field{Name: name, Text: value})
+	return append(fields, staging.Field{Name: name, Value: staging.Text(*value)})
 }
 
-func textValue(fields []Field, name, value string) []Field {
-	return append(fields, Field{Name: name, Text: &value})
+func textValue(fields []staging.Field, name, value string) []staging.Field {
+	return append(fields, staging.Field{Name: name, Value: staging.Text(value)})
 }
 
 // extraFields renders client extension fields as upstream multipart text
 // fields: arrays repeat as name[] and non-strings are compact JSON.
-func extraFields(fields []Field, extra map[string]any) []Field {
+func extraFields(fields []staging.Field, extra map[string]any) []staging.Field {
 	if len(extra) == 0 {
 		return fields
 	}
@@ -338,12 +335,12 @@ func extraFields(fields []Field, extra map[string]any) []Field {
 			}
 			for _, item := range values {
 				text := extraText(item)
-				fields = append(fields, Field{Name: field, Text: &text})
+				fields = append(fields, staging.Field{Name: field, Value: staging.Text(text)})
 			}
 			continue
 		}
 		text := extraText(value)
-		fields = append(fields, Field{Name: name, Text: &text})
+		fields = append(fields, staging.Field{Name: name, Value: staging.Text(text)})
 	}
 	return fields
 }
@@ -477,70 +474,25 @@ func decodeJSON(body []byte, encodedWire any, known ...string) (map[string]any, 
 }
 
 // DecodeImageEdit validates a parsed image-edit form.
-func DecodeImageEdit(form *Form) (*Request, *Error) {
-	images, failure := form.TakeFilesWithPrefix("image")
-	if failure != nil {
-		return nil, failure
-	}
-	mask, failure := form.TakeSingleFile("mask")
-	if failure != nil {
-		return nil, failure
-	}
-	model, failure := form.Required("model")
-	if failure != nil {
-		return nil, failure
-	}
-	prompt, failure := form.Required("prompt")
-	if failure != nil {
-		return nil, failure
-	}
-	n, failure := form.OptionalInt("n")
-	if failure != nil {
-		return nil, failure
-	}
-	size, failure := form.Optional("size")
-	if failure != nil {
-		return nil, failure
-	}
-	stream, failure := form.OptionalBool("stream")
-	if failure != nil {
-		return nil, failure
-	}
-	quality, failure := form.Optional("quality")
-	if failure != nil {
-		return nil, failure
-	}
-	responseFormat, failure := form.Optional("response_format")
-	if failure != nil {
-		return nil, failure
-	}
-	user, failure := form.Optional("user")
-	if failure != nil {
-		return nil, failure
-	}
-	background, failure := form.Optional("background")
-	if failure != nil {
-		return nil, failure
-	}
-	inputFidelity, failure := form.Optional("input_fidelity")
-	if failure != nil {
-		return nil, failure
-	}
-	outputCompression, failure := form.OptionalInt("output_compression")
-	if failure != nil {
-		return nil, failure
-	}
-	outputFormat, failure := form.Optional("output_format")
-	if failure != nil {
-		return nil, failure
-	}
-	partialImages, failure := form.OptionalInt("partial_images")
-	if failure != nil {
-		return nil, failure
-	}
-	extra, failure := form.TakeExtensions()
-	if failure != nil {
-		return nil, failure
+func DecodeImageEdit(form *staging.Form) (*Request, *Error) {
+	images := form.TakeFilesWithPrefix("image")
+	mask := form.TakeSingleFile("mask")
+	model := form.Required("model")
+	prompt := form.Required("prompt")
+	n := form.OptionalInt("n")
+	size := form.Optional("size")
+	stream := form.OptionalBool("stream")
+	quality := form.Optional("quality")
+	responseFormat := form.Optional("response_format")
+	user := form.Optional("user")
+	background := form.Optional("background")
+	inputFidelity := form.Optional("input_fidelity")
+	outputCompression := form.OptionalInt("output_compression")
+	outputFormat := form.Optional("output_format")
+	partialImages := form.OptionalInt("partial_images")
+	extra := form.TakeExtensions()
+	if err := form.Err(); err != nil {
+		return nil, invalidMedia(err.Error())
 	}
 	if len(images) == 0 {
 		return nil, invalidMedia("The image file is required.")
@@ -576,34 +528,16 @@ func DecodeImageEdit(form *Form) (*Request, *Error) {
 }
 
 // DecodeImageVariation validates a parsed image-variation form.
-func DecodeImageVariation(form *Form) (*Request, *Error) {
-	image, failure := form.TakeSingleFile("image")
-	if failure != nil {
-		return nil, failure
-	}
-	model, failure := form.Required("model")
-	if failure != nil {
-		return nil, failure
-	}
-	n, failure := form.OptionalInt("n")
-	if failure != nil {
-		return nil, failure
-	}
-	size, failure := form.Optional("size")
-	if failure != nil {
-		return nil, failure
-	}
-	responseFormat, failure := form.Optional("response_format")
-	if failure != nil {
-		return nil, failure
-	}
-	user, failure := form.Optional("user")
-	if failure != nil {
-		return nil, failure
-	}
-	extra, failure := form.TakeExtensions()
-	if failure != nil {
-		return nil, failure
+func DecodeImageVariation(form *staging.Form) (*Request, *Error) {
+	image := form.TakeSingleFile("image")
+	model := form.Required("model")
+	n := form.OptionalInt("n")
+	size := form.Optional("size")
+	responseFormat := form.Optional("response_format")
+	user := form.Optional("user")
+	extra := form.TakeExtensions()
+	if err := form.Err(); err != nil {
+		return nil, invalidMedia(err.Error())
 	}
 	if image == nil {
 		return nil, invalidMedia("The image file is required.")
@@ -628,58 +562,22 @@ func DecodeImageVariation(form *Form) (*Request, *Error) {
 }
 
 // DecodeTranscription validates a parsed transcription form.
-func DecodeTranscription(form *Form) (*Request, *Error) {
-	file, failure := form.TakeSingleFile("file")
-	if failure != nil {
-		return nil, failure
-	}
-	responseFormat, failure := form.Optional("response_format")
-	if failure != nil {
-		return nil, failure
-	}
-	names, failure := form.TakeRepeated("known_speaker_names")
-	if failure != nil {
-		return nil, failure
-	}
-	references, failure := form.TakeRepeated("known_speaker_references")
-	if failure != nil {
-		return nil, failure
-	}
-	model, failure := form.Required("model")
-	if failure != nil {
-		return nil, failure
-	}
-	language, failure := form.Optional("language")
-	if failure != nil {
-		return nil, failure
-	}
-	prompt, failure := form.Optional("prompt")
-	if failure != nil {
-		return nil, failure
-	}
-	temperature, failure := form.OptionalFloat("temperature")
-	if failure != nil {
-		return nil, failure
-	}
-	include, failure := form.TakeRepeated("include")
-	if failure != nil {
-		return nil, failure
-	}
-	granularities, failure := form.TakeRepeated("timestamp_granularities")
-	if failure != nil {
-		return nil, failure
-	}
-	chunking, failure := form.Optional("chunking_strategy")
-	if failure != nil {
-		return nil, failure
-	}
-	stream, failure := form.OptionalBool("stream")
-	if failure != nil {
-		return nil, failure
-	}
-	extra, failure := form.TakeExtensions()
-	if failure != nil {
-		return nil, failure
+func DecodeTranscription(form *staging.Form) (*Request, *Error) {
+	file := form.TakeSingleFile("file")
+	responseFormat := form.Optional("response_format")
+	names := form.TakeRepeated("known_speaker_names")
+	references := form.TakeRepeated("known_speaker_references")
+	model := form.Required("model")
+	language := form.Optional("language")
+	prompt := form.Optional("prompt")
+	temperature := form.OptionalFloat("temperature")
+	include := form.TakeRepeated("include")
+	granularities := form.TakeRepeated("timestamp_granularities")
+	chunking := form.Optional("chunking_strategy")
+	stream := form.OptionalBool("stream")
+	extra := form.TakeExtensions()
+	if err := form.Err(); err != nil {
+		return nil, invalidMedia(err.Error())
 	}
 	if file == nil {
 		return nil, invalidMedia("The audio file is required.")
@@ -759,30 +657,15 @@ func validSpeakerReferences(references []string) bool {
 }
 
 // DecodeVideoCreate validates a parsed video-create form.
-func DecodeVideoCreate(form *Form) (*Request, *Error) {
-	model, failure := form.Required("model")
-	if failure != nil {
-		return nil, failure
-	}
-	prompt, failure := form.Required("prompt")
-	if failure != nil {
-		return nil, failure
-	}
-	inputRef, failure := form.TakeSingleFile("input_reference")
-	if failure != nil {
-		return nil, failure
-	}
-	seconds, failure := form.Optional("seconds")
-	if failure != nil {
-		return nil, failure
-	}
-	size, failure := form.Optional("size")
-	if failure != nil {
-		return nil, failure
-	}
-	extra, failure := form.TakeExtensions()
-	if failure != nil {
-		return nil, failure
+func DecodeVideoCreate(form *staging.Form) (*Request, *Error) {
+	model := form.Required("model")
+	prompt := form.Required("prompt")
+	inputRef := form.TakeSingleFile("input_reference")
+	seconds := form.Optional("seconds")
+	size := form.Optional("size")
+	extra := form.TakeExtensions()
+	if err := form.Err(); err != nil {
+		return nil, invalidMedia(err.Error())
 	}
 	if prompt == "" || len(prompt) > MaxVideoPromptLength {
 		return nil, invalidMedia("The video prompt must contain 1 to 32000 bytes.")
@@ -931,18 +814,18 @@ func encodeImageGeneration(r *Request, kind, model string) (*UpstreamCall, *Erro
 }
 
 func encodeImageEdit(r *Request, model string) (*UpstreamCall, *Error) {
-	fields := []Field{}
+	fields := []staging.Field{}
 	fields = textValue(fields, "model", model)
 	fields = textValue(fields, "prompt", r.Prompt)
 	if len(r.Images) == 1 {
-		fields = append(fields, Field{Name: "image", File: &r.Images[0]})
+		fields = append(fields, staging.Field{Name: "image", Value: r.Images[0]})
 	} else {
 		for i := range r.Images {
-			fields = append(fields, Field{Name: "image[" + strconv.Itoa(i) + "]", File: &r.Images[i]})
+			fields = append(fields, staging.Field{Name: "image[" + strconv.Itoa(i) + "]", Value: r.Images[i]})
 		}
 	}
 	if r.Mask != nil {
-		fields = append(fields, Field{Name: "mask", File: r.Mask})
+		fields = append(fields, staging.Field{Name: "mask", Value: *r.Mask})
 	}
 	fields = textField(fields, "n", int64Text(r.Count))
 	fields = textField(fields, "size", r.Size)
@@ -965,9 +848,9 @@ func encodeImageEdit(r *Request, model string) (*UpstreamCall, *Error) {
 }
 
 func encodeImageVariation(r *Request, model string) (*UpstreamCall, *Error) {
-	fields := []Field{}
+	fields := []staging.Field{}
 	fields = textValue(fields, "model", model)
-	fields = append(fields, Field{Name: "image", File: r.Image})
+	fields = append(fields, staging.Field{Name: "image", Value: *r.Image})
 	fields = textField(fields, "n", int64Text(r.Count))
 	fields = textField(fields, "size", r.Size)
 	fields = textField(fields, "response_format", r.Format)
@@ -1004,9 +887,9 @@ func encodeSpeech(r *Request, model string) (*UpstreamCall, *Error) {
 }
 
 func encodeTranscription(r *Request, model string) (*UpstreamCall, *Error) {
-	fields := []Field{}
+	fields := []staging.Field{}
 	fields = textValue(fields, "model", model)
-	fields = append(fields, Field{Name: "file", File: r.File})
+	fields = append(fields, staging.Field{Name: "file", Value: *r.File})
 	fields = textField(fields, "language", r.Language)
 	fields = textField(fields, "prompt", r.TextPrompt)
 	fields = textField(fields, "response_format", r.Format)
@@ -1018,7 +901,7 @@ func encodeTranscription(r *Request, model string) (*UpstreamCall, *Error) {
 		fields = textValue(fields, "timestamp_granularities[]", value)
 	}
 	if len(r.ChunkingStrategy) > 0 {
-		fields = append(fields, Field{Name: "chunking_strategy", Text: new(string(r.ChunkingStrategy))})
+		fields = append(fields, staging.Field{Name: "chunking_strategy", Value: staging.Text(r.ChunkingStrategy)})
 	}
 	for i, name := range r.KnownSpeakerNames {
 		fields = textValue(fields, "known_speaker_names[]", name)
@@ -1035,13 +918,13 @@ func encodeTranscription(r *Request, model string) (*UpstreamCall, *Error) {
 }
 
 func encodeVideoCreate(r *Request, model string) (*UpstreamCall, *Error) {
-	fields := []Field{}
+	fields := []staging.Field{}
 	fields = textValue(fields, "model", model)
 	fields = textValue(fields, "prompt", r.Prompt)
 	fields = textField(fields, "seconds", r.Seconds)
 	fields = textField(fields, "size", r.Size)
 	if r.InputRef != nil {
-		fields = append(fields, Field{Name: "input_reference", File: r.InputRef})
+		fields = append(fields, staging.Field{Name: "input_reference", Value: *r.InputRef})
 	}
 	fields = extraFields(fields, r.Extra)
 	return &UpstreamCall{Method: "POST", Path: "videos", Accept: "application/json",

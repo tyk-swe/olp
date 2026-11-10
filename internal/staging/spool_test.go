@@ -1,4 +1,4 @@
-package media
+package staging
 
 import (
 	"errors"
@@ -17,7 +17,6 @@ func stage(t *testing.T, spool *Spool, body io.Reader, maximum int64) (*Artifact
 
 func TestSpoolGivesBackEveryByteItDoesNotKeep(t *testing.T) {
 	spool := newSpool(t)
-	// NewSpool refuses capacities under 256 MiB, too much to fill in a unit test.
 	spool.capacity = 10
 
 	kept, err := stage(t, spool, strings.NewReader("123456"), 64)
@@ -29,7 +28,10 @@ func TestSpoolGivesBackEveryByteItDoesNotKeep(t *testing.T) {
 		maximum int64
 		is      func(error) bool
 	}{
-		"an upload over its own limit": {strings.NewReader("12345"), 4, TooLarge},
+		"an upload over its own limit": {
+			strings.NewReader("12345"), 4,
+			func(err error) bool { _, ok := errors.AsType[*TooLargeError](err); return ok },
+		},
 		"an upload over the spool capacity": {
 			io.MultiReader(strings.NewReader("1234"), strings.NewReader("5")), 64,
 			func(err error) bool { return errors.Is(err, ErrUnavailable) },
@@ -88,7 +90,7 @@ func TestSpoolRefusesHandlesAndNamesThatCouldLeaveIt(t *testing.T) {
 	if err := os.WriteFile(outside, []byte("secret"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, handle := range []Handle{"../outside", "", "0123456789ABCDEF0123456789ABCDEF", Handle(strings.Repeat("a", HandleBytes+1)), ".owner.lock"} {
+	for _, handle := range []Handle{"../outside", "", "0123456789ABCDEF0123456789ABCDEF", Handle(strings.Repeat("a", handleBytes+1)), ".owner.lock"} {
 		if _, err := spool.Open(handle); !errors.Is(err, ErrInvalidHandle) {
 			t.Fatalf("opening %q: got %v, want an invalid handle", handle, err)
 		}
@@ -96,7 +98,7 @@ func TestSpoolRefusesHandlesAndNamesThatCouldLeaveIt(t *testing.T) {
 			t.Fatalf("removing %q: got %v, want an invalid handle", handle, err)
 		}
 	}
-	if _, err := spool.Open(NewHandle()); !errors.Is(err, ErrNotFound) {
+	if _, err := spool.Open(newHandle()); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("opening a handle nobody staged: got %v, want not found", err)
 	}
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/staging"
 )
 
 // ImageResult is the decoded unary image response. Base64 payloads are
@@ -26,7 +27,7 @@ type ImageResult struct {
 // ImageArtifact is one produced image: either an upstream URL or a staged file.
 type ImageArtifact struct {
 	URL           string
-	Handle        *Handle
+	Handle        *staging.Handle
 	RevisedPrompt *string
 }
 
@@ -44,7 +45,7 @@ type ImageUsage struct {
 
 // DecodeImageResponse parses an upstream image document, staging each
 // base64 payload through stage before the result is returned.
-func DecodeImageResponse(body []byte, stage func(b64 string, index int) (*Artifact, *Error)) (*ImageResult, *Error) {
+func DecodeImageResponse(body []byte, stage func(b64 string, index int) (*staging.Artifact, *Error)) (*ImageResult, *Error) {
 	var encodedWire struct {
 		Created int64 `json:"created"`
 		Data    []struct {
@@ -124,7 +125,7 @@ func DecodeImageResponse(body []byte, stage func(b64 string, index int) (*Artifa
 	return result, nil
 }
 
-func DecodeNativeImageResponse(kind string, body []byte, expected int64, stage func(b64 string, index int) (*Artifact, *Error)) (*ImageResult, *Error) {
+func DecodeNativeImageResponse(kind string, body []byte, expected int64, stage func(b64 string, index int) (*staging.Artifact, *Error)) (*ImageResult, *Error) {
 	var encodedWire struct {
 		Predictions []struct {
 			BytesBase64Encoded string `json:"bytesBase64Encoded"`

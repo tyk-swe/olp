@@ -23,19 +23,14 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-// MediaDeps wires the bounded media substrate into the public surface. A nil
-// MediaDeps leaves the media routes unregistered.
 type MediaDeps struct {
-	Jobs      *media.Service
-	Admission *media.AdmissionState
+	Jobs *media.Service
 }
-
-// transport returns the media upstream transport.
-func (s *Server) transport() *media.Transport { return s.deps.Media.Jobs.Transport }
 
 // multipartParseDeadline bounds one inbound multipart body.
 const multipartParseDeadline = 60 * time.Second
@@ -97,7 +92,7 @@ func (s *Server) mediaJSONHandler(decode func([]byte) (*media.Request, *media.Er
 
 // mediaFormHandler serves a multipart media operation. Staged uploads live in
 // the spool until the decoded request takes ownership of them.
-func (s *Server) mediaFormHandler(maxFileBytes int64, maxFiles int, decode func(*media.Form) (*media.Request, *media.Error)) http.HandlerFunc {
+func (s *Server) mediaFormHandler(maxFileBytes int64, maxFiles int, decode func(*staging.Form) (*media.Request, *media.Error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		x, authority, done := s.mediaBegin(w, r)
 		if done {
@@ -124,7 +119,7 @@ func (s *Server) mediaFormHandler(maxFileBytes int64, maxFiles int, decode func(
 
 // parseMediaForm bounds both the raw request and the spool bytes promised to
 // its parser. The aggregate body cap also bounds multi-image reservations.
-func (s *Server) parseMediaForm(w http.ResponseWriter, r *http.Request, keyID string, maxFileBytes int64, maxFiles int) (*media.Form, *Error) {
+func (s *Server) parseMediaForm(w http.ResponseWriter, r *http.Request, keyID string, maxFileBytes int64, maxFiles int) (*staging.Form, *Error) {
 	limit := s.cfg.MaxMediaBodyBytes
 	if r.ContentLength > limit {
 		return nil, bodyTooLarge()
@@ -133,13 +128,10 @@ func (s *Server) parseMediaForm(w http.ResponseWriter, r *http.Request, keyID st
 	rc := http.NewResponseController(w)
 	rc.SetReadDeadline(time.Now().Add(multipartParseDeadline))
 	defer rc.SetReadDeadline(time.Time{})
-	admission := media.Admission{
-		Lease: s.deps.Media.Admission.TryAdmit(keyID, min(limit, maxFileBytes*int64(maxFiles))),
-		Route: media.RouteAdmission{Kind: media.RouteUnrestricted},
-	}
-	form, err := media.ParseMultipart(r.Context(), r, s.transport().Spool, &admission, maxFileBytes, maxFiles)
-	if err != nil {
-		return nil, mediaError(mediaErr(err))
+	lease := s.deps.Uploads.TryAdmit(keyID, min(limit, maxFileBytes*int64(maxFiles)))
+	form, failure := staging.ParseMultipart(r.Context(), r, s.deps.Staging, lease, maxFileBytes, maxFiles)
+	if failure != nil {
+		return nil, stagingError(failure)
 	}
 	return form, nil
 }
@@ -240,7 +232,7 @@ func (s *Server) cleanupUploads(request *media.Request) {
 		return
 	}
 	for _, handle := range request.Uploads() {
-		if err := s.deps.Media.Jobs.Transport.Spool.Remove(handle); err != nil {
+		if err := s.deps.Staging.Remove(handle); err != nil {
 			s.log.Warn("media upload cleanup failed", "error", err)
 		}
 	}
@@ -379,25 +371,26 @@ func strictMediaHeaders(x *call) *Error {
 // request. The media transport remains the sole authority that opens handles.
 func bindMediaContract(template *mediacontract.Template, request *media.Request, call *media.UpstreamCall, effective *media.Request) (mediacontract.Bound, error) {
 	input := mediacontract.Input{Route: request.Route, Mode: effective.Mode(), Source: request.SourceDocument(), JSON: call.JSON}
-	owned := map[media.Handle]bool{}
+	owned := map[staging.Handle]bool{}
 	for _, handle := range request.Uploads() {
 		owned[handle] = true
 	}
-	convert := func(field media.Field) (mediacontract.Part, error) {
-		part := mediacontract.Part{Name: field.Name, Text: field.Text, Raw: field.Raw}
-		if field.File != nil {
-			if !owned[field.File.Handle] {
+	convert := func(field staging.Field) (mediacontract.Part, error) {
+		switch value := field.Value.(type) {
+		case staging.Text:
+			text := string(value)
+			return mediacontract.Part{Name: field.Name, Text: &text}, nil
+		case staging.Part:
+			if !owned[value.Handle] {
 				return mediacontract.Part{}, errors.New("media part is not owned by this request")
 			}
-			blob, err := field.File.BlobReference()
+			blob, err := value.BlobReference()
 			if err != nil {
 				return mediacontract.Part{}, err
 			}
-			part.Blob = blob
-			part.Filename = field.File.Filename
-			part.ContentType = field.File.ContentType
+			return mediacontract.Part{Name: field.Name, Blob: blob, Filename: value.Filename, ContentType: value.ContentType}, nil
 		}
-		return part, nil
+		return mediacontract.Part{Name: field.Name}, nil
 	}
 	for _, field := range call.Fields {
 		part, err := convert(field)
@@ -446,7 +439,7 @@ func mediaOutboundParameterNames(call *media.UpstreamCall, request *media.Reques
 		}
 	} else if len(call.Fields) != 0 {
 		for _, field := range call.Fields {
-			if field.File != nil && field.Name != "mask" && field.Name != "input_reference" {
+			if _, file := field.Value.(staging.Part); file && field.Name != "mask" && field.Name != "input_reference" {
 				continue
 			}
 			add(field.Name)
@@ -678,7 +671,7 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *cal
 			if result.Images != nil {
 				for _, image := range result.Images.Images {
 					if image.Handle != nil {
-						_ = s.transport().Spool.Remove(*image.Handle)
+						_ = s.deps.Staging.Remove(*image.Handle)
 					}
 				}
 			}
@@ -793,7 +786,7 @@ func (s *Server) writeMediaResult(w http.ResponseWriter, x *call, out *mediaOutc
 			defer func() {
 				for _, image := range result.Images.Images {
 					if image.Handle != nil {
-						_ = s.transport().Spool.Remove(*image.Handle)
+						_ = s.deps.Staging.Remove(*image.Handle)
 					}
 				}
 			}()
@@ -909,7 +902,7 @@ func (s *Server) writeImageResult(w http.ResponseWriter, x *call, out *mediaOutc
 	defer func() {
 		for _, image := range out.result.Images.Images {
 			if image.Handle != nil {
-				s.transport().Spool.Remove(*image.Handle)
+				s.deps.Staging.Remove(*image.Handle)
 			}
 		}
 	}()
@@ -920,7 +913,7 @@ func (s *Server) writeImageResult(w http.ResponseWriter, x *call, out *mediaOutc
 		writeSurfaceError(w, out.err, "openai")
 		return
 	}
-	handles := map[string]media.Handle{}
+	handles := map[string]staging.Handle{}
 	index := 0
 	for _, image := range out.result.Images.Images {
 		if image.Handle != nil && index < len(markers) {
@@ -951,8 +944,8 @@ func (s *Server) writeImageResult(w http.ResponseWriter, x *call, out *mediaOutc
 }
 
 // streamBase64 writes one staged artifact base64-encoded into w.
-func (s *Server) streamBase64(w io.Writer, handle media.Handle) error {
-	opened, err := s.deps.Media.Jobs.Transport.Spool.Open(handle)
+func (s *Server) streamBase64(w io.Writer, handle staging.Handle) error {
+	opened, err := s.deps.Staging.Open(handle)
 	if err != nil {
 		return err
 	}
@@ -969,15 +962,15 @@ func (s *Server) streamBase64(w io.Writer, handle media.Handle) error {
 // it once the body is exhausted or the write fails.
 func (s *Server) streamArtifact(w http.ResponseWriter, x *call, out *mediaOutcome) {
 	artifact := out.result.Artifact
-	opened, err := s.deps.Media.Jobs.Transport.Spool.Open(artifact.Handle)
+	opened, err := s.deps.Staging.Open(artifact.Handle)
 	if err != nil {
-		s.deps.Media.Jobs.Transport.Spool.Remove(artifact.Handle)
+		s.deps.Staging.Remove(artifact.Handle)
 		out.err = serverError(http.StatusBadGateway, "media_content_unavailable", "The staged media could not be read.")
 		out.status, out.committed = out.err.Status, false
 		writeSurfaceError(w, out.err, "openai")
 		return
 	}
-	defer s.deps.Media.Jobs.Transport.Spool.Remove(artifact.Handle)
+	defer s.deps.Staging.Remove(artifact.Handle)
 	defer opened.File.Close()
 	if artifact.ContentLength > 0 {
 		w.Header().Set("Content-Length", strconv.FormatInt(artifact.ContentLength, 10))
@@ -1100,13 +1093,6 @@ func mediaError(failure *media.Error) *Error {
 		typeName = "server_error"
 	}
 	return &Error{Status: failure.Status, Type: typeName, Code: failure.Code, Message: failure.Message}
-}
-
-func mediaErr(err error) *media.Error {
-	if failure, ok := errors.AsType[*media.Error](err); ok {
-		return failure
-	}
-	return media.Fail(http.StatusBadRequest, "invalid_request", err.Error())
 }
 
 // imageGenerations decodes the JSON image-generation body.

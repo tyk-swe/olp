@@ -1,15 +1,8 @@
-// Package media provides the bounded private filesystem spool for staged
-// request and response media, the durable media-job records behind the
-// asynchronous video surface, the reconciliation worker that keeps those
-// records converged with providers, and the media management API.
-//
-// The spool enforces a byte-accurate capacity bound across concurrent
-// uploads, keeps staged artifacts under opaque handles, and guarantees
-// cleanup ownership outlives request cancellation.
-package media
+package staging
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -24,21 +17,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/oif"
 )
 
 const (
-	// ReadChunkBytes bounds every filesystem read and write step.
-	ReadChunkBytes = 64 * 1024
-	// DefaultCapacityBytes is the production default spool size (1 GiB).
+	readChunkBytes             = 64 * 1024
 	DefaultCapacityBytes int64 = 1024 * 1024 * 1024
-	// MinCapacityBytes is the smallest supported production spool. Multipart
-	// admission reserves fixed worst-case endpoint budgets, so a smaller
-	// volume cannot safely serve the public media API.
-	MinCapacityBytes int64 = 256 * 1024 * 1024
-	// HandleBytes is the opaque handle length: 32 lowercase hex characters.
-	HandleBytes = 32
+	MinCapacityBytes     int64 = 256 * 1024 * 1024
+	handleBytes                = 32
 
 	cleanupConcurrency    = 4
 	cleanupInitialBackoff = 25 * time.Millisecond
@@ -46,43 +32,29 @@ const (
 )
 
 var (
-	// ErrUnavailable reports a filesystem or capacity failure.
-	ErrUnavailable = errors.New("media spool unavailable")
-	// ErrNotFound reports an unknown or already-removed handle.
-	ErrNotFound = errors.New("media handle not found")
-	// ErrInvalidHandle reports a malformed handle supplied by a caller.
-	ErrInvalidHandle = errors.New("invalid media handle")
-	// ErrInvalidFilename reports an empty, oversized, or unsafe filename.
+	ErrUnavailable     = errors.New("media spool unavailable")
+	ErrNotFound        = errors.New("media handle not found")
+	ErrInvalidHandle   = errors.New("invalid media handle")
 	ErrInvalidFilename = errors.New("invalid media filename")
-	// ErrZeroLimit reports an upload configured with no length bound.
-	ErrZeroLimit = errors.New("media uploads require a length bound")
+	ErrZeroLimit       = errors.New("media uploads require a length bound")
 )
 
-// TooLargeError reports a media body that exceeded its configured bound.
 type TooLargeError struct{ Maximum int64 }
 
 func (e *TooLargeError) Error() string {
 	return fmt.Sprintf("media body exceeds the configured limit of %d bytes", e.Maximum)
 }
 
-// TooLarge reports whether err is a media body bound violation.
-func TooLarge(err error) bool {
-	var target *TooLargeError
-	return errors.As(err, &target)
-}
-
-// Handle is an opaque spool artifact identifier.
 type Handle string
 
-// NewHandle returns a fresh unguessable handle.
-func NewHandle() Handle {
-	id := uuid.Must(uuid.NewV7())
-	return Handle(strings.ReplaceAll(id.String(), "-", ""))
+func newHandle() Handle {
+	value := make([]byte, handleBytes/2)
+	rand.Read(value)
+	return Handle(hex.EncodeToString(value))
 }
 
-// ValidateHandle rejects malformed handles before any filesystem use.
-func ValidateHandle(value string) error {
-	if len(value) != HandleBytes {
+func validateHandle(value string) error {
+	if len(value) != handleBytes {
 		return ErrInvalidHandle
 	}
 	for i := 0; i < len(value); i++ {
@@ -94,17 +66,13 @@ func ValidateHandle(value string) error {
 	return nil
 }
 
-// Artifact describes a committed spool object.
 type Artifact struct {
 	Handle        Handle
-	Digest        string // SHA-256 of the exact committed bytes, lowercase hex
+	Digest        string
 	ContentType   string
 	ContentLength int64
 }
 
-// BlobReference uses this spool's opaque handle and original byte identity.
-// Missing caller Content-Type stays absent on the Part; the generic MIME here
-// describes storage bytes and does not invent a native request control.
 func (a Artifact) BlobReference() (oif.BlobReference, error) {
 	mediaType := a.ContentType
 	if mediaType == "" {
@@ -113,7 +81,6 @@ func (a Artifact) BlobReference() (oif.BlobReference, error) {
 	return oif.NewBlobReference(string(a.Handle), a.Digest, mediaType, a.ContentLength)
 }
 
-// Upload is a single bounded inbound media stream.
 type Upload struct {
 	Filename      string
 	ContentType   string
@@ -121,7 +88,6 @@ type Upload struct {
 	Body          io.Reader
 }
 
-// Opened is a spool artifact opened for reading.
 type Opened struct {
 	Artifact Artifact
 	Filename string
@@ -136,9 +102,6 @@ type spoolEntry struct {
 	contentLength int64
 }
 
-// Spool is a per-process, private filesystem spool for bounded request and
-// response media. usedBytes covers both in-flight reservations and committed
-// artifacts so concurrent uploads cannot overrun capacity.
 type Spool struct {
 	root     string
 	owner    *os.File
@@ -153,8 +116,6 @@ type Spool struct {
 	closed     atomic.Bool
 }
 
-// NewSpool reclaims abandoned spools and creates a private, capacity-bounded
-// spool. An ownership lock protects each live spool from restart cleanup.
 func NewSpool(baseDir string, capacity int64, log *slog.Logger) (*Spool, error) {
 	if capacity < MinCapacityBytes {
 		return nil, fmt.Errorf("media spool capacity must be at least %d bytes", MinCapacityBytes)
@@ -180,10 +141,8 @@ func NewSpool(baseDir string, capacity int64, log *slog.Logger) (*Spool, error) 
 	return s, nil
 }
 
-// CapacityBytes reports the configured spool bound.
 func (s *Spool) CapacityBytes() int64 { return s.capacity }
 
-// UsedBytes reports bytes currently committed or reserved.
 func (s *Spool) UsedBytes() int64 { return s.usedBytes.Load() }
 
 func (s *Spool) tryReserve(bytes int64) bool {
@@ -205,8 +164,6 @@ func (s *Spool) release(bytes int64) {
 	}
 }
 
-// SafeFilename reduces an untrusted filename to a safe basename and applies
-// the length and character policy shared by request and response media.
 func SafeFilename(value string) (string, error) {
 	filename := path.Base(strings.ReplaceAll(value, "\\", "/"))
 	if filename == "" || filename == "." || filename == ".." || filename == "/" {
@@ -223,8 +180,6 @@ func SafeFilename(value string) (string, error) {
 	return filename, nil
 }
 
-// Put streams an upload into the spool, enforcing both the per-upload length
-// bound and the global capacity reservation.
 func (s *Spool) Put(ctx context.Context, upload Upload) (*Artifact, error) {
 	if s.closed.Load() {
 		return nil, ErrUnavailable
@@ -236,7 +191,7 @@ func (s *Spool) Put(ctx context.Context, upload Upload) (*Artifact, error) {
 	if err != nil {
 		return nil, err
 	}
-	token := string(NewHandle())
+	token := string(newHandle())
 	target := filepath.Join(s.root, token)
 	pending := &pendingWrite{spool: s, path: target}
 	file, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
@@ -245,7 +200,7 @@ func (s *Spool) Put(ctx context.Context, upload Upload) (*Artifact, error) {
 	}
 	var written int64
 	hash := sha256.New()
-	buffer := make([]byte, ReadChunkBytes)
+	buffer := make([]byte, readChunkBytes)
 	for {
 		if err = ctx.Err(); err != nil {
 			file.Close()
@@ -311,8 +266,6 @@ func (s *Spool) Put(ctx context.Context, upload Upload) (*Artifact, error) {
 	}, nil
 }
 
-// pendingWrite owns an in-flight reservation until the artifact commits; the
-// partial file is removed before the reserved bytes are released.
 type pendingWrite struct {
 	spool     *Spool
 	path      string
@@ -343,12 +296,11 @@ func (p *pendingWrite) abort(cause error) {
 		p.spool.log.Warn("failed to remove an incomplete media spool write; scheduled for retry",
 			"error", err, "cause", cause)
 	}
-	p.spool.enqueueCleanup(&cleanupJob{path: p.path, bytes: p.reserved, committedEntry: false})
+	p.spool.enqueueCleanup(&cleanupJob{path: p.path, bytes: p.reserved})
 }
 
-// Open returns the artifact metadata and its file for reading.
 func (s *Spool) Open(handle Handle) (*Opened, error) {
-	if err := ValidateHandle(string(handle)); err != nil {
+	if err := validateHandle(string(handle)); err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
@@ -386,11 +338,8 @@ func (s *Spool) Open(handle Handle) (*Opened, error) {
 	}, nil
 }
 
-// Remove deletes an artifact and releases its bytes once the file is gone.
-// Removal continues in the janitor when the first unlink fails so a request
-// returning early cannot strand reserved capacity.
 func (s *Spool) Remove(handle Handle) error {
-	if err := ValidateHandle(string(handle)); err != nil {
+	if err := validateHandle(string(handle)); err != nil {
 		return err
 	}
 	s.mu.Lock()
@@ -411,25 +360,13 @@ func (s *Spool) Remove(handle Handle) error {
 		return nil
 	}
 	s.log.Warn("failed to remove a media spool artifact; scheduled for retry", "error", err)
-	s.enqueueCleanup(&cleanupJob{
-		path:           entry.path,
-		bytes:          entry.contentLength,
-		committedEntry: true,
-		handle:         string(handle),
-		entry:          entry,
-	})
+	s.enqueueCleanup(&cleanupJob{path: entry.path, bytes: entry.contentLength})
 	return ErrUnavailable
 }
 
-// cleanupJob retries filesystem removal until the bytes can be released.
-// For committed entries the job owns the entry bookkeeping: if the job is
-// abandoned the entry is reinserted so a later remove can retry honestly.
 type cleanupJob struct {
-	path           string
-	bytes          int64
-	committedEntry bool
-	handle         string
-	entry          spoolEntry
+	path  string
+	bytes int64
 }
 
 func (s *Spool) enqueueCleanup(job *cleanupJob) {
@@ -458,21 +395,10 @@ func (s *Spool) enqueueCleanup(job *cleanupJob) {
 	}()
 }
 
-// Close removes this process's spool directory tree.
 func (s *Spool) Close() error {
 	if s.closed.Swap(true) {
 		return nil
 	}
 	defer s.owner.Close()
 	return os.RemoveAll(s.root)
-}
-
-// PutBytes is a convenience wrapper for staging a fully buffered payload.
-func (s *Spool) PutBytes(ctx context.Context, filename, contentType string, data []byte, maximum int64) (*Artifact, error) {
-	return s.Put(ctx, Upload{
-		Filename:      filename,
-		ContentType:   contentType,
-		MaximumLength: maximum,
-		Body:          strings.NewReader(string(data)),
-	})
 }

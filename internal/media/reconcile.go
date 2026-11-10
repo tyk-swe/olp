@@ -3,11 +3,12 @@ package media
 import (
 	"context"
 	"errors"
-	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"

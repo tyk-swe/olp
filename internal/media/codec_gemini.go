@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/staging"
 )
 
 // The gemini wire is Gemini's generateContent, on the Gemini API and on
@@ -148,7 +150,7 @@ func modalityCounts(detail []geminiModalityCount) (audio, image int64) {
 	return audio, image
 }
 
-func decodeGeminiImage(body []byte, stage func(string, int) (*Artifact, *Error)) (*ImageResult, *Error) {
+func decodeGeminiImage(body []byte, stage func(string, int) (*staging.Artifact, *Error)) (*ImageResult, *Error) {
 	result, failure := readGemini(body)
 	if failure != nil {
 		return nil, failure
@@ -249,7 +251,7 @@ func encodeGeminiTranscription(r *Request, model string) (*UpstreamCall, *Error)
 	}
 	file := r.File
 	return &UpstreamCall{Method: http.MethodPost, Path: generateContent(model), Kind: ResponseTranscription, Ambiguous: true,
-		JSONFrom: func(read func(*Part) ([]byte, *Error)) ([]byte, *Error) {
+		JSONFrom: func(read func(*staging.Part) ([]byte, *Error)) ([]byte, *Error) {
 			audio, failure := read(file)
 			if failure != nil {
 				return nil, failure

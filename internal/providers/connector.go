@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/providerconfig"
+	"github.com/tyk-swe/olp/internal/staging"
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 
@@ -1180,7 +1181,7 @@ func (s *Server) certifyMediaCall(ctx context.Context, cfg *Configuration, crede
 	}
 	silence := media.SilentWAV(100)
 	if operation == "transcription" {
-		request.File = &media.Part{Filename: "silence.wav", ContentType: "audio/wav"}
+		request.File = &staging.Part{Filename: "silence.wav", ContentType: "audio/wav"}
 	}
 	call, _, failure := media.EncodeConfigured(request, transport, model)
 	if failure != nil {
@@ -1190,19 +1191,19 @@ func (s *Server) certifyMediaCall(ctx context.Context, cfg *Configuration, crede
 	switch {
 	case call.JSONFrom != nil:
 		var mErr *media.Error
-		if body, mErr = call.JSONFrom(func(*media.Part) ([]byte, *media.Error) { return silence, nil }); mErr != nil {
+		if body, mErr = call.JSONFrom(func(*staging.Part) ([]byte, *media.Error) { return silence, nil }); mErr != nil {
 			return &probeError{Code: "capability_unavailable", Detail: mErr.Message}
 		}
 	case len(call.Fields) > 0:
 		var form bytes.Buffer
 		writer := multipart.NewWriter(&form)
 		for _, field := range call.Fields {
-			switch {
-			case field.File != nil:
+			switch value := field.Value.(type) {
+			case staging.Part:
 				part, _ := writer.CreateFormFile(field.Name, "silence.wav")
 				_, _ = part.Write(silence)
-			case field.Text != nil:
-				_ = writer.WriteField(field.Name, *field.Text)
+			case staging.Text:
+				_ = writer.WriteField(field.Name, string(value))
 			}
 		}
 		_ = writer.Close()
@@ -1231,11 +1232,11 @@ func (s *Server) certifyMediaCall(ctx context.Context, cfg *Configuration, crede
 // decodeMediaProbe checks a probe's result with the codec the gateway reads
 // it with.
 func decodeMediaProbe(call *media.UpstreamCall, operation string, data []byte) *media.Error {
-	stage := func(b64 string, index int) (*media.Artifact, *media.Error) {
+	stage := func(b64 string, index int) (*staging.Artifact, *media.Error) {
 		if _, err := base64.StdEncoding.DecodeString(b64); err != nil {
 			return nil, media.Fail(502, "provider_protocol_error", "The provider image payload is not valid base64.")
 		}
-		return &media.Artifact{}, nil
+		return &staging.Artifact{}, nil
 	}
 	var mErr *media.Error
 	switch operation {

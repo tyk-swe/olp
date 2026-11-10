@@ -19,13 +19,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/batches/upstream"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/staging"
 )
 
 const (
@@ -163,8 +163,8 @@ type translatedBatch struct {
 	err      error
 }
 
-func (s *Server) translateManagedBatchInput(ctx context.Context, p *pin, route *routing.Route, file *media.Part, adapter connectors.BatchAdapter) (*media.Part, batchManifest, *Error) {
-	opened, err := s.transport().Spool.Open(file.Handle)
+func (s *Server) translateManagedBatchInput(ctx context.Context, p *pin, route *routing.Route, file *staging.Part, adapter connectors.BatchAdapter) (*staging.Part, batchManifest, *Error) {
+	opened, err := s.deps.Staging.Open(file.Handle)
 	if err != nil {
 		return nil, batchManifest{}, serverError(http.StatusInternalServerError, "media_content_unavailable", "The uploaded batch file could not be read.")
 	}
@@ -175,21 +175,21 @@ func (s *Server) translateManagedBatchInput(ctx context.Context, p *pin, route *
 		manifest, err := translateManagedBatchLines(writer, opened.File, s.batchLineDigest, managedLineTarget{pin: p, route: route, adapter: adapter})
 		done <- translatedBatch{manifest: manifest, err: err}
 	}()
-	artifact, spoolErr := s.transport().Spool.Put(ctx, media.Upload{
+	artifact, spoolErr := s.deps.Staging.Put(ctx, staging.Upload{
 		Filename: file.Filename, ContentType: "application/jsonl", MaximumLength: file.Limit, Body: reader,
 	})
 	_ = reader.Close()
 	translated := <-done
 	if spoolErr != nil || translated.err != nil {
 		if spoolErr == nil {
-			_ = s.transport().Spool.Remove(artifact.Handle)
+			_ = s.deps.Staging.Remove(artifact.Handle)
 		}
 		if failure, ok := translated.err.(*Error); ok {
 			return nil, batchManifest{}, failure
 		}
 		return nil, batchManifest{}, invalidRequest("unsupported_parameter", "The batch file could not be translated.", strPtr("file"))
 	}
-	part := &media.Part{
+	part := &staging.Part{
 		Handle: artifact.Handle, Digest: artifact.Digest, Filename: file.Filename,
 		ContentType: artifact.ContentType, Size: artifact.ContentLength, Limit: file.Limit,
 	}

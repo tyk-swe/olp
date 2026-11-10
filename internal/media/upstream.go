@@ -2,6 +2,7 @@ package media
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/staging"
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
@@ -73,7 +75,7 @@ type Transport struct {
 	Client          *http.Client
 	Auth            *connectors.Auth
 	Egress          *egress.Policy
-	Spool           *Spool
+	Spool           *staging.Spool
 	// MaxResponseBytes bounds every collected JSON body and every staged
 	// binary response.
 	MaxResponseBytes int64
@@ -90,9 +92,9 @@ type Result struct {
 	Video         *VideoJobResult
 	Deleted       *VideoDeleteResult
 	Transcription *TranscriptionResult
-	Text          []byte        // transcription text/srt/vtt payloads
-	Artifact      *Artifact     // staged binary response
-	Body          io.ReadCloser // SSE response body; the caller drains it
+	Text          []byte            // transcription text/srt/vtt payloads
+	Artifact      *staging.Artifact // staged binary response
+	Body          io.ReadCloser     // SSE response body; the caller drains it
 	ContentType   string
 	// BilledCharacters is the characters a speech call bills, as the vendor
 	// reports them, and Tokens the tokens it bills, for a vendor that bills
@@ -310,43 +312,39 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 	return result, nil
 }
 
-func (t *Transport) writeMultipart(pipe *io.PipeWriter, form *multipart.Writer, fields []Field) error {
-	failure := func(err error) error {
-		pipe.CloseWithError(err)
-		return err
-	}
+func (t *Transport) writeMultipart(pipe *io.PipeWriter, form *multipart.Writer, fields []staging.Field) error {
 	for _, field := range fields {
-		if field.File != nil {
-			opened, err := t.Spool.Open(field.File.Handle)
-			if err != nil {
-				return failure(fmt.Errorf("spool open: %w", err))
-			}
-			name := opened.Filename
-			if name == "" {
-				name = "media"
-			}
-			part, err := form.CreatePart(filePartHeader(field.Name, name, opened.Artifact.ContentType))
-			if err != nil {
-				opened.File.Close()
-				return failure(err)
-			}
-			_, copyErr := io.Copy(part, opened.File)
-			opened.File.Close()
-			if copyErr != nil {
-				return failure(copyErr)
-			}
-			continue
-		}
-		if field.Text != nil {
-			if err := form.WriteField(field.Name, *field.Text); err != nil {
-				return failure(err)
-			}
+		if err := t.writeField(form, field); err != nil {
+			pipe.CloseWithError(err)
+			return err
 		}
 	}
 	if err := form.Close(); err != nil {
-		return failure(err)
+		pipe.CloseWithError(err)
+		return err
 	}
 	return pipe.Close()
+}
+
+func (t *Transport) writeField(form *multipart.Writer, field staging.Field) error {
+	switch value := field.Value.(type) {
+	case staging.Text:
+		return form.WriteField(field.Name, string(value))
+	case staging.Part:
+		opened, err := t.Spool.Open(value.Handle)
+		if err != nil {
+			return fmt.Errorf("spool open: %w", err)
+		}
+		defer opened.File.Close()
+		name := cmp.Or(opened.Filename, "media")
+		part, err := form.CreatePart(filePartHeader(field.Name, name, opened.Artifact.ContentType))
+		if err != nil {
+			return err
+		}
+		_, err = io.Copy(part, opened.File)
+		return err
+	}
+	return nil
 }
 
 // filePartHeader builds the multipart headers for one staged file part.
@@ -431,9 +429,9 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 				return nil, &Failure{Class: ClassProtocol, Dispatched: true, Detail: "the vendor named no video content"}
 			}
 			contentType := strings.ToLower(strings.TrimSpace(strings.Split(asset.contentType, ";")[0]))
-			artifact, err := t.Spool.Put(ctx, Upload{Filename: "video-content", ContentType: contentType, MaximumLength: int64(len(asset.body)), Body: bytes.NewReader(asset.body)})
+			artifact, err := t.Spool.Put(ctx, staging.Upload{Filename: "video-content", ContentType: contentType, MaximumLength: int64(len(asset.body)), Body: bytes.NewReader(asset.body)})
 			if err != nil {
-				return nil, stageFailure(SpoolError(err))
+				return nil, stageFailure(spoolError(err))
 			}
 			result.Artifact, result.ContentType = artifact, artifact.ContentType
 			return result, nil
@@ -512,21 +510,21 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		if failure := retainJSON(body); failure != nil {
 			return nil, failure
 		}
-		var stagedHandles []Handle
-		stageRaw := func(raw []byte, index int) (*Artifact, *Error) {
-			staged, sErr := t.Spool.Put(ctx, Upload{
+		var stagedHandles []staging.Handle
+		stageRaw := func(raw []byte, index int) (*staging.Artifact, *Error) {
+			staged, sErr := t.Spool.Put(ctx, staging.Upload{
 				Filename:      "image-" + strconv.Itoa(index) + ".png",
 				ContentType:   "image/png",
 				MaximumLength: int64(len(raw)),
 				Body:          bytes.NewReader(raw),
 			})
 			if sErr != nil {
-				return nil, SpoolError(sErr)
+				return nil, spoolError(sErr)
 			}
 			stagedHandles = append(stagedHandles, staged.Handle)
 			return staged, nil
 		}
-		stage := func(b64 string, index int) (*Artifact, *Error) {
+		stage := func(b64 string, index int) (*staging.Artifact, *Error) {
 			raw, err := base64.StdEncoding.DecodeString(b64)
 			if err != nil {
 				return nil, protocolError("The provider image payload is not valid base64.")
@@ -602,7 +600,7 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 
 // readPart reads an uploaded file a JSON body inlines, within the audio
 // upload bound.
-func (t *Transport) readPart(part *Part) ([]byte, *Error) {
+func (t *Transport) readPart(part *staging.Part) ([]byte, *Error) {
 	opened, err := t.Spool.Open(part.Handle)
 	if err != nil {
 		return nil, Fail(http.StatusInternalServerError, "media_unavailable", "The uploaded file is unavailable.")
@@ -632,9 +630,9 @@ func (t *Transport) decodeAudio(ctx context.Context, resp *http.Response, call *
 	if request != nil {
 		name = request.Op + "-response"
 	}
-	artifact, err := t.Spool.Put(ctx, Upload{Filename: name, ContentType: decoded.ContentType, MaximumLength: int64(len(decoded.Audio)), Body: bytes.NewReader(decoded.Audio)})
+	artifact, err := t.Spool.Put(ctx, staging.Upload{Filename: name, ContentType: decoded.ContentType, MaximumLength: int64(len(decoded.Audio)), Body: bytes.NewReader(decoded.Audio)})
 	if err != nil {
-		return nil, stageFailure(SpoolError(err))
+		return nil, stageFailure(spoolError(err))
 	}
 	result.Artifact, result.ContentType, result.Tokens = artifact, artifact.ContentType, decoded.Tokens
 	return result, nil
@@ -676,19 +674,19 @@ func stageFailure(err *Error) *Failure {
 }
 
 // stageResponse streams a bounded response body into the spool.
-func (t *Transport) stageResponse(ctx context.Context, resp *http.Response, contentType string, request *Request) (*Artifact, *Error) {
+func (t *Transport) stageResponse(ctx context.Context, resp *http.Response, contentType string, request *Request) (*staging.Artifact, *Error) {
 	name := "response"
 	if request != nil {
 		name = request.Op + "-response"
 	}
-	artifact, err := t.Spool.Put(ctx, Upload{
+	artifact, err := t.Spool.Put(ctx, staging.Upload{
 		Filename:      name,
 		ContentType:   contentType,
 		MaximumLength: t.MaxResponseBytes,
 		Body:          io.LimitReader(resp.Body, t.MaxResponseBytes+1),
 	})
 	if err != nil {
-		return nil, SpoolError(err)
+		return nil, spoolError(err)
 	}
 	return artifact, nil
 }

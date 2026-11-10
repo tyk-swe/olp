@@ -72,7 +72,7 @@ func JobHTTPError(err error) *Error {
 		return Fail(http.StatusConflict, "media_job_upstream_conflict",
 			"The upstream media job identity conflicts with stored metadata.")
 	case JobErrorInvalid:
-		return invalidRequest(job.Message)
+		return invalidMedia(job.Message)
 	default:
 		return Fail(http.StatusServiceUnavailable, "media_job_unavailable", "The media job store is unavailable.")
 	}

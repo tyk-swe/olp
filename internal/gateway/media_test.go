@@ -28,6 +28,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/staging"
 )
 
 var update = flag.Bool("update", false, "rewrite testdata/media.golden.json from the current behavior")
@@ -197,7 +198,7 @@ func scripted(t *testing.T, replies []mediaReply, upstream func() string) (http.
 func runMediaCase(t *testing.T, tc mediaCase) mediaRecord {
 	t.Helper()
 	h := newHarness(t, Config{MaxMediaBodyBytes: 1 << 20})
-	spool, err := media.NewSpool(t.TempDir(), media.MinCapacityBytes, nil)
+	spool, err := staging.NewSpool(t.TempDir(), staging.MinCapacityBytes, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,8 +208,9 @@ func runMediaCase(t *testing.T, tc mediaCase) mediaRecord {
 			Client: h.gateway.client, Auth: h.gateway.auth, Egress: h.gateway.egress,
 			Spool: spool, MaxResponseBytes: 1 << 20,
 		}},
-		Admission: media.NewAdmissionState(spool.CapacityBytes()),
 	}
+	h.gateway.deps.Staging = spool
+	h.gateway.deps.Uploads = staging.NewAdmission(spool.CapacityBytes())
 	mode := tc.mode
 	if mode == "" {
 		mode = "unary"

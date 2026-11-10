@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/staging"
 )
 
 // The stability and recraft wires are Stability AI's and Recraft's image
@@ -63,7 +65,7 @@ func stabilityService(model string) (string, bool) {
 	return "", false
 }
 
-func stabilityFields(r *Request) ([]Field, *Error) {
+func stabilityFields(r *Request) ([]staging.Field, *Error) {
 	if failure := refuseImageControls(r, "Stability", "b64_json"); failure != nil {
 		return nil, failure
 	}
@@ -113,9 +115,9 @@ func encodeStabilityEdit(r *Request, model string) (*UpstreamCall, *Error) {
 	if failure != nil {
 		return nil, failure
 	}
-	fields = append(fields, Field{Name: "image", File: &r.Images[0]})
+	fields = append(fields, staging.Field{Name: "image", Value: r.Images[0]})
 	if r.Mask != nil {
-		fields = append(fields, Field{Name: "mask", File: r.Mask})
+		fields = append(fields, staging.Field{Name: "mask", Value: *r.Mask})
 	}
 	return &UpstreamCall{Method: http.MethodPost, Path: "v2beta/stable-image/edit/inpaint", Accept: "application/json", Fields: fields,
 		Kind: ResponseImages, Ambiguous: true, DecodeImages: decodeStabilityImage}, nil
@@ -123,7 +125,7 @@ func encodeStabilityEdit(r *Request, model string) (*UpstreamCall, *Error) {
 
 // decodeStabilityImage reads Stability's one image, which its content filter
 // may withhold.
-func decodeStabilityImage(body []byte, stage func(string, int) (*Artifact, *Error)) (*ImageResult, *Error) {
+func decodeStabilityImage(body []byte, stage func(string, int) (*staging.Artifact, *Error)) (*ImageResult, *Error) {
 	var encodedWire struct {
 		Image        string `json:"image"`
 		FinishReason string `json:"finish_reason"`

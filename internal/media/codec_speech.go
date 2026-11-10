@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/staging"
 )
 
 // The elevenlabs and deepgram wires are ElevenLabs' and Deepgram's speech
@@ -128,7 +129,7 @@ func encodeElevenLabsTranscription(r *Request, model string) (*UpstreamCall, *Er
 		return nil, invalidMedia("ElevenLabs transcription takes no prompt.")
 	}
 	fields := textValue(nil, "model_id", model)
-	fields = append(fields, Field{Name: "file", File: r.File})
+	fields = append(fields, staging.Field{Name: "file", Value: *r.File})
 	fields = textField(fields, "language_code", r.Language)
 	return &UpstreamCall{Method: http.MethodPost, Path: "speech-to-text", Accept: "application/json", Fields: fields, Kind: ResponseTranscription, Ambiguous: true,
 		DecodeTranscription: func(body []byte) (*TranscriptionResult, *Error) {

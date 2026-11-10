@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/codesessions"
+	"github.com/tyk-swe/olp/internal/staging"
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/google/uuid"
@@ -777,7 +778,7 @@ func TestEmbeddingsRejectInvalidResultIndices(t *testing.T) {
 
 func TestTransformedMediaPreservesUsage(t *testing.T) {
 	h := newHarness(t, Config{MaxMediaBodyBytes: 1 << 20})
-	spool, err := media.NewSpool(t.TempDir(), media.MinCapacityBytes, nil)
+	spool, err := staging.NewSpool(t.TempDir(), staging.MinCapacityBytes, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -787,8 +788,9 @@ func TestTransformedMediaPreservesUsage(t *testing.T) {
 			Client: h.gateway.client, Auth: h.gateway.auth, Egress: h.gateway.egress,
 			Spool: spool, MaxResponseBytes: 1 << 20,
 		}},
-		Admission: media.NewAdmissionState(spool.CapacityBytes()),
 	}
+	h.gateway.deps.Staging = spool
+	h.gateway.deps.Uploads = staging.NewAdmission(spool.CapacityBytes())
 	h.republish(func(snapshot *routing.Snapshot, a, b routing.Provider) {
 		for _, provider := range []routing.Provider{a, b} {
 			provider.Capabilities = []routing.Capability{

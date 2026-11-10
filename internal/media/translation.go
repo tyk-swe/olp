@@ -6,34 +6,20 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/staging"
 )
 
 // DecodeTranslation retains the native audio translation form. Unlike
 // transcription, translation has no language, streaming or diarization controls.
-func DecodeTranslation(form *Form) (*Request, *Error) {
-	file, failure := form.TakeSingleFile("file")
-	if failure != nil {
-		return nil, failure
-	}
-	model, failure := form.Required("model")
-	if failure != nil {
-		return nil, failure
-	}
-	format, failure := form.Optional("response_format")
-	if failure != nil {
-		return nil, failure
-	}
-	prompt, failure := form.Optional("prompt")
-	if failure != nil {
-		return nil, failure
-	}
-	temperature, failure := form.OptionalFloat("temperature")
-	if failure != nil {
-		return nil, failure
-	}
-	extra, failure := form.TakeExtensions()
-	if failure != nil {
-		return nil, failure
+func DecodeTranslation(form *staging.Form) (*Request, *Error) {
+	file := form.TakeSingleFile("file")
+	model := form.Required("model")
+	format := form.Optional("response_format")
+	prompt := form.Optional("prompt")
+	temperature := form.OptionalFloat("temperature")
+	extra := form.TakeExtensions()
+	if err := form.Err(); err != nil {
+		return nil, invalidMedia(err.Error())
 	}
 	if file == nil || !validRouteSlug(model) {
 		return nil, invalidMedia("Audio translation requires a file and a model naming a route.")
@@ -60,7 +46,7 @@ func DecodeTranslation(form *Form) (*Request, *Error) {
 
 func encodeTranslation(r *Request, model string) (*UpstreamCall, *Error) {
 	fields := textValue(nil, "model", model)
-	fields = append(fields, Field{Name: "file", File: r.File})
+	fields = append(fields, staging.Field{Name: "file", Value: *r.File})
 	fields = textField(fields, "prompt", r.TextPrompt)
 	fields = textField(fields, "response_format", r.Format)
 	fields = textField(fields, "temperature", float64Text(r.Temperature))

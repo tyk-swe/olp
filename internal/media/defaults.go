@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/mediacontract"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
@@ -171,20 +172,12 @@ func EncodeStrictConfigured(request *Request, cfg connectors.Config, model strin
 	if err != nil {
 		return nil, nil, invalidMedia(err.Error())
 	}
-	fields := make([]Field, 0, len(request.SourceParts)+len(defaults))
+	fields := make([]staging.Field, 0, len(request.SourceParts)+len(defaults))
 	seen := map[string]bool{}
 	for _, source := range request.SourceParts {
-		field := Field{Name: source.Name, Raw: source.Raw}
-		if source.Text != nil {
-			text := *source.Text
-			if field.Name == "model" {
-				text = cfg.Model(model)
-			}
-			field.Text = &text
-		}
-		if source.File != nil {
-			part := *source.File
-			field.File = &part
+		field := source
+		if _, text := source.Value.(staging.Text); text && source.Name == "model" {
+			field = staging.Field{Name: source.Name, Value: staging.Text(cfg.Model(model))}
 		}
 		fields = append(fields, field)
 		seen[field.Name] = true
@@ -344,13 +337,13 @@ func applyConfiguredField(r *Request, name string, raw json.RawMessage) *Error {
 	return nil
 }
 
-func configuredMultipartFields(name string, raw json.RawMessage) ([]Field, *Error) {
+func configuredMultipartFields(name string, raw json.RawMessage) ([]staging.Field, *Error) {
 	if mediacontract.RepeatedMultipartDefault(name) {
 		var values []string
 		if json.Unmarshal(raw, &values) != nil || len(values) == 0 {
 			return nil, configuredFailure(name, "requires a nonempty array of strings in multipart")
 		}
-		fields := make([]Field, 0, len(values))
+		fields := make([]staging.Field, 0, len(values))
 		for _, value := range values {
 			fields = textValue(fields, name+"[]", value)
 		}
@@ -358,14 +351,14 @@ func configuredMultipartFields(name string, raw json.RawMessage) ([]Field, *Erro
 	}
 	var text string
 	if json.Unmarshal(raw, &text) == nil {
-		return []Field{{Name: name, Text: &text}}, nil
+		return []staging.Field{{Name: name, Value: staging.Text(text)}}, nil
 	}
 	var compact bytes.Buffer
 	if json.Compact(&compact, raw) != nil {
 		return nil, configuredFailure(name, "is not valid JSON")
 	}
 	text = compact.String()
-	return []Field{{Name: name, Text: &text, Raw: true}}, nil
+	return []staging.Field{{Name: name, Value: staging.Text(text)}}, nil
 }
 
 func validateConfiguredResponse(r *Request) *Error {

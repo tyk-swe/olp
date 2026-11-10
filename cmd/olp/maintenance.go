@@ -20,11 +20,11 @@ import (
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/pluginindex"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/signing"
+	"github.com/tyk-swe/olp/internal/staging"
 )
 
 type MaintenanceOptions struct {
@@ -189,11 +189,7 @@ func Maintenance(ctx context.Context, c Config, command string, options Maintena
 				return err
 			}
 		}
-		spoolDir := c.MediaSpoolDir
-		if spoolDir == "" {
-			spoolDir = filepath.Join(os.TempDir(), "olp-media-spool")
-		}
-		spool, err := media.NewSpool(spoolDir, c.MediaSpoolCapacityBytes, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+		spool, err := staging.NewSpool(c.spoolDirectory(), c.MediaSpoolCapacityBytes, slog.New(slog.NewJSONHandler(io.Discard, nil)))
 		if err != nil {
 			return err
 		}
