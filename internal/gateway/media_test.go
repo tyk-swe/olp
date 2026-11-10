@@ -362,6 +362,16 @@ func mediaCases(t *testing.T) []mediaCase {
 		{name: "openai transcription json", operation: media.OpTranscription, path: "/v1/audio/transcriptions",
 			fields: [][2]string{{"language", "en"}, {"prompt", "names: Ada"}, {"temperature", "0.2"}}, files: []mediaFile{wav},
 			replies: reply("application/json", transcript)},
+		{name: "openai transcription chunking auto", operation: media.OpTranscription, path: "/v1/audio/transcriptions",
+			fields: [][2]string{{"chunking_strategy", "auto"}}, files: []mediaFile{wav},
+			replies: reply("application/json", transcript)},
+		{name: "profiled transcription chunking default", operation: media.OpTranscription, path: "/v1/audio/transcriptions",
+			provider: func(p *routing.Provider) {
+				p.ProfileID, p.ProfileRevision = "compatible-chat", connectors.ProfileRevision
+				p.OperationDefaults = map[string]connectors.DefaultSet{string(media.OpTranscription): {Dialect: "direct-compatible/transcription", Values: map[string]json.RawMessage{"chunking_strategy": json.RawMessage(`"auto"`)}}}
+			},
+			files:   []mediaFile{wav},
+			replies: reply("application/json", transcript)},
 		{name: "openai transcription verbose", operation: media.OpTranscription, path: "/v1/audio/transcriptions",
 			fields: [][2]string{{"response_format", "verbose_json"}, {"timestamp_granularities[]", "word"}}, files: []mediaFile{wav},
 			replies: reply("application/json", `{"task":"transcribe","language":"english","duration":1.5,"text":"hello there","words":[{"word":"hello","start":0,"end":0.5},{"word":"there","start":0.6,"end":1.1}]}`)},

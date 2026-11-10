@@ -943,6 +943,57 @@
       }
     ]
   },
+  "openai transcription chunking auto": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/audio/transcriptions",
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer secret-a",
+          "Content-Type": "multipart/form-data"
+        },
+        "parts": [
+          {
+            "name": "model",
+            "text": "model-a"
+          },
+          {
+            "name": "file",
+            "filename": "silence.wav",
+            "content_type": "audio/wav",
+            "digest": "e7531525a8818a3b/364"
+          },
+          {
+            "name": "chunking_strategy",
+            "text": "auto"
+          },
+          {
+            "name": "stream",
+            "text": "false"
+          }
+        ]
+      }
+    ],
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "text": "hello there",
+      "usage": {
+        "seconds": 1.5,
+        "type": "duration"
+      }
+    },
+    "operation": "transcription",
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true
+      }
+    ]
+  },
   "openai transcription json": {
     "upstream": [
       {
@@ -1315,6 +1366,57 @@
           "image_output_tokens": 7,
           "media_units": "1"
         }
+      }
+    ]
+  },
+  "profiled transcription chunking default": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/audio/transcriptions",
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer secret-a",
+          "Content-Type": "multipart/form-data"
+        },
+        "parts": [
+          {
+            "name": "model",
+            "text": "model-a"
+          },
+          {
+            "name": "file",
+            "filename": "silence.wav",
+            "content_type": "audio/wav",
+            "digest": "e7531525a8818a3b/364"
+          },
+          {
+            "name": "chunking_strategy",
+            "text": "auto"
+          },
+          {
+            "name": "stream",
+            "text": "false"
+          }
+        ]
+      }
+    ],
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "text": "hello there",
+      "usage": {
+        "seconds": 1.5,
+        "type": "duration"
+      }
+    },
+    "operation": "transcription",
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true
       }
     ]
   },

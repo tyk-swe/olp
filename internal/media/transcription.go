@@ -20,7 +20,7 @@ type Transcription struct {
 	Temperature            *float64
 	Include                []string
 	TimestampGranularities []string
-	ChunkingStrategy       json.RawMessage
+	ChunkingStrategy       string
 	KnownSpeakerNames      []string
 	KnownSpeakerReferences []string
 	Stream                 bool
@@ -69,8 +69,8 @@ func DecodeTranscription(form *staging.Form) (*Request, *Error) {
 	case (len(names) > 0 || len(references) > 0) && (effective != "diarized_json" || len(names) == 0 || len(names) > 4 ||
 		len(names) != len(references) || !validSpeakerNames(names) || !validSpeakerReferences(references)):
 		return nil, invalidMedia("The known speaker fields require diarized_json with at most four name/reference pairs.")
-	case chunking != nil && !json.Valid([]byte(*chunking)):
-		return nil, invalidMedia("chunking_strategy must be JSON.")
+	case chunking != nil && *chunking != "auto" && !json.Valid([]byte(*chunking)):
+		return nil, invalidMedia(`chunking_strategy must be "auto" or JSON.`)
 	}
 	p := Transcription{
 		File: *file, Format: format, Language: language, Prompt: prompt, Temperature: temperature,
@@ -78,7 +78,7 @@ func DecodeTranscription(form *staging.Form) (*Request, *Error) {
 		KnownSpeakerReferences: references, Stream: valueOf(stream),
 	}
 	if chunking != nil {
-		p.ChunkingStrategy = json.RawMessage(*chunking)
+		p.ChunkingStrategy = *chunking
 	}
 	return formRequest(form, route, p, extra)
 }
@@ -138,7 +138,7 @@ func encodeTranscription(r *Request, p Transcription, _ connectors.Config, model
 		fields = textValue(fields, "timestamp_granularities[]", value)
 	}
 	if len(p.ChunkingStrategy) > 0 {
-		fields = textValue(fields, "chunking_strategy", string(p.ChunkingStrategy))
+		fields = textValue(fields, "chunking_strategy", p.ChunkingStrategy)
 	}
 	for i, name := range p.KnownSpeakerNames {
 		fields = textValue(fields, "known_speaker_names[]", name)
