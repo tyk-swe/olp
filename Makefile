@@ -10,15 +10,16 @@ AIR_VERSION := v1.67.4
 SIGNED_DOCUMENTS = internal/catalog/catalog.json internal/pluginindex/index.json
 GOFMT_PATHS = \
 	cmd guardrails inference internal management plugin \
-	tests/fidelity tests/fixtures/*.go tests/fixtures/fidelity tests/qualification tests/service
+	tests/e2e tests/fidelity tests/fixtures/*.go tests/fixtures/fidelity tests/harness tests/integration tests/qualification
 
 .PHONY: \
 	help setup dev dev-stop dev-reset check check-go check-console check-contracts lint fmt-check vet \
-	test-fast test-service qualify-code qualify-code-live \
+	test test-unit test-unit-go test-unit-console test-integration test-e2e test-e2e-api test-e2e-browser \
+	qualify-code qualify-code-live \
 	api build build-go catalog catalog-sign fmt
 
 help:
-	@awk 'BEGIN {FS = ":.*## "} /^##@ / {printf "\n%s\n", substr($$0, 5)} /^[a-z-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*## "} /^##@ / {printf "\n%s\n", substr($$0, 5)} /^[a-z0-9-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 ##@ Everyday commands
 setup: ## Install dependencies and the local watcher, then generate contracts
@@ -31,11 +32,11 @@ setup: ## Install dependencies and the local watcher, then generate contracts
 dev: ## Start services, automatically reloaded Go, and Vite
 	./scripts/dev.sh
 
-check: ## Check contracts, Go, console, and the safety net without rewriting source
+check: ## Check contracts, Go, console, and the unit tier without rewriting source
 	$(MAKE) check-contracts
 	$(MAKE) check-go
 	$(MAKE) check-console
-	$(MAKE) test-fast
+	$(MAKE) test-unit
 
 api: ## Regenerate tracked contracts and ignored console types
 	./scripts/api.sh
@@ -62,11 +63,33 @@ check-console: ## Prepare console types and check formatting, types, and lint
 check-contracts: ## Check all tracked generated contracts without rewriting them
 	./scripts/check-contracts.sh
 
-test-fast: ## Run the fast safety net inside its 60 second budget
-	./scripts/test-fast.sh
+##@ Tests
+test: ## Run every tier, cheapest first
+	$(MAKE) test-unit
+	$(MAKE) test-integration
+	$(MAKE) test-e2e
 
-test-service: ## Run the database-backed service suite in disposable containers
-	./scripts/test-service.sh
+test-unit: ## Run both unit suites at once
+	$(MAKE) -j2 --output-sync=target test-unit-go test-unit-console
+
+test-unit-go: ## Run every untagged Go test inside a 30 second run budget
+	./scripts/test-unit.sh go
+
+test-unit-console: ## Run the console and script unit tests inside a 30 second run budget
+	./scripts/test-unit.sh console
+
+test-integration: ## Run Go code against real PostgreSQL and Valkey inside a 30 second run budget
+	./scripts/test-integration.sh
+
+test-e2e: ## Run both end to end suites
+	$(MAKE) test-e2e-api
+	$(MAKE) test-e2e-browser
+
+test-e2e-api: ## Drive the olp binary over HTTP inside a 45 second run budget
+	./scripts/test-e2e.sh api
+
+test-e2e-browser: ## Drive the built console in Chromium inside a 60 second run budget
+	./scripts/test-e2e.sh browser
 
 qualify-code: ## Run the code mode fixture qualification lanes in disposable containers
 	./scripts/qualification.sh
@@ -78,7 +101,7 @@ fmt-check:
 	@bad="$$(gofmt -l $(GOFMT_PATHS))"; test -z "$$bad" || { printf '%s\n' "$$bad"; exit 1; }
 
 vet:
-	go vet ./...
+	go vet -tags integration,e2e ./...
 
 lint:
 	./scripts/check-lint.sh

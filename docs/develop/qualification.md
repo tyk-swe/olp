@@ -7,7 +7,7 @@ CI or as release gates. Their evidence, pins, and reproduction commands
 remain in git history before commit `99234cb0`, scoped to the revisions
 that produced them.
 
-Pre-merge validation is now the fast safety net and the small service suite in
+Pre-merge validation is now the unit, integration and end-to-end tiers in
 [testing](../../tests/README.md) plus formatting, vet, lint, type checks,
 contract generation, and a full build. Release qualification still builds
 the candidate image and runs the image mode and service smokes and the
@@ -20,7 +20,7 @@ anything, still covers part of it. Performance claims follow
 ## Providers and token estimates
 
 Paid live-provider checks no longer run, including the token comparison
-against a live API. The token estimator still runs in the safety net
+against a live API. The token estimator still runs in the unit tier
 against its offline oracle fixtures, which pin the reference encoder
 output without any provider account. Provider certification through the
 management API remains a product feature. Its former automated evidence
@@ -29,17 +29,22 @@ is historical.
 ## Guardrail and capture qualification
 
 Guardrail detection, masking, and streaming behavior still run in the
-safety net through the guardrails package and the reduced gateway slice.
-Platform activation, ownership, migration, SDK journeys, and browser
-checks for guardrails and capture no longer run. Validate changes in
-those areas by running the affected functionality directly.
+unit tier through the guardrails package and the gateway slice. One
+guardrail lifecycle runs against the real binary, and one browser journey
+builds a keyword guardrail and tries it. Platform activation, ownership,
+migration, SDK journeys, and browser checks for capture no longer run.
+Validate changes in those areas by running the affected functionality
+directly.
 
 ## Operator ecosystem
 
 The operator and ecosystem process suites no longer run. Management
 contract generation and the authorization golden still run pre-merge, so
-contract shape and route admission keep automated signal. End-to-end
-operator workflows against real services have no automated coverage.
+contract shape and route admission keep automated signal. The end-to-end
+tier in [testing](../../tests/README.md#end-to-end-tier) covers first-run
+setup, provider activation, route publishing, API keys, usage and SCIM
+provisioning. Other operator workflows against real services have no
+automated coverage.
 
 ## Code-mode qualification
 
@@ -47,10 +52,9 @@ Fixture qualification lanes for code mode run again as a release gate.
 Run them with `make qualify-code`, which builds the real `olp` binary,
 starts disposable PostgreSQL and Valkey containers, and runs
 `tests/qualification` behind the `qualification` build tag through
-`scripts/qualification.sh`. The lanes live outside the fast and service
-allowlists in [testing](../../tests/README.md). Restoring them changed
-neither allowlist, so the pre-merge budgets carry no timed result for
-this suite.
+`scripts/qualification.sh`. The lanes live outside the three tiers in
+[testing](../../tests/README.md), so the pre-merge budgets carry no timed
+result for this suite.
 
 Each lane seeds one subscription code account, publishes a code route
 onto it, and drives one client journey end to end over HTTP against the
@@ -101,7 +105,7 @@ The release workflow installs the latest Codex, Claude Code, and
 OpenCode clients from npm and runs `make qualify-code` as a gate on
 promotion. Fleet process suites still do not run. Generated client
 configuration and protocol translation keep partial signal through the
-allowlisted unit tests. Behavior against real subscription services is
+unit tests. Behavior against real subscription services is
 covered only by the live lanes below, and only where a lane has actually
 run green.
 
@@ -231,5 +235,5 @@ and transport with the result.
 Historical repair and qualification evidence stays in git history before
 commit `99234cb0`. Read it as a dated record for its stated revision and
 scope. It does not qualify later revisions, and timing diaries from that
-record are not current suite budgets. The current budget is the safety
-net budget in [testing](../../tests/README.md).
+record are not current suite budgets. The current budgets are the tier
+budgets in [testing](../../tests/README.md#budgets).

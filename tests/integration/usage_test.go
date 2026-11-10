@@ -1,6 +1,6 @@
-//go:build service
+//go:build integration
 
-package service_test
+package integration_test
 
 import (
 	"context"
@@ -20,9 +20,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/coordination"
-	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export/destination"
 	"github.com/tyk-swe/olp/internal/export/focus"
@@ -31,9 +28,10 @@ import (
 	"github.com/tyk-swe/olp/internal/notifications"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedworker"
-	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/tests/harness"
+	"github.com/tyk-swe/olp/tests/harness/vendor"
 )
 
 func testRetainedSettlementPollFailure(t *testing.T, fixture usageFixture) {
@@ -85,90 +83,9 @@ func testRetainedSettlementPollFailure(t *testing.T, fixture usageFixture) {
 	t.Fatal("retained worker did not checkpoint its first pass")
 }
 
-// TestPublishedRouteServesAndSettlesUsage takes one request from publication
-// through the gateway to durable usage, across the Valkey stream and the
-// consumer that writes PostgreSQL.
-func TestPublishedRouteServesAndSettlesUsage(t *testing.T) {
-	s := startService(t)
-	owner := s.owner()
-	project := s.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "journey"}, idempotent(), http.StatusCreated)["id"].(string)
-	provider := s.activeProvider(owner, "journey-provider", newVendor(t).URL, project)
-	slug := uniqueName("journey")
-	s.publishedRoute(owner, slug, provider, project)
-	key := s.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "journey", "scopes": []string{"inference"}, "project_id": project}, idempotent(), http.StatusCreated)
-	consumer := &caller{name: "journey key", token: key["secret"].(string)}
-	request := map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "hello"}}}
-
-	s.eventually("the published route serving a request", 20*time.Second, func() (bool, string) {
-		status, raw := s.do(consumer, "POST", "/v1/chat/completions", request, nil)
-		if status != http.StatusOK {
-			return false, describe(status, raw)
-		}
-		var completion struct {
-			Choices []struct {
-				Message struct {
-					Content string `json:"content"`
-				} `json:"message"`
-			} `json:"choices"`
-		}
-		if err := json.Unmarshal(raw, &completion); err != nil {
-			t.Fatalf("invalid completion: %v: %s", err, raw)
-		}
-		if len(completion.Choices) != 1 || !strings.Contains(completion.Choices[0].Message.Content, vendorAnswer) {
-			t.Fatalf("unexpected completion: %s", raw)
-		}
-		return true, ""
-	})
-
-	s.eventually("usage reaching durable storage", 20*time.Second, func() (bool, string) {
-		var attempts, input, output int64
-		err := s.pool.QueryRow(t.Context(), `SELECT count(*),coalesce(sum(input_tokens),0),coalesce(sum(output_tokens),0) FROM olp.attempt_usage_facts`).Scan(&attempts, &input, &output)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return attempts == 1 && input == vendorInputTokens && output == vendorOutputTokens,
-			fmt.Sprintf("attempts=%d input=%d output=%d", attempts, input, output)
-	})
-
-	t.Run("simulation_requires_all_predicates", func(t *testing.T) {
-		classifier := &routing.ClassifierPredicate{Route: slug, Labels: []string{"complex"}, TimeoutMS: 500}
-		plugin := &routing.PluginPredicate{Digest: strings.Repeat("a", 64)}
-		draft := s.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
-			"slug": uniqueName("simulation"), "operations": []string{"generation"}, "overall_timeout_ms": 5000, "max_attempts": 1,
-			"fidelity": map[string]any{"mode": "transformed"}, "project_id": project,
-			"targets": []any{map[string]any{"provider_id": provider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 2000, "tags": []string{"selected"}}},
-			"selectors": []routing.Selector{
-				{ID: "both", Tags: []string{"selected"}, When: routing.Predicate{Classifier: classifier, Plugin: plugin}},
-				{ID: "plugin", Tags: []string{"selected"}, When: routing.Predicate{Plugin: plugin}},
-				{ID: "classifier", Tags: []string{"selected"}, When: routing.Predicate{Classifier: classifier}},
-			},
-		}, idempotent(), http.StatusCreated)
-		result := s.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/simulate", map[string]any{
-			"operation": "generation", "surface": "openai", "mode": "unary", "seed": "predicates",
-			"classifier_labels": map[string]string{"both": "complex", "classifier": "complex"},
-		}, nil, http.StatusOK)
-		selectors, ok := result["selectors"].([]any)
-		if !ok || len(selectors) != 3 {
-			t.Fatalf("simulation selectors = %v, want both plugin predicates skipped before classifier", result["selectors"])
-		}
-		for i, id := range []string{"both", "plugin", "classifier"} {
-			selector := selectors[i].(map[string]any)
-			want := "plugin_not_simulated"
-			if id == "classifier" {
-				want = "matched"
-			}
-			if selector["id"] != id || selector["matched"] != (id == "classifier") || selector["outcome"] != want {
-				t.Fatalf("selector %s = %v, want %s", id, selector, want)
-			}
-		}
-	})
-}
-
 func TestFocusSettlesMultipleAttemptsAndOverlappingCommitmentDays(t *testing.T) {
-	pool, _ := newDatabase(t)
-	if err := database.Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
+	pool, _ := harness.Database(t)
 	fixture := newUsageFixture(t, pool)
 	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.export_sinks
 		(id,name,type,destination,streams,format,etag,created_by)
@@ -253,11 +170,7 @@ func newUsageFixture(t *testing.T, pool *pgxpool.Pool) usageFixture {
 		fixture.providerID, fixture.ownerID, fixture.projectID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.api_keys (id,lookup_id,digest,name,created_by,policy,etag,project_id)
-		VALUES ($1::uuid,$1::text,decode(repeat('00',32),'hex'),'Usage fixture',$2,'{}',$1::uuid,$3)`,
-		fixture.keyID, fixture.ownerID, fixture.projectID); err != nil {
-		t.Fatal(err)
-	}
+	fixture.addKey(t, fixture.keyID)
 	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.runtime_releases (id,sequence,sha256,snapshot,created_by)
 		SELECT $1,coalesce(max(sequence),0)+1,repeat('0',64),'{}',$2 FROM olp.runtime_releases`,
 		fixture.generationID, fixture.ownerID); err != nil {
@@ -271,16 +184,25 @@ func newUsageFixture(t *testing.T, pool *pgxpool.Pool) usageFixture {
 	}
 	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.prices
 		(pricing_revision_id,provider_kind,provider_id,model,operation,input_per_million,output_per_million,currency)
-		VALUES ($1,'openai_compatible',$2,$3,'generation',1,2,'USD')`, pricingID, fixture.providerID, vendorModel); err != nil {
+		VALUES ($1,'openai_compatible',$2,$3,'generation',1,2,'USD')`, pricingID, fixture.providerID, vendor.Model); err != nil {
 		t.Fatal(err)
 	}
 	return fixture
 }
 
+func (f usageFixture) addKey(t *testing.T, keyID string) {
+	t.Helper()
+	if _, err := f.pool.Exec(t.Context(), `INSERT INTO olp.api_keys (id,lookup_id,digest,name,created_by,policy,etag,project_id)
+		VALUES ($1::uuid,$1::text,decode(repeat('00',32),'hex'),'Usage fixture',$2,'{}',$1::uuid,$3)`,
+		keyID, f.ownerID, f.projectID); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func (f usageFixture) attempt(ordinal int) usage.Attempt {
-	status, input, output := http.StatusOK, int64(vendorInputTokens), int64(vendorOutputTokens)
+	status, input, output := http.StatusOK, int64(vendor.InputTokens), int64(vendor.OutputTokens)
 	return usage.Attempt{
-		ID: uuid.NewString(), Ordinal: ordinal, ProviderID: f.providerID, UpstreamModel: vendorModel,
+		ID: uuid.NewString(), Ordinal: ordinal, ProviderID: f.providerID, UpstreamModel: vendor.Model,
 		StartedAt: f.observedAt, CompletedAt: f.observedAt, StatusCode: &status, Committed: true,
 		Usage: &usage.AttemptUsage{Observed: true, Complete: true, UsageQuantities: usage.UsageQuantities{InputTokens: &input, OutputTokens: &output}},
 	}
@@ -299,10 +221,8 @@ func (f usageFixture) event(attempts ...usage.Attempt) *usage.Event {
 }
 
 func TestConsumerCommitsBeforeLaterEventIsBlocked(t *testing.T) {
-	pool, _ := newDatabase(t)
-	if err := database.Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
+	pool, _ := harness.Database(t)
 	fixture := newUsageFixture(t, pool)
 	first := fixture.event(fixture.attempt(1))
 	second := fixture.event(fixture.attempt(1))
@@ -314,15 +234,7 @@ func TestConsumerCommitsBeforeLaterEventIsBlocked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	configuration, err := coordination.Configuration(required(t, "OLP_TEST_VALKEY_URL"), "", 5*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	client, err := coordination.Open(t.Context(), configuration)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(client.Close)
+	client := harness.Valkey(t)
 	stream := "service:usage:" + uuid.NewString()
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -362,8 +274,7 @@ func TestConsumerCommitsBeforeLaterEventIsBlocked(t *testing.T) {
 			t.Error("consumer did not stop")
 		}
 	})
-	s := &service{t: t, pool: pool}
-	s.eventually("consumer reaching the blocked event", 5*time.Second, func() (bool, string) {
+	harness.Eventually(t, "consumer reaching the blocked event", 5*time.Second, func() (bool, string) {
 		var blocked bool
 		err := pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM pg_stat_activity
 			WHERE $1::integer=ANY(pg_blocking_pids(pid)))`, int32(barrier.Conn().PgConn().PID())).Scan(&blocked)
@@ -386,14 +297,14 @@ func TestConsumerCommitsBeforeLaterEventIsBlocked(t *testing.T) {
 	if err := barrier.Rollback(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	s.eventually("both events acknowledged", 5*time.Second, func() (bool, string) {
+	harness.Eventually(t, "both events acknowledged", 5*time.Second, func() (bool, string) {
 		length, err := client.Do(t.Context(), "XLEN", stream)
 		return err == nil && length == int64(0), fmt.Sprintf("length=%v error=%v", length, err)
 	})
 	if _, err := client.Do(t.Context(), "XADD", stream, "*", "event", string(firstPayload)); err != nil {
 		t.Fatal(err)
 	}
-	s.eventually("replayed event acknowledged", 5*time.Second, func() (bool, string) {
+	harness.Eventually(t, "replayed event acknowledged", 5*time.Second, func() (bool, string) {
 		length, err := client.Do(t.Context(), "XLEN", stream)
 		return err == nil && length == int64(0), fmt.Sprintf("length=%v error=%v", length, err)
 	})
@@ -407,10 +318,8 @@ func TestConsumerCommitsBeforeLaterEventIsBlocked(t *testing.T) {
 }
 
 func TestCleanupPreservesRetainedAndActiveEvidence(t *testing.T) {
-	pool, _ := newDatabase(t)
-	if err := database.Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
+	pool, _ := harness.Database(t)
 	fixture := newUsageFixture(t, pool)
 	t.Run("anchor retention", func(t *testing.T) { testAnchorRetention(t, fixture) })
 	t.Run("identity expiry", func(t *testing.T) { testIdentityExpiry(t, fixture) })
@@ -645,10 +554,8 @@ func testWorkflowRecovery(t *testing.T, fixture usageFixture) {
 }
 
 func TestUsageReportsKeepWholePeriodAllocationAndCompleteness(t *testing.T) {
-	pool, _ := newDatabase(t)
-	if err := database.Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
+	pool, _ := harness.Database(t)
 	fixture := newUsageFixture(t, pool)
 	selected, earlier, later := fixture.attempt(1), fixture.attempt(2), fixture.attempt(3)
 	ineligible, legacy, absent := fixture.attempt(4), fixture.attempt(5), fixture.attempt(6)
@@ -742,7 +649,7 @@ func TestUsageReportsKeepWholePeriodAllocationAndCompleteness(t *testing.T) {
 		request_unpriced_count,provider_unpriced_count,model_unpriced_count,target_unpriced_count,
 		request_incomplete_count,provider_incomplete_count,model_incomplete_count,target_incomplete_count)
 		VALUES($1,'report-hourly',$2,$3,'generation','openai',$4,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0)`,
-		hour, fixture.providerID, vendorModel, fixture.keyID); err != nil {
+		hour, fixture.providerID, vendor.Model, fixture.keyID); err != nil {
 		t.Fatal(err)
 	}
 	for _, offset := range []time.Duration{0, time.Minute} {
@@ -776,10 +683,8 @@ func TestUsageReportsKeepWholePeriodAllocationAndCompleteness(t *testing.T) {
 }
 
 func TestBudgetThresholdNotificationsUseBudgetBasis(t *testing.T) {
-	pool, _ := newDatabase(t)
-	if err := database.Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
+	pool, _ := harness.Database(t)
 	fixture := newUsageFixture(t, pool)
 	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 	defer receiver.Close()
@@ -871,33 +776,9 @@ func TestBudgetThresholdNotificationsUseBudgetBasis(t *testing.T) {
 	}
 }
 
-func TestInstallationNotificationDeleteRequiresSettings(t *testing.T) {
-	s := startService(t)
-	owner := s.owner()
-	ownerID := s.want(owner, "GET", "/api/v1/profile", nil, nil, http.StatusOK)["id"].(string)
-	destination := uuid.NewString()
-	if _, err := s.pool.Exec(t.Context(), `INSERT INTO olp.notification_destinations(id,name,url,etag,created_by)
- VALUES($1,'installation',$2,$1,$3)`, destination, "https://hooks.example.com/olp", ownerID); err != nil {
-		t.Fatal(err)
-	}
-	token := s.want(owner, "POST", "/api/v1/management-tokens", map[string]any{
-		"name": "keys only", "scopes": []string{"keys"}, "expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
-	}, idempotent(), http.StatusCreated)
-	path := "/api/v1/notifications/destinations/" + destination
-	match := map[string]string{"If-Match": `"` + destination + `"`}
-	for _, c := range []*caller{s.invite(owner, "developer@example.com", access.RoleDeveloper), {name: "keys token", token: token["secret"].(string)}} {
-		if status, raw := s.do(c, "DELETE", path, nil, idempotent(match)); status != http.StatusForbidden {
-			t.Errorf("%s deleted an installation destination: %s", c.name, describe(status, raw))
-		}
-	}
-	s.want(owner, "DELETE", path, nil, idempotent(match), http.StatusNoContent)
-}
-
 func TestFocusExportsHonorDefaultAndExplicitStartDates(t *testing.T) {
-	pool, _ := newDatabase(t)
-	if err := database.Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
+	pool, _ := harness.Database(t)
 	fixture := newUsageFixture(t, pool)
 	var installation string
 	if err := pool.QueryRow(t.Context(), `UPDATE olp.installation SET active_key_version=1 WHERE singleton RETURNING id::text`).Scan(&installation); err != nil {

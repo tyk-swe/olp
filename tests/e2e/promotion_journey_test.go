@@ -1,6 +1,6 @@
-//go:build service
+//go:build e2e
 
-package service_test
+package e2e_test
 
 import (
 	"encoding/json"
@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/tests/harness/vendor"
 )
 
 const legacyRouteSlug = "legacy-content-policy-for-a-route-whose-slug-is-long-enough-to-hash-its-name"
@@ -86,16 +87,21 @@ func installationPolicyDocument(exported map[string]any) map[string]any {
 	return document
 }
 
-func (s *service) seedPromotion(owner *caller, fixture canaryFixture) *caller {
+func (s *service) installationToken(owner *caller, name string) *caller {
 	s.t.Helper()
 	scopes := make([]string, 0, len(access.TokenScopes()))
 	for _, operation := range access.TokenScopes() {
 		scopes = append(scopes, operation.String())
 	}
 	token := s.want(owner, "POST", "/api/v1/management-tokens", map[string]any{
-		"name": "promotion", "scopes": scopes, "expires_at": time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339),
+		"name": name, "scopes": scopes, "expires_at": time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339),
 	}, idempotent(), http.StatusCreated)
-	operator := &caller{name: "installation token", token: token["secret"].(string)}
+	return &caller{name: name + " token", token: token["secret"].(string)}
+}
+
+func (s *service) seedPromotion(owner *caller, fixture canaryFixture) *caller {
+	s.t.Helper()
+	operator := s.installationToken(owner, "promotion")
 
 	zone := s.want(operator, "GET", "/api/v1/settings/budgets.time_zone", nil, nil, http.StatusOK)
 	s.want(operator, "PUT", "/api/v1/settings/budgets.time_zone", map[string]any{"value": "Europe/Berlin"}, etag(zone), http.StatusOK)
@@ -111,7 +117,7 @@ func (s *service) seedPromotion(owner *caller, fixture canaryFixture) *caller {
 		return map[string]any{"provider_kind": "openai_compatible", "provider_id": fixture.ids["provider_id"], "model": model, "operation": "generation", "currency": "USD", "input_per_million": input, "output_per_million": "2.00"}
 	}
 	s.want(operator, "POST", "/api/v1/pricing/revisions", map[string]any{
-		"effective_at": time.Now().UTC().Format(time.RFC3339), "prices": []any{price(vendorModel, "1.00"), price("a-cheaper-model", "0.50")},
+		"effective_at": time.Now().UTC().Format(time.RFC3339), "prices": []any{price(vendor.Model, "1.00"), price("a-cheaper-model", "0.50")},
 	}, idempotent(), http.StatusCreated)
 	s.want(operator, "POST", "/api/v1/pricing/discounts", map[string]any{"provider_kind": "openai_compatible", "provider_id": fixture.ids["provider_id"], "multiplier": "0.9"}, idempotent(), http.StatusCreated)
 	card := s.want(operator, "POST", "/api/v1/rate-cards", map[string]any{"owner": map[string]any{"kind": "organization", "id": organization}}, idempotent(), http.StatusCreated)

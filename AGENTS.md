@@ -20,9 +20,9 @@ Don't assume that the existing code is correct or the right way of doing things 
 
 In descending order of importance
 
-Pre-merge tests are one fast safety net run with `make test-fast` inside a 60 second budget, plus a small service suite run with `make test-service` for behavior that needs real PostgreSQL or Valkey. The allowlists live in `scripts/test-fast.sh` and `scripts/test-service.sh`, and the full rules live in `tests/README.md`. When adding new features inside the allowlist, add meaningful tests there. Don't add tests that don't check anything substantial. I'd rather have no signal whether the code is working than tests that don't fail when code is broken. A kept test would fail before the feature was added and succeed only when the feature is fully working. There is no coverage or mutation gate, and speed comes from keeping the net small rather than from tuning a large suite
+Tests run in three tiers, each with its own command and a budget on the time spent running tests. `make test-unit` needs only the toolchain and runs every untagged Go test plus the console Vitest projects. `make test-integration` runs `tests/integration` against real PostgreSQL and Valkey. `make test-e2e` drives the real binary over HTTP from `tests/e2e` and the built console in a browser from `console/tests/e2e`. The budgets and the full rules live in `tests/README.md`. Put a test in the cheapest tier that can catch the failure. When adding new features, add meaningful tests for them. Don't add tests that don't check anything substantial. I'd rather have no signal whether the code is working than tests that don't fail when code is broken. A kept test would fail before the feature was added and succeed only when the feature is fully working. There is no coverage or mutation gate, and speed comes from the budgets, from tests that run in parallel on their own state, and from keeping each tier small
 
-Same thing for bug fixes inside the allowlist. The tests should make it so that this specific bug can never happen again without failing tests (i.e., regression). Work outside the allowlist gets no new test file by default. A test enters the net only when the whole net still fits the budget with headroom, or when it displaces a weaker test, and the change states the timed result. A test file outside the allowlist is a defect because nothing runs it
+Same thing for bug fixes. The tests should make it so that this specific bug can never happen again without failing tests (i.e., regression). A new test must leave its suite inside the budget with headroom. When a suite gets tight, move the test down a tier, make it faster, or displace a weaker test, and state the timed result in the change. A test file that no tier runs is a defect because nothing runs it
 
 Never test structure or implementation details of code, only function of it. A test should catch a change that breaks behavior by accident. If the only way it can fail is someone deliberately undoing the change, don't write it
 
@@ -112,7 +112,7 @@ Before implementing:
 
 Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify
 
-Before requesting maintainer review, verify the current PR tip passes required CI and has acceptable reviews from any review bots configured for the PR. Inspect warnings and findings, fix actionable issues, and rerun the affected checks and reviewers after changes. Record evidence for any false positive or unavailable review. Never treat a pending or missing bot result as a pass. Do not raise the safety-net budget or relax lint or type-checking limits to satisfy a check
+Before requesting maintainer review, verify the current PR tip passes required CI and has acceptable reviews from any review bots configured for the PR. Inspect warnings and findings, fix actionable issues, and rerun the affected checks and reviewers after changes. Record evidence for any false positive or unavailable review. Never treat a pending or missing bot result as a pass. Do not raise a test budget or relax lint or type-checking limits to satisfy a check
 
 <!--
 Adapted from https://github.com/BerriAI/litellm/blob/main/AGENTS.md

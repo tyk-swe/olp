@@ -1,6 +1,6 @@
-//go:build service
+//go:build e2e
 
-package service_test
+package e2e_test
 
 import (
 	"bytes"
@@ -11,7 +11,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,61 +20,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/tests/harness"
 )
 
 const (
 	accessPassword = "a long service test password"
 	startupLimit   = 30 * time.Second
 )
-
-func required(t *testing.T, name string) string {
-	t.Helper()
-	value := os.Getenv(name)
-	if value == "" {
-		t.Fatalf("%s is not set. Run make test-service", name)
-	}
-	return value
-}
-
-func newDatabase(t *testing.T) (*pgxpool.Pool, string) {
-	t.Helper()
-	raw := required(t, "OLP_TEST_DATABASE_URL")
-	admin, err := pgx.Connect(t.Context(), raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	name := "service_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	identifier := pgx.Identifier{name}.Sanitize()
-	if _, err = admin.Exec(t.Context(), "CREATE DATABASE "+identifier); err != nil {
-		t.Fatal(err)
-	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	u.Path = "/" + name
-	config, err := database.Configuration(u.String(), 10, 10*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pool, err := database.Open(t.Context(), config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		pool.Close()
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if _, err := admin.Exec(ctx, "DROP DATABASE "+identifier+" WITH (FORCE)"); err != nil {
-			t.Errorf("drop database: %v", err)
-		}
-		admin.Close(ctx)
-	})
-	return pool, u.String()
-}
 
 type environment struct {
 	values    map[string]string
@@ -103,7 +55,7 @@ func newEnvironment(t *testing.T, databaseURL string) environment {
 		bootstrap: bootstrap,
 		values: map[string]string{
 			"OLP_DATABASE_URL":                     databaseURL,
-			"OLP_VALKEY_URL":                       required(t, "OLP_TEST_VALKEY_URL"),
+			"OLP_VALKEY_URL":                       harness.Required(t, "OLP_TEST_VALKEY_URL"),
 			"OLP_AUTH_HMAC_KEY_FILE":               write("auth.key", secret()),
 			"OLP_BOOTSTRAP_TOKEN_FILE":             write("bootstrap.token", bootstrap),
 			"OLP_MASTER_KEY_FILE":                  write("master.json", `{"active_version":1,"keys":[{"version":1,"key":"`+secret()+`"}]}`),
@@ -137,7 +89,7 @@ func (e environment) list(overrides map[string]string) []string {
 
 func runBinary(t *testing.T, env environment, args ...string) {
 	t.Helper()
-	command := exec.CommandContext(t.Context(), required(t, "OLP_TEST_BINARY"), args...)
+	command := exec.CommandContext(t.Context(), harness.Required(t, "OLP_TEST_BINARY"), args...)
 	command.Env = env.list(nil)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("olp %s: %v\n%s", strings.Join(args, " "), err, output)
@@ -168,13 +120,14 @@ type service struct {
 
 func startService(t *testing.T) *service {
 	t.Helper()
-	pool, databaseURL := newDatabase(t)
+	pool, databaseURL := harness.Database(t)
 	env := newEnvironment(t, databaseURL)
 	runBinary(t, env, "migrate")
 	return startProcess(t, pool, env)
 }
 
 func TestStartupFailureCleanup(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("OLP_TEST_STARTUP_FAILURE") == "1" {
 		startProcess(t, nil, environment{})
 		t.Fatal("process unexpectedly started")
@@ -183,7 +136,6 @@ func TestStartupFailureCleanup(t *testing.T) {
 	if err := os.WriteFile(binary, []byte("#!/bin/sh\nexit 23\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("OLP_TEST_BINARY", binary)
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -191,7 +143,7 @@ func TestStartupFailureCleanup(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, executable, "-test.run=^TestStartupFailureCleanup$")
-	command.Env = append(os.Environ(), "OLP_TEST_STARTUP_FAILURE=1")
+	command.Env = append(os.Environ(), "OLP_TEST_STARTUP_FAILURE=1", "OLP_TEST_BINARY="+binary)
 	output, err := command.CombinedOutput()
 	if ctx.Err() != nil {
 		t.Fatalf("startup failure cleanup did not finish: %v\n%s", ctx.Err(), output)
@@ -210,7 +162,7 @@ func startProcess(t *testing.T, pool *pgxpool.Pool, env environment) *service {
 	if err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command(required(t, "OLP_TEST_BINARY"), "all")
+	command := exec.Command(harness.Required(t, "OLP_TEST_BINARY"), "all")
 	command.Env = env.list(map[string]string{"OLP_LISTEN_ADDR": public, "OLP_OBSERVABILITY_LISTEN_ADDR": private, "OLP_PUBLIC_ORIGIN": origin})
 	command.Stdout, command.Stderr = logFile, logFile
 	if err = command.Start(); err != nil {
@@ -392,17 +344,7 @@ func (s *service) invite(owner *caller, email, role string) *caller {
 
 func (s *service) eventually(what string, limit time.Duration, check func() (bool, string)) {
 	s.t.Helper()
-	deadline := time.Now().Add(limit)
-	last := ""
-	for time.Now().Before(deadline) {
-		done, detail := check()
-		if done {
-			return
-		}
-		last = detail
-		time.Sleep(50 * time.Millisecond)
-	}
-	s.t.Fatalf("%s did not happen within %s: %s", what, limit, last)
+	harness.Eventually(s.t, what, limit, check)
 }
 
 func describe(status int, raw []byte) string { return fmt.Sprintf("status %d: %s", status, raw) }

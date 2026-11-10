@@ -42,7 +42,7 @@ documentation unless a guide links to them for that purpose.
 ## Develop and qualify changes
 
 [Contributing](../CONTRIBUTING.md) covers local setup and the normal change
-workflow. [Testing](../tests/README.md) explains the safety net and its budget. The
+workflow. [Testing](../tests/README.md) explains the test tiers and their budgets. The
 remaining guides cover the implementation contracts behind a change.
 
 | Task | Guide |
