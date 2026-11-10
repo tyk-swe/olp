@@ -17,6 +17,7 @@
   import DiagnosticFilterBar, {
     type DiagnosticFilterValues
   } from './DiagnosticFilterBar.svelte';
+  import DiagnosticsHeader from './DiagnosticsHeader.svelte';
   import LoadError from './LoadError.svelte';
   import { codeKeys } from './codeKeys';
   import {
@@ -106,15 +107,11 @@
 </script>
 
 <section class="diagnostics">
-  <div class="actions">
-    <h2>{section.title}</h2>
-    <button
-      class="button button-secondary"
-      type="button"
-      onclick={refresh}
-      disabled={attempts.isFetching}>Refresh</button
-    >
-  </div>
+  <DiagnosticsHeader
+    title={section.title}
+    fetching={attempts.isFetching}
+    onRefresh={refresh}
+  />
   <DiagnosticFilterBar
     fields={['attempt', 'route', 'key', 'account', 'binding', 'endUser']}
     bind:values={form}
@@ -342,17 +339,6 @@
   }
   article {
     padding: 1.25rem;
-  }
-  .actions {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-  }
-  h2 {
-    flex: 1;
-    font-size: 1.25rem;
-    font-weight: 600;
   }
   h3 {
     font-weight: 600;

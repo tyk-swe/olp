@@ -19,6 +19,7 @@
   import DiagnosticFilterBar, {
     type DiagnosticFilterValues
   } from './DiagnosticFilterBar.svelte';
+  import DiagnosticsHeader from './DiagnosticsHeader.svelte';
   import LoadError from './LoadError.svelte';
   import { codeKeys } from './codeKeys';
   import { mutationError } from './presentation';
@@ -80,27 +81,29 @@
       busy ||
       !allowed ||
       !(await confirmAction({
-        title: `Retire tree ${item.conversation}?`,
-        body: 'Every conversation in this parent/child tree will permanently stop serving. A new independent conversation must use a new client conversation identifier.',
-        confirmLabel: 'Retire entire tree',
+        title: `Retire tree ${item.root_id}?`,
+        body: 'Every child and resume is refused from now on, and the tree can’t be moved to another account. You can’t undo this.',
+        confirmLabel: 'Retire tree',
         danger: true
       }))
     )
       return;
     busy = item.id;
     error = '';
+    notice = '';
     try {
       const submission = retireIntent.prepare(item.id);
       await retireCodeBinding(submission.input, submission.requestId);
       retireIntent.reset();
-      notice = `Retired tree ${item.conversation}.`;
+      notice =
+        'Tree permanently retired. Start a fresh independent conversation to use another eligible account.';
       try {
         await client.invalidateQueries(
           { queryKey: codeKeys.root },
           { throwOnError: true }
         );
       } catch (e) {
-        error = `Retired tree ${item.conversation}, but refreshing failed. Use Refresh to reload. ${errorMessage(e)}`;
+        error = `Binding retired, but refreshing failed. ${errorMessage(e)}`;
       }
     } catch (e) {
       error = mutationError(e);
@@ -111,15 +114,11 @@
 </script>
 
 <section class="diagnostics">
-  <div class="actions">
-    <h2>{section.title}</h2>
-    <button
-      class="button button-secondary"
-      type="button"
-      onclick={refresh}
-      disabled={bindings.isFetching}>Refresh</button
-    >
-  </div>
+  <DiagnosticsHeader
+    title={section.title}
+    fetching={bindings.isFetching}
+    onRefresh={refresh}
+  />
   <DiagnosticFilterBar
     fields={['route', 'key', 'account']}
     bind:values={form}
@@ -205,17 +204,6 @@
   }
   article {
     padding: 1.25rem;
-  }
-  .actions {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-  }
-  h2 {
-    flex: 1;
-    font-size: 1.25rem;
-    font-weight: 600;
   }
   h3 {
     font-weight: 600;

@@ -28,7 +28,7 @@
   }
 </script>
 
-<form class="filters" onsubmit={submit}>
+<form class="filters form-field" onsubmit={submit}>
   {#if has('attempt')}
     <div>
       <label for="code-filter-attempt">Attempt ID</label>
@@ -51,7 +51,7 @@
   {/if}
   {#if has('key')}
     <div>
-      <label for="code-filter-key">API key ID</label>
+      <label for="code-filter-key">API-key ID</label>
       <input
         id="code-filter-key"
         bind:value={values.key}
@@ -81,7 +81,7 @@
   {/if}
   {#if has('endUser')}
     <div>
-      <label for="code-filter-end-user">End-user lookup digest</label>
+      <label for="code-filter-end-user">End-user digest</label>
       <input
         id="code-filter-end-user"
         bind:value={values.endUser}

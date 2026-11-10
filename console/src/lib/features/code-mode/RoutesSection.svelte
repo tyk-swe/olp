@@ -132,6 +132,7 @@
       return;
     busy = true;
     error = '';
+    notice = '';
     try {
       const submission = publishIntent.prepare({
         id: route.id,
@@ -139,14 +140,15 @@
       });
       await publishCodeRoute(submission.input, submission.requestId);
       publishIntent.reset();
-      notice = `Published ${route.slug}.`;
+      notice =
+        'Route published without synthetic inference. Serving health and qualification remain separate.';
       try {
         await client.invalidateQueries(
           { queryKey: codeKeys.root },
           { throwOnError: true }
         );
       } catch (e) {
-        error = `Published ${route.slug}, but refreshing failed. Use Refresh to reload. ${errorMessage(e)}`;
+        error = `Route published, but refreshing failed. ${errorMessage(e)}`;
       }
     } catch (e) {
       error = mutationError(e);
