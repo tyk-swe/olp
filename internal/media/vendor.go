@@ -1,9 +1,6 @@
 package media
 
 import (
-	"maps"
-	"slices"
-
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
@@ -37,15 +34,6 @@ var codecs = map[string]codec{
 	"runway":     runwayCodec,
 	"stability":  stabilityCodec,
 	"xai-images": xaiImagesCodec,
-}
-
-// Wires are the registered vendor wires and the operations each serves.
-func Wires() map[string][]string {
-	out := map[string][]string{}
-	for wire, c := range codecs {
-		out[wire] = slices.Sorted(maps.Keys(c))
-	}
-	return out
 }
 
 // encodeVendor encodes a request in the vendor's own wire, reporting whether

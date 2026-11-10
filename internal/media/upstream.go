@@ -88,7 +88,6 @@ type Result struct {
 	FirstByte     time.Duration
 	Images        *ImageResult
 	Video         *VideoJobResult
-	List          *VideoListResult
 	Deleted       *VideoDeleteResult
 	Transcription *TranscriptionResult
 	Text          []byte        // transcription text/srt/vtt payloads
@@ -370,7 +369,7 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		if !call.Strict {
 			return nil
 		}
-		if (call.Kind == ResponseVideoJob || call.Kind == ResponseVideoList || call.Kind == ResponseVideoDelete) && len(body) > MaxNativeVideoSourceBytes {
+		if (call.Kind == ResponseVideoJob || call.Kind == ResponseVideoDelete) && len(body) > MaxNativeVideoSourceBytes {
 			return &Failure{Class: ClassProtocol, Dispatched: true, Ambiguous: call.Ambiguous, Detail: "native video metadata exceeds its durable bound"}
 		}
 		doc, err := oif.ParseJSON(body, oif.Limits{MaxBytes: int(t.MaxResponseBytes)})
@@ -569,7 +568,7 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		}
 		result.Images = decoded
 		return result, nil
-	case ResponseVideoJob, ResponseVideoList, ResponseVideoDelete:
+	case ResponseVideoJob, ResponseVideoDelete:
 		if call.NoContent && resp.StatusCode == http.StatusNoContent {
 			result.Deleted = &VideoDeleteResult{Deleted: true}
 			return result, nil
@@ -590,8 +589,6 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 			result.Video, mErr = call.DecodeVideo(body)
 		case call.Kind == ResponseVideoJob:
 			result.Video, mErr = DecodeVideoObject(body)
-		case call.Kind == ResponseVideoList:
-			result.List, mErr = DecodeVideoListResponse(body)
 		case call.Kind == ResponseVideoDelete:
 			result.Deleted, mErr = DecodeVideoDeleteResponse(body)
 		}

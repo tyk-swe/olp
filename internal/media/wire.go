@@ -27,7 +27,6 @@ const (
 	OpTranscription   = "transcription"
 	OpTranslation     = "translation"
 	OpVideoCreate     = "video_create"
-	OpVideoList       = "video_list"
 	OpVideoGet        = "video_get"
 	OpVideoContent    = "video_content"
 	OpVideoDelete     = "video_delete"
@@ -51,8 +50,6 @@ const (
 	ResponseBinary
 	// ResponseVideoJob is a video object document.
 	ResponseVideoJob
-	// ResponseVideoList is a video list document.
-	ResponseVideoList
 	// ResponseVideoContent is staged video or image bytes.
 	ResponseVideoContent
 	// ResponseVideoDelete is a deletion receipt document.
@@ -200,9 +197,6 @@ type Request struct {
 	// Video job operations.
 	JobID           string
 	Variant         string
-	After           string
-	Limit           int64
-	Order           string
 	DeleteMissingOK bool
 }
 
@@ -889,8 +883,6 @@ func Encode(r *Request, kind, upstreamModel string) (*UpstreamCall, *Error) {
 		return encodeTranslation(r, upstreamModel)
 	case OpVideoCreate:
 		return encodeVideoCreate(r, upstreamModel)
-	case OpVideoList:
-		return encodeVideoList(r)
 	case OpVideoGet:
 		return encodeVideoJob(r.JobID, "")
 	case OpVideoContent:
@@ -1054,21 +1046,6 @@ func encodeVideoCreate(r *Request, model string) (*UpstreamCall, *Error) {
 	fields = extraFields(fields, r.Extra)
 	return &UpstreamCall{Method: "POST", Path: "videos", Accept: "application/json",
 		Fields: fields, Kind: ResponseVideoJob, Ambiguous: true}, nil
-}
-
-func encodeVideoList(r *Request) (*UpstreamCall, *Error) {
-	query := url.Values{}
-	if r.After != "" {
-		query.Set("after", r.After)
-	}
-	if r.Limit > 0 {
-		query.Set("limit", strconv.FormatInt(r.Limit, 10))
-	}
-	if r.Order == "asc" {
-		query.Set("order", "asc")
-	}
-	return &UpstreamCall{Method: "GET", Path: "videos", Query: query, Accept: "application/json",
-		Kind: ResponseVideoList}, nil
 }
 
 // ValidUpstreamJobID reports whether an upstream job identity is safe to

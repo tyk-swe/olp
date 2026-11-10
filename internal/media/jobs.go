@@ -114,7 +114,6 @@ const (
 type JobRecord struct {
 	ID                     string
 	StrictContract         bool
-	NativeSourceID         *string
 	UpstreamJobID          *string
 	APIKeyID               string
 	ProviderID             string
@@ -225,7 +224,7 @@ const jobSelect = `SELECT j.id::text, j.upstream_job_id, j.api_key_id::text, j.p
 		j.credential_version_id::text, j.slot_id::text, j.reconciliation_claim_id::text,
 		j.reconciliation_attempts, j.next_reconciliation_at,
 		j.last_reconciliation_at, j.etag::text,
-		j.created_at, j.updated_at, j.strict_contract, j.native_source_id::text
+		j.created_at, j.updated_at, j.strict_contract
 	FROM olp.media_jobs j
 	JOIN olp.providers p ON p.id = j.provider_id`
 
@@ -240,7 +239,7 @@ func scanJob(row pgx.Row) (JobRecord, error) {
 		&j.CredentialVersionID, &j.SlotID, &j.ReconciliationClaimID,
 		&j.ReconciliationAttempts, &j.NextReconciliationAt,
 		&j.LastReconciliationAt, &j.ETag, &j.CreatedAt, &j.UpdatedAt,
-		&j.StrictContract, &j.NativeSourceID)
+		&j.StrictContract)
 	return j, err
 }
 
@@ -579,8 +578,7 @@ func AttachUpstream(ctx context.Context, q Querier, id, upstreamJobID string, up
 				reconciliation_error = NULL,
 				-- The create's dispatch window no longer gates an attached job.
 				next_reconciliation_at = now(),
-				etag = $9,
-				native_source_id = NULL
+				etag = $9
 			WHERE id = $1 AND lifecycle_state = 'creating'
 			RETURNING *
 		)
@@ -594,7 +592,7 @@ func AttachUpstream(ctx context.Context, q Querier, id, upstreamJobID string, up
 			j.credential_version_id::text, j.slot_id::text, j.reconciliation_claim_id::text,
 			j.reconciliation_attempts, j.next_reconciliation_at,
 			j.last_reconciliation_at, j.etag::text, j.created_at, j.updated_at,
-			j.strict_contract, j.native_source_id::text
+			j.strict_contract
 		FROM attached j JOIN olp.providers p ON p.id = j.provider_id`,
 		id, upstreamJobID, string(update.State), update.ProgressPercent,
 		update.ContentAvailable, update.ExpiresAt, update.ErrorClass,
@@ -889,7 +887,7 @@ func FinalizeDeletion(ctx context.Context, q Querier, id string) (bool, error) {
 	tag, err := q.Exec(ctx, `UPDATE olp.media_jobs
 		SET lifecycle_state = 'deleted', deleted_at = COALESCE(deleted_at, now()),
 			reconciliation_error = NULL, content_available = false,
-			native_source_id = NULL, etag = $2
+			etag = $2
 		WHERE id = $1
 		  AND lifecycle_state IN ('creating','create_ambiguous','create_cleanup_pending','delete_pending')`,
 		id, uuid.Must(uuid.NewV7()))
@@ -907,7 +905,7 @@ func finalizeDeletionClaimed(ctx context.Context, q Querier, id, claimID string)
 	tag, err := q.Exec(ctx, `UPDATE olp.media_jobs
 		SET lifecycle_state = 'deleted', deleted_at = COALESCE(deleted_at, now()),
 			reconciliation_error = NULL, content_available = false,
-			native_source_id = NULL, etag = $3
+			etag = $3
 		WHERE id = $1
 		  AND reconciliation_claim_id = $2
 		  AND lifecycle_state IN ('creating','create_ambiguous','create_cleanup_pending','delete_pending')`,
@@ -985,7 +983,7 @@ func ClaimJobs(ctx context.Context, q Querier, now time.Time, limit int) ([]JobR
 			c.credential_version_id::text, c.slot_id::text, c.reconciliation_claim_id::text,
 			c.reconciliation_attempts, c.next_reconciliation_at,
 			c.last_reconciliation_at, c.etag::text, c.created_at, c.updated_at,
-			c.strict_contract, c.native_source_id::text
+			c.strict_contract
 		FROM claimed c JOIN olp.providers p ON p.id = c.provider_id
 		ORDER BY c.created_at, c.id`,
 		now, limit, claimID, PollGateSeconds, uuid.Must(uuid.NewV7()))
@@ -1084,23 +1082,4 @@ func ReconciliationSummary(ctx context.Context, q Querier, now time.Time) (Summa
 		now, PollGateSeconds).
 		Scan(&s.Pending, &s.Stale, &s.Failed, &s.OldestPendingAt)
 	return s, dbError(err)
-}
-
-// PendingJobs lists one key's unreconciled jobs; used by diagnostics.
-func PendingJobs(ctx context.Context, q Querier, apiKeyID string, limit int) ([]JobRecord, error) {
-	if limit < 1 {
-		limit = 1
-	}
-	if limit > 32 {
-		limit = 32
-	}
-	rows, err := q.Query(ctx, jobSelect+` WHERE j.api_key_id = $1
-		AND j.lifecycle_state IN ('create_cleanup_pending','delete_pending')
-		ORDER BY j.updated_at ASC, j.id ASC LIMIT $2`, apiKeyID, limit)
-	if err != nil {
-		return nil, dbError(err)
-	}
-	items, err := scanJobs(rows)
-	rows.Close()
-	return items, dbError(err)
 }

@@ -356,10 +356,8 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			mediaSpool = spool
 			defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "media spool", func(context.Context) error { return spool.Close() })
 			mediaService = &media.Service{
-				Pool:         pool,
-				Keys:         keys,
-				Installation: installation,
-				Gaps:         &mediaGapsTotal,
+				Pool: pool,
+				Gaps: &mediaGapsTotal,
 				Transport: &media.Transport{
 					Client:           policy.Client(gateway.UpstreamHeaderTimeout),
 					Auth:             connectors.NewAuth(&policy),

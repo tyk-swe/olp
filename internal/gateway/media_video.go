@@ -266,11 +266,9 @@ func (s *Server) attachCreated(ctx context.Context, x *call, reserved media.JobR
 	}
 	// Native provider documents may echo prompts or arbitrary output fields.
 	// Keep them transient; lifecycle recovery needs only the typed job metadata.
-	record, err := s.deps.Media.Jobs.AttachWithRetry(ctx, reserved.ID, upstreamID, update)
-	if err != nil {
+	if _, err := s.deps.Media.Jobs.AttachWithRetry(ctx, reserved.ID, upstreamID, update); err != nil {
 		return s.handleFailedAttachment(ctx, x, reserved, upstreamID, result, err, out)
 	}
-	_ = record
 	return out
 }
 

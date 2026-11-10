@@ -440,41 +440,6 @@ func ValidStrictVideoJobSource(source oif.Document, upstreamID, model string) bo
 		validStatus
 }
 
-// DecodeVideoListResponse parses a provider list document.
-func DecodeVideoListResponse(body []byte) (*VideoListResult, *Error) {
-	var encodedWire struct {
-		Object  string            `json:"object"`
-		Data    []json.RawMessage `json:"data"`
-		FirstID *string           `json:"first_id"`
-		LastID  *string           `json:"last_id"`
-		HasMore bool              `json:"has_more"`
-	}
-	var doc map[string]any
-	if err := json.Unmarshal(body, &doc); err != nil {
-		return nil, protocolError("The provider video list is not valid JSON.")
-	}
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.UseNumber()
-	if err := decoder.Decode(&encodedWire); err != nil {
-		return nil, protocolError("The provider video list is not valid JSON.")
-	}
-	if encodedWire.Object != "list" {
-		return nil, protocolError("The provider returned an unexpected video list object type.")
-	}
-	result := &VideoListResult{
-		FirstID: encodedWire.FirstID, LastID: encodedWire.LastID, HasMore: encodedWire.HasMore,
-		Extra: diffFields(doc, "object", "data", "first_id", "last_id", "has_more"),
-	}
-	for _, raw := range encodedWire.Data {
-		job, failure := DecodeVideoObject(raw)
-		if failure != nil {
-			return nil, failure
-		}
-		result.Jobs = append(result.Jobs, *job)
-	}
-	return result, nil
-}
-
 // EncodeVideoListResponse renders the client list document. Each job keeps
 // its own route slug as the public model.
 func EncodeVideoListResponse(result *VideoListResult, fallback string) ([]byte, *Error) {

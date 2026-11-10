@@ -16,7 +16,6 @@ import (
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/release"
-	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 // Reconciliation concurrency and pacing match the reference worker.
@@ -32,10 +31,8 @@ var errClaimLost = errors.New("reconciliation_claim_lost")
 // Service owns durable media job work: create attachment, client-facing
 // refreshes, and the autonomous reconciliation loop.
 type Service struct {
-	Pool         *pgxpool.Pool
-	Keys         *secrets.KeyRing
-	Installation string
-	Transport    *Transport
+	Pool      *pgxpool.Pool
+	Transport *Transport
 	// Credentials serves the pinned credential versions' eligibility and
 	// secrets. Without it every credential fails closed.
 	Credentials release.Credentials
@@ -120,11 +117,6 @@ func (s *Service) FinalizeDeletion(ctx context.Context, id string) (bool, error)
 	finalized, err := FinalizeDeletion(ctx, tx, id)
 	if err != nil {
 		return false, err
-	}
-	if finalized {
-		if _, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", id, secrets.MediaJobSource); err != nil {
-			return false, dbError(err)
-		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, dbError(err)
@@ -476,9 +468,6 @@ func (s *Service) confirmDeletion(ctx context.Context, record *JobRecord, claimI
 	defer tx.Rollback(ctx)
 	if err := finalizeDeletionClaimed(ctx, tx, record.ID, claimID); err != nil {
 		return mutationFailure(err)
-	}
-	if _, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", record.ID, secrets.MediaJobSource); err != nil {
-		return mutationFailure(dbError(err))
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return mutationFailure(dbError(err))
