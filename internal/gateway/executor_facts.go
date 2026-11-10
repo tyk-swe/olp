@@ -159,7 +159,7 @@ func (s *Server) newFact(x *call, a routing.Attempt, slot routing.Slot, ordinal 
 			return fact
 		}
 		if x.media != nil {
-			if _, ok := x.snapshot().MediaTemplate(x.route.Slug, a.TargetID, x.media.Op); ok {
+			if _, ok := x.snapshot().MediaTemplate(x.route.Slug, a.TargetID, string(x.media.Op())); ok {
 				fact.Interaction = &usage.InteractionEvidence{Fidelity: routing.FidelityStrict, PlanClass: "native_identity", UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
 			}
 		} else if x.unary != nil {

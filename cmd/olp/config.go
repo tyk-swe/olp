@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"errors"
 	"flag"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/telemetry"
 )
 
@@ -130,7 +132,7 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	f.StringVar(&c.PublicOrigin, "public-origin", "http://127.0.0.1:8080", "browser origin")
 	f.StringVar(&c.ConsoleDir, "console-dir", "console/build", "static console directory")
 	f.StringVar(&c.MediaSpoolDir, "media-spool-dir", "", "directory for bounded media staging; defaults to the system temp directory")
-	f.Int64Var(&c.MediaSpoolCapacityBytes, "media-spool-capacity-bytes", 1073741824, "media spool capacity in bytes")
+	f.Int64Var(&c.MediaSpoolCapacityBytes, "media-spool-capacity-bytes", staging.DefaultCapacityBytes, "media spool capacity in bytes")
 	f.StringVar(&c.AuthHMACKeyFile, "auth-hmac-key-file", "", "mounted hex/base64 authentication key")
 	f.StringVar(&c.BootstrapTokenFile, "bootstrap-token-file", "", "mounted first-owner bootstrap token")
 	f.StringVar(&c.ConnectorConfigFile, "connector-config-file", "", "mounted provider transport configuration")
@@ -296,6 +298,10 @@ func secretURL(value, path, name string) (string, error) {
 	return strings.TrimSpace(string(data)), nil
 }
 
+func (c Config) spoolDirectory() string {
+	return cmp.Or(c.MediaSpoolDir, filepath.Join(os.TempDir(), "olp-media-spool"))
+}
+
 func (c Config) Validate() error {
 	if c.CacheValkeyCAFile != "" && c.CacheValkeyURL == "" {
 		return errors.New("OLP_CACHE_VALKEY_TLS_CA_FILE requires OLP_CACHE_VALKEY_URL")
@@ -399,7 +405,7 @@ func (c Config) Validate() error {
 	if c.MaxJSONBodyBytes < 65536 || c.MaxJSONBodyBytes > 64<<20 {
 		return errors.New("OLP_HTTP_MAX_JSON_BODY_BYTES must be between 64 KiB and 64 MiB")
 	}
-	if c.MediaSpoolCapacityBytes < 256<<20 {
+	if c.MediaSpoolCapacityBytes < staging.MinCapacityBytes {
 		return errors.New("OLP_MEDIA_SPOOL_CAPACITY_BYTES must be at least 256 MiB")
 	}
 	if c.MaxMediaBodyBytes < 1<<20 || c.MaxMediaBodyBytes > bodylimit.Maximum {

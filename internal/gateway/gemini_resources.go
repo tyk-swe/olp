@@ -17,12 +17,12 @@ import (
 	"github.com/google/uuid"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/staging"
 )
 
 func (s *Server) registerGeminiFilesState(mux *http.ServeMux) {
@@ -301,7 +301,7 @@ func (s *Server) geminiUploadStart(w http.ResponseWriter, r *http.Request) {
 	s.finish(x, &outcome{committed: true}, http.StatusOK)
 }
 
-func (s *Server) uploadGeminiManagedFile(ctx context.Context, x *call, p *pin, part *media.Part) ([]byte, string, *attemptFailure) {
+func (s *Server) uploadGeminiManagedFile(ctx context.Context, x *call, p *pin, part *staging.Part) ([]byte, string, *attemptFailure) {
 	endpoint, err := geminiUploadOrigin(p.provider.Connector(), p.model, s.egress)
 	if err != nil {
 		return nil, "", geminiManagedUploadFailure(x, classConnect, false)
@@ -326,7 +326,7 @@ func (s *Server) uploadGeminiManagedFile(ctx context.Context, x *call, p *pin, p
 	}
 	_ = start.Body.Close()
 	x.completePinned()
-	opened, err := s.transport().Spool.Open(part.Handle)
+	opened, err := s.deps.Staging.Open(part.Handle)
 	if err != nil {
 		return nil, "", geminiManagedUploadFailure(x, classProtocol, true)
 	}
@@ -640,7 +640,7 @@ func (s *Server) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
 			s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The Gemini chunk read could not be bounded."), x.family)
 			return
 		}
-		artifact, err := s.transport().Spool.Put(ctx, media.Upload{
+		artifact, err := s.deps.Staging.Put(ctx, staging.Upload{
 			Filename: "gemini-upload-chunk", ContentType: contentType, MaximumLength: min(remaining, s.cfg.MaxMediaBodyBytes), Body: r.Body,
 		})
 		if err != nil {
@@ -649,8 +649,8 @@ func (s *Server) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
 		}
 		// Keep failed reads bounded while HTTP/1 drains their remaining body.
 		_ = controller.SetReadDeadline(time.Time{})
-		defer s.transport().Spool.Remove(artifact.Handle)
-		opened, err := s.transport().Spool.Open(artifact.Handle)
+		defer s.deps.Staging.Remove(artifact.Handle)
+		opened, err := s.deps.Staging.Open(artifact.Handle)
 		if err != nil {
 			s.stateFail(x, w, serverError(http.StatusBadGateway, "media_content_unavailable", "The staged Gemini chunk could not be read."), x.family)
 			return
@@ -992,14 +992,14 @@ func (s *Server) geminiDownloadFile(w http.ResponseWriter, r *http.Request) {
 		if contentType == "" {
 			contentType = "application/octet-stream"
 		}
-		artifact, err := s.transport().Spool.Put(ctx, media.Upload{
+		artifact, err := s.deps.Staging.Put(ctx, staging.Upload{
 			Filename: "gemini-file", ContentType: contentType, MaximumLength: s.cfg.MaxResponseBytes, Body: resp.Body,
 		})
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_response_too_large", "The Gemini download exceeded the configured response limit.")
 		}
-		defer s.transport().Spool.Remove(artifact.Handle)
-		opened, err := s.transport().Spool.Open(artifact.Handle)
+		defer s.deps.Staging.Remove(artifact.Handle)
+		opened, err := s.deps.Staging.Open(artifact.Handle)
 		if err != nil {
 			return serverError(http.StatusBadGateway, "media_content_unavailable", "The staged Gemini download could not be read.")
 		}

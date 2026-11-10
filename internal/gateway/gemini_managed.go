@@ -15,10 +15,10 @@ import (
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/batches/upstream"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/staging"
 )
 
 var errGeminiManagedBatchState = errors.New("Gemini managed batch state is unknown")
@@ -224,7 +224,7 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 		return upstreamError(failure)
 	}
 	defer response.Body.Close()
-	spool := s.transport().Spool
+	spool := s.deps.Staging
 	if spool == nil {
 		return serverError(http.StatusServiceUnavailable, "media_content_unavailable", "The bounded file spool is unavailable.")
 	}
@@ -233,18 +233,18 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 		contentType = "application/jsonl"
 	}
 	limit := min(s.cfg.MaxResponseBytes, batches.MaxBatchBytes)
-	raw, err := spool.Put(ctx, media.Upload{
+	raw, err := spool.Put(ctx, staging.Upload{
 		Filename: "gemini-managed-results", ContentType: contentType, MaximumLength: limit, Body: response.Body,
 	})
 	if err != nil {
 		return serverError(http.StatusBadGateway, "upstream_response_too_large", "The Gemini batch file exceeded the bounded spool limit.")
 	}
 	defer spool.Remove(raw.Handle)
-	part := &media.Part{Handle: raw.Handle, Filename: "gemini-managed-results", ContentType: raw.ContentType, Size: raw.ContentLength, Limit: limit}
+	part := &staging.Part{Handle: raw.Handle, Filename: "gemini-managed-results", ContentType: raw.ContentType, Size: raw.ContentLength, Limit: limit}
 	if record.Role != "input" {
 		part, err = s.translateGeminiManagedContent(ctx, resource.RouteSlug, part, record.Role)
 		if err != nil {
-			var tooLarge *media.TooLargeError
+			var tooLarge *staging.TooLargeError
 			if errors.As(err, &tooLarge) {
 				return serverError(http.StatusBadGateway, "upstream_response_too_large", "The translated Gemini batch file exceeded the response limit.")
 			}
@@ -282,11 +282,11 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 	return nil
 }
 
-func (s *Server) translateGeminiManagedContent(ctx context.Context, routeSlug string, source *media.Part, role string) (*media.Part, error) {
+func (s *Server) translateGeminiManagedContent(ctx context.Context, routeSlug string, source *staging.Part, role string) (*staging.Part, error) {
 	if role != "output" && role != "error" {
 		return nil, errGeminiBatchFidelity
 	}
-	opened, err := s.transport().Spool.Open(source.Handle)
+	opened, err := s.deps.Staging.Open(source.Handle)
 	if err != nil {
 		return nil, err
 	}
@@ -387,19 +387,19 @@ func (s *Server) translateGeminiManagedContent(ctx context.Context, routeSlug st
 		done <- nil
 		_ = writer.Close()
 	}()
-	artifact, spoolErr := s.transport().Spool.Put(ctx, media.Upload{
+	artifact, spoolErr := s.deps.Staging.Put(ctx, staging.Upload{
 		Filename: source.Filename, ContentType: "application/jsonl", MaximumLength: limit, Body: reader,
 	})
 	_ = reader.Close()
 	translateErr := <-done
 	if spoolErr != nil || translateErr != nil {
 		if spoolErr == nil {
-			_ = s.transport().Spool.Remove(artifact.Handle)
+			_ = s.deps.Staging.Remove(artifact.Handle)
 		}
 		if spoolErr != nil {
 			return nil, spoolErr
 		}
 		return nil, translateErr
 	}
-	return &media.Part{Handle: artifact.Handle, Filename: source.Filename, ContentType: artifact.ContentType, Size: artifact.ContentLength, Limit: limit}, nil
+	return &staging.Part{Handle: artifact.Handle, Filename: source.Filename, ContentType: artifact.ContentType, Size: artifact.ContentLength, Limit: limit}, nil
 }

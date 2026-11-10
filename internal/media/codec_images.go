@@ -8,49 +8,57 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/staging"
 )
 
-// The stability and recraft wires are Stability AI's and Recraft's image
-// APIs. Both take an aspect ratio in place of a size.
-//
-// https://platform.stability.ai/docs/api-reference
-// https://www.recraft.ai/docs/api-reference/endpoints
-var stabilityCodec = codec{
-	OpImageGeneration: modelOnly(encodeStabilityImage),
-	OpImageEdit:       modelOnly(encodeStabilityEdit),
+var stabilityCodec = codec{imageGeneration: encodeStabilityImage, imageEdit: encodeStabilityEdit}
+
+var recraftCodec = codec{imageGeneration: encodeRecraftImage}
+
+var bflCodec = codec{imageGeneration: encodeBFLImage}
+
+type imageView struct {
+	prompt                     string
+	count                      *int64
+	size, format, outputFormat *string
+	extended                   bool
 }
 
-var recraftCodec = codec{
-	OpImageGeneration: modelOnly(encodeRecraftImage),
+func generationView(r *Request, p ImageGeneration) imageView {
+	extended := p.Quality != nil || p.Style != nil || p.Background != nil || p.Moderation != nil || p.OutputCompression != nil ||
+		p.PartialImages != nil || p.Stream || p.User != nil || len(r.Extra()) > 0
+	return imageView{p.Prompt, p.Count, p.Size, p.Format, p.OutputFormat, extended}
 }
 
-// refuseImageControls refuses the OpenAI image controls a vendor has no
-// counterpart for, and every response format but those it returns.
-func refuseImageControls(r *Request, vendor string, formats ...string) *Error {
+func editView(r *Request, p ImageEdit) imageView {
+	extended := p.Quality != nil || p.Background != nil || p.OutputCompression != nil || p.InputFidelity != nil ||
+		p.PartialImages != nil || p.Stream || p.User != nil || len(r.Extra()) > 0
+	return imageView{p.Prompt, p.Count, p.Size, p.Format, p.OutputFormat, extended}
+}
+
+func (v imageView) refuse(vendor string, formats ...string) *Error {
 	switch {
-	case r.Quality != nil, r.Style != nil, r.Background != nil, r.Moderation != nil, r.OutputCompression != nil, r.InputFidelity != nil,
-		r.PartialImages != nil, r.Stream, r.User != nil, len(r.Extra) > 0:
+	case v.extended:
 		return invalidMedia(vendor + " does not support the requested image parameters.")
-	case r.Format != nil && !slices.Contains(formats, *r.Format):
+	case v.format != nil && !slices.Contains(formats, *v.format):
 		return invalidMedia(vendor + " returns images as " + strings.Join(formats, " or ") + ".")
 	}
 	return nil
 }
 
-// imageAspectRatio is the aspect ratio of an OpenAI image size, if any.
-func imageAspectRatio(r *Request, vendor string) (string, *Error) {
-	if r.Size == nil || *r.Size == "auto" {
+func imageAspectRatio(size *string, vendor string) (string, *Error) {
+	if size == nil || *size == "auto" {
 		return "", nil
 	}
-	ratio, ok := imageAspectRatios[*r.Size]
+	ratio, ok := imageAspectRatios[*size]
 	if !ok {
 		return "", invalidMedia("The size is not supported by " + vendor + ".")
 	}
 	return ratio, nil
 }
 
-// stabilityGenerations are the Stability generation services and the models
-// each serves; Stable Diffusion 3.5 names its model in the request.
 func stabilityService(model string) (string, bool) {
 	switch {
 	case model == "stable-image-ultra":
@@ -63,30 +71,29 @@ func stabilityService(model string) (string, bool) {
 	return "", false
 }
 
-func stabilityFields(r *Request) ([]Field, *Error) {
-	if failure := refuseImageControls(r, "Stability", "b64_json"); failure != nil {
+func stabilityFields(v imageView) ([]staging.Field, *Error) {
+	if failure := v.refuse("Stability", "b64_json"); failure != nil {
 		return nil, failure
 	}
-	if r.Count != nil && *r.Count != 1 {
+	if imageCount(v.count) != 1 {
 		return nil, invalidMedia("Stability generates one image per request.")
 	}
-	if r.OutputFormat != nil && !slices.Contains([]string{"png", "jpeg", "webp"}, *r.OutputFormat) {
+	if v.outputFormat != nil && !slices.Contains([]string{"png", "jpeg", "webp"}, *v.outputFormat) {
 		return nil, invalidMedia("Stability returns png, jpeg or webp images.")
 	}
-	fields := textValue(nil, "prompt", r.Prompt)
-	return textField(fields, "output_format", r.OutputFormat), nil
+	return textField(textValue(nil, "prompt", v.prompt), "output_format", v.outputFormat), nil
 }
 
-func encodeStabilityImage(r *Request, model string) (*UpstreamCall, *Error) {
+func encodeStabilityImage(r *Request, p ImageGeneration, _ connectors.Config, model string) (*UpstreamCall, *Error) {
 	service, named := stabilityService(model)
 	if service == "" {
 		return nil, invalidMedia("The model is not a Stability generation service: stable-image-ultra, stable-image-core or an sd3.5 model.")
 	}
-	fields, failure := stabilityFields(r)
+	fields, failure := stabilityFields(generationView(r, p))
 	if failure != nil {
 		return nil, failure
 	}
-	ratio, failure := imageAspectRatio(r, "Stability")
+	ratio, failure := imageAspectRatio(p.Size, "Stability")
 	if failure != nil {
 		return nil, failure
 	}
@@ -96,46 +103,42 @@ func encodeStabilityImage(r *Request, model string) (*UpstreamCall, *Error) {
 	if named {
 		fields = textValue(fields, "model", model)
 	}
-	return &UpstreamCall{Method: http.MethodPost, Path: "v2beta/stable-image/" + service, Accept: "application/json", Fields: fields,
-		Kind: ResponseImages, Ambiguous: true, DecodeImages: decodeStabilityImage}, nil
+	return &UpstreamCall{Method: http.MethodPost, Endpoint: Path{Path: "v2beta/stable-image/" + service}, Accept: "application/json", Body: FormBody(fields),
+		Response: ImageReply{Decode: decodeStabilityImage}, Ambiguous: true}, nil
 }
 
-// encodeStabilityEdit inpaints one image, under its mask or its transparent
-// areas, as OpenAI's edits do.
-func encodeStabilityEdit(r *Request, model string) (*UpstreamCall, *Error) {
+func encodeStabilityEdit(r *Request, p ImageEdit, _ connectors.Config, model string) (*UpstreamCall, *Error) {
 	if model != "stable-image-inpaint" {
 		return nil, invalidMedia("Stability edits images with stable-image-inpaint.")
 	}
-	if len(r.Images) != 1 || r.Size != nil {
+	if len(p.Images) != 1 || p.Size != nil {
 		return nil, invalidMedia("Stability inpaints one image at its own size.")
 	}
-	fields, failure := stabilityFields(r)
+	fields, failure := stabilityFields(editView(r, p))
 	if failure != nil {
 		return nil, failure
 	}
-	fields = append(fields, Field{Name: "image", File: &r.Images[0]})
-	if r.Mask != nil {
-		fields = append(fields, Field{Name: "mask", File: r.Mask})
+	fields = append(fields, staging.Field{Name: "image", Value: p.Images[0]})
+	if p.Mask != nil {
+		fields = append(fields, staging.Field{Name: "mask", Value: *p.Mask})
 	}
-	return &UpstreamCall{Method: http.MethodPost, Path: "v2beta/stable-image/edit/inpaint", Accept: "application/json", Fields: fields,
-		Kind: ResponseImages, Ambiguous: true, DecodeImages: decodeStabilityImage}, nil
+	return &UpstreamCall{Method: http.MethodPost, Endpoint: Path{Path: "v2beta/stable-image/edit/inpaint"}, Accept: "application/json", Body: FormBody(fields),
+		Response: ImageReply{Decode: decodeStabilityImage}, Ambiguous: true}, nil
 }
 
-// decodeStabilityImage reads Stability's one image, which its content filter
-// may withhold.
-func decodeStabilityImage(body []byte, stage func(string, int) (*Artifact, *Error)) (*ImageResult, *Error) {
+func decodeStabilityImage(body []byte, stage StageImage) (*ImageResult, *Error) {
 	var encodedWire struct {
 		Image        string `json:"image"`
 		FinishReason string `json:"finish_reason"`
 	}
 	if json.Unmarshal(body, &encodedWire) != nil {
-		return nil, protocolError("The provider image response is not valid JSON.")
+		return nil, ProtocolError("The provider image response is not valid JSON.")
 	}
 	switch {
 	case encodedWire.FinishReason == "CONTENT_FILTERED":
 		return nil, Fail(http.StatusBadRequest, "content_filter", "The provider's content filter refused the image request.")
 	case encodedWire.FinishReason != "SUCCESS" || encodedWire.Image == "":
-		return nil, protocolError("The provider image response carries no image.")
+		return nil, ProtocolError("The provider image response carries no image.")
 	}
 	staged, failure := stage(encodedWire.Image, 0)
 	if failure != nil {
@@ -145,21 +148,21 @@ func decodeStabilityImage(body []byte, stage func(string, int) (*Artifact, *Erro
 	return &ImageResult{CreatedAt: time.Now().Unix(), Images: []ImageArtifact{{Handle: &handle}}}, nil
 }
 
-func encodeRecraftImage(r *Request, model string) (*UpstreamCall, *Error) {
-	if failure := refuseImageControls(r, "Recraft", "url", "b64_json"); failure != nil {
+func encodeRecraftImage(r *Request, p ImageGeneration, _ connectors.Config, model string) (*UpstreamCall, *Error) {
+	if failure := generationView(r, p).refuse("Recraft", "url", "b64_json"); failure != nil {
 		return nil, failure
 	}
-	if r.Count != nil && (*r.Count < 1 || *r.Count > 6) {
+	if p.Count != nil && (*p.Count < 1 || *p.Count > 6) {
 		return nil, invalidMedia("Recraft generates 1 to 6 images per request.")
 	}
-	if r.OutputFormat != nil && *r.OutputFormat != "png" && *r.OutputFormat != "webp" {
+	if p.OutputFormat != nil && *p.OutputFormat != "png" && *p.OutputFormat != "webp" {
 		return nil, invalidMedia("Recraft returns png or webp images.")
 	}
-	ratio, failure := imageAspectRatio(r, "Recraft")
+	ratio, failure := imageAspectRatio(p.Size, "Recraft")
 	if failure != nil {
 		return nil, failure
 	}
-	fields := map[string]any{"prompt": r.Prompt, "model": model, "n": r.Count, "response_format": r.Format, "image_format": r.OutputFormat}
+	fields := map[string]any{"prompt": p.Prompt, "model": model, "n": p.Count, "response_format": p.Format, "image_format": p.OutputFormat}
 	if ratio != "" {
 		fields["size"] = ratio
 	}
@@ -167,37 +170,25 @@ func encodeRecraftImage(r *Request, model string) (*UpstreamCall, *Error) {
 	if failure != nil {
 		return nil, failure
 	}
-	// The raster path refuses vector models, whose SVG is no OpenAI image.
-	return &UpstreamCall{Method: http.MethodPost, Path: "images/generations/raster", JSON: body, Kind: ResponseImages, Ambiguous: true}, nil
+	return &UpstreamCall{Method: http.MethodPost, Endpoint: Path{Path: "images/generations/raster"}, Body: JSONBody(body), Response: ImageReply{}, Ambiguous: true}, nil
 }
 
-// The bfl wire is Black Forest Labs' FLUX API, which works asynchronously:
-// a submission answers with a polling URL, the poll reports the work's
-// status, and a ready result names a signed image URL, which expires in
-// minutes and takes no credential.
-//
-// https://docs.bfl.ai/api_integration/integration_guidelines
-var bflCodec = codec{
-	OpImageGeneration: modelOnly(encodeBFLImage),
-}
-
-// bflPoll is how long the work waits between polls.
 const bflPoll = time.Second
 
-func encodeBFLImage(r *Request, model string) (*UpstreamCall, *Error) {
-	if failure := refuseImageControls(r, "Black Forest Labs", "b64_json"); failure != nil {
+func encodeBFLImage(r *Request, p ImageGeneration, _ connectors.Config, model string) (*UpstreamCall, *Error) {
+	if failure := generationView(r, p).refuse("Black Forest Labs", "b64_json"); failure != nil {
 		return nil, failure
 	}
-	if r.Count != nil && *r.Count != 1 {
+	if imageCount(p.Count) != 1 {
 		return nil, invalidMedia("Black Forest Labs generates one image per request.")
 	}
-	if r.OutputFormat != nil && *r.OutputFormat != "png" && *r.OutputFormat != "jpeg" {
+	if p.OutputFormat != nil && *p.OutputFormat != "png" && *p.OutputFormat != "jpeg" {
 		return nil, invalidMedia("Black Forest Labs returns png or jpeg images.")
 	}
-	fields := map[string]any{"prompt": r.Prompt, "output_format": r.OutputFormat}
-	if r.Size != nil && *r.Size != "auto" {
+	fields := map[string]any{"prompt": p.Prompt, "output_format": p.OutputFormat}
+	if p.Size != nil && *p.Size != "auto" {
 		var width, height int
-		if _, err := fmt.Sscanf(*r.Size, "%dx%d", &width, &height); err != nil || width < 64 || height < 64 {
+		if _, err := fmt.Sscanf(*p.Size, "%dx%d", &width, &height); err != nil || width < 64 || height < 64 {
 			return nil, invalidMedia("The size is not supported by Black Forest Labs.")
 		}
 		fields["width"], fields["height"] = width, height
@@ -206,13 +197,11 @@ func encodeBFLImage(r *Request, model string) (*UpstreamCall, *Error) {
 	if failure != nil {
 		return nil, failure
 	}
-	return &UpstreamCall{Method: http.MethodPost, Path: url.PathEscape(model), Accept: "application/json", JSON: body, Kind: ResponseImages, Ambiguous: true,
-		Next: nextBFLStep, StepDomains: []string{"bfl.ai"}}, nil
+	return &UpstreamCall{Method: http.MethodPost, Endpoint: Path{Path: url.PathEscape(model)}, Accept: "application/json", Body: JSONBody(body),
+		Response: ImageReply{Poll: &Poll{Next: nextBFLStep, Domains: []string{"bfl.ai"}}}, Ambiguous: true}, nil
 }
 
-// nextBFLStep follows a submission to its polling URL, polls until the work
-// is ready, and then fetches the image.
-func nextBFLStep(body []byte) (*Step, *Error) {
+func nextBFLStep(body []byte) (Step, *Error) {
 	var encodedWire struct {
 		PollingURL string `json:"polling_url"`
 		Status     string `json:"status"`
@@ -221,17 +210,17 @@ func nextBFLStep(body []byte) (*Step, *Error) {
 		} `json:"result"`
 	}
 	if json.Unmarshal(body, &encodedWire) != nil {
-		return nil, protocolError("The provider's image work answered with invalid JSON.")
+		return nil, ProtocolError("The provider's image work answered with invalid JSON.")
 	}
 	switch {
 	case encodedWire.PollingURL != "" && encodedWire.Status == "":
-		return &Step{URL: encodedWire.PollingURL, Wait: bflPoll, Credentials: true}, nil
+		return Visit{URL: encodedWire.PollingURL, Wait: bflPoll, Credentials: true}, nil
 	case encodedWire.Status == "Pending" || encodedWire.Status == "Reasoning" || encodedWire.Status == "Generating":
-		return nil, nil
+		return Again{}, nil
 	case encodedWire.Status == "Ready" && encodedWire.Result.Sample != "":
-		return &Step{URL: encodedWire.Result.Sample, Asset: "image/"}, nil
+		return Fetch{URL: encodedWire.Result.Sample, Prefix: "image/"}, nil
 	case encodedWire.Status == "Request Moderated" || encodedWire.Status == "Content Moderated":
 		return nil, Fail(http.StatusBadRequest, "content_filter", "The provider's content filter refused the image request.")
 	}
-	return nil, protocolError("The provider's image work failed.")
+	return nil, ProtocolError("The provider's image work failed.")
 }

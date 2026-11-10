@@ -14,7 +14,6 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
-	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
@@ -211,12 +210,9 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 				return usage.Cost{}, true
 			}
 			if mediaRequest != nil {
-				if mediaRequest.Op != media.OpVideoCreate {
+				seconds, video := mediaRequest.VideoSeconds()
+				if !video {
 					return usage.Cost{}, false
-				}
-				seconds := "4"
-				if mediaRequest.Seconds != nil {
-					seconds = *mediaRequest.Seconds
 				}
 				return price.Cost(usage.AttemptUsage{Complete: true, UsageQuantities: usage.UsageQuantities{MediaUnits: &seconds}}, now, true, discount)
 			}

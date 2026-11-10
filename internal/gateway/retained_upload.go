@@ -12,10 +12,10 @@ import (
 	"slices"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/staging"
 )
 
 func retainedFileOperation(r *resources.Resource) string {
@@ -44,7 +44,7 @@ func retainedFilePurposeOperation(purpose string) string {
 
 // Native retained-family uploads keep file bytes in the existing bounded spool
 // and persist their at-most-once submission identity before the provider sees it.
-func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *call, a keyauthority.Authority, route *routing.Route, file *media.Part, purpose string, extra map[string]string) {
+func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *call, a keyauthority.Authority, route *routing.Route, file *staging.Part, purpose string, extra map[string]string) {
 	status := http.StatusInternalServerError
 	var p *pin
 	defer func() { s.finish(x, nil, status); s.retainedSettle(r.Context(), x, p) }()
@@ -148,8 +148,8 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *c
 	status = s.retainedDispatch(w, r.WithContext(ctx), x, p, e, resource, endpoint, body, contentType, true, fail)
 }
 
-func (s *Server) retainedUploadBody(file *media.Part, purpose string) ([]byte, string, error) {
-	opened, err := s.transport().Spool.Open(file.Handle)
+func (s *Server) retainedUploadBody(file *staging.Part, purpose string) ([]byte, string, error) {
+	opened, err := s.deps.Staging.Open(file.Handle)
 	if err != nil {
 		return nil, "", err
 	}

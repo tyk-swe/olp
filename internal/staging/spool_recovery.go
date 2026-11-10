@@ -1,4 +1,4 @@
-package media
+package staging
 
 import (
 	"errors"
@@ -7,14 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/google/uuid"
 	"golang.org/x/sys/unix"
 )
 
 const spoolOwnerFile = ".owner.lock"
 
-// Serialize recovery with directory registration: another process must never
-// mistake a newly created directory for an abandoned, unlocked spool.
 func openSpoolDirectory(base string) (string, *os.File, error) {
 	recovery, err := os.OpenFile(filepath.Join(base, ".recovery.lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
@@ -36,7 +33,7 @@ func openSpoolDirectory(base string) (string, *os.File, error) {
 			return "", nil, err
 		}
 	}
-	root := filepath.Join(base, fmt.Sprintf("olp-media-%d-%s", os.Getpid(), uuid.Must(uuid.NewV7())))
+	root := filepath.Join(base, fmt.Sprintf("olp-media-%d-%s", os.Getpid(), newHandle()))
 	if err := os.Mkdir(root, 0700); err != nil {
 		return "", nil, err
 	}
@@ -56,8 +53,6 @@ func openSpoolDirectory(base string) (string, *os.File, error) {
 func reclaimSpool(root string) error {
 	owner, err := os.OpenFile(filepath.Join(root, spoolOwnerFile), os.O_RDWR, 0)
 	if errors.Is(err, os.ErrNotExist) {
-		// Registration holds the recovery lock until the ownership lock exists,
-		// so a spool without one was abandoned before registration finished.
 		return os.RemoveAll(root)
 	}
 	if err != nil {
@@ -70,7 +65,5 @@ func reclaimSpool(root string) error {
 		}
 		return err
 	}
-	// The kernel releases the ownership lock on exit, including SIGKILL. Keep
-	// it until removal finishes so concurrent cleanup cannot claim these files.
 	return os.RemoveAll(root)
 }

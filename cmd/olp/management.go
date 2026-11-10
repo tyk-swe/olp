@@ -6,6 +6,8 @@ import (
 	"net/http"
 
 	"github.com/tyk-swe/olp/internal/guardrails/attachment"
+	"github.com/tyk-swe/olp/internal/media/jobs"
+	"github.com/tyk-swe/olp/internal/staging"
 
 	"github.com/tyk-swe/olp/internal/guardrails/policy"
 
@@ -40,7 +42,6 @@ import (
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/mcp/registration"
-	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/modelcatalog"
 	"github.com/tyk-swe/olp/internal/notifications"
 	"github.com/tyk-swe/olp/internal/observability"
@@ -72,7 +73,8 @@ type Management struct {
 	Limits         *sharedLimits
 	Runtime        *release.Manager
 	Gateway        *gateway.Server
-	Media          *media.Service
+	Media          *jobs.Service
+	Spool          *staging.Spool
 	Health         *observability.Cache
 	Log            *slog.Logger
 	PluginRuntime  *plugins.Runtime
@@ -158,7 +160,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	catalogue.Activated = routeServer.Activated
 	routeServer.Register(mux)
 	(&gateway.Playground{Access: m.Access, Gateway: m.Gateway}).Register(mux)
-	(&media.Management{Access: m.Access, Pool: m.Access.Pool, Jobs: m.Media, Log: m.Log}).Register(mux)
+	(&jobs.API{Access: m.Access, Jobs: m.Media, Spool: m.Spool, Log: m.Log}).Register(mux)
 	codeaccount.NewAPI(m.Access).Register(mux)
 	codepool.NewAPI(m.Access).Register(mux)
 	codebudget.NewAPI(m.Access).Register(mux)

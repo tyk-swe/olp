@@ -16,10 +16,10 @@ import (
 
 	"github.com/google/uuid"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/staging"
 )
 
 const anthropicFilesBeta = "files-api-2025-04-14"
@@ -106,18 +106,17 @@ func (s *Server) anthropicUploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer form.Cleanup()
-	file, mediaErr := form.TakeSingleFile("file")
-	if mediaErr != nil || file == nil {
+	file := form.TakeSingleFile("file")
+	if form.Err() != nil || file == nil {
 		s.stateFail(x, w, invalidRequest("invalid_request", "Upload exactly one file part.", nil), x.family)
 		return
 	}
-	extra, mediaErr := form.TakeExtensions()
-	if mediaErr != nil || len(extra) != 0 {
+	if extra := form.TakeExtensions(); form.Err() != nil || len(extra) != 0 {
 		s.stateFail(x, w, invalidRequest("invalid_request", "Anthropic file uploads accept only one file part.", nil), x.family)
 		return
 	}
 	form.Disarm()
-	defer s.transport().Spool.Remove(file.Handle)
+	defer s.deps.Staging.Remove(file.Handle)
 	p, err := s.anthropicPin(r.Context(), x, route)
 	if err != nil {
 		s.stateFail(x, w, err, x.family)
@@ -311,12 +310,12 @@ func (s *Server) anthropicFileContent(w http.ResponseWriter, r *http.Request) {
 		if contentType == "" {
 			contentType = "application/octet-stream"
 		}
-		artifact, err := s.transport().Spool.Put(ctx, media.Upload{Filename: "file-content", ContentType: contentType, MaximumLength: s.cfg.MaxResponseBytes, Body: resp.Body})
+		artifact, err := s.deps.Staging.Put(ctx, staging.Upload{Filename: "file-content", ContentType: contentType, MaximumLength: s.cfg.MaxResponseBytes, Body: resp.Body})
 		if err != nil {
 			return serverError(http.StatusBadGateway, "media_content_unavailable", "The provider file could not be staged.")
 		}
-		defer s.transport().Spool.Remove(artifact.Handle)
-		opened, err := s.transport().Spool.Open(artifact.Handle)
+		defer s.deps.Staging.Remove(artifact.Handle)
+		opened, err := s.deps.Staging.Open(artifact.Handle)
 		if err != nil {
 			return serverError(http.StatusBadGateway, "media_content_unavailable", "The staged provider file could not be read.")
 		}

@@ -1,10 +1,9 @@
-package media
+package staging
 
 import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"io"
 	"log/slog"
 	"mime/multipart"
@@ -72,27 +71,18 @@ func upload(t *testing.T, members ...member) *http.Request {
 	return request
 }
 
-func admit(t *testing.T, state *AdmissionState, route RouteAdmission) *Admission {
+func admit(t *testing.T, admission *Admission) *Lease {
 	t.Helper()
-	lease := state.TryAdmit(uploadKey, 1<<20)
+	lease := admission.TryAdmit(uploadKey, 1<<20)
 	if lease == nil {
 		t.Fatal("the upload was not admitted")
 	}
-	return &Admission{Route: route, Lease: lease}
-}
-
-func refusal(t *testing.T, err error) *Error {
-	t.Helper()
-	failure, ok := errors.AsType[*Error](err)
-	if !ok {
-		t.Fatalf("got %v, want a media error", err)
-	}
-	return failure
+	return lease
 }
 
 func TestParseMultipartStagesFilesAndKeepsCallerOrder(t *testing.T) {
 	spool := newSpool(t)
-	state := NewAdmissionState(MinCapacityBytes)
+	state := NewAdmission(MinCapacityBytes)
 	const audio = "RIFF fixture audio"
 	request := upload(t,
 		text("model", "whisper"),
@@ -100,9 +90,9 @@ func TestParseMultipartStagesFilesAndKeepsCallerOrder(t *testing.T) {
 		text("language", "\ufeffen"),
 	)
 
-	form, err := ParseMultipart(t.Context(), request, spool, admit(t, state, RouteAdmission{}), 1024, 1)
-	if err != nil {
-		t.Fatal(err)
+	form, failure := ParseMultipart(t.Context(), request, spool, admit(t, state), 1024, 1)
+	if failure != nil {
+		t.Fatal(failure)
 	}
 	fields, _ := form.SourceFields()
 	names := make([]string, len(fields))
@@ -112,12 +102,12 @@ func TestParseMultipartStagesFilesAndKeepsCallerOrder(t *testing.T) {
 	if want := []string{"model", "file", "language"}; !slices.Equal(names, want) {
 		t.Fatalf("got fields %v, want %v", names, want)
 	}
-	if language, failure := form.Required("language"); failure != nil || language != "en" {
-		t.Fatalf("got language %q, %v, want en", language, failure)
+	if language := form.Required("language"); language != "en" {
+		t.Fatalf("got language %q, want en", language)
 	}
-	part, failure := form.TakeSingleFile("file")
-	if failure != nil || part == nil {
-		t.Fatalf("got file %v, %v", part, failure)
+	part := form.TakeSingleFile("file")
+	if form.Err() != nil || part == nil {
+		t.Fatalf("got file %v, %v", part, form.Err())
 	}
 	digest := sha256.Sum256([]byte(audio))
 	want := Part{
@@ -173,8 +163,8 @@ func TestParseMultipartReportsWhenItChangedWhatTheCallerSent(t *testing.T) {
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			state := NewAdmissionState(MinCapacityBytes)
-			form, err := ParseMultipart(t.Context(), upload(t, c.member), newSpool(t), admit(t, state, RouteAdmission{}), 64, 1)
+			state := NewAdmission(MinCapacityBytes)
+			form, err := ParseMultipart(t.Context(), upload(t, c.member), newSpool(t), admit(t, state), 64, 1)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -198,47 +188,46 @@ func TestParseMultipartRefusesAndCleansUpRequestsOutsideItsLimits(t *testing.T) 
 	cases := map[string]struct {
 		members []member
 		mutate  func(*http.Request)
-		status  int
-		code    string
+		kind    Kind
 	}{
 		"more files than the endpoint takes": {
 			members: []member{staged, file("extra", "second.wav", "x"), file("third", "third.wav", "x")},
-			status:  http.StatusBadRequest, code: "invalid_request",
+			kind:    Invalid,
 		},
 		"a file over the size limit": {
 			members: []member{staged, file("extra", "big.wav", strings.Repeat("x", 65))},
-			status:  http.StatusRequestEntityTooLarge, code: "media_too_large",
+			kind:    TooLarge,
 		},
 		"a text field over 64 KiB": {
-			members: []member{staged, text("prompt", strings.Repeat("x", MaxTextFieldBytes+1))},
-			status:  http.StatusBadRequest, code: "invalid_request",
+			members: []member{staged, text("prompt", strings.Repeat("x", maxTextFieldBytes+1))},
+			kind:    Invalid,
 		},
 		"text fields over the aggregate limit": {
-			members: append([]member{staged}, slices.Repeat([]member{text("prompt", strings.Repeat("x", MaxTextFieldBytes))}, MaxTextTotalBytes/MaxTextFieldBytes+1)...),
-			status:  http.StatusBadRequest, code: "invalid_request",
+			members: append([]member{staged}, slices.Repeat([]member{text("prompt", strings.Repeat("x", maxTextFieldBytes))}, maxTextTotalBytes/maxTextFieldBytes+1)...),
+			kind:    Invalid,
 		},
 		"more fields than the parser takes": {
-			members: append([]member{staged}, fields(MaxFields)...),
-			status:  http.StatusBadRequest, code: "invalid_request",
+			members: append([]member{staged}, fields(maxFields)...),
+			kind:    Invalid,
 		},
 		"a field without a name": {
 			members: []member{staged, text("", "x")},
-			status:  http.StatusBadRequest, code: "invalid_request",
+			kind:    Invalid,
 		},
 		"text that is not UTF-8": {
 			members: []member{staged, text("prompt", "\xff\xfe")},
-			status:  http.StatusBadRequest, code: "invalid_request",
+			kind:    Invalid,
 		},
 		"a filename that names no file": {
 			members: []member{staged, file("extra", "..", "x")},
-			status:  http.StatusBadRequest, code: "invalid_request",
+			kind:    Invalid,
 		},
 		"a body over the request limit": {
 			members: []member{staged, text("prompt", strings.Repeat("x", 4096))},
 			mutate: func(r *http.Request) {
 				r.Body = http.MaxBytesReader(httptest.NewRecorder(), r.Body, 1024)
 			},
-			status: http.StatusRequestEntityTooLarge, code: "media_too_large",
+			kind: TooLarge,
 		},
 		"a truncated body": {
 			members: []member{staged, text("prompt", "cut short")},
@@ -246,39 +235,39 @@ func TestParseMultipartRefusesAndCleansUpRequestsOutsideItsLimits(t *testing.T) 
 				body, _ := io.ReadAll(r.Body)
 				r.Body = io.NopCloser(bytes.NewReader(body[:len(body)-8]))
 			},
-			status: http.StatusBadRequest, code: "invalid_request",
+			kind: Invalid,
 		},
 		"a boundary with a quote in it": {
 			members: []member{staged},
 			mutate: func(r *http.Request) {
 				r.Header.Set("Content-Type", `multipart/form-data; boundary="a\"b"`)
 			},
-			status: http.StatusBadRequest, code: "invalid_request",
+			kind: Invalid,
 		},
 		"a body that is not multipart": {
 			members: []member{staged},
 			mutate: func(r *http.Request) {
 				r.Header.Set("Content-Type", "application/json")
 			},
-			status: http.StatusBadRequest, code: "invalid_request",
+			kind: Invalid,
 		},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			spool := newSpool(t)
-			state := NewAdmissionState(MinCapacityBytes)
+			state := NewAdmission(MinCapacityBytes)
 			request := upload(t, c.members...)
 			if c.mutate != nil {
 				c.mutate(request)
 			}
 
-			form, err := ParseMultipart(t.Context(), request, spool, admit(t, state, RouteAdmission{}), 64, 2)
-			if err == nil {
+			form, failure := ParseMultipart(t.Context(), request, spool, admit(t, state), 64, 2)
+			if failure == nil {
 				form.Cleanup()
 				t.Fatal("the request was accepted")
 			}
-			if failure := refusal(t, err); failure.Status != c.status || failure.Code != c.code {
-				t.Fatalf("got %d %s (%s), want %d %s", failure.Status, failure.Code, failure.Message, c.status, c.code)
+			if failure.Kind != c.kind {
+				t.Fatalf("got kind %d (%s), want %d", failure.Kind, failure.Message, c.kind)
 			}
 			if spool.UsedBytes() != 0 {
 				t.Fatalf("the refused request left %d bytes staged", spool.UsedBytes())
@@ -298,54 +287,14 @@ func TestParseMultipartRefusesAndCleansUpRequestsOutsideItsLimits(t *testing.T) 
 }
 
 func TestParseMultipartRequiresAnAdmittedUpload(t *testing.T) {
-	_, err := ParseMultipart(t.Context(), upload(t, text("model", "whisper")), newSpool(t), &Admission{}, 64, 1)
-	if failure := refusal(t, err); failure.Status != http.StatusServiceUnavailable {
-		t.Fatalf("got %d %s, want 503", failure.Status, failure.Code)
-	}
-}
-
-func TestParseMultipartHoldsTheModelFieldToTheRoutePolicy(t *testing.T) {
-	authorized := RouteAdmission{Kind: RouteRequireAuthorizedModel, Allowed: []string{"whisper", "scribe"}}
-	expected := RouteAdmission{Kind: RouteExpected, Expected: "whisper"}
-	cases := map[string]struct {
-		route   RouteAdmission
-		members []member
-		status  int
-	}{
-		"an authorized route":                  {authorized, []member{text("model", "scribe")}, 0},
-		"a route the key may not use":          {authorized, []member{text("model", "other")}, http.StatusForbidden},
-		"no model on a restricted key":         {authorized, []member{text("prompt", "hi")}, http.StatusBadRequest},
-		"a model sent as a file":               {authorized, []member{file("model", "whisper", "whisper")}, http.StatusBadRequest},
-		"an authorized then a forbidden model": {authorized, []member{text("model", "scribe"), text("model", "other")}, http.StatusForbidden},
-		"the route named by the header":        {expected, []member{text("model", "whisper")}, 0},
-		"a model that contradicts the header":  {expected, []member{text("model", "scribe")}, http.StatusBadRequest},
-		"no model on an unrestricted key":      {RouteAdmission{}, []member{text("prompt", "hi")}, 0},
-		"any model on an unrestricted key":     {RouteAdmission{}, []member{text("model", "other")}, 0},
-	}
-	for name, c := range cases {
-		t.Run(name, func(t *testing.T) {
-			state := NewAdmissionState(MinCapacityBytes)
-			form, err := ParseMultipart(t.Context(), upload(t, c.members...), newSpool(t), admit(t, state, c.route), 64, 1)
-			if c.status == 0 {
-				if err != nil {
-					t.Fatal(err)
-				}
-				form.Cleanup()
-				return
-			}
-			if err == nil {
-				form.Cleanup()
-				t.Fatal("the request was accepted")
-			}
-			if failure := refusal(t, err); failure.Status != c.status {
-				t.Fatalf("got %d %s (%s), want %d", failure.Status, failure.Code, failure.Message, c.status)
-			}
-		})
+	_, err := ParseMultipart(t.Context(), upload(t, text("model", "whisper")), newSpool(t), nil, 64, 1)
+	if err == nil || err.Kind != Overloaded {
+		t.Fatalf("got %v, want an overloaded refusal", err)
 	}
 }
 
 func TestAdmissionBoundsStagedUploadsPerKeyAndInTotal(t *testing.T) {
-	state := NewAdmissionState(100)
+	state := NewAdmission(100)
 	if state.TryAdmit("idle", 0) != nil || state.TryAdmit("idle", 51) != nil {
 		t.Fatal("a reservation outside half the spool capacity was admitted")
 	}
@@ -375,8 +324,8 @@ func TestAdmissionBoundsStagedUploadsPerKeyAndInTotal(t *testing.T) {
 func TestFormOrdersFileArraysAndRefusesAmbiguousFields(t *testing.T) {
 	parse := func(t *testing.T, members ...member) *Form {
 		t.Helper()
-		state := NewAdmissionState(MinCapacityBytes)
-		form, err := ParseMultipart(t.Context(), upload(t, members...), newSpool(t), admit(t, state, RouteAdmission{}), 64, 16)
+		state := NewAdmission(MinCapacityBytes)
+		form, err := ParseMultipart(t.Context(), upload(t, members...), newSpool(t), admit(t, state), 64, 16)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -389,9 +338,9 @@ func TestFormOrdersFileArraysAndRefusesAmbiguousFields(t *testing.T) {
 			file("image[]", "appended.png", "x"), file("image[10]", "ten.png", "x"),
 			file("image[2]", "two.png", "x"), file("image", "bare.png", "x"), file("mask", "mask.png", "x"),
 		)
-		parts, failure := form.TakeFilesWithPrefix("image")
-		if failure != nil {
-			t.Fatal(failure)
+		parts := form.TakeFilesWithPrefix("image")
+		if form.Err() != nil {
+			t.Fatal(form.Err())
 		}
 		names := make([]string, len(parts))
 		for i, part := range parts {
@@ -400,85 +349,81 @@ func TestFormOrdersFileArraysAndRefusesAmbiguousFields(t *testing.T) {
 		if want := []string{"bare.png", "two.png", "ten.png", "appended.png"}; !slices.Equal(names, want) {
 			t.Fatalf("got %v, want %v", names, want)
 		}
-		if mask, failure := form.TakeSingleFile("mask"); failure != nil || mask == nil || mask.Filename != "mask.png" {
-			t.Fatalf("got mask %v, %v", mask, failure)
+		if mask := form.TakeSingleFile("mask"); form.Err() != nil || mask == nil || mask.Filename != "mask.png" {
+			t.Fatalf("got mask %v, %v", mask, form.Err())
 		}
 	})
 
 	refused := map[string]struct {
 		members []member
-		take    func(*Form) *Error
+		take    func(*Form)
 	}{
 		"a file index with a leading zero": {
 			[]member{file("image[01]", "a.png", "x")},
-			func(f *Form) *Error { _, failure := f.TakeFilesWithPrefix("image"); return failure },
+			func(f *Form) { f.TakeFilesWithPrefix("image") },
 		},
 		"a file index that is not a number": {
 			[]member{file("image[x]", "a.png", "x")},
-			func(f *Form) *Error { _, failure := f.TakeFilesWithPrefix("image"); return failure },
+			func(f *Form) { f.TakeFilesWithPrefix("image") },
 		},
 		"text where a file belongs": {
 			[]member{text("image[0]", "x")},
-			func(f *Form) *Error { _, failure := f.TakeFilesWithPrefix("image"); return failure },
+			func(f *Form) { f.TakeFilesWithPrefix("image") },
 		},
 		"a single file sent twice": {
 			[]member{file("clip", "a.wav", "x"), file("clip", "b.wav", "x")},
-			func(f *Form) *Error { _, failure := f.TakeSingleFile("clip"); return failure },
+			func(f *Form) { f.TakeSingleFile("clip") },
 		},
 		"a single value sent twice": {
 			[]member{text("language", "en"), text("language", "fr")},
-			func(f *Form) *Error { _, failure := f.Optional("language"); return failure },
+			func(f *Form) { f.Optional("language") },
 		},
 		"a missing required value": {
 			[]member{text("language", "en")},
-			func(f *Form) *Error { _, failure := f.Required("model"); return failure },
+			func(f *Form) { f.Required("model") },
 		},
 		"a number that is not one": {
 			[]member{text("n", "many")},
-			func(f *Form) *Error { _, failure := f.OptionalInt("n"); return failure },
+			func(f *Form) { f.OptionalInt("n") },
 		},
 		"bare and array values mixed": {
 			[]member{text("include", "a"), text("include[]", "b")},
-			func(f *Form) *Error { _, failure := f.TakeRepeated("include"); return failure },
+			func(f *Form) { f.TakeRepeated("include") },
 		},
 		"an indexed text array": {
 			[]member{text("include[0]", "a")},
-			func(f *Form) *Error { _, failure := f.TakeRepeated("include"); return failure },
+			func(f *Form) { f.TakeRepeated("include") },
 		},
 		"an unknown field sent twice": {
 			[]member{text("extra", "a"), text("extra", "b")},
-			func(f *Form) *Error { _, failure := f.TakeExtensions(); return failure },
+			func(f *Form) { f.TakeExtensions() },
 		},
 		"an unknown file": {
 			[]member{file("extra", "a.bin", "x")},
-			func(f *Form) *Error { _, failure := f.TakeExtensions(); return failure },
+			func(f *Form) { f.TakeExtensions() },
 		},
 	}
 	for name, c := range refused {
 		t.Run(name, func(t *testing.T) {
-			if failure := c.take(parse(t, c.members...)); failure == nil || failure.Status != http.StatusBadRequest {
-				t.Fatalf("got %v, want a 400", failure)
+			form := parse(t, c.members...)
+			c.take(form)
+			if form.Err() == nil {
+				t.Fatal("the form accepted the field")
 			}
 		})
 	}
 
 	t.Run("repeated text accepts either spelling", func(t *testing.T) {
 		form := parse(t, text("include", "a"), text("include", "b"), text("tag[]", "c"), text("n", "3"))
-		include, failure := form.TakeRepeated("include")
-		if failure != nil || !slices.Equal(include, []string{"a", "b"}) {
-			t.Fatalf("got %v, %v", include, failure)
+		include := form.TakeRepeated("include")
+		tags := form.TakeRepeated("tag")
+		count := form.OptionalInt("n")
+		extra := form.TakeExtensions()
+		if form.Err() != nil || !slices.Equal(include, []string{"a", "b"}) || !slices.Equal(tags, []string{"c"}) || count == nil || *count != 3 {
+			t.Fatalf("got include %v, tags %v, count %v, %v", include, tags, count, form.Err())
 		}
-		tags, failure := form.TakeRepeated("tag")
-		if failure != nil || !slices.Equal(tags, []string{"c"}) {
-			t.Fatalf("got %v, %v", tags, failure)
-		}
-		count, failure := form.OptionalInt("n")
-		if failure != nil || count == nil || *count != 3 {
-			t.Fatalf("got %v, %v", count, failure)
-		}
-		extra, failure := form.TakeExtensions()
-		if failure != nil || len(extra) != 0 {
-			t.Fatalf("consumed fields came back as extensions: %v, %v", extra, failure)
+		if len(extra) != 0 {
+			t.Fatalf("consumed fields came back as extensions: %v", extra)
 		}
 	})
 }

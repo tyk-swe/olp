@@ -7,7 +7,6 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
-	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/protocols"
 )
 
@@ -111,25 +110,6 @@ func applySlotRules(x *call, rules []contentpolicy.CompiledRule, phase string, v
 		recordDecision(x, contentpolicy.Decision{RuleID: rule.ID, Phase: phase, Action: contentpolicy.ActionRedact, Outcome: contentpolicy.OutcomeRedacted})
 	}
 	return false
-}
-
-func (s *Server) enforceMediaInput(x *call, request *media.Request) *Error {
-	if x.strict() {
-		// Every strict target was checked against its actual effective native
-		// call during selection. Mutating this detached typed adapter would not
-		// mutate the immutable outbound OIF source.
-		return nil
-	}
-	compiled, e := compiledPolicy(x.route)
-	if compiled == nil || e != nil {
-		return e
-	}
-	for _, slot := range []*string{&request.Prompt, &request.Input, request.TextPrompt, request.Instructions} {
-		if applySlotRules(x, compiled.Input, contentpolicy.PhaseInput, slot) {
-			return invalidRequest("content_policy_blocked", "The request was blocked by the route's content policy.", nil)
-		}
-	}
-	return nil
 }
 
 func (s *Server) enforceCompletionOutput(x *call, completion *wire.Completion) *Error {

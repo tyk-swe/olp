@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/staging"
 )
 
 // Error is an OpenAI-shaped error returned to inference clients.
@@ -133,4 +134,19 @@ func (e *Error) surfaceBody(surface string) []byte {
 		return b
 	}
 	return e.body()
+}
+
+func stagingError(failure *staging.Error) *Error {
+	switch failure.Kind {
+	case staging.TooLarge:
+		return &Error{Status: http.StatusRequestEntityTooLarge, Type: "invalid_request_error", Code: "media_too_large", Message: failure.Message}
+	case staging.Timeout:
+		return &Error{Status: http.StatusRequestTimeout, Type: "invalid_request_error", Code: "multipart_parser_timeout", Message: failure.Message}
+	case staging.Overloaded:
+		return serverError(http.StatusServiceUnavailable, "media_admission_overloaded", failure.Message)
+	case staging.Unavailable:
+		return serverError(http.StatusServiceUnavailable, "media_spool_unavailable", failure.Message)
+	default:
+		return invalidRequest("invalid_request", failure.Message, nil)
+	}
 }

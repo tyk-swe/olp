@@ -19,6 +19,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/media/transport"
+	"github.com/tyk-swe/olp/internal/staging"
+
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/google/uuid"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
@@ -690,28 +693,27 @@ func TestEmbeddingsRejectInvalidResultIndices(t *testing.T) {
 
 func TestTransformedMediaPreservesUsage(t *testing.T) {
 	h := newHarness(t, Config{MaxMediaBodyBytes: 1 << 20})
-	spool, err := media.NewSpool(t.TempDir(), media.MinCapacityBytes, nil)
+	spool, err := staging.NewSpool(t.TempDir(), staging.MinCapacityBytes, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = spool.Close() })
-	h.gateway.deps.Media = &MediaDeps{
-		Jobs: &media.Service{Transport: &media.Transport{
-			Client: h.gateway.client, Auth: h.gateway.auth, Egress: h.gateway.egress,
-			Spool: spool, MaxResponseBytes: 1 << 20,
-		}},
-		Admission: media.NewAdmissionState(spool.CapacityBytes()),
-	}
+	h.gateway.deps.Media = &MediaDeps{Transport: transport.New(transport.Deps{
+		Client: h.gateway.client, Auth: h.gateway.auth, Egress: h.gateway.egress,
+		Spool: spool, MaxResponseBytes: 1 << 20, Log: h.gateway.log,
+	})}
+	h.gateway.deps.Staging = spool
+	h.gateway.deps.Uploads = staging.NewAdmission(spool.CapacityBytes())
 	h.republish(func(snapshot *routing.Snapshot, a, b routing.Provider) {
 		for _, provider := range []routing.Provider{a, b} {
 			provider.Capabilities = []routing.Capability{
-				{Model: provider.Capabilities[0].Model, Operation: media.OpImageGeneration, Surface: "openai", Mode: "unary"},
-				{Model: provider.Capabilities[0].Model, Operation: media.OpTranscription, Surface: "openai", Mode: "unary"},
+				{Model: provider.Capabilities[0].Model, Operation: string(media.OpImageGeneration), Surface: "openai", Mode: "unary"},
+				{Model: provider.Capabilities[0].Model, Operation: string(media.OpTranscription), Surface: "openai", Mode: "unary"},
 			}
 			snapshot.Providers[provider.ID] = provider
 		}
 		route := snapshot.Routes[routeSlug]
-		route.Operations = []string{media.OpImageGeneration, media.OpTranscription}
+		route.Operations = []string{string(media.OpImageGeneration), string(media.OpTranscription)}
 		snapshot.Routes[routeSlug] = route
 	})
 	mux := http.NewServeMux()

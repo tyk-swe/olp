@@ -1,28 +1,36 @@
 package media
 
 import (
-	"maps"
-	"slices"
-
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
-// A codec translates the OpenAI media operations of one vendor wire, which
-// vendor contracts name, to the vendor's API and its results back. Codecs
-// serve providers without a profile on transformed routes; a vendor that
-// names no wire for an operation speaks OpenAI's.
-//
-// A codec holds the encoder of each operation the wire serves. An encoder
-// returns the upstream call, which decodes the vendor's result itself where
-// it differs from OpenAI's; the connector addresses an operation that depends
-// on it, such as one at another of its cloud's services.
-type codec map[string]func(r *Request, cfg connectors.Config, model string) (*UpstreamCall, *Error)
+type encoder[P Params] func(r *Request, p P, cfg connectors.Config, model string) (*UpstreamCall, *Error)
 
-// modelOnly is the encoder of an operation whose call depends on the model
-// alone.
-func modelOnly(encode func(r *Request, model string) (*UpstreamCall, *Error)) func(*Request, connectors.Config, string) (*UpstreamCall, *Error) {
-	return func(r *Request, _ connectors.Config, model string) (*UpstreamCall, *Error) { return encode(r, model) }
+type codec struct {
+	imageGeneration encoder[ImageGeneration]
+	imageEdit       encoder[ImageEdit]
+	imageVariation  encoder[ImageVariation]
+	speech          encoder[Speech]
+	transcription   encoder[Transcription]
+	translation     encoder[Translation]
+	videoCreate     encoder[VideoCreate]
+	videoGet        func(VideoGet) (*UpstreamCall, *Error)
+	videoContent    func(VideoContent) (*UpstreamCall, *Error)
+	videoDelete     func(VideoDelete) (*UpstreamCall, *Error)
+}
+
+var openAICodec = codec{
+	imageGeneration: encodeImageGeneration,
+	imageEdit:       encodeImageEdit,
+	imageVariation:  encodeImageVariation,
+	speech:          encodeSpeech,
+	transcription:   encodeTranscription,
+	translation:     encodeTranslation,
+	videoCreate:     encodeVideoCreate,
+	videoGet:        encodeVideoGet,
+	videoContent:    encodeVideoContent,
+	videoDelete:     encodeVideoDelete,
 }
 
 var codecs = map[string]codec{
@@ -39,35 +47,60 @@ var codecs = map[string]codec{
 	"xai-images": xaiImagesCodec,
 }
 
-// Wires are the registered vendor wires and the operations each serves.
-func Wires() map[string][]string {
-	out := map[string][]string{}
-	for wire, c := range codecs {
-		out[wire] = slices.Sorted(maps.Keys(c))
+func codecFor(cfg connectors.Config, op Operation) (codec, bool) {
+	if wire := vendors.MediaWire(cfg.VendorID, string(op)); wire != "" {
+		return codecs[wire], true
 	}
-	return out
+	return openAICodec, false
 }
 
-// encodeVendor encodes a request in the vendor's own wire, reporting whether
-// the vendor has one for the operation.
-func encodeVendor(r *Request, cfg connectors.Config, model string) (*UpstreamCall, bool, *Error) {
-	wire := vendors.MediaWire(cfg.VendorID, r.Op)
-	if wire == "" {
-		return nil, false, nil
+func (c codec) encode(r *Request, cfg connectors.Config, model string) (*UpstreamCall, *Error) {
+	switch p := r.Params().(type) {
+	case ImageGeneration:
+		return run(c.imageGeneration, r, p, cfg, model)
+	case ImageEdit:
+		return run(c.imageEdit, r, p, cfg, model)
+	case ImageVariation:
+		return run(c.imageVariation, r, p, cfg, model)
+	case Speech:
+		return run(c.speech, r, p, cfg, model)
+	case Transcription:
+		return run(c.transcription, r, p, cfg, model)
+	case Translation:
+		return run(c.translation, r, p, cfg, model)
+	case VideoCreate:
+		return run(c.videoCreate, r, p, cfg, model)
 	}
-	encode := codecs[wire][r.Op]
+	return nil, unservedOperation()
+}
+
+func run[P Params](encode encoder[P], r *Request, p P, cfg connectors.Config, model string) (*UpstreamCall, *Error) {
 	if encode == nil {
-		return nil, true, invalidMedia("The vendor's media codec does not serve this operation.")
+		return nil, unservedOperation()
 	}
-	call, failure := encode(r, cfg, model)
-	return call, true, failure
+	return encode(r, p, cfg, model)
 }
 
-// EncodeJob is the call for one operation on an existing video job, in the
-// wire of the vendor its pinned provider revision names.
-func EncodeJob(r *Request, cfg connectors.Config, model string) (*UpstreamCall, *Error) {
-	if call, translated, failure := encodeVendor(r, cfg, model); translated {
-		return call, failure
+func EncodeJob(job JobCall, cfg connectors.Config) (*UpstreamCall, *Error) {
+	c, _ := codecFor(cfg, job.Operation())
+	switch job := job.(type) {
+	case VideoGet:
+		return runJob(c.videoGet, job)
+	case VideoContent:
+		return runJob(c.videoContent, job)
+	case VideoDelete:
+		return runJob(c.videoDelete, job)
 	}
-	return Encode(r, "openai", model)
+	return nil, unservedOperation()
+}
+
+func runJob[J JobCall](encode func(J) (*UpstreamCall, *Error), job J) (*UpstreamCall, *Error) {
+	if encode == nil {
+		return nil, unservedOperation()
+	}
+	return encode(job)
+}
+
+func unservedOperation() *Error {
+	return invalidMedia("The vendor's media codec does not serve this operation.")
 }
