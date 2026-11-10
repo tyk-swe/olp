@@ -56,11 +56,6 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 		s.mediaFail(x, w, e)
 		return
 	}
-	if e := s.enforceMediaInput(x); e != nil {
-		form.Cleanup()
-		s.mediaFail(x, w, e)
-		return
-	}
 	form.Disarm()
 	attempt := x.attempts[0]
 	provider, ok := x.request.release.Snapshot().FindProvider(attempt.ProviderID)

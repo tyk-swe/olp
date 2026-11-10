@@ -135,57 +135,6 @@ func (r *Request) suppliedNames() []string {
 	return nil
 }
 
-var policyTexts = []string{"prompt", "input", "instructions"}
-
-func (r *Request) PolicyTexts() map[string]string {
-	texts := map[string]string{}
-	switch source := r.origin.(type) {
-	case JSONSource:
-		fields := source.Document.Fields()
-		for _, name := range policyTexts {
-			var text string
-			if raw, ok := fields[name]; ok && json.Unmarshal(raw, &text) == nil {
-				texts[name] = text
-			}
-		}
-	case FormSource:
-		for _, part := range source.Parts {
-			if text, ok := part.Value.(staging.Text); ok && slices.Contains(policyTexts, part.Name) {
-				texts[part.Name] = string(text)
-			}
-		}
-	}
-	return texts
-}
-
-func (r *Request) WithTexts(texts map[string]string) (*Request, *Error) {
-	switch source := r.origin.(type) {
-	case JSONSource:
-		changes := make([]oif.Change, 0, len(texts))
-		for _, name := range slices.Sorted(maps.Keys(texts)) {
-			value, err := json.Marshal(texts[name])
-			if err != nil {
-				return nil, invalidMedia("The rewritten media field could not be encoded.")
-			}
-			changes = append(changes, oif.Change{Pointer: oif.Pointer("", name), Value: string(value), Origin: oif.ExplicitTransform, Reason: "content policy rewrite"})
-		}
-		document, err := oif.Apply(source.Document, changes)
-		if err != nil {
-			return nil, invalidMedia("The rewritten media body could not be encoded.")
-		}
-		return decode(r.Op(), JSONSource{Document: document})
-	case FormSource:
-		parts := slices.Clone(source.Parts)
-		for i, part := range parts {
-			if text, ok := texts[part.Name]; ok {
-				parts[i].Value = staging.Text(text)
-			}
-		}
-		return decode(r.Op(), FormSource{Parts: parts, Normalized: source.Normalized})
-	}
-	return nil, invalidMedia("The media request has no source.")
-}
-
 func decode(op Operation, source Source) (*Request, *Error) {
 	switch source := source.(type) {
 	case JSONSource:

@@ -179,10 +179,6 @@ func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *call,
 		s.mediaFail(x, w, e)
 		return
 	}
-	if e := s.enforceMediaInput(x); e != nil {
-		s.mediaFail(x, w, e)
-		return
-	}
 	overall := time.Duration(x.primary.OverallTimeout) * time.Millisecond
 	ctx, cancel := x.routeContext(ctx)
 	defer cancel()

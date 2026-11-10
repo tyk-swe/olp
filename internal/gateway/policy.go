@@ -1,9 +1,7 @@
 package gateway
 
 import (
-	"maps"
 	"net/http"
-	"slices"
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -99,53 +97,19 @@ func applySlotRules(x *call, rules []contentpolicy.CompiledRule, phase string, v
 	if value == nil {
 		return false
 	}
-	redacted, blocked := applyRules(x, rules, phase, *value)
-	*value = redacted
-	return blocked
-}
-
-func applyRules(x *call, rules []contentpolicy.CompiledRule, phase string, text string) (string, bool) {
 	for i := range rules {
 		rule := &rules[i]
-		if !rule.Re.MatchString(text) {
+		if !rule.Re.MatchString(*value) {
 			continue
 		}
 		if rule.Action == contentpolicy.ActionBlock {
 			recordDecision(x, contentpolicy.Decision{RuleID: rule.ID, Phase: phase, Action: contentpolicy.ActionBlock, Outcome: contentpolicy.OutcomeBlocked})
-			return text, true
+			return true
 		}
-		text = rule.Re.ReplaceAllLiteralString(text, rule.Replacement)
+		*value = rule.Re.ReplaceAllLiteralString(*value, rule.Replacement)
 		recordDecision(x, contentpolicy.Decision{RuleID: rule.ID, Phase: phase, Action: contentpolicy.ActionRedact, Outcome: contentpolicy.OutcomeRedacted})
 	}
-	return text, false
-}
-
-func (s *Server) enforceMediaInput(x *call) *Error {
-	if x.strict() {
-		return nil
-	}
-	compiled, e := compiledPolicy(x.route)
-	if compiled == nil || e != nil {
-		return e
-	}
-	texts := x.media.PolicyTexts()
-	redacted := make(map[string]string, len(texts))
-	for _, name := range slices.Sorted(maps.Keys(texts)) {
-		text, blocked := applyRules(x, compiled.Input, contentpolicy.PhaseInput, texts[name])
-		if blocked {
-			return invalidRequest("content_policy_blocked", "The request was blocked by the route's content policy.", nil)
-		}
-		redacted[name] = text
-	}
-	if maps.Equal(texts, redacted) {
-		return nil
-	}
-	request, failure := x.media.WithTexts(redacted)
-	if failure != nil {
-		return mediaError(failure)
-	}
-	x.media = request
-	return nil
+	return false
 }
 
 func (s *Server) enforceCompletionOutput(x *call, completion *wire.Completion) *Error {
