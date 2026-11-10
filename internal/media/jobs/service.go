@@ -267,6 +267,9 @@ func (s *Service) Refresh(ctx context.Context, id string) (Record, error) {
 	if err != nil || !refreshable(record, s.now()) {
 		return record, err
 	}
+	if record.CallerCredential {
+		return Record{}, errCallerCredential
+	}
 	claimed, ok, err := s.store.ClaimOne(ctx, id, s.now())
 	if err != nil {
 		return Record{}, err
@@ -285,6 +288,9 @@ func (s *Service) Delete(ctx context.Context, id string) (Record, error) {
 	}
 	if record.Lifecycle == Creating {
 		return Record{}, busy("media job create is still in flight")
+	}
+	if record.CallerCredential {
+		return Record{}, errCallerCredential
 	}
 	claimed, ok, err := s.store.ClaimOne(ctx, id, s.now())
 	if err != nil {

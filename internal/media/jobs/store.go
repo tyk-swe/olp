@@ -29,13 +29,18 @@ func NewStore(db Querier) *Store { return &Store{db: db} }
 
 const pollGateSeconds = 5
 
-const columns = `j.id::text, j.upstream_job_id, j.api_key_id::text, k.project_id::text, j.provider_id::text,
+func callerCredential(job string) string {
+	return `EXISTS (SELECT 1 FROM olp.provider_revisions revision
+		WHERE revision.id = ` + job + `.provider_revision_id AND revision.configuration->>'credential_source' = 'caller')`
+}
+
+var columns = `j.id::text, j.upstream_job_id, j.api_key_id::text, k.project_id::text, j.provider_id::text,
 	p.name, j.provider_model, j.route_slug, j.operation, j.surface, j.state, j.lifecycle_state,
 	j.progress_percent::real, j.expires_at, j.error_class, j.completed_at, j.last_polled_at,
 	j.reconciliation_error, j.deleted_at, j.runtime_generation_id::text, j.provider_revision_id::text,
 	j.credential_version_id::text, j.slot_id::text, j.reconciliation_claim_id::text,
 	j.reconciliation_attempts, j.next_reconciliation_at, j.last_reconciliation_at, j.etag::text,
-	j.created_at, j.updated_at, j.strict_contract`
+	j.created_at, j.updated_at, j.strict_contract, ` + callerCredential("j")
 
 func from(source string) string {
 	return "SELECT " + columns + " FROM " + source +
@@ -48,8 +53,7 @@ func returning(mutation string) string {
 
 var selectJobs = from("olp.media_jobs")
 
-const ownedCredential = `NOT EXISTS (SELECT 1 FROM olp.provider_revisions revision
-	WHERE revision.id = media_jobs.provider_revision_id AND revision.configuration->>'credential_source' = 'caller')`
+var ownedCredential = "NOT " + callerCredential("media_jobs")
 
 const claimSet = `reconciliation_claim_id = gen_random_uuid(),
 	reconciliation_claimed_until = $1 + interval '2 minutes',
@@ -66,7 +70,7 @@ func scan(row pgx.Row) (Record, error) {
 		&j.ReconciliationError, &j.DeletedAt, &j.RuntimeGenerationID, &j.ProviderRevisionID,
 		&j.CredentialVersionID, &j.SlotID, &j.ReconciliationClaimID,
 		&j.ReconciliationAttempts, &j.NextReconciliationAt, &j.LastReconciliationAt, &j.ETag,
-		&j.CreatedAt, &j.UpdatedAt, &j.StrictContract)
+		&j.CreatedAt, &j.UpdatedAt, &j.StrictContract, &j.CallerCredential)
 	return j, err
 }
 
@@ -471,8 +475,7 @@ func (s *Store) Claim(ctx context.Context, now time.Time, limit int) ([]Claimed,
 func (s *Store) ClaimOne(ctx context.Context, id string, now time.Time) (Claimed, bool, error) {
 	claimed, err := scanClaimed(s.db.QueryRow(ctx, returning(`UPDATE olp.media_jobs SET `+claimSet+`
 		WHERE id = $2 AND lifecycle_state <> 'deleted'
-		  AND (reconciliation_claimed_until IS NULL OR reconciliation_claimed_until <= $1)
-		  AND `+ownedCredential), now, id))
+		  AND (reconciliation_claimed_until IS NULL OR reconciliation_claimed_until <= $1)`), now, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Claimed{}, false, nil
 	}

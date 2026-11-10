@@ -51,6 +51,7 @@ func (s State) Polling() bool { return s == Queued || s == Running }
 type Record struct {
 	ID                     string
 	StrictContract         bool
+	CallerCredential       bool
 	UpstreamJobID          *string
 	APIKeyID               string
 	ProjectID              *string
@@ -202,6 +203,7 @@ const (
 	KindConflict
 	KindInvalid
 	KindBusy
+	KindCallerCredential
 )
 
 type Error struct {
@@ -231,10 +233,11 @@ type Unavailable struct{ Code string }
 func (u *Unavailable) Error() string { return u.Code }
 
 var (
-	ErrNoContent = errors.New("media job has no downloadable content")
-	errClaimLost = errors.New("reconciliation_claim_lost")
-	errNotFound  = &Error{Kind: KindNotFound, Message: "media job was not found"}
-	errChanged   = &Error{Kind: KindChanged, Message: "media job changed; refresh and retry"}
+	ErrNoContent        = errors.New("media job has no downloadable content")
+	errClaimLost        = errors.New("reconciliation_claim_lost")
+	errNotFound         = &Error{Kind: KindNotFound, Message: "media job was not found"}
+	errChanged          = &Error{Kind: KindChanged, Message: "media job changed; refresh and retry"}
+	errCallerCredential = &Error{Kind: KindCallerCredential, Message: "media job runs on the caller's credential"}
 )
 
 func invalid(message string) *Error { return &Error{Kind: KindInvalid, Message: message} }

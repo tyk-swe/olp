@@ -336,8 +336,15 @@ func TestVideoJobClaimsFenceConcurrentWorkers(t *testing.T) {
 	if _, ok, err := store.ClaimOne(ctx, ambiguous, now); err != nil || ok {
 		t.Fatalf("a management refresh claimed a leased job: %v, %v", ok, err)
 	}
-	if _, ok, err := store.ClaimOne(ctx, caller, now); err != nil || ok {
-		t.Fatalf("a management refresh claimed a job that only the caller's credential can reach: %v, %v", ok, err)
+	operator := jobs.New(jobs.Deps{Store: store, Now: func() time.Time { return now }})
+	if _, err := operator.Refresh(ctx, caller); jobKind(t, err) != jobs.KindCallerCredential {
+		t.Fatalf("a management refresh of a caller-credential job = %v", err)
+	}
+	if _, err := operator.Delete(ctx, caller); jobKind(t, err) != jobs.KindCallerCredential {
+		t.Fatalf("a management delete of a caller-credential job = %v", err)
+	}
+	if record, err := store.Get(ctx, caller); err != nil || record.Lifecycle != jobs.CreateAmbiguous || record.ReconciliationAttempts != 0 {
+		t.Fatalf("refused management calls changed the caller-credential job: %+v, %v", record, err)
 	}
 	first := claimed[0]
 	if extended, err := store.Extend(ctx, first, now.Add(time.Minute)); err != nil || !extended {

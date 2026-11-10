@@ -350,6 +350,8 @@ func problem(err error) error {
 		return access.Fail(http.StatusConflict, "media_job_busy", "The media job is being reconciled by another worker; retry shortly.")
 	case KindInvalid:
 		return access.Invalid("media_job", failure.Message)
+	case KindCallerCredential:
+		return access.Fail(http.StatusConflict, "media_job_caller_credential", "The media job runs on the caller's credential, so only the caller's own requests can refresh or delete it.")
 	}
 	return err
 }
