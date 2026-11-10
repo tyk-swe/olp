@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/vendors"
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/duplexcontract"
@@ -198,7 +199,7 @@ func (s *Snapshot) compileOperations(route Route) (map[string]*operationplan.Tem
 		if !route.Fidelity.Strict() && !operationregistry.PolicyFor(op).TransformedUnary {
 			continue
 		}
-		if op == "generation" || op == "batch" || op == "realtime" || mediacontract.IsMediaOperation(op) {
+		if op == "generation" || op == "batch" || op == "realtime" || vendors.IsMediaOperation(op) {
 			continue
 		}
 		for _, target := range route.Targets {
@@ -328,7 +329,7 @@ func (s *Snapshot) compileMedia(route Route) (map[string]*mediacontract.Template
 	}
 	templates := map[string]*mediacontract.Template{}
 	for _, op := range route.Operations {
-		if !mediacontract.IsMediaOperation(op) {
+		if !vendors.IsMediaOperation(op) {
 			continue
 		}
 		for _, target := range route.Targets {

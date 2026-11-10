@@ -1,0 +1,1709 @@
+{
+  "assemblyai transcription": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/v2/upload",
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "secret-a",
+          "Content-Type": "audio/wav"
+        },
+        "digest": "e7531525a8818a3b/364"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/v2/transcript",
+        "headers": {
+          "Authorization": "secret-a",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "audio_url": "https://cdn.assemblyai.com/upload/abc",
+          "language_code": "en",
+          "speech_models": [
+            "model-a"
+          ]
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/v1/v2/transcript/tr_1",
+        "headers": {
+          "Authorization": "secret-a"
+        }
+      },
+      {
+        "method": "DELETE",
+        "path": "/v1/v2/transcript/tr_1",
+        "headers": {
+          "Authorization": "secret-a"
+        }
+      }
+    ],
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "text": "hello there"
+    },
+    "operation": "transcription",
+    "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "media_units": "1.500000"
+    },
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true,
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "media_units": "1.500000"
+        }
+      }
+    ]
+  },
+  "bfl image generation": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/flux-pro-1.1",
+        "headers": {
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+          "X-Key": "secret-a"
+        },
+        "json": {
+          "height": 768,
+          "output_format": "png",
+          "prompt": "a red fox",
+          "width": 1024
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/poll/job-1",
+        "headers": {
+          "X-Key": "secret-a"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/sample.png",
+        "headers": {}
+      }
+    ],
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "created": "{now}",
+      "data": [
+        {
+          "b64_json": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEklEQVR4nAAFAPr/AgAAAAADAAAPAANCp/UOAAAAAElFTkSuQmCC"
+        }
+      ]
+    },
+    "operation": "image_generation",
+    "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "media_units": "1"
+    },
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true,
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "media_units": "1"
+        }
+      }
+    ]
+  },
+  "bfl refuses image count": {
+    "upstream": null,
+    "status": 400,
+    "content_type": "application/json",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "Black Forest Labs generates one image per request.",
+        "param": null,
+        "type": "invalid_request_error"
+      }
+    },
+    "operation": "image_generation",
+    "attempts": null
+  },
+  "deepgram speech": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/speak",
+        "query": "container=wav\u0026encoding=linear16\u0026model=aura-2-thalia-en",
+        "headers": {
+          "Authorization": "Token secret-a",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "text": "hello there"
+        }
+      }
+    ],
+    "status": 200,
+    "content_type": "audio/wav",
+    "body": "e7531525a8818a3b/364",
+    "operation": "speech",
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true
+      }
+    ]
+  },
+  "deepgram transcription": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/listen",
+        "query": "language=en\u0026model=model-a",
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Token secret-a",
+          "Content-Type": "audio/wav"
+        },
+        "digest": "e7531525a8818a3b/364"
+      }
+    ],
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "duration": 1.5,
+      "language": "en",
+      "text": "hello there",
+      "words": [
+        {
+          "end": 0.5,
+          "start": 0,
+          "word": "hello"
+        },
+        {
+          "end": 1.1,
+          "start": 0.6,
+          "word": "there"
+        }
+      ]
+    },
+    "operation": "transcription",
+    "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "media_units": "1.500000"
+    },
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true,
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "media_units": "1.500000"
+        }
+      }
+    ]
+  },
+  "elevenlabs speech": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/text-to-speech/voice-1",
+        "query": "output_format=mp3_44100_128",
+        "headers": {
+          "Content-Type": "application/json",
+          "Xi-Api-Key": "secret-a"
+        },
+        "json": {
+          "model_id": "model-a",
+          "text": "hello there",
+          "voice_settings": {
+            "speed": 1.1
+          }
+        }
+      }
+    ],
+    "status": 200,
+    "content_type": "audio/mpeg",
+    "body": "ccfbdabd588f222c/12",
+    "operation": "speech",
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true
+      }
+    ]
+  },
+  "elevenlabs transcription": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/speech-to-text",
+        "headers": {
+          "Accept": "application/json",
+          "Content-Type": "multipart/form-data",
+          "Xi-Api-Key": "secret-a"
+        },
+        "parts": [
+          {
+            "name": "model_id",
+            "text": "model-a"
+          },
+          {
+            "name": "file",
+            "filename": "silence.wav",
+            "content_type": "audio/wav",
+            "digest": "e7531525a8818a3b/364"
+          },
+          {
+            "name": "language_code",
+            "text": "en"
+          }
+        ]
+      }
+    ],
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "language": "en",
+      "text": "hello there",
+      "words": [
+        {
+          "end": 0.5,
+          "start": 0,
+          "word": "hello"
+        },
+        {
+          "end": 1.1,
+          "start": 0.6,
+          "word": "there"
+        }
+      ]
+    },
+    "operation": "transcription",
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true
+      }
+    ]
+  },
+  "gemini image generation": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/models/model-a:generateContent",
+        "headers": {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Key": "secret-a"
+        },
+        "json": {
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "a red fox"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "generationConfig": {
+            "imageConfig": {
+              "aspectRatio": "1:1"
+            },
+            "responseModalities": [
+              "IMAGE"
+            ]
+          }
+        }
+      }
+    ],
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "created": "{now}",
+      "data": [
+        {
+          "b64_json": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEklEQVR4nAAFAPr/AgAAAAADAAAPAANCp/UOAAAAAElFTkSuQmCC"
+        }
+      ],
+      "usage": {
+        "input_tokens": 4,
+        "output_tokens": 9,
+        "total_tokens": 13
+      }
+    },
+    "operation": "image_generation",
+    "usage": {
+      "input_tokens": 4,
+      "output_tokens": 9,
+      "total_tokens": 13,
+      "image_output_tokens": 9,
+      "media_units": "1"
+    },
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true,
+        "usage": {
+          "input_tokens": 4,
+          "output_tokens": 9,
+          "total_tokens": 13,
+          "image_output_tokens": 9,
+          "media_units": "1"
+        }
+      }
+    ]
+  },
+  "gemini speech": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/models/model-a:generateContent",
+        "headers": {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Key": "secret-a"
+        },
+        "json": {
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "hello there"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "generationConfig": {
+            "responseModalities": [
+              "AUDIO"
+            ],
+            "speechConfig": {
+              "voiceConfig": {
+                "prebuiltVoiceConfig": {
+                  "voiceName": "Kore"
+                }
+              }
+            }
+          }
+        }
+      }
+    ],
+    "status": 200,
+    "content_type": "audio/wav",
+    "body": "70bc0542b955f062/48",
+    "operation": "speech",
+    "usage": {
+      "input_tokens": 3,
+      "output_tokens": 5,
+      "total_tokens": 8
+    },
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true,
+        "usage": {
+          "input_tokens": 3,
+          "output_tokens": 5,
+          "total_tokens": 8
+        }
+      }
+    ]
+  },
+  "gemini transcription": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/models/model-a:generateContent",
+        "headers": {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Key": "secret-a"
+        },
+        "json": {
+          "contents": [
+            {
+              "parts": [
+                {
+                  "inlineData": {
+                    "data": "UklGRmQBAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YUABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+                    "mimeType": "audio/wav"
+                  }
+                },
+                {
+                  "text": "Generate a transcript of the speech in this audio. Answer with the transcript only."
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "generationConfig": {}
+        }
+      }
+    ],
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "text": "hello there"
+    },
+    "operation": "transcription",
+    "usage": {
+      "input_tokens": 30,
+      "output_tokens": 3,
+      "total_tokens": 33
+    },
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true,
+        "usage": {
+          "input_tokens": 30,
+          "output_tokens": 3,
+          "total_tokens": 33
+        }
+      }
+    ]
+  },
+  "groq transcription": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/audio/transcriptions",
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer secret-a",
+          "Content-Type": "multipart/form-data"
+        },
+        "parts": [
+          {
+            "name": "model",
+            "text": "model-a"
+          },
+          {
+            "name": "file",
+            "filename": "silence.wav",
+            "content_type": "audio/wav",
+            "digest": "e7531525a8818a3b/364"
+          },
+          {
+            "name": "language",
+            "text": "en"
+          },
+          {
+            "name": "response_format",
+            "text": "verbose_json"
+          },
+          {
+            "name": "stream",
+            "text": "false"
+          }
+        ]
+      }
+    ],
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "text": "hello there"
+    },
+    "operation": "transcription",
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true
+      }
+    ]
+  },
+  "groq translation": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/audio/translations",
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer secret-a",
+          "Content-Type": "multipart/form-data"
+        },
+        "parts": [
+          {
+            "name": "model",
+            "text": "model-a"
+          },
+          {
+            "name": "file",
+            "filename": "silence.wav",
+            "content_type": "audio/wav",
+            "digest": "e7531525a8818a3b/364"
+          },
+          {
+            "name": "response_format",
+            "text": "verbose_json"
+          }
+        ]
+      }
+    ],
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "text": "hello there"
+    },
+    "operation": "translation",
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true
+      }
+    ]
+  },
+  "openai image edit": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/images/edits",
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer secret-a",
+          "Content-Type": "multipart/form-data"
+        },
+        "parts": [
+          {
+            "name": "model",
+            "text": "model-a"
+          },
+          {
+            "name": "prompt",
+            "text": "add a hat"
+          },
+          {
+            "name": "image",
+            "filename": "pixel.png",
+            "content_type": "image/png",
+            "digest": "2e39f08959218012/75"
+          },
+          {
+            "name": "mask",
+            "filename": "mask.png",
+            "content_type": "image/png",
+            "digest": "2e39f08959218012/75"
+          },
+          {
+            "name": "n",
+            "text": "1"
+          },
+          {
+            "name": "stream",
+            "text": "false"
+          },
+          {
+            "name": "input_fidelity",
+            "text": "high"
+          }
+        ]
+      }
+    ],
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "created": 1,
+      "data": [
+        {
+          "b64_json": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEklEQVR4nAAFAPr/AgAAAAADAAAPAANCp/UOAAAAAElFTkSuQmCC"
+        }
+      ],
+      "usage": {
+        "input_tokens": 5,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 5
+        },
+        "output_tokens": 7,
+        "total_tokens": 12
+      }
+    },
+    "operation": "image_edit",
+    "usage": {
+      "input_tokens": 5,
+      "output_tokens": 7,
+      "total_tokens": 12,
+      "image_input_tokens": 0,
+      "image_output_tokens": 7,
+      "media_units": "1"
+    },
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true,
+        "usage": {
+          "input_tokens": 5,
+          "output_tokens": 7,
+          "total_tokens": 12,
+          "image_input_tokens": 0,
+          "image_output_tokens": 7,
+          "media_units": "1"
+        }
+      }
+    ]
+  },
+  "openai image generation": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/images/generations",
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer secret-a",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "model": "model-a",
+          "n": 1,
+          "prompt": "a red fox",
+          "quality": "high",
+          "response_format": "b64_json",
+          "size": "1024x1024",
+          "user": "u-1",
+          "vendor_flag": true
+        }
+      }
+    ],
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "created": 1,
+      "data": [
+        {
+          "b64_json": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEklEQVR4nAAFAPr/AgAAAAADAAAPAANCp/UOAAAAAElFTkSuQmCC"
+        }
+      ],
+      "usage": {
+        "input_tokens": 5,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 5
+        },
+        "output_tokens": 7,
+        "total_tokens": 12
+      }
+    },
+    "operation": "image_generation",
+    "usage": {
+      "input_tokens": 5,
+      "output_tokens": 7,
+      "total_tokens": 12,
+      "image_input_tokens": 0,
+      "image_output_tokens": 7,
+      "media_units": "1"
+    },
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true,
+        "usage": {
+          "input_tokens": 5,
+          "output_tokens": 7,
+          "total_tokens": 12,
+          "image_input_tokens": 0,
+          "image_output_tokens": 7,
+          "media_units": "1"
+        }
+      }
+    ]
+  },
+  "openai image generation stream": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/images/generations",
+        "headers": {
+          "Accept": "text/event-stream",
+          "Authorization": "Bearer secret-a",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "model": "model-a",
+          "partial_images": 1,
+          "prompt": "a red fox",
+          "stream": true
+        }
+      }
+    ],
+    "status": 200,
+    "content_type": "text/event-stream; charset=utf-8",
+    "body": "event: image_generation.completed\ndata: {\"type\":\"image_generation.completed\",\"b64_json\":\"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEklEQVR4nAAFAPr/AgAAAAADAAAPAANCp/UOAAAAAElFTkSuQmCC\",\"usage\":{\"input_tokens\":5,\"output_tokens\":7,\"total_tokens\":12}}\n\n",
+    "operation": "image_generation",
+    "usage": {
+      "input_tokens": 5,
+      "output_tokens": 7,
+      "total_tokens": 12,
+      "image_output_tokens": 7,
+      "media_units": "1"
+    },
+    "attempts": [
+      {
+        "mode": "streaming",
+        "status": 200,
+        "class": "success",
+        "committed": true,
+        "usage": {
+          "input_tokens": 5,
+          "output_tokens": 7,
+          "total_tokens": 12,
+          "image_output_tokens": 7,
+          "media_units": "1"
+        }
+      }
+    ]
+  },
+  "openai image variation": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/images/variations",
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer secret-a",
+          "Content-Type": "multipart/form-data"
+        },
+        "parts": [
+          {
+            "name": "model",
+            "text": "model-a"
+          },
+          {
+            "name": "image",
+            "filename": "pixel.png",
+            "content_type": "image/png",
+            "digest": "2e39f08959218012/75"
+          },
+          {
+            "name": "n",
+            "text": "2"
+          },
+          {
+            "name": "size",
+            "text": "256x256"
+          },
+          {
+            "name": "response_format",
+            "text": "url"
+          }
+        ]
+      }
+    ],
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "created": 1,
+      "data": [
+        {
+          "url": "https://cdn.example.test/1.png"
+        },
+        {
+          "url": "https://cdn.example.test/2.png"
+        }
+      ]
+    },
+    "operation": "image_variation",
+    "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "media_units": "2"
+    },
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true,
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "media_units": "2"
+        }
+      }
+    ]
+  },
+  "openai speech": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/audio/speech",
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer secret-a",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "input": "hello there",
+          "instructions": "cheerful",
+          "model": "model-a",
+          "response_format": "mp3",
+          "speed": 1.25,
+          "voice": "alloy"
+        }
+      }
+    ],
+    "status": 200,
+    "content_type": "audio/mpeg",
+    "body": "ccfbdabd588f222c/12",
+    "operation": "speech",
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true
+      }
+    ]
+  },
+  "openai speech stream": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/audio/speech",
+        "headers": {
+          "Accept": "text/event-stream",
+          "Authorization": "Bearer secret-a",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "input": "hello",
+          "model": "model-a",
+          "stream_format": "sse",
+          "voice": "alloy"
+        }
+      }
+    ],
+    "status": 200,
+    "content_type": "text/event-stream; charset=utf-8",
+    "body": "data: {\"type\":\"speech.audio.delta\",\"audio\":\"AAAA\"}\n\ndata: {\"type\":\"speech.audio.done\",\"usage\":{\"input_tokens\":3,\"output_tokens\":9,\"total_tokens\":12}}\n\n",
+    "operation": "speech",
+    "usage": {
+      "input_tokens": 3,
+      "output_tokens": 9,
+      "total_tokens": 12,
+      "audio_output_tokens": 9
+    },
+    "attempts": [
+      {
+        "mode": "streaming",
+        "status": 200,
+        "class": "success",
+        "committed": true,
+        "usage": {
+          "input_tokens": 3,
+          "output_tokens": 9,
+          "total_tokens": 12,
+          "audio_output_tokens": 9
+        }
+      }
+    ]
+  },
+  "openai transcription chunking auto": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/audio/transcriptions",
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer secret-a",
+          "Content-Type": "multipart/form-data"
+        },
+        "parts": [
+          {
+            "name": "model",
+            "text": "model-a"
+          },
+          {
+            "name": "file",
+            "filename": "silence.wav",
+            "content_type": "audio/wav",
+            "digest": "e7531525a8818a3b/364"
+          },
+          {
+            "name": "chunking_strategy",
+            "text": "auto"
+          },
+          {
+            "name": "stream",
+            "text": "false"
+          }
+        ]
+      }
+    ],
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "text": "hello there",
+      "usage": {
+        "seconds": 1.5,
+        "type": "duration"
+      }
+    },
+    "operation": "transcription",
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true
+      }
+    ]
+  },
+  "openai transcription json": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/audio/transcriptions",
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer secret-a",
+          "Content-Type": "multipart/form-data"
+        },
+        "parts": [
+          {
+            "name": "model",
+            "text": "model-a"
+          },
+          {
+            "name": "file",
+            "filename": "silence.wav",
+            "content_type": "audio/wav",
+            "digest": "e7531525a8818a3b/364"
+          },
+          {
+            "name": "language",
+            "text": "en"
+          },
+          {
+            "name": "prompt",
+            "text": "names: Ada"
+          },
+          {
+            "name": "temperature",
+            "text": "0.2"
+          },
+          {
+            "name": "stream",
+            "text": "false"
+          }
+        ]
+      }
+    ],
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "text": "hello there",
+      "usage": {
+        "seconds": 1.5,
+        "type": "duration"
+      }
+    },
+    "operation": "transcription",
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true
+      }
+    ]
+  },
+  "openai transcription stream": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/audio/transcriptions",
+        "headers": {
+          "Accept": "text/event-stream",
+          "Authorization": "Bearer secret-a",
+          "Content-Type": "multipart/form-data"
+        },
+        "parts": [
+          {
+            "name": "model",
+            "text": "model-a"
+          },
+          {
+            "name": "file",
+            "filename": "silence.wav",
+            "content_type": "audio/wav",
+            "digest": "e7531525a8818a3b/364"
+          },
+          {
+            "name": "stream",
+            "text": "true"
+          }
+        ]
+      }
+    ],
+    "status": 200,
+    "content_type": "text/event-stream; charset=utf-8",
+    "body": "data: {\"type\":\"transcript.text.delta\",\"delta\":\"hello\"}\n\ndata: {\"type\":\"transcript.text.done\",\"text\":\"hello\",\"usage\":{\"type\":\"tokens\",\"input_tokens\":4,\"output_tokens\":2,\"total_tokens\":6}}\n\n",
+    "operation": "transcription",
+    "usage": {
+      "input_tokens": 4,
+      "output_tokens": 2,
+      "total_tokens": 6
+    },
+    "attempts": [
+      {
+        "mode": "streaming",
+        "status": 200,
+        "class": "success",
+        "committed": true,
+        "usage": {
+          "input_tokens": 4,
+          "output_tokens": 2,
+          "total_tokens": 6
+        }
+      }
+    ]
+  },
+  "openai transcription text": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/audio/transcriptions",
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer secret-a",
+          "Content-Type": "multipart/form-data"
+        },
+        "parts": [
+          {
+            "name": "model",
+            "text": "model-a"
+          },
+          {
+            "name": "file",
+            "filename": "silence.wav",
+            "content_type": "audio/wav",
+            "digest": "e7531525a8818a3b/364"
+          },
+          {
+            "name": "response_format",
+            "text": "text"
+          },
+          {
+            "name": "stream",
+            "text": "false"
+          }
+        ]
+      }
+    ],
+    "status": 200,
+    "content_type": "text/plain; charset=utf-8",
+    "body": "hello there\n",
+    "operation": "transcription",
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true
+      }
+    ]
+  },
+  "openai transcription verbose": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/audio/transcriptions",
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer secret-a",
+          "Content-Type": "multipart/form-data"
+        },
+        "parts": [
+          {
+            "name": "model",
+            "text": "model-a"
+          },
+          {
+            "name": "file",
+            "filename": "silence.wav",
+            "content_type": "audio/wav",
+            "digest": "e7531525a8818a3b/364"
+          },
+          {
+            "name": "response_format",
+            "text": "verbose_json"
+          },
+          {
+            "name": "timestamp_granularities[]",
+            "text": "word"
+          },
+          {
+            "name": "stream",
+            "text": "false"
+          }
+        ]
+      }
+    ],
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "duration": 1.5,
+      "language": "english",
+      "task": "transcribe",
+      "text": "hello there",
+      "words": [
+        {
+          "end": 0.5,
+          "start": 0,
+          "word": "hello"
+        },
+        {
+          "end": 1.1,
+          "start": 0.6,
+          "word": "there"
+        }
+      ]
+    },
+    "operation": "transcription",
+    "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "media_units": "1.500000"
+    },
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true,
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "media_units": "1.500000"
+        }
+      }
+    ]
+  },
+  "openai translation": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/audio/translations",
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer secret-a",
+          "Content-Type": "multipart/form-data"
+        },
+        "parts": [
+          {
+            "name": "model",
+            "text": "model-a"
+          },
+          {
+            "name": "file",
+            "filename": "silence.wav",
+            "content_type": "audio/wav",
+            "digest": "e7531525a8818a3b/364"
+          },
+          {
+            "name": "prompt",
+            "text": "names: Ada"
+          }
+        ]
+      }
+    ],
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "text": "hello there"
+    },
+    "operation": "translation",
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true
+      }
+    ]
+  },
+  "openai upstream rate limit": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/images/generations",
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer secret-a",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "model": "model-a",
+          "prompt": "a red fox"
+        }
+      }
+    ],
+    "status": 429,
+    "content_type": "application/json",
+    "body": {
+      "error": {
+        "code": "upstream_rate_limit",
+        "message": "The upstream provider is rate limiting requests.",
+        "param": null,
+        "type": "rate_limit_error"
+      }
+    },
+    "operation": "image_generation",
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 429,
+        "class": "rate_limit",
+        "committed": false
+      }
+    ]
+  },
+  "profiled defaults": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/images/generations",
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer secret-a",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "model": "model-a",
+          "prompt": "a red fox",
+          "quality": "low",
+          "size": "1024x1024"
+        }
+      }
+    ],
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "created": 1,
+      "data": [
+        {
+          "b64_json": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEklEQVR4nAAFAPr/AgAAAAADAAAPAANCp/UOAAAAAElFTkSuQmCC"
+        }
+      ],
+      "usage": {
+        "input_tokens": 5,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 5
+        },
+        "output_tokens": 7,
+        "total_tokens": 12
+      }
+    },
+    "operation": "image_generation",
+    "usage": {
+      "input_tokens": 5,
+      "output_tokens": 7,
+      "total_tokens": 12,
+      "image_input_tokens": 0,
+      "image_output_tokens": 7,
+      "media_units": "1"
+    },
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true,
+        "usage": {
+          "input_tokens": 5,
+          "output_tokens": 7,
+          "total_tokens": 12,
+          "image_input_tokens": 0,
+          "image_output_tokens": 7,
+          "media_units": "1"
+        }
+      }
+    ]
+  },
+  "profiled transcription chunking default": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/audio/transcriptions",
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer secret-a",
+          "Content-Type": "multipart/form-data"
+        },
+        "parts": [
+          {
+            "name": "model",
+            "text": "model-a"
+          },
+          {
+            "name": "file",
+            "filename": "silence.wav",
+            "content_type": "audio/wav",
+            "digest": "e7531525a8818a3b/364"
+          },
+          {
+            "name": "chunking_strategy",
+            "text": "auto"
+          },
+          {
+            "name": "stream",
+            "text": "false"
+          }
+        ]
+      }
+    ],
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "text": "hello there",
+      "usage": {
+        "seconds": 1.5,
+        "type": "duration"
+      }
+    },
+    "operation": "transcription",
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true
+      }
+    ]
+  },
+  "recraft image generation": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/images/generations/raster",
+        "headers": {
+          "Authorization": "Bearer secret-a",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "model": "model-a",
+          "n": 1,
+          "prompt": "a red fox",
+          "response_format": "b64_json",
+          "size": "1:1"
+        }
+      }
+    ],
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "created": 1,
+      "data": [
+        {
+          "b64_json": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEklEQVR4nAAFAPr/AgAAAAADAAAPAANCp/UOAAAAAElFTkSuQmCC"
+        }
+      ]
+    },
+    "operation": "image_generation",
+    "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "media_units": "1"
+    },
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true,
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "media_units": "1"
+        }
+      }
+    ]
+  },
+  "stability image edit": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/v2beta/stable-image/edit/inpaint",
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer secret-a",
+          "Content-Type": "multipart/form-data"
+        },
+        "parts": [
+          {
+            "name": "prompt",
+            "text": "add a hat"
+          },
+          {
+            "name": "image",
+            "filename": "pixel.png",
+            "content_type": "image/png",
+            "digest": "2e39f08959218012/75"
+          },
+          {
+            "name": "mask",
+            "filename": "mask.png",
+            "content_type": "image/png",
+            "digest": "2e39f08959218012/75"
+          }
+        ]
+      }
+    ],
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "created": "{now}",
+      "data": [
+        {
+          "b64_json": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEklEQVR4nAAFAPr/AgAAAAADAAAPAANCp/UOAAAAAElFTkSuQmCC"
+        }
+      ]
+    },
+    "operation": "image_edit",
+    "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "media_units": "1"
+    },
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true,
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "media_units": "1"
+        }
+      }
+    ]
+  },
+  "stability image generation": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/v2beta/stable-image/generate/core",
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer secret-a",
+          "Content-Type": "multipart/form-data"
+        },
+        "parts": [
+          {
+            "name": "prompt",
+            "text": "a red fox"
+          },
+          {
+            "name": "output_format",
+            "text": "png"
+          },
+          {
+            "name": "aspect_ratio",
+            "text": "1:1"
+          }
+        ]
+      }
+    ],
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "created": "{now}",
+      "data": [
+        {
+          "b64_json": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEklEQVR4nAAFAPr/AgAAAAADAAAPAANCp/UOAAAAAElFTkSuQmCC"
+        }
+      ]
+    },
+    "operation": "image_generation",
+    "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "media_units": "1"
+    },
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true,
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "media_units": "1"
+        }
+      }
+    ]
+  },
+  "strict image generation": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/images/generations",
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer secret-a",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "model": "model-a",
+          "prompt": "a red fox",
+          "size": "1024x1024",
+          "vendor_flag": true
+        }
+      }
+    ],
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "created": 1,
+      "data": [
+        {
+          "b64_json": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEklEQVR4nAAFAPr/AgAAAAADAAAPAANCp/UOAAAAAElFTkSuQmCC"
+        }
+      ],
+      "usage": {
+        "input_tokens": 5,
+        "input_tokens_details": {
+          "image_tokens": 0,
+          "text_tokens": 5
+        },
+        "output_tokens": 7,
+        "total_tokens": 12
+      }
+    },
+    "operation": "image_generation",
+    "usage": {
+      "input_tokens": 5,
+      "output_tokens": 7,
+      "total_tokens": 12,
+      "image_input_tokens": 0,
+      "image_output_tokens": 7,
+      "media_units": "1"
+    },
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true,
+        "usage": {
+          "input_tokens": 5,
+          "output_tokens": 7,
+          "total_tokens": 12,
+          "image_input_tokens": 0,
+          "image_output_tokens": 7,
+          "media_units": "1"
+        }
+      }
+    ]
+  },
+  "xai image generation": {
+    "upstream": [
+      {
+        "method": "POST",
+        "path": "/v1/images/generations",
+        "headers": {
+          "Authorization": "Bearer secret-a",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "aspect_ratio": "16:9",
+          "model": "model-a",
+          "n": 2,
+          "prompt": "a red fox",
+          "response_format": "b64_json"
+        }
+      }
+    ],
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "created": "{now}",
+      "data": [
+        {
+          "b64_json": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEklEQVR4nAAFAPr/AgAAAAADAAAPAANCp/UOAAAAAElFTkSuQmCC"
+        },
+        {
+          "b64_json": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEklEQVR4nAAFAPr/AgAAAAADAAAPAANCp/UOAAAAAElFTkSuQmCC"
+        }
+      ]
+    },
+    "operation": "image_generation",
+    "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "media_units": "2"
+    },
+    "attempts": [
+      {
+        "mode": "unary",
+        "status": 200,
+        "class": "success",
+        "committed": true,
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "media_units": "2"
+        }
+      }
+    ]
+  }
+}

@@ -11,7 +11,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -28,6 +28,7 @@ type Sources struct {
 	Gateway       GatewayCounters
 	Emitter       MetadataBuffer
 	Spool         Spool
+	Media         MediaJobs
 	MediaGaps     *atomic.Uint64
 	Loss          LossCounters
 	Export        func(context.Context) []prometheus.Metric
@@ -35,8 +36,11 @@ type Sources struct {
 
 type Store interface {
 	access.Queryer
-	media.Querier
 	Pinger
+}
+
+type MediaJobs interface {
+	Summary(ctx context.Context, now time.Time) (jobs.Summary, error)
 }
 
 type Pinger interface {
@@ -238,13 +242,13 @@ func limitsStatus(configured, healthy bool) Status {
 	}
 }
 
-func mediaDegraded(summary *media.Summary, gaps int64) bool {
+func mediaDegraded(summary *jobs.Summary, gaps int64) bool {
 	return (summary != nil && (summary.Stale > 0 || summary.Failed > 0)) || gaps > 0
 }
 
 type storeProbe struct {
 	database Status
-	media    *media.Summary
+	media    *jobs.Summary
 	consumer usage.ConsumerStatus
 	epochs   EpochHealth
 	tasks    *WorkerTaskHealth
@@ -264,7 +268,7 @@ func probeStore(ctx context.Context, s *Sources, now time.Time, hasGeneration bo
 		}
 		return nil, errors.New("database_unavailable")
 	}
-	summary, err := media.ReconciliationSummary(ctx, s.Store, now)
+	summary, err := s.Media.Summary(ctx, now)
 	if err != nil {
 		return nil, fmt.Errorf("database_unavailable: media reconciliation summary: %w", err)
 	}
@@ -355,7 +359,7 @@ func requestMetadata(store *storeProbe, now time.Time, localComplete, expectsCon
 	return health
 }
 
-func mediaHealth(summary *media.Summary, gaps int64, degraded bool, spool Spool) MediaHealth {
+func mediaHealth(summary *jobs.Summary, gaps int64, degraded bool, spool Spool) MediaHealth {
 	health := MediaHealth{MediaReconciliation: StatusUnknown, MediaReconciliationGapsTotal: gaps}
 	if summary != nil {
 		health.MediaReconciliation = StatusOK

@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -47,7 +46,8 @@ import (
 	"github.com/tyk-swe/olp/internal/mcp/registration"
 	"github.com/tyk-swe/olp/internal/mcp/sessions"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
-	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/media/jobs"
+	"github.com/tyk-swe/olp/internal/media/transport"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/pluginindex"
@@ -59,6 +59,7 @@ import (
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/secretstore"
 	"github.com/tyk-swe/olp/internal/signing"
+	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/surface"
 	"github.com/tyk-swe/olp/internal/telemetry"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -210,8 +211,9 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 	var rt *release.Manager
 	var gw *gateway.Server
 	var agentMonitor *agents.TaskMonitor
-	var mediaService *media.Service
-	var mediaSpool *media.Spool
+	var mediaService *jobs.Service
+	var mediaTransport *transport.Transport
+	var mediaSpool *staging.Spool
 	var pluginHost *plugins.Host
 	var policy egress.Policy
 	var auth *secrets.AuthKey
@@ -345,35 +347,34 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			probeDeps.Admission = gateway.NewAdmission(limiter, shared.Fleet, nil, log)
 		}
 		if c.Mode.Management() || c.Mode.Inference() || c.Mode == Worker {
-			spoolDir := c.MediaSpoolDir
-			if spoolDir == "" {
-				spoolDir = filepath.Join(os.TempDir(), "olp-media-spool")
-			}
-			spool, err := media.NewSpool(spoolDir, c.MediaSpoolCapacityBytes, log)
+			spool, err := staging.NewSpool(c.spoolDirectory(), c.MediaSpoolCapacityBytes, log)
 			if err != nil {
 				return err
 			}
 			mediaSpool = spool
 			defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "media spool", func(context.Context) error { return spool.Close() })
-			mediaService = &media.Service{
-				Pool:         pool,
-				Keys:         keys,
-				Installation: installation,
-				Gaps:         &mediaGapsTotal,
-				Transport: &media.Transport{
-					Client:           policy.Client(gateway.UpstreamHeaderTimeout),
-					Auth:             connectors.NewAuth(&policy),
-					Egress:           &policy,
-					Spool:            spool,
-					MaxResponseBytes: c.ProviderMaxResponseBytes,
-				},
+			mediaTransport = transport.New(transport.Deps{
+				Client:           policy.Client(gateway.UpstreamHeaderTimeout),
+				Auth:             connectors.NewAuth(&policy),
+				Egress:           &policy,
+				Spool:            spool,
+				MaxResponseBytes: c.ProviderMaxResponseBytes,
+				Log:              log,
+			})
+			mediaService = jobs.New(jobs.Deps{
+				Store:       jobs.NewStore(pool),
+				Transport:   mediaTransport,
 				Credentials: rt,
+				Gaps:        &mediaGapsTotal,
 				Log:         log,
-			}
+				Now:         time.Now,
+			})
 		}
 		if c.Mode.Inference() {
 			gatewayDeps.Capture = capturer
-			gatewayDeps.Media = &gateway.MediaDeps{Jobs: mediaService, Admission: media.NewAdmissionState(c.MediaSpoolCapacityBytes)}
+			gatewayDeps.Media = &gateway.MediaDeps{Transport: mediaTransport, Jobs: mediaService, Store: jobs.NewStore(pool)}
+			gatewayDeps.Staging = mediaSpool
+			gatewayDeps.Uploads = staging.NewAdmission(mediaSpool.CapacityBytes())
 			if pool != nil {
 				gatewayDeps.CodeLedger = codesessions.New(pool)
 				gatewayDeps.CodeAuthorizer = &providers.CodeAuthorizer{Pool: pool, Credentials: rt, Plugins: pluginHost}
@@ -484,7 +485,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 				return err
 			}
 			defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "management plugin runtime", pluginRuntime.Close)
-			Management{Getenv: os.Getenv, Access: control, IdentityClient: identityClient, Egress: &policy, Limits: shared, Runtime: rt, Gateway: gw, Media: mediaService, Health: obsCache, Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog, CatalogKeys: catalogKeys, PluginIndex: pluginIndex}.Register(public)
+			Management{Getenv: os.Getenv, Access: control, IdentityClient: identityClient, Egress: &policy, Limits: shared, Runtime: rt, Gateway: gw, Media: mediaService, Spool: mediaSpool, Health: obsCache, Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog, CatalogKeys: catalogKeys, PluginIndex: pluginIndex}.Register(public)
 		}
 	}
 	if err := startup.Err(); err != nil {
@@ -586,6 +587,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		gateway:       gw,
 		emitter:       emitter,
 		spool:         mediaSpool,
+		media:         jobs.NewStore(pool),
 		mediaGaps:     &mediaGapsTotal,
 		loss:          lossCounters,
 		export: func(ctx context.Context) []prometheus.Metric {
@@ -631,7 +633,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		// provider egress client, so the plane runs even when no shared state
 		// backend is configured. It is started exactly once, inside the single
 		// worker plane.
-		workersStopped = startWorkers(workers, pool, reader, debitStore, shared, workerStream, mediaService, pluginHost, keys, auth, installation, c.Region, c.Hostname, &policy, log, exporter, focusWorker, importer, referenceCatalog)
+		workersStopped = startWorkers(workers, pool, reader, debitStore, shared, workerStream, mediaService, rt, pluginHost, keys, auth, installation, c.Region, c.Hostname, &policy, log, exporter, focusWorker, importer, referenceCatalog)
 	}
 	// Probes produce accounting events, so they stop before delivery closes;
 	// the consumer and recovery workers remain alive until delivery drains.

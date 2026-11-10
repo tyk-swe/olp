@@ -310,12 +310,12 @@ func (x *call) targetCostBound(provider routing.Provider, target routing.Target,
 }
 
 func videoCreateUsage(m *media.Request) (usage.AttemptUsage, bool) {
-	if m == nil || m.Op != media.OpVideoCreate {
+	if m == nil {
 		return usage.AttemptUsage{}, false
 	}
-	seconds := "4"
-	if m.Seconds != nil {
-		seconds = *m.Seconds
+	seconds, video := m.VideoSeconds()
+	if !video {
+		return usage.AttemptUsage{}, false
 	}
 	return usage.AttemptUsage{Complete: true, UsageQuantities: usage.UsageQuantities{MediaUnits: &seconds}}, true
 }

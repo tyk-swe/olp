@@ -16,12 +16,12 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/staging"
 )
 
 var anthropicCustomID = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
@@ -360,12 +360,12 @@ func (s *Server) anthropicBatchResults(w http.ResponseWriter, r *http.Request) {
 		if contentType == "" {
 			contentType = "application/jsonl"
 		}
-		artifact, err := s.transport().Spool.Put(ctx, media.Upload{Filename: "batch-results", ContentType: contentType, MaximumLength: s.cfg.MaxResponseBytes, Body: resp.Body})
+		artifact, err := s.deps.Staging.Put(ctx, staging.Upload{Filename: "batch-results", ContentType: contentType, MaximumLength: s.cfg.MaxResponseBytes, Body: resp.Body})
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_response_too_large", "The results exceeded the configured response bound.")
 		}
-		defer s.transport().Spool.Remove(artifact.Handle)
-		opened, err := s.transport().Spool.Open(artifact.Handle)
+		defer s.deps.Staging.Remove(artifact.Handle)
+		opened, err := s.deps.Staging.Open(artifact.Handle)
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The staged results could not be read.")
 		}

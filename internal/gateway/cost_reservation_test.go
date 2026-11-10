@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -253,12 +254,19 @@ func TestRouteChargeBoundSortsDearestRetriesAndVideoCard(t *testing.T) {
 		t.Fatalf("routeChargeBound = %s, want %s (two dispatches of dearest explicit rate)", got, want)
 	}
 
-	seconds := "5"
+	video, failure := media.DecodeVideoCreate(staging.FormOf([]staging.Field{
+		{Name: "model", Value: staging.Text("team-chat")},
+		{Name: "prompt", Value: staging.Text("A cat.")},
+		{Name: "seconds", Value: staging.Text("4")},
+	}, false))
+	if failure != nil {
+		t.Fatal(failure.Message)
+	}
 	videoAttempt := routing.Attempt{ProviderID: x.attempts[0].ProviderID, UpstreamModel: "sora-2",
-		Price: &usage.RoutingPrice{Price: usage.Price{Model: "sora-2", Operation: "video_create", UnitPrice: costText("0.2")}}}
+		Price: &usage.RoutingPrice{Price: usage.Price{Model: "sora-2", Operation: "video_create", UnitPrice: costText("0.25")}}}
 	videoExec := &call{
 		family:             wire.Format("video_create"),
-		media:              &media.Request{Op: media.OpVideoCreate, Seconds: &seconds},
+		media:              video,
 		request:            request{id: "video-charge", minted: true},
 		historicalSnapshot: x.historicalSnapshot,
 		cardPinned:         true,

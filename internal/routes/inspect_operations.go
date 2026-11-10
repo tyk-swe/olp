@@ -5,6 +5,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/vendors"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/interaction"
@@ -34,18 +35,18 @@ func inspectorAnyRequest(raw json.RawMessage, operation, surface, mode, dialect,
 	if tuple {
 		return nil, nil, nil, nil
 	}
-	if mediacontract.IsMediaOperation(operation) {
-		if surface != "openai" || mode != "unary" && mode != "streaming" || operation != "image_generation" && operation != "speech" {
+	if vendors.IsMediaOperation(operation) {
+		if surface != "openai" || mode != "unary" && mode != "streaming" || media.Operation(operation) != media.OpImageGeneration && media.Operation(operation) != media.OpSpeech {
 			return nil, nil, nil, access.Invalid("request", "This media source requires a live multipart or lifecycle invocation; the inspector cannot stage its assets.")
 		}
 		var request *media.Request
 		var failure *media.Error
-		if operation == "image_generation" {
+		if media.Operation(operation) == media.OpImageGeneration {
 			request, failure = media.DecodeImageGeneration(raw)
 		} else {
 			request, failure = media.DecodeSpeech(raw)
 		}
-		if failure != nil || request.Route != slug || request.Mode() != mode {
+		if failure != nil || request.Route() != slug || request.Mode() != mode {
 			return nil, nil, nil, access.Invalid("request", "Use a native media request naming this route and delivery mode.")
 		}
 		return nil, nil, request, nil
@@ -116,7 +117,7 @@ func inspectionMediaAccept(route routing.Route, source *media.Request, dialect s
 		if client != "" || len(context.Headers) != 0 || len(context.Query) != 0 {
 			return nil, safeInspectionError(&oif.Incompatibility{Code: "target_capability", Field: "/semantic_context", Requirement: "media_context", Message: "This media profile has no qualified caller semantic context."})
 		}
-		template, err := mediacontract.Compile(mediacontract.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: source.Op, Policy: route.ContentPolicy})
+		template, err := mediacontract.Compile(mediacontract.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: string(source.Op()), Policy: route.ContentPolicy})
 		if err != nil {
 			return nil, safeInspectionError(err)
 		}
@@ -124,7 +125,11 @@ func inspectionMediaAccept(route routing.Route, source *media.Request, dialect s
 		if failure != nil {
 			return nil, safeInspectionError(failure)
 		}
-		bound, err := template.Bind(mediacontract.Input{Route: route.Slug, Mode: effective.Mode(), Source: source.SourceDocument(), JSON: call.JSON, PolicyBudget: budget.reserve})
+		input, err := media.ContractInput(source, call, effective, budget.reserve)
+		if err != nil {
+			return nil, safeInspectionError(err)
+		}
+		bound, err := template.Bind(input)
 		if err != nil {
 			safe := safeInspectionError(err)
 			if diagnostic, ok := safe.(*inspectionDiagnostic); ok && diagnostic.code == "content_policy_blocked" {

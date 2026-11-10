@@ -20,15 +20,6 @@ import (
 
 const maxDocumentBytes = 64 << 20
 
-// IsMediaOperation identifies the operations owned by the existing media
-// service, including resource operations that cannot yet claim strict identity.
-func IsMediaOperation(op string) bool {
-	return slices.Contains([]string{
-		"image_generation", "image_edit", "image_variation", "speech", "transcription", "translation",
-		"video_create", "video_list", "video_get", "video_content", "video_delete",
-	}, op)
-}
-
 type Config struct {
 	Provider                                 connectors.Config
 	ProviderID, RevisionID, Model, Operation string
@@ -124,7 +115,6 @@ type Part struct {
 	Blob        oif.BlobReference
 	Filename    string
 	ContentType string
-	Raw         bool
 }
 
 type Input struct {
@@ -285,7 +275,7 @@ func (t *Template) bindMultipart(d oif.Descriptor, in Input) (Bound, error) {
 	for index, caller := range in.CallerParts {
 		outbound := in.Parts[index]
 		seen[caller.Name] = true
-		if caller.Name != outbound.Name || caller.Blob != outbound.Blob || caller.Filename != outbound.Filename || caller.ContentType != outbound.ContentType || caller.Raw != outbound.Raw || (caller.Text == nil) != (outbound.Text == nil) {
+		if caller.Name != outbound.Name || caller.Blob != outbound.Blob || caller.Filename != outbound.Filename || caller.ContentType != outbound.ContentType || (caller.Text == nil) != (outbound.Text == nil) {
 			return Bound{}, reject("target_capability", "/request", "source_order", "A caller multipart member changed position or identity.")
 		}
 		if caller.Text != nil {
@@ -310,7 +300,7 @@ func (t *Template) bindMultipart(d oif.Descriptor, in Input) (Bound, error) {
 	}
 	for i, want := range defaultParts {
 		got := in.Parts[len(in.CallerParts)+i]
-		if got.Name != want.Name || got.Text == nil || *got.Text != *want.Text || got.Blob.Valid() || got.Raw != want.Raw {
+		if got.Name != want.Name || got.Text == nil || *got.Text != *want.Text || got.Blob.Valid() {
 			return Bound{}, reject("target_capability", "/defaults", "absent_only_default", "A multipart default changed its native value.")
 		}
 	}
@@ -424,7 +414,7 @@ func multipartDefaultParts(name string, raw json.RawMessage) []Part {
 		return nil
 	}
 	text = compact.String()
-	return []Part{{Name: name, Text: &text, Raw: true}}
+	return []Part{{Name: name, Text: &text}}
 }
 
 func (t *Template) inspectJSONInput(doc oif.Document, reserve func(int) error) error {

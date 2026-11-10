@@ -84,7 +84,6 @@ var (
 	MutationReplay       = SealPurpose{"mutation_replay"}
 	OIDCClientSecret     = SealPurpose{"oidc_client"}
 	OIDCFlow             = SealPurpose{"oidc_flow"}
-	MediaJobSource       = SealPurpose{"media_job_source"}
 	// ProviderGrantRefresh is a refresh token read only by control and workers.
 	ProviderGrantRefresh = SealPurpose{"provider_grant_refresh"}
 	// GrantEnrollment holds short-lived plugin enrollment state.
@@ -100,7 +99,7 @@ var (
 
 func SealPurposes() []SealPurpose {
 	return []SealPurpose{SAMLKey, SAMLFlow, MFATOTP, MFAWebAuthn, ProviderCredential, ProviderContinuation, NotificationSecret, MutationReplay,
-		OIDCClientSecret, OIDCFlow, MediaJobSource, ProviderGrantRefresh, GrantEnrollment, SinkCredential, MCPCredential, MCPGrantAccess, MCPGrantRefresh, MCPGrantEnrollment, MCPEntraClient, MCPDelegationSigning, BillingCredential, GuardrailCredential, ResponseCache, ProviderUploadSession, AgentCredential, WorkflowContinuation}
+		OIDCClientSecret, OIDCFlow, ProviderGrantRefresh, GrantEnrollment, SinkCredential, MCPCredential, MCPGrantAccess, MCPGrantRefresh, MCPGrantEnrollment, MCPEntraClient, MCPDelegationSigning, BillingCredential, GuardrailCredential, ResponseCache, ProviderUploadSession, AgentCredential, WorkflowContinuation}
 }
 
 func ParseSealPurpose(name string) (SealPurpose, bool) {

@@ -4,26 +4,24 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/staging"
 )
 
-// The runway wire is Runway's task API: a video creation is a task, polled by
-// its ID, whose output is a signed URL on Runway's CDN, and deleting the task
-// cancels or removes it.
-//
-// https://docs.dev.runwayml.com/api
 var runwayCodec = codec{
-	OpVideoCreate:  modelOnly(encodeRunwayCreate),
-	OpVideoGet:     modelOnly(encodeRunwayGet),
-	OpVideoContent: modelOnly(encodeRunwayContent),
-	OpVideoDelete:  modelOnly(encodeRunwayDelete),
+	videoCreate:  encodeRunwayCreate,
+	videoGet:     encodeRunwayGet,
+	videoContent: encodeRunwayContent,
+	videoDelete:  encodeRunwayDelete,
 }
 
-// runwayTask is the path of one Runway task, whose IDs are UUIDs.
 func runwayTask(id string) (string, *Error) {
 	if id == "" || strings.ContainsAny(id, "/?#%") {
 		return "", invalidMedia("The video job's upstream identity is malformed.")
@@ -31,30 +29,26 @@ func runwayTask(id string) (string, *Error) {
 	return "tasks/" + url.PathEscape(id), nil
 }
 
-func encodeRunwayCreate(r *Request, model string) (*UpstreamCall, *Error) {
-	if len(r.Extra) > 0 {
+func encodeRunwayCreate(r *Request, p VideoCreate, _ connectors.Config, model string) (*UpstreamCall, *Error) {
+	if len(r.Extra()) > 0 {
 		return nil, invalidMedia("Runway does not support the requested video parameters.")
 	}
-	fields := map[string]any{"model": model, "promptText": r.Prompt, "ratio": "1280:720"}
-	if r.Size != nil {
+	fields := map[string]any{"model": model, "promptText": p.Prompt, "ratio": "1280:720"}
+	if p.Size != nil {
 		var width, height int
-		if _, err := fmt.Sscanf(*r.Size, "%dx%d", &width, &height); err != nil || width < 1 || height < 1 {
+		if _, err := fmt.Sscanf(*p.Size, "%dx%d", &width, &height); err != nil || width < 1 || height < 1 {
 			return nil, invalidMedia("The size is not a Runway resolution.")
 		}
 		fields["ratio"] = strconv.Itoa(width) + ":" + strconv.Itoa(height)
 	}
-	// Runway requires a duration; OpenAI's is four seconds when unnamed.
-	duration := "4"
-	if r.Seconds != nil {
-		duration = *r.Seconds
-	}
+	duration := p.Duration()
 	seconds, err := strconv.Atoi(duration)
 	if err != nil || seconds < 1 {
 		return nil, invalidMedia("Runway takes a whole number of seconds.")
 	}
 	fields["duration"] = seconds
 	path := "text_to_video"
-	reference := r.InputRef
+	reference := p.InputRef
 	if reference != nil {
 		path = "image_to_video"
 		if !strings.HasPrefix(strings.ToLower(reference.ContentType), "image/") {
@@ -66,30 +60,30 @@ func encodeRunwayCreate(r *Request, model string) (*UpstreamCall, *Error) {
 			ID string `json:"id"`
 		}
 		if json.Unmarshal(body, &encodedWire) != nil || encodedWire.ID == "" {
-			return nil, protocolError("The provider created no video task.")
+			return nil, ProtocolError("The provider created no video task.")
 		}
 		now := time.Now().Unix()
-		return &VideoJobResult{ID: encodedWire.ID, Status: "queued", CreatedAt: &now, Prompt: &r.Prompt, Seconds: &duration, Size: r.Size}, nil
+		return &VideoJobResult{ID: encodedWire.ID, Status: "queued", CreatedAt: &now, Prompt: &p.Prompt, Seconds: &duration, Size: p.Size}, nil
 	}
-	call := &UpstreamCall{Method: http.MethodPost, Path: path, Kind: ResponseVideoJob, Ambiguous: true, DecodeVideo: created}
-	call.JSONFrom = func(read func(*Part) ([]byte, *Error)) ([]byte, *Error) {
+	inline := func(read func(staging.Part) ([]byte, *Error)) ([]byte, *Error) {
+		document := maps.Clone(fields)
 		if reference != nil {
-			image, failure := read(reference)
+			image, failure := read(*reference)
 			if failure != nil {
 				return nil, failure
 			}
-			fields["promptImage"] = "data:" + reference.ContentType + ";base64," + base64.StdEncoding.EncodeToString(image)
+			document["promptImage"] = "data:" + reference.ContentType + ";base64," + base64.StdEncoding.EncodeToString(image)
 		}
-		body, err := json.Marshal(fields)
+		body, err := json.Marshal(document)
 		if err != nil {
 			return nil, invalidMedia("The video request could not be encoded.")
 		}
 		return body, nil
 	}
-	return call, nil
+	return &UpstreamCall{Method: http.MethodPost, Endpoint: Path{Path: path}, Body: InlineBody(inline),
+		Response: VideoJobReply{Decode: created}, Ambiguous: true}, nil
 }
 
-// runwayTaskObject is a Runway task as OpenAI's video object.
 func runwayTaskObject(body []byte) (*VideoJobResult, *Error) {
 	var encodedWire struct {
 		ID          string   `json:"id"`
@@ -100,12 +94,12 @@ func runwayTaskObject(body []byte) (*VideoJobResult, *Error) {
 		FailureCode *string  `json:"failureCode"`
 	}
 	if json.Unmarshal(body, &encodedWire) != nil || encodedWire.ID == "" {
-		return nil, protocolError("The provider video task is malformed.")
+		return nil, ProtocolError("The provider video task is malformed.")
 	}
 	statuses := map[string]string{"PENDING": "queued", "THROTTLED": "queued", "RUNNING": "in_progress", "SUCCEEDED": "completed", "FAILED": "failed", "CANCELLED": "failed"}
 	status, ok := statuses[encodedWire.Status]
 	if !ok {
-		return nil, protocolError("The provider video task has an unknown status.")
+		return nil, ProtocolError("The provider video task has an unknown status.")
 	}
 	result := &VideoJobResult{ID: encodedWire.ID, Status: status, ErrorCode: encodedWire.FailureCode, ErrorMessage: encodedWire.Failure}
 	if encodedWire.Progress != nil {
@@ -122,44 +116,42 @@ func runwayTaskObject(body []byte) (*VideoJobResult, *Error) {
 	return result, nil
 }
 
-func encodeRunwayGet(r *Request, _ string) (*UpstreamCall, *Error) {
-	path, failure := runwayTask(r.JobID)
+func encodeRunwayGet(job VideoGet) (*UpstreamCall, *Error) {
+	path, failure := runwayTask(job.ID)
 	if failure != nil {
 		return nil, failure
 	}
-	return &UpstreamCall{Method: http.MethodGet, Path: path, Accept: "application/json", Kind: ResponseVideoJob, DecodeVideo: runwayTaskObject}, nil
+	return &UpstreamCall{Method: http.MethodGet, Endpoint: Path{Path: path}, Accept: "application/json", Response: VideoJobReply{Decode: runwayTaskObject}}, nil
 }
 
-// encodeRunwayContent reads the task and fetches its first output, which
-// takes no credential.
-func encodeRunwayContent(r *Request, _ string) (*UpstreamCall, *Error) {
-	if r.Variant != "" && r.Variant != "video" {
+func encodeRunwayContent(job VideoContent) (*UpstreamCall, *Error) {
+	if job.Variant != "" && job.Variant != "video" {
 		return nil, invalidMedia("Runway serves the video itself, without thumbnails or spritesheets.")
 	}
-	path, failure := runwayTask(r.JobID)
+	path, failure := runwayTask(job.ID)
 	if failure != nil {
 		return nil, failure
 	}
-	return &UpstreamCall{Method: http.MethodGet, Path: path, Accept: "application/json", Kind: ResponseVideoContent,
-		Next: func(body []byte) (*Step, *Error) {
+	return &UpstreamCall{Method: http.MethodGet, Endpoint: Path{Path: path}, Accept: "application/json", Response: VideoContentReply{Poll: &Poll{
+		Next: func(body []byte) (Step, *Error) {
 			var encodedWire struct {
 				Status string   `json:"status"`
 				Output []string `json:"output"`
 			}
 			if json.Unmarshal(body, &encodedWire) != nil {
-				return nil, protocolError("The provider video task is malformed.")
+				return nil, ProtocolError("The provider video task is malformed.")
 			}
 			if encodedWire.Status != "SUCCEEDED" || len(encodedWire.Output) == 0 {
 				return nil, Fail(http.StatusConflict, "video_not_ready", "The video has no content yet.")
 			}
-			return &Step{URL: encodedWire.Output[0], Asset: "video/"}, nil
-		}}, nil
+			return Fetch{URL: encodedWire.Output[0], Prefix: "video/"}, nil
+		}}}}, nil
 }
 
-func encodeRunwayDelete(r *Request, _ string) (*UpstreamCall, *Error) {
-	path, failure := runwayTask(r.JobID)
+func encodeRunwayDelete(job VideoDelete) (*UpstreamCall, *Error) {
+	path, failure := runwayTask(job.ID)
 	if failure != nil {
 		return nil, failure
 	}
-	return &UpstreamCall{Method: http.MethodDelete, Path: path, Kind: ResponseVideoDelete, NoContent: true}, nil
+	return &UpstreamCall{Method: http.MethodDelete, Endpoint: Path{Path: path}, Response: VideoDeletedReply{NoContent: true}}, nil
 }

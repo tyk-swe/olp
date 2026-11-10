@@ -134,6 +134,10 @@ func (c Contract) Serves(operation string) bool { return slices.Contains(c.Opera
 
 // MediaWire is the vendor's own wire for a media operation, or "" when the
 // vendor speaks OpenAI's.
+func MediaOperations() []string { return slices.Clone(mediaOperations) }
+
+func IsMediaOperation(op string) bool { return slices.Contains(mediaOperations, op) }
+
 func MediaWire(vendor, operation string) string {
 	i, ok := index[vendor]
 	if !ok {

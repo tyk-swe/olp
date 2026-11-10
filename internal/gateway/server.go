@@ -40,6 +40,7 @@ import (
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/telemetry"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -118,6 +119,8 @@ type Dependencies struct {
 	WorkflowTools  WorkflowToolRunner
 	Traces         *TraceDeps
 	Media          *MediaDeps
+	Staging        *staging.Spool
+	Uploads        *staging.Admission
 	Capture        *capture.Manager
 	Business       *telemetry.BusinessMetrics
 
@@ -1323,7 +1326,7 @@ func normalizedDependencies(deps Dependencies) Dependencies {
 		Egress: deps.Egress, Log: deps.Log, Cache: deps.Cache, Guardrails: guardrailRunner(deps),
 		CodeLedger: deps.CodeLedger, CodeAuthorizer: deps.CodeAuthorizer, CodeResearch: deps.CodeResearch, ResearchAuth: deps.ResearchAuth,
 		Runtime: deps.Runtime, Sink: configuredSink(deps.Sink, deps.Log), Admission: deps.Admission, Debits: deps.Debits, WorkflowRuns: deps.WorkflowRuns, WorkflowTools: deps.WorkflowTools,
-		Traces: deps.Traces, Media: deps.Media, Capture: deps.Capture, Business: deps.Business, Resources: deps.Resources, Batches: deps.Batches, Resolver: deps.Resolver,
+		Traces: deps.Traces, Media: deps.Media, Staging: deps.Staging, Uploads: deps.Uploads, Capture: deps.Capture, Business: deps.Business, Resources: deps.Resources, Batches: deps.Batches, Resolver: deps.Resolver,
 	}
 }
 

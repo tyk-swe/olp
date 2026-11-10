@@ -8,8 +8,10 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codesessions"
+	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/notifications"
 	"github.com/tyk-swe/olp/internal/observability/workerhealth"
+	"github.com/tyk-swe/olp/internal/release"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -29,7 +31,6 @@ import (
 	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
-	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -53,7 +54,7 @@ import (
 // returned function waits for all of them to have stopped.
 // vk is the consumer's own Valkey client: its blocking stream reads would
 // otherwise stall every command the gateway sends on a shared connection.
-func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Client, store *debits.Store, shared *sharedLimits, stream string, mediaService *media.Service, pluginHost *plugins.Host, keys *secrets.KeyRing, auth *secrets.AuthKey, installation, region, hostname string, policy *egress.Policy, log *slog.Logger, exporter *stream.Worker, focusWorker *focus.Worker, importer *billing.Importer, reference *catalog.Signed) func() {
+func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Client, store *debits.Store, shared *sharedLimits, stream string, mediaService *jobs.Service, credentials release.Credentials, pluginHost *plugins.Host, keys *secrets.KeyRing, auth *secrets.AuthKey, installation, region, hostname string, policy *egress.Policy, log *slog.Logger, exporter *stream.Worker, focusWorker *focus.Worker, importer *billing.Importer, reference *catalog.Signed) func() {
 	var wg sync.WaitGroup
 	var limiter *admission.Limiter
 	var syncer *debits.Syncer
@@ -63,26 +64,26 @@ func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Clie
 	}
 	managedExporter := &sinks.Worker{Pool: pool, Keys: keys, Installation: installation, Egress: policy}
 	wg.Go(func() { managedExporter.Run(ctx, log) })
-	wg.Go(func() { mediaService.RunReconciler(ctx) })
+	wg.Go(func() { mediaService.Run(ctx) })
 	batchAuth := connectors.NewAuth(policy)
 	batchAuth.Signer = pluginHost
 	batchWorker := reconcile.New(reconcile.Deps{
 		Pool: pool, Store: batches.NewStore(pool),
 		Resources: resources.NewEncrypted(pool, installation, keys),
-		Resolver:  resources.NewResolver(pool), Credentials: mediaService.Credentials,
+		Resolver:  resources.NewResolver(pool), Credentials: credentials,
 		DigestKey: auth, Readers: upstream.New(batchAuth, policy), Egress: policy,
 		Client: policy.Client(5 * time.Minute), Connections: egress.NewConnectionClientCache(128),
 		Limiter: limiter, Log: log, Now: time.Now,
 	})
 	wg.Go(func() { batchWorker.Run(ctx) })
-	retained := &retainedworker.Worker{Store: resources.New(pool), Resolver: resources.NewResolver(pool), Credentials: mediaService.Credentials, Auth: batchAuth, Egress: policy, Log: log}
+	retained := &retainedworker.Worker{Store: resources.New(pool), Resolver: resources.NewResolver(pool), Credentials: credentials, Auth: batchAuth, Egress: policy, Log: log}
 	wg.Go(func() { retained.Run(ctx) })
 	// Grant refresh needs only PostgreSQL and the providers' network paths.
 	refresher := &grants.Refresher{Pool: pool, Keys: keys, Installation: installation, Plugins: pluginHost, Egress: policy, Log: log}
 	wg.Go(func() { refresher.Run(ctx) })
 	allowanceReader := &codeallowance.Reader{
 		Pool: pool, Store: codesessions.New(pool),
-		Authorizer: &providers.CodeAuthorizer{Pool: pool, Credentials: mediaService.Credentials, Plugins: pluginHost},
+		Authorizer: &providers.CodeAuthorizer{Pool: pool, Credentials: credentials, Plugins: pluginHost},
 		Client:     policy.Client(30 * time.Second), Log: log,
 	}
 	wg.Go(func() { allowanceReader.Run(ctx) })

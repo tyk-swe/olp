@@ -7,7 +7,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/metric"
 	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -204,9 +204,9 @@ func gatewayMetrics(gateway GatewayCounters) []prometheus.Metric {
 }
 
 func mediaMetrics(ctx context.Context, s *Sources, now time.Time) []prometheus.Metric {
-	summary, err := media.ReconciliationSummary(ctx, s.Store, now)
+	summary, err := s.Media.Summary(ctx, now)
 	if err != nil {
-		summary = media.Summary{}
+		summary = jobs.Summary{}
 	}
 	metrics := []prometheus.Metric{
 		mediaPending.Sample(float64(summary.Pending)),
