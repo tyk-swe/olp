@@ -13,12 +13,12 @@ import (
 	"github.com/google/uuid"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/mcp"
 )
 
 type workflowRecoveryLedger interface {
-	SettleRecovery(context.Context, limits.DebitResult) error
+	SettleRecovery(context.Context, debits.Result) error
 	PreviousRecovery(context.Context, string, string, []string) (bool, bool, error)
 }
 
@@ -88,21 +88,21 @@ func (s *Server) recoverWorkflowContent(ctx context.Context, x *call, authority 
 	if err != nil {
 		return nil, err
 	}
-	intent := limits.DebitIntent{
+	intent := debits.Intent{
 		ID: dispatchID, APIKeyID: authority.ID, ProjectID: *authority.ProjectID,
-		RunID: x.workflow.runID, StepID: stepID, Kind: "tool", ClaimID: claimID,
+		RunID: x.workflow.runID, StepID: stepID, Kind: debits.KindTool, ClaimID: claimID,
 		Currency: currency, CostBound: "0", ChargeBound: "0", PreparedUntil: time.Now().Add(90 * time.Second),
-		Affinity: limits.ExecutionAffinity{ReleaseID: canonicalSessionID(x.snapshot().Generation().ID), RevisionID: canonicalSessionID(x.route.RevisionID), RouteRevisionID: canonicalSessionID(x.route.RevisionID)},
+		Affinity: debits.Affinity{ReleaseID: canonicalSessionID(x.snapshot().Generation().ID), RevisionID: canonicalSessionID(x.route.RevisionID), RouteRevisionID: canonicalSessionID(x.route.RevisionID)},
 	}
-	owners, requestLimits, valid := sessionDebitBoundaries(x, authority)
-	if !valid {
+	boundaries := x.admissionAuthority(authority).CostBoundaries(x.limitRoute())
+	if !boundaries.Resolved {
 		return nil, &mcp.WorkflowError{Status: 503, Code: "tool_execution_unavailable", Message: "Recovery accounting is unavailable."}
 	}
-	state, err := s.deps.WorkflowRuns.Prepare(ctx, authority, intent, x.workflow.ordinal, owners)
-	if err != nil || state != limits.DebitPrepared {
+	state, err := s.deps.WorkflowRuns.Prepare(ctx, authority, intent, x.workflow.ordinal, boundaries.Owners())
+	if err != nil || state != debits.Prepared {
 		return nil, &mcp.WorkflowError{Status: 503, Code: "tool_execution_unavailable", Message: "Recovery accounting is unavailable."}
 	}
-	if err := s.deps.Debits.Admit(ctx, dispatchID, claimID, requestLimits); err != nil {
+	if err := s.deps.Debits.Admit(ctx, dispatchID, claimID, boundaries.Admissions()); err != nil {
 		_ = s.deps.Debits.ReleaseUndispatched(context.WithoutCancel(ctx), dispatchID, claimID)
 		return nil, err
 	}
@@ -116,7 +116,7 @@ func (s *Server) recoverWorkflowContent(ctx context.Context, x *call, authority 
 	}
 	resultDigest := sha256.Sum256([]byte("recovery-result:" + dispatchID))
 	evidenceDigest := sha256.Sum256([]byte("recovery-evidence:" + dispatchID))
-	result := limits.DebitResult{DispatchID: dispatchID, EventID: eventID, ResultDigest: resultDigest[:], EvidenceDigest: evidenceDigest[:], Cost: "0", Charge: "0", Final: true, Complete: true}
+	result := debits.Result{DispatchID: dispatchID, EventID: eventID, ResultDigest: resultDigest[:], EvidenceDigest: evidenceDigest[:], Cost: "0", Charge: "0", Final: true, Complete: true}
 	if err := ledger.SettleRecovery(ctx, result); err != nil {
 		_ = s.deps.Debits.MarkUnknown(context.WithoutCancel(ctx), dispatchID, claimID)
 		return nil, err

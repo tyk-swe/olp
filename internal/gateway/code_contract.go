@@ -3,8 +3,9 @@ package gateway
 import (
 	"context"
 	"encoding/json"
-	"github.com/tyk-swe/olp/internal/codesessions"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/codesessions"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/codeadapter"

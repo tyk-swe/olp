@@ -87,7 +87,7 @@ func (s *Store) AdmitPaid(ctx context.Context, in PaidAdmission) (PaidPermit, er
  VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'prepared',0,$12,$13,$14,$15)`, attempt.ID, in.Route.ProjectID, in.Route.ID, in.Route.RevisionID, in.APIKeyID, binding.ID, target.ProviderID, target.SlotID, in.Operation.PublicModel(), in.Operation.Name, in.Operation.Model, in.EndUserDigest, attribution.JSON(in.Attribution), paidCodeOwners(authority, in), codeRecoveryFrom(in.Recovery)); err != nil {
 		return PaidPermit{}, err
 	}
-	if err := limits.ReserveCodeTokens(ctx, tx, attempt, in.Bound); err != nil {
+	if err := reserveCodeTokens(ctx, tx, attempt, in.Bound); err != nil {
 		return PaidPermit{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {

@@ -14,7 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/limits"
+	limitadmission "github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -740,7 +740,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 	// Route leases stay separate from the caller's page lease: each
 	// route's cost budget is grown and settled with only its own
 	// reads, never the whole page total.
-	routeLeases := make(map[string]*limits.Lease)
+	routeLeases := make(map[string]*limitadmission.Lease)
 	routeReserved := make(map[string]usage.Cost)
 	routeReservedCharge := make(map[string]usage.Cost)
 	routeActual := make(map[string]usage.Cost)
@@ -772,7 +772,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 		}
 		if lease != nil {
 			if prior := routeLeases[entry.route.Slug]; prior != nil {
-				prior.Attach(lease)
+				prior.Join(lease)
 			} else {
 				routeLeases[entry.route.Slug] = lease
 			}

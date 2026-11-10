@@ -92,7 +92,7 @@ func CreateApprovalTx(ctx context.Context, tx pgx.Tx, key *secrets.AuthKey, a ke
 	return id, nil
 }
 
-// ConsumeApprovalTx must share a transaction with limits.MarkDispatchedTx.
+// ConsumeApprovalTx must share a transaction with debits.MarkDispatchedTx.
 // The supplied authority must be freshly resolved by runtime; the database also
 // refuses revoked/expired principals and retired resources at consumption.
 func ConsumeApprovalTx(ctx context.Context, tx pgx.Tx, key *secrets.AuthKey, a keyauthority.Authority, id, dispatch string, b ApprovalBinding) error {

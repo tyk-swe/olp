@@ -9,7 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/attribution"
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/ledger"
 )
 
 type Policies struct {
@@ -48,7 +48,7 @@ func WritePolicies(ctx context.Context, tx pgx.Tx, id string, desired Policies) 
 		return "", err
 	}
 	if desired.Budget.Limited() {
-		if err := limits.EnsureAggregateBudget(ctx, tx, "project", id); err != nil {
+		if err := ledger.EnsureAggregateBudget(ctx, tx, "project", id); err != nil {
 			return "", err
 		}
 	}

@@ -106,11 +106,9 @@ func (w *Worker) close(ctx context.Context, settlement batches.Settlement, decis
 	return outcomeProgress
 }
 
-func (w *Worker) applySnapshots(ctx context.Context, snapshots []limits.CostSnapshot) {
-	for _, snapshot := range snapshots {
-		if _, _, err := w.deps.Limiter.ApplyCostSnapshot(ctx, snapshot); err != nil {
-			w.deps.Log.Warn("batch cost snapshot application failed; reconciliation will repair it", "error", err)
-		}
+func (w *Worker) applySnapshots(ctx context.Context, snapshots []limits.Snapshot) {
+	if err := w.deps.Limiter.InstallSnapshots(ctx, snapshots); err != nil {
+		w.deps.Log.Warn("batch cost snapshot application failed; reconciliation will repair it", "error", err)
 	}
 }
 

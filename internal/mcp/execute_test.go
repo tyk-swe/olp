@@ -12,7 +12,7 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/mcp/messages"
 	"github.com/tyk-swe/olp/internal/mcp/sessions"
@@ -346,7 +346,7 @@ func (p executionPolicies) ToolGuardrailEngine(string, string) *guardrails.Engin
 
 type executionLimiter struct{}
 
-func (executionLimiter) Reserve(context.Context, limits.Request) (*limits.Lease, error) {
+func (executionLimiter) Reserve(context.Context, admission.Request) (*admission.Lease, error) {
 	return nil, nil
 }
 

@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/debits"
 )
 
 const debitEventDispatchID = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607"
@@ -115,7 +115,7 @@ func TestPersistWorkflowRejectsAttemptWithoutSettledDebit(t *testing.T) {
 		t.Fatal(acceptErr)
 	}
 	ledger := cardRevisionTx{row: unsettledWorkflowRow{}}
-	if _, err := PersistEventTx(t.Context(), ledger, accepted); !errors.Is(err, limits.ErrDebitConflict) {
+	if _, err := PersistEventTx(t.Context(), ledger, accepted); !errors.Is(err, debits.ErrConflict) {
 		t.Fatalf("workflow with an unsettled attempt was accepted: %v", err)
 	}
 }
@@ -127,7 +127,7 @@ func TestPersistWorkflowRejectsUnboundReceiptIdentity(t *testing.T) {
 	if changedErr != nil {
 		t.Fatal(changedErr)
 	}
-	if _, err := PersistEventTx(t.Context(), cardRevisionTx{}, changed); !errors.Is(err, limits.ErrDebitConflict) {
+	if _, err := PersistEventTx(t.Context(), cardRevisionTx{}, changed); !errors.Is(err, debits.ErrConflict) {
 		t.Fatalf("workflow accepted a receipt unrelated to its run and request: %v", err)
 	}
 }
@@ -150,16 +150,16 @@ func TestSessionDebitResultIdentityIsStablePerEvent(t *testing.T) {
 
 func TestPersistWorkflowAttemptRejectsUnboundOrOutOfOrderEvidence(t *testing.T) {
 	event := metadataEvent()
-	if _, err := PersistWorkflowAttempt(t.Context(), nil, event, -1); !errors.Is(err, limits.ErrDebitConflict) {
+	if _, err := PersistWorkflowAttempt(t.Context(), nil, event, -1); !errors.Is(err, debits.ErrConflict) {
 		t.Fatalf("negative attempt accepted: %v", err)
 	}
-	if _, err := PersistWorkflowAttempt(t.Context(), nil, event, 0); !errors.Is(err, limits.ErrDebitConflict) {
+	if _, err := PersistWorkflowAttempt(t.Context(), nil, event, 0); !errors.Is(err, debits.ErrConflict) {
 		t.Fatalf("nonterminal attempt accepted: %v", err)
 	}
-	if _, err := PersistWorkflowAttempt(t.Context(), nil, event, len(event.Attempts)); !errors.Is(err, limits.ErrDebitConflict) {
+	if _, err := PersistWorkflowAttempt(t.Context(), nil, event, len(event.Attempts)); !errors.Is(err, debits.ErrConflict) {
 		t.Fatalf("out-of-range attempt accepted: %v", err)
 	}
-	if _, err := PersistWorkflowAttempt(t.Context(), nil, event, len(event.Attempts)-1); !errors.Is(err, limits.ErrDebitConflict) {
+	if _, err := PersistWorkflowAttempt(t.Context(), nil, event, len(event.Attempts)-1); !errors.Is(err, debits.ErrConflict) {
 		t.Fatalf("attempt without dispatch accepted: %v", err)
 	}
 	if _, err := PersistWorkflowAttempt(t.Context(), nil, &Event{}, 0); err == nil {
@@ -194,7 +194,7 @@ func TestPersistWorkflowAttemptRejectsUnboundOrOutOfOrderEvidence(t *testing.T) 
 		"another dispatch": withExecution(event.EventID, uuid.NewString()),
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := PersistWorkflowAttempt(t.Context(), nil, bound, len(bound.Attempts)-1); !errors.Is(err, limits.ErrDebitConflict) {
+			if _, err := PersistWorkflowAttempt(t.Context(), nil, bound, len(bound.Attempts)-1); !errors.Is(err, debits.ErrConflict) {
 				t.Fatalf("mismatched workflow attempt accepted: %v", err)
 			}
 		})

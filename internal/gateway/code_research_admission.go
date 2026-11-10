@@ -9,7 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -20,8 +20,8 @@ type researchAttempt struct {
 	config               routing.Configuration
 	auth                 codemode.Authorization
 	binding              codemode.ResearchSessionBinding
-	lease, providerLease *limits.Lease
-	streamLease          *limits.Lease
+	lease, providerLease *admission.Lease
+	streamLease          *admission.Lease
 	dispatched           bool
 }
 

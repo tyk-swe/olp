@@ -3,10 +3,11 @@ package gateway
 import (
 	"bytes"
 	"context"
-	"github.com/tyk-swe/olp/internal/codesessions"
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/codesessions"
 
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"

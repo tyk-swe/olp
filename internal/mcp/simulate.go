@@ -37,7 +37,7 @@ func describeTool(authority keyauthority.Authority, resolved resolvedToolset, to
 		ToolsetID: resolved.id, ToolsetRevisionID: resolved.revisionID,
 		Name: tool.Alias, Description: tool.Description, InputSchema: tool.InputSchema,
 		UnitPrice: cloneUnitPrice(tool.UnitPrice), PricingState: accounting.PricingStateFor(tool.UnitPrice),
-		BudgetRequired: authority.ToolDebitBoundaries(toolRateLeaseTTL).CostBudgeted,
+		BudgetRequired: authority.CostBoundaries("").CostBudgeted(),
 		Limits: toolCallLimits{
 			ServerCallsPerMinute: effective.CallsPerMinute, ServerMaxConcurrency: effective.MaxConcurrency,
 			KeyCallsPerMinute: *tighterToolLimit(effective.PerKeyCallsPerMinute, authority.Policy.RequestsPerMinute),
@@ -131,12 +131,12 @@ func (s *Server) simulateTool(w http.ResponseWriter, r *http.Request) {
 		writeError(w, preparationFailure)
 		return
 	}
-	boundaries := authority.ToolDebitBoundaries(toolRateLeaseTTL)
+	boundaries := authority.CostBoundaries("")
 	if !boundaries.Resolved {
 		writeError(w, errLedger)
 		return
 	}
-	if prepared.tool.UnitPrice == nil && boundaries.CostBudgeted {
+	if prepared.tool.UnitPrice == nil && boundaries.CostBudgeted() {
 		writeError(w, fail(http.StatusUnprocessableEntity, "tool_unpriced", "invalid_request_error", "The tool has no price and an enforced budget needs a finite bound, so the call cannot be dispatched."))
 		return
 	}

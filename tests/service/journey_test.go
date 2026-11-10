@@ -26,7 +26,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export/destination"
 	"github.com/tyk-swe/olp/internal/export/focus"
-	"github.com/tyk-swe/olp/internal/limits"
+	limitdebits "github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/notifications"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -421,7 +421,7 @@ func TestCleanupPreservesRetainedAndActiveEvidence(t *testing.T) {
 
 func testSessionAdmissionAfterUsageRetention(t *testing.T, fixture usageFixture) {
 	t.Helper()
-	store := &limits.DebitStore{Pool: fixture.pool}
+	store := limitdebits.NewStore(fixture.pool)
 	session := func(complete bool) (string, usage.AccountingEvent) {
 		key, dispatch := uuid.NewString(), uuid.NewString()
 		if _, err := fixture.pool.Exec(t.Context(), `INSERT INTO olp.api_keys (id,lookup_id,digest,name,created_by,policy,etag,project_id)
@@ -567,7 +567,7 @@ func testIdentityExpiry(t *testing.T, fixture usageFixture) {
 	if err := locked.QueryRow(t.Context(), `SELECT call_digest FROM olp.mcp_call_identities WHERE api_key_id=$1 AND expires_at<now() ORDER BY expires_at LIMIT 1 FOR UPDATE`, fixture.keyID).Scan(&lockedDigest); err != nil {
 		t.Fatal(err)
 	}
-	ledger := accounting.NewDurableLedger(fixture.pool, &limits.DebitStore{Pool: fixture.pool}, nil)
+	ledger := accounting.NewDurableLedger(fixture.pool, limitdebits.NewStore(fixture.pool), nil, nil)
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 	first, err := ledger.ExpireCallIdentities(ctx, batchSize)
@@ -605,7 +605,7 @@ func testWorkflowRecovery(t *testing.T, fixture usageFixture) {
 	if _, err := fixture.pool.Exec(t.Context(), `INSERT INTO olp.agent_runs(id,api_key_id,project_id,revision_id,principal_digest) VALUES($1,$2,$3,$4,decode(repeat('00',32),'hex'))`, runID, fixture.keyID, fixture.projectID, revision); err != nil {
 		t.Fatal(err)
 	}
-	store := &limits.DebitStore{Pool: fixture.pool}
+	store := limitdebits.NewStore(fixture.pool)
 	leases := []struct {
 		id, claim string
 		expiresIn time.Duration
@@ -632,7 +632,7 @@ func testWorkflowRecovery(t *testing.T, fixture usageFixture) {
 	if err := fixture.pool.QueryRow(t.Context(), `SELECT (SELECT state FROM olp.execution_debits WHERE id=$1),(SELECT state FROM olp.execution_debits WHERE id=$2)`, leases[0].id, leases[1].id).Scan(&expiredState, &liveState); err != nil {
 		t.Fatal(err)
 	}
-	if expiredState != string(limits.DebitUnknown) || liveState != string(limits.DebitDispatched) {
+	if expiredState != string(limitdebits.Unknown) || liveState != string(limitdebits.Dispatched) {
 		t.Fatalf("workflow states expired=%s live=%s", expiredState, liveState)
 	}
 	if err := store.MarkNotSent(t.Context(), leases[0].id, leases[0].claim); err != nil {

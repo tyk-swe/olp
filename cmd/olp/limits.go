@@ -10,7 +10,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/admission"
+	"github.com/tyk-swe/olp/internal/limits/debits"
+	"github.com/tyk-swe/olp/internal/limits/fleet"
+	"github.com/tyk-swe/olp/internal/limits/scripts"
 )
 
 // outagePollInterval is how often a replica re-reads the installation's choice
@@ -19,7 +22,7 @@ import (
 // operator's change reaches every replica within one interval.
 const outagePollInterval = 15 * time.Second
 
-// outagePolicy holds the limits.OutagePolicy in force for this process.
+// outagePolicy holds the admission.OutagePolicy in force for this process.
 type outagePolicy struct {
 	pool  *pgxpool.Pool
 	log   *slog.Logger
@@ -44,16 +47,16 @@ func newOutagePolicy(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) 
 // one yet as the default. Setup writes the settings row, so a process that
 // starts against a database nobody has set up must still hold the strict
 // default rather than refuse to serve.
-func (p *outagePolicy) read(ctx context.Context) (limits.OutagePolicy, error) {
-	current, err := limits.LoadOutagePolicy(ctx, p.pool)
+func (p *outagePolicy) read(ctx context.Context) (admission.OutagePolicy, error) {
+	current, err := admission.LoadOutagePolicy(ctx, p.pool)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return limits.FailClosed, nil
+		return admission.FailClosed, nil
 	}
 	return current, err
 }
 
 // Policy is the policy in force right now, safe to call from every request.
-func (p *outagePolicy) Policy() limits.OutagePolicy { return limits.OutagePolicy(p.value.Load()) }
+func (p *outagePolicy) Policy() admission.OutagePolicy { return admission.OutagePolicy(p.value.Load()) }
 
 // run keeps the policy current until ctx is cancelled. A poll that fails keeps
 // the value already in force: an unreadable setting must never silently widen
@@ -81,4 +84,19 @@ func (p *outagePolicy) run(ctx context.Context) {
 			p.log.Info("valkey outage policy changed", "previous", previous, "policy", current)
 		}
 	}
+}
+
+type sharedLimits struct {
+	Limiter *admission.Limiter
+	Syncer  *debits.Syncer
+	Fleet   *fleet.State
+}
+
+func newSharedLimits(client scripts.Commander, namespace string, store *debits.Store) (*sharedLimits, error) {
+	runner, err := scripts.NewRunner(client, namespace)
+	if err != nil {
+		return nil, err
+	}
+	syncer := debits.NewSyncer(store, runner)
+	return &sharedLimits{Limiter: admission.NewDurable(runner, syncer), Syncer: syncer, Fleet: fleet.New(runner)}, nil
 }

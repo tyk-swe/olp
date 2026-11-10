@@ -12,6 +12,7 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/mcp/sessions"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
@@ -30,60 +31,39 @@ func toolPerServerLookup(serverID string) string {
 	return "ts_" + strings.ReplaceAll(serverID, "-", "")
 }
 
-func toolRateRequests(in CallRequest) []limits.Request {
+func toolRate(lookup string, calls, concurrency *int64) admission.Request {
+	return admission.Request{Lookup: lookup, LeaseTTL: toolRateLeaseTTL, Rate: admission.RateLimits{RequestsPerMinute: calls, MaxConcurrency: concurrency}}
+}
+
+func toolRateRequests(in CallRequest) []admission.Request {
 	effective := routing.EffectiveToolLimits(in.Tool.CallsPerMinute, in.Tool.MaxConcurrency, in.Tool.PerKeyCallsPerMinute, in.Tool.PerKeyMaxConcurrency)
-	requests := []limits.Request{
-		{
-			CostOwnerID: in.Authority.ID, LookupID: toolPerKeyLookup(in.Authority, in.Tool.ServerID),
-			RequestsPerMinute: &effective.PerKeyCallsPerMinute,
-			MaxConcurrency:    &effective.PerKeyMaxConcurrency,
-			LeaseTTL:          toolRateLeaseTTL,
-		},
-		{
-			CostOwnerID:       in.Tool.ServerID,
-			LookupID:          toolPerServerLookup(in.Tool.ServerID),
-			RequestsPerMinute: &effective.CallsPerMinute,
-			MaxConcurrency:    &effective.MaxConcurrency,
-			LeaseTTL:          toolRateLeaseTTL,
-		},
+	authority := in.Authority
+	requests := []admission.Request{
+		toolRate(toolPerKeyLookup(authority, in.Tool.ServerID), &effective.PerKeyCallsPerMinute, &effective.PerKeyMaxConcurrency),
+		toolRate(toolPerServerLookup(in.Tool.ServerID), &effective.CallsPerMinute, &effective.MaxConcurrency),
 	}
 	if in.RunID != "" {
 		return requests
 	}
-	return append(requests, toolCallerRate(in.Authority), toolGroupRate(in.Authority), toolAgentRate(in.Authority))
-}
-
-func toolCallerRate(authority keyauthority.Authority) limits.Request {
-	if authority.Policy.RequestsPerMinute == nil && authority.Policy.MaxConcurrency == nil {
-		return limits.Request{}
+	callers := []admission.Request{toolRate(authority.LimitsLookup(), authority.Policy.RequestsPerMinute, authority.Policy.MaxConcurrency)}
+	if authority.BudgetGroupID != nil {
+		callers = append(callers, toolRate(limits.BudgetGroupLookup(*authority.BudgetGroupID), authority.BudgetGroupRPM, authority.BudgetGroupConcurrency))
 	}
-	return limits.Request{CostOwnerID: authority.ID, LookupID: authority.LimitsLookup(), RequestsPerMinute: authority.Policy.RequestsPerMinute, MaxConcurrency: authority.Policy.MaxConcurrency, LeaseTTL: toolRateLeaseTTL}
-}
-
-func toolGroupRate(authority keyauthority.Authority) limits.Request {
-	if authority.BudgetGroupID == nil || (authority.BudgetGroupRPM == nil && authority.BudgetGroupConcurrency == nil) {
-		return limits.Request{}
+	if agent := authority.DelegationAgentLimits; agent != nil {
+		callers = append(callers, toolRate(agent.LookupID, agent.Limits.RequestsPerMinute, agent.Limits.MaxConcurrency))
 	}
-	return limits.Request{CostOwnerID: *authority.BudgetGroupID, LookupID: limits.BudgetGroupLookup(*authority.BudgetGroupID), RequestsPerMinute: authority.BudgetGroupRPM, MaxConcurrency: authority.BudgetGroupConcurrency, LeaseTTL: toolRateLeaseTTL}
+	return append(requests, callers...)
 }
 
-func toolAgentRate(authority keyauthority.Authority) limits.Request {
-	if authority.DelegationAgentLimits == nil || (authority.DelegationAgentLimits.Limits.RequestsPerMinute == nil && authority.DelegationAgentLimits.Limits.MaxConcurrency == nil) {
-		return limits.Request{}
-	}
-	agent := authority.DelegationAgentLimits
-	return limits.Request{CostOwnerID: agent.ID, LookupID: agent.LookupID, RequestsPerMinute: agent.Limits.RequestsPerMinute, MaxConcurrency: agent.Limits.MaxConcurrency, LeaseTTL: toolRateLeaseTTL}
-}
-
-func (s *Executor) reserveToolRate(ctx context.Context, in CallRequest) ([]*limits.Lease, *Failure, time.Duration) {
+func (s *Executor) reserveToolRate(ctx context.Context, in CallRequest) ([]*admission.Lease, *Failure, time.Duration) {
 	limiter := s.limiter
 	if limiter == nil {
 		return nil, refusal("limits_unavailable", "Tool call limits are unavailable, so the call was not dispatched."), 0
 	}
 	requests := toolRateRequests(in)
-	leases := make([]*limits.Lease, 0, len(requests))
+	leases := make([]*admission.Lease, 0, len(requests))
 	for _, request := range requests {
-		if !request.HasRateLimits() {
+		if !request.Rate.Limited() {
 			continue
 		}
 		lease, err := limiter.Reserve(ctx, request)

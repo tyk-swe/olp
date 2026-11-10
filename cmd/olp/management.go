@@ -31,7 +31,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/grants/personal"
 	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/management"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
@@ -65,7 +65,7 @@ type Management struct {
 	Getenv         func(string) string
 	Access         *access.Server
 	Egress         *egress.Policy
-	Limiter        *limits.Limiter
+	Limits         *sharedLimits
 	Runtime        *release.Manager
 	Gateway        *gateway.Server
 	Media          *media.Service
@@ -105,7 +105,7 @@ func (m Management) Register(mux *http.ServeMux) {
 		return m.Gateway.EvaluateGuardrails(r, p, pinned, in)
 	}).Register(mux)
 	attachment.NewAPI(m.Access, publishGuardrails).Register(mux)
-	agentTasks := tasks.New(m.Access.Pool, nil, m.Access.Auth)
+	agentTasks := tasks.New(m.Access.Pool, tasks.Limits{}, m.Access.Auth)
 	agentGrants := personal.NewStore(m.Access.Pool, m.Access.Installation, m.Access.Auth, m.Access.Keys, m.Egress)
 	agentPeers := a2a.NewPeers(m.Egress, func(ctx context.Context, id string) ([]byte, error) {
 		return m.Access.Keys.Read(ctx, m.Access.Pool, m.Access.Installation, id, secrets.AgentCredential)
@@ -126,8 +126,8 @@ func (m Management) Register(mux *http.ServeMux) {
 	catalogue.Log = m.Log
 	catalogue.Plugins = m.PluginHost
 	catalogue.Catalog = m.Catalog
-	if m.Limiter != nil {
-		catalogue.Quotas = m.Limiter
+	if m.Limits != nil {
+		catalogue.Quotas = m.Limits.Fleet
 	}
 	catalogue.Register(mux)
 	routeServer := routes.New(m.Access)
@@ -147,9 +147,9 @@ func (m Management) Register(mux *http.ServeMux) {
 	}
 	routeServer.UnconfinedPlugins = m.Unconfined != nil
 	routeServer.Catalog = m.Catalog
-	if m.Limiter != nil {
-		routeServer.Supply = gateway.NewAdmission(m.Limiter, nil, m.Log)
-		routeServer.Fleet = m.Limiter
+	if m.Limits != nil {
+		routeServer.Supply = gateway.NewAdmission(m.Limits.Limiter, m.Limits.Fleet, nil, m.Log)
+		routeServer.Fleet = m.Limits.Fleet
 	}
 	catalogue.Activated = routeServer.Activated
 	routeServer.Register(mux)
@@ -159,8 +159,8 @@ func (m Management) Register(mux *http.ServeMux) {
 	(&resources.Management{Access: m.Access, Pool: m.Access.Pool}).Register(mux)
 	(&management.Overview{Access: m.Access}).Register(mux)
 	health := &observability.Management{Access: m.Access, Cache: m.Health, Pool: m.Access.Pool}
-	if m.Limiter != nil {
-		health.Fleet = m.Limiter
+	if m.Limits != nil {
+		health.Fleet = m.Limits.Fleet
 	}
 	health.Register(mux)
 	(&plugins.Management{Access: m.Access, Runtime: m.PluginRuntime, Host: m.PluginHost, Unconfined: m.Unconfined, Index: m.PluginIndex}).Register(mux)
@@ -177,8 +177,15 @@ func (m Management) Register(mux *http.ServeMux) {
 		Egress:     m.Egress,
 		Unconfined: m.Unconfined,
 		Identity:   m.IdentityClient,
-		Costs:      project.CostsOf(m.Limiter),
+		Costs:      project.CostsOf(m.limiter()),
 		VendorKind: providers.VendorKind,
 		Catalogue:  catalogue,
 	})
+}
+
+func (m Management) limiter() *admission.Limiter {
+	if m.Limits == nil {
+		return nil
+	}
+	return m.Limits.Limiter
 }

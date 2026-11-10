@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/debits"
 )
 
 type Management struct {
@@ -40,7 +41,7 @@ type ToolCall struct {
 	CompletedAt        *time.Time            `json:"completed_at"`
 	CreatedAt          time.Time             `json:"created_at"`
 	CallDigest         *string               `json:"call_digest"`
-	DebitState         limits.DebitState     `json:"debit_state"`
+	DebitState         debits.State          `json:"debit_state"`
 	CostBound          string                `json:"cost_bound"`
 	ChargeBound        string                `json:"charge_bound"`
 	ObservedCost       string                `json:"observed_cost"`
@@ -226,17 +227,17 @@ func (m *Management) resolve(r *http.Request, p access.Principal) (access.Reply,
 	switch request.Outcome {
 	case ResolveSettled:
 		resultDigest := sha256.Sum256([]byte("olp:mcp-tool-resolution:" + call.DispatchID + ":" + request.EvidenceDigest))
-		err = limits.SettleToolDebitTx(r.Context(), tx, limits.DebitResult{
+		err = debits.SettleToolTx(r.Context(), tx, debits.Result{
 			DispatchID: call.DispatchID, ResultDigest: resultDigest[:], EvidenceDigest: evidence,
 			EventID: call.ID, Cost: observedCost, Charge: observedCharge, Final: true, Complete: true,
 		})
 	case ResolveNotAccepted:
-		err = limits.ResolveNotAcceptedTx(r.Context(), tx, limits.NonAcceptanceProof{
+		err = debits.ResolveNotAcceptedTx(r.Context(), tx, debits.NonAcceptanceProof{
 			DispatchID: call.DispatchID, ActorID: p.UserID(), EvidenceDigest: evidence,
 		})
 	}
 	if err != nil {
-		if errors.Is(err, limits.ErrDebitState) || errors.Is(err, limits.ErrDebitConflict) {
+		if errors.Is(err, debits.ErrState) || errors.Is(err, debits.ErrConflict) {
 			return access.Reply{}, access.Fail(409, "debit_already_resolved", "This held debit was already resolved by different evidence.")
 		}
 		return access.Reply{}, err

@@ -9,6 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -17,15 +18,15 @@ import (
 // of its own and its connection's; a slot with no quota has none to report,
 // and ranks after slots whose headroom is known.
 func (a *Admission) ReadSupply(ctx context.Context, query routing.SupplyQuery) *routing.SupplyState {
-	var quotas []limits.QuotaProbe
+	var quotas []admission.QuotaProbe
 	probe := func(lookup string, rpm, tpm, concurrency *int64) int {
 		if rpm == nil && tpm == nil && concurrency == nil {
 			return -1
 		}
-		if i := slices.IndexFunc(quotas, func(q limits.QuotaProbe) bool { return q.LookupID == lookup }); i >= 0 {
+		if i := slices.IndexFunc(quotas, func(q admission.QuotaProbe) bool { return q.Lookup == lookup }); i >= 0 {
 			return i
 		}
-		quotas = append(quotas, limits.QuotaProbe{LookupID: lookup, RequestsPerMinute: rpm, TokensPerMinute: tpm, MaxConcurrency: concurrency})
+		quotas = append(quotas, admission.QuotaProbe{Lookup: lookup, RequestsPerMinute: rpm, TokensPerMinute: tpm, MaxConcurrency: concurrency})
 		return len(quotas) - 1
 	}
 	type slotProbes struct {
@@ -41,9 +42,9 @@ func (a *Admission) ReadSupply(ctx context.Context, query routing.SupplyQuery) *
 		probes.slot = probe(limits.SlotLookup(entry.Slot.ID), entry.Slot.RequestsPerMinute, entry.Slot.TokensPerMinute, entry.Slot.MaxConcurrency)
 		slots = append(slots, probes)
 	}
-	caps := make([]limits.CapProbe, len(query.Caps))
+	caps := make([]admission.CapProbe, len(query.Caps))
 	for i, cap := range query.Caps {
-		caps[i] = limits.CapProbe{OwnerID: cap.OwnerID, DailyCostLimit: cap.Limits.DailyCostLimit, MonthlyCostLimit: cap.Limits.MonthlyCostLimit}
+		caps[i] = admission.CapProbe{OwnerID: cap.OwnerID, Daily: cap.Limits.DailyCostLimit, Monthly: cap.Limits.MonthlyCostLimit}
 	}
 	state := &routing.SupplyState{Headroom: map[string]float64{}, Spend: map[string]routing.Spend{}}
 	if len(quotas) == 0 && len(caps) == 0 {
@@ -71,9 +72,9 @@ func (a *Admission) ReadSupply(ctx context.Context, query routing.SupplyQuery) *
 	}
 	for i, cap := range caps {
 		switch spend[i] {
-		case limits.CapAvailable:
+		case admission.CapAvailable:
 			state.Spend[cap.OwnerID] = routing.SpendAvailable
-		case limits.CapExhausted:
+		case admission.CapExhausted:
 			state.Spend[cap.OwnerID] = routing.SpendExhausted
 		}
 	}
@@ -85,7 +86,7 @@ func (a *Admission) ReadSupply(ctx context.Context, query routing.SupplyQuery) *
 // handed to that owner. It settles once with the request.
 type capHold struct {
 	owner      string
-	lease      *limits.Lease
+	lease      *admission.Lease
 	dispatched bool
 	reserved   usage.Cost
 	spent      usage.Cost
@@ -158,16 +159,9 @@ func (s *Server) holdCaps(ctx context.Context, x *call, attempt routing.Attempt,
 		if !s.deps.Admission.ready() {
 			return capCheck{quota: owner.quota}
 		}
-		request := limits.Request{
-			LookupID: owner.lookup, CostOwnerID: owner.id, DailyCostLimit: owner.limits.DailyCostLimit,
-			MonthlyCostLimit: owner.limits.MonthlyCostLimit, LeaseTTL: max(time.Until(deadline), time.Second),
-			RetainCostReservation: index >= 0 && x.caps[index].lease.HasCostReservation(),
-		}
-		if !bound.IsZero() {
-			request.CostEstimate, request.RequestID = bound.String(), x.request.accountingID()
-		}
+		ttl := max(time.Until(deadline), time.Second)
 		decision, cancel := context.WithTimeout(ctx, reserveTimeout)
-		lease, err := s.deps.Admission.limiter.Reserve(decision, request)
+		lease, err := s.holdCap(decision, x, index, owner, bound, ttl)
 		cancel()
 		if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
 			return capCheck{quota: owner.quota, refusal: &attemptFailure{class: classBudget, quota: owner.quota, retryAfter: exceeded.RetryAfter}}
@@ -183,6 +177,25 @@ func (s *Server) holdCaps(ctx context.Context, x *call, attempt routing.Attempt,
 		}
 	}
 	return check
+}
+
+func capRequest(owner cappedOwner, ttl time.Duration) admission.Request {
+	return admission.Request{
+		Lookup: owner.lookup, LeaseTTL: ttl,
+		Cost: admission.Budget(limits.Owner{ID: owner.id, Kind: limits.OwnerSupply, Basis: limits.BasisCost}, owner.limits.DailyCostLimit, nil, owner.limits.MonthlyCostLimit, ""),
+	}
+}
+
+func (s *Server) holdCap(ctx context.Context, x *call, index int, owner cappedOwner, bound usage.Cost, ttl time.Duration) (*admission.Lease, error) {
+	amount := costReservation{requestID: x.request.accountingID()}
+	if !bound.IsZero() {
+		amount.amount = bound.String()
+	}
+	if index < 0 || !x.caps[index].lease.HasCostReservation() {
+		return s.deps.Admission.limiter.Reserve(ctx, amount.on(capRequest(owner, ttl)))
+	}
+	held := x.caps[index].lease
+	return held, held.GrowCost(ctx, amount.amount, amount.amount, amount.requestID, ttl)
 }
 
 // spendCaps marks the caps an attempt was dispatched against, whose

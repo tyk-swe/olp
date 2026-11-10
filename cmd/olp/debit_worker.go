@@ -3,24 +3,24 @@ package main
 import (
 	"context"
 	"errors"
-	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"log/slog"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 )
 
-func runDebitReconciliation(ctx context.Context, pool *pgxpool.Pool, limiter *limits.Limiter, log *slog.Logger) {
-	store := &limits.DebitStore{Pool: pool, Limiter: limiter}
-	toolLedger := accounting.NewDurableLedger(pool, store, nil)
+func runDebitReconciliation(ctx context.Context, pool *pgxpool.Pool, store *debits.Store, syncer *debits.Syncer, log *slog.Logger) {
+	toolLedger := accounting.NewDurableLedger(pool, store, syncer, nil)
 	timer := time.NewTicker(time.Minute)
 	defer timer.Stop()
 	for {
 		pass, cancel := context.WithTimeout(ctx, 40*time.Second)
-		reconcileErr := reconcileDebitPass(pass, store, toolLedger)
+		reconcileErr := reconcileDebitPass(pass, store, syncer, toolLedger)
 		cancel()
 		expiry, expiryCancel := context.WithTimeout(ctx, 5*time.Second)
 		_, expiryErr := toolLedger.DrainExpiredCallIdentities(expiry, 256)
@@ -44,19 +44,19 @@ func runDebitReconciliation(ctx context.Context, pool *pgxpool.Pool, limiter *li
 	}
 }
 
-func reconcileDebitPass(ctx context.Context, store *limits.DebitStore, toolLedger *accounting.DurableLedger) error {
-	if store.Limiter == nil {
+func reconcileDebitPass(ctx context.Context, store *debits.Store, syncer *debits.Syncer, toolLedger *accounting.DurableLedger) error {
+	if syncer == nil {
 		if _, err := store.RecoverPrepared(ctx, 256); err != nil {
 			return err
 		}
-	} else if err := store.ReconcileDebits(ctx); err != nil {
+	} else if err := syncer.ReconcileDebits(ctx); err != nil {
 		return err
 	}
 	_, err := toolLedger.RecoverOrphanedDispatches(ctx, time.Now().Add(-accounting.OrphanDispatchAge), 256)
 	return err
 }
 
-func recoverWorkflowModels(ctx context.Context, store *limits.DebitStore, log *slog.Logger) {
+func recoverWorkflowModels(ctx context.Context, store *debits.Store, log *slog.Logger) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {

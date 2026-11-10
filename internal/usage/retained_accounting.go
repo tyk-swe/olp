@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/ledger"
 )
 
 // PersistRetainedEventTx keeps the accepted accounting pins and also charges a
@@ -27,32 +28,29 @@ func PersistRetainedEventTx(ctx context.Context, tx pgx.Tx, accepted AccountingE
 	if currentGroup == nil || event.BudgetGroupID != nil && *currentGroup == *event.BudgetGroupID {
 		return result, invalidateRetainedCostProjections(ctx, tx, result.CostSnapshots)
 	}
-	var facts, unpriced, uncharged int64
-	var cost, charge string
-	if err = tx.QueryRow(ctx, factTotalsSQL, event.EventID, nil).Scan(&facts, &cost, &unpriced, &charge, &uncharged); err != nil {
+	var facts int64
+	delta := ledger.Delta{ObservedAt: event.ObservedAt}
+	if err = tx.QueryRow(ctx, factTotalsSQL, event.EventID, nil).Scan(&facts, &delta.Cost, &delta.Unpriced, &delta.Charge, &delta.Uncharged); err != nil {
 		return Persisted{}, err
 	}
 	if facts == 0 {
 		return result, nil
 	}
-	snapshots, err := limits.AddGroupCostDelta(ctx, tx, *currentGroup, event.ObservedAt, cost, unpriced, charge, uncharged)
+	snapshots, err := ledger.AddDelta(ctx, tx, limits.OwnerGroup, *currentGroup, delta)
 	if err != nil {
 		return Persisted{}, err
 	}
-	for i := range snapshots {
-		snapshots[i].RequestID = event.RequestID
-	}
-	result.CostSnapshots = append(result.CostSnapshots, snapshots...)
+	result.CostSnapshots = append(result.CostSnapshots, named(snapshots, event.RequestID)...)
 	return result, invalidateRetainedCostProjections(ctx, tx, result.CostSnapshots)
 }
 
 // Admission reads this generation in the same snapshot as pending liabilities.
 // On financial commit, every replica must refresh its limiter projection before
 // admitting a newly capped caller, even if this process dies before publication.
-func invalidateRetainedCostProjections(ctx context.Context, tx pgx.Tx, snapshots []limits.CostSnapshot) error {
+func invalidateRetainedCostProjections(ctx context.Context, tx pgx.Tx, snapshots []limits.Snapshot) error {
 	owners := make([]string, 0, len(snapshots))
 	for _, snapshot := range snapshots {
-		owners = append(owners, snapshot.CostOwnerID)
+		owners = append(owners, snapshot.OwnerID)
 	}
 	slices.Sort(owners)
 	for _, owner := range slices.Compact(owners) {

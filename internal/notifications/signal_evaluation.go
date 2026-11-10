@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/catalog"
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
 
@@ -18,7 +18,7 @@ const evaluatedRuleLimit = 1000
 
 type signalEnv struct {
 	now       time.Time
-	limiter   *limits.Limiter
+	fleet     *fleet.State
 	reference *catalog.Signed
 }
 
@@ -42,7 +42,7 @@ func (w *deliveryWorker) claimSignals(ctx context.Context, tx pgx.Tx) (int, erro
 	if err := tx.QueryRow(ctx, signalClockSQL).Scan(&now); err != nil {
 		return 0, err
 	}
-	env := signalEnv{now: now, limiter: w.Limiter, reference: w.Catalog}
+	env := signalEnv{now: now, fleet: w.Fleet, reference: w.Catalog}
 	claimed := 0
 	for _, rule := range rules {
 		count, err := events[rule.event].evaluate(w, ctx, tx, rule, env)

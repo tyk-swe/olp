@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/ledger"
 )
 
 type budgetGroupInput struct {
@@ -61,7 +61,7 @@ func (s *Server) budgetGroupJSON() string {
 	if s.limitsEnforced {
 		enforcement = "true"
 	}
-	return `jsonb_build_object(` + budgetGroupFields + `,'budget',olp.budget_allowances(g.id,g.effective_limits,` + limits.GroupBudgetSQL +
+	return `jsonb_build_object(` + budgetGroupFields + `,'budget',olp.budget_allowances(g.id,g.effective_limits,` + ledger.GroupBudgetSQL("g") +
 		`||jsonb_build_object('enforcement_active',` + enforcement + `)))`
 }
 

@@ -22,6 +22,10 @@ go test -mod=readonly -vet=off -count=1 -timeout=60s \
   ./internal/operations/tokenization/estimate \
   ./internal/catalog \
   ./internal/limits \
+  ./internal/limits/scripts \
+  ./internal/limits/admission \
+  ./internal/limits/ledger \
+  ./internal/limits/debits \
   ./internal/release \
   ./internal/routing \
   ./internal/guardrails \

@@ -9,7 +9,7 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -81,7 +81,7 @@ func NewExecutor(options ExecutorOptions) *Executor {
 func (s *Executor) available() bool {
 	return s != nil && s.authority != nil && s.ledger != nil && s.auth != nil && s.connect != nil
 }
-func (s *Executor) finishLeases(ctx context.Context, leases []*limits.Lease, dispatched bool) {
+func (s *Executor) finishLeases(ctx context.Context, leases []*admission.Lease, dispatched bool) {
 	for _, lease := range leases {
 		finish := lease.Refund
 		action := "refund"

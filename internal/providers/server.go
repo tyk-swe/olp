@@ -13,19 +13,20 @@ import (
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
 // QuotaSource reports the shared quota state a provider connection and its
-// credential slots are in right now. *limits.Limiter implements it. The field
+// credential slots are in right now. *fleet.State implements it. The field
 // stays nil where no Valkey is configured, and the console is then told the
 // live counters are unknown rather than shown a zero it would read as idle.
 type QuotaSource interface {
-	ProviderUsage(ctx context.Context, lookup string) (limits.Usage, error)
+	Usage(ctx context.Context, lookup string) (fleet.Usage, error)
 	Cooling(ctx context.Context, scopes ...string) (bool, error)
+	Cooldown(ctx context.Context, scope string, d time.Duration) error
 }
 
 // Server serves the provider management surface.

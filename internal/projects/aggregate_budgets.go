@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/settings"
 )
 
@@ -140,15 +140,19 @@ func (s *Server) writeAggregateBudget(r *http.Request, _ access.Principal, proje
 }
 
 func aggregateReportSQL(level string) string {
-	if level == "organization" {
-		return limits.OrganizationBudgetSQL
+	switch level {
+	case "organization":
+		return ledger.OrganizationBudgetSQL("p")
+	case "project":
+		return ledger.ProjectBudgetSQL("p")
+	default:
+		return ledger.InstallationBudgetSQL("p")
 	}
-	return limits.AggregateBudgetSQL(level == "project")
 }
 
 func SetOrganizationBudget(ctx context.Context, tx pgx.Tx, id string, policy *authority.BudgetPolicy) (string, error) {
 	if policy.Limited() {
-		if err := limits.EnsureAggregateBudget(ctx, tx, "organization", id); err != nil {
+		if err := ledger.EnsureAggregateBudget(ctx, tx, "organization", id); err != nil {
 			return "", err
 		}
 	}

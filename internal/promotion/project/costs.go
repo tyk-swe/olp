@@ -6,13 +6,14 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/admission"
 )
 
 type Costs interface {
-	Install(ctx context.Context, snapshots []limits.CostSnapshot) error
+	Install(ctx context.Context, snapshots []limits.Snapshot) error
 }
 
-func CostsOf(limiter *limits.Limiter) Costs {
+func CostsOf(limiter *admission.Limiter) Costs {
 	if limiter == nil {
 		return noCosts{}
 	}
@@ -21,15 +22,13 @@ func CostsOf(limiter *limits.Limiter) Costs {
 
 type noCosts struct{}
 
-func (noCosts) Install(context.Context, []limits.CostSnapshot) error { return nil }
+func (noCosts) Install(context.Context, []limits.Snapshot) error { return nil }
 
-type limiterCosts struct{ limiter *limits.Limiter }
+type limiterCosts struct{ limiter *admission.Limiter }
 
-func (c limiterCosts) Install(ctx context.Context, snapshots []limits.CostSnapshot) error {
-	for _, snapshot := range snapshots {
-		if _, _, err := c.limiter.ApplyCostSnapshot(ctx, snapshot); err != nil {
-			return access.Fail(http.StatusServiceUnavailable, "limits_unavailable", "Budget state is unavailable; retry the apply.")
-		}
+func (c limiterCosts) Install(ctx context.Context, snapshots []limits.Snapshot) error {
+	if err := c.limiter.InstallSnapshots(ctx, snapshots); err != nil {
+		return access.Fail(http.StatusServiceUnavailable, "limits_unavailable", "Budget state is unavailable; retry the apply.")
 	}
 	return nil
 }

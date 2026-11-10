@@ -3,52 +3,59 @@ package tasks
 import (
 	"context"
 	"encoding/hex"
+	"slices"
 	"strings"
 	"time"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/admission"
+	limitdebits "github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
-func (l *Store) admitRate(ctx context.Context, authority keyauthority.Authority) ([]*limits.Lease, error) {
-	if l == nil || l.debits == nil || l.debits.Limiter == nil {
-		return nil, limits.ErrDebitAuthority
-	}
+func rateRequest(lookup string, requests, concurrency *int64) admission.Request {
+	return admission.Request{Lookup: lookup, LeaseTTL: time.Hour + time.Minute, Rate: admission.RateLimits{RequestsPerMinute: requests, MaxConcurrency: concurrency}}
+}
+
+func rateRequests(authority keyauthority.Authority) []admission.Request {
 	rate := int64(60)
-	ttl := time.Hour + time.Minute
-	requests := []limits.Request{
-		{LookupID: "a2a_" + strings.ReplaceAll(authority.ID, "-", ""), CostOwnerID: authority.ID, RequestsPerMinute: &rate, LeaseTTL: ttl},
-		{LookupID: authority.LimitsLookup(), CostOwnerID: authority.ID, RequestsPerMinute: authority.Policy.RequestsPerMinute, MaxConcurrency: authority.Policy.MaxConcurrency, LeaseTTL: ttl},
+	requests := []admission.Request{
+		rateRequest("a2a_"+strings.ReplaceAll(authority.ID, "-", ""), &rate, nil),
+		rateRequest(authority.LimitsLookup(), authority.Policy.RequestsPerMinute, authority.Policy.MaxConcurrency),
 	}
 	if agent := authority.DelegationAgentLimits; agent != nil {
-		requests = append(requests, limits.Request{LookupID: agent.LookupID, CostOwnerID: agent.ID, RequestsPerMinute: agent.Limits.RequestsPerMinute, MaxConcurrency: agent.Limits.MaxConcurrency, LeaseTTL: ttl})
+		requests = append(requests, rateRequest(agent.LookupID, agent.Limits.RequestsPerMinute, agent.Limits.MaxConcurrency))
 	}
 	if authority.BudgetGroupID != nil {
-		requests = append(requests, limits.Request{LookupID: limits.BudgetGroupLookup(*authority.BudgetGroupID), CostOwnerID: *authority.BudgetGroupID, RequestsPerMinute: authority.BudgetGroupRPM, MaxConcurrency: authority.BudgetGroupConcurrency, LeaseTTL: ttl})
+		requests = append(requests, rateRequest(limits.BudgetGroupLookup(*authority.BudgetGroupID), authority.BudgetGroupRPM, authority.BudgetGroupConcurrency))
 	}
-	merged := make([]limits.Request, 0, len(requests))
+	merged := make([]admission.Request, 0, len(requests))
 	for _, request := range requests {
-		if !request.HasRateLimits() {
+		if !request.Rate.Limited() {
 			continue
 		}
-		found := false
-		for i := range merged {
-			if merged[i].LookupID == request.LookupID {
-				merged[i].RequestsPerMinute = lowerLimit(merged[i].RequestsPerMinute, request.RequestsPerMinute)
-				merged[i].MaxConcurrency = lowerLimit(merged[i].MaxConcurrency, request.MaxConcurrency)
-				found = true
-				break
-			}
-		}
-		if !found {
+		i := slices.IndexFunc(merged, func(m admission.Request) bool { return m.Lookup == request.Lookup })
+		if i < 0 {
 			merged = append(merged, request)
+			continue
 		}
+		merged[i] = rateRequest(request.Lookup,
+			lowerLimit(merged[i].Rate.RequestsPerMinute, request.Rate.RequestsPerMinute),
+			lowerLimit(merged[i].Rate.MaxConcurrency, request.Rate.MaxConcurrency))
 	}
-	leases := make([]*limits.Lease, 0, len(merged))
-	for _, request := range merged {
-		lease, err := l.debits.Limiter.Reserve(ctx, request)
+	return merged
+}
+
+func (l *Store) admitRate(ctx context.Context, authority keyauthority.Authority) ([]*admission.Lease, error) {
+	if l == nil || l.limiter == nil {
+		return nil, limitdebits.ErrAuthority
+	}
+	requests := rateRequests(authority)
+	leases := make([]*admission.Lease, 0, len(requests))
+	for _, request := range requests {
+		lease, err := l.limiter.Reserve(ctx, request)
 		if err != nil {
 			finishRate(ctx, leases, false)
 			return nil, err
@@ -67,7 +74,7 @@ func lowerLimit(a, b *int64) *int64 {
 	return a
 }
 
-func finishRate(ctx context.Context, leases []*limits.Lease, dispatched bool) {
+func finishRate(ctx context.Context, leases []*admission.Lease, dispatched bool) {
 	for _, lease := range leases {
 		if dispatched {
 			_ = lease.Release(context.WithoutCancel(ctx))

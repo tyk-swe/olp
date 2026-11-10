@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -82,7 +83,7 @@ func workflowUnboundedCost() *Error {
 	return invalidRequest("run_cost_unbounded", "The workflow step cannot be bounded under the run cost limit.", nil)
 }
 
-func (s *Server) reserveWorkflowRun(ctx context.Context, x *call) (*limits.Lease, *Error) {
+func (s *Server) reserveWorkflowRun(ctx context.Context, x *call) (*admission.Lease, *Error) {
 	if x.workflow == nil {
 		return nil, nil
 	}
@@ -94,12 +95,10 @@ func (s *Server) reserveWorkflowRun(ctx context.Context, x *call) (*limits.Lease
 	}
 	reserveCtx, cancel := context.WithTimeout(ctx, reserveTimeout)
 	defer cancel()
-	lease, err := s.deps.Admission.limiter.Reserve(reserveCtx, limits.Request{
-		LookupID:         "run_" + strings.ReplaceAll(x.keyID, "-", ""),
-		CostOwnerID:      x.keyID,
-		MaxConcurrency:   x.generation.runLimits.MaxConcurrentRuns,
-		TrackConcurrency: true,
-		LeaseTTL:         time.Duration(*x.generation.runLimits.MaxDurationSeconds)*time.Second + time.Minute,
+	lease, err := s.deps.Admission.limiter.Reserve(reserveCtx, admission.Request{
+		Lookup:   "run_" + strings.ReplaceAll(x.keyID, "-", ""),
+		LeaseTTL: time.Duration(*x.generation.runLimits.MaxDurationSeconds)*time.Second + time.Minute,
+		Rate:     admission.RateLimits{MaxConcurrency: x.generation.runLimits.MaxConcurrentRuns, TrackConcurrency: true},
 	})
 	if err == nil {
 		return lease, nil

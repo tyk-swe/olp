@@ -8,11 +8,12 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/admission"
 )
 
 // Each boundary reserves independently. A later refusal refunds every earlier
 // reservation, while every dispatched request settles the complete chain.
-func (a *Admission) reserveEndUsers(ctx context.Context, authority *keyauthority.Authority, estimate int64, ttl time.Duration, hold costReservation, costChecked *bool) (*limits.Lease, *Error) {
+func (a *Admission) reserveEndUsers(ctx context.Context, authority *keyauthority.Authority, estimate int64, ttl time.Duration, hold costReservation, costChecked *bool) (*admission.Lease, *Error) {
 	if authority.Policy.EndUserPolicy == nil && authority.ProjectEndUserPolicy == nil {
 		return nil, nil
 	}
@@ -22,7 +23,7 @@ func (a *Admission) reserveEndUsers(ctx context.Context, authority *keyauthority
 	if authority.Policy.EndUserPolicy.Blocks(authority.EndUserDigest) || authority.ProjectEndUserPolicy.Blocks(authority.EndUserDigest) {
 		return nil, &Error{Status: http.StatusForbidden, Type: "permission_error", Code: "end_user_blocked", Message: "This end user is blocked by policy."}
 	}
-	var chain *limits.Lease
+	var chain *admission.Lease
 	for _, boundary := range [...]struct {
 		policy  *keyauthority.EndUserPolicy
 		project bool
@@ -63,14 +64,12 @@ func (a *Admission) reserveEndUsers(ctx context.Context, authority *keyauthority
 			settleKey(ctx, chain, false, nil, a.logger())
 			return nil, limitsUnavailable()
 		}
-		request := limits.Request{CostOwnerID: owner, CostIncreases: authority.BudgetIncreases[owner], LookupID: limits.EndUserLookup(owner),
-			CostBasis:         limits.Basis(policy.CostBasis),
-			RequestsPerMinute: policy.RequestsPerMinute, TokensPerMinute: policy.TokensPerMinute,
-			MaxConcurrency: policy.MaxConcurrency, DailyCostLimit: policy.DailyCostLimit, MonthlyCostLimit: policy.MonthlyCostLimit, WeeklyCostLimit: policy.WeeklyCostLimit,
-			RequestedTokens: estimate, LeaseTTL: ttl}
-		if policy.CostBudgeted() {
-			request.CostEstimate, request.RequestID = hold.amountFor(request.CostBasis), hold.requestID
-		}
+		request := hold.on(admission.Request{
+			Lookup: limits.EndUserLookup(owner), LeaseTTL: ttl,
+			Rate: admission.RateLimits{RequestsPerMinute: policy.RequestsPerMinute, TokensPerMinute: policy.TokensPerMinute, MaxConcurrency: policy.MaxConcurrency, Tokens: estimate},
+			Cost: admission.Budget(limits.Owner{ID: owner, Kind: limits.OwnerEndUser, Basis: limits.Basis(policy.CostBasis)},
+				policy.DailyCostLimit, policy.WeeklyCostLimit, policy.MonthlyCostLimit, authority.BudgetIncreases[owner]),
+		})
 		if policy.TokensPerMinute != nil && estimate > *policy.TokensPerMinute {
 			settleKey(ctx, chain, false, nil, a.logger())
 			return nil, invalidRequest("request_exceeds_token_limit", "This request exceeds the end-user token limit.", nil)
@@ -79,7 +78,7 @@ func (a *Admission) reserveEndUsers(ctx context.Context, authority *keyauthority
 		lease, err := a.limiter.Reserve(decision, request)
 		cancel()
 		if err == nil {
-			lease.Attach(chain)
+			lease.Join(chain)
 			chain = lease
 			continue
 		}

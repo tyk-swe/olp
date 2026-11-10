@@ -195,10 +195,10 @@ func scanRuntimeInstall(row pgx.Row) (notificationSignal, error) {
 }
 
 func circuitSignals(ctx context.Context, tx pgx.Tx, _ signalRule, env signalEnv) ([]notificationSignal, error) {
-	if env.limiter == nil {
+	if env.fleet == nil {
 		return nil, errSignalUnavailable
 	}
-	circuits, err := env.limiter.Circuits(ctx, env.now)
+	circuits, err := env.fleet.Circuits(ctx, env.now)
 	if err != nil {
 		return nil, fmt.Errorf("%w: fleet circuit state", errSignalUnavailable)
 	}

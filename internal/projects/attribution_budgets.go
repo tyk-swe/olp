@@ -8,13 +8,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/ledger"
 )
 
 func EnsureAttributionBudgetAccounts(ctx context.Context, tx pgx.Tx, project string, b authority.AttributionBudgets) error {
 	for key, values := range b {
 		for value := range values {
-			if err := limits.EnsureAttributionBudget(ctx, tx, project, key, value); err != nil {
+			if err := ledger.EnsureAttributionBudget(ctx, tx, project, key, value); err != nil {
 				return err
 			}
 		}
@@ -38,7 +38,7 @@ func readAttributionBudgets(r *http.Request, q interface {
 }, id string) (access.Reply, error) {
 	var budgets, usage json.RawMessage
 	var etag string
-	if err := q.QueryRow(r.Context(), `SELECT attribution_budgets,etag::text,`+limits.AttributionBudgetsSQL+` FROM olp.projects p WHERE id=$1`, id).Scan(&budgets, &etag, &usage); err != nil {
+	if err := q.QueryRow(r.Context(), `SELECT attribution_budgets,etag::text,`+ledger.AttributionBudgetsSQL("p")+` FROM olp.projects p WHERE id=$1`, id).Scan(&budgets, &etag, &usage); err != nil {
 		return access.Reply{}, err
 	}
 	return access.Detail(map[string]any{"budgets": budgets, "usage": usage, "etag": etag}, etag), nil

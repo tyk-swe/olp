@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/tyk-swe/olp/internal/codesessions"
 	"io"
 	"log/slog"
 	"maps"
@@ -20,6 +19,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/codesessions"
+
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/google/uuid"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
@@ -28,7 +29,9 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/limits"
+	limitadmission "github.com/tyk-swe/olp/internal/limits/admission"
+	"github.com/tyk-swe/olp/internal/limits/fleet"
+	"github.com/tyk-swe/olp/internal/limits/scripts"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/release"
 
@@ -872,24 +875,25 @@ func (unreachableValkey) Do(context.Context, ...string) (any, error) {
 }
 
 func TestResearchStreamFollowsOutagePolicy(t *testing.T) {
-	limiter, err := limits.New(unreachableValkey{}, "test")
+	runner, err := scripts.NewRunner(unreachableValkey{}, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
+	limiter := limitadmission.New(runner)
 	slots := int64(1)
 	authority := keyauthority.Authority{ID: uuid.NewString(), Policy: keyauthority.KeyPolicy{MaxConcurrency: &slots}}
 	for _, test := range []struct {
 		name       string
-		policy     limits.OutagePolicy
+		policy     limitadmission.OutagePolicy
 		provider   *routing.Limits
 		wantRefuse bool
 	}{
-		{"fail open admits key concurrency", limits.FailOpen, nil, false},
-		{"fail closed refuses key concurrency", limits.FailClosed, nil, true},
-		{"fail open still refuses provider concurrency", limits.FailOpen, &routing.Limits{MaxConcurrency: &slots}, true},
+		{"fail open admits key concurrency", limitadmission.FailOpen, nil, false},
+		{"fail closed refuses key concurrency", limitadmission.FailClosed, nil, true},
+		{"fail open still refuses provider concurrency", limitadmission.FailOpen, &routing.Limits{MaxConcurrency: &slots}, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			admission := NewAdmission(limiter, func() limits.OutagePolicy { return test.policy }, slog.New(slog.DiscardHandler))
+			admission := NewAdmission(limiter, fleet.New(runner), func() limitadmission.OutagePolicy { return test.policy }, slog.New(slog.DiscardHandler))
 			lease, failure := admission.reserveResearchStream(t.Context(), authority, routeSlug, "service", "provider", test.provider)
 			if test.wantRefuse {
 				if failure == nil || failure.Code != "distributed_limits_unavailable" {

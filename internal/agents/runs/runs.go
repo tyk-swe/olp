@@ -8,6 +8,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/debits"
+	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -22,13 +24,13 @@ func PrincipalDigest(key *secrets.AuthKey, a keyauthority.Authority) []byte {
 // resend a step and does not itself reserve or charge money.
 func StartRunTx(ctx context.Context, tx pgx.Tx, key *secrets.AuthKey, a keyauthority.Authority, id, scope, resource, revision string) error {
 	if key == nil || a.ProjectID == nil || !validApprovalID(id) || !a.AllowsResource(scope, resource, *a.ProjectID, time.Now()) {
-		return limits.ErrDebitAuthority
+		return debits.ErrAuthority
 	}
 	kind := "toolset"
 	if scope == "agents" {
 		kind = "agent"
 	} else if scope != "tools" {
-		return limits.ErrDebitAuthority
+		return debits.ErrAuthority
 	}
 	digest := PrincipalDigest(key, a)
 	var allowed bool
@@ -36,7 +38,7 @@ func StartRunTx(ctx context.Context, tx pgx.Tx, key *secrets.AuthKey, a keyautho
 		return err
 	}
 	if !allowed {
-		return limits.ErrDebitAuthority
+		return debits.ErrAuthority
 	}
 	_, err := tx.Exec(ctx, `INSERT INTO olp.agent_runs(id,api_key_id,project_id,revision_id,principal_digest) VALUES($1,$2,$3,$4,$5) ON CONFLICT(id) DO NOTHING`, id, a.ID, *a.ProjectID, revision, digest)
 	if err != nil {
@@ -46,25 +48,25 @@ func StartRunTx(ctx context.Context, tx pgx.Tx, key *secrets.AuthKey, a keyautho
 		return err
 	}
 	if !allowed {
-		return limits.ErrDebitConflict
+		return debits.ErrConflict
 	}
 	return nil
 }
 
 // PrepareStepTx persists the run/step link and shared reservation intent in
 // one transaction. Deferred foreign keys fence orphaned financial references.
-func PrepareStepTx(ctx context.Context, tx pgx.Tx, store *limits.DebitStore, a keyauthority.Authority, intent limits.DebitIntent, ordinal int, owners []limits.DebitOwner) (limits.DebitState, error) {
+func PrepareStepTx(ctx context.Context, tx pgx.Tx, a keyauthority.Authority, intent debits.Intent, ordinal int, owners []limits.Owner) (debits.State, error) {
 	if a.ProjectID == nil || intent.APIKeyID != a.ID || intent.ProjectID != *a.ProjectID || ordinal < 0 || intent.RunID == "" || intent.StepID == "" {
-		return "", limits.ErrDebitAuthority
+		return "", debits.ErrAuthority
 	}
 	var allowed bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.agent_runs r WHERE r.id=$1 AND r.api_key_id=$2 AND r.project_id=$3 AND (EXISTS(SELECT 1 FROM olp.agent_publication_revisions v JOIN olp.agent_publications p ON p.id=v.publication_id WHERE v.id=r.revision_id AND NOT p.retired) OR EXISTS(SELECT 1 FROM olp.route_revisions v JOIN olp.routes route ON route.id=v.route_id WHERE v.id=r.route_revision_id AND route.retired_at IS NULL AND (route.project_id IS NULL OR route.project_id=r.project_id))))`, intent.RunID, a.ID, *a.ProjectID).Scan(&allowed); err != nil {
 		return "", err
 	}
 	if !allowed {
-		return "", limits.ErrDebitAuthority
+		return "", debits.ErrAuthority
 	}
-	state, err := store.PrepareTx(ctx, tx, intent, owners)
+	state, err := debits.PrepareTx(ctx, tx, intent, owners)
 	if err != nil {
 		return "", err
 	}
@@ -76,28 +78,31 @@ func PrepareStepTx(ctx context.Context, tx pgx.Tx, store *limits.DebitStore, a k
 		return "", err
 	}
 	if !allowed {
-		return "", limits.ErrDebitConflict
+		return "", debits.ErrConflict
 	}
 	return state, nil
 }
 
-func EnsureBoundaryAccountsTx(ctx context.Context, tx pgx.Tx, authority keyauthority.Authority, boundaries keyauthority.ToolDebitBoundariesResult) error {
+func EnsureBoundaryAccountsTx(ctx context.Context, tx pgx.Tx, authority keyauthority.Authority, boundaries keyauthority.CostBoundaries) error {
 	if authority.EndUserDigest != "" {
-		if err := limits.EnsureEndUserAccounts(ctx, tx, authority.ID, authority.ProjectID, authority.EndUserDigest); err != nil {
+		if err := ledger.EnsureEndUserAccounts(ctx, tx, authority.ID, authority.ProjectID, authority.EndUserDigest); err != nil {
 			return err
 		}
 	}
 	for _, boundary := range boundaries.Boundaries {
-		switch {
-		case boundary.AggregateLevel == "attribution":
-			if err := limits.EnsureAttributionBudget(ctx, tx, *authority.ProjectID, boundary.AggregateKey, boundary.AggregateValue); err != nil {
-				return err
-			}
-		case boundary.AggregateLevel != "":
-			if err := limits.EnsureAggregateBudget(ctx, tx, boundary.AggregateLevel, boundary.AggregateKey); err != nil {
-				return err
-			}
+		if err := ensureAggregateAccount(ctx, tx, authority, boundary.Aggregate); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func ensureAggregateAccount(ctx context.Context, tx pgx.Tx, authority keyauthority.Authority, account *keyauthority.AggregateAccount) error {
+	if account == nil {
+		return nil
+	}
+	if account.Level == "attribution" {
+		return ledger.EnsureAttributionBudget(ctx, tx, *authority.ProjectID, account.Key, account.Value)
+	}
+	return ledger.EnsureAggregateBudget(ctx, tx, account.Level, account.Key)
 }

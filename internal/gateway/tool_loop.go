@@ -12,6 +12,7 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -24,7 +25,7 @@ import (
 
 type WorkflowRunStore interface {
 	Start(context.Context, keyauthority.Authority, string, string) (string, error)
-	Prepare(context.Context, keyauthority.Authority, limits.DebitIntent, int, []limits.DebitOwner) (limits.DebitState, error)
+	Prepare(context.Context, keyauthority.Authority, debits.Intent, int, []limits.Owner) (debits.State, error)
 }
 
 type WorkflowTool = mcp.WorkflowTool

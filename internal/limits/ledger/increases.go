@@ -1,4 +1,4 @@
-package limits
+package ledger
 
 import (
 	"context"
@@ -6,8 +6,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// LoadBudgetIncreases compiles bounded server-authored grants once per authority
-// refresh. Valkey, not the gateway clock, checks their period and expiration.
 func LoadBudgetIncreases(ctx context.Context, q interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
 }) (map[string]string, error) {
@@ -15,17 +13,17 @@ func LoadBudgetIncreases(ctx context.Context, q interface {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var result map[string]string
-	for rows.Next() {
-		var owner, grants string
-		if err = rows.Scan(&owner, &grants); err != nil {
-			return nil, err
-		}
-		if result == nil {
-			result = map[string]string{}
-		}
-		result[owner] = grants
+	grants, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) ([2]string, error) {
+		var owner, increases string
+		err := row.Scan(&owner, &increases)
+		return [2]string{owner, increases}, err
+	})
+	if err != nil || len(grants) == 0 {
+		return nil, err
 	}
-	return result, rows.Err()
+	result := make(map[string]string, len(grants))
+	for _, grant := range grants {
+		result[grant[0]] = grant[1]
+	}
+	return result, nil
 }

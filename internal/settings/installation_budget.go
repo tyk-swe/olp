@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/ledger"
 )
 
 func ApplyInstallationBudget(ctx context.Context, tx pgx.Tx, p access.Principal, desired *authority.BudgetPolicy) (bool, error) {
@@ -35,7 +35,7 @@ func ApplyInstallationBudget(ctx context.Context, tx pgx.Tx, p access.Principal,
 
 func SetInstallationBudget(ctx context.Context, tx pgx.Tx, id string, policy *authority.BudgetPolicy) (string, error) {
 	if policy.Limited() {
-		if err := limits.EnsureAggregateBudget(ctx, tx, "installation", id); err != nil {
+		if err := ledger.EnsureAggregateBudget(ctx, tx, "installation", id); err != nil {
 			return "", err
 		}
 	}

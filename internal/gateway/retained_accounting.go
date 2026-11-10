@@ -100,7 +100,7 @@ func (s *Server) admitRetainedPageCost(ctx context.Context, x *call, authority k
 	if x.lease == nil {
 		x.lease = lease
 	} else {
-		x.lease.Attach(lease)
+		x.lease.Join(lease)
 	}
 	return nil
 }

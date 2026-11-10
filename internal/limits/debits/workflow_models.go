@@ -1,4 +1,4 @@
-package limits
+package debits
 
 import (
 	"context"
@@ -7,8 +7,8 @@ import (
 
 const WorkflowModelLeaseDuration = 12 * time.Second
 
-func (s *DebitStore) MarkWorkflowModelDispatched(ctx context.Context, id, claim string) error {
-	tx, err := s.Pool.Begin(ctx)
+func (s *Store) MarkWorkflowModelDispatched(ctx context.Context, id, claim string) error {
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -23,13 +23,13 @@ func (s *DebitStore) MarkWorkflowModelDispatched(ctx context.Context, id, claim 
 		return err
 	}
 	if tag.RowsAffected() != 1 {
-		return ErrDebitState
+		return ErrState
 	}
 	return tx.Commit(ctx)
 }
 
-func (s *DebitStore) RenewWorkflowModelLease(ctx context.Context, id, claim string) error {
-	tx, err := s.Pool.Begin(ctx)
+func (s *Store) RenewWorkflowModelLease(ctx context.Context, id, claim string) error {
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -42,7 +42,7 @@ func (s *DebitStore) RenewWorkflowModelLease(ctx context.Context, id, claim stri
 		return err
 	}
 	if !active {
-		return ErrDebitState
+		return ErrState
 	}
 	if _, err := tx.Exec(ctx, `UPDATE olp.workflow_model_leases SET expires_at=clock_timestamp()+make_interval(secs=>$3)
 		WHERE dispatch_id=$1 AND claim_id=$2`, id, claim, WorkflowModelLeaseDuration.Seconds()); err != nil {
@@ -51,11 +51,11 @@ func (s *DebitStore) RenewWorkflowModelLease(ctx context.Context, id, claim stri
 	return tx.Commit(ctx)
 }
 
-func (s *DebitStore) RecoverOrphanedWorkflowModels(ctx context.Context, limit int) (int64, error) {
+func (s *Store) RecoverOrphanedWorkflowModels(ctx context.Context, limit int) (int64, error) {
 	if limit <= 0 {
 		return 0, nil
 	}
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, err
 	}

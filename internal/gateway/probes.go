@@ -12,7 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -79,7 +79,7 @@ func (s *Server) probeDue(ctx context.Context) (int, error) {
 	if release == nil || release.Snapshot() == nil {
 		return 0, nil
 	}
-	limiter := s.deps.Admission.limiter
+	limiter := s.deps.Admission.fleet
 	probed := 0
 	for _, target := range probeTargets(release.Snapshot()) {
 		call, cancel := context.WithTimeout(ctx, reserveTimeout)
@@ -140,7 +140,7 @@ func probeTargets(snapshot *routing.View) []probeTarget {
 // planning and execution, so it is gated, priced and recorded like any
 // attempt, and accounted to the installation as a probe. It reports false
 // when no attempt reached the provider, which says nothing about its health.
-func (s *Server) probe(ctx context.Context, release *release.Release, target probeTarget) (limits.ProbeResult, bool) {
+func (s *Server) probe(ctx context.Context, release *release.Release, target probeTarget) (fleet.ProbeResult, bool) {
 	shape := probeRequests[target.operation]
 	if target.operation == operationGeneration {
 		provider := release.Snapshot().Provider(target.provider)
@@ -152,7 +152,7 @@ func (s *Server) probe(ctx context.Context, release *release.Release, target pro
 	parsed, err := protocols.Parse(shape.family, fmt.Appendf(nil, shape.body, target.route.Slug), target.route.Slug)
 	if err != nil {
 		s.log.Warn("health probe request could not be built", "operation", target.operation, "error", err.Error())
-		return limits.ProbeResult{}, false
+		return fleet.ProbeResult{}, false
 	}
 	// The probe plans against the route narrowed to the probed target, with
 	// one attempt, no route behavior beyond its spend cap, and a short
@@ -176,21 +176,21 @@ func (s *Server) probe(ctx context.Context, release *release.Release, target pro
 	defer s.settleAdmission(ctx, x)
 	if e := s.planCanonical(ctx, x); e != nil {
 		s.log.Info("health probe not planned", "provider_id", target.provider, "route", route.Slug, "code", e.Code)
-		return limits.ProbeResult{}, false
+		return fleet.ProbeResult{}, false
 	}
 	x.budget, x.allowance = 1, 1
 	if e := s.reserveSystemBudgets(ctx, x); e != nil {
 		s.finish(x, &outcome{err: e}, e.Status)
-		return limits.ProbeResult{}, false
+		return fleet.ProbeResult{}, false
 	}
 	out := s.execute(ctx, x)
 	s.finish(x, out, cmp.Or(errorStatus(out.err), 200))
 	if !x.dispatched || len(x.facts) == 0 {
-		return limits.ProbeResult{}, false
+		return fleet.ProbeResult{}, false
 	}
 	fact := x.facts[len(x.facts)-1]
-	result := limits.ProbeResult{
-		Status:     limits.ProbeHealthy,
+	result := fleet.ProbeResult{
+		Status:     fleet.ProbeHealthy,
 		Model:      target.target.ProviderModel,
 		ObservedAt: s.now().UTC(),
 		LatencyMS:  fact.Duration.Milliseconds(),
@@ -198,7 +198,7 @@ func (s *Server) probe(ctx context.Context, release *release.Release, target pro
 	if out.err != nil {
 		result.Class = fact.Class
 		if unhealthyClass(fact.Class) {
-			result.Status = limits.ProbeUnhealthy
+			result.Status = fleet.ProbeUnhealthy
 		}
 	}
 	return result, true
@@ -207,14 +207,14 @@ func (s *Server) probe(ctx context.Context, release *release.Release, target pro
 // shareProbe publishes a probe result: an unhealthy one opens the provider's
 // fleet circuit until the next probe can decide again, a healthy one closes
 // it.
-func (s *Server) shareProbe(ctx context.Context, limiter *limits.Limiter, target probeTarget, result limits.ProbeResult) error {
+func (s *Server) shareProbe(ctx context.Context, limiter *fleet.State, target probeTarget, result fleet.ProbeResult) error {
 	call, cancel := context.WithTimeout(ctx, reserveTimeout)
 	defer cancel()
 	if err := limiter.RecordProbe(call, target.provider, result); err != nil {
 		return err
 	}
 	var until time.Time
-	if result.Status == limits.ProbeUnhealthy {
+	if result.Status == fleet.ProbeUnhealthy {
 		until = s.now().Add(max(target.interval, circuitOpenFor))
 	}
 	return limiter.PublishCircuit(call, target.provider, until)

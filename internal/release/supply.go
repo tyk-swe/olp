@@ -4,18 +4,18 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
 // supplyBudgets lists every spend cap the snapshot declares, for
 // reconciliation to keep current: capped connections, capped credential slots
 // and routes with a budget.
-func supplyBudgets(s *routing.Snapshot) []limits.SupplyBudget {
-	var budgets []limits.SupplyBudget
+func supplyBudgets(s *routing.Snapshot) []ledger.SupplyBudget {
+	var budgets []ledger.SupplyBudget
 	add := func(ownerID, kind string, costs *routing.CostLimits) {
 		if costs != nil {
-			budgets = append(budgets, limits.SupplyBudget{OwnerID: ownerID, Kind: kind, DailyCostLimit: costs.DailyCostLimit, MonthlyCostLimit: costs.MonthlyCostLimit})
+			budgets = append(budgets, ledger.SupplyBudget{OwnerID: ownerID, Kind: kind, Daily: costs.DailyCostLimit, Monthly: costs.MonthlyCostLimit})
 		}
 	}
 	for _, id := range slices.Sorted(maps.Keys(s.Providers)) {
