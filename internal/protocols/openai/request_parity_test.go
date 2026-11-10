@@ -109,3 +109,25 @@ func FuzzTheConversationIsValidatedAsTheFieldsAreValidated(f *testing.F) {
 		}
 	})
 }
+
+func TestEmbeddingAndCompletionInputsRejectNullElements(t *testing.T) {
+	for _, family := range []wire.Format{wire.Embeddings, wire.Completions} {
+		field := "input"
+		if family == wire.Completions {
+			field = "prompt"
+		}
+		for _, input := range []string{`[null]`, `["text",null]`, `[1,null]`, `[[1,null]]`, `[[1],null]`} {
+			body := []byte(`{"model":"route","` + field + `":` + input + `}`)
+			_, err := Parse(family, body)
+			requestError, ok := errors.AsType[*wire.RequestError](err)
+			if !ok || requestError.Param != field {
+				t.Errorf("%s accepted %s, error %v", family, input, err)
+			}
+		}
+		for _, input := range []string{`"text"`, `["text","null"]`, `[0,1]`, `[[0,1],[2]]`} {
+			if _, err := Parse(family, []byte(`{"model":"route","`+field+`":`+input+`}`)); err != nil {
+				t.Errorf("%s rejected %s, error %v", family, input, err)
+			}
+		}
+	}
+}
