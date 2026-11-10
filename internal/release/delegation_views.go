@@ -10,7 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/attribution"
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/ledger"
 )
 
 type DelegationRecord struct {
@@ -146,7 +146,7 @@ func (s *DelegationManagement) listDelegations(r *http.Request, p access.Princip
 ), pairs AS MATERIALIZED (
  SELECT DISTINCT project_id,digest FROM entries WHERE ordinal<=$2
 ), budgets AS MATERIALIZED (
- SELECT pair.project_id,pair.digest,p.attribution_budgets->'delegation_pair'->pair.digest AS policy,`+limits.DelegationPairBudgetSQL+` AS usage
+ SELECT pair.project_id,pair.digest,p.attribution_budgets->'delegation_pair'->pair.digest AS policy,`+ledger.DelegationPairBudgetSQL("p", "pair")+` AS usage
  FROM pairs pair JOIN olp.projects p ON p.id=pair.project_id
 )
  SELECT entries.ordinal,budgets.policy,budgets.usage

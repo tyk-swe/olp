@@ -10,14 +10,15 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/admission"
 )
 
-func (a *Admission) reserveAggregateBudgets(ctx context.Context, authority *keyauthority.Authority, ttl time.Duration, hold costReservation, costChecked *bool) (*limits.Lease, *Error) {
+func (a *Admission) reserveAggregateBudgets(ctx context.Context, authority *keyauthority.Authority, ttl time.Duration, hold costReservation, costChecked *bool) (*admission.Lease, *Error) {
 	labels := authority.BudgetAttribution()
 	if !authority.OrganizationBudget.Limited() && !authority.InstallationBudget.Limited() && !authority.ProjectBudget.Limited() && !authority.ProjectAttributionBudgets.Matches(labels) {
 		return nil, nil
 	}
-	var chain *limits.Lease
+	var chain *admission.Lease
 	for _, boundary := range [...]struct {
 		level, subject string
 		policy         *keyauthority.BudgetPolicy
@@ -43,7 +44,7 @@ func (a *Admission) reserveAggregateBudgets(ctx context.Context, authority *keya
 			settleKey(ctx, chain, false, nil, a.logger())
 			return nil, failure
 		}
-		lease.Attach(chain)
+		lease.Join(chain)
 		chain = lease
 	}
 	for _, key := range slices.Sorted(maps.Keys(labels)) {
@@ -66,7 +67,7 @@ func (a *Admission) reserveAggregateBudgets(ctx context.Context, authority *keya
 			settleKey(ctx, chain, false, nil, a.logger())
 			return nil, failure
 		}
-		lease.Attach(chain)
+		lease.Join(chain)
 		chain = lease
 	}
 	return chain, nil
@@ -82,25 +83,18 @@ func budgetKind(basis limits.Basis) string {
 
 // Every aggregate boundary uses the same reservation and fail-closed semantics.
 // The caller attaches successful leases or refunds earlier boundaries on refusal.
-func (a *Admission) reserveCostBoundary(ctx context.Context, keyID, owner, label, param string, increases string, policy *keyauthority.BudgetPolicy, ttl time.Duration, hold costReservation, costChecked *bool) (*limits.Lease, *Error) {
+func (a *Admission) reserveCostBoundary(ctx context.Context, keyID, owner, label, param string, increases string, policy *keyauthority.BudgetPolicy, ttl time.Duration, hold costReservation, costChecked *bool) (*admission.Lease, *Error) {
 	if e := a.checkCostAccountingOnce(ctx, costChecked); e != nil {
 		return nil, e
 	}
 	if e := a.checkPendingCostAccounting(ctx, owner); e != nil {
 		return nil, e
 	}
-	request := limits.Request{
-		CostOwnerID:      owner,
-		CostIncreases:    increases,
-		LookupID:         limits.AggregateBudgetLookup(owner),
-		DailyCostLimit:   policy.DailyCostLimit,
-		WeeklyCostLimit:  policy.WeeklyCostLimit,
-		MonthlyCostLimit: policy.MonthlyCostLimit,
-		LeaseTTL:         ttl,
-		CostBasis:        policy.Basis(),
-		CostEstimate:     hold.amountFor(policy.Basis()),
-		RequestID:        hold.requestID,
-	}
+	request := hold.on(admission.Request{
+		Lookup: limits.AggregateBudgetLookup(owner), LeaseTTL: ttl,
+		Cost: admission.Budget(limits.Owner{ID: owner, Kind: limits.OwnerAggregate, Basis: policy.Basis()},
+			policy.DailyCostLimit, policy.WeeklyCostLimit, policy.MonthlyCostLimit, increases),
+	})
 	decision, cancel := context.WithTimeout(ctx, reserveTimeout)
 	defer cancel()
 	lease, err := a.limiter.Reserve(decision, request)

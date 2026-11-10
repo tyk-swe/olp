@@ -480,7 +480,7 @@ func TestBatchSubmissionMigrationSplitsLegacyCursor(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s %s: migrated settlement was not claimable", c.adapter, c.legacy)
 		}
-		if reflect.TypeOf(got.Submission) != reflect.TypeOf(c.want) || !sameJSON(t, got.Submission, c.want) {
+		if reflect.TypeOf(got.Submission) != reflect.TypeOf(c.want) || !equalJSON(t, got.Submission, c.want) {
 			t.Errorf("%s submission = %#v, want %#v", c.adapter, got.Submission, c.want)
 		}
 		if !got.CreatorDeadline.Equal(c.deadline) {
@@ -500,7 +500,7 @@ func TestBatchSubmissionMigrationSplitsLegacyCursor(t *testing.T) {
 	}
 }
 
-func sameJSON(t *testing.T, got, want any) bool {
+func equalJSON(t *testing.T, got, want any) bool {
 	t.Helper()
 	decode := func(value any) any {
 		raw, err := json.Marshal(value)

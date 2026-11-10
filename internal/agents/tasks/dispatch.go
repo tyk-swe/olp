@@ -6,7 +6,7 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agentcontract"
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/admission"
 )
 
 type State string
@@ -48,7 +48,7 @@ type dispatch struct {
 	reservation reservation
 	intent      SendIntent
 	capability  string
-	leases      []*limits.Lease
+	leases      []*admission.Lease
 }
 
 func (s *Store) Prepare(ctx context.Context, in SendIntent) (Dispatch, error) {

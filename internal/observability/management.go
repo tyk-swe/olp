@@ -10,7 +10,7 @@ import (
 	"github.com/oapi-codegen/nullable"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/limits"
+	limitfleet "github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
 
@@ -29,7 +29,7 @@ type Management struct {
 // FleetHealth reads the provider health the gateway fleet shares.
 type FleetHealth interface {
 	Circuits(ctx context.Context, now time.Time) (map[string]time.Time, error)
-	Probes(ctx context.Context) (map[string]limits.ProbeResult, error)
+	Probes(ctx context.Context) (map[string]limitfleet.ProbeResult, error)
 }
 
 // Register mounts the health routes on the management surface.
@@ -97,7 +97,7 @@ func (m *Management) providerHealth(r *http.Request, p access.Principal) (access
 
 // fleet reads the shared circuits and probe results. An unreadable store
 // leaves every item without them rather than failing the listing.
-func (m *Management) fleet(ctx context.Context) (contract.ProviderHealthResponseSharedState, map[string]time.Time, map[string]limits.ProbeResult) {
+func (m *Management) fleet(ctx context.Context) (contract.ProviderHealthResponseSharedState, map[string]time.Time, map[string]limitfleet.ProbeResult) {
 	if m.Fleet == nil {
 		return contract.ProviderHealthResponseSharedStateUnconfigured, nil, nil
 	}
@@ -117,7 +117,7 @@ func (m *Management) fleet(ctx context.Context) (contract.ProviderHealthResponse
 // fleetReadTimeout bounds the shared-state reads of one listing.
 const fleetReadTimeout = time.Second
 
-func probeResult(probe limits.ProbeResult) contract.ProviderProbeResult {
+func probeResult(probe limitfleet.ProbeResult) contract.ProviderProbeResult {
 	result := contract.ProviderProbeResult{
 		Status:     contract.ProviderProbeResultStatus(probe.Status),
 		Model:      probe.Model,

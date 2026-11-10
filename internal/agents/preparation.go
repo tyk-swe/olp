@@ -2,7 +2,6 @@ package agents
 
 import (
 	"context"
-	"time"
 
 	protocol "github.com/a2aproject/a2a-go/v2/a2a"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
@@ -81,6 +80,6 @@ func (s *Executor) prepareSend(ctx context.Context, authority keyauthority.Autho
 }
 
 func remoteWorkBounded(authority keyauthority.Authority, revision agentcontract.Revision) bool {
-	boundaries := authority.ToolDebitBoundaries(time.Hour)
-	return boundaries.Resolved && revision.Definition.Agent != nil && (!boundaries.CostBudgeted || revision.Definition.Agent.RemoteWorkBoundSeconds != nil)
+	boundaries := authority.CostBoundaries("")
+	return boundaries.Resolved && revision.Definition.Agent != nil && (!boundaries.CostBudgeted() || revision.Definition.Agent.RemoteWorkBoundSeconds != nil)
 }

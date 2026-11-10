@@ -7,20 +7,21 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/admission"
 )
 
-func (a *Admission) reserveRouteLimits(ctx context.Context, authority *keyauthority.Authority, route string, estimate int64, ttl time.Duration, hold costReservation, costChecked *bool) (*limits.Lease, *Error) {
+func (a *Admission) reserveRouteLimits(ctx context.Context, authority *keyauthority.Authority, route string, estimate int64, ttl time.Duration, hold costReservation, costChecked *bool) (*admission.Lease, *Error) {
 	policy := authority.Policy.RouteLimits[route]
 	if !policy.Limited() {
 		return nil, nil
 	}
 	owner := limits.KeyRouteBudgetID(authority.ID, route)
-	request := limits.Request{
-		CostOwnerID: owner, CostIncreases: authority.BudgetIncreases[owner], LookupID: limits.AggregateBudgetLookup(owner),
-		RequestsPerMinute: policy.RequestsPerMinute, TokensPerMinute: policy.TokensPerMinute, MaxConcurrency: policy.MaxConcurrency,
-		DailyCostLimit: policy.DailyCostLimit, MonthlyCostLimit: policy.MonthlyCostLimit, WeeklyCostLimit: policy.WeeklyCostLimit,
-		CostBasis: limits.Basis(policy.CostBasis), RequestedTokens: estimate, LeaseTTL: ttl,
-	}
+	basis := limits.Owner{ID: owner, Kind: limits.OwnerAggregate, Basis: limits.Basis(policy.CostBasis)}
+	request := hold.on(admission.Request{
+		Lookup: limits.AggregateBudgetLookup(owner), LeaseTTL: ttl,
+		Rate: admission.RateLimits{RequestsPerMinute: policy.RequestsPerMinute, TokensPerMinute: policy.TokensPerMinute, MaxConcurrency: policy.MaxConcurrency, Tokens: estimate},
+		Cost: admission.Budget(basis, policy.DailyCostLimit, policy.WeeklyCostLimit, policy.MonthlyCostLimit, authority.BudgetIncreases[owner]),
+	})
 	if policy.TokensPerMinute != nil {
 		if e := a.checkPendingTokenAccounting(ctx, owner); e != nil {
 			return nil, e
@@ -33,7 +34,6 @@ func (a *Admission) reserveRouteLimits(ctx context.Context, authority *keyauthor
 		if e := a.checkPendingCostAccounting(ctx, owner); e != nil {
 			return nil, e
 		}
-		request.CostEstimate, request.RequestID = hold.amountFor(request.CostBasis), hold.requestID
 	}
 	if !a.ready() {
 		return nil, limitsUnavailable()

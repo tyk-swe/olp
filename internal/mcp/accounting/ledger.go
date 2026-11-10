@@ -12,19 +12,20 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agents/runs"
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 type DurableLedger struct {
-	pool  *pgxpool.Pool
-	store *limits.DebitStore
-	auth  *secrets.AuthKey
+	pool   *pgxpool.Pool
+	store  *debits.Store
+	syncer *debits.Syncer
+	auth   *secrets.AuthKey
 }
 
-func NewDurableLedger(pool *pgxpool.Pool, store *limits.DebitStore, auth *secrets.AuthKey) *DurableLedger {
-	return &DurableLedger{pool: pool, store: store, auth: auth}
+func NewDurableLedger(pool *pgxpool.Pool, store *debits.Store, syncer *debits.Syncer, auth *secrets.AuthKey) *DurableLedger {
+	return &DurableLedger{pool: pool, store: store, syncer: syncer, auth: auth}
 }
 
 func newID() (string, error) {
@@ -42,17 +43,17 @@ func (l *DurableLedger) currency(ctx context.Context) (string, error) {
 }
 
 func (l *DurableLedger) Reserve(ctx context.Context, in ReserveInput) (ReserveResult, error) {
-	if _, ok := parseEvidenceDigest(in.CallDigest); l.pool == nil || l.store == nil || l.auth == nil || in.Authority.ProjectID == nil || !ok {
-		return ReserveResult{}, limits.ErrDebitAuthority
+	if _, ok := parseEvidenceDigest(in.CallDigest); l.pool == nil || l.store == nil || l.syncer == nil || l.auth == nil || in.Authority.ProjectID == nil || !ok {
+		return ReserveResult{}, debits.ErrAuthority
 	}
 	if in.UnitPrice != nil && !routing.ValidToolPrice(*in.UnitPrice) {
-		return ReserveResult{}, limits.ErrDebitConflict
+		return ReserveResult{}, debits.ErrConflict
 	}
-	boundaries := in.Authority.ToolDebitBoundaries(time.Hour)
+	boundaries := in.Authority.CostBoundaries("")
 	if !boundaries.Resolved {
-		return ReserveResult{}, limits.ErrDebitAuthority
+		return ReserveResult{}, debits.ErrAuthority
 	}
-	owners, requests := boundaries.Owners(), boundaries.Requests()
+	owners := boundaries.Owners()
 	bound := "0"
 	if in.UnitPrice != nil {
 		bound = *in.UnitPrice
@@ -67,7 +68,7 @@ func (l *DurableLedger) Reserve(ctx context.Context, in ReserveInput) (ReserveRe
 	}
 	currency, err := l.currency(ctx)
 	if err != nil || currency == "" {
-		return ReserveResult{}, limits.ErrDebitAuthority
+		return ReserveResult{}, debits.ErrAuthority
 	}
 	reservation := &Reservation{
 		Approval: in.Approval, Authority: in.Authority,
@@ -80,21 +81,21 @@ func (l *DurableLedger) Reserve(ctx context.Context, in ReserveInput) (ReserveRe
 	}
 	if in.RunID != "" {
 		if !canonicalUUID(in.RunID) || in.Ordinal < 0 {
-			return ReserveResult{}, limits.ErrDebitAuthority
+			return ReserveResult{}, debits.ErrAuthority
 		}
 		reservation.RunID = in.RunID
 	}
-	intent := limits.DebitIntent{
+	intent := debits.Intent{
 		ID: reservation.DispatchID, APIKeyID: in.Authority.ID, ProjectID: reservation.ProjectID,
 		RunID: reservation.RunID, StepID: reservation.StepID, Kind: "tool", ClaimID: reservation.ClaimID,
 		Currency: currency, CostBound: bound, ChargeBound: bound, PreparedUntil: time.Now().Add(90 * time.Second),
-		Affinity: limits.ExecutionAffinity{ReleaseID: in.ReleaseID, RevisionID: in.ToolsetRevisionID, ToolAlias: in.ToolAlias, InputDigest: in.InputDigest},
+		Affinity: debits.Affinity{ReleaseID: in.ReleaseID, RevisionID: in.ToolsetRevisionID, ToolAlias: in.ToolAlias, InputDigest: in.InputDigest},
 	}
 	if in.Approval != nil {
 		intent.Affinity.RouteRevisionID = in.Approval.Binding.RouteRevisionID
 		intent.Affinity.TranscriptDigest = in.Approval.Binding.TranscriptDigest
 	}
-	if in.UnitPrice == nil && boundaries.CostBudgeted {
+	if in.UnitPrice == nil && boundaries.CostBudgeted() {
 		if err = l.recordRefusedUnpriced(ctx, in, reservation, intent, boundaries); err != nil {
 			return ReserveResult{}, err
 		}
@@ -113,12 +114,12 @@ func (l *DurableLedger) Reserve(ctx context.Context, in ReserveInput) (ReserveRe
 	if err = runs.EnsureBoundaryAccountsTx(ctx, tx, in.Authority, boundaries); err != nil {
 		return ReserveResult{}, err
 	}
-	state, err := runs.PrepareStepTx(ctx, tx, l.store, in.Authority, intent, in.Ordinal, owners)
+	state, err := runs.PrepareStepTx(ctx, tx, in.Authority, intent, in.Ordinal, owners)
 	if err != nil {
 		return ReserveResult{}, err
 	}
-	if state != limits.DebitPrepared {
-		return ReserveResult{}, limits.ErrDebitState
+	if state != debits.Prepared {
+		return ReserveResult{}, debits.ErrState
 	}
 	repeat, err := claimCallTx(ctx, tx, in, reservation)
 	if err != nil {
@@ -130,7 +131,7 @@ func (l *DurableLedger) Reserve(ctx context.Context, in ReserveInput) (ReserveRe
 	if err = tx.Commit(ctx); err != nil {
 		return ReserveResult{}, err
 	}
-	if err = l.store.Admit(ctx, reservation.DispatchID, reservation.ClaimID, requests); err != nil {
+	if err = l.syncer.Admit(ctx, reservation.DispatchID, reservation.ClaimID, boundaries.Admissions()); err != nil {
 		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		_ = l.store.ReleaseUndispatched(releaseCtx, reservation.DispatchID, reservation.ClaimID)
 		cancel()
@@ -155,7 +156,7 @@ func reservationCurrency(reservation *Reservation) *string {
 	return &currency
 }
 
-func (l *DurableLedger) recordRefusedUnpriced(ctx context.Context, in ReserveInput, reservation *Reservation, intent limits.DebitIntent, boundaries keyauthority.ToolDebitBoundariesResult) error {
+func (l *DurableLedger) recordRefusedUnpriced(ctx context.Context, in ReserveInput, reservation *Reservation, intent debits.Intent, boundaries keyauthority.CostBoundaries) error {
 	tx, err := l.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -169,12 +170,12 @@ func (l *DurableLedger) recordRefusedUnpriced(ctx context.Context, in ReserveInp
 	if err = runs.EnsureBoundaryAccountsTx(ctx, tx, in.Authority, boundaries); err != nil {
 		return err
 	}
-	state, err := runs.PrepareStepTx(ctx, tx, l.store, in.Authority, intent, in.Ordinal, boundaries.Owners())
+	state, err := runs.PrepareStepTx(ctx, tx, in.Authority, intent, in.Ordinal, boundaries.Owners())
 	if err != nil {
 		return err
 	}
-	if state != limits.DebitPrepared {
-		return limits.ErrDebitState
+	if state != debits.Prepared {
+		return debits.ErrState
 	}
 	now := time.Now().UTC()
 	if _, err = tx.Exec(ctx, `INSERT INTO olp.mcp_tool_calls(id,dispatch_id,api_key_id,project_id,toolset_id,toolset_revision_id,server_id,server_revision_id,tool_alias,input_digest,call_digest,result_digest,status,is_error,started_at,completed_at,unit_price,pricing_state,currency,agent_principal_id,member_principal_id,delegation_pair_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NULL,'refused_unpriced',false,$12,$12,NULL,'unpriced',$13,NULLIF($14,'')::uuid,NULLIF($15,'')::uuid,NULLIF($16,''))`,
@@ -210,7 +211,7 @@ func claimCallTx(ctx context.Context, tx pgx.Tx, in ReserveInput, reservation *R
 		alias      string
 		input      string
 		expired    bool
-		state      limits.DebitState
+		state      debits.State
 		status     Status
 	}
 	err = tx.QueryRow(ctx, `SELECT i.dispatch_id::text,i.attempt_id::text,i.project_id::text,i.toolset_revision_id::text,i.tool_alias,i.input_digest,i.expires_at<=clock_timestamp(),d.state,COALESCE(c.status,'')
@@ -220,7 +221,7 @@ WHERE i.api_key_id=$1 AND i.call_digest=$2 FOR UPDATE OF i`, reservation.APIKeyI
 	if err != nil {
 		return nil, err
 	}
-	if existing.expired || existing.state == limits.DebitReleased && (existing.status == "" || in.RunID != "" && existing.status == StatusGuardrailBlocked) {
+	if existing.expired || existing.state == debits.Released && (existing.status == "" || in.RunID != "" && existing.status == StatusGuardrailBlocked) {
 		_, err = tx.Exec(ctx, `UPDATE olp.mcp_call_identities SET project_id=$3,dispatch_id=$4,attempt_id=$5,toolset_id=$6,toolset_revision_id=$7,tool_alias=$8,input_digest=$9,created_at=clock_timestamp(),expires_at=clock_timestamp()+make_interval(secs=>$10) WHERE api_key_id=$1 AND call_digest=$2`,
 			reservation.APIKeyID, in.CallDigest, reservation.ProjectID, reservation.DispatchID, reservation.AttemptID,
 			in.ToolsetID, in.ToolsetRevisionID, in.ToolAlias, in.InputDigest, callIdentityBinding.Seconds())
@@ -232,7 +233,7 @@ WHERE i.api_key_id=$1 AND i.call_digest=$2 FOR UPDATE OF i`, reservation.APIKeyI
 	case StatusDispatched:
 		status = StatusInProgress
 	default:
-		if existing.state == limits.DebitPrepared || existing.state == limits.DebitReady || existing.state == limits.DebitDispatched {
+		if existing.state == debits.Prepared || existing.state == debits.Ready || existing.state == debits.Dispatched {
 			status = StatusInProgress
 		} else {
 			status = StatusOutcomeUnknown
@@ -257,7 +258,7 @@ func (l *DurableLedger) MarkDispatched(ctx context.Context, reservation *Reserva
 			return err
 		}
 	}
-	if err = limits.MarkDispatchedTx(ctx, tx, reservation.DispatchID, reservation.ClaimID); err != nil {
+	if err = debits.MarkDispatchedTx(ctx, tx, reservation.DispatchID, reservation.ClaimID); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO olp.mcp_tool_calls(id,dispatch_id,api_key_id,project_id,toolset_id,toolset_revision_id,server_id,server_revision_id,tool_alias,input_digest,call_digest,result_digest,status,is_error,started_at,completed_at,unit_price,pricing_state,currency,agent_principal_id,member_principal_id,delegation_pair_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NULL,'dispatched',false,$12,NULL,$13::numeric,$14,$15,NULLIF($16,'')::uuid,NULLIF($17,'')::uuid,NULLIF($18,'')) ON CONFLICT(dispatch_id) DO NOTHING`,
@@ -399,11 +400,11 @@ func (l *DurableLedger) MarkUnknown(ctx context.Context, reservation *Reservatio
 		return err
 	}
 	if tag.RowsAffected() != 1 {
-		var state limits.DebitState
-		if scanErr := tx.QueryRow(ctx, `SELECT state FROM olp.execution_debits WHERE id=$1`, reservation.DispatchID).Scan(&state); scanErr == nil && state == limits.DebitSettled {
+		var state debits.State
+		if scanErr := tx.QueryRow(ctx, `SELECT state FROM olp.execution_debits WHERE id=$1`, reservation.DispatchID).Scan(&state); scanErr == nil && state == debits.Settled {
 			return tx.Commit(ctx)
 		}
-		return limits.ErrDebitState
+		return debits.ErrState
 	}
 	return tx.Commit(ctx)
 }
@@ -411,7 +412,7 @@ func (l *DurableLedger) MarkUnknown(ctx context.Context, reservation *Reservatio
 func (l *DurableLedger) Settle(ctx context.Context, reservation *Reservation, evidence AttemptEvidence) error {
 	resultDigest := sha256.Sum256([]byte("olp:mcp-tool-result:" + reservation.DispatchID + ":" + reservation.AttemptID))
 	evidenceDigest := sha256.Sum256([]byte(reservation.AttemptID + ":" + string(evidence.Status) + ":" + evidence.ResultDigest))
-	result := limits.DebitResult{
+	result := debits.Result{
 		DispatchID: reservation.DispatchID, ResultDigest: resultDigest[:], EvidenceDigest: evidenceDigest[:],
 		EventID: reservation.AttemptID, Cost: reservation.Amount(), Charge: reservation.Amount(), Final: true, Complete: true,
 		Unpriced: reservation.UnitPrice == nil, ObservedAt: evidence.CompletedAt,
@@ -424,8 +425,8 @@ func (l *DurableLedger) Settle(ctx context.Context, reservation *Reservation, ev
 	if err = insertAttemptTx(ctx, tx, reservation, evidence); err != nil {
 		return err
 	}
-	if err = limits.SettleToolDebitTx(ctx, tx, result); err != nil {
-		if errors.Is(err, limits.ErrDebitState) {
+	if err = debits.SettleToolTx(ctx, tx, result); err != nil {
+		if errors.Is(err, debits.ErrState) {
 			var settled bool
 			if scanErr := tx.QueryRow(ctx, `SELECT state='settled' FROM olp.execution_debits WHERE id=$1`, reservation.DispatchID).Scan(&settled); scanErr == nil && settled {
 				return tx.Commit(ctx)

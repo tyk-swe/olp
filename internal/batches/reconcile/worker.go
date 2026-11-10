@@ -11,7 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/batches/upstream"
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -36,7 +36,7 @@ type Deps struct {
 	Egress      *egress.Policy
 	Client      *http.Client
 	Connections *egress.ConnectionClientCache
-	Limiter     *limits.Limiter
+	Limiter     *admission.Limiter
 	Log         *slog.Logger
 	Now         func() time.Time
 }

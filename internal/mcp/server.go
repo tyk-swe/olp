@@ -17,7 +17,7 @@ import (
 	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/grants/personal"
 	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/mcp/sessions"
 	"github.com/tyk-swe/olp/internal/release"
@@ -32,7 +32,7 @@ const (
 )
 
 type RateLimiter interface {
-	Reserve(ctx context.Context, request limits.Request) (*limits.Lease, error)
+	Reserve(ctx context.Context, request admission.Request) (*admission.Lease, error)
 }
 
 func cloneUnitPrice(price *string) *string {

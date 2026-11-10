@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/debits"
 )
 
 // WorkflowEventID gives each request in a workflow its own stable receipt identity.
@@ -64,7 +65,7 @@ func persistWorkflowTerminalTx(ctx context.Context, tx pgx.Tx, accepted Accounti
 			continue
 		}
 		if !workflowReferenceMatches(event, ref, attempt.Attempt.ID) || runID != ref.RunID {
-			return Persisted{}, limits.ErrDebitConflict
+			return Persisted{}, debits.ErrConflict
 		}
 	}
 	digest := accepted.digest
@@ -103,12 +104,12 @@ ON CONFLICT DO NOTHING RETURNING event_id::text`, event.EventID, event.RequestID
 				return Persisted{}, err
 			}
 			if !existing {
-				return Persisted{}, limits.ErrDebitConflict
+				return Persisted{}, debits.ErrConflict
 			}
 			continue
 		}
 		if attempt.Usage.observed() || attempt.Usage.uncertain() {
-			return Persisted{}, limits.ErrDebitConflict
+			return Persisted{}, debits.ErrConflict
 		}
 		if _, err := insertFact(ctx, tx, event, attempt); err != nil {
 			return Persisted{}, err
@@ -123,18 +124,18 @@ ON CONFLICT DO NOTHING RETURNING event_id::text`, event.EventID, event.RequestID
 	return Persisted{Outcome: PersistOutcomePersisted}, nil
 }
 
-func PersistWorkflowAttempt(ctx context.Context, pool *pgxpool.Pool, event *Event, index int) ([]limits.CostSnapshot, error) {
+func PersistWorkflowAttempt(ctx context.Context, pool *pgxpool.Pool, event *Event, index int) ([]limits.Snapshot, error) {
 	validated, err := Validate(event)
 	if err != nil {
 		return nil, err
 	}
 	if index < 0 || index != len(validated.Attempts)-1 {
-		return nil, limits.ErrDebitConflict
+		return nil, debits.ErrConflict
 	}
 	attempt := validated.Attempts[index]
 	ref := attempt.Attempt.Execution
 	if !workflowReferenceMatches(event, ref, attempt.Attempt.ID) {
-		return nil, limits.ErrDebitConflict
+		return nil, debits.ErrConflict
 	}
 	payload, err := json.Marshal(attempt.Attempt)
 	if err != nil {
@@ -159,7 +160,7 @@ func PersistWorkflowAttempt(ctx context.Context, pool *pgxpool.Pool, event *Even
 	}
 	if replayErr == nil {
 		retained := sessionDebitResult(ref.DispatchID, event, payload, retainedCost, retainedCharge, retainedComplete)
-		if _, err := limits.DebitResultReplayTx(ctx, tx, retained); err != nil {
+		if _, err := debits.ResultReplayTx(ctx, tx, retained); err != nil {
 			return nil, err
 		}
 		if !retainedComplete {
@@ -181,13 +182,13 @@ func PersistWorkflowAttempt(ctx context.Context, pool *pgxpool.Pool, event *Even
 		return nil, err
 	}
 	if exists {
-		return nil, limits.ErrDebitConflict
+		return nil, debits.ErrConflict
 	}
 	charge, err := insertFact(ctx, tx, event, attempt)
 	if err != nil {
 		return nil, err
 	}
-	supply := map[string]limits.CostSnapshot{}
+	supply := map[string]limits.Snapshot{}
 	if err := chargeSupply(ctx, tx, event, attempt, charge, supply, owners); err != nil {
 		return nil, err
 	}
@@ -195,7 +196,7 @@ func PersistWorkflowAttempt(ctx context.Context, pool *pgxpool.Pool, event *Even
 	if err != nil {
 		return nil, err
 	}
-	supplySnapshots := slices.Collect(func(yield func(limits.CostSnapshot) bool) {
+	supplySnapshots := slices.Collect(func(yield func(limits.Snapshot) bool) {
 		for _, owner := range slices.Sorted(maps.Keys(supply)) {
 			if !yield(supply[owner]) {
 				return
@@ -213,7 +214,7 @@ func PersistWorkflowAttempt(ctx context.Context, pool *pgxpool.Pool, event *Even
 	}
 	complete := factsComplete && attempt.Attempt.Usage != nil && attempt.Attempt.Usage.Complete && !attempt.Attempt.Usage.BillingUncertain
 	result := sessionDebitResult(ref.DispatchID, event, payload, cost, billed, complete)
-	if err := limits.SettleDebitTx(ctx, tx, result, allSnapshots); err != nil {
+	if err := debits.SettleTx(ctx, tx, result, allSnapshots); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {

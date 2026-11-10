@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/fleet"
 )
 
 // fleetStaleness bounds how long a circuit one replica opens can go unseen by
@@ -57,7 +57,7 @@ func (s *Server) RunFleetHealth(ctx context.Context) {
 	if !s.deps.Admission.ready() {
 		return
 	}
-	limiter := s.deps.Admission.limiter
+	limiter := s.deps.Admission.fleet
 	ticker := time.NewTicker(fleetPoll)
 	defer ticker.Stop()
 	s.pollFleet(ctx, limiter)
@@ -80,7 +80,7 @@ func (s *Server) RunFleetHealth(ctx context.Context) {
 
 // pollFleet replaces the fleet's circuits with the shared state. An
 // unreadable state forgets them: a stale mark would outlive its bound.
-func (s *Server) pollFleet(ctx context.Context, limiter *limits.Limiter) {
+func (s *Server) pollFleet(ctx context.Context, limiter *fleet.State) {
 	call, cancel := context.WithTimeout(ctx, reserveTimeout)
 	defer cancel()
 	open, err := limiter.Circuits(call, s.now())

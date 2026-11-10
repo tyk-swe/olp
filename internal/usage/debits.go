@@ -6,7 +6,7 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/debits"
 )
 
 func debitDispatchID(event *Event) (string, bool) {
@@ -29,10 +29,10 @@ func debitDispatchID(event *Event) (string, bool) {
 	return dispatchID, dispatchID != ""
 }
 
-func sessionDebitResult(dispatchID string, event *Event, payload []byte, cost, charge string, complete bool) limits.DebitResult {
+func sessionDebitResult(dispatchID string, event *Event, payload []byte, cost, charge string, complete bool) debits.Result {
 	resultDigest := sha256.Sum256([]byte("olp:debit-result:" + dispatchID + ":" + event.EventID))
 	evidenceDigest := sha256.Sum256(payload)
-	return limits.DebitResult{
+	return debits.Result{
 		DispatchID: dispatchID, ResultDigest: resultDigest[:], EvidenceDigest: evidenceDigest[:],
 		EventID: event.EventID, Cost: cost, Charge: charge, Final: true, Complete: complete,
 	}
@@ -40,37 +40,37 @@ func sessionDebitResult(dispatchID string, event *Event, payload []byte, cost, c
 
 func validateDebitEvent(ctx context.Context, tx pgx.Tx, event *Event, dispatchID string) (string, []string, error) {
 	var key, run, step, currency string
-	var affinity limits.ExecutionAffinity
+	var affinity debits.Affinity
 	if err := tx.QueryRow(ctx, `SELECT api_key_id::text,COALESCE(run_id::text,''),COALESCE(step_id::text,''),currency,affinity FROM olp.execution_debits WHERE id=$1 FOR UPDATE`, dispatchID).Scan(&key, &run, &step, &currency, &affinity); err != nil {
 		return "", nil, err
 	}
 	if event.APIKeyID != key || event.RuntimeGenerationID != affinity.ReleaseID || len(event.Attempts) == 0 {
-		return "", nil, limits.ErrDebitConflict
+		return "", nil, debits.ErrConflict
 	}
 	for _, attempt := range event.Attempts {
 		if attempt.Routing != nil && attempt.Routing.BudgetExempt {
-			return "", nil, limits.ErrDebitConflict
+			return "", nil, debits.ErrConflict
 		}
 		ref := attempt.Execution
 		if ref == nil || ref.Validate() != nil || ref.DispatchID != dispatchID || ref.RunID != run || ref.StepID != step || ref.TargetID != affinity.TargetID || ref.RouteRevisionID != affinity.RouteRevisionID {
-			return "", nil, limits.ErrDebitConflict
+			return "", nil, debits.ErrConflict
 		}
 		if affinity.ProviderID != "" && attempt.ProviderID != affinity.ProviderID {
-			return "", nil, limits.ErrDebitConflict
+			return "", nil, debits.ErrConflict
 		}
 		if affinity.ProviderRevisionID != "" && (attempt.Routing == nil || attempt.Routing.ProviderRevisionID != affinity.ProviderRevisionID) {
-			return "", nil, limits.ErrDebitConflict
+			return "", nil, debits.ErrConflict
 		}
 		if affinity.CredentialID != "" || affinity.SlotID != "" || affinity.PricingRevisionID != "" {
 			if attempt.Routing == nil {
-				return "", nil, limits.ErrDebitConflict
+				return "", nil, debits.ErrConflict
 			}
 			for _, pin := range []struct {
 				expected string
 				actual   *string
 			}{{affinity.CredentialID, attempt.Routing.CredentialVersionID}, {affinity.SlotID, attempt.Routing.CredentialSlotID}, {affinity.PricingRevisionID, attempt.Routing.PricingRevisionID}} {
 				if pin.expected != "" && (pin.actual == nil || *pin.actual != pin.expected) {
-					return "", nil, limits.ErrDebitConflict
+					return "", nil, debits.ErrConflict
 				}
 			}
 		}
@@ -99,7 +99,7 @@ func persistDebitEventTx(ctx context.Context, tx pgx.Tx, accepted AccountingEven
 	event, payload := accepted.event, accepted.payload
 	dispatchID, present := debitDispatchID(event)
 	if !present || dispatchID == "" {
-		return Persisted{}, limits.ErrDebitConflict
+		return Persisted{}, debits.ErrConflict
 	}
 	currency, supplyOwners, err := validateDebitEvent(ctx, tx, event, dispatchID)
 	if err != nil {
@@ -114,7 +114,7 @@ func persistDebitEventTx(ctx context.Context, tx pgx.Tx, accepted AccountingEven
 	}
 	if replayErr == nil {
 		retained := sessionDebitResult(dispatchID, event, payload, retainedCost, retainedCharge, retainedComplete)
-		if duplicate, err := limits.DebitResultReplayTx(ctx, tx, retained); err != nil {
+		if duplicate, err := debits.ResultReplayTx(ctx, tx, retained); err != nil {
 			return Persisted{}, err
 		} else if duplicate {
 			return Persisted{Outcome: PersistOutcomeDuplicate}, nil
@@ -140,7 +140,7 @@ func persistDebitEventTx(ctx context.Context, tx pgx.Tx, accepted AccountingEven
 		}
 	}
 	result := sessionDebitResult(dispatchID, event, payload, cost, charge, complete)
-	if err := limits.SettleDebitTx(ctx, tx, result, persisted.CostSnapshots); err != nil {
+	if err := debits.SettleTx(ctx, tx, result, persisted.CostSnapshots); err != nil {
 		return Persisted{}, err
 	}
 	return persisted, nil

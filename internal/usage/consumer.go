@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/coordination"
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/admission"
 )
 
 //go:embed scripts/*.lua
@@ -85,12 +85,12 @@ func defaultConsumerPolicy() consumerPolicy {
 // between replays the event and the receipt makes it a duplicate. The consumer
 // is never deleted on exit: its unacknowledged deliveries must stay reclaimable.
 func RunConsumer(ctx context.Context, pool *pgxpool.Pool, client *coordination.Client,
-	stream, consumer, region string, limiter *limits.Limiter, log *slog.Logger) error {
+	stream, consumer, region string, limiter *admission.Limiter, log *slog.Logger) error {
 	return runConsumer(ctx, pool, client, stream, consumer, region, limiter, log, defaultConsumerPolicy())
 }
 
 func RunConsumerWithReclaimIdle(ctx context.Context, pool *pgxpool.Pool, client *coordination.Client,
-	stream, consumer, region string, limiter *limits.Limiter, log *slog.Logger, reclaimIdle time.Duration) error {
+	stream, consumer, region string, limiter *admission.Limiter, log *slog.Logger, reclaimIdle time.Duration) error {
 	policy := defaultConsumerPolicy()
 	policy.reclaimIdle = reclaimIdle
 	return runConsumer(ctx, pool, client, stream, consumer, region, limiter, log, policy)
@@ -102,7 +102,7 @@ type consumerRun struct {
 	stream   string
 	consumer string
 	region   string
-	limiter  *limits.Limiter
+	limiter  *admission.Limiter
 	log      *slog.Logger
 	policy   consumerPolicy
 	// groupLost records that a stream command found no consumer group, which
@@ -111,7 +111,7 @@ type consumerRun struct {
 }
 
 func runConsumer(ctx context.Context, pool *pgxpool.Pool, client *coordination.Client,
-	stream, consumer, region string, limiter *limits.Limiter, log *slog.Logger, policy consumerPolicy) error {
+	stream, consumer, region string, limiter *admission.Limiter, log *slog.Logger, policy consumerPolicy) error {
 	if err := validateConsumerConfig(stream, consumer, policy); err != nil {
 		return err
 	}
@@ -447,11 +447,9 @@ func (r *consumerRun) settle(ctx context.Context, streamID string, result Persis
 		// Spend is already durable; the counters are a cache of it. A failure
 		// here is repaired by the reconciliation pass, so it never blocks the
 		// delivery from being acknowledged.
-		for _, snapshot := range result.CostSnapshots {
-			if _, _, err := r.limiter.ApplyCostSnapshot(ctx, snapshot); err != nil {
-				r.log.Warn("cost snapshot application failed; reconciliation will repair it",
-					"stream_id", streamID, "error", err)
-			}
+		if err := r.limiter.InstallSnapshots(ctx, result.CostSnapshots); err != nil {
+			r.log.Warn("cost snapshot application failed; reconciliation will repair it",
+				"stream_id", streamID, "error", err)
 		}
 	}
 	if err := r.acknowledge(ctx, streamID); err != nil {

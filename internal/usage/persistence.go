@@ -14,6 +14,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/ledger"
 )
 
 // PersistOutcome is what one delivery did to the accounting tables.
@@ -35,7 +36,7 @@ const (
 // that the caller pushes back into the distributed cost counters.
 type Persisted struct {
 	Outcome       PersistOutcome
-	CostSnapshots []limits.CostSnapshot
+	CostSnapshots []limits.Snapshot
 }
 
 // chargeStatus classifies what an attempt may be charged for.
@@ -272,7 +273,7 @@ func persistEventTx(ctx context.Context, tx pgx.Tx, accepted AccountingEvent, su
 	if !validated.HasAttempts {
 		// An authenticated request that failed before any provider attempt is
 		// worth remembering, but there is no usage to price or roll up.
-		snapshots, err := applyIdentityCostDelta(ctx, tx, ev, "0", 0, "0", 0)
+		snapshots, err := applyAttemptIdentityCostDelta(ctx, tx, ev, ledger.Delta{ObservedAt: ev.ObservedAt, Cost: "0", Charge: "0"}, nil)
 		if err != nil {
 			return Persisted{}, err
 		}
@@ -285,7 +286,7 @@ func persistEventTx(ctx context.Context, tx pgx.Tx, accepted AccountingEvent, su
 	if _, err = tx.Exec(ctx, insertAnchorSQL, ev.RequestID, ev.RequestStartedAt); err != nil {
 		return Persisted{}, fmt.Errorf("persist request metadata anchor: %w", err)
 	}
-	supply := map[string]limits.CostSnapshot{}
+	supply := map[string]limits.Snapshot{}
 	for _, attempt := range validated.Attempts {
 		charge, err := insertFact(ctx, tx, ev, attempt)
 		if err != nil {
@@ -508,7 +509,7 @@ type factCharge struct {
 // or durably recorded owner it was dispatched against, keeping
 // each owner's latest balance. The balances name the request, so installing
 // them also removes what the gateway reserved against those caps.
-func chargeSupply(ctx context.Context, tx pgx.Tx, ev *Event, attempt ValidatedAttempt, charge factCharge, balances map[string]limits.CostSnapshot, recordedOwners []string) error {
+func chargeSupply(ctx context.Context, tx pgx.Tx, ev *Event, attempt ValidatedAttempt, charge factCharge, balances map[string]limits.Snapshot, recordedOwners []string) error {
 	if (!charge.billable || attempt.Attempt.Routing == nil) && len(recordedOwners) == 0 {
 		return nil
 	}
@@ -527,12 +528,13 @@ func chargeSupply(ctx context.Context, tx pgx.Tx, ev *Event, attempt ValidatedAt
 	}
 	slices.Sort(owners)
 	for _, owner := range slices.Compact(owners) {
-		snapshot, err := limits.AddSupplyCostDelta(ctx, tx, owner, ev.ObservedAt, cost, unpriced)
+		snapshots, err := ledger.AddDelta(ctx, tx, limits.OwnerSupply, owner, ledger.Delta{ObservedAt: ev.ObservedAt, Cost: cost, Unpriced: unpriced, Charge: "0"})
 		if err != nil {
 			return fmt.Errorf("apply supply cost delta: %w", err)
 		}
-		snapshot.RequestID = ev.RequestID
-		balances[owner] = snapshot
+		for _, snapshot := range named(snapshots, ev.RequestID) {
+			balances[owner] = snapshot
+		}
 	}
 	return nil
 }
@@ -541,19 +543,19 @@ func chargeSupply(ctx context.Context, tx pgx.Tx, ev *Event, attempt ValidatedAt
 // returns the reconstructed snapshot for the distributed counters. Unpriced
 // billable attempts accrue no money but are counted, so an operator can see
 // that a budget is being consumed by spend nobody can price.
-func applyCostDelta(ctx context.Context, tx pgx.Tx, ev *Event) ([]limits.CostSnapshot, error) {
+func applyCostDelta(ctx context.Context, tx pgx.Tx, ev *Event) ([]limits.Snapshot, error) {
 	return applyAttemptCostDelta(ctx, tx, ev, nil)
 }
 
-func applyAttemptCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, attemptID *string) ([]limits.CostSnapshot, error) {
-	var facts, unpriced, uncharged int64
-	var cost, charge string
-	if err := tx.QueryRow(ctx, factTotalsSQL, ev.EventID, attemptID).Scan(&facts, &cost, &unpriced, &charge, &uncharged); err != nil {
+func applyAttemptCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, attemptID *string) ([]limits.Snapshot, error) {
+	var facts int64
+	delta := ledger.Delta{ObservedAt: ev.ObservedAt}
+	if err := tx.QueryRow(ctx, factTotalsSQL, ev.EventID, attemptID).Scan(&facts, &delta.Cost, &delta.Unpriced, &delta.Charge, &delta.Uncharged); err != nil {
 		return nil, fmt.Errorf("total attempt usage facts: %w", err)
 	}
 	// Keyless requests are the installation's own: they spend from no key's
 	// or group's budget.
-	endUsers, err := applyAttemptIdentityCostDelta(ctx, tx, ev, cost, unpriced, charge, uncharged, attemptID)
+	endUsers, err := applyAttemptIdentityCostDelta(ctx, tx, ev, delta, attemptID)
 	if err != nil {
 		return nil, err
 	}
@@ -561,11 +563,11 @@ func applyAttemptCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, attemptID 
 	if facts == 0 || ev.APIKeyID == "" {
 		return endUsers, nil
 	}
-	snapshot, err := limits.AddCostDelta(ctx, tx, ev.APIKeyID, ev.ObservedAt, cost, unpriced, charge, uncharged)
+	snapshot, err := ledger.AddDelta(ctx, tx, limits.OwnerKey, ev.APIKeyID, delta)
 	if err != nil {
 		return nil, fmt.Errorf("apply request metadata cost delta: %w", err)
 	}
-	agent, err := applyAgentCostDelta(ctx, tx, ev, cost, unpriced, charge, uncharged)
+	agent, err := applyAgentCostDelta(ctx, tx, ev, delta)
 	if err != nil {
 		return nil, err
 	}
@@ -573,29 +575,22 @@ func applyAttemptCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, attemptID 
 	// the distributed counters also removes the cost the gateway reserved for the
 	// request when it was admitted. The reservation can sit under either basis,
 	// so both snapshots carry the identifier.
-	keySnapshots := slices.Concat(snapshot, agent)
-	for i := range keySnapshots {
-		keySnapshots[i].RequestID = ev.RequestID
+	snapshots := slices.Concat(named(slices.Concat(snapshot, agent), ev.RequestID), endUsers)
+	if ev.BudgetGroupID == nil {
+		return snapshots, nil
 	}
-	snapshots := append(keySnapshots, endUsers...)
-	if ev.BudgetGroupID != nil {
-		group, err := limits.AddGroupCostDelta(ctx, tx, *ev.BudgetGroupID, ev.ObservedAt, cost, unpriced, charge, uncharged)
-		if err != nil {
-			return nil, fmt.Errorf("apply request metadata group cost delta: %w", err)
-		}
-		for i := range group {
-			group[i].RequestID = ev.RequestID
-		}
-		snapshots = append(snapshots, group...)
+	group, err := ledger.AddDelta(ctx, tx, limits.OwnerGroup, *ev.BudgetGroupID, delta)
+	if err != nil {
+		return nil, fmt.Errorf("apply request metadata group cost delta: %w", err)
 	}
-	return snapshots, nil
+	return append(snapshots, named(group, ev.RequestID)...), nil
 }
 
-func applyAgentCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, cost string, unpriced int64, charge string, uncharged int64) ([]limits.CostSnapshot, error) {
+func applyAgentCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, delta ledger.Delta) ([]limits.Snapshot, error) {
 	if ev.AgentPrincipalID == "" {
 		return nil, nil
 	}
-	snapshots, err := limits.AddCostDelta(ctx, tx, ev.AgentPrincipalID, ev.ObservedAt, cost, unpriced, charge, uncharged)
+	snapshots, err := ledger.AddDelta(ctx, tx, limits.OwnerKey, ev.AgentPrincipalID, delta)
 	if err != nil {
 		return nil, fmt.Errorf("apply agent cost delta: %w", err)
 	}
@@ -604,44 +599,39 @@ func applyAgentCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, cost string,
 
 // A refusal before dispatch still establishes the durable current-window
 // balance. It must not assume zero when this identity already has usage.
-func applyEndUserCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, cost string, unpriced int64, charge string, uncharged int64) ([]limits.CostSnapshot, error) {
+func applyEndUserCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, delta ledger.Delta) ([]limits.Snapshot, error) {
 	if ev.EndUserDigest == "" || ev.APIKeyID == "" {
 		return nil, nil
 	}
-	snapshots, err := limits.AddEndUserCostDelta(ctx, tx, ev.APIKeyID, ev.EndUserDigest, ev.ObservedAt, cost, unpriced, charge, uncharged)
+	snapshots, err := ledger.AddEndUserDelta(ctx, tx, ev.APIKeyID, ev.EndUserDigest, delta)
 	if err != nil {
 		return nil, fmt.Errorf("apply end-user cost delta: %w", err)
 	}
-	for i := range snapshots {
-		snapshots[i].RequestID = ev.RequestID
-	}
-	return snapshots, nil
+	return named(snapshots, ev.RequestID), nil
 }
 
-func applyIdentityCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, cost string, unpriced int64, charge string, uncharged int64) ([]limits.CostSnapshot, error) {
-	return applyAttemptIdentityCostDelta(ctx, tx, ev, cost, unpriced, charge, uncharged, nil)
-}
-
-func applyAttemptIdentityCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, cost string, unpriced int64, charge string, uncharged int64, attemptID *string) ([]limits.CostSnapshot, error) {
-	snapshots, err := applyEndUserCostDelta(ctx, tx, ev, cost, unpriced, charge, uncharged)
+func applyAttemptIdentityCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, delta ledger.Delta, attemptID *string) ([]limits.Snapshot, error) {
+	snapshots, err := applyEndUserCostDelta(ctx, tx, ev, delta)
 	if err != nil {
 		return nil, err
 	}
-	aggregates, err := aggregateCostDelta(ctx, tx, ev, attemptID)
+	aggregates, err := ledger.AddAggregateDeltas(ctx, tx, ledger.AggregateEvent{
+		EventID: ev.EventID, AttemptID: attemptID, KeyID: ev.APIKeyID, ProviderID: ev.ProviderID,
+		Route: ev.RouteSlug, Labels: ev.Attribution, At: ev.ObservedAt,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("apply aggregate cost delta: %w", err)
 	}
-	for i := range aggregates {
-		aggregates[i].RequestID = ev.RequestID
-	}
-	return append(snapshots, aggregates...), nil
+	return append(snapshots, named(aggregates, ev.RequestID)...), nil
 }
 
-func aggregateCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, attemptID *string) ([]limits.CostSnapshot, error) {
-	if attemptID != nil {
-		return limits.AddAggregateAttemptCostDelta(ctx, tx, ev.EventID, ev.APIKeyID, ev.ProviderID, ev.RouteSlug, ev.Attribution, ev.ObservedAt, *attemptID)
+func named(snapshots []limits.Snapshot, requestID string) []limits.Snapshot {
+	out := make([]limits.Snapshot, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		snapshot.RequestID = requestID
+		out = append(out, snapshot)
 	}
-	return limits.AddAggregateCostDelta(ctx, tx, ev.EventID, ev.APIKeyID, ev.ProviderID, ev.RouteSlug, ev.Attribution, ev.ObservedAt)
+	return out
 }
 
 func guardrailJSON(v any) string {

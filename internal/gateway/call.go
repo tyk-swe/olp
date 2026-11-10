@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/export/capture"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -28,7 +29,7 @@ type call struct {
 	prompt               *usage.PromptReference
 	currentCommitments   *routing.View
 	cache                *responseCacheCall
-	cacheRateLease       *limits.Lease
+	cacheRateLease       *admission.Lease
 	sessionDebit         *sessionDebit
 	workflow             *workflowCall
 	evaluatorGuardrailID string
@@ -118,10 +119,10 @@ type call struct {
 	once              sync.Once
 	facts             []AttemptFact
 	exchange          *pinnedExchange
-	failure           *Error         // terminal error decided before the attempt loop ran
-	firstByte         *time.Duration // request start to the first payload byte the client received
-	lease             *limits.Lease  // the API key reservation, settled once the request ends
-	dispatched        bool           // at least one attempt was handed to a provider
+	failure           *Error           // terminal error decided before the attempt loop ran
+	firstByte         *time.Duration   // request start to the first payload byte the client received
+	lease             *admission.Lease // the API key reservation, settled once the request ends
+	dispatched        bool             // at least one attempt was handed to a provider
 	stepDispatched    bool
 	guardrailMetadata bool
 	responseMetadata  bool

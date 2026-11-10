@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/tyk-swe/olp/internal/codesessions"
 	"net/http"
 	"reflect"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/codesessions"
 
 	"github.com/coder/websocket"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
@@ -15,7 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
 	"github.com/tyk-swe/olp/internal/codexwire"
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/release"
 
 	"github.com/tyk-swe/olp/internal/routing"
@@ -32,8 +33,8 @@ type codeAttempt struct {
 	permit             codesessions.Permit
 	config             routing.Configuration
 	auth               codemode.Authorization
-	lease              *limits.Lease
-	providerLease      *limits.Lease
+	lease              *admission.Lease
+	providerLease      *admission.Lease
 	observer           codewire.Observer
 	endpoint           codeadapter.Endpoint
 	dispatched         bool

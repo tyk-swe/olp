@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/secretstore"
@@ -350,7 +351,7 @@ const quotaTimeout = 2 * time.Second
 
 // quotaUsage renders one shared usage snapshot as the management contract's
 // ProviderQuotaUsage.
-func quotaUsage(u limits.Usage) map[string]any {
+func quotaUsage(u fleet.Usage) map[string]any {
 	return map[string]any{"requests_this_minute": u.RequestsThisMinute, "tokens_this_minute": u.TokensThisMinute, "concurrent_requests": u.ConcurrentRequests}
 }
 
@@ -365,7 +366,7 @@ func (s *Server) quotas(ctx context.Context, providerID string, slots []slotRow,
 	}
 	ctx, cancel := context.WithTimeout(ctx, quotaTimeout)
 	defer cancel()
-	connection, err := s.Quotas.ProviderUsage(ctx, limits.ConnectionLookup(providerID))
+	connection, err := s.Quotas.Usage(ctx, limits.ConnectionLookup(providerID))
 	if err != nil {
 		s.quotaUnavailable(err)
 		return nil
@@ -375,7 +376,7 @@ func (s *Server) quotas(ctx context.Context, providerID string, slots []slotRow,
 		if !ok {
 			continue
 		}
-		usage, err := s.Quotas.ProviderUsage(ctx, limits.SlotLookup(row.ID))
+		usage, err := s.Quotas.Usage(ctx, limits.SlotLookup(row.ID))
 		if err != nil {
 			s.quotaUnavailable(err)
 			break
@@ -387,7 +388,7 @@ func (s *Server) quotas(ctx context.Context, providerID string, slots []slotRow,
 		if id := published[row.ID]; id != nil {
 			generation = generations[*id]
 		}
-		cooling, err := s.Quotas.Cooling(ctx, limits.CredentialScope(providerID, published[row.ID], generation), limits.SlotScope(row.ID))
+		cooling, err := s.Quotas.Cooling(ctx, fleet.CredentialScope(providerID, published[row.ID], generation), fleet.SlotScope(row.ID))
 		if err != nil {
 			s.quotaUnavailable(err)
 			break

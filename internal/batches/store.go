@@ -315,7 +315,7 @@ const (
 	recordedConflict
 )
 
-func recordResultTx(ctx context.Context, tx pgx.Tx, settlement Settlement, digest []byte, result Result, now time.Time) (recordOutcome, []limits.CostSnapshot, error) {
+func recordResultTx(ctx context.Context, tx pgx.Tx, settlement Settlement, digest []byte, result Result, now time.Time) (recordOutcome, []limits.Snapshot, error) {
 	evidence := EvidenceDigest(result.Evidence)
 	var existing []byte
 	err := tx.QueryRow(ctx, `SELECT evidence_digest FROM olp.batch_settlement_results
@@ -367,7 +367,7 @@ func recordResultTx(ctx context.Context, tx pgx.Tx, settlement Settlement, diges
 	return recordedNew, persisted.CostSnapshots, nil
 }
 
-func (s *Store) CommitPage(ctx context.Context, settlement Settlement, results []PageResult, cursor Cursor, now time.Time) ([]limits.CostSnapshot, error) {
+func (s *Store) CommitPage(ctx context.Context, settlement Settlement, results []PageResult, cursor Cursor, now time.Time) ([]limits.Snapshot, error) {
 	if len(results) > PageSize {
 		return nil, errors.New("batch settlement page is too large")
 	}
@@ -380,7 +380,7 @@ func (s *Store) CommitPage(ctx context.Context, settlement Settlement, results [
 		return nil, fmt.Errorf("begin batch result page: %w", err)
 	}
 	defer tx.Rollback(ctx)
-	var snapshots []limits.CostSnapshot
+	var snapshots []limits.Snapshot
 	var settled int64
 	state := settlement.State
 	for _, page := range results {
@@ -457,7 +457,7 @@ func (s *Store) Finish(ctx context.Context, settlement Settlement, state State, 
 	return nil
 }
 
-func (s *Store) Close(ctx context.Context, settlement Settlement, closing Closing, now time.Time) ([]limits.CostSnapshot, error) {
+func (s *Store) Close(ctx context.Context, settlement Settlement, closing Closing, now time.Time) ([]limits.Snapshot, error) {
 	if closing.State != StateSettled && closing.State != StateUncertain {
 		return nil, errors.New("batch settlements close as settled or uncertain")
 	}
@@ -497,7 +497,7 @@ func (s *Store) Close(ctx context.Context, settlement Settlement, closing Closin
 	return snapshots, nil
 }
 
-func recordGapTx(ctx context.Context, tx pgx.Tx, settlement Settlement, closing Closing, now time.Time) ([]limits.CostSnapshot, int64, error) {
+func recordGapTx(ctx context.Context, tx pgx.Tx, settlement Settlement, closing Closing, now time.Time) ([]limits.Snapshot, int64, error) {
 	if closing.Gap <= 0 {
 		return nil, 0, nil
 	}

@@ -12,11 +12,11 @@ import (
 )
 
 type workflowDebitSettler interface {
-	SettleWorkflow(context.Context, *usage.Event, int) ([]limits.CostSnapshot, error)
+	SettleWorkflow(context.Context, *usage.Event, int) ([]limits.Snapshot, error)
 }
 
-func (d durableSessionDebits) SettleWorkflow(ctx context.Context, event *usage.Event, attempt int) ([]limits.CostSnapshot, error) {
-	return usage.PersistWorkflowAttempt(ctx, d.store.Pool, event, attempt)
+func (d durableSessionDebits) SettleWorkflow(ctx context.Context, event *usage.Event, attempt int) ([]limits.Snapshot, error) {
+	return usage.PersistWorkflowAttempt(ctx, d.pool, event, attempt)
 }
 
 func accountingEventID(e Envelope) (uuid.UUID, error) {
@@ -75,10 +75,8 @@ func (s *Server) settleWorkflowModelAttempt(ctx context.Context, x *call, fact A
 	defer cancel()
 	snapshots, settleErr := settler.SettleWorkflow(settleCtx, event, len(event.Attempts)-1)
 	if s.deps.Admission != nil && s.deps.Admission.limiter != nil {
-		for _, snapshot := range snapshots {
-			if _, _, err := s.deps.Admission.limiter.ApplyCostSnapshot(settleCtx, snapshot); err != nil {
-				return s.workflowSettlementFailure(ctx, x, err)
-			}
+		if err := s.deps.Admission.limiter.InstallSnapshots(settleCtx, snapshots); err != nil {
+			return s.workflowSettlementFailure(ctx, x, err)
 		}
 	}
 	if settleErr != nil {

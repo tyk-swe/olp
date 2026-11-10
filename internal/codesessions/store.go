@@ -16,7 +16,6 @@ import (
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -323,7 +322,7 @@ func (s *Store) admit(ctx context.Context, admission Admission, connection bool)
 	if err = recordCodeDecision(ctx, tx, in, out.Binding, &out.Attempt.ID, decisionSelection, decisionReason); err != nil {
 		return out, err
 	}
-	if err = limits.ReserveCodeTokens(ctx, tx, out.Attempt, in.Bound); err != nil {
+	if err = reserveCodeTokens(ctx, tx, out.Attempt, in.Bound); err != nil {
 		return out, err
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -745,7 +744,7 @@ func (s *Store) finish(ctx context.Context, id string, u codemode.Usage, abort b
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if err = limits.SettleCodeTokens(ctx, tx, id, u, abort); err != nil {
+	if err = settleCodeTokens(ctx, tx, id, u, abort); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

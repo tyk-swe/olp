@@ -1,4 +1,4 @@
-package limits
+package codesessions
 
 import (
 	"context"
@@ -10,9 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 )
 
-// ReserveCodeTokens participates in the pin/admission transaction. The caller
-// holds the installation row FOR SHARE, excluding budget configuration writes.
-func ReserveCodeTokens(ctx context.Context, tx pgx.Tx, attempt codemode.Attempt, bound *codemode.TokenBound) error {
+func reserveCodeTokens(ctx context.Context, tx pgx.Tx, attempt codemode.Attempt, bound *codemode.TokenBound) error {
 	rows, err := tx.Query(ctx, `SELECT id::text,daily_tokens,monthly_tokens,route_id::text,api_key_id::text FROM olp.code_token_budgets
 		WHERE enabled AND project_id=$1 AND (route_id IS NULL OR route_id=$2) AND (api_key_id IS NULL OR api_key_id=$3)
 		ORDER BY id FOR UPDATE`, attempt.ProjectID, attempt.RouteID, attempt.APIKeyID)
@@ -86,9 +84,7 @@ func ReserveCodeTokens(ctx context.Context, tx pgx.Tx, attempt codemode.Attempt,
 	return nil
 }
 
-// SettleCodeTokens keeps missing usage reserved indefinitely. The attempt row
-// and all charged windows change in the same transaction, once.
-func SettleCodeTokens(ctx context.Context, tx pgx.Tx, id string, usage codemode.Usage, abort bool) error {
+func settleCodeTokens(ctx context.Context, tx pgx.Tx, id string, usage codemode.Usage, abort bool) error {
 	if err := usage.Validate(); err != nil {
 		return err
 	}

@@ -524,7 +524,7 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 				if x.lease == nil {
 					x.lease = lease
 				} else {
-					x.lease.Attach(lease)
+					x.lease.Join(lease)
 				}
 			}
 			admitted[entry.route.Slug] = true

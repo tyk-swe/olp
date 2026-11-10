@@ -12,7 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/attribution"
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -217,7 +217,7 @@ func (m *Manager) authenticateDelegation(ctx context.Context, token, assertion s
 		}
 	}
 	pairDigest, member := m.delegationPair(project, key.ID, agent.ID, memberID)
-	if err := limits.EnsureAttributionBudget(ctx, tx, project, attribution.DelegationPairKey, pairDigest); err != nil {
+	if err := ledger.EnsureAttributionBudget(ctx, tx, project, attribution.DelegationPairKey, pairDigest); err != nil {
 		return nil, ErrStaleAuthority
 	}
 	if err := tx.Commit(ctx); err != nil {

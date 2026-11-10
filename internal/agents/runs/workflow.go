@@ -7,24 +7,24 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 type WorkflowStore struct {
 	pool         *pgxpool.Pool
 	auth         *secrets.AuthKey
-	debits       *limits.DebitStore
 	keys         *secrets.KeyRing
 	installation string
 }
 
-func NewWorkflowStore(pool *pgxpool.Pool, auth *secrets.AuthKey, debits *limits.DebitStore, keys *secrets.KeyRing, installation string) *WorkflowStore {
-	return &WorkflowStore{pool: pool, auth: auth, debits: debits, keys: keys, installation: installation}
+func NewWorkflowStore(pool *pgxpool.Pool, auth *secrets.AuthKey, keys *secrets.KeyRing, installation string) *WorkflowStore {
+	return &WorkflowStore{pool: pool, auth: auth, keys: keys, installation: installation}
 }
 
 func (s *WorkflowStore) Start(ctx context.Context, authority keyauthority.Authority, routeID, revisionID string) (string, error) {
 	if s == nil || s.pool == nil || s.auth == nil || authority.ProjectID == nil || !validApprovalID(routeID) || !validApprovalID(revisionID) {
-		return "", limits.ErrDebitAuthority
+		return "", debits.ErrAuthority
 	}
 	id, err := uuid.NewV7()
 	if err != nil {
@@ -36,21 +36,21 @@ func (s *WorkflowStore) Start(ctx context.Context, authority keyauthority.Author
 		return "", err
 	}
 	if tag.RowsAffected() != 1 {
-		return "", limits.ErrDebitAuthority
+		return "", debits.ErrAuthority
 	}
 	return id.String(), nil
 }
 
-func (s *WorkflowStore) Prepare(ctx context.Context, authority keyauthority.Authority, intent limits.DebitIntent, ordinal int, owners []limits.DebitOwner) (limits.DebitState, error) {
-	if s == nil || s.pool == nil || s.debits == nil {
-		return "", limits.ErrDebitAuthority
+func (s *WorkflowStore) Prepare(ctx context.Context, authority keyauthority.Authority, intent debits.Intent, ordinal int, owners []limits.Owner) (debits.State, error) {
+	if s == nil || s.pool == nil {
+		return "", debits.ErrAuthority
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return "", err
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx))
-	state, err := PrepareStepTx(ctx, tx, s.debits, authority, intent, ordinal, owners)
+	state, err := PrepareStepTx(ctx, tx, authority, intent, ordinal, owners)
 	if err != nil {
 		return "", err
 	}

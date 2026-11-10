@@ -1,4 +1,4 @@
-package limits
+package admission
 
 import (
 	"context"
@@ -7,21 +7,13 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// OutagePolicy decides what happens to a request when Valkey cannot answer.
 type OutagePolicy int
 
-// The policies an operator can choose. FailClosed is the zero value, so a
-// policy that was never loaded rejects rather than admits.
 const (
-	// FailClosed rejects the request: no replica can tell whether the budget
-	// still has room.
 	FailClosed OutagePolicy = iota
-	// FailOpen admits the request. It only applies to rate and concurrency
-	// limits; spending is never admitted against an unknown balance.
 	FailOpen
 )
 
-// String names the policy as it is stored and displayed.
 func (p OutagePolicy) String() string {
 	if p == FailOpen {
 		return "fail_open"
@@ -29,12 +21,8 @@ func (p OutagePolicy) String() string {
 	return "fail_closed"
 }
 
-// outagePolicySetting is the settings key an operator changes.
 const outagePolicySetting = "limits.valkey_unavailable"
 
-// LoadOutagePolicy reads the configured policy. An unreadable or unrecognised
-// value is an error rather than a default, so a caller keeps the policy it
-// already had instead of silently widening admission.
 func LoadOutagePolicy(ctx context.Context, q interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }) (OutagePolicy, error) {

@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -43,7 +43,7 @@ func Publish(ctx context.Context, tx pgx.Tx, actor string) (Published, error) {
 	if err = snapshot.Compile(); err != nil {
 		return Published{}, fmt.Errorf("release rejected: %w", err)
 	}
-	if err = limits.ReplaceSupplyBudgets(ctx, tx, supplyBudgets(snapshot)); err != nil {
+	if err = ledger.ReplaceSupplyBudgets(ctx, tx, supplyBudgets(snapshot)); err != nil {
 		return Published{}, err
 	}
 	digest, err := snapshot.Digest()

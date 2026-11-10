@@ -20,6 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/secrets"
 	collector "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
@@ -35,7 +36,7 @@ const traceAttributeLimit = 32
 
 type TraceDeps struct {
 	Pool    *pgxpool.Pool
-	Limiter *limits.Limiter
+	Limiter *admission.Limiter
 	Auth    *secrets.AuthKey
 }
 
@@ -176,10 +177,10 @@ func readTraceBytes(reader io.Reader) ([]byte, int) {
 	return body, 0
 }
 
-func (d *TraceDeps) reserve(ctx context.Context, authority keyauthority.Authority) ([]*limits.Lease, error) {
+func (d *TraceDeps) reserve(ctx context.Context, authority keyauthority.Authority) ([]*admission.Lease, error) {
 	limit := int64(60)
 	hash := sha256.Sum256([]byte(authority.ID))
-	traceLease, err := d.Limiter.Reserve(ctx, limits.Request{CostOwnerID: authority.ID, LookupID: "tr_" + hex.EncodeToString(hash[:16]), RequestsPerMinute: &limit, LeaseTTL: time.Minute})
+	traceLease, err := d.Limiter.Reserve(ctx, rateRequest("tr_"+hex.EncodeToString(hash[:16]), &limit, nil))
 	if err != nil {
 		return nil, err
 	}
@@ -194,24 +195,28 @@ func (d *TraceDeps) reserve(ctx context.Context, authority keyauthority.Authorit
 		_ = traceLease.Refund(ctx)
 		return nil, err
 	}
-	return []*limits.Lease{traceLease, keyLease, groupLease}, nil
+	return []*admission.Lease{traceLease, keyLease, groupLease}, nil
 }
 
-func (d *TraceDeps) reserveTraceKey(ctx context.Context, authority keyauthority.Authority) (*limits.Lease, error) {
+func (d *TraceDeps) reserveTraceKey(ctx context.Context, authority keyauthority.Authority) (*admission.Lease, error) {
 	if authority.Policy.RequestsPerMinute == nil && authority.Policy.MaxConcurrency == nil {
 		return nil, nil
 	}
-	return d.Limiter.Reserve(ctx, limits.Request{CostOwnerID: authority.ID, LookupID: authority.LimitsLookup(), RequestsPerMinute: authority.Policy.RequestsPerMinute, MaxConcurrency: authority.Policy.MaxConcurrency, LeaseTTL: time.Minute})
+	return d.Limiter.Reserve(ctx, rateRequest(authority.LimitsLookup(), authority.Policy.RequestsPerMinute, authority.Policy.MaxConcurrency))
 }
 
-func (d *TraceDeps) reserveTraceGroup(ctx context.Context, authority keyauthority.Authority) (*limits.Lease, error) {
+func (d *TraceDeps) reserveTraceGroup(ctx context.Context, authority keyauthority.Authority) (*admission.Lease, error) {
 	if authority.BudgetGroupID == nil || authority.BudgetGroupRPM == nil && authority.BudgetGroupConcurrency == nil {
 		return nil, nil
 	}
-	return d.Limiter.Reserve(ctx, limits.Request{CostOwnerID: *authority.BudgetGroupID, LookupID: limits.BudgetGroupLookup(*authority.BudgetGroupID), RequestsPerMinute: authority.BudgetGroupRPM, MaxConcurrency: authority.BudgetGroupConcurrency, LeaseTTL: time.Minute})
+	return d.Limiter.Reserve(ctx, rateRequest(limits.BudgetGroupLookup(*authority.BudgetGroupID), authority.BudgetGroupRPM, authority.BudgetGroupConcurrency))
 }
 
-func releaseTraceLeases(ctx context.Context, leases []*limits.Lease) {
+func rateRequest(lookup string, requests, concurrency *int64) admission.Request {
+	return admission.Request{Lookup: lookup, LeaseTTL: time.Minute, Rate: admission.RateLimits{RequestsPerMinute: requests, MaxConcurrency: concurrency}}
+}
+
+func releaseTraceLeases(ctx context.Context, leases []*admission.Lease) {
 	for _, lease := range leases {
 		_ = lease.Release(ctx)
 	}

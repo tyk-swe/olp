@@ -2,13 +2,14 @@ package main
 
 import (
 	"context"
+	"log/slog"
+	"sync"
+	"time"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/notifications"
 	"github.com/tyk-swe/olp/internal/observability/workerhealth"
-	"log/slog"
-	"sync"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -24,7 +25,10 @@ import (
 	"github.com/tyk-swe/olp/internal/export/focus"
 	"github.com/tyk-swe/olp/internal/export/stream"
 	"github.com/tyk-swe/olp/internal/grants"
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/admission"
+	"github.com/tyk-swe/olp/internal/limits/debits"
+	"github.com/tyk-swe/olp/internal/limits/fleet"
+	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/providers"
@@ -49,8 +53,14 @@ import (
 // returned function waits for all of them to have stopped.
 // vk is the consumer's own Valkey client: its blocking stream reads would
 // otherwise stall every command the gateway sends on a shared connection.
-func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Client, limiter *limits.Limiter, stream string, mediaService *media.Service, pluginHost *plugins.Host, keys *secrets.KeyRing, auth *secrets.AuthKey, installation, region, hostname string, policy *egress.Policy, log *slog.Logger, exporter *stream.Worker, focusWorker *focus.Worker, importer *billing.Importer, reference *catalog.Signed) func() {
+func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Client, store *debits.Store, shared *sharedLimits, stream string, mediaService *media.Service, pluginHost *plugins.Host, keys *secrets.KeyRing, auth *secrets.AuthKey, installation, region, hostname string, policy *egress.Policy, log *slog.Logger, exporter *stream.Worker, focusWorker *focus.Worker, importer *billing.Importer, reference *catalog.Signed) func() {
 	var wg sync.WaitGroup
+	var limiter *admission.Limiter
+	var syncer *debits.Syncer
+	var fleetState *fleet.State
+	if shared != nil {
+		limiter, syncer, fleetState = shared.Limiter, shared.Syncer, shared.Fleet
+	}
 	managedExporter := &sinks.Worker{Pool: pool, Keys: keys, Installation: installation, Egress: policy}
 	wg.Go(func() { managedExporter.Run(ctx, log) })
 	wg.Go(func() { mediaService.RunReconciler(ctx) })
@@ -86,12 +96,12 @@ func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Clie
 	wg.Go(func() {
 		notifications.RunDelivery(ctx, notifications.DeliveryConfig{
 			Pool: pool, Keys: keys, Installation: installation, Log: log,
-			Sender: notifications.NewSender(*policy), Limiter: limiter, Catalog: reference,
+			Sender: notifications.NewSender(*policy), Fleet: fleetState, Catalog: reference,
 			NewID: access.NewID, Now: time.Now,
 		})
 	})
-	wg.Go(func() { runDebitReconciliation(ctx, pool, limiter, log) })
-	wg.Go(func() { recoverWorkflowModels(ctx, &limits.DebitStore{Pool: pool, Limiter: limiter}, log) })
+	wg.Go(func() { runDebitReconciliation(ctx, pool, store, syncer, log) })
+	wg.Go(func() { recoverWorkflowModels(ctx, store, log) })
 	wg.Go(func() { runMaintenance(ctx, pool, log) })
 	if limiter == nil {
 		return wg.Wait
@@ -105,8 +115,8 @@ func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Clie
 	})
 	wg.Go(func() { usage.RunEpochDetection(ctx, pool, log) })
 	wg.Go(func() {
-		connect := func(context.Context) (*limits.Limiter, error) { return limiter, nil }
-		limits.RunRegionalCostReconciliation(ctx, pool, region, connect, costCheckpoint(pool, region), log)
+		connect := func(context.Context) (ledger.Installer, error) { return limiter, nil }
+		ledger.Worker{Pool: pool, Region: region, Connect: connect, Checkpoint: costCheckpoint(pool, region), Log: log}.Run(ctx)
 	})
 	return wg.Wait
 }
@@ -129,13 +139,13 @@ func probeCheckpoint(pool *pgxpool.Pool, log *slog.Logger, region string) func(c
 // costCheckpoint records how one cost reconciliation pass ended in the shared
 // worker health table. The limiter and the metadata plane keep their own
 // outcome vocabularies, so the two are translated here rather than aliased.
-func costCheckpoint(pool *pgxpool.Pool, region string) func(context.Context, limits.Outcome, bool) error {
-	return func(ctx context.Context, outcome limits.Outcome, progress bool) error {
+func costCheckpoint(pool *pgxpool.Pool, region string) func(context.Context, ledger.Outcome, bool) error {
+	return func(ctx context.Context, outcome ledger.Outcome, progress bool) error {
 		recorded := workerhealth.OutcomeSuccess
 		switch outcome {
-		case limits.OutcomeFailure:
+		case ledger.OutcomeFailure:
 			recorded = workerhealth.OutcomeFailure
-		case limits.OutcomeSkipped:
+		case ledger.OutcomeSkipped:
 			recorded = workerhealth.OutcomeSkipped
 		}
 		return workerhealth.New(workerhealth.TaskCostReconciliation, region).Checkpoint(ctx, pool, recorded, progress)

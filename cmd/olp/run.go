@@ -40,7 +40,8 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/grants/personal"
 	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/limits"
+	limitadmission "github.com/tyk-swe/olp/internal/limits/admission"
+	limitdebits "github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/mcp/registration"
@@ -184,7 +185,9 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 	// traffic, because both the gateway and the console are told at
 	// composition time whether this installation has a limiter at all.
 	prefix := database.ValkeyNamespace(installation)
-	var limiter *limits.Limiter
+	debitStore := limitdebits.NewStore(pool)
+	var shared *sharedLimits
+	var limiter *limitadmission.Limiter
 	var outage *outagePolicy
 	if openValkey != nil {
 		vk, err = openValkey(startup)
@@ -192,10 +195,10 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			return err
 		}
 		defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "Valkey", func(context.Context) error { vk.Close(); return nil })
-		if limiter, err = limits.New(vk, prefix+"limits"); err != nil {
+		if shared, err = newSharedLimits(vk, prefix+"limits", debitStore); err != nil {
 			return err
 		}
-		limiter.UseDurableDebits(pool)
+		limiter = shared.Limiter
 		if c.Mode.Inference() {
 			if outage, err = newOutagePolicy(startup, pool, log); err != nil {
 				return err
@@ -318,12 +321,12 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			gatewayDeps.Cache = responseCache
 			gatewayDeps.Business = business
 			if limiter != nil {
-				var policy func() limits.OutagePolicy
+				var policy func() limitadmission.OutagePolicy
 				if outage != nil {
 					policy = outage.Policy
 				}
 				// Control-only processes also execute playground requests.
-				gatewayDeps.Admission = gateway.NewAdmission(limiter, policy, log)
+				gatewayDeps.Admission = gateway.NewAdmission(limiter, shared.Fleet, policy, log)
 			}
 		}
 		if limiter != nil && (c.Mode == Worker || c.Mode == All) {
@@ -339,7 +342,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 				UnconfinedPlugins: unconfined != nil,
 			}
 			probeDeps.Business = business
-			probeDeps.Admission = gateway.NewAdmission(limiter, nil, log)
+			probeDeps.Admission = gateway.NewAdmission(limiter, shared.Fleet, nil, log)
 		}
 		if c.Mode.Management() || c.Mode.Inference() || c.Mode == Worker {
 			spoolDir := c.MediaSpoolDir
@@ -380,7 +383,11 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 				gatewayDeps.Resolver = resources.NewResolver(pool)
 			}
 			grantStore := personal.NewStore(pool, installation, auth, keys, &policy)
-			agentTasks := tasks.New(pool, &limits.DebitStore{Pool: pool, Limiter: limiter}, auth)
+			taskLimits := tasks.Limits{Debits: debitStore}
+			if shared != nil {
+				taskLimits = tasks.Limits{Debits: debitStore, Syncer: shared.Syncer, Limiter: limiter}
+			}
+			agentTasks := tasks.New(pool, taskLimits, auth)
 			agentPeers := a2a.NewPeers(&policy, func(ctx context.Context, id string) ([]byte, error) {
 				return keys.Read(ctx, pool, installation, id, secrets.AgentCredential)
 			})
@@ -390,7 +397,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			agentMonitor = agents.NewMonitor(agentTasks, agents.NewTaskOperations(agentTasks, agentPeers, grantStore), rt, log)
 			var toolLedger accounting.Ledger
 			if limiter != nil {
-				toolLedger = accounting.NewDurableLedger(pool, &limits.DebitStore{Pool: pool, Limiter: limiter}, auth)
+				toolLedger = accounting.NewDurableLedger(pool, debitStore, shared.Syncer, auth)
 			}
 			var sessionStore *sessions.Store
 			if vk != nil {
@@ -417,7 +424,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			})
 			toolServer := mcp.New(mcp.ServerOptions{Runtime: rt, Executor: toolExecutor, Auth: auth, Grants: grantStore, Sessions: sessionStore, TrustedProxies: c.TrustedProxyCIDRs})
 			if limiter != nil {
-				gatewayDeps.WorkflowRuns = runs.NewWorkflowStore(pool, auth, &limits.DebitStore{Pool: pool, Limiter: limiter}, keys, installation)
+				gatewayDeps.WorkflowRuns = runs.NewWorkflowStore(pool, auth, keys, installation)
 				gatewayDeps.WorkflowTools = toolServer
 			}
 			toolServer.Register(public)
@@ -433,9 +440,8 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 				if server.Admission == nil {
 					continue
 				}
-				debits := &limits.DebitStore{Pool: pool, Limiter: limiter}
-				server.Debits = gateway.DurableSessionDebits(debits)
-				server.Admission.PendingCostAccountingReady = debits.CheckOwnerAccounting
+				server.Debits = gateway.DurableSessionDebits(pool, debitStore, shared.Syncer)
+				server.Admission.PendingCostAccountingReady = shared.Syncer.CheckOwnerAccounting
 				server.Admission.PendingTokenAccountingReady = resources.New(pool).CheckPendingTokenOwner
 				server.Admission.CostAccountingReady = func(ctx context.Context) error {
 					return usage.CheckBudgetAccounting(ctx, pool, emitter)
@@ -478,7 +484,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 				return err
 			}
 			defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "management plugin runtime", pluginRuntime.Close)
-			Management{Getenv: os.Getenv, Access: control, IdentityClient: identityClient, Egress: &policy, Limiter: limiter, Runtime: rt, Gateway: gw, Media: mediaService, Health: obsCache, Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog, CatalogKeys: catalogKeys, PluginIndex: pluginIndex}.Register(public)
+			Management{Getenv: os.Getenv, Access: control, IdentityClient: identityClient, Egress: &policy, Limits: shared, Runtime: rt, Gateway: gw, Media: mediaService, Health: obsCache, Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog, CatalogKeys: catalogKeys, PluginIndex: pluginIndex}.Register(public)
 		}
 	}
 	if err := startup.Err(); err != nil {
@@ -625,7 +631,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		// provider egress client, so the plane runs even when no shared state
 		// backend is configured. It is started exactly once, inside the single
 		// worker plane.
-		workersStopped = startWorkers(workers, pool, reader, limiter, workerStream, mediaService, pluginHost, keys, auth, installation, c.Region, c.Hostname, &policy, log, exporter, focusWorker, importer, referenceCatalog)
+		workersStopped = startWorkers(workers, pool, reader, debitStore, shared, workerStream, mediaService, pluginHost, keys, auth, installation, c.Region, c.Hostname, &policy, log, exporter, focusWorker, importer, referenceCatalog)
 	}
 	// Probes produce accounting events, so they stop before delivery closes;
 	// the consumer and recovery workers remain alive until delivery drains.

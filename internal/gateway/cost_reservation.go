@@ -8,6 +8,7 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
@@ -162,7 +163,7 @@ func (s *Server) reserveSessionCost(ctx context.Context, x *call, authority keya
 	return s.growCost(ctx, x.lease, hold.amount, hold.charge, hold.requestID, ttl)
 }
 
-func (s *Server) growCost(ctx context.Context, lease *limits.Lease, cost, charge, requestID string, ttl time.Duration) *Error {
+func (s *Server) growCost(ctx context.Context, lease *admission.Lease, cost, charge, requestID string, ttl time.Duration) *Error {
 	if e := s.deps.Admission.checkCostAccounting(ctx); e != nil {
 		return e
 	}
@@ -524,4 +525,21 @@ func (x *call) factCommitted(fact *AttemptFact) bool {
 	}
 	p, ok := snapshot.FindProvider(fact.ProviderID)
 	return ok && p.CommitmentAt(fact.StartedAt) != nil
+}
+
+func (r costReservation) on(request admission.Request) admission.Request {
+	if request.Cost == nil {
+		return request
+	}
+	return admission.Request{
+		Lookup: request.Lookup, LeaseTTL: request.LeaseTTL, Rate: request.Rate,
+		Cost: request.Cost.Holding(r.amountFor(request.Cost.Owner.Basis), r.requestID),
+	}
+}
+
+func reporting(rate admission.RateLimits, report bool) admission.RateLimits {
+	return admission.RateLimits{
+		RequestsPerMinute: rate.RequestsPerMinute, TokensPerMinute: rate.TokensPerMinute, MaxConcurrency: rate.MaxConcurrency,
+		TrackConcurrency: rate.TrackConcurrency, Tokens: rate.Tokens, Report: report, Share: rate.Share,
+	}
 }

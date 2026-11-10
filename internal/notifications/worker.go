@@ -14,6 +14,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/fleet"
+	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -102,7 +104,7 @@ type DeliveryConfig struct {
 	Installation string
 	Sender       *Sender
 	Log          *slog.Logger
-	Limiter      *limits.Limiter
+	Fleet        *fleet.State
 	Catalog      *catalog.Signed
 	NewID        func() string
 	Now          func() time.Time
@@ -201,7 +203,7 @@ func (w *deliveryWorker) claimBudgetAlerts(ctx context.Context, tx pgx.Tx) (int,
 	if err != nil {
 		return 0, err
 	}
-	windows, err := limits.CurrentBudgetWindows(ctx, tx, w.Now())
+	windows, err := ledger.CurrentBudgetWindows(ctx, tx, w.Now())
 	if err != nil {
 		return 0, err
 	}

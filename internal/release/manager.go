@@ -20,7 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/guardrails/credential"
-	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/secretstore"
@@ -365,7 +365,7 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 	if err = tx.QueryRow(ctx, "SELECT budget_policy FROM olp.installation WHERE singleton").Scan(&state.installationBudget); err != nil {
 		return err
 	}
-	state.budgetIncreases, err = limits.LoadBudgetIncreases(ctx, tx)
+	state.budgetIncreases, err = ledger.LoadBudgetIncreases(ctx, tx)
 	if err != nil {
 		return err
 	}

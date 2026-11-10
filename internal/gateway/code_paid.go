@@ -3,12 +3,13 @@ package gateway
 import (
 	"context"
 	"errors"
-	"github.com/tyk-swe/olp/internal/codesessions"
-	"github.com/tyk-swe/olp/internal/providerconfig"
 	"net/http"
 	"net/url"
 	"slices"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/codesessions"
+	"github.com/tyk-swe/olp/internal/providerconfig"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/codeadapter"
@@ -16,6 +17,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -35,7 +37,7 @@ type paidCodeAttempt struct {
 	release       *release.Release
 	authority     keyauthority.Authority
 	targetLease   *targetReservation
-	supplyLeases  []*limits.Lease
+	supplyLeases  []*admission.Lease
 	price         *usage.RoutingPrice
 	discount      *usage.RoutingDiscount
 	card          *usage.RoutingCardRevision
@@ -173,7 +175,7 @@ func (s *Server) preparePaidCode(r *http.Request, release *release.Release, rout
 	return a, nil
 }
 
-func (s *Server) reservePaidSupply(ctx context.Context, provider routing.Provider, slot routing.Slot, hold costReservation) ([]*limits.Lease, error) {
+func (s *Server) reservePaidSupply(ctx context.Context, provider routing.Provider, slot routing.Slot, hold costReservation) ([]*admission.Lease, error) {
 	return s.reservePaidCaps(ctx, slices.Collect(func(yield func(cappedOwner) bool) {
 		for index, owner := range attemptCaps(&routing.Route{}, &provider, &slot) {
 			if index == 0 {
@@ -186,7 +188,7 @@ func (s *Server) reservePaidSupply(ctx context.Context, provider routing.Provide
 	}), hold)
 }
 
-func (s *Server) reservePaidCaps(ctx context.Context, owners []cappedOwner, hold costReservation) ([]*limits.Lease, error) {
+func (s *Server) reservePaidCaps(ctx context.Context, owners []cappedOwner, hold costReservation) ([]*admission.Lease, error) {
 	if len(owners) == 0 {
 		return nil, nil
 	}
@@ -203,7 +205,7 @@ func (s *Server) reservePaidCaps(ctx context.Context, owners []cappedOwner, hold
 	if !s.deps.Admission.ready() {
 		return nil, codemode.Refuse(503, "code_limits_unavailable")
 	}
-	lease, err := s.deps.Admission.limiter.Reserve(ctx, limits.Request{CostOwnerID: owner.id, CostBasis: limits.BasisCost, LookupID: owner.lookup, DailyCostLimit: owner.limits.DailyCostLimit, MonthlyCostLimit: owner.limits.MonthlyCostLimit, CostEstimate: hold.amount, RequestID: hold.requestID, LeaseTTL: codeGenerationTimeout + time.Minute})
+	lease, err := s.deps.Admission.limiter.Reserve(ctx, hold.on(capRequest(owner, codeGenerationTimeout+time.Minute)))
 	if _, ok := errors.AsType[*limits.ExceededError](err); ok {
 		return nil, codemode.Refuse(429, "code_budget_exhausted")
 	}
@@ -211,7 +213,7 @@ func (s *Server) reservePaidCaps(ctx context.Context, owners []cappedOwner, hold
 		return nil, codemode.Refuse(503, "code_limits_unavailable")
 	}
 	tail, tailErr := s.reservePaidCaps(ctx, owners[1:], hold)
-	return append([]*limits.Lease{lease}, tail...), tailErr
+	return append([]*admission.Lease{lease}, tail...), tailErr
 }
 
 func (a *codeAttempt) providerID() string {
