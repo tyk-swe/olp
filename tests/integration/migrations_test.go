@@ -19,7 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/batches"
-	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/code"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/tests/harness"
@@ -55,7 +55,7 @@ func TestAllowanceObservationMigrationBackfillsLegacyWindows(t *testing.T) {
 	if err = pool.QueryRow(t.Context(), `SELECT allowance FROM olp.code_accounts WHERE id=$1`, account).Scan(&document); err != nil {
 		t.Fatal(err)
 	}
-	var allowance codemode.Allowance
+	var allowance code.Allowance
 	if err = json.Unmarshal(document, &allowance); err != nil {
 		t.Fatal(err)
 	}
@@ -63,13 +63,13 @@ func TestAllowanceObservationMigrationBackfillsLegacyWindows(t *testing.T) {
 		t.Fatalf("windows = %s", document)
 	}
 	primary := allowance.Windows[0]
-	if primary.Unit != codemode.AllowanceUnitPercent || primary.Evidence != codemode.AllowanceEvidencePassive || primary.UsedValue != nil || primary.RemainingValue != nil {
+	if primary.Unit != code.AllowanceUnitPercent || primary.Evidence != code.AllowanceEvidencePassive || primary.UsedValue != nil || primary.RemainingValue != nil {
 		t.Fatalf("primary window not backfilled: %s", document)
 	}
 	if primary.UsedPercent != 25 || primary.RemainingPercent != 75 || primary.ResetsAt == nil || !primary.ResetsAt.Equal(time.Date(2036, 11, 5, 15, 0, 0, 0, time.UTC)) {
 		t.Fatalf("primary window values changed: %s", document)
 	}
-	if allowance.Windows[1].Unit != codemode.AllowanceUnitPercent || allowance.Windows[1].Evidence != codemode.AllowanceEvidencePassive || allowance.Credits == nil || allowance.Credits.Balance == nil || *allowance.Credits.Balance != "12.5" {
+	if allowance.Windows[1].Unit != code.AllowanceUnitPercent || allowance.Windows[1].Evidence != code.AllowanceEvidencePassive || allowance.Credits == nil || allowance.Credits.Balance == nil || *allowance.Credits.Balance != "12.5" {
 		t.Fatalf("secondary window or credits changed: %s", document)
 	}
 	var available bool
@@ -116,12 +116,12 @@ func TestCodeDecisionsMigrationKeepsRecordsContentFree(t *testing.T) {
 	if err := pool.QueryRow(t.Context(), `SELECT to_jsonb(x) FROM olp.code_decisions x WHERE x.attempt_id=$1 AND x.chosen_account_id=$2`, attempt, account).Scan(&document); err != nil {
 		t.Fatal(err)
 	}
-	var decision codemode.Decision
+	var decision code.Decision
 	if err := json.Unmarshal(document, &decision); err != nil {
 		t.Fatal(err)
 	}
-	if decision.Reason != codemode.DecisionChosen || decision.Band != nil || decision.Evidence == nil || *decision.Evidence != codemode.AllowanceEvidencePassive ||
-		len(decision.Skipped) != 1 || decision.Skipped[0].AccountID != other || decision.Skipped[0].Class != codemode.SkipCooldown ||
+	if decision.Reason != code.DecisionChosen || decision.Band != nil || decision.Evidence == nil || *decision.Evidence != code.AllowanceEvidencePassive ||
+		len(decision.Skipped) != 1 || decision.Skipped[0].AccountID != other || decision.Skipped[0].Class != code.SkipCooldown ||
 		decision.RecoveryEnvelope == nil || *decision.RecoveryEnvelope != "codex_usage_limit_reached" || decision.RecoveryOrdinal == nil || *decision.RecoveryOrdinal != 1 {
 		t.Fatalf("decision projection = %s", document)
 	}

@@ -7,7 +7,7 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/agentcontract"
-	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/code"
 	"github.com/tyk-swe/olp/internal/connectors"
 )
 
@@ -255,8 +255,8 @@ func clonePredicate(p Predicate) Predicate {
 	}
 	return p
 }
-func cloneCodeRoute(route codemode.Route) codemode.Route {
-	return codemode.Route{
+func cloneCodeRoute(route code.Route) code.Route {
+	return code.Route{
 		ID: route.ID, ProjectID: route.ProjectID, Slug: route.Slug, PoolID: route.PoolID, PaidParticipation: route.PaidParticipation, PaidTargets: maps.Clone(route.PaidTargets), PaidFallbackTargets: maps.Clone(route.PaidFallbackTargets),
 		ModelPools: maps.Collect(func(yield func(string, []string) bool) {
 			for public, targets := range route.ModelPools {
@@ -267,11 +267,11 @@ func cloneCodeRoute(route codemode.Route) codemode.Route {
 		}),
 		Models: slices.Clone(route.Models), Aliases: maps.Clone(route.Aliases), ModelRewriting: route.ModelRewriting,
 		CodexCLIIdentity: route.CodexCLIIdentity, ChatToCodex: route.ChatToCodex, MessagesToCodex: route.MessagesToCodex, ChatToAntigravity: route.ChatToAntigravity, AllowanceOrdering: route.AllowanceOrdering, InitialRecoveryAttempts: route.InitialRecoveryAttempts,
-		Tools: func() *codemode.ResearchTools {
+		Tools: func() *code.ResearchTools {
 			if route.Tools == nil {
 				return nil
 			}
-			return &codemode.ResearchTools{AccountID: route.Tools.AccountID, Services: slices.Clone(route.Tools.Services)}
+			return &code.ResearchTools{AccountID: route.Tools.AccountID, Services: slices.Clone(route.Tools.Services)}
 		}(),
 		MaxBodyBytes: copyPointer(route.MaxBodyBytes), Enabled: route.Enabled, ETag: route.ETag,
 		RevisionID: route.RevisionID, Revision: route.Revision, PublishedAt: copyPointer(route.PublishedAt),

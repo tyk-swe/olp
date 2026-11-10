@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/codemode"
+	domain "github.com/tyk-swe/olp/internal/code"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
@@ -26,23 +26,23 @@ func (t PaidTarget) render() contract.ConfigurationCodePaidTarget {
 	return contract.ConfigurationCodePaidTarget{Provider: t.Provider, Slot: t.Slot, CredentialRef: t.CredentialRef}
 }
 
-func resolveTargets(ctx context.Context, q access.Queryer, targets map[string]PaidTarget, project string, credentials map[string]string) (map[string]codemode.PaidTarget, error) {
-	return promotion.TryMapValues(targets, func(_ string, t PaidTarget) (codemode.PaidTarget, error) {
+func resolveTargets(ctx context.Context, q access.Queryer, targets map[string]PaidTarget, project string, credentials map[string]string) (map[string]domain.PaidTarget, error) {
+	return promotion.TryMapValues(targets, func(_ string, t PaidTarget) (domain.PaidTarget, error) {
 		return resolveTarget(ctx, q, t, project, credentials)
 	})
 }
 
-func resolveTarget(ctx context.Context, q access.Queryer, t PaidTarget, project string, credentials map[string]string) (codemode.PaidTarget, error) {
+func resolveTarget(ctx context.Context, q access.Queryer, t PaidTarget, project string, credentials map[string]string) (domain.PaidTarget, error) {
 	credential, err := bound(t.CredentialRef, credentials)
 	if err != nil {
-		return codemode.PaidTarget{}, err
+		return domain.PaidTarget{}, err
 	}
 	target, err := providers.ReadPublishedSlot(ctx, q, t.Provider, project, t.Slot, credential)
 	if err != nil {
-		return codemode.PaidTarget{}, err
+		return domain.PaidTarget{}, err
 	}
 	if target == nil {
-		return codemode.PaidTarget{}, access.Invalid("code.paid_targets", "Bind the current credential of an enabled published destination provider slot.")
+		return domain.PaidTarget{}, access.Invalid("code.paid_targets", "Bind the current credential of an enabled published destination provider slot.")
 	}
 	return *target, nil
 }
@@ -70,8 +70,8 @@ func readSlotNames(ctx context.Context, q access.Queryer) (map[string]PaidTarget
 	}), nil
 }
 
-func portableTargets(targets map[string]codemode.PaidTarget, names map[string]PaidTarget) (map[string]PaidTarget, error) {
-	return promotion.TryMapValues(targets, func(_ string, t codemode.PaidTarget) (PaidTarget, error) {
+func portableTargets(targets map[string]domain.PaidTarget, names map[string]PaidTarget) (map[string]PaidTarget, error) {
+	return promotion.TryMapValues(targets, func(_ string, t domain.PaidTarget) (PaidTarget, error) {
 		target, ok := names[slotKey(t.ProviderID, t.SlotID)]
 		if !ok {
 			return PaidTarget{}, access.Invalid("code.paid_targets", "A paid target no longer has a portable provider and slot reference.")

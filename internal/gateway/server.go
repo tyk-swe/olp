@@ -102,24 +102,21 @@ type Runtime interface {
 }
 
 type Dependencies struct {
-	Egress         *egress.Policy
-	Log            *slog.Logger
-	Cache          *cache.Store
-	Guardrails     func(guardrails.Caller) guardrails.Evaluator
-	CodeLedger     CodeLedger
-	CodeAuthorizer CodeAuthorizer
-	CodeResearch   ResearchLedger
-	ResearchAuth   ResearchAuthorizer
-	Runtime        Runtime
-	Sink           Sink
-	Admission      *Admission
-	Debits         SessionDebitLedger
-	WorkflowRuns   WorkflowRunStore
-	WorkflowTools  WorkflowToolRunner
-	Traces         *TraceDeps
-	Media          *MediaDeps
-	Capture        *capture.Manager
-	Business       *telemetry.BusinessMetrics
+	Egress        *egress.Policy
+	Log           *slog.Logger
+	Cache         *cache.Store
+	Guardrails    func(guardrails.Caller) guardrails.Evaluator
+	Code          *CodeDependencies
+	Runtime       Runtime
+	Sink          Sink
+	Admission     *Admission
+	Debits        SessionDebitLedger
+	WorkflowRuns  WorkflowRunStore
+	WorkflowTools WorkflowToolRunner
+	Traces        *TraceDeps
+	Media         *MediaDeps
+	Capture       *capture.Manager
+	Business      *telemetry.BusinessMetrics
 
 	Resources *resources.Store
 	Batches   *batches.Store
@@ -194,11 +191,8 @@ func (s *Server) AdmissionPool() *admission.Pool { return s.admission }
 // OpenCircuits counts provider circuits currently open or half-open.
 func (s *Server) OpenCircuits() int64 { return s.health.openCircuits() }
 
-// Register mounts the OpenAI surface on the public mux.
 func (s *Server) Register(mux *http.ServeMux) {
-	if s.deps.CodeLedger != nil && s.deps.CodeAuthorizer != nil {
-		s.RegisterCode(mux)
-	}
+	s.registerCode(mux)
 	mux.HandleFunc("POST /v1/guardrails/apply", s.applyGuardrails)
 	mux.HandleFunc("POST /v1/delegations", s.createDelegation)
 	mux.HandleFunc("POST /v1/traces", s.ingestTraces)
@@ -1321,7 +1315,7 @@ func inferencePool(cfg Config) *admission.Pool {
 func normalizedDependencies(deps Dependencies) Dependencies {
 	return Dependencies{
 		Egress: deps.Egress, Log: deps.Log, Cache: deps.Cache, Guardrails: guardrailRunner(deps),
-		CodeLedger: deps.CodeLedger, CodeAuthorizer: deps.CodeAuthorizer, CodeResearch: deps.CodeResearch, ResearchAuth: deps.ResearchAuth,
+		Code:    deps.Code,
 		Runtime: deps.Runtime, Sink: configuredSink(deps.Sink, deps.Log), Admission: deps.Admission, Debits: deps.Debits, WorkflowRuns: deps.WorkflowRuns, WorkflowTools: deps.WorkflowTools,
 		Traces: deps.Traces, Media: deps.Media, Capture: deps.Capture, Business: deps.Business, Resources: deps.Resources, Batches: deps.Batches, Resolver: deps.Resolver,
 	}

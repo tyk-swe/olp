@@ -10,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
+	domain "github.com/tyk-swe/olp/internal/code"
+	codepool "github.com/tyk-swe/olp/internal/code/pool"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 )
@@ -36,15 +38,15 @@ func parsePool(e contract.ConfigurationCodePool, accounts []Account) (Pool, erro
 		return Pool{}, err
 	}
 	keys := e.ApiKeyRefs.GetOrEmpty()
-	pool := Pool{ID: e.Id.String(), Project: e.Project, Name: e.Name, OwnerRef: owner, Accounts: weights, APIKeyRefs: promotion.NonNil(slices.Clone(keys))}
-	placeholder := access.CodePoolInput{ProjectID: pool.ID, Name: pool.Name, Kind: string(e.Kind), OwnerUserID: placeholderOf(owner, pool.ID), AccountIDs: promotion.NonNil(slices.Sorted(maps.Keys(weights))), AccountWeights: weights, APIKeyIDs: promotion.Map(keys, func(string) string { return pool.ID })}
+	p := Pool{ID: e.Id.String(), Project: e.Project, Name: e.Name, OwnerRef: owner, Accounts: weights, APIKeyRefs: promotion.NonNil(slices.Clone(keys))}
+	placeholder := codepool.Input{ProjectID: p.ID, Name: p.Name, Kind: domain.PoolKind(e.Kind), OwnerUserID: placeholderOf(owner, p.ID), AccountIDs: promotion.NonNil(slices.Sorted(maps.Keys(weights))), AccountWeights: weights, APIKeyIDs: promotion.Map(keys, func(string) string { return p.ID })}
 	if err := placeholder.Validate(); err != nil {
 		return Pool{}, err
 	}
 	if slices.ContainsFunc(keys, func(ref string) bool { return access.ValidText("code", ref, 200) != nil }) {
 		return Pool{}, access.Invalid("code.pools.api_key_refs", "Use nonempty destination key references.")
 	}
-	return pool, nil
+	return p, nil
 }
 
 func poolAccounts(e contract.ConfigurationCodePool, accounts []Account) (map[string]int64, error) {
@@ -79,11 +81,11 @@ func placeholderOf(ref *string, id string) *string {
 	return &id
 }
 
-func (p Pool) kind() string {
+func (p Pool) kind() domain.PoolKind {
 	if p.OwnerRef != nil {
-		return string(contract.ConfigurationCodePoolKindPersonal)
+		return domain.PoolPersonal
 	}
-	return string(contract.ConfigurationCodePoolKindShared)
+	return domain.PoolShared
 }
 
 func (p Pool) ownerRefs() []string {
@@ -94,11 +96,11 @@ func (p Pool) ownerRefs() []string {
 }
 
 func readPools(ctx context.Context, q access.Queryer) ([]Pool, error) {
-	pools, err := access.ReadCodePools(ctx, q)
+	pools, err := codepool.ReadStored(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	return promotion.Map(pools, func(p access.CodePool) Pool {
+	return promotion.Map(pools, func(p codepool.Stored) Pool {
 		keys := promotion.Map(p.APIKeyIDs, func(id string) string { return codeRef("key", id) })
 		return Pool{ID: p.ID, Project: p.Project, Name: p.Name, OwnerRef: optionalRef("user", p.OwnerUserID), Accounts: p.AccountWeights, APIKeyRefs: keys}
 	}), nil
@@ -120,29 +122,29 @@ func renderPool(p Pool) (contract.ConfigurationCodePool, error) {
 	return contract.ConfigurationCodePool{Id: id, Project: p.Project, Name: p.Name, Kind: contract.ConfigurationCodePoolKind(p.kind()), OwnerRef: promotion.Nullable(p.OwnerRef), Accounts: accounts, ApiKeyRefs: nullable.NewNullableWithValue(promotion.NonNil(slices.Clone(keys)))}, nil
 }
 
-func resolvePool(ctx context.Context, q access.Queryer, p Pool, desired Desired, directory promotion.Directory, accountIDs map[string]string) (resolved[access.CodePoolInput], error) {
+func resolvePool(ctx context.Context, q access.Queryer, p Pool, desired Desired, directory promotion.Directory, accountIDs map[string]string) (resolved[codepool.Input], error) {
 	projectID, err := projectOf(directory, p.Project)
 	if err != nil {
-		return resolved[access.CodePoolInput]{}, err
+		return resolved[codepool.Input]{}, err
 	}
 	ownerID, err := owner(ctx, q, p.OwnerRef, projectID, desired.bindings.users)
 	if err != nil {
-		return resolved[access.CodePoolInput]{}, err
+		return resolved[codepool.Input]{}, err
 	}
 	keys, err := keysOf(ctx, q, p.APIKeyRefs, projectID, ownerID, desired.bindings.keys)
 	if err != nil {
-		return resolved[access.CodePoolInput]{}, err
+		return resolved[codepool.Input]{}, err
 	}
 	derived, err := derivedID("pool", projectID, p.ID)
 	if err != nil {
-		return resolved[access.CodePoolInput]{}, err
+		return resolved[codepool.Input]{}, err
 	}
 	unique := !slices.ContainsFunc(desired.Code.Pools, func(other Pool) bool {
 		return other.ID != p.ID && strings.EqualFold(other.Project, p.Project) && other.Name == p.Name && other.kind() == p.kind() && boundOr(other.OwnerRef, desired.bindings.users) == boundOr(p.OwnerRef, desired.bindings.users)
 	})
-	candidates, err := access.CodePoolCandidates(ctx, q, p.ID, derived, access.CodePoolMatch{ProjectID: projectID, Name: p.Name, Kind: p.kind(), OwnerUserID: ownerID})
+	candidates, err := codepool.Candidates(ctx, q, p.ID, derived, codepool.Match{ProjectID: projectID, Name: p.Name, Kind: p.kind(), OwnerUserID: ownerID})
 	if err != nil {
-		return resolved[access.CodePoolInput]{}, err
+		return resolved[codepool.Input]{}, err
 	}
 	to, err := mapped(p.ID, projectID, derived, unique, candidates)
 	weights := maps.Collect(func(yield func(string, int64) bool) {
@@ -152,16 +154,20 @@ func resolvePool(ctx context.Context, q access.Queryer, p Pool, desired Desired,
 			}
 		}
 	})
-	input := access.CodePoolInput{ProjectID: projectID, Name: p.Name, Kind: p.kind(), OwnerUserID: ownerID, AccountIDs: promotion.NonNil(slices.Sorted(maps.Keys(weights))), AccountWeights: weights, APIKeyIDs: promotion.NonNil(slices.Sorted(slices.Values(keys)))}
-	return resolved[access.CodePoolInput]{ref: p.ID, to: to, input: input}, err
+	input := codepool.Input{ProjectID: projectID, Name: p.Name, Kind: p.kind(), OwnerUserID: ownerID, AccountIDs: promotion.NonNil(slices.Sorted(maps.Keys(weights))), AccountWeights: weights, APIKeyIDs: promotion.NonNil(slices.Sorted(slices.Values(keys)))}
+	return resolved[codepool.Input]{ref: p.ID, to: to, input: input}, err
 }
 
-func poolChange(ctx context.Context, q access.Queryer, p resolved[access.CodePoolInput]) (change, error) {
-	action, err := compared(ctx, q, p, access.ReadCodePoolInput)
+func poolChange(ctx context.Context, q access.Queryer, p resolved[codepool.Input]) (change, error) {
+	action, err := compared(ctx, q, p, codepool.ReadInput)
 	return change{
 		item: promotion.Item{Kind: contract.ConfigurationPlanItemKindCodePool, Key: p.ref, Action: action},
 		write: func(ctx context.Context, tx pgx.Tx, principal access.Principal) error {
-			_, err := access.SaveCodePool(ctx, tx, principal, p.to.id, access.NewID(), p.input, p.to.existing)
+			draft, err := codepool.ParseDraft(p.input)
+			if err != nil {
+				return err
+			}
+			_, err = codepool.Save(ctx, tx, principal, p.to.id, access.NewID(), draft, p.to.existing)
 			return err
 		},
 	}, err

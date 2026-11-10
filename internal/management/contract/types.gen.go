@@ -8908,9 +8908,12 @@ type CodeAccount struct {
 	Id               openapi_types.UUID           `json:"id"`
 	Models           []string                     `json:"models"`
 	Name             string                       `json:"name"`
-	Principal        string                       `json:"principal"`
-	ProjectId        openapi_types.UUID           `json:"project_id"`
-	ProviderId       openapi_types.UUID           `json:"provider_id"`
+
+	// NextMonthlyReset Next UTC monthly reset date derived from cycle_anchor, or null when no cycle anchor is configured.
+	NextMonthlyReset nullable.Nullable[openapi_types.Date] `json:"next_monthly_reset,omitempty"`
+	Principal        string                                `json:"principal"`
+	ProjectId        openapi_types.UUID                    `json:"project_id"`
+	ProviderId       openapi_types.UUID                    `json:"provider_id"`
 
 	// ResearchEligible Current research enrollment eligibility, independent of inference health and allowance; route pool membership is also required.
 	ResearchEligible *bool `json:"research_eligible,omitempty"`
@@ -9037,6 +9040,9 @@ type CodeAttempt struct {
 	// CodexCliIdentityEnabled Whether the frozen route revision enabled Codex CLI identity compatibility. This is route policy, not evidence that an Originator header changed or that this attempt used Codex. No client identity header values or prompt content are recorded.
 	CodexCliIdentityEnabled *bool     `json:"codex_cli_identity_enabled,omitempty"`
 	CreatedAt               time.Time `json:"created_at"`
+
+	// Decision Admission-time account selection recorded for this attempt, or null for paid targets and historical attempts without a recorded decision.
+	Decision nullable.Nullable[CodeDecision] `json:"decision,omitempty"`
 
 	// EndUserDigest Project-scoped end-user HMAC, or empty when identification was not configured. Raw identifiers are never retained.
 	EndUserDigest string                       `json:"end_user_digest"`

@@ -7,7 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/code"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -31,8 +31,8 @@ func ReadSlotNames(ctx context.Context, q access.Queryer) ([]SlotName, error) {
 	return pgx.CollectRows(rows, pgx.RowToStructByPos[SlotName])
 }
 
-func ReadPublishedSlot(ctx context.Context, q access.Queryer, providerName, projectID, slot, credentialID string) (*codemode.PaidTarget, error) {
-	var target codemode.PaidTarget
+func ReadPublishedSlot(ctx context.Context, q access.Queryer, providerName, projectID, slot, credentialID string) (*code.PaidTarget, error) {
+	var target code.PaidTarget
 	err := q.QueryRow(ctx, `SELECT p.id::text,s.id::text FROM olp.providers p JOIN olp.provider_revisions v ON v.id=p.active_revision_id JOIN olp.provider_slots s ON s.provider_id=p.id JOIN olp.provider_credentials c ON c.id=s.credential_id WHERE lower(p.name)=lower($1) AND p.project_id=$2 AND s.name=$3 AND s.credential_id=$4 AND c.revoked_at IS NULL AND s.enabled AND p.state='active' AND EXISTS(SELECT 1 FROM jsonb_array_elements(v.slots) x WHERE x->>'id'=s.id::text AND x->>'credential_id'=c.id::text AND (x->>'enabled')::boolean)`, providerName, projectID, slot, credentialID).Scan(&target.ProviderID, &target.SlotID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil

@@ -10,7 +10,7 @@
     type CodeRoute,
     type CodeBudgetWrite
   } from '#lib/features/code-mode/api.js';
-  import { tokenLimit } from './presentation';
+  import { parseTokenLimit, type Validation } from './presentation';
 
   import {
     useResourceSubmission,
@@ -50,18 +50,27 @@
     onDraftChange: (dirty) => onDraftChange(dirty),
     onSaved: () => onSaved(),
     onCancel: () => onCancel(),
-    build: (): CodeBudgetWrite => {
-      const dailyTokens = tokenLimit(daily),
-        monthlyTokens = tokenLimit(monthly);
-      if (dailyTokens === null && monthlyTokens === null)
-        throw new Error('Set at least one daily or monthly token limit.');
+    build: (): Validation<CodeBudgetWrite> => {
+      const dailyTokens = parseTokenLimit(daily);
+      if (!dailyTokens.ok) return dailyTokens;
+      const monthlyTokens = parseTokenLimit(monthly);
+      if (!monthlyTokens.ok) return monthlyTokens;
+      if (dailyTokens.value === null && monthlyTokens.value === null) {
+        return {
+          ok: false,
+          message: 'Set at least one daily or monthly token limit.'
+        };
+      }
       return {
-        project_id: projectId,
-        route_id: routeId || null,
-        api_key_id: keyId || null,
-        daily_tokens: dailyTokens,
-        monthly_tokens: monthlyTokens,
-        enabled
+        ok: true,
+        value: {
+          project_id: projectId,
+          route_id: routeId || null,
+          api_key_id: keyId || null,
+          daily_tokens: dailyTokens.value,
+          monthly_tokens: monthlyTokens.value,
+          enabled
+        }
       };
     },
     persist: (input, requestId) =>

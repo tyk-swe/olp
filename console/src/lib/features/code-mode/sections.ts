@@ -1,5 +1,3 @@
-/** The management sections, in navigation order. They edit configuration;
- * every other section only observes traffic. */
 const managementKinds = ['accounts', 'pools', 'routes', 'budgets'] as const;
 export type CodeManagementKind = (typeof managementKinds)[number];
 
@@ -43,60 +41,32 @@ export const managementSections: Record<
   }
 };
 
-type DiagnosticFilters = {
-  route: boolean;
-  key: boolean;
-  account: boolean;
-  binding: boolean;
-  endUser: boolean;
-};
-
-/** Route and key filters apply to every diagnostic, except token windows,
- * which have no filter form. */
-function filters(
-  overrides: Partial<DiagnosticFilters> = {}
-): DiagnosticFilters {
-  return {
-    route: true,
-    key: true,
-    account: false,
-    binding: false,
-    endUser: false,
-    ...overrides
-  };
-}
-
 export const diagnosticSections: Record<
   CodeDiagnosticsKind,
-  { label: string; title: string; empty: string; filters: DiagnosticFilters }
+  { label: string; title: string; empty: string }
 > = {
   bindings: {
     label: 'Conversation trees',
     title: 'Durable conversation trees',
-    empty: 'bindings',
-    filters: filters({ account: true })
+    empty: 'bindings'
   },
   attempts: {
     label: 'Attempts',
     title: 'Generation attempts',
-    empty: 'attempts',
-    filters: filters({ account: true, binding: true, endUser: true })
+    empty: 'attempts'
   },
   refusals: {
     label: 'Refusals',
     title: 'Admission refusals',
-    empty: 'refusals',
-    filters: filters({ endUser: true })
+    empty: 'refusals'
   },
   'token-windows': {
     label: 'Token windows',
     title: 'Hard-budget token windows',
-    empty: 'token windows',
-    filters: filters({ route: false, key: false })
+    empty: 'token windows'
   }
 };
 
-/** Tab labels in page order. */
 export const codeSections: readonly { id: CodeSection; label: string }[] = [
   ...managementKinds.map((id) => ({
     id,
@@ -107,11 +77,3 @@ export const codeSections: readonly { id: CodeSection; label: string }[] = [
     label: diagnosticSections[id].label
   }))
 ];
-
-const management = new Set<CodeSection>(managementKinds);
-
-export function isManagementSection(
-  section: CodeSection
-): section is CodeManagementKind {
-  return management.has(section);
-}

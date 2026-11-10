@@ -75,6 +75,9 @@ test('live-proven claims are rejected in guides and console copy', () => {
   const userFacing = [
     'docs/use/code-mode.md',
     'console/src/lib/features/code-mode/presentation.ts',
+    'console/src/lib/features/code-mode/routeDraft.ts',
+    'console/src/lib/features/code-mode/AccountsSection.svelte',
+    'console/src/lib/features/code-mode/RoutesSection.svelte',
     'console/src/lib/features/code-mode/RouteEditor.svelte',
     'console/src/lib/features/code-mode/RouteRevisions.svelte'
   ];

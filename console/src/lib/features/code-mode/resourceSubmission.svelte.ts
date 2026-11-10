@@ -3,7 +3,7 @@ import { onDestroy } from 'svelte';
 import { ApiProblem, unanswered } from '#lib/management/http.js';
 import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
 import { confirmDiscardChanges } from '#lib/editing/unsavedChanges.js';
-import { mutationError } from './presentation';
+import { mutationError, type Validation } from './presentation';
 
 export type ResourceEditorProps<Current> = {
   current?: Current;
@@ -14,12 +14,11 @@ export type ResourceEditorProps<Current> = {
   onCancel: () => void;
 };
 
-/** One mounted editor owns a submission until it is saved or explicitly edited. */
 export function useResourceSubmission<Input>(options: {
   allowed: () => boolean;
   creating: () => boolean;
   blocked?: () => boolean;
-  build: () => Input;
+  build: () => Validation<Input>;
   persist: (input: Input, requestId: string) => Promise<unknown>;
   onDraftChange: (dirty: boolean) => void;
   onSaved: () => Promise<void>;
@@ -29,8 +28,6 @@ export function useResourceSubmission<Input>(options: {
   let busy = $state(false);
   let error = $state('');
   let dirty = $state(false);
-  // A create whose response was lost remains the same logical submission.
-  // Keep its fields fixed until the operator retries or explicitly edits it.
   let submitted = $state(false);
   let active = true;
 
@@ -64,11 +61,16 @@ export function useResourceSubmission<Input>(options: {
   async function save(event: SubmitEvent) {
     event.preventDefault();
     if (busy || options.blocked?.() || !options.allowed()) return;
+    const built = options.build();
+    if (!built.ok) {
+      error = built.message;
+      return;
+    }
     busy = true;
     error = '';
     let dispatched = false;
     try {
-      const submission = intent.prepare(options.build());
+      const submission = intent.prepare(built.value);
       const promise = options.persist(submission.input, submission.requestId);
       dispatched = true;
       await promise;

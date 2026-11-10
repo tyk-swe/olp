@@ -15651,6 +15651,14 @@
               ]
             },
             "description": "Research services supported by the enrolled profile; also requires research eligibility and route pool membership."
+          },
+          "next_monthly_reset": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "Next UTC monthly reset date derived from cycle_anchor, or null when no cycle anchor is configured."
           }
         },
         "required": [
@@ -16063,6 +16071,17 @@
           "codex_cli_identity_enabled": {
             "type": "boolean",
             "description": "Whether the frozen route revision enabled Codex CLI identity compatibility. This is route policy, not evidence that an Originator header changed or that this attempt used Codex. No client identity header values or prompt content are recorded."
+          },
+          "decision": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CodeDecision"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Admission-time account selection recorded for this attempt, or null for paid targets and historical attempts without a recorded decision."
           }
         },
         "required": [

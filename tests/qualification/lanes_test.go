@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/codeadapter"
+	"github.com/tyk-swe/olp/internal/code/vendor"
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -238,14 +238,14 @@ func (s *service) seedSubscription(project, ownerID string, spec laneSeed, proxy
 }
 
 func (s *service) seedSubscriptionE(project, ownerID string, spec laneSeed, network *egress.ConnectionOptions) (providerID, credentialID string, err error) {
-	vendor, ok := codeadapter.ForConnection("plugin", "grant", spec.profile)
+	v, ok := vendor.ForConnection("plugin", "grant", spec.profile)
 	if !ok {
 		return "", "", fmt.Errorf("no adapter for profile %s", spec.profile)
 	}
-	if string(vendor.Adapter) != spec.adapter {
-		return "", "", fmt.Errorf("profile %s serves adapter %s, lane expects %s", spec.profile, vendor.Adapter, spec.adapter)
+	if string(v.Adapter) != spec.adapter {
+		return "", "", fmt.Errorf("profile %s serves adapter %s, lane expects %s", spec.profile, v.Adapter, spec.adapter)
 	}
-	address, ok := vendor.Address(spec.profile)
+	address, ok := v.Address(spec.profile)
 	if !ok {
 		return "", "", fmt.Errorf("adapter %s has no address for profile %s", spec.adapter, spec.profile)
 	}

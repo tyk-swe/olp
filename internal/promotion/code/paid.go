@@ -8,12 +8,12 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/codemode"
+	domain "github.com/tyk-swe/olp/internal/code"
+	coderoute "github.com/tyk-swe/olp/internal/code/route"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
 	"github.com/tyk-swe/olp/internal/providers"
-	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -98,7 +98,7 @@ func (c PaidConnection) render() (contract.ConfigurationCodePaidConnection, erro
 	return contract.ConfigurationCodePaidConnection{Provider: entries[0], SlotKeyRefs: refs}, nil
 }
 
-func resolvePaid(ctx context.Context, q access.Queryer, connections map[string]PaidConnection, policy routes.CodeRouteInput, values bindings, deps provider.Deps) (map[string]routing.Provider, error) {
+func resolvePaid(ctx context.Context, q access.Queryer, connections map[string]PaidConnection, policy coderoute.Input, values bindings, deps provider.Deps) (map[string]routing.Provider, error) {
 	frozen, err := promotion.TryMap(slices.Sorted(maps.Keys(connections)), func(name string) (routing.Provider, error) {
 		return connections[name].resolve(ctx, q, policy.ProjectID, values, deps)
 	})
@@ -107,10 +107,10 @@ func resolvePaid(ctx context.Context, q access.Queryer, connections map[string]P
 	}
 	byProvider := promotion.Index(frozen, func(p routing.Provider) string { return p.ID })
 	route := paidRoute(policy)
-	if err := routes.ValidateCodePaidProviders(route, byProvider); err != nil {
+	if err := coderoute.ValidatePaidProviders(route, byProvider); err != nil {
 		return nil, err
 	}
-	for _, targets := range []map[string]codemode.PaidTarget{route.PaidTargets, route.PaidFallbackTargets} {
+	for _, targets := range []map[string]domain.PaidTarget{route.PaidTargets, route.PaidFallbackTargets} {
 		for _, model := range slices.Sorted(maps.Keys(targets)) {
 			target := targets[model]
 			slots := byProvider[target.ProviderID].Slots
@@ -177,8 +177,8 @@ func (c PaidConnection) resolve(ctx context.Context, q access.Queryer, project s
 	return decoded(current, configuration, models, slots)
 }
 
-func paidRoute(policy routes.CodeRouteInput) codemode.Route {
-	return codemode.Route{Models: policy.Models, ProjectID: policy.ProjectID, PaidParticipation: policy.PaidParticipation, PaidTargets: policy.PaidTargets, PaidFallbackTargets: policy.PaidFallbackTargets, InitialRecoveryAttempts: policy.InitialRecoveryAttempts}
+func paidRoute(policy coderoute.Input) domain.Route {
+	return domain.Route{Slug: policy.Slug, Models: policy.Models, ProjectID: policy.ProjectID, PaidParticipation: policy.PaidParticipation, PaidTargets: policy.PaidTargets, PaidFallbackTargets: policy.PaidFallbackTargets, InitialRecoveryAttempts: policy.InitialRecoveryAttempts}
 }
 
 func preparedPaid(ctx context.Context, q access.Queryer, configuration providers.Configuration, deps provider.Deps) (providers.Configuration, error) {

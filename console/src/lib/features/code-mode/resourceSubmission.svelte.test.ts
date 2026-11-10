@@ -23,7 +23,7 @@ function renderSubmission(overrides: Partial<Options> = {}) {
   const options: Options = {
     allowed: () => true,
     creating: () => true,
-    build: () => ({ name: 'Example' }),
+    build: () => ({ ok: true, value: { name: 'Example' } }),
     persist,
     onDraftChange,
     onSaved,
@@ -221,6 +221,18 @@ describe('resource submissions', () => {
     expect(persist.mock.calls[1][1]).not.toBe(persist.mock.calls[0][1]);
   });
 
+  it('reports validation failures as values without dispatching a request', async () => {
+    const { state, persist } = renderSubmission({
+      build: () => ({ ok: false, message: 'Enter a valid route slug.' })
+    });
+
+    await state.save(submit());
+
+    expect(state.error).toBe('Enter a valid route slug.');
+    expect(state.submitted).toBe(false);
+    expect(persist).not.toHaveBeenCalled();
+  });
+
   it('ignores a completed request after the editor is closed', async () => {
     const pending = Promise.withResolvers<void>();
     const onSaved = vi.fn<Options['onSaved']>(async () => undefined);
@@ -236,7 +248,7 @@ describe('resource submissions', () => {
             useResourceSubmission({
               allowed: () => true,
               creating: () => true,
-              build: () => ({ name: 'Example' }),
+              build: () => ({ ok: true, value: { name: 'Example' } }),
               persist: () => pending.promise,
               onDraftChange,
               onSaved,

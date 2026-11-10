@@ -9,12 +9,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/codemode"
+	domain "github.com/tyk-swe/olp/internal/code"
+	codeaccount "github.com/tyk-swe/olp/internal/code/account"
+	codepool "github.com/tyk-swe/olp/internal/code/pool"
+	coderoute "github.com/tyk-swe/olp/internal/code/route"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
-	"github.com/tyk-swe/olp/internal/providers"
-	"github.com/tyk-swe/olp/internal/routes"
 )
 
 type Route struct {
@@ -29,12 +30,12 @@ type scope struct {
 	directory promotion.Directory
 	bindings  bindings
 	deps      provider.Deps
-	accounts  []resolved[providers.CodeAccountInput]
-	pools     []resolved[access.CodePoolInput]
+	accounts  []resolved[codeaccount.Input]
+	pools     []resolved[codepool.Input]
 }
 
 type routeInput struct {
-	draft     routes.CodeRouteInput
+	draft     coderoute.Input
 	published *frozen
 }
 
@@ -53,14 +54,14 @@ func parseRoute(e contract.ConfigurationCodeRoute, prior []contract.Configuratio
 	if err != nil {
 		return Route{}, err
 	}
-	route := Route{ID: draft.ID, Project: draft.Project, Slug: draft.Slug, Draft: draft.Draft, Published: &publication}
-	if err := route.validPaid(); err != nil {
+	r := Route{ID: draft.ID, Project: draft.Project, Slug: draft.Slug, Draft: draft.Draft, Published: &publication}
+	if err := r.validPaid(); err != nil {
 		return Route{}, err
 	}
-	if err := route.validPolicy(publication.Policy, accounts, pools); err != nil {
+	if err := r.validPolicy(publication.Policy, accounts, pools); err != nil {
 		return Route{}, err
 	}
-	return route, route.validConnections(accounts, pools)
+	return r, r.validConnections(accounts, pools)
 }
 
 func (r Route) validPolicy(policy Policy, accounts []Account, pools []Pool) error {
@@ -75,8 +76,8 @@ func (r Route) validPolicy(policy Policy, accounts []Account, pools []Pool) erro
 			return access.Invalid("code.paid_targets", "Use declared models and named provider, slot and explicit credential references.")
 		}
 	}
-	placeholder := func(targets map[string]PaidTarget) map[string]codemode.PaidTarget {
-		return promotion.MapValues(targets, func(PaidTarget) codemode.PaidTarget { return codemode.PaidTarget{ProviderID: r.ID, SlotID: r.ID} })
+	placeholder := func(targets map[string]PaidTarget) map[string]domain.PaidTarget {
+		return promotion.MapValues(targets, func(PaidTarget) domain.PaidTarget { return domain.PaidTarget{ProviderID: r.ID, SlotID: r.ID} })
 	}
 	return policy.input(r.ID, r.Slug, policy.Pool, policy.Tools, placeholder(policy.PaidTargets), placeholder(policy.PaidFallbackTargets)).Validate()
 }
@@ -144,7 +145,7 @@ func renderRoute(r Route) (contract.ConfigurationCodeRoute, error) {
 }
 
 func readRoutes(ctx context.Context, q access.Queryer) ([]Route, error) {
-	stored, err := routes.ReadStoredCodeRoutes(ctx, q)
+	stored, err := coderoute.ReadStored(ctx, q)
 	if err != nil {
 		return nil, err
 	}
@@ -152,10 +153,10 @@ func readRoutes(ctx context.Context, q access.Queryer) ([]Route, error) {
 	if err != nil {
 		return nil, err
 	}
-	return promotion.TryMap(stored, func(s routes.StoredCodeRoute) (Route, error) { return portableRoute(ctx, q, s, slots) })
+	return promotion.TryMap(stored, func(s coderoute.Stored) (Route, error) { return portableRoute(ctx, q, s, slots) })
 }
 
-func portableRoute(ctx context.Context, q access.Queryer, s routes.StoredCodeRoute, slots map[string]PaidTarget) (Route, error) {
+func portableRoute(ctx context.Context, q access.Queryer, s coderoute.Stored, slots map[string]PaidTarget) (Route, error) {
 	draft, err := portablePolicy(s.Draft, slots)
 	if err != nil {
 		return Route{}, err
@@ -169,14 +170,14 @@ func resolveRoute(ctx context.Context, q access.Queryer, r Route, in scope) (res
 	if err != nil {
 		return resolved[routeInput]{}, err
 	}
-	taken, err := routes.CodeSlugTaken(ctx, q, r.Slug, projectID)
+	taken, err := coderoute.SlugTaken(ctx, q, r.Slug, projectID)
 	if err != nil {
 		return resolved[routeInput]{}, err
 	}
 	if taken {
 		return resolved[routeInput]{}, access.Invalid("code.routes.slug", "Choose an unused slug or a code route in the destination project.")
 	}
-	ids, err := routes.CodeRouteIDs(ctx, q, r.Slug, projectID)
+	ids, err := coderoute.IDs(ctx, q, r.Slug, projectID)
 	if err != nil {
 		return resolved[routeInput]{}, err
 	}
@@ -213,7 +214,7 @@ func routeAction(ctx context.Context, q access.Queryer, r resolved[routeInput]) 
 	if !r.to.existing {
 		return contract.ConfigurationPlanItemActionCreate, r.input.published != nil, nil
 	}
-	current, err := routes.ReadCodeRouteState(ctx, q, r.to.id)
+	current, err := coderoute.ReadState(ctx, q, r.to.id)
 	if err != nil {
 		return "", false, err
 	}
@@ -228,19 +229,27 @@ func routeAction(ctx context.Context, q access.Queryer, r resolved[routeInput]) 
 func saveRoute(ctx context.Context, tx pgx.Tx, p access.Principal, r resolved[routeInput], republished bool) error {
 	published := r.input.published
 	if republished && published != nil {
-		saved, err := routes.SaveCodeRoute(ctx, tx, p, r.to.id, access.NewID(), published.Policy, r.to.existing)
+		pubDraft, err := coderoute.ParseDraft(published.Policy)
 		if err != nil {
 			return err
 		}
-		if _, err := routes.SaveCodePublication(ctx, tx, p, r.to.id, saved.Route, published.Connections, published.Paid); err != nil {
+		saved, err := coderoute.Save(ctx, tx, p, r.to.id, access.NewID(), pubDraft, r.to.existing)
+		if err != nil {
+			return err
+		}
+		if _, err := coderoute.SavePublication(ctx, tx, p, nil, r.to.id, saved.Route, published.Connections, published.Paid); err != nil {
 			return err
 		}
 	}
-	if _, err := routes.SaveCodeRoute(ctx, tx, p, r.to.id, access.NewID(), r.input.draft, r.to.existing || republished && published != nil); err != nil {
+	draft, err := coderoute.ParseDraft(r.input.draft)
+	if err != nil {
+		return err
+	}
+	if _, err := coderoute.Save(ctx, tx, p, r.to.id, access.NewID(), draft, r.to.existing || republished && published != nil); err != nil {
 		return err
 	}
 	if republished && published == nil {
-		return routes.UnpublishCodeRoute(ctx, tx, r.to.id)
+		return coderoute.Unpublish(ctx, tx, r.to.id)
 	}
 	return nil
 }

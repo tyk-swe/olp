@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/codewire"
+	codewire "github.com/tyk-swe/olp/internal/code/wire"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"

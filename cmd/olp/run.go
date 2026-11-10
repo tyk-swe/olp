@@ -27,7 +27,8 @@ import (
 	"github.com/tyk-swe/olp/internal/billing"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/catalog"
-	"github.com/tyk-swe/olp/internal/codesessions"
+	codeauth "github.com/tyk-swe/olp/internal/code/auth"
+	codesession "github.com/tyk-swe/olp/internal/code/session"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/console"
 	"github.com/tyk-swe/olp/internal/coordination"
@@ -375,10 +376,13 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			gatewayDeps.Capture = capturer
 			gatewayDeps.Media = &gateway.MediaDeps{Jobs: mediaService, Admission: media.NewAdmissionState(c.MediaSpoolCapacityBytes)}
 			if pool != nil {
-				gatewayDeps.CodeLedger = codesessions.New(pool)
-				gatewayDeps.CodeAuthorizer = &providers.CodeAuthorizer{Pool: pool, Credentials: rt, Plugins: pluginHost}
-				gatewayDeps.CodeResearch = codesessions.New(pool)
-				gatewayDeps.ResearchAuth = &providers.CodeAuthorizer{Pool: pool, Credentials: rt, Plugins: pluginHost}
+				codeSessions := codesession.New(pool)
+				codeAuthorizer := &codeauth.Authorizer{Pool: pool, Credentials: rt, Plugins: pluginHost}
+				gatewayDeps.Code = &gateway.CodeDependencies{
+					Ledger:     codeSessions,
+					Authorizer: codeAuthorizer,
+					Research:   codeSessions,
+				}
 				gatewayDeps.Resources = resources.NewEncrypted(pool, installation, keys)
 				gatewayDeps.Resolver = resources.NewResolver(pool)
 			}

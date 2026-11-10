@@ -1,6 +1,11 @@
 import type { components, paths } from '#lib/management/schema.js';
 import { apiClient } from '#lib/management/client.js';
-import { ensureOk, unwrap, unwrapPage } from '#lib/management/http.js';
+import {
+  ensureOk,
+  unwrap,
+  unwrapPage,
+  type CursorPage
+} from '#lib/management/http.js';
 
 type Schemas = components['schemas'];
 export type CodeAccount = Schemas['CodeAccount'];
@@ -16,6 +21,7 @@ export type CodeBudgetWrite = Schemas['CodeBudgetWrite'];
 export type CodeBinding = Schemas['CodeBinding'];
 export type CodeAttempt = Schemas['CodeAttempt'];
 export type CodeDecision = Schemas['CodeDecision'];
+export type CodeRefusal = Schemas['CodeRefusal'];
 export type CodeClientConfiguration = Schemas['CodeClientConfiguration'];
 
 export type CodeClient = CodeClientConfiguration['client'];
@@ -28,6 +34,99 @@ export type CodeClientSelection = {
   plan_model?: string;
   small_model?: string;
 };
+
+export type CodeSave<Body> =
+  | { kind: 'create'; body: Body; requestId: string }
+  | { kind: 'update'; body: Body; current: { id: string; etag: string } };
+
+type CollectionPath =
+  | '/api/v1/code/accounts'
+  | '/api/v1/code/pools'
+  | '/api/v1/code/routes'
+  | '/api/v1/code/budgets'
+  | '/api/v1/code/bindings'
+  | '/api/v1/code/attempts'
+  | '/api/v1/code/decisions'
+  | '/api/v1/code/refusals'
+  | '/api/v1/code/token-windows';
+
+type QueryOf<P extends CollectionPath> = NonNullable<
+  paths[P]['get']['parameters']['query']
+>;
+
+export type CodeAccountsQuery = QueryOf<'/api/v1/code/accounts'>;
+export type CodePoolsQuery = QueryOf<'/api/v1/code/pools'>;
+export type CodeRoutesQuery = QueryOf<'/api/v1/code/routes'>;
+export type CodeBudgetsQuery = QueryOf<'/api/v1/code/budgets'>;
+export type CodeBindingsQuery = QueryOf<'/api/v1/code/bindings'>;
+export type CodeAttemptsQuery = QueryOf<'/api/v1/code/attempts'>;
+export type CodeDecisionsQuery = QueryOf<'/api/v1/code/decisions'>;
+export type CodeRefusalsQuery = QueryOf<'/api/v1/code/refusals'>;
+export type CodeTokenWindowsQuery = QueryOf<'/api/v1/code/token-windows'>;
+
+export type CodeFilters =
+  | CodeAccountsQuery
+  | CodePoolsQuery
+  | CodeRoutesQuery
+  | CodeBudgetsQuery
+  | CodeBindingsQuery
+  | CodeAttemptsQuery
+  | CodeDecisionsQuery
+  | CodeRefusalsQuery
+  | CodeTokenWindowsQuery;
+
+type FetchedResult<T> = { data?: T; error?: unknown; response: Response };
+
+async function fetchPage<T, Q extends Record<string, unknown>>(
+  get: (options: {
+    params: { query: Q };
+    signal?: AbortSignal;
+  }) => Promise<FetchedResult<{ items: T[]; next_cursor?: string | null }>>,
+  filters: Q,
+  signal?: AbortSignal
+): Promise<CursorPage<T>> {
+  return unwrapPage(
+    await get({
+      params: { query: { limit: 50, ...filters } as Q },
+      signal
+    })
+  );
+}
+
+async function persistResource<Body, Saved>(
+  command: CodeSave<Body>,
+  endpoints: {
+    create: (options: {
+      params: { header: { 'Idempotency-Key': string } };
+      body: Body;
+    }) => Promise<FetchedResult<Saved>>;
+    update: (options: {
+      params: {
+        path: { id: string };
+        header: { 'If-Match': string };
+      };
+      body: Body;
+    }) => Promise<FetchedResult<Saved>>;
+  }
+): Promise<NonNullable<Saved>> {
+  if (command.kind === 'update') {
+    return unwrap(
+      await endpoints.update({
+        params: {
+          path: { id: command.current.id },
+          header: { 'If-Match': command.current.etag }
+        },
+        body: command.body
+      })
+    );
+  }
+  return unwrap(
+    await endpoints.create({
+      params: { header: { 'Idempotency-Key': command.requestId } },
+      body: command.body
+    })
+  );
+}
 
 export async function getCodeClientConfiguration(
   route: CodeRoute,
@@ -46,230 +145,130 @@ export async function getCodeClientConfiguration(
   );
 }
 
-export type CodeSave<Body> =
-  | { kind: 'create'; body: Body; requestId: string }
-  | { kind: 'update'; body: Body; current: { id: string; etag: string } };
-
-export type CodeAccountsQuery = NonNullable<
-  paths['/api/v1/code/accounts']['get']['parameters']['query']
->;
-export type CodePoolsQuery = NonNullable<
-  paths['/api/v1/code/pools']['get']['parameters']['query']
->;
-export type CodeRoutesQuery = NonNullable<
-  paths['/api/v1/code/routes']['get']['parameters']['query']
->;
-export type CodeBudgetsQuery = NonNullable<
-  paths['/api/v1/code/budgets']['get']['parameters']['query']
->;
-export type CodeBindingsQuery = NonNullable<
-  paths['/api/v1/code/bindings']['get']['parameters']['query']
->;
-export type CodeAttemptsQuery = NonNullable<
-  paths['/api/v1/code/attempts']['get']['parameters']['query']
->;
-export type CodeDecisionsQuery = NonNullable<
-  paths['/api/v1/code/decisions']['get']['parameters']['query']
->;
-export type CodeRefusalsQuery = NonNullable<
-  paths['/api/v1/code/refusals']['get']['parameters']['query']
->;
-export type CodeTokenWindowsQuery = NonNullable<
-  paths['/api/v1/code/token-windows']['get']['parameters']['query']
->;
-
-export type CodeFilters =
-  | CodeAccountsQuery
-  | CodePoolsQuery
-  | CodeRoutesQuery
-  | CodeBudgetsQuery
-  | CodeBindingsQuery
-  | CodeAttemptsQuery
-  | CodeDecisionsQuery
-  | CodeRefusalsQuery
-  | CodeTokenWindowsQuery;
-
-export async function listCodeAccounts(
+export function listCodeAccounts(
   filters: CodeAccountsQuery = {},
   signal?: AbortSignal
 ) {
-  return unwrapPage(
-    await apiClient.GET('/api/v1/code/accounts', {
-      params: { query: { limit: 50, ...filters } },
-      signal
-    })
+  return fetchPage(
+    (opts) => apiClient.GET('/api/v1/code/accounts', opts),
+    filters,
+    signal
   );
 }
 
-export async function saveCodeAccount(command: CodeSave<CodeAccountWrite>) {
-  if (command.kind === 'update')
-    return unwrap(
-      await apiClient.PUT('/api/v1/code/accounts/{id}', {
-        params: {
-          path: { id: command.current.id },
-          header: { 'If-Match': command.current.etag }
-        },
-        body: command.body
-      })
-    );
-  return unwrap(
-    await apiClient.POST('/api/v1/code/accounts', {
-      params: { header: { 'Idempotency-Key': command.requestId } },
-      body: command.body
-    })
-  );
+export function saveCodeAccount(command: CodeSave<CodeAccountWrite>) {
+  return persistResource(command, {
+    create: (opts) => apiClient.POST('/api/v1/code/accounts', opts),
+    update: (opts) => apiClient.PUT('/api/v1/code/accounts/{id}', opts)
+  });
 }
 
-export async function listCodePools(
+export function listCodePools(
   filters: CodePoolsQuery = {},
   signal?: AbortSignal
 ) {
-  return unwrapPage(
-    await apiClient.GET('/api/v1/code/pools', {
-      params: { query: { limit: 50, ...filters } },
-      signal
-    })
+  return fetchPage(
+    (opts) => apiClient.GET('/api/v1/code/pools', opts),
+    filters,
+    signal
   );
 }
 
-export async function saveCodePool(command: CodeSave<CodePoolWrite>) {
-  if (command.kind === 'update')
-    return unwrap(
-      await apiClient.PUT('/api/v1/code/pools/{id}', {
-        params: {
-          path: { id: command.current.id },
-          header: { 'If-Match': command.current.etag }
-        },
-        body: command.body
-      })
-    );
-  return unwrap(
-    await apiClient.POST('/api/v1/code/pools', {
-      params: { header: { 'Idempotency-Key': command.requestId } },
-      body: command.body
-    })
-  );
+export function saveCodePool(command: CodeSave<CodePoolWrite>) {
+  return persistResource(command, {
+    create: (opts) => apiClient.POST('/api/v1/code/pools', opts),
+    update: (opts) => apiClient.PUT('/api/v1/code/pools/{id}', opts)
+  });
 }
 
-export async function listCodeRoutes(
+export function listCodeRoutes(
   filters: CodeRoutesQuery = {},
   signal?: AbortSignal
 ) {
-  return unwrapPage(
-    await apiClient.GET('/api/v1/code/routes', {
-      params: { query: { limit: 50, ...filters } },
-      signal
-    })
+  return fetchPage(
+    (opts) => apiClient.GET('/api/v1/code/routes', opts),
+    filters,
+    signal
   );
 }
 
-export async function saveCodeRoute(command: CodeSave<CodeRouteWrite>) {
-  if (command.kind === 'update')
-    return unwrap(
-      await apiClient.PUT('/api/v1/code/routes/{id}', {
-        params: {
-          path: { id: command.current.id },
-          header: { 'If-Match': command.current.etag }
-        },
-        body: command.body
-      })
-    );
-  return unwrap(
-    await apiClient.POST('/api/v1/code/routes', {
-      params: { header: { 'Idempotency-Key': command.requestId } },
-      body: command.body
-    })
-  );
+export function saveCodeRoute(command: CodeSave<CodeRouteWrite>) {
+  return persistResource(command, {
+    create: (opts) => apiClient.POST('/api/v1/code/routes', opts),
+    update: (opts) => apiClient.PUT('/api/v1/code/routes/{id}', opts)
+  });
 }
 
-export async function listCodeBudgets(
+export function listCodeBudgets(
   filters: CodeBudgetsQuery = {},
   signal?: AbortSignal
 ) {
-  return unwrapPage(
-    await apiClient.GET('/api/v1/code/budgets', {
-      params: { query: { limit: 50, ...filters } },
-      signal
-    })
+  return fetchPage(
+    (opts) => apiClient.GET('/api/v1/code/budgets', opts),
+    filters,
+    signal
   );
 }
 
-export async function saveCodeBudget(command: CodeSave<CodeBudgetWrite>) {
-  if (command.kind === 'update')
-    return unwrap(
-      await apiClient.PUT('/api/v1/code/budgets/{id}', {
-        params: {
-          path: { id: command.current.id },
-          header: { 'If-Match': command.current.etag }
-        },
-        body: command.body
-      })
-    );
-  return unwrap(
-    await apiClient.POST('/api/v1/code/budgets', {
-      params: { header: { 'Idempotency-Key': command.requestId } },
-      body: command.body
-    })
-  );
+export function saveCodeBudget(command: CodeSave<CodeBudgetWrite>) {
+  return persistResource(command, {
+    create: (opts) => apiClient.POST('/api/v1/code/budgets', opts),
+    update: (opts) => apiClient.PUT('/api/v1/code/budgets/{id}', opts)
+  });
 }
 
-export async function listCodeBindings(
+export function listCodeBindings(
   filters: CodeBindingsQuery = {},
   signal?: AbortSignal
 ) {
-  return unwrapPage(
-    await apiClient.GET('/api/v1/code/bindings', {
-      params: { query: { limit: 50, ...filters } },
-      signal
-    })
+  return fetchPage(
+    (opts) => apiClient.GET('/api/v1/code/bindings', opts),
+    filters,
+    signal
   );
 }
 
-export async function listCodeAttempts(
+export function listCodeAttempts(
   filters: CodeAttemptsQuery = {},
   signal?: AbortSignal
 ) {
-  return unwrapPage(
-    await apiClient.GET('/api/v1/code/attempts', {
-      params: { query: { limit: 50, ...filters } },
-      signal
-    })
+  return fetchPage(
+    (opts) => apiClient.GET('/api/v1/code/attempts', opts),
+    filters,
+    signal
   );
 }
 
-export async function listCodeDecisions(
+export function listCodeDecisions(
   filters: CodeDecisionsQuery = {},
   signal?: AbortSignal
 ) {
-  return unwrapPage(
-    await apiClient.GET('/api/v1/code/decisions', {
-      params: { query: { limit: 50, ...filters } },
-      signal
-    })
+  return fetchPage(
+    (opts) => apiClient.GET('/api/v1/code/decisions', opts),
+    filters,
+    signal
   );
 }
 
-export async function listCodeRefusals(
+export function listCodeRefusals(
   filters: CodeRefusalsQuery = {},
   signal?: AbortSignal
 ) {
-  return unwrapPage(
-    await apiClient.GET('/api/v1/code/refusals', {
-      params: { query: { limit: 50, ...filters } },
-      signal
-    })
+  return fetchPage(
+    (opts) => apiClient.GET('/api/v1/code/refusals', opts),
+    filters,
+    signal
   );
 }
 
-export async function listCodeTokenWindows(
+export function listCodeTokenWindows(
   filters: CodeTokenWindowsQuery = {},
   signal?: AbortSignal
 ) {
-  return unwrapPage(
-    await apiClient.GET('/api/v1/code/token-windows', {
-      params: { query: { limit: 50, ...filters } },
-      signal
-    })
+  return fetchPage(
+    (opts) => apiClient.GET('/api/v1/code/token-windows', opts),
+    filters,
+    signal
   );
 }
 
@@ -307,8 +306,6 @@ export async function requestCodeAccountAllowanceRead(
   account: Pick<CodeAccount, 'id'>,
   requestId: string
 ) {
-  if (!requestId)
-    throw new Error('An allowance read requires a stable request ID.');
   return unwrap(
     await apiClient.POST('/api/v1/code/accounts/{id}/allowance-reads', {
       params: {

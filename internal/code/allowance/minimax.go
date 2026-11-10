@@ -1,0 +1,253 @@
+package allowance
+
+import (
+	"math"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/tyk-swe/olp/internal/code"
+	"github.com/tyk-swe/olp/internal/oif"
+)
+
+const (
+	RemainsURL     = "https://api.minimax.io/v1/token_plan/remains"
+	RemainsURLCN   = "https://api.minimax.cn/v1/token_plan/remains"
+	maxEpochMillis = int64(253402300800) * 1000
+)
+
+func ParseRemains(body []byte, accountModels []string, now time.Time) (code.Allowance, bool) {
+	document, err := oif.ParseJSON(body, oif.Limits{MaxBytes: maxUsageBytes})
+	if err != nil || now.IsZero() {
+		return code.Allowance{}, false
+	}
+	root := document.Root()
+	if root.Kind() != oif.Object || !remainsBaseOK(root) {
+		return code.Allowance{}, false
+	}
+	remains, present, valid := member(root, "model_remains")
+	if !valid || !present || remains.Kind() != oif.Array {
+		return code.Allowance{}, false
+	}
+	for _, element := range remains.Elements() {
+		if !remainsRowTypesValid(element) {
+			return code.Allowance{}, false
+		}
+	}
+	bucket, ok := selectCodingBucket(remains.Elements(), accountModels)
+	if !ok {
+		return code.Allowance{}, false
+	}
+	windows, ok := remainsWindows(bucket, now)
+	if !ok || len(windows) == 0 {
+		return code.Allowance{}, false
+	}
+	allowance := code.NewAllowance(now, windows, nil)
+	if allowance.Validate() != nil {
+		return code.Allowance{}, false
+	}
+	return allowance, true
+}
+
+func remainsBaseOK(root oif.Value) bool {
+	base, present, valid := member(root, "base_resp")
+	if !valid {
+		return false
+	}
+	if !present {
+		return true
+	}
+	if base.Kind() != oif.Object {
+		return false
+	}
+	statusCode, ok := requiredInt64(base, "status_code")
+	if !ok || statusCode != 0 {
+		return false
+	}
+	message, messagePresent, messageValid := member(base, "status_msg")
+	return messageValid && (!messagePresent || message.Kind() == oif.String)
+}
+
+var remainsRequiredIntFields = []string{
+	"start_time", "end_time", "remains_time",
+	"current_interval_total_count", "current_interval_usage_count",
+	"current_weekly_total_count", "current_weekly_usage_count",
+	"weekly_start_time", "weekly_end_time", "weekly_remains_time",
+}
+
+func remainsRowTypesValid(element oif.Value) bool {
+	if element.Kind() != oif.Object {
+		return false
+	}
+	for _, name := range remainsRequiredIntFields {
+		if _, ok := requiredInt64(element, name); !ok {
+			return false
+		}
+	}
+	for _, name := range []string{"current_interval_status", "current_weekly_status", "weekly_boost_permille"} {
+		if _, _, valid := optionalInt64(element, name); !valid {
+			return false
+		}
+	}
+	for _, name := range []string{"current_interval_remaining_percent", "current_weekly_remaining_percent"} {
+		value, present, valid := member(element, name)
+		if !valid {
+			return false
+		}
+		if !present {
+			continue
+		}
+		if value.Kind() != oif.Number {
+			return false
+		}
+		parsed, err := strconv.ParseFloat(value.Raw(), 64)
+		if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
+			return false
+		}
+	}
+	return true
+}
+
+func selectCodingBucket(elements []oif.Value, accountModels []string) (oif.Value, bool) {
+	type namedBucket struct {
+		value oif.Value
+		name  string
+		valid bool
+	}
+	rows := slices.Collect(func(yield func(namedBucket) bool) {
+		for _, element := range elements {
+			nameValue, present, valid := member(element, "model_name")
+			name, isText := nameValue.Text()
+			if !yield(namedBucket{value: element, name: name, valid: present && valid && isText}) {
+				return
+			}
+		}
+	})
+	if slices.ContainsFunc(rows, func(row namedBucket) bool { return !row.valid }) {
+		return oif.Value{}, false
+	}
+	candidates := slices.Collect(func(yield func(namedBucket) bool) {
+		for _, row := range rows {
+			if (row.name == "general" || row.name == "MiniMax-M*" || strings.HasPrefix(row.name, "MiniMax-M") && slices.Contains(accountModels, row.name)) && !yield(row) {
+				return
+			}
+		}
+	})
+	if len(candidates) == 1 {
+		return candidates[0].value, true
+	}
+	if len(candidates) == 0 {
+		return oif.Value{}, false
+	}
+	exact := slices.Collect(func(yield func(namedBucket) bool) {
+		for _, candidate := range candidates {
+			if slices.Contains(accountModels, candidate.name) && !yield(candidate) {
+				return
+			}
+		}
+	})
+	if len(exact) == 1 {
+		return exact[0].value, true
+	}
+	return oif.Value{}, false
+}
+
+type remainsWindowInput struct {
+	name         string
+	start, end   int64
+	percent      float64
+	percentFound bool
+	status       int64
+	statusFound  bool
+}
+
+func remainsWindows(bucket oif.Value, now time.Time) ([]code.AllowanceWindow, bool) {
+	required := map[string]int64{}
+	for _, name := range remainsRequiredIntFields {
+		value, ok := requiredInt64(bucket, name)
+		if !ok || value < 0 {
+			return nil, false
+		}
+		required[name] = value
+	}
+	if boost, present, valid := optionalInt64(bucket, "weekly_boost_permille"); !valid || present && boost < 0 {
+		return nil, false
+	}
+	interval, ok := remainsWindowInputFor(bucket, "primary", required["start_time"], required["end_time"], "current_interval_remaining_percent", "current_interval_status")
+	if !ok {
+		return nil, false
+	}
+	weekly, ok := remainsWindowInputFor(bucket, "weekly", required["weekly_start_time"], required["weekly_end_time"], "current_weekly_remaining_percent", "current_weekly_status")
+	if !ok {
+		return nil, false
+	}
+	windows := []code.AllowanceWindow{}
+	for _, input := range []remainsWindowInput{interval, weekly} {
+		window, emit, validWindow := remainsWindow(input, now)
+		if !validWindow {
+			return nil, false
+		}
+		if emit {
+			windows = append(windows, window)
+		}
+	}
+	return windows, true
+}
+
+func remainsWindowInputFor(bucket oif.Value, name string, start, end int64, percentName, statusName string) (remainsWindowInput, bool) {
+	input := remainsWindowInput{name: name, start: start, end: end}
+	percent, percentPresent, percentValid := optionalPercent(bucket, percentName)
+	if !percentValid {
+		return remainsWindowInput{}, false
+	}
+	input.percent, input.percentFound = percent, percentPresent
+	status, statusPresent, statusValid := optionalInt64(bucket, statusName)
+	if !statusValid || statusPresent && (status < 1 || status > 3) {
+		return remainsWindowInput{}, false
+	}
+	input.status, input.statusFound = status, statusPresent
+	return input, true
+}
+
+func remainsWindow(input remainsWindowInput, now time.Time) (code.AllowanceWindow, bool, bool) {
+	remaining, found := input.percent, input.percentFound
+	if input.statusFound && input.status == 2 {
+		remaining, found = 0, true
+	}
+	if !found {
+		return code.AllowanceWindow{}, false, true
+	}
+	if input.end <= 0 || input.end >= maxEpochMillis || input.start < 0 || input.start >= maxEpochMillis {
+		return code.AllowanceWindow{}, false, false
+	}
+	reset := time.UnixMilli(input.end).UTC()
+	window := code.AllowanceWindow{
+		LimitID: "minimax", Window: input.name, Unit: code.AllowanceUnitPercent,
+		Evidence: code.AllowanceEvidenceActive, UsedPercent: 100 - remaining,
+		RemainingPercent: remaining, ResetsAt: &reset, ObservedAt: now,
+	}
+	if span := input.end - input.start; span > 0 && span%60000 == 0 {
+		minutes := span / 60000
+		window.WindowMinutes = &minutes
+	}
+	if window.Validate() != nil {
+		return code.AllowanceWindow{}, false, false
+	}
+	return window, true, true
+}
+
+func optionalPercent(object oif.Value, name string) (float64, bool, bool) {
+	value, present, valid := member(object, name)
+	if !valid || !present {
+		return 0, present, valid
+	}
+	if value.Kind() != oif.Number {
+		return 0, true, false
+	}
+	parsed, err := strconv.ParseFloat(value.Raw(), 64)
+	if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed < 0 || parsed > 100 {
+		return 0, true, false
+	}
+	return parsed, true, true
+}

@@ -401,9 +401,7 @@ func (s *Server) simulateRouting(r *http.Request, p access.Principal) (access.Re
 	return access.OK(leg.Decisions), nil
 }
 
-// Register mounts the route surface.
 func (s *Server) Register(mux *http.ServeMux) {
-	s.registerCodeMode(mux)
 	s.Access.Route(mux, "GET /api/v1/route-drafts", s.drafts)
 	s.Access.Route(mux, "POST /api/v1/route-drafts", s.createDraft)
 	s.Access.Route(mux, "GET /api/v1/route-drafts/{draft_id}", s.draft)

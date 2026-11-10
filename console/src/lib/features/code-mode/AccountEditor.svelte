@@ -17,9 +17,10 @@
   import {
     extraUsageAdapterFor,
     extraUsageValue,
-    nativeModels,
+    parseNativeModels,
     providerProfilePending,
-    showsExtraUsage
+    showsExtraUsage,
+    type Validation
   } from './presentation';
 
   import AccountEnrollment from './AccountEnrollment.svelte';
@@ -87,20 +88,27 @@
     onSaved: () => onSaved(),
     onCancel: () => onCancel(),
     blocked: () => enrolling || profilePending,
-    build: (): CodeAccountWrite => ({
-      project_id: projectId,
-      name,
-      provider_id: providerId,
-      credential_id: credentialId,
-      models: nativeModels(models),
-      cycle_anchor: qwenTokenPlan && cycleAnchor ? cycleAnchor : null,
-      enabled,
-      extra_usage_enabled: extraUsageValue(
-        extraUsageAdapter,
-        extraUsage,
-        initial?.extra_usage_enabled
-      )
-    }),
+    build: (): Validation<CodeAccountWrite> => {
+      const parsedModels = parseNativeModels(models);
+      if (!parsedModels.ok) return parsedModels;
+      return {
+        ok: true,
+        value: {
+          project_id: projectId,
+          name,
+          provider_id: providerId,
+          credential_id: credentialId,
+          models: parsedModels.value,
+          cycle_anchor: qwenTokenPlan && cycleAnchor ? cycleAnchor : null,
+          enabled,
+          extra_usage_enabled: extraUsageValue(
+            extraUsageAdapter,
+            extraUsage,
+            initial?.extra_usage_enabled
+          )
+        }
+      };
+    },
     persist: (input, requestId) =>
       saveCodeAccount(
         current

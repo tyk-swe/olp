@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/code"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -19,7 +19,7 @@ func compileCodeMode(ctx context.Context, tx pgx.Tx, s *routing.Snapshot) error 
 		var slug string
 		var document, encoded, paidEncoded []byte
 		var connections map[string]routing.Configuration
-		var route codemode.Route
+		var route code.Route
 		if err = rows.Scan(&slug, &document, &encoded, &paidEncoded); err != nil {
 			return err
 		}
@@ -27,7 +27,7 @@ func compileCodeMode(ctx context.Context, tx pgx.Tx, s *routing.Snapshot) error 
 			return err
 		}
 		if s.CodeRoutes == nil {
-			s.CodeRoutes = map[string]codemode.Route{}
+			s.CodeRoutes = map[string]code.Route{}
 		}
 		s.CodeRoutes[slug] = route
 		var paid map[string]routing.Provider

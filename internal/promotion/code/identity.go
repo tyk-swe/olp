@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
+	domain "github.com/tyk-swe/olp/internal/code"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 )
@@ -52,20 +53,20 @@ func lookup(absent string, ids []string) (destination, error) {
 	return destination{}, ambiguous()
 }
 
-func mapped(ref, project, derived string, unique bool, candidates []access.CodeCandidate) (destination, error) {
-	if direct := slices.IndexFunc(candidates, func(c access.CodeCandidate) bool { return c.ID == ref && c.ProjectID == project }); direct >= 0 {
+func mapped(ref, project, derived string, unique bool, candidates []domain.CandidateMatch) (destination, error) {
+	if direct := slices.IndexFunc(candidates, func(c domain.CandidateMatch) bool { return c.ID == ref && c.ProjectID == project }); direct >= 0 {
 		if !candidates[direct].ScopeMatches {
 			return destination{}, access.Invalid("code", "A destination artifact reference cannot change its immutable resource scope.")
 		}
 		return destination{id: ref, existing: true}, nil
 	}
-	if stable := slices.IndexFunc(candidates, func(c access.CodeCandidate) bool { return c.ID == derived }); stable >= 0 {
+	if stable := slices.IndexFunc(candidates, func(c domain.CandidateMatch) bool { return c.ID == derived }); stable >= 0 {
 		if candidates[stable].ProjectID != project || !candidates[stable].ScopeMatches {
 			return destination{}, access.Invalid("code", "A mapped destination resource cannot change its immutable scope.")
 		}
 		return destination{id: derived, existing: true}, nil
 	}
-	natural := func(c access.CodeCandidate) bool { return c.ProjectID == project && c.NaturalMatches }
+	natural := func(c domain.CandidateMatch) bool { return c.ProjectID == project && c.NaturalMatches }
 	first := slices.IndexFunc(candidates, natural)
 	if first < 0 {
 		return destination{id: derived}, nil

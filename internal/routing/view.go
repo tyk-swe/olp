@@ -7,8 +7,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/agentcontract"
-	"github.com/tyk-swe/olp/internal/codeadapter"
-	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/code"
 	"github.com/tyk-swe/olp/internal/duplexcontract"
 	"github.com/tyk-swe/olp/internal/durablecontract"
 	"github.com/tyk-swe/olp/internal/guardrails"
@@ -99,12 +98,12 @@ func (v *View) AgentPublications() []agentcontract.Revision {
 		}
 	})
 }
-func (v *View) FindCodeRoute(slug string) (codemode.Route, bool) {
+func (v *View) FindCodeRoute(slug string) (code.Route, bool) {
 	route, ok := v.snapshot.CodeRoutes[slug]
 	return cloneCodeRoute(route), ok
 }
-func (v *View) CodeRoutes() iter.Seq2[string, codemode.Route] {
-	return func(yield func(string, codemode.Route) bool) {
+func (v *View) CodeRoutes() iter.Seq2[string, code.Route] {
+	return func(yield func(string, code.Route) bool) {
 		for slug, route := range v.snapshot.CodeRoutes {
 			if !yield(slug, cloneCodeRoute(route)) {
 				return
@@ -112,11 +111,11 @@ func (v *View) CodeRoutes() iter.Seq2[string, codemode.Route] {
 		}
 	}
 }
-func (v *View) FindCodePaidConnection(id string) (Provider, bool) {
-	provider, ok := v.snapshot.CodePaidConnections[id]
+func (v *View) CodePaidConnection(route code.Route, providerID string) (Provider, bool) {
+	provider, ok := v.snapshot.CodePaidConnection(route, providerID)
 	return cloneProvider(provider), ok
 }
-func (v *View) CodeConnection(route codemode.Route, providerID string) (Configuration, bool) {
+func (v *View) CodeConnection(route code.Route, providerID string) (Configuration, bool) {
 	configuration, ok := v.snapshot.CodeConnection(route, providerID)
 	return configuration.Clone(), ok
 }
@@ -136,14 +135,14 @@ func (v *View) ToolGuardrailEngine(toolsetID, key string) *guardrails.Engine {
 func (v *View) MCPToolset(revisionID string) (MCPToolsetResolution, bool) {
 	return v.snapshot.MCPToolset(revisionID)
 }
-func (v *View) HasCodeAdapters(route codemode.Route) bool { return v.snapshot.HasCodeAdapters(route) }
-func (v *View) CodeProviders(route codemode.Route, path string, transport codeadapter.Transport) []string {
+func (v *View) HasCodeAdapters(route code.Route) bool { return v.snapshot.HasCodeAdapters(route) }
+func (v *View) CodeProviders(route code.Route, path string, transport code.Transport) []string {
 	return v.snapshot.CodeProviders(route, path, transport)
 }
-func (v *View) HasCodeProviders(route codemode.Route, path string, transport codeadapter.Transport) bool {
+func (v *View) HasCodeProviders(route code.Route, path string, transport code.Transport) bool {
 	return v.snapshot.HasCodeProviders(route, path, transport)
 }
-func (v *View) CodeModelProviders(route codemode.Route, path, model string, transport codeadapter.Transport) []string {
+func (v *View) CodeModelProviders(route code.Route, path, model string, transport code.Transport) []string {
 	return v.snapshot.CodeModelProviders(route, path, model, transport)
 }
 

@@ -9,7 +9,11 @@ import (
 
 	"github.com/tyk-swe/olp/internal/guardrails/policy"
 
-	"github.com/tyk-swe/olp/internal/codesessions"
+	codeaccount "github.com/tyk-swe/olp/internal/code/account"
+	codebudget "github.com/tyk-swe/olp/internal/code/budget"
+	codepool "github.com/tyk-swe/olp/internal/code/pool"
+	coderoute "github.com/tyk-swe/olp/internal/code/route"
+	codesession "github.com/tyk-swe/olp/internal/code/session"
 	"github.com/tyk-swe/olp/internal/guardrails/credential"
 	"github.com/tyk-swe/olp/internal/guardrails/definition"
 
@@ -155,7 +159,11 @@ func (m Management) Register(mux *http.ServeMux) {
 	routeServer.Register(mux)
 	(&gateway.Playground{Access: m.Access, Gateway: m.Gateway}).Register(mux)
 	(&media.Management{Access: m.Access, Pool: m.Access.Pool, Jobs: m.Media, Log: m.Log}).Register(mux)
-	codesessions.NewManagement(m.Access).Register(mux)
+	codeaccount.NewAPI(m.Access).Register(mux)
+	codepool.NewAPI(m.Access).Register(mux)
+	codebudget.NewAPI(m.Access).Register(mux)
+	coderoute.NewAPI(m.Access, m.PluginHost, publishGuardrails).Register(mux)
+	codesession.NewAPI(m.Access).Register(mux)
 	(&resources.Management{Access: m.Access, Pool: m.Access.Pool}).Register(mux)
 	(&management.Overview{Access: m.Access}).Register(mux)
 	health := &observability.Management{Access: m.Access, Cache: m.Health, Pool: m.Access.Pool}

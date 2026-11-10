@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/codeadapter"
+	"github.com/tyk-swe/olp/internal/code/vendor"
 )
 
 func liveBody(protocol, model string) map[string]any {
@@ -423,11 +423,11 @@ func TestLiveLaneTableCoversRequiredProfiles(t *testing.T) {
 			t.Fatalf("lane %s has missing or duplicate env names", spec.id())
 		}
 		keyEnvs[spec.keyEnv] = true
-		vendor, ok := codeadapter.ForConnection("plugin", "grant", spec.profile)
-		if !ok || string(vendor.Adapter) != spec.adapter {
-			t.Fatalf("lane %s does not resolve through codeadapter", spec.id())
+		v, ok := vendor.ForConnection("plugin", "grant", spec.profile)
+		if !ok || string(v.Adapter) != spec.adapter {
+			t.Fatalf("lane %s does not resolve through code/vendor", spec.id())
 		}
-		if _, ok := vendor.Address(spec.profile); !ok {
+		if _, ok := v.Address(spec.profile); !ok {
 			t.Fatalf("lane %s has no real vendor address", spec.id())
 		}
 	}

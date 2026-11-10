@@ -1,17 +1,9 @@
 import type { CredentialSlot } from '#lib/features/providers/credentials.js';
-export type PaidTargetOption = {
-  id: string;
-  name: string;
-  slots: CredentialSlot[];
-};
 import type {
   CodeAccount,
   CodeAllowanceWindow,
   CodeAttempt,
-  CodeBudget,
-  CodeDecision,
-  CodePool,
-  CodeRoute
+  CodeDecision
 } from '#lib/features/code-mode/api.js';
 import {
   errorMessage,
@@ -20,11 +12,14 @@ import {
 } from '#lib/management/http.js';
 import { formatInteger } from '#lib/format.js';
 
-export type CodeEditing =
-  | { kind: 'accounts'; current?: CodeAccount }
-  | { kind: 'pools'; current?: CodePool }
-  | { kind: 'routes'; current?: CodeRoute }
-  | { kind: 'budgets'; current?: CodeBudget };
+export type PaidTargetOption = {
+  id: string;
+  name: string;
+  slots: CredentialSlot[];
+};
+
+export type Validation<T> =
+  { ok: true; value: T } | { ok: false; message: string };
 
 const adapterLabels: Record<string, string> = {
   codex: 'Codex',
@@ -157,44 +152,7 @@ export function allowanceEvidenceLabel(
   return evidence === 'active' ? 'Active read' : 'Passive observation';
 }
 
-export function nextMonthlyReset(
-  anchor: string | null | undefined,
-  now: Date
-): string | null {
-  const match = anchor?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!match) return null;
-  const day = Number(match[3]);
-  const anchorDate = new Date(
-    Date.UTC(Number(match[1]), Number(match[2]) - 1, day)
-  );
-  if (
-    anchorDate.getUTCDate() !== day ||
-    anchorDate.getUTCMonth() !== Number(match[2]) - 1
-  ) {
-    return null;
-  }
-  for (let offset = -1; offset <= 2; offset += 1) {
-    const probe = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + offset, 1)
-    );
-    const lastDay = new Date(
-      Date.UTC(probe.getUTCFullYear(), probe.getUTCMonth() + 1, 0)
-    ).getUTCDate();
-    const candidate = new Date(
-      Date.UTC(
-        probe.getUTCFullYear(),
-        probe.getUTCMonth(),
-        Math.min(day, lastDay)
-      )
-    );
-    if (candidate.getTime() > now.getTime()) {
-      return candidate.toISOString().slice(0, 10);
-    }
-  }
-  return null;
-}
-
-export function nativeModels(value: string): string[] {
+export function parseNativeModels(value: string): Validation<string[]> {
   const models = value.split(/[\s,]+/).filter(Boolean);
   if (
     !models.length ||
@@ -204,25 +162,26 @@ export function nativeModels(value: string): string[] {
     ) ||
     new Set(models).size !== models.length
   ) {
-    throw new Error(
-      'Enter 1–100 unique native model identifiers, separated by spaces or commas.'
-    );
+    return {
+      ok: false,
+      message:
+        'Enter 1–100 unique native model identifiers, separated by spaces or commas.'
+    };
   }
-  return models;
+  return { ok: true, value: models };
 }
 
-export function tokenLimit(value: string): number | null {
-  if (!value.trim()) return null;
-  if (
-    !/^\d+$/.test(value) ||
-    !Number.isSafeInteger(Number(value)) ||
-    Number(value) < 1
-  ) {
-    throw new Error(
-      'Token limits must be positive whole numbers no greater than 9007199254740991.'
-    );
+export function parseTokenLimit(value: string): Validation<number | null> {
+  if (!value.trim()) return { ok: true, value: null };
+  const parsed = Number(value);
+  if (!/^\d+$/.test(value) || !Number.isSafeInteger(parsed) || parsed < 1) {
+    return {
+      ok: false,
+      message:
+        'Token limits must be positive whole numbers no greater than 9007199254740991.'
+    };
   }
-  return Number(value);
+  return { ok: true, value: parsed };
 }
 
 export function mutationError(error: unknown): string {

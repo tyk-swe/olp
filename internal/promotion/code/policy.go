@@ -9,10 +9,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/codemode"
+	domain "github.com/tyk-swe/olp/internal/code"
+	coderoute "github.com/tyk-swe/olp/internal/code/route"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
-	"github.com/tyk-swe/olp/internal/routes"
 )
 
 type Policy struct {
@@ -31,7 +31,7 @@ type Policy struct {
 	PaidParticipation       bool
 	PaidTargets             map[string]PaidTarget
 	PaidFallbackTargets     map[string]PaidTarget
-	Tools                   *codemode.ResearchTools
+	Tools                   *domain.ResearchTools
 	MaxBodyBytes            *int64
 }
 
@@ -46,11 +46,11 @@ func policyOf(e contract.ConfigurationCodeRoutePolicy) Policy {
 	}
 }
 
-func toolsOf(tools *contract.CodeResearchTools) *codemode.ResearchTools {
+func toolsOf(tools *contract.CodeResearchTools) *domain.ResearchTools {
 	if tools == nil {
 		return nil
 	}
-	return &codemode.ResearchTools{AccountID: tools.AccountId.String(), Services: promotion.Map(tools.Services, func(s contract.CodeResearchToolsServices) string { return string(s) })}
+	return &domain.ResearchTools{AccountID: tools.AccountId.String(), Services: promotion.Map(tools.Services, func(s contract.CodeResearchToolsServices) string { return string(s) })}
 }
 
 func widened(limit *int) *int64 {
@@ -60,8 +60,8 @@ func widened(limit *int) *int64 {
 	return new(int64(*limit))
 }
 
-func (p Policy) input(project, slug, pool string, tools *codemode.ResearchTools, targets, fallback map[string]codemode.PaidTarget) routes.CodeRouteInput {
-	return routes.CodeRouteInput{
+func (p Policy) input(project, slug, pool string, tools *domain.ResearchTools, targets, fallback map[string]domain.PaidTarget) coderoute.Input {
+	return coderoute.Input{
 		ProjectID: project, Slug: slug, PoolID: pool, Models: promotion.NonNil(slices.Clone(p.Models)), Enabled: p.Enabled,
 		ModelPools: maps.Collect(maps.All(p.ModelPools)), Aliases: maps.Collect(maps.All(p.Aliases)), InitialRecoveryAttempts: p.InitialRecoveryAttempts,
 		ModelRewriting: p.ModelRewriting, CodexCLIIdentity: p.CodexCLIIdentity, ChatToCodex: p.ChatToCodex, MessagesToCodex: p.MessagesToCodex,
@@ -70,11 +70,11 @@ func (p Policy) input(project, slug, pool string, tools *codemode.ResearchTools,
 	}
 }
 
-func inputOf(route codemode.Route) routes.CodeRouteInput {
+func inputOf(route domain.Route) coderoute.Input {
 	return stored(route, nil, nil).input(route.ProjectID, route.Slug, route.PoolID, route.Tools, route.PaidTargets, route.PaidFallbackTargets)
 }
 
-func stored(route codemode.Route, targets, fallback map[string]PaidTarget) Policy {
+func stored(route domain.Route, targets, fallback map[string]PaidTarget) Policy {
 	return Policy{
 		Pool: route.PoolID, Models: route.Models, Enabled: route.Enabled, ModelPools: route.ModelPools, Aliases: route.Aliases, InitialRecoveryAttempts: route.InitialRecoveryAttempts,
 		ModelRewriting: route.ModelRewriting, CodexCLIIdentity: route.CodexCLIIdentity, ChatToCodex: route.ChatToCodex, MessagesToCodex: route.MessagesToCodex,
@@ -83,7 +83,7 @@ func stored(route codemode.Route, targets, fallback map[string]PaidTarget) Polic
 	}
 }
 
-func portablePolicy(route codemode.Route, slots map[string]PaidTarget) (Policy, error) {
+func portablePolicy(route domain.Route, slots map[string]PaidTarget) (Policy, error) {
 	targets, err := portableTargets(route.PaidTargets, slots)
 	if err != nil {
 		return Policy{}, err
@@ -92,30 +92,30 @@ func portablePolicy(route codemode.Route, slots map[string]PaidTarget) (Policy, 
 	return stored(route, targets, fallback), err
 }
 
-func (p Policy) resolve(ctx context.Context, q access.Queryer, slug, projectID string, in scope) (routes.CodeRouteInput, error) {
+func (p Policy) resolve(ctx context.Context, q access.Queryer, slug, projectID string, in scope) (coderoute.Input, error) {
 	targets, err := resolveTargets(ctx, q, p.PaidTargets, projectID, in.bindings.credentials)
 	if err != nil {
-		return routes.CodeRouteInput{}, err
+		return coderoute.Input{}, err
 	}
 	fallback, err := resolveTargets(ctx, q, p.PaidFallbackTargets, projectID, in.bindings.credentials)
 	if err != nil {
-		return routes.CodeRouteInput{}, err
+		return coderoute.Input{}, err
 	}
 	return p.input(projectID, slug, destinations(in.pools)[p.Pool], onAccount(p.Tools, destinations(in.accounts)), targets, fallback), nil
 }
 
-func onAccount(tools *codemode.ResearchTools, accounts map[string]string) *codemode.ResearchTools {
+func onAccount(tools *domain.ResearchTools, accounts map[string]string) *domain.ResearchTools {
 	if tools == nil {
 		return nil
 	}
-	return &codemode.ResearchTools{AccountID: accounts[tools.AccountID], Services: tools.Services}
+	return &domain.ResearchTools{AccountID: accounts[tools.AccountID], Services: tools.Services}
 }
 
-func cloned(tools *codemode.ResearchTools) *codemode.ResearchTools {
+func cloned(tools *domain.ResearchTools) *domain.ResearchTools {
 	if tools == nil {
 		return nil
 	}
-	return &codemode.ResearchTools{AccountID: tools.AccountID, Services: promotion.NonNil(slices.Clone(tools.Services))}
+	return &domain.ResearchTools{AccountID: tools.AccountID, Services: promotion.NonNil(slices.Clone(tools.Services))}
 }
 
 func (p Policy) paidTargets() iter.Seq2[string, PaidTarget] {
@@ -158,7 +158,7 @@ func renderPolicy(p Policy) (contract.ConfigurationCodeRoutePolicy, error) {
 	}, nil
 }
 
-func renderTools(tools *codemode.ResearchTools) (nullable.Nullable[contract.CodeResearchTools], error) {
+func renderTools(tools *domain.ResearchTools) (nullable.Nullable[contract.CodeResearchTools], error) {
 	if tools == nil {
 		return nullable.Nullable[contract.CodeResearchTools]{}, nil
 	}

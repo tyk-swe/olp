@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/codesessions"
-
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/codeadapter"
+	"github.com/tyk-swe/olp/internal/code"
+	"github.com/tyk-swe/olp/internal/code/session"
+	"github.com/tyk-swe/olp/internal/code/vendor"
 )
 
 func TestCodeAccountEndpoints(t *testing.T) {
@@ -69,10 +69,10 @@ func TestCodeAccountEndpoints(t *testing.T) {
 	if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_accounts SET models='["model","other"]' WHERE id=$1`, minimax); err != nil {
 		t.Fatal(err)
 	}
-	store := codesessions.New(s.pool)
+	store := session.New(s.pool)
 	retryAt := time.Now().Add(time.Hour)
 	for _, account := range []string{codex, minimax} {
-		if err := store.ObserveCooldownClass(t.Context(), account, "model", codeadapter.Classification{Class: codeadapter.CooldownCapacity, Scope: codeadapter.ScopeModel, RetryAt: retryAt}, time.Now()); err != nil {
+		if err := store.ObserveCooldownClass(t.Context(), account, "model", vendor.Classification{Class: code.CooldownCapacity, Scope: code.ScopeModel, RetryAt: retryAt}, time.Now()); err != nil {
 			t.Fatal(err)
 		}
 	}

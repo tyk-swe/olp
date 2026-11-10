@@ -4,20 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/tyk-swe/olp/internal/providerconfig"
-	"strings"
-
 	"fmt"
-	"github.com/jackc/pgx/v5"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/codeadapter"
-	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/code"
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/providerconfig"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -31,20 +29,20 @@ func BenchmarkCodeProviders(b *testing.B) {
 			if err := s.Compile(); err != nil {
 				b.Fatal(err)
 			}
-			route := codemode.Route{RevisionID: "revision-0"}
-			if got := s.CodeProviders(route, "responses", codeadapter.HTTP); !slices.Equal(got, []string{"provider"}) {
+			route := code.Route{RevisionID: "revision-0"}
+			if got := s.CodeProviders(route, "responses", code.HTTP); !slices.Equal(got, []string{"provider"}) {
 				b.Fatalf("providers %q", got)
 			}
 			b.ReportAllocs()
 			for b.Loop() {
-				s.CodeProviders(route, "responses", codeadapter.HTTP)
+				s.CodeProviders(route, "responses", code.HTTP)
 			}
 		})
 	}
 }
 
 type codeSnapshotPublication struct {
-	route    codemode.Route
+	route    code.Route
 	provider routing.Provider
 }
 
@@ -82,7 +80,6 @@ func (codeSnapshotSettingsRow) Scan(dest ...any) error {
 	default:
 		return fmt.Errorf("unexpected fixture destination %T", dest[0])
 	}
-
 	return nil
 }
 
@@ -131,7 +128,7 @@ func TestReadSnapshotPreservesPaidTargetPerPublication(t *testing.T) {
 	project, providerID, slotID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	publications := slices.Collect(func(yield func(codeSnapshotPublication) bool) {
 		for _, slug := range []string{"coding-first", "coding-second"} {
-			route := codemode.Route{ID: uuid.NewString(), ProjectID: project, Slug: slug, PoolID: uuid.NewString(), Models: []string{"native-model"}, Enabled: true, RevisionID: uuid.NewString(), Revision: 1, PublishedAt: new(time.Now().UTC()), PaidParticipation: true, PaidTargets: map[string]codemode.PaidTarget{"native-model": {ProviderID: providerID, SlotID: slotID}}}
+			route := code.Route{ID: uuid.NewString(), ProjectID: project, Slug: slug, PoolID: uuid.NewString(), Models: []string{"native-model"}, Enabled: true, RevisionID: uuid.NewString(), Revision: 1, PublishedAt: new(time.Now().UTC()), PaidParticipation: true, PaidTargets: map[string]code.PaidTarget{"native-model": {ProviderID: providerID, SlotID: slotID}}}
 			provider := routing.Provider{ID: providerID, RevisionID: uuid.NewString(), ProjectID: &project, Name: slug, Kind: "openai", Enabled: true, Endpoint: "https://" + slug + ".example/v1", AuthMode: "api_key", ProfileID: "openai-responses", ProfileRevision: connectors.ProfileRevision, VendorID: "openai", Slots: []routing.Slot{{ID: slotID, Enabled: true, CredentialID: new(uuid.NewString()), CredentialVersion: new(1), AllowedModels: route.Models}}, Capabilities: []routing.Capability{{Model: "native-model", Operation: "generation", Surface: "openai", Mode: "unary"}}}
 			if !yield(codeSnapshotPublication{route: route, provider: provider}) {
 				return
@@ -144,8 +141,8 @@ func TestReadSnapshotPreservesPaidTargetPerPublication(t *testing.T) {
 	}
 	for _, publication := range publications {
 		route := snapshot.CodeRoutes[publication.route.Slug]
-		selected := snapshot.CodePaidConnections[route.RevisionID+":"+route.PaidTargets["native-model"].ProviderID]
-		if selected.RevisionID != publication.provider.RevisionID || selected.Endpoint != publication.provider.Endpoint || selected.VendorID != publication.provider.VendorID || selected.ProjectID == nil || *selected.ProjectID != project {
+		selected, ok := snapshot.CodePaidConnection(route, route.PaidTargets["native-model"].ProviderID)
+		if !ok || selected.RevisionID != publication.provider.RevisionID || selected.Endpoint != publication.provider.Endpoint || selected.VendorID != publication.provider.VendorID || selected.ProjectID == nil || *selected.ProjectID != project {
 			t.Fatalf("paid target lost publication ownership %+v", selected)
 		}
 		if len(selected.Slots) != 1 {
@@ -155,8 +152,8 @@ func TestReadSnapshotPreservesPaidTargetPerPublication(t *testing.T) {
 		if slot.ID != slotID || slot.CredentialID == nil || *slot.CredentialID != *publication.provider.Slots[0].CredentialID || slot.CredentialVersion == nil || *slot.CredentialVersion != *publication.provider.Slots[0].CredentialVersion {
 			t.Fatalf("paid target lost frozen credential authority %+v", slot)
 		}
-		if protocol, ok := routing.CodePaidProtocol(selected, "native-model"); !ok || protocol != codemode.ProtocolResponses {
-			t.Fatalf("published paid target is not natively usable %q %v", protocol, ok)
+		if protocol, streaming, ok := routing.CodePaidProtocol(selected, "native-model"); !ok || streaming || protocol != code.ProtocolResponses {
+			t.Fatalf("published paid target is not natively usable %q streaming=%v ok=%v", protocol, streaming, ok)
 		}
 	}
 }

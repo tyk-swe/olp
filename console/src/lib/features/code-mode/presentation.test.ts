@@ -13,21 +13,21 @@ import {
   extraUsageAdapterFor,
   extraUsageLabel,
   extraUsageValue,
-  providerProfilePending,
-  showsExtraUsage,
-  skipClassLabel,
   mutationError,
-  nativeModels,
-  nextMonthlyReset,
+  parseNativeModels,
+  parseTokenLimit,
+  providerProfilePending,
   recoveryReasonLabel,
   refusalAdvice,
   reservationLabel,
   servingHealthLabel,
+  showsExtraUsage,
+  skipClassLabel,
   tokenCount,
-  tokenLimit,
-  utcWindowStart,
-  usageCertaintyLabel
+  usageCertaintyLabel,
+  utcWindowStart
 } from './presentation';
+import { buildRouteWrite, parseAliases, parseModelPools } from './routeDraft';
 
 const attempt: CodeAttempt = {
   id: '10000000-0000-4000-8000-000000000001',
@@ -64,23 +64,31 @@ const attempt: CodeAttempt = {
 
 describe('code configuration input', () => {
   it('preserves native identifier spelling and order across separators', () => {
-    expect(nativeModels('  Team-Model,namespace/model:v1\nsmall_2  ')).toEqual([
-      'Team-Model',
-      'namespace/model:v1',
-      'small_2'
-    ]);
+    expect(
+      parseNativeModels('  Team-Model,namespace/model:v1\nsmall_2  ')
+    ).toEqual({
+      ok: true,
+      value: ['Team-Model', 'namespace/model:v1', 'small_2']
+    });
   });
 
   it.each(['', ', \n ', 'same,same', '_invalid', 'invalid*', 'm'.repeat(201)])(
     'rejects invalid model declarations %s',
-    (value) =>
-      expect(() => nativeModels(value)).toThrow(/native model identifiers/)
+    (value) => {
+      const result = parseNativeModels(value);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.message).toMatch(/native model identifiers/);
+      }
+    }
   );
 
   it.each(['valid-model,invalid*', 'invalid*,valid-model'])(
     'rejects a declaration containing an invalid member %s',
-    (value) =>
-      expect(() => nativeModels(value)).toThrow(/native model identifiers/)
+    (value) => {
+      const result = parseNativeModels(value);
+      expect(result.ok).toBe(false);
+    }
   );
 
   it('accepts the declared model capacity and refuses overflow', () => {
@@ -88,18 +96,22 @@ describe('code configuration input', () => {
       { length: 100 },
       (_, index) => `fixture-${index}`
     );
-    expect(nativeModels(models.join(','))).toEqual(models);
-    expect(() => nativeModels([...models, 'one-more'].join(','))).toThrow();
+    expect(parseNativeModels(models.join(','))).toEqual({
+      ok: true,
+      value: models
+    });
+    expect(parseNativeModels([...models, 'one-more'].join(',')).ok).toBe(false);
   });
 
   it('distinguishes no token cap from positive safe integer caps', () => {
-    expect(tokenLimit('')).toBeNull();
-    expect(tokenLimit(' \n ')).toBeNull();
-    expect(tokenLimit('1')).toBe(1);
-    expect(tokenLimit('0012')).toBe(12);
-    expect(tokenLimit(String(Number.MAX_SAFE_INTEGER))).toBe(
-      Number.MAX_SAFE_INTEGER
-    );
+    expect(parseTokenLimit('')).toEqual({ ok: true, value: null });
+    expect(parseTokenLimit(' \n ')).toEqual({ ok: true, value: null });
+    expect(parseTokenLimit('1')).toEqual({ ok: true, value: 1 });
+    expect(parseTokenLimit('0012')).toEqual({ ok: true, value: 12 });
+    expect(parseTokenLimit(String(Number.MAX_SAFE_INTEGER))).toEqual({
+      ok: true,
+      value: Number.MAX_SAFE_INTEGER
+    });
   });
 
   it.each([
@@ -110,9 +122,62 @@ describe('code configuration input', () => {
     '+1',
     'Infinity',
     String(Number.MAX_SAFE_INTEGER + 1)
-  ])('rejects an invalid token cap %s', (value) =>
-    expect(() => tokenLimit(value)).toThrow(/positive whole numbers/)
-  );
+  ])('rejects an invalid token cap %s', (value) => {
+    const result = parseTokenLimit(value);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.message).toMatch(/positive whole numbers/);
+    }
+  });
+
+  it('validates route aliases, model pools and paid fallback invariants as values', () => {
+    expect(parseAliases('team=native-a', ['native-a'], false)).toEqual({
+      ok: false,
+      message: 'Enable model rewriting to publish aliases.'
+    });
+    expect(parseAliases('team=native-a', ['native-a'], true)).toEqual({
+      ok: true,
+      value: { team: 'native-a' }
+    });
+    expect(
+      parseModelPools(
+        'team=native-a,native-b',
+        ['native-a', 'native-b'],
+        { team: 'native-a' },
+        true
+      )
+    ).toEqual({
+      ok: true,
+      value: { team: ['native-a', 'native-b'] }
+    });
+    const conflict = buildRouteWrite({
+      projectId: 'p1',
+      slug: 'team-route',
+      poolId: 'pool-1',
+      maxBodyBytes: '',
+      models: 'native-a',
+      paidParticipation: true,
+      paidTargets: { 'native-a': { provider_id: 'prov-1', slot_id: 'slot-1' } },
+      paidFallbackTargets: {
+        'native-a': { provider_id: 'prov-1', slot_id: 'slot-1' }
+      },
+      enabled: true,
+      modelRewriting: false,
+      aliases: '',
+      modelPools: '',
+      recoveryAttempts: 1,
+      chatToCodex: false,
+      messagesToCodex: false,
+      codexCLIIdentity: false,
+      chatToAntigravity: false,
+      allowanceOrdering: false,
+      research: false,
+      researchAccount: '',
+      researchServices: [],
+      researchAccounts: []
+    });
+    expect(conflict.ok).toBe(false);
+  });
 });
 
 describe('code diagnostics', () => {
@@ -441,31 +506,6 @@ describe('extra usage presentation', () => {
     expect(providerProfilePending(true, 'provider-1', true)).toBe(false);
     expect(providerProfilePending(true, '', false)).toBe(false);
     expect(providerProfilePending(false, 'provider-1', false)).toBe(false);
-  });
-});
-
-describe('qwen cycle reset presentation', () => {
-  // Source: https://www.alibabacloud.com/help/en/model-studio/token-plan-team-faq (fetched 2026-11-05), seat quotas reset at the end of each subscription month.
-  it('reports the next monthly anniversary of the anchor, clamped to month end', () => {
-    expect(
-      nextMonthlyReset('2026-01-15', new Date('2026-11-05T10:00:00Z'))
-    ).toBe('2026-11-15');
-    expect(
-      nextMonthlyReset('2026-01-15', new Date('2026-11-15T00:00:00Z'))
-    ).toBe('2026-12-15');
-    expect(
-      nextMonthlyReset('2026-01-31', new Date('2026-02-10T00:00:00Z'))
-    ).toBe('2026-02-28');
-    expect(
-      nextMonthlyReset('2026-01-31', new Date('2026-03-01T00:00:00Z'))
-    ).toBe('2026-03-31');
-  });
-
-  it('reports no reset without a valid anchor', () => {
-    expect(nextMonthlyReset(null, new Date('2026-11-05T10:00:00Z'))).toBeNull();
-    expect(
-      nextMonthlyReset('2026-13-15', new Date('2026-11-05T10:00:00Z'))
-    ).toBeNull();
   });
 });
 

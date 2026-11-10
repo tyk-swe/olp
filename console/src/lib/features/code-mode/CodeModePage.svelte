@@ -17,14 +17,16 @@
   import Callout from '#lib/components/Callout.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
+  import AccountsSection from './AccountsSection.svelte';
+  import AttemptsDiagnostics from './AttemptsDiagnostics.svelte';
+  import BindingsDiagnostics from './BindingsDiagnostics.svelte';
+  import BudgetsSection from './BudgetsSection.svelte';
+  import PoolsSection from './PoolsSection.svelte';
+  import RefusalsDiagnostics from './RefusalsDiagnostics.svelte';
+  import RoutesSection from './RoutesSection.svelte';
+  import TokenWindowsDiagnostics from './TokenWindowsDiagnostics.svelte';
   import { getCodeClientConfiguration } from './api.js';
-  import CodeManagement from './CodeManagement.svelte';
-  import CodeDiagnostics from './CodeDiagnostics.svelte';
-  import {
-    codeSections,
-    isManagementSection,
-    type CodeSection
-  } from './sections';
+  import { codeSections, type CodeSection } from './sections';
 
   let {
     loadClientConfiguration = (route, selection, signal) =>
@@ -73,6 +75,9 @@
           (project) => project.id === projectId && project.role === 'manager'
         )) === true
   );
+  const onDraftChange = (dirty: boolean) => {
+    draftDirty = dirty;
+  };
 </script>
 
 <PageHeader
@@ -138,16 +143,29 @@
     </nav>
     {#if projectId}
       {#key `${principal}:${projectId}:${tab}`}
-        {#if isManagementSection(tab)}
-          <CodeManagement
+        {#if tab === 'accounts'}
+          <AccountsSection {projectId} {allowed} {onDraftChange} />
+        {:else if tab === 'pools'}
+          <PoolsSection {projectId} {allowed} {onDraftChange} />
+        {:else if tab === 'routes'}
+          <RoutesSection
             {projectId}
-            kind={tab}
             {allowed}
             {gatewayURL}
             {loadClientConfiguration}
-            onDraftChange={(dirty) => (draftDirty = dirty)}
+            {onDraftChange}
           />
-        {:else}<CodeDiagnostics {projectId} kind={tab} {allowed} />{/if}
+        {:else if tab === 'budgets'}
+          <BudgetsSection {projectId} {allowed} {onDraftChange} />
+        {:else if tab === 'bindings'}
+          <BindingsDiagnostics {projectId} {allowed} />
+        {:else if tab === 'attempts'}
+          <AttemptsDiagnostics {projectId} />
+        {:else if tab === 'refusals'}
+          <RefusalsDiagnostics {projectId} />
+        {:else}
+          <TokenWindowsDiagnostics {projectId} />
+        {/if}
       {/key}
     {/if}
   {/if}

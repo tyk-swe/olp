@@ -5,10 +5,12 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/access"
+	codepool "github.com/tyk-swe/olp/internal/code/pool"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 type Connection struct {
@@ -18,7 +20,7 @@ type Connection struct {
 
 type pin struct {
 	provider      string
-	configuration providers.Configuration
+	configuration routing.Configuration
 }
 
 func parseConnection(name string, e contract.ConfigurationCodeConnection) (Connection, error) {
@@ -44,9 +46,13 @@ func renderConnection(name string, c Connection) (contract.ConfigurationCodeConn
 	return contract.ConfigurationCodeConnection{Configuration: configuration, NetworkCredentialRef: new(string(provider.NetworkRef(name)))}, nil
 }
 
-func portableConnection(configuration providers.Configuration) Connection {
-	stored := configuration.Options.Network != nil && configuration.Options.Network.CredentialID != ""
-	return Connection{Configuration: configuration.WithNetworkCredential(""), Network: stored}
+func portableConnection(configuration routing.Configuration) (Connection, error) {
+	converted, err := promotion.Convert[providers.Configuration](configuration)
+	if err != nil {
+		return Connection{}, err
+	}
+	stored := converted.Options.Network != nil && converted.Options.Network.CredentialID != ""
+	return Connection{Configuration: converted.WithNetworkCredential(""), Network: stored}, nil
 }
 
 func (c Connection) resolve(ctx context.Context, q access.Queryer, name, project, pool string, in scope) (pin, error) {
@@ -73,11 +79,15 @@ func (c Connection) resolve(ctx context.Context, q access.Queryer, name, project
 		return pin{}, err
 	}
 	bound, err := networked(configuration, current, c.Network)
-	return pin{provider: id, configuration: bound}, err
+	if err != nil {
+		return pin{}, err
+	}
+	routingCfg, err := promotion.Convert[routing.Configuration](bound)
+	return pin{provider: id, configuration: routingCfg}, err
 }
 
 func enrolled(ctx context.Context, q access.Queryer, providerID string, configuration providers.Configuration, pool string, in scope) error {
-	at := slices.IndexFunc(in.pools, func(p resolved[access.CodePoolInput]) bool { return p.ref == pool })
+	at := slices.IndexFunc(in.pools, func(p resolved[codepool.Input]) bool { return p.ref == pool })
 	if at < 0 {
 		return access.Invalid("code.routes.published", "Resolve the published pool before its credential bindings.")
 	}

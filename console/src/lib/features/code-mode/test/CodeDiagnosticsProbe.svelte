@@ -3,12 +3,12 @@
     QueryClientProvider,
     type QueryClient
   } from '@tanstack/svelte-query';
-  import CodeDiagnostics from '../CodeDiagnostics.svelte';
+  import AttemptsDiagnostics from '../AttemptsDiagnostics.svelte';
 
   let { client, projectId }: { client: QueryClient; projectId: string } =
     $props();
 </script>
 
 <QueryClientProvider {client}>
-  <CodeDiagnostics {projectId} kind="attempts" allowed={false} />
+  <AttemptsDiagnostics {projectId} />
 </QueryClientProvider>

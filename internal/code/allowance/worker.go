@@ -1,0 +1,271 @@
+package allowance
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/code"
+	"github.com/tyk-swe/olp/internal/code/vendor"
+	"github.com/tyk-swe/olp/internal/codeplans"
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
+	"github.com/tyk-swe/olp/internal/routing"
+)
+
+const ReadFreshFor = 5 * time.Minute
+
+const (
+	readEvery       = 15 * time.Second
+	readTimeout     = 30 * time.Second
+	readsPerPass    = 50
+	allowanceLockID = int64(0x4f4c505f414c5752)
+)
+
+type DueAccount struct {
+	Account       code.Account
+	Configuration routing.Configuration
+}
+
+type Store interface {
+	DueAllowanceReads(ctx context.Context, now time.Time, limit int, qualifiedProfileIDs []string) ([]DueAccount, error)
+	ObserveAllowance(ctx context.Context, account string, allowance code.Allowance) error
+	InvalidateActiveAllowance(ctx context.Context, account string) error
+	CompleteAllowanceRead(ctx context.Context, account string, readAt time.Time) error
+}
+
+type Authorizer interface {
+	AuthorizeCode(ctx context.Context, cfg routing.Configuration, account code.Account, dispatch code.Dispatch) (code.Authorization, error)
+}
+
+type Locker interface {
+	TryLock(ctx context.Context, key string, run func() (bool, error)) (bool, bool, error)
+}
+
+type Reader struct {
+	Pool       *pgxpool.Pool
+	Store      Store
+	Authorizer Authorizer
+	Locker     Locker
+	Client     *http.Client
+	Log        *slog.Logger
+	Now        func() time.Time
+}
+
+func (r *Reader) now() time.Time {
+	if r.Now != nil {
+		return r.Now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+func (r *Reader) locker() Locker {
+	if r.Locker != nil {
+		return r.Locker
+	}
+	return poolLocker{pool: r.Pool}
+}
+
+func Due(account code.Account, now time.Time) bool {
+	if account.AllowanceReadRequestedAt != nil &&
+		(account.AllowanceReadAt == nil || account.AllowanceReadRequestedAt.After(*account.AllowanceReadAt)) {
+		return true
+	}
+	if account.AllowanceReadAt != nil && account.AllowanceReadAt.After(now.Add(-ReadFreshFor)) {
+		return false
+	}
+	if account.Allowance == nil {
+		return true
+	}
+	for _, raw := range account.Allowance.Windows {
+		window := raw.Normalized()
+		if window.Evidence == code.AllowanceEvidenceActive && window.ObservedAt.After(now.Add(-ReadFreshFor)) {
+			return false
+		}
+	}
+	return true
+}
+
+func (r *Reader) Run(ctx context.Context) {
+	ticker := time.NewTicker(readEvery)
+	defer ticker.Stop()
+	for ctx.Err() == nil {
+		outcome, progress := r.Pass(ctx)
+		if ctx.Err() != nil {
+			return
+		}
+		if r.Pool != nil {
+			if err := workerhealth.New(workerhealth.TaskCodeAllowanceRead, "").Checkpoint(ctx, r.Pool, outcome, progress); err != nil {
+				r.Log.Warn("code allowance read checkpoint failed", "error", err)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (r *Reader) Pass(ctx context.Context) (workerhealth.Outcome, bool) {
+	due, err := r.Store.DueAllowanceReads(ctx, r.now(), readsPerPass, vendor.QualifiedProfileIDs())
+	if err != nil {
+		r.Log.Warn("code accounts due an allowance read could not be read", "error", err)
+		return workerhealth.OutcomeFailure, false
+	}
+	progress := false
+	for _, entry := range due {
+		if !qualifiedForActiveRead(entry.Configuration) {
+			continue
+		}
+		ran, wrote, err := r.locker().TryLock(ctx, entry.Account.ID, func() (bool, error) {
+			return r.read(ctx, entry)
+		})
+		if err != nil {
+			if ctx.Err() == nil {
+				r.Log.Warn("code allowance read could not be recorded", "account_id", entry.Account.ID, "error", err)
+			}
+			return workerhealth.OutcomeFailure, progress
+		}
+		progress = progress || ran && wrote
+	}
+	return workerhealth.OutcomeSuccess, progress
+}
+
+var errAllowanceReadUnqualified = errors.New("allowance read is not qualified for this adapter")
+
+func qualifiedForActiveRead(configuration routing.Configuration) bool {
+	signal, ok := vendor.AllowanceSignalForProfile(configuration.Kind, configuration.AuthMode, configuration.ProfileID)
+	return ok && signal.ActiveQualified
+}
+
+func (r *Reader) read(ctx context.Context, entry DueAccount) (bool, error) {
+	now := r.now()
+	if !Due(entry.Account, now) {
+		return false, nil
+	}
+	v, ok := vendor.ForConnection(entry.Configuration.Kind, entry.Configuration.AuthMode, entry.Configuration.ProfileID)
+	if !ok {
+		return false, nil
+	}
+	step, cancel := context.WithTimeout(ctx, readTimeout)
+	defer cancel()
+	allowance, parsed, err := r.fetchForAdapter(step, v.Adapter, entry, now)
+	if errors.Is(err, errAllowanceReadUnqualified) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if parsed {
+		if err := r.Store.ObserveAllowance(ctx, entry.Account.ID, allowance); err != nil {
+			return false, err
+		}
+	} else if err := r.Store.InvalidateActiveAllowance(ctx, entry.Account.ID); err != nil {
+		return false, err
+	}
+	if err := r.Store.CompleteAllowanceRead(ctx, entry.Account.ID, now); err != nil {
+		return false, err
+	}
+	return parsed, nil
+}
+
+func (r *Reader) fetchForAdapter(ctx context.Context, adapter code.Adapter, entry DueAccount, now time.Time) (code.Allowance, bool, error) {
+	switch adapter {
+	case code.AdapterCodex:
+		body, ok := r.fetchJSON(ctx, entry, code.Dispatch{Adapter: code.AdapterCodex, Protocol: code.ProtocolResponses, ClientPath: "responses"}, UsageURL, false)
+		if !ok {
+			return code.Allowance{}, false, nil
+		}
+		allowance, parsed := ParseUsage(body, now)
+		if !parsed {
+			r.Log.Warn("code allowance read response did not match the pinned usage schema", "account_id", entry.Account.ID)
+		}
+		return allowance, parsed, nil
+	case code.AdapterMiniMaxPlan:
+		endpoint, ok := remainsURL(entry.Configuration.ProfileID)
+		if !ok {
+			return code.Allowance{}, false, nil
+		}
+		body, ok := r.fetchJSON(ctx, entry, code.Dispatch{Adapter: code.AdapterMiniMaxPlan, Protocol: code.ProtocolMessages, ClientPath: "v1/messages"}, endpoint, true)
+		if !ok {
+			return code.Allowance{}, false, nil
+		}
+		allowance, parsed := ParseRemains(body, entry.Account.Models, now)
+		if !parsed {
+			r.Log.Warn("code allowance read response did not match the pinned remains schema", "account_id", entry.Account.ID)
+		}
+		return allowance, parsed, nil
+	default:
+		return code.Allowance{}, false, fmt.Errorf("%w: %s", errAllowanceReadUnqualified, adapter)
+	}
+}
+
+func (r *Reader) fetchJSON(ctx context.Context, entry DueAccount, dispatch code.Dispatch, endpoint string, requireBearer bool) ([]byte, bool) {
+	auth, err := r.Authorizer.AuthorizeCode(ctx, entry.Configuration, entry.Account, dispatch)
+	if err != nil {
+		r.Log.Warn("code allowance read authorization unavailable", "account_id", entry.Account.ID, "error", err)
+		return nil, false
+	}
+	if requireBearer && auth.Headers.Get("Authorization") == "" {
+		r.Log.Warn("code allowance read authorization has no bearer credential", "account_id", entry.Account.ID)
+		return nil, false
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		r.Log.Warn("code allowance read request could not be built", "account_id", entry.Account.ID, "error", err)
+		return nil, false
+	}
+	request.Header = auth.Headers.Clone()
+	request.Header.Set("Accept", "application/json")
+	response, err := r.Client.Do(request)
+	if err != nil {
+		r.Log.Warn("code allowance read failed", "account_id", entry.Account.ID, "error", err)
+		return nil, false
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxUsageBytes+1))
+	if err != nil || response.StatusCode != http.StatusOK || len(body) > maxUsageBytes {
+		r.Log.Warn("code allowance read returned no usable payload", "account_id", entry.Account.ID, "status", response.StatusCode)
+		return nil, false
+	}
+	return body, true
+}
+
+func remainsURL(profileID string) (string, bool) {
+	switch profileID {
+	case codeplans.MiniMaxProfile:
+		return RemainsURL, true
+	case codeplans.MiniMaxCNProfile:
+		return RemainsURLCN, true
+	default:
+		return "", false
+	}
+}
+
+type poolLocker struct{ pool *pgxpool.Pool }
+
+func (l poolLocker) TryLock(ctx context.Context, key string, run func() (bool, error)) (bool, bool, error) {
+	if l.pool == nil {
+		return false, false, nil
+	}
+	conn, err := l.pool.Acquire(ctx)
+	if err != nil {
+		return false, false, err
+	}
+	defer conn.Release()
+	var held bool
+	if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtextextended($1,$2))`, key, allowanceLockID).Scan(&held); err != nil || !held {
+		return false, false, err
+	}
+	progress, runErr := run()
+	_, unlockErr := conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock(hashtextextended($1,$2))`, key, allowanceLockID)
+	if runErr != nil {
+		return true, progress, runErr
+	}
+	return true, progress, unlockErr
+}

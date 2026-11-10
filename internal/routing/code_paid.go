@@ -1,35 +1,39 @@
 package routing
 
 import (
-	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"reflect"
-	"slices"
+
+	"github.com/tyk-swe/olp/internal/code"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
-func CodePaidProtocol(provider Provider, model string, modes ...string) (codemode.Protocol, bool) {
+func CodePaidProtocol(provider Provider, model string) (code.Protocol, bool, bool) {
 	connector := provider.Connector()
 	if connector.CredentialSource == "caller" || len(provider.ParameterDefaults) > 0 || len(provider.OperationDefaults) > 0 || len(provider.Models) > 0 || provider.Plugin != nil {
-		return "", false
+		return "", false, false
 	}
 	if connector.Hosting() == "vertex-anthropic" || connector.Hosting() == "bedrock-anthropic" {
-		return "", false
+		return "", false, false
 	}
 	family, err := connector.TargetFamily(wire.Chat)
 	if err != nil {
-		return "", false
+		return "", false, false
 	}
-	protocol, known := map[wire.Format]codemode.Protocol{wire.Responses: codemode.ProtocolResponses, wire.Anthropic: codemode.ProtocolMessages, wire.Chat: codemode.ProtocolChat}[family]
-	deliveries := func() []string {
-		if len(modes) > 0 {
-			return modes
-		}
-		return []string{"unary", "streaming"}
-	}()
-	if !known || !slices.ContainsFunc(deliveries, func(mode string) bool { return provider.Supports(model, "generation", family.Surface(), mode) }) {
-		return "", false
+	protocol, known := map[wire.Format]code.Protocol{
+		wire.Responses: code.ProtocolResponses,
+		wire.Anthropic: code.ProtocolMessages,
+		wire.Chat:      code.ProtocolChat,
+	}[family]
+	if !known {
+		return "", false, false
 	}
-	return protocol, true
+	surface := family.Surface()
+	streaming := provider.Supports(model, "generation", surface, "streaming")
+	unary := provider.Supports(model, "generation", surface, "unary")
+	if !streaming && !unary {
+		return "", false, false
+	}
+	return protocol, streaming, true
 }
 
 func CodePaidLimitsMatch(liveProvider, frozenProvider *Limits, liveSlot, frozenSlot Slot) bool {

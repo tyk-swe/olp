@@ -11,24 +11,69 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/codesessions"
-
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/oapi-codegen/nullable"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/codeadapter"
-	"github.com/tyk-swe/olp/internal/codeallowance"
-	"github.com/tyk-swe/olp/internal/codeclient"
-	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/code"
+	codeaccount "github.com/tyk-swe/olp/internal/code/account"
+	"github.com/tyk-swe/olp/internal/code/allowance"
+	"github.com/tyk-swe/olp/internal/code/budget"
+	"github.com/tyk-swe/olp/internal/code/client"
+	"github.com/tyk-swe/olp/internal/code/session"
+	"github.com/tyk-swe/olp/internal/code/vendor"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	codepromotion "github.com/tyk-swe/olp/internal/promotion/code"
 	providerpromotion "github.com/tyk-swe/olp/internal/promotion/provider"
-	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/tests/harness"
 )
+
+func TestCodeBudgetRoundTrip(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	user, project, id := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.users(id,email,display_name,role,etag) VALUES($1,'budget@example.invalid','Budget','owner',$2)`, user, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.projects(id,name,etag,created_by) VALUES($1,'budget',$2,$3)`, project, uuid.NewString(), user); err != nil {
+		t.Fatal(err)
+	}
+	principal := access.Principal{User: access.User{ID: user, Role: access.RoleOwner}, AllProjects: true}
+	for _, enabled := range []bool{true, false} {
+		input := budget.Input{ProjectID: project, DailyTokens: new(int64(100)), MonthlyTokens: new(int64(1000)), Enabled: enabled}
+		draft, err := budget.ParseDraft(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tx, err := pool.Begin(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(t.Context())
+		etag := uuid.NewString()
+		saved, err := budget.Save(t.Context(), tx, principal, id, etag, draft, !enabled)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := budget.Load(t.Context(), pool, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, actual := range []budget.Budget{saved, loaded} {
+			if actual.ID != id || actual.ProjectID != project || actual.ETag != etag || actual.Enabled != input.Enabled ||
+				actual.RouteID != nil || actual.APIKeyID != nil ||
+				actual.DailyTokens == nil || *actual.DailyTokens != *input.DailyTokens ||
+				actual.MonthlyTokens == nil || *actual.MonthlyTokens != *input.MonthlyTokens {
+				t.Fatalf("budget did not round trip: %+v, input %+v", actual, input)
+			}
+		}
+	}
+}
 
 func TestCodeDecisionJourneys(t *testing.T) {
 	t.Parallel()
@@ -42,7 +87,7 @@ func codeAdmissionRecordsChosenAndPinnedDecisions(t *testing.T, pool *pgxpool.Po
 	healthyCredential, coolingCredential := uuid.NewString(), uuid.NewString()
 	healthy, cooling := uuid.NewString(), uuid.NewString()
 	key, poolID, routeID, revisionID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
-	route := codemode.Route{ID: routeID, ProjectID: project, Slug: "decision-journey", PoolID: poolID, Models: []string{"model"}, Enabled: true, RevisionID: revisionID, Revision: 1, ETag: uuid.NewString()}
+	route := code.Route{ID: routeID, ProjectID: project, Slug: "decision-journey", PoolID: poolID, Models: []string{"model"}, Enabled: true, RevisionID: revisionID, Revision: 1, ETag: uuid.NewString()}
 	document, err := json.Marshal(route)
 	if err != nil {
 		t.Fatal(err)
@@ -76,8 +121,8 @@ func codeAdmissionRecordsChosenAndPinnedDecisions(t *testing.T, pool *pgxpool.Po
 			t.Fatal(err)
 		}
 	}
-	store := codesessions.New(pool)
-	admission := codesessions.Admission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: "journey-conversation"}}, Providers: []string{provider}}
+	store := session.New(pool)
+	admission := session.Admission{Route: route, APIKeyID: key, Operation: code.Operation{Name: "responses", Model: "model", Identity: code.Identity{Conversation: "journey-conversation"}}, ProvidersFor: session.StaticProviders(provider)}
 	permit, err := store.Admit(t.Context(), admission)
 	if err != nil {
 		t.Fatal(err)
@@ -86,9 +131,9 @@ func codeAdmissionRecordsChosenAndPinnedDecisions(t *testing.T, pool *pgxpool.Po
 		t.Fatalf("first admission chose %s, want the available account %s", permit.Account.ID, healthy)
 	}
 	decision := codeDecisionForAttempt(t, pool, permit.Attempt.ID)
-	if decision.Reason != codemode.DecisionChosen || decision.ChosenAccountID != healthy || decision.Band != nil ||
+	if decision.Reason != code.DecisionChosen || decision.ChosenAccountID != healthy || decision.Band != nil ||
 		decision.Evidence != nil || decision.EvidenceObservedAt != nil ||
-		len(decision.Skipped) != 1 || decision.Skipped[0].AccountID != cooling || decision.Skipped[0].Class != codemode.SkipCooldown ||
+		len(decision.Skipped) != 1 || decision.Skipped[0].AccountID != cooling || decision.Skipped[0].Class != code.SkipCooldown ||
 		decision.RecoveryEnvelope != nil || decision.RecoveryOrdinal != nil {
 		t.Fatalf("first decision = %+v", decision)
 	}
@@ -100,10 +145,10 @@ func codeAdmissionRecordsChosenAndPinnedDecisions(t *testing.T, pool *pgxpool.Po
 		t.Fatalf("pinned turn moved to %s", second.Account.ID)
 	}
 	pinned := codeDecisionForAttempt(t, pool, second.Attempt.ID)
-	if pinned.Reason != codemode.DecisionPin || pinned.ChosenAccountID != healthy || pinned.Band != nil || pinned.Evidence != nil || pinned.EvidenceObservedAt != nil || len(pinned.Skipped) != 0 {
+	if pinned.Reason != code.DecisionPin || pinned.ChosenAccountID != healthy || pinned.Band != nil || pinned.Evidence != nil || pinned.EvidenceObservedAt != nil || len(pinned.Skipped) != 0 {
 		t.Fatalf("pinned decision = %+v", pinned)
 	}
-	bound, err := store.BindConnection(t.Context(), route, key, codemode.Identity{Conversation: "connection-conversation"}, "model", []string{provider})
+	bound, err := store.BindConnection(t.Context(), route, key, code.Identity{Conversation: "connection-conversation"}, "model", []string{provider})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,24 +156,24 @@ func codeAdmissionRecordsChosenAndPinnedDecisions(t *testing.T, pool *pgxpool.Po
 		t.Fatalf("connection bound to %s, want the available account %s", bound.Account.ID, healthy)
 	}
 	connection := codeConnectionDecisions(t, pool, bound.Binding.RootID)
-	if len(connection) != 1 || connection[0].AttemptID != nil || connection[0].Reason != codemode.DecisionConnection ||
+	if len(connection) != 1 || connection[0].AttemptID != nil || connection[0].Reason != code.DecisionConnection ||
 		connection[0].ChosenAccountID != healthy || connection[0].BindingID != bound.Binding.ID || connection[0].RootID != bound.Binding.RootID ||
 		connection[0].Band != nil || connection[0].Evidence != nil || connection[0].EvidenceObservedAt != nil ||
-		len(connection[0].Skipped) != 1 || connection[0].Skipped[0].AccountID != cooling || connection[0].Skipped[0].Class != codemode.SkipCooldown {
+		len(connection[0].Skipped) != 1 || connection[0].Skipped[0].AccountID != cooling || connection[0].Skipped[0].Class != code.SkipCooldown {
 		t.Fatalf("connection decision = %+v", connection)
 	}
-	rebound, err := store.BindConnection(t.Context(), route, key, codemode.Identity{Conversation: "connection-conversation"}, "model", []string{provider})
+	rebound, err := store.BindConnection(t.Context(), route, key, code.Identity{Conversation: "connection-conversation"}, "model", []string{provider})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if rebound.Binding.RootID != bound.Binding.RootID || rebound.Account.ID != healthy {
 		t.Fatalf("reconnected permit = %+v", rebound)
 	}
-	generation, err := store.Admit(t.Context(), codesessions.Admission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: "connection-conversation"}}, Providers: []string{provider}})
+	generation, err := store.Admit(t.Context(), session.Admission{Route: route, APIKeyID: key, Operation: code.Operation{Name: "responses", Model: "model", Identity: code.Identity{Conversation: "connection-conversation"}}, ProvidersFor: session.StaticProviders(provider)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	pinnedReconnect, err := store.BindConnection(t.Context(), route, key, codemode.Identity{Conversation: "connection-conversation"}, "model", []string{provider})
+	pinnedReconnect, err := store.BindConnection(t.Context(), route, key, code.Identity{Conversation: "connection-conversation"}, "model", []string{provider})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +183,7 @@ func codeAdmissionRecordsChosenAndPinnedDecisions(t *testing.T, pool *pgxpool.Po
 	recordedConnections := codeConnectionDecisions(t, pool, bound.Binding.RootID)
 	emptySkipped := 0
 	for _, recorded := range recordedConnections {
-		if recorded.AttemptID != nil || recorded.Reason != codemode.DecisionConnection || recorded.ChosenAccountID != healthy {
+		if recorded.AttemptID != nil || recorded.Reason != code.DecisionConnection || recorded.ChosenAccountID != healthy {
 			t.Fatalf("connection decisions = %+v", recordedConnections)
 		}
 		if len(recorded.Skipped) == 0 {
@@ -177,8 +222,8 @@ func codeAdmissionRecordsChosenAndPinnedDecisions(t *testing.T, pool *pgxpool.Po
 
 func bandAllowanceJSON(t *testing.T, remaining float64, resetsAt *time.Time, observedAt time.Time) []byte {
 	t.Helper()
-	document, err := json.Marshal(codemode.Allowance{
-		Windows:          []codemode.AllowanceWindow{{LimitID: "codex", Window: "primary", Unit: codemode.AllowanceUnitPercent, Evidence: codemode.AllowanceEvidencePassive, UsedPercent: 100 - remaining, RemainingPercent: remaining, ResetsAt: resetsAt, ObservedAt: observedAt}},
+	document, err := json.Marshal(code.Allowance{
+		Windows:          []code.AllowanceWindow{{LimitID: "codex", Window: "primary", Unit: code.AllowanceUnitPercent, Evidence: code.AllowanceEvidencePassive, UsedPercent: 100 - remaining, RemainingPercent: remaining, ResetsAt: resetsAt, ObservedAt: observedAt}},
 		RemainingPercent: &remaining,
 		ResetsAt:         resetsAt,
 		ObservedAt:       observedAt,
@@ -278,10 +323,10 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 			args []any
 		}{`INSERT INTO olp.code_pool_keys(pool_id, api_key_id) VALUES($1, $2)`, []any{membership.poolID, key}})
 	}
-	bySlug := map[string]codemode.Route{}
+	bySlug := map[string]code.Route{}
 	for _, seeded := range routes {
 		revisionID := uuid.NewString()
-		route := codemode.Route{ID: seeded.id, ProjectID: project, Slug: seeded.slug, PoolID: seeded.poolID, Models: []string{"model"}, Enabled: true, AllowanceOrdering: seeded.ordering, RevisionID: revisionID, Revision: 1, ETag: uuid.NewString()}
+		route := code.Route{ID: seeded.id, ProjectID: project, Slug: seeded.slug, PoolID: seeded.poolID, Models: []string{"model"}, Enabled: true, AllowanceOrdering: seeded.ordering, RevisionID: revisionID, Revision: 1, ETag: uuid.NewString()}
 		bySlug[seeded.slug] = route
 		document, err := json.Marshal(route)
 		if err != nil {
@@ -307,16 +352,16 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 			t.Fatal(err)
 		}
 	}
-	store := codesessions.New(pool)
-	admit := func(route codemode.Route, conversation string) codesessions.Permit {
+	store := session.New(pool)
+	admit := func(route code.Route, conversation string) session.Permit {
 		t.Helper()
-		permit, err := store.Admit(t.Context(), codesessions.Admission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: conversation}}, Providers: []string{provider}})
+		permit, err := store.Admit(t.Context(), session.Admission{Route: route, APIKeyID: key, Operation: code.Operation{Name: "responses", Model: "model", Identity: code.Identity{Conversation: conversation}}, ProvidersFor: session.StaticProviders(provider)})
 		if err != nil {
 			t.Fatal(err)
 		}
 		return permit
 	}
-	skippedClass := func(decision codemode.Decision, accountID string) codemode.SkipClass {
+	skippedClass := func(decision code.Decision, accountID string) code.SkipClass {
 		t.Helper()
 		for _, skipped := range decision.Skipped {
 			if skipped.AccountID == accountID {
@@ -331,7 +376,7 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 	if off.Account.ID != low {
 		t.Fatalf("ordering off chose %s, want the weighted score winner %s", off.Account.ID, low)
 	}
-	if decision := codeDecisionForAttempt(t, pool, off.Attempt.ID); decision.Band != nil || decision.Evidence != nil || decision.EvidenceObservedAt != nil || decision.Reason != codemode.DecisionChosen {
+	if decision := codeDecisionForAttempt(t, pool, off.Attempt.ID); decision.Band != nil || decision.Evidence != nil || decision.EvidenceObservedAt != nil || decision.Reason != code.DecisionChosen {
 		t.Fatalf("ordering off decision = %+v, want no band", decision)
 	}
 
@@ -342,7 +387,7 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 	decision := codeDecisionForAttempt(t, pool, on.Attempt.ID)
 	if decision.Band != nil ||
 		decision.Evidence != nil || decision.EvidenceObservedAt != nil ||
-		skippedClass(decision, healthy) != codemode.SkipWeight || skippedClass(decision, unknown) != codemode.SkipWeight {
+		skippedClass(decision, healthy) != code.SkipWeight || skippedClass(decision, unknown) != code.SkipWeight {
 		t.Fatalf("ordering on decision = %+v", decision)
 	}
 
@@ -352,7 +397,7 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 		t.Fatalf("no healthy decision = %+v", decision)
 	}
 	for _, skipped := range decision.Skipped {
-		if skipped.Class == codemode.SkipBand {
+		if skipped.Class == code.SkipBand {
 			t.Fatalf("an unmapped family affected selection: %+v", decision)
 		}
 	}
@@ -375,7 +420,7 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 	if pinned.Account.ID != low {
 		t.Fatalf("pinned turn moved to %s after bands flipped", pinned.Account.ID)
 	}
-	if decision = codeDecisionForAttempt(t, pool, pinned.Attempt.ID); decision.Reason != codemode.DecisionPin || decision.Band != nil || decision.Evidence != nil || decision.EvidenceObservedAt != nil {
+	if decision = codeDecisionForAttempt(t, pool, pinned.Attempt.ID); decision.Reason != code.DecisionPin || decision.Band != nil || decision.Evidence != nil || decision.EvidenceObservedAt != nil {
 		t.Fatalf("pinned decision = %+v", decision)
 	}
 	other := seedCooldownJourney(t, pool)
@@ -387,11 +432,11 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 	}
 	for _, tc := range []struct {
 		name      string
-		allowance codemode.Allowance
+		allowance code.Allowance
 		retryAt   *time.Time
 	}{
-		{"exhausted window", codemode.Allowance{Windows: []codemode.AllowanceWindow{{LimitID: "codex", Window: "primary", Unit: codemode.AllowanceUnitPercent, Evidence: codemode.AllowanceEvidencePassive, UsedPercent: 100, RemainingPercent: 0, ResetsAt: &reset, ObservedAt: base}}, ObservedAt: base}, &reset},
-		{"stale resetless count", codemode.Allowance{RemainingTokens: new(int64(0)), ObservedAt: base.Add(-time.Hour)}, nil},
+		{"exhausted window", code.Allowance{Windows: []code.AllowanceWindow{{LimitID: "codex", Window: "primary", Unit: code.AllowanceUnitPercent, Evidence: code.AllowanceEvidencePassive, UsedPercent: 100, RemainingPercent: 0, ResetsAt: &reset, ObservedAt: base}}, ObservedAt: base}, &reset},
+		{"stale resetless count", code.Allowance{RemainingTokens: new(int64(0)), ObservedAt: base.Add(-time.Hour)}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			document, err := json.Marshal(tc.allowance)
@@ -402,8 +447,8 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 				t.Fatal(err)
 			}
 			for _, conversation := range []string{uuid.NewString(), "band-conv-0"} {
-				_, err = store.Admit(t.Context(), codesessions.Admission{Route: bySlug["band-on"], APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: conversation}}, Providers: []string{provider}})
-				var refusal *codemode.Refusal
+				_, err = store.Admit(t.Context(), session.Admission{Route: bySlug["band-on"], APIKeyID: key, Operation: code.Operation{Name: "responses", Model: "model", Identity: code.Identity{Conversation: conversation}}, ProvidersFor: session.StaticProviders(provider)})
+				var refusal *code.Refusal
 				if !errors.As(err, &refusal) || refusal.Code != "code_account_unavailable" || (tc.retryAt == nil && refusal.RetryAt != nil) || (tc.retryAt != nil && (refusal.RetryAt == nil || !refusal.RetryAt.Equal(*tc.retryAt))) {
 					t.Fatalf("admission for %s = %v (%+v), want refusal with retry at %v", conversation, err, refusal, tc.retryAt)
 				}
@@ -419,31 +464,31 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 	if _, err := other.store.Admit(t.Context(), other.admission("model", "other-project-second")); err != nil {
 		t.Fatalf("other project admission after root selection: %v", err)
 	}
-	window := func(family string, unit codemode.AllowanceUnit, evidence codemode.AllowanceEvidence, remainingPercent float64, remainingValue *float64, observation time.Time, resetAt *time.Time) codemode.AllowanceWindow {
+	window := func(family string, unit code.AllowanceUnit, evidence code.AllowanceEvidence, remainingPercent float64, remainingValue *float64, observation time.Time, resetAt *time.Time) code.AllowanceWindow {
 		usedPercent := func() float64 {
-			if unit == codemode.AllowanceUnitPercent {
+			if unit == code.AllowanceUnitPercent {
 				return 100 - remainingPercent
 			}
 			return 0
 		}()
-		return codemode.AllowanceWindow{LimitID: family, Window: "primary", Unit: unit, Evidence: evidence, UsedPercent: usedPercent, RemainingPercent: remainingPercent, RemainingValue: remainingValue, ObservedAt: observation, ResetsAt: resetAt}
+		return code.AllowanceWindow{LimitID: family, Window: "primary", Unit: unit, Evidence: evidence, UsedPercent: usedPercent, RemainingPercent: remainingPercent, RemainingValue: remainingValue, ObservedAt: observation, ResetsAt: resetAt}
 	}
 	cases := []struct {
 		name      string
-		allowance codemode.Allowance
+		allowance code.Allowance
 		off, on   bool
 	}{
-		{"old active mirror", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidenceActive, 0, nil, observed, &reset)}, RemainingPercent: new(float64(0)), ResetsAt: &reset, ObservedAt: observed}, true, true},
-		{"legacy top-level exhausted", codemode.Allowance{RemainingPercent: new(float64(0)), ResetsAt: &reset, ObservedAt: observed}, false, false},
-		{"positive count", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitCount, codemode.AllowanceEvidencePassive, 0, new(float64(9)), observed, &reset)}, ObservedAt: observed}, true, true},
-		{"positive credits", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitCredits, codemode.AllowanceEvidencePassive, 0, new(float64(9)), observed, &reset)}, ObservedAt: observed}, true, true},
-		{"positive cents", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitCents, codemode.AllowanceEvidencePassive, 0, new(float64(9)), observed, &reset)}, ObservedAt: observed}, true, true},
-		{"fresh exhausted", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, observed, &reset)}, ObservedAt: observed}, false, false},
-		{"stale no reset", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, base.Add(-time.Hour), nil)}, ObservedAt: base.Add(-time.Hour)}, false, false},
-		{"stale future reset", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, base.Add(-time.Hour), &reset)}, ObservedAt: base.Add(-time.Hour)}, false, false},
-		{"stale token count", codemode.Allowance{RemainingTokens: new(int64(0)), TokenObservation: &codemode.CountObservation{ObservedAt: base.Add(-time.Hour), ResetsAt: &reset}, ObservedAt: observed}, false, false},
-		{"fresh request count", codemode.Allowance{RemainingRequests: new(int64(0)), RequestObservation: &codemode.CountObservation{ObservedAt: observed, ResetsAt: &reset}, ObservedAt: observed}, false, false},
-		{"unrelated family", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("special_model", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, observed, &reset)}, ObservedAt: observed}, false, false},
+		{"old active mirror", code.Allowance{Windows: []code.AllowanceWindow{window("codex", code.AllowanceUnitPercent, code.AllowanceEvidenceActive, 0, nil, observed, &reset)}, RemainingPercent: new(float64(0)), ResetsAt: &reset, ObservedAt: observed}, true, true},
+		{"legacy top-level exhausted", code.Allowance{RemainingPercent: new(float64(0)), ResetsAt: &reset, ObservedAt: observed}, false, false},
+		{"positive count", code.Allowance{Windows: []code.AllowanceWindow{window("codex", code.AllowanceUnitCount, code.AllowanceEvidencePassive, 0, new(float64(9)), observed, &reset)}, ObservedAt: observed}, true, true},
+		{"positive credits", code.Allowance{Windows: []code.AllowanceWindow{window("codex", code.AllowanceUnitCredits, code.AllowanceEvidencePassive, 0, new(float64(9)), observed, &reset)}, ObservedAt: observed}, true, true},
+		{"positive cents", code.Allowance{Windows: []code.AllowanceWindow{window("codex", code.AllowanceUnitCents, code.AllowanceEvidencePassive, 0, new(float64(9)), observed, &reset)}, ObservedAt: observed}, true, true},
+		{"fresh exhausted", code.Allowance{Windows: []code.AllowanceWindow{window("codex", code.AllowanceUnitPercent, code.AllowanceEvidencePassive, 0, nil, observed, &reset)}, ObservedAt: observed}, false, false},
+		{"stale no reset", code.Allowance{Windows: []code.AllowanceWindow{window("codex", code.AllowanceUnitPercent, code.AllowanceEvidencePassive, 0, nil, base.Add(-time.Hour), nil)}, ObservedAt: base.Add(-time.Hour)}, false, false},
+		{"stale future reset", code.Allowance{Windows: []code.AllowanceWindow{window("codex", code.AllowanceUnitPercent, code.AllowanceEvidencePassive, 0, nil, base.Add(-time.Hour), &reset)}, ObservedAt: base.Add(-time.Hour)}, false, false},
+		{"stale token count", code.Allowance{RemainingTokens: new(int64(0)), TokenObservation: &code.CountObservation{ObservedAt: base.Add(-time.Hour), ResetsAt: &reset}, ObservedAt: observed}, false, false},
+		{"fresh request count", code.Allowance{RemainingRequests: new(int64(0)), RequestObservation: &code.CountObservation{ObservedAt: observed, ResetsAt: &reset}, ObservedAt: observed}, false, false},
+		{"unrelated family", code.Allowance{Windows: []code.AllowanceWindow{window("special_model", code.AllowanceUnitPercent, code.AllowanceEvidencePassive, 0, nil, observed, &reset)}, ObservedAt: observed}, false, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -465,15 +510,15 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 				available bool
 			}{{"band-off", tc.off}, {"band-on", tc.on}} {
 				route := bySlug[check.slug]
-				permit, err := store.Admit(t.Context(), codesessions.Admission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{provider}})
+				permit, err := store.Admit(t.Context(), session.Admission{Route: route, APIKeyID: key, Operation: code.Operation{Name: "responses", Model: "model", Identity: code.Identity{Conversation: uuid.NewString()}}, ProvidersFor: session.StaticProviders(provider)})
 				if check.available && (err != nil || permit.Account.ID != healthy) {
 					t.Fatalf("%s admission = %+v, %v", check.slug, permit, err)
 				}
 				if !check.available && err == nil {
 					t.Fatalf("%s admitted exhausted account %+v", check.slug, permit)
 				}
-				offers, err := codesessions.Offers(t.Context(), pool, route.RevisionID)
-				if err != nil || (len(offers) > 0) != check.available {
+				offers, err := session.Offers(t.Context(), pool, route.RevisionID, "")
+				if err != nil || (!offers.IsEmpty()) != check.available {
 					t.Fatalf("%s offers = %+v, %v; available %t", check.slug, offers, err, check.available)
 				}
 			}
@@ -481,13 +526,13 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 	}
 	countReset := base.Add(30 * time.Minute)
 	activeReset := base.Add(4 * time.Hour)
-	blocked := codemode.Allowance{
+	blocked := code.Allowance{
 		RemainingTokens:  new(int64(0)),
-		TokenObservation: &codemode.CountObservation{ObservedAt: observed, ResetsAt: &countReset},
+		TokenObservation: &code.CountObservation{ObservedAt: observed, ResetsAt: &countReset},
 		ObservedAt:       observed,
-		Windows: []codemode.AllowanceWindow{
-			window("special_model", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, observed, &reset),
-			window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidenceActive, 0, nil, observed, &activeReset),
+		Windows: []code.AllowanceWindow{
+			window("special_model", code.AllowanceUnitPercent, code.AllowanceEvidencePassive, 0, nil, observed, &reset),
+			window("codex", code.AllowanceUnitPercent, code.AllowanceEvidenceActive, 0, nil, observed, &activeReset),
 		},
 	}
 	blockedJSON, err := json.Marshal(blocked)
@@ -501,21 +546,21 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 		slug  string
 		reset time.Time
 	}{{"band-on", reset}, {"band-off", reset}} {
-		_, err := store.Admit(t.Context(), codesessions.Admission{Route: bySlug[tc.slug], APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{provider}})
-		var refusal *codemode.Refusal
+		_, err := store.Admit(t.Context(), session.Admission{Route: bySlug[tc.slug], APIKeyID: key, Operation: code.Operation{Name: "responses", Model: "model", Identity: code.Identity{Conversation: uuid.NewString()}}, ProvidersFor: session.StaticProviders(provider)})
+		var refusal *code.Refusal
 		if !errors.As(err, &refusal) || refusal.RetryAt == nil || !refusal.RetryAt.Equal(tc.reset) {
 			t.Fatalf("%s refusal = %+v, want retry at %s", tc.slug, err, tc.reset)
 		}
 	}
 	for _, tc := range []struct {
 		name      string
-		allowance codemode.Allowance
+		allowance code.Allowance
 	}{
-		{"token freshness", codemode.Allowance{RemainingTokens: new(int64(0)), TokenObservation: &codemode.CountObservation{ObservedAt: observed}, ObservedAt: observed}},
-		{"request freshness", codemode.Allowance{RemainingRequests: new(int64(0)), RequestObservation: &codemode.CountObservation{ObservedAt: observed}, ObservedAt: observed}},
-		{"legacy freshness", codemode.Allowance{RemainingTokens: new(int64(0)), ObservedAt: observed}},
-		{"latest freshness", codemode.Allowance{RemainingTokens: new(int64(0)), TokenObservation: &codemode.CountObservation{ObservedAt: observed.Add(-time.Minute)}, RemainingRequests: new(int64(0)), RequestObservation: &codemode.CountObservation{ObservedAt: observed}, ObservedAt: observed}},
-		{"later vendor reset", codemode.Allowance{RemainingTokens: new(int64(0)), TokenObservation: &codemode.CountObservation{ObservedAt: observed}, RemainingRequests: new(int64(0)), RequestObservation: &codemode.CountObservation{ObservedAt: observed, ResetsAt: &countReset}, ObservedAt: observed}},
+		{"token freshness", code.Allowance{RemainingTokens: new(int64(0)), TokenObservation: &code.CountObservation{ObservedAt: observed}, ObservedAt: observed}},
+		{"request freshness", code.Allowance{RemainingRequests: new(int64(0)), RequestObservation: &code.CountObservation{ObservedAt: observed}, ObservedAt: observed}},
+		{"legacy freshness", code.Allowance{RemainingTokens: new(int64(0)), ObservedAt: observed}},
+		{"latest freshness", code.Allowance{RemainingTokens: new(int64(0)), TokenObservation: &code.CountObservation{ObservedAt: observed.Add(-time.Minute)}, RemainingRequests: new(int64(0)), RequestObservation: &code.CountObservation{ObservedAt: observed}, ObservedAt: observed}},
+		{"later vendor reset", code.Allowance{RemainingTokens: new(int64(0)), TokenObservation: &code.CountObservation{ObservedAt: observed}, RemainingRequests: new(int64(0)), RequestObservation: &code.CountObservation{ObservedAt: observed, ResetsAt: &countReset}, ObservedAt: observed}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			document, err := json.Marshal(tc.allowance)
@@ -529,20 +574,20 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 				slug    string
 				retryAt *time.Time
 			}{{"band-on", nil}, {"band-off", nil}} {
-				_, err := store.Admit(t.Context(), codesessions.Admission{Route: bySlug[policy.slug], APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{provider}})
-				var refusal *codemode.Refusal
+				_, err := store.Admit(t.Context(), session.Admission{Route: bySlug[policy.slug], APIKeyID: key, Operation: code.Operation{Name: "responses", Model: "model", Identity: code.Identity{Conversation: uuid.NewString()}}, ProvidersFor: session.StaticProviders(provider)})
+				var refusal *code.Refusal
 				if !errors.As(err, &refusal) || (policy.retryAt == nil && refusal.RetryAt != nil) || (policy.retryAt != nil && (refusal.RetryAt == nil || !refusal.RetryAt.Equal(*policy.retryAt))) {
 					t.Fatalf("%s refusal = %+v, want retry at %v", policy.slug, err, policy.retryAt)
 				}
 			}
 		})
 	}
-	if err := store.ObserveCooldownClass(t.Context(), healthy, "model", codeadapter.Classification{Class: codeadapter.CooldownRate, Scope: codeadapter.ScopeModel, RetryAt: countReset, Envelope: "fixture_rate"}, observed); err != nil {
+	if err := store.ObserveCooldownClass(t.Context(), healthy, "model", vendor.Classification{Class: code.CooldownRate, Scope: code.ScopeModel, RetryAt: countReset, Envelope: "fixture_rate"}, observed); err != nil {
 		t.Fatal(err)
 	}
-	for _, allowance := range []codemode.Allowance{
-		{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, observed, nil)}, ObservedAt: observed},
-		{RemainingTokens: new(int64(0)), TokenObservation: &codemode.CountObservation{ObservedAt: base.Add(-time.Hour)}, ObservedAt: base.Add(-time.Hour)},
+	for _, allowance := range []code.Allowance{
+		{Windows: []code.AllowanceWindow{window("codex", code.AllowanceUnitPercent, code.AllowanceEvidencePassive, 0, nil, observed, nil)}, ObservedAt: observed},
+		{RemainingTokens: new(int64(0)), TokenObservation: &code.CountObservation{ObservedAt: base.Add(-time.Hour)}, ObservedAt: base.Add(-time.Hour)},
 	} {
 		withoutReset, err := json.Marshal(allowance)
 		if err != nil {
@@ -555,8 +600,8 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 			slug  string
 			reset *time.Time
 		}{{"band-on", nil}, {"band-off", nil}} {
-			_, err := store.Admit(t.Context(), codesessions.Admission{Route: bySlug[tc.slug], APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{provider}})
-			var refusal *codemode.Refusal
+			_, err := store.Admit(t.Context(), session.Admission{Route: bySlug[tc.slug], APIKeyID: key, Operation: code.Operation{Name: "responses", Model: "model", Identity: code.Identity{Conversation: uuid.NewString()}}, ProvidersFor: session.StaticProviders(provider)})
+			var refusal *code.Refusal
 			if !errors.As(err, &refusal) || (tc.reset == nil && refusal.RetryAt != nil) || (tc.reset != nil && (refusal.RetryAt == nil || !refusal.RetryAt.Equal(*tc.reset))) {
 				t.Fatalf("%s resetless refusal = %+v, want retry at %v", tc.slug, err, tc.reset)
 			}
@@ -581,20 +626,20 @@ func attemptAllowanceCharge(t *testing.T, pool *pgxpool.Pool, attemptID string) 
 	return charge
 }
 
-func codeConnectionDecisions(t *testing.T, pool *pgxpool.Pool, rootID string) []codemode.Decision {
+func codeConnectionDecisions(t *testing.T, pool *pgxpool.Pool, rootID string) []code.Decision {
 	t.Helper()
 	rows, err := pool.Query(t.Context(), `SELECT to_jsonb(x) FROM olp.code_decisions x WHERE x.root_id=$1 AND x.reason='connection' AND x.attempt_id IS NULL ORDER BY x.created_at,x.id`, rootID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer rows.Close()
-	decisions := []codemode.Decision{}
+	decisions := []code.Decision{}
 	for rows.Next() {
 		var document []byte
 		if err := rows.Scan(&document); err != nil {
 			t.Fatal(err)
 		}
-		var decision codemode.Decision
+		var decision code.Decision
 		if err := json.Unmarshal(document, &decision); err != nil {
 			t.Fatal(err)
 		}
@@ -606,13 +651,13 @@ func codeConnectionDecisions(t *testing.T, pool *pgxpool.Pool, rootID string) []
 	return decisions
 }
 
-func codeDecisionForAttempt(t *testing.T, pool *pgxpool.Pool, attemptID string) codemode.Decision {
+func codeDecisionForAttempt(t *testing.T, pool *pgxpool.Pool, attemptID string) code.Decision {
 	t.Helper()
 	var document []byte
 	if err := pool.QueryRow(t.Context(), `SELECT to_jsonb(x) FROM olp.code_decisions x WHERE x.attempt_id=$1`, attemptID).Scan(&document); err != nil {
 		t.Fatal(err)
 	}
-	var decision codemode.Decision
+	var decision code.Decision
 	if err := json.Unmarshal(document, &decision); err != nil {
 		t.Fatal(err)
 	}
@@ -620,8 +665,8 @@ func codeDecisionForAttempt(t *testing.T, pool *pgxpool.Pool, attemptID string) 
 }
 
 type cooldownJourney struct {
-	store    *codesessions.Store
-	route    codemode.Route
+	store    *session.Store
+	route    code.Route
 	key      string
 	provider string
 	first    string
@@ -634,7 +679,7 @@ func seedCooldownJourney(t *testing.T, pool *pgxpool.Pool) cooldownJourney {
 	firstCredential, secondCredential := uuid.NewString(), uuid.NewString()
 	first, second := uuid.NewString(), uuid.NewString()
 	key, poolID, routeID, revisionID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
-	route := codemode.Route{ID: routeID, ProjectID: project, Slug: "cooldown-" + routeID, PoolID: poolID, Models: []string{"model", "other"}, Enabled: true, RevisionID: revisionID, Revision: 1, ETag: uuid.NewString()}
+	route := code.Route{ID: routeID, ProjectID: project, Slug: "cooldown-" + routeID, PoolID: poolID, Models: []string{"model", "other"}, Enabled: true, RevisionID: revisionID, Revision: 1, ETag: uuid.NewString()}
 	document, err := json.Marshal(route)
 	if err != nil {
 		t.Fatal(err)
@@ -667,11 +712,11 @@ func seedCooldownJourney(t *testing.T, pool *pgxpool.Pool) cooldownJourney {
 			t.Fatal(err)
 		}
 	}
-	return cooldownJourney{store: codesessions.New(pool), route: route, key: key, provider: provider, first: first, second: second}
+	return cooldownJourney{store: session.New(pool), route: route, key: key, provider: provider, first: first, second: second}
 }
 
-func (j cooldownJourney) admission(model, conversation string) codesessions.Admission {
-	return codesessions.Admission{Route: j.route, APIKeyID: j.key, Operation: codemode.Operation{Name: "responses", Model: model, Identity: codemode.Identity{Conversation: conversation}}, Providers: []string{j.provider}}
+func (j cooldownJourney) admission(model, conversation string) session.Admission {
+	return session.Admission{Route: j.route, APIKeyID: j.key, Operation: code.Operation{Name: "responses", Model: model, Identity: code.Identity{Conversation: conversation}}, ProvidersFor: session.StaticProviders(j.provider)}
 }
 
 func TestCodeCooldownJourneys(t *testing.T) {
@@ -690,7 +735,7 @@ func codeCooldownClassesScopeSelectionNeverShortenAndNameRefusalRecovery(t *test
 	base := time.Now().UTC().Truncate(time.Second)
 	modelRetry := base.Add(30 * time.Minute)
 	credentialRetry := base.Add(3 * time.Hour)
-	if err := journey.store.ObserveCooldownClass(t.Context(), journey.first, "model", codeadapter.Classification{Class: codeadapter.CooldownCapacity, Scope: codeadapter.ScopeModel, RetryAt: modelRetry, Envelope: "codex_model_at_capacity"}, base); err != nil {
+	if err := journey.store.ObserveCooldownClass(t.Context(), journey.first, "model", vendor.Classification{Class: code.CooldownCapacity, Scope: code.ScopeModel, RetryAt: modelRetry, Envelope: "codex_model_at_capacity"}, base); err != nil {
 		t.Fatal(err)
 	}
 	permit, err := journey.store.Admit(t.Context(), journey.admission("model", "cooldown-model-conversation"))
@@ -701,10 +746,10 @@ func codeCooldownClassesScopeSelectionNeverShortenAndNameRefusalRecovery(t *test
 		t.Fatalf("model cooled admission chose %s, want %s", permit.Account.ID, journey.second)
 	}
 	decision := codeDecisionForAttempt(t, pool, permit.Attempt.ID)
-	if len(decision.Skipped) != 1 || decision.Skipped[0].AccountID != journey.first || decision.Skipped[0].Class != codemode.SkipCooldown {
+	if len(decision.Skipped) != 1 || decision.Skipped[0].AccountID != journey.first || decision.Skipped[0].Class != code.SkipCooldown {
 		t.Fatalf("model cooldown decision = %+v", decision)
 	}
-	if err := journey.store.ObserveCooldownClass(t.Context(), journey.second, "", codeadapter.Classification{Class: codeadapter.CooldownQuota, Scope: codeadapter.ScopeCredential, RetryAt: credentialRetry, Envelope: "codex_usage_limit_reached"}, base.Add(time.Second)); err != nil {
+	if err := journey.store.ObserveCooldownClass(t.Context(), journey.second, "", vendor.Classification{Class: code.CooldownQuota, Scope: code.ScopeCredential, RetryAt: credentialRetry, Envelope: "codex_usage_limit_reached"}, base.Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	other, err := journey.store.Admit(t.Context(), journey.admission("other", "cooldown-other-conversation"))
@@ -715,14 +760,14 @@ func codeCooldownClassesScopeSelectionNeverShortenAndNameRefusalRecovery(t *test
 		t.Fatalf("other model admission chose %s, want the model cooled account %s", other.Account.ID, journey.first)
 	}
 	_, err = journey.store.Admit(t.Context(), journey.admission("model", "cooldown-refused-conversation"))
-	var refusal *codemode.Refusal
+	var refusal *code.Refusal
 	if !errors.As(err, &refusal) || refusal.Code != "code_account_unavailable" || refusal.RetryAt == nil || !refusal.RetryAt.Equal(modelRetry) {
 		t.Fatalf("refusal = %v (%+v), want recovery at %s", err, refusal, modelRetry)
 	}
-	if err := journey.store.ObserveCooldownClass(t.Context(), journey.first, "model", codeadapter.Classification{Class: codeadapter.CooldownCapacity, Scope: codeadapter.ScopeModel, RetryAt: base.Add(10 * time.Minute)}, base.Add(2*time.Second)); err != nil {
+	if err := journey.store.ObserveCooldownClass(t.Context(), journey.first, "model", vendor.Classification{Class: code.CooldownCapacity, Scope: code.ScopeModel, RetryAt: base.Add(10 * time.Minute)}, base.Add(2*time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	if err := journey.store.ObserveCooldownClass(t.Context(), journey.second, "", codeadapter.Classification{Class: codeadapter.CooldownQuota, Scope: codeadapter.ScopeCredential, RetryAt: base.Add(time.Hour)}, base.Add(3*time.Second)); err != nil {
+	if err := journey.store.ObserveCooldownClass(t.Context(), journey.second, "", vendor.Classification{Class: code.CooldownQuota, Scope: code.ScopeCredential, RetryAt: base.Add(time.Hour)}, base.Add(3*time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	var modelStored, credentialStored, unavailable time.Time
@@ -754,7 +799,7 @@ func codeModelLessConnectionChecksEveryModelCooldown(t *testing.T, pool *pgxpool
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, journey.second); err != nil {
 		t.Fatal(err)
 	}
-	pinned, err := journey.store.BindConnection(t.Context(), journey.route, journey.key, codemode.Identity{Conversation: "pinned-model-less"}, "", providers)
+	pinned, err := journey.store.BindConnection(t.Context(), journey.route, journey.key, code.Identity{Conversation: "pinned-model-less"}, "", providers)
 	if err != nil || pinned.Account.ID != journey.first {
 		t.Fatalf("initial pinned connection = %+v, %v", pinned, err)
 	}
@@ -763,57 +808,57 @@ func codeModelLessConnectionChecksEveryModelCooldown(t *testing.T, pool *pgxpool
 	}
 	now := time.Now().UTC().Truncate(time.Second)
 	late := now.Add(20 * time.Minute)
-	if err := journey.store.ObserveCooldownClass(t.Context(), journey.first, "other", codeadapter.Classification{Class: codeadapter.CooldownCapacity, Scope: codeadapter.ScopeModel, RetryAt: late}, now); err != nil {
+	if err := journey.store.ObserveCooldownClass(t.Context(), journey.first, "other", vendor.Classification{Class: code.CooldownCapacity, Scope: code.ScopeModel, RetryAt: late}, now); err != nil {
 		t.Fatal(err)
 	}
-	reconnected, err := journey.store.BindConnection(t.Context(), journey.route, journey.key, codemode.Identity{Conversation: "pinned-model-less"}, "", providers)
+	reconnected, err := journey.store.BindConnection(t.Context(), journey.route, journey.key, code.Identity{Conversation: "pinned-model-less"}, "", providers)
 	if err != nil || reconnected.Account.ID != journey.first {
 		t.Fatalf("model-less reconnect = %+v, %v, want account %s", reconnected, err, journey.first)
 	}
-	healthy, err := journey.store.Admit(t.Context(), codesessions.Admission{Route: journey.route, APIKeyID: journey.key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: "pinned-model-less"}}, Providers: providers})
+	healthy, err := journey.store.Admit(t.Context(), session.Admission{Route: journey.route, APIKeyID: journey.key, Operation: code.Operation{Name: "responses", Model: "model", Identity: code.Identity{Conversation: "pinned-model-less"}}, ProvidersFor: session.StaticProviders(providers...)})
 	if err != nil || healthy.Account.ID != journey.first {
 		t.Fatalf("healthy generation = %+v, %v, want account %s", healthy, err, journey.first)
 	}
-	_, err = journey.store.Admit(t.Context(), codesessions.Admission{Route: journey.route, APIKeyID: journey.key, Operation: codemode.Operation{Name: "responses", Model: "other", Identity: codemode.Identity{Conversation: "pinned-model-less"}}, Providers: providers})
-	var refusal *codemode.Refusal
+	_, err = journey.store.Admit(t.Context(), session.Admission{Route: journey.route, APIKeyID: journey.key, Operation: code.Operation{Name: "responses", Model: "other", Identity: code.Identity{Conversation: "pinned-model-less"}}, ProvidersFor: session.StaticProviders(providers...)})
+	var refusal *code.Refusal
 	if !errors.As(err, &refusal) || refusal.Code != "code_account_unavailable" || refusal.RetryAt == nil || !refusal.RetryAt.Equal(late) {
 		t.Fatalf("cooled generation = %v (%+v), want retry at %s", err, refusal, late)
 	}
-	bound, err := journey.store.BindConnection(t.Context(), journey.route, journey.key, codemode.Identity{Conversation: "new-model-less"}, "", providers)
+	bound, err := journey.store.BindConnection(t.Context(), journey.route, journey.key, code.Identity{Conversation: "new-model-less"}, "", providers)
 	if err != nil || bound.Account.ID != journey.second {
 		t.Fatalf("model-less connection = %+v, %v, want account %s", bound, err, journey.second)
 	}
 	decisions := codeConnectionDecisions(t, pool, bound.Binding.RootID)
-	if len(decisions) != 1 || len(decisions[0].Skipped) != 1 || decisions[0].Skipped[0].AccountID != journey.first || decisions[0].Skipped[0].Class != codemode.SkipCooldown {
+	if len(decisions) != 1 || len(decisions[0].Skipped) != 1 || decisions[0].Skipped[0].AccountID != journey.first || decisions[0].Skipped[0].Class != code.SkipCooldown {
 		t.Fatalf("model-less selection = %+v", decisions)
 	}
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, journey.second); err != nil {
 		t.Fatal(err)
 	}
-	hinted, err := journey.store.BindConnection(t.Context(), journey.route, journey.key, codemode.Identity{Conversation: "hinted-model"}, "model", providers)
+	hinted, err := journey.store.BindConnection(t.Context(), journey.route, journey.key, code.Identity{Conversation: "hinted-model"}, "model", providers)
 	if err != nil || hinted.Account.ID != journey.first {
 		t.Fatalf("hinted connection = %+v, %v", hinted, err)
 	}
-	if err := journey.store.ObserveCooldownClass(t.Context(), journey.first, "model", codeadapter.Classification{Class: codeadapter.CooldownCapacity, Scope: codeadapter.ScopeModel, RetryAt: now.Add(10 * time.Minute)}, now); err != nil {
+	if err := journey.store.ObserveCooldownClass(t.Context(), journey.first, "model", vendor.Classification{Class: code.CooldownCapacity, Scope: code.ScopeModel, RetryAt: now.Add(10 * time.Minute)}, now); err != nil {
 		t.Fatal(err)
 	}
-	reconnectedAll, err := journey.store.BindConnection(t.Context(), journey.route, journey.key, codemode.Identity{Conversation: "pinned-model-less"}, "", providers)
+	reconnectedAll, err := journey.store.BindConnection(t.Context(), journey.route, journey.key, code.Identity{Conversation: "pinned-model-less"}, "", providers)
 	if err != nil || reconnectedAll.Account.ID != journey.first {
 		t.Fatalf("model-less reconnect with both models cooling = %+v, %v", reconnectedAll, err)
 	}
-	_, err = journey.store.BindConnection(t.Context(), journey.route, journey.key, codemode.Identity{Conversation: "pinned-model-less"}, "model", providers)
+	_, err = journey.store.BindConnection(t.Context(), journey.route, journey.key, code.Identity{Conversation: "pinned-model-less"}, "model", providers)
 	if !errors.As(err, &refusal) || refusal.Code != "code_account_unavailable" || refusal.RetryAt == nil || !refusal.RetryAt.Equal(now.Add(10*time.Minute)) {
 		t.Fatalf("hinted reconnect = %v (%+v), want model cooldown", err, refusal)
 	}
-	_, err = journey.store.BindConnection(t.Context(), journey.route, journey.key, codemode.Identity{Conversation: "new-model-less-both"}, "", providers)
+	_, err = journey.store.BindConnection(t.Context(), journey.route, journey.key, code.Identity{Conversation: "new-model-less-both"}, "", providers)
 	if !errors.As(err, &refusal) || refusal.Code != "code_account_unavailable" || refusal.RetryAt == nil || !refusal.RetryAt.Equal(late) {
 		t.Fatalf("new model-less connection = %v (%+v), want retry at %s", err, refusal, late)
 	}
 	credentialReset := now.Add(30 * time.Minute)
-	if err := journey.store.ObserveCooldownClass(t.Context(), journey.first, "", codeadapter.Classification{Class: codeadapter.CooldownQuota, Scope: codeadapter.ScopeCredential, RetryAt: credentialReset}, now); err != nil {
+	if err := journey.store.ObserveCooldownClass(t.Context(), journey.first, "", vendor.Classification{Class: code.CooldownQuota, Scope: code.ScopeCredential, RetryAt: credentialReset}, now); err != nil {
 		t.Fatal(err)
 	}
-	_, err = journey.store.BindConnection(t.Context(), journey.route, journey.key, codemode.Identity{Conversation: "pinned-model-less"}, "", providers)
+	_, err = journey.store.BindConnection(t.Context(), journey.route, journey.key, code.Identity{Conversation: "pinned-model-less"}, "", providers)
 	if !errors.As(err, &refusal) || refusal.Code != "code_account_unavailable" || refusal.RetryAt == nil || !refusal.RetryAt.Equal(credentialReset) {
 		t.Fatalf("credential-cooled reconnect = %v (%+v), want retry at %s", err, refusal, credentialReset)
 	}
@@ -840,14 +885,14 @@ func codeModelLessConnectionRequiresUsefulModelHint(t *testing.T, pool *pgxpool.
 			now := time.Now().UTC().Truncate(time.Second)
 			if tc.credential {
 				for i, account := range []string{journey.first, journey.second} {
-					if err := journey.store.ObserveCooldownClass(t.Context(), account, "", codeadapter.Classification{Class: codeadapter.CooldownQuota, Scope: codeadapter.ScopeCredential, RetryAt: now.Add(time.Duration(i+1) * 10 * time.Minute)}, now); err != nil {
+					if err := journey.store.ObserveCooldownClass(t.Context(), account, "", vendor.Classification{Class: code.CooldownQuota, Scope: code.ScopeCredential, RetryAt: now.Add(time.Duration(i+1) * 10 * time.Minute)}, now); err != nil {
 						t.Fatal(err)
 					}
 				}
 			}
 			if tc.splitModels {
 				for i, account := range []string{journey.first, journey.second} {
-					if err := journey.store.ObserveCooldownClass(t.Context(), account, journey.route.Models[i], codeadapter.Classification{Class: codeadapter.CooldownCapacity, Scope: codeadapter.ScopeModel, RetryAt: now.Add(10 * time.Minute)}, now); err != nil {
+					if err := journey.store.ObserveCooldownClass(t.Context(), account, journey.route.Models[i], vendor.Classification{Class: code.CooldownCapacity, Scope: code.ScopeModel, RetryAt: now.Add(10 * time.Minute)}, now); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -864,8 +909,8 @@ func codeModelLessConnectionRequiresUsefulModelHint(t *testing.T, pool *pgxpool.
 			}
 			providers := []string{journey.provider}
 			conversation := uuid.NewString()
-			_, err := journey.store.BindConnection(t.Context(), journey.route, journey.key, codemode.Identity{Conversation: "model-less-" + conversation}, "", providers)
-			var refusal *codemode.Refusal
+			_, err := journey.store.BindConnection(t.Context(), journey.route, journey.key, code.Identity{Conversation: "model-less-" + conversation}, "", providers)
+			var refusal *code.Refusal
 			if !errors.As(err, &refusal) || refusal.Code != tc.wantCode {
 				t.Fatalf("model-less refusal = %v (%+v), want %s", err, refusal, tc.wantCode)
 			}
@@ -873,7 +918,7 @@ func codeModelLessConnectionRequiresUsefulModelHint(t *testing.T, pool *pgxpool.
 				t.Fatalf("credential retry = %+v, want %s", refusal.RetryAt, now.Add(10*time.Minute))
 			}
 			for _, model := range journey.route.Models {
-				_, err := journey.store.BindConnection(t.Context(), journey.route, journey.key, codemode.Identity{Conversation: "hinted-" + model + "-" + conversation}, model, providers)
+				_, err := journey.store.BindConnection(t.Context(), journey.route, journey.key, code.Identity{Conversation: "hinted-" + model + "-" + conversation}, model, providers)
 				if (tc.credential || tc.disabled) && err == nil || !tc.credential && !tc.disabled && err != nil {
 					t.Errorf("hinted connection for %s = %v", model, err)
 				}
@@ -889,7 +934,7 @@ func codeModelCooldownFollowsAliasTarget(t *testing.T, pool *pgxpool.Pool) {
 	}
 	observed := time.Now().UTC().Truncate(time.Second)
 	reset := observed.Add(time.Hour)
-	if err := journey.store.ObserveCooldownClass(t.Context(), journey.first, "model", codeadapter.Classification{Class: codeadapter.CooldownCapacity, Scope: codeadapter.ScopeModel, RetryAt: reset}, observed); err != nil {
+	if err := journey.store.ObserveCooldownClass(t.Context(), journey.first, "model", vendor.Classification{Class: code.CooldownCapacity, Scope: code.ScopeModel, RetryAt: reset}, observed); err != nil {
 		t.Fatal(err)
 	}
 	route := journey.route
@@ -903,20 +948,20 @@ func codeModelCooldownFollowsAliasTarget(t *testing.T, pool *pgxpool.Pool) {
 		t.Fatal(err)
 	}
 	for _, alias := range []string{"first-alias", "second-alias"} {
-		_, err := journey.store.Admit(t.Context(), codesessions.Admission{Route: route, APIKeyID: journey.key, Operation: codemode.Operation{Name: "responses", Model: alias, Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{journey.provider}})
-		var refusal *codemode.Refusal
+		_, err := journey.store.Admit(t.Context(), session.Admission{Route: route, APIKeyID: journey.key, Operation: code.Operation{Name: "responses", Model: alias, Identity: code.Identity{Conversation: uuid.NewString()}}, ProvidersFor: session.StaticProviders(journey.provider)})
+		var refusal *code.Refusal
 		if !errors.As(err, &refusal) || refusal.Code != "code_account_unavailable" || refusal.RetryAt == nil || !refusal.RetryAt.Equal(reset) {
 			t.Fatalf("cooled target via %s = %v (%+v), want refusal until %s", alias, err, refusal, reset)
 		}
 	}
 	checkCatalog := func(want []string) {
 		t.Helper()
-		offers, err := codesessions.Offers(t.Context(), pool, route.RevisionID, journey.key)
+		offers, err := session.Offers(t.Context(), pool, route.RevisionID, journey.key)
 		if err != nil {
 			t.Fatal(err)
 		}
 		models := slices.Sorted(func(yield func(string) bool) {
-			for _, model := range codeclient.Catalog(route, offers) {
+			for _, model := range client.Catalog(route, offers) {
 				if !yield(model.ID) {
 					return
 				}
@@ -948,7 +993,7 @@ func codeModelCooldownFollowsAliasTarget(t *testing.T, pool *pgxpool.Pool) {
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_routes SET latest_revision_id=$2 WHERE id=$1`, route.ID, republished.RevisionID); err != nil {
 		t.Fatal(err)
 	}
-	permit, err := journey.store.Admit(t.Context(), codesessions.Admission{Route: republished, APIKeyID: journey.key, Operation: codemode.Operation{Name: "responses", Model: "first-alias", Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{journey.provider}})
+	permit, err := journey.store.Admit(t.Context(), session.Admission{Route: republished, APIKeyID: journey.key, Operation: code.Operation{Name: "responses", Model: "first-alias", Identity: code.Identity{Conversation: uuid.NewString()}}, ProvidersFor: session.StaticProviders(journey.provider)})
 	if err != nil || permit.Account.ID != journey.first || permit.Attempt.Model != "other" {
 		t.Fatalf("same alias with a different target = %+v, %v", permit, err)
 	}
@@ -993,34 +1038,35 @@ func codeRecoveryRecordsActualDestinationSelection(t *testing.T, pool *pgxpool.P
 	if err := journey.store.MarkDispatched(t.Context(), first.Attempt.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := journey.store.ObserveOutcome(t.Context(), first.Attempt.ID, codemode.Outcome{Origin: "upstream", Kind: "rejected", UpstreamStatus: &status, ObservedAt: now}); err != nil {
+	if err := journey.store.ObserveOutcome(t.Context(), first.Attempt.ID, code.UpstreamTerminalOutcome(code.OutcomeRejected, &status, now)); err != nil {
 		t.Fatal(err)
 	}
 	if err := journey.store.ConfirmNonexecution(t.Context(), first.Attempt.ID, status); err != nil {
 		t.Fatal(err)
 	}
 	zero := int64(0)
-	if err := journey.store.Settle(t.Context(), first.Attempt.ID, codemode.Usage{Total: &zero}); err != nil {
+	if err := journey.store.Settle(t.Context(), first.Attempt.ID, code.Usage{Total: &zero}); err != nil {
 		t.Fatal(err)
 	}
-	if err := journey.store.ObserveCooldownClass(t.Context(), journey.first, "", codeadapter.Classification{Class: codeadapter.CooldownQuota, Scope: codeadapter.ScopeCredential, RetryAt: now.Add(time.Hour)}, now); err != nil {
+	if err := journey.store.ObserveCooldownClass(t.Context(), journey.first, "", vendor.Classification{Class: code.CooldownQuota, Scope: code.ScopeCredential, RetryAt: now.Add(time.Hour)}, now); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=true WHERE id=ANY($1::uuid[])`, []string{journey.second, third}); err != nil {
 		t.Fatal(err)
 	}
 	for _, account := range []string{journey.second, third} {
-		if err := journey.store.ObserveCooldownClass(t.Context(), account, "model", codeadapter.Classification{Class: codeadapter.CooldownCapacity, Scope: codeadapter.ScopeModel, RetryAt: now.Add(time.Hour)}, now); err != nil {
+		if err := journey.store.ObserveCooldownClass(t.Context(), account, "model", vendor.Classification{Class: code.CooldownCapacity, Scope: code.ScopeModel, RetryAt: now.Add(time.Hour)}, now); err != nil {
 			t.Fatal(err)
 		}
 	}
-	admission.Recovery = &codesessions.Recovery{From: first.Attempt.ID, Envelope: "codex_usage_limit_reached", Number: 1}
+	rec := code.NewRebindRecovery(first.Attempt.ID, "codex_usage_limit_reached", 1)
+	admission.Recovery = &rec
 	recovered, err := journey.store.Admit(t.Context(), admission)
 	if err != nil || recovered.Attempt.Model != "other" {
 		t.Fatalf("model-pool recovery = %+v, %v", recovered, err)
 	}
 	decision := codeDecisionForAttempt(t, pool, recovered.Attempt.ID)
-	if decision.Reason != codemode.DecisionChosen || decision.ChosenAccountID != recovered.Account.ID || decision.Band != nil || decision.RecoveryEnvelope == nil || *decision.RecoveryEnvelope != "codex_usage_limit_reached" || decision.RecoveryOrdinal == nil || *decision.RecoveryOrdinal != 1 || len(decision.Skipped) != 1 || decision.Skipped[0].Class != codemode.SkipWeight || decision.Skipped[0].AccountID == recovered.Account.ID {
+	if decision.Reason != code.DecisionChosen || decision.ChosenAccountID != recovered.Account.ID || decision.Band != nil || decision.RecoveryEnvelope == nil || *decision.RecoveryEnvelope != "codex_usage_limit_reached" || decision.RecoveryOrdinal == nil || *decision.RecoveryOrdinal != 1 || len(decision.Skipped) != 1 || decision.Skipped[0].Class != code.SkipWeight || decision.Skipped[0].AccountID == recovered.Account.ID {
 		t.Fatalf("recovery decision = %+v", decision)
 	}
 }
@@ -1057,12 +1103,12 @@ func codeTreeRefusalUsesPreferredAccountRecovery(t *testing.T, pool *pgxpool.Poo
 		account string
 		retryAt time.Time
 	}{{journey.first, preferredRetry}, {alternative, base.Add(5 * time.Minute)}} {
-		if err := journey.store.ObserveCooldownClass(t.Context(), observation.account, "other", codeadapter.Classification{Class: codeadapter.CooldownRate, Scope: codeadapter.ScopeModel, RetryAt: observation.retryAt}, base); err != nil {
+		if err := journey.store.ObserveCooldownClass(t.Context(), observation.account, "other", vendor.Classification{Class: code.CooldownRate, Scope: code.ScopeModel, RetryAt: observation.retryAt}, base); err != nil {
 			t.Fatal(err)
 		}
 	}
-	_, err = journey.store.Admit(t.Context(), codesessions.Admission{Route: journey.route, APIKeyID: journey.key, Operation: codemode.Operation{Name: "responses", Model: "other", Identity: codemode.Identity{Conversation: "tree-recovery"}}, Providers: []string{journey.provider, provider}})
-	var refusal *codemode.Refusal
+	_, err = journey.store.Admit(t.Context(), session.Admission{Route: journey.route, APIKeyID: journey.key, Operation: code.Operation{Name: "responses", Model: "other", Identity: code.Identity{Conversation: "tree-recovery"}}, ProvidersFor: session.StaticProviders(journey.provider, provider)})
+	var refusal *code.Refusal
 	if !errors.As(err, &refusal) || refusal.RetryAt == nil || !refusal.RetryAt.Equal(preferredRetry) {
 		t.Fatalf("tree refusal = %v (%+v), want preferred account recovery at %s", err, refusal, preferredRetry)
 	}
@@ -1079,7 +1125,7 @@ func codeActiveAllowanceDoesNotAffectBands(t *testing.T, pool *pgxpool.Pool) {
 	user, project, provider := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	active, unknown := uuid.NewString(), uuid.NewString()
 	key, poolID, routeID, revisionID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
-	route := codemode.Route{ID: routeID, ProjectID: project, Slug: "active-band", PoolID: poolID, Models: []string{"model"}, Enabled: true, AllowanceOrdering: true, RevisionID: revisionID, Revision: 1, ETag: uuid.NewString()}
+	route := code.Route{ID: routeID, ProjectID: project, Slug: "active-band", PoolID: poolID, Models: []string{"model"}, Enabled: true, AllowanceOrdering: true, RevisionID: revisionID, Revision: 1, ETag: uuid.NewString()}
 	document, err := json.Marshal(route)
 	if err != nil {
 		t.Fatal(err)
@@ -1133,7 +1179,7 @@ func codeActiveAllowanceDoesNotAffectBands(t *testing.T, pool *pgxpool.Pool) {
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance_read_requested_at=$2 WHERE id=$1`, active, base.Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	store := codesessions.New(pool)
+	store := session.New(pool)
 	due, err := store.DueAllowanceReads(t.Context(), base, 50, []string{"codex-subscription"})
 	if err != nil {
 		t.Fatal(err)
@@ -1143,7 +1189,7 @@ func codeActiveAllowanceDoesNotAffectBands(t *testing.T, pool *pgxpool.Pool) {
 	}
 	reset := base.Add(2 * time.Hour)
 	body := fmt.Sprintf(`{"plan_type":"plus","rate_limit":{"allowed":true,"limit_reached":false,"primary_window":{"used_percent":20,"limit_window_seconds":18000,"reset_after_seconds":3600,"reset_at":%d},"secondary_window":null},"credits":{"has_credits":true,"unlimited":false,"balance":"3.25"}}`, reset.Unix())
-	allowance, ok := codeallowance.ParseUsage([]byte(body), base)
+	allowance, ok := allowance.ParseUsage([]byte(body), base)
 	if !ok {
 		t.Fatal("pinned usage payload must parse")
 	}
@@ -1170,7 +1216,7 @@ func codeActiveAllowanceDoesNotAffectBands(t *testing.T, pool *pgxpool.Pool) {
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, unknown); err != nil {
 		t.Fatal(err)
 	}
-	permit, err := store.Admit(t.Context(), codesessions.Admission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: "active-conv-0"}}, Providers: []string{provider}})
+	permit, err := store.Admit(t.Context(), session.Admission{Route: route, APIKeyID: key, Operation: code.Operation{Name: "responses", Model: "model", Identity: code.Identity{Conversation: "active-conv-0"}}, ProvidersFor: session.StaticProviders(provider)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1181,18 +1227,18 @@ func codeActiveAllowanceDoesNotAffectBands(t *testing.T, pool *pgxpool.Pool) {
 	if decision.Band != nil || decision.Evidence != nil || decision.EvidenceObservedAt != nil {
 		t.Fatalf("active band decision = %+v", decision)
 	}
-	passive := codemode.Allowance{Windows: []codemode.AllowanceWindow{{LimitID: "codex", Window: "primary", Unit: codemode.AllowanceUnitPercent, Evidence: codemode.AllowanceEvidencePassive, UsedPercent: 40, RemainingPercent: 60, ResetsAt: &reset, ObservedAt: base}}, ObservedAt: base}
+	passive := code.Allowance{Windows: []code.AllowanceWindow{{LimitID: "codex", Window: "primary", Unit: code.AllowanceUnitPercent, Evidence: code.AllowanceEvidencePassive, UsedPercent: 40, RemainingPercent: 60, ResetsAt: &reset, ObservedAt: base}}, ObservedAt: base}
 	if err := store.ObserveAllowance(t.Context(), active, passive); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.InvalidateActiveAllowance(t.Context(), active); err != nil {
 		t.Fatal(err)
 	}
-	var stored codemode.Allowance
+	var stored code.Allowance
 	if err := pool.QueryRow(t.Context(), `SELECT allowance FROM olp.code_accounts WHERE id=$1`, active).Scan(&stored); err != nil {
 		t.Fatal(err)
 	}
-	if len(stored.Windows) != 1 || stored.Windows[0].Evidence != codemode.AllowanceEvidencePassive || stored.Windows[0].RemainingPercent != 60 || stored.RemainingPercent == nil || *stored.RemainingPercent != 60 || stored.Credits == nil {
+	if len(stored.Windows) != 1 || stored.Windows[0].Evidence != code.AllowanceEvidencePassive || stored.Windows[0].RemainingPercent != 60 || stored.RemainingPercent == nil || *stored.RemainingPercent != 60 || stored.Credits == nil {
 		t.Fatalf("allowance after failed read = %+v, want passive window and credits preserved", stored)
 	}
 
@@ -1202,7 +1248,7 @@ func codeMiniMaxActiveRemainsDoesNotAffectBands(t *testing.T, pool *pgxpool.Pool
 	user, project, provider := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	active, unknown := uuid.NewString(), uuid.NewString()
 	key, poolID, routeID, revisionID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
-	route := codemode.Route{ID: routeID, ProjectID: project, Slug: "minimax-active-band", PoolID: poolID, Models: []string{"MiniMax-M3"}, Enabled: true, AllowanceOrdering: true, RevisionID: revisionID, Revision: 1, ETag: uuid.NewString()}
+	route := code.Route{ID: routeID, ProjectID: project, Slug: "minimax-active-band", PoolID: poolID, Models: []string{"MiniMax-M3"}, Enabled: true, AllowanceOrdering: true, RevisionID: revisionID, Revision: 1, ETag: uuid.NewString()}
 	document, err := json.Marshal(route)
 	if err != nil {
 		t.Fatal(err)
@@ -1256,7 +1302,7 @@ func codeMiniMaxActiveRemainsDoesNotAffectBands(t *testing.T, pool *pgxpool.Pool
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance_read_requested_at=$2 WHERE id=$1`, active, base.Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	store := codesessions.New(pool)
+	store := session.New(pool)
 	due, err := store.DueAllowanceReads(t.Context(), base, 50, []string{"minimax-plan"})
 	if err != nil {
 		t.Fatal(err)
@@ -1268,7 +1314,7 @@ func codeMiniMaxActiveRemainsDoesNotAffectBands(t *testing.T, pool *pgxpool.Pool
 	start := reset.Add(-5 * time.Hour)
 	body := fmt.Sprintf(`{"model_remains":[{"model_name":"MiniMax-M3","start_time":%d,"end_time":%d,"remains_time":7200000,"current_interval_total_count":100,"current_interval_usage_count":20,"current_interval_remaining_percent":80,"current_weekly_total_count":500,"current_weekly_usage_count":200,"current_weekly_remaining_percent":60,"current_interval_status":1,"current_weekly_status":1,"weekly_start_time":%d,"weekly_end_time":%d,"weekly_remains_time":604800000}],"base_resp":{"status_code":0,"status_msg":"success"}}`,
 		start.UnixMilli(), reset.UnixMilli(), start.UnixMilli(), start.Add(7*24*time.Hour).UnixMilli())
-	allowance, ok := codeallowance.ParseRemains([]byte(body), due[0].Account.Models, base)
+	allowance, ok := allowance.ParseRemains([]byte(body), due[0].Account.Models, base)
 	if !ok {
 		t.Fatal("pinned remains payload must parse")
 	}
@@ -1288,7 +1334,7 @@ func codeMiniMaxActiveRemainsDoesNotAffectBands(t *testing.T, pool *pgxpool.Pool
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, unknown); err != nil {
 		t.Fatal(err)
 	}
-	permit, err := store.Admit(t.Context(), codesessions.Admission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "messages", Model: "MiniMax-M3", Identity: codemode.Identity{Conversation: "minimax-active-conv-0"}}, Providers: []string{provider}})
+	permit, err := store.Admit(t.Context(), session.Admission{Route: route, APIKeyID: key, Operation: code.Operation{Name: "messages", Model: "MiniMax-M3", Identity: code.Identity{Conversation: "minimax-active-conv-0"}}, ProvidersFor: session.StaticProviders(provider)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1328,18 +1374,26 @@ func TestCodeAccountExtraUsageRoundTripsAndRefusesNonKimiAccounts(t *testing.T) 
 	}
 	operator := access.Principal{User: access.User{ID: user}, AllProjects: true}
 	enabled, disabled := true, false
-	save := func(id string, input providers.CodeAccountInput, existing bool) (map[string]any, error) {
+	save := func(id string, input codeaccount.Input, existing bool) (map[string]any, error) {
 		t.Helper()
 		tx, err := pool.Begin(t.Context())
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer tx.Rollback(t.Context())
-		body, err := providers.SaveCodeAccount(t.Context(), tx, operator, id, access.NewID(), input, existing)
+		draft, err := codeaccount.ParseDraft(input)
+		if err != nil {
+			return nil, err
+		}
+		saved, err := codeaccount.Save(t.Context(), tx, operator, id, access.NewID(), draft, existing)
 		if err != nil {
 			return nil, err
 		}
 		if err := tx.Commit(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		body, err := json.Marshal(saved)
+		if err != nil {
 			t.Fatal(err)
 		}
 		var account map[string]any
@@ -1348,7 +1402,7 @@ func TestCodeAccountExtraUsageRoundTripsAndRefusesNonKimiAccounts(t *testing.T) 
 		}
 		return account, nil
 	}
-	kimiInput := providers.CodeAccountInput{ProjectID: project, ProviderID: kimiProvider, CredentialID: kimiCredential, Name: "kimi", Enabled: true, Models: []string{"model"}, ExtraUsageEnabled: &enabled}
+	kimiInput := codeaccount.Input{ProjectID: project, ProviderID: kimiProvider, CredentialID: kimiCredential, Name: "kimi", Enabled: true, Models: []string{"model"}, ExtraUsageEnabled: &enabled}
 	created, err := save(kimiAccount, kimiInput, false)
 	if err != nil {
 		t.Fatal(err)
@@ -1372,7 +1426,7 @@ func TestCodeAccountExtraUsageRoundTripsAndRefusesNonKimiAccounts(t *testing.T) 
 	if value, present := cleared["extra_usage_enabled"]; !present || value != nil {
 		t.Fatalf("cleared kimi account = %v, want extra_usage_enabled present and null (not recorded)", cleared)
 	}
-	codexInput := providers.CodeAccountInput{ProjectID: project, ProviderID: codexProvider, CredentialID: codexCredential, Name: "codex", Enabled: true, Models: []string{"model"}, ExtraUsageEnabled: &enabled}
+	codexInput := codeaccount.Input{ProjectID: project, ProviderID: codexProvider, CredentialID: codexCredential, Name: "codex", Enabled: true, Models: []string{"model"}, ExtraUsageEnabled: &enabled}
 	if _, err := save(codexAccount, codexInput, false); err == nil {
 		t.Fatal("extra usage on a Codex account saved, want a refusal")
 	}

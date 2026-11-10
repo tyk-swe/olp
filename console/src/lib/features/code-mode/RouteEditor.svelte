@@ -1,126 +1,22 @@
 <script lang="ts">
-  import { validRouteSlug } from '#lib/routeIdentity.js';
   import { untrack } from 'svelte';
   import {
     saveCodeRoute,
     type CodeAccount,
     type CodePool,
-    type CodeRoute,
-    type CodeRouteWrite
+    type CodeRoute
   } from '#lib/features/code-mode/api.js';
-  import { nativeModels, type PaidTargetOption } from './presentation';
-
+  import type { PaidTargetOption } from './presentation';
+  import {
+    buildRouteWrite,
+    type PaidTargets,
+    type ResearchService
+  } from './routeDraft';
   import {
     useResourceSubmission,
     type ResourceEditorProps
   } from './resourceSubmission.svelte';
   import ResourceEditorForm from './ResourceEditorForm.svelte';
-
-  type PaidTargets = NonNullable<CodeRouteWrite['paid_targets']>;
-
-  type AliasValidation =
-    | { kind: 'valid'; aliases: Record<string, string> }
-    | { kind: 'invalid'; message: string };
-
-  function parseAliases(
-    value: string,
-    models: readonly string[],
-    rewriting: boolean
-  ): AliasValidation {
-    const entries = value
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => line.split('=').map((part) => part.trim()));
-    if (
-      !entries.every(
-        (entry): entry is [string, string] =>
-          entry.length === 2 &&
-          !!entry[0] &&
-          !!entry[1] &&
-          /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/.test(entry[0]) &&
-          !models.includes(entry[0]) &&
-          models.includes(entry[1])
-      )
-    )
-      return {
-        kind: 'invalid',
-        message:
-          'Use one distinct alias=native-model per line, targeting a listed native model.'
-      };
-    if (entries.length && !rewriting)
-      return {
-        kind: 'invalid',
-        message: 'Enable model rewriting to publish aliases.'
-      };
-    if (
-      entries.length > 100 ||
-      new Set(entries.map(([alias]) => alias)).size !== entries.length
-    )
-      return { kind: 'invalid', message: 'Use up to 100 unique aliases.' };
-    return { kind: 'valid', aliases: Object.fromEntries(entries) };
-  }
-
-  type ModelPoolValidation =
-    | { kind: 'valid'; pools: Record<string, string[]> }
-    | { kind: 'invalid'; message: string };
-
-  function parseModelPools(
-    value: string,
-    models: readonly string[],
-    aliases: Readonly<Record<string, string>>,
-    rewriting: boolean
-  ): ModelPoolValidation {
-    const lines = value
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean);
-    const entries = lines.map((line) =>
-      line.split('=').map((part) => part.trim())
-    );
-    if (
-      !entries.every(
-        (entry): entry is [string, string] =>
-          entry.length === 2 && !!entry[0] && !!entry[1]
-      )
-    )
-      return {
-        kind: 'invalid',
-        message: 'Use public-model=primary,alternate per line.'
-      };
-    const pools = entries.map(
-      ([publicName, targets]) =>
-        [publicName, targets.split(',').map((target) => target.trim())] as const
-    );
-    if (pools.length && !rewriting)
-      return {
-        kind: 'invalid',
-        message: 'Enable model rewriting to publish model pools.'
-      };
-    if (
-      pools.length > 100 ||
-      new Set(pools.map(([publicName]) => publicName)).size !== pools.length ||
-      !pools.every(([publicName, targets]) => {
-        const primary = models.includes(publicName)
-          ? publicName
-          : aliases[publicName];
-        return (
-          !!primary &&
-          targets.length >= 2 &&
-          targets.length <= 100 &&
-          targets[0] === primary &&
-          new Set(targets).size === targets.length &&
-          targets.every((target) => models.includes(target))
-        );
-      })
-    )
-      return {
-        kind: 'invalid',
-        message:
-          'Use distinct published native targets, starting with the public model’s normal exact target.'
-      };
-    return { kind: 'valid', pools: Object.fromEntries(pools) };
-  }
 
   let {
     current,
@@ -151,8 +47,10 @@
       )
   );
   let paidParticipation = $state(initial?.paid_participation ?? false);
-  let paidTargets = $state(initial?.paid_targets ?? {});
-  let paidFallbackTargets = $state(initial?.paid_fallback_targets ?? {});
+  let paidTargets = $state<PaidTargets>(initial?.paid_targets ?? {});
+  let paidFallbackTargets = $state<PaidTargets>(
+    initial?.paid_fallback_targets ?? {}
+  );
   let enabled = $state(initial?.enabled ?? true);
   let modelRewriting = $state(initial?.model_rewriting ?? false);
   let aliases = $state(
@@ -173,7 +71,7 @@
   let allowanceOrdering = $state(initial?.allowance_ordering ?? false);
   let research = $state(!!initial?.tools);
   let researchAccount = $state(initial?.tools?.account_id ?? '');
-  let researchServices = $state<('search' | 'reader' | 'zread')[]>(
+  let researchServices = $state<ResearchService[]>(
     initial?.tools?.services ?? ['search', 'reader', 'zread']
   );
   const services = [
@@ -203,88 +101,31 @@
     onDraftChange: (dirty) => onDraftChange(dirty),
     onSaved: () => onSaved(),
     onCancel: () => onCancel(),
-    build: (): CodeRouteWrite => {
-      if (!validRouteSlug(slug))
-        throw new Error(
-          'Use a route slug of 1–100 lowercase letters, numbers, dots, underscores or hyphens, starting with a letter or number.'
-        );
-      if (
-        maxBodyBytes &&
-        (!/^\d+$/.test(maxBodyBytes) ||
-          Number(maxBodyBytes) < 1 ||
-          Number(maxBodyBytes) > 1073741824)
-      )
-        throw new Error(
-          'Use a body limit from 1 to 1073741824 bytes, or leave it empty.'
-        );
-      if (
-        research &&
-        (!researchAccounts.some((account) => account.id === researchAccount) ||
-          !researchServices.length)
-      )
-        throw new Error(
-          'Choose an eligible research account and at least one service.'
-        );
-      const routeModels = nativeModels(models);
-      const aliasResult = parseAliases(aliases, routeModels, modelRewriting);
-      if (aliasResult.kind === 'invalid') throw new Error(aliasResult.message);
-      const poolResult = parseModelPools(
-        modelPools,
-        routeModels,
-        aliasResult.aliases,
-        modelRewriting
-      );
-      if (poolResult.kind === 'invalid') throw new Error(poolResult.message);
-      const selectedTargets = (
-        values: NonNullable<CodeRouteWrite['paid_targets']>
-      ): NonNullable<CodeRouteWrite['paid_targets']> =>
-        paidParticipation
-          ? Object.fromEntries(
-              routeModels.flatMap((model) =>
-                values[model]?.provider_id ? [[model, values[model]]] : []
-              )
-            )
-          : {};
-      const targets = selectedTargets(paidTargets);
-      const fallbackTargets = selectedTargets(paidFallbackTargets);
-      if (
-        Object.values({ ...targets, ...fallbackTargets }).some(
-          (target) => !target.slot_id
-        )
-      )
-        throw new Error('Choose a credential slot for every paid API target.');
-      if (Object.keys(fallbackTargets).length && !recoveryAttempts)
-        throw new Error(
-          'Enable bounded recovery before selecting paid fallback targets.'
-        );
-      if (Object.keys(fallbackTargets).some((model) => !!targets[model]))
-        throw new Error(
-          'Choose either direct paid selection or subscription-first fallback for each native model.'
-        );
-      return {
-        paid_participation: paidParticipation,
-        paid_targets: targets,
-        paid_fallback_targets: fallbackTargets,
-        project_id: projectId,
+    build: () =>
+      buildRouteWrite({
+        projectId,
         slug,
-        pool_id: poolId,
-        max_body_bytes: maxBodyBytes ? Number(maxBodyBytes) : null,
-        models: routeModels,
-        aliases: aliasResult.aliases,
-        model_rewriting: modelRewriting,
-        model_pools: poolResult.pools,
-        chat_to_codex: chatToCodex,
-        messages_to_codex: messagesToCodex,
-        codex_cli_identity: codexCLIIdentity,
-        chat_to_antigravity: chatToAntigravity,
-        allowance_ordering: allowanceOrdering,
-        initial_recovery_attempts: recoveryAttempts,
-        tools: research
-          ? { account_id: researchAccount, services: researchServices }
-          : null,
-        enabled
-      };
-    },
+        poolId,
+        maxBodyBytes,
+        models,
+        paidParticipation,
+        paidTargets,
+        paidFallbackTargets,
+        enabled,
+        modelRewriting,
+        aliases,
+        modelPools,
+        recoveryAttempts,
+        chatToCodex,
+        messagesToCodex,
+        codexCLIIdentity,
+        chatToAntigravity,
+        allowanceOrdering,
+        research,
+        researchAccount,
+        researchServices,
+        researchAccounts
+      }),
     persist: (input, requestId) =>
       saveCodeRoute(
         current

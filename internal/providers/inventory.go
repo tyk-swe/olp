@@ -119,9 +119,7 @@ func (s *Server) generations(r *http.Request, principal access.Principal) (acces
 	return access.ListReply(items, page), nil
 }
 
-// Register mounts the provider surface.
 func (s *Server) Register(mux *http.ServeMux) {
-	s.registerCodeMode(mux)
 	s.Access.Route(mux, "GET /api/v1/provider-profiles", s.profiles)
 	s.Access.Route(mux, "GET /api/v1/operation-dialects", s.operationDialects)
 	s.Access.Route(mux, "GET /api/v1/provider-kinds", s.kinds)

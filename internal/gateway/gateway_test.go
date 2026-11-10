@@ -19,14 +19,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/codesessions"
-
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/google/uuid"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/codeadapter"
-	"github.com/tyk-swe/olp/internal/codeclient"
-	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	limitadmission "github.com/tyk-swe/olp/internal/limits/admission"
@@ -558,88 +553,6 @@ func TestModelsFilteredByKey(t *testing.T) {
 
 // This fixture has no asynchronous publication or external database.
 func (*fakeRuntime) CheckRouteFidelity(context.Context, routing.Route) error { return nil }
-
-type chargeLedger struct {
-	charge  json.RawMessage
-	attempt string
-}
-
-func (l *chargeLedger) Models(context.Context, codemode.Route, string) (codeclient.Offers, error) {
-	return nil, nil
-}
-func (l *chargeLedger) Admit(context.Context, codesessions.Admission) (codesessions.Permit, error) {
-	return codesessions.Permit{}, nil
-}
-func (l *chargeLedger) BindConnection(context.Context, codemode.Route, string, codemode.Identity, string, []string) (codesessions.Permit, error) {
-	return codesessions.Permit{}, nil
-}
-func (l *chargeLedger) MarkDispatched(context.Context, string) error { return nil }
-func (l *chargeLedger) ConfirmNonexecution(context.Context, string, int) error {
-	return nil
-}
-func (l *chargeLedger) ObserveCooldown(context.Context, string, time.Time) error { return nil }
-func (l *chargeLedger) ObserveCooldownClass(context.Context, string, string, codeadapter.Classification, time.Time) error {
-	return nil
-}
-func (l *chargeLedger) Settle(context.Context, string, codemode.Usage) error { return nil }
-func (l *chargeLedger) Abort(context.Context, string) error                  { return nil }
-func (l *chargeLedger) ObserveHealth(context.Context, string, codemode.HealthObservation) error {
-	return nil
-}
-func (l *chargeLedger) ObserveAllowance(context.Context, string, codemode.Allowance) error {
-	return nil
-}
-func (l *chargeLedger) ObserveAllowanceCharge(_ context.Context, attempt string, charge json.RawMessage) error {
-	l.attempt, l.charge = attempt, charge
-	return nil
-}
-func (l *chargeLedger) ObserveReference(context.Context, string, string) error { return nil }
-func (l *chargeLedger) ObserveOutcome(context.Context, string, codemode.Outcome) error {
-	return nil
-}
-func (l *chargeLedger) RecordRefusal(context.Context, codemode.Route, string, string, string) error {
-	return nil
-}
-
-func TestCodeAttemptStoresAllowanceChargeOnlyForOpenCodeGo(t *testing.T) {
-	reported := json.RawMessage(`{"billing_source":"go","allowance":0.0021}`)
-	for name, tc := range map[string]struct {
-		adapter codemode.Adapter
-		paid    bool
-		want    bool
-	}{
-		"opencode go attempt":     {adapter: codemode.AdapterOpenCodeGo, want: true},
-		"other adapter attempt":   {adapter: codemode.AdapterZAICoding},
-		"paid opencode-shaped":    {adapter: codemode.AdapterOpenCodeGo, paid: true},
-		"unknown adapter attempt": {},
-	} {
-		t.Run(name, func(t *testing.T) {
-			ledger := &chargeLedger{}
-			attempt := &codeAttempt{server: &Server{deps: Dependencies{CodeLedger: ledger}}, adapter: tc.adapter, permit: codesessions.Permit{Attempt: codemode.Attempt{ID: "attempt-1"}}}
-			if tc.paid {
-				attempt.paid = &paidCodeAttempt{}
-			}
-			attempt.observe(codemode.Observation{Terminal: true, AllowanceCharge: reported})
-			if tc.want && (ledger.attempt != "attempt-1" || string(ledger.charge) != string(reported)) {
-				t.Fatalf("ledger = %s %s, want the reported charge on attempt-1", ledger.attempt, ledger.charge)
-			}
-			if !tc.want && ledger.charge != nil {
-				t.Fatalf("charge stored = %s, want none", ledger.charge)
-			}
-		})
-	}
-}
-
-func TestCodeAttemptLastTerminalChargeWins(t *testing.T) {
-	ledger := &chargeLedger{}
-	attempt := &codeAttempt{server: &Server{deps: Dependencies{CodeLedger: ledger}}, adapter: codemode.AdapterOpenCodeGo, permit: codesessions.Permit{Attempt: codemode.Attempt{ID: "attempt-1"}}}
-	attempt.observe(codemode.Observation{Terminal: true, AllowanceCharge: json.RawMessage(`{"billing_source":"go","allowance":0.001}`)})
-	terminal := json.RawMessage(`{"billing_source":"go","allowance":0.0021}`)
-	attempt.observe(codemode.Observation{Terminal: true, AllowanceCharge: terminal})
-	if string(ledger.charge) != string(terminal) {
-		t.Fatalf("charge = %s, want the last terminal charge %s", ledger.charge, terminal)
-	}
-}
 
 func TestTransformedRerankPreservesDocumentIdentity(t *testing.T) {
 	for _, tc := range []struct {

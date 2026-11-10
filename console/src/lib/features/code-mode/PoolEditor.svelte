@@ -14,7 +14,7 @@
     type CodePoolWrite
   } from '#lib/features/code-mode/api.js';
 
-  import { adapterLabel } from './presentation';
+  import { adapterLabel, type Validation } from './presentation';
   import {
     useResourceSubmission,
     type ResourceEditorProps
@@ -74,21 +74,26 @@
     onDraftChange: (dirty) => onDraftChange(dirty),
     onSaved: () => onSaved(),
     onCancel: () => onCancel(),
-    build: (): CodePoolWrite => {
-      if (accountIds.length > 100 || keyIds.length > 100)
-        throw new Error(
-          'A pool accepts at most 100 accounts and 100 explicit keys.'
-        );
+    build: (): Validation<CodePoolWrite> => {
+      if (accountIds.length > 100 || keyIds.length > 100) {
+        return {
+          ok: false,
+          message: 'A pool accepts at most 100 accounts and 100 explicit keys.'
+        };
+      }
       return {
-        project_id: projectId,
-        name,
-        kind,
-        owner_user_id: kind === 'personal' ? owner : null,
-        account_ids: accountIds,
-        account_weights: Object.fromEntries(
-          accountIds.map((id) => [id, accountWeights[id] ?? 1])
-        ),
-        api_key_ids: keyIds
+        ok: true,
+        value: {
+          project_id: projectId,
+          name,
+          kind,
+          owner_user_id: kind === 'personal' ? owner : null,
+          account_ids: accountIds,
+          account_weights: Object.fromEntries(
+            accountIds.map((id) => [id, accountWeights[id] ?? 1])
+          ),
+          api_key_ids: keyIds
+        }
       };
     },
     persist: (input, requestId) =>

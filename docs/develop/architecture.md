@@ -16,7 +16,7 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Projects, installation settings and policy | `internal/projects/`, `internal/settings/`, `internal/limits/`; console `access/` |
 | Notifications | `internal/notifications/`; console `access/notifications/` |
 | Admission, execution and retained resources | `internal/gateway/`, `internal/resources/`, `internal/media/`; console inference/media |
-| Code mode | `internal/codemode/`, `internal/codeadapter/`, `internal/codeclient/`, `internal/coderesearch/`, `internal/codesessions/`; console code mode |
+| Code mode | `internal/code/` and capability subpackages (`vendor/`, `wire/`, `client/`, `allowance/`, `auth/`, `account/`, `pool/`, `budget/`, `route/`, `session/`, `research/`, `proxy/`); console `code-mode/` |
 | Source and operation contracts | `internal/oif/`, `internal/operations/`, `internal/interaction/`, `internal/operationplan/`, `internal/operationregistry/` |
 | Protocol and lifecycle contracts | `internal/protocols/`, `internal/mediacontract/`, `internal/durablecontract/`, `internal/realtimecontract/`, `internal/geminilifecycle/` |
 | Preparation and failure evidence | `internal/providerinvoke/`, `internal/upstream/` |
@@ -152,60 +152,66 @@ multipart writers and both duplex tasks before terminal accounting.
 
 ## Code-mode forwarding boundary
 
-[Code mode](../use/code-mode.md) forwards `/code/{slug}` native models/bodies
+[Code mode](../use/code-mode.md) forwards `/code/{slug}` native models and bodies
 without ordinary translation, rewriting or inference retries by default. An
 explicit published initial recovery policy permits bounded additional attempts
 only after complete supported HTTP rejection and positive portable-state proof.
-`Snapshot.CodeRoutes` and `CodeConnection` freeze route/provider pairs. Missing
-configuration refuses until republish, while pool/key/grant eligibility remains
-live. `codewire.PortableInitialRequest` owns the shared complete-request proof
-for initial recovery. Unknown or account-owned state remains on its original
-account, and the native first dispatch remains unchanged.
+`Snapshot.CodeRoutes` and `CodeConnection` freeze route and provider pairs. Missing
+configuration refuses until republish, while pool, key and grant eligibility remain
+live. `wire.PortableInitialRequest` in `internal/code/wire` owns the shared
+complete-request proof for initial recovery. Unknown or account-owned state
+remains on its original account, and the native first dispatch remains unchanged.
 
 | Owner | Contract in | Invariant |
 | --- | --- | --- |
-| `codemode` | shared account, route, binding, usage and allowance types | observations never replace forwarded bytes |
-| `codeadapter`, fed by `codeplans` and `codexauth` | subscription profiles, client/upstream paths, operations, transports, conversation identity, credentials and observation rules | families sharing a client path agree on semantics, checked by `codeadapter.Validate` during snapshot validation |
+| `internal/code` | shared account, route, binding, outcome, recovery, usage and allowance types | observations never replace forwarded bytes |
+| `internal/code/vendor`, fed by `codeplans` and `codexauth` | subscription profiles, client and upstream paths, operations, transports, conversation identity, credentials and classification rules | families sharing a client path agree on semantics, checked by `vendor.Validate` during snapshot validation |
 | `routing`, installed by `release` | endpoint and model eligibility compiled from the frozen revision | a failed compile leaves the previous release serving |
-| `codewire`, `codexwire` | native request classification and response observation on copies | parsing never reserializes the forwarded payload |
-| `gateway/code_attempt.go`, `codesessions.Store`, `limits` | dispatch, durable conversation pinning, admission and settlement, hard token budgets | one `MarkDispatched` per attributed attempt, atomic initial rebinding only after proven nonexecution, no replay of accepted or ambiguous work |
-| `codeclient`, `routes`, `providers.CodeAuthorizer` | generated client configuration, project authority, upstream credential construction | generated configuration never contains an OLP or vendor key |
+| `internal/code/wire` | native request classification and response observation on copies across Responses, Messages and Chat | parsing never reserializes the forwarded payload |
+| `internal/code/proxy`, `internal/code/session`, `limits` | HTTP/SSE and WebSocket forwarding, separate subscription and paid execution lifecycles, durable conversation pinning, admission, settlement and hard token budgets | one `MarkDispatched` per attributed attempt, atomic initial rebinding only after proven nonexecution, no replay of accepted or ambiguous work |
+| `internal/code/{account,pool,budget,route}`, `internal/code/client`, `internal/code/auth`, `internal/code/allowance` | management APIs and persistence, generated client configuration, upstream grant authorization and background allowance reads | generated configuration never contains an OLP or vendor key |
 
-`gateway/code_attempt.go` shares dispatch, observations, settlement and workload
-binding across HTTP/SSE and WebSockets. Transport files own copying/handshakes;
-`code_transport.go` shares endpoint credentials, and `code_refusal.go` records
-refusals. `CodeAuthorizer` checks frozen plugin plus current grant/credential
-eligibility, then delegates credential construction to the adapter. Validate
-principal, credential header and extra single-valued headers before dispatch.
-Upgrade alone does not admit a generation: reauthorize each generation and retain
-the credential generation used at handshake for upstream refusals.
+`internal/code/proxy` separates subscription attempts from metered paid attempts
+while sharing stream copying, observations, settlement and workload binding, and
+mounts onto `internal/gateway` through an explicit host contract. `auth.Authorizer`
+checks the frozen plugin manifest plus current grant and credential eligibility,
+then delegates credential construction to `internal/code/vendor`. Principal,
+credential headers and single-valued extra headers are validated before dispatch.
+Upgrade alone does not admit a generation. Each WebSocket generation reauthorizes
+against current authority while retaining the handshake credential generation for
+upstream refusals.
 
-`codeclient` owns client/model reachability and renderers, using the published
-revision. `routes` retains project authority, account offers and HTTP responses.
-Console editors own typed payloads/validation and use shared mutation intent,
-cancellation and stale-callback fences. Secrets clear on abandonment.
+`internal/code/route` owns route drafts, publication, revision history and client
+configuration endpoints, delegating client/model reachability and renderers to
+`internal/code/client`. `internal/code/{account,pool,budget,session}` own their
+respective management endpoints and SQL queries. Console sections and editors
+under `console/src/lib/features/code-mode/` validate drafts as typed values at
+the form boundary, render inline attempt decisions without per-attempt round
+trips, and use shared mutation intent, cancellation and stale-callback fences.
+Secrets clear on abandonment.
 
-Research uses a separate `/code/{slug}/mcp/{service}` proxy. The published
-`codemode.ResearchTools` binding selects one global Z.ai account without model
-or conversation admission. `coderesearch` filters methods/discovery and preserves
-native tool definitions/results; the gateway reuses bounded SSE decoding and
-raw egress with no replay. `codesessions.Store` rechecks live key/pool/account
-authority and stores only opaque session metadata, bound to key, revision,
-service, account, credential and grant generation. Research errors do not update
-inference health. This proxy is separate from the management MCP endpoint and
-project-owned MCP certification.
+Research uses a separate `/code/{slug}/mcp/{service}` handler in
+`internal/code/research`. The published `code.ResearchTools` binding selects one
+global Z.ai account without model or conversation admission.
+`internal/code/research` filters methods and discovery while preserving native tool
+definitions and results, and reuses bounded SSE decoding and raw egress with no
+replay. `session.Store` rechecks live key, pool and account authority and stores
+only opaque session metadata bound to key, revision, service, account, credential
+and grant generation. Research errors do not update inference health. This proxy
+is separate from the management MCP endpoint and project-owned MCP certification.
 
 Match the observed principal before one `MarkDispatched`. Prepared aborts can
-refund; dispatched unknown usage cannot. Equal settlement is idempotent, conflicting
-totals refuse and proven overruns record `bound_violation`. Rate estimates,
-provider allowance and hard token reservations remain independent. No bodies,
-tools or authentication headers persist.
+refund, while dispatched unknown usage cannot. Equal settlement is idempotent,
+conflicting totals refuse and proven overruns record `bound_violation`. Rate
+estimates, provider allowance and hard token reservations remain independent. No
+bodies, tools or authentication headers persist.
 
-To add a subscription family, declare its profiles/endpoints/credential and
-observation contract in `codeadapter`, add an enrollment plugin, and reuse a
-family for profiles in the same subscription system. New protocols require a
-native parser/observer, not translation; new clients need `codeclient` renderers.
-Extend `codemode.Adapter` and public `CodeAccount.adapter`, `CodeRoute.adapters`
+To add a subscription family, declare its profiles, endpoints, credential rules
+and observation contract in `internal/code/vendor`, add an indexed enrollment
+plugin, and reuse a family for profiles in the same subscription system. New
+protocols require a native parser and observer in `internal/code/wire` rather
+than translation, and new clients need renderers in `internal/code/client`.
+Extend `code.Adapter` and public `CodeAccount.adapter`, `CodeRoute.adapters`
 and `CodeClientConfiguration.adapters` enums, then regenerate contracts and console
 types. Preserve controlled latest-client continuation, refusals, usage,
 subagents, model selection and mixed-subscription behavior. Verify live

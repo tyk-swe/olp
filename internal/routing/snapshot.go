@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/agentcontract"
-	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/code"
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -208,9 +208,9 @@ type Snapshot struct {
 	guardrailEngines     map[string]*guardrails.Engine
 	toolGuardrailEngines map[string]*guardrails.Engine
 	hasBodyLimits        bool
-	CodeRoutes           map[string]codemode.Route `json:"code_routes,omitempty"`
-	CodePaidConnections  map[string]Provider       `json:"code_paid_connections,omitempty"`
-	CodeConnections      map[string]Configuration  `json:"code_connections,omitempty"`
+	CodeRoutes           map[string]code.Route    `json:"code_routes,omitempty"`
+	CodePaidConnections  map[string]Provider      `json:"code_paid_connections,omitempty"`
+	CodeConnections      map[string]Configuration `json:"code_connections,omitempty"`
 	codeRevisions        map[string]codeRevision
 	interactions         map[string]map[string]*interaction.Template
 	operations           map[string]map[string]*operationplan.Template
@@ -231,17 +231,17 @@ type Snapshot struct {
 // configuration yields the same digest.
 func (s *Snapshot) Digest() (string, error) {
 	encoded, err := json.Marshal(struct {
-		AgentPublications   []agentcontract.Revision  `json:"agent_publications,omitempty"`
-		MCPServers          []MCPServer               `json:"mcp_servers,omitempty"`
-		Commitments         map[string][]Commitment   `json:"commitments,omitempty"`
-		Guardrails          *guardrails.Registry      `json:"guardrails,omitempty"`
-		CodeRoutes          map[string]codemode.Route `json:"code_routes,omitempty"`
-		CodePaidConnections map[string]Provider       `json:"code_paid_connections,omitempty"`
-		CodeConnections     map[string]Configuration  `json:"code_connections,omitempty"`
-		Providers           map[string]Provider       `json:"providers"`
-		Routes              map[string]Route          `json:"routes"`
-		InstallationPolicy  *Policy                   `json:"installation_policy,omitempty"`
-		KeyPolicies         map[string]*Policy        `json:"key_policies,omitempty"`
+		AgentPublications   []agentcontract.Revision `json:"agent_publications,omitempty"`
+		MCPServers          []MCPServer              `json:"mcp_servers,omitempty"`
+		Commitments         map[string][]Commitment  `json:"commitments,omitempty"`
+		Guardrails          *guardrails.Registry     `json:"guardrails,omitempty"`
+		CodeRoutes          map[string]code.Route    `json:"code_routes,omitempty"`
+		CodePaidConnections map[string]Provider      `json:"code_paid_connections,omitempty"`
+		CodeConnections     map[string]Configuration `json:"code_connections,omitempty"`
+		Providers           map[string]Provider      `json:"providers"`
+		Routes              map[string]Route         `json:"routes"`
+		InstallationPolicy  *Policy                  `json:"installation_policy,omitempty"`
+		KeyPolicies         map[string]*Policy       `json:"key_policies,omitempty"`
 	}{s.AgentPublications, s.MCPServers, s.Commitments, s.Guardrails, s.CodeRoutes, s.CodePaidConnections, s.CodeConnections, s.Providers, s.Routes, s.InstallationPolicy, s.KeyPolicies})
 	if err != nil {
 		return "", err

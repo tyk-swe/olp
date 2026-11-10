@@ -75,7 +75,6 @@
     allowed: () => allowed && access.user?.id === principal,
     error: (message) => (error = message),
     completed: async (result, { secret }) => {
-      // The credential write succeeded independently of subsequent refresh.
       onComplete(result.credential_id);
       notice =
         secret &&

@@ -10,11 +10,13 @@ import (
 	"github.com/oapi-codegen/nullable"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 	"github.com/tyk-swe/olp/internal/access"
+	codeaccount "github.com/tyk-swe/olp/internal/code/account"
+	codebudget "github.com/tyk-swe/olp/internal/code/budget"
+	codepool "github.com/tyk-swe/olp/internal/code/pool"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
-	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/release"
 )
 
@@ -42,10 +44,10 @@ type change struct {
 }
 
 type resolution struct {
-	accounts []resolved[providers.CodeAccountInput]
-	pools    []resolved[access.CodePoolInput]
+	accounts []resolved[codeaccount.Input]
+	pools    []resolved[codepool.Input]
 	routes   []resolved[routeInput]
-	budgets  []resolved[access.CodeBudgetInput]
+	budgets  []resolved[codebudget.Input]
 }
 
 func Parse(document *contract.ConfigurationCode, declared *contract.ConfigurationCodeBindings, names promotion.Names, deps provider.Deps) (Desired, error) {
@@ -231,11 +233,11 @@ func plan(ctx context.Context, q access.Queryer, desired Desired, deps provider.
 	if err != nil {
 		return nil, err
 	}
-	accounts, err := promotion.TryMapIndex(r.accounts, func(_ int, a resolved[providers.CodeAccountInput]) (change, error) { return accountChange(ctx, q, a) })
+	accounts, err := promotion.TryMapIndex(r.accounts, func(_ int, a resolved[codeaccount.Input]) (change, error) { return accountChange(ctx, q, a) })
 	if err != nil {
 		return nil, err
 	}
-	pools, err := promotion.TryMapIndex(r.pools, func(_ int, p resolved[access.CodePoolInput]) (change, error) { return poolChange(ctx, q, p) })
+	pools, err := promotion.TryMapIndex(r.pools, func(_ int, p resolved[codepool.Input]) (change, error) { return poolChange(ctx, q, p) })
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +245,7 @@ func plan(ctx context.Context, q access.Queryer, desired Desired, deps provider.
 	if err != nil {
 		return nil, err
 	}
-	budgets, err := promotion.TryMapIndex(r.budgets, func(_ int, b resolved[access.CodeBudgetInput]) (change, error) { return budgetChange(ctx, q, b) })
+	budgets, err := promotion.TryMapIndex(r.budgets, func(_ int, b resolved[codebudget.Input]) (change, error) { return budgetChange(ctx, q, b) })
 	if err != nil {
 		return nil, err
 	}
@@ -251,13 +253,13 @@ func plan(ctx context.Context, q access.Queryer, desired Desired, deps provider.
 }
 
 func resolve(ctx context.Context, q access.Queryer, desired Desired, directory promotion.Directory, deps provider.Deps) (resolution, error) {
-	accounts, err := promotion.TryMapIndex(desired.Code.Accounts, func(_ int, a Account) (resolved[providers.CodeAccountInput], error) {
+	accounts, err := promotion.TryMapIndex(desired.Code.Accounts, func(_ int, a Account) (resolved[codeaccount.Input], error) {
 		return resolveAccount(ctx, q, a, directory, desired.bindings.credentials)
 	})
 	if err != nil {
 		return resolution{}, err
 	}
-	pools, err := promotion.TryMapIndex(desired.Code.Pools, func(_ int, p Pool) (resolved[access.CodePoolInput], error) {
+	pools, err := promotion.TryMapIndex(desired.Code.Pools, func(_ int, p Pool) (resolved[codepool.Input], error) {
 		return resolvePool(ctx, q, p, desired, directory, destinations(accounts))
 	})
 	if err != nil {
@@ -268,7 +270,7 @@ func resolve(ctx context.Context, q access.Queryer, desired Desired, directory p
 	if err != nil {
 		return resolution{}, err
 	}
-	budgets, err := promotion.TryMapIndex(desired.Code.Budgets, func(_ int, b Budget) (resolved[access.CodeBudgetInput], error) {
+	budgets, err := promotion.TryMapIndex(desired.Code.Budgets, func(_ int, b Budget) (resolved[codebudget.Input], error) {
 		return resolveBudget(ctx, q, b, desired, directory, destinations(routes))
 	})
 	if err != nil {
