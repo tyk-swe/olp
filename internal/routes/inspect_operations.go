@@ -5,6 +5,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/vendors"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/interaction"
@@ -34,13 +35,13 @@ func inspectorAnyRequest(raw json.RawMessage, operation, surface, mode, dialect,
 	if tuple {
 		return nil, nil, nil, nil
 	}
-	if mediacontract.IsMediaOperation(operation) {
-		if surface != "openai" || mode != "unary" && mode != "streaming" || operation != "image_generation" && operation != "speech" {
+	if vendors.IsMediaOperation(operation) {
+		if surface != "openai" || mode != "unary" && mode != "streaming" || media.Operation(operation) != media.OpImageGeneration && media.Operation(operation) != media.OpSpeech {
 			return nil, nil, nil, access.Invalid("request", "This media source requires a live multipart or lifecycle invocation; the inspector cannot stage its assets.")
 		}
 		var request *media.Request
 		var failure *media.Error
-		if operation == "image_generation" {
+		if media.Operation(operation) == media.OpImageGeneration {
 			request, failure = media.DecodeImageGeneration(raw)
 		} else {
 			request, failure = media.DecodeSpeech(raw)

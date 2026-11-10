@@ -20,15 +20,6 @@ import (
 
 const maxDocumentBytes = 64 << 20
 
-// IsMediaOperation identifies the operations owned by the existing media
-// service, including resource operations that cannot yet claim strict identity.
-func IsMediaOperation(op string) bool {
-	return slices.Contains([]string{
-		"image_generation", "image_edit", "image_variation", "speech", "transcription", "translation",
-		"video_create", "video_list", "video_get", "video_content", "video_delete",
-	}, op)
-}
-
 type Config struct {
 	Provider                                 connectors.Config
 	ProviderID, RevisionID, Model, Operation string

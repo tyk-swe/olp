@@ -1140,21 +1140,18 @@ func (s *Server) certifyListedModel(ctx context.Context, cfg *Configuration, cre
 	return &probeError{Code: "model_unavailable", Detail: "The credential cannot discover the requested media model."}
 }
 
-// mediaByCallOperations are the media operations certified by a real call
-// where no costless proof exists: Vertex's, Bedrock's images, and the
-// minimum set that unblocks most Azure OpenAI deployments.
-var mediaByCallOperations = map[string][]string{
-	KindVertex:  {"image_generation", "speech", "transcription"},
-	KindBedrock: {"image_generation", "speech"},
-	KindAzure:   {"image_generation", "speech", "transcription"},
+var mediaByCallOperations = map[string][]media.Operation{
+	KindVertex:  {media.OpImageGeneration, media.OpSpeech, media.OpTranscription},
+	KindBedrock: {media.OpImageGeneration, media.OpSpeech},
+	KindAzure:   {media.OpImageGeneration, media.OpSpeech, media.OpTranscription},
 }
 
 func mediaByCall(kind, vendor, operation string) bool {
-	if !slices.Contains(mediaByCallOperations[kind], operation) {
+	op := media.Operation(operation)
+	if !slices.Contains(mediaByCallOperations[kind], op) {
 		return false
 	}
-	// Vertex speech and transcription are Gemini's, which its contract names.
-	return operation == "image_generation" || kind == KindAzure || vendors.MediaWire(vendor, operation) != ""
+	return op == media.OpImageGeneration || kind == KindAzure || vendors.MediaWire(vendor, operation) != ""
 }
 
 func (s *Server) certifyMediaCall(ctx context.Context, cfg *Configuration, credential []byte, model, operation string) error {
@@ -1202,18 +1199,18 @@ type mediaProbe struct {
 }
 
 func mediaProbeRequest(kind, operation string) (*media.Request, *media.Error) {
-	switch operation {
-	case "image_generation":
+	switch media.Operation(operation) {
+	case media.OpImageGeneration:
 		probe := mediaProbe{Model: "certification", Prompt: "A small blue square.", Count: 1}
 		if kind == KindAzure {
 			probe.Quality = "low"
 		}
 		return decodeProbe(probe, media.DecodeImageGeneration)
-	case "speech":
+	case media.OpSpeech:
 		voices := map[string]mediaProbe{KindBedrock: {Voice: "Joanna"}, KindVertex: {Voice: "Kore", Format: "wav"}}
 		probe := cmp.Or(voices[kind], mediaProbe{Voice: "alloy"})
 		return decodeProbe(mediaProbe{Model: "certification", Input: "OK", Voice: probe.Voice, Format: probe.Format}, media.DecodeSpeech)
-	case "transcription":
+	case media.OpTranscription:
 		return media.DecodeTranscription(staging.FormOf([]staging.Field{
 			{Name: "model", Value: staging.Text("certification")},
 			{Name: "file", Value: staging.Part{Filename: "silence.wav", ContentType: "audio/wav"}},

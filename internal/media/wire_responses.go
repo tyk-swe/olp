@@ -2,13 +2,13 @@ package media
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/json"
 	"net/http"
 	"slices"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/staging"
@@ -227,7 +227,7 @@ func EncodeImageResponse(result *ImageResult) ([]byte, []string, *Error) {
 		case image.URL != "":
 			item["url"] = image.URL
 		case image.Handle != nil:
-			marker := "__olp_streamed_media_" + strings.ReplaceAll(uuid.Must(uuid.NewV7()).String(), "-", "") + "__"
+			marker := "__olp_streamed_media_" + rand.Text() + "__"
 			item["b64_json"] = marker
 			markers = append(markers, marker)
 		default:
