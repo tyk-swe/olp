@@ -57,7 +57,7 @@ func (s *Server) enforceContentPolicy(x *call) *Error {
 			return policyUnavailable("content_policy_surface_unavailable", "The model `"+x.route.Slug+"` enforces an output content policy that cannot be applied to provider-retained responses; send the request without stateful options.")
 		}
 	}
-	if x.strict() || x.hasPreparedProviders() {
+	if x.strict() || x.preparation().hasProviders() {
 		// The compiled interaction inspected the effective destination after
 		// defaults while filtering candidates. Inspecting the caller projection
 		// again would not establish coverage of that actual invocation.
@@ -86,7 +86,6 @@ func (s *Server) enforceContentPolicy(x *call) *Error {
 			return invalidRequest("content_policy_blocked", "The request was blocked by the route's content policy.", nil)
 		case matched:
 			x.generation.parsed = transformed
-			x.requestPreparation = requestPreparation{}
 			recordDecision(x, contentpolicy.Decision{RuleID: rule.ID, Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionRedact, Outcome: contentpolicy.OutcomeRedacted})
 		}
 	}

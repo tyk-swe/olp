@@ -22,13 +22,14 @@ type preparedProvider struct {
 	invocation providerinvoke.Invocation
 	// admitted is what the attempt is admitted under: the larger of the
 	// caller's request and the one this provider is sent.
-	admitted          admittedEstimate
-	parameters        routing.Names
-	demand            *routing.TokenDemand
-	plan              *interaction.Plan
-	receipt           *oif.Receipt
-	policyDecisions   []contentpolicy.Decision
-	guardrailSegments []guardrails.Segment
+	admitted           admittedEstimate
+	parameters         routing.Names
+	demand             *routing.TokenDemand
+	plan               *interaction.Plan
+	receipt            *oif.Receipt
+	policyDecisions    []contentpolicy.Decision
+	guardrailSegments  []guardrails.Segment
+	guardrailDecisions []guardrails.Evidence
 }
 
 // admittedEstimate is the estimate one attempt is admitted under. Reserve is the
@@ -69,12 +70,9 @@ func (x *call) summarize(request *wire.Request) requestSummary {
 }
 
 func (x *call) summarizeSource() requestSummary {
-	x.prepareSource()
-	if x.sourceSummary == nil || x.sourceSummary.request != x.generation.parsed {
-		summary := x.summarize(x.generation.parsed)
-		x.sourceSummary = &summary
-	}
-	return *x.sourceSummary
+	return x.preparation().summary(x.generation.parsed, func() requestSummary {
+		return x.summarize(x.generation.parsed)
+	})
 }
 
 // sourceDemand is what routing weighs a target's context window against: the
@@ -91,15 +89,33 @@ func (x *call) strict() bool {
 	return x.route != nil && x.route.Fidelity.Strict()
 }
 
-// Prepared invocations are retained only for this inference request and bounded
-// by its published route targets. Admission, estimation and dispatch consume the
-// same effective defaults; accounting is still owned by the existing Attempt.
 func (x *call) preparedProvider(provider *routing.Provider, targetID, model string) (preparedProvider, error) {
-	x.prepareSource()
-	record := x.targetPreparation(provider, targetID, model)
-	if record.provider.invocation.Prepared.Document().Valid() {
-		return record.provider, nil
+	return x.preparation().provider(providerPreparationKey(provider, targetID, model), true, func() (preparedProvider, error) {
+		return x.buildProvider(provider, targetID, model)
+	})
+}
+
+func (x *call) providerAdmission(provider *routing.Provider, targetID, model string) (preparedProvider, error) {
+	return x.preparation().provider(providerPreparationKey(provider, targetID, model), false, func() (preparedProvider, error) {
+		return x.buildProvider(provider, targetID, model)
+	})
+}
+
+func (x *call) preparedGuardrailInput(format wire.Format, document oif.Document) (guardrailInput, error) {
+	if x.guardrailEngine == nil {
+		return guardrailInput{document: document}, nil
 	}
+	if coverage := interaction.CheckGuardrailCoverage(format, document); coverage != nil && (x.named().ToolExecution != "gateway" || !x.guardrailEngine.OnlyTypeSafe()) {
+		result, err := x.guardrailEngine.Unavailable()
+		x.recordGuardrails(result.Decisions)
+		return guardrailInput{document: document, decisions: result.Decisions}, err
+	}
+	result, err := x.evaluateGuardrailInput(x.guardrailCtx, document, true)
+	x.recordGuardrails(result.decisions)
+	return result, err
+}
+
+func (x *call) buildProvider(provider *routing.Provider, targetID, model string) (preparedProvider, error) {
 	if x.strict() {
 		template, _ := x.snapshot().InteractionTemplate(x.route.Slug, targetID)
 		if template == nil {
@@ -116,30 +132,29 @@ func (x *call) preparedProvider(provider *routing.Provider, targetID, model stri
 			return preparedProvider{}, err
 		}
 		decisions, err := plan.CheckInput()
-		var guardrailSegments []guardrails.Segment
+		var input guardrailInput
 		if err == nil && x.guardrailEngine != nil {
-			if coverage := interaction.CheckGuardrailCoverage(plan.Wire(), plan.EffectiveRequest().OIF().Document()); coverage != nil && (x.named().ToolExecution != "gateway" || !x.guardrailEngine.OnlyTypeSafe()) {
-				result, e := x.guardrailEngine.Unavailable()
-				x.recordPreparationGuardrails(record, result.Decisions)
-				if e != nil {
-					return preparedProvider{}, e
+			document := plan.EffectiveRequest().OIF().Document()
+			if coverage := interaction.CheckGuardrailCoverage(plan.Wire(), document); coverage != nil && (x.named().ToolExecution != "gateway" || !x.guardrailEngine.OnlyTypeSafe()) {
+				result, failure := x.guardrailEngine.Unavailable()
+				x.recordGuardrails(result.Decisions)
+				if failure != nil {
+					return preparedProvider{guardrailDecisions: result.Decisions}, failure
 				}
+				input = guardrailInput{decisions: result.Decisions}
 			} else {
-				result, inputErr := x.evaluateGuardrailInput(x.guardrailCtx, plan.EffectiveRequest().OIF().Document(), true)
-				x.recordPreparationGuardrails(record, result.decisions)
-				guardrailSegments, err = result.segments, inputErr
+				input, err = x.evaluateGuardrailInput(x.guardrailCtx, document, true)
+				x.recordGuardrails(input.decisions)
 			}
 		}
 		effective := x.summarize(plan.EffectiveRequest())
 		receipt := plan.Receipt()
-		prepared := preparedProvider{plan: plan, receipt: &receipt, invocation: providerinvoke.Invocation{Prepared: plan.Prepared(), Wire: plan.Wire()}, parameters: effective.parameters, policyDecisions: decisions, guardrailSegments: guardrailSegments}
-		prepared.admitted, prepared.demand = x.preparedEstimate(model, effective)
-		if err != nil {
-			return prepared, err
-		}
-		record.provider = prepared
-		x.retainPreparation(record)
-		return prepared, nil
+		admitted, demand := x.preparedEstimate(model, effective)
+		return preparedProvider{
+			plan: plan, receipt: &receipt, invocation: providerinvoke.Invocation{Prepared: plan.Prepared(), Wire: plan.Wire()},
+			parameters: effective.parameters, policyDecisions: decisions, guardrailSegments: input.segments,
+			guardrailDecisions: input.decisions, admitted: admitted, demand: demand,
+		}, err
 	}
 	invocation, err := x.prepareTransformed(provider, provider.Connector(), model)
 	if err != nil {
@@ -191,41 +206,27 @@ func (x *call) preparedProvider(provider *routing.Provider, targetID, model stri
 			invocation.Prepared = prepared.WithProvenance(invocation.Prepared.Provenance()...)
 		}
 	}
-	var guardrailSegments []guardrails.Segment
-	if x.guardrailEngine != nil {
-		if coverage := interaction.CheckGuardrailCoverage(invocation.Wire, native.OIF().Document()); coverage != nil && (x.named().ToolExecution != "gateway" || !x.guardrailEngine.OnlyTypeSafe()) {
-			result, e := x.guardrailEngine.Unavailable()
-			x.recordPreparationGuardrails(record, result.Decisions)
-			if e != nil {
-				return preparedProvider{}, e
-			}
-		} else {
-			result, err := x.evaluateGuardrailInput(x.guardrailCtx, native.OIF().Document(), true)
-			x.recordPreparationGuardrails(record, result.decisions)
-			document, segments := result.document, result.segments
-			if err != nil {
-				return preparedProvider{}, err
-			}
-			guardrailSegments = segments
-			if document != native.OIF().Document() {
-				native, err = wire.NewRequest(invocation.Wire, native.Route, native.Stream, document)
-				if err != nil {
-					return preparedProvider{}, err
-				}
-				changed, err := oif.PrepareDestination(invocation.Prepared.Request(), invocation.Prepared.Descriptor(), document, oif.ExplicitTransform, "guardrail transformation")
-				if err != nil {
-					return preparedProvider{}, err
-				}
-				invocation.Prepared = changed.WithProvenance(invocation.Prepared.Provenance()...)
-			}
+	input, err := x.preparedGuardrailInput(invocation.Wire, native.OIF().Document())
+	if err != nil {
+		return preparedProvider{guardrailDecisions: input.decisions}, err
+	}
+	if input.document != native.OIF().Document() {
+		native, err = wire.NewRequest(invocation.Wire, native.Route, native.Stream, input.document)
+		if err != nil {
+			return preparedProvider{guardrailDecisions: input.decisions}, err
 		}
+		changed, err := oif.PrepareDestination(invocation.Prepared.Request(), invocation.Prepared.Descriptor(), input.document, oif.ExplicitTransform, "guardrail transformation")
+		if err != nil {
+			return preparedProvider{guardrailDecisions: input.decisions}, err
+		}
+		invocation.Prepared = changed.WithProvenance(invocation.Prepared.Provenance()...)
 	}
 	effective := x.summarize(native)
-	prepared := preparedProvider{invocation: invocation, parameters: effective.parameters, policyDecisions: decisions, guardrailSegments: guardrailSegments}
-	prepared.admitted, prepared.demand = x.preparedEstimate(model, effective)
-	record.provider = prepared
-	x.retainPreparation(record)
-	return prepared, nil
+	admitted, demand := x.preparedEstimate(model, effective)
+	return preparedProvider{
+		invocation: invocation, parameters: effective.parameters, policyDecisions: decisions,
+		guardrailSegments: input.segments, guardrailDecisions: input.decisions, admitted: admitted, demand: demand,
+	}, nil
 }
 
 // preparedEstimate prices the request for a target that is sent a request of its
@@ -267,73 +268,95 @@ func (x *call) automatic(provider *routing.Provider) bool {
 	return provider.ProfileID == "" && x.family != wire.Completions && !x.strict() && (x.route == nil || x.route.ContentPolicy == nil) && x.guardrailEngine == nil
 }
 
-// encodedRequest is the body a provider that takes the caller's request as it
-// is would be sent, and the dialect it is in, as made from one document.
 type encodedRequest struct {
-	body []byte
-	wire wire.Format
-	// candidates belongs to this native document, including effective defaults.
-	candidates int64
+	document oif.Document
+	wire     wire.Format
+	output   effectiveOutput
 }
 
-// effectiveOutput retains the merged destination controls after planning lets
-// go of its encoded bodies. Every target needs its own bounds, even when its
-// body is not kept, and neither pricing nor recording needs to encode it again.
 type effectiveOutput struct {
 	output     *int64
 	candidates int64
 }
 
-// keptEncodings is how many bodies planning keeps for the attempts, which a route
-// of more targets than that is planned for as it always was: the attempts that
-// come after the first four encode their own.
 const keptEncodings = 4
 
-// encodes encodes the caller's request for a provider that takes it as it is,
-// which is how planning learns whether the provider can take it at all, and keeps
-// the body. Planning asks it of every target of the route, and the attempt that
-// serves the request is sent the body of its own target, so a request is encoded
-// once for that target and not twice. Only the first attempt is sent a body that
-// planning made, and it drops the rest: an attempt that fails over is the rare
-// one, and a request that is served for an hour must not hold a copy of itself for
-// each target of its route.
-func (x *call) encodes(provider *routing.Provider, cfg connectors.Config, targetID, model string) error {
-	x.prepareSource()
-	invocation, err := x.prepareTransformed(provider, cfg, model)
-	if err != nil {
-		return err
-	}
-	native, err := wire.NewRequest(invocation.Wire, x.generation.parsed.Route, x.generation.parsed.Stream, invocation.Prepared.Document())
-	if err != nil {
-		return err
-	}
-	output, candidates := estimate.OutputBounds(native, nil)
-	record := x.targetPreparation(provider, targetID, model)
-	record.output = effectiveOutput{output: output, candidates: candidates}
-	record.hasOutput = true
-	record.encoding = encodedRequest{body: invocation.Prepared.Document().Bytes(), wire: invocation.Wire, candidates: candidates}
-	x.retainPreparation(record)
-	return nil
+type candidatePreparation struct {
+	candidate       *routing.CandidatePreparation
+	policyDecisions []contentpolicy.Decision
 }
 
-// encoding is the body of the caller's request for one of a provider's models, and
-// the dialect it is in: the one planning made, if it made one of the request as it
-// now is, and one made now if not.
-func (x *call) encoding(provider *routing.Provider, cfg connectors.Config, targetID, model string) ([]byte, wire.Format, int64, error) {
-	x.prepareSource()
-	if request := x.targetPreparation(provider, targetID, model).encoding; request.body != nil {
-		return request.body, request.wire, request.candidates, nil
+type generationRequest struct {
+	document          oif.Document
+	wire              wire.Format
+	candidates        int64
+	config            connectors.Config
+	plan              *interaction.Plan
+	policyDecisions   []contentpolicy.Decision
+	guardrailSegments []guardrails.Segment
+}
+
+func (x *call) prepareCandidate(provider *routing.Provider, targetID, model string) (candidatePreparation, error) {
+	if x.unary != nil {
+		prepared, err := x.unaryAdmission(provider, targetID, model)
+		return candidatePreparation{candidate: &routing.CandidatePreparation{Parameters: prepared.parameters}}, err
 	}
-	invocation, err := x.prepareTransformed(provider, cfg, model)
+	if x.automatic(provider) {
+		_, err := x.preparation().encoded(providerPreparationKey(provider, targetID, model), func() (encodedRequest, error) {
+			return x.buildEncoding(provider, model)
+		})
+		return candidatePreparation{}, err
+	}
+	prepared, err := x.preparedProvider(provider, targetID, model)
+	return candidatePreparation{
+		candidate:       &routing.CandidatePreparation{Parameters: prepared.parameters, Demand: prepared.demand},
+		policyDecisions: prepared.policyDecisions,
+	}, err
+}
+
+func (x *call) buildEncoding(provider *routing.Provider, model string) (encodedRequest, error) {
+	invocation, err := x.prepareTransformed(provider, provider.Connector(), model)
 	if err != nil {
-		return nil, "", 0, err
+		return encodedRequest{}, err
 	}
 	native, err := wire.NewRequest(invocation.Wire, x.generation.parsed.Route, x.generation.parsed.Stream, invocation.Prepared.Document())
 	if err != nil {
-		return nil, "", 0, err
+		return encodedRequest{}, err
+	}
+	output, candidates := estimate.OutputBounds(native, nil)
+	return encodedRequest{
+		document: invocation.Prepared.Document(), wire: invocation.Wire,
+		output: effectiveOutput{output: output, candidates: candidates},
+	}, nil
+}
+
+func (x *call) generationRequest(provider *routing.Provider, targetID, model string) (generationRequest, error) {
+	if x.automatic(provider) {
+		encoded, err := x.preparation().encoded(providerPreparationKey(provider, targetID, model), func() (encodedRequest, error) {
+			return x.buildEncoding(provider, model)
+		})
+		return generationRequest{
+			document: encoded.document, wire: encoded.wire, candidates: encoded.output.candidates,
+			config: provider.Connector(),
+		}, err
+	}
+	prepared, err := x.preparedProvider(provider, targetID, model)
+	if err != nil {
+		return generationRequest{}, err
+	}
+	native, err := wire.NewRequest(prepared.invocation.Wire, x.generation.parsed.Route, x.generation.parsed.Stream, prepared.invocation.Prepared.Document())
+	if err != nil {
+		return generationRequest{}, err
 	}
 	_, candidates := estimate.OutputBounds(native, nil)
-	return invocation.Prepared.Document().Bytes(), invocation.Wire, candidates, nil
+	config := provider.Connector()
+	if prepared.plan != nil {
+		config = prepared.plan.Config()
+	}
+	return generationRequest{
+		document: prepared.invocation.Prepared.Document(), wire: prepared.invocation.Wire, candidates: candidates,
+		config: config, plan: prepared.plan, policyDecisions: prepared.policyDecisions, guardrailSegments: prepared.guardrailSegments,
+	}, nil
 }
 
 // attemptEstimate prices the request for an attempt on one of a provider's
@@ -353,13 +376,12 @@ func (x *call) attemptEstimate(provider *routing.Provider, targetID, model strin
 		return admittedEstimate{reserve: tokens, input: tokens, provenance: estimate.ProvenanceHeuristic, family: estimate.FamilyOf(model)}, nil
 	}
 	if x.automatic(provider) {
-		record := x.targetPreparation(provider, targetID, model)
-		if !record.hasOutput {
-			if err := x.encodes(provider, provider.Connector(), targetID, model); err != nil {
-				return admittedEstimate{}, err
-			}
+		bounds, err := x.preparation().output(providerPreparationKey(provider, targetID, model), func() (encodedRequest, error) {
+			return x.buildEncoding(provider, model)
+		})
+		if err != nil {
+			return admittedEstimate{}, err
 		}
-		bounds := record.output
 		e := x.summarizeSource().prompt.Estimate(estimate.ForModel(model), provider.ParameterDefaults)
 		e.Output, e.Candidates = bounds.output, bounds.candidates
 		return admittedEstimate{reserve: e.Tokens(), input: e.InputExposure(), reply: e.Reply(), provenance: e.Provenance, family: e.Family}, nil

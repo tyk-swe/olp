@@ -90,8 +90,7 @@ func (s *Server) initializeCache(x *call) *Error {
 	if x.guardrailEngine.HasAction(guardrails.Input, guardrails.Mask) {
 		return nil
 	}
-	x.prepareSource()
-	doc := x.source
+	doc := x.requestDocument()
 	if !doc.Valid() {
 		return nil
 	}
@@ -287,11 +286,11 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *Error {
 			return requestError(err2)
 		}
 	} else {
-		prepared, err := x.preparedProvider(&p, a.TargetID, a.UpstreamModel)
+		prepared, err := x.generationRequest(&p, a.TargetID, a.UpstreamModel)
 		if err != nil {
 			return requestError(err)
 		}
-		doc = prepared.invocation.Prepared.Document()
+		doc = prepared.document
 		x.guardrailInput = prepared.guardrailSegments
 	}
 	// Defaults and protocol preparation can add retention even when the caller

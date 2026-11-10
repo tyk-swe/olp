@@ -13,6 +13,8 @@ import (
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/protocols"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -211,5 +213,43 @@ func TestPublishedPolicySurvivesMutationOfReturnedCompiledRules(t *testing.T) {
 	}
 	if calls := h.mock.count("a") + h.mock.count("b"); calls != 0 {
 		t.Fatalf("blocked request reached providers: %d", calls)
+	}
+}
+
+func TestPreparationRetainsFailedGuardrailEvidenceWithoutReevaluation(t *testing.T) {
+	evaluations := 0
+	evaluator := guardrails.EvaluatorFunc(func(context.Context, guardrails.Revision, guardrails.Spec, guardrails.Evaluation) (guardrails.Verdict, error) {
+		evaluations++
+		return guardrails.Flag(), nil
+	})
+	h := newHarness(t, Config{}, Dependencies{Guardrails: func(guardrails.Caller) guardrails.Evaluator { return evaluator }})
+	installTestGuardrail(t, h, guardrails.Input, guardrails.Block, "webhook", `{"endpoint":"https://example.com","credential_ref":"key","content_egress":true}`)
+	route := h.rt.release.Snapshot().Route(routeSlug)
+	target := route.Targets[0]
+	provider := h.rt.release.Snapshot().Provider(target.ProviderID)
+	parsed, err := protocols.Parse(wire.Chat, []byte(`{"model":"team-chat","messages":[{"role":"user","content":"blocked"}]}`), routeSlug)
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := &call{family: wire.Chat, routeLeg: routeLeg{route: &route}, generation: generationCall{parsed: parsed}}
+	x.request.release = h.rt.release
+	x.authority = h.rt.keys[fullKey]
+	x.keyID = h.keyID
+	if failure := h.gateway.bindGuardrails(t.Context(), x); failure != nil {
+		t.Fatal(failure)
+	}
+	if _, err := x.prepareCandidate(&provider, target.ID, target.ProviderModel); err == nil {
+		t.Fatal("flagged input was admitted")
+	}
+	fact := &AttemptFact{TargetID: target.ID, ProviderID: provider.ID, ProviderRevisionID: provider.RevisionID, UpstreamModel: target.ProviderModel}
+	for range 2 {
+		evidence := x.preparation().factEvidence(fact)
+		if len(evidence.guardrails) != 1 || evidence.guardrails[0].Outcome != guardrails.Blocked {
+			t.Fatalf("failed preparation evidence = %+v", evidence.guardrails)
+		}
+		evidence.guardrails[0].Outcome = ""
+	}
+	if evaluations != 1 {
+		t.Fatalf("accounting evidence reran the guardrail, evaluations = %d", evaluations)
 	}
 }

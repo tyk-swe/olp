@@ -170,7 +170,7 @@ route:
 					}
 				}
 				x.spent++
-				x.activatePreparation(&provider, attempt.TargetID, attempt.UpstreamModel)
+				x.preparation().activate(attempt)
 				x.grantGeneration = 0
 				fact := s.newFact(x, attempt, slot, x.spent)
 				// Streams can persist accounting before dispatch returns.

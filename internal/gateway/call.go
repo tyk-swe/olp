@@ -137,7 +137,7 @@ type call struct {
 
 // routeLeg owns selection and every representation derived for one route.
 type routeLeg struct {
-	requestPreparation
+	prepared *requestPreparation
 
 	affinity []byte
 

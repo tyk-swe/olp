@@ -6,7 +6,6 @@ import (
 	"net/http/httptrace"
 	"sync/atomic"
 
-	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/upstream"
@@ -135,11 +134,9 @@ func (s *Server) newFact(x *call, a routing.Attempt, slot routing.Slot, ordinal 
 	if slot.CredentialVersion != nil && fact.CredentialSource != "caller" {
 		fact.CredentialVersion = *slot.CredentialVersion
 	}
-	if record := x.targets[preparationKey{target: a.TargetID, provider: a.ProviderID, revision: a.ProviderRevisionID, model: a.UpstreamModel}]; record != nil {
-		fact.GuardrailDecisions = append([]guardrails.Evidence(nil), record.guardrailDecisions...)
-	}
+	evidence := x.preparation().attemptEvidence(a)
+	fact.GuardrailDecisions = evidence.guardrails
 	if x.strict() {
-		provider := x.snapshot().Provider(a.ProviderID)
 		if x.family == wire.GeminiInteractions || x.family == wire.GeminiLive {
 			fact.Interaction = &usage.InteractionEvidence{Fidelity: routing.FidelityStrict, PlanClass: "native_identity", UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
 			return fact
@@ -162,12 +159,8 @@ func (s *Server) newFact(x *call, a routing.Attempt, slot routing.Slot, ordinal 
 			if _, ok := x.snapshot().MediaTemplate(x.route.Slug, a.TargetID, string(x.media.Op())); ok {
 				fact.Interaction = &usage.InteractionEvidence{Fidelity: routing.FidelityStrict, PlanClass: "native_identity", UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
 			}
-		} else if x.unary != nil {
-			if admission, err := x.unaryAdmission(&provider, a.TargetID, a.UpstreamModel); err == nil {
-				fact.Interaction = &usage.InteractionEvidence{Fidelity: routing.FidelityStrict, PlanClass: admission.receipt.Class, UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
-			}
-		} else if prepared, err := x.providerAdmission(&provider, a.TargetID, a.UpstreamModel); err == nil && prepared.receipt != nil {
-			fact.Interaction = &usage.InteractionEvidence{Fidelity: routing.FidelityStrict, PlanClass: prepared.receipt.Class, UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
+		} else if evidence.planClass != "" {
+			fact.Interaction = &usage.InteractionEvidence{Fidelity: routing.FidelityStrict, PlanClass: evidence.planClass, UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
 		}
 	}
 	return fact

@@ -110,19 +110,27 @@ func (s *Server) selectUnary(x *call, family wire.Format, dialect string, body [
 	x.unary.source = source
 	return true, nil
 }
-func (x *call) unaryPlan(p *routing.Provider, targetID, model string) (*operationplan.Plan, error) {
-	x.prepareSource()
-	record := x.targetPreparation(p, targetID, model)
-	if record.unary.plan != nil {
-		return record.unary.plan, nil
-	}
+func (x *call) unaryPlan(provider *routing.Provider, targetID, model string) (*operationplan.Plan, error) {
+	prepared, err := x.preparation().operation(providerPreparationKey(provider, targetID, model), true, func() (unaryAdmission, error) {
+		return x.buildUnary(targetID)
+	})
+	return prepared.plan, err
+}
+
+func (x *call) unaryAdmission(provider *routing.Provider, targetID, model string) (unaryAdmission, error) {
+	return x.preparation().operation(providerPreparationKey(provider, targetID, model), false, func() (unaryAdmission, error) {
+		return x.buildUnary(targetID)
+	})
+}
+
+func (x *call) buildUnary(targetID string) (unaryAdmission, error) {
 	template, _ := x.snapshot().OperationTemplate(x.route.Slug, targetID, x.operationName())
 	if template == nil {
-		return nil, operations.Error("target_capability", "/operation", "compiled_operation", "The selected target has no compiled native operation contract.")
+		return unaryAdmission{}, operations.Error("target_capability", "/operation", "compiled_operation", "The selected target has no compiled native operation contract.")
 	}
 	clientValues := x.semanticHeaders.Values("X-Olp-Client-Contract")
 	if len(clientValues) > 1 {
-		return nil, operations.Invalid("/client_contract", "Provide one client contract.")
+		return unaryAdmission{}, operations.Invalid("/client_contract", "Provide one client contract.")
 	}
 	client := ""
 	if len(clientValues) == 1 {
@@ -130,43 +138,49 @@ func (x *call) unaryPlan(p *routing.Provider, targetID, model string) (*operatio
 	}
 	plan, err := template.Bind(x.unary.source, operationplan.Context{Headers: x.semanticHeaders, Query: x.semanticQuery, Route: x.unary.route, ClientContract: client})
 	if err != nil {
-		return nil, err
+		return unaryAdmission{}, err
 	}
 	decisions, err := plan.CheckInput()
 	for _, decision := range decisions {
 		recordDecision(x, decision)
 	}
 	if err != nil {
-		return nil, err
+		return unaryAdmission{}, err
 	}
-	if x.guardrailEngine.HasPhase(guardrails.Input) || x.guardrailEngine.HasPhase(guardrails.InputParallel) {
-		texts, err := plan.GuardrailInput()
-		if err != nil {
-			result, unavailable := x.guardrailEngine.Unavailable(guardrails.Input)
-			x.recordPreparationGuardrails(record, result.Decisions)
-			parallel, parallelErr := x.guardrailEngine.Unavailable(guardrails.InputParallel)
-			x.recordPreparationGuardrails(record, parallel.Decisions)
-			if x.guardrailEngine.HasLegacyInput() {
-				return nil, operations.Error("policy_conflict", "/request", "input_policy_coverage", "The input policy cannot inspect this native request.")
-			}
-			if unavailable != nil {
-				return nil, unavailable
-			}
-			if parallelErr != nil {
-				return nil, parallelErr
-			}
-		} else {
-			evidence, err := x.inspectOperationInput(texts)
-			x.recordPreparationGuardrails(record, evidence)
-			if err != nil {
-				return nil, err
-			}
-		}
+	evidence, err := x.prepareOperationGuardrails(plan)
+	if err != nil {
+		return unaryAdmission{guardrailDecisions: evidence}, err
 	}
-	record.unary = unaryAdmission{plan: plan, estimate: plan.Estimate(), receipt: plan.Receipt(), parameters: routing.Listed(plan.Parameters())}
-	x.retainPreparation(record)
-	return plan, nil
+	return unaryAdmission{
+		plan: plan, estimate: plan.Estimate(), receipt: plan.Receipt(), parameters: routing.Listed(plan.Parameters()),
+		guardrailDecisions: evidence,
+	}, nil
 }
+
+func (x *call) prepareOperationGuardrails(plan *operationplan.Plan) ([]guardrails.Evidence, error) {
+	if !x.guardrailEngine.HasPhase(guardrails.Input) && !x.guardrailEngine.HasPhase(guardrails.InputParallel) {
+		return nil, nil
+	}
+	texts, err := plan.GuardrailInput()
+	if err == nil {
+		evidence, failure := x.inspectOperationInput(texts)
+		x.recordGuardrails(evidence)
+		return evidence, failure
+	}
+	result, unavailable := x.guardrailEngine.Unavailable(guardrails.Input)
+	x.recordGuardrails(result.Decisions)
+	parallel, parallelErr := x.guardrailEngine.Unavailable(guardrails.InputParallel)
+	x.recordGuardrails(parallel.Decisions)
+	evidence := guardrails.MergeEvidence(result.Decisions, parallel.Decisions)
+	if x.guardrailEngine.HasLegacyInput() {
+		return evidence, operations.Error("policy_conflict", "/request", "input_policy_coverage", "The input policy cannot inspect this native request.")
+	}
+	if unavailable != nil {
+		return evidence, unavailable
+	}
+	return evidence, parallelErr
+}
+
 func (s *Server) prepareUnary(ctx context.Context, x *call) *Error {
 	authorize := guardrailAuthorizer(s, x)
 	if e := authorize(x.route); e != nil {
@@ -218,12 +232,12 @@ func (s *Server) planUnary(ctx context.Context, x *call) *Error {
 				}
 			}
 		}
-		admission, err := x.unaryAdmission(&p, t.ID, t.ProviderModel)
+		prepared, err := x.prepareCandidate(&p, t.ID, t.ProviderModel)
 		if err != nil {
 			incompatible = err
 			return nil, err
 		}
-		return &routing.CandidatePreparation{Parameters: admission.parameters}, nil
+		return prepared.candidate, nil
 	}
 	plan, err := routing.Select(x.snapshot(), x.route.Slug, x.operationName(), x.surfaceName(), "unary", x.affinity, options)
 	if err != nil {

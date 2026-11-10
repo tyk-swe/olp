@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -131,22 +132,22 @@ func TestAutomaticReservationsPriceEffectiveGeminiOutputControls(t *testing.T) {
 					for range keptEncodings {
 						other := provider
 						other.ID = uuid.NewString()
-						if err := x.encodes(&other, other.Connector(), attempt.TargetID, attempt.UpstreamModel); err != nil {
+						if _, err := x.prepareCandidate(&other, attempt.TargetID, attempt.UpstreamModel); err != nil {
 							t.Fatal(err)
 						}
 					}
 				}
 				if preparation != "unplanned" {
-					if err := x.encodes(&provider, provider.Connector(), attempt.TargetID, attempt.UpstreamModel); err != nil {
+					if _, err := x.prepareCandidate(&provider, attempt.TargetID, attempt.UpstreamModel); err != nil {
 						t.Fatal(err)
 					}
 				}
 				if hold := (&Server{}).costReservation(x, budgeted()); hold.amount != tc.cost {
 					t.Fatalf("cost reservation = %q, want %q", hold.amount, tc.cost)
 				}
-				body, encodedWire, _, err := x.encoding(&provider, provider.Connector(), attempt.TargetID, attempt.UpstreamModel)
-				if err != nil || encodedWire != wire.Gemini {
-					t.Fatalf("encoding wire = %s, error = %v", encodedWire, err)
+				prepared, err := x.generationRequest(&provider, attempt.TargetID, attempt.UpstreamModel)
+				if err != nil || prepared.wire != wire.Gemini {
+					t.Fatalf("encoding wire = %s, error = %v", prepared.wire, err)
 				}
 				var encoded struct {
 					Config struct {
@@ -154,7 +155,7 @@ func TestAutomaticReservationsPriceEffectiveGeminiOutputControls(t *testing.T) {
 						Candidates int64 `json:"candidateCount"`
 					} `json:"generationConfig"`
 				}
-				if err := json.Unmarshal(body, &encoded); err != nil {
+				if err := json.Unmarshal(prepared.document.Bytes(), &encoded); err != nil {
 					t.Fatal(err)
 				}
 				if encoded.Config.Output != tc.output || encoded.Config.Candidates != tc.candidates {
@@ -389,5 +390,64 @@ func TestRetainedPageOnlyAdmitsCostsForEntriesBeingRead(t *testing.T) {
 	}
 	if failure := s.admitRetainedPageCost(context.Background(), x, budgeted(), time.Second); failure == nil || failure.Code != "cost_accounting_incomplete" {
 		t.Fatalf("paid refill admission = %v", failure)
+	}
+}
+
+func TestPreparationFollowsSourceAndRouteChanges(t *testing.T) {
+	for _, transformed := range []bool{false, true} {
+		name := "automatic"
+		if transformed {
+			name = "transformed"
+		}
+		t.Run(name, func(t *testing.T) {
+			x := costExecution(t, `{"model":"team-chat","messages":[{"role":"user","content":"first"}],"max_tokens":8}`, wire.Chat, 1, routing.Attempt{})
+			attempt := x.attempts[0]
+			provider := x.snapshot().Provider(attempt.ProviderID)
+			provider.Kind = "openai_compatible"
+			if transformed {
+				x.route.ContentPolicy = &contentpolicy.Policy{Rules: []contentpolicy.Rule{{
+					ID: "redact", Phase: contentpolicy.PhaseInput, Pattern: "first|second",
+					Action: contentpolicy.ActionRedact, Replacement: "filtered",
+				}}}
+			}
+			assertRequest := func(want string, reply int64) {
+				t.Helper()
+				if _, err := x.prepareCandidate(&provider, attempt.TargetID, attempt.UpstreamModel); err != nil {
+					t.Fatal(err)
+				}
+				prepared, err := x.generationRequest(&provider, attempt.TargetID, attempt.UpstreamModel)
+				if err != nil {
+					t.Fatal(err)
+				}
+				value, _ := prepared.document.Lookup("/messages/0/content")
+				text, _ := value.Text()
+				if text != want {
+					t.Fatalf("prepared input = %q, want %q", text, want)
+				}
+				admitted, err := x.attemptEstimate(&provider, attempt.TargetID, attempt.UpstreamModel)
+				if err != nil || admitted.reply != reply {
+					t.Fatalf("admitted reply = %d, error = %v, want %d", admitted.reply, err, reply)
+				}
+			}
+			first, second := "first", "second"
+			if transformed {
+				first, second = "filtered", "filtered"
+			}
+			assertRequest(first, 8)
+			next, err := protocols.Parse(wire.Chat, []byte(`{"model":"team-chat","messages":[{"role":"user","content":"second"}],"max_tokens":16}`), "team-chat")
+			if err != nil {
+				t.Fatal(err)
+			}
+			x.generation.parsed = next
+			assertRequest(second, 16)
+			x.useRoute(&routing.Route{
+				Slug: "fallback", Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed},
+				ContentPolicy: &contentpolicy.Policy{Rules: []contentpolicy.Rule{{
+					ID: "redact", Phase: contentpolicy.PhaseInput, Pattern: "second",
+					Action: contentpolicy.ActionRedact, Replacement: "routed",
+				}}},
+			}, usage.ViaFallback)
+			assertRequest("routed", 16)
+		})
 	}
 }

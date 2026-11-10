@@ -153,7 +153,7 @@ func (s *Server) putStrictResponse(ctx context.Context, x *call, fact *AttemptFa
 	if !ok {
 		return nil, resources.ErrContract
 	}
-	prepared, err := x.preparedProvider(&provider, fact.TargetID, fact.UpstreamModel)
+	prepared, err := x.generationRequest(&provider, fact.TargetID, fact.UpstreamModel)
 	if err != nil || prepared.plan == nil || prepared.plan.Obligations().Continuation != "native_response_resource" {
 		return nil, resources.ErrContract
 	}

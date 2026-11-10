@@ -199,11 +199,8 @@ func (x *call) captureInputDocument() map[string]json.RawMessage {
 	var body []byte
 	if len(x.facts) != 0 {
 		fact := &x.facts[len(x.facts)-1]
-		if record := x.targets[preparationKey{target: fact.TargetID, provider: fact.ProviderID, revision: fact.ProviderRevisionID, model: fact.UpstreamModel}]; record != nil {
-			prepared := record.provider
-			if document := prepared.invocation.Prepared.Document(); document.Valid() {
-				body = document.Bytes()
-			}
+		if document := x.preparation().factEvidence(fact).document; document.Valid() {
+			body = document.Bytes()
 		}
 	}
 	if len(body) == 0 && x.generation.parsed != nil && (x.route == nil || x.route.ContentPolicy == nil) {

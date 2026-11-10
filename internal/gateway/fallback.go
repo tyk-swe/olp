@@ -92,7 +92,7 @@ func (x *call) initAllowance(budget int) {
 func (x *call) adoptPlan(plan routing.Plan) {
 	x.initAllowance(plan.Budget)
 	x.decisions, x.policy, x.attempts, x.shadows = plan.Decisions, plan.Policy, plan.Attempts, plan.Shadows
-	x.finishPreparationPlanning()
+	x.preparation().finishPlanning(plan.Attempts)
 	x.budget = x.spent + min(plan.Budget, x.allowance-x.spent)
 	x.selector, x.baseline = plan.Selected(), nil
 	if b := plan.Baseline; b != nil {
@@ -174,7 +174,6 @@ func (x *call) useRoute(route *routing.Route, via string) {
 	x.walk = x.walk.Move(route, via == usage.ViaSelector)
 	x.routeLeg = routeLeg{route: route}
 	x.leg = &usage.RouteLeg{Route: route.Slug, RevisionID: route.RevisionID, Via: via}
-	x.requestPreparation = requestPreparation{}
 	x.affinity = x.routeSeed(route)
 }
 

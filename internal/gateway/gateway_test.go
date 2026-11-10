@@ -35,6 +35,9 @@ import (
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/limits/scripts"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/operationplan"
+	"github.com/tyk-swe/olp/internal/protocols"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/release"
 
 	"github.com/tyk-swe/olp/internal/routing"
@@ -1061,6 +1064,72 @@ func TestBraveSearchRejectsNonObjectResponses(t *testing.T) {
 			}
 			if tc.want == http.StatusBadGateway && !strings.Contains(string(body), `"code":"fidelity_protocol_violation"`) {
 				t.Fatalf("unexpected rejection: %s", body)
+			}
+		})
+	}
+}
+
+func TestStrictPreparationKeepsTargetsAndSourcesSeparate(t *testing.T) {
+	for _, native := range []bool{false, true} {
+		name := "generation"
+		configure := (func(*routing.Snapshot))(nil)
+		if native {
+			name, configure = "native operation", strictEmbeddings
+		}
+		t.Run(name, func(t *testing.T) {
+			h := strictHarness(t, configure)
+			route := h.rt.release.Snapshot().Route(routeSlug)
+			target := route.Targets[0]
+			provider := h.rt.release.Snapshot().Provider(target.ProviderID)
+			x := &call{family: wire.Chat, routeLeg: routeLeg{route: &route}}
+			x.request.release = h.rt.release
+			x.authority = h.rt.keys[fullKey]
+			for _, text := range []string{"first", "second"} {
+				body := []byte(fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":%q}]}`, routeSlug, text))
+				if native {
+					body = []byte(fmt.Sprintf(`{"model":%q,"input":%q}`, routeSlug, text))
+					if x.unary == nil {
+						selected, err := h.gateway.selectUnary(x, wire.Embeddings, "", body, "", "")
+						if err != nil || !selected {
+							t.Fatalf("select operation = %t, error = %v", selected, err)
+						}
+					} else {
+						source, err := operationplan.Parse("openai-embeddings", body, 64<<10)
+						if err != nil {
+							t.Fatal(err)
+						}
+						x.unary.source = source
+					}
+				} else {
+					parsed, err := protocols.Parse(wire.Chat, body, routeSlug)
+					if err != nil {
+						t.Fatal(err)
+					}
+					x.generation.parsed = parsed
+				}
+				if _, err := x.prepareCandidate(&provider, target.ID, target.ProviderModel); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := x.prepareCandidate(&provider, "missing-target", target.ProviderModel); err == nil {
+					t.Fatal("a target without a compiled contract reused another target's preparation")
+				}
+				var preparedBody []byte
+				if native {
+					plan, err := x.unaryPlan(&provider, target.ID, target.ProviderModel)
+					if err != nil {
+						t.Fatal(err)
+					}
+					preparedBody = plan.Body()
+				} else {
+					prepared, err := x.generationRequest(&provider, target.ID, target.ProviderModel)
+					if err != nil {
+						t.Fatal(err)
+					}
+					preparedBody = prepared.document.Bytes()
+				}
+				if !bytes.Contains(preparedBody, []byte(text)) {
+					t.Fatalf("prepared request does not contain current input %q: %s", text, preparedBody)
+				}
 			}
 		})
 	}

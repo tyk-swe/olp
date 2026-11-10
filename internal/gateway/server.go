@@ -1034,19 +1034,12 @@ func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
 				return nil, semantic
 			}
 		}
-		if x.automatic(&p) {
-			err := x.encodes(&p, cfg, t.ID, t.ProviderModel)
-			if err != nil {
-				semantic = err
-			}
-			return nil, err
-		}
-		prepared, err := x.preparedProvider(&p, t.ID, t.ProviderModel)
+		prepared, err := x.prepareCandidate(&p, t.ID, t.ProviderModel)
 		if err != nil {
 			semantic, policyDecisions = err, prepared.policyDecisions
 			return nil, err
 		}
-		return &routing.CandidatePreparation{Parameters: prepared.parameters, Demand: prepared.demand}, nil
+		return prepared.candidate, nil
 	}
 	options.Preferences = x.legPreferences()
 	plan, err := routing.Select(snapshot, route.Slug, x.family.Operation(), x.family.Surface(), x.mode, x.affinity, options)

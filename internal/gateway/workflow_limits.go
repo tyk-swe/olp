@@ -31,12 +31,7 @@ func (x *call) workflowModelCost(attempt routing.Attempt) *Error {
 	if x.unary != nil {
 		output = metadata.MaxOutputTokens
 	} else {
-		record := x.targetPreparation(&provider, attempt.TargetID, attempt.UpstreamModel)
-		if record.hasOutput {
-			output = record.output.output
-		} else if record.provider.demand != nil {
-			output = record.provider.demand.MaxOutputTokens
-		}
+		output = x.preparation().attemptEvidence(attempt).output
 	}
 	if output == nil || *output < 1 {
 		return workflowUnboundedCost()

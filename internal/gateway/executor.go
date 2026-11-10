@@ -17,7 +17,6 @@ import (
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -480,36 +479,17 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 	if err != nil {
 		return fail(classConnect, nil)
 	}
-	var body []byte
-	var encodedWire wire.Format
-	var streamCandidates int64
-	var contract *interaction.Plan
-	if provider.ProfileID != "" || x.strict() || x.route.ContentPolicy != nil || x.guardrailEngine != nil {
-		prepared, prepareErr := x.preparedProvider(provider, a.TargetID, a.UpstreamModel)
-		err = prepareErr
-		if err == nil {
-			x.guardrailInput = prepared.guardrailSegments
-			for _, decision := range prepared.policyDecisions {
-				recordDecision(x, decision)
-			}
-			body, encodedWire = prepared.invocation.Prepared.Document().Bytes(), prepared.invocation.Wire
-			native, sourceErr := wire.NewRequest(encodedWire, x.generation.parsed.Route, x.generation.parsed.Stream, prepared.invocation.Prepared.Document())
-			if sourceErr != nil {
-				return fail(classProtocol, nil)
-			}
-			_, streamCandidates = estimate.OutputBounds(native, nil)
-			contract = prepared.plan
-			if contract != nil {
-				cfg = contract.Config()
-			}
-		}
-	} else {
-		body, encodedWire, streamCandidates, err = x.encoding(provider, cfg, a.TargetID, a.UpstreamModel)
-	}
+	prepared, err := x.generationRequest(provider, a.TargetID, a.UpstreamModel)
 	if err != nil {
 		return fail(classProtocol, nil)
 	}
-	body = cfg.WrapRequest(body, a.UpstreamModel)
+	x.guardrailInput = prepared.guardrailSegments
+	for _, decision := range prepared.policyDecisions {
+		recordDecision(x, decision)
+	}
+	cfg = prepared.config
+	body := cfg.WrapRequest(prepared.document.Bytes(), a.UpstreamModel)
+	encodedWire, streamCandidates, contract := prepared.wire, prepared.candidates, prepared.plan
 	// A profile that forces streaming streams every request, and the gateway
 	// aggregates the stream for a caller that did not ask for one.
 	aggregated := !x.generation.parsed.Stream && cfg.ForcesStreaming()
