@@ -1,13 +1,14 @@
 package gateway
 
 import (
+	"maps"
 	"net/http"
+	"slices"
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
-	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/protocols"
 )
 
@@ -98,37 +99,52 @@ func applySlotRules(x *call, rules []contentpolicy.CompiledRule, phase string, v
 	if value == nil {
 		return false
 	}
+	redacted, blocked := applyRules(x, rules, phase, *value)
+	*value = redacted
+	return blocked
+}
+
+func applyRules(x *call, rules []contentpolicy.CompiledRule, phase string, text string) (string, bool) {
 	for i := range rules {
 		rule := &rules[i]
-		if !rule.Re.MatchString(*value) {
+		if !rule.Re.MatchString(text) {
 			continue
 		}
 		if rule.Action == contentpolicy.ActionBlock {
 			recordDecision(x, contentpolicy.Decision{RuleID: rule.ID, Phase: phase, Action: contentpolicy.ActionBlock, Outcome: contentpolicy.OutcomeBlocked})
-			return true
+			return text, true
 		}
-		*value = rule.Re.ReplaceAllLiteralString(*value, rule.Replacement)
+		text = rule.Re.ReplaceAllLiteralString(text, rule.Replacement)
 		recordDecision(x, contentpolicy.Decision{RuleID: rule.ID, Phase: phase, Action: contentpolicy.ActionRedact, Outcome: contentpolicy.OutcomeRedacted})
 	}
-	return false
+	return text, false
 }
 
-func (s *Server) enforceMediaInput(x *call, request *media.Request) *Error {
+func (s *Server) enforceMediaInput(x *call) *Error {
 	if x.strict() {
-		// Every strict target was checked against its actual effective native
-		// call during selection. Mutating this detached typed adapter would not
-		// mutate the immutable outbound OIF source.
 		return nil
 	}
 	compiled, e := compiledPolicy(x.route)
 	if compiled == nil || e != nil {
 		return e
 	}
-	for _, slot := range []*string{&request.Prompt, &request.Input, request.TextPrompt, request.Instructions} {
-		if applySlotRules(x, compiled.Input, contentpolicy.PhaseInput, slot) {
+	texts := x.media.PolicyTexts()
+	redacted := make(map[string]string, len(texts))
+	for _, name := range slices.Sorted(maps.Keys(texts)) {
+		text, blocked := applyRules(x, compiled.Input, contentpolicy.PhaseInput, texts[name])
+		if blocked {
 			return invalidRequest("content_policy_blocked", "The request was blocked by the route's content policy.", nil)
 		}
+		redacted[name] = text
 	}
+	if maps.Equal(texts, redacted) {
+		return nil
+	}
+	request, failure := x.media.WithTexts(redacted)
+	if failure != nil {
+		return mediaError(failure)
+	}
+	x.media = request
 	return nil
 }
 

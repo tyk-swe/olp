@@ -50,6 +50,19 @@ func newForm(spool *Spool, lease *Lease) *Form {
 	return &Form{text: map[string][]string{}, files: map[string][]Part{}, spool: spool, armed: true, lease: lease}
 }
 
+func FormOf(fields []Field, normalized bool) *Form {
+	form := &Form{text: map[string][]string{}, files: map[string][]Part{}, source: slices.Clone(fields), normalized: normalized}
+	for _, field := range fields {
+		switch value := field.Value.(type) {
+		case Text:
+			form.text[field.Name] = append(form.text[field.Name], string(value))
+		case Part:
+			form.files[field.Name] = append(form.files[field.Name], value)
+		}
+	}
+	return form
+}
+
 func (f *Form) SourceFields() ([]Field, bool) {
 	return slices.Clone(f.source), f.normalized
 }

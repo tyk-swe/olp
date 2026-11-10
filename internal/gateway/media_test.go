@@ -51,7 +51,7 @@ type mediaCase struct {
 	model     string
 	provider  func(*routing.Provider)
 	route     func(*routing.Route)
-	operation string
+	operation media.Operation
 	mode      string
 	path      string
 	json      string
@@ -218,13 +218,13 @@ func runMediaCase(t *testing.T, tc mediaCase) mediaRecord {
 		if tc.model != "" {
 			model = tc.model
 		}
-		a.Capabilities = []routing.Capability{{Model: model, Operation: tc.operation, Surface: "openai", Mode: mode}}
+		a.Capabilities = []routing.Capability{{Model: model, Operation: string(tc.operation), Surface: "openai", Mode: mode}}
 		if tc.provider != nil {
 			tc.provider(&a)
 		}
 		snapshot.Providers[a.ID] = a
 		route := snapshot.Routes[routeSlug]
-		route.Operations = []string{tc.operation}
+		route.Operations = []string{string(tc.operation)}
 		route.Targets = route.Targets[:1]
 		route.Targets[0].ProviderModel = model
 		if tc.route != nil {
@@ -379,7 +379,7 @@ func mediaCases(t *testing.T) []mediaCase {
 		{name: "profiled defaults", operation: media.OpImageGeneration, path: "/v1/images/generations",
 			provider: func(p *routing.Provider) {
 				p.ProfileID, p.ProfileRevision = "compatible-chat", connectors.ProfileRevision
-				p.OperationDefaults = map[string]connectors.DefaultSet{media.OpImageGeneration: {Dialect: "direct-compatible/image_generation", Values: map[string]json.RawMessage{"quality": json.RawMessage(`"low"`), "size": json.RawMessage(`"512x512"`)}}}
+				p.OperationDefaults = map[string]connectors.DefaultSet{string(media.OpImageGeneration): {Dialect: "direct-compatible/image_generation", Values: map[string]json.RawMessage{"quality": json.RawMessage(`"low"`), "size": json.RawMessage(`"512x512"`)}}}
 			},
 			json:    `{"model":"{route}","prompt":"a red fox","size":"1024x1024"}`,
 			replies: reply("application/json", openAIImage)},

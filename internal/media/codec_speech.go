@@ -12,46 +12,16 @@ import (
 	"github.com/tyk-swe/olp/internal/staging"
 )
 
-// The elevenlabs and deepgram wires are ElevenLabs' and Deepgram's speech
-// synthesis and recognition APIs. Synthesis returns the audio itself, with
-// the characters it bills in a response header; recognition returns the
-// vendor's transcript, read back as OpenAI's json or verbose_json.
-//
-// https://elevenlabs.io/docs/api-reference/text-to-speech/convert
-// https://elevenlabs.io/docs/api-reference/speech-to-text/convert
-// https://developers.deepgram.com/reference/text-to-speech/speak-request
-// https://developers.deepgram.com/reference/speech-to-text/listen-pre-recorded
-var elevenLabsCodec = codec{
-	OpSpeech:        modelOnly(encodeElevenLabsSpeech),
-	OpTranscription: modelOnly(encodeElevenLabsTranscription),
-}
+var elevenLabsCodec = codec{speech: encodeElevenLabsSpeech, transcription: encodeElevenLabsTranscription}
 
-var deepgramCodec = codec{
-	OpSpeech:        modelOnly(encodeDeepgramSpeech),
-	OpTranscription: modelOnly(encodeDeepgramTranscription),
-}
+var deepgramCodec = codec{speech: encodeDeepgramSpeech, transcription: encodeDeepgramTranscription}
 
-// speechFormat is the OpenAI response format a speech request asks for.
-func speechFormat(r *Request) string {
-	if r.Format != nil {
-		return *r.Format
-	}
-	return "mp3"
-}
+var pollyCodec = codec{speech: encodePollySpeech}
 
-// transcriptionFormat is the OpenAI response format a transcription request
-// asks for.
-func transcriptionFormat(r *Request) string {
-	if r.Format != nil {
-		return *r.Format
-	}
-	return "json"
-}
+var assemblyAICodec = codec{transcription: encodeAssemblyAI}
 
-// refuseSpeechControls refuses the OpenAI speech controls a vendor has no
-// counterpart for.
-func refuseSpeechControls(r *Request, vendor string) *Error {
-	if r.Instructions != nil || r.StreamFormat != nil && *r.StreamFormat != "audio" || r.Stream || len(r.Extra) > 0 {
+func refuseSpeechControls(r *Request, p Speech, vendor string) *Error {
+	if p.Instructions != nil || p.StreamFormat != nil && *p.StreamFormat != "audio" || len(r.Extra()) > 0 {
 		return invalidMedia(vendor + " speech does not support the requested speech parameters.")
 	}
 	return nil
@@ -59,55 +29,49 @@ func refuseSpeechControls(r *Request, vendor string) *Error {
 
 var elevenLabsFormats = map[string]string{"mp3": "mp3_44100_128", "opus": "opus_48000_128", "pcm": "pcm_24000", "wav": "wav_24000"}
 
-func encodeElevenLabsSpeech(r *Request, model string) (*UpstreamCall, *Error) {
-	if failure := refuseSpeechControls(r, "ElevenLabs"); failure != nil {
+func encodeElevenLabsSpeech(r *Request, p Speech, _ connectors.Config, model string) (*UpstreamCall, *Error) {
+	if failure := refuseSpeechControls(r, p, "ElevenLabs"); failure != nil {
 		return nil, failure
 	}
-	format, ok := elevenLabsFormats[speechFormat(r)]
+	format, ok := elevenLabsFormats[valueOr(p.Format, "mp3")]
 	if !ok {
 		return nil, invalidMedia("ElevenLabs returns speech as mp3, opus, pcm or wav.")
 	}
-	if r.Voice == "" {
+	if p.Voice == "" {
 		return nil, invalidMedia("ElevenLabs speech names an ElevenLabs voice ID as the voice.")
 	}
-	fields := map[string]any{"text": r.Input, "model_id": model}
-	if r.Speed != nil {
-		// ElevenLabs paces speech from 0.7 to 1.2 times its natural rate.
-		if *r.Speed < 0.7 || *r.Speed > 1.2 {
+	fields := map[string]any{"text": p.Input, "model_id": model}
+	if p.Speed != nil {
+		if *p.Speed < 0.7 || *p.Speed > 1.2 {
 			return nil, invalidMedia("ElevenLabs speech speed ranges from 0.7 to 1.2.")
 		}
-		fields["voice_settings"] = map[string]float64{"speed": *r.Speed}
+		fields["voice_settings"] = map[string]float64{"speed": *p.Speed}
 	}
 	body, err := json.Marshal(fields)
 	if err != nil {
 		return nil, invalidMedia("The speech request could not be encoded.")
 	}
-	return &UpstreamCall{Method: http.MethodPost, Path: "text-to-speech/" + url.PathEscape(r.Voice), Query: url.Values{"output_format": {format}},
+	return &UpstreamCall{Method: http.MethodPost, Path: "text-to-speech/" + url.PathEscape(p.Voice), Query: url.Values{"output_format": {format}},
 		JSON: body, Kind: ResponseBinary, Ambiguous: true, CharacterHeader: "Character-Cost"}, nil
 }
 
-// transcriptFormat is the OpenAI transcript format a request asks for, of
-// the formats a vendor that answers in JSON can render.
-func transcriptFormat(r *Request, vendor string, formats ...string) (string, *Error) {
-	format := transcriptionFormat(r)
+func vendorTranscriptFormat(r *Request, p Transcription, vendor string, formats ...string) (string, *Error) {
+	format := valueOr(p.Format, "json")
 	switch last := len(formats) - 1; {
 	case !slices.Contains(formats, format):
 		return "", invalidMedia(vendor + " transcripts are served as " + strings.Join(formats[:last], ", ") + " or " + formats[last] + ".")
-	case r.Stream, r.Temperature != nil, len(r.Include) > 0, len(r.ChunkingStrategy) > 0, len(r.KnownSpeakerNames) > 0, len(r.Extra) > 0,
-		slices.ContainsFunc(r.TimestampGranularities, func(granularity string) bool { return granularity != "word" }):
+	case p.Stream, p.Temperature != nil, len(p.Include) > 0, len(p.ChunkingStrategy) > 0, len(p.KnownSpeakerNames) > 0, len(r.Extra()) > 0,
+		slices.ContainsFunc(p.TimestampGranularities, func(granularity string) bool { return granularity != "word" }):
 		return "", invalidMedia(vendor + " transcription does not support the requested transcription parameters.")
 	}
 	return format, nil
 }
 
-// transcriptWord is one recognized word, timed in seconds.
 type transcriptWord struct {
 	Word       string
 	Start, End float64
 }
 
-// vendorTranscript is a vendor's transcript as OpenAI's json, or verbose_json
-// with its language, duration and words.
 func vendorTranscript(format, text string, language *string, duration *float64, words []transcriptWord) *TranscriptionResult {
 	result := &TranscriptionResult{Text: text, Language: language, DurationSeconds: duration}
 	if format == "verbose_json" && words != nil {
@@ -120,17 +84,17 @@ func vendorTranscript(format, text string, language *string, duration *float64, 
 	return result
 }
 
-func encodeElevenLabsTranscription(r *Request, model string) (*UpstreamCall, *Error) {
-	format, failure := transcriptFormat(r, "ElevenLabs", "json", "verbose_json")
+func encodeElevenLabsTranscription(r *Request, p Transcription, _ connectors.Config, model string) (*UpstreamCall, *Error) {
+	format, failure := vendorTranscriptFormat(r, p, "ElevenLabs", "json", "verbose_json")
 	if failure != nil {
 		return nil, failure
 	}
-	if r.TextPrompt != nil {
+	if p.Prompt != nil {
 		return nil, invalidMedia("ElevenLabs transcription takes no prompt.")
 	}
 	fields := textValue(nil, "model_id", model)
-	fields = append(fields, staging.Field{Name: "file", Value: *r.File})
-	fields = textField(fields, "language_code", r.Language)
+	fields = append(fields, staging.Field{Name: "file", Value: p.File})
+	fields = textField(fields, "language_code", p.Language)
 	return &UpstreamCall{Method: http.MethodPost, Path: "speech-to-text", Accept: "application/json", Fields: fields, Kind: ResponseTranscription, Ambiguous: true,
 		DecodeTranscription: func(body []byte) (*TranscriptionResult, *Error) {
 			var encodedWire struct {
@@ -157,8 +121,6 @@ func encodeElevenLabsTranscription(r *Request, model string) (*UpstreamCall, *Er
 		}}, nil
 }
 
-// deepgramEncodings are Deepgram's encoding and container for each OpenAI
-// speech format.
 var deepgramEncodings = map[string]url.Values{
 	"mp3":  {"encoding": {"mp3"}},
 	"opus": {"encoding": {"opus"}, "container": {"ogg"}},
@@ -168,20 +130,17 @@ var deepgramEncodings = map[string]url.Values{
 	"pcm":  {"encoding": {"linear16"}, "container": {"none"}, "sample_rate": {"24000"}},
 }
 
-// encodeDeepgramSpeech names the voice in the model, as Deepgram's Aura
-// models do: aura-2-thalia-en speaks as thalia, so a request for that model
-// names thalia as its voice.
-func encodeDeepgramSpeech(r *Request, model string) (*UpstreamCall, *Error) {
-	if failure := refuseSpeechControls(r, "Deepgram"); failure != nil {
+func encodeDeepgramSpeech(r *Request, p Speech, _ connectors.Config, model string) (*UpstreamCall, *Error) {
+	if failure := refuseSpeechControls(r, p, "Deepgram"); failure != nil {
 		return nil, failure
 	}
-	if r.Speed != nil {
+	if p.Speed != nil {
 		return nil, invalidMedia("Deepgram speech has no documented speed range.")
 	}
-	if r.Voice == "" || !strings.Contains(model, "-"+r.Voice+"-") {
+	if p.Voice == "" || !strings.Contains(model, "-"+p.Voice+"-") {
 		return nil, invalidMedia("Deepgram speech names the voice of its model, such as thalia for aura-2-thalia-en.")
 	}
-	encoding, ok := deepgramEncodings[speechFormat(r)]
+	encoding, ok := deepgramEncodings[valueOr(p.Format, "mp3")]
 	if !ok {
 		return nil, invalidMedia("Deepgram does not produce the requested speech format.")
 	}
@@ -189,26 +148,26 @@ func encodeDeepgramSpeech(r *Request, model string) (*UpstreamCall, *Error) {
 	for name, values := range encoding {
 		query[name] = values
 	}
-	body, err := json.Marshal(map[string]string{"text": r.Input})
+	body, err := json.Marshal(map[string]string{"text": p.Input})
 	if err != nil {
 		return nil, invalidMedia("The speech request could not be encoded.")
 	}
 	return &UpstreamCall{Method: http.MethodPost, Path: "speak", Query: query, JSON: body, Kind: ResponseBinary, Ambiguous: true, CharacterHeader: "Dg-Char-Count"}, nil
 }
 
-func encodeDeepgramTranscription(r *Request, model string) (*UpstreamCall, *Error) {
-	format, failure := transcriptFormat(r, "Deepgram", "json", "verbose_json")
+func encodeDeepgramTranscription(r *Request, p Transcription, _ connectors.Config, model string) (*UpstreamCall, *Error) {
+	format, failure := vendorTranscriptFormat(r, p, "Deepgram", "json", "verbose_json")
 	if failure != nil {
 		return nil, failure
 	}
-	if r.TextPrompt != nil {
+	if p.Prompt != nil {
 		return nil, invalidMedia("Deepgram transcription takes no prompt.")
 	}
 	query := url.Values{"model": {model}}
-	if r.Language != nil {
-		query.Set("language", *r.Language)
+	if p.Language != nil {
+		query.Set("language", *p.Language)
 	}
-	return &UpstreamCall{Method: http.MethodPost, Path: "listen", Query: query, Accept: "application/json", Upload: r.File, Kind: ResponseTranscription, Ambiguous: true,
+	return &UpstreamCall{Method: http.MethodPost, Path: "listen", Query: query, Accept: "application/json", Upload: &p.File, Kind: ResponseTranscription, Ambiguous: true,
 		DecodeTranscription: func(body []byte) (*TranscriptionResult, *Error) {
 			var encodedWire struct {
 				Metadata struct {
@@ -239,45 +198,34 @@ func encodeDeepgramTranscription(r *Request, model string) (*UpstreamCall, *Erro
 			}
 			language := channel.Language
 			if language == nil {
-				language = r.Language
+				language = p.Language
 			}
 			return vendorTranscript(format, *best.Transcript, language, encodedWire.Metadata.Duration, words), nil
 		}}, nil
 }
 
-// The polly wire is Amazon Polly's SynthesizeSpeech, which a Bedrock
-// provider reaches in its region with its AWS credentials, signed for
-// Polly. The model is the Polly engine and the voice a Polly voice ID.
-//
-// https://docs.aws.amazon.com/polly/latest/dg/API_SynthesizeSpeech.html
-var pollyCodec = codec{
-	OpSpeech: encodePollySpeech,
-}
-
-// pollyFormats are Polly's output formats for the OpenAI ones it serves:
-// its PCM is 16 kHz, not OpenAI's 24 kHz, and it makes no WAV.
 var pollyFormats = map[string]string{"mp3": "mp3", "opus": "ogg_opus"}
 
-func encodePollySpeech(r *Request, cfg connectors.Config, model string) (*UpstreamCall, *Error) {
-	if failure := refuseSpeechControls(r, "Amazon Polly"); failure != nil {
+func encodePollySpeech(r *Request, p Speech, cfg connectors.Config, model string) (*UpstreamCall, *Error) {
+	if failure := refuseSpeechControls(r, p, "Amazon Polly"); failure != nil {
 		return nil, failure
 	}
-	format, ok := pollyFormats[speechFormat(r)]
+	format, ok := pollyFormats[valueOr(p.Format, "mp3")]
 	switch {
 	case !ok:
 		return nil, invalidMedia("Amazon Polly returns speech as mp3 or opus.")
-	case r.Speed != nil:
+	case p.Speed != nil:
 		return nil, invalidMedia("Amazon Polly paces speech through SSML, not a speed.")
 	case !slices.Contains([]string{"standard", "neural", "long-form", "generative"}, model):
 		return nil, invalidMedia("The model names a Polly engine: standard, neural, long-form or generative.")
-	case r.Voice == "":
+	case p.Voice == "":
 		return nil, invalidMedia("Amazon Polly speech names a Polly voice ID, such as Joanna.")
 	}
 	endpoint, err := connectors.PollyEndpoint(cfg.CloudRegion)
 	if err != nil {
 		return nil, invalidMedia(err.Error())
 	}
-	body, err := json.Marshal(map[string]string{"Text": r.Input, "VoiceId": r.Voice, "Engine": model, "OutputFormat": format})
+	body, err := json.Marshal(map[string]string{"Text": p.Input, "VoiceId": p.Voice, "Engine": model, "OutputFormat": format})
 	if err != nil {
 		return nil, invalidMedia("The speech request could not be encoded.")
 	}
@@ -285,31 +233,20 @@ func encodePollySpeech(r *Request, cfg connectors.Config, model string) (*Upstre
 		CharacterHeader: "X-Amzn-Requestcharacters"}, nil
 }
 
-// The assemblyai wire is AssemblyAI's asynchronous transcription: the audio
-// is uploaded, a transcript submitted for it and polled until complete, and
-// the transcript then deleted, so AssemblyAI keeps no copy of the audio or
-// its words.
-//
-// https://www.assemblyai.com/docs/pre-recorded-audio/api-reference/transcripts/submit
-var assemblyAICodec = codec{
-	OpTranscription: encodeAssemblyAI,
-}
-
-// assemblyAIPoll is how long a transcript waits between polls.
 const assemblyAIPoll = time.Second
 
-func encodeAssemblyAI(r *Request, cfg connectors.Config, model string) (*UpstreamCall, *Error) {
-	format, failure := transcriptFormat(r, "AssemblyAI", "json", "verbose_json", "text")
+func encodeAssemblyAI(r *Request, p Transcription, cfg connectors.Config, model string) (*UpstreamCall, *Error) {
+	format, failure := vendorTranscriptFormat(r, p, "AssemblyAI", "json", "verbose_json", "text")
 	if failure != nil {
 		return nil, failure
 	}
-	if r.TextPrompt != nil {
+	if p.Prompt != nil {
 		return nil, invalidMedia("AssemblyAI transcription takes no prompt.")
 	}
 	base := strings.TrimRight(cfg.Endpoint, "/")
 	submission := map[string]any{"speech_models": []string{model}}
-	if r.Language != nil {
-		submission["language_code"] = *r.Language
+	if p.Language != nil {
+		submission["language_code"] = *p.Language
 	}
 	var transcript string
 	next := func(body []byte) (*Step, *Error) {
@@ -336,13 +273,12 @@ func encodeAssemblyAI(r *Request, cfg connectors.Config, model string) (*Upstrea
 		case encodedWire.Status == "error":
 			return nil, Fail(http.StatusBadRequest, "transcription_failed", "The provider could not transcribe the audio.")
 		case transcript == "":
-			// The submission answers with the queued transcript to poll.
 			transcript = base + "/v2/transcript/" + url.PathEscape(encodedWire.ID)
 			return &Step{URL: transcript, Wait: assemblyAIPoll, Credentials: true}, nil
 		}
 		return nil, nil
 	}
-	return &UpstreamCall{Method: http.MethodPost, Path: "v2/upload", Accept: "application/json", Upload: r.File, Kind: ResponseTranscription, Ambiguous: true,
+	return &UpstreamCall{Method: http.MethodPost, Path: "v2/upload", Accept: "application/json", Upload: &p.File, Kind: ResponseTranscription, Ambiguous: true,
 		Next: next, StepDomains: []string{"assemblyai.com"},
 		DecodeTranscription: func(body []byte) (*TranscriptionResult, *Error) {
 			var encodedWire struct {
@@ -360,7 +296,6 @@ func encodeAssemblyAI(r *Request, cfg connectors.Config, model string) (*Upstrea
 			}
 			words := []transcriptWord{}
 			for _, word := range encodedWire.Words {
-				// AssemblyAI times words in milliseconds.
 				words = append(words, transcriptWord{Word: word.Text, Start: word.Start / 1000, End: word.End / 1000})
 			}
 			return vendorTranscript(format, *encodedWire.Text, encodedWire.Language, encodedWire.Duration, words), nil

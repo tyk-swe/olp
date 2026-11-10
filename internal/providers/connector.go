@@ -2,6 +2,7 @@ package providers
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -1156,32 +1157,15 @@ func mediaByCall(kind, vendor, operation string) bool {
 	return operation == "image_generation" || kind == KindAzure || vendors.MediaWire(vendor, operation) != ""
 }
 
-// certifyMediaCall proves a model serves a media operation by its smallest
-// real call, which bills: one low-quality image, two characters of speech,
-// or a tenth of a second of silence to transcribe.
 func (s *Server) certifyMediaCall(ctx context.Context, cfg *Configuration, credential []byte, model, operation string) error {
 	transport := cfg.transport()
 	if cfg.Kind == KindAzure && transport.Hosting() == "azure-v1" {
 		return &probeError{Code: "capability_unavailable", Detail: "Azure OpenAI serves media through deployments; its v1 API offers none."}
 	}
-	one := int64(1)
-	request := &media.Request{Op: operation, Route: "certification", Prompt: "A small blue square.", Count: &one, Input: "OK", Voice: "alloy"}
-	if cfg.Kind == KindAzure && operation == "image_generation" {
-		low := "low"
-		request.Quality = &low
-	}
-	if cfg.Kind == KindBedrock && operation == "speech" {
-		// Polly speaks with an engine its model names, in one of its voices.
-		request.Voice = "Joanna"
-	}
-	if cfg.Kind == KindVertex && operation == "speech" {
-		// Gemini speech speaks in one of its prebuilt voices, as WAV.
-		wav := "wav"
-		request.Voice, request.Format = "Kore", &wav
-	}
 	silence := media.SilentWAV(100)
-	if operation == "transcription" {
-		request.File = &staging.Part{Filename: "silence.wav", ContentType: "audio/wav"}
+	request, failure := mediaProbeRequest(cfg.Kind, operation)
+	if failure != nil {
+		return &probeError{Code: "capability_unavailable", Detail: failure.Message}
 	}
 	call, _, failure := media.EncodeConfigured(request, transport, model)
 	if failure != nil {
@@ -1229,8 +1213,45 @@ func (s *Server) certifyMediaCall(ctx context.Context, cfg *Configuration, crede
 	return nil
 }
 
-// decodeMediaProbe checks a probe's result with the codec the gateway reads
-// it with.
+type mediaProbe struct {
+	Model   string `json:"model"`
+	Prompt  string `json:"prompt,omitempty"`
+	Count   int64  `json:"n,omitempty"`
+	Quality string `json:"quality,omitempty"`
+	Input   string `json:"input,omitempty"`
+	Voice   string `json:"voice,omitempty"`
+	Format  string `json:"response_format,omitempty"`
+}
+
+func mediaProbeRequest(kind, operation string) (*media.Request, *media.Error) {
+	switch operation {
+	case "image_generation":
+		probe := mediaProbe{Model: "certification", Prompt: "A small blue square.", Count: 1}
+		if kind == KindAzure {
+			probe.Quality = "low"
+		}
+		return decodeProbe(probe, media.DecodeImageGeneration)
+	case "speech":
+		voices := map[string]mediaProbe{KindBedrock: {Voice: "Joanna"}, KindVertex: {Voice: "Kore", Format: "wav"}}
+		probe := cmp.Or(voices[kind], mediaProbe{Voice: "alloy"})
+		return decodeProbe(mediaProbe{Model: "certification", Input: "OK", Voice: probe.Voice, Format: probe.Format}, media.DecodeSpeech)
+	case "transcription":
+		return media.DecodeTranscription(staging.FormOf([]staging.Field{
+			{Name: "model", Value: staging.Text("certification")},
+			{Name: "file", Value: staging.Part{Filename: "silence.wav", ContentType: "audio/wav"}},
+		}, false))
+	}
+	return nil, media.Fail(400, "capability_unavailable", "The media operation has no certification probe.")
+}
+
+func decodeProbe(probe mediaProbe, decode func([]byte) (*media.Request, *media.Error)) (*media.Request, *media.Error) {
+	body, err := json.Marshal(probe)
+	if err != nil {
+		return nil, media.Fail(400, "capability_unavailable", "The media probe could not be encoded.")
+	}
+	return decode(body)
+}
+
 func decodeMediaProbe(call *media.UpstreamCall, operation string, data []byte) *media.Error {
 	stage := func(b64 string, index int) (*staging.Artifact, *media.Error) {
 		if _, err := base64.StdEncoding.DecodeString(b64); err != nil {

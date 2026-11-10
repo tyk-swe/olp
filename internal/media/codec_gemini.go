@@ -10,41 +10,29 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/staging"
 )
 
-// The gemini wire is Gemini's generateContent, on the Gemini API and on
-// Vertex: an image model answers a prompt with an image, a speech model reads
-// text aloud, and a model hears uploaded audio and writes its transcript.
-// Vertex's Imagen models keep their predict API.
-//
-// https://ai.google.dev/gemini-api/docs/image-generation
-// https://ai.google.dev/gemini-api/docs/speech-generation
-// https://ai.google.dev/gemini-api/docs/audio
-var geminiMediaCodec = codec{
-	OpImageGeneration: modelOnly(encodeGeminiImage),
-	OpSpeech:          modelOnly(encodeGeminiSpeech),
-	OpTranscription:   modelOnly(encodeGeminiTranscription),
-}
+var geminiMediaCodec = codec{imageGeneration: encodeGeminiImage, speech: encodeGeminiSpeech, transcription: encodeGeminiTranscription}
 
-// geminiTranscriptPrompt asks a model for the transcript of the audio it hears.
 const geminiTranscriptPrompt = "Generate a transcript of the speech in this audio. Answer with the transcript only."
 
 func generateContent(model string) string {
 	return "models/" + url.PathEscape(model) + ":generateContent"
 }
 
-func encodeGeminiImage(r *Request, model string) (*UpstreamCall, *Error) {
+func encodeGeminiImage(r *Request, p ImageGeneration, _ connectors.Config, model string) (*UpstreamCall, *Error) {
 	if strings.HasPrefix(model, "imagen-") {
-		return encodeVertexImage(r, model)
+		return encodeVertexImage(r, p, model)
 	}
-	if failure := refuseImageControls(r, "Gemini", "b64_json"); failure != nil {
+	if failure := generationView(r, p).refuse("Gemini", "b64_json"); failure != nil {
 		return nil, failure
 	}
-	if r.Count != nil && *r.Count != 1 || r.OutputFormat != nil {
+	if imageCount(p.Count) != 1 || p.OutputFormat != nil {
 		return nil, invalidMedia("Gemini image models generate one image per request in their own format.")
 	}
-	ratio, failure := imageAspectRatio(r, "Gemini")
+	ratio, failure := imageAspectRatio(p.Size, "Gemini")
 	if failure != nil {
 		return nil, failure
 	}
@@ -52,14 +40,13 @@ func encodeGeminiImage(r *Request, model string) (*UpstreamCall, *Error) {
 	if ratio != "" {
 		config["imageConfig"] = map[string]string{"aspectRatio": ratio}
 	}
-	body, err := json.Marshal(map[string]any{"contents": []any{map[string]any{"role": "user", "parts": []any{map[string]string{"text": r.Prompt}}}}, "generationConfig": config})
+	body, err := json.Marshal(map[string]any{"contents": []any{map[string]any{"role": "user", "parts": []any{map[string]string{"text": p.Prompt}}}}, "generationConfig": config})
 	if err != nil {
 		return nil, invalidMedia("The image request could not be encoded.")
 	}
 	return &UpstreamCall{Method: http.MethodPost, Path: generateContent(model), JSON: body, Kind: ResponseImages, Ambiguous: true, DecodeImages: decodeGeminiImage}, nil
 }
 
-// geminiResult is a generateContent result's first candidate and usage.
 type geminiResult struct {
 	Candidates []struct {
 		FinishReason string `json:"finishReason"`
@@ -87,7 +74,6 @@ type geminiResult struct {
 	} `json:"usageMetadata"`
 }
 
-// readGemini reads a result, refusing one Gemini's safety filters withheld.
 func readGemini(body []byte) (*geminiResult, *Error) {
 	var result geminiResult
 	if json.Unmarshal(body, &result) != nil {
@@ -106,8 +92,6 @@ func readGemini(body []byte) (*geminiResult, *Error) {
 	return &result, nil
 }
 
-// geminiModalityCount is one modality bucket in a Gemini usage detail array.
-// Images and video frames bill through the image shares.
 type geminiModalityCount struct {
 	Modality   string `json:"modality"`
 	TokenCount int64  `json:"tokenCount"`
@@ -137,7 +121,6 @@ func (r *geminiResult) tokens() *ImageUsage {
 	return usage
 }
 
-// modalityCounts sums a detail array's audio and image shares.
 func modalityCounts(detail []geminiModalityCount) (audio, image int64) {
 	for _, entry := range detail {
 		switch entry.Modality {
@@ -168,20 +151,20 @@ func decodeGeminiImage(body []byte, stage func(string, int) (*staging.Artifact, 
 	return nil, Fail(http.StatusBadRequest, "no_image", "The model answered without an image.")
 }
 
-func encodeGeminiSpeech(r *Request, model string) (*UpstreamCall, *Error) {
-	if failure := refuseSpeechControls(r, "Gemini"); failure != nil {
+func encodeGeminiSpeech(r *Request, p Speech, _ connectors.Config, model string) (*UpstreamCall, *Error) {
+	if failure := refuseSpeechControls(r, p, "Gemini"); failure != nil {
 		return nil, failure
 	}
-	format := speechFormat(r)
-	if format != "wav" && format != "pcm" || r.Speed != nil {
+	format := valueOr(p.Format, "mp3")
+	if format != "wav" && format != "pcm" || p.Speed != nil {
 		return nil, invalidMedia("Gemini speech is served as wav or pcm, at its natural pace.")
 	}
-	if r.Voice == "" {
+	if p.Voice == "" {
 		return nil, invalidMedia("Gemini speech names one of its prebuilt voices, such as Kore.")
 	}
 	body, err := json.Marshal(map[string]any{
-		"contents":         []any{map[string]any{"role": "user", "parts": []any{map[string]string{"text": r.Input}}}},
-		"generationConfig": map[string]any{"responseModalities": []string{"AUDIO"}, "speechConfig": map[string]any{"voiceConfig": map[string]any{"prebuiltVoiceConfig": map[string]string{"voiceName": r.Voice}}}},
+		"contents":         []any{map[string]any{"role": "user", "parts": []any{map[string]string{"text": p.Input}}}},
+		"generationConfig": map[string]any{"responseModalities": []string{"AUDIO"}, "speechConfig": map[string]any{"voiceConfig": map[string]any{"prebuiltVoiceConfig": map[string]string{"voiceName": p.Voice}}}},
 	})
 	if err != nil {
 		return nil, invalidMedia("The speech request could not be encoded.")
@@ -190,9 +173,6 @@ func encodeGeminiSpeech(r *Request, model string) (*UpstreamCall, *Error) {
 		DecodeAudio: func(body []byte) (*AudioResult, *Error) { return decodeGeminiSpeech(body, format) }}, nil
 }
 
-// decodeGeminiSpeech reads the audio as the format the client asked for:
-// Gemini answers with WAV, or with raw 16-bit PCM whose MIME type names its
-// rate, and either becomes the other.
 func decodeGeminiSpeech(body []byte, format string) (*AudioResult, *Error) {
 	result, failure := readGemini(body)
 	if failure != nil {
@@ -235,21 +215,21 @@ func decodeGeminiSpeech(body []byte, format string) (*AudioResult, *Error) {
 	return nil, protocolError("The model answered without audio.")
 }
 
-func encodeGeminiTranscription(r *Request, model string) (*UpstreamCall, *Error) {
-	format := transcriptionFormat(r)
+func encodeGeminiTranscription(r *Request, p Transcription, _ connectors.Config, model string) (*UpstreamCall, *Error) {
+	format := valueOr(p.Format, "json")
 	switch {
 	case format != "json" && format != "text":
 		return nil, invalidMedia("Gemini transcripts are served as json or text.")
-	case r.Stream, r.TextPrompt != nil, r.Language != nil, len(r.Include) > 0, len(r.ChunkingStrategy) > 0, len(r.KnownSpeakerNames) > 0, len(r.TimestampGranularities) > 0, len(r.Extra) > 0:
+	case p.Stream, p.Prompt != nil, p.Language != nil, len(p.Include) > 0, len(p.ChunkingStrategy) > 0, len(p.KnownSpeakerNames) > 0, len(p.TimestampGranularities) > 0, len(r.Extra()) > 0:
 		return nil, invalidMedia("Gemini transcription does not support the requested transcription parameters.")
-	case r.File == nil || !strings.HasPrefix(strings.ToLower(r.File.ContentType), "audio/"):
+	case !strings.HasPrefix(strings.ToLower(p.File.ContentType), "audio/"):
 		return nil, invalidMedia("Gemini transcription needs the audio file's content type.")
 	}
 	config := map[string]any{}
-	if r.Temperature != nil {
-		config["temperature"] = *r.Temperature
+	if p.Temperature != nil {
+		config["temperature"] = *p.Temperature
 	}
-	file := r.File
+	file := &p.File
 	return &UpstreamCall{Method: http.MethodPost, Path: generateContent(model), Kind: ResponseTranscription, Ambiguous: true,
 		JSONFrom: func(read func(*staging.Part) ([]byte, *Error)) ([]byte, *Error) {
 			audio, failure := read(file)

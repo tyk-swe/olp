@@ -124,8 +124,8 @@ type upstreamFailure struct{ *media.Failure }
 
 func (f upstreamFailure) Error() string { return "media job upstream call failed: " + string(f.Class) }
 
-func (s *Service) send(ctx context.Context, resolved Resolved, record Record, request *media.Request) (*media.Result, error) {
-	call, encodeFailure := media.EncodeJob(request, resolved.Config, record.UpstreamModel)
+func (s *Service) send(ctx context.Context, resolved Resolved, record Record, job media.JobCall) (*media.Result, error) {
+	call, encodeFailure := media.EncodeJob(job, resolved.Config)
 	if encodeFailure != nil {
 		return nil, &Unavailable{Code: "media_job_operation_invalid"}
 	}
@@ -139,7 +139,7 @@ func (s *Service) send(ctx context.Context, resolved Resolved, record Record, re
 	return result, nil
 }
 
-func (s *Service) dispatch(ctx context.Context, record Record, request *media.Request, caller *Caller) (*media.Result, error) {
+func (s *Service) dispatch(ctx context.Context, record Record, job media.JobCall, caller *Caller) (*media.Result, error) {
 	resolved, err := s.Target(ctx, record)
 	if err != nil {
 		return nil, err
@@ -148,7 +148,7 @@ func (s *Service) dispatch(ctx context.Context, record Record, request *media.Re
 	if err != nil {
 		return nil, err
 	}
-	return s.send(ctx, resolved, record, request)
+	return s.send(ctx, resolved, record, job)
 }
 
 func deleteConfirmed(result *media.Result, err error) bool {
@@ -248,7 +248,7 @@ func (s *Service) compensate(ctx context.Context, reserved Record, upstream stri
 		s.log.Error("failed to persist video cleanup metadata", "job_id", reserved.ID, "error", err)
 		return false
 	}
-	result, err := s.dispatch(context.WithoutCancel(ctx), marked, &media.Request{Op: media.OpVideoDelete, JobID: upstream, Route: marked.RouteSlug}, caller)
+	result, err := s.dispatch(context.WithoutCancel(ctx), marked, media.VideoDelete{ID: upstream}, caller)
 	if !deleteConfirmed(result, err) {
 		return false
 	}
@@ -309,7 +309,7 @@ func (s *Service) Content(ctx context.Context, record Record, variant string) (*
 	if !ok || record.Lifecycle != Active || !record.ContentAvailable() {
 		return nil, ErrNoContent
 	}
-	result, err := s.dispatch(ctx, record, &media.Request{Op: media.OpVideoContent, JobID: upstream, Variant: variant, Route: record.RouteSlug}, nil)
+	result, err := s.dispatch(ctx, record, media.VideoContent{ID: upstream, Variant: variant}, nil)
 	if err != nil {
 		return nil, err
 	}

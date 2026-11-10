@@ -58,7 +58,7 @@ type Record struct {
 	ProviderName           string
 	UpstreamModel          string
 	RouteSlug              string
-	Operation              string
+	Operation              media.Operation
 	Surface                string
 	State                  State
 	Lifecycle              Lifecycle
@@ -170,7 +170,7 @@ type Query struct {
 	Routes        Scope
 	APIKeyID      *string
 	ProviderID    *string
-	Operation     *string
+	Operation     *media.Operation
 	Surface       *string
 	State         *State
 	Lifecycle     *Lifecycle

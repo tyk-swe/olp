@@ -11,8 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -211,5 +213,34 @@ func TestPublishedPolicySurvivesMutationOfReturnedCompiledRules(t *testing.T) {
 	}
 	if calls := h.mock.count("a") + h.mock.count("b"); calls != 0 {
 		t.Fatalf("blocked request reached providers: %d", calls)
+	}
+}
+
+func TestMediaInputRedactionReachesProfiledUpstream(t *testing.T) {
+	profiled := func(p *routing.Provider) {
+		p.ProfileID, p.ProfileRevision = "compatible-chat", connectors.ProfileRevision
+	}
+	redact := func(r *routing.Route) {
+		r.ContentPolicy = &contentpolicy.Policy{Rules: []contentpolicy.Rule{{ID: "secret", Phase: contentpolicy.PhaseInput, Pattern: "s3cret", Action: contentpolicy.ActionRedact, Replacement: "[gone]"}}}
+	}
+	for _, tc := range []mediaCase{
+		{name: "image generation", operation: media.OpImageGeneration, path: "/v1/images/generations", provider: profiled, route: redact,
+			json:    `{"model":"{route}","prompt":"a fox named s3cret"}`,
+			replies: reply("application/json", `{"created":1,"data":[{"url":"https://images.example/fox.png"}]}`)},
+		{name: "speech", operation: media.OpSpeech, path: "/v1/audio/speech", provider: profiled, route: redact,
+			json:    `{"model":"{route}","input":"say s3cret","voice":"alloy","instructions":"whisper s3cret"}`,
+			replies: reply("audio/mpeg", "ID3-fake-mp3")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			record := runMediaCase(t, tc)
+			if record.Status != http.StatusOK || len(record.Upstream) != 1 {
+				t.Fatalf("status %d with %d upstream calls", record.Status, len(record.Upstream))
+			}
+			sent := string(record.Upstream[0].JSON)
+			if strings.Contains(sent, "s3cret") || !strings.Contains(sent, "[gone]") {
+				t.Fatalf("upstream body kept the redacted text: %s", sent)
+			}
+		})
 	}
 }

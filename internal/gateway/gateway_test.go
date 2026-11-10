@@ -792,13 +792,13 @@ func TestTransformedMediaPreservesUsage(t *testing.T) {
 	h.republish(func(snapshot *routing.Snapshot, a, b routing.Provider) {
 		for _, provider := range []routing.Provider{a, b} {
 			provider.Capabilities = []routing.Capability{
-				{Model: provider.Capabilities[0].Model, Operation: media.OpImageGeneration, Surface: "openai", Mode: "unary"},
-				{Model: provider.Capabilities[0].Model, Operation: media.OpTranscription, Surface: "openai", Mode: "unary"},
+				{Model: provider.Capabilities[0].Model, Operation: string(media.OpImageGeneration), Surface: "openai", Mode: "unary"},
+				{Model: provider.Capabilities[0].Model, Operation: string(media.OpTranscription), Surface: "openai", Mode: "unary"},
 			}
 			snapshot.Providers[provider.ID] = provider
 		}
 		route := snapshot.Routes[routeSlug]
-		route.Operations = []string{media.OpImageGeneration, media.OpTranscription}
+		route.Operations = []string{string(media.OpImageGeneration), string(media.OpTranscription)}
 		snapshot.Routes[routeSlug] = route
 	})
 	mux := http.NewServeMux()

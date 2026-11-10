@@ -30,7 +30,6 @@ import (
 	"github.com/tyk-swe/olp/internal/upstream"
 )
 
-// FailureClass is the upstream failure class of a media call.
 type FailureClass = upstream.Class
 
 const (
@@ -44,65 +43,53 @@ const (
 	ClassCancelled      = upstream.Cancelled
 )
 
-// Failure is one classified upstream media failure. Ambiguous marks a
-// non-idempotent request whose effect the gateway cannot prove absent.
 type Failure struct {
 	Class      FailureClass
 	Status     int
-	Dispatched bool // request bytes reached the upstream; no client response is implied
+	Dispatched bool
 	Ambiguous  bool
 	RetryAfter time.Duration
 	Upstream   *wire.UpstreamError
 	Detail     string
 }
 
-// Target is one resolved upstream destination for a media call.
 type Target struct {
-	// Sensitive is request-local error-redaction evidence, never durable state.
 	Sensitive        *egress.Sensitive `json:"-"`
 	CallerCredential bool
 	ConnectionScope  string
 	NetworkSecret    []byte
 	Config           connectors.Config
-	Model            string // upstream model identifier
+	Model            string
 	Secret           []byte
 }
 
-// Transport executes media calls against provider endpoints.
 type Transport struct {
-	connectionsOnce sync.Once
-	connections     *egress.ConnectionClientCache
-	Client          *http.Client
-	Auth            *connectors.Auth
-	Egress          *egress.Policy
-	Spool           *staging.Spool
-	// MaxResponseBytes bounds every collected JSON body and every staged
-	// binary response.
+	connectionsOnce  sync.Once
+	connections      *egress.ConnectionClientCache
+	Client           *http.Client
+	Auth             *connectors.Auth
+	Egress           *egress.Policy
+	Spool            *staging.Spool
 	MaxResponseBytes int64
 	Now              func() time.Time
 }
 
-// Result is one decoded upstream media response. Binary payloads are staged
-// artifacts; SSE responses keep their body open for the caller to drain.
 type Result struct {
-	Kind          ResponseKind
-	Status        int
-	FirstByte     time.Duration
-	Images        *ImageResult
-	Video         *VideoJobResult
-	Deleted       *VideoDeleteResult
-	Transcription *TranscriptionResult
-	Text          []byte            // transcription text/srt/vtt payloads
-	Artifact      *staging.Artifact // staged binary response
-	Body          io.ReadCloser     // SSE response body; the caller drains it
-	ContentType   string
-	// BilledCharacters is the characters a speech call bills, as the vendor
-	// reports them, and Tokens the tokens it bills, for a vendor that bills
-	// speech by token.
+	Kind             ResponseKind
+	Status           int
+	FirstByte        time.Duration
+	Images           *ImageResult
+	Video            *VideoJobResult
+	Deleted          *VideoDeleteResult
+	Transcription    *TranscriptionResult
+	Text             []byte
+	Artifact         *staging.Artifact
+	Body             io.ReadCloser
+	ContentType      string
 	BilledCharacters *int64
 	Tokens           *ImageUsage
-	Source           oif.Document    // bounded immutable native JSON result for strict media
-	BlobSource       *oif.BlobResult // existing spool owns the bytes and lifecycle
+	Source           oif.Document
+	BlobSource       *oif.BlobResult
 }
 
 const errorBodyLimit = 64 * 1024
@@ -114,8 +101,6 @@ func (t *Transport) now() time.Time {
 	return time.Now()
 }
 
-// Do dispatches one media call and decodes the response per its kind. The
-// returned SSE Result leaves Body open; every other kind is fully resolved.
 func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, request *Request) (result *Result, failure *Failure) {
 	if target.CallerCredential && target.Sensitive == nil {
 		target.Sensitive = &egress.Sensitive{}
@@ -189,7 +174,6 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 		}()
 	}
 
-	// dispatched records whether request bytes may have reached the upstream.
 	var dispatched atomic.Bool
 	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, upstream.Trace(&dispatched)), call.Method, endpoint, body)
 	if err != nil {
@@ -266,8 +250,6 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 	}
 	firstByte := t.now().Sub(started)
 	if resp.StatusCode != http.StatusOK && !(call.Kind == ResponseVideoJob && resp.StatusCode == http.StatusCreated) && !(call.NoContent && resp.StatusCode == http.StatusNoContent) {
-		// A provider can reject headers before reading the upload. Stop the
-		// producer and preserve the definitive HTTP rejection in that case.
 		if pipe != nil {
 			pipe.Close()
 			<-multipartDone
@@ -279,8 +261,6 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 			Dispatched: true,
 			Upstream:   openai.ParseErrorBody(raw).Redact(credentialValues.Redact),
 		}
-		// A non-idempotent call's work may survive a server failure, never a
-		// stated rejection.
 		outcome := upstream.Classifier{Declared: target.Config.Classification()}.Classify(upstream.Evidence{Reached: true, Status: resp.StatusCode, Error: failure.Upstream})
 		failure.Class, failure.Ambiguous = outcome.Class, call.Ambiguous && outcome.Acceptance.Unresolved()
 		if failure.Class == ClassRateLimit {
@@ -289,7 +269,6 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 		return nil, failure
 	}
 	if multipartDone != nil {
-		// A successful response still requires a complete request body.
 		if sendErr := <-multipartDone; sendErr != nil {
 			resp.Body.Close()
 			return nil, &Failure{Class: ClassConnect, Dispatched: true, Ambiguous: call.Ambiguous,
@@ -301,8 +280,6 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 	if failure != nil {
 		resp.Body.Close()
 		failure.Dispatched = true
-		// A call that may create work leaves it unresolved on any failure but
-		// the vendor's stated verdict on the request.
 		failure.Ambiguous = call.Ambiguous && failure.Class != ClassUpstreamClient
 		return nil, failure
 	}
@@ -347,7 +324,6 @@ func (t *Transport) writeField(form *multipart.Writer, field staging.Field) erro
 	return nil
 }
 
-// filePartHeader builds the multipart headers for one staged file part.
 func filePartHeader(field, filename, contentType string) textproto.MIMEHeader {
 	header := textproto.MIMEHeader{}
 	header.Set("Content-Disposition",
@@ -398,8 +374,6 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 			}
 			contentType = original
 		}
-		// Without the vendor's count, the call stays billing-uncertain; the
-		// audio it billed for is still delivered.
 		if billed, err := strconv.ParseInt(resp.Header.Get(call.CharacterHeader), 10, 64); call.CharacterHeader != "" && err == nil && billed >= 0 {
 			result.BilledCharacters = &billed
 		}
@@ -412,8 +386,6 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		return result, nil
 	case ResponseVideoContent:
 		if call.Next != nil {
-			// The vendor names its product in a job object; the work's
-			// last step fetches it.
 			if !requireContentType(resp, "application/json") {
 				return nil, &Failure{Class: ClassProtocol, Detail: "video job response is not JSON"}
 			}
@@ -456,10 +428,7 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		result.ContentType = artifact.ContentType
 		return result, nil
 	case ResponseTranscription:
-		format := "json"
-		if request != nil && request.Format != nil {
-			format = *request.Format
-		}
+		format := request.TranscriptFormat()
 		if TranscriptionFormatIsText(format) && call.DecodeTranscription == nil {
 			if !transcriptionTextContentType(resp, format) {
 				return nil, &Failure{Class: ClassProtocol,
@@ -495,7 +464,6 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		}
 		result.Transcription = decoded
 		if format == "text" {
-			// A vendor that answers in JSON serves a text client its text.
 			result.Text = []byte(decoded.Text)
 		}
 		return result, nil
@@ -550,11 +518,7 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		} else if call.DecodeImages != nil {
 			decoded, mErr = call.DecodeImages(body, stage)
 		} else if call.Native != "" {
-			expected := int64(1)
-			if request != nil && request.Count != nil {
-				expected = *request.Count
-			}
-			decoded, mErr = DecodeNativeImageResponse(call.Native, body, expected, stage)
+			decoded, mErr = DecodeNativeImageResponse(call.Native, body, request.expectedImages(), stage)
 		} else {
 			decoded, mErr = DecodeImageResponse(body, stage)
 		}
@@ -598,8 +562,6 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 	return nil, &Failure{Class: ClassProtocol, Detail: "unsupported media response kind"}
 }
 
-// readPart reads an uploaded file a JSON body inlines, within the audio
-// upload bound.
 func (t *Transport) readPart(part *staging.Part) ([]byte, *Error) {
 	opened, err := t.Spool.Open(part.Handle)
 	if err != nil {
@@ -613,7 +575,6 @@ func (t *Transport) readPart(part *staging.Part) ([]byte, *Error) {
 	return data, nil
 }
 
-// decodeAudio stages the speech a vendor returned inside JSON.
 func (t *Transport) decodeAudio(ctx context.Context, resp *http.Response, call *UpstreamCall, request *Request, result *Result) (*Result, *Failure) {
 	if !requireContentType(resp, "application/json") {
 		return nil, &Failure{Class: ClassProtocol, Detail: "speech response is not JSON"}
@@ -626,11 +587,7 @@ func (t *Transport) decodeAudio(ctx context.Context, resp *http.Response, call *
 	if mErr != nil {
 		return nil, decodeFailure(mErr)
 	}
-	name := "speech"
-	if request != nil {
-		name = request.Op + "-response"
-	}
-	artifact, err := t.Spool.Put(ctx, staging.Upload{Filename: name, ContentType: decoded.ContentType, MaximumLength: int64(len(decoded.Audio)), Body: bytes.NewReader(decoded.Audio)})
+	artifact, err := t.Spool.Put(ctx, staging.Upload{Filename: request.spoolName("speech"), ContentType: decoded.ContentType, MaximumLength: int64(len(decoded.Audio)), Body: bytes.NewReader(decoded.Audio)})
 	if err != nil {
 		return nil, stageFailure(spoolError(err))
 	}
@@ -638,9 +595,6 @@ func (t *Transport) decodeAudio(ctx context.Context, resp *http.Response, call *
 	return result, nil
 }
 
-// DecodeTranscript reads a call's JSON transcription result for a client that
-// asked for format: with the call's own decoder, whose vendor transcript a
-// json client receives as its text alone, or as OpenAI's transcription JSON.
 func DecodeTranscript(call *UpstreamCall, format string, body []byte) (*TranscriptionResult, *Error) {
 	if call.DecodeTranscription == nil {
 		return DecodeTranscriptionJSON(body)
@@ -653,9 +607,6 @@ func DecodeTranscript(call *UpstreamCall, format string, body []byte) (*Transcri
 	return result, nil
 }
 
-// decodeFailure maps a result decoder's error onto a transport failure: a
-// vendor's verdict on the request, such as its content filter's, is the
-// caller's error; anything else violates the vendor's protocol.
 func decodeFailure(err *Error) *Failure {
 	if err.Status >= 400 && err.Status < 500 {
 		return &Failure{Class: ClassUpstreamClient, Status: err.Status, Upstream: &wire.UpstreamError{Type: "invalid_request_error", Code: err.Code, Message: err.Message}, Detail: err.Message}
@@ -663,9 +614,6 @@ func decodeFailure(err *Error) *Failure {
 	return &Failure{Class: ClassProtocol, Detail: err.Message}
 }
 
-// stageFailure maps a spool staging error onto a transport failure: an
-// oversized body is a protocol violation, anything else is a local failure
-// the attempt loop may retry.
 func stageFailure(err *Error) *Failure {
 	if err.Status == http.StatusRequestEntityTooLarge {
 		return &Failure{Class: ClassProtocol, Dispatched: true, Detail: err.Message}
@@ -673,12 +621,8 @@ func stageFailure(err *Error) *Failure {
 	return &Failure{Class: ClassConnect, Dispatched: true, Detail: err.Message}
 }
 
-// stageResponse streams a bounded response body into the spool.
 func (t *Transport) stageResponse(ctx context.Context, resp *http.Response, contentType string, request *Request) (*staging.Artifact, *Error) {
-	name := "response"
-	if request != nil {
-		name = request.Op + "-response"
-	}
+	name := request.spoolName("response")
 	artifact, err := t.Spool.Put(ctx, staging.Upload{
 		Filename:      name,
 		ContentType:   contentType,
@@ -691,7 +635,6 @@ func (t *Transport) stageResponse(ctx context.Context, resp *http.Response, cont
 	return artifact, nil
 }
 
-// collect reads a bounded JSON/text body into memory.
 func (t *Transport) collect(resp *http.Response) ([]byte, *Failure) {
 	body, err := io.ReadAll(io.LimitReader(resp.Body, t.MaxResponseBytes+1))
 	if err != nil {
@@ -709,7 +652,6 @@ func requireContentType(resp *http.Response, want string) bool {
 		(want == "application/json" && strings.HasSuffix(value, "+json"))
 }
 
-// binaryContentType accepts audio/* (or octet-stream) for speech bodies.
 func binaryContentType(resp *http.Response, prefix string) string {
 	value := strings.ToLower(strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0]))
 	if strings.HasPrefix(value, prefix) {
@@ -730,8 +672,6 @@ func transcriptionTextContentType(resp *http.Response, format string) bool {
 	}
 }
 
-// interrupted reports why this side ended a media exchange: the caller's
-// cancellation, or an expired deadline including a transport timeout.
 func interrupted(ctx context.Context, err error) error {
 	if errors.Is(err, context.Canceled) {
 		return context.Canceled

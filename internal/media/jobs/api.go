@@ -315,7 +315,7 @@ func jobItem(record Record) (contract.MediaJobItem, error) {
 		ProviderName:        record.ProviderName,
 		ProviderModel:       record.UpstreamModel,
 		Route:               record.RouteSlug,
-		Operation:           record.Operation,
+		Operation:           string(record.Operation),
 		Surface:             record.Surface,
 		State:               string(record.State),
 		Lifecycle:           string(record.Lifecycle),

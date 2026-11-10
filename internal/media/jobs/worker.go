@@ -207,7 +207,7 @@ func (s *Service) execute(ctx context.Context, job Claimed, record Record) (Reco
 		return Record{}, errClaimLost
 	}
 	if record.Lifecycle != Active {
-		result, err := s.send(ctx, resolved, record, &media.Request{Op: media.OpVideoDelete, JobID: upstream, Route: record.RouteSlug})
+		result, err := s.send(ctx, resolved, record, media.VideoDelete{ID: upstream})
 		switch {
 		case deleteConfirmed(result, err):
 			deleted, err := s.store.Finalize(ctx, record.ID, job.Fence())
@@ -217,7 +217,7 @@ func (s *Service) execute(ctx context.Context, job Claimed, record Record) (Reco
 		}
 		return Record{}, code("video_delete_not_confirmed")
 	}
-	result, err := s.send(ctx, resolved, record, &media.Request{Op: media.OpVideoGet, JobID: upstream, Route: record.RouteSlug})
+	result, err := s.send(ctx, resolved, record, media.VideoGet{ID: upstream})
 	if err != nil {
 		return Record{}, failureCode(err)
 	}

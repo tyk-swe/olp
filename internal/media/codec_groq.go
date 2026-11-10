@@ -1,40 +1,55 @@
 package media
 
-import "slices"
+import (
+	"slices"
 
-// The groq-audio wire is Groq's OpenAI-compatible speech-to-text API. Groq
-// bills audio by the second but reports a duration only in verbose_json, so
-// a request for json is sent as verbose_json and its result read back as
-// the json client asked for.
-//
-// https://console.groq.com/docs/speech-to-text
-var groqAudioCodec = codec{
-	OpTranscription: modelOnly(encodeGroqAudio),
-	OpTranslation:   modelOnly(encodeGroqAudio),
-}
+	"github.com/tyk-swe/olp/internal/connectors"
+)
 
-func encodeGroqAudio(r *Request, model string) (*UpstreamCall, *Error) {
-	format := transcriptionFormat(r)
-	switch {
-	case r.Stream:
+var groqAudioCodec = codec{transcription: encodeGroqTranscription, translation: encodeGroqTranslation}
+
+func encodeGroqTranscription(r *Request, p Transcription, cfg connectors.Config, model string) (*UpstreamCall, *Error) {
+	if p.Stream {
 		return nil, invalidMedia("Groq does not stream transcripts.")
-	case !slices.Contains([]string{"json", "text", "verbose_json"}, format):
-		return nil, invalidMedia("Groq returns transcripts as json, text or verbose_json.")
-	case len(r.Include) > 0, len(r.ChunkingStrategy) > 0, len(r.KnownSpeakerNames) > 0:
+	}
+	format, failure := groqFormat(p.Format)
+	if failure != nil {
+		return nil, failure
+	}
+	if len(p.Include) > 0 || len(p.ChunkingStrategy) > 0 || len(p.KnownSpeakerNames) > 0 {
 		return nil, invalidMedia("Groq does not support the requested transcription parameters.")
 	}
-	sent := *r
+	return groqCall(format)(encodeTranscription(r, p.withFormat(groqWireFormat(format)), cfg, model))
+}
+
+func encodeGroqTranslation(r *Request, p Translation, cfg connectors.Config, model string) (*UpstreamCall, *Error) {
+	format, failure := groqFormat(p.Format)
+	if failure != nil {
+		return nil, failure
+	}
+	return groqCall(format)(encodeTranslation(r, p.withFormat(groqWireFormat(format)), cfg, model))
+}
+
+func groqFormat(format *string) (string, *Error) {
+	effective := valueOr(format, "json")
+	if !slices.Contains([]string{"json", "text", "verbose_json"}, effective) {
+		return "", invalidMedia("Groq returns transcripts as json, text or verbose_json.")
+	}
+	return effective, nil
+}
+
+func groqWireFormat(format string) *string {
 	if format == "json" {
-		sent.Format = new("verbose_json")
+		return new("verbose_json")
 	}
-	encode := encodeTranscription
-	if r.Op == OpTranslation {
-		encode = encodeTranslation
-	}
-	call, failure := encode(&sent, model)
-	if failure != nil || format != "json" {
+	return &format
+}
+
+func groqCall(format string) func(*UpstreamCall, *Error) (*UpstreamCall, *Error) {
+	return func(call *UpstreamCall, failure *Error) (*UpstreamCall, *Error) {
+		if failure == nil && format == "json" {
+			call.DecodeTranscription = DecodeTranscriptionJSON
+		}
 		return call, failure
 	}
-	call.DecodeTranscription = DecodeTranscriptionJSON
-	return call, nil
 }

@@ -135,7 +135,7 @@ func (s *Store) List(ctx context.Context, q Query) (Page, error) {
 		afterAt, afterID = &q.After.CreatedAt, &q.After.ID
 	}
 	rows, err := s.db.Query(ctx, sql, q.Projects.param(), q.Routes.param(), q.APIKeyID, q.ProviderID,
-		q.Operation, q.Surface, text(q.State), text(q.Lifecycle), q.CreatedAfter, q.CreatedBefore,
+		text(q.Operation), q.Surface, text(q.State), text(q.Lifecycle), q.CreatedAfter, q.CreatedBefore,
 		afterAt, afterID, q.Limit+1)
 	if err != nil {
 		return Page{}, storeError(err)
@@ -161,7 +161,7 @@ func (s *Store) Position(ctx context.Context, id *string, q Query) (*Position, e
 		  AND ($3::text[] IS NULL OR route_slug = ANY($3::text[]))
 		  AND ($4::text IS NULL OR operation = $4::text)
 		  AND ($5::text IS NULL OR surface = $5::text)`,
-		*id, q.APIKeyID, q.Routes.param(), q.Operation, q.Surface).Scan(&position.CreatedAt, &position.ID)
+		*id, q.APIKeyID, q.Routes.param(), text(q.Operation), q.Surface).Scan(&position.CreatedAt, &position.ID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, invalid("video cursor is invalid")
 	}

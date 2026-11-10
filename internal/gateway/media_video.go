@@ -39,7 +39,7 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 		s.mediaFail(x, w, mediaError(failure))
 		return
 	}
-	x.family = wire.Format(request.Op)
+	x.family = wire.Format(request.Op())
 	x.media = request
 	x.estimate = mediaMultipartTokens
 	defer s.release(r.Context())
@@ -58,7 +58,7 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 		s.mediaFail(x, w, e)
 		return
 	}
-	if e := s.enforceMediaInput(x, request); e != nil {
+	if e := s.enforceMediaInput(x); e != nil {
 		form.Cleanup()
 		s.mediaFail(x, w, e)
 		return
@@ -245,7 +245,7 @@ func jobError(err error) *Error {
 
 // ownedJob loads a media job the caller is allowed to see, enforcing
 // ownership, lifecycle visibility, and the route permission.
-func (s *Server) ownedJob(ctx context.Context, authority keyauthority.Authority, videoID, op string) (*jobs.Record, *Error) {
+func (s *Server) ownedJob(ctx context.Context, authority keyauthority.Authority, videoID string, op media.Operation) (*jobs.Record, *Error) {
 	id, err := uuid.Parse(videoID)
 	if err != nil {
 		return nil, notFoundError("video_not_found", "The video job does not exist.")
@@ -338,7 +338,7 @@ func (s *Server) admitVideoRequest(parent context.Context, x *call, authority ke
 // returns the attempt fact for the caller to record.
 // videoJobCall makes one call on an existing job, encoded in the wire of the
 // vendor the job's pinned provider revision names.
-func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record, request *media.Request) (*media.Result, *attemptFailure, AttemptFact) {
+func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record, job media.JobCall) (*media.Result, *attemptFailure, AttemptFact) {
 	fact := AttemptFact{
 		TargetID:           record.ID,
 		ProviderID:         record.ProviderID,
@@ -387,7 +387,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record,
 	}
 
 	fact.VendorID = provider.VendorID
-	call, encodeFailure := media.EncodeJob(request, target.Config, record.UpstreamModel)
+	call, encodeFailure := media.EncodeJob(job, target.Config)
 	if encodeFailure != nil {
 		fact.Class = classProtocol
 		fact.Duration = s.now().Sub(fact.StartedAt)
@@ -400,7 +400,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record,
 		strictTemplate, err = mediacontract.Compile(mediacontract.Config{
 			Provider: target.Config, ProviderID: record.ProviderID,
 			RevisionID: record.ProviderRevisionID, Model: record.UpstreamModel,
-			Operation: request.Op,
+			Operation: string(job.Operation()),
 		})
 		if err != nil {
 			fact.Class = classProtocol
@@ -434,7 +434,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record,
 	}
 	dispatched := false
 	defer func() { reservation.settle(ctx, dispatched, nil) }()
-	if request.Op == media.OpVideoDelete {
+	if _, deleting := job.(media.VideoDelete); deleting {
 		if _, err := s.deps.Media.Store.BeginDeletion(ctx, record.ID, jobs.Unfenced); err != nil {
 			fact.Class = classConnect
 			fact.Duration = s.now().Sub(fact.StartedAt)
@@ -448,7 +448,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record,
 	callCtx, cancel := context.WithTimeout(attemptCtx, target.Timeout+jobs.LeaseSlack)
 	defer cancel()
 	target.Sensitive = &sensitive
-	result, failure := s.deps.Media.Transport.Do(callCtx, target.Target, call, request)
+	result, failure := s.deps.Media.Transport.Do(callCtx, target.Target, call, nil)
 	dispatched = failure == nil || failure.Dispatched
 	fact.Duration = s.now().Sub(fact.StartedAt)
 	if failure != nil {
@@ -473,8 +473,8 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record,
 	}
 	if strictTemplate != nil {
 		var contractErr error
-		switch request.Op {
-		case media.OpVideoGet, media.OpVideoDelete:
+		switch job.(type) {
+		case media.VideoGet, media.VideoDelete:
 			if !result.Source.Valid() || record.UpstreamJobID == nil {
 				contractErr = errors.New("native video source is unavailable")
 			} else {
@@ -487,7 +487,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record,
 					}
 				}
 			}
-		case media.OpVideoContent:
+		case media.VideoContent:
 			if result.Artifact == nil {
 				contractErr = errors.New("native video content is unavailable")
 			} else {
@@ -517,7 +517,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record,
 	fact.Status = result.Status
 	fb := result.FirstByte
 	fact.FirstByte = &fb
-	fact.Usage = mediaUsage(request, result)
+	fact.Usage = mediaUsage(nil, result)
 	fact.Committed = true
 	fact.recordEvidence(false)
 	s.health.record(record.ProviderID, fact, false)
@@ -651,7 +651,7 @@ func (s *Server) refreshListRecord(ctx context.Context, x *call, record jobs.Rec
 			return record, nil, false, nil
 		}
 	}
-	result, transportFailure, fact := s.videoJobCall(ctx, x, &record, &media.Request{Op: media.OpVideoGet, JobID: upstream, Route: record.RouteSlug})
+	result, transportFailure, fact := s.videoJobCall(ctx, x, &record, media.VideoGet{ID: upstream})
 	if transportFailure != nil {
 		if transportFailure.quota != "" || transportFailure.class == classLimitsUnavailable {
 			return record, &fact, false, transportFailure.toError()
@@ -700,7 +700,7 @@ func (s *Server) videoGet(w http.ResponseWriter, r *http.Request) {
 		s.mediaFail(x, w, serverError(http.StatusServiceUnavailable, "media_job_upstream_id_unavailable", "The video job's upstream identity is unavailable."))
 		return
 	}
-	result, transportFailure, fact := s.videoJobCall(r.Context(), x, record, &media.Request{Op: media.OpVideoGet, JobID: upstream, Route: record.RouteSlug})
+	result, transportFailure, fact := s.videoJobCall(r.Context(), x, record, media.VideoGet{ID: upstream})
 	x.dispatched = transportFailure == nil || transportFailure.dispatched
 	x.noteJobAttempt(fact)
 	if transportFailure != nil {
@@ -771,7 +771,7 @@ func (s *Server) videoContent(w http.ResponseWriter, r *http.Request) {
 		s.mediaFail(x, w, serverError(http.StatusServiceUnavailable, "media_job_upstream_id_unavailable", "The video job's upstream identity is unavailable."))
 		return
 	}
-	result, transportFailure, fact := s.videoJobCall(r.Context(), x, record, &media.Request{Op: media.OpVideoContent, JobID: upstream, Variant: variant, Route: record.RouteSlug})
+	result, transportFailure, fact := s.videoJobCall(r.Context(), x, record, media.VideoContent{ID: upstream, Variant: variant})
 	x.dispatched = transportFailure == nil || transportFailure.dispatched
 	x.noteJobAttempt(fact)
 	if transportFailure != nil {
@@ -832,7 +832,7 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 		s.mediaFail(x, w, serverError(http.StatusServiceUnavailable, "media_job_upstream_id_unavailable", "The video job's upstream identity is unavailable."))
 		return
 	}
-	result, transportFailure, fact := s.videoJobCall(r.Context(), x, &record, &media.Request{Op: media.OpVideoDelete, JobID: upstream, Route: record.RouteSlug})
+	result, transportFailure, fact := s.videoJobCall(r.Context(), x, &record, media.VideoDelete{ID: upstream})
 	x.dispatched = transportFailure == nil || transportFailure.dispatched
 	x.noteJobAttempt(fact)
 	deleted := false

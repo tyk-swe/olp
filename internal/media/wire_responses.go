@@ -14,26 +14,21 @@ import (
 	"github.com/tyk-swe/olp/internal/staging"
 )
 
-// ImageResult is the decoded unary image response. Base64 payloads are
-// already staged in the spool and referenced by handle.
 type ImageResult struct {
 	CreatedAt  int64
 	Images     []ImageArtifact
 	Usage      *ImageUsage
-	Extra      map[string]any // top-level extension fields for the client reply
+	Extra      map[string]any
 	DataExtra  []map[string]any
 	UsageExtra map[string]any
 }
 
-// ImageArtifact is one produced image: either an upstream URL or a staged file.
 type ImageArtifact struct {
 	URL           string
 	Handle        *staging.Handle
 	RevisedPrompt *string
 }
 
-// ImageUsage is the token usage a media response reported, such as an image
-// model's, or a speech or transcription model's that bills by token.
 type ImageUsage struct {
 	InputTokens       int64
 	OutputTokens      int64
@@ -44,8 +39,6 @@ type ImageUsage struct {
 	ImageOutputTokens *int64
 }
 
-// DecodeImageResponse parses an upstream image document, staging each
-// base64 payload through stage before the result is returned.
 func DecodeImageResponse(body []byte, stage func(b64 string, index int) (*staging.Artifact, *Error)) (*ImageResult, *Error) {
 	var encodedWire struct {
 		Created int64 `json:"created"`
@@ -117,8 +110,6 @@ func DecodeImageResponse(body []byte, stage func(b64 string, index int) (*stagin
 		if encodedWire.Usage.OutputDetail != nil && encodedWire.Usage.OutputDetail.ImageTokens != nil {
 			result.Usage.ImageOutputTokens = encodedWire.Usage.OutputDetail.ImageTokens
 		} else {
-			// Without an output breakdown every output token an image model
-			// reports is the image it produced.
 			output := encodedWire.Usage.OutputTokens
 			result.Usage.ImageOutputTokens = &output
 		}
@@ -132,10 +123,8 @@ func DecodeNativeImageResponse(kind string, body []byte, expected int64, stage f
 			BytesBase64Encoded string `json:"bytesBase64Encoded"`
 			MIMEType           string `json:"mimeType"`
 		} `json:"predictions"`
-		Images []string `json:"images"`
-		Error  *string  `json:"error"`
-		// FinishReasons is a Stability model's verdict on each image; any but
-		// null reports a filtered request or an inference error.
+		Images        []string  `json:"images"`
+		Error         *string   `json:"error"`
 		FinishReasons []*string `json:"finish_reasons"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
@@ -193,7 +182,6 @@ func DecodeNativeImageResponse(kind string, body []byte, expected int64, stage f
 	return result, nil
 }
 
-// diffFields returns the object fields not listed, or nil when none exist.
 func diffFields(doc map[string]any, known ...string) map[string]any {
 	var extra map[string]any
 	for name, value := range doc {
@@ -208,9 +196,6 @@ func diffFields(doc map[string]any, known ...string) map[string]any {
 	return extra
 }
 
-// EncodeImageResponse renders the client JSON image document. Staged handles
-// are emitted as marker strings; the caller streams base64 content in their
-// place so the whole response never buffers in memory.
 func EncodeImageResponse(result *ImageResult) ([]byte, []string, *Error) {
 	var markers []string
 	data := make([]any, len(result.Images))
@@ -264,12 +249,10 @@ func EncodeImageResponse(result *ImageResult) ([]byte, []string, *Error) {
 	return body, markers, nil
 }
 
-// VideoJobResult is the decoded video object. Route is set by the gateway for
-// client rendering — it is the public route slug, never the upstream model.
 type VideoJobResult struct {
 	ID           string
 	Route        string
-	Status       string // queued | in_progress | completed | failed | other value
+	Status       string
 	Progress     *float32
 	CreatedAt    *int64
 	CompletedAt  *int64
@@ -283,7 +266,6 @@ type VideoJobResult struct {
 	Extra        map[string]any
 }
 
-// VideoListResult is a decoded provider list page.
 type VideoListResult struct {
 	Jobs    []VideoJobResult
 	FirstID *string
@@ -292,7 +274,6 @@ type VideoListResult struct {
 	Extra   map[string]any
 }
 
-// VideoDeleteResult is a decoded deletion receipt.
 type VideoDeleteResult struct {
 	ID      string
 	Deleted bool
@@ -300,7 +281,6 @@ type VideoDeleteResult struct {
 	Extra   map[string]any
 }
 
-// DecodeVideoObject parses a provider video document.
 func DecodeVideoObject(body []byte) (*VideoJobResult, *Error) {
 	var encodedWire struct {
 		ID        string   `json:"id"`
@@ -346,8 +326,6 @@ func DecodeVideoObject(body []byte) (*VideoJobResult, *Error) {
 	return result, nil
 }
 
-// EncodeVideoObject renders the client video object. The client always sees
-// the local job id and route slug, never upstream identities.
 func EncodeVideoObject(result *VideoJobResult, localID, route string) ([]byte, *Error) {
 	doc := map[string]any{
 		"id":     localID,
@@ -395,10 +373,6 @@ func EncodeVideoObject(result *VideoJobResult, localID, route string) ([]byte, *
 	return body, nil
 }
 
-// EncodeStrictVideoObject keeps every native metadata member and numeric token
-// intact while replacing only the provider resource ID and model binding with
-// the caller's owned local job identity and route. The original source stays
-// available in the encrypted job secret for recovery.
 func EncodeStrictVideoObject(source oif.Document, upstreamID, localID, route string) ([]byte, *Error) {
 	if !source.Valid() || source.Root().Kind() != oif.Object {
 		return nil, protocolError("The native video metadata is unavailable.")
@@ -421,9 +395,6 @@ func EncodeStrictVideoObject(source oif.Document, upstreamID, localID, route str
 	return client.Bytes(), nil
 }
 
-// ValidStrictVideoJobSource guards autonomous polls, which have no gateway
-// response writer or route template. They may advance a strict job only from
-// an unambiguous provider object with the same pinned identity and model.
 func ValidStrictVideoJobSource(source oif.Document, upstreamID, model string) bool {
 	if !source.Valid() || source.Root().Kind() != oif.Object {
 		return false
@@ -442,8 +413,6 @@ func ValidStrictVideoJobSource(source oif.Document, upstreamID, model string) bo
 		validStatus
 }
 
-// EncodeVideoListResponse renders the client list document. Each job keeps
-// its own route slug as the public model.
 func EncodeVideoListResponse(result *VideoListResult, fallback string) ([]byte, *Error) {
 	data := make([]any, len(result.Jobs))
 	for i := range result.Jobs {
@@ -484,7 +453,6 @@ func modelForList(job VideoJobResult, fallback string) string {
 	return fallback
 }
 
-// DecodeVideoDeleteResponse parses a provider deletion receipt.
 func DecodeVideoDeleteResponse(body []byte) (*VideoDeleteResult, *Error) {
 	var encodedWire struct {
 		ID      string  `json:"id"`
@@ -506,7 +474,6 @@ func DecodeVideoDeleteResponse(body []byte) (*VideoDeleteResult, *Error) {
 	}, nil
 }
 
-// EncodeVideoDeleteResponse renders the client deletion receipt.
 func EncodeVideoDeleteResponse(result *VideoDeleteResult, localID string) ([]byte, *Error) {
 	object := "video.deleted"
 	if result.Object != nil && *result.Object != "" {
@@ -525,13 +492,8 @@ func EncodeVideoDeleteResponse(result *VideoDeleteResult, localID string) ([]byt
 	return body, nil
 }
 
-// TranscriptionResult is a decoded transcription.
 type TranscriptionResult struct {
-	// TextOnly renders the transcript as OpenAI's json format, its text
-	// alone, for a client that asked for json of a vendor whose own
-	// transcript says more.
-	TextOnly bool
-	// Tokens is the usage of a vendor that bills transcripts by token.
+	TextOnly        bool
 	Tokens          *ImageUsage
 	Text            string
 	Language        *string
@@ -540,10 +502,7 @@ type TranscriptionResult struct {
 	Extra           map[string]any
 }
 
-// TranscriptionSegment is one timed text span.
 type TranscriptionSegment struct {
-	// ID is kept as raw JSON: verbose_json uses integer ids and diarized_json
-	// uses string ids such as "seg_001".
 	ID      json.RawMessage
 	Start   float64
 	End     float64
@@ -552,12 +511,10 @@ type TranscriptionSegment struct {
 	Extra   map[string]any
 }
 
-// TranscriptionFormat is the response format class.
 func TranscriptionFormatIsText(format string) bool {
 	return format == "text" || format == "srt" || format == "vtt"
 }
 
-// DecodeTranscriptionJSON parses a JSON transcription document.
 func DecodeTranscriptionJSON(body []byte) (*TranscriptionResult, *Error) {
 	var encodedWire struct {
 		Text     string   `json:"text"`
@@ -638,7 +595,6 @@ func DecodeTranscriptionJSON(body []byte) (*TranscriptionResult, *Error) {
 	return result, nil
 }
 
-// EncodeTranscriptionJSON renders the client transcription JSON document.
 func EncodeTranscriptionJSON(result *TranscriptionResult) ([]byte, *Error) {
 	doc := map[string]any{"text": result.Text}
 	if result.TextOnly {
@@ -685,19 +641,13 @@ func EncodeTranscriptionJSON(result *TranscriptionResult) ([]byte, *Error) {
 	return body, nil
 }
 
-// MediaUsage is the token accounting one media SSE frame observed: input,
-// output and cached counts plus the modality shares the operation reports.
 type MediaUsage struct {
 	Input, Output, Cached   *int64
 	AudioInput, AudioOutput *int64
 	ImageInput, ImageOutput *int64
 }
 
-// ObserveMediaUsage extracts token usage from a raw media SSE frame payload,
-// resolved through the operation's modality rule: speech bills all output as
-// audio, transcription details its audio input, and an image operation's
-// output is its image unless the usage names another breakdown.
-func ObserveMediaUsage(data, op string) *MediaUsage {
+func ObserveMediaUsage(data string, op Operation) *MediaUsage {
 	var frame struct {
 		Usage *struct {
 			InputTokens       *int64 `json:"input_tokens"`
@@ -754,7 +704,6 @@ func ObserveMediaUsage(data, op string) *MediaUsage {
 	}
 	switch op {
 	case OpSpeech:
-		// Speech models bill their whole output as audio.
 		m.AudioOutput = m.Output
 	case OpTranscription:
 		m.AudioInput = audioDetail()
@@ -778,7 +727,6 @@ func firstInt(values ...*int64) *int64 {
 	return nil
 }
 
-// IsMediaTerminal reports whether a raw media SSE event name ends the stream.
 func IsMediaTerminal(event string) bool {
 	return strings.HasSuffix(event, ".completed") || event == "transcript.text.done" ||
 		event == "speech.audio.done" || event == "error" || event == "done"
@@ -788,7 +736,6 @@ func protocolError(message string) *Error {
 	return Fail(502, "provider_protocol_error", message)
 }
 
-// UnixTime converts a unix-seconds timestamp to time.Time.
 func UnixTime(value *int64) *time.Time {
 	if value == nil {
 		return nil
