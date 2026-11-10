@@ -1,17 +1,11 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
-	"io"
-	"math"
 	"net/http"
 	"net/url"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -20,9 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/media/transport"
 	"github.com/tyk-swe/olp/internal/mediacontract"
-	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
-	"github.com/tyk-swe/olp/internal/protocols/sse"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/staging"
@@ -36,18 +28,15 @@ type MediaDeps struct {
 	Store     *jobs.Store
 }
 
-// multipartParseDeadline bounds one inbound multipart body.
 const multipartParseDeadline = 60 * time.Second
 
-// mediaMultipartTokens is the fixed token estimate that admits multipart and
-// video media requests.
 const mediaMultipartTokens = 2000
 
 func (s *Server) registerMedia(mux *http.ServeMux) {
 	if s.deps.Media == nil {
 		return
 	}
-	mux.HandleFunc("POST /v1/images/generations", s.imageGenerations)
+	mux.HandleFunc("POST /v1/images/generations", s.mediaJSONHandler(media.DecodeImageGeneration))
 	mux.HandleFunc("POST /v1/images/edits", s.mediaFormHandler(media.DefaultImageUploadLimit, 33, media.DecodeImageEdit))
 	mux.HandleFunc("POST /v1/images/variations", s.mediaFormHandler(media.DefaultImageUploadLimit, 1, media.DecodeImageVariation))
 	mux.HandleFunc("POST /v1/audio/speech", s.mediaJSONHandler(media.DecodeSpeech))
@@ -60,7 +49,6 @@ func (s *Server) registerMedia(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /v1/videos/{video_id}", s.videoDelete)
 }
 
-// mediaJSONHandler serves a JSON-bodied media operation.
 func (s *Server) mediaJSONHandler(decode func([]byte) (*media.Request, *media.Error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		x, authority, done := s.mediaBegin(w, r)
@@ -79,7 +67,6 @@ func (s *Server) mediaJSONHandler(decode func([]byte) (*media.Request, *media.Er
 			s.mediaFail(x, w, e)
 			return
 		}
-		// Failed reads retain the deadline so HTTP/1 body draining is bounded.
 		rc.SetReadDeadline(time.Time{})
 		request, failure := decode(body)
 		if failure != nil {
@@ -94,8 +81,6 @@ func (s *Server) mediaJSONHandler(decode func([]byte) (*media.Request, *media.Er
 	}
 }
 
-// mediaFormHandler serves a multipart media operation. Staged uploads live in
-// the spool until the decoded request takes ownership of them.
 func (s *Server) mediaFormHandler(maxFileBytes int64, maxFiles int, decode func(*staging.Form) (*media.Request, *media.Error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		x, authority, done := s.mediaBegin(w, r)
@@ -121,8 +106,6 @@ func (s *Server) mediaFormHandler(maxFileBytes int64, maxFiles int, decode func(
 	}
 }
 
-// parseMediaForm bounds both the raw request and the spool bytes promised to
-// its parser. The aggregate body cap also bounds multi-image reservations.
 func (s *Server) parseMediaForm(w http.ResponseWriter, r *http.Request, keyID string, maxFileBytes int64, maxFiles int) (*staging.Form, *Error) {
 	limit := s.cfg.MaxMediaBodyBytes
 	if r.ContentLength > limit {
@@ -130,7 +113,9 @@ func (s *Server) parseMediaForm(w http.ResponseWriter, r *http.Request, keyID st
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	rc := http.NewResponseController(w)
-	rc.SetReadDeadline(time.Now().Add(multipartParseDeadline))
+	if err := rc.SetReadDeadline(time.Now().Add(multipartParseDeadline)); err != nil {
+		return nil, serverError(http.StatusInternalServerError, "internal_error", "The request could not be read.")
+	}
 	defer rc.SetReadDeadline(time.Time{})
 	lease := s.deps.Uploads.TryAdmit(keyID, min(limit, maxFileBytes*int64(maxFiles)))
 	form, failure := staging.ParseMultipart(r.Context(), r, s.deps.Staging, lease, maxFileBytes, maxFiles)
@@ -140,8 +125,6 @@ func (s *Server) parseMediaForm(w http.ResponseWriter, r *http.Request, keyID st
 	return form, nil
 }
 
-// mediaBegin runs the shared prelude: identity, admission, authentication,
-// and the routing header every route-planned media operation shares.
 func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*call, keyauthority.Authority, bool) {
 	x := &call{request: s.begin(w, r), family: wire.Chat, actor: "api_key"}
 	x.semanticHeaders = semanticHeaders(r.Header)
@@ -162,7 +145,6 @@ func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*call, keya
 		s.mediaFail(x, w, e)
 		return x, keyauthority.Authority{}, true
 	}
-	// Media waits before staging uploads, so the queue timeout alone bounds it.
 	if e = s.awaitAdmission(r.Context(), x); e != nil {
 		s.release(r.Context())
 		s.mediaFail(x, w, e)
@@ -177,14 +159,12 @@ func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*call, keya
 	return x, authority, false
 }
 
-// mediaFail records and writes a pre-dispatch media failure.
 func (s *Server) mediaFail(x *call, w http.ResponseWriter, e *Error) {
 	x.failure = e
 	s.finish(x, nil, e.Status)
 	writeSurfaceError(w, e, "openai")
 }
 
-// serveMedia plans and executes one media operation, then renders the result.
 func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *call, authority keyauthority.Authority, request *media.Request) {
 	defer s.release(ctx)
 	x.media = request
@@ -230,7 +210,6 @@ func (s *Server) finishMedia(x *call, out *mediaOutcome, status int) {
 	s.finish(x, &outcome{err: out.err, committed: out.committed, cancelled: out.cancelled}, status)
 }
 
-// cleanupUploads removes the staged upload artifacts a media request owns.
 func (s *Server) cleanupUploads(request *media.Request) {
 	if request == nil {
 		return
@@ -242,8 +221,6 @@ func (s *Server) cleanupUploads(request *media.Request) {
 	}
 }
 
-// prepareMedia resolves the route, the caller's route permission, and the
-// eligible attempt set for one media operation.
 func (s *Server) prepareMedia(ctx context.Context, x *call, authority keyauthority.Authority) *Error {
 	request := x.media
 	x.mode = request.Mode()
@@ -256,13 +233,10 @@ func (s *Server) prepareMedia(ctx context.Context, x *call, authority keyauthori
 	if e := authorize(&route); e != nil {
 		return e
 	}
-	// A video job is reserved against one provider target before creation,
-	// so it never leaves the route it names.
 	x.bind(mediaPlanner, authorize, request.Op() == media.OpVideoCreate)
 	return s.planNamed(ctx, x)
 }
 
-// planMedia plans x.route for one media operation.
 func (s *Server) planMedia(ctx context.Context, x *call) *Error {
 	if x.snapshot().GuardrailEngine(x.route.Slug, x.keyID) != nil {
 		if e := x.guardrailSurfaceGate(x.route); e != nil {
@@ -334,9 +308,6 @@ func (s *Server) planMedia(ctx context.Context, x *call) *Error {
 	return nil
 }
 
-// Media has no qualified caller semantic-header or query mapping. SDK
-// transport metadata is harmless, but provider settings and idempotency
-// promises must be refused before an effectful strict dispatch.
 func strictMediaContext(x *call) *Error {
 	if x.semanticQueryInvalid || len(x.semanticQuery) != 0 {
 		return invalidRequest("target_capability", "This native media route does not qualify caller query settings.", nil)
@@ -404,8 +375,6 @@ type mediaOutcome struct {
 	localJob  string
 }
 
-// executeMedia adapts media to shared attempt execution. Media transport
-// retains its absolute attempt deadline and side-effect ambiguity rules.
 func (s *Server) executeMedia(ctx context.Context, w http.ResponseWriter, x *call) *mediaOutcome {
 	attempted := runAttempts(ctx, s, x, attemptAdapter[*transport.Result]{
 		estimate: func(routing.Attempt, *routing.Provider) int64 { return x.estimate },
@@ -542,8 +511,6 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *cal
 	return fact, result, nil
 }
 
-// mediaClass is the attempt class of a media transport failure. An ambiguous
-// side-effecting failure never falls over.
 func mediaClass(f *transport.Failure) string {
 	if f.Ambiguous {
 		return classAmbiguous
@@ -551,407 +518,6 @@ func mediaClass(f *transport.Failure) string {
 	return string(f.Class)
 }
 
-// mediaUsage builds the accounting usage a media result carries.
-func mediaUsage(request *media.Request, result *transport.Result) *wire.Usage {
-	switch payload := result.Payload.(type) {
-	case transport.Images:
-		units := strconv.Itoa(len(payload.Images))
-		if payload.Usage == nil {
-			return &wire.Usage{MediaUnits: &units}
-		}
-		usage := tokenUsage(payload.Usage)
-		usage.MediaUnits = &units
-		return usage
-	case transport.Audio:
-		// Speech usage is the characters a vendor reports billing. A count
-		// of the request's own characters would be no evidence: OpenAI, for
-		// one, bills its speech models by tokens.
-		if payload.Tokens != nil {
-			return tokenUsage(payload.Tokens)
-		}
-		if payload.BilledCharacters == nil {
-			return nil
-		}
-		units := strconv.FormatInt(*payload.BilledCharacters, 10)
-		return &wire.Usage{MediaUnits: &units}
-	case transport.Transcript:
-		return transcriptUsage(payload.TranscriptionResult)
-	case transport.Text:
-		return transcriptUsage(payload.Usage)
-	case transport.Video:
-		if request == nil || request.Op() != media.OpVideoCreate || payload.Seconds == nil {
-			return nil
-		}
-		units := *payload.Seconds
-		return &wire.Usage{MediaUnits: &units}
-	}
-	return nil
-}
-
-func transcriptUsage(transcript *media.TranscriptionResult) *wire.Usage {
-	if transcript != nil && transcript.Tokens != nil {
-		return tokenUsage(transcript.Tokens)
-	}
-	if transcript == nil || transcript.DurationSeconds == nil {
-		return nil
-	}
-	duration := *transcript.DurationSeconds
-	if duration < 0 || duration >= 1e18 || math.IsNaN(duration) || math.IsInf(duration, 0) {
-		return nil
-	}
-	// Accounting stores numeric(24,6). Preserve native response precision,
-	// but quantize its separate billing observation to microseconds so a
-	// more precise vendor duration cannot invalidate the entire event.
-	units := strconv.FormatFloat(duration, 'f', 6, 64)
-	return &wire.Usage{MediaUnits: &units}
-}
-
-func mediaArtifact(payload transport.Payload) *staging.Artifact {
-	switch payload := payload.(type) {
-	case transport.Audio:
-		return payload.Artifact
-	case transport.Content:
-		return payload.Artifact
-	}
-	return nil
-}
-
-func mediaVideo(result *transport.Result) *media.VideoJobResult {
-	if result == nil {
-		return nil
-	}
-	video, _ := result.Payload.(transport.Video)
-	return video.VideoJobResult
-}
-
-func mediaDeleted(result *transport.Result) *media.VideoDeleteResult {
-	if result == nil {
-		return nil
-	}
-	deleted, _ := result.Payload.(transport.Deleted)
-	return deleted.VideoDeleteResult
-}
-
-func strictBlob(descriptor oif.Descriptor, artifact *staging.Artifact) error {
-	blob, err := artifact.BlobReference()
-	if err != nil {
-		return err
-	}
-	_, err = oif.NewBlobResult(descriptor, blob, oif.Complete)
-	return err
-}
-
-func (s *Server) removeImages(images *media.ImageResult) {
-	for _, image := range images.Images {
-		if image.Handle == nil {
-			continue
-		}
-		if err := s.deps.Staging.Remove(*image.Handle); err != nil {
-			s.log.Warn("staged media image cleanup failed", "error", err)
-		}
-	}
-}
-
-// tokenUsage is the accounting usage of a vendor that bills media by token.
-func tokenUsage(tokens *media.ImageUsage) *wire.Usage {
-	return &wire.Usage{InputTokens: tokens.InputTokens, OutputTokens: tokens.OutputTokens, TotalTokens: tokens.TotalTokens,
-		AudioInputTokens: tokens.AudioInputTokens, AudioOutputTokens: tokens.AudioOutputTokens,
-		ImageInputTokens: tokens.ImageInputTokens, ImageOutputTokens: tokens.ImageOutputTokens}
-}
-
-// writeMediaResult renders the successful media response.
-func (s *Server) writeMediaResult(w http.ResponseWriter, x *call, out *mediaOutcome) {
-	result := out.result
-	switch payload := result.Payload.(type) {
-	case transport.Images:
-		if x.strict() && result.Source.Valid() {
-			defer s.removeImages(payload.ImageResult)
-			s.deliverMediaJSON(w, x, out, result.Source.Bytes())
-			return
-		}
-		s.writeImageResult(w, x, out, payload.ImageResult)
-	case transport.Audio:
-		s.streamArtifact(w, x, out, payload.Artifact)
-	case transport.Content:
-		s.streamArtifact(w, x, out, payload.Artifact)
-	case transport.Text:
-		out.committed = true
-		format := "text/plain; charset=utf-8"
-		switch x.media.TranscriptFormat() {
-		case "srt":
-			format = "application/x-subrip; charset=utf-8"
-		case "vtt":
-			format = "text/vtt; charset=utf-8"
-		}
-		s.deliverMedia(w, x, out, format, func() error {
-			_, err := w.Write(payload.Body)
-			return err
-		})
-	case transport.Transcript:
-		out.committed = true
-		if x.strict() && result.Source.Valid() {
-			s.deliverMediaJSON(w, x, out, result.Source.Bytes())
-			return
-		}
-		body, failure := media.EncodeTranscriptionJSON(payload.TranscriptionResult)
-		if failure != nil {
-			out.err = serverError(http.StatusBadGateway, failure.Code, failure.Message)
-			out.status, out.committed = out.err.Status, false
-			writeSurfaceError(w, out.err, "openai")
-			return
-		}
-		s.deliverMediaJSON(w, x, out, body)
-	case transport.Video:
-		// Video create responses bind the owned durable identity. Strict
-		// responses retain every other native member and numeric token.
-		var body []byte
-		var failure *media.Error
-		if x.strict() {
-			body, failure = media.EncodeStrictVideoObject(result.Source, payload.ID, outJobID(out), x.media.Route())
-		} else {
-			body, failure = media.EncodeVideoObject(payload.VideoJobResult, outJobID(out), x.media.Route())
-		}
-		if failure != nil {
-			out.err = serverError(http.StatusBadGateway, failure.Code, failure.Message)
-			out.status, out.committed = out.err.Status, false
-			writeSurfaceError(w, out.err, "openai")
-			return
-		}
-		s.deliverMediaJSON(w, x, out, body)
-	}
-}
-
-// deliverMedia records success only after the bounded body write and flush.
-// Upstream usage remains intact when the client cannot receive the response.
-func (s *Server) deliverMedia(w http.ResponseWriter, x *call, out *mediaOutcome, contentType string, write func() error) {
-	rc := http.NewResponseController(w)
-	if err := rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout)); err != nil {
-		out.err = serverError(http.StatusInternalServerError, "internal_error", "The response could not be written.")
-		out.status, out.committed = out.err.Status, false
-		w.Header().Del("Content-Length")
-		writeSurfaceError(w, out.err, "openai")
-		return
-	}
-	w.Header().Set("Content-Type", contentType)
-	x.responseHeaders(w.Header(), false)
-	w.WriteHeader(out.status)
-	out.committed = true
-	err := write()
-	if err == nil {
-		err = rc.Flush()
-	}
-	if err != nil {
-		out.err = (&attemptFailure{class: classCancelled}).toError()
-		out.cancelled, out.status = true, 0
-		if n := len(x.facts); n > 0 && x.facts[n-1].Interaction != nil {
-			x.facts[n-1].Interaction.ClientState = usage.ClientPartial
-		}
-		return
-	}
-	x.delivered(s.now())
-	if n := len(x.facts); n > 0 && x.facts[n-1].Interaction != nil {
-		x.facts[n-1].Interaction.ClientState = usage.ClientTerminal
-	}
-}
-
-func (s *Server) deliverMediaJSON(w http.ResponseWriter, x *call, out *mediaOutcome, body []byte) {
-	s.deliverMedia(w, x, out, "application/json", func() error {
-		_, err := w.Write(body)
-		return err
-	})
-}
-
-func outJobID(out *mediaOutcome) string {
-	if out.localJob != "" {
-		return out.localJob
-	}
-	if video := mediaVideo(out.result); video != nil {
-		return video.ID
-	}
-	return ""
-}
-
-// writeImageResult streams the image JSON document: each staged payload is
-// base64-streamed in place of its marker so the response never buffers media.
-func (s *Server) writeImageResult(w http.ResponseWriter, x *call, out *mediaOutcome, images *media.ImageResult) {
-	defer s.removeImages(images)
-	body, markers, failure := media.EncodeImageResponse(images)
-	if failure != nil {
-		out.err = serverError(http.StatusBadGateway, failure.Code, failure.Message)
-		out.status, out.committed = out.err.Status, false
-		writeSurfaceError(w, out.err, "openai")
-		return
-	}
-	handles := map[string]staging.Handle{}
-	index := 0
-	for _, image := range images.Images {
-		if image.Handle != nil && index < len(markers) {
-			handles[markers[index]] = *image.Handle
-			index++
-		}
-	}
-	s.deliverMedia(w, x, out, "application/json", func() error {
-		rest := body
-		for _, marker := range markers {
-			cut := bytes.Index(rest, []byte(marker))
-			if cut < 0 {
-				return errors.New("staged media marker missing")
-			}
-			if _, err := w.Write(rest[:cut]); err != nil {
-				return err
-			}
-			if err := s.streamBase64(w, handles[marker]); err != nil {
-				return err
-			}
-			rest = rest[cut+len(marker):]
-		}
-		if _, err := w.Write(rest); err != nil {
-			return err
-		}
-		return nil
-	})
-}
-
-// streamBase64 writes one staged artifact base64-encoded into w.
-func (s *Server) streamBase64(w io.Writer, handle staging.Handle) error {
-	opened, err := s.deps.Staging.Open(handle)
-	if err != nil {
-		return err
-	}
-	defer opened.File.Close()
-	encoder := base64.NewEncoder(base64.StdEncoding, w)
-	_, err = io.Copy(encoder, opened.File)
-	if cerr := encoder.Close(); err == nil {
-		err = cerr
-	}
-	return err
-}
-
-// streamArtifact streams a staged binary artifact to the client and removes
-// it once the body is exhausted or the write fails.
-func (s *Server) streamArtifact(w http.ResponseWriter, x *call, out *mediaOutcome, artifact *staging.Artifact) {
-	opened, err := s.deps.Staging.Open(artifact.Handle)
-	if err != nil {
-		s.deps.Staging.Remove(artifact.Handle)
-		out.err = serverError(http.StatusBadGateway, "media_content_unavailable", "The staged media could not be read.")
-		out.status, out.committed = out.err.Status, false
-		writeSurfaceError(w, out.err, "openai")
-		return
-	}
-	defer s.deps.Staging.Remove(artifact.Handle)
-	defer opened.File.Close()
-	if artifact.ContentLength > 0 {
-		w.Header().Set("Content-Length", strconv.FormatInt(artifact.ContentLength, 10))
-	}
-	s.deliverMedia(w, x, out, artifact.ContentType, func() error {
-		_, err := io.Copy(w, opened.File)
-		return err
-	})
-}
-
-// streamMediaEvents drains a stream inside its attempt's deadline and quota
-// reservation. Only a terminal event proves that the response completed.
-func (s *Server) streamMediaEvents(ctx context.Context, w http.ResponseWriter, x *call, events io.ReadCloser, contract *mediacontract.Template, bound mediacontract.Bound) (*wire.Usage, bool, *attemptFailure) {
-	defer events.Close()
-	sw := &streamWriter{w: w, family: x.family, x: x}
-	var usage *wire.Usage
-	var sequence uint64
-	terminal := errors.New("media stream completed")
-	decodeErr := sse.Decode(events, int(s.cfg.MaxEventBytes), func(frame sse.Frame) error {
-		var payload struct {
-			Type  string          `json:"type"`
-			Error json.RawMessage `json:"error"`
-		}
-		event := "done"
-		if frame.Data != "[DONE]" {
-			if contract != nil {
-				frameName := ""
-				if frame.Event != nil {
-					frameName = *frame.Event
-				}
-				if _, err := contract.Event(bound.Descriptor, frame.Data, frameName, sequence); err != nil {
-					return err
-				}
-				sequence++
-			}
-			if err := json.Unmarshal([]byte(frame.Data), &payload); err != nil {
-				return err
-			}
-			event = payload.Type
-			if frame.Event != nil && *frame.Event != "" {
-				event = *frame.Event
-			}
-		}
-		if event == "error" || (len(payload.Error) > 0 && string(payload.Error) != "null") {
-			return errors.New("provider media stream failed")
-		}
-		var buf bytes.Buffer
-		if contract != nil && frame.ID != nil {
-			buf.WriteString("id: " + *frame.ID + "\n")
-		}
-		if contract != nil && frame.RetryMS != nil {
-			buf.WriteString("retry: " + strconv.FormatUint(*frame.RetryMS, 10) + "\n")
-		}
-		if frame.Event != nil && *frame.Event != "" {
-			buf.WriteString("event: " + *frame.Event + "\n")
-		}
-		for line := range strings.SplitSeq(frame.Data, "\n") {
-			buf.WriteString("data: " + line + "\n")
-		}
-		buf.WriteByte('\n')
-		if observed := media.ObserveMediaUsage(frame.Data, x.media.Op()); observed != nil {
-			if usage == nil {
-				usage = &wire.Usage{}
-			}
-			if observed.Input != nil {
-				usage.InputTokens = *observed.Input
-			}
-			if observed.Output != nil {
-				usage.OutputTokens = *observed.Output
-			}
-			if observed.Input != nil && observed.Output != nil {
-				usage.TotalTokens = *observed.Input + *observed.Output
-			}
-			if observed.Cached != nil {
-				usage.CachedInputTokens = observed.Cached
-			}
-			usage.AudioInputTokens = observed.AudioInput
-			usage.AudioOutputTokens = observed.AudioOutput
-			usage.ImageInputTokens = observed.ImageInput
-			usage.ImageOutputTokens = observed.ImageOutput
-		}
-		completed := media.IsMediaTerminal(event)
-		if completed {
-			if units := x.media.SeedMediaUnits(); units != nil {
-				if usage == nil {
-					usage = &wire.Usage{}
-				}
-				usage.MediaUnits = units
-			}
-		}
-		if err := sw.emit(buf.Bytes()); err != nil {
-			return err
-		}
-		x.delivered(s.now())
-		if completed {
-			return terminal
-		}
-		return nil
-	})
-	if errors.Is(decodeErr, terminal) {
-		return usage, sw.committed, nil
-	}
-	class := classProtocol
-	switch {
-	case errors.Is(decodeErr, errClientWrite), errors.Is(ctx.Err(), context.Canceled):
-		class = classCancelled
-	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		class = classTimeout
-	}
-	return usage, sw.committed, &attemptFailure{class: class, committed: sw.committed, dispatched: true}
-}
-
-// mediaError maps a media-layer failure onto a gateway error.
 func mediaError(failure *media.Error) *Error {
 	if failure == nil {
 		return nil
@@ -961,9 +527,4 @@ func mediaError(failure *media.Error) *Error {
 		typeName = "server_error"
 	}
 	return &Error{Status: failure.Status, Type: typeName, Code: failure.Code, Message: failure.Message}
-}
-
-// imageGenerations decodes the JSON image-generation body.
-func (s *Server) imageGenerations(w http.ResponseWriter, r *http.Request) {
-	s.mediaJSONHandler(media.DecodeImageGeneration)(w, r)
 }
