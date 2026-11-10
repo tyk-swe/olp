@@ -1,6 +1,6 @@
-//go:build service
+//go:build e2e
 
-package service_test
+package e2e_test
 
 import (
 	"encoding/json"

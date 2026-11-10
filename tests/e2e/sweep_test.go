@@ -1,6 +1,6 @@
-//go:build service
+//go:build e2e
 
-package service_test
+package e2e_test
 
 import (
 	"encoding/json"
@@ -138,6 +138,7 @@ func secureReads(t *testing.T) []string {
 // route against seeded data. A query that no longer matches the schema answers
 // 5xx here, because nothing else runs this SQL before merge.
 func TestManagementReadsAnswerWithoutServerErrors(t *testing.T) {
+	t.Parallel()
 	s := startService(t)
 	owner := s.owner()
 	fixture := s.seedCanary(owner, newVendor(t).URL)
@@ -157,6 +158,7 @@ func TestManagementReadsAnswerWithoutServerErrors(t *testing.T) {
 // may mention the canary, and naming a canary resource must answer as if it
 // did not exist.
 func TestManagementIsolationSweep(t *testing.T) {
+	t.Parallel()
 	s := startService(t)
 	owner := s.owner()
 	fixture := s.seedCanary(owner, newVendor(t).URL)

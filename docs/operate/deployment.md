@@ -200,10 +200,10 @@ not measured memory or disk-reliability guarantees, and the node-local spool
 does not replace durable provider job references. Keep analytics in control
 processes and ingestion in workers, with database CPU/I/O headroom for both.
 
-The fast safety net does not establish a production SLO, live-provider
+The pre-merge test tiers do not establish a production SLO, live-provider
 certification, invoice accuracy, or disaster-recovery RPO. Validate
 capacity and failure behavior on the actual deployment. Use the
-[testing guide](../../tests/README.md) for net scope,
+[testing guide](../../tests/README.md) for test scope,
 [performance](../develop/performance.md) for measurement status, and
 [backup and restore](operations.md#backup-and-restore) for recovery
 requirements.

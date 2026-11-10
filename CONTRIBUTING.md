@@ -16,12 +16,14 @@ unqualified.
 | --- | --- |
 | `make setup` | Install modules, the pnpm workspace and a local Air watcher, then generate contracts |
 | `make dev` | Start services, automatically reloaded Go on 8082/private 9092, and Vite on 5173 |
-| `make check` | Check contract freshness, Go, console, and the safety net without rewriting tracked files |
+| `make check` | Check contract freshness, Go, console, and the unit tier without rewriting tracked files |
 | `make check-go` | Check Go formatting, vet, and pinned static analysis |
 | `make check-console` | Generate ignored console types, then check formatting, types, and ESLint |
 | `make check-contracts` | Compare all tracked contracts with temporary generated outputs |
-| `make test-fast` | Fast safety net inside its 60 second budget, in [tests/README.md](tests/README.md) |
-| `make test-service` | Database-backed service suite in disposable Docker containers, in [tests/README.md](tests/README.md#service-suite) |
+| `make test` | Every test tier with the cheapest first, in [tests/README.md](tests/README.md) |
+| `make test-unit` | Go and console unit tests, which need no services, in [tests/README.md](tests/README.md#unit-tier) |
+| `make test-integration` | Tests against PostgreSQL and Valkey in disposable Docker containers, in [tests/README.md](tests/README.md#integration-tier) |
+| `make test-e2e` | API journeys against the real binary and browser journeys against the built console, in [tests/README.md](tests/README.md#end-to-end-tier) |
 | `make qualify-code` | Code mode fixture qualification lanes (release gate) in disposable Docker containers, in [tests/README.md](tests/README.md#qualification-lanes) |
 | `make qualify-code-live` | Code mode live qualification lanes against real vendor accounts (release gate when `OLP_LIVE_QUALIFICATION=required`) in disposable Docker containers, in [tests/README.md](tests/README.md#qualification-lanes) |
 | `make api` | Generate Go and TypeScript types without building the gateway |
@@ -39,7 +41,8 @@ Run `make setup` after cloning or changing dependencies or the watcher version.
 dependencies or regenerating tracked files. After editing an API schema or
 generator, run `make api` explicitly.
 
-Required CI includes `check-go`, `check-console`, `test-fast`, `test-service`,
+Required CI includes `check-go`, `check-console`, `test-unit-go`,
+`test-unit-console`, `test-integration`, `test-e2e-api`, `test-e2e-browser`,
 `contracts`, `helm`, `dependencies`, and `build`,
 each gated on the paths a change touches. Helm, dependency and release checks
 remain separate from the daily `make check`. Contract generation is reproducible.
@@ -89,24 +92,28 @@ make dev
 
 Keep feature types, validation, SQL, handlers and workflows together. The
 [architecture map](docs/develop/architecture.md) identifies backend and console owners;
-[testing](tests/README.md) covers the safety net, its budget and admission rule.
+[testing](tests/README.md) covers the test tiers, their budgets and the placement rules.
 
 Use `gofmt`, `go vet`, and `make lint` for Go; console source uses Prettier, two spaces,
 single quotes, no trailing commas, `camelCase` helpers and `PascalCase.svelte` components. Keep
 Svelte route components thin and use the [console design system](console/README.md#design-system).
 
-Place allowlisted Go tests beside their feature as `*_test.go`, allowlisted
-console tests as Vitest `*.test.ts` in the `unit` project, and reactive
-Svelte tests as `*.svelte.test.ts` in the `svelte` project.
-Cover changed behavior inside the allowlist and preserve protocol fixtures. Tests follow the strict
+Place Go unit tests beside their feature as `*_test.go`, console unit tests
+as Vitest `*.test.ts` in the `unit` project, and reactive Svelte tests as
+`*.svelte.test.ts` in the `svelte` project. Tests that need PostgreSQL or
+Valkey go in `tests/integration`, journeys against the real binary go in
+`tests/e2e`, and browser journeys go in `console/tests/e2e`. Put a test in
+the cheapest tier that can catch the failure.
+Cover changed behavior and preserve protocol fixtures. Tests follow the strict
 rules in [testing](tests/README.md#test-rules), meaning behavior assertions
 only, no pinned outside facts without a cited source and date, and one focused
 regression test per bug fix in the existing mapped test file.
-Service and browser behavior has no automated suite. Validate it by running
-the affected functionality directly and record the command and output.
+The end-to-end tier holds one journey per flow, so most service and browser
+behavior has no journey of its own. Validate it by running the affected
+functionality directly and record the command and output.
 
 Documentation changes also run `node scripts/check-docs.mjs`. The same scoped
-link, anchor and handbook-index contract runs through `make test-fast`.
+link, anchor and handbook-index contract runs through `make test-unit-console`.
 
 Use conventional commit subjects and name agent-created branches `tyk-{name}`.
 Follow the [PR template](.github/PULL_REQUEST_TEMPLATE.md) and describe the problem,

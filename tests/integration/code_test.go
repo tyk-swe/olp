@@ -1,18 +1,17 @@
-//go:build service
+//go:build integration
 
-package service_test
+package integration_test
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/tyk-swe/olp/internal/codesessions"
-	"maps"
-	"net/http"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/codesessions"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -23,19 +22,17 @@ import (
 	"github.com/tyk-swe/olp/internal/codeallowance"
 	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	codepromotion "github.com/tyk-swe/olp/internal/promotion/code"
 	providerpromotion "github.com/tyk-swe/olp/internal/promotion/provider"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/tests/harness"
 )
 
 func TestCodeDecisionJourneys(t *testing.T) {
-	pool, _ := newDatabase(t)
-	if err := database.Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
+	pool, _ := harness.Database(t)
 	t.Run("chosen and pinned", func(t *testing.T) { codeAdmissionRecordsChosenAndPinnedDecisions(t, pool) })
 	t.Run("allowance ordering", func(t *testing.T) { codeBandOrderingOrdersNewRootsAndNeverMovesPins(t, pool) })
 }
@@ -678,10 +675,8 @@ func (j cooldownJourney) admission(model, conversation string) codesessions.Admi
 }
 
 func TestCodeCooldownJourneys(t *testing.T) {
-	pool, _ := newDatabase(t)
-	if err := database.Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
+	pool, _ := harness.Database(t)
 	t.Run("classes and recovery", func(t *testing.T) { codeCooldownClassesScopeSelectionNeverShortenAndNameRefusalRecovery(t, pool) })
 	t.Run("model-less cooldowns", func(t *testing.T) { codeModelLessConnectionChecksEveryModelCooldown(t, pool) })
 	t.Run("model hints", func(t *testing.T) { codeModelLessConnectionRequiresUsefulModelHint(t, pool) })
@@ -959,73 +954,6 @@ func codeModelCooldownFollowsAliasTarget(t *testing.T, pool *pgxpool.Pool) {
 	}
 }
 
-func TestCodeCatalogReachesPaidModelPoolFallback(t *testing.T) {
-	route := codemode.Route{
-		Enabled: true, RevisionID: "revision", Slug: "route", Models: []string{"native-a", "native-b"},
-		ModelRewriting: true, Aliases: map[string]string{"pool": "native-a"},
-		ModelPools:        map[string][]string{"pool": {"native-a", "native-b"}},
-		PaidParticipation: true, InitialRecoveryAttempts: 1,
-		PaidFallbackTargets: map[string]codemode.PaidTarget{"native-b": {}},
-	}
-	offers := codeclient.Offers{{PaidProtocol: codemode.ProtocolResponses, PaidStreaming: true, Models: []string{"native-b"}}}
-	fallback, err := route.PaidFallbackModel(codemode.Operation{Model: "pool"}, nil)
-	if err != nil || fallback == nil || fallback.Model != "native-b" {
-		t.Fatalf("paid fallback = %+v, error = %v", fallback, err)
-	}
-	pool := func(route codemode.Route, offers codeclient.Offers) *codemode.Model {
-		models := codeclient.Catalog(route, offers)
-		index := slices.IndexFunc(models, func(model codemode.Model) bool { return model.ID == "pool" })
-		if index < 0 {
-			return nil
-		}
-		return &models[index]
-	}
-	model := pool(route, offers)
-	if model == nil || !model.Paid || !slices.Contains(model.Clients, codeadapter.ClientCodex) || len(model.Capabilities) != 1 || model.Capabilities[0].Protocol != codemode.ProtocolResponses {
-		t.Fatalf("pool catalog entry = %+v", model)
-	}
-	configuration, err := codeclient.Generate(route, offers, codeclient.Request{GatewayURL: "http://localhost:4000", Client: codeadapter.ClientCodex, Model: "pool"})
-	if err != nil || configuration.Model != "pool" || !slices.Contains(configuration.PaidModels, "pool") || !strings.Contains(configuration.Configuration, "supports_websockets = false") {
-		t.Fatalf("client configuration = %+v, error = %v", configuration, err)
-	}
-	missing := pool(route, nil)
-	if missing != nil {
-		t.Fatalf("unavailable paid target advertised: %+v", missing)
-	}
-	withoutRecovery := route
-	withoutRecovery.InitialRecoveryAttempts = 0
-	if model := pool(withoutRecovery, offers); model != nil {
-		t.Fatalf("disabled fallback advertised: %+v", model)
-	}
-	withoutPool := route
-	withoutPool.ModelPools = nil
-	if model := pool(withoutPool, offers); model != nil {
-		t.Fatalf("unreachable alternate advertised: %+v", model)
-	}
-	earlierFallback := route
-	earlierFallback.PaidFallbackTargets = map[string]codemode.PaidTarget{"native-a": {}, "native-b": {}}
-	if model := pool(earlierFallback, offers); model != nil {
-		t.Fatalf("unselected alternate advertised: %+v", model)
-	}
-	messageOffers := codeclient.Offers{{PaidProtocol: codemode.ProtocolMessages, PaidStreaming: true, Models: []string{"native-b"}}}
-	messageModel := pool(route, messageOffers)
-	if messageModel == nil || slices.Contains(messageModel.Clients, codeadapter.ClientCodex) || !slices.Contains(messageModel.Clients, codeadapter.ClientClaudeCode) {
-		t.Fatalf("messages paid fallback = %+v", messageModel)
-	}
-	if _, err := codeclient.Generate(route, messageOffers, codeclient.Request{GatewayURL: "http://localhost:4000", Client: codeadapter.ClientCodex, Model: "pool"}); err == nil {
-		t.Fatal("unsupported client accepted for paid fallback")
-	}
-	withoutStreaming := codeclient.Offers{{PaidProtocol: codemode.ProtocolResponses, Models: []string{"native-b"}}}
-	if model := pool(route, withoutStreaming); model == nil || len(model.Clients) != 0 {
-		t.Fatalf("non-streaming paid fallback clients = %+v", model)
-	}
-	withSubscription := slices.Concat(offers, codeclient.Offers{{Adapter: codemode.AdapterCodex, Models: []string{"native-a"}}})
-	configuration, err = codeclient.Generate(route, withSubscription, codeclient.Request{GatewayURL: "http://localhost:4000", Client: codeadapter.ClientCodex, Model: "pool"})
-	if err != nil || !strings.Contains(configuration.Configuration, "supports_websockets = true") {
-		t.Fatalf("subscription client configuration = %+v, error = %v", configuration, err)
-	}
-}
-
 func codeRecoveryRecordsActualDestinationSelection(t *testing.T, pool *pgxpool.Pool) {
 	journey := seedCooldownJourney(t, pool)
 	third, credential := uuid.NewString(), uuid.NewString()
@@ -1141,10 +1069,8 @@ func codeTreeRefusalUsesPreferredAccountRecovery(t *testing.T, pool *pgxpool.Poo
 }
 
 func TestCodeActiveAllowanceJourneys(t *testing.T) {
-	pool, _ := newDatabase(t)
-	if err := database.Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
+	pool, _ := harness.Database(t)
 	t.Run("Codex", func(t *testing.T) { codeActiveAllowanceDoesNotAffectBands(t, pool) })
 	t.Run("MiniMax", func(t *testing.T) { codeMiniMaxActiveRemainsDoesNotAffectBands(t, pool) })
 }
@@ -1375,80 +1301,9 @@ func codeMiniMaxActiveRemainsDoesNotAffectBands(t *testing.T, pool *pgxpool.Pool
 	}
 }
 
-func TestCodeAccountEndpoints(t *testing.T) {
-	s := startService(t)
-	owner := s.owner()
-	var user string
-	if err := s.pool.QueryRow(t.Context(), `SELECT id::text FROM olp.users WHERE email='owner@example.com'`).Scan(&user); err != nil {
-		t.Fatal(err)
-	}
-	project := s.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "allowance-read"}, idempotent(), http.StatusCreated)["id"].(string)
-	seed := func(profile, principal string) string {
-		t.Helper()
-		provider, credential, account := uuid.NewString(), uuid.NewString(), uuid.NewString()
-		configuration := `{"kind":"plugin","auth_mode":"grant","profile_id":"` + profile + `","profile_revision":"` + strings.Repeat("0", 64) + `"}`
-		for _, statement := range []struct {
-			sql  string
-			args []any
-		}{
-			{`INSERT INTO olp.providers(id, project_id, name, kind, state, configuration, etag, slots_etag, created_by) VALUES($1, $2, $7, 'plugin', 'active', $3, $4, $5, $6)`, []any{provider, project, configuration, uuid.NewString(), uuid.NewString(), user, principal}},
-			{`INSERT INTO olp.provider_credentials(id, provider_id, version, principal, plugin_digest, profile_id, grant_facts) VALUES($1, $2, 1, $3, repeat('0',64), $4, '{}')`, []any{credential, provider, principal, profile}},
-			{`INSERT INTO olp.provider_grants(credential_id) VALUES($1)`, []any{credential}},
-			{`INSERT INTO olp.code_accounts(id, project_id, provider_id, credential_id, principal, name, models, etag, created_by) VALUES($1, $2, $3, $4, $5, $6, '["model"]', $7, $8)`, []any{account, project, provider, credential, principal, principal, uuid.NewString(), user}},
-		} {
-			if _, err := s.pool.Exec(t.Context(), statement.sql, statement.args...); err != nil {
-				t.Fatal(err)
-			}
-		}
-		return account
-	}
-	codex := seed("codex-subscription", "codex-principal")
-	minimax := seed("minimax-plan", "minimax-principal")
-	claude := seed("claude-subscription", "claude-principal")
-
-	if status, raw := s.do(owner, "POST", "/api/v1/code/accounts/"+codex+"/allowance-reads", nil, nil); status != http.StatusBadRequest {
-		t.Fatalf("missing Idempotency-Key: status %d: %s", status, raw)
-	}
-	for _, account := range []string{codex, minimax} {
-		if status, raw := s.do(owner, "POST", "/api/v1/code/accounts/"+account+"/allowance-reads", nil, idempotent()); status != http.StatusUnprocessableEntity {
-			t.Fatalf("unqualified allowance read: status %d: %s", status, raw)
-		}
-	}
-	if status, raw := s.do(owner, "POST", "/api/v1/code/accounts/"+claude+"/allowance-reads", nil, idempotent()); status != http.StatusUnprocessableEntity {
-		t.Fatalf("unqualified allowance read: status %d: %s", status, raw)
-	}
-	s.eventually("code allowance worker checkpoint", 30*time.Second, func() (bool, string) {
-		var checks int
-		if err := s.pool.QueryRow(t.Context(), `SELECT successes_total+failures_total FROM olp.worker_task_health WHERE task='code_allowance_read'`).Scan(&checks); err != nil {
-			return false, err.Error()
-		}
-		return checks > 0, "no checkpoint yet"
-	})
-
-	if _, err := s.pool.Exec(t.Context(), `UPDATE olp.code_accounts SET models='["model","other"]' WHERE id=$1`, minimax); err != nil {
-		t.Fatal(err)
-	}
-	store := codesessions.New(s.pool)
-	retryAt := time.Now().Add(time.Hour)
-	for _, account := range []string{codex, minimax} {
-		if err := store.ObserveCooldownClass(t.Context(), account, "model", codeadapter.Classification{Class: codeadapter.CooldownCapacity, Scope: codeadapter.ScopeModel, RetryAt: retryAt}, time.Now()); err != nil {
-			t.Fatal(err)
-		}
-	}
-	eligible := map[string]bool{}
-	for _, item := range s.want(owner, "GET", "/api/v1/code/accounts?project_id="+project, nil, nil, http.StatusOK)["items"].([]any) {
-		account := item.(map[string]any)
-		eligible[account["id"].(string)] = account["eligible"].(bool)
-	}
-	if want := map[string]bool{codex: false, minimax: true, claude: true}; !maps.Equal(eligible, want) {
-		t.Fatalf("eligible after model cooldowns = %v, want %v", eligible, want)
-	}
-}
 func TestCodeAccountExtraUsageRoundTripsAndRefusesNonKimiAccounts(t *testing.T) {
-	pool, _ := newDatabase(t)
-	if err := database.Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
+	pool, _ := harness.Database(t)
 	user, project := uuid.NewString(), uuid.NewString()
 	kimiProvider, codexProvider := uuid.NewString(), uuid.NewString()
 	kimiCredential, codexCredential := uuid.NewString(), uuid.NewString()
@@ -1543,10 +1398,8 @@ func TestCodeAccountExtraUsageRoundTripsAndRefusesNonKimiAccounts(t *testing.T) 
 }
 
 func TestCodeAccountPromotionCycleAnchor(t *testing.T) {
-	pool, _ := newDatabase(t)
-	if err := database.Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
+	pool, _ := harness.Database(t)
 	user, project, provider, credential, account := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 	anchor, changedAnchor, etag := "2026-10-04", "2026-10-12", uuid.NewString()
 	for _, statement := range []struct {

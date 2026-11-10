@@ -1,13 +1,11 @@
-//go:build service
+//go:build integration
 
-package service_test
+package integration_test
 
 import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -19,19 +17,17 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/tests/harness"
 )
 
 func TestAllowanceObservationMigrationBackfillsLegacyWindows(t *testing.T) {
-	pool, _ := newDatabase(t)
-	if err := database.Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
+	pool, _ := harness.Database(t)
 	user, project, provider, credential, account := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 	statements := []struct {
 		sql  string
@@ -86,10 +82,8 @@ func TestAllowanceObservationMigrationBackfillsLegacyWindows(t *testing.T) {
 }
 
 func TestCodeDecisionsMigrationKeepsRecordsContentFree(t *testing.T) {
-	pool, _ := newDatabase(t)
-	if err := database.Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
+	pool, _ := harness.Database(t)
 	user, project, provider, credential, account, other, key, route, revision, binding, attempt := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 	statements := []struct {
 		sql  string
@@ -200,7 +194,8 @@ func migrateBefore(t *testing.T, pool *pgxpool.Pool, version string) {
 }
 
 func TestUpgradeKeepsLegacyBillingGapsUnimported(t *testing.T) {
-	pool, _ := newDatabase(t)
+	t.Parallel()
+	pool, _ := harness.EmptyDatabase(t)
 	migrateBefore(t, pool, "0127")
 	user, provider := uuid.NewString(), uuid.NewString()
 	legacy := []struct {
@@ -245,7 +240,8 @@ func TestUpgradeKeepsLegacyBillingGapsUnimported(t *testing.T) {
 }
 
 func TestUpgradeRefusesGuardrailFieldsOutsideTheirType(t *testing.T) {
-	pool, _ := newDatabase(t)
+	t.Parallel()
+	pool, _ := harness.EmptyDatabase(t)
 	migrateBefore(t, pool, "0142")
 	user, guardrail, revision := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	tx, err := pool.Begin(t.Context())
@@ -286,7 +282,8 @@ func TestUpgradeRefusesGuardrailFieldsOutsideTheirType(t *testing.T) {
 }
 
 func TestMigrationsApplyConcurrentlyAndRefuseChangedHistory(t *testing.T) {
-	pool, _ := newDatabase(t)
+	t.Parallel()
+	pool, _ := harness.EmptyDatabase(t)
 	var group sync.WaitGroup
 	failures := make(chan error, 2)
 	for range 2 {
@@ -318,65 +315,9 @@ func TestMigrationsApplyConcurrentlyAndRefuseChangedHistory(t *testing.T) {
 	}
 }
 
-// TestServiceRunsUnderRuntimeRole follows the documented deployment: the owner
-// migrates and grants, and the process connects as the restricted runtime role.
-func TestServiceRunsUnderRuntimeRole(t *testing.T) {
-	pool, databaseURL := newDatabase(t)
-	role := "runtime_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	identifier := pgx.Identifier{role}.Sanitize()
-	if _, err := pool.Exec(t.Context(), "CREATE ROLE "+identifier+" LOGIN PASSWORD 'runtime-test'"); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if _, err := pool.Exec(ctx, "DROP OWNED BY "+identifier); err != nil {
-			t.Errorf("drop owned: %v", err)
-		}
-		if _, err := pool.Exec(ctx, "DROP ROLE "+identifier); err != nil {
-			t.Errorf("drop role: %v", err)
-		}
-	})
-	env := newEnvironment(t, databaseURL)
-	runBinary(t, env, "migrate", "--runtime-role", role)
-
-	parsed, err := url.Parse(databaseURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	parsed.User = url.UserPassword(role, "runtime-test")
-	env.values["OLP_DATABASE_URL"] = parsed.String()
-	s := startProcess(t, pool, env)
-	owner := s.owner()
-	s.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "runtime-role"}, idempotent(), http.StatusCreated)
-	s.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "runtime-role", "scopes": []string{"inference"}}, idempotent(), http.StatusCreated)
-
-	config, err := pgx.ParseConfig(parsed.String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	restricted, err := pgx.ConnectConfig(t.Context(), config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer restricted.Close(context.Background())
-	if _, err = restricted.Exec(t.Context(), "SELECT olp.dirty_commitment(date_trunc('day', now()), date_trunc('day', now()) + interval '1 day')"); err != nil {
-		t.Fatalf("the runtime role cannot mark commitment usage for export: %v", err)
-	}
-	var dirtyDays int
-	if err = restricted.QueryRow(t.Context(), "SELECT count(*) FROM olp.focus_dirty_days").Scan(&dirtyDays); err != nil || dirtyDays != 1 {
-		t.Fatalf("commitment export days = %d, want 1: %v", dirtyDays, err)
-	}
-	if _, err = restricted.Exec(t.Context(), "DELETE FROM olp.migrations"); err == nil {
-		t.Fatal("the runtime role can rewrite migration history")
-	}
-}
-
 func TestNotificationEventConstraintMatchesPublishedEvents(t *testing.T) {
-	pool, _ := newDatabase(t)
-	if err := database.Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
+	pool, _ := harness.Database(t)
 	var definition string
 	if err := pool.QueryRow(t.Context(), `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname='notification_rules_event_check'`).Scan(&definition); err != nil {
 		t.Fatal(err)
@@ -411,10 +352,8 @@ func TestNotificationEventConstraintMatchesPublishedEvents(t *testing.T) {
 }
 
 func TestBatchSubmissionMigrationSplitsLegacyCursor(t *testing.T) {
-	pool, _ := newDatabase(t)
-	if err := database.Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
+	pool, _ := harness.Database(t)
 	created := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
 	closeAfter := created.Add(72 * time.Hour)
 	deadline := created.Add(10 * time.Minute)

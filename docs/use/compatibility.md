@@ -932,8 +932,8 @@ establish live-provider or production-performance qualification.
 
 | Tier | What it adds | Evidence required |
 | --- | --- | --- |
-| Reviewed preset | A catalog entry over an existing dialect and hosting composition | Vendor contract fixtures in the safety net where the package is allowlisted, pinning documented endpoints, unsupported parameters, usage shape, stream terminal events and error envelopes |
-| First-party profile or codec | A new profile, hosting composition, authentication mode or dialect codec in `internal/connectors`, `internal/protocols` or `internal/operations` | Conformance fixtures in the safety net where the package is allowlisted, pricing coverage, and a recorded manual run against a stub or real provider |
+| Reviewed preset | A catalog entry over an existing dialect and hosting composition | Vendor contract fixtures in the unit tier, pinning documented endpoints, unsupported parameters, usage shape, stream terminal events and error envelopes |
+| First-party profile or codec | A new profile, hosting composition, authentication mode or dialect codec in `internal/connectors`, `internal/protocols` or `internal/operations` | Conformance fixtures in the unit tier, pricing coverage, and a recorded manual run against a stub or real provider |
 | Plugin | Authentication and hosting around a built-in dialect, supplied by an operator ([plugins](plugins.md)) | The plugin's own manifest review and origin approval |
 
 No tier certifies a model: certification stays a live, exact-tuple probe run by

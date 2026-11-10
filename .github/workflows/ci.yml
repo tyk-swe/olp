@@ -151,28 +151,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: make check-console
-  test-fast:
-    needs: changes
-    if: needs.changes.outputs.code == 'true' || needs.changes.outputs.scripts == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - id: setup
-        uses: ./.github/actions/setup
-        with:
-          go-cache-suffix: -test-fast-${{ hashFiles('**/*.go') }}
-      - run: pnpm --dir console api:generate
-      - run: make test-fast
-      - if: ${{ failure() && steps.setup.outcome == 'success' && steps.setup.outputs.go-cache-hit != 'true' }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-            ~/.cache/staticcheck
-          key: ${{ steps.setup.outputs.go-cache-key }}
-  test-service:
+  test-unit-go:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-26.04
@@ -183,9 +162,106 @@ jobs:
         uses: ./.github/actions/setup
         with:
           node-modules: "false"
-          go-cache-suffix: -test-service-${{ hashFiles('**/*.go', 'scripts/test-service.sh') }}
-          go-cache-restore-suffix: -test-service-
-      - run: make test-service
+          go-cache-suffix: -test-unit-go-${{ hashFiles('**/*.go', 'scripts/lib/test.sh', 'scripts/test-unit.sh') }}
+          go-cache-restore-suffix: -test-unit-go-
+      - run: make test-unit-go
+      - if: ${{ failure() && steps.setup.outcome == 'success' && steps.setup.outputs.go-cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+            ~/.cache/staticcheck
+          key: ${{ steps.setup.outputs.go-cache-key }}
+  test-unit-console:
+    needs: changes
+    if: needs.changes.outputs.code == 'true' || needs.changes.outputs.scripts == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: '>=10.26.0'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --dir console api:generate
+      - run: make test-unit-console
+  test-integration:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: setup
+        uses: ./.github/actions/setup
+        with:
+          node-modules: "false"
+          go-cache-suffix: -test-integration-${{ hashFiles('**/*.go', 'scripts/lib/test.sh', 'scripts/test-integration.sh') }}
+          go-cache-restore-suffix: -test-integration-
+      - run: make test-integration
+      - if: ${{ failure() && steps.setup.outcome == 'success' && steps.setup.outputs.go-cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+            ~/.cache/staticcheck
+          key: ${{ steps.setup.outputs.go-cache-key }}
+  test-e2e-api:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: setup
+        uses: ./.github/actions/setup
+        with:
+          node-modules: "false"
+          go-cache-suffix: -test-e2e-api-${{ hashFiles('**/*.go', 'scripts/lib/test.sh', 'scripts/test-e2e.sh') }}
+          go-cache-restore-suffix: -test-e2e-api-
+      - run: make test-e2e-api
+      - if: ${{ failure() && steps.setup.outcome == 'success' && steps.setup.outputs.go-cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+            ~/.cache/staticcheck
+          key: ${{ steps.setup.outputs.go-cache-key }}
+  test-e2e-browser:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: setup
+        uses: ./.github/actions/setup
+        with:
+          go-cache-suffix: -test-e2e-browser-${{ hashFiles('**/*.go', 'scripts/lib/test.sh', 'scripts/test-e2e.sh') }}
+          go-cache-restore-suffix: -test-e2e-browser-
+      - run: pnpm --dir console api:generate
+      - id: playwright
+        run: echo "version=$(pnpm --dir console exec playwright --version | cut -d ' ' -f 2)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
+      - run: pnpm --dir console exec playwright install --with-deps --only-shell chromium
+      - run: make test-e2e-browser
+      - if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: browser-journey-traces
+          path: console/test-results
+          if-no-files-found: ignore
+          retention-days: 7
       - if: ${{ failure() && steps.setup.outcome == 'success' && steps.setup.outputs.go-cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

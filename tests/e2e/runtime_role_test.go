@@ -1,0 +1,71 @@
+//go:build e2e
+
+package e2e_test
+
+import (
+	"context"
+	"net/http"
+	"net/url"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/tests/harness"
+)
+
+// TestServiceRunsUnderRuntimeRole follows the documented deployment: the owner
+// migrates and grants, and the process connects as the restricted runtime role.
+func TestServiceRunsUnderRuntimeRole(t *testing.T) {
+	t.Parallel()
+	pool, databaseURL := harness.EmptyDatabase(t)
+	role := "runtime_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	identifier := pgx.Identifier{role}.Sanitize()
+	if _, err := pool.Exec(t.Context(), "CREATE ROLE "+identifier+" LOGIN PASSWORD 'runtime-test'"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := pool.Exec(ctx, "DROP OWNED BY "+identifier); err != nil {
+			t.Errorf("drop owned: %v", err)
+		}
+		if _, err := pool.Exec(ctx, "DROP ROLE "+identifier); err != nil {
+			t.Errorf("drop role: %v", err)
+		}
+	})
+	env := newEnvironment(t, databaseURL)
+	runBinary(t, env, "migrate", "--runtime-role", role)
+
+	parsed, err := url.Parse(databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed.User = url.UserPassword(role, "runtime-test")
+	env.values["OLP_DATABASE_URL"] = parsed.String()
+	s := startProcess(t, pool, env)
+	owner := s.owner()
+	s.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "runtime-role"}, idempotent(), http.StatusCreated)
+	s.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "runtime-role", "scopes": []string{"inference"}}, idempotent(), http.StatusCreated)
+
+	config, err := pgx.ParseConfig(parsed.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	restricted, err := pgx.ConnectConfig(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restricted.Close(context.Background())
+	if _, err = restricted.Exec(t.Context(), "SELECT olp.dirty_commitment(date_trunc('day', now()), date_trunc('day', now()) + interval '1 day')"); err != nil {
+		t.Fatalf("the runtime role cannot mark commitment usage for export: %v", err)
+	}
+	var dirtyDays int
+	if err = restricted.QueryRow(t.Context(), "SELECT count(*) FROM olp.focus_dirty_days").Scan(&dirtyDays); err != nil || dirtyDays != 1 {
+		t.Fatalf("commitment export days = %d, want 1: %v", dirtyDays, err)
+	}
+	if _, err = restricted.Exec(t.Context(), "DELETE FROM olp.migrations"); err == nil {
+		t.Fatal("the runtime role can rewrite migration history")
+	}
+}

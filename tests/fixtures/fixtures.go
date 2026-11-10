@@ -1,5 +1,5 @@
 // Package fixtures preserves the language-neutral reference corpus used by
-// the protocol, routing, and token tests in the fast safety net.
+// the protocol, routing, and token tests.
 package fixtures
 
 import "embed"

@@ -6,7 +6,7 @@
 
 - [ ] `make check` passes
 - [ ] New or changed tests assert behavior only, pin no outside fact without a cited source and date, and bug fixes carry a regression test in the existing mapped test file
-- [ ] `make test-fast` passes inside its budget, and any new test is in the allowlist or displaces a weaker one
+- [ ] `make test` passes with every suite inside its budget, and each new test sits in the cheapest tier that can catch the failure
 - [ ] Ran the affected service or browser behavior directly and recorded the command and output
 - [ ] Regenerated affected API contracts with `make api`
 - [ ] Included screenshots for visible console changes

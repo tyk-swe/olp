@@ -75,7 +75,7 @@ and event limits apply; malformed responses fail explicitly.
 
 ## Testing
 
-Bedrock protocol translation remains in the fast safety net. Run it focused
+Bedrock protocol translation runs in the unit tier. Run it focused
 with:
 
 ```sh
