@@ -24,7 +24,7 @@
 <style>
   .actions {
     display: flex;
-    align-items: center;
+    align-items: end;
     flex-wrap: wrap;
     gap: 0.75rem;
   }

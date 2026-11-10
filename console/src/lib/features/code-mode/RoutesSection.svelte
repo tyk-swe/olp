@@ -158,7 +158,7 @@
   }
 </script>
 
-<div class="section">
+<div class="management">
   <div class="actions">
     <h2>{section.title}</h2>
     {#if allowed}
@@ -319,7 +319,7 @@
 </div>
 
 <style>
-  .section {
+  .management {
     display: grid;
     gap: 1rem;
   }
