@@ -133,7 +133,7 @@ func scriptMissing(err error) bool {
 }
 
 func namesMissingScript(err error) bool {
-	return strings.Contains(err.Error(), "NOSCRIPT") || strings.Contains(err.Error(), "NoScriptError")
+	return strings.Contains(err.Error(), "NOSCRIPT")
 }
 
 type reply struct {

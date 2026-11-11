@@ -18,15 +18,11 @@ COPY inference ./inference
 COPY internal ./internal
 COPY management ./management
 COPY plugin ./plugin
-COPY deploy/native /out/native
 RUN version=$(sed -n 's/  "version": "\([^" ]*\)",/\1/p' package.json) && \
     test -n "$version" && test "${OLP_VERSION:-$version}" = "$version" && \
     mkdir -p /out && go build -mod=readonly -trimpath -tags="$OLP_GO_TAGS" \
       -ldflags="-s -w -X main.Version=$version" -o /out/olp ./cmd/olp
 RUN go version -m /out/olp > /out/go-build-info.txt && ldd /out/olp > /out/native-link.txt
-RUN glide_dir="$(go list -m -f '{{.Dir}}' github.com/valkey-io/valkey-glide/go/v2)" && \
-    cp "$glide_dir/LICENSE" /out/GLIDE-LICENSE && \
-    cp "$glide_dir/THIRD_PARTY_LICENSES_GO" /out/GLIDE-THIRD-PARTY-LICENSES
 RUN cp internal/operations/tokenization/estimate/ranks/LICENSE /out/TIKTOKEN-LICENSE
 
 FROM node:lts-alpine AS console-build
@@ -49,7 +45,6 @@ LABEL org.opencontainers.image.source="https://github.com/tyk-swe/olp" \
       org.opencontainers.image.version="$OLP_VERSION"
 COPY --from=go-build /out/olp /usr/local/bin/olp
 COPY --from=go-build /out/*LICENSE* /out/*txt /usr/share/doc/openllmproxy/
-COPY --from=go-build /out/native/ /usr/share/doc/openllmproxy/native/
 COPY --from=console-build /src/console/build /opt/olp/console
 COPY LICENSE /usr/share/doc/openllmproxy/
 ENV OLP_CONSOLE_DIR=/opt/olp/console OLP_LISTEN_ADDR=0.0.0.0:8080 OLP_OBSERVABILITY_LISTEN_ADDR=0.0.0.0:9090

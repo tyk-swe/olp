@@ -41,7 +41,7 @@ require (
 	github.com/scim2/filter-parser/v2 v2.3.1
 	github.com/shopspring/decimal v1.6.0
 	github.com/tetratelabs/wazero v1.12.0
-	github.com/valkey-io/valkey-glide/go/v2 v2.5.3
+	github.com/valkey-io/valkey-go v1.0.79
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.47.0
 	go.opentelemetry.io/otel/sdk v1.47.0

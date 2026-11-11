@@ -148,30 +148,25 @@ func TestReserveRateRejectsMalformedResponses(t *testing.T) {
 	}
 }
 
-func TestSupplyLoadsMissingScriptsForServerAndDriverErrors(t *testing.T) {
-	for name, refusal := range map[string]error{
-		"server": errors.New("NOSCRIPT No matching script. Please use EVAL."),
-		"driver": errors.New("An error was signalled by the server: - NoScriptError: No matching script."),
-	} {
-		t.Run(name, func(t *testing.T) {
-			client := &pipelinedScripted{&scripted{answer: func(command []string) (any, error) {
-				if command[0] == "EVALSHA" {
-					return nil, refusal
-				}
-				return []any{int64(1), int64(1), "ok", int64(0), int64(20_000), int64(24_000)}, nil
-			}}}
-			runner, err := NewRunner(client, "test")
-			if err != nil {
-				t.Fatal(err)
-			}
-			answer := runner.Supply(t.Context(), SupplyQuery{Caps: []CostCaps{{Owner: limits.Owner{ID: owner, Kind: limits.OwnerSupply, Basis: limits.BasisCost}, Daily: "1"}}})
-			if len(answer.Caps) != 1 || answer.Caps[0] != nil {
-				t.Fatalf("available cap with an uncached script = %v", answer.Caps)
-			}
-			if commands := client.commands(); len(commands) != 2 || commands[0][0] != "EVALSHA" || commands[1][0] != "EVAL" {
-				t.Fatalf("missing script was not loaded: %v", commands)
-			}
-		})
+func TestSupplyLoadsMissingScripts(t *testing.T) {
+	t.Parallel()
+	refusal := errors.New("NOSCRIPT No matching script. Please use EVAL.")
+	client := &pipelinedScripted{&scripted{answer: func(command []string) (any, error) {
+		if command[0] == "EVALSHA" {
+			return nil, refusal
+		}
+		return []any{int64(1), int64(1), "ok", int64(0), int64(20_000), int64(24_000)}, nil
+	}}}
+	runner, err := NewRunner(client, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer := runner.Supply(t.Context(), SupplyQuery{Caps: []CostCaps{{Owner: limits.Owner{ID: owner, Kind: limits.OwnerSupply, Basis: limits.BasisCost}, Daily: "1"}}})
+	if len(answer.Caps) != 1 || answer.Caps[0] != nil {
+		t.Fatalf("available cap with an uncached script = %v", answer.Caps)
+	}
+	if commands := client.commands(); len(commands) != 2 || commands[0][0] != "EVALSHA" || commands[1][0] != "EVAL" {
+		t.Fatalf("missing script was not loaded: %v", commands)
 	}
 }
 

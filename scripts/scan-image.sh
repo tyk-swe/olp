@@ -18,15 +18,10 @@ for ecosystem in golang npm; do
     '[.. | objects | .referenceLocator? // empty | select(startswith($prefix))] | length > 0' \
     "$reports/sboms.json" >/dev/null || { echo "The inventory is missing $ecosystem packages." >&2; exit 1; }
 done
-# The shipped GLIDE archive is native Rust-derived code. Its prebuilt sources
-# and licenses remain part of the inventory even though Cargo is never run.
-jq -e '[.. | objects | .name? // empty | select(test("valkey-glide"))] | length > 0' \
-  "$reports/sboms.json" >/dev/null
 container=$(docker create "$image")
 mkdir -p "$reports/native-inventory"
 docker cp "$container:/usr/share/doc/openllmproxy/." "$reports/native-inventory"
 docker rm "$container" >/dev/null
-test -s "$reports/native-inventory/GLIDE-THIRD-PARTY-LICENSES"
 test -s "$reports/native-inventory/TIKTOKEN-LICENSE"
 test -s "$reports/native-inventory/native-link.txt"
 count=0
@@ -38,16 +33,11 @@ while IFS= read -r document; do
     --exit-code 1 "/reports/sbom-$count.json" || status=$?
 done < <(jq -c '.. | objects | select(has("spdxVersion") and has("packages"))' "$reports/sboms.json")
 (( count > 0 )) || { echo 'The candidate is missing its SPDX inventory.' >&2; exit 1; }
-test -s "$reports/native-inventory/native/valkey-glide.spdx.json"
-docker run "${args[@]}" "$scanner" sbom --cache-dir /reports/cache \
-  --severity HIGH,CRITICAL --exit-code 1 --format json \
-  --output /reports/native-rust-vulnerabilities.json \
-  /reports/native-inventory/native/valkey-glide.spdx.json || status=$?
 if (( status != 0 )); then
   for report in "$reports"/*vulnerabilities.json; do
     [[ -f $report ]] || continue
     jq -r '.Results[]?.Vulnerabilities[]? | [.VulnerabilityID, .PkgName, .InstalledVersion, .FixedVersion, .Severity] | @tsv' "$report"
   done
 fi
-printf 'Scanned %s, %s build inventories, and the native FFI inventory.\n' "$image" "$count"
+printf 'Scanned %s and %s build inventories.\n' "$image" "$count"
 exit "$status"
