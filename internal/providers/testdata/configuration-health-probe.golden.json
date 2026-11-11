@@ -1,0 +1,1 @@
+{"kind":"gemini","auth_mode":"api_key","endpoint":"https://generativelanguage.googleapis.com/v1beta","cloud_region":null,"cloud_project":null,"deployment":null,"api_version":null,"options":{"credential_headers":[],"limits":null,"models":{"gemini-2.5-flash":{"context_length":1048576}},"parameter_defaults":{},"vendor_id":"google","health_probe":{"interval_seconds":300}}}

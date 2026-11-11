@@ -3,8 +3,12 @@ package providers
 import (
 	"encoding/json"
 	"errors"
+	"maps"
+	"os"
+	"reflect"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -96,5 +100,161 @@ func TestValidateAndNormalizeRefusesConnectionsThatCannotBeServedSafely(t *testi
 				t.Fatalf("got %#v, want a refusal of %q", err, c.field)
 			}
 		})
+	}
+}
+
+func storedInputs() map[string]Configuration {
+	effective := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	ends := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+	return map[string]Configuration{
+		"null-rich-openai": openAI(Options{}),
+		"limits-supply": {Identity: identity{Kind: KindAnthropic, AuthMode: AuthAPIKey}, Options: Options{Limits: &Limits{
+			MaxConcurrency: new(int64(4)), RequestsPerMinute: new(int64(60)), TokensPerMinute: new(int64(100000)),
+			Supply: routing.Supply{DailyCostLimit: new("10.00"), MonthlyCostLimit: new("200"), PriorityShares: &routing.Shares{Critical: 40, High: 30, Normal: 20, Low: 10}, SaturationPercent: new(int64(80))},
+		}}},
+		"commitment": {Identity: identity{Kind: KindBedrock, AuthMode: "default_chain", CloudRegion: new("us-east-1")},
+			Options: Options{Commitment: &routing.Commitment{ID: "commitment-1", EffectiveAt: &effective, EndsAt: &ends, Amount: " 1200.50 ", Period: "month"}}},
+		"health-probe": {Identity: identity{Kind: KindGemini, AuthMode: AuthAPIKey},
+			Options: Options{HealthProbe: &routing.HealthProbe{IntervalSeconds: 300}, Models: map[string]json.RawMessage{"gemini-2.5-flash": json.RawMessage(`{"context_length":1048576}`)}}},
+		"azure-deployment": {Identity: identity{Kind: KindAzure, AuthMode: AuthAPIKey, ProfileID: "azure-legacy-chat", ProfileRevision: connectors.ProfileRevision,
+			Endpoint: new("https://example.openai.azure.com"), Deployment: new("chat-deployment"), APIVersion: new("2024-10-21")},
+			Options: Options{
+				Network:           &egress.ConnectionOptions{CredentialID: "6f1c2d3e-4b5a-4c6d-8e7f-9a0b1c2d3e4f", ConnectTimeoutMS: new(int64(2000)), MaxConnsPerHost: new(8)},
+				SemanticHeaders:   map[string]string{"OpenAI-Beta": "assistants=v2"},
+				QuerySettings:     map[string]string{"api-version": "2024-10-21"},
+				OperationDefaults: map[string]connectors.DefaultSet{"generation": {Dialect: "openai-chat", Values: map[string]json.RawMessage{"temperature": json.RawMessage(`0.2`)}}},
+				Bindings:          map[string]connectors.Binding{"gpt-4o": {Deployment: "gpt-4o-deployment", PrincipalID: "principal-1", Snapshot: "2024-08-06", ResourceScope: "scope-1"}},
+				Models:            map[string]json.RawMessage{"gpt-4o": json.RawMessage(`{"context_length":128000}`)},
+			}},
+		"vertex-batch": {Identity: identity{Kind: KindVertex, AuthMode: "service_account", ProfileID: "vertex-batch-prediction", ProfileRevision: connectors.ProfileRevision,
+			CloudRegion: new("us-central1"), CloudProject: new("acme-project"), BatchStorage: &connectors.BatchStorage{InputURIPrefix: "gs://acme-batch/in/", OutputURIPrefix: "gs://acme-batch/out/"}},
+			Options: Options{
+				TuningDatasetURIPrefixes: []string{"gs://acme-tuning/datasets/"},
+				DocumentURIPrefixes:      []string{"gs://acme-docs/"},
+				QuerySettings:            map[string]string{"$xgafv": "2"},
+				Bindings:                 map[string]connectors.Binding{"gemini-2.5-pro": {Region: "us-central1"}},
+			}},
+		"credential-headers": {Identity: identity{CredentialSource: "caller", Kind: KindOpenAICompatible, AuthMode: AuthHeaders, Endpoint: new("https://llm.example.com/v1")},
+			Options: Options{VendorID: new("groq"), CredentialHeaders: []string{"x-tenant-key"}, ParameterDefaults: map[string]json.RawMessage{"temperature": json.RawMessage(`0.5`)}}},
+	}
+}
+
+func storedNames() []string {
+	return append(slices.Sorted(maps.Keys(storedInputs())), "plugin")
+}
+
+func testdata(t *testing.T, name string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/" + name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func golden(t *testing.T, name string) []byte {
+	t.Helper()
+	return testdata(t, "configuration-"+name+".golden.json")
+}
+
+func storedBytes(t *testing.T, c Configuration) string {
+	t.Helper()
+	encoded, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(encoded) + "\n"
+}
+
+func readStored(t *testing.T, name string) Configuration {
+	t.Helper()
+	var stored Configuration
+	if err := json.Unmarshal(golden(t, name), &stored); err != nil {
+		t.Fatal(err)
+	}
+	stored.Normalize()
+	if err := stored.pinned(testdata(t, "installed-plugin.json")); err != nil {
+		t.Fatal(err)
+	}
+	return stored
+}
+
+func TestPrepareConfigurationStoresTheGoldenBytes(t *testing.T) {
+	t.Parallel()
+	for name, input := range storedInputs() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			prepared, err := PrepareConfiguration(t.Context(), nil, nil, &egress.Policy{}, input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, want := storedBytes(t, prepared.Configuration()), string(golden(t, name)); got != want {
+				t.Fatalf("stored\n%s\nwant\n%s", got, want)
+			}
+		})
+	}
+}
+
+func TestStoredConfigurationRevalidatesToTheSameBytes(t *testing.T) {
+	t.Parallel()
+	for _, name := range storedNames() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			want := string(golden(t, name))
+			var decoded Configuration
+			if err := json.Unmarshal([]byte(want), &decoded); err != nil {
+				t.Fatal(err)
+			}
+			if got := storedBytes(t, decoded); got != want {
+				t.Fatalf("re-encoded\n%s\nwant\n%s", got, want)
+			}
+			stored := readStored(t, name)
+			if err := stored.ValidateAndNormalize(&egress.Policy{}); err != nil {
+				t.Fatal(err)
+			}
+			if got := storedBytes(t, stored); got != want {
+				t.Fatalf("revalidated\n%s\nwant\n%s", got, want)
+			}
+		})
+	}
+}
+
+func servedConnector(t *testing.T, name string) connectors.Config {
+	t.Helper()
+	provider, err := routing.DecodeProviderRevision(routing.ProviderRevision{
+		ID: "provider", RevisionID: "revision", Name: name, State: "active",
+		Configuration: golden(t, name), Models: []byte(`[]`), Slots: []byte(`[]`), InstalledPlugin: testdata(t, "installed-plugin.json"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return provider.Connector()
+}
+
+func TestStoredConfigurationServesTheConnectorItWasValidatedAs(t *testing.T) {
+	t.Parallel()
+	runtimeOnly := []string{"CredentialSource", "ObservedPrincipal", "SigningService"}
+	carried := slices.DeleteFunc(reflect.VisibleFields(reflect.TypeFor[connectors.Config]()), func(field reflect.StructField) bool {
+		return slices.Contains(runtimeOnly, field.Name)
+	})
+	for _, name := range storedNames() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			stored := readStored(t, name)
+			validated, served := reflect.ValueOf(stored.transport()), reflect.ValueOf(servedConnector(t, name))
+			for _, field := range carried {
+				if want, got := validated.FieldByIndex(field.Index).Interface(), served.FieldByIndex(field.Index).Interface(); !reflect.DeepEqual(got, want) {
+					t.Errorf("%s served %#v, validated %#v", field.Name, got, want)
+				}
+			}
+		})
+	}
+	for _, field := range carried {
+		populated := slices.ContainsFunc(storedNames(), func(name string) bool {
+			return !reflect.ValueOf(servedConnector(t, name)).FieldByIndex(field.Index).IsZero()
+		})
+		if !populated {
+			t.Errorf("no stored configuration sets %s, so the served and validated copies are never compared on it", field.Name)
+		}
 	}
 }
