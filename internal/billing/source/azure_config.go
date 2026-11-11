@@ -54,12 +54,18 @@ func parseAzureScope(raw json.RawMessage) (azureScope, error) {
 		return azureScope{}, access.Invalid("scope.subscription_ids", "Subscription IDs must be UUIDs.")
 	}
 	return azureScope{
-		BillingScope:    scope.BillingScope,
-		ExportName:      scope.ExportName,
-		StorageAccount:  scope.StorageAccount,
-		Container:       scope.Container,
-		Prefix:          strings.Trim(scope.Prefix, "/"),
-		SubscriptionIDs: slices.Compact(slices.Sorted(slices.Values(scope.SubscriptionIDs))),
+		BillingScope:   scope.BillingScope,
+		ExportName:     scope.ExportName,
+		StorageAccount: scope.StorageAccount,
+		Container:      scope.Container,
+		Prefix:         strings.Trim(scope.Prefix, "/"),
+		SubscriptionIDs: slices.Compact(slices.Sorted(func(yield func(string) bool) {
+			for _, id := range scope.SubscriptionIDs {
+				if !yield(strings.ToLower(id)) {
+					return
+				}
+			}
+		})),
 	}, nil
 }
 

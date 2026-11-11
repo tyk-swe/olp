@@ -5,10 +5,18 @@ package integration_test
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/csv"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"io"
 	"log/slog"
+	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -29,6 +37,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/tests/harness"
+	bigqueryapi "google.golang.org/api/bigquery/v2"
 )
 
 type billingFixture struct {
@@ -213,6 +222,119 @@ func TestBillingImportStoresEachInvoicedDayAndRefreshesTheLastWeek(t *testing.T)
 	if got, want := queries[len(queries)-1].Get("start_time"), strconv.FormatInt(today.AddDate(0, 0, -7).Unix(), 10); got != want {
 		t.Fatalf("a refresh started at %s, want the last week from %s", got, want)
 	}
+}
+
+func TestBillingImportClearsOnlyDaysOmittedByAnEmptyGoogleRestatement(t *testing.T) {
+	t.Parallel()
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	watermark := today.AddDate(0, 0, -1)
+	proxy, roots, key := googleBillingProxy(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/token":
+			io.WriteString(w, `{"access_token":"billing-fixture-token","token_type":"Bearer","expires_in":3600}`)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/jobs"):
+			var job bigqueryapi.Job
+			if err := json.NewDecoder(r.Body).Decode(&job); err != nil {
+				t.Error(err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			json.NewEncoder(w).Encode(bigqueryapi.Job{JobReference: job.JobReference, Configuration: job.Configuration, Status: &bigqueryapi.JobStatus{State: "DONE"}})
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/queries/"):
+			fields := slices.Collect(func(yield func(*bigqueryapi.TableFieldSchema) bool) {
+				for _, name := range []string{"usage_day", "service_id", "sku_id", "currency", "amount", "line_kind", "source_revision"} {
+					if !yield(&bigqueryapi.TableFieldSchema{Name: name, Type: "STRING"}) {
+						return
+					}
+				}
+			})
+			json.NewEncoder(w).Encode(bigqueryapi.GetQueryResultsResponse{
+				JobComplete: true, TotalRows: 1, Schema: &bigqueryapi.TableSchema{Fields: fields},
+				Rows: []*bigqueryapi.TableRow{{F: []*bigqueryapi.TableCell{{V: ""}, {V: ""}, {V: ""}, {V: ""}, {V: ""}, {V: ""}, {V: watermark.Format(time.RFC3339Nano)}}}},
+			})
+		default:
+			t.Errorf("unexpected Google billing request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	f := newBillingFixture(t, "vertex_ai", fmt.Sprintf(`{"kind":"vertex_ai","options":{"network":{"proxy_url":%q,"trust_roots_pem":%q}}}`, proxy, roots))
+	const scope = `{"billing_account_id":"123456-ABCDEF-123456","bigquery_project_id":"fixture-project","dataset_id":"billing_export","table_id":"export"}`
+	credential := fmt.Sprintf(`{"source":"google_bigquery","auth_mode":"service_account","service_account":{"type":"service_account","client_email":"billing@fixture-project.iam.gserviceaccount.com","private_key":%q,"token_uri":"https://oauth2.googleapis.com/token"}}`, key)
+	f.enable(t, "google_bigquery", scope, credential)
+	for _, at := range []time.Time{today.AddDate(0, 0, -4), watermark} {
+		if _, err := f.pool.Exec(t.Context(), `INSERT INTO olp.provider_billing_days(provider_id,day,source,scope,last_success_at)
+			VALUES ($1,$2,'google_bigquery',$3::jsonb,now())`, f.providerID, at, scope); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.pool.Exec(t.Context(), `INSERT INTO olp.provider_invoiced_costs(provider_id,day,line_item,currency,amount,source)
+			VALUES ($1,$2,'fixture','USD',1,'google_bigquery')`, f.providerID, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	f.importDue(t, "")
+	wantBillingStatus(t, f.status(t), "", 0, 55*time.Minute, 65*time.Minute)
+	want := []string{day(watermark) + " / fixture / USD / 1"}
+	if got := f.invoiced(t); !slices.Equal(got, want) {
+		t.Fatalf("invoiced costs after an empty restatement:\n%q\nwant\n%q", got, want)
+	}
+	rows, err := f.pool.Query(t.Context(), `SELECT day FROM olp.provider_billing_days WHERE provider_id=$1 ORDER BY day`, f.providerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	covered, err := pgx.CollectRows(rows, pgx.RowTo[time.Time])
+	if err != nil || !slices.Equal(covered, []time.Time{watermark}) {
+		t.Fatalf("covered days after an empty restatement %v (%v), want only the watermark day", covered, err)
+	}
+}
+
+func googleBillingProxy(t *testing.T, handler http.Handler) (string, string, string) {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificate := &x509.Certificate{
+		SerialNumber: big.NewInt(1), DNSNames: []string{"bigquery.googleapis.com", "oauth2.googleapis.com"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, certificate, certificate, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewUnstartedServer(handler)
+	server.TLS = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}}}
+	server.StartTLS()
+	t.Cleanup(server.Close)
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodConnect {
+			http.Error(w, "CONNECT required", http.StatusMethodNotAllowed)
+			return
+		}
+		upstream, err := net.DialTimeout("tcp", server.Listener.Addr().String(), time.Second)
+		if err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		defer upstream.Close()
+		client, buffered, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer client.Close()
+		buffered.WriteString("HTTP/1.1 200 Connection Established\r\n\r\n")
+		buffered.Flush()
+		go func() { _, _ = io.Copy(upstream, buffered) }()
+		_, _ = io.Copy(client, upstream)
+	}))
+	t.Cleanup(proxy.Close)
+	return proxy.URL, string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
+		string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}))
 }
 
 func TestBillingImportBacksOffWhenTheVendorRejectsALegacyRawKey(t *testing.T) {

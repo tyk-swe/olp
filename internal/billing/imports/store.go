@@ -200,7 +200,7 @@ func writeDays(ctx context.Context, tx pgx.Tx, r record, scope source.Scope, per
 	if replaces := period.Revision; replaces != nil && replaces.Replaces != nil {
 		if _, err := tx.Exec(ctx, `WITH omitted AS (
 				DELETE FROM olp.provider_billing_days WHERE provider_id=$1
-				AND day>=$2::date AND day<$3::date AND day <> ALL($4::date[])
+				AND day>=$2::date AND day<$3::date AND day <> ALL(COALESCE($4::date[], '{}'))
 				RETURNING day
 			)
 			DELETE FROM olp.provider_invoiced_costs WHERE provider_id=$1 AND day IN (SELECT day FROM omitted)`,
