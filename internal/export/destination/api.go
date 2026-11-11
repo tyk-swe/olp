@@ -20,7 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/secrets"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/retention"
 )
 
 const maxSinks = 1000
@@ -467,7 +467,7 @@ func checkStart(ctx context.Context, q access.Queryer, spec FOCUS, previous Spec
 	if prior, ok := previous.(FOCUS); ok && prior.StartDate != nil && *prior.StartDate == *spec.StartDate {
 		return nil
 	}
-	days, err := usage.RetentionDays(ctx, q)
+	days, err := retention.RetentionDays(ctx, q)
 	if err != nil {
 		return err
 	}

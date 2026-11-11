@@ -126,7 +126,7 @@ func (s *Server) delegate(ctx context.Context, x *call, plan routing.Plan) *Erro
 
 // adopt moves the request to the named route and plans it, returning the
 // outcome a fallback step records and the route's planning refusal.
-func (s *Server) adopt(ctx context.Context, x *call, slug, via string) (string, *Error) {
+func (s *Server) adopt(ctx context.Context, x *call, slug string, via usage.LegVia) (string, *Error) {
 	if x.walk.Visited(slug) {
 		return routing.FallbackRepeated, nil
 	}
@@ -170,7 +170,7 @@ func (s *Server) fallBack(ctx context.Context, x *call, conditions []string) boo
 // useRoute moves the request to route. Provider preparation depends on the
 // route's fidelity and content policy, and the session seed on its affinity,
 // so both start over.
-func (x *call) useRoute(route *routing.Route, via string) {
+func (x *call) useRoute(route *routing.Route, via usage.LegVia) {
 	x.walk = x.walk.Move(route, via == usage.ViaSelector)
 	x.routeLeg = routeLeg{route: route}
 	x.leg = &usage.RouteLeg{Route: route.Slug, RevisionID: route.RevisionID, Via: via}

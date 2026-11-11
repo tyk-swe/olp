@@ -11,7 +11,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/rates"
+	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 )
 
 type TokenDemand struct {
@@ -49,7 +50,7 @@ type Options struct {
 	KeyID       string
 	Preferences *Preferences
 	Parameters  Names
-	Inputs      *usage.RoutingInputs
+	Inputs      *routinginputs.Inputs
 	TokenDemand *TokenDemand
 	// Demand, when set, supplies the token demand of each target in place of
 	// TokenDemand, for a request whose input counts differently on each model.
@@ -88,31 +89,31 @@ type Options struct {
 	// WorstCost bounds one candidate's attempt cost — provider cost with the
 	// attempt's pinned discount — or reports it cannot be bounded. It runs only
 	// when an effective maximum-cost ceiling or cost estimation calls for it.
-	WorstCost func(Provider, Target, *usage.RoutingPrice, *usage.RoutingDiscount) (usage.Cost, bool)
+	WorstCost func(Provider, Target, *rates.RoutingPrice, *rates.RoutingDiscount) (rates.Cost, bool)
 }
 type Decision struct {
-	Incompatibility       *Incompatibility    `json:"incompatibility,omitempty"`
-	TargetID              string              `json:"target_id"`
-	ProviderID            string              `json:"provider_id"`
-	UpstreamModel         string              `json:"upstream_model"`
-	Eligible              bool                `json:"eligible"`
-	Priority              int                 `json:"priority"`
-	Strategy              string              `json:"strategy"`
-	Attempt               *int                `json:"attempt"`
-	CredentialSlotID      *string             `json:"credential_slot_id"`
-	Reason                *string             `json:"reason"`
-	Price                 *usage.RoutingPrice `json:"price"`
-	Performance           *usage.Performance  `json:"performance"`
-	VendorID              *string             `json:"vendor_id"`
-	MetadataObservedAt    *time.Time          `json:"metadata_observed_at"`
-	EstimatedInputTokens  *int64              `json:"estimated_input_tokens"`
-	RequestedOutputTokens *int64              `json:"requested_output_tokens"`
-	ContextLength         *int64              `json:"context_length"`
-	MaxOutputTokens       *int64              `json:"max_output_tokens"`
-	Selector              *string             `json:"selector,omitempty"`
-	Shadow                bool                `json:"shadow,omitempty"`
-	Unhealthy             bool                `json:"unhealthy,omitempty"`
-	Headroom              *float64            `json:"headroom,omitempty"`
+	Incompatibility       *Incompatibility           `json:"incompatibility,omitempty"`
+	TargetID              string                     `json:"target_id"`
+	ProviderID            string                     `json:"provider_id"`
+	UpstreamModel         string                     `json:"upstream_model"`
+	Eligible              bool                       `json:"eligible"`
+	Priority              int                        `json:"priority"`
+	Strategy              string                     `json:"strategy"`
+	Attempt               *int                       `json:"attempt"`
+	CredentialSlotID      *string                    `json:"credential_slot_id"`
+	Reason                *string                    `json:"reason"`
+	Price                 *rates.RoutingPrice        `json:"price"`
+	Performance           *routinginputs.Performance `json:"performance"`
+	VendorID              *string                    `json:"vendor_id"`
+	MetadataObservedAt    *time.Time                 `json:"metadata_observed_at"`
+	EstimatedInputTokens  *int64                     `json:"estimated_input_tokens"`
+	RequestedOutputTokens *int64                     `json:"requested_output_tokens"`
+	ContextLength         *int64                     `json:"context_length"`
+	MaxOutputTokens       *int64                     `json:"max_output_tokens"`
+	Selector              *string                    `json:"selector,omitempty"`
+	Shadow                bool                       `json:"shadow,omitempty"`
+	Unhealthy             bool                       `json:"unhealthy,omitempty"`
+	Headroom              *float64                   `json:"headroom,omitempty"`
 	// EstimatedCost is the attempt's cost bound pair for a simulation, null
 	// when the target's price cannot bound or no demand is known.
 	EstimatedCost *EstimatedCost `json:"estimated_cost"`
@@ -291,7 +292,7 @@ func baseline(rows []rankedCandidate, operation string) *Baseline {
 // estimatedCost is the bound pair a simulation reports for a target. A
 // committed provider can only charge zero; a target without a demand or a
 // boundable price reports nothing.
-func estimatedCost(provider Provider, price *usage.RoutingPrice, discount *usage.RoutingDiscount, demand *TokenDemand, now time.Time, worst func(Provider, Target, *usage.RoutingPrice, *usage.RoutingDiscount) (usage.Cost, bool), target Target) *EstimatedCost {
+func estimatedCost(provider Provider, price *rates.RoutingPrice, discount *rates.RoutingDiscount, demand *TokenDemand, now time.Time, worst func(Provider, Target, *rates.RoutingPrice, *rates.RoutingDiscount) (rates.Cost, bool), target Target) *EstimatedCost {
 	if price == nil || demand == nil {
 		return nil
 	}
@@ -646,7 +647,7 @@ func saturatingSum(a, b int64) int64 {
 	return a + b
 }
 
-func constraintReason(policy EffectivePolicy, p Provider, m ModelMetadata, price *usage.RoutingPrice, parameters Names) string {
+func constraintReason(policy EffectivePolicy, p Provider, m ModelMetadata, price *rates.RoutingPrice, parameters Names) string {
 	for _, c := range policy.Constraints {
 		if c.Only != nil && !anySelector(c.Only, p) {
 			return "provider_not_allowed"

@@ -7,8 +7,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/routing"
-
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
 // selectionOptions supplies the shared routing authority and measurements.
@@ -30,7 +29,7 @@ func (s *Server) selectionOptions(ctx context.Context, x *call) routing.Options 
 		options.Unhealthy = s.unhealthy
 	}
 	options.Mirror = x.mirrorSeed()
-	options.WorstCost = func(provider routing.Provider, target routing.Target, price *usage.RoutingPrice, discount *usage.RoutingDiscount) (usage.Cost, bool) {
+	options.WorstCost = func(provider routing.Provider, target routing.Target, price *rates.RoutingPrice, discount *rates.RoutingDiscount) (rates.Cost, bool) {
 		return x.targetCostBound(provider, target, price, discount)
 	}
 	// Only a route with selectors pays to describe the request to them.

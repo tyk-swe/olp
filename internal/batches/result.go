@@ -100,7 +100,7 @@ func ResultEvent(template *usage.Event, resourceID uuid.UUID, customIDDigest []b
 	event.LatencyMS = 0
 	event.FirstByteMS = nil
 	event.Attempts = []usage.Attempt{attempt}
-	event.UsageComplete = evidence.Complete
+	event.UsageComplete = evidence.Evidence.Complete()
 	event.InputTokens = evidence.InputTokens
 	event.OutputTokens = evidence.OutputTokens
 	event.CachedInputTokens = evidence.CachedInputTokens
@@ -143,8 +143,7 @@ func resultUsage(attempt usage.Attempt, result Result) (usage.AttemptUsage, erro
 		return usage.AttemptUsage{}, err
 	}
 	if uncertain {
-		evidence.Complete = false
-		evidence.BillingUncertain = true
+		evidence.Evidence = evidence.Evidence.Unsettled()
 	}
 	return evidence, nil
 }

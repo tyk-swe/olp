@@ -9,6 +9,9 @@ import (
 	"github.com/tyk-swe/olp/internal/guardrails/attachment"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/staging"
+	"github.com/tyk-swe/olp/internal/usage/completeness"
+	"github.com/tyk-swe/olp/internal/usage/pricebook"
+	"github.com/tyk-swe/olp/internal/usage/reports"
 
 	"github.com/tyk-swe/olp/internal/guardrails/policy"
 
@@ -56,7 +59,6 @@ import (
 	"github.com/tyk-swe/olp/internal/settings"
 	"github.com/tyk-swe/olp/internal/signing"
 	"github.com/tyk-swe/olp/internal/sinks"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // Management is everything the management API is composed from. Processes
@@ -169,7 +171,9 @@ func (m Management) Register(mux *http.ServeMux) {
 	// Usage, pricing, request history and recovery reporting are part
 	// of the management surface; their patterns are more specific than
 	// its catch-all, which answers everything no surface claims.
-	(&usage.Server{Access: m.Access, VendorKind: providers.VendorKind, Egress: m.Egress, Catalog: m.Catalog, CatalogKeys: m.CatalogKeys}).Register(mux)
+	(&reports.API{Access: m.Access}).Register(mux)
+	(&pricebook.API{Access: m.Access, Normalizer: pricebook.NewNormalizer(providers.VendorKind), Egress: m.Egress, Catalog: m.Catalog, CatalogKeys: m.CatalogKeys}).Register(mux)
+	(&completeness.API{Access: m.Access}).Register(mux)
 	destination.NewAPI(m.Access, m.Egress).Register(mux)
 	focus.NewAPI(m.Access).Register(mux)
 	capture.NewAPI(m.Access).Register(mux)
@@ -181,7 +185,7 @@ func (m Management) Register(mux *http.ServeMux) {
 		Unconfined: m.Unconfined,
 		Identity:   m.IdentityClient,
 		Costs:      project.CostsOf(m.limiter()),
-		VendorKind: providers.VendorKind,
+		Normalizer: pricebook.NewNormalizer(providers.VendorKind),
 		Catalogue:  catalogue,
 	})
 }

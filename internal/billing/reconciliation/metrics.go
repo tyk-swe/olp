@@ -11,7 +11,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/metric"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/pricebook"
 )
 
 var captureRate = metric.Gauge("olp_billing_capture_rate", "Attributed-to-invoiced spend ratio per provider over the last 7 closed covered days.", "provider")
@@ -24,7 +24,7 @@ type windowInvoice struct {
 func CaptureRates(ctx context.Context, q access.Queryer, now time.Time) ([]prometheus.Metric, error) {
 	end := now.UTC().Truncate(24 * time.Hour)
 	window := Range{Start: end.AddDate(0, 0, -7), End: end}
-	currency, err := usage.InstallationCurrency(ctx, q)
+	currency, err := pricebook.InstallationCurrency(ctx, q)
 	if err != nil {
 		return nil, err
 	}

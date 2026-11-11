@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/geminilifecycle"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/ingest"
 )
 
 const InteractionContract = "gemini-interaction/v1beta"
@@ -108,17 +109,17 @@ func (s *Store) ReadInteractionContract(ctx context.Context, owner, localID stri
 // ObserveInteraction commits native state and any terminal accounting together.
 // A resumed stream may repeat its earlier created/status events; those cannot
 // move an already terminal retained interaction back into pending work.
-func (s *Store) ObserveInteraction(ctx context.Context, owner, localID, status string, evidence usage.AttemptUsage, now time.Time) (usage.Persisted, error) {
+func (s *Store) ObserveInteraction(ctx context.Context, owner, localID, status string, evidence usage.AttemptUsage, now time.Time) (ingest.Persisted, error) {
 	if !interactionState(status) || status == StateDeleted {
-		return usage.Persisted{}, ErrContract
+		return ingest.Persisted{}, ErrContract
 	}
 	id, err := parseLocal(localID)
 	if err != nil || LocalID(KindInteraction, id) != localID {
-		return usage.Persisted{}, ErrNotFound
+		return ingest.Persisted{}, ErrNotFound
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return usage.Persisted{}, err
+		return ingest.Persisted{}, err
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx))
 	var current string
@@ -126,44 +127,44 @@ func (s *Store) ObserveInteraction(ctx context.Context, owner, localID, status s
 	err = tx.QueryRow(ctx, `SELECT state,metadata->'pending_usage' FROM olp.provider_resources
  WHERE id=$1 AND kind=$2 AND api_key_id=$3 AND state<>$4 AND expires_at>now() FOR UPDATE`, id, KindInteraction, owner, StateDeleted).Scan(&current, &pending)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return usage.Persisted{}, ErrNotFound
+		return ingest.Persisted{}, ErrNotFound
 	}
 	if err != nil {
-		return usage.Persisted{}, err
+		return ingest.Persisted{}, err
 	}
 	terminal := geminilifecycle.InteractionTurnFinished(status)
-	result := usage.Persisted{Outcome: usage.PersistOutcomeDuplicate}
+	result := ingest.Persisted{Outcome: ingest.PersistOutcomeDuplicate}
 	if terminal {
 		result, err = persistPendingUsage(ctx, tx, pending, evidence, now, true)
 		if err != nil {
-			return usage.Persisted{}, err
+			return ingest.Persisted{}, err
 		}
 	} else if geminilifecycle.InteractionTurnFinished(current) {
 		status = current
-	} else if evidence.Observed && len(pending) != 0 && string(pending) != "null" {
+	} else if evidence.Evidence.Observed() && len(pending) != 0 && string(pending) != "null" {
 		generation, decodeErr := usage.DecodePendingGeneration(pending)
 		if decodeErr != nil {
-			return usage.Persisted{}, decodeErr
+			return ingest.Persisted{}, decodeErr
 		}
 		observed, observeErr := generation.Observe(evidence, usage.GenerationPending)
 		if observeErr != nil {
-			return usage.Persisted{}, observeErr
+			return ingest.Persisted{}, observeErr
 		}
 		encoded, encodeErr := observed.Encode()
 		if encodeErr != nil {
-			return usage.Persisted{}, encodeErr
+			return ingest.Persisted{}, encodeErr
 		}
 		if _, err = tx.Exec(ctx, `UPDATE olp.provider_resources SET metadata=jsonb_set(metadata,'{pending_usage}',$2::jsonb) WHERE id=$1`, id, encoded); err != nil {
-			return usage.Persisted{}, err
+			return ingest.Persisted{}, err
 		}
 	}
 	_, err = tx.Exec(ctx, `UPDATE olp.provider_resources SET state=$2,
  metadata=CASE WHEN $3 THEN metadata-'pending_usage' ELSE metadata END, updated_at=now() WHERE id=$1`, id, status, terminal)
 	if err != nil {
-		return usage.Persisted{}, err
+		return ingest.Persisted{}, err
 	}
 	if err = tx.Commit(ctx); err != nil {
-		return usage.Persisted{}, err
+		return ingest.Persisted{}, err
 	}
 	return result, nil
 }
@@ -192,7 +193,7 @@ func (s *Store) DeleteInteractionContract(ctx context.Context, owner, localID st
 		}
 		return err
 	}
-	if _, err = persistPendingUsage(ctx, tx, pending, usage.AttemptUsage{BillingUncertain: true}, time.Now(), false); err != nil {
+	if _, err = persistPendingUsage(ctx, tx, pending, usage.AttemptUsage{Evidence: usage.EvidenceUnobservedUncertain}, time.Now(), false); err != nil {
 		return err
 	}
 	tag, err := tx.Exec(ctx, `UPDATE olp.provider_resources SET state=$4,metadata=metadata-'pending_usage',updated_at=now()

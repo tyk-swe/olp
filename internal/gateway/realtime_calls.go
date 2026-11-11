@@ -21,12 +21,12 @@ import (
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/admission"
+	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/upstream"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 const (
@@ -342,7 +342,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		fail(e)
 		return
 	}
-	if x.attribution, e = parseAttributionValues(r.Header.Values(usage.AttributionHeader), authority); e != nil {
+	if x.attribution, e = parseAttributionValues(r.Header.Values(attribution.Header), authority); e != nil {
 		fail(e)
 		return
 	}
@@ -611,7 +611,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 	fact.Class = "success"
 	fact.Committed = true
 	if fact.Interaction != nil {
-		fact.Interaction.UpstreamState = usage.UpstreamAccepted
+		fact.Interaction.UpstreamState = upstream.Accepted
 	}
 	fact.Duration = s.now().Sub(fact.StartedAt)
 	fact.recordEvidence(true)

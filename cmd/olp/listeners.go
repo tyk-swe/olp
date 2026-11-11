@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/delivery"
 )
 
 type listenerConfig struct {
@@ -73,7 +73,7 @@ func serveListeners(ctx context.Context, listeners []boundListener, mode Mode, l
 
 // Both listeners drain against the same deadline. Forced connection closure
 // does not prove that every handler has finished producing metadata.
-func drainListeners(ctx context.Context, listeners []boundListener, accounting *usage.Delivery) {
+func drainListeners(ctx context.Context, listeners []boundListener, accounting *delivery.Delivery) {
 	var wg sync.WaitGroup
 	for _, listener := range listeners {
 		wg.Go(func() {

@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -19,7 +20,7 @@ import (
 
 func metadataAttempt(ordinal int, providerID string, model string, committed bool) Attempt {
 	completedAt := time.Now().UTC()
-	usage := AttemptUsage{Observed: committed, Complete: true}
+	usage := AttemptUsage{Evidence: EvidenceFrom(committed, true, false)}
 	if committed {
 		tokens := int64(7)
 		usage.InputTokens = &tokens
@@ -73,6 +74,66 @@ func metadataEvent() *Event {
 			metadataAttempt(1, firstProvider, "model-a", false),
 			metadataAttempt(2, finalProvider, "model-b", true),
 		},
+	}
+}
+
+const (
+	populatedEventBytes = `{"training_tokens":5,"storage_byte_seconds":"12.5","cache_token_seconds":"7.25","container_sessions":{"default":2},"cache_result":"miss","evaluator_guardrail_id":"44444444-4444-4444-8444-444444444444","budget_boundary":"project","version":1,"event_id":"11111111-1111-4111-8111-111111111111","request_id":"22222222-2222-4222-8222-222222222222","runtime_generation_id":"33333333-3333-4333-8333-333333333333","end_user_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","api_key_id":"55555555-5555-4555-8555-555555555555","agent_principal_id":"66666666-6666-4666-8666-666666666666","member_principal_id":"77777777-7777-4777-8777-777777777777","delegation_pair_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","attribution":{"team":"core"},"origin":"classifier","parent_request_id":"88888888-8888-4888-8888-888888888888","guardrail_decisions":[{"guardrail_id":"g1","revision":"r1","phase":"input","action":"annotate","outcome":"annotated","categories":["cat.a"],"latency_ms":4}],"policy_decisions":[{"rule_id":"rule-a","phase":"input","action":"block","outcome":"blocked"}],"budget_group_id":"99999999-9999-4999-8999-999999999999","provider_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","route_slug":"primary","upstream_model":"model-b","operation":"generation","surface":"openai","request_started_at":"2026-01-02T03:04:05.123456789Z","request_completed_at":"2026-01-02T03:04:06Z","observed_at":"2026-01-02T03:04:06Z","status_code":402,"error_class":"budget_exhausted","committed":true,"latency_ms":25,"first_byte_ms":18,"input_tokens":100,"output_tokens":50,"cached_input_tokens":10,"cache_write_input_tokens":6,"cache_write_5m_input_tokens":2,"cache_write_1h_input_tokens":1,"audio_input_tokens":4,"cached_audio_input_tokens":1,"audio_output_tokens":3,"image_input_tokens":2,"cached_image_input_tokens":1,"image_output_tokens":2,"media_units":"1.5","tool_calls":{"web_search":2},"batch":true,"usage_complete":true,"unpriced":true,"payload_captured":true,"attempts":[{"execution":{"dispatch_id":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","run_id":"cccccccc-cccc-4ccc-8ccc-cccccccccccc","step_id":"dddddddd-dddd-4ddd-8ddd-dddddddddddd","target_id":"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee","route_revision_id":"ffffffff-ffff-4fff-8fff-ffffffffffff"},"guardrail_decisions":[{"guardrail_id":"g2","revision":"r2","phase":"input","action":"annotate","outcome":"annotated","latency_ms":0}],"routing":{"prompt":{"id":"01010101-0101-4101-8101-010101010101","revision_id":"02020202-0202-4202-8202-020202020202"},"cache":{"result":"hit","currency":"USD","age_seconds":3,"similarity":0.5,"avoided_cost":"1.5","budget_cost":"0.5","budget_charge":"0.25"},"credential_source":"operator","interaction":{"fidelity":"strict","plan_class":"native_identity","upstream_state":"accepted","client_state":"terminal"},"policy":{"kept":["raw"]},"mode":"auto","first_output_ms":9,"streamed_output_tokens":8,"credential_slot_id":"03030303-0303-4303-8303-030303030303","credential_version_id":"04040404-0404-4404-8404-040404040404","provider_revision_id":"05050505-0505-4505-8505-050505050505","pricing_revision_id":"06060606-0606-4606-8606-060606060606","leg":{"route":"fallback-route","revision_id":"07070707-0707-4707-8707-070707070707","via":"fallback"},"selector":"sel-1","retry":1,"budgets":["08080808-0808-4808-8808-080808080808"],"baseline":{"provider_id":"09090909-0909-4909-8909-090909090909","upstream_model":"base","vendor_id":"openai"}},"id":"0a0a0a0a-0a0a-4a0a-8a0a-0a0a0a0a0a0a","ordinal":1,"provider_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","upstream_model":"model-b","started_at":"2026-01-02T03:04:05Z","completed_at":"2026-01-02T03:04:06Z","status_code":402,"error_class":"budget_exhausted","committed":true,"latency_ms":20,"first_byte_ms":15,"usage":{"invocation_count":3,"training_tokens":4,"storage_byte_seconds":"8.5","cache_token_seconds":"2.25","container_sessions":{"1g":1},"deferred":true,"observed":true,"complete":false,"billing_uncertain":true,"input_tokens":100,"output_tokens":50,"cached_input_tokens":10,"cache_write_input_tokens":6,"cache_write_5m_input_tokens":2,"cache_write_1h_input_tokens":1,"audio_input_tokens":4,"cached_audio_input_tokens":1,"audio_output_tokens":3,"image_input_tokens":2,"cached_image_input_tokens":1,"image_output_tokens":2,"media_units":"1.5","tool_calls":{"web_search":2},"batch":true},"estimated_input_tokens":0,"estimate_provenance":"tokenizer","model_family":"gpt-4"}]}`
+	minimalEventBytes   = `{"version":1,"event_id":"11111111-1111-4111-8111-111111111111","request_id":"22222222-2222-4222-8222-222222222222","runtime_generation_id":"33333333-3333-4333-8333-333333333333","api_key_id":"","origin":"probe","budget_group_id":null,"provider_id":null,"route_slug":"primary","upstream_model":null,"operation":"generation","surface":"unknown","request_started_at":"2026-01-02T03:04:05.123456789Z","request_completed_at":"2026-01-02T03:04:06Z","observed_at":"2026-01-02T03:04:06Z","status_code":null,"error_class":null,"committed":false,"latency_ms":0,"first_byte_ms":null,"input_tokens":null,"output_tokens":null,"cached_input_tokens":null,"cache_write_input_tokens":null,"cache_write_5m_input_tokens":null,"cache_write_1h_input_tokens":null,"audio_input_tokens":null,"cached_audio_input_tokens":null,"audio_output_tokens":null,"image_input_tokens":null,"cached_image_input_tokens":null,"image_output_tokens":null,"media_units":null,"usage_complete":false,"unpriced":false,"payload_captured":false,"attempts":[]}`
+)
+
+func TestEncodedEventBytesAreStable(t *testing.T) {
+	for name, want := range map[string]string{"populated": populatedEventBytes, "minimal": minimalEventBytes} {
+		t.Run(name, func(t *testing.T) {
+			event, err := Decode([]byte(want))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Validate(event); err != nil {
+				t.Fatal(err)
+			}
+			got, err := Encode(event)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != want {
+				t.Fatalf("encoded bytes changed\n got %s\nwant %s", got, want)
+			}
+		})
+	}
+}
+
+func TestHalfAnInputEstimateIsRejectedOnTheWire(t *testing.T) {
+	for name, field := range map[string]string{
+		"tokens without provenance": `"estimate_provenance":"tokenizer",`,
+		"provenance without tokens": `"estimated_input_tokens":0,`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			encoded := strings.Replace(populatedEventBytes, field, "", 1)
+			if encoded == populatedEventBytes {
+				t.Fatal("fixture no longer carries the field")
+			}
+			if _, err := Decode([]byte(encoded)); err == nil {
+				t.Fatal("half an input estimate was accepted")
+			}
+		})
+	}
+}
+
+func TestInconsistentWireEvidenceIsRejected(t *testing.T) {
+	const encoded = `"observed":true,"complete":false,"billing_uncertain":true`
+	for _, flags := range []string{
+		`"observed":false,"complete":false,"billing_uncertain":false`,
+		`"observed":false,"complete":true,"billing_uncertain":true`,
+		`"observed":true,"complete":true,"billing_uncertain":true`,
+	} {
+		event, err := Decode([]byte(strings.Replace(populatedEventBytes, encoded, flags, 1)))
+		if err == nil {
+			_, err = Validate(event)
+		}
+		if err == nil {
+			t.Fatalf("accepted %s", flags)
+		}
 	}
 }
 
@@ -145,15 +206,8 @@ func TestValidateRejectsMalformedEnvelopesAndAttempts(t *testing.T) {
 			overflow := int64(math.MaxInt32) + 1
 			e.Attempts[0].FirstByteMS = &overflow
 		}},
-		{"missing evidence without billing uncertainty", func(e *Event) {
-			e.Attempts[0].Usage.Complete = false
-		}},
-		{"complete and billing-uncertain", func(e *Event) {
-			e.Attempts[0].Usage.BillingUncertain = true
-			e.Attempts[0].Usage.Complete = true
-		}},
-		{"observed and billing-uncertain", func(e *Event) {
-			e.Attempts[1].Usage.BillingUncertain = true
+		{"inconsistent usage evidence", func(e *Event) {
+			e.Attempts[0].Usage.Evidence = EvidenceUnset
 		}},
 		{"tokens without observed usage", func(e *Event) {
 			tokens := int64(1)
@@ -201,19 +255,13 @@ func TestValidateRejectsMalformedEnvelopesAndAttempts(t *testing.T) {
 			e.Attempts[1].Usage.MediaUnits = &units
 		}},
 		{"negative input estimate", func(e *Event) {
-			estimated := int64(-1)
-			e.Attempts[1].EstimatedInputTokens, e.Attempts[1].EstimateProvenance = &estimated, EstimateTokenizer
+			e.Attempts[1].InputEstimate = &InputEstimate{Tokens: -1, Provenance: EstimateTokenizer}
 		}},
 		{"input estimate without provenance", func(e *Event) {
-			estimated := int64(12)
-			e.Attempts[1].EstimatedInputTokens = &estimated
-		}},
-		{"estimate provenance without an input estimate", func(e *Event) {
-			e.Attempts[1].EstimateProvenance = EstimateHeuristic
+			e.Attempts[1].InputEstimate = &InputEstimate{Tokens: 12}
 		}},
 		{"unknown estimate provenance", func(e *Event) {
-			estimated := int64(12)
-			e.Attempts[1].EstimatedInputTokens, e.Attempts[1].EstimateProvenance = &estimated, "guess"
+			e.Attempts[1].InputEstimate = &InputEstimate{Tokens: 12, Provenance: "guess"}
 		}},
 		{"malformed model family", func(e *Event) { e.Attempts[1].ModelFamily = "OpenAI o200k" }},
 		{"oversized model family", func(e *Event) { e.Attempts[1].ModelFamily = "f" + strings.Repeat("a", 64) }},
@@ -272,9 +320,6 @@ func TestRouteSlugsAgreeAcrossRequestsAccessAccountingAndCache(t *testing.T) {
 		})
 	}
 }
-
-// The first attempt never carried routing or usage evidence, so neither key
-// is written at all.
 
 func TestDecodeRejectsMalformedFields(t *testing.T) {
 	base := metadataEvent()
@@ -456,7 +501,7 @@ func TestDecodeAcceptsPassthroughOperation(t *testing.T) {
 	if err != nil || decoded.Operation != "passthrough" {
 		t.Fatalf("decode passthrough: event=%v err=%v", decoded, err)
 	}
-	if !validOperation("passthrough") {
+	if !ValidOperation("passthrough") {
 		t.Fatal("pricing vocabulary rejects passthrough")
 	}
 }
@@ -473,7 +518,7 @@ func TestDecodeAcceptsRetainedOperations(t *testing.T) {
 		if err != nil || decoded.Operation != operation {
 			t.Fatalf("decode %s: event=%v err=%v", operation, decoded, err)
 		}
-		if !validOperation(operation) {
+		if !ValidOperation(operation) {
 			t.Fatalf("pricing vocabulary rejects %s", operation)
 		}
 	}
@@ -491,11 +536,6 @@ func TestDecodeAcceptsUnpricedOperations(t *testing.T) {
 			decoded, err := Decode(payload)
 			if err != nil || decoded.Operation != operation {
 				t.Fatalf("decode %s: event=%v err=%v", operation, decoded, err)
-			}
-			entry := samplePriceEntry()
-			entry.Operation = operation
-			if _, _, err := validatePrices([]Price{entry}, sampleVendorKind); err == nil {
-				t.Fatalf("accepted a price for %s", operation)
 			}
 		})
 	}
@@ -605,17 +645,17 @@ func TestAccountingEventPreservesUsageEvidence(t *testing.T) {
 			event := metadataEvent()
 			event.ProviderID, event.UpstreamModel = nil, nil
 			event.Committed = false
-			event.Attempts[0].Usage = &AttemptUsage{Observed: state.observed, Complete: state.complete, BillingUncertain: state.uncertain, Deferred: deferred}
+			event.Attempts[0].Usage = &AttemptUsage{Evidence: EvidenceFrom(state.observed, state.complete, state.uncertain), Deferred: deferred}
 			accepted, err := NewAccountingEvent(event)
 			if err != nil {
 				t.Fatalf("state %+v deferred %v: %v", state, deferred, err)
 			}
-			recorded := accepted.validated.Attempts[0].Usage.wire()
-			if recorded.Observed != state.observed || recorded.Complete != state.complete || recorded.BillingUncertain != state.uncertain || recorded.Deferred != deferred {
+			recorded := accepted.Validated().Attempts[0].Usage
+			if recorded.Evidence.Observed() != state.observed || recorded.Evidence.Complete() != state.complete || recorded.Evidence.Uncertain() != state.uncertain || recorded.Deferred != deferred {
 				t.Fatalf("accounting changed evidence %+v deferred %v to %+v", state, deferred, recorded)
 			}
 			final := event.Attempts[len(event.Attempts)-1]
-			if *accepted.event.ProviderID != final.ProviderID || *accepted.event.UpstreamModel != final.UpstreamModel || accepted.event.Committed != final.Committed {
+			if *accepted.Event().ProviderID != final.ProviderID || *accepted.Event().UpstreamModel != final.UpstreamModel || accepted.Event().Committed != final.Committed {
 				t.Fatal("accounting request did not derive its final attempt")
 			}
 		}
@@ -634,5 +674,97 @@ func TestUsageFingerprintSurvivesReconstruction(t *testing.T) {
 	}
 	if sha256.Sum256(payload) != sha256.Sum256(reconstructed) {
 		t.Fatalf("reconstructing persisted usage changed its receipt fingerprint\noriginal %s\nreconstructed %s", payload, reconstructed)
+	}
+}
+
+func TestRetainedSettlementOriginRoundTripRequiresParent(t *testing.T) {
+	event := metadataEvent()
+	event.Origin = OriginRetainedSettlement
+	event.ParentRequestID = new(event.RequestID)
+	encoded, err := Encode(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := Decode(encoded)
+	if err != nil {
+		t.Fatalf("retained accounting template cannot settle: %v", err)
+	}
+	if decoded.Origin != OriginRetainedSettlement || decoded.ParentRequestID == nil || *decoded.ParentRequestID != event.RequestID {
+		t.Fatal("lost retained submission parent")
+	}
+	event.ParentRequestID = nil
+	encoded, err = Encode(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = Decode(encoded); err == nil {
+		t.Fatal("retained child work accepted without its submission parent")
+	}
+}
+
+func TestPendingGenerationPreservesWholeUsageSnapshots(t *testing.T) {
+	initial := AttemptUsage{Evidence: EvidenceObservedIncompleteUncertain,
+		UsageQuantities: UsageQuantities{InputTokens: new(int64(100)), OutputTokens: new(int64(20)), CachedInputTokens: new(int64(20))}}
+	payload, err := Encode(metadataEvent().WithFinalUsage(initial))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := DecodePendingGeneration(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name                              string
+		input, output, cached             int64
+		state                             GenerationState
+		wantInput, wantOutput, wantCached int64
+		invalid                           bool
+	}{
+		{name: "a partial observation cannot combine dimensions", input: 120, output: 10, cached: 30,
+			state: GenerationPending, wantInput: 100, wantOutput: 20, wantCached: 20},
+		{name: "a terminal provider snapshot replaces provisional evidence", input: 90, output: 10, cached: 10,
+			state: GenerationTerminal, wantInput: 90, wantOutput: 10, wantCached: 10},
+		{name: "terminal zero is evidence", state: GenerationTerminal},
+		{name: "a stale invalid observation is still rejected", input: -1, state: GenerationPending, invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			evidence := AttemptUsage{Evidence: EvidenceObservedComplete, UsageQuantities: UsageQuantities{
+				InputTokens: &tc.input, OutputTokens: &tc.output, CachedInputTokens: &tc.cached, ToolCalls: map[string]int64{"search": 2}, ContainerSessions: map[string]int64{"1g": 1}}}
+			observed, err := pending.Observe(evidence, tc.state)
+			if tc.invalid {
+				if err == nil {
+					t.Fatal("invalid usage was accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = observed.AccountingEvent(time.Now().UTC(), tc.state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := observed.Encode()
+			if err != nil {
+				t.Fatal(err)
+			}
+			*evidence.InputTokens = 999
+			evidence.ToolCalls["search"] = 999
+			evidence.ContainerSessions["1g"] = 999
+			unchanged, err := observed.Encode()
+			if err != nil || !bytes.Equal(encoded, unchanged) {
+				t.Fatalf("caller changed retained evidence: %v", err)
+			}
+			event, err := Decode(encoded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := event.Attempts[len(event.Attempts)-1].Usage
+			if got == nil || got.InputTokens == nil || got.OutputTokens == nil || got.CachedInputTokens == nil ||
+				*got.InputTokens != tc.wantInput || *got.OutputTokens != tc.wantOutput || *got.CachedInputTokens != tc.wantCached ||
+				event.InputTokens == nil || *event.InputTokens != *got.InputTokens || got.Evidence.Complete() != (tc.state == GenerationTerminal) {
+				t.Fatalf("usage snapshot was mixed or lost: %+v", got)
+			}
+		})
 	}
 }

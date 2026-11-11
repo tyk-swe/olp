@@ -10,21 +10,19 @@ import (
 // record. Upstream acceptance, client observation and HTTP commitment are
 // independent: a lost response may leave work accepted but never observed.
 type InteractionEvidence struct {
-	Fidelity      string `json:"fidelity"`
-	PlanClass     string `json:"plan_class"`
-	UpstreamState string `json:"upstream_state"`
-	ClientState   string `json:"client_state"`
+	Fidelity      string              `json:"fidelity"`
+	PlanClass     string              `json:"plan_class"`
+	UpstreamState upstream.Acceptance `json:"upstream_state"`
+	ClientState   ClientState         `json:"client_state"`
 }
 
+type ClientState string
+
 const (
-	UpstreamNotSent  = string(upstream.NotSent)
-	UpstreamUnknown  = string(upstream.Unknown)
-	UpstreamAccepted = string(upstream.Accepted)
-	UpstreamTerminal = string(upstream.Terminal)
-	ClientUnobserved = "unobserved"
-	ClientPartial    = "partially-observed"
-	ClientActionable = "actionable"
-	ClientTerminal   = "terminal"
+	ClientUnobserved ClientState = "unobserved"
+	ClientPartial    ClientState = "partially-observed"
+	ClientActionable ClientState = "actionable"
+	ClientTerminal   ClientState = "terminal"
 )
 
 func (e *InteractionEvidence) validate() error {
@@ -35,7 +33,7 @@ func (e *InteractionEvidence) validate() error {
 		return errors.New("routing.interaction contract is invalid")
 	}
 	switch e.UpstreamState {
-	case UpstreamNotSent, UpstreamUnknown, UpstreamAccepted, UpstreamTerminal:
+	case upstream.NotSent, upstream.Unknown, upstream.Accepted, upstream.Terminal:
 	default:
 		return errors.New("routing.interaction upstream state is invalid")
 	}
@@ -44,7 +42,7 @@ func (e *InteractionEvidence) validate() error {
 	default:
 		return errors.New("routing.interaction client state is invalid")
 	}
-	if e.UpstreamState == UpstreamNotSent && e.ClientState != ClientUnobserved {
+	if e.UpstreamState == upstream.NotSent && e.ClientState != ClientUnobserved {
 		return errors.New("routing.interaction observes unsent work")
 	}
 	return nil

@@ -4,12 +4,17 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/operationregistry"
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
 	"github.com/tyk-swe/olp/internal/toolidentity"
 )
 
@@ -29,7 +34,7 @@ type Validated struct {
 
 type ValidatedAttempt struct {
 	Attempt     *Attempt
-	Usage       ValidatedUsage
+	Usage       AttemptUsage
 	Ordinal     int16
 	StatusCode  *int32
 	LatencyMS   int32
@@ -78,13 +83,13 @@ func Validate(e *Event) (*Validated, error) {
 	case !emptyAttemptMetadataIsValid:
 		return nil, fmt.Errorf("%w: target metadata without an attempt", ErrInvalidEvent)
 	}
-	if e.EndUserDigest != "" && (!authority.ValidEndUserDigest(e.EndUserDigest) || Keyless(e.Origin)) {
+	if e.EndUserDigest != "" && (!authority.ValidEndUserDigest(e.EndUserDigest) || e.Origin.Keyless()) {
 		return nil, fmt.Errorf("%w: invalid end-user digest", ErrInvalidEvent)
 	}
 	if err := validateDelegation(e); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidEvent, err)
 	}
-	if err := ValidateAttribution(e.Attribution); err != nil {
+	if err := attribution.Validate(e.Attribution); err != nil {
 		return nil, fmt.Errorf("%w: attribution %w", ErrInvalidEvent, err)
 	}
 	if err := guardrails.ValidateEvidence(e.GuardrailDecisions); err != nil {
@@ -93,10 +98,7 @@ func Validate(e *Event) (*Validated, error) {
 	if err := contentpolicy.ValidateDecisions(e.PolicyDecisions); err != nil {
 		return nil, fmt.Errorf("%w: policy decisions %w", ErrInvalidEvent, err)
 	}
-	if err := validateUsageDimensions(e.InputTokens, e.OutputTokens, e.CachedInputTokens,
-		e.CacheWriteInputTokens, e.CacheWrite5MInputTokens, e.CacheWrite1HInputTokens,
-		e.AudioInputTokens, e.CachedAudioInputTokens, e.AudioOutputTokens,
-		e.ImageInputTokens, e.CachedImageInputTokens, e.ImageOutputTokens); err != nil {
+	if err := validateUsageDimensions(e.tokenQuantities()); err != nil {
 		return nil, fmt.Errorf("%w: request %w", ErrInvalidEvent, err)
 	}
 	if err := validateToolCalls(e.ToolCalls); err != nil {
@@ -155,11 +157,11 @@ func validateAttempt(attempt *Attempt, index int) (*ValidatedAttempt, error) {
 	// Every attempt carries its own evidence; an attempt without it cannot be
 	// classified as billable, not billable, or uncertain, and an unclassified
 	// attempt has no honest place in an account.
-	usage, err := validateUsage(attempt.Usage, index)
+	usage, err := ValidateUsage(attempt.Usage, index)
 	if err != nil {
 		return nil, err
 	}
-	if err = checkEstimate(attempt.EstimatedInputTokens, attempt.EstimateProvenance, attempt.ModelFamily); err != nil {
+	if err = checkEstimate(attempt.InputEstimate, attempt.ModelFamily); err != nil {
 		return nil, fmt.Errorf("%w: attempt %d %w", ErrInvalidEvent, index, err)
 	}
 	validated := &ValidatedAttempt{
@@ -177,39 +179,50 @@ func validateAttempt(attempt *Attempt, index int) (*ValidatedAttempt, error) {
 	return validated, nil
 }
 
-func validateUsage(usage *AttemptUsage, index int) (*ValidatedUsage, error) {
+func (q UsageQuantities) tokenCounts() [12]*int64 {
+	return [12]*int64{q.InputTokens, q.OutputTokens, q.CachedInputTokens,
+		q.CacheWriteInputTokens, q.CacheWrite5MInputTokens, q.CacheWrite1HInputTokens,
+		q.AudioInputTokens, q.CachedAudioInputTokens, q.AudioOutputTokens,
+		q.ImageInputTokens, q.CachedImageInputTokens, q.ImageOutputTokens}
+}
+
+func (q UsageQuantities) hasTokenCounts() bool {
+	for _, tokens := range q.tokenCounts() {
+		if tokens != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *Event) tokenQuantities() UsageQuantities {
+	return UsageQuantities{InputTokens: e.InputTokens, OutputTokens: e.OutputTokens, CachedInputTokens: e.CachedInputTokens,
+		CacheWriteInputTokens: e.CacheWriteInputTokens, CacheWrite5MInputTokens: e.CacheWrite5MInputTokens, CacheWrite1HInputTokens: e.CacheWrite1HInputTokens,
+		AudioInputTokens: e.AudioInputTokens, CachedAudioInputTokens: e.CachedAudioInputTokens, AudioOutputTokens: e.AudioOutputTokens,
+		ImageInputTokens: e.ImageInputTokens, CachedImageInputTokens: e.CachedImageInputTokens, ImageOutputTokens: e.ImageOutputTokens}
+}
+
+func ValidateUsage(usage *AttemptUsage, index int) (*AttemptUsage, error) {
 	if usage == nil {
 		return nil, fmt.Errorf("%w: attempt %d has no usage evidence", ErrInvalidEvent, index)
 	}
-	state, valid := classifyUsage(usage.Observed, usage.Complete, usage.BillingUncertain)
-	if !valid {
+	if !usage.Evidence.Valid() {
 		return nil, fmt.Errorf("%w: attempt %d usage state is inconsistent", ErrInvalidEvent, index)
 	}
-	hasValues := usage.InputTokens != nil || usage.OutputTokens != nil ||
-		usage.CachedInputTokens != nil || usage.CacheWriteInputTokens != nil ||
-		usage.CacheWrite5MInputTokens != nil || usage.CacheWrite1HInputTokens != nil ||
-		usage.AudioInputTokens != nil || usage.CachedAudioInputTokens != nil ||
-		usage.AudioOutputTokens != nil || usage.ImageInputTokens != nil ||
-		usage.CachedImageInputTokens != nil || usage.ImageOutputTokens != nil ||
-		usage.MediaUnits != nil || len(usage.ToolCalls) > 0 || retainedValues(*usage)
-	if !usage.Observed && hasValues {
+	hasValues := usage.hasTokenCounts() ||
+		usage.MediaUnits != nil || len(usage.ToolCalls) > 0 || RetainedValues(*usage)
+	if !usage.Evidence.Observed() && hasValues {
 		return nil, fmt.Errorf("%w: attempt %d reports usage it never observed", ErrInvalidEvent, index)
 	}
-	for _, tokens := range [12]*int64{usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens,
-		usage.CacheWriteInputTokens, usage.CacheWrite5MInputTokens, usage.CacheWrite1HInputTokens,
-		usage.AudioInputTokens, usage.CachedAudioInputTokens, usage.AudioOutputTokens,
-		usage.ImageInputTokens, usage.CachedImageInputTokens, usage.ImageOutputTokens} {
+	for _, tokens := range usage.tokenCounts() {
 		if tokens != nil && *tokens < 0 {
 			return nil, fmt.Errorf("%w: attempt %d has a negative token count", ErrInvalidEvent, index)
 		}
 	}
-	if err := validateUsageDimensions(usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens,
-		usage.CacheWriteInputTokens, usage.CacheWrite5MInputTokens, usage.CacheWrite1HInputTokens,
-		usage.AudioInputTokens, usage.CachedAudioInputTokens, usage.AudioOutputTokens,
-		usage.ImageInputTokens, usage.CachedImageInputTokens, usage.ImageOutputTokens); err != nil {
+	if err := validateUsageDimensions(usage.UsageQuantities); err != nil {
 		return nil, fmt.Errorf("%w: attempt %d %w", ErrInvalidEvent, index, err)
 	}
-	if err := validateRetainedUsage(*usage); err != nil {
+	if err := ValidateRetainedUsage(*usage); err != nil {
 		return nil, fmt.Errorf("%w: attempt %d %w", ErrInvalidEvent, index, err)
 	}
 	if err := validateToolCalls(usage.ToolCalls); err != nil {
@@ -224,15 +237,16 @@ func validateUsage(usage *AttemptUsage, index int) (*ValidatedUsage, error) {
 			return nil, fmt.Errorf("%w: attempt %d has negative media units", ErrInvalidEvent, index)
 		}
 	}
-	return &ValidatedUsage{state: state, quantities: usage.UsageQuantities, deferred: usage.Deferred}, nil
+	return usage, nil
 }
 
 // validateUsageDimensions checks the counters against the subset invariants the
 // fact table enforces: every share belongs to a total that was reported, and no
 // combination of shares exceeds its total. The modality shares behave exactly
 // like the cache shares: they are subsets of the input and output counts.
-func validateUsageDimensions(input, output, read, write, write5m, write1h,
-	audio, cachedAudio, audioOut, image, cachedImage, imageOut *int64) error {
+func validateUsageDimensions(q UsageQuantities) error {
+	input, output, read, write, write5m, write1h := q.InputTokens, q.OutputTokens, q.CachedInputTokens, q.CacheWriteInputTokens, q.CacheWrite5MInputTokens, q.CacheWrite1HInputTokens
+	audio, cachedAudio, audioOut, image, cachedImage, imageOut := q.AudioInputTokens, q.CachedAudioInputTokens, q.AudioOutputTokens, q.ImageInputTokens, q.CachedImageInputTokens, q.ImageOutputTokens
 	count := func(value *int64) int64 {
 		if value == nil {
 			return 0
@@ -276,30 +290,24 @@ func validateUsageDimensions(input, output, read, write, write5m, write1h,
 }
 
 func ConsistentUsage(usage *AttemptUsage) bool {
-	if validateRetainedUsage(*usage) != nil {
+	if ValidateRetainedUsage(*usage) != nil {
 		return false
 	}
-	for _, tokens := range [12]*int64{usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens,
-		usage.CacheWriteInputTokens, usage.CacheWrite5MInputTokens, usage.CacheWrite1HInputTokens,
-		usage.AudioInputTokens, usage.CachedAudioInputTokens, usage.AudioOutputTokens,
-		usage.ImageInputTokens, usage.CachedImageInputTokens, usage.ImageOutputTokens} {
+	for _, tokens := range usage.tokenCounts() {
 		if tokens != nil && *tokens < 0 {
 			return false
 		}
 	}
-	if err := validateUsageDimensions(usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens,
-		usage.CacheWriteInputTokens, usage.CacheWrite5MInputTokens, usage.CacheWrite1HInputTokens,
-		usage.AudioInputTokens, usage.CachedAudioInputTokens, usage.AudioOutputTokens,
-		usage.ImageInputTokens, usage.CachedImageInputTokens, usage.ImageOutputTokens); err != nil {
+	if err := validateUsageDimensions(usage.UsageQuantities); err != nil {
 		return false
 	}
 	return validateToolCalls(usage.ToolCalls) == nil
 }
 
-const maxToolCalls = 16
+const MaxToolCalls = 16
 
 func validateToolCalls(calls map[string]int64) error {
-	if len(calls) > maxToolCalls {
+	if len(calls) > MaxToolCalls {
 		return errors.New("too many tool call counters")
 	}
 	for name, count := range calls {
@@ -352,3 +360,53 @@ func validBudgetBoundary(boundary string, code *string) bool {
 	}
 	return limits.ValidBudgetBoundary(boundary)
 }
+
+// priceOperations are the operations a price may be scoped to, and the
+// operations a usage filter may name.
+var priceOperations = []string{"generation", "embeddings", "token_count", "image_generation",
+	"image_edit", "image_variation", "speech", "transcription", "translation", "video_create", "video_list",
+	"video_get", "video_content", "video_delete", "moderation", "model_list", "model_get", "rerank",
+	"batch", "realtime", "bedrock_invoke", "agent_resource", "fine_tuning", "vector_store", "retrieval",
+	"conversation", "container", "eval", "skill", "context_cache", "passthrough"}
+
+func ValidOperation(value string) bool {
+	if slices.Contains(priceOperations, value) {
+		return true
+	}
+	return operationregistry.Catalog().HasOperation(value)
+}
+
+func RetainedValues(u AttemptUsage) bool {
+	return u.InvocationCount != nil || u.TrainingTokens != nil || u.StorageByteSeconds != nil || u.CacheTokenSeconds != nil || len(u.ContainerSessions) > 0
+}
+
+func ValidateRetainedUsage(u AttemptUsage) error {
+	if u.InvocationCount != nil && *u.InvocationCount < 0 {
+		return errors.New("negative invocation count")
+	}
+	if u.TrainingTokens != nil && *u.TrainingTokens < 0 {
+		return errors.New("negative training tokens")
+	}
+	for _, quantity := range []*string{u.StorageByteSeconds, u.CacheTokenSeconds} {
+		if quantity == nil {
+			continue
+		}
+		if len(*quantity) > 128 {
+			return errors.New("retained quantity too large")
+		}
+		if !retainedQuantityPattern.MatchString(*quantity) {
+			return errors.New("invalid retained quantity")
+		}
+	}
+	if len(u.ContainerSessions) > pricingpolicy.MaxContainerTiers {
+		return errors.New("too many memory tiers")
+	}
+	for tier, count := range u.ContainerSessions {
+		if !pricingpolicy.ValidContainerTier(tier) || count < 0 {
+			return errors.New("invalid container memory tier or count")
+		}
+	}
+	return nil
+}
+
+var retainedQuantityPattern = regexp.MustCompile(`^[0-9]+(?:\.[0-9]+)?$`)

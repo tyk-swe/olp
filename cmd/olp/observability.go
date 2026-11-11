@@ -16,7 +16,8 @@ import (
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/staging"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/completeness"
+	"github.com/tyk-swe/olp/internal/usage/delivery"
 )
 
 type observed struct {
@@ -27,11 +28,11 @@ type observed struct {
 	runtime       *release.Manager
 	policy        *egress.Policy
 	gateway       *gateway.Server
-	accounting    *usage.Delivery
+	accounting    *delivery.Delivery
 	spool         *staging.Spool
 	media         *jobs.Store
 	mediaGaps     *atomic.Uint64
-	loss          *usage.LossCounters
+	loss          *completeness.LossCounters
 	export        func(context.Context) []prometheus.Metric
 }
 

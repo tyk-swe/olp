@@ -442,7 +442,7 @@ func (s *Store) Tombstone(ctx context.Context, localID string) error {
 		return err
 	}
 	if ownsPendingUsage(kind) {
-		if _, err = persistPendingUsage(ctx, tx, pending, usage.AttemptUsage{BillingUncertain: true}, time.Now(), false); err != nil {
+		if _, err = persistPendingUsage(ctx, tx, pending, usage.AttemptUsage{Evidence: usage.EvidenceUnobservedUncertain}, time.Now(), false); err != nil {
 			return err
 		}
 	}

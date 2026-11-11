@@ -117,7 +117,7 @@ func (x *call) finalizePinned(out *outcome, at time.Time) {
 		fact.Committed = fact.Committed || out.committed
 	}
 	if fact.Interaction != nil {
-		fact.Interaction.UpstreamState = string(e.state.evidence().Acceptance())
+		fact.Interaction.UpstreamState = e.state.evidence().Acceptance()
 	}
 	uncertain := e.billable && e.state.evidence().Acceptance().Unresolved()
 	// Valid terminal work without usage can still have unknown consumption.

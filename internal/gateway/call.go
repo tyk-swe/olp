@@ -21,6 +21,8 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/rates"
+	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 )
 
 // call owns authority, accounting and the shared attempt loop for one request.
@@ -61,8 +63,8 @@ type call struct {
 	authority      keyauthority.Authority
 	cardPinned     bool
 	cardRevisionID *string
-	cardRev        *usage.RoutingCardRevision
-	routingInputs  *usage.RoutingInputs
+	cardRev        *rates.RoutingCardRevision
+	routingInputs  *routinginputs.Inputs
 
 	mode string
 
@@ -75,8 +77,8 @@ type call struct {
 	fixed       bool
 	spent       int
 	allowance   int
-	spentCost   usage.Cost
-	spentCharge usage.Cost
+	spentCost   rates.Cost
+	spentCharge rates.Cost
 	seed        []byte
 
 	walk routing.RouteWalk
@@ -86,7 +88,7 @@ type call struct {
 	classified map[string]classification
 	mirrors    bool
 
-	origin   string
+	origin   usage.Origin
 	parent   string
 	priority string
 

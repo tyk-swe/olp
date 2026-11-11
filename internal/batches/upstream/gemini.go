@@ -506,7 +506,7 @@ func parseGeminiLine(line []byte, model string) (batches.Result, error) {
 	case failed:
 		return batches.Result{
 			CustomID: object.Key, Kind: batches.ResultErrored, ErrorClass: "gemini_batch_errored",
-			Evidence: canonical, Usage: usage.AttemptUsage{Complete: true},
+			Evidence: canonical, Usage: usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete},
 		}, nil
 	}
 	completion, err := protocols.Decode(wire.Gemini, wire.Gemini, object.Response, model, "")

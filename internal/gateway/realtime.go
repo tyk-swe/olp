@@ -19,8 +19,10 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/upstream"
 
 	"github.com/coder/websocket"
 
@@ -29,7 +31,7 @@ import (
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/routeidentity"
-	"github.com/tyk-swe/olp/internal/upstream"
+	acceptance "github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -596,7 +598,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.bindAuthority(x, authority)
-	attributionValues := r.Header.Values(usage.AttributionHeader)
+	attributionValues := r.Header.Values(attribution.Header)
 	if len(attributionValues) == 0 {
 		attributionValues = r.URL.Query()["attribution"]
 	}
@@ -753,10 +755,10 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 				fact.Interaction.ClientState = usage.ClientPartial
 			}
 			if relayErr == nil {
-				fact.Interaction.UpstreamState = usage.UpstreamTerminal
+				fact.Interaction.UpstreamState = acceptance.Terminal
 				fact.Interaction.ClientState = usage.ClientTerminal
 			} else {
-				fact.Interaction.UpstreamState = usage.UpstreamUnknown
+				fact.Interaction.UpstreamState = acceptance.Unknown
 			}
 		}
 		if observedUsage != nil {
@@ -892,14 +894,14 @@ func realtimeDial(ctx context.Context, s *Server, x *call, p *pin, endpoint stri
 		evidence.Error, evidence.Interrupted, evidence.Err = nativeError, ctx.Err(), err
 		outcome := state.classifier.Classify(evidence)
 		if fact.Interaction != nil {
-			fact.Interaction.UpstreamState = string(outcome.Acceptance)
+			fact.Interaction.UpstreamState = outcome.Acceptance
 		}
 		return nil, finish(string(outcome.Class), upstreamError(&attemptFailure{status: status, upstream: nativeError}))
 	}
 	fact.Class = "success"
 	fact.Status = http.StatusOK
 	if fact.Interaction != nil {
-		fact.Interaction.UpstreamState = usage.UpstreamAccepted
+		fact.Interaction.UpstreamState = acceptance.Accepted
 	}
 	fact.Committed = true
 	fact.Duration = s.now().Sub(fact.StartedAt)

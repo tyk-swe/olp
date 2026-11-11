@@ -31,7 +31,7 @@ func ParseLine(line []byte, endpoint string, errorFile bool) (batches.Result, er
 	if object.Response == nil {
 		return classifyLine(batches.Result{
 			CustomID: object.CustomID, Kind: batches.ResultErrored, Evidence: canonical,
-			Usage: usage.AttemptUsage{BillingUncertain: true},
+			Usage: usage.AttemptUsage{Evidence: usage.EvidenceUnobservedUncertain},
 		}, errorCode(object.Error)), nil
 	}
 	status := object.Response.StatusCode
@@ -40,7 +40,7 @@ func ParseLine(line []byte, endpoint string, errorFile bool) (batches.Result, er
 	}
 	result := batches.Result{
 		CustomID: object.CustomID, Kind: batches.ResultErrored, StatusCode: &status, Evidence: canonical,
-		Usage: usage.AttemptUsage{BillingUncertain: true},
+		Usage: usage.AttemptUsage{Evidence: usage.EvidenceUnobservedUncertain},
 	}
 	if isNull(object.Response.Body) {
 		return classifyLine(result, errorCode(object.Error)), nil
@@ -81,7 +81,7 @@ func errorCode(raw json.RawMessage) string {
 }
 
 func classifyLine(result batches.Result, code string) batches.Result {
-	unbilled := usage.AttemptUsage{Complete: true, UsageQuantities: usage.UsageQuantities{Batch: true}}
+	unbilled := usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete, UsageQuantities: usage.UsageQuantities{Batch: true}}
 	switch strings.ToLower(code) {
 	case "batch_expired":
 		result.Kind, result.ErrorClass = batches.ResultExpired, "batch_expired"
@@ -93,7 +93,7 @@ func classifyLine(result batches.Result, code string) batches.Result {
 		}
 		return result
 	}
-	if !result.Usage.Observed {
+	if !result.Usage.Evidence.Observed() {
 		result.Usage = unbilled
 	}
 	return result

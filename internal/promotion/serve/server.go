@@ -16,11 +16,11 @@ import (
 	"github.com/tyk-swe/olp/internal/promotion/guardrail"
 	"github.com/tyk-swe/olp/internal/promotion/identity"
 	"github.com/tyk-swe/olp/internal/promotion/mcpserver"
-	"github.com/tyk-swe/olp/internal/promotion/pricing"
 	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/sinks"
+	"github.com/tyk-swe/olp/internal/usage/pricebook"
 )
 
 const maxDocument = 4 << 20
@@ -31,7 +31,7 @@ type Deps struct {
 	Unconfined *plugins.Unconfined
 	Identity   *http.Client
 	Costs      project.Costs
-	VendorKind pricing.VendorKind
+	Normalizer pricebook.Normalizer
 	Catalogue  *providers.Catalogue
 }
 
@@ -39,7 +39,7 @@ type server struct {
 	access       *access.Server
 	egress       *egress.Policy
 	costs        project.Costs
-	vendorKind   pricing.VendorKind
+	normalizer   pricebook.Normalizer
 	identity     identity.Deps
 	providers    provider.Deps
 	sinks        sinks.Credentials
@@ -72,7 +72,7 @@ func Register(mux *http.ServeMux, deps Deps) {
 		access:       deps.Access,
 		egress:       deps.Egress,
 		costs:        deps.Costs,
-		vendorKind:   deps.VendorKind,
+		normalizer:   deps.Normalizer,
 		identity:     identity.Deps{Access: deps.Access, Identity: deps.Identity},
 		providers:    provider.Deps{Egress: deps.Egress, Unconfined: deps.Unconfined, Keys: keys, Installation: installation, Catalogue: deps.Catalogue},
 		sinks:        sinks.Credentials{Keys: keys, Installation: installation},

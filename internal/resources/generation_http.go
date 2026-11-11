@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/ingest"
 )
 
 // CompleteGenerationHTTP finalizes the original exchange under the same lock
@@ -49,7 +50,7 @@ func (s *Store) CompleteGenerationHTTP(ctx context.Context, localID string, comp
 		if _, err = tx.Exec(ctx, `UPDATE olp.provider_resources SET metadata=jsonb_set(metadata,'{pending_usage}',$2::jsonb),updated_at=now() WHERE id=$1`, id, encoded); err != nil {
 			return err
 		}
-	} else if err = usage.CompleteRequestHTTPTx(ctx, tx, completion); err != nil {
+	} else if err = ingest.CompleteRequestHTTPTx(ctx, tx, completion); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

@@ -22,6 +22,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/media/transport"
 	"github.com/tyk-swe/olp/internal/staging"
+	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/google/uuid"
@@ -41,7 +42,6 @@ import (
 	"github.com/tyk-swe/olp/internal/release"
 
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 const (
@@ -59,7 +59,7 @@ const (
 type fakeRuntime struct {
 	mu      sync.Mutex
 	release *release.Release
-	inputs  *usage.RoutingInputs
+	inputs  *routinginputs.Inputs
 	keys    map[string]keyauthority.Authority
 	stale   bool
 	revoked map[string]bool
@@ -72,7 +72,7 @@ type fakeRuntime struct {
 
 func (f *fakeRuntime) Release() *release.Release { f.mu.Lock(); defer f.mu.Unlock(); return f.release }
 
-func (f *fakeRuntime) RoutingInputs() *usage.RoutingInputs {
+func (f *fakeRuntime) RoutingInputs() *routinginputs.Inputs {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.inputs

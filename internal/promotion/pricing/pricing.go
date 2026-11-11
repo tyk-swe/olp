@@ -12,12 +12,11 @@ import (
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/release"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/pricebook"
+	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
 const maxPrices = 10000
-
-type VendorKind func(vendor string) (string, bool)
 
 type Pricing struct {
 	EffectiveAt time.Time
@@ -107,19 +106,19 @@ func Planner(desired Desired, names promotion.Names) promotion.Planner {
 	}
 }
 
-func Applier(desired Desired, vendorKind VendorKind) promotion.Applier {
+func Applier(desired Desired, normalizer pricebook.Normalizer) promotion.Applier {
 	return func(ctx context.Context, tx pgx.Tx, principal access.Principal) error {
 		destination, err := readDestination(ctx, tx)
 		if err != nil {
 			return err
 		}
-		if err := applyPricing(ctx, tx, principal, desired.Pricing, destination.providers, vendorKind); err != nil {
+		if err := applyPricing(ctx, tx, principal, desired.Pricing, destination.providers, normalizer); err != nil {
 			return err
 		}
-		if err := applyDiscounts(ctx, tx, principal, desired.Discounts, destination.providers, vendorKind); err != nil {
+		if err := applyDiscounts(ctx, tx, principal, desired.Discounts, destination.providers, normalizer); err != nil {
 			return err
 		}
-		return applyCards(ctx, tx, principal, desired.RateCards, destination, vendorKind)
+		return applyCards(ctx, tx, principal, desired.RateCards, destination, normalizer)
 	}
 }
 
@@ -135,13 +134,13 @@ func parsePricing(value nullable.Nullable[contract.ConfigurationPricingEntry]) (
 }
 
 func readPricing(ctx context.Context, q access.Queryer, providers promotion.Directory) (*Pricing, error) {
-	revisions, _, err := usage.ListRevisions(ctx, q, nil, 1)
+	revisions, _, err := pricebook.ListRevisions(ctx, q, nil, 1)
 	if err != nil || len(revisions) == 0 {
 		return nil, err
 	}
 	return &Pricing{
 		EffectiveAt: revisions[0].EffectiveAt,
-		Prices: promotion.Map(revisions[0].Prices, func(price usage.Price) Price {
+		Prices: promotion.Map(revisions[0].Prices, func(price rates.Price) Price {
 			return Price{Provider: nameOf(providers, price.ProviderID), Rate: scoped(price, nil)}
 		}),
 	}, nil
@@ -179,7 +178,7 @@ func planPricing(ctx context.Context, q access.Queryer, desired *Pricing, provid
 	}
 }
 
-func applyPricing(ctx context.Context, tx pgx.Tx, principal access.Principal, desired *Pricing, providers promotion.Directory, vendorKind VendorKind) error {
+func applyPricing(ctx context.Context, tx pgx.Tx, principal access.Principal, desired *Pricing, providers promotion.Directory, normalizer pricebook.Normalizer) error {
 	if desired == nil {
 		return nil
 	}
@@ -194,18 +193,18 @@ func applyPricing(ctx context.Context, tx pgx.Tx, principal access.Principal, de
 	if resolveErr != nil {
 		return resolveErr
 	}
-	if _, err := usage.CreateRevision(ctx, tx, principal.UserID(), rebased(desired.EffectiveAt, time.Now()), prices, vendorKind); err != nil {
+	if _, err := pricebook.CreateRevision(ctx, tx, principal.UserID(), rebased(desired.EffectiveAt, time.Now()), prices, normalizer); err != nil {
 		return err
 	}
 	_, publishErr := release.Publish(ctx, tx, principal.UserID())
 	return publishErr
 }
 
-func resolvePrices(prices []Price, providers promotion.Directory) ([]usage.Price, error) {
+func resolvePrices(prices []Price, providers promotion.Directory) ([]rates.Price, error) {
 	if i := slices.IndexFunc(prices, func(price Price) bool { return !resolves(providers, price.Provider) }); i >= 0 {
 		return nil, undeclaredPrice(i)
 	}
-	return promotion.Map(prices, func(price Price) usage.Price {
+	return promotion.Map(prices, func(price Price) rates.Price {
 		return scoped(price.Rate, idOf(providers, price.Provider))
 	}), nil
 }

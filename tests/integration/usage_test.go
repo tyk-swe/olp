@@ -30,6 +30,9 @@ import (
 	"github.com/tyk-swe/olp/internal/retainedworker"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/ingest"
+	"github.com/tyk-swe/olp/internal/usage/reports"
+	"github.com/tyk-swe/olp/internal/usage/retention"
 	"github.com/tyk-swe/olp/tests/harness"
 	"github.com/tyk-swe/olp/tests/harness/vendor"
 )
@@ -112,8 +115,8 @@ func TestFocusSettlesMultipleAttemptsAndOverlappingCommitmentDays(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := usage.PersistEvent(t.Context(), pool, accepted)
-			if err != nil || result.Outcome != usage.PersistOutcomePersisted {
+			result, err := ingest.PersistEvent(t.Context(), pool, accepted)
+			if err != nil || result.Outcome != ingest.PersistOutcomePersisted {
 				t.Fatalf("settle FOCUS event: outcome=%v error=%v", result.Outcome, err)
 			}
 			var status string
@@ -204,7 +207,7 @@ func (f usageFixture) attempt(ordinal int) usage.Attempt {
 	return usage.Attempt{
 		ID: uuid.NewString(), Ordinal: ordinal, ProviderID: f.providerID, UpstreamModel: vendor.Model,
 		StartedAt: f.observedAt, CompletedAt: f.observedAt, StatusCode: &status, Committed: true,
-		Usage: &usage.AttemptUsage{Observed: true, Complete: true, UsageQuantities: usage.UsageQuantities{InputTokens: &input, OutputTokens: &output}},
+		Usage: &usage.AttemptUsage{Evidence: usage.EvidenceObservedComplete, UsageQuantities: usage.UsageQuantities{InputTokens: &input, OutputTokens: &output}},
 	}
 }
 
@@ -261,7 +264,7 @@ func TestConsumerCommitsBeforeLaterEventIsBlocked(t *testing.T) {
 	consumerContext, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
-		done <- usage.RunConsumer(consumerContext, pool, client, stream, "service-consumer", "service-region", nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		done <- (ingest.Consumer{Pool: pool, Client: client, Stream: stream, Name: "service-consumer", Region: "service-region", Log: slog.New(slog.NewTextHandler(io.Discard, nil))}).Run(consumerContext)
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -343,7 +346,7 @@ func testSessionAdmissionAfterUsageRetention(t *testing.T, fixture usageFixture)
 		}
 		attempt := fixture.attempt(1)
 		attempt.UpstreamModel = "unpriced-session-model"
-		attempt.Usage.Complete = complete
+		attempt.Usage.Evidence = usage.EvidenceFrom(attempt.Usage.Evidence.Observed(), complete, false)
 		attempt.Execution = &usage.ExecutionReference{DispatchID: dispatch}
 		event := fixture.event(attempt)
 		event.APIKeyID, event.UsageComplete = key, complete
@@ -351,7 +354,7 @@ func testSessionAdmissionAfterUsageRetention(t *testing.T, fixture usageFixture)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if result, err := usage.PersistEvent(t.Context(), fixture.pool, accepted); err != nil || result.Outcome != usage.PersistOutcomePersisted {
+		if result, err := ingest.PersistEvent(t.Context(), fixture.pool, accepted); err != nil || result.Outcome != ingest.PersistOutcomePersisted {
 			t.Fatalf("persist session: outcome=%v error=%v", result.Outcome, err)
 		}
 		return key, accepted
@@ -372,7 +375,7 @@ func testSessionAdmissionAfterUsageRetention(t *testing.T, fixture usageFixture)
 		VALUES ('retention.usage_days','1',gen_random_uuid(),$1) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, fixture.ownerID); err != nil {
 		t.Fatal(err)
 	}
-	if report, err := usage.RunMaintenance(t.Context(), fixture.pool, time.Now().Add(72*time.Hour)); err != nil || !report.LockAcquired {
+	if report, err := retention.RunMaintenance(t.Context(), fixture.pool, time.Now().Add(72*time.Hour)); err != nil || !report.LockAcquired {
 		t.Fatalf("maintenance: lock=%v error=%v", report.LockAcquired, err)
 	}
 	var facts int
@@ -380,7 +383,7 @@ func testSessionAdmissionAfterUsageRetention(t *testing.T, fixture usageFixture)
 		t.Fatalf("retention kept %d session facts, error=%v", facts, err)
 	}
 	admission("after retention")
-	if result, err := usage.PersistEvent(t.Context(), fixture.pool, clean); err != nil || result.Outcome != usage.PersistOutcomeDuplicate {
+	if result, err := ingest.PersistEvent(t.Context(), fixture.pool, clean); err != nil || result.Outcome != ingest.PersistOutcomeDuplicate {
 		t.Fatalf("replay after retention: outcome=%v error=%v", result.Outcome, err)
 	}
 	admission("after replay")
@@ -421,7 +424,7 @@ func testAnchorRetention(t *testing.T, fixture usageFixture) {
 			}
 			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 			defer cancel()
-			report, err := usage.RunMaintenance(ctx, fixture.pool, now)
+			report, err := retention.RunMaintenance(ctx, fixture.pool, now)
 			if err != nil || !report.LockAcquired {
 				t.Fatalf("maintenance did not finish while an anchor was locked: lock=%v error=%v", report.LockAcquired, err)
 			}
@@ -564,8 +567,8 @@ func TestUsageReportsKeepWholePeriodAllocationAndCompleteness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := usage.PersistEvent(t.Context(), pool, accepted)
-	if err != nil || result.Outcome != usage.PersistOutcomePersisted {
+	result, err := ingest.PersistEvent(t.Context(), pool, accepted)
+	if err != nil || result.Outcome != ingest.PersistOutcomePersisted {
 		t.Fatalf("persist report fixture: outcome=%v error=%v", result.Outcome, err)
 	}
 	selectedIDs := []string{selected.ID, ineligible.ID, legacy.ID, absent.ID}
@@ -607,12 +610,12 @@ func TestUsageReportsKeepWholePeriodAllocationAndCompleteness(t *testing.T) {
 		t.Fatal(err)
 	}
 	route := "report-selected"
-	filters := usage.Filters{
+	filters := reports.Filters{
 		Start: fixture.observedAt.Add(-time.Minute), End: fixture.observedAt.Add(time.Minute),
-		ProviderID: &fixture.providerID, Route: &route, AllProjects: true,
+		ProviderID: &fixture.providerID, Route: &route, Projects: reports.AllProjects(),
 	}
 	now := time.Now()
-	summary, err := usage.ReadSummary(t.Context(), pool, filters, now)
+	summary, err := reports.ReadSummary(t.Context(), pool, filters, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -622,13 +625,13 @@ func TestUsageReportsKeepWholePeriodAllocationAndCompleteness(t *testing.T) {
 	if len(summary.ContainerSessions) != 2 || summary.ContainerSessions["small"] != "5" || summary.ContainerSessions["large"] != "1" {
 		t.Fatalf("container totals changed: %v", summary.ContainerSessions)
 	}
-	full, err := usage.ReadSummary(t.Context(), pool, usage.Filters{
-		Start: filters.Start, End: filters.End, ProviderID: filters.ProviderID, AllProjects: true,
+	full, err := reports.ReadSummary(t.Context(), pool, reports.Filters{
+		Start: filters.Start, End: filters.End, ProviderID: filters.ProviderID, Projects: reports.AllProjects(),
 	}, now)
 	if err != nil || full.AllocatedCommitment != "3.000000000000" {
 		t.Fatalf("whole period lost its residual: allocation=%s error=%v", full.AllocatedCommitment, err)
 	}
-	completeness, err := usage.ReadCompleteness(t.Context(), pool, filters, now)
+	completeness, err := reports.ReadCompleteness(t.Context(), pool, filters, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -653,12 +656,12 @@ func TestUsageReportsKeepWholePeriodAllocationAndCompleteness(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, offset := range []time.Duration{0, time.Minute} {
-		retainedFilters := usage.Filters{Start: hour.Add(offset), End: hour.Add(time.Hour), ProviderID: &fixture.providerID, AllProjects: true}
-		retainedSummary, err := usage.ReadSummary(t.Context(), pool, retainedFilters, now)
+		retainedFilters := reports.Filters{Start: hour.Add(offset), End: hour.Add(time.Hour), ProviderID: &fixture.providerID, Projects: reports.AllProjects()}
+		retainedSummary, err := reports.ReadSummary(t.Context(), pool, retainedFilters, now)
 		if err != nil {
 			t.Fatal(err)
 		}
-		retainedCompleteness, err := usage.ReadCompleteness(t.Context(), pool, retainedFilters, now)
+		retainedCompleteness, err := reports.ReadCompleteness(t.Context(), pool, retainedFilters, now)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -673,11 +676,11 @@ func TestUsageReportsKeepWholePeriodAllocationAndCompleteness(t *testing.T) {
 		WHERE bucket=$1 AND provider_id=$2`, hour, fixture.providerID); err != nil {
 		t.Fatal(err)
 	}
-	invalidFilters := usage.Filters{Start: hour, End: hour.Add(time.Hour), ProviderID: &fixture.providerID, AllProjects: true}
-	if _, err := usage.ReadSummary(t.Context(), pool, invalidFilters, now); err == nil {
+	invalidFilters := reports.Filters{Start: hour, End: hour.Add(time.Hour), ProviderID: &fixture.providerID, Projects: reports.AllProjects()}
+	if _, err := reports.ReadSummary(t.Context(), pool, invalidFilters, now); err == nil {
 		t.Fatal("summary accepted more unpriced requests than total requests")
 	}
-	if _, err := usage.ReadCompleteness(t.Context(), pool, invalidFilters, now); err == nil {
+	if _, err := reports.ReadCompleteness(t.Context(), pool, invalidFilters, now); err == nil {
 		t.Fatal("completeness accepted more unpriced requests than total requests")
 	}
 }

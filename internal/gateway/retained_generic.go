@@ -20,7 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/upstream"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
 // Generic retained families share the managed-agent lifecycle contracts:
@@ -735,10 +735,10 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 	// route's cost budget is grown and settled with only its own
 	// reads, never the whole page total.
 	routeLeases := make(map[string]*limitadmission.Lease)
-	routeReserved := make(map[string]usage.Cost)
-	routeReservedCharge := make(map[string]usage.Cost)
-	routeActual := make(map[string]usage.Cost)
-	routeActualCharge := make(map[string]usage.Cost)
+	routeReserved := make(map[string]rates.Cost)
+	routeReservedCharge := make(map[string]rates.Cost)
+	routeActual := make(map[string]rates.Cost)
+	routeActualCharge := make(map[string]rates.Cost)
 	routeDispatched := make(map[string]bool)
 	defer func() {
 		zero := int64(0)

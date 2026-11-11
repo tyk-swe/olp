@@ -9,7 +9,6 @@ import (
 	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/telemetry"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 var errResponseTooLarge = providerinvoke.ErrResponseTooLarge
@@ -58,7 +57,7 @@ func (s *Server) finish(x *call, out *outcome, status int) {
 		}
 		if x.origin != "" {
 			env.Origin, env.ParentRequestID = x.origin, x.parent
-			if usage.Keyless(x.origin) {
+			if x.origin.Keyless() {
 				env.KeyID = ""
 				env.EndUserDigest = ""
 				env.AgentPrincipalID = ""

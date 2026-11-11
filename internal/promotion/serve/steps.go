@@ -57,7 +57,7 @@ func (s server) appliers(d desired, ready prepared, r *http.Request) []promotion
 		provider.Applier(d.providers, d.bindings, s.providers),
 		route.Applier(d.routes),
 		route.TemplateApplier(d.routes),
-		pricing.Applier(d.pricing, s.vendorKind),
+		pricing.Applier(d.pricing, s.normalizer),
 		route.GroupApplier(d.routes),
 		sink.Applier(d.sinks, d.bindings, s.sinks),
 		guardrail.CredentialApplier(d.guardrails, d.bindings, s.vault),

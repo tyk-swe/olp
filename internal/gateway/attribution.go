@@ -9,11 +9,10 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/attribution"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func (s *Server) parseAttribution(r *http.Request, authority keyauthority.Authority) (map[string]string, *Error) {
-	return parseAttributionValues(r.Header.Values(usage.AttributionHeader), authority)
+	return parseAttributionValues(r.Header.Values(attribution.Header), authority)
 }
 
 func parseAttributionValues(values []string, authority keyauthority.Authority) (map[string]string, *Error) {
@@ -40,10 +39,10 @@ func parseCallerAttribution(values []string, authority keyauthority.Authority) (
 		return nil, nil
 	}
 	if len(values) != 1 {
-		return nil, invalidRequest("invalid_attribution", "Provide at most one "+usage.AttributionHeader+" header.", nil)
+		return nil, invalidRequest("invalid_attribution", "Provide at most one "+attribution.Header+" header.", nil)
 	}
 	raw := values[0]
-	if len(raw) > usage.AttributionHeaderBytes {
+	if len(raw) > attribution.HeaderBytes {
 		return nil, invalidRequest("invalid_attribution", "The attribution header exceeds 4096 bytes.", nil)
 	}
 	var entries map[string]json.RawMessage
@@ -53,7 +52,7 @@ func parseCallerAttribution(values []string, authority keyauthority.Authority) (
 		decoder.Decode(&trailing) != io.EOF {
 		return nil, invalidRequest("invalid_attribution", "The attribution header must be a single JSON object.", nil)
 	}
-	if len(entries) > usage.AttributionMaxKeys {
+	if len(entries) > attribution.MaxKeys {
 		return nil, invalidRequest("invalid_attribution", "The attribution header allows at most 4 entries.", nil)
 	}
 	labels := make(map[string]string, len(entries))
@@ -67,7 +66,7 @@ func parseCallerAttribution(values []string, authority keyauthority.Authority) (
 		}
 		labels[key] = value
 	}
-	if err := usage.ValidateAttribution(labels); err != nil {
+	if err := attribution.Validate(labels); err != nil {
 		return nil, invalidRequest("invalid_attribution", "Attribution keys and values must be short machine tokens.", nil)
 	}
 	return labels, nil

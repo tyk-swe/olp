@@ -20,6 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
 type responseCacheCall struct {
@@ -434,12 +435,12 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *Error {
 	c.budgetCost, c.budgetCharge = "0", "0"
 	fact := AttemptFact{Class: classSuccess, Status: 200, Usage: c.metadata.Usage, UsageObserved: c.metadata.Usage != nil, UsageComplete: c.metadata.UsageComplete}
 	u := attemptUsage(&fact, x.operationName())
-	var costPtr *usage.Cost
+	var costPtr *rates.Cost
 	at := s.now()
 	if a.Price != nil {
 		if cost, ok := a.Price.Cost(u, at, true, a.Discount); ok {
 			if x.committed(a.ProviderID) {
-				cost = usage.Cost{}
+				cost = rates.Cost{}
 			}
 			costPtr = &cost
 			c.budgetCost = cost.String()

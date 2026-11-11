@@ -10,7 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/pricebook"
 )
 
 type Discount struct {
@@ -63,11 +63,11 @@ func validateDiscount(i int, discount Discount, duplicate bool) error {
 }
 
 func readDiscounts(ctx context.Context, q access.Queryer, providers promotion.Directory) ([]Discount, error) {
-	stored, err := usage.ReadDiscountsInForce(ctx, q)
+	stored, err := pricebook.ReadDiscountsInForce(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	return promotion.Map(stored, func(discount usage.DiscountInForce) Discount {
+	return promotion.Map(stored, func(discount pricebook.DiscountInForce) Discount {
 		return Discount{ProviderKind: discount.ProviderKind, Provider: nameOf(providers, discount.ProviderID), Vendor: discount.VendorID, Multiplier: discount.Multiplier}
 	}), nil
 }
@@ -109,7 +109,7 @@ func planDiscounts(ctx context.Context, q access.Queryer, desired []Discount, pr
 	}), nil
 }
 
-func applyDiscounts(ctx context.Context, tx pgx.Tx, principal access.Principal, desired []Discount, providers promotion.Directory, vendorKind VendorKind) error {
+func applyDiscounts(ctx context.Context, tx pgx.Tx, principal access.Principal, desired []Discount, providers promotion.Directory, normalizer pricebook.Normalizer) error {
 	if i := slices.IndexFunc(desired, func(discount Discount) bool { return !resolves(providers, discount.Provider) }); i >= 0 {
 		return undeclaredDiscount(i)
 	}
@@ -125,16 +125,16 @@ func applyDiscounts(ctx context.Context, tx pgx.Tx, principal access.Principal, 
 		if err := principal.Authorize(access.Settings); err != nil {
 			return err
 		}
-		normalized, normalizeErr := usage.NormalizeDiscount(ctx, tx, usage.DiscountInput{
+		normalized, normalizeErr := pricebook.NormalizeDiscount(ctx, tx, pricebook.DiscountInput{
 			ProviderKind: discount.ProviderKind,
 			VendorID:     discount.Vendor,
 			ProviderID:   idOf(providers, discount.Provider),
 			Multiplier:   &discount.Multiplier,
-		}, vendorKind)
+		}, normalizer)
 		if normalizeErr != nil {
 			return normalizeErr
 		}
-		if _, err := usage.CreateDiscount(ctx, tx, principal.UserID(), normalized); err != nil {
+		if _, err := pricebook.CreateDiscount(ctx, tx, principal.UserID(), normalized); err != nil {
 			return err
 		}
 	}

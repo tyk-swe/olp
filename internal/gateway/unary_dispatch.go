@@ -13,7 +13,6 @@ import (
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operations"
 	"github.com/tyk-swe/olp/internal/upstream"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, operationplan.Result, *attemptFailure) {
@@ -50,7 +49,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 			fact.RetryAfter = &v
 		}
 		if fact.Interaction != nil {
-			fact.Interaction.UpstreamState = string(f.acceptance)
+			fact.Interaction.UpstreamState = f.acceptance
 		}
 		fact.recordEvidence(f.billingUncertain())
 		finish()
@@ -126,7 +125,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 	fact.Class = classSuccess
 	fact.Duration = s.now().Sub(fact.StartedAt)
 	if fact.Interaction != nil {
-		fact.Interaction.UpstreamState = usage.UpstreamTerminal
+		fact.Interaction.UpstreamState = upstream.Terminal
 	}
 	// Moderation and search have no usage counters; a validated result
 	// completes their evidence.

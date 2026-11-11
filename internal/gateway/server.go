@@ -42,6 +42,7 @@ import (
 	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/telemetry"
 	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 )
 
 // Config bounds the inference surface.
@@ -91,7 +92,7 @@ type Runtime interface {
 	Authenticate(secret string) (*keyauthority.Authority, error)
 	// RoutingInputs returns current price and performance measurements, or
 	// nil when no measurements are available.
-	RoutingInputs() *usage.RoutingInputs
+	RoutingInputs() *routinginputs.Inputs
 	release.Credentials
 	// GrantGeneration is the generation of the token currently served.
 	GrantGeneration(credentialID string) int64

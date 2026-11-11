@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/usage/rates"
+	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -36,7 +38,7 @@ type simulation struct {
 	ctx              context.Context
 	snapshot         *routing.Snapshot
 	input            simulationInput
-	inputs           *usage.RoutingInputs
+	inputs           *routinginputs.Inputs
 	demand           *routing.TokenDemand
 	inspectionBudget inspectionBudget
 	// named is the route the request names; every leg parses the request as
@@ -77,7 +79,7 @@ type explanation struct {
 }
 
 // newSimulation reads the shared state a simulation plans with once.
-func (s *Server) newSimulation(ctx context.Context, snapshot *routing.Snapshot, input simulationInput, inputs *usage.RoutingInputs, demand *routing.TokenDemand) *simulation {
+func (s *Server) newSimulation(ctx context.Context, snapshot *routing.Snapshot, input simulationInput, inputs *routinginputs.Inputs, demand *routing.TokenDemand) *simulation {
 	m := &simulation{ctx: ctx, snapshot: snapshot, input: input, inputs: inputs, demand: demand, supply: s.Supply}
 	if s.Fleet != nil {
 		if circuits, err := s.Fleet.Circuits(ctx, time.Now()); err == nil && len(circuits) > 0 {
@@ -110,7 +112,7 @@ func (m *simulation) evaluate(selector routing.Selector) routing.PredicateResult
 
 // leg plans the request on one route. The plan serves only when the key may
 // use the route and it ranks at least one attempt.
-func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Plan, bool, error) {
+func (s *Server) leg(m *simulation, slug string, via usage.LegVia) (simulatedLeg, routing.Plan, bool, error) {
 	route := m.snapshot.Routes[slug]
 	key, err := m.key(route)
 	if err != nil {
@@ -202,22 +204,22 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 		// A simulation reports what each target could cost and applies the
 		// caller's cost ceiling to the same worst case.
 		EstimateCost: true,
-		WorstCost: func(provider routing.Provider, target routing.Target, price *usage.RoutingPrice, discount *usage.RoutingDiscount) (usage.Cost, bool) {
+		WorstCost: func(provider routing.Provider, target routing.Target, price *rates.RoutingPrice, discount *rates.RoutingDiscount) (rates.Cost, bool) {
 			if !operationregistry.PolicyFor(input.Operation).BoundedWork {
-				return usage.Cost{}, false
+				return rates.Cost{}, false
 			}
 			if provider.Commitment != nil {
-				return usage.Cost{}, true
+				return rates.Cost{}, true
 			}
 			if mediaRequest != nil {
 				seconds, video := mediaRequest.VideoSeconds()
 				if !video {
-					return usage.Cost{}, false
+					return rates.Cost{}, false
 				}
-				return price.Cost(usage.AttemptUsage{Complete: true, UsageQuantities: usage.UsageQuantities{MediaUnits: &seconds}}, now, true, discount)
+				return price.Cost(usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete, UsageQuantities: usage.UsageQuantities{MediaUnits: &seconds}}, now, true, discount)
 			}
 			if input.Operation == "search" {
-				return price.Cost(usage.AttemptUsage{Complete: true}, now, true, discount)
+				return price.Cost(usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete}, now, true, discount)
 			}
 			if counted.prompt != nil {
 				from := counted.prompt.Estimate(estimate.ForModel(target.ProviderModel), nil)
@@ -239,7 +241,7 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 				d = demand(provider, target)
 			}
 			if d == nil {
-				return usage.Cost{}, false
+				return rates.Cost{}, false
 			}
 			output := int64(0)
 			if d.MaxOutputTokens != nil {
@@ -278,7 +280,7 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 		leg.Selectors = []routing.SelectorOutcome{}
 	}
 	if via != "" {
-		leg.Via = &via
+		leg.Via = new(string(via))
 	}
 	if affinity := route.Affinity; affinity != nil {
 		leg.Affinity = &simulatedAffinity{Source: affinity.Source, Session: affinity.SessionKey(input.Attribution, parsed) != ""}
@@ -384,7 +386,7 @@ func workflowModelInspectionCost(m *simulation, provider routing.Provider, targe
 	if capability == nil || capability.Limits.MaxRunCost == nil {
 		return nil
 	}
-	limit, ok := usage.ParseCost(*capability.Limits.MaxRunCost)
+	limit, ok := rates.ParseCost(*capability.Limits.MaxRunCost)
 	if !ok || request == nil {
 		return workflowUnboundedInspection()
 	}
@@ -461,7 +463,7 @@ func (w *walk) settle(plan routing.Plan) string {
 }
 
 // adopt moves the request to another route, as the gateway does.
-func (w *walk) adopt(slug, via string) string {
+func (w *walk) adopt(slug string, via usage.LegVia) string {
 	if w.traversal.Visited(slug) {
 		return routing.FallbackRepeated
 	}

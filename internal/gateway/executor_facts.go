@@ -138,12 +138,12 @@ func (s *Server) newFact(x *call, a routing.Attempt, slot routing.Slot, ordinal 
 	fact.GuardrailDecisions = evidence.guardrails
 	if x.strict() {
 		if x.family == wire.GeminiInteractions || x.family == wire.GeminiLive {
-			fact.Interaction = &usage.InteractionEvidence{Fidelity: routing.FidelityStrict, PlanClass: "native_identity", UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
+			fact.Interaction = &usage.InteractionEvidence{Fidelity: routing.FidelityStrict, PlanClass: "native_identity", UpstreamState: upstream.NotSent, ClientState: usage.ClientUnobserved}
 			return fact
 		}
 		if x.family == wire.Realtime {
 			if _, ok := x.snapshot().RealtimeTemplate(x.route.Slug, a.TargetID); ok {
-				fact.Interaction = &usage.InteractionEvidence{Fidelity: routing.FidelityStrict, PlanClass: "native_identity", UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
+				fact.Interaction = &usage.InteractionEvidence{Fidelity: routing.FidelityStrict, PlanClass: "native_identity", UpstreamState: upstream.NotSent, ClientState: usage.ClientUnobserved}
 			}
 			return fact
 		}
@@ -151,16 +151,16 @@ func (s *Server) newFact(x *call, a routing.Attempt, slot routing.Slot, ordinal 
 			x.family == wire.AnthropicFile || x.family == wire.AnthropicBatch ||
 			x.family == wire.GeminiFile || x.family == wire.GeminiBatch || x.family == wire.CloudBatch {
 			if _, ok := x.snapshot().DurableTemplate(x.route.Slug, a.TargetID); ok {
-				fact.Interaction = &usage.InteractionEvidence{Fidelity: routing.FidelityStrict, PlanClass: "native_identity", UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
+				fact.Interaction = &usage.InteractionEvidence{Fidelity: routing.FidelityStrict, PlanClass: "native_identity", UpstreamState: upstream.NotSent, ClientState: usage.ClientUnobserved}
 			}
 			return fact
 		}
 		if x.media != nil {
 			if _, ok := x.snapshot().MediaTemplate(x.route.Slug, a.TargetID, string(x.media.Op())); ok {
-				fact.Interaction = &usage.InteractionEvidence{Fidelity: routing.FidelityStrict, PlanClass: "native_identity", UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
+				fact.Interaction = &usage.InteractionEvidence{Fidelity: routing.FidelityStrict, PlanClass: "native_identity", UpstreamState: upstream.NotSent, ClientState: usage.ClientUnobserved}
 			}
 		} else if evidence.planClass != "" {
-			fact.Interaction = &usage.InteractionEvidence{Fidelity: routing.FidelityStrict, PlanClass: evidence.planClass, UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
+			fact.Interaction = &usage.InteractionEvidence{Fidelity: routing.FidelityStrict, PlanClass: evidence.planClass, UpstreamState: upstream.NotSent, ClientState: usage.ClientUnobserved}
 		}
 	}
 	return fact

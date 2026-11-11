@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/usage/delivery"
 
 	"github.com/google/uuid"
 
@@ -22,7 +23,7 @@ var uuidNewV7 = uuid.NewV7
 // bounded handoff. A rejected event checkpoints its loss with a bounded write
 // so other replicas can refuse admission against incomplete cost accounting.
 type AccountingSink struct {
-	Delivery *usage.Delivery
+	Delivery *delivery.Delivery
 	Next     Sink
 }
 
@@ -88,7 +89,7 @@ func (p *PersistingSink) logger() *slog.Logger {
 // nothing to account for: no API key owns a caller request, or it ended before
 // a route and a runtime generation could be attributed to it.
 func accountingEvent(e Envelope) (*usage.Event, error) {
-	if (e.KeyID == "" && !usage.Keyless(e.Origin)) || e.Route == "" || e.RuntimeGenerationID == "" {
+	if (e.KeyID == "" && !e.Origin.Keyless()) || e.Route == "" || e.RuntimeGenerationID == "" {
 		return nil, nil
 	}
 	if len(e.Attempts) > 0 && e.Attempts[len(e.Attempts)-1].GenerationUsageDeferred {
@@ -147,7 +148,7 @@ func accountingEvent(e Envelope) (*usage.Event, error) {
 		// usage and had nothing left to reconcile.
 		if fact.UsageObserved {
 			evidence := attemptUsage(fact, e.Operation)
-			event.UsageComplete = evidence.Complete
+			event.UsageComplete = evidence.Evidence.Complete()
 			event.InputTokens, event.OutputTokens, event.CachedInputTokens = evidence.InputTokens, evidence.OutputTokens, evidence.CachedInputTokens
 			event.CacheWriteInputTokens, event.CacheWrite5MInputTokens, event.CacheWrite1HInputTokens = evidence.CacheWriteInputTokens, evidence.CacheWrite5MInputTokens, evidence.CacheWrite1HInputTokens
 			event.MediaUnits = evidence.MediaUnits
@@ -256,14 +257,12 @@ func accountingAttempt(e Envelope, index int) (usage.Attempt, error) {
 	// a provenance names how a number was made and there is no number without
 	// one. One the event contract would refuse is left off rather than costing
 	// the request its billing record.
-	var estimated *int64
+	var estimated *usage.InputEstimate
 	if fact.EstimateProvenance != "" {
-		tokens := max(fact.EstimatedInputTokens, 0)
-		estimated = &tokens
+		estimated = &usage.InputEstimate{Tokens: max(fact.EstimatedInputTokens, 0), Provenance: usage.EstimateProvenance(fact.EstimateProvenance)}
 	}
-	if usage.ValidEstimate(estimated, fact.EstimateProvenance, fact.ModelFamily) {
-		attempt.EstimatedInputTokens, attempt.EstimateProvenance, attempt.ModelFamily =
-			estimated, fact.EstimateProvenance, fact.ModelFamily
+	if usage.ValidEstimate(estimated, fact.ModelFamily) {
+		attempt.InputEstimate, attempt.ModelFamily = estimated, fact.ModelFamily
 	}
 	return attempt, nil
 }
@@ -280,17 +279,13 @@ func attemptSuccessful(fact *AttemptFact) bool {
 // for it are one reading of the same attempt.
 func attemptUsage(fact *AttemptFact, operation string) usage.AttemptUsage {
 	if !fact.UsageObserved {
-		return usage.AttemptUsage{
-			Observed:         false,
-			Complete:         fact.UsageComplete,
-			BillingUncertain: fact.BillingUncertain,
-		}
+		return usage.AttemptUsage{Evidence: usage.EvidenceFrom(false, fact.UsageComplete, fact.BillingUncertain)}
 	}
 	if fact.TokenlessUsage {
-		return usage.AttemptUsage{Observed: true, Complete: fact.UsageComplete, BillingUncertain: fact.BillingUncertain}
+		return usage.AttemptUsage{Evidence: usage.EvidenceFrom(true, fact.UsageComplete, fact.BillingUncertain)}
 	}
 	evidence := observedAttemptUsage(fact.Usage, fact.UsageComplete, operation)
-	evidence.BillingUncertain = fact.BillingUncertain
+	evidence.Evidence = usage.EvidenceFrom(evidence.Evidence.Observed(), evidence.Evidence.Complete(), fact.BillingUncertain)
 	return evidence
 }
 

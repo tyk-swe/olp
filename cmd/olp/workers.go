@@ -12,6 +12,8 @@ import (
 	"github.com/tyk-swe/olp/internal/notifications"
 	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"github.com/tyk-swe/olp/internal/release"
+	"github.com/tyk-swe/olp/internal/usage/completeness"
+	"github.com/tyk-swe/olp/internal/usage/ingest"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -37,7 +39,6 @@ import (
 	"github.com/tyk-swe/olp/internal/retainedworker"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/sinks"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // startWorkers runs the recovery plane of one replica: the media and batch
@@ -110,11 +111,11 @@ func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Clie
 	wg.Go(func() {
 		// The consumer identity is stable for this process and unique among
 		// live ones, so a restart reclaims exactly its own deliveries.
-		if err := usage.RunConsumer(ctx, pool, vk, stream, usage.ConsumerName(hostname), region, limiter, log); err != nil {
+		if err := (ingest.Consumer{Pool: pool, Client: vk, Stream: stream, Name: ingest.ConsumerName(hostname), Region: region, Limiter: limiter, Log: log}).Run(ctx); err != nil {
 			log.Error("request metadata consumer stopped", "error", err)
 		}
 	})
-	wg.Go(func() { usage.RunEpochDetection(ctx, pool, log) })
+	wg.Go(func() { completeness.RunEpochDetection(ctx, pool, log) })
 	wg.Go(func() {
 		connect := func(context.Context) (ledger.Installer, error) { return limiter, nil }
 		ledger.Worker{Pool: pool, Region: region, Connect: connect, Checkpoint: costCheckpoint(pool, region), Log: log}.Run(ctx)

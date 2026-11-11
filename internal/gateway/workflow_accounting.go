@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/ingest"
 )
 
 type workflowDebitSettler interface {
@@ -16,13 +17,13 @@ type workflowDebitSettler interface {
 }
 
 func (d durableSessionDebits) SettleWorkflow(ctx context.Context, event *usage.Event, attempt int) ([]limits.Snapshot, error) {
-	return usage.PersistWorkflowAttempt(ctx, d.pool, event, attempt)
+	return ingest.PersistWorkflowAttempt(ctx, d.pool, event, attempt)
 }
 
 func accountingEventID(e Envelope) (uuid.UUID, error) {
 	for _, attempt := range e.Attempts {
 		if attempt.Execution != nil && attempt.Execution.RunID != "" {
-			return usage.WorkflowEventID(attempt.Execution.RunID, e.AccountingID)
+			return ingest.WorkflowEventID(attempt.Execution.RunID, e.AccountingID)
 		}
 	}
 	return uuidNewV7()
@@ -35,7 +36,7 @@ func accountingAttemptID(e Envelope, index int) (uuid.UUID, error) {
 	}
 	for _, attempt := range e.Attempts {
 		if attempt.Execution != nil && attempt.Execution.RunID != "" {
-			eventID, err := usage.WorkflowEventID(attempt.Execution.RunID, e.AccountingID)
+			eventID, err := ingest.WorkflowEventID(attempt.Execution.RunID, e.AccountingID)
 			if err != nil {
 				return uuid.Nil, err
 			}

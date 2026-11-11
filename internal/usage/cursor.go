@@ -41,3 +41,9 @@ func DecodeCursor(s string) (time.Time, string, error) {
 	}
 	return at.UTC(), parsed.String(), nil
 }
+
+// Cursor is a position in a list ordered by timestamp and identifier.
+type Cursor struct {
+	At time.Time
+	ID string
+}

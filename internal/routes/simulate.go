@@ -10,6 +10,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 
 	"github.com/jackc/pgx/v5"
 
@@ -20,7 +21,6 @@ import (
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routeidentity"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // simulationInput is the draft request and the normalized input used by both
@@ -456,11 +456,11 @@ func simulationRoute(id, slug string, fidelity routing.RouteFidelity, operations
 	}
 	return r
 }
-func (s *Server) routingInputs(r *http.Request, q access.Queryer) (*usage.RoutingInputs, error) {
+func (s *Server) routingInputs(r *http.Request, q access.Queryer) (*routinginputs.Inputs, error) {
 	if s.Inputs != nil {
 		return s.Inputs(), nil
 	}
-	return usage.LoadRoutingInputs(r.Context(), q, time.Now())
+	return routinginputs.Load(r.Context(), q, time.Now())
 }
 
 // Credential revocation and grant lapse are authoritative without publishing a

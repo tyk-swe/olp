@@ -17,6 +17,7 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/ingest"
 )
 
 var (
@@ -360,7 +361,7 @@ func recordResultTx(ctx context.Context, tx pgx.Tx, settlement Settlement, diges
 	if err != nil {
 		return 0, nil, err
 	}
-	persisted, err := usage.PersistEventTx(ctx, tx, accepted)
+	persisted, err := ingest.PersistEventTx(ctx, tx, accepted)
 	if err != nil {
 		return 0, nil, fmt.Errorf("persist batch usage event: %w", err)
 	}
@@ -504,7 +505,7 @@ func recordGapTx(ctx context.Context, tx pgx.Tx, settlement Settlement, closing 
 	gap := Result{
 		CustomID:   "*",
 		Kind:       ResultGap,
-		Usage:      usage.AttemptUsage{Observed: false, BillingUncertain: true},
+		Usage:      usage.AttemptUsage{Evidence: usage.EvidenceUnobservedUncertain},
 		ErrorClass: "billing_uncertain",
 		Evidence:   fmt.Appendf(nil, "batch-gap:%d", closing.Gap),
 	}

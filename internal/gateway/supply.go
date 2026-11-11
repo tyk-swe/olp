@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/usage/rates"
 
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // ReadSupply reads the remaining headroom of the queried slots and the state of
@@ -88,8 +88,8 @@ type capHold struct {
 	owner      string
 	lease      *admission.Lease
 	dispatched bool
-	reserved   usage.Cost
-	spent      usage.Cost
+	reserved   rates.Cost
+	spent      rates.Cost
 }
 
 // cappedOwner is one spend cap an attempt is subject to.
@@ -186,7 +186,7 @@ func capRequest(owner cappedOwner, ttl time.Duration) admission.Request {
 	}
 }
 
-func (s *Server) holdCap(ctx context.Context, x *call, index int, owner cappedOwner, bound usage.Cost, ttl time.Duration) (*admission.Lease, error) {
+func (s *Server) holdCap(ctx context.Context, x *call, index int, owner cappedOwner, bound rates.Cost, ttl time.Duration) (*admission.Lease, error) {
 	amount := costReservation{requestID: x.request.accountingID()}
 	if !bound.IsZero() {
 		amount.amount = bound.String()

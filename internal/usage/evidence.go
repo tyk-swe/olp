@@ -1,45 +1,58 @@
 package usage
 
-type usageState uint8
+// UsageEvidence is what an attempt's accounting can claim. Observed means the
+// provider reported usage, complete means the accounting is settled, and
+// uncertain means the attempt may have been charged upstream without the
+// evidence ever arriving. Only these five combinations are meaningful, and the
+// zero value is refused by Validate.
+type UsageEvidence uint8
 
 const (
-	unobservedComplete usageState = iota
-	unobservedUncertain
-	observedIncomplete
-	observedIncompleteUncertain
-	observedComplete
+	EvidenceUnset UsageEvidence = iota
+	EvidenceUnobservedComplete
+	EvidenceUnobservedUncertain
+	EvidenceObservedIncomplete
+	EvidenceObservedIncompleteUncertain
+	EvidenceObservedComplete
 )
 
-type ValidatedUsage struct {
-	state      usageState
-	quantities UsageQuantities
-	deferred   bool
-}
-
-func classifyUsage(observed, complete, uncertain bool) (usageState, bool) {
+// EvidenceFrom maps the three wire flags to a state, and to EvidenceUnset when
+// no state has that combination.
+func EvidenceFrom(observed, complete, uncertain bool) UsageEvidence {
 	switch {
 	case !observed && complete && !uncertain:
-		return unobservedComplete, true
+		return EvidenceUnobservedComplete
 	case !observed && !complete && uncertain:
-		return unobservedUncertain, true
+		return EvidenceUnobservedUncertain
 	case observed && !complete && !uncertain:
-		return observedIncomplete, true
+		return EvidenceObservedIncomplete
 	case observed && !complete && uncertain:
-		return observedIncompleteUncertain, true
+		return EvidenceObservedIncompleteUncertain
 	case observed && complete && !uncertain:
-		return observedComplete, true
+		return EvidenceObservedComplete
 	default:
-		return 0, false
+		return EvidenceUnset
 	}
 }
 
-func (u ValidatedUsage) observed() bool { return u.state >= observedIncomplete }
-func (u ValidatedUsage) complete() bool {
-	return u.state == unobservedComplete || u.state == observedComplete
+func (e UsageEvidence) Valid() bool { return e != EvidenceUnset }
+
+func (e UsageEvidence) Observed() bool {
+	return e == EvidenceObservedIncomplete || e == EvidenceObservedIncompleteUncertain || e == EvidenceObservedComplete
 }
-func (u ValidatedUsage) uncertain() bool {
-	return u.state == unobservedUncertain || u.state == observedIncompleteUncertain
+
+func (e UsageEvidence) Complete() bool {
+	return e == EvidenceUnobservedComplete || e == EvidenceObservedComplete
 }
-func (u ValidatedUsage) wire() AttemptUsage {
-	return AttemptUsage{UsageQuantities: u.quantities, Deferred: u.deferred, Observed: u.observed(), Complete: u.complete(), BillingUncertain: u.uncertain()}
+
+func (e UsageEvidence) Uncertain() bool {
+	return e == EvidenceUnobservedUncertain || e == EvidenceObservedIncompleteUncertain
+}
+
+// Unsettled is the state of evidence that a later observation may still replace.
+func (e UsageEvidence) Unsettled() UsageEvidence {
+	if e.Observed() {
+		return EvidenceObservedIncompleteUncertain
+	}
+	return EvidenceUnobservedUncertain
 }

@@ -391,7 +391,7 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *cal
 		f.accepted = fact.Status == http.StatusOK
 		f.acceptance = upstream.Evidence{Reached: f.dispatched, Status: f.status, Accepted: f.accepted}.Acceptance()
 		if fact.Interaction != nil {
-			fact.Interaction.UpstreamState = string(f.acceptance)
+			fact.Interaction.UpstreamState = f.acceptance
 			if f.committed {
 				fact.Interaction.ClientState = usage.ClientPartial
 			}
@@ -465,7 +465,7 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *cal
 	fact.Usage = mediaUsage(effective, result)
 	fact.Committed = true
 	if fact.Interaction != nil {
-		fact.Interaction.UpstreamState = usage.UpstreamTerminal
+		fact.Interaction.UpstreamState = upstream.Terminal
 	}
 	if events, ok := result.Payload.(transport.Events); ok {
 		var streamFailure *attemptFailure

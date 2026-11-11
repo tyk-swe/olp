@@ -17,7 +17,7 @@ import (
 	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/secrets"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/retention"
 )
 
 const (
@@ -195,7 +195,7 @@ func (in importInputs) Cloud(ctx context.Context) (source.Cloud, error) {
 	}
 	context.AfterFunc(ctx, authClient.CloseIdleConnections)
 	today := in.worker.today()
-	retention, err := usage.RetentionDays(ctx, in.worker.deps.Pool)
+	retention, err := retention.RetentionDays(ctx, in.worker.deps.Pool)
 	if err != nil {
 		return source.Cloud{}, err
 	}
@@ -240,7 +240,7 @@ func (w *Worker) networkSecret(ctx context.Context, options *egress.ConnectionOp
 }
 
 func (w *Worker) purge(ctx context.Context) error {
-	retention, err := usage.RetentionDays(ctx, w.deps.Pool)
+	retention, err := retention.RetentionDays(ctx, w.deps.Pool)
 	if err != nil {
 		return err
 	}

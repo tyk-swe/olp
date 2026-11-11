@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 
 	"github.com/jackc/pgx/v5"
 
@@ -24,7 +25,6 @@ import (
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routeidentity"
-	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
@@ -32,7 +32,7 @@ import (
 type Server struct {
 	Region            string
 	Access            *access.Server
-	Inputs            func() *usage.RoutingInputs
+	Inputs            func() *routinginputs.Inputs
 	WorkflowTools     func() mcp.WorkflowResolver
 	WorkflowRelease   func() *release.Release
 	WorkflowAvailable func() bool

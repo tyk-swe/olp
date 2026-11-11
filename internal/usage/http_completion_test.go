@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/upstream"
 )
 
 func pendingHTTPEvent(t *testing.T) *Event {
@@ -15,7 +17,7 @@ func pendingHTTPEvent(t *testing.T) *Event {
 	event.Committed = false
 	final := &event.Attempts[len(event.Attempts)-1]
 	final.Committed, final.ErrorClass = false, nil
-	final.Routing = &Routing{ProviderRevisionID: event.RuntimeGenerationID, Interaction: &InteractionEvidence{Fidelity: "strict", PlanClass: "native_identity", UpstreamState: UpstreamTerminal, ClientState: ClientUnobserved}}
+	final.Routing = &Routing{ProviderRevisionID: event.RuntimeGenerationID, Interaction: &InteractionEvidence{Fidelity: "strict", PlanClass: "native_identity", UpstreamState: upstream.Terminal, ClientState: ClientUnobserved}}
 	if _, err := Validate(event); err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +65,7 @@ func TestPendingHTTPCompletionPreservesFinancialIdentityAndNativeEvidence(t *tes
 	}
 	final := decoded.Attempts[len(decoded.Attempts)-1]
 	if decoded.HTTPOutcomePending || decoded.StatusCode == nil || *decoded.StatusCode != 502 || decoded.Committed || final.Committed || decoded.EventID != financial.EventID || decoded.RequestID != financial.RequestID || final.ID != completion.Attempt.ID ||
-		!reflect.DeepEqual(decoded.Attempts[0], prior) || !reflect.DeepEqual(*final.Usage, usage) || final.Routing.Interaction.UpstreamState != UpstreamTerminal {
+		!reflect.DeepEqual(decoded.Attempts[0], prior) || !reflect.DeepEqual(*final.Usage, usage) || final.Routing.Interaction.UpstreamState != upstream.Terminal {
 		t.Fatalf("completion rewrote financial or prior attempt evidence: %+v", decoded)
 	}
 	if !decoded.PayloadCaptured {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/providerconfig"
+	"github.com/tyk-swe/olp/internal/usage/rates"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/codeadapter"
@@ -38,9 +39,9 @@ type paidCodeAttempt struct {
 	authority     keyauthority.Authority
 	targetLease   *targetReservation
 	supplyLeases  []*admission.Lease
-	price         *usage.RoutingPrice
-	discount      *usage.RoutingDiscount
-	card          *usage.RoutingCardRevision
+	price         *rates.RoutingPrice
+	discount      *rates.RoutingDiscount
+	card          *rates.RoutingCardRevision
 	started       time.Time
 	status        int
 	usage         *wire.Usage
@@ -116,7 +117,7 @@ func (s *Server) preparePaidCode(r *http.Request, release *release.Release, rout
 	if !cardKnown {
 		return nil, codemode.Refuse(503, "code_paid_pricing_unavailable")
 	}
-	charge, chargePriced := func() (usage.Cost, bool) {
+	charge, chargePriced := func() (rates.Cost, bool) {
 		if card == nil {
 			return cost, true
 		}

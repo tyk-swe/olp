@@ -5,6 +5,8 @@ import (
 	"math/big"
 	"slices"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/upstream"
 )
 
 // observePendingUsage keeps one provider-reported snapshot, never a tuple made
@@ -15,7 +17,7 @@ func observePendingUsage(event *Event, evidence AttemptUsage, terminal bool) err
 		return ErrInvalidEvent
 	}
 	if !terminal {
-		evidence.Complete, evidence.BillingUncertain = false, true
+		evidence.Evidence = evidence.Evidence.Unsettled()
 	}
 	// Validate the incoming evidence even if selection will discard it. A stale
 	// observation must not conceal malformed accounting state.
@@ -25,12 +27,12 @@ func observePendingUsage(event *Event, evidence AttemptUsage, terminal bool) err
 	if _, err := Validate(&candidate); err != nil {
 		return err
 	}
-	if !terminal || !evidence.Observed || !evidence.Complete || evidence.BillingUncertain {
+	if !terminal || !evidence.Evidence.Observed() || !evidence.Evidence.Complete() || evidence.Evidence.Uncertain() {
 		previous := event.Attempts[len(event.Attempts)-1].Usage
-		if previous != nil && previous.Observed && (!evidence.Observed || !usageSnapshotDominates(evidence, *previous)) {
+		if previous != nil && previous.Evidence.Observed() && (!evidence.Evidence.Observed() || !usageSnapshotDominates(evidence, *previous)) {
 			evidence = *previous
 		}
-		evidence.Complete, evidence.BillingUncertain = false, true
+		evidence.Evidence = evidence.Evidence.Unsettled()
 	}
 	setPendingUsage(event, clonePendingUsage(evidence))
 	return nil
@@ -45,26 +47,18 @@ func setPendingUsage(event *Event, evidence AttemptUsage) {
 	event.ImageInputTokens, event.CachedImageInputTokens, event.ImageOutputTokens = evidence.ImageInputTokens, evidence.CachedImageInputTokens, evidence.ImageOutputTokens
 	event.ToolCalls, event.Batch = evidence.ToolCalls, evidence.Batch
 	event.TrainingTokens = evidence.TrainingTokens
-	eveStorage := evidence.StorageByteSeconds
-	event.StorageByteSeconds = eveStorage
+	event.StorageByteSeconds = evidence.StorageByteSeconds
 	event.CacheTokenSeconds = evidence.CacheTokenSeconds
 	event.ContainerSessions = evidence.ContainerSessions
-	event.MediaUnits, event.UsageComplete = evidence.MediaUnits, evidence.Complete
+	event.MediaUnits, event.UsageComplete = evidence.MediaUnits, evidence.Evidence.Complete()
 }
 
 // A partial snapshot covers another only if it preserves each known dimension
 // and does not reduce a known cache partition. Missing fields are unknown;
 // explicit zero remains evidence. This comparison never changes either tuple.
 func usageSnapshotDominates(next, previous AttemptUsage) bool {
-	nextCounts := [...]*int64{next.InputTokens, next.OutputTokens, next.CachedInputTokens,
-		next.CacheWriteInputTokens, next.CacheWrite5MInputTokens, next.CacheWrite1HInputTokens,
-		next.AudioInputTokens, next.CachedAudioInputTokens, next.AudioOutputTokens,
-		next.ImageInputTokens, next.CachedImageInputTokens, next.ImageOutputTokens}
-	previousCounts := [...]*int64{previous.InputTokens, previous.OutputTokens, previous.CachedInputTokens,
-		previous.CacheWriteInputTokens, previous.CacheWrite5MInputTokens, previous.CacheWrite1HInputTokens,
-		previous.AudioInputTokens, previous.CachedAudioInputTokens, previous.AudioOutputTokens,
-		previous.ImageInputTokens, previous.CachedImageInputTokens, previous.ImageOutputTokens}
-	for index, before := range previousCounts {
+	nextCounts := next.tokenCounts()
+	for index, before := range previous.tokenCounts() {
 		if before != nil && (nextCounts[index] == nil || *nextCounts[index] < *before) {
 			return false
 		}
@@ -198,9 +192,9 @@ func (p PendingGeneration) AccountingEvent(now time.Time, state GenerationState)
 	final := event.Attempts[len(event.Attempts)-1]
 	if final.Routing != nil && final.Routing.Interaction != nil {
 		if state == GenerationTerminal {
-			final.Routing.Interaction.UpstreamState = UpstreamTerminal
+			final.Routing.Interaction.UpstreamState = upstream.Terminal
 		} else {
-			final.Routing.Interaction.UpstreamState = UpstreamUnknown
+			final.Routing.Interaction.UpstreamState = upstream.Unknown
 		}
 	}
 	return NewAccountingEvent(event)
@@ -221,8 +215,7 @@ func clonePendingQuantity[T int64 | string](value *T) *T {
 }
 
 func clonePendingUsage(evidence AttemptUsage) AttemptUsage {
-	return AttemptUsage{Observed: evidence.Observed, Complete: evidence.Complete,
-		BillingUncertain: evidence.BillingUncertain, Deferred: evidence.Deferred,
+	return AttemptUsage{Evidence: evidence.Evidence, Deferred: evidence.Deferred,
 		UsageQuantities: UsageQuantities{
 			InvocationCount:         clonePendingQuantity(evidence.InvocationCount),
 			TrainingTokens:          clonePendingQuantity(evidence.TrainingTokens),

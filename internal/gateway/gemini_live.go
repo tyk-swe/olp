@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	acceptance "github.com/tyk-swe/olp/internal/upstream"
+
 	"github.com/coder/websocket"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/bodylimit"
@@ -255,7 +257,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 			fact := &x.facts[len(x.facts)-1]
 			fact.Class, fact.BillingUncertain = classAmbiguous, true
 			if fact.Interaction != nil {
-				fact.Interaction.UpstreamState = usage.UpstreamUnknown
+				fact.Interaction.UpstreamState = acceptance.Unknown
 			}
 		}
 		return
@@ -270,7 +272,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 			fact := &x.facts[len(x.facts)-1]
 			fact.Class, fact.BillingUncertain = classAmbiguous, true
 			if fact.Interaction != nil {
-				fact.Interaction.UpstreamState = usage.UpstreamUnknown
+				fact.Interaction.UpstreamState = acceptance.Unknown
 			}
 		}
 		return
@@ -282,7 +284,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 			fact := &x.facts[len(x.facts)-1]
 			fact.Class, fact.BillingUncertain = classProtocol, true
 			if fact.Interaction != nil {
-				fact.Interaction.UpstreamState = usage.UpstreamTerminal
+				fact.Interaction.UpstreamState = acceptance.Terminal
 			}
 		}
 		return
@@ -304,7 +306,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 	}
 	x.delivered(s.now())
 	if len(x.facts) > 0 && x.facts[len(x.facts)-1].Interaction != nil {
-		x.facts[len(x.facts)-1].Interaction.UpstreamState = usage.UpstreamAccepted
+		x.facts[len(x.facts)-1].Interaction.UpstreamState = acceptance.Accepted
 		x.facts[len(x.facts)-1].Interaction.ClientState = usage.ClientPartial
 	}
 	usageRecord, usageComplete, relayErr := s.relayGeminiLive(ctx, x, p, client, upstream, token, int(limit))
@@ -339,13 +341,13 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 			fact.Class = class
 			if fact.Interaction != nil {
 				if errors.Is(relayErr, errGeminiLiveProviderError) {
-					fact.Interaction.UpstreamState = usage.UpstreamTerminal
+					fact.Interaction.UpstreamState = acceptance.Terminal
 				} else {
-					fact.Interaction.UpstreamState = usage.UpstreamUnknown
+					fact.Interaction.UpstreamState = acceptance.Unknown
 				}
 			}
 		} else if fact.Interaction != nil {
-			fact.Interaction.UpstreamState, fact.Interaction.ClientState = usage.UpstreamTerminal, usage.ClientTerminal
+			fact.Interaction.UpstreamState, fact.Interaction.ClientState = acceptance.Terminal, usage.ClientTerminal
 		}
 	}
 	if relayErr != nil {
