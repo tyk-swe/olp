@@ -62,11 +62,29 @@ func Open(ctx context.Context, c Config) (*Client, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	raw, err := valkey.NewClient(c.option)
-	if err != nil {
-		return nil, errors.New("Valkey connection failed")
+	type opened struct {
+		raw valkey.Client
+		err error
 	}
-	return &Client{raw: raw, timeout: c.timeout}, nil
+	done := make(chan opened, 1)
+	go func() {
+		raw, err := valkey.NewClient(c.option)
+		done <- opened{raw, err}
+	}()
+	select {
+	case <-ctx.Done():
+		go func() {
+			if late := <-done; late.err == nil {
+				late.raw.Close()
+			}
+		}()
+		return nil, ctx.Err()
+	case result := <-done:
+		if result.err != nil {
+			return nil, errors.New("Valkey connection failed")
+		}
+		return &Client{raw: result.raw, timeout: c.timeout}, nil
+	}
 }
 
 func (c *Client) Close()                         { c.raw.Close() }
