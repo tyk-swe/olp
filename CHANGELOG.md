@@ -7,6 +7,28 @@ semantic versioning and take their source from root `package.json`. The
 
 ## [Unreleased]
 
+### Changed
+
+- Google BigQuery billing imports share the month walker that AWS and Azure
+  use. A pass reads at most three months, newest first, and an unfinished
+  backfill resumes a minute later. A closed month is not read again once its
+  import covers every retained day, so only the current and previous months
+  pick up restatements. AWS and Azure sweeps also walk newest first, and Azure
+  reads the newest run of a month across its export folders. Migration 0143
+  replaces the per-source resume columns with one cursor, which now also
+  resets for Google when the scope changes.
+
+- OpenAI and Anthropic cost imports reject a line with an invalid currency code
+  and record a `response` failure, as cloud imports already did. Every source
+  now shortens line items longer than 256 characters the same way, so a long
+  AWS line item gets a new key on its next import. S3 errors other than 401,
+  403 and 404 record `status` instead of `network`.
+
+### Fixed
+
+- Planning an unchanged configuration export no longer replaces a provider
+  whose billing import has an AWS, Azure or Google scope.
+
 ## [0.2.0] - 2026-11-03
 
 ### Added

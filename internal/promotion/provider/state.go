@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/billing"
+	"github.com/tyk-swe/olp/internal/billing/imports"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/providers"
 )
@@ -18,7 +18,7 @@ type destination struct {
 	kind      string
 	project   *string
 	network   *string
-	billing   *billing.ImportState
+	billing   *imports.Config
 	slots     map[string]storedSlot
 	draft     Entry
 	published *Entry
@@ -108,11 +108,15 @@ func readDestination(ctx context.Context, q access.Queryer, row providers.Provid
 	}, nil
 }
 
-func readImport(ctx context.Context, q access.Queryer, row providers.ProviderSnapshot) (*billing.ImportState, error) {
+func readImport(ctx context.Context, q access.Queryer, row providers.ProviderSnapshot) (*imports.Config, error) {
 	if !row.Imported {
 		return nil, nil
 	}
-	return billing.ReadImportState(ctx, q, row.ID)
+	config, found, err := imports.Read(ctx, q, row.ID)
+	if err != nil || !found {
+		return nil, err
+	}
+	return &config, nil
 }
 
 func draftEntry(row providers.ProviderSnapshot, configuration providers.Configuration, models []providers.ModelSnapshot, slots []storedPair, imported *Billing) (Entry, error) {
