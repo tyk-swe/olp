@@ -133,6 +133,17 @@ func (s *service) seedPromotion(owner *caller, fixture canaryFixture) *caller {
 			"urn:openllmproxy:params:scim:schemas:extension:2.0:Group": map[string]any{"role": "viewer", "accessScope": "assigned", "projects": grants},
 		}, nil, http.StatusCreated)
 	}
+	bedrock := s.want(operator, "POST", "/api/v1/providers", map[string]any{
+		"name": "promotion-bedrock", "project_id": fixture.project,
+		"configuration": map[string]any{"kind": "bedrock", "auth_mode": "default_chain", "cloud_region": "us-east-1"},
+	}, idempotent(), http.StatusCreated)
+	s.want(operator, "PUT", "/api/v1/providers/"+bedrock["id"].(string)+"/billing-import", map[string]any{
+		"credential": map[string]any{"auth_mode": "workload"},
+		"scope": map[string]any{
+			"payer_account_id": "123456789012", "bucket": "olp-cur", "report_prefix": "cur/olp", "region": "us-east-1",
+			"linked_account_ids": []string{"210987654321", "123456789012"},
+		},
+	}, idempotent(etag(bedrock)), http.StatusCreated)
 	group("zeta", second, fixture.project)
 	group("alpha", fixture.project)
 	mfa := s.want(operator, "GET", "/api/v1/settings/auth.mfa_required", nil, nil, http.StatusOK)

@@ -20,13 +20,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/billing"
+	"github.com/tyk-swe/olp/internal/billing/imports"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -105,13 +103,11 @@ func (f billingFixture) importDue(t *testing.T, s3Endpoint string) {
 	if _, err := f.pool.Exec(t.Context(), `UPDATE olp.provider_billing_imports SET next_import_at=now() WHERE provider_id=$1::uuid`, f.providerID); err != nil {
 		t.Fatal(err)
 	}
-	importer := &billing.Importer{
-		Pool: f.pool, Keys: f.keys, Installation: f.installation, Log: slog.New(slog.DiscardHandler),
-		Egress: &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}},
-		AWSClient: func(config aws.Config) *s3.Client {
-			return s3.NewFromConfig(config, func(o *s3.Options) { o.BaseEndpoint, o.UsePathStyle = aws.String(s3Endpoint), true })
-		},
-	}
+	importer := imports.NewWorker(imports.Deps{
+		Pool: f.pool, Keys: f.keys, Installation: f.installation, Log: slog.New(slog.DiscardHandler), Now: time.Now,
+		Egress:     egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}},
+		S3Endpoint: s3Endpoint,
+	})
 	if err := importer.Pass(t.Context()); err != nil {
 		t.Fatal(err)
 	}

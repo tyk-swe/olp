@@ -23,7 +23,8 @@ import (
 	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/agents/tasks"
 	"github.com/tyk-swe/olp/internal/batches"
-	"github.com/tyk-swe/olp/internal/billing"
+	"github.com/tyk-swe/olp/internal/billing/imports"
+	"github.com/tyk-swe/olp/internal/billing/reconciliation"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/codesessions"
@@ -222,7 +223,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 	var business *telemetry.BusinessMetrics
 	var exporter *stream.Worker
 	var capturer *capture.Manager
-	var importer *billing.Importer
+	var importer *imports.Worker
 	var focusWorker *focus.Worker
 	// The public listener's process-local admission pools. The inference pool
 	// is shared with the gateway so middleware and direct handler calls bound
@@ -265,7 +266,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		exporter = &stream.Worker{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Log: log}
 		focusWorker = &focus.Worker{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Version: Version, Log: log, Now: time.Now}
 		capturer = capture.NewManager(pool, keys, installation, sender, log)
-		importer = &billing.Importer{Pool: pool, Keys: keys, Installation: installation, Egress: &policy, Log: log}
+		importer = imports.NewWorker(imports.Deps{Pool: pool, Keys: keys, Installation: installation, Egress: policy, Log: log, Now: time.Now})
 		var mounted map[string]release.MountedProvider
 		if c.ConnectorConfigFile != "" {
 			mounted, err = providers.LoadMounted(c.ConnectorConfigFile, &policy)
@@ -590,7 +591,11 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		mediaGaps:     &mediaGapsTotal,
 		loss:          lossCounters,
 		export: func(ctx context.Context) []prometheus.Metric {
-			return slices.Concat(exporter.Metrics(ctx), focusWorker.Metrics(ctx), capturer.Metrics(), billing.Metrics(ctx, pool, importer))
+			captureRates, err := reconciliation.CaptureRates(ctx, pool, time.Now())
+			if err != nil {
+				log.Warn("billing capture rates could not be computed", "error", err)
+			}
+			return slices.Concat(exporter.Metrics(ctx), focusWorker.Metrics(ctx), capturer.Metrics(), importer.Metrics(), captureRates)
 		},
 	})
 	background.Go(func() { obsCache.Run(auxiliary, obsSources, log) })

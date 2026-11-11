@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/guardrails/attachment"
 	"github.com/tyk-swe/olp/internal/media/jobs"
@@ -23,7 +24,8 @@ import (
 	"github.com/tyk-swe/olp/internal/agents/publications"
 	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/agents/tasks"
-	"github.com/tyk-swe/olp/internal/billing"
+	"github.com/tyk-swe/olp/internal/billing/imports"
+	"github.com/tyk-swe/olp/internal/billing/reconciliation"
 	"github.com/tyk-swe/olp/internal/branding"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/egress"
@@ -171,7 +173,8 @@ func (m Management) Register(mux *http.ServeMux) {
 	destination.NewAPI(m.Access, m.Egress).Register(mux)
 	focus.NewAPI(m.Access).Register(mux)
 	capture.NewAPI(m.Access).Register(mux)
-	(&billing.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
+	imports.NewAPI(m.Access).Register(mux)
+	reconciliation.NewAPI(m.Access, time.Now).Register(mux)
 	promotionserve.Register(mux, promotionserve.Deps{
 		Access:     m.Access,
 		Egress:     m.Egress,
