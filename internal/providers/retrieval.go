@@ -6,10 +6,11 @@ import (
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 )
 
-func (s *Catalogue) certifyRetrieval(ctx context.Context, cfg *Configuration, credential []byte, model string) error {
-	endpoint, err := cfg.transport().RetrievalProbeURL(cfg.transport().Model(model))
+func (s *Catalogue) certifyRetrieval(ctx context.Context, cfg *connection.Configuration, credential []byte, model string) error {
+	endpoint, err := cfg.Transport().RetrievalProbeURL(cfg.Transport().Model(model))
 	if err != nil {
 		return &probeError{Code: "capability_unavailable", Detail: "This binding cannot establish a cost-free native resource metadata probe."}
 	}
@@ -36,7 +37,7 @@ func (s *Catalogue) certifyRetrieval(ctx context.Context, cfg *Configuration, cr
 	}
 	value, _ := root.Lookup(identity)
 	got, ok := value.Text()
-	if !ok || got != cfg.transport().Model(model) {
+	if !ok || got != cfg.Transport().Model(model) {
 		return &probeError{Code: "provider_protocol_error", Detail: "Native retrieval metadata does not match the selected resource."}
 	}
 	return nil

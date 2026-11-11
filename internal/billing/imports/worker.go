@@ -15,7 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/observability/workerhealth"
-	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage/retention"
 )
@@ -160,7 +160,7 @@ func (w *Worker) read(ctx context.Context, r record) (*source.Resume, error) {
 type importInputs struct {
 	worker          *Worker
 	record          record
-	configuration   providers.Configuration
+	configuration   connection.Configuration
 	scope           source.Scope
 	connectionScope string
 }

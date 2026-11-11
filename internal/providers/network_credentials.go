@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -116,7 +117,7 @@ func (s *Server) revokeNetworkCredential(r *http.Request, _ access.Principal) (a
 	})
 }
 
-func validateNetworkReference(ctx context.Context, q access.Queryer, providerID string, cfg *Configuration) error {
+func validateNetworkReference(ctx context.Context, q access.Queryer, providerID string, cfg *connection.Configuration) error {
 	if cfg.Options.Network == nil || cfg.Options.Network.CredentialID == "" {
 		return nil
 	}
@@ -128,7 +129,7 @@ func validateNetworkReference(ctx context.Context, q access.Queryer, providerID 
 	return err
 }
 
-func (s *Catalogue) networkSecret(ctx context.Context, cfg *Configuration) ([]byte, error) {
+func (s *Catalogue) networkSecret(ctx context.Context, cfg *connection.Configuration) ([]byte, error) {
 	if cfg.Options.Network == nil || cfg.Options.Network.CredentialID == "" {
 		return nil, nil
 	}
@@ -143,7 +144,7 @@ func (s *Catalogue) networkSecret(ctx context.Context, cfg *Configuration) ([]by
 	return s.Access.Keys.Read(ctx, tx, s.Access.Installation, cfg.Options.Network.CredentialID, secrets.ProviderCredential)
 }
 
-func (s *Catalogue) connectionClient(ctx context.Context, cfg *Configuration, credential []byte) (*http.Client, error) {
+func (s *Catalogue) connectionClient(ctx context.Context, cfg *connection.Configuration, credential []byte) (*http.Client, error) {
 	if cfg.Options.Network == nil && cfg.ProfileID == "" {
 		return s.client, nil
 	}
@@ -155,19 +156,8 @@ func (s *Catalogue) connectionClient(ctx context.Context, cfg *Configuration, cr
 		return nil, errors.New("provider identity is required for configured connections")
 	}
 	digest := sha256.Sum256(credential)
-	scope := cfg.ProviderID + "/" + cfg.transportFingerprint() + "/" + hex.EncodeToString(digest[:])
+	scope := cfg.ProviderID + "/" + cfg.TransportFingerprint() + "/" + hex.EncodeToString(digest[:])
 	return s.connections.ClientScoped(scope, *s.Egress, cfg.Options.Network, secret, probeTimeout)
-}
-
-func (c Configuration) WithNetworkCredential(credentialID string) Configuration {
-	if c.Options.Network == nil {
-		return c
-	}
-	network := *c.Options.Network
-	network.CredentialID = credentialID
-	configured := c
-	configured.Options.Network = &network
-	return configured
 }
 
 func (s *Catalogue) revokeNetworkCredentialVersion(ctx context.Context, tx pgx.Tx, current *record, id string) (revokedCredential, error) {

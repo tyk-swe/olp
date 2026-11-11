@@ -13,17 +13,18 @@ import (
 	"github.com/tyk-swe/olp/internal/geminilifecycle"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 )
 
-func (s *Catalogue) certifyGeminiInteraction(ctx context.Context, cfg *Configuration, credential []byte, model, mode string, maxEventBytes int) error {
+func (s *Catalogue) certifyGeminiInteraction(ctx context.Context, cfg *connection.Configuration, credential []byte, model, mode string, maxEventBytes int) error {
 	if mode != ModeUnary && mode != ModeStreaming {
 		return &probeError{Code: "capability_unavailable", Detail: "Gemini Interactions profile supports unary and streaming calls."}
 	}
-	endpoint, err := cfg.transport().InteractionsURL("", "")
+	endpoint, err := cfg.Transport().InteractionsURL("", "")
 	if err != nil {
 		return &probeError{Code: "invalid_endpoint", Detail: "The Interactions profile cannot address this endpoint."}
 	}
-	upstream := cfg.transport().Model(model)
+	upstream := cfg.Transport().Model(model)
 	if !connectors.ModelValid(connectors.KindGemini, upstream) {
 		return &probeError{Code: "model_invalid", Detail: "The Interactions model binding is malformed."}
 	}
@@ -56,8 +57,8 @@ func (s *Catalogue) certifyGeminiInteraction(ctx context.Context, cfg *Configura
 	return nil
 }
 
-func (s *Catalogue) certifyGeminiLive(ctx context.Context, cfg *Configuration, credential []byte, model string, maxEventBytes int) error {
-	endpoint, err := cfg.transport().GeminiLiveURL()
+func (s *Catalogue) certifyGeminiLive(ctx context.Context, cfg *connection.Configuration, credential []byte, model string, maxEventBytes int) error {
+	endpoint, err := cfg.Transport().GeminiLiveURL()
 	if err != nil {
 		return &probeError{Code: "invalid_endpoint", Detail: "The Live profile cannot address this endpoint."}
 	}
@@ -77,7 +78,7 @@ func (s *Catalogue) certifyGeminiLive(ctx context.Context, cfg *Configuration, c
 	if err != nil {
 		return &probeError{Code: "invalid_endpoint", Detail: "The Live endpoint is malformed."}
 	}
-	transport := cfg.transport()
+	transport := cfg.Transport()
 	if _, err := s.auth.Apply(ctx, req, transport, credential, nil); err != nil {
 		return &probeError{Code: "credential_invalid", Detail: "The Live credential could not be applied."}
 	}

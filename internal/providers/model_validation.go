@@ -12,6 +12,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/operationregistry"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 )
 
 func modelJSON(m storedModel) map[string]any {
@@ -493,7 +494,7 @@ func (s *Catalogue) setDraftModel(ctx context.Context, tx pgx.Tx, current *recor
 func (s *Catalogue) storeDiscoveredModels(ctx context.Context, tx pgx.Tx, current *record, models []discoveredModel, upstream bool, at time.Time) error {
 	var err error
 	for _, m := range models {
-		mergeDiscoveredFacts(&current.Configuration, m.Name, m.Metadata)
+		connection.MergeDiscoveredFacts(&current.Configuration, m.Name, m.Metadata)
 		if _, err = tx.Exec(ctx, "INSERT INTO olp.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities,discovered_at) VALUES($1,$2,$3,$4,false,'[]',$5) ON CONFLICT(provider_id,upstream_model) DO UPDATE SET display_name=excluded.display_name,discovered_at=excluded.discovered_at", access.NewID(), current.ID, m.Name, m.Display, at); err != nil {
 			return err
 		}

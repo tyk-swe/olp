@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -30,7 +31,7 @@ type DraftSlot struct {
 	Weight       int64
 	CredentialID *string
 	Restrictions SlotRestrictions
-	Limits       Limits
+	Limits       connection.Limits
 }
 
 // StageDraftInventory owns replacement of a validated provider inventory under

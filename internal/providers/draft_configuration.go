@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/grants"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 )
 
 // StoreDraftConfiguration owns the provider configuration/evidence transition
@@ -18,7 +19,7 @@ func (s *Catalogue) StoreDraftConfiguration(ctx context.Context, tx pgx.Tx, id, 
 	if next.Endpoint == nil {
 		return access.Invalid("configuration", "Prepare a valid provider configuration before saving it.")
 	}
-	var previous Configuration
+	var previous connection.Configuration
 	var encoded []byte
 	var previousName string
 	if err := tx.QueryRow(ctx, "SELECT name,configuration FROM olp.providers WHERE id=$1 FOR UPDATE", id).Scan(&previousName, &encoded); err != nil {
@@ -28,7 +29,7 @@ func (s *Catalogue) StoreDraftConfiguration(ctx context.Context, tx pgx.Tx, id, 
 		return err
 	}
 	previous.Normalize()
-	if err := PreserveCredentialBoundary(ctx, tx, id, &previous, &next); err != nil {
+	if err := connection.PreserveCredentialBoundary(ctx, tx, id, &previous, &next); err != nil {
 		return err
 	}
 	if err := validateNetworkReference(ctx, tx, id, &next); err != nil {
@@ -45,12 +46,12 @@ func (s *Catalogue) StoreDraftConfiguration(ctx context.Context, tx pgx.Tx, id, 
 	if previousName == name && string(before) == string(after) {
 		return nil
 	}
-	if previous.enrollmentBoundary() != next.enrollmentBoundary() {
+	if previous.EnrollmentBoundary() != next.EnrollmentBoundary() {
 		if err := grants.CancelProviderPending(ctx, tx, id); err != nil {
 			return err
 		}
 	}
-	if next.transportFingerprint() != previous.transportFingerprint() {
+	if next.TransportFingerprint() != previous.TransportFingerprint() {
 		if err := invalidateEvidence(ctx, tx, id); err != nil {
 			return err
 		}

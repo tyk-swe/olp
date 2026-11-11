@@ -9,23 +9,24 @@ import (
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 )
 
 func NetworkRef(provider string) promotion.Ref { return promotion.Ref(provider + "/network") }
 
-func portableConfiguration(input contract.ProviderConfiguration, at path) (providers.Configuration, error) {
-	configuration, err := promotion.Convert[providers.Configuration](input)
+func portableConfiguration(input contract.ProviderConfiguration, at path) (connection.Configuration, error) {
+	configuration, err := promotion.Convert[connection.Configuration](input)
 	if err != nil {
-		return providers.Configuration{}, err
+		return connection.Configuration{}, err
 	}
 	configuration.Normalize()
 	if configuration.Options.Network != nil && configuration.Options.Network.CredentialID != "" {
-		return providers.Configuration{}, access.Invalid(at.field("configuration.options.network.credential_id"), "Configuration artifacts use network_credential_ref instead of environment-specific credential IDs.")
+		return connection.Configuration{}, access.Invalid(at.field("configuration.options.network.credential_id"), "Configuration artifacts use network_credential_ref instead of environment-specific credential IDs.")
 	}
 	return configuration, nil
 }
 
-func parseNetwork(entry contract.ConfigurationProviderEntry, configuration providers.Configuration, at path) (bool, error) {
+func parseNetwork(entry contract.ConfigurationProviderEntry, configuration connection.Configuration, at path) (bool, error) {
 	if entry.NetworkCredentialRef == nil {
 		return false, nil
 	}
@@ -40,7 +41,7 @@ func renderNetwork(entry Entry) *string {
 	return promotion.PointerIf(string(NetworkRef(entry.Name)), entry.Network)
 }
 
-func storedNetwork(configuration providers.Configuration) bool {
+func storedNetwork(configuration connection.Configuration) bool {
 	return configuration.Options.Network != nil && configuration.Options.Network.CredentialID != ""
 }
 

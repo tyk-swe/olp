@@ -1,25 +1,10 @@
-// Package providers owns provider connections: configuration drafts, model
-// discovery and certification, credential pools, activation into immutable
-// revisions, and history for the connector matrix.
-package providers
+package connection
 
 import (
 	"slices"
-	"strings"
-
-	"github.com/tyk-swe/olp/internal/providerconfig"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/vendors"
-)
-
-// Capability tuple vocabulary shared across providers.
-const (
-	OperationGeneration = "generation"
-	SurfaceOpenAI       = "openai"
-	ModeUnary           = "unary"
-	ModeStreaming       = "streaming"
 )
 
 type authCapability struct {
@@ -81,12 +66,6 @@ type vendor struct {
 	UnsupportedParameters []string `json:"unsupported_parameters"`
 }
 
-type CapabilityInput struct {
-	Operation string `json:"operation"`
-	Surface   string `json:"surface"`
-	Mode      string `json:"mode"`
-}
-
 var (
 	apiKeyAuth  = authCapability{Mode: connectors.AuthAPIKey, Label: "API key", Credential: "required"}
 	headersAuth = authCapability{Mode: connectors.AuthHeaders, Label: "Encrypted headers", Credential: "required"}
@@ -94,9 +73,9 @@ var (
 	endpoint    = fieldCapability{Field: "endpoint", Label: "Endpoint"}
 )
 
-// kinds is the connector kind catalogue. Each kind's presets are the reviewed
+// Kinds is the connector kind catalogue. Each kind's presets are the reviewed
 // vendor contracts that offer themselves as its presets.
-var kinds = withPresets([]kindCapability{
+var Kinds = withPresets([]kindCapability{
 	{Kind: connectors.KindOpenAI, Label: "OpenAI", Description: "OpenAI platform API with Chat Completions and Responses.", DefaultAuthMode: connectors.AuthAPIKey,
 		AuthModes: []authCapability{apiKeyAuth, headersAuth, noAuth}, Fields: []fieldCapability{endpoint}},
 	{Kind: connectors.KindOpenAICompatible, Label: "OpenAI-compatible", Description: "Any server implementing the OpenAI Chat Completions or Responses API.", DefaultAuthMode: connectors.AuthAPIKey,
@@ -136,11 +115,9 @@ var kinds = withPresets([]kindCapability{
 		Fields:    []fieldCapability{}},
 })
 
-// vendorCatalogue is what /provider-vendors publishes: every reviewed vendor
+// VendorCatalogue is what /provider-vendors publishes: every reviewed vendor
 // contract, authenticated as its connector kind allows.
-var vendorCatalogue = publishedVendors()
-
-var capabilityVocabulary = capabilityOptions()
+var VendorCatalogue = publishedVendors()
 
 func withPresets(catalogue []kindCapability) []kindCapability {
 	for i := range catalogue {
@@ -165,7 +142,7 @@ func publishedVendors() []vendor {
 	out := []vendor{}
 	for _, c := range vendors.All() {
 		auth := []string{}
-		for _, mode := range kindByName(c.Connector).AuthModes {
+		for _, mode := range KindByName(c.Connector).AuthModes {
 			auth = append(auth, mode.Mode)
 		}
 		var endpoint *string
@@ -184,144 +161,10 @@ func publishedVendors() []vendor {
 	return out
 }
 
-func capabilityOptions() []CapabilityInput {
-	tuple := func(operation, surface, mode string) CapabilityInput {
-		return CapabilityInput{Operation: operation, Surface: surface, Mode: mode}
-	}
-	out := []CapabilityInput{tuple(OperationGeneration, SurfaceOpenAI, ModeUnary), tuple(OperationGeneration, SurfaceOpenAI, ModeStreaming)}
-	for _, surface := range []string{"openai", "anthropic", "gemini"} {
-		if surface != "openai" {
-			out = append(out, tuple("generation", surface, "unary"), tuple("generation", surface, "streaming"))
-		}
-		out = append(out, tuple("token_count", surface, "unary"))
-	}
-	out = append(out, tuple("batch", "gemini", "unary"))
-	for _, operation := range []string{"embeddings", "moderation", "rerank", "translation", "decision"} {
-		out = append(out, tuple(operation, "openai", "unary"))
-	}
-	for _, operation := range []string{"ocr", "search"} {
-		out = append(out, tuple(operation, "openai", "unary"), tuple(operation, "native", "unary"))
-	}
-	for _, operation := range []string{"image_generation", "image_edit", "speech", "transcription"} {
-		out = append(out, tuple(operation, "openai", "unary"), tuple(operation, "openai", "streaming"))
-	}
-	for _, operation := range []string{"image_variation", "video_list", "video_get", "video_content", "video_delete"} {
-		out = append(out, tuple(operation, "openai", "unary"))
-	}
-	out = append(out, tuple("video_create", "openai", "async"), tuple("batch", "openai", "unary"), tuple("batch", "anthropic", "unary"), tuple("realtime", "openai", "realtime"), tuple("realtime", "openai", "webrtc"), tuple("realtime", "gemini", "realtime"), tuple("realtime", "native", "realtime"))
-	for _, operation := range []string{"generation", "bedrock_invoke"} {
-		out = append(out, tuple(operation, "bedrock", "unary"), tuple(operation, "bedrock", "streaming"))
-	}
-	// Native generation dialects, which only their profiles serve.
-	out = append(out, tuple("generation", "native", "unary"), tuple("generation", "native", "streaming"), tuple("batch", "native", "unary"))
-	out = append(out, tuple("decision", "native", "unary"))
-	out = append(out, tuple("agent_resource", "gemini", "unary"))
-	for _, operation := range []string{"vector_store", "conversation", "container", "eval", "retrieval"} {
-		out = append(out, tuple(operation, "openai", "unary"))
-	}
-	out = append(out, tuple("fine_tuning", "openai", "unary"), tuple("fine_tuning", "native", "unary"),
-		tuple("skill", "anthropic", "unary"), tuple("context_cache", "gemini", "unary"))
-	return out
-}
-
-// VendorKind maps a catalogue vendor identifier to the connector kind that
-// serves it. Prices are published per vendor while every recorded attempt
-// carries the kind of the provider that served it, so pricing selection
-// applies a vendor-scoped price only where the two agree.
-
-func kindByName(name string) *kindCapability {
-	i := slices.IndexFunc(kinds, func(k kindCapability) bool { return k.Kind == name })
+func KindByName(name string) *kindCapability {
+	i := slices.IndexFunc(Kinds, func(k kindCapability) bool { return k.Kind == name })
 	if i < 0 {
 		return nil
 	}
-	return &kinds[i]
-}
-
-// Kind options include tuples available through an explicit profile, even
-// when the kind's Automatic connector cannot serve them.
-func capabilityOptionsForKind(kind string) []CapabilityInput {
-	var profiles []Configuration
-	for _, profile := range connectors.Profiles() {
-		if profile.Kind == kind {
-			cfg := Configuration{Identity: providerconfig.Identity[*string]{Kind: kind, ProfileID: profile.ID, ProfileRevision: profile.Revision}}
-			if kind == connectors.KindOpenAICompatible && strings.HasSuffix(profile.ID, "-files-batches") {
-				vendor := strings.TrimSuffix(profile.ID, "-files-batches")
-				cfg.Options.VendorID = &vendor
-			}
-			profiles = append(profiles, cfg)
-		}
-	}
-	out := []CapabilityInput{}
-	for _, tuple := range capabilityVocabulary {
-		profiled := slices.ContainsFunc(profiles, func(cfg Configuration) bool {
-			return configurationCertifiable(&cfg, tuple) && cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
-		})
-		if certifiable(kind, vendors.DefaultFor(kind), tuple) || profiled {
-			out = append(out, tuple)
-		}
-	}
-	return out
-}
-
-// Custom endpoints need a safe live probe; native media instead relies on the
-// official connector contract and authenticated discovery.
-// reviewedMedia reports a reviewed vendor's media operation through its own
-// connector, which certifies costlessly: by its model listing or its account
-// probe, beside its codec contract. No reviewed vendor streams media.
-func reviewedMedia(kind, vendor, operation string) bool {
-	contract, ok := vendors.Lookup(vendor)
-	if !ok || contract.Connector != kind || !contract.Serves(operation) {
-		return false
-	}
-	return contract.AccountProbe != "" || contract.Discovery && vendors.MediaWire(vendor, operation) != ""
-}
-
-func certifiable(kind, vendor string, c CapabilityInput) bool {
-	if c.Operation == "retrieval" && (kind == connectors.KindBedrock || kind == connectors.KindVertexAI || kind == connectors.KindAzureAISearch) {
-		return false
-	} // Cloud retrieval requires its dedicated profile.
-	if retainedapi.Operation(c.Operation) {
-		return connectors.Supports(kind, vendor, c.Operation, c.Surface, c.Mode)
-	}
-	if !connectors.Supports(kind, vendor, c.Operation, c.Surface, c.Mode) {
-		return false
-	}
-	switch c.Operation {
-	case "generation", "token_count", "embeddings", "moderation", "rerank":
-		return true
-	case "ocr", "search":
-		return true
-	case "batch":
-		if c.Surface == "native" {
-			return kind == connectors.KindVertexAI && vendor == "google-vertex" || kind == connectors.KindBedrock && vendor == "amazon-bedrock"
-		}
-		if c.Surface == "anthropic" {
-			return kind == connectors.KindAnthropic && vendor == "anthropic"
-		}
-		if c.Surface == "gemini" {
-			return kind == connectors.KindGemini && vendor == "google"
-		}
-		if c.Surface == "openai" && kind == connectors.KindGemini {
-			return vendor == "google"
-		}
-		return kind == connectors.KindOpenAI || kind == connectors.KindAzureOpenAI || kind == connectors.KindOpenAICompatible &&
-			(vendor == "groq" || vendor == "together" || vendor == "mistral")
-	case "realtime":
-		if c.Mode == "webrtc" {
-			return kind == connectors.KindOpenAI
-		}
-		if c.Surface == "native" {
-			return kind == connectors.KindOpenAICompatible && vendor == "xai" ||
-				kind == connectors.KindVertexAI && vendor == "google-vertex" ||
-				kind == connectors.KindBedrock && vendor == "amazon-bedrock"
-		}
-		return kind == connectors.KindOpenAI || kind == connectors.KindAzureOpenAI
-	case "bedrock_invoke":
-		return kind == connectors.KindBedrock
-	default:
-		// Reviewed vendor media is unary, but for the job a video creation
-		// starts.
-		vendorMode := c.Mode == ModeUnary || c.Operation == "video_create" && c.Mode == "async"
-		return kind == connectors.KindOpenAI || (reviewedMedia(kind, vendor, c.Operation) || mediaByCall(kind, vendor, c.Operation)) && vendorMode
-	}
+	return &Kinds[i]
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -147,7 +148,7 @@ func (c PaidConnection) resolve(ctx context.Context, q access.Queryer, project s
 	if err := json.Unmarshal(current.Slots, &currentSlots); err != nil {
 		return routing.Provider{}, err
 	}
-	var currentConfiguration providers.Configuration
+	var currentConfiguration connection.Configuration
 	if err := json.Unmarshal(current.Configuration, &currentConfiguration); err != nil {
 		return routing.Provider{}, err
 	}
@@ -181,18 +182,18 @@ func paidRoute(policy routes.CodeRouteInput) codemode.Route {
 	return codemode.Route{Models: policy.Models, ProjectID: policy.ProjectID, PaidParticipation: policy.PaidParticipation, PaidTargets: policy.PaidTargets, PaidFallbackTargets: policy.PaidFallbackTargets, InitialRecoveryAttempts: policy.InitialRecoveryAttempts}
 }
 
-func preparedPaid(ctx context.Context, q access.Queryer, configuration providers.Configuration, deps provider.Deps) (providers.Configuration, error) {
+func preparedPaid(ctx context.Context, q access.Queryer, configuration connection.Configuration, deps provider.Deps) (connection.Configuration, error) {
 	prepared, err := providers.PrepareConfiguration(ctx, q, deps.Unconfined, deps.Egress, configuration)
 	if _, refused := provider.Refusal(err); refused {
 		return configuration, nil
 	}
 	if err != nil {
-		return providers.Configuration{}, err
+		return connection.Configuration{}, err
 	}
 	return prepared.Configuration(), nil
 }
 
-func decoded(current routing.ProviderRevision, configuration providers.Configuration, models []routing.RevisionModel, slots []routing.RevisionSlot) (routing.Provider, error) {
+func decoded(current routing.ProviderRevision, configuration connection.Configuration, models []routing.RevisionModel, slots []routing.RevisionSlot) (routing.Provider, error) {
 	configurationJSON, err := json.Marshal(configuration)
 	if err != nil {
 		return routing.Provider{}, err

@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 )
 
 type planning struct {
@@ -90,7 +91,7 @@ func unknownProject(entry Entry, directory promotion.Directory) bool {
 	return !known
 }
 
-func providerItem(entry Entry, configuration providers.Configuration, existing destination, found bool) (promotion.Item, error) {
+func providerItem(entry Entry, configuration connection.Configuration, existing destination, found bool) (promotion.Item, error) {
 	kind := contract.ConfigurationPlanItemKindProvider
 	switch {
 	case !found:
@@ -110,7 +111,7 @@ func providerItem(entry Entry, configuration providers.Configuration, existing d
 	return promotion.Item{Kind: kind, Key: entry.Name, Action: contract.ConfigurationPlanItemActionReplace, Detail: "draft"}, nil
 }
 
-func unchanged(entry Entry, configuration providers.Configuration, current Entry) (bool, error) {
+func unchanged(entry Entry, configuration connection.Configuration, current Entry) (bool, error) {
 	named := slices.Collect(func(yield func(string) bool) {
 		for _, model := range entry.Models {
 			if !yield(model.UpstreamModel) {
@@ -132,7 +133,7 @@ func unchanged(entry Entry, configuration providers.Configuration, current Entry
 	return bytes.Equal(desired, stored), nil
 }
 
-func withParts(entry Entry, configuration providers.Configuration, models []providers.DraftModel) Entry {
+func withParts(entry Entry, configuration connection.Configuration, models []providers.DraftModel) Entry {
 	return Entry{
 		Name:            entry.Name,
 		Project:         entry.Project,

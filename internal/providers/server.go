@@ -1,3 +1,6 @@
+// Package providers owns provider connections: configuration drafts, model
+// discovery and certification, credential pools, activation into immutable
+// revisions, and history for the connector matrix.
 package providers
 
 import (
@@ -15,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/plugins"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/secretstore"
 )
@@ -81,7 +85,7 @@ type record struct {
 	Name             string
 	Kind             string
 	State            string
-	Configuration    Configuration
+	Configuration    connection.Configuration
 	ETag             string
 	SlotsETag        string
 	DraftDirty       bool
@@ -96,7 +100,7 @@ type record struct {
 	ProjectID        *string
 }
 
-const recordColumns = "p.id::text,p.name,p.kind,p.state,p.configuration,p.etag::text,p.slots_etag::text,p.draft_dirty,p.active_revision,p.active_revision_id::text,p.last_probe_at,p.last_probe_status,p.last_probe_detail,p.created_by::text,p.created_at,p.updated_at,p.project_id::text," + pluginColumn
+const recordColumns = "p.id::text,p.name,p.kind,p.state,p.configuration,p.etag::text,p.slots_etag::text,p.draft_dirty,p.active_revision,p.active_revision_id::text,p.last_probe_at,p.last_probe_status,p.last_probe_detail,p.created_by::text,p.created_at,p.updated_at,p.project_id::text," + connection.PluginColumn
 
 func scanRecord(row pgx.Row) (*record, error) {
 	var p record
@@ -119,7 +123,7 @@ func (p *record) decodeConfiguration(configuration, plugin []byte) error {
 	}
 	p.Configuration.Normalize()
 	p.Configuration.ProviderID = p.ID
-	return p.Configuration.pinned(plugin)
+	return p.Configuration.Pinned(plugin)
 }
 
 // load reads one provider, locking the row inside a transaction when asked.
@@ -183,12 +187,12 @@ type providerSummary struct {
 
 type detail struct {
 	providerSummary
-	Configuration            Configuration `json:"configuration"`
-	DraftCredentialID        *string       `json:"draft_credential_id"`
-	DraftCredentialVersion   *int          `json:"draft_credential_version"`
-	RuntimeCredentialID      *string       `json:"runtime_credential_id"`
-	RuntimeCredentialVersion *int          `json:"runtime_credential_version"`
-	LastProbeDetail          *string       `json:"last_probe_detail"`
+	Configuration            connection.Configuration `json:"configuration"`
+	DraftCredentialID        *string                  `json:"draft_credential_id"`
+	DraftCredentialVersion   *int                     `json:"draft_credential_version"`
+	RuntimeCredentialID      *string                  `json:"runtime_credential_id"`
+	RuntimeCredentialVersion *int                     `json:"runtime_credential_version"`
+	LastProbeDetail          *string                  `json:"last_probe_detail"`
 }
 
 const detailQuery = "SELECT " + recordColumns + ",pr.name,u.email," +

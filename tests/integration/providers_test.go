@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/tests/harness"
 )
 
@@ -136,9 +137,9 @@ func (f providerFixture) certifiedDraft(t *testing.T) storedProvider {
 	return p
 }
 
-func providerConfiguration(t *testing.T, raw string) providers.Configuration {
+func providerConfiguration(t *testing.T, raw string) connection.Configuration {
 	t.Helper()
-	var configuration providers.Configuration
+	var configuration connection.Configuration
 	if err := json.Unmarshal([]byte(raw), &configuration); err != nil {
 		t.Fatal(err)
 	}

@@ -166,7 +166,7 @@ func (s *Enrollments) stage(requestContext context.Context, authority Enrollment
 		return EnrollmentCompletion{}, err
 	}
 	stale := access.Fail(409, "grant_enrollment_stale", "The connection's plugin profile, credential boundary or credential slot changed during grant enrollment. Start another.")
-	if cfg := locked.Configuration; !cfg.Grant() || cfg.ProfileRevision != enrollment.PluginDigest || cfg.ProfileID != enrollment.ProfileID || cfg.enrollmentBoundary() != current.Configuration.enrollmentBoundary() {
+	if cfg := locked.Configuration; !cfg.Grant() || cfg.ProfileRevision != enrollment.PluginDigest || cfg.ProfileID != enrollment.ProfileID || cfg.EnrollmentBoundary() != current.Configuration.EnrollmentBoundary() {
 		return EnrollmentCompletion{}, stale
 	}
 	credentialID, version, err := grants.Store(ctx, tx, s.catalogue.Access, current.ID, enrollment.PluginDigest, enrollment.ProfileID, grant)

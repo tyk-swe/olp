@@ -14,7 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/billing/reconciliation"
 	"github.com/tyk-swe/olp/internal/billing/source"
-	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 )
 
 const (
@@ -93,7 +93,7 @@ func claim(ctx context.Context, pool *pgxpool.Pool) (record, bool, error) {
 type provider struct {
 	ETag          string
 	ProjectID     *string
-	Configuration providers.Configuration
+	Configuration connection.Configuration
 }
 
 const selectProvider = `SELECT etag::text,project_id::text,configuration FROM olp.providers WHERE id=$1::uuid`

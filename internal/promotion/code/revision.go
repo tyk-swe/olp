@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/promotion/provider"
 	"github.com/tyk-swe/olp/internal/providerconfig"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -92,9 +93,9 @@ func displayName(model string, labels []routing.RevisionModel) string {
 	return labels[at].DisplayName
 }
 
-func configurationOf(frozen routing.Provider) providers.Configuration {
-	return providers.Configuration{
-		Options: providers.Options{
+func configurationOf(frozen routing.Provider) connection.Configuration {
+	return connection.Configuration{
+		Options: connection.Options{
 			Limits: limitsOf(frozen.Limits), Commitment: frozen.Commitment, HealthProbe: frozen.HealthProbe, TuningDatasetURIPrefixes: frozen.TuningDatasetURIPrefixes,
 			DocumentURIPrefixes: frozen.DocumentURIPrefixes, Network: frozen.Network, SemanticHeaders: frozen.SemanticHeaders, QuerySettings: frozen.QuerySettings,
 			OperationDefaults: frozen.OperationDefaults, Bindings: frozen.Bindings, CredentialHeaders: promotion.NonNil(slices.Clone(frozen.CredentialHeaders)),
@@ -108,11 +109,11 @@ func configurationOf(frozen routing.Provider) providers.Configuration {
 	}
 }
 
-func limitsOf(limits *routing.Limits) *providers.Limits {
+func limitsOf(limits *routing.Limits) *connection.Limits {
 	if limits == nil {
 		return nil
 	}
-	return &providers.Limits{MaxConcurrency: limits.MaxConcurrency, RequestsPerMinute: limits.RequestsPerMinute, TokensPerMinute: limits.TokensPerMinute, Supply: limits.Supply}
+	return &connection.Limits{MaxConcurrency: limits.MaxConcurrency, RequestsPerMinute: limits.RequestsPerMinute, TokensPerMinute: limits.TokensPerMinute, Supply: limits.Supply}
 }
 
 func nonEmpty(value string) *string {

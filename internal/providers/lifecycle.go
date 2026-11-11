@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/jackc/pgx/v5"
@@ -28,18 +29,18 @@ import (
 const maxCredentialBytes = 65536
 
 type createRequest struct {
-	Name                string                 `json:"name"`
-	Configuration       Configuration          `json:"configuration"`
-	Credential          *string                `json:"credential"`
-	CredentialReference *secretstore.Reference `json:"credential_reference,omitempty"`
-	DisplayName         *string                `json:"display_name"`
-	Model               *string                `json:"model"`
-	ProjectID           *string                `json:"project_id"`
+	Name                string                   `json:"name"`
+	Configuration       connection.Configuration `json:"configuration"`
+	Credential          *string                  `json:"credential"`
+	CredentialReference *secretstore.Reference   `json:"credential_reference,omitempty"`
+	DisplayName         *string                  `json:"display_name"`
+	Model               *string                  `json:"model"`
+	ProjectID           *string                  `json:"project_id"`
 }
 
 type updateRequest struct {
-	Name          string        `json:"name"`
-	Configuration Configuration `json:"configuration"`
+	Name          string                   `json:"name"`
+	Configuration connection.Configuration `json:"configuration"`
 }
 
 func ValidCredential(value string) error {
@@ -308,7 +309,7 @@ type slotRow struct {
 	// enrollment — what it serves as beyond its principal.
 	CredentialFacts      map[string]string
 	Restrictions         SlotRestrictions
-	Limits               Limits
+	Limits               connection.Limits
 	ValidatedAt          *time.Time
 	ValidatedFingerprint *string
 }
@@ -353,7 +354,7 @@ func loadSlots(ctx context.Context, q access.Queryer, providerID string) ([]slot
 // beneath it for a provider that takes a static credential, a pasted one for
 // a provider that authenticates with a grant, or a grant another build or
 // profile of the plugin enrolled.
-func (row *slotRow) credentialFits(cfg *Configuration) error {
+func (row *slotRow) credentialFits(cfg *connection.Configuration) error {
 	switch {
 	case row.CredentialID == nil || !cfg.CredentialRequired() || cfg.Authenticates(row.CredentialPlugin, row.CredentialProfile):
 		return nil
@@ -389,7 +390,7 @@ func (row *slotRow) observedFacts() map[string]string {
 // slot's principal. Every slot of a provider revision serves as one upstream
 // account and environment, so re-enrolling that account is a credential
 // rotation and several accounts are pooled through several providers.
-func onePrincipal(slots []slotRow, cfg *Configuration) error {
+func onePrincipal(slots []slotRow, cfg *connection.Configuration) error {
 	if !cfg.Grant() {
 		return nil
 	}
@@ -452,7 +453,7 @@ type revisionRow struct {
 	ProviderID        string
 	Revision          int
 	Name              string
-	Configuration     Configuration
+	Configuration     connection.Configuration
 	Models            []routing.RevisionModel
 	Slots             []routing.RevisionSlot
 	CredentialVersion *int
@@ -672,7 +673,7 @@ func (s *Server) revisionDiff(r *http.Request, p access.Principal) (access.Reply
 		"from_revision": from.Revision, "to_revision": to.Revision,
 		"network_configuration_changed":  !sameJSON(a.Options.Network, b.Options.Network),
 		"profile_changed":                a.ProfileID != b.ProfileID || a.ProfileRevision != b.ProfileRevision,
-		"plugin_changed":                 a.pluginDigest() != b.pluginDigest(),
+		"plugin_changed":                 a.PluginDigest() != b.PluginDigest(),
 		"plugin_options_changed":         !sameJSON(a.Options.PluginOptions, b.Options.PluginOptions),
 		"semantic_configuration_changed": !sameJSON(a.Options.SemanticHeaders, b.Options.SemanticHeaders) || !sameJSON(a.Options.QuerySettings, b.Options.QuerySettings) || !sameJSON(a.Options.OperationDefaults, b.Options.OperationDefaults),
 		"serving_binding_changed":        !sameJSON(a.Options.Bindings, b.Options.Bindings) || routing.ObservedPrincipal(from.Slots) != routing.ObservedPrincipal(to.Slots),
@@ -699,10 +700,10 @@ func deref[T comparable](v *T) T {
 // restoreDraft rewrites the draft configuration and models from a revision.
 // Credentials are never restored; the draft keeps its current slots.
 func (s *Catalogue) restoreDraft(ctx context.Context, tx pgx.Tx, current *record, v *revisionRow) (string, error) {
-	if err := PreserveCredentialBoundary(ctx, tx, current.ID, &current.Configuration, &v.Configuration); err != nil {
+	if err := connection.PreserveCredentialBoundary(ctx, tx, current.ID, &current.Configuration, &v.Configuration); err != nil {
 		return "", err
 	}
-	if current.Configuration.enrollmentBoundary() != v.Configuration.enrollmentBoundary() {
+	if current.Configuration.EnrollmentBoundary() != v.Configuration.EnrollmentBoundary() {
 		if err := grants.CancelProviderPending(ctx, tx, current.ID); err != nil {
 			return "", err
 		}
@@ -863,7 +864,7 @@ func (s *Catalogue) createDraft(ctx context.Context, tx pgx.Tx, p access.Princip
 			surface = "gemini"
 		}
 		if configuration.ProfileID != "" {
-			profile, _ := configuration.transport().Profile()
+			profile, _ := configuration.Transport().Profile()
 			if _, native := protocols.NativeGenerationFamily(profile.OperationDialect("generation")); native && operation == "generation" {
 				surface = "native"
 			}

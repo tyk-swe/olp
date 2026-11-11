@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/jackc/pgx/v5"
@@ -236,8 +237,8 @@ type slotInput struct {
 	routing.Supply
 }
 
-func (in *slotInput) limits() Limits {
-	return Limits{MaxConcurrency: in.MaxConcurrency, RequestsPerMinute: in.RequestsPerMinute, TokensPerMinute: in.TokensPerMinute, Supply: in.Supply}
+func (in *slotInput) limits() connection.Limits {
+	return connection.Limits{MaxConcurrency: in.MaxConcurrency, RequestsPerMinute: in.RequestsPerMinute, TokensPerMinute: in.TokensPerMinute, Supply: in.Supply}
 }
 
 type slotWrite struct {
@@ -420,7 +421,7 @@ func validSlot(in *slotInput, slotID string) error {
 			return err
 		}
 	}
-	if err := ValidLimits("slot", in.limits()); err != nil {
+	if err := connection.ValidLimits("slot", in.limits()); err != nil {
 		return err
 	}
 	if in.CredentialVersionID != nil {

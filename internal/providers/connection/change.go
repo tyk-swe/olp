@@ -1,4 +1,4 @@
-package providers
+package connection
 
 import (
 	"context"
@@ -20,7 +20,7 @@ func (c *Configuration) credentialBoundary() string {
 
 // An enrollment also pins the concrete network credential version used by
 // its challenge. Ordinary credentials can rotate within the same destination.
-func (c *Configuration) enrollmentBoundary() string {
+func (c *Configuration) EnrollmentBoundary() string {
 	networkCredential := ""
 	if c.Options.Network != nil {
 		networkCredential = c.Options.Network.CredentialID

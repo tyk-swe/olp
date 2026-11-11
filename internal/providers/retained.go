@@ -6,13 +6,14 @@ import (
 	"net/url"
 
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 )
 
 // certifyRetained proves a retained family with one authenticated,
 // read-only collection request, mirroring the agent-resource probe.
-func (s *Catalogue) certifyRetained(ctx context.Context, cfg *Configuration, credential []byte, model string, tuple CapabilityInput) error {
-	if tuple.Operation == "retrieval" && cfg.transport().RetrievalBackend() != "" {
+func (s *Catalogue) certifyRetained(ctx context.Context, cfg *connection.Configuration, credential []byte, model string, tuple CapabilityInput) error {
+	if tuple.Operation == "retrieval" && cfg.Transport().RetrievalBackend() != "" {
 		return s.certifyRetrieval(ctx, cfg, credential, model)
 	}
 	if tuple.Operation == "agent_resource" {
@@ -51,7 +52,7 @@ func (s *Catalogue) certifyRetained(ctx context.Context, cfg *Configuration, cre
 	if !retainedapi.Supports(cfg.Kind, tuple.Operation, tuple.Surface, tuple.Mode) {
 		return &probeError{Code: "capability_unavailable", Detail: "This connector cannot certify the requested tuple."}
 	}
-	endpoint, err := cfg.transport().ResourceURL(model, path, query)
+	endpoint, err := cfg.Transport().ResourceURL(model, path, query)
 	if err != nil {
 		return err
 	}
@@ -86,8 +87,8 @@ func (s *Catalogue) certifyRetained(ctx context.Context, cfg *Configuration, cre
 
 // Certification reads the native collection; it never creates a billable
 // resource or infers support from a generic 404 response.
-func (s *Catalogue) certifyAgentResources(ctx context.Context, cfg *Configuration, credential []byte, model string) error {
-	endpoint, err := cfg.transport().ResourceURL(model, "agents", url.Values{"page_size": {"1"}})
+func (s *Catalogue) certifyAgentResources(ctx context.Context, cfg *connection.Configuration, credential []byte, model string) error {
+	endpoint, err := cfg.Transport().ResourceURL(model, "agents", url.Values{"page_size": {"1"}})
 	if err != nil {
 		return err
 	}

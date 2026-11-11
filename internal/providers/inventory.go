@@ -10,23 +10,24 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/plugins"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 func (s *Server) kinds(r *http.Request, _ access.Principal) (access.Reply, error) {
-	return access.OK(map[string]any{"items": kinds}), nil
+	return access.OK(map[string]any{"items": connection.Kinds}), nil
 }
 
 func (s *Server) kindCapabilities(r *http.Request, _ access.Principal) (access.Reply, error) {
 	kind := r.PathValue("provider_kind")
-	if kindByName(kind) == nil {
+	if connection.KindByName(kind) == nil {
 		return access.Reply{}, access.Fail(400, "invalid_provider_kind", "This provider kind is not available.")
 	}
 	return access.OK(map[string]any{"provider_kind": kind, "capabilities": capabilityOptionsForKind(kind)}), nil
 }
 
 func (s *Server) listVendors(r *http.Request, _ access.Principal) (access.Reply, error) {
-	return access.OK(vendorCatalogue), nil
+	return access.OK(connection.VendorCatalogue), nil
 }
 
 func (s *Server) inventory(r *http.Request, principal access.Principal) (access.Reply, error) {
@@ -82,7 +83,7 @@ func (s *Server) inventory(r *http.Request, principal access.Principal) (access.
 		if err = json.Unmarshal(capabilities, &m.Capabilities); err != nil {
 			return access.Reply{}, err
 		}
-		facts, metadataErr := metadataJSON(metadata)
+		facts, metadataErr := connection.MetadataJSON(metadata)
 		if metadataErr != nil {
 			return access.Reply{}, metadataErr
 		}

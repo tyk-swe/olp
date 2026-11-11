@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/billing/imports"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 )
 
 type destination struct {
@@ -78,7 +79,7 @@ func readDestination(ctx context.Context, q access.Queryer, row providers.Provid
 	if err != nil {
 		return destination{}, err
 	}
-	var configuration providers.Configuration
+	var configuration connection.Configuration
 	if err := json.Unmarshal(row.Configuration, &configuration); err != nil {
 		return destination{}, err
 	}
@@ -119,7 +120,7 @@ func readImport(ctx context.Context, q access.Queryer, row providers.ProviderSna
 	return &config, nil
 }
 
-func draftEntry(row providers.ProviderSnapshot, configuration providers.Configuration, models []providers.ModelSnapshot, slots []storedPair, imported *Billing) (Entry, error) {
+func draftEntry(row providers.ProviderSnapshot, configuration connection.Configuration, models []providers.ModelSnapshot, slots []storedPair, imported *Billing) (Entry, error) {
 	draftModels, err := promotion.TryMap(models, func(model providers.ModelSnapshot) (providers.DraftModel, error) {
 		var capabilities []providers.CapabilityInput
 		if err := json.Unmarshal(model.Capabilities, &capabilities); err != nil {
@@ -152,7 +153,7 @@ func parseSlotRow(row providers.SlotSnapshot, grant bool) (storedPair, error) {
 	if err := json.Unmarshal(row.Restrictions, &restrictions); err != nil {
 		return storedPair{}, err
 	}
-	var limits providers.Limits
+	var limits connection.Limits
 	if err := json.Unmarshal(row.Limits, &limits); err != nil {
 		return storedPair{}, err
 	}

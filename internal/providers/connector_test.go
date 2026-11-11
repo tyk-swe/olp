@@ -11,6 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/providerconfig"
+	"github.com/tyk-swe/olp/internal/providers/connection"
+
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 )
@@ -21,10 +24,10 @@ func probeCatalogue(policy egress.Policy) *Catalogue {
 	return NewCatalogue(nil, &policy, nil, func(string) string { return "" }, CatalogueOptions{})
 }
 
-func upstreamConnection(kind, endpoint string) Configuration {
-	connection := Configuration{Identity: identity{Kind: kind, AuthMode: connectors.AuthAPIKey, Endpoint: new(endpoint)}}
-	connection.Normalize()
-	return connection
+func upstreamConnection(kind, endpoint string) connection.Configuration {
+	cfg := connection.Configuration{Identity: providerconfig.Identity[*string]{Kind: kind, AuthMode: connectors.AuthAPIKey, Endpoint: new(endpoint)}}
+	cfg.Normalize()
+	return cfg
 }
 
 func answer(status int, body string) http.HandlerFunc {

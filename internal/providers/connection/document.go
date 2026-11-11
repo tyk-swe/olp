@@ -1,4 +1,4 @@
-package providers
+package connection
 
 import (
 	"context"
@@ -142,7 +142,7 @@ func (c *Configuration) Pin(ctx context.Context, q access.Queryer, unconfined *p
 }
 
 // pluginDigest is the digest of the plugin a plugin provider pins, or "".
-func (c *Configuration) pluginDigest() string {
+func (c *Configuration) PluginDigest() string {
 	if c.Kind != connectors.KindPlugin {
 		return ""
 	}
@@ -150,9 +150,9 @@ func (c *Configuration) pluginDigest() string {
 }
 
 // pinned attaches the plugin profile a stored plugin provider configuration
-// pins, from its installed plugin, which pluginColumn selects. Uninstalling a
+// pins, from its installed plugin, which PluginColumn selects. Uninstalling a
 // plugin is refused while a provider pins it.
-func (c *Configuration) pinned(installed []byte) error {
+func (c *Configuration) Pinned(installed []byte) error {
 	if c.Kind != connectors.KindPlugin || installed == nil {
 		return nil
 	}
@@ -161,9 +161,9 @@ func (c *Configuration) pinned(installed []byte) error {
 	return err
 }
 
-// pluginColumn selects the plugin that the provider p pins, as a
+// PluginColumn selects the plugin that the provider p pins, as a
 // connectors.InstalledPlugin, or NULL.
-const pluginColumn = "(SELECT jsonb_build_object('manifest', pl.manifest, 'unconfined', pl.executable IS NOT NULL) FROM olp.plugins pl WHERE p.kind='plugin' AND pl.digest=p.configuration->>'profile_revision')"
+const PluginColumn = "(SELECT jsonb_build_object('manifest', pl.manifest, 'unconfined', pl.executable IS NOT NULL) FROM olp.plugins pl WHERE p.kind='plugin' AND pl.digest=p.configuration->>'profile_revision')"
 
 // VendorMissing reports whether the configuration omits its vendor id.
 func (c *Configuration) VendorMissing() bool {
@@ -184,7 +184,7 @@ func (c *Configuration) ValidateAndNormalize(policy *egress.Policy) error {
 			return access.Invalid("configuration.options.network.credential_id", "Use a canonical network credential UUID.")
 		}
 	}
-	kind := kindByName(c.Kind)
+	kind := KindByName(c.Kind)
 	if kind == nil {
 		return access.Fail(422, "provider_kind_unavailable", "Unknown provider connector kind.")
 	}
@@ -244,7 +244,7 @@ func (c *Configuration) ValidateAndNormalize(policy *egress.Policy) error {
 	if c.AuthMode != connectors.AuthHeaders && len(c.Options.CredentialHeaders) != 0 {
 		return access.Invalid("configuration.options.credential_headers", "Credential headers apply only to the headers authentication mode.")
 	}
-	if err := c.transport().Validate(policy); err != nil {
+	if err := c.Transport().Validate(policy); err != nil {
 		return access.Invalid("configuration", err.Error())
 	}
 	if c.Kind == connectors.KindPlugin {
@@ -265,7 +265,7 @@ func (c *Configuration) ValidateAndNormalize(policy *egress.Policy) error {
 		if err := json.Unmarshal(raw, &metadata); err != nil || metadata == nil {
 			return access.Invalid("configuration.options.models", "Model metadata must be an object.")
 		}
-		if err := validateMetadata(raw); err != nil {
+		if err := ValidateMetadata(raw); err != nil {
 			return access.Invalid("configuration.options.models", err.Error())
 		}
 	}
@@ -347,7 +347,7 @@ func (c *Configuration) Authenticates(pluginDigest, profileID string) bool {
 // transportFingerprint identifies everything that affects how the gateway
 // reaches the upstream. Certification evidence is retained only while it is
 // unchanged.
-func (c *Configuration) transportFingerprint() string {
+func (c *Configuration) TransportFingerprint() string {
 	h := sha256.New()
 	parts := []any{c.Kind, c.AuthMode, c.Endpoint, c.CloudRegion, c.CloudProject, c.Deployment, c.APIVersion, c.Options.CredentialHeaders, c.Options.ParameterDefaults, c.Options.Models, c.Options.VendorID}
 	if c.ProfileID != "" {
@@ -373,11 +373,26 @@ func (c *Configuration) transportFingerprint() string {
 	return hex.EncodeToString(h.Sum(nil))[:32]
 }
 
-func (c *Configuration) transport() connectors.Config {
+func (c *Configuration) Transport() connectors.Config {
 	return c.Identity.Connector(providerconfig.Options{
 		Network: c.Options.Network, SemanticHeaders: c.Options.SemanticHeaders, QuerySettings: c.Options.QuerySettings,
 		OperationDefaults: c.Options.OperationDefaults, Bindings: c.Options.Bindings, PluginOptions: c.Options.PluginOptions,
 		TuningDatasetURIPrefixes: c.Options.TuningDatasetURIPrefixes, DocumentURIPrefixes: c.Options.DocumentURIPrefixes,
 		VendorID: providerconfig.Value(c.Options.VendorID), CredentialHeaders: c.Options.CredentialHeaders, Models: c.Options.Models,
 	}, c.plugin, "", "")
+}
+
+func (c Configuration) WithNetworkCredential(credentialID string) Configuration {
+	if c.Options.Network == nil {
+		return c
+	}
+	network := *c.Options.Network
+	network.CredentialID = credentialID
+	configured := c
+	configured.Options.Network = &network
+	return configured
+}
+
+func (c *Configuration) Plugin() *connectors.PluginProfile {
+	return c.plugin
 }

@@ -1,4 +1,4 @@
-package providers
+package connection
 
 import (
 	"encoding/json"
@@ -173,7 +173,7 @@ func readStored(t *testing.T, name string) Configuration {
 		t.Fatal(err)
 	}
 	stored.Normalize()
-	if err := stored.pinned(testdata(t, "installed-plugin.json")); err != nil {
+	if err := stored.Pinned(testdata(t, "installed-plugin.json")); err != nil {
 		t.Fatal(err)
 	}
 	return stored
@@ -184,11 +184,11 @@ func TestPrepareConfigurationStoresTheGoldenBytes(t *testing.T) {
 	for name, input := range storedInputs() {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			prepared, err := PrepareConfiguration(t.Context(), nil, nil, &egress.Policy{}, input)
+			prepared, err := validated(input)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got, want := storedBytes(t, prepared.Configuration()), string(golden(t, name)); got != want {
+			if got, want := storedBytes(t, prepared), string(golden(t, name)); got != want {
 				t.Fatalf("stored\n%s\nwant\n%s", got, want)
 			}
 		})
@@ -241,7 +241,7 @@ func TestStoredConfigurationServesTheConnectorItWasValidatedAs(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			stored := readStored(t, name)
-			validated, served := reflect.ValueOf(stored.transport()), reflect.ValueOf(servedConnector(t, name))
+			validated, served := reflect.ValueOf(stored.Transport()), reflect.ValueOf(servedConnector(t, name))
 			for _, field := range carried {
 				if want, got := validated.FieldByIndex(field.Index).Interface(), served.FieldByIndex(field.Index).Interface(); !reflect.DeepEqual(got, want) {
 					t.Errorf("%s served %#v, validated %#v", field.Name, got, want)

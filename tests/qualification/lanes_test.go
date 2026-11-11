@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/tyk-swe/olp/internal/providerconfig"
 	"io"
 	"net"
 	"net/http"
@@ -22,13 +21,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/providerconfig"
+	"github.com/tyk-swe/olp/internal/providers/connection"
+
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
@@ -255,9 +256,9 @@ func (s *service) seedSubscriptionE(project, ownerID string, spec laneSeed, netw
 	if err != nil {
 		return "", "", err
 	}
-	configuration, err := json.Marshal(providers.Configuration{
+	configuration, err := json.Marshal(connection.Configuration{
 
-		Options: providers.Options{Network: network,
+		Options: connection.Options{Network: network,
 			CredentialHeaders: []string{},
 			Models:            map[string]json.RawMessage{},
 			ParameterDefaults: map[string]json.RawMessage{},

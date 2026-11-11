@@ -7,6 +7,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -41,7 +42,7 @@ func publishedEntry(row providers.ProviderSnapshot, slots []providers.SlotSnapsh
 }
 
 func fromRevision(stored revision, draft map[string]int, imported *Billing) (Entry, error) {
-	var configuration providers.Configuration
+	var configuration connection.Configuration
 	if err := json.Unmarshal(stored.configuration, &configuration); err != nil {
 		return Entry{}, err
 	}
@@ -73,7 +74,7 @@ func fromRevision(stored revision, draft map[string]int, imported *Billing) (Ent
 				Weight:        slot.Weight,
 				AllowedModels: promotion.NonNil(slot.AllowedModels),
 				AllowedRoutes: promotion.NonNil(slot.AllowedRoutes),
-				Limits:        providers.Limits{MaxConcurrency: slot.MaxConcurrency, RequestsPerMinute: slot.RequestsPerMinute, TokensPerMinute: slot.TokensPerMinute, Supply: slot.Supply},
+				Limits:        connection.Limits{MaxConcurrency: slot.MaxConcurrency, RequestsPerMinute: slot.RequestsPerMinute, TokensPerMinute: slot.TokensPerMinute, Supply: slot.Supply},
 				Credential:    storedCredential(configuration.Grant(), slot.CredentialID != nil),
 			}
 		}),

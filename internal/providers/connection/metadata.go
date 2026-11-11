@@ -1,4 +1,4 @@
-package providers
+package connection
 
 import (
 	"bytes"
@@ -10,11 +10,11 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
-// mergeDiscoveredFacts places upstream-listed facts under the operator's
+// MergeDiscoveredFacts places upstream-listed facts under the operator's
 // metadata for one model. Facts that would leave the configuration invalid,
 // or a new entry beyond the metadata bound, are not stored, so discovery can
 // never make the saved configuration fail its own validation.
-func mergeDiscoveredFacts(cfg *Configuration, model string, discovered map[string]json.RawMessage) {
+func MergeDiscoveredFacts(cfg *Configuration, model string, discovered map[string]json.RawMessage) {
 	if len(discovered) == 0 {
 		return
 	}
@@ -23,7 +23,7 @@ func mergeDiscoveredFacts(cfg *Configuration, model string, discovered map[strin
 	_ = json.Unmarshal(cfg.Options.Models[model], &existing)
 	maps.Copy(facts, existing)
 	encoded, err := json.Marshal(facts)
-	if err != nil || validateMetadata(encoded) != nil {
+	if err != nil || ValidateMetadata(encoded) != nil {
 		return
 	}
 	if _, stored := cfg.Options.Models[model]; !stored && len(cfg.Options.Models) >= 2000 {
@@ -35,7 +35,7 @@ func mergeDiscoveredFacts(cfg *Configuration, model string, discovered map[strin
 	cfg.Options.Models[model] = encoded
 }
 
-func validateMetadata(raw json.RawMessage) error {
+func ValidateMetadata(raw json.RawMessage) error {
 	var m routing.ModelMetadata
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
@@ -45,9 +45,9 @@ func validateMetadata(raw json.RawMessage) error {
 	return m.Validate()
 }
 
-// metadataJSON applies the public contract's defaults without inventing facts
+// MetadataJSON applies the public contract's defaults without inventing facts
 // or rounding exact integer metadata through float64.
-func metadataJSON(raw []byte) (map[string]json.RawMessage, error) {
+func MetadataJSON(raw []byte) (map[string]json.RawMessage, error) {
 	var facts map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &facts); err != nil {
 		return nil, err

@@ -8,18 +8,19 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/plugins"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 )
 
 type PreparedConfiguration struct {
-	configuration Configuration
+	configuration connection.Configuration
 }
 
-func PrepareConfiguration(ctx context.Context, q access.Queryer, unconfined *plugins.Unconfined, policy *egress.Policy, input Configuration) (PreparedConfiguration, error) {
+func PrepareConfiguration(ctx context.Context, q access.Queryer, unconfined *plugins.Unconfined, policy *egress.Policy, input connection.Configuration) (PreparedConfiguration, error) {
 	encoded, err := json.Marshal(input)
 	if err != nil {
 		return PreparedConfiguration{}, err
 	}
-	var configuration Configuration
+	var configuration connection.Configuration
 	if err := json.Unmarshal(encoded, &configuration); err != nil {
 		return PreparedConfiguration{}, err
 	}
@@ -35,7 +36,7 @@ func PrepareConfiguration(ctx context.Context, q access.Queryer, unconfined *plu
 	return PreparedConfiguration{configuration: configuration}, nil
 }
 
-func (p PreparedConfiguration) Configuration() Configuration {
+func (p PreparedConfiguration) Configuration() connection.Configuration {
 	return p.configuration
 }
 
@@ -43,6 +44,6 @@ func (p PreparedConfiguration) WithNetworkCredential(credentialID string) Prepar
 	return PreparedConfiguration{configuration: p.configuration.WithNetworkCredential(credentialID)}
 }
 
-func (s *Catalogue) PrepareConfiguration(ctx context.Context, q access.Queryer, input Configuration) (PreparedConfiguration, error) {
+func (s *Catalogue) PrepareConfiguration(ctx context.Context, q access.Queryer, input connection.Configuration) (PreparedConfiguration, error) {
 	return PrepareConfiguration(ctx, q, s.Unconfined, s.Egress, input)
 }

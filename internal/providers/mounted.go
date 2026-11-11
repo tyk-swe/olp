@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/google/uuid"
@@ -25,11 +26,11 @@ func LoadMounted(path string, policy *egress.Policy) (map[string]release.Mounted
 	defer file.Close()
 	var document struct {
 		Providers []struct {
-			ProviderID            string        `json:"provider_id"`
-			Configuration         Configuration `json:"configuration"`
-			Model                 *string       `json:"model"`
-			CredentialFile        *string       `json:"credential_file"`
-			NetworkCredentialFile *string       `json:"network_credential_file"`
+			ProviderID            string                   `json:"provider_id"`
+			Configuration         connection.Configuration `json:"configuration"`
+			Model                 *string                  `json:"model"`
+			CredentialFile        *string                  `json:"credential_file"`
+			NetworkCredentialFile *string                  `json:"network_credential_file"`
 		} `json:"providers"`
 	}
 	data, err := io.ReadAll(io.LimitReader(file, (4<<20)+1))

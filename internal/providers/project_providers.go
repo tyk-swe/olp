@@ -6,12 +6,13 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
 type ProjectProvider struct {
 	ID            string
-	Configuration Configuration
+	Configuration connection.Configuration
 }
 
 type RevisionLabels struct {

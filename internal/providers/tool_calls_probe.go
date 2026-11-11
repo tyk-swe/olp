@@ -12,10 +12,11 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 )
 
-func (s *Catalogue) certifyToolCalls(ctx context.Context, cfg *Configuration, credential []byte, model string, stream bool) error {
-	transport := cfg.transport()
+func (s *Catalogue) certifyToolCalls(ctx context.Context, cfg *connection.Configuration, credential []byte, model string, stream bool) error {
+	transport := cfg.Transport()
 	parsed, err := toolCallProbeRequest(transport, stream)
 	if err != nil {
 		return err

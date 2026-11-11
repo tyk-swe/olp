@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -32,7 +33,7 @@ type Deps struct {
 type Entry struct {
 	Name            string
 	Project         *string
-	Configuration   providers.Configuration
+	Configuration   connection.Configuration
 	Models          []providers.DraftModel
 	Slots           []Slot
 	Network         bool

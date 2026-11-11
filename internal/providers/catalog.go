@@ -8,6 +8,7 @@ import (
 	"reflect"
 
 	"github.com/tyk-swe/olp/internal/providerconfig"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 
 	"github.com/tyk-swe/olp/internal/routing"
 
@@ -96,7 +97,7 @@ func applyCatalogFacts(stored json.RawMessage, facts routing.ModelMetadata) (jso
 	if err != nil {
 		return nil, nil, err
 	}
-	return merged, changes, validateMetadata(merged)
+	return merged, changes, connection.ValidateMetadata(merged)
 }
 
 func sameFact(a, b json.RawMessage) bool {
@@ -117,7 +118,7 @@ func privacyEvidence(stored json.RawMessage) bool {
 
 // suggestionsFor matches a provider's models against the catalog under the
 // provider's vendor.
-func suggestionsFor(signed *catalog.Signed, cfg *Configuration, models []storedModel) ([]catalogSuggestion, error) {
+func suggestionsFor(signed *catalog.Signed, cfg *connection.Configuration, models []storedModel) ([]catalogSuggestion, error) {
 	vendorID := providerconfig.Value(cfg.Options.VendorID)
 	out := []catalogSuggestion{}
 	for _, model := range models {

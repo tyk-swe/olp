@@ -3,18 +3,19 @@ package routes
 import (
 	"context"
 	"encoding/json"
-	"github.com/tyk-swe/olp/internal/codesessions"
 	"maps"
 	"net/http"
 	"slices"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/codesessions"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/release"
 
 	"github.com/tyk-swe/olp/internal/routeidentity"
@@ -273,7 +274,7 @@ func (in CodeRouteInput) validate() error {
 	return nil
 }
 
-func SaveCodePublication(ctx context.Context, tx pgx.Tx, p access.Principal, id string, in codemode.Route, frozen map[string]providers.Configuration, frozenPaid map[string]routing.Provider) (*codeRoute, error) {
+func SaveCodePublication(ctx context.Context, tx pgx.Tx, p access.Principal, id string, in codemode.Route, frozen map[string]connection.Configuration, frozenPaid map[string]routing.Provider) (*codeRoute, error) {
 	project, projectError := access.ParseUUID(in.ProjectID)
 	if projectError != nil {
 		return nil, projectError
