@@ -8,7 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/rates"
+	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 )
 
 func ptr[T any](v T) *T { return &v }
@@ -122,10 +123,10 @@ func TestModelFactsFollowSnapshotRecompilation(t *testing.T) {
 func TestPricePriorityFallbackAndPerformanceShareOneOrdering(t *testing.T) {
 	s, slug, ids := planningFixture()
 	now := time.Now()
-	inputs := &usage.RoutingInputs{RefreshedAt: now, Performance: map[string]usage.Performance{}}
+	inputs := &routinginputs.Inputs{RefreshedAt: now, Performance: map[string]routinginputs.Performance{}}
 	for i, id := range ids[:2] {
 		amount := []string{"0.000000000002", "0.000000000001"}[i]
-		inputs.Prices = append(inputs.Prices, usage.RoutingPrice{Price: usage.Price{ProviderID: &id, ProviderKind: "openai", Model: "wire-model", Operation: "generation", InputPerMillion: &amount, OutputPerMillion: &amount, Currency: "USD"}, RevisionID: uuid.NewString(), Revision: 1, EffectiveAt: now.Add(-time.Hour)})
+		inputs.Prices = append(inputs.Prices, *rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{ProviderID: &id, ProviderKind: "openai", Model: "wire-model", Operation: "generation", InputPerMillion: &amount, OutputPerMillion: &amount, Currency: "USD"}, RevisionID: uuid.NewString(), Revision: 1, EffectiveAt: now.Add(-time.Hour)}))
 	}
 	options := Options{Inputs: inputs, Now: now, Preferences: &Preferences{Strategy: ptr("price")}}
 	plan, e := Select(&s, slug, "generation", "openai", "unary", []byte("seed"), options)
@@ -146,7 +147,7 @@ func TestPricePriorityFallbackAndPerformanceShareOneOrdering(t *testing.T) {
 	}
 	route.Targets[0].Priority = 0
 	s.Routes[slug] = route
-	inputs.Performance[usage.PerformanceKey(ids[1], "wire-model", "generation", "unary")] = usage.Performance{SampleCount: 20, LatencyMS: 5, ObservedAt: now}
+	inputs.Performance[routinginputs.PerformanceKey(ids[1], "wire-model", "generation", "unary")] = routinginputs.Performance{SampleCount: 20, LatencyMS: 5, ObservedAt: now}
 	options.Preferences = &Preferences{Strategy: ptr("latency")}
 	plan, e = Select(&s, slug, "generation", "openai", "unary", []byte("seed"), options)
 	if e != nil || plan.Attempts[0].ProviderID != ids[1] {
@@ -174,10 +175,10 @@ func TestDecisionPriceStrategyUsesTokenRates(t *testing.T) {
 		s.Providers[id] = p
 	}
 	now := time.Now()
-	inputs := &usage.RoutingInputs{RefreshedAt: now}
+	inputs := &routinginputs.Inputs{RefreshedAt: now}
 	for i, id := range ids[:2] {
 		amount := []string{"2", "1"}[i]
-		inputs.Prices = append(inputs.Prices, usage.RoutingPrice{Price: usage.Price{ProviderID: &id, ProviderKind: "openai", Model: "wire-model", Operation: "decision", InputPerMillion: &amount, OutputPerMillion: &amount, Currency: "USD"}, EffectiveAt: now.Add(-time.Hour)})
+		inputs.Prices = append(inputs.Prices, *rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{ProviderID: &id, ProviderKind: "openai", Model: "wire-model", Operation: "decision", InputPerMillion: &amount, OutputPerMillion: &amount, Currency: "USD"}, EffectiveAt: now.Add(-time.Hour)}))
 	}
 	if cheap, expensive := inputs.Prices[1].Scalar("decision"), inputs.Prices[0].Scalar("decision"); cheap == nil || expensive == nil || cheap.Cmp(expensive) >= 0 {
 		t.Fatal("decision token rates did not produce ordered scalar prices")
@@ -191,11 +192,11 @@ func TestDecisionPriceStrategyUsesTokenRates(t *testing.T) {
 func TestThroughputStrategyOrdersProvidersByMeasuredThroughput(t *testing.T) {
 	snapshot, slug, ids := planningFixture()
 	now := time.Now()
-	inputs := &usage.RoutingInputs{
+	inputs := &routinginputs.Inputs{
 		RefreshedAt: now,
-		Performance: map[string]usage.Performance{
-			usage.PerformanceKey(ids[0], "wire-model", "generation", "unary"): {SampleCount: 20, LatencyMS: 5, Throughput: ptr(10.0), ObservedAt: now},
-			usage.PerformanceKey(ids[1], "wire-model", "generation", "unary"): {SampleCount: 20, LatencyMS: 5, Throughput: ptr(20.0), ObservedAt: now},
+		Performance: map[string]routinginputs.Performance{
+			routinginputs.PerformanceKey(ids[0], "wire-model", "generation", "unary"): {SampleCount: 20, LatencyMS: 5, Throughput: ptr(10.0), ObservedAt: now},
+			routinginputs.PerformanceKey(ids[1], "wire-model", "generation", "unary"): {SampleCount: 20, LatencyMS: 5, Throughput: ptr(20.0), ObservedAt: now},
 		},
 	}
 	plan, err := Select(&snapshot, slug, "generation", "openai", "unary", []byte("seed"), Options{
@@ -214,11 +215,11 @@ func TestLatencyStrategyOrdersProvidersByMeasuredLatency(t *testing.T) {
 		t.Fatalf("weighted plan: %+v %v", weighted, err)
 	}
 	slow, fast, unknown := weighted.Attempts[0].ProviderID, weighted.Attempts[1].ProviderID, weighted.Attempts[2].ProviderID
-	inputs := &usage.RoutingInputs{
+	inputs := &routinginputs.Inputs{
 		RefreshedAt: now,
-		Performance: map[string]usage.Performance{
-			usage.PerformanceKey(slow, "wire-model", "generation", "unary"): {SampleCount: 20, LatencyMS: 10, ObservedAt: now},
-			usage.PerformanceKey(fast, "wire-model", "generation", "unary"): {SampleCount: 20, LatencyMS: 5, ObservedAt: now},
+		Performance: map[string]routinginputs.Performance{
+			routinginputs.PerformanceKey(slow, "wire-model", "generation", "unary"): {SampleCount: 20, LatencyMS: 10, ObservedAt: now},
+			routinginputs.PerformanceKey(fast, "wire-model", "generation", "unary"): {SampleCount: 20, LatencyMS: 5, ObservedAt: now},
 		},
 	}
 	plan, err := Select(&snapshot, slug, "generation", "openai", "unary", []byte("seed"), Options{

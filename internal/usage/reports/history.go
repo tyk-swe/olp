@@ -1,0 +1,422 @@
+package reports
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/usage"
+)
+
+// RequestFilters narrow the request explorer. Every field is optional; the
+// provider and model filters match a request through its attempts, so a request
+// that failed over is found by either provider it touched.
+type RequestFilters struct {
+	Route      *string
+	ProviderID *string
+	Model      *string
+	APIKey     *string
+	Operation  *string
+	StatusCode *int
+	ErrorClass *string
+	// AttributionKey keeps requests carrying that attribution key;
+	// AttributionValue, which requires the key, also matches its value.
+	AttributionKey   *string
+	AttributionValue *string
+	StartedAfter     *time.Time
+	StartedBefore    *time.Time
+	Projects         ProjectScope
+	ProjectID        *string
+}
+
+// RequestSummary is one row of the request explorer: the request's own
+// metadata plus the usage its attempts accounted for. Token totals and money
+// are absent (null) when no fact exists yet, which is different from zero.
+type RequestSummary struct {
+	TrainingTokens     *int64           `json:"training_tokens"`
+	StorageByteSeconds *string          `json:"storage_byte_seconds"`
+	CacheTokenSeconds  *string          `json:"cache_token_seconds"`
+	ContainerSessions  map[string]int64 `json:"container_sessions"`
+
+	CacheResult             *string                  `json:"cache_result"`
+	EvaluatorGuardrailID    *string                  `json:"evaluator_guardrail_id,omitempty"`
+	BudgetBoundary          string                   `json:"budget_boundary,omitempty"`
+	ID                      string                   `json:"id"`
+	RuntimeGenerationID     string                   `json:"runtime_generation_id"`
+	APIKeyID                *string                  `json:"api_key_id"`
+	Origin                  string                   `json:"origin"`
+	ParentRequestID         *string                  `json:"parent_request_id"`
+	Route                   string                   `json:"route"`
+	Operation               string                   `json:"operation"`
+	Surface                 string                   `json:"surface"`
+	StartedAt               time.Time                `json:"started_at"`
+	CompletedAt             *time.Time               `json:"completed_at"`
+	StatusCode              *int32                   `json:"status_code"`
+	ErrorClass              *string                  `json:"error_class"`
+	TotalLatencyMS          *int64                   `json:"total_latency_ms"`
+	FirstByteMS             *int64                   `json:"first_byte_ms"`
+	AttemptCount            int32                    `json:"attempt_count"`
+	InputTokens             *int64                   `json:"input_tokens"`
+	OutputTokens            *int64                   `json:"output_tokens"`
+	CachedInputTokens       *int64                   `json:"cached_input_tokens"`
+	CacheWriteInputTokens   *int64                   `json:"cache_write_input_tokens"`
+	CacheWrite5MInputTokens *int64                   `json:"cache_write_5m_input_tokens"`
+	CacheWrite1HInputTokens *int64                   `json:"cache_write_1h_input_tokens"`
+	AudioInputTokens        *int64                   `json:"audio_input_tokens"`
+	CachedAudioInputTokens  *int64                   `json:"cached_audio_input_tokens"`
+	AudioOutputTokens       *int64                   `json:"audio_output_tokens"`
+	ImageInputTokens        *int64                   `json:"image_input_tokens"`
+	CachedImageInputTokens  *int64                   `json:"cached_image_input_tokens"`
+	ImageOutputTokens       *int64                   `json:"image_output_tokens"`
+	EstimatedCost           *string                  `json:"estimated_cost"`
+	Charge                  *string                  `json:"charge"`
+	Currency                *string                  `json:"currency"`
+	Unpriced                *bool                    `json:"unpriced"`
+	UsageComplete           *bool                    `json:"usage_complete"`
+	EndUserDigest           string                   `json:"end_user_digest"`
+	Attribution             map[string]string        `json:"attribution"`
+	GuardrailDecisions      []guardrails.Evidence    `json:"guardrail_decisions"`
+	PolicyDecisions         []contentpolicy.Decision `json:"policy_decisions"`
+	PayloadCaptured         bool                     `json:"payload_captured"`
+}
+
+// AttemptDetail is one provider attempt of a request, with the routing
+// provenance that explains why this provider served it and the charge evidence
+// that explains what it cost.
+type AttemptDetail struct {
+	InvocationCount    *int64           `json:"invocation_count"`
+	TrainingTokens     *int64           `json:"training_tokens"`
+	StorageByteSeconds *string          `json:"storage_byte_seconds"`
+	CacheTokenSeconds  *string          `json:"cache_token_seconds"`
+	ContainerSessions  map[string]int64 `json:"container_sessions"`
+
+	GuardrailDecisions      []guardrails.Evidence `json:"guardrail_decisions,omitempty"`
+	Routing                 *usage.Routing        `json:"routing"`
+	ID                      string                `json:"id"`
+	Ordinal                 int32                 `json:"ordinal"`
+	ProviderID              string                `json:"provider_id"`
+	ProviderName            string                `json:"provider_name"`
+	UpstreamModel           string                `json:"upstream_model"`
+	StartedAt               time.Time             `json:"started_at"`
+	CompletedAt             *time.Time            `json:"completed_at"`
+	StatusCode              *int32                `json:"status_code"`
+	ErrorClass              *string               `json:"error_class"`
+	Committed               bool                  `json:"committed"`
+	LatencyMS               *int64                `json:"latency_ms"`
+	FirstByteMS             *int64                `json:"first_byte_ms"`
+	ChargeStatus            *string               `json:"charge_status"`
+	UsageObserved           *bool                 `json:"usage_observed"`
+	UsageComplete           *bool                 `json:"usage_complete"`
+	InputTokens             *int64                `json:"input_tokens"`
+	OutputTokens            *int64                `json:"output_tokens"`
+	CachedInputTokens       *int64                `json:"cached_input_tokens"`
+	CacheWriteInputTokens   *int64                `json:"cache_write_input_tokens"`
+	CacheWrite5MInputTokens *int64                `json:"cache_write_5m_input_tokens"`
+	CacheWrite1HInputTokens *int64                `json:"cache_write_1h_input_tokens"`
+	AudioInputTokens        *int64                `json:"audio_input_tokens"`
+	CachedAudioInputTokens  *int64                `json:"cached_audio_input_tokens"`
+	AudioOutputTokens       *int64                `json:"audio_output_tokens"`
+	ImageInputTokens        *int64                `json:"image_input_tokens"`
+	CachedImageInputTokens  *int64                `json:"cached_image_input_tokens"`
+	ImageOutputTokens       *int64                `json:"image_output_tokens"`
+	MediaUnits              *string               `json:"media_units"`
+	ToolCalls               map[string]int64      `json:"tool_calls"`
+	Batch                   *bool                 `json:"batch"`
+	PricingComponents       []string              `json:"pricing_components"`
+	EstimatedCost           *string               `json:"estimated_cost"`
+	Currency                *string               `json:"currency"`
+	Unpriced                *bool                 `json:"unpriced"`
+	PricingRevisionID       *string               `json:"pricing_revision_id"`
+	CommitmentWeight        *string               `json:"commitment_weight"`
+	CommitmentAmount        *string               `json:"commitment_amount"`
+	CommitmentPeriod        *string               `json:"commitment_period"`
+	DiscountID              *string               `json:"discount_id"`
+	Charge                  *string               `json:"charge"`
+	RateCardRevisionID      *string               `json:"rate_card_revision_id"`
+}
+
+// RequestDetail is one request with its attempt timeline.
+type RequestDetail struct {
+	RequestSummary
+	Attempts []AttemptDetail `json:"attempts"`
+}
+
+// requestColumns projects a request with the usage its facts add up to. The
+// lateral join is filtered by HAVING so a request with no facts yet reports
+// null totals rather than zeros it never earned.
+const requestColumns = `SELECT r.id::text, r.runtime_generation_id::text, r.api_key_id::text,
+        r.route_slug, r.operation, r.surface, r.started_at, r.completed_at,
+        r.status_code::int, r.error_class, r.total_latency_ms::bigint, r.first_byte_ms::bigint,
+        r.attempt_count::int, u.input_tokens, u.output_tokens, u.cached_input_tokens,
+        u.cache_write_input_tokens, u.cache_write_5m_input_tokens, u.cache_write_1h_input_tokens,
+        u.audio_input_tokens, u.cached_audio_input_tokens, u.audio_output_tokens,
+        u.image_input_tokens, u.cached_image_input_tokens, u.image_output_tokens,
+        u.estimated_cost, u.charge, u.currency, u.unpriced, u.usage_complete, r.attribution, r.policy_decisions, r.guardrail_decisions, r.end_user_digest,
+        r.origin, r.parent_request_id::text, r.budget_boundary, r.payload_captured,r.evaluator_guardrail_id::text,r.cache_result,u.training_tokens,u.storage_byte_seconds,u.cache_token_seconds,u.container_sessions
+    FROM olp.requests r LEFT JOIN LATERAL (
+      SELECT SUM(f.training_tokens)::bigint AS training_tokens,SUM(f.storage_byte_seconds)::text AS storage_byte_seconds,SUM(f.cache_token_seconds)::text AS cache_token_seconds,
+ (SELECT jsonb_object_agg(tier,quantity) FROM (SELECT e.key AS tier,sum(e.value::bigint) AS quantity FROM olp.attempt_usage_facts cf CROSS JOIN LATERAL jsonb_each_text(COALESCE(cf.container_sessions,'{}'::jsonb)) e WHERE cf.request_id=r.id AND cf.request_started_at=r.started_at GROUP BY e.key) counts) AS container_sessions,
+ SUM(f.input_tokens)::bigint AS input_tokens,
+             SUM(f.output_tokens)::bigint AS output_tokens,
+             SUM(f.cached_input_tokens)::bigint AS cached_input_tokens,
+             SUM(f.cache_write_input_tokens)::bigint AS cache_write_input_tokens,
+             SUM(f.cache_write_5m_input_tokens)::bigint AS cache_write_5m_input_tokens,
+             SUM(f.cache_write_1h_input_tokens)::bigint AS cache_write_1h_input_tokens,
+             SUM(f.audio_input_tokens)::bigint AS audio_input_tokens,
+             SUM(f.cached_audio_input_tokens)::bigint AS cached_audio_input_tokens,
+             SUM(f.audio_output_tokens)::bigint AS audio_output_tokens,
+             SUM(f.image_input_tokens)::bigint AS image_input_tokens,
+             SUM(f.cached_image_input_tokens)::bigint AS cached_image_input_tokens,
+             SUM(f.image_output_tokens)::bigint AS image_output_tokens,
+             SUM(f.estimated_cost)::text AS estimated_cost,
+             SUM(f.charge)::text AS charge,
+             btrim(MAX(f.currency)) AS currency, BOOL_OR(f.unpriced) AS unpriced,
+             BOOL_AND(f.charge_status = 'not_billable' OR f.usage_complete) AS usage_complete
+        FROM olp.attempt_usage_facts f
+       WHERE f.request_id = r.id AND f.request_started_at = r.started_at
+      HAVING count(*) > 0
+    ) u ON true`
+
+func (s *RequestSummary) scanTargets() []any {
+	return []any{&s.ID, &s.RuntimeGenerationID, &s.APIKeyID, &s.Route, &s.Operation, &s.Surface,
+		&s.StartedAt, &s.CompletedAt, &s.StatusCode, &s.ErrorClass, &s.TotalLatencyMS,
+		&s.FirstByteMS, &s.AttemptCount, &s.InputTokens, &s.OutputTokens, &s.CachedInputTokens,
+		&s.CacheWriteInputTokens, &s.CacheWrite5MInputTokens, &s.CacheWrite1HInputTokens,
+		&s.AudioInputTokens, &s.CachedAudioInputTokens, &s.AudioOutputTokens,
+		&s.ImageInputTokens, &s.CachedImageInputTokens, &s.ImageOutputTokens,
+		&s.EstimatedCost, &s.Charge, &s.Currency, &s.Unpriced, &s.UsageComplete, &s.Attribution, &s.PolicyDecisions, &s.GuardrailDecisions, &s.EndUserDigest,
+		&s.Origin, &s.ParentRequestID, &s.BudgetBoundary, &s.PayloadCaptured, &s.EvaluatorGuardrailID, &s.CacheResult, &s.TrainingTokens, &s.StorageByteSeconds, &s.CacheTokenSeconds, &s.ContainerSessions}
+}
+
+// normalize pins the timestamps to UTC so the JSON always renders as Z.
+func (s *RequestSummary) normalize() {
+	s.StartedAt = s.StartedAt.UTC()
+	if s.CompletedAt != nil {
+		completed := s.CompletedAt.UTC()
+		s.CompletedAt = &completed
+	}
+}
+
+// ListRequests pages the request explorer newest first. The page is keyed by
+// (started_at, id) rather than an offset, so rows arriving during paging cannot
+// shift a reader onto a page it has already seen.
+func ListRequests(ctx context.Context, q access.Queryer, f RequestFilters, cursor *usage.Cursor, limit int) ([]RequestSummary, *string, error) {
+	if limit < 1 {
+		limit = 1
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	var query filterQuery
+	query.push(requestColumns + " WHERE true")
+	f.push(&query)
+	if cursor != nil {
+		query.push(" AND (r.started_at, r.id) < (" + query.bind(cursor.At) + ", " + query.bind(cursor.ID) + ")")
+	}
+	query.push(" ORDER BY r.started_at DESC, r.id DESC LIMIT " + query.bind(int64(limit)+1))
+	rows, err := q.Query(ctx, query.sql(), query.args...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list requests: %w", err)
+	}
+	defer rows.Close()
+	items := []RequestSummary{}
+	for rows.Next() {
+		var item RequestSummary
+		if err = rows.Scan(item.scanTargets()...); err != nil {
+			return nil, nil, fmt.Errorf("list requests: %w", err)
+		}
+		item.normalize()
+		items = append(items, item)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("list requests: %w", err)
+	}
+	var next *string
+	if len(items) > limit {
+		items = items[:limit]
+		last := items[len(items)-1]
+		token := usage.EncodeCursor(last.StartedAt, last.ID)
+		next = &token
+	}
+	return items, next, nil
+}
+
+// push appends the explorer's filters. Provider and model are attempt
+// properties, so they are matched against retained attempts, not expiring usage facts.
+func (f RequestFilters) push(q *filterQuery) {
+	if !f.Projects.all {
+		q.push(" AND r.api_key_id IN (SELECT id FROM olp.api_keys WHERE project_id = ANY(" + q.bind(f.Projects.ids) + "::uuid[]))")
+	}
+	if f.ProjectID != nil {
+		q.push(" AND " + requestProjectExpression + " = " + q.bind(*f.ProjectID) + "::uuid")
+	}
+	if f.Route != nil {
+		q.pushBind(" AND r.route_slug = ", *f.Route)
+	}
+	if f.ProviderID != nil || f.Model != nil {
+		q.push(" AND EXISTS (SELECT 1 FROM olp.attempts filter_attempt" +
+			" WHERE filter_attempt.request_id = r.id AND filter_attempt.request_started_at = r.started_at")
+		if f.ProviderID != nil {
+			q.pushBind(" AND filter_attempt.provider_id = ", *f.ProviderID)
+		}
+		if f.Model != nil {
+			q.pushBind(" AND filter_attempt.upstream_model = ", *f.Model)
+		}
+		q.push(")")
+	}
+	if f.APIKey != nil {
+		q.pushBind(" AND r.api_key_id = ", *f.APIKey)
+	}
+	if f.Operation != nil {
+		q.pushBind(" AND r.operation = ", *f.Operation)
+	}
+	if f.StatusCode != nil {
+		q.pushBind(" AND r.status_code = ", int32(*f.StatusCode))
+	}
+	if f.ErrorClass != nil {
+		q.pushBind(" AND r.error_class = ", *f.ErrorClass)
+	}
+	if f.AttributionKey != nil {
+		q.pushBind(" AND r.attribution ? ", *f.AttributionKey)
+	}
+	if f.AttributionValue != nil {
+		q.push(" AND r.attribution->>" + q.bind(*f.AttributionKey) + " = " + q.bind(*f.AttributionValue))
+	}
+	if f.StartedAfter != nil {
+		q.pushBind(" AND r.started_at >= ", *f.StartedAfter)
+	}
+	if f.StartedBefore != nil {
+		q.pushBind(" AND r.started_at < ", *f.StartedBefore)
+	}
+}
+
+func ReadRequestExport(ctx context.Context, q access.Queryer, filters RequestFilters) ([]RequestSummary, error) {
+	var query filterQuery
+	query.push(requestColumns + " WHERE true")
+	filters.push(&query)
+	query.push(" ORDER BY r.started_at DESC,r.id DESC LIMIT 10001")
+	rows, err := q.Query(ctx, query.sql(), query.args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RequestSummary{}
+	for rows.Next() {
+		if len(items) == 10000 {
+			return nil, fail(FailureExportTooLarge, "Narrow the request filters to at most 10000 requests.")
+		}
+		var item RequestSummary
+		if err := rows.Scan(item.scanTargets()...); err != nil {
+			return nil, err
+		}
+		item.normalize()
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+const attemptColumns = `SELECT a.routing, a.id::text, a.ordinal::int, a.provider_id::text, p.name,
+        a.upstream_model, a.started_at, a.completed_at, a.status_code::int, a.error_class,
+        a.committed, a.latency_ms::bigint, a.first_byte_ms::bigint, f.charge_status,
+        f.usage_observed, f.usage_complete, f.input_tokens, f.output_tokens, f.cached_input_tokens,
+        f.cache_write_input_tokens, f.cache_write_5m_input_tokens, f.cache_write_1h_input_tokens,
+        f.audio_input_tokens, f.cached_audio_input_tokens, f.audio_output_tokens,
+        f.image_input_tokens, f.cached_image_input_tokens, f.image_output_tokens,
+        f.media_units::text, f.tool_calls::text, f.batch, f.pricing_components,
+        f.estimated_cost::text, btrim(f.currency), f.unpriced,
+        f.pricing_revision_id::text, f.commitment_weight::text,
+        f.commitment_amount::text, f.commitment_period,
+        f.discount_id::text, f.charge::text, f.rate_card_revision_id::text,a.guardrail_decisions,f.training_tokens,f.storage_byte_seconds::text,f.cache_token_seconds::text,f.container_sessions,f.invocation_count
+    FROM olp.attempts a JOIN olp.providers p ON p.id = a.provider_id
+    LEFT JOIN olp.attempt_usage_facts f ON f.request_id = a.request_id
+        AND f.request_started_at = a.request_started_at AND f.attempt_ordinal = a.ordinal
+    WHERE a.request_id = $1 AND a.request_started_at = $2 ORDER BY a.ordinal`
+
+// GetRequest reads one request and its attempts. The request table is
+// partitioned by start time, so the newest row for an identifier is the row.
+// A missing request surfaces as pgx.ErrNoRows, which the HTTP layer renders as
+// a 404.
+func GetRequest(ctx context.Context, q access.Queryer, id string) (RequestDetail, error) {
+	var detail RequestDetail
+	err := q.QueryRow(ctx, requestColumns+" WHERE r.id = $1 ORDER BY r.started_at DESC LIMIT 1", id).
+		Scan(detail.RequestSummary.scanTargets()...)
+	if err != nil {
+		return RequestDetail{}, err
+	}
+	detail.RequestSummary.normalize()
+	rows, err := q.Query(ctx, attemptColumns, detail.ID, detail.StartedAt)
+	if err != nil {
+		return RequestDetail{}, fmt.Errorf("read request attempts: %w", err)
+	}
+	defer rows.Close()
+	detail.Attempts = []AttemptDetail{}
+	for rows.Next() {
+		var attempt AttemptDetail
+		var routing []byte
+		var attemptToolCalls *string
+		if err = rows.Scan(&routing, &attempt.ID, &attempt.Ordinal, &attempt.ProviderID,
+			&attempt.ProviderName, &attempt.UpstreamModel, &attempt.StartedAt, &attempt.CompletedAt,
+			&attempt.StatusCode, &attempt.ErrorClass, &attempt.Committed, &attempt.LatencyMS,
+			&attempt.FirstByteMS, &attempt.ChargeStatus, &attempt.UsageObserved,
+			&attempt.UsageComplete, &attempt.InputTokens, &attempt.OutputTokens,
+			&attempt.CachedInputTokens, &attempt.CacheWriteInputTokens,
+			&attempt.CacheWrite5MInputTokens, &attempt.CacheWrite1HInputTokens,
+			&attempt.AudioInputTokens, &attempt.CachedAudioInputTokens, &attempt.AudioOutputTokens,
+			&attempt.ImageInputTokens, &attempt.CachedImageInputTokens, &attempt.ImageOutputTokens,
+			&attempt.MediaUnits, &attemptToolCalls, &attempt.Batch, &attempt.PricingComponents,
+			&attempt.EstimatedCost,
+			&attempt.Currency, &attempt.Unpriced, &attempt.PricingRevisionID,
+			&attempt.CommitmentWeight, &attempt.CommitmentAmount, &attempt.CommitmentPeriod,
+			&attempt.DiscountID, &attempt.Charge, &attempt.RateCardRevisionID, &attempt.GuardrailDecisions, &attempt.TrainingTokens, &attempt.StorageByteSeconds, &attempt.CacheTokenSeconds, &attempt.ContainerSessions, &attempt.InvocationCount); err != nil {
+			return RequestDetail{}, fmt.Errorf("read request attempts: %w", err)
+		}
+		if attemptToolCalls != nil {
+			if err = json.Unmarshal([]byte(*attemptToolCalls), &attempt.ToolCalls); err != nil {
+				return RequestDetail{}, fmt.Errorf("read request attempts: stored tool calls are invalid")
+			}
+		}
+		if routing != nil {
+			// Stored provenance is re-decoded rather than passed through, so a
+			// damaged row cannot reach the console as a shape the contract
+			// does not describe.
+			var parsed usage.Routing
+			if err = json.Unmarshal(routing, &parsed); err != nil {
+				return RequestDetail{}, fmt.Errorf("read request attempts: stored routing is invalid")
+			}
+			attempt.Routing = &parsed
+		}
+		attempt.StartedAt = attempt.StartedAt.UTC()
+		if attempt.CompletedAt != nil {
+			completed := attempt.CompletedAt.UTC()
+			attempt.CompletedAt = &completed
+		}
+		detail.Attempts = append(detail.Attempts, attempt)
+	}
+	if err = rows.Err(); err != nil {
+		return RequestDetail{}, fmt.Errorf("read request attempts: %w", err)
+	}
+	return detail, nil
+}
+
+// validate refuses a filter set that cannot describe any request. An impossible
+// window or an unknown operation is an error, not an empty page: the caller
+// would otherwise read "no traffic" from a typo.
+func (f RequestFilters) validate() error {
+	if f.StartedAfter != nil && f.StartedBefore != nil && !f.StartedBefore.After(*f.StartedAfter) {
+		return fail(FailureInvalidRange, "Use a positive started_after to started_before range.")
+	}
+	if f.Operation != nil && !usage.ValidOperation(*f.Operation) {
+		return fail(FailureInvalidOperation, "The operation filter is invalid.")
+	}
+	return validateAttributionFilter(f.AttributionKey, f.AttributionValue)
+}
+
+func readKeyProject(ctx context.Context, q access.Queryer, apiKeyID string) (*string, error) {
+	var project *string
+	err := q.QueryRow(ctx, "SELECT project_id::text FROM olp.api_keys WHERE id=$1", apiKeyID).Scan(&project)
+	return project, err
+}

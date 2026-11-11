@@ -9,6 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/upstream"
+	"github.com/tyk-swe/olp/internal/usage/rates"
+	"github.com/tyk-swe/olp/internal/usage/routinginputs"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/batches"
@@ -308,7 +312,7 @@ func (s *Server) settlementTemplate(x *call, p *pin, surface, lineOperation stri
 		return nil, errors.New("batch pricing inputs are unavailable")
 	}
 	inputs := s.deps.Runtime.RoutingInputs()
-	if inputs == nil || now.Sub(inputs.RefreshedAt) > usage.PerformanceMaxAge {
+	if inputs == nil || now.Sub(inputs.RefreshedAt) > routinginputs.PerformanceMaxAge {
 		return nil, errors.New("batch pricing inputs are unavailable or stale")
 	}
 	attemptCount, attemptVendor, routingInputs := x.attemptCount, x.attemptVendor, x.routingInputs
@@ -328,7 +332,7 @@ func (s *Server) settlementTemplate(x *call, p *pin, surface, lineOperation stri
 	fact.UsageComplete = false
 	fact.BillingUncertain = true
 	if fact.Interaction != nil {
-		fact.Interaction.UpstreamState = usage.UpstreamAccepted
+		fact.Interaction.UpstreamState = upstream.Accepted
 		fact.Interaction.ClientState = usage.ClientUnobserved
 	}
 	if p.hold != nil {
@@ -375,7 +379,7 @@ func (s *Server) settlementTemplate(x *call, p *pin, surface, lineOperation stri
 
 // A manifest supplies only aggregate text-token totals. Per-invocation fees,
 // tiers and specialized meters cannot be reconstructed from those totals.
-func aggregateTariffNeedsPerRecordUsage(price *usage.RoutingPrice) bool {
+func aggregateTariffNeedsPerRecordUsage(price *rates.RoutingPrice) bool {
 	if price == nil {
 		return false
 	}

@@ -1,0 +1,373 @@
+package pricebook
+
+import (
+	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/json"
+	"errors"
+	"maps"
+	"net/http"
+	"net/http/httptest"
+	"net/netip"
+	"slices"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/catalog"
+	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/signing"
+	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/vendors"
+)
+
+// TestEmbeddedCatalogMapsToValidPrices proves the catalog this release ships
+// becomes a snapshot an operator can publish: every price valid, within the
+// revision and snapshot bounds, and every alias its own row.
+func TestEmbeddedCatalogMapsToValidPrices(t *testing.T) {
+	signed, err := catalog.Embedded()
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, skipped := catalogDocument(signed.Catalog, NewNormalizer(vendors.Kind))
+	if len(skipped) != 0 {
+		t.Fatalf("this build cannot store %d prices of its own catalog, first %+v", len(skipped), skipped[0])
+	}
+	normalized, currency, err := validatePrices(doc.Prices, NewNormalizer(vendors.Kind))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if currency != signed.Catalog.Currency || len(normalized) > MaxRevisionPrices {
+		t.Fatalf("%d prices in %s", len(normalized), currency)
+	}
+	doc.Prices = normalized
+	if size := len(canonicalSourceDocument(doc)); size > maxSourceDocumentBytes {
+		t.Fatalf("the catalog snapshot is %d bytes, over the %d snapshot limit", size, maxSourceDocumentBytes)
+	}
+	names := 0
+	for _, vendor := range signed.Catalog.Vendors {
+		for _, model := range vendor.Models {
+			names += len(model.Prices) * (1 + len(model.Aliases))
+		}
+	}
+	if len(doc.Prices) != names {
+		t.Fatalf("mapped %d prices for %d priced names", len(doc.Prices), names)
+	}
+}
+
+func TestContainerTiersAgreeAcrossCatalogPricingAndUsage(t *testing.T) {
+	document, _, _, _ := signedCatalog(t, time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC))
+	for _, tc := range []struct {
+		tier  string
+		valid bool
+	}{
+		{"1g", true}, {"42g", true}, {"99999g", true},
+		{"", false}, {"0g", false}, {"01g", false}, {"100000g", false}, {"1G", false}, {"1gb", false},
+	} {
+		fixture, err := catalog.Decode(document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixture.Vendors[0].Models[0].Prices[0].ContainerPerSession = map[string]catalog.Decimal{tc.tier: "1"}
+		catalogErr, pricingErr := catalogPriceValidation(t, fixture)
+		usageValid := usage.ConsistentUsage(&usage.AttemptUsage{UsageQuantities: usage.UsageQuantities{ContainerSessions: map[string]int64{tc.tier: 1}}})
+		if (catalogErr == nil) != tc.valid || (pricingErr == nil) != tc.valid || usageValid != tc.valid {
+			t.Errorf("tier %q, catalog error %v, pricing error %v, usage valid %v, want valid %v", tc.tier, catalogErr, pricingErr, usageValid, tc.valid)
+		}
+	}
+	for _, tc := range []struct {
+		count int
+		valid bool
+	}{{16, true}, {17, false}} {
+		fixture, err := catalog.Decode(document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rates := maps.Collect(func(yield func(string, catalog.Decimal) bool) {
+			for i := range tc.count {
+				if !yield(strconv.Itoa(i+1)+"g", "1") {
+					return
+				}
+			}
+		})
+		sessions := maps.Collect(func(yield func(string, int64) bool) {
+			for tier := range rates {
+				if !yield(tier, 1) {
+					return
+				}
+			}
+		})
+		fixture.Vendors[0].Models[0].Prices[0].ContainerPerSession = rates
+		catalogErr, pricingErr := catalogPriceValidation(t, fixture)
+		usageValid := usage.ConsistentUsage(&usage.AttemptUsage{UsageQuantities: usage.UsageQuantities{ContainerSessions: sessions}})
+		if (catalogErr == nil) != tc.valid || (pricingErr == nil) != tc.valid || usageValid != tc.valid {
+			t.Errorf("%d tiers, catalog error %v, pricing error %v, usage valid %v, want valid %v", tc.count, catalogErr, pricingErr, usageValid, tc.valid)
+		}
+	}
+}
+
+func TestMeteredToolNamesAgreeAcrossCatalogPricingAndUsage(t *testing.T) {
+	document, _, _, _ := signedCatalog(t, time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC))
+	for _, tc := range []struct {
+		name  string
+		valid bool
+	}{
+		{"tool", true}, {"tool_2", true}, {strings.Repeat("a", 64), true},
+		{"", false}, {"Tool", false}, {"2tool", false}, {"tool-name", false}, {strings.Repeat("a", 65), false},
+	} {
+		fixture, err := catalog.Decode(document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixture.Vendors[0].Models[0].Prices[0].ToolCalls = map[string]catalog.Decimal{tc.name: "1"}
+		catalogErr, pricingErr := catalogPriceValidation(t, fixture)
+		usageValid := usage.ConsistentUsage(&usage.AttemptUsage{UsageQuantities: usage.UsageQuantities{ToolCalls: map[string]int64{tc.name: 1}}})
+		if (catalogErr == nil) != tc.valid || (pricingErr == nil) != tc.valid || usageValid != tc.valid {
+			t.Errorf("tool %q, catalog error %v, pricing error %v, usage valid %t", tc.name, catalogErr, pricingErr, usageValid)
+		}
+	}
+}
+
+func TestCatalogCurrencyAgreesWithPriceRevisions(t *testing.T) {
+	document, _, _, _ := signedCatalog(t, time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC))
+	for _, tc := range []struct {
+		currency     string
+		catalogValid bool
+		pricingValid bool
+	}{
+		{"ABC", true, true},
+		{"abc", false, true},
+		{" ABC ", false, true},
+		{"", false, false},
+		{"AB", false, false},
+		{"ABCD", false, false},
+		{"AB1", false, false},
+		{"ÄBC", false, false},
+	} {
+		fixture, err := catalog.Decode(document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixture.Currency = tc.currency
+		catalogErr, pricingErr := catalogPriceValidation(t, fixture)
+		if (catalogErr == nil) != tc.catalogValid || (pricingErr == nil) != tc.pricingValid {
+			t.Errorf("currency %q, catalog error %v, pricing error %v", tc.currency, catalogErr, pricingErr)
+		}
+	}
+}
+
+func TestCatalogWindowsAgreeWithPriceRevisions(t *testing.T) {
+	published := time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC)
+	document, _, _, _ := signedCatalog(t, published)
+	period := func(start, end string, days ...int) catalog.WindowPeriod {
+		return catalog.WindowPeriod{Start: start, End: end, Days: days, Multiplier: "1"}
+	}
+	periods := func(count int) []catalog.WindowPeriod {
+		return slices.Collect(func(yield func(catalog.WindowPeriod) bool) {
+			for index := range count {
+				start := published.Add(time.Duration(index) * 30 * time.Minute)
+				if !yield(period(start.Format("15:04"), start.Add(30*time.Minute).Format("15:04"), 1)) {
+					return
+				}
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name    string
+		periods []catalog.WindowPeriod
+		valid   bool
+	}{
+		{"full day", []catalog.WindowPeriod{period("00:00", "24:00", 1)}, true},
+		{"adjacent", []catalog.WindowPeriod{period("09:00", "12:00", 1), period("12:00", "15:00", 1)}, true},
+		{"different days", []catalog.WindowPeriod{period("09:00", "12:00", 1), period("09:00", "12:00", 2)}, true},
+		{"overlap", []catalog.WindowPeriod{period("09:00", "12:00", 1), period("11:00", "15:00", 1)}, false},
+		{"midnight start", []catalog.WindowPeriod{period("24:00", "24:00", 1)}, false},
+		{"late end", []catalog.WindowPeriod{period("09:00", "24:01", 1)}, false},
+		{"short hour", []catalog.WindowPeriod{period("9:00", "12:00", 1)}, false},
+		{"duplicate day", []catalog.WindowPeriod{period("09:00", "12:00", 1, 1)}, false},
+		{"no periods", []catalog.WindowPeriod{}, false},
+		{"period limit", periods(32), true},
+		{"too many periods", periods(33), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture, err := catalog.Decode(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fixture.Vendors[0].Models[0].Prices[0].Windows = &catalog.Windows{TimeZone: time.UTC.String(), Periods: tc.periods}
+			catalogErr, pricingErr := catalogPriceValidation(t, fixture)
+			if (catalogErr == nil) != tc.valid || (pricingErr == nil) != tc.valid {
+				t.Fatalf("catalog error = %v, pricing error = %v", catalogErr, pricingErr)
+			}
+		})
+	}
+}
+
+func TestCatalogTiersAgreeWithPriceRevisions(t *testing.T) {
+	document, _, _, _ := signedCatalog(t, time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC))
+	rate := catalog.Decimal("2")
+	tier := func(threshold int64) catalog.Tier {
+		return catalog.Tier{AboveInputTokens: threshold, InputPerMillion: &rate, OutputPerMillion: &rate}
+	}
+	tiers := func(count int) []catalog.Tier {
+		return slices.Collect(func(yield func(catalog.Tier) bool) {
+			for index := range count {
+				if !yield(tier(int64(index + 1))) {
+					return
+				}
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name  string
+		tiers []catalog.Tier
+		valid bool
+	}{
+		{"no tiers", nil, true},
+		{"one tier", []catalog.Tier{tier(1)}, true},
+		{"tier limit", tiers(8), true},
+		{"too many tiers", tiers(9), false},
+		{"zero threshold", []catalog.Tier{tier(0)}, false},
+		{"unordered", []catalog.Tier{tier(2), tier(1)}, false},
+		{"missing rate", []catalog.Tier{{AboveInputTokens: 1, InputPerMillion: &rate}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture, err := catalog.Decode(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fixture.Vendors[0].Models[0].Prices[0].Tiers = tc.tiers
+			catalogErr, pricingErr := catalogPriceValidation(t, fixture)
+			if (catalogErr == nil) != tc.valid || (pricingErr == nil) != tc.valid {
+				t.Fatalf("catalog error = %v, pricing error = %v", catalogErr, pricingErr)
+			}
+		})
+	}
+}
+
+func catalogPriceValidation(t *testing.T, fixture *catalog.Catalog) (error, error) {
+	t.Helper()
+	catalogErr := fixture.Validate()
+	doc, skipped := catalogDocument(fixture, NewNormalizer(vendors.Kind))
+	if len(skipped) != 0 {
+		t.Fatalf("unexpected skipped catalog price: %+v", skipped)
+	}
+	_, _, pricingErr := validatePrices(doc.Prices, NewNormalizer(vendors.Kind))
+	return catalogErr, pricingErr
+}
+
+// catalogUpstream serves a signed catalog and its signature the way a static
+// file host does, with whatever media type the host chose.
+type catalogUpstream struct {
+	document, signature []byte
+	contentType         string
+}
+
+func (u *catalogUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", u.contentType)
+	switch r.URL.Path {
+	case "/catalog.json":
+		w.Write(u.document)
+	case "/catalog.json.sig":
+		if u.signature == nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write(u.signature)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func signedCatalog(t *testing.T, published time.Time) ([]byte, []byte, signing.Keyring, ed25519.PrivateKey) {
+	t.Helper()
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provenance := catalog.Provenance{SourceURL: "https://example.test/pricing", ObservedAt: published}
+	three := catalog.Decimal("3")
+	document, err := catalog.Encode(&catalog.Catalog{APIVersion: catalog.APIVersion, PublishedAt: published, Currency: "USD", Vendors: []catalog.Vendor{{ID: "anthropic", Name: "Anthropic", Models: []catalog.Model{{
+		ID: "claude-test", InputModalities: []string{"text"}, OutputModalities: []string{"text"}, Provenance: provenance,
+		Prices: []catalog.Price{{Operation: "generation", InputPerMillion: &three, OutputPerMillion: &three, Unrepresentable: []catalog.Unrepresentable{}, Provenance: provenance}},
+	}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	signature, err := signing.Sign(nil, "test-release", private, document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys, err := signing.NewKeyring(signing.Key{ID: "test-release", Public: public})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return document, signature, keys, private
+}
+
+func problemCode(err error) string {
+	var problem *access.Problem
+	if errors.As(err, &problem) {
+		return problem.Code
+	}
+	return ""
+}
+
+// TestFetchedCatalogsVerifyBeforeAnyPriceIsRead covers source refresh: a
+// tampered document, a tampered or missing signature and a catalog older
+// than the one this release ships are refused; any media type is accepted,
+// because the signature establishes what the document is.
+func TestFetchedCatalogsVerifyBeforeAnyPriceIsRead(t *testing.T) {
+	published := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	document, signature, keys, _ := signedCatalog(t, published)
+	upstream := &catalogUpstream{document: document, signature: signature, contentType: "application/octet-stream"}
+	server := httptest.NewServer(upstream)
+	defer server.Close()
+	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+	s := &API{Egress: policy, Normalizer: NewNormalizer(vendors.Kind), CatalogKeys: keys}
+	address := server.URL + "/catalog.json"
+
+	fetched, err := s.fetchCatalog(context.Background(), &address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fetched.Catalog == nil || fetched.Catalog.KeyID != "test-release" || len(fetched.Document.Prices) != 1 || !fetched.Catalog.Catalog.PublishedAt.Equal(published) {
+		t.Fatalf("fetched = %+v", fetched)
+	}
+
+	upstream.document = []byte(strings.Replace(string(document), `"3"`, `"0.3"`, 1))
+	if _, err = s.fetchCatalog(context.Background(), &address); problemCode(err) != "catalog_signature_invalid" {
+		t.Fatalf("tampered catalog: %v", err)
+	}
+	upstream.document = document
+
+	var file signing.File
+	_ = json.Unmarshal(signature, &file)
+	file.Signatures[0].Signature[3] ^= 1
+	upstream.signature, _ = json.Marshal(file)
+	if _, err = s.fetchCatalog(context.Background(), &address); problemCode(err) != "catalog_signature_invalid" {
+		t.Fatalf("tampered signature: %v", err)
+	}
+
+	upstream.signature = nil
+	if _, err = s.fetchCatalog(context.Background(), &address); problemCode(err) != "source_fetch_failed" {
+		t.Fatalf("missing signature: %v", err)
+	}
+	upstream.signature = signature
+
+	newer, newerSignature, newerKeys, _ := signedCatalog(t, published.Add(time.Hour))
+	bundled, err := catalog.Load(newer, newerSignature, newerKeys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Catalog = bundled
+	if _, err = s.fetchCatalog(context.Background(), &address); problemCode(err) != "catalog_outdated" {
+		t.Fatalf("outdated catalog: %v", err)
+	}
+	if fetched, err = s.fetchCatalog(context.Background(), nil); err != nil || fetched.Catalog.SHA256 != bundled.SHA256 {
+		t.Fatalf("bundled catalog: %+v %v", fetched.Catalog, err)
+	}
+}

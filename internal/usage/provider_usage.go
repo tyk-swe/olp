@@ -9,13 +9,9 @@ import (
 // shared by live requests and deferred results.
 func ObservedAttemptUsage(u *wire.Usage, complete bool, operation string) AttemptUsage {
 	if u == nil {
-		return AttemptUsage{BillingUncertain: true}
+		return AttemptUsage{Evidence: EvidenceUnobservedUncertain}
 	}
-	evidence := AttemptUsage{
-		Observed:         true,
-		Complete:         complete,
-		BillingUncertain: !complete,
-	}
+	evidence := AttemptUsage{Evidence: EvidenceFrom(true, complete, !complete)}
 	// Retained control and search calls consume no tokens: an empty
 	// counter set is tokenless evidence, not explicit zero token
 	// dimensions, so a per-request-only price can still apply.
@@ -51,7 +47,7 @@ func ObservedAttemptUsage(u *wire.Usage, complete bool, operation string) Attemp
 		evidence.ImageInputTokens = nil
 		evidence.ImageOutputTokens = nil
 		evidence.ToolCalls = nil
-		evidence.Complete = false
+		evidence.Evidence = EvidenceFrom(true, false, !complete)
 	}
 	return evidence
 }

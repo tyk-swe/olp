@@ -1,0 +1,148 @@
+package ingest
+
+import (
+	"context"
+	"crypto/sha256"
+	"errors"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/limits/debits"
+	"github.com/tyk-swe/olp/internal/usage"
+)
+
+func debitDispatchID(event *usage.Event) (string, bool) {
+	if event == nil {
+		return "", false
+	}
+	dispatchID := ""
+	for _, attempt := range event.Attempts {
+		if attempt.Execution == nil {
+			continue
+		}
+		if dispatchID == "" {
+			dispatchID = attempt.Execution.DispatchID
+			continue
+		}
+		if attempt.Execution.DispatchID != dispatchID {
+			return "", true
+		}
+	}
+	return dispatchID, dispatchID != ""
+}
+
+func sessionDebitResult(dispatchID string, event *usage.Event, payload []byte, cost, charge string, complete bool) debits.Result {
+	resultDigest := sha256.Sum256([]byte("olp:debit-result:" + dispatchID + ":" + event.EventID))
+	evidenceDigest := sha256.Sum256(payload)
+	return debits.Result{
+		DispatchID: dispatchID, ResultDigest: resultDigest[:], EvidenceDigest: evidenceDigest[:],
+		EventID: event.EventID, Cost: cost, Charge: charge, Final: true, Complete: complete,
+	}
+}
+
+func validateDebitEvent(ctx context.Context, tx pgx.Tx, event *usage.Event, dispatchID string) (string, []string, error) {
+	var key, run, step, currency string
+	var affinity debits.Affinity
+	if err := tx.QueryRow(ctx, `SELECT api_key_id::text,COALESCE(run_id::text,''),COALESCE(step_id::text,''),currency,affinity FROM olp.execution_debits WHERE id=$1 FOR UPDATE`, dispatchID).Scan(&key, &run, &step, &currency, &affinity); err != nil {
+		return "", nil, err
+	}
+	if event.APIKeyID != key || event.RuntimeGenerationID != affinity.ReleaseID || len(event.Attempts) == 0 {
+		return "", nil, debits.ErrConflict
+	}
+	for _, attempt := range event.Attempts {
+		if attempt.Routing != nil && attempt.Routing.BudgetExempt {
+			return "", nil, debits.ErrConflict
+		}
+		ref := attempt.Execution
+		if ref == nil || ref.Validate() != nil || ref.DispatchID != dispatchID || ref.RunID != run || ref.StepID != step || ref.TargetID != affinity.TargetID || ref.RouteRevisionID != affinity.RouteRevisionID {
+			return "", nil, debits.ErrConflict
+		}
+		if affinity.ProviderID != "" && attempt.ProviderID != affinity.ProviderID {
+			return "", nil, debits.ErrConflict
+		}
+		if affinity.ProviderRevisionID != "" && (attempt.Routing == nil || attempt.Routing.ProviderRevisionID != affinity.ProviderRevisionID) {
+			return "", nil, debits.ErrConflict
+		}
+		if affinity.CredentialID != "" || affinity.SlotID != "" || affinity.PricingRevisionID != "" {
+			if attempt.Routing == nil {
+				return "", nil, debits.ErrConflict
+			}
+			for _, pin := range []struct {
+				expected string
+				actual   *string
+			}{{affinity.CredentialID, attempt.Routing.CredentialVersionID}, {affinity.SlotID, attempt.Routing.CredentialSlotID}, {affinity.PricingRevisionID, attempt.Routing.PricingRevisionID}} {
+				if pin.expected != "" && (pin.actual == nil || *pin.actual != pin.expected) {
+					return "", nil, debits.ErrConflict
+				}
+			}
+		}
+	}
+	rows, err := tx.Query(ctx, `SELECT DISTINCT owner_id::text FROM olp.execution_debit_owners WHERE dispatch_id=$1 AND owner_kind='supply' ORDER BY owner_id::text`, dispatchID)
+	if err != nil {
+		return "", nil, err
+	}
+	var supplyOwners []string
+	for rows.Next() {
+		var owner string
+		if err = rows.Scan(&owner); err != nil {
+			rows.Close()
+			return "", nil, err
+		}
+		supplyOwners = append(supplyOwners, owner)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return "", nil, err
+	}
+	return currency, supplyOwners, nil
+}
+
+func persistDebitEventTx(ctx context.Context, tx pgx.Tx, accepted usage.AccountingEvent) (Persisted, error) {
+	event, payload := accepted.Event(), accepted.Payload()
+	dispatchID, present := debitDispatchID(event)
+	if !present || dispatchID == "" {
+		return Persisted{}, debits.ErrConflict
+	}
+	currency, supplyOwners, err := validateDebitEvent(ctx, tx, event, dispatchID)
+	if err != nil {
+		return Persisted{}, err
+	}
+	identity := sessionDebitResult(dispatchID, event, payload, "0", "0", false)
+	var retainedCost, retainedCharge string
+	var retainedComplete bool
+	replayErr := tx.QueryRow(ctx, `SELECT cost::text,charge::text,complete FROM olp.execution_debit_results WHERE dispatch_id=$1 AND result_digest=$2`, dispatchID, identity.ResultDigest).Scan(&retainedCost, &retainedCharge, &retainedComplete)
+	if replayErr != nil && !errors.Is(replayErr, pgx.ErrNoRows) {
+		return Persisted{}, replayErr
+	}
+	if replayErr == nil {
+		retained := sessionDebitResult(dispatchID, event, payload, retainedCost, retainedCharge, retainedComplete)
+		if duplicate, err := debits.ResultReplayTx(ctx, tx, retained); err != nil {
+			return Persisted{}, err
+		} else if duplicate {
+			return Persisted{Outcome: PersistOutcomeDuplicate}, nil
+		}
+	}
+	persisted, err := persistEventTx(ctx, tx, accepted, supplyOwners)
+	if err != nil {
+		return Persisted{}, err
+	}
+	if persisted.Outcome == PersistOutcomeRejectedOutsideReplayWindow {
+		return persisted, nil
+	}
+	var cost, charge string
+	var factsComplete bool
+	var facts int
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(sum(COALESCE(estimated_cost,0)),0)::text,COALESCE(sum(COALESCE(charge,0)),0)::text,COALESCE(bool_and(charge_status='not_billable' OR (usage_complete AND NOT unpriced AND estimated_cost IS NOT NULL AND charge IS NOT NULL AND (currency=$2 OR (estimated_cost=0 AND charge=0)))),false),count(*) FROM olp.attempt_usage_facts WHERE event_id=$1`, event.EventID, currency).Scan(&cost, &charge, &factsComplete, &facts); err != nil {
+		return Persisted{}, err
+	}
+	complete := factsComplete && facts > 0
+	for _, attempt := range event.Attempts {
+		if attempt.Usage == nil || attempt.Usage.Evidence.Uncertain() || !attempt.Usage.Evidence.Complete() {
+			complete = false
+		}
+	}
+	result := sessionDebitResult(dispatchID, event, payload, cost, charge, complete)
+	if err := debits.SettleTx(ctx, tx, result, persisted.CostSnapshots); err != nil {
+		return Persisted{}, err
+	}
+	return persisted, nil
+}

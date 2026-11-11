@@ -18,7 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 )
 
 func (s *Server) registerRetainedLifecycle(mux *http.ServeMux) {
@@ -694,7 +694,7 @@ func (s *Server) retainedControlPolicy(x *call, p *pin, route *routing.Route) *E
 	if x.routingInputs == nil && s.deps.Runtime != nil {
 		x.routingInputs = s.deps.Runtime.RoutingInputs()
 	}
-	if x.routingInputs == nil || x.request.startedAt.Sub(x.routingInputs.RefreshedAt) > usage.PerformanceMaxAge {
+	if x.routingInputs == nil || x.request.startedAt.Sub(x.routingInputs.RefreshedAt) > routinginputs.PerformanceMaxAge {
 		return serverError(http.StatusServiceUnavailable, "pricing_unavailable", "Current resource pricing is unavailable; retry shortly.")
 	}
 	if p.attempt.Price == nil {

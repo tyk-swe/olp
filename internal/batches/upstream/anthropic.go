@@ -141,7 +141,7 @@ func parseAnthropicLine(line []byte, model string) (batches.Result, error) {
 		return batches.Result{}, batches.ErrCursorConflict
 	}
 	unobserved := func(kind batches.ResultKind, class batches.ErrorClass) (batches.Result, error) {
-		return batches.Result{CustomID: object.CustomID, Kind: kind, ErrorClass: class, Evidence: canonical, Usage: usage.AttemptUsage{Complete: true}}, nil
+		return batches.Result{CustomID: object.CustomID, Kind: kind, ErrorClass: class, Evidence: canonical, Usage: usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete}}, nil
 	}
 	switch object.Result.Type {
 	case "errored":

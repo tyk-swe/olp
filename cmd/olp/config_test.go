@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/release"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/ingest"
 )
 
 func TestProcessIdentitiesUseProvidedHost(t *testing.T) {
@@ -21,7 +21,7 @@ func TestProcessIdentitiesUseProvidedHost(t *testing.T) {
 	}
 	manager := release.NewManager(release.ManagerConfig{Installation: uuid.NewString(), Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Hostname: cfg.Hostname})
 	t.Cleanup(manager.Stop)
-	for _, identity := range []string{manager.InstanceID(), usage.ConsumerName(cfg.Hostname)} {
+	for _, identity := range []string{manager.InstanceID(), ingest.ConsumerName(cfg.Hostname)} {
 		if !strings.HasPrefix(identity, host+"-") {
 			t.Fatalf("identity %q does not use provided host %q", identity, host)
 		}

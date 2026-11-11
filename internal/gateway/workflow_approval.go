@@ -15,7 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
 type workflowPauseCall struct {
@@ -103,7 +103,7 @@ func (s *Server) prepareWorkflowResume(ctx context.Context, x *call) *Error {
 	if json.Unmarshal(continuation.State, &state) != nil || state.Family != x.family || state.Completion == nil || state.Iteration < 0 || state.Iteration >= 31 || continuation.StartOrdinal < 0 || continuation.NextOrdinal < continuation.StartOrdinal || state.Calls < 0 || state.Calls > 128 || !state.RunLimits.Valid() || state.RunLimits.MaxIterations == nil || state.RunLimits.MaxToolCalls == nil || state.RunLimits.MaxDurationSeconds == nil || state.StartedAt.IsZero() {
 		return permissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
 	}
-	priorCost, validCost := usage.ParseCost(state.PriorCost)
+	priorCost, validCost := rates.ParseCost(state.PriorCost)
 	if !validCost {
 		return permissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
 	}

@@ -20,7 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
 type WorkflowRunStore interface {
@@ -48,8 +48,8 @@ type WorkflowApprovedToolRunner interface {
 }
 
 type workflowCall struct {
-	toolCost      usage.Cost
-	priorCost     usage.Cost
+	toolCost      rates.Cost
+	priorCost     rates.Cost
 	unknownCost   bool
 	startedAt     time.Time
 	runID         string

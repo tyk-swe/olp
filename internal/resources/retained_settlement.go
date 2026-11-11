@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/ingest"
 )
 
 var ErrEvidenceConflict = errors.New("retained usage evidence conflicts with existing coverage")
@@ -139,7 +140,7 @@ func NormalizeRetainedEvidence(line RetainedEvidenceLine) (RetainedEvidenceLine,
 			*v = normalized
 		}
 	}
-	u.Observed, u.Complete, u.BillingUncertain, u.Deferred = true, true, false, true
+	u.Evidence, u.Deferred = usage.EvidenceObservedComplete, true
 	if !usage.ConsistentUsage(&u) {
 		return line, ErrContract
 	}
@@ -162,10 +163,10 @@ func evidenceDigest(v any) string {
 // ordinary usage facts. Every resource is serialized before overlap checks, so
 // two different evidence sources cannot charge an overlapping interval twice.
 // The caller verifies remote termination independently of operator assertions.
-func (s *Store) ApplyRetainedEvidence(ctx context.Context, id uuid.UUID, key, digest, provenance, actor string, observation RetainedObservation, claim *uuid.UUID) (usage.Persisted, error) {
+func (s *Store) ApplyRetainedEvidence(ctx context.Context, id uuid.UUID, key, digest, provenance, actor string, observation RetainedObservation, claim *uuid.UUID) (ingest.Persisted, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return usage.Persisted{}, err
+		return ingest.Persisted{}, err
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx))
 	result, err := s.ApplyRetainedEvidenceTx(ctx, tx, id, key, digest, provenance, actor, observation, claim)
@@ -173,7 +174,7 @@ func (s *Store) ApplyRetainedEvidence(ctx context.Context, id uuid.UUID, key, di
 		return result, err
 	}
 	if commitErr := tx.Commit(ctx); commitErr != nil {
-		return usage.Persisted{}, commitErr
+		return ingest.Persisted{}, commitErr
 	}
 	return result, err
 }
@@ -181,13 +182,13 @@ func (s *Store) ApplyRetainedEvidence(ctx context.Context, id uuid.UUID, key, di
 // Provider termination remains valid even when its usage conflicts with earlier
 // financial coverage. On that conflict the caller must commit the termination
 // proof while reporting ErrEvidenceConflict; no conflicting charges survive.
-func (s *Store) ApplyRetainedEvidenceTx(ctx context.Context, tx pgx.Tx, id uuid.UUID, key, digest, provenance, actor string, observation RetainedObservation, claim *uuid.UUID) (usage.Persisted, error) {
+func (s *Store) ApplyRetainedEvidenceTx(ctx context.Context, tx pgx.Tx, id uuid.UUID, key, digest, provenance, actor string, observation RetainedObservation, claim *uuid.UUID) (ingest.Persisted, error) {
 	if provenance != "provider_verified" || !observation.RemoteTerminated {
 		return s.applyRetainedEvidenceTx(ctx, tx, id, key, digest, provenance, actor, observation, claim)
 	}
 	financial, err := tx.Begin(ctx)
 	if err != nil {
-		return usage.Persisted{}, err
+		return ingest.Persisted{}, err
 	}
 	defer financial.Rollback(context.WithoutCancel(ctx))
 	result, err := s.applyRetainedEvidenceTx(ctx, financial, id, key, digest, provenance, actor, observation, claim)
@@ -195,21 +196,21 @@ func (s *Store) ApplyRetainedEvidenceTx(ctx context.Context, tx pgx.Tx, id uuid.
 		return result, financial.Commit(ctx)
 	}
 	if rollbackErr := financial.Rollback(ctx); rollbackErr != nil {
-		return usage.Persisted{}, rollbackErr
+		return ingest.Persisted{}, rollbackErr
 	}
 	if !errors.Is(err, ErrEvidenceConflict) {
-		return usage.Persisted{}, err
+		return ingest.Persisted{}, err
 	}
 	termination := RetainedObservation{RemoteTerminated: true, ObservedAt: observation.ObservedAt}
 	terminationDigest := retainedObservationDigest(termination)
 	if _, proofErr := s.applyRetainedEvidenceTx(ctx, tx, id, "termination:"+terminationDigest, terminationDigest, provenance, actor, termination, claim); proofErr != nil {
-		return usage.Persisted{}, proofErr
+		return ingest.Persisted{}, proofErr
 	}
-	return usage.Persisted{}, err
+	return ingest.Persisted{}, err
 }
 
-func (s *Store) applyRetainedEvidenceTx(ctx context.Context, tx pgx.Tx, id uuid.UUID, key, digest, provenance, actor string, observation RetainedObservation, claim *uuid.UUID) (usage.Persisted, error) {
-	result := usage.Persisted{Outcome: usage.PersistOutcomeDuplicate}
+func (s *Store) applyRetainedEvidenceTx(ctx context.Context, tx pgx.Tx, id uuid.UUID, key, digest, provenance, actor string, observation RetainedObservation, claim *uuid.UUID) (ingest.Persisted, error) {
+	result := ingest.Persisted{Outcome: ingest.PersistOutcomeDuplicate}
 	if len(key) < 1 || len(key) > 128 || len(digest) != 64 || digest != strings.ToLower(digest) || (provenance != "provider_verified" && provenance != "operator_verified") {
 		return result, ErrContract
 	}
@@ -344,11 +345,11 @@ func (s *Store) applyRetainedEvidenceTx(ctx context.Context, tx pgx.Tx, id uuid.
 			if e != nil {
 				return result, e
 			}
-			persisted, e := usage.PersistRetainedEventTx(ctx, tx, accepted)
+			persisted, e := ingest.PersistRetainedEventTx(ctx, tx, accepted)
 			if e != nil {
 				return result, e
 			}
-			if persisted.Outcome == usage.PersistOutcomeRejectedOutsideReplayWindow {
+			if persisted.Outcome == ingest.PersistOutcomeRejectedOutsideReplayWindow {
 				return result, ErrContract
 			}
 			result = persisted

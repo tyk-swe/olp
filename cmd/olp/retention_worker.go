@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/observability/workerhealth"
+	"github.com/tyk-swe/olp/internal/usage/retention"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -15,23 +16,22 @@ import (
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // Composition supervises resource, batch-settlement and usage retention under
 // the existing maintenance cadence and checkpoint.
 func runMaintenance(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) {
-	ticker := time.NewTicker(usage.MaintenanceInterval)
+	ticker := time.NewTicker(retention.MaintenanceInterval)
 	defer ticker.Stop()
 	store := resources.New(pool)
 	for {
 		now := time.Now()
-		resourceCtx, stopResource := context.WithTimeout(ctx, usage.MaintenanceInterval/2)
+		resourceCtx, stopResource := context.WithTimeout(ctx, retention.MaintenanceInterval/2)
 		_, resourceErr := store.Expire(resourceCtx, now)
 		resourceErr = errors.Join(resourceErr, access.ExpireKeyOverlaps(resourceCtx, pool), release.ExpireInstallStatus(resourceCtx, pool))
 		stopResource()
-		usageCtx, stopUsage := context.WithTimeout(ctx, usage.MaintenanceInterval/2)
-		report, usageErr := usage.RunMaintenance(usageCtx, pool, now)
+		usageCtx, stopUsage := context.WithTimeout(ctx, retention.MaintenanceInterval/2)
+		report, usageErr := retention.RunMaintenance(usageCtx, pool, now)
 		var batchErr error
 		if report.LockAcquired {
 			batchStore := batches.NewStore(pool)

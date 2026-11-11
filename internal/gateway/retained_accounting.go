@@ -12,7 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 )
 
 type retainedUsage uint8
@@ -169,7 +169,7 @@ func (s *Server) prepareRetainedAdmission(x *call, p *pin, deferred bool) (retai
 	if x.routingInputs == nil && s.deps.Runtime != nil {
 		x.routingInputs = s.deps.Runtime.RoutingInputs()
 	}
-	if x.routingInputs == nil || x.request.startedAt.Sub(x.routingInputs.RefreshedAt) > usage.PerformanceMaxAge {
+	if x.routingInputs == nil || x.request.startedAt.Sub(x.routingInputs.RefreshedAt) > routinginputs.PerformanceMaxAge {
 		return retainedAdmissionPlan{}, serverError(http.StatusServiceUnavailable, "pricing_unavailable", "Current resource pricing is unavailable; retry shortly.")
 	}
 	attempt := p.attempt

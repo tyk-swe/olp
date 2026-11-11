@@ -1,6 +1,8 @@
 package usage
 
-import "errors"
+import (
+	"errors"
+)
 
 // ExecutionReference correlates one observed attempt with its pre-dispatch
 // intent. It is accounting metadata, never a root-run charge or runtime body.

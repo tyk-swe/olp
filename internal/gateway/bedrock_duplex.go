@@ -6,10 +6,11 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/upstream"
+
 	"github.com/coder/websocket"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 type bedrockPeer struct {
@@ -108,7 +109,7 @@ func (s *Server) bedrockDuplexDial(ctx context.Context, x *call, p *pin) (duplex
 	fact.Status = http.StatusOK
 	fact.Committed = true
 	if fact.Interaction != nil {
-		fact.Interaction.UpstreamState = usage.UpstreamAccepted
+		fact.Interaction.UpstreamState = upstream.Accepted
 	}
 	fact.Duration = s.now().Sub(fact.StartedAt)
 	fact.recordEvidence(true)

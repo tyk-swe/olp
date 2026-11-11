@@ -64,6 +64,8 @@ import (
 	"github.com/tyk-swe/olp/internal/surface"
 	"github.com/tyk-swe/olp/internal/telemetry"
 	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/completeness"
+	"github.com/tyk-swe/olp/internal/usage/delivery"
 )
 
 // metadataBuffer is how many request metadata events one producer replica may
@@ -207,7 +209,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			}
 		}
 	}
-	var accounting *usage.Delivery
+	var accounting *delivery.Delivery
 	var rt *release.Manager
 	var gw *gateway.Server
 	var agentMonitor *agents.TaskMonitor
@@ -231,7 +233,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 	// process counters the metrics endpoint renders.
 	inferencePool := admission.NewPool(c.MaxInFlightInference).Queue(c.AdmissionQueueDepth, c.AdmissionQueueTimeout)
 	managementPool := admission.NewPool(c.MaxInFlightManagement)
-	lossCounters := &usage.LossCounters{}
+	lossCounters := &completeness.LossCounters{}
 	var mediaGapsTotal atomic.Uint64
 	obsCache := observability.NewCache()
 	// Worker replicas also need the runtime manager and the key ring: media
@@ -441,7 +443,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		// health probes. No producer may log and forget a failed ledger write.
 		// Without shared state, hard limits are refused and metadata stays logged.
 		if limiter != nil {
-			accounting = usage.NewDelivery(pool, usage.GatewayInstance(c.Hostname), metadataBuffer, lossCounters, log)
+			accounting = delivery.NewDelivery(pool, completeness.GatewayInstance(c.Hostname), metadataBuffer, lossCounters, log)
 			for _, server := range []*gateway.Dependencies{&gatewayDeps, &probeDeps} {
 				if server.Admission == nil {
 					continue
@@ -505,12 +507,12 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		workerStream = usage.StreamName(prefix)
 	}
 	auxiliary, stopAuxiliary := context.WithCancel(context.WithoutCancel(ctx))
-	delivery, stopDelivery := context.WithCancel(context.WithoutCancel(ctx))
+	deliveryState, stopDelivery := context.WithCancel(context.WithoutCancel(ctx))
 	workers, stopWorkers := context.WithCancel(context.WithoutCancel(ctx))
 	probes, stopProbes := context.WithCancel(context.WithoutCancel(ctx))
 	requestContext, cancelRequests := context.WithCancel(context.WithoutCancel(ctx))
 	var background, delivered sync.WaitGroup
-	var metadata *usage.DeliveryRun
+	var metadata *delivery.DeliveryRun
 	var probesStopped chan struct{}
 	var workersStopped func()
 	var listeners []boundListener
@@ -608,7 +610,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			return err
 		}
 	}
-	delivered.Go(func() { capturer.Run(delivery) })
+	delivered.Go(func() { capturer.Run(deliveryState) })
 	if outage != nil {
 		background.Go(func() { outage.run(auxiliary) })
 	}
@@ -700,7 +702,7 @@ func reservePublicPaths(public *http.ServeMux, mode Mode) {
 // drainProbes stops synthetic request production before metadata intake closes.
 // A producer that exceeds the drain budget leaves its epoch open because a
 // terminal event may still arrive after delivery stops.
-func drainProbes(ctx context.Context, stop context.CancelFunc, stopped <-chan struct{}, accounting *usage.Delivery, log *slog.Logger) {
+func drainProbes(ctx context.Context, stop context.CancelFunc, stopped <-chan struct{}, accounting *delivery.Delivery, log *slog.Logger) {
 	stop()
 	if stopped != nil && !awaitPlane(ctx, func() { <-stopped }, log, "health probes") && accounting != nil {
 		accounting.MarkUnclean()

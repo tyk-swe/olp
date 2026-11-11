@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/upstream"
+
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/geminilifecycle"
 	"github.com/tyk-swe/olp/internal/oif"
@@ -677,7 +679,7 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 			fact := &x.facts[len(x.facts)-1]
 			fact.Class = classCancelled
 			if fact.Interaction != nil {
-				fact.Interaction.UpstreamState = usage.UpstreamTerminal
+				fact.Interaction.UpstreamState = upstream.Terminal
 			}
 		}
 		return
@@ -824,13 +826,13 @@ func (s *Server) streamGeminiInteraction(ctx context.Context, w http.ResponseWri
 		}
 		x.delivered(s.now())
 		if f := &x.facts[len(x.facts)-1]; f.Interaction != nil {
-			f.Interaction.UpstreamState = usage.UpstreamAccepted
+			f.Interaction.UpstreamState = upstream.Accepted
 			f.Interaction.ClientState = usage.ClientPartial
 			if event.Type == "step.stop" {
 				f.Interaction.ClientState = usage.ClientActionable
 			}
 			if state.Done {
-				f.Interaction.UpstreamState, f.Interaction.ClientState = usage.UpstreamTerminal, usage.ClientTerminal
+				f.Interaction.UpstreamState, f.Interaction.ClientState = upstream.Terminal, usage.ClientTerminal
 			}
 		}
 		return nil
@@ -845,7 +847,7 @@ func (s *Server) streamGeminiInteraction(ctx context.Context, w http.ResponseWri
 			}
 			fact.BillingUncertain = fact.Usage == nil
 			if fact.Interaction != nil {
-				fact.Interaction.UpstreamState = usage.UpstreamUnknown
+				fact.Interaction.UpstreamState = upstream.Unknown
 			}
 		}
 		if err == nil {

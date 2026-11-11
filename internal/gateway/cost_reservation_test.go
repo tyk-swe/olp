@@ -17,16 +17,27 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/rates"
+	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 )
 
 func costText(value string) *string { return &value }
 
 func costCount(value int64) *int64 { return &value }
 
-func costPrice() *usage.RoutingPrice {
-	return &usage.RoutingPrice{Price: usage.Price{
+func loadedCardRevision(t *testing.T, loaded rates.RoutingCardRevision) *rates.RoutingCardRevision {
+	t.Helper()
+	revision, err := rates.NewRoutingCardRevision(loaded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return revision
+}
+
+func costPrice() *rates.RoutingPrice {
+	return rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{
 		InputPerMillion: costText("1"), OutputPerMillion: costText("10"),
-	}}
+	}})
 }
 
 func TestWorkflowCostRejectsPartiallyDecodedModelFacts(t *testing.T) {
@@ -185,9 +196,9 @@ func TestAutomaticReservationsPriceEffectiveGeminiOutputControls(t *testing.T) {
 // interaction for the target; this route has none.
 
 func TestSettledCostPricesWhatEachAttemptReported(t *testing.T) {
-	price := &usage.RoutingPrice{Price: usage.Price{
+	price := rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{
 		InputPerMillion: costText("2"), OutputPerMillion: costText("8"), CachedInputPerMillion: costText("0.5"),
-	}}
+	}})
 	observed := func(input, output int64) AttemptFact {
 		return AttemptFact{
 			Price: price, UsageObserved: true, UsageComplete: true,
@@ -232,21 +243,21 @@ func TestSettledCostPricesWhatEachAttemptReported(t *testing.T) {
 }
 
 func TestRouteChargeBoundSortsDearestRetriesAndVideoCard(t *testing.T) {
-	cheap := routing.Attempt{UpstreamModel: "cheap", Price: &usage.RoutingPrice{Price: usage.Price{
+	cheap := routing.Attempt{UpstreamModel: "cheap", Price: rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{
 		Model: "cheap", Operation: "generation",
 		InputPerMillion: costText("1"), OutputPerMillion: costText("1"),
-	}}}
-	dear := routing.Attempt{UpstreamModel: "dear", Price: &usage.RoutingPrice{Price: usage.Price{
+	}})}
+	dear := routing.Attempt{UpstreamModel: "dear", Price: rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{
 		Model: "dear", Operation: "generation",
 		InputPerMillion: costText("1"), OutputPerMillion: costText("1"),
-	}}}
+	}})}
 	x := costExecution(t, `{"model":"team-chat","max_tokens":1000,"messages":[{"role":"user","content":"hello"}]}`, wire.Chat, 2, cheap, dear)
 	x.route.Retry = routing.Retry{classRateLimit: {MaxRetries: 1}}
 	x.cardPinned = true
-	x.cardRev = &usage.RoutingCardRevision{Markup: "1", Prices: []usage.RoutingPrice{{Price: usage.Price{
+	x.cardRev = loadedCardRevision(t, rates.RoutingCardRevision{Markup: "1", Prices: []rates.RoutingPrice{*rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{
 		Model: "dear", Operation: "generation",
 		InputPerMillion: costText("100"), OutputPerMillion: costText("100"),
-	}}}}
+	}})}})
 	s := &Server{}
 	got := s.routeChargeBound(x)
 	want := x.attemptChargeBound(x.attempts[1], x.attemptCostBound(x.attempts[1]))
@@ -264,14 +275,14 @@ func TestRouteChargeBoundSortsDearestRetriesAndVideoCard(t *testing.T) {
 		t.Fatal(failure.Message)
 	}
 	videoAttempt := routing.Attempt{ProviderID: x.attempts[0].ProviderID, UpstreamModel: "sora-2",
-		Price: &usage.RoutingPrice{Price: usage.Price{Model: "sora-2", Operation: "video_create", UnitPrice: costText("0.25")}}}
+		Price: rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{Model: "sora-2", Operation: "video_create", UnitPrice: costText("0.25")}})}
 	videoExec := &call{
 		family:             wire.Format("video_create"),
 		media:              video,
 		request:            request{id: "video-charge", minted: true},
 		historicalSnapshot: x.historicalSnapshot,
 		cardPinned:         true,
-		cardRev:            &usage.RoutingCardRevision{Markup: "1.5"},
+		cardRev:            loadedCardRevision(t, rates.RoutingCardRevision{Markup: "1.5"}),
 	}
 	if hold := videoExec.attemptCostReservation(budgeted(), videoAttempt); hold.amount != "1" || hold.charge != "1.5" {
 		t.Fatalf("video attemptCostReservation = %+v, want amount=1 charge=1.5", hold)
@@ -287,9 +298,9 @@ func TestSettledChargeRetainsEachAttemptCardRevision(t *testing.T) {
 			x.request.startedAt = now
 			project := uuid.NewString()
 			authority := keyauthority.Authority{}
-			card := usage.RoutingRateCard{ProjectID: &project, Revisions: []usage.RoutingCardRevision{{
+			card := routinginputs.RoutingRateCard{ProjectID: &project, Revisions: []rates.RoutingCardRevision{*loadedCardRevision(t, rates.RoutingCardRevision{
 				ID: uuid.NewString(), Markup: "2", EffectiveAt: now.Add(-time.Hour),
-			}}}
+			})}}
 			snapshot := x.snapshot().Clone()
 			provider := snapshot.Providers[x.attempts[0].ProviderID]
 			switch owner {
@@ -304,7 +315,7 @@ func TestSettledChargeRetainsEachAttemptCardRevision(t *testing.T) {
 			case "authority":
 				authority.ProjectID = &project
 			}
-			rt := &fakeRuntime{inputs: &usage.RoutingInputs{RefreshedAt: now, RateCards: []usage.RoutingRateCard{card}}}
+			rt := &fakeRuntime{inputs: &routinginputs.Inputs{RefreshedAt: now, RateCards: []routinginputs.RoutingRateCard{card}}}
 			s := &Server{now: func() time.Time { return now }, fleet: &fleetHealth{}, deps: Dependencies{Runtime: rt}}
 			s.bindAuthority(x, authority)
 			dispatch := func() {
@@ -316,16 +327,16 @@ func TestSettledChargeRetainsEachAttemptCardRevision(t *testing.T) {
 			dispatch()
 
 			// A retry outlives the original inputs while the runtime refreshes.
-			now = now.Add(usage.PerformanceMaxAge + time.Second)
-			rt.inputs = &usage.RoutingInputs{RefreshedAt: now, RateCards: []usage.RoutingRateCard{card}}
+			now = now.Add(routinginputs.PerformanceMaxAge + time.Second)
+			rt.inputs = &routinginputs.Inputs{RefreshedAt: now, RateCards: []routinginputs.RoutingRateCard{card}}
 			dispatch()
 
 			// Replanning sees only the new in-force revision. Earlier facts
 			// must retain their original terms even if their first settlement
 			// happens after that revision is pruned.
-			now = now.Add(usage.PerformanceMaxAge + time.Second)
-			card.Revisions = []usage.RoutingCardRevision{{ID: uuid.NewString(), Markup: "3", EffectiveAt: now}}
-			rt.inputs = &usage.RoutingInputs{RefreshedAt: now, RateCards: []usage.RoutingRateCard{card}}
+			now = now.Add(routinginputs.PerformanceMaxAge + time.Second)
+			card.Revisions = []rates.RoutingCardRevision{*loadedCardRevision(t, rates.RoutingCardRevision{ID: uuid.NewString(), Markup: "3", EffectiveAt: now})}
+			rt.inputs = &routinginputs.Inputs{RefreshedAt: now, RateCards: []routinginputs.RoutingRateCard{card}}
 			s.selectionOptions(context.Background(), x)
 			if got := s.settledCharge(x).String(); got != "0.0024" {
 				t.Fatalf("charge after replan = %s, want 0.0024", got)
@@ -350,9 +361,9 @@ func TestRetainedPageOnlyAdmitsCostsForEntriesBeingRead(t *testing.T) {
 		retained:           retainedOperation{use: retainedHousekeeping, usage: retainedTokenlessUsage},
 		request:            request{startedAt: now},
 		historicalSnapshot: (&routing.Snapshot{Providers: map[string]routing.Provider{provider.ID: provider}}).ReadOnly(),
-		routingInputs: &usage.RoutingInputs{RefreshedAt: now, Prices: []usage.RoutingPrice{
-			{Price: usage.Price{ProviderKind: provider.Kind, Model: "free", Operation: "fine_tuning", PerRequest: new("0")}},
-			{Price: usage.Price{ProviderKind: provider.Kind, Model: "paid", Operation: "fine_tuning", PerRequest: new("1")}},
+		routingInputs: &routinginputs.Inputs{RefreshedAt: now, Prices: []rates.RoutingPrice{
+			*rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{ProviderKind: provider.Kind, Model: "free", Operation: "fine_tuning", PerRequest: new("0")}}),
+			*rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{ProviderKind: provider.Kind, Model: "paid", Operation: "fine_tuning", PerRequest: new("1")}}),
 		}},
 	}
 	s := &Server{now: func() time.Time { return now }, deps: Dependencies{Admission: &Admission{

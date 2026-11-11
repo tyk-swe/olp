@@ -26,26 +26,41 @@ var ErrUnsupportedVersion = errors.New("unsupported request metadata version")
 // classifier or cache embedding call is made for, and charged to, the key whose
 // request it routes or matches. Batch settlement records deferred work for its
 // caller's key and links each result to the batch creation request.
+type Origin string
+
 const (
-	OriginCaller             = "caller"
-	OriginShadow             = "shadow"
-	OriginClassifier         = "classifier"
-	OriginCacheEmbedding     = "cache_embedding"
-	OriginProbe              = "probe"
-	OriginPlayground         = "playground"
-	OriginBatchSettlement    = "batch_settlement"
-	OriginRetainedSettlement = "retained_settlement"
+	OriginCaller             Origin = "caller"
+	OriginShadow             Origin = "shadow"
+	OriginClassifier         Origin = "classifier"
+	OriginCacheEmbedding     Origin = "cache_embedding"
+	OriginProbe              Origin = "probe"
+	OriginPlayground         Origin = "playground"
+	OriginBatchSettlement    Origin = "batch_settlement"
+	OriginRetainedSettlement Origin = "retained_settlement"
 )
 
-func Keyless(origin string) bool {
-	return origin == OriginShadow || origin == OriginProbe || origin == OriginPlayground
+func (o Origin) known() bool {
+	switch o {
+	case OriginCaller, OriginShadow, OriginClassifier, OriginCacheEmbedding, OriginProbe, OriginPlayground, OriginBatchSettlement, OriginRetainedSettlement:
+		return true
+	default:
+		return false
+	}
+}
+
+func (o Origin) Keyless() bool {
+	return o == OriginShadow || o == OriginProbe || o == OriginPlayground
+}
+
+func (o Origin) derivesFromParent() bool {
+	return o == OriginShadow || o == OriginClassifier || o == OriginCacheEmbedding || o == OriginBatchSettlement || o == OriginRetainedSettlement
 }
 
 func validateDelegation(event *Event) error {
 	if event.AgentPrincipalID == "" && event.MemberPrincipalID == "" && event.DelegationPairDigest == "" {
 		return nil
 	}
-	if _, err := uuid.Parse(event.AgentPrincipalID); err != nil || !delegationDigestPattern.MatchString(event.DelegationPairDigest) || Keyless(event.Origin) || event.APIKeyID == "" {
+	if _, err := uuid.Parse(event.AgentPrincipalID); err != nil || !delegationDigestPattern.MatchString(event.DelegationPairDigest) || event.Origin.Keyless() || event.APIKeyID == "" {
 		return errors.New("request metadata delegation attribution is invalid")
 	}
 	if event.MemberPrincipalID != "" {
@@ -81,7 +96,7 @@ type Event struct {
 	Attribution          map[string]string `json:"attribution,omitempty"`
 	// Origin is empty for a caller request. ParentRequestID names the caller
 	// request a shadow, classifier, cache embedding or batch settlement derives from.
-	Origin          string  `json:"origin,omitempty"`
+	Origin          Origin  `json:"origin,omitempty"`
 	ParentRequestID *string `json:"parent_request_id,omitempty"`
 
 	GuardrailDecisions []guardrails.Evidence    `json:"guardrail_decisions,omitempty"`
@@ -145,39 +160,46 @@ type Attempt struct {
 	LatencyMS          int64                 `json:"latency_ms"`
 	FirstByteMS        *int64                `json:"first_byte_ms"`
 	Usage              *AttemptUsage         `json:"usage,omitempty"`
-	// EstimatedInputTokens is what admission estimated this attempt's input to
-	// be before the provider reported it, so a report can set the two side by
-	// side. EstimateProvenance says how it was produced, one of the Estimate*
-	// constants. They are absent together when no estimate was made, as for a
-	// stored-response call, a realtime session or a job poll. ModelFamily names
-	// the tokenizer family of the attempt's model, which an attempt records
-	// whether or not it was estimated; it is empty only on events from before
-	// families were recorded. Like Routing and Usage they are omitted when
-	// empty, so such events decode to the zero value.
-	EstimatedInputTokens *int64 `json:"estimated_input_tokens,omitempty"`
-	EstimateProvenance   string `json:"estimate_provenance,omitempty"`
-	ModelFamily          string `json:"model_family,omitempty"`
+	// InputEstimate is what admission estimated this attempt's input to be
+	// before the provider reported it, absent when no estimate was made, as for
+	// a stored-response call, a realtime session or a job poll. ModelFamily
+	// names the tokenizer family of the attempt's model, which an attempt
+	// records whether or not it was estimated. It is empty only on events from
+	// before families were recorded.
+	*InputEstimate
+	ModelFamily string `json:"model_family,omitempty"`
 }
+
+// InputEstimate pairs an estimated input size with how it was counted.
+type InputEstimate struct {
+	Tokens     int64              `json:"estimated_input_tokens"`
+	Provenance EstimateProvenance `json:"estimate_provenance"`
+}
+
+func (e *InputEstimate) Columns() (*int64, EstimateProvenance) {
+	if e == nil {
+		return nil, ""
+	}
+	return &e.Tokens, e.Provenance
+}
+
+type EstimateProvenance string
 
 // How an attempt's input estimate was produced.
 const (
 	// EstimateTokenizer is an exact count by the family's own tokenizer of a
 	// prompt that is all text and message framing.
-	EstimateTokenizer = "tokenizer"
+	EstimateTokenizer EstimateProvenance = "tokenizer"
 	// EstimateCalibrated is a count that is partly a ratio or a guess: the
 	// characters-per-token heuristic scaled by a per-family factor, a tokenizer
 	// count extrapolated past its bound, or one that also charges images, media,
 	// tool schemas or tool calls.
-	EstimateCalibrated = "calibrated"
+	EstimateCalibrated EstimateProvenance = "calibrated"
 	// EstimateHeuristic is the unscaled characters-per-token heuristic, which
 	// also prices the tail of a long prompt that follows too little exact text
 	// to measure a ratio from.
-	EstimateHeuristic = "heuristic"
+	EstimateHeuristic EstimateProvenance = "heuristic"
 )
-
-var knownEstimateProvenances = map[string]struct{}{
-	EstimateTokenizer: {}, EstimateCalibrated: {}, EstimateHeuristic: {},
-}
 
 var delegationDigestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
@@ -186,26 +208,23 @@ var delegationDigestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 // producer owns which names exist.
 var modelFamilyPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
-// ValidEstimate reports whether an attempt's estimate fields can be recorded as
-// they are, for producers that would rather leave an annotation off than lose
-// the event it rides on.
-func ValidEstimate(tokens *int64, provenance, family string) bool {
-	return checkEstimate(tokens, provenance, family) == nil
+// ValidEstimate reports whether an attempt's estimate can be recorded as it
+// is, for producers that would rather leave an annotation off than lose the
+// event it rides on.
+func ValidEstimate(estimate *InputEstimate, family string) bool {
+	return checkEstimate(estimate, family) == nil
 }
 
-// checkEstimate reports why an attempt's estimate fields cannot be stored. The
-// fact table enforces the same rules, and an event it would refuse must never
-// reach it: the persisting transaction would abort after the delivery was
+// checkEstimate reports why an attempt's estimate cannot be stored. The fact
+// table enforces the same rules, and an event it would refuse must never reach
+// it: the persisting transaction would abort after the delivery was
 // acknowledged and be retried forever.
-func checkEstimate(tokens *int64, provenance, family string) error {
-	switch {
-	case tokens != nil && *tokens < 0:
-		return errors.New("input estimate is negative")
-	case (tokens == nil) != (provenance == ""):
-		return errors.New("input estimate and its provenance must appear together")
-	}
-	if provenance != "" {
-		if _, ok := knownEstimateProvenances[provenance]; !ok {
+func checkEstimate(estimate *InputEstimate, family string) error {
+	if estimate != nil {
+		if estimate.Tokens < 0 {
+			return errors.New("input estimate is negative")
+		}
+		if estimate.Provenance != EstimateTokenizer && estimate.Provenance != EstimateCalibrated && estimate.Provenance != EstimateHeuristic {
 			return errors.New("estimate provenance is unknown")
 		}
 	}
@@ -215,16 +234,11 @@ func checkEstimate(tokens *int64, provenance, family string) error {
 	return nil
 }
 
-// AttemptUsage is the billing evidence one attempt produced. `Observed` says
-// the provider reported usage, `Complete` says the accounting for this attempt
-// is settled, and `BillingUncertain` says the attempt may have been charged
-// upstream without the evidence ever arriving.
+// AttemptUsage is the billing evidence one attempt produced.
 type AttemptUsage struct {
 	UsageQuantities
-	Observed         bool `json:"observed"`
-	Complete         bool `json:"complete"`
-	BillingUncertain bool `json:"billing_uncertain"`
-	Deferred         bool `json:"deferred,omitempty"`
+	Evidence UsageEvidence
+	Deferred bool
 }
 
 type UsageQuantities struct {
@@ -320,14 +334,15 @@ type Baseline struct {
 type RouteLeg struct {
 	Route      string `json:"route"`
 	RevisionID string `json:"revision_id"`
-	// Via is how the request reached the route: "selector" or "fallback".
-	Via string `json:"via"`
+	Via        LegVia `json:"via"`
 }
 
-// Leg routes, by how a request reaches them.
+// LegVia is how a request reached a route it ran on.
+type LegVia string
+
 const (
-	ViaSelector = "selector"
-	ViaFallback = "fallback"
+	ViaSelector LegVia = "selector"
+	ViaFallback LegVia = "fallback"
 )
 
 // maxAttemptBudgets bounds the caps one attempt counts against: one each for

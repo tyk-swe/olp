@@ -341,7 +341,7 @@ func parseVertexLine(line []byte, object gcsObject, number int64, model string) 
 	}
 	id := fmt.Sprintf("%s:%d", object.file(), number)
 	if item.Status != "" {
-		return batches.Result{CustomID: id, Kind: batches.ResultErrored, ErrorClass: "vertex_batch_errored", Evidence: evidence, Usage: usage.AttemptUsage{Complete: true}}, nil
+		return batches.Result{CustomID: id, Kind: batches.ResultErrored, ErrorClass: "vertex_batch_errored", Evidence: evidence, Usage: usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete}}, nil
 	}
 	if len(item.Response) == 0 {
 		return batches.Result{}, ErrProviderConflict

@@ -17,7 +17,7 @@ import (
 	"github.com/tyk-swe/olp/internal/export/destination"
 	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"github.com/tyk-swe/olp/internal/secrets"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/retention"
 )
 
 const (
@@ -122,7 +122,7 @@ func (w *Worker) Run(ctx context.Context) {
 
 func (w *Worker) Pass(ctx context.Context) (bool, error) {
 	now := w.Now()
-	days, err := usage.RetentionDays(ctx, w.Pool)
+	days, err := retention.RetentionDays(ctx, w.Pool)
 	if err != nil {
 		return false, err
 	}
@@ -130,7 +130,7 @@ func (w *Worker) Pass(ctx context.Context) (bool, error) {
 	if _, err := w.Pool.Exec(ctx, purgeDirtyDaysSQL, retained); err != nil {
 		return false, err
 	}
-	if err := usage.MaintainCommitments(ctx, w.Pool, now, retained); err != nil {
+	if err := retention.MaintainCommitments(ctx, w.Pool, now, retained); err != nil {
 		return false, err
 	}
 	sinks, err := w.sinks(ctx, retained)

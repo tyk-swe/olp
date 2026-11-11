@@ -12,13 +12,22 @@ type AccountingEvent struct {
 	digest    [sha256.Size]byte
 }
 
-type invalidAccountingEvent struct {
-	eventID string
+func (a AccountingEvent) Event() *Event { return a.event }
+
+func (a AccountingEvent) Validated() *Validated { return a.validated }
+
+func (a AccountingEvent) Payload() []byte { return a.payload }
+
+func (a AccountingEvent) Digest() [sha256.Size]byte { return a.digest }
+
+type InvalidAccountingEvent struct {
+	EventID string
 	cause   error
 }
 
-func (e *invalidAccountingEvent) Error() string { return e.cause.Error() }
-func (e *invalidAccountingEvent) Unwrap() error { return e.cause }
+func (e *InvalidAccountingEvent) Error() string { return e.cause.Error() }
+
+func (e *InvalidAccountingEvent) Unwrap() error { return e.cause }
 
 func DecodeAccountingEvent(payload []byte) (AccountingEvent, error) {
 	owned := bytes.Clone(payload)
@@ -28,7 +37,7 @@ func DecodeAccountingEvent(payload []byte) (AccountingEvent, error) {
 	}
 	validated, err := Validate(event)
 	if err != nil {
-		return AccountingEvent{}, &invalidAccountingEvent{eventID: event.EventID, cause: err}
+		return AccountingEvent{}, &InvalidAccountingEvent{EventID: event.EventID, cause: err}
 	}
 	return AccountingEvent{event: event, validated: validated, payload: owned, digest: sha256.Sum256(owned)}, nil
 }

@@ -11,7 +11,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/pricebook"
+	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
 type Owner interface{ owner() }
@@ -29,7 +30,7 @@ func (Project) owner()      {}
 type RateCard struct {
 	Owner  Owner
 	Markup string
-	Prices []usage.Price
+	Prices []rates.Price
 }
 
 type storedCard struct {
@@ -75,7 +76,7 @@ func parseCard(entry contract.ConfigurationRateCardEntry) RateCard {
 	return RateCard{
 		Owner:  parseOwner(entry.Owner),
 		Markup: strings.TrimSpace(entry.Markup),
-		Prices: promotion.Map(promotion.ValueOf(entry.Prices), func(price contract.ConfigurationPriceEntry) usage.Price { return parsePrice(price).Rate }),
+		Prices: promotion.Map(promotion.ValueOf(entry.Prices), func(price contract.ConfigurationPriceEntry) rates.Price { return parsePrice(price).Rate }),
 	}
 }
 
@@ -123,16 +124,16 @@ func validateOwner(field string, entry contract.ConfigurationRateCardOwner, owne
 }
 
 func readCards(ctx context.Context, q access.Queryer) ([]storedCard, error) {
-	cards, err := usage.ReadCardsInForce(ctx, q)
+	cards, err := pricebook.ReadCardsInForce(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	live := promotion.Filter(cards, func(card usage.CardInForce) bool { return card.RevisionID != nil })
-	prices, priceErr := usage.LoadCardPricesByRevisions(ctx, q, promotion.Map(live, func(card usage.CardInForce) string { return *card.RevisionID }))
+	live := promotion.Filter(cards, func(card pricebook.CardInForce) bool { return card.RevisionID != nil })
+	prices, priceErr := pricebook.LoadCardPricesByRevisions(ctx, q, promotion.Map(live, func(card pricebook.CardInForce) string { return *card.RevisionID }))
 	if priceErr != nil {
 		return nil, priceErr
 	}
-	return promotion.Map(cards, func(card usage.CardInForce) storedCard {
+	return promotion.Map(cards, func(card pricebook.CardInForce) storedCard {
 		return storedCard{
 			id:   card.ID,
 			live: card.RevisionID != nil,
@@ -175,8 +176,8 @@ func renderOwner(owner Owner) contract.ConfigurationRateCardOwner {
 	}
 }
 
-func unscoped(prices []usage.Price) []Price {
-	return promotion.Map(prices, func(rate usage.Price) Price { return Price{Rate: rate} })
+func unscoped(prices []rates.Price) []Price {
+	return promotion.Map(prices, func(rate rates.Price) Price { return Price{Rate: rate} })
 }
 
 func indexCards(stored []storedCard) map[Owner]storedCard {
@@ -201,7 +202,7 @@ func readCardState(ctx context.Context, q access.Queryer) (map[Owner]storedCard,
 	if err != nil {
 		return nil, "", err
 	}
-	currency, currencyErr := usage.InstallationCurrency(ctx, q)
+	currency, currencyErr := pricebook.InstallationCurrency(ctx, q)
 	return indexCards(stored), currency, currencyErr
 }
 
@@ -215,7 +216,7 @@ func planCards(ctx context.Context, q access.Queryer, desired []RateCard) ([]pro
 	}), nil
 }
 
-func applyCards(ctx context.Context, tx pgx.Tx, principal access.Principal, desired []RateCard, at destination, vendorKind VendorKind) error {
+func applyCards(ctx context.Context, tx pgx.Tx, principal access.Principal, desired []RateCard, at destination, normalizer pricebook.Normalizer) error {
 	existing, currency, err := readCardState(ctx, tx)
 	if err != nil {
 		return err
@@ -231,7 +232,7 @@ func applyCards(ctx context.Context, tx pgx.Tx, principal access.Principal, desi
 		if idErr != nil {
 			return idErr
 		}
-		if _, err := usage.CreateCardRevision(ctx, tx, principal.UserID(), cardID, card.Markup, time.Now().UTC(), card.Prices, currency, vendorKind); err != nil {
+		if _, err := pricebook.CreateCardRevision(ctx, tx, principal.UserID(), cardID, card.Markup, time.Now().UTC(), card.Prices, currency, normalizer); err != nil {
 			return err
 		}
 	}
@@ -248,14 +249,19 @@ func cardIDFor(ctx context.Context, tx pgx.Tx, principal access.Principal, owner
 		if !ok {
 			return "", undeclaredOrganization()
 		}
-		return usage.CreateRateCard(ctx, tx, principal.UserID(), &id, nil)
+		return storeCard(ctx, tx, principal, pricebook.OrganizationOwner(id))
 	case Project:
 		id, ok := at.projects.ID(owner.Name)
 		if !ok {
 			return "", undeclaredProject()
 		}
-		return usage.CreateRateCard(ctx, tx, principal.UserID(), nil, &id)
+		return storeCard(ctx, tx, principal, pricebook.ProjectOwner(id))
 	default:
-		return usage.CreateRateCard(ctx, tx, principal.UserID(), nil, nil)
+		return storeCard(ctx, tx, principal, pricebook.InstallationOwner())
 	}
+}
+
+func storeCard(ctx context.Context, tx pgx.Tx, principal access.Principal, owner pricebook.Owner) (string, error) {
+	id, err := pricebook.CreateRateCard(ctx, tx, principal.UserID(), owner)
+	return id, pricebook.Problem(err)
 }

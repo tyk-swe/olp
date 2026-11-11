@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/pricebook"
 )
 
 const maxRangeDays = 93
@@ -94,7 +94,7 @@ func (a *API) report(r *http.Request, p access.Principal) (access.Reply, error) 
 	if err != nil {
 		return access.Reply{}, err
 	}
-	currency, err := usage.InstallationCurrency(ctx, pool)
+	currency, err := pricebook.InstallationCurrency(ctx, pool)
 	if err != nil {
 		return access.Reply{}, err
 	}

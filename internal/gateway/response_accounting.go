@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/upstream"
+
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 
 	"github.com/tyk-swe/olp/internal/protocols/openai"
@@ -44,11 +46,11 @@ func (s *Server) pendingGenerationUsage(x *call, fact *AttemptFact, metadata map
 		interaction := *fact.Interaction
 		interaction.ClientState = usage.ClientUnobserved
 		if x.exchange != nil {
-			interaction.UpstreamState = string(x.exchange.state.evidence().Acceptance())
-		} else if interaction.UpstreamState == usage.UpstreamNotSent {
+			interaction.UpstreamState = x.exchange.state.evidence().Acceptance()
+		} else if interaction.UpstreamState == upstream.NotSent {
 			// The operation only creates this template after validating native
 			// creation. Stream finish may not yet have copied its acceptance.
-			interaction.UpstreamState = usage.UpstreamAccepted
+			interaction.UpstreamState = upstream.Accepted
 		}
 		copyFact.Interaction = &interaction
 	}
@@ -161,7 +163,7 @@ func (s *Server) reconcileResponse(ctx context.Context, localID string, body []b
 }
 
 func (s *Server) applyResponseObservation(ctx context.Context, localID string, observation openai.ResponseUsageObservation) *Error {
-	evidence := usage.AttemptUsage{Observed: false, Complete: false, BillingUncertain: true}
+	evidence := usage.AttemptUsage{Evidence: usage.EvidenceUnobservedUncertain}
 	if observation.Usage != nil {
 		evidence = observedAttemptUsage(observation.Usage, observation.Complete, "generation")
 	}

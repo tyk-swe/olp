@@ -8,18 +8,19 @@ import (
 
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/pricebook"
+	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
 type Price struct {
 	Provider *string
-	Rate     usage.Price
+	Rate     rates.Price
 }
 
 func parsePrice(entry contract.ConfigurationPriceEntry) Price {
 	return Price{
 		Provider: promotion.Trimmed(promotion.Pointer(entry.Provider)),
-		Rate: usage.Price{
+		Rate: rates.Price{
 			TrainingPerMillion:              promotion.Pointer(entry.TrainingPerMillion),
 			StoragePerGiBDay:                promotion.Pointer(entry.StoragePerGibDay),
 			CacheStoragePerMillionTokenHour: promotion.Pointer(entry.CacheStoragePerMillionTokenHour),
@@ -106,17 +107,17 @@ func samePrices(want, have []Price, currency string) bool {
 		})), comparePrices)
 	}
 	return slices.EqualFunc(sorted(want), sorted(have), func(a, b Price) bool {
-		return comparePrices(a, b) == 0 && usage.SamePrice(a.Rate, b.Rate)
+		return comparePrices(a, b) == 0 && pricebook.SamePrice(a.Rate, b.Rate)
 	})
 }
 
-func withCurrency(rate usage.Price, currency string) usage.Price {
+func withCurrency(rate rates.Price, currency string) rates.Price {
 	priced := rate
 	priced.Currency = currency
 	return priced
 }
 
-func scoped(rate usage.Price, providerID *string) usage.Price {
+func scoped(rate rates.Price, providerID *string) rates.Price {
 	priced := rate
 	priced.ProviderID = providerID
 	return priced
@@ -141,8 +142,8 @@ func folded(value *string) string {
 	return strings.ToLower(promotion.ValueOf(value))
 }
 
-func parseTier(tier contract.PriceTier) usage.PriceTier {
-	return usage.PriceTier{
+func parseTier(tier contract.PriceTier) rates.PriceTier {
+	return rates.PriceTier{
 		AboveInputTokens:            tier.AboveInputTokens,
 		InputPerMillion:             promotion.Pointer(tier.InputPerMillion),
 		CachedInputPerMillion:       promotion.Pointer(tier.CachedInputPerMillion),
@@ -159,7 +160,7 @@ func parseTier(tier contract.PriceTier) usage.PriceTier {
 	}
 }
 
-func renderTier(tier usage.PriceTier) contract.PriceTier {
+func renderTier(tier rates.PriceTier) contract.PriceTier {
 	return contract.PriceTier{
 		AboveInputTokens:            tier.AboveInputTokens,
 		InputPerMillion:             promotion.Nullable(tier.InputPerMillion),
@@ -177,32 +178,32 @@ func renderTier(tier usage.PriceTier) contract.PriceTier {
 	}
 }
 
-func parseTiers(tiers []contract.PriceTier) []usage.PriceTier {
+func parseTiers(tiers []contract.PriceTier) []rates.PriceTier {
 	if len(tiers) == 0 {
 		return nil
 	}
 	return promotion.Map(tiers, parseTier)
 }
 
-func parseWindows(windows *contract.PriceWindows) *usage.PriceWindows {
+func parseWindows(windows *contract.PriceWindows) *rates.PriceWindows {
 	if windows == nil {
 		return nil
 	}
-	return &usage.PriceWindows{
+	return &rates.PriceWindows{
 		TimeZone: windows.TimeZone,
-		Periods: promotion.Map(windows.Periods, func(period contract.PriceWindowPeriod) usage.PriceWindowPeriod {
-			return usage.PriceWindowPeriod{Days: period.Days, Start: period.Start, End: period.End, Multiplier: period.Multiplier}
+		Periods: promotion.Map(windows.Periods, func(period contract.PriceWindowPeriod) rates.PriceWindowPeriod {
+			return rates.PriceWindowPeriod{Days: period.Days, Start: period.Start, End: period.End, Multiplier: period.Multiplier}
 		}),
 	}
 }
 
-func renderWindows(windows *usage.PriceWindows) *contract.PriceWindows {
+func renderWindows(windows *rates.PriceWindows) *contract.PriceWindows {
 	if windows == nil {
 		return nil
 	}
 	return &contract.PriceWindows{
 		TimeZone: windows.TimeZone,
-		Periods: promotion.Map(windows.Periods, func(period usage.PriceWindowPeriod) contract.PriceWindowPeriod {
+		Periods: promotion.Map(windows.Periods, func(period rates.PriceWindowPeriod) contract.PriceWindowPeriod {
 			return contract.PriceWindowPeriod{Days: period.Days, Start: period.Start, End: period.End, Multiplier: period.Multiplier}
 		}),
 	}

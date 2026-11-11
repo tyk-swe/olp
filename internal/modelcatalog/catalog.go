@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 
 	"github.com/shopspring/decimal"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 type Range struct {
@@ -58,7 +58,7 @@ type Model struct {
 
 // Describe exposes only the route identity by default. Prices are consumer
 // ranges, rather than provider records; upstream names require a separate opt-in.
-func Describe(snapshot *routing.View, route routing.Route, inputs *usage.RoutingInputs, origin string, prices, upstream bool, now time.Time) Model {
+func Describe(snapshot *routing.View, route routing.Route, inputs *routinginputs.Inputs, origin string, prices, upstream bool, now time.Time) Model {
 	model := Model{ID: route.Slug, Capabilities: routing.EffectiveCapabilities(snapshot, route), Samples: certifiedSamples(snapshot, route, origin)}
 	metadata := []routing.ModelMetadata{}
 	for _, target := range route.Targets {
@@ -145,7 +145,7 @@ func extend(bounds **Range, value *string) {
 	}
 }
 
-func priceRanges(snapshot *routing.View, route routing.Route, inputs *usage.RoutingInputs, now time.Time) []Price {
+func priceRanges(snapshot *routing.View, route routing.Route, inputs *routinginputs.Inputs, now time.Time) []Price {
 	result := []Price{}
 	if inputs == nil {
 		return result

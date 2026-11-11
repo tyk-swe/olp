@@ -13,7 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/observability/workerhealth"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/completeness"
 )
 
 // Sources are what the readiness and metrics collectors probe. A nil source
@@ -59,7 +59,7 @@ type GatewayCounters interface {
 }
 
 type MetadataBuffer interface {
-	Snapshot() usage.Snapshot
+	Snapshot() completeness.Snapshot
 }
 
 type Spool interface {
@@ -249,7 +249,7 @@ func mediaDegraded(summary *jobs.Summary, gaps int64) bool {
 type storeProbe struct {
 	database Status
 	media    *jobs.Summary
-	consumer usage.ConsumerStatus
+	consumer completeness.ConsumerStatus
 	epochs   EpochHealth
 	tasks    *WorkerTaskHealth
 	counters *WorkerRecoveryCounters
@@ -262,7 +262,7 @@ func probeStore(ctx context.Context, s *Sources, now time.Time, hasGeneration bo
 		if s.ServesGateway && hasGeneration {
 			return &storeProbe{
 				database: StatusUnavailableLKG,
-				consumer: usage.ConsumerStatus{State: usage.ConsumerUnknown},
+				consumer: completeness.ConsumerStatus{State: completeness.ConsumerUnknown},
 				tasks:    unknownWorkerTasks(),
 			}, nil
 		}
@@ -272,7 +272,7 @@ func probeStore(ctx context.Context, s *Sources, now time.Time, hasGeneration bo
 	if err != nil {
 		return nil, fmt.Errorf("database_unavailable: media reconciliation summary: %w", err)
 	}
-	consumer, err := usage.ReadConsumerStatus(ctx, s.Store, now)
+	consumer, err := completeness.ReadConsumerStatus(ctx, s.Store, now)
 	if err != nil {
 		return nil, fmt.Errorf("database_unavailable: metadata consumer: %w", err)
 	}
@@ -305,10 +305,10 @@ func expectedTasks(limiterConfigured bool) []workerhealth.Task {
 	})
 }
 
-func asynchronousPlane(tasks *WorkerTaskHealth, expected []workerhealth.Task, consumer usage.ConsumerStatus) AsynchronousPlaneHealth {
+func asynchronousPlane(tasks *WorkerTaskHealth, expected []workerhealth.Task, consumer completeness.ConsumerStatus) AsynchronousPlaneHealth {
 	expectsConsumer := slices.Contains(expected, workerhealth.TaskRequestMetadataConsumer)
 	current := tasks.Count(expected, TaskHealthy) == int64(len(expected)) &&
-		(!expectsConsumer || consumer.State == usage.ConsumerHealthy || consumer.State == usage.ConsumerBacklogged)
+		(!expectsConsumer || consumer.State == completeness.ConsumerHealthy || consumer.State == completeness.ConsumerBacklogged)
 	drained := !expectsConsumer || (consumer.PendingEvents == 0 && consumer.LagEvents == 0)
 	unknown := tasks.Count(expected, TaskUnknown)
 	state := StatusStale
@@ -317,7 +317,7 @@ func asynchronousPlane(tasks *WorkerTaskHealth, expected []workerhealth.Task, co
 		state = StatusHealthy
 	case current:
 		state = StatusBacklogged
-	case unknown > 0 || consumer.State == usage.ConsumerUnknown:
+	case unknown > 0 || consumer.State == completeness.ConsumerUnknown:
 		state = StatusUnknown
 	}
 	return AsynchronousPlaneHealth{
@@ -336,7 +336,7 @@ func requestMetadata(store *storeProbe, now time.Time, localComplete, expectsCon
 		RequestMetadataComplete: localComplete &&
 			(!expectsConsumer || consumer.Complete()) &&
 			epochs.UnresolvedEpochs == 0,
-		RequestMetadataConsumer:                    consumer.State,
+		RequestMetadataConsumer:                    string(consumer.State),
 		RequestMetadataConsumerPendingEvents:       consumer.PendingEvents,
 		RequestMetadataConsumerLagEvents:           consumer.LagEvents,
 		RequestMetadataConsumerOldestPendingAt:     consumer.OldestPendingAt,

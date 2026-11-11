@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	acceptance "github.com/tyk-swe/olp/internal/upstream"
+
 	"github.com/coder/websocket"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/bodylimit"
@@ -255,7 +257,7 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 	}
 	x.delivered(s.now())
 	if len(x.facts) > 0 && x.facts[len(x.facts)-1].Interaction != nil {
-		x.facts[len(x.facts)-1].Interaction.UpstreamState = usage.UpstreamAccepted
+		x.facts[len(x.facts)-1].Interaction.UpstreamState = acceptance.Accepted
 		x.facts[len(x.facts)-1].Interaction.ClientState = usage.ClientPartial
 	}
 	usageRecord, usageComplete, relayErr := s.relayNativeDuplex(ctx, x, p, client, upstream, token, observer, template.Transport(), int(limit))
@@ -288,13 +290,13 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 			fact.Class = class
 			if fact.Interaction != nil {
 				if errors.Is(relayErr, errDuplexProviderError) {
-					fact.Interaction.UpstreamState = usage.UpstreamTerminal
+					fact.Interaction.UpstreamState = acceptance.Terminal
 				} else {
-					fact.Interaction.UpstreamState = usage.UpstreamUnknown
+					fact.Interaction.UpstreamState = acceptance.Unknown
 				}
 			}
 		} else if fact.Interaction != nil {
-			fact.Interaction.UpstreamState, fact.Interaction.ClientState = usage.UpstreamTerminal, usage.ClientTerminal
+			fact.Interaction.UpstreamState, fact.Interaction.ClientState = acceptance.Terminal, usage.ClientTerminal
 		}
 	}
 	if relayErr != nil {
@@ -517,6 +519,6 @@ func markDuplexFactUncertain(x *call, class string) {
 	fact := &x.facts[len(x.facts)-1]
 	fact.Class, fact.BillingUncertain = class, true
 	if fact.Interaction != nil {
-		fact.Interaction.UpstreamState = usage.UpstreamUnknown
+		fact.Interaction.UpstreamState = acceptance.Unknown
 	}
 }

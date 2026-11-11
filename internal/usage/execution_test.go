@@ -1,6 +1,8 @@
 package usage
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestExecutionReferenceRejectsIncompleteIdentity(t *testing.T) {
 	id := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607"

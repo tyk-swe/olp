@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/management/contract"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/reports"
 )
 
 const incidentKeyField = "incident_key"
@@ -30,18 +30,18 @@ type signalPayload struct {
 }
 
 type spendReportPayload struct {
-	Version    int                        `json:"version"`
-	DeliveryID string                     `json:"delivery_id"`
-	Event      contract.NotificationEvent `json:"event"`
-	RuleID     string                     `json:"rule_id"`
-	RuleName   string                     `json:"rule_name"`
-	DedupKey   string                     `json:"dedup_key"`
-	Resolved   bool                       `json:"resolved"`
-	Period     string                     `json:"period"`
-	Start      string                     `json:"start"`
-	End        string                     `json:"end"`
-	Summary    usage.Summary              `json:"summary"`
-	Breakdowns map[string]usage.Breakdown `json:"breakdowns"`
+	Version    int                          `json:"version"`
+	DeliveryID string                       `json:"delivery_id"`
+	Event      contract.NotificationEvent   `json:"event"`
+	RuleID     string                       `json:"rule_id"`
+	RuleName   string                       `json:"rule_name"`
+	DedupKey   string                       `json:"dedup_key"`
+	Resolved   bool                         `json:"resolved"`
+	Period     string                       `json:"period"`
+	Start      string                       `json:"start"`
+	End        string                       `json:"end"`
+	Summary    reports.Summary              `json:"summary"`
+	Breakdowns map[string]reports.Breakdown `json:"breakdowns"`
 }
 
 type message struct {

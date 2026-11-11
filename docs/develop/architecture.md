@@ -20,7 +20,7 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Source and operation contracts | `internal/oif/`, `internal/operations/`, `internal/interaction/`, `internal/operationplan/`, `internal/operationregistry/` |
 | Protocol and lifecycle contracts | `internal/protocols/`, `internal/mediacontract/`, `internal/durablecontract/`, `internal/realtimecontract/`, `internal/geminilifecycle/` |
 | Preparation and failure evidence | `internal/providerinvoke/`, `internal/upstream/` |
-| Accounting, pricing, billing and exports | `internal/usage/`, `internal/billing/`, `internal/export/`; console usage/observability |
+| Accounting, pricing, billing and exports | `internal/usage/` (event contract, with `rates/`, `routinginputs/`, `pricebook/`, `completeness/`, `delivery/`, `ingest/`, `reports/` and `retention/` beneath it), `internal/billing/`, `internal/export/`; console usage/observability |
 | Plugins and guardrails | `internal/plugins/`, `plugin/`, `internal/guardrails/`, `internal/contentpolicy/`; matching console features |
 | MCP registration, tool execution and personal grants | `internal/mcp/`, `internal/grants/personal/`; console `plugins/`, `agents/` |
 | Promotion and process lifetime | `internal/promotion/` kernel, one `internal/promotion/<section>/` package per document section, `internal/promotion/serve/`, `cmd/olp/`, `internal/database/` |
@@ -258,7 +258,7 @@ polling, and plugin grant refresh to happen at all. Gateway readiness on the
 private `GET /health/ready` listener fails while the key-authority snapshot is
 missing or stale.
 
-`usage.Delivery` owns one producer identity, bounded intake, durable registration,
+`delivery.Delivery` (`internal/usage/delivery`) owns one producer identity, bounded intake, durable registration,
 writer, loss reporting and accounting readiness. Startup registers it before
 spending producers run. Shutdown drains requests and probes while runtime
 authority remains available, then closes and flushes delivery before stopping
@@ -522,7 +522,7 @@ versioned exposure projection, checked in ordinary monetary admission and supply
 selection. The existing pending-accounting read also checks the ledger generation,
 so a region refreshes stale exposure without an additional database round trip.
 A missing projection fails closed and is rebuilt. Projection updates install accrued spend and exposure atomically, and
-stale versions cannot reduce holds. `usage.PersistDebitResultTx` joins existing
+stale versions cannot reduce holds. `internal/usage/ingest` joins existing
 observed-fact persistence with idempotent result settlement. Run totals and
 reservations are never additional usage charges.
 

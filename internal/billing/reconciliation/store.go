@@ -9,7 +9,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/reports"
 )
 
 type providerImport struct {
@@ -103,7 +103,7 @@ func attributedSpend(ctx context.Context, q access.Queryer, providers []uuid.UUI
 	for i, provider := range providers {
 		ids[i] = provider.String()
 	}
-	rows, err := usage.ReconciliationSpend(ctx, q, window.Start, window.End, ids)
+	rows, err := reports.ReconciliationSpend(ctx, q, window.Start, window.End, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +118,7 @@ func attributedSpend(ctx context.Context, q access.Queryer, providers []uuid.UUI
 	return spend, nil
 }
 
-func parseSpend(row usage.ProviderDaySpend) (daySpend, error) {
+func parseSpend(row reports.ProviderDaySpend) (daySpend, error) {
 	provider, err := uuid.Parse(row.ProviderID)
 	if err != nil {
 		return daySpend{}, err

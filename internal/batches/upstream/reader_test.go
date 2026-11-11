@@ -118,7 +118,7 @@ func TestVendorBatchFixturesDecode(t *testing.T) {
 func settles(result batches.Result) bool {
 	switch result.Kind {
 	case batches.ResultSucceeded:
-		return result.Usage.Observed && result.Usage.InputTokens != nil && *result.Usage.InputTokens > 0
+		return result.Usage.Evidence.Observed() && result.Usage.InputTokens != nil && *result.Usage.InputTokens > 0
 	case batches.ResultErrored, batches.ResultCancelled, batches.ResultExpired:
 		return result.ErrorClass != ""
 	default:

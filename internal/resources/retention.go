@@ -109,7 +109,7 @@ func (s *Store) expireBatch(ctx context.Context, now time.Time, cursor *expiryCu
 		if err != nil {
 			return expiryResult{}, err
 		}
-		_, err = persistPendingUsage(ctx, child, resource.pending, usage.AttemptUsage{BillingUncertain: true}, now, false)
+		_, err = persistPendingUsage(ctx, child, resource.pending, usage.AttemptUsage{Evidence: usage.EvidenceUnobservedUncertain}, now, false)
 		if err == nil {
 			_, err = child.Exec(ctx, `DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2`, resource.id, secrets.ProviderContinuation)
 		}

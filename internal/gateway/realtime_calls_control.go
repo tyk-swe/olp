@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/upstream"
+
 	"github.com/coder/websocket"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -172,10 +174,10 @@ func (s *Server) settleWebRTC(sess *webrtcSession, failure *Error) {
 					fact.Interaction.ClientState = usage.ClientPartial
 				}
 				if failure == nil || sess.rejected {
-					fact.Interaction.UpstreamState = usage.UpstreamTerminal
+					fact.Interaction.UpstreamState = upstream.Terminal
 					fact.Interaction.ClientState = usage.ClientTerminal
 				} else {
-					fact.Interaction.UpstreamState = usage.UpstreamUnknown
+					fact.Interaction.UpstreamState = upstream.Unknown
 				}
 			}
 			if observed != nil {

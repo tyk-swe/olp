@@ -24,7 +24,8 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/secretstore"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/completeness"
+	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 	"github.com/tyk-swe/olp/internal/workload"
 )
 
@@ -182,7 +183,7 @@ type Manager struct {
 	authority authorityState
 	release   *Release
 	failed    int64
-	inputs    *usage.RoutingInputs
+	inputs    *routinginputs.Inputs
 	desired   atomic.Int64
 	// grants holds what the manager serves for the installed release's
 	// credential versions with grants, and refreshRequested the generation
@@ -215,7 +216,7 @@ func NewManager(config ManagerConfig) *Manager {
 		prepareGuardrailPlugin: config.PrepareGuardrailPlugin,
 		release:                emptyRelease(), stop: make(chan struct{}), taskCtx: tasks,
 		cancelTask: cancel, stopped: make(chan struct{}),
-		instanceID:       usage.GatewayInstance(config.Hostname),
+		instanceID:       completeness.GatewayInstance(config.Hostname),
 		refreshRequested: map[string]int64{},
 	}
 }
@@ -855,7 +856,7 @@ func (m *Manager) HasHardLimits() bool {
 	return false
 }
 
-func (m *Manager) RoutingInputs() *usage.RoutingInputs {
+func (m *Manager) RoutingInputs() *routinginputs.Inputs {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.inputs
@@ -863,10 +864,10 @@ func (m *Manager) RoutingInputs() *usage.RoutingInputs {
 func (m *Manager) refreshInputs(ctx context.Context) error {
 	now := time.Now()
 	current := m.RoutingInputs()
-	if current != nil && now.Sub(current.RefreshedAt) < usage.RoutingRefreshInterval {
+	if current != nil && now.Sub(current.RefreshedAt) < routinginputs.RefreshInterval {
 		return nil
 	}
-	inputs, err := usage.LoadRoutingInputs(ctx, m.pool, now)
+	inputs, err := routinginputs.Load(ctx, m.pool, now)
 	if err != nil {
 		return fmt.Errorf("routing measurements: %w", err)
 	}

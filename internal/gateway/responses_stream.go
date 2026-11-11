@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"time"
 
+	acceptance "github.com/tyk-swe/olp/internal/upstream"
+
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 
 	"github.com/tyk-swe/olp/internal/egress"
@@ -340,7 +342,7 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 		x.failure = (&attemptFailure{class: classCancelled}).toError()
 		fact.Class = classCancelled
 		if fact.Interaction != nil {
-			fact.Interaction.UpstreamState = usage.UpstreamUnknown
+			fact.Interaction.UpstreamState = acceptance.Unknown
 		}
 		s.finish(x, &outcome{err: x.failure, committed: committed, cancelled: true}, 0)
 		return nil
@@ -355,9 +357,9 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 			fact.Class = classProtocol
 		}
 		if fact.Interaction != nil {
-			fact.Interaction.UpstreamState = usage.UpstreamUnknown
+			fact.Interaction.UpstreamState = acceptance.Unknown
 			if nativeTerminalFailure {
-				fact.Interaction.UpstreamState = usage.UpstreamTerminal
+				fact.Interaction.UpstreamState = acceptance.Terminal
 			}
 		}
 		if !committed {
@@ -370,14 +372,14 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 		x.failure = serverError(http.StatusBadGateway, "response_incomplete", "The retained provider response ended incomplete.")
 		fact.Class = classProtocol
 		if fact.Interaction != nil {
-			fact.Interaction.UpstreamState, fact.Interaction.ClientState = usage.UpstreamTerminal, usage.ClientTerminal
+			fact.Interaction.UpstreamState, fact.Interaction.ClientState = acceptance.Terminal, usage.ClientTerminal
 		}
 		s.finish(x, &outcome{err: x.failure, committed: true}, http.StatusOK)
 		return nil
 	}
 	x.completePinned()
 	if fact.Interaction != nil {
-		fact.Interaction.UpstreamState, fact.Interaction.ClientState = usage.UpstreamTerminal, usage.ClientTerminal
+		fact.Interaction.UpstreamState, fact.Interaction.ClientState = acceptance.Terminal, usage.ClientTerminal
 	}
 	s.finish(x, &outcome{committed: true}, http.StatusOK)
 	return nil

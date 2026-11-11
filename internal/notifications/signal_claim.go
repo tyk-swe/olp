@@ -6,9 +6,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/tyk-swe/olp/internal/usage"
 	"strconv"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/usage/reports"
 
 	"github.com/jackc/pgx/v5"
 
@@ -106,21 +107,21 @@ func claimSpendReport(w *deliveryWorker, ctx context.Context, tx pgx.Tx, rule si
 	if queued {
 		return 0, nil
 	}
-	filters := usage.Filters{Start: start, End: end, AllProjects: rule.project == nil}
+	filters := reports.Filters{Start: start, End: end, Projects: reports.AllProjects()}
 	if rule.project != nil {
-		filters.AllowedProjects = []string{*rule.project}
+		filters.Projects = reports.OnlyProjects(*rule.project)
 	}
-	summary, err := usage.ReadSummary(ctx, tx, filters, w.Now())
+	summary, err := reports.ReadSummary(ctx, tx, filters, w.Now())
 	if err != nil {
 		return 0, err
 	}
-	breakdowns := make(map[string]usage.Breakdown, 3)
-	for _, dimension := range []string{usage.DimensionProject, usage.DimensionRoute, usage.DimensionAPIKey} {
-		breakdown, err := usage.ReadBreakdown(ctx, tx, filters, dimension, 10)
+	breakdowns := make(map[string]reports.Breakdown, 3)
+	for _, dimension := range []reports.Dimension{reports.DimensionProject, reports.DimensionRoute, reports.DimensionAPIKey} {
+		breakdown, err := reports.ReadBreakdown(ctx, tx, filters, dimension, 10)
 		if err != nil {
 			return 0, err
 		}
-		breakdowns[dimension] = breakdown
+		breakdowns[string(dimension)] = breakdown
 	}
 	id := w.NewID()
 	payload, err := json.Marshal(spendReportPayload{

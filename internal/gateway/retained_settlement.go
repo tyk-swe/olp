@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
 func (s *Server) prepareRetainedAccounting(x *call, p *pin, route *routing.Route, r *resources.Resource, e retainedapi.Endpoint, source oif.Document) *Error {
@@ -55,7 +56,7 @@ func (s *Server) prepareRetainedAccounting(x *call, p *pin, route *routing.Route
 	return nil
 }
 
-func retainedEvalPricingSupported(price *usage.RoutingPrice, card *usage.RoutingCardRevision, kind, vendor, model string) bool {
+func retainedEvalPricingSupported(price *rates.RoutingPrice, card *rates.RoutingCardRevision, kind, vendor, model string) bool {
 	if price != nil && len(price.Tiers) > 0 {
 		return false
 	}
@@ -130,7 +131,7 @@ func (s *Server) retainedUnboundedLimits(x *call, p *pin) *Error {
 	return nil
 }
 
-func retainedPriceCovers(price *usage.RoutingPrice, operation string, metadata []byte) bool {
+func retainedPriceCovers(price *rates.RoutingPrice, operation string, metadata []byte) bool {
 	switch operation {
 	case "fine_tuning":
 		return price.TrainingPerMillion != nil

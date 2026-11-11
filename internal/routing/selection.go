@@ -7,7 +7,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/rates"
+	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 )
 
 // Attempt is one candidate in deterministic order.
@@ -23,11 +24,11 @@ type Attempt struct {
 	Strategy           string
 	PolicyDigest       string
 	VendorID           string
-	Price              *usage.RoutingPrice
+	Price              *rates.RoutingPrice
 	// Discount is the multiplier pinned at plan time; accounting prices the
 	// attempt under exactly it.
-	Discount    *usage.RoutingDiscount
-	Performance *usage.Performance
+	Discount    *rates.RoutingDiscount
+	Performance *routinginputs.Performance
 	// Slots, when set, are the credential slots live supply state left the
 	// attempt, in the order it ranked them. Without supply state the gateway
 	// orders the target's slots itself, exactly as the plan did.

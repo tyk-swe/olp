@@ -446,7 +446,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 			f.noRetry = f.noRetry || f.dispatched
 		}
 		if fact.Interaction != nil {
-			fact.Interaction.UpstreamState = string(f.acceptance)
+			fact.Interaction.UpstreamState = f.acceptance
 		}
 		f.class = class
 		fact.Class = class
@@ -895,7 +895,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 	}
 	fact.Class = classSuccess
 	if fact.Interaction != nil {
-		fact.Interaction.UpstreamState = usage.UpstreamTerminal
+		fact.Interaction.UpstreamState = upstream.Terminal
 		if x.generation.parsed.Stream {
 			fact.Interaction.ClientState = usage.ClientTerminal
 		}

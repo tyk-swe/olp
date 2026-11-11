@@ -9,7 +9,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/observability/workerhealth"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/reports"
 )
 
 type signalTestRow []any
@@ -47,7 +47,7 @@ func TestSignalMeasurementsKeepUnknownSeparateFromRecovery(t *testing.T) {
 	latency := func(samples int64, milliseconds *string) func(*testing.T) (notificationSignal, error) {
 		return func(t *testing.T) (notificationSignal, error) {
 			rule := signalRule{event: contract.NotificationEventRouteLatency, configuration: defaults(t, contract.NotificationEventRouteLatency), project: &project}
-			return latencySignal(rule, usage.RouteLatencyObservation{Route: "route", Samples: samples, Milliseconds: milliseconds}), nil
+			return latencySignal(rule, reports.RouteLatencyObservation{Route: "route", Samples: samples, Milliseconds: milliseconds}), nil
 		}
 	}
 	scan := func(read func(pgx.Row) (notificationSignal, error), row signalTestRow) func(*testing.T) (notificationSignal, error) {
@@ -97,7 +97,7 @@ func TestSignalMeasurementsKeepUnknownSeparateFromRecovery(t *testing.T) {
 func TestProjectScopedLatencyKeepsRuleProject(t *testing.T) {
 	project := "01990000-0000-7000-8000-000000000004"
 	rule := signalRule{event: contract.NotificationEventRouteLatency, configuration: defaults(t, contract.NotificationEventRouteLatency), project: &project}
-	signal := latencySignal(rule, usage.RouteLatencyObservation{Route: "route", Samples: 20})
+	signal := latencySignal(rule, reports.RouteLatencyObservation{Route: "route", Samples: 20})
 	if signal.evidence["project_id"] != &project {
 		t.Fatal("global route measurement lost its project-scoped rule boundary")
 	}

@@ -10,7 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/metric"
 	"github.com/tyk-swe/olp/internal/observability/workerhealth"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/completeness"
 )
 
 var (
@@ -94,9 +94,9 @@ func CollectMetrics(ctx context.Context, s *Sources) []prometheus.Metric {
 	now := time.Now()
 	providers, providersComplete, providersErr := ReadProviderHealthMetrics(ctx, s.Store)
 	limiterConfigured, limiterHealthy := s.limiter(ctx)
-	consumer, consumerErr := usage.ReadConsumerStatus(ctx, s.Store, now)
+	consumer, consumerErr := completeness.ReadConsumerStatus(ctx, s.Store, now)
 	if consumerErr != nil {
-		consumer = usage.ConsumerStatus{State: usage.ConsumerUnknown}
+		consumer = completeness.ConsumerStatus{State: completeness.ConsumerUnknown}
 	}
 	tasks, tasksErr := ReadRegionalWorkerTaskHealth(ctx, s.Store, s.Region)
 	counters, countersErr := ReadWorkerRecoveryCounters(ctx, s.Store)
@@ -147,8 +147,8 @@ func currentGeneration(probe RuntimeProbe) int64 {
 	return *probe.Generation
 }
 
-func metadataMetrics(ctx context.Context, s *Sources, consumer usage.ConsumerStatus, consumerRead bool) []prometheus.Metric {
-	snapshot := usage.Snapshot{Closed: true}
+func metadataMetrics(ctx context.Context, s *Sources, consumer completeness.ConsumerStatus, consumerRead bool) []prometheus.Metric {
+	snapshot := completeness.Snapshot{Closed: true}
 	if s.Emitter != nil {
 		snapshot = s.Emitter.Snapshot()
 	}
@@ -172,7 +172,7 @@ func metadataMetrics(ctx context.Context, s *Sources, consumer usage.ConsumerSta
 		consumerLag.Sample(float64(consumer.LagEvents)),
 		consumerHeartbeatAge.Sample(heartbeatAge),
 		consumerHealthy.Sample(metric.Flag(consumerRead && consumer.Complete())),
-		consumerStale.Sample(metric.Flag(consumerRead && consumer.State == usage.ConsumerStale)),
+		consumerStale.Sample(metric.Flag(consumerRead && consumer.State == completeness.ConsumerStale)),
 		gatewayOpenEpochs.Sample(float64(epochs.OpenEpochs)),
 		gatewayUnresolvedEpochs.Sample(float64(epochs.UnresolvedEpochs)),
 		historicalUncertainGaps.Sample(float64(epochs.HistoricalUncertainGaps)),
@@ -225,7 +225,7 @@ func mediaMetrics(ctx context.Context, s *Sources, now time.Time) []prometheus.M
 	return metrics
 }
 
-func asyncPlaneMetrics(tasks *WorkerTaskHealth, consumer usage.ConsumerStatus, limiterConfigured bool, now time.Time) []prometheus.Metric {
+func asyncPlaneMetrics(tasks *WorkerTaskHealth, consumer completeness.ConsumerStatus, limiterConfigured bool, now time.Time) []prometheus.Metric {
 	if tasks == nil {
 		return nil
 	}

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/usage/rates"
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
@@ -34,7 +35,7 @@ type Envelope struct {
 	EndUserDigest        string
 	// Origin is empty for a caller request. ParentRequestID is the accounting
 	// identity of the caller request a shadow or classifier request serves.
-	Origin          string
+	Origin          usage.Origin
 	ParentRequestID string
 
 	BudgetGroupID *string
@@ -101,19 +102,19 @@ type AttemptFact struct {
 	Strategy     string
 	PolicyDigest string
 	VendorID     string
-	Price        *usage.RoutingPrice
+	Price        *rates.RoutingPrice
 	// PricingPinned also records a submission-time decision when retained
 	// resource routing does not produce a policy digest. Nil price is pinned.
 	PricingPinned bool
 	// Discount is the multiplier the plan pinned on the attempt.
-	Discount *usage.RoutingDiscount
+	Discount *rates.RoutingDiscount
 	// CardPinned records that accounting must use CardRevisionID exactly,
 	// null included; unpinned attempts resolve the card themselves.
 	CardPinned     bool
 	CardRevisionID *string
 	// cardRev retains the terms resolved when this attempt started, even if
 	// later routing inputs no longer contain that revision. Nil means no card.
-	cardRev            *usage.RoutingCardRevision
+	cardRev            *rates.RoutingCardRevision
 	Ordinal            int
 	TargetID           string
 	ProviderID         string

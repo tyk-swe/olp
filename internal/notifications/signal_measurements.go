@@ -12,7 +12,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/observability/workerhealth"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/reports"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
@@ -115,7 +115,7 @@ func scanCredentialFailure(row pgx.Row, configuration ruleConfiguration) (notifi
 }
 
 func routeLatencySignals(ctx context.Context, tx pgx.Tx, rule signalRule, _ signalEnv) ([]notificationSignal, error) {
-	observations, err := usage.ReadRouteLatency(ctx, tx, rule.configuration.WindowSeconds, rule.project, rule.configuration.Metric == "ttft")
+	observations, err := reports.ReadRouteLatency(ctx, tx, rule.configuration.WindowSeconds, rule.project, rule.configuration.Metric == "ttft")
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +129,7 @@ func routeLatencySignals(ctx context.Context, tx pgx.Tx, rule signalRule, _ sign
 	return signals, nil
 }
 
-func latencySignal(rule signalRule, observation usage.RouteLatencyObservation) notificationSignal {
+func latencySignal(rule signalRule, observation reports.RouteLatencyObservation) notificationSignal {
 	project := observation.ProjectID
 	if rule.project != nil {
 		project = rule.project

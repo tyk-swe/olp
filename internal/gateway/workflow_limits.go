@@ -9,7 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
 func (x *call) workflowModelCost(attempt routing.Attempt) *Error {
@@ -43,19 +43,19 @@ func (x *call) workflowModelCost(attempt routing.Attempt) *Error {
 	return x.workflowCheckCost(bound)
 }
 
-func (x *call) workflowToolCost(tool WorkflowTool) (usage.Cost, bool, *Error) {
+func (x *call) workflowToolCost(tool WorkflowTool) (rates.Cost, bool, *Error) {
 	if tool.Definition.UnitPrice == nil {
 		if x.generation.runLimits.MaxRunCost == nil {
-			return usage.Cost{}, false, nil
+			return rates.Cost{}, false, nil
 		}
-		return usage.Cost{}, false, workflowUnboundedCost()
+		return rates.Cost{}, false, workflowUnboundedCost()
 	}
-	bound, ok := usage.ParseCost(*tool.Definition.UnitPrice)
+	bound, ok := rates.ParseCost(*tool.Definition.UnitPrice)
 	if !ok {
 		if x.generation.runLimits.MaxRunCost == nil {
-			return usage.Cost{}, false, nil
+			return rates.Cost{}, false, nil
 		}
-		return usage.Cost{}, false, workflowUnboundedCost()
+		return rates.Cost{}, false, workflowUnboundedCost()
 	}
 	if x.generation.runLimits.MaxRunCost == nil {
 		return bound, true, nil
@@ -63,8 +63,8 @@ func (x *call) workflowToolCost(tool WorkflowTool) (usage.Cost, bool, *Error) {
 	return bound, true, x.workflowCheckCost(bound)
 }
 
-func (x *call) workflowCheckCost(next usage.Cost) *Error {
-	limit, ok := usage.ParseCost(*x.generation.runLimits.MaxRunCost)
+func (x *call) workflowCheckCost(next rates.Cost) *Error {
+	limit, ok := rates.ParseCost(*x.generation.runLimits.MaxRunCost)
 	if !ok || x.workflow.unknownCost {
 		return workflowUnboundedCost()
 	}

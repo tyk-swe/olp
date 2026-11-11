@@ -2,7 +2,7 @@ package focus
 
 import (
 	"github.com/tyk-swe/olp/internal/export/destination"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/reports"
 )
 
 type basis struct {
@@ -38,7 +38,7 @@ var bases = map[destination.CostBasis]basis{
  SELECT DISTINCT provider_id, commitment_period, commitment_bucket FROM facts WHERE commitment_period IS NOT NULL),
  commitment_shares AS (
  SELECT p.provider_id, p.commitment_period, p.commitment_bucket, w.period_weight, w.latest_amount
- FROM focus_buckets p CROSS JOIN LATERAL (` + usage.CommitmentSharesLateral() + `) w)`,
+ FROM focus_buckets p CROSS JOIN LATERAL (` + reports.CommitmentSharesLateral(reports.CommitmentDriver{Provider: "p.provider_id", Period: "p.commitment_period", Bucket: "p.commitment_bucket"}) + `) w)`,
 	}),
 	destination.Charge: newBasis(destination.Charge, pricingSQL{
 		included:           `f.charge IS NOT NULL`,
