@@ -7,8 +7,7 @@ build-script permissions. Building and checking Go also needs a C compiler/linke
 and glibc development headers. Running the development stack needs Docker Compose
 and Python 3. Operational scripts need additional tools such as PostgreSQL 18
 clients, OpenSSL, curl, jq, bubblewrap and ripgrep. Run commands from the
-repository root. GLIDE links a pinned prebuilt native core, so development needs
-CGO but no Rust toolchain.
+repository root.
 Release platforms are native Linux amd64 and arm64. macOS and musl are
 unqualified.
 
@@ -134,9 +133,8 @@ managers. Commit the corresponding lockfiles with each update.
 vulnerabilities, licenses and production JavaScript packages. Image qualification
 also scans runtime/build SBOMs and retains native linking/license evidence.
 
-GLIDE's pinned native archive needs CGO, not Rust. The embedded OpenAI token ranks
-carry their MIT notice and SHA-256 checks; oracle fixtures use test-only tiktoken
-under `tests/fixtures/tokens`.
+The embedded OpenAI token ranks carry their MIT notice and SHA-256 checks;
+oracle fixtures use test-only tiktoken under `tests/fixtures/tokens`.
 
 TypeScript stays on the newest 6.0 patch until both
 [typescript-eslint](https://typescript-eslint.io/users/dependency-versions/) and

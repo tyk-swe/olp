@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/coordination"
-	"github.com/valkey-io/valkey-glide/go/v2/config"
 )
 
 // reconnectDelay backs off reconnect attempts so a down cache does not spin.
@@ -18,7 +17,7 @@ const reconnectDelay = time.Second
 // from starting. The native client reconnects after a connection is established.
 type Remote struct {
 	mu            sync.Mutex
-	configuration *config.ClientConfiguration
+	configuration coordination.Config
 	control       Commander
 	client        *coordination.Client
 	retry         time.Time

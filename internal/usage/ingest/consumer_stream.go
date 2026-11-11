@@ -68,7 +68,11 @@ func (r *consumerRun) readGroup(ctx context.Context, id string, block time.Durat
 	args = append(args, "STREAMS", r.stream, id)
 	command, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	reply, err := r.client.Do(command, args...)
+	do := r.client.Do
+	if block > 0 {
+		do = r.client.DoBlocking
+	}
+	reply, err := do(command, args...)
 	if err != nil {
 		return nil, r.noteGroupLoss(fmt.Errorf("read request metadata stream: %w", err))
 	}

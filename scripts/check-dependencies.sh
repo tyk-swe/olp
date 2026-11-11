@@ -19,11 +19,3 @@ go run github.com/google/go-licenses/v2@v2.0.1 check ./cmd/olp --ignore=github.c
 tiktoken_notice=internal/operations/tokenization/estimate/ranks/LICENSE
 printf '%s  %s\n' 418cb499b436128d653d79941333a5437b7be2ea9213dcc2f04d15d5d2c51d86 "$tiktoken_notice" | sha256sum --check --status
 pnpm audit --prod --audit-level high
-# GLIDE's prebuilt Rust core is not traversed by Go's vulnerability database.
-# Image qualification additionally requires its shipped notices, native linking
-# inventory, and scans of both the runtime image and its build-stage SBOMs.
-glide_dir=$(go list -m -f '{{.Dir}}' github.com/valkey-io/valkey-glide/go/v2)
-test -s "$glide_dir/LICENSE"
-test -s "$glide_dir/THIRD_PARTY_LICENSES_GO"
-
-./scripts/native-sbom.py --check

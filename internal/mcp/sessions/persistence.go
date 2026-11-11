@@ -101,8 +101,7 @@ func noSessionScript(err error) bool {
 	if !ok || command.Ambiguous || command.Cause == nil {
 		return false
 	}
-	text := command.Cause.Error()
-	return strings.Contains(text, "NOSCRIPT") || strings.Contains(text, "NoScriptError")
+	return strings.Contains(command.Cause.Error(), "NOSCRIPT")
 }
 
 func (s *Store) Create(ctx context.Context, record Record) (bool, error) {

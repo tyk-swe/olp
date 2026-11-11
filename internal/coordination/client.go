@@ -1,4 +1,4 @@
-// Package coordination owns the concrete GLIDE client lifecycle and transport
+// Package coordination owns the concrete Valkey client lifecycle and transport
 // outcome classification. Features own keys, scripts, stream formats, and retries.
 package coordination
 
@@ -8,96 +8,68 @@ import (
 	"errors"
 	"net/url"
 	"os"
-	"slices"
 	"strconv"
-	"strings"
-	"sync"
 	"time"
 
-	glide "github.com/valkey-io/valkey-glide/go/v2"
-	"github.com/valkey-io/valkey-glide/go/v2/config"
-	"github.com/valkey-io/valkey-glide/go/v2/pipeline"
+	"github.com/valkey-io/valkey-go"
 )
 
-func Configuration(rawURL, caFile string, timeout time.Duration) (*config.ClientConfiguration, error) {
+type Config struct {
+	option  valkey.ClientOption
+	timeout time.Duration
+}
+
+func Configuration(rawURL, caFile string, timeout time.Duration) (Config, error) {
 	u, err := url.Parse(rawURL)
-	if err != nil || u == nil || (u.Scheme != "redis" && u.Scheme != "rediss") || u.Hostname() == "" || u.RawQuery != "" || u.Fragment != "" {
-		return nil, errors.New("OLP_VALKEY_URL must be a redis:// or rediss:// URL without query or fragment")
+	if err != nil || (u.Scheme != "redis" && u.Scheme != "rediss") || u.Hostname() == "" || u.RawQuery != "" || u.Fragment != "" {
+		return Config{}, errors.New("OLP_VALKEY_URL must be a redis:// or rediss:// URL without query or fragment")
 	}
-	port := 6379
 	if u.Port() != "" {
-		port, err = strconv.Atoi(u.Port())
+		port, err := strconv.Atoi(u.Port())
 		if err != nil || port < 1 || port > 65535 {
-			return nil, errors.New("invalid OLP_VALKEY_URL port")
+			return Config{}, errors.New("invalid OLP_VALKEY_URL port")
 		}
 	}
-	db := 0
-	if u.Path != "" && u.Path != "/" {
-		db, err = strconv.Atoi(strings.TrimPrefix(u.Path, "/"))
-		if err != nil || db < 0 {
-			return nil, errors.New("invalid OLP_VALKEY_URL database")
-		}
+	option, err := valkey.ParseURL(rawURL)
+	if err != nil || option.SelectDB < 0 {
+		return Config{}, errors.New("invalid OLP_VALKEY_URL database")
 	}
-	advanced := config.NewAdvancedClientConfiguration().WithConnectionTimeout(timeout)
-	if caFile != "" {
-		if u.Scheme != "rediss" {
-			return nil, errors.New("OLP_VALKEY_TLS_CA_FILE requires rediss://")
-		}
-		data, err := os.ReadFile(caFile)
-		if err != nil || !x509.NewCertPool().AppendCertsFromPEM(data) {
-			return nil, errors.New("OLP_VALKEY_TLS_CA_FILE must contain PEM trust roots")
-		}
-		advanced.WithTlsConfiguration(config.NewTlsConfiguration().WithRootCertificates(data))
+	option.ClientName = "olp"
+	option.ForceSingleClient = true
+	option.DisableCache = true
+	option.Dialer.Timeout = timeout
+	if caFile == "" {
+		return Config{option: option, timeout: timeout}, nil
 	}
-	c := config.NewClientConfiguration().
-		WithAddress(&config.NodeAddress{Host: u.Hostname(), Port: port}).
-		WithUseTLS(u.Scheme == "rediss").WithDatabaseId(db).
-		WithRequestTimeout(timeout).WithAdvancedConfiguration(advanced).
-		WithClientName("olp").WithLazyConnect(true)
-	if u.User != nil {
-		password, _ := u.User.Password()
-		username := u.User.Username()
-		if username == "" {
-			username = "default"
-		}
-		c.WithCredentials(config.NewServerCredentials(username, password))
+	if u.Scheme != "rediss" {
+		return Config{}, errors.New("OLP_VALKEY_TLS_CA_FILE requires rediss://")
 	}
-	return c, nil
+	data, err := os.ReadFile(caFile)
+	roots := x509.NewCertPool()
+	if err != nil || !roots.AppendCertsFromPEM(data) {
+		return Config{}, errors.New("OLP_VALKEY_TLS_CA_FILE must contain PEM trust roots")
+	}
+	option.TLSConfig.RootCAs = roots
+	return Config{option: option, timeout: timeout}, nil
 }
 
 type Client struct {
-	raw    *glide.Client
-	mu     sync.Mutex
-	closed bool
-	calls  sync.WaitGroup
+	raw     valkey.Client
+	timeout time.Duration
 }
 
-func Open(ctx context.Context, c *config.ClientConfiguration) (*Client, error) {
+func Open(ctx context.Context, c Config) (*Client, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	raw, err := glide.NewClient(c)
+	raw, err := valkey.NewClient(c.option)
 	if err != nil {
-		return nil, errors.New("cannot create GLIDE client")
-	}
-	client := &Client{raw: raw}
-	if err := client.Ping(ctx); err != nil {
-		client.Close()
 		return nil, errors.New("Valkey connection failed")
 	}
-	return client, nil
+	return &Client{raw: raw, timeout: c.timeout}, nil
 }
 
-func (c *Client) Close() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.closed {
-		return
-	}
-	c.closed = true
-	c.raw.Close()
-	c.calls.Wait()
-}
+func (c *Client) Close()                         { c.raw.Close() }
 func (c *Client) Ping(ctx context.Context) error { _, err := c.Do(ctx, "PING"); return err }
 
 // CommandError deliberately omits command arguments and server error text from
@@ -120,42 +92,19 @@ func (c *Client) Do(ctx context.Context, args ...string) (any, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, &CommandError{Cause: err}
 	}
-	c.mu.Lock()
-	if c.closed {
-		c.mu.Unlock()
-		return nil, &CommandError{Cause: glide.NewClosingError("client closed")}
+	command, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	return reply(c.raw.Do(command, c.raw.B().Arbitrary(args...).Build()))
+}
+
+// DoBlocking runs a command that waits server side, such as XREADGROUP BLOCK,
+// on a dedicated connection so it cannot stall the shared pipelined one. The
+// caller's context bounds it in place of the request timeout.
+func (c *Client) DoBlocking(ctx context.Context, args ...string) (any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, &CommandError{Cause: err}
 	}
-	c.calls.Add(1)
-	c.mu.Unlock()
-	// GLIDE 2.5.2 removes canceled calls from its pending registry, then starts
-	// a goroutine waiting for their native response. Close cannot release those
-	// removed calls. Keep native calls registered until completion/close and
-	// enforce caller cancellation here, with one owned, buffered result channel.
-	// The native request timeout still bounds commands; blocking consumers must
-	// additionally use finite server-side BLOCK deadlines.
-	type result struct {
-		value any
-		err   error
-	}
-	done := make(chan result, 1)
-	args = slices.Clone(args)
-	go func() {
-		defer c.calls.Done()
-		value, err := c.raw.CustomCommand(context.WithoutCancel(ctx), args)
-		done <- result{value, err}
-	}()
-	var value any
-	var err error
-	select {
-	case <-ctx.Done():
-		return nil, &CommandError{Cause: ctx.Err(), Ambiguous: true}
-	case response := <-done:
-		value, err = response.value, response.err
-	}
-	if err == nil {
-		return value, nil
-	}
-	return nil, commandError(err)
+	return reply(c.raw.Do(ctx, c.raw.B().Arbitrary(args...).Blocking()))
 }
 
 // Pipeline sends commands in one round trip, without atomicity, and returns
@@ -165,48 +114,34 @@ func (c *Client) Pipeline(ctx context.Context, commands ...[]string) ([]any, err
 	if err := ctx.Err(); err != nil {
 		return nil, &CommandError{Cause: err}
 	}
-	batch := pipeline.NewStandaloneBatch(false)
-	for _, command := range commands {
-		batch.CustomCommand(slices.Clone(command))
+	built := make(valkey.Commands, len(commands))
+	for index, command := range commands {
+		built[index] = c.raw.B().Arbitrary(command...).Build()
 	}
-	c.mu.Lock()
-	if c.closed {
-		c.mu.Unlock()
-		return nil, &CommandError{Cause: glide.NewClosingError("client closed")}
-	}
-	c.calls.Add(1)
-	c.mu.Unlock()
-	// The same registration discipline as Do keeps a cancelled pipeline's
-	// native call owned until it completes or the client closes.
-	type result struct {
-		values []any
-		err    error
-	}
-	done := make(chan result, 1)
-	go func() {
-		defer c.calls.Done()
-		values, err := c.raw.Exec(context.WithoutCancel(ctx), *batch, false)
-		done <- result{values, err}
-	}()
-	select {
-	case <-ctx.Done():
-		return nil, &CommandError{Cause: ctx.Err(), Ambiguous: true}
-	case response := <-done:
-		if response.err != nil {
-			return nil, commandError(response.err)
+	command, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	results := c.raw.DoMulti(command, built...)
+	values := make([]any, len(results))
+	for index, result := range results {
+		value, err := result.ToAny()
+		refusal, refused := valkey.IsValkeyErr(err)
+		switch {
+		case err == nil || valkey.IsValkeyNil(err):
+			values[index] = value
+		case refused:
+			values[index] = refusal
+		default:
+			return nil, &CommandError{Cause: err, Ambiguous: true}
 		}
-		return response.values, nil
 	}
+	return values, nil
 }
 
-// commandError classifies a GLIDE failure: a transport failure leaves the
-// command's outcome unknown, while a refusal proves it did not run.
-func commandError(err error) error {
-	var timeout *glide.TimeoutError
-	var disconnected *glide.DisconnectError
-	var connection *glide.ConnectionError
-	var closing *glide.ClosingError
-	ambiguous := errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
-		errors.As(err, &timeout) || errors.As(err, &disconnected) || errors.As(err, &connection) || errors.As(err, &closing)
-	return &CommandError{Cause: err, Ambiguous: ambiguous}
+func reply(result valkey.ValkeyResult) (any, error) {
+	value, err := result.ToAny()
+	if err == nil || valkey.IsValkeyNil(err) {
+		return value, nil
+	}
+	_, refused := valkey.IsValkeyErr(err)
+	return nil, &CommandError{Cause: err, Ambiguous: !refused}
 }
