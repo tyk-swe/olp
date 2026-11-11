@@ -21,7 +21,7 @@ import (
 type identity = providerconfig.Identity[*string]
 
 func openAI(options Options) Configuration {
-	return Configuration{Identity: identity{Kind: "openai", AuthMode: AuthAPIKey}, Options: options}
+	return Configuration{Identity: identity{Kind: "openai", AuthMode: connectors.AuthAPIKey}, Options: options}
 }
 
 func validated(c Configuration) (Configuration, error) {
@@ -43,7 +43,7 @@ func refusedField(err error) (string, bool) {
 
 func TestValidateAndNormalizeCompletesAUsableConnection(t *testing.T) {
 	saved, err := validated(Configuration{
-		Identity: identity{Kind: "openai", AuthMode: AuthHeaders},
+		Identity: identity{Kind: "openai", AuthMode: connectors.AuthHeaders},
 		Options: Options{
 			CredentialHeaders: []string{" x-tenant-key "},
 			Limits:            &Limits{RequestsPerMinute: new(int64(60)), Supply: routing.Supply{PriorityShares: &routing.Shares{Critical: 40, High: 30, Normal: 20, Low: 10}, SaturationPercent: new(int64(80))}},
@@ -70,18 +70,18 @@ func TestValidateAndNormalizeRefusesConnectionsThatCannotBeServedSafely(t *testi
 		configuration Configuration
 		field         string
 	}{
-		"an unknown connector kind":                         {Configuration{Identity: identity{Kind: "telepathy", AuthMode: AuthAPIKey, Endpoint: new("https://upstream.example")}}, ""},
+		"an unknown connector kind":                         {Configuration{Identity: identity{Kind: "telepathy", AuthMode: connectors.AuthAPIKey, Endpoint: new("https://upstream.example")}}, ""},
 		"caller credentials only the gateway could mint":    {Configuration{Identity: identity{Kind: "bedrock", AuthMode: "default_chain", CredentialSource: "caller", CloudRegion: new("us-east-1")}}, "configuration.credential_source"},
 		"an authentication mode the connector lacks":        {Configuration{Identity: identity{Kind: "openai", AuthMode: "default_chain"}}, "configuration.auth_mode"},
-		"no endpoint where the connector has no default":    {Configuration{Identity: identity{Kind: "azure_openai", AuthMode: AuthAPIKey, Deployment: new("gpt"), APIVersion: new("2024-10-21")}}, "configuration.endpoint"},
-		"a loopback endpoint":                               {Configuration{Identity: identity{Kind: "openai", AuthMode: AuthAPIKey, Endpoint: new("https://127.0.0.1/v1")}}, "configuration.endpoint"},
-		"a cloud metadata endpoint":                         {Configuration{Identity: identity{Kind: "openai", AuthMode: AuthAPIKey, Endpoint: new("https://169.254.169.254/v1")}}, "configuration.endpoint"},
-		"a plain HTTP endpoint":                             {Configuration{Identity: identity{Kind: "openai", AuthMode: AuthAPIKey, Endpoint: new("http://upstream.example/v1")}}, "configuration.endpoint"},
-		"cloud context on a connector without one":          {Configuration{Identity: identity{Kind: "openai", AuthMode: AuthAPIKey, CloudRegion: new("us-east-1")}}, "configuration"},
+		"no endpoint where the connector has no default":    {Configuration{Identity: identity{Kind: "azure_openai", AuthMode: connectors.AuthAPIKey, Deployment: new("gpt"), APIVersion: new("2024-10-21")}}, "configuration.endpoint"},
+		"a loopback endpoint":                               {Configuration{Identity: identity{Kind: "openai", AuthMode: connectors.AuthAPIKey, Endpoint: new("https://127.0.0.1/v1")}}, "configuration.endpoint"},
+		"a cloud metadata endpoint":                         {Configuration{Identity: identity{Kind: "openai", AuthMode: connectors.AuthAPIKey, Endpoint: new("https://169.254.169.254/v1")}}, "configuration.endpoint"},
+		"a plain HTTP endpoint":                             {Configuration{Identity: identity{Kind: "openai", AuthMode: connectors.AuthAPIKey, Endpoint: new("http://upstream.example/v1")}}, "configuration.endpoint"},
+		"cloud context on a connector without one":          {Configuration{Identity: identity{Kind: "openai", AuthMode: connectors.AuthAPIKey, CloudRegion: new("us-east-1")}}, "configuration"},
 		"credential headers outside the headers mode":       {openAI(Options{CredentialHeaders: []string{"X-Tenant-Key"}}), "configuration.options.credential_headers"},
-		"the headers mode without a header":                 {Configuration{Identity: identity{Kind: "openai", AuthMode: AuthHeaders}}, "configuration.options.credential_headers"},
-		"a credential header that reframes the request":     {Configuration{Identity: identity{Kind: "openai", AuthMode: AuthHeaders}, Options: Options{CredentialHeaders: []string{"Transfer-Encoding"}}}, "configuration.options.credential_headers"},
-		"a credential header reserved for the gateway":      {Configuration{Identity: identity{Kind: "openai", AuthMode: AuthHeaders}, Options: Options{CredentialHeaders: []string{"X-Olp-Tenant"}}}, "configuration.options.credential_headers"},
+		"the headers mode without a header":                 {Configuration{Identity: identity{Kind: "openai", AuthMode: connectors.AuthHeaders}}, "configuration.options.credential_headers"},
+		"a credential header that reframes the request":     {Configuration{Identity: identity{Kind: "openai", AuthMode: connectors.AuthHeaders}, Options: Options{CredentialHeaders: []string{"Transfer-Encoding"}}}, "configuration.options.credential_headers"},
+		"a credential header reserved for the gateway":      {Configuration{Identity: identity{Kind: "openai", AuthMode: connectors.AuthHeaders}, Options: Options{CredentialHeaders: []string{"X-Olp-Tenant"}}}, "configuration.options.credential_headers"},
 		"a vendor served by another connector":              {openAI(Options{VendorID: new(vendors.DefaultFor("anthropic"))}), "configuration.options.vendor_id"},
 		"a vendor nobody knows":                             {openAI(Options{VendorID: new("telepathy")}), "configuration.options.vendor_id"},
 		"model metadata that is not an object":              {openAI(Options{Models: map[string]json.RawMessage{"fixture-model": json.RawMessage(`null`)}}), "configuration.options.models"},
@@ -108,15 +108,15 @@ func storedInputs() map[string]Configuration {
 	ends := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
 	return map[string]Configuration{
 		"null-rich-openai": openAI(Options{}),
-		"limits-supply": {Identity: identity{Kind: KindAnthropic, AuthMode: AuthAPIKey}, Options: Options{Limits: &Limits{
+		"limits-supply": {Identity: identity{Kind: connectors.KindAnthropic, AuthMode: connectors.AuthAPIKey}, Options: Options{Limits: &Limits{
 			MaxConcurrency: new(int64(4)), RequestsPerMinute: new(int64(60)), TokensPerMinute: new(int64(100000)),
 			Supply: routing.Supply{DailyCostLimit: new("10.00"), MonthlyCostLimit: new("200"), PriorityShares: &routing.Shares{Critical: 40, High: 30, Normal: 20, Low: 10}, SaturationPercent: new(int64(80))},
 		}}},
-		"commitment": {Identity: identity{Kind: KindBedrock, AuthMode: "default_chain", CloudRegion: new("us-east-1")},
+		"commitment": {Identity: identity{Kind: connectors.KindBedrock, AuthMode: "default_chain", CloudRegion: new("us-east-1")},
 			Options: Options{Commitment: &routing.Commitment{ID: "commitment-1", EffectiveAt: &effective, EndsAt: &ends, Amount: " 1200.50 ", Period: "month"}}},
-		"health-probe": {Identity: identity{Kind: KindGemini, AuthMode: AuthAPIKey},
+		"health-probe": {Identity: identity{Kind: connectors.KindGemini, AuthMode: connectors.AuthAPIKey},
 			Options: Options{HealthProbe: &routing.HealthProbe{IntervalSeconds: 300}, Models: map[string]json.RawMessage{"gemini-2.5-flash": json.RawMessage(`{"context_length":1048576}`)}}},
-		"azure-deployment": {Identity: identity{Kind: KindAzure, AuthMode: AuthAPIKey, ProfileID: "azure-legacy-chat", ProfileRevision: connectors.ProfileRevision,
+		"azure-deployment": {Identity: identity{Kind: connectors.KindAzureOpenAI, AuthMode: connectors.AuthAPIKey, ProfileID: "azure-legacy-chat", ProfileRevision: connectors.ProfileRevision,
 			Endpoint: new("https://example.openai.azure.com"), Deployment: new("chat-deployment"), APIVersion: new("2024-10-21")},
 			Options: Options{
 				Network:           &egress.ConnectionOptions{CredentialID: "6f1c2d3e-4b5a-4c6d-8e7f-9a0b1c2d3e4f", ConnectTimeoutMS: new(int64(2000)), MaxConnsPerHost: new(8)},
@@ -126,7 +126,7 @@ func storedInputs() map[string]Configuration {
 				Bindings:          map[string]connectors.Binding{"gpt-4o": {Deployment: "gpt-4o-deployment", PrincipalID: "principal-1", Snapshot: "2024-08-06", ResourceScope: "scope-1"}},
 				Models:            map[string]json.RawMessage{"gpt-4o": json.RawMessage(`{"context_length":128000}`)},
 			}},
-		"vertex-batch": {Identity: identity{Kind: KindVertex, AuthMode: "service_account", ProfileID: "vertex-batch-prediction", ProfileRevision: connectors.ProfileRevision,
+		"vertex-batch": {Identity: identity{Kind: connectors.KindVertexAI, AuthMode: "service_account", ProfileID: "vertex-batch-prediction", ProfileRevision: connectors.ProfileRevision,
 			CloudRegion: new("us-central1"), CloudProject: new("acme-project"), BatchStorage: &connectors.BatchStorage{InputURIPrefix: "gs://acme-batch/in/", OutputURIPrefix: "gs://acme-batch/out/"}},
 			Options: Options{
 				TuningDatasetURIPrefixes: []string{"gs://acme-tuning/datasets/"},
@@ -134,7 +134,7 @@ func storedInputs() map[string]Configuration {
 				QuerySettings:            map[string]string{"$xgafv": "2"},
 				Bindings:                 map[string]connectors.Binding{"gemini-2.5-pro": {Region: "us-central1"}},
 			}},
-		"credential-headers": {Identity: identity{CredentialSource: "caller", Kind: KindOpenAICompatible, AuthMode: AuthHeaders, Endpoint: new("https://llm.example.com/v1")},
+		"credential-headers": {Identity: identity{CredentialSource: "caller", Kind: connectors.KindOpenAICompatible, AuthMode: connectors.AuthHeaders, Endpoint: new("https://llm.example.com/v1")},
 			Options: Options{VendorID: new("groq"), CredentialHeaders: []string{"x-tenant-key"}, ParameterDefaults: map[string]json.RawMessage{"temperature": json.RawMessage(`0.5`)}}},
 	}
 }

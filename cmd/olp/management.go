@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/usage/completeness"
 	"github.com/tyk-swe/olp/internal/usage/pricebook"
 	"github.com/tyk-swe/olp/internal/usage/reports"
+	"github.com/tyk-swe/olp/internal/vendors"
 
 	"github.com/tyk-swe/olp/internal/guardrails/policy"
 
@@ -172,7 +173,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	// of the management surface; their patterns are more specific than
 	// its catch-all, which answers everything no surface claims.
 	(&reports.API{Access: m.Access}).Register(mux)
-	(&pricebook.API{Access: m.Access, Normalizer: pricebook.NewNormalizer(providers.VendorKind), Egress: m.Egress, Catalog: m.Catalog, CatalogKeys: m.CatalogKeys}).Register(mux)
+	(&pricebook.API{Access: m.Access, Normalizer: pricebook.NewNormalizer(vendors.Kind), Egress: m.Egress, Catalog: m.Catalog, CatalogKeys: m.CatalogKeys}).Register(mux)
 	(&completeness.API{Access: m.Access}).Register(mux)
 	destination.NewAPI(m.Access, m.Egress).Register(mux)
 	focus.NewAPI(m.Access).Register(mux)
@@ -185,7 +186,7 @@ func (m Management) Register(mux *http.ServeMux) {
 		Unconfined: m.Unconfined,
 		Identity:   m.IdentityClient,
 		Costs:      project.CostsOf(m.limiter()),
-		Normalizer: pricebook.NewNormalizer(providers.VendorKind),
+		Normalizer: pricebook.NewNormalizer(vendors.Kind),
 		Catalogue:  catalogue,
 	})
 }

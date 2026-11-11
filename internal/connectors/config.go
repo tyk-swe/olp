@@ -18,6 +18,16 @@ import (
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
+const (
+	KindOpenAI           = "openai"
+	KindOpenAICompatible = "openai_compatible"
+	KindAnthropic        = "anthropic"
+	KindGemini           = "gemini"
+	KindAzureOpenAI      = "azure_openai"
+	KindVertexAI         = "vertex_ai"
+	KindBedrock          = "bedrock"
+)
+
 type Config struct {
 	CredentialSource string
 	Network          *egress.ConnectionOptions

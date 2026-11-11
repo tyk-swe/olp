@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
@@ -31,30 +32,30 @@ func TestCertifiableFollowsTheVendorRules(t *testing.T) {
 		tuple        CapabilityInput
 		want         bool
 	}{
-		"openai batches": {KindOpenAI, "openai", openAIBatch, true},
-		"azure batches":  {KindAzure, "azure", openAIBatch, true},
-		"compatible without a vendor cannot batch":     {KindOpenAICompatible, "", openAIBatch, false},
-		"compatible groq batches":                      {KindOpenAICompatible, "groq", openAIBatch, true},
-		"compatible xai cannot batch":                  {KindOpenAICompatible, "xai", openAIBatch, false},
-		"gemini batches through the openai surface":    {KindGemini, "google", openAIBatch, true},
-		"anthropic batches on its own surface":         {KindAnthropic, "anthropic", anthropicBatch, true},
-		"openai cannot batch on the anthropic surface": {KindOpenAI, "openai", anthropicBatch, false},
-		"vertex batches natively":                      {KindVertex, "google-vertex", nativeBatch, true},
-		"bedrock batches natively":                     {KindBedrock, "amazon-bedrock", nativeBatch, true},
-		"openai serves webrtc":                         {KindOpenAI, "openai", webRTCRealtime, true},
-		"azure cannot serve webrtc":                    {KindAzure, "azure", webRTCRealtime, false},
-		"azure serves openai realtime":                 {KindAzure, "azure", openAIRealtime, true},
-		"xai serves native realtime":                   {KindOpenAICompatible, "xai", nativeRealtime, true},
-		"groq has no native realtime":                  {KindOpenAICompatible, "groq", nativeRealtime, false},
-		"bedrock serves native realtime":               {KindBedrock, "amazon-bedrock", nativeRealtime, true},
-		"gemini realtime needs the live profile":       {KindGemini, "google", geminiRealtime, false},
-		"bedrock serves invoke":                        {KindBedrock, "amazon-bedrock", bedrockInvoke, true},
-		"openai cannot serve bedrock invoke":           {KindOpenAI, "openai", bedrockInvoke, false},
-		"bedrock retrieval needs its profile":          {KindBedrock, "amazon-bedrock", retrieval, false},
-		"vertex retrieval needs its profile":           {KindVertex, "google-vertex", retrieval, false},
-		"azure openai retrieval needs no profile":      {KindAzure, "azure", retrieval, true},
-		"openai starts video creation asynchronously":  {KindOpenAI, "openai", asyncVideoStart, true},
-		"anthropic cannot start video creation":        {KindAnthropic, "anthropic", asyncVideoStart, false},
+		"openai batches": {connectors.KindOpenAI, "openai", openAIBatch, true},
+		"azure batches":  {connectors.KindAzureOpenAI, "azure", openAIBatch, true},
+		"compatible without a vendor cannot batch":     {connectors.KindOpenAICompatible, "", openAIBatch, false},
+		"compatible groq batches":                      {connectors.KindOpenAICompatible, "groq", openAIBatch, true},
+		"compatible xai cannot batch":                  {connectors.KindOpenAICompatible, "xai", openAIBatch, false},
+		"gemini batches through the openai surface":    {connectors.KindGemini, "google", openAIBatch, true},
+		"anthropic batches on its own surface":         {connectors.KindAnthropic, "anthropic", anthropicBatch, true},
+		"openai cannot batch on the anthropic surface": {connectors.KindOpenAI, "openai", anthropicBatch, false},
+		"vertex batches natively":                      {connectors.KindVertexAI, "google-vertex", nativeBatch, true},
+		"bedrock batches natively":                     {connectors.KindBedrock, "amazon-bedrock", nativeBatch, true},
+		"openai serves webrtc":                         {connectors.KindOpenAI, "openai", webRTCRealtime, true},
+		"azure cannot serve webrtc":                    {connectors.KindAzureOpenAI, "azure", webRTCRealtime, false},
+		"azure serves openai realtime":                 {connectors.KindAzureOpenAI, "azure", openAIRealtime, true},
+		"xai serves native realtime":                   {connectors.KindOpenAICompatible, "xai", nativeRealtime, true},
+		"groq has no native realtime":                  {connectors.KindOpenAICompatible, "groq", nativeRealtime, false},
+		"bedrock serves native realtime":               {connectors.KindBedrock, "amazon-bedrock", nativeRealtime, true},
+		"gemini realtime needs the live profile":       {connectors.KindGemini, "google", geminiRealtime, false},
+		"bedrock serves invoke":                        {connectors.KindBedrock, "amazon-bedrock", bedrockInvoke, true},
+		"openai cannot serve bedrock invoke":           {connectors.KindOpenAI, "openai", bedrockInvoke, false},
+		"bedrock retrieval needs its profile":          {connectors.KindBedrock, "amazon-bedrock", retrieval, false},
+		"vertex retrieval needs its profile":           {connectors.KindVertexAI, "google-vertex", retrieval, false},
+		"azure openai retrieval needs no profile":      {connectors.KindAzureOpenAI, "azure", retrieval, true},
+		"openai starts video creation asynchronously":  {connectors.KindOpenAI, "openai", asyncVideoStart, true},
+		"anthropic cannot start video creation":        {connectors.KindAnthropic, "anthropic", asyncVideoStart, false},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -73,13 +74,13 @@ func TestCapabilityOptionsForKindOfferWhatAProfileCanCertify(t *testing.T) {
 		tuple CapabilityInput
 		want  bool
 	}{
-		"bedrock retrieval through its profile":         {KindBedrock, retrieval, true},
-		"vertex retrieval through its profile":          {KindVertex, retrieval, true},
-		"azure ai search retrieval through its profile": {KindAzureAISearch, retrieval, true},
-		"gemini realtime through the live profile":      {KindGemini, geminiRealtime, true},
-		"compatible batches through a vendor profile":   {KindOpenAICompatible, openAIBatch, true},
-		"anthropic offers no realtime":                  {KindAnthropic, openAIRealtime, false},
-		"openai offers no native batch":                 {KindOpenAI, nativeBatch, false},
+		"bedrock retrieval through its profile":         {connectors.KindBedrock, retrieval, true},
+		"vertex retrieval through its profile":          {connectors.KindVertexAI, retrieval, true},
+		"azure ai search retrieval through its profile": {connectors.KindAzureAISearch, retrieval, true},
+		"gemini realtime through the live profile":      {connectors.KindGemini, geminiRealtime, true},
+		"compatible batches through a vendor profile":   {connectors.KindOpenAICompatible, openAIBatch, true},
+		"anthropic offers no realtime":                  {connectors.KindAnthropic, openAIRealtime, false},
+		"openai offers no native batch":                 {connectors.KindOpenAI, nativeBatch, false},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

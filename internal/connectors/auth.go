@@ -309,20 +309,33 @@ type authorization struct {
 	sign func(ctx context.Context, req *http.Request, body []byte) ([]string, error)
 }
 
+const (
+	AuthNone              = "none"
+	AuthAPIKey            = "api_key"
+	AuthHeaders           = "headers"
+	AuthADC               = "adc"
+	AuthServiceAccount    = "service_account"
+	AuthAzureDefault      = "azure_default"
+	AuthAzureClientSecret = "azure_client_secret"
+	AuthDefaultChain      = "default_chain"
+	AuthStatic            = "static"
+	AuthIBMIAM            = "ibm_iam"
+)
+
 // authenticators registers the authenticator for each auth mode. A provider
 // kind lists the modes its validation admits; a mode without an authenticator
 // never authorizes a request.
 var authenticators = map[string]authenticator{
-	"none":                {authenticate: (*Auth).authenticateNone},
-	"api_key":             {credential: true, authenticate: (*Auth).authenticateAPIKey},
-	"headers":             {credential: true, authenticate: (*Auth).authenticateHeaders},
-	"adc":                 {authenticate: (*Auth).authenticateGoogle},
-	"service_account":     {credential: true, authenticate: (*Auth).authenticateGoogle},
-	"azure_default":       {authenticate: (*Auth).authenticateAzure},
-	"azure_client_secret": {credential: true, authenticate: (*Auth).authenticateAzure},
-	"default_chain":       {authenticate: (*Auth).authenticateAWS},
-	"static":              {credential: true, authenticate: (*Auth).authenticateAWS},
-	"ibm_iam":             {credential: true, authenticate: (*Auth).authenticateIBM},
+	AuthNone:              {authenticate: (*Auth).authenticateNone},
+	AuthAPIKey:            {credential: true, authenticate: (*Auth).authenticateAPIKey},
+	AuthHeaders:           {credential: true, authenticate: (*Auth).authenticateHeaders},
+	AuthADC:               {authenticate: (*Auth).authenticateGoogle},
+	AuthServiceAccount:    {credential: true, authenticate: (*Auth).authenticateGoogle},
+	AuthAzureDefault:      {authenticate: (*Auth).authenticateAzure},
+	AuthAzureClientSecret: {credential: true, authenticate: (*Auth).authenticateAzure},
+	AuthDefaultChain:      {authenticate: (*Auth).authenticateAWS},
+	AuthStatic:            {credential: true, authenticate: (*Auth).authenticateAWS},
+	AuthIBMIAM:            {credential: true, authenticate: (*Auth).authenticateIBM},
 	AuthStaticCredential:  {credential: true, authenticate: (*Auth).authenticatePlaced},
 	AuthGrant:             {credential: true, authenticate: (*Auth).authenticatePlaced},
 }

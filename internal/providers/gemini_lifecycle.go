@@ -24,7 +24,7 @@ func (s *Catalogue) certifyGeminiInteraction(ctx context.Context, cfg *Configura
 		return &probeError{Code: "invalid_endpoint", Detail: "The Interactions profile cannot address this endpoint."}
 	}
 	upstream := cfg.transport().Model(model)
-	if !connectors.ModelValid(KindGemini, upstream) {
+	if !connectors.ModelValid(connectors.KindGemini, upstream) {
 		return &probeError{Code: "model_invalid", Detail: "The Interactions model binding is malformed."}
 	}
 	body, _ := json.Marshal(map[string]any{"model": upstream, "input": "Reply with OK.", "store": false,
@@ -95,7 +95,7 @@ func (s *Catalogue) certifyGeminiLive(ctx context.Context, cfg *Configuration, c
 	defer conn.Close(websocket.StatusNormalClosure, "")
 	conn.SetReadLimit(int64(maxEventBytes))
 	upstream := transport.Model(model)
-	if !connectors.ModelValid(KindGemini, upstream) {
+	if !connectors.ModelValid(connectors.KindGemini, upstream) {
 		return &probeError{Code: "model_invalid", Detail: "The Live model binding is malformed."}
 	}
 	setup, _ := json.Marshal(map[string]any{"setup": map[string]any{"model": "models/" + strings.TrimPrefix(upstream, "models/")}})

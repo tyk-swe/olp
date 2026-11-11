@@ -4,35 +4,14 @@
 package providers
 
 import (
-	"github.com/tyk-swe/olp/internal/providerconfig"
 	"slices"
 	"strings"
+
+	"github.com/tyk-swe/olp/internal/providerconfig"
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/vendors"
-)
-
-// Kind names accepted by the gateway.
-const (
-	KindOpenAI           = "openai"
-	KindOpenAICompatible = "openai_compatible"
-	KindAnthropic        = "anthropic"
-	KindGemini           = "gemini"
-	KindAzure            = "azure_openai"
-	KindAzureAISearch    = connectors.KindAzureAISearch
-	KindVertex           = "vertex_ai"
-	KindBedrock          = "bedrock"
-	KindSageMaker        = connectors.KindSageMaker
-	KindWatsonx          = connectors.KindWatsonx
-	KindPlugin           = connectors.KindPlugin
-)
-
-// Auth modes accepted by the gateway.
-const (
-	AuthAPIKey  = "api_key"
-	AuthHeaders = "headers"
-	AuthNone    = "none"
 )
 
 // Capability tuple vocabulary shared across providers.
@@ -42,9 +21,6 @@ const (
 	ModeUnary           = "unary"
 	ModeStreaming       = "streaming"
 )
-
-// DefaultOpenAIEndpoint is applied when an openai connection omits one.
-const DefaultOpenAIEndpoint = "https://api.openai.com/v1"
 
 type authCapability struct {
 	Mode       string `json:"mode"`
@@ -112,50 +88,50 @@ type CapabilityInput struct {
 }
 
 var (
-	apiKeyAuth  = authCapability{Mode: AuthAPIKey, Label: "API key", Credential: "required"}
-	headersAuth = authCapability{Mode: AuthHeaders, Label: "Encrypted headers", Credential: "required"}
-	noAuth      = authCapability{Mode: AuthNone, Label: "No credential", Credential: "forbidden"}
+	apiKeyAuth  = authCapability{Mode: connectors.AuthAPIKey, Label: "API key", Credential: "required"}
+	headersAuth = authCapability{Mode: connectors.AuthHeaders, Label: "Encrypted headers", Credential: "required"}
+	noAuth      = authCapability{Mode: connectors.AuthNone, Label: "No credential", Credential: "forbidden"}
 	endpoint    = fieldCapability{Field: "endpoint", Label: "Endpoint"}
 )
 
 // kinds is the connector kind catalogue. Each kind's presets are the reviewed
 // vendor contracts that offer themselves as its presets.
 var kinds = withPresets([]kindCapability{
-	{Kind: KindOpenAI, Label: "OpenAI", Description: "OpenAI platform API with Chat Completions and Responses.", DefaultAuthMode: AuthAPIKey,
+	{Kind: connectors.KindOpenAI, Label: "OpenAI", Description: "OpenAI platform API with Chat Completions and Responses.", DefaultAuthMode: connectors.AuthAPIKey,
 		AuthModes: []authCapability{apiKeyAuth, headersAuth, noAuth}, Fields: []fieldCapability{endpoint}},
-	{Kind: KindOpenAICompatible, Label: "OpenAI-compatible", Description: "Any server implementing the OpenAI Chat Completions or Responses API.", DefaultAuthMode: AuthAPIKey,
-		AuthModes: []authCapability{{Mode: AuthAPIKey, Label: "Bearer API key", Credential: "required"}, {Mode: AuthHeaders, Label: "Custom credential headers", Credential: "required"}, noAuth},
+	{Kind: connectors.KindOpenAICompatible, Label: "OpenAI-compatible", Description: "Any server implementing the OpenAI Chat Completions or Responses API.", DefaultAuthMode: connectors.AuthAPIKey,
+		AuthModes: []authCapability{{Mode: connectors.AuthAPIKey, Label: "Bearer API key", Credential: "required"}, {Mode: connectors.AuthHeaders, Label: "Custom credential headers", Credential: "required"}, noAuth},
 		Fields:    []fieldCapability{{Field: "endpoint", Label: "Endpoint", Required: true}}},
-	{Kind: KindAnthropic, Label: "Anthropic", Description: "Native API, including custom endpoints.", DefaultAuthMode: AuthAPIKey,
+	{Kind: connectors.KindAnthropic, Label: "Anthropic", Description: "Native API, including custom endpoints.", DefaultAuthMode: connectors.AuthAPIKey,
 		AuthModes: []authCapability{apiKeyAuth, headersAuth, noAuth}, Fields: []fieldCapability{endpoint}},
-	{Kind: KindGemini, Label: "Google Gemini", Description: "Native API, including custom endpoints.", DefaultAuthMode: AuthAPIKey,
+	{Kind: connectors.KindGemini, Label: "Google Gemini", Description: "Native API, including custom endpoints.", DefaultAuthMode: connectors.AuthAPIKey,
 		AuthModes: []authCapability{apiKeyAuth, headersAuth, noAuth}, Fields: []fieldCapability{endpoint}},
-	{Kind: KindAzure, Label: "Azure OpenAI", Description: "Azure deployment API.", DefaultAuthMode: AuthAPIKey,
-		AuthModes: []authCapability{apiKeyAuth, {Mode: "azure_default", Label: "Microsoft Entra default credential", Credential: "forbidden"}, {Mode: "azure_client_secret", Label: "Microsoft Entra client secret", Credential: "required"}},
+	{Kind: connectors.KindAzureOpenAI, Label: "Azure OpenAI", Description: "Azure deployment API.", DefaultAuthMode: connectors.AuthAPIKey,
+		AuthModes: []authCapability{apiKeyAuth, {Mode: connectors.AuthAzureDefault, Label: "Microsoft Entra default credential", Credential: "forbidden"}, {Mode: connectors.AuthAzureClientSecret, Label: "Microsoft Entra client secret", Credential: "required"}},
 		Fields:    []fieldCapability{{Field: "endpoint", Label: "Resource origin", Required: true}, {Field: "deployment", Label: "Deployment", Required: true}, {Field: "api_version", Label: "API version", Required: true}}},
-	{Kind: KindAzureAISearch, Label: "Azure AI Search", Description: "Query-only operator-managed search indexes.", DefaultAuthMode: AuthAPIKey,
-		AuthModes: []authCapability{{Mode: "api_key", Label: "API key", Credential: "required"}, {Mode: "azure_default", Label: "Azure identity", Credential: "forbidden"}, {Mode: "azure_client_secret", Label: "Service principal JSON", Credential: "required"}},
+	{Kind: connectors.KindAzureAISearch, Label: "Azure AI Search", Description: "Query-only operator-managed search indexes.", DefaultAuthMode: connectors.AuthAPIKey,
+		AuthModes: []authCapability{{Mode: connectors.AuthAPIKey, Label: "API key", Credential: "required"}, {Mode: connectors.AuthAzureDefault, Label: "Azure identity", Credential: "forbidden"}, {Mode: connectors.AuthAzureClientSecret, Label: "Service principal JSON", Credential: "required"}},
 		Fields:    []fieldCapability{{Field: "endpoint", Label: "Search service origin", Required: true}, {Field: "api_version", Label: "API version", Required: true}, {Field: "model", Label: "Index name", Required: true}}},
-	{Kind: KindVertex, Label: "Google Vertex AI", Description: "Vertex publisher generation API.", DefaultAuthMode: "adc",
-		AuthModes: []authCapability{{Mode: "adc", Label: "Application default credentials", Credential: "forbidden"}, {Mode: "service_account", Label: "Service account JSON", Credential: "required"}},
+	{Kind: connectors.KindVertexAI, Label: "Google Vertex AI", Description: "Vertex publisher generation API.", DefaultAuthMode: connectors.AuthADC,
+		AuthModes: []authCapability{{Mode: connectors.AuthADC, Label: "Application default credentials", Credential: "forbidden"}, {Mode: connectors.AuthServiceAccount, Label: "Service account JSON", Credential: "required"}},
 		Fields:    []fieldCapability{{Field: "cloud_project", Label: "Project", Required: true}, {Field: "cloud_region", Label: "Location", Required: true}, endpoint, {Field: "batch_storage", Label: "Batch storage"}}},
-	{Kind: KindBedrock, Label: "Amazon Bedrock", Description: "Converse, ConverseStream and CountTokens.", DefaultAuthMode: "default_chain",
-		AuthModes: []authCapability{{Mode: "default_chain", Label: "AWS credential chain", Credential: "forbidden"}, {Mode: "static", Label: "AWS credential JSON", Credential: "required"}},
+	{Kind: connectors.KindBedrock, Label: "Amazon Bedrock", Description: "Converse, ConverseStream and CountTokens.", DefaultAuthMode: connectors.AuthDefaultChain,
+		AuthModes: []authCapability{{Mode: connectors.AuthDefaultChain, Label: "AWS credential chain", Credential: "forbidden"}, {Mode: connectors.AuthStatic, Label: "AWS credential JSON", Credential: "required"}},
 		Fields:    []fieldCapability{{Field: "cloud_region", Label: "Region", Required: true}, endpoint, {Field: "batch_storage", Label: "Batch storage"}}},
 	// A SageMaker provider's models are its endpoints, or endpoint/component
 	// for inference components, which operators declare.
-	{Kind: KindSageMaker, Label: "Amazon SageMaker AI", Description: "Real-time endpoints serving OpenAI Chat Completions.", DefaultAuthMode: "default_chain",
-		AuthModes: []authCapability{{Mode: "default_chain", Label: "AWS credential chain", Credential: "forbidden"}, {Mode: "static", Label: "AWS credential JSON", Credential: "required"}},
+	{Kind: connectors.KindSageMaker, Label: "Amazon SageMaker AI", Description: "Real-time endpoints serving OpenAI Chat Completions.", DefaultAuthMode: connectors.AuthDefaultChain,
+		AuthModes: []authCapability{{Mode: connectors.AuthDefaultChain, Label: "AWS credential chain", Credential: "forbidden"}, {Mode: connectors.AuthStatic, Label: "AWS credential JSON", Credential: "required"}},
 		Fields:    []fieldCapability{{Field: "cloud_region", Label: "Region", Required: true}, endpoint, {Field: "model", Label: "Probe model", Required: true}}},
-	{Kind: KindWatsonx, Label: "IBM watsonx.ai", Description: "Chat API with IBM Cloud IAM authentication.", DefaultAuthMode: "ibm_iam",
-		AuthModes: []authCapability{{Mode: "ibm_iam", Label: "IBM Cloud API key", Credential: "required"}},
+	{Kind: connectors.KindWatsonx, Label: "IBM watsonx.ai", Description: "Chat API with IBM Cloud IAM authentication.", DefaultAuthMode: connectors.AuthIBMIAM,
+		AuthModes: []authCapability{{Mode: connectors.AuthIBMIAM, Label: "IBM Cloud API key", Credential: "required"}},
 		Fields: []fieldCapability{{Field: "cloud_region", Label: "Region", Required: true}, {Field: "cloud_project", Label: "Project ID", Required: true},
 			endpoint, {Field: "api_version", Label: "API version date", Required: false}}},
 	// A plugin profile supplies the address, credential placement, model
 	// discovery, and whether a static credential or a grant authenticates.
 	// Without discovery, the operator names a model to probe, as the
 	// profile catalogue's model_discovery tells.
-	{Kind: KindPlugin, Label: "Provider plugin", Description: "A profile an installed provider plugin supplies around a built-in dialect.", DefaultAuthMode: connectors.AuthStaticCredential,
+	{Kind: connectors.KindPlugin, Label: "Provider plugin", Description: "A profile an installed provider plugin supplies around a built-in dialect.", DefaultAuthMode: connectors.AuthStaticCredential,
 		AuthModes: []authCapability{{Mode: connectors.AuthStaticCredential, Label: "Static credential", Credential: "required"}, {Mode: connectors.AuthGrant, Label: "Grant", Credential: "grant"}},
 		Fields:    []fieldCapability{}},
 })
@@ -252,7 +228,6 @@ func capabilityOptions() []CapabilityInput {
 // serves it. Prices are published per vendor while every recorded attempt
 // carries the kind of the provider that served it, so pricing selection
 // applies a vendor-scoped price only where the two agree.
-func VendorKind(vendor string) (string, bool) { return vendors.Kind(vendor) }
 
 func kindByName(name string) *kindCapability {
 	i := slices.IndexFunc(kinds, func(k kindCapability) bool { return k.Kind == name })
@@ -269,7 +244,7 @@ func capabilityOptionsForKind(kind string) []CapabilityInput {
 	for _, profile := range connectors.Profiles() {
 		if profile.Kind == kind {
 			cfg := Configuration{Identity: providerconfig.Identity[*string]{Kind: kind, ProfileID: profile.ID, ProfileRevision: profile.Revision}}
-			if kind == KindOpenAICompatible && strings.HasSuffix(profile.ID, "-files-batches") {
+			if kind == connectors.KindOpenAICompatible && strings.HasSuffix(profile.ID, "-files-batches") {
 				vendor := strings.TrimSuffix(profile.ID, "-files-batches")
 				cfg.Options.VendorID = &vendor
 			}
@@ -302,7 +277,7 @@ func reviewedMedia(kind, vendor, operation string) bool {
 }
 
 func certifiable(kind, vendor string, c CapabilityInput) bool {
-	if c.Operation == "retrieval" && (kind == KindBedrock || kind == KindVertex || kind == KindAzureAISearch) {
+	if c.Operation == "retrieval" && (kind == connectors.KindBedrock || kind == connectors.KindVertexAI || kind == connectors.KindAzureAISearch) {
 		return false
 	} // Cloud retrieval requires its dedicated profile.
 	if retainedapi.Operation(c.Operation) {
@@ -318,35 +293,35 @@ func certifiable(kind, vendor string, c CapabilityInput) bool {
 		return true
 	case "batch":
 		if c.Surface == "native" {
-			return kind == KindVertex && vendor == "google-vertex" || kind == KindBedrock && vendor == "amazon-bedrock"
+			return kind == connectors.KindVertexAI && vendor == "google-vertex" || kind == connectors.KindBedrock && vendor == "amazon-bedrock"
 		}
 		if c.Surface == "anthropic" {
-			return kind == KindAnthropic && vendor == "anthropic"
+			return kind == connectors.KindAnthropic && vendor == "anthropic"
 		}
 		if c.Surface == "gemini" {
-			return kind == KindGemini && vendor == "google"
+			return kind == connectors.KindGemini && vendor == "google"
 		}
-		if c.Surface == "openai" && kind == KindGemini {
+		if c.Surface == "openai" && kind == connectors.KindGemini {
 			return vendor == "google"
 		}
-		return kind == KindOpenAI || kind == KindAzure || kind == KindOpenAICompatible &&
+		return kind == connectors.KindOpenAI || kind == connectors.KindAzureOpenAI || kind == connectors.KindOpenAICompatible &&
 			(vendor == "groq" || vendor == "together" || vendor == "mistral")
 	case "realtime":
 		if c.Mode == "webrtc" {
-			return kind == KindOpenAI
+			return kind == connectors.KindOpenAI
 		}
 		if c.Surface == "native" {
-			return kind == KindOpenAICompatible && vendor == "xai" ||
-				kind == KindVertex && vendor == "google-vertex" ||
-				kind == KindBedrock && vendor == "amazon-bedrock"
+			return kind == connectors.KindOpenAICompatible && vendor == "xai" ||
+				kind == connectors.KindVertexAI && vendor == "google-vertex" ||
+				kind == connectors.KindBedrock && vendor == "amazon-bedrock"
 		}
-		return kind == KindOpenAI || kind == KindAzure
+		return kind == connectors.KindOpenAI || kind == connectors.KindAzureOpenAI
 	case "bedrock_invoke":
-		return kind == KindBedrock
+		return kind == connectors.KindBedrock
 	default:
 		// Reviewed vendor media is unary, but for the job a video creation
 		// starts.
 		vendorMode := c.Mode == ModeUnary || c.Operation == "video_create" && c.Mode == "async"
-		return kind == KindOpenAI || (reviewedMedia(kind, vendor, c.Operation) || mediaByCall(kind, vendor, c.Operation)) && vendorMode
+		return kind == connectors.KindOpenAI || (reviewedMedia(kind, vendor, c.Operation) || mediaByCall(kind, vendor, c.Operation)) && vendorMode
 	}
 }

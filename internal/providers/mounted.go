@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/google/uuid"
@@ -55,7 +56,7 @@ func LoadMounted(path string, policy *egress.Policy) (map[string]release.Mounted
 		// A plugin provider's profile comes from the plugin its published
 		// revision pins, and the gateway requires this configuration to match
 		// that revision: only the credential is mounted.
-		if entry.Configuration.Kind != KindPlugin {
+		if entry.Configuration.Kind != connectors.KindPlugin {
 			if err = entry.Configuration.ValidateAndNormalize(policy); err != nil {
 				return nil, err
 			}

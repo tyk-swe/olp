@@ -135,11 +135,11 @@ func (s *Catalogue) callAsWithHeaders(ctx context.Context, cfg *Configuration, c
 		return 0, nil, nil, err
 	}
 	req.Header.Set("Accept", "application/json, text/event-stream")
-	if cfg.Kind == KindBedrock && (strings.HasSuffix(path, "/converse-stream") || strings.HasSuffix(path, "/invoke-with-response-stream")) {
+	if cfg.Kind == connectors.KindBedrock && (strings.HasSuffix(path, "/converse-stream") || strings.HasSuffix(path, "/invoke-with-response-stream")) {
 		req.Header.Set("Accept", "application/vnd.amazon.eventstream")
 	}
 	req.Header.Set("User-Agent", "olp/probe")
-	if cfg.Kind == KindAnthropic && req.URL.Query().Get("beta") == "true" {
+	if cfg.Kind == connectors.KindAnthropic && req.URL.Query().Get("beta") == "true" {
 		req.Header.Set("Anthropic-Beta", "files-api-2025-04-14")
 	}
 	if body != nil {
@@ -242,9 +242,9 @@ func listingFor(cfg *Configuration) (modelListing, bool, error) {
 		return modelListing{}, false, nil
 	}
 	switch cfg.Kind {
-	case KindAzure, KindVertex:
+	case connectors.KindAzureOpenAI, connectors.KindVertexAI:
 		return modelListing{}, false, nil
-	case KindPlugin:
+	case connectors.KindPlugin:
 		// A plugin profile declares the listing, if its upstream has one.
 		if cfg.plugin == nil {
 			return modelListing{}, false, nil
@@ -266,17 +266,17 @@ func listingFor(cfg *Configuration) (modelListing, bool, error) {
 	}
 	listing := modelListing{path: "/models", models: "data", id: "id", display: "display_name"}
 	switch cfg.Kind {
-	case KindAnthropic:
+	case connectors.KindAnthropic:
 		listing.cursor, listing.more, listing.parameter = "last_id", "has_more", "after_id"
-	case KindGemini:
+	case connectors.KindGemini:
 		listing.models, listing.id, listing.display = "models", "name", "displayName"
 		listing.cursor, listing.parameter = "nextPageToken", "pageToken"
-	case KindWatsonx:
+	case connectors.KindWatsonx:
 		// The chat-capable foundation models, in one page of the most the
 		// listing returns.
 		listing.path = "/ml/v1/foundation_model_specs?version=" + connectors.WatsonxVersion(providerconfig.Value(cfg.APIVersion)) + "&filters=function_text_chat&limit=200"
 		listing.models, listing.id, listing.display = "resources", "model_id", "label"
-	case KindBedrock:
+	case connectors.KindBedrock:
 		listing.path, listing.models, listing.id, listing.display = "/foundation-models", "modelSummaries", "modelId", "modelName"
 		if providerconfig.Value(cfg.Endpoint) == connectors.DefaultEndpoint(cfg.Kind, providerconfig.Value(cfg.CloudRegion), "") {
 			endpoint, err := connectors.BedrockEndpoint(providerconfig.Value(cfg.CloudRegion), true)
@@ -299,7 +299,7 @@ func (s *Catalogue) listModelFacts(ctx context.Context, cfg *Configuration, cred
 		ctx, cancel := probeBudget(ctx)
 		defer cancel()
 		names := append([]string{}, cfg.ProbeModels...)
-		if cfg.Kind == KindAzure {
+		if cfg.Kind == connectors.KindAzureOpenAI {
 			names = append(names, providerconfig.Value(cfg.Deployment))
 		}
 		for name := range cfg.Options.Models {
@@ -321,7 +321,7 @@ func (s *Catalogue) listModelFacts(ctx context.Context, cfg *Configuration, cred
 			previous = name
 			tuple := defaultProbeTuple(cfg)
 			err := s.certifyTuple(ctx, cfg, credential, name, tuple, probeBodyLimit)
-			if err != nil && cfg.Kind == KindAzure {
+			if err != nil && cfg.Kind == connectors.KindAzureOpenAI {
 				tuple.Operation = "embeddings"
 				err = s.certifyTuple(ctx, cfg, credential, name, tuple, probeBodyLimit)
 			}
@@ -503,7 +503,7 @@ func (s *Catalogue) certifyTuple(ctx context.Context, cfg *Configuration, creden
 			families = []wire.Format{wire.Responses}
 		}
 	}
-	if cfg.ProfileID == "" && tuple.Operation == "generation" && tuple.Surface == "openai" && vendors.Speaks(providerconfig.Value(cfg.Options.VendorID), "openai-responses") && (cfg.Kind == KindOpenAI || cfg.Kind == KindAzure || cfg.Kind == KindOpenAICompatible) {
+	if cfg.ProfileID == "" && tuple.Operation == "generation" && tuple.Surface == "openai" && vendors.Speaks(providerconfig.Value(cfg.Options.VendorID), "openai-responses") && (cfg.Kind == connectors.KindOpenAI || cfg.Kind == connectors.KindAzureOpenAI || cfg.Kind == connectors.KindOpenAICompatible) {
 		families = append(families, wire.Responses)
 	}
 	for _, family := range families {
@@ -605,10 +605,10 @@ func (s *Catalogue) certifyBatch(ctx context.Context, cfg *Configuration, creden
 	}
 	adapter, _ := cfg.transport().FilesBatchesAdapter()
 	switch {
-	case cfg.Kind == KindAnthropic:
+	case cfg.Kind == connectors.KindAnthropic:
 		probes[0].query.Set("beta", "true")
 		probes[1].resource = "messages/batches"
-	case cfg.Kind == KindGemini:
+	case cfg.Kind == connectors.KindGemini:
 		probes = []listingProbe{
 			{resource: "files", array: "files", query: url.Values{"pageSize": {"1"}}, optional: true},
 			{resource: "batches", array: "operations", query: url.Values{"pageSize": {"1"}}, optional: true},
@@ -1119,7 +1119,7 @@ func (s *Catalogue) certifyNativeMedia(ctx context.Context, cfg *Configuration, 
 		return s.certifyVendorMedia(ctx, cfg, credential, model, vendor)
 	}
 	endpoint, err := url.Parse(providerconfig.Value(cfg.Endpoint))
-	if err != nil || cfg.Kind != KindOpenAI || cfg.AuthMode != AuthAPIKey || len(credential) == 0 ||
+	if err != nil || cfg.Kind != connectors.KindOpenAI || cfg.AuthMode != connectors.AuthAPIKey || len(credential) == 0 ||
 		len(cfg.Options.CredentialHeaders) != 0 || endpoint.Scheme != "https" ||
 		endpoint.Hostname() != "api.openai.com" || (endpoint.Port() != "" && endpoint.Port() != "443") ||
 		strings.TrimRight(endpoint.EscapedPath(), "/") != "/v1" {
@@ -1141,9 +1141,9 @@ func (s *Catalogue) certifyListedModel(ctx context.Context, cfg *Configuration, 
 }
 
 var mediaByCallOperations = map[string][]media.Operation{
-	KindVertex:  {media.OpImageGeneration, media.OpSpeech, media.OpTranscription},
-	KindBedrock: {media.OpImageGeneration, media.OpSpeech},
-	KindAzure:   {media.OpImageGeneration, media.OpSpeech, media.OpTranscription},
+	connectors.KindVertexAI:    {media.OpImageGeneration, media.OpSpeech, media.OpTranscription},
+	connectors.KindBedrock:     {media.OpImageGeneration, media.OpSpeech},
+	connectors.KindAzureOpenAI: {media.OpImageGeneration, media.OpSpeech, media.OpTranscription},
 }
 
 func mediaByCall(kind, vendor, operation string) bool {
@@ -1151,12 +1151,12 @@ func mediaByCall(kind, vendor, operation string) bool {
 	if !slices.Contains(mediaByCallOperations[kind], op) {
 		return false
 	}
-	return op == media.OpImageGeneration || kind == KindAzure || vendors.MediaWire(vendor, operation) != ""
+	return op == media.OpImageGeneration || kind == connectors.KindAzureOpenAI || vendors.MediaWire(vendor, operation) != ""
 }
 
 func (s *Catalogue) certifyMediaCall(ctx context.Context, cfg *Configuration, credential []byte, model, operation string) error {
 	transport := cfg.transport()
-	if cfg.Kind == KindAzure && transport.Hosting() == "azure-v1" {
+	if cfg.Kind == connectors.KindAzureOpenAI && transport.Hosting() == "azure-v1" {
 		return &probeError{Code: "capability_unavailable", Detail: "Azure OpenAI serves media through deployments; its v1 API offers none."}
 	}
 	request, failure := mediaProbeRequest(cfg.Kind, operation)
@@ -1202,12 +1202,12 @@ func mediaProbeRequest(kind, operation string) (*media.Request, *media.Error) {
 	switch media.Operation(operation) {
 	case media.OpImageGeneration:
 		probe := mediaProbe{Model: "certification", Prompt: "A small blue square.", Count: 1}
-		if kind == KindAzure {
+		if kind == connectors.KindAzureOpenAI {
 			probe.Quality = "low"
 		}
 		return decodeProbe(probe, media.DecodeImageGeneration)
 	case media.OpSpeech:
-		voices := map[string]mediaProbe{KindBedrock: {Voice: "Joanna"}, KindVertex: {Voice: "Kore", Format: "wav"}}
+		voices := map[string]mediaProbe{connectors.KindBedrock: {Voice: "Joanna"}, connectors.KindVertexAI: {Voice: "Kore", Format: "wav"}}
 		probe := cmp.Or(voices[kind], mediaProbe{Voice: "alloy"})
 		return decodeProbe(mediaProbe{Model: "certification", Input: "OK", Voice: probe.Voice, Format: probe.Format}, media.DecodeSpeech)
 	case media.OpTranscription:

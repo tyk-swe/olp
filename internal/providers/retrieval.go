@@ -2,8 +2,10 @@ package providers
 
 import (
 	"context"
-	"github.com/tyk-swe/olp/internal/oif"
 	"net/http"
+
+	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/oif"
 )
 
 func (s *Catalogue) certifyRetrieval(ctx context.Context, cfg *Configuration, credential []byte, model string) error {
@@ -24,7 +26,7 @@ func (s *Catalogue) certifyRetrieval(ctx context.Context, cfg *Configuration, cr
 	}
 	identity := "name"
 	root := doc.Root()
-	if cfg.Kind == KindBedrock {
+	if cfg.Kind == connectors.KindBedrock {
 		value, ok := root.Lookup("knowledgeBase")
 		if !ok || value.Kind() != oif.Object {
 			return &probeError{Code: "provider_protocol_error", Detail: "Missing Knowledge Base metadata."}

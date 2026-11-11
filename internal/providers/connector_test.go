@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 )
 
@@ -21,7 +22,7 @@ func probeCatalogue(policy egress.Policy) *Catalogue {
 }
 
 func upstreamConnection(kind, endpoint string) Configuration {
-	connection := Configuration{Identity: identity{Kind: kind, AuthMode: AuthAPIKey, Endpoint: new(endpoint)}}
+	connection := Configuration{Identity: identity{Kind: kind, AuthMode: connectors.AuthAPIKey, Endpoint: new(endpoint)}}
 	connection.Normalize()
 	return connection
 }
@@ -37,7 +38,7 @@ func probeCode(t *testing.T, ctx context.Context, policy egress.Policy, handler 
 	t.Helper()
 	upstream := httptest.NewServer(handler)
 	t.Cleanup(upstream.Close)
-	connection := upstreamConnection(KindOpenAI, upstream.URL)
+	connection := upstreamConnection(connectors.KindOpenAI, upstream.URL)
 	models, err := probeCatalogue(policy).listModelFacts(ctx, &connection, []byte("sk-test"))
 	if err != nil {
 		return classify(err).Code
@@ -99,7 +100,7 @@ func TestModelProbeRefusesAHostThatResolvesToABlockedAddress(t *testing.T) {
 	t.Parallel()
 	upstream := httptest.NewServer(answer(http.StatusOK, `{"data":[]}`))
 	t.Cleanup(upstream.Close)
-	connection := upstreamConnection(KindOpenAI, strings.Replace(upstream.URL, "127.0.0.1", "localhost", 1))
+	connection := upstreamConnection(connectors.KindOpenAI, strings.Replace(upstream.URL, "127.0.0.1", "localhost", 1))
 	_, err := probeCatalogue(egress.Policy{PlainHTTPHosts: []string{"localhost"}}).listModelFacts(t.Context(), &connection, []byte("sk-test"))
 	if err == nil || classify(err).Code != "unsafe_destination" {
 		t.Fatalf("listing error %v, want unsafe_destination", err)
@@ -113,11 +114,11 @@ func TestModelDiscoveryFollowsPagesToTheEnd(t *testing.T) {
 		pages           map[string]string
 		want            []listedModel
 	}{
-		"anthropic has_more and last_id": {KindAnthropic, "after_id", map[string]string{
+		"anthropic has_more and last_id": {connectors.KindAnthropic, "after_id", map[string]string{
 			"":         `{"data":[{"id":"claude-a","display_name":"Claude A"},{"id":"claude-b"}],"has_more":true,"last_id":"claude-b"}`,
 			"claude-b": `{"data":[{"id":"claude-b"},{"id":"claude-c","display_name":"Claude C"}],"has_more":false,"last_id":"claude-c"}`,
 		}, []listedModel{{Name: "claude-a", Display: "Claude A"}, {Name: "claude-b", Display: "claude-b"}, {Name: "claude-c", Display: "Claude C"}}},
-		"gemini nextPageToken": {KindGemini, "pageToken", map[string]string{
+		"gemini nextPageToken": {connectors.KindGemini, "pageToken", map[string]string{
 			"":       `{"models":[{"name":"models/gemini-a","displayName":"Gemini A"}],"nextPageToken":"page-2"}`,
 			"page-2": `{"models":[{"name":"models/gemini-b","displayName":"Gemini B"}]}`,
 		}, []listedModel{{Name: "gemini-a", Display: "Gemini A"}, {Name: "gemini-b", Display: "Gemini B"}}},
@@ -157,7 +158,7 @@ func TestModelDiscoveryRefusesAContinuationItCannotFollow(t *testing.T) {
 			t.Parallel()
 			upstream := httptest.NewServer(answer(http.StatusOK, page))
 			t.Cleanup(upstream.Close)
-			connection := upstreamConnection(KindAnthropic, upstream.URL)
+			connection := upstreamConnection(connectors.KindAnthropic, upstream.URL)
 			_, err := probeCatalogue(loopback).listModelFacts(t.Context(), &connection, []byte("sk-test"))
 			if err == nil || classify(err).Code != "provider_protocol_error" {
 				t.Fatalf("listing error %v, want provider_protocol_error", err)

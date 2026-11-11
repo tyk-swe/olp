@@ -857,9 +857,9 @@ func (s *Catalogue) createDraft(ctx context.Context, tx pgx.Tx, p access.Princip
 	if input.Model != nil {
 		surface, operation := "openai", probeOperation(&configuration)
 		switch configuration.Kind {
-		case KindAnthropic:
+		case connectors.KindAnthropic:
 			surface = "anthropic"
-		case KindGemini, KindVertex:
+		case connectors.KindGemini, connectors.KindVertexAI:
 			surface = "gemini"
 		}
 		if configuration.ProfileID != "" {

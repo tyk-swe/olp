@@ -105,7 +105,7 @@ func (c *Configuration) Normalize() {
 		})
 	}
 	switch {
-	case c.Kind == KindPlugin:
+	case c.Kind == connectors.KindPlugin:
 		// No vendor list price applies to a plugin provider.
 		if c.VendorMissing() {
 			c.Options.VendorID = nil
@@ -120,7 +120,7 @@ func (c *Configuration) Normalize() {
 // or nil, and gives the provider its address, with its options in place, as
 // endpoint.
 func (c *Configuration) Pin(ctx context.Context, q access.Queryer, unconfined *plugins.Unconfined) error {
-	if c.Kind != KindPlugin {
+	if c.Kind != connectors.KindPlugin {
 		return nil
 	}
 	if c.ProfileID == "" || !plugins.ValidDigest(c.ProfileRevision) {
@@ -143,7 +143,7 @@ func (c *Configuration) Pin(ctx context.Context, q access.Queryer, unconfined *p
 
 // pluginDigest is the digest of the plugin a plugin provider pins, or "".
 func (c *Configuration) pluginDigest() string {
-	if c.Kind != KindPlugin {
+	if c.Kind != connectors.KindPlugin {
 		return ""
 	}
 	return c.ProfileRevision
@@ -153,7 +153,7 @@ func (c *Configuration) pluginDigest() string {
 // pins, from its installed plugin, which pluginColumn selects. Uninstalling a
 // plugin is refused while a provider pins it.
 func (c *Configuration) pinned(installed []byte) error {
-	if c.Kind != KindPlugin || installed == nil {
+	if c.Kind != connectors.KindPlugin || installed == nil {
 		return nil
 	}
 	plugin, err := connectors.DecodePluginProfile(c.ProfileRevision, installed, c.ProfileID)
@@ -188,7 +188,7 @@ func (c *Configuration) ValidateAndNormalize(policy *egress.Policy) error {
 	if kind == nil {
 		return access.Fail(422, "provider_kind_unavailable", "Unknown provider connector kind.")
 	}
-	if c.Kind == KindPlugin && c.plugin == nil {
+	if c.Kind == connectors.KindPlugin && c.plugin == nil {
 		return access.Invalid("configuration.profile_revision", "Choose a profile of an installed, approved plugin, with the plugin's digest as the profile revision.")
 	}
 	if c.plugin == nil && len(c.Options.PluginOptions) != 0 {
@@ -238,20 +238,20 @@ func (c *Configuration) ValidateAndNormalize(policy *egress.Policy) error {
 			return access.Invalid("configuration.options.credential_headers", "Use valid header names other than hop-by-hop or framing headers.")
 		}
 	}
-	if c.AuthMode == AuthHeaders && len(c.Options.CredentialHeaders) == 0 {
+	if c.AuthMode == connectors.AuthHeaders && len(c.Options.CredentialHeaders) == 0 {
 		return access.Invalid("configuration.options.credential_headers", "Name at least one header that carries the credential.")
 	}
-	if c.AuthMode != AuthHeaders && len(c.Options.CredentialHeaders) != 0 {
+	if c.AuthMode != connectors.AuthHeaders && len(c.Options.CredentialHeaders) != 0 {
 		return access.Invalid("configuration.options.credential_headers", "Credential headers apply only to the headers authentication mode.")
 	}
 	if err := c.transport().Validate(policy); err != nil {
 		return access.Invalid("configuration", err.Error())
 	}
-	if c.Kind == KindPlugin {
+	if c.Kind == connectors.KindPlugin {
 		if !c.VendorMissing() {
 			return access.Invalid("configuration.options.vendor_id", "A plugin provider has no vendor.")
 		}
-	} else if kind, ok := VendorKind(providerconfig.Value(c.Options.VendorID)); !ok || kind != c.Kind {
+	} else if kind, ok := vendors.Kind(providerconfig.Value(c.Options.VendorID)); !ok || kind != c.Kind {
 		return access.Invalid("configuration.options.vendor_id", "Vendor does not support this connector")
 	}
 	if len(c.Options.Models) > 2000 {
@@ -353,7 +353,7 @@ func (c *Configuration) transportFingerprint() string {
 	if c.ProfileID != "" {
 		parts = append(parts, c.ProfileID, c.ProfileRevision, c.Options.SemanticHeaders, c.Options.QuerySettings, c.Options.OperationDefaults, c.Options.Bindings)
 	}
-	if c.Kind == KindPlugin {
+	if c.Kind == connectors.KindPlugin {
 		parts = append(parts, c.Options.PluginOptions)
 	}
 	if c.Options.Network != nil {

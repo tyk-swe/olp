@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/providerconfig"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -70,7 +71,7 @@ func defaultProbeTuple(cfg *Configuration) CapabilityInput {
 		}
 	}
 	operation := probeOperation(cfg)
-	if cfg.Kind == KindVertex && cfg.transport().Hosting() != "vertex-anthropic" {
+	if cfg.Kind == connectors.KindVertexAI && cfg.transport().Hosting() != "vertex-anthropic" {
 		operation = "token_count"
 	}
 	tuple := CapabilityInput{Operation: operation, Surface: "openai", Mode: ModeUnary}

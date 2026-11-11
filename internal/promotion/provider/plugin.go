@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/plugins"
@@ -25,7 +26,7 @@ func Refusal(err error) (string, bool) {
 }
 
 func validated(configuration providers.Configuration, policy *egress.Policy) (providers.Configuration, error) {
-	if configuration.Kind == providers.KindPlugin {
+	if configuration.Kind == connectors.KindPlugin {
 		return configuration, nil
 	}
 	normalized := configuration
