@@ -45,7 +45,7 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 	if requestedRoute == "" {
 		requestedRoute, _ = anthropicCommonModel(body)
 	}
-	route, err := s.anthropicRoute(x, authority, r, requestedRoute)
+	route, err := s.nativeStateRoute(x, authority, r, requestedRoute)
 	if err != nil {
 		s.refuse(x, w, err)
 		return
@@ -98,17 +98,9 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 		s.refuse(x, w, e)
 		return
 	}
-	if e = s.reserveState(ctx, x, authority, time.Duration(route.OverallTimeout)*time.Millisecond); e != nil {
+	if e = s.reserveStateAndSlot(ctx, x, authority, p, route); e != nil {
 		s.refuse(x, w, e)
 		return
-	}
-	if p.hold == nil {
-		gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond), "")
-		if gate.verdict != gateAdmitted {
-			s.refuse(x, w, gateError(gate))
-			return
-		}
-		p.hold = gate.hold
 	}
 	if len(fileIDs) > 0 {
 		x.anthropicFilesBeta = true
@@ -187,7 +179,7 @@ func (s *Server) anthropicSelectPinWithFiles(ctx context.Context, x *call, autho
 		files = append(files, file)
 	}
 	if len(files) == 0 {
-		p, err := s.anthropicPin(ctx, x, route)
+		p, err := s.nativeStatePin(ctx, x, route)
 		return p, files, err
 	}
 	if !sameAnthropicAffinity(files) {
@@ -252,7 +244,7 @@ func (s *Server) anthropicBatchCall(w http.ResponseWriter, r *http.Request, use 
 	ctx, cancel := s.stateDeadline(r.Context(), route)
 	defer cancel()
 	defer s.resourceSettle(ctx, x, p)
-	if e = s.reserveStateAndSlot(ctx, x, authority, p); e != nil {
+	if e = s.reserveStateAndSlot(ctx, x, authority, p, route); e != nil {
 		s.refuse(x, w, e)
 		return
 	}

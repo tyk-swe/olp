@@ -736,7 +736,7 @@ func (s *Server) fileCall(w http.ResponseWriter, r *http.Request, use retainedUs
 	ctx, cancel := s.stateDeadline(r.Context(), route)
 	defer cancel()
 	defer s.resourceSettle(ctx, x, p)
-	if e := s.reserveStateAndSlot(ctx, x, authority, p); e != nil {
+	if e := s.reserveStateAndSlot(ctx, x, authority, p, route); e != nil {
 		s.refuse(x, w, e)
 		return
 	}

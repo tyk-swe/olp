@@ -449,7 +449,7 @@ func projectGeminiBatchFiles(object map[string]json.RawMessage, localInputFile, 
 }
 
 func (s *Server) geminiCreateBatch(w http.ResponseWriter, r *http.Request) {
-	x, authority, done := s.geminiBegin(w, r, wire.GeminiBatch)
+	x, authority, done := s.stateBegin(w, r, wire.GeminiBatch)
 	if done {
 		return
 	}
@@ -459,7 +459,7 @@ func (s *Server) geminiCreateBatch(w http.ResponseWriter, r *http.Request) {
 		s.refuse(x, w, invalidRequest("invalid_request", "The Gemini batch model path must match X-OLP-Route.", nil))
 		return
 	}
-	route, err := s.geminiRoute(x, authority, r, slug)
+	route, err := s.nativeStateRoute(x, authority, r, slug)
 	if err != nil {
 		s.refuse(x, w, err)
 		return
@@ -620,7 +620,7 @@ func rewriteGeminiBatchInputFile(body []byte, upstreamName string) ([]byte, erro
 
 func (s *Server) geminiBatchPin(ctx context.Context, x *call, authority keyauthority.Authority, route *routing.Route, input geminiBatchInput) (*pin, *routing.Route, *resources.Resource, *Error) {
 	if input.LocalFileID == "" {
-		p, err := s.geminiPin(ctx, x, route)
+		p, err := s.nativeStatePin(ctx, x, route)
 		return p, route, nil, err
 	}
 	file, err := s.deps.Resources.Get(ctx, resources.KindGeminiFile, authority.ID, input.LocalFileID)
@@ -686,7 +686,7 @@ func (s *Server) mapUpstreamGeminiFile(ctx context.Context, owner *resources.Res
 }
 
 func (s *Server) geminiBatchCall(w http.ResponseWriter, r *http.Request, use retainedUse, op func(context.Context, *call, keyauthority.Authority, *resources.Resource, *pin) *Error) {
-	x, authority, done := s.geminiBegin(w, r, wire.GeminiBatch)
+	x, authority, done := s.stateBegin(w, r, wire.GeminiBatch)
 	if done {
 		return
 	}
@@ -759,7 +759,7 @@ func (s *Server) geminiBatchResourceObject(ctx context.Context, resource *resour
 }
 
 func (s *Server) geminiListBatches(w http.ResponseWriter, r *http.Request) {
-	x, authority, done := s.geminiBegin(w, r, wire.GeminiBatch)
+	x, authority, done := s.stateBegin(w, r, wire.GeminiBatch)
 	if done {
 		return
 	}
@@ -869,7 +869,7 @@ func (s *Server) geminiGetBatch(w http.ResponseWriter, r *http.Request) {
 func (s *Server) geminiBatchCancel(w http.ResponseWriter, r *http.Request) {
 	localID, action, ok := strings.Cut(r.PathValue("action"), ":")
 	if !ok || action != "cancel" || localID == "" {
-		x, _, done := s.geminiBegin(w, r, wire.GeminiBatch)
+		x, _, done := s.stateBegin(w, r, wire.GeminiBatch)
 		if !done {
 			defer s.release(r.Context())
 			s.refuse(x, w, notFoundError("not_found", "Unknown Gemini batch action."))

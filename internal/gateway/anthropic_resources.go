@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -18,7 +17,6 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/staging"
 )
 
@@ -55,47 +53,13 @@ func (s *Server) anthropicBegin(w http.ResponseWriter, r *http.Request, family w
 	return x, authority, false
 }
 
-func (s *Server) anthropicRoute(x *call, authority keyauthority.Authority, r *http.Request, requested string) (*routing.Route, *Error) {
-	slug := strings.TrimSpace(r.Header.Get(stateRouteHeader))
-	if slug == "" {
-		slug = requested
-	}
-	if slug == "" {
-		return nil, invalidRequest("missing_required_parameter", "X-OLP-Route or params.model is required.", nil)
-	}
-	route, ok := x.snapshot().FindRoute(slug)
-	if !ok {
-		return nil, modelNotFound(slug)
-	}
-	x.route = &route
-	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
-		return nil, permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
-	}
-	if !slices.Contains(route.Operations, "batch") {
-		return nil, invalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow batch operations.", nil)
-	}
-	if x.strict() {
-		return nil, policyUnavailable("target_capability", "Strict routes do not serve Anthropic files and batches.")
-	}
-	if e := x.guardrailSurfaceGate(&route); e != nil {
-		return nil, e
-	}
-	return &route, nil
-}
-
-func (s *Server) anthropicPin(ctx context.Context, x *call, route *routing.Route) (*pin, *Error) {
-	return s.selectPinSurface(ctx, x, route, "batch", "anthropic", "unary", func(p *routing.Provider, model string) bool {
-		return p.Connector().Supports("batch", "anthropic", "unary") && p.Supports(model, "batch", "anthropic", "unary")
-	})
-}
-
 func (s *Server) anthropicUploadFile(w http.ResponseWriter, r *http.Request) {
 	x, authority, done := s.anthropicBegin(w, r, wire.AnthropicFile)
 	if done {
 		return
 	}
 	defer s.release(r.Context())
-	route, err := s.anthropicRoute(x, authority, r, "")
+	route, err := s.nativeStateRoute(x, authority, r, "")
 	if err != nil {
 		s.refuse(x, w, err)
 		return
@@ -117,7 +81,7 @@ func (s *Server) anthropicUploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 	form.Disarm()
 	defer s.deps.Staging.Remove(file.Handle)
-	p, err := s.anthropicPin(r.Context(), x, route)
+	p, err := s.nativeStatePin(r.Context(), x, route)
 	if err != nil {
 		s.refuse(x, w, err)
 		return
@@ -129,17 +93,9 @@ func (s *Server) anthropicUploadFile(w http.ResponseWriter, r *http.Request) {
 		s.refuse(x, w, e)
 		return
 	}
-	if e := s.reserveState(ctx, x, authority, time.Duration(route.OverallTimeout)*time.Millisecond); e != nil {
+	if e := s.reserveStateAndSlot(ctx, x, authority, p, route); e != nil {
 		s.refuse(x, w, e)
 		return
-	}
-	if p.hold == nil {
-		gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond), "")
-		if gate.verdict != gateAdmitted {
-			s.refuse(x, w, gateError(gate))
-			return
-		}
-		p.hold = gate.hold
 	}
 	x.anthropicFilesBeta = true
 	endpoint, urlErr := resourceURL(p.provider.Connector(), p.model, "files", anthropicFilesQuery())
@@ -210,17 +166,9 @@ func (s *Server) anthropicFileCall(w http.ResponseWriter, r *http.Request, use r
 	ctx, cancel := s.stateDeadline(r.Context(), route)
 	defer cancel()
 	defer s.resourceSettle(ctx, x, p)
-	if e = s.reserveState(ctx, x, authority, time.Duration(route.OverallTimeout)*time.Millisecond); e != nil {
+	if e = s.reserveStateAndSlot(ctx, x, authority, p, route); e != nil {
 		s.refuse(x, w, e)
 		return
-	}
-	if p.hold == nil {
-		gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond), "")
-		if gate.verdict != gateAdmitted {
-			s.refuse(x, w, gateError(gate))
-			return
-		}
-		p.hold = gate.hold
 	}
 	if e = op(ctx, x, res, p); e != nil {
 		s.refuse(x, w, e)

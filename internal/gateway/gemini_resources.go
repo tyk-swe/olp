@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -43,44 +42,6 @@ func (s *Server) registerGeminiFilesState(mux *http.ServeMux) {
 	}
 }
 
-func (s *Server) geminiBegin(w http.ResponseWriter, r *http.Request, family wire.Format) (*call, keyauthority.Authority, bool) {
-	return s.stateBegin(w, r, family)
-}
-
-func (s *Server) geminiRoute(x *call, authority keyauthority.Authority, r *http.Request, requested string) (*routing.Route, *Error) {
-	slug := strings.TrimSpace(r.Header.Get(stateRouteHeader))
-	if slug == "" {
-		slug = requested
-	}
-	if slug == "" {
-		return nil, invalidRequest("missing_required_parameter", "X-OLP-Route is required.", nil)
-	}
-	route, ok := x.snapshot().FindRoute(slug)
-	if !ok {
-		return nil, modelNotFound(slug)
-	}
-	x.route = &route
-	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
-		return nil, permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
-	}
-	if !slices.Contains(route.Operations, "batch") {
-		return nil, invalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow batch operations.", nil)
-	}
-	if x.strict() {
-		return nil, policyUnavailable("target_capability", "Strict routes do not serve Gemini files.")
-	}
-	if err := x.guardrailSurfaceGate(&route); err != nil {
-		return nil, err
-	}
-	return &route, nil
-}
-
-func (s *Server) geminiPin(ctx context.Context, x *call, route *routing.Route) (*pin, *Error) {
-	return s.selectPinSurface(ctx, x, route, "batch", "gemini", "unary", func(p *routing.Provider, model string) bool {
-		return p.Connector().Supports("batch", "gemini", "unary") && p.Supports(model, "batch", "gemini", "unary")
-	})
-}
-
 func (s *Server) geminiResourceGates(ctx context.Context, x *call, authority keyauthority.Authority, p *pin, route *routing.Route, newWork bool) *Error {
 	if newWork {
 		if err := s.unboundedPinLimits(x.admissionAuthority(authority), p, route); err != nil {
@@ -90,17 +51,7 @@ func (s *Server) geminiResourceGates(ctx context.Context, x *call, authority key
 			return err
 		}
 	}
-	if err := s.reserveState(ctx, x, authority, time.Duration(route.OverallTimeout)*time.Millisecond); err != nil {
-		return err
-	}
-	if p.hold == nil {
-		gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond), "")
-		if gate.verdict != gateAdmitted {
-			return gateError(gate)
-		}
-		p.hold = gate.hold
-	}
-	return nil
+	return s.reserveStateAndSlot(ctx, x, authority, p, route)
 }
 
 func validateGeminiStartHeaders(protocol, command, rawLength string, maximum int64) (int64, *Error) {
@@ -190,12 +141,12 @@ func validateGeminiUploadURL(uploadURL, providerEndpoint string, egressPolicy in
 }
 
 func (s *Server) geminiUploadStart(w http.ResponseWriter, r *http.Request) {
-	x, authority, done := s.geminiBegin(w, r, wire.GeminiFile)
+	x, authority, done := s.stateBegin(w, r, wire.GeminiFile)
 	if done {
 		return
 	}
 	defer s.release(r.Context())
-	route, err := s.geminiRoute(x, authority, r, "")
+	route, err := s.nativeStateRoute(x, authority, r, "")
 	if err != nil {
 		s.refuse(x, w, err)
 		return
@@ -220,7 +171,7 @@ func (s *Server) geminiUploadStart(w http.ResponseWriter, r *http.Request) {
 		s.refuse(x, w, serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Gemini upload sessions require encrypted resource storage."))
 		return
 	}
-	p, err := s.geminiPin(r.Context(), x, route)
+	p, err := s.nativeStatePin(r.Context(), x, route)
 	if err != nil {
 		s.refuse(x, w, err)
 		return
@@ -550,7 +501,7 @@ func (s *Server) markGeminiUploadFailed(ctx context.Context, resource *resources
 }
 
 func (s *Server) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
-	x, authority, done := s.geminiBegin(w, r, wire.GeminiFile)
+	x, authority, done := s.stateBegin(w, r, wire.GeminiFile)
 	if done {
 		return
 	}
@@ -781,7 +732,7 @@ func (s *Server) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) geminiFileCall(w http.ResponseWriter, r *http.Request, use retainedUse, op func(context.Context, *call, keyauthority.Authority, *resources.Resource, *pin, *routing.Route) *Error) {
-	x, authority, done := s.geminiBegin(w, r, wire.GeminiFile)
+	x, authority, done := s.stateBegin(w, r, wire.GeminiFile)
 	if done {
 		return
 	}
@@ -904,7 +855,7 @@ func (s *Server) geminiDeleteFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) geminiListFiles(w http.ResponseWriter, r *http.Request) {
-	x, authority, done := s.geminiBegin(w, r, wire.GeminiFile)
+	x, authority, done := s.stateBegin(w, r, wire.GeminiFile)
 	if done {
 		return
 	}
@@ -969,7 +920,7 @@ func geminiDownloadURL(cfg connectors.Config, model, fileID string) (string, err
 func (s *Server) geminiDownloadFile(w http.ResponseWriter, r *http.Request) {
 	localID, action, ok := strings.Cut(r.PathValue("action"), ":")
 	if !ok || action != "download" || localID == "" {
-		x, _, done := s.geminiBegin(w, r, wire.GeminiFile)
+		x, _, done := s.stateBegin(w, r, wire.GeminiFile)
 		if !done {
 			defer s.release(r.Context())
 			s.refuse(x, w, notFoundError("not_found", "Unknown Gemini file action."))

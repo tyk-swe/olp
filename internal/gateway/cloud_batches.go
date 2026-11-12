@@ -201,17 +201,9 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.resourceSettle(ctx, x, p)
-	if err := s.reserveState(ctx, x, authority, time.Duration(route.OverallTimeout)*time.Millisecond); err != nil {
+	if err := s.reserveStateAndSlot(ctx, x, authority, p, &route); err != nil {
 		s.cloudBatchFail(x, w, err)
 		return
-	}
-	if p.hold == nil {
-		gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond), "")
-		if gate.verdict != gateAdmitted {
-			s.cloudBatchFail(x, w, gateError(gate))
-			return
-		}
-		p.hold = gate.hold
 	}
 	source, err := parseObjectRequest(body, oif.Limits{MaxBytes: int(s.cfg.MaxBodyBytes)})
 	if err != nil {
@@ -426,7 +418,7 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 	ctx, stop := s.stateDeadline(r.Context(), route)
 	defer stop()
 	defer s.resourceSettle(ctx, x, p)
-	if err := s.reserveStateAndSlot(ctx, x, authority, p); err != nil {
+	if err := s.reserveStateAndSlot(ctx, x, authority, p, route); err != nil {
 		s.cloudBatchFail(x, w, err)
 		return
 	}
