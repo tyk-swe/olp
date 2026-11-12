@@ -1,4 +1,4 @@
-package gateway
+package codeforward
 
 import (
 	"github.com/tyk-swe/olp/internal/codeadapter"

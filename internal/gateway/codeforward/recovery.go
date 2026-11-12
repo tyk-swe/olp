@@ -1,4 +1,4 @@
-package gateway
+package codeforward
 
 import (
 	"bytes"
@@ -63,14 +63,14 @@ func (a *codeAttempt) recover(ctx context.Context, response *http.Response, rout
 		return nil, nil
 	}
 	adapter, ok := codeadapter.ForConnection(a.config.Kind, a.config.AuthMode, a.config.ProfileID)
-	rejection, proven := adapter.InitialRejection(a.endpoint, response.StatusCode, body, response.Header, a.server.now())
+	rejection, proven := adapter.InitialRejection(a.endpoint, response.StatusCode, body, response.Header, a.forwarder.now())
 	if !ok || !proven {
 		return nil, nil
 	}
-	if err := a.server.deps.CodeLedger.ConfirmNonexecution(ctx, a.permit.Attempt.ID, response.StatusCode); err != nil {
+	if err := a.forwarder.ledger.ConfirmNonexecution(ctx, a.permit.Attempt.ID, response.StatusCode); err != nil {
 		return nil, nil
 	}
-	rejection = codeadapter.RejectionWithCycleReset(rejection, a.permit.Account.CycleAnchor, a.server.now().UTC())
+	rejection = codeadapter.RejectionWithCycleReset(rejection, a.permit.Account.CycleAnchor, a.forwarder.now().UTC())
 	zero := int64(0)
 	a.usage, a.terminal = codemode.Usage{Total: &zero}, true
 	recorded := func() bool {
@@ -88,7 +88,7 @@ func (a *codeAttempt) recover(ctx context.Context, response *http.Response, rout
 		return nil, nil
 	}
 	if rejection.Class == upstream.Credential {
-		if err := a.server.deps.CodeLedger.ObserveCooldown(ctx, a.permit.Account.ID, rejection.RetryAt); err != nil {
+		if err := a.forwarder.ledger.ObserveCooldown(ctx, a.permit.Account.ID, rejection.RetryAt); err != nil {
 			return nil, nil
 		}
 	}
@@ -110,7 +110,7 @@ func (a *codeAttempt) refreshed(ctx context.Context, adapter codeadapter.Vendor)
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		auth, err := a.server.deps.CodeAuthorizer.AuthorizeCode(refreshCtx, a.config, a.permit.Account, codemode.Dispatch{Adapter: adapter.Adapter, Protocol: a.endpoint.Protocol, ClientPath: a.endpoint.ClientPath})
+		auth, err := a.forwarder.authorizer.AuthorizeCode(refreshCtx, a.config, a.permit.Account, codemode.Dispatch{Adapter: adapter.Adapter, Protocol: a.endpoint.Protocol, ClientPath: a.endpoint.ClientPath})
 		if err == nil && auth.CredentialID == a.auth.CredentialID && auth.GrantGeneration > a.auth.GrantGeneration && adapter.ValidateAuthorization(a.endpoint, auth, a.permit.Pin.Principal) == nil {
 			return true
 		}

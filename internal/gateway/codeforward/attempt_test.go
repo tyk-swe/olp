@@ -1,4 +1,4 @@
-package gateway
+package codeforward
 
 import (
 	"bytes"
@@ -315,10 +315,10 @@ func TestWebSocketHandshakeCapacityCooldownUsesSelectedModel(t *testing.T) {
 				Account: codemode.Account{ID: "account", ProviderID: "provider", Principal: "principal"},
 				Pin:     codemode.Pin{Model: tc.pin.Model, TargetModel: tc.pin.TargetModel, Principal: "principal"},
 			}}
-			server := &Server{
+			server := &Forwarder{
 				gate: ingress.NewGate(nil, nil, nil, 0, func() time.Time { return now }),
 				now:  func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil)),
-				egress: &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}, deps: Dependencies{CodeLedger: ledger, CodeAuthorizer: fakeCodeAuthorizer{}},
+				egress: &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}, ledger: ledger, authorizer: fakeCodeAuthorizer{},
 			}
 			request := httptest.NewRequest(http.MethodGet, "/responses", nil)
 			request.Header.Set("X-OLP-Code-Affinity", "conversation")
@@ -467,9 +467,9 @@ func codexAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time) *codeAtte
 	if !ok {
 		t.Fatal("codex responses endpoint missing")
 	}
-	server := &Server{now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil)), deps: Dependencies{CodeLedger: ledger}}
+	server := &Forwarder{now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil)), ledger: ledger}
 	return &codeAttempt{
-		server:      server,
+		forwarder:   server,
 		permit:      codesessions.Permit{Account: codemode.Account{ID: "account"}, Attempt: codemode.Attempt{ID: "attempt"}},
 		config:      routing.Configuration{Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID}},
 		endpoint:    endpoint,
@@ -534,13 +534,17 @@ func TestCodeAttemptRecoveryRecordsQuotaCooldown(t *testing.T) {
 	}
 }
 
+type refusalRuntime struct{ Runtime }
+
+func (refusalRuntime) CredentialRefused(string, int64) {}
+
 func TestTranslatedRecoveryBoundsStalledRejection(t *testing.T) {
 	for _, status := range []int{401, 429} {
 		t.Run(fmt.Sprint(status), func(t *testing.T) {
 			ledger := &fakeCodeLedger{}
 			attempt := codexAttempt(t, ledger, time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC))
 			attempt.permit.InitialRecovery = true
-			attempt.server.deps.Runtime = &fakeRuntime{}
+			attempt.forwarder.runtime = refusalRuntime{}
 			attempt.dispatched = true
 			body := &stalledRejectionBody{prefix: strings.NewReader(`{"error":`), waiting: make(chan struct{}), closed: make(chan struct{})}
 			defer body.Close()
@@ -668,9 +672,9 @@ func glmAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time, path string
 	if !ok {
 		t.Fatal("glm endpoint missing")
 	}
-	server := &Server{now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil)), deps: Dependencies{CodeLedger: ledger}}
+	server := &Forwarder{now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil)), ledger: ledger}
 	return &codeAttempt{
-		server:      server,
+		forwarder:   server,
 		permit:      codesessions.Permit{InitialRecovery: true, Account: codemode.Account{ID: "account"}, Attempt: codemode.Attempt{ID: "attempt"}},
 		config:      routing.Configuration{Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.ZAIProfile}},
 		endpoint:    endpoint,
@@ -743,9 +747,9 @@ func qwenAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time, anchor *st
 	if !ok {
 		t.Fatal("qwen messages endpoint missing")
 	}
-	server := &Server{now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil)), deps: Dependencies{CodeLedger: ledger}}
+	server := &Forwarder{now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil)), ledger: ledger}
 	return &codeAttempt{
-		server:      server,
+		forwarder:   server,
 		permit:      codesessions.Permit{InitialRecovery: true, Account: codemode.Account{ID: "account", CycleAnchor: anchor}, Attempt: codemode.Attempt{ID: "attempt"}},
 		config:      routing.Configuration{Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.QwenTokenPlanProfile}},
 		endpoint:    endpoint,
@@ -820,9 +824,9 @@ func minimaxAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time, path st
 	if !ok {
 		t.Fatal("minimax endpoint missing")
 	}
-	server := &Server{now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil)), deps: Dependencies{CodeLedger: ledger}}
+	server := &Forwarder{now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil)), ledger: ledger}
 	return &codeAttempt{
-		server:      server,
+		forwarder:   server,
 		permit:      codesessions.Permit{InitialRecovery: true, Account: codemode.Account{ID: "account"}, Attempt: codemode.Attempt{ID: "attempt"}},
 		config:      routing.Configuration{Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.MiniMaxProfile}},
 		endpoint:    endpoint,
@@ -920,9 +924,9 @@ func kimiAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time, path strin
 	if !ok {
 		t.Fatal("kimi endpoint missing")
 	}
-	server := &Server{now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil)), deps: Dependencies{CodeLedger: ledger}}
+	server := &Forwarder{now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil)), ledger: ledger}
 	return &codeAttempt{
-		server:      server,
+		forwarder:   server,
 		permit:      codesessions.Permit{InitialRecovery: true, Account: codemode.Account{ID: "account"}, Attempt: codemode.Attempt{ID: "attempt"}},
 		config:      routing.Configuration{Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.KimiProfile}},
 		endpoint:    endpoint,
@@ -969,5 +973,87 @@ func TestCodeAttemptMiniMaxUsageAndAmbiguousDoNotRecover(t *testing.T) {
 	recovery, err = ambiguous.recover(t.Context(), response, route, nil, false)
 	if err != nil || recovery != nil {
 		t.Fatalf("recover(ambiguous) = %+v, %v, want no replay", recovery, err)
+	}
+}
+
+type chargeLedger struct {
+	charge  json.RawMessage
+	attempt string
+}
+
+func (l *chargeLedger) Models(context.Context, codemode.Route, string) (codeclient.Offers, error) {
+	return nil, nil
+}
+func (l *chargeLedger) Admit(context.Context, codesessions.Admission) (codesessions.Permit, error) {
+	return codesessions.Permit{}, nil
+}
+func (l *chargeLedger) BindConnection(context.Context, codemode.Route, string, codemode.Identity, string, []string) (codesessions.Permit, error) {
+	return codesessions.Permit{}, nil
+}
+func (l *chargeLedger) MarkDispatched(context.Context, string) error { return nil }
+func (l *chargeLedger) ConfirmNonexecution(context.Context, string, int) error {
+	return nil
+}
+func (l *chargeLedger) ObserveCooldown(context.Context, string, time.Time) error { return nil }
+func (l *chargeLedger) ObserveCooldownClass(context.Context, string, string, codeadapter.Classification, time.Time) error {
+	return nil
+}
+func (l *chargeLedger) Settle(context.Context, string, codemode.Usage) error { return nil }
+func (l *chargeLedger) Abort(context.Context, string) error                  { return nil }
+func (l *chargeLedger) ObserveHealth(context.Context, string, codemode.HealthObservation) error {
+	return nil
+}
+func (l *chargeLedger) ObserveAllowance(context.Context, string, codemode.Allowance) error {
+	return nil
+}
+func (l *chargeLedger) ObserveAllowanceCharge(_ context.Context, attempt string, charge json.RawMessage) error {
+	l.attempt, l.charge = attempt, charge
+	return nil
+}
+func (l *chargeLedger) ObserveReference(context.Context, string, string) error { return nil }
+func (l *chargeLedger) ObserveOutcome(context.Context, string, codemode.Outcome) error {
+	return nil
+}
+func (l *chargeLedger) RecordRefusal(context.Context, codemode.Route, string, string, string) error {
+	return nil
+}
+
+func TestCodeAttemptStoresAllowanceChargeOnlyForOpenCodeGo(t *testing.T) {
+	reported := json.RawMessage(`{"billing_source":"go","allowance":0.0021}`)
+	for name, tc := range map[string]struct {
+		adapter codemode.Adapter
+		paid    bool
+		want    bool
+	}{
+		"opencode go attempt":     {adapter: codemode.AdapterOpenCodeGo, want: true},
+		"other adapter attempt":   {adapter: codemode.AdapterZAICoding},
+		"paid opencode-shaped":    {adapter: codemode.AdapterOpenCodeGo, paid: true},
+		"unknown adapter attempt": {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ledger := &chargeLedger{}
+			attempt := &codeAttempt{forwarder: &Forwarder{ledger: ledger}, adapter: tc.adapter, permit: codesessions.Permit{Attempt: codemode.Attempt{ID: "attempt-1"}}}
+			if tc.paid {
+				attempt.paid = &paidCodeAttempt{}
+			}
+			attempt.observe(codemode.Observation{Terminal: true, AllowanceCharge: reported})
+			if tc.want && (ledger.attempt != "attempt-1" || string(ledger.charge) != string(reported)) {
+				t.Fatalf("ledger = %s %s, want the reported charge on attempt-1", ledger.attempt, ledger.charge)
+			}
+			if !tc.want && ledger.charge != nil {
+				t.Fatalf("charge stored = %s, want none", ledger.charge)
+			}
+		})
+	}
+}
+
+func TestCodeAttemptLastTerminalChargeWins(t *testing.T) {
+	ledger := &chargeLedger{}
+	attempt := &codeAttempt{forwarder: &Forwarder{ledger: ledger}, adapter: codemode.AdapterOpenCodeGo, permit: codesessions.Permit{Attempt: codemode.Attempt{ID: "attempt-1"}}}
+	attempt.observe(codemode.Observation{Terminal: true, AllowanceCharge: json.RawMessage(`{"billing_source":"go","allowance":0.001}`)})
+	terminal := json.RawMessage(`{"billing_source":"go","allowance":0.0021}`)
+	attempt.observe(codemode.Observation{Terminal: true, AllowanceCharge: terminal})
+	if string(ledger.charge) != string(terminal) {
+		t.Fatalf("charge = %s, want the last terminal charge %s", ledger.charge, terminal)
 	}
 }

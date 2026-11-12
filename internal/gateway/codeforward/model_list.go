@@ -1,4 +1,4 @@
-package gateway
+package codeforward
 
 import (
 	"net/http"
@@ -9,24 +9,24 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 )
 
-func (s *Server) codeModels(w http.ResponseWriter, r *http.Request) {
+func (f *Forwarder) codeModels(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if !s.gate.Admit(r.Context()) {
+	if !f.gate.Admit(r.Context()) {
 		codeWriteError(w, r, codemode.Refuse(503, "code_overloaded"))
 		return
 	}
-	defer s.gate.Release(r.Context())
+	defer f.gate.Release(r.Context())
 	token, failure := ingress.PresentedKey(r)
 	if failure != nil {
 		codeWriteError(w, r, codemode.Refuse(failure.Status, "code_authentication_refused"))
 		return
 	}
-	authority, failure := s.gate.AuthenticateKey(r, token, "inference")
+	authority, failure := f.gate.AuthenticateKey(r, token, "inference")
 	if failure != nil {
 		codeWriteError(w, r, codemode.Refuse(failure.Status, "code_authentication_refused"))
 		return
 	}
-	release := s.deps.Runtime.Release()
+	release := f.runtime.Release()
 	if release == nil || release.Snapshot() == nil {
 		codeWriteError(w, r, codemode.Refuse(503, "code_runtime_unavailable"))
 		return
@@ -36,15 +36,15 @@ func (s *Server) codeModels(w http.ResponseWriter, r *http.Request) {
 		codeWriteError(w, r, codemode.Refuse(404, "code_route_unavailable"))
 		return
 	}
-	if !route.Enabled || !authority.Allows("inference", route.Slug, &route.ProjectID, s.now()) {
+	if !route.Enabled || !authority.Allows("inference", route.Slug, &route.ProjectID, f.now()) {
 		codeWriteError(w, r, codemode.Refuse(404, "code_route_unavailable"))
 		return
 	}
-	if s.deps.CodeLedger == nil {
+	if f.ledger == nil {
 		codeWriteError(w, r, codemode.Refuse(503, "code_admission_unavailable"))
 		return
 	}
-	offers, err := s.deps.CodeLedger.Models(r.Context(), route, authority.ID)
+	offers, err := f.ledger.Models(r.Context(), route, authority.ID)
 	if err != nil {
 		codeWriteError(w, r, err)
 		return

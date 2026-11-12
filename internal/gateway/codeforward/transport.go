@@ -1,4 +1,4 @@
-package gateway
+package codeforward
 
 import (
 	"context"
@@ -31,30 +31,30 @@ func (a *codeAttempt) headers(source http.Header) http.Header {
 	return h
 }
 
-func (s *Server) codeEndpoint(cfg routing.Configuration, path, query string) (string, error) {
+func (f *Forwarder) codeEndpoint(cfg routing.Configuration, path, query string) (string, error) {
 	u, err := url.Parse(cfg.Endpoint)
 	if err != nil || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
 		return "", codemode.Refuse(502, "code_connection_invalid")
 	}
 	u.Path = strings.TrimRight(u.Path, "/") + "/" + path
 	u.RawPath = ""
-	if _, err := s.egress.ValidateEndpoint(u.String()); err != nil {
+	if _, err := f.egress.ValidateEndpoint(u.String()); err != nil {
 		return "", codemode.Refuse(502, "code_egress_refused")
 	}
 	u.RawQuery = query
 	return u.String(), nil
 }
 
-func (s *Server) codeClient(ctx context.Context, release *release.Release, cfg routing.Configuration, providerID string) (*http.Client, error) {
+func (f *Forwarder) codeClient(ctx context.Context, release *release.Release, cfg routing.Configuration, providerID string) (*http.Client, error) {
 	var secret []byte
 	if network := cfg.Options.Network; network != nil && network.CredentialID != "" {
 		var err error
-		secret, err = s.deps.Runtime.NetworkSecret(ctx, release, providerID, network.CredentialID)
+		secret, err = f.runtime.NetworkSecret(ctx, release, providerID, network.CredentialID)
 		if err != nil {
 			return nil, codemode.Refuse(503, "code_network_credential_unavailable")
 		}
 	}
-	client, err := s.egress.RawConnectionClient(cfg.Options.Network, secret, UpstreamHeaderTimeout)
+	client, err := f.egress.RawConnectionClient(cfg.Options.Network, secret, f.headerTimeout)
 	if err != nil {
 		return nil, codemode.Refuse(502, "code_connection_invalid")
 	}

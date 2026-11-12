@@ -55,7 +55,7 @@ func retainedOperationForAction(action string) retainedOperation {
 
 func (p retainedAdmissionPlan) authority(authority keyauthority.Authority, costExempt bool) keyauthority.Authority {
 	if p.billing == retainedFree {
-		return researchRateAuthority(authority, false)
+		return quota.RequestRateAuthority(authority, false)
 	}
 	if costExempt {
 		return quota.WithoutCostBudgets(authority)
@@ -152,7 +152,7 @@ func (s *Server) admitRetainedRequest(ctx context.Context, x *call, a keyauthori
 func (s *Server) reserveRetainedPage(ctx context.Context, x *call, authority keyauthority.Authority, entries []retainedListEntry, limit int, ttl time.Duration) *fault.Error {
 	authority.Attribution = x.attribution
 	if retainedPageFreeControl(entries, limit) {
-		authority = researchRateAuthority(authority, false)
+		authority = quota.RequestRateAuthority(authority, false)
 	}
 	lease, failure := s.deps.Admission.ReserveKey(ctx, authority, x.clientSurface(), max(resourceEstimate, x.estimate), ttl)
 	x.lease = lease

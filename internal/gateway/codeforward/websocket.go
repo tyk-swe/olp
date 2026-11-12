@@ -1,4 +1,4 @@
-package gateway
+package codeforward
 
 import (
 	"context"
@@ -66,7 +66,7 @@ type codeWebSocketHandshake struct {
 	target     string
 }
 
-func (s *Server) prepareCodeWebSocket(r *http.Request, release *release.Release, route codemode.Route, authority keyauthority.Authority, inbound codeIngress) (codeWebSocketHandshake, error) {
+func (f *Forwarder) prepareCodeWebSocket(r *http.Request, release *release.Release, route codemode.Route, authority keyauthority.Authority, inbound codeIngress) (codeWebSocketHandshake, error) {
 	var handshake codeWebSocketHandshake
 	identity, err := codeConnectionIdentity(inbound, r.Header)
 	if err != nil {
@@ -86,7 +86,7 @@ func (s *Server) prepareCodeWebSocket(r *http.Request, release *release.Release,
 			return handshake, codemode.Refuse(400, "code_paid_operation_unsupported")
 		}
 	}
-	permit, err := s.deps.CodeLedger.BindConnection(r.Context(), route, authority.ID, identity, r.Header.Get("X-OLP-Code-Model"), release.Snapshot().CodeProviders(route, inbound.path, codeadapter.WebSocket))
+	permit, err := f.ledger.BindConnection(r.Context(), route, authority.ID, identity, r.Header.Get("X-OLP-Code-Model"), release.Snapshot().CodeProviders(route, inbound.path, codeadapter.WebSocket))
 	if err != nil {
 		return handshake, err
 	}
@@ -107,30 +107,30 @@ func (s *Server) prepareCodeWebSocket(r *http.Request, release *release.Release,
 		return handshake, codemode.Refuse(failure.Status, "code_"+failure.Code)
 	}
 	handshake.labels = labels
-	if failure := s.gate.CheckKeyAddress(r, permit.Authority); failure != nil {
+	if failure := f.gate.CheckKeyAddress(r, permit.Authority); failure != nil {
 		return handshake, codemode.Refuse(failure.Status, "code_ip_not_allowed")
 	}
 	target, err := resolveCodeTarget(release.Snapshot(), route, permit.Account.ProviderID, inbound, codeadapter.WebSocket)
 	if err != nil {
 		return handshake, err
 	}
-	auth, err := s.deps.CodeAuthorizer.AuthorizeCode(r.Context(), target.config, permit.Account, target.dispatchDescriptor())
+	auth, err := f.authorizer.AuthorizeCode(r.Context(), target.config, permit.Account, target.dispatchDescriptor())
 	if err != nil {
 		return handshake, codemode.Refuse(503, "code_account_unavailable")
 	}
 	if err := target.adapter.ValidateAuthorization(target.endpoint, auth, permit.Pin.Principal); err != nil {
-		// Keep the handshake's existing principal-refusal envelope.
+		// Keep the handshake'f existing principal-refusal envelope.
 		if codeRefusal(err).Code == "code_principal_mismatch" {
 			err = codemode.Refuse(503, "code_account_unavailable")
 		}
 		return handshake, err
 	}
-	handshake.connection = &codeAttempt{model: operation.Model, identityOriginator: target.adapter.CompatibilityOriginator(route), adapter: target.adapter.Adapter, server: s, permit: permit, config: target.config, auth: auth, endpoint: target.endpoint, observer: codeObserver(target.endpoint)}
-	handshake.client, err = s.codeClient(r.Context(), release, target.config, permit.Account.ProviderID)
+	handshake.connection = &codeAttempt{model: operation.Model, identityOriginator: target.adapter.CompatibilityOriginator(route), adapter: target.adapter.Adapter, forwarder: f, permit: permit, config: target.config, auth: auth, endpoint: target.endpoint, observer: codeObserver(target.endpoint)}
+	handshake.client, err = f.codeClient(r.Context(), release, target.config, permit.Account.ProviderID)
 	if err != nil {
 		return handshake, err
 	}
-	handshake.target, err = s.codeEndpoint(target.config, target.endpoint.UpstreamPath, r.URL.RawQuery)
+	handshake.target, err = f.codeEndpoint(target.config, target.endpoint.UpstreamPath, r.URL.RawQuery)
 	if err != nil {
 		handshake.client.CloseIdleConnections()
 		return handshake, err
@@ -138,14 +138,14 @@ func (s *Server) prepareCodeWebSocket(r *http.Request, release *release.Release,
 	return handshake, nil
 }
 
-func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *release.Release, route codemode.Route, authority keyauthority.Authority, inbound codeIngress) {
+func (f *Forwarder) codeWebSocket(w http.ResponseWriter, r *http.Request, release *release.Release, route codemode.Route, authority keyauthority.Authority, inbound codeIngress) {
 	keyID, digest := authority.ID, authority.EndUserDigest
-	reject := func(err error) { s.codeRefuse(w, r, route, keyID, digest, err) }
+	reject := func(err error) { f.codeRefuse(w, r, route, keyID, digest, err) }
 	if r.Header.Get("Sec-Websocket-Protocol") != "" {
 		reject(codemode.Refuse(400, "code_protocol_unsupported"))
 		return
 	}
-	handshake, err := s.prepareCodeWebSocket(r, release, route, authority, inbound)
+	handshake, err := f.prepareCodeWebSocket(r, release, route, authority, inbound)
 	if err != nil {
 		reject(err)
 		return
@@ -185,7 +185,7 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 		return
 	}
 	defer client.CloseNow()
-	client.SetReadLimit(bodylimit.Lower(s.codeBodyLimit(), route.MaxBodyBytes))
+	client.SetReadLimit(bodylimit.Lower(f.codeBodyLimit(), route.MaxBodyBytes))
 	ctx, cancel := context.WithTimeout(r.Context(), time.Hour)
 	defer cancel()
 	clientMessages := codeRead(ctx, client)
@@ -210,20 +210,20 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 			active.outcome(ctx, codemode.Outcome{Origin: "gateway", Kind: "rejected"})
 		}
 		refusal := codeRefusal(err)
-		s.recordCodeRefusal(ctx, route, keyID, digest, refusal.Code)
+		f.recordCodeRefusal(ctx, route, keyID, digest, refusal.Code)
 		_ = client.Close(websocket.StatusPolicyViolation, refusal.Code)
 	}
 	var authorityTick <-chan time.Time
 	if authority.WorkloadIssuerID != nil {
-		ticker := time.NewTicker(realtimeReauth)
+		ticker := time.NewTicker(ingress.ReauthInterval)
 		defer ticker.Stop()
 		authorityTick = ticker.C
 	}
 	for {
 		select {
 		case <-authorityTick:
-			fresh, problem := s.gate.Authenticate(r, "inference")
-			if problem != nil || fresh.ID != keyID || fresh.EndUserDigest != digest || !fresh.Allows("inference", route.Slug, &route.ProjectID, s.now()) || !fresh.AllowsAttribution(labels) {
+			fresh, problem := f.gate.Authenticate(r, "inference")
+			if problem != nil || fresh.ID != keyID || fresh.EndUserDigest != digest || !fresh.Allows("inference", route.Slug, &route.ProjectID, f.now()) || !fresh.AllowsAttribution(labels) {
 				refuse(codemode.Refuse(403, "code_authority_revoked"))
 				return
 			}
@@ -256,7 +256,7 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 				refuse(codemode.Refuse(409, "code_identity_changed"))
 				return
 			}
-			active, err = s.prepareCode(r.WithContext(ctx), release, route, observation, inbound, codeadapter.WebSocket, nil, message.body)
+			active, err = f.prepareCode(r.WithContext(ctx), release, route, observation, inbound, codeadapter.WebSocket, nil, message.body)
 			if err != nil {
 				refuse(err)
 				return
@@ -268,13 +268,13 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 			identity = observation.Operation.Identity
 			account = active.permit.Account.ID
 			// The socket still uses the authorization sent at its handshake,
-			// even if this generation's admission reads a refreshed credential.
+			// even if this generation'f admission reads a refreshed credential.
 			active.auth = connection.auth
-			if s.deps.Runtime.Eligibility(connection.auth.CredentialID) != routing.Eligible {
+			if f.runtime.Eligibility(connection.auth.CredentialID) != routing.Eligible {
 				refuse(codemode.Refuse(503, "code_account_unavailable"))
 				return
 			}
-			if network := connection.config.Options.Network; network != nil && network.CredentialID != "" && s.deps.Runtime.Eligibility(network.CredentialID) != routing.Eligible {
+			if network := connection.config.Options.Network; network != nil && network.CredentialID != "" && f.runtime.Eligibility(network.CredentialID) != routing.Eligible {
 				refuse(codemode.Refuse(503, "code_network_credential_unavailable"))
 				return
 			}

@@ -1,4 +1,4 @@
-package gateway
+package codeforward
 
 import (
 	"context"
@@ -41,16 +41,16 @@ func codeError(r *http.Request, err error) *fault.Error {
 	return &fault.Error{Status: refusal.Status, Code: refusal.Code, Type: kind, Message: codeRefusalMessage(refusal.Code), RetryAfter: refusal.RetryAfter(time.Now())}
 }
 
-func (s *Server) codeRefuse(w http.ResponseWriter, r *http.Request, route codemode.Route, keyID, digest string, err error) {
+func (f *Forwarder) codeRefuse(w http.ResponseWriter, r *http.Request, route codemode.Route, keyID, digest string, err error) {
 	refusal := codeRefusal(err)
-	s.recordCodeRefusal(r.Context(), route, keyID, digest, refusal.Code)
+	f.recordCodeRefusal(r.Context(), route, keyID, digest, refusal.Code)
 	codeWriteError(w, r, refusal)
 }
 
-func (s *Server) recordCodeRefusal(ctx context.Context, route codemode.Route, keyID, digest, code string) {
+func (f *Forwarder) recordCodeRefusal(ctx context.Context, route codemode.Route, keyID, digest, code string) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	_ = s.deps.CodeLedger.RecordRefusal(ctx, route, keyID, digest, code)
+	_ = f.ledger.RecordRefusal(ctx, route, keyID, digest, code)
 }
 
 func codeRefusalMessage(code string) string {

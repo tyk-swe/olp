@@ -1,4 +1,4 @@
-package gateway
+package codeforward
 
 import (
 	"context"
@@ -29,13 +29,13 @@ type researchAttempt struct {
 	dispatched           bool
 }
 
-func (s *Server) prepareResearch(r *http.Request, release *release.Release, route codemode.Route, service string, authority keyauthority.Authority, notification bool) (*researchAttempt, error) {
+func (f *Forwarder) prepareResearch(r *http.Request, release *release.Release, route codemode.Route, service string, authority keyauthority.Authority, notification bool) (*researchAttempt, error) {
 	ctx := r.Context()
-	fresh, account, err := s.researchAuthority(r, route, service, authority)
+	fresh, account, err := f.researchAuthority(r, route, service, authority)
 	if err != nil {
 		return nil, err
 	}
-	a := &researchAttempt{log: s.log, account: account}
+	a := &researchAttempt{log: f.log, account: account}
 	prepared := false
 	defer func() {
 		if !prepared {
@@ -45,8 +45,8 @@ func (s *Server) prepareResearch(r *http.Request, release *release.Release, rout
 	var failure *fault.Error
 	streamAuthority := fresh
 	control := notification || r.Method == http.MethodGet
-	fresh = researchRateAuthority(fresh, control)
-	a.lease, failure = s.deps.Admission.ReserveCodeRate(ctx, fresh, 0, researchTimeout+time.Minute, route.Slug)
+	fresh = quota.RequestRateAuthority(fresh, control)
+	a.lease, failure = f.admission.ReserveCodeRate(ctx, fresh, 0, researchTimeout+time.Minute, route.Slug)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_rate_limited")
 	}
@@ -64,17 +64,17 @@ func (s *Server) prepareResearch(r *http.Request, release *release.Release, rout
 		}
 		limited.Options.Limits = &copy
 	}
-	a.providerLease, failure = s.deps.Admission.ReserveCodeProvider(ctx, account.ProviderID, limited, 0, researchTimeout+time.Minute)
+	a.providerLease, failure = f.admission.ReserveCodeProvider(ctx, account.ProviderID, limited, 0, researchTimeout+time.Minute)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_provider_rate_limited")
 	}
 	if r.Method == http.MethodGet {
-		a.streamLease, failure = s.deps.Admission.ReserveResearchStream(ctx, streamAuthority, route.Slug, service, account.ProviderID, a.config.Options.Limits, researchTimeout)
+		a.streamLease, failure = f.admission.ReserveResearchStream(ctx, streamAuthority, route.Slug, service, account.ProviderID, a.config.Options.Limits, researchTimeout)
 		if failure != nil {
 			return nil, codemode.Refuse(failure.Status, "code_research_stream_limited")
 		}
 	}
-	a.auth, err = s.researchAuthorization(ctx, a.config, account, service)
+	a.auth, err = f.researchAuthorization(ctx, a.config, account, service)
 	if err != nil {
 		return nil, err
 	}
@@ -83,45 +83,9 @@ func (s *Server) prepareResearch(r *http.Request, release *release.Release, rout
 	return a, nil
 }
 
-// Research consumes requests, without inference tokens. Lifecycle notifications
-// bypass work concurrency; GET streams reserve separate concurrency below.
-func researchRateAuthority(authority keyauthority.Authority, control bool) keyauthority.Authority {
-	// This also clones the nested route and end-user policies before editing.
-	authority = quota.WithoutCostBudgets(authority)
-	authority.Policy.TokensPerMinute = nil
-	authority.BudgetGroupTPM = nil
-	if control {
-		authority.Policy.MaxConcurrency = nil
-		authority.BudgetGroupConcurrency = nil
-	}
-	for slug, policy := range authority.Policy.RouteLimits {
-		policy.TokensPerMinute = nil
-		if control {
-			policy.MaxConcurrency = nil
-		}
-		authority.Policy.RouteLimits[slug] = policy
-	}
-	for _, policy := range []*keyauthority.EndUserPolicy{authority.Policy.EndUserPolicy, authority.ProjectEndUserPolicy} {
-		if policy != nil {
-			policy.Defaults.TokensPerMinute = nil
-			if control {
-				policy.Defaults.MaxConcurrency = nil
-			}
-			for digest, limits := range policy.Overrides {
-				limits.TokensPerMinute = nil
-				if control {
-					limits.MaxConcurrency = nil
-				}
-				policy.Overrides[digest] = limits
-			}
-		}
-	}
-	return authority
-}
-
-func (s *Server) researchAuthority(r *http.Request, route codemode.Route, service string, authority keyauthority.Authority) (keyauthority.Authority, codemode.Account, error) {
+func (f *Forwarder) researchAuthority(r *http.Request, route codemode.Route, service string, authority keyauthority.Authority) (keyauthority.Authority, codemode.Account, error) {
 	ctx := r.Context()
-	fresh, account, err := s.deps.CodeResearch.AuthorizeResearch(ctx, route, authority.ID, service)
+	fresh, account, err := f.research.AuthorizeResearch(ctx, route, authority.ID, service)
 	if err != nil {
 		return fresh, account, err
 	}
@@ -131,9 +95,9 @@ func (s *Server) researchAuthority(r *http.Request, route codemode.Route, servic
 	if err = bindCodeWorkload(&fresh, authority); err != nil {
 		return fresh, account, err
 	}
-	failure := s.gate.CheckKeyAddress(r, fresh)
+	failure := f.gate.CheckKeyAddress(r, fresh)
 	if failure == nil {
-		fresh, failure = s.gate.IdentifyEndUser(r, fresh)
+		fresh, failure = f.gate.IdentifyEndUser(r, fresh)
 	}
 	if failure != nil {
 		return fresh, account, codemode.Refuse(failure.Status, "code_permission_denied")
@@ -147,8 +111,8 @@ func (s *Server) researchAuthority(r *http.Request, route codemode.Route, servic
 	return fresh, account, nil
 }
 
-func (s *Server) researchAuthorization(ctx context.Context, config routing.Configuration, account codemode.Account, service string) (codemode.Authorization, error) {
-	auth, err := s.deps.ResearchAuth.AuthorizeResearch(ctx, config, account, service)
+func (f *Forwarder) researchAuthorization(ctx context.Context, config routing.Configuration, account codemode.Account, service string) (codemode.Authorization, error) {
+	auth, err := f.researchAuth.AuthorizeResearch(ctx, config, account, service)
 	if err != nil {
 		return auth, err
 	}

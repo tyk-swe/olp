@@ -1,4 +1,4 @@
-package gateway
+package codeforward
 
 import (
 	"encoding/json"
@@ -31,7 +31,7 @@ func researchOriginAllowed(r *http.Request) bool {
 
 // copyResearchResponse reports whether a valid InitializeResult reached the
 // caller. Tentative sessions must be removed when it returns false.
-func (s *Server) copyResearchResponse(w http.ResponseWriter, r *http.Request, response *http.Response, forwarding researchResponse) bool {
+func (f *Forwarder) copyResearchResponse(w http.ResponseWriter, r *http.Request, response *http.Response, forwarding researchResponse) bool {
 	refuse := func() { codeWriteError(w, r, codemode.Refuse(502, "code_research_response_invalid")) }
 	if encoding := response.Header.Get("Content-Encoding"); encoding != "" && encoding != "identity" {
 		refuse()
@@ -71,7 +71,7 @@ func (s *Server) copyResearchResponse(w http.ResponseWriter, r *http.Request, re
 		if err != nil || n != len(raw) || response.StatusCode != http.StatusOK || forwarding.method != "initialize" || !coderesearch.Initialized(raw, forwarding.requestID) || r.Context().Err() != nil {
 			return false
 		}
-		// Write may only acknowledge net/http's local response buffer. Flush the
+		// Write may only acknowledge net/http'f local response buffer. Flush the
 		// session ID and result before keeping a tentative initialization alive.
 		return http.NewResponseController(w).Flush() == nil && r.Context().Err() == nil
 	}

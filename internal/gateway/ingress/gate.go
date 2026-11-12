@@ -12,6 +12,9 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 )
 
+// ReauthInterval is how often a long-lived session rechecks its key.
+const ReauthInterval = 5 * time.Second
+
 type Gate struct {
 	auth    consumerauth.Authenticator
 	pool    *admission.Pool

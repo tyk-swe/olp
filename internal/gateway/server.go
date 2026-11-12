@@ -25,11 +25,13 @@ import (
 	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export/capture"
+	"github.com/tyk-swe/olp/internal/gateway/codeforward"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/health"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
+	"github.com/tyk-swe/olp/internal/gateway/traceingest"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
@@ -108,17 +110,17 @@ type Dependencies struct {
 	Log            *slog.Logger
 	Cache          *cache.Store
 	Guardrails     func(guardrails.Caller) guardrails.Evaluator
-	CodeLedger     CodeLedger
-	CodeAuthorizer CodeAuthorizer
-	CodeResearch   ResearchLedger
-	ResearchAuth   ResearchAuthorizer
+	CodeLedger     codeforward.Ledger
+	CodeAuthorizer codeforward.Authorizer
+	CodeResearch   codeforward.ResearchLedger
+	ResearchAuth   codeforward.ResearchAuthorizer
 	Runtime        Runtime
 	Sink           events.Sink
 	Admission      *quota.Admission
 	Debits         SessionDebitLedger
 	WorkflowRuns   WorkflowRunStore
 	WorkflowTools  WorkflowToolRunner
-	Traces         *TraceDeps
+	Traces         *traceingest.Store
 	Media          *MediaDeps
 	Staging        *staging.Spool
 	Uploads        *staging.Admission
@@ -141,6 +143,7 @@ type Server struct {
 	connections *egress.ConnectionClientCache
 	auth        *connectors.Auth
 	gate        *ingress.Gate
+	code        *codeforward.Forwarder
 	health      *health.Tracker
 	fleet       *health.Fleet
 	// unhealthy is fleet.unhealthy bound once, so selection never allocates
@@ -171,6 +174,7 @@ func New(deps Dependencies, cfg Config) *Server {
 	}
 	fleet := health.NewFleet(time.Now)
 	normalized := normalizedDependencies(deps)
+	gate := ingress.NewGate(normalized.Runtime, pool, config.TrustedProxies, config.MaxBodyBytes, time.Now)
 	return &Server{
 		log:         log,
 		cfg:         config,
@@ -178,7 +182,8 @@ func New(deps Dependencies, cfg Config) *Server {
 		client:      policy.Client(UpstreamHeaderTimeout),
 		connections: egress.NewConnectionClientCache(128),
 		auth:        auth,
-		gate:        ingress.NewGate(normalized.Runtime, pool, config.TrustedProxies, config.MaxBodyBytes, time.Now),
+		gate:        gate,
+		code:        codeForwarder(normalized, config, gate, auth),
 		health:      health.NewTracker(time.Now),
 		fleet:       fleet,
 		unhealthy:   fleet.Unhealthy,
@@ -206,12 +211,12 @@ func (s *Server) OpenCircuits() int64 { return s.health.OpenCircuits() }
 
 // Register mounts the OpenAI surface on the public mux.
 func (s *Server) Register(mux *http.ServeMux) {
-	if s.deps.CodeLedger != nil && s.deps.CodeAuthorizer != nil {
-		s.RegisterCode(mux)
+	if s.code != nil {
+		s.code.Register(mux)
 	}
 	mux.HandleFunc("POST /v1/guardrails/apply", s.applyGuardrails)
 	mux.HandleFunc("POST /v1/delegations", s.createDelegation)
-	mux.HandleFunc("POST /v1/traces", s.ingestTraces)
+	mux.Handle("POST /v1/traces", traceingest.New(s.deps.Runtime, s.cfg.TrustedProxies, s.deps.Traces))
 	s.registerNative(mux)
 	s.registerGeminiLifecycle(mux)
 	s.registerMedia(mux)
@@ -1058,7 +1063,7 @@ func normalizedConfig(cfg Config) Config {
 		TrustedProxies: slices.Clone(cfg.TrustedProxies), CORSAllowedOrigins: slices.Clone(cfg.CORSAllowedOrigins),
 		InlineMedia: normalizedInlineMedia(cfg.InlineMedia), AdmissionPool: cfg.AdmissionPool, Predicates: cfg.Predicates, Signer: cfg.Signer, Carrier: cfg.Carrier,
 		UnconfinedPlugins: cfg.UnconfinedPlugins, MaxShadowInFlight: cfg.MaxShadowInFlight,
-		WebRTCBound: positiveOrDefault(cfg.WebRTCBound, time.Hour), WebRTCReauth: positiveOrDefault(cfg.WebRTCReauth, realtimeReauth), WebRTCHeartbeat: positiveOrDefault(cfg.WebRTCHeartbeat, realtimePing),
+		WebRTCBound: positiveOrDefault(cfg.WebRTCBound, time.Hour), WebRTCReauth: positiveOrDefault(cfg.WebRTCReauth, ingress.ReauthInterval), WebRTCHeartbeat: positiveOrDefault(cfg.WebRTCHeartbeat, realtimePing),
 	}
 }
 
@@ -1081,6 +1086,17 @@ func inferencePool(cfg Config) *admission.Pool {
 		return cfg.AdmissionPool
 	}
 	return admission.NewPool(max(cfg.MaxInFlight, 1))
+}
+
+func codeForwarder(deps Dependencies, cfg Config, gate *ingress.Gate, auth *connectors.Auth) *codeforward.Forwarder {
+	if deps.CodeLedger == nil || deps.CodeAuthorizer == nil {
+		return nil
+	}
+	return codeforward.New(codeforward.Dependencies{
+		Ledger: deps.CodeLedger, Authorizer: deps.CodeAuthorizer, Research: deps.CodeResearch, ResearchAuth: deps.ResearchAuth,
+		Runtime: deps.Runtime, Sink: deps.Sink, Admission: deps.Admission, Gate: gate, Egress: deps.Egress, Auth: auth,
+		Log: deps.Log, Now: time.Now, MaxBodyBytes: cfg.MaxBodyBytes, HeaderTimeout: UpstreamHeaderTimeout,
+	})
 }
 
 func normalizedDependencies(deps Dependencies) Dependencies {
