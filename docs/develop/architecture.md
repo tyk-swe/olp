@@ -200,7 +200,7 @@ account, and the native first dispatch remains unchanged.
 | `routing`, installed by `release` | endpoint and model eligibility compiled from the frozen revision | a failed compile leaves the previous release serving |
 | `codewire`, `codexwire` | native request classification and response observation on copies | parsing never reserializes the forwarded payload |
 | `gateway/code_attempt.go`, `codesessions.Store`, `limits` | dispatch, durable conversation pinning, admission and settlement, hard token budgets | one `MarkDispatched` per attributed attempt, atomic initial rebinding only after proven nonexecution, no replay of accepted or ambiguous work |
-| `codeclient`, `routes`, `providers.CodeAuthorizer` | generated client configuration, project authority, upstream credential construction | generated configuration never contains an OLP or vendor key |
+| `codeclient`, `routes`, `codeaccounts.Authorizer` | generated client configuration, project authority, upstream credential construction | generated configuration never contains an OLP or vendor key |
 
 `gateway/code_attempt.go` shares dispatch, observations, settlement and workload
 binding across HTTP/SSE and WebSockets. Transport files own copying/handshakes;
