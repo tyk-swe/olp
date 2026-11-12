@@ -32,7 +32,7 @@ func openDestination(typ contract.NotificationDestinationType, rawURL, configura
 	if err != nil {
 		return err
 	}
-	if _, err := open(&policy, destination{Type: typ, URL: rawURL, Configuration: fields}, []byte(secret)); err != nil {
+	if _, err := kindOf(typ).open(&policy, destination{Type: typ, URL: rawURL, Configuration: fields}, []byte(secret)); err != nil {
 		return err
 	}
 	return nil

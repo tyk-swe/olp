@@ -7,7 +7,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 )
 
-func parseWebhook(policy *egress.Policy, d destination) (endpoint, error) {
+func parseWebhook(policy *egress.Policy, d destination) (endpoint[signingKey], error) {
 	if err := onlyFields(d.Configuration); err != nil {
 		return nil, err
 	}
@@ -20,11 +20,10 @@ func parseWebhook(policy *egress.Policy, d destination) (endpoint, error) {
 
 type webhook struct {
 	url string
-	key []byte
+	key signingKey
 }
 
-func (w webhook) bind(_ *egress.Policy, c credential) (channel, error) {
-	key, _ := c.(signingKey)
+func (w webhook) bind(_ *egress.Policy, key signingKey) (channel, error) {
 	return webhook{url: w.url, key: key}, nil
 }
 

@@ -12,7 +12,9 @@ import (
 
 const webhookURLLimit = 2048
 
-func parseChat(policy *egress.Policy, d destination, render func(message) any) (endpoint, error) {
+type chatRenderer func(message) any
+
+func (render chatRenderer) parse(policy *egress.Policy, d destination) (endpoint[credentialFields], error) {
 	if err := onlyFields(d.Configuration); err != nil {
 		return nil, err
 	}
@@ -28,11 +30,10 @@ func parseChat(policy *egress.Policy, d destination, render func(message) any) (
 
 type chatOrigin struct {
 	origin *url.URL
-	render func(message) any
+	render chatRenderer
 }
 
-func (c chatOrigin) bind(policy *egress.Policy, secret credential) (channel, error) {
-	fields, _ := secret.(credentialFields)
+func (c chatOrigin) bind(policy *egress.Policy, fields credentialFields) (channel, error) {
 	if err := onlyFields(fields, "webhook_url"); err != nil {
 		return nil, err
 	}
@@ -57,7 +58,7 @@ func (c chatOrigin) bind(policy *egress.Policy, secret credential) (channel, err
 
 type chat struct {
 	hook   string
-	render func(message) any
+	render chatRenderer
 }
 
 func (c chat) send(ctx context.Context, s *Sender, m message) error {

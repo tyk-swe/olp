@@ -39,33 +39,78 @@ type destination struct {
 
 var errMalformedCredential = errors.New("credential must be a JSON object")
 
-type credential interface{ credential() }
-
 type signingKey []byte
 
 type credentialFields map[string]json.RawMessage
 
-func (signingKey) credential() {}
+func readSigningKey(secret []byte) (signingKey, error) {
+	return signingKey(secret), nil
+}
 
-func (credentialFields) credential() {}
-
-func readCredential(typ contract.NotificationDestinationType, secret []byte) (credential, error) {
-	if typ == contract.NotificationDestinationTypeWebhook {
-		return signingKey(secret), nil
-	}
+func readCredentialFields(secret []byte) (credentialFields, error) {
 	fields, err := decodeObject(secret)
 	if err != nil {
 		return nil, errMalformedCredential
 	}
-	return credentialFields(fields), nil
+	return fields, nil
 }
 
-type endpoint interface {
-	bind(policy *egress.Policy, c credential) (channel, error)
+type endpoint[C any] interface {
+	bind(policy *egress.Policy, credential C) (channel, error)
 }
 
 type channel interface {
 	send(ctx context.Context, s *Sender, m message) error
+}
+
+type destinationKind interface {
+	check(policy *egress.Policy, d destination) error
+	open(policy *egress.Policy, d destination, secret []byte) (channel, error)
+}
+
+type kind[C any] struct {
+	credential func(secret []byte) (C, error)
+	parse      func(policy *egress.Policy, d destination) (endpoint[C], error)
+}
+
+func (k kind[C]) check(policy *egress.Policy, d destination) error {
+	_, err := k.parse(policy, d)
+	return err
+}
+
+func (k kind[C]) open(policy *egress.Policy, d destination, secret []byte) (channel, error) {
+	credential, err := k.credential(secret)
+	if err != nil {
+		return nil, err
+	}
+	endpoint, err := k.parse(policy, d)
+	if err != nil {
+		return nil, err
+	}
+	return endpoint.bind(policy, credential)
+}
+
+func kindOf(typ contract.NotificationDestinationType) destinationKind {
+	switch typ {
+	case contract.NotificationDestinationTypeWebhook:
+		return kind[signingKey]{readSigningKey, parseWebhook}
+	case contract.NotificationDestinationTypeSlack:
+		return kind[credentialFields]{readCredentialFields, chatRenderer(slackMessage).parse}
+	case contract.NotificationDestinationTypeMsteams:
+		return kind[credentialFields]{readCredentialFields, chatRenderer(teamsMessage).parse}
+	case contract.NotificationDestinationTypeDiscord:
+		return kind[credentialFields]{readCredentialFields, chatRenderer(discordMessage).parse}
+	case contract.NotificationDestinationTypePagerduty:
+		return kind[credentialFields]{readCredentialFields, parsePagerDuty}
+	case contract.NotificationDestinationTypeEmail:
+		return kind[credentialFields]{readCredentialFields, parseEmail}
+	default:
+		return kind[credentialFields]{readCredentialFields, parseUnsupported}
+	}
+}
+
+func parseUnsupported(*egress.Policy, destination) (endpoint[credentialFields], error) {
+	return nil, errors.New("unsupported destination type")
 }
 
 type sendError struct {
@@ -106,7 +151,7 @@ func NewSender(policy egress.Policy) *Sender {
 }
 
 func (s *Sender) send(ctx context.Context, d destination, secret []byte, m message) error {
-	c, err := open(&s.policy, d, secret)
+	c, err := kindOf(d.Type).open(&s.policy, d, secret)
 	if err != nil {
 		return &sendError{invalidDestinationCode, err}
 	}
@@ -131,37 +176,6 @@ func requiresSecret(typ contract.NotificationDestinationType) bool {
 		return true
 	}
 	return false
-}
-
-func parse(policy *egress.Policy, d destination) (endpoint, error) {
-	switch d.Type {
-	case contract.NotificationDestinationTypeWebhook:
-		return parseWebhook(policy, d)
-	case contract.NotificationDestinationTypeSlack:
-		return parseChat(policy, d, slackMessage)
-	case contract.NotificationDestinationTypeMsteams:
-		return parseChat(policy, d, teamsMessage)
-	case contract.NotificationDestinationTypeDiscord:
-		return parseChat(policy, d, discordMessage)
-	case contract.NotificationDestinationTypePagerduty:
-		return parsePagerDuty(policy, d)
-	case contract.NotificationDestinationTypeEmail:
-		return parseEmail(policy, d)
-	default:
-		return nil, errors.New("unsupported destination type")
-	}
-}
-
-func open(policy *egress.Policy, d destination, secret []byte) (channel, error) {
-	c, err := readCredential(d.Type, secret)
-	if err != nil {
-		return nil, err
-	}
-	endpoint, err := parse(policy, d)
-	if err != nil {
-		return nil, err
-	}
-	return endpoint.bind(policy, c)
 }
 
 func headerSafe(s string, max int) bool {

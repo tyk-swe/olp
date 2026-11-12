@@ -11,7 +11,7 @@ import (
 
 const routingKeyLimit = 512
 
-func parsePagerDuty(policy *egress.Policy, d destination) (endpoint, error) {
+func parsePagerDuty(policy *egress.Policy, d destination) (endpoint[credentialFields], error) {
 	if err := onlyFields(d.Configuration); err != nil {
 		return nil, err
 	}
@@ -26,8 +26,7 @@ type pagerDuty struct {
 	routingKey string
 }
 
-func (p pagerDuty) bind(_ *egress.Policy, c credential) (channel, error) {
-	fields, _ := c.(credentialFields)
+func (p pagerDuty) bind(_ *egress.Policy, fields credentialFields) (channel, error) {
 	if err := onlyFields(fields, "routing_key"); err != nil {
 		return nil, err
 	}

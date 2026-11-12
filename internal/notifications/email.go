@@ -136,7 +136,7 @@ func systemRoots() *x509.CertPool {
 	return roots
 }
 
-func parseEmail(policy *egress.Policy, d destination) (endpoint, error) {
+func parseEmail(policy *egress.Policy, d destination) (endpoint[credentialFields], error) {
 	target, err := smtpTarget(d.URL)
 	if err != nil {
 		return nil, err
@@ -156,8 +156,7 @@ func parseEmail(policy *egress.Policy, d destination) (endpoint, error) {
 	}, nil
 }
 
-func (m mailer) bind(_ *egress.Policy, c credential) (channel, error) {
-	fields, _ := c.(credentialFields)
+func (m mailer) bind(_ *egress.Policy, fields credentialFields) (channel, error) {
 	if err := onlyFields(fields, "username", "password"); err != nil {
 		return nil, err
 	}

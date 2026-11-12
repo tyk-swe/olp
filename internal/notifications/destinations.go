@@ -109,7 +109,7 @@ func parseDestination(input destinationInput) (destinationTarget, error) {
 }
 
 func (s *Server) checkEndpoint(d destination, enabled bool) error {
-	if _, err := parse(&s.egress, d); err != nil {
+	if err := kindOf(d.Type).check(&s.egress, d); err != nil {
 		return access.Invalid("destination", "The destination or its configuration is invalid.")
 	}
 	if enabled && requiresSecret(d.Type) {
@@ -119,7 +119,7 @@ func (s *Server) checkEndpoint(d destination, enabled bool) error {
 }
 
 func (s *Server) checkBinding(d destination, secret []byte) error {
-	_, err := open(&s.egress, d, secret)
+	_, err := kindOf(d.Type).open(&s.egress, d, secret)
 	if errors.Is(err, errMalformedCredential) {
 		return access.Invalid("secret", "Use the channel credential object or null.")
 	}
