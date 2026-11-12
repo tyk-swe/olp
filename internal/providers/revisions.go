@@ -346,10 +346,11 @@ type ProjectProvider struct {
 	Configuration connection.Configuration
 }
 
-type RevisionLabels struct {
-	Provider string
-	Project  string
-	Models   []routing.RevisionModel
+type ExportedRevision struct {
+	Provider      string
+	Project       string
+	Configuration []byte
+	Models        []routing.RevisionModel
 }
 
 func ReadProjectProvider(ctx context.Context, q access.Queryer, name, projectID string) (*ProjectProvider, error) {
@@ -376,8 +377,8 @@ func ReadActiveRevision(ctx context.Context, q access.Queryer, name, projectID s
 	return &current, nil
 }
 
-func ReadRevisionLabels(ctx context.Context, q access.Queryer, revisionID, providerID string) (RevisionLabels, error) {
-	var labels RevisionLabels
-	err := q.QueryRow(ctx, `SELECT p.name,j.name,v.models FROM olp.provider_revisions v JOIN olp.providers p ON p.id=v.provider_id JOIN olp.projects j ON j.id=p.project_id WHERE v.id=$1 AND p.id=$2`, revisionID, providerID).Scan(&labels.Provider, &labels.Project, &labels.Models)
-	return labels, err
+func ReadExportedRevision(ctx context.Context, q access.Queryer, revisionID, providerID string) (ExportedRevision, error) {
+	var revision ExportedRevision
+	err := q.QueryRow(ctx, `SELECT p.name,j.name,v.configuration,v.models FROM olp.provider_revisions v JOIN olp.providers p ON p.id=v.provider_id JOIN olp.projects j ON j.id=p.project_id WHERE v.id=$1 AND p.id=$2`, revisionID, providerID).Scan(&revision.Provider, &revision.Project, &revision.Configuration, &revision.Models)
+	return revision, err
 }

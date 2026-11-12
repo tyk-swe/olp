@@ -9,9 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
-	"github.com/tyk-swe/olp/internal/providerconfig"
 	"github.com/tyk-swe/olp/internal/providers"
-	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -33,15 +31,15 @@ func portablePaidConnection(ctx context.Context, q access.Queryer, frozen routin
 	if frozen.PendingCommitment != nil {
 		return PaidConnection{}, access.Invalid("code.paid_connections", "Publish the pending monetary commitment before exporting this paid provider.")
 	}
-	labels, err := providers.ReadRevisionLabels(ctx, q, frozen.RevisionID, frozen.ID)
+	stored, err := providers.ReadExportedRevision(ctx, q, frozen.RevisionID, frozen.ID)
 	if err != nil {
 		return PaidConnection{}, err
 	}
-	revision, err := revisionOf(frozen, labels.Models)
+	revision, err := revisionOf(frozen, stored)
 	if err != nil {
 		return PaidConnection{}, err
 	}
-	entry, err := provider.FromRevision(labels.Provider, &labels.Project, revision.configuration, revision.models, revision.slots)
+	entry, err := provider.FromRevision(stored.Provider, &stored.Project, revision.configuration, revision.models, revision.slots)
 	if err != nil {
 		return PaidConnection{}, err
 	}
@@ -52,11 +50,7 @@ func portablePaidConnection(ctx context.Context, q access.Queryer, frozen routin
 	return PaidConnection{Provider: entry, SlotKeyRefs: refs}, nil
 }
 
-func revisionOf(frozen routing.Provider, labels []routing.RevisionModel) (portableRevision, error) {
-	configuration, err := json.Marshal(configurationOf(frozen))
-	if err != nil {
-		return portableRevision{}, err
-	}
+func revisionOf(frozen routing.Provider, stored providers.ExportedRevision) (portableRevision, error) {
 	upstream := slices.Compact(slices.Sorted(func(yield func(string) bool) {
 		for _, capability := range frozen.Capabilities {
 			if !yield(capability.Model) {
@@ -64,14 +58,14 @@ func revisionOf(frozen routing.Provider, labels []routing.RevisionModel) (portab
 			}
 		}
 	}))
-	models, err := json.Marshal(promotion.Map(upstream, func(model string) routing.RevisionModel { return modelOf(model, frozen, labels) }))
+	models, err := json.Marshal(promotion.Map(upstream, func(model string) routing.RevisionModel { return modelOf(model, frozen, stored.Models) }))
 	if err != nil {
 		return portableRevision{}, err
 	}
 	slots, err := json.Marshal(promotion.Map(frozen.Slots, func(slot routing.Slot) routing.RevisionSlot {
 		return routing.RevisionSlot{Slot: slot, Default: slot.ID == frozen.DefaultSlotID}
 	}))
-	return portableRevision{configuration: configuration, models: models, slots: slots}, err
+	return portableRevision{configuration: stored.Configuration, models: models, slots: slots}, err
 }
 
 func modelOf(model string, frozen routing.Provider, labels []routing.RevisionModel) routing.RevisionModel {
@@ -91,34 +85,4 @@ func displayName(model string, labels []routing.RevisionModel) string {
 		return model
 	}
 	return labels[at].DisplayName
-}
-
-func configurationOf(frozen routing.Provider) connection.Configuration {
-	return connection.Configuration{
-		Options: connection.Options{
-			Limits: limitsOf(frozen.Limits), Commitment: frozen.Commitment, HealthProbe: frozen.HealthProbe, TuningDatasetURIPrefixes: frozen.TuningDatasetURIPrefixes,
-			DocumentURIPrefixes: frozen.DocumentURIPrefixes, Network: frozen.Network, SemanticHeaders: frozen.SemanticHeaders, QuerySettings: frozen.QuerySettings,
-			OperationDefaults: frozen.OperationDefaults, Bindings: frozen.Bindings, CredentialHeaders: promotion.NonNil(slices.Clone(frozen.CredentialHeaders)),
-			Models: maps.Collect(maps.All(frozen.Models)), ParameterDefaults: maps.Collect(maps.All(frozen.ParameterDefaults)), VendorID: nonEmpty(frozen.VendorID), PluginOptions: frozen.PluginOptions,
-		},
-		Identity: providerconfig.Identity[*string]{
-			CredentialSource: frozen.CredentialSource, ProfileID: frozen.ProfileID, ProfileRevision: frozen.ProfileRevision, Kind: frozen.Kind, AuthMode: frozen.AuthMode,
-			Endpoint: nonEmpty(frozen.Endpoint), CloudRegion: nonEmpty(frozen.CloudRegion), CloudProject: nonEmpty(frozen.CloudProject), BatchStorage: frozen.BatchStorage,
-			Deployment: nonEmpty(frozen.Deployment), APIVersion: nonEmpty(frozen.APIVersion),
-		},
-	}
-}
-
-func limitsOf(limits *routing.Limits) *connection.Limits {
-	if limits == nil {
-		return nil
-	}
-	return &connection.Limits{MaxConcurrency: limits.MaxConcurrency, RequestsPerMinute: limits.RequestsPerMinute, TokensPerMinute: limits.TokensPerMinute, Supply: limits.Supply}
-}
-
-func nonEmpty(value string) *string {
-	if value == "" {
-		return nil
-	}
-	return &value
 }
