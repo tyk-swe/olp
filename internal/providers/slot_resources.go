@@ -35,14 +35,13 @@ func (s *Server) getSlot(r *http.Request, p access.Principal) (access.Reply, err
 	if err != nil {
 		return access.Reply{}, err
 	}
-	for i := range rows {
-		if rows[i].ID == slotID {
-			body := slotJSON(rows[i])
-			body["provider_id"], body["is_default"], body["etag"] = providerID, rows[i].Default, rows[i].ETag
-			return access.Detail(body, rows[i].ETag), nil
-		}
+	slot := findSlot(rows, slotID)
+	if slot == nil {
+		return access.Reply{}, access.Fail(404, "slot_not_found", "The credential slot is unavailable.")
 	}
-	return access.Reply{}, access.Fail(404, "slot_not_found", "The credential slot is unavailable.")
+	body := slotJSON(*slot)
+	body["provider_id"], body["is_default"], body["etag"] = providerID, slot.Default, slot.ETag
+	return access.Detail(body, slot.ETag), nil
 }
 
 func (s *Server) deleteSlot(r *http.Request, _ access.Principal) (access.Reply, error) {
@@ -54,54 +53,28 @@ func (s *Server) deleteSlot(r *http.Request, _ access.Principal) (access.Reply, 
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, p, err := s.Access.BeginMutation(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	current, err := lockProvider(r.Context(), tx, providerID)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err = p.Project(current.ProjectID, access.Change); err != nil {
-		return access.Reply{}, err
-	}
-	claim, replayed, err := s.Access.Replay(r, tx, p, map[string]string{"provider_id": providerID, "slot_id": slotID})
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if replayed != nil {
-		return *replayed, tx.Commit(r.Context())
-	}
-	rows, err := loadSlots(r.Context(), tx, providerID)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	var slot *slotRow
-	for i := range rows {
-		if rows[i].ID == slotID {
-			slot = &rows[i]
-			break
+	input := map[string]string{"provider_id": providerID, "slot_id": slotID}
+	return access.Mutate(s.Access, r, input, changeable(r.Context(), providerID), func(tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
+		rows, err := loadSlots(r.Context(), tx, providerID)
+		if err != nil {
+			return access.Reply{}, err
 		}
-	}
-	if slot == nil {
-		return access.Reply{}, access.Fail(404, "slot_not_found", "The credential slot is unavailable.")
-	}
-	if err = matchSlot(r, current, slot); err != nil {
-		return access.Reply{}, err
-	}
-	etag, err := s.deleteDraftSlot(r.Context(), tx, providerID, slotID, slot)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.slot.delete", "provider_slot", slotID, "success"); err != nil {
-		return access.Reply{}, err
-	}
-	result := access.Reply{Status: http.StatusNoContent, ParentMutation: &access.ParentMutation{Previous: current.ETag, Current: etag}}
-	if err = s.Access.CompleteReplay(r, tx, claim, result); err != nil {
-		return access.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
+		slot := findSlot(rows, slotID)
+		if slot == nil {
+			return access.Reply{}, access.Fail(404, "slot_not_found", "The credential slot is unavailable.")
+		}
+		if err = matchSlot(r, current, slot); err != nil {
+			return access.Reply{}, err
+		}
+		etag, err := s.deleteDraftSlot(r.Context(), tx, providerID, slotID, slot)
+		if err != nil {
+			return access.Reply{}, err
+		}
+		if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.slot.delete", "provider_slot", slotID, "success"); err != nil {
+			return access.Reply{}, err
+		}
+		return access.Reply{Status: http.StatusNoContent, ParentMutation: &access.ParentMutation{Previous: current.ETag, Current: etag}}, nil
+	})
 }
 
 func (s *Catalogue) deleteDraftSlot(ctx context.Context, tx pgx.Tx, providerID, slotID string, slot *slotRow) (string, error) {

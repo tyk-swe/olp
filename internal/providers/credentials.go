@@ -162,53 +162,38 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 		}
 		validatedAt = new(time.Now().UTC())
 	}
-	tx, p, err = a.BeginMutation(r)
-	if err != nil {
-		return access.Reply{}, err
+	return access.Mutate(a, r, input, referencing(r.Context(), id, input.CredentialReference), func(tx pgx.Tx, p access.Principal, locked *record) (access.Reply, error) {
+		if locked.ETag != current.ETag {
+			return access.Reply{}, access.Fail(412, "etag_mismatch", "The connection changed during validation; reload and retry.")
+		}
+		rotated, err := s.rotateCredential(r.Context(), tx, current, models, defaultSlot, validatedAt, plain, input.CredentialReference)
+		if err != nil {
+			return access.Reply{}, err
+		}
+		if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.credential.rotate", "provider_credential", rotated.ID, "success"); err != nil {
+			return access.Reply{}, err
+		}
+		return access.Reply{Status: 201, ETag: rotated.ETag, Body: map[string]any{"provider_id": id, "etag": rotated.ETag, "credential_id": rotated.ID, "credential_version": rotated.Version, "runtime_generation": nil}}, nil
+	})
+}
+
+// referencing locks a provider for a change that may store an external
+// credential reference, which only settings administrators may name.
+func referencing(ctx context.Context, id string, reference *secretstore.Reference) func(pgx.Tx, access.Principal) (*record, error) {
+	lock := changeable(ctx, id)
+	return func(tx pgx.Tx, p access.Principal) (*record, error) {
+		if err := authorizeCredentialReference(p, reference); err != nil {
+			return nil, err
+		}
+		return lock(tx, p)
 	}
-	defer tx.Rollback(r.Context())
-	if err = authorizeCredentialReference(p, input.CredentialReference); err != nil {
-		return access.Reply{}, err
-	}
-	// The stored reply discloses the provider, so the caller must still reach
-	// its project before a replay is served.
-	locked, err := lockProvider(r.Context(), tx, id)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err := p.Project(locked.ProjectID, access.Change); err != nil {
-		return access.Reply{}, err
-	}
-	claim, replayed, err := a.Replay(r, tx, p, input)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if replayed != nil {
-		return *replayed, tx.Commit(r.Context())
-	}
-	if locked.ETag != current.ETag {
-		return access.Reply{}, access.Fail(412, "etag_mismatch", "The connection changed during validation; reload and retry.")
-	}
-	rotated, err := s.rotateCredential(r.Context(), tx, current, models, defaultSlot, validatedAt, plain, input.CredentialReference)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	credentialID, version, etag := rotated.ID, rotated.Version, rotated.ETag
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.credential.rotate", "provider_credential", credentialID, "success"); err != nil {
-		return access.Reply{}, err
-	}
-	result := access.Reply{Status: 201, ETag: etag, Body: map[string]any{"provider_id": id, "etag": etag, "credential_id": credentialID, "credential_version": version, "runtime_generation": nil}}
-	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
-		return access.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
 }
 
 // revoke marks a credential version unusable everywhere: drafts, published
 // revisions, and gateways that learn it through the authority refresh. It
 // ends the version's grant, if it has one.
 func (s *Server) revoke(r *http.Request, _ access.Principal) (access.Reply, error) {
-	return s.mutation(r, "provider.credential.revoke", func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
+	return s.mutation(r, "provider.credential.revoke", nil, func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
 		credentialID, err := access.IDParam(r, "credential_id")
 		if err != nil {
 			return access.Reply{}, err
@@ -457,62 +442,32 @@ func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, e
 	if input.CredentialReference != nil && input.Slot.CredentialVersionID != nil {
 		return access.Reply{}, access.Invalid("credential_reference", "Choose a new reference or an existing credential version.")
 	}
-	tx, p, err := a.BeginMutation(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	if err = authorizeCredentialReference(p, input.CredentialReference); err != nil {
-		return access.Reply{}, err
-	}
-	// The stored reply discloses the provider's slots, so the caller must
-	// still reach its project before a replay is served.
-	current, err := lockProvider(r.Context(), tx, id)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err := p.Project(current.ProjectID, access.Change); err != nil {
-		return access.Reply{}, err
-	}
-	claim, replayed, err := a.Replay(r, tx, p, input)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if replayed != nil {
-		return *replayed, tx.Commit(r.Context())
-	}
-	slots, err := loadSlots(r.Context(), tx, id)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	var existing *slotRow
-	for i := range slots {
-		if slots[i].ID == slotID {
-			existing = &slots[i]
+	return access.Mutate(a, r, input, referencing(r.Context(), id, input.CredentialReference), func(tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
+		slots, err := loadSlots(r.Context(), tx, id)
+		if err != nil {
+			return access.Reply{}, err
 		}
-	}
-	if err = matchSlot(r, current, existing); err != nil {
-		return access.Reply{}, err
-	}
-	if err := s.saveDraftSlot(r.Context(), tx, current, slotID, input, existing, len(slots)); err != nil {
-		return access.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.slot.update", "provider_slot", slotID, "success"); err != nil {
-		return access.Reply{}, err
-	}
-	updated, err := readProvider(r.Context(), tx, id)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	result, err := s.slotList(r.Context(), tx, updated)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	result.ParentMutation = &access.ParentMutation{Previous: current.ETag, Current: updated.ETag}
-	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
-		return access.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
+		existing := findSlot(slots, slotID)
+		if err = matchSlot(r, current, existing); err != nil {
+			return access.Reply{}, err
+		}
+		if err := s.saveDraftSlot(r.Context(), tx, current, slotID, input, existing, len(slots)); err != nil {
+			return access.Reply{}, err
+		}
+		if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.slot.update", "provider_slot", slotID, "success"); err != nil {
+			return access.Reply{}, err
+		}
+		updated, err := readProvider(r.Context(), tx, id)
+		if err != nil {
+			return access.Reply{}, err
+		}
+		result, err := s.slotList(r.Context(), tx, updated)
+		if err != nil {
+			return access.Reply{}, err
+		}
+		result.ParentMutation = &access.ParentMutation{Previous: current.ETag, Current: updated.ETag}
+		return result, nil
+	})
 }
 
 func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply, error) {
@@ -541,12 +496,7 @@ func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply
 	if err != nil {
 		return access.Reply{}, err
 	}
-	var slot *slotRow
-	for i := range slots {
-		if slots[i].ID == slotID {
-			slot = &slots[i]
-		}
-	}
+	slot := findSlot(slots, slotID)
 	if slot == nil {
 		return access.Reply{}, pgx.ErrNoRows
 	}
@@ -582,39 +532,23 @@ func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply
 	probeErr := s.validateModelAccess(r.Context(), current.target(credential), slot, models)
 	// Probes run without mutation locks. Only save evidence if its complete
 	// input (credential, transport, restrictions, and models) is still current.
-	tx, p, err = a.BeginMutation(r)
+	result, err := access.Transact(a, r, unchangedSince(r.Context(), current, "validation"), func(tx pgx.Tx, p access.Principal, locked *record) (access.Reply, error) {
+		if err := s.storeSlotValidation(r.Context(), tx, current, slot, models, probeErr == nil); err != nil {
+			return access.Reply{}, err
+		}
+		if err := access.Audit(r.Context(), tx, r, p.Actor(), "provider.slot.validate", "provider_slot", slotID, auditOutcome(probeErr == nil)); err != nil {
+			return access.Reply{}, err
+		}
+		return s.slotList(r.Context(), tx, locked)
+	})
 	if err != nil {
 		return access.Reply{}, err
 	}
-	defer tx.Rollback(r.Context())
-	locked, err := lockProvider(r.Context(), tx, id)
-	if err != nil {
-		return access.Reply{}, err
+	if probeErr != nil {
+		return result, access.Fail(422, "slot_validation_failed", probe.Classify(probeErr).Detail)
 	}
-	if err := p.Project(locked.ProjectID, access.Change); err != nil {
-		return access.Reply{}, err
-	}
-	if locked.ETag != current.ETag {
-		return access.Reply{}, access.Fail(412, "etag_mismatch", "The connection changed during validation; reload and retry.")
-	}
-	if err := s.storeSlotValidation(r.Context(), tx, current, slot, models, probeErr == nil); err != nil {
-		return access.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.slot.validate", "provider_slot", slotID, auditOutcome(probeErr == nil)); err != nil {
-		return access.Reply{}, err
-	}
-	result, err := s.slotList(r.Context(), tx, locked)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	err = tx.Commit(r.Context())
-	if err == nil && probeErr == nil {
-		s.clearValidatedCooldowns(r.Context(), id, *slot)
-	}
-	if err == nil && probeErr != nil {
-		err = access.Fail(422, "slot_validation_failed", probe.Classify(probeErr).Detail)
-	}
-	return result, err
+	s.clearValidatedCooldowns(r.Context(), id, *slot)
+	return result, nil
 }
 
 func (s *Catalogue) saveDraftSlot(ctx context.Context, tx pgx.Tx, current *record, slotID string, input slotWrite, existing *slotRow, slotCount int) error {

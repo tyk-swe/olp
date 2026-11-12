@@ -149,7 +149,6 @@ func invalidateEvidence(ctx context.Context, tx pgx.Tx, providerID string) error
 }
 
 func (s *Server) updateProvider(r *http.Request, _ access.Principal) (access.Reply, error) {
-	a := s.Access
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -158,90 +157,73 @@ func (s *Server) updateProvider(r *http.Request, _ access.Principal) (access.Rep
 	if err = access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
 	}
-	tx, p, err := a.BeginMutation(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	current, err := lockProvider(r.Context(), tx, id)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err := p.Project(current.ProjectID, access.Change); err != nil {
-		return access.Reply{}, err
-	}
-	if err = access.Match(r, current.ETag); err != nil {
-		return access.Reply{}, err
-	}
 	if err = access.ValidText("name", input.Name, 100); err != nil {
 		return access.Reply{}, err
 	}
-	prepared, err := connection.Prepare(r.Context(), s.ConnectionPolicy(tx), input.Configuration)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err = s.StoreDraftConfiguration(r.Context(), tx, id, input.Name, prepared); err != nil {
-		return access.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.update", "provider", id, "success"); err != nil {
-		return access.Reply{}, err
-	}
-	result, err := s.detailReply(r.Context(), tx, id)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
+	return access.Transact(s.Access, r, changeable(r.Context(), id), func(tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
+		if err := access.Match(r, current.ETag); err != nil {
+			return access.Reply{}, err
+		}
+		prepared, err := connection.Prepare(r.Context(), s.ConnectionPolicy(tx), input.Configuration)
+		if err != nil {
+			return access.Reply{}, err
+		}
+		if err = s.StoreDraftConfiguration(r.Context(), tx, id, input.Name, prepared); err != nil {
+			return access.Reply{}, err
+		}
+		if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.update", "provider", id, "success"); err != nil {
+			return access.Reply{}, err
+		}
+		return s.detailReply(r.Context(), tx, id)
+	})
 }
 
-// mutation runs a locked, replay-protected provider mutation that needs
-// If-Match and Idempotency-Key.
-func (s *Server) mutation(r *http.Request, action string, fn func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error)) (access.Reply, error) {
-	return s.mutationWith(r, action, nil, fn)
-}
-
-// mutationWith is mutation for a request whose body input a replay must
-// match.
-func (s *Server) mutationWith(r *http.Request, action string, input any, fn func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error)) (access.Reply, error) {
-	a := s.Access
+func (s *Server) mutation(r *http.Request, action string, input any, fn func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error)) (access.Reply, error) {
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, p, err := a.BeginMutation(r)
-	if err != nil {
-		return access.Reply{}, err
+	return access.Mutate(s.Access, r, input, changeable(r.Context(), id), func(tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
+		if err := access.Match(r, current.ETag); err != nil {
+			return access.Reply{}, err
+		}
+		reply, err := fn(r.Context(), tx, p, current)
+		if err != nil {
+			return access.Reply{}, err
+		}
+		return reply, access.Audit(r.Context(), tx, r, p.Actor(), action, "provider", id, "success")
+	})
+}
+
+// changeable locks a provider for a caller who may change its project. A
+// stored replay discloses the provider, so the check also guards replays.
+func changeable(ctx context.Context, id string) func(pgx.Tx, access.Principal) (*record, error) {
+	return func(tx pgx.Tx, p access.Principal) (*record, error) {
+		current, err := lockProvider(ctx, tx, id)
+		if err != nil {
+			return nil, err
+		}
+		if err := p.Project(current.ProjectID, access.Change); err != nil {
+			return nil, err
+		}
+		return current, nil
 	}
-	defer tx.Rollback(r.Context())
-	// The stored reply discloses the provider, so the caller must still reach
-	// its project before a replay is served.
-	current, err := lockProvider(r.Context(), tx, id)
-	if err != nil {
-		return access.Reply{}, err
+}
+
+// unchangedSince locks a provider that a probe read without the lock and
+// refuses to store the outcome once the provider has moved on.
+func unchangedSince(ctx context.Context, read *record, during string) func(pgx.Tx, access.Principal) (*record, error) {
+	lock := changeable(ctx, read.ID)
+	return func(tx pgx.Tx, p access.Principal) (*record, error) {
+		current, err := lock(tx, p)
+		if err != nil {
+			return nil, err
+		}
+		if current.ETag != read.ETag {
+			return nil, access.Fail(412, "etag_mismatch", "The connection changed during "+during+"; reload and retry.")
+		}
+		return current, nil
 	}
-	if err := p.Project(current.ProjectID, access.Change); err != nil {
-		return access.Reply{}, err
-	}
-	claim, replayed, err := a.Replay(r, tx, p, input)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if replayed != nil {
-		return *replayed, tx.Commit(r.Context())
-	}
-	if err = access.Match(r, current.ETag); err != nil {
-		return access.Reply{}, err
-	}
-	result, err := fn(r.Context(), tx, p, current)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), action, "provider", id, "success"); err != nil {
-		return access.Reply{}, err
-	}
-	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
-		return access.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
 }
 
 type storedCapability struct {
@@ -335,6 +317,14 @@ type SlotRestrictions struct {
 	AllowedAPIKeys []string `json:"allowed_api_keys"`
 	AllowedModels  []string `json:"allowed_models"`
 	AllowedRoutes  []string `json:"allowed_routes"`
+}
+
+func findSlot(slots []slotRow, id string) *slotRow {
+	index := slices.IndexFunc(slots, func(row slotRow) bool { return row.ID == id })
+	if index < 0 {
+		return nil
+	}
+	return &slots[index]
 }
 
 func loadSlots(ctx context.Context, q access.Queryer, providerID string) ([]slotRow, error) {
@@ -446,7 +436,7 @@ func (row *slotRow) published(authMode string) routing.RevisionSlot {
 }
 
 func (s *Server) activateProvider(r *http.Request, _ access.Principal) (access.Reply, error) {
-	return s.mutation(r, "provider.activate", func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
+	return s.mutation(r, "provider.activate", nil, func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
 		activated, err := s.activateDraft(ctx, tx, p, current)
 		if err != nil {
 			return access.Reply{}, err
@@ -456,7 +446,7 @@ func (s *Server) activateProvider(r *http.Request, _ access.Principal) (access.R
 }
 
 func (s *Server) disableProvider(r *http.Request, _ access.Principal) (access.Reply, error) {
-	return s.mutation(r, "provider.disable", func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
+	return s.mutation(r, "provider.disable", nil, func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
 		disabled, err := s.disable(ctx, tx, p, current)
 		if err != nil {
 			return access.Reply{}, err
@@ -784,7 +774,7 @@ func (s *Catalogue) restoreDraft(ctx context.Context, tx pgx.Tx, current *record
 }
 
 func (s *Server) restoreActiveAsDraft(r *http.Request, _ access.Principal) (access.Reply, error) {
-	return s.mutation(r, "provider.restore", func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
+	return s.mutation(r, "provider.restore", nil, func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
 		if current.ActiveRevisionID == nil {
 			return access.Reply{}, access.Fail(409, "invalid_state", "This connection has no activated revision to restore.")
 		}
@@ -801,7 +791,7 @@ func (s *Server) restoreActiveAsDraft(r *http.Request, _ access.Principal) (acce
 
 func (s *Server) restoreRevisionAsDraft(r *http.Request, _ access.Principal) (access.Reply, error) {
 	ref := r.PathValue("revision_id")
-	return s.mutation(r, "provider.restore", func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
+	return s.mutation(r, "provider.restore", nil, func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
 		v, err := loadRevision(ctx, tx, current.ID, ref)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return access.Reply{}, access.Fail(404, "not_found", "Unknown revision.")

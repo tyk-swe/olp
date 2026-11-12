@@ -101,25 +101,13 @@ func (s *Server) probe(r *http.Request, p access.Principal) (access.Reply, error
 // caller's authority and project reach are decided again under it before
 // anything is written.
 func (s *Server) recordProbe(r *http.Request, action, id string, at time.Time, succeeded bool, detail string) error {
-	tx, p, err := s.Access.BeginMutation(r)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(r.Context())
-	current, err := lockProvider(r.Context(), tx, id)
-	if err != nil {
-		return err
-	}
-	if err := p.Project(current.ProjectID, access.Change); err != nil {
-		return err
-	}
-	if err := storeProbe(r.Context(), tx, id, at, succeeded, detail); err != nil {
-		return err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), action, "provider", id, auditOutcome(succeeded)); err != nil {
-		return err
-	}
-	return tx.Commit(r.Context())
+	_, err := access.Transact(s.Access, r, changeable(r.Context(), id), func(tx pgx.Tx, p access.Principal, _ *record) (access.Reply, error) {
+		if err := storeProbe(r.Context(), tx, id, at, succeeded, detail); err != nil {
+			return access.Reply{}, err
+		}
+		return access.Reply{}, access.Audit(r.Context(), tx, r, p.Actor(), action, "provider", id, auditOutcome(succeeded))
+	})
+	return err
 }
 
 // auditOutcome maps a probe result onto the audit outcome vocabulary.
@@ -145,7 +133,6 @@ type discoverRequest struct {
 }
 
 func (s *Server) discover(r *http.Request, p access.Principal) (access.Reply, error) {
-	a := s.Access
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -191,32 +178,15 @@ func (s *Server) discover(r *http.Request, p access.Principal) (access.Reply, er
 		}
 		models = append(models, listed...)
 	}
-	tx, p, err := a.BeginMutation(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	locked, err := lockProvider(r.Context(), tx, id)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err := p.Project(locked.ProjectID, access.Change); err != nil {
-		return access.Reply{}, err
-	}
-	if locked.ETag != current.ETag {
-		return access.Reply{}, access.Fail(412, "etag_mismatch", "The connection changed during discovery; reload and retry.")
-	}
-	if err := s.storeDiscoveredModels(r.Context(), tx, locked, models, upstream, at); err != nil {
-		return access.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.discover", "provider", id, "success"); err != nil {
-		return access.Reply{}, err
-	}
-	result, err := s.detailReply(r.Context(), tx, id)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
+	return access.Transact(s.Access, r, unchangedSince(r.Context(), current, "discovery"), func(tx pgx.Tx, p access.Principal, locked *record) (access.Reply, error) {
+		if err := s.storeDiscoveredModels(r.Context(), tx, locked, models, upstream, at); err != nil {
+			return access.Reply{}, err
+		}
+		if err := access.Audit(r.Context(), tx, r, p.Actor(), "provider.discover", "provider", id, "success"); err != nil {
+			return access.Reply{}, err
+		}
+		return s.detailReply(r.Context(), tx, id)
+	})
 }
 
 func (s *Server) models(r *http.Request, p access.Principal) (access.Reply, error) {
@@ -263,7 +233,6 @@ func lockModel(ctx context.Context, tx pgx.Tx, providerID, modelID string) (stor
 }
 
 func (s *Server) setModel(r *http.Request, _ access.Principal) (access.Reply, error) {
-	a := s.Access
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -276,32 +245,18 @@ func (s *Server) setModel(r *http.Request, _ access.Principal) (access.Reply, er
 	if err = access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
 	}
-	tx, p, err := a.BeginMutation(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	current, err := lockProvider(r.Context(), tx, id)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err := p.Project(current.ProjectID, access.Change); err != nil {
-		return access.Reply{}, err
-	}
-	if err = access.Match(r, current.ETag); err != nil {
-		return access.Reply{}, err
-	}
-	if err := s.setDraftModel(r.Context(), tx, current, modelID, input); err != nil {
-		return access.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.model.update", "provider_model", modelID, "success"); err != nil {
-		return access.Reply{}, err
-	}
-	result, err := s.detailReply(r.Context(), tx, id)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
+	return access.Transact(s.Access, r, changeable(r.Context(), id), func(tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
+		if err := access.Match(r, current.ETag); err != nil {
+			return access.Reply{}, err
+		}
+		if err := s.setDraftModel(r.Context(), tx, current, modelID, input); err != nil {
+			return access.Reply{}, err
+		}
+		if err := access.Audit(r.Context(), tx, r, p.Actor(), "provider.model.update", "provider_model", modelID, "success"); err != nil {
+			return access.Reply{}, err
+		}
+		return s.detailReply(r.Context(), tx, id)
+	})
 }
 
 func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, error) {
@@ -368,30 +323,16 @@ func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, err
 	case certified < len(m.Capabilities):
 		status = "partial"
 	}
-	tx, p, err := a.BeginMutation(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	locked, err := lockProvider(r.Context(), tx, id)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err := p.Project(locked.ProjectID, access.Change); err != nil {
-		return access.Reply{}, err
-	}
-	if locked.ETag != current.ETag {
-		return access.Reply{}, access.Fail(412, "etag_mismatch", "The connection changed during certification; reload and retry.")
-	}
-	etag, err := s.storeCertification(r.Context(), tx, current, m, defaultSlot, certified, at)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.model.certify", "provider_model", modelID, auditOutcome(certified > 0)); err != nil {
-		return access.Reply{}, err
-	}
-	result := access.Detail(map[string]any{"provider_id": id, "model_id": modelID, "status": status, "checked_at": at, "certified_count": certified, "attempted_count": len(m.Capabilities), "results": results}, etag)
-	reply, err := result, tx.Commit(r.Context())
+	reply, err := access.Transact(s.Access, r, unchangedSince(r.Context(), current, "certification"), func(tx pgx.Tx, p access.Principal, _ *record) (access.Reply, error) {
+		etag, err := s.storeCertification(r.Context(), tx, current, m, defaultSlot, certified, at)
+		if err != nil {
+			return access.Reply{}, err
+		}
+		if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.model.certify", "provider_model", modelID, auditOutcome(certified > 0)); err != nil {
+			return access.Reply{}, err
+		}
+		return access.Detail(map[string]any{"provider_id": id, "model_id": modelID, "status": status, "checked_at": at, "certified_count": certified, "attempted_count": len(m.Capabilities), "results": results}, etag), nil
+	})
 	if err == nil && certified == len(m.Capabilities) {
 		s.clearValidatedCooldowns(r.Context(), id, defaultSlot)
 	}

@@ -62,46 +62,23 @@ func (s *Server) createNetworkCredential(r *http.Request, _ access.Principal) (a
 	if err != nil {
 		return access.Reply{}, err
 	}
-	tx, principal, err := s.Access.BeginMutation(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	// The stored reply discloses the provider, so the caller must still reach
-	// its project before a replay is served.
-	provider, err := lockProvider(r.Context(), tx, id)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err := principal.Project(provider.ProjectID, access.Change); err != nil {
-		return access.Reply{}, err
-	}
-	claim, replayed, err := s.Access.Replay(r, tx, principal, input)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if replayed != nil {
-		return *replayed, tx.Commit(r.Context())
-	}
-	if err := access.Match(r, provider.ETag); err != nil {
-		return access.Reply{}, err
-	}
-	created, err := s.createNetworkCredentialVersion(r.Context(), tx, id, input.Credential)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err := access.Audit(r.Context(), tx, r, principal.Actor(), "provider.network_credential.create", "provider", id, "success"); err != nil {
-		return access.Reply{}, err
-	}
-	result := access.Reply{Status: http.StatusCreated, ETag: created.ETag, Body: map[string]any{"provider_id": id, "credential_id": created.ID, "etag": created.ETag}}
-	if err := s.Access.CompleteReplay(r, tx, claim, result); err != nil {
-		return access.Reply{}, err
-	}
-	return result, tx.Commit(r.Context())
+	return access.Mutate(s.Access, r, input, changeable(r.Context(), id), func(tx pgx.Tx, principal access.Principal, provider *record) (access.Reply, error) {
+		if err := access.Match(r, provider.ETag); err != nil {
+			return access.Reply{}, err
+		}
+		created, err := s.createNetworkCredentialVersion(r.Context(), tx, id, input.Credential)
+		if err != nil {
+			return access.Reply{}, err
+		}
+		if err := access.Audit(r.Context(), tx, r, principal.Actor(), "provider.network_credential.create", "provider", id, "success"); err != nil {
+			return access.Reply{}, err
+		}
+		return access.Reply{Status: http.StatusCreated, ETag: created.ETag, Body: map[string]any{"provider_id": id, "credential_id": created.ID, "etag": created.ETag}}, nil
+	})
 }
 
 func (s *Server) revokeNetworkCredential(r *http.Request, _ access.Principal) (access.Reply, error) {
-	return s.mutation(r, "provider.network_credential.revoke", func(ctx context.Context, tx pgx.Tx, principal access.Principal, current *record) (access.Reply, error) {
+	return s.mutation(r, "provider.network_credential.revoke", nil, func(ctx context.Context, tx pgx.Tx, principal access.Principal, current *record) (access.Reply, error) {
 		id, err := access.IDParam(r, "credential_id")
 		if err != nil {
 			return access.Reply{}, err

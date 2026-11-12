@@ -182,7 +182,7 @@ func (s *Server) acceptCatalogSuggestions(r *http.Request, _ access.Principal) (
 	if len(input.UpstreamModels) == 0 || len(input.UpstreamModels) > 2000 {
 		return access.Reply{}, access.Invalid("upstream_models", "Name 1–2000 models to accept catalog facts for.")
 	}
-	return s.mutationWith(r, "provider.catalog_facts.accept", input, func(ctx context.Context, tx pgx.Tx, _ access.Principal, current *record) (access.Reply, error) {
+	return s.mutation(r, "provider.catalog_facts.accept", input, func(ctx context.Context, tx pgx.Tx, _ access.Principal, current *record) (access.Reply, error) {
 		if err := s.acceptCatalogFacts(ctx, tx, current, input); err != nil {
 			return access.Reply{}, err
 		}
