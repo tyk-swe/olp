@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -324,7 +325,7 @@ func (s *Server) settlementTemplate(x *call, p *pin, surface, lineOperation stri
 		cardPinned: x.cardPinned, cardRev: x.cardRev, routingInputs: inputs,
 		routeLeg: routeLeg{route: x.route},
 	}
-	fact.cardRev = pricingCall.attemptCardRevision(p.provider.ID, now)
+	fact.CardRev = pricingCall.attemptCardRevision(p.provider.ID, now)
 	fact.StartedAt = now
 	fact.Status = http.StatusOK
 	fact.Class = classSuccess
@@ -344,18 +345,18 @@ func (s *Server) settlementTemplate(x *call, p *pin, surface, lineOperation stri
 	fact.PricingPinned = true
 	fact.CardPinned = true
 	fact.CardRevisionID = nil
-	if fact.cardRev != nil {
-		fact.CardRevisionID = &fact.cardRev.ID
+	if fact.CardRev != nil {
+		fact.CardRevisionID = &fact.CardRev.ID
 	}
 	accountingID := x.request.accountingID()
-	event, err := accountingEvent(Envelope{
+	event, err := events.UsageEvent(events.Envelope{
 		RequestID: accountingID, AccountingID: accountingID, KeyID: x.keyID,
 		EndUserDigest: x.endUserDigest, Origin: usage.OriginBatchSettlement, ParentRequestID: accountingID,
 		BudgetGroupID: x.budgetGroupID, Attribution: x.attribution,
 		EvaluatorGuardrailID: x.evaluatorGuardrailID, GuardrailDecisions: x.guardrailEvidence(),
 		PolicyDecisions: x.policyDecisions, Route: x.route.Slug, RouteRevisionID: x.route.RevisionID,
 		Operation: lineOperation, Surface: surface, RuntimeGenerationID: x.request.release.Snapshot().Generation().ID,
-		StartedAt: now, CompletedAt: now, Attempts: []AttemptFact{fact},
+		StartedAt: now, CompletedAt: now, Attempts: []events.AttemptFact{fact},
 	})
 	if err != nil {
 		return nil, err
@@ -365,7 +366,7 @@ func (s *Server) settlementTemplate(x *call, p *pin, surface, lineOperation stri
 	}
 	if p.provider.ProfileID == connectors.BedrockBatchProfile {
 		uncertain := aggregateTariffNeedsPerRecordUsage(fact.Price) ||
-			aggregateTariffNeedsPerRecordUsage(fact.cardRev.Explicit(p.provider.Kind, p.provider.VendorID, p.model, lineOperation))
+			aggregateTariffNeedsPerRecordUsage(fact.CardRev.Explicit(p.provider.Kind, p.provider.VendorID, p.model, lineOperation))
 		policy, err := withPolicyFlag(*event.Attempts[0].Routing.Policy, "batch_aggregate_pricing_uncertain", uncertain)
 		if err != nil {
 			return nil, err

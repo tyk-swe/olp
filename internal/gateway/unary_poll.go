@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operations"
@@ -37,7 +38,7 @@ type unaryExchange struct {
 	plan       *operationplan.Plan
 	client     *http.Client
 	bound      *boundExchange
-	fact       *AttemptFact
+	fact       *events.AttemptFact
 	bodyCap    int
 	inject     func(http.Header)
 }

@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/geminilifecycle"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -14,7 +15,7 @@ import (
 func (s *Server) observeGeminiInteraction(ctx context.Context, owner, localID, status string, object oif.Value) (ingest.Persisted, error) {
 	evidence := usage.AttemptUsage{Evidence: usage.EvidenceUnobservedUncertain}
 	if observed := geminiInteractionUsage(object); observed != nil {
-		evidence = observedAttemptUsage(observed, geminilifecycle.InteractionTurnFinished(status), "generation")
+		evidence = events.ObservedUsage(observed, geminilifecycle.InteractionTurnFinished(status), "generation")
 	}
 	result, err := s.deps.Resources.ObserveInteraction(ctx, owner, localID, status, evidence, s.now())
 	if err != nil {

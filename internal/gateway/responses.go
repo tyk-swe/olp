@@ -12,6 +12,7 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
@@ -239,7 +240,7 @@ func (s *Server) mapStoredResponse(ctx context.Context, x *call, authority keyau
 			}
 			last := &x.facts[len(x.facts)-1]
 			last.GenerationUsageDeferred = true
-			last.recordEvidence(false)
+			last.RecordEvidence(false)
 			if e := s.reconcileResponse(commitCtx, res.ID, body); e != nil {
 				return nil, e
 			}
@@ -288,7 +289,7 @@ func (s *Server) mapStoredResponse(ctx context.Context, x *call, authority keyau
 		}
 		last := &x.facts[len(x.facts)-1]
 		last.GenerationUsageDeferred = true
-		last.recordEvidence(false)
+		last.RecordEvidence(false)
 		if e := s.reconcileResponse(ctx, res.ID, body); e != nil {
 			return nil, e
 		}
@@ -598,7 +599,7 @@ func (binding *responseStreamBinding) mappedID(ordinal int, upstreamID string) (
 	return binding.localID, true
 }
 
-func (s *Server) observeStreamResponseEvent(ctx context.Context, x *call, fact *AttemptFact, event oif.Event) error {
+func (s *Server) observeStreamResponseEvent(ctx context.Context, x *call, fact *events.AttemptFact, event oif.Event) error {
 	if s.deps.Resources == nil || !responseStoreRequested(x.generation.parsed) {
 		return nil
 	}
@@ -659,7 +660,7 @@ func (s *Server) observeStreamResponseEvent(ctx context.Context, x *call, fact *
 	return nil
 }
 
-func (s *Server) mapStreamResponseFrame(ctx context.Context, x *call, fact *AttemptFact, frame []byte, observe bool) ([]byte, error) {
+func (s *Server) mapStreamResponseFrame(ctx context.Context, x *call, fact *events.AttemptFact, frame []byte, observe bool) ([]byte, error) {
 	if s.deps.Resources == nil || !responseStoreRequested(x.generation.parsed) {
 		return frame, nil
 	}
@@ -758,7 +759,7 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *call, fact *Atte
 	return out, nil
 }
 
-func (s *Server) putStreamResponse(ctx context.Context, x *call, fact *AttemptFact, upstreamID, state string, response oif.Value) (*resources.Resource, error) {
+func (s *Server) putStreamResponse(ctx context.Context, x *call, fact *events.AttemptFact, upstreamID, state string, response oif.Value) (*resources.Resource, error) {
 	metadata := map[string]json.RawMessage{}
 	for _, name := range responseMetadataFields() {
 		if value, present := response.Lookup(name); present {

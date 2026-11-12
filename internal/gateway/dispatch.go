@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 )
 
@@ -154,7 +155,7 @@ func (s *Server) settlePinHold(ctx context.Context, x *call, hold *dispatchHold,
 }
 
 type attemptCompletion struct {
-	fact        AttemptFact
+	fact        events.AttemptFact
 	failure     *attemptFailure
 	authority   *fault.Error
 	attempt     routing.Attempt

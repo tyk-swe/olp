@@ -304,8 +304,8 @@ func (s *Server) recordBedrockUsage(x *call, usage *wire.Usage) {
 		return
 	}
 	fact := &x.facts[len(x.facts)-1]
-	fact.observeUsage(usage, true)
-	fact.recordEvidence(false)
+	fact.ObserveUsage(usage, true)
+	fact.RecordEvidence(false)
 }
 
 func bedrockReadFailure(ctx context.Context) (*fault.Error, string) {
@@ -395,8 +395,8 @@ func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, 
 	}
 	completeUsage := terminal && (authoritativeUsage || initialUsage && finalUsage)
 	fact := &x.facts[len(x.facts)-1]
-	fact.observeUsage(usage, completeUsage)
-	fact.recordEvidence(!completeUsage)
+	fact.ObserveUsage(usage, completeUsage)
+	fact.RecordEvidence(!completeUsage)
 	if failure != nil {
 		x.failure = failure
 		x.facts[len(x.facts)-1].Class = class

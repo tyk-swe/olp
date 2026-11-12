@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/jobs"
@@ -92,7 +93,7 @@ func (s *Server) videoList(w http.ResponseWriter, r *http.Request) {
 	s.finishMedia(x, out, out.status)
 }
 
-func (s *Server) refreshListRecord(ctx context.Context, x *call, record jobs.Record) (jobs.Record, *AttemptFact, bool, *fault.Error) {
+func (s *Server) refreshListRecord(ctx context.Context, x *call, record jobs.Record) (jobs.Record, *events.AttemptFact, bool, *fault.Error) {
 	upstream, ok := record.Upstream()
 	if !record.State.Polling() || !ok {
 		return record, nil, false, nil

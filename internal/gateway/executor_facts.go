@@ -6,6 +6,7 @@ import (
 	"net/http/httptrace"
 	"sync/atomic"
 
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -82,8 +83,8 @@ func (st *attemptState) interrupted(err error) error {
 }
 
 // newFact opens the record of one attempt against one credential slot.
-func (s *Server) newFact(x *call, a routing.Attempt, slot routing.Slot, ordinal int, pinned ...*routing.Provider) AttemptFact {
-	fact := AttemptFact{
+func (s *Server) newFact(x *call, a routing.Attempt, slot routing.Slot, ordinal int, pinned ...*routing.Provider) events.AttemptFact {
+	fact := events.AttemptFact{
 		Prompt:   x.prompt,
 		Strategy: a.Strategy, PolicyDigest: a.PolicyDigest, VendorID: a.VendorID, Price: a.Price,
 		Discount:           a.Discount,
@@ -105,9 +106,9 @@ func (s *Server) newFact(x *call, a routing.Attempt, slot routing.Slot, ordinal 
 		// its consumer's card from current inputs and retain it on the fact.
 		x.routingInputs = s.deps.Runtime.RoutingInputs()
 	}
-	fact.cardRev, fact.CardPinned = x.resolveAttemptCardRevision(a.ProviderID, x.route, fact.StartedAt)
-	if fact.CardPinned && fact.cardRev != nil {
-		fact.CardRevisionID = &fact.cardRev.ID
+	fact.CardRev, fact.CardPinned = x.resolveAttemptCardRevision(a.ProviderID, x.route, fact.StartedAt)
+	if fact.CardPinned && fact.CardRev != nil {
+		fact.CardRevisionID = &fact.CardRev.ID
 	}
 	provider, known := x.snapshot().FindProvider(a.ProviderID)
 	if len(pinned) != 0 && pinned[0] != nil {
@@ -172,7 +173,7 @@ func (s *Server) newFact(x *call, a routing.Attempt, slot routing.Slot, ordinal 
 
 // rejectedFact records an attempt a quota refused. Nothing was sent, so the
 // attempt carries no status and cannot have been billed by anyone.
-func (s *Server) rejectedFact(x *call, a routing.Attempt, slot routing.Slot, ordinal int, rejection *attemptFailure) AttemptFact {
+func (s *Server) rejectedFact(x *call, a routing.Attempt, slot routing.Slot, ordinal int, rejection *attemptFailure) events.AttemptFact {
 	fact := s.newFact(x, a, slot, ordinal)
 	fact.Class = rejection.class
 	fact.Duration = s.now().Sub(fact.StartedAt)
@@ -180,6 +181,6 @@ func (s *Server) rejectedFact(x *call, a routing.Attempt, slot routing.Slot, ord
 		retry := rejection.retryAfter
 		fact.RetryAfter = &retry
 	}
-	fact.recordEvidence(false)
+	fact.RecordEvidence(false)
 	return fact
 }

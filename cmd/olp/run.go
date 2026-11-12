@@ -38,6 +38,7 @@ import (
 	"github.com/tyk-swe/olp/internal/export/focus"
 	"github.com/tyk-swe/olp/internal/export/stream"
 	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/grants/personal"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	limitadmission "github.com/tyk-swe/olp/internal/limits/admission"
@@ -304,7 +305,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		})
 		defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "plugin host", func(ctx context.Context) error { pluginHost.Close(ctx); return nil })
 		var gatewayConfig, probeConfig gateway.Config
-		gatewayDeps := gateway.Dependencies{Runtime: rt, Egress: &policy, Log: log, Sink: gateway.LogSink{Log: log}}
+		gatewayDeps := gateway.Dependencies{Runtime: rt, Egress: &policy, Log: log, Sink: events.LogSink{Log: log}}
 		probeDeps := gatewayDeps
 		if c.Mode.Management() || c.Mode.Inference() {
 			gatewayConfig = gateway.Config{
@@ -453,7 +454,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 				server.Admission.PendingCostAccountingReady = shared.Syncer.CheckOwnerAccounting
 				server.Admission.PendingTokenAccountingReady = resources.New(pool).CheckPendingTokenOwner
 				server.Admission.CostAccountingReady = accounting.Check
-				server.Sink = &gateway.AccountingSink{Delivery: accounting, Next: server.Sink}
+				server.Sink = &events.AccountingSink{Delivery: accounting, Next: server.Sink}
 			}
 		}
 		if c.Mode.Management() || c.Mode.Inference() {

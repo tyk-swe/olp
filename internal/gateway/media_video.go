@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/jobs"
@@ -303,8 +304,8 @@ func (s *Server) admitVideoRequest(parent context.Context, x *call, authority ke
 	}, nil
 }
 
-func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record, job media.JobCall) (*transport.Result, *attemptFailure, AttemptFact) {
-	fact := AttemptFact{
+func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record, job media.JobCall) (*transport.Result, *attemptFailure, events.AttemptFact) {
+	fact := events.AttemptFact{
 		TargetID:           record.ID,
 		ProviderID:         record.ProviderID,
 		ProviderRevisionID: record.ProviderRevisionID,
@@ -406,7 +407,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record,
 			dispatched: failure.Dispatched,
 			acceptance: upstream.Evidence{Reached: failure.Dispatched, Status: failure.Status}.Acceptance(),
 		}
-		fact.recordEvidence(f.billingUncertain())
+		fact.RecordEvidence(f.billingUncertain())
 		s.health.record(record.ProviderID, fact, false)
 		atr.Finish(fact.Class, fact.Status)
 		return nil, f, fact
@@ -442,7 +443,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record,
 			}
 			fact.Class = classProtocol
 			fact.Duration = s.now().Sub(fact.StartedAt)
-			fact.recordEvidence(true)
+			fact.RecordEvidence(true)
 			atr.Finish(fact.Class, result.Status)
 			return nil, &attemptFailure{class: classProtocol, status: result.Status, dispatched: true}, fact
 		}
@@ -453,7 +454,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record,
 	fact.FirstByte = &fb
 	fact.Usage = mediaUsage(nil, result)
 	fact.Committed = true
-	fact.recordEvidence(false)
+	fact.RecordEvidence(false)
 	s.health.record(record.ProviderID, fact, false)
 	if u := fact.Usage; u != nil {
 		atr.RecordUsage(&u.InputTokens, &u.OutputTokens, u.CachedInputTokens, u.MediaUnits)
@@ -462,14 +463,14 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record,
 	return result, nil, fact
 }
 
-func (s *Server) jobRefused(fact AttemptFact, failure *attemptFailure) (*transport.Result, *attemptFailure, AttemptFact) {
+func (s *Server) jobRefused(fact events.AttemptFact, failure *attemptFailure) (*transport.Result, *attemptFailure, events.AttemptFact) {
 	fact.Class = failure.class
 	fact.Duration = s.now().Sub(fact.StartedAt)
-	fact.recordEvidence(false)
+	fact.RecordEvidence(false)
 	return nil, failure, fact
 }
 
-func (x *call) noteJobAttempt(fact AttemptFact) {
+func (x *call) noteJobAttempt(fact events.AttemptFact) {
 	x.facts = append(x.facts, fact)
 	x.attemptCount, x.attemptVendor = len(x.facts), fact.VendorID
 }

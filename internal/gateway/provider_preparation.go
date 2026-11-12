@@ -9,6 +9,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/interaction"
@@ -403,7 +404,7 @@ func (x *call) attemptReservation(a routing.Attempt, provider *routing.Provider)
 // family is recorded whether or not an estimate was. Requests the gateway reads
 // no prompt of, such as a stored-response lifecycle call, a realtime session
 // or a job poll, record none.
-func (x *call) recordEstimate(fact *AttemptFact, a routing.Attempt) {
+func (x *call) recordEstimate(fact *events.AttemptFact, a routing.Attempt) {
 	fact.ModelFamily = string(estimate.FamilyOf(a.UpstreamModel))
 	if x.sizedInput != nil {
 		fact.EstimatedInputTokens, fact.EstimateProvenance = *x.sizedInput, string(estimate.ProvenanceHeuristic)

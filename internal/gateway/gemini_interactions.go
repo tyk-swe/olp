@@ -263,7 +263,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 	} else {
 		fact := &x.facts[len(x.facts)-1]
 		fact.Class = classSuccess
-		fact.observeUsage(fact.Usage, false)
+		fact.ObserveUsage(fact.Usage, false)
 	}
 	nativeFailure := result.Status == "failed"
 	if nativeFailure {
@@ -360,7 +360,7 @@ func (s *Server) storeGeminiInteraction(ctx context.Context, x *call, p *pin, ow
 		}
 		fact := &x.facts[len(x.facts)-1]
 		fact.GenerationUsageDeferred = true
-		fact.recordEvidence(true)
+		fact.RecordEvidence(true)
 	}
 	return stored, err
 }
@@ -858,8 +858,8 @@ func (s *Server) recordGeminiInteractionUsage(x *call, object oif.Value) {
 	statusValue, _ := object.Lookup("status")
 	status, _ := statusValue.Text()
 	complete := geminilifecycle.InteractionTurnFinished(status)
-	fact.observeUsage(observed, complete)
-	fact.recordEvidence(!complete)
+	fact.ObserveUsage(observed, complete)
+	fact.RecordEvidence(!complete)
 	fact.UsageComplete, fact.BillingUncertain = complete, !complete
 }
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -25,20 +26,20 @@ func backgroundResponseRequested(parsed *wire.Request) bool {
 // A background response may outlive its POST or stream. Keep a content-free
 // accounting template on the resource so polling uses the generation's key,
 // attribution, pricing and request identity.
-func (s *Server) pendingResponseUsage(x *call, fact *AttemptFact, metadata map[string]json.RawMessage) bool {
+func (s *Server) pendingResponseUsage(x *call, fact *events.AttemptFact, metadata map[string]json.RawMessage) bool {
 	if !backgroundResponseRequested(x.generation.parsed) {
 		return false
 	}
 	return s.pendingGenerationUsage(x, fact, metadata)
 }
 
-func (s *Server) pendingGenerationUsage(x *call, fact *AttemptFact, metadata map[string]json.RawMessage) bool {
+func (s *Server) pendingGenerationUsage(x *call, fact *events.AttemptFact, metadata map[string]json.RawMessage) bool {
 	copyFact := *fact
 	if x.guardrailAttemptActive {
 		copyFact.GuardrailDecisions = x.attemptGuardrailEvidence()
 	}
 	copyFact.GenerationUsageDeferred = false
-	copyFact.recordEvidence(true)
+	copyFact.RecordEvidence(true)
 	// Native acceptance and financial evidence are already known. The original
 	// HTTP exchange is still unfinished and may refuse its local projection.
 	copyFact.Class = ""
@@ -56,14 +57,14 @@ func (s *Server) pendingGenerationUsage(x *call, fact *AttemptFact, metadata map
 		copyFact.Interaction = &interaction
 	}
 	copyFact.UsageComplete, copyFact.BillingUncertain = false, true
-	facts := append([]AttemptFact{}, x.facts...)
+	facts := append([]events.AttemptFact{}, x.facts...)
 	if len(facts) > 0 && facts[len(facts)-1].Ordinal == fact.Ordinal {
 		facts[len(facts)-1] = copyFact
 	} else {
 		facts = append(facts, copyFact)
 	}
 	now := s.now()
-	ev, err := accountingEvent(Envelope{
+	ev, err := events.UsageEvent(events.Envelope{
 		AccountingID: x.request.accountingID(), KeyID: x.keyID,
 		BudgetGroupID: x.budgetGroupID, Attribution: x.attribution, EndUserDigest: x.endUserDigest,
 		EvaluatorGuardrailID: x.evaluatorGuardrailID, GuardrailDecisions: x.guardrailEvidence(), PolicyDecisions: x.policyDecisions, Route: x.named().Slug,
@@ -119,7 +120,7 @@ func attachGenerationHTTP(x *call, resource *resources.Resource) error {
 	return nil
 }
 
-func (s *Server) finalizeGenerationHTTP(x *call, env Envelope) {
+func (s *Server) finalizeGenerationHTTP(x *call, env events.Envelope) {
 	owner := x.generation.generationHTTP
 	if owner == nil || owner.localID == "" || s.deps.Resources == nil || len(env.Attempts) == 0 {
 		return
@@ -133,15 +134,15 @@ func (s *Server) finalizeGenerationHTTP(x *call, env Envelope) {
 	completion := usage.HTTPCompletion{
 		EventID: owner.event.EventID, RequestID: owner.event.RequestID, APIKeyID: owner.event.APIKeyID,
 		RequestStartedAt: owner.event.RequestStartedAt, CompletedAt: env.CompletedAt,
-		StatusCode: optionalStatus(env.Status), ErrorClass: optionalText(env.ErrorClass),
-		LatencyMS: milliseconds(env.Duration), FirstByteMS: optionalMilliseconds(env.FirstByte),
+		StatusCode: events.OptionalStatus(env.Status), ErrorClass: events.OptionalText(env.ErrorClass),
+		LatencyMS: events.Milliseconds(env.Duration), FirstByteMS: events.OptionalMilliseconds(env.FirstByte),
 		BudgetBoundary: env.BudgetBoundary, PayloadCaptured: env.PayloadCaptured,
 		Attempt: usage.HTTPAttemptCompletion{ID: last.ID, Ordinal: last.Ordinal, ProviderID: last.ProviderID, UpstreamModel: last.UpstreamModel,
-			StartedAt: last.StartedAt, CompletedAt: fact.StartedAt.Add(max(fact.Duration, 0)), StatusCode: optionalStatus(fact.Status),
-			Committed: fact.Committed, LatencyMS: milliseconds(fact.Duration), FirstByteMS: optionalMilliseconds(fact.FirstByte)},
+			StartedAt: last.StartedAt, CompletedAt: fact.StartedAt.Add(max(fact.Duration, 0)), StatusCode: events.OptionalStatus(fact.Status),
+			Committed: fact.Committed, LatencyMS: events.Milliseconds(fact.Duration), FirstByteMS: events.OptionalMilliseconds(fact.FirstByte)},
 	}
 	if fact.Class != classSuccess {
-		completion.Attempt.ErrorClass = optionalText(fact.Class)
+		completion.Attempt.ErrorClass = events.OptionalText(fact.Class)
 	}
 	if fact.Interaction != nil {
 		completion.Attempt.ClientState = fact.Interaction.ClientState
@@ -166,7 +167,7 @@ func (s *Server) reconcileResponse(ctx context.Context, localID string, body []b
 func (s *Server) applyResponseObservation(ctx context.Context, localID string, observation openai.ResponseUsageObservation) *fault.Error {
 	evidence := usage.AttemptUsage{Evidence: usage.EvidenceUnobservedUncertain}
 	if observation.Usage != nil {
-		evidence = observedAttemptUsage(observation.Usage, observation.Complete, "generation")
+		evidence = events.ObservedUsage(observation.Usage, observation.Complete, "generation")
 	}
 	result, err := s.deps.Resources.ObserveResponseUsage(ctx, localID, observation.Status, evidence, s.now())
 	if err != nil {

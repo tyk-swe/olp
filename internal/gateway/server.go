@@ -27,6 +27,7 @@ import (
 	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export/capture"
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -111,7 +112,7 @@ type Dependencies struct {
 	CodeResearch   ResearchLedger
 	ResearchAuth   ResearchAuthorizer
 	Runtime        Runtime
-	Sink           Sink
+	Sink           events.Sink
 	Admission      *Admission
 	Debits         SessionDebitLedger
 	WorkflowRuns   WorkflowRunStore
@@ -1198,9 +1199,9 @@ func normalizedDependencies(deps Dependencies) Dependencies {
 	}
 }
 
-func configuredSink(sink Sink, log *slog.Logger) Sink {
+func configuredSink(sink events.Sink, log *slog.Logger) events.Sink {
 	if sink != nil {
 		return sink
 	}
-	return LogSink{Log: log}
+	return events.LogSink{Log: log}
 }

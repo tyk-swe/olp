@@ -7,6 +7,7 @@ import (
 	"time"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
@@ -354,7 +355,7 @@ func (x *call) costOf(owner string) rates.Cost {
 		if fact.BudgetExempt || !fact.UsageObserved || fact.Price == nil || owner != "" && !slices.Contains(fact.Budgets, owner) {
 			continue
 		}
-		if cost, ok := fact.Price.Cost(attemptUsage(fact, operation), fact.StartedAt, attemptSuccessful(fact), fact.Discount); ok {
+		if cost, ok := fact.Price.Cost(events.AttemptUsage(fact, operation), fact.StartedAt, events.AttemptSuccessful(fact), fact.Discount); ok {
 			if !x.factCommitted(fact) {
 				total = total.Add(cost)
 			}
@@ -391,7 +392,7 @@ func (x *call) responseCost() (rates.Cost, bool) {
 		if !fact.UsageObserved {
 			continue
 		}
-		cost, ok := fact.Price.Cost(attemptUsage(fact, operation), fact.StartedAt, attemptSuccessful(fact), fact.Discount)
+		cost, ok := fact.Price.Cost(events.AttemptUsage(fact, operation), fact.StartedAt, events.AttemptSuccessful(fact), fact.Discount)
 		if !ok {
 			return rates.Cost{}, false
 		}
@@ -451,7 +452,7 @@ func (s *Server) settledCharge(x *call) rates.Cost {
 		var cost rates.Cost
 		var costPtr *rates.Cost
 		if fact.Price != nil {
-			if priced, ok := fact.Price.Cost(attemptUsage(fact, operation), fact.StartedAt, attemptSuccessful(fact), fact.Discount); ok {
+			if priced, ok := fact.Price.Cost(events.AttemptUsage(fact, operation), fact.StartedAt, events.AttemptSuccessful(fact), fact.Discount); ok {
 				cost = priced
 				if x.factCommitted(fact) {
 					cost = rates.Cost{}
@@ -459,14 +460,14 @@ func (s *Server) settledCharge(x *call) rates.Cost {
 				costPtr = &cost
 			}
 		}
-		rev := fact.cardRev
+		rev := fact.CardRev
 		if rev == nil {
 			// No card: the charge is the cost itself.
 			total = total.Add(cost)
 			continue
 		}
 		provider := x.snapshot().Provider(fact.ProviderID)
-		if charge, ok := rev.Charge(attemptUsage(fact, operation), fact.StartedAt, attemptSuccessful(fact), costPtr,
+		if charge, ok := rev.Charge(events.AttemptUsage(fact, operation), fact.StartedAt, events.AttemptSuccessful(fact), costPtr,
 			provider.Kind, provider.VendorID, fact.UpstreamModel, operation); ok {
 			total = total.Add(charge)
 		}
@@ -519,7 +520,7 @@ func (s *Server) recordCost(x *call) {
 	}
 }
 
-func (x *call) factCommitted(fact *AttemptFact) bool {
+func (x *call) factCommitted(fact *events.AttemptFact) bool {
 	if fact.CommitmentPinned {
 		return fact.Commitment != nil
 	}

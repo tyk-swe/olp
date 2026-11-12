@@ -535,7 +535,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 	if err := s.applySlotCredential(reqCtx, x, req, cfg, p.slot, body, &p.provider, p.model); err != nil {
 		fact.Class = classCredential
 		fact.Duration = s.now().Sub(fact.StartedAt)
-		fact.recordEvidence(false)
+		fact.RecordEvidence(false)
 		x.facts = append(x.facts, fact)
 		return nil, 0, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider credential could not be applied.")
 	}
@@ -543,14 +543,14 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 	if err != nil {
 		fact.Class = classCredential
 		fact.Duration = s.now().Sub(fact.StartedAt)
-		fact.recordEvidence(false)
+		fact.RecordEvidence(false)
 		x.facts = append(x.facts, fact)
 		return nil, 0, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider network credential is unavailable.")
 	}
 	if e := s.markSessionDispatched(reqCtx, x); e != nil {
 		fact.Class = classConnect
 		fact.Duration = s.now().Sub(fact.StartedAt)
-		fact.recordEvidence(false)
+		fact.RecordEvidence(false)
 		x.facts = append(x.facts, fact)
 		return nil, 0, e
 	}
@@ -563,7 +563,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 		fact.Class = classConnect
 		dispatched := state.dispatched.Load()
 		sess.rejected = state.classifier.Classify(state.evidence()).Acceptance == upstream.NotSent
-		fact.recordEvidence(dispatched)
+		fact.RecordEvidence(dispatched)
 		if dispatched {
 			s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
 		}
@@ -582,7 +582,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 		sess.rejected = outcome.Acceptance == upstream.Terminal
 		fact.Class = string(outcome.Class)
 		fact.Duration = s.now().Sub(fact.StartedAt)
-		fact.recordEvidence(false)
+		fact.RecordEvidence(false)
 		x.facts = append(x.facts, fact)
 		return nil, 0, upstreamError(&attemptFailure{status: resp.StatusCode, upstream: nativeError})
 	}
@@ -594,7 +594,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 	mediaType, _, mediaErr := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil || len(answer) == 0 || len(answer) > maxWebRTCSDPBytes || mediaErr != nil || mediaType != "application/sdp" {
 		fact.Class = classProtocol
-		fact.recordEvidence(true)
+		fact.RecordEvidence(true)
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		x.facts = append(x.facts, fact)
 		if !ok || s.hangupWebRTCCall(ctx, sess) != nil {
@@ -605,7 +605,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 	controlEndpoint, controlErr := cfg.RealtimeControlURL(p.model, callID)
 	if !ok || controlErr != nil {
 		fact.Class = classProtocol
-		fact.recordEvidence(true)
+		fact.RecordEvidence(true)
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		x.facts = append(x.facts, fact)
 		s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
@@ -618,7 +618,7 @@ func (s *Server) createWebRTCCall(ctx context.Context, sess *webrtcSession, sdp,
 		fact.Interaction.UpstreamState = upstream.Accepted
 	}
 	fact.Duration = s.now().Sub(fact.StartedAt)
-	fact.recordEvidence(true)
+	fact.RecordEvidence(true)
 	x.facts = append(x.facts, fact)
 	conn, e := s.dialWebRTCControl(createCtx, sess, controlEndpoint)
 	if e != nil {

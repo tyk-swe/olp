@@ -15,6 +15,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/codewire"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -189,7 +190,7 @@ func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *cal
 	estimate := max(resourceEstimate, x.estimate)
 	var slot routing.Slot
 	var hold *dispatchHold
-	var factP *AttemptFact
+	var factP *events.AttemptFact
 	found := false
 	unmeterable := false
 slots:
@@ -256,14 +257,14 @@ slots:
 	factP = &x.facts[len(x.facts)-1]
 	if err := s.applySlotCredential(ctx, x, req, provider.Connector(), slot, body, &provider, target.ProviderModel); err != nil {
 		factP.Class, factP.Duration = classCredential, s.now().Sub(factP.StartedAt)
-		factP.recordEvidence(false)
+		factP.RecordEvidence(false)
 		fail(fault.ServerError(http.StatusBadGateway, "upstream_error", "The bound credential could not be applied."))
 		return
 	}
 	client, err := s.providerClient(ctx, x.request.release, &provider, slot)
 	if err != nil {
 		factP.Class, factP.Duration = classCredential, s.now().Sub(factP.StartedAt)
-		factP.recordEvidence(false)
+		factP.RecordEvidence(false)
 		fail(fault.ServerError(http.StatusBadGateway, "upstream_error", "The bound connection could not be reached."))
 		return
 	}
@@ -276,7 +277,7 @@ slots:
 				factP.Status = resp.StatusCode
 			}
 			factP.Class = classProtocol
-			factP.recordEvidence(true)
+			factP.RecordEvidence(true)
 			fail(fault.ServerError(http.StatusBadGateway, "passthrough_redirect_refused", "The provider redirect was refused."))
 			return
 		}
@@ -284,7 +285,7 @@ slots:
 		if ctx.Err() != nil {
 			factP.Class = classTimeout
 		}
-		factP.recordEvidence(true)
+		factP.RecordEvidence(true)
 		fail(fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider could not complete the request."))
 		return
 	}
@@ -294,7 +295,7 @@ slots:
 	switch resp.StatusCode {
 	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
 		factP.Class, factP.Duration = classProtocol, s.now().Sub(factP.StartedAt)
-		factP.recordEvidence(true)
+		factP.RecordEvidence(true)
 		fail(fault.ServerError(http.StatusBadGateway, "passthrough_redirect_refused", "The provider redirect was refused."))
 		return
 	}
@@ -304,7 +305,7 @@ slots:
 	}
 	if r.Method != http.MethodHead && resp.ContentLength > responseLimit {
 		factP.Class, factP.Duration = classProtocol, s.now().Sub(factP.StartedAt)
-		factP.recordEvidence(true)
+		factP.RecordEvidence(true)
 		fail(fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response exceeded the gateway limit."))
 		return
 	}
@@ -314,7 +315,7 @@ slots:
 		if ctx.Err() != nil {
 			factP.Class = classTimeout
 		}
-		factP.recordEvidence(true)
+		factP.RecordEvidence(true)
 		fail(responseError)
 		return
 	}
@@ -344,21 +345,21 @@ slots:
 		if ctx.Err() != nil {
 			factP.Class = classTimeout
 		}
-		factP.recordEvidence(true)
+		factP.RecordEvidence(true)
 	case providerSuccess:
 		factP.Class = classSuccess
-		factP.observeUsage(&wire.Usage{}, true)
+		factP.ObserveUsage(&wire.Usage{}, true)
 		factP.TokenlessUsage = true
-		factP.recordEvidence(false)
+		factP.RecordEvidence(false)
 	case resp.StatusCode >= 500:
 		factP.Class = classUpstreamServer
-		factP.recordEvidence(true)
+		factP.RecordEvidence(true)
 	case resp.StatusCode >= 400:
 		factP.Class = classUpstreamClient
-		factP.recordEvidence(true)
+		factP.RecordEvidence(true)
 	default:
 		factP.Class = classProtocol
-		factP.recordEvidence(true)
+		factP.RecordEvidence(true)
 	}
 	out := &outcome{committed: providerSuccess && copyErr == nil}
 	switch {

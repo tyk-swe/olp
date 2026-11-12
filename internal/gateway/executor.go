@@ -12,6 +12,7 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/interaction"
@@ -29,7 +30,7 @@ import (
 // Failure classes shared with the routing retry taxonomy fixture. Upstream
 // exchanges are classified by internal/upstream.
 const (
-	classSuccess        = "success"
+	classSuccess        = events.ClassSuccess
 	classConnect        = string(upstream.Connect)
 	classTimeout        = string(upstream.Timeout)
 	classRateLimit      = string(upstream.RateLimit)
@@ -346,7 +347,7 @@ func (s *Server) execute(ctx context.Context, x *call) *outcome {
 	defer cancel()
 	out := runAttempts(ctx, s, x, attemptAdapter[*wire.Completion]{
 		estimate: x.attemptReservation,
-		dispatch: func(ctx context.Context, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, *wire.Completion, *attemptFailure) {
+		dispatch: func(ctx context.Context, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, *wire.Completion, *attemptFailure) {
 			return s.attempt(ctx, x, attempt, provider, slot, fact)
 		},
 	})
@@ -396,7 +397,7 @@ func (s *Server) slotAvailable(x *call, attempt routing.Attempt, slot *routing.S
 }
 
 // attempt performs one upstream call with one credential.
-func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, *wire.Completion, *attemptFailure) {
+func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, *wire.Completion, *attemptFailure) {
 	if x.guardrailEngine != nil {
 		x.guardrailCtx = ctx
 	}
@@ -421,7 +422,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 		atr.RecordResponse(fact.ResponseModel, fact.FinishReasons)
 		atr.Finish(fact.Class, fact.Status)
 	}
-	fail := func(class string, f *attemptFailure) (AttemptFact, *wire.Completion, *attemptFailure) {
+	fail := func(class string, f *attemptFailure) (events.AttemptFact, *wire.Completion, *attemptFailure) {
 		if f == nil {
 			f = &attemptFailure{}
 		}
@@ -453,7 +454,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 		fact.Class = class
 		if nativeDeliveryClass != "" {
 			fact.Class = nativeDeliveryClass
-		} else if fact.localRefusal && st.settled {
+		} else if fact.LocalRefusal && st.settled {
 			fact.Class = classSuccess
 		}
 		fact.Committed = f.committed
@@ -462,7 +463,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 			retry := f.retryAfter
 			fact.RetryAfter = &retry
 		}
-		fact.recordEvidence(f.billingUncertain())
+		fact.RecordEvidence(f.billingUncertain())
 		finishTrace()
 		return fact, nil, f
 	}
@@ -758,13 +759,13 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 		raw := read.Body
 		err = readErr
 		if responseReader.Aggregated() {
-			fact.observeUsage(read.Usage, read.UsageComplete)
+			fact.ObserveUsage(read.Usage, read.UsageComplete)
 		}
 		if err == nil {
 			native, nativeErr := responseCodec.Native(raw)
 			if native != nil {
 				if encodedWire == wire.Responses {
-					fact.observeUsage(native.Usage, native.UsageComplete)
+					fact.ObserveUsage(native.Usage, native.UsageComplete)
 				} else if !responseReader.Aggregated() {
 					fact.Usage = native.Usage
 				}
@@ -820,7 +821,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 	}
 	if completion != nil {
 		if x.generation.parsed.Stream || encodedWire == wire.Responses {
-			fact.observeUsage(completion.Usage, completion.UsageComplete)
+			fact.ObserveUsage(completion.Usage, completion.UsageComplete)
 		} else {
 			fact.Usage = completion.Usage
 		}
@@ -852,12 +853,12 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 		}
 		_, localMapping := errors.AsType[*responseLocalRefusal](err)
 		if localMapping || openai.IsResponseProjectionError(err) {
-			fact.localRefusal = true
+			fact.LocalRefusal = true
 			f.overall, f.noRetry = true, st.dispatched.Load()
 			terminal, nativeFailure := completion.NativeResponseOutcome()
 			st.settled = st.settled || terminal
 			if nativeFailure != nil {
-				fact.localRefusal = false
+				fact.LocalRefusal = false
 				// A known failed stateless generation remains retryable. An
 				// accepted retained create keeps its original resource owner.
 				f.overall = retainedResponse || fact.GenerationUsageDeferred
@@ -905,7 +906,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 	fact.Duration = s.now().Sub(fact.StartedAt)
 	// Moderation intentionally has no usage counters. Other successful work
 	// without usage may have been billed with nothing this gateway can meter.
-	fact.recordEvidence(x.operationName() != "moderation")
+	fact.RecordEvidence(x.operationName() != "moderation")
 	finishTrace()
 	return fact, completion, nil
 }

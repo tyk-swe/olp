@@ -79,7 +79,7 @@ func (s *Server) bedrockDuplexDial(ctx context.Context, x *call, p *pin) (duplex
 	finish := func(class string, e *fault.Error) (duplexPeer, *fault.Error) {
 		fact.Class = class
 		fact.Duration = s.now().Sub(fact.StartedAt)
-		fact.recordEvidence(false)
+		fact.RecordEvidence(false)
 		x.facts = append(x.facts, fact)
 		return nil, e
 	}
@@ -109,7 +109,7 @@ func (s *Server) bedrockDuplexDial(ctx context.Context, x *call, p *pin) (duplex
 		fact.Interaction.UpstreamState = upstream.Accepted
 	}
 	fact.Duration = s.now().Sub(fact.StartedAt)
-	fact.recordEvidence(true)
+	fact.RecordEvidence(true)
 	x.facts = append(x.facts, fact)
 	x.dispatched = true
 	if p.hold != nil {

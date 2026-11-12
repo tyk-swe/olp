@@ -14,6 +14,7 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/cache"
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/oif"
@@ -434,8 +435,8 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *fault.Error {
 	c.entry = entry
 	c.age = int64(max(s.now().Sub(entry.CreatedAt)/time.Second, 0))
 	c.budgetCost, c.budgetCharge = "0", "0"
-	fact := AttemptFact{Class: classSuccess, Status: 200, Usage: c.metadata.Usage, UsageObserved: c.metadata.Usage != nil, UsageComplete: c.metadata.UsageComplete}
-	u := attemptUsage(&fact, x.operationName())
+	fact := events.AttemptFact{Class: classSuccess, Status: 200, Usage: c.metadata.Usage, UsageObserved: c.metadata.Usage != nil, UsageComplete: c.metadata.UsageComplete}
+	u := events.AttemptUsage(&fact, x.operationName())
 	var costPtr *rates.Cost
 	at := s.now()
 	if a.Price != nil {
@@ -469,7 +470,7 @@ func (s *Server) recordCacheHit(x *call) {
 		e.BudgetCost = c.budgetCost
 		e.BudgetCharge = c.budgetCharge
 	}
-	f := AttemptFact{Cache: e, Class: "cache_hit", Status: 200, StartedAt: s.now(), ProviderID: a.ProviderID, ProviderRevisionID: a.ProviderRevisionID, TargetID: a.TargetID, UpstreamModel: a.UpstreamModel, Usage: c.metadata.Usage, UsageObserved: c.metadata.Usage != nil, UsageComplete: c.metadata.UsageComplete, Mode: x.mode}
+	f := events.AttemptFact{Cache: e, Class: events.ClassCacheHit, Status: 200, StartedAt: s.now(), ProviderID: a.ProviderID, ProviderRevisionID: a.ProviderRevisionID, TargetID: a.TargetID, UpstreamModel: a.UpstreamModel, Usage: c.metadata.Usage, UsageObserved: c.metadata.Usage != nil, UsageComplete: c.metadata.UsageComplete, Mode: x.mode}
 	x.facts = append(x.facts, f)
 	x.mirrors = false
 }

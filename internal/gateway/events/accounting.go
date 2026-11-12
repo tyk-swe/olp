@@ -1,14 +1,17 @@
-package gateway
+package events
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/usage/delivery"
+	"github.com/tyk-swe/olp/internal/usage/ingest"
 
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -31,7 +34,7 @@ func (a *AccountingSink) Terminal(e Envelope) {
 	if a.Delivery == nil {
 		return
 	}
-	event, err := accountingEvent(e)
+	event, err := UsageEvent(e)
 	if err != nil {
 		a.Delivery.Reject(e.RequestID, err)
 		return
@@ -51,11 +54,11 @@ type PersistingSink struct {
 }
 
 // persistTimeout bounds writing one directly persisted record.
-const persistTimeout = 10 * time.Second
+const PersistTimeout = 10 * time.Second
 
 // Terminal records one finished request.
 func (p *PersistingSink) Terminal(e Envelope) {
-	event, err := accountingEvent(e)
+	event, err := UsageEvent(e)
 	if err != nil {
 		p.logger().Warn("usage event not recorded", "request_id", e.RequestID, "error", err.Error())
 		return
@@ -65,7 +68,7 @@ func (p *PersistingSink) Terminal(e Envelope) {
 	}
 	payload, err := json.Marshal(event)
 	if err == nil {
-		ctx, cancel := context.WithTimeout(context.Background(), persistTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), PersistTimeout)
 		err = p.Persist(ctx, event, payload)
 		cancel()
 	}
@@ -84,7 +87,7 @@ func (p *PersistingSink) logger() *slog.Logger {
 // accountingEvent renders one envelope as a usage event, or nil when there is
 // nothing to account for: no API key owns a caller request, or it ended before
 // a route and a runtime generation could be attributed to it.
-func accountingEvent(e Envelope) (*usage.Event, error) {
+func UsageEvent(e Envelope) (*usage.Event, error) {
 	if (e.KeyID == "" && !e.Origin.Keyless()) || e.Route == "" || e.RuntimeGenerationID == "" {
 		return nil, nil
 	}
@@ -97,7 +100,7 @@ func accountingEvent(e Envelope) (*usage.Event, error) {
 	}
 	event := &usage.Event{
 		CacheResult:          e.CacheResult,
-		EvaluatorGuardrailID: optionalText(e.EvaluatorGuardrailID),
+		EvaluatorGuardrailID: OptionalText(e.EvaluatorGuardrailID),
 		Version:              usage.WireVersion,
 		EventID:              eventID.String(),
 		RequestID:            e.AccountingID,
@@ -107,7 +110,7 @@ func accountingEvent(e Envelope) (*usage.Event, error) {
 		MemberPrincipalID:    e.MemberPrincipalID,
 		DelegationPairDigest: e.DelegationPairDigest,
 		Origin:               e.Origin,
-		ParentRequestID:      optionalText(e.ParentRequestID),
+		ParentRequestID:      OptionalText(e.ParentRequestID),
 		Attribution:          e.Attribution,
 		EndUserDigest:        e.EndUserDigest,
 		BudgetBoundary:       e.BudgetBoundary,
@@ -119,14 +122,14 @@ func accountingEvent(e Envelope) (*usage.Event, error) {
 		RequestStartedAt:   e.StartedAt,
 		RequestCompletedAt: e.CompletedAt,
 		ObservedAt:         e.CompletedAt,
-		StatusCode:         optionalStatus(e.Status),
-		ErrorClass:         optionalText(e.ErrorClass),
-		LatencyMS:          milliseconds(e.Duration),
+		StatusCode:         OptionalStatus(e.Status),
+		ErrorClass:         OptionalText(e.ErrorClass),
+		LatencyMS:          Milliseconds(e.Duration),
 		PayloadCaptured:    e.PayloadCaptured,
 		Attempts:           make([]usage.Attempt, 0, len(e.Attempts)),
 	}
 	for index := range e.Attempts {
-		attempt, err := accountingAttempt(e, index)
+		attempt, err := UsageAttempt(e, index)
 		if err != nil {
 			return nil, err
 		}
@@ -136,14 +139,14 @@ func accountingEvent(e Envelope) (*usage.Event, error) {
 	// field that would describe one stays absent.
 	if final := len(e.Attempts) - 1; final >= 0 {
 		fact := &e.Attempts[final]
-		event.ProviderID = optionalText(fact.ProviderID)
-		event.UpstreamModel = optionalText(fact.UpstreamModel)
+		event.ProviderID = OptionalText(fact.ProviderID)
+		event.UpstreamModel = OptionalText(fact.UpstreamModel)
 		event.Committed = fact.Committed
-		event.FirstByteMS = optionalMilliseconds(e.FirstByte)
+		event.FirstByteMS = OptionalMilliseconds(e.FirstByte)
 		// The request is settled when the attempt that served it reported its
 		// usage and had nothing left to reconcile.
 		if fact.UsageObserved {
-			evidence := attemptUsage(fact, e.Operation)
+			evidence := AttemptUsage(fact, e.Operation)
 			event.UsageComplete = evidence.Evidence.Complete()
 			event.InputTokens, event.OutputTokens, event.CachedInputTokens = evidence.InputTokens, evidence.OutputTokens, evidence.CachedInputTokens
 			event.CacheWriteInputTokens, event.CacheWrite5MInputTokens, event.CacheWrite1HInputTokens = evidence.CacheWriteInputTokens, evidence.CacheWrite5MInputTokens, evidence.CacheWrite1HInputTokens
@@ -159,7 +162,7 @@ func accountingEvent(e Envelope) (*usage.Event, error) {
 	return event, nil
 }
 
-type attemptPolicy struct {
+type AttemptPolicy struct {
 	Commitment         *routing.Commitment `json:"commitment"`
 	CommitmentPinned   bool                `json:"commitment_pinned"`
 	DiscountID         *string             `json:"discount_id"`
@@ -174,9 +177,9 @@ type attemptPolicy struct {
 
 // accountingAttempt renders one attempt, including the provenance that
 // explains why this target served and what it reported.
-func accountingAttempt(e Envelope, index int) (usage.Attempt, error) {
+func UsageAttempt(e Envelope, index int) (usage.Attempt, error) {
 	fact := &e.Attempts[index]
-	evidence := attemptUsage(fact, e.Operation)
+	evidence := AttemptUsage(fact, e.Operation)
 	attemptID, err := accountingAttemptID(e, index)
 	if err != nil {
 		return usage.Attempt{}, fmt.Errorf("generate usage attempt ID: %w", err)
@@ -191,22 +194,22 @@ func accountingAttempt(e Envelope, index int) (usage.Attempt, error) {
 		UpstreamModel: fact.UpstreamModel,
 		StartedAt:     fact.StartedAt,
 		CompletedAt:   fact.StartedAt.Add(max(fact.Duration, 0)),
-		StatusCode:    optionalStatus(fact.Status),
+		StatusCode:    OptionalStatus(fact.Status),
 		Committed:     fact.Committed,
-		LatencyMS:     milliseconds(fact.Duration),
-		FirstByteMS:   optionalMilliseconds(fact.FirstByte),
+		LatencyMS:     Milliseconds(fact.Duration),
+		FirstByteMS:   OptionalMilliseconds(fact.FirstByte),
 		Usage:         &evidence,
 		Routing: &usage.Routing{
 			Prompt:           fact.Prompt,
 			Cache:            fact.Cache,
 			Interaction:      fact.Interaction,
-			Mode:             optionalText(fact.Mode),
-			CredentialSlotID: optionalText(fact.SlotID),
+			Mode:             OptionalText(fact.Mode),
+			CredentialSlotID: OptionalText(fact.SlotID),
 			CredentialSource: fact.CredentialSource, BudgetExempt: fact.BudgetExempt,
-			CredentialVersionID: optionalText(fact.CredentialID),
+			CredentialVersionID: OptionalText(fact.CredentialID),
 			ProviderRevisionID:  fact.ProviderRevisionID,
 			Leg:                 fact.Leg,
-			Selector:            optionalText(fact.Selector),
+			Selector:            OptionalText(fact.Selector),
 			Baseline:            fact.Baseline,
 		},
 	}
@@ -221,7 +224,7 @@ func accountingAttempt(e Envelope, index int) (usage.Attempt, error) {
 		if fact.Discount != nil {
 			discountID = &fact.Discount.ID
 		}
-		policy, err := json.Marshal(attemptPolicy{
+		policy, err := json.Marshal(AttemptPolicy{
 			Commitment: fact.Commitment, CommitmentPinned: fact.CommitmentPinned,
 			DiscountID: discountID, DiscountPinned: pricingPinned,
 			Digest: fact.PolicyDigest, PricingPinned: pricingPinned,
@@ -236,8 +239,8 @@ func accountingAttempt(e Envelope, index int) (usage.Attempt, error) {
 			attempt.Routing.PricingRevisionID = &fact.Price.RevisionID
 		}
 	}
-	if fact.Class != classSuccess && fact.Class != "cache_hit" {
-		attempt.ErrorClass = optionalText(fact.Class)
+	if fact.Class != ClassSuccess && fact.Class != ClassCacheHit {
+		attempt.ErrorClass = OptionalText(fact.Class)
 	}
 	if fact.UsageObserved {
 		attempt.Routing.StreamedOutputTokens = streamedTokens(fact)
@@ -246,7 +249,7 @@ func accountingAttempt(e Envelope, index int) (usage.Attempt, error) {
 		}
 	}
 	if fact.FirstOutput != nil {
-		output := milliseconds(*fact.FirstOutput)
+		output := Milliseconds(*fact.FirstOutput)
 		attempt.Routing.FirstOutputMS = &output
 	}
 	// The estimate is a diagnostic annotation, recorded only when it is whole:
@@ -265,27 +268,27 @@ func accountingAttempt(e Envelope, index int) (usage.Attempt, error) {
 
 // attemptSuccessful reports whether the attempt completed successfully, which
 // is when a per-request price component applies.
-func attemptSuccessful(fact *AttemptFact) bool {
-	return (fact.Class == classSuccess || fact.Class == "cache_hit") && (fact.Status >= 200 && fact.Status <= 299 || fact.Status == 304)
+func AttemptSuccessful(fact *AttemptFact) bool {
+	return (fact.Class == ClassSuccess || fact.Class == ClassCacheHit) && (fact.Status >= 200 && fact.Status <= 299 || fact.Status == 304)
 }
 
 // attemptUsage is the billing evidence an attempt carries into its usage event.
 // It is also what the gateway prices an attempt by when it settles the request's
 // cost, so what the budget holds for a request and what accounting later records
 // for it are one reading of the same attempt.
-func attemptUsage(fact *AttemptFact, operation string) usage.AttemptUsage {
+func AttemptUsage(fact *AttemptFact, operation string) usage.AttemptUsage {
 	if !fact.UsageObserved {
 		return usage.AttemptUsage{Evidence: usage.EvidenceFrom(false, fact.UsageComplete, fact.BillingUncertain)}
 	}
 	if fact.TokenlessUsage {
 		return usage.AttemptUsage{Evidence: usage.EvidenceFrom(true, fact.UsageComplete, fact.BillingUncertain)}
 	}
-	evidence := observedAttemptUsage(fact.Usage, fact.UsageComplete, operation)
+	evidence := ObservedUsage(fact.Usage, fact.UsageComplete, operation)
 	evidence.Evidence = usage.EvidenceFrom(evidence.Evidence.Observed(), evidence.Evidence.Complete(), fact.BillingUncertain)
 	return evidence
 }
 
-func observedAttemptUsage(u *wire.Usage, complete bool, operation string) usage.AttemptUsage {
+func ObservedUsage(u *wire.Usage, complete bool, operation string) usage.AttemptUsage {
 	return usage.ObservedAttemptUsage(u, complete, operation)
 }
 
@@ -306,7 +309,7 @@ func streamedTokens(fact *AttemptFact) *int64 {
 }
 
 // optionalText omits an empty string rather than storing one.
-func optionalText(value string) *string {
+func OptionalText(value string) *string {
 	if value == "" {
 		return nil
 	}
@@ -314,7 +317,7 @@ func optionalText(value string) *string {
 }
 
 // optionalStatus keeps only a status that was actually sent.
-func optionalStatus(status int) *int {
+func OptionalStatus(status int) *int {
 	if status < 100 || status > 599 {
 		return nil
 	}
@@ -323,14 +326,40 @@ func optionalStatus(status int) *int {
 
 // milliseconds renders a duration for storage. Time never runs backwards in a
 // record, so a negative measurement is reported as none elapsed.
-func milliseconds(d time.Duration) int64 {
+func Milliseconds(d time.Duration) int64 {
 	return max(d.Milliseconds(), 0)
 }
 
-func optionalMilliseconds(d *time.Duration) *int64 {
+func OptionalMilliseconds(d *time.Duration) *int64 {
 	if d == nil {
 		return nil
 	}
-	ms := milliseconds(*d)
+	ms := Milliseconds(*d)
 	return &ms
+}
+
+func accountingEventID(e Envelope) (uuid.UUID, error) {
+	for _, attempt := range e.Attempts {
+		if attempt.Execution != nil && attempt.Execution.RunID != "" {
+			return ingest.WorkflowEventID(attempt.Execution.RunID, e.AccountingID)
+		}
+	}
+	return uuid.NewV7()
+}
+
+func accountingAttemptID(e Envelope, index int) (uuid.UUID, error) {
+	fact := e.Attempts[index]
+	if fact.Execution != nil && fact.Execution.RunID != "" {
+		return uuid.Parse(fact.Execution.DispatchID)
+	}
+	for _, attempt := range e.Attempts {
+		if attempt.Execution != nil && attempt.Execution.RunID != "" {
+			eventID, err := ingest.WorkflowEventID(attempt.Execution.RunID, e.AccountingID)
+			if err != nil {
+				return uuid.Nil, err
+			}
+			return uuid.NewSHA1(eventID, []byte(strconv.Itoa(index+1))), nil
+		}
+	}
+	return uuid.NewV7()
 }

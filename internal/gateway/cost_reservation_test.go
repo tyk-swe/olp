@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -199,8 +200,8 @@ func TestSettledCostPricesWhatEachAttemptReported(t *testing.T) {
 	price := rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{
 		InputPerMillion: costText("2"), OutputPerMillion: costText("8"), CachedInputPerMillion: costText("0.5"),
 	}})
-	observed := func(input, output int64) AttemptFact {
-		return AttemptFact{
+	observed := func(input, output int64) events.AttemptFact {
+		return events.AttemptFact{
 			Price: price, UsageObserved: true, UsageComplete: true,
 			Usage: &wire.Usage{InputTokens: input, OutputTokens: output},
 		}
@@ -210,23 +211,23 @@ func TestSettledCostPricesWhatEachAttemptReported(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		operation string
-		facts     []AttemptFact
+		facts     []events.AttemptFact
 		want      string
 	}{
 		{"no attempt is no cost", "generation", nil, "0"},
-		{"input and output", "generation", []AttemptFact{observed(1_000_000, 500_000)}, "6"},
-		{"a failover bills every attempt that reported", "generation", []AttemptFact{observed(1_000_000, 0), observed(0, 1_000_000)}, "10"},
-		{"cached input bills at its own rate", "generation", []AttemptFact{cached}, "1.25"},
-		{"an embedding is priced on input alone", "embeddings", []AttemptFact{observed(1_000_000, 777)}, "2"},
-		{"usage nobody observed is not billed here", "generation", []AttemptFact{
+		{"input and output", "generation", []events.AttemptFact{observed(1_000_000, 500_000)}, "6"},
+		{"a failover bills every attempt that reported", "generation", []events.AttemptFact{observed(1_000_000, 0), observed(0, 1_000_000)}, "10"},
+		{"cached input bills at its own rate", "generation", []events.AttemptFact{cached}, "1.25"},
+		{"an embedding is priced on input alone", "embeddings", []events.AttemptFact{observed(1_000_000, 777)}, "2"},
+		{"usage nobody observed is not billed here", "generation", []events.AttemptFact{
 			{Price: price, UsageComplete: true},
 			{Price: price, BillingUncertain: true},
 			{Price: price, GenerationUsageDeferred: true, UsageComplete: true},
 		}, "0"},
-		{"an attempt without a price list is not priced here", "generation", []AttemptFact{
+		{"an attempt without a price list is not priced here", "generation", []events.AttemptFact{
 			{UsageObserved: true, UsageComplete: true, Usage: &wire.Usage{InputTokens: 5}},
 		}, "0"},
-		{"usage that is not complete is not priced", "generation", []AttemptFact{
+		{"usage that is not complete is not priced", "generation", []events.AttemptFact{
 			{Price: price, UsageObserved: true, Usage: &wire.Usage{InputTokens: 1_000_000}},
 		}, "0"},
 	} {
@@ -471,16 +472,16 @@ func TestPreparationFollowsSourceAndRouteChanges(t *testing.T) {
 	}
 }
 
-func assertAccountingCardPin(t *testing.T, fact AttemptFact, pinned bool, revision string) usage.Attempt {
+func assertAccountingCardPin(t *testing.T, fact events.AttemptFact, pinned bool, revision string) usage.Attempt {
 	t.Helper()
-	attempt, err := accountingAttempt(Envelope{Operation: "generation", Attempts: []AttemptFact{fact}}, 0)
+	attempt, err := events.UsageAttempt(events.Envelope{Operation: "generation", Attempts: []events.AttemptFact{fact}}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if attempt.Routing.Policy == nil {
 		t.Fatal("card resolution missing from accounting policy")
 	}
-	var policy attemptPolicy
+	var policy events.AttemptPolicy
 	if err := json.Unmarshal(*attempt.Routing.Policy, &policy); err != nil {
 		t.Fatal(err)
 	}
@@ -515,7 +516,7 @@ func TestAttemptCardAbsenceDistinguishesFreshAndStaleInputs(t *testing.T) {
 
 func TestAccountingCardPinDoesNotPinProviderPricing(t *testing.T) {
 	revision := uuid.NewString()
-	fact := AttemptFact{CardPinned: true, CardRevisionID: &revision, Price: costPrice()}
+	fact := events.AttemptFact{CardPinned: true, CardRevisionID: &revision, Price: costPrice()}
 	attempt := assertAccountingCardPin(t, fact, true, revision)
 	if attempt.Routing.PricingRevisionID != nil {
 		t.Fatal("card-only pin unexpectedly pinned provider pricing")

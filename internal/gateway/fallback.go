@@ -6,6 +6,7 @@ import (
 	"time"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -97,7 +98,7 @@ func (x *call) adoptPlan(plan routing.Plan) {
 	x.budget = x.spent + min(plan.Budget, x.allowance-x.spent)
 	x.selector, x.baseline = plan.Selected(), nil
 	if b := plan.Baseline; b != nil {
-		x.baseline = &usage.Baseline{ProviderID: b.ProviderID, UpstreamModel: b.UpstreamModel, VendorID: optionalText(b.VendorID)}
+		x.baseline = &usage.Baseline{ProviderID: b.ProviderID, UpstreamModel: b.UpstreamModel, VendorID: events.OptionalText(b.VendorID)}
 	}
 	if len(plan.Attempts) == 0 {
 		x.planConditions = plan.Conditions()

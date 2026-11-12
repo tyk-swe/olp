@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export/capture"
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -120,7 +121,7 @@ type call struct {
 	providerState bool
 
 	once              sync.Once
-	facts             []AttemptFact
+	facts             []events.AttemptFact
 	exchange          *pinnedExchange
 	failure           *fault.Error     // terminal error decided before the attempt loop ran
 	firstByte         *time.Duration   // request start to the first payload byte the client received

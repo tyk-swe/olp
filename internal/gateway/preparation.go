@@ -3,6 +3,7 @@ package gateway
 import (
 	"slices"
 
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operationplan"
@@ -142,7 +143,7 @@ func (p *requestPreparation) attemptEvidence(attempt routing.Attempt) preparatio
 	return p.evidence(attemptPreparationKey(attempt))
 }
 
-func (p *requestPreparation) factEvidence(fact *AttemptFact) preparationEvidence {
+func (p *requestPreparation) factEvidence(fact *events.AttemptFact) preparationEvidence {
 	return p.evidence(preparationKey{target: fact.TargetID, provider: fact.ProviderID, revision: fact.ProviderRevisionID, model: fact.UpstreamModel})
 }
 

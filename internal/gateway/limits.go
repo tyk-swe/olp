@@ -11,6 +11,7 @@ import (
 	"time"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
@@ -675,7 +676,7 @@ func (x *call) settledTokens() *int64 {
 	return x.settledTokensFor(x.facts, x.estimate)
 }
 
-func (x *call) settledTokensFor(facts []AttemptFact, estimate int64) *int64 {
+func (x *call) settledTokensFor(facts []events.AttemptFact, estimate int64) *int64 {
 	var total int64
 	for index := range facts {
 		fact := &facts[index]
@@ -695,7 +696,7 @@ func (x *call) settledTokensFor(facts []AttemptFact, estimate int64) *int64 {
 
 // settledAttemptTokens preserves a reservation's estimate when native counters
 // are partial. nil leaves an undisclosed target's existing estimate standing.
-func settledAttemptTokens(fact *AttemptFact, estimate int64) *int64 {
+func settledAttemptTokens(fact *events.AttemptFact, estimate int64) *int64 {
 	if fact == nil {
 		return nil
 	}

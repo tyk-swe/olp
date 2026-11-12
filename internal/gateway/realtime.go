@@ -842,7 +842,7 @@ func realtimeDial(ctx context.Context, s *Server, x *call, p *pin, endpoint stri
 		fact.Class = class
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		x.dispatched = x.dispatched || state.dispatched.Load()
-		fact.recordEvidence(state.evidence().Acceptance().Unresolved())
+		fact.RecordEvidence(state.evidence().Acceptance().Unresolved())
 		x.facts = append(x.facts, fact)
 		return e
 	}
@@ -892,7 +892,7 @@ func realtimeDial(ctx context.Context, s *Server, x *call, p *pin, endpoint stri
 	}
 	fact.Committed = true
 	fact.Duration = s.now().Sub(fact.StartedAt)
-	fact.recordEvidence(true)
+	fact.RecordEvidence(true)
 	x.facts = append(x.facts, fact)
 	return conn, nil
 }

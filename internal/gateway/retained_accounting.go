@@ -201,7 +201,7 @@ func observeRetainedUsage(x *call, source oif.Document, generation bool) error {
 	if !generation {
 		// A completed control/search request has no generated tokens. Its
 		// per-request price still applies through observed request usage.
-		fact.observeUsage(&wire.Usage{}, true)
+		fact.ObserveUsage(&wire.Usage{}, true)
 		fact.TokenlessUsage = true
 		return nil
 	}
@@ -210,7 +210,7 @@ func observeRetainedUsage(x *call, source oif.Document, generation bool) error {
 		return err
 	}
 	// Compaction is a terminal unary result and has no response status field.
-	fact.observeUsage(observation.Usage, observation.Usage != nil)
+	fact.ObserveUsage(observation.Usage, observation.Usage != nil)
 	return nil
 }
 

@@ -10,6 +10,7 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agents/runs"
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
@@ -214,7 +215,7 @@ func (s *Server) pauseWorkflow(ctx context.Context, x *call, completion *wire.Co
 		return nil, fault.ServerError(503, "tool_approval_unavailable", "The approval service is unavailable.")
 	}
 	_, modelCostKnown := x.responseCost()
-	costKnown := modelCostKnown && !x.workflow.unknownCost && !slices.ContainsFunc(x.facts, func(fact AttemptFact) bool {
+	costKnown := modelCostKnown && !x.workflow.unknownCost && !slices.ContainsFunc(x.facts, func(fact events.AttemptFact) bool {
 		return fact.BillingUncertain && !fact.UsageObserved
 	})
 	startedAt := func() time.Time {

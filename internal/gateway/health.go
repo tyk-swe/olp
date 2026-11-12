@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"sync"
 	"time"
 )
@@ -109,7 +110,7 @@ func cooldownDuration(d time.Duration) time.Duration {
 
 // record folds one attempt into the circuit and the health window. probe says
 // the attempt holds the half-open probe, which only its own completion releases.
-func (h *healthTracker) record(providerID string, fact AttemptFact, probe bool) {
+func (h *healthTracker) record(providerID string, fact events.AttemptFact, probe bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	now := h.now()
@@ -138,7 +139,7 @@ func (h *healthTracker) record(providerID string, fact AttemptFact, probe bool) 
 	}
 	b.attempts++
 	b.latency += fact.Duration
-	if fact.localRefusal && fact.Class != classSuccess {
+	if fact.LocalRefusal && fact.Class != classSuccess {
 		return
 	}
 	switch fact.Class {

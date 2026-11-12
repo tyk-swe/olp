@@ -16,6 +16,7 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/interaction"
@@ -619,7 +620,7 @@ func (s *Server) modelGuardrail(ctx context.Context, parent *call, d guardrails.
 				if admissionErr := s.admitClassifier(embeddingCtx, x); admissionErr != nil {
 					out = &outcome{err: admissionErr}
 				} else {
-					result := runAttempts(embeddingCtx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(attemptCtx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, operationplan.Result, *attemptFailure) {
+					result := runAttempts(embeddingCtx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(attemptCtx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *attemptFailure) {
 						return s.unaryAttempt(attemptCtx, x, a, p, slot, fact)
 					}})
 					raw = result.result.Body
@@ -662,7 +663,7 @@ func (s *Server) modelGuardrail(ctx context.Context, parent *call, d guardrails.
 		} else if e := s.admitClassifier(ctx, x); e != nil {
 			out = &outcome{err: e}
 		} else {
-			result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, operationplan.Result, *attemptFailure) {
+			result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *attemptFailure) {
 				return s.unaryAttempt(ctx, x, a, p, slot, fact)
 			}})
 			raw = result.result.Body
