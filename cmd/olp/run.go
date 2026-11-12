@@ -488,7 +488,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 				return err
 			}
 			defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "management plugin runtime", pluginRuntime.Close)
-			Management{AgentTasks: agentTasks, AgentPeers: agentPeers, AgentGrants: grantStore, Getenv: os.Getenv, Access: control, IdentityClient: identityClient, Egress: &policy, Limits: shared, Runtime: rt, Gateway: gw, Media: mediaService, Spool: mediaSpool, Health: obsCache, Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog, CatalogKeys: catalogKeys, PluginIndex: pluginIndex}.Register(public)
+			Management{AgentTasks: agentTasks, AgentPeers: agentPeers, AgentGrants: grantStore, Getenv: os.Getenv, Access: control, IdentityClient: identityClient, Egress: &policy, Limits: shared, Runtime: rt, Gateway: gw, ResponseCache: responseCache, Media: mediaService, Spool: mediaSpool, Health: obsCache, Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog, CatalogKeys: catalogKeys, PluginIndex: pluginIndex}.Register(public)
 		}
 	}
 	if err := startup.Err(); err != nil {

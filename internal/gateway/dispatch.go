@@ -107,6 +107,31 @@ func (s *Server) releaseHold(ctx context.Context, hold *dispatchHold) {
 	}
 }
 
+func (s *Server) settleSession(ctx context.Context, x *call, p *pin) {
+	s.finishSessionDebit(ctx, x, x.failure != nil)
+	settled := sessionSettlement(x)
+	if p != nil {
+		s.settlePinHold(ctx, x, p.hold, settled)
+	}
+	s.settleCaps(ctx, x)
+	s.recordCost(x)
+	settleKey(ctx, x.lease, x.dispatched, settled, s.log)
+}
+
+func sessionSettlement(x *call) *int64 {
+	if !x.dispatched {
+		return new(int64(0))
+	}
+	actual := totalTokens(x.usage())
+	if len(x.facts) == 0 || !x.facts[len(x.facts)-1].BillingUncertain {
+		return actual
+	}
+	if actual == nil {
+		return new(x.estimate)
+	}
+	return new(max(x.estimate, *actual))
+}
+
 // settlePinHold settles a pinned hold that never passed through the attempt
 // loop. When it carries the half-open probe, the attempt's outcome lands on
 // the circuit through record, or the probe is released when nothing reached

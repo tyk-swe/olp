@@ -168,16 +168,7 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var p *pin
-	defer func() {
-		s.finishSessionDebit(r.Context(), x, x.failure != nil)
-		settled := geminiLiveSettlement(x)
-		if p != nil {
-			s.settlePinHold(r.Context(), x, p.hold, settled)
-		}
-		s.settleCaps(r.Context(), x)
-		s.recordCost(x)
-		settleKey(r.Context(), x.lease, x.dispatched, settled, s.log)
-	}()
+	defer func() { s.settleSession(r.Context(), x, p) }()
 	p, e = s.selectPinSurface(ctx, x, &route, "realtime", "native", "realtime", func(provider *routing.Provider, model string) bool {
 		return provider.ProfileID == descriptor.ProfileID && provider.Connector().Supports("realtime", "native", "realtime") && provider.Supports(model, "realtime", "native", "realtime")
 	})

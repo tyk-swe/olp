@@ -58,20 +58,20 @@ func (s *Server) mediaJSONHandler(decode func([]byte) (*media.Request, *media.Er
 		rc := http.NewResponseController(w)
 		if err := rc.SetReadDeadline(time.Now().Add(requestBodyTimeout)); err != nil {
 			s.release(r.Context())
-			s.mediaFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The request could not be read."))
+			s.refuse(x, w, serverError(http.StatusInternalServerError, "internal_error", "The request could not be read."))
 			return
 		}
 		body, e := s.readBody(r)
 		if e != nil {
 			s.release(r.Context())
-			s.mediaFail(x, w, e)
+			s.refuse(x, w, e)
 			return
 		}
 		rc.SetReadDeadline(time.Time{})
 		request, failure := decode(body)
 		if failure != nil {
 			s.release(r.Context())
-			s.mediaFail(x, w, mediaError(failure))
+			s.refuse(x, w, mediaError(failure))
 			return
 		}
 		x.family = wire.Format(request.Op())
@@ -90,14 +90,14 @@ func (s *Server) mediaFormHandler(maxFileBytes int64, maxFiles int, decode func(
 		form, e := s.parseMediaForm(w, r, authority.ID, maxFileBytes, maxFiles)
 		if e != nil {
 			s.release(r.Context())
-			s.mediaFail(x, w, e)
+			s.refuse(x, w, e)
 			return
 		}
 		request, failure := decode(form)
 		if failure != nil {
 			form.Cleanup()
 			s.release(r.Context())
-			s.mediaFail(x, w, mediaError(failure))
+			s.refuse(x, w, mediaError(failure))
 			return
 		}
 		form.Disarm()
@@ -131,38 +131,32 @@ func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*call, keya
 	query, queryErr := url.ParseQuery(r.URL.RawQuery)
 	x.semanticQuery, x.semanticQueryInvalid = query, queryErr != nil
 	if !s.admitLater(r.Context()) {
-		s.mediaFail(x, w, overloaded)
+		s.refuse(x, w, overloaded)
 		return x, keyauthority.Authority{}, true
 	}
 	authority, e := s.authenticate(r, "inference")
 	if e != nil {
 		s.release(r.Context())
-		s.mediaFail(x, w, e)
+		s.refuse(x, w, e)
 		return x, keyauthority.Authority{}, true
 	}
 	if x.preferences, x.priority, e = routingControls(r, authority.Policy); e != nil {
 		s.release(r.Context())
-		s.mediaFail(x, w, e)
+		s.refuse(x, w, e)
 		return x, keyauthority.Authority{}, true
 	}
 	if e = s.awaitAdmission(r.Context(), x); e != nil {
 		s.release(r.Context())
-		s.mediaFail(x, w, e)
+		s.refuse(x, w, e)
 		return x, keyauthority.Authority{}, true
 	}
 	s.bindAuthority(x, authority)
 	if x.attribution, e = s.parseAttribution(r, authority); e != nil {
 		s.release(r.Context())
-		s.mediaFail(x, w, e)
+		s.refuse(x, w, e)
 		return x, keyauthority.Authority{}, true
 	}
 	return x, authority, false
-}
-
-func (s *Server) mediaFail(x *call, w http.ResponseWriter, e *Error) {
-	x.failure = e
-	s.finish(x, nil, e.Status)
-	writeSurfaceError(w, e, "openai")
 }
 
 func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *call, authority keyauthority.Authority, request *media.Request) {
@@ -176,7 +170,7 @@ func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *call,
 	}
 	defer s.cleanupUploads(request)
 	if e := s.prepareMedia(ctx, x, authority); e != nil {
-		s.mediaFail(x, w, e)
+		s.refuse(x, w, e)
 		return
 	}
 	overall := time.Duration(x.primary.OverallTimeout) * time.Millisecond
@@ -184,7 +178,7 @@ func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *call,
 	defer cancel()
 	var e *Error
 	if x.lease, e = s.deps.Admission.reserveKey(ctx, x.admissionAuthority(authority), x.clientSurface(), x.estimate, overall, x.limitRoute()); e != nil {
-		s.mediaFail(x, w, e)
+		s.refuse(x, w, e)
 		return
 	}
 	defer s.settleAdmission(ctx, x)

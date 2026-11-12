@@ -192,15 +192,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var p *pin
-	defer func() {
-		settled := geminiLiveSettlement(x)
-		if p != nil {
-			s.settlePinHold(r.Context(), x, p.hold, settled)
-		}
-		s.settleCaps(r.Context(), x)
-		s.recordCost(x)
-		settleKey(r.Context(), x.lease, x.dispatched, settled, s.log)
-	}()
+	defer func() { s.settleSession(r.Context(), x, p) }()
 	p, e = s.selectPinSurface(ctx, x, &route, "realtime", "gemini", "realtime", func(provider *routing.Provider, model string) bool {
 		return provider.ProfileID == "gemini-live" && provider.Connector().Supports("realtime", "gemini", "realtime") && provider.Supports(model, "realtime", "gemini", "realtime")
 	})
@@ -703,20 +695,4 @@ func writeGeminiLiveFrameWithin(ctx context.Context, conn geminiLiveFrameWriter,
 	frameCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	return conn.Write(frameCtx, kind, payload)
-}
-
-func geminiLiveSettlement(x *call) *int64 {
-	if !x.dispatched {
-		zero := int64(0)
-		return &zero
-	}
-	actual := totalTokens(x.usage())
-	if len(x.facts) == 0 || !x.facts[len(x.facts)-1].BillingUncertain {
-		return actual
-	}
-	conservative := x.estimate
-	if actual != nil {
-		conservative = max(conservative, *actual)
-	}
-	return &conservative
 }

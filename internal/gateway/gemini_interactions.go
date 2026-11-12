@@ -33,32 +33,13 @@ func (s *Server) beginGeminiInteraction(w http.ResponseWriter, r *http.Request, 
 		actor = "api_key_resource"
 	}
 	x := &call{request: s.begin(w, r), family: wire.GeminiInteractions, actor: actor, mode: "unary"}
-	if !s.admit(r.Context()) {
-		x.failure = overloaded
-		s.finish(x, nil, overloaded.Status)
-		writeSurfaceError(w, overloaded, "gemini")
-		return x, keyauthority.Authority{}, false
-	}
-	if _, e := geminiClientKey(r, "stream", "last_event_id", "include_input"); e != nil {
-		x.failure = e
-		s.finish(x, nil, e.Status)
-		writeSurfaceError(w, e, "gemini")
-		s.release(r.Context())
-		return x, keyauthority.Authority{}, false
-	}
-	authority, e := s.authenticate(r, "inference")
-	if e == nil {
-		s.bindAuthority(x, authority)
-		x.attribution, e = s.parseAttribution(r, authority)
-	}
-	if e != nil {
-		x.failure = e
-		s.finish(x, nil, e.Status)
-		writeSurfaceError(w, e, "gemini")
-		s.release(r.Context())
-		return x, keyauthority.Authority{}, false
-	}
-	return x, authority, true
+	authority, ok := s.enter(w, r, x, func(r *http.Request) (keyauthority.Authority, *Error) {
+		if _, e := geminiClientKey(r, "stream", "last_event_id", "include_input"); e != nil {
+			return keyauthority.Authority{}, e
+		}
+		return s.authenticate(r, "inference")
+	})
+	return x, authority, ok
 }
 
 func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request) {
@@ -168,7 +149,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 	if input.Previous != "" {
 		parent, previousUpstream, err = s.deps.Resources.ReadInteractionContract(ctx, authority.ID, input.Previous)
 		if errors.Is(err, resources.ErrNotFound) || parent != nil && parent.RouteSlug != input.Model {
-			fail(invalidRequest("invalid_previous_interaction_id", "The previous Interaction is not owned by this key and route.", strPtr("previous_interaction_id")))
+			fail(invalidRequest("invalid_previous_interaction_id", "The previous Interaction is not owned by this key and route.", new("previous_interaction_id")))
 			return
 		}
 		if err != nil {

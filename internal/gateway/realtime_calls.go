@@ -125,11 +125,11 @@ func parseWebRTCCallRequest(r *http.Request) (*webrtcCallRequest, *Error) {
 	switch mediaType {
 	case "application/sdp":
 		if len(r.URL.Query()["model"]) != 1 {
-			return invalid("model must name exactly one published route slug.", strPtr("model"))
+			return invalid("model must name exactly one published route slug.", new("model"))
 		}
 		data, err := io.ReadAll(io.LimitReader(body, maxWebRTCSDPBytes+1))
 		if err != nil || len(data) == 0 || len(data) > maxWebRTCSDPBytes {
-			return invalid("The SDP offer is missing or too large.", strPtr("sdp"))
+			return invalid("The SDP offer is missing or too large.", new("sdp"))
 		}
 		out.sdp = data
 	case "multipart/form-data":
@@ -145,28 +145,28 @@ func parseWebRTCCallRequest(r *http.Request) (*webrtcCallRequest, *Error) {
 			switch part.FormName() {
 			case "sdp":
 				if out.sdp != nil {
-					return invalid("The sdp part must appear once.", strPtr("sdp"))
+					return invalid("The sdp part must appear once.", new("sdp"))
 				}
 				data, err := readWebRTCPart(part, maxWebRTCSDPBytes)
 				if err != nil || len(data) == 0 {
-					return invalid("The SDP offer is missing or too large.", strPtr("sdp"))
+					return invalid("The SDP offer is missing or too large.", new("sdp"))
 				}
 				out.sdp = data
 			case "session":
 				if out.session != nil {
-					return invalid("The session part must appear once.", strPtr("session"))
+					return invalid("The session part must appear once.", new("session"))
 				}
 				data, err := readWebRTCPart(part, maxWebRTCSessionBytes)
 				if err != nil || len(data) == 0 {
-					return invalid("The session document is missing or too large.", strPtr("session"))
+					return invalid("The session document is missing or too large.", new("session"))
 				}
 				out.session = data
 			default:
-				return invalid("This realtime call field has no qualified binding.", strPtr(part.FormName()))
+				return invalid("This realtime call field has no qualified binding.", new(part.FormName()))
 			}
 		}
 		if out.sdp == nil {
-			return invalid("The SDP offer is missing or too large.", strPtr("sdp"))
+			return invalid("The SDP offer is missing or too large.", new("sdp"))
 		}
 	default:
 		return nil, invalidRequest("unsupported_media_type", "Realtime calls require multipart form data or an SDP body.", nil)
@@ -212,34 +212,34 @@ func bindWebRTCSession(raw json.RawMessage, slug, providerModel string) (json.Ra
 	}
 	var members map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &members); err != nil || members == nil {
-		return nil, invalidRequest("invalid_value", "The session document must be one JSON object.", strPtr("session"))
+		return nil, invalidRequest("invalid_value", "The session document must be one JSON object.", new("session"))
 	}
 	if rawType, present := members["type"]; present {
 		var sessionType string
 		if err := json.Unmarshal(rawType, &sessionType); err != nil || sessionType != "realtime" {
-			return nil, invalidRequest("unsupported_session_type", "This surface only admits realtime sessions.", strPtr("session"))
+			return nil, invalidRequest("unsupported_session_type", "This surface only admits realtime sessions.", new("session"))
 		}
 	}
 	members["type"] = json.RawMessage(`"realtime"`)
 	for _, name := range []string{"client_secret", "client_secrets"} {
 		if _, ok := members[name]; ok {
-			return nil, invalidRequest("client_secrets_unavailable", "Raw provider client secrets are not available on this surface.", strPtr("session"))
+			return nil, invalidRequest("client_secrets_unavailable", "Raw provider client secrets are not available on this surface.", new("session"))
 		}
 	}
 	if webrtcTranscriptionConfigured(members) {
-		return nil, invalidRequest("unsupported_session_field", "Input transcription is not available on this surface.", strPtr("session"))
+		return nil, invalidRequest("unsupported_session_field", "Input transcription is not available on this surface.", new("session"))
 	}
 	if rawModel, ok := members["model"]; ok {
 		var model string
 		if err := json.Unmarshal(rawModel, &model); err != nil || model != slug {
-			return nil, invalidRequest("invalid_value", "The session model must name the published route slug.", strPtr("session"))
+			return nil, invalidRequest("invalid_value", "The session model must name the published route slug.", new("session"))
 		}
 	}
 	encoded, _ := json.Marshal(providerModel)
 	members["model"] = encoded
 	bound, err := json.Marshal(members)
 	if err != nil {
-		return nil, invalidRequest("invalid_value", "The session document must be one JSON object.", strPtr("session"))
+		return nil, invalidRequest("invalid_value", "The session document must be one JSON object.", new("session"))
 	}
 	return bound, nil
 }
@@ -249,21 +249,21 @@ func webrtcSessionSlug(raw json.RawMessage, querySlug string) (string, *Error) {
 	if len(raw) > 0 {
 		var members map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &members); err != nil || members == nil {
-			return "", invalidRequest("invalid_value", "The session document must be one JSON object.", strPtr("session"))
+			return "", invalidRequest("invalid_value", "The session document must be one JSON object.", new("session"))
 		}
 		if rawModel, ok := members["model"]; ok {
 			var model string
 			if err := json.Unmarshal(rawModel, &model); err != nil {
-				return "", invalidRequest("invalid_value", "The session model must name the published route slug.", strPtr("session"))
+				return "", invalidRequest("invalid_value", "The session model must name the published route slug.", new("session"))
 			}
 			if slug != "" && slug != model {
-				return "", invalidRequest("invalid_value", "The session model must name the published route slug.", strPtr("session"))
+				return "", invalidRequest("invalid_value", "The session model must name the published route slug.", new("session"))
 			}
 			slug = model
 		}
 	}
 	if !routeidentity.ValidSlug(slug) {
-		return "", invalidRequest("invalid_value", "model must name a published route slug.", strPtr("model"))
+		return "", invalidRequest("invalid_value", "model must name a published route slug.", new("model"))
 	}
 	return slug, nil
 }
@@ -312,11 +312,7 @@ func parseWebRTCCallID(location string) (string, bool) {
 func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 	x := &call{request: s.begin(w, r), family: wire.Realtime, actor: "api_key"}
 	x.mode = "webrtc"
-	fail := func(e *Error) {
-		x.failure = e
-		s.finish(x, nil, e.Status)
-		writeSurfaceError(w, e, "openai")
-	}
+	fail := func(e *Error) { s.refuse(x, w, e) }
 	permit := admission.PermitFromContext(r.Context())
 	if permit == nil {
 		permit = s.admission.AcquirePermit()

@@ -151,7 +151,6 @@ type Server struct {
 	webrtcMu        sync.Mutex
 	webrtcSessions  map[string]*webrtcSession
 	webrtcExposures map[string]time.Time
-	bedrockStream   func(ctx context.Context, x *call, p *pin) (duplexPeer, error)
 }
 
 const UpstreamHeaderTimeout = 5 * time.Minute

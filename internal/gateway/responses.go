@@ -337,21 +337,21 @@ func (s *Server) responseCall(w http.ResponseWriter, r *http.Request, use retain
 	}
 	defer s.release(r.Context())
 	if !authority.Policy.AllowProviderState {
-		s.stateFail(x, w, providerStateForbidden(), x.family)
+		s.refuse(x, w, providerStateForbidden())
 		return
 	}
 	res, contract, err := s.readResponseResource(r.Context(), authority.ID, r.PathValue("id"))
 	if errors.Is(err, resources.ErrNotFound) {
-		s.stateFail(x, w, notFoundError("not_found", "No stored response with this identifier exists for this key."), x.family)
+		s.refuse(x, w, notFoundError("not_found", "No stored response with this identifier exists for this key."))
 		return
 	}
 	if err != nil {
-		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The stored response could not be read."), x.family)
+		s.refuse(x, w, serverError(http.StatusInternalServerError, "internal_error", "The stored response could not be read."))
 		return
 	}
 	p, route, e := s.admitStoredResponse(r.Context(), x, authority, res, contract, use)
 	if e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	if contract != nil {
@@ -361,12 +361,12 @@ func (s *Server) responseCall(w http.ResponseWriter, r *http.Request, use retain
 	ctx, cancel := s.stateDeadline(r.Context(), route)
 	defer cancel()
 	defer s.resourceSettle(ctx, x, p)
-	if e := s.reserveStateAndSlot(ctx, x, authority, p); e != nil {
-		s.stateFail(x, w, e, x.family)
+	if e := s.reserveStateAndSlot(ctx, x, authority, p, route); e != nil {
+		s.refuse(x, w, e)
 		return
 	}
 	if e := op(ctx, x, authority, res, p, route); e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 	}
 }
 

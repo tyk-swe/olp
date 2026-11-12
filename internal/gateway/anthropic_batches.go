@@ -38,25 +38,25 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 	defer s.release(r.Context())
 	body, err := s.readResourceBody(w, r)
 	if err != nil {
-		s.stateFail(x, w, err, x.family)
+		s.refuse(x, w, err)
 		return
 	}
 	requestedRoute := strings.TrimSpace(r.Header.Get(stateRouteHeader))
 	if requestedRoute == "" {
 		requestedRoute, _ = anthropicCommonModel(body)
 	}
-	route, err := s.anthropicRoute(x, authority, r, requestedRoute)
+	route, err := s.nativeStateRoute(x, authority, r, requestedRoute)
 	if err != nil {
-		s.stateFail(x, w, err, x.family)
+		s.refuse(x, w, err)
 		return
 	}
 	if _, _, _, validationErr := validateAnthropicBatchRequest(body, route.Slug, "", ""); validationErr != nil {
-		s.stateFail(x, w, validationErr, x.family)
+		s.refuse(x, w, validationErr)
 		return
 	}
 	p, _, e := s.anthropicSelectPinWithFiles(r.Context(), x, authority, route, body)
 	if e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	if x.route != nil {
@@ -65,7 +65,7 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 	translated, fileIDs, customIDs, e := validateAnthropicBatchRequest(body, route.Slug, p.model, p.provider.Connector().Model(p.model))
 	if e != nil {
 		s.releaseHold(r.Context(), p.hold)
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	if len(fileIDs) > 0 {
@@ -74,7 +74,7 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 			file, getErr := s.deps.Resources.Get(r.Context(), resources.KindAnthropicFile, authority.ID, id)
 			if getErr != nil || file.RouteSlug != route.Slug {
 				s.releaseHold(r.Context(), p.hold)
-				s.stateFail(x, w, notFoundError("not_found", "No file with this identifier exists for this key."), x.family)
+				s.refuse(x, w, notFoundError("not_found", "No file with this identifier exists for this key."))
 				return
 			}
 			rewrites[id] = file.UpstreamID
@@ -83,7 +83,7 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 		translated, rewriteErr = replaceAnthropicFileReferences(translated, rewrites)
 		if rewriteErr != nil {
 			s.releaseHold(r.Context(), p.hold)
-			s.stateFail(x, w, invalidRequest("invalid_request", "A referenced file could not be bound.", nil), x.family)
+			s.refuse(x, w, invalidRequest("invalid_request", "A referenced file could not be bound.", nil))
 			return
 		}
 	}
@@ -91,36 +91,28 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	defer s.resourceSettle(ctx, x, p)
 	if e = s.unboundedPinLimits(x.admissionAuthority(authority), p, route); e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	if e = x.guardrailSurfaceGate(route); e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
-	if e = s.reserveState(ctx, x, authority, time.Duration(route.OverallTimeout)*time.Millisecond); e != nil {
-		s.stateFail(x, w, e, x.family)
+	if e = s.reserveStateAndSlot(ctx, x, authority, p, route); e != nil {
+		s.refuse(x, w, e)
 		return
-	}
-	if p.hold == nil {
-		gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond), "")
-		if gate.verdict != gateAdmitted {
-			s.stateFail(x, w, gateError(gate), x.family)
-			return
-		}
-		p.hold = gate.hold
 	}
 	if len(fileIDs) > 0 {
 		x.anthropicFilesBeta = true
 	}
 	source, parseErr := oif.ParseJSON(body, oif.Limits{MaxBytes: len(body)})
 	if parseErr != nil {
-		s.stateFail(x, w, invalidRequest("invalid_request", "The request body is invalid.", nil), x.family)
+		s.refuse(x, w, invalidRequest("invalid_request", "The request body is invalid.", nil))
 		return
 	}
 	endpoint, urlErr := resourceURL(p.provider.Connector(), p.model, "messages/batches", nil)
 	if urlErr != nil {
-		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."), x.family)
+		s.refuse(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."))
 		return
 	}
 	expected := int64(len(customIDs))
@@ -130,22 +122,22 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 		submission: batches.AnthropicSubmission{}, source: source, canonical: source.Bytes(), effective: translated,
 	})
 	if e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	id := submission.resource.UUID
 	result, e := s.sendBatch(ctx, x, p, id, endpoint, translated)
 	if e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	view, projectionErr := projectAnthropicBatch(result, resources.LocalID(resources.KindAnthropicBatch, id), s.gatewayOrigin(r), p.model)
 	if projectionErr != nil {
-		s.stateFail(x, w, s.batchSubmissionUnknown(ctx, id, "The provider returned a malformed batch object. The batch may have been accepted."), x.family)
+		s.refuse(x, w, s.batchSubmissionUnknown(ctx, id, "The provider returned a malformed batch object. The batch may have been accepted."))
 		return
 	}
 	if _, e = s.activateBatch(ctx, submission, acceptedBatch{upstreamID: view.upstreamID, state: view.state, metadata: view.metadata}); e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	x.completePinned()
@@ -187,7 +179,7 @@ func (s *Server) anthropicSelectPinWithFiles(ctx context.Context, x *call, autho
 		files = append(files, file)
 	}
 	if len(files) == 0 {
-		p, err := s.anthropicPin(ctx, x, route)
+		p, err := s.nativeStatePin(ctx, x, route)
 		return p, files, err
 	}
 	if !sameAnthropicAffinity(files) {
@@ -232,32 +224,32 @@ func (s *Server) anthropicBatchCall(w http.ResponseWriter, r *http.Request, use 
 	defer s.release(r.Context())
 	res, err := s.deps.Resources.Get(r.Context(), resources.KindAnthropicBatch, authority.ID, r.PathValue("id"))
 	if errors.Is(err, resources.ErrNotFound) {
-		s.stateFail(x, w, notFoundError("not_found", "No message batch with this identifier exists for this key."), x.family)
+		s.refuse(x, w, notFoundError("not_found", "No message batch with this identifier exists for this key."))
 		return
 	}
 	if err != nil {
-		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The batch mapping could not be read."), x.family)
+		s.refuse(x, w, serverError(http.StatusInternalServerError, "internal_error", "The batch mapping could not be read."))
 		return
 	}
 	p, route, e := s.resolveResource(r.Context(), x, authority, res, "batch", use)
 	if e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	if !p.provider.Connector().Supports("batch", "anthropic", "unary") || !p.provider.Supports(p.model, "batch", "anthropic", "unary") {
-		s.stateFail(x, w, notFoundError("not_found", "No message batch with this identifier exists for this key."), x.family)
+		s.refuse(x, w, notFoundError("not_found", "No message batch with this identifier exists for this key."))
 		return
 	}
 	x.route = route
 	ctx, cancel := s.stateDeadline(r.Context(), route)
 	defer cancel()
 	defer s.resourceSettle(ctx, x, p)
-	if e = s.reserveStateAndSlot(ctx, x, authority, p); e != nil {
-		s.stateFail(x, w, e, x.family)
+	if e = s.reserveStateAndSlot(ctx, x, authority, p, route); e != nil {
+		s.refuse(x, w, e)
 		return
 	}
 	if e = op(ctx, x, authority, res, p); e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 	}
 }
 

@@ -26,7 +26,7 @@ func accountingEventID(e Envelope) (uuid.UUID, error) {
 			return ingest.WorkflowEventID(attempt.Execution.RunID, e.AccountingID)
 		}
 	}
-	return uuidNewV7()
+	return uuid.NewV7()
 }
 
 func accountingAttemptID(e Envelope, index int) (uuid.UUID, error) {
@@ -43,7 +43,7 @@ func accountingAttemptID(e Envelope, index int) (uuid.UUID, error) {
 			return uuid.NewSHA1(eventID, []byte(strconv.Itoa(index+1))), nil
 		}
 	}
-	return uuidNewV7()
+	return uuid.NewV7()
 }
 
 func (s *Server) settleWorkflowModelAttempt(ctx context.Context, x *call, fact AttemptFact) *Error {

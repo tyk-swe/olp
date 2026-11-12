@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -297,37 +298,8 @@ func upstreamError(f *attemptFailure) *Error {
 
 func (s *Server) stateBegin(w http.ResponseWriter, r *http.Request, family wire.Format) (*call, keyauthority.Authority, bool) {
 	x := &call{request: s.begin(w, r), family: family, actor: "api_key"}
-	if !s.admit(r.Context()) {
-		s.stateFail(x, w, overloaded, family)
-		return x, keyauthority.Authority{}, true
-	}
-	authority, e := s.authenticate(r, "inference")
-	if e != nil {
-		s.release(r.Context())
-		s.stateFail(x, w, e, family)
-		return x, keyauthority.Authority{}, true
-	}
-	s.bindAuthority(x, authority)
-	switch family {
-	case wire.AnthropicFile, wire.AnthropicBatch, wire.GeminiFile, wire.GeminiBatch, wire.CloudBatch:
-		if !authority.Policy.AllowProviderState {
-			s.release(r.Context())
-			s.stateFail(x, w, providerStateForbidden(), family)
-			return x, authority, true
-		}
-	}
-	if x.attribution, e = s.parseAttribution(r, authority); e != nil {
-		s.release(r.Context())
-		s.stateFail(x, w, e, family)
-		return x, keyauthority.Authority{}, true
-	}
-	return x, authority, false
-}
-
-func (s *Server) stateFail(x *call, w http.ResponseWriter, e *Error, family wire.Format) {
-	x.failure = e
-	s.finish(x, nil, e.Status)
-	writeSurfaceError(w, e, family.Surface())
+	authority, ok := s.enter(w, r, x, s.authenticateInference)
+	return x, authority, !ok
 }
 
 func (s *Server) stateDeadline(ctx context.Context, route *routing.Route) (context.Context, context.CancelFunc) {
@@ -343,10 +315,56 @@ func (s *Server) reserveState(ctx context.Context, x *call, authority keyauthori
 	return e
 }
 
-func (s *Server) reserveStateAndSlot(ctx context.Context, x *call, authority keyauthority.Authority, p *pin) *Error {
-	overall := time.Duration(x.route.OverallTimeout) * time.Millisecond
+type nativeStateWording struct {
+	missingRoute string
+	strictRoute  string
+}
+
+var nativeStateWordings = map[string]nativeStateWording{
+	"anthropic": {missingRoute: "X-OLP-Route or params.model is required.", strictRoute: "Strict routes do not serve Anthropic files and batches."},
+	"gemini":    {missingRoute: "X-OLP-Route is required.", strictRoute: "Strict routes do not serve Gemini files."},
+}
+
+func (s *Server) nativeStateRoute(x *call, authority keyauthority.Authority, r *http.Request, requested string) (*routing.Route, *Error) {
+	wording := nativeStateWordings[x.family.Surface()]
+	slug := cmp.Or(strings.TrimSpace(r.Header.Get(stateRouteHeader)), requested)
+	if slug == "" {
+		return nil, invalidRequest("missing_required_parameter", wording.missingRoute, nil)
+	}
+	route, ok := x.snapshot().FindRoute(slug)
+	if !ok {
+		return nil, modelNotFound(slug)
+	}
+	x.route = &route
+	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
+		return nil, permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
+	}
+	if !slices.Contains(route.Operations, "batch") {
+		return nil, invalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow batch operations.", nil)
+	}
+	if x.strict() {
+		return nil, policyUnavailable("target_capability", wording.strictRoute)
+	}
+	if e := x.guardrailSurfaceGate(&route); e != nil {
+		return nil, e
+	}
+	return &route, nil
+}
+
+func (s *Server) nativeStatePin(ctx context.Context, x *call, route *routing.Route) (*pin, *Error) {
+	surface := x.family.Surface()
+	return s.selectPinSurface(ctx, x, route, "batch", surface, "unary", func(p *routing.Provider, model string) bool {
+		return p.Connector().Supports("batch", surface, "unary") && p.Supports(model, "batch", surface, "unary")
+	})
+}
+
+func (s *Server) reserveStateAndSlot(ctx context.Context, x *call, authority keyauthority.Authority, p *pin, route *routing.Route) *Error {
+	overall := time.Duration(route.OverallTimeout) * time.Millisecond
 	if e := s.reserveState(ctx, x, authority, overall); e != nil {
 		return e
+	}
+	if p.hold != nil {
+		return nil
 	}
 	gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(overall), "")
 	if gate.verdict != gateAdmitted {
@@ -746,7 +764,7 @@ func (s *Server) writeStateJSONStatus(w http.ResponseWriter, x *call, body []byt
 
 func resourceListError(err error, message string) *Error {
 	if errors.Is(err, resources.ErrNotFound) {
-		return invalidRequest("invalid_value", "after must be a gateway identifier of the listed resource kind.", strPtr("after"))
+		return invalidRequest("invalid_value", "after must be a gateway identifier of the listed resource kind.", new("after"))
 	}
 	return serverError(http.StatusInternalServerError, "internal_error", message)
 }

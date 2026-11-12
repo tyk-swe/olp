@@ -27,14 +27,14 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	form, parseError := s.parseMediaForm(w, r, authority.ID, media.DefaultVideoReferenceLimit, 1)
 	if parseError != nil {
 		s.release(r.Context())
-		s.mediaFail(x, w, parseError)
+		s.refuse(x, w, parseError)
 		return
 	}
 	request, failure := media.DecodeVideoCreate(form)
 	if failure != nil {
 		form.Cleanup()
 		s.release(r.Context())
-		s.mediaFail(x, w, mediaError(failure))
+		s.refuse(x, w, mediaError(failure))
 		return
 	}
 	x.family = wire.Format(request.Op())
@@ -46,30 +46,30 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	jobID, err := uuid.NewV7()
 	if err != nil {
 		form.Cleanup()
-		s.mediaFail(x, w, jobError(err))
+		s.refuse(x, w, jobError(err))
 		return
 	}
 	localJobID := jobID.String()
 	x.affinity = []byte(localJobID)
 	if e := s.prepareMedia(r.Context(), x, authority); e != nil {
 		form.Cleanup()
-		s.mediaFail(x, w, e)
+		s.refuse(x, w, e)
 		return
 	}
 	form.Disarm()
 	attempt := x.attempts[0]
 	provider, ok := x.request.release.Snapshot().FindProvider(attempt.ProviderID)
 	if !ok {
-		s.mediaFail(x, w, serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider is currently able to serve `"+x.route.Slug+"`."))
+		s.refuse(x, w, serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider is currently able to serve `"+x.route.Slug+"`."))
 		return
 	}
 	if e := x.checkCallerTarget(&provider, attempt.UpstreamModel); e != nil {
-		s.mediaFail(x, w, e)
+		s.refuse(x, w, e)
 		return
 	}
 	slots := s.slots(x, attempt, &provider)
 	if len(slots) == 0 {
-		s.mediaFail(x, w, serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider credential is currently able to serve `"+x.route.Slug+"`."))
+		s.refuse(x, w, serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider credential is currently able to serve `"+x.route.Slug+"`."))
 		return
 	}
 
@@ -79,7 +79,7 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	var e *Error
 	admitted := x.admissionAuthority(authority)
 	if x.lease, e = s.deps.Admission.reserveKeyCosted(ctx, &admitted, x.clientSurface(), x.estimate, overall, x.attemptCostReservation(authority, attempt), x.limitRoute()); e != nil {
-		s.mediaFail(x, w, e)
+		s.refuse(x, w, e)
 		return
 	}
 	defer s.settleAdmission(ctx, x)
@@ -87,7 +87,7 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	deadline, _ := ctx.Deadline()
 	hold, slot, e := s.admitVideoSlot(ctx, x, attempt, &provider, slots, deadline)
 	if hold == nil {
-		s.mediaFail(x, w, e)
+		s.refuse(x, w, e)
 		return
 	}
 	defer func() { hold.settle(ctx, x.dispatched, x.settledTokens()) }()
@@ -108,7 +108,7 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	})
 	if jobErr != nil {
 		s.releaseHold(ctx, hold)
-		s.mediaFail(x, w, jobError(jobErr))
+		s.refuse(x, w, jobError(jobErr))
 		return
 	}
 

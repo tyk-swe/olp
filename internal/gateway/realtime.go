@@ -567,11 +567,7 @@ func (s *realtimeResponseState) providerFrame(typ websocket.MessageType, data []
 func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	x := &call{request: s.begin(w, r), family: wire.Realtime, actor: "api_key"}
 	x.mode = "realtime"
-	fail := func(e *Error) {
-		x.failure = e
-		s.finish(x, nil, e.Status)
-		writeSurfaceError(w, e, "openai")
-	}
+	fail := func(e *Error) { s.refuse(x, w, e) }
 	if !s.admit(r.Context()) {
 		fail(overloaded)
 		return
@@ -608,7 +604,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	}
 	slug := r.URL.Query().Get("model")
 	if !routeidentity.ValidSlug(slug) {
-		fail(invalidRequest("invalid_value", "model must name a published route slug.", strPtr("model")))
+		fail(invalidRequest("invalid_value", "model must name a published route slug.", new("model")))
 		return
 	}
 	snapshot := x.request.release.Snapshot()
@@ -638,9 +634,9 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), realtimeSession)
 	defer cancel()
-	defer s.settleCaps(r.Context(), x)
 	x.estimate = resourceEstimate
 	var p *pin
+	defer func() { s.settleSession(r.Context(), x, p) }()
 	if x.strict() {
 		// Realtime has an operation-owned duplex contract. Retained Responses
 		// eligibility and the unary codec say nothing about a native session.
@@ -654,16 +650,6 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		fail(e)
 		return
 	}
-	// A realtime session settles its observed usage against key and slot
-	// limits the way a Gemini Live session does; a session whose billing is
-	// uncertain keeps at least the reserved estimate.
-	x.estimate = resourceEstimate
-	defer func() {
-		settled := geminiLiveSettlement(x)
-		s.settlePinHold(r.Context(), x, p.hold, settled)
-		s.recordCost(x)
-		settleKey(r.Context(), x.lease, x.dispatched, settled, s.log)
-	}()
 	if x.strict() {
 		if _, ok := snapshot.RealtimeTemplate(route.Slug, p.target.ID); !ok {
 			fail(policyUnavailable("realtime_contract_unavailable", "The selected target has no compiled strict realtime contract."))
@@ -1165,5 +1151,3 @@ loop:
 	}
 	return usage, observed, first
 }
-
-func strPtr(value string) *string { return &value }
