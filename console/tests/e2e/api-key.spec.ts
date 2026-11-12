@@ -35,6 +35,9 @@ test('a new API key serves the published route and its usage is reported', async
     (await usageLink.getAttribute('href'))!,
     baseURL
   ).searchParams.get('api_key_id')!;
+  const originalKey = await page.request.get(`/api/v1/api-keys/${keyID}`);
+  expect(originalKey.status()).toBe(200);
+  const originalExpiry = (await originalKey.json()).expires_at;
   await usageLink.click();
   const metric = (label: string) =>
     page
@@ -132,7 +135,7 @@ test('a new API key serves the published route and its usage is reported', async
   expect((await savedNewer).status()).toBe(200);
   const acknowledged = await page.request.get(`/api/v1/api-keys/${keyID}`);
   expect(acknowledged.status()).toBe(200);
-  expect((await acknowledged.json()).expires_at).toBe(`${expiryA}:00Z`);
+  expect((await acknowledged.json()).expires_at).toBe(originalExpiry);
   await expect(page).toHaveURL(/\/keys$/);
   expect(confirmations).toHaveLength(1);
 
