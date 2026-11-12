@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"maps"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -13,6 +16,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/tests/harness"
 	"github.com/tyk-swe/olp/tests/harness/vendor"
 )
 
@@ -30,6 +34,7 @@ func testPromotionRoundTrip(t *testing.T, parent *service, owner *caller, fixtur
 
 	planned := s.want(operator, "POST", "/api/v1/configuration/plan", request, nil, http.StatusOK)
 	assertSettledPlan(t, planned)
+	testPromotionCLIReview(t, s, operator, document)
 	if planned["digest"] != exported["digest"] {
 		t.Errorf("plan digest %v differs from export digest %v", planned["digest"], exported["digest"])
 	}
@@ -73,6 +78,7 @@ func testPromotionRoundTrip(t *testing.T, parent *service, owner *caller, fixtur
 	s.want(operator, "POST", "/api/v1/guardrail-attachments", map[string]any{
 		"scope": "installation", "scope_id": "installation", "policy_revision_id": installed["revision_id"], "order": 1,
 	}, idempotent(), http.StatusCreated)
+	testPromotionEmptyAttributionPolicyConverges(t, s, operator)
 }
 
 func installationPolicyDocument(exported map[string]any) map[string]any {
@@ -257,4 +263,77 @@ func items(value any) []map[string]any {
 func text(entry map[string]any, field string) string {
 	value, _ := entry[field].(string)
 	return value
+}
+
+func testPromotionEmptyAttributionPolicyConverges(t *testing.T, s *service, owner *caller) {
+	t.Helper()
+	policies := map[string]map[string]any{
+		uniqueName("empty-required"): {"required_attribution_keys": []any{}},
+		uniqueName("empty-defaults"): {"attribution_defaults": map[string]any{}},
+		uniqueName("empty-both"):     {"required_attribution_keys": []any{}, "attribution_defaults": map[string]any{}},
+	}
+	for name := range policies {
+		s.want(owner, "POST", "/api/v1/projects", map[string]any{"name": name}, idempotent(), http.StatusCreated)
+	}
+	exported := s.want(owner, "GET", "/api/v1/configuration/export", nil, nil, http.StatusOK)
+	document := exported["document"].(map[string]any)
+	for _, project := range items(document["projects"]) {
+		if policy, ok := policies[text(project, "name")]; ok {
+			project["attribution_policy"] = policy
+		}
+	}
+	request := map[string]any{"document": document}
+	s.want(owner, "POST", "/api/v1/configuration/apply", request, idempotent(), http.StatusOK)
+	assertSettledPlan(t, s.want(owner, "POST", "/api/v1/configuration/plan", request, nil, http.StatusOK))
+	for _, desired := range []any{map[string]any{"attribution_defaults": map[string]any{"team": "fixture"}}, nil} {
+		for _, project := range items(document["projects"]) {
+			if _, ok := policies[text(project, "name")]; ok {
+				project["attribution_policy"] = desired
+			}
+		}
+		plan := s.want(owner, "POST", "/api/v1/configuration/plan", request, nil, http.StatusOK)
+		actions := items(plan["actions"])
+		for name := range policies {
+			index := slices.IndexFunc(actions, func(action map[string]any) bool {
+				return action["kind"] == "project" && action["key"] == name
+			})
+			if index < 0 || actions[index]["action"] != "replace" {
+				t.Fatalf("changed attribution policy for %s was suppressed: %v", name, actions)
+			}
+		}
+		s.want(owner, "POST", "/api/v1/configuration/apply", request, idempotent(), http.StatusOK)
+		assertSettledPlan(t, s.want(owner, "POST", "/api/v1/configuration/plan", request, nil, http.StatusOK))
+	}
+}
+
+func testPromotionCLIReview(t *testing.T, s *service, operator *caller, document map[string]any) {
+	t.Helper()
+	directory := t.TempDir()
+	documentPath, tokenPath := filepath.Join(directory, "configuration.json"), filepath.Join(directory, "token")
+	raw, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(documentPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(tokenPath, []byte(operator.token), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plan, comment, review := filepath.Join(directory, "plan.json"), filepath.Join(directory, "comment.json"), filepath.Join(directory, "review.json")
+	command := exec.CommandContext(t.Context(), harness.Required(t, "OLP_TEST_BINARY"), "config", "plan", "--file", documentPath, "--output", plan)
+	command.Env = s.env.list(map[string]string{"OLP_MANAGEMENT_URL": s.origin, "OLP_MANAGEMENT_TOKEN_FILE": tokenPath})
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("plan configuration: %v\n%s", err, output)
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, arguments := range [][]string{{filepath.Join(root, "scripts/promotion-comment.mjs"), plan, comment, review}, {filepath.Join(root, "scripts/verify-promotion-review.mjs"), plan, review}} {
+		command := exec.CommandContext(t.Context(), "node", arguments...)
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("review current CLI plan: %v\n%s", err, output)
+		}
+	}
 }

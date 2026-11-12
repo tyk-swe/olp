@@ -230,6 +230,7 @@ func (m *Management) resolve(r *http.Request, p access.Principal) (access.Reply,
 		err = debits.SettleToolTx(r.Context(), tx, debits.Result{
 			DispatchID: call.DispatchID, ResultDigest: resultDigest[:], EvidenceDigest: evidence,
 			EventID: call.ID, Cost: observedCost, Charge: observedCharge, Final: true, Complete: true,
+			Unpriced: call.UnitPrice == nil,
 		})
 	case ResolveNotAccepted:
 		err = debits.ResolveNotAcceptedTx(r.Context(), tx, debits.NonAcceptanceProof{

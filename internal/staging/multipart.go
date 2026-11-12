@@ -141,11 +141,11 @@ func multipartBoundary(contentType string) (string, bool) {
 		return "", false
 	}
 	boundary := params["boundary"]
-	if boundary == "" || len(boundary) > 200 {
+	if boundary == "" || len(boundary) > 200 || strings.HasSuffix(boundary, " ") {
 		return "", false
 	}
 	for i := range len(boundary) {
-		if c := boundary[i]; c < 0x21 || c > 0x7e || c == '"' || c == '\\' {
+		if c := boundary[i]; c < 0x20 || c > 0x7e || c == '"' || c == '\\' {
 			return "", false
 		}
 	}
