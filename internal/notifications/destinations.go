@@ -254,10 +254,15 @@ func (s *Server) checkCreated(target destinationTarget) error {
 }
 
 func (s *Server) checkPatched(target destinationTarget, secret []byte) error {
-	if _, replaced := target.secret.(newSecret); len(secret) != 0 || !replaced && !requiresSecret(target.Type) {
+	_, replaced := target.secret.(newSecret)
+	switch {
+	case len(secret) != 0:
 		return s.checkBinding(target.destination, secret)
+	case replaced || requiresSecret(target.Type):
+		return s.checkEndpoint(target.destination, target.enabled)
+	default:
+		return s.checkBinding(target.destination, nil)
 	}
-	return s.checkEndpoint(target.destination, target.enabled)
 }
 
 func (s *Server) effectiveSecret(ctx context.Context, tx pgx.Tx, id string, current storedDestination, change secretChange) ([]byte, error) {
