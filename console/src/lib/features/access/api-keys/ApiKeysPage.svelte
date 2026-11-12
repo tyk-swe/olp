@@ -101,7 +101,6 @@
             ? `Saved ${keyName}. Gateways pick up the change within a few seconds.`
             : `Saved ${keyName}`
         );
-        void goto(resolve('keys'));
       } else {
         const submission = createIntent.prepare<
           Parameters<typeof createApiKey>[0]
@@ -182,6 +181,9 @@
     {submitError}
     canManage={canChangeForm}
     onSubmit={submit}
+    onSaved={() => {
+      if (keyId) void goto(resolve('keys'));
+    }}
     onCancel={cancelEdit}
     onClearError={() => (submitError = '')}
   />

@@ -43,6 +43,7 @@
     canManage: permissionToManage,
     publicationBlocked = false,
     onSubmit,
+    onSaved,
     onCancel,
     onClearError
   }: {
@@ -55,6 +56,7 @@
       command: ApiKeyPolicyCommand,
       preferredRoute?: string
     ) => boolean | Promise<boolean>;
+    onSaved: () => void;
     onCancel: () => void;
     onClearError: () => void;
   } = $props();
@@ -137,8 +139,10 @@
     errors = {};
     formError = '';
     const saved = await onSubmit(result.command, form.allowedRoutes[0]);
-    if (saved) dirty = false;
-    else await focusFormError(root);
+    if (saved) {
+      dirty = false;
+      onSaved();
+    } else await focusFormError(root);
   }
 </script>
 
