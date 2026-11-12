@@ -26,6 +26,7 @@ import (
 	limitdebits "github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/notifications"
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedworker"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -805,6 +806,10 @@ func TestFocusExportsHonorDefaultAndExplicitStartDates(t *testing.T) {
 	}
 	uploads := make(chan string, 32)
 	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/failure/") {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		if strings.HasSuffix(r.URL.Path, "/manifest.json") {
 			var manifest struct {
 				ChargeDate       string                  `json:"charge_date"`
@@ -877,6 +882,41 @@ func TestFocusExportsHonorDefaultAndExplicitStartDates(t *testing.T) {
 	if delivered != 4 {
 		t.Errorf("delivered %d FOCUS datasets, want 4", delivered)
 	}
+	failedSink := uuid.NewString()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.export_sinks(id,name,type,destination,streams,format,settings,credential_id,enabled,etag,created_by,created_at) VALUES($1,'failure','s3',$2,ARRAY['focus'],'csv_gzip','{"cost_basis":"cost"}',$3,true,$1,$4,$5)`, failedSink, receiver.URL+"/failure", credential, fixture.ownerID, today.AddDate(0, 0, -1)); err != nil {
+		t.Fatal(err)
+	}
+	runCtx, stop := context.WithCancel(t.Context())
+	defer stop()
+	var deliveryErr error
+	workerhealth.Run(runCtx, workerhealth.Loop{Task: workerhealth.TaskFocusExport, Health: pool, Log: worker.Log, Budget: time.Second * 10, Interval: time.Hour, Pass: func(ctx context.Context) (bool, error) {
+		progress, err := worker.Pass(ctx)
+		deliveryErr = err
+		stop()
+		return progress, err
+	}})
+	var sendErr *destination.SendError
+	if !errors.As(deliveryErr, &sendErr) {
+		t.Errorf("failed destination lost delivery error: %v", deliveryErr)
+	}
+	var failures, successes int64
+	if err := pool.QueryRow(t.Context(), `SELECT failures_total,successes_total FROM olp.worker_task_health WHERE task='focus_export'`).Scan(&failures, &successes); err != nil {
+		t.Fatal(err)
+	}
+	if failures != 1 || successes != 0 {
+		t.Errorf("failed export checkpoint failures=%d successes=%d", failures, successes)
+	}
+	var attempts, failed int
+	var retryScheduled bool
+	var code string
+	if err := pool.QueryRow(t.Context(), `SELECT attempts,failures,next_attempt_at>now(),last_error_code FROM olp.focus_datasets WHERE sink_id=$1`, failedSink).Scan(&attempts, &failed, &retryScheduled, &code); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 1 || failed != 1 || !retryScheduled || code == "" {
+		t.Errorf("lost failure/retry state attempts=%d failures=%d scheduled=%t code=%s", attempts, failed, retryScheduled, code)
+	}
+	t.Logf("failed upload checkpoint failures=%d successes=%d, dataset attempts=%d failures=%d retry_scheduled=%t", failures, successes, attempts, failed, retryScheduled)
+
 }
 
 func TestBlockingStreamReadDoesNotStallOtherCommands(t *testing.T) {
