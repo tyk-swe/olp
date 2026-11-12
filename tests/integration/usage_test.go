@@ -30,6 +30,7 @@ import (
 	limitdebits "github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/notifications"
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedworker"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -809,6 +810,10 @@ func TestFocusExportsHonorDefaultAndExplicitStartDates(t *testing.T) {
 	}
 	uploads := make(chan string, 32)
 	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/failure/") {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		if strings.HasSuffix(r.URL.Path, "/manifest.json") {
 			var manifest struct {
 				ChargeDate       string                  `json:"charge_date"`
@@ -881,6 +886,41 @@ func TestFocusExportsHonorDefaultAndExplicitStartDates(t *testing.T) {
 	if delivered != 4 {
 		t.Errorf("delivered %d FOCUS datasets, want 4", delivered)
 	}
+	failedSink := uuid.NewString()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.export_sinks(id,name,type,destination,streams,format,settings,credential_id,enabled,etag,created_by,created_at) VALUES($1,'failure','s3',$2,ARRAY['focus'],'csv_gzip','{"cost_basis":"cost"}',$3,true,$1,$4,$5)`, failedSink, receiver.URL+"/failure", credential, fixture.ownerID, today.AddDate(0, 0, -1)); err != nil {
+		t.Fatal(err)
+	}
+	runCtx, stop := context.WithCancel(t.Context())
+	defer stop()
+	var deliveryErr error
+	workerhealth.Run(runCtx, workerhealth.Loop{Task: workerhealth.TaskFocusExport, Health: pool, Log: worker.Log, Budget: time.Second * 10, Interval: time.Hour, Pass: func(ctx context.Context) (bool, error) {
+		progress, err := worker.Pass(ctx)
+		deliveryErr = err
+		stop()
+		return progress, err
+	}})
+	var sendErr *destination.SendError
+	if !errors.As(deliveryErr, &sendErr) {
+		t.Errorf("failed destination lost delivery error: %v", deliveryErr)
+	}
+	var failures, successes int64
+	if err := pool.QueryRow(t.Context(), `SELECT failures_total,successes_total FROM olp.worker_task_health WHERE task='focus_export'`).Scan(&failures, &successes); err != nil {
+		t.Fatal(err)
+	}
+	if failures != 1 || successes != 0 {
+		t.Errorf("failed export checkpoint failures=%d successes=%d", failures, successes)
+	}
+	var attempts, failed int
+	var retryScheduled bool
+	var code string
+	if err := pool.QueryRow(t.Context(), `SELECT attempts,failures,next_attempt_at>now(),last_error_code FROM olp.focus_datasets WHERE sink_id=$1`, failedSink).Scan(&attempts, &failed, &retryScheduled, &code); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 1 || failed != 1 || !retryScheduled || code == "" {
+		t.Errorf("lost failure/retry state attempts=%d failures=%d scheduled=%t code=%s", attempts, failed, retryScheduled, code)
+	}
+	t.Logf("failed upload checkpoint failures=%d successes=%d, dataset attempts=%d failures=%d retry_scheduled=%t", failures, successes, attempts, failed, retryScheduled)
+
 }
 
 func TestBlockingStreamReadDoesNotStallOtherCommands(t *testing.T) {
@@ -992,6 +1032,281 @@ func TestMCPManualSettlementPreservesPricingState(t *testing.T) {
 				t.Fatalf("pricing=%s: unpriced=%d uncharged=%d, want %d", pricing, attempts, uncharged, expected)
 			}
 		})
+	}
+}
+
+func TestUsagePersistsPinnedRateCardsAtLaterObservation(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	fixture := newUsageFixture(t, pool)
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.api_keys SET project_id=NULL WHERE id=$1`, fixture.keyID); err != nil {
+		t.Fatal(err)
+	}
+	providerRevision := uuid.NewString()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.provider_revisions(id,provider_id,revision,name,configuration,models,slots,source_etag,activated_by)
+		VALUES($1,$2,1,'Rate card fixture','{}','[]','[]',$1,$3)`, providerRevision, fixture.providerID, fixture.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	card, oldRevision, newRevision := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.rate_cards(id,project_id,created_by) VALUES($1,$2,$3)`, card, fixture.projectID, fixture.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.rate_card_revisions(id,rate_card_id,revision,markup,effective_at,created_by)
+		VALUES($1,$2,1,2,$3,$4),($5,$2,2,3,$6,$4)`, oldRevision, card, fixture.observedAt.Add(-time.Minute), fixture.ownerID, newRevision, fixture.observedAt.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name, policy, revision, charge string
+	}{
+		{"old_pin", fmt.Sprintf(`{"rate_card_pinned":true,"rate_card_revision_id":%q}`, oldRevision), oldRevision, "0.0004"},
+		{"pinned_absence", `{"rate_card_pinned":true,"rate_card_revision_id":null}`, "", "0.0002"},
+		{"stale_unpinned", `{"rate_card_pinned":false,"rate_card_revision_id":null}`, newRevision, "0.0006"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			attempt := fixture.attempt(1)
+			input, output := int64(100), int64(50)
+			attempt.Usage.InputTokens, attempt.Usage.OutputTokens = &input, &output
+			policy := json.RawMessage(test.policy)
+			attempt.Routing = &usage.Routing{ProviderRevisionID: providerRevision, Policy: &policy}
+			event := fixture.event(attempt)
+			event.RequestCompletedAt = fixture.observedAt.Add(2 * time.Second)
+			event.Attempts[0].CompletedAt = event.RequestCompletedAt
+			event.ObservedAt = event.RequestCompletedAt
+			accepted, err := usage.NewAccountingEvent(event)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := ingest.PersistEvent(t.Context(), pool, accepted)
+			if err != nil || result.Outcome != ingest.PersistOutcomePersisted {
+				t.Fatalf("persist rate-card pin: outcome=%v error=%v", result.Outcome, err)
+			}
+			var revision string
+			var costMatches, chargeMatches bool
+			if err := pool.QueryRow(t.Context(), `SELECT COALESCE(rate_card_revision_id::text,''),estimated_cost=0.0002,charge=$2::numeric
+				FROM olp.attempt_usage_facts WHERE attempt_id=$1`, attempt.ID, test.charge).Scan(&revision, &costMatches, &chargeMatches); err != nil {
+				t.Fatal(err)
+			}
+			if revision != test.revision || !costMatches || !chargeMatches {
+				t.Fatalf("persisted revision=%q cost matches=%t charge matches=%t; want revision=%q charge=%s", revision, costMatches, chargeMatches, test.revision, test.charge)
+			}
+		})
+	}
+}
+
+func TestFocusLateCommitmentUsageDirtiesLaterObservedDay(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	fixture := newUsageFixture(t, pool)
+	day := fixture.observedAt.UTC().Truncate(24 * time.Hour).Add(-72 * time.Hour)
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.pricing_revisions SET effective_at=$1`, day.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.export_sinks (id,name,type,destination,streams,format,etag,created_by) VALUES($1,'focus-midnight','s3','s3://fixture/focus',ARRAY['focus'],'csv_gzip',$1,$2)`, uuid.NewString(), fixture.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.commitment_schedules (provider_id,provider_revision_id,provider_name,provider_kind,amount,currency,period,effective_at) VALUES($1,$2,'fixture','openai_compatible',10,'USD','day',$3)`, fixture.providerID, uuid.NewString(), day); err != nil {
+		t.Fatal(err)
+	}
+	persist := func(started, observed time.Time) string {
+		t.Helper()
+		f := fixture
+		f.observedAt = observed
+		attempt := f.attempt(1)
+		attempt.StartedAt = started
+		event := f.event(attempt)
+		event.RequestStartedAt = started
+		accepted, err := usage.NewAccountingEvent(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := ingest.PersistEvent(t.Context(), pool, accepted)
+		if err != nil || result.Outcome != ingest.PersistOutcomePersisted {
+			t.Fatalf("persist outcome=%v error=%v", result.Outcome, err)
+		}
+		return attempt.ID
+	}
+	first := persist(day.Add(23*time.Hour+50*time.Minute), day.Add(24*time.Hour+10*time.Minute))
+	var initial, revised string
+	var before, after int64
+	read := func(amount *string, version *int64) {
+		t.Helper()
+		if err := pool.QueryRow(t.Context(), `SELECT a.allocated_cost::text,d.version FROM olp.commitment_allocations a JOIN olp.focus_dirty_days d ON d.day=(a.observed_at AT TIME ZONE 'UTC')::date WHERE a.attempt_id=$1`, first).Scan(amount, version); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read(&initial, &before)
+	persist(day.Add(12*time.Hour), day.Add(12*time.Hour+time.Minute))
+	read(&revised, &after)
+	if initial == revised {
+		t.Fatalf("late usage did not change allocation %s", initial)
+	}
+	if after <= before {
+		t.Fatalf("allocation changed %s to %s but observed-day dirty version stayed %d -> %d", initial, revised, before, after)
+	}
+	var updated string
+	var updateVersion int64
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.commitment_usage SET weight=weight*2 WHERE attempt_id=$1`, first); err != nil {
+		t.Fatal(err)
+	}
+	read(&updated, &updateVersion)
+	if updated == revised || updateVersion <= after {
+		t.Fatalf("weight update allocation %s -> %s, dirty version %d -> %d", revised, updated, after, updateVersion)
+	}
+}
+
+func TestMCPLateSettlementAfterOrphanRecovery(t *testing.T) {
+	t.Parallel()
+	for _, status := range []accounting.Status{accounting.StatusSucceeded, accounting.StatusUpstreamError, accounting.StatusGuardrailBlocked} {
+		t.Run(string(status), func(t *testing.T) {
+			pool, _ := harness.Database(t)
+			f := newUsageFixture(t, pool)
+			ctx := t.Context()
+			pub, rev, server, srev, dispatch, call := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+			sql := fmt.Sprintf(`
+ INSERT INTO olp.agent_publications(id,project_id,kind,name,draft,etag,created_by) VALUES('%[1]s','%[2]s','toolset','late','{}','%[1]s','%[3]s');
+ INSERT INTO olp.agent_publication_revisions(id,publication_id,project_id,kind,definition,digest,created_by) VALUES('%[4]s','%[1]s','%[2]s','toolset','{}',repeat('0',64),'%[3]s');
+ INSERT INTO olp.mcp_servers(id,project_id,name,transport,endpoint,enabled,latest_revision_id,etag,created_by) VALUES('%[5]s','%[2]s','late','streamable_http','https://example.com/mcp',true,'%[6]s','%[5]s','%[3]s');
+ INSERT INTO olp.mcp_server_revisions(id,server_id,revision,endpoint,protocol_version,tools,digest,created_by) VALUES('%[6]s','%[5]s',1,'https://example.com/mcp','2025-03-26','[]',repeat('0',64),'%[3]s');
+ INSERT INTO olp.execution_debits(id,api_key_id,project_id,kind,affinity,intent_digest,claim_id,currency,cost_bound,charge_bound,state,prepared_until) VALUES('%[7]s','%[8]s','%[2]s','tool','{}',decode(repeat('00',32),'hex'),'%[7]s','USD',1,1,'ready',now()+interval '1 hour');
+ INSERT INTO olp.execution_debit_owners(dispatch_id,owner_id,owner_kind,basis,bound,daily_window_id,weekly_window_id,monthly_window_id) VALUES('%[7]s','%[8]s','key','cost',1,0,0,0);`, pub, f.projectID, f.ownerID, rev, server, srev, dispatch, f.keyID)
+			if _, err := pool.Exec(ctx, sql); err != nil {
+				t.Fatal(err)
+			}
+			price := "1"
+			reservation := &accounting.Reservation{DispatchID: dispatch, ClaimID: dispatch, AttemptID: call, APIKeyID: f.keyID, ProjectID: f.projectID, ToolsetID: pub, ToolsetRevisionID: rev, ToolAlias: "t_" + strings.Repeat("0", 32) + "_" + strings.Repeat("0", 32), InputDigest: strings.Repeat("0", 64), CallDigest: strings.Repeat("1", 64), UnitPrice: &price, Currency: "USD"}
+			evidence := accounting.AttemptEvidence{ServerID: server, ServerRevisionID: srev, StartedAt: time.Now().UTC(), Status: accounting.StatusDispatched}
+			ledger := accounting.NewDurableLedger(pool, nil, nil, nil)
+			if err := ledger.MarkDispatched(ctx, reservation, evidence); err != nil {
+				t.Fatal(err)
+			}
+			if n, err := ledger.RecoverOrphanedDispatches(ctx, time.Now().Add(time.Minute), 1); err != nil || n != 1 {
+				t.Fatalf("recover = %d, %v", n, err)
+			}
+			unknown := evidence
+			unknown.Status = accounting.StatusOutcomeUnknown
+			unknown.ResultDigest = strings.Repeat("3", 64)
+			unknown.CompletedAt = time.Now().UTC()
+			if err := ledger.MarkUnknown(ctx, reservation, unknown); err != nil {
+				t.Fatal(err)
+			}
+			evidence.Status = status
+			evidence.IsError = status == accounting.StatusUpstreamError
+			evidence.CompletedAt = time.Now().UTC()
+			evidence.ResultDigest = strings.Repeat("2", 64)
+			for range 2 {
+				if err := ledger.Settle(ctx, reservation, evidence); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var callStatus, debitState, resultDigest string
+			var chargedOnce bool
+			var receipts int
+			if err := pool.QueryRow(ctx, `SELECT c.status,d.state,c.result_digest,d.observed_cost=1 AND d.observed_charge=1,(SELECT count(*) FROM olp.execution_debit_results WHERE dispatch_id=d.id) FROM olp.mcp_tool_calls c JOIN olp.execution_debits d ON d.id=c.dispatch_id WHERE c.id=$1`, call).Scan(&callStatus, &debitState, &resultDigest, &chargedOnce, &receipts); err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("call=%s debit=%s charged_once=%t receipts=%d", callStatus, debitState, chargedOnce, receipts)
+			if callStatus != string(status) || debitState != "settled" || !chargedOnce || resultDigest != evidence.ResultDigest || receipts != 1 {
+				t.Fatalf("late settlement: call=%s debit=%s receipts=%d", callStatus, debitState, receipts)
+			}
+		})
+	}
+}
+
+func TestKeyReminderRestoredScheduleRetries(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	fixture := newUsageFixture(t, pool)
+	requests := make(chan struct{}, 8)
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- struct{}{}
+		if len(requests) == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer receiver.Close()
+	destinationID, ruleID := uuid.NewString(), uuid.NewString()
+	due := time.Now().UTC().Truncate(time.Second).Add(time.Hour)
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.api_keys SET expires_at=$2 WHERE id=$1`, fixture.keyID, due); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_destinations(id,name,url,project_id,etag,created_by) VALUES($1,'restored schedule',$2,$3,$1,$4)`, destinationID, receiver.URL, fixture.projectID, fixture.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_rules(id,name,project_id,event,subject_kind,subject_id,destination_id,etag,created_by) VALUES($1,'restored schedule',$2,'key.expiring','api_key',$3,$4,$1,$5)`, ruleID, fixture.projectID, fixture.keyID, destinationID, fixture.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	pass := func() {
+		t.Helper()
+		var before int64
+		if err := pool.QueryRow(t.Context(), `SELECT COALESCE((SELECT successes_total FROM olp.worker_task_health WHERE task='notification_delivery'),0)`).Scan(&before); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			notifications.RunDelivery(ctx, notifications.DeliveryConfig{Pool: pool, NewID: uuid.NewString, Now: time.Now, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Sender: notifications.NewSender(egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}})})
+		}()
+		defer func() { cancel(); <-done }()
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			var successes int64
+			if err := pool.QueryRow(t.Context(), `SELECT COALESCE((SELECT successes_total FROM olp.worker_task_health WHERE task='notification_delivery'),0)`).Scan(&successes); err != nil {
+				t.Fatal(err)
+			}
+			if successes > before {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("reminder pass did not complete")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	assertDelivery := func(want string, attempts int) (string, time.Time) {
+		t.Helper()
+		var id, status string
+		var got int
+		var at time.Time
+		if err := pool.QueryRow(t.Context(), `SELECT id::text,status,attempts,last_attempt_at FROM olp.notification_deliveries WHERE rule_id=$1 AND due_at=$2`, ruleID, due).Scan(&id, &status, &got, &at); err != nil {
+			t.Fatal(err)
+		}
+		if status != want || got != attempts {
+			t.Fatalf("restored reminder status=%s attempts=%d, want %s/%d", status, got, want, attempts)
+		}
+		return id, at
+	}
+	setDue := func(at time.Time) {
+		t.Helper()
+		if _, err := pool.Exec(t.Context(), `UPDATE olp.api_keys SET expires_at=$2 WHERE id=$1`, fixture.keyID, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pass()
+	id, attemptAt := assertDelivery("failed", 1)
+	setDue(due.Add(48 * time.Hour))
+	pass()
+	assertDelivery("cancelled", 1)
+	setDue(due)
+	pass()
+	restoredID, restoredAt := assertDelivery("pending", 1)
+	if restoredID != id || !restoredAt.Equal(attemptAt) || len(requests) != 1 {
+		t.Fatal("restoring the schedule reset identity, retry history or backoff")
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.notification_deliveries SET last_attempt_at=now()-interval '2 minutes' WHERE id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+	pass()
+	assertDelivery("delivered", 2)
+	setDue(due.Add(48 * time.Hour))
+	pass()
+	setDue(due)
+	pass()
+	assertDelivery("delivered", 2)
+	if len(requests) != 2 {
+		t.Fatalf("sent %d attempts, want one failure and one successful delivery", len(requests))
 	}
 }
 

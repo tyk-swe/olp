@@ -34,7 +34,9 @@ const insertDueRemindersSQL = `WITH due AS (` + keyDueSQL + `)
  FROM due JOIN olp.notification_rules r ON r.event=$1 AND r.subject_kind='api_key' AND r.subject_id=due.id AND r.project_id IS NOT DISTINCT FROM due.project_id
  JOIN olp.notification_destinations d ON d.id=r.destination_id
  WHERE r.enabled AND d.enabled AND due.due_at<=now()+make_interval(secs=>COALESCE((r.configuration->>'lead_time_seconds')::integer,86400))
- ON CONFLICT DO NOTHING`
+ ON CONFLICT (rule_id,api_key_id,reason,due_at) WHERE api_key_id IS NOT NULL
+ DO UPDATE SET status='pending',last_error_code=NULL,payload=excluded.payload
+ WHERE olp.notification_deliveries.status='cancelled'`
 
 // FOR SHARE holds the key and rule until the attempt commits, so later edits
 // cannot cancel an in-flight send.

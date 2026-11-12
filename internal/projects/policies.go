@@ -3,7 +3,9 @@ package projects
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"reflect"
+	"slices"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
@@ -98,7 +100,7 @@ func (desired PolicyImport) Changes(current Policies) bool {
 }
 
 func (current Policies) equal(desired Policies) bool {
-	return current.AttributionBudgets.Equal(desired.AttributionBudgets) && reflect.DeepEqual(current.Templates, desired.Templates) && reflect.DeepEqual(current.EndUser, desired.EndUser) && reflect.DeepEqual(current.Attribution, desired.Attribution) && current.RouteGroups.Equal(desired.RouteGroups) && reflect.DeepEqual(current.Budget, desired.Budget)
+	return current.AttributionBudgets.Equal(desired.AttributionBudgets) && reflect.DeepEqual(current.Templates, desired.Templates) && reflect.DeepEqual(current.EndUser, desired.EndUser) && equalAttributionPolicy(current.Attribution, desired.Attribution) && current.RouteGroups.Equal(desired.RouteGroups) && reflect.DeepEqual(current.Budget, desired.Budget)
 }
 
 func ApplyPolicies(ctx context.Context, tx pgx.Tx, principal access.Principal, changes []PolicyImport) (bool, error) {
@@ -121,4 +123,11 @@ func ApplyPolicies(ctx context.Context, tx pgx.Tx, principal access.Principal, c
 	}
 	restChanged, err := ApplyPolicies(ctx, tx, principal, changes[1:])
 	return changed || restChanged, err
+}
+
+func equalAttributionPolicy(current, desired *attribution.Policy) bool {
+	if current == nil || desired == nil {
+		return current == desired
+	}
+	return slices.Equal(current.Required, desired.Required) && maps.Equal(current.Defaults, desired.Defaults)
 }

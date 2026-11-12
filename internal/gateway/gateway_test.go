@@ -26,7 +26,9 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -40,6 +42,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/release"
+	"github.com/tyk-swe/olp/internal/resources"
 
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -1130,6 +1133,186 @@ func TestStrictPreparationKeepsTargetsAndSourcesSeparate(t *testing.T) {
 				if !bytes.Contains(preparedBody, []byte(text)) {
 					t.Fatalf("prepared request does not contain current input %q: %s", text, preparedBody)
 				}
+			}
+		})
+	}
+}
+
+func TestRealtimeCallAdmissionHonorsRequestedPriority(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct{ name, defaultPriority, header, expected string }{
+		{"caller critical", "normal", `{"priority":"critical"}`, "critical"},
+		{"key critical", "critical", "", "critical"},
+		{"normal", "normal", "", "normal"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pool := admission.NewPool(1).Queue(2, 2*time.Second)
+			management := admission.NewPool(1)
+			outer := &admission.Public{Inference: pool, Management: management, InferenceEnabled: true, Reject: func(w http.ResponseWriter, _ *http.Request, _ string) { w.WriteHeader(503) }}
+			h := newHarnessWrapped(t, Config{}, outer.Wrap)
+			critical := "critical"
+			authority := h.rt.keys[fullKey]
+			authority.Policy.MaxPriority = &critical
+			authority.Policy.Priority = &test.defaultPriority
+			h.rt.keys[fullKey] = authority
+			registry := prometheus.NewRegistry()
+			registry.MustRegister(admission.Metrics(pool, management))
+			depth := func() map[string]float64 {
+				families, e := registry.Gather()
+				if e != nil {
+					t.Fatal(e)
+				}
+				out := map[string]float64{}
+				for _, f := range families {
+					if f.GetName() != "olp_admission_queue_depth" {
+						continue
+					}
+					for _, m := range f.Metric {
+						for _, label := range m.Label {
+							if label.GetName() == "class" {
+								out[label.GetValue()] = m.GetGauge().GetValue()
+							}
+						}
+					}
+				}
+				return out
+			}
+			holder := pool.Enter()
+			defer holder.Release()
+			req, e := http.NewRequest("POST", h.server.URL+"/v1/realtime/calls?model="+routeSlug, strings.NewReader("v=0\r\n"))
+			if e != nil {
+				t.Fatal(e)
+			}
+			req.Header.Set("Authorization", "Bearer "+fullKey)
+			req.Header.Set("Content-Type", "application/sdp")
+			if test.header != "" {
+				req.Header.Set("X-OLP-Routing", test.header)
+			}
+			_, resolved, controlErr := routingControls(req, authority.Policy)
+			if controlErr != nil || resolved != test.expected {
+				t.Fatalf("fixture priority=%s err=%v", resolved, controlErr)
+			}
+			done := make(chan error, 1)
+			go func() {
+				r, e := h.server.Client().Do(req)
+				if e == nil {
+					io.Copy(io.Discard, r.Body)
+					r.Body.Close()
+				}
+				done <- e
+			}()
+			var observed map[string]float64
+			deadline := time.Now().Add(time.Second)
+			for time.Now().Before(deadline) {
+				observed = depth()
+				if observed["normal"]+observed["critical"] > 0 {
+					break
+				}
+				time.Sleep(time.Millisecond)
+			}
+			holder.Release()
+			if e := <-done; e != nil {
+				t.Fatal(e)
+			}
+			t.Logf("priority=%s queued depths=%v", test.expected, observed)
+			if pool.Admitted() != 0 {
+				t.Fatalf("admission permit leaked: %d", pool.Admitted())
+			}
+			h.mock.mu.Lock()
+			calls := len(h.mock.calls)
+			h.mock.mu.Unlock()
+			if calls != 0 {
+				t.Fatal("unexpected provider dispatch")
+			}
+			if observed[test.expected] != 1 {
+				t.Fatalf("request entered wrong admission class: %v", observed)
+			}
+		})
+	}
+}
+
+type deadlineFailWriter struct {
+	*httptest.ResponseRecorder
+	ctx context.Context
+}
+
+func (w *deadlineFailWriter) Write([]byte) (int, error) {
+	<-w.ctx.Done()
+	return 0, io.ErrClosedPipe
+}
+
+func TestRetainedResponseStreamClassifiesDeadlineAndProtocolFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name                         string
+		timeout, frame, writeFailure bool
+	}{
+		{"idle deadline", true, false, false},
+		{"truncated stream", false, false, false},
+		{"committed deadline", true, true, false},
+		{"client write failure at deadline", true, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, Config{})
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.WriteHeader(http.StatusOK)
+				if tc.frame {
+					_, _ = io.WriteString(w, "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"item_id\":\"m\",\"content_index\":0,\"delta\":\"hello\"}\n\n")
+				}
+				_ = http.NewResponseController(w).Flush()
+				if tc.timeout {
+					<-r.Context().Done()
+				}
+			})
+			snapshot := h.rt.release.Snapshot().Clone()
+			route := snapshot.Routes[routeSlug]
+			route.OverallTimeout = 150
+			target := route.Targets[0]
+			provider := snapshot.Providers[target.ProviderID]
+			p := &pin{provider: provider, target: target, model: modelA, slot: provider.Slots[0], attempt: routing.Attempt{ProviderID: provider.ID, UpstreamModel: modelA}}
+			x := &call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.Responses, actor: "api_key_resource", keyID: h.keyID}
+			x.route = &route
+			ctx, cancel := h.gateway.stateDeadline(t.Context(), &route)
+			defer cancel()
+			recorder := httptest.NewRecorder()
+			var writer http.ResponseWriter = recorder
+			if tc.writeFailure {
+				writer = &deadlineFailWriter{ResponseRecorder: recorder, ctx: ctx}
+			}
+			failure := h.gateway.streamStoredResponse(ctx, writer, x, &resources.Resource{ID: uuid.NewString(), Kind: resources.KindResponse, UpstreamID: "response-local-fixture", RouteSlug: routeSlug}, p, nil)
+			code, status, class := "response_stream_incomplete", http.StatusBadGateway, classProtocol
+			if tc.timeout {
+				code, status, class = "gateway_timeout", http.StatusGatewayTimeout, classTimeout
+			}
+			if tc.frame {
+				if failure != nil || recorder.Code != http.StatusOK {
+					t.Fatalf("committed response: failure=%v status=%d", failure, recorder.Code)
+				}
+				outcome := "failure"
+				envelopeStatus := http.StatusOK
+				if tc.writeFailure {
+					code, class, outcome, envelopeStatus = "client_cancelled", classCancelled, "cancelled", 0
+				}
+				h.sink.mu.Lock()
+				defer h.sink.mu.Unlock()
+				if len(h.sink.envs) != 1 {
+					t.Fatalf("terminal envelopes=%d, want1", len(h.sink.envs))
+				}
+				env := h.sink.envs[0]
+				if env.ErrorClass != code || env.Outcome != outcome || env.Status != envelopeStatus || !env.Committed || len(env.Attempts) != 1 || env.Attempts[0].Class != class {
+					t.Fatalf("terminal envelope=%+v", env)
+				}
+				if !tc.writeFailure && !strings.Contains(recorder.Body.String(), "hello") {
+					t.Fatal("nonterminal frame was not delivered")
+				}
+			} else if failure == nil || failure.Code != code || failure.Status != status || x.facts[0].Class != class {
+				t.Fatalf("failure=%+v class=%s; want%d %s %s", failure, x.facts[0].Class, status, code, class)
+			}
+			if !x.exchange.state.accepted || x.exchange.state.settled {
+				t.Fatal("incomplete accepted stream lost its unresolved upstream evidence")
+			}
+			if tc.timeout && ctx.Err() != context.DeadlineExceeded {
+				t.Fatalf("route deadline did not expire: %v", ctx.Err())
 			}
 		})
 	}

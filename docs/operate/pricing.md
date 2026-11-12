@@ -269,9 +269,8 @@ An attempt's consumer is the aggregate-ownership project: the API key's
 project, else the provider's, else the route's. The card resolved is the
 most specific card with a revision in force. Resolution checks the project's
 card, then its organization card, then the installation card, taking the newest
-revision in force
-at the observed time, and a card whose revisions all start in the future
-falls through to the next scope; revisions never layer.
+revision in force at the resolution time. A card whose revisions all start in
+the future falls through to the next scope; revisions never layer.
 
 | Case | Charge |
 | --- | --- |
@@ -290,8 +289,11 @@ and hourly rollups carry them.
 
 The gateway resolves the card for requests with an authority project at
 admission and pins `rate_card_pinned` and `rate_card_revision_id`, including a
-null revision, on every attempt. Keyless origins stay unpinned and accounting
-resolves the card itself.
+null revision, on every attempt. Other consumers resolve and pin the card at
+each attempt's start when routing inputs are fresh, including a null revision
+when no card applies. Accounting preserves those pins even when a newer card
+becomes effective before completion. Missing or stale inputs leave the attempt
+unpinned, so accounting resolves its card at the event's observed time.
 
 ## Budget basis
 
