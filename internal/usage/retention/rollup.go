@@ -33,7 +33,10 @@ const rollupSQL = `WITH candidates AS (
                 provider_incomplete_counted, model_incomplete_counted, target_incomplete_counted,
                 attribution, end_user_digest, budget_exempt, agent_principal_id, delegation_pair_digest, usage_observed, estimated_input_tokens, estimate_provenance, model_family,
                 commitment_weight, commitment_amount, commitment_period, charge,
-                list_cost, contracted_cost, cache_budget_cost, cache_budget_charge, response_cache,training_tokens,storage_byte_seconds,cache_token_seconds,container_sessions
+                list_cost, contracted_cost, cache_budget_cost, cache_budget_charge, response_cache,training_tokens,storage_byte_seconds,cache_token_seconds,container_sessions,
+                charge_status <> 'not_billable' AND (NOT usage_complete OR unpriced OR NOT EXISTS(
+                 SELECT 1 FROM olp.commitment_usage u WHERE u.attempt_id=fact.attempt_id)) AS focus_cost_detail_missing,
+                charge_status <> 'not_billable' AS focus_charge_detail_missing
     ), rolled AS (
       INSERT INTO olp.attempt_usage_hourly
         (bucket, budget_bucket, route_slug, provider_id, upstream_model, operation, surface, api_key_id,
@@ -50,7 +53,7 @@ const rollupSQL = `WITH candidates AS (
          model_family, estimate_provenance, estimated_input_tokens,
          estimate_reported_input_tokens, estimate_attempt_count,
          commitment_weight, commitment_amount, commitment_period, charge, uncharged_attempt_count,
-         list_cost, contracted_cost, cache_budget_cost, cache_budget_charge, provider_cache_hit_count,training_tokens,storage_byte_seconds,cache_token_seconds,container_sessions)
+         list_cost, contracted_cost, cache_budget_cost, cache_budget_charge, provider_cache_hit_count,training_tokens,storage_byte_seconds,cache_token_seconds,container_sessions,focus_cost_detail_missing,focus_charge_detail_missing)
       SELECT date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',olp.budget_bucket(observed_at),
              route_slug, provider_id, upstream_model, operation, surface, api_key_id,
              budget_group_id, attribution, end_user_digest, budget_exempt, agent_principal_id, COALESCE(delegation_pair_digest,''),
@@ -90,13 +93,16 @@ const rollupSQL = `WITH candidates AS (
              SUM(COALESCE(contracted_cost, estimated_cost + COALESCE(commitment_weight, 0))),
              SUM(cache_budget_cost), SUM(cache_budget_charge),
              COUNT(*) FILTER (WHERE response_cache AND provider_request_counted),
- COALESCE(SUM(training_tokens),0),COALESCE(SUM(storage_byte_seconds),0),COALESCE(SUM(cache_token_seconds),0),COALESCE(olp.container_session_totals(jsonb_agg(container_sessions)),'{}'::jsonb)
+ COALESCE(SUM(training_tokens),0),COALESCE(SUM(storage_byte_seconds),0),COALESCE(SUM(cache_token_seconds),0),COALESCE(olp.container_session_totals(jsonb_agg(container_sessions)),'{}'::jsonb),
+ bool_or(focus_cost_detail_missing),bool_or(focus_charge_detail_missing)
         FROM expired
        GROUP BY date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',olp.budget_bucket(observed_at),
                 route_slug, provider_id, upstream_model, operation, surface, api_key_id,
                 budget_group_id, attribution, end_user_digest, budget_exempt, model_family, estimate_provenance,
                 commitment_amount, commitment_period, agent_principal_id, COALESCE(delegation_pair_digest,'')
       ON CONFLICT ON CONSTRAINT attempt_usage_hourly_dimensions_key DO UPDATE SET
+        focus_cost_detail_missing = attempt_usage_hourly.focus_cost_detail_missing OR EXCLUDED.focus_cost_detail_missing,
+        focus_charge_detail_missing = attempt_usage_hourly.focus_charge_detail_missing OR EXCLUDED.focus_charge_detail_missing,
         request_count = attempt_usage_hourly.request_count + EXCLUDED.request_count,
         provider_request_count = attempt_usage_hourly.provider_request_count + EXCLUDED.provider_request_count,
         model_request_count = attempt_usage_hourly.model_request_count + EXCLUDED.model_request_count,

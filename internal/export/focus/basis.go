@@ -6,10 +6,11 @@ import (
 )
 
 type basis struct {
-	name         destination.CostBasis
-	rowsSQL      string
-	countsSQL    string
-	accountedSQL string
+	name           destination.CostBasis
+	rowsSQL        string
+	countsSQL      string
+	accountedSQL   string
+	unavailableSQL string
 }
 
 func (b basis) billsCallers() bool {
@@ -79,6 +80,16 @@ const (
  ORDER BY p.bucket_start,s.id`
 )
 
+func unavailableDetailSQL(column string) string {
+	return `SELECT EXISTS(SELECT 1 FROM olp.attempt_usage_hourly f
+ LEFT JOIN olp.api_keys k ON k.id=f.api_key_id
+ LEFT JOIN olp.providers pr ON pr.id=f.provider_id
+ LEFT JOIN olp.routes rt ON rt.slug=f.route_slug
+ WHERE f.bucket >= $1::date AND f.bucket < $1::date+1 AND f.` + column + `
+ AND ($2::text IS NULL OR ` + ownerSQL + `::text=$2)
+ AND ($3::text IS NULL OR f.route_slug=$3))`
+}
+
 func scheduled(key, otherwise string) string {
 	return `CASE WHEN src.schedule_id IS NOT NULL THEN src.doc->>'` + key + `' ELSE ` + otherwise + ` END`
 }
@@ -87,7 +98,8 @@ func newBasis(name destination.CostBasis, p pricingSQL) basis {
 	withSource := `WITH source AS (` + p.source + `)`
 	included := ` AND f.usage_complete AND (` + p.included + `)`
 	return basis{
-		name: name,
+		name:           name,
+		unavailableSQL: unavailableDetailSQL(map[destination.CostBasis]string{destination.Cost: "focus_cost_detail_missing", destination.Charge: "focus_charge_detail_missing"}[name]),
 		rowsSQL: withSource + `, facts AS (
  SELECT f.attempt_id::text, f.provider_id, f.route_slug, f.api_key_id::text, src.allocated, src.schedule_id,
   f.upstream_model, f.operation, f.attribution::text, f.commitment_period,
