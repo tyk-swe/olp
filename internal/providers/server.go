@@ -57,7 +57,6 @@ type Catalogue struct {
 
 type Server struct {
 	*Catalogue
-	enrollments *Enrollments
 }
 
 func NewCatalogue(a *access.Server, policy *egress.Policy, signer connectors.Signer, getenv func(string) string, options CatalogueOptions) *Catalogue {
@@ -71,7 +70,7 @@ func NewCatalogue(a *access.Server, policy *egress.Policy, signer connectors.Sig
 }
 
 func New(catalogue *Catalogue) *Server {
-	return &Server{Catalogue: catalogue, enrollments: NewEnrollments(catalogue)}
+	return &Server{Catalogue: catalogue}
 }
 
 type record struct {

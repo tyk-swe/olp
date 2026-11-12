@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"time"
 
@@ -18,18 +19,15 @@ const maxGrantInput = 8 << 10
 const stageGrantTimeout = 15 * time.Second
 const grantEnrollmentOnly = "A grant authenticates this provider: its credential versions come from grant enrollment, not a pasted credential."
 
-type EnrollmentAuthority struct {
-	BeginMutation func(context.Context) (pgx.Tx, access.Principal, error)
-	Reauthorize   func(context.Context, pgx.Tx) (access.Principal, error)
-	Match         func(string) error
-	Audit         func(context.Context, pgx.Tx, access.Actor, string, string, string, string) error
+type grantStart struct {
+	SlotID string `json:"slot_id"`
 }
 
-type Enrollments struct{ catalogue *Catalogue }
+type grantContinuation struct {
+	Input string `json:"input"`
+}
 
-func NewEnrollments(catalogue *Catalogue) *Enrollments { return &Enrollments{catalogue: catalogue} }
-
-type EnrollmentCompletion struct {
+type enrollmentCompletion struct {
 	ProviderID        string `json:"provider_id"`
 	ETag              string `json:"etag"`
 	CredentialID      string `json:"credential_id"`
@@ -37,65 +35,120 @@ type EnrollmentCompletion struct {
 	Principal         string `json:"principal"`
 }
 
-type EnrollmentStatus struct {
+type enrollmentStatus struct {
 	Status     grants.Status         `json:"status"`
 	Interval   *int64                `json:"interval,omitempty"`
-	Completion *EnrollmentCompletion `json:"completion,omitempty"`
+	Completion *enrollmentCompletion `json:"completion,omitempty"`
 }
 
-func (s *Enrollments) Start(ctx context.Context, authority EnrollmentAuthority, principal access.Principal, providerID, requestedSlot string) (grants.Enrollment, error) {
-	c := s.catalogue
-	current, err := readProvider(ctx, c.Access.Pool, providerID)
+type enrollmentStarted struct {
+	ID               string               `json:"id"`
+	ProviderID       string               `json:"provider_id"`
+	SlotID           string               `json:"slot_id"`
+	ExpiresAt        time.Time            `json:"expires_at"`
+	AuthorizationURL *string              `json:"authorization_url,omitempty"`
+	Device           *deviceAuthorization `json:"device,omitempty"`
+	Input            string               `json:"input,omitempty"`
+}
+
+type deviceAuthorization struct {
+	VerificationURL string `json:"verification_url"`
+	UserCode        string `json:"user_code"`
+	Interval        int64  `json:"interval"`
+}
+
+func started(enrollment grants.Enrollment) enrollmentStarted {
+	return enrollmentStarted{ID: enrollment.ID, ProviderID: enrollment.ProviderID, SlotID: enrollment.SlotID, ExpiresAt: enrollment.ExpiresAt, Input: enrollment.Input,
+		AuthorizationURL: authorizationURL(enrollment), Device: device(enrollment.Device)}
+}
+
+func authorizationURL(enrollment grants.Enrollment) *string {
+	if enrollment.Device != nil {
+		return nil
+	}
+	return &enrollment.AuthorizationURL
+}
+
+func device(authorization *abi.DeviceAuthorization) *deviceAuthorization {
+	if authorization == nil {
+		return nil
+	}
+	return &deviceAuthorization{VerificationURL: authorization.VerificationURL, UserCode: authorization.UserCode, Interval: authorization.Interval}
+}
+
+func enrollmentIDs(r *http.Request) (string, string, error) {
+	providerID, err := access.IDParam(r, "provider_id")
 	if err != nil {
-		return grants.Enrollment{}, err
+		return "", "", err
 	}
-	if err := principal.Project(current.ProjectID, access.Change); err != nil {
-		return grants.Enrollment{}, err
-	}
-	if err := authority.Match(current.ETag); err != nil {
-		return grants.Enrollment{}, err
-	}
-	if !current.Connection.Document().Grant() {
-		return grants.Enrollment{}, access.Fail(422, "grant_enrollment_unavailable", "This provider's profile authenticates without a grant.")
-	}
-	slots, err := loadSlots(ctx, c.Access.Pool, providerID)
+	enrollmentID, err := access.IDParam(r, "enrollment_id")
+	return providerID, enrollmentID, err
+}
+
+func (s *Server) startGrantEnrollment(r *http.Request, p access.Principal) (access.Reply, error) {
+	providerID, err := access.IDParam(r, "provider_id")
 	if err != nil {
-		return grants.Enrollment{}, err
+		return access.Reply{}, err
+	}
+	var input grantStart
+	if r.ContentLength != 0 {
+		if err := access.DecodeUnique(r, &input, 1<<10); err != nil {
+			return access.Reply{}, err
+		}
+	}
+	requestedSlot, err := optionalSlotID(input.SlotID)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	ctx := r.Context()
+	current, err := readProvider(ctx, s.Access.Pool, providerID)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if err := p.Project(current.ProjectID, access.Change); err != nil {
+		return access.Reply{}, err
+	}
+	if err := access.Match(r, current.ETag); err != nil {
+		return access.Reply{}, err
+	}
+	document := current.Connection.Document()
+	if !document.Grant() {
+		return access.Reply{}, access.Fail(422, "grant_enrollment_unavailable", "This provider's profile authenticates without a grant.")
+	}
+	slots, err := loadSlots(ctx, s.Access.Pool, providerID)
+	if err != nil {
+		return access.Reply{}, err
 	}
 	slot, err := enrollmentSlot(slots, requestedSlot)
 	if err != nil {
-		return grants.Enrollment{}, err
+		return access.Reply{}, err
 	}
-	client, err := c.prober.Client(ctx, current.target(nil))
+	client, err := s.prober.Client(ctx, current.target(nil))
 	if err != nil {
-		return grants.Enrollment{}, err
+		return access.Reply{}, err
 	}
-	enrollment, err := grants.Start(ctx, c.Plugins, grants.Enrollment{ProviderID: providerID, SlotID: slot.ID, ExpectedCredentialID: slot.CredentialID, PluginDigest: current.Connection.Document().ProfileRevision, ProfileID: current.Connection.Document().ProfileID, StartedBy: principal.ID}, current.Connection.Document().Options.PluginOptions, client)
+	enrollment, err := grants.Start(ctx, s.Plugins, grants.Enrollment{ProviderID: providerID, SlotID: slot.ID, ExpectedCredentialID: slot.CredentialID, PluginDigest: document.ProfileRevision, ProfileID: document.ProfileID, StartedBy: p.ID}, document.Options.PluginOptions, client)
 	if err != nil {
-		if audited := s.auditFailure(ctx, authority, principal.Actor(), providerID); audited != nil {
-			return grants.Enrollment{}, audited
+		return access.Reply{}, s.failedEnrollment(r, p.Actor(), providerID, err)
+	}
+	reply, err := access.Transact(s.Access, r, unchangedSince(ctx, current, "grant enrollment"), func(tx pgx.Tx, _ access.Principal, _ *record) (access.Reply, error) {
+		if err := enrollment.Save(ctx, tx, s.Access); err != nil {
+			return access.Reply{}, err
 		}
-		return grants.Enrollment{}, err
+		return access.Reply{Status: 201, Body: started(enrollment)}, nil
+	})
+	return reply, err
+}
+
+func optionalSlotID(raw string) (string, error) {
+	if raw == "" {
+		return "", nil
 	}
-	tx, authorized, err := authority.BeginMutation(ctx)
+	parsed, err := access.ParseUUID(raw)
 	if err != nil {
-		return grants.Enrollment{}, err
+		return "", access.Invalid("slot_id", "Use a credential slot identifier.")
 	}
-	defer tx.Rollback(ctx)
-	locked, err := lockProvider(ctx, tx, providerID)
-	if err != nil {
-		return grants.Enrollment{}, err
-	}
-	if err := authorized.Project(locked.ProjectID, access.Change); err != nil {
-		return grants.Enrollment{}, err
-	}
-	if locked.ETag != current.ETag {
-		return grants.Enrollment{}, access.Fail(412, "etag_mismatch", "The connection changed while its plugin started grant enrollment; reload and retry.")
-	}
-	if err := enrollment.Save(ctx, tx, c.Access); err != nil {
-		return grants.Enrollment{}, err
-	}
-	return enrollment, tx.Commit(ctx)
+	return parsed, nil
 }
 
 func enrollmentSlot(slots []slotRow, requested string) (slotRow, error) {
@@ -107,86 +160,95 @@ func enrollmentSlot(slots []slotRow, requested string) (slotRow, error) {
 	return slotRow{}, access.Invalid("slot_id", "Unknown credential slot for this connection.")
 }
 
-func (s *Enrollments) Continue(ctx context.Context, authority EnrollmentAuthority, providerID, enrollmentID, input string) (EnrollmentCompletion, error) {
-	if input == "" || len(input) > maxGrantInput || strings.ContainsRune(input, 0) {
-		return EnrollmentCompletion{}, access.Invalid("input", "Paste the callback URL, or the code the upstream displayed, in at most 8192 bytes.")
-	}
-	tx, principal, err := authority.BeginMutation(ctx)
+func (s *Server) continueGrantEnrollment(r *http.Request, _ access.Principal) (access.Reply, error) {
+	providerID, enrollmentID, err := enrollmentIDs(r)
 	if err != nil {
-		return EnrollmentCompletion{}, err
+		return access.Reply{}, err
+	}
+	var input grantContinuation
+	if err := access.DecodeUnique(r, &input, 2*maxGrantInput); err != nil {
+		return access.Reply{}, err
+	}
+	if input.Input == "" || len(input.Input) > maxGrantInput || strings.ContainsRune(input.Input, 0) {
+		return access.Reply{}, access.Invalid("input", "Paste the callback URL, or the code the upstream displayed, in at most 8192 bytes.")
+	}
+	ctx := r.Context()
+	tx, principal, err := s.Access.BeginMutation(r)
+	if err != nil {
+		return access.Reply{}, err
 	}
 	defer tx.Rollback(ctx)
 	current, err := readProvider(ctx, tx, providerID)
 	if err != nil {
-		return EnrollmentCompletion{}, err
+		return access.Reply{}, err
 	}
 	if err := principal.Project(current.ProjectID, access.Change); err != nil {
-		return EnrollmentCompletion{}, err
+		return access.Reply{}, err
 	}
-	enrollment, err := grants.Claim(ctx, tx, s.catalogue.Access, providerID, enrollmentID, principal.ID)
+	enrollment, err := grants.Claim(ctx, tx, s.Access, providerID, enrollmentID, principal.ID)
 	if err != nil {
-		return EnrollmentCompletion{}, err
+		return access.Reply{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return EnrollmentCompletion{}, err
+		return access.Reply{}, err
 	}
-	completion, err := s.exchange(ctx, authority, current, enrollment, input)
+	completed, err := s.exchange(r, current, enrollment, input.Input)
 	if err != nil {
-		if audited := s.auditFailure(ctx, authority, principal.Actor(), providerID); audited != nil {
-			return EnrollmentCompletion{}, audited
-		}
+		return access.Reply{}, s.failedEnrollment(r, principal.Actor(), providerID, err)
 	}
-	return completion, err
+	return access.Reply{Status: 201, ETag: completed.ETag, Body: completed}, nil
 }
 
-func (s *Enrollments) exchange(ctx context.Context, authority EnrollmentAuthority, current *record, enrollment grants.Enrollment, input string) (EnrollmentCompletion, error) {
-	client, err := s.catalogue.prober.Client(ctx, current.target(nil))
+func (s *Server) exchange(r *http.Request, current *record, enrollment grants.Enrollment, input string) (enrollmentCompletion, error) {
+	client, err := s.prober.Client(r.Context(), current.target(nil))
 	if err != nil {
-		return EnrollmentCompletion{}, err
+		return enrollmentCompletion{}, err
 	}
-	grant, err := grants.Exchange(ctx, s.catalogue.Plugins, enrollment, input, current.Connection.Document().Options.PluginOptions, client)
+	grant, err := grants.Exchange(r.Context(), s.Plugins, enrollment, input, current.Connection.Document().Options.PluginOptions, client)
 	if err != nil {
-		return EnrollmentCompletion{}, err
+		return enrollmentCompletion{}, err
 	}
-	return s.stage(ctx, authority, current, enrollment, grant)
+	return s.stage(r, current, enrollment, grant)
 }
 
-func (s *Enrollments) stage(requestContext context.Context, authority EnrollmentAuthority, current *record, enrollment grants.Enrollment, grant abi.Grant) (EnrollmentCompletion, error) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(requestContext), stageGrantTimeout)
+func (s *Server) stage(r *http.Request, current *record, enrollment grants.Enrollment, grant abi.Grant) (enrollmentCompletion, error) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), stageGrantTimeout)
 	defer cancel()
-	tx, principal, err := authority.BeginMutation(ctx)
+	tx, principal, err := s.Access.BeginMutation(r.WithContext(ctx))
 	if err != nil {
-		return EnrollmentCompletion{}, err
+		return enrollmentCompletion{}, err
 	}
 	defer tx.Rollback(ctx)
 	locked, err := lockProvider(ctx, tx, current.ID)
 	if err != nil {
-		return EnrollmentCompletion{}, err
+		return enrollmentCompletion{}, err
 	}
 	if err := principal.Project(locked.ProjectID, access.Change); err != nil {
-		return EnrollmentCompletion{}, err
+		return enrollmentCompletion{}, err
 	}
 	stale := access.Fail(409, "grant_enrollment_stale", "The connection's plugin profile, credential boundary or credential slot changed during grant enrollment. Start another.")
 	change, err := connection.Diff(current.Connection.Document(), locked.Connection.Document())
 	if err != nil {
-		return EnrollmentCompletion{}, err
+		return enrollmentCompletion{}, err
 	}
 	if cfg := locked.Connection.Document(); !cfg.Grant() || cfg.ProfileRevision != enrollment.PluginDigest || cfg.ProfileID != enrollment.ProfileID || change.Enrollment {
-		return EnrollmentCompletion{}, stale
+		return enrollmentCompletion{}, stale
 	}
-	credentialID, version, err := grants.Store(ctx, tx, s.catalogue.Access, current.ID, enrollment.PluginDigest, enrollment.ProfileID, grant)
+	credentialID, version, err := grants.Store(ctx, tx, s.Access, current.ID, enrollment.PluginDigest, enrollment.ProfileID, grant)
 	if err != nil {
-		return EnrollmentCompletion{}, err
+		return enrollmentCompletion{}, err
 	}
 	if err := enrollment.Complete(ctx, tx, credentialID); err != nil {
-		return EnrollmentCompletion{}, err
+		return enrollmentCompletion{}, err
 	}
-	completion, err := s.catalogue.bindGrant(ctx, tx, authority, principal.Actor(), grantBinding{ProviderID: current.ID, SlotID: enrollment.SlotID, ExpectedCredentialID: enrollment.ExpectedCredentialID, Credential: grants.Credential{ID: credentialID, Version: version, Principal: grant.Principal}, Action: "provider.grant.enroll"}, stale)
+	completion, err := bindGrant(ctx, tx, r, principal.Actor(), grantBinding{ProviderID: current.ID, SlotID: enrollment.SlotID, ExpectedCredentialID: enrollment.ExpectedCredentialID, Credential: grants.Credential{ID: credentialID, Version: version, Principal: grant.Principal}, Action: grantEnrollAction}, stale)
 	if err != nil {
-		return EnrollmentCompletion{}, err
+		return enrollmentCompletion{}, err
 	}
 	return completion, tx.Commit(ctx)
 }
+
+const grantEnrollAction = "provider.grant.enroll"
 
 type grantBinding struct {
 	ProviderID           string
@@ -196,128 +258,141 @@ type grantBinding struct {
 	Action               string
 }
 
-func (s *Catalogue) bindGrant(ctx context.Context, tx pgx.Tx, authority EnrollmentAuthority, actor access.Actor, binding grantBinding, stale error) (EnrollmentCompletion, error) {
+func bindGrant(ctx context.Context, tx pgx.Tx, r *http.Request, actor access.Actor, binding grantBinding, stale error) (enrollmentCompletion, error) {
 	bound, err := tx.Exec(ctx, `UPDATE olp.provider_slots SET credential_id=$3,validated_at=NULL,validated_fingerprint=NULL
   WHERE provider_id=$1 AND id=$2 AND credential_id IS NOT DISTINCT FROM $4::uuid`, binding.ProviderID, binding.SlotID, binding.Credential.ID, binding.ExpectedCredentialID)
 	if err != nil {
-		return EnrollmentCompletion{}, err
+		return enrollmentCompletion{}, err
 	}
 	if bound.RowsAffected() != 1 {
-		return EnrollmentCompletion{}, stale
+		return enrollmentCompletion{}, stale
 	}
 	etag, err := touchSlots(ctx, tx, binding.ProviderID)
 	if err != nil {
-		return EnrollmentCompletion{}, err
+		return enrollmentCompletion{}, err
 	}
-	if err := authority.Audit(ctx, tx, actor, binding.Action, "provider_credential", binding.Credential.ID, "success"); err != nil {
-		return EnrollmentCompletion{}, err
+	if err := access.Audit(ctx, tx, r, actor, binding.Action, "provider_credential", binding.Credential.ID, "success"); err != nil {
+		return enrollmentCompletion{}, err
 	}
 	return completion(binding.ProviderID, etag, binding.Credential), nil
 }
 
-func completion(providerID, etag string, credential grants.Credential) EnrollmentCompletion {
-	return EnrollmentCompletion{ProviderID: providerID, ETag: etag, CredentialID: credential.ID, CredentialVersion: credential.Version, Principal: credential.Principal}
+func completion(providerID, etag string, credential grants.Credential) enrollmentCompletion {
+	return enrollmentCompletion{ProviderID: providerID, ETag: etag, CredentialID: credential.ID, CredentialVersion: credential.Version, Principal: credential.Principal}
 }
 
-func (s *Enrollments) Poll(ctx context.Context, authority EnrollmentAuthority, providerID, enrollmentID string) (EnrollmentStatus, error) {
-	tx, err := s.catalogue.Access.Pool.Begin(ctx)
+func (s *Server) pollGrantEnrollment(r *http.Request, _ access.Principal) (access.Reply, error) {
+	providerID, enrollmentID, err := enrollmentIDs(r)
 	if err != nil {
-		return EnrollmentStatus{}, err
+		return access.Reply{}, err
+	}
+	ctx := r.Context()
+	tx, err := s.Access.Pool.Begin(ctx)
+	if err != nil {
+		return access.Reply{}, err
 	}
 	defer tx.Rollback(ctx)
-	principal, err := authority.Reauthorize(ctx, tx)
+	principal, err := s.Access.Reauthorize(r, tx)
 	if err != nil {
-		return EnrollmentStatus{}, err
+		return access.Reply{}, err
 	}
 	current, err := readProvider(ctx, tx, providerID)
 	if err != nil {
-		return EnrollmentStatus{}, err
+		return access.Reply{}, err
 	}
 	if err := principal.Project(current.ProjectID, access.Change); err != nil {
-		return EnrollmentStatus{}, err
+		return access.Reply{}, err
 	}
-	enrollment, standing, err := grants.Watch(ctx, tx, s.catalogue.Access, providerID, enrollmentID, principal.ID)
+	enrollment, standing, err := grants.Watch(ctx, tx, s.Access, providerID, enrollmentID, principal.ID)
 	if err != nil {
-		return EnrollmentStatus{}, err
+		return access.Reply{}, err
 	}
 	if standing.Ended {
-		if err := authority.Audit(ctx, tx, principal.Actor(), "provider.grant.enroll", "provider", providerID, "failure"); err != nil {
-			return EnrollmentStatus{}, err
+		if err := access.Audit(ctx, tx, r, principal.Actor(), grantEnrollAction, "provider", providerID, "failure"); err != nil {
+			return access.Reply{}, err
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return EnrollmentStatus{}, err
+		return access.Reply{}, err
 	}
 	if enrollment == nil {
-		return grantStatus(current, standing), nil
+		return access.OK(grantStatus(current, standing)), nil
 	}
-	staged, err := s.poll(ctx, authority, current, *enrollment)
+	staged, err := s.poll(r, current, *enrollment)
 	if err == nil {
-		return EnrollmentStatus{Status: grants.Completed, Completion: &staged}, nil
+		return access.OK(enrollmentStatus{Status: grants.Completed, Completion: &staged}), nil
 	}
-	settled, settleErr := enrollment.Settle(ctx, s.catalogue.Access.Pool, err)
+	settled, settleErr := enrollment.Settle(ctx, s.Access.Pool, err)
 	if (settleErr != nil || settled.Status != grants.Pending) && !errors.Is(settleErr, pgx.ErrNoRows) {
-		if audited := s.auditFailure(ctx, authority, principal.Actor(), providerID); audited != nil {
-			return EnrollmentStatus{}, audited
+		if audited := s.auditFailedEnrollment(r, principal.Actor(), providerID); audited != nil {
+			return access.Reply{}, audited
 		}
 	}
 	if settleErr != nil {
-		return EnrollmentStatus{}, settleErr
+		return access.Reply{}, settleErr
 	}
-	return grantStatus(current, settled), nil
+	return access.OK(grantStatus(current, settled)), nil
 }
 
-func (s *Enrollments) poll(ctx context.Context, authority EnrollmentAuthority, current *record, enrollment grants.Enrollment) (EnrollmentCompletion, error) {
-	client, err := s.catalogue.prober.Client(ctx, current.target(nil))
+func (s *Server) poll(r *http.Request, current *record, enrollment grants.Enrollment) (enrollmentCompletion, error) {
+	client, err := s.prober.Client(r.Context(), current.target(nil))
 	if err != nil {
-		return EnrollmentCompletion{}, err
+		return enrollmentCompletion{}, err
 	}
-	grant, err := grants.Poll(ctx, s.catalogue.Plugins, enrollment, current.Connection.Document().Options.PluginOptions, client)
+	grant, err := grants.Poll(r.Context(), s.Plugins, enrollment, current.Connection.Document().Options.PluginOptions, client)
 	if err != nil {
-		return EnrollmentCompletion{}, err
+		return enrollmentCompletion{}, err
 	}
-	return s.stage(ctx, authority, current, enrollment, grant)
+	return s.stage(r, current, enrollment, grant)
 }
 
-func grantStatus(current *record, standing grants.Standing) EnrollmentStatus {
+func grantStatus(current *record, standing grants.Standing) enrollmentStatus {
 	if standing.Status == grants.Completed {
 		completed := completion(current.ID, current.ETag, standing.Credential)
-		return EnrollmentStatus{Status: standing.Status, Completion: &completed}
+		return enrollmentStatus{Status: standing.Status, Completion: &completed}
 	}
 	if standing.Status == grants.Pending || standing.Interval > 0 {
-		return EnrollmentStatus{Status: standing.Status, Interval: new(int64(standing.Interval / time.Second))}
+		return enrollmentStatus{Status: standing.Status, Interval: new(int64(standing.Interval / time.Second))}
 	}
-	return EnrollmentStatus{Status: standing.Status}
+	return enrollmentStatus{Status: standing.Status}
 }
 
-func (s *Enrollments) auditFailure(requestContext context.Context, authority EnrollmentAuthority, actor access.Actor, providerID string) error {
-	ctx := context.WithoutCancel(requestContext)
-	tx, err := s.catalogue.Access.Pool.Begin(ctx)
+func (s *Server) failedEnrollment(r *http.Request, actor access.Actor, providerID string, failure error) error {
+	if audited := s.auditFailedEnrollment(r, actor, providerID); audited != nil {
+		return audited
+	}
+	return failure
+}
+
+func (s *Server) auditFailedEnrollment(r *http.Request, actor access.Actor, providerID string) error {
+	ctx := context.WithoutCancel(r.Context())
+	tx, err := s.Access.Pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if err := authority.Audit(ctx, tx, actor, "provider.grant.enroll", "provider", providerID, "failure"); err != nil {
+	if err := access.Audit(ctx, tx, r, actor, grantEnrollAction, "provider", providerID, "failure"); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
 }
 
-func (s *Enrollments) Cancel(ctx context.Context, authority EnrollmentAuthority, providerID, enrollmentID string) error {
-	tx, principal, err := authority.BeginMutation(ctx)
+func (s *Server) cancelGrantEnrollment(r *http.Request, _ access.Principal) (access.Reply, error) {
+	providerID, enrollmentID, err := enrollmentIDs(r)
 	if err != nil {
-		return err
+		return access.Reply{}, err
 	}
-	defer tx.Rollback(ctx)
-	current, err := readProvider(ctx, tx, providerID)
-	if err != nil {
-		return err
-	}
-	if err := principal.Project(current.ProjectID, access.Change); err != nil {
-		return err
-	}
-	if err := grants.Cancel(ctx, tx, providerID, enrollmentID, principal.ID); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	reply, err := access.Transact(s.Access, r, func(tx pgx.Tx, principal access.Principal) (*record, error) {
+		current, err := readProvider(r.Context(), tx, providerID)
+		if err != nil {
+			return nil, err
+		}
+		return current, principal.Project(current.ProjectID, access.Change)
+	}, func(tx pgx.Tx, principal access.Principal, _ *record) (access.Reply, error) {
+		if err := grants.Cancel(r.Context(), tx, providerID, enrollmentID, principal.ID); err != nil {
+			return access.Reply{}, err
+		}
+		return access.Reply{Status: 204}, nil
+	})
+	return reply, err
 }

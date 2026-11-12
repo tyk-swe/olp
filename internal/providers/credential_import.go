@@ -89,7 +89,7 @@ func (s *Server) importCredentials(r *http.Request, p access.Principal, adapter 
 	}
 	grant, err := s.Plugins.RefreshGrant(r.Context(), cfg.ProfileRevision, abi.Provider{Profile: cfg.ProfileID, Options: cfg.Options.PluginOptions}, credentials.refresh, client, credentials.secrets)
 	if err != nil || grants.ValidateTokenMaterial(grant.AccessToken, grant.RefreshToken, grant.ExpiresIn) != nil || !credentials.matches(grant) || slot.CredentialID != nil && slot.Principal != grant.Principal {
-		if auditErr := s.auditFailedGrantEnrollment(r, p.Actor(), id); auditErr != nil {
+		if auditErr := s.auditFailedEnrollment(r, p.Actor(), id); auditErr != nil {
 			return access.Reply{}, auditErr
 		}
 		return access.Reply{}, access.Invalid("credentials", "Could not verify the imported credentials for this account. Sign in again and retry.")
@@ -137,7 +137,7 @@ func (s *Server) stageCredentialImport(request *http.Request, current *record, s
 	if err != nil {
 		return access.Reply{}, err
 	}
-	completed, err := s.Catalogue.bindGrant(ctx, tx, s.enrollmentAuthority(r), p.Actor(), grantBinding{ProviderID: current.ID, SlotID: slot.ID, ExpectedCredentialID: slot.CredentialID,
+	completed, err := bindGrant(ctx, tx, r, p.Actor(), grantBinding{ProviderID: current.ID, SlotID: slot.ID, ExpectedCredentialID: slot.CredentialID,
 		Credential: grants.Credential{ID: credentialID, Version: version, Principal: grant.Principal}, Action: "provider.grant.import"},
 		access.Fail(409, string(adapter)+"_import_stale", "The credential slot changed during import. Reload before retrying."))
 	if err != nil {
