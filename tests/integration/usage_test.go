@@ -918,6 +918,7 @@ func TestBlockingStreamReadDoesNotStallOtherCommands(t *testing.T) {
 }
 
 func TestMCPLateSettlementAfterOrphanRecovery(t *testing.T) {
+	t.Parallel()
 	for _, status := range []accounting.Status{accounting.StatusSucceeded, accounting.StatusUpstreamError, accounting.StatusGuardrailBlocked} {
 		t.Run(string(status), func(t *testing.T) {
 			pool, _ := harness.Database(t)
