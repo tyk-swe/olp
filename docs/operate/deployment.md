@@ -48,9 +48,9 @@ the runtime role migration-owner membership or CREATE privileges.
 Supply the runtime connection to application processes. Serving and worker
 processes require an initialized installation; startup checks the complete,
 unchanged migration history and never migrates implicitly. Production Helm
-needs separate runtime and migration URL Secrets and sets
+needs separate runtime and migration URL Secret references and sets
 `migration.runtimeRole`, so every pre-install and pre-upgrade hook reapplies the
-runtime grants. See
+runtime grants. Different keys in the same Secret also require this role. See
 [database deadlines](operations.md#database-deadlines-and-privileges) for query
 limits and backup roles.
 
