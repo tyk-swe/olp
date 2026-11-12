@@ -49,7 +49,7 @@ func (s *Server) anthropicBegin(w http.ResponseWriter, r *http.Request, family w
 	}
 	if err := validateAnthropicFilesBeta(r.Header); err != nil {
 		s.release(r.Context())
-		s.stateFail(x, w, err, family)
+		s.refuse(x, w, err)
 		return x, authority, true
 	}
 	return x, authority, false
@@ -97,46 +97,46 @@ func (s *Server) anthropicUploadFile(w http.ResponseWriter, r *http.Request) {
 	defer s.release(r.Context())
 	route, err := s.anthropicRoute(x, authority, r, "")
 	if err != nil {
-		s.stateFail(x, w, err, x.family)
+		s.refuse(x, w, err)
 		return
 	}
 	form, err := s.parseMediaForm(w, r, authority.ID, s.cfg.MaxMediaBodyBytes, 1)
 	if err != nil {
-		s.stateFail(x, w, err, x.family)
+		s.refuse(x, w, err)
 		return
 	}
 	defer form.Cleanup()
 	file := form.TakeSingleFile("file")
 	if form.Err() != nil || file == nil {
-		s.stateFail(x, w, invalidRequest("invalid_request", "Upload exactly one file part.", nil), x.family)
+		s.refuse(x, w, invalidRequest("invalid_request", "Upload exactly one file part.", nil))
 		return
 	}
 	if extra := form.TakeExtensions(); form.Err() != nil || len(extra) != 0 {
-		s.stateFail(x, w, invalidRequest("invalid_request", "Anthropic file uploads accept only one file part.", nil), x.family)
+		s.refuse(x, w, invalidRequest("invalid_request", "Anthropic file uploads accept only one file part.", nil))
 		return
 	}
 	form.Disarm()
 	defer s.deps.Staging.Remove(file.Handle)
 	p, err := s.anthropicPin(r.Context(), x, route)
 	if err != nil {
-		s.stateFail(x, w, err, x.family)
+		s.refuse(x, w, err)
 		return
 	}
 	ctx, cancel := s.stateDeadline(r.Context(), route)
 	defer cancel()
 	defer s.resourceSettle(ctx, x, p)
 	if e := s.unboundedPinLimits(x.admissionAuthority(authority), p, route); e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	if e := s.reserveState(ctx, x, authority, time.Duration(route.OverallTimeout)*time.Millisecond); e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	if p.hold == nil {
 		gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond), "")
 		if gate.verdict != gateAdmitted {
-			s.stateFail(x, w, gateError(gate), x.family)
+			s.refuse(x, w, gateError(gate))
 			return
 		}
 		p.hold = gate.hold
@@ -144,24 +144,24 @@ func (s *Server) anthropicUploadFile(w http.ResponseWriter, r *http.Request) {
 	x.anthropicFilesBeta = true
 	endpoint, urlErr := resourceURL(p.provider.Connector(), p.model, "files", anthropicFilesQuery())
 	if urlErr != nil {
-		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."), x.family)
+		s.refuse(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."))
 		return
 	}
 	resp, failure := s.uploadMultipart(ctx, x, p, endpoint, "", nil, file, false)
 	if failure != nil {
-		s.stateFail(x, w, upstreamError(failure), x.family)
+		s.refuse(x, w, upstreamError(failure))
 		return
 	}
 	defer resp.Body.Close()
 	x.dispatched = true
 	body, readErr := readBounded(resp.Body, s.cfg.MaxResponseBytes)
 	if readErr != nil {
-		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read."), x.family)
+		s.refuse(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read."))
 		return
 	}
 	upstreamID, valid := nativeResourceID(body, s.cfg.MaxResponseBytes)
 	if !valid {
-		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed file object."), x.family)
+		s.refuse(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed file object."))
 		return
 	}
 	metadata, state, expires := anthropicFileMetadata(body, p.model)
@@ -174,7 +174,7 @@ func (s *Server) anthropicUploadFile(w http.ResponseWriter, r *http.Request) {
 		UpstreamID: upstreamID, State: state, Metadata: metadata, ExpiresAt: expires,
 	})
 	if putErr != nil {
-		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The file mapping could not be stored."), x.family)
+		s.refuse(x, w, serverError(http.StatusInternalServerError, "internal_error", "The file mapping could not be stored."))
 		return
 	}
 	x.completePinned()
@@ -190,20 +190,20 @@ func (s *Server) anthropicFileCall(w http.ResponseWriter, r *http.Request, use r
 	defer s.release(r.Context())
 	res, err := s.deps.Resources.Get(r.Context(), resources.KindAnthropicFile, authority.ID, r.PathValue("id"))
 	if errors.Is(err, resources.ErrNotFound) {
-		s.stateFail(x, w, notFoundError("not_found", "No file with this identifier exists for this key."), x.family)
+		s.refuse(x, w, notFoundError("not_found", "No file with this identifier exists for this key."))
 		return
 	}
 	if err != nil {
-		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The file mapping could not be read."), x.family)
+		s.refuse(x, w, serverError(http.StatusInternalServerError, "internal_error", "The file mapping could not be read."))
 		return
 	}
 	p, route, e := s.resolveResource(r.Context(), x, authority, res, "batch", use)
 	if e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	if !p.provider.Connector().Supports("batch", "anthropic", "unary") || !p.provider.Supports(p.model, "batch", "anthropic", "unary") {
-		s.stateFail(x, w, notFoundError("not_found", "No file with this identifier exists for this key."), x.family)
+		s.refuse(x, w, notFoundError("not_found", "No file with this identifier exists for this key."))
 		return
 	}
 	x.route = route
@@ -211,19 +211,19 @@ func (s *Server) anthropicFileCall(w http.ResponseWriter, r *http.Request, use r
 	defer cancel()
 	defer s.resourceSettle(ctx, x, p)
 	if e = s.reserveState(ctx, x, authority, time.Duration(route.OverallTimeout)*time.Millisecond); e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	if p.hold == nil {
 		gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond), "")
 		if gate.verdict != gateAdmitted {
-			s.stateFail(x, w, gateError(gate), x.family)
+			s.refuse(x, w, gateError(gate))
 			return
 		}
 		p.hold = gate.hold
 	}
 	if e = op(ctx, x, res, p); e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 	}
 }
 
@@ -371,7 +371,7 @@ func (s *Server) anthropicListResources(w http.ResponseWriter, r *http.Request, 
 	defer s.release(r.Context())
 	limit, before, cursor, err := anthropicListCursor(r.URL.Query(), kind)
 	if err != nil {
-		s.stateFail(x, w, err, family)
+		s.refuse(x, w, err)
 		return
 	}
 	var rows []*resources.Resource
@@ -387,22 +387,22 @@ func (s *Server) anthropicListResources(w http.ResponseWriter, r *http.Request, 
 			if before != "" {
 				param = "before_id"
 			}
-			s.stateFail(x, w, invalidRequest("invalid_value", "The cursor must identify a resource owned by this key.", &param), family)
+			s.refuse(x, w, invalidRequest("invalid_value", "The cursor must identify a resource owned by this key.", &param))
 			return
 		}
-		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The resource list could not be read."), family)
+		s.refuse(x, w, serverError(http.StatusInternalServerError, "internal_error", "The resource list could not be read."))
 		return
 	}
 	rows, hasMore := anthropicListPage(rows, limit, before != "")
 	items, ids := make([]json.RawMessage, 0, len(rows)), make([]string, 0, len(rows))
 	for _, row := range rows {
 		if authErr := s.authorizeListedResource(r.Context(), authority, row); authErr != nil {
-			s.stateFail(x, w, authErr, family)
+			s.refuse(x, w, authErr)
 			return
 		}
 		object, err := s.anthropicResourceObject(row, kind, r)
 		if err != nil {
-			s.stateFail(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A resource could not be projected."), family)
+			s.refuse(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A resource could not be projected."))
 			return
 		}
 		items, ids = append(items, object), append(ids, row.ID)

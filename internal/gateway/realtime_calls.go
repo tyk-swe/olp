@@ -312,11 +312,7 @@ func parseWebRTCCallID(location string) (string, bool) {
 func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 	x := &call{request: s.begin(w, r), family: wire.Realtime, actor: "api_key"}
 	x.mode = "webrtc"
-	fail := func(e *Error) {
-		x.failure = e
-		s.finish(x, nil, e.Status)
-		writeSurfaceError(w, e, "openai")
-	}
+	fail := func(e *Error) { s.refuse(x, w, e) }
 	permit := admission.PermitFromContext(r.Context())
 	if permit == nil {
 		permit = s.admission.AcquirePermit()

@@ -21,11 +21,7 @@ import (
 
 func (s *Server) passthrough(w http.ResponseWriter, r *http.Request) {
 	x := &call{request: s.begin(w, r), family: wire.Passthrough, actor: "api_key", mode: "unary"}
-	fail := func(e *Error) {
-		x.failure = e
-		s.finish(x, nil, e.Status)
-		writeSurfaceError(w, e, "openai")
-	}
+	fail := func(e *Error) { s.refuseOn(x, w, e, "openai") }
 	if !s.admit(r.Context()) {
 		fail(overloaded)
 		return

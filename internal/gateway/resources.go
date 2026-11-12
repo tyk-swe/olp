@@ -297,37 +297,8 @@ func upstreamError(f *attemptFailure) *Error {
 
 func (s *Server) stateBegin(w http.ResponseWriter, r *http.Request, family wire.Format) (*call, keyauthority.Authority, bool) {
 	x := &call{request: s.begin(w, r), family: family, actor: "api_key"}
-	if !s.admit(r.Context()) {
-		s.stateFail(x, w, overloaded, family)
-		return x, keyauthority.Authority{}, true
-	}
-	authority, e := s.authenticate(r, "inference")
-	if e != nil {
-		s.release(r.Context())
-		s.stateFail(x, w, e, family)
-		return x, keyauthority.Authority{}, true
-	}
-	s.bindAuthority(x, authority)
-	switch family {
-	case wire.AnthropicFile, wire.AnthropicBatch, wire.GeminiFile, wire.GeminiBatch, wire.CloudBatch:
-		if !authority.Policy.AllowProviderState {
-			s.release(r.Context())
-			s.stateFail(x, w, providerStateForbidden(), family)
-			return x, authority, true
-		}
-	}
-	if x.attribution, e = s.parseAttribution(r, authority); e != nil {
-		s.release(r.Context())
-		s.stateFail(x, w, e, family)
-		return x, keyauthority.Authority{}, true
-	}
-	return x, authority, false
-}
-
-func (s *Server) stateFail(x *call, w http.ResponseWriter, e *Error, family wire.Format) {
-	x.failure = e
-	s.finish(x, nil, e.Status)
-	writeSurfaceError(w, e, family.Surface())
+	authority, ok := s.enter(w, r, x, s.authenticateInference)
+	return x, authority, !ok
 }
 
 func (s *Server) stateDeadline(ctx context.Context, route *routing.Route) (context.Context, context.CancelFunc) {

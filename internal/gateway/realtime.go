@@ -567,11 +567,7 @@ func (s *realtimeResponseState) providerFrame(typ websocket.MessageType, data []
 func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	x := &call{request: s.begin(w, r), family: wire.Realtime, actor: "api_key"}
 	x.mode = "realtime"
-	fail := func(e *Error) {
-		x.failure = e
-		s.finish(x, nil, e.Status)
-		writeSurfaceError(w, e, "openai")
-	}
+	fail := func(e *Error) { s.refuse(x, w, e) }
 	if !s.admit(r.Context()) {
 		fail(overloaded)
 		return

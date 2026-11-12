@@ -50,12 +50,12 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	defer s.release(r.Context())
 	request, e := s.batchCreateRequest(w, r)
 	if e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	file, contract, e := s.batchInputFile(r.Context(), authority.ID, request.localFile)
 	if e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	if candidate, exists := x.snapshot().FindRoute(file.RouteSlug); exists {
@@ -66,31 +66,31 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		if refusal := fireworksBatchRefusal(x, x.route); refusal != nil {
 			e = refusal
 		}
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	x.route = route
 	plan, e := s.planBatch(r.Context(), x, authority, request, file, contract, p, route)
 	if e != nil {
 		s.releaseHold(r.Context(), p.hold)
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	ctx, cancel := s.stateDeadline(r.Context(), route)
 	defer cancel()
 	defer s.resourceSettle(ctx, x, p)
 	if e := s.reserveStateAndSlot(ctx, x, authority, p); e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	resource, e := s.submitBatch(ctx, x, authority, p, request, plan)
 	if e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	out, err := s.batchObject(r.Context(), resource)
 	if err != nil {
-		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed batch object."), x.family)
+		s.refuse(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed batch object."))
 		return
 	}
 	s.writeStateJSON(w, x, out)
@@ -402,21 +402,21 @@ func (s *Server) batchCall(w http.ResponseWriter, r *http.Request, use retainedU
 	defer s.release(r.Context())
 	kind := durableKind(resources.KindBatch, r.PathValue("id"))
 	if kind == resources.KindStrictBatch && !authority.Policy.AllowProviderState {
-		s.stateFail(x, w, providerStateForbidden(), x.family)
+		s.refuse(x, w, providerStateForbidden())
 		return
 	}
 	res, contract, err := s.readDurable(r.Context(), kind, authority.ID, r.PathValue("id"))
 	if errors.Is(err, resources.ErrNotFound) {
-		s.stateFail(x, w, notFoundError("not_found", "No batch with this identifier exists for this key."), x.family)
+		s.refuse(x, w, notFoundError("not_found", "No batch with this identifier exists for this key."))
 		return
 	}
 	if err != nil {
-		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The batch mapping could not be read."), x.family)
+		s.refuse(x, w, serverError(http.StatusInternalServerError, "internal_error", "The batch mapping could not be read."))
 		return
 	}
 	p, route, e := s.admitDurable(r.Context(), x, authority, res, contract, "batch", use)
 	if e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	x.route = route
@@ -424,11 +424,11 @@ func (s *Server) batchCall(w http.ResponseWriter, r *http.Request, use retainedU
 	defer cancel()
 	defer s.resourceSettle(ctx, x, p)
 	if e := s.reserveStateAndSlot(ctx, x, authority, p); e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	if e := op(ctx, x, authority, res, p, route); e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 	}
 }
 
@@ -440,7 +440,7 @@ func (s *Server) listBatches(w http.ResponseWriter, r *http.Request) {
 	defer s.release(r.Context())
 	limit, after, e := listArgs(r)
 	if e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	kinds := []string{resources.KindBatch}
@@ -451,7 +451,7 @@ func (s *Server) listBatches(w http.ResponseWriter, r *http.Request) {
 	// authorized or projected.
 	rows, err := s.deps.Resources.ListKinds(r.Context(), kinds, authority.ID, limit+1, after)
 	if err != nil {
-		s.stateFail(x, w, resourceListError(err, "The batch list could not be read."), x.family)
+		s.refuse(x, w, resourceListError(err, "The batch list could not be read."))
 		return
 	}
 	hasMore := len(rows) > limit
@@ -464,13 +464,13 @@ func (s *Server) listBatches(w http.ResponseWriter, r *http.Request) {
 		if row.Kind == resources.KindStrictBatch {
 			_, contract, readErr := s.readDurable(r.Context(), row.Kind, authority.ID, row.ID)
 			if readErr != nil || s.authorizeDurable(r.Context(), x, authority, row, contract, "batch", retainedHousekeeping) != nil {
-				s.stateFail(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A batch in this list is unavailable."), x.family)
+				s.refuse(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A batch in this list is unavailable."))
 				return
 			}
 		}
 		obj, err := s.batchObject(r.Context(), row)
 		if err != nil {
-			s.stateFail(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A batch in this list could not be projected."), x.family)
+			s.refuse(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A batch in this list could not be projected."))
 			return
 		}
 		items = append(items, obj)

@@ -132,9 +132,7 @@ func (s *Server) registerCloudBatchState(mux *http.ServeMux) {
 }
 
 func (s *Server) cloudBatchFail(x *call, w http.ResponseWriter, e *Error) {
-	x.failure = e
-	s.finish(x, nil, e.Status)
-	writeSurfaceError(w, e, "openai")
+	s.refuseOn(x, w, e, "openai")
 }
 
 func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {

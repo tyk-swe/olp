@@ -287,11 +287,11 @@ func (s *Server) recoverContinuation(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.release(r.Context())
 	if values := r.Header.Values(continuationHeader); len(values) != 1 || values[0] != interaction.ContinuationV1 {
-		s.stateFail(x, w, invalidRequest("state_carrier", "Recovery requires the tested chat-anthropic-tools-v1 client contract.", nil), x.family)
+		s.refuse(x, w, invalidRequest("state_carrier", "Recovery requires the tested chat-anthropic-tools-v1 client contract.", nil))
 		return
 	}
 	if !authority.Policy.AllowProviderState {
-		s.stateFail(x, w, invalidRequest("policy_conflict", "Encrypted native continuation requires allow_provider_state on this API key.", nil), x.family)
+		s.refuse(x, w, invalidRequest("policy_conflict", "Encrypted native continuation requires allow_provider_state on this API key.", nil))
 		return
 	}
 	var res *resources.Resource
@@ -303,31 +303,31 @@ func (s *Server) recoverContinuation(w http.ResponseWriter, r *http.Request) {
 		res, payload, err = s.deps.Resources.ReadContract(r.Context(), resources.KindContinuation, authority.ID, r.PathValue("id"))
 	}
 	if err != nil {
-		s.stateFail(x, w, notFoundError("continuation_unavailable", "No unexpired continuation with this identity is available to this key."), x.family)
+		s.refuse(x, w, notFoundError("continuation_unavailable", "No unexpired continuation with this identity is available to this key."))
 		return
 	}
 	route, exists := x.request.release.Snapshot().FindRoute(res.RouteSlug)
 	if !exists || !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
-		s.stateFail(x, w, notFoundError("continuation_unavailable", "The continuation is unavailable to this key."), x.family)
+		s.refuse(x, w, notFoundError("continuation_unavailable", "The continuation is unavailable to this key."))
 		return
 	}
 	x.route = &route
 	state, err := decodeStoredContinuation(payload)
 	if err != nil {
-		s.stateFail(x, w, continuationError("continuation_unavailable", "The stored contract is unavailable."), x.family)
+		s.refuse(x, w, continuationError("continuation_unavailable", "The stored contract is unavailable."))
 		return
 	}
 	if e := s.authorizeContinuation(r.Context(), x, res, state); e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	if res.State != resources.StateReady || state.Interaction == nil {
-		s.stateFail(x, w, continuationError("continuation_outcome_unknown", "This submission reserved provider work but has no committed ready delivery; fresh inference will not run."), x.family)
+		s.refuse(x, w, continuationError("continuation_outcome_unknown", "This submission reserved provider work but has no committed ready delivery; fresh inference will not run."))
 		return
 	}
 	body, err := json.Marshal(map[string]any{"version": state.Version, "handle": res.ID, "state": "ready", "assistant": state.Interaction.Assistant, "delivery": state.Delivery})
 	if err != nil {
-		s.stateFail(x, w, continuationError("continuation_unavailable", "The stored delivery could not be encoded."), x.family)
+		s.refuse(x, w, continuationError("continuation_unavailable", "The stored delivery could not be encoded."))
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

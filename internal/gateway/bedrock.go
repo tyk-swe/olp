@@ -72,26 +72,12 @@ func (s *Server) bedrockInvokeStream(w http.ResponseWriter, r *http.Request) {
 func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family wire.Format, operation, mode, upstreamOp string) {
 	x := &call{request: s.begin(w, r), family: family, actor: "api_key"}
 	x.mode = mode
-	fail := func(e *Error) {
-		x.failure = e
-		s.finish(x, nil, e.Status)
-		writeSurfaceError(w, e, "bedrock")
-	}
-	if !s.admit(r.Context()) {
-		fail(overloaded)
+	authority, ok := s.enter(w, r, x, s.bedrockAuthenticate)
+	if !ok {
 		return
 	}
 	defer s.release(r.Context())
-	authority, e := s.bedrockAuthenticate(r)
-	if e != nil {
-		fail(e)
-		return
-	}
-	s.bindAuthority(x, authority)
-	if x.attribution, e = s.parseAttribution(r, authority); e != nil {
-		fail(e)
-		return
-	}
+	fail := func(e *Error) { s.refuse(x, w, e) }
 	slug := r.PathValue("model")
 	if !routeidentity.ValidSlug(slug) {
 		fail(invalidRequest("invalid_value", "model must name a published route slug.", nil))

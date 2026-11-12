@@ -33,31 +33,31 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	defer s.release(r.Context())
 	slug := strings.TrimSpace(r.Header.Get(stateRouteHeader))
 	if slug == "" {
-		s.stateFail(x, w, invalidRequest("missing_required_parameter", "X-OLP-Route is required for file uploads.", nil), x.family)
+		s.refuse(x, w, invalidRequest("missing_required_parameter", "X-OLP-Route is required for file uploads.", nil))
 		return
 	}
 	snapshot := x.request.release.Snapshot()
 	route, ok := snapshot.FindRoute(slug)
 	if !ok {
-		s.stateFail(x, w, modelNotFound(slug), x.family)
+		s.refuse(x, w, modelNotFound(slug))
 		return
 	}
 	x.route = &route
 	if x.strict() && !authority.Policy.AllowProviderState {
-		s.stateFail(x, w, providerStateForbidden(), x.family)
+		s.refuse(x, w, providerStateForbidden())
 		return
 	}
 	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
-		s.stateFail(x, w, permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`."), x.family)
+		s.refuse(x, w, permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`."))
 		return
 	}
 	if e := x.guardrailSurfaceGate(&route); e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	form, e := s.parseMediaForm(w, r, authority.ID, s.cfg.MaxMediaBodyBytes, 1)
 	if e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	defer form.Cleanup()
@@ -65,11 +65,11 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	file := form.TakeSingleFile("file")
 	extra := form.TakeExtensions()
 	if err := form.Err(); err != nil {
-		s.stateFail(x, w, invalidRequest("invalid_request", err.Error(), nil), x.family)
+		s.refuse(x, w, invalidRequest("invalid_request", err.Error(), nil))
 		return
 	}
 	if file == nil {
-		s.stateFail(x, w, invalidRequest("missing_required_parameter", "The file field must carry one file.", nil), x.family)
+		s.refuse(x, w, invalidRequest("missing_required_parameter", "The file field must carry one file.", nil))
 		return
 	}
 	if purpose != "batch" {
@@ -77,11 +77,11 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !slices.Contains(route.Operations, "batch") {
-		s.stateFail(x, w, invalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow batch operations.", nil), x.family)
+		s.refuse(x, w, invalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow batch operations.", nil))
 		return
 	}
 	if x.strict() && !s.deps.Resources.Encrypted() {
-		s.stateFail(x, w, providerStateForbidden(), x.family)
+		s.refuse(x, w, providerStateForbidden())
 		return
 	}
 	var strictSource []byte
@@ -91,7 +91,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		fileFirst = len(fields) == 2 && fields[0].Name == "file"
 		if normalized || len(fields) != 2 || len(extra) != 0 || purpose != "batch" ||
 			file.ContentType == "" || strings.ContainsAny(file.Filename, "\"\\\r\n") || r.Header.Get("Idempotency-Key") != "" {
-			s.stateFail(x, w, invalidRequest("target_capability", "Strict batch file upload requires one purpose=batch and one typed file field without unqualified options.", nil), x.family)
+			s.refuse(x, w, invalidRequest("target_capability", "Strict batch file upload requires one purpose=batch and one typed file field without unqualified options.", nil))
 			return
 		}
 		type sourceField struct {
@@ -120,13 +120,13 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		if refusal := fireworksBatchRefusal(x, &route); refusal != nil {
 			e = refusal
 		}
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	if x.strict() {
 		if refusal := strictBatchTargetRefusal(p); refusal != nil {
 			s.releaseHold(r.Context(), p.hold)
-			s.stateFail(x, w, refusal, x.family)
+			s.refuse(x, w, refusal)
 			return
 		}
 	}
@@ -137,21 +137,21 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	if p.provider.VendorID == "groq" && purpose != "batch" {
 		param := "purpose"
 		s.releaseHold(r.Context(), p.hold)
-		s.stateFail(x, w, invalidRequest("unsupported_parameter", "Groq files used by batches require purpose=batch.", &param), x.family)
+		s.refuse(x, w, invalidRequest("unsupported_parameter", "Groq files used by batches require purpose=batch.", &param))
 		return
 	}
 	if adapter.Managed() || adapter == connectors.BatchOpenAI && !x.strict() && purpose == "batch" {
 		if adapter != connectors.BatchOpenAI && (purpose != "batch" || len(extra) > 0) {
 			param := "purpose"
 			s.releaseHold(r.Context(), p.hold)
-			s.stateFail(x, w, invalidRequest("unsupported_parameter", "Managed batch uploads require purpose=batch and no extra fields.", &param), x.family)
+			s.refuse(x, w, invalidRequest("unsupported_parameter", "Managed batch uploads require purpose=batch and no extra fields.", &param))
 			return
 		}
 		var translated *staging.Part
 		translated, manifest, e = s.translateManagedBatchInput(r.Context(), p, &route, file, adapter)
 		if e != nil {
 			s.releaseHold(r.Context(), p.hold)
-			s.stateFail(x, w, e, x.family)
+			s.refuse(x, w, e)
 			return
 		}
 		uploadFile = translated
@@ -172,7 +172,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		template, ok := x.snapshot().DurableTemplate(route.Slug, p.target.ID)
 		if !ok {
 			s.releaseHold(r.Context(), p.hold)
-			s.stateFail(x, w, invalidRequest("target_capability", "The selected target has no strict batch contract.", nil), x.family)
+			s.refuse(x, w, invalidRequest("target_capability", "The selected target has no strict batch contract.", nil))
 			return
 		}
 		strictServing = template.Serving()
@@ -180,7 +180,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		strictEndpoint, strictItems, validationErr = s.validateBatchInput(file, template.Model(), &p.provider, &route)
 		if validationErr != nil {
 			s.releaseHold(r.Context(), p.hold)
-			s.stateFail(x, w, invalidRequest("target_capability", "The batch file has an unqualified item, duplicate identity, or mixed endpoint.", new("file")), x.family)
+			s.refuse(x, w, invalidRequest("target_capability", "The batch file has an unqualified item, duplicate identity, or mixed endpoint.", new("file")))
 			return
 		}
 	}
@@ -188,7 +188,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	defer s.resourceSettle(ctx, x, p)
 	if e := s.reserveState(ctx, x, authority, time.Duration(route.OverallTimeout)*time.Millisecond); e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	var body []byte
@@ -199,7 +199,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		body, upstreamID, failure = s.uploadGeminiManagedFile(ctx, x, p, uploadFile)
 		if failure != nil {
 			x.dispatched = failure.dispatched
-			s.stateFail(x, w, upstreamError(failure), x.family)
+			s.refuse(x, w, upstreamError(failure))
 			return
 		}
 	} else {
@@ -209,31 +209,31 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		}
 		endpoint, err := resourceURL(p.provider.Connector(), p.model, filePath, nil)
 		if err != nil {
-			s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."), x.family)
+			s.refuse(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."))
 			return
 		}
 		resp, failure := s.uploadMultipart(ctx, x, p, endpoint, uploadPurpose, uploadExtra, uploadFile, fileFirst)
 		if failure != nil {
 			x.dispatched = failure.dispatched
-			s.stateFail(x, w, upstreamError(failure), x.family)
+			s.refuse(x, w, upstreamError(failure))
 			return
 		}
 		defer resp.Body.Close()
 		x.dispatched = true
 		body, err = readBounded(resp.Body, s.cfg.MaxResponseBytes)
 		if err != nil {
-			s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read."), x.family)
+			s.refuse(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read."))
 			return
 		}
 		if x.strict() {
 			if _, upstreamID, err = strictResult(body, ""); err != nil {
-				s.stateFail(x, w, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid native file result."), x.family)
+				s.refuse(x, w, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid native file result."))
 				return
 			}
 		} else {
 			var valid bool
 			if upstreamID, valid = nativeResourceID(body, s.cfg.MaxResponseBytes); !valid {
-				s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed file object."), x.family)
+				s.refuse(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed file object."))
 				return
 			}
 		}
@@ -242,7 +242,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	provided, state, expires := fileMetadata(body, p.model)
 	metadata, err := uploadedFileMetadata(provided, body, adapter, manifest)
 	if err != nil {
-		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed file object."), x.family)
+		s.refuse(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed file object."))
 		return
 	}
 	commitCtx, stopCommit := resourceCommitContext(ctx)
@@ -275,7 +275,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		payload, marshalErr := json.Marshal(durableDocument{Version: version, Source: strictSource, Result: body, Binding: p.model, Serving: strictServing,
 			Asset: &durableAsset{SHA256: file.Digest, Filename: file.Filename, ContentType: file.ContentType, Size: file.Size, Endpoint: strictEndpoint, ItemCount: strictItems}})
 		if marshalErr != nil {
-			s.stateFail(x, w, durableError(marshalErr), x.family)
+			s.refuse(x, w, durableError(marshalErr))
 			return
 		}
 		res, err = s.deps.Resources.PutDurableContract(commitCtx, resource, payload)
@@ -283,7 +283,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		res, err = s.deps.Resources.Put(commitCtx, resource)
 	}
 	if err != nil {
-		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The file mapping could not be stored."), x.family)
+		s.refuse(x, w, serverError(http.StatusInternalServerError, "internal_error", "The file mapping could not be stored."))
 		return
 	}
 	var out []byte
@@ -295,7 +295,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		out, err = rewriteID(body, "id", res.ID)
 	}
 	if err != nil {
-		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed file object."), x.family)
+		s.refuse(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed file object."))
 		return
 	}
 	s.writeStateJSON(w, x, out)
@@ -413,7 +413,7 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 	defer s.release(r.Context())
 	limit, after, e := listArgs(r)
 	if e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	kinds := []string{resources.KindFile}
@@ -424,7 +424,7 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 	// authorized or projected.
 	rows, err := s.deps.Resources.ListKinds(r.Context(), kinds, authority.ID, limit+1, after)
 	if err != nil {
-		s.stateFail(x, w, resourceListError(err, "The file list could not be read."), x.family)
+		s.refuse(x, w, resourceListError(err, "The file list could not be read."))
 		return
 	}
 	hasMore := len(rows) > limit
@@ -436,24 +436,24 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		if retainedFileOperation(row) != "batch" {
 			if !authority.Policy.AllowProviderState {
-				s.stateFail(x, w, providerStateForbidden(), x.family)
+				s.refuse(x, w, providerStateForbidden())
 				return
 			}
 			if _, _, e := s.resolveResource(r.Context(), x, authority, row, retainedFileOperation(row), retainedHousekeeping); e != nil {
-				s.stateFail(x, w, e, x.family)
+				s.refuse(x, w, e)
 				return
 			}
 		}
 		if row.Kind == resources.KindStrictFile {
 			_, contract, readErr := s.readDurable(r.Context(), row.Kind, authority.ID, row.ID)
 			if readErr != nil || s.authorizeDurable(r.Context(), x, authority, row, contract, "batch", retainedHousekeeping) != nil {
-				s.stateFail(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A file in this list is unavailable."), x.family)
+				s.refuse(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A file in this list is unavailable."))
 				return
 			}
 		}
 		obj, err := s.fileObject(r.Context(), row)
 		if err != nil {
-			s.stateFail(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A file in this list could not be projected."), x.family)
+			s.refuse(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A file in this list could not be projected."))
 			return
 		}
 		items = append(items, obj)
@@ -686,32 +686,32 @@ func (s *Server) fileCall(w http.ResponseWriter, r *http.Request, use retainedUs
 	defer s.release(r.Context())
 	kind := durableKind(resources.KindFile, r.PathValue("id"))
 	if kind == resources.KindStrictFile && !authority.Policy.AllowProviderState {
-		s.stateFail(x, w, providerStateForbidden(), x.family)
+		s.refuse(x, w, providerStateForbidden())
 		return
 	}
 	res, contract, err := s.readDurable(r.Context(), kind, authority.ID, r.PathValue("id"))
 	if errors.Is(err, resources.ErrNotFound) {
-		s.stateFail(x, w, notFoundError("not_found", "No file with this identifier exists for this key."), x.family)
+		s.refuse(x, w, notFoundError("not_found", "No file with this identifier exists for this key."))
 		return
 	}
 	if err != nil {
-		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The file mapping could not be read."), x.family)
+		s.refuse(x, w, serverError(http.StatusInternalServerError, "internal_error", "The file mapping could not be read."))
 		return
 	}
 	if operation := retainedFileOperation(res); operation != "batch" {
 		if !authority.Policy.AllowProviderState {
-			s.stateFail(x, w, providerStateForbidden(), x.family)
+			s.refuse(x, w, providerStateForbidden())
 			return
 		}
 		x.operationOverride = operation
 		if res.State == "submitting" || res.State == "submission_unknown" || res.State == "not_accepted" {
-			s.stateFail(x, w, serverError(http.StatusConflict, "submission_unknown", "The file upload has no reconciled native identity yet."), x.family)
+			s.refuse(x, w, serverError(http.StatusConflict, "submission_unknown", "The file upload has no reconciled native identity yet."))
 			return
 		}
 		x.retained = retainedOperation{use: retainedHousekeeping, usage: retainedTokenlessUsage}
 		p, route, e := s.resolveResource(r.Context(), x, authority, res, operation, use)
 		if e != nil {
-			s.stateFail(x, w, e, x.family)
+			s.refuse(x, w, e)
 			return
 		}
 		x.route = route
@@ -719,17 +719,17 @@ func (s *Server) fileCall(w http.ResponseWriter, r *http.Request, use retainedUs
 		defer cancel()
 		defer s.retainedSettle(ctx, x, p)
 		if e := s.admitRetainedRequest(ctx, x, authority, p, route, false); e != nil {
-			s.stateFail(x, w, e, x.family)
+			s.refuse(x, w, e)
 			return
 		}
 		if e := op(ctx, x, authority, res, p, route); e != nil {
-			s.stateFail(x, w, e, x.family)
+			s.refuse(x, w, e)
 		}
 		return
 	}
 	p, route, e := s.admitDurable(r.Context(), x, authority, res, contract, "batch", use)
 	if e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	x.route = route
@@ -737,11 +737,11 @@ func (s *Server) fileCall(w http.ResponseWriter, r *http.Request, use retainedUs
 	defer cancel()
 	defer s.resourceSettle(ctx, x, p)
 	if e := s.reserveStateAndSlot(ctx, x, authority, p); e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 		return
 	}
 	if e := op(ctx, x, authority, res, p, route); e != nil {
-		s.stateFail(x, w, e, x.family)
+		s.refuse(x, w, e)
 	}
 }
 
