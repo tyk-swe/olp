@@ -26,7 +26,10 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -1136,6 +1139,99 @@ func TestStrictPreparationKeepsTargetsAndSourcesSeparate(t *testing.T) {
 	}
 }
 
+func TestRealtimeCallAdmissionHonorsRequestedPriority(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct{ name, defaultPriority, header, expected string }{
+		{"caller critical", "normal", `{"priority":"critical"}`, "critical"},
+		{"key critical", "critical", "", "critical"},
+		{"normal", "normal", "", "normal"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pool := admission.NewPool(1).Queue(2, 2*time.Second)
+			management := admission.NewPool(1)
+			outer := &admission.Public{Inference: pool, Management: management, InferenceEnabled: true, Reject: func(w http.ResponseWriter, _ *http.Request, _ string) { w.WriteHeader(503) }}
+			h := newHarnessWrapped(t, Config{}, outer.Wrap)
+			critical := "critical"
+			authority := h.rt.keys[fullKey]
+			authority.Policy.MaxPriority = &critical
+			authority.Policy.Priority = &test.defaultPriority
+			h.rt.keys[fullKey] = authority
+			registry := prometheus.NewRegistry()
+			registry.MustRegister(admission.Metrics(pool, management))
+			depth := func() map[string]float64 {
+				families, e := registry.Gather()
+				if e != nil {
+					t.Fatal(e)
+				}
+				out := map[string]float64{}
+				for _, f := range families {
+					if f.GetName() != "olp_admission_queue_depth" {
+						continue
+					}
+					for _, m := range f.Metric {
+						for _, label := range m.Label {
+							if label.GetName() == "class" {
+								out[label.GetValue()] = m.GetGauge().GetValue()
+							}
+						}
+					}
+				}
+				return out
+			}
+			holder := pool.Enter()
+			defer holder.Release()
+			req, e := http.NewRequest("POST", h.server.URL+"/v1/realtime/calls?model="+routeSlug, strings.NewReader("v=0\r\n"))
+			if e != nil {
+				t.Fatal(e)
+			}
+			req.Header.Set("Authorization", "Bearer "+fullKey)
+			req.Header.Set("Content-Type", "application/sdp")
+			if test.header != "" {
+				req.Header.Set("X-OLP-Routing", test.header)
+			}
+			_, resolved, controlErr := routingControls(req, authority.Policy)
+			if controlErr != nil || resolved != test.expected {
+				t.Fatalf("fixture priority=%s err=%v", resolved, controlErr)
+			}
+			done := make(chan error, 1)
+			go func() {
+				r, e := h.server.Client().Do(req)
+				if e == nil {
+					io.Copy(io.Discard, r.Body)
+					r.Body.Close()
+				}
+				done <- e
+			}()
+			var observed map[string]float64
+			deadline := time.Now().Add(time.Second)
+			for time.Now().Before(deadline) {
+				observed = depth()
+				if observed["normal"]+observed["critical"] > 0 {
+					break
+				}
+				time.Sleep(time.Millisecond)
+			}
+			holder.Release()
+			if e := <-done; e != nil {
+				t.Fatal(e)
+			}
+			t.Logf("priority=%s queued depths=%v", test.expected, observed)
+			if pool.Admitted() != 0 {
+				t.Fatalf("admission permit leaked: %d", pool.Admitted())
+			}
+			h.mock.mu.Lock()
+			calls := len(h.mock.calls)
+			h.mock.mu.Unlock()
+			if calls != 0 {
+				t.Fatal("unexpected provider dispatch")
+			}
+			if observed[test.expected] != 1 {
+				t.Fatalf("request entered wrong admission class: %v", observed)
+			}
+		})
+	}
+}
+
 type deadlineFailWriter struct {
 	*httptest.ResponseRecorder
 	ctx context.Context
@@ -1220,5 +1316,52 @@ func TestRetainedResponseStreamClassifiesDeadlineAndProtocolFailures(t *testing.
 				t.Fatalf("route deadline did not expire: %v", ctx.Err())
 			}
 		})
+	}
+}
+
+func TestResourceListsRejectInvalidCursor(t *testing.T) {
+	t.Parallel()
+	pool, err := pgxpool.New(t.Context(), "postgres://unused@127.0.0.1:1/unused")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.Close()
+	spool, err := staging.NewSpool(t.TempDir(), staging.MinCapacityBytes, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = spool.Close() })
+	h := newHarness(t, Config{}, Dependencies{Resources: resources.New(pool), Staging: spool})
+	for _, list := range []struct{ kind, other, path string }{
+		{"batch", "file", "/v1/batches"},
+		{"file", "batch", "/v1/files"},
+	} {
+		for _, tc := range []struct {
+			name, cursor string
+			status       int
+			code, param  string
+		}{
+			{"missing separator", "not-an-id", 400, "invalid_value", "after"},
+			{"malformed UUID", list.kind + "_not-a-uuid", 400, "invalid_value", "after"},
+			{"wrong kind", resources.LocalID(list.other, uuid.New()), 400, "invalid_value", "after"},
+			{"database failure", resources.LocalID(list.kind, uuid.New()), 500, "internal_error", ""},
+		} {
+			t.Run(list.kind+"/"+tc.name, func(t *testing.T) {
+				response := h.do(t.Context(), http.MethodGet, list.path+"?after="+tc.cursor, fullKey, nil, nil)
+				defer response.Body.Close()
+				var body struct {
+					Error struct {
+						Code  string `json:"code"`
+						Param string `json:"param"`
+					} `json:"error"`
+				}
+				if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				if response.StatusCode != tc.status || body.Error.Code != tc.code || body.Error.Param != tc.param {
+					t.Errorf("cursor response = %d %#v, want %d %s at %s", response.StatusCode, body, tc.status, tc.code, tc.param)
+				}
+			})
+		}
 	}
 }

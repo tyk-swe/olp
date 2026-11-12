@@ -18,7 +18,7 @@ const (
 	rejectEvidenceSQL = `UPDATE olp.export_pending SET rejected_at=now(),last_error_code='evidence_unavailable' WHERE sink_id=$1 AND record_id=$2 AND delivered_at IS NULL AND rejected_at IS NULL`
 	finishRecordSQL   = `UPDATE olp.export_pending SET delivered_at=CASE WHEN $3 THEN now() ELSE NULL END,
  rejected_at=CASE WHEN $6 THEN now() ELSE NULL END,
- last_error_code=$4,next_attempt_at=now()+make_interval(secs=>$5)
+ last_error_code=CASE WHEN $3 THEN NULL ELSE $4 END,next_attempt_at=now()+make_interval(secs=>$5)
  WHERE sink_id=$1 AND record_id=$2 AND delivered_at IS NULL AND rejected_at IS NULL`
 	checkpointCursorSQL = `INSERT INTO olp.export_cursors(sink_id,stream,cursor,delivered_total,failed_total,last_success_at)
  VALUES($1,$2,$3,$4,$5,CASE WHEN $4::bigint>0 THEN now() END) ON CONFLICT(sink_id,stream) DO UPDATE SET
