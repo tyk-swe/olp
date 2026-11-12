@@ -25,7 +25,6 @@ func LoadMounted(path string, policy *egress.Policy) (map[string]release.Mounted
 		Providers []struct {
 			ProviderID            string                   `json:"provider_id"`
 			Configuration         connection.Configuration `json:"configuration"`
-			Model                 *string                  `json:"model"`
 			CredentialFile        *string                  `json:"credential_file"`
 			NetworkCredentialFile *string                  `json:"network_credential_file"`
 		} `json:"providers"`
@@ -83,10 +82,8 @@ func LoadMounted(path string, policy *egress.Policy) (map[string]release.Mounted
 			if err != nil {
 				return nil, err
 			}
-		}
-		if entry.Model != nil {
-			if err = connection.ValidModelName("model", *entry.Model); err != nil {
-				return nil, err
+			if err = ValidCredential(string(secret)); err != nil {
+				return nil, errors.New("mounted credential file must not contain NUL bytes, and a multiline credential must be JSON")
 			}
 		}
 		config, err := cfg.Serving()

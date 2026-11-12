@@ -27,8 +27,7 @@
         "auth_mode": "adc",
         "cloud_project": "example-project",
         "cloud_region": "us-central1"
-      },
-      "model": "gemini-2.5-flash"
+      }
     },
     {
       "provider_id": "018f1f77-9823-7b8a-b847-3658e91e4d03",

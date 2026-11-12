@@ -18,6 +18,14 @@ semantic versioning and take their source from root `package.json`. The
   replaces the per-source resume columns with one cursor, which now also
   resets for Google when the scope changes.
 
+- The mounted connector file (`OLP_CONNECTOR_CONFIG_FILE`) no longer accepts a
+  per-provider `model`. The gateway never used it, since mounted connectors
+  serve the models of the published revision, so a file that still sets it
+  now fails to load until that line is removed. Mounted credential files are
+  also checked like credentials stored through the management API, so a file
+  with a NUL byte, or one spanning several lines that isn't JSON, fails at
+  startup instead of on every request.
+
 - OpenAI and Anthropic cost imports reject a line with an invalid currency code
   and record a `response` failure, as cloud imports already did. Every source
   now shortens line items longer than 256 characters the same way, so a long
