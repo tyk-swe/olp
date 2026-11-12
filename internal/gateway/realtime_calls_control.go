@@ -203,7 +203,7 @@ func (s *Server) settleWebRTC(sess *webrtcSession, failure *Error) {
 			out = &outcome{committed: true}
 		}
 		s.finish(x, out, status)
-		settled := geminiLiveSettlement(x)
+		settled := sessionSettlement(x)
 		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(sess.ctx), webrtcCloseTimeout)
 		s.settlePinHold(settleCtx, x, sess.p.hold, settled)
 		s.recordCost(x)
