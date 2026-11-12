@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -153,9 +154,38 @@ func TestStartupFailureCleanup(t *testing.T) {
 	}
 }
 
+func TestStartupPortCollision(t *testing.T) {
+	t.Parallel()
+	pool, databaseURL := harness.Database(t)
+	env := newEnvironment(t, databaseURL)
+	runBinary(t, env, "migrate")
+	occupied := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer occupied.Close()
+	attempts := 0
+	addresses := func(t *testing.T) (string, string) {
+		attempts++
+		public, private := freeAddresses(t)
+		if attempts == 1 {
+			private = strings.TrimPrefix(occupied.URL, "http://")
+		}
+		return public, private
+	}
+	s := startProcessAttempt(t, pool, env, addresses, time.Now().Add(startupLimit), 3)
+	if attempts != 2 {
+		t.Fatalf("startup attempts = %d, want 2", attempts)
+	}
+	// Exercise the child rather than trusting a foreign health endpoint.
+	s.owner()
+}
+
 func startProcess(t *testing.T, pool *pgxpool.Pool, env environment) *service {
 	t.Helper()
-	public, private := freeAddresses(t)
+	return startProcessAttempt(t, pool, env, freeAddresses, time.Now().Add(startupLimit), 3)
+}
+
+func startProcessAttempt(t *testing.T, pool *pgxpool.Pool, env environment, addresses func(*testing.T) (string, string), deadline time.Time, remaining int) *service {
+	t.Helper()
+	public, private := addresses(t)
 	origin := "http://" + public
 	logPath := filepath.Join(t.TempDir(), "olp.log")
 	logFile, err := os.Create(logPath)
@@ -163,7 +193,7 @@ func startProcess(t *testing.T, pool *pgxpool.Pool, env environment) *service {
 		t.Fatal(err)
 	}
 	command := exec.Command(harness.Required(t, "OLP_TEST_BINARY"), "all")
-	command.Env = env.list(map[string]string{"OLP_LISTEN_ADDR": public, "OLP_OBSERVABILITY_LISTEN_ADDR": private, "OLP_PUBLIC_ORIGIN": origin})
+	command.Env = env.list(map[string]string{"OLP_LISTEN_ADDR": public, "OLP_OBSERVABILITY_LISTEN_ADDR": private, "OLP_PUBLIC_ORIGIN": origin, "OLP_LOG_LEVEL": "info"})
 	command.Stdout, command.Stderr = logFile, logFile
 	if err = command.Start(); err != nil {
 		t.Fatal(err)
@@ -192,12 +222,23 @@ func startProcess(t *testing.T, pool *pgxpool.Pool, env environment) *service {
 		}
 	})
 	client := http.Client{Timeout: time.Second}
-	deadline := time.Now().Add(startupLimit)
 	for time.Now().Before(deadline) {
 		select {
 		case err := <-exited:
+			log := dumpLog()
+			// Only address collisions are retried. Authentication, migration,
+			// configuration and other startup failures must remain visible.
+			if remaining > 1 && strings.Contains(log, "bind ") && strings.Contains(log, "listener:") && strings.Contains(log, "address already in use") {
+				return startProcessAttempt(t, pool, env, addresses, deadline, remaining-1)
+			}
 			t.Fatalf("olp exited during startup: %v\n%s", err, dumpLog())
 		default:
+		}
+		// A different process may have acquired the released private address.
+		// Its health response cannot establish that our child is ready.
+		if !strings.Contains(dumpLog(), `"msg":"listener started"`) {
+			time.Sleep(50 * time.Millisecond)
+			continue
 		}
 		response, err := client.Get("http://" + private + "/health/live")
 		if err == nil {
