@@ -54,7 +54,7 @@ func TestRuleConfigurationDefaults(t *testing.T) {
 		contract.NotificationEventRuntimeInstallFailed:      `{"cooldown_seconds":900}`,
 		contract.NotificationEventWorkerStale:               `{"cooldown_seconds":900}`,
 	} {
-		for _, configuration := range []string{"", "null", "{}"} {
+		for _, configuration := range []string{"", "null", "{}", want} {
 			t.Run(string(event)+"/"+configuration, func(t *testing.T) {
 				t.Parallel()
 				got, err := storedConfiguration(event, configuration)
@@ -88,6 +88,10 @@ func TestRuleConfigurationOverrides(t *testing.T) {
 			`{"window_seconds":300,"minimum_samples":20,"threshold":"1","recovery_threshold":"0","cooldown_seconds":900}`},
 		{"recovery only below default threshold", contract.NotificationEventProviderErrorRate, `{"recovery_threshold":"0.01"}`,
 			`{"window_seconds":300,"minimum_samples":20,"threshold":"0.1","recovery_threshold":"0.01","cooldown_seconds":900}`},
+		{"non-canonical thresholds", contract.NotificationEventProviderErrorRate, `{"threshold":"0.10","recovery_threshold":"0.050"}`,
+			`{"window_seconds":300,"minimum_samples":20,"threshold":"0.1","recovery_threshold":"0.05","cooldown_seconds":900}`},
+		{"integral credential spelling", contract.NotificationEventProviderCredentialFailing, `{"threshold":"3.0"}`,
+			`{"window_seconds":300,"minimum_samples":3,"threshold":"3","recovery_threshold":"2.4","cooldown_seconds":900}`},
 		{"credential failures", contract.NotificationEventProviderCredentialFailing, `{"threshold":"5","minimum_samples":10000}`,
 			`{"window_seconds":300,"minimum_samples":10000,"threshold":"5","recovery_threshold":"4","cooldown_seconds":900}`},
 		{"latency every field", contract.NotificationEventRouteLatency,
@@ -152,6 +156,8 @@ func TestRuleConfigurationRejects(t *testing.T) {
 		{"negative threshold", contract.NotificationEventRouteLatency, `{"threshold":"-5"}`},
 		{"non-decimal threshold", contract.NotificationEventRouteLatency, `{"threshold":"fast"}`},
 		{"threshold above bound", contract.NotificationEventRouteLatency, `{"threshold":"1000000001"}`},
+		{"padded threshold", contract.NotificationEventRouteLatency, `{"threshold":"0000000000000000000000000000001000"}`},
+		{"padded recovery", contract.NotificationEventRouteLatency, `{"recovery_threshold":"0000000000000000000000000000000800"}`},
 		{"threshold too precise", contract.NotificationEventProviderErrorRate, `{"threshold":"0.0000000000001"}`},
 		{"error rate above one", contract.NotificationEventProviderErrorRate, `{"threshold":"1.5"}`},
 		{"recovery equal to threshold", contract.NotificationEventProviderErrorRate, `{"threshold":"0.5","recovery_threshold":"0.5"}`},

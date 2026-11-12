@@ -29,8 +29,44 @@ type signalReader func(ctx context.Context, tx pgx.Tx, rule signalRule, env sign
 type signalSource struct {
 	read            signalReader
 	recoversMissing bool
-	recoveredAs     contract.NotificationEvent
-	recoveryOnly    bool
+	announce        announce
+}
+
+type announce interface {
+	announces(signalChange) bool
+	event(rule contract.NotificationEvent, change signalChange) contract.NotificationEvent
+}
+
+type triggersAndRecoveries struct{}
+
+type recoveriesAs struct{ recovery contract.NotificationEvent }
+
+type recoveriesOnly struct{}
+
+func (triggersAndRecoveries) announces(change signalChange) bool { return change != quiet }
+
+func (triggersAndRecoveries) event(rule contract.NotificationEvent, _ signalChange) contract.NotificationEvent {
+	return rule
+}
+
+func (recoveriesAs) announces(change signalChange) bool { return change != quiet }
+
+func (a recoveriesAs) event(rule contract.NotificationEvent, change signalChange) contract.NotificationEvent {
+	if change == recovered {
+		return a.recovery
+	}
+	return rule
+}
+
+func (recoveriesOnly) announces(change signalChange) bool { return change == recovered }
+
+func (recoveriesOnly) event(rule contract.NotificationEvent, _ signalChange) contract.NotificationEvent {
+	return rule
+}
+
+type evaluatedRule struct {
+	rule     signalRule
+	evaluate evaluator
 }
 
 func (w *deliveryWorker) claimSignals(ctx context.Context, tx pgx.Tx) (int, error) {
@@ -45,7 +81,7 @@ func (w *deliveryWorker) claimSignals(ctx context.Context, tx pgx.Tx) (int, erro
 	env := signalEnv{now: now, fleet: w.Fleet, reference: w.Catalog}
 	claimed := 0
 	for _, rule := range rules {
-		count, err := events[rule.event].evaluate(w, ctx, tx, rule, env)
+		count, err := rule.evaluate(w, ctx, tx, rule.rule, env)
 		if err != nil {
 			return 0, err
 		}
@@ -54,13 +90,13 @@ func (w *deliveryWorker) claimSignals(ctx context.Context, tx pgx.Tx) (int, erro
 	return claimed, nil
 }
 
-func readEvaluatedRules(ctx context.Context, tx pgx.Tx) ([]signalRule, error) {
+func readEvaluatedRules(ctx context.Context, tx pgx.Tx) ([]evaluatedRule, error) {
 	rows, err := tx.Query(ctx, signalRulesSQL, evaluatedEvents, evaluatedRuleLimit+1)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	rules := []signalRule{}
+	rules := []evaluatedRule{}
 	for rows.Next() {
 		if len(rules) == evaluatedRuleLimit {
 			return nil, errSignalLimit
@@ -70,15 +106,17 @@ func readEvaluatedRules(ctx context.Context, tx pgx.Tx) ([]signalRule, error) {
 		if err := rows.Scan(&rule.id, &rule.event, &rule.name, &rule.project, &raw, &rule.createdAt); err != nil {
 			return nil, err
 		}
-		if rule.configuration, err = events[rule.event].configuration.parse(raw); err != nil {
+		configuration, err := events[rule.event].configure(raw)
+		if err != nil {
 			return nil, err
 		}
-		rules = append(rules, rule)
+		rules = append(rules, evaluatedRule{rule: rule, evaluate: configuration.evaluate})
 	}
 	return rules, rows.Err()
 }
 
-func signals(source signalSource) evaluator {
+func signals(source signalSource, cooldownSeconds int) evaluator {
+	cooldown := time.Duration(cooldownSeconds) * time.Second
 	return func(w *deliveryWorker, ctx context.Context, tx pgx.Tx, rule signalRule, env signalEnv) (int, error) {
 		readings, err := source.read(ctx, tx, rule, env)
 		if errors.Is(err, errSignalUnavailable) {
@@ -92,7 +130,7 @@ func signals(source signalSource) evaluator {
 		claimed := 0
 		for _, signal := range readings {
 			seen[signal.subject] = true
-			count, err := w.claimSignal(ctx, tx, rule, source, signal, env.now)
+			count, err := w.claimSignal(ctx, tx, rule, source, cooldown, signal, env.now)
 			if err != nil {
 				return 0, err
 			}
@@ -101,12 +139,12 @@ func signals(source signalSource) evaluator {
 		if !source.recoversMissing {
 			return claimed, nil
 		}
-		recovered, err := w.recoverMissingSignals(ctx, tx, rule, source, seen, env.now)
+		recovered, err := w.recoverMissingSignals(ctx, tx, rule, source, cooldown, seen, env.now)
 		return claimed + recovered, err
 	}
 }
 
-func (w *deliveryWorker) recoverMissingSignals(ctx context.Context, tx pgx.Tx, rule signalRule, source signalSource, seen map[string]bool, now time.Time) (int, error) {
+func (w *deliveryWorker) recoverMissingSignals(ctx context.Context, tx pgx.Tx, rule signalRule, source signalSource, cooldown time.Duration, seen map[string]bool, now time.Time) (int, error) {
 	subjects, err := activeSignalSubjects(ctx, tx, rule.id)
 	if err != nil {
 		return 0, err
@@ -116,8 +154,8 @@ func (w *deliveryWorker) recoverMissingSignals(ctx context.Context, tx pgx.Tx, r
 		if seen[subject] {
 			continue
 		}
-		count, err := w.claimSignal(ctx, tx, rule, source, notificationSignal{
-			subject: subject, known: true,
+		count, err := w.claimSignal(ctx, tx, rule, source, cooldown, notificationSignal{
+			subject: subject, reading: observed{active: false},
 			evidence: map[string]any{"recovery_reason": "subject_no_longer_in_scope"},
 		}, now)
 		if err != nil {
@@ -150,25 +188,55 @@ func activeSignalSubjects(ctx context.Context, tx pgx.Tx, ruleID string) ([]stri
 	return subjects, rows.Err()
 }
 
-type signalTransition struct {
+type signalState struct {
 	active        bool
 	incident      int64
 	lastTriggerAt *time.Time
-	trigger       bool
-	recover       bool
 }
 
-func transitionSignal(active bool, incident int64, lastTriggerAt *time.Time, desired bool, now time.Time, cooldown time.Duration) (signalTransition, error) {
-	if desired && !active && incident == math.MaxInt64 {
+type signalChange int
+
+const (
+	quiet signalChange = iota
+	triggered
+	recovered
+)
+
+type signalTransition struct {
+	state  signalState
+	change signalChange
+}
+
+func transitionSignal(current signalState, r reading, now time.Time, cooldown time.Duration) (signalTransition, error) {
+	switch r := r.(type) {
+	case observed:
+		return current.toward(r.active, now, cooldown)
+	case measured:
+		return current.toward(r.band.breached(r.value, current.active), now, cooldown)
+	default:
+		return signalTransition{state: current}, nil
+	}
+}
+
+func (s signalState) toward(breaching bool, now time.Time, cooldown time.Duration) (signalTransition, error) {
+	cooling := s.lastTriggerAt != nil && now.Before(s.lastTriggerAt.Add(cooldown))
+	switch {
+	case !breaching && s.active:
+		return signalTransition{state: signalState{incident: s.incident, lastTriggerAt: s.lastTriggerAt}, change: recovered}, nil
+	case !breaching:
+		return signalTransition{state: s}, nil
+	case !s.active && s.incident == math.MaxInt64:
 		return signalTransition{}, errors.New("notification incident counter exhausted")
+	case cooling:
+		return signalTransition{state: signalState{active: true, incident: s.breachIncident(), lastTriggerAt: s.lastTriggerAt}}, nil
+	default:
+		return signalTransition{state: signalState{active: true, incident: s.breachIncident(), lastTriggerAt: &now}, change: triggered}, nil
 	}
-	next := signalTransition{active: desired, incident: incident, lastTriggerAt: lastTriggerAt, recover: active && !desired}
-	if desired && !active {
-		next.incident++
+}
+
+func (s signalState) breachIncident() int64 {
+	if s.active {
+		return s.incident
 	}
-	if desired && (lastTriggerAt == nil || !now.Before(lastTriggerAt.Add(cooldown))) {
-		next.trigger = true
-		next.lastTriggerAt = &now
-	}
-	return next, nil
+	return s.incident + 1
 }

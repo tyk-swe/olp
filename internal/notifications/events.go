@@ -1,6 +1,7 @@
 package notifications
 
 import (
+	"encoding/json"
 	"maps"
 	"slices"
 
@@ -10,68 +11,84 @@ import (
 type eventSpec struct {
 	subject       subjectShape
 	projectScoped bool
-	configuration configurationSpec
-	evaluate      evaluator
+	configure     func(json.RawMessage) (configured, error)
 }
 
-var (
-	cooldownOnly   = configurationSpec{fields: []string{"cooldown_seconds"}}
-	measuredFields = []string{"window_seconds", "minimum_samples", "threshold", "recovery_threshold", "cooldown_seconds"}
-)
+type configured struct {
+	canonical json.RawMessage
+	evaluate  evaluator
+}
+
+func evaluated[C any](resolve func(json.RawMessage) (C, error), evaluate func(C) evaluator) func(json.RawMessage) (configured, error) {
+	return func(raw json.RawMessage) (configured, error) {
+		config, err := resolve(raw)
+		if err != nil {
+			return configured{}, err
+		}
+		canonical, err := json.Marshal(config)
+		return configured{canonical: canonical, evaluate: evaluate(config)}, err
+	}
+}
+
+func stored[C any](resolve func(json.RawMessage) (C, error)) func(json.RawMessage) (configured, error) {
+	return evaluated(resolve, func(C) evaluator { return nil })
+}
+
+func cooldownSignals(source signalSource) func(json.RawMessage) (configured, error) {
+	return evaluated(resolveCooldown, func(c cooldownConfig) evaluator { return signals(source, c.CooldownSeconds) })
+}
 
 var events = map[contract.NotificationEvent]eventSpec{
-	contract.NotificationEventBudgetThreshold:     {subject: budgetSubject},
-	contract.NotificationEventProviderGrantLapsed: {},
-	contract.NotificationEventKeyExpiring:         {subject: keySubject, configuration: configurationSpec{fields: []string{"lead_time_seconds"}}},
+	contract.NotificationEventBudgetThreshold:     {subject: budgetSubject, configure: stored(resolveNothing)},
+	contract.NotificationEventProviderGrantLapsed: {configure: stored(resolveNothing)},
+	contract.NotificationEventKeyExpiring:         {subject: keySubject, configure: stored(resolveLeadTime)},
 	contract.NotificationEventReportSpend: {
 		projectScoped: true,
-		configuration: configurationSpec{fields: []string{"period"}},
-		evaluate:      claimSpendReport,
+		configure:     evaluated(resolveSpendReport, func(c spendReportConfig) evaluator { return c.claim }),
 	},
 	contract.NotificationEventBudgetExhausted: {
 		projectScoped: true,
-		configuration: cooldownOnly,
-		evaluate:      signals(signalSource{read: budgetExhaustedSignals, recoversMissing: true}),
+		configure:     cooldownSignals(signalSource{read: budgetExhaustedSignals, recoversMissing: true, announce: triggersAndRecoveries{}}),
 	},
 	contract.NotificationEventProviderErrorRate: {
-		configuration: configurationSpec{fields: measuredFields, threshold: &thresholdSpec{trigger: "0.1", recovery: "0.05", check: atMostOne}},
-		evaluate:      signals(signalSource{read: providerErrorSignals, recoversMissing: true}),
+		configure: evaluated(errorRateDefaults.resolve, func(c measuredConfig) evaluator {
+			return signals(signalSource{read: providerErrorSignals(c), recoversMissing: true, announce: triggersAndRecoveries{}}, c.CooldownSeconds)
+		}),
 	},
 	contract.NotificationEventProviderCredentialFailing: {
-		configuration: configurationSpec{fields: measuredFields, threshold: &thresholdSpec{trigger: "3", recovery: "0", minimumSamples: 3, check: failureCount}},
-		evaluate:      signals(signalSource{read: credentialFailureSignals}),
+		configure: evaluated(credentialDefaults.resolve, func(c measuredConfig) evaluator {
+			return signals(signalSource{read: credentialFailureSignals(c), announce: triggersAndRecoveries{}}, c.CooldownSeconds)
+		}),
 	},
 	contract.NotificationEventRouteLatency: {
 		projectScoped: true,
-		configuration: configurationSpec{fields: append(slices.Clone(measuredFields), "metric"), threshold: &thresholdSpec{trigger: "1000", recovery: "800"}},
-		evaluate:      signals(signalSource{read: routeLatencySignals, recoversMissing: true}),
+		configure: evaluated(resolveLatency, func(c latencyConfig) evaluator {
+			return signals(signalSource{read: routeLatencySignals(c), recoversMissing: true, announce: triggersAndRecoveries{}}, c.CooldownSeconds)
+		}),
 	},
 	contract.NotificationEventModelRetirement: {
 		projectScoped: true,
-		configuration: configurationSpec{fields: []string{"lead_days", "cooldown_seconds"}},
-		evaluate:      signals(signalSource{read: retirementSignals, recoversMissing: true}),
+		configure: evaluated(resolveRetirement, func(c retirementConfig) evaluator {
+			return signals(signalSource{read: retirementSignals(c), recoversMissing: true, announce: triggersAndRecoveries{}}, c.CooldownSeconds)
+		}),
 	},
 	contract.NotificationEventProviderCircuitOpen: {
-		configuration: cooldownOnly,
-		evaluate:      signals(signalSource{read: circuitSignals, recoversMissing: true, recoveredAs: contract.NotificationEventProviderCircuitClosed}),
+		configure: cooldownSignals(signalSource{read: circuitSignals, recoversMissing: true, announce: recoveriesAs{recovery: contract.NotificationEventProviderCircuitClosed}}),
 	},
 	contract.NotificationEventProviderCircuitClosed: {
-		configuration: cooldownOnly,
-		evaluate:      signals(signalSource{read: circuitSignals, recoversMissing: true, recoveryOnly: true}),
+		configure: cooldownSignals(signalSource{read: circuitSignals, recoversMissing: true, announce: recoveriesOnly{}}),
 	},
 	contract.NotificationEventRuntimeInstallFailed: {
-		configuration: cooldownOnly,
-		evaluate:      signals(signalSource{read: runtimeInstallSignals}),
+		configure: cooldownSignals(signalSource{read: runtimeInstallSignals, announce: triggersAndRecoveries{}}),
 	},
 	contract.NotificationEventWorkerStale: {
-		configuration: cooldownOnly,
-		evaluate:      signals(signalSource{read: workerStaleSignals}),
+		configure: cooldownSignals(signalSource{read: workerStaleSignals, announce: triggersAndRecoveries{}}),
 	},
 }
 
 var evaluatedEvents = slices.Sorted(func(yield func(string) bool) {
 	for event, spec := range maps.All(events) {
-		if spec.evaluate != nil && !yield(string(event)) {
+		if defaults, err := spec.configure(nil); err == nil && defaults.evaluate != nil && !yield(string(event)) {
 			return
 		}
 	}

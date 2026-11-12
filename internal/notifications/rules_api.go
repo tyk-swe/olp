@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -106,13 +107,9 @@ func parseRule(input ruleInput, projectID *string) (ruleTarget, error) {
 	if spec.subject == noSubject && projectID != nil && !spec.projectScoped {
 		return ruleTarget{}, access.Invalid("project_id", "This notification event is installation-wide.")
 	}
-	configuration, err := spec.configuration.parse(input.Configuration)
+	configuration, err := spec.configure(input.Configuration)
 	if err != nil {
 		return ruleTarget{}, access.Invalid("configuration", "The rule configuration is invalid for its event.")
-	}
-	canonical, err := json.Marshal(configuration)
-	if err != nil {
-		return ruleTarget{}, err
 	}
 	destinationID, err := access.ParseUUID(input.DestinationID)
 	if err != nil {
@@ -120,7 +117,7 @@ func parseRule(input ruleInput, projectID *string) (ruleTarget, error) {
 	}
 	return ruleTarget{
 		name: strings.TrimSpace(input.Name), projectID: projectID, event: event, subject: subject,
-		destinationID: destinationID, enabled: input.Enabled == nil || *input.Enabled, configuration: canonical,
+		destinationID: destinationID, enabled: input.Enabled == nil || *input.Enabled, configuration: configuration.canonical,
 	}, nil
 }
 
@@ -222,7 +219,7 @@ func checkReferences(ctx context.Context, tx pgx.Tx, t ruleTarget) error {
 }
 
 func enforceRuleCap(ctx context.Context, tx pgx.Tx, event contract.NotificationEvent) error {
-	if events[event].evaluate == nil {
+	if !slices.Contains(evaluatedEvents, string(event)) {
 		return nil
 	}
 	if _, err := tx.Exec(ctx, lockGenericRuleCreationSQL); err != nil {
