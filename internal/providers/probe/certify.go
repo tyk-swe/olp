@@ -20,7 +20,6 @@ import (
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
-// Certify uses a bounded live probe or authenticated native media discovery.
 func (p *Prober) Certify(ctx context.Context, t Target, model string, tuple connection.Capability, maxEventBytes int) error {
 	if !ConfigurationCertifiable(t.Connection.Transport(), tuple) || !t.Connection.Transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode) {
 		return &Failure{Reason: CapabilityUnavailable, Detail: "This connector cannot certify the requested tuple."}
@@ -266,7 +265,6 @@ func validBatchListing(data []byte, field string, optional bool) bool {
 	return json.Unmarshal(array, &items) == nil && items != nil
 }
 
-// certifyListedModel proves the credential can discover the media model.
 func (p *Prober) certifyListedModel(ctx context.Context, t Target, model string) error {
 	models, err := p.ListModels(ctx, t)
 	if err != nil {

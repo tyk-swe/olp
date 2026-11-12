@@ -113,10 +113,8 @@ func publishedModelReply(m routing.RevisionModel) modelReply {
 
 func modelID(m modelReply) string { return m.ID }
 
-// prepare reads what an upstream call needs without holding the installation
-// lock: the provider, its etag precondition, and the enabled probe credential.
-// The caller's project scope is decided first, so a provider outside it answers
-// 404 before its precondition or credential is consulted.
+// The project scope is decided first, so a provider outside it answers 404
+// before its precondition or credential is consulted.
 func (s *Server) prepare(r *http.Request, p access.Principal, id string) (*record, probe.Target, error) {
 	tx, err := s.access.Pool.Begin(r.Context())
 	if err != nil {
@@ -173,10 +171,8 @@ func (s *Server) probe(r *http.Request, p access.Principal) (access.Reply, error
 	return access.Detail(map[string]any{"provider_id": id, "succeeded": succeeded, "checked_at": at, "probe_type": "models", "detail": detail, "discovered_models": discovered}, current.ETag), nil
 }
 
-// recordProbe stores a probe outcome on the provider and audits it in one
-// transaction. The upstream call ran without the installation lock, so the
-// caller's authority and project reach are decided again under it before
-// anything is written.
+// The upstream call ran without the installation lock, so authority and
+// project reach are decided again under it before anything is written.
 func (s *Server) recordProbe(r *http.Request, action, id string, at time.Time, succeeded bool, detail string) error {
 	_, err := access.Transact(s.access, r, changeable(r.Context(), id), func(tx pgx.Tx, p access.Principal, _ *record) (access.Reply, error) {
 		if err := storeProbe(r.Context(), tx, id, at, succeeded, detail); err != nil {
@@ -187,7 +183,6 @@ func (s *Server) recordProbe(r *http.Request, action, id string, at time.Time, s
 	return err
 }
 
-// auditOutcome maps a probe result onto the audit outcome vocabulary.
 func auditOutcome(succeeded bool) string {
 	if succeeded {
 		return "success"
@@ -539,7 +534,6 @@ func storeProbe(ctx context.Context, tx pgx.Tx, id string, at time.Time, succeed
 	return err
 }
 
-// credentialFor prefers the enabled default slot, then another enabled slot.
 func (s *Server) credentialFor(ctx context.Context, tx pgx.Tx, p *record) ([]byte, *credentialState, error) {
 	slots, err := loadSlots(ctx, tx, p.ID)
 	if err != nil {

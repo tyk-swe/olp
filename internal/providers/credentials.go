@@ -58,9 +58,7 @@ type rotateRequest struct {
 	CredentialReference *secretstore.Reference `json:"credential_reference,omitempty"`
 }
 
-// rotate validates a new credential against the upstream, records it as the
-// next version, and selects it for the draft. Published revisions keep the
-// version they were activated with.
+// Published revisions keep the credential version they were activated with.
 func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.access
 	id, err := access.IDParam(r, "provider_id")
@@ -172,8 +170,7 @@ type credentialChange struct {
 	RuntimeGeneration *release.Published `json:"runtime_generation"`
 }
 
-// referencing locks a provider for a change that may store an external
-// credential reference, which only settings administrators may name.
+// Only settings administrators may name an external credential reference.
 func referencing(ctx context.Context, id string, source credentialSource) func(pgx.Tx, access.Principal) (*record, error) {
 	lock := changeable(ctx, id)
 	return func(tx pgx.Tx, p access.Principal) (*record, error) {
@@ -184,9 +181,8 @@ func referencing(ctx context.Context, id string, source credentialSource) func(p
 	}
 }
 
-// revoke marks a credential version unusable everywhere: drafts, published
-// revisions, and gateways that learn it through the authority refresh. It
-// ends the version's grant, if it has one.
+// Revoking makes a version unusable in drafts, published revisions and the
+// gateways that learn it through the authority refresh, and ends its grant.
 func (s *Server) revoke(r *http.Request, _ access.Principal) (access.Reply, error) {
 	return s.mutation(r, "provider.credential.revoke", nil, func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
 		credentialID, err := access.IDParam(r, "credential_id")
@@ -375,9 +371,7 @@ func (s *Server) readCredential(ctx context.Context, q access.Queryer, id string
 	return s.access.Keys.Read(ctx, q, s.access.Installation, id, secrets.ProviderCredential)
 }
 
-// BindDraftCredential stages an already stored destination credential. A new
-// identity clears slot evidence and advances both mutation preconditions; a
-// repeated binding is a no-op. The caller owns authorization and transaction.
+// The caller owns authorization and the transaction.
 func (s *Server) BindDraftCredential(ctx context.Context, tx pgx.Tx, providerID, slotID, credentialID string) error {
 	tag, err := tx.Exec(ctx, `UPDATE olp.provider_slots SET credential_id=$3,validated_at=NULL,validated_fingerprint=NULL
   WHERE provider_id=$1 AND id=$2 AND credential_id IS DISTINCT FROM $3::uuid`, providerID, slotID, credentialID)

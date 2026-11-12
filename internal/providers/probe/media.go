@@ -21,13 +21,10 @@ import (
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
-// Media certification proves a model serves a media operation without
-// billed work wherever the upstream allows: the official OpenAI connector's
-// model listing, or a reviewed vendor's listing or account probe, beside the
-// closed media wire contract its codec supplies. Custom hosts cannot use
-// unrelated chat success or a self-reported model list as media evidence.
-// Vertex, Bedrock and Azure offer no costless proof, so their media
-// certifies by the smallest real call of the operation.
+// Media certifies without billed work wherever the upstream allows it. Custom
+// hosts cannot use unrelated chat success or a self-reported model list as
+// media evidence. Vertex, Bedrock and Azure offer no costless proof, so their
+// media certifies by the smallest real call of the operation.
 func (p *Prober) certifyNativeMedia(ctx context.Context, t Target, model string, tuple connection.Capability) error {
 	vendor := providerconfig.Value(t.Connection.Document().Options.VendorID)
 	if mediaByCall(t.Connection.Document().Kind, vendor, tuple.Operation) {
@@ -184,11 +181,9 @@ func decodeMediaProbe(response media.Response, data []byte) *media.Error {
 	return nil
 }
 
-// certifyVendorMedia proves a reviewed vendor's media operation without
-// billed work: the reviewed codec proves the wire, and the model's place in
-// the vendor's listing, or else the vendor's account probe, proves the
-// credential reaches it. Without a listing, the model is the operator's
-// declaration, as for any upstream that lists none.
+// The reviewed codec proves the wire, and the vendor's listing or else its
+// account probe proves the credential reaches the model. Without a listing, the
+// model is the operator's declaration.
 func (p *Prober) certifyVendorMedia(ctx context.Context, t Target, model, vendor string) error {
 	contract, _ := vendors.Lookup(vendor)
 	if contract.AccountProbe == "" {

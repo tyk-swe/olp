@@ -15,7 +15,6 @@ import (
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
-// ListModels asks the upstream for its model identifiers.
 func (p *Prober) ListModels(ctx context.Context, t Target) ([]string, error) {
 	models, err := p.ListModelFacts(ctx, t)
 	if err != nil {
@@ -33,20 +32,14 @@ type DiscoveredModel struct {
 	Metadata      map[string]json.RawMessage
 }
 
-// A modelListing is how an upstream lists its models: a GET of path, which
-// extends the endpoint unless it is an absolute URL, answered with a JSON
-// object whose models field holds an array of model objects, each with its ID
-// in its id field and display name in its display field. A listing with a
-// cursor continues while a page holds the next page's cursor in that field,
-// and, when it names a more field, reports there that another page follows.
-// The next request sends the cursor back in the parameter query parameter.
+// A path that is an absolute URL replaces the endpoint. A listing with a cursor
+// continues while a page holds the next cursor and, when it names a more
+// field, while that field reports another page.
 type modelListing struct {
 	path, models, id, display string
 	cursor, more, parameter   string
 }
 
-// listingFor returns how the configured upstream lists its models, or false
-// when it has no listing and operators declare its models.
 func listingFor(t Target) (modelListing, bool, error) {
 	if t.Connection.Transport().RetrievalBackend() != "" {
 		return modelListing{}, false, nil
@@ -55,7 +48,6 @@ func listingFor(t Target) (modelListing, bool, error) {
 	case connectors.KindAzureOpenAI, connectors.KindVertexAI:
 		return modelListing{}, false, nil
 	case connectors.KindPlugin:
-		// A plugin profile declares the listing, if its upstream has one.
 		if t.Connection.Transport().Plugin == nil {
 			return modelListing{}, false, nil
 		}
@@ -105,7 +97,6 @@ func (p *Prober) ListModelFacts(ctx context.Context, t Target) ([]DiscoveredMode
 		return nil, err
 	}
 	if !discovery {
-		// Each declared model is its own bounded upstream probe.
 		ctx, cancel := Budget(ctx)
 		defer cancel()
 		names := append([]string{}, t.ProbeModels...)
@@ -202,7 +193,6 @@ func (p *Prober) ListModelFacts(ctx context.Context, t Target) ([]DiscoveredMode
 	}
 }
 
-// next returns the cursor of the page after page, or "" when page is the last.
 func (l modelListing) next(page map[string]json.RawMessage) (string, error) {
 	if l.cursor == "" {
 		return "", nil

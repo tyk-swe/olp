@@ -15,11 +15,6 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
-// credentialFits refuses a slot whose credential version the provider can't
-// authenticate with (Configuration.Authenticates): a version with a grant
-// beneath it for a provider that takes a static credential, a pasted one for
-// a provider that authenticates with a grant, or a grant another build or
-// profile of the plugin enrolled.
 func (row slotRow) credentialFits(cfg connection.Configuration) error {
 	switch {
 	case row.CredentialID == nil || !cfg.CredentialRequired() || cfg.Authenticates(row.CredentialPlugin, row.CredentialProfile):
@@ -32,9 +27,7 @@ func (row slotRow) credentialFits(cfg connection.Configuration) error {
 	return access.Fail(422, "credential_mismatch", "Slot "+row.Name+" holds a grant that another build or profile of the plugin enrolled. A grant serves only its enrolling build and profile; re-enroll the slot's grant through this provider's profile.")
 }
 
-// observedPrincipal is the principal the slot observes: the one grant
-// enrollment observed for its credential version, unless that version serves
-// no more because it is revoked or its grant lapsed.
+// A revoked version or a lapsed grant observes no principal.
 func (row slotRow) observedPrincipal() string {
 	if row.CredentialRevoked || row.CredentialLapsed {
 		return ""
@@ -42,8 +35,6 @@ func (row slotRow) observedPrincipal() string {
 	return row.CredentialPrincipal
 }
 
-// observedFacts are the grant facts the slot's credential version serves
-// with, cleared like its principal when the version serves no more.
 func (row slotRow) observedFacts() map[string]string {
 	if row.CredentialRevoked || row.CredentialLapsed {
 		return nil
@@ -51,11 +42,9 @@ func (row slotRow) observedFacts() map[string]string {
 	return row.CredentialFacts
 }
 
-// onePrincipal refuses to activate credential slots that observe different
-// principals or serving environments (their grants' facts), naming each
-// slot's principal. Every slot of a provider revision serves as one upstream
-// account and environment, so re-enrolling that account is a credential
-// rotation and several accounts are pooled through several providers.
+// Every slot of a provider revision serves as one upstream account and
+// environment, so re-enrolling that account is a credential rotation and
+// several accounts are pooled through several providers.
 func onePrincipal(slots []slotRow, cfg connection.Configuration) error {
 	if !cfg.Grant() {
 		return nil

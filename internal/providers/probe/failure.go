@@ -39,8 +39,7 @@ const (
 	UpstreamUnavailable          Reason = "upstream_unavailable"
 )
 
-// Failure is a classified, content-free upstream failure. Its detail never
-// carries upstream text, which may echo credentials.
+// A Failure detail never carries upstream text, which may echo credentials.
 type Failure struct {
 	Reason Reason
 	Detail string

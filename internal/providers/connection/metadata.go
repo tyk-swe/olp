@@ -10,11 +10,9 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
-// MergeDiscoveredFacts places upstream-listed facts under the operator's
-// metadata for model, reporting false when nothing is to be stored: facts that
-// would leave the configuration invalid, or a new entry beyond the metadata
-// bound, so discovery can never make the saved configuration fail its own
-// validation.
+// Discovery stores nothing that would make the saved configuration fail its
+// own validation, so facts that are invalid or exceed the metadata bound are
+// dropped and reported as false.
 func MergeDiscoveredFacts(models map[string]json.RawMessage, model string, discovered map[string]json.RawMessage) (json.RawMessage, bool, error) {
 	stored, known := models[model]
 	if len(discovered) == 0 || !known && len(models) >= maxModelEntries {

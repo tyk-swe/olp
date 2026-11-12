@@ -11,8 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
-// StoreNetworkCredential uses the existing encryption authority, but a distinct
-// provider-owned reference table so API credential slots cannot select TLS keys.
+// A table of its own keeps API credential slots from selecting TLS keys.
 func (s *Server) StoreNetworkCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error) {
 	if len(secret) > maxCredentialBytes {
 		return "", access.Invalid("credential", "Network credentials must fit within 64 KiB.")

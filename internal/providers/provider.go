@@ -64,8 +64,7 @@ func lockProvider(ctx context.Context, tx pgx.Tx, id string) (*record, error) {
 	return scanRecord(tx.QueryRow(ctx, recordQuery+" FOR UPDATE", id))
 }
 
-// visibleProvider loads a provider p may see; one outside p's scope is
-// missing.
+// A provider outside p's scope is reported missing.
 func visibleProvider(ctx context.Context, q access.Queryer, p access.Principal, id string) (*record, error) {
 	current, err := readProvider(ctx, q, id)
 	if err != nil {
@@ -77,21 +76,18 @@ func visibleProvider(ctx context.Context, q access.Queryer, p access.Principal, 
 	return current, nil
 }
 
-// touch records a draft change and returns the new etag.
 func touch(ctx context.Context, tx pgx.Tx, id string) (string, error) {
 	etag := access.NewID()
 	_, err := tx.Exec(ctx, "UPDATE olp.providers SET etag=$2,draft_dirty=true,updated_at=now() WHERE id=$1", id, etag)
 	return etag, err
 }
 
-// touchSlots records a draft change to the slot set and returns the new etag.
 func touchSlots(ctx context.Context, tx pgx.Tx, id string) (string, error) {
 	etag := access.NewID()
 	_, err := tx.Exec(ctx, "UPDATE olp.providers SET etag=$2,slots_etag=$3,draft_dirty=true,updated_at=now() WHERE id=$1", id, etag, access.NewID())
 	return etag, err
 }
 
-// credentialState is what the detail view needs about a credential.
 type credentialState struct {
 	ID      *string
 	Version *int
@@ -245,8 +241,8 @@ func (s *Server) mutation(r *http.Request, action string, input any, fn func(ctx
 	})
 }
 
-// changeable locks a provider for a caller who may change its project. A
-// stored replay discloses the provider, so the check also guards replays.
+// A stored replay discloses the provider, so the project check also guards
+// replays.
 func changeable(ctx context.Context, id string) func(pgx.Tx, access.Principal) (*record, error) {
 	return func(tx pgx.Tx, p access.Principal) (*record, error) {
 		current, err := lockProvider(ctx, tx, id)

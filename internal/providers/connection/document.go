@@ -16,16 +16,13 @@ import (
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
-// Limits is the connection quota configuration persisted for distributed limits enforcement.
 type Limits struct {
 	MaxConcurrency    *int64 `json:"max_concurrency"`
 	RequestsPerMinute *int64 `json:"requests_per_minute"`
 	TokensPerMinute   *int64 `json:"tokens_per_minute"`
-	// Supply carries the quota's spend caps and per-priority shares.
 	routing.Supply
 }
 
-// Options carries connector options and per-model metadata.
 type Options struct {
 	TuningDatasetURIPrefixes []string                         `json:"tuning_dataset_uri_prefixes,omitempty"`
 	DocumentURIPrefixes      []string                         `json:"document_uri_prefixes,omitempty"`
@@ -42,18 +39,15 @@ type Options struct {
 	// Commitment is the provisioned capacity the connection pays for: priced
 	// attempts on it bill nothing extra and share the amount across each UTC
 	// calendar period by list-cost weight.
-	Commitment *routing.Commitment `json:"commitment,omitempty"`
-	// PluginOptions holds a plugin provider's values for the options its
-	// plugin profile declares, by option name.
-	PluginOptions map[string]string `json:"plugin_options,omitempty"`
+	Commitment    *routing.Commitment `json:"commitment,omitempty"`
+	PluginOptions map[string]string   `json:"plugin_options,omitempty"`
 	// HealthProbe opts the connection into active health probing, which
 	// sends billable synthetic requests.
 	HealthProbe *routing.HealthProbe `json:"health_probe,omitempty"`
 }
 
-// Configuration is the stored connection configuration; it is the contract's
-// ProviderConfiguration verbatim. A plugin provider pins its plugin's digest
-// as the profile revision.
+// Configuration is the contract's ProviderConfiguration verbatim. A plugin
+// provider pins its plugin's digest as the profile revision.
 type Configuration struct {
 	providerconfig.Identity[*string]
 	Options Options `json:"options"`
@@ -143,7 +137,6 @@ func defaultVendor(kind string, vendorID *string) *string {
 
 func vendorMissing(vendorID *string) bool { return vendorID == nil || *vendorID == "" }
 
-// PluginDigest is the digest of the plugin a plugin provider pins, or "".
 func (c Configuration) PluginDigest() string {
 	if c.Kind != connectors.KindPlugin {
 		return ""
@@ -151,20 +144,14 @@ func (c Configuration) PluginDigest() string {
 	return c.ProfileRevision
 }
 
-// CredentialRequired reports whether the auth mode needs a secret.
 func (c Configuration) CredentialRequired() bool { return connectors.SecretRequired(c.AuthMode) }
 
-// Grant reports whether the provider authenticates with a grant, whose
-// credential versions only grant enrollment creates, never a pasted secret.
+// Only grant enrollment creates the credential versions of a grant provider.
 func (c Configuration) Grant() bool { return c.AuthMode == connectors.AuthGrant }
 
-// Authenticates reports whether a provider that takes a credential can
-// authenticate with a credential version recording pluginDigest and profileID:
-// the build and profile whose enrollment created it, or empty for a pasted
-// credential. A grant serves only its enrolling build and profile, since a
+// A grant serves only the plugin build and profile that enrolled it, because a
 // plugin gets only its own grant and a build's name is only what its manifest
-// claims; moving a provider to another build therefore takes a new grant
-// enrollment for each of its slots.
+// claims. Moving a provider to another build takes a new enrollment per slot.
 func (c Configuration) Authenticates(pluginDigest, profileID string) bool {
 	if c.Grant() {
 		return profileID != "" && pluginDigest != "" && pluginDigest == c.ProfileRevision && profileID == c.ProfileID
@@ -172,8 +159,7 @@ func (c Configuration) Authenticates(pluginDigest, profileID string) bool {
 	return pluginDigest == "" && profileID == ""
 }
 
-// Fingerprint identifies everything that affects how the gateway reaches the
-// upstream. Certification evidence is retained only while it is unchanged.
+// Certification evidence is kept only while the fingerprint is unchanged.
 func (c Configuration) Fingerprint() string {
 	parts := slices.Concat([]any{c.Kind, c.AuthMode, c.Endpoint, c.CloudRegion, c.CloudProject, c.Deployment, c.APIVersion, c.Options.CredentialHeaders, c.Options.ParameterDefaults, c.Options.Models, c.Options.VendorID},
 		when(c.ProfileID != "", c.ProfileID, c.ProfileRevision, c.Options.SemanticHeaders, c.Options.QuerySettings, c.Options.OperationDefaults, c.Options.Bindings),

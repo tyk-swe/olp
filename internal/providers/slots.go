@@ -42,8 +42,8 @@ type slotRow struct {
 	CredentialLapsed    bool
 	GrantGeneration     int64
 	CredentialPrincipal string
-	// CredentialFacts are the grant facts the credential version reported at
-	// enrollment — what it serves as beyond its principal.
+	// CredentialFacts are what the credential version reported serving as at
+	// enrollment, beyond its principal.
 	CredentialFacts      map[string]string
 	Restrictions         SlotRestrictions
 	Limits               connection.Limits
@@ -221,9 +221,7 @@ type slotHealth struct {
 	Usage                     *quotaUsage `json:"usage"`
 }
 
-// quotaTimeout bounds one console read of shared quota state. Valkey holds no
-// part of the stored slot list, so a slow store costs the page its live
-// counters rather than the page itself.
+// A slow quota store costs the slot list its live counters, never the list.
 const quotaTimeout = 2 * time.Second
 
 type quotaUsage struct {
@@ -241,11 +239,8 @@ type slotQuota struct {
 	coolingDown *bool
 }
 
-// quotas reads the live per-slot counters and the counters of the shared
-// provider connection. Every value it cannot read stays nil: the stored list
-// is complete without them, so an unreachable or malformed quota store is
-// reported to the operator and shown to the console as unknown, never as an
-// idle zero and never as a failed request.
+// A counter that cannot be read stays nil, so the console shows it as unknown
+// instead of an idle zero or a failed request.
 func (s *Server) quotas(ctx context.Context, providerID string, slots []slotRow, published map[string]*string, generations map[string]int64) (map[string]slotQuota, *quotaUsage) {
 	if s.quota == nil {
 		return nil, nil
@@ -281,8 +276,6 @@ func (s *Server) quotas(ctx context.Context, providerID string, slots []slotRow,
 	return live, usageOf(connection)
 }
 
-// quotaUnavailable reports a quota read that failed without changing what the
-// caller answers.
 func (s *Server) quotaUnavailable(err error) {
 	s.log.Warn("shared provider quota state is unavailable", "error", err)
 }

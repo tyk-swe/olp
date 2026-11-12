@@ -71,8 +71,7 @@ type Preset struct {
 	DocumentationURL   string `json:"documentation_url"`
 	// Discovery reports that the upstream lists its models; without it the
 	// connection test needs a declared probe model.
-	Discovery bool `json:"discovery"`
-	// Placeholder marks an endpoint the operator replaces with their own.
+	Discovery   bool `json:"discovery"`
 	Placeholder bool `json:"placeholder"`
 	// ProfileID and ProfileRevision name the profile onboarding selects, so
 	// the provider can serve strict routes. The server never infers it.
@@ -92,8 +91,7 @@ type Vendor struct {
 	Endpoint         *string  `json:"endpoint"`
 	// Dialects are the generation dialects the vendor documents; profiles in
 	// other generation dialects are refused for it.
-	Dialects []string `json:"dialects"`
-	// UnsupportedParameters are request fields refused for the vendor.
+	Dialects              []string `json:"dialects"`
 	UnsupportedParameters []string `json:"unsupported_parameters"`
 }
 
@@ -144,8 +142,6 @@ var kinds = []Kind{
 		Fields:    []Field{}},
 }
 
-// Kinds lists the connector kinds, each with the reviewed vendor contracts that
-// offer themselves as its presets.
 func Kinds() []ListedKind {
 	out := make([]ListedKind, 0, len(kinds))
 	for _, k := range kinds {
@@ -179,8 +175,6 @@ func presetsOf(kind string) []Preset {
 	return out
 }
 
-// Vendors is what /provider-vendors publishes: every reviewed vendor contract,
-// authenticated as its connector kind allows.
 func Vendors() []Vendor {
 	out := make([]Vendor, 0, len(vendors.All()))
 	for _, c := range vendors.All() {

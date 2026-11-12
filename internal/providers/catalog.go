@@ -21,8 +21,6 @@ import (
 // the provider's configuration, so certified capabilities return to declared:
 // the catalog never certifies anything.
 
-// canonicalModel is the canonical model a provider model's facts declare, by
-// which the catalog also matches it.
 func canonicalModel(metadata json.RawMessage) string {
 	var facts struct {
 		CanonicalModel string `json:"canonical_model"`
@@ -32,22 +30,17 @@ func canonicalModel(metadata json.RawMessage) string {
 }
 
 type catalogSuggestion struct {
-	ModelID       string `json:"model_id"`
-	UpstreamModel string `json:"upstream_model"`
-	CatalogModel  string `json:"catalog_model"`
-	MatchedBy     string `json:"matched_by"`
-	// Facts are what accepting the suggestion stores.
-	Facts routing.ModelMetadata `json:"facts"`
-	// Changes name the stored facts accepting would change.
-	Changes      []string               `json:"changes"`
-	Capabilities catalog.Capabilities   `json:"capabilities"`
-	Lifecycle    *catalog.LifecycleView `json:"lifecycle"`
-	// Conflict explains why the suggestion cannot be accepted.
-	Conflict *string `json:"conflict"`
+	ModelID       string                 `json:"model_id"`
+	UpstreamModel string                 `json:"upstream_model"`
+	CatalogModel  string                 `json:"catalog_model"`
+	MatchedBy     string                 `json:"matched_by"`
+	Facts         routing.ModelMetadata  `json:"facts"`
+	Changes       []string               `json:"changes"`
+	Capabilities  catalog.Capabilities   `json:"capabilities"`
+	Lifecycle     *catalog.LifecycleView `json:"lifecycle"`
+	Conflict      *string                `json:"conflict"`
 }
 
-// catalogFacts are the operator facts a catalog model supports, tagged with
-// the catalog's digest and the time the vendor's page was observed.
 // Deployment, region, quantization and privacy declarations describe the
 // operator's account and are never taken from the catalog.
 func catalogFacts(signed *catalog.Signed, m *catalog.Model) routing.ModelMetadata {
@@ -59,8 +52,6 @@ func catalogFacts(signed *catalog.Signed, m *catalog.Model) routing.ModelMetadat
 	return facts
 }
 
-// applyCatalogFacts overlays catalog facts on a model's stored facts, keeping
-// every fact the catalog does not state, and reports which facts changed.
 func applyCatalogFacts(stored json.RawMessage, facts routing.ModelMetadata) (json.RawMessage, []string, error) {
 	current, err := connection.ModelFacts(stored)
 	if err != nil {
@@ -100,16 +91,14 @@ func sameFact(a, b json.RawMessage) bool {
 	return reflect.DeepEqual(x, y)
 }
 
-// privacyEvidence reports facts whose source attests a privacy declaration:
-// overwriting their source would make the catalog look like that evidence.
+// Overwriting the source of a privacy declaration would make the catalog look
+// like its evidence.
 func privacyEvidence(stored json.RawMessage) bool {
 	var facts routing.ModelMetadata
 	_ = json.Unmarshal(stored, &facts)
 	return facts.DataCollection != nil || facts.ZeroDataRetention != nil
 }
 
-// suggestionsFor matches a provider's models against the catalog under the
-// provider's vendor.
 func suggestionsFor(signed *catalog.Signed, cfg connection.Configuration, models []storedModel) ([]catalogSuggestion, error) {
 	vendorID := providerconfig.Value(cfg.Options.VendorID)
 	out := []catalogSuggestion{}
@@ -162,9 +151,8 @@ type acceptCatalogRequest struct {
 	UpstreamModels []string `json:"upstream_models"`
 }
 
-// acceptCatalogSuggestions stores the catalog's facts for the named models as
-// operator facts. The caller names the catalog it reviewed, so an upgrade
-// between review and acceptance cannot store facts nobody saw.
+// The caller names the catalog it reviewed, so an upgrade between review and
+// acceptance cannot store facts nobody saw.
 func (s *Server) acceptCatalogSuggestions(r *http.Request, _ access.Principal) (access.Reply, error) {
 	var input acceptCatalogRequest
 	if err := access.Decode(r, &input); err != nil {

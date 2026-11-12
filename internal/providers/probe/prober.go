@@ -61,9 +61,8 @@ type Target struct {
 	ProbeModels []string
 }
 
-// Budget bounds a sequence of probes by the caller's deadline less a reserve
-// for recording the outcome: one Timeout, or half the remaining time when less
-// than two remain.
+// Budget keeps part of the caller's deadline in reserve for recording the
+// outcome.
 func Budget(ctx context.Context) (context.Context, context.CancelFunc) {
 	deadline, ok := ctx.Deadline()
 	if !ok {
@@ -73,9 +72,8 @@ func Budget(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithDeadline(ctx, deadline.Add(-max(reserve, 0)))
 }
 
-// Client is the connection the provider's traffic leaves through, scoped to
-// its transport and credential so a changed network credential never reuses
-// a pooled connection.
+// Clients are scoped to the transport and network credential, so a changed
+// network credential never reuses a pooled connection.
 func (p *Prober) Client(ctx context.Context, t Target) (*http.Client, error) {
 	document := t.Connection.Document()
 	if document.Options.Network == nil && document.ProfileID == "" {

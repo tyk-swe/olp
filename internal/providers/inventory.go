@@ -129,7 +129,6 @@ func (s *Server) generations(r *http.Request, principal access.Principal) (acces
 	return access.ListReply(items, page), nil
 }
 
-// profiles lists the built-in profiles and those of usable plugins.
 func (s *Server) profiles(r *http.Request, _ access.Principal) (access.Reply, error) {
 	pluginProfiles, err := plugins.Profiles(r.Context(), s.access.Pool, s.unconfined)
 	if err != nil {

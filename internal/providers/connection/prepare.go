@@ -356,8 +356,6 @@ func quota(p Prepared) error {
 	return ValidLimits("configuration.options.limits", *p.document.Options.Limits)
 }
 
-// ValidLimits checks a connection or slot quota: its windows, its spend caps,
-// and that priority shares divide at least one window.
 func ValidLimits(field string, q Limits) error {
 	if !validQuota(q) {
 		return invalid(field, fmt.Sprintf("Use positive limits: requests and concurrency at most %d, tokens at most %d.", math.MaxInt32, limits.MaxCounter))

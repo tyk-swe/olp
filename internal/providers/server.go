@@ -22,10 +22,8 @@ import (
 	"github.com/tyk-swe/olp/internal/release"
 )
 
-// QuotaSource reports the shared quota state a provider connection and its
-// credential slots are in right now. *fleet.State implements it. The field
-// stays nil where no Valkey is configured, and the console is then told the
-// live counters are unknown rather than shown a zero it would read as idle.
+// Quotas is nil where no Valkey is configured, and the console then shows the
+// live counters as unknown instead of an idle zero.
 type QuotaSource interface {
 	Usage(ctx context.Context, lookup string) (fleet.Usage, error)
 	Cooling(ctx context.Context, scopes ...string) (bool, error)
@@ -66,7 +64,6 @@ func New(deps Deps) *Server {
 	}
 }
 
-// Register mounts the provider surface.
 func (s *Server) Register(mux *http.ServeMux) {
 	s.access.Route(mux, "GET /api/v1/provider-profiles", s.profiles)
 	s.access.Route(mux, "GET /api/v1/operation-dialects", s.operationDialects)

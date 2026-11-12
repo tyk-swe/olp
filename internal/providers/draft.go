@@ -117,8 +117,7 @@ func (s *Server) updateProvider(r *http.Request, _ access.Principal) (access.Rep
 	})
 }
 
-// restoreDraft rewrites the draft configuration and models from a revision.
-// Credentials are never restored; the draft keeps its current slots.
+// Credentials are never restored, so the draft keeps its current slots.
 func (s *Server) restoreDraft(ctx context.Context, tx pgx.Tx, current *record, v *revisionRow) (string, error) {
 	if err := preserveCredentialBoundary(ctx, tx, current.ID, current.Connection.Document(), v.Configuration); err != nil {
 		return "", err
@@ -322,10 +321,7 @@ func (s *Server) createDraft(ctx context.Context, tx pgx.Tx, p access.Principal,
 	return createdProvider{CreatedDraft: created, Kind: configuration.Kind}, nil
 }
 
-// StoreDraftConfiguration owns the provider configuration/evidence transition
-// after a caller has acquired the installation lock and current authorization.
-// Both ordinary edits and promotion use the stored full configuration as the
-// evidence boundary; a portable document cannot stand in for that identity.
+// The caller must hold the installation lock and current authorization.
 func (s *Server) StoreDraftConfiguration(ctx context.Context, tx pgx.Tx, id, name string, prepared connection.Prepared) error {
 	next := prepared.Document()
 	var encoded []byte
@@ -426,8 +422,8 @@ func (s *Server) CreateDraft(ctx context.Context, tx pgx.Tx, draft Draft) (Creat
 	return created, nil
 }
 
-// DraftModel is declared portable model intent. Certification belongs to the
-// destination's probe/activation workflow, never to imported intent.
+// Imported models are never certified. The destination certifies them through
+// its own probe and activation workflow.
 type DraftModel struct {
 	UpstreamModel string                  `json:"upstream_model"`
 	DisplayName   string                  `json:"display_name"`
@@ -435,8 +431,6 @@ type DraftModel struct {
 	Capabilities  []connection.Capability `json:"capabilities"`
 }
 
-// DraftSlot binds validated slot intent to destination-owned identities.
-// A caller resolves credentials and local restrictions before staging.
 type DraftSlot struct {
 	ID           string
 	Default      bool
@@ -450,11 +444,8 @@ type DraftSlot struct {
 	Limits       connection.Limits
 }
 
-// StageDraftInventory owns replacement of a validated provider inventory under
-// the caller's authorized installation transaction. Published model/credential
-// identities survive staging; retained slots preserve pending enrollments and
-// fingerprint-bound validation. Omitted slots discard their encrypted pending
-// enrollment state. Every replacement advances parent/collection preconditions.
+// Published model and credential identities survive staging, and retained
+// slots keep their pending enrollments and fingerprint-bound validation.
 func (s *Server) StageDraftInventory(ctx context.Context, tx pgx.Tx, providerID string, models []DraftModel, slots []DraftSlot) error {
 	desired := make([]string, 0, len(models))
 	for _, model := range models {

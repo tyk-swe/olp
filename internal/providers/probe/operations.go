@@ -60,10 +60,9 @@ func ConfigurationCertifiable(transport connectors.Config, tuple connection.Capa
 	return certifiable(transport.Kind, transport.VendorID, tuple)
 }
 
-// DefaultTuple is the unary tuple a provider without model discovery
-// certifies its declared models with. An explicit profile that cannot serve
-// the default tuple, such as a dedicated embeddings or rerank dialect, is
-// probed with the first unary tuple it can certify.
+// An explicit profile that cannot serve the default tuple, such as a dedicated
+// embeddings or rerank dialect, is probed with the first unary tuple it can
+// certify.
 func DefaultTuple(transport connectors.Config) connection.Capability {
 	if duplexcontract.IsProfile(transport.ProfileID) {
 		if tuple := (connection.Capability{Operation: "realtime", Surface: "native", Mode: "realtime"}); Probeable(transport, tuple) {
@@ -92,8 +91,6 @@ func DefaultTuple(transport connectors.Config) connection.Capability {
 	return tuple
 }
 
-// Operation is the operation that certifies a declared model of the
-// configured vendor: the one its contract names, or generation.
 func Operation(transport connectors.Config) string {
 	if contract, ok := vendors.Lookup(transport.VendorID); ok && contract.ProbeOperation != "" {
 		return contract.ProbeOperation
@@ -227,11 +224,9 @@ func OptionsForKind(kind string) []connection.Capability {
 	return out
 }
 
-// Custom endpoints need a safe live probe; native media instead relies on the
-// official connector contract and authenticated discovery.
-// reviewedMedia reports a reviewed vendor's media operation through its own
-// connector, which certifies costlessly: by its model listing or its account
-// probe, beside its codec contract. No reviewed vendor streams media.
+// Custom endpoints need a safe live probe. A reviewed vendor's media certifies
+// costlessly through its own connector's model listing or account probe, and
+// no reviewed vendor streams media.
 func reviewedMedia(kind, vendor, operation string) bool {
 	contract, ok := vendors.Lookup(vendor)
 	if !ok || contract.Connector != kind || !contract.Serves(operation) {

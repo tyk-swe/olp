@@ -11,8 +11,6 @@ import (
 	"github.com/tyk-swe/olp/internal/retainedapi"
 )
 
-// certifyRetained proves a retained family with one authenticated,
-// read-only collection request, mirroring the agent-resource probe.
 func (p *Prober) certifyRetained(ctx context.Context, t Target, model string, tuple connection.Capability) error {
 	if tuple.Operation == "retrieval" && t.Connection.Transport().RetrievalBackend() != "" {
 		return p.certifyRetrieval(ctx, t, model)
@@ -110,7 +108,6 @@ func (p *Prober) certifyAgentResources(ctx context.Context, t Target, model stri
 		return &Failure{Reason: ProviderProtocolError, Detail: "The provider returned an invalid agent collection."}
 	}
 	items, present := source.Root().Lookup("agents")
-	// Protobuf JSON can omit an empty repeated field.
 	if source.Root().Kind() != oif.Object || present && items.Kind() != oif.Array {
 		return &Failure{Reason: ProviderProtocolError, Detail: "The provider returned an invalid agent collection."}
 	}
