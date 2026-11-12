@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -239,7 +240,7 @@ func (s *Server) generateLabel(ctx context.Context, x *call, slug, text string) 
 // cannot finish planning until the label is known. It shares the caller's
 // admission permit, awaiting it before any upstream work.
 // Keyless evaluations share the installation, organization and project budgets.
-func (s *Server) admitClassifier(ctx context.Context, x *call) *Error {
+func (s *Server) admitClassifier(ctx context.Context, x *call) *fault.Error {
 	if e := s.awaitAdmission(ctx, x); e != nil {
 		return e
 	}
@@ -248,7 +249,7 @@ func (s *Server) admitClassifier(ctx context.Context, x *call) *Error {
 		return s.reserveSystemBudgets(ctx, x)
 	}
 	ttl := time.Duration(x.named().OverallTimeout) * time.Millisecond
-	var e *Error
+	var e *fault.Error
 	admitted := x.admissionAuthority(x.authority)
 	x.lease, e = s.deps.Admission.reserveKeyCosted(ctx, &admitted, x.clientSurface(), keyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), ttl, s.costReservation(x, x.authority), x.limitRoute())
 	return e

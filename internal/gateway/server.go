@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"mime"
@@ -19,7 +18,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/google/uuid"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/admission"
@@ -29,6 +27,7 @@ import (
 	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export/capture"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
@@ -265,7 +264,7 @@ func (s *Server) begin(w http.ResponseWriter, r *http.Request) request {
 	}
 	h := w.Header()
 	h.Set("X-Request-Id", id)
-	if requestSurface(r) == "anthropic" {
+	if fault.RequestSurface(r) == "anthropic" {
 		// The Anthropic SDKs report the request id of an error from this header.
 		h.Set("Request-Id", id)
 	}
@@ -305,7 +304,7 @@ func (s *Server) cors(w http.ResponseWriter, r *http.Request) {
 	h.Set("Access-Control-Allow-Origin", r.Header.Get("Origin"))
 	h.Add("Vary", "Origin")
 	expose := exposedHeaders
-	if requestSurface(r) == "anthropic" {
+	if fault.RequestSurface(r) == "anthropic" {
 		expose = exposedHeadersAnthropic
 	}
 	h.Set("Access-Control-Expose-Headers", expose)
@@ -322,7 +321,7 @@ func (s *Server) preflight(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) unknown(w http.ResponseWriter, r *http.Request) {
 	s.begin(w, r)
-	writeError(w, notFoundError("not_found", "Unknown endpoint "+r.Method+" "+r.URL.Path+"."))
+	fault.WriteError(w, fault.NotFoundError("not_found", "Unknown endpoint "+r.Method+" "+r.URL.Path+"."))
 }
 
 func ClientIP(r *http.Request, trusted []netip.Prefix) string {
@@ -384,7 +383,7 @@ func (s *Server) admitLater(ctx context.Context) bool {
 // awaitAdmission waits for the slot a queued request reserved, in its
 // priority class and never past ctx's deadline, then answers the same 503 a
 // full pool does. A request admitted outright returns at once.
-func (s *Server) awaitAdmission(ctx context.Context, x *call) *Error {
+func (s *Server) awaitAdmission(ctx context.Context, x *call) *fault.Error {
 	permit := admission.PermitFromContext(ctx)
 	if !permit.Queued() {
 		return nil
@@ -393,7 +392,7 @@ func (s *Server) awaitAdmission(ctx context.Context, x *call) *Error {
 	if permit.Await(ctx, admission.ClassOf(x.priority), deadline) {
 		return nil
 	}
-	return overloaded
+	return fault.Overloaded
 }
 
 // release returns the slot admit took, whether that was the outer permit or
@@ -408,10 +407,10 @@ func (s *Server) release(ctx context.Context) {
 }
 
 // readBody bounds both the encoded and decoded body before parsing.
-func (s *Server) readBody(r *http.Request) ([]byte, *Error) {
+func (s *Server) readBody(r *http.Request) ([]byte, *fault.Error) {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
-		return nil, &Error{Status: http.StatusUnsupportedMediaType, Type: "invalid_request_error", Code: "unsupported_media_type", Message: "Request bodies must be application/json."}
+		return nil, &fault.Error{Status: http.StatusUnsupportedMediaType, Type: "invalid_request_error", Code: "unsupported_media_type", Message: "Request bodies must be application/json."}
 	}
 	limit := s.cfg.MaxBodyBytes
 	encoded := &io.LimitedReader{R: r.Body, N: limit + 1}
@@ -429,7 +428,7 @@ func (s *Server) readBody(r *http.Request) ([]byte, *Error) {
 		defer gz.Close()
 		reader = io.LimitReader(gz, limit+1)
 	default:
-		return nil, &Error{Status: http.StatusUnsupportedMediaType, Type: "invalid_request_error", Code: "unsupported_content_encoding", Message: "Only identity and gzip request encodings are supported."}
+		return nil, &fault.Error{Status: http.StatusUnsupportedMediaType, Type: "invalid_request_error", Code: "unsupported_content_encoding", Message: "Only identity and gzip request encodings are supported."}
 	}
 	data, err := io.ReadAll(reader)
 	// Check the wire cap even when gzip has decoded a smaller body or reports
@@ -446,16 +445,16 @@ func (s *Server) readBody(r *http.Request) ([]byte, *Error) {
 	return data, nil
 }
 
-func bodyTooLarge() *Error {
-	return &Error{Status: http.StatusRequestEntityTooLarge, Type: "invalid_request_error", Code: "request_too_large", Message: "The request body exceeds the configured limit."}
+func bodyTooLarge() *fault.Error {
+	return &fault.Error{Status: http.StatusRequestEntityTooLarge, Type: "invalid_request_error", Code: "request_too_large", Message: "The request body exceeds the configured limit."}
 }
 
-func bodyReadError(err error) *Error {
+func bodyReadError(err error) *fault.Error {
 	var timeout net.Error
 	if errors.As(err, &timeout) && timeout.Timeout() {
-		return &Error{Status: http.StatusRequestTimeout, Type: "invalid_request_error", Code: "request_timeout", Message: "The request body was not received within the deadline."}
+		return &fault.Error{Status: http.StatusRequestTimeout, Type: "invalid_request_error", Code: "request_timeout", Message: "The request body was not received within the deadline."}
 	}
-	return invalidRequest("invalid_request", "The request body could not be read.", nil)
+	return fault.InvalidRequest("invalid_request", "The request body could not be read.", nil)
 }
 
 // routingHeader carries per-request routing preferences and the admission
@@ -467,7 +466,7 @@ const routingHeader = "X-OLP-Routing"
 // admission class: the key's own priority unless the header asks for another
 // within the key's ceiling. Asking above it is refused like any other budget
 // increase.
-func routingControls(r *http.Request, policy keyauthority.KeyPolicy) (*routing.Preferences, string, *Error) {
+func routingControls(r *http.Request, policy keyauthority.KeyPolicy) (*routing.Preferences, string, *fault.Error) {
 	preferences, e := routingPreferences(r)
 	if e != nil {
 		return nil, "", e
@@ -478,32 +477,32 @@ func routingControls(r *http.Request, policy keyauthority.KeyPolicy) (*routing.P
 	requestedPriority, ceiling := *preferences.Priority, policy.PriorityCeiling()
 	if priority.Rank(requestedPriority) < priority.Rank(ceiling) {
 		param := routingHeader
-		return nil, "", invalidRequest("priority_increase_forbidden", "This API key may request priority "+ceiling+" at most.", &param)
+		return nil, "", fault.InvalidRequest("priority_increase_forbidden", "This API key may request priority "+ceiling+" at most.", &param)
 	}
 	return preferences, requestedPriority, nil
 }
 
-func routingPreferences(r *http.Request) (*routing.Preferences, *Error) {
+func routingPreferences(r *http.Request) (*routing.Preferences, *fault.Error) {
 	values := r.Header.Values("X-OLP-Routing")
 	if len(values) == 0 {
 		return nil, nil
 	}
 	param := "X-OLP-Routing"
 	if len(values) != 1 {
-		return nil, invalidRequest("invalid_request", "Provide exactly one X-OLP-Routing header.", &param)
+		return nil, fault.InvalidRequest("invalid_request", "Provide exactly one X-OLP-Routing header.", &param)
 	}
 	p, err := routing.ParsePreferences([]byte(values[0]))
 	if err != nil {
-		return nil, invalidRequest("invalid_request", err.Error(), &param)
+		return nil, fault.InvalidRequest("invalid_request", err.Error(), &param)
 	}
 	return p, nil
 }
-func requestError(err error) *Error {
+func requestError(err error) *fault.Error {
 	var guard guardrails.Failure
 	if errors.As(err, &guard) {
 		return guardrailError(guard)
 	}
-	if gatewayError, ok := errors.AsType[*Error](err); ok {
+	if gatewayError, ok := errors.AsType[*fault.Error](err); ok {
 		return gatewayError
 	}
 	var contract interface {
@@ -518,18 +517,18 @@ func requestError(err error) *Error {
 		if code == "target_capability" && requirement == "source_control_mapping" {
 			// Preserve the established ingress error for an unmapped control;
 			// the planner and inspector retain its precise requirement/category.
-			return invalidRequest("unsupported_parameter", message, param)
+			return fault.InvalidRequest("unsupported_parameter", message, param)
 		}
-		return invalidRequest(code, message, param)
+		return fault.InvalidRequest(code, message, param)
 	}
 	if re, ok := errors.AsType[*wire.RequestError](err); ok {
 		var param *string
 		if re.Param != "" {
 			param = &re.Param
 		}
-		return invalidRequest(re.Code, re.Message, param)
+		return fault.InvalidRequest(re.Code, re.Message, param)
 	}
-	return invalidRequest("invalid_request", err.Error(), nil)
+	return fault.InvalidRequest("invalid_request", err.Error(), nil)
 }
 
 // noteCostExceeded remembers that a leg this request planned excluded a
@@ -546,20 +545,20 @@ func (x *call) noteCostExceeded(plan routing.Plan) {
 
 // costLimitExceeded is the refusal a request ends on when a leg it planned
 // excluded a non-shadow target for its maximum cost.
-func costLimitExceeded() *Error {
-	return invalidRequest("cost_limit_exceeded", "Every candidate exceeds the request's maximum cost.", func() *string { p := "max_cost"; return &p }())
+func costLimitExceeded() *fault.Error {
+	return fault.InvalidRequest("cost_limit_exceeded", "Every candidate exceeds the request's maximum cost.", func() *string { p := "max_cost"; return &p }())
 }
 
-func selectionError(err error, model string) *Error {
+func selectionError(err error, model string) *fault.Error {
 	if se, ok := errors.AsType[*routing.SelectionError](err); ok {
 		switch se.Code {
 		case routing.RouteNotFound:
-			return modelNotFound(model)
+			return fault.ModelNotFound(model)
 		case routing.OperationNotSupported:
-			return invalidRequest("invalid_request", "The model `"+model+"` does not allow this operation.", nil)
+			return fault.InvalidRequest("invalid_request", "The model `"+model+"` does not allow this operation.", nil)
 		}
 	}
-	return serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider is currently eligible to serve `"+model+"`.")
+	return fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider is currently eligible to serve `"+model+"`.")
 }
 
 const requestBodyTimeout = 15 * time.Second
@@ -570,18 +569,18 @@ func (s *Server) inference(family wire.Format) http.HandlerFunc {
 func (s *Server) inferenceOperation(family wire.Format, dialect string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		x := &call{request: s.begin(w, r), family: family, actor: "api_key"}
-		if dialect == "" && requestSurface(r) == "gemini" {
+		if dialect == "" && fault.RequestSurface(r) == "gemini" {
 			// Gemini embeddings match OpenAI embedding capabilities but
 			// speak Gemini on the wire.
 			x.ingress = "gemini"
 		}
-		writeError := func(w http.ResponseWriter, e *Error) {
+		writeError := func(w http.ResponseWriter, e *fault.Error) {
 			if x.strict() && x.dispatched && e.Status >= 500 {
 				copy := *e
 				copy.NoRetry = true
 				e = &copy
 			}
-			writeSurfaceError(w, e, x.clientSurface())
+			fault.WriteSurfaceError(w, e, x.clientSurface())
 		}
 		x.semanticHeaders = semanticHeaders(r.Header)
 		query, queryErr := url.ParseQuery(r.URL.RawQuery)
@@ -603,14 +602,14 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 		// A context timeout alone cannot interrupt a blocked socket read.
 		rc := http.NewResponseController(w)
 		if err := rc.SetReadDeadline(time.Now().Add(requestBodyTimeout)); err != nil {
-			e := serverError(http.StatusInternalServerError, "internal_error", "The request could not be read.")
+			e := fault.ServerError(http.StatusInternalServerError, "internal_error", "The request could not be read.")
 			x.failure, status = e, e.Status
 			writeError(w, e)
 			return
 		}
 		if !s.admitLater(r.Context()) {
-			x.failure, status = overloaded, overloaded.Status
-			writeError(w, overloaded)
+			x.failure, status = fault.Overloaded, fault.Overloaded.Status
+			writeError(w, fault.Overloaded)
 			return
 		}
 		defer s.release(r.Context())
@@ -682,7 +681,7 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 		}
 		x.generation.parsed, x.generation.approval, err = stripWorkflowApproval(parsed)
 		if err != nil {
-			e = invalidRequest("invalid_request", "The workflow approval could not be removed from the request.", nil)
+			e = fault.InvalidRequest("invalid_request", "The workflow approval could not be removed from the request.", nil)
 			x.failure, status = e, e.Status
 			writeError(w, e)
 			return
@@ -734,7 +733,7 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 				return
 			}
 		} else if len(x.generation.approval) > 0 {
-			e := permissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
+			e := fault.PermissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
 			x.failure, status = e, e.Status
 			writeError(w, e)
 			return
@@ -780,7 +779,7 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 		if x.workflow != nil && x.workflow.runID == "" {
 			runID, err := s.deps.WorkflowRuns.Start(ctx, authority, x.named().ID, x.named().RevisionID)
 			if err != nil {
-				x.failure = serverError(http.StatusServiceUnavailable, "tool_execution_unavailable", "The workflow run could not be reserved.")
+				x.failure = fault.ServerError(http.StatusServiceUnavailable, "tool_execution_unavailable", "The workflow run could not be reserved.")
 				status = x.failure.Status
 				writeError(w, x.failure)
 				return
@@ -788,9 +787,9 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			x.workflow.runID = runID
 		}
 		if parsed.Stream && x.workflow == nil {
-			sw := &streamWriter{w: w, family: family, x: x}
+			sw := &fault.StreamWriter{W: w, Family: family, Headers: streamedHeaders{x}}
 			x.generation.emit = func(frame []byte) error {
-				err := sw.emit(frame)
+				err := sw.Emit(frame)
 				if err == nil {
 					x.captureCacheFrame(frame)
 					x.delivered(s.now())
@@ -798,7 +797,7 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 				return err
 			}
 			out = s.executeModelStep(ctx, x, x.generation.parsed, x.authority)
-			status = sw.finish(out)
+			status = sw.Finish(out.err, out.cancelled)
 			return
 		}
 		if x.workflow != nil {
@@ -817,7 +816,7 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			if parsed.Stream {
 				frames, err := workflowPauseFrames(family, x.named().Slug, x.request.accountingID(), out.approval, int(s.cfg.MaxEventBytes), int(s.cfg.MaxResponseBytes))
 				if err != nil {
-					out.err = serverError(http.StatusBadGateway, "invalid_tool_response", "The approval response could not be prepared.")
+					out.err = fault.ServerError(http.StatusBadGateway, "invalid_tool_response", "The approval response could not be prepared.")
 					status = out.err.Status
 					writeError(w, out.err)
 					return
@@ -837,8 +836,8 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			return
 		}
 		if parsed.Stream && x.workflow != nil {
-			sw := &streamWriter{w: w, family: family, x: x}
-			if err := sw.emit(x.workflow.finalFrames); err != nil {
+			sw := &fault.StreamWriter{W: w, Family: family, Headers: streamedHeaders{x}}
+			if err := sw.Emit(x.workflow.finalFrames); err != nil {
 				out.err = (&attemptFailure{class: classCancelled}).toError()
 				out.cancelled = true
 			} else {
@@ -846,11 +845,11 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 				x.facts[len(x.facts)-1].Committed = true
 				x.delivered(s.now())
 			}
-			status = sw.finish(out)
+			status = sw.Finish(out.err, out.cancelled)
 			return
 		}
-		if err := rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout)); err != nil {
-			out.err = serverError(http.StatusInternalServerError, "internal_error", "The response could not be written.")
+		if err := rc.SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout)); err != nil {
+			out.err = fault.ServerError(http.StatusInternalServerError, "internal_error", "The response could not be written.")
 			status = out.err.Status
 			writeError(w, out.err)
 			return
@@ -870,7 +869,7 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			identity := responseNativeIdentity(x, &x.facts[len(x.facts)-1], "")
 			mapped, err := s.mapGenerationResultReferences(r.Context(), x, identity, out.completion.Body)
 			if err != nil {
-				out.err = serverError(http.StatusBadGateway, "resource_affinity", "The provider returned an unowned result reference.")
+				out.err = fault.ServerError(http.StatusBadGateway, "resource_affinity", "The provider returned an unowned result reference.")
 				status = out.err.Status
 				writeError(w, out.err)
 				return
@@ -913,24 +912,24 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 // prepare resolves the route, lets authorize refuse the caller's use of it in
 // the caller's own terms, and ranks the eligible attempts against the pinned
 // snapshot.
-func (s *Server) prepare(ctx context.Context, x *call, authorize func(*routing.Route) *Error) *Error {
+func (s *Server) prepare(ctx context.Context, x *call, authorize func(*routing.Route) *fault.Error) *fault.Error {
 	x.mode = "unary"
 	if x.generation.parsed.Stream {
 		x.mode = "streaming"
 	}
 	route, ok := x.snapshot().FindRoute(x.generation.parsed.Route)
 	if !ok {
-		return modelNotFound(x.generation.parsed.Route)
+		return fault.ModelNotFound(x.generation.parsed.Route)
 	}
 	x.route = &route
 	if e := authorize(&route); e != nil {
 		return e
 	}
 	if route.ToolExecution != "gateway" && len(x.generation.approval) > 0 {
-		return permissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
+		return fault.PermissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
 	}
 	if route.ToolExecution == "gateway" && x.strict() {
-		return invalidRequest("tool_execution_strict_route", "Gateway tool execution requires a transformed route.", nil)
+		return fault.InvalidRequest("tool_execution_strict_route", "Gateway tool execution requires a transformed route.", nil)
 	}
 	if route.ToolExecution == "gateway" && !x.generation.toolsetsSelected {
 		x.mirrors = false
@@ -950,7 +949,7 @@ func (s *Server) prepare(ctx context.Context, x *call, authorize func(*routing.R
 		x.generation.toolsetsSelected = true
 	}
 	if route.ToolExecution == "gateway" && (s.deps.WorkflowRuns == nil || s.deps.WorkflowTools == nil || s.deps.Debits == nil) {
-		return serverError(http.StatusServiceUnavailable, "tool_execution_unavailable", "Gateway tool execution requires durable accounting and tool services.")
+		return fault.ServerError(http.StatusServiceUnavailable, "tool_execution_unavailable", "Gateway tool execution requires durable accounting and tool services.")
 	}
 	if x.pin != nil {
 		if e := s.pinAttempts(ctx, x); e != nil {
@@ -966,16 +965,16 @@ func (s *Server) prepare(ctx context.Context, x *call, authorize func(*routing.R
 // planCanonical plans x.route for a canonical request and applies the route's
 // content policy to it. A selector that delegates moves the request on to its
 // route, which is planned in turn.
-func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
+func (s *Server) planCanonical(ctx context.Context, x *call) *fault.Error {
 	if x.named().ToolExecution == "gateway" && x.route.Fidelity.Strict() {
-		return invalidRequest("tool_execution_strict_route", "Gateway tool execution requires a transformed route.", nil)
+		return fault.InvalidRequest("tool_execution_strict_route", "Gateway tool execution requires a transformed route.", nil)
 	}
 	if e := s.bindGuardrails(ctx, x); e != nil {
 		return e
 	}
 	if x.prompt != nil && x.route.Fidelity.Strict() {
 		param := "olp_prompt"
-		return invalidRequest("invalid_prompt", "Published prompts require a transformed route.", &param)
+		return fault.InvalidRequest("invalid_prompt", "Published prompts require a transformed route.", &param)
 	}
 	if e := s.checkRouteFidelity(ctx, x.route); e != nil {
 		return e
@@ -983,11 +982,11 @@ func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
 	if x.strict() {
 		if x.actor == "playground" {
 			param := "client_contract"
-			return invalidRequest("state_carrier", "This playground projection does not yet preserve the strict native interaction; use the admitted native API client.", &param)
+			return fault.InvalidRequest("state_carrier", "This playground projection does not yet preserve the strict native interaction; use the admitted native API client.", &param)
 		}
 		if x.semanticQueryInvalid {
 			param := "query"
-			return invalidRequest("invalid_request", "The query must be unambiguous URL-encoded parameters.", &param)
+			return fault.InvalidRequest("invalid_request", "The query must be unambiguous URL-encoded parameters.", &param)
 		}
 		if e := x.dropIngressQuery(); e != nil {
 			return e
@@ -1073,7 +1072,7 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 	req := s.begin(w, r)
 	authority, e := s.authenticate(r, "models_read")
 	if e != nil {
-		writeError(w, e)
+		fault.WriteError(w, e)
 		return
 	}
 	now := s.now()
@@ -1084,30 +1083,30 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 			data = append(data, s.modelObject(r.Context(), req.release, authority, &route))
 		}
 	}
-	writeJSON(w, map[string]any{"object": "list", "data": data})
+	fault.WriteJSON(w, map[string]any{"object": "list", "data": data})
 }
 
 func (s *Server) model(w http.ResponseWriter, r *http.Request) {
 	req := s.begin(w, r)
 	authority, e := s.authenticate(r, "models_read")
 	if e != nil {
-		writeError(w, e)
+		fault.WriteError(w, e)
 		return
 	}
 	slug := r.PathValue("model")
 	route, ok := req.release.Snapshot().FindRoute(slug)
 	if !ok || !authority.Allows("models_read", slug, route.ProjectID, s.now()) {
-		writeError(w, modelNotFound(slug))
+		fault.WriteError(w, fault.ModelNotFound(slug))
 		return
 	}
-	writeJSON(w, s.modelObject(r.Context(), req.release, authority, &route))
+	fault.WriteJSON(w, s.modelObject(r.Context(), req.release, authority, &route))
 }
 
 // WriteAdmissionOverload renders the surface's 503 rejection. The public
 // admission middleware calls it before routing, so the request context is the
 // only state available — writeSurfaceError applies the write deadline itself.
 func WriteAdmissionOverload(w http.ResponseWriter, r *http.Request) {
-	writeSurfaceError(w, overloaded, requestSurface(r))
+	fault.WriteSurfaceError(w, fault.Overloaded, fault.RequestSurface(r))
 }
 
 // WriteNotFound renders the surface's 404 for a request nothing routed.
@@ -1115,7 +1114,7 @@ func WriteAdmissionOverload(w http.ResponseWriter, r *http.Request) {
 // only partially claims, so an unknown endpoint or a method mismatch still
 // answers in the envelope the surface's other errors use.
 func WriteNotFound(w http.ResponseWriter, r *http.Request, surface string) {
-	writeSurfaceError(w, notFoundError("not_found", "Unknown endpoint "+r.Method+" "+r.URL.Path+"."), surface)
+	fault.WriteSurfaceError(w, fault.NotFoundError("not_found", "Unknown endpoint "+r.Method+" "+r.URL.Path+"."), surface)
 }
 
 // bindAuthority attaches the authenticated caller's authority to x and pins
@@ -1141,95 +1140,6 @@ func (s *Server) bindAuthority(x *call, authority keyauthority.Authority) {
 			}
 		}
 	}
-}
-
-func writeJSON(w http.ResponseWriter, body any) {
-	data, _ := json.Marshal(body)
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	w.Write(data)
-}
-
-// streamWriter commits the client response on the first upstream frame and
-// applies a per-frame write deadline so slow readers cannot pin upstream
-// work forever.
-type streamWriter struct {
-	w      http.ResponseWriter
-	family wire.Format
-	// x is the request being streamed, whose response headers are added as the
-	// stream is committed. A writer that only reports an error has none.
-	x         *call
-	committed bool
-}
-
-// responseWriteTimeout bounds unary delivery and each streamed frame.
-const responseWriteTimeout = 30 * time.Second
-
-// errClientWrite marks a frame the client could not or would not read; the
-// executor classifies it as client cancellation rather than provider failure.
-var errClientWrite = errors.New("client write failed")
-
-func (sw *streamWriter) emit(frame []byte) error {
-	rc := http.NewResponseController(sw.w)
-	if !sw.committed {
-		h := sw.w.Header()
-		h.Set("Content-Type", "text/event-stream; charset=utf-8")
-		if sw.family == wire.Bedrock {
-			h.Set("Content-Type", "application/vnd.amazon.eventstream")
-		}
-		h.Set("X-Accel-Buffering", "no")
-		if sw.x != nil {
-			sw.x.responseHeaders(h, true)
-		}
-		sw.w.WriteHeader(http.StatusOK)
-		sw.committed = true
-	}
-	rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
-	if _, err := sw.w.Write(frame); err != nil {
-		return fmt.Errorf("%w: %v", errClientWrite, err)
-	}
-	if err := rc.Flush(); err != nil {
-		return fmt.Errorf("%w: %v", errClientWrite, err)
-	}
-	return nil
-}
-
-// finish completes the client response and returns the status it carried.
-func (sw *streamWriter) finish(out *outcome) int {
-	if sw.x != nil {
-		sw.x.guardrailHeaders(sw.w.Header(), true, sw.committed)
-	}
-	if out.err == nil {
-		return http.StatusOK
-	}
-	if out.cancelled {
-		return 0 // the client is gone; nothing more can be delivered
-	}
-	if !sw.committed {
-		if out.err.Status > 0 {
-			writeSurfaceError(sw.w, out.err, sw.family.Surface())
-		}
-		return out.err.Status
-	}
-	// The response is committed: signal the failure in-band the way the
-	// official SDKs detect it, then end the stream without a completion
-	// marker so the client cannot mistake it for success.
-	if sw.family == wire.Bedrock {
-		headers := eventstream.Headers{}
-		headers.Set(":message-type", eventstream.StringValue("exception"))
-		headers.Set(":exception-type", eventstream.StringValue("modelStreamErrorException"))
-		payload, _ := json.Marshal(map[string]string{"message": out.err.Message, "code": out.err.Code})
-		http.NewResponseController(sw.w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
-		_ = eventstream.NewEncoder().Encode(sw.w, eventstream.Message{Headers: headers, Payload: payload})
-		_ = http.NewResponseController(sw.w).Flush()
-		return http.StatusOK
-	}
-	frame := "data: " + string(out.err.surfaceBody(sw.family.Surface())) + "\n\n"
-	if sw.family == wire.Responses || sw.family.Surface() == "anthropic" {
-		frame = "event: error\n" + frame
-	}
-	sw.emit([]byte(frame))
-	return http.StatusOK
 }
 
 func (s *Server) WorkflowResolver() WorkflowToolRunner {

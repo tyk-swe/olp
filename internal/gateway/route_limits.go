@@ -6,11 +6,12 @@ import (
 	"time"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 )
 
-func (a *Admission) reserveRouteLimits(ctx context.Context, authority *keyauthority.Authority, route string, estimate int64, ttl time.Duration, hold costReservation, costChecked *bool) (*admission.Lease, *Error) {
+func (a *Admission) reserveRouteLimits(ctx context.Context, authority *keyauthority.Authority, route string, estimate int64, ttl time.Duration, hold costReservation, costChecked *bool) (*admission.Lease, *fault.Error) {
 	policy := authority.Policy.RouteLimits[route]
 	if !policy.Limited() {
 		return nil, nil
@@ -39,7 +40,7 @@ func (a *Admission) reserveRouteLimits(ctx context.Context, authority *keyauthor
 		return nil, limitsUnavailable()
 	}
 	if policy.TokensPerMinute != nil && estimate > *policy.TokensPerMinute {
-		return nil, invalidRequest("request_exceeds_token_limit", "This request exceeds the API key token limit for this route.", nil)
+		return nil, fault.InvalidRequest("request_exceeds_token_limit", "This request exceeds the API key token limit for this route.", nil)
 	}
 	decision, cancel := context.WithTimeout(ctx, reserveTimeout)
 	defer cancel()

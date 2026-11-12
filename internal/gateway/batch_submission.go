@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -59,9 +60,9 @@ type batchWindow struct {
 	length time.Duration
 }
 
-var errUnsupportedBatchEndpoint = invalidRequest("unsupported_parameter", "The batch endpoint must be a supported operation.", new("endpoint"))
+var errUnsupportedBatchEndpoint = fault.InvalidRequest("unsupported_parameter", "The batch endpoint must be a supported operation.", new("endpoint"))
 
-func batchLineOperation(source oif.Document) (string, wire.LineOperation, *Error) {
+func batchLineOperation(source oif.Document) (string, wire.LineOperation, *fault.Error) {
 	value, present := source.Root().Lookup("endpoint")
 	endpoint, valid := value.Text()
 	if !present || !valid {
@@ -74,22 +75,22 @@ func batchLineOperation(source oif.Document) (string, wire.LineOperation, *Error
 	return endpoint, operation, nil
 }
 
-func batchCompletionWindow(source oif.Document, vendor string) (batchWindow, *Error) {
+func batchCompletionWindow(source oif.Document, vendor string) (batchWindow, *fault.Error) {
 	value, present := source.Root().Lookup("completion_window")
 	if !present {
 		return batchWindow{label: "24h", length: defaultBatchCompletionWindow}, nil
 	}
 	raw, valid := value.Text()
 	if !valid {
-		return batchWindow{}, invalidRequest("invalid_value", "completion_window must be a valid duration.", new("completion_window"))
+		return batchWindow{}, fault.InvalidRequest("invalid_value", "completion_window must be a valid duration.", new("completion_window"))
 	}
 	hours, ok := windowHours(raw)
 	if !ok {
-		return batchWindow{}, invalidRequest("invalid_value", "completion_window must use whole hours or days.", new("completion_window"))
+		return batchWindow{}, fault.InvalidRequest("invalid_value", "completion_window must use whole hours or days.", new("completion_window"))
 	}
 	minimum, maximum := completionWindowRange(vendor)
 	if hours < minimum || hours > maximum {
-		return batchWindow{}, invalidRequest("invalid_value", "completion_window is outside the provider's supported range.", new("completion_window"))
+		return batchWindow{}, fault.InvalidRequest("invalid_value", "completion_window is outside the provider's supported range.", new("completion_window"))
 	}
 	return batchWindow{label: raw, length: time.Duration(hours) * time.Hour}, nil
 }
@@ -123,9 +124,9 @@ func completionWindowRange(vendor string) (int, int) {
 	}
 }
 
-func (s *Server) beginBatch(ctx context.Context, x *call, authorityID string, p *pin, intent batchIntent) (batchSubmission, *Error) {
+func (s *Server) beginBatch(ctx context.Context, x *call, authorityID string, p *pin, intent batchIntent) (batchSubmission, *fault.Error) {
 	if s.deps.Batches == nil {
-		return batchSubmission{}, serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Batch settlement is not configured.")
+		return batchSubmission{}, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "Batch settlement is not configured.")
 	}
 	if p.provider.CredentialSource == "caller" {
 		return batchSubmission{}, policyUnavailable("target_capability", "Batch submissions require gateway-managed credentials so settlement can run after the request ends.")
@@ -134,20 +135,20 @@ func (s *Server) beginBatch(ctx context.Context, x *call, authorityID string, p 
 		Digest(secrets.DigestPurpose, string) []byte
 	})
 	if !ok {
-		return batchSubmission{}, serverError(http.StatusServiceUnavailable, "authority_unavailable", "Batch submission identity is unavailable.")
+		return batchSubmission{}, fault.ServerError(http.StatusServiceUnavailable, "authority_unavailable", "Batch submission identity is unavailable.")
 	}
 	now := s.now()
 	template, err := s.settlementTemplate(x, p, string(intent.surface), string(intent.operation), now)
 	if err != nil {
-		return batchSubmission{}, serverError(http.StatusServiceUnavailable, "accounting_unavailable", "Batch usage accounting could not be prepared.")
+		return batchSubmission{}, fault.ServerError(http.StatusServiceUnavailable, "accounting_unavailable", "Batch usage accounting could not be prepared.")
 	}
 	canonical, err := canonicalBatchJSON(intent.canonical)
 	if err != nil {
-		return batchSubmission{}, invalidRequest("invalid_json", "The batch submission must be valid JSON.", nil)
+		return batchSubmission{}, fault.InvalidRequest("invalid_json", "The batch submission must be valid JSON.", nil)
 	}
 	identity, err := json.Marshal([]string{authorityID, x.route.Slug, string(intent.surface), intent.kind, string(intent.operation), string(canonical)})
 	if err != nil {
-		return batchSubmission{}, serverError(http.StatusInternalServerError, "internal_error", "Batch submission identity could not be encoded.")
+		return batchSubmission{}, fault.ServerError(http.StatusInternalServerError, "internal_error", "Batch submission identity could not be encoded.")
 	}
 	resource := s.batchResource(x, authorityID, p, intent)
 	err = s.deps.Batches.BeginSubmission(ctx, batches.Intent{
@@ -157,11 +158,11 @@ func (s *Server) beginBatch(ctx context.Context, x *call, authorityID string, p 
 		CreatorDeadline: creatorDeadline(ctx, now, x.route.OverallTimeout), CloseAfter: now.Add(intent.window + 48*time.Hour),
 	})
 	if errors.Is(err, batches.ErrSubmissionInFlight) {
-		return batchSubmission{}, serverError(http.StatusConflict, "submission_unknown",
+		return batchSubmission{}, fault.ServerError(http.StatusConflict, "submission_unknown",
 			"An identical batch submission has an unknown outcome; list batches before retrying.")
 	}
 	if err != nil {
-		return batchSubmission{}, serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Batch submission intent could not be stored.")
+		return batchSubmission{}, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "Batch submission intent could not be stored.")
 	}
 	submission := batchSubmission{resource: resource, expected: intent.expected}
 	if intent.kind != resources.KindStrictBatch {
@@ -177,7 +178,7 @@ func (s *Server) beginBatch(ctx context.Context, x *call, authorityID string, p 
 	}
 	if err = s.deps.Resources.StageDurableContract(ctx, resource.UUID, payload, resource.ExpiresAt); err != nil {
 		s.abandonBatch(ctx, resource.UUID)
-		return batchSubmission{}, serverError(http.StatusInternalServerError, "internal_error", "The native batch contract could not be staged.")
+		return batchSubmission{}, fault.ServerError(http.StatusInternalServerError, "internal_error", "The native batch contract could not be staged.")
 	}
 	return submission, nil
 }
@@ -226,7 +227,7 @@ func (s *Server) abandonBatch(ctx context.Context, resourceID uuid.UUID) {
 	}
 }
 
-func (s *Server) sendBatch(ctx context.Context, x *call, p *pin, resourceID uuid.UUID, endpoint string, body []byte) ([]byte, *Error) {
+func (s *Server) sendBatch(ctx context.Context, x *call, p *pin, resourceID uuid.UUID, endpoint string, body []byte) ([]byte, *fault.Error) {
 	resp, failure := s.pinnedDo(ctx, x, p, http.MethodPost, endpoint, body, "application/json")
 	if failure != nil {
 		x.dispatched = failure.dispatched
@@ -245,7 +246,7 @@ func (s *Server) sendBatch(ctx context.Context, x *call, p *pin, resourceID uuid
 	return result, nil
 }
 
-func (s *Server) activateBatch(ctx context.Context, submission batchSubmission, accepted acceptedBatch) (*resources.Resource, *Error) {
+func (s *Server) activateBatch(ctx context.Context, submission batchSubmission, accepted acceptedBatch) (*resources.Resource, *fault.Error) {
 	commitCtx, stop := resourceCommitContext(ctx)
 	defer stop()
 	stored, err := s.commitAcceptedBatch(commitCtx, submission, accepted)
@@ -255,7 +256,7 @@ func (s *Server) activateBatch(ctx context.Context, submission batchSubmission, 
 	if markErr := s.deps.Batches.MarkUnknown(commitCtx, submission.resource.UUID, batches.ErrorSubmissionCommitUnavailable, s.now()); markErr != nil {
 		s.log.Warn("accepted batch intent could not be marked unknown", "resource_id", submission.resource.UUID, "error", markErr)
 	}
-	return nil, serverError(http.StatusBadGateway, "submission_unknown", "The provider accepted the batch, but its local state could not be confirmed.")
+	return nil, fault.ServerError(http.StatusBadGateway, "submission_unknown", "The provider accepted the batch, but its local state could not be confirmed.")
 }
 
 func (s *Server) commitAcceptedBatch(ctx context.Context, submission batchSubmission, accepted acceptedBatch) (*resources.Resource, error) {
@@ -290,16 +291,16 @@ func (s *Server) putAcceptedBatch(ctx context.Context, tx pgx.Tx, resource *reso
 	return s.deps.Resources.PutTx(ctx, tx, resource)
 }
 
-func (s *Server) requireBatchEvidenceSettled(ctx context.Context, resourceID uuid.UUID) *Error {
+func (s *Server) requireBatchEvidenceSettled(ctx context.Context, resourceID uuid.UUID) *fault.Error {
 	if s.deps.Batches == nil {
-		return serverError(http.StatusServiceUnavailable, "accounting_unavailable", "Batch settlement state is unavailable.")
+		return fault.ServerError(http.StatusServiceUnavailable, "accounting_unavailable", "Batch settlement state is unavailable.")
 	}
 	pending, err := s.deps.Batches.Pending(ctx, resourceID)
 	if err != nil {
-		return serverError(http.StatusServiceUnavailable, "accounting_unavailable", "Batch settlement state could not be read.")
+		return fault.ServerError(http.StatusServiceUnavailable, "accounting_unavailable", "Batch settlement state could not be read.")
 	}
 	if pending {
-		return serverError(http.StatusConflict, "batch_settlement_pending", "The resource is still needed for batch settlement; retry after settlement closes.")
+		return fault.ServerError(http.StatusConflict, "batch_settlement_pending", "The resource is still needed for batch settlement; retry after settlement closes.")
 	}
 	return nil
 }
@@ -425,11 +426,11 @@ func batchExpectedResults(body []byte) *int64 {
 	return &count
 }
 
-func (s *Server) batchSubmissionUnknown(ctx context.Context, resourceID uuid.UUID, message string) *Error {
-	return s.markBatchUnknown(ctx, resourceID, serverError(http.StatusBadGateway, "submission_unknown", message))
+func (s *Server) batchSubmissionUnknown(ctx context.Context, resourceID uuid.UUID, message string) *fault.Error {
+	return s.markBatchUnknown(ctx, resourceID, fault.ServerError(http.StatusBadGateway, "submission_unknown", message))
 }
 
-func (s *Server) markBatchUnknown(ctx context.Context, resourceID uuid.UUID, failure *Error) *Error {
+func (s *Server) markBatchUnknown(ctx context.Context, resourceID uuid.UUID, failure *fault.Error) *fault.Error {
 	commitCtx, stop := resourceCommitContext(ctx)
 	defer stop()
 	if err := s.deps.Batches.MarkUnknown(commitCtx, resourceID, batches.ErrorSubmissionUnknown, s.now()); err != nil {

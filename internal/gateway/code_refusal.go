@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 )
 
 // codeRefusal is the refusal a client sees for err; failures that are not
@@ -21,12 +22,12 @@ func codeRefusal(err error) *codemode.Refusal {
 // codeWriteError writes a refusal in the envelope of the request's surface:
 // Anthropic's for a route's Messages paths, OpenAI's otherwise.
 func codeWriteError(w http.ResponseWriter, r *http.Request, err error) {
-	writeSurfaceError(w, codeError(r, err), requestSurface(r))
+	fault.WriteSurfaceError(w, codeError(r, err), fault.RequestSurface(r))
 }
 
-func codeError(r *http.Request, err error) *Error {
+func codeError(r *http.Request, err error) *fault.Error {
 	refusal := codeRefusal(err)
-	surface, kind := requestSurface(r), "code_mode_error"
+	surface, kind := fault.RequestSurface(r), "code_mode_error"
 	if surface == "anthropic" {
 		switch refusal.Status {
 		case 400, 409, 413, 415, 422:
@@ -37,7 +38,7 @@ func codeError(r *http.Request, err error) *Error {
 			kind = "permission_error"
 		}
 	}
-	return &Error{Status: refusal.Status, Code: refusal.Code, Type: kind, Message: codeRefusalMessage(refusal.Code), RetryAfter: refusal.RetryAfter(time.Now())}
+	return &fault.Error{Status: refusal.Status, Code: refusal.Code, Type: kind, Message: codeRefusalMessage(refusal.Code), RetryAfter: refusal.RetryAfter(time.Now())}
 }
 
 func (s *Server) codeRefuse(w http.ResponseWriter, r *http.Request, route codemode.Route, keyID, digest string, err error) {

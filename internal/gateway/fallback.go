@@ -6,6 +6,7 @@ import (
 	"time"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -24,7 +25,7 @@ const (
 // bind makes x.route the request's primary route: its deadline and attempt
 // budget bound the request, whichever routes it moves on to. A fixed request
 // belongs to its route and never leaves it.
-func (x *call) bind(p planner, authorize func(*routing.Route) *Error, fixed bool) {
+func (x *call) bind(p planner, authorize func(*routing.Route) *fault.Error, fixed bool) {
 	x.primary, x.planner, x.authorize, x.fixed = x.route, p, authorize, fixed
 	x.walk = routing.NewRouteWalk(x.route)
 	x.seed = x.affinity
@@ -41,7 +42,7 @@ func (x *call) named() *routing.Route {
 
 // planNamed plans the primary route. A route that cannot plan any attempt for
 // a reason one of its fallbacks names moves the request on before dispatch.
-func (s *Server) planNamed(ctx context.Context, x *call) *Error {
+func (s *Server) planNamed(ctx context.Context, x *call) *fault.Error {
 	ctx, cancel := x.routeContext(ctx)
 	defer cancel()
 	e := s.replan(ctx, x)
@@ -66,7 +67,7 @@ func (x *call) routeContext(ctx context.Context) (context.Context, context.Cance
 }
 
 // replan plans x.route with the request's own planner.
-func (s *Server) replan(ctx context.Context, x *call) *Error {
+func (s *Server) replan(ctx context.Context, x *call) *fault.Error {
 	x.planConditions = nil
 	if e := x.checkBody(x.route); e != nil {
 		return e
@@ -105,7 +106,7 @@ func (x *call) adoptPlan(plan routing.Plan) {
 
 // delegate moves the request to the route its matched selector names. The
 // planner has already checked that the route exists and the key may use it.
-func (s *Server) delegate(ctx context.Context, x *call, plan routing.Plan) *Error {
+func (s *Server) delegate(ctx context.Context, x *call, plan routing.Plan) *fault.Error {
 	x.initAllowance(plan.Budget)
 	selector := plan.Selected()
 	outcome, e := s.adopt(ctx, x, plan.Delegate, usage.ViaSelector)
@@ -126,7 +127,7 @@ func (s *Server) delegate(ctx context.Context, x *call, plan routing.Plan) *Erro
 
 // adopt moves the request to the named route and plans it, returning the
 // outcome a fallback step records and the route's planning refusal.
-func (s *Server) adopt(ctx context.Context, x *call, slug string, via usage.LegVia) (string, *Error) {
+func (s *Server) adopt(ctx context.Context, x *call, slug string, via usage.LegVia) (string, *fault.Error) {
 	if x.walk.Visited(slug) {
 		return routing.FallbackRepeated, nil
 	}
@@ -204,13 +205,13 @@ func (x *call) mayLeaveRoute() bool {
 }
 
 // keyAuthorizer allows the routes an API key may use for inference.
-func (s *Server) keyAuthorizer(authority keyauthority.Authority) func(*routing.Route) *Error {
-	return func(route *routing.Route) *Error {
+func (s *Server) keyAuthorizer(authority keyauthority.Authority) func(*routing.Route) *fault.Error {
+	return func(route *routing.Route) *fault.Error {
 		if authority.TaskCapability != nil && !slices.Contains(authority.TaskCapability.RouteRevisions, route.RevisionID) {
-			return permissionError("route_forbidden", "This task is not allowed to use the model `"+route.Slug+"`.")
+			return fault.PermissionError("route_forbidden", "This task is not allowed to use the model `"+route.Slug+"`.")
 		}
 		if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
-			return permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
+			return fault.PermissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
 		}
 		return nil
 	}

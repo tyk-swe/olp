@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/release"
 )
 
@@ -288,7 +289,7 @@ func (a *codeAttempt) copyResponse(ctx context.Context, w http.ResponseWriter, r
 					observed = nil
 				}
 			}
-			_ = rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+			_ = rc.SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
 			if _, err := w.Write(part); err != nil {
 				a.outcome(ctx, codemode.Outcome{Origin: "client", Kind: "canceled"})
 				return

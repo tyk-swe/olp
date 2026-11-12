@@ -11,6 +11,7 @@ import (
 	"time"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
@@ -110,20 +111,20 @@ func (a *Admission) logger() *slog.Logger {
 
 // limitsUnavailable is the terminal answer when a budget that must be enforced
 // cannot be consulted.
-func limitsUnavailable() *Error {
-	return serverError(http.StatusServiceUnavailable, "distributed_limits_unavailable", "Request limits cannot be enforced right now; retry shortly.")
+func limitsUnavailable() *fault.Error {
+	return fault.ServerError(http.StatusServiceUnavailable, "distributed_limits_unavailable", "Request limits cannot be enforced right now; retry shortly.")
 }
 
 // rateLimited renders the rejection a shared budget produced. estimate says a
 // cost budget refused the request although it is not spent: the request's own
 // estimated cost does not fit beside what is accrued and in flight.
-func rateLimited(dimension limits.Dimension, retryAfter time.Duration, estimate bool) *Error {
+func rateLimited(dimension limits.Dimension, retryAfter time.Duration, estimate bool) *fault.Error {
 	return rateLimitedBasis(dimension, retryAfter, estimate, limits.BasisCost)
 }
 
 // rateLimitedBasis is rateLimited for a refusal under an owner's basis: a
 // charge-basis budget names its measure.
-func rateLimitedBasis(dimension limits.Dimension, retryAfter time.Duration, estimate bool, basis limits.Basis) *Error {
+func rateLimitedBasis(dimension limits.Dimension, retryAfter time.Duration, estimate bool, basis limits.Basis) *fault.Error {
 	code, message := "rate_limit_exceeded", "The API key rate limit was exceeded."
 	switch dimension {
 	case limits.DimensionRequests:
@@ -148,7 +149,7 @@ func rateLimitedBasis(dimension limits.Dimension, retryAfter time.Duration, esti
 			message = "The API key " + budgetKind + " was exhausted. Unpriced attempts accrue 0."
 		}
 	}
-	return &Error{
+	return &fault.Error{
 		Status:     http.StatusTooManyRequests,
 		Type:       "rate_limit_error",
 		Code:       code,
@@ -210,21 +211,21 @@ func groupRequest(authority *keyauthority.Authority, estimate int64, ttl time.Du
 // or the limiter is unreachable and the installation chose to fail open. The
 // surface is the one the caller speaks, whose headers report the key's allowance
 // if it has any.
-func (a *Admission) reserveKey(ctx context.Context, authority keyauthority.Authority, surface string, estimate int64, ttl time.Duration, route ...string) (*admission.Lease, *Error) {
+func (a *Admission) reserveKey(ctx context.Context, authority keyauthority.Authority, surface string, estimate int64, ttl time.Duration, route ...string) (*admission.Lease, *fault.Error) {
 	return a.reserveKeyCosted(ctx, &authority, surface, estimate, ttl, costReservation{}, route...)
 }
 
 // reserveKeyCosted applies all configured caller boundaries and attaches their
 // leases for one settlement. Every refusal refunds earlier reservations. The
 // optional route identifies the ingress route for per-key route policy.
-func (a *Admission) reserveKeyCosted(ctx context.Context, authority *keyauthority.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*admission.Lease, *Error) {
+func (a *Admission) reserveKeyCosted(ctx context.Context, authority *keyauthority.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*admission.Lease, *fault.Error) {
 	if authority.DelegationAgentLimits == nil && keyBoundariesOnly(authority) && authority.BudgetGroupID == nil && !keyHasHardLimits(&authority.Policy) {
 		return nil, nil
 	}
 	return a.reserveKeyWithLimits(ctx, authority, surface, estimate, ttl, hold, route...)
 }
 
-func (a *Admission) reserveKeyWithLimits(ctx context.Context, authority *keyauthority.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*admission.Lease, *Error) {
+func (a *Admission) reserveKeyWithLimits(ctx context.Context, authority *keyauthority.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*admission.Lease, *fault.Error) {
 	if authority.DelegationAgentLimits == nil {
 		return a.reserveCallerLimits(ctx, authority, surface, estimate, ttl, hold, route...)
 	}
@@ -255,7 +256,7 @@ func (a *Admission) reserveKeyWithLimits(ctx context.Context, authority *keyauth
 	return lease, nil
 }
 
-func (a *Admission) reserveCallerLimits(ctx context.Context, authority *keyauthority.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*admission.Lease, *Error) {
+func (a *Admission) reserveCallerLimits(ctx context.Context, authority *keyauthority.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*admission.Lease, *fault.Error) {
 	// Every cost boundary checks shared accounting evidence just before it
 	// spends against it, once per request, so keys without budgets stay free.
 	costChecked := false
@@ -304,7 +305,7 @@ func (a *Admission) reserveCallerLimits(ctx context.Context, authority *keyautho
 
 // checkCostAccountingOnce runs the shared accounting check the first time a
 // request's cost boundary needs it.
-func (a *Admission) checkCostAccountingOnce(ctx context.Context, checked *bool) *Error {
+func (a *Admission) checkCostAccountingOnce(ctx context.Context, checked *bool) *fault.Error {
 	if *checked {
 		return nil
 	}
@@ -312,28 +313,28 @@ func (a *Admission) checkCostAccountingOnce(ctx context.Context, checked *bool) 
 	return a.checkCostAccounting(ctx)
 }
 
-func (a *Admission) checkCostAccounting(ctx context.Context) *Error {
+func (a *Admission) checkCostAccounting(ctx context.Context) *fault.Error {
 	if a == nil || a.CostAccountingReady == nil {
 		return nil
 	}
 	check, cancel := context.WithTimeout(ctx, reserveTimeout)
 	defer cancel()
 	if err := a.CostAccountingReady(check); err != nil {
-		return serverError(http.StatusServiceUnavailable, "cost_accounting_incomplete", "Cost budgets cannot admit work while accounting is incomplete.")
+		return fault.ServerError(http.StatusServiceUnavailable, "cost_accounting_incomplete", "Cost budgets cannot admit work while accounting is incomplete.")
 	}
 	return nil
 }
 
 // Known accepted generations have a durable owner even when their final usage
 // has not arrived. A newly enabled cost budget cannot assume that work cost zero.
-func (a *Admission) checkPendingCostAccounting(ctx context.Context, owner string) *Error {
+func (a *Admission) checkPendingCostAccounting(ctx context.Context, owner string) *fault.Error {
 	if a == nil || a.PendingCostAccountingReady == nil {
 		return nil
 	}
 	check, cancel := context.WithTimeout(ctx, reserveTimeout)
 	defer cancel()
 	if err := a.PendingCostAccountingReady(check, owner); err != nil {
-		return serverError(http.StatusServiceUnavailable, "cost_accounting_incomplete", "Cost budgets cannot admit work while accounting is incomplete.")
+		return fault.ServerError(http.StatusServiceUnavailable, "cost_accounting_incomplete", "Cost budgets cannot admit work while accounting is incomplete.")
 	}
 	return nil
 }
@@ -351,7 +352,7 @@ func keyHasHardLimits(policy *keyauthority.KeyPolicy) bool {
 		policy.DailyCostLimit != nil || policy.MonthlyCostLimit != nil || policy.WeeklyCostLimit != nil
 }
 
-func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *keyauthority.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, costChecked *bool) (*admission.Lease, *Error) {
+func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *keyauthority.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, costChecked *bool) (*admission.Lease, *fault.Error) {
 	var group *admission.Lease
 	if request := groupRequest(authority, estimate, ttl); request != nil {
 		if request.Rate.TokensPerMinute != nil {
@@ -371,7 +372,7 @@ func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *keyauthor
 			return nil, limitsUnavailable()
 		}
 		if request.Rate.TokensPerMinute != nil && estimate > *request.Rate.TokensPerMinute {
-			return nil, invalidRequest("request_exceeds_token_limit", "This request exceeds the budget group token limit.", nil)
+			return nil, fault.InvalidRequest("request_exceeds_token_limit", "This request exceeds the budget group token limit.", nil)
 		}
 		decision, cancel := context.WithTimeout(ctx, reserveTimeout)
 		lease, err := a.limiter.Reserve(decision, hold.on(*request))
@@ -394,7 +395,7 @@ func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *keyauthor
 	}
 	stated := keyRequest(*authority, estimate, ttl)
 	// A surface whose SDKs read no rate-limit headers is not answered an allowance nothing would write.
-	request := hold.on(admission.Request{Lookup: stated.Lookup, LeaseTTL: ttl, Cost: stated.Cost, Rate: reporting(stated.Rate, rateHeadersOf(surface) != nil)})
+	request := hold.on(admission.Request{Lookup: stated.Lookup, LeaseTTL: ttl, Cost: stated.Cost, Rate: reporting(stated.Rate, fault.ReportsRate(surface))})
 	if request.Rate.TokensPerMinute != nil {
 		if e := a.checkPendingTokenAccounting(ctx, authority.ID); e != nil {
 			settleKey(ctx, group, false, nil, a.logger())
@@ -418,7 +419,7 @@ func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *keyauthor
 		// No window will ever hold this request: answer now rather than make
 		// the caller retry into a limit it cannot satisfy.
 		settleKey(ctx, group, false, nil, a.logger())
-		return nil, invalidRequest("request_exceeds_token_limit", "This request needs more tokens than the API key tokens per minute limit allows.", nil)
+		return nil, fault.InvalidRequest("request_exceeds_token_limit", "This request needs more tokens than the API key tokens per minute limit allows.", nil)
 	}
 	decision, cancel := context.WithTimeout(ctx, reserveTimeout)
 	defer cancel()
@@ -434,7 +435,7 @@ func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *keyauthor
 		// only its rejection reports it: a budget group has none, and the quota
 		// of a provider is not the caller's.
 		e := rateLimitedBasis(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate, exceeded.Basis)
-		e.rate = exceeded.Rate
+		e.Rate = exceeded.Rate
 		return nil, e
 	}
 	if e := a.outage(authority.ID, request.Cost != nil, err); e != nil {
@@ -450,7 +451,7 @@ func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *keyauthor
 // Spending against an unknown balance can never be undone, so a cost budget
 // always fails closed; rate and concurrency limits follow the policy the
 // installation configured.
-func (a *Admission) outage(keyID string, costBudget bool, cause error) *Error {
+func (a *Admission) outage(keyID string, costBudget bool, cause error) *fault.Error {
 	var service *limits.ServiceError
 	if !errors.As(cause, &service) || costBudget || a == nil || a.policy == nil || a.policy() != admission.FailOpen {
 		return limitsUnavailable()
@@ -750,14 +751,14 @@ func share(supply routing.Supply, priority string) admission.Share {
 	return admission.Share{Class: priority, Percent: supply.PriorityShares.Of(priority), SaturationPercent: *supply.SaturationPercent}
 }
 
-func (a *Admission) checkPendingTokenAccounting(ctx context.Context, owner string) *Error {
+func (a *Admission) checkPendingTokenAccounting(ctx context.Context, owner string) *fault.Error {
 	if a == nil || a.PendingTokenAccountingReady == nil {
 		return nil
 	}
 	check, cancel := context.WithTimeout(ctx, reserveTimeout)
 	defer cancel()
 	if a.PendingTokenAccountingReady(check, owner) != nil {
-		return serverError(http.StatusServiceUnavailable, "token_accounting_incomplete", "Token limits cannot admit work while token-consuming retained usage is unresolved.")
+		return fault.ServerError(http.StatusServiceUnavailable, "token_accounting_incomplete", "Token limits cannot admit work while token-consuming retained usage is unresolved.")
 	}
 	return nil
 }

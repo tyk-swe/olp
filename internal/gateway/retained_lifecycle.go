@@ -12,6 +12,7 @@ import (
 	"time"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -42,7 +43,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 	var p *pin
 	status := http.StatusInternalServerError
 	defer func() { s.finish(x, nil, status); s.resourceSettle(r.Context(), x, p) }()
-	fail := func(err *Error) {
+	fail := func(err *fault.Error) {
 		if e.Action == "create" {
 			copy := *err
 			copy.NoRetry = true
@@ -50,7 +51,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 		}
 		x.failure = err
 		status = err.Status
-		writeSurfaceError(w, err, e.Surface)
+		fault.WriteSurfaceError(w, err, e.Surface)
 	}
 	if !authority.Policy.AllowProviderState {
 		fail(providerStateForbidden())
@@ -60,7 +61,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 		if name == "key" || e.Action == "list" && (name == "page_size" || name == "page_token") {
 			continue
 		}
-		fail(invalidRequest("unsupported_parameter", "This resource method does not accept that query parameter.", nil))
+		fail(fault.InvalidRequest("unsupported_parameter", "This resource method does not accept that query parameter.", nil))
 		return
 	}
 	if e.Action == "list" {
@@ -70,7 +71,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 	var body []byte
 	var source oif.Document
 	if e.Method == http.MethodPost || e.Method == http.MethodPatch {
-		var err *Error
+		var err *fault.Error
 		body, err = s.readBody(r)
 		if err != nil {
 			fail(err)
@@ -79,7 +80,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 		var parseErr error
 		source, parseErr = oif.ParseJSON(body, oif.Limits{MaxBytes: int(s.cfg.MaxBodyBytes)})
 		if parseErr != nil || source.Root().Kind() != oif.Object {
-			fail(invalidRequest("invalid_request", "A valid JSON object is required.", nil))
+			fail(fault.InvalidRequest("invalid_request", "A valid JSON object is required.", nil))
 			return
 		}
 		if err = retainedAgentInput(source); err != nil {
@@ -88,29 +89,29 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 		}
 		source, parseErr = normalizeRetainedAgent(source)
 		if parseErr != nil {
-			fail(invalidRequest("invalid_request", "The agent definition could not be normalized.", nil))
+			fail(fault.InvalidRequest("invalid_request", "The agent definition could not be normalized.", nil))
 			return
 		}
 	}
 	var route *routing.Route
 	var resource *resources.Resource
 	var lifecycle *resources.Lifecycle
-	var err *Error
+	var err *fault.Error
 	var idempotency string
 	var digest []byte
 	if e.Action == "create" {
 		slug := strings.TrimSpace(r.Header.Get(stateRouteHeader))
 		if slug == "" {
-			fail(invalidRequest("missing_required_parameter", "X-OLP-Route is required.", nil))
+			fail(fault.InvalidRequest("missing_required_parameter", "X-OLP-Route is required.", nil))
 			return
 		}
 		idempotency = r.Header.Get("Idempotency-Key")
 		if idempotency == "" {
-			fail(invalidRequest("missing_required_parameter", "Idempotency-Key is required for resource creation.", nil))
+			fail(fault.InvalidRequest("missing_required_parameter", "Idempotency-Key is required for resource creation.", nil))
 			return
 		}
 		if len(idempotency) > 128 {
-			fail(invalidRequest("invalid_idempotency_key", "Idempotency-Key must be at most 128 bytes.", nil))
+			fail(fault.InvalidRequest("invalid_idempotency_key", "Idempotency-Key must be at most 128 bytes.", nil))
 			return
 		}
 		digest, err = s.retainedSubmissionDigest(e, slug, body)
@@ -120,23 +121,23 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 		}
 		prior, lookupErr := s.deps.Resources.LookupLifecycle(r.Context(), x.keyID, e.Operation, idempotency, digest)
 		if errors.Is(lookupErr, resources.ErrSubmissionConflict) {
-			fail(serverError(409, "idempotency_conflict", "This submission identity is already bound to another request."))
+			fail(fault.ServerError(409, "idempotency_conflict", "This submission identity is already bound to another request."))
 			return
 		}
 		if lookupErr == nil {
 			// Recovery reveals only an already-owned identity and starts no work.
 			x.route = &routing.Route{Slug: prior.RouteSlug, RevisionID: prior.RouteRevisionID}
 			w.Header().Set("X-OLP-Resource-ID", prior.ID)
-			fail(serverError(409, "submission_exists", "This submission already exists; inspect X-OLP-Resource-ID instead of recreating it."))
+			fail(fault.ServerError(409, "submission_exists", "This submission already exists; inspect X-OLP-Resource-ID instead of recreating it."))
 			return
 		}
 		if !errors.Is(lookupErr, resources.ErrNotFound) {
-			fail(serverError(503, "provider_state_unavailable", "The submission could not be read."))
+			fail(fault.ServerError(503, "provider_state_unavailable", "The submission could not be read."))
 			return
 		}
 		candidate, ok := x.snapshot().FindRoute(slug)
 		if !ok {
-			fail(modelNotFound(slug))
+			fail(fault.ModelNotFound(slug))
 			return
 		}
 		route = &candidate
@@ -146,7 +147,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 			return
 		}
 		if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
-			fail(permissionError("route_forbidden", "The API key cannot use this route."))
+			fail(fault.PermissionError("route_forbidden", "The API key cannot use this route."))
 			return
 		}
 		if !slices.Contains(route.Operations, e.Operation) {
@@ -163,7 +164,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 			var getErr error
 			base, getErr = s.deps.Resources.Get(r.Context(), "agent_resource", x.keyID, id)
 			if getErr != nil || base.RouteSlug != route.Slug || base.RouteRevisionID != route.RevisionID || base.State == "submitting" || base.State == "submission_unknown" || base.State == "not_accepted" || base.ContractVersion == nil || *base.ContractVersion != retainedapi.Revision {
-				fail(invalidRequest("invalid_resource_reference", "A resource reference is unavailable for this owner and target.", nil))
+				fail(fault.InvalidRequest("invalid_resource_reference", "A resource reference is unavailable for this owner and target.", nil))
 				return
 			}
 		}
@@ -183,7 +184,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 			return bound.UpstreamID, nil
 		})
 		if parseErr != nil {
-			fail(invalidRequest("invalid_resource_reference", "A resource reference is unavailable for this owner and target.", nil))
+			fail(fault.InvalidRequest("invalid_resource_reference", "A resource reference is unavailable for this owner and target.", nil))
 			return
 		}
 		body = source.Bytes()
@@ -191,7 +192,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 		var getErr error
 		lifecycle, getErr = s.deps.Resources.OpenOwned(r.Context(), e.Kind, x.keyID, r.PathValue("id"))
 		if getErr != nil {
-			fail(notFoundError("not_found", "No resource with this identifier exists for this key."))
+			fail(fault.NotFoundError("not_found", "No resource with this identifier exists for this key."))
 			return
 		}
 		resource = lifecycle.Resource()
@@ -220,7 +221,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 			}
 		}
 		if resource.State == "submitting" || resource.State == "submission_unknown" || resource.State == "not_accepted" {
-			fail(serverError(409, "submission_unknown", "Creation has not been reconciled; this request cannot be resubmitted."))
+			fail(fault.ServerError(409, "submission_unknown", "Creation has not been reconciled; this request cannot be resubmitted."))
 			return
 		}
 	}
@@ -244,7 +245,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 	}
 	endpoint, urlErr := p.provider.Connector().ResourceURL(p.model, path, nil)
 	if urlErr != nil {
-		fail(serverError(502, "provider_protocol_error", "The retained endpoint is unavailable."))
+		fail(fault.ServerError(502, "provider_protocol_error", "The retained endpoint is unavailable."))
 		return
 	}
 	if e.Action == "create" {
@@ -254,21 +255,21 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 		var prepareErr error
 		lifecycle, prepareErr = s.deps.Resources.BeginCreate(ctx, candidate, resources.Submission{Operation: e.Operation, Key: idempotency, Digest: digest})
 		if errors.Is(prepareErr, resources.ErrSubmissionConflict) {
-			fail(serverError(409, "idempotency_conflict", "This submission identity is already bound to another request."))
+			fail(fault.ServerError(409, "idempotency_conflict", "This submission identity is already bound to another request."))
 			return
 		}
 		if prepareErr != nil {
-			fail(serverError(503, "provider_state_unavailable", "The submission could not be persisted."))
+			fail(fault.ServerError(503, "provider_state_unavailable", "The submission could not be persisted."))
 			return
 		}
 		resource = lifecycle.Resource()
 		w.Header().Set("X-OLP-Resource-ID", resource.ID)
 		if lifecycle.Existing() {
-			fail(serverError(409, "submission_exists", "This submission already exists; inspect X-OLP-Resource-ID instead of recreating it."))
+			fail(fault.ServerError(409, "submission_exists", "This submission already exists; inspect X-OLP-Resource-ID instead of recreating it."))
 			return
 		}
 		if prepareErr = lifecycle.Dispatch(ctx); prepareErr != nil {
-			fail(serverError(503, "provider_state_unavailable", "The submission could not be fenced."))
+			fail(fault.ServerError(503, "provider_state_unavailable", "The submission could not be fenced."))
 			return
 		}
 		defer func() {
@@ -283,10 +284,10 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 			commitCtx, cancel := resourceCommitContext(ctx)
 			defer cancel()
 			if removeErr := s.deps.Resources.Tombstone(commitCtx, resource.ID); removeErr != nil {
-				fail(serverError(503, "provider_state_unavailable", "The deleted resource could not be reconciled."))
+				fail(fault.ServerError(503, "provider_state_unavailable", "The deleted resource could not be reconciled."))
 				return
 			}
-			fail(notFoundError("not_found", "No resource with this identifier exists for this key."))
+			fail(fault.NotFoundError("not_found", "No resource with this identifier exists for this key."))
 			return
 		}
 		fail(retainedPublicError(upstreamError(failure), failure.status))
@@ -295,18 +296,18 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 	defer native.Body.Close()
 	response, readErr := readBounded(native.Body, s.retainedResponseLimit())
 	if readErr != nil {
-		fail(serverError(502, "provider_protocol_error", "The provider response exceeded the supported resource contract."))
+		fail(fault.ServerError(502, "provider_protocol_error", "The provider response exceeded the supported resource contract."))
 		return
 	}
 	if native.StatusCode < 200 || native.StatusCode >= 300 {
-		fail(serverError(502, "provider_protocol_error", "The provider returned an unsupported resource response."))
+		fail(fault.ServerError(502, "provider_protocol_error", "The provider returned an unsupported resource response."))
 		return
 	}
 	commitCtx, commitCancel := resourceCommitContext(ctx)
 	defer commitCancel()
 	if e.Action == "delete" {
 		if putErr := s.deps.Resources.Tombstone(commitCtx, resource.ID); putErr != nil {
-			fail(serverError(503, "provider_state_unavailable", "Deletion was accepted but its local record could not be updated."))
+			fail(fault.ServerError(503, "provider_state_unavailable", "Deletion was accepted but its local record could not be updated."))
 			return
 		}
 		// Gemini's native delete result is an empty JSON message.
@@ -321,23 +322,23 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 	}
 	nativeID, validID := nativeResourceID(response, retainedBodyLimit)
 	if !validID {
-		fail(serverError(502, "provider_protocol_error", "The provider response omitted a valid resource identity."))
+		fail(fault.ServerError(502, "provider_protocol_error", "The provider response omitted a valid resource identity."))
 		return
 	}
 	if e.Action == "create" {
 		accepted, putErr := lifecycle.AcceptCreated(commitCtx, resources.CreationResult{IDs: []string{nativeID}})
 		if putErr != nil {
-			fail(serverError(503, "provider_state_unavailable", "The provider accepted creation but its resource identity could not be committed."))
+			fail(fault.ServerError(503, "provider_state_unavailable", "The provider accepted creation but its resource identity could not be committed."))
 			return
 		}
 		resource = accepted
 	} else if nativeID != resource.UpstreamID {
-		fail(serverError(502, "provider_protocol_error", "The provider returned a mismatched resource identity."))
+		fail(fault.ServerError(502, "provider_protocol_error", "The provider returned a mismatched resource identity."))
 		return
 	}
 	projected, projectErr := s.projectRetainedAgent(ctx, x, resource, response)
 	if projectErr != nil {
-		fail(serverError(502, "provider_protocol_error", "The provider response contained an unbound resource identity."))
+		fail(fault.ServerError(502, "provider_protocol_error", "The provider response contained an unbound resource identity."))
 		return
 	}
 	status = native.StatusCode
@@ -345,16 +346,16 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 	s.writeStateJSONStatus(w, x, projected, status)
 }
 
-func (s *Server) retainedSubmissionDigest(endpoint retainedapi.Endpoint, slug string, body []byte) ([]byte, *Error) {
+func (s *Server) retainedSubmissionDigest(endpoint retainedapi.Endpoint, slug string, body []byte) ([]byte, *fault.Error) {
 	digester, ok := s.deps.Runtime.(interface {
 		Digest(secrets.DigestPurpose, string) []byte
 	})
 	if !ok {
-		return nil, serverError(503, "authority_unavailable", "Resource submission identity is unavailable.")
+		return nil, fault.ServerError(503, "authority_unavailable", "Resource submission identity is unavailable.")
 	}
 	canonical, err := canonicalBatchJSON(body)
 	if err != nil {
-		return nil, invalidRequest("invalid_request", "A valid JSON object is required.", nil)
+		return nil, fault.InvalidRequest("invalid_request", "A valid JSON object is required.", nil)
 	}
 	return digester.Digest(secrets.RetainedSubmissionDigest, endpoint.Operation+"\x00"+endpoint.Kind+"\x00"+slug+"\x00"+string(canonical)), nil
 }
@@ -373,13 +374,13 @@ func (s *Server) retainedResponseLimit() int64 {
 	return retainedBodyLimit
 }
 
-func retainedAgentInput(source oif.Document) *Error {
+func retainedAgentInput(source oif.Document) *fault.Error {
 	if err := retainedAgentEnvironment(source); err != nil {
 		return err
 	}
 	for _, field := range source.Root().Members() {
 		if !slices.Contains([]string{"agent_config", "base_agent", "base_environment", "description", "system_instruction", "tools"}, field.Name) {
-			return invalidRequest("unsupported_field", "The agent contract does not support field "+field.Name+".", nil)
+			return fault.InvalidRequest("unsupported_field", "The agent contract does not support field "+field.Name+".", nil)
 		}
 		if field.Value.Kind() == oif.Null {
 			continue
@@ -392,7 +393,7 @@ func retainedAgentInput(source oif.Document) *Error {
 			expected = oif.Array
 		}
 		if field.Value.Kind() != expected {
-			return invalidRequest("invalid_parameter", "Invalid value type for agent field: "+field.Name, nil)
+			return fault.InvalidRequest("invalid_parameter", "Invalid value type for agent field: "+field.Name, nil)
 		}
 	}
 	return nil
@@ -431,7 +432,7 @@ func (s *Server) projectRetainedAgent(ctx context.Context, x *call, resource *re
 
 // Provider errors may echo native resource identifiers. Preserve the stable
 // HTTP status while keeping provider identities outside public errors.
-func retainedPublicError(err *Error, status int) *Error {
+func retainedPublicError(err *fault.Error, status int) *fault.Error {
 	out := *err
 	if status >= http.StatusBadRequest && status <= 599 {
 		out.Status = status
@@ -443,12 +444,12 @@ func retainedPublicError(err *Error, status int) *Error {
 	return &out
 }
 
-func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x *call, a keyauthority.Authority, e retainedapi.Endpoint, fail func(*Error)) int {
+func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x *call, a keyauthority.Authority, e retainedapi.Endpoint, fail func(*fault.Error)) int {
 	limit := 20
 	if raw := r.URL.Query().Get("page_size"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed < 1 || parsed > 100 {
-			fail(invalidRequest("invalid_parameter", "page_size must be between 1 and 100.", nil))
+			fail(fault.InvalidRequest("invalid_parameter", "page_size must be between 1 and 100.", nil))
 			return 400
 		}
 		limit = parsed
@@ -456,10 +457,10 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 	rows, err := s.deps.Resources.ListLifecycle(r.Context(), e.Kind, x.keyID, limit+1, r.URL.Query().Get("page_token"))
 	if err != nil {
 		if errors.Is(err, resources.ErrNotFound) {
-			fail(invalidRequest("invalid_parameter", "The page token is unavailable for this owner.", nil))
+			fail(fault.InvalidRequest("invalid_parameter", "The page token is unavailable for this owner.", nil))
 			return http.StatusBadRequest
 		}
-		fail(serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Provider state is unavailable."))
+		fail(fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "Provider state is unavailable."))
 		return http.StatusServiceUnavailable
 	}
 	hasMore := len(rows) > limit
@@ -553,7 +554,7 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 				removeErr := s.deps.Resources.Tombstone(commitCtx, resource.ID)
 				commitCancel()
 				if removeErr != nil {
-					fail(serverError(503, "provider_state_unavailable", "The deleted resource could not be reconciled."))
+					fail(fault.ServerError(503, "provider_state_unavailable", "The deleted resource could not be reconciled."))
 					return 503
 				}
 				continue
@@ -581,12 +582,12 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 		}
 		s.settlePinHold(ctx, x, p.hold, nil)
 		if readErr != nil {
-			fail(serverError(502, "provider_protocol_error", "The provider returned an invalid resource."))
+			fail(fault.ServerError(502, "provider_protocol_error", "The provider returned an invalid resource."))
 			return 502
 		}
 		responseBytes += len(projected) + 1
 		if responseBytes > retainedBodyLimit {
-			fail(serverError(502, "provider_protocol_error", "The resource page exceeds the supported response size; request a smaller page."))
+			fail(fault.ServerError(502, "provider_protocol_error", "The resource page exceeds the supported response size; request a smaller page."))
 			return 502
 		}
 		items = append(items, projected)
@@ -606,18 +607,18 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 
 const retainedBodyLimit = 4 << 20
 
-func encodeRetainedPage(response map[string]any) ([]byte, *Error) {
+func encodeRetainedPage(response map[string]any) ([]byte, *fault.Error) {
 	body, err := json.Marshal(response)
 	if err != nil {
-		return nil, serverError(500, "internal_error", "The resource list could not be encoded.")
+		return nil, fault.ServerError(500, "internal_error", "The resource list could not be encoded.")
 	}
 	if len(body) > retainedBodyLimit {
-		return nil, serverError(502, "provider_protocol_error", "The resource page exceeds the supported response size; request a smaller page.")
+		return nil, fault.ServerError(502, "provider_protocol_error", "The resource page exceeds the supported response size; request a smaller page.")
 	}
 	return body, nil
 }
 
-func (s *Server) gateRetainedSlot(ctx context.Context, x *call, p *pin, route *routing.Route) *Error {
+func (s *Server) gateRetainedSlot(ctx context.Context, x *call, p *pin, route *routing.Route) *fault.Error {
 	if p.hold != nil {
 		return nil
 	}
@@ -651,7 +652,7 @@ func (s *Server) gateRetainedSlot(ctx context.Context, x *call, p *pin, route *r
 
 // Environment and credential references require their own owner-scoped
 // contracts. Inline environment values may pass without provider references.
-func retainedAgentEnvironment(source oif.Document) *Error {
+func retainedAgentEnvironment(source oif.Document) *fault.Error {
 	v, present := source.Root().Lookup("base_environment")
 	if present && v.Kind() != oif.Null && v.Kind() != oif.Object {
 		return policyUnavailable("unsupported_stateful_reference", "Native environment references are not supported by this agent resource contract.")
@@ -687,7 +688,7 @@ func normalizeRetainedAgent(source oif.Document) (oif.Document, error) {
 
 // Retained controls require durable credential identity and known, unpriced
 // execution because this contract has no model usage observations.
-func (s *Server) retainedControlPolicy(x *call, p *pin, route *routing.Route) *Error {
+func (s *Server) retainedControlPolicy(x *call, p *pin, route *routing.Route) *fault.Error {
 	if p.provider.CredentialSource == "caller" {
 		return policyUnavailable("unsupported_provider_credentials", "Agent resources require managed provider credentials.")
 	}
@@ -695,7 +696,7 @@ func (s *Server) retainedControlPolicy(x *call, p *pin, route *routing.Route) *E
 		x.routingInputs = s.deps.Runtime.RoutingInputs()
 	}
 	if x.routingInputs == nil || x.request.startedAt.Sub(x.routingInputs.RefreshedAt) > routinginputs.PerformanceMaxAge {
-		return serverError(http.StatusServiceUnavailable, "pricing_unavailable", "Current resource pricing is unavailable; retry shortly.")
+		return fault.ServerError(http.StatusServiceUnavailable, "pricing_unavailable", "Current resource pricing is unavailable; retry shortly.")
 	}
 	if p.attempt.Price == nil {
 		p.attempt.Price = x.routingInputs.Price(p.provider.Kind, p.provider.ID, p.provider.VendorID, p.model, x.operationName(), x.request.startedAt)

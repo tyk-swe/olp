@@ -9,6 +9,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -191,7 +192,7 @@ func (x *call) buildProvider(provider *routing.Provider, targetID, model string)
 			}
 			if blocked {
 				decisions = append(decisions, contentpolicy.Decision{RuleID: rule.ID, Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionBlock, Outcome: contentpolicy.OutcomeBlocked})
-				return preparedProvider{policyDecisions: decisions}, invalidRequest("content_policy_blocked", "The request was blocked by the route's content policy.", nil)
+				return preparedProvider{policyDecisions: decisions}, fault.InvalidRequest("content_policy_blocked", "The request was blocked by the route's content policy.", nil)
 			}
 			if matched {
 				native = next
@@ -419,7 +420,7 @@ func (x *call) recordEstimate(fact *AttemptFact, a routing.Attempt) {
 
 // inputPolicyWireGate refuses a destination wire the input rules cannot
 // inspect, so an input policy never dispatches a body it has not seen.
-func inputPolicyWireGate(route *routing.Route, compiled *contentpolicy.Compiled, encodedWire wire.Format) *Error {
+func inputPolicyWireGate(route *routing.Route, compiled *contentpolicy.Compiled, encodedWire wire.Format) *fault.Error {
 	if compiled == nil || len(compiled.Input) == 0 || protocols.InputInspectable(encodedWire) {
 		return nil
 	}

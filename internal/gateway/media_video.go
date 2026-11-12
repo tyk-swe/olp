@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/media/transport"
@@ -60,7 +61,7 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	attempt := x.attempts[0]
 	provider, ok := x.request.release.Snapshot().FindProvider(attempt.ProviderID)
 	if !ok {
-		s.refuse(x, w, serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider is currently able to serve `"+x.route.Slug+"`."))
+		s.refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider is currently able to serve `"+x.route.Slug+"`."))
 		return
 	}
 	if e := x.checkCallerTarget(&provider, attempt.UpstreamModel); e != nil {
@@ -69,14 +70,14 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	slots := s.slots(x, attempt, &provider)
 	if len(slots) == 0 {
-		s.refuse(x, w, serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider credential is currently able to serve `"+x.route.Slug+"`."))
+		s.refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider credential is currently able to serve `"+x.route.Slug+"`."))
 		return
 	}
 
 	overall := time.Duration(x.route.OverallTimeout) * time.Millisecond
 	ctx, cancel := x.routeContext(r.Context())
 	defer cancel()
-	var e *Error
+	var e *fault.Error
 	admitted := x.admissionAuthority(authority)
 	if x.lease, e = s.deps.Admission.reserveKeyCosted(ctx, &admitted, x.clientSurface(), x.estimate, overall, x.attemptCostReservation(authority, attempt), x.limitRoute()); e != nil {
 		s.refuse(x, w, e)
@@ -129,20 +130,20 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 		s.deps.Media.Jobs.Abandon(commitCtx, reserved.ID, dispatchFailure.class == classAmbiguous)
 		out := &mediaOutcome{err: dispatchFailure.toError(), committed: dispatchFailure.committed, cancelled: dispatchFailure.class == classCancelled}
 		s.finishMedia(x, out, out.err.Status)
-		writeSurfaceError(w, out.err, "openai")
+		fault.WriteSurfaceError(w, out.err, "openai")
 		return
 	}
 	out := s.attachCreated(commitCtx, x, reserved, result)
 	if out.err != nil {
 		s.finishMedia(x, out, out.err.Status)
-		writeSurfaceError(w, out.err, "openai")
+		fault.WriteSurfaceError(w, out.err, "openai")
 		return
 	}
 	s.writeMediaResult(w, x, out)
 	s.finishMedia(x, out, out.status)
 }
 
-func (s *Server) admitVideoSlot(ctx context.Context, x *call, attempt routing.Attempt, provider *routing.Provider, slots []routing.Slot, deadline time.Time) (*dispatchHold, routing.Slot, *Error) {
+func (s *Server) admitVideoSlot(ctx context.Context, x *call, attempt routing.Attempt, provider *routing.Provider, slots []routing.Slot, deadline time.Time) (*dispatchHold, routing.Slot, *fault.Error) {
 	used := 0
 	unmeterable := false
 	var last *attemptFailure
@@ -175,7 +176,7 @@ func (s *Server) admitVideoSlot(ctx context.Context, x *call, attempt routing.At
 	return nil, routing.Slot{}, s.videoAdmissionError(ctx, x, last, unmeterable)
 }
 
-func (s *Server) videoAdmissionError(ctx context.Context, x *call, last *attemptFailure, unmeterable bool) *Error {
+func (s *Server) videoAdmissionError(ctx context.Context, x *call, last *attemptFailure, unmeterable bool) *fault.Error {
 	switch {
 	case ctx.Err() != nil && errors.Is(context.Cause(ctx), context.DeadlineExceeded):
 		return (&attemptFailure{class: classTimeout}).toError()
@@ -186,7 +187,7 @@ func (s *Server) videoAdmissionError(ctx context.Context, x *call, last *attempt
 	case unmeterable:
 		return limitsUnavailable()
 	}
-	return serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider credential is currently able to serve `"+x.route.Slug+"`.")
+	return fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider credential is currently able to serve `"+x.route.Slug+"`.")
 }
 
 func (s *Server) attachCreated(ctx context.Context, x *call, reserved jobs.Record, result *transport.Result) *mediaOutcome {
@@ -195,14 +196,14 @@ func (s *Server) attachCreated(ctx context.Context, x *call, reserved jobs.Recor
 	rejected, isRejected := errors.AsType[*jobs.Rejected](err)
 	switch {
 	case isRejected:
-		out.err = serverError(http.StatusBadGateway, "provider_protocol_error", rejected.Message)
+		out.err = fault.ServerError(http.StatusBadGateway, "provider_protocol_error", rejected.Message)
 	case err != nil:
-		out.err = serverError(http.StatusServiceUnavailable, "media_job_create_reconciliation_pending", "The video creation is being reconciled; check the job status shortly.")
+		out.err = fault.ServerError(http.StatusServiceUnavailable, "media_job_create_reconciliation_pending", "The video creation is being reconciled; check the job status shortly.")
 	}
 	return out
 }
 
-func jobError(err error) *Error {
+func jobError(err error) *fault.Error {
 	failure, ok := errors.AsType[*jobs.Error](err)
 	if !ok {
 		return mediaError(media.Fail(http.StatusServiceUnavailable, "media_job_unavailable", "The media job store is unavailable."))
@@ -220,32 +221,32 @@ func jobError(err error) *Error {
 	return mediaError(media.Fail(http.StatusServiceUnavailable, "media_job_unavailable", "The media job store is unavailable."))
 }
 
-func (s *Server) ownedJob(ctx context.Context, authority keyauthority.Authority, videoID string, op media.Operation) (*jobs.Record, *Error) {
+func (s *Server) ownedJob(ctx context.Context, authority keyauthority.Authority, videoID string, op media.Operation) (*jobs.Record, *fault.Error) {
 	id, err := uuid.Parse(videoID)
 	if err != nil {
-		return nil, notFoundError("video_not_found", "The video job does not exist.")
+		return nil, fault.NotFoundError("video_not_found", "The video job does not exist.")
 	}
 	record, err := s.deps.Media.Store.Get(ctx, id.String())
 	if err != nil {
 		return nil, jobError(err)
 	}
 	if record.APIKeyID != authority.ID {
-		return nil, notFoundError("video_not_found", "The video job does not exist.")
+		return nil, fault.NotFoundError("video_not_found", "The video job does not exist.")
 	}
 	if record.Lifecycle == jobs.Deleted && op != media.OpVideoDelete {
-		return nil, notFoundError("video_not_found", "The video job does not exist.")
+		return nil, fault.NotFoundError("video_not_found", "The video job does not exist.")
 	}
 	switch record.Lifecycle {
 	case jobs.Active, jobs.DeletePending, jobs.Deleted:
 	default:
-		return nil, serverError(http.StatusServiceUnavailable, "media_job_reconciliation_pending", "The video job is being reconciled; retry shortly.")
+		return nil, fault.ServerError(http.StatusServiceUnavailable, "media_job_reconciliation_pending", "The video job is being reconciled; retry shortly.")
 	}
 	projectID, current, e := s.jobRoute(ctx, record.RouteSlug)
 	if e != nil {
 		return nil, e
 	}
 	if !authority.Allows("inference", record.RouteSlug, projectID, s.now()) {
-		return nil, notFoundError("video_not_found", "The video job does not exist.")
+		return nil, fault.NotFoundError("video_not_found", "The video job does not exist.")
 	}
 	use := retainedRetrieval
 	if op == media.OpVideoDelete {
@@ -257,15 +258,15 @@ func (s *Server) ownedJob(ctx context.Context, authority keyauthority.Authority,
 	return &record, nil
 }
 
-func (s *Server) jobRoute(ctx context.Context, slug string) (*string, routing.RouteFidelity, *Error) {
+func (s *Server) jobRoute(ctx context.Context, slug string) (*string, routing.RouteFidelity, *fault.Error) {
 	projectID, current, err := s.deps.Media.Store.RouteAuthority(ctx, slug)
 	if err != nil {
-		return nil, routing.RouteFidelity{}, serverError(http.StatusServiceUnavailable, "route_unavailable", "The video job's route could not be read.")
+		return nil, routing.RouteFidelity{}, fault.ServerError(http.StatusServiceUnavailable, "route_unavailable", "The video job's route could not be read.")
 	}
 	return projectID, current, nil
 }
 
-func strictVideoResourceContext(x *call, record *jobs.Record, allowVariant bool) *Error {
+func strictVideoResourceContext(x *call, record *jobs.Record, allowVariant bool) *fault.Error {
 	if !record.StrictContract {
 		return nil
 	}
@@ -273,7 +274,7 @@ func strictVideoResourceContext(x *call, record *jobs.Record, allowVariant bool)
 		return e
 	}
 	if x.semanticQueryInvalid || !allowVariant && len(x.semanticQuery) != 0 {
-		return invalidRequest("target_capability", "This strict video resource does not qualify caller query settings.", nil)
+		return fault.InvalidRequest("target_capability", "This strict video resource does not qualify caller query settings.", nil)
 	}
 	return nil
 }
@@ -286,11 +287,11 @@ func videoJobRoute(record *jobs.Record) *routing.Route {
 	return route
 }
 
-func (s *Server) admitVideoRequest(parent context.Context, x *call, authority keyauthority.Authority) (context.Context, func(), *Error) {
+func (s *Server) admitVideoRequest(parent context.Context, x *call, authority keyauthority.Authority) (context.Context, func(), *fault.Error) {
 	ttl := maxStreamDuration + jobs.LeaseSlack
 	x.budgetGroupID = authority.BudgetGroupID
 	ctx, cancel := context.WithTimeout(parent, ttl)
-	var e *Error
+	var e *fault.Error
 	x.lease, e = s.deps.Admission.reserveKey(ctx, x.admissionAuthority(authority), x.clientSurface(), resourceEstimate, ttl, x.limitRoute())
 	if e != nil {
 		cancel()

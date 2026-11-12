@@ -5,6 +5,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 )
 
 func (s *Server) codeModels(w http.ResponseWriter, r *http.Request) {
@@ -47,7 +48,7 @@ func (s *Server) codeModels(w http.ResponseWriter, r *http.Request) {
 		codeWriteError(w, r, err)
 		return
 	}
-	writeJSON(w, struct {
+	fault.WriteJSON(w, struct {
 		Object string           `json:"object"`
 		Data   []codemode.Model `json:"data"`
 	}{Object: "list", Data: codeclient.Catalog(route, offers)})

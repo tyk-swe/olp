@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -16,7 +17,7 @@ type attemptAdapter[Result any] struct {
 	dispatch func(context.Context, routing.Attempt, *routing.Provider, routing.Slot, AttemptFact) (AttemptFact, Result, *attemptFailure)
 }
 
-func dispatchWithLease[Result any](ctx context.Context, hold *dispatchHold, adapter attemptAdapter[Result], s *Server, x *call, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, Result, *attemptFailure, *Error) {
+func dispatchWithLease[Result any](ctx context.Context, hold *dispatchHold, adapter attemptAdapter[Result], s *Server, x *call, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, Result, *attemptFailure, *fault.Error) {
 	dispatchCtx, finish, err := hold.authorize(ctx, s, x)
 	if err != nil {
 		var result Result
@@ -30,7 +31,7 @@ func dispatchWithLease[Result any](ctx context.Context, hold *dispatchHold, adap
 // execution to the canonical or media response representation.
 type attemptOutcome[Result any] struct {
 	result    Result
-	err       *Error
+	err       *fault.Error
 	committed bool
 	cancelled bool
 }
@@ -195,7 +196,7 @@ route:
 		// Every eligible target had a quota that could not be consulted.
 		return attemptOutcome[Result]{err: limitsUnavailable()}, met
 	}
-	return attemptOutcome[Result]{err: serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider is currently able to serve `"+x.named().Slug+"`.")}, met
+	return attemptOutcome[Result]{err: fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider is currently able to serve `"+x.named().Slug+"`.")}, met
 }
 
 // meet adds the fallback condition a failure class meets to met.

@@ -8,6 +8,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
@@ -131,7 +132,7 @@ func (a *codeAttempt) scrubPaidError(data []byte, failed bool) ([]byte, error) {
 	if !failed && !hasError && text != "error" && text != "response.failed" && text != "response.incomplete" {
 		return data, nil
 	}
-	scrubbed, err := redactNativeFailureDocument(doc, a.paid.sensitive)
+	scrubbed, err := fault.RedactNativeFailureDocument(doc, a.paid.sensitive)
 	if err != nil {
 		return nil, err
 	}

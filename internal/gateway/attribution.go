@@ -9,13 +9,14 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 )
 
-func (s *Server) parseAttribution(r *http.Request, authority keyauthority.Authority) (map[string]string, *Error) {
+func (s *Server) parseAttribution(r *http.Request, authority keyauthority.Authority) (map[string]string, *fault.Error) {
 	return parseAttributionValues(r.Header.Values(attribution.Header), authority)
 }
 
-func parseAttributionValues(values []string, authority keyauthority.Authority) (map[string]string, *Error) {
+func parseAttributionValues(values []string, authority keyauthority.Authority) (map[string]string, *fault.Error) {
 	labels, err := parseCallerAttribution(values, authority)
 	if err != nil {
 		return nil, err
@@ -24,50 +25,50 @@ func parseAttributionValues(values []string, authority keyauthority.Authority) (
 	if problem != nil {
 		reason := problem.(*attribution.Error).Reason
 		if reason == "missing_attribution" {
-			return nil, invalidRequest(reason, "Required attribution labels are missing.", nil)
+			return nil, fault.InvalidRequest(reason, "Required attribution labels are missing.", nil)
 		}
 		if reason == "pinned_attribution_override" {
-			return nil, invalidRequest(reason, "Operator-pinned attribution labels cannot be overridden.", nil)
+			return nil, fault.InvalidRequest(reason, "Operator-pinned attribution labels cannot be overridden.", nil)
 		}
-		return nil, invalidRequest("invalid_attribution", "Attribution does not satisfy the key and project policies.", nil)
+		return nil, fault.InvalidRequest("invalid_attribution", "Attribution does not satisfy the key and project policies.", nil)
 	}
 	return resolved, nil
 }
 
-func parseCallerAttribution(values []string, authority keyauthority.Authority) (map[string]string, *Error) {
+func parseCallerAttribution(values []string, authority keyauthority.Authority) (map[string]string, *fault.Error) {
 	if len(values) == 0 {
 		return nil, nil
 	}
 	if len(values) != 1 {
-		return nil, invalidRequest("invalid_attribution", "Provide at most one "+attribution.Header+" header.", nil)
+		return nil, fault.InvalidRequest("invalid_attribution", "Provide at most one "+attribution.Header+" header.", nil)
 	}
 	raw := values[0]
 	if len(raw) > attribution.HeaderBytes {
-		return nil, invalidRequest("invalid_attribution", "The attribution header exceeds 4096 bytes.", nil)
+		return nil, fault.InvalidRequest("invalid_attribution", "The attribution header exceeds 4096 bytes.", nil)
 	}
 	var entries map[string]json.RawMessage
 	decoder := json.NewDecoder(bytes.NewReader([]byte(raw)))
 	var trailing any
 	if err := decoder.Decode(&entries); err != nil || entries == nil ||
 		decoder.Decode(&trailing) != io.EOF {
-		return nil, invalidRequest("invalid_attribution", "The attribution header must be a single JSON object.", nil)
+		return nil, fault.InvalidRequest("invalid_attribution", "The attribution header must be a single JSON object.", nil)
 	}
 	if len(entries) > attribution.MaxKeys {
-		return nil, invalidRequest("invalid_attribution", "The attribution header allows at most 4 entries.", nil)
+		return nil, fault.InvalidRequest("invalid_attribution", "The attribution header allows at most 4 entries.", nil)
 	}
 	labels := make(map[string]string, len(entries))
 	for key, rawValue := range entries {
 		if !slices.Contains(authority.Policy.AllowedAttributionKeys, key) && authority.Policy.AttributionDefaults[key] == "" && authority.ProjectAttributionPolicy.Defaults[key] == "" {
-			return nil, invalidRequest("invalid_attribution", "The attribution key `"+key+"` is not allowed for this API key.", nil)
+			return nil, fault.InvalidRequest("invalid_attribution", "The attribution key `"+key+"` is not allowed for this API key.", nil)
 		}
 		var value string
 		if err := json.Unmarshal(rawValue, &value); err != nil {
-			return nil, invalidRequest("invalid_attribution", "Attribution values must be strings.", nil)
+			return nil, fault.InvalidRequest("invalid_attribution", "Attribution values must be strings.", nil)
 		}
 		labels[key] = value
 	}
 	if err := attribution.Validate(labels); err != nil {
-		return nil, invalidRequest("invalid_attribution", "Attribution keys and values must be short machine tokens.", nil)
+		return nil, fault.InvalidRequest("invalid_attribution", "Attribution keys and values must be short machine tokens.", nil)
 	}
 	return labels, nil
 }

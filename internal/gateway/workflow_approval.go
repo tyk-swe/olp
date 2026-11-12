@@ -10,6 +10,7 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agents/runs"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/oif"
@@ -75,44 +76,44 @@ func stripWorkflowApproval(parsed *wire.Request) (*wire.Request, json.RawMessage
 	return clean, raw, err
 }
 
-func (s *Server) prepareWorkflowResume(ctx context.Context, x *call) *Error {
+func (s *Server) prepareWorkflowResume(ctx context.Context, x *call) *fault.Error {
 	raw := x.generation.approval
 	if len(raw) == 0 {
 		return nil
 	}
 	var request workflowResumeRequest
 	if json.Unmarshal(raw, &request) != nil || !request.Approved || request.ContinuationToken == "" || len(request.Arguments) == 0 {
-		return permissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
+		return fault.PermissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
 	}
 	store, ok := s.deps.WorkflowRuns.(WorkflowApprovalStore)
 	if !ok {
-		return serverError(503, "tool_approval_unavailable", "The approval service is unavailable.")
+		return fault.ServerError(503, "tool_approval_unavailable", "The approval service is unavailable.")
 	}
 	continuation, err := store.Continue(ctx, x.authority, request.ContinuationToken, x.workflow.transcript, request.Arguments, int(s.cfg.MaxBodyBytes))
 	if err != nil || continuation.RouteRevisionID != x.named().RevisionID {
-		return permissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
+		return fault.PermissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
 	}
 	for _, approval := range continuation.Approvals {
 		if !slices.ContainsFunc(x.workflow.tools, func(tool WorkflowTool) bool {
 			return tool.ToolsetID == approval.Binding.ToolsetID && tool.RevisionID == approval.Binding.ToolsetRevisionID && tool.Definition.Alias == approval.Binding.ToolAlias
 		}) {
-			return permissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
+			return fault.PermissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
 		}
 	}
 	var state workflowResumeState
 	if json.Unmarshal(continuation.State, &state) != nil || state.Family != x.family || state.Completion == nil || state.Iteration < 0 || state.Iteration >= 31 || continuation.StartOrdinal < 0 || continuation.NextOrdinal < continuation.StartOrdinal || state.Calls < 0 || state.Calls > 128 || !state.RunLimits.Valid() || state.RunLimits.MaxIterations == nil || state.RunLimits.MaxToolCalls == nil || state.RunLimits.MaxDurationSeconds == nil || state.StartedAt.IsZero() {
-		return permissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
+		return fault.PermissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
 	}
 	priorCost, validCost := rates.ParseCost(state.PriorCost)
 	if !validCost {
-		return permissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
+		return fault.PermissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
 	}
 	bounds := limits.ResolveWorkflowBounds(&state.RunLimits, x.named().RunLimits, x.authority.Policy.RunLimits, &x.generation.callerRunLimits)
 	if int64(state.Iteration)+1 >= *bounds.MaxIterations {
-		return invalidRequest("tool_iteration_limit", "The workflow reached its model iteration limit.", nil)
+		return fault.InvalidRequest("tool_iteration_limit", "The workflow reached its model iteration limit.", nil)
 	}
 	if int64(state.Calls+len(state.Completion.ToolCalls)) > *bounds.MaxToolCalls {
-		return invalidRequest("tool_call_limit", "The workflow reached its tool call limit.", nil)
+		return fault.InvalidRequest("tool_call_limit", "The workflow reached its tool call limit.", nil)
 	}
 	if bounds.MaxRunCost != nil && !state.CostKnown {
 		return workflowUnboundedCost()
@@ -159,11 +160,11 @@ func (s *Server) callWorkflowTool(ctx context.Context, x *call, authority keyaut
 	return runner.CallApproved(ctx, authority, x.request.release, tool, x.workflow.runID, x.workflow.ordinal, callID, json.RawMessage(call.Arguments), x.workflow.approvals[index])
 }
 
-func (s *Server) pauseWorkflow(ctx context.Context, x *call, completion *wire.Completion, iteration int) (*workflowPause, *Error) {
+func (s *Server) pauseWorkflow(ctx context.Context, x *call, completion *wire.Completion, iteration int) (*workflowPause, *fault.Error) {
 	for _, call := range completion.ToolCalls {
 		index := slices.IndexFunc(x.workflow.tools, func(tool WorkflowTool) bool { return tool.Definition.Alias == call.Name })
 		if index < 0 || call.ID == "" || !json.Valid([]byte(call.Arguments)) {
-			return nil, invalidRequest("invalid_tool_call", "The model requested an unavailable tool or invalid arguments.", nil)
+			return nil, fault.InvalidRequest("invalid_tool_call", "The model requested an unavailable tool or invalid arguments.", nil)
 		}
 	}
 	type candidate struct {
@@ -210,7 +211,7 @@ func (s *Server) pauseWorkflow(ctx context.Context, x *call, completion *wire.Co
 	})
 	store, ok := s.deps.WorkflowRuns.(WorkflowApprovalStore)
 	if !ok {
-		return nil, serverError(503, "tool_approval_unavailable", "The approval service is unavailable.")
+		return nil, fault.ServerError(503, "tool_approval_unavailable", "The approval service is unavailable.")
 	}
 	_, modelCostKnown := x.responseCost()
 	costKnown := modelCostKnown && !x.workflow.unknownCost && !slices.ContainsFunc(x.facts, func(fact AttemptFact) bool {
@@ -225,12 +226,12 @@ func (s *Server) pauseWorkflow(ctx context.Context, x *call, completion *wire.Co
 	priorCost := x.workflow.priorCost.Add(x.settledCost()).Add(x.workflow.toolCost)
 	state, err := json.Marshal(workflowResumeState{RunLimits: x.generation.runLimits, PriorCost: priorCost.String(), CostKnown: costKnown, StartedAt: startedAt, Family: x.family, Transcript: x.generation.parsed.Field(x.family.WorkflowTranscriptField()), Completion: completion, Iteration: iteration, Calls: x.workflow.calls, ResponseMCP: x.workflow.responseMCP, ResponseItems: x.workflow.responseItems, RecoveryCalls: x.workflowRecoveryCalls})
 	if err != nil {
-		return nil, serverError(503, "tool_approval_unavailable", "The approval could not be prepared.")
+		return nil, fault.ServerError(503, "tool_approval_unavailable", "The approval could not be prepared.")
 	}
 	deadline, _ := ctx.Deadline()
 	token, err := store.Pause(ctx, x.authority, runs.WorkflowApprovalRequest{RunID: x.workflow.runID, RouteRevisionID: x.named().RevisionID, StartOrdinal: x.workflow.ordinal, Transcript: x.workflow.transcript, State: state, Calls: requests, ExpiresAt: deadline}, int(s.cfg.MaxBodyBytes))
 	if err != nil {
-		return nil, serverError(503, "tool_approval_unavailable", "The approval could not be prepared.")
+		return nil, fault.ServerError(503, "tool_approval_unavailable", "The approval could not be prepared.")
 	}
 	if !x.workflow.responseMCP {
 		return &workflowPause{Type: "tool_approval_required", ContinuationToken: token, Calls: calls}, nil

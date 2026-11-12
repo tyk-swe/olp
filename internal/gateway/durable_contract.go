@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/staging"
 
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -239,11 +240,11 @@ func durableMetadata(model string) []byte {
 	return encoded
 }
 
-func durableError(err error) *Error {
+func durableError(err error) *fault.Error {
 	if errors.Is(err, resources.ErrPayloadTooLarge) || errors.Is(err, resources.ErrMetadataTooLarge) {
-		return serverError(http.StatusBadGateway, "upstream_response_too_large", "The provider resource exceeded the durable state bound.")
+		return fault.ServerError(http.StatusBadGateway, "upstream_response_too_large", "The provider resource exceeded the durable state bound.")
 	}
-	return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The accepted provider resource could not be committed.")
+	return fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The accepted provider resource could not be committed.")
 }
 
 func durableProjection(result []byte, localID string, files map[string]string) ([]byte, error) {

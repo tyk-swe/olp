@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 )
 
 // gateVerdict is the shared pre-dispatch decision for one candidate slot.
@@ -155,13 +156,13 @@ func (s *Server) settlePinHold(ctx context.Context, x *call, hold *dispatchHold,
 type attemptCompletion struct {
 	fact        AttemptFact
 	failure     *attemptFailure
-	authority   *Error
+	authority   *fault.Error
 	attempt     routing.Attempt
 	estimate    int64
-	finishLease func() *Error
+	finishLease func() *fault.Error
 }
 
-func (h *dispatchHold) begin(ctx context.Context, s *Server, x *call, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot) (bool, *Error) {
+func (h *dispatchHold) begin(ctx context.Context, s *Server, x *call, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot) (bool, *fault.Error) {
 	if !x.servingAllowed(provider, attempt.TargetID, attempt.UpstreamModel, slot, true) {
 		s.releaseHold(ctx, h)
 		return false, nil
@@ -186,7 +187,7 @@ func (h *dispatchHold) begin(ctx context.Context, s *Server, x *call, attempt ro
 	return true, nil
 }
 
-func (h *dispatchHold) authorize(ctx context.Context, s *Server, x *call) (context.Context, func() *Error, *Error) {
+func (h *dispatchHold) authorize(ctx context.Context, s *Server, x *call) (context.Context, func() *fault.Error, *fault.Error) {
 	if x.authority.TaskCapability != nil {
 		admitter, ok := s.deps.Runtime.(interface {
 			AdmitTaskCapabilityAttempt(context.Context, keyauthority.Authority, string, string, string, *string, string) error
@@ -197,26 +198,26 @@ func (h *dispatchHold) authorize(ctx context.Context, s *Server, x *call) (conte
 		}
 		if !ok || err != nil {
 			if errors.Is(err, release.ErrTaskAttemptLimit) {
-				return ctx, nil, &Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "task_limit_exceeded", Message: "The task attempt limit was exceeded."}
+				return ctx, nil, &fault.Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "task_limit_exceeded", Message: "The task attempt limit was exceeded."}
 			}
-			return ctx, nil, permissionError("permission_denied", "The task capability is no longer authorized.")
+			return ctx, nil, fault.PermissionError("permission_denied", "The task capability is no longer authorized.")
 		}
 	}
 	if x.workflow == nil {
-		return ctx, func() *Error { return nil }, nil
+		return ctx, func() *fault.Error { return nil }, nil
 	}
 	dispatchCtx, finish := s.monitorWorkflowAuthority(ctx, x, "")
 	return dispatchCtx, finish, nil
 }
 
-func (h *dispatchHold) dispatchContext(ctx context.Context, s *Server, x *call) (context.Context, func() *Error) {
+func (h *dispatchHold) dispatchContext(ctx context.Context, s *Server, x *call) (context.Context, func() *fault.Error) {
 	if x.workflow == nil {
-		return ctx, func() *Error { return nil }
+		return ctx, func() *fault.Error { return nil }
 	}
 	return s.monitorWorkflowModelLease(ctx, x.sessionDebit)
 }
 
-func (h *dispatchHold) complete(ctx context.Context, s *Server, x *call, completion attemptCompletion) (*Error, bool) {
+func (h *dispatchHold) complete(ctx context.Context, s *Server, x *call, completion attemptCompletion) (*fault.Error, bool) {
 	dispatched := completion.failure == nil || completion.failure.dispatched
 	x.dispatched = x.dispatched || dispatched
 	x.stepDispatched = x.stepDispatched || dispatched
@@ -241,7 +242,7 @@ func (h *dispatchHold) complete(ctx context.Context, s *Server, x *call, complet
 		}
 		return completion.authority, false
 	}
-	var releaseErr *Error
+	var releaseErr *fault.Error
 	if completion.failure.dispatched {
 		s.markSessionUnknown(ctx, x)
 	} else {

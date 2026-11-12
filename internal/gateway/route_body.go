@@ -3,6 +3,7 @@ package gateway
 import (
 	"io"
 
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -25,7 +26,7 @@ func (b *measuredBody) size() int64 {
 	}
 	return max(b.read, b.declared, b.decoded)
 }
-func (x *call) checkBody(route *routing.Route) *Error {
+func (x *call) checkBody(route *routing.Route) *fault.Error {
 	if route == nil || x.request.body == nil {
 		return nil
 	}

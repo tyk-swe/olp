@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
@@ -25,7 +26,7 @@ import (
 
 // Decoding follows the endpoint contract, not just its HTTP verb. Multipart
 // bodies remain byte-for-byte intact (including boundaries and file content).
-func (s *Server) readRetainedBody(r *http.Request, e retainedapi.Endpoint) ([]byte, oif.Document, string, *Error) {
+func (s *Server) readRetainedBody(r *http.Request, e retainedapi.Endpoint) ([]byte, oif.Document, string, *fault.Error) {
 	var source oif.Document
 	if e.Method != http.MethodPost && e.Method != http.MethodPatch {
 		return nil, source, "", nil
@@ -36,10 +37,10 @@ func (s *Server) readRetainedBody(r *http.Request, e retainedapi.Endpoint) ([]by
 	if e.Action == "create" && (e.Operation == "skill" || e.Kind == "container_file" && strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data")) {
 		mediaType, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 		if err != nil || mediaType != "multipart/form-data" || params["boundary"] == "" {
-			return nil, source, "", serverError(415, "unsupported_media_type", "Resource uploads require multipart/form-data.")
+			return nil, source, "", fault.ServerError(415, "unsupported_media_type", "Resource uploads require multipart/form-data.")
 		}
 		if encoding := r.Header.Get("Content-Encoding"); encoding != "" && encoding != "identity" {
-			return nil, source, "", serverError(415, "unsupported_content_encoding", "Multipart uploads require identity encoding.")
+			return nil, source, "", fault.ServerError(415, "unsupported_content_encoding", "Multipart uploads require identity encoding.")
 		}
 		body, err := readBounded(r.Body, s.cfg.MaxBodyBytes)
 		if errors.Is(err, errResponseTooLarge) {
@@ -60,28 +61,28 @@ func (s *Server) readRetainedBody(r *http.Request, e retainedapi.Endpoint) ([]by
 				break
 			}
 			if err != nil {
-				return nil, source, "", invalidRequest("invalid_request", "Invalid multipart upload.", nil)
+				return nil, source, "", fault.InvalidRequest("invalid_request", "Invalid multipart upload.", nil)
 			}
 			name := part.FormName()
 			parts++
 			if e.Kind == "container_file" && name == "file_id" {
 				value, err := readBounded(part, 512)
 				if err != nil || part.FileName() != "" || len(value) == 0 {
-					return nil, source, "", invalidRequest("invalid_resource_reference", "A multipart file_id must name one owned file.", nil)
+					return nil, source, "", fault.InvalidRequest("invalid_resource_reference", "A multipart file_id must name one owned file.", nil)
 				}
 				fileID = string(value)
 				continue
 			}
 			if strings.HasSuffix(name, "_id") || strings.HasSuffix(name, "_ids") || e.Kind == "container_file" && name != "file" {
-				return nil, source, "", invalidRequest("invalid_resource_reference", "Multipart resource references are not supported.", nil)
+				return nil, source, "", fault.InvalidRequest("invalid_resource_reference", "Multipart resource references are not supported.", nil)
 			}
 			if _, err = io.Copy(io.Discard, part); err != nil {
-				return nil, source, "", invalidRequest("invalid_request", "Invalid multipart upload.", nil)
+				return nil, source, "", fault.InvalidRequest("invalid_request", "Invalid multipart upload.", nil)
 			}
 		}
 		if e.Kind == "container_file" {
 			if parts != 1 {
-				return nil, source, "", invalidRequest("invalid_request", "Container uploads require exactly one file or file_id.", nil)
+				return nil, source, "", fault.InvalidRequest("invalid_request", "Container uploads require exactly one file or file_id.", nil)
 			}
 			if fileID != "" {
 				source, _ = oif.ParseJSON([]byte(`{"file_id":`+strconv.Quote(fileID)+`}`), oif.Limits{})
@@ -96,7 +97,7 @@ func (s *Server) readRetainedBody(r *http.Request, e retainedapi.Endpoint) ([]by
 	var err error
 	source, err = oif.ParseJSON(body, oif.Limits{MaxBytes: int(s.cfg.MaxBodyBytes)})
 	if err != nil || source.Root().Kind() != oif.Object {
-		return nil, source, "", invalidRequest("invalid_request", "A valid JSON object is required.", nil)
+		return nil, source, "", fault.InvalidRequest("invalid_request", "A valid JSON object is required.", nil)
 	}
 	return body, source, "application/json", nil
 }
@@ -121,7 +122,7 @@ func encodeRetainedRequestBody(e retainedapi.Endpoint, source oif.Document, cont
 	return body.Bytes(), writer.FormDataContentType(), nil
 }
 
-func (s *Server) retainedBodyDigest(e retainedapi.Endpoint, slug string, body []byte, contentType string) ([]byte, *Error) {
+func (s *Server) retainedBodyDigest(e retainedapi.Endpoint, slug string, body []byte, contentType string) ([]byte, *fault.Error) {
 	if !strings.HasPrefix(contentType, "multipart/") {
 		return s.retainedSubmissionDigest(e, slug, body)
 	}
@@ -129,11 +130,11 @@ func (s *Server) retainedBodyDigest(e retainedapi.Endpoint, slug string, body []
 		Digest(secrets.DigestPurpose, string) []byte
 	})
 	if !ok {
-		return nil, serverError(503, "authority_unavailable", "Resource submission identity is unavailable.")
+		return nil, fault.ServerError(503, "authority_unavailable", "Resource submission identity is unavailable.")
 	}
 	_, params, err := mime.ParseMediaType(contentType)
 	if err != nil {
-		return nil, invalidRequest("invalid_request", "Invalid multipart upload.", nil)
+		return nil, fault.InvalidRequest("invalid_request", "Invalid multipart upload.", nil)
 	}
 	reader := multipart.NewReader(bytes.NewReader(body), params["boundary"])
 	type partContent struct {
@@ -147,7 +148,7 @@ func (s *Server) retainedBodyDigest(e retainedapi.Endpoint, slug string, body []
 			break
 		}
 		if err != nil {
-			return nil, invalidRequest("invalid_request", "Invalid multipart upload.", nil)
+			return nil, fault.InvalidRequest("invalid_request", "Invalid multipart upload.", nil)
 		}
 		data, err := io.ReadAll(part)
 		if err != nil {
@@ -157,7 +158,7 @@ func (s *Server) retainedBodyDigest(e retainedapi.Endpoint, slug string, body []
 	}
 	canonical, err := json.Marshal(parts)
 	if err != nil {
-		return nil, invalidRequest("invalid_request", "Invalid multipart upload.", nil)
+		return nil, fault.InvalidRequest("invalid_request", "Invalid multipart upload.", nil)
 	}
 	return digester.Digest(secrets.RetainedSubmissionDigest, e.Operation+"\x00"+e.Kind+"\x00"+slug+"\x00"+string(canonical)), nil
 }
@@ -333,7 +334,7 @@ func (s *Server) rewriteRetainedRequest(ctx context.Context, x *call, a keyautho
 			var contract *durableDocument
 			bound, contract, err = s.readDurable(ctx, durableKind(kind, id), x.keyID, id)
 			if err == nil {
-				var failure *Error
+				var failure *fault.Error
 				if contract != nil {
 					_, _, failure = s.admitDurable(ctx, x, a, bound, contract, x.operationName(), retainedNewWork)
 				} else {
@@ -375,60 +376,60 @@ func (s *Server) rewriteRetainedRequest(ctx context.Context, x *call, a keyautho
 
 // Only declared pagination/filter fields reach the provider. ID cursors have
 // exactly the same owner, parent and serving affinity checks as path IDs.
-func (s *Server) retainedQuery(ctx context.Context, x *call, e retainedapi.Endpoint, resource *resources.Resource, raw url.Values) (url.Values, *Error) {
+func (s *Server) retainedQuery(ctx context.Context, x *call, e retainedapi.Endpoint, resource *resources.Resource, raw url.Values) (url.Values, *fault.Error) {
 	out := url.Values{}
 	for name, values := range raw {
 		if len(values) != 1 {
-			return nil, invalidRequest("invalid_parameter", "Repeated query parameters are not supported.", &name)
+			return nil, fault.InvalidRequest("invalid_parameter", "Repeated query parameters are not supported.", &name)
 		}
 		v := values[0]
 		switch name {
 		case "limit", "page_size", "pageSize":
 			n, err := strconv.Atoi(v)
 			if e.Action != "list" || err != nil || n < 1 || n > 100 {
-				return nil, invalidRequest("invalid_parameter", "Page size must be between 1 and 100.", &name)
+				return nil, fault.InvalidRequest("invalid_parameter", "Page size must be between 1 and 100.", &name)
 			}
 		case "order":
 			if e.Action != "list" || (v != "asc" && v != "desc") {
-				return nil, invalidRequest("invalid_parameter", "order must be asc or desc.", &name)
+				return nil, fault.InvalidRequest("invalid_parameter", "order must be asc or desc.", &name)
 			}
 		case "filter":
 			if e.Action != "list" || e.Kind != "vector_store_file" || !strings.Contains("|in_progress|completed|failed|cancelled|", "|"+v+"|") {
-				return nil, invalidRequest("invalid_parameter", "Unsupported list filter.", &name)
+				return nil, fault.InvalidRequest("invalid_parameter", "Unsupported list filter.", &name)
 			}
 		case "after", "before", "after_id", "before_id":
 			if e.Action != "list" {
-				return nil, invalidRequest("invalid_parameter", "Cursor is only valid on a collection.", &name)
+				return nil, fault.InvalidRequest("invalid_parameter", "Cursor is only valid on a collection.", &name)
 			}
 			bound, err := s.deps.Resources.Get(ctx, e.Kind, x.keyID, v)
 			if err != nil || resource == nil || bound.ParentID == nil || *bound.ParentID != resource.UUID || bound.RouteRevisionID != resource.RouteRevisionID || !samePin(bound, resource) {
-				return nil, invalidRequest("invalid_resource_reference", "The cursor is unavailable under this parent.", &name)
+				return nil, fault.InvalidRequest("invalid_resource_reference", "The cursor is unavailable under this parent.", &name)
 			}
 			v = bound.UpstreamID
 		case "beta":
 			// The pinned Anthropic SDK appends ?beta=true to every
 			// Skills and Skill Versions request; forward it unchanged.
 			if e.Operation != "skill" || v != "true" {
-				return nil, invalidRequest("invalid_parameter", "Unsupported query parameter.", &name)
+				return nil, fault.InvalidRequest("invalid_parameter", "Unsupported query parameter.", &name)
 			}
 		case "page":
 			// Skills lists paginate with the provider's opaque page
 			// token (the previous response's next_page), not a gateway
 			// resource ID, so it passes through without a binding lookup.
 			if e.Operation != "skill" || e.Action != "list" || v == "" {
-				return nil, invalidRequest("invalid_parameter", "Unsupported query parameter.", &name)
+				return nil, fault.InvalidRequest("invalid_parameter", "Unsupported query parameter.", &name)
 			}
 		case "updateMask":
 			if e.Kind != "context_cache" || e.Action != "patch" {
-				return nil, invalidRequest("invalid_parameter", "Unsupported query parameter.", &name)
+				return nil, fault.InvalidRequest("invalid_parameter", "Unsupported query parameter.", &name)
 			}
 			for _, field := range strings.Split(v, ",") {
 				if field != "ttl" && field != "expire_time" && field != "expireTime" {
-					return nil, invalidRequest("invalid_parameter", "Only cache expiration can be updated.", &name)
+					return nil, fault.InvalidRequest("invalid_parameter", "Only cache expiration can be updated.", &name)
 				}
 			}
 		default:
-			return nil, invalidRequest("invalid_parameter", "Unsupported query parameter.", &name)
+			return nil, fault.InvalidRequest("invalid_parameter", "Unsupported query parameter.", &name)
 		}
 		out.Set(name, v)
 	}

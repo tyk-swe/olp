@@ -9,6 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operationplan"
@@ -64,7 +65,7 @@ func (s *Server) selectUnary(x *call, family wire.Format, dialect string, body [
 	if family == wire.Search && !explicit {
 		// Perplexity Search has no model field; the route arrives by header.
 		if routeHeader == "" {
-			return true, invalidRequest("missing_required_parameter", "X-OLP-Route must name a search route.", nil)
+			return true, fault.InvalidRequest("missing_required_parameter", "X-OLP-Route must name a search route.", nil)
 		}
 		model = routeHeader
 	}
@@ -85,7 +86,7 @@ func (s *Server) selectUnary(x *call, family wire.Format, dialect string, body [
 		return false, nil
 	}
 	if !exists {
-		return true, modelNotFound(model)
+		return true, fault.ModelNotFound(model)
 	}
 	x.route = &route
 	if !x.strict() && !serving {
@@ -181,13 +182,13 @@ func (x *call) prepareOperationGuardrails(plan *operationplan.Plan) ([]guardrail
 	return evidence, parallelErr
 }
 
-func (s *Server) prepareUnary(ctx context.Context, x *call) *Error {
+func (s *Server) prepareUnary(ctx context.Context, x *call) *fault.Error {
 	authorize := guardrailAuthorizer(s, x)
 	if e := authorize(x.route); e != nil {
 		return e
 	}
 	if x.semanticQueryInvalid {
-		return invalidRequest("invalid_request", "The query is malformed or ambiguous.", nil)
+		return fault.InvalidRequest("invalid_request", "The query is malformed or ambiguous.", nil)
 	}
 	if e := x.dropIngressQuery(); e != nil {
 		return e
@@ -197,7 +198,7 @@ func (s *Server) prepareUnary(ctx context.Context, x *call) *Error {
 }
 
 // planUnary plans x.route for a registered native operation.
-func (s *Server) planUnary(ctx context.Context, x *call) *Error {
+func (s *Server) planUnary(ctx context.Context, x *call) *fault.Error {
 	if e := s.bindGuardrails(ctx, x); e != nil {
 		return e
 	}
@@ -244,7 +245,7 @@ func (s *Server) planUnary(ctx context.Context, x *call) *Error {
 	return failure
 }
 func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *call, body []byte) (*outcome, int) {
-	fail := func(e *Error) (*outcome, int) {
+	fail := func(e *fault.Error) (*outcome, int) {
 		if x.dispatched && e.Status >= 500 {
 			copy := *e
 			copy.NoRetry = true
@@ -252,11 +253,11 @@ func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *call, bod
 		}
 		// A cancelled client has no status to receive and nothing to read.
 		if e.Status > 0 {
-			writeSurfaceError(w, e, x.clientSurface())
+			fault.WriteSurfaceError(w, e, x.clientSurface())
 		}
 		return &outcome{err: e, cancelled: e.Status == 0}, e.Status
 	}
-	var e *Error
+	var e *fault.Error
 	x.preferences, x.priority, e = routingControls(r, x.authority.Policy)
 	if e != nil {
 		return fail(e)
@@ -294,8 +295,8 @@ func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *call, bod
 		return out, status
 	}
 	rc := http.NewResponseController(w)
-	if rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout)) != nil {
-		return fail(serverError(500, "internal_error", "The result could not be written."))
+	if rc.SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout)) != nil {
+		return fail(fault.ServerError(500, "internal_error", "The result could not be written."))
 	}
 	w.Header().Set("Content-Type", "application/json")
 	x.responseHeaders(w.Header(), false)

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/transport"
 	"github.com/tyk-swe/olp/internal/mediacontract"
@@ -158,9 +159,9 @@ func (s *Server) writeMediaResult(w http.ResponseWriter, x *call, out *mediaOutc
 		}
 		body, failure := media.EncodeTranscriptionJSON(payload.TranscriptionResult)
 		if failure != nil {
-			out.err = serverError(http.StatusBadGateway, failure.Code, failure.Message)
+			out.err = fault.ServerError(http.StatusBadGateway, failure.Code, failure.Message)
 			out.status, out.committed = out.err.Status, false
-			writeSurfaceError(w, out.err, "openai")
+			fault.WriteSurfaceError(w, out.err, "openai")
 			return
 		}
 		s.deliverMediaJSON(w, x, out, body)
@@ -173,9 +174,9 @@ func (s *Server) writeMediaResult(w http.ResponseWriter, x *call, out *mediaOutc
 			body, failure = media.EncodeVideoObject(payload.VideoJobResult, outJobID(out), x.media.Route())
 		}
 		if failure != nil {
-			out.err = serverError(http.StatusBadGateway, failure.Code, failure.Message)
+			out.err = fault.ServerError(http.StatusBadGateway, failure.Code, failure.Message)
 			out.status, out.committed = out.err.Status, false
-			writeSurfaceError(w, out.err, "openai")
+			fault.WriteSurfaceError(w, out.err, "openai")
 			return
 		}
 		s.deliverMediaJSON(w, x, out, body)
@@ -184,11 +185,11 @@ func (s *Server) writeMediaResult(w http.ResponseWriter, x *call, out *mediaOutc
 
 func (s *Server) deliverMedia(w http.ResponseWriter, x *call, out *mediaOutcome, contentType string, write func() error) {
 	rc := http.NewResponseController(w)
-	if err := rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout)); err != nil {
-		out.err = serverError(http.StatusInternalServerError, "internal_error", "The response could not be written.")
+	if err := rc.SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout)); err != nil {
+		out.err = fault.ServerError(http.StatusInternalServerError, "internal_error", "The response could not be written.")
 		out.status, out.committed = out.err.Status, false
 		w.Header().Del("Content-Length")
-		writeSurfaceError(w, out.err, "openai")
+		fault.WriteSurfaceError(w, out.err, "openai")
 		return
 	}
 	w.Header().Set("Content-Type", contentType)
@@ -234,9 +235,9 @@ func (s *Server) writeImageResult(w http.ResponseWriter, x *call, out *mediaOutc
 	defer s.removeImages(images)
 	body, markers, failure := media.EncodeImageResponse(images)
 	if failure != nil {
-		out.err = serverError(http.StatusBadGateway, failure.Code, failure.Message)
+		out.err = fault.ServerError(http.StatusBadGateway, failure.Code, failure.Message)
 		out.status, out.committed = out.err.Status, false
-		writeSurfaceError(w, out.err, "openai")
+		fault.WriteSurfaceError(w, out.err, "openai")
 		return
 	}
 	handles := map[string]staging.Handle{}
@@ -287,9 +288,9 @@ func (s *Server) streamArtifact(w http.ResponseWriter, x *call, out *mediaOutcom
 	opened, err := s.deps.Staging.Open(artifact.Handle)
 	if err != nil {
 		s.deps.Staging.Remove(artifact.Handle)
-		out.err = serverError(http.StatusBadGateway, "media_content_unavailable", "The staged media could not be read.")
+		out.err = fault.ServerError(http.StatusBadGateway, "media_content_unavailable", "The staged media could not be read.")
 		out.status, out.committed = out.err.Status, false
-		writeSurfaceError(w, out.err, "openai")
+		fault.WriteSurfaceError(w, out.err, "openai")
 		return
 	}
 	defer s.deps.Staging.Remove(artifact.Handle)
@@ -305,7 +306,7 @@ func (s *Server) streamArtifact(w http.ResponseWriter, x *call, out *mediaOutcom
 
 func (s *Server) streamMediaEvents(ctx context.Context, w http.ResponseWriter, x *call, events io.ReadCloser, contract *mediacontract.Template, bound mediacontract.Bound) (*wire.Usage, bool, *attemptFailure) {
 	defer events.Close()
-	sw := &streamWriter{w: w, family: x.family, x: x}
+	sw := &fault.StreamWriter{W: w, Family: x.family, Headers: streamedHeaders{x}}
 	var usage *wire.Usage
 	var sequence uint64
 	terminal := errors.New("media stream completed")
@@ -381,7 +382,7 @@ func (s *Server) streamMediaEvents(ctx context.Context, w http.ResponseWriter, x
 				usage.MediaUnits = units
 			}
 		}
-		if err := sw.emit(buf.Bytes()); err != nil {
+		if err := sw.Emit(buf.Bytes()); err != nil {
 			return err
 		}
 		x.delivered(s.now())
@@ -391,14 +392,14 @@ func (s *Server) streamMediaEvents(ctx context.Context, w http.ResponseWriter, x
 		return nil
 	})
 	if errors.Is(decodeErr, terminal) {
-		return usage, sw.committed, nil
+		return usage, sw.Committed, nil
 	}
 	class := classProtocol
 	switch {
-	case errors.Is(decodeErr, errClientWrite), errors.Is(ctx.Err(), context.Canceled):
+	case errors.Is(decodeErr, fault.ErrClientWrite), errors.Is(ctx.Err(), context.Canceled):
 		class = classCancelled
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		class = classTimeout
 	}
-	return usage, sw.committed, &attemptFailure{class: class, committed: sw.committed, dispatched: true}
+	return usage, sw.Committed, &attemptFailure{class: class, committed: sw.Committed, dispatched: true}
 }

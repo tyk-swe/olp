@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -51,7 +52,7 @@ func (s *Server) videoList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	refreshed := make([]jobs.Record, 0, len(page.Items))
-	var refreshError *Error
+	var refreshError *fault.Error
 	for _, record := range page.Items {
 		updated, fact, dispatched, e := s.refreshListRecord(r.Context(), x, record)
 		refreshed = append(refreshed, updated)
@@ -82,7 +83,7 @@ func (s *Server) videoList(w http.ResponseWriter, r *http.Request) {
 	list := &media.VideoListResult{Jobs: results, FirstID: firstID, LastID: lastID, HasMore: page.More}
 	body, failure := media.EncodeVideoListResponse(list, "video")
 	if failure != nil {
-		s.refuse(x, w, serverError(http.StatusBadGateway, failure.Code, failure.Message))
+		s.refuse(x, w, fault.ServerError(http.StatusBadGateway, failure.Code, failure.Message))
 		return
 	}
 	x.dispatched = true
@@ -91,7 +92,7 @@ func (s *Server) videoList(w http.ResponseWriter, r *http.Request) {
 	s.finishMedia(x, out, out.status)
 }
 
-func (s *Server) refreshListRecord(ctx context.Context, x *call, record jobs.Record) (jobs.Record, *AttemptFact, bool, *Error) {
+func (s *Server) refreshListRecord(ctx context.Context, x *call, record jobs.Record) (jobs.Record, *AttemptFact, bool, *fault.Error) {
 	upstream, ok := record.Upstream()
 	if !record.State.Polling() || !ok {
 		return record, nil, false, nil
@@ -146,7 +147,7 @@ func (s *Server) videoGet(w http.ResponseWriter, r *http.Request) {
 	r = r.WithContext(ctx)
 	upstream, ok := record.Upstream()
 	if !ok {
-		s.refuse(x, w, serverError(http.StatusServiceUnavailable, "media_job_upstream_id_unavailable", "The video job's upstream identity is unavailable."))
+		s.refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "media_job_upstream_id_unavailable", "The video job's upstream identity is unavailable."))
 		return
 	}
 	result, transportFailure, fact := s.videoJobCall(r.Context(), x, record, media.VideoGet{ID: upstream})
@@ -214,7 +215,7 @@ func (s *Server) videoContent(w http.ResponseWriter, r *http.Request) {
 	}
 	upstream, ok := record.Upstream()
 	if !ok {
-		s.refuse(x, w, serverError(http.StatusServiceUnavailable, "media_job_upstream_id_unavailable", "The video job's upstream identity is unavailable."))
+		s.refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "media_job_upstream_id_unavailable", "The video job's upstream identity is unavailable."))
 		return
 	}
 	result, transportFailure, fact := s.videoJobCall(r.Context(), x, record, media.VideoContent{ID: upstream, Variant: variant})
@@ -262,7 +263,7 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 	record := *loaded
 	if record.Lifecycle == jobs.Deleted {
 		if record.StrictContract {
-			s.refuse(x, w, notFoundError("video_not_found", "The video job does not exist."))
+			s.refuse(x, w, fault.NotFoundError("video_not_found", "The video job does not exist."))
 			return
 		}
 		body, failure := media.EncodeVideoDeleteResponse(&media.VideoDeleteResult{ID: record.ID, Deleted: true}, record.ID)
@@ -278,7 +279,7 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	upstream, ok := record.Upstream()
 	if !ok {
-		s.refuse(x, w, serverError(http.StatusServiceUnavailable, "media_job_upstream_id_unavailable", "The video job's upstream identity is unavailable."))
+		s.refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "media_job_upstream_id_unavailable", "The video job's upstream identity is unavailable."))
 		return
 	}
 	result, transportFailure, fact := s.videoJobCall(r.Context(), x, &record, media.VideoDelete{ID: upstream})
@@ -341,7 +342,7 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 func (s *Server) mediaFailOutcome(x *call, w http.ResponseWriter, failure *attemptFailure) {
 	e := failure.toError()
 	s.finishMedia(x, &mediaOutcome{err: e, committed: failure.committed}, e.Status)
-	writeSurfaceError(w, e, "openai")
+	fault.WriteSurfaceError(w, e, "openai")
 }
 
 func mediaJobResult(record *jobs.Record) media.VideoJobResult {

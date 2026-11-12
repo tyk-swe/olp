@@ -6,6 +6,7 @@ import (
 	"net/http/httptrace"
 	"sync/atomic"
 
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/upstream"
@@ -74,7 +75,7 @@ func (st *attemptState) interrupted(err error) error {
 		return st.parent.Err()
 	case st.reason.Load() != 0:
 		return context.DeadlineExceeded
-	case errors.Is(err, errClientWrite):
+	case errors.Is(err, fault.ErrClientWrite):
 		return context.Canceled
 	}
 	return nil

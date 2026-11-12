@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -39,7 +40,7 @@ func (s *Server) prepareResearch(r *http.Request, release *release.Release, rout
 			a.finish(ctx)
 		}
 	}()
-	var failure *Error
+	var failure *fault.Error
 	streamAuthority := fresh
 	control := notification || r.Method == http.MethodGet
 	fresh = researchRateAuthority(fresh, control)

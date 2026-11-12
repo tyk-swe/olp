@@ -7,6 +7,7 @@ import (
 	"time"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/media"
@@ -124,7 +125,7 @@ func (s *Server) routeBound(x *call, boundOf func(routing.Attempt) rates.Cost) r
 
 // reserveFallbackCost covers the remaining route's work alongside the bound
 // already dispatched, even when an earlier attempt could not report its usage.
-func (s *Server) reserveFallbackCost(ctx context.Context, x *call) *Error {
+func (s *Server) reserveFallbackCost(ctx context.Context, x *call) *fault.Error {
 	if x.workflow != nil {
 		return nil
 	}
@@ -148,7 +149,7 @@ func (s *Server) reserveFallbackCost(ctx context.Context, x *call) *Error {
 // reserveSessionCost holds the price of a realtime session's selected attempt.
 // A session admits apart from choosing its target, so the hold follows the
 // selection, before the provider is dialled.
-func (s *Server) reserveSessionCost(ctx context.Context, x *call, authority keyauthority.Authority, attempt routing.Attempt, ttl time.Duration) *Error {
+func (s *Server) reserveSessionCost(ctx context.Context, x *call, authority keyauthority.Authority, attempt routing.Attempt, ttl time.Duration) *fault.Error {
 	if s.deps.Runtime != nil {
 		if release := s.deps.Runtime.Release(); release != nil {
 			x.currentCommitments = release.Snapshot()
@@ -164,7 +165,7 @@ func (s *Server) reserveSessionCost(ctx context.Context, x *call, authority keya
 	return s.growCost(ctx, x.lease, hold.amount, hold.charge, hold.requestID, ttl)
 }
 
-func (s *Server) growCost(ctx context.Context, lease *admission.Lease, cost, charge, requestID string, ttl time.Duration) *Error {
+func (s *Server) growCost(ctx context.Context, lease *admission.Lease, cost, charge, requestID string, ttl time.Duration) *fault.Error {
 	if e := s.deps.Admission.checkCostAccounting(ctx); e != nil {
 		return e
 	}

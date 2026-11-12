@@ -7,6 +7,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols"
 )
@@ -14,7 +15,7 @@ import (
 func (x *call) redactBedrockFailure(message *eventstream.Message, observation protocols.BedrockObservation) error {
 	source := observation.Source
 	if observation.Native.Valid() {
-		redacted, err := redactNativeFailureDocument(observation.Native, x.sensitive)
+		redacted, err := fault.RedactNativeFailureDocument(observation.Native, x.sensitive)
 		if err != nil {
 			return err
 		}
@@ -27,7 +28,7 @@ func (x *call) redactBedrockFailure(message *eventstream.Message, observation pr
 		}
 	} else {
 		var err error
-		source, err = redactNativeFailureDocument(source, x.sensitive)
+		source, err = fault.RedactNativeFailureDocument(source, x.sensitive)
 		if err != nil {
 			return err
 		}

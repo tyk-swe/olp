@@ -6,13 +6,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
-func (x *call) workflowModelCost(attempt routing.Attempt) *Error {
+func (x *call) workflowModelCost(attempt routing.Attempt) *fault.Error {
 	if x.workflow == nil || x.generation.runLimits.MaxRunCost == nil {
 		return nil
 	}
@@ -43,7 +44,7 @@ func (x *call) workflowModelCost(attempt routing.Attempt) *Error {
 	return x.workflowCheckCost(bound)
 }
 
-func (x *call) workflowToolCost(tool WorkflowTool) (rates.Cost, bool, *Error) {
+func (x *call) workflowToolCost(tool WorkflowTool) (rates.Cost, bool, *fault.Error) {
 	if tool.Definition.UnitPrice == nil {
 		if x.generation.runLimits.MaxRunCost == nil {
 			return rates.Cost{}, false, nil
@@ -63,22 +64,22 @@ func (x *call) workflowToolCost(tool WorkflowTool) (rates.Cost, bool, *Error) {
 	return bound, true, x.workflowCheckCost(bound)
 }
 
-func (x *call) workflowCheckCost(next rates.Cost) *Error {
+func (x *call) workflowCheckCost(next rates.Cost) *fault.Error {
 	limit, ok := rates.ParseCost(*x.generation.runLimits.MaxRunCost)
 	if !ok || x.workflow.unknownCost {
 		return workflowUnboundedCost()
 	}
 	if x.workflow.priorCost.Add(x.settledCost()).Add(x.workflow.toolCost).Add(next).Cmp(limit) > 0 {
-		return invalidRequest("run_cost_limit", "The next workflow step exceeds the run cost limit.", nil)
+		return fault.InvalidRequest("run_cost_limit", "The next workflow step exceeds the run cost limit.", nil)
 	}
 	return nil
 }
 
-func workflowUnboundedCost() *Error {
-	return invalidRequest("run_cost_unbounded", "The workflow step cannot be bounded under the run cost limit.", nil)
+func workflowUnboundedCost() *fault.Error {
+	return fault.InvalidRequest("run_cost_unbounded", "The workflow step cannot be bounded under the run cost limit.", nil)
 }
 
-func (s *Server) reserveWorkflowRun(ctx context.Context, x *call) (*admission.Lease, *Error) {
+func (s *Server) reserveWorkflowRun(ctx context.Context, x *call) (*admission.Lease, *fault.Error) {
 	if x.workflow == nil {
 		return nil, nil
 	}

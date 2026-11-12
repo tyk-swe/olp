@@ -7,20 +7,13 @@ import (
 	"strings"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/surface"
 )
 
-// requestSurface names the inference API a gateway request speaks.
-func requestSurface(r *http.Request) string {
-	if classified := surface.Of(r.URL.Path); classified.Inference {
-		return classified.Name
-	}
-	return "openai"
-}
 func (s *Server) registerNative(mux *http.ServeMux) {
 	mux.HandleFunc("POST /native/{dialect}/models/{model}", func(w http.ResponseWriter, r *http.Request) {
 		// A native generation dialect is generation on the native surface;
@@ -53,14 +46,14 @@ func (s *Server) registerNative(mux *http.ServeMux) {
 		mux.HandleFunc("OPTIONS "+prefix+"/", s.preflight)
 		mux.HandleFunc(prefix+"/", func(w http.ResponseWriter, r *http.Request) {
 			s.begin(w, r)
-			writeSurfaceError(w, notFoundError("not_found", "Unknown endpoint."), requestSurface(r))
+			fault.WriteSurfaceError(w, fault.NotFoundError("not_found", "Unknown endpoint."), fault.RequestSurface(r))
 		})
 		if strings.HasPrefix(prefix, "/gemini/") {
 			mux.HandleFunc("POST "+prefix+"/models/{action}", func(w http.ResponseWriter, r *http.Request) {
 				model, action, ok := strings.Cut(r.PathValue("action"), ":")
 				if !ok {
 					s.begin(w, r)
-					writeSurfaceError(w, notFoundError("not_found", "Unknown Gemini operation."), "gemini")
+					fault.WriteSurfaceError(w, fault.NotFoundError("not_found", "Unknown Gemini operation."), "gemini")
 					return
 				}
 				var family wire.Format
@@ -81,7 +74,7 @@ func (s *Server) registerNative(mux *http.ServeMux) {
 					return
 				default:
 					s.begin(w, r)
-					writeSurfaceError(w, notFoundError("not_found", "Unknown Gemini operation."), "gemini")
+					fault.WriteSurfaceError(w, fault.NotFoundError("not_found", "Unknown Gemini operation."), "gemini")
 					return
 				}
 				r.SetPathValue("model", model)
@@ -106,19 +99,19 @@ func (s *Server) nativeModel(ctx context.Context, release *release.Release, auth
 }
 func (s *Server) nativeModels(w http.ResponseWriter, r *http.Request) {
 	req := s.begin(w, r)
-	surface := requestSurface(r)
+	surface := fault.RequestSurface(r)
 	authority, e := s.authenticate(r, "models_read")
 	if e != nil {
-		writeSurfaceError(w, e, surface)
+		fault.WriteSurfaceError(w, e, surface)
 		return
 	}
 	if slug := r.PathValue("model"); slug != "" {
 		route, ok := req.release.Snapshot().FindRoute(slug)
 		if !ok || !authority.Allows("models_read", slug, route.ProjectID, s.now()) {
-			writeSurfaceError(w, modelNotFound(slug), surface)
+			fault.WriteSurfaceError(w, fault.ModelNotFound(slug), surface)
 			return
 		}
-		writeJSON(w, s.nativeModel(r.Context(), req.release, authority, route, surface))
+		fault.WriteJSON(w, s.nativeModel(r.Context(), req.release, authority, route, surface))
 		return
 	}
 	rows := []map[string]any{}
@@ -133,8 +126,8 @@ func (s *Server) nativeModels(w http.ResponseWriter, r *http.Request) {
 			first = rows[0]["id"]
 			last = rows[len(rows)-1]["id"]
 		}
-		writeJSON(w, map[string]any{"data": rows, "has_more": false, "first_id": first, "last_id": last})
+		fault.WriteJSON(w, map[string]any{"data": rows, "has_more": false, "first_id": first, "last_id": last})
 	} else {
-		writeJSON(w, map[string]any{"models": rows})
+		fault.WriteJSON(w, map[string]any{"models": rows})
 	}
 }

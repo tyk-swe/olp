@@ -11,6 +11,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -154,22 +155,22 @@ func (s *Server) finalizeGenerationHTTP(x *call, env Envelope) {
 	}
 }
 
-func (s *Server) reconcileResponse(ctx context.Context, localID string, body []byte) *Error {
+func (s *Server) reconcileResponse(ctx context.Context, localID string, body []byte) *fault.Error {
 	observation, err := openai.ObserveResponseUsage(body)
 	if err != nil {
-		return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned malformed response usage.")
+		return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned malformed response usage.")
 	}
 	return s.applyResponseObservation(ctx, localID, observation)
 }
 
-func (s *Server) applyResponseObservation(ctx context.Context, localID string, observation openai.ResponseUsageObservation) *Error {
+func (s *Server) applyResponseObservation(ctx context.Context, localID string, observation openai.ResponseUsageObservation) *fault.Error {
 	evidence := usage.AttemptUsage{Evidence: usage.EvidenceUnobservedUncertain}
 	if observation.Usage != nil {
 		evidence = observedAttemptUsage(observation.Usage, observation.Complete, "generation")
 	}
 	result, err := s.deps.Resources.ObserveResponseUsage(ctx, localID, observation.Status, evidence, s.now())
 	if err != nil {
-		return serverError(http.StatusServiceUnavailable, "response_usage_unavailable", "The stored response usage could not be reconciled; retry the request.")
+		return fault.ServerError(http.StatusServiceUnavailable, "response_usage_unavailable", "The stored response usage could not be reconciled; retry the request.")
 	}
 	if s.deps.Admission != nil && s.deps.Admission.limiter != nil {
 		if err := s.deps.Admission.limiter.InstallSnapshots(ctx, result.CostSnapshots); err != nil {

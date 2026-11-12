@@ -7,6 +7,7 @@ import (
 	"time"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -14,7 +15,7 @@ import (
 
 // ReserveCodeRate uses the shared request/token-rate/concurrency counters.
 // Estimates here never become proven hard token bounds or subscription spend.
-func (a *Admission) ReserveCodeRate(ctx context.Context, authority keyauthority.Authority, estimate int64, ttl time.Duration, route ...string) (*admission.Lease, *Error) {
+func (a *Admission) ReserveCodeRate(ctx context.Context, authority keyauthority.Authority, estimate int64, ttl time.Duration, route ...string) (*admission.Lease, *fault.Error) {
 	authority = withoutCostBudgets(authority)
 	// Code forwarding preserves upstream allowance headers rather than adding
 	// the synthetic API-key allowance of the inference surfaces.
@@ -61,7 +62,7 @@ func codeEndUserPolicy(policy *keyauthority.EndUserPolicy) *keyauthority.EndUser
 	return &copy
 }
 
-func (a *Admission) reserveCodeProvider(ctx context.Context, providerID string, configuration routing.Configuration, estimate int64, ttl time.Duration) (*admission.Lease, *Error) {
+func (a *Admission) reserveCodeProvider(ctx context.Context, providerID string, configuration routing.Configuration, estimate int64, ttl time.Duration) (*admission.Lease, *fault.Error) {
 	request := connectionRequest(&routing.Provider{ID: providerID, Limits: configuration.Options.Limits}, estimate, ttl, "")
 	if !request.HasHardLimits() {
 		return nil, nil

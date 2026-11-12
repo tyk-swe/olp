@@ -7,21 +7,22 @@ import (
 	"time"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 )
 
 // Each boundary reserves independently. A later refusal refunds every earlier
 // reservation, while every dispatched request settles the complete chain.
-func (a *Admission) reserveEndUsers(ctx context.Context, authority *keyauthority.Authority, estimate int64, ttl time.Duration, hold costReservation, costChecked *bool) (*admission.Lease, *Error) {
+func (a *Admission) reserveEndUsers(ctx context.Context, authority *keyauthority.Authority, estimate int64, ttl time.Duration, hold costReservation, costChecked *bool) (*admission.Lease, *fault.Error) {
 	if authority.Policy.EndUserPolicy == nil && authority.ProjectEndUserPolicy == nil {
 		return nil, nil
 	}
 	if authority.EndUserDigest == "" {
-		return nil, invalidRequest("invalid_end_user", "An end-user identity is required by policy.", nil)
+		return nil, fault.InvalidRequest("invalid_end_user", "An end-user identity is required by policy.", nil)
 	}
 	if authority.Policy.EndUserPolicy.Blocks(authority.EndUserDigest) || authority.ProjectEndUserPolicy.Blocks(authority.EndUserDigest) {
-		return nil, &Error{Status: http.StatusForbidden, Type: "permission_error", Code: "end_user_blocked", Message: "This end user is blocked by policy."}
+		return nil, &fault.Error{Status: http.StatusForbidden, Type: "permission_error", Code: "end_user_blocked", Message: "This end user is blocked by policy."}
 	}
 	var chain *admission.Lease
 	for _, boundary := range [...]struct {
@@ -72,7 +73,7 @@ func (a *Admission) reserveEndUsers(ctx context.Context, authority *keyauthority
 		})
 		if policy.TokensPerMinute != nil && estimate > *policy.TokensPerMinute {
 			settleKey(ctx, chain, false, nil, a.logger())
-			return nil, invalidRequest("request_exceeds_token_limit", "This request exceeds the end-user token limit.", nil)
+			return nil, fault.InvalidRequest("request_exceeds_token_limit", "This request exceeds the end-user token limit.", nil)
 		}
 		decision, cancel := context.WithTimeout(ctx, reserveTimeout)
 		lease, err := a.limiter.Reserve(decision, request)

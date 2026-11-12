@@ -14,6 +14,7 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/telemetry"
@@ -292,10 +293,10 @@ func (p *Playground) call(r *http.Request, principal access.Principal, parsed *w
 	}
 }
 
-func (p *Playground) authorize(principal access.Principal) func(*routing.Route) *Error {
-	return func(route *routing.Route) *Error {
+func (p *Playground) authorize(principal access.Principal) func(*routing.Route) *fault.Error {
+	return func(route *routing.Route) *fault.Error {
 		if principal.Project(route.ProjectID, access.View) != nil {
-			return modelNotFound(route.Slug)
+			return fault.ModelNotFound(route.Slug)
 		}
 		return nil
 	}
@@ -329,9 +330,9 @@ func (p *Playground) handle(r *http.Request, principal access.Principal) (access
 	}
 	x.estimate = requestEstimate(x)
 	if !s.admit(r.Context()) {
-		x.failure = overloaded
-		s.finish(x, nil, overloaded.Status)
-		return access.Reply{}, access.Fail(overloaded.Status, overloaded.Code, overloaded.Message)
+		x.failure = fault.Overloaded
+		s.finish(x, nil, fault.Overloaded.Status)
+		return access.Reply{}, access.Fail(fault.Overloaded.Status, fault.Overloaded.Code, fault.Overloaded.Message)
 	}
 	defer s.release(r.Context())
 	// Playground calls, streamed or not, are charged to the route's project and
@@ -478,9 +479,9 @@ func (p *Playground) stream(w http.ResponseWriter, r *http.Request, principal ac
 	}
 	x.estimate = requestEstimate(x)
 	if !s.admit(r.Context()) {
-		x.failure = overloaded
-		s.finish(x, nil, overloaded.Status)
-		return access.Fail(overloaded.Status, overloaded.Code, overloaded.Message)
+		x.failure = fault.Overloaded
+		s.finish(x, nil, fault.Overloaded.Status)
+		return access.Fail(fault.Overloaded.Status, fault.Overloaded.Code, fault.Overloaded.Message)
 	}
 	defer s.release(r.Context())
 	defer s.settleAdmission(r.Context(), x)
@@ -536,13 +537,13 @@ func (sw *playgroundStreamWriter) write(event string, data []byte, limited bool)
 		sw.w.WriteHeader(http.StatusOK)
 		sw.committed = true
 	}
-	rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+	rc.SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
 	if _, err := fmt.Fprintf(sw.w, "event: %s\ndata: %s\n\n", event, data); err != nil {
-		return fmt.Errorf("%w: %v", errClientWrite, err)
+		return fmt.Errorf("%w: %v", fault.ErrClientWrite, err)
 	}
 	sw.total += chunk
 	if err := rc.Flush(); err != nil {
-		return fmt.Errorf("%w: %v", errClientWrite, err)
+		return fmt.Errorf("%w: %v", fault.ErrClientWrite, err)
 	}
 	return nil
 }

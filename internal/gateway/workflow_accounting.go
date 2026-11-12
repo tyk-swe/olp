@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/usage/ingest"
@@ -46,7 +47,7 @@ func accountingAttemptID(e Envelope, index int) (uuid.UUID, error) {
 	return uuid.NewV7()
 }
 
-func (s *Server) settleWorkflowModelAttempt(ctx context.Context, x *call, fact AttemptFact) *Error {
+func (s *Server) settleWorkflowModelAttempt(ctx context.Context, x *call, fact AttemptFact) *fault.Error {
 	settler, ok := s.deps.Debits.(workflowDebitSettler)
 	if !ok {
 		return s.workflowSettlementFailure(ctx, x, fmt.Errorf("workflow settlement is unavailable"))
@@ -86,10 +87,10 @@ func (s *Server) settleWorkflowModelAttempt(ctx context.Context, x *call, fact A
 	return nil
 }
 
-func (s *Server) workflowSettlementFailure(ctx context.Context, x *call, err error) *Error {
+func (s *Server) workflowSettlementFailure(ctx context.Context, x *call, err error) *fault.Error {
 	s.markSessionUnknown(ctx, x)
 	if s.log != nil {
 		s.log.Warn("workflow model attempt settlement failed", "error", err.Error())
 	}
-	return serverError(http.StatusServiceUnavailable, "debit_ledger_unavailable", "The workflow model attempt could not be settled.")
+	return fault.ServerError(http.StatusServiceUnavailable, "debit_ledger_unavailable", "The workflow model attempt could not be settled.")
 }

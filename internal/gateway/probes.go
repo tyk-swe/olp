@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/release"
@@ -230,7 +231,7 @@ func unhealthyClass(class string) bool {
 	return false
 }
 
-func errorStatus(e *Error) int {
+func errorStatus(e *fault.Error) int {
 	if e == nil {
 		return 0
 	}

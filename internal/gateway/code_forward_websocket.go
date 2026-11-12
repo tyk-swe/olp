@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -45,7 +46,7 @@ func codeRead(ctx context.Context, conn *websocket.Conn) <-chan codeMessage {
 }
 
 func codeWrite(ctx context.Context, conn *websocket.Conn, kind websocket.MessageType, body []byte) error {
-	ctx, cancel := context.WithTimeout(ctx, responseWriteTimeout)
+	ctx, cancel := context.WithTimeout(ctx, fault.ResponseWriteTimeout)
 	defer cancel()
 	return conn.Write(ctx, kind, body)
 }
@@ -346,7 +347,7 @@ func forwardCodeHandshakeRejection(ctx context.Context, w http.ResponseWriter, a
 		w.Header().Add("Trailer", name)
 	}
 	w.WriteHeader(response.StatusCode)
-	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
 	writer := flushingHandshakeWriter{w}
 	body, readErr := io.ReadAll(io.TeeReader(io.LimitReader(response.Body, codewire.MaxBody+1), writer))
 	if readErr == nil {

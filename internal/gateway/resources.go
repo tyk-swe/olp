@@ -17,6 +17,7 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -105,7 +106,7 @@ func stateQualified(p *routing.Provider, model, operation, mode string) bool {
 	return p.Connector().SupportsFilesBatches()
 }
 
-func fireworksBatchRefusal(x *call, route *routing.Route) *Error {
+func fireworksBatchRefusal(x *call, route *routing.Route) *fault.Error {
 	if x == nil || route == nil {
 		return nil
 	}
@@ -119,7 +120,7 @@ func fireworksBatchRefusal(x *call, route *routing.Route) *Error {
 	return nil
 }
 
-func strictBatchTargetRefusal(p *pin) *Error {
+func strictBatchTargetRefusal(p *pin) *fault.Error {
 	if p != nil && p.provider.Kind != "openai" && p.provider.Kind != "azure_openai" {
 		return policyUnavailable("target_capability",
 			"Strict routes serve files and batches only for OpenAI and Azure.")
@@ -139,19 +140,19 @@ func resourceModel(res *resources.Resource) string {
 	return meta.UpstreamModel
 }
 
-func (s *Server) selectPin(ctx context.Context, x *call, route *routing.Route, operation, mode string) (*pin, *Error) {
+func (s *Server) selectPin(ctx context.Context, x *call, route *routing.Route, operation, mode string) (*pin, *fault.Error) {
 	return s.selectPinSurface(ctx, x, route, operation, "openai", mode, func(p *routing.Provider, model string) bool {
 		return stateQualified(p, model, operation, mode)
 	})
 }
 
-func (s *Server) selectPinSurface(ctx context.Context, x *call, route *routing.Route, operation, surface, mode string, qualified func(*routing.Provider, string) bool) (*pin, *Error) {
+func (s *Server) selectPinSurface(ctx context.Context, x *call, route *routing.Route, operation, surface, mode string, qualified func(*routing.Provider, string) bool) (*pin, *fault.Error) {
 	return s.selectBoundPinSurface(ctx, x, route, operation, surface, mode, nil, qualified)
 }
 
 type retainedSlotQualifier func(*routing.Provider, *routing.Slot, string) bool
 
-func (s *Server) selectBoundPinSurface(ctx context.Context, x *call, route *routing.Route, operation, surface, mode string, bound *resources.Resource, qualified func(*routing.Provider, string) bool, slotQualifiers ...retainedSlotQualifier) (*pin, *Error) {
+func (s *Server) selectBoundPinSurface(ctx context.Context, x *call, route *routing.Route, operation, surface, mode string, bound *resources.Resource, qualified func(*routing.Provider, string) bool, slotQualifiers ...retainedSlotQualifier) (*pin, *fault.Error) {
 	if e := s.checkRouteFidelity(ctx, route); e != nil {
 		return nil, e
 	}
@@ -221,7 +222,7 @@ func (s *Server) selectBoundPinSurface(ctx context.Context, x *call, route *rout
 		var ok bool
 		deadline, ok = ctx.Deadline()
 		if !ok {
-			return nil, serverError(http.StatusInternalServerError, "internal_error", "Realtime admission requires a session deadline.")
+			return nil, fault.ServerError(http.StatusInternalServerError, "internal_error", "Realtime admission requires a session deadline.")
 		}
 	}
 	for i := range provider.Slots {
@@ -245,7 +246,7 @@ func (s *Server) selectBoundPinSurface(ctx context.Context, x *call, route *rout
 			return nil, (&attemptFailure{class: classTimeout}).toError()
 		}
 	}
-	return nil, serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No credential slot is currently able to serve `"+route.Slug+"`.")
+	return nil, fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "No credential slot is currently able to serve `"+route.Slug+"`.")
 }
 
 func (s *Server) pinnedDo(ctx context.Context, x *call, p *pin, method, endpoint string, body []byte, contentType string) (*http.Response, *attemptFailure) {
@@ -289,11 +290,11 @@ func (s *Server) pinnedDo(ctx context.Context, x *call, p *pin, method, endpoint
 	return s.doPinnedRequest(ctx, x, p, exchange, req, openai.ParseErrorBody)
 }
 
-func upstreamError(f *attemptFailure) *Error {
+func upstreamError(f *attemptFailure) *fault.Error {
 	if f.upstream != nil && f.upstream.Message != "" {
-		return &Error{Status: f.status, Type: f.upstream.Type, Code: f.upstream.Code, Message: f.upstream.Message}
+		return &fault.Error{Status: f.status, Type: f.upstream.Type, Code: f.upstream.Code, Message: f.upstream.Message}
 	}
-	return serverError(http.StatusBadGateway, "upstream_error", "The provider could not complete the request.")
+	return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider could not complete the request.")
 }
 
 func (s *Server) stateBegin(w http.ResponseWriter, r *http.Request, family wire.Format) (*call, keyauthority.Authority, bool) {
@@ -306,11 +307,11 @@ func (s *Server) stateDeadline(ctx context.Context, route *routing.Route) (conte
 	return context.WithTimeout(ctx, time.Duration(route.OverallTimeout)*time.Millisecond)
 }
 
-func (s *Server) reserveState(ctx context.Context, x *call, authority keyauthority.Authority, overall time.Duration) *Error {
+func (s *Server) reserveState(ctx context.Context, x *call, authority keyauthority.Authority, overall time.Duration) *fault.Error {
 	if e := x.checkBody(x.route); e != nil {
 		return e
 	}
-	var e *Error
+	var e *fault.Error
 	x.lease, e = s.deps.Admission.reserveKey(ctx, x.admissionAuthority(authority), x.clientSurface(), max(resourceEstimate, x.estimate), overall, x.limitRoute())
 	return e
 }
@@ -325,22 +326,22 @@ var nativeStateWordings = map[string]nativeStateWording{
 	"gemini":    {missingRoute: "X-OLP-Route is required.", strictRoute: "Strict routes do not serve Gemini files."},
 }
 
-func (s *Server) nativeStateRoute(x *call, authority keyauthority.Authority, r *http.Request, requested string) (*routing.Route, *Error) {
+func (s *Server) nativeStateRoute(x *call, authority keyauthority.Authority, r *http.Request, requested string) (*routing.Route, *fault.Error) {
 	wording := nativeStateWordings[x.family.Surface()]
 	slug := cmp.Or(strings.TrimSpace(r.Header.Get(stateRouteHeader)), requested)
 	if slug == "" {
-		return nil, invalidRequest("missing_required_parameter", wording.missingRoute, nil)
+		return nil, fault.InvalidRequest("missing_required_parameter", wording.missingRoute, nil)
 	}
 	route, ok := x.snapshot().FindRoute(slug)
 	if !ok {
-		return nil, modelNotFound(slug)
+		return nil, fault.ModelNotFound(slug)
 	}
 	x.route = &route
 	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
-		return nil, permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
+		return nil, fault.PermissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
 	}
 	if !slices.Contains(route.Operations, "batch") {
-		return nil, invalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow batch operations.", nil)
+		return nil, fault.InvalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow batch operations.", nil)
 	}
 	if x.strict() {
 		return nil, policyUnavailable("target_capability", wording.strictRoute)
@@ -351,14 +352,14 @@ func (s *Server) nativeStateRoute(x *call, authority keyauthority.Authority, r *
 	return &route, nil
 }
 
-func (s *Server) nativeStatePin(ctx context.Context, x *call, route *routing.Route) (*pin, *Error) {
+func (s *Server) nativeStatePin(ctx context.Context, x *call, route *routing.Route) (*pin, *fault.Error) {
 	surface := x.family.Surface()
 	return s.selectPinSurface(ctx, x, route, "batch", surface, "unary", func(p *routing.Provider, model string) bool {
 		return p.Connector().Supports("batch", surface, "unary") && p.Supports(model, "batch", surface, "unary")
 	})
 }
 
-func (s *Server) reserveStateAndSlot(ctx context.Context, x *call, authority keyauthority.Authority, p *pin, route *routing.Route) *Error {
+func (s *Server) reserveStateAndSlot(ctx context.Context, x *call, authority keyauthority.Authority, p *pin, route *routing.Route) *fault.Error {
 	overall := time.Duration(route.OverallTimeout) * time.Millisecond
 	if e := s.reserveState(ctx, x, authority, overall); e != nil {
 		return e
@@ -714,14 +715,14 @@ func (s *Server) batchFileProjection(ctx context.Context, res *resources.Resourc
 	return projected, nil
 }
 
-func gateError(gate gateResult) *Error {
+func gateError(gate gateResult) *fault.Error {
 	switch gate.verdict {
 	case gateRejected:
 		return gate.rejection.toError()
 	case gateExpired:
 		return (&attemptFailure{class: classTimeout}).toError()
 	}
-	return serverError(http.StatusServiceUnavailable, "upstream_unavailable", "The pinned credential cannot currently serve this object.")
+	return fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "The pinned credential cannot currently serve this object.")
 }
 
 func (s *Server) writeStateJSON(w http.ResponseWriter, x *call, body []byte) {
@@ -729,7 +730,7 @@ func (s *Server) writeStateJSON(w http.ResponseWriter, x *call, body []byte) {
 }
 
 func (s *Server) writeStateJSONStatus(w http.ResponseWriter, x *call, body []byte, status int) {
-	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
 	if body != nil {
 		w.Header().Set("Content-Type", "application/json")
 	}
@@ -740,7 +741,7 @@ func (s *Server) writeStateJSONStatus(w http.ResponseWriter, x *call, body []byt
 		err = http.NewResponseController(w).Flush()
 	}
 	if err != nil || n != len(body) {
-		x.failure = serverError(http.StatusBadGateway, "client_delivery_failed", "The resource result could not be delivered.")
+		x.failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The resource result could not be delivered.")
 		if len(x.facts) > 0 {
 			fact := &x.facts[len(x.facts)-1]
 			fact.Class = classCancelled
@@ -762,27 +763,27 @@ func (s *Server) writeStateJSONStatus(w http.ResponseWriter, x *call, body []byt
 	s.finish(x, &outcome{committed: true}, status)
 }
 
-func resourceListError(err error, message string) *Error {
+func resourceListError(err error, message string) *fault.Error {
 	if errors.Is(err, resources.ErrNotFound) {
-		return invalidRequest("invalid_value", "after must be a gateway identifier of the listed resource kind.", new("after"))
+		return fault.InvalidRequest("invalid_value", "after must be a gateway identifier of the listed resource kind.", new("after"))
 	}
-	return serverError(http.StatusInternalServerError, "internal_error", message)
+	return fault.ServerError(http.StatusInternalServerError, "internal_error", message)
 }
 
-func listArgs(r *http.Request) (int, string, *Error) {
+func listArgs(r *http.Request) (int, string, *fault.Error) {
 	limit := 20
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		var parsed int
 		if _, err := fmt.Sscanf(raw, "%d", &parsed); err != nil || parsed < 1 || parsed > maxResourceList {
 			param := "limit"
-			return 0, "", invalidRequest("invalid_value", "limit must be an integer between 1 and 100.", &param)
+			return 0, "", fault.InvalidRequest("invalid_value", "limit must be an integer between 1 and 100.", &param)
 		}
 		limit = parsed
 	}
 	after := r.URL.Query().Get("after")
 	if after != "" && !strings.Contains(after, "_") {
 		param := "after"
-		return 0, "", invalidRequest("invalid_value", "after must be a gateway object identifier.", &param)
+		return 0, "", fault.InvalidRequest("invalid_value", "after must be a gateway object identifier.", &param)
 	}
 	return limit, after, nil
 }

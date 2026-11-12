@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operations"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
@@ -29,7 +30,7 @@ type unaryFailure struct {
 
 type unaryExchange struct {
 	now        func() time.Time
-	dispatched func(context.Context, *call) *Error
+	dispatched func(context.Context, *call) *fault.Error
 	ctx        context.Context
 	x          *call
 	state      *attemptState

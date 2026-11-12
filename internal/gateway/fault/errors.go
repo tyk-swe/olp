@@ -1,4 +1,4 @@
-package gateway
+package fault
 
 import (
 	"encoding/json"
@@ -23,7 +23,7 @@ type Error struct {
 	// rate is the allowance of the key whose request limits refused the request,
 	// as its reservation measured it, for the rate-limit headers of a 429. It is
 	// zero for every other error.
-	rate limits.RateState
+	Rate limits.RateState
 }
 
 func (e *Error) Error() string { return e.Code + ": " + e.Message }
@@ -39,9 +39,9 @@ func (e *Error) body() []byte {
 	return data
 }
 
-func writeError(w http.ResponseWriter, e *Error) { writeSurfaceError(w, e, "openai") }
-func writeSurfaceError(w http.ResponseWriter, e *Error, surface string) {
-	http.NewResponseController(w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+func WriteError(w http.ResponseWriter, e *Error) { WriteSurfaceError(w, e, "openai") }
+func WriteSurfaceError(w http.ResponseWriter, e *Error, surface string) {
+	http.NewResponseController(w).SetWriteDeadline(time.Now().Add(ResponseWriteTimeout))
 	h := w.Header()
 	h.Set("Content-Type", "application/json")
 	if e.NoRetry {
@@ -53,36 +53,36 @@ func writeSurfaceError(w http.ResponseWriter, e *Error, surface string) {
 	if e.RetryAfter > 0 {
 		h.Set("Retry-After", strconv.FormatInt(int64(math.Ceil(e.RetryAfter.Seconds())), 10))
 	}
-	setRateLimitHeaders(h, surface, e.rate)
+	setRateLimitHeaders(h, surface, e.Rate)
 	w.WriteHeader(e.Status)
-	w.Write(e.surfaceBody(surface))
+	w.Write(e.SurfaceBody(surface))
 }
 
-func invalidRequest(code, message string, param *string) *Error {
+func InvalidRequest(code, message string, param *string) *Error {
 	return &Error{Status: http.StatusBadRequest, Type: "invalid_request_error", Code: code, Message: message, Param: param}
 }
 
-func authenticationError(code, message string) *Error {
+func AuthenticationError(code, message string) *Error {
 	return &Error{Status: http.StatusUnauthorized, Type: "authentication_error", Code: code, Message: message}
 }
 
-func permissionError(code, message string) *Error {
+func PermissionError(code, message string) *Error {
 	return &Error{Status: http.StatusForbidden, Type: "permission_error", Code: code, Message: message}
 }
 
-func notFoundError(code, message string) *Error {
+func NotFoundError(code, message string) *Error {
 	return &Error{Status: http.StatusNotFound, Type: "invalid_request_error", Code: code, Message: message}
 }
 
-func serverError(status int, code, message string) *Error {
+func ServerError(status int, code, message string) *Error {
 	return &Error{Status: status, Type: "server_error", Code: code, Message: message}
 }
 
-func modelNotFound(model string) *Error {
-	return notFoundError("route_not_found", "The model `"+model+"` does not exist or you do not have access to it.")
+func ModelNotFound(model string) *Error {
+	return NotFoundError("route_not_found", "The model `"+model+"` does not exist or you do not have access to it.")
 }
 
-var overloaded = &Error{
+var Overloaded = &Error{
 	Status:     http.StatusServiceUnavailable,
 	Type:       "server_error",
 	Code:       "request_admission_overloaded",
@@ -90,7 +90,7 @@ var overloaded = &Error{
 	RetryAfter: time.Second,
 }
 
-func (e *Error) surfaceBody(surface string) []byte {
+func (e *Error) SurfaceBody(surface string) []byte {
 	if surface == "anthropic" {
 		kind := e.Type
 		switch e.Status {
@@ -136,17 +136,17 @@ func (e *Error) surfaceBody(surface string) []byte {
 	return e.body()
 }
 
-func stagingError(failure *staging.Error) *Error {
+func StagingError(failure *staging.Error) *Error {
 	switch failure.Kind {
 	case staging.TooLarge:
 		return &Error{Status: http.StatusRequestEntityTooLarge, Type: "invalid_request_error", Code: "media_too_large", Message: failure.Message}
 	case staging.Timeout:
 		return &Error{Status: http.StatusRequestTimeout, Type: "invalid_request_error", Code: "multipart_parser_timeout", Message: failure.Message}
 	case staging.Overloaded:
-		return serverError(http.StatusServiceUnavailable, "media_admission_overloaded", failure.Message)
+		return ServerError(http.StatusServiceUnavailable, "media_admission_overloaded", failure.Message)
 	case staging.Unavailable:
-		return serverError(http.StatusServiceUnavailable, "media_spool_unavailable", failure.Message)
+		return ServerError(http.StatusServiceUnavailable, "media_spool_unavailable", failure.Message)
 	default:
-		return invalidRequest("invalid_request", failure.Message, nil)
+		return InvalidRequest("invalid_request", failure.Message, nil)
 	}
 }

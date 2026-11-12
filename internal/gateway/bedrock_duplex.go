@@ -11,6 +11,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 )
 
 type bedrockPeer struct {
@@ -69,13 +70,13 @@ func (s *Server) openBedrockStream(ctx context.Context, x *call, p *pin) (duplex
 	return &bedrockPeer{stream: stream}, nil
 }
 
-func (s *Server) bedrockDuplexDial(ctx context.Context, x *call, p *pin) (duplexPeer, *Error) {
+func (s *Server) bedrockDuplexDial(ctx context.Context, x *call, p *pin) (duplexPeer, *fault.Error) {
 	fact := s.newFact(x, p.attempt, p.slot, len(x.facts)+1, &p.provider)
 	fact.Mode = "realtime"
 	if p.hold != nil {
 		fact.Budgets = p.hold.budgets
 	}
-	finish := func(class string, e *Error) (duplexPeer, *Error) {
+	finish := func(class string, e *fault.Error) (duplexPeer, *fault.Error) {
 		fact.Class = class
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		fact.recordEvidence(false)
@@ -84,10 +85,10 @@ func (s *Server) bedrockDuplexDial(ctx context.Context, x *call, p *pin) (duplex
 	}
 	endpoint, err := p.provider.Connector().BedrockDuplexEndpoint()
 	if err != nil {
-		return finish(classCredential, serverError(http.StatusBadGateway, "upstream_error", "The Bedrock duplex profile cannot address this model."))
+		return finish(classCredential, fault.ServerError(http.StatusBadGateway, "upstream_error", "The Bedrock duplex profile cannot address this model."))
 	}
 	if _, err := s.egress.ValidateEndpoint(endpoint); err != nil {
-		return finish(classConnect, serverError(http.StatusBadGateway, "upstream_error", "The Bedrock provider address is not permitted."))
+		return finish(classConnect, fault.ServerError(http.StatusBadGateway, "upstream_error", "The Bedrock provider address is not permitted."))
 	}
 	dialCtx, cancel := context.WithCancel(ctx)
 	dialTimer := time.AfterFunc(p.attempt.Timeout, cancel)
@@ -99,7 +100,7 @@ func (s *Server) bedrockDuplexDial(ctx context.Context, x *call, p *pin) (duplex
 		if errors.Is(err, connectors.ErrCredentialRejected) {
 			class = classCredential
 		}
-		return finish(class, serverError(http.StatusBadGateway, "upstream_error", "The Bedrock bidirectional stream could not be opened."))
+		return finish(class, fault.ServerError(http.StatusBadGateway, "upstream_error", "The Bedrock bidirectional stream could not be opened."))
 	}
 	fact.Class = "success"
 	fact.Status = http.StatusOK

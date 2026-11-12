@@ -7,6 +7,7 @@ import (
 	"errors"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -15,7 +16,7 @@ import (
 // Notification streams have the configured concurrency bounds, but their own
 // counters per service. They must not occupy tool-call slots. Request rates
 // remain shared with ordinary traffic through the usual research reservation.
-func (a *Admission) reserveResearchStream(ctx context.Context, authority keyauthority.Authority, route, service, provider string, providerLimits *routing.Limits) (*admission.Lease, *Error) {
+func (a *Admission) reserveResearchStream(ctx context.Context, authority keyauthority.Authority, route, service, provider string, providerLimits *routing.Limits) (*admission.Lease, *fault.Error) {
 	type boundary struct {
 		scope    string
 		max      *int64
@@ -40,7 +41,7 @@ func (a *Admission) reserveResearchStream(ctx context.Context, authority keyauth
 		if boundary.max == nil {
 			continue
 		}
-		refuse := func(failure *Error) (*admission.Lease, *Error) {
+		refuse := func(failure *fault.Error) (*admission.Lease, *fault.Error) {
 			settleKey(ctx, chain, false, nil, a.logger())
 			return nil, failure
 		}

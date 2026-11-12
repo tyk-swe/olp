@@ -11,6 +11,7 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agents/runs"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/mcp"
@@ -66,11 +67,11 @@ type workflowCall struct {
 	approvals     []runs.WorkflowApproval
 }
 
-func workflowBounds(route, key *limits.WorkflowBounds, request *wire.Request) (limits.WorkflowBounds, limits.WorkflowBounds, *wire.Request, *Error) {
+func workflowBounds(route, key *limits.WorkflowBounds, request *wire.Request) (limits.WorkflowBounds, limits.WorkflowBounds, *wire.Request, *fault.Error) {
 	raw := request.Field("olp_run_limits")
 	caller, ok := limits.ParseWorkflowBounds(raw)
 	if !ok {
-		return limits.WorkflowBounds{}, limits.WorkflowBounds{}, nil, invalidRequest("invalid_run_limits", "Use valid workflow run limits.", nil)
+		return limits.WorkflowBounds{}, limits.WorkflowBounds{}, nil, fault.InvalidRequest("invalid_run_limits", "Use valid workflow run limits.", nil)
 	}
 	resolved := limits.ResolveWorkflowBounds(nil, route, key, &caller)
 	if len(raw) == 0 {
@@ -78,17 +79,17 @@ func workflowBounds(route, key *limits.WorkflowBounds, request *wire.Request) (l
 	}
 	stripped, err := request.WithResourceBindings(oif.Change{Pointer: oif.Pointer("", "olp_run_limits"), Remove: true, Reason: "gateway workflow bounds"})
 	if err != nil {
-		return limits.WorkflowBounds{}, limits.WorkflowBounds{}, nil, invalidRequest("invalid_run_limits", "The workflow limits could not be processed.", nil)
+		return limits.WorkflowBounds{}, limits.WorkflowBounds{}, nil, fault.InvalidRequest("invalid_run_limits", "The workflow limits could not be processed.", nil)
 	}
 	return resolved, caller, stripped, nil
 }
 
-func (s *Server) prepareWorkflow(ctx context.Context, x *call, token string) *Error {
+func (s *Server) prepareWorkflow(ctx context.Context, x *call, token string) *fault.Error {
 	switch refusal := mcp.WorkflowRequestRefusal(x.generation.parsed); refusal {
 	case "tool_execution_unsupported":
-		return invalidRequest("tool_execution_unsupported", "Gateway tool execution is unavailable on this surface.", nil)
+		return fault.InvalidRequest("tool_execution_unsupported", "Gateway tool execution is unavailable on this surface.", nil)
 	case "tool_execution_choices_unsupported":
-		return invalidRequest(refusal, "Gateway tool execution requires a single choice.", nil)
+		return fault.InvalidRequest(refusal, "Gateway tool execution requires a single choice.", nil)
 	}
 	tools, err := s.deps.WorkflowTools.Resolve(ctx, x.authority, x.request.release, x.generation.toolsets)
 	if err != nil {
@@ -109,7 +110,7 @@ func (s *Server) prepareWorkflow(ctx context.Context, x *call, token string) *Er
 			}
 			parsed, err := x.generation.parsed.WithResourceBindings(oif.Change{Pointer: oif.Pointer("", field), Remove: true, Reason: "empty gateway toolset selection"})
 			if err != nil {
-				return invalidRequest("invalid_request", "The route tools could not be removed from the request.", nil)
+				return fault.InvalidRequest("invalid_request", "The route tools could not be removed from the request.", nil)
 			}
 			x.generation.parsed = parsed
 		}
@@ -118,11 +119,11 @@ func (s *Server) prepareWorkflow(ctx context.Context, x *call, token string) *Er
 	}
 	raw, err := workflowDefinitions(x.family, tools)
 	if err != nil {
-		return serverError(http.StatusServiceUnavailable, "tool_execution_unavailable", "The route tools could not be prepared.")
+		return fault.ServerError(http.StatusServiceUnavailable, "tool_execution_unavailable", "The route tools could not be prepared.")
 	}
 	parsed, err := x.generation.parsed.WithField("tools", raw)
 	if err != nil {
-		return invalidRequest("invalid_request", "The route tools could not be added to the request.", nil)
+		return fault.InvalidRequest("invalid_request", "The route tools could not be added to the request.", nil)
 	}
 	x.generation.parsed = parsed
 	x.workflow = &workflowCall{token: token, tools: tools, transcript: x.generation.parsed.Field(x.family.WorkflowTranscriptField()), responseMCP: x.family == wire.Responses && x.named().ResponsesMCPItems}
@@ -156,13 +157,13 @@ func workflowDefinitions(family wire.Format, tools []WorkflowTool) (json.RawMess
 	return protocols.WorkflowDefinitions(family, definitions)
 }
 
-func (s *Server) workflowAuthority(ctx context.Context, x *call, route *routing.Route, toolsetID string) (*keyauthority.Authority, *Error) {
+func (s *Server) workflowAuthority(ctx context.Context, x *call, route *routing.Route, toolsetID string) (*keyauthority.Authority, *fault.Error) {
 	authority, err := s.reauthenticateSession(ctx, x, x.workflow.token)
 	if errors.Is(err, release.ErrStaleAuthority) {
-		return nil, serverError(http.StatusServiceUnavailable, "authority_unavailable", "Key authority is unavailable; retry shortly.")
+		return nil, fault.ServerError(http.StatusServiceUnavailable, "authority_unavailable", "Key authority is unavailable; retry shortly.")
 	}
 	if err != nil || authority == nil || authority.ID != x.authority.ID || authority.DelegationAgentID != x.authority.DelegationAgentID || authority.DelegationMemberID != x.authority.DelegationMemberID || authority.DelegationPairDigest != x.authority.DelegationPairDigest {
-		return nil, authenticationError("invalid_api_key", "This API key is no longer authorized.")
+		return nil, fault.AuthenticationError("invalid_api_key", "This API key is no longer authorized.")
 	}
 	if e := s.keyAuthorizer(*authority)(x.named()); e != nil {
 		return nil, e
@@ -171,10 +172,10 @@ func (s *Server) workflowAuthority(ctx context.Context, x *call, route *routing.
 		return nil, e
 	}
 	if !authority.AllowsEndUser(x.endUserDigest) || (authority.WorkloadIssuerID != nil && authority.EndUserDigest != x.endUserDigest) || !authority.AllowsAttribution(x.attribution) || !authority.AllowsClientIP(x.request.clientIP) {
-		return nil, permissionError("permission_denied", "This API key no longer permits the request.")
+		return nil, fault.PermissionError("permission_denied", "This API key no longer permits the request.")
 	}
 	if toolsetID != "" && (authority.ProjectID == nil || !authority.AllowsResource("tools", toolsetID, *authority.ProjectID, s.now())) {
-		return nil, permissionError("permission_denied", "This API key no longer permits the toolset.")
+		return nil, fault.PermissionError("permission_denied", "This API key no longer permits the toolset.")
 	}
 	for _, tool := range x.workflow.tools {
 		if tool.ToolsetID == "" && tool.Definition.Alias == recoveryToolName {
@@ -187,9 +188,9 @@ func (s *Server) workflowAuthority(ctx context.Context, x *call, route *routing.
 	return authority, nil
 }
 
-func (s *Server) monitorWorkflowAuthority(ctx context.Context, x *call, toolsetID string) (context.Context, func() *Error) {
+func (s *Server) monitorWorkflowAuthority(ctx context.Context, x *call, toolsetID string) (context.Context, func() *fault.Error) {
 	callCtx, cancel := context.WithCancel(ctx)
-	result := make(chan *Error, 1)
+	result := make(chan *fault.Error, 1)
 	done := make(chan struct{})
 	route := x.route
 	go func() {
@@ -212,7 +213,7 @@ func (s *Server) monitorWorkflowAuthority(ctx context.Context, x *call, toolsetI
 			}
 		}
 	}()
-	return callCtx, func() *Error {
+	return callCtx, func() *fault.Error {
 		cancel()
 		<-done
 		select {
@@ -224,15 +225,15 @@ func (s *Server) monitorWorkflowAuthority(ctx context.Context, x *call, toolsetI
 	}
 }
 
-func workflowError(err error) *Error {
+func workflowError(err error) *fault.Error {
 	var failure *mcp.WorkflowError
 	if errors.As(err, &failure) {
-		return &Error{Status: failure.Status, Type: "invalid_request_error", Code: failure.Code, Message: failure.Message}
+		return &fault.Error{Status: failure.Status, Type: "invalid_request_error", Code: failure.Code, Message: failure.Message}
 	}
-	return serverError(http.StatusServiceUnavailable, "tool_execution_unavailable", "The workflow tool service is unavailable.")
+	return fault.ServerError(http.StatusServiceUnavailable, "tool_execution_unavailable", "The workflow tool service is unavailable.")
 }
 
-func (s *Server) abandonWorkflowDebit(ctx context.Context, x *call) *Error {
+func (s *Server) abandonWorkflowDebit(ctx context.Context, x *call) *fault.Error {
 	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	err := func() error {
@@ -260,7 +261,7 @@ func (s *Server) abandonWorkflowDebit(ctx context.Context, x *call) *Error {
 }
 
 func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
-	firstIteration, resumeError := func() (int, *Error) {
+	firstIteration, resumeError := func() (int, *fault.Error) {
 		if x.workflow.resume == nil {
 			return 0, nil
 		}
@@ -268,7 +269,7 @@ func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
 		x.workflow.calls = state.Calls
 		parsed, err := x.generation.parsed.WithField(x.family.WorkflowTranscriptField(), state.Transcript)
 		if err != nil {
-			return 0, invalidRequest("tool_approval_invalid", "The approved workflow could not be resumed.", nil)
+			return 0, fault.InvalidRequest("tool_approval_invalid", "The approved workflow could not be resumed.", nil)
 		}
 		x.generation.parsed = parsed
 		if x.guardrailEngine != nil && x.guardrailEngine.HasCompression() {
@@ -317,7 +318,7 @@ func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
 		if out.err == nil && out.completion != nil && x.generation.parsed.Stream {
 			completion, err := workflowStreamCompletion(x.family, bytes.NewReader(frames.Bytes()), int(s.cfg.MaxEventBytes), int(s.cfg.MaxResponseBytes), x.named().Slug)
 			if err != nil {
-				return &outcome{err: serverError(http.StatusBadGateway, "invalid_tool_response", "The model returned an invalid streaming response.")}
+				return &outcome{err: fault.ServerError(http.StatusBadGateway, "invalid_tool_response", "The model returned an invalid streaming response.")}
 			}
 			out.completion.ToolCalls, out.completion.OutputText, out.completion.Refusal = completion.ToolCalls, completion.OutputText, completion.Refusal
 			if len(completion.ToolCalls) != 0 && x.family == wire.Responses {
@@ -325,19 +326,19 @@ func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
 			} else if len(completion.ToolCalls) != 0 && x.family != wire.Chat {
 				body, err := protocols.WorkflowStreamBody(x.family, bytes.NewReader(frames.Bytes()), int(s.cfg.MaxEventBytes))
 				if err != nil {
-					return &outcome{err: serverError(http.StatusBadGateway, "invalid_tool_response", "The model returned an invalid streaming response.")}
+					return &outcome{err: fault.ServerError(http.StatusBadGateway, "invalid_tool_response", "The model returned an invalid streaming response.")}
 				}
 				out.completion.Body = body
 			}
 		}
 		if out.err == nil && out.completion != nil && !x.generation.parsed.Stream && x.family.Surface() == "gemini" && !protocols.WorkflowSingleCandidate(out.completion.Body) {
-			return &outcome{err: serverError(http.StatusBadGateway, "invalid_tool_response", "The model returned multiple candidates.")}
+			return &outcome{err: fault.ServerError(http.StatusBadGateway, "invalid_tool_response", "The model returned multiple candidates.")}
 		}
 		if out.err != nil || out.completion == nil || len(out.completion.ToolCalls) == 0 {
 			if out.err == nil && out.completion != nil && !x.generation.parsed.Stream && len(x.workflow.responseItems) > 0 {
 				body, err := projectResponseMCPItems(out.completion.Body, x.workflow.responseItems, s.cfg.MaxResponseBytes)
 				if err != nil {
-					return &outcome{err: serverError(http.StatusBadGateway, "invalid_tool_response", "The workflow response could not be prepared.")}
+					return &outcome{err: fault.ServerError(http.StatusBadGateway, "invalid_tool_response", "The workflow response could not be prepared.")}
 				}
 				out.completion.Body = body
 			}
@@ -345,7 +346,7 @@ func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
 				if len(x.workflow.responseItems) > 0 {
 					projected, err := projectResponseMCPFrames(frames.Bytes(), x.workflow.responseItems, int(s.cfg.MaxEventBytes), s.cfg.MaxResponseBytes)
 					if err != nil {
-						return &outcome{err: serverError(http.StatusBadGateway, "invalid_tool_response", "The workflow response could not be prepared.")}
+						return &outcome{err: fault.ServerError(http.StatusBadGateway, "invalid_tool_response", "The workflow response could not be prepared.")}
 					}
 					x.workflow.finalFrames = projected
 				} else {
@@ -355,10 +356,10 @@ func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
 			return out
 		}
 		if int64(iteration)+1 == *x.generation.runLimits.MaxIterations {
-			return &outcome{err: invalidRequest("tool_iteration_limit", "The workflow reached its model iteration limit.", nil)}
+			return &outcome{err: fault.InvalidRequest("tool_iteration_limit", "The workflow reached its model iteration limit.", nil)}
 		}
 		if int64(len(out.completion.ToolCalls)+x.workflow.calls) > *x.generation.runLimits.MaxToolCalls {
-			return &outcome{err: invalidRequest("tool_call_limit", "The workflow reached its tool call limit.", nil)}
+			return &outcome{err: fault.InvalidRequest("tool_call_limit", "The workflow reached its tool call limit.", nil)}
 		}
 		pause, failure := s.pauseWorkflow(ctx, x, out.completion, iteration)
 		if failure != nil {
@@ -373,7 +374,7 @@ func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
 		}
 		x.generation.parsed = parsed
 	}
-	return &outcome{err: invalidRequest("tool_iteration_limit", "The workflow reached its model iteration limit.", nil)}
+	return &outcome{err: fault.InvalidRequest("tool_iteration_limit", "The workflow reached its model iteration limit.", nil)}
 }
 
 func workflowStreamCompletion(family wire.Format, frames *bytes.Reader, maxEvent, maxResponse int, route string) (*wire.Completion, error) {
@@ -402,7 +403,7 @@ func workflowStreamCompletion(family wire.Format, frames *bytes.Reader, maxEvent
 	return openai.Stream(wire.Chat, &translated, maxEvent, route, true, func([]byte) error { return nil })
 }
 
-func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire.Completion, identityStart int) (*wire.Request, *Error) {
+func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire.Completion, identityStart int) (*wire.Request, *fault.Error) {
 	var response struct {
 		Choices []struct {
 			Message json.RawMessage `json:"message"`
@@ -416,13 +417,13 @@ func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire
 		}
 		assistant, err := json.Marshal(map[string]any{"role": "assistant", "content": completion.OutputText, "tool_calls": calls})
 		if err != nil {
-			return nil, serverError(http.StatusBadGateway, "invalid_tool_response", "The model returned an invalid tool response.")
+			return nil, fault.ServerError(http.StatusBadGateway, "invalid_tool_response", "The model returned an invalid tool response.")
 		}
 		response.Choices = append(response.Choices, struct {
 			Message json.RawMessage `json:"message"`
 		}{Message: assistant})
 	} else if x.family == wire.Chat && (json.Unmarshal(completion.Body, &response) != nil || len(response.Choices) != 1 || len(response.Choices[0].Message) == 0) {
-		return nil, serverError(http.StatusBadGateway, "invalid_tool_response", "The model returned an invalid tool response.")
+		return nil, fault.ServerError(http.StatusBadGateway, "invalid_tool_response", "The model returned an invalid tool response.")
 	}
 	field := x.family.WorkflowTranscriptField()
 	input := x.generation.parsed.Field(field)
@@ -432,11 +433,11 @@ func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire
 			Content json.RawMessage `json:"content"`
 		}{Role: "user", Content: input})
 		if err != nil {
-			return nil, invalidRequest("invalid_request", "The request messages could not be continued.", nil)
+			return nil, fault.InvalidRequest("invalid_request", "The request messages could not be continued.", nil)
 		}
 		messages = []json.RawMessage{message}
 	} else if err := json.Unmarshal(input, &messages); err != nil {
-		return nil, invalidRequest("invalid_request", "The request messages could not be continued.", nil)
+		return nil, fault.InvalidRequest("invalid_request", "The request messages could not be continued.", nil)
 	}
 	if x.family == wire.Chat {
 		messages = append(messages, response.Choices[0].Message)
@@ -449,7 +450,7 @@ func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire
 		}
 		index := slices.IndexFunc(x.workflow.tools, func(tool WorkflowTool) bool { return tool.Definition.Alias == call.Name })
 		if index < 0 || call.ID == "" || slices.Contains(x.workflowRecoveryCalls, call.ID) || !json.Valid([]byte(call.Arguments)) {
-			return nil, invalidRequest("invalid_tool_call", "The model requested an unavailable tool or invalid arguments.", nil)
+			return nil, fault.InvalidRequest("invalid_tool_call", "The model requested an unavailable tool or invalid arguments.", nil)
 		}
 		// A shallow copy retains fresh limits while binding request-local attribution.
 		toolAuthority := *authority
@@ -472,7 +473,7 @@ func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire
 		if x.workflow.responseMCP && call.Name != recoveryToolName {
 			item, err := responseMCPCall(x.workflow.tools[index], call, result)
 			if err != nil {
-				return nil, serverError(http.StatusBadGateway, "invalid_tool_response", "The tool returned an invalid response.")
+				return nil, fault.ServerError(http.StatusBadGateway, "invalid_tool_response", "The tool returned an invalid response.")
 			}
 			x.workflow.responseItems = append(x.workflow.responseItems, item)
 		}
@@ -488,43 +489,43 @@ func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire
 			Content    string `json:"content"`
 		}{Role: "tool", ToolCallID: call.ID, Content: string(result)})
 		if err != nil {
-			return nil, serverError(http.StatusServiceUnavailable, "tool_execution_unavailable", "The tool result could not be continued.")
+			return nil, fault.ServerError(http.StatusServiceUnavailable, "tool_execution_unavailable", "The tool result could not be continued.")
 		}
 		messages = append(messages, message)
 	}
 	if x.family != wire.Chat {
 		turns, err := protocols.WorkflowTurns(x.family, completion, results)
 		if err != nil {
-			return nil, serverError(http.StatusBadGateway, "invalid_tool_response", "The model returned an invalid tool response.")
+			return nil, fault.ServerError(http.StatusBadGateway, "invalid_tool_response", "The model returned an invalid tool response.")
 		}
 		messages = append(messages, turns...)
 	}
 	raw, err := json.Marshal(messages)
 	if err != nil {
-		return nil, serverError(http.StatusServiceUnavailable, "tool_execution_unavailable", "The workflow could not be continued.")
+		return nil, fault.ServerError(http.StatusServiceUnavailable, "tool_execution_unavailable", "The workflow could not be continued.")
 	}
 	parsed, err := x.generation.parsed.WithField(field, raw)
 	if err != nil {
-		return nil, invalidRequest("invalid_request", "The request messages could not be continued.", nil)
+		return nil, fault.InvalidRequest("invalid_request", "The request messages could not be continued.", nil)
 	}
 	return parsed, nil
 }
 
-func selectToolsets(allowed []string, request *wire.Request) ([]string, *wire.Request, *Error) {
+func selectToolsets(allowed []string, request *wire.Request) ([]string, *wire.Request, *fault.Error) {
 	raw := request.Field("olp_toolsets")
 	selected, err := mcp.SelectWorkflowToolsets(allowed, raw)
 	if errors.Is(err, mcp.ErrWorkflowToolsetsInvalid) {
-		return nil, nil, invalidRequest("invalid_toolsets", "Use an array of toolset IDs.", nil)
+		return nil, nil, fault.InvalidRequest("invalid_toolsets", "Use an array of toolset IDs.", nil)
 	}
 	if err != nil {
-		return nil, nil, invalidRequest("toolset_not_permitted", "The request can only select distinct toolsets allowed by the route.", nil)
+		return nil, nil, fault.InvalidRequest("toolset_not_permitted", "The request can only select distinct toolsets allowed by the route.", nil)
 	}
 	if len(raw) == 0 {
 		return selected, request, nil
 	}
 	stripped, err := request.WithResourceBindings(oif.Change{Pointer: oif.Pointer("", "olp_toolsets"), Remove: true, Reason: "gateway toolset selection"})
 	if err != nil {
-		return nil, nil, invalidRequest("invalid_toolsets", "The request toolsets could not be processed.", nil)
+		return nil, nil, fault.InvalidRequest("invalid_toolsets", "The request toolsets could not be processed.", nil)
 	}
 	return selected, stripped, nil
 }

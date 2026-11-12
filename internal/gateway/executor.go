@@ -12,6 +12,7 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/oif"
@@ -88,7 +89,7 @@ func (x *call) delivered(at time.Time) {
 type outcome struct {
 	completion *wire.Completion
 	approval   *workflowPause
-	err        *Error
+	err        *fault.Error
 	committed  bool
 	cancelled  bool
 }
@@ -199,14 +200,14 @@ func (f *attemptFailure) billingUncertain() bool {
 	return f.dispatched
 }
 
-func (f *attemptFailure) toError() (result *Error) {
+func (f *attemptFailure) toError() (result *fault.Error) {
 	defer func() {
 		if result != nil && result.Status >= 500 && f.noRetry {
 			result.NoRetry = true
 		}
 	}()
 	if f.contractCode != "" {
-		return serverError(http.StatusBadGateway, f.contractCode, "The provider result did not satisfy the admitted interaction contract.")
+		return fault.ServerError(http.StatusBadGateway, f.contractCode, "The provider result did not satisfy the admitted interaction contract.")
 	}
 	if f.policyCode == string(guardrails.ErrSurface) {
 		return guardrailError(guardrails.ErrSurface)
@@ -216,46 +217,46 @@ func (f *attemptFailure) toError() (result *Error) {
 		if f.policyCode == "policy_conflict" {
 			message = "The route's content policy cannot inspect this provider result."
 		}
-		return invalidRequest(f.policyCode, message, nil)
+		return fault.InvalidRequest(f.policyCode, message, nil)
 	}
 	if f.aggregateTooLarge {
-		return serverError(http.StatusBadGateway, "upstream_response_too_large", "The upstream streamed a result larger than the gateway's response size limit for a non-streaming request; request a streaming response instead.")
+		return fault.ServerError(http.StatusBadGateway, "upstream_response_too_large", "The upstream streamed a result larger than the gateway's response size limit for a non-streaming request; request a streaming response instead.")
 	}
 	switch f.class {
 	case classLimitsUnavailable:
 		return limitsUnavailable()
 	case classAmbiguous:
-		err := serverError(http.StatusBadGateway, "ambiguous_upstream_result", "The upstream provider may have applied this request; its result could not be confirmed.")
+		err := fault.ServerError(http.StatusBadGateway, "ambiguous_upstream_result", "The upstream provider may have applied this request; its result could not be confirmed.")
 		err.NoRetry = f.noRetry
 		return err
 	case classCancelled:
-		return &Error{Status: 0, Code: "client_cancelled", Message: "The client went away."}
+		return &fault.Error{Status: 0, Code: "client_cancelled", Message: "The client went away."}
 	case classTimeout:
-		return serverError(http.StatusGatewayTimeout, "gateway_timeout", "The upstream provider did not respond within the configured deadline.")
+		return fault.ServerError(http.StatusGatewayTimeout, "gateway_timeout", "The upstream provider did not respond within the configured deadline.")
 	case classConnect:
-		return serverError(http.StatusBadGateway, "upstream_unavailable", "The upstream provider could not be reached.")
+		return fault.ServerError(http.StatusBadGateway, "upstream_unavailable", "The upstream provider could not be reached.")
 	case classRateLimit:
 		// A quota this gateway enforces was never the upstream's decision, and
 		// saying so would send the caller looking at the wrong system.
 		switch f.quota {
 		case quotaConnection:
-			return &Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "rate_limit_exceeded", Message: "The provider connection limit was exceeded.", RetryAfter: f.retryAfter}
+			return &fault.Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "rate_limit_exceeded", Message: "The provider connection limit was exceeded.", RetryAfter: f.retryAfter}
 		case quotaSlot:
-			return &Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "rate_limit_exceeded", Message: "The provider credential limit was exceeded.", RetryAfter: f.retryAfter}
+			return &fault.Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "rate_limit_exceeded", Message: "The provider credential limit was exceeded.", RetryAfter: f.retryAfter}
 		}
-		return &Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "upstream_rate_limit", Message: "The upstream provider is rate limiting requests.", RetryAfter: f.retryAfter}
+		return &fault.Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "upstream_rate_limit", Message: "The upstream provider is rate limiting requests.", RetryAfter: f.retryAfter}
 	case classBudget:
-		return serverError(http.StatusServiceUnavailable, "supply_budget_exhausted", "The spend cap of the "+f.quota+" serving this request is exhausted.")
+		return fault.ServerError(http.StatusServiceUnavailable, "supply_budget_exhausted", "The spend cap of the "+f.quota+" serving this request is exhausted.")
 	case classUpstreamServer:
-		return serverError(http.StatusBadGateway, "upstream_unavailable", "The upstream provider failed with HTTP "+strconv.Itoa(f.status)+".")
+		return fault.ServerError(http.StatusBadGateway, "upstream_unavailable", "The upstream provider failed with HTTP "+strconv.Itoa(f.status)+".")
 	case classCredential:
 		code := "upstream_authentication_failed"
 		if f.status == http.StatusForbidden {
 			code = "upstream_permission_denied"
 		}
-		return serverError(http.StatusBadGateway, code, "The upstream provider rejected the configured credential.")
+		return fault.ServerError(http.StatusBadGateway, code, "The upstream provider rejected the configured credential.")
 	case classProtocol:
-		return serverError(http.StatusBadGateway, "provider_protocol_error", "The upstream provider returned a malformed response.")
+		return fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The upstream provider returned a malformed response.")
 	case classContentFilter:
 		message := "The upstream provider's content filter refused the request."
 		if f.upstream != nil && f.upstream.Message != "" {
@@ -265,18 +266,18 @@ func (f *attemptFailure) toError() (result *Error) {
 		if !forwardable(status) {
 			status = http.StatusBadRequest
 		}
-		return &Error{Status: status, Type: "invalid_request_error", Code: "content_filter", Message: message}
+		return &fault.Error{Status: status, Type: "invalid_request_error", Code: "content_filter", Message: message}
 	case classUpstreamClient, classContextWindow:
 		message := "The upstream provider rejected the request."
 		if f.upstream != nil && f.upstream.Message != "" {
 			message = f.upstream.Message
 		}
 		if forwardable(f.status) {
-			return &Error{Status: f.status, Type: "invalid_request_error", Code: "upstream_rejected", Message: message}
+			return &fault.Error{Status: f.status, Type: "invalid_request_error", Code: "upstream_rejected", Message: message}
 		}
-		return serverError(http.StatusBadGateway, "upstream_rejected", message)
+		return fault.ServerError(http.StatusBadGateway, "upstream_rejected", message)
 	}
-	return serverError(http.StatusBadGateway, "upstream_unavailable", "The upstream provider failed.")
+	return fault.ServerError(http.StatusBadGateway, "upstream_unavailable", "The upstream provider failed.")
 }
 
 // forwardable reports whether an upstream client-error status is returned to
@@ -298,7 +299,7 @@ func (s *Server) executeModelStep(ctx context.Context, x *call, source *wire.Req
 		return out
 	}
 	if source.Route != x.named().Slug || source.Family != x.generation.parsed.Family || x.cache != nil && x.cache.result != "bypass" {
-		return &outcome{err: invalidRequest("invalid_request", "The model step must use the original route and format without response caching.", nil)}
+		return &outcome{err: fault.InvalidRequest("invalid_request", "The model step must use the original route and format without response caching.", nil)}
 	}
 	stepCtx, cancel := x.routeContext(ctx)
 	defer cancel()
@@ -833,7 +834,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 	}
 	if err != nil {
 		f := &attemptFailure{status: resp.StatusCode, committed: committed}
-		if errors.Is(err, errClientWrite) {
+		if errors.Is(err, fault.ErrClientWrite) {
 			if terminal, nativeFailure := completion.NativeResponseOutcome(); terminal {
 				// The native result arrived before its client write failed.
 				// Keep that provider outcome independent of the interruption
