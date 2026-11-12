@@ -239,7 +239,7 @@ func (e email) send(ctx context.Context, s *Sender, m message) error {
 	if err != nil {
 		return smtpError(err)
 	}
-	if _, err := w.Write(e.message(m, time.Now())); err != nil {
+	if _, err := w.Write(e.message(m)); err != nil {
 		_ = w.Close()
 		return smtpError(err)
 	}
@@ -261,7 +261,7 @@ func (e email) secure(ctx context.Context, conn net.Conn, config *tls.Config) (n
 	return tlsConn, nil
 }
 
-func (e email) message(m message, now time.Time) []byte {
+func (e email) message(m message) []byte {
 	subject := strings.TrimSpace(e.subjectPrefix + " " + m.title)
 	to := make([]string, 0, len(e.to))
 	for _, recipient := range e.to {
@@ -272,7 +272,7 @@ func (e email) message(m message, now time.Time) []byte {
 	_, _ = io.WriteString(&message,
 		"From: "+e.from.String()+"\r\n"+
 			"To: "+strings.Join(to, ", ")+"\r\n"+
-			"Date: "+now.UTC().Format(time.RFC1123Z)+"\r\n"+
+			"Date: "+m.date.UTC().Format(time.RFC1123Z)+"\r\n"+
 			"Message-ID: <"+uuid.NewString()+"@"+domain+">\r\n"+
 			"Subject: "+mime.QEncoding.Encode("utf-8", truncate(subject, 200))+"\r\n"+
 			"MIME-Version: 1.0\r\n"+

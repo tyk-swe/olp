@@ -108,7 +108,7 @@ func (d delivery) lockKey() string {
 	return ""
 }
 
-func (d delivery) message() (message, error) {
+func (d delivery) message(now time.Time) (message, error) {
 	switch k := d.kind.(type) {
 	case budgetAlert:
 		body, err := json.Marshal(budgetAlertBody{
@@ -120,13 +120,13 @@ func (d delivery) message() (message, error) {
 		if err != nil {
 			return message{}, err
 		}
-		return newMessage(body, d.event, d.ruleName, d.ruleID+":"+string(d.event)+":"+strconv.FormatInt(k.windowID, 10), false)
+		return newMessage(body, d.event, d.ruleName, d.ruleID+":"+string(d.event)+":"+strconv.FormatInt(k.windowID, 10), false, now)
 	case keyReminder:
-		return d.payloadMessage(k.payload, d.id, false)
+		return d.payloadMessage(k.payload, d.id, false, now)
 	case signalIncident:
-		return d.payloadMessage(k.payload, k.key, k.resolved)
+		return d.payloadMessage(k.payload, k.key, k.resolved, now)
 	case storedPayload:
-		return d.payloadMessage(k.payload, cmp.Or(k.key, d.id), k.resolved)
+		return d.payloadMessage(k.payload, cmp.Or(k.key, d.id), k.resolved, now)
 	}
 	return message{}, errors.New("delivery has no kind")
 }
@@ -154,7 +154,7 @@ func (d delivery) identity() deliveryIdentity {
 	return deliveryIdentity{Event: d.event, RuleID: d.ruleID, RuleName: d.ruleName, DeliveryID: d.id}
 }
 
-func (d delivery) payloadMessage(payload []byte, dedupKey string, resolved bool) (message, error) {
+func (d delivery) payloadMessage(payload []byte, dedupKey string, resolved bool, now time.Time) (message, error) {
 	var stored map[string]json.RawMessage
 	if err := json.Unmarshal(payload, &stored); err != nil {
 		return message{}, err
@@ -179,7 +179,7 @@ func (d delivery) payloadMessage(payload []byte, dedupKey string, resolved bool)
 	if err != nil {
 		return message{}, err
 	}
-	return newMessage(body, d.event, d.ruleName, dedupKey, resolved)
+	return newMessage(body, d.event, d.ruleName, dedupKey, resolved, now)
 }
 
 func (w *deliveryWorker) pending(ctx context.Context) ([]delivery, error) {
@@ -319,7 +319,7 @@ func attemptOutcome(code Failure) (contract.NotificationDeliveryStatus, *Failure
 }
 
 func (w *deliveryWorker) send(ctx context.Context, d delivery, target destination, secret []byte) Failure {
-	m, err := d.message()
+	m, err := d.message(w.Now())
 	if err != nil {
 		return invalidDestinationCode
 	}

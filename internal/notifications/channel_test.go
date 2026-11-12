@@ -41,7 +41,7 @@ func openDestination(typ contract.NotificationDestinationType, rawURL, configura
 func sendDestination(ctx context.Context, t *testing.T, typ contract.NotificationDestinationType, rawURL, secret string) Failure {
 	t.Helper()
 	m, err := newMessage([]byte(`{"version":1,"event":"worker.stale","evidence":{"task":"usage"}}`),
-		contract.NotificationEventWorkerStale, "stale workers", "olp:incident:1", false)
+		contract.NotificationEventWorkerStale, "stale workers", "olp:incident:1", false, time.Date(2026, time.March, 1, 12, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}

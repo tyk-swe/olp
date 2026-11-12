@@ -3,6 +3,7 @@ package notifications
 import (
 	"encoding/json"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/tyk-swe/olp/internal/management/contract"
@@ -24,14 +25,15 @@ type message struct {
 	title    string
 	dedupKey string
 	resolved bool
+	date     time.Time
 }
 
-func newMessage(body []byte, event contract.NotificationEvent, ruleName, dedupKey string, resolved bool) (message, error) {
+func newMessage(body []byte, event contract.NotificationEvent, ruleName, dedupKey string, resolved bool, date time.Time) (message, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(body, &fields); err != nil {
 		return message{}, err
 	}
-	return message{body: body, fields: fields, title: mentionSafe.Replace(messageTitle(event, ruleName)), dedupKey: dedupKey, resolved: resolved}, nil
+	return message{body: body, fields: fields, title: mentionSafe.Replace(messageTitle(event, ruleName)), dedupKey: dedupKey, resolved: resolved, date: date}, nil
 }
 
 func messageTitle(event contract.NotificationEvent, ruleName string) string {
