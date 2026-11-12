@@ -32,8 +32,8 @@ const definitions = [
   {
     label: 'Review discovered models',
     description: 'Enable the certified model capabilities your clients need.',
-    href: 'provider-models',
-    viewHref: 'provider-models',
+    href: 'models',
+    viewHref: 'models',
     capability: 'providers.manage'
   },
   {
@@ -47,8 +47,8 @@ const definitions = [
   {
     label: 'Create your first API key',
     description: 'Create a scoped key. Its secret is shown only once.',
-    href: 'api-keys/new',
-    viewHref: 'api-keys',
+    href: 'keys/new',
+    viewHref: 'keys',
     capability: 'api_keys.manage'
   }
 ] as const satisfies readonly {
