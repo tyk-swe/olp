@@ -300,6 +300,9 @@ manifest. Rehearse restoration from the actual off-site store.
 
 Run `scripts/restore.sh BACKUP` using the dump path printed by the backup
 script, with `OLP_RESTORE_DATABASE_URL` identifying an empty isolated database.
+Put the database name in the URL path, such as `postgresql://host/replacement`.
+A `dbname` query option is rejected before database access because it would
+override the staging database path. Other connection options remain supported.
 Set `OLP_RESTORE_VALKEY_ISOLATED=true`, point `OLP_VALKEY_URL` at a separate
 empty Valkey service, and mount the original master and auth key files. Set
 `OLP_MAINTENANCE_BIN` to the qualified binary when using a nondefault path.

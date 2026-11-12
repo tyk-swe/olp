@@ -91,7 +91,8 @@ answering without a server error, cross-project isolation of those reads, one
 guardrail definition, policy, attachment and credential lifecycle with its
 audit trail, one promotion round trip, one request travelling from route
 publication to durable usage, the code account endpoints, and a SCIM directory
-provisioning, searching and removing users.
+provisioning, searching and removing users. The restore preflight regression
+runs the operator script with Bash and Python 3 and requires no database client.
 
 `make test-e2e-browser` builds the console, starts one `olp all` that serves
 it, and runs the Playwright journeys in `console/tests/e2e` in Chromium. The
