@@ -1706,6 +1706,35 @@ func TestNotificationDestinationAndRuleLifecycle(t *testing.T) {
 	if err := json.Unmarshal(moved.body, &problem); err != nil || problem.Errors["secret"] == nil {
 		t.Fatalf("move without secret problem = %s (%v)", moved.body, err)
 	}
+	slack := decode(expect("create disabled slack destination", call("POST", "/api/v1/notifications/destinations", "", `{"name":"chat","type":"slack","url":"https://hooks.slack.com","enabled":false}`), http.StatusCreated))
+	slackPath := "/api/v1/notifications/destinations/" + slack.ID
+	slackETag := expect("get slack destination", call("GET", slackPath, "", ""), http.StatusOK).etag
+	unsigned := decode(expect("create unsigned webhook destination", call("POST", "/api/v1/notifications/destinations", "", `{"name":"plain","url":"https://hooks.example.com/plain"}`), http.StatusCreated))
+	unsignedPath := "/api/v1/notifications/destinations/" + unsigned.ID
+	unsignedETag := expect("get unsigned destination", call("GET", unsignedPath, "", ""), http.StatusOK).etag
+	for _, rejected := range []struct {
+		step, method, path, ifMatch, body, field, message string
+	}{
+		{"create with non-object configuration", "POST", "/api/v1/notifications/destinations", "", `{"name":"bad","url":"nope","configuration":"x"}`, "configuration", "Use a configuration object."},
+		{"create with non-object credential", "POST", "/api/v1/notifications/destinations", "", `{"name":"bad","type":"slack","url":"nope","secret":"s"}`, "secret", "Use the channel credential object or null."},
+		{"patch with non-object configuration", "PATCH", path, fetched.etag, `{"configuration":[]}`, "configuration", "Use a configuration object."},
+		{"patch with non-object credential", "PATCH", slackPath, slackETag, `{"url":"nope","secret":"s"}`, "secret", "Use the channel credential object or null."},
+		{"patch blank name before malformed url", "PATCH", path, fetched.etag, `{"name":" ","url":5}`, "name", "Use 1–100 characters."},
+		{"patch configuration before malformed enabled", "PATCH", path, fetched.etag, `{"enabled":"x","configuration":"y"}`, "configuration", "Use a configuration object."},
+		{"patch null type", "PATCH", path, fetched.etag, `{"type":null}`, "type", "The destination type cannot be changed."},
+		{"patch unsigned webhook to a malformed url", "PATCH", unsignedPath, unsignedETag, `{"url":"nope"}`, "destination", "The destination, configuration or secret is invalid."},
+	} {
+		got := expect(rejected.step, call(rejected.method, rejected.path, rejected.ifMatch, rejected.body), http.StatusUnprocessableEntity)
+		var rejection struct {
+			Errors map[string][]struct {
+				Message string `json:"message"`
+			} `json:"errors"`
+		}
+		err := json.Unmarshal(got.body, &rejection)
+		if err != nil || len(rejection.Errors) != 1 || len(rejection.Errors[rejected.field]) != 1 || rejection.Errors[rejected.field][0].Message != rejected.message {
+			t.Errorf("%s: problem = %s, want %s: %s (%v)", rejected.step, got.body, rejected.field, rejected.message, err)
+		}
+	}
 	renamed := expect("rename destination", call("PATCH", path, fetched.etag, `{"name":"renamed"}`), http.StatusOK)
 	if got := decode(expect("get renamed destination", call("GET", path, "", ""), http.StatusOK)); renamed.etag == fetched.etag || got.Name != "renamed" || !got.SecretConfigured {
 		t.Fatalf("renamed destination etag=%q (was %q) body=%+v", renamed.etag, fetched.etag, got)

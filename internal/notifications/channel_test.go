@@ -28,8 +28,14 @@ func loopbackPolicy() egress.Policy {
 
 func openDestination(typ contract.NotificationDestinationType, rawURL, configuration, secret string) error {
 	policy := loopbackPolicy()
-	_, err := open(&policy, destination{Type: typ, URL: rawURL, Configuration: json.RawMessage(configuration)}, []byte(secret))
-	return err
+	fields, err := decodeObject(json.RawMessage(configuration))
+	if err != nil {
+		return err
+	}
+	if _, err := open(&policy, destination{Type: typ, URL: rawURL, Configuration: fields}, []byte(secret)); err != nil {
+		return err
+	}
+	return nil
 }
 
 func sendDestination(ctx context.Context, t *testing.T, typ contract.NotificationDestinationType, rawURL, secret string) Failure {
@@ -420,7 +426,6 @@ func TestDestinationSecret(t *testing.T) {
 		{name: "long webhook string", typ: "webhook", raw: longWebhook, wantErr: true},
 		{name: "webhook object", typ: "webhook", raw: json.RawMessage(`{}`), wantErr: true},
 		{name: "slack object", typ: "slack", raw: json.RawMessage(`{"webhook_url":"x"}`), want: newSecret{[]byte(`{"webhook_url":"x"}`)}},
-		{name: "slack string", typ: "slack", raw: json.RawMessage(`"s"`), wantErr: true},
 		{name: "oversized slack object", typ: "slack", raw: largeObject, wantErr: true},
 		{name: "webhook null", typ: "webhook", raw: json.RawMessage(`null`), want: newSecret{}},
 		{name: "slack null", typ: "slack", raw: json.RawMessage(`null`), want: newSecret{}},

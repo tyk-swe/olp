@@ -30,11 +30,33 @@ const (
 type destination struct {
 	Type          contract.NotificationDestinationType
 	URL           string
-	Configuration json.RawMessage
+	Configuration map[string]json.RawMessage
+}
+
+var errMalformedCredential = errors.New("credential must be a JSON object")
+
+type credential interface{ credential() }
+
+type signingKey []byte
+
+type credentialFields map[string]json.RawMessage
+
+func (signingKey) credential()       {}
+func (credentialFields) credential() {}
+
+func readCredential(typ contract.NotificationDestinationType, secret []byte) (credential, error) {
+	if typ == contract.NotificationDestinationTypeWebhook {
+		return signingKey(secret), nil
+	}
+	fields, err := decodeObject(secret)
+	if err != nil {
+		return nil, errMalformedCredential
+	}
+	return credentialFields(fields), nil
 }
 
 type endpoint interface {
-	bind(policy *egress.Policy, secret []byte) (channel, error)
+	bind(policy *egress.Policy, c credential) (channel, error)
 }
 
 type channel interface {
@@ -125,11 +147,15 @@ func parse(policy *egress.Policy, d destination) (endpoint, error) {
 }
 
 func open(policy *egress.Policy, d destination, secret []byte) (channel, error) {
+	c, err := readCredential(d.Type, secret)
+	if err != nil {
+		return nil, err
+	}
 	endpoint, err := parse(policy, d)
 	if err != nil {
 		return nil, err
 	}
-	return endpoint.bind(policy, secret)
+	return endpoint.bind(policy, c)
 }
 
 func headerSafe(s string, max int) bool {

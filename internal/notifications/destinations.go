@@ -3,6 +3,7 @@ package notifications
 import (
 	"cmp"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -27,7 +28,7 @@ type storedDestination struct {
 	Name             string                               `json:"name"`
 	URL              string                               `json:"url"`
 	Type             contract.NotificationDestinationType `json:"type"`
-	Configuration    json.RawMessage                      `json:"configuration"`
+	Configuration    map[string]json.RawMessage           `json:"configuration"`
 	Enabled          bool                                 `json:"enabled"`
 	SecretConfigured bool                                 `json:"secret_configured"`
 }
@@ -70,25 +71,18 @@ func destinationSecret(typ contract.NotificationDestinationType, raw json.RawMes
 	if len(raw) > secretObjectLimit {
 		return nil, access.Invalid("secret", "The secret object is too large.")
 	}
-	var decoded map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &decoded); err != nil || decoded == nil {
-		return nil, access.Invalid("secret", "Use the channel credential object or null.")
-	}
 	return newSecret{raw}, nil
 }
 
-func configurationObject(raw json.RawMessage) (json.RawMessage, error) {
-	if len(raw) == 0 || string(raw) == "null" {
-		return json.RawMessage(`{}`), nil
-	}
+func configurationObject(raw json.RawMessage) (map[string]json.RawMessage, error) {
 	if len(raw) > configurationLimit {
 		return nil, access.Invalid("configuration", "Use a configuration object of at most 4096 bytes.")
 	}
-	var decoded map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &decoded); err != nil || decoded == nil {
+	fields, err := decodeObject(raw)
+	if err != nil {
 		return nil, access.Invalid("configuration", "Use a configuration object.")
 	}
-	return raw, nil
+	return fields, nil
 }
 
 func parseDestination(input destinationInput) (destinationTarget, error) {
@@ -112,20 +106,22 @@ func parseDestination(input destinationInput) (destinationTarget, error) {
 	}, nil
 }
 
-func (s *Server) validateDestination(d destination, secret []byte, enabled bool) error {
-	if len(secret) == 0 && requiresSecret(d.Type) {
-		if _, err := parse(&s.egress, d); err != nil {
-			return access.Invalid("destination", "The destination or its configuration is invalid.")
-		}
-		if enabled {
-			return access.Invalid("secret", "This destination type requires a credential secret object.")
-		}
-		return nil
+func (s *Server) checkEndpoint(d destination, enabled bool) error {
+	if _, err := parse(&s.egress, d); err != nil {
+		return access.Invalid("destination", "The destination or its configuration is invalid.")
 	}
-	if _, err := open(&s.egress, d, secret); err != nil {
-		if len(secret) == 0 {
-			return access.Invalid("destination", "The destination or its configuration is invalid.")
-		}
+	if enabled && requiresSecret(d.Type) {
+		return access.Invalid("secret", "This destination type requires a credential secret object.")
+	}
+	return nil
+}
+
+func (s *Server) checkBinding(d destination, secret []byte) error {
+	_, err := open(&s.egress, d, secret)
+	if errors.Is(err, errMalformedCredential) {
+		return access.Invalid("secret", "Use the channel credential object or null.")
+	}
+	if err != nil {
 		return access.Invalid("destination", "The destination, configuration or secret is invalid.")
 	}
 	return nil
@@ -142,8 +138,7 @@ func (s *Server) createNotificationDestination(r *http.Request, _ access.Princip
 			if err != nil {
 				return destinationTarget{}, err
 			}
-			replaced, _ := target.secret.(newSecret)
-			if err = s.validateDestination(target.destination, replaced.value, target.enabled); err != nil {
+			if err := s.checkCreated(target); err != nil {
 				return destinationTarget{}, err
 			}
 			return target, nil
@@ -175,11 +170,7 @@ func (s *Server) updateNotificationDestination(r *http.Request, _ access.Princip
 		if err := json.Unmarshal(row.current, &current); err != nil {
 			return err
 		}
-		input, err := mergeDestination(current, patch)
-		if err != nil {
-			return err
-		}
-		target, err := parseDestination(input)
+		target, err := patchDestination(current, patch)
 		if err != nil {
 			return err
 		}
@@ -190,10 +181,10 @@ func (s *Server) updateNotificationDestination(r *http.Request, _ access.Princip
 		if err != nil {
 			return err
 		}
-		if err = s.validateDestination(target.destination, secret, target.enabled); err != nil {
+		if err := s.checkPatched(target, secret); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(r.Context(), updateChannelDestinationSQL,
+		if _, err := tx.Exec(r.Context(), updateChannelDestinationSQL,
 			row.id, target.name, target.URL, target.enabled, etag, target.Type, target.Configuration); err != nil {
 			return err
 		}
@@ -201,33 +192,38 @@ func (s *Server) updateNotificationDestination(r *http.Request, _ access.Princip
 	})
 }
 
-func mergeDestination(current storedDestination, patch map[string]json.RawMessage) (destinationInput, error) {
+func patchDestination(current storedDestination, patch map[string]json.RawMessage) (destinationTarget, error) {
 	name, err := patched(patch, "name", current.Name, "Use a non-empty destination name.")
 	if err != nil {
-		return destinationInput{}, err
+		return destinationTarget{}, err
+	}
+	if err := access.ValidText("name", name, nameLimit); err != nil {
+		return destinationTarget{}, err
 	}
 	url, err := patched(patch, "url", current.URL, "Use a valid destination URL.")
 	if err != nil {
-		return destinationInput{}, err
+		return destinationTarget{}, err
 	}
-	typ, err := patched(patch, "type", current.Type, "The destination type cannot be changed.")
+	if raw, present := patch["type"]; present && !sameType(raw, current.Type) {
+		return destinationTarget{}, access.Invalid("type", "The destination type cannot be changed.")
+	}
+	configuration, err := patchedConfiguration(patch, current.Configuration)
 	if err != nil {
-		return destinationInput{}, err
-	}
-	if typ != current.Type {
-		return destinationInput{}, access.Invalid("type", "The destination type cannot be changed.")
+		return destinationTarget{}, err
 	}
 	enabled, err := patched(patch, "enabled", current.Enabled, "Use true or false.")
 	if err != nil {
-		return destinationInput{}, err
+		return destinationTarget{}, err
 	}
-	return destinationInput{
-		Name:          name,
-		URL:           url,
-		Type:          typ,
-		Configuration: rawField(patch, "configuration", current.Configuration),
-		Secret:        rawField(patch, "secret", nil),
-		Enabled:       &enabled,
+	secret, err := destinationSecret(current.Type, patch["secret"])
+	if err != nil {
+		return destinationTarget{}, err
+	}
+	return destinationTarget{
+		destination: destination{Type: current.Type, URL: strings.TrimSpace(url), Configuration: configuration},
+		name:        strings.TrimSpace(name),
+		enabled:     enabled,
+		secret:      secret,
 	}, nil
 }
 
@@ -243,12 +239,31 @@ func patched[T any](patch map[string]json.RawMessage, field string, stored T, me
 	return value, nil
 }
 
-func rawField(patch map[string]json.RawMessage, field string, stored json.RawMessage) json.RawMessage {
-	raw, present := patch[field]
+func sameType(raw json.RawMessage, current contract.NotificationDestinationType) bool {
+	var typ contract.NotificationDestinationType
+	return json.Unmarshal(raw, &typ) == nil && typ == current
+}
+
+func patchedConfiguration(patch, stored map[string]json.RawMessage) (map[string]json.RawMessage, error) {
+	raw, present := patch["configuration"]
 	if !present {
-		return stored
+		return stored, nil
 	}
-	return raw
+	return configurationObject(raw)
+}
+
+func (s *Server) checkCreated(target destinationTarget) error {
+	if replaced, ok := target.secret.(newSecret); ok && len(replaced.value) != 0 {
+		return s.checkBinding(target.destination, replaced.value)
+	}
+	return s.checkEndpoint(target.destination, target.enabled)
+}
+
+func (s *Server) checkPatched(target destinationTarget, secret []byte) error {
+	if _, replaced := target.secret.(newSecret); len(secret) != 0 || !replaced && !requiresSecret(target.Type) {
+		return s.checkBinding(target.destination, secret)
+	}
+	return s.checkEndpoint(target.destination, target.enabled)
 }
 
 func (s *Server) effectiveSecret(r *http.Request, tx pgx.Tx, id string, current storedDestination, change secretChange) ([]byte, error) {

@@ -24,7 +24,7 @@ const (
 )
 
 func parseWebhook(policy *egress.Policy, d destination) (endpoint, error) {
-	if _, err := objectFields(d.Configuration); err != nil {
+	if err := onlyFields(d.Configuration); err != nil {
 		return nil, err
 	}
 	target, err := policy.ValidateEndpoint(d.URL)
@@ -35,7 +35,7 @@ func parseWebhook(policy *egress.Policy, d destination) (endpoint, error) {
 }
 
 func parseChat(policy *egress.Policy, d destination, render func(message) any) (endpoint, error) {
-	if _, err := objectFields(d.Configuration); err != nil {
+	if err := onlyFields(d.Configuration); err != nil {
 		return nil, err
 	}
 	origin, err := policy.ValidateEndpoint(d.URL)
@@ -49,7 +49,7 @@ func parseChat(policy *egress.Policy, d destination, render func(message) any) (
 }
 
 func parsePagerDuty(policy *egress.Policy, d destination) (endpoint, error) {
-	if _, err := objectFields(d.Configuration); err != nil {
+	if err := onlyFields(d.Configuration); err != nil {
 		return nil, err
 	}
 	if _, err := policy.ValidateEndpoint(d.URL); err != nil {
@@ -63,8 +63,9 @@ type webhook struct {
 	key []byte
 }
 
-func (w webhook) bind(_ *egress.Policy, secret []byte) (channel, error) {
-	return webhook{url: w.url, key: secret}, nil
+func (w webhook) bind(_ *egress.Policy, c credential) (channel, error) {
+	key, _ := c.(signingKey)
+	return webhook{url: w.url, key: key}, nil
 }
 
 func (w webhook) send(ctx context.Context, s *Sender, m message) error {
@@ -84,9 +85,9 @@ type chatOrigin struct {
 	render func(message) any
 }
 
-func (c chatOrigin) bind(policy *egress.Policy, secret []byte) (channel, error) {
-	fields, err := objectFields(secret, "webhook_url")
-	if err != nil {
+func (c chatOrigin) bind(policy *egress.Policy, secret credential) (channel, error) {
+	fields, _ := secret.(credentialFields)
+	if err := onlyFields(fields, "webhook_url"); err != nil {
 		return nil, err
 	}
 	raw, err := requiredTextField(fields, "webhook_url", webhookURLLimit)
@@ -130,9 +131,9 @@ type pagerDuty struct {
 	routingKey string
 }
 
-func (p pagerDuty) bind(_ *egress.Policy, secret []byte) (channel, error) {
-	fields, err := objectFields(secret, "routing_key")
-	if err != nil {
+func (p pagerDuty) bind(_ *egress.Policy, c credential) (channel, error) {
+	fields, _ := c.(credentialFields)
+	if err := onlyFields(fields, "routing_key"); err != nil {
 		return nil, err
 	}
 	key, err := requiredTextField(fields, "routing_key", routingKeyLimit)

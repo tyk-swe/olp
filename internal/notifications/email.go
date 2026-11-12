@@ -66,9 +66,8 @@ func smtpTarget(raw string) (*url.URL, error) {
 	return u, nil
 }
 
-func emailConfig(raw json.RawMessage) (emailConfiguration, error) {
-	fields, err := objectFields(raw, "from", "to", "subject_prefix", "ca_certificate")
-	if err != nil {
+func emailConfig(fields map[string]json.RawMessage) (emailConfiguration, error) {
+	if err := onlyFields(fields, "from", "to", "subject_prefix", "ca_certificate"); err != nil {
 		return emailConfiguration{}, err
 	}
 	sender, err := requiredTextField(fields, "from", addressLimit)
@@ -156,9 +155,9 @@ func parseEmail(policy *egress.Policy, d destination) (endpoint, error) {
 	}, nil
 }
 
-func (m mailer) bind(_ *egress.Policy, secret []byte) (channel, error) {
-	fields, err := objectFields(secret, "username", "password")
-	if err != nil {
+func (m mailer) bind(_ *egress.Policy, c credential) (channel, error) {
+	fields, _ := c.(credentialFields)
+	if err := onlyFields(fields, "username", "password"); err != nil {
 		return nil, err
 	}
 	if len(fields) == 0 {
