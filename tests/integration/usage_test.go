@@ -992,3 +992,64 @@ func TestMCPManualSettlementPreservesPricingState(t *testing.T) {
 		})
 	}
 }
+
+func TestFocusLateCommitmentUsageDirtiesLaterObservedDay(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	fixture := newUsageFixture(t, pool)
+	day := fixture.observedAt.UTC().Truncate(24 * time.Hour).Add(-72 * time.Hour)
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.pricing_revisions SET effective_at=$1`, day.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.export_sinks (id,name,type,destination,streams,format,etag,created_by) VALUES($1,'focus-midnight','s3','s3://fixture/focus',ARRAY['focus'],'csv_gzip',$1,$2)`, uuid.NewString(), fixture.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.commitment_schedules (provider_id,provider_revision_id,provider_name,provider_kind,amount,currency,period,effective_at) VALUES($1,$2,'fixture','openai_compatible',10,'USD','day',$3)`, fixture.providerID, uuid.NewString(), day); err != nil {
+		t.Fatal(err)
+	}
+	persist := func(started, observed time.Time) string {
+		t.Helper()
+		f := fixture
+		f.observedAt = observed
+		attempt := f.attempt(1)
+		attempt.StartedAt = started
+		event := f.event(attempt)
+		event.RequestStartedAt = started
+		accepted, err := usage.NewAccountingEvent(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := ingest.PersistEvent(t.Context(), pool, accepted)
+		if err != nil || result.Outcome != ingest.PersistOutcomePersisted {
+			t.Fatalf("persist outcome=%v error=%v", result.Outcome, err)
+		}
+		return attempt.ID
+	}
+	first := persist(day.Add(23*time.Hour+50*time.Minute), day.Add(24*time.Hour+10*time.Minute))
+	var initial, revised string
+	var before, after int64
+	read := func(amount *string, version *int64) {
+		t.Helper()
+		if err := pool.QueryRow(t.Context(), `SELECT a.allocated_cost::text,d.version FROM olp.commitment_allocations a JOIN olp.focus_dirty_days d ON d.day=(a.observed_at AT TIME ZONE 'UTC')::date WHERE a.attempt_id=$1`, first).Scan(amount, version); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read(&initial, &before)
+	persist(day.Add(12*time.Hour), day.Add(12*time.Hour+time.Minute))
+	read(&revised, &after)
+	if initial == revised {
+		t.Fatalf("late usage did not change allocation %s", initial)
+	}
+	if after <= before {
+		t.Fatalf("allocation changed %s to %s but observed-day dirty version stayed %d -> %d", initial, revised, before, after)
+	}
+	var updated string
+	var updateVersion int64
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.commitment_usage SET weight=weight*2 WHERE attempt_id=$1`, first); err != nil {
+		t.Fatal(err)
+	}
+	read(&updated, &updateVersion)
+	if updated == revised || updateVersion <= after {
+		t.Fatalf("weight update allocation %s -> %s, dirty version %d -> %d", revised, updated, after, updateVersion)
+	}
+}
