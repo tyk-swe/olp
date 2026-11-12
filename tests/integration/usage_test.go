@@ -1152,6 +1152,162 @@ func TestFocusLateCommitmentUsageDirtiesLaterObservedDay(t *testing.T) {
 	}
 }
 
+func TestMCPLateSettlementAfterOrphanRecovery(t *testing.T) {
+	t.Parallel()
+	for _, status := range []accounting.Status{accounting.StatusSucceeded, accounting.StatusUpstreamError, accounting.StatusGuardrailBlocked} {
+		t.Run(string(status), func(t *testing.T) {
+			pool, _ := harness.Database(t)
+			f := newUsageFixture(t, pool)
+			ctx := t.Context()
+			pub, rev, server, srev, dispatch, call := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+			sql := fmt.Sprintf(`
+ INSERT INTO olp.agent_publications(id,project_id,kind,name,draft,etag,created_by) VALUES('%[1]s','%[2]s','toolset','late','{}','%[1]s','%[3]s');
+ INSERT INTO olp.agent_publication_revisions(id,publication_id,project_id,kind,definition,digest,created_by) VALUES('%[4]s','%[1]s','%[2]s','toolset','{}',repeat('0',64),'%[3]s');
+ INSERT INTO olp.mcp_servers(id,project_id,name,transport,endpoint,enabled,latest_revision_id,etag,created_by) VALUES('%[5]s','%[2]s','late','streamable_http','https://example.com/mcp',true,'%[6]s','%[5]s','%[3]s');
+ INSERT INTO olp.mcp_server_revisions(id,server_id,revision,endpoint,protocol_version,tools,digest,created_by) VALUES('%[6]s','%[5]s',1,'https://example.com/mcp','2025-03-26','[]',repeat('0',64),'%[3]s');
+ INSERT INTO olp.execution_debits(id,api_key_id,project_id,kind,affinity,intent_digest,claim_id,currency,cost_bound,charge_bound,state,prepared_until) VALUES('%[7]s','%[8]s','%[2]s','tool','{}',decode(repeat('00',32),'hex'),'%[7]s','USD',1,1,'ready',now()+interval '1 hour');
+ INSERT INTO olp.execution_debit_owners(dispatch_id,owner_id,owner_kind,basis,bound,daily_window_id,weekly_window_id,monthly_window_id) VALUES('%[7]s','%[8]s','key','cost',1,0,0,0);`, pub, f.projectID, f.ownerID, rev, server, srev, dispatch, f.keyID)
+			if _, err := pool.Exec(ctx, sql); err != nil {
+				t.Fatal(err)
+			}
+			price := "1"
+			reservation := &accounting.Reservation{DispatchID: dispatch, ClaimID: dispatch, AttemptID: call, APIKeyID: f.keyID, ProjectID: f.projectID, ToolsetID: pub, ToolsetRevisionID: rev, ToolAlias: "t_" + strings.Repeat("0", 32) + "_" + strings.Repeat("0", 32), InputDigest: strings.Repeat("0", 64), CallDigest: strings.Repeat("1", 64), UnitPrice: &price, Currency: "USD"}
+			evidence := accounting.AttemptEvidence{ServerID: server, ServerRevisionID: srev, StartedAt: time.Now().UTC(), Status: accounting.StatusDispatched}
+			ledger := accounting.NewDurableLedger(pool, nil, nil, nil)
+			if err := ledger.MarkDispatched(ctx, reservation, evidence); err != nil {
+				t.Fatal(err)
+			}
+			if n, err := ledger.RecoverOrphanedDispatches(ctx, time.Now().Add(time.Minute), 1); err != nil || n != 1 {
+				t.Fatalf("recover = %d, %v", n, err)
+			}
+			unknown := evidence
+			unknown.Status = accounting.StatusOutcomeUnknown
+			unknown.ResultDigest = strings.Repeat("3", 64)
+			unknown.CompletedAt = time.Now().UTC()
+			if err := ledger.MarkUnknown(ctx, reservation, unknown); err != nil {
+				t.Fatal(err)
+			}
+			evidence.Status = status
+			evidence.IsError = status == accounting.StatusUpstreamError
+			evidence.CompletedAt = time.Now().UTC()
+			evidence.ResultDigest = strings.Repeat("2", 64)
+			for range 2 {
+				if err := ledger.Settle(ctx, reservation, evidence); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var callStatus, debitState, resultDigest string
+			var chargedOnce bool
+			var receipts int
+			if err := pool.QueryRow(ctx, `SELECT c.status,d.state,c.result_digest,d.observed_cost=1 AND d.observed_charge=1,(SELECT count(*) FROM olp.execution_debit_results WHERE dispatch_id=d.id) FROM olp.mcp_tool_calls c JOIN olp.execution_debits d ON d.id=c.dispatch_id WHERE c.id=$1`, call).Scan(&callStatus, &debitState, &resultDigest, &chargedOnce, &receipts); err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("call=%s debit=%s charged_once=%t receipts=%d", callStatus, debitState, chargedOnce, receipts)
+			if callStatus != string(status) || debitState != "settled" || !chargedOnce || resultDigest != evidence.ResultDigest || receipts != 1 {
+				t.Fatalf("late settlement: call=%s debit=%s receipts=%d", callStatus, debitState, receipts)
+			}
+		})
+	}
+}
+
+func TestKeyReminderRestoredScheduleRetries(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	fixture := newUsageFixture(t, pool)
+	requests := make(chan struct{}, 8)
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- struct{}{}
+		if len(requests) == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer receiver.Close()
+	destinationID, ruleID := uuid.NewString(), uuid.NewString()
+	due := time.Now().UTC().Truncate(time.Second).Add(time.Hour)
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.api_keys SET expires_at=$2 WHERE id=$1`, fixture.keyID, due); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_destinations(id,name,url,project_id,etag,created_by) VALUES($1,'restored schedule',$2,$3,$1,$4)`, destinationID, receiver.URL, fixture.projectID, fixture.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_rules(id,name,project_id,event,subject_kind,subject_id,destination_id,etag,created_by) VALUES($1,'restored schedule',$2,'key.expiring','api_key',$3,$4,$1,$5)`, ruleID, fixture.projectID, fixture.keyID, destinationID, fixture.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	pass := func() {
+		t.Helper()
+		var before int64
+		if err := pool.QueryRow(t.Context(), `SELECT COALESCE((SELECT successes_total FROM olp.worker_task_health WHERE task='notification_delivery'),0)`).Scan(&before); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			notifications.RunDelivery(ctx, notifications.DeliveryConfig{Pool: pool, NewID: uuid.NewString, Now: time.Now, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Sender: notifications.NewSender(egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}})})
+		}()
+		defer func() { cancel(); <-done }()
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			var successes int64
+			if err := pool.QueryRow(t.Context(), `SELECT COALESCE((SELECT successes_total FROM olp.worker_task_health WHERE task='notification_delivery'),0)`).Scan(&successes); err != nil {
+				t.Fatal(err)
+			}
+			if successes > before {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("reminder pass did not complete")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	assertDelivery := func(want string, attempts int) (string, time.Time) {
+		t.Helper()
+		var id, status string
+		var got int
+		var at time.Time
+		if err := pool.QueryRow(t.Context(), `SELECT id::text,status,attempts,last_attempt_at FROM olp.notification_deliveries WHERE rule_id=$1 AND due_at=$2`, ruleID, due).Scan(&id, &status, &got, &at); err != nil {
+			t.Fatal(err)
+		}
+		if status != want || got != attempts {
+			t.Fatalf("restored reminder status=%s attempts=%d, want %s/%d", status, got, want, attempts)
+		}
+		return id, at
+	}
+	setDue := func(at time.Time) {
+		t.Helper()
+		if _, err := pool.Exec(t.Context(), `UPDATE olp.api_keys SET expires_at=$2 WHERE id=$1`, fixture.keyID, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pass()
+	id, attemptAt := assertDelivery("failed", 1)
+	setDue(due.Add(48 * time.Hour))
+	pass()
+	assertDelivery("cancelled", 1)
+	setDue(due)
+	pass()
+	restoredID, restoredAt := assertDelivery("pending", 1)
+	if restoredID != id || !restoredAt.Equal(attemptAt) || len(requests) != 1 {
+		t.Fatal("restoring the schedule reset identity, retry history or backoff")
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.notification_deliveries SET last_attempt_at=now()-interval '2 minutes' WHERE id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+	pass()
+	assertDelivery("delivered", 2)
+	setDue(due.Add(48 * time.Hour))
+	pass()
+	setDue(due)
+	pass()
+	assertDelivery("delivered", 2)
+	if len(requests) != 2 {
+		t.Fatalf("sent %d attempts, want one failure and one successful delivery", len(requests))
+	}
+}
+
 func TestFocusRetainedHistoryCompleteness(t *testing.T) {
 	t.Parallel()
 	pool, _ := harness.Database(t)
