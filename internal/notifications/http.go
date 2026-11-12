@@ -9,7 +9,6 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -17,14 +16,15 @@ import (
 )
 
 const (
-	webhookSecretMax  = 1024
 	channelTimeout    = 15 * time.Second
 	webhookTimeout    = 5 * time.Second
 	channelDrainBytes = 64 << 10
+	webhookURLLimit   = 2048
+	routingKeyLimit   = 512
 )
 
 func parseWebhook(policy *egress.Policy, d destination) (endpoint, error) {
-	if err := requireNoConfiguration(d.Configuration); err != nil {
+	if _, err := objectFields(d.Configuration); err != nil {
 		return nil, err
 	}
 	target, err := policy.ValidateEndpoint(d.URL)
@@ -35,21 +35,21 @@ func parseWebhook(policy *egress.Policy, d destination) (endpoint, error) {
 }
 
 func parseChat(policy *egress.Policy, d destination, render func(message) any) (endpoint, error) {
-	origin, err := channelOrigin(d.URL)
+	if _, err := objectFields(d.Configuration); err != nil {
+		return nil, err
+	}
+	origin, err := policy.ValidateEndpoint(d.URL)
 	if err != nil {
 		return nil, err
 	}
-	if err := requireNoConfiguration(d.Configuration); err != nil {
-		return nil, err
+	if origin.Path != "" {
+		return nil, errors.New("destination must be an https://host[:port] origin")
 	}
-	if _, err = policy.ValidateEndpoint(origin.String()); err != nil {
-		return nil, err
-	}
-	return chat{origin: origin, render: render}, nil
+	return chatOrigin{origin: origin, render: render}, nil
 }
 
 func parsePagerDuty(policy *egress.Policy, d destination) (endpoint, error) {
-	if err := requireNoConfiguration(d.Configuration); err != nil {
+	if _, err := objectFields(d.Configuration); err != nil {
 		return nil, err
 	}
 	if _, err := policy.ValidateEndpoint(d.URL); err != nil {
@@ -58,54 +58,13 @@ func parsePagerDuty(policy *egress.Policy, d destination) (endpoint, error) {
 	return pagerDuty{url: d.URL}, nil
 }
 
-func channelOrigin(raw string) (*url.URL, error) {
-	if strings.TrimSpace(raw) != raw {
-		return nil, errors.New("destination origin is not a URL")
-	}
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" || u.User != nil ||
-		(u.Scheme != "https" && u.Scheme != "http") ||
-		u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.RawFragment != "" {
-		return nil, errors.New("destination must be an https://host[:port] origin")
-	}
-	if path := strings.Trim(u.Path, "/"); path != "" {
-		return nil, errors.New("destination must be an https://host[:port] origin")
-	}
-	u.Path = ""
-	u.RawPath = ""
-	return u, nil
-}
-
-func webhookSecretURL(secret []byte, origin *url.URL) (*url.URL, error) {
-	fields, err := decodeObject(secret)
-	if err != nil || len(fields) != 1 {
-		return nil, errors.New("secret must be a webhook_url object")
-	}
-	raw, err := textField(fields, "webhook_url", 2048)
-	if err != nil || raw == "" {
-		return nil, errors.New("secret must be a webhook_url object")
-	}
-	hook, err := url.Parse(raw)
-	if err != nil || hook.Host == "" || hook.User != nil ||
-		(hook.Scheme != "https" && hook.Scheme != "http") {
-		return nil, errors.New("webhook_url is not an https URL")
-	}
-	if connectors.Origin(hook) != connectors.Origin(origin) {
-		return nil, errors.New("webhook_url must share the destination origin")
-	}
-	return hook, nil
-}
-
 type webhook struct {
 	url string
 	key []byte
 }
 
 func (w webhook) bind(_ *egress.Policy, secret []byte) (channel, error) {
-	if len(secret) > webhookSecretMax {
-		return nil, errors.New("secret too large")
-	}
-	return webhook{url: w.url, key: append([]byte(nil), secret...)}, nil
+	return webhook{url: w.url, key: secret}, nil
 }
 
 func (w webhook) send(ctx context.Context, s *Sender, m message) error {
@@ -120,31 +79,44 @@ func (w webhook) send(ctx context.Context, s *Sender, m message) error {
 	return statusError(status)
 }
 
-type chat struct {
+type chatOrigin struct {
 	origin *url.URL
 	render func(message) any
-	hook   string
 }
 
-func (c chat) bind(policy *egress.Policy, secret []byte) (channel, error) {
-	hook, err := webhookSecretURL(secret, c.origin)
+func (c chatOrigin) bind(policy *egress.Policy, secret []byte) (channel, error) {
+	fields, err := objectFields(secret, "webhook_url")
 	if err != nil {
 		return nil, err
 	}
-	queryFree := *hook
-	queryFree.RawQuery, queryFree.ForceQuery = "", false
-	queryFree.Fragment, queryFree.RawFragment = "", ""
-	if _, err = policy.ValidateEndpoint(queryFree.String()); err != nil {
+	raw, err := requiredTextField(fields, "webhook_url", webhookURLLimit)
+	if err != nil {
 		return nil, err
 	}
-	c.hook = hook.String()
-	return c, nil
+	hook, err := url.Parse(raw)
+	if err != nil {
+		return nil, errors.New("webhook_url is not a URL")
+	}
+	queryFree := url.URL{Scheme: hook.Scheme, User: hook.User, Host: hook.Host, Path: hook.Path, RawPath: hook.RawPath}
+	base, err := policy.ValidateEndpoint(queryFree.String())
+	if err != nil {
+		return nil, err
+	}
+	if connectors.Origin(base) != connectors.Origin(c.origin) {
+		return nil, errors.New("webhook_url must share the destination origin")
+	}
+	return chat{hook: raw, render: c.render}, nil
+}
+
+type chat struct {
+	hook   string
+	render func(message) any
 }
 
 func (c chat) send(ctx context.Context, s *Sender, m message) error {
 	payload, err := json.Marshal(c.render(m))
 	if err != nil {
-		return channelError(invalidDestinationCode, err)
+		return &sendError{invalidDestinationCode, err}
 	}
 	status, _, err := post(ctx, s.channels, channelTimeout, c.hook, nil, payload)
 	if err != nil {
@@ -159,26 +131,25 @@ type pagerDuty struct {
 }
 
 func (p pagerDuty) bind(_ *egress.Policy, secret []byte) (channel, error) {
-	fields, err := decodeObject(secret)
-	if err != nil || len(fields) != 1 {
-		return nil, errors.New("secret must be a routing_key object")
+	fields, err := objectFields(secret, "routing_key")
+	if err != nil {
+		return nil, err
 	}
-	key, err := textField(fields, "routing_key", 512)
-	if err != nil || key == "" {
-		return nil, errors.New("secret must be a routing_key object")
+	key, err := requiredTextField(fields, "routing_key", routingKeyLimit)
+	if err != nil {
+		return nil, err
 	}
-	p.routingKey = key
-	return p, nil
+	return pagerDuty{url: p.url, routingKey: key}, nil
 }
 
 func (p pagerDuty) send(ctx context.Context, s *Sender, m message) error {
 	payload, err := newPagerDutyEvent(p.routingKey, m)
 	if err != nil {
-		return channelError(invalidDestinationCode, err)
+		return &sendError{invalidDestinationCode, err}
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
-		return channelError(invalidDestinationCode, err)
+		return &sendError{invalidDestinationCode, err}
 	}
 	status, answer, err := post(ctx, s.channels, channelTimeout, p.url, nil, encoded)
 	if err != nil {
@@ -186,7 +157,7 @@ func (p pagerDuty) send(ctx context.Context, s *Sender, m message) error {
 	}
 	if status != http.StatusAccepted {
 		if status >= 200 && status < 300 {
-			return channelError(http5xxCode, errors.New("destination acknowledgement invalid"))
+			return &sendError{http5xxCode, errors.New("destination acknowledgement invalid")}
 		}
 		return statusError(status)
 	}
@@ -195,7 +166,7 @@ func (p pagerDuty) send(ctx context.Context, s *Sender, m message) error {
 		DedupKey string `json:"dedup_key"`
 	}
 	if err := json.Unmarshal(answer, &ack); err != nil || ack.Status != "success" || ack.DedupKey != payload.DedupKey {
-		return channelError(http5xxCode, errors.New("destination acknowledgement invalid"))
+		return &sendError{http5xxCode, errors.New("destination acknowledgement invalid")}
 	}
 	return nil
 }
@@ -205,7 +176,7 @@ func post(ctx context.Context, client *http.Client, timeout time.Duration, targe
 	defer cancel()
 	req, err := http.NewRequestWithContext(sendCtx, http.MethodPost, target, bytes.NewReader(body))
 	if err != nil {
-		return 0, nil, channelError(invalidDestinationCode, err)
+		return 0, nil, &sendError{invalidDestinationCode, err}
 	}
 	req.Header.Set("Content-Type", "application/json")
 	maps.Copy(req.Header, header)
@@ -223,7 +194,7 @@ func statusError(status int) error {
 		return nil
 	}
 	if status < 500 {
-		return channelError(http4xxCode, errors.New("destination refused the request"))
+		return &sendError{http4xxCode, errors.New("destination refused the request")}
 	}
-	return channelError(http5xxCode, errors.New("destination failed"))
+	return &sendError{http5xxCode, errors.New("destination failed")}
 }

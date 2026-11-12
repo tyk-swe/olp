@@ -240,20 +240,17 @@ func (s *Server) createNotificationRule(r *http.Request, _ access.Principal) (ac
 	if err := access.Decode(r, &input); err != nil {
 		return access.Reply{}, err
 	}
-	return s.create(r, rules, creation{projectID: input.ProjectID, fingerprint: input,
-		insert: func(tx pgx.Tx, p access.Principal, projectID *string, id, etag string) error {
-			target, err := parseRule(input, projectID)
-			if err != nil {
+	return create(s, r, rules, creation[ruleTarget]{projectID: input.ProjectID, fingerprint: input,
+		parse: func(projectID *string) (ruleTarget, error) { return parseRule(input, projectID) },
+		insert: func(tx pgx.Tx, p access.Principal, _ *string, target ruleTarget, id, etag string) error {
+			if err := checkReferences(r.Context(), tx, target); err != nil {
 				return err
 			}
-			if err = checkReferences(r.Context(), tx, target); err != nil {
-				return err
-			}
-			if err = enforceRuleCap(r.Context(), tx, target.event); err != nil {
+			if err := enforceRuleCap(r.Context(), tx, target.event); err != nil {
 				return err
 			}
 			c := target.subject.columns()
-			_, err = tx.Exec(r.Context(), createChannelRuleSQL, id, target.name, target.projectID, target.event,
+			_, err := tx.Exec(r.Context(), createChannelRuleSQL, id, target.name, target.projectID, target.event,
 				c.kind, c.id, c.window, c.percent, target.destinationID, target.enabled, etag, p.UserID(), target.configuration)
 			return err
 		}})

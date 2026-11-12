@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -25,13 +26,13 @@ func loopbackPolicy() egress.Policy {
 	}
 }
 
-func openDestination(typ, rawURL, configuration, secret string) error {
+func openDestination(typ contract.NotificationDestinationType, rawURL, configuration, secret string) error {
 	policy := loopbackPolicy()
 	_, err := open(&policy, destination{Type: typ, URL: rawURL, Configuration: json.RawMessage(configuration)}, []byte(secret))
 	return err
 }
 
-func sendDestination(ctx context.Context, t *testing.T, typ, rawURL, secret string) string {
+func sendDestination(ctx context.Context, t *testing.T, typ contract.NotificationDestinationType, rawURL, secret string) Failure {
 	t.Helper()
 	m, err := newMessage([]byte(`{"version":1,"event":"worker.stale","evidence":{"task":"usage"}}`),
 		contract.NotificationEventWorkerStale, "stale workers", "olp:incident:1", false)
@@ -61,11 +62,10 @@ func TestOpenWebhookDestination(t *testing.T) {
 		{name: "surrounding whitespace", url: " https://hooks.example.com/olp"},
 		{name: "configuration fields", url: "https://hooks.example.com/olp", configuration: `{"channel":"ops"}`},
 		{name: "configuration not an object", url: "https://hooks.example.com/olp", configuration: `[]`},
-		{name: "oversized secret", url: "https://hooks.example.com/olp", secret: strings.Repeat("k", 1025)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			if err := openDestination(webhookType, test.url, test.configuration, test.secret); (err == nil) != test.ok {
+			if err := openDestination(contract.NotificationDestinationTypeWebhook, test.url, test.configuration, test.secret); (err == nil) != test.ok {
 				t.Fatalf("open() error = %v, want ok %t", err, test.ok)
 			}
 		})
@@ -94,6 +94,7 @@ func TestOpenChatDestination(t *testing.T) {
 		{name: "secret empty value", url: "https://hooks.example.com", secret: `{"webhook_url":""}`},
 		{name: "secret extra key", url: "https://hooks.example.com", secret: `{"webhook_url":"https://hooks.example.com/services/x","channel":"#ops"}`},
 		{name: "hook on another origin", url: "https://hooks.example.com", secret: `{"webhook_url":"https://other.example.com/services/x"}`},
+		{name: "hook on another port", url: "https://hooks.example.com", secret: `{"webhook_url":"https://hooks.example.com:8443/services/x"}`},
 		{name: "hook with another scheme", url: "https://hooks.example.com", secret: `{"webhook_url":"http://hooks.example.com/services/x"}`},
 		{name: "hook with userinfo", url: "https://hooks.example.com", secret: `{"webhook_url":"https://user:pass@hooks.example.com/services/x"}`},
 		{name: "hook too long", url: "https://hooks.example.com", secret: `{"webhook_url":"https://hooks.example.com/` + strings.Repeat("x", 2048) + `"}`},
@@ -105,9 +106,9 @@ func TestOpenChatDestination(t *testing.T) {
 		{name: "hook host case", url: "https://hooks.example.com", secret: `{"webhook_url":"https://HOOKS.example.com/services/x"}`, ok: true},
 		{name: "hook without the custom port", url: "https://hooks.example.com:8443", secret: hook},
 	}
-	for _, typ := range []string{slackType, msteamsType, discordType} {
+	for _, typ := range []contract.NotificationDestinationType{contract.NotificationDestinationTypeSlack, contract.NotificationDestinationTypeMsteams, contract.NotificationDestinationTypeDiscord} {
 		for _, test := range cases {
-			t.Run(typ+"/"+test.name, func(t *testing.T) {
+			t.Run(string(typ)+"/"+test.name, func(t *testing.T) {
 				t.Parallel()
 				if err := openDestination(typ, test.url, test.configuration, test.secret); (err == nil) != test.ok {
 					t.Fatalf("open() error = %v, want ok %t", err, test.ok)
@@ -134,7 +135,7 @@ func TestOpenPagerDutyDestination(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			if err := openDestination(pagerDutyType, test.url, test.configuration, test.secret); (err == nil) != test.ok {
+			if err := openDestination(contract.NotificationDestinationTypePagerduty, test.url, test.configuration, test.secret); (err == nil) != test.ok {
 				t.Fatalf("open() error = %v, want ok %t", err, test.ok)
 			}
 		})
@@ -186,7 +187,7 @@ func TestOpenEmailDestination(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			if err := openDestination(emailType, test.url, test.configuration, test.secret); (err == nil) != test.ok {
+			if err := openDestination(contract.NotificationDestinationTypeEmail, test.url, test.configuration, test.secret); (err == nil) != test.ok {
 				t.Fatalf("open() error = %v, want ok %t", err, test.ok)
 			}
 		})
@@ -231,7 +232,7 @@ func TestWebhookSignsBodyWhenSecretIsSet(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			server, requests := captureServer(t, noContent)
-			if code := sendDestination(t.Context(), t, webhookType, server.URL+"/olp", test.secret); code != "" {
+			if code := sendDestination(t.Context(), t, contract.NotificationDestinationTypeWebhook, server.URL+"/olp", test.secret); code != "" {
 				t.Fatalf("send() failure code %q", code)
 			}
 			got := <-requests
@@ -252,14 +253,15 @@ func TestWebhookSignsBodyWhenSecretIsSet(t *testing.T) {
 func TestChatPostsRenderedMessageToHook(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
-		typ, titleField string
-		fields          []string
+		typ        contract.NotificationDestinationType
+		titleField string
+		fields     []string
 	}{
-		{slackType, "text", []string{"blocks", "text"}},
-		{msteamsType, "type", []string{"attachments", "type"}},
-		{discordType, "content", []string{"allowed_mentions", "content", "embeds"}},
+		{contract.NotificationDestinationTypeSlack, "text", []string{"blocks", "text"}},
+		{contract.NotificationDestinationTypeMsteams, "type", []string{"attachments", "type"}},
+		{contract.NotificationDestinationTypeDiscord, "content", []string{"allowed_mentions", "content", "embeds"}},
 	} {
-		t.Run(test.typ, func(t *testing.T) {
+		t.Run(string(test.typ), func(t *testing.T) {
 			t.Parallel()
 			server, requests := captureServer(t, noContent)
 			secret := `{"webhook_url":"` + server.URL + `/hooks/T/B?sig=abc"}`
@@ -277,7 +279,7 @@ func TestChatPostsRenderedMessageToHook(t *testing.T) {
 			if keys := slices.Sorted(maps.Keys(body)); !slices.Equal(keys, test.fields) {
 				t.Errorf("body fields = %v, want %v", keys, test.fields)
 			}
-			if test.typ != msteamsType && !bytes.Contains(body[test.titleField], []byte("worker.stale")) {
+			if test.typ != contract.NotificationDestinationTypeMsteams && !bytes.Contains(body[test.titleField], []byte("worker.stale")) {
 				t.Errorf("%s = %s, want the event title", test.titleField, body[test.titleField])
 			}
 		})
@@ -301,7 +303,7 @@ func TestPagerDutyRequiresMatchingAcknowledgement(t *testing.T) {
 	for _, test := range []struct {
 		name    string
 		respond func(http.ResponseWriter, []byte)
-		code    string
+		code    Failure
 	}{
 		{"accepted", ack(http.StatusAccepted, same), ""},
 		{"dedup mismatch", ack(http.StatusAccepted, other), http5xxCode},
@@ -311,7 +313,7 @@ func TestPagerDutyRequiresMatchingAcknowledgement(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			server, requests := captureServer(t, test.respond)
-			if code := sendDestination(t.Context(), t, pagerDutyType, server.URL+"/v2/enqueue", `{"routing_key":"R0UT1NG"}`); code != test.code {
+			if code := sendDestination(t.Context(), t, contract.NotificationDestinationTypePagerduty, server.URL+"/v2/enqueue", `{"routing_key":"R0UT1NG"}`); code != test.code {
 				t.Fatalf("send() failure code %q, want %q", code, test.code)
 			}
 			var event struct {
@@ -346,7 +348,7 @@ func TestSendMapsFailuresToCodes(t *testing.T) {
 	for _, test := range []struct {
 		name    string
 		respond func(http.ResponseWriter, []byte)
-		code    string
+		code    Failure
 	}{
 		{"bad request", status(http.StatusBadRequest), http4xxCode},
 		{"too many requests", status(http.StatusTooManyRequests), http4xxCode},
@@ -357,7 +359,7 @@ func TestSendMapsFailuresToCodes(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			server, _ := captureServer(t, test.respond)
-			if code := sendDestination(t.Context(), t, webhookType, server.URL+"/olp", ""); code != test.code {
+			if code := sendDestination(t.Context(), t, contract.NotificationDestinationTypeWebhook, server.URL+"/olp", ""); code != test.code {
 				t.Fatalf("send() failure code %q, want %q", code, test.code)
 			}
 		})
@@ -375,7 +377,7 @@ func TestSendMapsFailuresToCodes(t *testing.T) {
 		t.Cleanup(func() { close(release) })
 		ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 		defer cancel()
-		if code := sendDestination(ctx, t, webhookType, server.URL+"/olp", ""); code != timeoutCode {
+		if code := sendDestination(ctx, t, contract.NotificationDestinationTypeWebhook, server.URL+"/olp", ""); code != timeoutCode {
 			t.Fatalf("send() failure code %q, want %q", code, timeoutCode)
 		}
 	})
@@ -383,13 +385,13 @@ func TestSendMapsFailuresToCodes(t *testing.T) {
 		t.Parallel()
 		server := httptest.NewServer(http.NotFoundHandler())
 		server.Close()
-		if code := sendDestination(t.Context(), t, webhookType, server.URL+"/olp", ""); code != networkCode {
+		if code := sendDestination(t.Context(), t, contract.NotificationDestinationTypeWebhook, server.URL+"/olp", ""); code != networkCode {
 			t.Fatalf("send() failure code %q, want %q", code, networkCode)
 		}
 	})
 	t.Run("invalid destination", func(t *testing.T) {
 		t.Parallel()
-		if code := sendDestination(t.Context(), t, webhookType, "https://hooks.example.com/olp?token=1", ""); code != invalidDestinationCode {
+		if code := sendDestination(t.Context(), t, contract.NotificationDestinationTypeWebhook, "https://hooks.example.com/olp?token=1", ""); code != invalidDestinationCode {
 			t.Fatalf("send() failure code %q, want %q", code, invalidDestinationCode)
 		}
 	})
@@ -407,20 +409,21 @@ func TestDestinationSecret(t *testing.T) {
 	}
 	tests := []struct {
 		name    string
-		typ     string
+		typ     contract.NotificationDestinationType
 		raw     json.RawMessage
-		want    []byte
+		want    secretChange
 		wantErr bool
 	}{
-		{name: "webhook string", typ: "webhook", raw: json.RawMessage(`"k"`), want: []byte("k")},
+		{name: "absent", typ: "slack", want: keptSecret{}},
+		{name: "webhook string", typ: "webhook", raw: json.RawMessage(`"k"`), want: newSecret{[]byte("k")}},
 		{name: "empty webhook string", typ: "webhook", raw: json.RawMessage(`""`), wantErr: true},
 		{name: "long webhook string", typ: "webhook", raw: longWebhook, wantErr: true},
 		{name: "webhook object", typ: "webhook", raw: json.RawMessage(`{}`), wantErr: true},
-		{name: "slack object", typ: "slack", raw: json.RawMessage(`{"webhook_url":"x"}`), want: []byte(`{"webhook_url":"x"}`)},
+		{name: "slack object", typ: "slack", raw: json.RawMessage(`{"webhook_url":"x"}`), want: newSecret{[]byte(`{"webhook_url":"x"}`)}},
 		{name: "slack string", typ: "slack", raw: json.RawMessage(`"s"`), wantErr: true},
 		{name: "oversized slack object", typ: "slack", raw: largeObject, wantErr: true},
-		{name: "webhook null", typ: "webhook", raw: json.RawMessage(`null`)},
-		{name: "slack null", typ: "slack", raw: json.RawMessage(`null`)},
+		{name: "webhook null", typ: "webhook", raw: json.RawMessage(`null`), want: newSecret{}},
+		{name: "slack null", typ: "slack", raw: json.RawMessage(`null`), want: newSecret{}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -429,7 +432,7 @@ func TestDestinationSecret(t *testing.T) {
 			if (err != nil) != test.wantErr {
 				t.Fatalf("destinationSecret() error = %v, want error %v", err, test.wantErr)
 			}
-			if err == nil && !bytes.Equal(got, test.want) {
+			if err == nil && !reflect.DeepEqual(got, test.want) {
 				t.Errorf("destinationSecret() = %q, want %q", got, test.want)
 			}
 		})

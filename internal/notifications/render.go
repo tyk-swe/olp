@@ -38,18 +38,16 @@ func chatEvidence(m message, max int) string {
 }
 
 func slackMessage(m message) any {
-	title := m.title
 	return map[string]any{
-		"text": truncate(title, 150),
+		"text": truncate(m.title, 150),
 		"blocks": []map[string]any{
-			{"type": "header", "text": map[string]any{"type": "plain_text", "text": truncate(title, 150)}},
+			{"type": "header", "text": map[string]any{"type": "plain_text", "text": truncate(m.title, 150)}},
 			{"type": "section", "text": map[string]any{"type": "mrkdwn", "text": "```" + chatEvidence(m, 2800) + "```"}},
 		},
 	}
 }
 
 func teamsMessage(m message) any {
-	title := m.title
 	return map[string]any{
 		"type": "message",
 		"attachments": []map[string]any{
@@ -58,7 +56,7 @@ func teamsMessage(m message) any {
 					"$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
 					"type":    "AdaptiveCard", "version": "1.4",
 					"body": []map[string]any{
-						{"type": "TextBlock", "text": truncate(title, 256), "weight": "Bolder"},
+						{"type": "TextBlock", "text": truncate(m.title, 256), "weight": "Bolder"},
 						{"type": "TextBlock", "text": chatEvidence(m, 3600), "wrap": true},
 					},
 				}},
@@ -67,12 +65,11 @@ func teamsMessage(m message) any {
 }
 
 func discordMessage(m message) any {
-	title := m.title
 	return map[string]any{
-		"content":          truncate(title, discordContentMax),
+		"content":          truncate(m.title, discordContentMax),
 		"allowed_mentions": map[string]any{"parse": []string{}},
 		"embeds": []map[string]any{
-			{"title": truncate(title, discordTitleMax), "description": chatEvidence(m, discordDescMax)},
+			{"title": truncate(m.title, discordTitleMax), "description": chatEvidence(m, discordDescMax)},
 		},
 	}
 }

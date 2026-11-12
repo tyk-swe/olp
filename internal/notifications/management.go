@@ -85,13 +85,14 @@ func (s *Server) get(res resource) access.Handler {
 	}
 }
 
-type creation struct {
+type creation[T any] struct {
 	projectID   *string
 	fingerprint any
-	insert      func(tx pgx.Tx, p access.Principal, projectID *string, id, etag string) error
+	parse       func(projectID *string) (T, error)
+	insert      func(tx pgx.Tx, p access.Principal, projectID *string, target T, id, etag string) error
 }
 
-func (s *Server) create(r *http.Request, res resource, c creation) (access.Reply, error) {
+func create[T any](s *Server, r *http.Request, res resource, c creation[T]) (access.Reply, error) {
 	tx, p, err := s.access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
@@ -117,8 +118,12 @@ func (s *Server) create(r *http.Request, res resource, c creation) (access.Reply
 	if err = s.access.RequireProject(r.Context(), tx, p, projectID); err != nil {
 		return access.Reply{}, err
 	}
+	target, err := c.parse(projectID)
+	if err != nil {
+		return access.Reply{}, err
+	}
 	id, etag := access.NewID(), access.NewID()
-	if err = c.insert(tx, p, projectID, id, etag); err != nil {
+	if err = c.insert(tx, p, projectID, target, id, etag); err != nil {
 		return access.Reply{}, err
 	}
 	body, err := res.read(r.Context(), tx, id)

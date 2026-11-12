@@ -268,7 +268,7 @@ func (w *deliveryWorker) attempt(ctx context.Context, db database, d delivery) b
 		return false
 	}
 	code := w.send(ctx, d, target, secret)
-	status, lastError := contract.NotificationDeliveryStatusDelivered, (*string)(nil)
+	status, lastError := contract.NotificationDeliveryStatusDelivered, (*Failure)(nil)
 	if code != "" {
 		status, lastError = contract.NotificationDeliveryStatusFailed, &code
 	}
@@ -278,10 +278,10 @@ func (w *deliveryWorker) attempt(ctx context.Context, db database, d delivery) b
 	return true
 }
 
-func (w *deliveryWorker) send(ctx context.Context, d delivery, target destination, secret []byte) string {
+func (w *deliveryWorker) send(ctx context.Context, d delivery, target destination, secret []byte) Failure {
 	m, err := d.message()
 	if err != nil {
-		return "invalid_destination"
+		return invalidDestinationCode
 	}
 	return sendErrorCode(w.Sender.send(ctx, target, secret, m))
 }

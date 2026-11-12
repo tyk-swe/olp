@@ -22,197 +22,170 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 )
 
+const (
+	addressLimit       = 512
+	recipientLimit     = 50
+	subjectPrefixLimit = 200
+	credentialLimit    = 512
+)
+
 type emailConfiguration struct {
-	From          string   `json:"from"`
-	To            []string `json:"to"`
-	SubjectPrefix string   `json:"subject_prefix,omitempty"`
-	CACertificate string   `json:"ca_certificate,omitempty"`
+	from          *mail.Address
+	to            []*mail.Address
+	subjectPrefix string
+	roots         *x509.CertPool
+}
+
+type mailer struct {
+	emailConfiguration
+	implicitTLS bool
+	address     string
+	hostname    string
 }
 
 type email struct {
-	implicitTLS   bool
-	address       string
-	hostname      string
-	subjectPrefix string
-	from          *mail.Address
-	to            []*mail.Address
-	roots         *x509.CertPool
-	username      string
-	password      string
+	mailer
+	auth smtp.Auth
 }
 
-func smtpTarget(raw string) (scheme, host string, err error) {
+func smtpTarget(raw string) (*url.URL, error) {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" || u.User != nil ||
 		u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.RawFragment != "" ||
 		strings.Trim(u.Path, "/") != "" {
-		return "", "", errors.New("email destination must be smtps://host:port or smtp+starttls://host:port")
+		return nil, errors.New("email destination must be smtps://host:port or smtp+starttls://host:port")
 	}
 	switch u.Scheme {
 	case "smtps", "smtp+starttls":
 	default:
-		return "", "", errors.New("email destination must be smtps://host:port or smtp+starttls://host:port")
+		return nil, errors.New("email destination must be smtps://host:port or smtp+starttls://host:port")
 	}
 	if u.Port() == "" {
-		return "", "", errors.New("email destination requires an explicit port")
+		return nil, errors.New("email destination requires an explicit port")
 	}
-	return u.Scheme, u.Host, nil
+	return u, nil
 }
 
 func emailConfig(raw json.RawMessage) (emailConfiguration, error) {
-	var config emailConfiguration
-	if len(raw) == 0 {
-		return config, errors.New("email destinations require from/to configuration")
+	fields, err := objectFields(raw, "from", "to", "subject_prefix", "ca_certificate")
+	if err != nil {
+		return emailConfiguration{}, err
 	}
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&config); err != nil {
-		return config, errors.New("configuration fields have invalid types")
+	sender, err := requiredTextField(fields, "from", addressLimit)
+	if err != nil {
+		return emailConfiguration{}, err
 	}
-	if err := dec.Decode(new(any)); err != io.EOF {
-		return config, errors.New("trailing data")
+	from, err := mail.ParseAddress(sender)
+	if err != nil {
+		return emailConfiguration{}, errors.New("from is not a valid address")
 	}
-	if config.From == "" || len(config.From) > 512 || strings.ContainsAny(config.From, "\r\n\x00") {
-		return config, errors.New("from is missing or invalid")
+	to, err := emailRecipients(fields["to"])
+	if err != nil {
+		return emailConfiguration{}, err
 	}
-	if len(config.To) < 1 || len(config.To) > 50 {
-		return config, errors.New("to requires from 1 to 50 addresses")
+	subjectPrefix, err := textField(fields, "subject_prefix", subjectPrefixLimit)
+	if err != nil {
+		return emailConfiguration{}, err
 	}
-	for _, to := range config.To {
-		if len(to) > 512 || strings.ContainsAny(to, "\r\n\x00") {
-			return config, errors.New("to is invalid")
-		}
+	roots, err := emailRoots(fields)
+	if err != nil {
+		return emailConfiguration{}, err
 	}
-	if len(config.SubjectPrefix) > 200 || strings.ContainsAny(config.SubjectPrefix, "\r\n\x00") {
-		return config, errors.New("subject_prefix is invalid")
-	}
-	if len(config.CACertificate) > secretObjectLimit {
-		return config, errors.New("ca_certificate too large")
-	}
-	return config, nil
+	return emailConfiguration{from: from, to: to, subjectPrefix: subjectPrefix, roots: roots}, nil
 }
 
-func emailRoots(pemData string) (*x509.CertPool, error) {
-	roots, err := x509.SystemCertPool()
-	if err != nil {
-		roots = x509.NewCertPool()
+func emailRecipients(raw json.RawMessage) ([]*mail.Address, error) {
+	var recipients []string
+	if err := json.Unmarshal(raw, &recipients); err != nil || len(recipients) < 1 || len(recipients) > recipientLimit {
+		return nil, errors.New("to requires from 1 to 50 addresses")
 	}
-	if !roots.AppendCertsFromPEM([]byte(pemData)) {
+	to := make([]*mail.Address, 0, len(recipients))
+	for _, recipient := range recipients {
+		if !headerSafe(recipient, addressLimit) {
+			return nil, errors.New("to is invalid")
+		}
+		address, err := mail.ParseAddress(recipient)
+		if err != nil {
+			return nil, errors.New("to is not a valid address")
+		}
+		to = append(to, address)
+	}
+	return to, nil
+}
+
+func emailRoots(fields map[string]json.RawMessage) (*x509.CertPool, error) {
+	var certificate string
+	if raw, present := fields["ca_certificate"]; present && json.Unmarshal(raw, &certificate) != nil {
+		return nil, errors.New("ca_certificate must be a PEM string")
+	}
+	if certificate == "" {
+		return nil, nil
+	}
+	roots := systemRoots()
+	if !roots.AppendCertsFromPEM([]byte(certificate)) {
 		return nil, errors.New("ca_certificate is not valid PEM")
 	}
 	return roots, nil
 }
 
-func smtpSecret(secret []byte) (string, string, error) {
-	if len(secret) == 0 {
-		return "", "", nil
-	}
-	fields, err := decodeObject(secret)
+func systemRoots() *x509.CertPool {
+	roots, err := x509.SystemCertPool()
 	if err != nil {
-		return "", "", errors.New("email secret must be username and password")
+		return x509.NewCertPool()
 	}
-	if len(fields) == 0 {
-		return "", "", nil
-	}
-	if len(fields) != 2 {
-		return "", "", errors.New("email secret must be username and password")
-	}
-	user, err := textField(fields, "username", 512)
-	if err != nil {
-		return "", "", errors.New("email secret must be username and password")
-	}
-	pass, err := textField(fields, "password", 512)
-	if err != nil {
-		return "", "", errors.New("email secret must be username and password")
-	}
-	if user == "" || pass == "" {
-		return "", "", errors.New("email secret requires both username and password or neither")
-	}
-	return user, pass, nil
+	return roots
 }
 
-func parseSMTPAddresses(config emailConfiguration) (*mail.Address, []*mail.Address, error) {
-	from, err := mail.ParseAddress(config.From)
+func parseEmail(policy *egress.Policy, d destination) (endpoint, error) {
+	target, err := smtpTarget(d.URL)
 	if err != nil {
-		return nil, nil, errors.New("from is not a valid address")
+		return nil, err
 	}
-	to := make([]*mail.Address, 0, len(config.To))
-	for _, recipient := range config.To {
-		address, err := mail.ParseAddress(recipient)
-		if err != nil {
-			return nil, nil, errors.New("to is not a valid address")
-		}
-		to = append(to, address)
-	}
-	return from, to, nil
-}
-
-func parseEmail(policy *egress.Policy, d destination) (email, error) {
-	scheme, host, err := smtpTarget(d.URL)
-	if err != nil {
-		return email{}, err
-	}
-	if err := validateSMTPHost(policy, host); err != nil {
-		return email{}, err
+	if err := policy.ValidateHost(target.Host); err != nil {
+		return nil, err
 	}
 	config, err := emailConfig(d.Configuration)
 	if err != nil {
-		return email{}, err
+		return nil, err
 	}
-	from, to, err := parseSMTPAddresses(config)
-	if err != nil {
-		return email{}, err
-	}
-	var roots *x509.CertPool
-	if config.CACertificate != "" {
-		roots, err = emailRoots(config.CACertificate)
-		if err != nil {
-			return email{}, err
-		}
-	}
-	hostname, _, err := net.SplitHostPort(host)
-	if err != nil {
-		return email{}, errors.New("email destination requires an explicit host and port")
-	}
-	return email{
-		implicitTLS:   scheme == "smtps",
-		address:       host,
-		hostname:      hostname,
-		subjectPrefix: config.SubjectPrefix,
-		from:          from,
-		to:            to,
-		roots:         roots,
+	return mailer{
+		emailConfiguration: config,
+		implicitTLS:        target.Scheme == "smtps",
+		address:            target.Host,
+		hostname:           target.Hostname(),
 	}, nil
 }
 
-// validateSMTPHost applies provider egress validation to the SMTP hostname.
-func validateSMTPHost(policy *egress.Policy, host string) error {
-	_, err := policy.ValidateEndpoint("https://" + host)
-	return err
+func (m mailer) bind(_ *egress.Policy, secret []byte) (channel, error) {
+	fields, err := objectFields(secret, "username", "password")
+	if err != nil {
+		return nil, err
+	}
+	if len(fields) == 0 {
+		return email{mailer: m}, nil
+	}
+	username, err := requiredTextField(fields, "username", credentialLimit)
+	if err != nil {
+		return nil, errors.New("email secret requires both username and password or neither")
+	}
+	password, err := requiredTextField(fields, "password", credentialLimit)
+	if err != nil {
+		return nil, errors.New("email secret requires both username and password or neither")
+	}
+	return email{mailer: m, auth: smtp.PlainAuth("", username, password, m.hostname)}, nil
 }
 
-// smtpError classifies SMTP reply codes and delegates other failures.
 func smtpError(err error) error {
 	var reply *textproto.Error
 	if errors.As(err, &reply) {
 		if reply.Code >= 500 {
-			return channelError(smtp5xxCode, err)
+			return &sendError{smtp5xxCode, err}
 		}
 		if reply.Code >= 400 {
-			return channelError(smtp4xxCode, err)
+			return &sendError{smtp4xxCode, err}
 		}
 	}
 	return transportError(err)
-}
-
-func (e email) bind(_ *egress.Policy, secret []byte) (channel, error) {
-	username, password, err := smtpSecret(secret)
-	if err != nil {
-		return nil, err
-	}
-	e.username = username
-	e.password = password
-	return e, nil
 }
 
 func (e email) send(ctx context.Context, s *Sender, m message) error {
@@ -248,16 +221,15 @@ func (e email) send(ctx context.Context, s *Sender, m message) error {
 	}
 	if !e.implicitTLS {
 		if ok, _ := client.Extension("STARTTLS"); !ok {
-			return channelError(invalidDestinationCode, errors.New("server does not offer STARTTLS"))
+			return &sendError{invalidDestinationCode, errors.New("server does not offer STARTTLS")}
 		}
 		if err = client.StartTLS(tlsConfig); err != nil {
 			return smtpError(err)
 		}
 	}
-	if e.username != "" {
-		auth := smtp.PlainAuth("", e.username, e.password, e.hostname)
-		if err = client.Auth(auth); err != nil {
-			return channelError(credentialCode, err)
+	if e.auth != nil {
+		if err = client.Auth(e.auth); err != nil {
+			return &sendError{credentialCode, err}
 		}
 	}
 	if err = client.Mail(e.from.Address); err != nil {
@@ -279,7 +251,6 @@ func (e email) send(ctx context.Context, s *Sender, m message) error {
 	if err = w.Close(); err != nil {
 		return smtpError(err)
 	}
-	// A failed QUIT must not resend a message the server accepted.
 	_ = client.Quit()
 	return nil
 }
