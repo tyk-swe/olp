@@ -51,13 +51,12 @@ func ValidCredential(value string) error {
 	return nil
 }
 
-func (s *Catalogue) StoreCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (id string, version int, err error) {
-	id = access.NewID()
-	if err = tx.QueryRow(ctx, "INSERT INTO olp.provider_credentials(id,provider_id,version) VALUES($1,$2,(SELECT coalesce(max(version),0)+1 FROM olp.provider_credentials WHERE provider_id=$2)) RETURNING version", id, providerID).Scan(&version); err != nil {
+func (s *Catalogue) StoreCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, int, error) {
+	id, version, err := insertCredentialVersion(ctx, tx, providerID, nil)
+	if err != nil {
 		return "", 0, err
 	}
-	err = s.Access.Keys.Store(ctx, tx, s.Access.Installation, id, secrets.ProviderCredential, []byte(secret), nil)
-	return id, version, err
+	return id, version, s.Access.Keys.Store(ctx, tx, s.Access.Installation, id, secrets.ProviderCredential, []byte(secret), nil)
 }
 
 func (s *Server) providers(r *http.Request, principal access.Principal) (access.Reply, error) {
@@ -105,12 +104,16 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 	if err := access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
 	}
+	credential, err := decodeCredential(input.Credential, input.CredentialReference)
+	if err != nil {
+		return access.Reply{}, err
+	}
 	tx, p, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	if err = authorizeCredentialReference(p, input.CredentialReference); err != nil {
+	if err = authorizeCredential(p, credential); err != nil {
 		return access.Reply{}, err
 	}
 	claim, replayed, err := a.Replay(r, tx, p, input)
@@ -125,7 +128,7 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 		}
 		return *replayed, tx.Commit(r.Context())
 	}
-	created, err := s.createDraft(r.Context(), tx, p, input)
+	created, err := s.createDraft(r.Context(), tx, p, input, credential)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -361,7 +364,7 @@ func loadSlots(ctx context.Context, q access.Queryer, providerID string) ([]slot
 // beneath it for a provider that takes a static credential, a pasted one for
 // a provider that authenticates with a grant, or a grant another build or
 // profile of the plugin enrolled.
-func (row *slotRow) credentialFits(cfg connection.Configuration) error {
+func (row slotRow) credentialFits(cfg connection.Configuration) error {
 	switch {
 	case row.CredentialID == nil || !cfg.CredentialRequired() || cfg.Authenticates(row.CredentialPlugin, row.CredentialProfile):
 		return nil
@@ -376,7 +379,7 @@ func (row *slotRow) credentialFits(cfg connection.Configuration) error {
 // observedPrincipal is the principal the slot observes: the one grant
 // enrollment observed for its credential version, unless that version serves
 // no more because it is revoked or its grant lapsed.
-func (row *slotRow) observedPrincipal() string {
+func (row slotRow) observedPrincipal() string {
 	if row.CredentialRevoked || row.CredentialLapsed {
 		return ""
 	}
@@ -385,7 +388,7 @@ func (row *slotRow) observedPrincipal() string {
 
 // observedFacts are the grant facts the slot's credential version serves
 // with, cleared like its principal when the version serves no more.
-func (row *slotRow) observedFacts() map[string]string {
+func (row slotRow) observedFacts() map[string]string {
 	if row.CredentialRevoked || row.CredentialLapsed {
 		return nil
 	}
@@ -423,7 +426,7 @@ func onePrincipal(slots []slotRow, cfg connection.Configuration) error {
 	return access.Fail(422, "principal_mismatch", "The credential slots observe different upstream principals or serving environments: "+strings.Join(observed, "; ")+". Every slot of a provider serves one account and environment: re-enroll these slots alike, and pool other accounts through other providers.")
 }
 
-func (row *slotRow) published(authMode string) routing.RevisionSlot {
+func (row slotRow) published(authMode string) routing.RevisionSlot {
 	slot := routing.Slot{ID: row.ID, Name: row.Name, Enabled: row.Enabled, Priority: row.Priority, Weight: row.Weight, AllowedModels: row.Restrictions.AllowedModels, AllowedRoutes: row.Restrictions.AllowedRoutes, AllowedAPIKeys: row.Restrictions.AllowedAPIKeys, RequestsPerMinute: row.Limits.RequestsPerMinute, TokensPerMinute: row.Limits.TokensPerMinute, MaxConcurrency: row.Limits.MaxConcurrency, Supply: row.Limits.Supply}
 	var principal string
 	if connectors.SecretRequired(authMode) {
@@ -697,6 +700,13 @@ func (s *Server) revisionDiff(r *http.Request, p access.Principal) (access.Reply
 	}), nil
 }
 
+func valueOr[T any](v *T, fallback T) T {
+	if v == nil {
+		return fallback
+	}
+	return *v
+}
+
 func deref[T comparable](v *T) T {
 	var zero T
 	if v == nil {
@@ -821,7 +831,7 @@ type createdProvider struct {
 	Kind string
 }
 
-func (s *Catalogue) createDraft(ctx context.Context, tx pgx.Tx, p access.Principal, input createRequest) (createdProvider, error) {
+func (s *Catalogue) createDraft(ctx context.Context, tx pgx.Tx, p access.Principal, input createRequest, credential credentialSource) (createdProvider, error) {
 	var err error
 	if err = access.ValidText("name", input.Name, 100); err != nil {
 		return createdProvider{}, err
@@ -832,15 +842,12 @@ func (s *Catalogue) createDraft(ctx context.Context, tx pgx.Tx, p access.Princip
 	}
 	configuration := prepared.Document()
 	switch {
-	case configuration.Grant() && (input.Credential != nil || input.CredentialReference != nil):
+	case configuration.Grant() && credential != nil:
 		return createdProvider{}, access.Invalid("credential", grantEnrollmentOnly)
-	case configuration.CredentialRequired() && !configuration.Grant() && input.Credential == nil && input.CredentialReference == nil:
+	case configuration.CredentialRequired() && !configuration.Grant() && credential == nil:
 		return createdProvider{}, access.Invalid("credential", "This authentication mode requires a credential.")
-	case !configuration.CredentialRequired() && (input.Credential != nil || input.CredentialReference != nil):
+	case !configuration.CredentialRequired() && credential != nil:
 		return createdProvider{}, access.Invalid("credential", "This authentication mode takes no stored credential.")
-	}
-	if err = validateCredentialInput(input.Credential, input.CredentialReference); err != nil {
-		return createdProvider{}, err
 	}
 	displayName := cmp.Or(deref(input.DisplayName), deref(input.Model))
 	if input.Model != nil {
@@ -860,8 +867,8 @@ func (s *Catalogue) createDraft(ctx context.Context, tx pgx.Tx, p access.Princip
 	}
 	id := created.ID
 	var credentialID *string
-	if input.Credential != nil || input.CredentialReference != nil {
-		stored, _, err := s.storeCredentialInput(ctx, tx, id, input.Credential, input.CredentialReference)
+	if credential != nil {
+		stored, _, err := s.storeCredential(ctx, tx, id, credential)
 		if err != nil {
 			return createdProvider{}, err
 		}

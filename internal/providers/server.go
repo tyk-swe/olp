@@ -142,6 +142,13 @@ func touch(ctx context.Context, tx pgx.Tx, id string) (string, error) {
 	return etag, err
 }
 
+// touchSlots records a draft change to the slot set and returns the new etag.
+func touchSlots(ctx context.Context, tx pgx.Tx, id string) (string, error) {
+	etag := access.NewID()
+	_, err := tx.Exec(ctx, "UPDATE olp.providers SET etag=$2,slots_etag=$3,draft_dirty=true,updated_at=now() WHERE id=$1", id, etag, access.NewID())
+	return etag, err
+}
+
 // credentialState is what the detail view needs about a credential.
 type credentialState struct {
 	ID      *string

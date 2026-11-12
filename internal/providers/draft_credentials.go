@@ -21,7 +21,7 @@ func (s *Catalogue) BindDraftCredential(ctx context.Context, tx pgx.Tx, provider
 	if err != nil || tag.RowsAffected() == 0 {
 		return err
 	}
-	_, err = tx.Exec(ctx, "UPDATE olp.providers SET etag=$2,slots_etag=$3,draft_dirty=true,updated_at=now() WHERE id=$1", providerID, access.NewID(), access.NewID())
+	_, err = touchSlots(ctx, tx, providerID)
 	return err
 }
 

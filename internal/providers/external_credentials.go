@@ -11,24 +11,38 @@ import (
 	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
-func validateCredentialInput(plain *string, reference *secretstore.Reference) error {
-	if plain != nil && reference != nil {
-		return access.Invalid("credential_reference", "Choose a sealed credential or an external reference.")
+type credentialSource interface{ credentialSource() }
+
+type pastedCredential string
+
+type externalCredential secretstore.Reference
+
+func (pastedCredential) credentialSource()   {}
+func (externalCredential) credentialSource() {}
+
+func decodeCredential(plain *string, reference *secretstore.Reference) (credentialSource, error) {
+	switch {
+	case plain != nil && reference != nil:
+		return nil, access.Invalid("credential_reference", "Choose a sealed credential or an external reference.")
+	case plain != nil:
+		if err := ValidCredential(*plain); err != nil {
+			return nil, err
+		}
+		return pastedCredential(*plain), nil
+	case reference != nil:
+		if reference.Validate() != nil {
+			return nil, access.Invalid("credential_reference", "Use an immutable, version-pinned external credential reference.")
+		}
+		return externalCredential(*reference), nil
 	}
-	if plain != nil {
-		return ValidCredential(*plain)
-	}
-	if reference != nil && reference.Validate() != nil {
-		return access.Invalid("credential_reference", "Use an immutable, version-pinned external credential reference.")
-	}
-	return nil
+	return nil, nil
 }
 
 // External references spend the installation's workload authority. An
 // installation operator must approve the exact version for this provider;
 // project managers may use approved versions but cannot introduce references.
-func authorizeCredentialReference(p access.Principal, reference *secretstore.Reference) error {
-	if reference != nil {
+func authorizeCredential(p access.Principal, source credentialSource) error {
+	if _, external := source.(externalCredential); external {
 		return p.Authorize(access.Settings)
 	}
 	return nil
@@ -49,11 +63,18 @@ func (s *Catalogue) resolveReference(ctx context.Context, reference secretstore.
 	return value, nil
 }
 
-func (s *Catalogue) storeCredentialInput(ctx context.Context, tx pgx.Tx, providerID string, plain *string, reference *secretstore.Reference) (string, int, error) {
-	if reference == nil {
-		return s.StoreCredential(ctx, tx, providerID, *plain)
+func (s *Catalogue) material(ctx context.Context, source credentialSource) ([]byte, error) {
+	if reference, external := source.(externalCredential); external {
+		return s.resolveReference(ctx, secretstore.Reference(reference))
 	}
-	return s.StoreExternalCredential(ctx, tx, providerID, *reference)
+	return []byte(source.(pastedCredential)), nil
+}
+
+func (s *Catalogue) storeCredential(ctx context.Context, tx pgx.Tx, providerID string, source credentialSource) (string, int, error) {
+	if reference, external := source.(externalCredential); external {
+		return s.StoreExternalCredential(ctx, tx, providerID, secretstore.Reference(reference))
+	}
+	return s.StoreCredential(ctx, tx, providerID, string(source.(pastedCredential)))
 }
 
 func (s *Catalogue) StoreExternalCredential(ctx context.Context, tx pgx.Tx, providerID string, reference secretstore.Reference) (string, int, error) {
@@ -61,9 +82,13 @@ func (s *Catalogue) StoreExternalCredential(ctx context.Context, tx pgx.Tx, prov
 	if err != nil {
 		return "", 0, err
 	}
+	return insertCredentialVersion(ctx, tx, providerID, data)
+}
+
+func insertCredentialVersion(ctx context.Context, tx pgx.Tx, providerID string, externalReference []byte) (string, int, error) {
 	id := access.NewID()
 	var version int
-	err = tx.QueryRow(ctx, "INSERT INTO olp.provider_credentials(id,provider_id,version,external_reference) VALUES($1,$2,(SELECT coalesce(max(version),0)+1 FROM olp.provider_credentials WHERE provider_id=$2),$3) RETURNING version", id, providerID, data).Scan(&version)
+	err := tx.QueryRow(ctx, "INSERT INTO olp.provider_credentials(id,provider_id,version,external_reference) VALUES($1,$2,(SELECT coalesce(max(version),0)+1 FROM olp.provider_credentials WHERE provider_id=$2),$3) RETURNING version", id, providerID, externalReference).Scan(&version)
 	return id, version, err
 }
 

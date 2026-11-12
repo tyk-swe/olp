@@ -12,11 +12,11 @@ import (
 	"github.com/tyk-swe/olp/internal/providers/probe"
 )
 
-func (row *slotRow) allowsModel(model storedModel) bool {
+func (row slotRow) allowsModel(model storedModel) bool {
 	return model.Enabled && (len(row.Restrictions.AllowedModels) == 0 || slices.Contains(row.Restrictions.AllowedModels, model.UpstreamModel))
 }
 
-func (row *slotRow) credentialFingerprint(cfg connection.Configuration) string {
+func (row slotRow) credentialFingerprint(cfg connection.Configuration) string {
 	credential := ""
 	if cfg.CredentialRequired() {
 		credential = deref(row.CredentialID)
@@ -26,7 +26,7 @@ func (row *slotRow) credentialFingerprint(cfg connection.Configuration) string {
 
 // Validation covers exactly the model capabilities this slot can serve. Changes
 // to routing preferences or limits do not change the upstream access being tested.
-func (row *slotRow) validationFingerprint(cfg connection.Configuration, models []storedModel) string {
+func (row slotRow) validationFingerprint(cfg connection.Configuration, models []storedModel) string {
 	var tuples []string
 	for _, model := range models {
 		if !row.allowsModel(model) {
@@ -46,7 +46,12 @@ func (row *slotRow) validationFingerprint(cfg connection.Configuration, models [
 	return row.credentialFingerprint(cfg) + ":" + hex.EncodeToString(hash[:])
 }
 
-func (row *slotRow) validationTime(cfg connection.Configuration, models []storedModel) *time.Time {
+func (row slotRow) withCredential(id string) slotRow {
+	row.CredentialID = &id
+	return row
+}
+
+func (row slotRow) validationTime(cfg connection.Configuration, models []storedModel) *time.Time {
 	fingerprint := row.validationFingerprint(cfg, models)
 	if fingerprint != "" && deref(row.ValidatedFingerprint) == fingerprint {
 		return row.ValidatedAt
@@ -56,7 +61,7 @@ func (row *slotRow) validationTime(cfg connection.Configuration, models []stored
 
 // Certification uses the default credential. It also validates that slot once
 // every allowed enabled capability has been certified with that same credential.
-func (row *slotRow) certificationTime(cfg connection.Configuration, models []storedModel) *time.Time {
+func (row slotRow) certificationTime(cfg connection.Configuration, models []storedModel) *time.Time {
 	var at *time.Time
 	for _, model := range models {
 		if !row.allowsModel(model) {
@@ -77,7 +82,7 @@ func (row *slotRow) certificationTime(cfg connection.Configuration, models []sto
 	return at
 }
 
-func (s *Catalogue) validateModelAccess(ctx context.Context, target probe.Target, row *slotRow, models []storedModel) error {
+func (s *Catalogue) validateModelAccess(ctx context.Context, target probe.Target, row slotRow, models []storedModel) error {
 	ctx, cancel := probe.Budget(ctx)
 	defer cancel()
 	checked := 0

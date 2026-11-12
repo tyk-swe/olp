@@ -109,6 +109,6 @@ func (s *Catalogue) StageDraftInventory(ctx context.Context, tx pgx.Tx, provider
 			return access.Invalid("slots", "Slot identity belongs to another provider.")
 		}
 	}
-	_, err := tx.Exec(ctx, "UPDATE olp.providers SET etag=$2,slots_etag=$3,draft_dirty=true,updated_at=now() WHERE id=$1", providerID, access.NewID(), access.NewID())
+	_, err := touchSlots(ctx, tx, providerID)
 	return err
 }

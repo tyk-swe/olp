@@ -205,11 +205,8 @@ func (s *Catalogue) bindGrant(ctx context.Context, tx pgx.Tx, authority Enrollme
 	if bound.RowsAffected() != 1 {
 		return EnrollmentCompletion{}, stale
 	}
-	etag, err := touch(ctx, tx, binding.ProviderID)
+	etag, err := touchSlots(ctx, tx, binding.ProviderID)
 	if err != nil {
-		return EnrollmentCompletion{}, err
-	}
-	if _, err := tx.Exec(ctx, "UPDATE olp.providers SET slots_etag=$2 WHERE id=$1", binding.ProviderID, access.NewID()); err != nil {
 		return EnrollmentCompletion{}, err
 	}
 	if err := authority.Audit(ctx, tx, actor, binding.Action, "provider_credential", binding.Credential.ID, "success"); err != nil {

@@ -90,12 +90,5 @@ func (s *Catalogue) deleteDraftSlot(ctx context.Context, tx pgx.Tx, providerID, 
 	if _, err = tx.Exec(ctx, "DELETE FROM olp.provider_slots WHERE id=$1 AND provider_id=$2", slotID, providerID); err != nil {
 		return "", err
 	}
-	etag, err := touch(ctx, tx, providerID)
-	if err != nil {
-		return "", err
-	}
-	if _, err = tx.Exec(ctx, "UPDATE olp.providers SET slots_etag=$2 WHERE id=$1", providerID, access.NewID()); err != nil {
-		return "", err
-	}
-	return etag, nil
+	return touchSlots(ctx, tx, providerID)
 }

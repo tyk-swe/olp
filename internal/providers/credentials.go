@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/providers/connection"
@@ -81,18 +82,19 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 	if input.Credential != "" {
 		plain = &input.Credential
 	}
-	if plain == nil && input.CredentialReference == nil {
-		return access.Reply{}, access.Invalid("credential", "Supply a credential or external reference.")
-	}
-	if err = validateCredentialInput(plain, input.CredentialReference); err != nil {
+	source, err := decodeCredential(plain, input.CredentialReference)
+	if err != nil {
 		return access.Reply{}, err
+	}
+	if source == nil {
+		return access.Reply{}, access.Invalid("credential", "Supply a credential or external reference.")
 	}
 	tx, p, err := a.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	if err = authorizeCredentialReference(p, input.CredentialReference); err != nil {
+	if err = authorizeCredential(p, source); err != nil {
 		return access.Reply{}, err
 	}
 	// The stored reply discloses the provider, so the caller must still reach
@@ -128,12 +130,7 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 	if err != nil {
 		return access.Reply{}, err
 	}
-	var defaultSlot slotRow
-	for _, row := range slots {
-		if row.Default {
-			defaultSlot = row
-		}
-	}
+	defaultSlot := slots[slices.IndexFunc(slots, func(row slotRow) bool { return row.Default })]
 	// Do not hold the installation mutation lock during the upstream probe.
 	// The commit transaction rechecks authority, replay, and the draft ETag.
 	if err = tx.Rollback(r.Context()); err != nil {
@@ -143,12 +140,9 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 	for i, model := range models {
 		declared[i] = model.UpstreamModel
 	}
-	credential := []byte(input.Credential)
-	if input.CredentialReference != nil {
-		credential, err = s.resolveReference(r.Context(), *input.CredentialReference)
-		if err != nil {
-			return access.Reply{}, err
-		}
+	credential, err := s.material(r.Context(), source)
+	if err != nil {
+		return access.Reply{}, err
 	}
 	defer clear(credential)
 	target := current.target(credential, declared...)
@@ -157,16 +151,16 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 	}
 	var validatedAt *time.Time
 	if defaultSlot.validationFingerprint(current.Connection.Document(), models) != "" {
-		if err = s.validateModelAccess(r.Context(), target, &defaultSlot, models); err != nil {
+		if err = s.validateModelAccess(r.Context(), target, defaultSlot, models); err != nil {
 			return access.Reply{}, access.Fail(422, "credential_invalid", "The new credential cannot access the enabled models: "+probe.Classify(err).Detail)
 		}
 		validatedAt = new(time.Now().UTC())
 	}
-	return access.Mutate(a, r, input, referencing(r.Context(), id, input.CredentialReference), func(tx pgx.Tx, p access.Principal, locked *record) (access.Reply, error) {
+	return access.Mutate(a, r, input, referencing(r.Context(), id, source), func(tx pgx.Tx, p access.Principal, locked *record) (access.Reply, error) {
 		if locked.ETag != current.ETag {
 			return access.Reply{}, access.Fail(412, "etag_mismatch", "The connection changed during validation; reload and retry.")
 		}
-		rotated, err := s.rotateCredential(r.Context(), tx, current, models, defaultSlot, validatedAt, plain, input.CredentialReference)
+		rotated, err := s.rotateCredential(r.Context(), tx, current, models, defaultSlot, validatedAt, source)
 		if err != nil {
 			return access.Reply{}, err
 		}
@@ -179,10 +173,10 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 
 // referencing locks a provider for a change that may store an external
 // credential reference, which only settings administrators may name.
-func referencing(ctx context.Context, id string, reference *secretstore.Reference) func(pgx.Tx, access.Principal) (*record, error) {
+func referencing(ctx context.Context, id string, source credentialSource) func(pgx.Tx, access.Principal) (*record, error) {
 	lock := changeable(ctx, id)
 	return func(tx pgx.Tx, p access.Principal) (*record, error) {
-		if err := authorizeCredentialReference(p, reference); err != nil {
+		if err := authorizeCredential(p, source); err != nil {
 			return nil, err
 		}
 		return lock(tx, p)
@@ -222,7 +216,7 @@ type slotInput struct {
 	routing.Supply
 }
 
-func (in *slotInput) limits() connection.Limits {
+func (in slotInput) limits() connection.Limits {
 	return connection.Limits{MaxConcurrency: in.MaxConcurrency, RequestsPerMinute: in.RequestsPerMinute, TokensPerMinute: in.TokensPerMinute, Supply: in.Supply}
 }
 
@@ -369,54 +363,84 @@ func (s *Server) slots(r *http.Request, p access.Principal) (access.Reply, error
 	return s.slotList(r.Context(), s.Access.Pool, current)
 }
 
-func validSlot(in *slotInput, slotID string) error {
-	if in.ID != "" {
-		id, err := access.ParseUUID(in.ID)
-		if err != nil || (id != "00000000-0000-0000-0000-000000000000" && id != slotID) {
-			return access.Invalid("slot.id", "The slot id must match the path.")
-		}
-		in.ID = id
+func (in slotInput) normalized(slotID string) (slotInput, error) {
+	id, err := slotPathID(in.ID, slotID)
+	if err != nil {
+		return slotInput{}, err
 	}
 	if err := access.ValidText("slot.name", in.Name, 100); err != nil {
-		return err
+		return slotInput{}, err
 	}
 	if in.Priority != nil && (*in.Priority < 0 || *in.Priority > 32767) {
-		return access.Invalid("slot.priority", "Use a priority from 0 to 32767.")
+		return slotInput{}, access.Invalid("slot.priority", "Use a priority from 0 to 32767.")
 	}
 	if in.Weight != nil && (*in.Weight < 1 || *in.Weight > 1000000) {
-		return access.Invalid("slot.weight", "Use a weight from 1 to 1000000.")
+		return slotInput{}, access.Invalid("slot.weight", "Use a weight from 1 to 1000000.")
 	}
 	if len(in.AllowedAPIKeys) > 100 || len(in.AllowedRoutes) > 100 || len(in.AllowedModels) > 2000 {
-		return access.Invalid("slot", "Use at most 100 API keys, 100 routes, and 2000 models per slot.")
+		return slotInput{}, access.Invalid("slot", "Use at most 100 API keys, 100 routes, and 2000 models per slot.")
 	}
-	for i, key := range in.AllowedAPIKeys {
-		id, err := access.ParseUUID(key)
-		if err != nil {
-			return access.Invalid("slot.allowed_api_keys", "Use API key identifiers.")
-		}
-		in.AllowedAPIKeys[i] = id
+	keys, err := apiKeyIDs(in.AllowedAPIKeys)
+	if err != nil {
+		return slotInput{}, err
 	}
 	for _, route := range in.AllowedRoutes {
 		if !routeidentity.ValidSlug(route) {
-			return access.Invalid("slot.allowed_routes", "Use route slugs.")
+			return slotInput{}, access.Invalid("slot.allowed_routes", "Use route slugs.")
 		}
 	}
 	for _, model := range in.AllowedModels {
 		if err := ValidModelName("slot.allowed_models", model); err != nil {
-			return err
+			return slotInput{}, err
 		}
 	}
 	if err := connection.ValidLimits("slot", in.limits()); err != nil {
-		return err
+		return slotInput{}, err
 	}
-	if in.CredentialVersionID != nil {
-		id, err := access.ParseUUID(*in.CredentialVersionID)
+	versionID, err := credentialVersionID(in.CredentialVersionID)
+	if err != nil {
+		return slotInput{}, err
+	}
+	normalized := in
+	normalized.ID, normalized.AllowedAPIKeys, normalized.CredentialVersionID = id, keys, versionID
+	return normalized, nil
+}
+
+func slotPathID(given, path string) (string, error) {
+	if given == "" {
+		return "", nil
+	}
+	id, err := access.ParseUUID(given)
+	if err != nil || (id != "00000000-0000-0000-0000-000000000000" && id != path) {
+		return "", access.Invalid("slot.id", "The slot id must match the path.")
+	}
+	return id, nil
+}
+
+func apiKeyIDs(keys []string) ([]string, error) {
+	if keys == nil {
+		return nil, nil
+	}
+	ids := make([]string, len(keys))
+	for i, key := range keys {
+		id, err := access.ParseUUID(key)
 		if err != nil {
-			return access.Invalid("slot.credential_version_id", "Use a credential identifier.")
+			return nil, access.Invalid("slot.allowed_api_keys", "Use API key identifiers.")
 		}
-		in.CredentialVersionID = &id
+		ids[i] = id
 	}
-	return nil
+	return ids, nil
+}
+
+func credentialVersionID(given *string) (*string, error) {
+	if given == nil {
+		return nil, nil
+	}
+	id, err := access.ParseUUID(*given)
+	if err != nil {
+		return nil, access.Invalid("slot.credential_version_id", "Use a credential identifier.")
+	}
+	return &id, nil
 }
 
 func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, error) {
@@ -429,20 +453,23 @@ func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, e
 	if err != nil {
 		return access.Reply{}, err
 	}
-	var input slotWrite
-	if err = access.DecodeUnique(r, &input, 1<<20); err != nil {
+	var request slotWrite
+	if err = access.DecodeUnique(r, &request, 1<<20); err != nil {
 		return access.Reply{}, err
 	}
-	if err = validSlot(&input.Slot, slotID); err != nil {
+	slot, err := request.Slot.normalized(slotID)
+	if err != nil {
 		return access.Reply{}, err
 	}
-	if err = validateCredentialInput(input.Credential, input.CredentialReference); err != nil {
+	input := slotWrite{Slot: slot, Credential: request.Credential, CredentialReference: request.CredentialReference}
+	source, err := decodeCredential(input.Credential, input.CredentialReference)
+	if err != nil {
 		return access.Reply{}, err
 	}
-	if input.CredentialReference != nil && input.Slot.CredentialVersionID != nil {
+	if _, external := source.(externalCredential); external && slot.CredentialVersionID != nil {
 		return access.Reply{}, access.Invalid("credential_reference", "Choose a new reference or an existing credential version.")
 	}
-	return access.Mutate(a, r, input, referencing(r.Context(), id, input.CredentialReference), func(tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
+	return access.Mutate(a, r, input, referencing(r.Context(), id, source), func(tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
 		slots, err := loadSlots(r.Context(), tx, id)
 		if err != nil {
 			return access.Reply{}, err
@@ -451,7 +478,7 @@ func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, e
 		if err = matchSlot(r, current, existing); err != nil {
 			return access.Reply{}, err
 		}
-		if err := s.saveDraftSlot(r.Context(), tx, current, slotID, input, existing, len(slots)); err != nil {
+		if err := s.saveDraftSlot(r.Context(), tx, current, slotID, slot, source, existing, len(slots)); err != nil {
 			return access.Reply{}, err
 		}
 		if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.slot.update", "provider_slot", slotID, "success"); err != nil {
@@ -529,7 +556,7 @@ func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply
 		}
 		defer clear(credential)
 	}
-	probeErr := s.validateModelAccess(r.Context(), current.target(credential), slot, models)
+	probeErr := s.validateModelAccess(r.Context(), current.target(credential), *slot, models)
 	// Probes run without mutation locks. Only save evidence if its complete
 	// input (credential, transport, restrictions, and models) is still current.
 	result, err := access.Transact(a, r, unchangedSince(r.Context(), current, "validation"), func(tx pgx.Tx, p access.Principal, locked *record) (access.Reply, error) {
@@ -551,74 +578,61 @@ func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply
 	return result, nil
 }
 
-func (s *Catalogue) saveDraftSlot(ctx context.Context, tx pgx.Tx, current *record, slotID string, input slotWrite, existing *slotRow, slotCount int) error {
+func (s *Catalogue) saveDraftSlot(ctx context.Context, tx pgx.Tx, current *record, slotID string, slot slotInput, source credentialSource, existing *slotRow, slotCount int) error {
 	id := current.ID
-	var err error
 	if existing == nil && slotCount >= maxSlots {
 		return access.Fail(422, "slot_limit", "A connection can hold at most 64 credential slots.")
 	}
-	enabled, priority, weight := true, 0, int64(1)
-	if input.Slot.Enabled != nil {
-		enabled = *input.Slot.Enabled
+	enabled, priority, weight := valueOr(slot.Enabled, true), valueOr(slot.Priority, 0), valueOr(slot.Weight, 1)
+	credentialID, err := s.slotCredential(ctx, tx, current, slot, source, existing)
+	if err != nil {
+		return err
 	}
-	if input.Slot.Priority != nil {
-		priority = *input.Slot.Priority
-	}
-	if input.Slot.Weight != nil {
-		weight = *input.Slot.Weight
-	}
-	var credentialID *string
-	switch {
-	case input.Credential != nil || input.CredentialReference != nil:
-		if !current.Connection.Document().CredentialRequired() {
-			return access.Fail(422, "credential_forbidden", "This authentication mode takes no stored credential.")
-		}
-		if current.Connection.Document().Grant() {
-			return access.Fail(422, "credential_forbidden", grantEnrollmentOnly)
-		}
-		stored, _, err := s.storeCredentialInput(ctx, tx, id, input.Credential, input.CredentialReference)
-		if err != nil {
-			return err
-		}
-		credentialID = &stored
-	case input.Slot.CredentialVersionID != nil:
-		var revoked, lapsed bool
-		err = tx.QueryRow(ctx, "SELECT c.revoked_at IS NOT NULL,g.lapsed_at IS NOT NULL FROM olp.provider_credentials c LEFT JOIN olp.provider_grants g ON g.credential_id=c.id WHERE c.id=$1 AND c.provider_id=$2", *input.Slot.CredentialVersionID, id).Scan(&revoked, &lapsed)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return access.Invalid("slot.credential_version_id", "Unknown credential for this connection.")
-		}
-		if err != nil {
-			return err
-		}
-		if revoked {
-			return access.Fail(422, "credential_revoked", "That credential version is revoked.")
-		}
-		if lapsed {
-			return access.Fail(422, "credential_lapsed", "That credential version's grant lapsed. Enroll a new grant.")
-		}
-		credentialID = input.Slot.CredentialVersionID
-	case existing != nil:
-		credentialID = existing.CredentialID
-	}
-	restrictions, _ := json.Marshal(SlotRestrictions{AllowedAPIKeys: orEmpty(input.Slot.AllowedAPIKeys), AllowedModels: orEmpty(input.Slot.AllowedModels), AllowedRoutes: orEmpty(input.Slot.AllowedRoutes)})
-	limits, _ := json.Marshal(input.Slot.limits())
+	restrictions, _ := json.Marshal(SlotRestrictions{AllowedAPIKeys: orEmpty(slot.AllowedAPIKeys), AllowedModels: orEmpty(slot.AllowedModels), AllowedRoutes: orEmpty(slot.AllowedRoutes)})
+	limits, _ := json.Marshal(slot.limits())
 	if existing == nil {
-		if _, err = tx.Exec(ctx, "INSERT INTO olp.provider_slots(id,provider_id,is_default,position,name,enabled,priority,weight,credential_id,restrictions,limits) VALUES($1,$2,false,(SELECT coalesce(max(position),0)+1 FROM olp.provider_slots WHERE provider_id=$2),$3,$4,$5,$6,$7,$8,$9)", slotID, id, input.Slot.Name, enabled, priority, weight, credentialID, restrictions, limits); err != nil {
+		if _, err = tx.Exec(ctx, "INSERT INTO olp.provider_slots(id,provider_id,is_default,position,name,enabled,priority,weight,credential_id,restrictions,limits) VALUES($1,$2,false,(SELECT coalesce(max(position),0)+1 FROM olp.provider_slots WHERE provider_id=$2),$3,$4,$5,$6,$7,$8,$9)", slotID, id, slot.Name, enabled, priority, weight, credentialID, restrictions, limits); err != nil {
 			return err
 		}
 	} else {
 		keepValidation := deref(existing.CredentialID) == deref(credentialID)
-		if _, err = tx.Exec(ctx, "UPDATE olp.provider_slots SET name=$3,enabled=$4,priority=$5,weight=$6,credential_id=$7,restrictions=$8,limits=$9,validated_at=CASE WHEN $10 THEN validated_at END,validated_fingerprint=CASE WHEN $10 THEN validated_fingerprint END WHERE id=$1 AND provider_id=$2", slotID, id, input.Slot.Name, enabled, priority, weight, credentialID, restrictions, limits, keepValidation); err != nil {
+		if _, err = tx.Exec(ctx, "UPDATE olp.provider_slots SET name=$3,enabled=$4,priority=$5,weight=$6,credential_id=$7,restrictions=$8,limits=$9,validated_at=CASE WHEN $10 THEN validated_at END,validated_fingerprint=CASE WHEN $10 THEN validated_fingerprint END WHERE id=$1 AND provider_id=$2", slotID, id, slot.Name, enabled, priority, weight, credentialID, restrictions, limits, keepValidation); err != nil {
 			return err
 		}
 	}
-	if _, err = touch(ctx, tx, id); err != nil {
-		return err
+	_, err = touchSlots(ctx, tx, id)
+	return err
+}
+
+func (s *Catalogue) slotCredential(ctx context.Context, tx pgx.Tx, current *record, slot slotInput, source credentialSource, existing *slotRow) (*string, error) {
+	switch {
+	case source != nil:
+		if !current.Connection.Document().CredentialRequired() {
+			return nil, access.Fail(422, "credential_forbidden", "This authentication mode takes no stored credential.")
+		}
+		if current.Connection.Document().Grant() {
+			return nil, access.Fail(422, "credential_forbidden", grantEnrollmentOnly)
+		}
+		stored, _, err := s.storeCredential(ctx, tx, current.ID, source)
+		return &stored, err
+	case slot.CredentialVersionID != nil:
+		var revoked, lapsed bool
+		err := tx.QueryRow(ctx, "SELECT c.revoked_at IS NOT NULL,g.lapsed_at IS NOT NULL FROM olp.provider_credentials c LEFT JOIN olp.provider_grants g ON g.credential_id=c.id WHERE c.id=$1 AND c.provider_id=$2", *slot.CredentialVersionID, current.ID).Scan(&revoked, &lapsed)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			return nil, access.Invalid("slot.credential_version_id", "Unknown credential for this connection.")
+		case err != nil:
+			return nil, err
+		case revoked:
+			return nil, access.Fail(422, "credential_revoked", "That credential version is revoked.")
+		case lapsed:
+			return nil, access.Fail(422, "credential_lapsed", "That credential version's grant lapsed. Enroll a new grant.")
+		}
+		return slot.CredentialVersionID, nil
+	case existing != nil:
+		return existing.CredentialID, nil
 	}
-	if _, err = tx.Exec(ctx, "UPDATE olp.providers SET slots_etag=$2 WHERE id=$1", id, access.NewID()); err != nil {
-		return err
-	}
-	return nil
+	return nil, nil
 }
 
 type credentialRotation struct {
@@ -627,22 +641,18 @@ type credentialRotation struct {
 	ETag    string
 }
 
-func (s *Catalogue) rotateCredential(ctx context.Context, tx pgx.Tx, current *record, models []storedModel, defaultSlot slotRow, validatedAt *time.Time, plain *string, reference *secretstore.Reference) (credentialRotation, error) {
+func (s *Catalogue) rotateCredential(ctx context.Context, tx pgx.Tx, current *record, models []storedModel, defaultSlot slotRow, validatedAt *time.Time, source credentialSource) (credentialRotation, error) {
 	id := current.ID
-	credentialID, version, err := s.storeCredentialInput(ctx, tx, id, plain, reference)
+	credentialID, version, err := s.storeCredential(ctx, tx, id, source)
 	if err != nil {
 		return credentialRotation{}, err
 	}
-	defaultSlot.CredentialID = &credentialID
-	fingerprint := defaultSlot.validationFingerprint(current.Connection.Document(), models)
+	fingerprint := defaultSlot.withCredential(credentialID).validationFingerprint(current.Connection.Document(), models)
 	if _, err = tx.Exec(ctx, "UPDATE olp.provider_slots SET credential_id=$2,validated_at=$4,validated_fingerprint=$3 WHERE provider_id=$1 AND is_default", id, credentialID, fingerprint, validatedAt); err != nil {
 		return credentialRotation{}, err
 	}
-	etag, err := touch(ctx, tx, id)
+	etag, err := touchSlots(ctx, tx, id)
 	if err != nil {
-		return credentialRotation{}, err
-	}
-	if _, err = tx.Exec(ctx, "UPDATE olp.providers SET slots_etag=$2 WHERE id=$1", id, access.NewID()); err != nil {
 		return credentialRotation{}, err
 	}
 	return credentialRotation{ID: credentialID, Version: version, ETag: etag}, nil
