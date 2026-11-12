@@ -36,6 +36,15 @@ if [ "$runtime_role" != 1 ] || helm template olp deploy/helm | grep -q OLP_RUNTI
   echo "Expected OLP_RUNTIME_ROLE on the migration job only when migration.runtimeRole is set" >&2
   exit 1
 fi
+for migration in 'migration.databaseSecretKey=migration' \
+  'migration.databaseSecretName=olp-postgresql,migration.databaseSecretKey=migration'; do
+  runtime_role=$(helm template olp deploy/helm --set "$migration" --set migration.runtimeRole=olp_runtime |
+    grep -c 'OLP_RUNTIME_ROLE' || true)
+  if [ "$runtime_role" != 1 ]; then
+    echo "Expected a runtime grant role for a separate migration key" >&2
+    exit 1
+  fi
+done
 for mode in gateway control worker; do
   if helm template olp deploy/helm --set monitoring.enabled=true --set "$mode.replicas=0" |
     grep -q "absent_over_time(olp_ready{[^}]*service=\"olp-openllmproxy-$mode-observability\""; then
@@ -73,7 +82,9 @@ for invalid in 'config.region=Invalid' 'config.databaseMaxConnections=0' 'config
   'config.databaseReadSecretName=olp-replica,config.databaseReadSecretKey=' \
   'gateway.replicas=-1' 'ingress.enabled=true,config.trustedProxyCidrs=' \
   'networkPolicy.enabled=true' 'config.unconfinedPluginDir=plugins' \
-  'migration.databaseSecretName=olp-postgresql-migration'; do
+  'migration.databaseSecretName=olp-postgresql-migration' \
+  'migration.databaseSecretKey=migration' \
+  'migration.databaseSecretName=olp-postgresql,migration.databaseSecretKey=migration'; do
   if helm template olp deploy/helm --set "$invalid" >/dev/null 2>&1; then
     echo "Expected invalid Helm configuration to fail: $invalid" >&2
     exit 1

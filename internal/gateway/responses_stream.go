@@ -347,6 +347,15 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 		s.finish(x, &outcome{err: x.failure, committed: committed, cancelled: true}, 0)
 		return nil
 	}
+	if streamErr != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		x.failure = (&attemptFailure{class: classTimeout}).toError()
+		fact.Class = classTimeout
+		if !committed {
+			return x.failure
+		}
+		s.finish(x, &outcome{err: x.failure, committed: true}, http.StatusOK)
+		return nil
+	}
 	if streamErr != nil {
 		var upstream *wire.UpstreamError
 		if errors.As(streamErr, &upstream) && nativeTerminalFailure {

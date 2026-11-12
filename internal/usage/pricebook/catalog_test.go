@@ -371,3 +371,33 @@ func TestFetchedCatalogsVerifyBeforeAnyPriceIsRead(t *testing.T) {
 		t.Fatalf("bundled catalog: %+v %v", fetched.Catalog, err)
 	}
 }
+
+func TestFetchedCatalogPreservesEscapedSourcePath(t *testing.T) {
+	document, signature, keys, _ := signedCatalog(t, time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC))
+	for _, path := range []string{"/catalog.json", "/release%2Fstable/catalog.json", "/release%2fstable/catalog.json"} {
+		t.Run(path, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.EscapedPath() {
+				case path:
+					_, _ = w.Write(document)
+				case path + ".sig":
+					_, _ = w.Write(signature)
+				default:
+					t.Logf("unexpected object path %s", r.URL.EscapedPath())
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+			s := &API{Egress: policy, Normalizer: NewNormalizer(vendors.Kind), CatalogKeys: keys}
+			address := server.URL + path
+			if err := s.validateSourceURL(address); err != nil {
+				t.Fatal(err)
+			}
+			fetched, err := s.fetchCatalog(t.Context(), &address)
+			if err != nil || fetched.Catalog == nil || len(fetched.Document.Prices) != 1 {
+				t.Fatalf("refresh escaped source path %s failed: %v", path, err)
+			}
+		})
+	}
+}
