@@ -43,6 +43,7 @@
     canManage: permissionToManage,
     publicationBlocked = false,
     onSubmit,
+    onSaved,
     onCancel,
     onClearError
   }: {
@@ -55,6 +56,7 @@
       command: ApiKeyPolicyCommand,
       preferredRoute?: string
     ) => boolean | Promise<boolean>;
+    onSaved: () => void;
     onCancel: () => void;
     onClearError: () => void;
   } = $props();
@@ -67,6 +69,7 @@
   let errors = $state<Record<string, string>>({});
   let formError = $state('');
   let dirty = $state(false);
+  let editRevision = 0;
   let initialized = $state(false);
   const routes = createQuery(() => ({
     queryKey: routeKeys.all(),
@@ -104,6 +107,7 @@
   guardUnsavedChanges(() => dirty);
 
   function touch() {
+    editRevision++;
     dirty = true;
   }
 
@@ -136,9 +140,12 @@
     }
     errors = {};
     formError = '';
+    const submittedRevision = editRevision;
     const saved = await onSubmit(result.command, form.allowedRoutes[0]);
-    if (saved) dirty = false;
-    else await focusFormError(root);
+    if (saved && editRevision === submittedRevision) {
+      dirty = false;
+      onSaved();
+    } else if (!saved) await focusFormError(root);
   }
 </script>
 

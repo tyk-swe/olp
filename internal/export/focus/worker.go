@@ -235,8 +235,8 @@ func (w *Worker) deliverDay(ctx context.Context, s sink, day time.Time) (bool, e
 	g, err := w.generateAndSend(ctx, s, day)
 	if err != nil {
 		w.count(s.id, failed)
-		_, err := w.Pool.Exec(ctx, failedDaySQL, s.id, day, errorCode(err), attempts)
-		return true, err
+		_, recordErr := w.Pool.Exec(ctx, failedDaySQL, s.id, day, errorCode(err), attempts)
+		return true, errors.Join(err, recordErr)
 	}
 	w.count(s.id, delivered)
 	_, err = w.Pool.Exec(ctx, deliveredDaySQL, s.id, day, g.dirtyVersion, g.generatedAt,
