@@ -227,12 +227,18 @@ func firstNonEmpty(values ...string) string {
 }
 
 func s3EndpointRegion(endpoint *url.URL) string {
-	host := endpoint.Hostname()
-	for _, marker := range []string{".s3.", ".s3-"} {
-		if i := strings.Index(host, marker); i >= 0 {
-			rest := host[i+len(marker):]
-			if j := strings.IndexByte(rest, '.'); j > 0 {
-				return rest[:j]
+	host := strings.ToLower(strings.TrimSuffix(endpoint.Hostname(), "."))
+	for _, suffix := range []string{".amazonaws.com", ".amazonaws.com.cn"} {
+		if !strings.HasSuffix(host, suffix) {
+			continue
+		}
+		service := "." + strings.TrimSuffix(host, suffix)
+		for _, marker := range []string{".s3.", ".s3-fips.", ".s3-"} {
+			if i := strings.LastIndex(service, marker); i >= 0 {
+				region := strings.TrimPrefix(service[i+len(marker):], "dualstack.")
+				if region != "accelerate" && region != "fips" && !strings.Contains(region, ".") {
+					return region
+				}
 			}
 		}
 	}
