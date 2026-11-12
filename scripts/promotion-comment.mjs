@@ -5,7 +5,7 @@ import { readFile, writeFile } from "node:fs/promises";
 export function promotionReview(saved) {
   const plan = saved?.plan;
   if (
-    saved?.version !== 1 ||
+    saved?.version !== 2 ||
     typeof saved.destination !== "string" ||
     !saved.destination ||
     typeof saved.destination_digest !== "string" ||

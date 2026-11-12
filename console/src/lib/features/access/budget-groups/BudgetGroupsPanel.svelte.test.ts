@@ -90,3 +90,76 @@ it('keeps an edited budget group when another group is retired', async () => {
     'Unsaved group name'
   );
 });
+
+it.each(['create', 'edit'] as const)(
+  'saves the selected budget basis on %s',
+  async (mode) => {
+    const saved = vi.fn<(request: Request) => void>();
+    const group = {
+      id: 'group',
+      name: 'Existing',
+      etag: 'version',
+      cost_basis: 'cost',
+      daily_cost_limit: '10',
+      budget: {
+        cost_basis: 'cost',
+        enforcement_active: true,
+        unpriced_attempts: 0,
+        daily: { accrued: '0', limit: '10', reset_at: '2026-01-01T00:00:00Z' },
+        monthly: { accrued: '0', limit: null, reset_at: '2026-02-01T00:00:00Z' }
+      }
+    };
+    serve(
+      (request) => {
+        if (request.method === 'POST' || request.method === 'PATCH') {
+          saved(request);
+          return json({ id: 'group', etag: 'saved' });
+        }
+        if (new URL(request.url).pathname === '/api/v1/budget-groups')
+          return json({ items: [group] });
+        return json({ items: [] });
+      },
+      ['read', 'keys', 'configure']
+    );
+    const target = document.createElement('div');
+    document.body.append(target);
+    const setup = vi.fn(() =>
+      mount(BudgetGroupsPanel, { target, context: getAllContexts() })
+    );
+    const harness = mount(StateHarness, { target, props: { setup } });
+    onTestFinished(async () => {
+      await unmount(setup.mock.results[0].value);
+      await unmount(harness);
+      target.remove();
+    });
+    const button = (label: string) =>
+      [...document.querySelectorAll('button')].find(
+        (x) => x.textContent?.trim() === label
+      )!;
+    await vi.waitFor(() => expect(button('Edit')).toBeDefined());
+    button(mode === 'create' ? 'New group' : 'Edit').click();
+    flushSync();
+    if (mode === 'create') {
+      for (const [id, value] of [
+        ['group-name', 'Created'],
+        ['group-daily', '10']
+      ]) {
+        const input = document.getElementById(id) as HTMLInputElement;
+        input.value = value;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }
+    const select = document.querySelector<HTMLSelectElement>(
+      mode === 'create' ? '#group-basis' : '[aria-label="Budget basis"]'
+    )!;
+    select.value = 'charge';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    button(mode === 'create' ? 'Create group' : 'Save').click();
+    await vi.waitFor(() => expect(saved).toHaveBeenCalledOnce());
+    expect(await saved.mock.calls[0][0].json()).toHaveProperty(
+      'cost_basis',
+      'charge'
+    );
+  }
+);

@@ -1,6 +1,8 @@
 package codeclient
 
 import (
+	"encoding/json"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -74,5 +76,67 @@ func TestCatalogReachesPaidModelPoolFallback(t *testing.T) {
 	configuration, err = Generate(route, withSubscription, Request{GatewayURL: "http://localhost:4000", Client: codeadapter.ClientCodex, Model: "pool"})
 	if err != nil || !strings.Contains(configuration.Configuration, "supports_websockets = true") {
 		t.Fatalf("subscription client configuration = %+v, error = %v", configuration, err)
+	}
+}
+
+func TestOpenCodePaidConfigurationsReachAdvertisedOperations(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		protocol codemode.Protocol
+		sdk      string
+	}{
+		{codemode.ProtocolMessages, "@ai-sdk/anthropic"},
+		{codemode.ProtocolResponses, "@ai-sdk/openai"},
+		{codemode.ProtocolChat, "@ai-sdk/openai-compatible"},
+	} {
+		t.Run(string(test.protocol), func(t *testing.T) {
+			protocol := test.protocol
+			route := codemode.Route{Enabled: true, RevisionID: "revision", Slug: "paid", Models: []string{"paid-model"}, PaidParticipation: true, PaidTargets: map[string]codemode.PaidTarget{"paid-model": {}}}
+			offers := Offers{{PaidProtocol: protocol, PaidStreaming: true, Models: []string{"paid-model"}}}
+			configuration, err := Generate(route, offers, Request{GatewayURL: "https://gateway.example.test/prefix", Client: codeadapter.ClientOpenCode, Model: "paid-model"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var document struct {
+				Model    string `json:"model"`
+				Provider map[string]struct {
+					Models map[string]struct {
+						Provider struct {
+							NPM string `json:"npm"`
+						} `json:"provider"`
+					} `json:"models"`
+					Options struct {
+						BaseURL string `json:"baseURL"`
+					} `json:"options"`
+				} `json:"provider"`
+			}
+			if err := json.Unmarshal([]byte(configuration.Configuration), &document); err != nil {
+				t.Fatal(err)
+			}
+			provider, model, found := strings.Cut(document.Model, "/")
+			if !found {
+				t.Fatalf("unqualified model %q", document.Model)
+			}
+			if sdk := document.Provider[provider].Models[model].Provider.NPM; sdk != test.sdk {
+				t.Fatalf("model SDK %q, want %q", sdk, test.sdk)
+			}
+			base, err := url.Parse(document.Provider[provider].Options.BaseURL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			capability, _ := paidCapability(protocol, true)
+			// SDK endpoint composition was captured with @ai-sdk/anthropic 4.0.102 on 2026-11-12.
+			// https://www.npmjs.com/package/@ai-sdk/anthropic/v/4.0.102
+			operation := strings.TrimPrefix(capability.Path, "v1/")
+			requestPath := strings.TrimRight(base.Path, "/") + "/" + operation
+			expectedPath := "/prefix" + route.BasePath() + "/" + capability.Path
+			if requestPath != expectedPath {
+				t.Fatalf("generated SDK request path %q, advertised gateway path %q", requestPath, expectedPath)
+			}
+			endpoint, ok := codeadapter.ForPath(strings.TrimPrefix(requestPath, "/prefix"+route.BasePath()+"/"))
+			if !ok || endpoint.Protocol != protocol {
+				t.Fatalf("generated request is not recognized for protocol %q", protocol)
+			}
+		})
 	}
 }
