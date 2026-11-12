@@ -6,12 +6,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/vendors"
 	"github.com/tyk-swe/olp/tests/harness/vendor"
 )
 
@@ -34,6 +36,46 @@ func TestProviderLifecycleJourney(t *testing.T) {
 		provider := s.activeProvider(owner, uniqueName("provider"), upstream, project)
 		return s, "/api/v1/providers/" + provider["id"].(string)
 	}
+
+	t.Run("template_preserves_route_retirement", func(t *testing.T) {
+		t.Parallel()
+		s := &service{t: t, pool: parent.pool, origin: parent.origin, env: parent.env}
+		project := s.want(owner, "POST", "/api/v1/projects", map[string]any{"name": uniqueName("retired-template")}, idempotent(), http.StatusCreated)["id"].(string)
+		prefix := uniqueName("retired-template")
+		s.want(owner, "POST", "/api/v1/route-templates", map[string]any{
+			"name": prefix, "provider_selector": "vendor:" + vendors.DefaultFor("openai_compatible"), "model_filter": vendor.Model,
+			"slug_pattern": prefix + "-{model}", "overall_timeout_ms": 5000, "max_attempts": 1,
+			"fidelity": map[string]any{"mode": "transformed"}, "auto_publish": true, "project_id": project,
+		}, idempotent(), http.StatusCreated)
+		s.activeProvider(owner, uniqueName("first-template-provider"), upstream, project)
+		routes := items(s.want(owner, "GET", "/api/v1/routes", nil, nil, http.StatusOK)["items"])
+		index := slices.IndexFunc(routes, func(route map[string]any) bool { return route["slug"] == prefix+"-"+vendor.Model })
+		if index < 0 {
+			t.Fatal("template did not publish a route")
+		}
+		path := "/api/v1/routes/" + text(routes[index], "id")
+		s.activeProvider(owner, uniqueName("second-template-provider"), upstream, project)
+		active := s.want(owner, "GET", path, nil, nil, http.StatusOK)
+		revisions := items(s.want(owner, "GET", path+"/revisions", nil, nil, http.StatusOK)["items"])
+		if active["state"] != "active" || len(revisions) != 2 {
+			t.Fatalf("unretired automatic join failed: %v %v", active, revisions)
+		}
+		s.want(owner, "POST", path+"/retire", nil, idempotent(etag(active)), http.StatusOK)
+		s.activeProvider(owner, uniqueName("third-template-provider"), upstream, project)
+		retired := s.want(owner, "GET", path, nil, nil, http.StatusOK)
+		if retired["state"] != "retired" {
+			t.Errorf("provider activation reactivated retired route: %v", retired["state"])
+		}
+		after := items(s.want(owner, "GET", path+"/revisions", nil, nil, http.StatusOK)["items"])
+		if len(after) != len(revisions) {
+			t.Errorf("retired route gained an automatic revision: %d -> %d", len(revisions), len(after))
+		}
+		restored := s.want(owner, "POST", path+"/revisions/"+text(after[0], "id")+"/restore-as-draft", nil, idempotent(), http.StatusCreated)
+		s.want(owner, "POST", "/api/v1/route-drafts/"+text(restored, "id")+"/activate", nil, idempotent(etag(restored)), http.StatusOK)
+		if got := s.want(owner, "GET", path, nil, nil, http.StatusOK); got["state"] != "active" {
+			t.Fatalf("explicit restoration failed: %v", got["state"])
+		}
+	})
 
 	t.Run("revisions_restore_and_reactivate", func(t *testing.T) {
 		s, path := journey(t)
