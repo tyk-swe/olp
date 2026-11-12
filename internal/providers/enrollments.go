@@ -45,7 +45,7 @@ type EnrollmentStatus struct {
 
 func (s *Enrollments) Start(ctx context.Context, authority EnrollmentAuthority, principal access.Principal, providerID, requestedSlot string) (grants.Enrollment, error) {
 	c := s.catalogue
-	current, err := load(ctx, c.Access.Pool, providerID, false)
+	current, err := readProvider(ctx, c.Access.Pool, providerID)
 	if err != nil {
 		return grants.Enrollment{}, err
 	}
@@ -82,7 +82,7 @@ func (s *Enrollments) Start(ctx context.Context, authority EnrollmentAuthority, 
 		return grants.Enrollment{}, err
 	}
 	defer tx.Rollback(ctx)
-	locked, err := load(ctx, tx, providerID, true)
+	locked, err := lockProvider(ctx, tx, providerID)
 	if err != nil {
 		return grants.Enrollment{}, err
 	}
@@ -116,7 +116,7 @@ func (s *Enrollments) Continue(ctx context.Context, authority EnrollmentAuthorit
 		return EnrollmentCompletion{}, err
 	}
 	defer tx.Rollback(ctx)
-	current, err := load(ctx, tx, providerID, false)
+	current, err := readProvider(ctx, tx, providerID)
 	if err != nil {
 		return EnrollmentCompletion{}, err
 	}
@@ -159,7 +159,7 @@ func (s *Enrollments) stage(requestContext context.Context, authority Enrollment
 		return EnrollmentCompletion{}, err
 	}
 	defer tx.Rollback(ctx)
-	locked, err := load(ctx, tx, current.ID, true)
+	locked, err := lockProvider(ctx, tx, current.ID)
 	if err != nil {
 		return EnrollmentCompletion{}, err
 	}
@@ -232,7 +232,7 @@ func (s *Enrollments) Poll(ctx context.Context, authority EnrollmentAuthority, p
 	if err != nil {
 		return EnrollmentStatus{}, err
 	}
-	current, err := load(ctx, tx, providerID, false)
+	current, err := readProvider(ctx, tx, providerID)
 	if err != nil {
 		return EnrollmentStatus{}, err
 	}
@@ -312,7 +312,7 @@ func (s *Enrollments) Cancel(ctx context.Context, authority EnrollmentAuthority,
 		return err
 	}
 	defer tx.Rollback(ctx)
-	current, err := load(ctx, tx, providerID, false)
+	current, err := readProvider(ctx, tx, providerID)
 	if err != nil {
 		return err
 	}

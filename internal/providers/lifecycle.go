@@ -163,7 +163,7 @@ func (s *Server) updateProvider(r *http.Request, _ access.Principal) (access.Rep
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	current, err := load(r.Context(), tx, id, true)
+	current, err := lockProvider(r.Context(), tx, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -214,7 +214,7 @@ func (s *Server) mutationWith(r *http.Request, action string, input any, fn func
 	defer tx.Rollback(r.Context())
 	// The stored reply discloses the provider, so the caller must still reach
 	// its project before a replay is served.
-	current, err := load(r.Context(), tx, id, true)
+	current, err := lockProvider(r.Context(), tx, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -261,24 +261,42 @@ type storedModel struct {
 	DiscoveredAt  *time.Time         `json:"discovered_at"`
 }
 
-func loadModels(ctx context.Context, q access.Queryer, providerID string, enabledOnly bool) ([]storedModel, error) {
-	rows, err := q.Query(ctx, "SELECT id::text,upstream_model,display_name,enabled,capabilities,discovered_at FROM olp.provider_models WHERE provider_id=$1 AND (enabled OR NOT $2) ORDER BY upstream_model", providerID, enabledOnly)
+const modelColumns = "id::text,upstream_model,display_name,enabled,capabilities,discovered_at"
+
+func scanModel(row pgx.Row) (storedModel, error) {
+	var m storedModel
+	var capabilities []byte
+	if err := row.Scan(&m.ID, &m.UpstreamModel, &m.DisplayName, &m.Enabled, &capabilities, &m.DiscoveredAt); err != nil {
+		return storedModel{}, err
+	}
+	if err := json.Unmarshal(capabilities, &m.Capabilities); err != nil {
+		return storedModel{}, err
+	}
+	if m.Capabilities == nil {
+		m.Capabilities = []storedCapability{}
+	}
+	return m, nil
+}
+
+func loadModels(ctx context.Context, q access.Queryer, providerID string) ([]storedModel, error) {
+	return queryModels(ctx, q, "SELECT "+modelColumns+" FROM olp.provider_models WHERE provider_id=$1 ORDER BY upstream_model", providerID)
+}
+
+func enabledModels(ctx context.Context, q access.Queryer, providerID string) ([]storedModel, error) {
+	return queryModels(ctx, q, "SELECT "+modelColumns+" FROM olp.provider_models WHERE provider_id=$1 AND enabled ORDER BY upstream_model", providerID)
+}
+
+func queryModels(ctx context.Context, q access.Queryer, query string, args ...any) ([]storedModel, error) {
+	rows, err := q.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var models []storedModel
 	for rows.Next() {
-		var m storedModel
-		var capabilities []byte
-		if err = rows.Scan(&m.ID, &m.UpstreamModel, &m.DisplayName, &m.Enabled, &capabilities, &m.DiscoveredAt); err != nil {
+		m, err := scanModel(rows)
+		if err != nil {
 			return nil, err
-		}
-		if err = json.Unmarshal(capabilities, &m.Capabilities); err != nil {
-			return nil, err
-		}
-		if m.Capabilities == nil {
-			m.Capabilities = []storedCapability{}
 		}
 		models = append(models, m)
 	}
@@ -930,7 +948,7 @@ func (s *Catalogue) activateDraft(ctx context.Context, tx pgx.Tx, p access.Princ
 	if _, _, err := s.credentialFor(ctx, tx, current); err != nil {
 		return activatedProvider{}, err
 	}
-	models, err := loadModels(ctx, tx, current.ID, true)
+	models, err := enabledModels(ctx, tx, current.ID)
 	if err != nil {
 		return activatedProvider{}, err
 	}

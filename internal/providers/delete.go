@@ -30,7 +30,7 @@ func (s *Server) deleteProvider(r *http.Request, _ access.Principal) (access.Rep
 	if replayed != nil {
 		return *replayed, tx.Commit(r.Context())
 	}
-	current, err := load(r.Context(), tx, id, true)
+	current, err := lockProvider(r.Context(), tx, id)
 	if err != nil {
 		return access.Reply{}, err
 	}

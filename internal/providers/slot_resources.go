@@ -59,7 +59,7 @@ func (s *Server) deleteSlot(r *http.Request, _ access.Principal) (access.Reply, 
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	current, err := load(r.Context(), tx, providerID, true)
+	current, err := lockProvider(r.Context(), tx, providerID)
 	if err != nil {
 		return access.Reply{}, err
 	}

@@ -53,7 +53,7 @@ func (s *Server) importCredentials(r *http.Request, p access.Principal, adapter 
 	if err := access.DecodeUnique(r, &input, 128<<10); err != nil {
 		return access.Reply{}, err
 	}
-	current, err := load(r.Context(), s.Access.Pool, id, false)
+	current, err := readProvider(r.Context(), s.Access.Pool, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -123,7 +123,7 @@ func (s *Server) stageCredentialImport(request *http.Request, current *record, s
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(ctx)
-	locked, err := load(ctx, tx, current.ID, true)
+	locked, err := lockProvider(ctx, tx, current.ID)
 	if err != nil {
 		return access.Reply{}, err
 	}

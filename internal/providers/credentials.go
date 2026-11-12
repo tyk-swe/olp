@@ -97,7 +97,7 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 	}
 	// The stored reply discloses the provider, so the caller must still reach
 	// its project before a replay is served.
-	current, err := load(r.Context(), tx, id, false)
+	current, err := readProvider(r.Context(), tx, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -120,7 +120,7 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 	if current.Connection.Document().Grant() {
 		return access.Reply{}, access.Fail(422, "credential_forbidden", grantEnrollmentOnly)
 	}
-	models, err := loadModels(r.Context(), tx, id, true)
+	models, err := enabledModels(r.Context(), tx, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -172,7 +172,7 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 	}
 	// The stored reply discloses the provider, so the caller must still reach
 	// its project before a replay is served.
-	locked, err := load(r.Context(), tx, id, true)
+	locked, err := lockProvider(r.Context(), tx, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -283,7 +283,7 @@ func (s *Server) slotList(ctx context.Context, q access.Queryer, current *record
 			activeCredentials[slot.ID] = slot.CredentialID
 		}
 	}
-	models, err := loadModels(ctx, q, current.ID, true)
+	models, err := enabledModels(ctx, q, current.ID)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -467,7 +467,7 @@ func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, e
 	}
 	// The stored reply discloses the provider's slots, so the caller must
 	// still reach its project before a replay is served.
-	current, err := load(r.Context(), tx, id, true)
+	current, err := lockProvider(r.Context(), tx, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -500,7 +500,7 @@ func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, e
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.slot.update", "provider_slot", slotID, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	updated, err := load(r.Context(), tx, id, false)
+	updated, err := readProvider(r.Context(), tx, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -530,7 +530,7 @@ func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	current, err := load(r.Context(), tx, id, false)
+	current, err := readProvider(r.Context(), tx, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -550,7 +550,7 @@ func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply
 	if slot == nil {
 		return access.Reply{}, pgx.ErrNoRows
 	}
-	models, err := loadModels(r.Context(), tx, id, true)
+	models, err := enabledModels(r.Context(), tx, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -587,7 +587,7 @@ func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	locked, err := load(r.Context(), tx, id, true)
+	locked, err := lockProvider(r.Context(), tx, id)
 	if err != nil {
 		return access.Reply{}, err
 	}

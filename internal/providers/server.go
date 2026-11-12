@@ -112,19 +112,20 @@ func scanRecord(row pgx.Row) (*record, error) {
 	return &p, nil
 }
 
-// load reads one provider, locking the row inside a transaction when asked.
-func load(ctx context.Context, q access.Queryer, id string, lock bool) (*record, error) {
-	query := "SELECT " + recordColumns + " FROM olp.providers p WHERE p.id=$1"
-	if lock {
-		query += " FOR UPDATE"
-	}
-	return scanRecord(q.QueryRow(ctx, query, id))
+const recordQuery = "SELECT " + recordColumns + " FROM olp.providers p WHERE p.id=$1"
+
+func readProvider(ctx context.Context, q access.Queryer, id string) (*record, error) {
+	return scanRecord(q.QueryRow(ctx, recordQuery, id))
+}
+
+func lockProvider(ctx context.Context, tx pgx.Tx, id string) (*record, error) {
+	return scanRecord(tx.QueryRow(ctx, recordQuery+" FOR UPDATE", id))
 }
 
 // visibleProvider loads a provider p may see; one outside p's scope is
 // missing.
 func visibleProvider(ctx context.Context, q access.Queryer, p access.Principal, id string) (*record, error) {
-	current, err := load(ctx, q, id, false)
+	current, err := readProvider(ctx, q, id)
 	if err != nil {
 		return nil, err
 	}

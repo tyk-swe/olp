@@ -69,7 +69,7 @@ func (s *Server) createNetworkCredential(r *http.Request, _ access.Principal) (a
 	defer tx.Rollback(r.Context())
 	// The stored reply discloses the provider, so the caller must still reach
 	// its project before a replay is served.
-	provider, err := load(r.Context(), tx, id, true)
+	provider, err := lockProvider(r.Context(), tx, id)
 	if err != nil {
 		return access.Reply{}, err
 	}

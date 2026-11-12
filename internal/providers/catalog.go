@@ -152,7 +152,7 @@ func (s *Server) catalogSuggestions(r *http.Request, p access.Principal) (access
 	if err != nil {
 		return access.Reply{}, err
 	}
-	models, err := loadModels(r.Context(), s.Access.Pool, id, false)
+	models, err := loadModels(r.Context(), s.Access.Pool, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -194,7 +194,7 @@ func (s *Catalogue) acceptCatalogFacts(ctx context.Context, tx pgx.Tx, current *
 	if input.CatalogSHA256 != s.Catalog.SHA256 {
 		return access.Fail(409, "catalog_changed", "The reference catalog changed since these suggestions were reviewed; review them again.")
 	}
-	models, err := loadModels(ctx, tx, current.ID, false)
+	models, err := loadModels(ctx, tx, current.ID)
 	if err != nil {
 		return err
 	}

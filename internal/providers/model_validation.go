@@ -46,7 +46,7 @@ func (s *Server) prepare(r *http.Request, p access.Principal, id string) (*recor
 		return nil, probe.Target{}, err
 	}
 	defer tx.Rollback(r.Context())
-	current, err := load(r.Context(), tx, id, false)
+	current, err := readProvider(r.Context(), tx, id)
 	if err != nil {
 		return nil, probe.Target{}, err
 	}
@@ -106,14 +106,14 @@ func (s *Server) recordProbe(r *http.Request, action, id string, at time.Time, s
 		return err
 	}
 	defer tx.Rollback(r.Context())
-	current, err := load(r.Context(), tx, id, true)
+	current, err := lockProvider(r.Context(), tx, id)
 	if err != nil {
 		return err
 	}
 	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return err
 	}
-	if err := s.storeProbe(r.Context(), tx, id, at, succeeded, detail); err != nil {
+	if err := storeProbe(r.Context(), tx, id, at, succeeded, detail); err != nil {
 		return err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), action, "provider", id, auditOutcome(succeeded)); err != nil {
@@ -196,7 +196,7 @@ func (s *Server) discover(r *http.Request, p access.Principal) (access.Reply, er
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	locked, err := load(r.Context(), tx, id, true)
+	locked, err := lockProvider(r.Context(), tx, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -235,25 +235,13 @@ func (s *Server) models(r *http.Request, p access.Principal) (access.Reply, erro
 	if err != nil {
 		return access.Reply{}, err
 	}
-	rows, err := s.Access.Pool.Query(r.Context(), "SELECT id::text,upstream_model,display_name,enabled,capabilities,discovered_at FROM olp.provider_models WHERE provider_id=$1 AND id<$2 ORDER BY id DESC LIMIT $3", id, page.Before, page.Limit+1)
+	models, err := queryModels(r.Context(), s.Access.Pool, "SELECT "+modelColumns+" FROM olp.provider_models WHERE provider_id=$1 AND id<$2 ORDER BY id DESC LIMIT $3", id, page.Before, page.Limit+1)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	defer rows.Close()
-	items := []map[string]any{}
-	for rows.Next() {
-		var m storedModel
-		var capabilities []byte
-		if err = rows.Scan(&m.ID, &m.UpstreamModel, &m.DisplayName, &m.Enabled, &capabilities, &m.DiscoveredAt); err != nil {
-			return access.Reply{}, err
-		}
-		if err = json.Unmarshal(capabilities, &m.Capabilities); err != nil {
-			return access.Reply{}, err
-		}
+	items := make([]map[string]any, 0, len(models))
+	for _, m := range models {
 		items = append(items, modelJSON(m))
-	}
-	if err = rows.Err(); err != nil {
-		return access.Reply{}, err
 	}
 	reply := access.ListReply(items, page)
 	reply.Body.(map[string]any)["provider"] = d
@@ -266,23 +254,12 @@ type setModelRequest struct {
 	Capabilities *[]connection.Capability `json:"capabilities"`
 }
 
-func loadModel(ctx context.Context, q access.Queryer, providerID, modelID string, lock bool) (*storedModel, error) {
-	query := "SELECT id::text,upstream_model,display_name,enabled,capabilities,discovered_at FROM olp.provider_models WHERE provider_id=$1 AND id=$2"
-	if lock {
-		query += " FOR UPDATE"
-	}
-	var m storedModel
-	var capabilities []byte
-	if err := q.QueryRow(ctx, query, providerID, modelID).Scan(&m.ID, &m.UpstreamModel, &m.DisplayName, &m.Enabled, &capabilities, &m.DiscoveredAt); err != nil {
-		return nil, err
-	}
-	if err := json.Unmarshal(capabilities, &m.Capabilities); err != nil {
-		return nil, err
-	}
-	if m.Capabilities == nil {
-		m.Capabilities = []storedCapability{}
-	}
-	return &m, nil
+func readModel(ctx context.Context, q access.Queryer, providerID, modelID string) (storedModel, error) {
+	return scanModel(q.QueryRow(ctx, "SELECT "+modelColumns+" FROM olp.provider_models WHERE provider_id=$1 AND id=$2", providerID, modelID))
+}
+
+func lockModel(ctx context.Context, tx pgx.Tx, providerID, modelID string) (storedModel, error) {
+	return scanModel(tx.QueryRow(ctx, "SELECT "+modelColumns+" FROM olp.provider_models WHERE provider_id=$1 AND id=$2 FOR UPDATE", providerID, modelID))
 }
 
 func (s *Server) setModel(r *http.Request, _ access.Principal) (access.Reply, error) {
@@ -304,7 +281,7 @@ func (s *Server) setModel(r *http.Request, _ access.Principal) (access.Reply, er
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	current, err := load(r.Context(), tx, id, true)
+	current, err := lockProvider(r.Context(), tx, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -341,7 +318,7 @@ func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, err
 	if err != nil {
 		return access.Reply{}, err
 	}
-	m, err := loadModel(r.Context(), a.Pool, id, modelID, false)
+	m, err := readModel(r.Context(), a.Pool, id, modelID)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -396,7 +373,7 @@ func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, err
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	locked, err := load(r.Context(), tx, id, true)
+	locked, err := lockProvider(r.Context(), tx, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -422,7 +399,7 @@ func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, err
 }
 
 func (s *Catalogue) setDraftModel(ctx context.Context, tx pgx.Tx, current *record, modelID string, input setModelRequest) error {
-	m, err := loadModel(ctx, tx, current.ID, modelID, true)
+	m, err := lockModel(ctx, tx, current.ID, modelID)
 	if err != nil {
 		return err
 	}
@@ -482,23 +459,23 @@ func (s *Catalogue) storeDiscoveredModels(ctx context.Context, tx pgx.Tx, curren
 		return err
 	}
 	if upstream {
-		if _, err = tx.Exec(ctx, "UPDATE olp.providers SET last_probe_at=$2,last_probe_status='succeeded',last_probe_detail=$3 WHERE id=$1", current.ID, at, fmt.Sprintf("Discovered %d models.", len(models))); err != nil {
+		if err = storeProbe(ctx, tx, current.ID, at, true, fmt.Sprintf("Discovered %d models.", len(models))); err != nil {
 			return err
 		}
 	}
-	if _, err = touch(ctx, tx, current.ID); err != nil {
-		return err
-	}
-	return nil
+	_, err = touch(ctx, tx, current.ID)
+	return err
 }
 
-func (s *Catalogue) storeCertification(ctx context.Context, tx pgx.Tx, current *record, model *storedModel, defaultSlot slotRow, certified int, at time.Time) (string, error) {
-	var err error
-	encoded, _ := json.Marshal(model.Capabilities)
+func (s *Catalogue) storeCertification(ctx context.Context, tx pgx.Tx, current *record, model storedModel, defaultSlot slotRow, certified int, at time.Time) (string, error) {
+	encoded, err := json.Marshal(model.Capabilities)
+	if err != nil {
+		return "", err
+	}
 	if _, err = tx.Exec(ctx, "UPDATE olp.provider_models SET capabilities=$3 WHERE provider_id=$1 AND id=$2", current.ID, model.ID, encoded); err != nil {
 		return "", err
 	}
-	models, err := loadModels(ctx, tx, current.ID, true)
+	models, err := enabledModels(ctx, tx, current.ID)
 	if err != nil {
 		return "", err
 	}
@@ -509,17 +486,13 @@ func (s *Catalogue) storeCertification(ctx context.Context, tx pgx.Tx, current *
 		}
 	}
 	detail := fmt.Sprintf("Certified %d of %d capabilities for %s.", certified, len(model.Capabilities), model.UpstreamModel)
-	if _, err = tx.Exec(ctx, "UPDATE olp.providers SET last_probe_at=$2,last_probe_status=$3,last_probe_detail=$4 WHERE id=$1", current.ID, at, probeStatus(certified > 0), detail); err != nil {
+	if err = storeProbe(ctx, tx, current.ID, at, certified > 0, detail); err != nil {
 		return "", err
 	}
-	etag, err := touch(ctx, tx, current.ID)
-	if err != nil {
-		return "", err
-	}
-	return etag, nil
+	return touch(ctx, tx, current.ID)
 }
 
-func (s *Catalogue) storeProbe(ctx context.Context, tx pgx.Tx, id string, at time.Time, succeeded bool, detail string) error {
+func storeProbe(ctx context.Context, tx pgx.Tx, id string, at time.Time, succeeded bool, detail string) error {
 	_, err := tx.Exec(ctx, "UPDATE olp.providers SET last_probe_at=$2,last_probe_status=$3,last_probe_detail=$4 WHERE id=$1", id, at, probeStatus(succeeded), detail)
 	return err
 }
