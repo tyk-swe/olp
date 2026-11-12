@@ -58,10 +58,13 @@ type storedPayload struct {
 	resolved bool
 }
 
-func (budgetAlert) sealedDeliveryKind()    {}
-func (keyReminder) sealedDeliveryKind()    {}
+func (budgetAlert) sealedDeliveryKind() {}
+
+func (keyReminder) sealedDeliveryKind() {}
+
 func (signalIncident) sealedDeliveryKind() {}
-func (storedPayload) sealedDeliveryKind()  {}
+
+func (storedPayload) sealedDeliveryKind() {}
 
 type pendingRow struct {
 	id, ruleID, ruleName               string
@@ -311,3 +314,25 @@ func (w *deliveryWorker) notificationDestination(ctx context.Context, tx pgx.Tx,
 	secret, err := w.Keys.Read(ctx, tx, w.Installation, *secretID, secrets.NotificationSecret)
 	return d, secret, err
 }
+
+const pendingChannelDeliverySQL = `SELECT v.id::text,v.rule_id::text,COALESCE(v.event,r.event),v.attempts,
+ r.name,r.subject_kind,r.subject_id::text,r.window_kind,v.window_id,v.threshold_percent,
+ v.accrued::text,v.limit_amount::text,COALESCE(v.currency::text,''),v.payload,v.api_key_id IS NOT NULL,
+ k.incident_key,v.payload->>'subject',CASE WHEN jsonb_typeof(v.payload->'incident')='number' THEN (v.payload->'incident')::bigint END,v.resolved
+ FROM olp.notification_deliveries v JOIN olp.notification_rules r ON r.id=v.rule_id
+ JOIN olp.notification_destinations d ON d.id=r.destination_id
+ CROSS JOIN LATERAL (SELECT COALESCE(NULLIF(v.payload->>'incident_key',''),v.dedup_key) AS incident_key) k
+ WHERE v.status IN ('pending','failed') AND v.attempts<$1 AND r.enabled AND d.enabled
+ AND (v.last_attempt_at IS NULL OR v.attempts<1 OR v.last_attempt_at+make_interval(mins=>1<<GREATEST(v.attempts-1,0))<=now())
+ AND (k.incident_key IS NULL OR NOT EXISTS(
+ SELECT 1 FROM olp.notification_deliveries earlier JOIN olp.notification_rules er ON er.id=earlier.rule_id
+ WHERE er.destination_id=r.destination_id AND er.enabled AND earlier.status IN ('pending','failed') AND earlier.attempts<$1
+ AND COALESCE(NULLIF(earlier.payload->>'incident_key',''),earlier.dedup_key)=k.incident_key
+ AND (earlier.created_at,earlier.id)<(v.created_at,v.id)))
+ ORDER BY v.created_at,v.id LIMIT $2`
+
+const readChannelDestinationSQL = `SELECT d.url,d.secret_id::text,d.type,d.configuration FROM olp.notification_rules r
+ JOIN olp.notification_destinations d ON d.id=r.destination_id WHERE r.id=$1 AND r.enabled AND d.enabled FOR SHARE OF r,d`
+
+const signalDeliveryCurrentSQL = `SELECT EXISTS(SELECT 1 FROM olp.notification_signal_states
+ WHERE rule_id=$1 AND subject=$2 AND active AND incident=$3)`

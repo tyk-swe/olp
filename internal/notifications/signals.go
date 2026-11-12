@@ -2,12 +2,16 @@ package notifications
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"math"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
 
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
@@ -238,3 +242,116 @@ func (s signalState) breachIncident() int64 {
 	}
 	return s.incident + 1
 }
+
+type signalRule struct {
+	id, name  string
+	event     contract.NotificationEvent
+	project   *string
+	createdAt time.Time
+}
+
+type notificationSignal struct {
+	subject  string
+	reading  reading
+	evidence map[string]any
+}
+
+type reading interface{ isReading() }
+
+type unknown struct{}
+
+type observed struct{ active bool }
+
+type measured struct {
+	value decimal.Decimal
+	band  band
+}
+
+func (unknown) isReading() {}
+
+func (observed) isReading() {}
+
+func (measured) isReading() {}
+
+func observation(known, active bool) reading {
+	if !known {
+		return unknown{}
+	}
+	return observed{active: active}
+}
+
+func (w *deliveryWorker) claimSignal(ctx context.Context, tx pgx.Tx, rule signalRule, source signalSource, cooldown time.Duration, signal notificationSignal, now time.Time) (int, error) {
+	if _, skip := signal.reading.(unknown); skip {
+		return 0, nil
+	}
+	if _, err := tx.Exec(ctx, createSignalStateSQL, rule.id, signal.subject); err != nil {
+		return 0, err
+	}
+	var current signalState
+	if err := tx.QueryRow(ctx, lockSignalStateSQL, rule.id, signal.subject).Scan(&current.active, &current.incident, &current.lastTriggerAt); err != nil {
+		return 0, err
+	}
+	next, err := transitionSignal(current, signal.reading, source.announce, now, cooldown)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(ctx, updateSignalStateSQL, rule.id, signal.subject, next.state.active, next.state.incident, next.state.lastTriggerAt); err != nil {
+		return 0, err
+	}
+	if !source.announce.announces(next.change) {
+		return 0, nil
+	}
+	digest := sha256.Sum256([]byte(rule.id + ":" + signal.subject))
+	incidentKey := "olp:" + hex.EncodeToString(digest[:]) + ":" + strconv.FormatInt(next.state.incident, 10)
+	dedupKey := next.change.dedupKey(incidentKey, now)
+	event := source.announce.event(rule.event, next.change)
+	resolved := next.change == recovered
+	id := w.NewID()
+	payload, err := json.Marshal(signalPayload{
+		envelope: envelope{
+			Version: 1, DeliveryID: id, Event: event, RuleID: rule.id, RuleName: rule.name,
+			DedupKey: dedupKey, Resolved: resolved,
+		},
+		IncidentKey: incidentKey, Subject: signal.subject, Incident: next.state.incident,
+		OccurredAt: now.UTC().Format(time.RFC3339Nano), Evidence: signal.evidence,
+	})
+	if err != nil {
+		return 0, err
+	}
+	tag, err := tx.Exec(ctx, insertSignalDeliverySQL, id, rule.id, event, dedupKey, resolved, payload)
+	return int(tag.RowsAffected()), err
+}
+
+func (c signalChange) dedupKey(incidentKey string, now time.Time) string {
+	if c == recovered {
+		return incidentKey
+	}
+	return incidentKey + ":" + strconv.FormatInt(now.UnixNano(), 10)
+}
+
+type signalPayload struct {
+	envelope
+	IncidentKey string         `json:"incident_key"`
+	Subject     string         `json:"subject,omitempty"`
+	Incident    int64          `json:"incident"`
+	OccurredAt  string         `json:"occurred_at"`
+	Evidence    map[string]any `json:"evidence"`
+}
+
+const signalRulesSQL = `SELECT r.id::text,r.event,r.name,r.project_id::text,r.configuration,r.created_at
+ FROM olp.notification_rules r JOIN olp.notification_destinations d ON d.id=r.destination_id
+ WHERE r.enabled AND d.enabled AND r.event=ANY($1)
+ ORDER BY r.id LIMIT $2`
+
+const signalClockSQL = `SELECT now()`
+
+const createSignalStateSQL = `INSERT INTO olp.notification_signal_states(rule_id,subject) VALUES($1,$2) ON CONFLICT DO NOTHING`
+
+const lockSignalStateSQL = `SELECT active,incident,last_trigger_at FROM olp.notification_signal_states WHERE rule_id=$1 AND subject=$2 FOR UPDATE`
+
+const updateSignalStateSQL = `UPDATE olp.notification_signal_states SET active=$3,incident=$4,last_trigger_at=$5,checked_at=now() WHERE rule_id=$1 AND subject=$2`
+
+const insertSignalDeliverySQL = `INSERT INTO olp.notification_deliveries(id,rule_id,event,dedup_key,resolved,payload,status)
+ VALUES($1,$2,$3,$4,$5,$6,'pending') ON CONFLICT DO NOTHING`
+
+const activeSignalStatesSQL = `SELECT subject FROM olp.notification_signal_states WHERE rule_id=$1 AND active ORDER BY subject LIMIT 10001 FOR UPDATE`

@@ -308,3 +308,54 @@ func patchRule(current json.RawMessage, patch map[string]json.RawMessage) (ruleI
 	}
 	return next, nil
 }
+
+var rules = resource{
+	parameter: "notification_rule_id", kind: "notification_rule", path: "/api/v1/notifications/rules/",
+	documentsSQL: ruleDocumentsSQL, lockSQL: lockRuleSQL, remove: removeRule,
+}
+
+func removeRule(ctx context.Context, tx pgx.Tx, id string) error {
+	_, err := tx.Exec(ctx, "DELETE FROM olp.notification_rules WHERE id=$1", id)
+	return err
+}
+
+func referenceProject(ctx context.Context, tx pgx.Tx, query, id string) (*string, bool, error) {
+	var project *string
+	err := tx.QueryRow(ctx, query, id).Scan(&project)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, nil
+	}
+	return project, err == nil, err
+}
+
+func sameProject(a, b *string) bool {
+	return a == nil && b == nil || a != nil && b != nil && *a == *b
+}
+
+const ruleDocumentsSQL = `SELECT r.id,r.project_id,r.etag,jsonb_build_object(
+	'id',r.id,'name',r.name,'project_id',r.project_id,'project_name',p.name,'event',r.event,'configuration',r.configuration,
+	'subject_kind',r.subject_kind,'subject_id',r.subject_id,'subject_name',COALESCE(k.name,g.name),
+	'window_kind',r.window_kind,'threshold_percent',r.threshold_percent,'destination_id',r.destination_id,'destination_name',d.name,
+	'enabled',r.enabled,'etag',r.etag,'created_by',r.created_by,'created_by_email',u.email,'created_at',r.created_at,'updated_at',r.updated_at) AS document
+ FROM olp.notification_rules r
+ JOIN olp.users u ON u.id=r.created_by
+ LEFT JOIN olp.projects p ON p.id=r.project_id
+ LEFT JOIN olp.api_keys k ON r.subject_kind='api_key' AND k.id=r.subject_id
+ LEFT JOIN olp.budget_groups g ON r.subject_kind='budget_group' AND g.id=r.subject_id
+ JOIN olp.notification_destinations d ON d.id=r.destination_id`
+
+const lockRuleSQL = `SELECT etag::text,project_id::text FROM olp.notification_rules WHERE id=$1 FOR UPDATE`
+
+const createChannelRuleSQL = `INSERT INTO olp.notification_rules(id,name,project_id,event,subject_kind,subject_id,window_kind,threshold_percent,destination_id,enabled,etag,created_by,configuration)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`
+
+const updateChannelRuleSQL = `UPDATE olp.notification_rules SET name=$2,subject_kind=$3,subject_id=$4,window_kind=$5,threshold_percent=$6,destination_id=$7,enabled=$8,etag=$9,configuration=$10,updated_at=now() WHERE id=$1`
+
+const evaluatedRuleCountSQL = `SELECT count(*) FROM olp.notification_rules WHERE event=ANY($1)`
+
+const destinationProjectSQL = `SELECT project_id::text FROM olp.notification_destinations WHERE id=$1`
+
+var subjectProjectSQL = map[contract.BudgetSubjectKind]string{
+	contract.BudgetSubjectKindApiKey:      `SELECT project_id::text FROM olp.api_keys WHERE id=$1`,
+	contract.BudgetSubjectKindBudgetGroup: `SELECT project_id::text FROM olp.budget_groups WHERE id=$1 AND retired_at IS NULL`,
+}

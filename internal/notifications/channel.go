@@ -1,13 +1,17 @@
 package notifications
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"maps"
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/management/contract"
@@ -41,7 +45,8 @@ type signingKey []byte
 
 type credentialFields map[string]json.RawMessage
 
-func (signingKey) credential()       {}
+func (signingKey) credential() {}
+
 func (credentialFields) credential() {}
 
 func readCredential(typ contract.NotificationDestinationType, secret []byte) (credential, error) {
@@ -69,6 +74,7 @@ type sendError struct {
 }
 
 func (e *sendError) Error() string { return string(e.code) }
+
 func (e *sendError) Unwrap() error { return e.err }
 
 func transportError(err error) error {
@@ -183,4 +189,38 @@ func requiredTextField(fields map[string]json.RawMessage, name string, max int) 
 		return "", fmt.Errorf("%s is required", name)
 	}
 	return value, nil
+}
+
+const (
+	channelTimeout    = 15 * time.Second
+	webhookTimeout    = 5 * time.Second
+	channelDrainBytes = 64 << 10
+)
+
+func post(ctx context.Context, client *http.Client, timeout time.Duration, target string, header http.Header, body []byte) (int, []byte, error) {
+	sendCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(sendCtx, http.MethodPost, target, bytes.NewReader(body))
+	if err != nil {
+		return 0, nil, &sendError{invalidDestinationCode, err}
+	}
+	req.Header.Set("Content-Type", "application/json")
+	maps.Copy(req.Header, header)
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, nil, transportError(err)
+	}
+	defer resp.Body.Close()
+	answer, _ := io.ReadAll(io.LimitReader(resp.Body, channelDrainBytes))
+	return resp.StatusCode, answer, nil
+}
+
+func statusError(status int) error {
+	if status >= 200 && status < 300 {
+		return nil
+	}
+	if status < 500 {
+		return &sendError{http4xxCode, errors.New("destination refused the request")}
+	}
+	return &sendError{http5xxCode, errors.New("destination failed")}
 }

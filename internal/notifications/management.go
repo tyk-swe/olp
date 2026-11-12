@@ -1,6 +1,8 @@
 package notifications
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -213,4 +215,47 @@ func removalError(kind string, err error) error {
 		return access.Fail(409, kind+"_in_use", "The resource still has dependent resources or retained history.")
 	}
 	return err
+}
+
+const nameLimit = 100
+
+type resource struct {
+	parameter, kind, path string
+	documentsSQL, lockSQL string
+	remove                func(context.Context, pgx.Tx, string) error
+}
+
+type revision struct {
+	etag      string
+	projectID *string
+}
+
+type document struct {
+	revision
+	id   string
+	body json.RawMessage
+}
+
+func (res resource) find(ctx context.Context, q access.Queryer, id string) (document, error) {
+	var found document
+	err := q.QueryRow(ctx, "SELECT id::text,document,etag::text,project_id::text FROM ("+res.documentsSQL+") documents WHERE id=$1", id).
+		Scan(&found.id, &found.body, &found.etag, &found.projectID)
+	return found, err
+}
+
+func (res resource) lockForChange(ctx context.Context, tx pgx.Tx, p access.Principal, id string) (revision, error) {
+	var locked revision
+	if err := tx.QueryRow(ctx, res.lockSQL, id).Scan(&locked.etag, &locked.projectID); err != nil {
+		return revision{}, err
+	}
+	if err := p.Project(locked.projectID, access.View); err != nil {
+		return revision{}, err
+	}
+	if err := p.Authorize(notificationOperation(locked.projectID)); err != nil {
+		return revision{}, err
+	}
+	if err := p.Project(locked.projectID, access.Change); err != nil {
+		return revision{}, err
+	}
+	return locked, nil
 }

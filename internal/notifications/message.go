@@ -2,10 +2,10 @@ package notifications
 
 import (
 	"encoding/json"
-	"time"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/tyk-swe/olp/internal/management/contract"
-	"github.com/tyk-swe/olp/internal/usage/reports"
 )
 
 type envelope struct {
@@ -16,24 +16,6 @@ type envelope struct {
 	RuleName   string                     `json:"rule_name"`
 	DedupKey   string                     `json:"dedup_key"`
 	Resolved   bool                       `json:"resolved"`
-}
-
-type signalPayload struct {
-	envelope
-	IncidentKey string         `json:"incident_key"`
-	Subject     string         `json:"subject,omitempty"`
-	Incident    int64          `json:"incident"`
-	OccurredAt  string         `json:"occurred_at"`
-	Evidence    map[string]any `json:"evidence"`
-}
-
-type spendReportPayload struct {
-	envelope
-	Period     string                       `json:"period"`
-	Start      string                       `json:"start"`
-	End        string                       `json:"end"`
-	Summary    reports.Summary              `json:"summary"`
-	Breakdowns map[string]reports.Breakdown `json:"breakdowns"`
 }
 
 type message struct {
@@ -59,17 +41,20 @@ func messageTitle(event contract.NotificationEvent, ruleName string) string {
 	return string(event) + " — " + ruleName
 }
 
-type GrantLapse struct {
-	CredentialID      string      `json:"credential_version_id"`
-	CredentialVersion int         `json:"credential_version"`
-	ObservedPrincipal *string     `json:"observed_principal"`
-	ProviderID        string      `json:"provider_id"`
-	ProviderName      string      `json:"provider_name"`
-	LapsedAt          time.Time   `json:"lapsed_at"`
-	CredentialSlots   []GrantSlot `json:"credential_slots"`
+var mentionSafe = strings.NewReplacer("@", "\uFF20", "<", "\u2039", ">", "\u203A")
+
+func truncate(text string, max int) string {
+	if utf8.RuneCountInString(text) <= max {
+		return text
+	}
+	runes := []rune(text)
+	return string(runes[:max-1]) + "…"
 }
 
-type GrantSlot struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+func (m message) details() string {
+	raw, err := json.MarshalIndent(m.fields, "", "  ")
+	if err != nil {
+		return "(evidence unavailable)"
+	}
+	return string(raw)
 }

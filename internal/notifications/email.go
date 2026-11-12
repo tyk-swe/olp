@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
 	"github.com/tyk-swe/olp/internal/egress"
 )
 
