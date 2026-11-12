@@ -154,6 +154,7 @@
         Parameters<typeof createBudgetGroup>[0]
       >({
         name: createName.trim(),
+        cost_basis: createBasis as 'cost' | 'charge',
         project_id: createProjectId || null,
         daily_cost_limit: optionalDecimal(createDaily),
         weekly_cost_limit: optionalDecimal(createWeekly),
@@ -232,6 +233,7 @@
     try {
       await updateBudgetGroup(current, {
         name: editName.trim(),
+        cost_basis: editBasis as 'cost' | 'charge',
         daily_cost_limit: optionalDecimal(editDaily),
         weekly_cost_limit: optionalDecimal(editWeekly),
         monthly_cost_limit: optionalDecimal(editMonthly),
