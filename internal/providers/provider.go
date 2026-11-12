@@ -18,11 +18,18 @@ import (
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
+type providerState string
+
+const (
+	stateDraft  providerState = "draft"
+	stateActive providerState = "active"
+)
+
 type record struct {
 	ID               string
 	Name             string
 	Kind             string
-	State            string
+	State            providerState
 	Connection       connection.Prepared
 	ETag             string
 	SlotsETag        string
@@ -95,26 +102,26 @@ type credentialState struct {
 }
 
 type providerSummary struct {
-	ID                       string     `json:"id"`
-	Name                     string     `json:"name"`
-	Kind                     string     `json:"kind"`
-	VendorID                 *string    `json:"vendor_id"`
-	ProjectID                *string    `json:"project_id"`
-	ProjectName              *string    `json:"project_name"`
-	State                    string     `json:"state"`
-	ConnectorReady           bool       `json:"connector_ready"`
-	ETag                     string     `json:"etag"`
-	PendingActivation        bool       `json:"pending_activation"`
-	ActiveRevision           *int       `json:"active_revision"`
-	CreatedByEmail           *string    `json:"created_by_email"`
-	LastProbeAt              *time.Time `json:"last_probe_at"`
-	LastProbeStatus          *string    `json:"last_probe_status"`
-	CreatedAt                time.Time  `json:"created_at"`
-	UpdatedAt                time.Time  `json:"updated_at"`
-	ModelCount               int64      `json:"model_count"`
-	EnabledModelCount        int64      `json:"enabled_model_count"`
-	CapabilityCount          int64      `json:"capability_count"`
-	CertifiedCapabilityCount int64      `json:"certified_capability_count"`
+	ID                       string        `json:"id"`
+	Name                     string        `json:"name"`
+	Kind                     string        `json:"kind"`
+	VendorID                 *string       `json:"vendor_id"`
+	ProjectID                *string       `json:"project_id"`
+	ProjectName              *string       `json:"project_name"`
+	State                    providerState `json:"state"`
+	ConnectorReady           bool          `json:"connector_ready"`
+	ETag                     string        `json:"etag"`
+	PendingActivation        bool          `json:"pending_activation"`
+	ActiveRevision           *int          `json:"active_revision"`
+	CreatedByEmail           *string       `json:"created_by_email"`
+	LastProbeAt              *time.Time    `json:"last_probe_at"`
+	LastProbeStatus          *string       `json:"last_probe_status"`
+	CreatedAt                time.Time     `json:"created_at"`
+	UpdatedAt                time.Time     `json:"updated_at"`
+	ModelCount               int64         `json:"model_count"`
+	EnabledModelCount        int64         `json:"enabled_model_count"`
+	CapabilityCount          int64         `json:"capability_count"`
+	CertifiedCapabilityCount int64         `json:"certified_capability_count"`
 }
 
 type detail struct {
@@ -325,7 +332,7 @@ func (s *Server) deleteProvider(r *http.Request, _ access.Principal) (access.Rep
  OR EXISTS(SELECT 1 FROM olp.notification_deliveries d JOIN olp.provider_credentials c ON c.id=d.credential_id WHERE c.provider_id=$1)`, id).Scan(&used); err != nil {
 			return access.Reply{}, err
 		}
-		if current.State != "draft" || used {
+		if current.State != stateDraft || used {
 			return access.Reply{}, access.Fail(409, "provider_in_use", "Disable published providers; deletion requires an unused draft without retained history.")
 		}
 		if err := grants.DiscardProvider(r.Context(), tx, id); err != nil {

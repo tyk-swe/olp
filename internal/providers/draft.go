@@ -72,7 +72,7 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.create", "provider", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	result := access.Reply{Status: 201, Location: "/api/v1/providers/" + id, ETag: etag, Body: map[string]any{"id": id, "name": input.Name, "kind": created.Kind, "state": "draft", "etag": etag, "model": input.Model, "project_id": input.ProjectID}}
+	result := access.Reply{Status: 201, Location: "/api/v1/providers/" + id, ETag: etag, Body: map[string]any{"id": id, "name": input.Name, "kind": created.Kind, "state": stateDraft, "etag": etag, "model": input.Model, "project_id": input.ProjectID}}
 	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}

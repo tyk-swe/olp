@@ -89,7 +89,7 @@ func (s *Server) activateProvider(r *http.Request, _ access.Principal) (access.R
 		if err != nil {
 			return access.Reply{}, err
 		}
-		return access.Detail(map[string]any{"id": current.ID, "state": "active", "etag": activated.ETag, "runtime_generation": activated.Generation}, activated.ETag), nil
+		return access.Detail(map[string]any{"id": current.ID, "state": stateActive, "etag": activated.ETag, "runtime_generation": activated.Generation}, activated.ETag), nil
 	})
 }
 
@@ -195,7 +195,7 @@ func (s *Server) activateDraft(ctx context.Context, tx pgx.Tx, p access.Principa
 }
 
 func (s *Server) disable(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (activatedProvider, error) {
-	if current.State != "active" {
+	if current.State != stateActive {
 		return activatedProvider{}, access.Fail(409, "invalid_state", "Only active connections can be disabled.")
 	}
 	etag := access.NewID()
