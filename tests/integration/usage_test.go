@@ -992,3 +992,145 @@ func TestMCPManualSettlementPreservesPricingState(t *testing.T) {
 		})
 	}
 }
+
+func TestNotificationRetryPreservesBudgetSubject(t *testing.T) {
+	for _, change := range []string{"subject", "kind", "window", "name"} {
+		t.Run(change, func(t *testing.T) {
+			t.Parallel()
+			pool, _ := harness.Database(t)
+			f := newUsageFixture(t, pool)
+			nextKey := uuid.NewString()
+			f.addKey(t, nextKey)
+			payloads := make(chan map[string]any, 4)
+			receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+				}
+				payloads <- body
+				w.WriteHeader(http.StatusServiceUnavailable)
+			}))
+			defer receiver.Close()
+			destination, rule := uuid.NewString(), uuid.NewString()
+			for _, s := range []struct {
+				sql  string
+				args []any
+			}{
+				{`UPDATE olp.api_keys SET policy='{"daily_cost_limit":"100"}' WHERE id=$1`, []any{f.keyID}},
+				{`INSERT INTO olp.api_key_cost_windows(api_key_id,window_kind,window_id,accrued,unpriced_attempts,weekly_complete) SELECT $1,'day',window_id,80,0,true FROM olp.budget_window('day',now())`, []any{f.keyID}},
+				{`INSERT INTO olp.notification_destinations(id,name,url,project_id,etag,created_by) VALUES($1,'retry',$2,$3,$1,$4)`, []any{destination, receiver.URL, f.projectID, f.ownerID}},
+				{`INSERT INTO olp.notification_rules(id,name,project_id,event,subject_kind,subject_id,window_kind,threshold_percent,destination_id,etag,created_by) VALUES($1,'retry',$2,'budget.threshold','api_key',$3,'day',75,$4,$1,$5)`, []any{rule, f.projectID, f.keyID, destination, f.ownerID}},
+			} {
+				if _, err := pool.Exec(t.Context(), s.sql, s.args...); err != nil {
+					t.Fatal(err)
+				}
+			}
+			policy := egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+			run := func() {
+				var prior int64
+				if err := pool.QueryRow(t.Context(), `SELECT COALESCE((SELECT successes_total FROM olp.worker_task_health WHERE task='notification_delivery'),0)`).Scan(&prior); err != nil {
+					t.Fatal(err)
+				}
+				ctx, cancel := context.WithCancel(t.Context())
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					notifications.RunDelivery(ctx, notifications.DeliveryConfig{Pool: pool, NewID: uuid.NewString, Now: time.Now, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Sender: notifications.NewSender(policy)})
+				}()
+				defer func() { cancel(); <-done }()
+				deadline := time.Now().Add(5 * time.Second)
+				for {
+					var success bool
+					if err := pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp.worker_task_health WHERE task='notification_delivery' AND successes_total>$1)`, prior).Scan(&success); err != nil {
+						t.Fatal(err)
+					}
+					if success {
+						return
+					}
+					if time.Now().After(deadline) {
+						t.Fatal("delivery pass did not finish")
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+			}
+			run()
+			var first map[string]any
+			select {
+			case first = <-payloads:
+			case <-time.After(5 * time.Second):
+				t.Fatal("first delivery absent")
+			}
+			if first["subject_id"] != f.keyID {
+				t.Fatalf("first subject=%v", first)
+			}
+			var installation string
+			if err := pool.QueryRow(t.Context(), `SELECT id::text FROM olp.installation WHERE singleton`).Scan(&installation); err != nil {
+				t.Fatal(err)
+			}
+			auth := secrets.NewAuthKey(make([]byte, 32), installation)
+			keys, err := secrets.ParseRing([]byte(`{"active_version":1,"keys":[{"version":1,"key":"` + strings.Repeat("01", 32) + `"}]}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := access.PrepareInstallation(t.Context(), pool, installation, auth, keys); err != nil {
+				t.Fatal(err)
+			}
+			token := "notification-fixture-session"
+			if _, err := pool.Exec(t.Context(), `INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint) VALUES($1,$2,$3,now()+interval '1 hour','test')`, uuid.NewString(), f.ownerID, auth.Digest(secrets.SessionDigest, token)); err != nil {
+				t.Fatal(err)
+			}
+			mux := http.NewServeMux()
+			notifications.NewManagement(access.New(access.Config{Pool: pool, Installation: installation, Origin: "https://test.example", Auth: auth, Keys: keys}), policy).Register(mux)
+			api := httptest.NewServer(mux)
+			defer api.Close()
+			patch := map[string]string{"subject_id": nextKey}
+			switch change {
+			case "kind":
+				group := uuid.NewString()
+				if _, err := pool.Exec(t.Context(), `INSERT INTO olp.budget_groups(id,name,project_id,etag,created_by,daily_cost_limit) VALUES($1,'new group',$2,$1,$3,100)`, group, f.projectID, f.ownerID); err != nil {
+					t.Fatal(err)
+				}
+				patch = map[string]string{"subject_kind": "budget_group", "subject_id": group}
+			case "window":
+				patch = map[string]string{"window_kind": "month"}
+			case "name":
+				patch = map[string]string{"name": "renamed"}
+			}
+			patchBody, err := json.Marshal(patch)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req, err := http.NewRequest(http.MethodPatch, api.URL+"/api/v1/notifications/rules/"+rule, strings.NewReader(string(patchBody)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Origin", "https://test.example")
+			req.Header.Set("If-Match", `"`+rule+`"`)
+			req.Header.Set("X-CSRF-Token", base64.RawURLEncoding.EncodeToString(auth.Digest(secrets.CSRFDigest, token)))
+			req.AddCookie(&http.Cookie{Name: "__Host-olp_session", Value: token})
+			response, err := api.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			body, _ := io.ReadAll(response.Body)
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("PATCH status=%d body=%s", response.StatusCode, body)
+			}
+			if _, err := pool.Exec(t.Context(), `UPDATE olp.notification_deliveries SET last_attempt_at=now()-interval '2 minutes' WHERE rule_id=$1`, rule); err != nil {
+				t.Fatal(err)
+			}
+			run()
+			select {
+			case second := <-payloads:
+				t.Logf("PATCH returned200, same delivery=%t first subject=%v retry subject=%v accrued=%v", first["delivery_id"] == second["delivery_id"], first["subject_id"], second["subject_id"], second["accrued"])
+				if second["subject_id"] != first["subject_id"] || second["subject_kind"] != first["subject_kind"] || second["window_kind"] != first["window_kind"] || second["window_id"] != first["window_id"] || second["accrued"] != first["accrued"] || second["limit"] != first["limit"] || second["delivery_id"] != first["delivery_id"] {
+					t.Fatalf("retry reassigned original budget evidence to another subject: first=%v retry=%v", first, second)
+				}
+			default:
+				t.Fatal("original failed alert was not retried")
+			}
+		})
+	}
+}

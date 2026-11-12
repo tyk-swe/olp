@@ -36,7 +36,7 @@ func windowColumn(column string) string {
       WHEN 'week' THEN COALESCE(kww.` + column + `,gww.` + column + `) ELSE COALESCE(kwm.` + column + `,gwm.` + column + `) END`
 }
 
-var dueAlertSQL = `SELECT r.id::text,r.threshold_percent,r.window_kind,
+var dueAlertSQL = `SELECT r.id::text,r.subject_kind,r.threshold_percent,r.window_kind,
  CASE r.subject_kind WHEN 'api_key' THEN k.id ELSE g.id END::text AS subject_id,
  ` + windowColumn("window_id") + ` AS window_id,
  COALESCE(CASE WHEN COALESCE(k.effective_limits,g.effective_limits)->>'cost_basis'='charge' THEN ` + windowColumn("charged") + `
@@ -54,17 +54,18 @@ LEFT JOIN olp.budget_group_cost_windows gwm ON gwm.budget_group_id=g.id AND gwm.
 JOIN olp.notification_destinations d ON d.id=r.destination_id
 WHERE r.event=$1 AND r.enabled AND d.enabled`
 
-const insertBudgetDeliverySQL = `INSERT INTO olp.notification_deliveries (id, rule_id, window_id, threshold_percent, accrued, limit_amount, currency, status)
- VALUES ($1, $2, $3, $4, $5::numeric, $6::numeric, $7, 'pending') ON CONFLICT DO NOTHING`
+const insertBudgetDeliverySQL = `INSERT INTO olp.notification_deliveries (id, rule_id, window_id, threshold_percent, accrued, limit_amount, currency, status, budget_subject_kind, budget_subject_id, budget_window_kind)
+ VALUES ($1, $2, $3, $4, $5::numeric, $6::numeric, $7, 'pending', $8, $9, $10) ON CONFLICT DO NOTHING`
 
 type dueAlert struct {
-	ruleID     string
-	threshold  int
-	windowKind contract.BudgetWindowKind
-	subjectID  *string
-	windowID   *int64
-	accrued    string
-	limit      *string
+	ruleID      string
+	subjectKind string
+	threshold   int
+	windowKind  contract.BudgetWindowKind
+	subjectID   *string
+	windowID    *int64
+	accrued     string
+	limit       *string
 }
 
 func (a dueAlert) inCurrentWindow(windows limits.Windows) bool {
@@ -197,7 +198,7 @@ func (w *deliveryWorker) claimBudgetAlerts(ctx context.Context, tx pgx.Tx) (int,
 	}
 	alerts, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (dueAlert, error) {
 		var a dueAlert
-		err := row.Scan(&a.ruleID, &a.threshold, &a.windowKind, &a.subjectID, &a.windowID, &a.accrued, &a.limit)
+		err := row.Scan(&a.ruleID, &a.subjectKind, &a.threshold, &a.windowKind, &a.subjectID, &a.windowID, &a.accrued, &a.limit)
 		return a, err
 	})
 	if err != nil {
@@ -218,7 +219,7 @@ func (w *deliveryWorker) claimBudgetAlerts(ctx context.Context, tx pgx.Tx) (int,
 			continue
 		}
 		tag, err := tx.Exec(ctx, insertBudgetDeliverySQL,
-			w.NewID(), a.ruleID, *a.windowID, a.threshold, accrued.String(), limit.String(), currency)
+			w.NewID(), a.ruleID, *a.windowID, a.threshold, accrued.String(), limit.String(), currency, a.subjectKind, a.subjectID, a.windowKind)
 		if err != nil {
 			return 0, err
 		}

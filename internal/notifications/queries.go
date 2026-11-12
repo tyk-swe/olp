@@ -87,7 +87,7 @@ const notificationCurrencySQL = `SELECT currency FROM olp.pricing_currency WHERE
 
 const pendingChannelDeliverySQL = `SELECT v.id::text,v.rule_id::text,
  CASE WHEN v.api_key_id IS NOT NULL THEN $3 ELSE COALESCE(v.event,r.event) END,v.attempts,
- r.name,r.subject_kind,r.subject_id::text,r.window_kind,v.window_id,v.threshold_percent,
+ r.name,v.budget_subject_kind,v.budget_subject_id::text,v.budget_window_kind,v.window_id,v.threshold_percent,
  v.accrued::text,v.limit_amount::text,COALESCE(v.currency::text,''),v.payload,v.dedup_key,v.resolved
  FROM olp.notification_deliveries v JOIN olp.notification_rules r ON r.id=v.rule_id
  JOIN olp.notification_destinations d ON d.id=r.destination_id
