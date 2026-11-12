@@ -23,8 +23,8 @@ var errSignalLimit = errors.New("notification signal scope exceeds its bound")
 
 var errSignalUnavailable = errors.New("notification signal source is unavailable")
 
-func querySignals(ctx context.Context, tx pgx.Tx, query string, args []any, scan func(pgx.Row) (notificationSignal, error)) ([]notificationSignal, error) {
-	rows, err := tx.Query(ctx, query, args...)
+func querySignals(ctx context.Context, tx pgx.Tx, query string, scan func(pgx.Row) (notificationSignal, error), args ...any) ([]notificationSignal, error) {
+	rows, err := tx.Query(ctx, query, append([]any{signalScopeLimit + 1}, args...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +44,7 @@ func querySignals(ctx context.Context, tx pgx.Tx, query string, args []any, scan
 }
 
 func budgetExhaustedSignals(ctx context.Context, tx pgx.Tx, rule signalRule, _ signalEnv) ([]notificationSignal, error) {
-	return querySignals(ctx, tx, exhaustedBudgetSignalsSQL, []any{rule.project}, scanBudgetExhausted)
+	return querySignals(ctx, tx, exhaustedBudgetSignalsSQL, scanBudgetExhausted, rule.project)
 }
 
 func scanBudgetExhausted(row pgx.Row) (notificationSignal, error) {
@@ -73,9 +73,9 @@ func scanBudgetExhausted(row pgx.Row) (notificationSignal, error) {
 
 func providerErrorSignals(c measuredConfig) signalReader {
 	return func(ctx context.Context, tx pgx.Tx, _ signalRule, _ signalEnv) ([]notificationSignal, error) {
-		return querySignals(ctx, tx, providerErrorSignalsSQL, []any{c.WindowSeconds}, func(row pgx.Row) (notificationSignal, error) {
+		return querySignals(ctx, tx, providerErrorSignalsSQL, func(row pgx.Row) (notificationSignal, error) {
 			return scanProviderError(row, c)
-		})
+		}, c.WindowSeconds)
 	}
 }
 
@@ -97,9 +97,9 @@ func scanProviderError(row pgx.Row, c measuredConfig) (notificationSignal, error
 
 func credentialFailureSignals(c measuredConfig) signalReader {
 	return func(ctx context.Context, tx pgx.Tx, _ signalRule, _ signalEnv) ([]notificationSignal, error) {
-		return querySignals(ctx, tx, credentialFailureSignalsSQL, []any{c.WindowSeconds}, func(row pgx.Row) (notificationSignal, error) {
+		return querySignals(ctx, tx, credentialFailureSignalsSQL, func(row pgx.Row) (notificationSignal, error) {
 			return scanCredentialFailure(row, c)
-		})
+		}, c.WindowSeconds)
 	}
 }
 
@@ -161,7 +161,7 @@ func latencySignal(rule signalRule, c latencyConfig, observation reports.RouteLa
 }
 
 func workerStaleSignals(ctx context.Context, tx pgx.Tx, _ signalRule, _ signalEnv) ([]notificationSignal, error) {
-	return querySignals(ctx, tx, workerStaleSignalsSQL, nil, scanWorkerStale)
+	return querySignals(ctx, tx, workerStaleSignalsSQL, scanWorkerStale)
 }
 
 func scanWorkerStale(row pgx.Row) (notificationSignal, error) {
@@ -185,7 +185,7 @@ func scanWorkerStale(row pgx.Row) (notificationSignal, error) {
 }
 
 func runtimeInstallSignals(ctx context.Context, tx pgx.Tx, _ signalRule, _ signalEnv) ([]notificationSignal, error) {
-	return querySignals(ctx, tx, runtimeInstallSignalsSQL, nil, scanRuntimeInstall)
+	return querySignals(ctx, tx, runtimeInstallSignalsSQL, scanRuntimeInstall)
 }
 
 func scanRuntimeInstall(row pgx.Row) (notificationSignal, error) {
@@ -210,7 +210,7 @@ func circuitSignals(ctx context.Context, tx pgx.Tx, _ signalRule, env signalEnv)
 	if err != nil {
 		return nil, fmt.Errorf("%w: fleet circuit state", errSignalUnavailable)
 	}
-	return querySignals(ctx, tx, providerCircuitSubjectsSQL, nil, func(row pgx.Row) (notificationSignal, error) {
+	return querySignals(ctx, tx, providerCircuitSubjectsSQL, func(row pgx.Row) (notificationSignal, error) {
 		return scanCircuit(row, circuits)
 	})
 }
@@ -234,9 +234,9 @@ func retirementSignals(c retirementConfig) signalReader {
 		if env.reference == nil {
 			return nil, errSignalUnavailable
 		}
-		return querySignals(ctx, tx, routedRetirementModelsSQL, []any{rule.project}, func(row pgx.Row) (notificationSignal, error) {
+		return querySignals(ctx, tx, routedRetirementModelsSQL, func(row pgx.Row) (notificationSignal, error) {
 			return scanRetirement(row, c, env.now, env.reference)
-		})
+		}, rule.project)
 	}
 }
 
@@ -266,38 +266,38 @@ func scanRetirement(row pgx.Row, c retirementConfig, now time.Time, reference *c
 
 const providerErrorSignalsSQL = `SELECT p.id::text,p.name,count(a.id),
  CASE WHEN count(a.id)>0 THEN count(a.id) FILTER(WHERE a.error_class IS NOT NULL OR a.status_code>=400)::numeric/count(a.id) END::text
- FROM olp.providers p LEFT JOIN olp.attempts a ON a.provider_id=p.id AND a.completed_at>=now()-make_interval(secs=>$1)
+ FROM olp.providers p LEFT JOIN olp.attempts a ON a.provider_id=p.id AND a.completed_at>=now()-make_interval(secs=>$2)
  AND NOT(a.status_code IS NULL AND COALESCE(a.error_class,'') IN ('rate_limit','budget'))
- WHERE p.state='active' GROUP BY p.id,p.name ORDER BY p.id LIMIT 10001`
+ WHERE p.state='active' GROUP BY p.id,p.name ORDER BY p.id LIMIT $1`
 
 const credentialFailureSignalsSQL = `WITH recent AS (
  SELECT a.routing->>'credential_version_id' AS credential_id,a.provider_id,a.completed_at,
  (a.status_code IN (401,403) OR a.error_class='credential') AS failed,
  (a.status_code BETWEEN 200 AND 399 AND a.error_class IS NULL) AS succeeded
- FROM olp.attempts a WHERE a.completed_at>=now()-make_interval(secs=>$1) AND a.routing->>'credential_version_id' IS NOT NULL
+ FROM olp.attempts a WHERE a.completed_at>=now()-make_interval(secs=>$2) AND a.routing->>'credential_version_id' IS NOT NULL
  AND NOT(a.status_code IS NULL AND COALESCE(a.error_class,'') IN ('rate_limit','budget'))
  ), successes AS (
  SELECT credential_id,max(completed_at) FILTER(WHERE succeeded) AS last_success FROM recent GROUP BY credential_id
  ) SELECT r.credential_id,r.provider_id::text,count(*) FILTER(WHERE r.failed AND (s.last_success IS NULL OR r.completed_at>s.last_success)),count(*)
- FROM recent r JOIN successes s USING(credential_id) GROUP BY r.credential_id,r.provider_id ORDER BY r.credential_id LIMIT 10001`
+ FROM recent r JOIN successes s USING(credential_id) GROUP BY r.credential_id,r.provider_id ORDER BY r.credential_id LIMIT $1`
 
 const workerStaleSignalsSQL = `WITH workers AS (
  SELECT w.task,''::text AS region,w.last_success_at,w.first_seen_at FROM olp.worker_task_health w
  WHERE NOT EXISTS(SELECT 1 FROM olp.regional_worker_task_health r WHERE r.task=w.task AND r.first_seen_at>w.checked_at)
  UNION ALL SELECT task,region,last_success_at,first_seen_at FROM olp.regional_worker_task_health
  ) SELECT task,region,GREATEST(0,EXTRACT(epoch FROM now()-COALESCE(last_success_at,first_seen_at)))::text
- FROM workers ORDER BY task,region`
+ FROM workers ORDER BY task,region LIMIT $1`
 
 const runtimeInstallSignalsSQL = `SELECT gateway_instance,desired_generation,installed_generation,failed FROM olp.runtime_install_status
- WHERE checked_at>=now()-interval '2 minutes' ORDER BY gateway_instance LIMIT 10001`
+ WHERE checked_at>=now()-interval '2 minutes' ORDER BY gateway_instance LIMIT $1`
 
-const providerCircuitSubjectsSQL = `SELECT id::text,name FROM olp.providers WHERE state='active' ORDER BY id LIMIT 10001`
+const providerCircuitSubjectsSQL = `SELECT id::text,name FROM olp.providers WHERE state='active' ORDER BY id LIMIT $1`
 
 const routedRetirementModelsSQL = `SELECT DISTINCT rt.slug,rt.project_id::text,p.id::text,p.kind,COALESCE(pr.configuration->>'vendor_id',''),t->>'provider_model'
  FROM olp.routes rt JOIN olp.route_revisions rr ON rr.id=rt.latest_revision_id
  CROSS JOIN LATERAL jsonb_array_elements(rr.targets) t JOIN olp.providers p ON p.id=(t->>'provider_id')::uuid
  JOIN olp.provider_revisions pr ON pr.id=p.active_revision_id
- WHERE rt.state='active' AND ($1::uuid IS NULL OR rt.project_id=$1) ORDER BY rt.slug,p.id::text,t->>'provider_model' LIMIT 10001`
+ WHERE rt.state='active' AND ($2::uuid IS NULL OR rt.project_id=$2) ORDER BY rt.slug,p.id::text,t->>'provider_model' LIMIT $1`
 
 const exhaustedBudgetSignalsSQL = `WITH end_users AS (
  SELECT a.id,COALESCE(a.project_id,k.project_id) AS project_id,a.end_user_digest,
@@ -328,7 +328,7 @@ const exhaustedBudgetSignalsSQL = `WITH end_users AS (
  UNION ALL SELECT CASE WHEN s.policy->>'cost_basis'='charge' THEN charged ELSE accrued END,weekly_complete FROM olp.budget_group_cost_windows WHERE s.kind='budget_group' AND budget_group_id=s.owner_id AND window_kind=k.window_kind AND window_id=b.window_id
  UNION ALL SELECT CASE WHEN s.policy->>'cost_basis'='charge' THEN charged ELSE accrued END,weekly_complete FROM olp.end_user_cost_windows WHERE s.kind='end_user' AND account_id=s.owner_id AND window_kind=k.window_kind AND window_id=b.window_id
  UNION ALL SELECT CASE WHEN s.policy->>'cost_basis'='charge' THEN charged ELSE accrued END,weekly_complete FROM olp.aggregate_cost_windows WHERE s.kind IN ('organization','project','installation') AND account_id=s.owner_id AND window_kind=k.window_kind AND window_id=b.window_id
- ) w ON true WHERE ($1::uuid IS NULL OR s.project_id=$1)
+ ) w ON true WHERE ($2::uuid IS NULL OR s.project_id=$2)
  ) SELECT c.kind,c.id::text,c.project_id::text,c.name,c.window_kind,c.window_id,c.accrued::text,
  (c.base_limit::numeric+olp.active_budget_increase(c.owner_id,c.window_kind,c.window_id,now()))::text,c.known
- FROM current c WHERE c.base_limit IS NOT NULL AND c.base_limit::numeric>0 ORDER BY c.kind,c.id,c.window_kind LIMIT 10001`
+ FROM current c WHERE c.base_limit IS NOT NULL AND c.base_limit::numeric>0 ORDER BY c.kind,c.id,c.window_kind LIMIT $1`

@@ -171,7 +171,7 @@ func (w *deliveryWorker) recoverMissingSignals(ctx context.Context, tx pgx.Tx, r
 }
 
 func activeSignalSubjects(ctx context.Context, tx pgx.Tx, ruleID string) ([]string, error) {
-	rows, err := tx.Query(ctx, activeSignalStatesSQL, ruleID)
+	rows, err := tx.Query(ctx, activeSignalStatesSQL, ruleID, signalScopeLimit+1)
 	if err != nil {
 		return nil, err
 	}
@@ -354,4 +354,4 @@ const updateSignalStateSQL = `UPDATE olp.notification_signal_states SET active=$
 const insertSignalDeliverySQL = `INSERT INTO olp.notification_deliveries(id,rule_id,event,dedup_key,resolved,payload,status)
  VALUES($1,$2,$3,$4,$5,$6,'pending') ON CONFLICT DO NOTHING`
 
-const activeSignalStatesSQL = `SELECT subject FROM olp.notification_signal_states WHERE rule_id=$1 AND active ORDER BY subject LIMIT 10001 FOR UPDATE`
+const activeSignalStatesSQL = `SELECT subject FROM olp.notification_signal_states WHERE rule_id=$1 AND active ORDER BY subject LIMIT $2 FOR UPDATE`
