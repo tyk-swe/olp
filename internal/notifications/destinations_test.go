@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/tyk-swe/olp/internal/egress"
 )
 
 func TestDestinationSecret(t *testing.T) {
@@ -41,6 +43,36 @@ func TestDestinationSecret(t *testing.T) {
 			}
 			if err == nil && !bytes.Equal(got, test.want) {
 				t.Errorf("destinationSecret() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestChatDestinationBindsEquivalentDefaultPorts(t *testing.T) {
+	for _, typ := range []string{"slack", "msteams", "discord"} {
+		t.Run(typ, func(t *testing.T) {
+			for _, tc := range []struct {
+				origin, hook string
+				valid        bool
+			}{
+				{"https://hooks.example.invalid:443", "https://hooks.example.invalid/path", true},
+				{"https://hooks.example.invalid", "https://hooks.example.invalid:443/path", true},
+				{"https://hooks.example.invalid:8443", "https://hooks.example.invalid:8443/path", true},
+				{"http://hooks.example.invalid:80", "http://hooks.example.invalid/path", true},
+				{"http://hooks.example.invalid", "http://hooks.example.invalid:80/path", true},
+				{"https://hooks.example.invalid:8443", "https://hooks.example.invalid/path", false},
+				{"https://hooks.example.invalid", "https://other.example.invalid/path", false},
+				{"https://hooks.example.invalid", "http://hooks.example.invalid/path", false},
+			} {
+				raw, err := json.Marshal(map[string]string{"webhook_url": tc.hook})
+				if err != nil {
+					t.Fatal(err)
+				}
+				s := &Server{egress: egress.Policy{PlainHTTPHosts: []string{"hooks.example.invalid"}}}
+				err = s.checkDestination(destination{Type: typ, URL: tc.origin}, raw, true, true)
+				if (err == nil) != tc.valid {
+					t.Errorf("%s binding %s valid=%t: %v", tc.origin, tc.hook, tc.valid, err)
+				}
 			}
 		})
 	}
