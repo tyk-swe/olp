@@ -478,12 +478,17 @@ func (x *call) attemptCardRevision(providerID string, at time.Time) *rates.Routi
 }
 
 func (x *call) attemptCardRevisionForRoute(providerID string, route *routing.Route, at time.Time) *rates.RoutingCardRevision {
+	revision, _ := x.resolveAttemptCardRevision(providerID, route, at)
+	return revision
+}
+
+func (x *call) resolveAttemptCardRevision(providerID string, route *routing.Route, at time.Time) (*rates.RoutingCardRevision, bool) {
 	if x.cardPinned {
-		return x.cardRev
+		return x.cardRev, true
 	}
 	inputs := x.routingInputs
 	if inputs == nil {
-		return nil
+		return nil, false
 	}
 	// The consumer is the aggregate-ownership project: the key's, then the
 	// provider's, then the route's — the same precedence accounting applies.
@@ -498,10 +503,7 @@ func (x *call) attemptCardRevisionForRoute(providerID string, route *routing.Rou
 	if project == nil && route != nil {
 		project = route.ProjectID
 	}
-	if revision, known := inputs.RateCardRevision(project, at); known && revision != nil {
-		return revision
-	}
-	return nil
+	return inputs.RateCardRevision(project, at)
 }
 
 // recordCost gives a lease that holds a cost estimate what the request cost, for

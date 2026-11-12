@@ -152,8 +152,9 @@ func signatureURL(rawURL string) (string, error) {
 	if err != nil || u.Path == "" {
 		return "", errors.New("the catalog URL has no path")
 	}
+	escapedPath := u.EscapedPath() + ".sig"
 	u.Path += ".sig"
-	u.RawPath = ""
+	u.RawPath = escapedPath
 	return u.String(), nil
 }
 
