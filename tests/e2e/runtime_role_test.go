@@ -69,3 +69,30 @@ func TestServiceRunsUnderRuntimeRole(t *testing.T) {
 		t.Fatal("the runtime role can rewrite migration history")
 	}
 }
+
+func TestEpochRecoveryWithoutValkey(t *testing.T) {
+	t.Parallel()
+	pool, databaseURL := harness.Database(t)
+	epoch := uuid.NewString()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.request_metadata_gateway_epochs
+ (gateway_instance,process_epoch,started_at,accepted,persisted,dropped,abandoned,retrying,writer_closed,updated_at,stale_candidate_at)
+ VALUES('stopped-gateway',$1,now()-interval '3 minutes',1,0,0,0,false,false,now()-interval '2 minutes',now()-interval '30 seconds')`, epoch); err != nil {
+		t.Fatal(err)
+	}
+	env := newEnvironment(t, databaseURL)
+	env.values["OLP_VALKEY_URL"] = ""
+	s := startProcess(t, pool, env)
+	s.eventually("PostgreSQL-only epoch recovery and its health checkpoint", 12*time.Second, func() (bool, string) {
+		var recovered, healthy bool
+		if err := pool.QueryRow(t.Context(), `SELECT e.stale_detected_at IS NOT NULL AND g.event_count=1,
+ EXISTS(SELECT 1 FROM olp.worker_task_health WHERE task='request_metadata_gateway_epoch_detection' AND successes_total>0)
+ FROM olp.request_metadata_gateway_epochs e LEFT JOIN olp.request_metadata_ingestion_gaps g ON g.id=e.uncertainty_gap_id
+ WHERE e.process_epoch=$1`, epoch).Scan(&recovered, &healthy); err != nil {
+			return false, err.Error()
+		}
+		if recovered && healthy {
+			return true, ""
+		}
+		return false, "the stopped gateway has no recorded gap or successful detector checkpoint"
+	})
+}
