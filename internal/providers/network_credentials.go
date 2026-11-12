@@ -13,7 +13,7 @@ import (
 
 // StoreNetworkCredential uses the existing encryption authority, but a distinct
 // provider-owned reference table so API credential slots cannot select TLS keys.
-func (s *Catalogue) StoreNetworkCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error) {
+func (s *Server) StoreNetworkCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error) {
 	if len(secret) > maxCredentialBytes {
 		return "", access.Invalid("credential", "Network credentials must fit within 64 KiB.")
 	}
@@ -24,7 +24,7 @@ func (s *Catalogue) StoreNetworkCredential(ctx context.Context, tx pgx.Tx, provi
 	if _, err := tx.Exec(ctx, "INSERT INTO olp.provider_network_credentials(id,provider_id,version) VALUES($1,$2,(SELECT coalesce(max(version),0)+1 FROM olp.provider_network_credentials WHERE provider_id=$2))", id, providerID); err != nil {
 		return "", err
 	}
-	if err := s.Access.Keys.Store(ctx, tx, s.Access.Installation, id, secrets.ProviderCredential, []byte(secret), nil); err != nil {
+	if err := s.access.Keys.Store(ctx, tx, s.access.Installation, id, secrets.ProviderCredential, []byte(secret), nil); err != nil {
 		return "", err
 	}
 	return id, nil
@@ -35,14 +35,14 @@ func (s *Server) networkCredentials(r *http.Request, principal access.Principal)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err := visibleProvider(r.Context(), s.Access.Pool, principal, id); err != nil {
+	if _, err := visibleProvider(r.Context(), s.access.Pool, principal, id); err != nil {
 		return access.Reply{}, err
 	}
 	page, err := access.Page(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	rows, err := s.Access.Pool.Query(r.Context(), "SELECT jsonb_build_object('id',id,'version',version,'created_at',created_at,'revoked_at',revoked_at) FROM olp.provider_network_credentials WHERE provider_id=$1 AND id<$2 ORDER BY id DESC LIMIT $3", id, page.Before, page.Limit+1)
+	rows, err := s.access.Pool.Query(r.Context(), "SELECT jsonb_build_object('id',id,'version',version,'created_at',created_at,'revoked_at',revoked_at) FROM olp.provider_network_credentials WHERE provider_id=$1 AND id<$2 ORDER BY id DESC LIMIT $3", id, page.Before, page.Limit+1)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -66,7 +66,7 @@ func (s *Server) createNetworkCredential(r *http.Request, _ access.Principal) (a
 	if err != nil {
 		return access.Reply{}, err
 	}
-	return access.Mutate(s.Access, r, input, changeable(r.Context(), id), func(tx pgx.Tx, principal access.Principal, provider *record) (access.Reply, error) {
+	return access.Mutate(s.access, r, input, changeable(r.Context(), id), func(tx pgx.Tx, principal access.Principal, provider *record) (access.Reply, error) {
 		if err := access.Match(r, provider.ETag); err != nil {
 			return access.Reply{}, err
 		}
@@ -121,7 +121,7 @@ func (n networkSecrets) NetworkSecret(ctx context.Context, providerID, credentia
 	return n.server.Keys.Read(ctx, tx, n.server.Installation, credentialID, secrets.ProviderCredential)
 }
 
-func (s *Catalogue) revokeNetworkCredentialVersion(ctx context.Context, tx pgx.Tx, current *record, id string) (revokedCredential, error) {
+func (s *Server) revokeNetworkCredentialVersion(ctx context.Context, tx pgx.Tx, current *record, id string) (revokedCredential, error) {
 	var version int
 	if err := tx.QueryRow(ctx, "UPDATE olp.provider_network_credentials SET revoked_at=now() WHERE id=$1 AND provider_id=$2 AND revoked_at IS NULL RETURNING version", id, current.ID).Scan(&version); err != nil {
 		return revokedCredential{}, err
@@ -142,7 +142,7 @@ type createdNetworkCredential struct {
 	ETag string
 }
 
-func (s *Catalogue) createNetworkCredentialVersion(ctx context.Context, tx pgx.Tx, providerID, credential string) (createdNetworkCredential, error) {
+func (s *Server) createNetworkCredentialVersion(ctx context.Context, tx pgx.Tx, providerID, credential string) (createdNetworkCredential, error) {
 	id, err := s.StoreNetworkCredential(ctx, tx, providerID, credential)
 	if err != nil {
 		return createdNetworkCredential{}, err

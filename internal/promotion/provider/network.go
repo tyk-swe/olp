@@ -82,7 +82,7 @@ func (a applying) bindNetwork(ctx context.Context, tx pgx.Tx, entry Entry, prepa
 	if err != nil || (same && !rotated) {
 		return err
 	}
-	return a.deps.Catalogue.StoreDraftConfiguration(ctx, tx, target.id, entry.Name, configured)
+	return a.deps.Drafts.StoreDraftConfiguration(ctx, tx, target.id, entry.Name, configured)
 }
 
 func (a applying) networkConfiguration(ctx context.Context, tx pgx.Tx, entry Entry, prepared connection.Prepared, target destination) (connection.Prepared, bool, error) {
@@ -108,7 +108,7 @@ func (a applying) networkCredential(ctx context.Context, tx pgx.Tx, entry Entry,
 	if err != nil || same {
 		return target.network, false, err
 	}
-	id, err := a.deps.Catalogue.StoreNetworkCredential(ctx, tx, target.id, sealed.Secret)
+	id, err := a.deps.Drafts.StoreNetworkCredential(ctx, tx, target.id, sealed.Secret)
 	if err != nil {
 		return nil, false, err
 	}

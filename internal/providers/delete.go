@@ -18,7 +18,7 @@ func (s *Server) deleteProvider(r *http.Request, _ access.Principal) (access.Rep
 	if err != nil {
 		return access.Reply{}, err
 	}
-	return access.Remove(s.Access, r, map[string]string{"provider_id": id}, changeable(r.Context(), id), func(tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
+	return access.Remove(s.access, r, map[string]string{"provider_id": id}, changeable(r.Context(), id), func(tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
 		if err := access.Match(r, current.ETag); err != nil {
 			return access.Reply{}, err
 		}

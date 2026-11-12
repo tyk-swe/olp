@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"slices"
 	"time"
@@ -35,10 +34,10 @@ func (s *Server) credentials(r *http.Request, p access.Principal) (access.Reply,
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = visibleProvider(r.Context(), s.Access.Pool, p, id); err != nil {
+	if _, err = visibleProvider(r.Context(), s.access.Pool, p, id); err != nil {
 		return access.Reply{}, err
 	}
-	rows, err := s.Access.Pool.Query(r.Context(), `SELECT jsonb_build_object(
+	rows, err := s.access.Pool.Query(r.Context(), `SELECT jsonb_build_object(
 		'id',c.id,'version',c.version,
 		'active',EXISTS(SELECT 1 FROM jsonb_array_elements(r.slots) slot WHERE slot->>'credential_id'=c.id::text),
 		'draft_selected',EXISTS(SELECT 1 FROM olp.provider_slots d WHERE d.provider_id=p.id AND d.credential_id=c.id),
@@ -69,7 +68,7 @@ type rotateRequest struct {
 // next version, and selects it for the draft. Published revisions keep the
 // version they were activated with.
 func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, error) {
-	a := s.Access
+	a := s.access
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -359,19 +358,19 @@ type slotQuota struct {
 // reported to the operator and shown to the console as unknown, never as an
 // idle zero and never as a failed request.
 func (s *Server) quotas(ctx context.Context, providerID string, slots []slotRow, published map[string]*string, generations map[string]int64) (map[string]slotQuota, *quotaUsage) {
-	if s.Quotas == nil {
+	if s.quota == nil {
 		return nil, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, quotaTimeout)
 	defer cancel()
-	connection, err := s.Quotas.Usage(ctx, limits.ConnectionLookup(providerID))
+	connection, err := s.quota.Usage(ctx, limits.ConnectionLookup(providerID))
 	if err != nil {
 		s.quotaUnavailable(err)
 		return nil, nil
 	}
 	live := make(map[string]slotQuota, len(slots))
 	for _, row := range slots {
-		usage, err := s.Quotas.Usage(ctx, limits.SlotLookup(row.ID))
+		usage, err := s.quota.Usage(ctx, limits.SlotLookup(row.ID))
 		if err != nil {
 			s.quotaUnavailable(err)
 			break
@@ -383,7 +382,7 @@ func (s *Server) quotas(ctx context.Context, providerID string, slots []slotRow,
 		if id := published[row.ID]; id != nil {
 			generation = generations[*id]
 		}
-		cooling, err := s.Quotas.Cooling(ctx, fleet.CredentialScope(providerID, published[row.ID], generation), fleet.SlotScope(row.ID))
+		cooling, err := s.quota.Cooling(ctx, fleet.CredentialScope(providerID, published[row.ID], generation), fleet.SlotScope(row.ID))
 		if err != nil {
 			s.quotaUnavailable(err)
 			break
@@ -396,11 +395,7 @@ func (s *Server) quotas(ctx context.Context, providerID string, slots []slotRow,
 // quotaUnavailable reports a quota read that failed without changing what the
 // caller answers.
 func (s *Server) quotaUnavailable(err error) {
-	log := s.Log
-	if log == nil {
-		log = slog.Default()
-	}
-	log.Warn("shared provider quota state is unavailable", "error", err)
+	s.log.Warn("shared provider quota state is unavailable", "error", err)
 }
 
 func (s *Server) slots(r *http.Request, p access.Principal) (access.Reply, error) {
@@ -408,11 +403,11 @@ func (s *Server) slots(r *http.Request, p access.Principal) (access.Reply, error
 	if err != nil {
 		return access.Reply{}, err
 	}
-	current, err := visibleProvider(r.Context(), s.Access.Pool, p, id)
+	current, err := visibleProvider(r.Context(), s.access.Pool, p, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	return s.slotList(r.Context(), s.Access.Pool, current)
+	return s.slotList(r.Context(), s.access.Pool, current)
 }
 
 func (in slotInput) normalized(slotID string) (slotInput, error) {
@@ -496,7 +491,7 @@ func credentialVersionID(given *string) (*string, error) {
 }
 
 func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, error) {
-	a := s.Access
+	a := s.access
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -550,7 +545,7 @@ func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, e
 }
 
 func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply, error) {
-	a := s.Access
+	a := s.access
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -630,7 +625,7 @@ func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply
 	return result, nil
 }
 
-func (s *Catalogue) saveDraftSlot(ctx context.Context, tx pgx.Tx, current *record, slotID string, slot slotInput, source credentialSource, existing *slotRow, slotCount int) error {
+func (s *Server) saveDraftSlot(ctx context.Context, tx pgx.Tx, current *record, slotID string, slot slotInput, source credentialSource, existing *slotRow, slotCount int) error {
 	id := current.ID
 	if existing == nil && slotCount >= maxSlots {
 		return access.Fail(422, "slot_limit", "A connection can hold at most 64 credential slots.")
@@ -656,7 +651,7 @@ func (s *Catalogue) saveDraftSlot(ctx context.Context, tx pgx.Tx, current *recor
 	return err
 }
 
-func (s *Catalogue) slotCredential(ctx context.Context, tx pgx.Tx, current *record, slot slotInput, source credentialSource, existing *slotRow) (*string, error) {
+func (s *Server) slotCredential(ctx context.Context, tx pgx.Tx, current *record, slot slotInput, source credentialSource, existing *slotRow) (*string, error) {
 	switch {
 	case source != nil:
 		if !current.Connection.Document().CredentialRequired() {
@@ -693,7 +688,7 @@ type credentialRotation struct {
 	ETag    string
 }
 
-func (s *Catalogue) rotateCredential(ctx context.Context, tx pgx.Tx, current *record, models []storedModel, defaultSlot slotRow, validatedAt *time.Time, source credentialSource) (credentialRotation, error) {
+func (s *Server) rotateCredential(ctx context.Context, tx pgx.Tx, current *record, models []storedModel, defaultSlot slotRow, validatedAt *time.Time, source credentialSource) (credentialRotation, error) {
 	id := current.ID
 	credentialID, version, err := s.storeCredential(ctx, tx, id, source)
 	if err != nil {
@@ -716,7 +711,7 @@ type revokedCredential struct {
 	ETag       string
 }
 
-func (s *Catalogue) revokeCredential(ctx context.Context, tx pgx.Tx, current *record, credentialID string) (revokedCredential, error) {
+func (s *Server) revokeCredential(ctx context.Context, tx pgx.Tx, current *record, credentialID string) (revokedCredential, error) {
 	var version int
 	err := tx.QueryRow(ctx, "UPDATE olp.provider_credentials SET revoked_at=now() WHERE id=$1 AND provider_id=$2 AND revoked_at IS NULL RETURNING version", credentialID, current.ID).Scan(&version)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -750,7 +745,7 @@ func (s *Catalogue) revokeCredential(ctx context.Context, tx pgx.Tx, current *re
 	return revokedCredential{Version: version, Generation: generation, ETag: etag}, nil
 }
 
-func (s *Catalogue) storeSlotValidation(ctx context.Context, tx pgx.Tx, current *record, slot *slotRow, models []storedModel, succeeded bool) error {
+func (s *Server) storeSlotValidation(ctx context.Context, tx pgx.Tx, current *record, slot *slotRow, models []storedModel, succeeded bool) error {
 	slotID := slot.ID
 	var validatedAt *time.Time
 	var fingerprint *string

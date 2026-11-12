@@ -48,7 +48,7 @@ func (s *Server) importCredentialsAs(r *http.Request, p access.Principal, adapte
 	if err := access.DecodeUnique(r, &input, 128<<10); err != nil {
 		return access.Reply{}, err
 	}
-	current, err := readProvider(r.Context(), s.Access.Pool, id)
+	current, err := readProvider(r.Context(), s.access.Pool, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -67,7 +67,7 @@ func (s *Server) importCredentialsAs(r *http.Request, p access.Principal, adapte
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err := codeaccounts.ValidateConnection(r.Context(), s.Plugins, served, vendor); err != nil {
+	if err := codeaccounts.ValidateConnection(r.Context(), s.plugins, served, vendor); err != nil {
 		return access.Reply{}, access.Invalid("credentials", "This connection must use the unmodified subscription plugin and configuration.")
 	}
 	slot, err := s.credentialImportSlot(r, id, input.SlotID)
@@ -82,7 +82,7 @@ func (s *Server) importCredentialsAs(r *http.Request, p access.Principal, adapte
 	if err != nil {
 		return access.Reply{}, access.Invalid("credentials", "Could not verify the supported credential format and original account. Sign in again and retry.")
 	}
-	grant, err := s.Plugins.RefreshGrant(r.Context(), cfg.ProfileRevision, abi.Provider{Profile: cfg.ProfileID, Options: cfg.Options.PluginOptions}, credentials.refresh, client, credentials.secrets)
+	grant, err := s.plugins.RefreshGrant(r.Context(), cfg.ProfileRevision, abi.Provider{Profile: cfg.ProfileID, Options: cfg.Options.PluginOptions}, credentials.refresh, client, credentials.secrets)
 	if err != nil || grants.ValidateTokenMaterial(grant.AccessToken, grant.RefreshToken, grant.ExpiresIn) != nil || !credentials.matches(grant) || slot.CredentialID != nil && slot.Principal != grant.Principal {
 		if auditErr := s.auditFailedEnrollment(r, p.Actor(), id); auditErr != nil {
 			return access.Reply{}, auditErr
@@ -100,7 +100,7 @@ func (s *Server) credentialImportSlot(r *http.Request, providerID, slotID string
 		return credentialImportSlot{}, access.Invalid("slot_id", "Use a credential slot identifier.")
 	}
 	var slot credentialImportSlot
-	err := s.Access.Pool.QueryRow(r.Context(), `SELECT s.id::text,s.credential_id::text,coalesce(c.principal,'')
+	err := s.access.Pool.QueryRow(r.Context(), `SELECT s.id::text,s.credential_id::text,coalesce(c.principal,'')
 		FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id
 		WHERE s.provider_id=$1 AND (($3 AND s.is_default) OR (NOT $3 AND s.id=$2))`, providerID, identifier, slotID == "").Scan(&slot.ID, &slot.CredentialID, &slot.Principal)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -113,7 +113,7 @@ func (s *Server) stageCredentialImport(request *http.Request, current *record, s
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(request.Context()), stageGrantTimeout)
 	defer cancel()
 	r := request.WithContext(ctx)
-	tx, p, err := s.Access.BeginMutation(r)
+	tx, p, err := s.access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -128,7 +128,7 @@ func (s *Server) stageCredentialImport(request *http.Request, current *record, s
 	if err := access.Match(r, locked.ETag); err != nil {
 		return access.Reply{}, err
 	}
-	credentialID, version, err := grants.Store(ctx, tx, s.Access, current.ID, current.Connection.Document().ProfileRevision, current.Connection.Document().ProfileID, grant)
+	credentialID, version, err := grants.Store(ctx, tx, s.access, current.ID, current.Connection.Document().ProfileRevision, current.Connection.Document().ProfileID, grant)
 	if err != nil {
 		return access.Reply{}, err
 	}

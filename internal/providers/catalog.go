@@ -138,26 +138,26 @@ func suggestionsFor(signed *catalog.Signed, cfg connection.Configuration, models
 }
 
 func (s *Server) catalogSuggestions(r *http.Request, p access.Principal) (access.Reply, error) {
-	if s.Catalog == nil {
+	if s.catalog == nil {
 		return access.Reply{}, access.Fail(503, "reference_catalog_unavailable", "This process holds no verified reference catalog.")
 	}
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
 	}
-	current, err := visibleProvider(r.Context(), s.Access.Pool, p, id)
+	current, err := visibleProvider(r.Context(), s.access.Pool, p, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	models, err := loadModels(r.Context(), s.Access.Pool, id)
+	models, err := loadModels(r.Context(), s.access.Pool, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	items, err := suggestionsFor(s.Catalog, current.Connection.Document(), models)
+	items, err := suggestionsFor(s.catalog, current.Connection.Document(), models)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	return access.OK(map[string]any{"catalog": s.Catalog.Summary(), "vendor_id": providerconfig.Value(current.Connection.Document().Options.VendorID), "items": items}), nil
+	return access.OK(map[string]any{"catalog": s.catalog.Summary(), "vendor_id": providerconfig.Value(current.Connection.Document().Options.VendorID), "items": items}), nil
 }
 
 type acceptCatalogRequest struct {
@@ -173,7 +173,7 @@ func (s *Server) acceptCatalogSuggestions(r *http.Request, _ access.Principal) (
 	if err := access.Decode(r, &input); err != nil {
 		return access.Reply{}, err
 	}
-	if s.Catalog == nil {
+	if s.catalog == nil {
 		return access.Reply{}, access.Fail(503, "reference_catalog_unavailable", "This process holds no verified reference catalog.")
 	}
 	if len(input.UpstreamModels) == 0 || len(input.UpstreamModels) > 2000 {
@@ -187,15 +187,15 @@ func (s *Server) acceptCatalogSuggestions(r *http.Request, _ access.Principal) (
 	})
 }
 
-func (s *Catalogue) acceptCatalogFacts(ctx context.Context, tx pgx.Tx, current *record, input acceptCatalogRequest) error {
-	if input.CatalogSHA256 != s.Catalog.SHA256 {
+func (s *Server) acceptCatalogFacts(ctx context.Context, tx pgx.Tx, current *record, input acceptCatalogRequest) error {
+	if input.CatalogSHA256 != s.catalog.SHA256 {
 		return access.Fail(409, "catalog_changed", "The reference catalog changed since these suggestions were reviewed; review them again.")
 	}
 	models, err := loadModels(ctx, tx, current.ID)
 	if err != nil {
 		return err
 	}
-	suggestions, err := suggestionsFor(s.Catalog, current.Connection.Document(), models)
+	suggestions, err := suggestionsFor(s.catalog, current.Connection.Document(), models)
 	if err != nil {
 		return err
 	}

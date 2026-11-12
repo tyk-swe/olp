@@ -52,7 +52,7 @@ func portableConnection(configuration connection.Configuration) Connection {
 }
 
 func (c Connection) resolve(ctx context.Context, q access.Queryer, name, project, pool string, in scope) (pin, error) {
-	prepared, err := connection.Prepare(ctx, in.deps.Catalogue.ConnectionPolicy(q), c.Configuration)
+	prepared, err := connection.Prepare(ctx, in.deps.Drafts.ConnectionPolicy(q), c.Configuration)
 	if _, refused := provider.Refusal(err); refused {
 		return pin{}, access.Invalid("code.connections", "Install and approve the pinned frozen provider profile before promotion.")
 	}

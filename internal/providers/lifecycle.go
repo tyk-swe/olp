@@ -51,12 +51,12 @@ func ValidCredential(value string) error {
 	return nil
 }
 
-func (s *Catalogue) StoreCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, int, error) {
+func (s *Server) StoreCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, int, error) {
 	id, version, err := insertCredentialVersion(ctx, tx, providerID, nil)
 	if err != nil {
 		return "", 0, err
 	}
-	return id, version, s.Access.Keys.Store(ctx, tx, s.Access.Installation, id, secrets.ProviderCredential, []byte(secret), nil)
+	return id, version, s.access.Keys.Store(ctx, tx, s.access.Installation, id, secrets.ProviderCredential, []byte(secret), nil)
 }
 
 func (s *Server) providers(r *http.Request, principal access.Principal) (access.Reply, error) {
@@ -68,7 +68,7 @@ func (s *Server) providers(r *http.Request, principal access.Principal) (access.
 	if len(search) > 100 {
 		return access.Reply{}, access.Invalid("search", "Use at most 100 characters.")
 	}
-	rows, err := s.Access.Pool.Query(r.Context(), detailQuery+" WHERE p.id<$1 AND ($2='' OR p.name ILIKE '%'||$2||'%') AND ($3 OR p.project_id=ANY($4::uuid[])) ORDER BY p.id DESC LIMIT $5", page.Before, search, principal.AllProjects, principal.ProjectIDs(), page.Limit+1)
+	rows, err := s.access.Pool.Query(r.Context(), detailQuery+" WHERE p.id<$1 AND ($2='' OR p.name ILIKE '%'||$2||'%') AND ($3 OR p.project_id=ANY($4::uuid[])) ORDER BY p.id DESC LIMIT $5", page.Before, search, principal.AllProjects, principal.ProjectIDs(), page.Limit+1)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -92,14 +92,14 @@ func (s *Server) provider(r *http.Request, p access.Principal) (access.Reply, er
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = visibleProvider(r.Context(), s.Access.Pool, p, id); err != nil {
+	if _, err = visibleProvider(r.Context(), s.access.Pool, p, id); err != nil {
 		return access.Reply{}, err
 	}
-	return s.detailReply(r.Context(), s.Access.Pool, id)
+	return s.detailReply(r.Context(), s.access.Pool, id)
 }
 
 func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Reply, error) {
-	a := s.Access
+	a := s.access
 	var input createRequest
 	if err := access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
@@ -163,7 +163,7 @@ func (s *Server) updateProvider(r *http.Request, _ access.Principal) (access.Rep
 	if err = access.ValidText("name", input.Name, 100); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Transact(s.Access, r, changeable(r.Context(), id), func(tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
+	return access.Transact(s.access, r, changeable(r.Context(), id), func(tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
 		if err := access.Match(r, current.ETag); err != nil {
 			return access.Reply{}, err
 		}
@@ -186,7 +186,7 @@ func (s *Server) mutation(r *http.Request, action string, input any, fn func(ctx
 	if err != nil {
 		return access.Reply{}, err
 	}
-	return access.Mutate(s.Access, r, input, changeable(r.Context(), id), func(tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
+	return access.Mutate(s.access, r, input, changeable(r.Context(), id), func(tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
 		if err := access.Match(r, current.ETag); err != nil {
 			return access.Reply{}, err
 		}
@@ -565,10 +565,10 @@ func (s *Server) revisions(r *http.Request, p access.Principal) (access.Reply, e
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = visibleProvider(r.Context(), s.Access.Pool, p, id); err != nil {
+	if _, err = visibleProvider(r.Context(), s.access.Pool, p, id); err != nil {
 		return access.Reply{}, err
 	}
-	rows, err := s.Access.Pool.Query(r.Context(), "SELECT "+revisionColumns+" FROM olp.provider_revisions WHERE provider_id=$1 AND id<$2 ORDER BY id DESC LIMIT $3", id, page.Before, page.Limit+1)
+	rows, err := s.access.Pool.Query(r.Context(), "SELECT "+revisionColumns+" FROM olp.provider_revisions WHERE provider_id=$1 AND id<$2 ORDER BY id DESC LIMIT $3", id, page.Before, page.Limit+1)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -590,10 +590,10 @@ func (s *Server) revision(r *http.Request, p access.Principal) (access.Reply, er
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = visibleProvider(r.Context(), s.Access.Pool, p, id); err != nil {
+	if _, err = visibleProvider(r.Context(), s.access.Pool, p, id); err != nil {
 		return access.Reply{}, err
 	}
-	v, err := loadRevision(r.Context(), s.Access.Pool, id, r.PathValue("revision_id"))
+	v, err := loadRevision(r.Context(), s.access.Pool, id, r.PathValue("revision_id"))
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -609,10 +609,10 @@ func (s *Server) revisionModels(r *http.Request, p access.Principal) (access.Rep
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = visibleProvider(r.Context(), s.Access.Pool, p, id); err != nil {
+	if _, err = visibleProvider(r.Context(), s.access.Pool, p, id); err != nil {
 		return access.Reply{}, err
 	}
-	v, err := loadRevision(r.Context(), s.Access.Pool, id, r.PathValue("revision_id"))
+	v, err := loadRevision(r.Context(), s.access.Pool, id, r.PathValue("revision_id"))
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -635,14 +635,14 @@ func (s *Server) revisionDiff(r *http.Request, p access.Principal) (access.Reply
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = visibleProvider(r.Context(), s.Access.Pool, p, id); err != nil {
+	if _, err = visibleProvider(r.Context(), s.access.Pool, p, id); err != nil {
 		return access.Reply{}, err
 	}
-	from, err := loadRevision(r.Context(), s.Access.Pool, id, r.URL.Query().Get("from"))
+	from, err := loadRevision(r.Context(), s.access.Pool, id, r.URL.Query().Get("from"))
 	if err != nil {
 		return access.Reply{}, err
 	}
-	to, err := loadRevision(r.Context(), s.Access.Pool, id, r.URL.Query().Get("to"))
+	to, err := loadRevision(r.Context(), s.access.Pool, id, r.URL.Query().Get("to"))
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -730,7 +730,7 @@ func deref[T comparable](v *T) T {
 
 // restoreDraft rewrites the draft configuration and models from a revision.
 // Credentials are never restored; the draft keeps its current slots.
-func (s *Catalogue) restoreDraft(ctx context.Context, tx pgx.Tx, current *record, v *revisionRow) (string, error) {
+func (s *Server) restoreDraft(ctx context.Context, tx pgx.Tx, current *record, v *revisionRow) (string, error) {
 	if err := preserveCredentialBoundary(ctx, tx, current.ID, current.Connection.Document(), v.Configuration); err != nil {
 		return "", err
 	}
@@ -844,7 +844,7 @@ type createdProvider struct {
 	Kind string
 }
 
-func (s *Catalogue) createDraft(ctx context.Context, tx pgx.Tx, p access.Principal, input createRequest, credential credentialSource) (createdProvider, error) {
+func (s *Server) createDraft(ctx context.Context, tx pgx.Tx, p access.Principal, input createRequest, credential credentialSource) (createdProvider, error) {
 	var err error
 	if err = access.ValidText("name", input.Name, 100); err != nil {
 		return createdProvider{}, err
@@ -871,7 +871,7 @@ func (s *Catalogue) createDraft(ctx context.Context, tx pgx.Tx, p access.Princip
 			return createdProvider{}, err
 		}
 	}
-	if err = s.Access.RequireProject(ctx, tx, p, input.ProjectID); err != nil {
+	if err = s.access.RequireProject(ctx, tx, p, input.ProjectID); err != nil {
 		return createdProvider{}, err
 	}
 	created, err := s.CreateDraft(ctx, tx, Draft{Name: input.Name, ProjectID: input.ProjectID, Configuration: prepared, CreatedBy: p.UserID()})
@@ -944,7 +944,7 @@ type activatedProvider struct {
 	Generation release.Published
 }
 
-func (s *Catalogue) activateDraft(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (activatedProvider, error) {
+func (s *Server) activateDraft(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (activatedProvider, error) {
 	// The plugin a draft pinned may since have become unusable, such as
 	// an unconfined plugin in a deployment that no longer enables them.
 	prepared, err := connection.Prepare(ctx, s.ConnectionPolicy(tx), current.Connection.Document())
@@ -1020,10 +1020,8 @@ func (s *Catalogue) activateDraft(ctx context.Context, tx pgx.Tx, p access.Princ
 	if _, err = tx.Exec(ctx, "UPDATE olp.providers SET state='active',active_revision=$2,active_revision_id=$3,draft_dirty=false,etag=$4,updated_at=now() WHERE id=$1", current.ID, revision, revisionID, etag); err != nil {
 		return activatedProvider{}, err
 	}
-	if s.Activated != nil {
-		if err = s.Activated(ctx, tx, current.ID, p.UserID()); err != nil {
-			return activatedProvider{}, err
-		}
+	if err = s.activated(ctx, tx, current.ID, p.UserID()); err != nil {
+		return activatedProvider{}, err
 	}
 	generation, err := release.Publish(ctx, tx, p.UserID())
 	if err != nil {
@@ -1032,7 +1030,7 @@ func (s *Catalogue) activateDraft(ctx context.Context, tx pgx.Tx, p access.Princ
 	return activatedProvider{ETag: etag, Generation: generation}, nil
 }
 
-func (s *Catalogue) disable(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (activatedProvider, error) {
+func (s *Server) disable(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (activatedProvider, error) {
 	if current.State != "active" {
 		return activatedProvider{}, access.Fail(409, "invalid_state", "Only active connections can be disabled.")
 	}

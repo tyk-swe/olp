@@ -101,7 +101,7 @@ func (s *Server) startGrantEnrollment(r *http.Request, p access.Principal) (acce
 		return access.Reply{}, err
 	}
 	ctx := r.Context()
-	current, err := readProvider(ctx, s.Access.Pool, providerID)
+	current, err := readProvider(ctx, s.access.Pool, providerID)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -115,7 +115,7 @@ func (s *Server) startGrantEnrollment(r *http.Request, p access.Principal) (acce
 	if !document.Grant() {
 		return access.Reply{}, access.Fail(422, "grant_enrollment_unavailable", "This provider's profile authenticates without a grant.")
 	}
-	slots, err := loadSlots(ctx, s.Access.Pool, providerID)
+	slots, err := loadSlots(ctx, s.access.Pool, providerID)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -127,12 +127,12 @@ func (s *Server) startGrantEnrollment(r *http.Request, p access.Principal) (acce
 	if err != nil {
 		return access.Reply{}, err
 	}
-	enrollment, err := grants.Start(ctx, s.Plugins, grants.Enrollment{ProviderID: providerID, SlotID: slot.ID, ExpectedCredentialID: slot.CredentialID, PluginDigest: document.ProfileRevision, ProfileID: document.ProfileID, StartedBy: p.ID}, document.Options.PluginOptions, client)
+	enrollment, err := grants.Start(ctx, s.plugins, grants.Enrollment{ProviderID: providerID, SlotID: slot.ID, ExpectedCredentialID: slot.CredentialID, PluginDigest: document.ProfileRevision, ProfileID: document.ProfileID, StartedBy: p.ID}, document.Options.PluginOptions, client)
 	if err != nil {
 		return access.Reply{}, s.failedEnrollment(r, p.Actor(), providerID, err)
 	}
-	reply, err := access.Transact(s.Access, r, unchangedSince(ctx, current, "grant enrollment"), func(tx pgx.Tx, _ access.Principal, _ *record) (access.Reply, error) {
-		if err := enrollment.Save(ctx, tx, s.Access); err != nil {
+	reply, err := access.Transact(s.access, r, unchangedSince(ctx, current, "grant enrollment"), func(tx pgx.Tx, _ access.Principal, _ *record) (access.Reply, error) {
+		if err := enrollment.Save(ctx, tx, s.access); err != nil {
 			return access.Reply{}, err
 		}
 		return access.Reply{Status: 201, Body: started(enrollment)}, nil
@@ -173,7 +173,7 @@ func (s *Server) continueGrantEnrollment(r *http.Request, _ access.Principal) (a
 		return access.Reply{}, access.Invalid("input", "Paste the callback URL, or the code the upstream displayed, in at most 8192 bytes.")
 	}
 	ctx := r.Context()
-	tx, principal, err := s.Access.BeginMutation(r)
+	tx, principal, err := s.access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -185,7 +185,7 @@ func (s *Server) continueGrantEnrollment(r *http.Request, _ access.Principal) (a
 	if err := principal.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
-	enrollment, err := grants.Claim(ctx, tx, s.Access, providerID, enrollmentID, principal.ID)
+	enrollment, err := grants.Claim(ctx, tx, s.access, providerID, enrollmentID, principal.ID)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -204,7 +204,7 @@ func (s *Server) exchange(r *http.Request, current *record, enrollment grants.En
 	if err != nil {
 		return enrollmentCompletion{}, err
 	}
-	grant, err := grants.Exchange(r.Context(), s.Plugins, enrollment, input, current.Connection.Document().Options.PluginOptions, client)
+	grant, err := grants.Exchange(r.Context(), s.plugins, enrollment, input, current.Connection.Document().Options.PluginOptions, client)
 	if err != nil {
 		return enrollmentCompletion{}, err
 	}
@@ -214,7 +214,7 @@ func (s *Server) exchange(r *http.Request, current *record, enrollment grants.En
 func (s *Server) stage(r *http.Request, current *record, enrollment grants.Enrollment, grant abi.Grant) (enrollmentCompletion, error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), stageGrantTimeout)
 	defer cancel()
-	tx, principal, err := s.Access.BeginMutation(r.WithContext(ctx))
+	tx, principal, err := s.access.BeginMutation(r.WithContext(ctx))
 	if err != nil {
 		return enrollmentCompletion{}, err
 	}
@@ -234,7 +234,7 @@ func (s *Server) stage(r *http.Request, current *record, enrollment grants.Enrol
 	if cfg := locked.Connection.Document(); !cfg.Grant() || cfg.ProfileRevision != enrollment.PluginDigest || cfg.ProfileID != enrollment.ProfileID || change.Enrollment {
 		return enrollmentCompletion{}, stale
 	}
-	credentialID, version, err := grants.Store(ctx, tx, s.Access, current.ID, enrollment.PluginDigest, enrollment.ProfileID, grant)
+	credentialID, version, err := grants.Store(ctx, tx, s.access, current.ID, enrollment.PluginDigest, enrollment.ProfileID, grant)
 	if err != nil {
 		return enrollmentCompletion{}, err
 	}
@@ -287,12 +287,12 @@ func (s *Server) pollGrantEnrollment(r *http.Request, _ access.Principal) (acces
 		return access.Reply{}, err
 	}
 	ctx := r.Context()
-	tx, err := s.Access.Pool.Begin(ctx)
+	tx, err := s.access.Pool.Begin(ctx)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(ctx)
-	principal, err := s.Access.Reauthorize(r, tx)
+	principal, err := s.access.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -303,7 +303,7 @@ func (s *Server) pollGrantEnrollment(r *http.Request, _ access.Principal) (acces
 	if err := principal.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
-	enrollment, standing, err := grants.Watch(ctx, tx, s.Access, providerID, enrollmentID, principal.ID)
+	enrollment, standing, err := grants.Watch(ctx, tx, s.access, providerID, enrollmentID, principal.ID)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -322,7 +322,7 @@ func (s *Server) pollGrantEnrollment(r *http.Request, _ access.Principal) (acces
 	if err == nil {
 		return access.OK(enrollmentStatus{Status: grants.Completed, Completion: &staged}), nil
 	}
-	settled, settleErr := enrollment.Settle(ctx, s.Access.Pool, err)
+	settled, settleErr := enrollment.Settle(ctx, s.access.Pool, err)
 	if (settleErr != nil || settled.Status != grants.Pending) && !errors.Is(settleErr, pgx.ErrNoRows) {
 		if audited := s.auditFailedEnrollment(r, principal.Actor(), providerID); audited != nil {
 			return access.Reply{}, audited
@@ -339,7 +339,7 @@ func (s *Server) poll(r *http.Request, current *record, enrollment grants.Enroll
 	if err != nil {
 		return enrollmentCompletion{}, err
 	}
-	grant, err := grants.Poll(r.Context(), s.Plugins, enrollment, current.Connection.Document().Options.PluginOptions, client)
+	grant, err := grants.Poll(r.Context(), s.plugins, enrollment, current.Connection.Document().Options.PluginOptions, client)
 	if err != nil {
 		return enrollmentCompletion{}, err
 	}
@@ -366,7 +366,7 @@ func (s *Server) failedEnrollment(r *http.Request, actor access.Actor, providerI
 
 func (s *Server) auditFailedEnrollment(r *http.Request, actor access.Actor, providerID string) error {
 	ctx := context.WithoutCancel(r.Context())
-	tx, err := s.Access.Pool.Begin(ctx)
+	tx, err := s.access.Pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -382,7 +382,7 @@ func (s *Server) cancelGrantEnrollment(r *http.Request, _ access.Principal) (acc
 	if err != nil {
 		return access.Reply{}, err
 	}
-	reply, err := access.Transact(s.Access, r, func(tx pgx.Tx, principal access.Principal) (*record, error) {
+	reply, err := access.Transact(s.access, r, func(tx pgx.Tx, principal access.Principal) (*record, error) {
 		current, err := readProvider(r.Context(), tx, providerID)
 		if err != nil {
 			return nil, err

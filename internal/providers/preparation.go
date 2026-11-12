@@ -30,6 +30,6 @@ func profileField(code string) string {
 	return "configuration.profile_revision"
 }
 
-func (s *Catalogue) ConnectionPolicy(q access.Queryer) connection.Policy {
-	return connection.Policy{Egress: s.Egress, Plugins: installedPlugins{q, s.Unconfined}}
+func (s *Server) ConnectionPolicy(q access.Queryer) connection.Policy {
+	return connection.Policy{Egress: s.egress, Plugins: installedPlugins{q, s.unconfined}}
 }

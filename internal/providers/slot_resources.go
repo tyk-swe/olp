@@ -28,10 +28,10 @@ func (s *Server) getSlot(r *http.Request, p access.Principal) (access.Reply, err
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = visibleProvider(r.Context(), s.Access.Pool, p, providerID); err != nil {
+	if _, err = visibleProvider(r.Context(), s.access.Pool, p, providerID); err != nil {
 		return access.Reply{}, err
 	}
-	rows, err := loadSlots(r.Context(), s.Access.Pool, providerID)
+	rows, err := loadSlots(r.Context(), s.access.Pool, providerID)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -57,7 +57,7 @@ func (s *Server) deleteSlot(r *http.Request, _ access.Principal) (access.Reply, 
 		return access.Reply{}, err
 	}
 	input := map[string]string{"provider_id": providerID, "slot_id": slotID}
-	return access.Mutate(s.Access, r, input, changeable(r.Context(), providerID), func(tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
+	return access.Mutate(s.access, r, input, changeable(r.Context(), providerID), func(tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
 		rows, err := loadSlots(r.Context(), tx, providerID)
 		if err != nil {
 			return access.Reply{}, err
@@ -80,7 +80,7 @@ func (s *Server) deleteSlot(r *http.Request, _ access.Principal) (access.Reply, 
 	})
 }
 
-func (s *Catalogue) deleteDraftSlot(ctx context.Context, tx pgx.Tx, providerID, slotID string, slot *slotRow) (string, error) {
+func (s *Server) deleteDraftSlot(ctx context.Context, tx pgx.Tx, providerID, slotID string, slot *slotRow) (string, error) {
 	var err error
 	if slot.Default {
 		return "", access.Fail(409, "default_slot_required", "The default credential slot cannot be deleted.")

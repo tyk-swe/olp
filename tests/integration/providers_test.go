@@ -21,9 +21,9 @@ import (
 const providerEndpoint = `{"kind":"openai_compatible","auth_mode":"api_key","endpoint":"http://127.0.0.1:9/v1"}`
 
 type providerFixture struct {
-	pool      *pgxpool.Pool
-	catalogue *providers.Catalogue
-	owner     string
+	pool   *pgxpool.Pool
+	server *providers.Server
+	owner  string
 }
 
 type storedProvider struct {
@@ -37,8 +37,7 @@ func TestProviderDraftConfigurationWritesKeepEvidenceOnlyWhileItStillApplies(t *
 	t.Parallel()
 	pool, _ := harness.Database(t)
 	f := providerFixture{pool: pool, owner: uuid.NewString(),
-		catalogue: providers.NewCatalogue(nil, &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}},
-			nil, func(string) string { return "" }, providers.CatalogueOptions{})}
+		server: providers.New(providers.Deps{Egress: &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}})}
 	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.users (id,email,display_name,role,etag) VALUES ($1::uuid,$1::text || '@example.com','Provider fixture','owner',$1::uuid)`, f.owner); err != nil {
 		t.Fatal(err)
 	}
@@ -112,11 +111,11 @@ func (f providerFixture) certifiedDraft(t *testing.T) storedProvider {
 	t.Helper()
 	p := storedProvider{providerFixture: f, name: "provider-" + uuid.NewString(), slot: uuid.NewString()}
 	if err := p.transact(t, func(tx pgx.Tx) error {
-		prepared, err := connection.Prepare(t.Context(), f.catalogue.ConnectionPolicy(tx), providerConfiguration(t, providerEndpoint))
+		prepared, err := connection.Prepare(t.Context(), f.server.ConnectionPolicy(tx), providerConfiguration(t, providerEndpoint))
 		if err != nil {
 			return err
 		}
-		created, err := f.catalogue.CreateDraft(t.Context(), tx, providers.Draft{Name: p.name, Configuration: prepared, CreatedBy: f.owner})
+		created, err := f.server.CreateDraft(t.Context(), tx, providers.Draft{Name: p.name, Configuration: prepared, CreatedBy: f.owner})
 		if err != nil {
 			return err
 		}
@@ -124,7 +123,7 @@ func (f providerFixture) certifiedDraft(t *testing.T) storedProvider {
 		models := []providers.DraftModel{{UpstreamModel: "fixture-model", Enabled: true, Capabilities: []connection.Capability{
 			{Operation: "generation", Surface: "openai", Mode: "unary"}, {Operation: "generation", Surface: "openai", Mode: "streaming"}}}}
 		slots := []providers.DraftSlot{{ID: p.slot, Default: true, Name: "default", Enabled: true, Weight: 1}}
-		if err := f.catalogue.StageDraftInventory(t.Context(), tx, p.id, models, slots); err != nil {
+		if err := f.server.StageDraftInventory(t.Context(), tx, p.id, models, slots); err != nil {
 			return err
 		}
 		_, err = tx.Exec(t.Context(), `UPDATE olp.provider_models SET capabilities=(SELECT jsonb_agg(c || jsonb_build_object('source','certified','certified_at',now(),'credential_fingerprint','fixture'))
@@ -162,11 +161,11 @@ func (p storedProvider) transact(t *testing.T, fn func(pgx.Tx) error) error {
 func (p storedProvider) store(t *testing.T, name, configuration string) error {
 	t.Helper()
 	return p.transact(t, func(tx pgx.Tx) error {
-		prepared, err := connection.Prepare(t.Context(), p.catalogue.ConnectionPolicy(tx), providerConfiguration(t, configuration))
+		prepared, err := connection.Prepare(t.Context(), p.server.ConnectionPolicy(tx), providerConfiguration(t, configuration))
 		if err != nil {
 			return err
 		}
-		return p.catalogue.StoreDraftConfiguration(t.Context(), tx, p.id, name, prepared)
+		return p.server.StoreDraftConfiguration(t.Context(), tx, p.id, name, prepared)
 	})
 }
 

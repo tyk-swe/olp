@@ -48,11 +48,8 @@ func authorizeCredential(p access.Principal, source credentialSource) error {
 	return nil
 }
 
-func (s *Catalogue) resolveReference(ctx context.Context, reference secretstore.Reference) ([]byte, error) {
-	if s.ExternalSecrets == nil {
-		return nil, access.Fail(422, "external_secret_unavailable", "The external credential store could not resolve the pinned version.")
-	}
-	value, err := s.ExternalSecrets.Resolve(ctx, reference)
+func (s *Server) resolveReference(ctx context.Context, reference secretstore.Reference) ([]byte, error) {
+	value, err := s.external.Resolve(ctx, reference)
 	if err != nil {
 		return nil, access.Fail(422, "external_secret_unavailable", "The external credential store could not resolve the pinned version.")
 	}
@@ -63,21 +60,21 @@ func (s *Catalogue) resolveReference(ctx context.Context, reference secretstore.
 	return value, nil
 }
 
-func (s *Catalogue) material(ctx context.Context, source credentialSource) ([]byte, error) {
+func (s *Server) material(ctx context.Context, source credentialSource) ([]byte, error) {
 	if reference, external := source.(externalCredential); external {
 		return s.resolveReference(ctx, secretstore.Reference(reference))
 	}
 	return []byte(source.(pastedCredential)), nil
 }
 
-func (s *Catalogue) storeCredential(ctx context.Context, tx pgx.Tx, providerID string, source credentialSource) (string, int, error) {
+func (s *Server) storeCredential(ctx context.Context, tx pgx.Tx, providerID string, source credentialSource) (string, int, error) {
 	if reference, external := source.(externalCredential); external {
 		return s.StoreExternalCredential(ctx, tx, providerID, secretstore.Reference(reference))
 	}
 	return s.StoreCredential(ctx, tx, providerID, string(source.(pastedCredential)))
 }
 
-func (s *Catalogue) StoreExternalCredential(ctx context.Context, tx pgx.Tx, providerID string, reference secretstore.Reference) (string, int, error) {
+func (s *Server) StoreExternalCredential(ctx context.Context, tx pgx.Tx, providerID string, reference secretstore.Reference) (string, int, error) {
 	data, err := json.Marshal(reference)
 	if err != nil {
 		return "", 0, err
@@ -92,7 +89,7 @@ func insertCredentialVersion(ctx context.Context, tx pgx.Tx, providerID string, 
 	return id, version, err
 }
 
-func (s *Catalogue) readCredential(ctx context.Context, q access.Queryer, id string) ([]byte, error) {
+func (s *Server) readCredential(ctx context.Context, q access.Queryer, id string) ([]byte, error) {
 	var referenceJSON []byte
 	if err := q.QueryRow(ctx, "SELECT external_reference FROM olp.provider_credentials WHERE id=$1", id).Scan(&referenceJSON); err != nil {
 		return nil, err
@@ -104,5 +101,5 @@ func (s *Catalogue) readCredential(ctx context.Context, q access.Queryer, id str
 		}
 		return s.resolveReference(ctx, reference)
 	}
-	return s.Access.Keys.Read(ctx, q, s.Access.Installation, id, secrets.ProviderCredential)
+	return s.access.Keys.Read(ctx, q, s.access.Installation, id, secrets.ProviderCredential)
 }

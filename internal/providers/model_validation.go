@@ -68,7 +68,7 @@ func ValidModelName(field, value string) error {
 // The caller's project scope is decided first, so a provider outside it answers
 // 404 before its precondition or credential is consulted.
 func (s *Server) prepare(r *http.Request, p access.Principal, id string) (*record, probe.Target, error) {
-	tx, err := s.Access.Pool.Begin(r.Context())
+	tx, err := s.access.Pool.Begin(r.Context())
 	if err != nil {
 		return nil, probe.Target{}, err
 	}
@@ -128,7 +128,7 @@ func (s *Server) probe(r *http.Request, p access.Principal) (access.Reply, error
 // caller's authority and project reach are decided again under it before
 // anything is written.
 func (s *Server) recordProbe(r *http.Request, action, id string, at time.Time, succeeded bool, detail string) error {
-	_, err := access.Transact(s.Access, r, changeable(r.Context(), id), func(tx pgx.Tx, p access.Principal, _ *record) (access.Reply, error) {
+	_, err := access.Transact(s.access, r, changeable(r.Context(), id), func(tx pgx.Tx, p access.Principal, _ *record) (access.Reply, error) {
 		if err := storeProbe(r.Context(), tx, id, at, succeeded, detail); err != nil {
 			return access.Reply{}, err
 		}
@@ -205,7 +205,7 @@ func (s *Server) discover(r *http.Request, p access.Principal) (access.Reply, er
 		}
 		models = append(models, listed...)
 	}
-	return access.Transact(s.Access, r, unchangedSince(r.Context(), current, "discovery"), func(tx pgx.Tx, p access.Principal, locked *record) (access.Reply, error) {
+	return access.Transact(s.access, r, unchangedSince(r.Context(), current, "discovery"), func(tx pgx.Tx, p access.Principal, locked *record) (access.Reply, error) {
 		if err := s.storeDiscoveredModels(r.Context(), tx, locked, models, upstream, at); err != nil {
 			return access.Reply{}, err
 		}
@@ -225,14 +225,14 @@ func (s *Server) models(r *http.Request, p access.Principal) (access.Reply, erro
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = visibleProvider(r.Context(), s.Access.Pool, p, id); err != nil {
+	if _, err = visibleProvider(r.Context(), s.access.Pool, p, id); err != nil {
 		return access.Reply{}, err
 	}
-	d, err := s.detail(r.Context(), s.Access.Pool, id)
+	d, err := s.detail(r.Context(), s.access.Pool, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	models, err := queryModels(r.Context(), s.Access.Pool, "SELECT "+modelColumns+" FROM olp.provider_models WHERE provider_id=$1 AND id<$2 ORDER BY id DESC LIMIT $3", id, page.Before, page.Limit+1)
+	models, err := queryModels(r.Context(), s.access.Pool, "SELECT "+modelColumns+" FROM olp.provider_models WHERE provider_id=$1 AND id<$2 ORDER BY id DESC LIMIT $3", id, page.Before, page.Limit+1)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -272,7 +272,7 @@ func (s *Server) setModel(r *http.Request, _ access.Principal) (access.Reply, er
 	if err = access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Transact(s.Access, r, changeable(r.Context(), id), func(tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
+	return access.Transact(s.access, r, changeable(r.Context(), id), func(tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
 		if err := access.Match(r, current.ETag); err != nil {
 			return access.Reply{}, err
 		}
@@ -287,7 +287,7 @@ func (s *Server) setModel(r *http.Request, _ access.Principal) (access.Reply, er
 }
 
 func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, error) {
-	a := s.Access
+	a := s.access
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -336,7 +336,7 @@ func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, err
 	case certified < len(m.Capabilities):
 		status = "partial"
 	}
-	reply, err := access.Transact(s.Access, r, unchangedSince(r.Context(), current, "certification"), func(tx pgx.Tx, p access.Principal, _ *record) (access.Reply, error) {
+	reply, err := access.Transact(s.access, r, unchangedSince(r.Context(), current, "certification"), func(tx pgx.Tx, p access.Principal, _ *record) (access.Reply, error) {
 		etag, err := s.storeCertification(r.Context(), tx, current, m.withCapabilities(capabilities), defaultSlot, certified, at)
 		if err != nil {
 			return access.Reply{}, err
@@ -352,7 +352,7 @@ func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, err
 	return reply, err
 }
 
-func (s *Catalogue) setDraftModel(ctx context.Context, tx pgx.Tx, current *record, modelID string, input setModelRequest) error {
+func (s *Server) setDraftModel(ctx context.Context, tx pgx.Tx, current *record, modelID string, input setModelRequest) error {
 	m, err := lockModel(ctx, tx, current.ID, modelID)
 	if err != nil {
 		return err
@@ -389,7 +389,7 @@ func (s *Catalogue) setDraftModel(ctx context.Context, tx pgx.Tx, current *recor
 	return nil
 }
 
-func (s *Catalogue) storeDiscoveredModels(ctx context.Context, tx pgx.Tx, current *record, models []probe.DiscoveredModel, upstream bool, at time.Time) error {
+func (s *Server) storeDiscoveredModels(ctx context.Context, tx pgx.Tx, current *record, models []probe.DiscoveredModel, upstream bool, at time.Time) error {
 	document := current.Connection.Document()
 	metadata := maps.Clone(document.Options.Models)
 	for _, m := range models {
@@ -459,7 +459,7 @@ func countCertified(results []certifyResult) int {
 	return count
 }
 
-func (s *Catalogue) storeCertification(ctx context.Context, tx pgx.Tx, current *record, model storedModel, defaultSlot slotRow, certified int, at time.Time) (string, error) {
+func (s *Server) storeCertification(ctx context.Context, tx pgx.Tx, current *record, model storedModel, defaultSlot slotRow, certified int, at time.Time) (string, error) {
 	encoded, err := json.Marshal(model.Capabilities)
 	if err != nil {
 		return "", err
@@ -490,7 +490,7 @@ func storeProbe(ctx context.Context, tx pgx.Tx, id string, at time.Time, succeed
 }
 
 // credentialFor prefers the enabled default slot, then another enabled slot.
-func (s *Catalogue) credentialFor(ctx context.Context, tx pgx.Tx, p *record) ([]byte, *credentialState, error) {
+func (s *Server) credentialFor(ctx context.Context, tx pgx.Tx, p *record) ([]byte, *credentialState, error) {
 	slots, err := loadSlots(ctx, tx, p.ID)
 	if err != nil {
 		return nil, nil, err

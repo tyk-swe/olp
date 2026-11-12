@@ -62,11 +62,13 @@ the document digest is computed over the rendered canonical document. Every
 credential binding must be claimed by a section reference, and unclaimed bindings
 are refused before any planner runs.
 
-`providers.Catalogue` owns provider draft, slot, credential, certification and
-activation changes for both HTTP and promotion. `providers.Enrollments` owns
-provider grant claims, remote exchanges and completion checks. Network steps run
-outside mutation locks, with authority and slot identity checked again before
-commit. Personal grant enrollment remains a separate protocol.
+`providers.Server` owns provider draft, slot, credential, certification,
+activation and grant enrollment changes. Promotion writes drafts through the
+narrower `provider.Drafts` interface it declares. The stored configuration
+document and the kind registry live in `providers/connection`, upstream probes
+in `providers/probe`, and code accounts in `providers/codeaccounts`. Network
+steps run outside mutation locks, with authority and slot identity checked again
+before commit. Personal grant enrollment remains a separate protocol.
 
 Publication keeps two commands. `Publish` validates current references even when
 the draft digest already exists. Promotion uses `EnsureRetainedRevision` to reuse

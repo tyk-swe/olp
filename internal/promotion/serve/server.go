@@ -18,7 +18,6 @@ import (
 	"github.com/tyk-swe/olp/internal/promotion/mcpserver"
 	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
-	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/sinks"
 	"github.com/tyk-swe/olp/internal/usage/pricebook"
 )
@@ -32,7 +31,7 @@ type Deps struct {
 	Identity   *http.Client
 	Costs      project.Costs
 	Normalizer pricebook.Normalizer
-	Catalogue  *providers.Catalogue
+	Drafts     provider.Drafts
 }
 
 type server struct {
@@ -74,7 +73,7 @@ func Register(mux *http.ServeMux, deps Deps) {
 		costs:        deps.Costs,
 		normalizer:   deps.Normalizer,
 		identity:     identity.Deps{Access: deps.Access, Identity: deps.Identity},
-		providers:    provider.Deps{Egress: deps.Egress, Unconfined: deps.Unconfined, Keys: keys, Installation: installation, Catalogue: deps.Catalogue},
+		providers:    provider.Deps{Egress: deps.Egress, Unconfined: deps.Unconfined, Keys: keys, Installation: installation, Drafts: deps.Drafts},
 		sinks:        sinks.Credentials{Keys: keys, Installation: installation},
 		vault:        guardrail.Vault{Keys: keys, Installation: installation},
 		servers:      mcpserver.Deps{Keys: mcpserver.Keys{Ring: keys, Installation: installation}, Egress: deps.Egress, Unconfined: deps.Unconfined},

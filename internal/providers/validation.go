@@ -82,7 +82,7 @@ func (row slotRow) certificationTime(cfg connection.Configuration, models []stor
 	return at
 }
 
-func (s *Catalogue) validateModelAccess(ctx context.Context, target probe.Target, row slotRow, models []storedModel) error {
+func (s *Server) validateModelAccess(ctx context.Context, target probe.Target, row slotRow, models []storedModel) error {
 	ctx, cancel := probe.Budget(ctx)
 	defer cancel()
 	checked := 0

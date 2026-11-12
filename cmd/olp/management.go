@@ -9,6 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/guardrails/attachment"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
+	"github.com/tyk-swe/olp/internal/secretstore"
 	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/usage/completeness"
 	"github.com/tyk-swe/olp/internal/usage/pricebook"
@@ -147,7 +148,8 @@ func (m Management) Register(mux *http.ServeMux) {
 		routeServer.Supply = gateway.NewAdmission(m.Limits.Limiter, m.Limits.Fleet, nil, m.Log)
 		routeServer.Fleet = m.Limits.Fleet
 	}
-	catalogue := providers.NewCatalogue(m.Access, m.Egress, m.PluginHost, m.Getenv, providers.CatalogueOptions{
+	providerServer := providers.New(providers.Deps{
+		Access: m.Access, Egress: m.Egress, Signer: m.PluginHost, ExternalSecrets: secretstore.New(*m.Egress, m.Getenv),
 		Unconfined: m.Unconfined, Log: m.Log, Plugins: m.PluginHost, Catalog: m.Catalog,
 		Activated: routeServer.Activated,
 		Quotas: func() providers.QuotaSource {
@@ -157,7 +159,7 @@ func (m Management) Register(mux *http.ServeMux) {
 			return m.Limits.Fleet
 		}(),
 	})
-	providers.New(catalogue).Register(mux)
+	providerServer.Register(mux)
 	codeaccounts.NewAPI(m.Access).Register(mux)
 	routeServer.Register(mux)
 	(&gateway.Playground{Access: m.Access, Gateway: m.Gateway}).Register(mux)
@@ -189,7 +191,7 @@ func (m Management) Register(mux *http.ServeMux) {
 		Identity:   m.IdentityClient,
 		Costs:      project.CostsOf(m.limiter()),
 		Normalizer: pricebook.NewNormalizer(vendors.Kind),
-		Catalogue:  catalogue,
+		Drafts:     providerServer,
 	})
 }
 

@@ -2,10 +2,12 @@ package provider
 
 import (
 	"cmp"
+	"context"
 	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/management/contract"
@@ -14,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
 const (
@@ -22,12 +25,25 @@ const (
 	maxModels    = 10000
 )
 
+type Drafts interface {
+	ConnectionPolicy(q access.Queryer) connection.Policy
+	CreateDraft(ctx context.Context, tx pgx.Tx, draft providers.Draft) (providers.CreatedDraft, error)
+	StoreDraftConfiguration(ctx context.Context, tx pgx.Tx, id, name string, prepared connection.Prepared) error
+	StageDraftInventory(ctx context.Context, tx pgx.Tx, providerID string, models []providers.DraftModel, slots []providers.DraftSlot) error
+	BindDraftCredential(ctx context.Context, tx pgx.Tx, providerID, slotID, credentialID string) error
+	CredentialEquals(ctx context.Context, q access.Queryer, credentialID, secret string) (bool, error)
+	ExternalCredentialEquals(ctx context.Context, q access.Queryer, credentialID string, reference secretstore.Reference) (bool, error)
+	StoreCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, int, error)
+	StoreExternalCredential(ctx context.Context, tx pgx.Tx, providerID string, reference secretstore.Reference) (string, int, error)
+	StoreNetworkCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error)
+}
+
 type Deps struct {
 	Egress       *egress.Policy
 	Unconfined   *plugins.Unconfined
 	Keys         *secrets.KeyRing
 	Installation string
-	Catalogue    *providers.Catalogue
+	Drafts       Drafts
 }
 
 type Entry struct {

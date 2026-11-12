@@ -19,7 +19,6 @@ import (
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/providers/probe"
 	"github.com/tyk-swe/olp/internal/release"
-	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
 // QuotaSource reports the shared quota state a provider connection and its
@@ -32,19 +31,10 @@ type QuotaSource interface {
 	Cooldown(ctx context.Context, scope string, d time.Duration) error
 }
 
-type CatalogueOptions struct {
-	ExternalSecrets release.ExternalSecrets
-	Unconfined      *plugins.Unconfined
-	Quotas          QuotaSource
-	Plugins         *plugins.Host
-	Catalog         *catalog.Signed
-	Activated       func(context.Context, pgx.Tx, string, string) error
-	Log             *slog.Logger
-}
-
-type Catalogue struct {
+type Deps struct {
 	Access          *access.Server
 	Egress          *egress.Policy
+	Signer          connectors.Signer
 	ExternalSecrets release.ExternalSecrets
 	Unconfined      *plugins.Unconfined
 	Quotas          QuotaSource
@@ -52,25 +42,27 @@ type Catalogue struct {
 	Catalog         *catalog.Signed
 	Activated       func(context.Context, pgx.Tx, string, string) error
 	Log             *slog.Logger
-	prober          *probe.Prober
 }
 
 type Server struct {
-	*Catalogue
+	access     *access.Server
+	egress     *egress.Policy
+	external   release.ExternalSecrets
+	unconfined *plugins.Unconfined
+	quota      QuotaSource
+	plugins    *plugins.Host
+	catalog    *catalog.Signed
+	activated  func(context.Context, pgx.Tx, string, string) error
+	log        *slog.Logger
+	prober     *probe.Prober
 }
 
-func NewCatalogue(a *access.Server, policy *egress.Policy, signer connectors.Signer, getenv func(string) string, options CatalogueOptions) *Catalogue {
-	external := options.ExternalSecrets
-	if external == nil {
-		external = secretstore.New(*policy, getenv)
+func New(deps Deps) *Server {
+	return &Server{
+		access: deps.Access, egress: deps.Egress, external: deps.ExternalSecrets, unconfined: deps.Unconfined,
+		quota: deps.Quotas, plugins: deps.Plugins, catalog: deps.Catalog, activated: deps.Activated, log: deps.Log,
+		prober: probe.New(deps.Egress, deps.Signer, deps.Plugins, networkSecrets{server: deps.Access}),
 	}
-	return &Catalogue{Access: a, Egress: policy, ExternalSecrets: external, Unconfined: options.Unconfined, Quotas: options.Quotas,
-		Plugins: options.Plugins, Catalog: options.Catalog, Activated: options.Activated, Log: options.Log,
-		prober: probe.New(policy, signer, options.Plugins, networkSecrets{server: a})}
-}
-
-func New(catalogue *Catalogue) *Server {
-	return &Server{Catalogue: catalogue}
 }
 
 type record struct {
@@ -200,7 +192,7 @@ const detailQuery = "SELECT " + recordColumns + ",pr.name,u.email," +
 	" LEFT JOIN olp.provider_revisions r ON r.id=p.active_revision_id" +
 	" LEFT JOIN olp.provider_credentials rc ON rc.provider_id=p.id AND rc.version=r.credential_version"
 
-func (s *Catalogue) scanDetail(row pgx.Row) (*detail, error) {
+func (s *Server) scanDetail(row pgx.Row) (*detail, error) {
 	var p record
 	var configuration, plugin []byte
 	var d detail
@@ -226,11 +218,11 @@ func (s *Catalogue) scanDetail(row pgx.Row) (*detail, error) {
 	d.DraftCredentialID, d.DraftCredentialVersion = draft.ID, draft.Version
 	d.LastProbeAt, d.LastProbeStatus, d.LastProbeDetail = p.LastProbeAt, p.LastProbeStatus, p.LastProbeDetail
 	d.CreatedAt, d.UpdatedAt = p.CreatedAt.UTC(), p.UpdatedAt.UTC()
-	d.ConnectorReady = p.Connection.Transport().Validate(s.Egress) == nil && (!document.CredentialRequired() || usableCredential)
+	d.ConnectorReady = p.Connection.Transport().Validate(s.egress) == nil && (!document.CredentialRequired() || usableCredential)
 	return &d, nil
 }
 
-func (s *Catalogue) detail(ctx context.Context, q access.Queryer, id string) (*detail, error) {
+func (s *Server) detail(ctx context.Context, q access.Queryer, id string) (*detail, error) {
 	return s.scanDetail(q.QueryRow(ctx, detailQuery+" WHERE p.id=$1", id))
 }
 

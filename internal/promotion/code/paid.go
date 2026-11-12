@@ -184,7 +184,7 @@ func paidRoute(policy routes.CodeRouteInput) codemode.Route {
 }
 
 func preparedPaid(ctx context.Context, q access.Queryer, configuration connection.Configuration, deps provider.Deps) (connection.Configuration, error) {
-	prepared, err := connection.Prepare(ctx, deps.Catalogue.ConnectionPolicy(q), configuration)
+	prepared, err := connection.Prepare(ctx, deps.Drafts.ConnectionPolicy(q), configuration)
 	if _, refused := provider.Refusal(err); refused {
 		return configuration, nil
 	}
