@@ -138,8 +138,8 @@ migration:
   databaseSecretName: ""
   databaseSecretKey: ""
   # Existing runtime login granted schema and table access after every
-  # migration. Required when databaseSecretName differs from
-  # config.databaseSecretName, so each pre-install and pre-upgrade hook
+  # migration. Required when the effective Secret name or key differs from
+  # the runtime database reference, so each pre-install and pre-upgrade hook
   # reapplies grants for tables it creates.
   runtimeRole: ""
   backoffLimit: 3

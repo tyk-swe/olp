@@ -317,7 +317,10 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		s.finish(x, nil, e.Status)
 		writeSurfaceError(w, e, "openai")
 	}
-	permit := s.acquirePermit(r.Context())
+	permit := admission.PermitFromContext(r.Context())
+	if permit == nil {
+		permit = s.admission.AcquirePermit()
+	}
 	if permit == nil {
 		fail(overloaded)
 		return
@@ -340,6 +343,10 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 	s.bindAuthority(x, authority)
 	if x.preferences, x.priority, e = routingControls(r, authority.Policy); e != nil {
 		fail(e)
+		return
+	}
+	if !permit.Await(r.Context(), admission.ClassOf(x.priority), time.Time{}) {
+		fail(overloaded)
 		return
 	}
 	if x.attribution, e = parseAttributionValues(r.Header.Values(attribution.Header), authority); e != nil {

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 )
 
@@ -89,7 +90,7 @@ func webhookSecretURL(secret []byte, origin *url.URL) (*url.URL, error) {
 		(hook.Scheme != "https" && hook.Scheme != "http") {
 		return nil, errors.New("webhook_url is not an https URL")
 	}
-	if hook.Scheme+"://"+strings.ToLower(hook.Host) != origin.Scheme+"://"+strings.ToLower(origin.Host) {
+	if connectors.Origin(hook) != connectors.Origin(origin) {
 		return nil, errors.New("webhook_url must share the destination origin")
 	}
 	return hook, nil

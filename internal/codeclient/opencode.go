@@ -96,12 +96,6 @@ func openCodeConfiguration(route codemode.Route, adapters []codemode.Adapter, of
 			continue
 		}
 		provider := "olp-paid-" + string(protocol)
-		suffix := func() string {
-			if protocol == codemode.ProtocolMessages {
-				return ""
-			}
-			return "/v1"
-		}()
 		sdk := openCodeSDK(protocol)
 		definitions := maps.Collect(func(yield func(string, modelDefinition) bool) {
 			for _, model := range models {
@@ -111,7 +105,7 @@ func openCodeConfiguration(route codemode.Route, adapters []codemode.Adapter, of
 			}
 		})
 		document.EnabledProviders = append(document.EnabledProviders, provider)
-		document.Provider[provider] = settings{Options: options{BaseURL: baseURL + suffix, APIKey: "{env:OLP_API_KEY}"}, Whitelist: models, Models: definitions}
+		document.Provider[provider] = settings{Options: options{BaseURL: baseURL + "/v1", APIKey: "{env:OLP_API_KEY}"}, Whitelist: models, Models: definitions}
 	}
 	var b bytes.Buffer
 	encoder := json.NewEncoder(&b)

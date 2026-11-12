@@ -105,6 +105,7 @@ func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Clie
 	wg.Go(func() { runDebitReconciliation(ctx, pool, store, syncer, log) })
 	wg.Go(func() { recoverWorkflowModels(ctx, store, log) })
 	wg.Go(func() { runMaintenance(ctx, pool, log) })
+	wg.Go(func() { completeness.RunEpochDetection(ctx, pool, log) })
 	if limiter == nil {
 		return wg.Wait
 	}
@@ -115,7 +116,6 @@ func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Clie
 			log.Error("request metadata consumer stopped", "error", err)
 		}
 	})
-	wg.Go(func() { completeness.RunEpochDetection(ctx, pool, log) })
 	wg.Go(func() {
 		connect := func(context.Context) (ledger.Installer, error) { return limiter, nil }
 		ledger.Worker{Pool: pool, Region: region, Connect: connect, Checkpoint: costCheckpoint(pool, region), Log: log}.Run(ctx)

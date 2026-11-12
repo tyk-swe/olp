@@ -28,6 +28,7 @@ import (
 	limitdebits "github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/notifications"
+	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedworker"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -807,6 +808,10 @@ func TestFocusExportsHonorDefaultAndExplicitStartDates(t *testing.T) {
 	}
 	uploads := make(chan string, 32)
 	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/failure/") {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		if strings.HasSuffix(r.URL.Path, "/manifest.json") {
 			var manifest struct {
 				ChargeDate       string                  `json:"charge_date"`
@@ -879,6 +884,41 @@ func TestFocusExportsHonorDefaultAndExplicitStartDates(t *testing.T) {
 	if delivered != 4 {
 		t.Errorf("delivered %d FOCUS datasets, want 4", delivered)
 	}
+	failedSink := uuid.NewString()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.export_sinks(id,name,type,destination,streams,format,settings,credential_id,enabled,etag,created_by,created_at) VALUES($1,'failure','s3',$2,ARRAY['focus'],'csv_gzip','{"cost_basis":"cost"}',$3,true,$1,$4,$5)`, failedSink, receiver.URL+"/failure", credential, fixture.ownerID, today.AddDate(0, 0, -1)); err != nil {
+		t.Fatal(err)
+	}
+	runCtx, stop := context.WithCancel(t.Context())
+	defer stop()
+	var deliveryErr error
+	workerhealth.Run(runCtx, workerhealth.Loop{Task: workerhealth.TaskFocusExport, Health: pool, Log: worker.Log, Budget: time.Second * 10, Interval: time.Hour, Pass: func(ctx context.Context) (bool, error) {
+		progress, err := worker.Pass(ctx)
+		deliveryErr = err
+		stop()
+		return progress, err
+	}})
+	var sendErr *destination.SendError
+	if !errors.As(deliveryErr, &sendErr) {
+		t.Errorf("failed destination lost delivery error: %v", deliveryErr)
+	}
+	var failures, successes int64
+	if err := pool.QueryRow(t.Context(), `SELECT failures_total,successes_total FROM olp.worker_task_health WHERE task='focus_export'`).Scan(&failures, &successes); err != nil {
+		t.Fatal(err)
+	}
+	if failures != 1 || successes != 0 {
+		t.Errorf("failed export checkpoint failures=%d successes=%d", failures, successes)
+	}
+	var attempts, failed int
+	var retryScheduled bool
+	var code string
+	if err := pool.QueryRow(t.Context(), `SELECT attempts,failures,next_attempt_at>now(),last_error_code FROM olp.focus_datasets WHERE sink_id=$1`, failedSink).Scan(&attempts, &failed, &retryScheduled, &code); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 1 || failed != 1 || !retryScheduled || code == "" {
+		t.Errorf("lost failure/retry state attempts=%d failures=%d scheduled=%t code=%s", attempts, failed, retryScheduled, code)
+	}
+	t.Logf("failed upload checkpoint failures=%d successes=%d, dataset attempts=%d failures=%d retry_scheduled=%t", failures, successes, attempts, failed, retryScheduled)
+
 }
 
 func TestBlockingStreamReadDoesNotStallOtherCommands(t *testing.T) {
@@ -990,6 +1030,125 @@ func TestMCPManualSettlementPreservesPricingState(t *testing.T) {
 				t.Fatalf("pricing=%s: unpriced=%d uncharged=%d, want %d", pricing, attempts, uncharged, expected)
 			}
 		})
+	}
+}
+
+func TestUsagePersistsPinnedRateCardsAtLaterObservation(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	fixture := newUsageFixture(t, pool)
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.api_keys SET project_id=NULL WHERE id=$1`, fixture.keyID); err != nil {
+		t.Fatal(err)
+	}
+	providerRevision := uuid.NewString()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.provider_revisions(id,provider_id,revision,name,configuration,models,slots,source_etag,activated_by)
+		VALUES($1,$2,1,'Rate card fixture','{}','[]','[]',$1,$3)`, providerRevision, fixture.providerID, fixture.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	card, oldRevision, newRevision := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.rate_cards(id,project_id,created_by) VALUES($1,$2,$3)`, card, fixture.projectID, fixture.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.rate_card_revisions(id,rate_card_id,revision,markup,effective_at,created_by)
+		VALUES($1,$2,1,2,$3,$4),($5,$2,2,3,$6,$4)`, oldRevision, card, fixture.observedAt.Add(-time.Minute), fixture.ownerID, newRevision, fixture.observedAt.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name, policy, revision, charge string
+	}{
+		{"old_pin", fmt.Sprintf(`{"rate_card_pinned":true,"rate_card_revision_id":%q}`, oldRevision), oldRevision, "0.0004"},
+		{"pinned_absence", `{"rate_card_pinned":true,"rate_card_revision_id":null}`, "", "0.0002"},
+		{"stale_unpinned", `{"rate_card_pinned":false,"rate_card_revision_id":null}`, newRevision, "0.0006"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			attempt := fixture.attempt(1)
+			input, output := int64(100), int64(50)
+			attempt.Usage.InputTokens, attempt.Usage.OutputTokens = &input, &output
+			policy := json.RawMessage(test.policy)
+			attempt.Routing = &usage.Routing{ProviderRevisionID: providerRevision, Policy: &policy}
+			event := fixture.event(attempt)
+			event.RequestCompletedAt = fixture.observedAt.Add(2 * time.Second)
+			event.Attempts[0].CompletedAt = event.RequestCompletedAt
+			event.ObservedAt = event.RequestCompletedAt
+			accepted, err := usage.NewAccountingEvent(event)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := ingest.PersistEvent(t.Context(), pool, accepted)
+			if err != nil || result.Outcome != ingest.PersistOutcomePersisted {
+				t.Fatalf("persist rate-card pin: outcome=%v error=%v", result.Outcome, err)
+			}
+			var revision string
+			var costMatches, chargeMatches bool
+			if err := pool.QueryRow(t.Context(), `SELECT COALESCE(rate_card_revision_id::text,''),estimated_cost=0.0002,charge=$2::numeric
+				FROM olp.attempt_usage_facts WHERE attempt_id=$1`, attempt.ID, test.charge).Scan(&revision, &costMatches, &chargeMatches); err != nil {
+				t.Fatal(err)
+			}
+			if revision != test.revision || !costMatches || !chargeMatches {
+				t.Fatalf("persisted revision=%q cost matches=%t charge matches=%t; want revision=%q charge=%s", revision, costMatches, chargeMatches, test.revision, test.charge)
+			}
+		})
+	}
+}
+
+func TestFocusLateCommitmentUsageDirtiesLaterObservedDay(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	fixture := newUsageFixture(t, pool)
+	day := fixture.observedAt.UTC().Truncate(24 * time.Hour).Add(-72 * time.Hour)
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.pricing_revisions SET effective_at=$1`, day.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.export_sinks (id,name,type,destination,streams,format,etag,created_by) VALUES($1,'focus-midnight','s3','s3://fixture/focus',ARRAY['focus'],'csv_gzip',$1,$2)`, uuid.NewString(), fixture.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.commitment_schedules (provider_id,provider_revision_id,provider_name,provider_kind,amount,currency,period,effective_at) VALUES($1,$2,'fixture','openai_compatible',10,'USD','day',$3)`, fixture.providerID, uuid.NewString(), day); err != nil {
+		t.Fatal(err)
+	}
+	persist := func(started, observed time.Time) string {
+		t.Helper()
+		f := fixture
+		f.observedAt = observed
+		attempt := f.attempt(1)
+		attempt.StartedAt = started
+		event := f.event(attempt)
+		event.RequestStartedAt = started
+		accepted, err := usage.NewAccountingEvent(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := ingest.PersistEvent(t.Context(), pool, accepted)
+		if err != nil || result.Outcome != ingest.PersistOutcomePersisted {
+			t.Fatalf("persist outcome=%v error=%v", result.Outcome, err)
+		}
+		return attempt.ID
+	}
+	first := persist(day.Add(23*time.Hour+50*time.Minute), day.Add(24*time.Hour+10*time.Minute))
+	var initial, revised string
+	var before, after int64
+	read := func(amount *string, version *int64) {
+		t.Helper()
+		if err := pool.QueryRow(t.Context(), `SELECT a.allocated_cost::text,d.version FROM olp.commitment_allocations a JOIN olp.focus_dirty_days d ON d.day=(a.observed_at AT TIME ZONE 'UTC')::date WHERE a.attempt_id=$1`, first).Scan(amount, version); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read(&initial, &before)
+	persist(day.Add(12*time.Hour), day.Add(12*time.Hour+time.Minute))
+	read(&revised, &after)
+	if initial == revised {
+		t.Fatalf("late usage did not change allocation %s", initial)
+	}
+	if after <= before {
+		t.Fatalf("allocation changed %s to %s but observed-day dirty version stayed %d -> %d", initial, revised, before, after)
+	}
+	var updated string
+	var updateVersion int64
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.commitment_usage SET weight=weight*2 WHERE attempt_id=$1`, first); err != nil {
+		t.Fatal(err)
+	}
+	read(&updated, &updateVersion)
+	if updated == revised || updateVersion <= after {
+		t.Fatalf("weight update allocation %s -> %s, dirty version %d -> %d", revised, updated, after, updateVersion)
 	}
 }
 
