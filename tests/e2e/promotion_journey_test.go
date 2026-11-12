@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"maps"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -13,6 +16,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/tests/harness"
 	"github.com/tyk-swe/olp/tests/harness/vendor"
 )
 
@@ -30,6 +34,7 @@ func testPromotionRoundTrip(t *testing.T, parent *service, owner *caller, fixtur
 
 	planned := s.want(operator, "POST", "/api/v1/configuration/plan", request, nil, http.StatusOK)
 	assertSettledPlan(t, planned)
+	testPromotionCLIReview(t, s, operator, document)
 	if planned["digest"] != exported["digest"] {
 		t.Errorf("plan digest %v differs from export digest %v", planned["digest"], exported["digest"])
 	}
@@ -257,4 +262,36 @@ func items(value any) []map[string]any {
 func text(entry map[string]any, field string) string {
 	value, _ := entry[field].(string)
 	return value
+}
+
+func testPromotionCLIReview(t *testing.T, s *service, operator *caller, document map[string]any) {
+	t.Helper()
+	directory := t.TempDir()
+	documentPath, tokenPath := filepath.Join(directory, "configuration.json"), filepath.Join(directory, "token")
+	raw, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(documentPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(tokenPath, []byte(operator.token), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plan, comment, review := filepath.Join(directory, "plan.json"), filepath.Join(directory, "comment.json"), filepath.Join(directory, "review.json")
+	command := exec.CommandContext(t.Context(), harness.Required(t, "OLP_TEST_BINARY"), "config", "plan", "--file", documentPath, "--output", plan)
+	command.Env = s.env.list(map[string]string{"OLP_MANAGEMENT_URL": s.origin, "OLP_MANAGEMENT_TOKEN_FILE": tokenPath})
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("plan configuration: %v\n%s", err, output)
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, arguments := range [][]string{{filepath.Join(root, "scripts/promotion-comment.mjs"), plan, comment, review}, {filepath.Join(root, "scripts/verify-promotion-review.mjs"), plan, review}} {
+		command := exec.CommandContext(t.Context(), "node", arguments...)
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("review current CLI plan: %v\n%s", err, output)
+		}
+	}
 }

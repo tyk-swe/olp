@@ -101,6 +101,10 @@ type Config struct {
 // Parse gives flags precedence over environment variables. File-backed URLs are
 // mutually exclusive with inline URLs; their contents never appear in errors.
 func Parse(args []string, getenv func(string) string, output io.Writer) (Config, error) {
+	return parseWithFlags(args, getenv, output, nil)
+}
+
+func parseWithFlags(args []string, getenv func(string) string, output io.Writer, extraFlags func(*flag.FlagSet)) (Config, error) {
 	var c Config
 	if len(args) == 0 {
 		return c, errors.New("usage: olp <all|gateway|control|worker|health-probe> [flags]")
@@ -173,6 +177,11 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	var metricsTenantLabels string
 	f.StringVar(&metricsTenantLabels, "metrics-tenant-labels", "", "comma-separated business metric tenant labels: project, key, end_user (OLP_METRICS_TENANT_LABELS)")
 	f.IntVar(&c.MetricsSeriesCap, "metrics-series-cap", 5000, "business metric series admitted per process")
+	var configurationFlags []*flag.Flag
+	f.VisitAll(func(v *flag.Flag) { configurationFlags = append(configurationFlags, v) })
+	if extraFlags != nil {
+		extraFlags(f)
+	}
 	if err := f.Parse(args[1:]); err != nil {
 		return c, err
 	}
@@ -182,9 +191,9 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	explicit := make(map[string]bool)
 	f.Visit(func(v *flag.Flag) { explicit[v.Name] = true })
 	var envErr error
-	f.VisitAll(func(v *flag.Flag) {
+	for _, v := range configurationFlags {
 		if explicit[v.Name] {
-			return
+			continue
 		}
 		name := "OLP_" + strings.ToUpper(strings.ReplaceAll(v.Name, "-", "_"))
 		if value := getenv(name); value != "" {
@@ -192,7 +201,7 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 				envErr = fmt.Errorf("invalid %s", name)
 			}
 		}
-	})
+	}
 	if envErr != nil {
 		return c, envErr
 	}

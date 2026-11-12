@@ -118,3 +118,35 @@ func TestInstallationNotificationDeleteRequiresSettings(t *testing.T) {
 	}
 	s.want(owner, "DELETE", path, nil, idempotent(match), http.StatusNoContent)
 }
+
+func TestNotificationRuleRejectsNullEnabled(t *testing.T) {
+	t.Parallel()
+	s := startService(t)
+	owner := s.owner()
+	ownerID := s.want(owner, "GET", "/api/v1/profile", nil, nil, http.StatusOK)["id"].(string)
+	destination := uuid.NewString()
+	if _, err := s.pool.Exec(t.Context(), `INSERT INTO olp.notification_destinations(id,name,url,etag,created_by)
+ VALUES($1,'notification validation','https://hooks.example.com/olp',$1,$2)`, destination, ownerID); err != nil {
+		t.Fatal(err)
+	}
+	rule := s.want(owner, "POST", "/api/v1/notifications/rules", map[string]any{
+		"name": "disabled", "event": "provider.grant.lapsed", "destination_id": destination, "enabled": false,
+	}, idempotent(), http.StatusCreated)
+	path := "/api/v1/notifications/rules/" + rule["id"].(string)
+	current := s.want(owner, "GET", path, nil, nil, http.StatusOK)
+	status, raw := s.do(owner, "PATCH", path, map[string]any{"enabled": nil}, idempotent(map[string]string{"If-Match": `"` + current["etag"].(string) + `"`}))
+	if status != http.StatusUnprocessableEntity {
+		t.Errorf("PATCH enabled=null: %s", describe(status, raw))
+	}
+	current = s.want(owner, "GET", path, nil, nil, http.StatusOK)
+	if current["enabled"] != false {
+		t.Errorf("disabled rule after rejected null patch: enabled=%v", current["enabled"])
+	}
+	for _, enabled := range []bool{true, false} {
+		s.want(owner, "PATCH", path, map[string]any{"enabled": enabled}, idempotent(map[string]string{"If-Match": `"` + current["etag"].(string) + `"`}), http.StatusOK)
+		current = s.want(owner, "GET", path, nil, nil, http.StatusOK)
+		if current["enabled"] != enabled {
+			t.Fatalf("enabled=%v, want %v", current["enabled"], enabled)
+		}
+	}
+}

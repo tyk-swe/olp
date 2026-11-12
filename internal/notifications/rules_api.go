@@ -300,6 +300,9 @@ func patchRule(current json.RawMessage, patch map[string]json.RawMessage) (ruleI
 		return ruleInput{}, err
 	}
 	for field, raw := range patch {
+		if field == "enabled" && string(raw) == "null" {
+			return ruleInput{}, access.Invalid(field, rulePatchFields[field])
+		}
 		object, err := json.Marshal(map[string]json.RawMessage{field: raw})
 		if err != nil {
 			return ruleInput{}, err
