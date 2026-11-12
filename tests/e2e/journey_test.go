@@ -27,6 +27,7 @@ func TestPublishedRouteServesAndSettlesUsage(t *testing.T) {
 	provider := s.activeProvider(owner, "journey-provider", newVendor(t).URL, project)
 	slug := uniqueName("journey")
 	s.publishedRoute(owner, slug, provider, project)
+	testSelectorPluginPins(t, s, owner, provider, project)
 	key := s.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "journey", "scopes": []string{"inference"}, "project_id": project}, idempotent(), http.StatusCreated)
 	consumer := &caller{name: "journey key", token: key["secret"].(string)}
 	request := map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "hello"}}}
@@ -117,4 +118,37 @@ func TestInstallationNotificationDeleteRequiresSettings(t *testing.T) {
 		}
 	}
 	s.want(owner, "DELETE", path, nil, idempotent(match), http.StatusNoContent)
+}
+
+func testSelectorPluginPins(t *testing.T, s *service, owner *caller, provider map[string]any, project string) {
+	t.Helper()
+	const digest = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	if _, err := s.pool.Exec(t.Context(), `INSERT INTO olp.plugins(digest, abi_version, manifest, module, size_bytes, etag, installed_by, approved_by, approved_at)
+ SELECT $1, 1, '{"name":"selector-fixture","version":"0.1.0","origins":[],"profiles":[]}', '\x0061736d01000000'::bytea, 8, gen_random_uuid(), id, id, now() FROM olp.users WHERE email='owner@example.com'`, digest); err != nil {
+		t.Fatal(err)
+	}
+	pluginPath := "/api/v1/plugins/" + digest
+	installed := s.want(owner, "GET", pluginPath, nil, nil, http.StatusOK)
+	draft := s.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
+		"slug": uniqueName("selector-pin"), "project_id": project, "operations": []string{"generation"}, "overall_timeout_ms": 5000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"},
+		"targets":   []any{map[string]any{"provider_id": provider["id"], "provider_model": vendor.Model, "priority": 0, "weight": 1, "timeout_ms": 2000, "tags": []string{"selected"}}},
+		"selectors": []routing.Selector{{ID: "module", Tags: []string{"selected"}, When: routing.Predicate{Plugin: &routing.PluginPredicate{Digest: digest}}}},
+	}, idempotent(), http.StatusCreated)
+	requirePinned := func() {
+		t.Helper()
+		problem := s.want(owner, "DELETE", pluginPath, nil, idempotent(etag(installed)), http.StatusConflict)
+		if !strings.HasSuffix(problem["type"].(string), "/plugin_pinned") {
+			t.Fatalf("selector pin uninstall = %v", problem)
+		}
+	}
+	requirePinned()
+	draftPath := "/api/v1/route-drafts/" + draft["id"].(string)
+	activated := s.want(owner, "POST", draftPath+"/activate", nil, idempotent(etag(draft)), http.StatusOK)
+	current := s.want(owner, "GET", draftPath, nil, nil, http.StatusOK)
+	s.want(owner, "DELETE", draftPath, nil, idempotent(etag(current)), http.StatusNoContent)
+	requirePinned()
+	routePath := "/api/v1/routes/" + activated["route_id"].(string)
+	route := s.want(owner, "GET", routePath, nil, nil, http.StatusOK)
+	s.want(owner, "POST", routePath+"/retire", nil, idempotent(etag(route)), http.StatusOK)
+	requirePinned()
 }

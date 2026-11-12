@@ -301,6 +301,10 @@ func pinningResources(ctx context.Context, q access.Queryer, digest string) (str
 		UNION SELECT g.name, g.id FROM olp.guardrails g
 		JOIN olp.guardrail_revisions r ON r.guardrail_id=g.id
 		WHERE g.type='plugin' AND r.configuration->>'plugin_version'=$1
+		UNION SELECT d.slug, d.id FROM olp.route_drafts d
+		WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(d.behavior->'selectors') selector WHERE selector #>> '{when,plugin,digest}'=$1)
+		UNION SELECT r.slug, r.id FROM olp.route_revisions r
+		WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(r.behavior->'selectors') selector WHERE selector #>> '{when,plugin,digest}'=$1)
 		) pins ORDER BY lower(name), id`, digest)
 	if err != nil {
 		return "", err
