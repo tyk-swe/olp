@@ -279,7 +279,6 @@ type ProviderSnapshot struct {
 	Kind                  string
 	Configuration         []byte
 	Network               *string
-	Imported              bool
 	RevisionConfiguration []byte
 	RevisionModels        []byte
 	RevisionSlots         []byte
@@ -313,7 +312,6 @@ type SlotSnapshot struct {
 func ReadProviderSnapshots(ctx context.Context, q access.Queryer) ([]ProviderSnapshot, error) {
 	rows, err := q.Query(ctx, `SELECT p.id::text,p.name,pr.name,p.kind,p.configuration,
 	(SELECT c.id::text FROM olp.provider_network_credentials c WHERE c.id::text=p.configuration#>>'{options,network,credential_id}' AND c.provider_id=p.id AND c.revoked_at IS NULL),
-	EXISTS (SELECT 1 FROM olp.provider_billing_imports bi WHERE bi.provider_id=p.id),
 	r.configuration,r.models,r.slots
 	FROM olp.providers p LEFT JOIN olp.projects pr ON pr.id=p.project_id
 	LEFT JOIN olp.provider_revisions r ON r.id=p.active_revision_id AND p.state IN ('active','disabled')`)

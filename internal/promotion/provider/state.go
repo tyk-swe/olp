@@ -59,8 +59,12 @@ func readDestinations(ctx context.Context, q access.Queryer) (map[string]destina
 	if err != nil {
 		return nil, err
 	}
+	billing, err := imports.ReadAll(ctx, q)
+	if err != nil {
+		return nil, err
+	}
 	destinations, err := promotion.TryMap(rows, func(row providers.ProviderSnapshot) (destination, error) {
-		return readDestination(ctx, q, row, promotion.Filter(models, func(model providers.ModelSnapshot) bool { return model.ProviderID == row.ID }), promotion.Filter(slots, func(slot providers.SlotSnapshot) bool { return slot.ProviderID == row.ID }))
+		return readDestination(row, billing, promotion.Filter(models, func(model providers.ModelSnapshot) bool { return model.ProviderID == row.ID }), promotion.Filter(slots, func(slot providers.SlotSnapshot) bool { return slot.ProviderID == row.ID }))
 	})
 	if err != nil {
 		return nil, err
@@ -74,11 +78,8 @@ func readDestinations(ctx context.Context, q access.Queryer) (map[string]destina
 	}), nil
 }
 
-func readDestination(ctx context.Context, q access.Queryer, row providers.ProviderSnapshot, models []providers.ModelSnapshot, slots []providers.SlotSnapshot) (destination, error) {
-	imported, err := readImport(ctx, q, row)
-	if err != nil {
-		return destination{}, err
-	}
+func readDestination(row providers.ProviderSnapshot, billing map[string]imports.Config, models []providers.ModelSnapshot, slots []providers.SlotSnapshot) (destination, error) {
+	imported := importOf(billing, row.ID)
 	var configuration connection.Configuration
 	if err := json.Unmarshal(row.Configuration, &configuration); err != nil {
 		return destination{}, err
@@ -109,15 +110,12 @@ func readDestination(ctx context.Context, q access.Queryer, row providers.Provid
 	}, nil
 }
 
-func readImport(ctx context.Context, q access.Queryer, row providers.ProviderSnapshot) (*imports.Config, error) {
-	if !row.Imported {
-		return nil, nil
+func importOf(billing map[string]imports.Config, providerID string) *imports.Config {
+	config, found := billing[providerID]
+	if !found {
+		return nil
 	}
-	config, found, err := imports.Read(ctx, q, row.ID)
-	if err != nil || !found {
-		return nil, err
-	}
-	return &config, nil
+	return &config
 }
 
 func draftEntry(row providers.ProviderSnapshot, configuration connection.Configuration, models []providers.ModelSnapshot, slots []storedPair, imported *Billing) (Entry, error) {

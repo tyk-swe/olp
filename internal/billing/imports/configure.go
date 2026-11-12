@@ -33,20 +33,36 @@ type Desired struct {
 	Credential *source.Credential
 }
 
-func Read(ctx context.Context, q access.Queryer, providerID string) (Config, bool, error) {
-	r, found, err := readRecord(ctx, q, providerID)
-	if err != nil || !found {
-		return Config{}, false, err
+func ReadAll(ctx context.Context, q access.Queryer) (map[string]Config, error) {
+	rows, err := q.Query(ctx, selectRecords)
+	if err != nil {
+		return nil, err
 	}
+	records, err := pgx.CollectRows(rows, pgx.RowToStructByPos[record])
+	if err != nil {
+		return nil, err
+	}
+	configs := make(map[string]Config, len(records))
+	for _, r := range records {
+		config, err := r.config()
+		if err != nil {
+			return nil, err
+		}
+		configs[r.ProviderID.String()] = config
+	}
+	return configs, nil
+}
+
+func (r record) config() (Config, error) {
 	src, ok := source.Lookup(r.Source)
 	if !ok {
-		return Config{}, false, errors.New("unsupported billing source " + string(r.Source))
+		return Config{}, errors.New("unsupported billing source " + string(r.Source))
 	}
 	scope, err := src.Scope(r.Scope)
 	if err != nil {
-		return Config{}, false, err
+		return Config{}, err
 	}
-	return Config{Enabled: r.Enabled, Scope: scope, CredentialID: r.CredentialID}, true, nil
+	return Config{Enabled: r.Enabled, Scope: scope, CredentialID: r.CredentialID}, nil
 }
 
 func (v Vault) Fits(ctx context.Context, q access.Queryer, src source.Source, credentialID *string) (bool, error) {
