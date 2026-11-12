@@ -10,6 +10,8 @@ import (
 
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/coderesearch"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 )
 
@@ -24,7 +26,7 @@ func researchOriginAllowed(r *http.Request) bool {
 	if len(values) == 0 {
 		return true
 	}
-	return len(values) == 1 && sameOrigin(r, values[0])
+	return len(values) == 1 && ingress.SameOrigin(r, values[0])
 }
 
 // copyResearchResponse reports whether a valid InitializeResult reached the
@@ -64,7 +66,7 @@ func (s *Server) copyResearchResponse(w http.ResponseWriter, r *http.Request, re
 			w.Header().Set("Content-Type", media)
 		}
 		w.WriteHeader(response.StatusCode)
-		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
 		n, err := w.Write(raw)
 		if err != nil || n != len(raw) || response.StatusCode != http.StatusOK || forwarding.method != "initialize" || !coderesearch.Initialized(raw, forwarding.requestID) || r.Context().Err() != nil {
 			return false
@@ -79,13 +81,13 @@ func (s *Server) copyResearchResponse(w http.ResponseWriter, r *http.Request, re
 	reader := &io.LimitedReader{R: response.Body, N: coderesearch.MaxResponse + 1}
 	decoder := sse.NewDecoder(reader, coderesearch.MaxEvent)
 	controller := http.NewResponseController(w)
-	_ = controller.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+	_ = controller.SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
 	if err := controller.Flush(); err != nil {
 		return false
 	}
 	_ = controller.SetWriteDeadline(time.Time{})
 	write := func(raw []byte) error {
-		_ = controller.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+		_ = controller.SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
 		defer controller.SetWriteDeadline(time.Time{})
 		if n, err := w.Write(raw); err != nil {
 			return err

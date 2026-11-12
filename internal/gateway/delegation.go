@@ -11,6 +11,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/consumerauth"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/release"
 )
 
@@ -44,39 +46,39 @@ func (s *Server) reauthenticateSession(ctx context.Context, x *call, token strin
 
 func (s *Server) createDelegation(w http.ResponseWriter, r *http.Request) {
 	s.begin(w, r)
-	if !s.admit(r.Context()) {
-		writeError(w, overloaded)
+	if !s.gate.Admit(r.Context()) {
+		fault.WriteError(w, fault.Overloaded)
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	delegate, ok := s.deps.Runtime.(delegationRuntime)
 	if !ok {
-		writeError(w, serverError(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable."))
+		fault.WriteError(w, fault.ServerError(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable."))
 		return
 	}
-	assertion, ok := bearer(r.Header.Get("Authorization"))
+	assertion, ok := consumerauth.Bearer(r.Header.Get("Authorization"))
 	if !ok {
-		writeError(w, authenticationError("invalid_api_key", "Provide a workload identity."))
+		fault.WriteError(w, fault.AuthenticationError("invalid_api_key", "Provide a workload identity."))
 		return
 	}
 	var bounds release.DelegationBounds
 	if err := access.DecodeUnique(r, &bounds, 16<<10); err != nil {
-		writeError(w, invalidRequest("invalid_request", "Provide bounded delegation scopes and resources.", nil))
+		fault.WriteError(w, fault.InvalidRequest("invalid_request", "Provide bounded delegation scopes and resources.", nil))
 		return
 	}
 	agent, failure := consumerauth.Authenticate(s.deps.Runtime, r, assertion, delegationScope(bounds), s.cfg.TrustedProxies, s.now())
 	if failure != nil {
-		writeError(w, consumerFailure(failure))
+		fault.WriteError(w, ingress.ConsumerFailure(failure))
 		return
 	}
 	if consent := strings.TrimSpace(r.Header.Get("X-OLP-Delegation-Consent")); consent != "" {
 		if strings.TrimSpace(r.Header.Get("X-OLP-Delegating-Key")) != "" {
-			writeError(w, invalidRequest("invalid_request", "Provide either a delegating key or member consent.", nil))
+			fault.WriteError(w, fault.InvalidRequest("invalid_request", "Provide either a delegating key or member consent.", nil))
 			return
 		}
 		member, ok := s.deps.Runtime.(memberConsentRuntime)
 		if !ok {
-			writeError(w, serverError(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable."))
+			fault.WriteError(w, fault.ServerError(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable."))
 			return
 		}
 		grant, err := member.ExchangeMemberConsent(r.Context(), agent, consent, bounds)
@@ -85,7 +87,7 @@ func (s *Server) createDelegation(w http.ResponseWriter, r *http.Request) {
 	}
 	key, failure := consumerauth.Authenticate(s.deps.Runtime, r, strings.TrimSpace(r.Header.Get("X-OLP-Delegating-Key")), "delegate", s.cfg.TrustedProxies, s.now())
 	if failure != nil {
-		writeError(w, consumerFailure(failure))
+		fault.WriteError(w, ingress.ConsumerFailure(failure))
 		return
 	}
 	grant, err := delegate.CreateDelegation(r.Context(), agent, key, bounds)
@@ -104,20 +106,20 @@ func delegationScope(bounds release.DelegationBounds) string {
 
 func writeDelegationGrant(w http.ResponseWriter, grant release.DelegationGrant, err error) {
 	if errors.Is(err, release.ErrDelegationBounds) {
-		writeError(w, invalidRequest("invalid_request", "Provide bounded delegation scopes and resources.", nil))
+		fault.WriteError(w, fault.InvalidRequest("invalid_request", "Provide bounded delegation scopes and resources.", nil))
 		return
 	}
 	if errors.Is(err, release.ErrInvalidKey) {
-		writeError(w, authenticationError("invalid_api_key", "The member consent is invalid or expired."))
+		fault.WriteError(w, fault.AuthenticationError("invalid_api_key", "The member consent is invalid or expired."))
 		return
 	}
 	var problem *access.Problem
 	if errors.As(err, &problem) && problem.Status == http.StatusForbidden {
-		writeError(w, permissionError("permission_denied", "The principals cannot delegate the requested rights."))
+		fault.WriteError(w, fault.PermissionError("permission_denied", "The principals cannot delegate the requested rights."))
 		return
 	}
 	if err != nil {
-		writeError(w, serverError(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable."))
+		fault.WriteError(w, fault.ServerError(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable."))
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -166,17 +167,17 @@ func sameGenerationAffinity(a, b *resources.Resource) bool {
 	return a != nil && b != nil && a.APIKeyID == b.APIKeyID && a.RouteSlug == b.RouteSlug && a.RouteRevisionID == b.RouteRevisionID && samePin(a, b) && strings.TrimPrefix(resourceModel(a), "models/") == strings.TrimPrefix(resourceModel(b), "models/")
 }
 
-func (s *Server) bindGenerationReferences(ctx context.Context, x *call) *Error {
+func (s *Server) bindGenerationReferences(ctx context.Context, x *call) *fault.Error {
 	parsed := x.generation.parsed
 	refs, err := generationReferences(parsed.OIF().Document(), parsed.Family)
 	if err != nil {
-		return invalidRequest("invalid_resource_reference", err.Error(), nil)
+		return fault.InvalidRequest("invalid_resource_reference", err.Error(), nil)
 	}
 	if len(refs) == 0 && x.previousResponse() == nil {
 		return nil
 	}
 	if s.deps.Resources == nil {
-		return serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Provider resource authority is unavailable.")
+		return fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "Provider resource authority is unavailable.")
 	}
 	if len(refs) > 0 && !x.authority.Policy.AllowProviderState {
 		return providerStateForbidden()
@@ -217,10 +218,10 @@ func (s *Server) bindGenerationReferences(ctx context.Context, x *call) *Error {
 			resource, err = s.deps.Resources.Get(ctx, ref.kind, x.keyID, localID)
 		}
 		if err != nil || resource == nil || resource.RouteSlug != parsed.Route || resource.State == "submitting" || resource.State == "submission_unknown" || resource.State == "not_accepted" || resource.State == resources.StateDeleted || resource.ExpiresAt != nil && !resource.ExpiresAt.After(s.now()) {
-			return invalidRequest("invalid_resource_reference", "The resource is unavailable to this key and model.", &ref.pointer)
+			return fault.InvalidRequest("invalid_resource_reference", "The resource is unavailable to this key and model.", &ref.pointer)
 		}
 		if ref.kind != resources.KindFile && (resource.ContractVersion == nil || *resource.ContractVersion != retainedapi.Revision) {
-			return invalidRequest("resource_affinity", "The resource has no compatible native reference contract.", &ref.pointer)
+			return fault.InvalidRequest("resource_affinity", "The resource has no compatible native reference contract.", &ref.pointer)
 		}
 		var p *pin
 		var route *routing.Route
@@ -230,12 +231,12 @@ func (s *Server) bindGenerationReferences(ctx context.Context, x *call) *Error {
 			p, route, _ = s.resolveResource(ctx, x, x.authority, resource, "generation", retainedNewWork)
 		}
 		if p == nil || x.pin != nil && !sameGenerationAffinity(x.pin, resource) {
-			return invalidRequest("resource_affinity", "Generation references must share one authorized model, connection and credential.", &ref.pointer)
+			return fault.InvalidRequest("resource_affinity", "Generation references must share one authorized model, connection and credential.", &ref.pointer)
 		}
 		if ref.kind == "context_cache" {
 			tokens, valid := generationCacheInput(resource, p)
 			if !valid {
-				return invalidRequest("resource_affinity", "Recreate this cache with a qualified model, expiry and no cached tools.", &ref.pointer)
+				return fault.InvalidRequest("resource_affinity", "Recreate this cache with a qualified model, expiry and no cached tools.", &ref.pointer)
 			}
 			bindings.cacheInput = tokens
 		} else {
@@ -279,16 +280,16 @@ func generationCacheInput(resource *resources.Resource, p *pin) (int64, bool) {
 	return *metadata.Tokens, true
 }
 
-func (x *call) bindGenerationServing(p *pin, resource *resources.Resource, pointer string) *Error {
+func (x *call) bindGenerationServing(p *pin, resource *resources.Resource, pointer string) *fault.Error {
 	serving := p.provider.Connector().ServingIdentity(p.provider.ID, p.provider.RevisionID, p.model)
 	if x.serving != nil && *x.serving != serving {
-		return invalidRequest("resource_affinity", "Generation references require the same native serving contract.", &pointer)
+		return fault.InvalidRequest("resource_affinity", "Generation references require the same native serving contract.", &pointer)
 	}
 	x.serving, x.servingSlot, x.servingBinding = &serving, resource.SlotID, p.model
 	return nil
 }
 
-func (s *Server) generationReferenceBudget(x *call, p *pin, route *routing.Route, bindings *generationResources) *Error {
+func (s *Server) generationReferenceBudget(x *call, p *pin, route *routing.Route, bindings *generationResources) *fault.Error {
 	if bindings == nil || !bindings.unknownInput {
 		return nil
 	}

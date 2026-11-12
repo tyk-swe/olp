@@ -19,6 +19,8 @@ import (
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/release"
 
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/upstream"
 )
@@ -50,8 +52,8 @@ type codeAttempt struct {
 	pendingHealth      *codemode.HealthObservation
 }
 
-func (s *Server) prepareCode(r *http.Request, release *release.Release, route codemode.Route, observation codemode.Request, ingress codeIngress, transport codeadapter.Transport, recovery *codesessions.Recovery, body []byte) (*codeAttempt, error) {
-	authority, failure := s.authenticate(r, "inference")
+func (s *Server) prepareCode(r *http.Request, release *release.Release, route codemode.Route, observation codemode.Request, inbound codeIngress, transport codeadapter.Transport, recovery *codesessions.Recovery, body []byte) (*codeAttempt, error) {
+	authority, failure := s.gate.Authenticate(r, "inference")
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_authentication_refused")
 	}
@@ -76,7 +78,7 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 		return nil, err
 	}
 	if _, paid := route.PaidTargets[operation.Model]; paid && recovery == nil {
-		return s.preparePaidCode(r, release, route, observation, operation, ingress, transport, authority, body, nil, false)
+		return s.preparePaidCode(r, release, route, observation, operation, inbound, transport, authority, body, nil, false)
 	}
 	if recovery == nil && len(route.PaidFallbackTargets) > 0 {
 		if ledger, ok := s.deps.CodeLedger.(PaidCodeLedger); ok {
@@ -85,16 +87,16 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 				return nil, err
 			}
 			if selected != nil {
-				return s.preparePaidCode(r, release, route, observation, *selected, ingress, transport, authority, body, nil, true)
+				return s.preparePaidCode(r, release, route, observation, *selected, inbound, transport, authority, body, nil, true)
 			}
 		}
 	}
-	providers := release.Snapshot().CodeModelProviders(route, ingress.path, operation.Model, transport)
-	if len(providers) == 0 && len(route.PaidFallbackTargets) == 0 && (!route.ModelRewriting || len(release.Snapshot().CodeProviders(route, ingress.path, transport)) == 0) {
+	providers := release.Snapshot().CodeModelProviders(route, inbound.path, operation.Model, transport)
+	if len(providers) == 0 && len(route.PaidFallbackTargets) == 0 && (!route.ModelRewriting || len(release.Snapshot().CodeProviders(route, inbound.path, transport)) == 0) {
 		return nil, codemode.Refuse(400, "code_operation_unsupported")
 	}
 
-	labels, failure := s.parseAttribution(r, authority)
+	labels, failure := ingress.ParseAttribution(r, authority)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_"+failure.Code)
 	}
@@ -104,10 +106,10 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 	}
 	permit, err := s.deps.CodeLedger.Admit(r.Context(), codesessions.Admission{
 		Attribution: labels, Route: route, APIKeyID: authority.ID, EndUserDigest: authority.EndUserDigest,
-		InitialRecovery: observation.Recoverable, Recovery: recovery, Operation: operation, Providers: providers, ModelSource: release.Snapshot(), ModelPath: ingress.path, ModelTransport: transport, PreviousResponse: observation.PreviousResponse,
+		InitialRecovery: observation.Recoverable, Recovery: recovery, Operation: operation, Providers: providers, ModelSource: release.Snapshot(), ModelPath: inbound.path, ModelTransport: transport, PreviousResponse: observation.PreviousResponse,
 	})
 	if err != nil {
-		settleKey(r.Context(), lease, false, nil, s.log)
+		quota.SettleKey(r.Context(), lease, false, nil, s.log)
 		if refusal, ok := errors.AsType[*codemode.Refusal](err); ok && refusal.Code == "code_account_unavailable" && (recovery == nil || recovery.AccountID == "") && transport == codeadapter.HTTP && observation.Recoverable && len(route.PaidFallbackTargets) > 0 {
 			ledger, supported := s.deps.CodeLedger.(PaidCodeLedger)
 			if !supported {
@@ -118,7 +120,7 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 				return nil, selectionErr
 			}
 			if selected != nil {
-				return s.preparePaidCode(r, release, route, observation, *selected, ingress, transport, authority, body, recovery, true)
+				return s.preparePaidCode(r, release, route, observation, *selected, inbound, transport, authority, body, recovery, true)
 			}
 		}
 		return nil, err
@@ -144,13 +146,13 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 		return nil, codemode.Refuse(409, "code_attribution_changed")
 	}
 	if !reflect.DeepEqual(authority.Policy, permit.Authority.Policy) || !reflect.DeepEqual(authority.ProjectEndUserPolicy, permit.Authority.ProjectEndUserPolicy) || !reflect.DeepEqual(authority.BudgetGroupID, permit.Authority.BudgetGroupID) || !reflect.DeepEqual(authority.GroupLimits(), permit.Authority.GroupLimits()) {
-		settleKey(r.Context(), a.lease, false, nil, s.log)
+		quota.SettleKey(r.Context(), a.lease, false, nil, s.log)
 		a.lease = nil
 		fresh := permit.Authority
-		if failure = s.checkKeyAddress(r, fresh); failure != nil {
+		if failure = s.gate.CheckKeyAddress(r, fresh); failure != nil {
 			return nil, codemode.Refuse(failure.Status, "code_ip_not_allowed")
 		}
-		fresh, failure = s.identifyEndUser(r, fresh)
+		fresh, failure = s.gate.IdentifyEndUser(r, fresh)
 		if failure != nil {
 			return nil, codemode.Refuse(failure.Status, "code_end_user_invalid")
 		}
@@ -165,7 +167,7 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 	if permit.Pin.AccountID != permit.Account.ID || permit.Pin.Principal != permit.Account.Principal || permit.Authority.ID != authority.ID {
 		return nil, codemode.Refuse(503, "code_binding_invalid")
 	}
-	target, err := resolveCodeTarget(release.Snapshot(), route, permit.Account.ProviderID, ingress, transport)
+	target, err := resolveCodeTarget(release.Snapshot(), route, permit.Account.ProviderID, inbound, transport)
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +177,7 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 	a.config, a.endpoint, a.observer = target.config, target.endpoint, codeObserver(target.endpoint)
 	a.adapter = target.adapter.Adapter
 	a.identityOriginator = target.adapter.CompatibilityOriginator(route)
-	a.providerLease, failure = s.deps.Admission.reserveCodeProvider(r.Context(), permit.Account.ProviderID, target.config, observation.Estimate, codeGenerationTimeout+time.Minute)
+	a.providerLease, failure = s.deps.Admission.ReserveCodeProvider(r.Context(), permit.Account.ProviderID, target.config, observation.Estimate, codeGenerationTimeout+time.Minute)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_provider_rate_limited")
 	}
@@ -293,8 +295,8 @@ func (a *codeAttempt) finish(ctx context.Context) {
 	if a.paid != nil {
 		a.finishPaid(ctx)
 	}
-	settleKey(ctx, a.lease, a.dispatched, a.usage.Total, a.server.log)
-	settleKey(ctx, a.providerLease, a.dispatched, a.usage.Total, a.server.log)
+	quota.SettleKey(ctx, a.lease, a.dispatched, a.usage.Total, a.server.log)
+	quota.SettleKey(ctx, a.providerLease, a.dispatched, a.usage.Total, a.server.log)
 }
 
 func (a *codeAttempt) outcome(ctx context.Context, outcome codemode.Outcome) {

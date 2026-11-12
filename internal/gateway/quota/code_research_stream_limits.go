@@ -1,12 +1,14 @@
-package gateway
+package quota
 
 import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"time"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -15,7 +17,7 @@ import (
 // Notification streams have the configured concurrency bounds, but their own
 // counters per service. They must not occupy tool-call slots. Request rates
 // remain shared with ordinary traffic through the usual research reservation.
-func (a *Admission) reserveResearchStream(ctx context.Context, authority keyauthority.Authority, route, service, provider string, providerLimits *routing.Limits) (*admission.Lease, *Error) {
+func (a *Admission) ReserveResearchStream(ctx context.Context, authority keyauthority.Authority, route, service, provider string, providerLimits *routing.Limits, hold time.Duration) (*admission.Lease, *fault.Error) {
 	type boundary struct {
 		scope    string
 		max      *int64
@@ -40,26 +42,26 @@ func (a *Admission) reserveResearchStream(ctx context.Context, authority keyauth
 		if boundary.max == nil {
 			continue
 		}
-		refuse := func(failure *Error) (*admission.Lease, *Error) {
-			settleKey(ctx, chain, false, nil, a.logger())
+		refuse := func(failure *fault.Error) (*admission.Lease, *fault.Error) {
+			SettleKey(ctx, chain, false, nil, a.Logger())
 			return nil, failure
 		}
-		if !a.ready() {
-			return refuse(limitsUnavailable())
+		if !a.Ready() {
+			return refuse(LimitsUnavailable())
 		}
 		digest := sha256.Sum256([]byte(service + "\x00" + boundary.scope))
-		request := admission.Request{Lookup: "rs_" + hex.EncodeToString(digest[:16]), LeaseTTL: researchTimeout + reserveTimeout, Rate: admission.RateLimits{MaxConcurrency: boundary.max}}
-		decision, cancel := context.WithTimeout(ctx, reserveTimeout)
+		request := admission.Request{Lookup: "rs_" + hex.EncodeToString(digest[:16]), LeaseTTL: hold + ReserveTimeout, Rate: admission.RateLimits{MaxConcurrency: boundary.max}}
+		decision, cancel := context.WithTimeout(ctx, ReserveTimeout)
 		lease, err := a.limiter.Reserve(decision, request)
 		cancel()
 		if err != nil {
 			if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
-				return refuse(rateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate))
+				return refuse(RateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate))
 			}
 			if boundary.provider {
-				return refuse(limitsUnavailable())
+				return refuse(LimitsUnavailable())
 			}
-			if failure := a.outage(authority.ID, false, err); failure != nil {
+			if failure := a.Outage(authority.ID, false, err); failure != nil {
 				return refuse(failure)
 			}
 			continue

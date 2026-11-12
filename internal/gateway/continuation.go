@@ -17,6 +17,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/resources"
 )
@@ -55,8 +56,8 @@ func (x *call) snapshot() *routing.View {
 	}
 	return x.request.release.Snapshot()
 }
-func continuationError(code, message string) *Error {
-	return serverError(http.StatusConflict, code, message)
+func continuationError(code, message string) *fault.Error {
+	return fault.ServerError(http.StatusConflict, code, message)
 }
 
 func decodeStoredContinuation(payload []byte) (*storedContinuation, error) {
@@ -69,7 +70,7 @@ func decodeStoredContinuation(payload []byte) (*storedContinuation, error) {
 	}
 	return &state, nil
 }
-func (s *Server) prepareContinuation(ctx context.Context, x *call) *Error {
+func (s *Server) prepareContinuation(ctx context.Context, x *call) *fault.Error {
 	values := x.semanticHeaders.Values(continuationHeader)
 	submission := x.semanticHeaders.Values(submissionHeader)
 	handles := x.semanticHeaders.Values(handleHeader)
@@ -77,20 +78,20 @@ func (s *Server) prepareContinuation(ctx context.Context, x *call) *Error {
 		return nil
 	}
 	if len(values) != 1 || values[0] != interaction.ContinuationV1 || len(submission) != 1 || len(handles) > 1 || x.family != wire.Chat {
-		return invalidRequest("state_carrier", "Provide the tested chat-anthropic-tools-v1 continuation contract and one submission identity.", nil)
+		return fault.InvalidRequest("state_carrier", "Provide the tested chat-anthropic-tools-v1 continuation contract and one submission identity.", nil)
 	}
 	route, ok := x.request.release.Snapshot().FindRoute(x.generation.parsed.Route)
 	if !ok || !route.Fidelity.Strict() {
-		return invalidRequest("state_carrier", "Negotiated continuation requires a strict route.", nil)
+		return fault.InvalidRequest("state_carrier", "Negotiated continuation requires a strict route.", nil)
 	}
 	if !x.authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
-		return permissionError("route_forbidden", "This key is not authorized for the continuation route.")
+		return fault.PermissionError("route_forbidden", "This key is not authorized for the continuation route.")
 	}
 	if !x.authority.Policy.AllowProviderState {
-		return invalidRequest("policy_conflict", "Encrypted native continuation requires allow_provider_state on this API key.", nil)
+		return fault.InvalidRequest("policy_conflict", "Encrypted native continuation requires allow_provider_state on this API key.", nil)
 	}
 	if !s.deps.Resources.Encrypted() {
-		return serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Encrypted continuation authority is not configured.")
+		return fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "Encrypted continuation authority is not configured.")
 	}
 	c := &continuationExecution{version: values[0], submission: submission[0]}
 	x.generation.continuation = c
@@ -119,7 +120,7 @@ func (s *Server) prepareContinuation(ctx context.Context, x *call) *Error {
 		return continuationError("continuation_unavailable", "The stored continuation contract is unavailable.")
 	}
 	if err := resources.ValidateSubmission(c.submission, s.now()); err != nil {
-		return invalidRequest("invalid_submission_identity", "Provide a timestamp.UUID submission identity from the last fifteen minutes, allowing five minutes of clock skew.", nil)
+		return fault.InvalidRequest("invalid_submission_identity", "Provide a timestamp.UUID submission identity from the last fifteen minutes, allowing five minutes of clock skew.", nil)
 	}
 	if len(handles) == 0 {
 		return nil
@@ -142,14 +143,14 @@ func (s *Server) prepareContinuation(ctx context.Context, x *call) *Error {
 	x.servingBinding = state.Binding
 	return nil
 }
-func (s *Server) authorizeContinuation(ctx context.Context, x *call, res *resources.Resource, state *storedContinuation) *Error {
+func (s *Server) authorizeContinuation(ctx context.Context, x *call, res *resources.Resource, state *storedContinuation) *fault.Error {
 	p, _, e := s.resolveResource(ctx, x, x.authority, res, operationGeneration, retainedRetrieval)
 	if e != nil {
 		return e
 	}
 	return s.authorizeContinuationPin(ctx, x, res, state, p)
 }
-func (s *Server) authorizeContinuationPin(ctx context.Context, x *call, res *resources.Resource, state *storedContinuation, p *pin) *Error {
+func (s *Server) authorizeContinuationPin(ctx context.Context, x *call, res *resources.Resource, state *storedContinuation, p *pin) *fault.Error {
 	if !p.provider.Enabled || !p.slot.Allows(p.model, res.RouteSlug, x.keyID) {
 		return pinUnavailable()
 	}
@@ -239,7 +240,7 @@ func (s *Server) replayContinuation(w http.ResponseWriter, x *call) (int, error)
 // original response. It never enters provider dispatch or owns new usage.
 func (s *Server) writeContinuationPayload(w http.ResponseWriter, x *call, data []byte) error {
 	rc := http.NewResponseController(w)
-	_ = rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+	_ = rc.SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
 	n, err := w.Write(data)
 	if err == nil && n != len(data) {
 		err = io.ErrShortWrite
@@ -248,7 +249,7 @@ func (s *Server) writeContinuationPayload(w http.ResponseWriter, x *call, data [
 		err = rc.Flush()
 	}
 	if err != nil {
-		return fmt.Errorf("%w: %v", errClientWrite, err)
+		return fmt.Errorf("%w: %v", fault.ErrClientWrite, err)
 	}
 	if len(data) != 0 {
 		x.delivered(s.now())
@@ -285,13 +286,13 @@ func (s *Server) recoverContinuation(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	if values := r.Header.Values(continuationHeader); len(values) != 1 || values[0] != interaction.ContinuationV1 {
-		s.refuse(x, w, invalidRequest("state_carrier", "Recovery requires the tested chat-anthropic-tools-v1 client contract.", nil))
+		s.refuse(x, w, fault.InvalidRequest("state_carrier", "Recovery requires the tested chat-anthropic-tools-v1 client contract.", nil))
 		return
 	}
 	if !authority.Policy.AllowProviderState {
-		s.refuse(x, w, invalidRequest("policy_conflict", "Encrypted native continuation requires allow_provider_state on this API key.", nil))
+		s.refuse(x, w, fault.InvalidRequest("policy_conflict", "Encrypted native continuation requires allow_provider_state on this API key.", nil))
 		return
 	}
 	var res *resources.Resource
@@ -303,12 +304,12 @@ func (s *Server) recoverContinuation(w http.ResponseWriter, r *http.Request) {
 		res, payload, err = s.deps.Resources.ReadContract(r.Context(), resources.KindContinuation, authority.ID, r.PathValue("id"))
 	}
 	if err != nil {
-		s.refuse(x, w, notFoundError("continuation_unavailable", "No unexpired continuation with this identity is available to this key."))
+		s.refuse(x, w, fault.NotFoundError("continuation_unavailable", "No unexpired continuation with this identity is available to this key."))
 		return
 	}
 	route, exists := x.request.release.Snapshot().FindRoute(res.RouteSlug)
 	if !exists || !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
-		s.refuse(x, w, notFoundError("continuation_unavailable", "The continuation is unavailable to this key."))
+		s.refuse(x, w, fault.NotFoundError("continuation_unavailable", "The continuation is unavailable to this key."))
 		return
 	}
 	x.route = &route

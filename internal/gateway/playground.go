@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -14,6 +15,8 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/telemetry"
@@ -278,7 +281,7 @@ func (in *playgroundRequest) parse(operation, mode string, p *Playground, x *cal
 func (p *Playground) call(r *http.Request, principal access.Principal, parsed *wire.Request, family wire.Format, preferences *routing.Preferences) *call {
 	s := p.Gateway
 	return &call{
-		request:     request{id: uuidString(), minted: true, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: s.deps.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context())},
+		request:     request{id: uuidString(), minted: true, clientIP: consumerauth.ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: s.deps.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context())},
 		family:      family,
 		preferences: preferences,
 
@@ -292,10 +295,10 @@ func (p *Playground) call(r *http.Request, principal access.Principal, parsed *w
 	}
 }
 
-func (p *Playground) authorize(principal access.Principal) func(*routing.Route) *Error {
-	return func(route *routing.Route) *Error {
+func (p *Playground) authorize(principal access.Principal) func(*routing.Route) *fault.Error {
+	return func(route *routing.Route) *fault.Error {
 		if principal.Project(route.ProjectID, access.View) != nil {
-			return modelNotFound(route.Slug)
+			return fault.ModelNotFound(route.Slug)
 		}
 		return nil
 	}
@@ -312,7 +315,7 @@ func (p *Playground) handle(r *http.Request, principal access.Principal) (access
 	s := p.Gateway
 	x := p.call(r, principal, nil, "", in.Routing)
 	if in.Request != nil {
-		x.request.body = &measuredBody{decoded: int64(len(in.Request))}
+		x.request.body = &ingress.MeasuredBody{Decoded: int64(len(in.Request))}
 	}
 	parsed, err := in.parse(in.operation(), "unary", p, x, principal)
 	if err != nil {
@@ -320,7 +323,7 @@ func (p *Playground) handle(r *http.Request, principal access.Principal) (access
 	}
 	x.generation.parsed, x.family, x.prompt = parsed.request, parsed.request.Family, parsed.reference
 	if x.request.body != nil {
-		x.request.body.decoded = max(x.request.body.decoded, parsed.decoded)
+		x.request.body.Decoded = max(x.request.body.Decoded, parsed.decoded)
 	}
 	if e := s.prepare(r.Context(), x, p.authorize(principal)); e != nil {
 		x.failure = e
@@ -328,12 +331,12 @@ func (p *Playground) handle(r *http.Request, principal access.Principal) (access
 		return access.Reply{}, access.Fail(e.Status, e.Code, e.Message)
 	}
 	x.estimate = requestEstimate(x)
-	if !s.admit(r.Context()) {
-		x.failure = overloaded
-		s.finish(x, nil, overloaded.Status)
-		return access.Reply{}, access.Fail(overloaded.Status, overloaded.Code, overloaded.Message)
+	if !s.gate.Admit(r.Context()) {
+		x.failure = fault.Overloaded
+		s.finish(x, nil, fault.Overloaded.Status)
+		return access.Reply{}, access.Fail(fault.Overloaded.Status, fault.Overloaded.Code, fault.Overloaded.Message)
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	// Playground calls, streamed or not, are charged to the route's project and
 	// installation, so they hold against those caps as probes and shadows do.
 	defer s.settleAdmission(r.Context(), x)
@@ -461,7 +464,7 @@ func (p *Playground) stream(w http.ResponseWriter, r *http.Request, principal ac
 	s := p.Gateway
 	x := p.call(r, principal, nil, "", in.Routing)
 	if in.Request != nil {
-		x.request.body = &measuredBody{decoded: int64(len(in.Request))}
+		x.request.body = &ingress.MeasuredBody{Decoded: int64(len(in.Request))}
 	}
 	parsed, err := in.parse("generation", "streaming", p, x, principal)
 	if err != nil {
@@ -469,7 +472,7 @@ func (p *Playground) stream(w http.ResponseWriter, r *http.Request, principal ac
 	}
 	x.generation.parsed, x.family, x.prompt = parsed.request, parsed.request.Family, parsed.reference
 	if x.request.body != nil {
-		x.request.body.decoded = max(x.request.body.decoded, parsed.decoded)
+		x.request.body.Decoded = max(x.request.body.Decoded, parsed.decoded)
 	}
 	if e := s.prepare(r.Context(), x, p.authorize(principal)); e != nil {
 		x.failure = e
@@ -477,12 +480,12 @@ func (p *Playground) stream(w http.ResponseWriter, r *http.Request, principal ac
 		return access.Fail(e.Status, e.Code, e.Message)
 	}
 	x.estimate = requestEstimate(x)
-	if !s.admit(r.Context()) {
-		x.failure = overloaded
-		s.finish(x, nil, overloaded.Status)
-		return access.Fail(overloaded.Status, overloaded.Code, overloaded.Message)
+	if !s.gate.Admit(r.Context()) {
+		x.failure = fault.Overloaded
+		s.finish(x, nil, fault.Overloaded.Status)
+		return access.Fail(fault.Overloaded.Status, fault.Overloaded.Code, fault.Overloaded.Message)
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	defer s.settleAdmission(r.Context(), x)
 	if e := s.reserveSystemBudgets(r.Context(), x); e != nil {
 		x.failure = e
@@ -536,13 +539,13 @@ func (sw *playgroundStreamWriter) write(event string, data []byte, limited bool)
 		sw.w.WriteHeader(http.StatusOK)
 		sw.committed = true
 	}
-	rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+	rc.SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
 	if _, err := fmt.Fprintf(sw.w, "event: %s\ndata: %s\n\n", event, data); err != nil {
-		return fmt.Errorf("%w: %v", errClientWrite, err)
+		return fmt.Errorf("%w: %v", fault.ErrClientWrite, err)
 	}
 	sw.total += chunk
 	if err := rc.Flush(); err != nil {
-		return fmt.Errorf("%w: %v", errClientWrite, err)
+		return fmt.Errorf("%w: %v", fault.ErrClientWrite, err)
 	}
 	return nil
 }

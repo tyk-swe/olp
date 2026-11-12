@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
@@ -69,7 +70,7 @@ func (a *codeAttempt) antigravityResponse(ctx context.Context, w http.ResponseWr
 		codeWriteError(w, r, codemode.Refuse(response.StatusCode, "code_upstream_rejected"))
 		return
 	}
-	writer := &streamWriter{w: w, family: wire.Chat}
+	writer := &fault.StreamWriter{W: w, Family: wire.Chat}
 	completion, err := func() (*wire.Completion, error) {
 		if payload.stream {
 			if !strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
@@ -77,7 +78,7 @@ func (a *codeAttempt) antigravityResponse(ctx context.Context, w http.ResponseWr
 			}
 			reader := antigravityStream(response.Body, model)
 			defer reader.Close()
-			return protocols.StreamWithEvents(wire.Gemini, wire.Chat, reader, codewire.MaxBody, model, payload.includeUsage, writer.emit, nil, 1)
+			return protocols.StreamWithEvents(wire.Gemini, wire.Chat, reader, codewire.MaxBody, model, payload.includeUsage, writer.Emit, nil, 1)
 		}
 		body, err := io.ReadAll(io.LimitReader(response.Body, codewire.MaxBody+1))
 		if err != nil || len(body) > codewire.MaxBody {
@@ -101,7 +102,7 @@ func (a *codeAttempt) antigravityResponse(ctx context.Context, w http.ResponseWr
 			}
 			return "code_upstream_invalid"
 		}()
-		writer.finish(&outcome{err: &Error{Status: 502, Code: code, Type: "api_error", Message: code}, cancelled: ctx.Err() != nil})
+		writer.Finish(&fault.Error{Status: 502, Code: code, Type: "api_error", Message: code}, ctx.Err() != nil)
 		return
 	}
 	if payload.stream {

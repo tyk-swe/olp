@@ -1,4 +1,4 @@
-package gateway
+package events
 
 import (
 	"log/slog"
@@ -112,9 +112,9 @@ type AttemptFact struct {
 	// null included; unpinned attempts resolve the card themselves.
 	CardPinned     bool
 	CardRevisionID *string
-	// cardRev retains the terms resolved when this attempt started, even if
+	// CardRev retains the terms resolved when this attempt started, even if
 	// later routing inputs no longer contain that revision. Nil means no card.
-	cardRev            *rates.RoutingCardRevision
+	CardRev            *rates.RoutingCardRevision
 	Ordinal            int
 	TargetID           string
 	ProviderID         string
@@ -154,7 +154,7 @@ type AttemptFact struct {
 	// including file controls authorized through a generation route.
 	TokenlessUsage  bool
 	usageIncomplete bool // native stream counters observed before terminal proof
-	localRefusal    bool // valid native work could not be projected or persisted locally
+	LocalRefusal    bool // valid native work could not be projected or persisted locally
 	// EstimateProvenance says how the admission estimate of this attempt's
 	// input was produced: usage.EstimateTokenizer, usage.EstimateCalibrated or
 	// usage.EstimateHeuristic. It is empty when no estimate was made, as for a
@@ -167,18 +167,18 @@ type AttemptFact struct {
 	ModelFamily          string
 }
 
-// observeUsage retains counters without promoting intermediate stream evidence
+// ObserveUsage retains counters without promoting intermediate stream evidence
 // to proof that no further work was billed.
-func (a *AttemptFact) observeUsage(observed *wire.Usage, complete bool) {
+func (a *AttemptFact) ObserveUsage(observed *wire.Usage, complete bool) {
 	a.Usage = observed
 	a.usageIncomplete = observed != nil && !complete
 	a.TokenlessUsage = false
 }
 
-// recordEvidence records what the attempt proves about upstream billing. The
+// RecordEvidence records what the attempt proves about upstream billing. The
 // caller's fallback matters when counters are absent; native partial counters
 // retain their explicit uncertainty even when the transport has ended.
-func (a *AttemptFact) recordEvidence(uncertain bool) {
+func (a *AttemptFact) RecordEvidence(uncertain bool) {
 	switch {
 	case a.Usage != nil:
 		a.UsageObserved, a.UsageComplete, a.BillingUncertain = true, !a.usageIncomplete, a.usageIncomplete
@@ -188,6 +188,11 @@ func (a *AttemptFact) recordEvidence(uncertain bool) {
 		a.UsageObserved, a.UsageComplete, a.BillingUncertain = false, true, false
 	}
 }
+
+const (
+	ClassSuccess  = "success"
+	ClassCacheHit = "cache_hit"
+)
 
 // Sink receives every terminal envelope exactly once.
 type Sink interface {

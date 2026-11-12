@@ -32,6 +32,7 @@ import (
 	"github.com/tyk-swe/olp/internal/providerconfig"
 	"github.com/tyk-swe/olp/internal/release"
 
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -294,7 +295,7 @@ func TestWebSocketHandshakeCapacityCooldownUsesSelectedModel(t *testing.T) {
 	snapshot := &routing.Snapshot{Generation: routing.Generation{ID: uuid.NewString()}, CodeConnections: map[string]routing.Configuration{
 		"revision:provider": {Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID, Endpoint: upstream.URL}},
 	}}
-	ingress, ok := codeIngressFor("responses")
+	inbound, ok := codeIngressFor("responses")
 	if !ok {
 		t.Fatal("responses ingress missing")
 	}
@@ -315,8 +316,8 @@ func TestWebSocketHandshakeCapacityCooldownUsesSelectedModel(t *testing.T) {
 				Pin:     codemode.Pin{Model: tc.pin.Model, TargetModel: tc.pin.TargetModel, Principal: "principal"},
 			}}
 			server := &Server{
-
-				now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+				gate: ingress.NewGate(nil, nil, nil, 0, func() time.Time { return now }),
+				now:  func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 				egress: &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}, deps: Dependencies{CodeLedger: ledger, CodeAuthorizer: fakeCodeAuthorizer{}},
 			}
 			request := httptest.NewRequest(http.MethodGet, "/responses", nil)
@@ -329,7 +330,7 @@ func TestWebSocketHandshakeCapacityCooldownUsesSelectedModel(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			server.codeWebSocket(writer, request, snapshotRelease, route, keyauthority.Authority{}, ingress)
+			server.codeWebSocket(writer, request, snapshotRelease, route, keyauthority.Authority{}, inbound)
 			if writer.Code != http.StatusTooManyRequests || writer.Body.String() != body {
 				t.Fatalf("response = %d %s", writer.Code, writer.Body.String())
 			}

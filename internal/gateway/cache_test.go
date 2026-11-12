@@ -18,6 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -129,15 +130,15 @@ func TestCacheAdmissionReportsARealAnthropicResetTime(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var (
-				buf  headerBuffer
-				list headerList
+				buf  fault.HeaderBuffer
+				list fault.HeaderList
 			)
 			headers := http.Header{}
-			list.apply(headers, list.rate(buf[:0], "anthropic", withCacheRequestAllowance(test.tokens, requests), 0))
-			if got := headers.Get(headerAnthropicLimitRequests); got != "10" {
+			list.Apply(headers, list.Rate(buf[:0], "anthropic", withCacheRequestAllowance(test.tokens, requests), 0))
+			if got := headers.Get("Anthropic-Ratelimit-Requests-Limit"); got != "10" {
 				t.Fatalf("request limit header = %q", got)
 			}
-			if got := headers.Get(headerAnthropicResetRequests); got != test.want.Format(time.RFC3339) {
+			if got := headers.Get("Anthropic-Ratelimit-Requests-Reset"); got != test.want.Format(time.RFC3339) {
 				t.Fatalf("request reset header = %q, want %s", got, test.want.Format(time.RFC3339))
 			}
 		})

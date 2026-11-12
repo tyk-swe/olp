@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -241,7 +242,7 @@ func TestPreparationRetainsFailedGuardrailEvidenceWithoutReevaluation(t *testing
 	if _, err := x.prepareCandidate(&provider, target.ID, target.ProviderModel); err == nil {
 		t.Fatal("flagged input was admitted")
 	}
-	fact := &AttemptFact{TargetID: target.ID, ProviderID: provider.ID, ProviderRevisionID: provider.RevisionID, UpstreamModel: target.ProviderModel}
+	fact := &events.AttemptFact{TargetID: target.ID, ProviderID: provider.ID, ProviderRevisionID: provider.RevisionID, UpstreamModel: target.ProviderModel}
 	for range 2 {
 		evidence := x.preparation().factEvidence(fact)
 		if len(evidence.guardrails) != 1 || evidence.guardrails[0].Outcome != guardrails.Blocked {

@@ -14,6 +14,8 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/release"
 )
 
@@ -25,12 +27,12 @@ func (s *Server) RegisterCode(mux *http.ServeMux) {
 }
 
 func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
-	if !s.admit(r.Context()) {
+	if !s.gate.Admit(r.Context()) {
 		codeWriteError(w, r, codemode.Refuse(503, "code_overloaded"))
 		return
 	}
-	defer s.release(r.Context())
-	authority, failure := s.authenticate(r, "inference")
+	defer s.gate.Release(r.Context())
+	authority, failure := s.gate.Authenticate(r, "inference")
 	if failure != nil {
 		codeWriteError(w, r, codemode.Refuse(failure.Status, "code_authentication_refused"))
 		return
@@ -50,7 +52,7 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		refuse(codemode.Refuse(404, "code_route_unavailable"))
 		return
 	}
-	if _, failure = s.parseAttribution(r, authority); failure != nil {
+	if _, failure = ingress.ParseAttribution(r, authority); failure != nil {
 		refuse(codemode.Refuse(failure.Status, "code_"+failure.Code))
 		return
 	}
@@ -63,9 +65,9 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		refuse(codemode.Refuse(503, "code_adapter_unavailable"))
 		return
 	}
-	ingress, ok := codeIngressFor(path)
+	inbound, ok := codeIngressFor(path)
 	if ok && r.Method == http.MethodGet && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") && release.Snapshot().HasCodeProviders(route, path, codeadapter.WebSocket) {
-		s.codeWebSocket(w, r, release, route, authority, ingress)
+		s.codeWebSocket(w, r, release, route, authority, inbound)
 		return
 	}
 	if r.Method != http.MethodPost || !ok || !release.Snapshot().HasCodeProviders(route, path, codeadapter.HTTP) && len(route.PaidTargets)+len(route.PaidFallbackTargets) == 0 {
@@ -93,7 +95,7 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		refuse(err)
 		return
 	}
-	observation, err := classifyCode(ingress, body, r.Header, false)
+	observation, err := classifyCode(inbound, body, r.Header, false)
 	if err != nil {
 		refuse(err)
 		return
@@ -101,12 +103,12 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), codeGenerationTimeout)
 	defer cancel()
 	observation.Recoverable = route.InitialRecoveryAttempts > 0 && codewire.PortableInitialRequest(body, r.Header, observation)
-	s.forwardCode(w, r.WithContext(ctx), release, route, observation, ingress, raw, body, nil, refuse)
+	s.forwardCode(w, r.WithContext(ctx), release, route, observation, inbound, raw, body, nil, refuse)
 }
 
-func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *release.Release, route codemode.Route, observation codemode.Request, ingress codeIngress, raw, body []byte, recovery *codesessions.Recovery, refuse func(error)) {
+func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *release.Release, route codemode.Route, observation codemode.Request, inbound codeIngress, raw, body []byte, recovery *codesessions.Recovery, refuse func(error)) {
 	ctx := r.Context()
-	attempt, err := s.prepareCode(r, release, route, observation, ingress, codeadapter.HTTP, recovery, body)
+	attempt, err := s.prepareCode(r, release, route, observation, inbound, codeadapter.HTTP, recovery, body)
 	if err != nil {
 		refuse(err)
 		return
@@ -125,13 +127,13 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *re
 		if attempt.endpoint.Target == codeadapter.TargetAntigravity {
 			return codeTranslateAntigravity(requestBody, r, attempt.model, attempt.auth.ProjectID)
 		}
-		if attempt.endpoint.Protocol == ingress.protocol {
+		if attempt.endpoint.Protocol == inbound.protocol {
 			if attempt.model != attempt.publicModel {
 				return codePayload{body: requestBody, query: r.URL.RawQuery}, nil
 			}
 			return codePayload{body: raw, query: r.URL.RawQuery}, nil
 		}
-		if ingress.protocol == codemode.ProtocolChat {
+		if inbound.protocol == codemode.ProtocolChat {
 			return codeTranslateChat(requestBody, r, attempt.model)
 		}
 		return codeTranslateMessages(requestBody, r, attempt.model)
@@ -209,7 +211,7 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *re
 		return
 	}
 	if next != nil {
-		s.forwardCode(w, r, release, route, observation, ingress, raw, body, next, refuse)
+		s.forwardCode(w, r, release, route, observation, inbound, raw, body, next, refuse)
 		return
 	}
 	if payload.target == codeadapter.TargetAntigravity {
@@ -217,7 +219,7 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *re
 		return
 	}
 	if payload.translated {
-		attempt.translateResponse(ctx, w, r, response, observation.Operation.Model, payload.stream, codeFamily(ingress.protocol), payload.includeUsage)
+		attempt.translateResponse(ctx, w, r, response, observation.Operation.Model, payload.stream, codeFamily(inbound.protocol), payload.includeUsage)
 		return
 	}
 	maps.Copy(w.Header(), codewire.ForwardHeaders(response.Header, false))
@@ -288,7 +290,7 @@ func (a *codeAttempt) copyResponse(ctx context.Context, w http.ResponseWriter, r
 					observed = nil
 				}
 			}
-			_ = rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+			_ = rc.SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
 			if _, err := w.Write(part); err != nil {
 				a.outcome(ctx, codemode.Outcome{Origin: "client", Kind: "canceled"})
 				return

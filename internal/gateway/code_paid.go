@@ -24,6 +24,9 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/release"
 
+	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -37,7 +40,7 @@ type paidCodeAttempt struct {
 	route         codemode.Route
 	release       *release.Release
 	authority     keyauthority.Authority
-	targetLease   *targetReservation
+	targetLease   *quota.TargetReservation
 	supplyLeases  []*admission.Lease
 	price         *rates.RoutingPrice
 	discount      *rates.RoutingDiscount
@@ -60,7 +63,7 @@ func codeFamily(protocol codemode.Protocol) wire.Format {
 	}
 }
 
-func (s *Server) preparePaidCode(r *http.Request, release *release.Release, route codemode.Route, observation codemode.Request, operation codemode.Operation, ingress codeIngress, transport codeadapter.Transport, verified keyauthority.Authority, body []byte, recovery *codesessions.Recovery, fallback bool) (*codeAttempt, error) {
+func (s *Server) preparePaidCode(r *http.Request, release *release.Release, route codemode.Route, observation codemode.Request, operation codemode.Operation, inbound codeIngress, transport codeadapter.Transport, verified keyauthority.Authority, body []byte, recovery *codesessions.Recovery, fallback bool) (*codeAttempt, error) {
 	if !route.PaidParticipation {
 		return nil, codemode.Refuse(403, "code_paid_participation_disabled")
 	}
@@ -82,9 +85,9 @@ func (s *Server) preparePaidCode(r *http.Request, release *release.Release, rout
 		return nil, codemode.Refuse(403, "code_paid_target_denied")
 	}
 	connector := provider.Connector()
-	family := codeFamily(ingress.protocol)
+	family := codeFamily(inbound.protocol)
 	native, nativeOK := routing.CodePaidProtocol(provider, operation.Model)
-	if !nativeOK || native != ingress.protocol {
+	if !nativeOK || native != inbound.protocol {
 		return nil, codemode.Refuse(400, "code_paid_operation_unsupported")
 	}
 	parsed, parseErr := protocols.ParseForModel(family, body, operation.PublicModel())
@@ -126,15 +129,15 @@ func (s *Server) preparePaidCode(r *http.Request, release *release.Release, rout
 	if !chargePriced {
 		return nil, codemode.Refuse(503, "code_paid_pricing_unavailable")
 	}
-	labels, labelErr := s.parseAttribution(r, verified)
+	labels, labelErr := ingress.ParseAttribution(r, verified)
 	if labelErr != nil {
 		return nil, codemode.Refuse(labelErr.Status, "code_"+labelErr.Code)
 	}
-	permit, err := ledger.AdmitPaid(r.Context(), codesessions.PaidAdmission{Admission: codesessions.Admission{Route: route, APIKeyID: verified.ID, EndUserDigest: verified.EndUserDigest, Attribution: labels, Operation: operation, PreviousResponse: observation.PreviousResponse, InitialRecovery: observation.Recoverable, Recovery: recovery, ModelSource: release.Snapshot(), ModelPath: ingress.path, ModelTransport: transport}, Fallback: fallback, Authority: verified, Provider: provider, Slot: slot})
+	permit, err := ledger.AdmitPaid(r.Context(), codesessions.PaidAdmission{Admission: codesessions.Admission{Route: route, APIKeyID: verified.ID, EndUserDigest: verified.EndUserDigest, Attribution: labels, Operation: operation, PreviousResponse: observation.PreviousResponse, InitialRecovery: observation.Recoverable, Recovery: recovery, ModelSource: release.Snapshot(), ModelPath: inbound.path, ModelTransport: transport}, Fallback: fallback, Authority: verified, Provider: provider, Slot: slot})
 	if err != nil {
 		return nil, err
 	}
-	a := &codeAttempt{server: s, model: operation.Model, publicModel: operation.PublicModel(), permit: codesessions.Permit{Authority: permit.Authority, Attempt: permit.Attempt}, endpoint: codeadapter.Endpoint{Protocol: ingress.protocol, ClientPath: ingress.path}, observer: codeObserver(codeadapter.Endpoint{Protocol: ingress.protocol}), paid: &paidCodeAttempt{provider: provider, slot: slot, connector: connector, family: family, route: route, release: release, authority: permit.Authority, price: price, discount: discount, card: card, started: now, stream: parsed.Stream}, config: paidCodeConfiguration(provider)}
+	a := &codeAttempt{server: s, model: operation.Model, publicModel: operation.PublicModel(), permit: codesessions.Permit{Authority: permit.Authority, Attempt: permit.Attempt}, endpoint: codeadapter.Endpoint{Protocol: inbound.protocol, ClientPath: inbound.path}, observer: codeObserver(codeadapter.Endpoint{Protocol: inbound.protocol}), paid: &paidCodeAttempt{provider: provider, slot: slot, connector: connector, family: family, route: route, release: release, authority: permit.Authority, price: price, discount: discount, card: card, started: now, stream: parsed.Stream}, config: paidCodeConfiguration(provider)}
 	ready := false
 	defer func() {
 		if !ready {
@@ -144,22 +147,22 @@ func (s *Server) preparePaidCode(r *http.Request, release *release.Release, rout
 	if err := bindCodeWorkload(&a.paid.authority, verified); err != nil {
 		return nil, err
 	}
-	if failure := s.checkKeyAddress(r, a.paid.authority); failure != nil {
+	if failure := s.gate.CheckKeyAddress(r, a.paid.authority); failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_ip_not_allowed")
 	}
-	fresh, failure := s.identifyEndUser(r, a.paid.authority)
+	fresh, failure := s.gate.IdentifyEndUser(r, a.paid.authority)
 	if failure != nil || fresh.EndUserDigest != verified.EndUserDigest {
 		return nil, codemode.Refuse(403, "code_end_user_invalid")
 	}
 	a.paid.authority = fresh
 	a.paid.authority.Attribution = labels
-	hold := costReservation{amount: cost.String(), charge: charge.String(), requestID: permit.Attempt.ID}
-	lease, failure := s.deps.Admission.reserveKeyCosted(r.Context(), &a.paid.authority, "code", demand.Tokens(), codeGenerationTimeout+time.Minute, hold, route.Slug)
+	hold := quota.CostReservation{Amount: cost.String(), Charge: charge.String(), RequestID: permit.Attempt.ID}
+	lease, failure := s.deps.Admission.ReserveKeyCosted(r.Context(), &a.paid.authority, "code", demand.Tokens(), codeGenerationTimeout+time.Minute, hold, route.Slug)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_"+failure.Code)
 	}
 	a.lease = lease
-	targetLease, rejection, skip := s.deps.Admission.reserveTarget(r.Context(), &provider, &slot, demand.Tokens(), codeGenerationTimeout+time.Minute, "code")
+	targetLease, rejection, skip := s.deps.Admission.ReserveTarget(r.Context(), &provider, &slot, demand.Tokens(), codeGenerationTimeout+time.Minute, "code")
 	if rejection != nil {
 		return nil, codemode.Refuse(429, "code_paid_target_rate_limited")
 	}
@@ -176,9 +179,9 @@ func (s *Server) preparePaidCode(r *http.Request, release *release.Release, rout
 	return a, nil
 }
 
-func (s *Server) reservePaidSupply(ctx context.Context, provider routing.Provider, slot routing.Slot, hold costReservation) ([]*admission.Lease, error) {
-	return s.reservePaidCaps(ctx, slices.Collect(func(yield func(cappedOwner) bool) {
-		for index, owner := range attemptCaps(&routing.Route{}, &provider, &slot) {
+func (s *Server) reservePaidSupply(ctx context.Context, provider routing.Provider, slot routing.Slot, hold quota.CostReservation) ([]*admission.Lease, error) {
+	return s.reservePaidCaps(ctx, slices.Collect(func(yield func(quota.CappedOwner) bool) {
+		for index, owner := range quota.AttemptCaps(&routing.Route{}, &provider, &slot) {
 			if index == 0 {
 				continue
 			}
@@ -189,24 +192,24 @@ func (s *Server) reservePaidSupply(ctx context.Context, provider routing.Provide
 	}), hold)
 }
 
-func (s *Server) reservePaidCaps(ctx context.Context, owners []cappedOwner, hold costReservation) ([]*admission.Lease, error) {
+func (s *Server) reservePaidCaps(ctx context.Context, owners []quota.CappedOwner, hold quota.CostReservation) ([]*admission.Lease, error) {
 	if len(owners) == 0 {
 		return nil, nil
 	}
 	owner := owners[0]
-	if owner.limits == nil {
+	if owner.Limits == nil {
 		return s.reservePaidCaps(ctx, owners[1:], hold)
 	}
-	if failure := s.deps.Admission.checkCostAccounting(ctx); failure != nil {
+	if failure := s.deps.Admission.CheckCostAccounting(ctx); failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_"+failure.Code)
 	}
-	if failure := s.deps.Admission.checkPendingCostAccounting(ctx, owner.id); failure != nil {
+	if failure := s.deps.Admission.CheckPendingCostAccounting(ctx, owner.ID); failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_"+failure.Code)
 	}
-	if !s.deps.Admission.ready() {
+	if !s.deps.Admission.Ready() {
 		return nil, codemode.Refuse(503, "code_limits_unavailable")
 	}
-	lease, err := s.deps.Admission.limiter.Reserve(ctx, hold.on(capRequest(owner, codeGenerationTimeout+time.Minute)))
+	lease, err := s.deps.Admission.Reserve(ctx, hold.On(quota.CapRequest(owner, codeGenerationTimeout+time.Minute)))
 	if _, ok := errors.AsType[*limits.ExceededError](err); ok {
 		return nil, codemode.Refuse(429, "code_budget_exhausted")
 	}
@@ -312,16 +315,16 @@ func (a *codeAttempt) finishPaid(ctx context.Context) {
 		}
 		return "failure"
 	}()
-	fact := AttemptFact{VendorID: p.provider.VendorID, Class: outcome, TargetID: p.slot.ID, ProviderID: p.provider.ID, ProviderRevisionID: p.provider.RevisionID, UpstreamModel: a.model, SlotID: p.slot.ID, CredentialID: *p.slot.CredentialID, CredentialVersion: *p.slot.CredentialVersion, Price: p.price, PricingPinned: true, Discount: p.discount, CardPinned: true, cardRev: p.card, CardRevisionID: cardID, Budgets: []string{p.route.ID, p.provider.ID, p.slot.ID}, Ordinal: 1, Mode: mode, StartedAt: p.started, Duration: a.server.now().Sub(p.started), Status: p.status, Usage: measured, UsageObserved: measured != nil, UsageComplete: observed, BillingUncertain: a.dispatched && !observed}
-	p.targetLease.settle(ctx, a.dispatched, a.usage.Total)
+	fact := events.AttemptFact{VendorID: p.provider.VendorID, Class: outcome, TargetID: p.slot.ID, ProviderID: p.provider.ID, ProviderRevisionID: p.provider.RevisionID, UpstreamModel: a.model, SlotID: p.slot.ID, CredentialID: *p.slot.CredentialID, CredentialVersion: *p.slot.CredentialVersion, Price: p.price, PricingPinned: true, Discount: p.discount, CardPinned: true, CardRev: p.card, CardRevisionID: cardID, Budgets: []string{p.route.ID, p.provider.ID, p.slot.ID}, Ordinal: 1, Mode: mode, StartedAt: p.started, Duration: a.server.now().Sub(p.started), Status: p.status, Usage: measured, UsageObserved: measured != nil, UsageComplete: observed, BillingUncertain: a.dispatched && !observed}
+	p.targetLease.Settle(ctx, a.dispatched, a.usage.Total)
 	for _, lease := range p.supplyLeases {
-		settleKey(ctx, lease, a.dispatched, a.usage.Total, a.server.log)
+		quota.SettleKey(ctx, lease, a.dispatched, a.usage.Total, a.server.log)
 	}
 	if !a.dispatched {
 		return
 	}
 	if a.server.deps.Sink != nil {
-		a.server.deps.Sink.Terminal(Envelope{RequestID: a.permit.Attempt.ID, AccountingID: a.permit.Attempt.ID, KeyID: p.authority.ID, EndUserDigest: p.authority.EndUserDigest, BudgetGroupID: p.authority.BudgetGroupID, Attribution: p.authority.Attribution, Route: p.route.Slug, RouteRevisionID: p.route.RevisionID, RuntimeGenerationID: p.release.Snapshot().Generation().ID, ReleaseSequence: p.release.Sequence, Family: string(p.family), Operation: "generation", Surface: p.family.Surface(), Mode: fact.Mode, Outcome: outcome, Status: p.status, Committed: true, StartedAt: p.started, CompletedAt: a.server.now(), Duration: a.server.now().Sub(p.started), Usage: measured, Attempts: []AttemptFact{fact}})
+		a.server.deps.Sink.Terminal(events.Envelope{RequestID: a.permit.Attempt.ID, AccountingID: a.permit.Attempt.ID, KeyID: p.authority.ID, EndUserDigest: p.authority.EndUserDigest, BudgetGroupID: p.authority.BudgetGroupID, Attribution: p.authority.Attribution, Route: p.route.Slug, RouteRevisionID: p.route.RevisionID, RuntimeGenerationID: p.release.Snapshot().Generation().ID, ReleaseSequence: p.release.Sequence, Family: string(p.family), Operation: "generation", Surface: p.family.Surface(), Mode: fact.Mode, Outcome: outcome, Status: p.status, Committed: true, StartedAt: p.started, CompletedAt: a.server.now(), Duration: a.server.now().Sub(p.started), Usage: measured, Attempts: []events.AttemptFact{fact}})
 	}
 }
 

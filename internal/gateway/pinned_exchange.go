@@ -31,7 +31,7 @@ func (s *Server) beginPinned(ctx context.Context, x *call, p *pin, method string
 	if p.hold != nil {
 		fact.Budgets = p.hold.budgets
 	}
-	retainedBillable := x.retained.billing == retainedMeteredWork || x.retainedAdmission != nil && (fact.Price != nil || fact.cardRev != nil)
+	retainedBillable := x.retained.billing == retainedMeteredWork || x.retainedAdmission != nil && (fact.Price != nil || fact.CardRev != nil)
 	nativeBillable := (x.family == wire.GeminiInteractions || x.family == wire.Bedrock || x.family == wire.BedrockInvoke) && x.actor != "api_key_resource"
 	exchange := &pinnedExchange{
 		state: attemptState{parent: ctx, classifier: upstream.Classifier{AtMostOnce: method == http.MethodPost, Declared: p.provider.Connector().Classification()}},
@@ -122,5 +122,5 @@ func (x *call) finalizePinned(out *outcome, at time.Time) {
 	uncertain := e.billable && e.state.evidence().Acceptance().Unresolved()
 	// Valid terminal work without usage can still have unknown consumption.
 	uncertain = uncertain || e.billable && e.state.accepted && fact.Usage == nil
-	fact.recordEvidence(uncertain)
+	fact.RecordEvidence(uncertain)
 }

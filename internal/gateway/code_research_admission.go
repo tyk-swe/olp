@@ -10,6 +10,9 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -39,7 +42,7 @@ func (s *Server) prepareResearch(r *http.Request, release *release.Release, rout
 			a.finish(ctx)
 		}
 	}()
-	var failure *Error
+	var failure *fault.Error
 	streamAuthority := fresh
 	control := notification || r.Method == http.MethodGet
 	fresh = researchRateAuthority(fresh, control)
@@ -52,21 +55,21 @@ func (s *Server) prepareResearch(r *http.Request, release *release.Release, rout
 	if !found || a.config.ProfileID != codeplans.ZAIProfile {
 		return nil, codemode.Refuse(503, "code_configuration_unsupported")
 	}
-	quota := a.config
-	if quota.Options.Limits != nil {
-		copy := *quota.Options.Limits
+	limited := a.config
+	if limited.Options.Limits != nil {
+		copy := *limited.Options.Limits
 		copy.TokensPerMinute = nil
 		if control {
 			copy.MaxConcurrency = nil
 		}
-		quota.Options.Limits = &copy
+		limited.Options.Limits = &copy
 	}
-	a.providerLease, failure = s.deps.Admission.reserveCodeProvider(ctx, account.ProviderID, quota, 0, researchTimeout+time.Minute)
+	a.providerLease, failure = s.deps.Admission.ReserveCodeProvider(ctx, account.ProviderID, limited, 0, researchTimeout+time.Minute)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_provider_rate_limited")
 	}
 	if r.Method == http.MethodGet {
-		a.streamLease, failure = s.deps.Admission.reserveResearchStream(ctx, streamAuthority, route.Slug, service, account.ProviderID, a.config.Options.Limits)
+		a.streamLease, failure = s.deps.Admission.ReserveResearchStream(ctx, streamAuthority, route.Slug, service, account.ProviderID, a.config.Options.Limits, researchTimeout)
 		if failure != nil {
 			return nil, codemode.Refuse(failure.Status, "code_research_stream_limited")
 		}
@@ -84,7 +87,7 @@ func (s *Server) prepareResearch(r *http.Request, release *release.Release, rout
 // bypass work concurrency; GET streams reserve separate concurrency below.
 func researchRateAuthority(authority keyauthority.Authority, control bool) keyauthority.Authority {
 	// This also clones the nested route and end-user policies before editing.
-	authority = withoutCostBudgets(authority)
+	authority = quota.WithoutCostBudgets(authority)
 	authority.Policy.TokensPerMinute = nil
 	authority.BudgetGroupTPM = nil
 	if control {
@@ -128,9 +131,9 @@ func (s *Server) researchAuthority(r *http.Request, route codemode.Route, servic
 	if err = bindCodeWorkload(&fresh, authority); err != nil {
 		return fresh, account, err
 	}
-	failure := s.checkKeyAddress(r, fresh)
+	failure := s.gate.CheckKeyAddress(r, fresh)
 	if failure == nil {
-		fresh, failure = s.identifyEndUser(r, fresh)
+		fresh, failure = s.gate.IdentifyEndUser(r, fresh)
 	}
 	if failure != nil {
 		return fresh, account, codemode.Refuse(failure.Status, "code_permission_denied")
@@ -138,7 +141,7 @@ func (s *Server) researchAuthority(r *http.Request, route codemode.Route, servic
 	if !fresh.AllowsEndUser(fresh.EndUserDigest) {
 		return fresh, account, codemode.Refuse(403, "code_permission_denied")
 	}
-	if _, failure = s.parseAttribution(r, fresh); failure != nil {
+	if _, failure = ingress.ParseAttribution(r, fresh); failure != nil {
 		return fresh, account, codemode.Refuse(failure.Status, "code_invalid_attribution")
 	}
 	return fresh, account, nil
@@ -164,7 +167,7 @@ func researchBinding(key string, route codemode.Route, service string, account c
 func (a *researchAttempt) finish(ctx context.Context) {
 	// Research consumes requests and concurrency, without inference token usage.
 	zero := int64(0)
-	settleKey(ctx, a.lease, a.dispatched, &zero, a.log)
-	settleKey(ctx, a.providerLease, a.dispatched, &zero, a.log)
-	settleKey(ctx, a.streamLease, a.dispatched, &zero, a.log)
+	quota.SettleKey(ctx, a.lease, a.dispatched, &zero, a.log)
+	quota.SettleKey(ctx, a.providerLease, a.dispatched, &zero, a.log)
+	quota.SettleKey(ctx, a.streamLease, a.dispatched, &zero, a.log)
 }

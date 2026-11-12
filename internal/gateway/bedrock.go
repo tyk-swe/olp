@@ -17,6 +17,8 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/routeidentity"
@@ -72,43 +74,43 @@ func (s *Server) bedrockInvokeStream(w http.ResponseWriter, r *http.Request) {
 func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family wire.Format, operation, mode, upstreamOp string) {
 	x := &call{request: s.begin(w, r), family: family, actor: "api_key"}
 	x.mode = mode
-	authority, ok := s.enter(w, r, x, s.bedrockAuthenticate)
+	authority, ok := s.enter(w, r, x, s.gate.BedrockAuthenticate)
 	if !ok {
 		return
 	}
-	defer s.release(r.Context())
-	fail := func(e *Error) { s.refuse(x, w, e) }
+	defer s.gate.Release(r.Context())
+	fail := func(e *fault.Error) { s.refuse(x, w, e) }
 	slug := r.PathValue("model")
 	if !routeidentity.ValidSlug(slug) {
-		fail(invalidRequest("invalid_value", "model must name a published route slug.", nil))
+		fail(fault.InvalidRequest("invalid_value", "model must name a published route slug.", nil))
 		return
 	}
 	snapshot := x.request.release.Snapshot()
 	route, ok := snapshot.FindRoute(slug)
 	if !ok {
-		fail(modelNotFound(slug))
+		fail(fault.ModelNotFound(slug))
 		return
 	}
 	x.route = &route
 	if x.strict() {
 		// A release may have changed between the dispatch wrapper and begin.
 		// Never let that race serve strict work through the transformed resource path.
-		fail(invalidRequest("target_capability", "This interaction requires the compiled generation runner; retry against the current route.", nil))
+		fail(fault.InvalidRequest("target_capability", "This interaction requires the compiled generation runner; retry against the current route.", nil))
 		return
 	}
 	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
-		fail(permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`."))
+		fail(fault.PermissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`."))
 		return
 	}
 	if !slices.Contains(route.Operations, operation) {
-		fail(invalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow this operation.", nil))
+		fail(fault.InvalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow this operation.", nil))
 		return
 	}
 	if e := x.guardrailSurfaceGate(&route); e != nil {
 		fail(e)
 		return
 	}
-	body, e := s.readBody(r)
+	body, e := s.gate.ReadBody(r)
 	if e != nil {
 		fail(e)
 		return
@@ -129,7 +131,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family wir
 		actual := x.settledTokens()
 		s.settlePinHold(r.Context(), x, p.hold, actual)
 		s.recordCost(x)
-		settleKey(r.Context(), x.lease, x.dispatched, actual, s.log)
+		quota.SettleKey(r.Context(), x.lease, x.dispatched, actual, s.log)
 	}()
 	overall := time.Duration(route.OverallTimeout) * time.Millisecond
 	if e := s.reserveState(r.Context(), x, authority, overall); e != nil {
@@ -144,7 +146,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family wir
 	}
 	endpoint := strings.TrimRight(p.provider.Endpoint, "/") + "/model/" + url.PathEscape(p.provider.Connector().Model(p.model)) + "/" + upstreamOp
 	if _, err := s.egress.ValidateEndpoint(endpoint); err != nil {
-		fail(serverError(http.StatusBadGateway, "upstream_error", "The provider address is not permitted by egress policy."))
+		fail(fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address is not permitted by egress policy."))
 		return
 	}
 	resp, failure := s.bedrockCall(ctx, x, p, endpoint, body, mode == "streaming")
@@ -161,7 +163,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family wir
 	}
 	result, err := readBounded(resp.Body, s.cfg.MaxResponseBytes)
 	if err != nil {
-		fail(serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read."))
+		fail(fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be read."))
 		return
 	}
 	if e := s.validateBedrockResult(x, p, upstreamOp, result, w); e != nil {
@@ -177,13 +179,13 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family wir
 	x.responseHeaders(w.Header(), false)
 	w.WriteHeader(http.StatusOK)
 	rc := http.NewResponseController(w)
-	_ = rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+	_ = rc.SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
 	n, writeErr := w.Write(result)
 	if writeErr == nil && n == len(result) {
 		writeErr = rc.Flush()
 	}
 	if writeErr != nil || n != len(result) {
-		x.failure = serverError(http.StatusBadGateway, "client_delivery_failed", "The native result could not be delivered.")
+		x.failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The native result could not be delivered.")
 		x.facts[len(x.facts)-1].Class = classCancelled
 		s.finish(x, &outcome{err: x.failure, committed: true, cancelled: true}, 0)
 		return
@@ -228,13 +230,13 @@ func bedrockErrorBody(body []byte) *wire.UpstreamError {
 	return &wire.UpstreamError{Type: "upstream_error", Code: code, Message: encodedWire.Message}
 }
 
-func (s *Server) validateBedrockResult(x *call, p *pin, upstreamOp string, body []byte, w http.ResponseWriter) *Error {
+func (s *Server) validateBedrockResult(x *call, p *pin, upstreamOp string, body []byte, w http.ResponseWriter) *fault.Error {
 	model := p.provider.Connector().Model(p.model)
 	switch upstreamOp {
 	case "converse":
 		completion, err := protocols.Decode(wire.Bedrock, wire.Bedrock, body, model, "")
 		if err != nil {
-			return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed Converse response.")
+			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed Converse response.")
 		}
 		s.recordBedrockUsage(x, completion.Usage)
 		return nil
@@ -244,25 +246,25 @@ func (s *Server) validateBedrockResult(x *call, p *pin, upstreamOp string, body 
 	return nil
 }
 
-func (s *Server) validateBedrockInvoke(x *call, model string, body []byte) *Error {
+func (s *Server) validateBedrockInvoke(x *call, model string, body []byte) *fault.Error {
 	switch {
 	case strings.Contains(model, "anthropic.claude"):
 		completion, err := protocols.Decode(wire.Anthropic, wire.Anthropic, body, model, "")
 		if err != nil {
-			return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed Claude response.")
+			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed Claude response.")
 		}
 		s.recordBedrockUsage(x, completion.Usage)
 		return nil
 	case strings.HasPrefix(model, "amazon.titan-embed-text-"):
 		completion, err := protocols.Decode(wire.BedrockEmbeddings, wire.BedrockEmbeddings, body, model, "")
 		if err != nil {
-			return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed Titan embeddings response.")
+			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed Titan embeddings response.")
 		}
 		s.recordBedrockUsage(x, completion.Usage)
 		return nil
 	case strings.HasPrefix(model, "amazon.titan-image-generator-"):
 		if err := validateTitanImage(body); err != nil {
-			return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed Titan image response.")
+			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed Titan image response.")
 		}
 		// Titan image responses report no token usage, so the invoke keeps
 		// its request-sized reservation instead of settling at zero.
@@ -272,7 +274,7 @@ func (s *Server) validateBedrockInvoke(x *call, model string, body []byte) *Erro
 		}
 		return nil
 	}
-	return serverError(http.StatusUnprocessableEntity, "unsupported_invoke_model",
+	return fault.ServerError(http.StatusUnprocessableEntity, "unsupported_invoke_model",
 		"The Invoke operation supports only qualified Anthropic Claude, Titan embeddings, and Titan image models; `"+model+"` is not qualified.")
 }
 
@@ -303,18 +305,18 @@ func (s *Server) recordBedrockUsage(x *call, usage *wire.Usage) {
 		return
 	}
 	fact := &x.facts[len(x.facts)-1]
-	fact.observeUsage(usage, true)
-	fact.recordEvidence(false)
+	fact.ObserveUsage(usage, true)
+	fact.RecordEvidence(false)
 }
 
-func bedrockReadFailure(ctx context.Context) (*Error, string) {
+func bedrockReadFailure(ctx context.Context) (*fault.Error, string) {
 	switch {
 	case errors.Is(ctx.Err(), context.Canceled):
 		return (&attemptFailure{class: classCancelled}).toError(), classCancelled
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		return (&attemptFailure{class: classTimeout}).toError(), classTimeout
 	}
-	return serverError(http.StatusBadGateway, "upstream_error", "The native stream was malformed or truncated."), classProtocol
+	return fault.ServerError(http.StatusBadGateway, "upstream_error", "The native stream was malformed or truncated."), classProtocol
 }
 
 func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, x *call, p *pin, resp *http.Response) {
@@ -332,14 +334,14 @@ func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, 
 		limit = 1 << 20
 	}
 	var usage *wire.Usage
-	var failure *Error
+	var failure *fault.Error
 	class := classProtocol
 	terminal, authoritativeUsage, initialUsage, finalUsage := false, false, false, false
 	for {
 		message, err := protocols.ReadBedrockEvent(resp.Body, limit)
 		if errors.Is(err, io.EOF) {
 			if !terminal {
-				failure = serverError(http.StatusBadGateway, "upstream_error", "The native stream ended without a terminal event.")
+				failure = fault.ServerError(http.StatusBadGateway, "upstream_error", "The native stream ended without a terminal event.")
 			}
 			break
 		}
@@ -349,13 +351,13 @@ func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, 
 		}
 		observation, err := protocols.ObserveBedrockEvent(&message, limit)
 		if err != nil {
-			failure = serverError(http.StatusBadGateway, "upstream_error", "The native stream contained an invalid event.")
+			failure = fault.ServerError(http.StatusBadGateway, "upstream_error", "The native stream contained an invalid event.")
 			break
 		}
 		if observed := observation.Usage; observed.Value != nil {
 			merged, err := observed.Merge(usage)
 			if err != nil {
-				failure = serverError(http.StatusBadGateway, "upstream_error", "The native stream contained invalid usage counts.")
+				failure = fault.ServerError(http.StatusBadGateway, "upstream_error", "The native stream contained invalid usage counts.")
 				break
 			}
 			usage = merged
@@ -366,24 +368,24 @@ func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, 
 		terminal = terminal || observation.Terminal
 		if observation.Failed {
 			if err := x.redactBedrockFailure(&message, observation); err != nil {
-				failure = serverError(http.StatusBadGateway, "upstream_error", "The native error could not be safely delivered.")
+				failure = fault.ServerError(http.StatusBadGateway, "upstream_error", "The native error could not be safely delivered.")
 				break
 			}
-			failure = serverError(http.StatusBadGateway, "upstream_error", "The provider terminated the native stream with an error.")
+			failure = fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider terminated the native stream with an error.")
 			class = classUpstreamServer
 		}
 		// Observe completion and usage before a downstream write can fail.
 		if terminal && !observation.Failed {
 			x.completePinned()
 		}
-		_ = rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+		_ = rc.SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
 		if err := encoder.Encode(w, message); err != nil {
-			failure = serverError(http.StatusBadGateway, "client_delivery_failed", "The native stream could not be delivered.")
+			failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The native stream could not be delivered.")
 			class = classCancelled
 			break
 		}
 		if err := rc.Flush(); err != nil {
-			failure = serverError(http.StatusBadGateway, "client_delivery_failed", "The native stream could not be delivered.")
+			failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The native stream could not be delivered.")
 			class = classCancelled
 			break
 		}
@@ -394,8 +396,8 @@ func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, 
 	}
 	completeUsage := terminal && (authoritativeUsage || initialUsage && finalUsage)
 	fact := &x.facts[len(x.facts)-1]
-	fact.observeUsage(usage, completeUsage)
-	fact.recordEvidence(!completeUsage)
+	fact.ObserveUsage(usage, completeUsage)
+	fact.RecordEvidence(!completeUsage)
 	if failure != nil {
 		x.failure = failure
 		x.facts[len(x.facts)-1].Class = class

@@ -28,6 +28,9 @@ import (
 
 	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/routeidentity"
@@ -98,7 +101,7 @@ func (s *realtimeResponseState) add(id string, strict bool) {
 // controls, without materializing a second JSON tree for the few observed
 // response fields. OIF rejects duplicate keys and invalid Unicode throughout.
 func realtimeObject(data []byte) (oif.Value, bool) {
-	doc, err := parseObjectRequest(data, oif.Limits{MaxBytes: maxRealtimeTrackedFrameBytes})
+	doc, err := ingress.ParseObjectRequest(data, oif.Limits{MaxBytes: maxRealtimeTrackedFrameBytes})
 	if err != nil || doc.Root().Kind() != oif.Object {
 		return oif.Value{}, false
 	}
@@ -567,28 +570,28 @@ func (s *realtimeResponseState) providerFrame(typ websocket.MessageType, data []
 func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	x := &call{request: s.begin(w, r), family: wire.Realtime, actor: "api_key"}
 	x.mode = "realtime"
-	fail := func(e *Error) { s.refuse(x, w, e) }
-	if !s.admit(r.Context()) {
-		fail(overloaded)
+	fail := func(e *fault.Error) { s.refuse(x, w, e) }
+	if !s.gate.Admit(r.Context()) {
+		fail(fault.Overloaded)
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 
 	if !s.browserOriginAllowed(r) {
-		fail(permissionError("origin_forbidden", "This origin is not allowed to open realtime sessions."))
+		fail(fault.PermissionError("origin_forbidden", "This origin is not allowed to open realtime sessions."))
 		return
 	}
 
 	if !realtimeUpgrade(r) {
-		fail(invalidRequest("websocket_upgrade_required", "This endpoint requires a WebSocket upgrade request.", nil))
+		fail(fault.InvalidRequest("websocket_upgrade_required", "This endpoint requires a WebSocket upgrade request.", nil))
 		return
 	}
-	token := bearerToken(r)
+	token := ingress.BearerToken(r)
 	if token == "" {
-		fail(authenticationError("missing_authorization", "Provide an Authorization bearer API key."))
+		fail(fault.AuthenticationError("missing_authorization", "Provide an Authorization bearer API key."))
 		return
 	}
-	authority, e := s.authenticateRequest(r, token, "inference")
+	authority, e := s.gate.AuthenticateRequest(r, token, "inference")
 	if e != nil {
 		fail(e)
 		return
@@ -598,28 +601,28 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	if len(attributionValues) == 0 {
 		attributionValues = r.URL.Query()["attribution"]
 	}
-	if x.attribution, e = parseAttributionValues(attributionValues, authority); e != nil {
+	if x.attribution, e = ingress.ParseAttributionValues(attributionValues, authority); e != nil {
 		fail(e)
 		return
 	}
 	slug := r.URL.Query().Get("model")
 	if !routeidentity.ValidSlug(slug) {
-		fail(invalidRequest("invalid_value", "model must name a published route slug.", new("model")))
+		fail(fault.InvalidRequest("invalid_value", "model must name a published route slug.", new("model")))
 		return
 	}
 	snapshot := x.request.release.Snapshot()
 	route, ok := snapshot.FindRoute(slug)
 	if !ok {
-		fail(modelNotFound(slug))
+		fail(fault.ModelNotFound(slug))
 		return
 	}
 	x.route = &route
 	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
-		fail(permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`."))
+		fail(fault.PermissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`."))
 		return
 	}
 	if !slices.Contains(route.Operations, "realtime") {
-		fail(invalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow realtime sessions.", nil))
+		fail(fault.InvalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow realtime sessions.", nil))
 		return
 	}
 	if e := x.guardrailSurfaceGate(&route); e != nil {
@@ -676,7 +679,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		check = u.String()
 	}
 	if _, err := s.egress.ValidateEndpoint(check); err != nil {
-		fail(serverError(http.StatusBadGateway, "upstream_error", "The provider address is not permitted by egress policy."))
+		fail(fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address is not permitted by egress policy."))
 		return
 	}
 
@@ -687,7 +690,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		InsecureSkipVerify: true,
 	})
 	if err != nil {
-		fail(serverError(http.StatusBadRequest, "websocket_upgrade_failed", "The WebSocket upgrade could not be completed."))
+		fail(fault.ServerError(http.StatusBadRequest, "websocket_upgrade_failed", "The WebSocket upgrade could not be completed."))
 		return
 	}
 	defer client.Close(websocket.StatusNormalClosure, "")
@@ -759,12 +762,12 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if relayErr != nil {
-		x.failure = serverError(http.StatusBadGateway, "realtime_incomplete", "The realtime session ended without a complete transport contract.")
+		x.failure = fault.ServerError(http.StatusBadGateway, "realtime_incomplete", "The realtime session ended without a complete transport contract.")
 		switch {
 		case errors.Is(relayErr, errRealtimeAuthorityRevoked):
-			x.failure = permissionError("key_revoked", "The realtime session no longer has route authority.")
+			x.failure = fault.PermissionError("key_revoked", "The realtime session no longer has route authority.")
 		case errors.As(relayErr, &ineligible):
-			x.failure = permissionError("provider_credential_"+string(ineligible.eligibility), "The realtime provider credential is no longer eligible.")
+			x.failure = fault.PermissionError("provider_credential_"+string(ineligible.eligibility), "The realtime provider credential is no longer eligible.")
 		case class == classCancelled:
 			x.failure = (&attemptFailure{class: classCancelled}).toError()
 		case class == classTimeout:
@@ -780,7 +783,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	s.finish(x, &outcome{committed: true}, terminalStatus)
 }
 
-func strictRealtimeHandshake(snapshot *routing.View, route *routing.Route, r *http.Request) *Error {
+func strictRealtimeHandshake(snapshot *routing.View, route *routing.Route, r *http.Request) *fault.Error {
 	for _, target := range route.Targets {
 		template, ok := snapshot.RealtimeTemplate(route.Slug, target.ID)
 		if !ok {
@@ -790,9 +793,9 @@ func strictRealtimeHandshake(snapshot *routing.View, route *routing.Route, r *ht
 			var refusal *oif.Incompatibility
 			if errors.As(err, &refusal) {
 				parameter := refusal.Field
-				return invalidRequest(refusal.Code, refusal.Message, &parameter)
+				return fault.InvalidRequest(refusal.Code, refusal.Message, &parameter)
 			}
-			return invalidRequest("realtime_control_unavailable", "The realtime handshake is not qualified by this strict route.", nil)
+			return fault.InvalidRequest("realtime_control_unavailable", "The realtime handshake is not qualified by this strict route.", nil)
 		}
 		return nil
 	}
@@ -821,15 +824,15 @@ func realtimeUpgrade(r *http.Request) bool {
 	return err == nil && len(key) == 16
 }
 
-func realtimeURL(p *pin) (string, *Error) {
+func realtimeURL(p *pin) (string, *fault.Error) {
 	endpoint, err := p.provider.Connector().RealtimeURL(p.model)
 	if err != nil {
-		return "", serverError(http.StatusBadGateway, "upstream_error", "The provider profile cannot address this realtime model.")
+		return "", fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider profile cannot address this realtime model.")
 	}
 	return endpoint, nil
 }
 
-func realtimeDial(ctx context.Context, s *Server, x *call, p *pin, endpoint string) (*websocket.Conn, *Error) {
+func realtimeDial(ctx context.Context, s *Server, x *call, p *pin, endpoint string) (*websocket.Conn, *fault.Error) {
 	fact := s.newFact(x, p.attempt, p.slot, len(x.facts)+1, &p.provider)
 	fact.Mode = "realtime"
 	state := attemptState{parent: ctx, classifier: upstream.Classifier{Declared: p.provider.Connector().Classification()}}
@@ -837,20 +840,20 @@ func realtimeDial(ctx context.Context, s *Server, x *call, p *pin, endpoint stri
 	if p.hold != nil {
 		fact.Budgets = p.hold.budgets
 	}
-	finish := func(class string, e *Error) *Error {
+	finish := func(class string, e *fault.Error) *fault.Error {
 		fact.Class = class
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		x.dispatched = x.dispatched || state.dispatched.Load()
-		fact.recordEvidence(state.evidence().Acceptance().Unresolved())
+		fact.RecordEvidence(state.evidence().Acceptance().Unresolved())
 		x.facts = append(x.facts, fact)
 		return e
 	}
 	probe, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, finish(classConnect, serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."))
+		return nil, finish(classConnect, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."))
 	}
 	if err := s.applySlotCredential(ctx, x, probe, p.provider.Connector(), p.slot, nil, &p.provider, p.model); err != nil {
-		return nil, finish(classCredential, serverError(http.StatusBadGateway, "upstream_error", "The provider credential could not be applied."))
+		return nil, finish(classCredential, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider credential could not be applied."))
 	}
 	headers := http.Header{}
 	for name, values := range probe.Header {
@@ -858,7 +861,7 @@ func realtimeDial(ctx context.Context, s *Server, x *call, p *pin, endpoint stri
 	}
 	client, err := s.providerClient(ctx, x.request.release, &p.provider, p.slot)
 	if err != nil {
-		return nil, finish(classCredential, serverError(http.StatusBadGateway, "upstream_error", "The provider network credential is unavailable."))
+		return nil, finish(classCredential, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider network credential is unavailable."))
 	}
 	conn, resp, err := websocket.Dial(ctx, probe.URL.String(), &websocket.DialOptions{HTTPClient: client, HTTPHeader: headers})
 	if resp != nil {
@@ -891,7 +894,7 @@ func realtimeDial(ctx context.Context, s *Server, x *call, p *pin, endpoint stri
 	}
 	fact.Committed = true
 	fact.Duration = s.now().Sub(fact.StartedAt)
-	fact.recordEvidence(true)
+	fact.RecordEvidence(true)
 	x.facts = append(x.facts, fact)
 	return conn, nil
 }
@@ -928,7 +931,7 @@ func redactRealtimeError(data []byte, credentials egress.Sensitive) ([]byte, err
 	if !isError {
 		return data, nil
 	}
-	redacted, err := redactNativeFailureDocument(doc, credentials)
+	redacted, err := fault.RedactNativeFailureDocument(doc, credentials)
 	if err != nil {
 		return nil, err
 	}
@@ -1004,7 +1007,7 @@ func (s *Server) relayRealtime(ctx context.Context, x *call, p *pin, client, con
 		deliveryFailed bool
 	}
 	forward := func(dst, src duplexPeer, inspect bool) relayEnd {
-		writer := newRealtimeBoundedWriter(ctx, dst, responseWriteTimeout)
+		writer := newRealtimeBoundedWriter(ctx, dst, fault.ResponseWriteTimeout)
 		defer writer.close()
 		for {
 			typ, data, err := src.Read(ctx)
@@ -1014,12 +1017,12 @@ func (s *Server) relayRealtime(ctx context.Context, x *call, p *pin, client, con
 			if inspect {
 				usageMu.Lock()
 				if u := responses.providerFrame(typ, data, x.strict()); u != nil {
-					usage.InputTokens = addBounded(usage.InputTokens, u.InputTokens)
-					usage.OutputTokens = addBounded(usage.OutputTokens, u.OutputTokens)
+					usage.InputTokens = quota.AddBounded(usage.InputTokens, u.InputTokens)
+					usage.OutputTokens = quota.AddBounded(usage.OutputTokens, u.OutputTokens)
 					if u.CachedInputTokens != nil {
 						cached := *u.CachedInputTokens
 						if usage.CachedInputTokens != nil {
-							cached = addBounded(cached, *usage.CachedInputTokens)
+							cached = quota.AddBounded(cached, *usage.CachedInputTokens)
 						}
 						usage.CachedInputTokens = &cached
 					}

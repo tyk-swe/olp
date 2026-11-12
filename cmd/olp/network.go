@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/surface"
 )
 
@@ -26,7 +26,7 @@ func managementNetwork(allowed, trusted []netip.Prefix, next http.Handler) http.
 			next.ServeHTTP(w, r)
 			return
 		}
-		addr, err := netip.ParseAddr(gateway.ClientIP(r, trusted))
+		addr, err := netip.ParseAddr(consumerauth.ClientIP(r, trusted))
 		if err == nil && addr.Zone() == "" && slices.ContainsFunc(allowed, func(prefix netip.Prefix) bool { return prefix.Contains(addr.Unmap()) }) {
 			next.ServeHTTP(w, r)
 			return

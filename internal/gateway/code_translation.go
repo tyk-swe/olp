@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -171,9 +172,9 @@ func codeTextContent(parent oif.Value, key string) bool {
 func (a *codeAttempt) translateResponse(ctx context.Context, w http.ResponseWriter, r *http.Request, response *http.Response, model string, stream bool, family wire.Format, includeUsage bool) {
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		refusal := codeError(r, codemode.Refuse(response.StatusCode, "code_upstream_rejected"))
-		surface := requestSurface(r)
-		w.Header().Set("Content-Length", strconv.Itoa(len(refusal.surfaceBody(surface))))
-		writeSurfaceError(w, refusal, surface)
+		surface := fault.RequestSurface(r)
+		w.Header().Set("Content-Length", strconv.Itoa(len(refusal.SurfaceBody(surface))))
+		fault.WriteSurfaceError(w, refusal, surface)
 		_ = http.NewResponseController(w).Flush()
 		if response.StatusCode == http.StatusTooManyRequests {
 			a.observeTranslatedRateLimit(ctx, response)
@@ -181,13 +182,13 @@ func (a *codeAttempt) translateResponse(ctx context.Context, w http.ResponseWrit
 		a.terminal = true
 		return
 	}
-	writer := &streamWriter{w: w, family: family}
-	completion, err := a.translatedCompletion(response, model, stream, family, includeUsage, writer.emit)
+	writer := &fault.StreamWriter{W: w, Family: family}
+	completion, err := a.translatedCompletion(response, model, stream, family, includeUsage, writer.Emit)
 	if err != nil {
 		if !a.terminal {
 			a.outcome(ctx, codemode.Outcome{Origin: "upstream", Kind: "incomplete"})
 		}
-		writer.finish(&outcome{err: &Error{Status: 502, Code: "code_upstream_invalid", Type: "api_error", Message: "code_upstream_invalid"}, cancelled: ctx.Err() != nil})
+		writer.Finish(&fault.Error{Status: 502, Code: "code_upstream_invalid", Type: "api_error", Message: "code_upstream_invalid"}, ctx.Err() != nil)
 		return
 	}
 	if stream {

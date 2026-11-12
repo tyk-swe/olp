@@ -8,6 +8,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operationplan"
@@ -15,7 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/upstream"
 )
 
-func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, operationplan.Result, *attemptFailure) {
+func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *attemptFailure) {
 	if x.guardrailEngine != nil {
 		x.guardrailCtx = ctx
 	}
@@ -30,7 +31,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 			trace.Finish(fact.Class, fact.Status)
 		}
 	}
-	fail := func(class string, f *attemptFailure) (AttemptFact, operationplan.Result, *attemptFailure) {
+	fail := func(class string, f *attemptFailure) (events.AttemptFact, operationplan.Result, *attemptFailure) {
 		if f == nil {
 			f = &attemptFailure{}
 		}
@@ -51,7 +52,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 		if fact.Interaction != nil {
 			fact.Interaction.UpstreamState = f.acceptance
 		}
-		fact.recordEvidence(f.billingUncertain())
+		fact.RecordEvidence(f.billingUncertain())
 		finish()
 		return fact, operationplan.Result{}, f
 	}
@@ -129,7 +130,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 	}
 	// Moderation and search have no usage counters; a validated result
 	// completes their evidence.
-	fact.recordEvidence(x.operationName() != "moderation" && x.operationName() != "search")
+	fact.RecordEvidence(x.operationName() != "moderation" && x.operationName() != "search")
 	finish()
 	return fact, result, nil
 }

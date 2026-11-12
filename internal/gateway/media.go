@@ -10,6 +10,9 @@ import (
 	"time"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/media/transport"
@@ -57,20 +60,20 @@ func (s *Server) mediaJSONHandler(decode func([]byte) (*media.Request, *media.Er
 		}
 		rc := http.NewResponseController(w)
 		if err := rc.SetReadDeadline(time.Now().Add(requestBodyTimeout)); err != nil {
-			s.release(r.Context())
-			s.refuse(x, w, serverError(http.StatusInternalServerError, "internal_error", "The request could not be read."))
+			s.gate.Release(r.Context())
+			s.refuse(x, w, fault.ServerError(http.StatusInternalServerError, "internal_error", "The request could not be read."))
 			return
 		}
-		body, e := s.readBody(r)
+		body, e := s.gate.ReadBody(r)
 		if e != nil {
-			s.release(r.Context())
+			s.gate.Release(r.Context())
 			s.refuse(x, w, e)
 			return
 		}
 		rc.SetReadDeadline(time.Time{})
 		request, failure := decode(body)
 		if failure != nil {
-			s.release(r.Context())
+			s.gate.Release(r.Context())
 			s.refuse(x, w, mediaError(failure))
 			return
 		}
@@ -89,14 +92,14 @@ func (s *Server) mediaFormHandler(maxFileBytes int64, maxFiles int, decode func(
 		}
 		form, e := s.parseMediaForm(w, r, authority.ID, maxFileBytes, maxFiles)
 		if e != nil {
-			s.release(r.Context())
+			s.gate.Release(r.Context())
 			s.refuse(x, w, e)
 			return
 		}
 		request, failure := decode(form)
 		if failure != nil {
 			form.Cleanup()
-			s.release(r.Context())
+			s.gate.Release(r.Context())
 			s.refuse(x, w, mediaError(failure))
 			return
 		}
@@ -106,21 +109,21 @@ func (s *Server) mediaFormHandler(maxFileBytes int64, maxFiles int, decode func(
 	}
 }
 
-func (s *Server) parseMediaForm(w http.ResponseWriter, r *http.Request, keyID string, maxFileBytes int64, maxFiles int) (*staging.Form, *Error) {
+func (s *Server) parseMediaForm(w http.ResponseWriter, r *http.Request, keyID string, maxFileBytes int64, maxFiles int) (*staging.Form, *fault.Error) {
 	limit := s.cfg.MaxMediaBodyBytes
 	if r.ContentLength > limit {
-		return nil, bodyTooLarge()
+		return nil, ingress.BodyTooLarge()
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	rc := http.NewResponseController(w)
 	if err := rc.SetReadDeadline(time.Now().Add(multipartParseDeadline)); err != nil {
-		return nil, serverError(http.StatusInternalServerError, "internal_error", "The request could not be read.")
+		return nil, fault.ServerError(http.StatusInternalServerError, "internal_error", "The request could not be read.")
 	}
 	defer rc.SetReadDeadline(time.Time{})
 	lease := s.deps.Uploads.TryAdmit(keyID, min(limit, maxFileBytes*int64(maxFiles)))
 	form, failure := staging.ParseMultipart(r.Context(), r, s.deps.Staging, lease, maxFileBytes, maxFiles)
 	if failure != nil {
-		return nil, stagingError(failure)
+		return nil, fault.StagingError(failure)
 	}
 	return form, nil
 }
@@ -130,29 +133,29 @@ func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*call, keya
 	x.semanticHeaders = semanticHeaders(r.Header)
 	query, queryErr := url.ParseQuery(r.URL.RawQuery)
 	x.semanticQuery, x.semanticQueryInvalid = query, queryErr != nil
-	if !s.admitLater(r.Context()) {
-		s.refuse(x, w, overloaded)
+	if !s.gate.AdmitLater(r.Context()) {
+		s.refuse(x, w, fault.Overloaded)
 		return x, keyauthority.Authority{}, true
 	}
-	authority, e := s.authenticate(r, "inference")
+	authority, e := s.gate.Authenticate(r, "inference")
 	if e != nil {
-		s.release(r.Context())
+		s.gate.Release(r.Context())
 		s.refuse(x, w, e)
 		return x, keyauthority.Authority{}, true
 	}
 	if x.preferences, x.priority, e = routingControls(r, authority.Policy); e != nil {
-		s.release(r.Context())
+		s.gate.Release(r.Context())
 		s.refuse(x, w, e)
 		return x, keyauthority.Authority{}, true
 	}
-	if e = s.awaitAdmission(r.Context(), x); e != nil {
-		s.release(r.Context())
+	if e = s.gate.AwaitAdmission(r.Context(), x.priority); e != nil {
+		s.gate.Release(r.Context())
 		s.refuse(x, w, e)
 		return x, keyauthority.Authority{}, true
 	}
 	s.bindAuthority(x, authority)
-	if x.attribution, e = s.parseAttribution(r, authority); e != nil {
-		s.release(r.Context())
+	if x.attribution, e = ingress.ParseAttribution(r, authority); e != nil {
+		s.gate.Release(r.Context())
 		s.refuse(x, w, e)
 		return x, keyauthority.Authority{}, true
 	}
@@ -160,7 +163,7 @@ func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*call, keya
 }
 
 func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *call, authority keyauthority.Authority, request *media.Request) {
-	defer s.release(ctx)
+	defer s.gate.Release(ctx)
 	x.media = request
 	switch request.Op() {
 	case media.OpImageEdit, media.OpImageVariation:
@@ -176,8 +179,8 @@ func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *call,
 	overall := time.Duration(x.primary.OverallTimeout) * time.Millisecond
 	ctx, cancel := x.routeContext(ctx)
 	defer cancel()
-	var e *Error
-	if x.lease, e = s.deps.Admission.reserveKey(ctx, x.admissionAuthority(authority), x.clientSurface(), x.estimate, overall, x.limitRoute()); e != nil {
+	var e *fault.Error
+	if x.lease, e = s.deps.Admission.ReserveKey(ctx, x.admissionAuthority(authority), x.clientSurface(), x.estimate, overall, x.limitRoute()); e != nil {
 		s.refuse(x, w, e)
 		return
 	}
@@ -185,8 +188,7 @@ func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *call,
 
 	out := s.executeMedia(ctx, w, x)
 	if out.err != nil {
-		status := (&streamWriter{w: w, family: x.family, committed: out.committed}).finish(
-			&outcome{err: out.err, committed: out.committed, cancelled: out.cancelled})
+		status := (&fault.StreamWriter{W: w, Family: x.family, Committed: out.committed}).Finish(out.err, out.cancelled)
 		s.finishMedia(x, out, status)
 		return
 	}
@@ -211,12 +213,12 @@ func (s *Server) cleanupUploads(request *media.Request) {
 	}
 }
 
-func (s *Server) prepareMedia(ctx context.Context, x *call, authority keyauthority.Authority) *Error {
+func (s *Server) prepareMedia(ctx context.Context, x *call, authority keyauthority.Authority) *fault.Error {
 	request := x.media
 	x.mode = request.Mode()
 	route, ok := x.snapshot().FindRoute(request.Route())
 	if !ok {
-		return modelNotFound(request.Route())
+		return fault.ModelNotFound(request.Route())
 	}
 	x.route = &route
 	authorize := s.keyAuthorizer(authority)
@@ -227,7 +229,7 @@ func (s *Server) prepareMedia(ctx context.Context, x *call, authority keyauthori
 	return s.planNamed(ctx, x)
 }
 
-func (s *Server) planMedia(ctx context.Context, x *call) *Error {
+func (s *Server) planMedia(ctx context.Context, x *call) *fault.Error {
 	if x.snapshot().GuardrailEngine(x.route.Slug, x.keyID) != nil {
 		if e := x.guardrailSurfaceGate(x.route); e != nil {
 			return e
@@ -246,7 +248,7 @@ func (s *Server) planMedia(ctx context.Context, x *call) *Error {
 	}
 	video := request.Op() == media.OpVideoCreate
 	if video && !videoLifecycle(func(op string) bool { return slices.Contains(route.Operations, op) }) {
-		return invalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow video lifecycle operations.", nil)
+		return fault.InvalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow video lifecycle operations.", nil)
 	}
 	session := s.planning(x, mediaPlanning, x.route, string(request.Op()), "openai", x.mode)
 	options := s.selectionOptions(ctx, x)
@@ -277,21 +279,21 @@ func (s *Server) planMedia(ctx context.Context, x *call) *Error {
 	return failure
 }
 
-func strictMediaContext(x *call) *Error {
+func strictMediaContext(x *call) *fault.Error {
 	if x.semanticQueryInvalid || len(x.semanticQuery) != 0 {
-		return invalidRequest("target_capability", "This native media route does not qualify caller query settings.", nil)
+		return fault.InvalidRequest("target_capability", "This native media route does not qualify caller query settings.", nil)
 	}
 	return strictMediaHeaders(x)
 }
 
-func strictMediaHeaders(x *call) *Error {
+func strictMediaHeaders(x *call) *fault.Error {
 	for name := range x.semanticHeaders {
 		canonical := http.CanonicalHeaderKey(name)
 		lower := strings.ToLower(canonical)
 		if canonical == "Idempotency-Key" || canonical == "X-Idempotency-Key" || canonical == "X-Olp-Client-Contract" || canonical == "X-Olp-Route" ||
 			strings.HasPrefix(lower, "openai-") || strings.HasPrefix(lower, "x-openai-") || strings.HasPrefix(lower, "anthropic-") || strings.HasPrefix(lower, "x-goog-") || strings.HasPrefix(lower, "x-amzn-") || canonical == "Api-Version" {
 			param := "/headers/" + canonical
-			return invalidRequest("target_capability", "This native media route does not qualify the caller's semantic header.", &param)
+			return fault.InvalidRequest("target_capability", "This native media route does not qualify the caller's semantic header.", &param)
 		}
 	}
 	return nil
@@ -337,7 +339,7 @@ func videoLifecycle(supported func(op string) bool) bool {
 
 type mediaOutcome struct {
 	result    *transport.Result
-	err       *Error
+	err       *fault.Error
 	committed bool
 	cancelled bool
 	status    int
@@ -347,7 +349,7 @@ type mediaOutcome struct {
 func (s *Server) executeMedia(ctx context.Context, w http.ResponseWriter, x *call) *mediaOutcome {
 	attempted := runAttempts(ctx, s, x, attemptAdapter[*transport.Result]{
 		estimate: func(routing.Attempt, *routing.Provider) int64 { return x.estimate },
-		dispatch: func(ctx context.Context, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, *transport.Result, *attemptFailure) {
+		dispatch: func(ctx context.Context, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, *transport.Result, *attemptFailure) {
 			return s.mediaAttempt(ctx, w, x, attempt, provider, slot, fact)
 		},
 	})
@@ -364,7 +366,7 @@ func (s *Server) executeMedia(ctx context.Context, w http.ResponseWriter, x *cal
 	return out
 }
 
-func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, *transport.Result, *attemptFailure) {
+func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, *transport.Result, *attemptFailure) {
 	attemptCtx, atr := x.request.trace.Attempt(ctx, provider.Kind, a.ProviderRevisionID, a.UpstreamModel)
 	finishTrace := func() {
 		if atr == nil {
@@ -375,7 +377,7 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *cal
 		}
 		atr.Finish(fact.Class, fact.Status)
 	}
-	fail := func(class string, f *attemptFailure) (AttemptFact, *transport.Result, *attemptFailure) {
+	fail := func(class string, f *attemptFailure) (events.AttemptFact, *transport.Result, *attemptFailure) {
 		if f == nil {
 			f = &attemptFailure{}
 		}
@@ -395,7 +397,7 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *cal
 			retry := f.retryAfter
 			fact.RetryAfter = &retry
 		}
-		fact.recordEvidence(f.billingUncertain())
+		fact.RecordEvidence(f.billingUncertain())
 		finishTrace()
 		return fact, nil, f
 	}
@@ -475,7 +477,7 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *cal
 		}
 	}
 	fact.Duration = s.now().Sub(fact.StartedAt)
-	fact.recordEvidence(true)
+	fact.RecordEvidence(true)
 	finishTrace()
 	return fact, result, nil
 }
@@ -487,7 +489,7 @@ func mediaClass(f *transport.Failure) string {
 	return string(f.Class)
 }
 
-func mediaError(failure *media.Error) *Error {
+func mediaError(failure *media.Error) *fault.Error {
 	if failure == nil {
 		return nil
 	}
@@ -495,5 +497,5 @@ func mediaError(failure *media.Error) *Error {
 	if failure.Status >= 500 {
 		typeName = "server_error"
 	}
-	return &Error{Status: failure.Status, Type: typeName, Code: failure.Code, Message: failure.Message}
+	return &fault.Error{Status: failure.Status, Type: typeName, Code: failure.Code, Message: failure.Message}
 }

@@ -11,6 +11,8 @@ import (
 	"github.com/tyk-swe/olp/internal/upstream"
 
 	"github.com/coder/websocket"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -22,14 +24,14 @@ func addUsageShare(dst **int64, share *int64) {
 	}
 	total := *share
 	if *dst != nil {
-		total = addBounded(total, **dst)
+		total = quota.AddBounded(total, **dst)
 	}
 	*dst = &total
 }
 
 func (sess *webrtcSession) accumulateUsage(u *wire.Usage) {
-	sess.usage.InputTokens = addBounded(sess.usage.InputTokens, u.InputTokens)
-	sess.usage.OutputTokens = addBounded(sess.usage.OutputTokens, u.OutputTokens)
+	sess.usage.InputTokens = quota.AddBounded(sess.usage.InputTokens, u.InputTokens)
+	sess.usage.OutputTokens = quota.AddBounded(sess.usage.OutputTokens, u.OutputTokens)
 	addUsageShare(&sess.usage.CachedInputTokens, u.CachedInputTokens)
 	addUsageShare(&sess.usage.AudioInputTokens, u.AudioInputTokens)
 	addUsageShare(&sess.usage.CachedAudioInputTokens, u.CachedAudioInputTokens)
@@ -88,20 +90,20 @@ func (s *Server) runWebRTCControl(sess *webrtcSession) {
 			if err := s.hangupWebRTCCall(sess.ctx, sess); err != nil {
 				s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
 			}
-			s.settleWebRTC(sess, serverError(http.StatusGatewayTimeout, "realtime_session_expired", "The realtime session reached its maximum duration."))
+			s.settleWebRTC(sess, fault.ServerError(http.StatusGatewayTimeout, "realtime_session_expired", "The realtime session reached its maximum duration."))
 			return
 		}
 	}
 }
 
-func (s *Server) webrtcAuthority(sess *webrtcSession) *Error {
+func (s *Server) webrtcAuthority(sess *webrtcSession) *fault.Error {
 	x := sess.x
 	authority, err := s.reauthenticateSession(sess.ctx, x, sess.token)
 	if err != nil || authority == nil || authority.ID != sess.keyID || !authority.Allows("inference", x.route.Slug, x.route.ProjectID, s.now()) || !authority.AllowsEndUser(x.endUserDigest) || (authority.WorkloadIssuerID != nil && authority.EndUserDigest != x.endUserDigest) || !authority.AllowsAttribution(x.attribution) || !authority.AllowsClientIP(x.request.clientIP) {
-		return permissionError("key_revoked", "The realtime session no longer has route authority.")
+		return fault.PermissionError("key_revoked", "The realtime session no longer has route authority.")
 	}
 	if eligibility := s.pinEligibility(sess.p); eligibility != routing.Eligible {
-		return permissionError("provider_credential_"+string(eligibility), "The realtime provider credential is no longer eligible.")
+		return fault.PermissionError("provider_credential_"+string(eligibility), "The realtime provider credential is no longer eligible.")
 	}
 	current := *authority
 	current.EndUserDigest = x.endUserDigest
@@ -119,7 +121,7 @@ func (s *Server) finishWebRTCControl(sess *webrtcSession, readErr error) {
 	if (code == websocket.StatusNormalClosure || code == websocket.StatusGoingAway) && !pending && sess.ctx.Err() == nil {
 		if err := s.hangupWebRTCCall(sess.ctx, sess); err != nil {
 			s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
-			s.settleWebRTC(sess, serverError(http.StatusBadGateway, "realtime_incomplete", "The realtime session ended without a complete transport contract."))
+			s.settleWebRTC(sess, fault.ServerError(http.StatusBadGateway, "realtime_incomplete", "The realtime session ended without a complete transport contract."))
 			sess.cancel()
 			return
 		}
@@ -131,17 +133,17 @@ func (s *Server) finishWebRTCControl(sess *webrtcSession, readErr error) {
 		if err := s.hangupWebRTCCall(sess.ctx, sess); err != nil {
 			s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
 		}
-		s.settleWebRTC(sess, serverError(http.StatusGatewayTimeout, "realtime_session_expired", "The realtime session reached its maximum duration."))
+		s.settleWebRTC(sess, fault.ServerError(http.StatusGatewayTimeout, "realtime_session_expired", "The realtime session reached its maximum duration."))
 		return
 	}
 	if err := s.hangupWebRTCCall(sess.ctx, sess); err != nil {
 		s.holdWebRTCExposure(sess.keyID, sess.started.Add(s.cfg.WebRTCBound))
 	}
-	s.settleWebRTC(sess, serverError(http.StatusBadGateway, "realtime_incomplete", "The realtime session ended without a complete transport contract."))
+	s.settleWebRTC(sess, fault.ServerError(http.StatusBadGateway, "realtime_incomplete", "The realtime session ended without a complete transport contract."))
 	sess.cancel()
 }
 
-func (s *Server) settleWebRTC(sess *webrtcSession, failure *Error) {
+func (s *Server) settleWebRTC(sess *webrtcSession, failure *fault.Error) {
 	sess.settleOnce.Do(func() {
 		defer sess.admission.Release()
 		x := sess.x
@@ -207,7 +209,7 @@ func (s *Server) settleWebRTC(sess *webrtcSession, failure *Error) {
 		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(sess.ctx), webrtcCloseTimeout)
 		s.settlePinHold(settleCtx, x, sess.p.hold, settled)
 		s.recordCost(x)
-		settleKey(settleCtx, x.lease, x.dispatched, settled, s.log)
+		quota.SettleKey(settleCtx, x.lease, x.dispatched, settled, s.log)
 		s.settleCaps(settleCtx, x)
 		cancel()
 		s.unregisterWebRTCSession(sess.id)

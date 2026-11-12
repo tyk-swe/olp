@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
@@ -22,10 +23,10 @@ func (s *Server) selectionOptions(ctx context.Context, x *call) routing.Options 
 		CheckSlots: true, CredentialEligibility: s.deps.Runtime.Eligibility,
 		UnconfinedPlugins: s.cfg.UnconfinedPlugins, Context: ctx,
 	}
-	if s.deps.Admission.ready() {
+	if s.deps.Admission.Ready() {
 		options.Supply = s.deps.Admission
 	}
-	if s.fleet.marked() {
+	if s.fleet.Marked() {
 		options.Unhealthy = s.unhealthy
 	}
 	options.Mirror = x.mirrorSeed()
@@ -82,7 +83,7 @@ func (s *Server) planning(x *call, kind planningKind, route *routing.Route, oper
 	return &planningSession{server: s, call: x, kind: kind, route: route, operation: operation, surface: surface, mode: mode}
 }
 
-func (p *planningSession) selectPlan(ctx context.Context, options routing.Options) (routing.Plan, bool, *Error) {
+func (p *planningSession) selectPlan(ctx context.Context, options routing.Options) (routing.Plan, bool, *fault.Error) {
 	x := p.call
 	plan, err := routing.Select(x.snapshot(), p.route.Slug, p.operation, p.surface, p.mode, x.affinity, options)
 	if err != nil {
@@ -119,7 +120,7 @@ func (p *planningSession) selectPlan(ctx context.Context, options routing.Option
 	if p.kind == canonicalPlanning && x.strict() {
 		for _, decision := range plan.Decisions {
 			if decision.Reason != nil && (*decision.Reason == "max_output_tokens_exceeded" || *decision.Reason == "context_length_exceeded") {
-				return plan, false, invalidRequest(*decision.Reason, "The effective invocation exceeds a declared model limit; its controls were not reduced.", nil)
+				return plan, false, fault.InvalidRequest(*decision.Reason, "The effective invocation exceeds a declared model limit; its controls were not reduced.", nil)
 			}
 		}
 	}

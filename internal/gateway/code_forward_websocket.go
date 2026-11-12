@@ -15,6 +15,8 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -45,7 +47,7 @@ func codeRead(ctx context.Context, conn *websocket.Conn) <-chan codeMessage {
 }
 
 func codeWrite(ctx context.Context, conn *websocket.Conn, kind websocket.MessageType, body []byte) error {
-	ctx, cancel := context.WithTimeout(ctx, responseWriteTimeout)
+	ctx, cancel := context.WithTimeout(ctx, fault.ResponseWriteTimeout)
 	defer cancel()
 	return conn.Write(ctx, kind, body)
 }
@@ -64,9 +66,9 @@ type codeWebSocketHandshake struct {
 	target     string
 }
 
-func (s *Server) prepareCodeWebSocket(r *http.Request, release *release.Release, route codemode.Route, authority keyauthority.Authority, ingress codeIngress) (codeWebSocketHandshake, error) {
+func (s *Server) prepareCodeWebSocket(r *http.Request, release *release.Release, route codemode.Route, authority keyauthority.Authority, inbound codeIngress) (codeWebSocketHandshake, error) {
 	var handshake codeWebSocketHandshake
-	identity, err := codeConnectionIdentity(ingress, r.Header)
+	identity, err := codeConnectionIdentity(inbound, r.Header)
 	if err != nil {
 		return handshake, err
 	}
@@ -84,7 +86,7 @@ func (s *Server) prepareCodeWebSocket(r *http.Request, release *release.Release,
 			return handshake, codemode.Refuse(400, "code_paid_operation_unsupported")
 		}
 	}
-	permit, err := s.deps.CodeLedger.BindConnection(r.Context(), route, authority.ID, identity, r.Header.Get("X-OLP-Code-Model"), release.Snapshot().CodeProviders(route, ingress.path, codeadapter.WebSocket))
+	permit, err := s.deps.CodeLedger.BindConnection(r.Context(), route, authority.ID, identity, r.Header.Get("X-OLP-Code-Model"), release.Snapshot().CodeProviders(route, inbound.path, codeadapter.WebSocket))
 	if err != nil {
 		return handshake, err
 	}
@@ -100,15 +102,15 @@ func (s *Server) prepareCodeWebSocket(r *http.Request, release *release.Release,
 	if err := bindCodeWorkload(&permit.Authority, authority); err != nil {
 		return handshake, err
 	}
-	labels, failure := s.parseAttribution(r, permit.Authority)
+	labels, failure := ingress.ParseAttribution(r, permit.Authority)
 	if failure != nil {
 		return handshake, codemode.Refuse(failure.Status, "code_"+failure.Code)
 	}
 	handshake.labels = labels
-	if failure := s.checkKeyAddress(r, permit.Authority); failure != nil {
+	if failure := s.gate.CheckKeyAddress(r, permit.Authority); failure != nil {
 		return handshake, codemode.Refuse(failure.Status, "code_ip_not_allowed")
 	}
-	target, err := resolveCodeTarget(release.Snapshot(), route, permit.Account.ProviderID, ingress, codeadapter.WebSocket)
+	target, err := resolveCodeTarget(release.Snapshot(), route, permit.Account.ProviderID, inbound, codeadapter.WebSocket)
 	if err != nil {
 		return handshake, err
 	}
@@ -136,14 +138,14 @@ func (s *Server) prepareCodeWebSocket(r *http.Request, release *release.Release,
 	return handshake, nil
 }
 
-func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *release.Release, route codemode.Route, authority keyauthority.Authority, ingress codeIngress) {
+func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *release.Release, route codemode.Route, authority keyauthority.Authority, inbound codeIngress) {
 	keyID, digest := authority.ID, authority.EndUserDigest
 	reject := func(err error) { s.codeRefuse(w, r, route, keyID, digest, err) }
 	if r.Header.Get("Sec-Websocket-Protocol") != "" {
 		reject(codemode.Refuse(400, "code_protocol_unsupported"))
 		return
 	}
-	handshake, err := s.prepareCodeWebSocket(r, release, route, authority, ingress)
+	handshake, err := s.prepareCodeWebSocket(r, release, route, authority, inbound)
 	if err != nil {
 		reject(err)
 		return
@@ -220,7 +222,7 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 	for {
 		select {
 		case <-authorityTick:
-			fresh, problem := s.authenticate(r, "inference")
+			fresh, problem := s.gate.Authenticate(r, "inference")
 			if problem != nil || fresh.ID != keyID || fresh.EndUserDigest != digest || !fresh.Allows("inference", route.Slug, &route.ProjectID, s.now()) || !fresh.AllowsAttribution(labels) {
 				refuse(codemode.Refuse(403, "code_authority_revoked"))
 				return
@@ -245,7 +247,7 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 				refuse(codemode.Refuse(409, "code_generation_pending"))
 				return
 			}
-			observation, err := classifyCode(ingress, message.body, r.Header, true)
+			observation, err := classifyCode(inbound, message.body, r.Header, true)
 			if err != nil {
 				refuse(err)
 				return
@@ -254,7 +256,7 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 				refuse(codemode.Refuse(409, "code_identity_changed"))
 				return
 			}
-			active, err = s.prepareCode(r.WithContext(ctx), release, route, observation, ingress, codeadapter.WebSocket, nil, message.body)
+			active, err = s.prepareCode(r.WithContext(ctx), release, route, observation, inbound, codeadapter.WebSocket, nil, message.body)
 			if err != nil {
 				refuse(err)
 				return
@@ -346,7 +348,7 @@ func forwardCodeHandshakeRejection(ctx context.Context, w http.ResponseWriter, a
 		w.Header().Add("Trailer", name)
 	}
 	w.WriteHeader(response.StatusCode)
-	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
 	writer := flushingHandshakeWriter{w}
 	body, readErr := io.ReadAll(io.TeeReader(io.LimitReader(response.Body, codewire.MaxBody+1), writer))
 	if readErr == nil {

@@ -1,4 +1,4 @@
-package gateway
+package quota
 
 import (
 	"cmp"
@@ -6,11 +6,12 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"slices"
 	"sync/atomic"
 	"time"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
@@ -73,10 +74,10 @@ func (a *Admission) BudgetRejections(dimension limits.Dimension) int64 {
 	return 0
 }
 
-// recordRejection counts the windows Prometheus reports. Rate and concurrency
+// RecordRejection counts the windows Prometheus reports. Rate and concurrency
 // rejections are per-request churn; cost budget rejections are the durable
 // evidence that a budget stopped spend.
-func (a *Admission) recordRejection(dimension limits.Dimension) {
+func (a *Admission) RecordRejection(dimension limits.Dimension) {
 	switch dimension {
 	case limits.DimensionDailyCost:
 		a.dailyBudgetRejections.Add(1)
@@ -88,9 +89,9 @@ func (a *Admission) recordRejection(dimension limits.Dimension) {
 }
 
 const (
-	// reserveTimeout bounds one admission decision. A limiter that cannot
+	// ReserveTimeout bounds one admission decision. A limiter that cannot
 	// answer this quickly is an outage, not a slow allow.
-	reserveTimeout = time.Second
+	ReserveTimeout = time.Second
 	// coordinationTimeout bounds the cooldown reads and writes that are
 	// advisory: the request proceeds either way.
 	coordinationTimeout = 250 * time.Millisecond
@@ -99,31 +100,31 @@ const (
 	maxConcurrencyRetryHint = 5 * time.Second
 )
 
-func (a *Admission) ready() bool { return a != nil && a.limiter != nil }
+func (a *Admission) Ready() bool { return a != nil && a.limiter != nil }
 
-func (a *Admission) logger() *slog.Logger {
+func (a *Admission) Logger() *slog.Logger {
 	if a == nil || a.log == nil {
 		return slog.Default()
 	}
 	return a.log
 }
 
-// limitsUnavailable is the terminal answer when a budget that must be enforced
+// LimitsUnavailable is the terminal answer when a budget that must be enforced
 // cannot be consulted.
-func limitsUnavailable() *Error {
-	return serverError(http.StatusServiceUnavailable, "distributed_limits_unavailable", "Request limits cannot be enforced right now; retry shortly.")
+func LimitsUnavailable() *fault.Error {
+	return fault.ServerError(http.StatusServiceUnavailable, "distributed_limits_unavailable", "Request limits cannot be enforced right now; retry shortly.")
 }
 
-// rateLimited renders the rejection a shared budget produced. estimate says a
+// RateLimited renders the rejection a shared budget produced. estimate says a
 // cost budget refused the request although it is not spent: the request's own
 // estimated cost does not fit beside what is accrued and in flight.
-func rateLimited(dimension limits.Dimension, retryAfter time.Duration, estimate bool) *Error {
-	return rateLimitedBasis(dimension, retryAfter, estimate, limits.BasisCost)
+func RateLimited(dimension limits.Dimension, retryAfter time.Duration, estimate bool) *fault.Error {
+	return RateLimitedBasis(dimension, retryAfter, estimate, limits.BasisCost)
 }
 
-// rateLimitedBasis is rateLimited for a refusal under an owner's basis: a
+// RateLimitedBasis is RateLimited for a refusal under an owner's basis: a
 // charge-basis budget names its measure.
-func rateLimitedBasis(dimension limits.Dimension, retryAfter time.Duration, estimate bool, basis limits.Basis) *Error {
+func RateLimitedBasis(dimension limits.Dimension, retryAfter time.Duration, estimate bool, basis limits.Basis) *fault.Error {
 	code, message := "rate_limit_exceeded", "The API key rate limit was exceeded."
 	switch dimension {
 	case limits.DimensionRequests:
@@ -148,7 +149,7 @@ func rateLimitedBasis(dimension limits.Dimension, retryAfter time.Duration, esti
 			message = "The API key " + budgetKind + " was exhausted. Unpriced attempts accrue 0."
 		}
 	}
-	return &Error{
+	return &fault.Error{
 		Status:     http.StatusTooManyRequests,
 		Type:       "rate_limit_error",
 		Code:       code,
@@ -205,26 +206,26 @@ func groupRequest(authority *keyauthority.Authority, estimate int64, ttl time.Du
 	return &request
 }
 
-// reserveKey admits one request against the API key budgets. A nil lease with
+// ReserveKey admits one request against the API key budgets. A nil lease with
 // a nil error admits the request without one: either the key bounds nothing,
 // or the limiter is unreachable and the installation chose to fail open. The
 // surface is the one the caller speaks, whose headers report the key's allowance
 // if it has any.
-func (a *Admission) reserveKey(ctx context.Context, authority keyauthority.Authority, surface string, estimate int64, ttl time.Duration, route ...string) (*admission.Lease, *Error) {
-	return a.reserveKeyCosted(ctx, &authority, surface, estimate, ttl, costReservation{}, route...)
+func (a *Admission) ReserveKey(ctx context.Context, authority keyauthority.Authority, surface string, estimate int64, ttl time.Duration, route ...string) (*admission.Lease, *fault.Error) {
+	return a.ReserveKeyCosted(ctx, &authority, surface, estimate, ttl, CostReservation{}, route...)
 }
 
-// reserveKeyCosted applies all configured caller boundaries and attaches their
+// ReserveKeyCosted applies all configured caller boundaries and attaches their
 // leases for one settlement. Every refusal refunds earlier reservations. The
 // optional route identifies the ingress route for per-key route policy.
-func (a *Admission) reserveKeyCosted(ctx context.Context, authority *keyauthority.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*admission.Lease, *Error) {
+func (a *Admission) ReserveKeyCosted(ctx context.Context, authority *keyauthority.Authority, surface string, estimate int64, ttl time.Duration, hold CostReservation, route ...string) (*admission.Lease, *fault.Error) {
 	if authority.DelegationAgentLimits == nil && keyBoundariesOnly(authority) && authority.BudgetGroupID == nil && !keyHasHardLimits(&authority.Policy) {
 		return nil, nil
 	}
 	return a.reserveKeyWithLimits(ctx, authority, surface, estimate, ttl, hold, route...)
 }
 
-func (a *Admission) reserveKeyWithLimits(ctx context.Context, authority *keyauthority.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*admission.Lease, *Error) {
+func (a *Admission) reserveKeyWithLimits(ctx context.Context, authority *keyauthority.Authority, surface string, estimate int64, ttl time.Duration, hold CostReservation, route ...string) (*admission.Lease, *fault.Error) {
 	if authority.DelegationAgentLimits == nil {
 		return a.reserveCallerLimits(ctx, authority, surface, estimate, ttl, hold, route...)
 	}
@@ -245,7 +246,7 @@ func (a *Admission) reserveKeyWithLimits(ctx context.Context, authority *keyauth
 	}
 	lease, failure := a.reserveCallerLimits(ctx, authority, surface, estimate, ttl, hold, route...)
 	if failure != nil {
-		settleKey(ctx, agentLease, false, nil, a.logger())
+		SettleKey(ctx, agentLease, false, nil, a.Logger())
 		return nil, failure
 	}
 	if lease == nil {
@@ -255,21 +256,21 @@ func (a *Admission) reserveKeyWithLimits(ctx context.Context, authority *keyauth
 	return lease, nil
 }
 
-func (a *Admission) reserveCallerLimits(ctx context.Context, authority *keyauthority.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*admission.Lease, *Error) {
+func (a *Admission) reserveCallerLimits(ctx context.Context, authority *keyauthority.Authority, surface string, estimate int64, ttl time.Duration, hold CostReservation, route ...string) (*admission.Lease, *fault.Error) {
 	// Every cost boundary checks shared accounting evidence just before it
 	// spends against it, once per request, so keys without budgets stay free.
 	costChecked := false
 	if keyBoundariesOnly(authority) {
 		return a.reserveKeyAndGroup(ctx, authority, surface, estimate, ttl, hold, &costChecked)
 	}
-	aggregate, err := a.reserveAggregateBudgets(ctx, authority, ttl, hold, &costChecked)
+	aggregate, err := a.ReserveAggregateBudgets(ctx, authority, ttl, hold, &costChecked)
 	if err != nil {
 		return nil, err
 	}
 
 	endUsers, err := a.reserveEndUsers(ctx, authority, estimate, ttl, hold, &costChecked)
 	if err != nil {
-		settleKey(ctx, aggregate, false, nil, a.logger())
+		SettleKey(ctx, aggregate, false, nil, a.Logger())
 		return nil, err
 	}
 	if endUsers == nil {
@@ -281,9 +282,9 @@ func (a *Admission) reserveCallerLimits(ctx context.Context, authority *keyautho
 	if len(route) > 0 {
 		named = route[0]
 	}
-	routeLease, refusal := a.reserveRouteLimits(ctx, authority, named, estimate, ttl, hold, &costChecked)
+	routeLease, refusal := a.ReserveRouteLimits(ctx, authority, named, estimate, ttl, hold, &costChecked)
 	if refusal != nil {
-		settleKey(ctx, endUsers, false, nil, a.logger())
+		SettleKey(ctx, endUsers, false, nil, a.Logger())
 		return nil, refusal
 	}
 	if routeLease != nil {
@@ -292,7 +293,7 @@ func (a *Admission) reserveCallerLimits(ctx context.Context, authority *keyautho
 	}
 	lease, failure := a.reserveKeyAndGroup(ctx, authority, surface, estimate, ttl, hold, &costChecked)
 	if failure != nil {
-		settleKey(ctx, endUsers, false, nil, a.logger())
+		SettleKey(ctx, endUsers, false, nil, a.Logger())
 		return nil, failure
 	}
 	if lease == nil {
@@ -304,36 +305,36 @@ func (a *Admission) reserveCallerLimits(ctx context.Context, authority *keyautho
 
 // checkCostAccountingOnce runs the shared accounting check the first time a
 // request's cost boundary needs it.
-func (a *Admission) checkCostAccountingOnce(ctx context.Context, checked *bool) *Error {
+func (a *Admission) checkCostAccountingOnce(ctx context.Context, checked *bool) *fault.Error {
 	if *checked {
 		return nil
 	}
 	*checked = true
-	return a.checkCostAccounting(ctx)
+	return a.CheckCostAccounting(ctx)
 }
 
-func (a *Admission) checkCostAccounting(ctx context.Context) *Error {
+func (a *Admission) CheckCostAccounting(ctx context.Context) *fault.Error {
 	if a == nil || a.CostAccountingReady == nil {
 		return nil
 	}
-	check, cancel := context.WithTimeout(ctx, reserveTimeout)
+	check, cancel := context.WithTimeout(ctx, ReserveTimeout)
 	defer cancel()
 	if err := a.CostAccountingReady(check); err != nil {
-		return serverError(http.StatusServiceUnavailable, "cost_accounting_incomplete", "Cost budgets cannot admit work while accounting is incomplete.")
+		return fault.ServerError(http.StatusServiceUnavailable, "cost_accounting_incomplete", "Cost budgets cannot admit work while accounting is incomplete.")
 	}
 	return nil
 }
 
 // Known accepted generations have a durable owner even when their final usage
 // has not arrived. A newly enabled cost budget cannot assume that work cost zero.
-func (a *Admission) checkPendingCostAccounting(ctx context.Context, owner string) *Error {
+func (a *Admission) CheckPendingCostAccounting(ctx context.Context, owner string) *fault.Error {
 	if a == nil || a.PendingCostAccountingReady == nil {
 		return nil
 	}
-	check, cancel := context.WithTimeout(ctx, reserveTimeout)
+	check, cancel := context.WithTimeout(ctx, ReserveTimeout)
 	defer cancel()
 	if err := a.PendingCostAccountingReady(check, owner); err != nil {
-		return serverError(http.StatusServiceUnavailable, "cost_accounting_incomplete", "Cost budgets cannot admit work while accounting is incomplete.")
+		return fault.ServerError(http.StatusServiceUnavailable, "cost_accounting_incomplete", "Cost budgets cannot admit work while accounting is incomplete.")
 	}
 	return nil
 }
@@ -351,7 +352,7 @@ func keyHasHardLimits(policy *keyauthority.KeyPolicy) bool {
 		policy.DailyCostLimit != nil || policy.MonthlyCostLimit != nil || policy.WeeklyCostLimit != nil
 }
 
-func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *keyauthority.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, costChecked *bool) (*admission.Lease, *Error) {
+func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *keyauthority.Authority, surface string, estimate int64, ttl time.Duration, hold CostReservation, costChecked *bool) (*admission.Lease, *fault.Error) {
 	var group *admission.Lease
 	if request := groupRequest(authority, estimate, ttl); request != nil {
 		if request.Rate.TokensPerMinute != nil {
@@ -363,25 +364,25 @@ func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *keyauthor
 			if e := a.checkCostAccountingOnce(ctx, costChecked); e != nil {
 				return nil, e
 			}
-			if e := a.checkPendingCostAccounting(ctx, request.Cost.Owner.ID); e != nil {
+			if e := a.CheckPendingCostAccounting(ctx, request.Cost.Owner.ID); e != nil {
 				return nil, e
 			}
 		}
-		if !a.ready() {
-			return nil, limitsUnavailable()
+		if !a.Ready() {
+			return nil, LimitsUnavailable()
 		}
 		if request.Rate.TokensPerMinute != nil && estimate > *request.Rate.TokensPerMinute {
-			return nil, invalidRequest("request_exceeds_token_limit", "This request exceeds the budget group token limit.", nil)
+			return nil, fault.InvalidRequest("request_exceeds_token_limit", "This request exceeds the budget group token limit.", nil)
 		}
-		decision, cancel := context.WithTimeout(ctx, reserveTimeout)
-		lease, err := a.limiter.Reserve(decision, hold.on(*request))
+		decision, cancel := context.WithTimeout(ctx, ReserveTimeout)
+		lease, err := a.limiter.Reserve(decision, hold.On(*request))
 		cancel()
 		if err != nil {
 			if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
-				a.recordRejection(exceeded.Dimension)
-				return nil, budgetBoundaryError(rateLimitedBasis(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate, exceeded.Basis), "budget group", "budget_group")
+				a.RecordRejection(exceeded.Dimension)
+				return nil, budgetBoundaryError(RateLimitedBasis(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate, exceeded.Basis), "budget group", "budget_group")
 			}
-			if failure := a.outage(authority.ID, request.Cost != nil, err); failure != nil {
+			if failure := a.Outage(authority.ID, request.Cost != nil, err); failure != nil {
 				return nil, failure
 			}
 		}
@@ -394,33 +395,33 @@ func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *keyauthor
 	}
 	stated := keyRequest(*authority, estimate, ttl)
 	// A surface whose SDKs read no rate-limit headers is not answered an allowance nothing would write.
-	request := hold.on(admission.Request{Lookup: stated.Lookup, LeaseTTL: ttl, Cost: stated.Cost, Rate: reporting(stated.Rate, rateHeadersOf(surface) != nil)})
+	request := hold.On(admission.Request{Lookup: stated.Lookup, LeaseTTL: ttl, Cost: stated.Cost, Rate: reporting(stated.Rate, fault.ReportsRate(surface))})
 	if request.Rate.TokensPerMinute != nil {
 		if e := a.checkPendingTokenAccounting(ctx, authority.ID); e != nil {
-			settleKey(ctx, group, false, nil, a.logger())
+			SettleKey(ctx, group, false, nil, a.Logger())
 			return nil, e
 		}
 	}
 	if request.Cost != nil {
 		if e := a.checkCostAccountingOnce(ctx, costChecked); e != nil {
-			settleKey(ctx, group, false, nil, a.logger())
+			SettleKey(ctx, group, false, nil, a.Logger())
 			return nil, e
 		}
-		if e := a.checkPendingCostAccounting(ctx, authority.ID); e != nil {
-			settleKey(ctx, group, false, nil, a.logger())
+		if e := a.CheckPendingCostAccounting(ctx, authority.ID); e != nil {
+			SettleKey(ctx, group, false, nil, a.Logger())
 			return nil, e
 		}
 	}
-	if !a.ready() {
-		return nil, limitsUnavailable()
+	if !a.Ready() {
+		return nil, LimitsUnavailable()
 	}
 	if request.Rate.TokensPerMinute != nil && estimate > *request.Rate.TokensPerMinute {
 		// No window will ever hold this request: answer now rather than make
 		// the caller retry into a limit it cannot satisfy.
-		settleKey(ctx, group, false, nil, a.logger())
-		return nil, invalidRequest("request_exceeds_token_limit", "This request needs more tokens than the API key tokens per minute limit allows.", nil)
+		SettleKey(ctx, group, false, nil, a.Logger())
+		return nil, fault.InvalidRequest("request_exceeds_token_limit", "This request needs more tokens than the API key tokens per minute limit allows.", nil)
 	}
-	decision, cancel := context.WithTimeout(ctx, reserveTimeout)
+	decision, cancel := context.WithTimeout(ctx, ReserveTimeout)
 	defer cancel()
 	lease, err := a.limiter.Reserve(decision, request)
 	if err == nil {
@@ -428,17 +429,17 @@ func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *keyauthor
 		return lease, nil
 	}
 	if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
-		a.recordRejection(exceeded.Dimension)
-		settleKey(ctx, group, false, nil, a.logger())
+		a.RecordRejection(exceeded.Dimension)
+		SettleKey(ctx, group, false, nil, a.Logger())
 		// Only the key's own request and token limits state an allowance, and
 		// only its rejection reports it: a budget group has none, and the quota
 		// of a provider is not the caller's.
-		e := rateLimitedBasis(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate, exceeded.Basis)
-		e.rate = exceeded.Rate
+		e := RateLimitedBasis(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate, exceeded.Basis)
+		e.Rate = exceeded.Rate
 		return nil, e
 	}
-	if e := a.outage(authority.ID, request.Cost != nil, err); e != nil {
-		settleKey(ctx, group, false, nil, a.logger())
+	if e := a.Outage(authority.ID, request.Cost != nil, err); e != nil {
+		SettleKey(ctx, group, false, nil, a.Logger())
 		return nil, e
 	}
 	// Failing open admits the request without the key's own reservation, but the
@@ -446,21 +447,21 @@ func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *keyauthor
 	return group, nil
 }
 
-// outage decides what happens to a request whose budgets cannot be consulted.
+// Outage decides what happens to a request whose budgets cannot be consulted.
 // Spending against an unknown balance can never be undone, so a cost budget
 // always fails closed; rate and concurrency limits follow the policy the
 // installation configured.
-func (a *Admission) outage(keyID string, costBudget bool, cause error) *Error {
+func (a *Admission) Outage(keyID string, costBudget bool, cause error) *fault.Error {
 	var service *limits.ServiceError
 	if !errors.As(cause, &service) || costBudget || a == nil || a.policy == nil || a.policy() != admission.FailOpen {
-		return limitsUnavailable()
+		return LimitsUnavailable()
 	}
 	a.failOpen.Add(1)
-	a.logger().Warn("admitting request without distributed limits", "api_key_id", keyID, "error", cause.Error())
+	a.Logger().Warn("admitting request without distributed limits", "api_key_id", keyID, "error", cause.Error())
 	return nil
 }
 
-// settleKey finishes the key reservation. A request that never dispatched an
+// SettleKey finishes the key reservation. A request that never dispatched an
 // attempt consumed nothing and is refunded in full; any other request keeps
 // its request and local token allowance, increases tokens for higher reported
 // usage, and returns the concurrency slot. The cost
@@ -474,7 +475,7 @@ func (a *Admission) outage(keyID string, costBudget bool, cause error) *Error {
 // The caller's context may already be cancelled — the client may have hung up,
 // which is exactly when the slot has to come back — so cancellation is dropped
 // and every step is retried on the caller's behalf by the limiter.
-func settleKey(ctx context.Context, lease *admission.Lease, dispatched bool, actual *int64, log *slog.Logger) {
+func SettleKey(ctx context.Context, lease *admission.Lease, dispatched bool, actual *int64, log *slog.Logger) {
 	if lease == nil {
 		return
 	}
@@ -498,20 +499,38 @@ func settleKey(ctx context.Context, lease *admission.Lease, dispatched bool, act
 	}
 }
 
-// targetReservation holds what one attempt reserved on its provider.
-type targetReservation struct {
+type TargetRefusal struct {
+	Quota      string
+	RetryAfter time.Duration
+}
+
+func (a *Admission) Reserve(ctx context.Context, request admission.Request) (*admission.Lease, error) {
+	return a.limiter.Reserve(ctx, request)
+}
+
+func (a *Admission) InstallSnapshots(ctx context.Context, snapshots []limits.Snapshot) error {
+	if !a.Ready() {
+		return nil
+	}
+	return a.limiter.InstallSnapshots(ctx, snapshots)
+}
+
+func (a *Admission) Fleet() *fleet.State { return a.fleet }
+
+// TargetReservation holds what one attempt reserved on its provider.
+type TargetReservation struct {
 	connection *admission.Lease
 	slot       *admission.Lease
 	log        *slog.Logger
 }
 
-// settle reconciles and releases both leases once the attempt has ended.
-func (t *targetReservation) settle(ctx context.Context, dispatched bool, actual *int64) {
+// Settle reconciles and releases both leases once the attempt has ended.
+func (t *TargetReservation) Settle(ctx context.Context, dispatched bool, actual *int64) {
 	if t == nil {
 		return
 	}
-	settleKey(ctx, t.connection, dispatched, actual, t.log)
-	settleKey(ctx, t.slot, dispatched, actual, t.log)
+	SettleKey(ctx, t.connection, dispatched, actual, t.log)
+	SettleKey(ctx, t.slot, dispatched, actual, t.log)
 }
 
 func quotaRequest(lookup string, rate admission.RateLimits, ttl time.Duration) admission.Request {
@@ -535,12 +554,12 @@ func slotRequest(slot *routing.Slot, estimate int64, ttl time.Duration, priority
 	}, ttl)
 }
 
-// reserveTarget admits one attempt against the provider connection quota and
+// ReserveTarget admits one attempt against the provider connection quota and
 // then the credential slot quota. It returns the reservation the attempt must
 // settle, or a rejection to record as a failed attempt, or skip when a quota
 // is configured but cannot be consulted: an unmeterable target is passed over
 // so a sibling can serve, never used unmetered.
-func (a *Admission) reserveTarget(ctx context.Context, provider *routing.Provider, slot *routing.Slot, estimate int64, ttl time.Duration, priority string) (reservation *targetReservation, rejection *attemptFailure, skip bool) {
+func (a *Admission) ReserveTarget(ctx context.Context, provider *routing.Provider, slot *routing.Slot, estimate int64, ttl time.Duration, priority string) (reservation *TargetReservation, rejection *TargetRefusal, skip bool) {
 	if provider.Limits != nil && provider.Limits.TokensPerMinute != nil {
 		if a.checkPendingTokenAccounting(ctx, provider.ID) != nil {
 			return nil, nil, true
@@ -556,20 +575,20 @@ func (a *Admission) reserveTarget(ctx context.Context, provider *routing.Provide
 	if !connection.HasHardLimits() && !credential.HasHardLimits() {
 		return nil, nil, false
 	}
-	if !a.ready() {
-		a.logger().Warn("skipping target with unenforceable quotas", "provider_id", provider.ID, "slot_id", slot.ID)
+	if !a.Ready() {
+		a.Logger().Warn("skipping target with unenforceable quotas", "provider_id", provider.ID, "slot_id", slot.ID)
 		return nil, nil, true
 	}
-	reservation = &targetReservation{log: a.logger()}
+	reservation = &TargetReservation{log: a.Logger()}
 	for _, step := range [...]struct {
 		request admission.Request
 		lease   **admission.Lease
 		quota   string
-	}{{connection, &reservation.connection, quotaConnection}, {credential, &reservation.slot, quotaSlot}} {
+	}{{connection, &reservation.connection, Connection}, {credential, &reservation.slot, Slot}} {
 		if !step.request.HasHardLimits() {
 			continue
 		}
-		decision, cancel := context.WithTimeout(ctx, reserveTimeout)
+		decision, cancel := context.WithTimeout(ctx, ReserveTimeout)
 		lease, err := a.limiter.Reserve(decision, step.request)
 		cancel()
 		if err == nil {
@@ -580,25 +599,25 @@ func (a *Admission) reserveTarget(ctx context.Context, provider *routing.Provide
 		// is abandoned: the attempt never happened.
 		settleTargetRefund(ctx, reservation)
 		if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
-			return nil, &attemptFailure{class: classRateLimit, quota: step.quota, retryAfter: retryHint(exceeded.Dimension, exceeded.RetryAfter)}, false
+			return nil, &TargetRefusal{Quota: step.quota, RetryAfter: retryHint(exceeded.Dimension, exceeded.RetryAfter)}, false
 		}
-		a.logger().Warn("skipping target with unenforceable quotas", "provider_id", provider.ID, "slot_id", slot.ID, "error", err.Error())
+		a.Logger().Warn("skipping target with unenforceable quotas", "provider_id", provider.ID, "slot_id", slot.ID, "error", err.Error())
 		return nil, nil, true
 	}
 	return reservation, nil, false
 }
 
 // settleTargetRefund returns everything a partially reserved attempt took.
-func settleTargetRefund(ctx context.Context, reservation *targetReservation) {
-	settleKey(ctx, reservation.connection, false, nil, reservation.log)
-	settleKey(ctx, reservation.slot, false, nil, reservation.log)
+func settleTargetRefund(ctx context.Context, reservation *TargetReservation) {
+	SettleKey(ctx, reservation.connection, false, nil, reservation.log)
+	SettleKey(ctx, reservation.slot, false, nil, reservation.log)
 }
 
-// cooldown records a shared cooldown for the credential and for the slot, so
+// Cooldown records a shared cooldown for the credential and for the slot, so
 // every replica avoids a target the upstream just rejected instead of each
 // learning it alone.
-func (a *Admission) cooldown(ctx context.Context, providerID string, slot *routing.Slot, generation int64, d time.Duration, credential bool) {
-	if !a.ready() || d <= 0 {
+func (a *Admission) Cooldown(ctx context.Context, providerID string, slot *routing.Slot, generation int64, d time.Duration, credential bool) {
+	if !a.Ready() || d <= 0 {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), coordinationTimeout)
@@ -609,36 +628,36 @@ func (a *Admission) cooldown(ctx context.Context, providerID string, slot *routi
 	}
 	{
 		if err := a.fleet.Cooldown(ctx, scope, d); err != nil {
-			a.logger().Warn("shared cooldown not recorded", "provider_id", providerID, "slot_id", slot.ID, "error", err.Error())
+			a.Logger().Warn("shared cooldown not recorded", "provider_id", providerID, "slot_id", slot.ID, "error", err.Error())
 		}
 	}
 }
 
-// endCredentialCooldown ends a credential version's shared cooldown before it
+// EndCredentialCooldown ends a credential version's shared cooldown before it
 // runs out, for every replica.
-func (a *Admission) endCredentialCooldown(ctx context.Context, providerID, credentialID string, generation int64) {
-	if !a.ready() {
+func (a *Admission) EndCredentialCooldown(ctx context.Context, providerID, credentialID string, generation int64) {
+	if !a.Ready() {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), coordinationTimeout)
 	defer cancel()
 	if err := a.fleet.Cooldown(ctx, fleet.CredentialScope(providerID, &credentialID, generation), 0); err != nil {
-		a.logger().Warn("shared cooldown not ended", "provider_id", providerID, "credential_id", credentialID, "error", err.Error())
+		a.Logger().Warn("shared cooldown not ended", "provider_id", providerID, "credential_id", credentialID, "error", err.Error())
 	}
 }
 
-// cooling reports whether another replica put this credential or slot in a
+// Cooling reports whether another replica put this credential or slot in a
 // cooldown. A store that cannot answer must not take every slot out of
 // service, so an unreadable cooldown is treated as absent and logged.
-func (a *Admission) cooling(ctx context.Context, providerID string, slot *routing.Slot, generation int64) bool {
-	if !a.ready() {
+func (a *Admission) Cooling(ctx context.Context, providerID string, slot *routing.Slot, generation int64) bool {
+	if !a.Ready() {
 		return false
 	}
 	ctx, cancel := context.WithTimeout(ctx, coordinationTimeout)
 	defer cancel()
 	cooling, err := a.fleet.Cooling(ctx, fleet.CredentialScope(providerID, slot.CredentialID, generation), fleet.SlotScope(slot.ID))
 	if err != nil {
-		a.logger().Warn("shared cooldown not read", "provider_id", providerID, "slot_id", slot.ID, "error", err.Error())
+		a.Logger().Warn("shared cooldown not read", "provider_id", providerID, "slot_id", slot.ID, "error", err.Error())
 		return false
 	}
 	return cooling
@@ -647,65 +666,28 @@ func (a *Admission) cooling(ctx context.Context, providerID string, slot *routin
 // maxEstimate is the largest integer the limiter can store.
 const maxEstimate = estimate.MaxTokens
 
-// requestEstimate covers any provider the pinned route may select. Connection
-// defaults affect what is actually sent, even when the client omitted a bound.
-// Each attempt is priced once, for its own provider and model, so the cost
-// grows with the targets of a route and not with their square.
-func requestEstimate(x *call) int64 {
-	var reserved int64
-	for _, attempt := range x.attempts {
-		provider := x.snapshot().Provider(attempt.ProviderID)
-		reserved = max(reserved, x.attemptReservation(attempt, &provider))
-	}
-	return max(reserved, 1)
-}
-
-// keyReservationEstimate covers every upstream attempt the route may dispatch.
+// KeyReservationEstimate covers every upstream attempt the route may dispatch.
 // Settlement charges every attempt, including a conservative estimate when an
 // upstream may have billed work without reporting usage, so admission must hold
 // the same worst-case capacity before any provider is called.
-func keyReservationEstimate(perAttempt int64, attempts int) int64 {
+func KeyReservationEstimate(perAttempt int64, attempts int) int64 {
 	return multiplyBounded(perAttempt, int64(max(attempts, 1)))
 }
 
-// settledTokens accounts for every attempted provider, not just the last one.
-// Uncertain attempts retain an estimate rather than refunding unknown work.
-func (x *call) settledTokens() *int64 {
-	return x.settledTokensFor(x.facts, x.estimate)
-}
-
-func (x *call) settledTokensFor(facts []AttemptFact, estimate int64) *int64 {
-	var total int64
-	for index := range facts {
-		fact := &facts[index]
-		if fact.Cache != nil && x.cache != nil && !slices.Contains(x.cache.policy.CountHitsAgainst, "tokens") {
-			continue
-		}
-		actual := settledAttemptTokens(fact, estimate)
-		switch {
-		case actual != nil:
-			total = addBounded(total, *actual)
-		case fact.BillingUncertain || fact.UsageObserved:
-			total = addBounded(total, estimate)
-		}
-	}
-	return &total
-}
-
-// settledAttemptTokens preserves a reservation's estimate when native counters
+// SettledAttemptTokens preserves a reservation's estimate when native counters
 // are partial. nil leaves an undisclosed target's existing estimate standing.
-func settledAttemptTokens(fact *AttemptFact, estimate int64) *int64 {
+func SettledAttemptTokens(fact *events.AttemptFact, estimate int64) *int64 {
 	if fact == nil {
 		return nil
 	}
-	actual := totalTokens(fact.Usage)
+	actual := TotalTokens(fact.Usage)
 	if actual != nil && fact.BillingUncertain {
 		*actual = max(*actual, estimate)
 	}
 	return actual
 }
 
-// multiplyBounded and addBounded saturate at the largest integer the limiter
+// multiplyBounded and AddBounded saturate at the largest integer the limiter
 // accepts, so an absurd request is rejected as too large for the key's window
 // rather than failing the reservation as malformed.
 func multiplyBounded(a, b int64) int64 {
@@ -715,17 +697,17 @@ func multiplyBounded(a, b int64) int64 {
 	return a * b
 }
 
-func addBounded(a, b int64) int64 {
+func AddBounded(a, b int64) int64 {
 	if a > maxEstimate-b {
 		return maxEstimate
 	}
 	return a + b
 }
 
-// totalTokens is the usage an attempt disclosed, as one number to reconcile a
+// TotalTokens is the usage an attempt disclosed, as one number to reconcile a
 // token reservation against. Providers that report only the two halves are
 // summed; a provider that reported nothing leaves the estimate standing.
-func totalTokens(usage *wire.Usage) *int64 {
+func TotalTokens(usage *wire.Usage) *int64 {
 	if usage == nil {
 		return nil
 	}
@@ -734,7 +716,7 @@ func totalTokens(usage *wire.Usage) *int64 {
 	}
 	// Do not overflow before saturating, or trust a contradictory smaller
 	// total over the input and output the same response reported.
-	total := addBounded(min(usage.InputTokens, maxEstimate), min(usage.OutputTokens, maxEstimate))
+	total := AddBounded(min(usage.InputTokens, maxEstimate), min(usage.OutputTokens, maxEstimate))
 	total = max(total, min(usage.TotalTokens, maxEstimate))
 	return &total
 }
@@ -750,14 +732,14 @@ func share(supply routing.Supply, priority string) admission.Share {
 	return admission.Share{Class: priority, Percent: supply.PriorityShares.Of(priority), SaturationPercent: *supply.SaturationPercent}
 }
 
-func (a *Admission) checkPendingTokenAccounting(ctx context.Context, owner string) *Error {
+func (a *Admission) checkPendingTokenAccounting(ctx context.Context, owner string) *fault.Error {
 	if a == nil || a.PendingTokenAccountingReady == nil {
 		return nil
 	}
-	check, cancel := context.WithTimeout(ctx, reserveTimeout)
+	check, cancel := context.WithTimeout(ctx, ReserveTimeout)
 	defer cancel()
 	if a.PendingTokenAccountingReady(check, owner) != nil {
-		return serverError(http.StatusServiceUnavailable, "token_accounting_incomplete", "Token limits cannot admit work while token-consuming retained usage is unresolved.")
+		return fault.ServerError(http.StatusServiceUnavailable, "token_accounting_incomplete", "Token limits cannot admit work while token-consuming retained usage is unresolved.")
 	}
 	return nil
 }

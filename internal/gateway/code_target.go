@@ -12,13 +12,13 @@ type codeTarget struct {
 	endpoint codeadapter.Endpoint
 }
 
-func resolveCodeTarget(snapshot *routing.View, route codemode.Route, providerID string, ingress codeIngress, transport codeadapter.Transport) (codeTarget, error) {
+func resolveCodeTarget(snapshot *routing.View, route codemode.Route, providerID string, inbound codeIngress, transport codeadapter.Transport) (codeTarget, error) {
 	config, exists := snapshot.CodeConnection(route, providerID)
 	if !exists {
 		return codeTarget{}, codemode.Refuse(503, "code_connection_unpublished")
 	}
 	adapter, known := codeadapter.ForConnection(config.Kind, config.AuthMode, config.ProfileID)
-	endpoint, served := codeadapter.RouteEndpoint(route, adapter, ingress.path)
+	endpoint, served := codeadapter.RouteEndpoint(route, adapter, inbound.path)
 	if !known || !served || !endpoint.Supports(transport) {
 		return codeTarget{}, codemode.Refuse(503, "code_configuration_unsupported")
 	}

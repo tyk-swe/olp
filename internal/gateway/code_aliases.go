@@ -10,6 +10,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 )
 
@@ -21,7 +22,7 @@ func (a *codeAttempt) copyModelResponse(ctx context.Context, w http.ResponseWrit
 	defer reader.Close()
 	rc := http.NewResponseController(w)
 	deliver := func(body []byte) bool {
-		_ = rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+		_ = rc.SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
 		if _, err := w.Write(body); err != nil {
 			a.outcome(ctx, codemode.Outcome{Origin: "client", Kind: "canceled"})
 			return false
