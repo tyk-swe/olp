@@ -7,11 +7,10 @@ import (
 	"io"
 	"os"
 
-	"github.com/tyk-swe/olp/internal/providers/connection"
-
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/secrets"
 )

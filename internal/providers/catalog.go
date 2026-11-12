@@ -8,15 +8,12 @@ import (
 	"reflect"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/providerconfig"
-	"github.com/tyk-swe/olp/internal/providers/connection"
-
-	"github.com/tyk-swe/olp/internal/routing"
-
 	"github.com/jackc/pgx/v5"
-
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/catalog"
+	"github.com/tyk-swe/olp/internal/providerconfig"
+	"github.com/tyk-swe/olp/internal/providers/connection"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 // The reference catalog offers its facts beside a provider's models. Accepting

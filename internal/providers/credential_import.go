@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/antigravityauth"
 	"github.com/tyk-swe/olp/internal/claudeauth"

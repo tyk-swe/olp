@@ -9,12 +9,75 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/providers/probe"
 	"github.com/tyk-swe/olp/internal/routing"
 )
+
+type storedCapability struct {
+	connection.Capability
+	Source                string     `json:"source"`
+	CertifiedAt           *time.Time `json:"certified_at"`
+	CredentialFingerprint string     `json:"credential_fingerprint,omitempty"`
+	ToolCalls             bool       `json:"tool_calls,omitempty"`
+}
+
+func (m storedModel) withCapabilities(capabilities []storedCapability) storedModel {
+	m.Capabilities = capabilities
+	return m
+}
+
+type storedModel struct {
+	ID            string             `json:"id"`
+	UpstreamModel string             `json:"upstream_model"`
+	DisplayName   string             `json:"display_name"`
+	Enabled       bool               `json:"enabled"`
+	Capabilities  []storedCapability `json:"capabilities"`
+	DiscoveredAt  *time.Time         `json:"discovered_at"`
+}
+
+const modelColumns = "id::text,upstream_model,display_name,enabled,capabilities,discovered_at"
+
+func scanModel(row pgx.Row) (storedModel, error) {
+	var m storedModel
+	var capabilities []byte
+	if err := row.Scan(&m.ID, &m.UpstreamModel, &m.DisplayName, &m.Enabled, &capabilities, &m.DiscoveredAt); err != nil {
+		return storedModel{}, err
+	}
+	if err := json.Unmarshal(capabilities, &m.Capabilities); err != nil {
+		return storedModel{}, err
+	}
+	if m.Capabilities == nil {
+		m.Capabilities = []storedCapability{}
+	}
+	return m, nil
+}
+
+func loadModels(ctx context.Context, q access.Queryer, providerID string) ([]storedModel, error) {
+	return queryModels(ctx, q, "SELECT "+modelColumns+" FROM olp.provider_models WHERE provider_id=$1 ORDER BY upstream_model", providerID)
+}
+
+func enabledModels(ctx context.Context, q access.Queryer, providerID string) ([]storedModel, error) {
+	return queryModels(ctx, q, "SELECT "+modelColumns+" FROM olp.provider_models WHERE provider_id=$1 AND enabled ORDER BY upstream_model", providerID)
+}
+
+func queryModels(ctx context.Context, q access.Queryer, query string, args ...any) ([]storedModel, error) {
+	rows, err := q.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var models []storedModel
+	for rows.Next() {
+		m, err := scanModel(rows)
+		if err != nil {
+			return nil, err
+		}
+		models = append(models, m)
+	}
+	return models, rows.Err()
+}
 
 type capabilityReply struct {
 	connection.Capability

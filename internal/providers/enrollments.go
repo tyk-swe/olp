@@ -15,8 +15,11 @@ import (
 )
 
 const grantStepTimeout = time.Minute
+
 const maxGrantInput = 8 << 10
+
 const stageGrantTimeout = 15 * time.Second
+
 const grantEnrollmentOnly = "A grant authenticates this provider: its credential versions come from grant enrollment, not a pasted credential."
 
 type grantStart struct {
