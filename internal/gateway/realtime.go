@@ -608,7 +608,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	}
 	slug := r.URL.Query().Get("model")
 	if !routeidentity.ValidSlug(slug) {
-		fail(invalidRequest("invalid_value", "model must name a published route slug.", strPtr("model")))
+		fail(invalidRequest("invalid_value", "model must name a published route slug.", new("model")))
 		return
 	}
 	snapshot := x.request.release.Snapshot()
@@ -1165,5 +1165,3 @@ loop:
 	}
 	return usage, observed, first
 }
-
-func strPtr(value string) *string { return &value }

@@ -746,7 +746,7 @@ func (s *Server) writeStateJSONStatus(w http.ResponseWriter, x *call, body []byt
 
 func resourceListError(err error, message string) *Error {
 	if errors.Is(err, resources.ErrNotFound) {
-		return invalidRequest("invalid_value", "after must be a gateway identifier of the listed resource kind.", strPtr("after"))
+		return invalidRequest("invalid_value", "after must be a gateway identifier of the listed resource kind.", new("after"))
 	}
 	return serverError(http.StatusInternalServerError, "internal_error", message)
 }

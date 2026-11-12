@@ -168,7 +168,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 	if input.Previous != "" {
 		parent, previousUpstream, err = s.deps.Resources.ReadInteractionContract(ctx, authority.ID, input.Previous)
 		if errors.Is(err, resources.ErrNotFound) || parent != nil && parent.RouteSlug != input.Model {
-			fail(invalidRequest("invalid_previous_interaction_id", "The previous Interaction is not owned by this key and route.", strPtr("previous_interaction_id")))
+			fail(invalidRequest("invalid_previous_interaction_id", "The previous Interaction is not owned by this key and route.", new("previous_interaction_id")))
 			return
 		}
 		if err != nil {

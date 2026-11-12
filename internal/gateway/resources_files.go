@@ -180,7 +180,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		strictEndpoint, strictItems, validationErr = s.validateBatchInput(file, template.Model(), &p.provider, &route)
 		if validationErr != nil {
 			s.releaseHold(r.Context(), p.hold)
-			s.stateFail(x, w, invalidRequest("target_capability", "The batch file has an unqualified item, duplicate identity, or mixed endpoint.", strPtr("file")), x.family)
+			s.stateFail(x, w, invalidRequest("target_capability", "The batch file has an unqualified item, duplicate identity, or mixed endpoint.", new("file")), x.family)
 			return
 		}
 	}

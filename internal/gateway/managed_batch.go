@@ -187,7 +187,7 @@ func (s *Server) translateManagedBatchInput(ctx context.Context, p *pin, route *
 		if failure, ok := translated.err.(*Error); ok {
 			return nil, batchManifest{}, failure
 		}
-		return nil, batchManifest{}, invalidRequest("unsupported_parameter", "The batch file could not be translated.", strPtr("file"))
+		return nil, batchManifest{}, invalidRequest("unsupported_parameter", "The batch file could not be translated.", new("file"))
 	}
 	part := &staging.Part{
 		Handle: artifact.Handle, Digest: artifact.Digest, Filename: file.Filename,
@@ -203,7 +203,7 @@ type managedLineTarget struct {
 }
 
 func batchFileError(format string, lineNumber int) *Error {
-	return invalidRequest("unsupported_parameter", fmt.Sprintf(format, lineNumber), strPtr("file"))
+	return invalidRequest("unsupported_parameter", fmt.Sprintf(format, lineNumber), new("file"))
 }
 
 func translateManagedBatchLines(writer *io.PipeWriter, input io.Reader, digest func(string) ([]byte, bool), target managedLineTarget) (batchManifest, error) {
@@ -244,7 +244,7 @@ func translateManagedBatchLines(writer *io.PipeWriter, input io.Reader, digest f
 		return fail(batchFileError("Batch file line %d exceeds the supported bounds.", count+1))
 	}
 	if count == 0 {
-		return fail(invalidRequest("unsupported_parameter", "The batch file must contain at least one request.", strPtr("file")))
+		return fail(invalidRequest("unsupported_parameter", "The batch file must contain at least one request.", new("file")))
 	}
 	operation, _ := wire.BatchLineOperation(endpoint)
 	return batchManifest{
@@ -296,7 +296,7 @@ func (t managedLineTarget) translate(raw []byte, lineNumber int) (managedBatchLi
 
 func (t managedLineTarget) bindOpenAILine(document oif.Document, line managedBatchLine, upstreamModel string) ([]byte, error) {
 	if t.pin.provider.VendorID == "groq" && line.URL != "/v1/chat/completions" {
-		return nil, invalidRequest("unsupported_parameter", "Groq batch files support only /v1/chat/completions.", strPtr("file"))
+		return nil, invalidRequest("unsupported_parameter", "Groq batch files support only /v1/chat/completions.", new("file"))
 	}
 	bound, err := oif.Apply(document, []oif.Change{{Pointer: "/body/model", Value: string(mustJSON(upstreamModel)), Origin: oif.ResourceBinding, Reason: "batch model affinity"}})
 	if err != nil {
@@ -330,7 +330,7 @@ func (t managedLineTarget) encodeLine(line managedBatchLine, operation wire.Line
 	if t.adapter == connectors.BatchGeminiManaged {
 		document, err := oif.ParseJSON(encoded, oif.Limits{MaxBytes: managedBatchLineLimit})
 		if err != nil || geminiBatchHasFileReference(document.Root()) {
-			return nil, invalidRequest("unsupported_parameter", "Gemini batch input cannot use unbound file or cached-content references.", strPtr("file"))
+			return nil, invalidRequest("unsupported_parameter", "Gemini batch input cannot use unbound file or cached-content references.", new("file"))
 		}
 	}
 	encodedRequest, err := t.withoutModel(encoded)
@@ -418,7 +418,7 @@ func managedBatchRequestBody(source oif.Document, adapter connectors.BatchAdapte
 	metadata, err := batchClientMetadata(source)
 	if adapter == connectors.BatchGeminiManaged {
 		if err != nil {
-			return nil, invalidRequest("invalid_request", "metadata must be a string map.", strPtr("metadata"))
+			return nil, invalidRequest("invalid_request", "metadata must be a string map.", new("metadata"))
 		}
 		_, windowSupplied := source.Root().Lookup("completion_window")
 		if !windowSupplied || window.label != "24h" || endpoint != manifest.Endpoint || manifest.LineOperation != wire.LineGeneration ||
@@ -428,10 +428,10 @@ func managedBatchRequestBody(source oif.Document, adapter connectors.BatchAdapte
 		return marshalBatchBody(geminiManagedBatchBody("olp-"+strings.ReplaceAll(id.String(), "-", ""), upstreamFileID))
 	}
 	if endpoint != manifest.Endpoint {
-		return nil, invalidRequest("unsupported_parameter", "The batch endpoint must match the uploaded file.", strPtr("endpoint"))
+		return nil, invalidRequest("unsupported_parameter", "The batch endpoint must match the uploaded file.", new("endpoint"))
 	}
 	if err != nil {
-		return nil, invalidRequest("unsupported_parameter", "Batch metadata must be a string map.", strPtr("metadata"))
+		return nil, invalidRequest("unsupported_parameter", "Batch metadata must be a string map.", new("metadata"))
 	}
 	if adapter == connectors.BatchTogether {
 		return marshalBatchBody(map[string]any{"endpoint": endpoint, "input_file_id": upstreamFileID, "completion_window": "24h"})

@@ -59,7 +59,7 @@ type batchWindow struct {
 	length time.Duration
 }
 
-var errUnsupportedBatchEndpoint = invalidRequest("unsupported_parameter", "The batch endpoint must be a supported operation.", strPtr("endpoint"))
+var errUnsupportedBatchEndpoint = invalidRequest("unsupported_parameter", "The batch endpoint must be a supported operation.", new("endpoint"))
 
 func batchLineOperation(source oif.Document) (string, wire.LineOperation, *Error) {
 	value, present := source.Root().Lookup("endpoint")
@@ -81,15 +81,15 @@ func batchCompletionWindow(source oif.Document, vendor string) (batchWindow, *Er
 	}
 	raw, valid := value.Text()
 	if !valid {
-		return batchWindow{}, invalidRequest("invalid_value", "completion_window must be a valid duration.", strPtr("completion_window"))
+		return batchWindow{}, invalidRequest("invalid_value", "completion_window must be a valid duration.", new("completion_window"))
 	}
 	hours, ok := windowHours(raw)
 	if !ok {
-		return batchWindow{}, invalidRequest("invalid_value", "completion_window must use whole hours or days.", strPtr("completion_window"))
+		return batchWindow{}, invalidRequest("invalid_value", "completion_window must use whole hours or days.", new("completion_window"))
 	}
 	minimum, maximum := completionWindowRange(vendor)
 	if hours < minimum || hours > maximum {
-		return batchWindow{}, invalidRequest("invalid_value", "completion_window is outside the provider's supported range.", strPtr("completion_window"))
+		return batchWindow{}, invalidRequest("invalid_value", "completion_window is outside the provider's supported range.", new("completion_window"))
 	}
 	return batchWindow{label: raw, length: time.Duration(hours) * time.Hour}, nil
 }

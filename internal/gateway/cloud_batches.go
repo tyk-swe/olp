@@ -38,7 +38,7 @@ func validateCloudBatchRequest(raw []byte, adapter connectors.BatchAdapter, stor
 	allowed := map[string]bool{"input_uri": true, "output_uri_prefix": true, "display_name": true, "timeout_hours": true}
 	for _, field := range doc.Root().Members() {
 		if !allowed[field.Name] {
-			return cloudBatchRequest{}, invalidRequest("unsupported_parameter", "This batch-job parameter is not supported.", strPtr(field.Name))
+			return cloudBatchRequest{}, invalidRequest("unsupported_parameter", "This batch-job parameter is not supported.", new(field.Name))
 		}
 	}
 	var input cloudBatchRequest
@@ -47,13 +47,13 @@ func validateCloudBatchRequest(raw []byte, adapter connectors.BatchAdapter, stor
 		input.InputURI, present = value.Text()
 	}
 	if !present || input.InputURI == "" {
-		return cloudBatchRequest{}, invalidRequest("missing_required_parameter", "input_uri is required.", strPtr("input_uri"))
+		return cloudBatchRequest{}, invalidRequest("missing_required_parameter", "input_uri is required.", new("input_uri"))
 	}
 	if value, ok := doc.Root().Lookup("output_uri_prefix"); ok {
 		input.OutputURIPrefix, present = value.Text()
 	}
 	if !present || input.OutputURIPrefix == "" {
-		return cloudBatchRequest{}, invalidRequest("missing_required_parameter", "output_uri_prefix is required.", strPtr("output_uri_prefix"))
+		return cloudBatchRequest{}, invalidRequest("missing_required_parameter", "output_uri_prefix is required.", new("output_uri_prefix"))
 	}
 	if storage == nil || !storage.Contains(storage.InputURIPrefix, input.InputURI) ||
 		!storage.ContainsPrefix(storage.OutputURIPrefix, input.OutputURIPrefix) {
@@ -62,19 +62,19 @@ func validateCloudBatchRequest(raw []byte, adapter connectors.BatchAdapter, stor
 	if value, ok := doc.Root().Lookup("display_name"); ok {
 		input.DisplayName, present = value.Text()
 		if !present || !cloudBatchDisplayName.MatchString(input.DisplayName) {
-			return cloudBatchRequest{}, invalidRequest("invalid_value", "display_name must use 1–128 letters, digits, underscores, or hyphens.", strPtr("display_name"))
+			return cloudBatchRequest{}, invalidRequest("invalid_value", "display_name must use 1–128 letters, digits, underscores, or hyphens.", new("display_name"))
 		}
 	}
 	if value, ok := doc.Root().Lookup("timeout_hours"); ok {
 		if adapter != connectors.BatchBedrock {
-			return cloudBatchRequest{}, invalidRequest("unsupported_parameter", "timeout_hours is only supported by Bedrock batch inference.", strPtr("timeout_hours"))
+			return cloudBatchRequest{}, invalidRequest("unsupported_parameter", "timeout_hours is only supported by Bedrock batch inference.", new("timeout_hours"))
 		}
 		if value.Kind() != oif.Number {
-			return cloudBatchRequest{}, invalidRequest("invalid_value", "timeout_hours must be an integer from 24 to 168.", strPtr("timeout_hours"))
+			return cloudBatchRequest{}, invalidRequest("invalid_value", "timeout_hours must be an integer from 24 to 168.", new("timeout_hours"))
 		}
 		parsed, parseErr := strconv.Atoi(value.Raw())
 		if parseErr != nil || parsed < 24 || parsed > 168 {
-			return cloudBatchRequest{}, invalidRequest("invalid_value", "timeout_hours must be an integer from 24 to 168.", strPtr("timeout_hours"))
+			return cloudBatchRequest{}, invalidRequest("invalid_value", "timeout_hours must be an integer from 24 to 168.", new("timeout_hours"))
 		}
 		input.TimeoutHours = parsed
 	}
@@ -517,7 +517,7 @@ func (s *Server) listCloudBatches(w http.ResponseWriter, r *http.Request) {
 	filtered, listErr := s.deps.Resources.ListCloudBatches(r.Context(), authority.ID, dialect, limit+1, after)
 	if listErr != nil {
 		if errors.Is(listErr, resources.ErrNotFound) {
-			s.cloudBatchFail(x, w, invalidRequest("invalid_cursor", "after must identify a local cloud batch job.", strPtr("after")))
+			s.cloudBatchFail(x, w, invalidRequest("invalid_cursor", "after must identify a local cloud batch job.", new("after")))
 			return
 		}
 		s.cloudBatchFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "Cloud batches could not be listed."))

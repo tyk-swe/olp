@@ -112,7 +112,7 @@ func (s *Server) batchCreateRequest(w http.ResponseWriter, r *http.Request) (bat
 	fileValue, ok := source.Root().Lookup("input_file_id")
 	localFile, valid := fileValue.Text()
 	if !ok || !valid || !strings.HasPrefix(localFile, "file_") && !strings.HasPrefix(localFile, "strict_file_") {
-		return batchCreateRequest{}, invalidRequest("missing_required_parameter", "input_file_id must name a file uploaded through this key.", strPtr("input_file_id"))
+		return batchCreateRequest{}, invalidRequest("missing_required_parameter", "input_file_id must name a file uploaded through this key.", new("input_file_id"))
 	}
 	return batchCreateRequest{source: source, endpoint: endpoint, operation: operation, localFile: localFile}, nil
 }
@@ -134,7 +134,7 @@ func (s *Server) planBatch(ctx context.Context, x *call, authority keyauthority.
 		return batchPlan{}, e
 	}
 	if p.provider.VendorID == "groq" && request.endpoint != "/v1/chat/completions" {
-		return batchPlan{}, invalidRequest("unsupported_parameter", "Groq batches currently support only /v1/chat/completions.", strPtr("endpoint"))
+		return batchPlan{}, invalidRequest("unsupported_parameter", "Groq batches currently support only /v1/chat/completions.", new("endpoint"))
 	}
 	adapter, ok := p.provider.Connector().FilesBatchesAdapter()
 	if !ok {
@@ -153,7 +153,7 @@ func (s *Server) planBatch(ctx context.Context, x *call, authority keyauthority.
 		return batchPlan{}, e
 	}
 	if _, supplied := request.source.Root().Lookup("id"); supplied && adapter != connectors.BatchTogether && adapter != connectors.BatchMistral {
-		return batchPlan{}, invalidRequest("invalid_request", "A new batch cannot supply a provider resource ID.", strPtr("id"))
+		return batchPlan{}, invalidRequest("invalid_request", "A new batch cannot supply a provider resource ID.", new("id"))
 	}
 	if e := s.unboundedPinLimits(x.admissionAuthority(authority), p, route); e != nil {
 		return batchPlan{}, e
@@ -178,7 +178,7 @@ func managedBatchShape(source oif.Document, vendor string, adapter connectors.Ba
 	allowed := []string{"input_file_id", "endpoint", "completion_window", "metadata"}
 	for _, field := range source.Root().Members() {
 		if !slices.Contains(allowed, field.Name) {
-			return invalidRequest("unsupported_parameter", "This batch parameter is not supported.", strPtr(field.Name))
+			return invalidRequest("unsupported_parameter", "This batch parameter is not supported.", new(field.Name))
 		}
 	}
 	if adapter != connectors.BatchGeminiManaged {
@@ -186,7 +186,7 @@ func managedBatchShape(source oif.Document, vendor string, adapter connectors.Ba
 	}
 	for _, required := range allowed[:3] {
 		if _, present := source.Root().Lookup(required); !present {
-			return invalidRequest("missing_required_parameter", "Gemini managed batches require input_file_id, endpoint, and completion_window.", strPtr(required))
+			return invalidRequest("missing_required_parameter", "Gemini managed batches require input_file_id, endpoint, and completion_window.", new(required))
 		}
 	}
 	return nil
@@ -197,13 +197,13 @@ func (s *Server) strictBatchAdmission(ctx context.Context, x *call, authority ke
 		return refusal
 	}
 	if durableKind(resources.KindFile, request.localFile) != resources.KindStrictFile || contract == nil || !authority.Policy.AllowProviderState || !s.deps.Resources.Encrypted() {
-		return invalidRequest("resource_affinity", "Strict batches require a file uploaded under the same strict route and state-enabled key.", strPtr("input_file_id"))
+		return invalidRequest("resource_affinity", "Strict batches require a file uploaded under the same strict route and state-enabled key.", new("input_file_id"))
 	}
 	if e := s.authorizeDurable(ctx, x, authority, file, contract, "batch", retainedNewWork); e != nil {
 		return e
 	}
 	if contract.Asset == nil || contract.Asset.Endpoint != request.endpoint || contract.Asset.ItemCount < 1 {
-		return invalidRequest("resource_affinity", "The batch endpoint must match every qualified item in its uploaded file.", strPtr("endpoint"))
+		return invalidRequest("resource_affinity", "The batch endpoint must match every qualified item in its uploaded file.", new("endpoint"))
 	}
 	return nil
 }
@@ -221,7 +221,7 @@ func inputBatchManifest(file *resources.Resource, adapter connectors.BatchAdapte
 	decodeErr := json.Unmarshal(file.Metadata, &stored)
 	if adapter == connectors.BatchOpenAI {
 		if decodeErr != nil || stored.Qualified == nil || !stored.Qualified.usable(adapter) || stored.Qualified.Endpoint != endpoint {
-			return batchManifest{}, invalidRequest("resource_affinity", "Upload a batch file qualified for this model and endpoint before submitting it.", strPtr("input_file_id"))
+			return batchManifest{}, invalidRequest("resource_affinity", "Upload a batch file qualified for this model and endpoint before submitting it.", new("input_file_id"))
 		}
 		return *stored.Qualified, nil
 	}
