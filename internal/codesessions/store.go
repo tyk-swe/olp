@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -647,7 +648,7 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in Admission, id, root string, 
 		JOIN olp.provider_credentials c ON c.id=a.credential_id JOIN olp.provider_grants g ON g.credential_id=c.id JOIN olp.providers p ON p.id=a.provider_id
 		JOIN olp.code_route_revisions v ON v.id=$7 CROSS JOIN LATERAL (SELECT `+codeadapter.SQL("v.connections->(a.provider_id::text)")+` adapter) f
 		WHERE pa.pool_id=$1 AND a.project_id=$2 AND a.enabled AND p.state<>'disabled' AND p.project_id=a.project_id
-		AND c.provider_id=a.provider_id AND c.principal=a.principal AND c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())
+		AND c.provider_id=a.provider_id AND c.principal=a.principal AND c.revoked_at IS NULL AND `+grants.LiveCondition+`
 		AND ($9::uuid IS NULL OR NOT EXISTS(SELECT 1 FROM olp.code_recovery_chain($9) rejected WHERE rejected.account_id=a.id AND rejected.nonexecution))
 		AND a.models @> $3::jsonb AND ($4='' OR a.id::text=$4) AND a.provider_id::text=ANY($5::text[])
 		AND NOT EXISTS(SELECT 1 FROM olp.code_accounts t WHERE t.id::text=ANY($6::text[])

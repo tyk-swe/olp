@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 )
 
 type applying struct {
@@ -41,15 +42,15 @@ func Applier(entries []Entry, bindings promotion.Bindings, deps Deps) promotion.
 }
 
 func (a applying) apply(ctx context.Context, tx pgx.Tx, entry Entry, existing destination, found bool, directory promotion.Directory) error {
-	prepared, err := a.deps.Catalogue.PrepareConfiguration(ctx, tx, entry.Configuration)
+	prepared, err := connection.Prepare(ctx, a.deps.Drafts.ConnectionPolicy(tx), entry.Configuration)
 	if err != nil {
 		return err
 	}
-	desired := withParts(entry, prepared.Configuration(), entry.Models)
+	desired := withParts(entry, prepared.Document(), entry.Models)
 	if !found {
 		return a.create(ctx, tx, desired, prepared, directory)
 	}
-	same, err := unchanged(entry, prepared.Configuration(), existing.draft)
+	same, err := unchanged(entry, prepared.Document(), existing.draft)
 	if err != nil {
 		return err
 	}
@@ -59,12 +60,12 @@ func (a applying) apply(ctx context.Context, tx pgx.Tx, entry Entry, existing de
 	return a.replace(ctx, tx, desired, prepared, existing)
 }
 
-func (a applying) create(ctx context.Context, tx pgx.Tx, entry Entry, prepared providers.PreparedConfiguration, directory promotion.Directory) error {
+func (a applying) create(ctx context.Context, tx pgx.Tx, entry Entry, prepared connection.Prepared, directory promotion.Directory) error {
 	projectID, err := projectID(entry, directory)
 	if err != nil {
 		return err
 	}
-	created, err := a.deps.Catalogue.CreateDraft(ctx, tx, providers.Draft{Name: entry.Name, ProjectID: projectID, Configuration: prepared, CreatedBy: a.createdBy})
+	created, err := a.deps.Drafts.CreateDraft(ctx, tx, providers.Draft{Name: entry.Name, ProjectID: projectID, Configuration: prepared, CreatedBy: a.createdBy})
 	if err != nil {
 		return err
 	}
@@ -82,7 +83,7 @@ func projectID(entry Entry, directory promotion.Directory) (*string, error) {
 	return &id, nil
 }
 
-func (a applying) rebind(ctx context.Context, tx pgx.Tx, entry Entry, prepared providers.PreparedConfiguration, target destination) error {
+func (a applying) rebind(ctx context.Context, tx pgx.Tx, entry Entry, prepared connection.Prepared, target destination) error {
 	for _, slot := range entry.Slots {
 		if err := a.rebindSlot(ctx, tx, entry, slot, target); err != nil {
 			return err
@@ -103,10 +104,10 @@ func (a applying) rebindSlot(ctx context.Context, tx pgx.Tx, entry Entry, slot S
 	if err != nil || fresh == nil {
 		return err
 	}
-	return a.deps.Catalogue.BindDraftCredential(ctx, tx, target.id, current.id, *fresh)
+	return a.deps.Drafts.BindDraftCredential(ctx, tx, target.id, current.id, *fresh)
 }
 
-func (a applying) replace(ctx context.Context, tx pgx.Tx, entry Entry, prepared providers.PreparedConfiguration, target destination) error {
+func (a applying) replace(ctx context.Context, tx pgx.Tx, entry Entry, prepared connection.Prepared, target destination) error {
 	if err := a.bindNetwork(ctx, tx, entry, prepared, target, false); err != nil {
 		return err
 	}
@@ -119,7 +120,7 @@ func (a applying) replace(ctx context.Context, tx pgx.Tx, entry Entry, prepared 
 	if err != nil {
 		return err
 	}
-	return a.deps.Catalogue.StageDraftInventory(ctx, tx, target.id, entry.Models, slots)
+	return a.deps.Drafts.StageDraftInventory(ctx, tx, target.id, entry.Models, slots)
 }
 
 func (a applying) resolveSlot(ctx context.Context, tx pgx.Tx, entry Entry, slot Slot, target destination) (providers.DraftSlot, error) {
@@ -172,9 +173,9 @@ func (d Deps) matches(ctx context.Context, q access.Queryer, credentialID *strin
 	}
 	switch bound := credential.(type) {
 	case promotion.Sealed:
-		return d.Catalogue.CredentialEquals(ctx, q, *credentialID, bound.Secret)
+		return d.Drafts.CredentialEquals(ctx, q, *credentialID, bound.Secret)
 	case promotion.External:
-		return d.Catalogue.ExternalCredentialEquals(ctx, q, *credentialID, bound.Reference)
+		return d.Drafts.ExternalCredentialEquals(ctx, q, *credentialID, bound.Reference)
 	}
 	return false, fmt.Errorf("unsupported credential binding %T", credential)
 }
@@ -182,10 +183,10 @@ func (d Deps) matches(ctx context.Context, q access.Queryer, credentialID *strin
 func (d Deps) store(ctx context.Context, tx pgx.Tx, providerID string, credential promotion.Credential) (string, error) {
 	switch bound := credential.(type) {
 	case promotion.Sealed:
-		id, _, err := d.Catalogue.StoreCredential(ctx, tx, providerID, bound.Secret)
+		id, _, err := d.Drafts.StoreCredential(ctx, tx, providerID, bound.Secret)
 		return id, err
 	case promotion.External:
-		id, _, err := d.Catalogue.StoreExternalCredential(ctx, tx, providerID, bound.Reference)
+		id, _, err := d.Drafts.StoreExternalCredential(ctx, tx, providerID, bound.Reference)
 		return id, err
 	}
 	return "", fmt.Errorf("unsupported credential binding %T", credential)

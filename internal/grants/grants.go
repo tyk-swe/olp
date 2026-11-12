@@ -121,3 +121,5 @@ func ValidateTokenMaterial(accessToken, refreshToken string, expiresIn int64) er
 func text(value string, least, most int) bool {
 	return len(value) >= least && len(value) <= most && utf8.ValidString(value) && !strings.ContainsFunc(value, unicode.IsControl)
 }
+
+const LiveCondition = "g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())"

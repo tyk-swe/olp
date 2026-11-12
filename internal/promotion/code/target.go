@@ -8,7 +8,7 @@ import (
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
-	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -37,18 +37,18 @@ func resolveTarget(ctx context.Context, q access.Queryer, t PaidTarget, project 
 	if err != nil {
 		return codemode.PaidTarget{}, err
 	}
-	target, err := providers.ReadPublishedSlot(ctx, q, t.Provider, project, t.Slot, credential)
+	target, found, err := codeaccounts.ReadPublishedSlot(ctx, q, t.Provider, project, t.Slot, credential)
 	if err != nil {
 		return codemode.PaidTarget{}, err
 	}
-	if target == nil {
+	if !found {
 		return codemode.PaidTarget{}, access.Invalid("code.paid_targets", "Bind the current credential of an enabled published destination provider slot.")
 	}
-	return *target, nil
+	return target, nil
 }
 
 func validLimits(ctx context.Context, q access.Queryer, frozen routing.Provider, slot routing.Slot, project string) error {
-	live, err := providers.ReadSlotLimits(ctx, q, frozen.ID, slot.ID, project)
+	live, err := codeaccounts.ReadSlotLimits(ctx, q, frozen.ID, slot.ID, project)
 	if err != nil {
 		return err
 	}
@@ -61,11 +61,11 @@ func validLimits(ctx context.Context, q access.Queryer, frozen routing.Provider,
 func slotKey(providerID, slotID string) string { return promotion.TupleKey(providerID, slotID) }
 
 func readSlotNames(ctx context.Context, q access.Queryer) (map[string]PaidTarget, error) {
-	names, err := providers.ReadSlotNames(ctx, q)
+	names, err := codeaccounts.ReadSlotNames(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	return promotion.Associate(names, func(n providers.SlotName) (string, PaidTarget) {
+	return promotion.Associate(names, func(n codeaccounts.SlotName) (string, PaidTarget) {
 		return slotKey(n.ProviderID, n.SlotID), PaidTarget{Provider: n.Provider, Slot: n.Slot, CredentialRef: string(provider.SlotRef(n.Provider, n.Slot))}
 	}), nil
 }

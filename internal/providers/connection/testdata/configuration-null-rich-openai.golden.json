@@ -1,0 +1,1 @@
+{"kind":"openai","auth_mode":"api_key","endpoint":"https://api.openai.com/v1","cloud_region":null,"cloud_project":null,"deployment":null,"api_version":null,"options":{"credential_headers":[],"limits":null,"models":{},"parameter_defaults":{},"vendor_id":"openai"}}

@@ -55,6 +55,7 @@ import (
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -393,9 +394,9 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			gatewayDeps.Uploads = staging.NewAdmission(mediaSpool.CapacityBytes())
 			if pool != nil {
 				gatewayDeps.CodeLedger = codesessions.New(pool)
-				gatewayDeps.CodeAuthorizer = &providers.CodeAuthorizer{Pool: pool, Credentials: rt, Plugins: pluginHost}
+				gatewayDeps.CodeAuthorizer = &codeaccounts.Authorizer{Pool: pool, Credentials: rt, Plugins: pluginHost}
 				gatewayDeps.CodeResearch = codesessions.New(pool)
-				gatewayDeps.ResearchAuth = &providers.CodeAuthorizer{Pool: pool, Credentials: rt, Plugins: pluginHost}
+				gatewayDeps.ResearchAuth = &codeaccounts.Authorizer{Pool: pool, Credentials: rt, Plugins: pluginHost}
 				gatewayDeps.Resources = resources.NewEncrypted(pool, installation, keys)
 				gatewayDeps.Resolver = resources.NewResolver(pool)
 			}

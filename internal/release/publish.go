@@ -64,7 +64,7 @@ func Publish(ctx context.Context, tx pgx.Tx, actor string) (Published, error) {
 // their latest published revision.
 func ReadSnapshot(ctx context.Context, tx pgx.Tx) (*routing.Snapshot, error) {
 	snapshot := &routing.Snapshot{Commitments: map[string][]routing.Commitment{}, Providers: map[string]routing.Provider{}, Routes: map[string]routing.Route{}}
-	rows, err := tx.Query(ctx, "SELECT p.id::text,p.state,r.id::text,r.name,r.configuration,r.models,r.slots,p.project_id::text,"+PluginColumn+" FROM olp.providers p JOIN olp.provider_revisions r ON r.id=p.active_revision_id WHERE p.state IN ('active','disabled')")
+	rows, err := tx.Query(ctx, "SELECT p.id::text,p.state,r.id::text,r.name,r.configuration,r.models,r.slots,p.project_id::text,"+PluginColumn("r")+" FROM olp.providers p JOIN olp.provider_revisions r ON r.id=p.active_revision_id WHERE p.state IN ('active','disabled')")
 	if err != nil {
 		return nil, err
 	}

@@ -1,32 +1,37 @@
 package providers
 
 import (
+	"cmp"
 	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/plugins"
+	"github.com/tyk-swe/olp/internal/providers/connection"
+	"github.com/tyk-swe/olp/internal/providers/probe"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 func (s *Server) kinds(r *http.Request, _ access.Principal) (access.Reply, error) {
-	return access.OK(map[string]any{"items": kinds}), nil
+	return access.OK(map[string]any{"items": connection.Kinds()}), nil
 }
 
 func (s *Server) kindCapabilities(r *http.Request, _ access.Principal) (access.Reply, error) {
 	kind := r.PathValue("provider_kind")
-	if kindByName(kind) == nil {
+	if _, ok := connection.LookupKind(kind); !ok {
 		return access.Reply{}, access.Fail(400, "invalid_provider_kind", "This provider kind is not available.")
 	}
-	return access.OK(map[string]any{"provider_kind": kind, "capabilities": capabilityOptionsForKind(kind)}), nil
+	return access.OK(map[string]any{"provider_kind": kind, "capabilities": probe.OptionsForKind(kind)}), nil
 }
 
 func (s *Server) listVendors(r *http.Request, _ access.Principal) (access.Reply, error) {
-	return access.OK(vendorCatalogue), nil
+	return access.OK(connection.Vendors()), nil
 }
 
 func (s *Server) inventory(r *http.Request, principal access.Principal) (access.Reply, error) {
@@ -41,7 +46,7 @@ func (s *Server) inventory(r *http.Request, principal access.Principal) (access.
 	}
 	surface := query.Get("surface")
 	switch surface {
-	case "", SurfaceOpenAI, "anthropic", "gemini", "bedrock", "native":
+	case "", "openai", "anthropic", "gemini", "bedrock", "native":
 	default:
 		return access.Reply{}, access.Fail(400, "invalid_query", "Unknown surface.")
 	}
@@ -53,7 +58,7 @@ func (s *Server) inventory(r *http.Request, principal access.Principal) (access.
 		}
 		enabled = &v
 	}
-	rows, err := s.Access.Pool.Query(r.Context(), `SELECT m.id::text,m.upstream_model,m.display_name,m.enabled,m.capabilities,m.discovered_at,p.id::text,p.name,p.kind,
+	rows, err := s.access.Pool.Query(r.Context(), `SELECT m.id::text,m.upstream_model,m.display_name,m.enabled,m.capabilities,m.discovered_at,p.id::text,p.name,p.kind,
 		p.state='active' AND EXISTS (
 			SELECT 1 FROM jsonb_array_elements(r.models) published,jsonb_array_elements(published->'capabilities') c
 			WHERE published->>'id'=m.id::text AND c->>'source'='certified' AND ($4='' OR c->>'surface'=$4)
@@ -70,114 +75,55 @@ func (s *Server) inventory(r *http.Request, principal access.Principal) (access.
 		return access.Reply{}, err
 	}
 	defer rows.Close()
-	items := []map[string]any{}
-	for rows.Next() {
+	items, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (inventoryItem, error) {
 		var m storedModel
 		var capabilities, metadata []byte
-		var providerID, providerName, providerKind, vendorID string
-		var available bool
-		if err = rows.Scan(&m.ID, &m.UpstreamModel, &m.DisplayName, &m.Enabled, &capabilities, &m.DiscoveredAt, &providerID, &providerName, &providerKind, &available, &metadata, &vendorID); err != nil {
-			return access.Reply{}, err
+		var item inventoryItem
+		var vendorID string
+		if err := row.Scan(&m.ID, &m.UpstreamModel, &m.DisplayName, &m.Enabled, &capabilities, &m.DiscoveredAt, &item.ProviderID, &item.ProviderName, &item.ProviderKind, &item.Available, &metadata, &vendorID); err != nil {
+			return inventoryItem{}, err
 		}
-		if err = json.Unmarshal(capabilities, &m.Capabilities); err != nil {
-			return access.Reply{}, err
+		if err := json.Unmarshal(capabilities, &m.Capabilities); err != nil {
+			return inventoryItem{}, err
 		}
-		facts, metadataErr := metadataJSON(metadata)
-		if metadataErr != nil {
-			return access.Reply{}, metadataErr
+		facts, err := connection.MetadataJSON(metadata)
+		if err != nil {
+			return inventoryItem{}, err
 		}
-		if vendorID == "" {
-			vendorID = vendors.DefaultFor(providerKind)
-		}
-		items = append(items, map[string]any{"available": available, "metadata": facts, "provider_id": providerID, "provider_name": providerName, "provider_kind": providerKind, "model": modelJSON(m),
-			"lifecycle": s.Catalog.Lifecycle(vendorID, m.UpstreamModel, canonicalModel(metadata))})
-	}
-	if err = rows.Err(); err != nil {
+		item.Metadata, item.Model = facts, m.reply()
+		item.Lifecycle = s.catalog.Lifecycle(cmp.Or(vendorID, vendors.DefaultFor(item.ProviderKind)), m.UpstreamModel, canonicalModel(metadata))
+		return item, nil
+	})
+	if err != nil {
 		return access.Reply{}, err
 	}
-	return access.ListReplyBy(items, page, func(item map[string]any) string {
-		return item["model"].(map[string]any)["id"].(string)
-	}), nil
+	return access.ListReplyBy(items, page, func(item inventoryItem) string { return item.Model.ID }), nil
+}
+
+type inventoryItem struct {
+	Available    bool                       `json:"available"`
+	Lifecycle    *catalog.LifecycleView     `json:"lifecycle"`
+	Metadata     map[string]json.RawMessage `json:"metadata"`
+	Model        modelReply                 `json:"model"`
+	ProviderID   string                     `json:"provider_id"`
+	ProviderKind string                     `json:"provider_kind"`
+	ProviderName string                     `json:"provider_name"`
 }
 
 // generations lists installation-wide runtime releases, which span every
 // project and name their publishers, so it requires installation reach.
-func (s *Server) generations(r *http.Request, principal access.Principal) (access.Reply, error) {
-	var err error
-	page, err := access.Page(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	rows, err := s.Access.Pool.Query(r.Context(), "SELECT jsonb_build_object('id',g.id,'sequence',g.sequence,'sha256',g.sha256,'created_by',g.created_by,'created_by_email',u.email,'created_at',g.created_at) FROM olp.runtime_releases g JOIN olp.users u ON u.id=g.created_by WHERE g.id<$1 ORDER BY g.id DESC LIMIT $2", page.Before, page.Limit+1)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	items, err := access.JSONRows(rows)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	return access.ListReply(items, page), nil
-}
-
-// Register mounts the provider surface.
-func (s *Server) Register(mux *http.ServeMux) {
-	s.registerCodeMode(mux)
-	s.Access.Route(mux, "GET /api/v1/provider-profiles", s.profiles)
-	s.Access.Route(mux, "GET /api/v1/operation-dialects", s.operationDialects)
-	s.Access.Route(mux, "GET /api/v1/provider-kinds", s.kinds)
-	s.Access.Route(mux, "GET /api/v1/provider-kinds/{provider_kind}/capabilities", s.kindCapabilities)
-	s.Access.Route(mux, "GET /api/v1/provider-vendors", s.listVendors)
-	s.Access.Route(mux, "GET /api/v1/provider-models", s.inventory)
-	s.Access.Route(mux, "GET /api/v1/runtime-generations", s.generations)
-	s.Access.Route(mux, "GET /api/v1/providers", s.providers)
-	s.Access.Route(mux, "POST /api/v1/providers", s.createProvider, access.MaxBody(1<<20))
-	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}", s.provider)
-	s.Access.Route(mux, "PATCH /api/v1/providers/{provider_id}", s.updateProvider, access.MaxBody(1<<20))
-	s.Access.Route(mux, "DELETE /api/v1/providers/{provider_id}", s.deleteProvider)
-	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/activate", s.activateProvider)
-	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/disable", s.disableProvider)
-	// Each advertised capability, or each declared model of a provider without
-	// discovery, can consume a full probe budget; reserve another management
-	// budget for preparation, queueing, and persistence.
-	certifyTimeout := time.Duration(len(capabilityVocabulary)+1) * probeTimeout
-	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/probe", s.probe, access.Deadline(certifyTimeout))
-	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/discovery", s.discover, access.MaxBody(1<<20), access.Deadline(certifyTimeout))
-	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/catalog-suggestions", s.catalogSuggestions)
-	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/catalog-suggestions/accept", s.acceptCatalogSuggestions, access.MaxBody(1<<20))
-	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/restore-as-draft", s.restoreActiveAsDraft)
-	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/models", s.models)
-	s.Access.Route(mux, "PATCH /api/v1/providers/{provider_id}/models/{model_id}", s.setModel)
-	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/models/{model_id}/certify", s.certify, access.MaxBody(65536), access.Deadline(certifyTimeout))
-	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/network-credentials", s.networkCredentials)
-	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/network-credentials", s.createNetworkCredential, access.MaxBody(256<<10))
-	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/network-credentials/{credential_id}/revoke", s.revokeNetworkCredential)
-	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/credentials", s.credentials)
-	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/credentials", s.rotate, access.MaxBody(65536), access.Deadline(certifyTimeout))
-	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/credentials/{credential_id}/revoke", s.revoke)
-	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/codex-import", s.importCodexCredentials, access.MaxBody(128<<10), access.Deadline(grantStepTimeout))
-	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/claude-import", s.importClaudeCredentials, access.MaxBody(128<<10), access.Deadline(grantStepTimeout))
-	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/antigravity-import", s.importAntigravityCredentials, access.MaxBody(128<<10), access.Deadline(grantStepTimeout))
-	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/grant-enrollments", s.startGrantEnrollment, access.MaxBody(65536), access.Deadline(grantStepTimeout))
-	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/grant-enrollments/{enrollment_id}/continue", s.continueGrantEnrollment, access.MaxBody(65536), access.Deadline(grantStepTimeout))
-	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/grant-enrollments/{enrollment_id}/poll", s.pollGrantEnrollment, access.MaxBody(65536), access.Deadline(grantStepTimeout))
-	s.Access.Route(mux, "DELETE /api/v1/providers/{provider_id}/grant-enrollments/{enrollment_id}", s.cancelGrantEnrollment)
-	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/credential-slots", s.slots)
-	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/credential-slots/{slot_id}", s.getSlot)
-	s.Access.Route(mux, "DELETE /api/v1/providers/{provider_id}/credential-slots/{slot_id}", s.deleteSlot)
-	s.Access.Route(mux, "PUT /api/v1/providers/{provider_id}/credential-slots/{slot_id}", s.writeSlot)
-	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/credential-slots/{slot_id}/validate", s.validateSlot, access.MaxBody(65536), access.Deadline(certifyTimeout))
-	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/revisions", s.revisions)
-	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/revisions/diff", s.revisionDiff)
-	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/revisions/{revision_id}", s.revision)
-	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/revisions/{revision_id}/models", s.revisionModels)
-	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/revisions/{revision_id}/restore-as-draft", s.restoreRevisionAsDraft)
-}
-
-// profiles lists the built-in profiles and those of usable plugins.
 func (s *Server) profiles(r *http.Request, _ access.Principal) (access.Reply, error) {
-	pluginProfiles, err := plugins.Profiles(r.Context(), s.Access.Pool, s.Unconfined)
+	pluginProfiles, err := plugins.Profiles(r.Context(), s.access.Pool, s.unconfined)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	return access.OK(map[string]any{"items": append(connectors.Profiles(), pluginProfiles...)}), nil
+}
+
+func (s *Server) operationDialects(r *http.Request, _ access.Principal) (access.Reply, error) {
+	items := []map[string]any{}
+	for _, d := range operationregistry.Catalog().Dialects() {
+		items = append(items, map[string]any{"id": d.Identity.ID, "revision": d.Identity.Revision, "operation": d.Operation.ID, "operation_revision": d.Operation.Revision, "surface": d.Surface, "mode": "unary", "label": d.Label, "request_schema": d.RequestSchema, "result_schema": d.ResultSchema, "documentation": d.Documentation, "evidence": d.Evidence})
+	}
+	return access.OK(map[string]any{"items": items}), nil
 }

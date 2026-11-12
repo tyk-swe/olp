@@ -13,7 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
-	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
 	"github.com/tyk-swe/olp/internal/routes"
 )
 
@@ -29,7 +29,7 @@ type scope struct {
 	directory promotion.Directory
 	bindings  bindings
 	deps      provider.Deps
-	accounts  []resolved[providers.CodeAccountInput]
+	accounts  []resolved[codeaccounts.Input]
 	pools     []resolved[access.CodePoolInput]
 }
 

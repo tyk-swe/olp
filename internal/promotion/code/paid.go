@@ -13,6 +13,8 @@ import (
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -131,14 +133,13 @@ func resolvePaid(ctx context.Context, q access.Queryer, connections map[string]P
 
 func (c PaidConnection) resolve(ctx context.Context, q access.Queryer, project string, values bindings, deps provider.Deps) (routing.Provider, error) {
 	entry := c.Provider
-	active, err := providers.ReadActiveRevision(ctx, q, entry.Name, project)
+	current, found, err := providers.ReadActiveRevision(ctx, q, entry.Name, project)
 	if err != nil {
 		return routing.Provider{}, err
 	}
-	if active == nil {
+	if !found {
 		return routing.Provider{}, access.Invalid("code.paid_connections", "Prepare the published destination metered provider first.")
 	}
-	current := *active
 	var currentModels []routing.RevisionModel
 	if err := json.Unmarshal(current.Models, &currentModels); err != nil {
 		return routing.Provider{}, err
@@ -147,7 +148,7 @@ func (c PaidConnection) resolve(ctx context.Context, q access.Queryer, project s
 	if err := json.Unmarshal(current.Slots, &currentSlots); err != nil {
 		return routing.Provider{}, err
 	}
-	var currentConfiguration providers.Configuration
+	var currentConfiguration connection.Configuration
 	if err := json.Unmarshal(current.Configuration, &currentConfiguration); err != nil {
 		return routing.Provider{}, err
 	}
@@ -181,18 +182,18 @@ func paidRoute(policy routes.CodeRouteInput) codemode.Route {
 	return codemode.Route{Models: policy.Models, ProjectID: policy.ProjectID, PaidParticipation: policy.PaidParticipation, PaidTargets: policy.PaidTargets, PaidFallbackTargets: policy.PaidFallbackTargets, InitialRecoveryAttempts: policy.InitialRecoveryAttempts}
 }
 
-func preparedPaid(ctx context.Context, q access.Queryer, configuration providers.Configuration, deps provider.Deps) (providers.Configuration, error) {
-	prepared, err := providers.PrepareConfiguration(ctx, q, deps.Unconfined, deps.Egress, configuration)
+func preparedPaid(ctx context.Context, q access.Queryer, configuration connection.Configuration, deps provider.Deps) (connection.Configuration, error) {
+	prepared, err := connection.Prepare(ctx, deps.Drafts.ConnectionPolicy(q), configuration)
 	if _, refused := provider.Refusal(err); refused {
 		return configuration, nil
 	}
 	if err != nil {
-		return providers.Configuration{}, err
+		return connection.Configuration{}, err
 	}
-	return prepared.Configuration(), nil
+	return prepared.Document(), nil
 }
 
-func decoded(current routing.ProviderRevision, configuration providers.Configuration, models []routing.RevisionModel, slots []routing.RevisionSlot) (routing.Provider, error) {
+func decoded(current routing.ProviderRevision, configuration connection.Configuration, models []routing.RevisionModel, slots []routing.RevisionSlot) (routing.Provider, error) {
 	configurationJSON, err := json.Marshal(configuration)
 	if err != nil {
 		return routing.Provider{}, err
@@ -214,7 +215,7 @@ func frozenModel(model providers.DraftModel, current []routing.RevisionModel) (r
 		return routing.RevisionModel{}, access.Invalid("code.paid_connections.models", "Frozen models must remain enabled in the destination publication.")
 	}
 	destination := current[at]
-	capabilities, err := promotion.TryMapIndex(model.Capabilities, func(_ int, capability providers.CapabilityInput) (routing.RevisionCapability, error) {
+	capabilities, err := promotion.TryMapIndex(model.Capabilities, func(_ int, capability connection.Capability) (routing.RevisionCapability, error) {
 		found := slices.IndexFunc(destination.Capabilities, func(c routing.RevisionCapability) bool {
 			return c.Operation == capability.Operation && c.Surface == capability.Surface && c.Mode == capability.Mode && c.Source == "certified"
 		})
@@ -256,7 +257,7 @@ func (c PaidConnection) slotCredential(ctx context.Context, q access.Queryer, sl
 	if err != nil {
 		return nil, err
 	}
-	allowed, err := providers.SlotCredentialCurrent(ctx, q, live.ID, providerID, id, slot.Enabled)
+	allowed, err := codeaccounts.SlotCredentialCurrent(ctx, q, live.ID, providerID, id, slot.Enabled)
 	if err != nil {
 		return nil, err
 	}

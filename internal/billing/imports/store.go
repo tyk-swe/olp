@@ -14,7 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/billing/reconciliation"
 	"github.com/tyk-swe/olp/internal/billing/source"
-	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 )
 
 const (
@@ -56,8 +56,9 @@ const (
 	columns = `provider_id,source,credential_id::text,scope,enabled,etag::text,
 		next_import_at,last_import_at,last_success_at,last_error_code,consecutive_failures,
 		imported_from,imported_through,source_revision,resume_period,resume_remaining`
-	selectRecord = `SELECT ` + columns + ` FROM olp.provider_billing_imports WHERE provider_id=$1::uuid`
-	claimRecord  = `UPDATE olp.provider_billing_imports SET next_import_at=now()+$1::interval
+	selectRecords = `SELECT ` + columns + ` FROM olp.provider_billing_imports`
+	selectRecord  = selectRecords + ` WHERE provider_id=$1::uuid`
+	claimRecord   = `UPDATE olp.provider_billing_imports SET next_import_at=now()+$1::interval
 		WHERE provider_id IN (
 			SELECT provider_id FROM olp.provider_billing_imports
 			WHERE enabled AND next_import_at <= now()
@@ -93,7 +94,7 @@ func claim(ctx context.Context, pool *pgxpool.Pool) (record, bool, error) {
 type provider struct {
 	ETag          string
 	ProjectID     *string
-	Configuration providers.Configuration
+	Configuration connection.Configuration
 }
 
 const selectProvider = `SELECT etag::text,project_id::text,configuration FROM olp.providers WHERE id=$1::uuid`

@@ -242,7 +242,7 @@ counting is unary, video creation is asynchronous, and realtime uses WebSockets.
 
 Endpoint registration lives in
 [`internal/gateway/server.go`](../../internal/gateway/server.go); certification
-policy lives in [`internal/providers/kinds.go`](../../internal/providers/kinds.go).
+policy lives in [`internal/providers/probe/operations.go`](../../internal/providers/probe/operations.go).
 The conformance corpus and SDK suites exercise these behaviors.
 
 ## Surfaces and operations
@@ -831,7 +831,7 @@ through deployment profiles; the Azure v1 profiles do not serve media. See
 [Azure media](providers/azure.md#media). It also supports the qualified file,
 batch, realtime, and stored-response paths above; image edits and variations,
 audio translation, and video operations remain uncertifiable. See
-[certification eligibility](../../internal/providers/kinds.go).
+[certification eligibility](../../internal/providers/probe/operations.go).
 
 See the [Azure connector guide](providers/azure.md) for API-key and Microsoft
 Entra authentication, token caching, and identity egress.

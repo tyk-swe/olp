@@ -1,47 +1,39 @@
+// Package providers owns provider connections: configuration drafts, model
+// discovery and certification, credential pools, activation into immutable
+// revisions, and history for the connector matrix.
 package providers
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5"
-
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/catalog"
+	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/plugins"
+	"github.com/tyk-swe/olp/internal/providers/connection"
+	"github.com/tyk-swe/olp/internal/providers/probe"
 	"github.com/tyk-swe/olp/internal/release"
-	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
-// QuotaSource reports the shared quota state a provider connection and its
-// credential slots are in right now. *fleet.State implements it. The field
-// stays nil where no Valkey is configured, and the console is then told the
-// live counters are unknown rather than shown a zero it would read as idle.
+// Quotas is nil where no Valkey is configured, and the console then shows the
+// live counters as unknown instead of an idle zero.
 type QuotaSource interface {
 	Usage(ctx context.Context, lookup string) (fleet.Usage, error)
 	Cooling(ctx context.Context, scopes ...string) (bool, error)
 	Cooldown(ctx context.Context, scope string, d time.Duration) error
 }
 
-type CatalogueOptions struct {
-	ExternalSecrets release.ExternalSecrets
-	Unconfined      *plugins.Unconfined
-	Quotas          QuotaSource
-	Plugins         *plugins.Host
-	Catalog         *catalog.Signed
-	Activated       func(context.Context, pgx.Tx, string, string) error
-	Log             *slog.Logger
-}
-
-type Catalogue struct {
+type Deps struct {
 	Access          *access.Server
 	Egress          *egress.Policy
+	Signer          connectors.Signer
 	ExternalSecrets release.ExternalSecrets
 	Unconfined      *plugins.Unconfined
 	Quotas          QuotaSource
@@ -49,198 +41,76 @@ type Catalogue struct {
 	Catalog         *catalog.Signed
 	Activated       func(context.Context, pgx.Tx, string, string) error
 	Log             *slog.Logger
-	client          *http.Client
-	connections     *egress.ConnectionClientCache
-	auth            *connectors.Auth
-	probes          chan struct{}
 }
 
 type Server struct {
-	*Catalogue
-	enrollments *Enrollments
+	access     *access.Server
+	egress     *egress.Policy
+	external   release.ExternalSecrets
+	unconfined *plugins.Unconfined
+	quota      QuotaSource
+	plugins    *plugins.Host
+	catalog    *catalog.Signed
+	activated  func(context.Context, pgx.Tx, string, string) error
+	log        *slog.Logger
+	prober     *probe.Prober
 }
 
-func NewCatalogue(a *access.Server, policy *egress.Policy, signer connectors.Signer, getenv func(string) string, options CatalogueOptions) *Catalogue {
-	auth := connectors.NewAuth(policy)
-	auth.Signer = signer
-	external := options.ExternalSecrets
-	if external == nil {
-		external = secretstore.New(*policy, getenv)
+func New(deps Deps) *Server {
+	return &Server{
+		access: deps.Access, egress: deps.Egress, external: deps.ExternalSecrets, unconfined: deps.Unconfined,
+		quota: deps.Quotas, plugins: deps.Plugins, catalog: deps.Catalog, activated: deps.Activated, log: deps.Log,
+		prober: probe.New(deps.Egress, deps.Signer, deps.Plugins, networkSecrets{server: deps.Access}),
 	}
-	return &Catalogue{Access: a, Egress: policy, ExternalSecrets: external, Unconfined: options.Unconfined, Quotas: options.Quotas,
-		Plugins: options.Plugins, Catalog: options.Catalog, Activated: options.Activated, Log: options.Log,
-		connections: egress.NewConnectionClientCache(128), client: policy.Client(probeTimeout), auth: auth, probes: make(chan struct{}, 4)}
 }
 
-func New(catalogue *Catalogue) *Server {
-	return &Server{Catalogue: catalogue, enrollments: NewEnrollments(catalogue)}
-}
-
-type record struct {
-	ID               string
-	Name             string
-	Kind             string
-	State            string
-	Configuration    Configuration
-	ETag             string
-	SlotsETag        string
-	DraftDirty       bool
-	ActiveRevision   *int
-	ActiveRevisionID *string
-	LastProbeAt      *time.Time
-	LastProbeStatus  *string
-	LastProbeDetail  *string
-	CreatedBy        string
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	ProjectID        *string
-}
-
-const recordColumns = "p.id::text,p.name,p.kind,p.state,p.configuration,p.etag::text,p.slots_etag::text,p.draft_dirty,p.active_revision,p.active_revision_id::text,p.last_probe_at,p.last_probe_status,p.last_probe_detail,p.created_by::text,p.created_at,p.updated_at,p.project_id::text," + pluginColumn
-
-func scanRecord(row pgx.Row) (*record, error) {
-	var p record
-	var configuration, plugin []byte
-	err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &configuration, &p.ETag, &p.SlotsETag, &p.DraftDirty, &p.ActiveRevision, &p.ActiveRevisionID, &p.LastProbeAt, &p.LastProbeStatus, &p.LastProbeDetail, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt, &p.ProjectID, &plugin)
-	if err != nil {
-		return nil, err
+func (s *Server) Register(mux *http.ServeMux) {
+	s.access.Route(mux, "GET /api/v1/provider-profiles", s.profiles)
+	s.access.Route(mux, "GET /api/v1/operation-dialects", s.operationDialects)
+	s.access.Route(mux, "GET /api/v1/provider-kinds", s.kinds)
+	s.access.Route(mux, "GET /api/v1/provider-kinds/{provider_kind}/capabilities", s.kindCapabilities)
+	s.access.Route(mux, "GET /api/v1/provider-vendors", s.listVendors)
+	s.access.Route(mux, "GET /api/v1/provider-models", s.inventory)
+	s.access.Route(mux, "GET /api/v1/providers", s.providers)
+	s.access.Route(mux, "POST /api/v1/providers", s.createProvider, access.MaxBody(1<<20))
+	s.access.Route(mux, "GET /api/v1/providers/{provider_id}", s.provider)
+	s.access.Route(mux, "PATCH /api/v1/providers/{provider_id}", s.updateProvider, access.MaxBody(1<<20))
+	s.access.Route(mux, "DELETE /api/v1/providers/{provider_id}", s.deleteProvider)
+	s.access.Route(mux, "POST /api/v1/providers/{provider_id}/activate", s.activateProvider)
+	s.access.Route(mux, "POST /api/v1/providers/{provider_id}/disable", s.disableProvider)
+	// Each advertised capability, or each declared model of a provider without
+	// discovery, can consume a full probe budget; reserve another management
+	// budget for preparation, queueing, and persistence.
+	certifyTimeout := time.Duration(len(connection.Vocabulary())+1) * probe.Timeout
+	s.access.Route(mux, "POST /api/v1/providers/{provider_id}/probe", s.probe, access.Deadline(certifyTimeout))
+	s.access.Route(mux, "POST /api/v1/providers/{provider_id}/discovery", s.discover, access.MaxBody(1<<20), access.Deadline(certifyTimeout))
+	s.access.Route(mux, "GET /api/v1/providers/{provider_id}/catalog-suggestions", s.catalogSuggestions)
+	s.access.Route(mux, "POST /api/v1/providers/{provider_id}/catalog-suggestions/accept", s.acceptCatalogSuggestions, access.MaxBody(1<<20))
+	s.access.Route(mux, "POST /api/v1/providers/{provider_id}/restore-as-draft", s.restoreActiveAsDraft)
+	s.access.Route(mux, "GET /api/v1/providers/{provider_id}/models", s.models)
+	s.access.Route(mux, "PATCH /api/v1/providers/{provider_id}/models/{model_id}", s.setModel)
+	s.access.Route(mux, "POST /api/v1/providers/{provider_id}/models/{model_id}/certify", s.certify, access.MaxBody(65536), access.Deadline(certifyTimeout))
+	s.access.Route(mux, "GET /api/v1/providers/{provider_id}/network-credentials", s.networkCredentials)
+	s.access.Route(mux, "POST /api/v1/providers/{provider_id}/network-credentials", s.createNetworkCredential, access.MaxBody(256<<10))
+	s.access.Route(mux, "POST /api/v1/providers/{provider_id}/network-credentials/{credential_id}/revoke", s.revokeNetworkCredential)
+	s.access.Route(mux, "GET /api/v1/providers/{provider_id}/credentials", s.credentials)
+	s.access.Route(mux, "POST /api/v1/providers/{provider_id}/credentials", s.rotate, access.MaxBody(65536), access.Deadline(certifyTimeout))
+	s.access.Route(mux, "POST /api/v1/providers/{provider_id}/credentials/{credential_id}/revoke", s.revoke)
+	for _, adapter := range []codemode.Adapter{codemode.AdapterCodex, codemode.AdapterClaude, codemode.AdapterAntigravity} {
+		s.access.Route(mux, "POST /api/v1/providers/{provider_id}/"+string(adapter)+"-import", s.importCredentials(adapter), access.MaxBody(128<<10), access.Deadline(grantStepTimeout))
 	}
-	if err = p.decodeConfiguration(configuration, plugin); err != nil {
-		return nil, err
-	}
-	return &p, nil
-}
-
-// decodeConfiguration reads a stored draft configuration, with the plugin it
-// pins, if any.
-func (p *record) decodeConfiguration(configuration, plugin []byte) error {
-	if err := json.Unmarshal(configuration, &p.Configuration); err != nil {
-		return err
-	}
-	p.Configuration.Normalize()
-	p.Configuration.ProviderID = p.ID
-	return p.Configuration.pinned(plugin)
-}
-
-// load reads one provider, locking the row inside a transaction when asked.
-func load(ctx context.Context, q access.Queryer, id string, lock bool) (*record, error) {
-	query := "SELECT " + recordColumns + " FROM olp.providers p WHERE p.id=$1"
-	if lock {
-		query += " FOR UPDATE"
-	}
-	return scanRecord(q.QueryRow(ctx, query, id))
-}
-
-// visibleProvider loads a provider p may see; one outside p's scope is
-// missing.
-func visibleProvider(ctx context.Context, q access.Queryer, p access.Principal, id string) (*record, error) {
-	current, err := load(ctx, q, id, false)
-	if err != nil {
-		return nil, err
-	}
-	if err = p.Project(current.ProjectID, access.View); err != nil {
-		return nil, err
-	}
-	return current, nil
-}
-
-// touch records a draft change and returns the new etag.
-func touch(ctx context.Context, tx pgx.Tx, id string) (string, error) {
-	etag := access.NewID()
-	_, err := tx.Exec(ctx, "UPDATE olp.providers SET etag=$2,draft_dirty=true,updated_at=now() WHERE id=$1", id, etag)
-	return etag, err
-}
-
-// credentialState is what the detail view needs about a credential.
-type credentialState struct {
-	ID      *string
-	Version *int
-	Revoked bool
-}
-
-type providerSummary struct {
-	ID                       string     `json:"id"`
-	Name                     string     `json:"name"`
-	Kind                     string     `json:"kind"`
-	VendorID                 *string    `json:"vendor_id"`
-	ProjectID                *string    `json:"project_id"`
-	ProjectName              *string    `json:"project_name"`
-	State                    string     `json:"state"`
-	ConnectorReady           bool       `json:"connector_ready"`
-	ETag                     string     `json:"etag"`
-	PendingActivation        bool       `json:"pending_activation"`
-	ActiveRevision           *int       `json:"active_revision"`
-	CreatedByEmail           *string    `json:"created_by_email"`
-	LastProbeAt              *time.Time `json:"last_probe_at"`
-	LastProbeStatus          *string    `json:"last_probe_status"`
-	CreatedAt                time.Time  `json:"created_at"`
-	UpdatedAt                time.Time  `json:"updated_at"`
-	ModelCount               int64      `json:"model_count"`
-	EnabledModelCount        int64      `json:"enabled_model_count"`
-	CapabilityCount          int64      `json:"capability_count"`
-	CertifiedCapabilityCount int64      `json:"certified_capability_count"`
-}
-
-type detail struct {
-	providerSummary
-	Configuration            Configuration `json:"configuration"`
-	DraftCredentialID        *string       `json:"draft_credential_id"`
-	DraftCredentialVersion   *int          `json:"draft_credential_version"`
-	RuntimeCredentialID      *string       `json:"runtime_credential_id"`
-	RuntimeCredentialVersion *int          `json:"runtime_credential_version"`
-	LastProbeDetail          *string       `json:"last_probe_detail"`
-}
-
-const detailQuery = "SELECT " + recordColumns + ",pr.name,u.email," +
-	"(SELECT count(*) FROM olp.provider_models m WHERE m.provider_id=p.id)," +
-	"(SELECT count(*) FROM olp.provider_models m WHERE m.provider_id=p.id AND m.enabled)," +
-	"(SELECT coalesce(sum(jsonb_array_length(m.capabilities)),0) FROM olp.provider_models m WHERE m.provider_id=p.id)," +
-	"(SELECT count(*) FROM olp.provider_models m,jsonb_array_elements(m.capabilities) c WHERE m.provider_id=p.id AND c->>'source'='certified')," +
-	"d.credential_id::text,dc.version,EXISTS(SELECT 1 FROM olp.provider_slots available JOIN olp.provider_credentials secret ON secret.id=available.credential_id WHERE available.provider_id=p.id AND available.enabled AND secret.revoked_at IS NULL),rc.id::text,rc.version" +
-	" FROM olp.providers p JOIN olp.users u ON u.id=p.created_by LEFT JOIN olp.projects pr ON pr.id=p.project_id" +
-	" LEFT JOIN olp.provider_slots d ON d.provider_id=p.id AND d.is_default" +
-	" LEFT JOIN olp.provider_credentials dc ON dc.id=d.credential_id" +
-	" LEFT JOIN olp.provider_revisions r ON r.id=p.active_revision_id" +
-	" LEFT JOIN olp.provider_credentials rc ON rc.provider_id=p.id AND rc.version=r.credential_version"
-
-func (s *Catalogue) scanDetail(row pgx.Row) (*detail, error) {
-	var p record
-	var configuration, plugin []byte
-	var d detail
-	var draft credentialState
-	var usableCredential bool
-	err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &configuration, &p.ETag, &p.SlotsETag, &p.DraftDirty, &p.ActiveRevision, &p.ActiveRevisionID, &p.LastProbeAt, &p.LastProbeStatus, &p.LastProbeDetail, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt, &p.ProjectID, &plugin,
-		&d.ProjectName, &d.CreatedByEmail, &d.ModelCount, &d.EnabledModelCount, &d.CapabilityCount, &d.CertifiedCapabilityCount,
-		&draft.ID, &draft.Version, &usableCredential, &d.RuntimeCredentialID, &d.RuntimeCredentialVersion)
-	if err != nil {
-		return nil, err
-	}
-	if err = p.decodeConfiguration(configuration, plugin); err != nil {
-		return nil, err
-	}
-	d.ID, d.Name, d.Kind, d.State, d.ETag = p.ID, p.Name, p.Kind, p.State, p.ETag
-	d.ProjectID = p.ProjectID
-	d.VendorID = p.Configuration.Options.VendorID
-	d.Configuration = p.Configuration
-	d.PendingActivation = p.DraftDirty
-	d.ActiveRevision = p.ActiveRevision
-	d.DraftCredentialID, d.DraftCredentialVersion = draft.ID, draft.Version
-	d.LastProbeAt, d.LastProbeStatus, d.LastProbeDetail = p.LastProbeAt, p.LastProbeStatus, p.LastProbeDetail
-	d.CreatedAt, d.UpdatedAt = p.CreatedAt.UTC(), p.UpdatedAt.UTC()
-	configurationErr := p.Configuration.ValidateAndNormalize(s.Egress)
-	d.Configuration.Options.Commitment = p.Configuration.Options.Commitment
-	d.ConnectorReady = configurationErr == nil && (!p.Configuration.CredentialRequired() || usableCredential)
-	return &d, nil
-}
-
-func (s *Catalogue) detail(ctx context.Context, q access.Queryer, id string) (*detail, error) {
-	return s.scanDetail(q.QueryRow(ctx, detailQuery+" WHERE p.id=$1", id))
-}
-
-func (s *Server) detailReply(ctx context.Context, q access.Queryer, id string) (access.Reply, error) {
-	d, err := s.detail(ctx, q, id)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	return access.Detail(d, d.ETag), nil
+	s.access.Route(mux, "POST /api/v1/providers/{provider_id}/grant-enrollments", s.startGrantEnrollment, access.MaxBody(65536), access.Deadline(grantStepTimeout))
+	s.access.Route(mux, "POST /api/v1/providers/{provider_id}/grant-enrollments/{enrollment_id}/continue", s.continueGrantEnrollment, access.MaxBody(65536), access.Deadline(grantStepTimeout))
+	s.access.Route(mux, "POST /api/v1/providers/{provider_id}/grant-enrollments/{enrollment_id}/poll", s.pollGrantEnrollment, access.MaxBody(65536), access.Deadline(grantStepTimeout))
+	s.access.Route(mux, "DELETE /api/v1/providers/{provider_id}/grant-enrollments/{enrollment_id}", s.cancelGrantEnrollment)
+	s.access.Route(mux, "GET /api/v1/providers/{provider_id}/credential-slots", s.slots)
+	s.access.Route(mux, "GET /api/v1/providers/{provider_id}/credential-slots/{slot_id}", s.getSlot)
+	s.access.Route(mux, "DELETE /api/v1/providers/{provider_id}/credential-slots/{slot_id}", s.deleteSlot)
+	s.access.Route(mux, "PUT /api/v1/providers/{provider_id}/credential-slots/{slot_id}", s.writeSlot)
+	s.access.Route(mux, "POST /api/v1/providers/{provider_id}/credential-slots/{slot_id}/validate", s.validateSlot, access.MaxBody(65536), access.Deadline(certifyTimeout))
+	s.access.Route(mux, "GET /api/v1/providers/{provider_id}/revisions", s.revisions)
+	s.access.Route(mux, "GET /api/v1/providers/{provider_id}/revisions/diff", s.revisionDiff)
+	s.access.Route(mux, "GET /api/v1/providers/{provider_id}/revisions/{revision_id}", s.revision)
+	s.access.Route(mux, "GET /api/v1/providers/{provider_id}/revisions/{revision_id}/models", s.revisionModels)
+	s.access.Route(mux, "POST /api/v1/providers/{provider_id}/revisions/{revision_id}/restore-as-draft", s.restoreRevisionAsDraft)
 }

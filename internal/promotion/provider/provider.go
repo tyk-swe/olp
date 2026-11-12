@@ -2,17 +2,21 @@ package provider
 
 import (
 	"cmp"
+	"context"
 	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
 const (
@@ -21,18 +25,31 @@ const (
 	maxModels    = 10000
 )
 
+type Drafts interface {
+	ConnectionPolicy(q access.Queryer) connection.Policy
+	CreateDraft(ctx context.Context, tx pgx.Tx, draft providers.Draft) (providers.CreatedDraft, error)
+	StoreDraftConfiguration(ctx context.Context, tx pgx.Tx, id, name string, prepared connection.Prepared) error
+	StageDraftInventory(ctx context.Context, tx pgx.Tx, providerID string, models []providers.DraftModel, slots []providers.DraftSlot) error
+	BindDraftCredential(ctx context.Context, tx pgx.Tx, providerID, slotID, credentialID string) error
+	CredentialEquals(ctx context.Context, q access.Queryer, credentialID, secret string) (bool, error)
+	ExternalCredentialEquals(ctx context.Context, q access.Queryer, credentialID string, reference secretstore.Reference) (bool, error)
+	StoreCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, int, error)
+	StoreExternalCredential(ctx context.Context, tx pgx.Tx, providerID string, reference secretstore.Reference) (string, int, error)
+	StoreNetworkCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error)
+}
+
 type Deps struct {
 	Egress       *egress.Policy
 	Unconfined   *plugins.Unconfined
 	Keys         *secrets.KeyRing
 	Installation string
-	Catalogue    *providers.Catalogue
+	Drafts       Drafts
 }
 
 type Entry struct {
 	Name            string
 	Project         *string
-	Configuration   providers.Configuration
+	Configuration   connection.Configuration
 	Models          []providers.DraftModel
 	Slots           []Slot
 	Network         bool
@@ -89,7 +106,7 @@ func parse(entry contract.ConfigurationProviderEntry, at path, names promotion.N
 	if err != nil {
 		return Entry{}, err
 	}
-	validated, err := validated(configuration, policy)
+	validated, err := connection.ValidateUnpinned(policy, configuration)
 	if err != nil {
 		return Entry{}, err
 	}
@@ -124,21 +141,21 @@ func parseModels(models []contract.ConfigurationModelEntry, at path) ([]provider
 	first := promotion.FirstIndex(models, func(model contract.ConfigurationModelEntry) string { return model.UpstreamModel })
 	return promotion.TryMapIndex(models, func(j int, model contract.ConfigurationModelEntry) (providers.DraftModel, error) {
 		field := at.at("models", j)
-		if err := providers.ValidModelName(field.field("upstream_model"), model.UpstreamModel); err != nil {
+		if err := connection.ValidModelName(field.field("upstream_model"), model.UpstreamModel); err != nil {
 			return providers.DraftModel{}, err
 		}
 		if first[model.UpstreamModel] != j {
 			return providers.DraftModel{}, access.Invalid(field.field("upstream_model"), "Model names must be unique per provider.")
 		}
 		display := cmp.Or(model.DisplayName, model.UpstreamModel)
-		if err := providers.ValidModelName(field.field("display_name"), display); err != nil {
+		if err := connection.ValidModelName(field.field("display_name"), display); err != nil {
 			return providers.DraftModel{}, err
 		}
-		capabilities, err := promotion.Convert[[]providers.CapabilityInput](model.Capabilities)
+		capabilities, err := promotion.Convert[[]connection.Capability](model.Capabilities)
 		if err != nil {
 			return providers.DraftModel{}, err
 		}
-		if _, err := providers.ValidCapabilities(capabilities); err != nil {
+		if _, err := connection.ValidCapabilities(capabilities); err != nil {
 			return providers.DraftModel{}, err
 		}
 		return providers.DraftModel{UpstreamModel: model.UpstreamModel, DisplayName: display, Enabled: model.Enabled, Capabilities: promotion.NonNil(capabilities)}, nil
@@ -175,9 +192,7 @@ func Render(entries []Entry) ([]contract.ConfigurationProviderEntry, error) {
 }
 
 func render(entry Entry) (contract.ConfigurationProviderEntry, error) {
-	normalized := entry.Configuration
-	normalized.Normalize()
-	configuration, err := promotion.Convert[contract.ProviderConfiguration](normalized)
+	configuration, err := promotion.Convert[contract.ProviderConfiguration](entry.Configuration.Normalized())
 	if err != nil {
 		return contract.ConfigurationProviderEntry{}, err
 	}
@@ -211,8 +226,8 @@ func canonicalModels(models []providers.DraftModel) []providers.DraftModel {
 	return slices.SortedFunc(slices.Values(canonical), func(a, b providers.DraftModel) int { return cmp.Compare(a.UpstreamModel, b.UpstreamModel) })
 }
 
-func canonicalCapabilities(capabilities []providers.CapabilityInput) []providers.CapabilityInput {
-	return promotion.NonNil(slices.SortedFunc(slices.Values(capabilities), func(a, b providers.CapabilityInput) int {
+func canonicalCapabilities(capabilities []connection.Capability) []connection.Capability {
+	return promotion.NonNil(slices.SortedFunc(slices.Values(capabilities), func(a, b connection.Capability) int {
 		return cmp.Compare(a.Operation+"/"+a.Surface+"/"+a.Mode, b.Operation+"/"+b.Surface+"/"+b.Mode)
 	}))
 }

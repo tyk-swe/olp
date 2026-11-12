@@ -25,6 +25,7 @@ func testPromotionRoundTrip(t *testing.T, parent *service, owner *caller, fixtur
 	exported := s.want(operator, "GET", "/api/v1/configuration/export", nil, nil, http.StatusOK)
 	document := exported["document"].(map[string]any)
 	assertCanonicalDocument(t, document)
+	assertExportedBillingImport(t, document)
 	request := map[string]any{"document": document, "expected_digest": exported["digest"]}
 
 	planned := s.want(operator, "POST", "/api/v1/configuration/plan", request, nil, http.StatusOK)
@@ -195,6 +196,20 @@ func assertCanonicalDocument(t *testing.T, document map[string]any) {
 	assertSorted(t, "pricing prices", items(pricing["prices"]), func(p map[string]any) []string {
 		return []string{text(p, "provider_kind"), strings.ToLower(text(p, "provider")), strings.ToLower(text(p, "vendor_id")), text(p, "model"), text(p, "operation")}
 	})
+}
+
+func assertExportedBillingImport(t *testing.T, document map[string]any) {
+	t.Helper()
+	providers := items(document["providers"])
+	index := slices.IndexFunc(providers, func(p map[string]any) bool { return p["name"] == "promotion-bedrock" })
+	if index < 0 {
+		t.Fatalf("export has no promotion-bedrock provider: %v", providers)
+	}
+	billing, _ := providers[index]["billing_import"].(map[string]any)
+	scope, _ := billing["scope"].(map[string]any)
+	if scope["payer_account_id"] != "123456789012" {
+		t.Errorf("exported promotion-bedrock billing import is %v", providers[index]["billing_import"])
+	}
 }
 
 func assertSorted(t *testing.T, label string, entries []map[string]any, key func(map[string]any) []string) {

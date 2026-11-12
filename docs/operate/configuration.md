@@ -337,8 +337,8 @@ See [`CONTRIBUTING.md`](../../CONTRIBUTING.md) and
 `OLP_CONNECTOR_CONFIG_FILE` accepts the `providers` list shown in
 [`deploy/connectors.example.json`](../../deploy/connectors.example.json). Each
 entry identifies a provider, uses the same nested `configuration` as the
-management API, and references an optional `credential_file`. Vertex entries
-also select a probe `model`. Credential files must have restricted permissions;
+management API, and references an optional `credential_file`. Credential files
+must have restricted permissions, and a multiline credential must be JSON;
 ADC and the AWS default chain reject stored credentials. A provider with a
 profile, including a [plugin provider](../use/plugins.md#providers-from-plugin-profiles)
 and its static credential, mounts only secret material: its `configuration` must

@@ -4,6 +4,7 @@
 package secretstore
 
 import (
+	"encoding/json"
 	"errors"
 	"regexp"
 	"strings"
@@ -41,6 +42,14 @@ var awsRegion = regexp.MustCompile(`^[a-z]{2}(?:-[a-z]+)+-[0-9]+$`)
 
 func clean(value string, max int) bool {
 	return value != "" && len(value) <= max && !strings.ContainsAny(value, "\x00\r\n\t") && strings.TrimSpace(value) == value
+}
+
+func ParseReference(data []byte) (Reference, error) {
+	var reference Reference
+	if err := json.Unmarshal(data, &reference); err != nil {
+		return Reference{}, err
+	}
+	return reference, reference.Validate()
 }
 
 func (r Reference) Validate() error {

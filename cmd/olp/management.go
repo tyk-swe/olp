@@ -8,10 +8,13 @@ import (
 
 	"github.com/tyk-swe/olp/internal/guardrails/attachment"
 	"github.com/tyk-swe/olp/internal/media/jobs"
+	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
+	"github.com/tyk-swe/olp/internal/secretstore"
 	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/usage/completeness"
 	"github.com/tyk-swe/olp/internal/usage/pricebook"
 	"github.com/tyk-swe/olp/internal/usage/reports"
+	"github.com/tyk-swe/olp/internal/vendors"
 
 	"github.com/tyk-swe/olp/internal/guardrails/policy"
 
@@ -101,6 +104,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	notifications.NewManagement(m.Access, *m.Egress).Register(mux)
 	settings.New(m.Access, m.Access.RuntimePublisher).Register(mux)
 	(&release.DelegationManagement{Access: m.Access, Manager: m.Runtime}).Register(mux)
+	release.RegisterGenerations(m.Access, mux)
 	(&gateway.CacheManagement{Access: m.Access, Gateway: m.Gateway}).Register(mux)
 	(&branding.Server{Access: m.Access}).Register(mux)
 	publishGuardrails := func(ctx context.Context, tx pgx.Tx, actor string) error {
@@ -145,7 +149,8 @@ func (m Management) Register(mux *http.ServeMux) {
 		routeServer.Supply = gateway.NewAdmission(m.Limits.Limiter, m.Limits.Fleet, nil, m.Log)
 		routeServer.Fleet = m.Limits.Fleet
 	}
-	catalogue := providers.NewCatalogue(m.Access, m.Egress, m.PluginHost, m.Getenv, providers.CatalogueOptions{
+	providerServer := providers.New(providers.Deps{
+		Access: m.Access, Egress: m.Egress, Signer: m.PluginHost, ExternalSecrets: secretstore.New(*m.Egress, m.Getenv),
 		Unconfined: m.Unconfined, Log: m.Log, Plugins: m.PluginHost, Catalog: m.Catalog,
 		Activated: routeServer.Activated,
 		Quotas: func() providers.QuotaSource {
@@ -155,7 +160,8 @@ func (m Management) Register(mux *http.ServeMux) {
 			return m.Limits.Fleet
 		}(),
 	})
-	providers.New(catalogue).Register(mux)
+	providerServer.Register(mux)
+	codeaccounts.NewAPI(m.Access).Register(mux)
 	routeServer.Register(mux)
 	(&gateway.Playground{Access: m.Access, Gateway: m.Gateway}).Register(mux)
 	(&jobs.API{Access: m.Access, Jobs: m.Media, Spool: m.Spool, Log: m.Log}).Register(mux)
@@ -172,7 +178,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	// of the management surface; their patterns are more specific than
 	// its catch-all, which answers everything no surface claims.
 	(&reports.API{Access: m.Access}).Register(mux)
-	(&pricebook.API{Access: m.Access, Normalizer: pricebook.NewNormalizer(providers.VendorKind), Egress: m.Egress, Catalog: m.Catalog, CatalogKeys: m.CatalogKeys}).Register(mux)
+	(&pricebook.API{Access: m.Access, Normalizer: pricebook.NewNormalizer(vendors.Kind), Egress: m.Egress, Catalog: m.Catalog, CatalogKeys: m.CatalogKeys}).Register(mux)
 	(&completeness.API{Access: m.Access}).Register(mux)
 	destination.NewAPI(m.Access, m.Egress).Register(mux)
 	focus.NewAPI(m.Access).Register(mux)
@@ -185,8 +191,8 @@ func (m Management) Register(mux *http.ServeMux) {
 		Unconfined: m.Unconfined,
 		Identity:   m.IdentityClient,
 		Costs:      project.CostsOf(m.limiter()),
-		Normalizer: pricebook.NewNormalizer(providers.VendorKind),
-		Catalogue:  catalogue,
+		Normalizer: pricebook.NewNormalizer(vendors.Kind),
+		Drafts:     providerServer,
 	})
 }
 

@@ -6,7 +6,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -16,14 +16,14 @@ type StoredCodeRoute struct {
 	Slug        string
 	Draft       codemode.Route
 	Published   *codemode.Route
-	Connections map[string]providers.Configuration
+	Connections map[string]connection.Configuration
 	Paid        map[string]routing.Provider
 }
 
 type CodeRouteState struct {
 	Draft       codemode.Route
 	Published   *codemode.Route
-	Connections map[string]providers.Configuration
+	Connections map[string]connection.Configuration
 	Paid        map[string]routing.Provider
 }
 

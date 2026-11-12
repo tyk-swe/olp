@@ -10,7 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
-	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -23,7 +23,7 @@ type Publication struct {
 
 type frozen struct {
 	Policy      routes.CodeRouteInput
-	Connections map[string]providers.Configuration
+	Connections map[string]connection.Configuration
 	Paid        map[string]routing.Provider
 }
 
@@ -78,18 +78,18 @@ func (p Publication) resolve(ctx context.Context, q access.Queryer, slug, projec
 	if _, err := routes.CodePaidProviders(ctx, q, paidRoute(policy)); err != nil {
 		return nil, err
 	}
-	connections := promotion.Associate(pinned, func(c pin) (string, providers.Configuration) { return c.provider, c.configuration })
+	connections := promotion.Associate(pinned, func(c pin) (string, connection.Configuration) { return c.provider, c.configuration })
 	return &frozen{Policy: policy, Connections: connections, Paid: paid}, nil
 }
 
-func (f *frozen) same(document *codemode.Route, connections map[string]providers.Configuration, paid map[string]routing.Provider) (bool, error) {
+func (f *frozen) same(document *codemode.Route, connections map[string]connection.Configuration, paid map[string]routing.Provider) (bool, error) {
 	if f == nil || document == nil {
 		return f == nil && document == nil, nil
 	}
 	return same(frozen{Policy: inputOf(*document), Connections: connections, Paid: paid}, *f)
 }
 
-func portablePublication(ctx context.Context, q access.Queryer, document *codemode.Route, connections map[string]providers.Configuration, paid map[string]routing.Provider, slots map[string]PaidTarget) (*Publication, error) {
+func portablePublication(ctx context.Context, q access.Queryer, document *codemode.Route, connections map[string]connection.Configuration, paid map[string]routing.Provider, slots map[string]PaidTarget) (*Publication, error) {
 	if document == nil {
 		return nil, nil
 	}

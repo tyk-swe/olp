@@ -505,16 +505,25 @@ func ListReply(items []map[string]any, p Pagination) Reply {
 
 // ListReplyBy paginates records using the identifier ordered by their query.
 func ListReplyBy[T any](items []T, p Pagination, id func(T) string) Reply {
-	var next any
-	if len(items) > p.Limit {
-		items = items[:p.Limit]
-		next = base64.RawURLEncoding.EncodeToString([]byte(id(items[len(items)-1])))
-	}
-	if items == nil {
-		items = []T{}
-	}
-	return OK(map[string]any{"items": items, "next_cursor": next})
+	return OK(ListPage(items, p, id))
 }
+
+type ListBody[T any] struct {
+	Items      []T     `json:"items"`
+	NextCursor *string `json:"next_cursor"`
+}
+
+func ListPage[T any](items []T, p Pagination, id func(T) string) ListBody[T] {
+	switch {
+	case len(items) > p.Limit:
+		cursor := base64.RawURLEncoding.EncodeToString([]byte(id(items[p.Limit-1])))
+		return ListBody[T]{Items: items[:p.Limit], NextCursor: &cursor}
+	case items == nil:
+		return ListBody[T]{Items: []T{}}
+	}
+	return ListBody[T]{Items: items}
+}
+
 func JSONRows(rows pgx.Rows) ([]map[string]any, error) {
 	defer rows.Close()
 	items := []map[string]any{}

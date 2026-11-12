@@ -3,7 +3,6 @@ package providers
 import (
 	"cmp"
 	"context"
-	"encoding/json"
 	"errors"
 	"maps"
 	"net/http"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/antigravityauth"
 	"github.com/tyk-swe/olp/internal/claudeauth"
@@ -19,7 +17,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/grants"
-	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
@@ -34,19 +32,13 @@ type credentialImportSlot struct {
 	Principal    string
 }
 
-func (s *Server) importCodexCredentials(r *http.Request, p access.Principal) (access.Reply, error) {
-	return s.importCredentials(r, p, codemode.AdapterCodex)
+func (s *Server) importCredentials(adapter codemode.Adapter) access.Handler {
+	return func(r *http.Request, p access.Principal) (access.Reply, error) {
+		return s.importCredentialsAs(r, p, adapter)
+	}
 }
 
-func (s *Server) importClaudeCredentials(r *http.Request, p access.Principal) (access.Reply, error) {
-	return s.importCredentials(r, p, codemode.AdapterClaude)
-}
-
-func (s *Server) importAntigravityCredentials(r *http.Request, p access.Principal) (access.Reply, error) {
-	return s.importCredentials(r, p, codemode.AdapterAntigravity)
-}
-
-func (s *Server) importCredentials(r *http.Request, p access.Principal, adapter codemode.Adapter) (access.Reply, error) {
+func (s *Server) importCredentialsAs(r *http.Request, p access.Principal, adapter codemode.Adapter) (access.Reply, error) {
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -55,7 +47,7 @@ func (s *Server) importCredentials(r *http.Request, p access.Principal, adapter 
 	if err := access.DecodeUnique(r, &input, 128<<10); err != nil {
 		return access.Reply{}, err
 	}
-	current, err := load(r.Context(), s.Access.Pool, id, false)
+	current, err := readProvider(r.Context(), s.access.Pool, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -65,27 +57,23 @@ func (s *Server) importCredentials(r *http.Request, p access.Principal, adapter 
 	if err := access.Match(r, current.ETag); err != nil {
 		return access.Reply{}, err
 	}
-	cfg := current.Configuration
+	cfg := current.Connection.Document()
 	vendor, supported := codeadapter.ForConnection(cfg.Kind, cfg.AuthMode, cfg.ProfileID)
 	if !supported || vendor.Adapter != adapter {
 		return access.Reply{}, access.Invalid("credentials", "This connection does not use the selected subscription profile.")
 	}
-	encoded, err := json.Marshal(cfg)
+	served, err := cfg.Serving()
 	if err != nil {
 		return access.Reply{}, err
 	}
-	var connection routing.Configuration
-	if err := json.Unmarshal(encoded, &connection); err != nil {
-		return access.Reply{}, err
-	}
-	if err := codeConnection(r.Context(), s.Plugins, connection, vendor); err != nil {
+	if err := codeaccounts.ValidateConnection(r.Context(), s.plugins, served, vendor); err != nil {
 		return access.Reply{}, access.Invalid("credentials", "This connection must use the unmodified subscription plugin and configuration.")
 	}
 	slot, err := s.credentialImportSlot(r, id, input.SlotID)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	client, err := s.connectionClient(r.Context(), &cfg, nil)
+	client, err := s.prober.Client(r.Context(), current.target(nil))
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -93,9 +81,9 @@ func (s *Server) importCredentials(r *http.Request, p access.Principal, adapter 
 	if err != nil {
 		return access.Reply{}, access.Invalid("credentials", "Could not verify the supported credential format and original account. Sign in again and retry.")
 	}
-	grant, err := s.Plugins.RefreshGrant(r.Context(), cfg.ProfileRevision, abi.Provider{Profile: cfg.ProfileID, Options: cfg.Options.PluginOptions}, credentials.refresh, client, credentials.secrets)
+	grant, err := s.plugins.RefreshGrant(r.Context(), cfg.ProfileRevision, abi.Provider{Profile: cfg.ProfileID, Options: cfg.Options.PluginOptions}, credentials.refresh, client, credentials.secrets)
 	if err != nil || grants.ValidateTokenMaterial(grant.AccessToken, grant.RefreshToken, grant.ExpiresIn) != nil || !credentials.matches(grant) || slot.CredentialID != nil && slot.Principal != grant.Principal {
-		if auditErr := s.auditFailedGrantEnrollment(r, p.Actor(), id); auditErr != nil {
+		if auditErr := s.auditFailedEnrollment(r, p.Actor(), id); auditErr != nil {
 			return access.Reply{}, auditErr
 		}
 		return access.Reply{}, access.Invalid("credentials", "Could not verify the imported credentials for this account. Sign in again and retry.")
@@ -111,7 +99,7 @@ func (s *Server) credentialImportSlot(r *http.Request, providerID, slotID string
 		return credentialImportSlot{}, access.Invalid("slot_id", "Use a credential slot identifier.")
 	}
 	var slot credentialImportSlot
-	err := s.Access.Pool.QueryRow(r.Context(), `SELECT s.id::text,s.credential_id::text,coalesce(c.principal,'')
+	err := s.access.Pool.QueryRow(r.Context(), `SELECT s.id::text,s.credential_id::text,coalesce(c.principal,'')
 		FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id
 		WHERE s.provider_id=$1 AND (($3 AND s.is_default) OR (NOT $3 AND s.id=$2))`, providerID, identifier, slotID == "").Scan(&slot.ID, &slot.CredentialID, &slot.Principal)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -124,12 +112,12 @@ func (s *Server) stageCredentialImport(request *http.Request, current *record, s
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(request.Context()), stageGrantTimeout)
 	defer cancel()
 	r := request.WithContext(ctx)
-	tx, p, err := s.Access.BeginMutation(r)
+	tx, p, err := s.access.BeginMutation(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(ctx)
-	locked, err := load(ctx, tx, current.ID, true)
+	locked, err := lockProvider(ctx, tx, current.ID)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -139,11 +127,11 @@ func (s *Server) stageCredentialImport(request *http.Request, current *record, s
 	if err := access.Match(r, locked.ETag); err != nil {
 		return access.Reply{}, err
 	}
-	credentialID, version, err := grants.Store(ctx, tx, s.Access, current.ID, current.Configuration.ProfileRevision, current.Configuration.ProfileID, grant)
+	credentialID, version, err := grants.Store(ctx, tx, s.access, current.ID, current.Connection.Document().ProfileRevision, current.Connection.Document().ProfileID, grant)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	completed, err := s.Catalogue.bindGrant(ctx, tx, s.enrollmentAuthority(r), p.Actor(), grantBinding{ProviderID: current.ID, SlotID: slot.ID, ExpectedCredentialID: slot.CredentialID,
+	completed, err := bindGrant(ctx, tx, r, p.Actor(), grantBinding{ProviderID: current.ID, SlotID: slot.ID, ExpectedCredentialID: slot.CredentialID,
 		Credential: grants.Credential{ID: credentialID, Version: version, Principal: grant.Principal}, Action: "provider.grant.import"},
 		access.Fail(409, string(adapter)+"_import_stale", "The credential slot changed during import. Reload before retrying."))
 	if err != nil {

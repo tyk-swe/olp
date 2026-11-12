@@ -18,6 +18,14 @@ semantic versioning and take their source from root `package.json`. The
   replaces the per-source resume columns with one cursor, which now also
   resets for Google when the scope changes.
 
+- The mounted connector file (`OLP_CONNECTOR_CONFIG_FILE`) no longer accepts a
+  per-provider `model`. The gateway never used it, since mounted connectors
+  serve the models of the published revision, so a file that still sets it
+  now fails to load until that line is removed. Mounted credential files are
+  also checked like credentials stored through the management API, so a file
+  with a NUL byte, or one spanning several lines that isn't JSON, fails at
+  startup instead of on every request.
+
 - OpenAI and Anthropic cost imports reject a line with an invalid currency code
   and record a `response` failure, as cloud imports already did. Every source
   now shortens line items longer than 256 characters the same way, so a long
@@ -25,6 +33,18 @@ semantic versioning and take their source from root `package.json`. The
   403 and 404 record `status` instead of `network`.
 
 ### Fixed
+
+- Model discovery that records new facts for a model, such as its context
+  length, now resets that provider's certified capabilities to declared and
+  marks the draft pending activation, as any other configuration change does.
+  Before, capabilities kept reading certified while the slot validation they
+  backed had already gone stale, so activation failed with
+  `slot_validation_required`.
+
+- Creating a provider network credential with a `credential_reference` member
+  now fails with `invalid_json`, as the contract declares. Before, the request
+  succeeded and the reference was silently dropped, so the stored credential
+  was only the pasted value.
 
 - Planning an unchanged configuration export no longer replaces a provider
   whose billing import has an AWS, Azure or Google scope.

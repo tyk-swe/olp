@@ -9,20 +9,22 @@ import (
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 )
 
 type Connection struct {
-	Configuration providers.Configuration
+	Configuration connection.Configuration
 	Network       bool
 }
 
 type pin struct {
 	provider      string
-	configuration providers.Configuration
+	configuration connection.Configuration
 }
 
 func parseConnection(name string, e contract.ConfigurationCodeConnection) (Connection, error) {
-	configuration, err := promotion.Convert[providers.Configuration](e.Configuration)
+	configuration, err := promotion.Convert[connection.Configuration](e.Configuration)
 	if err != nil {
 		return Connection{}, err
 	}
@@ -44,25 +46,25 @@ func renderConnection(name string, c Connection) (contract.ConfigurationCodeConn
 	return contract.ConfigurationCodeConnection{Configuration: configuration, NetworkCredentialRef: new(string(provider.NetworkRef(name)))}, nil
 }
 
-func portableConnection(configuration providers.Configuration) Connection {
+func portableConnection(configuration connection.Configuration) Connection {
 	stored := configuration.Options.Network != nil && configuration.Options.Network.CredentialID != ""
 	return Connection{Configuration: configuration.WithNetworkCredential(""), Network: stored}
 }
 
 func (c Connection) resolve(ctx context.Context, q access.Queryer, name, project, pool string, in scope) (pin, error) {
-	prepared, err := providers.PrepareConfiguration(ctx, q, in.deps.Unconfined, in.deps.Egress, c.Configuration)
+	prepared, err := connection.Prepare(ctx, in.deps.Drafts.ConnectionPolicy(q), c.Configuration)
 	if _, refused := provider.Refusal(err); refused {
 		return pin{}, access.Invalid("code.connections", "Install and approve the pinned frozen provider profile before promotion.")
 	}
 	if err != nil {
 		return pin{}, err
 	}
-	configuration := prepared.Configuration()
-	target, err := providers.ReadProjectProvider(ctx, q, name, project)
+	configuration := prepared.Document()
+	target, found, err := providers.ReadProjectProvider(ctx, q, name, project)
 	if err != nil {
 		return pin{}, err
 	}
-	if target == nil {
+	if !found {
 		return pin{}, access.Invalid("code.routes.published.connections", "Create the destination provider before freezing its connection.")
 	}
 	id, current := target.ID, target.Configuration
@@ -76,7 +78,7 @@ func (c Connection) resolve(ctx context.Context, q access.Queryer, name, project
 	return pin{provider: id, configuration: bound}, err
 }
 
-func enrolled(ctx context.Context, q access.Queryer, providerID string, configuration providers.Configuration, pool string, in scope) error {
+func enrolled(ctx context.Context, q access.Queryer, providerID string, configuration connection.Configuration, pool string, in scope) error {
 	at := slices.IndexFunc(in.pools, func(p resolved[access.CodePoolInput]) bool { return p.ref == pool })
 	if at < 0 {
 		return access.Invalid("code.routes.published", "Resolve the published pool before its credential bindings.")
@@ -86,7 +88,7 @@ func enrolled(ctx context.Context, q access.Queryer, providerID string, configur
 		if account.input.ProviderID != providerID || !slices.Contains(members, account.to.id) {
 			continue
 		}
-		matches, err := providers.CredentialEnrolledFor(ctx, q, account.input.CredentialID, configuration.ProfileRevision, configuration.ProfileID)
+		matches, err := codeaccounts.CredentialEnrolledFor(ctx, q, account.input.CredentialID, configuration.ProfileRevision, configuration.ProfileID)
 		if err != nil {
 			return err
 		}
@@ -97,12 +99,12 @@ func enrolled(ctx context.Context, q access.Queryer, providerID string, configur
 	return nil
 }
 
-func networked(configuration, current providers.Configuration, network bool) (providers.Configuration, error) {
+func networked(configuration, current connection.Configuration, network bool) (connection.Configuration, error) {
 	if !network {
 		return configuration, nil
 	}
 	if configuration.Options.Network == nil || current.Options.Network == nil || current.Options.Network.CredentialID == "" {
-		return providers.Configuration{}, access.Invalid("code.connections.network_credential_ref", "Bind the named destination provider network credential first.")
+		return connection.Configuration{}, access.Invalid("code.connections.network_credential_ref", "Bind the named destination provider network credential first.")
 	}
 	return configuration.WithNetworkCredential(current.Options.Network.CredentialID), nil
 }

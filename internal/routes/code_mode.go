@@ -3,18 +3,20 @@ package routes
 import (
 	"context"
 	"encoding/json"
-	"github.com/tyk-swe/olp/internal/codesessions"
 	"maps"
 	"net/http"
 	"slices"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/codesessions"
+	"github.com/tyk-swe/olp/internal/grants"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/release"
 
 	"github.com/tyk-swe/olp/internal/routeidentity"
@@ -273,7 +275,7 @@ func (in CodeRouteInput) validate() error {
 	return nil
 }
 
-func SaveCodePublication(ctx context.Context, tx pgx.Tx, p access.Principal, id string, in codemode.Route, frozen map[string]providers.Configuration, frozenPaid map[string]routing.Provider) (*codeRoute, error) {
+func SaveCodePublication(ctx context.Context, tx pgx.Tx, p access.Principal, id string, in codemode.Route, frozen map[string]connection.Configuration, frozenPaid map[string]routing.Provider) (*codeRoute, error) {
 	project, projectError := access.ParseUUID(in.ProjectID)
 	if projectError != nil {
 		return nil, projectError
@@ -304,7 +306,7 @@ func SaveCodePublication(ctx context.Context, tx pgx.Tx, p access.Principal, id 
 			}
 			var available bool
 			err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.code_pool_accounts pa JOIN olp.code_accounts a ON a.id=pa.account_id JOIN olp.provider_credentials c ON c.id=a.credential_id JOIN olp.provider_grants g ON g.credential_id=c.id
-				WHERE pa.pool_id=$1 AND a.enabled AND a.project_id=$2 AND a.models ? $3 AND c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now()) AND c.principal=a.principal)`, route.PoolID, route.ProjectID, model).Scan(&available)
+				WHERE pa.pool_id=$1 AND a.enabled AND a.project_id=$2 AND a.models ? $3 AND c.revoked_at IS NULL AND `+grants.LiveCondition+` AND c.principal=a.principal)`, route.PoolID, route.ProjectID, model).Scan(&available)
 			if err != nil {
 				return nil, err
 			}
@@ -395,7 +397,7 @@ func CodePaidProviders(ctx context.Context, tx access.Queryer, route codemode.Ro
 			}
 		}
 	})
-	rows, err := tx.Query(ctx, `SELECT p.id::text,p.state,r.id::text,r.name,r.configuration,r.models,r.slots,p.project_id::text,`+release.PluginColumn+` FROM olp.providers p JOIN olp.provider_revisions r ON r.id=p.active_revision_id WHERE p.id=ANY($1::uuid[]) AND p.project_id=$2 AND p.state<>'disabled'`, ids, route.ProjectID)
+	rows, err := tx.Query(ctx, `SELECT p.id::text,p.state,r.id::text,r.name,r.configuration,r.models,r.slots,p.project_id::text,`+release.PluginColumn("r")+` FROM olp.providers p JOIN olp.provider_revisions r ON r.id=p.active_revision_id WHERE p.id=ANY($1::uuid[]) AND p.project_id=$2 AND p.state<>'disabled'`, ids, route.ProjectID)
 	if err != nil {
 		return nil, err
 	}

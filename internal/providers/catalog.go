@@ -6,15 +6,14 @@ import (
 	"maps"
 	"net/http"
 	"reflect"
-
-	"github.com/tyk-swe/olp/internal/providerconfig"
-
-	"github.com/tyk-swe/olp/internal/routing"
+	"slices"
 
 	"github.com/jackc/pgx/v5"
-
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/catalog"
+	"github.com/tyk-swe/olp/internal/providerconfig"
+	"github.com/tyk-swe/olp/internal/providers/connection"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 // The reference catalog offers its facts beside a provider's models. Accepting
@@ -22,8 +21,6 @@ import (
 // the provider's configuration, so certified capabilities return to declared:
 // the catalog never certifies anything.
 
-// canonicalModel is the canonical model a provider model's facts declare, by
-// which the catalog also matches it.
 func canonicalModel(metadata json.RawMessage) string {
 	var facts struct {
 		CanonicalModel string `json:"canonical_model"`
@@ -33,27 +30,19 @@ func canonicalModel(metadata json.RawMessage) string {
 }
 
 type catalogSuggestion struct {
-	ModelID       string `json:"model_id"`
-	UpstreamModel string `json:"upstream_model"`
-	CatalogModel  string `json:"catalog_model"`
-	MatchedBy     string `json:"matched_by"`
-	// Facts are what accepting the suggestion stores.
-	Facts routing.ModelMetadata `json:"facts"`
-	// Changes name the stored facts accepting would change.
-	Changes      []string               `json:"changes"`
-	Capabilities catalog.Capabilities   `json:"capabilities"`
-	Lifecycle    *catalog.LifecycleView `json:"lifecycle"`
-	// Conflict explains why the suggestion cannot be accepted.
-	Conflict *string `json:"conflict"`
+	ModelID       string                 `json:"model_id"`
+	UpstreamModel string                 `json:"upstream_model"`
+	CatalogModel  string                 `json:"catalog_model"`
+	MatchedBy     string                 `json:"matched_by"`
+	Facts         routing.ModelMetadata  `json:"facts"`
+	Changes       []string               `json:"changes"`
+	Capabilities  catalog.Capabilities   `json:"capabilities"`
+	Lifecycle     *catalog.LifecycleView `json:"lifecycle"`
+	Conflict      *string                `json:"conflict"`
 }
 
-// catalogFactNames are the facts the catalog states. Deployment, region,
-// quantization and privacy declarations describe the operator's account and
-// are never taken from it.
-var catalogFactNames = []string{"canonical_model", "context_length", "max_output_tokens", "input_modalities", "output_modalities", "supported_parameters"}
-
-// catalogFacts are the operator facts a catalog model supports, tagged with
-// the catalog's digest and the time the vendor's page was observed.
+// Deployment, region, quantization and privacy declarations describe the
+// operator's account and are never taken from the catalog.
 func catalogFacts(signed *catalog.Signed, m *catalog.Model) routing.ModelMetadata {
 	facts := routing.ModelMetadata{InputModalities: m.InputModalities, OutputModalities: m.OutputModalities, ContextLength: m.ContextLength, MaxOutputTokens: m.MaxOutputTokens, SupportedParameters: m.SupportedParameters,
 		Source: new(signed.Source()), ObservedAt: new(m.Provenance.ObservedAt)}
@@ -63,14 +52,10 @@ func catalogFacts(signed *catalog.Signed, m *catalog.Model) routing.ModelMetadat
 	return facts
 }
 
-// applyCatalogFacts overlays catalog facts on a model's stored facts, keeping
-// every fact the catalog does not state, and reports which facts changed.
 func applyCatalogFacts(stored json.RawMessage, facts routing.ModelMetadata) (json.RawMessage, []string, error) {
-	current := map[string]json.RawMessage{}
-	if len(stored) > 0 {
-		if err := json.Unmarshal(stored, &current); err != nil {
-			return nil, nil, err
-		}
+	current, err := connection.ModelFacts(stored)
+	if err != nil {
+		return nil, nil, err
 	}
 	proposed := map[string]json.RawMessage{}
 	encoded, err := json.Marshal(facts)
@@ -81,22 +66,21 @@ func applyCatalogFacts(stored json.RawMessage, facts routing.ModelMetadata) (jso
 		return nil, nil, err
 	}
 	changes := []string{}
-	for _, name := range catalogFactNames {
+	for _, name := range slices.Sorted(maps.Keys(proposed)) {
 		value := proposed[name]
 		if string(value) == "null" {
 			continue
 		}
-		if !sameFact(current[name], value) {
+		if name != "source" && name != "observed_at" && !sameFact(current[name], value) {
 			changes = append(changes, name)
 		}
 		current[name] = value
 	}
-	current["source"], current["observed_at"] = proposed["source"], proposed["observed_at"]
 	merged, err := json.Marshal(current)
 	if err != nil {
 		return nil, nil, err
 	}
-	return merged, changes, validateMetadata(merged)
+	return merged, changes, connection.ValidateMetadata(merged)
 }
 
 func sameFact(a, b json.RawMessage) bool {
@@ -107,17 +91,15 @@ func sameFact(a, b json.RawMessage) bool {
 	return reflect.DeepEqual(x, y)
 }
 
-// privacyEvidence reports facts whose source attests a privacy declaration:
-// overwriting their source would make the catalog look like that evidence.
+// Overwriting the source of a privacy declaration would make the catalog look
+// like its evidence.
 func privacyEvidence(stored json.RawMessage) bool {
 	var facts routing.ModelMetadata
 	_ = json.Unmarshal(stored, &facts)
 	return facts.DataCollection != nil || facts.ZeroDataRetention != nil
 }
 
-// suggestionsFor matches a provider's models against the catalog under the
-// provider's vendor.
-func suggestionsFor(signed *catalog.Signed, cfg *Configuration, models []storedModel) ([]catalogSuggestion, error) {
+func suggestionsFor(signed *catalog.Signed, cfg connection.Configuration, models []storedModel) ([]catalogSuggestion, error) {
 	vendorID := providerconfig.Value(cfg.Options.VendorID)
 	out := []catalogSuggestion{}
 	for _, model := range models {
@@ -142,26 +124,26 @@ func suggestionsFor(signed *catalog.Signed, cfg *Configuration, models []storedM
 }
 
 func (s *Server) catalogSuggestions(r *http.Request, p access.Principal) (access.Reply, error) {
-	if s.Catalog == nil {
+	if s.catalog == nil {
 		return access.Reply{}, access.Fail(503, "reference_catalog_unavailable", "This process holds no verified reference catalog.")
 	}
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
 	}
-	current, err := visibleProvider(r.Context(), s.Access.Pool, p, id)
+	current, err := visibleProvider(r.Context(), s.access.Pool, p, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	models, err := loadModels(r.Context(), s.Access.Pool, id, false)
+	models, err := loadModels(r.Context(), s.access.Pool, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	items, err := suggestionsFor(s.Catalog, &current.Configuration, models)
+	items, err := suggestionsFor(s.catalog, current.Connection.Document(), models)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	return access.OK(map[string]any{"catalog": s.Catalog.Summary(), "vendor_id": providerconfig.Value(current.Configuration.Options.VendorID), "items": items}), nil
+	return access.OK(map[string]any{"catalog": s.catalog.Summary(), "vendor_id": providerconfig.Value(current.Connection.Document().Options.VendorID), "items": items}), nil
 }
 
 type acceptCatalogRequest struct {
@@ -169,21 +151,20 @@ type acceptCatalogRequest struct {
 	UpstreamModels []string `json:"upstream_models"`
 }
 
-// acceptCatalogSuggestions stores the catalog's facts for the named models as
-// operator facts. The caller names the catalog it reviewed, so an upgrade
-// between review and acceptance cannot store facts nobody saw.
+// The caller names the catalog it reviewed, so an upgrade between review and
+// acceptance cannot store facts nobody saw.
 func (s *Server) acceptCatalogSuggestions(r *http.Request, _ access.Principal) (access.Reply, error) {
 	var input acceptCatalogRequest
 	if err := access.Decode(r, &input); err != nil {
 		return access.Reply{}, err
 	}
-	if s.Catalog == nil {
+	if s.catalog == nil {
 		return access.Reply{}, access.Fail(503, "reference_catalog_unavailable", "This process holds no verified reference catalog.")
 	}
 	if len(input.UpstreamModels) == 0 || len(input.UpstreamModels) > 2000 {
 		return access.Reply{}, access.Invalid("upstream_models", "Name 1–2000 models to accept catalog facts for.")
 	}
-	return s.mutationWith(r, "provider.catalog_facts.accept", input, func(ctx context.Context, tx pgx.Tx, _ access.Principal, current *record) (access.Reply, error) {
+	return s.mutation(r, "provider.catalog_facts.accept", input, func(ctx context.Context, tx pgx.Tx, _ access.Principal, current *record) (access.Reply, error) {
 		if err := s.acceptCatalogFacts(ctx, tx, current, input); err != nil {
 			return access.Reply{}, err
 		}
@@ -191,15 +172,15 @@ func (s *Server) acceptCatalogSuggestions(r *http.Request, _ access.Principal) (
 	})
 }
 
-func (s *Catalogue) acceptCatalogFacts(ctx context.Context, tx pgx.Tx, current *record, input acceptCatalogRequest) error {
-	if input.CatalogSHA256 != s.Catalog.SHA256 {
+func (s *Server) acceptCatalogFacts(ctx context.Context, tx pgx.Tx, current *record, input acceptCatalogRequest) error {
+	if input.CatalogSHA256 != s.catalog.SHA256 {
 		return access.Fail(409, "catalog_changed", "The reference catalog changed since these suggestions were reviewed; review them again.")
 	}
-	models, err := loadModels(ctx, tx, current.ID, false)
+	models, err := loadModels(ctx, tx, current.ID)
 	if err != nil {
 		return err
 	}
-	suggestions, err := suggestionsFor(s.Catalog, &current.Configuration, models)
+	suggestions, err := suggestionsFor(s.catalog, current.Connection.Document(), models)
 	if err != nil {
 		return err
 	}
@@ -209,11 +190,8 @@ func (s *Catalogue) acceptCatalogFacts(ctx context.Context, tx pgx.Tx, current *
 			byModel[suggestions[i].UpstreamModel] = &suggestions[i]
 		}
 	}
-	next := current.Configuration
-	next.Options.Models = maps.Clone(current.Configuration.Options.Models)
-	if next.Options.Models == nil {
-		next.Options.Models = map[string]json.RawMessage{}
-	}
+	next := current.Connection.Document()
+	next.Options.Models = maps.Clone(next.Options.Models)
 	for _, name := range input.UpstreamModels {
 		suggestion := byModel[name]
 		switch {
@@ -228,12 +206,9 @@ func (s *Catalogue) acceptCatalogFacts(ctx context.Context, tx pgx.Tx, current *
 		}
 		next.Options.Models[name] = merged
 	}
-	prepared, err := s.PrepareConfiguration(ctx, tx, next)
+	prepared, err := connection.Prepare(ctx, s.ConnectionPolicy(tx), next)
 	if err != nil {
 		return err
 	}
-	if err = s.StoreDraftConfiguration(ctx, tx, current.ID, current.Name, prepared); err != nil {
-		return err
-	}
-	return nil
+	return s.StoreDraftConfiguration(ctx, tx, current.ID, current.Name, prepared)
 }

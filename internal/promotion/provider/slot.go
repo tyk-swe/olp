@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/routeidentity"
 )
 
@@ -27,7 +28,7 @@ type Slot struct {
 	Weight        int64
 	AllowedModels []string
 	AllowedRoutes []string
-	Limits        providers.Limits
+	Limits        connection.Limits
 	Credential    SlotCredential
 }
 
@@ -54,13 +55,13 @@ func referenced(slot Slot) bool {
 
 type slotScope struct {
 	provider      string
-	configuration providers.Configuration
+	configuration connection.Configuration
 	at            path
 	names         map[string]int
 	positions     map[int32]int
 }
 
-func parseSlots(entry contract.ConfigurationProviderEntry, configuration providers.Configuration, at path) ([]Slot, error) {
+func parseSlots(entry contract.ConfigurationProviderEntry, configuration connection.Configuration, at path) ([]Slot, error) {
 	if len(entry.Slots) < 1 || len(entry.Slots) > maxSlots {
 		return nil, access.Invalid(at.field("slots"), "Declare 1–"+strconv.Itoa(maxSlots)+" credential slots per provider.")
 	}
@@ -86,11 +87,11 @@ func (s slotScope) parse(j int, slot contract.ConfigurationSlotEntry) (Slot, err
 	if err := s.validate(j, slot, field); err != nil {
 		return Slot{}, err
 	}
-	limits, err := promotion.Convert[providers.Limits](slot.Limits)
+	limits, err := promotion.Convert[connection.Limits](slot.Limits)
 	if err != nil {
 		return Slot{}, err
 	}
-	if err := providers.ValidLimits(field.field("limits"), limits); err != nil {
+	if err := connection.ValidLimits(field.field("limits"), limits); err != nil {
 		return Slot{}, err
 	}
 	credential, err := slotCredential(s.provider, slot, s.configuration.Grant(), field.field("credential_ref"))
@@ -141,7 +142,7 @@ func validRestrictions(restrictions contract.ConfigurationSlotRestrictions, fiel
 		return access.Invalid(field.field("allowed_routes"), "Use route slugs.")
 	}
 	for _, model := range restrictions.AllowedModels {
-		if err := providers.ValidModelName(field.field("allowed_models"), model); err != nil {
+		if err := connection.ValidModelName(field.field("allowed_models"), model); err != nil {
 			return err
 		}
 	}
@@ -166,7 +167,7 @@ func slotCredential(provider string, slot contract.ConfigurationSlotEntry, grant
 	return Bound{}, nil
 }
 
-func credentialRequirement(slots []Slot, configuration providers.Configuration, at path) error {
+func credentialRequirement(slots []Slot, configuration connection.Configuration, at path) error {
 	hasCredential := slices.ContainsFunc(slots, referenced)
 	required := configuration.CredentialRequired()
 	if required && !hasCredential {
