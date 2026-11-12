@@ -2,48 +2,34 @@ package providers
 
 import (
 	"context"
-	"encoding/json"
-	"slices"
+	"errors"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 )
 
-type PreparedConfiguration struct {
-	configuration connection.Configuration
+type installedPlugins struct {
+	q          access.Queryer
+	unconfined *plugins.Unconfined
 }
 
-func PrepareConfiguration(ctx context.Context, q access.Queryer, unconfined *plugins.Unconfined, policy *egress.Policy, input connection.Configuration) (PreparedConfiguration, error) {
-	encoded, err := json.Marshal(input)
-	if err != nil {
-		return PreparedConfiguration{}, err
+func (p installedPlugins) Profile(ctx context.Context, digest, profileID string) (*connectors.PluginProfile, error) {
+	plugin, err := plugins.Profile(ctx, p.q, p.unconfined, digest, profileID)
+	if refusal, ok := errors.AsType[*plugins.Error](err); ok {
+		return nil, &access.Problem{Status: 422, Code: refusal.Code, Detail: refusal.Message, Field: profileField(refusal.Code)}
 	}
-	var configuration connection.Configuration
-	if err := json.Unmarshal(encoded, &configuration); err != nil {
-		return PreparedConfiguration{}, err
-	}
-	configuration.ProviderID = input.ProviderID
-	configuration.ProbeModels = slices.Clone(input.ProbeModels)
-	configuration.Normalize()
-	if err := configuration.Pin(ctx, q, unconfined); err != nil {
-		return PreparedConfiguration{}, err
-	}
-	if err := configuration.ValidateAndNormalize(policy); err != nil {
-		return PreparedConfiguration{}, err
-	}
-	return PreparedConfiguration{configuration: configuration}, nil
+	return plugin, err
 }
 
-func (p PreparedConfiguration) Configuration() connection.Configuration {
-	return p.configuration
+func profileField(code string) string {
+	if code == plugins.CodeProfileUnknown {
+		return "configuration.profile_id"
+	}
+	return "configuration.profile_revision"
 }
 
-func (p PreparedConfiguration) WithNetworkCredential(credentialID string) PreparedConfiguration {
-	return PreparedConfiguration{configuration: p.configuration.WithNetworkCredential(credentialID)}
-}
-
-func (s *Catalogue) PrepareConfiguration(ctx context.Context, q access.Queryer, input connection.Configuration) (PreparedConfiguration, error) {
-	return PrepareConfiguration(ctx, q, s.Unconfined, s.Egress, input)
+func (s *Catalogue) ConnectionPolicy(q access.Queryer) connection.Policy {
+	return connection.Policy{Egress: s.Egress, Plugins: installedPlugins{q, s.Unconfined}}
 }

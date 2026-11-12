@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"time"
 	"unicode"
@@ -39,45 +40,35 @@ func ValidModelName(field, value string) error {
 // lock: the provider, its etag precondition, and the enabled probe credential.
 // The caller's project scope is decided first, so a provider outside it answers
 // 404 before its precondition or credential is consulted.
-func (s *Server) prepare(r *http.Request, p access.Principal, id string) (*record, []byte, error) {
+func (s *Server) prepare(r *http.Request, p access.Principal, id string) (*record, probeTarget, []byte, error) {
 	tx, err := s.Access.Pool.Begin(r.Context())
 	if err != nil {
-		return nil, nil, err
+		return nil, probeTarget{}, nil, err
 	}
 	defer tx.Rollback(r.Context())
 	current, err := load(r.Context(), tx, id, false)
 	if err != nil {
-		return nil, nil, err
+		return nil, probeTarget{}, nil, err
 	}
 	if err = p.Project(current.ProjectID, access.Change); err != nil {
-		return nil, nil, err
+		return nil, probeTarget{}, nil, err
 	}
 	if err = access.Match(r, current.ETag); err != nil {
-		return nil, nil, err
-	}
-	if err = current.Configuration.ValidateAndNormalize(s.Egress); err != nil {
-		return nil, nil, err
+		return nil, probeTarget{}, nil, err
 	}
 	credential, _, err := s.credentialFor(r.Context(), tx, current)
 	if err != nil {
-		return nil, nil, err
+		return nil, probeTarget{}, nil, err
 	}
 	rows, err := tx.Query(r.Context(), "SELECT upstream_model FROM olp.provider_models WHERE provider_id=$1 ORDER BY enabled DESC,upstream_model LIMIT 2000", id)
 	if err != nil {
-		return nil, nil, err
+		return nil, probeTarget{}, nil, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var model string
-		if err := rows.Scan(&model); err != nil {
-			return nil, nil, err
-		}
-		current.Configuration.ProbeModels = append(current.Configuration.ProbeModels, model)
+	models, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, probeTarget{}, nil, err
 	}
-	if err := rows.Err(); err != nil {
-		return nil, nil, err
-	}
-	return current, credential, nil
+	return current, current.target(models...), credential, nil
 }
 
 func (s *Server) probe(r *http.Request, p access.Principal) (access.Reply, error) {
@@ -85,12 +76,12 @@ func (s *Server) probe(r *http.Request, p access.Principal) (access.Reply, error
 	if err != nil {
 		return access.Reply{}, err
 	}
-	current, credential, err := s.prepare(r, p, id)
+	current, target, credential, err := s.prepare(r, p, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	at := time.Now().UTC()
-	models, err := s.listModelFacts(r.Context(), &current.Configuration, credential)
+	models, err := s.listModelFacts(r.Context(), target, credential)
 	var discovered any
 	succeeded, detail := err == nil, ""
 	if succeeded {
@@ -183,14 +174,14 @@ func (s *Server) discover(r *http.Request, p access.Principal) (access.Reply, er
 			models = append(models, discoveredModel{m.UpstreamModel, m.DisplayName, nil})
 		}
 	}
-	current, credential, err := s.prepare(r, p, id)
+	current, target, credential, err := s.prepare(r, p, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	upstream := len(models) == 0
 	at := time.Now().UTC()
 	if upstream {
-		listed, err := s.listModelFacts(r.Context(), &current.Configuration, credential)
+		listed, err := s.listModelFacts(r.Context(), target, credential)
 		if err != nil {
 			pe := classify(err)
 			if err := s.recordProbe(r, "provider.discover", id, at, false, pe.Detail); err != nil {
@@ -370,7 +361,7 @@ func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, err
 	if err != nil {
 		return access.Reply{}, err
 	}
-	current, credential, err := s.prepare(r, p, id)
+	current, target, credential, err := s.prepare(r, p, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -385,7 +376,7 @@ func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, err
 	if err != nil {
 		return access.Reply{}, err
 	}
-	selected := selectProbeSlot(slots, &current.Configuration)
+	selected := selectProbeSlot(slots, current.Connection.Document())
 	if selected == nil {
 		return access.Reply{}, access.Fail(422, "credential_required", "Enable a credential slot before certifying.")
 	}
@@ -400,13 +391,13 @@ func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, err
 	defer cancel()
 	for i := range m.Capabilities {
 		c := &m.Capabilities[i]
-		err := s.certifyTuple(probeCtx, &current.Configuration, credential, m.UpstreamModel, CapabilityInput{c.Operation, c.Surface, c.Mode}, probeBodyLimit)
+		err := s.certifyTuple(probeCtx, target, credential, m.UpstreamModel, CapabilityInput{c.Operation, c.Surface, c.Mode}, probeBodyLimit)
 		item := map[string]any{"operation": c.Operation, "surface": c.Surface, "mode": c.Mode, "succeeded": err == nil, "detail": "Certified.", "error_code": nil}
 		if err == nil {
 			certified++
 			c.Source, c.CertifiedAt = "certified", &at
-			c.CredentialFingerprint = defaultSlot.credentialFingerprint(&current.Configuration)
-			c.ToolCalls = c.Operation == "generation" && (c.Surface == "openai" || c.Surface == "anthropic" || c.Surface == "gemini") && (c.Mode == ModeUnary || c.Mode == ModeStreaming) && s.certifyToolCalls(probeCtx, &current.Configuration, credential, m.UpstreamModel, c.Mode == ModeStreaming) == nil
+			c.CredentialFingerprint = defaultSlot.credentialFingerprint(current.Connection.Document())
+			c.ToolCalls = c.Operation == "generation" && (c.Surface == "openai" || c.Surface == "anthropic" || c.Surface == "gemini") && (c.Mode == ModeUnary || c.Mode == ModeStreaming) && s.certifyToolCalls(probeCtx, target, credential, m.UpstreamModel, c.Mode == ModeStreaming) == nil
 			item["tool_calls"] = c.ToolCalls
 		} else {
 			pe := classify(err)
@@ -471,7 +462,7 @@ func (s *Catalogue) setDraftModel(ctx context.Context, tx pgx.Tx, current *recor
 		}
 		capabilities = make([]storedCapability, 0, len(requested))
 		for _, c := range requested {
-			if !configurationCertifiable(&current.Configuration, c) {
+			if !configurationCertifiable(current.Connection.Transport(), c) {
 				return access.Fail(422, "capability_unavailable", "This connector cannot certify the requested tuple.")
 			}
 			if kept, ok := existing[c]; ok {
@@ -492,14 +483,25 @@ func (s *Catalogue) setDraftModel(ctx context.Context, tx pgx.Tx, current *recor
 }
 
 func (s *Catalogue) storeDiscoveredModels(ctx context.Context, tx pgx.Tx, current *record, models []discoveredModel, upstream bool, at time.Time) error {
-	var err error
+	document := current.Connection.Document()
+	metadata := maps.Clone(document.Options.Models)
 	for _, m := range models {
-		connection.MergeDiscoveredFacts(&current.Configuration, m.Name, m.Metadata)
+		facts, merged, err := connection.MergeDiscoveredFacts(metadata, m.Name, m.Metadata)
+		if err != nil {
+			return err
+		}
+		if merged {
+			metadata[m.Name] = facts
+		}
 		if _, err = tx.Exec(ctx, "INSERT INTO olp.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities,discovered_at) VALUES($1,$2,$3,$4,false,'[]',$5) ON CONFLICT(provider_id,upstream_model) DO UPDATE SET display_name=excluded.display_name,discovered_at=excluded.discovered_at", access.NewID(), current.ID, m.Name, m.Display, at); err != nil {
 			return err
 		}
 	}
-	config, _ := json.Marshal(current.Configuration)
+	document.Options.Models = metadata
+	config, err := json.Marshal(document)
+	if err != nil {
+		return err
+	}
 	if _, err = tx.Exec(ctx, "UPDATE olp.providers SET configuration=$2 WHERE id=$1", current.ID, config); err != nil {
 		return err
 	}
@@ -524,8 +526,8 @@ func (s *Catalogue) storeCertification(ctx context.Context, tx pgx.Tx, current *
 	if err != nil {
 		return "", err
 	}
-	if validatedAt := defaultSlot.certificationTime(&current.Configuration, models); validatedAt != nil {
-		fingerprint := defaultSlot.validationFingerprint(&current.Configuration, models)
+	if validatedAt := defaultSlot.certificationTime(current.Connection.Document(), models); validatedAt != nil {
+		fingerprint := defaultSlot.validationFingerprint(current.Connection.Document(), models)
 		if _, err = tx.Exec(ctx, "UPDATE olp.provider_slots SET validated_at=$2,validated_fingerprint=$3 WHERE id=$1", defaultSlot.ID, validatedAt, fingerprint); err != nil {
 			return "", err
 		}

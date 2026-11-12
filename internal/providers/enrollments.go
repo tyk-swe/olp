@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/grants"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
@@ -54,7 +55,7 @@ func (s *Enrollments) Start(ctx context.Context, authority EnrollmentAuthority, 
 	if err := authority.Match(current.ETag); err != nil {
 		return grants.Enrollment{}, err
 	}
-	if !current.Configuration.Grant() {
+	if !current.Connection.Document().Grant() {
 		return grants.Enrollment{}, access.Fail(422, "grant_enrollment_unavailable", "This provider's profile authenticates without a grant.")
 	}
 	slots, err := loadSlots(ctx, c.Access.Pool, providerID)
@@ -65,11 +66,11 @@ func (s *Enrollments) Start(ctx context.Context, authority EnrollmentAuthority, 
 	if err != nil {
 		return grants.Enrollment{}, err
 	}
-	client, err := c.connectionClient(ctx, &current.Configuration, nil)
+	client, err := c.connectionClient(ctx, current.target(), nil)
 	if err != nil {
 		return grants.Enrollment{}, err
 	}
-	enrollment, err := grants.Start(ctx, c.Plugins, grants.Enrollment{ProviderID: providerID, SlotID: slot.ID, ExpectedCredentialID: slot.CredentialID, PluginDigest: current.Configuration.ProfileRevision, ProfileID: current.Configuration.ProfileID, StartedBy: principal.ID}, current.Configuration.Options.PluginOptions, client)
+	enrollment, err := grants.Start(ctx, c.Plugins, grants.Enrollment{ProviderID: providerID, SlotID: slot.ID, ExpectedCredentialID: slot.CredentialID, PluginDigest: current.Connection.Document().ProfileRevision, ProfileID: current.Connection.Document().ProfileID, StartedBy: principal.ID}, current.Connection.Document().Options.PluginOptions, client)
 	if err != nil {
 		if audited := s.auditFailure(ctx, authority, principal.Actor(), providerID); audited != nil {
 			return grants.Enrollment{}, audited
@@ -139,11 +140,11 @@ func (s *Enrollments) Continue(ctx context.Context, authority EnrollmentAuthorit
 }
 
 func (s *Enrollments) exchange(ctx context.Context, authority EnrollmentAuthority, current *record, enrollment grants.Enrollment, input string) (EnrollmentCompletion, error) {
-	client, err := s.catalogue.connectionClient(ctx, &current.Configuration, nil)
+	client, err := s.catalogue.connectionClient(ctx, current.target(), nil)
 	if err != nil {
 		return EnrollmentCompletion{}, err
 	}
-	grant, err := grants.Exchange(ctx, s.catalogue.Plugins, enrollment, input, current.Configuration.Options.PluginOptions, client)
+	grant, err := grants.Exchange(ctx, s.catalogue.Plugins, enrollment, input, current.Connection.Document().Options.PluginOptions, client)
 	if err != nil {
 		return EnrollmentCompletion{}, err
 	}
@@ -166,7 +167,11 @@ func (s *Enrollments) stage(requestContext context.Context, authority Enrollment
 		return EnrollmentCompletion{}, err
 	}
 	stale := access.Fail(409, "grant_enrollment_stale", "The connection's plugin profile, credential boundary or credential slot changed during grant enrollment. Start another.")
-	if cfg := locked.Configuration; !cfg.Grant() || cfg.ProfileRevision != enrollment.PluginDigest || cfg.ProfileID != enrollment.ProfileID || cfg.EnrollmentBoundary() != current.Configuration.EnrollmentBoundary() {
+	change, err := connection.Diff(current.Connection.Document(), locked.Connection.Document())
+	if err != nil {
+		return EnrollmentCompletion{}, err
+	}
+	if cfg := locked.Connection.Document(); !cfg.Grant() || cfg.ProfileRevision != enrollment.PluginDigest || cfg.ProfileID != enrollment.ProfileID || change.Enrollment {
 		return EnrollmentCompletion{}, stale
 	}
 	credentialID, version, err := grants.Store(ctx, tx, s.catalogue.Access, current.ID, enrollment.PluginDigest, enrollment.ProfileID, grant)
@@ -266,11 +271,11 @@ func (s *Enrollments) Poll(ctx context.Context, authority EnrollmentAuthority, p
 }
 
 func (s *Enrollments) poll(ctx context.Context, authority EnrollmentAuthority, current *record, enrollment grants.Enrollment) (EnrollmentCompletion, error) {
-	client, err := s.catalogue.connectionClient(ctx, &current.Configuration, nil)
+	client, err := s.catalogue.connectionClient(ctx, current.target(), nil)
 	if err != nil {
 		return EnrollmentCompletion{}, err
 	}
-	grant, err := grants.Poll(ctx, s.catalogue.Plugins, enrollment, current.Configuration.Options.PluginOptions, client)
+	grant, err := grants.Poll(ctx, s.catalogue.Plugins, enrollment, current.Connection.Document().Options.PluginOptions, client)
 	if err != nil {
 		return EnrollmentCompletion{}, err
 	}

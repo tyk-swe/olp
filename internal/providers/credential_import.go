@@ -3,7 +3,6 @@ package providers
 import (
 	"cmp"
 	"context"
-	"encoding/json"
 	"errors"
 	"maps"
 	"net/http"
@@ -19,7 +18,6 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/grants"
-	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
@@ -65,27 +63,23 @@ func (s *Server) importCredentials(r *http.Request, p access.Principal, adapter 
 	if err := access.Match(r, current.ETag); err != nil {
 		return access.Reply{}, err
 	}
-	cfg := current.Configuration
+	cfg := current.Connection.Document()
 	vendor, supported := codeadapter.ForConnection(cfg.Kind, cfg.AuthMode, cfg.ProfileID)
 	if !supported || vendor.Adapter != adapter {
 		return access.Reply{}, access.Invalid("credentials", "This connection does not use the selected subscription profile.")
 	}
-	encoded, err := json.Marshal(cfg)
+	served, err := cfg.Serving()
 	if err != nil {
 		return access.Reply{}, err
 	}
-	var connection routing.Configuration
-	if err := json.Unmarshal(encoded, &connection); err != nil {
-		return access.Reply{}, err
-	}
-	if err := codeConnection(r.Context(), s.Plugins, connection, vendor); err != nil {
+	if err := codeConnection(r.Context(), s.Plugins, served, vendor); err != nil {
 		return access.Reply{}, access.Invalid("credentials", "This connection must use the unmodified subscription plugin and configuration.")
 	}
 	slot, err := s.credentialImportSlot(r, id, input.SlotID)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	client, err := s.connectionClient(r.Context(), &cfg, nil)
+	client, err := s.connectionClient(r.Context(), current.target(), nil)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -139,7 +133,7 @@ func (s *Server) stageCredentialImport(request *http.Request, current *record, s
 	if err := access.Match(r, locked.ETag); err != nil {
 		return access.Reply{}, err
 	}
-	credentialID, version, err := grants.Store(ctx, tx, s.Access, current.ID, current.Configuration.ProfileRevision, current.Configuration.ProfileID, grant)
+	credentialID, version, err := grants.Store(ctx, tx, s.Access, current.ID, current.Connection.Document().ProfileRevision, current.Connection.Document().ProfileID, grant)
 	if err != nil {
 		return access.Reply{}, err
 	}

@@ -86,24 +86,30 @@ func classify(err error) *probeError {
 
 // call performs one bounded upstream request. The body is capped and never
 // retained beyond the caller's parsing.
-func (s *Catalogue) call(ctx context.Context, cfg *connection.Configuration, credential []byte, method, path string, body []byte) (int, []byte, error) {
+type probeTarget struct {
+	connection.Prepared
+	providerID  string
+	probeModels []string
+}
+
+func (s *Catalogue) call(ctx context.Context, cfg probeTarget, credential []byte, method, path string, body []byte) (int, []byte, error) {
 	return s.callAs(ctx, cfg, credential, method, path, body, "application/json", "")
 }
 
 // callAs is call with a body of another content type, such as a form, signed
 // for another AWS service of the connector's cloud when signingService names
 // one.
-func (s *Catalogue) callAs(ctx context.Context, cfg *connection.Configuration, credential []byte, method, path string, body []byte, contentType, signingService string) (int, []byte, error) {
+func (s *Catalogue) callAs(ctx context.Context, cfg probeTarget, credential []byte, method, path string, body []byte, contentType, signingService string) (int, []byte, error) {
 	status, _, data, err := s.callAsWithHeaders(ctx, cfg, credential, method, path, body, contentType, signingService)
 	return status, data, err
 }
 
-func (s *Catalogue) callWithHeaders(ctx context.Context, cfg *connection.Configuration, credential []byte, method, path string, body []byte) (int, http.Header, []byte, error) {
+func (s *Catalogue) callWithHeaders(ctx context.Context, cfg probeTarget, credential []byte, method, path string, body []byte) (int, http.Header, []byte, error) {
 	return s.callAsWithHeaders(ctx, cfg, credential, method, path, body, "application/json", "")
 }
 
-func (s *Catalogue) callAsWithHeaders(ctx context.Context, cfg *connection.Configuration, credential []byte, method, path string, body []byte, contentType, signingService string) (int, http.Header, []byte, error) {
-	base, err := s.Egress.ValidateEndpoint(providerconfig.Value(cfg.Endpoint))
+func (s *Catalogue) callAsWithHeaders(ctx context.Context, cfg probeTarget, credential []byte, method, path string, body []byte, contentType, signingService string) (int, http.Header, []byte, error) {
+	base, err := s.Egress.ValidateEndpoint(providerconfig.Value(cfg.Document().Endpoint))
 	if err != nil {
 		return 0, nil, nil, &probeError{Code: "invalid_endpoint", Detail: err.Error()}
 	}
@@ -136,11 +142,11 @@ func (s *Catalogue) callAsWithHeaders(ctx context.Context, cfg *connection.Confi
 		return 0, nil, nil, err
 	}
 	req.Header.Set("Accept", "application/json, text/event-stream")
-	if cfg.Kind == connectors.KindBedrock && (strings.HasSuffix(path, "/converse-stream") || strings.HasSuffix(path, "/invoke-with-response-stream")) {
+	if cfg.Document().Kind == connectors.KindBedrock && (strings.HasSuffix(path, "/converse-stream") || strings.HasSuffix(path, "/invoke-with-response-stream")) {
 		req.Header.Set("Accept", "application/vnd.amazon.eventstream")
 	}
 	req.Header.Set("User-Agent", "olp/probe")
-	if cfg.Kind == connectors.KindAnthropic && req.URL.Query().Get("beta") == "true" {
+	if cfg.Document().Kind == connectors.KindAnthropic && req.URL.Query().Get("beta") == "true" {
 		req.Header.Set("Anthropic-Beta", "files-api-2025-04-14")
 	}
 	if body != nil {
@@ -185,7 +191,7 @@ func (s *Catalogue) callAsWithHeaders(ctx context.Context, cfg *connection.Confi
 // error its body states, under the classification the provider's profile
 // declares. It reports only local codes and text: upstream error fields may
 // echo credentials and must never enter persistent probe diagnostics.
-func statusError(cfg *connection.Configuration, status int, body []byte) *probeError {
+func statusError(cfg probeTarget, status int, body []byte) *probeError {
 	status, body = cfg.Transport().Rejection(status, body)
 	detail := fmt.Sprintf("The upstream answered HTTP %d.", status)
 	code := "upstream_rejected"
@@ -207,7 +213,7 @@ func statusError(cfg *connection.Configuration, status int, body []byte) *probeE
 }
 
 // listModels asks the upstream for its model identifiers.
-func (s *Catalogue) listModels(ctx context.Context, cfg *connection.Configuration, credential []byte) ([]string, error) {
+func (s *Catalogue) listModels(ctx context.Context, cfg probeTarget, credential []byte) ([]string, error) {
 	models, err := s.listModelFacts(ctx, cfg, credential)
 	if err != nil {
 		return nil, err
@@ -238,35 +244,35 @@ type modelListing struct {
 
 // listingFor returns how the configured upstream lists its models, or false
 // when it has no listing and operators declare its models.
-func listingFor(cfg *connection.Configuration) (modelListing, bool, error) {
+func listingFor(cfg probeTarget) (modelListing, bool, error) {
 	if cfg.Transport().RetrievalBackend() != "" {
 		return modelListing{}, false, nil
 	}
-	switch cfg.Kind {
+	switch cfg.Document().Kind {
 	case connectors.KindAzureOpenAI, connectors.KindVertexAI:
 		return modelListing{}, false, nil
 	case connectors.KindPlugin:
 		// A plugin profile declares the listing, if its upstream has one.
-		if cfg.Plugin() == nil {
+		if cfg.Transport().Plugin == nil {
 			return modelListing{}, false, nil
 		}
-		declared, ok := cfg.Plugin().Discovery()
+		declared, ok := cfg.Transport().Plugin.Discovery()
 		if !ok {
 			return modelListing{}, false, nil
 		}
 		// Keep the rendered address's escaped option segments. call validates
 		// absolute URLs without rebuilding their path from a normalized base.
-		listing := modelListing{path: strings.TrimRight(providerconfig.Value(cfg.Endpoint), "/") + declared.Path, models: declared.Models, id: declared.ID}
+		listing := modelListing{path: strings.TrimRight(providerconfig.Value(cfg.Document().Endpoint), "/") + declared.Path, models: declared.Models, id: declared.ID}
 		if pagination := declared.Pagination; pagination != nil {
 			listing.cursor, listing.more, listing.parameter = pagination.Cursor, pagination.More, pagination.Parameter
 		}
 		return listing, true, nil
 	}
-	if contract, ok := vendors.Lookup(providerconfig.Value(cfg.Options.VendorID)); ok && !contract.Discovery {
+	if contract, ok := vendors.Lookup(providerconfig.Value(cfg.Document().Options.VendorID)); ok && !contract.Discovery {
 		return modelListing{}, false, nil
 	}
 	listing := modelListing{path: "/models", models: "data", id: "id", display: "display_name"}
-	switch cfg.Kind {
+	switch cfg.Document().Kind {
 	case connectors.KindAnthropic:
 		listing.cursor, listing.more, listing.parameter = "last_id", "has_more", "after_id"
 	case connectors.KindGemini:
@@ -275,12 +281,12 @@ func listingFor(cfg *connection.Configuration) (modelListing, bool, error) {
 	case connectors.KindWatsonx:
 		// The chat-capable foundation models, in one page of the most the
 		// listing returns.
-		listing.path = "/ml/v1/foundation_model_specs?version=" + connectors.WatsonxVersion(providerconfig.Value(cfg.APIVersion)) + "&filters=function_text_chat&limit=200"
+		listing.path = "/ml/v1/foundation_model_specs?version=" + connectors.WatsonxVersion(providerconfig.Value(cfg.Document().APIVersion)) + "&filters=function_text_chat&limit=200"
 		listing.models, listing.id, listing.display = "resources", "model_id", "label"
 	case connectors.KindBedrock:
 		listing.path, listing.models, listing.id, listing.display = "/foundation-models", "modelSummaries", "modelId", "modelName"
-		if providerconfig.Value(cfg.Endpoint) == connectors.DefaultEndpoint(cfg.Kind, providerconfig.Value(cfg.CloudRegion), "") {
-			endpoint, err := connectors.BedrockEndpoint(providerconfig.Value(cfg.CloudRegion), true)
+		if providerconfig.Value(cfg.Document().Endpoint) == connectors.DefaultEndpoint(cfg.Document().Kind, providerconfig.Value(cfg.Document().CloudRegion), "") {
+			endpoint, err := connectors.BedrockEndpoint(providerconfig.Value(cfg.Document().CloudRegion), true)
 			if err != nil {
 				return modelListing{}, false, err
 			}
@@ -290,7 +296,7 @@ func listingFor(cfg *connection.Configuration) (modelListing, bool, error) {
 	return listing, true, nil
 }
 
-func (s *Catalogue) listModelFacts(ctx context.Context, cfg *connection.Configuration, credential []byte) ([]discoveredModel, error) {
+func (s *Catalogue) listModelFacts(ctx context.Context, cfg probeTarget, credential []byte) ([]discoveredModel, error) {
 	listing, discovery, err := listingFor(cfg)
 	if err != nil {
 		return nil, err
@@ -299,14 +305,14 @@ func (s *Catalogue) listModelFacts(ctx context.Context, cfg *connection.Configur
 		// Each declared model is its own bounded upstream probe.
 		ctx, cancel := probeBudget(ctx)
 		defer cancel()
-		names := append([]string{}, cfg.ProbeModels...)
-		if cfg.Kind == connectors.KindAzureOpenAI {
-			names = append(names, providerconfig.Value(cfg.Deployment))
+		names := append([]string{}, cfg.probeModels...)
+		if cfg.Document().Kind == connectors.KindAzureOpenAI {
+			names = append(names, providerconfig.Value(cfg.Document().Deployment))
 		}
-		for name := range cfg.Options.Models {
+		for name := range cfg.Document().Options.Models {
 			names = append(names, name)
 		}
-		for name := range cfg.Options.Bindings {
+		for name := range cfg.Document().Options.Bindings {
 			names = append(names, name)
 		}
 		slices.Sort(names)
@@ -320,9 +326,9 @@ func (s *Catalogue) listModelFacts(ctx context.Context, cfg *connection.Configur
 				continue
 			}
 			previous = name
-			tuple := defaultProbeTuple(cfg)
+			tuple := defaultProbeTuple(cfg.Transport())
 			err := s.certifyTuple(ctx, cfg, credential, name, tuple, probeBodyLimit)
-			if err != nil && cfg.Kind == connectors.KindAzureOpenAI {
+			if err != nil && cfg.Document().Kind == connectors.KindAzureOpenAI {
 				tuple.Operation = "embeddings"
 				err = s.certifyTuple(ctx, cfg, credential, name, tuple, probeBodyLimit)
 			}
@@ -373,7 +379,7 @@ func (s *Catalogue) listModelFacts(ctx context.Context, cfg *connection.Configur
 				}
 			}
 			if len(facts) > 0 {
-				facts["source"], _ = json.Marshal(providerconfig.Value(cfg.Endpoint))
+				facts["source"], _ = json.Marshal(providerconfig.Value(cfg.Document().Endpoint))
 				facts["observed_at"], _ = json.Marshal(time.Now().UTC())
 			}
 			out = append(out, discoveredModel{Name: name, Display: display, Metadata: facts})
@@ -414,23 +420,23 @@ func (l modelListing) next(page map[string]json.RawMessage) (string, error) {
 }
 
 // certifyTuple uses a bounded live probe or authenticated native media discovery.
-func (s *Catalogue) certifyTuple(ctx context.Context, cfg *connection.Configuration, credential []byte, model string, tuple CapabilityInput, maxEventBytes int) error {
-	if !configurationCertifiable(cfg, tuple) || !cfg.Transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode) {
+func (s *Catalogue) certifyTuple(ctx context.Context, cfg probeTarget, credential []byte, model string, tuple CapabilityInput, maxEventBytes int) error {
+	if !configurationCertifiable(cfg.Transport(), tuple) || !cfg.Transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode) {
 		return &probeError{Code: "capability_unavailable", Detail: "This connector cannot certify the requested tuple."}
 	}
 	if retainedapi.Operation(tuple.Operation) {
 		return s.certifyRetained(ctx, cfg, credential, model, tuple)
 	}
-	if cfg.ProfileID == "gemini-interactions" && tuple.Operation == "generation" && tuple.Surface == "gemini" {
+	if cfg.Document().ProfileID == "gemini-interactions" && tuple.Operation == "generation" && tuple.Surface == "gemini" {
 		return s.certifyGeminiInteraction(ctx, cfg, credential, model, tuple.Mode, maxEventBytes)
 	}
-	if cfg.ProfileID == "gemini-live" && tuple.Operation == "realtime" && tuple.Surface == "gemini" {
+	if cfg.Document().ProfileID == "gemini-live" && tuple.Operation == "realtime" && tuple.Surface == "gemini" {
 		return s.certifyGeminiLive(ctx, cfg, credential, model, maxEventBytes)
 	}
-	if duplexcontract.IsProfile(cfg.ProfileID) && tuple.Operation == "realtime" && tuple.Surface == "native" {
+	if duplexcontract.IsProfile(cfg.Document().ProfileID) && tuple.Operation == "realtime" && tuple.Surface == "native" {
 		return s.certifyNativeDuplex(ctx, cfg, credential, model)
 	}
-	if codec, ok := configuredOperation(cfg, tuple.Operation); ok {
+	if codec, ok := configuredOperation(cfg.Transport(), tuple.Operation); ok {
 		return s.certifyOperation(ctx, cfg, credential, model, tuple, codec)
 	}
 	switch {
@@ -496,7 +502,7 @@ func (s *Catalogue) certifyTuple(ctx context.Context, cfg *connection.Configurat
 		}
 	}
 	families := []wire.Format{family}
-	if cfg.ProfileID != "" && tuple.Operation == "generation" && tuple.Surface == "openai" {
+	if cfg.Document().ProfileID != "" && tuple.Operation == "generation" && tuple.Surface == "openai" {
 		profile, _ := cfg.Transport().Profile()
 		if profile.Dialect == "openai-completions" {
 			families = []wire.Format{wire.Completions}
@@ -504,7 +510,7 @@ func (s *Catalogue) certifyTuple(ctx context.Context, cfg *connection.Configurat
 			families = []wire.Format{wire.Responses}
 		}
 	}
-	if cfg.ProfileID == "" && tuple.Operation == "generation" && tuple.Surface == "openai" && vendors.Speaks(providerconfig.Value(cfg.Options.VendorID), "openai-responses") && (cfg.Kind == connectors.KindOpenAI || cfg.Kind == connectors.KindAzureOpenAI || cfg.Kind == connectors.KindOpenAICompatible) {
+	if cfg.Document().ProfileID == "" && tuple.Operation == "generation" && tuple.Surface == "openai" && vendors.Speaks(providerconfig.Value(cfg.Document().Options.VendorID), "openai-responses") && (cfg.Document().Kind == connectors.KindOpenAI || cfg.Document().Kind == connectors.KindAzureOpenAI || cfg.Document().Kind == connectors.KindOpenAICompatible) {
 		families = append(families, wire.Responses)
 	}
 	for _, family := range families {
@@ -520,7 +526,7 @@ func (s *Catalogue) certifyTuple(ctx context.Context, cfg *connection.Configurat
 			return err
 		}
 		transport := cfg.Transport()
-		invocation, err := providerinvoke.Prepare(parsed, transport, model, cfg.Options.ParameterDefaults)
+		invocation, err := providerinvoke.Prepare(parsed, transport, model, cfg.Document().Options.ParameterDefaults)
 		if err != nil {
 			return err
 		}
@@ -548,7 +554,7 @@ func (s *Catalogue) certifyTuple(ctx context.Context, cfg *connection.Configurat
 				_, err = protocols.DecodeRequest(encodedWire, family, streamed.Body, "certification", "", parsed)
 			}
 		default:
-			_, err = protocols.DecodeRequest(encodedWire, family, transport.UnwrapResponse(data), "certification", protocols.EmbeddingEncoding(parsed, cfg.Options.ParameterDefaults), parsed)
+			_, err = protocols.DecodeRequest(encodedWire, family, transport.UnwrapResponse(data), "certification", protocols.EmbeddingEncoding(parsed, cfg.Document().Options.ParameterDefaults), parsed)
 		}
 		if err != nil {
 			return &probeError{Code: "provider_protocol_error", Detail: "The upstream did not satisfy the requested native codec contract."}
@@ -557,8 +563,8 @@ func (s *Catalogue) certifyTuple(ctx context.Context, cfg *connection.Configurat
 	return nil
 }
 
-func (s *Catalogue) certifyBatch(ctx context.Context, cfg *connection.Configuration, credential []byte) error {
-	if cfg.ProfileID == "vertex-batch-prediction" {
+func (s *Catalogue) certifyBatch(ctx context.Context, cfg probeTarget, credential []byte) error {
+	if cfg.Document().ProfileID == "vertex-batch-prediction" {
 		endpoint, err := cfg.Transport().VertexBatchJobsURL("", "")
 		if err != nil {
 			return err
@@ -575,7 +581,7 @@ func (s *Catalogue) certifyBatch(ctx context.Context, cfg *connection.Configurat
 		}
 		return nil
 	}
-	if cfg.ProfileID == "bedrock-batch-inference" {
+	if cfg.Document().ProfileID == "bedrock-batch-inference" {
 		endpoint, err := cfg.Transport().BedrockBatchJobsURL("", "")
 		if err != nil {
 			return err
@@ -606,10 +612,10 @@ func (s *Catalogue) certifyBatch(ctx context.Context, cfg *connection.Configurat
 	}
 	adapter, _ := cfg.Transport().FilesBatchesAdapter()
 	switch {
-	case cfg.Kind == connectors.KindAnthropic:
+	case cfg.Document().Kind == connectors.KindAnthropic:
 		probes[0].query.Set("beta", "true")
 		probes[1].resource = "messages/batches"
-	case cfg.Kind == connectors.KindGemini:
+	case cfg.Document().Kind == connectors.KindGemini:
 		probes = []listingProbe{
 			{resource: "files", array: "files", query: url.Values{"pageSize": {"1"}}, optional: true},
 			{resource: "batches", array: "operations", query: url.Values{"pageSize": {"1"}}, optional: true},
@@ -656,7 +662,7 @@ func validBatchListing(data []byte, field string, optional bool) bool {
 	return json.Unmarshal(array, &items) == nil && items != nil
 }
 
-func (s *Catalogue) certifyRealtime(ctx context.Context, cfg *connection.Configuration, credential []byte, model string) error {
+func (s *Catalogue) certifyRealtime(ctx context.Context, cfg probeTarget, credential []byte, model string) error {
 	endpoint, err := cfg.Transport().RealtimeURL(model)
 	if err != nil {
 		return &probeError{Code: "invalid_endpoint", Detail: "The selected profile cannot address this realtime model."}
@@ -664,7 +670,7 @@ func (s *Catalogue) certifyRealtime(ctx context.Context, cfg *connection.Configu
 	return s.certifyWebSocketDial(ctx, cfg, credential, endpoint, nil)
 }
 
-func (s *Catalogue) certifyNativeDuplex(ctx context.Context, cfg *connection.Configuration, credential []byte, model string) error {
+func (s *Catalogue) certifyNativeDuplex(ctx context.Context, cfg probeTarget, credential []byte, model string) error {
 	transport := cfg.Transport()
 	template, err := duplexcontract.Compile(duplexcontract.Config{Provider: transport, Model: model})
 	if err != nil {
@@ -709,7 +715,7 @@ func (s *Catalogue) certifyNativeDuplex(ctx context.Context, cfg *connection.Con
 	return &probeError{Code: "capability_unavailable", Detail: "The native duplex transport cannot be certified."}
 }
 
-func (s *Catalogue) certifyWebSocketDial(ctx context.Context, cfg *connection.Configuration, credential []byte, endpoint string, exchange func(context.Context, *websocket.Conn) error) error {
+func (s *Catalogue) certifyWebSocketDial(ctx context.Context, cfg probeTarget, credential []byte, endpoint string, exchange func(context.Context, *websocket.Conn) error) error {
 	transport := cfg.Transport()
 	check := strings.Replace(endpoint, "wss://", "https://", 1)
 	check = strings.Replace(check, "ws://", "http://", 1)
@@ -813,7 +819,7 @@ const webrtcProbeSDP = "v=0\r\n" +
 	"a=mid:1\r\n" +
 	"a=sctp-port:5000\r\n"
 
-func (s *Catalogue) certifyWebRTC(ctx context.Context, cfg *connection.Configuration, credential []byte, model string) error {
+func (s *Catalogue) certifyWebRTC(ctx context.Context, cfg probeTarget, credential []byte, model string) error {
 	transport := cfg.Transport()
 	endpoint, err := transport.RealtimeCallsURL(model)
 	if err != nil {
@@ -897,7 +903,7 @@ func (s *Catalogue) certifyWebRTC(ctx context.Context, cfg *connection.Configura
 	return errors.Join(controlErr, hangupErr)
 }
 
-func (s *Catalogue) certifyWebRTCControl(ctx context.Context, cfg *connection.Configuration, credential []byte, model, callID string, client *http.Client) error {
+func (s *Catalogue) certifyWebRTCControl(ctx context.Context, cfg probeTarget, credential []byte, model, callID string, client *http.Client) error {
 	control, err := cfg.Transport().RealtimeControlURL(model, callID)
 	if err != nil {
 		return &probeError{Code: "control_unavailable", Detail: "The provider returned no controllable session identity."}
@@ -920,7 +926,7 @@ func (s *Catalogue) certifyWebRTCControl(ctx context.Context, cfg *connection.Co
 	return nil
 }
 
-func (s *Catalogue) hangupWebRTCProbe(ctx context.Context, cfg *connection.Configuration, credential []byte, model, callID string, client *http.Client) error {
+func (s *Catalogue) hangupWebRTCProbe(ctx context.Context, cfg probeTarget, credential []byte, model, callID string, client *http.Client) error {
 	hangupURL, err := cfg.Transport().RealtimeHangupURL(model, callID)
 	if err != nil {
 		return &probeError{Code: "control_unavailable", Detail: "The provider returned no controllable session identity."}
@@ -944,7 +950,7 @@ func (s *Catalogue) hangupWebRTCProbe(ctx context.Context, cfg *connection.Confi
 	return nil
 }
 
-func (s *Catalogue) certifyBedrockIngress(ctx context.Context, cfg *connection.Configuration, credential []byte, model string, tuple CapabilityInput, maxEventBytes int) error {
+func (s *Catalogue) certifyBedrockIngress(ctx context.Context, cfg probeTarget, credential []byte, model string, tuple CapabilityInput, maxEventBytes int) error {
 	upstream := cfg.Transport().Model(model)
 	if upstream == "" {
 		upstream = model
@@ -988,7 +994,7 @@ func (s *Catalogue) certifyBedrockIngress(ctx context.Context, cfg *connection.C
 	})
 }
 
-func (s *Catalogue) bedrockProbe(ctx context.Context, cfg *connection.Configuration, credential []byte, path string, body []byte, validate func([]byte) error) error {
+func (s *Catalogue) bedrockProbe(ctx context.Context, cfg probeTarget, credential []byte, path string, body []byte, validate func([]byte) error) error {
 	status, data, err := s.call(ctx, cfg, credential, http.MethodPost, path, body)
 	if err != nil {
 		return err
@@ -1056,16 +1062,16 @@ func (s *Catalogue) credentialFor(ctx context.Context, tx pgx.Tx, p *record) ([]
 	if err != nil {
 		return nil, nil, err
 	}
-	slot := selectProbeSlot(slots, &p.Configuration)
+	slot := selectProbeSlot(slots, p.Connection.Document())
 	if slot == nil {
 		return nil, nil, access.Fail(422, "credential_required", "Enable a credential slot before probing this connection.")
 	}
 	state := &credentialState{ID: slot.CredentialID, Version: slot.CredentialVersion, Revoked: slot.CredentialRevoked}
 
-	if !p.Configuration.CredentialRequired() {
+	if !p.Connection.Document().CredentialRequired() {
 		return nil, state, nil
 	}
-	if state.ID == nil && p.Configuration.Grant() {
+	if state.ID == nil && p.Connection.Document().Grant() {
 		return nil, state, access.Fail(422, "credential_required", "Enroll a grant before probing this connection.")
 	}
 	if state.ID == nil {
@@ -1077,7 +1083,7 @@ func (s *Catalogue) credentialFor(ctx context.Context, tx pgx.Tx, p *record) ([]
 	if slot.CredentialLapsed {
 		return nil, state, access.Fail(422, "credential_lapsed", "The draft credential's grant lapsed; re-enroll it before probing.")
 	}
-	if err := slot.credentialFits(&p.Configuration); err != nil {
+	if err := slot.credentialFits(p.Connection.Document()); err != nil {
 		return nil, state, err
 	}
 	secret, err := s.readCredential(ctx, tx, *state.ID)
@@ -1087,7 +1093,7 @@ func (s *Catalogue) credentialFor(ctx context.Context, tx pgx.Tx, p *record) ([]
 	return secret, state, nil
 }
 
-func selectProbeSlot(slots []slotRow, cfg *connection.Configuration) *slotRow {
+func selectProbeSlot(slots []slotRow, cfg connection.Configuration) *slotRow {
 	var best *slotRow
 	usable := func(s *slotRow) bool {
 		return !cfg.CredentialRequired() || s.CredentialID != nil && !s.CredentialRevoked && !s.CredentialLapsed
@@ -1111,17 +1117,17 @@ func selectProbeSlot(slots []slotRow, cfg *connection.Configuration) *slotRow {
 // unrelated chat success or a self-reported model list as media evidence.
 // Vertex, Bedrock and Azure offer no costless proof, so their media
 // certifies by the smallest real call of the operation.
-func (s *Catalogue) certifyNativeMedia(ctx context.Context, cfg *connection.Configuration, credential []byte, model string, tuple CapabilityInput) error {
-	vendor := providerconfig.Value(cfg.Options.VendorID)
-	if mediaByCall(cfg.Kind, vendor, tuple.Operation) {
+func (s *Catalogue) certifyNativeMedia(ctx context.Context, cfg probeTarget, credential []byte, model string, tuple CapabilityInput) error {
+	vendor := providerconfig.Value(cfg.Document().Options.VendorID)
+	if mediaByCall(cfg.Document().Kind, vendor, tuple.Operation) {
 		return s.certifyMediaCall(ctx, cfg, credential, model, tuple.Operation)
 	}
-	if reviewedMedia(cfg.Kind, vendor, tuple.Operation) {
+	if reviewedMedia(cfg.Document().Kind, vendor, tuple.Operation) {
 		return s.certifyVendorMedia(ctx, cfg, credential, model, vendor)
 	}
-	endpoint, err := url.Parse(providerconfig.Value(cfg.Endpoint))
-	if err != nil || cfg.Kind != connectors.KindOpenAI || cfg.AuthMode != connectors.AuthAPIKey || len(credential) == 0 ||
-		len(cfg.Options.CredentialHeaders) != 0 || endpoint.Scheme != "https" ||
+	endpoint, err := url.Parse(providerconfig.Value(cfg.Document().Endpoint))
+	if err != nil || cfg.Document().Kind != connectors.KindOpenAI || cfg.Document().AuthMode != connectors.AuthAPIKey || len(credential) == 0 ||
+		len(cfg.Document().Options.CredentialHeaders) != 0 || endpoint.Scheme != "https" ||
 		endpoint.Hostname() != "api.openai.com" || (endpoint.Port() != "" && endpoint.Port() != "443") ||
 		strings.TrimRight(endpoint.EscapedPath(), "/") != "/v1" {
 		return &probeError{Code: "capability_unavailable", Detail: "Media certification requires the official OpenAI endpoint and an API key."}
@@ -1130,7 +1136,7 @@ func (s *Catalogue) certifyNativeMedia(ctx context.Context, cfg *connection.Conf
 }
 
 // certifyListedModel proves the credential can discover the media model.
-func (s *Catalogue) certifyListedModel(ctx context.Context, cfg *connection.Configuration, credential []byte, model string) error {
+func (s *Catalogue) certifyListedModel(ctx context.Context, cfg probeTarget, credential []byte, model string) error {
 	models, err := s.listModels(ctx, cfg, credential)
 	if err != nil {
 		return err
@@ -1155,12 +1161,12 @@ func mediaByCall(kind, vendor, operation string) bool {
 	return op == media.OpImageGeneration || kind == connectors.KindAzureOpenAI || vendors.MediaWire(vendor, operation) != ""
 }
 
-func (s *Catalogue) certifyMediaCall(ctx context.Context, cfg *connection.Configuration, credential []byte, model, operation string) error {
+func (s *Catalogue) certifyMediaCall(ctx context.Context, cfg probeTarget, credential []byte, model, operation string) error {
 	transport := cfg.Transport()
-	if cfg.Kind == connectors.KindAzureOpenAI && transport.Hosting() == "azure-v1" {
+	if cfg.Document().Kind == connectors.KindAzureOpenAI && transport.Hosting() == "azure-v1" {
 		return &probeError{Code: "capability_unavailable", Detail: "Azure OpenAI serves media through deployments; its v1 API offers none."}
 	}
-	request, failure := mediaProbeRequest(cfg.Kind, operation)
+	request, failure := mediaProbeRequest(cfg.Document().Kind, operation)
 	if failure != nil {
 		return &probeError{Code: "capability_unavailable", Detail: failure.Message}
 	}
@@ -1283,7 +1289,7 @@ func decodeMediaProbe(response media.Response, data []byte) *media.Error {
 // the vendor's listing, or else the vendor's account probe, proves the
 // credential reaches it. Without a listing, the model is the operator's
 // declaration, as for any upstream that lists none.
-func (s *Catalogue) certifyVendorMedia(ctx context.Context, cfg *connection.Configuration, credential []byte, model, vendor string) error {
+func (s *Catalogue) certifyVendorMedia(ctx context.Context, cfg probeTarget, credential []byte, model, vendor string) error {
 	contract, _ := vendors.Lookup(vendor)
 	if contract.AccountProbe == "" {
 		return s.certifyListedModel(ctx, cfg, credential, model)

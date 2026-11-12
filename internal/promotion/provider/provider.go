@@ -90,7 +90,7 @@ func parse(entry contract.ConfigurationProviderEntry, at path, names promotion.N
 	if err != nil {
 		return Entry{}, err
 	}
-	validated, err := validated(configuration, policy)
+	validated, err := connection.ValidateUnpinned(policy, configuration)
 	if err != nil {
 		return Entry{}, err
 	}
@@ -176,9 +176,7 @@ func Render(entries []Entry) ([]contract.ConfigurationProviderEntry, error) {
 }
 
 func render(entry Entry) (contract.ConfigurationProviderEntry, error) {
-	normalized := entry.Configuration
-	normalized.Normalize()
-	configuration, err := promotion.Convert[contract.ProviderConfiguration](normalized)
+	configuration, err := promotion.Convert[contract.ProviderConfiguration](entry.Configuration.Normalized())
 	if err != nil {
 		return contract.ConfigurationProviderEntry{}, err
 	}

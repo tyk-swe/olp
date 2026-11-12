@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/providerconfig"
-	"github.com/tyk-swe/olp/internal/providers/connection"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/duplexcontract"
@@ -29,65 +27,65 @@ const (
 	probeCancelWait = 5 * time.Second
 )
 
-func configuredOperation(cfg *connection.Configuration, operation string) (operations.Dialect, bool) {
-	if cfg.ProfileID == "" {
+func configuredOperation(transport connectors.Config, operation string) (operations.Dialect, bool) {
+	if transport.ProfileID == "" {
 		return operations.Dialect{}, false
 	}
-	profile, err := cfg.Transport().Profile()
+	profile, err := transport.Profile()
 	if err != nil {
 		return operations.Dialect{}, false
 	}
 	codec, ok := operationregistry.Lookup(profile.OperationDialect(operation))
 	return codec, ok && codec.Operation.ID == operation
 }
-func configurationCertifiable(cfg *connection.Configuration, tuple CapabilityInput) bool {
+func configurationCertifiable(transport connectors.Config, tuple CapabilityInput) bool {
 	if retainedapi.Operation(tuple.Operation) {
-		return cfg.Transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
+		return transport.Supports(tuple.Operation, tuple.Surface, tuple.Mode)
 	}
-	if cfg.ProfileID == "gemini-live" {
-		return tuple.Operation == "realtime" && tuple.Surface == "gemini" && tuple.Mode == "realtime" && cfg.Transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
+	if transport.ProfileID == "gemini-live" {
+		return tuple.Operation == "realtime" && tuple.Surface == "gemini" && tuple.Mode == "realtime" && transport.Supports(tuple.Operation, tuple.Surface, tuple.Mode)
 	}
-	if duplexcontract.IsProfile(cfg.ProfileID) {
-		return tuple.Operation == "realtime" && tuple.Surface == "native" && tuple.Mode == "realtime" && cfg.Transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
+	if duplexcontract.IsProfile(transport.ProfileID) {
+		return tuple.Operation == "realtime" && tuple.Surface == "native" && tuple.Mode == "realtime" && transport.Supports(tuple.Operation, tuple.Surface, tuple.Mode)
 	}
 	if tuple.Operation == "batch" {
-		return cfg.Transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
+		return transport.Supports(tuple.Operation, tuple.Surface, tuple.Mode)
 	}
-	if _, ok := configuredOperation(cfg, tuple.Operation); ok {
-		return cfg.Transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
+	if _, ok := configuredOperation(transport, tuple.Operation); ok {
+		return transport.Supports(tuple.Operation, tuple.Surface, tuple.Mode)
 	}
 	if tuple.Operation == OperationGeneration && tuple.Surface == "native" {
 		// Only a profile in a native generation dialect serves this surface.
-		return cfg.ProfileID != "" && cfg.Transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
+		return transport.ProfileID != "" && transport.Supports(tuple.Operation, tuple.Surface, tuple.Mode)
 	}
-	return certifiable(cfg.Kind, providerconfig.Value(cfg.Options.VendorID), tuple)
+	return certifiable(transport.Kind, transport.VendorID, tuple)
 }
 
 // defaultProbeTuple is the unary tuple a provider without model discovery
 // certifies its declared models with. An explicit profile that cannot serve
 // the default tuple, such as a dedicated embeddings or rerank dialect, is
 // probed with the first unary tuple it can certify.
-func defaultProbeTuple(cfg *connection.Configuration) CapabilityInput {
-	if duplexcontract.IsProfile(cfg.ProfileID) {
-		if tuple := (CapabilityInput{Operation: "realtime", Surface: "native", Mode: "realtime"}); probeable(cfg, tuple) {
+func defaultProbeTuple(transport connectors.Config) CapabilityInput {
+	if duplexcontract.IsProfile(transport.ProfileID) {
+		if tuple := (CapabilityInput{Operation: "realtime", Surface: "native", Mode: "realtime"}); probeable(transport, tuple) {
 			return tuple
 		}
 	}
-	operation := probeOperation(cfg)
-	if cfg.Kind == connectors.KindVertexAI && cfg.Transport().Hosting() != "vertex-anthropic" {
+	operation := probeOperation(transport)
+	if transport.Kind == connectors.KindVertexAI && transport.Hosting() != "vertex-anthropic" {
 		operation = "token_count"
 	}
 	tuple := CapabilityInput{Operation: operation, Surface: "openai", Mode: ModeUnary}
-	if cfg.ProfileID == "" || probeable(cfg, tuple) {
+	if transport.ProfileID == "" || probeable(transport, tuple) {
 		return tuple
 	}
-	profile, err := cfg.Transport().Profile()
+	profile, err := transport.Profile()
 	if err != nil {
 		return tuple
 	}
 	for _, op := range profile.Operations {
 		for _, surface := range []string{"openai", "native", "anthropic", "gemini", "bedrock"} {
-			if candidate := (CapabilityInput{Operation: op, Surface: surface, Mode: ModeUnary}); probeable(cfg, candidate) {
+			if candidate := (CapabilityInput{Operation: op, Surface: surface, Mode: ModeUnary}); probeable(transport, candidate) {
 				return candidate
 			}
 		}
@@ -97,18 +95,18 @@ func defaultProbeTuple(cfg *connection.Configuration) CapabilityInput {
 
 // probeOperation is the operation that certifies a declared model of the
 // configured vendor: the one its contract names, or generation.
-func probeOperation(cfg *connection.Configuration) string {
-	if contract, ok := vendors.Lookup(providerconfig.Value(cfg.Options.VendorID)); ok && contract.ProbeOperation != "" {
+func probeOperation(transport connectors.Config) string {
+	if contract, ok := vendors.Lookup(transport.VendorID); ok && contract.ProbeOperation != "" {
 		return contract.ProbeOperation
 	}
 	return "generation"
 }
 
-func probeable(cfg *connection.Configuration, tuple CapabilityInput) bool {
-	return configurationCertifiable(cfg, tuple) && cfg.Transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
+func probeable(transport connectors.Config, tuple CapabilityInput) bool {
+	return configurationCertifiable(transport, tuple) && transport.Supports(tuple.Operation, tuple.Surface, tuple.Mode)
 }
 
-func (s *Catalogue) certifyOperation(ctx context.Context, cfg *connection.Configuration, credential []byte, model string, tuple CapabilityInput, codec operations.Dialect) error {
+func (s *Catalogue) certifyOperation(ctx context.Context, cfg probeTarget, credential []byte, model string, tuple CapabilityInput, codec operations.Dialect) error {
 	template, err := operationplan.Compile(operationplan.Config{Provider: cfg.Transport(), Model: model, Operation: tuple.Operation})
 	if err != nil {
 		return &probeError{Code: "capability_unavailable", Detail: "The native operation contract could not be compiled."}
@@ -145,7 +143,7 @@ func (s *Catalogue) certifyOperation(ctx context.Context, cfg *connection.Config
 	return nil
 }
 
-func (s *Catalogue) pollOperation(ctx context.Context, cfg *connection.Configuration, credential []byte, plan *operationplan.Plan, submit string, header http.Header) ([]byte, error) {
+func (s *Catalogue) pollOperation(ctx context.Context, cfg probeTarget, credential []byte, plan *operationplan.Plan, submit string, header http.Header) ([]byte, error) {
 	location, err := plan.PollLocation(submit, header)
 	if err != nil {
 		return nil, &probeError{Code: "provider_protocol_error", Detail: "The upstream polling location is invalid."}
@@ -196,7 +194,7 @@ func (s *Catalogue) pollOperation(ctx context.Context, cfg *connection.Configura
 	return nil, &probeError{Code: "gateway_timeout", Detail: "The upstream operation did not finish within the probe deadline."}
 }
 
-func (s *Catalogue) cancelOperationPoll(cfg *connection.Configuration, credential []byte, plan *operationplan.Plan, location string) {
+func (s *Catalogue) cancelOperationPoll(cfg probeTarget, credential []byte, plan *operationplan.Plan, location string) {
 	method, target, ok := plan.CancelPoll(location)
 	if !ok || method == "" || target == "" {
 		return
@@ -273,21 +271,20 @@ func capabilityOptions() []CapabilityInput {
 // Kind options include tuples available through an explicit profile, even
 // when the kind's Automatic connector cannot serve them.
 func capabilityOptionsForKind(kind string) []CapabilityInput {
-	var profiles []connection.Configuration
+	var profiles []connectors.Config
 	for _, profile := range connectors.Profiles() {
 		if profile.Kind == kind {
-			cfg := connection.Configuration{Identity: providerconfig.Identity[*string]{Kind: kind, ProfileID: profile.ID, ProfileRevision: profile.Revision}}
+			transport := connectors.Config{Kind: kind, ProfileID: profile.ID, ProfileRevision: profile.Revision}
 			if kind == connectors.KindOpenAICompatible && strings.HasSuffix(profile.ID, "-files-batches") {
-				vendor := strings.TrimSuffix(profile.ID, "-files-batches")
-				cfg.Options.VendorID = &vendor
+				transport.VendorID = strings.TrimSuffix(profile.ID, "-files-batches")
 			}
-			profiles = append(profiles, cfg)
+			profiles = append(profiles, transport)
 		}
 	}
 	out := []CapabilityInput{}
 	for _, tuple := range capabilityVocabulary {
-		profiled := slices.ContainsFunc(profiles, func(cfg connection.Configuration) bool {
-			return configurationCertifiable(&cfg, tuple) && cfg.Transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
+		profiled := slices.ContainsFunc(profiles, func(transport connectors.Config) bool {
+			return probeable(transport, tuple)
 		})
 		if certifiable(kind, vendors.DefaultFor(kind), tuple) || profiled {
 			out = append(out, tuple)

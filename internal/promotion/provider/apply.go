@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 )
 
 type applying struct {
@@ -41,15 +42,15 @@ func Applier(entries []Entry, bindings promotion.Bindings, deps Deps) promotion.
 }
 
 func (a applying) apply(ctx context.Context, tx pgx.Tx, entry Entry, existing destination, found bool, directory promotion.Directory) error {
-	prepared, err := a.deps.Catalogue.PrepareConfiguration(ctx, tx, entry.Configuration)
+	prepared, err := connection.Prepare(ctx, a.deps.Catalogue.ConnectionPolicy(tx), entry.Configuration)
 	if err != nil {
 		return err
 	}
-	desired := withParts(entry, prepared.Configuration(), entry.Models)
+	desired := withParts(entry, prepared.Document(), entry.Models)
 	if !found {
 		return a.create(ctx, tx, desired, prepared, directory)
 	}
-	same, err := unchanged(entry, prepared.Configuration(), existing.draft)
+	same, err := unchanged(entry, prepared.Document(), existing.draft)
 	if err != nil {
 		return err
 	}
@@ -59,7 +60,7 @@ func (a applying) apply(ctx context.Context, tx pgx.Tx, entry Entry, existing de
 	return a.replace(ctx, tx, desired, prepared, existing)
 }
 
-func (a applying) create(ctx context.Context, tx pgx.Tx, entry Entry, prepared providers.PreparedConfiguration, directory promotion.Directory) error {
+func (a applying) create(ctx context.Context, tx pgx.Tx, entry Entry, prepared connection.Prepared, directory promotion.Directory) error {
 	projectID, err := projectID(entry, directory)
 	if err != nil {
 		return err
@@ -82,7 +83,7 @@ func projectID(entry Entry, directory promotion.Directory) (*string, error) {
 	return &id, nil
 }
 
-func (a applying) rebind(ctx context.Context, tx pgx.Tx, entry Entry, prepared providers.PreparedConfiguration, target destination) error {
+func (a applying) rebind(ctx context.Context, tx pgx.Tx, entry Entry, prepared connection.Prepared, target destination) error {
 	for _, slot := range entry.Slots {
 		if err := a.rebindSlot(ctx, tx, entry, slot, target); err != nil {
 			return err
@@ -106,7 +107,7 @@ func (a applying) rebindSlot(ctx context.Context, tx pgx.Tx, entry Entry, slot S
 	return a.deps.Catalogue.BindDraftCredential(ctx, tx, target.id, current.id, *fresh)
 }
 
-func (a applying) replace(ctx context.Context, tx pgx.Tx, entry Entry, prepared providers.PreparedConfiguration, target destination) error {
+func (a applying) replace(ctx context.Context, tx pgx.Tx, entry Entry, prepared connection.Prepared, target destination) error {
 	if err := a.bindNetwork(ctx, tx, entry, prepared, target, false); err != nil {
 		return err
 	}

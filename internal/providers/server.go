@@ -5,7 +5,6 @@ package providers
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"time"
@@ -85,7 +84,7 @@ type record struct {
 	Name             string
 	Kind             string
 	State            string
-	Configuration    connection.Configuration
+	Connection       connection.Prepared
 	ETag             string
 	SlotsETag        string
 	DraftDirty       bool
@@ -100,7 +99,9 @@ type record struct {
 	ProjectID        *string
 }
 
-const recordColumns = "p.id::text,p.name,p.kind,p.state,p.configuration,p.etag::text,p.slots_etag::text,p.draft_dirty,p.active_revision,p.active_revision_id::text,p.last_probe_at,p.last_probe_status,p.last_probe_detail,p.created_by::text,p.created_at,p.updated_at,p.project_id::text," + connection.PluginColumn
+const recordColumns = "p.id::text,p.name,p.kind,p.state,p.configuration,p.etag::text,p.slots_etag::text,p.draft_dirty,p.active_revision,p.active_revision_id::text,p.last_probe_at,p.last_probe_status,p.last_probe_detail,p.created_by::text,p.created_at,p.updated_at,p.project_id::text," + pluginColumn
+
+const pluginColumn = "(SELECT jsonb_build_object('manifest', pl.manifest, 'unconfined', pl.executable IS NOT NULL) FROM olp.plugins pl WHERE p.kind='plugin' AND pl.digest=p.configuration->>'profile_revision')"
 
 func scanRecord(row pgx.Row) (*record, error) {
 	var p record
@@ -109,21 +110,11 @@ func scanRecord(row pgx.Row) (*record, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err = p.decodeConfiguration(configuration, plugin); err != nil {
+	p.Connection, err = connection.Load(configuration, plugin)
+	if err != nil {
 		return nil, err
 	}
 	return &p, nil
-}
-
-// decodeConfiguration reads a stored draft configuration, with the plugin it
-// pins, if any.
-func (p *record) decodeConfiguration(configuration, plugin []byte) error {
-	if err := json.Unmarshal(configuration, &p.Configuration); err != nil {
-		return err
-	}
-	p.Configuration.Normalize()
-	p.Configuration.ProviderID = p.ID
-	return p.Configuration.Pinned(plugin)
 }
 
 // load reads one provider, locking the row inside a transaction when asked.
@@ -207,7 +198,7 @@ const detailQuery = "SELECT " + recordColumns + ",pr.name,u.email," +
 	" LEFT JOIN olp.provider_revisions r ON r.id=p.active_revision_id" +
 	" LEFT JOIN olp.provider_credentials rc ON rc.provider_id=p.id AND rc.version=r.credential_version"
 
-func (s *Catalogue) scanDetail(row pgx.Row) (*detail, error) {
+func scanDetail(row pgx.Row) (*detail, error) {
 	var p record
 	var configuration, plugin []byte
 	var d detail
@@ -219,26 +210,26 @@ func (s *Catalogue) scanDetail(row pgx.Row) (*detail, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err = p.decodeConfiguration(configuration, plugin); err != nil {
+	p.Connection, err = connection.Load(configuration, plugin)
+	if err != nil {
 		return nil, err
 	}
+	document := p.Connection.Document()
 	d.ID, d.Name, d.Kind, d.State, d.ETag = p.ID, p.Name, p.Kind, p.State, p.ETag
 	d.ProjectID = p.ProjectID
-	d.VendorID = p.Configuration.Options.VendorID
-	d.Configuration = p.Configuration
+	d.VendorID = document.Options.VendorID
+	d.Configuration = document
 	d.PendingActivation = p.DraftDirty
 	d.ActiveRevision = p.ActiveRevision
 	d.DraftCredentialID, d.DraftCredentialVersion = draft.ID, draft.Version
 	d.LastProbeAt, d.LastProbeStatus, d.LastProbeDetail = p.LastProbeAt, p.LastProbeStatus, p.LastProbeDetail
 	d.CreatedAt, d.UpdatedAt = p.CreatedAt.UTC(), p.UpdatedAt.UTC()
-	configurationErr := p.Configuration.ValidateAndNormalize(s.Egress)
-	d.Configuration.Options.Commitment = p.Configuration.Options.Commitment
-	d.ConnectorReady = configurationErr == nil && (!p.Configuration.CredentialRequired() || usableCredential)
+	d.ConnectorReady = !document.CredentialRequired() || usableCredential
 	return &d, nil
 }
 
 func (s *Catalogue) detail(ctx context.Context, q access.Queryer, id string) (*detail, error) {
-	return s.scanDetail(q.QueryRow(ctx, detailQuery+" WHERE p.id=$1", id))
+	return scanDetail(q.QueryRow(ctx, detailQuery+" WHERE p.id=$1", id))
 }
 
 func (s *Server) detailReply(ctx context.Context, q access.Queryer, id string) (access.Reply, error) {
@@ -247,4 +238,8 @@ func (s *Server) detailReply(ctx context.Context, q access.Queryer, id string) (
 		return access.Reply{}, err
 	}
 	return access.Detail(d, d.ETag), nil
+}
+
+func (p *record) target(probeModels ...string) probeTarget {
+	return probeTarget{Prepared: p.Connection, providerID: p.ID, probeModels: probeModels}
 }

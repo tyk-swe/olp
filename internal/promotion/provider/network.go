@@ -8,18 +8,17 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
-	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 )
 
 func NetworkRef(provider string) promotion.Ref { return promotion.Ref(provider + "/network") }
 
 func portableConfiguration(input contract.ProviderConfiguration, at path) (connection.Configuration, error) {
-	configuration, err := promotion.Convert[connection.Configuration](input)
+	converted, err := promotion.Convert[connection.Configuration](input)
 	if err != nil {
 		return connection.Configuration{}, err
 	}
-	configuration.Normalize()
+	configuration := converted.Normalized()
 	if configuration.Options.Network != nil && configuration.Options.Network.CredentialID != "" {
 		return connection.Configuration{}, access.Invalid(at.field("configuration.options.network.credential_id"), "Configuration artifacts use network_credential_ref instead of environment-specific credential IDs.")
 	}
@@ -78,7 +77,7 @@ func networkItems(entry Entry, existing destination, bindings promotion.Bindings
 	return []promotion.Item{promotion.Blocker(contract.ConfigurationPlanItemKindNetworkCredential, ref, "secret_binding_required")}
 }
 
-func (a applying) bindNetwork(ctx context.Context, tx pgx.Tx, entry Entry, prepared providers.PreparedConfiguration, target destination, same bool) error {
+func (a applying) bindNetwork(ctx context.Context, tx pgx.Tx, entry Entry, prepared connection.Prepared, target destination, same bool) error {
 	configured, rotated, err := a.networkConfiguration(ctx, tx, entry, prepared, target)
 	if err != nil || (same && !rotated) {
 		return err
@@ -86,16 +85,16 @@ func (a applying) bindNetwork(ctx context.Context, tx pgx.Tx, entry Entry, prepa
 	return a.deps.Catalogue.StoreDraftConfiguration(ctx, tx, target.id, entry.Name, configured)
 }
 
-func (a applying) networkConfiguration(ctx context.Context, tx pgx.Tx, entry Entry, prepared providers.PreparedConfiguration, target destination) (providers.PreparedConfiguration, bool, error) {
+func (a applying) networkConfiguration(ctx context.Context, tx pgx.Tx, entry Entry, prepared connection.Prepared, target destination) (connection.Prepared, bool, error) {
 	if !entry.Network {
 		return prepared, false, nil
 	}
 	credentialID, rotated, err := a.networkCredential(ctx, tx, entry, target)
 	if err != nil {
-		return providers.PreparedConfiguration{}, false, err
+		return connection.Prepared{}, false, err
 	}
 	if credentialID == nil {
-		return providers.PreparedConfiguration{}, false, access.Invalid("secret_bindings", "Supply the provider's network credential binding.")
+		return connection.Prepared{}, false, access.Invalid("secret_bindings", "Supply the provider's network credential binding.")
 	}
 	return prepared.WithNetworkCredential(*credentialID), rotated, nil
 }

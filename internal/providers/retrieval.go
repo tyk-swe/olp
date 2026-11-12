@@ -6,10 +6,9 @@ import (
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/providers/connection"
 )
 
-func (s *Catalogue) certifyRetrieval(ctx context.Context, cfg *connection.Configuration, credential []byte, model string) error {
+func (s *Catalogue) certifyRetrieval(ctx context.Context, cfg probeTarget, credential []byte, model string) error {
 	endpoint, err := cfg.Transport().RetrievalProbeURL(cfg.Transport().Model(model))
 	if err != nil {
 		return &probeError{Code: "capability_unavailable", Detail: "This binding cannot establish a cost-free native resource metadata probe."}
@@ -27,7 +26,7 @@ func (s *Catalogue) certifyRetrieval(ctx context.Context, cfg *connection.Config
 	}
 	identity := "name"
 	root := doc.Root()
-	if cfg.Kind == connectors.KindBedrock {
+	if cfg.Document().Kind == connectors.KindBedrock {
 		value, ok := root.Lookup("knowledgeBase")
 		if !ok || value.Kind() != oif.Object {
 			return &probeError{Code: "provider_protocol_error", Detail: "Missing Knowledge Base metadata."}

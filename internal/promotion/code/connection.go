@@ -51,14 +51,14 @@ func portableConnection(configuration connection.Configuration) Connection {
 }
 
 func (c Connection) resolve(ctx context.Context, q access.Queryer, name, project, pool string, in scope) (pin, error) {
-	prepared, err := providers.PrepareConfiguration(ctx, q, in.deps.Unconfined, in.deps.Egress, c.Configuration)
+	prepared, err := connection.Prepare(ctx, in.deps.Catalogue.ConnectionPolicy(q), c.Configuration)
 	if _, refused := provider.Refusal(err); refused {
 		return pin{}, access.Invalid("code.connections", "Install and approve the pinned frozen provider profile before promotion.")
 	}
 	if err != nil {
 		return pin{}, err
 	}
-	configuration := prepared.Configuration()
+	configuration := prepared.Document()
 	target, err := providers.ReadProjectProvider(ctx, q, name, project)
 	if err != nil {
 		return pin{}, err

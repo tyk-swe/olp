@@ -5,8 +5,6 @@ import (
 	"errors"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -25,24 +23,13 @@ func Refusal(err error) (string, bool) {
 	return "", false
 }
 
-func validated(configuration connection.Configuration, policy *egress.Policy) (connection.Configuration, error) {
-	if configuration.Kind == connectors.KindPlugin {
-		return configuration, nil
-	}
-	normalized := configuration
-	if err := normalized.ValidateAndNormalize(policy); err != nil {
-		return connection.Configuration{}, err
-	}
-	return normalized, nil
-}
-
 func (p planning) prepare(ctx context.Context, q access.Queryer, entry Entry) (connection.Configuration, []promotion.Item, error) {
-	prepared, err := p.deps.Catalogue.PrepareConfiguration(ctx, q, entry.Configuration)
+	prepared, err := connection.Prepare(ctx, p.deps.Catalogue.ConnectionPolicy(q), entry.Configuration)
 	if code, refused := Refusal(err); refused {
 		return entry.Configuration, []promotion.Item{promotion.Blocker(contract.ConfigurationPlanItemKindPlugin, entry.Configuration.ProfileRevision, code)}, nil
 	}
 	if err != nil {
 		return connection.Configuration{}, nil, err
 	}
-	return prepared.Configuration(), nil, nil
+	return prepared.Document(), nil, nil
 }

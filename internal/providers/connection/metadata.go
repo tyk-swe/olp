@@ -11,28 +11,44 @@ import (
 )
 
 // MergeDiscoveredFacts places upstream-listed facts under the operator's
-// metadata for one model. Facts that would leave the configuration invalid,
-// or a new entry beyond the metadata bound, are not stored, so discovery can
-// never make the saved configuration fail its own validation.
-func MergeDiscoveredFacts(cfg *Configuration, model string, discovered map[string]json.RawMessage) {
-	if len(discovered) == 0 {
-		return
+// metadata for model, reporting false when nothing is to be stored: facts that
+// would leave the configuration invalid, or a new entry beyond the metadata
+// bound, so discovery can never make the saved configuration fail its own
+// validation.
+func MergeDiscoveredFacts(models map[string]json.RawMessage, model string, discovered map[string]json.RawMessage) (json.RawMessage, bool, error) {
+	stored, known := models[model]
+	if len(discovered) == 0 || !known && len(models) >= maxModelEntries {
+		return nil, false, nil
+	}
+	existing, err := ModelFacts(stored)
+	if err != nil {
+		return nil, false, err
 	}
 	facts := maps.Clone(discovered)
-	var existing map[string]json.RawMessage
-	_ = json.Unmarshal(cfg.Options.Models[model], &existing)
 	maps.Copy(facts, existing)
 	encoded, err := json.Marshal(facts)
-	if err != nil || ValidateMetadata(encoded) != nil {
-		return
+	if err != nil {
+		return nil, false, err
 	}
-	if _, stored := cfg.Options.Models[model]; !stored && len(cfg.Options.Models) >= 2000 {
-		return
+	if ValidateMetadata(encoded) != nil {
+		return nil, false, nil
 	}
-	if cfg.Options.Models == nil {
-		cfg.Options.Models = map[string]json.RawMessage{}
+	return encoded, true, nil
+}
+
+func ModelFacts(stored json.RawMessage) (map[string]json.RawMessage, error) {
+	if len(stored) == 0 {
+		return map[string]json.RawMessage{}, nil
 	}
-	cfg.Options.Models[model] = encoded
+	return metadataObject(stored)
+}
+
+func metadataObject(raw json.RawMessage) (map[string]json.RawMessage, error) {
+	var facts map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &facts); err != nil || facts == nil {
+		return nil, errors.New("model metadata must be an object")
+	}
+	return facts, nil
 }
 
 func ValidateMetadata(raw json.RawMessage) error {

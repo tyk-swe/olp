@@ -183,14 +183,14 @@ func paidRoute(policy routes.CodeRouteInput) codemode.Route {
 }
 
 func preparedPaid(ctx context.Context, q access.Queryer, configuration connection.Configuration, deps provider.Deps) (connection.Configuration, error) {
-	prepared, err := providers.PrepareConfiguration(ctx, q, deps.Unconfined, deps.Egress, configuration)
+	prepared, err := connection.Prepare(ctx, deps.Catalogue.ConnectionPolicy(q), configuration)
 	if _, refused := provider.Refusal(err); refused {
 		return configuration, nil
 	}
 	if err != nil {
 		return connection.Configuration{}, err
 	}
-	return prepared.Configuration(), nil
+	return prepared.Document(), nil
 }
 
 func decoded(current routing.ProviderRevision, configuration connection.Configuration, models []routing.RevisionModel, slots []routing.RevisionSlot) (routing.Provider, error) {

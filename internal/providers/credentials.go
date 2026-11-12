@@ -113,14 +113,11 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 	if err = access.Match(r, current.ETag); err != nil {
 		return access.Reply{}, err
 	}
-	if !current.Configuration.CredentialRequired() {
+	if !current.Connection.Document().CredentialRequired() {
 		return access.Reply{}, access.Fail(422, "credential_forbidden", "This authentication mode takes no stored credential.")
 	}
-	if current.Configuration.Grant() {
+	if current.Connection.Document().Grant() {
 		return access.Reply{}, access.Fail(422, "credential_forbidden", grantEnrollmentOnly)
-	}
-	if err = current.Configuration.ValidateAndNormalize(s.Egress); err != nil {
-		return access.Reply{}, err
 	}
 	models, err := loadModels(r.Context(), tx, id, true)
 	if err != nil {
@@ -141,9 +138,11 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 	if err = tx.Rollback(r.Context()); err != nil {
 		return access.Reply{}, err
 	}
-	for _, model := range models {
-		current.Configuration.ProbeModels = append(current.Configuration.ProbeModels, model.UpstreamModel)
+	declared := make([]string, len(models))
+	for i, model := range models {
+		declared[i] = model.UpstreamModel
 	}
+	target := current.target(declared...)
 	credential := []byte(input.Credential)
 	if input.CredentialReference != nil {
 		credential, err = s.resolveReference(r.Context(), *input.CredentialReference)
@@ -152,12 +151,12 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 		}
 	}
 	defer clear(credential)
-	if _, err = s.listModels(r.Context(), &current.Configuration, credential); err != nil {
+	if _, err = s.listModels(r.Context(), target, credential); err != nil {
 		return access.Reply{}, access.Fail(422, "credential_invalid", "The new credential was not accepted by the upstream: "+classify(err).Detail)
 	}
 	var validatedAt *time.Time
-	if defaultSlot.validationFingerprint(&current.Configuration, models) != "" {
-		if err = s.validateModelAccess(r.Context(), &current.Configuration, credential, &defaultSlot, models); err != nil {
+	if defaultSlot.validationFingerprint(current.Connection.Document(), models) != "" {
+		if err = s.validateModelAccess(r.Context(), target, credential, &defaultSlot, models); err != nil {
 			return access.Reply{}, access.Fail(422, "credential_invalid", "The new credential cannot access the enabled models: "+classify(err).Detail)
 		}
 		validatedAt = new(time.Now().UTC())
@@ -301,7 +300,7 @@ func (s *Server) slotList(ctx context.Context, q access.Queryer, current *record
 	health := map[string]any{}
 	for _, row := range slots {
 		items = append(items, slotJSON(row))
-		validated := row.validationTime(&current.Configuration, models)
+		validated := row.validationTime(current.Connection.Document(), models)
 		health[row.ID] = map[string]any{"revoked": row.CredentialRevoked, "lapsed": row.CredentialLapsed, "active_credential_version_id": activeCredentials[row.ID], "cooling_down": nil, "validated_at": validated, "usage": nil}
 	}
 	connection := s.quotas(ctx, current.ID, slots, activeCredentials, generations, health)
@@ -555,7 +554,7 @@ func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply
 		return access.Reply{}, err
 	}
 	var credential []byte
-	if current.Configuration.CredentialRequired() {
+	if current.Connection.Document().CredentialRequired() {
 		if slot.CredentialID == nil {
 			return access.Reply{}, access.Fail(422, "credential_required", "This slot has no credential to validate.")
 		}
@@ -565,24 +564,21 @@ func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply
 		if slot.CredentialLapsed {
 			return access.Reply{}, access.Fail(422, "credential_lapsed", "This slot's grant lapsed. Re-enroll its grant.")
 		}
-		if err = slot.credentialFits(&current.Configuration); err != nil {
+		if err = slot.credentialFits(current.Connection.Document()); err != nil {
 			return access.Reply{}, err
 		}
 	}
 	if err = tx.Rollback(r.Context()); err != nil {
 		return access.Reply{}, err
 	}
-	if current.Configuration.CredentialRequired() {
+	if current.Connection.Document().CredentialRequired() {
 		credential, err = s.readCredential(r.Context(), a.Pool, *slot.CredentialID)
 		if err != nil {
 			return access.Reply{}, err
 		}
 		defer clear(credential)
 	}
-	if err = current.Configuration.ValidateAndNormalize(s.Egress); err != nil {
-		return access.Reply{}, err
-	}
-	probeErr := s.validateModelAccess(r.Context(), &current.Configuration, credential, slot, models)
+	probeErr := s.validateModelAccess(r.Context(), current.target(), credential, slot, models)
 	// Probes run without mutation locks. Only save evidence if its complete
 	// input (credential, transport, restrictions, and models) is still current.
 	tx, p, err = a.BeginMutation(r)
@@ -639,10 +635,10 @@ func (s *Catalogue) saveDraftSlot(ctx context.Context, tx pgx.Tx, current *recor
 	var credentialID *string
 	switch {
 	case input.Credential != nil || input.CredentialReference != nil:
-		if !current.Configuration.CredentialRequired() {
+		if !current.Connection.Document().CredentialRequired() {
 			return access.Fail(422, "credential_forbidden", "This authentication mode takes no stored credential.")
 		}
-		if current.Configuration.Grant() {
+		if current.Connection.Document().Grant() {
 			return access.Fail(422, "credential_forbidden", grantEnrollmentOnly)
 		}
 		stored, _, err := s.storeCredentialInput(ctx, tx, id, input.Credential, input.CredentialReference)
@@ -703,7 +699,7 @@ func (s *Catalogue) rotateCredential(ctx context.Context, tx pgx.Tx, current *re
 		return credentialRotation{}, err
 	}
 	defaultSlot.CredentialID = &credentialID
-	fingerprint := defaultSlot.validationFingerprint(&current.Configuration, models)
+	fingerprint := defaultSlot.validationFingerprint(current.Connection.Document(), models)
 	if _, err = tx.Exec(ctx, "UPDATE olp.provider_slots SET credential_id=$2,validated_at=$4,validated_fingerprint=$3 WHERE provider_id=$1 AND is_default", id, credentialID, fingerprint, validatedAt); err != nil {
 		return credentialRotation{}, err
 	}
@@ -763,7 +759,7 @@ func (s *Catalogue) storeSlotValidation(ctx context.Context, tx pgx.Tx, current 
 	var fingerprint *string
 	if succeeded {
 		validatedAt = new(time.Now().UTC())
-		fingerprint = new(slot.validationFingerprint(&current.Configuration, models))
+		fingerprint = new(slot.validationFingerprint(current.Connection.Document(), models))
 	}
 	if _, err := tx.Exec(ctx, "UPDATE olp.provider_slots SET validated_at=$2,validated_fingerprint=$3 WHERE id=$1", slotID, validatedAt, fingerprint); err != nil {
 		return err

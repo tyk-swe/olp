@@ -67,11 +67,9 @@ func catalogFacts(signed *catalog.Signed, m *catalog.Model) routing.ModelMetadat
 // applyCatalogFacts overlays catalog facts on a model's stored facts, keeping
 // every fact the catalog does not state, and reports which facts changed.
 func applyCatalogFacts(stored json.RawMessage, facts routing.ModelMetadata) (json.RawMessage, []string, error) {
-	current := map[string]json.RawMessage{}
-	if len(stored) > 0 {
-		if err := json.Unmarshal(stored, &current); err != nil {
-			return nil, nil, err
-		}
+	current, err := connection.ModelFacts(stored)
+	if err != nil {
+		return nil, nil, err
 	}
 	proposed := map[string]json.RawMessage{}
 	encoded, err := json.Marshal(facts)
@@ -118,7 +116,7 @@ func privacyEvidence(stored json.RawMessage) bool {
 
 // suggestionsFor matches a provider's models against the catalog under the
 // provider's vendor.
-func suggestionsFor(signed *catalog.Signed, cfg *connection.Configuration, models []storedModel) ([]catalogSuggestion, error) {
+func suggestionsFor(signed *catalog.Signed, cfg connection.Configuration, models []storedModel) ([]catalogSuggestion, error) {
 	vendorID := providerconfig.Value(cfg.Options.VendorID)
 	out := []catalogSuggestion{}
 	for _, model := range models {
@@ -158,11 +156,11 @@ func (s *Server) catalogSuggestions(r *http.Request, p access.Principal) (access
 	if err != nil {
 		return access.Reply{}, err
 	}
-	items, err := suggestionsFor(s.Catalog, &current.Configuration, models)
+	items, err := suggestionsFor(s.Catalog, current.Connection.Document(), models)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	return access.OK(map[string]any{"catalog": s.Catalog.Summary(), "vendor_id": providerconfig.Value(current.Configuration.Options.VendorID), "items": items}), nil
+	return access.OK(map[string]any{"catalog": s.Catalog.Summary(), "vendor_id": providerconfig.Value(current.Connection.Document().Options.VendorID), "items": items}), nil
 }
 
 type acceptCatalogRequest struct {
@@ -200,7 +198,7 @@ func (s *Catalogue) acceptCatalogFacts(ctx context.Context, tx pgx.Tx, current *
 	if err != nil {
 		return err
 	}
-	suggestions, err := suggestionsFor(s.Catalog, &current.Configuration, models)
+	suggestions, err := suggestionsFor(s.Catalog, current.Connection.Document(), models)
 	if err != nil {
 		return err
 	}
@@ -210,11 +208,8 @@ func (s *Catalogue) acceptCatalogFacts(ctx context.Context, tx pgx.Tx, current *
 			byModel[suggestions[i].UpstreamModel] = &suggestions[i]
 		}
 	}
-	next := current.Configuration
-	next.Options.Models = maps.Clone(current.Configuration.Options.Models)
-	if next.Options.Models == nil {
-		next.Options.Models = map[string]json.RawMessage{}
-	}
+	next := current.Connection.Document()
+	next.Options.Models = maps.Clone(next.Options.Models)
 	for _, name := range input.UpstreamModels {
 		suggestion := byModel[name]
 		switch {
@@ -229,12 +224,9 @@ func (s *Catalogue) acceptCatalogFacts(ctx context.Context, tx pgx.Tx, current *
 		}
 		next.Options.Models[name] = merged
 	}
-	prepared, err := s.PrepareConfiguration(ctx, tx, next)
+	prepared, err := connection.Prepare(ctx, s.ConnectionPolicy(tx), next)
 	if err != nil {
 		return err
 	}
-	if err = s.StoreDraftConfiguration(ctx, tx, current.ID, current.Name, prepared); err != nil {
-		return err
-	}
-	return nil
+	return s.StoreDraftConfiguration(ctx, tx, current.ID, current.Name, prepared)
 }

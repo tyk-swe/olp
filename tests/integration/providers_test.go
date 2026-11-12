@@ -112,7 +112,7 @@ func (f providerFixture) certifiedDraft(t *testing.T) storedProvider {
 	t.Helper()
 	p := storedProvider{providerFixture: f, name: "provider-" + uuid.NewString(), slot: uuid.NewString()}
 	if err := p.transact(t, func(tx pgx.Tx) error {
-		prepared, err := f.catalogue.PrepareConfiguration(t.Context(), tx, providerConfiguration(t, providerEndpoint))
+		prepared, err := connection.Prepare(t.Context(), f.catalogue.ConnectionPolicy(tx), providerConfiguration(t, providerEndpoint))
 		if err != nil {
 			return err
 		}
@@ -162,7 +162,7 @@ func (p storedProvider) transact(t *testing.T, fn func(pgx.Tx) error) error {
 func (p storedProvider) store(t *testing.T, name, configuration string) error {
 	t.Helper()
 	return p.transact(t, func(tx pgx.Tx) error {
-		prepared, err := p.catalogue.PrepareConfiguration(t.Context(), tx, providerConfiguration(t, configuration))
+		prepared, err := connection.Prepare(t.Context(), p.catalogue.ConnectionPolicy(tx), providerConfiguration(t, configuration))
 		if err != nil {
 			return err
 		}

@@ -10,7 +10,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -117,20 +116,20 @@ func (s *Server) revokeNetworkCredential(r *http.Request, _ access.Principal) (a
 	})
 }
 
-func validateNetworkReference(ctx context.Context, q access.Queryer, providerID string, cfg *connection.Configuration) error {
-	if cfg.Options.Network == nil || cfg.Options.Network.CredentialID == "" {
+func validateNetworkReference(ctx context.Context, q access.Queryer, providerID string, network *egress.ConnectionOptions) error {
+	if network == nil || network.CredentialID == "" {
 		return nil
 	}
 	var valid bool
-	err := q.QueryRow(ctx, "SELECT revoked_at IS NULL FROM olp.provider_network_credentials WHERE id=$1 AND provider_id=$2", cfg.Options.Network.CredentialID, providerID).Scan(&valid)
+	err := q.QueryRow(ctx, "SELECT revoked_at IS NULL FROM olp.provider_network_credentials WHERE id=$1 AND provider_id=$2", network.CredentialID, providerID).Scan(&valid)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !valid {
 		return access.Invalid("configuration.options.network.credential_id", "Select an unrevoked network credential owned by this provider.")
 	}
 	return err
 }
 
-func (s *Catalogue) networkSecret(ctx context.Context, cfg *connection.Configuration) ([]byte, error) {
-	if cfg.Options.Network == nil || cfg.Options.Network.CredentialID == "" {
+func (s *Catalogue) networkSecret(ctx context.Context, cfg probeTarget) ([]byte, error) {
+	if cfg.Document().Options.Network == nil || cfg.Document().Options.Network.CredentialID == "" {
 		return nil, nil
 	}
 	tx, err := s.Access.Pool.Begin(ctx)
@@ -138,26 +137,26 @@ func (s *Catalogue) networkSecret(ctx context.Context, cfg *connection.Configura
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	if err := validateNetworkReference(ctx, tx, cfg.ProviderID, cfg); err != nil {
+	if err := validateNetworkReference(ctx, tx, cfg.providerID, cfg.Document().Options.Network); err != nil {
 		return nil, err
 	}
-	return s.Access.Keys.Read(ctx, tx, s.Access.Installation, cfg.Options.Network.CredentialID, secrets.ProviderCredential)
+	return s.Access.Keys.Read(ctx, tx, s.Access.Installation, cfg.Document().Options.Network.CredentialID, secrets.ProviderCredential)
 }
 
-func (s *Catalogue) connectionClient(ctx context.Context, cfg *connection.Configuration, credential []byte) (*http.Client, error) {
-	if cfg.Options.Network == nil && cfg.ProfileID == "" {
+func (s *Catalogue) connectionClient(ctx context.Context, cfg probeTarget, credential []byte) (*http.Client, error) {
+	if cfg.Document().Options.Network == nil && cfg.Document().ProfileID == "" {
 		return s.client, nil
 	}
 	secret, err := s.networkSecret(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
-	if cfg.ProviderID == "" {
+	if cfg.providerID == "" {
 		return nil, errors.New("provider identity is required for configured connections")
 	}
 	digest := sha256.Sum256(credential)
-	scope := cfg.ProviderID + "/" + cfg.TransportFingerprint() + "/" + hex.EncodeToString(digest[:])
-	return s.connections.ClientScoped(scope, *s.Egress, cfg.Options.Network, secret, probeTimeout)
+	scope := cfg.providerID + "/" + cfg.Document().Fingerprint() + "/" + hex.EncodeToString(digest[:])
+	return s.connections.ClientScoped(scope, *s.Egress, cfg.Document().Options.Network, secret, probeTimeout)
 }
 
 func (s *Catalogue) revokeNetworkCredentialVersion(ctx context.Context, tx pgx.Tx, current *record, id string) (revokedCredential, error) {

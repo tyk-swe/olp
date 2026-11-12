@@ -75,7 +75,7 @@ func (s *Server) providers(r *http.Request, principal access.Principal) (access.
 	defer rows.Close()
 	var items []providerSummary
 	for rows.Next() {
-		d, err := s.scanDetail(rows)
+		d, err := scanDetail(rows)
 		if err != nil {
 			return access.Reply{}, err
 		}
@@ -175,7 +175,7 @@ func (s *Server) updateProvider(r *http.Request, _ access.Principal) (access.Rep
 	if err = access.ValidText("name", input.Name, 100); err != nil {
 		return access.Reply{}, err
 	}
-	prepared, err := s.PrepareConfiguration(r.Context(), tx, input.Configuration)
+	prepared, err := connection.Prepare(r.Context(), s.ConnectionPolicy(tx), input.Configuration)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -354,7 +354,7 @@ func loadSlots(ctx context.Context, q access.Queryer, providerID string) ([]slot
 // beneath it for a provider that takes a static credential, a pasted one for
 // a provider that authenticates with a grant, or a grant another build or
 // profile of the plugin enrolled.
-func (row *slotRow) credentialFits(cfg *connection.Configuration) error {
+func (row *slotRow) credentialFits(cfg connection.Configuration) error {
 	switch {
 	case row.CredentialID == nil || !cfg.CredentialRequired() || cfg.Authenticates(row.CredentialPlugin, row.CredentialProfile):
 		return nil
@@ -390,7 +390,7 @@ func (row *slotRow) observedFacts() map[string]string {
 // slot's principal. Every slot of a provider revision serves as one upstream
 // account and environment, so re-enrolling that account is a credential
 // rotation and several accounts are pooled through several providers.
-func onePrincipal(slots []slotRow, cfg *connection.Configuration) error {
+func onePrincipal(slots []slotRow, cfg connection.Configuration) error {
 	if !cfg.Grant() {
 		return nil
 	}
@@ -470,16 +470,17 @@ func scanRevision(row pgx.Row) (*revisionRow, error) {
 	if err := row.Scan(&v.ID, &v.ProviderID, &v.Revision, &v.Name, &configuration, &models, &slots, &v.CredentialVersion, &v.SourceETag, &v.ActivatedBy, &v.ActivatedAt); err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal(configuration, &v.Configuration); err != nil {
+	document, err := connection.Decode(configuration)
+	if err != nil {
 		return nil, err
 	}
+	v.Configuration = document
 	if err := json.Unmarshal(models, &v.Models); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(slots, &v.Slots); err != nil {
 		return nil, err
 	}
-	v.Configuration.Normalize()
 	v.ActivatedAt = v.ActivatedAt.UTC()
 	return &v, nil
 }
@@ -700,10 +701,14 @@ func deref[T comparable](v *T) T {
 // restoreDraft rewrites the draft configuration and models from a revision.
 // Credentials are never restored; the draft keeps its current slots.
 func (s *Catalogue) restoreDraft(ctx context.Context, tx pgx.Tx, current *record, v *revisionRow) (string, error) {
-	if err := connection.PreserveCredentialBoundary(ctx, tx, current.ID, &current.Configuration, &v.Configuration); err != nil {
+	if err := preserveCredentialBoundary(ctx, tx, current.ID, current.Connection.Document(), v.Configuration); err != nil {
 		return "", err
 	}
-	if current.Configuration.EnrollmentBoundary() != v.Configuration.EnrollmentBoundary() {
+	change, err := connection.Diff(current.Connection.Document(), v.Configuration)
+	if err != nil {
+		return "", err
+	}
+	if change.Enrollment {
 		if err := grants.CancelProviderPending(ctx, tx, current.ID); err != nil {
 			return "", err
 		}
@@ -711,7 +716,10 @@ func (s *Catalogue) restoreDraft(ctx context.Context, tx pgx.Tx, current *record
 	// A revision only ever records evidence gathered against its own
 	// transport, so restoring it restores that evidence unchanged; slot
 	// validation is keyed by fingerprint and re-evaluates itself on read.
-	configuration, _ := json.Marshal(v.Configuration)
+	configuration, err := json.Marshal(v.Configuration)
+	if err != nil {
+		return "", err
+	}
 	// Published model identities also anchor route targets. Remove only models
 	// that have never been published, and disable the retained rows until the
 	// restored revision selects them again. Evidence outside that revision is
@@ -754,7 +762,7 @@ func (s *Catalogue) restoreDraft(ctx context.Context, tx pgx.Tx, current *record
 		activeSlots, _ := json.Marshal(v.Slots)
 		dirty = string(draftSlots) != string(activeSlots)
 	}
-	_, err := tx.Exec(ctx, "UPDATE olp.providers SET name=$2,kind=$3,configuration=$4,etag=$5,draft_dirty=$6,updated_at=now() WHERE id=$1", current.ID, v.Name, v.Configuration.Kind, configuration, etag, dirty)
+	_, err = tx.Exec(ctx, "UPDATE olp.providers SET name=$2,kind=$3,configuration=$4,etag=$5,draft_dirty=$6,updated_at=now() WHERE id=$1", current.ID, v.Name, v.Configuration.Kind, configuration, etag, dirty)
 	return etag, err
 }
 
@@ -811,17 +819,17 @@ func (s *Catalogue) createDraft(ctx context.Context, tx pgx.Tx, p access.Princip
 	if err = access.ValidText("name", input.Name, 100); err != nil {
 		return createdProvider{}, err
 	}
-	prepared, err := s.PrepareConfiguration(ctx, tx, input.Configuration)
+	prepared, err := connection.Prepare(ctx, s.ConnectionPolicy(tx), input.Configuration)
 	if err != nil {
 		return createdProvider{}, err
 	}
-	configuration := prepared.configuration
-	switch cfg := &configuration; {
-	case cfg.Grant() && (input.Credential != nil || input.CredentialReference != nil):
+	configuration := prepared.Document()
+	switch {
+	case configuration.Grant() && (input.Credential != nil || input.CredentialReference != nil):
 		return createdProvider{}, access.Invalid("credential", grantEnrollmentOnly)
-	case cfg.CredentialRequired() && !cfg.Grant() && input.Credential == nil && input.CredentialReference == nil:
+	case configuration.CredentialRequired() && !configuration.Grant() && input.Credential == nil && input.CredentialReference == nil:
 		return createdProvider{}, access.Invalid("credential", "This authentication mode requires a credential.")
-	case !cfg.CredentialRequired() && (input.Credential != nil || input.CredentialReference != nil):
+	case !configuration.CredentialRequired() && (input.Credential != nil || input.CredentialReference != nil):
 		return createdProvider{}, access.Invalid("credential", "This authentication mode takes no stored credential.")
 	}
 	if err = validateCredentialInput(input.Credential, input.CredentialReference); err != nil {
@@ -856,7 +864,8 @@ func (s *Catalogue) createDraft(ctx context.Context, tx pgx.Tx, p access.Princip
 		return createdProvider{}, err
 	}
 	if input.Model != nil {
-		surface, operation := "openai", probeOperation(&configuration)
+		transport := prepared.Transport()
+		surface, operation := "openai", probeOperation(transport)
 		switch configuration.Kind {
 		case connectors.KindAnthropic:
 			surface = "anthropic"
@@ -864,7 +873,7 @@ func (s *Catalogue) createDraft(ctx context.Context, tx pgx.Tx, p access.Princip
 			surface = "gemini"
 		}
 		if configuration.ProfileID != "" {
-			profile, _ := configuration.Transport().Profile()
+			profile, _ := transport.Profile()
 			if _, native := protocols.NativeGenerationFamily(profile.OperationDialect("generation")); native && operation == "generation" {
 				surface = "native"
 			}
@@ -886,8 +895,8 @@ func (s *Catalogue) createDraft(ctx context.Context, tx pgx.Tx, p access.Princip
 		// A dedicated operation profile, such as an embeddings or rerank
 		// dialect, declares the tuple it can actually certify.
 		mode := ModeUnary
-		if configuration.ProfileID != "" && !probeable(&configuration, CapabilityInput{Operation: operation, Surface: surface, Mode: mode}) {
-			if tuple := defaultProbeTuple(&configuration); probeable(&configuration, tuple) {
+		if configuration.ProfileID != "" && !probeable(transport, CapabilityInput{Operation: operation, Surface: surface, Mode: mode}) {
+			if tuple := defaultProbeTuple(transport); probeable(transport, tuple) {
 				operation, surface, mode = tuple.Operation, tuple.Surface, tuple.Mode
 			}
 		}
@@ -911,12 +920,12 @@ type activatedProvider struct {
 func (s *Catalogue) activateDraft(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (activatedProvider, error) {
 	// The plugin a draft pinned may since have become unusable, such as
 	// an unconfined plugin in a deployment that no longer enables them.
-	prepared, err := s.PrepareConfiguration(ctx, tx, current.Configuration)
+	prepared, err := connection.Prepare(ctx, s.ConnectionPolicy(tx), current.Connection.Document())
 	if err != nil {
 		return activatedProvider{}, err
 	}
-	configuration := prepared.configuration
-	if err := validateNetworkReference(ctx, tx, current.ID, &configuration); err != nil {
+	configuration := prepared.Document()
+	if err := validateNetworkReference(ctx, tx, current.ID, configuration.Options.Network); err != nil {
 		return activatedProvider{}, err
 	}
 	if _, _, err := s.credentialFor(ctx, tx, current); err != nil {
@@ -947,21 +956,21 @@ func (s *Catalogue) activateDraft(ctx context.Context, tx pgx.Tx, p access.Princ
 	if err != nil {
 		return activatedProvider{}, err
 	}
-	if err = onePrincipal(slots, &configuration); err != nil {
+	if err = onePrincipal(slots, configuration); err != nil {
 		return activatedProvider{}, err
 	}
 	var credentialVersion *int
 	revisionSlots := make([]routing.RevisionSlot, 0, len(slots))
 	for i := range slots {
 		slot := slots[i].published(configuration.AuthMode)
-		if err := slots[i].credentialFits(&configuration); err != nil {
+		if err := slots[i].credentialFits(configuration); err != nil {
 			return activatedProvider{}, err
 		}
-		if slot.Enabled && configuration.CredentialRequired() && slots[i].validationFingerprint(&configuration, models) != "" {
+		if slot.Enabled && configuration.CredentialRequired() && slots[i].validationFingerprint(configuration, models) != "" {
 			if slot.CredentialID == nil {
 				return activatedProvider{}, access.Fail(422, "credential_required", "Slot "+slot.Name+" has no credential.")
 			}
-			if slots[i].validationTime(&configuration, models) == nil {
+			if slots[i].validationTime(configuration, models) == nil {
 				return activatedProvider{}, access.Fail(422, "slot_validation_required", "Validate slot "+slot.Name+" for its enabled models before activating.")
 			}
 		}
@@ -972,7 +981,7 @@ func (s *Catalogue) activateDraft(ctx context.Context, tx pgx.Tx, p access.Princ
 	}
 	modelsJSON, _ := json.Marshal(published)
 	slotsJSON, _ := json.Marshal(revisionSlots)
-	configurationJSON, err := json.Marshal(configuration)
+	configurationJSON, err := json.Marshal(prepared)
 	if err != nil {
 		return activatedProvider{}, err
 	}

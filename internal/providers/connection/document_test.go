@@ -1,6 +1,7 @@
 package connection
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"maps"
@@ -10,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/providerconfig"
@@ -24,25 +24,29 @@ func openAI(options Options) Configuration {
 	return Configuration{Identity: identity{Kind: "openai", AuthMode: connectors.AuthAPIKey}, Options: options}
 }
 
-func validated(c Configuration) (Configuration, error) {
-	normalized := c
-	normalized.Normalize()
-	err := normalized.ValidateAndNormalize(&egress.Policy{})
-	return normalized, err
+type installedPlugin []byte
+
+func (installed installedPlugin) Profile(_ context.Context, digest, profileID string) (*connectors.PluginProfile, error) {
+	return connectors.DecodePluginProfile(digest, installed, profileID)
 }
 
-func refusedField(err error) (string, bool) {
-	if problem, ok := errors.AsType[*access.Problem](err); ok {
-		return problem.Field, problem.Status == 422
-	}
+func prepare(t *testing.T, c Configuration) (Prepared, error) {
+	t.Helper()
+	return Prepare(t.Context(), Policy{Egress: &egress.Policy{}, Plugins: installedPlugin(testdata(t, "installed-plugin.json"))}, c)
+}
+
+func refusal(err error) (string, bool) {
 	if invalid, ok := errors.AsType[*routing.ValidationError](err); ok {
 		return invalid.Field, true
+	}
+	if refused, ok := errors.AsType[*routing.Refusal](err); ok {
+		return refused.Code, true
 	}
 	return "", false
 }
 
-func TestValidateAndNormalizeCompletesAUsableConnection(t *testing.T) {
-	saved, err := validated(Configuration{
+func TestPrepareCompletesAUsableConnection(t *testing.T) {
+	prepared, err := prepare(t, Configuration{
 		Identity: identity{Kind: "openai", AuthMode: connectors.AuthHeaders},
 		Options: Options{
 			CredentialHeaders: []string{" x-tenant-key "},
@@ -53,6 +57,7 @@ func TestValidateAndNormalizeCompletesAUsableConnection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	saved := prepared.Document()
 	if want := connectors.DefaultEndpoint("openai", "", ""); saved.Endpoint == nil || *saved.Endpoint != want || want == "" {
 		t.Fatalf("endpoint %v, want the connector's default %q", saved.Endpoint, want)
 	}
@@ -64,13 +69,13 @@ func TestValidateAndNormalizeCompletesAUsableConnection(t *testing.T) {
 	}
 }
 
-func TestValidateAndNormalizeRefusesConnectionsThatCannotBeServedSafely(t *testing.T) {
+func TestPrepareRefusesConnectionsThatCannotBeServedSafely(t *testing.T) {
 	shares := &routing.Shares{Critical: 25, High: 25, Normal: 25, Low: 25}
 	cases := map[string]struct {
 		configuration Configuration
-		field         string
+		refused       string
 	}{
-		"an unknown connector kind":                         {Configuration{Identity: identity{Kind: "telepathy", AuthMode: connectors.AuthAPIKey, Endpoint: new("https://upstream.example")}}, ""},
+		"an unknown connector kind":                         {Configuration{Identity: identity{Kind: "telepathy", AuthMode: connectors.AuthAPIKey, Endpoint: new("https://upstream.example")}}, "provider_kind_unavailable"},
 		"caller credentials only the gateway could mint":    {Configuration{Identity: identity{Kind: "bedrock", AuthMode: "default_chain", CredentialSource: "caller", CloudRegion: new("us-east-1")}}, "configuration.credential_source"},
 		"an authentication mode the connector lacks":        {Configuration{Identity: identity{Kind: "openai", AuthMode: "default_chain"}}, "configuration.auth_mode"},
 		"no endpoint where the connector has no default":    {Configuration{Identity: identity{Kind: "azure_openai", AuthMode: connectors.AuthAPIKey, Deployment: new("gpt"), APIVersion: new("2024-10-21")}}, "configuration.endpoint"},
@@ -95,9 +100,9 @@ func TestValidateAndNormalizeRefusesConnectionsThatCannotBeServedSafely(t *testi
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, err := validated(c.configuration)
-			if field, refused := refusedField(err); !refused || field != c.field {
-				t.Fatalf("got %#v, want a refusal of %q", err, c.field)
+			_, err := prepare(t, c.configuration)
+			if refused, ok := refusal(err); !ok || refused != c.refused {
+				t.Fatalf("got %#v, want a refusal of %q", err, c.refused)
 			}
 		})
 	}
@@ -157,7 +162,7 @@ func golden(t *testing.T, name string) []byte {
 	return testdata(t, "configuration-"+name+".golden.json")
 }
 
-func storedBytes(t *testing.T, c Configuration) string {
+func storedBytes(t *testing.T, c any) string {
 	t.Helper()
 	encoded, err := json.Marshal(c)
 	if err != nil {
@@ -166,25 +171,21 @@ func storedBytes(t *testing.T, c Configuration) string {
 	return string(encoded) + "\n"
 }
 
-func readStored(t *testing.T, name string) Configuration {
+func readStored(t *testing.T, name string) Prepared {
 	t.Helper()
-	var stored Configuration
-	if err := json.Unmarshal(golden(t, name), &stored); err != nil {
-		t.Fatal(err)
-	}
-	stored.Normalize()
-	if err := stored.Pinned(testdata(t, "installed-plugin.json")); err != nil {
+	stored, err := Load(golden(t, name), testdata(t, "installed-plugin.json"))
+	if err != nil {
 		t.Fatal(err)
 	}
 	return stored
 }
 
-func TestPrepareConfigurationStoresTheGoldenBytes(t *testing.T) {
+func TestPrepareStoresTheGoldenBytes(t *testing.T) {
 	t.Parallel()
 	for name, input := range storedInputs() {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			prepared, err := validated(input)
+			prepared, err := prepare(t, input)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -195,7 +196,7 @@ func TestPrepareConfigurationStoresTheGoldenBytes(t *testing.T) {
 	}
 }
 
-func TestStoredConfigurationRevalidatesToTheSameBytes(t *testing.T) {
+func TestStoredConfigurationLoadsAndPreparesToTheSameBytes(t *testing.T) {
 	t.Parallel()
 	for _, name := range storedNames() {
 		t.Run(name, func(t *testing.T) {
@@ -209,11 +210,15 @@ func TestStoredConfigurationRevalidatesToTheSameBytes(t *testing.T) {
 				t.Fatalf("re-encoded\n%s\nwant\n%s", got, want)
 			}
 			stored := readStored(t, name)
-			if err := stored.ValidateAndNormalize(&egress.Policy{}); err != nil {
+			if got := storedBytes(t, stored); got != want {
+				t.Fatalf("loaded\n%s\nwant\n%s", got, want)
+			}
+			prepared, err := prepare(t, stored.Document())
+			if err != nil {
 				t.Fatal(err)
 			}
-			if got := storedBytes(t, stored); got != want {
-				t.Fatalf("revalidated\n%s\nwant\n%s", got, want)
+			if got := storedBytes(t, prepared); got != want {
+				t.Fatalf("prepared again\n%s\nwant\n%s", got, want)
 			}
 		})
 	}
