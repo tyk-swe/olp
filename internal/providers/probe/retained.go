@@ -1,10 +1,11 @@
-package providers
+package probe
 
 import (
 	"context"
 	"net/http"
 	"net/url"
 
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/retainedapi"
@@ -12,15 +13,16 @@ import (
 
 // certifyRetained proves a retained family with one authenticated,
 // read-only collection request, mirroring the agent-resource probe.
-func (s *Catalogue) certifyRetained(ctx context.Context, cfg probeTarget, credential []byte, model string, tuple connection.Capability) error {
-	if tuple.Operation == "retrieval" && cfg.Transport().RetrievalBackend() != "" {
-		return s.certifyRetrieval(ctx, cfg, credential, model)
+func (p *Prober) certifyRetained(ctx context.Context, t Target, model string, tuple connection.Capability) error {
+	if tuple.Operation == "retrieval" && t.Connection.Transport().RetrievalBackend() != "" {
+		return p.certifyRetrieval(ctx, t, model)
 	}
 	if tuple.Operation == "agent_resource" {
-		return s.certifyAgentResources(ctx, cfg, credential, model)
+		return p.certifyAgentResources(ctx, t, model)
 	}
 	path, collection, identity := "vector_stores", "data", "id"
 	query := url.Values{"limit": {"1"}}
+	var header http.Header
 	switch tuple.Operation {
 	case "fine_tuning":
 		if tuple.Surface == "native" {
@@ -33,7 +35,7 @@ func (s *Catalogue) certifyRetained(ctx context.Context, cfg probeTarget, creden
 		// Conversations have no collection endpoint in the pinned SDK
 		// or retained contract, so certification proves the credential
 		// and model through the supported model listing instead.
-		return s.certifyListedModel(ctx, cfg, credential, model)
+		return p.certifyListedModel(ctx, t, model)
 	case "container":
 		path = "containers"
 	case "eval":
@@ -41,45 +43,49 @@ func (s *Catalogue) certifyRetained(ctx context.Context, cfg probeTarget, creden
 	case "skill":
 		path = "skills"
 		query.Set("beta", "true")
+		if t.Connection.Document().Kind == connectors.KindAnthropic {
+			header = anthropicFilesBeta()
+		}
 	case "context_cache":
 		path, collection, identity = "cachedContents", "cachedContents", "name"
 		query = url.Values{"pageSize": {"1"}}
 	case "retrieval", "vector_store":
 		// Both operations read the same native store collection.
 	default:
-		return &probeError{Code: "capability_unavailable", Detail: "This connector cannot certify the requested tuple."}
+		return &Failure{Reason: CapabilityUnavailable, Detail: "This connector cannot certify the requested tuple."}
 	}
-	if !retainedapi.Supports(cfg.Document().Kind, tuple.Operation, tuple.Surface, tuple.Mode) {
-		return &probeError{Code: "capability_unavailable", Detail: "This connector cannot certify the requested tuple."}
+	if !retainedapi.Supports(t.Connection.Document().Kind, tuple.Operation, tuple.Surface, tuple.Mode) {
+		return &Failure{Reason: CapabilityUnavailable, Detail: "This connector cannot certify the requested tuple."}
 	}
-	endpoint, err := cfg.Transport().ResourceURL(model, path, query)
+	endpoint, err := t.Connection.Transport().ResourceURL(model, path, query)
 	if err != nil {
 		return err
 	}
-	status, body, err := s.call(ctx, cfg, credential, http.MethodGet, endpoint, nil)
+	resp, err := p.do(ctx, t, request{method: http.MethodGet, path: endpoint, header: header})
 	if err != nil {
 		return err
 	}
+	status, body := resp.status, resp.body
 	if status != http.StatusOK {
-		return statusError(cfg, status, body)
+		return statusError(t, status, body)
 	}
 	source, err := oif.ParseJSON(body, oif.Limits{MaxBytes: 1 << 20})
 	if err != nil || source.Root().Kind() != oif.Object {
-		return &probeError{Code: "provider_protocol_error", Detail: "The provider returned an invalid retained collection."}
+		return &Failure{Reason: ProviderProtocolError, Detail: "The provider returned an invalid retained collection."}
 	}
 	items, present := source.Root().Lookup(collection)
 	// Only Protobuf JSON (Gemini/Vertex) may omit an empty repeated
 	// field; OpenAI and Anthropic collections must carry their array.
 	if !present && (tuple.Surface == "openai" || tuple.Surface == "anthropic") {
-		return &probeError{Code: "provider_protocol_error", Detail: "The provider returned an invalid retained collection."}
+		return &Failure{Reason: ProviderProtocolError, Detail: "The provider returned an invalid retained collection."}
 	}
 	if present && items.Kind() != oif.Array {
-		return &probeError{Code: "provider_protocol_error", Detail: "The provider returned an invalid retained collection."}
+		return &Failure{Reason: ProviderProtocolError, Detail: "The provider returned an invalid retained collection."}
 	}
 	for _, item := range items.Elements() {
 		id, _ := item.Lookup(identity)
 		if value, ok := id.Text(); !ok || value == "" {
-			return &probeError{Code: "provider_protocol_error", Detail: "The provider returned a retained resource without an identity."}
+			return &Failure{Reason: ProviderProtocolError, Detail: "The provider returned a retained resource without an identity."}
 		}
 	}
 	return nil
@@ -87,32 +93,32 @@ func (s *Catalogue) certifyRetained(ctx context.Context, cfg probeTarget, creden
 
 // Certification reads the native collection; it never creates a billable
 // resource or infers support from a generic 404 response.
-func (s *Catalogue) certifyAgentResources(ctx context.Context, cfg probeTarget, credential []byte, model string) error {
-	endpoint, err := cfg.Transport().ResourceURL(model, "agents", url.Values{"page_size": {"1"}})
+func (p *Prober) certifyAgentResources(ctx context.Context, t Target, model string) error {
+	endpoint, err := t.Connection.Transport().ResourceURL(model, "agents", url.Values{"page_size": {"1"}})
 	if err != nil {
 		return err
 	}
-	status, body, err := s.call(ctx, cfg, credential, http.MethodGet, endpoint, nil)
+	status, body, err := p.call(ctx, t, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return err
 	}
 	if status != http.StatusOK {
-		return statusError(cfg, status, body)
+		return statusError(t, status, body)
 	}
 	source, err := oif.ParseJSON(body, oif.Limits{MaxBytes: 1 << 20})
 	if err != nil {
-		return &probeError{Code: "provider_protocol_error", Detail: "The provider returned an invalid agent collection."}
+		return &Failure{Reason: ProviderProtocolError, Detail: "The provider returned an invalid agent collection."}
 	}
 	items, present := source.Root().Lookup("agents")
 	// Protobuf JSON can omit an empty repeated field.
 	if source.Root().Kind() != oif.Object || present && items.Kind() != oif.Array {
-		return &probeError{Code: "provider_protocol_error", Detail: "The provider returned an invalid agent collection."}
+		return &Failure{Reason: ProviderProtocolError, Detail: "The provider returned an invalid agent collection."}
 	}
 	for _, item := range items.Elements() {
 		id, _ := item.Lookup("id")
 		value, ok := id.Text()
 		if !ok || value == "" {
-			return &probeError{Code: "provider_protocol_error", Detail: "The provider returned an agent without an identity."}
+			return &Failure{Reason: ProviderProtocolError, Detail: "The provider returned an agent without an identity."}
 		}
 	}
 	return nil

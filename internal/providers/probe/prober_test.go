@@ -1,4 +1,4 @@
-package providers
+package probe
 
 import (
 	"bytes"
@@ -21,11 +21,11 @@ import (
 
 var loopback = egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
 
-func probeCatalogue(policy egress.Policy) *Catalogue {
-	return NewCatalogue(nil, &policy, nil, func(string) string { return "" }, CatalogueOptions{})
+func prober(policy egress.Policy) *Prober {
+	return New(&policy, nil, nil, nil)
 }
 
-func upstreamConnection(t *testing.T, kind, endpoint string) probeTarget {
+func upstreamConnection(t *testing.T, kind, endpoint string) Target {
 	t.Helper()
 	stored, err := json.Marshal(connection.Configuration{Identity: providerconfig.Identity[*string]{Kind: kind, AuthMode: connectors.AuthAPIKey, Endpoint: new(endpoint)}})
 	if err != nil {
@@ -35,7 +35,7 @@ func upstreamConnection(t *testing.T, kind, endpoint string) probeTarget {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return probeTarget{Prepared: prepared}
+	return Target{Connection: prepared, Credential: []byte("sk-test")}
 }
 
 func answer(status int, body string) http.HandlerFunc {
@@ -50,9 +50,9 @@ func probeCode(t *testing.T, ctx context.Context, policy egress.Policy, handler 
 	upstream := httptest.NewServer(handler)
 	t.Cleanup(upstream.Close)
 	connection := upstreamConnection(t, connectors.KindOpenAI, upstream.URL)
-	models, err := probeCatalogue(policy).listModelFacts(ctx, connection, []byte("sk-test"))
+	models, err := prober(policy).ListModelFacts(ctx, connection)
 	if err != nil {
-		return classify(err).Code
+		return string(Classify(err).Reason)
 	}
 	t.Fatalf("probe succeeded with %d models", len(models))
 	return ""
@@ -73,7 +73,7 @@ func TestModelProbeRecordsUpstreamFailuresAsProbeCodes(t *testing.T) {
 		"unavailable":                   {loopback, answer(http.StatusServiceUnavailable, ""), "upstream_unavailable"},
 		"other rejection":               {loopback, answer(http.StatusBadRequest, ""), "upstream_rejected"},
 		"listing without models":        {loopback, answer(http.StatusOK, `{}`), "provider_protocol_error"},
-		"oversized body":                {loopback, answer(http.StatusOK, string(bytes.Repeat([]byte(" "), probeBodyLimit+1))), "upstream_response_too_large"},
+		"oversized body":                {loopback, answer(http.StatusOK, string(bytes.Repeat([]byte(" "), BodyLimit+1))), "upstream_response_too_large"},
 		"redirect":                      {loopback, func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/v2/models", http.StatusFound) }, "upstream_redirect"},
 		"plain http outside the policy": {egress.Policy{}, answer(http.StatusOK, `{"data":[]}`), "invalid_endpoint"},
 	}
@@ -99,7 +99,7 @@ func TestModelProbeRecordsAnUnansweredUpstreamAsTimeout(t *testing.T) {
 
 type listedModel struct{ Name, Display string }
 
-func listedModels(models []discoveredModel) []listedModel {
+func listedModels(models []DiscoveredModel) []listedModel {
 	listed := make([]listedModel, len(models))
 	for i, model := range models {
 		listed[i] = listedModel{Name: model.Name, Display: model.Display}
@@ -112,8 +112,8 @@ func TestModelProbeRefusesAHostThatResolvesToABlockedAddress(t *testing.T) {
 	upstream := httptest.NewServer(answer(http.StatusOK, `{"data":[]}`))
 	t.Cleanup(upstream.Close)
 	connection := upstreamConnection(t, connectors.KindOpenAI, strings.Replace(upstream.URL, "127.0.0.1", "localhost", 1))
-	_, err := probeCatalogue(egress.Policy{PlainHTTPHosts: []string{"localhost"}}).listModelFacts(t.Context(), connection, []byte("sk-test"))
-	if err == nil || classify(err).Code != "unsafe_destination" {
+	_, err := prober(egress.Policy{PlainHTTPHosts: []string{"localhost"}}).ListModelFacts(t.Context(), connection)
+	if err == nil || Classify(err).Reason != "unsafe_destination" {
 		t.Fatalf("listing error %v, want unsafe_destination", err)
 	}
 }
@@ -147,9 +147,9 @@ func TestModelDiscoveryFollowsPagesToTheEnd(t *testing.T) {
 			}))
 			t.Cleanup(upstream.Close)
 			connection := upstreamConnection(t, c.kind, upstream.URL)
-			models, err := probeCatalogue(loopback).listModelFacts(t.Context(), connection, []byte("sk-test"))
+			models, err := prober(loopback).ListModelFacts(t.Context(), connection)
 			if err != nil {
-				t.Fatal(classify(err))
+				t.Fatal(Classify(err))
 			}
 			if got := listedModels(models); !slices.Equal(got, c.want) {
 				t.Fatalf("listed %+v, want %+v", got, c.want)
@@ -170,8 +170,8 @@ func TestModelDiscoveryRefusesAContinuationItCannotFollow(t *testing.T) {
 			upstream := httptest.NewServer(answer(http.StatusOK, page))
 			t.Cleanup(upstream.Close)
 			connection := upstreamConnection(t, connectors.KindAnthropic, upstream.URL)
-			_, err := probeCatalogue(loopback).listModelFacts(t.Context(), connection, []byte("sk-test"))
-			if err == nil || classify(err).Code != "provider_protocol_error" {
+			_, err := prober(loopback).ListModelFacts(t.Context(), connection)
+			if err == nil || Classify(err).Reason != "provider_protocol_error" {
 				t.Fatalf("listing error %v, want provider_protocol_error", err)
 			}
 		})

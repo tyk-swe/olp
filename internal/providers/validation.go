@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/providers/connection"
+	"github.com/tyk-swe/olp/internal/providers/probe"
 )
 
 func (row *slotRow) allowsModel(model storedModel) bool {
@@ -76,8 +77,8 @@ func (row *slotRow) certificationTime(cfg connection.Configuration, models []sto
 	return at
 }
 
-func (s *Catalogue) validateModelAccess(ctx context.Context, cfg probeTarget, credential []byte, row *slotRow, models []storedModel) error {
-	ctx, cancel := probeBudget(ctx)
+func (s *Catalogue) validateModelAccess(ctx context.Context, target probe.Target, row *slotRow, models []storedModel) error {
+	ctx, cancel := probe.Budget(ctx)
 	defer cancel()
 	checked := 0
 	for _, model := range models {
@@ -85,17 +86,17 @@ func (s *Catalogue) validateModelAccess(ctx context.Context, cfg probeTarget, cr
 			continue
 		}
 		if len(model.Capabilities) == 0 {
-			return &probeError{Code: "no_capabilities", Detail: "Declare capabilities for the slot's enabled models before validating."}
+			return &probe.Failure{Reason: probe.NoCapabilities, Detail: "Declare capabilities for the slot's enabled models before validating."}
 		}
 		for _, capability := range model.Capabilities {
-			if err := s.certifyTuple(ctx, cfg, credential, model.UpstreamModel, capability.Capability, probeBodyLimit); err != nil {
+			if err := s.prober.Certify(ctx, target, model.UpstreamModel, capability.Capability, probe.BodyLimit); err != nil {
 				return err
 			}
 			checked++
 		}
 	}
 	if checked == 0 {
-		return &probeError{Code: "no_enabled_models", Detail: "Select allowed enabled models before validating this credential."}
+		return &probe.Failure{Reason: probe.NoEnabledModels, Detail: "Select allowed enabled models before validating this credential."}
 	}
 	return nil
 }

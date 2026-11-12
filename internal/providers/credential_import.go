@@ -79,7 +79,7 @@ func (s *Server) importCredentials(r *http.Request, p access.Principal, adapter 
 	if err != nil {
 		return access.Reply{}, err
 	}
-	client, err := s.connectionClient(r.Context(), current.target(), nil)
+	client, err := s.prober.Client(r.Context(), current.target(nil))
 	if err != nil {
 		return access.Reply{}, err
 	}

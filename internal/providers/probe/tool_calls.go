@@ -1,4 +1,4 @@
-package providers
+package probe
 
 import (
 	"bytes"
@@ -14,33 +14,33 @@ import (
 	"github.com/tyk-swe/olp/internal/providerinvoke"
 )
 
-func (s *Catalogue) certifyToolCalls(ctx context.Context, cfg probeTarget, credential []byte, model string, stream bool) error {
-	transport := cfg.Transport()
+func (p *Prober) CertifyToolCalls(ctx context.Context, t Target, model string, stream bool) error {
+	transport := t.Connection.Transport()
 	parsed, err := toolCallProbeRequest(transport, stream)
 	if err != nil {
 		return err
 	}
-	invocation, err := providerinvoke.Prepare(parsed, transport, model, cfg.Document().Options.ParameterDefaults)
+	invocation, err := providerinvoke.Prepare(parsed, transport, model, t.Connection.Document().Options.ParameterDefaults)
 	if err != nil {
 		return err
 	}
 	if transport.ForcesStreaming() && !stream {
-		return &probeError{Code: "capability_unavailable", Detail: "A unary tool-call probe is unavailable."}
+		return &Failure{Reason: CapabilityUnavailable, Detail: "A unary tool-call probe is unavailable."}
 	}
 	endpoint, err := transport.URL(invocation.Wire, model, stream)
 	if err != nil {
 		return err
 	}
-	status, body, err := s.call(ctx, cfg, credential, http.MethodPost, endpoint, transport.WrapRequest(invocation.Prepared.Document().Bytes(), model))
+	status, body, err := p.call(ctx, t, http.MethodPost, endpoint, transport.WrapRequest(invocation.Prepared.Document().Bytes(), model))
 	if err != nil {
 		return err
 	}
 	if status != http.StatusOK {
-		return statusError(cfg, status, body)
+		return statusError(t, status, body)
 	}
 	completion, err := toolCallProbeCompletion(body, stream, invocation, transport, parsed)
 	if err != nil || completion == nil || len(completion.ToolCalls) != 1 || completion.ToolCalls[0].Name != "olp_certification_probe" || completion.ToolCalls[0].ID == "" || !json.Valid([]byte(completion.ToolCalls[0].Arguments)) {
-		return &probeError{Code: "provider_protocol_error", Detail: "The upstream did not emit a valid requested tool call."}
+		return &Failure{Reason: ProviderProtocolError, Detail: "The upstream did not emit a valid requested tool call."}
 	}
 	return nil
 }
@@ -65,15 +65,15 @@ func toolCallProbeCompletion(body []byte, stream bool, invocation providerinvoke
 		return protocols.DecodeRequest(invocation.Wire, parsed.Family, transport.UnwrapResponse(body), "certification", "", parsed)
 	}
 	if parsed.Family == wire.Responses {
-		completion, err := openai.Aggregate(wire.Responses, transport.StreamPayload(bytes.NewReader(body), probeBodyLimit), probeBodyLimit, probeBodyLimit)
+		completion, err := openai.Aggregate(wire.Responses, transport.StreamPayload(bytes.NewReader(body), BodyLimit), BodyLimit, BodyLimit)
 		if err != nil {
 			return nil, err
 		}
 		return openai.DecodeResponse(completion.Body, "certification")
 	}
 	var frames bytes.Buffer
-	_, err := protocols.Stream(invocation.Wire, wire.Chat, transport.StreamPayload(bytes.NewReader(body), probeBodyLimit), probeBodyLimit, "certification", true, func(frame []byte) error {
-		if frames.Len()+len(frame) > probeBodyLimit {
+	_, err := protocols.Stream(invocation.Wire, wire.Chat, transport.StreamPayload(bytes.NewReader(body), BodyLimit), BodyLimit, "certification", true, func(frame []byte) error {
+		if frames.Len()+len(frame) > BodyLimit {
 			return wire.ErrEventTooLarge
 		}
 		_, writeErr := frames.Write(frame)
@@ -82,5 +82,5 @@ func toolCallProbeCompletion(body []byte, stream bool, invocation providerinvoke
 	if err != nil {
 		return nil, err
 	}
-	return openai.Stream(wire.Chat, bytes.NewReader(frames.Bytes()), probeBodyLimit, "certification", true, func([]byte) error { return nil })
+	return openai.Stream(wire.Chat, bytes.NewReader(frames.Bytes()), BodyLimit, "certification", true, func([]byte) error { return nil })
 }

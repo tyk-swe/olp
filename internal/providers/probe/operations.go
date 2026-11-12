@@ -1,4 +1,4 @@
-package providers
+package probe
 
 import (
 	"context"
@@ -9,7 +9,6 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/duplexcontract"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operationregistry"
@@ -38,7 +37,7 @@ func configuredOperation(transport connectors.Config, operation string) (operati
 	codec, ok := operationregistry.Lookup(profile.OperationDialect(operation))
 	return codec, ok && codec.Operation.ID == operation
 }
-func configurationCertifiable(transport connectors.Config, tuple connection.Capability) bool {
+func ConfigurationCertifiable(transport connectors.Config, tuple connection.Capability) bool {
 	if retainedapi.Operation(tuple.Operation) {
 		return transport.Supports(tuple.Operation, tuple.Surface, tuple.Mode)
 	}
@@ -61,22 +60,22 @@ func configurationCertifiable(transport connectors.Config, tuple connection.Capa
 	return certifiable(transport.Kind, transport.VendorID, tuple)
 }
 
-// defaultProbeTuple is the unary tuple a provider without model discovery
+// DefaultTuple is the unary tuple a provider without model discovery
 // certifies its declared models with. An explicit profile that cannot serve
 // the default tuple, such as a dedicated embeddings or rerank dialect, is
 // probed with the first unary tuple it can certify.
-func defaultProbeTuple(transport connectors.Config) connection.Capability {
+func DefaultTuple(transport connectors.Config) connection.Capability {
 	if duplexcontract.IsProfile(transport.ProfileID) {
-		if tuple := (connection.Capability{Operation: "realtime", Surface: "native", Mode: "realtime"}); probeable(transport, tuple) {
+		if tuple := (connection.Capability{Operation: "realtime", Surface: "native", Mode: "realtime"}); Probeable(transport, tuple) {
 			return tuple
 		}
 	}
-	operation := probeOperation(transport)
+	operation := Operation(transport)
 	if transport.Kind == connectors.KindVertexAI && transport.Hosting() != "vertex-anthropic" {
 		operation = "token_count"
 	}
 	tuple := connection.Capability{Operation: operation, Surface: "openai", Mode: "unary"}
-	if transport.ProfileID == "" || probeable(transport, tuple) {
+	if transport.ProfileID == "" || Probeable(transport, tuple) {
 		return tuple
 	}
 	profile, err := transport.Profile()
@@ -85,7 +84,7 @@ func defaultProbeTuple(transport connectors.Config) connection.Capability {
 	}
 	for _, op := range profile.Operations {
 		for _, surface := range []string{"openai", "native", "anthropic", "gemini", "bedrock"} {
-			if candidate := (connection.Capability{Operation: op, Surface: surface, Mode: "unary"}); probeable(transport, candidate) {
+			if candidate := (connection.Capability{Operation: op, Surface: surface, Mode: "unary"}); Probeable(transport, candidate) {
 				return candidate
 			}
 		}
@@ -93,60 +92,61 @@ func defaultProbeTuple(transport connectors.Config) connection.Capability {
 	return tuple
 }
 
-// probeOperation is the operation that certifies a declared model of the
+// Operation is the operation that certifies a declared model of the
 // configured vendor: the one its contract names, or generation.
-func probeOperation(transport connectors.Config) string {
+func Operation(transport connectors.Config) string {
 	if contract, ok := vendors.Lookup(transport.VendorID); ok && contract.ProbeOperation != "" {
 		return contract.ProbeOperation
 	}
 	return "generation"
 }
 
-func probeable(transport connectors.Config, tuple connection.Capability) bool {
-	return configurationCertifiable(transport, tuple) && transport.Supports(tuple.Operation, tuple.Surface, tuple.Mode)
+func Probeable(transport connectors.Config, tuple connection.Capability) bool {
+	return ConfigurationCertifiable(transport, tuple) && transport.Supports(tuple.Operation, tuple.Surface, tuple.Mode)
 }
 
-func (s *Catalogue) certifyOperation(ctx context.Context, cfg probeTarget, credential []byte, model string, tuple connection.Capability, codec operations.Dialect) error {
-	template, err := operationplan.Compile(operationplan.Config{Provider: cfg.Transport(), Model: model, Operation: tuple.Operation})
+func (p *Prober) certifyOperation(ctx context.Context, t Target, model string, tuple connection.Capability, codec operations.Dialect) error {
+	template, err := operationplan.Compile(operationplan.Config{Provider: t.Connection.Transport(), Model: model, Operation: tuple.Operation})
 	if err != nil {
-		return &probeError{Code: "capability_unavailable", Detail: "The native operation contract could not be compiled."}
+		return &Failure{Reason: CapabilityUnavailable, Detail: "The native operation contract could not be compiled."}
 	}
 	// Certification invokes the target's native probe and validates its full
 	// response. It does not certify every cross-dialect request or client contract.
 	source, err := operationplan.Parse(codec.Identity.ID, codec.Probe("certification"), 1<<20)
 	if err != nil {
-		return &probeError{Code: "capability_unavailable", Detail: "The native operation probe is invalid."}
+		return &Failure{Reason: CapabilityUnavailable, Detail: "The native operation probe is invalid."}
 	}
 	plan, err := template.Bind(source, operationplan.Context{Route: "certification", ClientContract: operations.RawVectorClient})
 	if err != nil {
-		return &probeError{Code: "capability_unavailable", Detail: "The native operation probe cannot bind its configured defaults."}
+		return &Failure{Reason: CapabilityUnavailable, Detail: "The native operation probe cannot bind its configured defaults."}
 	}
 	submit, err := plan.RequestURL()
 	if err != nil {
-		return &probeError{Code: "capability_unavailable", Detail: "The native operation probe could not be addressed."}
+		return &Failure{Reason: CapabilityUnavailable, Detail: "The native operation probe could not be addressed."}
 	}
-	status, header, raw, err := s.callWithHeaders(ctx, cfg, credential, plan.Method(), submit, plan.WireBody())
+	resp, err := p.do(ctx, t, request{method: plan.Method(), path: submit, body: plan.WireBody()})
 	if err != nil {
 		return err
 	}
+	status, header, raw := resp.status, resp.header, resp.body
 	if plan.Transport() == operations.TransportPoll202 && status == http.StatusAccepted {
-		raw, err = s.pollOperation(ctx, cfg, credential, plan, submit, header)
+		raw, err = p.pollOperation(ctx, t, plan, submit, header)
 		if err != nil {
 			return err
 		}
 	} else if status != http.StatusOK {
-		return statusError(cfg, status, raw)
+		return statusError(t, status, raw)
 	}
 	if _, err := plan.Decode(raw); err != nil {
-		return &probeError{Code: "provider_protocol_error", Detail: "The upstream violated its native operation result contract."}
+		return &Failure{Reason: ProviderProtocolError, Detail: "The upstream violated its native operation result contract."}
 	}
 	return nil
 }
 
-func (s *Catalogue) pollOperation(ctx context.Context, cfg probeTarget, credential []byte, plan *operationplan.Plan, submit string, header http.Header) ([]byte, error) {
+func (p *Prober) pollOperation(ctx context.Context, t Target, plan *operationplan.Plan, submit string, header http.Header) ([]byte, error) {
 	location, err := plan.PollLocation(submit, header)
 	if err != nil {
-		return nil, &probeError{Code: "provider_protocol_error", Detail: "The upstream polling location is invalid."}
+		return nil, &Failure{Reason: ProviderProtocolError, Detail: "The upstream polling location is invalid."}
 	}
 	waitHeader := header
 	for polls := 0; polls < maxProbePolls; polls++ {
@@ -160,61 +160,54 @@ func (s *Catalogue) pollOperation(ctx context.Context, cfg probeTarget, credenti
 			case <-timer.C:
 			case <-ctx.Done():
 				timer.Stop()
-				s.cancelOperationPoll(cfg, credential, plan, location)
-				return nil, classify(ctx.Err())
+				p.cancelOperationPoll(ctx, t, plan, location)
+				return nil, Classify(ctx.Err())
 			}
 		}
-		status, pollHeader, raw, err := s.callWithHeaders(ctx, cfg, credential, http.MethodGet, location, nil)
+		resp, err := p.do(ctx, t, request{method: http.MethodGet, path: location})
 		if err != nil {
 			if ctx.Err() != nil {
-				s.cancelOperationPoll(cfg, credential, plan, location)
+				p.cancelOperationPoll(ctx, t, plan, location)
 			}
 			return nil, err
 		}
-		waitHeader = pollHeader
+		status, raw := resp.status, resp.body
+		waitHeader = resp.header
 		switch {
 		case status == http.StatusOK:
 			state, stateErr := plan.PollState(raw)
 			if stateErr != nil {
-				return nil, &probeError{Code: "provider_protocol_error", Detail: "The upstream violated its native operation result contract."}
+				return nil, &Failure{Reason: ProviderProtocolError, Detail: "The upstream violated its native operation result contract."}
 			}
 			if state == operations.PollSucceeded {
 				return raw, nil
 			}
 			if state == operations.PollFailed {
-				return nil, &probeError{Code: "upstream_rejected", Detail: "The upstream operation failed."}
+				return nil, &Failure{Reason: UpstreamRejected, Detail: "The upstream operation failed."}
 			}
 		case status == http.StatusTooManyRequests || status >= 500:
 			continue
 		default:
-			return nil, statusError(cfg, status, raw)
+			return nil, statusError(t, status, raw)
 		}
 	}
-	s.cancelOperationPoll(cfg, credential, plan, location)
-	return nil, &probeError{Code: "gateway_timeout", Detail: "The upstream operation did not finish within the probe deadline."}
+	p.cancelOperationPoll(ctx, t, plan, location)
+	return nil, &Failure{Reason: GatewayTimeout, Detail: "The upstream operation did not finish within the probe deadline."}
 }
 
-func (s *Catalogue) cancelOperationPoll(cfg probeTarget, credential []byte, plan *operationplan.Plan, location string) {
+func (p *Prober) cancelOperationPoll(ctx context.Context, t Target, plan *operationplan.Plan, location string) {
 	method, target, ok := plan.CancelPoll(location)
 	if !ok || method == "" || target == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), probeCancelWait)
+	cancelCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), probeCancelWait)
 	defer cancel()
-	_, _, _ = s.call(ctx, cfg, credential, method, target, nil)
-}
-
-func (s *Server) operationDialects(r *http.Request, _ access.Principal) (access.Reply, error) {
-	items := []map[string]any{}
-	for _, d := range operationregistry.Catalog().Dialects() {
-		items = append(items, map[string]any{"id": d.Identity.ID, "revision": d.Identity.Revision, "operation": d.Operation.ID, "operation_revision": d.Operation.Revision, "surface": d.Surface, "mode": "unary", "label": d.Label, "request_schema": d.RequestSchema, "result_schema": d.ResultSchema, "documentation": d.Documentation, "evidence": d.Evidence})
-	}
-	return access.OK(map[string]any{"items": items}), nil
+	_, _, _ = p.call(cancelCtx, t, method, target, nil)
 }
 
 // Kind options include tuples available through an explicit profile, even
 // when the kind's Automatic connector cannot serve them.
-func capabilityOptionsForKind(kind string) []connection.Capability {
+func OptionsForKind(kind string) []connection.Capability {
 	var profiles []connectors.Config
 	for _, profile := range connectors.Profiles() {
 		if profile.Kind == kind {
@@ -225,7 +218,7 @@ func capabilityOptionsForKind(kind string) []connection.Capability {
 	out := []connection.Capability{}
 	for _, tuple := range connection.Vocabulary() {
 		profiled := slices.ContainsFunc(profiles, func(transport connectors.Config) bool {
-			return probeable(transport, tuple)
+			return Probeable(transport, tuple)
 		})
 		if certifiable(kind, vendors.DefaultFor(kind), tuple) || profiled {
 			out = append(out, tuple)

@@ -6,7 +6,6 @@ package providers
 import (
 	"context"
 	"log/slog"
-	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -18,6 +17,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/providers/connection"
+	"github.com/tyk-swe/olp/internal/providers/probe"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/secretstore"
 )
@@ -52,10 +52,7 @@ type Catalogue struct {
 	Catalog         *catalog.Signed
 	Activated       func(context.Context, pgx.Tx, string, string) error
 	Log             *slog.Logger
-	client          *http.Client
-	connections     *egress.ConnectionClientCache
-	auth            *connectors.Auth
-	probes          chan struct{}
+	prober          *probe.Prober
 }
 
 type Server struct {
@@ -64,15 +61,13 @@ type Server struct {
 }
 
 func NewCatalogue(a *access.Server, policy *egress.Policy, signer connectors.Signer, getenv func(string) string, options CatalogueOptions) *Catalogue {
-	auth := connectors.NewAuth(policy)
-	auth.Signer = signer
 	external := options.ExternalSecrets
 	if external == nil {
 		external = secretstore.New(*policy, getenv)
 	}
 	return &Catalogue{Access: a, Egress: policy, ExternalSecrets: external, Unconfined: options.Unconfined, Quotas: options.Quotas,
 		Plugins: options.Plugins, Catalog: options.Catalog, Activated: options.Activated, Log: options.Log,
-		connections: egress.NewConnectionClientCache(128), client: policy.Client(probeTimeout), auth: auth, probes: make(chan struct{}, 4)}
+		prober: probe.New(policy, signer, options.Plugins, networkSecrets{server: a})}
 }
 
 func New(catalogue *Catalogue) *Server {
@@ -240,6 +235,6 @@ func (s *Server) detailReply(ctx context.Context, q access.Queryer, id string) (
 	return access.Detail(d, d.ETag), nil
 }
 
-func (p *record) target(probeModels ...string) probeTarget {
-	return probeTarget{Prepared: p.Connection, providerID: p.ID, probeModels: probeModels}
+func (p *record) target(credential []byte, probeModels ...string) probe.Target {
+	return probe.Target{ProviderID: p.ID, Connection: p.Connection, Credential: credential, ProbeModels: probeModels}
 }

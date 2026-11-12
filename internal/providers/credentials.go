@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/providers/connection"
+	"github.com/tyk-swe/olp/internal/providers/probe"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/jackc/pgx/v5"
@@ -142,7 +143,6 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 	for i, model := range models {
 		declared[i] = model.UpstreamModel
 	}
-	target := current.target(declared...)
 	credential := []byte(input.Credential)
 	if input.CredentialReference != nil {
 		credential, err = s.resolveReference(r.Context(), *input.CredentialReference)
@@ -151,13 +151,14 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 		}
 	}
 	defer clear(credential)
-	if _, err = s.listModels(r.Context(), target, credential); err != nil {
-		return access.Reply{}, access.Fail(422, "credential_invalid", "The new credential was not accepted by the upstream: "+classify(err).Detail)
+	target := current.target(credential, declared...)
+	if _, err = s.prober.ListModels(r.Context(), target); err != nil {
+		return access.Reply{}, access.Fail(422, "credential_invalid", "The new credential was not accepted by the upstream: "+probe.Classify(err).Detail)
 	}
 	var validatedAt *time.Time
 	if defaultSlot.validationFingerprint(current.Connection.Document(), models) != "" {
-		if err = s.validateModelAccess(r.Context(), target, credential, &defaultSlot, models); err != nil {
-			return access.Reply{}, access.Fail(422, "credential_invalid", "The new credential cannot access the enabled models: "+classify(err).Detail)
+		if err = s.validateModelAccess(r.Context(), target, &defaultSlot, models); err != nil {
+			return access.Reply{}, access.Fail(422, "credential_invalid", "The new credential cannot access the enabled models: "+probe.Classify(err).Detail)
 		}
 		validatedAt = new(time.Now().UTC())
 	}
@@ -578,7 +579,7 @@ func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply
 		}
 		defer clear(credential)
 	}
-	probeErr := s.validateModelAccess(r.Context(), current.target(), credential, slot, models)
+	probeErr := s.validateModelAccess(r.Context(), current.target(credential), slot, models)
 	// Probes run without mutation locks. Only save evidence if its complete
 	// input (credential, transport, restrictions, and models) is still current.
 	tx, p, err = a.BeginMutation(r)
@@ -611,7 +612,7 @@ func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply
 		s.clearValidatedCooldowns(r.Context(), id, *slot)
 	}
 	if err == nil && probeErr != nil {
-		err = access.Fail(422, "slot_validation_failed", classify(probeErr).Detail)
+		err = access.Fail(422, "slot_validation_failed", probe.Classify(probeErr).Detail)
 	}
 	return result, err
 }

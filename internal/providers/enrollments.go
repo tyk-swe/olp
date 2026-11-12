@@ -66,7 +66,7 @@ func (s *Enrollments) Start(ctx context.Context, authority EnrollmentAuthority, 
 	if err != nil {
 		return grants.Enrollment{}, err
 	}
-	client, err := c.connectionClient(ctx, current.target(), nil)
+	client, err := c.prober.Client(ctx, current.target(nil))
 	if err != nil {
 		return grants.Enrollment{}, err
 	}
@@ -140,7 +140,7 @@ func (s *Enrollments) Continue(ctx context.Context, authority EnrollmentAuthorit
 }
 
 func (s *Enrollments) exchange(ctx context.Context, authority EnrollmentAuthority, current *record, enrollment grants.Enrollment, input string) (EnrollmentCompletion, error) {
-	client, err := s.catalogue.connectionClient(ctx, current.target(), nil)
+	client, err := s.catalogue.prober.Client(ctx, current.target(nil))
 	if err != nil {
 		return EnrollmentCompletion{}, err
 	}
@@ -271,7 +271,7 @@ func (s *Enrollments) Poll(ctx context.Context, authority EnrollmentAuthority, p
 }
 
 func (s *Enrollments) poll(ctx context.Context, authority EnrollmentAuthority, current *record, enrollment grants.Enrollment) (EnrollmentCompletion, error) {
-	client, err := s.catalogue.connectionClient(ctx, current.target(), nil)
+	client, err := s.catalogue.prober.Client(ctx, current.target(nil))
 	if err != nil {
 		return EnrollmentCompletion{}, err
 	}

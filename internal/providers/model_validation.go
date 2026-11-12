@@ -13,6 +13,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/providers/connection"
+	"github.com/tyk-swe/olp/internal/providers/probe"
 )
 
 func modelJSON(m storedModel) map[string]any {
@@ -39,35 +40,35 @@ func ValidModelName(field, value string) error {
 // lock: the provider, its etag precondition, and the enabled probe credential.
 // The caller's project scope is decided first, so a provider outside it answers
 // 404 before its precondition or credential is consulted.
-func (s *Server) prepare(r *http.Request, p access.Principal, id string) (*record, probeTarget, []byte, error) {
+func (s *Server) prepare(r *http.Request, p access.Principal, id string) (*record, probe.Target, error) {
 	tx, err := s.Access.Pool.Begin(r.Context())
 	if err != nil {
-		return nil, probeTarget{}, nil, err
+		return nil, probe.Target{}, err
 	}
 	defer tx.Rollback(r.Context())
 	current, err := load(r.Context(), tx, id, false)
 	if err != nil {
-		return nil, probeTarget{}, nil, err
+		return nil, probe.Target{}, err
 	}
 	if err = p.Project(current.ProjectID, access.Change); err != nil {
-		return nil, probeTarget{}, nil, err
+		return nil, probe.Target{}, err
 	}
 	if err = access.Match(r, current.ETag); err != nil {
-		return nil, probeTarget{}, nil, err
+		return nil, probe.Target{}, err
 	}
 	credential, _, err := s.credentialFor(r.Context(), tx, current)
 	if err != nil {
-		return nil, probeTarget{}, nil, err
+		return nil, probe.Target{}, err
 	}
 	rows, err := tx.Query(r.Context(), "SELECT upstream_model FROM olp.provider_models WHERE provider_id=$1 ORDER BY enabled DESC,upstream_model LIMIT 2000", id)
 	if err != nil {
-		return nil, probeTarget{}, nil, err
+		return nil, probe.Target{}, err
 	}
 	models, err := pgx.CollectRows(rows, pgx.RowTo[string])
 	if err != nil {
-		return nil, probeTarget{}, nil, err
+		return nil, probe.Target{}, err
 	}
-	return current, current.target(models...), credential, nil
+	return current, current.target(credential, models...), nil
 }
 
 func (s *Server) probe(r *http.Request, p access.Principal) (access.Reply, error) {
@@ -75,19 +76,19 @@ func (s *Server) probe(r *http.Request, p access.Principal) (access.Reply, error
 	if err != nil {
 		return access.Reply{}, err
 	}
-	current, target, credential, err := s.prepare(r, p, id)
+	current, target, err := s.prepare(r, p, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	at := time.Now().UTC()
-	models, err := s.listModelFacts(r.Context(), target, credential)
+	models, err := s.prober.ListModelFacts(r.Context(), target)
 	var discovered any
 	succeeded, detail := err == nil, ""
 	if succeeded {
 		discovered = len(models)
 		detail = fmt.Sprintf("Reached the upstream; %d models listed.", len(models))
 	} else {
-		detail = classify(err).Detail
+		detail = probe.Classify(err).Detail
 	}
 	if err = s.recordProbe(r, "provider.probe", id, at, succeeded, detail); err != nil {
 		return access.Reply{}, err
@@ -156,7 +157,7 @@ func (s *Server) discover(r *http.Request, p access.Principal) (access.Reply, er
 	if len(input.Models) > 2000 {
 		return access.Reply{}, access.Invalid("models", "Declare at most 2000 models per request.")
 	}
-	var models []discoveredModel
+	var models []probe.DiscoveredModel
 	seen := map[string]bool{}
 	for _, m := range input.Models {
 		if err = ValidModelName("models.upstream_model", m.UpstreamModel); err != nil {
@@ -170,27 +171,25 @@ func (s *Server) discover(r *http.Request, p access.Principal) (access.Reply, er
 		}
 		if !seen[m.UpstreamModel] {
 			seen[m.UpstreamModel] = true
-			models = append(models, discoveredModel{m.UpstreamModel, m.DisplayName, nil})
+			models = append(models, probe.DiscoveredModel{Name: m.UpstreamModel, Display: m.DisplayName})
 		}
 	}
-	current, target, credential, err := s.prepare(r, p, id)
+	current, target, err := s.prepare(r, p, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	upstream := len(models) == 0
 	at := time.Now().UTC()
 	if upstream {
-		listed, err := s.listModelFacts(r.Context(), target, credential)
+		listed, err := s.prober.ListModelFacts(r.Context(), target)
 		if err != nil {
-			pe := classify(err)
+			pe := probe.Classify(err)
 			if err := s.recordProbe(r, "provider.discover", id, at, false, pe.Detail); err != nil {
 				return access.Reply{}, err
 			}
 			return access.Reply{}, access.Fail(422, "discovery_failed", pe.Detail)
 		}
-		for _, name := range listed {
-			models = append(models, discoveredModel{name.Name, name.Display, name.Metadata})
-		}
+		models = append(models, listed...)
 	}
 	tx, p, err := a.BeginMutation(r)
 	if err != nil {
@@ -338,7 +337,7 @@ func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, err
 	if err != nil {
 		return access.Reply{}, err
 	}
-	current, target, credential, err := s.prepare(r, p, id)
+	current, target, err := s.prepare(r, p, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -364,21 +363,21 @@ func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, err
 	certified := 0
 	// The route deadline gives each capability a probe budget; the last one
 	// stays reserved so the results are always recorded.
-	probeCtx, cancel := probeBudget(r.Context())
+	probeCtx, cancel := probe.Budget(r.Context())
 	defer cancel()
 	for i := range m.Capabilities {
 		c := &m.Capabilities[i]
-		err := s.certifyTuple(probeCtx, target, credential, m.UpstreamModel, c.Capability, probeBodyLimit)
+		err := s.prober.Certify(probeCtx, target, m.UpstreamModel, c.Capability, probe.BodyLimit)
 		item := map[string]any{"operation": c.Operation, "surface": c.Surface, "mode": c.Mode, "succeeded": err == nil, "detail": "Certified.", "error_code": nil}
 		if err == nil {
 			certified++
 			c.Source, c.CertifiedAt = "certified", &at
 			c.CredentialFingerprint = defaultSlot.credentialFingerprint(current.Connection.Document())
-			c.ToolCalls = c.Operation == "generation" && (c.Surface == "openai" || c.Surface == "anthropic" || c.Surface == "gemini") && (c.Mode == "unary" || c.Mode == "streaming") && s.certifyToolCalls(probeCtx, target, credential, m.UpstreamModel, c.Mode == "streaming") == nil
+			c.ToolCalls = c.Operation == "generation" && (c.Surface == "openai" || c.Surface == "anthropic" || c.Surface == "gemini") && (c.Mode == "unary" || c.Mode == "streaming") && s.prober.CertifyToolCalls(probeCtx, target, m.UpstreamModel, c.Mode == "streaming") == nil
 			item["tool_calls"] = c.ToolCalls
 		} else {
-			pe := classify(err)
-			item["detail"], item["error_code"] = pe.Detail, pe.Code
+			pe := probe.Classify(err)
+			item["detail"], item["error_code"] = pe.Detail, pe.Reason
 			c.Source, c.CertifiedAt = "declared", nil
 			c.CredentialFingerprint = ""
 			c.ToolCalls = false
@@ -439,7 +438,7 @@ func (s *Catalogue) setDraftModel(ctx context.Context, tx pgx.Tx, current *recor
 		}
 		capabilities = make([]storedCapability, 0, len(requested))
 		for _, c := range requested {
-			if !configurationCertifiable(current.Connection.Transport(), c) {
+			if !probe.ConfigurationCertifiable(current.Connection.Transport(), c) {
 				return access.Fail(422, "capability_unavailable", "This connector cannot certify the requested tuple.")
 			}
 			if kept, ok := existing[c]; ok {
@@ -459,7 +458,7 @@ func (s *Catalogue) setDraftModel(ctx context.Context, tx pgx.Tx, current *recor
 	return nil
 }
 
-func (s *Catalogue) storeDiscoveredModels(ctx context.Context, tx pgx.Tx, current *record, models []discoveredModel, upstream bool, at time.Time) error {
+func (s *Catalogue) storeDiscoveredModels(ctx context.Context, tx pgx.Tx, current *record, models []probe.DiscoveredModel, upstream bool, at time.Time) error {
 	document := current.Connection.Document()
 	metadata := maps.Clone(document.Options.Models)
 	for _, m := range models {
@@ -523,4 +522,58 @@ func (s *Catalogue) storeCertification(ctx context.Context, tx pgx.Tx, current *
 func (s *Catalogue) storeProbe(ctx context.Context, tx pgx.Tx, id string, at time.Time, succeeded bool, detail string) error {
 	_, err := tx.Exec(ctx, "UPDATE olp.providers SET last_probe_at=$2,last_probe_status=$3,last_probe_detail=$4 WHERE id=$1", id, at, probeStatus(succeeded), detail)
 	return err
+}
+
+// credentialFor prefers the enabled default slot, then another enabled slot.
+func (s *Catalogue) credentialFor(ctx context.Context, tx pgx.Tx, p *record) ([]byte, *credentialState, error) {
+	slots, err := loadSlots(ctx, tx, p.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	slot := selectProbeSlot(slots, p.Connection.Document())
+	if slot == nil {
+		return nil, nil, access.Fail(422, "credential_required", "Enable a credential slot before probing this connection.")
+	}
+	state := &credentialState{ID: slot.CredentialID, Version: slot.CredentialVersion, Revoked: slot.CredentialRevoked}
+
+	if !p.Connection.Document().CredentialRequired() {
+		return nil, state, nil
+	}
+	if state.ID == nil && p.Connection.Document().Grant() {
+		return nil, state, access.Fail(422, "credential_required", "Enroll a grant before probing this connection.")
+	}
+	if state.ID == nil {
+		return nil, state, access.Fail(422, "credential_required", "Add a credential before probing this connection.")
+	}
+	if state.Revoked {
+		return nil, state, access.Fail(422, "credential_revoked", "The draft credential was revoked; rotate before probing.")
+	}
+	if slot.CredentialLapsed {
+		return nil, state, access.Fail(422, "credential_lapsed", "The draft credential's grant lapsed; re-enroll it before probing.")
+	}
+	if err := slot.credentialFits(p.Connection.Document()); err != nil {
+		return nil, state, err
+	}
+	secret, err := s.readCredential(ctx, tx, *state.ID)
+	if err != nil {
+		return nil, state, err
+	}
+	return secret, state, nil
+}
+
+func selectProbeSlot(slots []slotRow, cfg connection.Configuration) *slotRow {
+	var best *slotRow
+	usable := func(s *slotRow) bool {
+		return !cfg.CredentialRequired() || s.CredentialID != nil && !s.CredentialRevoked && !s.CredentialLapsed
+	}
+	for i := range slots {
+		row := &slots[i]
+		if !row.Enabled {
+			continue
+		}
+		if best == nil || usable(row) && !usable(best) || usable(row) == usable(best) && (row.Default && !best.Default || row.Default == best.Default && (row.Priority < best.Priority || row.Priority == best.Priority && row.Position < best.Position)) {
+			best = row
+		}
+	}
+	return best
 }

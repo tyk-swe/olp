@@ -9,8 +9,10 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/providers/connection"
+	"github.com/tyk-swe/olp/internal/providers/probe"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
@@ -23,7 +25,7 @@ func (s *Server) kindCapabilities(r *http.Request, _ access.Principal) (access.R
 	if _, ok := connection.LookupKind(kind); !ok {
 		return access.Reply{}, access.Fail(400, "invalid_provider_kind", "This provider kind is not available.")
 	}
-	return access.OK(map[string]any{"provider_kind": kind, "capabilities": capabilityOptionsForKind(kind)}), nil
+	return access.OK(map[string]any{"provider_kind": kind, "capabilities": probe.OptionsForKind(kind)}), nil
 }
 
 func (s *Server) listVendors(r *http.Request, _ access.Principal) (access.Reply, error) {
@@ -140,7 +142,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	// Each advertised capability, or each declared model of a provider without
 	// discovery, can consume a full probe budget; reserve another management
 	// budget for preparation, queueing, and persistence.
-	certifyTimeout := time.Duration(len(connection.Vocabulary())+1) * probeTimeout
+	certifyTimeout := time.Duration(len(connection.Vocabulary())+1) * probe.Timeout
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/probe", s.probe, access.Deadline(certifyTimeout))
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/discovery", s.discover, access.MaxBody(1<<20), access.Deadline(certifyTimeout))
 	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/catalog-suggestions", s.catalogSuggestions)
@@ -181,4 +183,12 @@ func (s *Server) profiles(r *http.Request, _ access.Principal) (access.Reply, er
 		return access.Reply{}, err
 	}
 	return access.OK(map[string]any{"items": append(connectors.Profiles(), pluginProfiles...)}), nil
+}
+
+func (s *Server) operationDialects(r *http.Request, _ access.Principal) (access.Reply, error) {
+	items := []map[string]any{}
+	for _, d := range operationregistry.Catalog().Dialects() {
+		items = append(items, map[string]any{"id": d.Identity.ID, "revision": d.Identity.Revision, "operation": d.Operation.ID, "operation_revision": d.Operation.Revision, "surface": d.Surface, "mode": "unary", "label": d.Label, "request_schema": d.RequestSchema, "result_schema": d.ResultSchema, "documentation": d.Documentation, "evidence": d.Evidence})
+	}
+	return access.OK(map[string]any{"items": items}), nil
 }

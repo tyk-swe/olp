@@ -2,8 +2,6 @@ package providers
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"net/http"
 
@@ -128,35 +126,18 @@ func validateNetworkReference(ctx context.Context, q access.Queryer, providerID 
 	return err
 }
 
-func (s *Catalogue) networkSecret(ctx context.Context, cfg probeTarget) ([]byte, error) {
-	if cfg.Document().Options.Network == nil || cfg.Document().Options.Network.CredentialID == "" {
-		return nil, nil
-	}
-	tx, err := s.Access.Pool.Begin(ctx)
+type networkSecrets struct{ server *access.Server }
+
+func (n networkSecrets) NetworkSecret(ctx context.Context, providerID, credentialID string) ([]byte, error) {
+	tx, err := n.server.Pool.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	if err := validateNetworkReference(ctx, tx, cfg.providerID, cfg.Document().Options.Network); err != nil {
+	if err := validateNetworkReference(ctx, tx, providerID, &egress.ConnectionOptions{CredentialID: credentialID}); err != nil {
 		return nil, err
 	}
-	return s.Access.Keys.Read(ctx, tx, s.Access.Installation, cfg.Document().Options.Network.CredentialID, secrets.ProviderCredential)
-}
-
-func (s *Catalogue) connectionClient(ctx context.Context, cfg probeTarget, credential []byte) (*http.Client, error) {
-	if cfg.Document().Options.Network == nil && cfg.Document().ProfileID == "" {
-		return s.client, nil
-	}
-	secret, err := s.networkSecret(ctx, cfg)
-	if err != nil {
-		return nil, err
-	}
-	if cfg.providerID == "" {
-		return nil, errors.New("provider identity is required for configured connections")
-	}
-	digest := sha256.Sum256(credential)
-	scope := cfg.providerID + "/" + cfg.Document().Fingerprint() + "/" + hex.EncodeToString(digest[:])
-	return s.connections.ClientScoped(scope, *s.Egress, cfg.Document().Options.Network, secret, probeTimeout)
+	return n.server.Keys.Read(ctx, tx, n.server.Installation, credentialID, secrets.ProviderCredential)
 }
 
 func (s *Catalogue) revokeNetworkCredentialVersion(ctx context.Context, tx pgx.Tx, current *record, id string) (revokedCredential, error) {

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/providers/connection"
+	"github.com/tyk-swe/olp/internal/providers/probe"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/jackc/pgx/v5"
@@ -863,7 +864,7 @@ func (s *Catalogue) createDraft(ctx context.Context, tx pgx.Tx, p access.Princip
 	}
 	if input.Model != nil {
 		transport := prepared.Transport()
-		surface, operation := "openai", probeOperation(transport)
+		surface, operation := "openai", probe.Operation(transport)
 		switch configuration.Kind {
 		case connectors.KindAnthropic:
 			surface = "anthropic"
@@ -893,8 +894,8 @@ func (s *Catalogue) createDraft(ctx context.Context, tx pgx.Tx, p access.Princip
 		// A dedicated operation profile, such as an embeddings or rerank
 		// dialect, declares the tuple it can actually certify.
 		mode := "unary"
-		if configuration.ProfileID != "" && !probeable(transport, connection.Capability{Operation: operation, Surface: surface, Mode: mode}) {
-			if tuple := defaultProbeTuple(transport); probeable(transport, tuple) {
+		if configuration.ProfileID != "" && !probe.Probeable(transport, connection.Capability{Operation: operation, Surface: surface, Mode: mode}) {
+			if tuple := probe.DefaultTuple(transport); probe.Probeable(transport, tuple) {
 				operation, surface, mode = tuple.Operation, tuple.Surface, tuple.Mode
 			}
 		}
