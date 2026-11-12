@@ -8,35 +8,27 @@ import (
 	"github.com/tyk-swe/olp/internal/usage/reports"
 )
 
-const incidentKeyField = "incident_key"
-
-type incidentRef struct {
-	Key     string `json:"incident_key,omitempty"`
-	Subject string `json:"subject,omitempty"`
-	Number  *int64 `json:"incident,omitempty"`
-}
-
-type signalPayload struct {
+type envelope struct {
 	Version    int                        `json:"version"`
 	DeliveryID string                     `json:"delivery_id"`
 	Event      contract.NotificationEvent `json:"event"`
 	RuleID     string                     `json:"rule_id"`
 	RuleName   string                     `json:"rule_name"`
-	incidentRef
-	DedupKey   string         `json:"dedup_key"`
-	Resolved   bool           `json:"resolved"`
-	OccurredAt string         `json:"occurred_at"`
-	Evidence   map[string]any `json:"evidence"`
+	DedupKey   string                     `json:"dedup_key"`
+	Resolved   bool                       `json:"resolved"`
+}
+
+type signalPayload struct {
+	envelope
+	IncidentKey string         `json:"incident_key"`
+	Subject     string         `json:"subject,omitempty"`
+	Incident    int64          `json:"incident"`
+	OccurredAt  string         `json:"occurred_at"`
+	Evidence    map[string]any `json:"evidence"`
 }
 
 type spendReportPayload struct {
-	Version    int                          `json:"version"`
-	DeliveryID string                       `json:"delivery_id"`
-	Event      contract.NotificationEvent   `json:"event"`
-	RuleID     string                       `json:"rule_id"`
-	RuleName   string                       `json:"rule_name"`
-	DedupKey   string                       `json:"dedup_key"`
-	Resolved   bool                         `json:"resolved"`
+	envelope
 	Period     string                       `json:"period"`
 	Start      string                       `json:"start"`
 	End        string                       `json:"end"`

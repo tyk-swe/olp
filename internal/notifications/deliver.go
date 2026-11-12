@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/management/contract"
@@ -29,124 +31,135 @@ type delivery struct {
 	id, ruleID, ruleName string
 	event                contract.NotificationEvent
 	attempts             int
-	dedupKey             *string
-	resolved             bool
-	evidence             evidence
+	kind                 deliveryKind
 }
 
-type evidence interface{ sealedEvidence() }
+type deliveryKind interface{ sealedDeliveryKind() }
 
-type budgetEvidence struct {
-	subjectKind, subjectID, windowKind *string
-	windowID                           *int64
-	threshold                          *int
-	accrued, limit                     *string
-	currency                           string
+type budgetAlert struct {
+	subjectKind, subjectID, windowKind string
+	windowID                           int64
+	threshold                          int32
+	accrued, limit, currency           string
 }
 
-type payloadEvidence struct {
-	raw    []byte
-	stored storedPayload
+type keyReminder struct{ payload []byte }
+
+type signalIncident struct {
+	payload      []byte
+	key, subject string
+	number       int64
+	resolved     bool
 }
 
 type storedPayload struct {
-	incidentRef
-	DedupKey string `json:"dedup_key"`
-	Resolved bool   `json:"resolved"`
+	payload  []byte
+	key      string
+	resolved bool
 }
 
-func (budgetEvidence) sealedEvidence()  {}
-func (payloadEvidence) sealedEvidence() {}
+func (budgetAlert) sealedDeliveryKind()    {}
+func (keyReminder) sealedDeliveryKind()    {}
+func (signalIncident) sealedDeliveryKind() {}
+func (storedPayload) sealedDeliveryKind()  {}
 
-func newPayloadEvidence(raw []byte) payloadEvidence {
-	var stored storedPayload
-	if json.Unmarshal(raw, &stored) != nil {
-		return payloadEvidence{raw: raw}
+type pendingRow struct {
+	id, ruleID, ruleName               string
+	event                              contract.NotificationEvent
+	attempts                           int
+	subjectKind, subjectID, windowKind pgtype.Text
+	windowID                           pgtype.Int8
+	threshold                          pgtype.Int4
+	accrued, limit                     pgtype.Text
+	currency                           string
+	payload                            []byte
+	reminder                           bool
+	incidentKey, subject               pgtype.Text
+	incident                           pgtype.Int8
+	resolved                           bool
+}
+
+func (r pendingRow) kind() deliveryKind {
+	switch {
+	case r.windowID.Valid:
+		return budgetAlert{
+			subjectKind: r.subjectKind.String, subjectID: r.subjectID.String, windowKind: r.windowKind.String,
+			windowID: r.windowID.Int64, threshold: r.threshold.Int32,
+			accrued: r.accrued.String, limit: r.limit.String, currency: r.currency,
+		}
+	case r.reminder:
+		return keyReminder{payload: r.payload}
+	case r.incident.Valid && r.subject.String != "":
+		return signalIncident{payload: r.payload, key: r.incidentKey.String, subject: r.subject.String, number: r.incident.Int64, resolved: r.resolved}
 	}
-	return payloadEvidence{raw: raw, stored: stored}
+	return storedPayload{payload: r.payload, key: r.incidentKey.String, resolved: r.resolved}
 }
 
-func (d delivery) storedDedupKey() string {
-	if d.dedupKey != nil {
-		return *d.dedupKey
+func (d delivery) lockKey() string {
+	switch k := d.kind.(type) {
+	case signalIncident:
+		return k.key
+	case storedPayload:
+		return k.key
 	}
 	return ""
 }
 
-func (d delivery) lockKey() string {
-	if p, ok := d.evidence.(payloadEvidence); ok {
-		return cmp.Or(p.stored.Key, d.storedDedupKey())
-	}
-	return d.storedDedupKey()
-}
-
-func (d delivery) openIncident() (incidentRef, bool) {
-	p, ok := d.evidence.(payloadEvidence)
-	if !ok || d.resolved || p.stored.Subject == "" || p.stored.Number == nil {
-		return incidentRef{}, false
-	}
-	return p.stored.incidentRef, true
-}
-
 func (d delivery) message() (message, error) {
-	switch e := d.evidence.(type) {
-	case budgetEvidence:
+	switch k := d.kind.(type) {
+	case budgetAlert:
 		body, err := json.Marshal(map[string]any{
 			"event": d.event, "rule_id": d.ruleID, "rule_name": d.ruleName,
-			"subject_kind": e.subjectKind, "subject_id": e.subjectID, "window_kind": e.windowKind,
-			"window_id": e.windowID, "threshold_percent": e.threshold, "accrued": e.accrued,
-			"limit": e.limit, "currency": e.currency, "delivery_id": d.id,
+			"subject_kind": k.subjectKind, "subject_id": k.subjectID, "window_kind": k.windowKind,
+			"window_id": k.windowID, "threshold_percent": k.threshold, "accrued": k.accrued,
+			"limit": k.limit, "currency": k.currency, "delivery_id": d.id,
 		})
 		if err != nil {
 			return message{}, err
 		}
-		dedup := d.id
-		if e.windowID != nil {
-			dedup = d.ruleID + ":" + string(d.event) + ":" + strconv.FormatInt(*e.windowID, 10)
-		}
-		return newMessage(body, d.event, d.ruleName, dedup, false)
-	case payloadEvidence:
-		var body map[string]any
-		if err := json.Unmarshal(e.raw, &body); err != nil {
-			return message{}, err
-		}
-		body["event"], body["rule_id"], body["rule_name"], body["delivery_id"] = d.event, d.ruleID, d.ruleName, d.id
-		if d.resolved {
-			body["resolved"] = true
-		}
-		if d.dedupKey != nil {
-			body["dedup_key"] = *d.dedupKey
-		}
-		raw, err := json.Marshal(body)
-		if err != nil {
-			return message{}, err
-		}
-		dedup := cmp.Or(e.stored.Key, cmp.Or(d.storedDedupKey(), e.stored.DedupKey), d.id)
-		return newMessage(raw, d.event, d.ruleName, dedup, d.resolved || e.stored.Resolved)
+		return newMessage(body, d.event, d.ruleName, d.ruleID+":"+string(d.event)+":"+strconv.FormatInt(k.windowID, 10), false)
+	case keyReminder:
+		return d.payloadMessage(k.payload, d.id, false)
+	case signalIncident:
+		return d.payloadMessage(k.payload, k.key, k.resolved)
+	case storedPayload:
+		return d.payloadMessage(k.payload, cmp.Or(k.key, d.id), k.resolved)
 	}
-	return message{}, errors.New("delivery has no evidence")
+	return message{}, errors.New("delivery has no kind")
+}
+
+func (d delivery) payloadMessage(payload []byte, dedupKey string, resolved bool) (message, error) {
+	var fields map[string]any
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		return message{}, err
+	}
+	overlay := map[string]any{"event": d.event, "rule_id": d.ruleID, "rule_name": d.ruleName, "delivery_id": d.id}
+	body, err := json.Marshal(maps.Collect(func(yield func(string, any) bool) {
+		for _, source := range []map[string]any{fields, overlay} {
+			for key, value := range source {
+				if !yield(key, value) {
+					return
+				}
+			}
+		}
+	}))
+	if err != nil {
+		return message{}, err
+	}
+	return newMessage(body, d.event, d.ruleName, dedupKey, resolved)
 }
 
 func (w *deliveryWorker) pending(ctx context.Context) ([]delivery, error) {
-	rows, err := w.Pool.Query(ctx, pendingChannelDeliverySQL, maxDeliveryAttempts, deliveriesPerPass, contract.NotificationEventKeyExpiring)
+	rows, err := w.Pool.Query(ctx, pendingChannelDeliverySQL, maxDeliveryAttempts, deliveriesPerPass)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (delivery, error) {
-		var d delivery
-		var budget budgetEvidence
-		var payload []byte
-		if err := row.Scan(&d.id, &d.ruleID, &d.event, &d.attempts, &d.ruleName,
-			&budget.subjectKind, &budget.subjectID, &budget.windowKind, &budget.windowID, &budget.threshold,
-			&budget.accrued, &budget.limit, &budget.currency, &payload, &d.dedupKey, &d.resolved); err != nil {
-			return d, err
-		}
-		if d.event == contract.NotificationEventBudgetThreshold {
-			d.evidence = budget
-			return d, nil
-		}
-		d.evidence = newPayloadEvidence(payload)
-		return d, nil
+		var r pendingRow
+		err := row.Scan(&r.id, &r.ruleID, &r.event, &r.attempts, &r.ruleName,
+			&r.subjectKind, &r.subjectID, &r.windowKind, &r.windowID, &r.threshold, &r.accrued, &r.limit, &r.currency,
+			&r.payload, &r.reminder, &r.incidentKey, &r.subject, &r.incident, &r.resolved)
+		return delivery{id: r.id, ruleID: r.ruleID, ruleName: r.ruleName, event: r.event, attempts: r.attempts, kind: r.kind()}, err
 	})
 }
 
@@ -205,20 +218,20 @@ func discard(ctx context.Context, conn *pgxpool.Conn) {
 }
 
 func (d delivery) current(ctx context.Context, tx pgx.Tx) (bool, error) {
-	if d.event == contract.NotificationEventKeyExpiring {
+	switch k := d.kind.(type) {
+	case keyReminder:
 		return keyReminderCurrent(ctx, tx, d.id)
+	case signalIncident:
+		if k.resolved {
+			return true, nil
+		}
+		var current bool
+		err := tx.QueryRow(ctx, signalDeliveryCurrentSQL, d.ruleID, k.subject, k.number).Scan(&current)
+		return current, err
 	}
-	incident, open := d.openIncident()
-	if !open {
-		return true, nil
-	}
-	var current bool
-	err := tx.QueryRow(ctx, signalDeliveryCurrentSQL, d.ruleID, incident.Subject, *incident.Number).Scan(&current)
-	return current, err
+	return true, nil
 }
 
-// Claim the enabled destination and attempt atomically, then commit before
-// sending. A later disable cannot cancel an already claimed attempt.
 func (w *deliveryWorker) attempt(ctx context.Context, db database, d delivery) bool {
 	tx, err := db.Begin(ctx)
 	if err != nil {
@@ -282,9 +295,6 @@ func (w *deliveryWorker) cancelSuperseded(ctx context.Context, tx pgx.Tx, id str
 	}
 }
 
-// The rule and destination stay locked through the claim so rotations cannot
-// delete the selected secret or redirect the claim. Disabled pairs return
-// pgx.ErrNoRows.
 func (w *deliveryWorker) notificationDestination(ctx context.Context, tx pgx.Tx, ruleID string) (destination, []byte, error) {
 	var d destination
 	var secretID *string

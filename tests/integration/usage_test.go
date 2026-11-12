@@ -1400,11 +1400,12 @@ func deliverNotifications(t *testing.T, pool *pgxpool.Pool, circuits *fleet.Stat
 	if err := pool.QueryRow(t.Context(), progressSQL).Scan(&before, &failures); err != nil {
 		t.Fatal(err)
 	}
+	keys, installation := notificationKeys(t, pool)
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		notifications.RunDelivery(ctx, notifications.DeliveryConfig{Pool: pool, NewID: uuid.NewString, Now: time.Now, Fleet: circuits,
+		notifications.RunDelivery(ctx, notifications.DeliveryConfig{Pool: pool, NewID: uuid.NewString, Now: time.Now, Fleet: circuits, Keys: keys, Installation: installation,
 			Log:    slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelWarn})),
 			Sender: notifications.NewSender(egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}})})
 	}()
@@ -1492,6 +1493,15 @@ func TestKeyExpiryReminderIsDelivered(t *testing.T) {
 	if status != "delivered" || reason != "expiry" {
 		t.Errorf("delivery status=%s reason=%s, want delivered expiry", status, reason)
 	}
+	listed := notificationManagement(t, pool, f)("GET", "/api/v1/notifications/deliveries?rule_id="+rule, "", "")
+	var page struct {
+		Items []struct {
+			Event string `json:"event"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(listed.body, &page); err != nil || len(page.Items) != 1 || page.Items[0].Event != "key.expiring" {
+		t.Errorf("deliveries API answered %d %s, want one key.expiring delivery", listed.status, listed.body)
+	}
 }
 
 func TestSignalNotificationsAnnounceTriggersAndRecoveries(t *testing.T) {
@@ -1518,8 +1528,13 @@ func TestSignalNotificationsAnnounceTriggersAndRecoveries(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_deliveries(id,rule_id,event,dedup_key,resolved,payload,status)
+ SELECT $1,id,event,'malformed',false,'{"incident":"x","incident_key":"malformed"}','pending' FROM olp.notification_rules WHERE event='provider.circuit.open'`, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	pages := pagerDutyReceiver(t, pool, f, "runtime.install_failed")
 	deliverNotifications(t, pool, circuits)
-	if got, want := received(bodies), []string{"provider.circuit.open resolved=false", "runtime.install_failed resolved=false"}; !slices.Equal(got, want) {
+	if got, want := received(bodies), []string{"provider.circuit.open resolved=false", "provider.circuit.open resolved=false", "runtime.install_failed resolved=false"}; !slices.Equal(got, want) {
 		t.Errorf("triggers delivered %v, want %v", got, want)
 	}
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.runtime_install_status SET installed_generation=2,failed=false,checked_at=now()`); err != nil {
@@ -1532,6 +1547,12 @@ func TestSignalNotificationsAnnounceTriggersAndRecoveries(t *testing.T) {
 	if got, want := received(bodies), []string{"provider.circuit.closed resolved=true", "provider.circuit.closed resolved=true", "runtime.install_failed resolved=true"}; !slices.Equal(got, want) {
 		t.Errorf("recoveries delivered %v, want %v", got, want)
 	}
+	if len(pages) != 2 {
+		t.Fatalf("PagerDuty got %d events, want a trigger and a resolve", len(pages))
+	}
+	if trigger, resolve := <-pages, <-pages; trigger.action != "trigger" || resolve.action != "resolve" || trigger.dedupKey != resolve.dedupKey {
+		t.Errorf("PagerDuty got %+v then %+v, want a trigger and a resolve sharing one dedup key", trigger, resolve)
+	}
 	var undelivered int
 	if err := pool.QueryRow(t.Context(), `SELECT count(*) FILTER (WHERE status<>'delivered') FROM olp.notification_deliveries`).Scan(&undelivered); err != nil {
 		t.Fatal(err)
@@ -1541,24 +1562,70 @@ func TestSignalNotificationsAnnounceTriggersAndRecoveries(t *testing.T) {
 	}
 }
 
+type pagerDutyEvent struct {
+	action   string
+	dedupKey string
+}
+
+func pagerDutyReceiver(t *testing.T, pool *pgxpool.Pool, f usageFixture, event string) <-chan pagerDutyEvent {
+	t.Helper()
+	pages := make(chan pagerDutyEvent, 4)
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var page struct {
+			Action   string `json:"event_action"`
+			DedupKey string `json:"dedup_key"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&page); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		pages <- pagerDutyEvent{action: page.Action, dedupKey: page.DedupKey}
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "success", "dedup_key": page.DedupKey})
+	}))
+	t.Cleanup(receiver.Close)
+	keys, installation := notificationKeys(t, pool)
+	secret, destination := uuid.NewString(), uuid.NewString()
+	sealed, err := keys.Seal(installation, secrets.NotificationSecret, secret, []byte(`{"routing_key":"R0UT1NG"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.secrets(id,purpose,key_version,ciphertext) VALUES($1,$2,$3,$4)`, secret, secrets.NotificationSecret, keys.Active, sealed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_destinations(id,name,type,url,secret_id,etag,created_by) VALUES($1,'pager','pagerduty',$2,$3,$1,$4)`, destination, receiver.URL+"/v2/enqueue", secret, f.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_rules(id,name,event,destination_id,etag,created_by) VALUES($1,'paged',$2,$3,$1,$4)`, uuid.NewString(), event, destination, f.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	return pages
+}
+
 type apiResult struct {
 	status int
 	etag   string
 	body   []byte
 }
 
-func notificationManagement(t *testing.T, pool *pgxpool.Pool, f usageFixture) func(method, path, ifMatch, body string) apiResult {
+func notificationKeys(t *testing.T, pool *pgxpool.Pool) (*secrets.KeyRing, string) {
 	t.Helper()
-	ctx := t.Context()
 	var installation string
-	if err := pool.QueryRow(ctx, "SELECT id::text FROM olp.installation WHERE singleton").Scan(&installation); err != nil {
+	if err := pool.QueryRow(t.Context(), "SELECT id::text FROM olp.installation WHERE singleton").Scan(&installation); err != nil {
 		t.Fatal(err)
 	}
-	auth := secrets.NewAuthKey(make([]byte, 32), installation)
 	keys, err := secrets.ParseRing([]byte(`{"active_version":1,"keys":[{"version":1,"key":"` + strings.Repeat("01", 32) + `"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
+	return keys, installation
+}
+
+func notificationManagement(t *testing.T, pool *pgxpool.Pool, f usageFixture) func(method, path, ifMatch, body string) apiResult {
+	t.Helper()
+	ctx := t.Context()
+	keys, installation := notificationKeys(t, pool)
+	auth := secrets.NewAuthKey(make([]byte, 32), installation)
 	if err := access.PrepareInstallation(ctx, pool, installation, auth, keys); err != nil {
 		t.Fatal(err)
 	}

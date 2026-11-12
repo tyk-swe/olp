@@ -171,21 +171,14 @@ func activeSignalSubjects(ctx context.Context, tx pgx.Tx, ruleID string) ([]stri
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	subjects := []string{}
-	for rows.Next() {
-		if len(subjects) == signalScopeLimit {
-			return nil, errSignalLimit
-		}
-		var subject string
-		var incident int64
-		var triggered *time.Time
-		if err := rows.Scan(&subject, &incident, &triggered); err != nil {
-			return nil, err
-		}
-		subjects = append(subjects, subject)
+	subjects, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, err
 	}
-	return subjects, rows.Err()
+	if len(subjects) > signalScopeLimit {
+		return nil, errSignalLimit
+	}
+	return subjects, nil
 }
 
 type signalState struct {

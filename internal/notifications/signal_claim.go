@@ -79,10 +79,12 @@ func (w *deliveryWorker) claimSignal(ctx context.Context, tx pgx.Tx, rule signal
 	resolved := next.change == recovered
 	id := w.NewID()
 	payload, err := json.Marshal(signalPayload{
-		Version: 1, DeliveryID: id, Event: event, RuleID: rule.id, RuleName: rule.name,
-		incidentRef: incidentRef{Key: incidentKey, Subject: signal.subject, Number: &next.state.incident},
-		DedupKey:    dedupKey, Resolved: resolved, OccurredAt: now.UTC().Format(time.RFC3339Nano),
-		Evidence: signal.evidence,
+		envelope: envelope{
+			Version: 1, DeliveryID: id, Event: event, RuleID: rule.id, RuleName: rule.name,
+			DedupKey: dedupKey, Resolved: resolved,
+		},
+		IncidentKey: incidentKey, Subject: signal.subject, Incident: next.state.incident,
+		OccurredAt: now.UTC().Format(time.RFC3339Nano), Evidence: signal.evidence,
 	})
 	if err != nil {
 		return 0, err
@@ -132,9 +134,8 @@ func (c spendReportConfig) claim(w *deliveryWorker, ctx context.Context, tx pgx.
 	}
 	id := w.NewID()
 	payload, err := json.Marshal(spendReportPayload{
-		Version: 1, DeliveryID: id, Event: rule.event, RuleID: rule.id, RuleName: rule.name,
-		DedupKey: dedupKey, Period: string(c.Period),
-		Start: start.UTC().Format(time.RFC3339), End: end.UTC().Format(time.RFC3339),
+		envelope: envelope{Version: 1, DeliveryID: id, Event: rule.event, RuleID: rule.id, RuleName: rule.name, DedupKey: dedupKey},
+		Period:   string(c.Period), Start: start.UTC().Format(time.RFC3339), End: end.UTC().Format(time.RFC3339),
 		Summary: summary, Breakdowns: breakdowns,
 	})
 	if err != nil {

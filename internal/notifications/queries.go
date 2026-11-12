@@ -37,7 +37,7 @@ const workerStaleSignalsSQL = `WITH workers AS (
 const runtimeInstallSignalsSQL = `SELECT gateway_instance,desired_generation,installed_generation,failed FROM olp.runtime_install_status
  WHERE checked_at>=now()-interval '2 minutes' ORDER BY gateway_instance LIMIT 10001`
 const providerCircuitSubjectsSQL = `SELECT id::text,name FROM olp.providers WHERE state='active' ORDER BY id LIMIT 10001`
-const activeSignalStatesSQL = `SELECT subject,incident,last_trigger_at FROM olp.notification_signal_states WHERE rule_id=$1 AND active ORDER BY subject LIMIT 10001 FOR UPDATE`
+const activeSignalStatesSQL = `SELECT subject FROM olp.notification_signal_states WHERE rule_id=$1 AND active ORDER BY subject LIMIT 10001 FOR UPDATE`
 
 const routedRetirementModelsSQL = `SELECT DISTINCT rt.slug,rt.project_id::text,p.id::text,p.kind,pr.configuration->>'vendor_id',t->>'provider_model'
  FROM olp.routes rt JOIN olp.route_revisions rr ON rr.id=rt.latest_revision_id
@@ -84,18 +84,19 @@ const reportPeriodSQL = `SELECT date_trunc($1,now() AT TIME ZONE 'UTC') AT TIME 
 const reportAlreadyQueuedSQL = `SELECT EXISTS(SELECT 1 FROM olp.notification_deliveries WHERE rule_id=$1 AND dedup_key=$2 AND NOT resolved)`
 const notificationCurrencySQL = `SELECT currency FROM olp.pricing_currency WHERE singleton`
 
-const pendingChannelDeliverySQL = `SELECT v.id::text,v.rule_id::text,
- CASE WHEN v.api_key_id IS NOT NULL THEN $3 ELSE COALESCE(v.event,r.event) END,v.attempts,
+const pendingChannelDeliverySQL = `SELECT v.id::text,v.rule_id::text,COALESCE(v.event,r.event),v.attempts,
  r.name,r.subject_kind,r.subject_id::text,r.window_kind,v.window_id,v.threshold_percent,
- v.accrued::text,v.limit_amount::text,COALESCE(v.currency::text,''),v.payload,v.dedup_key,v.resolved
+ v.accrued::text,v.limit_amount::text,COALESCE(v.currency::text,''),v.payload,v.api_key_id IS NOT NULL,
+ k.incident_key,v.payload->>'subject',CASE WHEN jsonb_typeof(v.payload->'incident')='number' THEN (v.payload->'incident')::bigint END,v.resolved
  FROM olp.notification_deliveries v JOIN olp.notification_rules r ON r.id=v.rule_id
  JOIN olp.notification_destinations d ON d.id=r.destination_id
+ CROSS JOIN LATERAL (SELECT COALESCE(NULLIF(v.payload->>'incident_key',''),v.dedup_key) AS incident_key) k
  WHERE v.status IN ('pending','failed') AND v.attempts<$1 AND r.enabled AND d.enabled
  AND (v.last_attempt_at IS NULL OR v.attempts<1 OR v.last_attempt_at+make_interval(mins=>1<<GREATEST(v.attempts-1,0))<=now())
- AND (v.dedup_key IS NULL OR NOT EXISTS(
+ AND (k.incident_key IS NULL OR NOT EXISTS(
  SELECT 1 FROM olp.notification_deliveries earlier JOIN olp.notification_rules er ON er.id=earlier.rule_id
  WHERE er.destination_id=r.destination_id AND er.enabled AND earlier.status IN ('pending','failed') AND earlier.attempts<$1
- AND COALESCE(earlier.payload->>'` + incidentKeyField + `',earlier.dedup_key)=COALESCE(v.payload->>'` + incidentKeyField + `',v.dedup_key)
+ AND COALESCE(NULLIF(earlier.payload->>'incident_key',''),earlier.dedup_key)=k.incident_key
  AND (earlier.created_at,earlier.id)<(v.created_at,v.id)))
  ORDER BY v.created_at,v.id LIMIT $2`
 const readChannelDestinationSQL = `SELECT d.url,d.secret_id::text,d.type,d.configuration FROM olp.notification_rules r
