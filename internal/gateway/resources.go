@@ -744,6 +744,13 @@ func (s *Server) writeStateJSONStatus(w http.ResponseWriter, x *call, body []byt
 	s.finish(x, &outcome{committed: true}, status)
 }
 
+func resourceListError(err error, message string) *Error {
+	if errors.Is(err, resources.ErrNotFound) {
+		return invalidRequest("invalid_value", "after must be a gateway identifier of the listed resource kind.", strPtr("after"))
+	}
+	return serverError(http.StatusInternalServerError, "internal_error", message)
+}
+
 func listArgs(r *http.Request) (int, string, *Error) {
 	limit := 20
 	if raw := r.URL.Query().Get("limit"); raw != "" {
