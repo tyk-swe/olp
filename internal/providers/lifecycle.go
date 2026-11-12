@@ -75,7 +75,7 @@ func (s *Server) providers(r *http.Request, principal access.Principal) (access.
 	defer rows.Close()
 	var items []providerSummary
 	for rows.Next() {
-		d, err := scanDetail(rows)
+		d, err := s.scanDetail(rows)
 		if err != nil {
 			return access.Reply{}, err
 		}

@@ -198,7 +198,7 @@ const detailQuery = "SELECT " + recordColumns + ",pr.name,u.email," +
 	" LEFT JOIN olp.provider_revisions r ON r.id=p.active_revision_id" +
 	" LEFT JOIN olp.provider_credentials rc ON rc.provider_id=p.id AND rc.version=r.credential_version"
 
-func scanDetail(row pgx.Row) (*detail, error) {
+func (s *Catalogue) scanDetail(row pgx.Row) (*detail, error) {
 	var p record
 	var configuration, plugin []byte
 	var d detail
@@ -224,12 +224,12 @@ func scanDetail(row pgx.Row) (*detail, error) {
 	d.DraftCredentialID, d.DraftCredentialVersion = draft.ID, draft.Version
 	d.LastProbeAt, d.LastProbeStatus, d.LastProbeDetail = p.LastProbeAt, p.LastProbeStatus, p.LastProbeDetail
 	d.CreatedAt, d.UpdatedAt = p.CreatedAt.UTC(), p.UpdatedAt.UTC()
-	d.ConnectorReady = !document.CredentialRequired() || usableCredential
+	d.ConnectorReady = p.Connection.Transport().Validate(s.Egress) == nil && (!document.CredentialRequired() || usableCredential)
 	return &d, nil
 }
 
 func (s *Catalogue) detail(ctx context.Context, q access.Queryer, id string) (*detail, error) {
-	return scanDetail(q.QueryRow(ctx, detailQuery+" WHERE p.id=$1", id))
+	return s.scanDetail(q.QueryRow(ctx, detailQuery+" WHERE p.id=$1", id))
 }
 
 func (s *Server) detailReply(ctx context.Context, q access.Queryer, id string) (access.Reply, error) {
