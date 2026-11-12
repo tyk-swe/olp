@@ -244,6 +244,13 @@ func TestParseMultipartRefusesAndCleansUpRequestsOutsideItsLimits(t *testing.T) 
 			},
 			kind: Invalid,
 		},
+		"a boundary ending in a space": {
+			members: []member{staged},
+			mutate: func(r *http.Request) {
+				r.Header.Set("Content-Type", `multipart/form-data; boundary="audio upload "`)
+			},
+			kind: Invalid,
+		},
 		"a body that is not multipart": {
 			members: []member{staged},
 			mutate: func(r *http.Request) {
@@ -290,6 +297,40 @@ func TestParseMultipartRequiresAnAdmittedUpload(t *testing.T) {
 	_, err := ParseMultipart(t.Context(), upload(t, text("model", "whisper")), newSpool(t), nil, 64, 1)
 	if err == nil || err.Kind != Overloaded {
 		t.Fatalf("got %v, want an overloaded refusal", err)
+	}
+}
+
+func TestParseMultipartAcceptsQuotedBoundarySpaces(t *testing.T) {
+	spool := newSpool(t)
+	state := NewAdmission(MinCapacityBytes)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.SetBoundary("audio upload boundary"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.WriteField("model", "transcribe"); err != nil {
+		t.Fatal(err)
+	}
+	part, err := writer.CreateFormFile("file", "clip.wav")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(part, "fixture audio"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", &body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	form, failure := ParseMultipart(t.Context(), request, spool, admit(t, state), 64, 1)
+	if failure != nil {
+		t.Fatal(failure)
+	}
+	defer form.Cleanup()
+	file := form.TakeSingleFile("file")
+	if form.Required("model") != "transcribe" || file == nil || file.Size != int64(len("fixture audio")) || form.Err() != nil {
+		t.Fatalf("uploaded fields were not preserved, file %v, error %v", file, form.Err())
 	}
 }
 
