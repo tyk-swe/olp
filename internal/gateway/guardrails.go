@@ -511,7 +511,7 @@ func (s *Server) evaluateGuardrails(ctx context.Context, x *call, in guardrails.
 			n += int64(len(segment.Text))
 		}
 		x.estimate = max(1, (n+3)/4)
-		lease, e := s.deps.Admission.reserveKey(ctx, x.authority, "openai", x.estimate, 30*time.Second, "guardrails")
+		lease, e := s.deps.Admission.ReserveKey(ctx, x.authority, "openai", x.estimate, 30*time.Second, "guardrails")
 		if e != nil {
 			return guardrails.Result{}, e
 		}

@@ -1,9 +1,10 @@
 package gateway
 
 import (
-	"github.com/tyk-swe/olp/internal/gateway/events"
 	"sync"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/gateway/events"
 )
 
 const (

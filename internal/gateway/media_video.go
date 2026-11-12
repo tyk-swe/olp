@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/media/transport"
@@ -80,7 +81,7 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	var e *fault.Error
 	admitted := x.admissionAuthority(authority)
-	if x.lease, e = s.deps.Admission.reserveKeyCosted(ctx, &admitted, x.clientSurface(), x.estimate, overall, x.attemptCostReservation(authority, attempt), x.limitRoute()); e != nil {
+	if x.lease, e = s.deps.Admission.ReserveKeyCosted(ctx, &admitted, x.clientSurface(), x.estimate, overall, x.attemptCostReservation(authority, attempt), x.limitRoute()); e != nil {
 		s.refuse(x, w, e)
 		return
 	}
@@ -162,12 +163,12 @@ func (s *Server) admitVideoSlot(ctx context.Context, x *call, attempt routing.At
 			used++
 			x.facts = append(x.facts, s.rejectedFact(x, attempt, slot, used, gate.rejection))
 			last = gate.rejection
-			if gate.rejection.quota == quotaConnection || gate.rejection.quota == quotaRoute {
+			if gate.rejection.quota == quota.Connection || gate.rejection.quota == quota.Route {
 				return nil, routing.Slot{}, s.videoAdmissionError(ctx, x, last, unmeterable)
 			}
 		case gateUnmeterable:
 			unmeterable = true
-			if gate.quota == quotaConnection || gate.quota == quotaRoute {
+			if gate.quota == quota.Connection || gate.quota == quota.Route {
 				return nil, routing.Slot{}, s.videoAdmissionError(ctx, x, last, unmeterable)
 			}
 		case gateAdmitted:
@@ -186,7 +187,7 @@ func (s *Server) videoAdmissionError(ctx context.Context, x *call, last *attempt
 	case last != nil:
 		return last.toError()
 	case unmeterable:
-		return limitsUnavailable()
+		return quota.LimitsUnavailable()
 	}
 	return fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider credential is currently able to serve `"+x.route.Slug+"`.")
 }
@@ -293,13 +294,13 @@ func (s *Server) admitVideoRequest(parent context.Context, x *call, authority ke
 	x.budgetGroupID = authority.BudgetGroupID
 	ctx, cancel := context.WithTimeout(parent, ttl)
 	var e *fault.Error
-	x.lease, e = s.deps.Admission.reserveKey(ctx, x.admissionAuthority(authority), x.clientSurface(), resourceEstimate, ttl, x.limitRoute())
+	x.lease, e = s.deps.Admission.ReserveKey(ctx, x.admissionAuthority(authority), x.clientSurface(), resourceEstimate, ttl, x.limitRoute())
 	if e != nil {
 		cancel()
 		return nil, nil, e
 	}
 	return ctx, func() {
-		settleKey(ctx, x.lease, x.dispatched, x.settledTokens(), s.log)
+		quota.SettleKey(ctx, x.lease, x.dispatched, x.settledTokens(), s.log)
 		cancel()
 	}, nil
 }
@@ -369,15 +370,15 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record,
 		}
 	}
 	fact.SlotID = slot.ID
-	reservation, rejection, skip := s.deps.Admission.reserveTarget(ctx, &provider, &slot, 0, target.Timeout+jobs.LeaseSlack, "")
+	reservation, refusal, skip := s.deps.Admission.ReserveTarget(ctx, &provider, &slot, 0, target.Timeout+jobs.LeaseSlack, "")
 	if skip {
-		rejection = &attemptFailure{class: classLimitsUnavailable}
+		return s.jobRefused(fact, &attemptFailure{class: classLimitsUnavailable})
 	}
-	if rejection != nil {
-		return s.jobRefused(fact, rejection)
+	if refusal != nil {
+		return s.jobRefused(fact, rateLimitedTarget(refusal))
 	}
 	dispatched := false
-	defer func() { reservation.settle(ctx, dispatched, nil) }()
+	defer func() { reservation.Settle(ctx, dispatched, nil) }()
 	if _, deleting := job.(media.VideoDelete); deleting {
 		if _, err := s.deps.Media.Store.BeginDeletion(ctx, record.ID, jobs.Unfenced); err != nil {
 			return s.jobRefused(fact, &attemptFailure{class: classConnect})

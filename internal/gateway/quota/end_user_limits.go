@@ -1,4 +1,4 @@
-package gateway
+package quota
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 
 // Each boundary reserves independently. A later refusal refunds every earlier
 // reservation, while every dispatched request settles the complete chain.
-func (a *Admission) reserveEndUsers(ctx context.Context, authority *keyauthority.Authority, estimate int64, ttl time.Duration, hold costReservation, costChecked *bool) (*admission.Lease, *fault.Error) {
+func (a *Admission) reserveEndUsers(ctx context.Context, authority *keyauthority.Authority, estimate int64, ttl time.Duration, hold CostReservation, costChecked *bool) (*admission.Lease, *fault.Error) {
 	if authority.Policy.EndUserPolicy == nil && authority.ProjectEndUserPolicy == nil {
 		return nil, nil
 	}
@@ -37,45 +37,45 @@ func (a *Admission) reserveEndUsers(ctx context.Context, authority *keyauthority
 		}
 		if policy.CostBudgeted() {
 			if e := a.checkCostAccountingOnce(ctx, costChecked); e != nil {
-				settleKey(ctx, chain, false, nil, a.logger())
+				SettleKey(ctx, chain, false, nil, a.Logger())
 				return nil, e
 			}
 		}
 		owner := limits.EndUserKeyID(authority.ID, authority.EndUserDigest)
 		if boundary.project {
 			if authority.ProjectID == nil {
-				settleKey(ctx, chain, false, nil, a.logger())
-				return nil, limitsUnavailable()
+				SettleKey(ctx, chain, false, nil, a.Logger())
+				return nil, LimitsUnavailable()
 			}
 			owner = limits.EndUserProjectID(*authority.ProjectID, authority.EndUserDigest)
 		}
 		if policy.CostBudgeted() {
-			if e := a.checkPendingCostAccounting(ctx, owner); e != nil {
-				settleKey(ctx, chain, false, nil, a.logger())
+			if e := a.CheckPendingCostAccounting(ctx, owner); e != nil {
+				SettleKey(ctx, chain, false, nil, a.Logger())
 				return nil, e
 			}
 		}
 		if policy.TokensPerMinute != nil {
 			if e := a.checkPendingTokenAccounting(ctx, owner); e != nil {
-				settleKey(ctx, chain, false, nil, a.logger())
+				SettleKey(ctx, chain, false, nil, a.Logger())
 				return nil, e
 			}
 		}
-		if !a.ready() {
-			settleKey(ctx, chain, false, nil, a.logger())
-			return nil, limitsUnavailable()
+		if !a.Ready() {
+			SettleKey(ctx, chain, false, nil, a.Logger())
+			return nil, LimitsUnavailable()
 		}
-		request := hold.on(admission.Request{
+		request := hold.On(admission.Request{
 			Lookup: limits.EndUserLookup(owner), LeaseTTL: ttl,
 			Rate: admission.RateLimits{RequestsPerMinute: policy.RequestsPerMinute, TokensPerMinute: policy.TokensPerMinute, MaxConcurrency: policy.MaxConcurrency, Tokens: estimate},
 			Cost: admission.Budget(limits.Owner{ID: owner, Kind: limits.OwnerEndUser, Basis: limits.Basis(policy.CostBasis)},
 				policy.DailyCostLimit, policy.WeeklyCostLimit, policy.MonthlyCostLimit, authority.BudgetIncreases[owner]),
 		})
 		if policy.TokensPerMinute != nil && estimate > *policy.TokensPerMinute {
-			settleKey(ctx, chain, false, nil, a.logger())
+			SettleKey(ctx, chain, false, nil, a.Logger())
 			return nil, fault.InvalidRequest("request_exceeds_token_limit", "This request exceeds the end-user token limit.", nil)
 		}
-		decision, cancel := context.WithTimeout(ctx, reserveTimeout)
+		decision, cancel := context.WithTimeout(ctx, ReserveTimeout)
 		lease, err := a.limiter.Reserve(decision, request)
 		cancel()
 		if err == nil {
@@ -84,16 +84,16 @@ func (a *Admission) reserveEndUsers(ctx context.Context, authority *keyauthority
 			continue
 		}
 		if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
-			a.recordRejection(exceeded.Dimension)
-			settleKey(ctx, chain, false, nil, a.logger())
+			a.RecordRejection(exceeded.Dimension)
+			SettleKey(ctx, chain, false, nil, a.Logger())
 			name, param := "key end-user", "end_user.key"
 			if boundary.project {
 				name, param = "project end-user", "end_user.project"
 			}
-			return nil, budgetBoundaryError(rateLimitedBasis(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate, exceeded.Basis), name, param)
+			return nil, budgetBoundaryError(RateLimitedBasis(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate, exceeded.Basis), name, param)
 		}
-		if refusal := a.outage(authority.ID, policy.CostBudgeted(), err); refusal != nil {
-			settleKey(ctx, chain, false, nil, a.logger())
+		if refusal := a.Outage(authority.ID, policy.CostBudgeted(), err); refusal != nil {
+			SettleKey(ctx, chain, false, nil, a.Logger())
 			return nil, refusal
 		}
 	}

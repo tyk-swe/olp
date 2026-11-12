@@ -25,6 +25,7 @@ import (
 	"github.com/tyk-swe/olp/internal/release"
 
 	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -38,7 +39,7 @@ type paidCodeAttempt struct {
 	route         codemode.Route
 	release       *release.Release
 	authority     keyauthority.Authority
-	targetLease   *targetReservation
+	targetLease   *quota.TargetReservation
 	supplyLeases  []*admission.Lease
 	price         *rates.RoutingPrice
 	discount      *rates.RoutingDiscount
@@ -154,13 +155,13 @@ func (s *Server) preparePaidCode(r *http.Request, release *release.Release, rout
 	}
 	a.paid.authority = fresh
 	a.paid.authority.Attribution = labels
-	hold := costReservation{amount: cost.String(), charge: charge.String(), requestID: permit.Attempt.ID}
-	lease, failure := s.deps.Admission.reserveKeyCosted(r.Context(), &a.paid.authority, "code", demand.Tokens(), codeGenerationTimeout+time.Minute, hold, route.Slug)
+	hold := quota.CostReservation{Amount: cost.String(), Charge: charge.String(), RequestID: permit.Attempt.ID}
+	lease, failure := s.deps.Admission.ReserveKeyCosted(r.Context(), &a.paid.authority, "code", demand.Tokens(), codeGenerationTimeout+time.Minute, hold, route.Slug)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_"+failure.Code)
 	}
 	a.lease = lease
-	targetLease, rejection, skip := s.deps.Admission.reserveTarget(r.Context(), &provider, &slot, demand.Tokens(), codeGenerationTimeout+time.Minute, "code")
+	targetLease, rejection, skip := s.deps.Admission.ReserveTarget(r.Context(), &provider, &slot, demand.Tokens(), codeGenerationTimeout+time.Minute, "code")
 	if rejection != nil {
 		return nil, codemode.Refuse(429, "code_paid_target_rate_limited")
 	}
@@ -177,9 +178,9 @@ func (s *Server) preparePaidCode(r *http.Request, release *release.Release, rout
 	return a, nil
 }
 
-func (s *Server) reservePaidSupply(ctx context.Context, provider routing.Provider, slot routing.Slot, hold costReservation) ([]*admission.Lease, error) {
-	return s.reservePaidCaps(ctx, slices.Collect(func(yield func(cappedOwner) bool) {
-		for index, owner := range attemptCaps(&routing.Route{}, &provider, &slot) {
+func (s *Server) reservePaidSupply(ctx context.Context, provider routing.Provider, slot routing.Slot, hold quota.CostReservation) ([]*admission.Lease, error) {
+	return s.reservePaidCaps(ctx, slices.Collect(func(yield func(quota.CappedOwner) bool) {
+		for index, owner := range quota.AttemptCaps(&routing.Route{}, &provider, &slot) {
 			if index == 0 {
 				continue
 			}
@@ -190,24 +191,24 @@ func (s *Server) reservePaidSupply(ctx context.Context, provider routing.Provide
 	}), hold)
 }
 
-func (s *Server) reservePaidCaps(ctx context.Context, owners []cappedOwner, hold costReservation) ([]*admission.Lease, error) {
+func (s *Server) reservePaidCaps(ctx context.Context, owners []quota.CappedOwner, hold quota.CostReservation) ([]*admission.Lease, error) {
 	if len(owners) == 0 {
 		return nil, nil
 	}
 	owner := owners[0]
-	if owner.limits == nil {
+	if owner.Limits == nil {
 		return s.reservePaidCaps(ctx, owners[1:], hold)
 	}
-	if failure := s.deps.Admission.checkCostAccounting(ctx); failure != nil {
+	if failure := s.deps.Admission.CheckCostAccounting(ctx); failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_"+failure.Code)
 	}
-	if failure := s.deps.Admission.checkPendingCostAccounting(ctx, owner.id); failure != nil {
+	if failure := s.deps.Admission.CheckPendingCostAccounting(ctx, owner.ID); failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_"+failure.Code)
 	}
-	if !s.deps.Admission.ready() {
+	if !s.deps.Admission.Ready() {
 		return nil, codemode.Refuse(503, "code_limits_unavailable")
 	}
-	lease, err := s.deps.Admission.limiter.Reserve(ctx, hold.on(capRequest(owner, codeGenerationTimeout+time.Minute)))
+	lease, err := s.deps.Admission.Reserve(ctx, hold.On(quota.CapRequest(owner, codeGenerationTimeout+time.Minute)))
 	if _, ok := errors.AsType[*limits.ExceededError](err); ok {
 		return nil, codemode.Refuse(429, "code_budget_exhausted")
 	}
@@ -314,9 +315,9 @@ func (a *codeAttempt) finishPaid(ctx context.Context) {
 		return "failure"
 	}()
 	fact := events.AttemptFact{VendorID: p.provider.VendorID, Class: outcome, TargetID: p.slot.ID, ProviderID: p.provider.ID, ProviderRevisionID: p.provider.RevisionID, UpstreamModel: a.model, SlotID: p.slot.ID, CredentialID: *p.slot.CredentialID, CredentialVersion: *p.slot.CredentialVersion, Price: p.price, PricingPinned: true, Discount: p.discount, CardPinned: true, CardRev: p.card, CardRevisionID: cardID, Budgets: []string{p.route.ID, p.provider.ID, p.slot.ID}, Ordinal: 1, Mode: mode, StartedAt: p.started, Duration: a.server.now().Sub(p.started), Status: p.status, Usage: measured, UsageObserved: measured != nil, UsageComplete: observed, BillingUncertain: a.dispatched && !observed}
-	p.targetLease.settle(ctx, a.dispatched, a.usage.Total)
+	p.targetLease.Settle(ctx, a.dispatched, a.usage.Total)
 	for _, lease := range p.supplyLeases {
-		settleKey(ctx, lease, a.dispatched, a.usage.Total, a.server.log)
+		quota.SettleKey(ctx, lease, a.dispatched, a.usage.Total, a.server.log)
 	}
 	if !a.dispatched {
 		return

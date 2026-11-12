@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -62,12 +63,12 @@ func (s *Server) prepareResearch(r *http.Request, release *release.Release, rout
 		}
 		quota.Options.Limits = &copy
 	}
-	a.providerLease, failure = s.deps.Admission.reserveCodeProvider(ctx, account.ProviderID, quota, 0, researchTimeout+time.Minute)
+	a.providerLease, failure = s.deps.Admission.ReserveCodeProvider(ctx, account.ProviderID, quota, 0, researchTimeout+time.Minute)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_provider_rate_limited")
 	}
 	if r.Method == http.MethodGet {
-		a.streamLease, failure = s.deps.Admission.reserveResearchStream(ctx, streamAuthority, route.Slug, service, account.ProviderID, a.config.Options.Limits)
+		a.streamLease, failure = s.deps.Admission.ReserveResearchStream(ctx, streamAuthority, route.Slug, service, account.ProviderID, a.config.Options.Limits, researchTimeout)
 		if failure != nil {
 			return nil, codemode.Refuse(failure.Status, "code_research_stream_limited")
 		}
@@ -85,7 +86,7 @@ func (s *Server) prepareResearch(r *http.Request, release *release.Release, rout
 // bypass work concurrency; GET streams reserve separate concurrency below.
 func researchRateAuthority(authority keyauthority.Authority, control bool) keyauthority.Authority {
 	// This also clones the nested route and end-user policies before editing.
-	authority = withoutCostBudgets(authority)
+	authority = quota.WithoutCostBudgets(authority)
 	authority.Policy.TokensPerMinute = nil
 	authority.BudgetGroupTPM = nil
 	if control {
@@ -165,7 +166,7 @@ func researchBinding(key string, route codemode.Route, service string, account c
 func (a *researchAttempt) finish(ctx context.Context) {
 	// Research consumes requests and concurrency, without inference token usage.
 	zero := int64(0)
-	settleKey(ctx, a.lease, a.dispatched, &zero, a.log)
-	settleKey(ctx, a.providerLease, a.dispatched, &zero, a.log)
-	settleKey(ctx, a.streamLease, a.dispatched, &zero, a.log)
+	quota.SettleKey(ctx, a.lease, a.dispatched, &zero, a.log)
+	quota.SettleKey(ctx, a.providerLease, a.dispatched, &zero, a.log)
+	quota.SettleKey(ctx, a.streamLease, a.dispatched, &zero, a.log)
 }

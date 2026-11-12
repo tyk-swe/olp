@@ -1,4 +1,4 @@
-package gateway
+package quota
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits/admission"
 )
 
-func (a *Admission) reserveAggregateBudgets(ctx context.Context, authority *keyauthority.Authority, ttl time.Duration, hold costReservation, costChecked *bool) (*admission.Lease, *fault.Error) {
+func (a *Admission) ReserveAggregateBudgets(ctx context.Context, authority *keyauthority.Authority, ttl time.Duration, hold CostReservation, costChecked *bool) (*admission.Lease, *fault.Error) {
 	labels := authority.BudgetAttribution()
 	if !authority.OrganizationBudget.Limited() && !authority.InstallationBudget.Limited() && !authority.ProjectBudget.Limited() && !authority.ProjectAttributionBudgets.Matches(labels) {
 		return nil, nil
@@ -32,17 +32,17 @@ func (a *Admission) reserveAggregateBudgets(ctx context.Context, authority *keya
 			continue
 		}
 		if e := a.checkCostAccountingOnce(ctx, costChecked); e != nil {
-			settleKey(ctx, chain, false, nil, a.logger())
+			SettleKey(ctx, chain, false, nil, a.Logger())
 			return nil, e
 		}
-		if !a.ready() || boundary.subject == "" {
-			settleKey(ctx, chain, false, nil, a.logger())
-			return nil, limitsUnavailable()
+		if !a.Ready() || boundary.subject == "" {
+			SettleKey(ctx, chain, false, nil, a.Logger())
+			return nil, LimitsUnavailable()
 		}
 		owner := limits.AggregateBudgetID(boundary.level, boundary.subject)
 		lease, failure := a.reserveCostBoundary(ctx, authority.ID, owner, boundary.level, "budget."+boundary.level, authority.BudgetIncreases[owner], boundary.policy, ttl, hold, costChecked)
 		if failure != nil {
-			settleKey(ctx, chain, false, nil, a.logger())
+			SettleKey(ctx, chain, false, nil, a.Logger())
 			return nil, failure
 		}
 		lease.Join(chain)
@@ -55,17 +55,17 @@ func (a *Admission) reserveAggregateBudgets(ctx context.Context, authority *keya
 			continue
 		}
 		if e := a.checkCostAccountingOnce(ctx, costChecked); e != nil {
-			settleKey(ctx, chain, false, nil, a.logger())
+			SettleKey(ctx, chain, false, nil, a.Logger())
 			return nil, e
 		}
-		if !a.ready() || authority.ProjectID == nil {
-			settleKey(ctx, chain, false, nil, a.logger())
-			return nil, limitsUnavailable()
+		if !a.Ready() || authority.ProjectID == nil {
+			SettleKey(ctx, chain, false, nil, a.Logger())
+			return nil, LimitsUnavailable()
 		}
 		owner := limits.AttributionBudgetID(*authority.ProjectID, key, value)
 		lease, failure := a.reserveCostBoundary(ctx, authority.ID, owner, "project attribution", "attribution_budgets."+key+"."+value, authority.BudgetIncreases[owner], &policy, ttl, hold, costChecked)
 		if failure != nil {
-			settleKey(ctx, chain, false, nil, a.logger())
+			SettleKey(ctx, chain, false, nil, a.Logger())
 			return nil, failure
 		}
 		lease.Join(chain)
@@ -84,32 +84,32 @@ func budgetKind(basis limits.Basis) string {
 
 // Every aggregate boundary uses the same reservation and fail-closed semantics.
 // The caller attaches successful leases or refunds earlier boundaries on refusal.
-func (a *Admission) reserveCostBoundary(ctx context.Context, keyID, owner, label, param string, increases string, policy *keyauthority.BudgetPolicy, ttl time.Duration, hold costReservation, costChecked *bool) (*admission.Lease, *fault.Error) {
+func (a *Admission) reserveCostBoundary(ctx context.Context, keyID, owner, label, param string, increases string, policy *keyauthority.BudgetPolicy, ttl time.Duration, hold CostReservation, costChecked *bool) (*admission.Lease, *fault.Error) {
 	if e := a.checkCostAccountingOnce(ctx, costChecked); e != nil {
 		return nil, e
 	}
-	if e := a.checkPendingCostAccounting(ctx, owner); e != nil {
+	if e := a.CheckPendingCostAccounting(ctx, owner); e != nil {
 		return nil, e
 	}
-	request := hold.on(admission.Request{
+	request := hold.On(admission.Request{
 		Lookup: limits.AggregateBudgetLookup(owner), LeaseTTL: ttl,
 		Cost: admission.Budget(limits.Owner{ID: owner, Kind: limits.OwnerAggregate, Basis: policy.Basis()},
 			policy.DailyCostLimit, policy.WeeklyCostLimit, policy.MonthlyCostLimit, increases),
 	})
-	decision, cancel := context.WithTimeout(ctx, reserveTimeout)
+	decision, cancel := context.WithTimeout(ctx, ReserveTimeout)
 	defer cancel()
 	lease, err := a.limiter.Reserve(decision, request)
 	if err == nil {
 		return lease, nil
 	}
 	if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
-		a.recordRejection(exceeded.Dimension)
-		failure := rateLimitedBasis(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate, exceeded.Basis)
+		a.RecordRejection(exceeded.Dimension)
+		failure := RateLimitedBasis(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate, exceeded.Basis)
 		failure.Message = "The " + label + " " + budgetKind(policy.Basis()) + " was exhausted. Unpriced attempts accrue 0."
 		failure.Param = &param
 		return nil, failure
 	}
-	return nil, a.outage(keyID, true, err)
+	return nil, a.Outage(keyID, true, err)
 }
 
 func projectBudgetSubject(project *string) string {
@@ -117,55 +117,6 @@ func projectBudgetSubject(project *string) string {
 		return ""
 	}
 	return *project
-}
-
-// System work has no key/group/end-user spend but shares aggregate invoice caps.
-func (s *Server) reserveSystemBudgets(ctx context.Context, x *call) *fault.Error {
-	source, ok := s.deps.Runtime.(interface {
-		BudgetAuthority(*string) (keyauthority.Authority, error)
-	})
-	if !ok {
-		return nil
-	}
-	authority, err := source.BudgetAuthority(x.route.ProjectID)
-	if err != nil {
-		return limitsUnavailable()
-	}
-	x.authority.BudgetIncreases = authority.BudgetIncreases
-	x.authority.OrganizationID = authority.OrganizationID
-	x.authority.OrganizationBudget = authority.OrganizationBudget
-	x.authority.InstallationID = authority.InstallationID
-	x.authority.InstallationBudget = authority.InstallationBudget
-	x.authority.ProjectBudget = authority.ProjectBudget
-	x.authority.ProjectAttributionBudgets = authority.ProjectAttributionBudgets
-	authority.Attribution = x.attribution
-
-	if x.callerCostExempt() {
-		authority = withoutCostBudgets(authority)
-	}
-	costChecked := callerCostBudgeted(&authority, x.limitRoute())
-	if costChecked {
-		if failure := s.deps.Admission.checkCostAccounting(ctx); failure != nil {
-			return failure
-		}
-	}
-	var failure *fault.Error
-	x.lease, failure = s.deps.Admission.reserveAggregateBudgets(ctx, &authority, time.Duration(x.route.OverallTimeout)*time.Millisecond, s.costReservation(x, authority), &costChecked)
-	return failure
-}
-
-func (x *call) admissionAuthority(authority keyauthority.Authority) keyauthority.Authority {
-	if x == nil {
-		return authority
-	}
-	authority.Attribution = x.attribution
-	if x.retainedAdmission != nil {
-		return x.retainedAdmission.authority(authority, x.callerCostExempt())
-	}
-	if (x.actor == "api_key_resource" && x.unpricedRetainedControl()) || x.callerCostExempt() {
-		return withoutCostBudgets(authority)
-	}
-	return authority
 }
 
 func budgetBoundaryError(e *fault.Error, name, param string) *fault.Error {
@@ -176,7 +127,7 @@ func budgetBoundaryError(e *fault.Error, name, param string) *fault.Error {
 
 // budgetBoundary retains only a fixed hierarchy label, never a request label/value,
 // route name, owner identifier or provider error text.
-func budgetBoundary(err *fault.Error) string {
+func BudgetBoundary(err *fault.Error) string {
 	if err == nil || err.Code != "budget_exhausted" {
 		return ""
 	}

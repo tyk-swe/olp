@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/release"
@@ -55,7 +56,7 @@ var probeRequests = map[string]struct {
 // reported to checkpoint. Probes need shared state to divide work and share
 // results, so without it this returns at once.
 func (s *Server) RunHealthProbes(ctx context.Context, checkpoint func(ctx context.Context, probed int, err error)) {
-	if !s.deps.Admission.ready() {
+	if !s.deps.Admission.Ready() {
 		return
 	}
 	ticker := time.NewTicker(probeTick)
@@ -80,10 +81,10 @@ func (s *Server) probeDue(ctx context.Context) (int, error) {
 	if release == nil || release.Snapshot() == nil {
 		return 0, nil
 	}
-	limiter := s.deps.Admission.fleet
+	limiter := s.deps.Admission.Fleet()
 	probed := 0
 	for _, target := range probeTargets(release.Snapshot()) {
-		call, cancel := context.WithTimeout(ctx, reserveTimeout)
+		call, cancel := context.WithTimeout(ctx, quota.ReserveTimeout)
 		claimed, err := limiter.ClaimProbe(call, target.key(), target.interval)
 		cancel()
 		if err != nil {
@@ -209,7 +210,7 @@ func (s *Server) probe(ctx context.Context, release *release.Release, target pro
 // fleet circuit until the next probe can decide again, a healthy one closes
 // it.
 func (s *Server) shareProbe(ctx context.Context, limiter *fleet.State, target probeTarget, result fleet.ProbeResult) error {
-	call, cancel := context.WithTimeout(ctx, reserveTimeout)
+	call, cancel := context.WithTimeout(ctx, quota.ReserveTimeout)
 	defer cancel()
 	if err := limiter.RecordProbe(call, target.provider, result); err != nil {
 		return err

@@ -49,10 +49,8 @@ func (s *Server) settleWorkflowModelAttempt(ctx context.Context, x *call, fact e
 	settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), events.PersistTimeout)
 	defer cancel()
 	snapshots, settleErr := settler.SettleWorkflow(settleCtx, event, len(event.Attempts)-1)
-	if s.deps.Admission != nil && s.deps.Admission.limiter != nil {
-		if err := s.deps.Admission.limiter.InstallSnapshots(settleCtx, snapshots); err != nil {
-			return s.workflowSettlementFailure(ctx, x, err)
-		}
+	if err := s.deps.Admission.InstallSnapshots(settleCtx, snapshots); err != nil {
+		return s.workflowSettlementFailure(ctx, x, err)
 	}
 	if settleErr != nil {
 		return s.workflowSettlementFailure(ctx, x, settleErr)

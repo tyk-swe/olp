@@ -21,10 +21,8 @@ func (s *Server) observeGeminiInteraction(ctx context.Context, owner, localID, s
 	if err != nil {
 		return ingest.Persisted{}, err
 	}
-	if s.deps.Admission != nil && s.deps.Admission.limiter != nil {
-		if err := s.deps.Admission.limiter.InstallSnapshots(ctx, result.CostSnapshots); err != nil {
-			s.log.Warn("interaction cost snapshot application failed; reconciliation will repair it", "error_type", "cost_snapshot")
-		}
+	if err := s.deps.Admission.InstallSnapshots(ctx, result.CostSnapshots); err != nil {
+		s.log.Warn("interaction cost snapshot application failed; reconciliation will repair it", "error_type", "cost_snapshot")
 	}
 	return result, nil
 }

@@ -23,7 +23,7 @@ func (s *Server) selectionOptions(ctx context.Context, x *call) routing.Options 
 		CheckSlots: true, CredentialEligibility: s.deps.Runtime.Eligibility,
 		UnconfinedPlugins: s.cfg.UnconfinedPlugins, Context: ctx,
 	}
-	if s.deps.Admission.ready() {
+	if s.deps.Admission.Ready() {
 		options.Supply = s.deps.Admission
 	}
 	if s.fleet.marked() {

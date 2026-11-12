@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	limitadmission "github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/limits/scripts"
@@ -190,7 +191,7 @@ func newSurfaceHarness(t *testing.T, limited bool) *surfaceHarness {
 		if err != nil {
 			t.Fatal(err)
 		}
-		dependencies.Admission = NewAdmission(limitadmission.New(runner), fleet.New(runner), func() limitadmission.OutagePolicy { return limitadmission.FailClosed }, slog.New(slog.DiscardHandler))
+		dependencies.Admission = quota.NewAdmission(limitadmission.New(runner), fleet.New(runner), func() limitadmission.OutagePolicy { return limitadmission.FailClosed }, slog.New(slog.DiscardHandler))
 	}
 	h := newHarness(t, Config{MaxMediaBodyBytes: 1 << 20}, dependencies)
 	spool, err := staging.NewSpool(t.TempDir(), staging.MinCapacityBytes, nil)

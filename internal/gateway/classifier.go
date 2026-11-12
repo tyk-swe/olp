@@ -15,6 +15,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -252,6 +253,6 @@ func (s *Server) admitClassifier(ctx context.Context, x *call) *fault.Error {
 	ttl := time.Duration(x.named().OverallTimeout) * time.Millisecond
 	var e *fault.Error
 	admitted := x.admissionAuthority(x.authority)
-	x.lease, e = s.deps.Admission.reserveKeyCosted(ctx, &admitted, x.clientSurface(), keyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), ttl, s.costReservation(x, x.authority), x.limitRoute())
+	x.lease, e = s.deps.Admission.ReserveKeyCosted(ctx, &admitted, x.clientSurface(), quota.KeyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), ttl, s.costReservation(x, x.authority), x.limitRoute())
 	return e
 }

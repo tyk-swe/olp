@@ -11,6 +11,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operationplan"
@@ -274,7 +275,7 @@ func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *call, bod
 		return fail(e)
 	}
 	admitted := x.admissionAuthority(x.authority)
-	e = s.admitCacheAware(ctx, x, &admitted, keyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), overall, s.costReservation(x, x.authority))
+	e = s.admitCacheAware(ctx, x, &admitted, quota.KeyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), overall, s.costReservation(x, x.authority))
 	if e != nil {
 		return fail(e)
 	}

@@ -18,6 +18,7 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/geminilifecycle"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
@@ -57,7 +58,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 		if p != nil {
 			var actual *int64
 			if len(x.facts) > 0 {
-				actual = settledAttemptTokens(&x.facts[len(x.facts)-1], x.estimate)
+				actual = quota.SettledAttemptTokens(&x.facts[len(x.facts)-1], x.estimate)
 			}
 			s.settlePinHold(r.Context(), x, p.hold, actual)
 		}
@@ -140,7 +141,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 	defer cancel()
 	sized := int64(len(body)) / 4
 	x.estimate, x.sizedInput = max(resourceEstimate, sized), &sized
-	x.lease, e = s.deps.Admission.reserveKey(ctx, x.admissionAuthority(authority), x.clientSurface(), x.estimate, time.Duration(route.OverallTimeout)*time.Millisecond, x.limitRoute())
+	x.lease, e = s.deps.Admission.ReserveKey(ctx, x.admissionAuthority(authority), x.clientSurface(), x.estimate, time.Duration(route.OverallTimeout)*time.Millisecond, x.limitRoute())
 	if e != nil {
 		fail(e)
 		return
@@ -419,7 +420,7 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 		if p != nil {
 			s.settlePinHold(r.Context(), x, p.hold, nil)
 		}
-		settleKey(r.Context(), x.lease, x.dispatched, x.settledTokens(), s.log)
+		quota.SettleKey(r.Context(), x.lease, x.dispatched, x.settledTokens(), s.log)
 	}()
 	fail := func(e *fault.Error) {
 		x.failure, status = e, e.Status

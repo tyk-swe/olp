@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 )
 
@@ -54,10 +55,10 @@ func (f *fleetHealth) unhealthy(providerID string) bool {
 // and follows the fleet's, until ctx ends. Without shared state it returns at
 // once, and local circuits alone decide.
 func (s *Server) RunFleetHealth(ctx context.Context) {
-	if !s.deps.Admission.ready() {
+	if !s.deps.Admission.Ready() {
 		return
 	}
-	limiter := s.deps.Admission.fleet
+	limiter := s.deps.Admission.Fleet()
 	ticker := time.NewTicker(fleetPoll)
 	defer ticker.Stop()
 	s.pollFleet(ctx, limiter)
@@ -66,7 +67,7 @@ func (s *Server) RunFleetHealth(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case change := <-s.health.changes:
-			call, cancel := context.WithTimeout(ctx, reserveTimeout)
+			call, cancel := context.WithTimeout(ctx, quota.ReserveTimeout)
 			err := limiter.PublishCircuit(call, change.provider, change.until)
 			cancel()
 			if err != nil {
@@ -81,7 +82,7 @@ func (s *Server) RunFleetHealth(ctx context.Context) {
 // pollFleet replaces the fleet's circuits with the shared state. An
 // unreadable state forgets them: a stale mark would outlive its bound.
 func (s *Server) pollFleet(ctx context.Context, limiter *fleet.State) {
-	call, cancel := context.WithTimeout(ctx, reserveTimeout)
+	call, cancel := context.WithTimeout(ctx, quota.ReserveTimeout)
 	defer cancel()
 	open, err := limiter.Circuits(call, s.now())
 	if err != nil {

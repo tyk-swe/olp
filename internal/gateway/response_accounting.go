@@ -173,10 +173,8 @@ func (s *Server) applyResponseObservation(ctx context.Context, localID string, o
 	if err != nil {
 		return fault.ServerError(http.StatusServiceUnavailable, "response_usage_unavailable", "The stored response usage could not be reconciled; retry the request.")
 	}
-	if s.deps.Admission != nil && s.deps.Admission.limiter != nil {
-		if err := s.deps.Admission.limiter.InstallSnapshots(ctx, result.CostSnapshots); err != nil {
-			s.log.Warn("response cost snapshot application failed; reconciliation will repair it", "error", err)
-		}
+	if err := s.deps.Admission.InstallSnapshots(ctx, result.CostSnapshots); err != nil {
+		s.log.Warn("response cost snapshot application failed; reconciliation will repair it", "error", err)
 	}
 	return nil
 }

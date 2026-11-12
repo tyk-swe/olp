@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/geminilifecycle"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -457,20 +458,20 @@ func (s *Server) relayGeminiLive(ctx context.Context, x *call, p *pin, client, u
 						if observed == nil {
 							observed = turn
 						} else {
-							observed.InputTokens = addBounded(observed.InputTokens, turn.InputTokens)
-							observed.OutputTokens = addBounded(observed.OutputTokens, turn.OutputTokens)
-							observed.TotalTokens = addBounded(observed.TotalTokens, turn.TotalTokens)
+							observed.InputTokens = quota.AddBounded(observed.InputTokens, turn.InputTokens)
+							observed.OutputTokens = quota.AddBounded(observed.OutputTokens, turn.OutputTokens)
+							observed.TotalTokens = quota.AddBounded(observed.TotalTokens, turn.TotalTokens)
 							if turn.ReasoningTokens != nil {
 								reasoning := *turn.ReasoningTokens
 								if observed.ReasoningTokens != nil {
-									reasoning = addBounded(reasoning, *observed.ReasoningTokens)
+									reasoning = quota.AddBounded(reasoning, *observed.ReasoningTokens)
 								}
 								observed.ReasoningTokens = &reasoning
 							}
 							if turn.CachedInputTokens != nil {
 								cached := *turn.CachedInputTokens
 								if observed.CachedInputTokens != nil {
-									cached = addBounded(cached, *observed.CachedInputTokens)
+									cached = quota.AddBounded(cached, *observed.CachedInputTokens)
 								}
 								observed.CachedInputTokens = &cached
 							}
@@ -485,7 +486,7 @@ func (s *Server) relayGeminiLive(ctx context.Context, x *call, p *pin, client, u
 									observed.ToolCalls = turn.ToolCalls
 								} else {
 									for tool, invocations := range turn.ToolCalls {
-										observed.ToolCalls[tool] = addBounded(observed.ToolCalls[tool], invocations)
+										observed.ToolCalls[tool] = quota.AddBounded(observed.ToolCalls[tool], invocations)
 									}
 									if observed.ToolCalls["google_search_prompt"] > 1 {
 										observed.ToolCalls["google_search_prompt"] = 1
@@ -610,7 +611,7 @@ func mergeUsageShare(slot **int64, value *int64) {
 	}
 	total := *value
 	if *slot != nil {
-		total = addBounded(total, **slot)
+		total = quota.AddBounded(total, **slot)
 	}
 	*slot = &total
 }
@@ -669,15 +670,15 @@ func geminiExtendedUsage(input, output int64, cached, thoughts, toolUse, total *
 	}
 	usageValue := &wire.Usage{CachedInputTokens: cached}
 	if toolUse != nil {
-		input = addBounded(input, *toolUse)
+		input = quota.AddBounded(input, *toolUse)
 	}
 	if thoughts != nil {
-		output = addBounded(output, *thoughts)
+		output = quota.AddBounded(output, *thoughts)
 		reasoning := *thoughts
 		usageValue.ReasoningTokens = &reasoning
 	}
 	usageValue.InputTokens, usageValue.OutputTokens = input, output
-	usageValue.TotalTokens = addBounded(input, output)
+	usageValue.TotalTokens = quota.AddBounded(input, output)
 	if total != nil {
 		usageValue.TotalTokens = max(usageValue.TotalTokens, *total)
 	}

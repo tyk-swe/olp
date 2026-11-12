@@ -8,6 +8,7 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -57,7 +58,7 @@ func (p retainedAdmissionPlan) authority(authority keyauthority.Authority, costE
 		return researchRateAuthority(authority, false)
 	}
 	if costExempt {
-		return withoutCostBudgets(authority)
+		return quota.WithoutCostBudgets(authority)
 	}
 	return authority
 }
@@ -94,7 +95,7 @@ func (s *Server) admitRetainedPageCost(ctx context.Context, x *call, authority k
 	authority = retainedCostAuthority(authority)
 	authority.Attribution = x.attribution
 	authority.Policy.RouteLimits = nil // each route has its own page lease
-	lease, failure := s.deps.Admission.reserveKey(ctx, authority, x.clientSurface(), resourceEstimate, ttl)
+	lease, failure := s.deps.Admission.ReserveKey(ctx, authority, x.clientSurface(), resourceEstimate, ttl)
 	if failure != nil {
 		return failure
 	}
@@ -153,7 +154,7 @@ func (s *Server) reserveRetainedPage(ctx context.Context, x *call, authority key
 	if retainedPageFreeControl(entries, limit) {
 		authority = researchRateAuthority(authority, false)
 	}
-	lease, failure := s.deps.Admission.reserveKey(ctx, authority, x.clientSurface(), max(resourceEstimate, x.estimate), ttl)
+	lease, failure := s.deps.Admission.ReserveKey(ctx, authority, x.clientSurface(), max(resourceEstimate, x.estimate), ttl)
 	x.lease = lease
 	return failure
 }

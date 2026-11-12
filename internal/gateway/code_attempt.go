@@ -19,6 +19,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/release"
 
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/upstream"
 )
@@ -107,7 +108,7 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 		InitialRecovery: observation.Recoverable, Recovery: recovery, Operation: operation, Providers: providers, ModelSource: release.Snapshot(), ModelPath: ingress.path, ModelTransport: transport, PreviousResponse: observation.PreviousResponse,
 	})
 	if err != nil {
-		settleKey(r.Context(), lease, false, nil, s.log)
+		quota.SettleKey(r.Context(), lease, false, nil, s.log)
 		if refusal, ok := errors.AsType[*codemode.Refusal](err); ok && refusal.Code == "code_account_unavailable" && (recovery == nil || recovery.AccountID == "") && transport == codeadapter.HTTP && observation.Recoverable && len(route.PaidFallbackTargets) > 0 {
 			ledger, supported := s.deps.CodeLedger.(PaidCodeLedger)
 			if !supported {
@@ -144,7 +145,7 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 		return nil, codemode.Refuse(409, "code_attribution_changed")
 	}
 	if !reflect.DeepEqual(authority.Policy, permit.Authority.Policy) || !reflect.DeepEqual(authority.ProjectEndUserPolicy, permit.Authority.ProjectEndUserPolicy) || !reflect.DeepEqual(authority.BudgetGroupID, permit.Authority.BudgetGroupID) || !reflect.DeepEqual(authority.GroupLimits(), permit.Authority.GroupLimits()) {
-		settleKey(r.Context(), a.lease, false, nil, s.log)
+		quota.SettleKey(r.Context(), a.lease, false, nil, s.log)
 		a.lease = nil
 		fresh := permit.Authority
 		if failure = s.checkKeyAddress(r, fresh); failure != nil {
@@ -175,7 +176,7 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 	a.config, a.endpoint, a.observer = target.config, target.endpoint, codeObserver(target.endpoint)
 	a.adapter = target.adapter.Adapter
 	a.identityOriginator = target.adapter.CompatibilityOriginator(route)
-	a.providerLease, failure = s.deps.Admission.reserveCodeProvider(r.Context(), permit.Account.ProviderID, target.config, observation.Estimate, codeGenerationTimeout+time.Minute)
+	a.providerLease, failure = s.deps.Admission.ReserveCodeProvider(r.Context(), permit.Account.ProviderID, target.config, observation.Estimate, codeGenerationTimeout+time.Minute)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_provider_rate_limited")
 	}
@@ -293,8 +294,8 @@ func (a *codeAttempt) finish(ctx context.Context) {
 	if a.paid != nil {
 		a.finishPaid(ctx)
 	}
-	settleKey(ctx, a.lease, a.dispatched, a.usage.Total, a.server.log)
-	settleKey(ctx, a.providerLease, a.dispatched, a.usage.Total, a.server.log)
+	quota.SettleKey(ctx, a.lease, a.dispatched, a.usage.Total, a.server.log)
+	quota.SettleKey(ctx, a.providerLease, a.dispatched, a.usage.Total, a.server.log)
 }
 
 func (a *codeAttempt) outcome(ctx context.Context, outcome codemode.Outcome) {

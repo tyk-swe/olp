@@ -7,6 +7,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/export/capture"
 	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/telemetry"
@@ -73,10 +74,10 @@ func (s *Server) finish(x *call, out *outcome, status int) {
 		switch {
 		case out != nil && out.err != nil:
 			env.ErrorClass = out.err.Code
-			env.BudgetBoundary = budgetBoundary(out.err)
+			env.BudgetBoundary = quota.BudgetBoundary(out.err)
 		case out == nil && x.failure != nil:
 			env.ErrorClass = x.failure.Code
-			env.BudgetBoundary = budgetBoundary(x.failure)
+			env.BudgetBoundary = quota.BudgetBoundary(x.failure)
 		}
 		if out != nil {
 			env.Committed = out.committed

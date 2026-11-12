@@ -10,6 +10,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -117,16 +118,16 @@ route:
 				x.facts = append(x.facts, s.rejectedFact(x, attempt, slot, x.spent, gate.rejection))
 				last = gate.rejection
 				met = meet(met, gate.rejection.class)
-				if gate.rejection.quota == quotaRoute {
+				if gate.rejection.quota == quota.Route {
 					break route
 				}
-				next = gate.rejection.quota == quotaConnection // every sibling shares this quota
+				next = gate.rejection.quota == quota.Connection // every sibling shares this quota
 			case gateUnmeterable:
 				unmeterable = true
-				if gate.quota == quotaRoute {
+				if gate.quota == quota.Route {
 					break route
 				}
-				next = gate.quota == quotaConnection
+				next = gate.quota == quota.Connection
 			case gateAdmitted:
 				ready, admissionErr := gate.hold.begin(ctx, s, x, attempt, &provider, slot)
 				if admissionErr != nil {
@@ -195,7 +196,7 @@ route:
 		return attemptOutcome[Result]{err: last.toError()}, met
 	case unmeterable:
 		// Every eligible target had a quota that could not be consulted.
-		return attemptOutcome[Result]{err: limitsUnavailable()}, met
+		return attemptOutcome[Result]{err: quota.LimitsUnavailable()}, met
 	}
 	return attemptOutcome[Result]{err: fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider is currently able to serve `"+x.named().Slug+"`.")}, met
 }

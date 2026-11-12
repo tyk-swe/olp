@@ -18,6 +18,7 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -312,7 +313,7 @@ func (s *Server) reserveState(ctx context.Context, x *call, authority keyauthori
 		return e
 	}
 	var e *fault.Error
-	x.lease, e = s.deps.Admission.reserveKey(ctx, x.admissionAuthority(authority), x.clientSurface(), max(resourceEstimate, x.estimate), overall, x.limitRoute())
+	x.lease, e = s.deps.Admission.ReserveKey(ctx, x.admissionAuthority(authority), x.clientSurface(), max(resourceEstimate, x.estimate), overall, x.limitRoute())
 	return e
 }
 
@@ -380,7 +381,7 @@ func (s *Server) resourceSettle(ctx context.Context, x *call, p *pin) {
 		s.settlePinHold(ctx, x, p.hold, nil)
 	}
 	s.settleCaps(ctx, x)
-	settleKey(ctx, x.lease, x.dispatched, nil, s.log)
+	quota.SettleKey(ctx, x.lease, x.dispatched, nil, s.log)
 }
 
 func upstreamString(body json.RawMessage, name string) (string, bool) {

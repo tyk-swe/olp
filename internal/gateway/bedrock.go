@@ -18,6 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/routeidentity"
@@ -130,7 +131,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family wir
 		actual := x.settledTokens()
 		s.settlePinHold(r.Context(), x, p.hold, actual)
 		s.recordCost(x)
-		settleKey(r.Context(), x.lease, x.dispatched, actual, s.log)
+		quota.SettleKey(r.Context(), x.lease, x.dispatched, actual, s.log)
 	}()
 	overall := time.Duration(route.OverallTimeout) * time.Millisecond
 	if e := s.reserveState(r.Context(), x, authority, overall); e != nil {

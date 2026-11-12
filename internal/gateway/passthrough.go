@@ -17,6 +17,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -215,7 +216,7 @@ slots:
 	}
 	if !found {
 		if unmeterable {
-			fail(limitsUnavailable())
+			fail(quota.LimitsUnavailable())
 			return
 		}
 		if len(provider.Slots) > 0 {
@@ -227,7 +228,7 @@ slots:
 		if x.dispatched && hold != nil {
 			x.spendCaps(hold.budgets, attempt)
 		}
-		s.settlePinHold(r.Context(), x, hold, settledAttemptTokens(factP, estimate))
+		s.settlePinHold(r.Context(), x, hold, quota.SettledAttemptTokens(factP, estimate))
 	}()
 	if e := s.reserveSessionCost(ctx, x, x.authority, attempt, time.Until(deadline)); e != nil {
 		fail(e)

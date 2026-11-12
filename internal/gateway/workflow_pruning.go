@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/operationplan"
@@ -272,14 +273,14 @@ func (s *Server) typeSafeRelevance(ctx context.Context, parent *call, policy gua
 	defer cancel()
 	x.estimate = requestEstimate(x)
 	authority := cacheAuthority(x.admissionAuthority(x.authority), false, true, false)
-	lease, problem := s.deps.Admission.reserveKeyCosted(stepCtx, &authority, x.clientSurface(), keyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), time.Duration(x.named().OverallTimeout)*time.Millisecond, costReservation{}, x.limitRoute())
+	lease, problem := s.deps.Admission.ReserveKeyCosted(stepCtx, &authority, x.clientSurface(), quota.KeyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), time.Duration(x.named().OverallTimeout)*time.Millisecond, quota.CostReservation{}, x.limitRoute())
 	if problem != nil {
 		return nil, problem
 	}
 	result := runAttempts(stepCtx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(attemptCtx context.Context, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *attemptFailure) {
 		return s.unaryAttempt(attemptCtx, x, attempt, provider, slot, fact)
 	}})
-	settleKey(ctx, lease, x.stepDispatched, x.settledTokensFor(x.facts[priorFacts:], x.estimate), s.log)
+	quota.SettleKey(ctx, lease, x.stepDispatched, x.settledTokensFor(x.facts[priorFacts:], x.estimate), s.log)
 	// Later steps must include this independently routed attempt in the same run.
 	parent.facts, parent.spent = x.facts, x.spent
 	if result.err != nil {

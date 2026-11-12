@@ -11,6 +11,7 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -154,8 +155,8 @@ func TestAutomaticReservationsPriceEffectiveGeminiOutputControls(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				if hold := (&Server{}).costReservation(x, budgeted()); hold.amount != tc.cost {
-					t.Fatalf("cost reservation = %q, want %q", hold.amount, tc.cost)
+				if hold := (&Server{}).costReservation(x, budgeted()); hold.Amount != tc.cost {
+					t.Fatalf("cost reservation = %q, want %q", hold.Amount, tc.cost)
 				}
 				prepared, err := x.generationRequest(&provider, attempt.TargetID, attempt.UpstreamModel)
 				if err != nil || prepared.wire != wire.Gemini {
@@ -285,7 +286,7 @@ func TestRouteChargeBoundSortsDearestRetriesAndVideoCard(t *testing.T) {
 		cardPinned:         true,
 		cardRev:            loadedCardRevision(t, rates.RoutingCardRevision{Markup: "1.5"}),
 	}
-	if hold := videoExec.attemptCostReservation(budgeted(), videoAttempt); hold.amount != "1" || hold.charge != "1.5" {
+	if hold := videoExec.attemptCostReservation(budgeted(), videoAttempt); hold.Amount != "1" || hold.Charge != "1.5" {
 		t.Fatalf("video attemptCostReservation = %+v, want amount=1 charge=1.5", hold)
 	}
 }
@@ -375,7 +376,7 @@ func TestRetainedPageOnlyAdmitsCostsForEntriesBeingRead(t *testing.T) {
 			*rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{ProviderKind: provider.Kind, Model: "paid", Operation: "fine_tuning", PerRequest: new("1")}}),
 		}},
 	}
-	s := &Server{now: func() time.Time { return now }, deps: Dependencies{Admission: &Admission{
+	s := &Server{now: func() time.Time { return now }, deps: Dependencies{Admission: &quota.Admission{
 		CostAccountingReady: func(context.Context) error { return errors.New("accounting unavailable") },
 	}}}
 	prepare := func(model string) retainedListEntry {

@@ -13,6 +13,7 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -518,7 +519,7 @@ func (s *Server) listRetainedLifecycle(w http.ResponseWriter, r *http.Request, x
 			if admitted[entry.route.Slug] {
 				continue
 			}
-			lease, gateErr := s.deps.Admission.reserveRouteLimits(ctx, &authority, entry.route.Slug, resourceEstimate, overall, costReservation{}, &costChecked)
+			lease, gateErr := s.deps.Admission.ReserveRouteLimits(ctx, &authority, entry.route.Slug, resourceEstimate, overall, quota.CostReservation{}, &costChecked)
 			if gateErr != nil {
 				fail(gateErr)
 				return gateErr.Status

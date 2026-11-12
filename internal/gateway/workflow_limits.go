@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -83,15 +84,15 @@ func (s *Server) reserveWorkflowRun(ctx context.Context, x *call) (*admission.Le
 	if x.workflow == nil {
 		return nil, nil
 	}
-	if !s.deps.Admission.ready() {
+	if !s.deps.Admission.Ready() {
 		if x.generation.runLimits.MaxConcurrentRuns == nil {
 			return nil, nil
 		}
-		return nil, limitsUnavailable()
+		return nil, quota.LimitsUnavailable()
 	}
-	reserveCtx, cancel := context.WithTimeout(ctx, reserveTimeout)
+	reserveCtx, cancel := context.WithTimeout(ctx, quota.ReserveTimeout)
 	defer cancel()
-	lease, err := s.deps.Admission.limiter.Reserve(reserveCtx, admission.Request{
+	lease, err := s.deps.Admission.Reserve(reserveCtx, admission.Request{
 		Lookup:   "run_" + strings.ReplaceAll(x.keyID, "-", ""),
 		LeaseTTL: time.Duration(*x.generation.runLimits.MaxDurationSeconds)*time.Second + time.Minute,
 		Rate:     admission.RateLimits{MaxConcurrency: x.generation.runLimits.MaxConcurrentRuns, TrackConcurrency: true},
@@ -101,7 +102,7 @@ func (s *Server) reserveWorkflowRun(ctx context.Context, x *call) (*admission.Le
 	}
 	var exceeded *limits.ExceededError
 	if errors.As(err, &exceeded) {
-		return nil, rateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate)
+		return nil, quota.RateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate)
 	}
-	return nil, s.deps.Admission.outage(x.keyID, false, err)
+	return nil, s.deps.Admission.Outage(x.keyID, false, err)
 }

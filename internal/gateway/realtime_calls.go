@@ -24,6 +24,7 @@ import (
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -445,7 +446,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if e := s.reserveSessionDebit(bg, x, authority, p.attempt, nil); e != nil {
-		settleKey(r.Context(), x.lease, false, nil, s.log)
+		quota.SettleKey(r.Context(), x.lease, false, nil, s.log)
 		releasePin()
 		cancel()
 		fail(e)
@@ -453,7 +454,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if e := s.reserveSessionCost(bg, x, authority, p.attempt, s.cfg.WebRTCBound); e != nil {
 		s.abandonSessionDebit(r.Context(), x)
-		settleKey(r.Context(), x.lease, false, nil, s.log)
+		quota.SettleKey(r.Context(), x.lease, false, nil, s.log)
 		releasePin()
 		cancel()
 		fail(e)

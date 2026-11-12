@@ -29,6 +29,7 @@ import (
 	"github.com/tyk-swe/olp/internal/export/capture"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
@@ -113,7 +114,7 @@ type Dependencies struct {
 	ResearchAuth   ResearchAuthorizer
 	Runtime        Runtime
 	Sink           events.Sink
-	Admission      *Admission
+	Admission      *quota.Admission
 	Debits         SessionDebitLedger
 	WorkflowRuns   WorkflowRunStore
 	WorkflowTools  WorkflowToolRunner
@@ -759,7 +760,7 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			writeError(w, e)
 			return
 		}
-		reservationEstimate := keyReservationEstimate(x.estimate, s.dispatchableAttempts(x))
+		reservationEstimate := quota.KeyReservationEstimate(x.estimate, s.dispatchableAttempts(x))
 		admitted := x.admissionAuthority(authority)
 		if e = s.admitCacheAware(ctx, x, &admitted, reservationEstimate, overall, s.costReservation(x, authority)); e != nil {
 			x.failure, status = e, e.Status
@@ -774,7 +775,7 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 		}
 		defer func() {
 			if err := workflowLease.Release(ctx); err != nil {
-				s.deps.Admission.logger().Error("release workflow concurrency", "error", err)
+				s.deps.Admission.Logger().Error("release workflow concurrency", "error", err)
 			}
 		}()
 		if x.workflow != nil && x.workflow.runID == "" {

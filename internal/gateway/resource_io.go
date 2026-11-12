@@ -2,10 +2,11 @@ package gateway
 
 import (
 	"encoding/json"
-	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 )
 
 func (s *Server) readResourceBody(w http.ResponseWriter, r *http.Request) ([]byte, *fault.Error) {

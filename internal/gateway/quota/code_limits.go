@@ -1,4 +1,4 @@
-package gateway
+package quota
 
 import (
 	"context"
@@ -16,14 +16,14 @@ import (
 // ReserveCodeRate uses the shared request/token-rate/concurrency counters.
 // Estimates here never become proven hard token bounds or subscription spend.
 func (a *Admission) ReserveCodeRate(ctx context.Context, authority keyauthority.Authority, estimate int64, ttl time.Duration, route ...string) (*admission.Lease, *fault.Error) {
-	authority = withoutCostBudgets(authority)
+	authority = WithoutCostBudgets(authority)
 	// Code forwarding preserves upstream allowance headers rather than adding
 	// the synthetic API-key allowance of the inference surfaces.
-	return a.reserveKey(ctx, authority, "code", estimate, ttl, route...)
+	return a.ReserveKey(ctx, authority, "code", estimate, ttl, route...)
 }
 
 // withoutCostBudgets preserves rate, token, concurrency and identity controls.
-func withoutCostBudgets(authority keyauthority.Authority) keyauthority.Authority {
+func WithoutCostBudgets(authority keyauthority.Authority) keyauthority.Authority {
 	authority.Policy.WeeklyCostLimit = nil
 	authority.Policy.DailyCostLimit = nil
 	authority.Policy.MonthlyCostLimit = nil
@@ -62,22 +62,22 @@ func codeEndUserPolicy(policy *keyauthority.EndUserPolicy) *keyauthority.EndUser
 	return &copy
 }
 
-func (a *Admission) reserveCodeProvider(ctx context.Context, providerID string, configuration routing.Configuration, estimate int64, ttl time.Duration) (*admission.Lease, *fault.Error) {
+func (a *Admission) ReserveCodeProvider(ctx context.Context, providerID string, configuration routing.Configuration, estimate int64, ttl time.Duration) (*admission.Lease, *fault.Error) {
 	request := connectionRequest(&routing.Provider{ID: providerID, Limits: configuration.Options.Limits}, estimate, ttl, "")
 	if !request.HasHardLimits() {
 		return nil, nil
 	}
-	if !a.ready() {
-		return nil, limitsUnavailable()
+	if !a.Ready() {
+		return nil, LimitsUnavailable()
 	}
-	ctx, cancel := context.WithTimeout(ctx, reserveTimeout)
+	ctx, cancel := context.WithTimeout(ctx, ReserveTimeout)
 	defer cancel()
 	lease, err := a.limiter.Reserve(ctx, request)
 	if err == nil {
 		return lease, nil
 	}
 	if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
-		return nil, rateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate)
+		return nil, RateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate)
 	}
-	return nil, limitsUnavailable()
+	return nil, LimitsUnavailable()
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/oif"
@@ -170,14 +171,6 @@ type attemptFailure struct {
 	aggregateTooLarge bool
 }
 
-// The quotas that can reject an attempt before it is dispatched.
-const (
-	quotaConnection = "connection"
-	quotaSlot       = "slot"
-	// quotaRoute is a route's own spend cap, which every target shares.
-	quotaRoute = "route"
-)
-
 // billingUncertain reports whether the upstream may have served and billed
 // work this attempt cannot account for. Anything already delivered to the
 // client was served, and work the upstream may hold is what its acceptance
@@ -225,7 +218,7 @@ func (f *attemptFailure) toError() (result *fault.Error) {
 	}
 	switch f.class {
 	case classLimitsUnavailable:
-		return limitsUnavailable()
+		return quota.LimitsUnavailable()
 	case classAmbiguous:
 		err := fault.ServerError(http.StatusBadGateway, "ambiguous_upstream_result", "The upstream provider may have applied this request; its result could not be confirmed.")
 		err.NoRetry = f.noRetry
@@ -240,9 +233,9 @@ func (f *attemptFailure) toError() (result *fault.Error) {
 		// A quota this gateway enforces was never the upstream's decision, and
 		// saying so would send the caller looking at the wrong system.
 		switch f.quota {
-		case quotaConnection:
+		case quota.Connection:
 			return &fault.Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "rate_limit_exceeded", Message: "The provider connection limit was exceeded.", RetryAfter: f.retryAfter}
-		case quotaSlot:
+		case quota.Slot:
 			return &fault.Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "rate_limit_exceeded", Message: "The provider credential limit was exceeded.", RetryAfter: f.retryAfter}
 		}
 		return &fault.Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "upstream_rate_limit", Message: "The upstream provider is rate limiting requests.", RetryAfter: f.retryAfter}
@@ -307,7 +300,7 @@ func (s *Server) executeModelStep(ctx context.Context, x *call, source *wire.Req
 	first := x.generation.firstStep
 	actual := x.settledTokensFor(x.facts[:first.factEnd], first.estimate)
 	if err := x.lease.Reconcile(stepCtx, *actual); err != nil {
-		if e := s.deps.Admission.outage(x.authority.ID, false, err); e != nil {
+		if e := s.deps.Admission.Outage(x.authority.ID, false, err); e != nil {
 			return &outcome{err: e}
 		}
 	}
@@ -321,19 +314,19 @@ func (s *Server) executeModelStep(ctx context.Context, x *call, source *wire.Req
 	}
 	x.estimate = requestEstimate(x)
 	authority := cacheAuthority(x.admissionAuthority(current), false, true, false)
-	reservation := keyReservationEstimate(x.estimate, s.dispatchableAttempts(x))
-	lease, e := s.deps.Admission.reserveKeyCosted(stepCtx, &authority, x.clientSurface(), reservation, time.Duration(x.named().OverallTimeout)*time.Millisecond, costReservation{}, x.limitRoute())
+	reservation := quota.KeyReservationEstimate(x.estimate, s.dispatchableAttempts(x))
+	lease, e := s.deps.Admission.ReserveKeyCosted(stepCtx, &authority, x.clientSurface(), reservation, time.Duration(x.named().OverallTimeout)*time.Millisecond, quota.CostReservation{}, x.limitRoute())
 	if e != nil {
 		return &outcome{err: e}
 	}
 	if e := s.reserveFallbackCost(stepCtx, x); e != nil {
-		settleKey(ctx, lease, false, nil, s.log)
+		quota.SettleKey(ctx, lease, false, nil, s.log)
 		return &outcome{err: e}
 	}
 	start := len(x.facts)
 	x.stepDispatched = false
 	out := s.execute(stepCtx, x)
-	settleKey(ctx, lease, x.stepDispatched, x.settledTokensFor(x.facts[start:], x.estimate), s.log)
+	quota.SettleKey(ctx, lease, x.stepDispatched, x.settledTokensFor(x.facts[start:], x.estimate), s.log)
 	return out
 }
 
@@ -376,7 +369,7 @@ func (s *Server) slots(x *call, attempt routing.Attempt, provider *routing.Provi
 	}
 	out := make([]routing.Slot, 0, len(ordered))
 	for _, slot := range ordered {
-		if !s.slotAvailable(x, attempt, &slot) || (!s.deps.Admission.ready() && (s.health.coolingDown(provider.ID, slot.ID) || s.health.coolingDown(provider.ID, credentialHealthKey(&slot, s.slotGrantGeneration(&slot))))) {
+		if !s.slotAvailable(x, attempt, &slot) || (!s.deps.Admission.Ready() && (s.health.coolingDown(provider.ID, slot.ID) || s.health.coolingDown(provider.ID, credentialHealthKey(&slot, s.slotGrantGeneration(&slot))))) {
 			continue
 		}
 		out = append(out, slot)

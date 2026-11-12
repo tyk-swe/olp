@@ -46,6 +46,7 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 
 	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -902,8 +903,8 @@ func TestResearchStreamFollowsOutagePolicy(t *testing.T) {
 		{"fail open still refuses provider concurrency", limitadmission.FailOpen, &routing.Limits{MaxConcurrency: &slots}, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			admission := NewAdmission(limiter, fleet.New(runner), func() limitadmission.OutagePolicy { return test.policy }, slog.New(slog.DiscardHandler))
-			lease, failure := admission.reserveResearchStream(t.Context(), authority, routeSlug, "service", "provider", test.provider)
+			admission := quota.NewAdmission(limiter, fleet.New(runner), func() limitadmission.OutagePolicy { return test.policy }, slog.New(slog.DiscardHandler))
+			lease, failure := admission.ReserveResearchStream(t.Context(), authority, routeSlug, "service", "provider", test.provider, researchTimeout)
 			if test.wantRefuse {
 				if failure == nil || failure.Code != "distributed_limits_unavailable" {
 					t.Fatalf("outage admitted the stream: lease=%v failure=%v", lease, failure)

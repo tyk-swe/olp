@@ -179,7 +179,7 @@ func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *call,
 	ctx, cancel := x.routeContext(ctx)
 	defer cancel()
 	var e *fault.Error
-	if x.lease, e = s.deps.Admission.reserveKey(ctx, x.admissionAuthority(authority), x.clientSurface(), x.estimate, overall, x.limitRoute()); e != nil {
+	if x.lease, e = s.deps.Admission.ReserveKey(ctx, x.admissionAuthority(authority), x.clientSurface(), x.estimate, overall, x.limitRoute()); e != nil {
 		s.refuse(x, w, e)
 		return
 	}

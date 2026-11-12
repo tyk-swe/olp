@@ -29,6 +29,7 @@ import (
 	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/routeidentity"
@@ -1015,12 +1016,12 @@ func (s *Server) relayRealtime(ctx context.Context, x *call, p *pin, client, con
 			if inspect {
 				usageMu.Lock()
 				if u := responses.providerFrame(typ, data, x.strict()); u != nil {
-					usage.InputTokens = addBounded(usage.InputTokens, u.InputTokens)
-					usage.OutputTokens = addBounded(usage.OutputTokens, u.OutputTokens)
+					usage.InputTokens = quota.AddBounded(usage.InputTokens, u.InputTokens)
+					usage.OutputTokens = quota.AddBounded(usage.OutputTokens, u.OutputTokens)
 					if u.CachedInputTokens != nil {
 						cached := *u.CachedInputTokens
 						if usage.CachedInputTokens != nil {
-							cached = addBounded(cached, *usage.CachedInputTokens)
+							cached = quota.AddBounded(cached, *usage.CachedInputTokens)
 						}
 						usage.CachedInputTokens = &cached
 					}

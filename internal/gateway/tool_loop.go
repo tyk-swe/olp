@@ -12,6 +12,7 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/mcp"
@@ -253,7 +254,7 @@ func (s *Server) abandonWorkflowDebit(ctx context.Context, x *call) *fault.Error
 			s.log.Warn("workflow debit release failed", "error", err.Error())
 		}
 		s.markSessionUnknown(ctx, x)
-		return limitsUnavailable()
+		return quota.LimitsUnavailable()
 	}
 	x.facts[len(x.facts)-1].Execution = nil
 	x.sessionDebit = nil

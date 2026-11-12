@@ -12,6 +12,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -23,14 +24,14 @@ func addUsageShare(dst **int64, share *int64) {
 	}
 	total := *share
 	if *dst != nil {
-		total = addBounded(total, **dst)
+		total = quota.AddBounded(total, **dst)
 	}
 	*dst = &total
 }
 
 func (sess *webrtcSession) accumulateUsage(u *wire.Usage) {
-	sess.usage.InputTokens = addBounded(sess.usage.InputTokens, u.InputTokens)
-	sess.usage.OutputTokens = addBounded(sess.usage.OutputTokens, u.OutputTokens)
+	sess.usage.InputTokens = quota.AddBounded(sess.usage.InputTokens, u.InputTokens)
+	sess.usage.OutputTokens = quota.AddBounded(sess.usage.OutputTokens, u.OutputTokens)
 	addUsageShare(&sess.usage.CachedInputTokens, u.CachedInputTokens)
 	addUsageShare(&sess.usage.AudioInputTokens, u.AudioInputTokens)
 	addUsageShare(&sess.usage.CachedAudioInputTokens, u.CachedAudioInputTokens)
@@ -208,7 +209,7 @@ func (s *Server) settleWebRTC(sess *webrtcSession, failure *fault.Error) {
 		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(sess.ctx), webrtcCloseTimeout)
 		s.settlePinHold(settleCtx, x, sess.p.hold, settled)
 		s.recordCost(x)
-		settleKey(settleCtx, x.lease, x.dispatched, settled, s.log)
+		quota.SettleKey(settleCtx, x.lease, x.dispatched, settled, s.log)
 		s.settleCaps(settleCtx, x)
 		cancel()
 		s.unregisterWebRTCSession(sess.id)

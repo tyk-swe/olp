@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -173,7 +174,7 @@ func (s *Server) sessionExposureHeld(ctx context.Context, keyID string) (bool, *
 	return held, nil
 }
 
-func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority keyauthority.Authority, attempt routing.Attempt, supply []cappedOwner) *fault.Error {
+func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority keyauthority.Authority, attempt routing.Attempt, supply []quota.CappedOwner) *fault.Error {
 	if e := x.workflowModelCost(attempt); e != nil {
 		return e
 	}
@@ -200,7 +201,7 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority key
 	if currency == "" {
 		resolved, err := s.deps.Debits.Currency(ctx)
 		if err != nil || resolved == "" {
-			return limitsUnavailable()
+			return quota.LimitsUnavailable()
 		}
 		currency = resolved
 	}
@@ -208,11 +209,11 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority key
 	charge := x.attemptChargeBound(attempt, bound)
 	dispatchID, err := newSessionDebitID()
 	if err != nil {
-		return limitsUnavailable()
+		return quota.LimitsUnavailable()
 	}
 	claimID, err := newSessionDebitID()
 	if err != nil {
-		return limitsUnavailable()
+		return quota.LimitsUnavailable()
 	}
 	projectID := ""
 	if authority.ProjectID != nil {
@@ -232,19 +233,19 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority key
 	if x.workflow != nil {
 		stepID, err := newSessionDebitID()
 		if err != nil {
-			return limitsUnavailable()
+			return quota.LimitsUnavailable()
 		}
 		debit.runID, debit.stepID = x.workflow.runID, stepID
 		intent.Kind, intent.RunID, intent.StepID = debits.KindModel, debit.runID, debit.stepID
 	}
 	boundaries := x.admissionAuthority(authority).CostBoundaries(x.limitRoute())
 	if !boundaries.Resolved {
-		return limitsUnavailable()
+		return quota.LimitsUnavailable()
 	}
-	capped := slices.DeleteFunc(slices.Clone(supply), func(owner cappedOwner) bool { return owner.limits == nil })
+	capped := slices.DeleteFunc(slices.Clone(supply), func(owner quota.CappedOwner) bool { return owner.Limits == nil })
 	owners, admissions := boundaries.Owners(), boundaries.Admissions()
 	for _, owner := range capped {
-		cap := capRequest(owner, time.Hour).Cost
+		cap := quota.CapRequest(owner, time.Hour).Cost
 		owners = append(owners, cap.Owner)
 		admissions = append(admissions, debits.Boundary{Owner: cap.Owner, Budget: cap})
 	}
@@ -255,7 +256,7 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority key
 		state, err = s.deps.Debits.Prepare(ctx, intent, owners)
 	}
 	if err != nil || state != debits.Prepared {
-		return limitsUnavailable()
+		return quota.LimitsUnavailable()
 	}
 	if x.workflow != nil {
 		x.workflow.ordinal++
@@ -266,11 +267,11 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority key
 		cancel()
 		if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
 			if s.deps.Admission != nil {
-				s.deps.Admission.recordRejection(exceeded.Dimension)
+				s.deps.Admission.RecordRejection(exceeded.Dimension)
 			}
-			return rateLimitedBasis(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate, exceeded.Basis)
+			return quota.RateLimitedBasis(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate, exceeded.Basis)
 		}
-		return limitsUnavailable()
+		return quota.LimitsUnavailable()
 	}
 	x.sessionDebit = debit
 	return nil
