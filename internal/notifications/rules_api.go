@@ -3,6 +3,7 @@ package notifications
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"slices"
 	"strings"
@@ -190,11 +191,7 @@ func watched(subject ruleSubject) (watchedSubject, bool) {
 
 func checkReferences(ctx context.Context, tx pgx.Tx, t ruleTarget) error {
 	if subject, ok := watched(t.subject); ok {
-		query := apiKeyProjectSQL
-		if subject.kind == contract.BudgetSubjectKindBudgetGroup {
-			query = budgetGroupProjectSQL
-		}
-		project, found, err := referenceProject(ctx, tx, query, subject.id)
+		project, found, err := referenceProject(ctx, tx, subjectProjectSQL[subject.kind], subject.id)
 		if err != nil {
 			return err
 		}
@@ -222,7 +219,7 @@ func enforceRuleCap(ctx context.Context, tx pgx.Tx, event contract.NotificationE
 	if !slices.Contains(evaluatedEvents, string(event)) {
 		return nil
 	}
-	if _, err := tx.Exec(ctx, lockGenericRuleCreationSQL); err != nil {
+	if _, err := tx.Exec(ctx, ruleCreationLockSQL, ruleCreationLockName); err != nil {
 		return err
 	}
 	var count int
@@ -269,8 +266,8 @@ func (s *Server) updateNotificationRule(r *http.Request, _ access.Principal) (ac
 			return access.Reply{}, access.Invalid(field, "Unknown notification rule field.")
 		}
 	}
-	return s.update(r, rules, func(tx pgx.Tx, row locked, etag string) error {
-		input, err := patchRule(row.current, patch)
+	return s.update(r, rules, func(tx pgx.Tx, row document, etag string) error {
+		input, err := patchRule(row.body, patch)
 		if err != nil {
 			return err
 		}
@@ -278,13 +275,15 @@ func (s *Server) updateNotificationRule(r *http.Request, _ access.Principal) (ac
 		if err != nil {
 			return err
 		}
-		if err = checkReferences(r.Context(), tx, target); err != nil {
+		if err := checkReferences(r.Context(), tx, target); err != nil {
 			return err
 		}
 		c := target.subject.columns()
-		_, err = tx.Exec(r.Context(), updateChannelRuleSQL, row.id, target.name,
-			c.kind, c.id, c.window, c.percent, target.destinationID, target.enabled, etag, target.configuration)
-		return err
+		if _, err := tx.Exec(r.Context(), updateChannelRuleSQL, row.id, target.name,
+			c.kind, c.id, c.window, c.percent, target.destinationID, target.enabled, etag, target.configuration); err != nil {
+			return err
+		}
+		return nil
 	})
 }
 
@@ -293,17 +292,19 @@ func patchRule(current json.RawMessage, patch map[string]json.RawMessage) (ruleI
 	if err := json.Unmarshal(current, &next); err != nil {
 		return ruleInput{}, err
 	}
-	for field, raw := range patch {
-		if field == "enabled" && string(raw) == "null" {
-			return ruleInput{}, access.Invalid(field, rulePatchFields[field])
+	if string(patch["enabled"]) == "null" {
+		return ruleInput{}, access.Invalid("enabled", rulePatchFields["enabled"])
+	}
+	overlay, err := json.Marshal(patch)
+	if err != nil {
+		return ruleInput{}, err
+	}
+	if err := json.Unmarshal(overlay, &next); err != nil {
+		var mismatch *json.UnmarshalTypeError
+		if errors.As(err, &mismatch) {
+			return ruleInput{}, access.Invalid(mismatch.Field, rulePatchFields[mismatch.Field])
 		}
-		object, err := json.Marshal(map[string]json.RawMessage{field: raw})
-		if err != nil {
-			return ruleInput{}, err
-		}
-		if err = json.Unmarshal(object, &next); err != nil {
-			return ruleInput{}, access.Invalid(field, rulePatchFields[field])
-		}
+		return ruleInput{}, err
 	}
 	return next, nil
 }

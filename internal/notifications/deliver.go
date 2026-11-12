@@ -188,7 +188,7 @@ func (w *deliveryWorker) lockIncident(ctx context.Context, id, key string) (*pgx
 		return nil, false
 	}
 	var locked bool
-	if err := conn.QueryRow(ctx, lockNotificationIncidentSQL, key).Scan(&locked); err != nil {
+	if err := conn.QueryRow(ctx, tryIncidentLockSQL, key, incidentLockSeed).Scan(&locked); err != nil {
 		w.Log.Warn("notification incident lock failed", "delivery", id, "error", err)
 		discard(ctx, conn)
 		return nil, false
@@ -203,7 +203,7 @@ func (w *deliveryWorker) lockIncident(ctx context.Context, id, key string) (*pgx
 func (w *deliveryWorker) unlockIncident(ctx context.Context, conn *pgxpool.Conn, id, key string) {
 	unlock, done := context.WithTimeout(context.WithoutCancel(ctx), connectionCloseTimeout)
 	defer done()
-	if _, err := conn.Exec(unlock, unlockNotificationIncidentSQL, key); err != nil {
+	if _, err := conn.Exec(unlock, unlockIncidentSQL, key, incidentLockSeed); err != nil {
 		w.Log.Warn("notification incident unlock failed", "delivery", id, "error", err)
 		discard(ctx, conn)
 		return
@@ -268,14 +268,18 @@ func (w *deliveryWorker) attempt(ctx context.Context, db database, d delivery) b
 		return false
 	}
 	code := w.send(ctx, d, target, secret)
-	status, lastError := contract.NotificationDeliveryStatusDelivered, (*Failure)(nil)
-	if code != "" {
-		status, lastError = contract.NotificationDeliveryStatusFailed, &code
-	}
+	status, lastError := attemptOutcome(code)
 	if _, err := db.Exec(ctx, recordAttemptSQL, d.id, status, lastError, code == ""); err != nil {
 		w.Log.Warn("notification delivery update failed", "delivery", d.id, "error", err)
 	}
 	return true
+}
+
+func attemptOutcome(code Failure) (contract.NotificationDeliveryStatus, *Failure) {
+	if code == "" {
+		return contract.NotificationDeliveryStatusDelivered, nil
+	}
+	return contract.NotificationDeliveryStatusFailed, &code
 }
 
 func (w *deliveryWorker) send(ctx context.Context, d delivery, target destination, secret []byte) Failure {

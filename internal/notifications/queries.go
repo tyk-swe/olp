@@ -39,7 +39,7 @@ const runtimeInstallSignalsSQL = `SELECT gateway_instance,desired_generation,ins
 const providerCircuitSubjectsSQL = `SELECT id::text,name FROM olp.providers WHERE state='active' ORDER BY id LIMIT 10001`
 const activeSignalStatesSQL = `SELECT subject FROM olp.notification_signal_states WHERE rule_id=$1 AND active ORDER BY subject LIMIT 10001 FOR UPDATE`
 
-const routedRetirementModelsSQL = `SELECT DISTINCT rt.slug,rt.project_id::text,p.id::text,p.kind,pr.configuration->>'vendor_id',t->>'provider_model'
+const routedRetirementModelsSQL = `SELECT DISTINCT rt.slug,rt.project_id::text,p.id::text,p.kind,COALESCE(pr.configuration->>'vendor_id',''),t->>'provider_model'
  FROM olp.routes rt JOIN olp.route_revisions rr ON rr.id=rt.latest_revision_id
  CROSS JOIN LATERAL jsonb_array_elements(rr.targets) t JOIN olp.providers p ON p.id=(t->>'provider_id')::uuid
  JOIN olp.provider_revisions pr ON pr.id=p.active_revision_id
@@ -101,7 +101,15 @@ const pendingChannelDeliverySQL = `SELECT v.id::text,v.rule_id::text,COALESCE(v.
  ORDER BY v.created_at,v.id LIMIT $2`
 const readChannelDestinationSQL = `SELECT d.url,d.secret_id::text,d.type,d.configuration FROM olp.notification_rules r
  JOIN olp.notification_destinations d ON d.id=r.destination_id WHERE r.id=$1 AND r.enabled AND d.enabled FOR SHARE OF r,d`
-const lockNotificationIncidentSQL = `SELECT pg_try_advisory_lock(hashtextextended($1,502))`
-const unlockNotificationIncidentSQL = `SELECT pg_advisory_unlock(hashtextextended($1,502))`
+const (
+	budgetAlertLockKey   = int64(0x4f4c505f414c5254)
+	incidentLockSeed     = int64(502)
+	ruleCreationLockName = "olp.notification_rule_creation"
+
+	tryBudgetAlertLockSQL = `SELECT pg_try_advisory_xact_lock($1)`
+	tryIncidentLockSQL    = `SELECT pg_try_advisory_lock(hashtextextended($1,$2))`
+	unlockIncidentSQL     = `SELECT pg_advisory_unlock(hashtextextended($1,$2))`
+	ruleCreationLockSQL   = `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`
+)
 const signalDeliveryCurrentSQL = `SELECT EXISTS(SELECT 1 FROM olp.notification_signal_states
  WHERE rule_id=$1 AND subject=$2 AND active AND incident=$3)`

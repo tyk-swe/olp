@@ -241,15 +241,12 @@ func retirementSignals(c retirementConfig) signalReader {
 
 func scanRetirement(row pgx.Row, c retirementConfig, now time.Time, reference *catalog.Signed) (notificationSignal, error) {
 	var route, provider, kind, upstream string
-	var project, vendor *string
+	var project *string
+	var vendor string
 	if err := row.Scan(&route, &project, &provider, &kind, &vendor, &upstream); err != nil {
 		return notificationSignal{}, err
 	}
-	vendorID := vendors.DefaultFor(kind)
-	if vendor != nil && *vendor != "" {
-		vendorID = *vendor
-	}
-	model, _, found := reference.Lookup(vendorID, upstream)
+	model, _, found := reference.Lookup(cmp.Or(vendor, vendors.DefaultFor(kind)), upstream)
 	subject := route + ":" + provider + ":" + upstream
 	if !found || model.Lifecycle == nil || model.Lifecycle.RetiresAt == nil {
 		return notificationSignal{subject: subject, reading: unknown{}}, nil

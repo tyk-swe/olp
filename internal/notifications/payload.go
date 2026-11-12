@@ -49,11 +49,14 @@ func newMessage(body []byte, event contract.NotificationEvent, ruleName, dedupKe
 	if err := json.Unmarshal(body, &fields); err != nil {
 		return message{}, err
 	}
-	title := string(event)
-	if ruleName != "" {
-		title += " — " + ruleName
+	return message{body: body, fields: fields, title: mentionSafe.Replace(messageTitle(event, ruleName)), dedupKey: dedupKey, resolved: resolved}, nil
+}
+
+func messageTitle(event contract.NotificationEvent, ruleName string) string {
+	if ruleName == "" {
+		return string(event)
 	}
-	return message{body: body, fields: fields, title: mentionSafe.Replace(title), dedupKey: dedupKey, resolved: resolved}, nil
+	return string(event) + " — " + ruleName
 }
 
 type GrantLapse struct {

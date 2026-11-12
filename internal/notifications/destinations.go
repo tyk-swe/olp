@@ -2,6 +2,7 @@ package notifications
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -148,7 +149,7 @@ func (s *Server) createNotificationDestination(r *http.Request, _ access.Princip
 				id, target.name, target.URL, projectID, etag, p.UserID(), target.enabled, target.Type, target.Configuration); err != nil {
 				return err
 			}
-			return s.storeSecretChange(r, tx, id, target.secret)
+			return s.storeSecretChange(r.Context(), tx, id, target.secret)
 		}})
 }
 
@@ -165,9 +166,9 @@ func (s *Server) updateNotificationDestination(r *http.Request, _ access.Princip
 			return access.Reply{}, access.Invalid(field, "Unknown destination field.")
 		}
 	}
-	return s.update(r, destinations, func(tx pgx.Tx, row locked, etag string) error {
+	return s.update(r, destinations, func(tx pgx.Tx, row document, etag string) error {
 		var current storedDestination
-		if err := json.Unmarshal(row.current, &current); err != nil {
+		if err := json.Unmarshal(row.body, &current); err != nil {
 			return err
 		}
 		target, err := patchDestination(current, patch)
@@ -177,7 +178,7 @@ func (s *Server) updateNotificationDestination(r *http.Request, _ access.Princip
 		if _, replaced := target.secret.(newSecret); !replaced && current.SecretConfigured && target.URL != current.URL {
 			return access.Invalid("secret", "Changing the destination URL requires a replacement secret or null.")
 		}
-		secret, err := s.effectiveSecret(r, tx, row.id, current, target.secret)
+		secret, err := s.effectiveSecret(r.Context(), tx, row.id, current, target.secret)
 		if err != nil {
 			return err
 		}
@@ -188,7 +189,7 @@ func (s *Server) updateNotificationDestination(r *http.Request, _ access.Princip
 			row.id, target.name, target.URL, target.enabled, etag, target.Type, target.Configuration); err != nil {
 			return err
 		}
-		return s.storeSecretChange(r, tx, row.id, target.secret)
+		return s.storeSecretChange(r.Context(), tx, row.id, target.secret)
 	})
 }
 
@@ -266,7 +267,7 @@ func (s *Server) checkPatched(target destinationTarget, secret []byte) error {
 	return s.checkEndpoint(target.destination, target.enabled)
 }
 
-func (s *Server) effectiveSecret(r *http.Request, tx pgx.Tx, id string, current storedDestination, change secretChange) ([]byte, error) {
+func (s *Server) effectiveSecret(ctx context.Context, tx pgx.Tx, id string, current storedDestination, change secretChange) ([]byte, error) {
 	if replaced, ok := change.(newSecret); ok {
 		return replaced.value, nil
 	}
@@ -274,16 +275,8 @@ func (s *Server) effectiveSecret(r *http.Request, tx pgx.Tx, id string, current 
 		return nil, nil
 	}
 	var secretID *string
-	if err := tx.QueryRow(r.Context(), readDestinationSecretSQL, id).Scan(&secretID); err != nil || secretID == nil {
+	if err := tx.QueryRow(ctx, readDestinationSecretSQL, id).Scan(&secretID); err != nil || secretID == nil {
 		return nil, err
 	}
-	return s.access.Keys.Read(r.Context(), tx, s.access.Installation, *secretID, secrets.NotificationSecret)
-}
-
-func (s *Server) storeSecretChange(r *http.Request, tx pgx.Tx, id string, change secretChange) error {
-	replaced, ok := change.(newSecret)
-	if !ok {
-		return nil
-	}
-	return s.storeNotificationSecret(r, tx, id, replaced.value)
+	return s.access.Keys.Read(ctx, tx, s.access.Installation, *secretID, secrets.NotificationSecret)
 }

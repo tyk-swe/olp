@@ -75,15 +75,17 @@ func discordMessage(m message) any {
 }
 
 type pagerDutyEvent struct {
-	RoutingKey  string `json:"routing_key"`
-	EventAction string `json:"event_action"`
-	DedupKey    string `json:"dedup_key"`
-	Payload     struct {
-		Summary       string                     `json:"summary"`
-		Source        string                     `json:"source"`
-		Severity      string                     `json:"severity"`
-		CustomDetails map[string]json.RawMessage `json:"custom_details"`
-	} `json:"payload"`
+	RoutingKey  string           `json:"routing_key"`
+	EventAction string           `json:"event_action"`
+	DedupKey    string           `json:"dedup_key"`
+	Payload     pagerDutyPayload `json:"payload"`
+}
+
+type pagerDutyPayload struct {
+	Summary       string                     `json:"summary"`
+	Source        string                     `json:"source"`
+	Severity      string                     `json:"severity"`
+	CustomDetails map[string]json.RawMessage `json:"custom_details"`
 }
 
 func newPagerDutyEvent(routingKey string, m message) (pagerDutyEvent, error) {
@@ -93,14 +95,15 @@ func newPagerDutyEvent(routingKey string, m message) (pagerDutyEvent, error) {
 	if m.dedupKey == "" {
 		return pagerDutyEvent{}, errors.New("no deduplication key")
 	}
-	action := "trigger"
-	if m.resolved {
-		action = "resolve"
+	return pagerDutyEvent{
+		RoutingKey: routingKey, EventAction: pagerDutyAction(m.resolved), DedupKey: m.dedupKey,
+		Payload: pagerDutyPayload{Summary: truncate(m.title, summaryMax), Source: "OpenLLMProxy", Severity: "warning", CustomDetails: m.fields},
+	}, nil
+}
+
+func pagerDutyAction(resolved bool) string {
+	if resolved {
+		return "resolve"
 	}
-	payload := pagerDutyEvent{RoutingKey: routingKey, EventAction: action, DedupKey: m.dedupKey}
-	payload.Payload.Summary = truncate(m.title, summaryMax)
-	payload.Payload.Source = "OpenLLMProxy"
-	payload.Payload.Severity = "warning"
-	payload.Payload.CustomDetails = m.fields
-	return payload, nil
+	return "trigger"
 }

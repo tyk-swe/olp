@@ -116,10 +116,7 @@ func (c spendReportConfig) claim(w *deliveryWorker, ctx context.Context, tx pgx.
 	if queued {
 		return 0, nil
 	}
-	filters := reports.Filters{Start: start, End: end, Projects: reports.AllProjects()}
-	if rule.project != nil {
-		filters.Projects = reports.OnlyProjects(*rule.project)
-	}
+	filters := reports.Filters{Start: start, End: end, Projects: projectScope(rule.project)}
 	summary, err := reports.ReadSummary(ctx, tx, filters, w.Now())
 	if err != nil {
 		return 0, err
@@ -143,4 +140,11 @@ func (c spendReportConfig) claim(w *deliveryWorker, ctx context.Context, tx pgx.
 	}
 	tag, err := tx.Exec(ctx, insertSignalDeliverySQL, id, rule.id, rule.event, dedupKey, false, payload)
 	return int(tag.RowsAffected()), err
+}
+
+func projectScope(project *string) reports.ProjectScope {
+	if project == nil {
+		return reports.AllProjects()
+	}
+	return reports.OnlyProjects(*project)
 }

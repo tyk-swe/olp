@@ -202,40 +202,36 @@ func (e email) send(ctx context.Context, s *Sender, m message) error {
 	}
 
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: e.hostname, RootCAs: e.roots}
-	conn := net.Conn(rawConn)
-	if e.implicitTLS {
-		tlsConn := tls.Client(rawConn, tlsConfig)
-		if err = tlsConn.HandshakeContext(sendCtx); err != nil {
-			return transportError(err)
-		}
-		conn = tlsConn
+	conn, err := e.secure(sendCtx, rawConn, tlsConfig)
+	if err != nil {
+		return transportError(err)
 	}
 	client, err := smtp.NewClient(conn, e.hostname)
 	if err != nil {
 		return smtpError(err)
 	}
 	defer client.Close()
-	if err = client.Hello("localhost"); err != nil {
+	if err := client.Hello("localhost"); err != nil {
 		return smtpError(err)
 	}
 	if !e.implicitTLS {
 		if ok, _ := client.Extension("STARTTLS"); !ok {
 			return &sendError{invalidDestinationCode, errors.New("server does not offer STARTTLS")}
 		}
-		if err = client.StartTLS(tlsConfig); err != nil {
+		if err := client.StartTLS(tlsConfig); err != nil {
 			return smtpError(err)
 		}
 	}
 	if e.auth != nil {
-		if err = client.Auth(e.auth); err != nil {
+		if err := client.Auth(e.auth); err != nil {
 			return &sendError{credentialCode, err}
 		}
 	}
-	if err = client.Mail(e.from.Address); err != nil {
+	if err := client.Mail(e.from.Address); err != nil {
 		return smtpError(err)
 	}
 	for _, recipient := range e.to {
-		if err = client.Rcpt(recipient.Address); err != nil {
+		if err := client.Rcpt(recipient.Address); err != nil {
 			return smtpError(err)
 		}
 	}
@@ -243,15 +239,26 @@ func (e email) send(ctx context.Context, s *Sender, m message) error {
 	if err != nil {
 		return smtpError(err)
 	}
-	if _, err = w.Write(e.message(m, time.Now())); err != nil {
+	if _, err := w.Write(e.message(m, time.Now())); err != nil {
 		_ = w.Close()
 		return smtpError(err)
 	}
-	if err = w.Close(); err != nil {
+	if err := w.Close(); err != nil {
 		return smtpError(err)
 	}
 	_ = client.Quit()
 	return nil
+}
+
+func (e email) secure(ctx context.Context, conn net.Conn, config *tls.Config) (net.Conn, error) {
+	if !e.implicitTLS {
+		return conn, nil
+	}
+	tlsConn := tls.Client(conn, config)
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		return nil, err
+	}
+	return tlsConn, nil
 }
 
 func (e email) message(m message, now time.Time) []byte {
@@ -260,10 +267,7 @@ func (e email) message(m message, now time.Time) []byte {
 	for _, recipient := range e.to {
 		to = append(to, recipient.String())
 	}
-	domain := ""
-	if at := strings.LastIndex(e.from.Address, "@"); at >= 0 {
-		domain = e.from.Address[at+1:]
-	}
+	domain := e.from.Address[strings.LastIndex(e.from.Address, "@")+1:]
 	var message bytes.Buffer
 	_, _ = io.WriteString(&message,
 		"From: "+e.from.String()+"\r\n"+

@@ -1,7 +1,6 @@
 package notifications
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -53,8 +52,7 @@ func (s *Server) list(res resource) access.Handler {
 			return access.Reply{}, err
 		}
 		rows, err := s.access.Pool.Query(r.Context(),
-			"SELECT jsonb_build_object("+res.fields+")"+res.from+
-				" WHERE "+res.alias+".id<$1::uuid AND ($2 OR "+res.alias+".project_id=ANY($3::uuid[])) ORDER BY "+res.alias+".id DESC LIMIT $4",
+			"SELECT document FROM ("+res.documentsSQL+") documents WHERE id<$1::uuid AND ($2 OR project_id=ANY($3::uuid[])) ORDER BY id DESC LIMIT $4",
 			page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
 		if err != nil {
 			return access.Reply{}, err
@@ -70,18 +68,14 @@ func (s *Server) get(res resource) access.Handler {
 		if err != nil {
 			return access.Reply{}, err
 		}
-		var data []byte
-		var etag string
-		var projectID *string
-		if err = s.access.Pool.QueryRow(r.Context(),
-			"SELECT jsonb_build_object("+res.fields+"),"+res.alias+".etag::text,"+res.alias+".project_id::text"+res.from+" WHERE "+res.alias+".id=$1",
-			id).Scan(&data, &etag, &projectID); err != nil {
+		found, err := res.find(r.Context(), s.access.Pool, id)
+		if err != nil {
 			return access.Reply{}, err
 		}
-		if err := p.Project(projectID, access.View); err != nil {
+		if err := p.Project(found.projectID, access.View); err != nil {
 			return access.Reply{}, err
 		}
-		return access.Detail(json.RawMessage(data), etag), nil
+		return access.Detail(found.body, found.etag), nil
 	}
 }
 
@@ -98,7 +92,7 @@ func create[T any](s *Server, r *http.Request, res resource, c creation[T]) (acc
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	if err = p.Authorize(notificationOperation(c.projectID)); err != nil {
+	if err := p.Authorize(notificationOperation(c.projectID)); err != nil {
 		return access.Reply{}, err
 	}
 	claim, replayed, err := s.access.Replay(r, tx, p, c.fingerprint)
@@ -111,11 +105,11 @@ func create[T any](s *Server, r *http.Request, res resource, c creation[T]) (acc
 		}
 		return *replayed, tx.Commit(r.Context())
 	}
-	projectID, err := parseProject(c.projectID)
+	projectID, err := access.ParseOptionalUUID(c.projectID)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err = s.access.RequireProject(r.Context(), tx, p, projectID); err != nil {
+	if err := s.access.RequireProject(r.Context(), tx, p, projectID); err != nil {
 		return access.Reply{}, err
 	}
 	target, err := c.parse(projectID)
@@ -123,60 +117,24 @@ func create[T any](s *Server, r *http.Request, res resource, c creation[T]) (acc
 		return access.Reply{}, err
 	}
 	id, etag := access.NewID(), access.NewID()
-	if err = c.insert(tx, p, projectID, target, id, etag); err != nil {
+	if err := c.insert(tx, p, projectID, target, id, etag); err != nil {
 		return access.Reply{}, err
 	}
-	body, err := res.read(r.Context(), tx, id)
+	created, err := res.find(r.Context(), tx, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	result := access.Reply{Status: http.StatusCreated, ETag: etag, Location: res.path + id, Body: body}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), res.kind+".create", res.kind, id, "success"); err != nil {
+	result := access.Reply{Status: http.StatusCreated, ETag: created.etag, Location: res.path + id, Body: created.body}
+	if err := access.Audit(r.Context(), tx, r, p.Actor(), res.kind+".create", res.kind, id, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	if err = s.access.CompleteReplay(r, tx, claim, result); err != nil {
+	if err := s.access.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
 	return result, tx.Commit(r.Context())
 }
 
-func parseProject(raw *string) (*string, error) {
-	if raw == nil {
-		return nil, nil
-	}
-	parsed, err := access.ParseUUID(*raw)
-	if err != nil {
-		return nil, err
-	}
-	return &parsed, nil
-}
-
-type locked struct {
-	id, etag  string
-	current   json.RawMessage
-	projectID *string
-}
-
-func (s *Server) lockForChange(r *http.Request, tx pgx.Tx, p access.Principal, res resource, id string) (locked, error) {
-	row := locked{id: id}
-	if err := tx.QueryRow(r.Context(),
-		"SELECT jsonb_build_object("+res.fields+"),"+res.alias+".etag::text,"+res.alias+".project_id::text"+res.from+" WHERE "+res.alias+".id=$1 FOR UPDATE OF "+res.alias,
-		id).Scan(&row.current, &row.etag, &row.projectID); err != nil {
-		return locked{}, err
-	}
-	if err := p.Project(row.projectID, access.View); err != nil {
-		return locked{}, err
-	}
-	if err := p.Authorize(notificationOperation(row.projectID)); err != nil {
-		return locked{}, err
-	}
-	if err := p.Project(row.projectID, access.Change); err != nil {
-		return locked{}, err
-	}
-	return row, access.Match(r, row.etag)
-}
-
-func (s *Server) update(r *http.Request, res resource, apply func(tx pgx.Tx, row locked, etag string) error) (access.Reply, error) {
+func (s *Server) update(r *http.Request, res resource, apply func(tx pgx.Tx, current document, etag string) error) (access.Reply, error) {
 	id, err := access.IDParam(r, res.parameter)
 	if err != nil {
 		return access.Reply{}, err
@@ -186,22 +144,28 @@ func (s *Server) update(r *http.Request, res resource, apply func(tx pgx.Tx, row
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	row, err := s.lockForChange(r, tx, p, res, id)
+	locked, err := res.lockForChange(r.Context(), tx, p, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	etag := access.NewID()
-	if err = apply(tx, row, etag); err != nil {
+	if err := access.Match(r, locked.etag); err != nil {
 		return access.Reply{}, err
 	}
-	body, err := res.read(r.Context(), tx, id)
+	current, err := res.find(r.Context(), tx, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), res.kind+".update", res.kind, id, "success"); err != nil {
+	if err := apply(tx, current, access.NewID()); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Detail(body, etag), tx.Commit(r.Context())
+	updated, err := res.find(r.Context(), tx, id)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if err := access.Audit(r.Context(), tx, r, p.Actor(), res.kind+".update", res.kind, id, "success"); err != nil {
+		return access.Reply{}, err
+	}
+	return access.Detail(updated.body, updated.etag), tx.Commit(r.Context())
 }
 
 func (s *Server) delete(res resource) access.Handler {
@@ -222,24 +186,31 @@ func (s *Server) delete(res resource) access.Handler {
 		if replayed != nil {
 			return *replayed, tx.Commit(r.Context())
 		}
-		row, err := s.lockForChange(r, tx, p, res, id)
+		locked, err := res.lockForChange(r.Context(), tx, p, id)
 		if err != nil {
 			return access.Reply{}, err
 		}
-		var constraint *pgconn.PgError
-		if err = res.remove(r.Context(), tx, id); errors.As(err, &constraint) && constraint.Code == "23503" {
-			return access.Reply{}, access.Fail(409, res.kind+"_in_use", "The resource still has dependent resources or retained history.")
-		}
-		if err != nil {
+		if err := access.Match(r, locked.etag); err != nil {
 			return access.Reply{}, err
 		}
-		if err = access.AuditForProject(r.Context(), tx, r, p.Actor(), res.kind+".delete", res.kind, id, "success", row.projectID); err != nil {
+		if err := removalError(res.kind, res.remove(r.Context(), tx, id)); err != nil {
+			return access.Reply{}, err
+		}
+		if err := access.AuditForProject(r.Context(), tx, r, p.Actor(), res.kind+".delete", res.kind, id, "success", locked.projectID); err != nil {
 			return access.Reply{}, err
 		}
 		result := access.Reply{Status: http.StatusNoContent}
-		if err = s.access.CompleteReplay(r, tx, claim, result); err != nil {
+		if err := s.access.CompleteReplay(r, tx, claim, result); err != nil {
 			return access.Reply{}, err
 		}
 		return result, tx.Commit(r.Context())
 	}
+}
+
+func removalError(kind string, err error) error {
+	var constraint *pgconn.PgError
+	if errors.As(err, &constraint) && constraint.Code == "23503" {
+		return access.Fail(409, kind+"_in_use", "The resource still has dependent resources or retained history.")
+	}
+	return err
 }

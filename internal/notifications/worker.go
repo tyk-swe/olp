@@ -20,7 +20,6 @@ import (
 )
 
 const (
-	budgetAlertLockID   = int64(0x4f4c505f414c5254)
 	notificationEvery   = time.Minute
 	notificationTimeout = 2 * time.Minute
 
@@ -145,7 +144,7 @@ func (w *deliveryWorker) claimDue(ctx context.Context) (int, error) {
 	}
 	defer tx.Rollback(ctx)
 	var held bool
-	if err = tx.QueryRow(ctx, "SELECT pg_try_advisory_xact_lock($1)", budgetAlertLockID).Scan(&held); err != nil {
+	if err := tx.QueryRow(ctx, tryBudgetAlertLockSQL, budgetAlertLockKey).Scan(&held); err != nil {
 		return 0, err
 	}
 	if !held {
@@ -228,7 +227,7 @@ func NotifyGrantLapsed(ctx context.Context, tx pgx.Tx, lapse GrantLapse) error {
 		return err
 	}
 	for _, rule := range rules {
-		if _, err = tx.Exec(ctx, insertGrantLapseDeliverySQL, access.NewID(), rule, lapse.CredentialID, payload); err != nil {
+		if _, err := tx.Exec(ctx, insertGrantLapseDeliverySQL, access.NewID(), rule, lapse.CredentialID, payload); err != nil {
 			return err
 		}
 	}
