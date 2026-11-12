@@ -353,28 +353,22 @@ type ExportedRevision struct {
 	Models        []routing.RevisionModel
 }
 
-func ReadProjectProvider(ctx context.Context, q access.Queryer, name, projectID string) (*ProjectProvider, error) {
+func ReadProjectProvider(ctx context.Context, q access.Queryer, name, projectID string) (ProjectProvider, bool, error) {
 	var provider ProjectProvider
 	err := q.QueryRow(ctx, `SELECT id::text,configuration FROM olp.providers WHERE lower(name)=lower($1) AND project_id=$2`, name, projectID).Scan(&provider.ID, &provider.Configuration)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
+		return ProjectProvider{}, false, nil
 	}
-	if err != nil {
-		return nil, err
-	}
-	return &provider, nil
+	return provider, err == nil, err
 }
 
-func ReadActiveRevision(ctx context.Context, q access.Queryer, name, projectID string) (*routing.ProviderRevision, error) {
+func ReadActiveRevision(ctx context.Context, q access.Queryer, name, projectID string) (routing.ProviderRevision, bool, error) {
 	var current routing.ProviderRevision
 	err := q.QueryRow(ctx, `SELECT p.id::text,v.id::text,p.name,p.state,p.project_id::text,v.configuration,v.models,v.slots FROM olp.providers p JOIN olp.provider_revisions v ON v.id=p.active_revision_id WHERE lower(p.name)=lower($1) AND p.project_id=$2 AND p.state='active'`, name, projectID).Scan(&current.ID, &current.RevisionID, &current.Name, &current.State, &current.ProjectID, &current.Configuration, &current.Models, &current.Slots)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
+		return routing.ProviderRevision{}, false, nil
 	}
-	if err != nil {
-		return nil, err
-	}
-	return &current, nil
+	return current, err == nil, err
 }
 
 func ReadExportedRevision(ctx context.Context, q access.Queryer, revisionID, providerID string) (ExportedRevision, error) {

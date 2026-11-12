@@ -60,11 +60,11 @@ func (c Connection) resolve(ctx context.Context, q access.Queryer, name, project
 		return pin{}, err
 	}
 	configuration := prepared.Document()
-	target, err := providers.ReadProjectProvider(ctx, q, name, project)
+	target, found, err := providers.ReadProjectProvider(ctx, q, name, project)
 	if err != nil {
 		return pin{}, err
 	}
-	if target == nil {
+	if !found {
 		return pin{}, access.Invalid("code.routes.published.connections", "Create the destination provider before freezing its connection.")
 	}
 	id, current := target.ID, target.Configuration

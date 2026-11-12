@@ -133,14 +133,13 @@ func resolvePaid(ctx context.Context, q access.Queryer, connections map[string]P
 
 func (c PaidConnection) resolve(ctx context.Context, q access.Queryer, project string, values bindings, deps provider.Deps) (routing.Provider, error) {
 	entry := c.Provider
-	active, err := providers.ReadActiveRevision(ctx, q, entry.Name, project)
+	current, found, err := providers.ReadActiveRevision(ctx, q, entry.Name, project)
 	if err != nil {
 		return routing.Provider{}, err
 	}
-	if active == nil {
+	if !found {
 		return routing.Provider{}, access.Invalid("code.paid_connections", "Prepare the published destination metered provider first.")
 	}
-	current := *active
 	var currentModels []routing.RevisionModel
 	if err := json.Unmarshal(current.Models, &currentModels); err != nil {
 		return routing.Provider{}, err
