@@ -121,7 +121,7 @@ func (f providerFixture) certifiedDraft(t *testing.T) storedProvider {
 			return err
 		}
 		p.id = created.ID
-		models := []providers.DraftModel{{UpstreamModel: "fixture-model", Enabled: true, Capabilities: []providers.CapabilityInput{
+		models := []providers.DraftModel{{UpstreamModel: "fixture-model", Enabled: true, Capabilities: []connection.Capability{
 			{Operation: "generation", Surface: "openai", Mode: "unary"}, {Operation: "generation", Surface: "openai", Mode: "streaming"}}}}
 		slots := []providers.DraftSlot{{ID: p.slot, Default: true, Name: "default", Enabled: true, Weight: 1}}
 		if err := f.catalogue.StageDraftInventory(t.Context(), tx, p.id, models, slots); err != nil {

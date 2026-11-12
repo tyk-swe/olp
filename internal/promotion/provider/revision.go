@@ -60,8 +60,8 @@ func fromRevision(stored revision, draft map[string]int, imported *Billing) (Ent
 		Project:       stored.project,
 		Configuration: configuration.WithNetworkCredential(""),
 		Models: promotion.Map(models, func(model routing.RevisionModel) providers.DraftModel {
-			return providers.DraftModel{UpstreamModel: model.UpstreamModel, DisplayName: model.DisplayName, Enabled: true, Capabilities: promotion.Map(model.Capabilities, func(capability routing.RevisionCapability) providers.CapabilityInput {
-				return providers.CapabilityInput{Operation: capability.Operation, Surface: capability.Surface, Mode: capability.Mode}
+			return providers.DraftModel{UpstreamModel: model.UpstreamModel, DisplayName: model.DisplayName, Enabled: true, Capabilities: promotion.Map(model.Capabilities, func(capability routing.RevisionCapability) connection.Capability {
+				return connection.Capability{Operation: capability.Operation, Surface: capability.Surface, Mode: capability.Mode}
 			})}
 		}),
 		Slots: promotion.MapIndex(slots, func(i int, slot routing.RevisionSlot) Slot {

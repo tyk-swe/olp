@@ -15,19 +15,19 @@ import (
 )
 
 func (s *Server) kinds(r *http.Request, _ access.Principal) (access.Reply, error) {
-	return access.OK(map[string]any{"items": connection.Kinds}), nil
+	return access.OK(map[string]any{"items": connection.Kinds()}), nil
 }
 
 func (s *Server) kindCapabilities(r *http.Request, _ access.Principal) (access.Reply, error) {
 	kind := r.PathValue("provider_kind")
-	if connection.KindByName(kind) == nil {
+	if _, ok := connection.LookupKind(kind); !ok {
 		return access.Reply{}, access.Fail(400, "invalid_provider_kind", "This provider kind is not available.")
 	}
 	return access.OK(map[string]any{"provider_kind": kind, "capabilities": capabilityOptionsForKind(kind)}), nil
 }
 
 func (s *Server) listVendors(r *http.Request, _ access.Principal) (access.Reply, error) {
-	return access.OK(connection.VendorCatalogue), nil
+	return access.OK(connection.Vendors()), nil
 }
 
 func (s *Server) inventory(r *http.Request, principal access.Principal) (access.Reply, error) {
@@ -42,7 +42,7 @@ func (s *Server) inventory(r *http.Request, principal access.Principal) (access.
 	}
 	surface := query.Get("surface")
 	switch surface {
-	case "", SurfaceOpenAI, "anthropic", "gemini", "bedrock", "native":
+	case "", "openai", "anthropic", "gemini", "bedrock", "native":
 	default:
 		return access.Reply{}, access.Fail(400, "invalid_query", "Unknown surface.")
 	}
@@ -140,7 +140,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	// Each advertised capability, or each declared model of a provider without
 	// discovery, can consume a full probe budget; reserve another management
 	// budget for preparation, queueing, and persistence.
-	certifyTimeout := time.Duration(len(capabilityVocabulary)+1) * probeTimeout
+	certifyTimeout := time.Duration(len(connection.Vocabulary())+1) * probeTimeout
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/probe", s.probe, access.Deadline(certifyTimeout))
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/discovery", s.discover, access.MaxBody(1<<20), access.Deadline(certifyTimeout))
 	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/catalog-suggestions", s.catalogSuggestions)

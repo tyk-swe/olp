@@ -58,6 +58,7 @@ type Profile struct {
 	// changes only authorization, address and headers, or is a qualified
 	// built-in binding.
 	Strict bool `json:"strict"`
+	vendor string
 }
 
 const ProfileRevision = "1"
@@ -456,9 +457,7 @@ func (c Config) ValidateProfile() error {
 	if p.Dialect == "mistral-ocr" && c.VendorID != "mistral" ||
 		p.Dialect == "azure-document-intelligence-ocr" && c.VendorID != "azure-document-intelligence" ||
 		p.Dialect == "vertex-document-processing-ocr" && c.VendorID != "google-vertex" ||
-		p.ID == "groq-files-batches" && c.VendorID != "groq" ||
-		p.ID == "together-files-batches" && c.VendorID != "together" ||
-		p.ID == "mistral-files-batches" && c.VendorID != "mistral" ||
+		p.vendor != "" && c.VendorID != p.vendor ||
 		p.Dialect == "perplexity-search" && c.VendorID != "perplexity" ||
 		p.Dialect == "tavily-search" && c.VendorID != "tavily" ||
 		p.Dialect == "exa-search" && c.VendorID != "exa" ||
@@ -826,6 +825,8 @@ func (c Config) WrapBody(body []byte, encodedWire wire.Format) ([]byte, error) {
 
 // OperationDialect names the operation schema instead of making non-generation
 // defaults inherit a generation-shaped intermediate representation.
+func (p Profile) Vendor() string { return p.vendor }
+
 func (p Profile) OperationDialect(operation string) string {
 	if dialect := p.OperationDialects[operation]; dialect != "" {
 		return dialect
@@ -960,8 +961,7 @@ func profileTemplateForRegistration(p Profile) *Profile {
 }
 
 func vendorBatchProfile(profile Profile) bool {
-	return profile.Kind == "openai_compatible" && slices.Contains(profile.Operations, "batch") &&
-		strings.HasSuffix(profile.ID, "-files-batches")
+	return profile.Kind == "openai_compatible" && slices.Contains(profile.Operations, "batch") && profile.vendor != ""
 }
 
 func defaultControlSchema(dialect, operation, name string) map[string]any {

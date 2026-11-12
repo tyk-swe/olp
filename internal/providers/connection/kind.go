@@ -7,19 +7,60 @@ import (
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
-type authCapability struct {
-	Mode       string `json:"mode"`
-	Label      string `json:"label"`
-	Credential string `json:"credential"`
+type CredentialPolicy string
+
+const (
+	CredentialRequired  CredentialPolicy = "required"
+	CredentialForbidden CredentialPolicy = "forbidden"
+	CredentialGrant     CredentialPolicy = "grant"
+)
+
+func credentialPolicy(mode string) CredentialPolicy {
+	switch {
+	case mode == connectors.AuthGrant:
+		return CredentialGrant
+	case connectors.SecretRequired(mode):
+		return CredentialRequired
+	default:
+		return CredentialForbidden
+	}
 }
 
-type fieldCapability struct {
+type AuthOption struct {
+	Mode       string           `json:"mode"`
+	Label      string           `json:"label"`
+	Credential CredentialPolicy `json:"credential"`
+}
+
+func auth(mode, label string) AuthOption {
+	return AuthOption{Mode: mode, Label: label, Credential: credentialPolicy(mode)}
+}
+
+type Field struct {
 	Field    string `json:"field"`
 	Label    string `json:"label"`
 	Required bool   `json:"required"`
 }
 
-type preset struct {
+type Kind struct {
+	Name            string       `json:"kind"`
+	Label           string       `json:"label"`
+	Description     string       `json:"description"`
+	DefaultAuthMode string       `json:"default_auth_mode"`
+	AuthModes       []AuthOption `json:"auth_modes"`
+	Fields          []Field      `json:"fields"`
+}
+
+func (k Kind) Offers(mode string) bool {
+	return slices.ContainsFunc(k.AuthModes, func(option AuthOption) bool { return option.Mode == mode })
+}
+
+type ListedKind struct {
+	Kind
+	Presets []Preset `json:"presets"`
+}
+
+type Preset struct {
 	ID                 string `json:"id"`
 	Label              string `json:"label"`
 	Description        string `json:"description"`
@@ -39,17 +80,7 @@ type preset struct {
 	ProfileRevision *string `json:"profile_revision"`
 }
 
-type kindCapability struct {
-	Kind            string            `json:"kind"`
-	Label           string            `json:"label"`
-	Description     string            `json:"description"`
-	DefaultAuthMode string            `json:"default_auth_mode"`
-	AuthModes       []authCapability  `json:"auth_modes"`
-	Fields          []fieldCapability `json:"fields"`
-	Presets         []preset          `json:"presets"`
-}
-
-type vendor struct {
+type Vendor struct {
 	ID               string   `json:"id"`
 	Name             string   `json:"name"`
 	Connector        string   `json:"connector"`
@@ -67,82 +98,95 @@ type vendor struct {
 }
 
 var (
-	apiKeyAuth  = authCapability{Mode: connectors.AuthAPIKey, Label: "API key", Credential: "required"}
-	headersAuth = authCapability{Mode: connectors.AuthHeaders, Label: "Encrypted headers", Credential: "required"}
-	noAuth      = authCapability{Mode: connectors.AuthNone, Label: "No credential", Credential: "forbidden"}
-	endpoint    = fieldCapability{Field: "endpoint", Label: "Endpoint"}
+	apiKeyAuth  = auth(connectors.AuthAPIKey, "API key")
+	headersAuth = auth(connectors.AuthHeaders, "Encrypted headers")
+	noAuth      = auth(connectors.AuthNone, "No credential")
+	endpoint    = Field{Field: "endpoint", Label: "Endpoint"}
 )
 
-// Kinds is the connector kind catalogue. Each kind's presets are the reviewed
-// vendor contracts that offer themselves as its presets.
-var Kinds = withPresets([]kindCapability{
-	{Kind: connectors.KindOpenAI, Label: "OpenAI", Description: "OpenAI platform API with Chat Completions and Responses.", DefaultAuthMode: connectors.AuthAPIKey,
-		AuthModes: []authCapability{apiKeyAuth, headersAuth, noAuth}, Fields: []fieldCapability{endpoint}},
-	{Kind: connectors.KindOpenAICompatible, Label: "OpenAI-compatible", Description: "Any server implementing the OpenAI Chat Completions or Responses API.", DefaultAuthMode: connectors.AuthAPIKey,
-		AuthModes: []authCapability{{Mode: connectors.AuthAPIKey, Label: "Bearer API key", Credential: "required"}, {Mode: connectors.AuthHeaders, Label: "Custom credential headers", Credential: "required"}, noAuth},
-		Fields:    []fieldCapability{{Field: "endpoint", Label: "Endpoint", Required: true}}},
-	{Kind: connectors.KindAnthropic, Label: "Anthropic", Description: "Native API, including custom endpoints.", DefaultAuthMode: connectors.AuthAPIKey,
-		AuthModes: []authCapability{apiKeyAuth, headersAuth, noAuth}, Fields: []fieldCapability{endpoint}},
-	{Kind: connectors.KindGemini, Label: "Google Gemini", Description: "Native API, including custom endpoints.", DefaultAuthMode: connectors.AuthAPIKey,
-		AuthModes: []authCapability{apiKeyAuth, headersAuth, noAuth}, Fields: []fieldCapability{endpoint}},
-	{Kind: connectors.KindAzureOpenAI, Label: "Azure OpenAI", Description: "Azure deployment API.", DefaultAuthMode: connectors.AuthAPIKey,
-		AuthModes: []authCapability{apiKeyAuth, {Mode: connectors.AuthAzureDefault, Label: "Microsoft Entra default credential", Credential: "forbidden"}, {Mode: connectors.AuthAzureClientSecret, Label: "Microsoft Entra client secret", Credential: "required"}},
-		Fields:    []fieldCapability{{Field: "endpoint", Label: "Resource origin", Required: true}, {Field: "deployment", Label: "Deployment", Required: true}, {Field: "api_version", Label: "API version", Required: true}}},
-	{Kind: connectors.KindAzureAISearch, Label: "Azure AI Search", Description: "Query-only operator-managed search indexes.", DefaultAuthMode: connectors.AuthAPIKey,
-		AuthModes: []authCapability{{Mode: connectors.AuthAPIKey, Label: "API key", Credential: "required"}, {Mode: connectors.AuthAzureDefault, Label: "Azure identity", Credential: "forbidden"}, {Mode: connectors.AuthAzureClientSecret, Label: "Service principal JSON", Credential: "required"}},
-		Fields:    []fieldCapability{{Field: "endpoint", Label: "Search service origin", Required: true}, {Field: "api_version", Label: "API version", Required: true}, {Field: "model", Label: "Index name", Required: true}}},
-	{Kind: connectors.KindVertexAI, Label: "Google Vertex AI", Description: "Vertex publisher generation API.", DefaultAuthMode: connectors.AuthADC,
-		AuthModes: []authCapability{{Mode: connectors.AuthADC, Label: "Application default credentials", Credential: "forbidden"}, {Mode: connectors.AuthServiceAccount, Label: "Service account JSON", Credential: "required"}},
-		Fields:    []fieldCapability{{Field: "cloud_project", Label: "Project", Required: true}, {Field: "cloud_region", Label: "Location", Required: true}, endpoint, {Field: "batch_storage", Label: "Batch storage"}}},
-	{Kind: connectors.KindBedrock, Label: "Amazon Bedrock", Description: "Converse, ConverseStream and CountTokens.", DefaultAuthMode: connectors.AuthDefaultChain,
-		AuthModes: []authCapability{{Mode: connectors.AuthDefaultChain, Label: "AWS credential chain", Credential: "forbidden"}, {Mode: connectors.AuthStatic, Label: "AWS credential JSON", Credential: "required"}},
-		Fields:    []fieldCapability{{Field: "cloud_region", Label: "Region", Required: true}, endpoint, {Field: "batch_storage", Label: "Batch storage"}}},
+var kinds = []Kind{
+	{Name: connectors.KindOpenAI, Label: "OpenAI", Description: "OpenAI platform API with Chat Completions and Responses.", DefaultAuthMode: connectors.AuthAPIKey,
+		AuthModes: []AuthOption{apiKeyAuth, headersAuth, noAuth}, Fields: []Field{endpoint}},
+	{Name: connectors.KindOpenAICompatible, Label: "OpenAI-compatible", Description: "Any server implementing the OpenAI Chat Completions or Responses API.", DefaultAuthMode: connectors.AuthAPIKey,
+		AuthModes: []AuthOption{auth(connectors.AuthAPIKey, "Bearer API key"), auth(connectors.AuthHeaders, "Custom credential headers"), noAuth},
+		Fields:    []Field{{Field: "endpoint", Label: "Endpoint", Required: true}}},
+	{Name: connectors.KindAnthropic, Label: "Anthropic", Description: "Native API, including custom endpoints.", DefaultAuthMode: connectors.AuthAPIKey,
+		AuthModes: []AuthOption{apiKeyAuth, headersAuth, noAuth}, Fields: []Field{endpoint}},
+	{Name: connectors.KindGemini, Label: "Google Gemini", Description: "Native API, including custom endpoints.", DefaultAuthMode: connectors.AuthAPIKey,
+		AuthModes: []AuthOption{apiKeyAuth, headersAuth, noAuth}, Fields: []Field{endpoint}},
+	{Name: connectors.KindAzureOpenAI, Label: "Azure OpenAI", Description: "Azure deployment API.", DefaultAuthMode: connectors.AuthAPIKey,
+		AuthModes: []AuthOption{apiKeyAuth, auth(connectors.AuthAzureDefault, "Microsoft Entra default credential"), auth(connectors.AuthAzureClientSecret, "Microsoft Entra client secret")},
+		Fields:    []Field{{Field: "endpoint", Label: "Resource origin", Required: true}, {Field: "deployment", Label: "Deployment", Required: true}, {Field: "api_version", Label: "API version", Required: true}}},
+	{Name: connectors.KindAzureAISearch, Label: "Azure AI Search", Description: "Query-only operator-managed search indexes.", DefaultAuthMode: connectors.AuthAPIKey,
+		AuthModes: []AuthOption{auth(connectors.AuthAPIKey, "API key"), auth(connectors.AuthAzureDefault, "Azure identity"), auth(connectors.AuthAzureClientSecret, "Service principal JSON")},
+		Fields:    []Field{{Field: "endpoint", Label: "Search service origin", Required: true}, {Field: "api_version", Label: "API version", Required: true}, {Field: "model", Label: "Index name", Required: true}}},
+	{Name: connectors.KindVertexAI, Label: "Google Vertex AI", Description: "Vertex publisher generation API.", DefaultAuthMode: connectors.AuthADC,
+		AuthModes: []AuthOption{auth(connectors.AuthADC, "Application default credentials"), auth(connectors.AuthServiceAccount, "Service account JSON")},
+		Fields:    []Field{{Field: "cloud_project", Label: "Project", Required: true}, {Field: "cloud_region", Label: "Location", Required: true}, endpoint, {Field: "batch_storage", Label: "Batch storage"}}},
+	{Name: connectors.KindBedrock, Label: "Amazon Bedrock", Description: "Converse, ConverseStream and CountTokens.", DefaultAuthMode: connectors.AuthDefaultChain,
+		AuthModes: []AuthOption{auth(connectors.AuthDefaultChain, "AWS credential chain"), auth(connectors.AuthStatic, "AWS credential JSON")},
+		Fields:    []Field{{Field: "cloud_region", Label: "Region", Required: true}, endpoint, {Field: "batch_storage", Label: "Batch storage"}}},
 	// A SageMaker provider's models are its endpoints, or endpoint/component
 	// for inference components, which operators declare.
-	{Kind: connectors.KindSageMaker, Label: "Amazon SageMaker AI", Description: "Real-time endpoints serving OpenAI Chat Completions.", DefaultAuthMode: connectors.AuthDefaultChain,
-		AuthModes: []authCapability{{Mode: connectors.AuthDefaultChain, Label: "AWS credential chain", Credential: "forbidden"}, {Mode: connectors.AuthStatic, Label: "AWS credential JSON", Credential: "required"}},
-		Fields:    []fieldCapability{{Field: "cloud_region", Label: "Region", Required: true}, endpoint, {Field: "model", Label: "Probe model", Required: true}}},
-	{Kind: connectors.KindWatsonx, Label: "IBM watsonx.ai", Description: "Chat API with IBM Cloud IAM authentication.", DefaultAuthMode: connectors.AuthIBMIAM,
-		AuthModes: []authCapability{{Mode: connectors.AuthIBMIAM, Label: "IBM Cloud API key", Credential: "required"}},
-		Fields: []fieldCapability{{Field: "cloud_region", Label: "Region", Required: true}, {Field: "cloud_project", Label: "Project ID", Required: true},
+	{Name: connectors.KindSageMaker, Label: "Amazon SageMaker AI", Description: "Real-time endpoints serving OpenAI Chat Completions.", DefaultAuthMode: connectors.AuthDefaultChain,
+		AuthModes: []AuthOption{auth(connectors.AuthDefaultChain, "AWS credential chain"), auth(connectors.AuthStatic, "AWS credential JSON")},
+		Fields:    []Field{{Field: "cloud_region", Label: "Region", Required: true}, endpoint, {Field: "model", Label: "Probe model", Required: true}}},
+	{Name: connectors.KindWatsonx, Label: "IBM watsonx.ai", Description: "Chat API with IBM Cloud IAM authentication.", DefaultAuthMode: connectors.AuthIBMIAM,
+		AuthModes: []AuthOption{auth(connectors.AuthIBMIAM, "IBM Cloud API key")},
+		Fields: []Field{{Field: "cloud_region", Label: "Region", Required: true}, {Field: "cloud_project", Label: "Project ID", Required: true},
 			endpoint, {Field: "api_version", Label: "API version date", Required: false}}},
 	// A plugin profile supplies the address, credential placement, model
 	// discovery, and whether a static credential or a grant authenticates.
 	// Without discovery, the operator names a model to probe, as the
 	// profile catalogue's model_discovery tells.
-	{Kind: connectors.KindPlugin, Label: "Provider plugin", Description: "A profile an installed provider plugin supplies around a built-in dialect.", DefaultAuthMode: connectors.AuthStaticCredential,
-		AuthModes: []authCapability{{Mode: connectors.AuthStaticCredential, Label: "Static credential", Credential: "required"}, {Mode: connectors.AuthGrant, Label: "Grant", Credential: "grant"}},
-		Fields:    []fieldCapability{}},
-})
-
-// VendorCatalogue is what /provider-vendors publishes: every reviewed vendor
-// contract, authenticated as its connector kind allows.
-var VendorCatalogue = publishedVendors()
-
-func withPresets(catalogue []kindCapability) []kindCapability {
-	for i := range catalogue {
-		catalogue[i].Presets = []preset{}
-		for _, c := range vendors.All() {
-			if c.Connector != catalogue[i].Kind || c.Preset == nil {
-				continue
-			}
-			entry := preset{ID: c.ID, Label: c.Name, Description: c.Description, Endpoint: c.Endpoint, AuthMode: c.Preset.AuthMode,
-				Maintainer: c.Maintainer, DocumentationLabel: c.Documentation.Label, DocumentationURL: c.Documentation.URL,
-				Discovery: c.Discovery, Placeholder: c.Preset.Placeholder}
-			if profile := c.Preset.Profile; profile != nil {
-				entry.ProfileID, entry.ProfileRevision = new(profile.ID), new(profile.Revision)
-			}
-			catalogue[i].Presets = append(catalogue[i].Presets, entry)
-		}
-	}
-	return catalogue
+	{Name: connectors.KindPlugin, Label: "Provider plugin", Description: "A profile an installed provider plugin supplies around a built-in dialect.", DefaultAuthMode: connectors.AuthStaticCredential,
+		AuthModes: []AuthOption{auth(connectors.AuthStaticCredential, "Static credential"), auth(connectors.AuthGrant, "Grant")},
+		Fields:    []Field{}},
 }
 
-func publishedVendors() []vendor {
-	out := []vendor{}
+// Kinds lists the connector kinds, each with the reviewed vendor contracts that
+// offer themselves as its presets.
+func Kinds() []ListedKind {
+	out := make([]ListedKind, 0, len(kinds))
+	for _, k := range kinds {
+		out = append(out, ListedKind{Kind: k, Presets: presetsOf(k.Name)})
+	}
+	return out
+}
+
+func LookupKind(name string) (Kind, bool) {
+	i := slices.IndexFunc(kinds, func(k Kind) bool { return k.Name == name })
+	if i < 0 {
+		return Kind{}, false
+	}
+	return kinds[i], true
+}
+
+func presetsOf(kind string) []Preset {
+	out := []Preset{}
 	for _, c := range vendors.All() {
-		auth := []string{}
-		for _, mode := range KindByName(c.Connector).AuthModes {
+		if c.Connector != kind || c.Preset == nil {
+			continue
+		}
+		entry := Preset{ID: c.ID, Label: c.Name, Description: c.Description, Endpoint: c.Endpoint, AuthMode: c.Preset.AuthMode,
+			Maintainer: c.Maintainer, DocumentationLabel: c.Documentation.Label, DocumentationURL: c.Documentation.URL,
+			Discovery: c.Discovery, Placeholder: c.Preset.Placeholder}
+		if profile := c.Preset.Profile; profile != nil {
+			entry.ProfileID, entry.ProfileRevision = new(profile.ID), new(profile.Revision)
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+// Vendors is what /provider-vendors publishes: every reviewed vendor contract,
+// authenticated as its connector kind allows.
+func Vendors() []Vendor {
+	out := make([]Vendor, 0, len(vendors.All()))
+	for _, c := range vendors.All() {
+		kind, _ := LookupKind(c.Connector)
+		auth := make([]string, 0, len(kind.AuthModes))
+		for _, mode := range kind.AuthModes {
 			auth = append(auth, mode.Mode)
 		}
 		var endpoint *string
@@ -154,17 +198,9 @@ func publishedVendors() []vendor {
 			unsupported = append(unsupported, shape.Unsupported...)
 		}
 		slices.Sort(unsupported)
-		out = append(out, vendor{ID: c.ID, Name: c.Name, Connector: c.Connector, Discovery: c.Discovery, Operations: c.Operations, Authentication: auth,
+		out = append(out, Vendor{ID: c.ID, Name: c.Name, Connector: c.Connector, Discovery: c.Discovery, Operations: c.Operations, Authentication: auth,
 			Parameters: c.Parameters, DocumentationURL: c.Documentation.URL, Endpoint: endpoint,
 			Dialects: append([]string{}, c.Dialects...), UnsupportedParameters: append([]string{}, slices.Compact(unsupported)...)})
 	}
 	return out
-}
-
-func KindByName(name string) *kindCapability {
-	i := slices.IndexFunc(Kinds, func(k kindCapability) bool { return k.Kind == name })
-	if i < 0 {
-		return nil
-	}
-	return &Kinds[i]
 }

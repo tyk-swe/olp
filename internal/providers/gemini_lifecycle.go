@@ -16,7 +16,7 @@ import (
 )
 
 func (s *Catalogue) certifyGeminiInteraction(ctx context.Context, cfg probeTarget, credential []byte, model, mode string, maxEventBytes int) error {
-	if mode != ModeUnary && mode != ModeStreaming {
+	if mode != "unary" && mode != "streaming" {
 		return &probeError{Code: "capability_unavailable", Detail: "Gemini Interactions profile supports unary and streaming calls."}
 	}
 	endpoint, err := cfg.Transport().InteractionsURL("", "")
@@ -28,7 +28,7 @@ func (s *Catalogue) certifyGeminiInteraction(ctx context.Context, cfg probeTarge
 		return &probeError{Code: "model_invalid", Detail: "The Interactions model binding is malformed."}
 	}
 	body, _ := json.Marshal(map[string]any{"model": upstream, "input": "Reply with OK.", "store": false,
-		"stream": mode == ModeStreaming, "generation_config": map[string]any{"max_output_tokens": 16}})
+		"stream": mode == "streaming", "generation_config": map[string]any{"max_output_tokens": 16}})
 	status, result, err := s.call(ctx, cfg, credential, http.MethodPost, endpoint, body)
 	if err != nil {
 		return err
@@ -36,7 +36,7 @@ func (s *Catalogue) certifyGeminiInteraction(ctx context.Context, cfg probeTarge
 	if status != http.StatusOK {
 		return statusError(cfg, status, result)
 	}
-	if mode == ModeUnary {
+	if mode == "unary" {
 		if _, err := geminilifecycle.ParseInteractionResponse(result, probeBodyLimit); err != nil {
 			return &probeError{Code: "provider_protocol_error", Detail: "The upstream did not return a valid Interaction resource."}
 		}

@@ -182,7 +182,7 @@ func canonicalNetworkCredential(p Prepared) error {
 }
 
 func knownKind(p Prepared) error {
-	if KindByName(p.document.Kind) == nil {
+	if _, ok := LookupKind(p.document.Kind); !ok {
 		return &routing.Refusal{Code: "provider_kind_unavailable", Message: "Unknown provider connector kind."}
 	}
 	return nil
@@ -210,7 +210,7 @@ func pluginOptions(p Prepared) error {
 }
 
 func offeredAuthMode(p Prepared) error {
-	if !slices.ContainsFunc(KindByName(p.document.Kind).AuthModes, func(m authCapability) bool { return m.Mode == p.document.AuthMode }) {
+	if kind, _ := LookupKind(p.document.Kind); !kind.Offers(p.document.AuthMode) {
 		return invalid("configuration.auth_mode", "This authentication mode is not available for the selected kind.")
 	}
 	return nil

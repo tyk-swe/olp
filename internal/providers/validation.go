@@ -88,7 +88,7 @@ func (s *Catalogue) validateModelAccess(ctx context.Context, cfg probeTarget, cr
 			return &probeError{Code: "no_capabilities", Detail: "Declare capabilities for the slot's enabled models before validating."}
 		}
 		for _, capability := range model.Capabilities {
-			if err := s.certifyTuple(ctx, cfg, credential, model.UpstreamModel, CapabilityInput{capability.Operation, capability.Surface, capability.Mode}, probeBodyLimit); err != nil {
+			if err := s.certifyTuple(ctx, cfg, credential, model.UpstreamModel, capability.Capability, probeBodyLimit); err != nil {
 				return err
 			}
 			checked++

@@ -135,11 +135,11 @@ func parseModels(models []contract.ConfigurationModelEntry, at path) ([]provider
 		if err := providers.ValidModelName(field.field("display_name"), display); err != nil {
 			return providers.DraftModel{}, err
 		}
-		capabilities, err := promotion.Convert[[]providers.CapabilityInput](model.Capabilities)
+		capabilities, err := promotion.Convert[[]connection.Capability](model.Capabilities)
 		if err != nil {
 			return providers.DraftModel{}, err
 		}
-		if _, err := providers.ValidCapabilities(capabilities); err != nil {
+		if _, err := connection.ValidCapabilities(capabilities); err != nil {
 			return providers.DraftModel{}, err
 		}
 		return providers.DraftModel{UpstreamModel: model.UpstreamModel, DisplayName: display, Enabled: model.Enabled, Capabilities: promotion.NonNil(capabilities)}, nil
@@ -210,8 +210,8 @@ func canonicalModels(models []providers.DraftModel) []providers.DraftModel {
 	return slices.SortedFunc(slices.Values(canonical), func(a, b providers.DraftModel) int { return cmp.Compare(a.UpstreamModel, b.UpstreamModel) })
 }
 
-func canonicalCapabilities(capabilities []providers.CapabilityInput) []providers.CapabilityInput {
-	return promotion.NonNil(slices.SortedFunc(slices.Values(capabilities), func(a, b providers.CapabilityInput) int {
+func canonicalCapabilities(capabilities []connection.Capability) []connection.Capability {
+	return promotion.NonNil(slices.SortedFunc(slices.Values(capabilities), func(a, b connection.Capability) int {
 		return cmp.Compare(a.Operation+"/"+a.Surface+"/"+a.Mode, b.Operation+"/"+b.Surface+"/"+b.Mode)
 	}))
 }

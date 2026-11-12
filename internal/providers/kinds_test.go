@@ -9,27 +9,28 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 var (
-	openAIBatch     = CapabilityInput{Operation: "batch", Surface: SurfaceOpenAI, Mode: ModeUnary}
-	anthropicBatch  = CapabilityInput{Operation: "batch", Surface: "anthropic", Mode: ModeUnary}
-	nativeBatch     = CapabilityInput{Operation: "batch", Surface: "native", Mode: ModeUnary}
-	openAIRealtime  = CapabilityInput{Operation: "realtime", Surface: SurfaceOpenAI, Mode: "realtime"}
-	webRTCRealtime  = CapabilityInput{Operation: "realtime", Surface: SurfaceOpenAI, Mode: "webrtc"}
-	geminiRealtime  = CapabilityInput{Operation: "realtime", Surface: "gemini", Mode: "realtime"}
-	nativeRealtime  = CapabilityInput{Operation: "realtime", Surface: "native", Mode: "realtime"}
-	bedrockInvoke   = CapabilityInput{Operation: "bedrock_invoke", Surface: "bedrock", Mode: ModeUnary}
-	retrieval       = CapabilityInput{Operation: "retrieval", Surface: SurfaceOpenAI, Mode: ModeUnary}
-	asyncVideoStart = CapabilityInput{Operation: "video_create", Surface: SurfaceOpenAI, Mode: "async"}
+	openAIBatch     = connection.Capability{Operation: "batch", Surface: "openai", Mode: "unary"}
+	anthropicBatch  = connection.Capability{Operation: "batch", Surface: "anthropic", Mode: "unary"}
+	nativeBatch     = connection.Capability{Operation: "batch", Surface: "native", Mode: "unary"}
+	openAIRealtime  = connection.Capability{Operation: "realtime", Surface: "openai", Mode: "realtime"}
+	webRTCRealtime  = connection.Capability{Operation: "realtime", Surface: "openai", Mode: "webrtc"}
+	geminiRealtime  = connection.Capability{Operation: "realtime", Surface: "gemini", Mode: "realtime"}
+	nativeRealtime  = connection.Capability{Operation: "realtime", Surface: "native", Mode: "realtime"}
+	bedrockInvoke   = connection.Capability{Operation: "bedrock_invoke", Surface: "bedrock", Mode: "unary"}
+	retrieval       = connection.Capability{Operation: "retrieval", Surface: "openai", Mode: "unary"}
+	asyncVideoStart = connection.Capability{Operation: "video_create", Surface: "openai", Mode: "async"}
 )
 
 func TestCertifiableFollowsTheVendorRules(t *testing.T) {
 	t.Parallel()
 	cases := map[string]struct {
 		kind, vendor string
-		tuple        CapabilityInput
+		tuple        connection.Capability
 		want         bool
 	}{
 		"openai batches": {connectors.KindOpenAI, "openai", openAIBatch, true},
@@ -71,7 +72,7 @@ func TestCapabilityOptionsForKindOfferWhatAProfileCanCertify(t *testing.T) {
 	t.Parallel()
 	cases := map[string]struct {
 		kind  string
-		tuple CapabilityInput
+		tuple connection.Capability
 		want  bool
 	}{
 		"bedrock retrieval through its profile":         {connectors.KindBedrock, retrieval, true},

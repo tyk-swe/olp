@@ -13,10 +13,10 @@ import (
 // DraftModel is declared portable model intent. Certification belongs to the
 // destination's probe/activation workflow, never to imported intent.
 type DraftModel struct {
-	UpstreamModel string            `json:"upstream_model"`
-	DisplayName   string            `json:"display_name"`
-	Enabled       bool              `json:"enabled"`
-	Capabilities  []CapabilityInput `json:"capabilities"`
+	UpstreamModel string                  `json:"upstream_model"`
+	DisplayName   string                  `json:"display_name"`
+	Enabled       bool                    `json:"enabled"`
+	Capabilities  []connection.Capability `json:"capabilities"`
 }
 
 // DraftSlot binds validated slot intent to destination-owned identities.
@@ -54,7 +54,7 @@ func (s *Catalogue) StageDraftInventory(ctx context.Context, tx pgx.Tx, provider
 		}
 		declared := make([]storedCapability, 0, len(model.Capabilities))
 		for _, capability := range model.Capabilities {
-			declared = append(declared, storedCapability{Operation: capability.Operation, Surface: capability.Surface, Mode: capability.Mode, Source: "declared"})
+			declared = append(declared, storedCapability{Capability: connection.Capability{Operation: capability.Operation, Surface: capability.Surface, Mode: capability.Mode}, Source: "declared"})
 		}
 		encoded, err := json.Marshal(declared)
 		if err != nil {

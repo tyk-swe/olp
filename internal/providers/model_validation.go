@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 )
 
@@ -264,8 +263,8 @@ func (s *Server) models(r *http.Request, p access.Principal) (access.Reply, erro
 }
 
 type setModelRequest struct {
-	Enabled      bool               `json:"enabled"`
-	Capabilities *[]CapabilityInput `json:"capabilities"`
+	Enabled      bool                     `json:"enabled"`
+	Capabilities *[]connection.Capability `json:"capabilities"`
 }
 
 func loadModel(ctx context.Context, q access.Queryer, providerID, modelID string, lock bool) (*storedModel, error) {
@@ -285,28 +284,6 @@ func loadModel(ctx context.Context, q access.Queryer, providerID, modelID string
 		m.Capabilities = []storedCapability{}
 	}
 	return &m, nil
-}
-
-func ValidCapabilities(inputs []CapabilityInput) ([]CapabilityInput, error) {
-	if len(inputs) > 64 {
-		return nil, access.Invalid("capabilities", "Declare at most 64 capabilities per model.")
-	}
-	var out []CapabilityInput
-	seen := map[CapabilityInput]bool{}
-	for _, c := range inputs {
-		supported := operationregistry.Catalog().Supports(c.Operation, c.Surface, c.Mode)
-		for _, option := range capabilityVocabulary {
-			supported = supported || option == c
-		}
-		if !supported {
-			return nil, access.Fail(422, "capability_unavailable", fmt.Sprintf("The %s/%s/%s capability is not available in this release.", c.Operation, c.Surface, c.Mode))
-		}
-		if !seen[c] {
-			seen[c] = true
-			out = append(out, c)
-		}
-	}
-	return out, nil
 }
 
 func (s *Server) setModel(r *http.Request, _ access.Principal) (access.Reply, error) {
@@ -391,13 +368,13 @@ func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, err
 	defer cancel()
 	for i := range m.Capabilities {
 		c := &m.Capabilities[i]
-		err := s.certifyTuple(probeCtx, target, credential, m.UpstreamModel, CapabilityInput{c.Operation, c.Surface, c.Mode}, probeBodyLimit)
+		err := s.certifyTuple(probeCtx, target, credential, m.UpstreamModel, c.Capability, probeBodyLimit)
 		item := map[string]any{"operation": c.Operation, "surface": c.Surface, "mode": c.Mode, "succeeded": err == nil, "detail": "Certified.", "error_code": nil}
 		if err == nil {
 			certified++
 			c.Source, c.CertifiedAt = "certified", &at
 			c.CredentialFingerprint = defaultSlot.credentialFingerprint(current.Connection.Document())
-			c.ToolCalls = c.Operation == "generation" && (c.Surface == "openai" || c.Surface == "anthropic" || c.Surface == "gemini") && (c.Mode == ModeUnary || c.Mode == ModeStreaming) && s.certifyToolCalls(probeCtx, target, credential, m.UpstreamModel, c.Mode == ModeStreaming) == nil
+			c.ToolCalls = c.Operation == "generation" && (c.Surface == "openai" || c.Surface == "anthropic" || c.Surface == "gemini") && (c.Mode == "unary" || c.Mode == "streaming") && s.certifyToolCalls(probeCtx, target, credential, m.UpstreamModel, c.Mode == "streaming") == nil
 			item["tool_calls"] = c.ToolCalls
 		} else {
 			pe := classify(err)
@@ -452,13 +429,13 @@ func (s *Catalogue) setDraftModel(ctx context.Context, tx pgx.Tx, current *recor
 	}
 	capabilities := m.Capabilities
 	if input.Capabilities != nil {
-		requested, err := ValidCapabilities(*input.Capabilities)
+		requested, err := connection.ValidCapabilities(*input.Capabilities)
 		if err != nil {
 			return err
 		}
-		existing := map[CapabilityInput]storedCapability{}
+		existing := map[connection.Capability]storedCapability{}
 		for _, c := range m.Capabilities {
-			existing[CapabilityInput{c.Operation, c.Surface, c.Mode}] = c
+			existing[c.Capability] = c
 		}
 		capabilities = make([]storedCapability, 0, len(requested))
 		for _, c := range requested {
@@ -469,7 +446,7 @@ func (s *Catalogue) setDraftModel(ctx context.Context, tx pgx.Tx, current *recor
 				capabilities = append(capabilities, kept)
 				continue
 			}
-			capabilities = append(capabilities, storedCapability{Operation: c.Operation, Surface: c.Surface, Mode: c.Mode, Source: "declared"})
+			capabilities = append(capabilities, storedCapability{Capability: connection.Capability{Operation: c.Operation, Surface: c.Surface, Mode: c.Mode}, Source: "declared"})
 		}
 	}
 	encoded, _ := json.Marshal(capabilities)

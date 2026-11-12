@@ -244,9 +244,7 @@ func (s *Server) mutationWith(r *http.Request, action string, input any, fn func
 }
 
 type storedCapability struct {
-	Operation             string     `json:"operation"`
-	Surface               string     `json:"surface"`
-	Mode                  string     `json:"mode"`
+	connection.Capability
 	Source                string     `json:"source"`
 	CertifiedAt           *time.Time `json:"certified_at"`
 	CredentialFingerprint string     `json:"credential_fingerprint,omitempty"`
@@ -737,7 +735,7 @@ func (s *Catalogue) restoreDraft(ctx context.Context, tx pgx.Tx, current *record
 	for _, m := range v.Models {
 		capabilities := make([]storedCapability, 0, len(m.Capabilities))
 		for _, c := range m.Capabilities {
-			capabilities = append(capabilities, storedCapability{Operation: c.Operation, Surface: c.Surface, Mode: c.Mode, Source: c.Source, CertifiedAt: c.CertifiedAt, ToolCalls: c.ToolCalls})
+			capabilities = append(capabilities, storedCapability{Capability: connection.Capability{Operation: c.Operation, Surface: c.Surface, Mode: c.Mode}, Source: c.Source, CertifiedAt: c.CertifiedAt, ToolCalls: c.ToolCalls})
 		}
 		encoded, _ := json.Marshal(capabilities)
 		if _, err := tx.Exec(ctx, `INSERT INTO olp.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities) VALUES($1,$2,$3,$4,true,$5)
@@ -894,15 +892,15 @@ func (s *Catalogue) createDraft(ctx context.Context, tx pgx.Tx, p access.Princip
 		}
 		// A dedicated operation profile, such as an embeddings or rerank
 		// dialect, declares the tuple it can actually certify.
-		mode := ModeUnary
-		if configuration.ProfileID != "" && !probeable(transport, CapabilityInput{Operation: operation, Surface: surface, Mode: mode}) {
+		mode := "unary"
+		if configuration.ProfileID != "" && !probeable(transport, connection.Capability{Operation: operation, Surface: surface, Mode: mode}) {
 			if tuple := defaultProbeTuple(transport); probeable(transport, tuple) {
 				operation, surface, mode = tuple.Operation, tuple.Surface, tuple.Mode
 			}
 		}
-		capabilities := []storedCapability{{Operation: operation, Surface: surface, Mode: mode, Source: "declared"}}
+		capabilities := []storedCapability{{Capability: connection.Capability{Operation: operation, Surface: surface, Mode: mode}, Source: "declared"}}
 		if operation == "generation" {
-			capabilities = append(capabilities, storedCapability{Operation: operation, Surface: surface, Mode: ModeStreaming, Source: "declared"})
+			capabilities = append(capabilities, storedCapability{Capability: connection.Capability{Operation: operation, Surface: surface, Mode: "streaming"}, Source: "declared"})
 		}
 		declared, _ := json.Marshal(capabilities)
 		if _, err = tx.Exec(ctx, "INSERT INTO olp.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities) VALUES($1,$2,$3,$4,true,$5)", access.NewID(), id, *input.Model, displayName, declared); err != nil {

@@ -122,7 +122,7 @@ func readImport(ctx context.Context, q access.Queryer, row providers.ProviderSna
 
 func draftEntry(row providers.ProviderSnapshot, configuration connection.Configuration, models []providers.ModelSnapshot, slots []storedPair, imported *Billing) (Entry, error) {
 	draftModels, err := promotion.TryMap(models, func(model providers.ModelSnapshot) (providers.DraftModel, error) {
-		var capabilities []providers.CapabilityInput
+		var capabilities []connection.Capability
 		if err := json.Unmarshal(model.Capabilities, &capabilities); err != nil {
 			return providers.DraftModel{}, err
 		}

@@ -6,12 +6,13 @@ import (
 	"net/url"
 
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 )
 
 // certifyRetained proves a retained family with one authenticated,
 // read-only collection request, mirroring the agent-resource probe.
-func (s *Catalogue) certifyRetained(ctx context.Context, cfg probeTarget, credential []byte, model string, tuple CapabilityInput) error {
+func (s *Catalogue) certifyRetained(ctx context.Context, cfg probeTarget, credential []byte, model string, tuple connection.Capability) error {
 	if tuple.Operation == "retrieval" && cfg.Transport().RetrievalBackend() != "" {
 		return s.certifyRetrieval(ctx, cfg, credential, model)
 	}

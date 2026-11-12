@@ -11,7 +11,7 @@ func registerFilesBatchesProfiles() {
 		{"mistral", []string{"generation", "embeddings", "batch"}, "https://docs.mistral.ai/api/endpoint/batch"},
 	} {
 		profile := Profile{
-			ID: item.vendor + "-files-batches", Revision: ProfileRevision,
+			ID: item.vendor + "-files-batches", Revision: ProfileRevision, vendor: item.vendor,
 			Label: item.vendor + " OpenAI-compatible files and batches",
 			Kind:  "openai_compatible", Dialect: "openai-chat", DialectRevision: "unversioned-2026-09-22",
 			Hosting: "direct-compatible", Authentication: []string{"api_key"}, Transport: "http",

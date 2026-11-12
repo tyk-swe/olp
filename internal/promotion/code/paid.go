@@ -215,7 +215,7 @@ func frozenModel(model providers.DraftModel, current []routing.RevisionModel) (r
 		return routing.RevisionModel{}, access.Invalid("code.paid_connections.models", "Frozen models must remain enabled in the destination publication.")
 	}
 	destination := current[at]
-	capabilities, err := promotion.TryMapIndex(model.Capabilities, func(_ int, capability providers.CapabilityInput) (routing.RevisionCapability, error) {
+	capabilities, err := promotion.TryMapIndex(model.Capabilities, func(_ int, capability connection.Capability) (routing.RevisionCapability, error) {
 		found := slices.IndexFunc(destination.Capabilities, func(c routing.RevisionCapability) bool {
 			return c.Operation == capability.Operation && c.Surface == capability.Surface && c.Mode == capability.Mode && c.Source == "certified"
 		})

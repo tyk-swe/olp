@@ -420,7 +420,7 @@ func (l modelListing) next(page map[string]json.RawMessage) (string, error) {
 }
 
 // certifyTuple uses a bounded live probe or authenticated native media discovery.
-func (s *Catalogue) certifyTuple(ctx context.Context, cfg probeTarget, credential []byte, model string, tuple CapabilityInput, maxEventBytes int) error {
+func (s *Catalogue) certifyTuple(ctx context.Context, cfg probeTarget, credential []byte, model string, tuple connection.Capability, maxEventBytes int) error {
 	if !configurationCertifiable(cfg.Transport(), tuple) || !cfg.Transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode) {
 		return &probeError{Code: "capability_unavailable", Detail: "This connector cannot certify the requested tuple."}
 	}
@@ -494,7 +494,7 @@ func (s *Catalogue) certifyTuple(ctx context.Context, cfg probeTarget, credentia
 		family, _ = cfg.Transport().TargetFamily(wire.Chat)
 		payload = protocols.NativeGenerationProbe(family)
 	}
-	if tuple.Mode == ModeStreaming {
+	if tuple.Mode == "streaming" {
 		if tuple.Surface == "gemini" {
 			family = wire.GeminiStream
 		} else {
@@ -516,9 +516,9 @@ func (s *Catalogue) certifyTuple(ctx context.Context, cfg probeTarget, credentia
 	for _, family := range families {
 		current := payload
 		if family == wire.Completions {
-			current = map[string]any{"model": "certification", "prompt": "Reply with OK.", "max_tokens": 16, "stream": tuple.Mode == ModeStreaming}
+			current = map[string]any{"model": "certification", "prompt": "Reply with OK.", "max_tokens": 16, "stream": tuple.Mode == "streaming"}
 		} else if family == wire.Responses {
-			current = map[string]any{"model": "certification", "input": "Reply with OK.", "max_output_tokens": 16, "stream": tuple.Mode == ModeStreaming}
+			current = map[string]any{"model": "certification", "input": "Reply with OK.", "max_output_tokens": 16, "stream": tuple.Mode == "streaming"}
 		}
 		data, _ := json.Marshal(current)
 		parsed, err := protocols.Parse(family, data, "certification")
@@ -533,8 +533,8 @@ func (s *Catalogue) certifyTuple(ctx context.Context, cfg probeTarget, credentia
 		body, encodedWire := invocation.Prepared.Document().Bytes(), invocation.Wire
 		// A profile that forces streaming serves a non-streaming tuple through
 		// the stream the gateway aggregates.
-		aggregated := tuple.Mode != ModeStreaming && transport.ForcesStreaming()
-		endpoint, err := transport.URL(encodedWire, model, tuple.Mode == ModeStreaming || aggregated)
+		aggregated := tuple.Mode != "streaming" && transport.ForcesStreaming()
+		endpoint, err := transport.URL(encodedWire, model, tuple.Mode == "streaming" || aggregated)
 		if err != nil {
 			return err
 		}
@@ -546,7 +546,7 @@ func (s *Catalogue) certifyTuple(ctx context.Context, cfg probeTarget, credentia
 			return statusError(cfg, status, data)
 		}
 		switch {
-		case tuple.Mode == ModeStreaming:
+		case tuple.Mode == "streaming":
 			_, err = protocols.Stream(encodedWire, family, transport.StreamPayload(bytes.NewReader(data), maxEventBytes), maxEventBytes, "certification", true, func([]byte) error { return nil })
 		case aggregated:
 			var streamed *wire.Completion
@@ -950,7 +950,7 @@ func (s *Catalogue) hangupWebRTCProbe(ctx context.Context, cfg probeTarget, cred
 	return nil
 }
 
-func (s *Catalogue) certifyBedrockIngress(ctx context.Context, cfg probeTarget, credential []byte, model string, tuple CapabilityInput, maxEventBytes int) error {
+func (s *Catalogue) certifyBedrockIngress(ctx context.Context, cfg probeTarget, credential []byte, model string, tuple connection.Capability, maxEventBytes int) error {
 	upstream := cfg.Transport().Model(model)
 	if upstream == "" {
 		upstream = model
@@ -961,7 +961,7 @@ func (s *Catalogue) certifyBedrockIngress(ctx context.Context, cfg probeTarget, 
 		if family == "" {
 			return &probeError{Code: "capability_unavailable", Detail: "InvokeModel ingress supports only qualified Anthropic Claude, Titan embeddings, and Titan image models."}
 		}
-		if tuple.Mode == ModeStreaming {
+		if tuple.Mode == "streaming" {
 			if family != wire.Anthropic {
 				return &probeError{Code: "capability_unavailable", Detail: "InvokeModelWithResponseStream ingress supports only qualified Anthropic Claude models."}
 			}
@@ -983,7 +983,7 @@ func (s *Catalogue) certifyBedrockIngress(ctx context.Context, cfg probeTarget, 
 		"messages":        []any{map[string]any{"role": "user", "content": []any{map[string]any{"text": "Reply with OK."}}}},
 		"inferenceConfig": map[string]any{"maxTokens": 16},
 	})
-	if tuple.Mode == ModeStreaming {
+	if tuple.Mode == "streaming" {
 		return s.bedrockProbe(ctx, cfg, credential, base+"converse-stream", body, func(data []byte) error {
 			return readBedrockProbeStream(data, maxEventBytes)
 		})
@@ -1117,7 +1117,7 @@ func selectProbeSlot(slots []slotRow, cfg connection.Configuration) *slotRow {
 // unrelated chat success or a self-reported model list as media evidence.
 // Vertex, Bedrock and Azure offer no costless proof, so their media
 // certifies by the smallest real call of the operation.
-func (s *Catalogue) certifyNativeMedia(ctx context.Context, cfg probeTarget, credential []byte, model string, tuple CapabilityInput) error {
+func (s *Catalogue) certifyNativeMedia(ctx context.Context, cfg probeTarget, credential []byte, model string, tuple connection.Capability) error {
 	vendor := providerconfig.Value(cfg.Document().Options.VendorID)
 	if mediaByCall(cfg.Document().Kind, vendor, tuple.Operation) {
 		return s.certifyMediaCall(ctx, cfg, credential, model, tuple.Operation)
