@@ -451,11 +451,11 @@ func (s *Catalogue) storeDiscoveredModels(ctx context.Context, tx pgx.Tx, curren
 		}
 	}
 	document.Options.Models = metadata
-	config, err := json.Marshal(document)
+	prepared, err := connection.Prepare(ctx, s.ConnectionPolicy(tx), document)
 	if err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, "UPDATE olp.providers SET configuration=$2 WHERE id=$1", current.ID, config); err != nil {
+	if err = s.StoreDraftConfiguration(ctx, tx, current.ID, current.Name, prepared); err != nil {
 		return err
 	}
 	if upstream {

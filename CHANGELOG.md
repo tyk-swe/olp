@@ -26,6 +26,13 @@ semantic versioning and take their source from root `package.json`. The
 
 ### Fixed
 
+- Model discovery that records new facts for a model, such as its context
+  length, now resets that provider's certified capabilities to declared and
+  marks the draft pending activation, as any other configuration change does.
+  Before, capabilities kept reading certified while the slot validation they
+  backed had already gone stale, so activation failed with
+  `slot_validation_required`.
+
 - Planning an unchanged configuration export no longer replaces a provider
   whose billing import has an AWS, Azure or Google scope.
 

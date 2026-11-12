@@ -3,8 +3,11 @@
 package e2e_test
 
 import (
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/uuid"
@@ -103,6 +106,36 @@ func TestProviderLifecycleJourney(t *testing.T) {
 		s.want(owner, "GET", path+"/credential-slots/"+second, nil, nil, http.StatusNotFound)
 		if remaining := items(s.want(owner, "GET", path+"/credential-slots", nil, nil, http.StatusOK)["items"]); len(remaining) != 1 || remaining[0]["id"] == second {
 			t.Fatalf("slots after delete = %v, want only the default slot", remaining)
+		}
+	})
+
+	t.Run("discovered_facts_reset_certified_evidence", func(t *testing.T) {
+		t.Parallel()
+		s := &service{t: t, pool: parent.pool, origin: parent.origin, env: parent.env}
+		reportsFacts := atomic.Bool{}
+		fixture := vendor.Handler()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet && r.URL.Path == "/v1/models" && reportsFacts.Load() {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"object":"list","data":[{"id":"`+vendor.Model+`","object":"model","inputTokenLimit":128000}]}`)
+				return
+			}
+			fixture.ServeHTTP(w, r)
+		}))
+		t.Cleanup(server.Close)
+		path := "/api/v1/providers/" + s.activeProvider(owner, uniqueName("provider"), server.URL, project)["id"].(string)
+
+		reportsFacts.Store(true)
+		detail := s.want(owner, "POST", path+"/discovery", map[string]any{}, etag(s.want(owner, "GET", path, nil, nil, http.StatusOK)), http.StatusOK)
+		if detail["pending_activation"] != true {
+			t.Fatalf("provider after discovering new facts = %v, want a pending activation", detail)
+		}
+		for _, model := range items(s.want(owner, "GET", path+"/models", nil, nil, http.StatusOK)["items"]) {
+			for _, capability := range items(model["capabilities"]) {
+				if capability["source"] != "declared" {
+					t.Fatalf("capability after discovering new facts = %v, want it declared again", capability)
+				}
+			}
 		}
 	})
 
