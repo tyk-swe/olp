@@ -3,7 +3,10 @@ package notifications
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -13,16 +16,16 @@ import (
 )
 
 type ruleInput struct {
-	Name             string          `json:"name"`
-	ProjectID        *string         `json:"project_id"`
-	Event            string          `json:"event"`
-	SubjectKind      *string         `json:"subject_kind"`
-	SubjectID        *string         `json:"subject_id"`
-	WindowKind       *string         `json:"window_kind"`
-	ThresholdPercent *int            `json:"threshold_percent"`
-	DestinationID    string          `json:"destination_id"`
-	Enabled          *bool           `json:"enabled"`
-	Configuration    json.RawMessage `json:"configuration"`
+	Name             string                      `json:"name"`
+	ProjectID        *string                     `json:"project_id"`
+	Event            contract.NotificationEvent  `json:"event"`
+	SubjectKind      *contract.BudgetSubjectKind `json:"subject_kind"`
+	SubjectID        *string                     `json:"subject_id"`
+	WindowKind       *contract.BudgetWindowKind  `json:"window_kind"`
+	ThresholdPercent *int                        `json:"threshold_percent"`
+	DestinationID    string                      `json:"destination_id"`
+	Enabled          *bool                       `json:"enabled"`
+	Configuration    json.RawMessage             `json:"configuration"`
 }
 
 var rulePatchFields = map[string]string{
@@ -94,8 +97,7 @@ func parseRule(input ruleInput, projectID *string) (ruleTarget, error) {
 	if err := access.ValidText("name", input.Name, nameLimit); err != nil {
 		return ruleTarget{}, err
 	}
-	event := contract.NotificationEvent(input.Event)
-	spec, ok := events[event]
+	spec, ok := events[input.Event]
 	if !ok {
 		return ruleTarget{}, access.Invalid("event", "Use a supported notification event.")
 	}
@@ -106,21 +108,17 @@ func parseRule(input ruleInput, projectID *string) (ruleTarget, error) {
 	if spec.subject == noSubject && projectID != nil && !spec.projectScoped {
 		return ruleTarget{}, access.Invalid("project_id", "This notification event is installation-wide.")
 	}
-	configuration, err := spec.configuration.parse(input.Configuration)
+	configuration, err := spec.configuration.canonical(input.Configuration)
 	if err != nil {
 		return ruleTarget{}, access.Invalid("configuration", "The rule configuration is invalid for its event.")
-	}
-	canonical, err := json.Marshal(configuration)
-	if err != nil {
-		return ruleTarget{}, err
 	}
 	destinationID, err := access.ParseUUID(input.DestinationID)
 	if err != nil {
 		return ruleTarget{}, access.Invalid("destination_id", "Use a valid destination identifier.")
 	}
 	return ruleTarget{
-		name: strings.TrimSpace(input.Name), projectID: projectID, event: event, subject: subject,
-		destinationID: destinationID, enabled: input.Enabled == nil || *input.Enabled, configuration: canonical,
+		name: strings.TrimSpace(input.Name), projectID: projectID, event: input.Event, subject: subject,
+		destinationID: destinationID, enabled: input.Enabled == nil || *input.Enabled, configuration: configuration,
 	}, nil
 }
 
@@ -129,7 +127,7 @@ func parseSubject(shape subjectShape, input ruleInput) (ruleSubject, error) {
 	case budgetSubject:
 		return parseBudgetWatch(input)
 	case keySubject:
-		if input.SubjectKind == nil || *input.SubjectKind != string(contract.BudgetSubjectKindApiKey) ||
+		if input.SubjectKind == nil || *input.SubjectKind != contract.BudgetSubjectKindApiKey ||
 			input.SubjectID == nil || input.WindowKind != nil || input.ThresholdPercent != nil {
 			return nil, access.Invalid("subject_id", "Key reminders require an API key and no budget window or threshold.")
 		}
@@ -154,10 +152,10 @@ func parseSubject(shape subjectShape, input ruleInput) (ruleSubject, error) {
 }
 
 func parseBudgetWatch(input ruleInput) (ruleSubject, error) {
-	if input.SubjectKind == nil || !contract.BudgetSubjectKind(*input.SubjectKind).Valid() {
+	if input.SubjectKind == nil || !input.SubjectKind.Valid() {
 		return nil, access.Invalid("subject_kind", "Use api_key or budget_group.")
 	}
-	if input.WindowKind == nil || !contract.BudgetWindowKind(*input.WindowKind).Valid() {
+	if input.WindowKind == nil || !input.WindowKind.Valid() {
 		return nil, access.Invalid("window_kind", "Use day, week or month.")
 	}
 	if input.ThresholdPercent == nil || *input.ThresholdPercent < 1 || *input.ThresholdPercent > 100 {
@@ -166,11 +164,11 @@ func parseBudgetWatch(input ruleInput) (ruleSubject, error) {
 	if input.SubjectID == nil {
 		return nil, access.Invalid("subject_id", "Use a valid subject identifier.")
 	}
-	subject, err := parseWatched(contract.BudgetSubjectKind(*input.SubjectKind), *input.SubjectID)
+	subject, err := parseWatched(*input.SubjectKind, *input.SubjectID)
 	if err != nil {
 		return nil, err
 	}
-	return budgetWatch{watchedSubject: subject, window: contract.BudgetWindowKind(*input.WindowKind), percent: *input.ThresholdPercent}, nil
+	return budgetWatch{watchedSubject: subject, window: *input.WindowKind, percent: *input.ThresholdPercent}, nil
 }
 
 func parseWatched(kind contract.BudgetSubjectKind, raw string) (watchedSubject, error) {
@@ -193,11 +191,7 @@ func watched(subject ruleSubject) (watchedSubject, bool) {
 
 func checkReferences(ctx context.Context, tx pgx.Tx, t ruleTarget) error {
 	if subject, ok := watched(t.subject); ok {
-		query := apiKeyProjectSQL
-		if subject.kind == contract.BudgetSubjectKindBudgetGroup {
-			query = budgetGroupProjectSQL
-		}
-		project, found, err := referenceProject(ctx, tx, query, subject.id)
+		project, found, err := referenceProject(ctx, tx, subjectProjectSQL[subject.kind], subject.id)
 		if err != nil {
 			return err
 		}
@@ -222,10 +216,10 @@ func checkReferences(ctx context.Context, tx pgx.Tx, t ruleTarget) error {
 }
 
 func enforceRuleCap(ctx context.Context, tx pgx.Tx, event contract.NotificationEvent) error {
-	if events[event].evaluate == nil {
+	if !slices.Contains(evaluatedEvents, string(event)) {
 		return nil
 	}
-	if _, err := tx.Exec(ctx, lockGenericRuleCreationSQL); err != nil {
+	if _, err := tx.Exec(ctx, ruleCreationLockSQL, ruleCreationLockName); err != nil {
 		return err
 	}
 	var count int
@@ -233,7 +227,7 @@ func enforceRuleCap(ctx context.Context, tx pgx.Tx, event contract.NotificationE
 		return err
 	}
 	if count >= evaluatedRuleLimit {
-		return access.Invalid("event", "The installation already has 1000 generic notification rules.")
+		return access.Invalid("event", fmt.Sprintf("The installation already has %d generic notification rules.", evaluatedRuleLimit))
 	}
 	return nil
 }
@@ -243,40 +237,29 @@ func (s *Server) createNotificationRule(r *http.Request, _ access.Principal) (ac
 	if err := access.Decode(r, &input); err != nil {
 		return access.Reply{}, err
 	}
-	return s.create(r, rules, creation{projectID: input.ProjectID, fingerprint: input,
-		insert: func(tx pgx.Tx, p access.Principal, projectID *string, id, etag string) error {
-			target, err := parseRule(input, projectID)
-			if err != nil {
+	return create(s, r, rules, creation[ruleTarget]{projectID: input.ProjectID, fingerprint: input,
+		parse: func(projectID *string) (ruleTarget, error) { return parseRule(input, projectID) },
+		insert: func(tx pgx.Tx, p access.Principal, _ *string, target ruleTarget, id, etag string) error {
+			if err := checkReferences(r.Context(), tx, target); err != nil {
 				return err
 			}
-			if err = checkReferences(r.Context(), tx, target); err != nil {
-				return err
-			}
-			if err = enforceRuleCap(r.Context(), tx, target.event); err != nil {
+			if err := enforceRuleCap(r.Context(), tx, target.event); err != nil {
 				return err
 			}
 			c := target.subject.columns()
-			_, err = tx.Exec(r.Context(), createChannelRuleSQL, id, target.name, target.projectID, target.event,
+			_, err := tx.Exec(r.Context(), createChannelRuleSQL, id, target.name, target.projectID, target.event,
 				c.kind, c.id, c.window, c.percent, target.destinationID, target.enabled, etag, p.UserID(), target.configuration)
 			return err
 		}})
 }
 
 func (s *Server) updateNotificationRule(r *http.Request, _ access.Principal) (access.Reply, error) {
-	var patch map[string]json.RawMessage
-	if err := access.Decode(r, &patch); err != nil {
+	patch, err := decodePatch(r, "rule", "Unknown notification rule field.", rulePatchFields)
+	if err != nil {
 		return access.Reply{}, err
 	}
-	if len(patch) == 0 {
-		return access.Reply{}, access.Invalid("rule", "Send at least one field to update.")
-	}
-	for field := range patch {
-		if _, ok := rulePatchFields[field]; !ok {
-			return access.Reply{}, access.Invalid(field, "Unknown notification rule field.")
-		}
-	}
-	return s.update(r, rules, func(tx pgx.Tx, row locked, etag string) error {
-		input, err := patchRule(row.current, patch)
+	return s.update(r, rules, func(tx pgx.Tx, row document, etag string) error {
+		input, err := patchRule(row.body, patch)
 		if err != nil {
 			return err
 		}
@@ -284,13 +267,15 @@ func (s *Server) updateNotificationRule(r *http.Request, _ access.Principal) (ac
 		if err != nil {
 			return err
 		}
-		if err = checkReferences(r.Context(), tx, target); err != nil {
+		if err := checkReferences(r.Context(), tx, target); err != nil {
 			return err
 		}
 		c := target.subject.columns()
-		_, err = tx.Exec(r.Context(), updateChannelRuleSQL, row.id, target.name,
-			c.kind, c.id, c.window, c.percent, target.destinationID, target.enabled, etag, target.configuration)
-		return err
+		if _, err := tx.Exec(r.Context(), updateChannelRuleSQL, row.id, target.name,
+			c.kind, c.id, c.window, c.percent, target.destinationID, target.enabled, etag, target.configuration); err != nil {
+			return err
+		}
+		return nil
 	})
 }
 
@@ -299,14 +284,70 @@ func patchRule(current json.RawMessage, patch map[string]json.RawMessage) (ruleI
 	if err := json.Unmarshal(current, &next); err != nil {
 		return ruleInput{}, err
 	}
-	for field, raw := range patch {
-		object, err := json.Marshal(map[string]json.RawMessage{field: raw})
-		if err != nil {
-			return ruleInput{}, err
+	if string(patch["enabled"]) == "null" {
+		return ruleInput{}, access.Invalid("enabled", rulePatchFields["enabled"])
+	}
+	overlay, err := json.Marshal(patch)
+	if err != nil {
+		return ruleInput{}, err
+	}
+	if err := json.Unmarshal(overlay, &next); err != nil {
+		var mismatch *json.UnmarshalTypeError
+		if errors.As(err, &mismatch) {
+			return ruleInput{}, access.Invalid(mismatch.Field, rulePatchFields[mismatch.Field])
 		}
-		if err = json.Unmarshal(object, &next); err != nil {
-			return ruleInput{}, access.Invalid(field, rulePatchFields[field])
-		}
+		return ruleInput{}, err
 	}
 	return next, nil
+}
+
+var rules = resource{
+	parameter: "notification_rule_id", kind: "notification_rule", path: "/api/v1/notifications/rules/",
+	documentsSQL: ruleDocumentsSQL, lockSQL: lockRuleSQL, remove: removeRule,
+}
+
+func removeRule(ctx context.Context, tx pgx.Tx, id string) error {
+	_, err := tx.Exec(ctx, "DELETE FROM olp.notification_rules WHERE id=$1", id)
+	return err
+}
+
+func referenceProject(ctx context.Context, tx pgx.Tx, query, id string) (*string, bool, error) {
+	var project *string
+	err := tx.QueryRow(ctx, query, id).Scan(&project)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, nil
+	}
+	return project, err == nil, err
+}
+
+func sameProject(a, b *string) bool {
+	return a == nil && b == nil || a != nil && b != nil && *a == *b
+}
+
+const ruleDocumentsSQL = `SELECT r.id,r.project_id,r.etag,jsonb_build_object(
+	'id',r.id,'name',r.name,'project_id',r.project_id,'project_name',p.name,'event',r.event,'configuration',r.configuration,
+	'subject_kind',r.subject_kind,'subject_id',r.subject_id,'subject_name',COALESCE(k.name,g.name),
+	'window_kind',r.window_kind,'threshold_percent',r.threshold_percent,'destination_id',r.destination_id,'destination_name',d.name,
+	'enabled',r.enabled,'etag',r.etag,'created_by',r.created_by,'created_by_email',u.email,'created_at',r.created_at,'updated_at',r.updated_at) AS document
+ FROM olp.notification_rules r
+ JOIN olp.users u ON u.id=r.created_by
+ LEFT JOIN olp.projects p ON p.id=r.project_id
+ LEFT JOIN olp.api_keys k ON r.subject_kind='api_key' AND k.id=r.subject_id
+ LEFT JOIN olp.budget_groups g ON r.subject_kind='budget_group' AND g.id=r.subject_id
+ JOIN olp.notification_destinations d ON d.id=r.destination_id`
+
+const lockRuleSQL = `SELECT etag::text,project_id::text FROM olp.notification_rules WHERE id=$1 FOR UPDATE`
+
+const createChannelRuleSQL = `INSERT INTO olp.notification_rules(id,name,project_id,event,subject_kind,subject_id,window_kind,threshold_percent,destination_id,enabled,etag,created_by,configuration)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`
+
+const updateChannelRuleSQL = `UPDATE olp.notification_rules SET name=$2,subject_kind=$3,subject_id=$4,window_kind=$5,threshold_percent=$6,destination_id=$7,enabled=$8,etag=$9,configuration=$10,updated_at=now() WHERE id=$1`
+
+const evaluatedRuleCountSQL = `SELECT count(*) FROM olp.notification_rules WHERE event=ANY($1)`
+
+const destinationProjectSQL = `SELECT project_id::text FROM olp.notification_destinations WHERE id=$1`
+
+var subjectProjectSQL = map[contract.BudgetSubjectKind]string{
+	contract.BudgetSubjectKindApiKey:      `SELECT project_id::text FROM olp.api_keys WHERE id=$1`,
+	contract.BudgetSubjectKindBudgetGroup: `SELECT project_id::text FROM olp.budget_groups WHERE id=$1 AND retired_at IS NULL`,
 }

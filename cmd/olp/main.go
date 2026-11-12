@@ -59,6 +59,7 @@ func run(ctx context.Context, args []string) error {
 		case "migrate", "doctor", "master-key":
 			command, options := args[0], args[1:]
 			var maintenance MaintenanceOptions
+			var extraFlags func(*flag.FlagSet)
 			if command == "master-key" {
 				if len(options) == 0 || (options[0] != "status" && options[0] != "reencrypt" && options[0] != "verify-retirement") {
 					return errors.New("usage: olp master-key <status|reencrypt|verify-retirement> [flags]")
@@ -74,11 +75,13 @@ func run(ctx context.Context, args []string) error {
 					}
 					maintenance.RetirementVersion, options = version, options[1:]
 				}
-				if command == "reencrypt" && len(options) > 0 && options[0] == "--dry-run" {
-					maintenance.DryRun, options = true, options[1:]
+				if command == "reencrypt" {
+					extraFlags = func(f *flag.FlagSet) {
+						f.BoolVar(&maintenance.DryRun, "dry-run", false, "authenticate records without changing them")
+					}
 				}
 			}
-			c, err := Parse(append([]string{"all"}, options...), os.Getenv, os.Stderr)
+			c, err := parseWithFlags(append([]string{"all"}, options...), os.Getenv, os.Stderr, extraFlags)
 			if err != nil {
 				return err
 			}

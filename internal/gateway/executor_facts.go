@@ -85,7 +85,7 @@ func (s *Server) newFact(x *call, a routing.Attempt, slot routing.Slot, ordinal 
 	fact := AttemptFact{
 		Prompt:   x.prompt,
 		Strategy: a.Strategy, PolicyDigest: a.PolicyDigest, VendorID: a.VendorID, Price: a.Price,
-		Discount: a.Discount, CardPinned: x.cardPinned, CardRevisionID: x.cardRevisionID,
+		Discount:           a.Discount,
 		Ordinal:            ordinal,
 		TargetID:           a.TargetID,
 		ProviderID:         a.ProviderID,
@@ -104,7 +104,10 @@ func (s *Server) newFact(x *call, a routing.Attempt, slot routing.Slot, ordinal 
 		// its consumer's card from current inputs and retain it on the fact.
 		x.routingInputs = s.deps.Runtime.RoutingInputs()
 	}
-	fact.cardRev = x.attemptCardRevision(a.ProviderID, fact.StartedAt)
+	fact.cardRev, fact.CardPinned = x.resolveAttemptCardRevision(a.ProviderID, x.route, fact.StartedAt)
+	if fact.CardPinned && fact.cardRev != nil {
+		fact.CardRevisionID = &fact.cardRev.ID
+	}
 	provider, known := x.snapshot().FindProvider(a.ProviderID)
 	if len(pinned) != 0 && pinned[0] != nil {
 		provider, known = *pinned[0], true

@@ -2,42 +2,65 @@ package notifications
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 type destinationInput struct {
-	Name          string           `json:"name"`
-	URL           string           `json:"url"`
-	Type          string           `json:"type"`
-	Configuration json.RawMessage  `json:"configuration"`
-	ProjectID     *string          `json:"project_id"`
-	Secret        *json.RawMessage `json:"secret"`
-	Enabled       *bool            `json:"enabled"`
+	Name          string                               `json:"name"`
+	URL           string                               `json:"url"`
+	Type          contract.NotificationDestinationType `json:"type"`
+	Configuration json.RawMessage                      `json:"configuration"`
+	ProjectID     *string                              `json:"project_id"`
+	Secret        json.RawMessage                      `json:"secret"`
+	Enabled       *bool                                `json:"enabled"`
 }
 
 type storedDestination struct {
-	Name             string          `json:"name"`
-	URL              string          `json:"url"`
-	Type             string          `json:"type"`
-	Configuration    json.RawMessage `json:"configuration"`
-	Enabled          bool            `json:"enabled"`
-	SecretConfigured bool            `json:"secret_configured"`
+	Name             string                               `json:"name"`
+	URL              string                               `json:"url"`
+	Type             contract.NotificationDestinationType `json:"type"`
+	Configuration    json.RawMessage                      `json:"configuration"`
+	Enabled          bool                                 `json:"enabled"`
+	SecretConfigured bool                                 `json:"secret_configured"`
+}
+
+type secretChange interface{ secretChange() }
+
+type keptSecret struct{}
+
+type newSecret struct{ value []byte }
+
+func (keptSecret) secretChange() {}
+
+func (newSecret) secretChange() {}
+
+type destinationTarget struct {
+	destination
+	name    string
+	enabled bool
+	secret  secretChange
 }
 
 var destinationPatchFields = map[string]bool{"name": true, "url": true, "type": true, "configuration": true, "enabled": true, "secret": true}
 
-func destinationSecret(typ string, raw json.RawMessage) ([]byte, error) {
-	if string(raw) == "null" {
-		return nil, nil
+func destinationSecret(typ contract.NotificationDestinationType, raw json.RawMessage) (secretChange, error) {
+	if len(raw) == 0 {
+		return keptSecret{}, nil
 	}
-	if typ == webhookType {
+	if string(raw) == "null" {
+		return newSecret{}, nil
+	}
+	if typ == contract.NotificationDestinationTypeWebhook {
 		var secret string
 		if err := json.Unmarshal(raw, &secret); err != nil {
 			return nil, access.Invalid("secret", "Use a signing secret string or null.")
@@ -45,16 +68,12 @@ func destinationSecret(typ string, raw json.RawMessage) ([]byte, error) {
 		if secret == "" || len(secret) > signingSecretLimit {
 			return nil, access.Invalid("secret", "Use a signing secret of 1–1024 bytes.")
 		}
-		return []byte(secret), nil
+		return newSecret{[]byte(secret)}, nil
 	}
 	if len(raw) > secretObjectLimit {
 		return nil, access.Invalid("secret", "The secret object is too large.")
 	}
-	var decoded map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &decoded); err != nil || decoded == nil {
-		return nil, access.Invalid("secret", "Use the channel credential object or null.")
-	}
-	return raw, nil
+	return newSecret{raw}, nil
 }
 
 func configurationObject(raw json.RawMessage) (json.RawMessage, error) {
@@ -64,25 +83,50 @@ func configurationObject(raw json.RawMessage) (json.RawMessage, error) {
 	if len(raw) > configurationLimit {
 		return nil, access.Invalid("configuration", "Use a configuration object of at most 4096 bytes.")
 	}
-	var decoded map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &decoded); err != nil || decoded == nil {
+	if _, err := decodeObject(raw); err != nil {
 		return nil, access.Invalid("configuration", "Use a configuration object.")
 	}
 	return raw, nil
 }
 
-func (s *Server) checkDestination(d destination, secret []byte, bind, enabled bool) error {
-	if bind {
-		if _, err := open(&s.egress, d, secret); err != nil {
-			return access.Invalid("destination", "The destination, configuration or secret is invalid.")
-		}
-		return nil
+func parseDestination(input destinationInput) (destinationTarget, error) {
+	if err := access.ValidText("name", input.Name, nameLimit); err != nil {
+		return destinationTarget{}, err
 	}
-	if _, err := parse(&s.egress, d); err != nil {
+	configuration, err := configurationObject(input.Configuration)
+	if err != nil {
+		return destinationTarget{}, err
+	}
+	typ := cmp.Or(input.Type, contract.NotificationDestinationTypeWebhook)
+	secret, err := destinationSecret(typ, input.Secret)
+	if err != nil {
+		return destinationTarget{}, err
+	}
+	return destinationTarget{
+		destination: destination{Type: typ, URL: strings.TrimSpace(input.URL), Configuration: configuration},
+		name:        strings.TrimSpace(input.Name),
+		enabled:     input.Enabled == nil || *input.Enabled,
+		secret:      secret,
+	}, nil
+}
+
+func (s *Server) checkEndpoint(d destination, enabled bool) error {
+	if err := kindOf(d.Type).check(&s.egress, d); err != nil {
 		return access.Invalid("destination", "The destination or its configuration is invalid.")
 	}
 	if enabled && requiresSecret(d.Type) {
 		return access.Invalid("secret", "This destination type requires a credential secret object.")
+	}
+	return nil
+}
+
+func (s *Server) checkBinding(d destination, secret []byte) error {
+	_, err := kindOf(d.Type).open(&s.egress, d, secret)
+	if errors.Is(err, errMalformedCredential) {
+		return access.Invalid("secret", "Use the channel credential object or null.")
+	}
+	if err != nil {
+		return access.Invalid("destination", "The destination, configuration or secret is invalid.")
 	}
 	return nil
 }
@@ -92,136 +136,223 @@ func (s *Server) createNotificationDestination(r *http.Request, _ access.Princip
 	if err := access.Decode(r, &input); err != nil {
 		return access.Reply{}, err
 	}
-	return s.create(r, destinations, creation{projectID: input.ProjectID, fingerprint: input,
-		insert: func(tx pgx.Tx, p access.Principal, projectID *string, id, etag string) error {
-			if err := access.ValidText("name", input.Name, nameLimit); err != nil {
-				return err
-			}
-			configuration, err := configurationObject(input.Configuration)
+	return create(s, r, destinations, creation[destinationTarget]{projectID: input.ProjectID, fingerprint: input,
+		parse: func(*string) (destinationTarget, error) {
+			target, err := parseDestination(input)
 			if err != nil {
+				return destinationTarget{}, err
+			}
+			if err := s.checkCreated(target); err != nil {
+				return destinationTarget{}, err
+			}
+			return target, nil
+		},
+		insert: func(tx pgx.Tx, p access.Principal, projectID *string, target destinationTarget, id, etag string) error {
+			if _, err := tx.Exec(r.Context(), createChannelDestinationSQL,
+				id, target.name, target.URL, projectID, etag, p.UserID(), target.enabled, target.Type, target.Configuration); err != nil {
 				return err
 			}
-			typ := cmp.Or(input.Type, webhookType)
-			secret, err := suppliedSecret(typ, input.Secret)
-			if err != nil {
-				return err
-			}
-			enabled := input.Enabled == nil || *input.Enabled
-			target := destination{Type: typ, URL: strings.TrimSpace(input.URL), Configuration: configuration}
-			if err = s.checkDestination(target, secret, secret != nil, enabled); err != nil {
-				return err
-			}
-			if _, err = tx.Exec(r.Context(), createChannelDestinationSQL,
-				id, strings.TrimSpace(input.Name), target.URL, projectID, etag, p.UserID(), enabled, typ, configuration); err != nil {
-				return err
-			}
-			if input.Secret == nil {
-				return nil
-			}
-			return s.storeNotificationSecret(r, tx, id, secret)
+			return s.storeSecretChange(r.Context(), tx, id, target.secret)
 		}})
 }
 
-func suppliedSecret(typ string, raw *json.RawMessage) ([]byte, error) {
-	if raw == nil {
-		return nil, nil
-	}
-	return destinationSecret(typ, *raw)
-}
-
 func (s *Server) updateNotificationDestination(r *http.Request, _ access.Principal) (access.Reply, error) {
-	var patch map[string]json.RawMessage
-	if err := access.Decode(r, &patch); err != nil {
+	patch, err := decodePatch(r, "destination", "Unknown destination field.", destinationPatchFields)
+	if err != nil {
 		return access.Reply{}, err
 	}
-	if len(patch) == 0 {
-		return access.Reply{}, access.Invalid("destination", "Send at least one field to update.")
-	}
-	for field := range patch {
-		if !destinationPatchFields[field] {
-			return access.Reply{}, access.Invalid(field, "Unknown destination field.")
-		}
-	}
-	return s.update(r, destinations, func(tx pgx.Tx, row locked, etag string) error {
+	return s.update(r, destinations, func(tx pgx.Tx, row document, etag string) error {
 		var current storedDestination
-		if err := json.Unmarshal(row.current, &current); err != nil {
+		if err := json.Unmarshal(row.body, &current); err != nil {
 			return err
 		}
-		next, err := patchDestination(current, patch)
+		target, err := patchDestination(current, patch)
 		if err != nil {
 			return err
 		}
-		target := destination{Type: next.Type, URL: strings.TrimSpace(next.URL), Configuration: next.Configuration}
-		rawSecret, secretSupplied := patch["secret"]
-		if !secretSupplied && current.SecretConfigured && target.URL != current.URL {
+		if _, replaced := target.secret.(newSecret); !replaced && current.SecretConfigured && target.URL != current.URL {
 			return access.Invalid("secret", "Changing the destination URL requires a replacement secret or null.")
 		}
-		secret, err := s.effectiveSecret(r, tx, row.id, current, rawSecret, secretSupplied)
+		secret, err := s.effectiveSecret(r.Context(), tx, row.id, current, target.secret)
 		if err != nil {
 			return err
 		}
-		cleared := secretSupplied && secret == nil
-		bind := len(secret) != 0 || !requiresSecret(next.Type) && !cleared
-		if err = s.checkDestination(target, secret, bind, next.Enabled); err != nil {
+		if err := s.checkPatched(target, secret); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(r.Context(), updateChannelDestinationSQL,
-			row.id, strings.TrimSpace(next.Name), target.URL, next.Enabled, etag, next.Type, next.Configuration); err != nil {
+		if _, err := tx.Exec(r.Context(), updateChannelDestinationSQL,
+			row.id, target.name, target.URL, target.enabled, etag, target.Type, target.Configuration); err != nil {
 			return err
 		}
-		if !secretSupplied {
-			return nil
-		}
-		return s.storeNotificationSecret(r, tx, row.id, secret)
+		return s.storeSecretChange(r.Context(), tx, row.id, target.secret)
 	})
 }
 
-func patchDestination(current storedDestination, patch map[string]json.RawMessage) (storedDestination, error) {
-	next := current
-	if raw, ok := patch["name"]; ok {
-		if err := json.Unmarshal(raw, &next.Name); err != nil {
-			return next, access.Invalid("name", "Use a non-empty destination name.")
-		}
-		if err := access.ValidText("name", next.Name, nameLimit); err != nil {
-			return next, err
-		}
+func patchDestination(current storedDestination, patch map[string]json.RawMessage) (destinationTarget, error) {
+	name, err := patched(patch, "name", current.Name, "Use a non-empty destination name.")
+	if err != nil {
+		return destinationTarget{}, err
 	}
-	if raw, ok := patch["url"]; ok {
-		if err := json.Unmarshal(raw, &next.URL); err != nil {
-			return next, access.Invalid("url", "Use a valid destination URL.")
-		}
+	if err := access.ValidText("name", name, nameLimit); err != nil {
+		return destinationTarget{}, err
 	}
-	if raw, ok := patch["type"]; ok {
-		var patched string
-		if err := json.Unmarshal(raw, &patched); err != nil || patched != current.Type {
-			return next, access.Invalid("type", "The destination type cannot be changed.")
-		}
+	url, err := patched(patch, "url", current.URL, "Use a valid destination URL.")
+	if err != nil {
+		return destinationTarget{}, err
 	}
-	if raw, ok := patch["configuration"]; ok {
-		configuration, err := configurationObject(raw)
-		if err != nil {
-			return next, err
-		}
-		next.Configuration = configuration
+	if raw, present := patch["type"]; present && !sameType(raw, current.Type) {
+		return destinationTarget{}, access.Invalid("type", "The destination type cannot be changed.")
 	}
-	if raw, ok := patch["enabled"]; ok {
-		if err := json.Unmarshal(raw, &next.Enabled); err != nil {
-			return next, access.Invalid("enabled", "Use true or false.")
-		}
+	configuration, err := patchedConfiguration(patch, current.Configuration)
+	if err != nil {
+		return destinationTarget{}, err
 	}
-	return next, nil
+	enabled, err := patched(patch, "enabled", current.Enabled, "Use true or false.")
+	if err != nil {
+		return destinationTarget{}, err
+	}
+	secret, err := destinationSecret(current.Type, patch["secret"])
+	if err != nil {
+		return destinationTarget{}, err
+	}
+	return destinationTarget{
+		destination: destination{Type: current.Type, URL: strings.TrimSpace(url), Configuration: configuration},
+		name:        strings.TrimSpace(name),
+		enabled:     enabled,
+		secret:      secret,
+	}, nil
 }
 
-func (s *Server) effectiveSecret(r *http.Request, tx pgx.Tx, id string, current storedDestination, raw json.RawMessage, supplied bool) ([]byte, error) {
-	if supplied {
-		return destinationSecret(current.Type, raw)
+func patched[T any](patch map[string]json.RawMessage, field string, stored T, message string) (T, error) {
+	raw, present := patch[field]
+	if !present || string(raw) == "null" {
+		return stored, nil
+	}
+	var value T
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return stored, access.Invalid(field, message)
+	}
+	return value, nil
+}
+
+func sameType(raw json.RawMessage, current contract.NotificationDestinationType) bool {
+	var typ contract.NotificationDestinationType
+	return json.Unmarshal(raw, &typ) == nil && typ == current
+}
+
+func patchedConfiguration(patch map[string]json.RawMessage, stored json.RawMessage) (json.RawMessage, error) {
+	raw, present := patch["configuration"]
+	if !present {
+		return stored, nil
+	}
+	return configurationObject(raw)
+}
+
+func (s *Server) checkCreated(target destinationTarget) error {
+	if replaced, ok := target.secret.(newSecret); ok && len(replaced.value) != 0 {
+		return s.checkBinding(target.destination, replaced.value)
+	}
+	return s.checkEndpoint(target.destination, target.enabled)
+}
+
+func (s *Server) checkPatched(target destinationTarget, secret []byte) error {
+	_, replaced := target.secret.(newSecret)
+	switch {
+	case len(secret) != 0:
+		return s.checkBinding(target.destination, secret)
+	case replaced || requiresSecret(target.Type):
+		return s.checkEndpoint(target.destination, target.enabled)
+	default:
+		return s.checkBinding(target.destination, nil)
+	}
+}
+
+func (s *Server) effectiveSecret(ctx context.Context, tx pgx.Tx, id string, current storedDestination, change secretChange) ([]byte, error) {
+	if replaced, ok := change.(newSecret); ok {
+		return replaced.value, nil
 	}
 	if !current.SecretConfigured {
 		return nil, nil
 	}
 	var secretID *string
-	if err := tx.QueryRow(r.Context(), readDestinationSecretSQL, id).Scan(&secretID); err != nil || secretID == nil {
+	if err := tx.QueryRow(ctx, readDestinationSecretSQL, id).Scan(&secretID); err != nil || secretID == nil {
 		return nil, err
 	}
-	return s.access.Keys.Read(r.Context(), tx, s.access.Installation, *secretID, secrets.NotificationSecret)
+	return s.access.Keys.Read(ctx, tx, s.access.Installation, *secretID, secrets.NotificationSecret)
 }
+
+const (
+	configurationLimit = 4096
+	signingSecretLimit = 1024
+	secretObjectLimit  = 16384
+)
+
+var destinations = resource{
+	parameter: "notification_destination_id", kind: "notification_destination", path: "/api/v1/notifications/destinations/",
+	documentsSQL: destinationDocumentsSQL, lockSQL: lockDestinationSQL, remove: removeDestination,
+}
+
+func removeDestination(ctx context.Context, tx pgx.Tx, id string) error {
+	var secretID *string
+	if err := tx.QueryRow(ctx, deleteDestinationSQL, id).Scan(&secretID); err != nil || secretID == nil {
+		return err
+	}
+	return deleteSecret(ctx, tx, *secretID)
+}
+
+func deleteSecret(ctx context.Context, tx pgx.Tx, id string) error {
+	_, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", id, secrets.NotificationSecret)
+	return err
+}
+
+func (s *Server) storeSecretChange(ctx context.Context, tx pgx.Tx, id string, change secretChange) error {
+	replaced, ok := change.(newSecret)
+	if !ok {
+		return nil
+	}
+	secretID, err := s.storeSecret(ctx, tx, replaced.value)
+	if err != nil {
+		return err
+	}
+	var previous *string
+	if err := tx.QueryRow(ctx, readDestinationSecretSQL, id).Scan(&previous); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, "UPDATE olp.notification_destinations SET secret_id=$2 WHERE id=$1", id, secretID); err != nil {
+		return err
+	}
+	if previous == nil {
+		return nil
+	}
+	return deleteSecret(ctx, tx, *previous)
+}
+
+func (s *Server) storeSecret(ctx context.Context, tx pgx.Tx, secret []byte) (*string, error) {
+	if secret == nil {
+		return nil, nil
+	}
+	id := access.NewID()
+	if err := s.access.Keys.Store(ctx, tx, s.access.Installation, id, secrets.NotificationSecret, secret, nil); err != nil {
+		return nil, err
+	}
+	return &id, nil
+}
+
+const destinationDocumentsSQL = `SELECT d.id,d.project_id,d.etag,jsonb_build_object(
+	'id',d.id,'name',d.name,'url',d.url,'type',d.type,'configuration',d.configuration,'secret_configured',d.secret_id IS NOT NULL,
+	'project_id',d.project_id,'project_name',p.name,'enabled',d.enabled,'etag',d.etag,
+	'created_by',d.created_by,'created_by_email',u.email,'created_at',d.created_at,'updated_at',d.updated_at) AS document
+ FROM olp.notification_destinations d
+ JOIN olp.users u ON u.id=d.created_by
+ LEFT JOIN olp.projects p ON p.id=d.project_id`
+
+const lockDestinationSQL = `SELECT etag::text,project_id::text FROM olp.notification_destinations WHERE id=$1 FOR UPDATE`
+
+const createChannelDestinationSQL = `INSERT INTO olp.notification_destinations(id,name,url,project_id,etag,created_by,enabled,type,configuration)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`
+
+const updateChannelDestinationSQL = `UPDATE olp.notification_destinations SET name=$2,url=$3,enabled=$4,etag=$5,type=$6,configuration=$7,updated_at=now() WHERE id=$1`
+
+const readDestinationSecretSQL = `SELECT secret_id::text FROM olp.notification_destinations WHERE id=$1`
+
+const deleteDestinationSQL = `DELETE FROM olp.notification_destinations WHERE id=$1 RETURNING secret_id::text`

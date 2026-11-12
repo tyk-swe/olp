@@ -301,6 +301,7 @@ func TestSettledChargeRetainsEachAttemptCardRevision(t *testing.T) {
 			card := routinginputs.RoutingRateCard{ProjectID: &project, Revisions: []rates.RoutingCardRevision{*loadedCardRevision(t, rates.RoutingCardRevision{
 				ID: uuid.NewString(), Markup: "2", EffectiveAt: now.Add(-time.Hour),
 			})}}
+			originalCardID := card.Revisions[0].ID
 			snapshot := x.snapshot().Clone()
 			provider := snapshot.Providers[x.attempts[0].ProviderID]
 			switch owner {
@@ -348,6 +349,13 @@ func TestSettledChargeRetainsEachAttemptCardRevision(t *testing.T) {
 			}
 			if got := s.settledCharge(x).String(); got != want {
 				t.Fatalf("charge with new revision = %s, want %s", got, want)
+			}
+			for index, fact := range x.facts {
+				wantID := originalCardID
+				if index == 2 && owner != "authority" {
+					wantID = card.Revisions[0].ID
+				}
+				assertAccountingCardPin(t, fact, true, wantID)
 			}
 		})
 	}
@@ -460,5 +468,56 @@ func TestPreparationFollowsSourceAndRouteChanges(t *testing.T) {
 			}, usage.ViaFallback)
 			assertRequest("routed", 16)
 		})
+	}
+}
+
+func assertAccountingCardPin(t *testing.T, fact AttemptFact, pinned bool, revision string) usage.Attempt {
+	t.Helper()
+	attempt, err := accountingAttempt(Envelope{Operation: "generation", Attempts: []AttemptFact{fact}}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempt.Routing.Policy == nil {
+		t.Fatal("card resolution missing from accounting policy")
+	}
+	var policy attemptPolicy
+	if err := json.Unmarshal(*attempt.Routing.Policy, &policy); err != nil {
+		t.Fatal(err)
+	}
+	got := ""
+	if policy.RateCardRevisionID != nil {
+		got = *policy.RateCardRevisionID
+	}
+	if policy.RateCardPinned != pinned || got != revision || revision == "" && policy.RateCardRevisionID != nil {
+		t.Fatalf("accounting card pin = %s, want pinned=%v revision=%q", *attempt.Routing.Policy, pinned, revision)
+	}
+	return attempt
+}
+
+func TestAttemptCardAbsenceDistinguishesFreshAndStaleInputs(t *testing.T) {
+	for _, fresh := range []bool{true, false} {
+		t.Run(map[bool]string{true: "fresh", false: "stale"}[fresh], func(t *testing.T) {
+			now := time.Now().UTC()
+			x := costExecution(t, `{"model":"team-chat","messages":[{"role":"user","content":"hello"}]}`, wire.Chat, 1, routing.Attempt{Price: costPrice()})
+			refreshed := now
+			if !fresh {
+				refreshed = now.Add(-routinginputs.PerformanceMaxAge - time.Second)
+			}
+			rt := &fakeRuntime{inputs: &routinginputs.Inputs{RefreshedAt: refreshed}}
+			s := &Server{now: func() time.Time { return now }, fleet: &fleetHealth{}, deps: Dependencies{Runtime: rt}}
+			s.bindAuthority(x, keyauthority.Authority{})
+			provider := x.snapshot().Provider(x.attempts[0].ProviderID)
+			fact := s.newFact(x, x.attempts[0], provider.Slots[0], 1)
+			assertAccountingCardPin(t, fact, fresh, "")
+		})
+	}
+}
+
+func TestAccountingCardPinDoesNotPinProviderPricing(t *testing.T) {
+	revision := uuid.NewString()
+	fact := AttemptFact{CardPinned: true, CardRevisionID: &revision, Price: costPrice()}
+	attempt := assertAccountingCardPin(t, fact, true, revision)
+	if attempt.Routing.PricingRevisionID != nil {
+		t.Fatal("card-only pin unexpectedly pinned provider pricing")
 	}
 }
