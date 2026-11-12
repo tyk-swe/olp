@@ -24,27 +24,22 @@ var errSignalLimit = errors.New("notification signal scope exceeds its bound")
 var errSignalUnavailable = errors.New("notification signal source is unavailable")
 
 func querySignals(ctx context.Context, tx pgx.Tx, query string, scan func(pgx.Row) (notificationSignal, error), args ...any) ([]notificationSignal, error) {
-	rows, err := tx.Query(ctx, query, append([]any{signalScopeLimit + 1}, args...)...)
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	signals := []notificationSignal{}
-	for rows.Next() {
-		if len(signals) == signalScopeLimit {
-			return nil, errSignalLimit
-		}
-		signal, err := scan(rows)
-		if err != nil {
-			return nil, err
-		}
-		signals = append(signals, signal)
+	signals, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (notificationSignal, error) { return scan(row) })
+	if err != nil {
+		return nil, err
 	}
-	return signals, rows.Err()
+	if len(signals) > signalScopeLimit {
+		return nil, errSignalLimit
+	}
+	return signals, nil
 }
 
 func budgetExhaustedSignals(ctx context.Context, tx pgx.Tx, rule signalRule, _ signalEnv) ([]notificationSignal, error) {
-	return querySignals(ctx, tx, exhaustedBudgetSignalsSQL, scanBudgetExhausted, rule.project)
+	return querySignals(ctx, tx, exhaustedBudgetSignalsSQL, scanBudgetExhausted, signalScopeLimit+1, rule.project)
 }
 
 func scanBudgetExhausted(row pgx.Row) (notificationSignal, error) {
@@ -75,7 +70,7 @@ func providerErrorSignals(c measuredConfig) signalReader {
 	return func(ctx context.Context, tx pgx.Tx, _ signalRule, _ signalEnv) ([]notificationSignal, error) {
 		return querySignals(ctx, tx, providerErrorSignalsSQL, func(row pgx.Row) (notificationSignal, error) {
 			return scanProviderError(row, c)
-		}, c.WindowSeconds)
+		}, signalScopeLimit+1, c.WindowSeconds)
 	}
 }
 
@@ -99,7 +94,7 @@ func credentialFailureSignals(c measuredConfig) signalReader {
 	return func(ctx context.Context, tx pgx.Tx, _ signalRule, _ signalEnv) ([]notificationSignal, error) {
 		return querySignals(ctx, tx, credentialFailureSignalsSQL, func(row pgx.Row) (notificationSignal, error) {
 			return scanCredentialFailure(row, c)
-		}, c.WindowSeconds)
+		}, signalScopeLimit+1, c.WindowSeconds)
 	}
 }
 
@@ -161,7 +156,7 @@ func latencySignal(rule signalRule, c latencyConfig, observation reports.RouteLa
 }
 
 func workerStaleSignals(ctx context.Context, tx pgx.Tx, _ signalRule, _ signalEnv) ([]notificationSignal, error) {
-	return querySignals(ctx, tx, workerStaleSignalsSQL, scanWorkerStale)
+	return querySignals(ctx, tx, workerStaleSignalsSQL, scanWorkerStale, signalScopeLimit+1)
 }
 
 func scanWorkerStale(row pgx.Row) (notificationSignal, error) {
@@ -185,7 +180,7 @@ func scanWorkerStale(row pgx.Row) (notificationSignal, error) {
 }
 
 func runtimeInstallSignals(ctx context.Context, tx pgx.Tx, _ signalRule, _ signalEnv) ([]notificationSignal, error) {
-	return querySignals(ctx, tx, runtimeInstallSignalsSQL, scanRuntimeInstall)
+	return querySignals(ctx, tx, runtimeInstallSignalsSQL, scanRuntimeInstall, signalScopeLimit+1)
 }
 
 func scanRuntimeInstall(row pgx.Row) (notificationSignal, error) {
@@ -212,7 +207,7 @@ func circuitSignals(ctx context.Context, tx pgx.Tx, _ signalRule, env signalEnv)
 	}
 	return querySignals(ctx, tx, providerCircuitSubjectsSQL, func(row pgx.Row) (notificationSignal, error) {
 		return scanCircuit(row, circuits)
-	})
+	}, signalScopeLimit+1)
 }
 
 func scanCircuit(row pgx.Row, circuits map[string]time.Time) (notificationSignal, error) {
@@ -236,7 +231,7 @@ func retirementSignals(c retirementConfig) signalReader {
 		}
 		return querySignals(ctx, tx, routedRetirementModelsSQL, func(row pgx.Row) (notificationSignal, error) {
 			return scanRetirement(row, c, env.now, env.reference)
-		}, rule.project)
+		}, signalScopeLimit+1, rule.project)
 	}
 }
 
