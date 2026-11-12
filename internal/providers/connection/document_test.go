@@ -224,7 +224,7 @@ func TestStoredConfigurationLoadsAndPreparesToTheSameBytes(t *testing.T) {
 	}
 }
 
-func servedConnector(t *testing.T, name string) connectors.Config {
+func served(t *testing.T, name string) routing.Provider {
 	t.Helper()
 	provider, err := routing.DecodeProviderRevision(routing.ProviderRevision{
 		ID: "provider", RevisionID: "revision", Name: name, State: "active",
@@ -233,7 +233,25 @@ func servedConnector(t *testing.T, name string) connectors.Config {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return provider
+}
+
+func servedConnector(t *testing.T, name string) connectors.Config {
+	t.Helper()
+	provider := served(t, name)
 	return provider.Connector()
+}
+
+func TestServedProviderExportsTheConfigurationItWasPublishedFrom(t *testing.T) {
+	t.Parallel()
+	for _, name := range storedNames() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if got, want := storedBytes(t, FromProvider(served(t, name))), string(golden(t, name)); got != want {
+				t.Fatalf("exported\n%s\nwant\n%s", got, want)
+			}
+		})
+	}
 }
 
 func TestStoredConfigurationServesTheConnectorItWasValidatedAs(t *testing.T) {

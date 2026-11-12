@@ -194,6 +194,37 @@ func (c Configuration) Serving() (routing.Configuration, error) {
 	return served, nil
 }
 
+func FromProvider(p routing.Provider) Configuration {
+	return Configuration{
+		Identity: providerconfig.Identity[*string]{
+			CredentialSource: p.CredentialSource, ProfileID: p.ProfileID, ProfileRevision: p.ProfileRevision, Kind: p.Kind, AuthMode: p.AuthMode,
+			Endpoint: optional(p.Endpoint), CloudRegion: optional(p.CloudRegion), CloudProject: optional(p.CloudProject), BatchStorage: p.BatchStorage,
+			Deployment: optional(p.Deployment), APIVersion: optional(p.APIVersion),
+		},
+		Options: Options{
+			TuningDatasetURIPrefixes: p.TuningDatasetURIPrefixes, DocumentURIPrefixes: p.DocumentURIPrefixes, Network: p.Network,
+			SemanticHeaders: p.SemanticHeaders, QuerySettings: p.QuerySettings, OperationDefaults: p.OperationDefaults, Bindings: p.Bindings,
+			CredentialHeaders: append([]string{}, p.CredentialHeaders...), Limits: limitsOf(p.Limits), Models: maps.Clone(p.Models),
+			ParameterDefaults: maps.Clone(p.ParameterDefaults), VendorID: optional(p.VendorID), Commitment: p.Commitment,
+			PluginOptions: p.PluginOptions, HealthProbe: p.HealthProbe,
+		},
+	}
+}
+
+func limitsOf(limits *routing.Limits) *Limits {
+	if limits == nil {
+		return nil
+	}
+	return &Limits{MaxConcurrency: limits.MaxConcurrency, RequestsPerMinute: limits.RequestsPerMinute, TokensPerMinute: limits.TokensPerMinute, Supply: limits.Supply}
+}
+
+func optional(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
 func (c Configuration) WithNetworkCredential(credentialID string) Configuration {
 	if c.Options.Network == nil {
 		return c

@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -31,7 +32,7 @@ func portablePaidConnection(ctx context.Context, q access.Queryer, frozen routin
 	if frozen.PendingCommitment != nil {
 		return PaidConnection{}, access.Invalid("code.paid_connections", "Publish the pending monetary commitment before exporting this paid provider.")
 	}
-	stored, err := providers.ReadExportedRevision(ctx, q, frozen.RevisionID, frozen.ID)
+	stored, err := providers.ReadRevisionLabels(ctx, q, frozen.RevisionID, frozen.ID)
 	if err != nil {
 		return PaidConnection{}, err
 	}
@@ -50,7 +51,7 @@ func portablePaidConnection(ctx context.Context, q access.Queryer, frozen routin
 	return PaidConnection{Provider: entry, SlotKeyRefs: refs}, nil
 }
 
-func revisionOf(frozen routing.Provider, stored providers.ExportedRevision) (portableRevision, error) {
+func revisionOf(frozen routing.Provider, stored providers.RevisionLabels) (portableRevision, error) {
 	upstream := slices.Compact(slices.Sorted(func(yield func(string) bool) {
 		for _, capability := range frozen.Capabilities {
 			if !yield(capability.Model) {
@@ -65,7 +66,11 @@ func revisionOf(frozen routing.Provider, stored providers.ExportedRevision) (por
 	slots, err := json.Marshal(promotion.Map(frozen.Slots, func(slot routing.Slot) routing.RevisionSlot {
 		return routing.RevisionSlot{Slot: slot, Default: slot.ID == frozen.DefaultSlotID}
 	}))
-	return portableRevision{configuration: stored.Configuration, models: models, slots: slots}, err
+	if err != nil {
+		return portableRevision{}, err
+	}
+	configuration, err := json.Marshal(connection.FromProvider(frozen))
+	return portableRevision{configuration: configuration, models: models, slots: slots}, err
 }
 
 func modelOf(model string, frozen routing.Provider, labels []routing.RevisionModel) routing.RevisionModel {
