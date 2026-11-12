@@ -1,4 +1,4 @@
-package providers
+package codeaccounts
 
 import (
 	"context"
@@ -18,15 +18,14 @@ import (
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
-type CodeAuthorizer struct {
+type Authorizer struct {
 	Pool        access.Queryer
 	Credentials release.Credentials
 	Plugins     *plugins.Host
 }
 
-// AuthorizeResearch reuses the enrolled grant's authorization boundary. Global
-// Z.ai research uses the same bearer credential as its native chat endpoint.
-func (a *CodeAuthorizer) AuthorizeResearch(ctx context.Context, cfg routing.Configuration, account codemode.Account, service string) (codemode.Authorization, error) {
+// Z.ai research authorizes with the same bearer credential as its native chat endpoint.
+func (a *Authorizer) AuthorizeResearch(ctx context.Context, cfg routing.Configuration, account codemode.Account, service string) (codemode.Authorization, error) {
 	if cfg.ProfileID != codeplans.ZAIProfile || codemode.ResearchEndpoint(service) == "" {
 		return codemode.Authorization{}, codemode.Refuse(503, "code_configuration_unsupported")
 	}
@@ -43,16 +42,13 @@ func (a *CodeAuthorizer) AuthorizeResearch(ctx context.Context, cfg routing.Conf
 	return auth, nil
 }
 
-// AuthorizeCode returns the upstream authorization of one request on account,
-// whose provider connection is cfg. The connection's plugin must be the
-// adapter's own, unaltered, and the request's protocol one its routes serve.
-func (a *CodeAuthorizer) AuthorizeCode(ctx context.Context, cfg routing.Configuration, account codemode.Account, dispatch codemode.Dispatch) (codemode.Authorization, error) {
+func (a *Authorizer) AuthorizeCode(ctx context.Context, cfg routing.Configuration, account codemode.Account, dispatch codemode.Dispatch) (codemode.Authorization, error) {
 	vendor, ok := codeadapter.ForConnection(cfg.Kind, cfg.AuthMode, cfg.ProfileID)
 	endpoint, served := vendor.Endpoint(dispatch.ClientPath)
 	if a == nil || a.Pool == nil || a.Credentials == nil || !ok || vendor.Adapter != dispatch.Adapter || !served || endpoint.Protocol != dispatch.Protocol {
 		return codemode.Authorization{}, codemode.Refuse(503, "code_configuration_unsupported")
 	}
-	if err := codeConnection(ctx, a.Plugins, cfg, vendor); err != nil {
+	if err := ValidateConnection(ctx, a.Plugins, cfg, vendor); err != nil {
 		return codemode.Authorization{}, err
 	}
 	// A Codex grant is a refreshed access token that must be current; a
@@ -80,8 +76,6 @@ func (a *CodeAuthorizer) AuthorizeCode(ctx context.Context, cfg routing.Configur
 	return auth, nil
 }
 
-// codeConfiguration admits only the adapter's own plugin profile at its own
-// upstream, with nothing that would change or add to the forwarded request.
 func codeConfiguration(c routing.Configuration, vendor codeadapter.Vendor) bool {
 	o := c.Options
 	address, ok := vendor.Address(c.ProfileID)
@@ -91,7 +85,7 @@ func codeConfiguration(c routing.Configuration, vendor codeadapter.Vendor) bool 
 		len(o.Models) == 0 && len(o.ParameterDefaults) == 0 && len(o.CredentialHeaders) == 0
 }
 
-func codeConnection(ctx context.Context, host *plugins.Host, cfg routing.Configuration, vendor codeadapter.Vendor) error {
+func ValidateConnection(ctx context.Context, host *plugins.Host, cfg routing.Configuration, vendor codeadapter.Vendor) error {
 	if host == nil || !codeConfiguration(cfg, vendor) {
 		return codemode.Refuse(503, "code_configuration_unsupported")
 	}

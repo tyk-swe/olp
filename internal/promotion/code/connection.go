@@ -9,6 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 )
 
@@ -87,7 +88,7 @@ func enrolled(ctx context.Context, q access.Queryer, providerID string, configur
 		if account.input.ProviderID != providerID || !slices.Contains(members, account.to.id) {
 			continue
 		}
-		matches, err := providers.CredentialEnrolledFor(ctx, q, account.input.CredentialID, configuration.ProfileRevision, configuration.ProfileID)
+		matches, err := codeaccounts.CredentialEnrolledFor(ctx, q, account.input.CredentialID, configuration.ProfileRevision, configuration.ProfileID)
 		if err != nil {
 			return err
 		}

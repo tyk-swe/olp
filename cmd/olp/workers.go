@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/notifications"
 	"github.com/tyk-swe/olp/internal/observability/workerhealth"
+	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/usage/completeness"
 	"github.com/tyk-swe/olp/internal/usage/ingest"
@@ -34,7 +35,6 @@ import (
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/plugins"
-	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedworker"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -84,7 +84,7 @@ func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Clie
 	wg.Go(func() { refresher.Run(ctx) })
 	allowanceReader := &codeallowance.Reader{
 		Pool: pool, Store: codesessions.New(pool),
-		Authorizer: &providers.CodeAuthorizer{Pool: pool, Credentials: credentials, Plugins: pluginHost},
+		Authorizer: &codeaccounts.Authorizer{Pool: pool, Credentials: credentials, Plugins: pluginHost},
 		Client:     policy.Client(30 * time.Second), Log: log,
 	}
 	wg.Go(func() { allowanceReader.Run(ctx) })

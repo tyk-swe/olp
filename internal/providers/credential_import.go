@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/grants"
+	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
@@ -32,19 +33,13 @@ type credentialImportSlot struct {
 	Principal    string
 }
 
-func (s *Server) importCodexCredentials(r *http.Request, p access.Principal) (access.Reply, error) {
-	return s.importCredentials(r, p, codemode.AdapterCodex)
+func (s *Server) importCredentials(adapter codemode.Adapter) access.Handler {
+	return func(r *http.Request, p access.Principal) (access.Reply, error) {
+		return s.importCredentialsAs(r, p, adapter)
+	}
 }
 
-func (s *Server) importClaudeCredentials(r *http.Request, p access.Principal) (access.Reply, error) {
-	return s.importCredentials(r, p, codemode.AdapterClaude)
-}
-
-func (s *Server) importAntigravityCredentials(r *http.Request, p access.Principal) (access.Reply, error) {
-	return s.importCredentials(r, p, codemode.AdapterAntigravity)
-}
-
-func (s *Server) importCredentials(r *http.Request, p access.Principal, adapter codemode.Adapter) (access.Reply, error) {
+func (s *Server) importCredentialsAs(r *http.Request, p access.Principal, adapter codemode.Adapter) (access.Reply, error) {
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -72,7 +67,7 @@ func (s *Server) importCredentials(r *http.Request, p access.Principal, adapter 
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err := codeConnection(r.Context(), s.Plugins, served, vendor); err != nil {
+	if err := codeaccounts.ValidateConnection(r.Context(), s.Plugins, served, vendor); err != nil {
 		return access.Reply{}, access.Invalid("credentials", "This connection must use the unmodified subscription plugin and configuration.")
 	}
 	slot, err := s.credentialImportSlot(r, id, input.SlotID)

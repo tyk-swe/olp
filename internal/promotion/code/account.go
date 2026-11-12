@@ -11,27 +11,23 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
-	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
 )
 
 type Account struct {
-	ID                string
-	Project           string
-	Provider          string
-	CredentialRef     string
-	Name              string
-	Enabled           bool
-	Models            []string
-	ExtraUsageEnabled *bool
-	CycleAnchor       *string
+	ID            string
+	Project       string
+	Provider      string
+	CredentialRef string
+	codeaccounts.Settings
 }
 
 func parseAccount(e contract.ConfigurationCodeAccount) (Account, error) {
 	if access.ValidText("code", e.Project, 100) != nil || access.ValidText("code", e.Provider, 100) != nil || access.ValidText("code", e.CredentialRef, 200) != nil {
 		return Account{}, access.Invalid("code.accounts", "Name the project, provider and destination credential reference.")
 	}
-	account := Account{ID: e.Id.String(), Project: e.Project, Provider: e.Provider, CredentialRef: e.CredentialRef, Name: e.Name, Enabled: e.Enabled, Models: promotion.NonNil(slices.Clone(e.Models)), ExtraUsageEnabled: promotion.Pointer(e.ExtraUsageEnabled), CycleAnchor: anchor(promotion.Pointer(e.CycleAnchor))}
-	return account, account.input(account.ID, account.ID, account.ID).Validate()
+	account := Account{ID: e.Id.String(), Project: e.Project, Provider: e.Provider, CredentialRef: e.CredentialRef, Settings: codeaccounts.Settings{Name: e.Name, Enabled: e.Enabled, Models: promotion.NonNil(slices.Clone(e.Models)), ExtraUsageEnabled: promotion.Pointer(e.ExtraUsageEnabled), CycleAnchor: anchor(promotion.Pointer(e.CycleAnchor))}}
+	return account, account.Settings.Validate()
 }
 
 func anchor(date *openapi_types.Date) *string {
@@ -42,17 +38,17 @@ func anchor(date *openapi_types.Date) *string {
 	return &value
 }
 
-func (a Account) input(project, provider, credential string) providers.CodeAccountInput {
-	return providers.CodeAccountInput{ProjectID: project, ProviderID: provider, CredentialID: credential, Name: a.Name, Enabled: a.Enabled, Models: a.Models, ExtraUsageEnabled: a.ExtraUsageEnabled, CycleAnchor: a.CycleAnchor}
+func (a Account) input(project, provider, credential string) codeaccounts.Input {
+	return codeaccounts.Input{ProjectID: project, ProviderID: provider, CredentialID: credential, Settings: a.Settings}
 }
 
 func readAccounts(ctx context.Context, q access.Queryer) ([]Account, error) {
-	accounts, err := providers.ReadCodeAccounts(ctx, q)
+	accounts, err := codeaccounts.ReadAccounts(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	return promotion.Map(accounts, func(a providers.CodeAccount) Account {
-		return Account{ID: a.ID, Project: a.Project, Provider: a.Provider, CredentialRef: codeRef("account", a.ID), Name: a.Name, Enabled: a.Enabled, Models: a.Models, ExtraUsageEnabled: a.ExtraUsageEnabled, CycleAnchor: a.CycleAnchor}
+	return promotion.Map(accounts, func(a codeaccounts.Account) Account {
+		return Account{ID: a.ID, Project: a.Project, Provider: a.Provider, CredentialRef: codeRef("account", a.ID), Settings: a.Settings}
 	}), nil
 }
 
@@ -79,36 +75,36 @@ func date(value *string) (*openapi_types.Date, error) {
 	return &openapi_types.Date{Time: parsed}, nil
 }
 
-func resolveAccount(ctx context.Context, q access.Queryer, a Account, directory promotion.Directory, credentials map[string]string) (resolved[providers.CodeAccountInput], error) {
+func resolveAccount(ctx context.Context, q access.Queryer, a Account, directory promotion.Directory, credentials map[string]string) (resolved[codeaccounts.Input], error) {
 	projectID, err := projectOf(directory, a.Project)
 	if err != nil {
-		return resolved[providers.CodeAccountInput]{}, err
+		return resolved[codeaccounts.Input]{}, err
 	}
 	credential, err := bound(a.CredentialRef, credentials)
 	if err != nil {
-		return resolved[providers.CodeAccountInput]{}, err
+		return resolved[codeaccounts.Input]{}, err
 	}
-	granted, err := providers.ReadGrantedCredential(ctx, q, a.Provider, projectID, credential)
+	granted, found, err := codeaccounts.ReadGranted(ctx, q, a.Provider, projectID, credential)
 	if err != nil {
-		return resolved[providers.CodeAccountInput]{}, err
+		return resolved[codeaccounts.Input]{}, err
 	}
-	if granted == nil {
-		return resolved[providers.CodeAccountInput]{}, access.Invalid("code_bindings.credentials", "Choose a current enrolled credential belonging to the destination provider and project.")
+	if !found {
+		return resolved[codeaccounts.Input]{}, access.Invalid("code_bindings.credentials", "Choose a current enrolled credential belonging to the destination provider and project.")
 	}
-	ids, err := providers.CodeAccountIDs(ctx, q, projectID, granted.ProviderID, granted.Principal)
+	ids, err := codeaccounts.AccountIDs(ctx, q, projectID, granted.ProviderID, granted.Principal)
 	if err != nil {
-		return resolved[providers.CodeAccountInput]{}, err
+		return resolved[codeaccounts.Input]{}, err
 	}
 	to, err := lookup(access.NewID(), ids)
-	return resolved[providers.CodeAccountInput]{ref: a.ID, to: to, identity: promotion.TupleKey(projectID, granted.ProviderID, granted.Principal), input: a.input(projectID, granted.ProviderID, credential)}, err
+	return resolved[codeaccounts.Input]{ref: a.ID, to: to, identity: promotion.TupleKey(projectID, granted.ProviderID, granted.Principal), input: a.input(projectID, granted.ProviderID, credential)}, err
 }
 
-func accountChange(ctx context.Context, q access.Queryer, a resolved[providers.CodeAccountInput]) (change, error) {
-	action, err := compared(ctx, q, a, providers.ReadCodeAccountInput)
+func accountChange(ctx context.Context, q access.Queryer, a resolved[codeaccounts.Input]) (change, error) {
+	action, err := compared(ctx, q, a, codeaccounts.ReadInput)
 	return change{
 		item: promotion.Item{Kind: contract.ConfigurationPlanItemKindCodeAccount, Key: a.ref, Action: action},
 		write: func(ctx context.Context, tx pgx.Tx, p access.Principal) error {
-			_, err := providers.SaveCodeAccount(ctx, tx, p, a.to.id, access.NewID(), a.input, a.to.existing)
+			_, err := codeaccounts.Save(ctx, tx, p, a.to.id, access.NewID(), a.input, a.to.existing)
 			return err
 		},
 	}, err

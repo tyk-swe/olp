@@ -8,6 +8,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/guardrails/attachment"
 	"github.com/tyk-swe/olp/internal/media/jobs"
+	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
 	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/usage/completeness"
 	"github.com/tyk-swe/olp/internal/usage/pricebook"
@@ -157,6 +158,7 @@ func (m Management) Register(mux *http.ServeMux) {
 		}(),
 	})
 	providers.New(catalogue).Register(mux)
+	codeaccounts.NewAPI(m.Access).Register(mux)
 	routeServer.Register(mux)
 	(&gateway.Playground{Access: m.Access, Gateway: m.Gateway}).Register(mux)
 	(&jobs.API{Access: m.Access, Jobs: m.Media, Spool: m.Spool, Log: m.Log}).Register(mux)

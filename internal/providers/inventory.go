@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/catalog"
+	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/plugins"
@@ -132,7 +133,6 @@ func (s *Server) generations(r *http.Request, principal access.Principal) (acces
 
 // Register mounts the provider surface.
 func (s *Server) Register(mux *http.ServeMux) {
-	s.registerCodeMode(mux)
 	s.Access.Route(mux, "GET /api/v1/provider-profiles", s.profiles)
 	s.Access.Route(mux, "GET /api/v1/operation-dialects", s.operationDialects)
 	s.Access.Route(mux, "GET /api/v1/provider-kinds", s.kinds)
@@ -165,9 +165,9 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/credentials", s.credentials)
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/credentials", s.rotate, access.MaxBody(65536), access.Deadline(certifyTimeout))
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/credentials/{credential_id}/revoke", s.revoke)
-	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/codex-import", s.importCodexCredentials, access.MaxBody(128<<10), access.Deadline(grantStepTimeout))
-	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/claude-import", s.importClaudeCredentials, access.MaxBody(128<<10), access.Deadline(grantStepTimeout))
-	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/antigravity-import", s.importAntigravityCredentials, access.MaxBody(128<<10), access.Deadline(grantStepTimeout))
+	for _, adapter := range []codemode.Adapter{codemode.AdapterCodex, codemode.AdapterClaude, codemode.AdapterAntigravity} {
+		s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/"+string(adapter)+"-import", s.importCredentials(adapter), access.MaxBody(128<<10), access.Deadline(grantStepTimeout))
+	}
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/grant-enrollments", s.startGrantEnrollment, access.MaxBody(65536), access.Deadline(grantStepTimeout))
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/grant-enrollments/{enrollment_id}/continue", s.continueGrantEnrollment, access.MaxBody(65536), access.Deadline(grantStepTimeout))
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/grant-enrollments/{enrollment_id}/poll", s.pollGrantEnrollment, access.MaxBody(65536), access.Deadline(grantStepTimeout))

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/codesessions"
+	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -26,7 +27,6 @@ import (
 	"github.com/tyk-swe/olp/internal/promotion"
 	codepromotion "github.com/tyk-swe/olp/internal/promotion/code"
 	providerpromotion "github.com/tyk-swe/olp/internal/promotion/provider"
-	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/tests/harness"
 )
 
@@ -1328,14 +1328,14 @@ func TestCodeAccountExtraUsageRoundTripsAndRefusesNonKimiAccounts(t *testing.T) 
 	}
 	operator := access.Principal{User: access.User{ID: user}, AllProjects: true}
 	enabled, disabled := true, false
-	save := func(id string, input providers.CodeAccountInput, existing bool) (map[string]any, error) {
+	save := func(id string, input codeaccounts.Input, existing bool) (map[string]any, error) {
 		t.Helper()
 		tx, err := pool.Begin(t.Context())
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer tx.Rollback(t.Context())
-		body, err := providers.SaveCodeAccount(t.Context(), tx, operator, id, access.NewID(), input, existing)
+		body, err := codeaccounts.Save(t.Context(), tx, operator, id, access.NewID(), input, existing)
 		if err != nil {
 			return nil, err
 		}
@@ -1348,7 +1348,7 @@ func TestCodeAccountExtraUsageRoundTripsAndRefusesNonKimiAccounts(t *testing.T) 
 		}
 		return account, nil
 	}
-	kimiInput := providers.CodeAccountInput{ProjectID: project, ProviderID: kimiProvider, CredentialID: kimiCredential, Name: "kimi", Enabled: true, Models: []string{"model"}, ExtraUsageEnabled: &enabled}
+	kimiInput := codeaccounts.Input{ProjectID: project, ProviderID: kimiProvider, CredentialID: kimiCredential, Settings: codeaccounts.Settings{Name: "kimi", Enabled: true, Models: []string{"model"}, ExtraUsageEnabled: &enabled}}
 	created, err := save(kimiAccount, kimiInput, false)
 	if err != nil {
 		t.Fatal(err)
@@ -1372,7 +1372,7 @@ func TestCodeAccountExtraUsageRoundTripsAndRefusesNonKimiAccounts(t *testing.T) 
 	if value, present := cleared["extra_usage_enabled"]; !present || value != nil {
 		t.Fatalf("cleared kimi account = %v, want extra_usage_enabled present and null (not recorded)", cleared)
 	}
-	codexInput := providers.CodeAccountInput{ProjectID: project, ProviderID: codexProvider, CredentialID: codexCredential, Name: "codex", Enabled: true, Models: []string{"model"}, ExtraUsageEnabled: &enabled}
+	codexInput := codeaccounts.Input{ProjectID: project, ProviderID: codexProvider, CredentialID: codexCredential, Settings: codeaccounts.Settings{Name: "codex", Enabled: true, Models: []string{"model"}, ExtraUsageEnabled: &enabled}}
 	if _, err := save(codexAccount, codexInput, false); err == nil {
 		t.Fatal("extra usage on a Codex account saved, want a refusal")
 	}

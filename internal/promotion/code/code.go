@@ -14,7 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
-	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
 	"github.com/tyk-swe/olp/internal/release"
 )
 
@@ -42,7 +42,7 @@ type change struct {
 }
 
 type resolution struct {
-	accounts []resolved[providers.CodeAccountInput]
+	accounts []resolved[codeaccounts.Input]
 	pools    []resolved[access.CodePoolInput]
 	routes   []resolved[routeInput]
 	budgets  []resolved[access.CodeBudgetInput]
@@ -231,7 +231,7 @@ func plan(ctx context.Context, q access.Queryer, desired Desired, deps provider.
 	if err != nil {
 		return nil, err
 	}
-	accounts, err := promotion.TryMapIndex(r.accounts, func(_ int, a resolved[providers.CodeAccountInput]) (change, error) { return accountChange(ctx, q, a) })
+	accounts, err := promotion.TryMapIndex(r.accounts, func(_ int, a resolved[codeaccounts.Input]) (change, error) { return accountChange(ctx, q, a) })
 	if err != nil {
 		return nil, err
 	}
@@ -251,7 +251,7 @@ func plan(ctx context.Context, q access.Queryer, desired Desired, deps provider.
 }
 
 func resolve(ctx context.Context, q access.Queryer, desired Desired, directory promotion.Directory, deps provider.Deps) (resolution, error) {
-	accounts, err := promotion.TryMapIndex(desired.Code.Accounts, func(_ int, a Account) (resolved[providers.CodeAccountInput], error) {
+	accounts, err := promotion.TryMapIndex(desired.Code.Accounts, func(_ int, a Account) (resolved[codeaccounts.Input], error) {
 		return resolveAccount(ctx, q, a, directory, desired.bindings.credentials)
 	})
 	if err != nil {

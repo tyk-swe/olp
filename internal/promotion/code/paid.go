@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -257,7 +258,7 @@ func (c PaidConnection) slotCredential(ctx context.Context, q access.Queryer, sl
 	if err != nil {
 		return nil, err
 	}
-	allowed, err := providers.SlotCredentialCurrent(ctx, q, live.ID, providerID, id, slot.Enabled)
+	allowed, err := codeaccounts.SlotCredentialCurrent(ctx, q, live.ID, providerID, id, slot.Enabled)
 	if err != nil {
 		return nil, err
 	}
