@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/health"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 )
 
@@ -106,7 +107,7 @@ func (s *Server) releaseHold(ctx context.Context, hold *dispatchHold) {
 	hold.settle(ctx, false, nil)
 	if hold.probed {
 		hold.probed = false
-		s.health.releaseProbe(hold.provider)
+		s.health.ReleaseProbe(hold.provider)
 	}
 }
 
@@ -149,10 +150,10 @@ func (s *Server) settlePinHold(ctx context.Context, x *call, hold *dispatchHold,
 	}
 	hold.probed = false
 	if x.dispatched && len(x.facts) > 0 {
-		s.health.record(hold.provider, x.facts[len(x.facts)-1], true)
+		s.health.Record(hold.provider, x.facts[len(x.facts)-1], true)
 		return
 	}
-	s.health.releaseProbe(hold.provider)
+	s.health.ReleaseProbe(hold.provider)
 }
 
 type attemptCompletion struct {
@@ -228,7 +229,7 @@ func (h *dispatchHold) complete(ctx context.Context, s *Server, x *call, complet
 		x.spendCaps(h.budgets, completion.attempt)
 	}
 	x.facts = append(x.facts, completion.fact)
-	s.health.record(h.provider, completion.fact, h.probed)
+	s.health.Record(h.provider, completion.fact, h.probed)
 	h.probed = false
 	if x.workflow == nil {
 		return completion.authority, false
@@ -274,8 +275,8 @@ func (s *Server) cooling(ctx context.Context, providerID string, slot *routing.S
 	if s.deps.Admission.Ready() {
 		return s.deps.Admission.Cooling(ctx, providerID, slot, generation)
 	}
-	return s.health.coolingDown(providerID, slot.ID) ||
-		s.health.coolingDown(providerID, credentialHealthKey(slot, generation))
+	return s.health.CoolingDown(providerID, slot.ID) ||
+		s.health.CoolingDown(providerID, credentialHealthKey(slot, generation))
 }
 
 func (s *Server) slotGrantGeneration(slot *routing.Slot) int64 {
@@ -326,7 +327,7 @@ func acquireDispatchHold(ctx context.Context, s *Server, provider *routing.Provi
 	if rejection != nil {
 		return gateResult{verdict: gateRejected, rejection: rateLimitedTarget(rejection)}
 	}
-	probed, granted := s.health.claim(provider.ID)
+	probed, granted := s.health.Claim(provider.ID)
 	if !granted {
 		reservation.Settle(ctx, false, nil)
 		return gateResult{verdict: gateDenied}
@@ -357,11 +358,11 @@ func (s *Server) cooldownFailure(ctx context.Context, providerID string, slot *r
 		// The poll may install a replacement while the shared store is
 		// recording this cooldown. Its generation keeps that write scoped
 		// to the refused token, including across gateway replicas.
-		s.health.cooldown(providerID, credentialHealthKey(slot, generation), credentialCooldown)
-		s.deps.Admission.Cooldown(ctx, providerID, slot, generation, credentialCooldown, true)
+		s.health.Cooldown(providerID, credentialHealthKey(slot, generation), health.CredentialCooldown)
+		s.deps.Admission.Cooldown(ctx, providerID, slot, generation, health.CredentialCooldown, true)
 	case classRateLimit:
-		s.health.cooldown(providerID, slot.ID, failure.retryAfter)
-		s.deps.Admission.Cooldown(ctx, providerID, slot, generation, cooldownDuration(failure.retryAfter), false)
+		s.health.Cooldown(providerID, slot.ID, failure.retryAfter)
+		s.deps.Admission.Cooldown(ctx, providerID, slot, generation, health.CooldownDuration(failure.retryAfter), false)
 	default:
 		return true
 	}
@@ -376,7 +377,7 @@ func (s *Server) GrantRefreshed(providerID, credentialID string) {
 	// their cooldowns expire. A delayed notifier must never clear a refusal
 	// of the newly served token.
 	generation := max(0, s.deps.Runtime.GrantGeneration(credentialID)-1)
-	s.health.endCooldown(providerID, credentialHealthKey(&routing.Slot{CredentialID: &credentialID}, generation))
+	s.health.EndCooldown(providerID, credentialHealthKey(&routing.Slot{CredentialID: &credentialID}, generation))
 	s.deps.Admission.EndCredentialCooldown(context.Background(), providerID, credentialID, generation)
 }
 

@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/health"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -217,7 +218,7 @@ func (s *Server) shareProbe(ctx context.Context, limiter *fleet.State, target pr
 	}
 	var until time.Time
 	if result.Status == fleet.ProbeUnhealthy {
-		until = s.now().Add(max(target.interval, circuitOpenFor))
+		until = s.now().Add(max(target.interval, health.CircuitOpenFor))
 	}
 	return limiter.PublishCircuit(call, target.provider, until)
 }

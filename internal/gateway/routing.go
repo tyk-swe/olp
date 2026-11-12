@@ -26,7 +26,7 @@ func (s *Server) selectionOptions(ctx context.Context, x *call) routing.Options 
 	if s.deps.Admission.Ready() {
 		options.Supply = s.deps.Admission
 	}
-	if s.fleet.marked() {
+	if s.fleet.Marked() {
 		options.Unhealthy = s.unhealthy
 	}
 	options.Mirror = x.mirrorSeed()

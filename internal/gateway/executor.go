@@ -369,7 +369,7 @@ func (s *Server) slots(x *call, attempt routing.Attempt, provider *routing.Provi
 	}
 	out := make([]routing.Slot, 0, len(ordered))
 	for _, slot := range ordered {
-		if !s.slotAvailable(x, attempt, &slot) || (!s.deps.Admission.Ready() && (s.health.coolingDown(provider.ID, slot.ID) || s.health.coolingDown(provider.ID, credentialHealthKey(&slot, s.slotGrantGeneration(&slot))))) {
+		if !s.slotAvailable(x, attempt, &slot) || (!s.deps.Admission.Ready() && (s.health.CoolingDown(provider.ID, slot.ID) || s.health.CoolingDown(provider.ID, credentialHealthKey(&slot, s.slotGrantGeneration(&slot))))) {
 			continue
 		}
 		out = append(out, slot)

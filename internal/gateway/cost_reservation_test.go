@@ -11,6 +11,7 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/health"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
@@ -319,7 +320,7 @@ func TestSettledChargeRetainsEachAttemptCardRevision(t *testing.T) {
 				authority.ProjectID = &project
 			}
 			rt := &fakeRuntime{inputs: &routinginputs.Inputs{RefreshedAt: now, RateCards: []routinginputs.RoutingRateCard{card}}}
-			s := &Server{now: func() time.Time { return now }, fleet: &fleetHealth{}, deps: Dependencies{Runtime: rt}}
+			s := &Server{now: func() time.Time { return now }, fleet: &health.Fleet{}, deps: Dependencies{Runtime: rt}}
 			s.bindAuthority(x, authority)
 			dispatch := func() {
 				fact := s.newFact(x, x.attempts[0], provider.Slots[0], len(x.facts)+1)
@@ -506,7 +507,7 @@ func TestAttemptCardAbsenceDistinguishesFreshAndStaleInputs(t *testing.T) {
 				refreshed = now.Add(-routinginputs.PerformanceMaxAge - time.Second)
 			}
 			rt := &fakeRuntime{inputs: &routinginputs.Inputs{RefreshedAt: refreshed}}
-			s := &Server{now: func() time.Time { return now }, fleet: &fleetHealth{}, deps: Dependencies{Runtime: rt}}
+			s := &Server{now: func() time.Time { return now }, fleet: &health.Fleet{}, deps: Dependencies{Runtime: rt}}
 			s.bindAuthority(x, keyauthority.Authority{})
 			provider := x.snapshot().Provider(x.attempts[0].ProviderID)
 			fact := s.newFact(x, x.attempts[0], provider.Slots[0], 1)

@@ -125,7 +125,7 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 		x.spendCaps(hold.budgets, attempt)
 	}
 	x.facts = append(x.facts, fact)
-	s.health.record(provider.ID, fact, hold.probed)
+	s.health.Record(provider.ID, fact, hold.probed)
 	commitCtx, stopCommit := resourceCommitContext(ctx)
 	defer stopCommit()
 	if dispatchFailure != nil {
@@ -409,7 +409,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record,
 			acceptance: upstream.Evidence{Reached: failure.Dispatched, Status: failure.Status}.Acceptance(),
 		}
 		fact.RecordEvidence(f.billingUncertain())
-		s.health.record(record.ProviderID, fact, false)
+		s.health.Record(record.ProviderID, fact, false)
 		atr.Finish(fact.Class, fact.Status)
 		return nil, f, fact
 	}
@@ -456,7 +456,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *call, record *jobs.Record,
 	fact.Usage = mediaUsage(nil, result)
 	fact.Committed = true
 	fact.RecordEvidence(false)
-	s.health.record(record.ProviderID, fact, false)
+	s.health.Record(record.ProviderID, fact, false)
 	if u := fact.Usage; u != nil {
 		atr.RecordUsage(&u.InputTokens, &u.OutputTokens, u.CachedInputTokens, u.MediaUnits)
 	}

@@ -82,7 +82,7 @@ route:
 			break
 		}
 		provider, ok := snapshot.FindProvider(attempt.ProviderID)
-		if !ok || s.health.open(provider.ID) {
+		if !ok || s.health.Open(provider.ID) {
 			continue
 		}
 		if e := x.checkCallerTarget(&provider, attempt.UpstreamModel); e != nil {
@@ -214,7 +214,7 @@ func meet(met []string, class string) []string {
 // request's attempt budget and deadline. An open circuit ends retries.
 func (s *Server) retryWait(x *call, providerID string, failure *attemptFailure, retries int, deadline time.Time) (time.Duration, bool) {
 	rule, ok := x.route.Retry.Retries(failure.class)
-	if !ok || retries >= rule.MaxRetries || x.spent >= x.budget || s.health.open(providerID) {
+	if !ok || retries >= rule.MaxRetries || x.spent >= x.budget || s.health.Open(providerID) {
 		return 0, false
 	}
 	wait := rule.Backoff(retries+1, rand.Float64(), failure.retryAfter)

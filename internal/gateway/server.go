@@ -27,6 +27,7 @@ import (
 	"github.com/tyk-swe/olp/internal/export/capture"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/health"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/guardrails"
@@ -140,8 +141,8 @@ type Server struct {
 	connections *egress.ConnectionClientCache
 	auth        *connectors.Auth
 	gate        *ingress.Gate
-	health      *healthTracker
-	fleet       *fleetHealth
+	health      *health.Tracker
+	fleet       *health.Fleet
 	// unhealthy is fleet.unhealthy bound once, so selection never allocates
 	// a method value per request.
 	unhealthy       func(string) bool
@@ -168,9 +169,7 @@ func New(deps Dependencies, cfg Config) *Server {
 	if err := estimate.Preload(); err != nil {
 		log.Warn("tokenizer unavailable; its models are estimated by the four-characters-per-token rule", "error", err.Error())
 	}
-	health := newHealthTracker(time.Now)
-	health.changes = make(chan circuitChange, 64)
-	fleet := &fleetHealth{now: time.Now}
+	fleet := health.NewFleet(time.Now)
 	normalized := normalizedDependencies(deps)
 	return &Server{
 		log:         log,
@@ -180,9 +179,9 @@ func New(deps Dependencies, cfg Config) *Server {
 		connections: egress.NewConnectionClientCache(128),
 		auth:        auth,
 		gate:        ingress.NewGate(normalized.Runtime, pool, config.TrustedProxies, config.MaxBodyBytes, time.Now),
-		health:      health,
+		health:      health.NewTracker(time.Now),
 		fleet:       fleet,
-		unhealthy:   fleet.unhealthy,
+		unhealthy:   fleet.Unhealthy,
 		shadows:     newShadowing(config.MaxShadowInFlight),
 		now:         time.Now, deps: normalized,
 	}
@@ -192,8 +191,18 @@ func New(deps Dependencies, cfg Config) *Server {
 // metrics endpoint renders.
 func (s *Server) AdmissionPool() *admission.Pool { return s.gate.Pool() }
 
+// RunFleetHealth shares this gateway's circuit transitions with the fleet
+// and follows the fleet's, until ctx ends. Without shared state it returns at
+// once, and local circuits alone decide.
+func (s *Server) RunFleetHealth(ctx context.Context) {
+	if !s.deps.Admission.Ready() {
+		return
+	}
+	s.fleet.Follow(ctx, s.health, s.deps.Admission.Fleet(), quota.ReserveTimeout, s.log)
+}
+
 // OpenCircuits counts provider circuits currently open or half-open.
-func (s *Server) OpenCircuits() int64 { return s.health.openCircuits() }
+func (s *Server) OpenCircuits() int64 { return s.health.OpenCircuits() }
 
 // Register mounts the OpenAI surface on the public mux.
 func (s *Server) Register(mux *http.ServeMux) {

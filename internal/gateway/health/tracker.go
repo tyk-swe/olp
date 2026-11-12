@@ -1,4 +1,4 @@
-package gateway
+package health
 
 import (
 	"sync"
@@ -10,20 +10,20 @@ import (
 const (
 	circuitFailures    = 5
 	circuitWindow      = 30 * time.Second
-	circuitOpenFor     = 30 * time.Second
-	credentialCooldown = time.Minute
+	CircuitOpenFor     = 30 * time.Second
+	CredentialCooldown = time.Minute
 	rateLimitCooldown  = 10 * time.Second
 	maxCooldown        = time.Minute
 	healthRetention    = 24 * time.Hour
 )
 
-// healthTracker keeps in-memory provider circuit state, credential slot
+// Tracker keeps in-memory provider circuit state, credential slot
 // cooldowns, and windowed attempt statistics for the health endpoint.
-type healthTracker struct {
+type Tracker struct {
 	mu        sync.Mutex
 	providers map[string]*providerHealth
 	now       func() time.Time
-	// changes carries circuit transitions to the fleet; nil keeps them local.
+	// changes carries circuit transitions to the fleet.
 	changes chan circuitChange
 }
 
@@ -42,11 +42,11 @@ type bucket struct {
 	latency                                                        time.Duration
 }
 
-func newHealthTracker(now func() time.Time) *healthTracker {
-	return &healthTracker{providers: map[string]*providerHealth{}, now: now}
+func NewTracker(now func() time.Time) *Tracker {
+	return &Tracker{providers: map[string]*providerHealth{}, now: now, changes: make(chan circuitChange, 64)}
 }
 
-func (h *healthTracker) provider(id string) *providerHealth {
+func (h *Tracker) provider(id string) *providerHealth {
 	p := h.providers[id]
 	if p == nil {
 		p = &providerHealth{buckets: map[int64]*bucket{}, cooldowns: map[string]time.Time{}}
@@ -55,17 +55,17 @@ func (h *healthTracker) provider(id string) *providerHealth {
 	return p
 }
 
-// open reports whether the provider circuit currently rejects attempts.
-func (h *healthTracker) open(providerID string) bool {
+// Open reports whether the provider circuit currently rejects attempts.
+func (h *Tracker) Open(providerID string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	p := h.provider(providerID)
 	return p.probing || h.now().Before(p.openUntil)
 }
 
-// openCircuits counts providers whose circuit is open or half-open right now.
+// OpenCircuits counts providers whose circuit is open or half-open right now.
 // It is the source of the olp_open_target_circuits metric.
-func (h *healthTracker) openCircuits() int64 {
+func (h *Tracker) OpenCircuits() int64 {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	var count int64
@@ -77,41 +77,41 @@ func (h *healthTracker) openCircuits() int64 {
 	return count
 }
 
-// coolingDown reports whether a credential slot is paused after a failure.
-func (h *healthTracker) coolingDown(providerID, slotID string) bool {
+// CoolingDown reports whether a credential slot is paused after a failure.
+func (h *Tracker) CoolingDown(providerID, slotID string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.now().Before(h.provider(providerID).cooldowns[slotID])
 }
 
-func (h *healthTracker) cooldown(providerID, slotID string, d time.Duration) {
+func (h *Tracker) Cooldown(providerID, slotID string, d time.Duration) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.provider(providerID).cooldowns[slotID] = h.now().Add(cooldownDuration(d))
+	h.provider(providerID).cooldowns[slotID] = h.now().Add(CooldownDuration(d))
 }
 
-// endCooldown ends a credential slot's cooldown before it runs out.
-func (h *healthTracker) endCooldown(providerID, slotID string) {
+// EndCooldown ends a credential slot's cooldown before it runs out.
+func (h *Tracker) EndCooldown(providerID, slotID string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	delete(h.provider(providerID).cooldowns, slotID)
 }
 
-// cooldownDuration bounds how long one rejection sidelines a credential slot.
+// CooldownDuration bounds how long one rejection sidelines a credential slot.
 // An upstream that named no delay gets the default wait, and one that named an
 // implausible delay is not believed past the cap: a slot that never comes back
 // is a slot that silently shrinks the pool. The shared cooldown every replica
 // reads is written for the same span as the local one.
-func cooldownDuration(d time.Duration) time.Duration {
+func CooldownDuration(d time.Duration) time.Duration {
 	if d <= 0 {
 		return rateLimitCooldown
 	}
 	return min(d, maxCooldown)
 }
 
-// record folds one attempt into the circuit and the health window. probe says
+// Record folds one attempt into the circuit and the health window. probe says
 // the attempt holds the half-open probe, which only its own completion releases.
-func (h *healthTracker) record(providerID string, fact events.AttemptFact, probe bool) {
+func (h *Tracker) Record(providerID string, fact events.AttemptFact, probe bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	now := h.now()
@@ -140,7 +140,7 @@ func (h *healthTracker) record(providerID string, fact events.AttemptFact, probe
 	}
 	b.attempts++
 	b.latency += fact.Duration
-	if fact.LocalRefusal && fact.Class != classSuccess {
+	if fact.LocalRefusal && fact.Class != events.ClassSuccess {
 		return
 	}
 	switch fact.Class {
@@ -177,7 +177,7 @@ func (h *healthTracker) record(providerID string, fact events.AttemptFact, probe
 		return
 	}
 	if probe {
-		p.openUntil = now.Add(circuitOpenFor)
+		p.openUntil = now.Add(CircuitOpenFor)
 		p.failures = 0
 		h.publish(providerID, p.openUntil)
 		return
@@ -188,7 +188,7 @@ func (h *healthTracker) record(providerID string, fact events.AttemptFact, probe
 	}
 	p.failures++
 	if p.failures >= circuitFailures {
-		p.openUntil = now.Add(circuitOpenFor)
+		p.openUntil = now.Add(CircuitOpenFor)
 		p.failures = 0
 		h.publish(providerID, p.openUntil)
 	}
@@ -196,22 +196,19 @@ func (h *healthTracker) record(providerID string, fact events.AttemptFact, probe
 
 // publish hands a circuit transition to the fleet without waiting: a full
 // queue drops it, and the circuit still holds on this gateway.
-func (h *healthTracker) publish(providerID string, until time.Time) {
-	if h.changes == nil {
-		return
-	}
+func (h *Tracker) publish(providerID string, until time.Time) {
 	select {
 	case h.changes <- circuitChange{provider: providerID, until: until}:
 	default:
 	}
 }
 
-// claim reserves the one half-open endpoint probe. The first return value
-// reports whether the probe was acquired: record releases it once the attempt
-// lands, and releaseProbe returns it when a local step fails before dispatch.
-// Credential-only outcomes release it in record without charging an endpoint
+// Claim reserves the one half-open endpoint probe. The first return value
+// reports whether the probe was acquired: Record releases it once the attempt
+// lands, and ReleaseProbe returns it when a local step fails before dispatch.
+// Credential-only outcomes release it in Record without charging an endpoint
 // failure.
-func (h *healthTracker) claim(id string) (probed, granted bool) {
+func (h *Tracker) Claim(id string) (probed, granted bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	p := h.provider(id)
@@ -225,9 +222,9 @@ func (h *healthTracker) claim(id string) (probed, granted bool) {
 	return probed, true
 }
 
-// releaseProbe returns a claimed half-open probe whose attempt was abandoned
+// ReleaseProbe returns a claimed half-open probe whose attempt was abandoned
 // before dispatch, leaving the endpoint free for the next sibling.
-func (h *healthTracker) releaseProbe(id string) {
+func (h *Tracker) ReleaseProbe(id string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.provider(id).probing = false
