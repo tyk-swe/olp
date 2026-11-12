@@ -221,14 +221,14 @@ func (s *Management) uninstall(r *http.Request, _ access.Principal) (access.Repl
 	if err = access.Match(r, plugin.Etag.String()); err != nil {
 		return access.Reply{}, err
 	}
-	// Provider writes hold the same installation lock, so no revision can pin
+	// Configuration writes hold the same installation lock, so no revision can pin
 	// the plugin between this check and the delete.
-	pinning, err := pinningProviders(r.Context(), tx, digest)
+	pinning, err := pinningResources(r.Context(), tx, digest)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	if len(pinning) > 0 {
-		return access.Reply{}, access.Fail(http.StatusConflict, CodePinned, "A draft or published revision of "+pinning+" pins this plugin. Move those providers to another plugin before uninstalling it.")
+		return access.Reply{}, access.Fail(http.StatusConflict, CodePinned, "A draft or published revision of "+pinning+" pins this plugin. Keep this plugin installed while those revisions exist.")
 	}
 	retired, err := retireGrants(r.Context(), tx, digest)
 	if err != nil {
@@ -292,14 +292,16 @@ func retireGrants(ctx context.Context, tx pgx.Tx, digest string) ([]string, erro
 	return retired, err
 }
 
-// pinningProviders names the providers whose draft, published provider revision
-// or frozen code-route connection pins a plugin digest, or returns "".
-func pinningProviders(ctx context.Context, q access.Queryer, digest string) (string, error) {
-	rows, err := q.Query(ctx, `SELECT p.name FROM olp.providers p
+// pinningResources names resources whose drafts or immutable revisions pin a plugin digest.
+func pinningResources(ctx context.Context, q access.Queryer, digest string) (string, error) {
+	rows, err := q.Query(ctx, `SELECT name FROM (SELECT p.name, p.id FROM olp.providers p
 		WHERE p.kind='plugin' AND p.configuration->>'profile_revision'=$1
 		   OR EXISTS (SELECT 1 FROM olp.provider_revisions r WHERE r.provider_id=p.id AND r.configuration->>'kind'='plugin' AND r.configuration->>'profile_revision'=$1)
 		   OR EXISTS (SELECT 1 FROM olp.code_route_revisions r WHERE r.connections->p.id::text->>'kind'='plugin' AND r.connections->p.id::text->>'profile_revision'=$1)
-		ORDER BY lower(p.name), p.id`, digest)
+		UNION SELECT g.name, g.id FROM olp.guardrails g
+		JOIN olp.guardrail_revisions r ON r.guardrail_id=g.id
+		WHERE g.type='plugin' AND r.configuration->>'plugin_version'=$1
+		) pins ORDER BY lower(name), id`, digest)
 	if err != nil {
 		return "", err
 	}
@@ -314,7 +316,7 @@ func pinningProviders(ctx context.Context, q access.Queryer, digest string) (str
 	}
 	listed := strings.Join(quoted, ", ")
 	if len(names) > shown {
-		listed += fmt.Sprintf(" and %d more providers", len(names)-shown)
+		listed += fmt.Sprintf(" and %d more resources", len(names)-shown)
 	}
 	return listed, nil
 }

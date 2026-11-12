@@ -116,6 +116,8 @@ func testGuardrailJourney(t *testing.T, parent *service, owner *caller) {
 	s.want(owner, "DELETE", "/api/v1/guardrail-credentials/"+unused, nil, idempotent(map[string]string{"If-Match": `"` + unused + `"`}), http.StatusNoContent)
 	s.want(owner, "GET", "/api/v1/guardrail-credentials/"+unused, nil, nil, http.StatusNotFound)
 
+	testGuardrailPluginPins(t, s, owner, project)
+
 	resources := []string{credentialID, unused, external["id"].(string), created["id"].(string), policy["policy_id"].(string), attachment["id"].(string)}
 	rows, err := s.pool.Query(t.Context(), `SELECT DISTINCT action COLLATE "C" FROM olp.audit WHERE resource_id::text=ANY($1) ORDER BY 1`, resources)
 	if err != nil {
@@ -153,4 +155,29 @@ func sameJSON(t *testing.T, value any) string {
 		t.Fatal(err)
 	}
 	return string(raw)
+}
+
+func testGuardrailPluginPins(t *testing.T, s *service, owner *caller, project string) {
+	t.Helper()
+	const digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	if _, err := s.pool.Exec(t.Context(), `INSERT INTO olp.plugins(digest, abi_version, manifest, module, size_bytes, etag, installed_by)
+		SELECT $1, 1, '{"name":"guardrail-fixture","version":"0.1.0","origins":[],"profiles":[],"guardrail":true}', '\x0061736d01000000'::bytea, 8, gen_random_uuid(), id FROM olp.users WHERE email='owner@example.com'`, digest); err != nil {
+		t.Fatal(err)
+	}
+	pluginPath := "/api/v1/plugins/" + digest
+	installed := s.want(owner, "GET", pluginPath, nil, nil, http.StatusOK)
+	definition := s.want(owner, "POST", "/api/v1/guardrails", map[string]any{
+		"name": "plugin-pin", "type": "plugin", "project_id": project,
+		"configuration": map[string]any{"plugin_id": "guardrail-fixture", "plugin_version": digest},
+	}, idempotent(), http.StatusCreated)
+	for _, retired := range []bool{false, true} {
+		if retired {
+			s.want(owner, "DELETE", "/api/v1/guardrails/"+definition["id"].(string), nil, idempotent(etag(definition)), http.StatusNoContent)
+		}
+		problem := s.want(owner, "DELETE", pluginPath, nil, idempotent(etag(installed)), http.StatusConflict)
+		if !strings.HasSuffix(problem["type"].(string), "/plugin_pinned") {
+			t.Fatalf("uninstall with retired=%t = %v", retired, problem)
+		}
+		s.want(owner, "GET", pluginPath, nil, nil, http.StatusOK)
+	}
 }
