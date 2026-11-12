@@ -2,7 +2,6 @@ package release
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -142,8 +141,8 @@ func readExternalReferences(ctx context.Context, q access.Queryer, ids []string)
 		if err = rows.Scan(&id, &data); err != nil {
 			return nil, err
 		}
-		var reference secretstore.Reference
-		if json.Unmarshal(data, &reference) != nil || reference.Validate() != nil {
+		reference, err := secretstore.ParseReference(data)
+		if err != nil {
 			return nil, errors.New("invalid external credential metadata")
 		}
 		result[id] = reference

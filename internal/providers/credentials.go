@@ -366,8 +366,8 @@ func (s *Server) readCredential(ctx context.Context, q access.Queryer, id string
 		return nil, err
 	}
 	if len(referenceJSON) > 0 {
-		var reference secretstore.Reference
-		if json.Unmarshal(referenceJSON, &reference) != nil || reference.Validate() != nil {
+		reference, err := secretstore.ParseReference(referenceJSON)
+		if err != nil {
 			return nil, release.ErrCredentialUnavailable
 		}
 		return s.resolveReference(ctx, reference)
