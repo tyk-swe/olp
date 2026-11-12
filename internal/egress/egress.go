@@ -58,25 +58,39 @@ func (p Policy) ValidateEndpoint(raw string) (*url.URL, error) {
 	if u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.RawFragment != "" {
 		return nil, errors.New("endpoint must not carry a query or fragment")
 	}
-	if strings.ContainsAny(host, " \t\r\n") || strings.Contains(u.Path, "..") {
+	if strings.Contains(u.Path, "..") {
 		return nil, errors.New("endpoint host or path is malformed")
 	}
-	if port := u.Port(); port != "" {
-		if _, err := net.LookupPort("tcp", port); err != nil {
-			return nil, errors.New("endpoint port is invalid")
-		}
-	}
-	if addr, err := netip.ParseAddr(strings.Trim(host, "[]")); err == nil {
-		if !p.Permits(addr) {
-			return nil, ErrUnsafeDestination
-		}
-	} else if !validHostname(host) {
-		return nil, errors.New("endpoint host is not a valid DNS name")
+	if err := p.ValidateHost(u.Host); err != nil {
+		return nil, err
 	}
 	u.Host = strings.ToLower(u.Host)
 	u.Path = strings.TrimRight(u.Path, "/")
 	u.RawPath = ""
 	return u, nil
+}
+
+func (p Policy) ValidateHost(hostport string) error {
+	target := url.URL{Host: hostport}
+	host := strings.ToLower(target.Hostname())
+	if strings.ContainsAny(host, " \t\r\n") {
+		return errors.New("endpoint host or path is malformed")
+	}
+	if port := target.Port(); port != "" {
+		if _, err := net.LookupPort("tcp", port); err != nil {
+			return errors.New("endpoint port is invalid")
+		}
+	}
+	if addr, err := netip.ParseAddr(host); err == nil {
+		if !p.Permits(addr) {
+			return ErrUnsafeDestination
+		}
+		return nil
+	}
+	if !validHostname(host) {
+		return errors.New("endpoint host is not a valid DNS name")
+	}
+	return nil
 }
 
 func validHostname(host string) bool {
