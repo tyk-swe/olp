@@ -8,15 +8,18 @@ import (
 	"slices"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
 type attemptAdapter[Result any] struct {
 	estimate func(routing.Attempt, *routing.Provider) int64
-	dispatch func(context.Context, routing.Attempt, *routing.Provider, routing.Slot, AttemptFact) (AttemptFact, Result, *attemptFailure)
+	dispatch func(context.Context, routing.Attempt, *routing.Provider, routing.Slot, events.AttemptFact) (events.AttemptFact, Result, *attemptFailure)
 }
 
-func dispatchWithLease[Result any](ctx context.Context, hold *dispatchHold, adapter attemptAdapter[Result], s *Server, x *call, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, Result, *attemptFailure, *Error) {
+func dispatchWithLease[Result any](ctx context.Context, hold *dispatchHold, adapter attemptAdapter[Result], s *Server, x *call, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, Result, *attemptFailure, *fault.Error) {
 	dispatchCtx, finish, err := hold.authorize(ctx, s, x)
 	if err != nil {
 		var result Result
@@ -30,7 +33,7 @@ func dispatchWithLease[Result any](ctx context.Context, hold *dispatchHold, adap
 // execution to the canonical or media response representation.
 type attemptOutcome[Result any] struct {
 	result    Result
-	err       *Error
+	err       *fault.Error
 	committed bool
 	cancelled bool
 }
@@ -79,7 +82,7 @@ route:
 			break
 		}
 		provider, ok := snapshot.FindProvider(attempt.ProviderID)
-		if !ok || s.health.open(provider.ID) {
+		if !ok || s.health.Open(provider.ID) {
 			continue
 		}
 		if e := x.checkCallerTarget(&provider, attempt.UpstreamModel); e != nil {
@@ -115,16 +118,16 @@ route:
 				x.facts = append(x.facts, s.rejectedFact(x, attempt, slot, x.spent, gate.rejection))
 				last = gate.rejection
 				met = meet(met, gate.rejection.class)
-				if gate.rejection.quota == quotaRoute {
+				if gate.rejection.quota == quota.Route {
 					break route
 				}
-				next = gate.rejection.quota == quotaConnection // every sibling shares this quota
+				next = gate.rejection.quota == quota.Connection // every sibling shares this quota
 			case gateUnmeterable:
 				unmeterable = true
-				if gate.quota == quotaRoute {
+				if gate.quota == quota.Route {
 					break route
 				}
-				next = gate.quota == quotaConnection
+				next = gate.quota == quota.Connection
 			case gateAdmitted:
 				ready, admissionErr := gate.hold.begin(ctx, s, x, attempt, &provider, slot)
 				if admissionErr != nil {
@@ -193,9 +196,9 @@ route:
 		return attemptOutcome[Result]{err: last.toError()}, met
 	case unmeterable:
 		// Every eligible target had a quota that could not be consulted.
-		return attemptOutcome[Result]{err: limitsUnavailable()}, met
+		return attemptOutcome[Result]{err: quota.LimitsUnavailable()}, met
 	}
-	return attemptOutcome[Result]{err: serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider is currently able to serve `"+x.named().Slug+"`.")}, met
+	return attemptOutcome[Result]{err: fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider is currently able to serve `"+x.named().Slug+"`.")}, met
 }
 
 // meet adds the fallback condition a failure class meets to met.
@@ -211,7 +214,7 @@ func meet(met []string, class string) []string {
 // request's attempt budget and deadline. An open circuit ends retries.
 func (s *Server) retryWait(x *call, providerID string, failure *attemptFailure, retries int, deadline time.Time) (time.Duration, bool) {
 	rule, ok := x.route.Retry.Retries(failure.class)
-	if !ok || retries >= rule.MaxRetries || x.spent >= x.budget || s.health.open(providerID) {
+	if !ok || retries >= rule.MaxRetries || x.spent >= x.budget || s.health.Open(providerID) {
 		return 0, false
 	}
 	wait := rule.Backoff(retries+1, rand.Float64(), failure.retryAfter)

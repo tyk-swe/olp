@@ -10,6 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -84,14 +86,14 @@ func (d *sessionDebit) reference() *usage.ExecutionReference {
 	return &usage.ExecutionReference{DispatchID: d.id, RunID: d.runID, StepID: d.stepID, TargetID: d.targetID, RouteRevisionID: d.routeRevisionID}
 }
 
-func (s *Server) monitorWorkflowModelLease(ctx context.Context, debit *sessionDebit) (context.Context, func() *Error) {
+func (s *Server) monitorWorkflowModelLease(ctx context.Context, debit *sessionDebit) (context.Context, func() *fault.Error) {
 	callCtx, cancel := context.WithCancel(ctx)
-	result := make(chan *Error, 1)
+	result := make(chan *fault.Error, 1)
 	done := make(chan struct{})
 	ledger, ok := s.deps.Debits.(workflowModelLeases)
 	if !ok || debit == nil {
 		close(done)
-		return callCtx, func() *Error { cancel(); return nil }
+		return callCtx, func() *fault.Error { cancel(); return nil }
 	}
 	go func() {
 		defer close(done)
@@ -114,14 +116,14 @@ func (s *Server) monitorWorkflowModelLease(ctx context.Context, debit *sessionDe
 					if callCtx.Err() != nil {
 						return
 					}
-					result <- serverError(http.StatusServiceUnavailable, "workflow_owner_lost", "The workflow step owner could not be verified.")
+					result <- fault.ServerError(http.StatusServiceUnavailable, "workflow_owner_lost", "The workflow step owner could not be verified.")
 					cancel()
 					return
 				}
 			}
 		}
 	}()
-	return callCtx, func() *Error {
+	return callCtx, func() *fault.Error {
 		cancel()
 		<-done
 		select {
@@ -134,7 +136,7 @@ func (s *Server) monitorWorkflowModelLease(ctx context.Context, debit *sessionDe
 			checkCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
 			defer stop()
 			if err := ledger.RenewWorkflowModelLease(checkCtx, debit.id, debit.claim); err != nil {
-				return serverError(http.StatusServiceUnavailable, "workflow_owner_lost", "The workflow step owner could not be verified.")
+				return fault.ServerError(http.StatusServiceUnavailable, "workflow_owner_lost", "The workflow step owner could not be verified.")
 			}
 		default:
 		}
@@ -158,7 +160,7 @@ func newSessionDebitID() (string, error) {
 	return id.String(), nil
 }
 
-func (s *Server) sessionExposureHeld(ctx context.Context, keyID string) (bool, *Error) {
+func (s *Server) sessionExposureHeld(ctx context.Context, keyID string) (bool, *fault.Error) {
 	if s.webrtcExposureHeld(keyID) {
 		return true, nil
 	}
@@ -167,12 +169,12 @@ func (s *Server) sessionExposureHeld(ctx context.Context, keyID string) (bool, *
 	}
 	held, err := s.deps.Debits.HasUnknownDebit(ctx, keyID, max(s.cfg.WebRTCBound, nativeDuplexSession))
 	if err != nil {
-		return false, serverError(http.StatusInternalServerError, "debit_ledger_unavailable", "The durable debit ledger is unavailable, so unresolved session exposure cannot be checked.")
+		return false, fault.ServerError(http.StatusInternalServerError, "debit_ledger_unavailable", "The durable debit ledger is unavailable, so unresolved session exposure cannot be checked.")
 	}
 	return held, nil
 }
 
-func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority keyauthority.Authority, attempt routing.Attempt, supply []cappedOwner) *Error {
+func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority keyauthority.Authority, attempt routing.Attempt, supply []quota.CappedOwner) *fault.Error {
 	if e := x.workflowModelCost(attempt); e != nil {
 		return e
 	}
@@ -181,12 +183,12 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority key
 	}
 	snapshot := x.snapshot()
 	if snapshot == nil || x.route == nil {
-		return serverError(http.StatusInternalServerError, "debit_ledger_unavailable", "The session cannot be reserved without a pinned release.")
+		return fault.ServerError(http.StatusInternalServerError, "debit_ledger_unavailable", "The session cannot be reserved without a pinned release.")
 	}
 	releaseID := canonicalSessionID(snapshot.Generation().ID)
 	routeRevisionID := canonicalSessionID(x.route.RevisionID)
 	if releaseID == "" {
-		return serverError(http.StatusInternalServerError, "debit_ledger_unavailable", "The session cannot be reserved without a pinned release.")
+		return fault.ServerError(http.StatusInternalServerError, "debit_ledger_unavailable", "The session cannot be reserved without a pinned release.")
 	}
 	revisionID := routeRevisionID
 	if revisionID == "" {
@@ -199,7 +201,7 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority key
 	if currency == "" {
 		resolved, err := s.deps.Debits.Currency(ctx)
 		if err != nil || resolved == "" {
-			return limitsUnavailable()
+			return quota.LimitsUnavailable()
 		}
 		currency = resolved
 	}
@@ -207,11 +209,11 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority key
 	charge := x.attemptChargeBound(attempt, bound)
 	dispatchID, err := newSessionDebitID()
 	if err != nil {
-		return limitsUnavailable()
+		return quota.LimitsUnavailable()
 	}
 	claimID, err := newSessionDebitID()
 	if err != nil {
-		return limitsUnavailable()
+		return quota.LimitsUnavailable()
 	}
 	projectID := ""
 	if authority.ProjectID != nil {
@@ -231,19 +233,19 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority key
 	if x.workflow != nil {
 		stepID, err := newSessionDebitID()
 		if err != nil {
-			return limitsUnavailable()
+			return quota.LimitsUnavailable()
 		}
 		debit.runID, debit.stepID = x.workflow.runID, stepID
 		intent.Kind, intent.RunID, intent.StepID = debits.KindModel, debit.runID, debit.stepID
 	}
 	boundaries := x.admissionAuthority(authority).CostBoundaries(x.limitRoute())
 	if !boundaries.Resolved {
-		return limitsUnavailable()
+		return quota.LimitsUnavailable()
 	}
-	capped := slices.DeleteFunc(slices.Clone(supply), func(owner cappedOwner) bool { return owner.limits == nil })
+	capped := slices.DeleteFunc(slices.Clone(supply), func(owner quota.CappedOwner) bool { return owner.Limits == nil })
 	owners, admissions := boundaries.Owners(), boundaries.Admissions()
 	for _, owner := range capped {
-		cap := capRequest(owner, time.Hour).Cost
+		cap := quota.CapRequest(owner, time.Hour).Cost
 		owners = append(owners, cap.Owner)
 		admissions = append(admissions, debits.Boundary{Owner: cap.Owner, Budget: cap})
 	}
@@ -254,7 +256,7 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority key
 		state, err = s.deps.Debits.Prepare(ctx, intent, owners)
 	}
 	if err != nil || state != debits.Prepared {
-		return limitsUnavailable()
+		return quota.LimitsUnavailable()
 	}
 	if x.workflow != nil {
 		x.workflow.ordinal++
@@ -265,17 +267,17 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority key
 		cancel()
 		if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
 			if s.deps.Admission != nil {
-				s.deps.Admission.recordRejection(exceeded.Dimension)
+				s.deps.Admission.RecordRejection(exceeded.Dimension)
 			}
-			return rateLimitedBasis(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate, exceeded.Basis)
+			return quota.RateLimitedBasis(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate, exceeded.Basis)
 		}
-		return limitsUnavailable()
+		return quota.LimitsUnavailable()
 	}
 	x.sessionDebit = debit
 	return nil
 }
 
-func (s *Server) markSessionDispatched(ctx context.Context, x *call) *Error {
+func (s *Server) markSessionDispatched(ctx context.Context, x *call) *fault.Error {
 	if x.sessionDebit == nil || s.deps.Debits == nil {
 		return nil
 	}
@@ -290,7 +292,7 @@ func (s *Server) markSessionDispatched(ctx context.Context, x *call) *Error {
 		return ledger.MarkWorkflowModelDispatched(ctx, x.sessionDebit.id, x.sessionDebit.claim)
 	}()
 	if err != nil {
-		return serverError(http.StatusInternalServerError, "debit_ledger_unavailable", "The durable debit could not be dispatched, so the provider session was not created.")
+		return fault.ServerError(http.StatusInternalServerError, "debit_ledger_unavailable", "The durable debit could not be dispatched, so the provider session was not created.")
 	}
 	x.sessionDebit.dispatched = true
 	if x.workflow != nil {

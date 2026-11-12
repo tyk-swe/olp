@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/batches/upstream"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -200,22 +201,22 @@ func (s *Server) geminiManagedBatchObject(ctx context.Context, resource *resourc
 	return json.Marshal(object)
 }
 
-func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWriter, x *call, resource *resources.Resource, p *pin) *Error {
+func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWriter, x *call, resource *resources.Resource, p *pin) *fault.Error {
 	record, err := decodeManagedFileRecord(resource.Metadata)
 	if err != nil {
-		return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The Gemini file mapping is malformed.")
+		return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The Gemini file mapping is malformed.")
 	}
 	fileID, err := geminiFileID(cmp.Or(record.ResponsesFile, resource.UpstreamID))
 	if err != nil {
-		return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The Gemini file mapping is malformed.")
+		return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The Gemini file mapping is malformed.")
 	}
 	generation, err := p.provider.Connector().URL(wire.Gemini, p.model, false)
 	if err != nil {
-		return serverError(http.StatusBadGateway, "upstream_error", "The Gemini download address could not be resolved.")
+		return fault.ServerError(http.StatusBadGateway, "upstream_error", "The Gemini download address could not be resolved.")
 	}
 	parsed, err := url.Parse(generation)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return serverError(http.StatusBadGateway, "upstream_error", "The Gemini download address could not be resolved.")
+		return fault.ServerError(http.StatusBadGateway, "upstream_error", "The Gemini download address could not be resolved.")
 	}
 	endpoint := parsed.Scheme + "://" + parsed.Host + "/download/v1beta/files/" + url.PathEscape(fileID) + ":download?alt=media"
 	x.geminiFileBinary = true
@@ -226,7 +227,7 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 	defer response.Body.Close()
 	spool := s.deps.Staging
 	if spool == nil {
-		return serverError(http.StatusServiceUnavailable, "media_content_unavailable", "The bounded file spool is unavailable.")
+		return fault.ServerError(http.StatusServiceUnavailable, "media_content_unavailable", "The bounded file spool is unavailable.")
 	}
 	contentType := response.Header.Get("Content-Type")
 	if contentType == "" {
@@ -237,7 +238,7 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 		Filename: "gemini-managed-results", ContentType: contentType, MaximumLength: limit, Body: response.Body,
 	})
 	if err != nil {
-		return serverError(http.StatusBadGateway, "upstream_response_too_large", "The Gemini batch file exceeded the bounded spool limit.")
+		return fault.ServerError(http.StatusBadGateway, "upstream_response_too_large", "The Gemini batch file exceeded the bounded spool limit.")
 	}
 	defer spool.Remove(raw.Handle)
 	part := &staging.Part{Handle: raw.Handle, Filename: "gemini-managed-results", ContentType: raw.ContentType, Size: raw.ContentLength, Limit: limit}
@@ -246,22 +247,22 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 		if err != nil {
 			var tooLarge *staging.TooLargeError
 			if errors.As(err, &tooLarge) {
-				return serverError(http.StatusBadGateway, "upstream_response_too_large", "The translated Gemini batch file exceeded the response limit.")
+				return fault.ServerError(http.StatusBadGateway, "upstream_response_too_large", "The translated Gemini batch file exceeded the response limit.")
 			}
-			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The Gemini batch results could not be translated.")
+			return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The Gemini batch results could not be translated.")
 		}
 		defer spool.Remove(part.Handle)
 		contentType = "application/jsonl"
 	}
 	opened, err := spool.Open(part.Handle)
 	if err != nil {
-		return serverError(http.StatusBadGateway, "media_content_unavailable", "The staged Gemini file could not be read.")
+		return fault.ServerError(http.StatusBadGateway, "media_content_unavailable", "The staged Gemini file could not be read.")
 	}
 	defer opened.File.Close()
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Length", strconv.FormatInt(part.Size, 10))
-	if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(responseWriteTimeout)); err != nil {
-		return serverError(http.StatusInternalServerError, "internal_error", "The Gemini file response could not be bounded.")
+	if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout)); err != nil {
+		return fault.ServerError(http.StatusInternalServerError, "internal_error", "The Gemini file response could not be bounded.")
 	}
 	x.responseHeaders(w.Header(), false)
 	w.WriteHeader(http.StatusOK)
@@ -271,7 +272,7 @@ func (s *Server) geminiManagedFileContent(ctx context.Context, w http.ResponseWr
 		if len(x.facts) > 0 {
 			x.facts[len(x.facts)-1].Class = classCancelled
 		}
-		x.failure = serverError(http.StatusBadGateway, "client_delivery_failed", "The Gemini file response ended before all bytes were delivered.")
+		x.failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The Gemini file response ended before all bytes were delivered.")
 		s.finish(x, &outcome{err: x.failure, committed: true, cancelled: true}, x.failure.Status)
 		return nil
 	}

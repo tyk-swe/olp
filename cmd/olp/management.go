@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/guardrails/attachment"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
@@ -33,6 +34,7 @@ import (
 	"github.com/tyk-swe/olp/internal/billing/imports"
 	"github.com/tyk-swe/olp/internal/billing/reconciliation"
 	"github.com/tyk-swe/olp/internal/branding"
+	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export/capture"
@@ -78,6 +80,7 @@ type Management struct {
 	Limits         *sharedLimits
 	Runtime        *release.Manager
 	Gateway        *gateway.Server
+	ResponseCache  *cache.Store
 	Media          *jobs.Service
 	Spool          *staging.Spool
 	Health         *observability.Cache
@@ -105,7 +108,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	settings.New(m.Access, m.Access.RuntimePublisher).Register(mux)
 	(&release.DelegationManagement{Access: m.Access, Manager: m.Runtime}).Register(mux)
 	release.RegisterGenerations(m.Access, mux)
-	(&gateway.CacheManagement{Access: m.Access, Gateway: m.Gateway}).Register(mux)
+	(&gateway.CacheManagement{Access: m.Access, Cache: m.ResponseCache}).Register(mux)
 	(&branding.Server{Access: m.Access}).Register(mux)
 	publishGuardrails := func(ctx context.Context, tx pgx.Tx, actor string) error {
 		_, err := release.Publish(ctx, tx, actor)
@@ -146,7 +149,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	routeServer.UnconfinedPlugins = m.Unconfined != nil
 	routeServer.Catalog = m.Catalog
 	if m.Limits != nil {
-		routeServer.Supply = gateway.NewAdmission(m.Limits.Limiter, m.Limits.Fleet, nil, m.Log)
+		routeServer.Supply = quota.NewAdmission(m.Limits.Limiter, m.Limits.Fleet, nil, m.Log)
 		routeServer.Fleet = m.Limits.Fleet
 	}
 	providerServer := providers.New(providers.Deps{

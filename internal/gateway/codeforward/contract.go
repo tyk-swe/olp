@@ -1,0 +1,62 @@
+package codeforward
+
+import (
+	"context"
+	"encoding/json"
+	"time"
+
+	"github.com/tyk-swe/olp/internal/codesessions"
+
+	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/codeadapter"
+	"github.com/tyk-swe/olp/internal/codeclient"
+	"github.com/tyk-swe/olp/internal/codemode"
+
+	"github.com/tyk-swe/olp/internal/routing"
+)
+
+// Ledger is the durable authority and admission boundary used before each
+// coding generation, including each generation on an upgraded connection.
+type Ledger interface {
+	Models(context.Context, codemode.Route, string) (codeclient.Offers, error)
+	Admit(context.Context, codesessions.Admission) (codesessions.Permit, error)
+	BindConnection(context.Context, codemode.Route, string, codemode.Identity, string, []string) (codesessions.Permit, error)
+	MarkDispatched(context.Context, string) error
+	ConfirmNonexecution(context.Context, string, int) error
+	ObserveCooldown(context.Context, string, time.Time) error
+	ObserveCooldownClass(context.Context, string, string, codeadapter.Classification, time.Time) error
+	Settle(context.Context, string, codemode.Usage) error
+	Abort(context.Context, string) error
+	ObserveHealth(context.Context, string, codemode.HealthObservation) error
+	ObserveAllowance(context.Context, string, codemode.Allowance) error
+	ObserveAllowanceCharge(context.Context, string, json.RawMessage) error
+	ObserveReference(context.Context, string, string) error
+	ObserveOutcome(context.Context, string, codemode.Outcome) error
+	RecordRefusal(context.Context, codemode.Route, string, string, string) error
+}
+
+// Authorizer returns the upstream authorization of one request: its
+// adapter and protocol, on an account whose provider connection the route
+// revision froze.
+type Authorizer interface {
+	AuthorizeCode(context.Context, routing.Configuration, codemode.Account, codemode.Dispatch) (codemode.Authorization, error)
+}
+
+// ResearchAuthorizer resolves the selected subscription's grant without a model.
+type ResearchAuthorizer interface {
+	AuthorizeResearch(context.Context, routing.Configuration, codemode.Account, string) (codemode.Authorization, error)
+}
+
+// ResearchLedger checks live authority and retains bounded opaque session state.
+type ResearchLedger interface {
+	AuthorizeResearch(context.Context, codemode.Route, string, string) (keyauthority.Authority, codemode.Account, error)
+	ResearchSession(context.Context, string, codemode.ResearchSessionBinding) (string, error)
+	CreateResearchSession(context.Context, codemode.ResearchSessionBinding, string) (string, error)
+	DeleteResearchSession(context.Context, string, string) error
+}
+
+type PaidLedger interface {
+	ResolvePaidFallback(context.Context, codesessions.Admission, keyauthority.Authority) (*codemode.Operation, error)
+	ResolvePaidModel(context.Context, codesessions.Admission, keyauthority.Authority) (codemode.Operation, error)
+	AdmitPaid(context.Context, codesessions.PaidAdmission) (codesessions.PaidPermit, error)
+}

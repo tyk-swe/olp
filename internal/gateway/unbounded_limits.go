@@ -2,6 +2,7 @@ package gateway
 
 import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -16,7 +17,7 @@ func callerCostBudgeted(authority *keyauthority.Authority, route string) bool {
 // Request-rate and concurrency limits remain supported by normal admission.
 // Caller-paid exempt routes waive cost caps on caller-credential providers only.
 // callerRoute retains named-route key limits when a selector changes route.
-func unboundedWorkLimits(authority keyauthority.Authority, provider *routing.Provider, slot *routing.Slot, route *routing.Route, callerRoute ...string) *Error {
+func unboundedWorkLimits(authority keyauthority.Authority, provider *routing.Provider, slot *routing.Slot, route *routing.Route, callerRoute ...string) *fault.Error {
 	var slug string
 	if route != nil {
 		slug = route.Slug
@@ -26,14 +27,14 @@ func unboundedWorkLimits(authority keyauthority.Authority, provider *routing.Pro
 	}
 	costExempt := route != nil && route.CallerCostExempt && (provider == nil || provider.CredentialSource == "caller")
 	if authority.UnboundedWorkBudgeted(slug, costExempt) || routing.UnboundedWorkBudgeted(provider, slot, route, costExempt) {
-		return invalidRequest("unbounded_work_budget", "This operation cannot enforce token or cost budgets; use a bounded inference operation.", nil)
+		return fault.InvalidRequest("unbounded_work_budget", "This operation cannot enforce token or cost budgets; use a bounded inference operation.", nil)
 	}
 	return nil
 }
 
 // A retained file and an ongoing session also respect consumption budgets added
 // after the serving contract was pinned, including current route and slot caps.
-func (s *Server) unboundedPinLimits(authority keyauthority.Authority, p *pin, route *routing.Route) *Error {
+func (s *Server) unboundedPinLimits(authority keyauthority.Authority, p *pin, route *routing.Route) *fault.Error {
 	if e := unboundedWorkLimits(authority, &p.provider, &p.slot, route); e != nil {
 		return e
 	}

@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operations"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
@@ -28,16 +30,17 @@ type unaryFailure struct {
 }
 
 type unaryExchange struct {
-	server  *Server
-	ctx     context.Context
-	x       *call
-	state   *attemptState
-	plan    *operationplan.Plan
-	client  *http.Client
-	bound   *boundExchange
-	fact    *AttemptFact
-	bodyCap int
-	inject  func(http.Header)
+	now        func() time.Time
+	dispatched func(context.Context, *call) *fault.Error
+	ctx        context.Context
+	x          *call
+	state      *attemptState
+	plan       *operationplan.Plan
+	client     *http.Client
+	bound      *boundExchange
+	fact       *events.AttemptFact
+	bodyCap    int
+	inject     func(http.Header)
 }
 
 func (e *unaryExchange) do(method, target string, body []byte) (*http.Response, *unaryFailure) {
@@ -62,7 +65,7 @@ func (e *unaryExchange) do(method, target string, body []byte) (*http.Response, 
 		return nil, &unaryFailure{class: classCredential}
 	}
 	if e.x.workflow != nil && e.x.sessionDebit != nil && !e.x.sessionDebit.dispatched {
-		if failure := e.server.markSessionDispatched(e.ctx, e.x); failure != nil {
+		if failure := e.dispatched(e.ctx, e.x); failure != nil {
 			return nil, &unaryFailure{class: classConnect, failure: &attemptFailure{contractCode: failure.Code, noRetry: true}}
 		}
 	}
@@ -71,7 +74,7 @@ func (e *unaryExchange) do(method, target string, body []byte) (*http.Response, 
 		return nil, &unaryFailure{class: e.state.classify(err, false)}
 	}
 	if e.fact.FirstByte == nil {
-		received := e.server.now().Sub(e.fact.StartedAt)
+		received := e.now().Sub(e.fact.StartedAt)
 		e.fact.FirstByte = &received
 	}
 	return response, nil
@@ -84,7 +87,7 @@ func (e *unaryExchange) rejected(response *http.Response) *unaryFailure {
 	failure := &attemptFailure{status: response.StatusCode, upstream: e.x.redacted(openai.ParseErrorBody(raw))}
 	class := e.state.rejected(response.StatusCode, failure.upstream)
 	if class == classRateLimit {
-		failure.retryAfter = upstream.RetryAfter(response.Header.Get("Retry-After"), e.server.now())
+		failure.retryAfter = upstream.RetryAfter(response.Header.Get("Retry-After"), e.now())
 	}
 	return &unaryFailure{class: class, failure: failure}
 }
@@ -208,7 +211,7 @@ func (e *unaryExchange) poll(location string) ([]byte, *unaryFailure) {
 func (e *unaryExchange) wait(location string, header http.Header) *unaryFailure {
 	wait := pollInterval
 	if header != nil && header.Get("Retry-After") != "" {
-		wait = min(max(upstream.RetryAfter(header.Get("Retry-After"), e.server.now()), minPollInterval), maxPollInterval)
+		wait = min(max(upstream.RetryAfter(header.Get("Retry-After"), e.now()), minPollInterval), maxPollInterval)
 	}
 	timer := time.NewTimer(wait)
 	defer timer.Stop()

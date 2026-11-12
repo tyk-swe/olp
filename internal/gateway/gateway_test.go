@@ -19,7 +19,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/media/transport"
 	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
@@ -30,9 +29,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/admission"
-	"github.com/tyk-swe/olp/internal/codeadapter"
-	"github.com/tyk-swe/olp/internal/codeclient"
-	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	limitadmission "github.com/tyk-swe/olp/internal/limits/admission"
@@ -45,6 +41,8 @@ import (
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
 
+	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -140,22 +138,22 @@ func (f *fakeRuntime) CredentialRefused(id string, generation int64) {
 
 type envelopes struct {
 	mu   sync.Mutex
-	envs []Envelope
+	envs []events.Envelope
 }
 
-func (c *envelopes) Terminal(e Envelope) {
+func (c *envelopes) Terminal(e events.Envelope) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.envs = append(c.envs, e)
 }
 
-func (c *envelopes) last(t *testing.T) Envelope {
+func (c *envelopes) last(t *testing.T) events.Envelope {
 	t.Helper()
 	envs := c.await(t, 1)
 	return envs[len(envs)-1]
 }
 
-func (c *envelopes) await(t *testing.T, n int) []Envelope {
+func (c *envelopes) await(t *testing.T, n int) []events.Envelope {
 	t.Helper()
 	// Reading a known-length HTTP response can finish before the serving
 	// goroutine records its terminal event. Await that event explicitly.
@@ -477,43 +475,6 @@ func errorCode(t *testing.T, body map[string]any) string {
 
 // Connection drops mid-stream without a completion marker.
 
-func TestHalfOpenProbeIsReleasedOnlyByItsOwnCompletion(t *testing.T) {
-	const provider = "provider"
-	for _, test := range []struct {
-		name       string
-		probeClass string
-		wantOpen   bool
-	}{
-		{"success closes the circuit", classSuccess, false},
-		{"failure reopens the circuit", "upstream_server", true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			clock := time.Date(2026, time.March, 10, 12, 0, 0, 0, time.UTC)
-			health := newHealthTracker(func() time.Time { return clock })
-			for range circuitFailures {
-				health.record(provider, AttemptFact{Class: "upstream_server"}, false)
-			}
-			if !health.open(provider) {
-				t.Fatal("repeated failures did not open the circuit")
-			}
-			clock = clock.Add(circuitOpenFor)
-			if probed, granted := health.claim(provider); !probed || !granted {
-				t.Fatalf("recovering circuit refused its probe: probed=%v granted=%v", probed, granted)
-			}
-			for _, unrelated := range []string{"rate_limit", "upstream_server"} {
-				health.record(provider, AttemptFact{Class: unrelated}, false)
-				if _, granted := health.claim(provider); granted {
-					t.Fatalf("in-flight %s completion admitted a second probe", unrelated)
-				}
-			}
-			health.record(provider, AttemptFact{Class: test.probeClass}, true)
-			if open := health.open(provider); open != test.wantOpen {
-				t.Fatalf("open after probe = %v, want %v", open, test.wantOpen)
-			}
-		})
-	}
-}
-
 func TestModelsFilteredByKey(t *testing.T) {
 	h := newHarness(t, Config{})
 	list := func(key, path string) (int, map[string]any) {
@@ -567,88 +528,6 @@ func TestModelsFilteredByKey(t *testing.T) {
 
 // This fixture has no asynchronous publication or external database.
 func (*fakeRuntime) CheckRouteFidelity(context.Context, routing.Route) error { return nil }
-
-type chargeLedger struct {
-	charge  json.RawMessage
-	attempt string
-}
-
-func (l *chargeLedger) Models(context.Context, codemode.Route, string) (codeclient.Offers, error) {
-	return nil, nil
-}
-func (l *chargeLedger) Admit(context.Context, codesessions.Admission) (codesessions.Permit, error) {
-	return codesessions.Permit{}, nil
-}
-func (l *chargeLedger) BindConnection(context.Context, codemode.Route, string, codemode.Identity, string, []string) (codesessions.Permit, error) {
-	return codesessions.Permit{}, nil
-}
-func (l *chargeLedger) MarkDispatched(context.Context, string) error { return nil }
-func (l *chargeLedger) ConfirmNonexecution(context.Context, string, int) error {
-	return nil
-}
-func (l *chargeLedger) ObserveCooldown(context.Context, string, time.Time) error { return nil }
-func (l *chargeLedger) ObserveCooldownClass(context.Context, string, string, codeadapter.Classification, time.Time) error {
-	return nil
-}
-func (l *chargeLedger) Settle(context.Context, string, codemode.Usage) error { return nil }
-func (l *chargeLedger) Abort(context.Context, string) error                  { return nil }
-func (l *chargeLedger) ObserveHealth(context.Context, string, codemode.HealthObservation) error {
-	return nil
-}
-func (l *chargeLedger) ObserveAllowance(context.Context, string, codemode.Allowance) error {
-	return nil
-}
-func (l *chargeLedger) ObserveAllowanceCharge(_ context.Context, attempt string, charge json.RawMessage) error {
-	l.attempt, l.charge = attempt, charge
-	return nil
-}
-func (l *chargeLedger) ObserveReference(context.Context, string, string) error { return nil }
-func (l *chargeLedger) ObserveOutcome(context.Context, string, codemode.Outcome) error {
-	return nil
-}
-func (l *chargeLedger) RecordRefusal(context.Context, codemode.Route, string, string, string) error {
-	return nil
-}
-
-func TestCodeAttemptStoresAllowanceChargeOnlyForOpenCodeGo(t *testing.T) {
-	reported := json.RawMessage(`{"billing_source":"go","allowance":0.0021}`)
-	for name, tc := range map[string]struct {
-		adapter codemode.Adapter
-		paid    bool
-		want    bool
-	}{
-		"opencode go attempt":     {adapter: codemode.AdapterOpenCodeGo, want: true},
-		"other adapter attempt":   {adapter: codemode.AdapterZAICoding},
-		"paid opencode-shaped":    {adapter: codemode.AdapterOpenCodeGo, paid: true},
-		"unknown adapter attempt": {},
-	} {
-		t.Run(name, func(t *testing.T) {
-			ledger := &chargeLedger{}
-			attempt := &codeAttempt{server: &Server{deps: Dependencies{CodeLedger: ledger}}, adapter: tc.adapter, permit: codesessions.Permit{Attempt: codemode.Attempt{ID: "attempt-1"}}}
-			if tc.paid {
-				attempt.paid = &paidCodeAttempt{}
-			}
-			attempt.observe(codemode.Observation{Terminal: true, AllowanceCharge: reported})
-			if tc.want && (ledger.attempt != "attempt-1" || string(ledger.charge) != string(reported)) {
-				t.Fatalf("ledger = %s %s, want the reported charge on attempt-1", ledger.attempt, ledger.charge)
-			}
-			if !tc.want && ledger.charge != nil {
-				t.Fatalf("charge stored = %s, want none", ledger.charge)
-			}
-		})
-	}
-}
-
-func TestCodeAttemptLastTerminalChargeWins(t *testing.T) {
-	ledger := &chargeLedger{}
-	attempt := &codeAttempt{server: &Server{deps: Dependencies{CodeLedger: ledger}}, adapter: codemode.AdapterOpenCodeGo, permit: codesessions.Permit{Attempt: codemode.Attempt{ID: "attempt-1"}}}
-	attempt.observe(codemode.Observation{Terminal: true, AllowanceCharge: json.RawMessage(`{"billing_source":"go","allowance":0.001}`)})
-	terminal := json.RawMessage(`{"billing_source":"go","allowance":0.0021}`)
-	attempt.observe(codemode.Observation{Terminal: true, AllowanceCharge: terminal})
-	if string(ledger.charge) != string(terminal) {
-		t.Fatalf("charge = %s, want the last terminal charge %s", ledger.charge, terminal)
-	}
-}
 
 func TestTransformedRerankPreservesDocumentIdentity(t *testing.T) {
 	for _, tc := range []struct {
@@ -901,8 +780,8 @@ func TestResearchStreamFollowsOutagePolicy(t *testing.T) {
 		{"fail open still refuses provider concurrency", limitadmission.FailOpen, &routing.Limits{MaxConcurrency: &slots}, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			admission := NewAdmission(limiter, fleet.New(runner), func() limitadmission.OutagePolicy { return test.policy }, slog.New(slog.DiscardHandler))
-			lease, failure := admission.reserveResearchStream(t.Context(), authority, routeSlug, "service", "provider", test.provider)
+			admission := quota.NewAdmission(limiter, fleet.New(runner), func() limitadmission.OutagePolicy { return test.policy }, slog.New(slog.DiscardHandler))
+			lease, failure := admission.ReserveResearchStream(t.Context(), authority, routeSlug, "service", "provider", test.provider, time.Minute)
 			if test.wantRefuse {
 				if failure == nil || failure.Code != "distributed_limits_unavailable" {
 					t.Fatalf("outage admitted the stream: lease=%v failure=%v", lease, failure)

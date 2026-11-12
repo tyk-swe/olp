@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -123,7 +124,7 @@ func responseResourceKind(x *call) string {
 	return resources.KindResponse
 }
 
-func responseNativeIdentity(x *call, fact *AttemptFact, upstream string) resources.NativeIdentity {
+func responseNativeIdentity(x *call, fact *events.AttemptFact, upstream string) resources.NativeIdentity {
 	var credential *string
 	if fact.CredentialID != "" {
 		credential = &fact.CredentialID
@@ -148,7 +149,7 @@ func (s *Server) readResponseResource(ctx context.Context, owner, id string) (*r
 	}
 	return r, &contract, nil
 }
-func (s *Server) putStrictResponse(ctx context.Context, x *call, fact *AttemptFact, upstream, state string, metadata []byte, providerExpiry *time.Time) (*resources.Resource, error) {
+func (s *Server) putStrictResponse(ctx context.Context, x *call, fact *events.AttemptFact, upstream, state string, metadata []byte, providerExpiry *time.Time) (*resources.Resource, error) {
 	provider, ok := x.snapshot().FindProvider(fact.ProviderID)
 	if !ok {
 		return nil, resources.ErrContract

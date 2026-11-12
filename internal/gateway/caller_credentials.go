@@ -8,6 +8,7 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 )
 
 // Use net/http canonical spelling to avoid allocating during absent-header lookups.
@@ -76,19 +77,19 @@ func (x *call) bindCallerSecret(provider, model string) ([]byte, error) {
 	return c.secret, nil
 }
 
-func (x *call) checkCallerTarget(provider *routing.Provider, model string) *Error {
+func (x *call) checkCallerTarget(provider *routing.Provider, model string) *fault.Error {
 	if x.callerCostExempt() && provider.CredentialSource != "caller" {
-		return invalidRequest("caller_cost_policy_mismatch", "This retained target is incompatible with the caller-paid route policy.", nil)
+		return fault.InvalidRequest("caller_cost_policy_mismatch", "This retained target is incompatible with the caller-paid route policy.", nil)
 	}
 	if provider.CredentialSource != "caller" || x.origin == "probe" {
 		return nil
 	}
 	c := x.request.callerCredential
 	if c == nil || c.invalid || x.origin != "" {
-		return invalidRequest("provider_credential_required", "Provide one bounded X-OLP-Provider-Credential header for this connection.", nil)
+		return fault.InvalidRequest("provider_credential_required", "Provide one bounded X-OLP-Provider-Credential header for this connection.", nil)
 	}
 	if c.boundElsewhere(provider.ID + "\x00" + model) {
-		return invalidRequest("provider_credential_scope", "The caller credential cannot be reused for another target.", nil)
+		return fault.InvalidRequest("provider_credential_scope", "The caller credential cannot be reused for another target.", nil)
 	}
 	return nil
 }
