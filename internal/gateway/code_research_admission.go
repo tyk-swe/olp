@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -15,7 +16,7 @@ import (
 )
 
 type researchAttempt struct {
-	server               *Server
+	log                  *slog.Logger
 	account              codemode.Account
 	config               routing.Configuration
 	auth                 codemode.Authorization
@@ -31,7 +32,7 @@ func (s *Server) prepareResearch(r *http.Request, release *release.Release, rout
 	if err != nil {
 		return nil, err
 	}
-	a := &researchAttempt{server: s, account: account}
+	a := &researchAttempt{log: s.log, account: account}
 	prepared := false
 	defer func() {
 		if !prepared {
@@ -163,7 +164,7 @@ func researchBinding(key string, route codemode.Route, service string, account c
 func (a *researchAttempt) finish(ctx context.Context) {
 	// Research consumes requests and concurrency, without inference token usage.
 	zero := int64(0)
-	settleKey(ctx, a.lease, a.dispatched, &zero, a.server.log)
-	settleKey(ctx, a.providerLease, a.dispatched, &zero, a.server.log)
-	settleKey(ctx, a.streamLease, a.dispatched, &zero, a.server.log)
+	settleKey(ctx, a.lease, a.dispatched, &zero, a.log)
+	settleKey(ctx, a.providerLease, a.dispatched, &zero, a.log)
+	settleKey(ctx, a.streamLease, a.dispatched, &zero, a.log)
 }

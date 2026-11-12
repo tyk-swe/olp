@@ -5,12 +5,13 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/routeidentity"
 )
 
 type CacheManagement struct {
-	Access  *access.Server
-	Gateway *Server
+	Access *access.Server
+	Cache  *cache.Store
 }
 
 func (s *CacheManagement) Register(mux *http.ServeMux) {
@@ -28,7 +29,7 @@ func (s *CacheManagement) purge(r *http.Request, _ access.Principal) (access.Rep
 	if (in.RouteID == nil) == (in.ProjectID == nil) {
 		return access.Reply{}, access.Invalid("scope", "Supply exactly one route_id or project_id.")
 	}
-	if s.Gateway == nil || s.Gateway.deps.Cache == nil {
+	if s.Cache == nil {
 		return access.Reply{}, access.Fail(503, "cache_unavailable", "The response cache is unavailable.")
 	}
 	tx, p, err := s.Access.BeginMutation(r)
@@ -61,7 +62,7 @@ func (s *CacheManagement) purge(r *http.Request, _ access.Principal) (access.Rep
 	if err = p.Project(project, access.Change); err != nil {
 		return access.Reply{}, err
 	}
-	if err = s.Gateway.deps.Cache.Purge(r.Context(), kind, *id); err != nil {
+	if err = s.Cache.Purge(r.Context(), kind, *id); err != nil {
 		return access.Reply{}, access.Fail(503, "cache_unavailable", "The response cache is unavailable.")
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "cache.purge", kind, *id, "success"); err != nil {
@@ -97,6 +98,5 @@ func (s *CacheManagement) statistics(r *http.Request, p access.Principal) (acces
 	if err = rows.Err(); err != nil {
 		return access.Reply{}, err
 	}
-	configured := s.Gateway != nil && s.Gateway.deps.Cache != nil
-	return access.OK(map[string]any{"configured": configured, "requests": requests, "hits": hits, "misses": misses, "bypasses": bypasses, "avoided_costs": costs}), nil
+	return access.OK(map[string]any{"configured": s.Cache != nil, "requests": requests, "hits": hits, "misses": misses, "bypasses": bypasses, "avoided_costs": costs}), nil
 }

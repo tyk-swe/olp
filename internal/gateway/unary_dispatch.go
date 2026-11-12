@@ -88,7 +88,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 	if s.cfg.MaxResponseBytes > 0 {
 		cap = min(cap, int(s.cfg.MaxResponseBytes))
 	}
-	exchange := &unaryExchange{server: s, ctx: actx, x: x, state: state, plan: plan, client: client, bound: bound, fact: &fact, bodyCap: cap, inject: trace.InjectUpstream}
+	exchange := &unaryExchange{now: s.now, dispatched: s.markSessionDispatched, ctx: actx, x: x, state: state, plan: plan, client: client, bound: bound, fact: &fact, bodyCap: cap, inject: trace.InjectUpstream}
 	raw, failure := exchange.run(plan.Method(), submit, plan.WireBody())
 	if failure != nil {
 		return fail(failure.class, failure.failure)

@@ -10,13 +10,9 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/usage/delivery"
 
-	"github.com/google/uuid"
-
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
-
-var uuidNewV7 = uuid.NewV7
 
 // AccountingSink hands every terminal request to the usage pipeline as the
 // content-free event the accounting tables are built from. Emitting is a

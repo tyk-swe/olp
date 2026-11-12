@@ -89,13 +89,9 @@ func (s *Server) bedrockDuplexDial(ctx context.Context, x *call, p *pin) (duplex
 	if _, err := s.egress.ValidateEndpoint(endpoint); err != nil {
 		return finish(classConnect, serverError(http.StatusBadGateway, "upstream_error", "The Bedrock provider address is not permitted."))
 	}
-	opener := s.bedrockStream
-	if opener == nil {
-		opener = s.openBedrockStream
-	}
 	dialCtx, cancel := context.WithCancel(ctx)
 	dialTimer := time.AfterFunc(p.attempt.Timeout, cancel)
-	peer, err := opener(dialCtx, x, p)
+	peer, err := s.openBedrockStream(dialCtx, x, p)
 	dialTimer.Stop()
 	if err != nil {
 		cancel()

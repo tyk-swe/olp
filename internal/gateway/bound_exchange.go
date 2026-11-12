@@ -9,12 +9,15 @@ import (
 	"net/url"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
 type boundExchange struct {
-	server  *Server
+	egress  *egress.Policy
+	auth    *connectors.Auth
+	plugins connectors.Carrier
 	call    *call
 	config  connectors.Config
 	target  providerinvoke.Binding
@@ -23,11 +26,11 @@ type boundExchange struct {
 }
 
 func (s *Server) bindExchange(x *call, provider *routing.Provider, slot routing.Slot, model string, config connectors.Config, state *attemptState) *boundExchange {
-	return &boundExchange{server: s, call: x, config: config, target: s.targetBinding(x, provider, slot, model), state: state}
+	return &boundExchange{egress: s.egress, auth: s.auth, plugins: s.cfg.Carrier, call: x, config: config, target: s.targetBinding(x, provider, slot, model), state: state}
 }
 
 func (e *boundExchange) validateBaseEndpoint(endpoint string) error {
-	_, err := e.server.egress.ValidateEndpoint(endpoint)
+	_, err := e.egress.ValidateEndpoint(endpoint)
 	return err
 }
 
@@ -62,7 +65,7 @@ func (e *boundExchange) authenticate(ctx context.Context, request *http.Request,
 	if err != nil {
 		return err
 	}
-	applied, err := e.server.auth.Apply(ctx, request, e.config, credential.Secret, body)
+	applied, err := e.auth.Apply(ctx, request, e.config, credential.Secret, body)
 	e.call.sensitive.Include(applied)
 	return err
 }
@@ -74,7 +77,7 @@ func (e *boundExchange) client(ctx context.Context) (*http.Client, error) {
 func (e *boundExchange) dispatchClient(ctx context.Context) (*http.Client, error) {
 	if e.config.CarriedByPlugin() {
 		e.carrier = true
-		return e.config.CarrierClient(e.server.cfg.Carrier, e.call.sensitive.Values()), nil
+		return e.config.CarrierClient(e.plugins, e.call.sensitive.Values()), nil
 	}
 	return e.target.Client(ctx)
 }
