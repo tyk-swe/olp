@@ -15,7 +15,7 @@ const webhookURLLimit = 2048
 type chatRenderer func(message) any
 
 func (render chatRenderer) parse(policy *egress.Policy, d destination) (endpoint[credentialFields], error) {
-	if err := onlyFields(d.Configuration); err != nil {
+	if _, err := decodeKnownFields[struct{}](d.Configuration); err != nil {
 		return nil, err
 	}
 	origin, err := policy.ValidateEndpoint(d.URL)

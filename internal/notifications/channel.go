@@ -34,7 +34,7 @@ const (
 type destination struct {
 	Type          contract.NotificationDestinationType
 	URL           string
-	Configuration map[string]json.RawMessage
+	Configuration json.RawMessage
 }
 
 var errMalformedCredential = errors.New("credential must be a JSON object")
@@ -182,25 +182,10 @@ func headerSafe(s string, max int) bool {
 	return len(s) <= max && !strings.ContainsAny(s, "\r\n\x00")
 }
 
-func textField(fields map[string]json.RawMessage, name string, max int) (string, error) {
-	raw, present := fields[name]
-	if !present {
-		return "", nil
-	}
-	var value string
-	if err := json.Unmarshal(raw, &value); err != nil || !headerSafe(value, max) {
-		return "", fmt.Errorf("%s must be a single-line string of at most %d bytes", name, max)
-	}
-	return value, nil
-}
-
 func requiredTextField(fields map[string]json.RawMessage, name string, max int) (string, error) {
-	value, err := textField(fields, name, max)
-	if err != nil {
-		return "", err
-	}
-	if value == "" {
-		return "", fmt.Errorf("%s is required", name)
+	var value string
+	if err := json.Unmarshal(fields[name], &value); err != nil || value == "" || !headerSafe(value, max) {
+		return "", fmt.Errorf("%s must be a non-empty single-line string of at most %d bytes", name, max)
 	}
 	return value, nil
 }

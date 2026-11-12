@@ -67,36 +67,41 @@ func smtpTarget(raw string) (*url.URL, error) {
 	return u, nil
 }
 
-func emailConfig(fields map[string]json.RawMessage) (emailConfiguration, error) {
-	if err := onlyFields(fields, "from", "to", "subject_prefix", "ca_certificate"); err != nil {
-		return emailConfiguration{}, err
-	}
-	sender, err := requiredTextField(fields, "from", addressLimit)
+type emailFields struct {
+	From          string   `json:"from"`
+	To            []string `json:"to"`
+	SubjectPrefix string   `json:"subject_prefix"`
+	CACertificate string   `json:"ca_certificate"`
+}
+
+func emailConfig(raw json.RawMessage) (emailConfiguration, error) {
+	fields, err := decodeKnownFields[emailFields](raw)
 	if err != nil {
 		return emailConfiguration{}, err
 	}
-	from, err := mail.ParseAddress(sender)
+	if fields.From == "" || !headerSafe(fields.From, addressLimit) {
+		return emailConfiguration{}, errors.New("from is missing or invalid")
+	}
+	from, err := mail.ParseAddress(fields.From)
 	if err != nil {
 		return emailConfiguration{}, errors.New("from is not a valid address")
 	}
-	to, err := emailRecipients(fields["to"])
+	to, err := emailRecipients(fields.To)
 	if err != nil {
 		return emailConfiguration{}, err
 	}
-	subjectPrefix, err := textField(fields, "subject_prefix", subjectPrefixLimit)
+	if !headerSafe(fields.SubjectPrefix, subjectPrefixLimit) {
+		return emailConfiguration{}, errors.New("subject_prefix is invalid")
+	}
+	roots, err := emailRoots(fields.CACertificate)
 	if err != nil {
 		return emailConfiguration{}, err
 	}
-	roots, err := emailRoots(fields)
-	if err != nil {
-		return emailConfiguration{}, err
-	}
-	return emailConfiguration{from: from, to: to, subjectPrefix: subjectPrefix, roots: roots}, nil
+	return emailConfiguration{from: from, to: to, subjectPrefix: fields.SubjectPrefix, roots: roots}, nil
 }
 
-func emailRecipients(raw json.RawMessage) ([]*mail.Address, error) {
-	var recipients []string
-	if err := json.Unmarshal(raw, &recipients); err != nil || len(recipients) < 1 || len(recipients) > recipientLimit {
+func emailRecipients(recipients []string) ([]*mail.Address, error) {
+	if len(recipients) < 1 || len(recipients) > recipientLimit {
 		return nil, errors.New("to requires from 1 to 50 addresses")
 	}
 	to := make([]*mail.Address, 0, len(recipients))
@@ -113,11 +118,7 @@ func emailRecipients(raw json.RawMessage) ([]*mail.Address, error) {
 	return to, nil
 }
 
-func emailRoots(fields map[string]json.RawMessage) (*x509.CertPool, error) {
-	var certificate string
-	if raw, present := fields["ca_certificate"]; present && json.Unmarshal(raw, &certificate) != nil {
-		return nil, errors.New("ca_certificate must be a PEM string")
-	}
+func emailRoots(certificate string) (*x509.CertPool, error) {
 	if certificate == "" {
 		return nil, nil
 	}

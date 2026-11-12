@@ -28,11 +28,11 @@ func loopbackPolicy() egress.Policy {
 
 func openDestination(typ contract.NotificationDestinationType, rawURL, configuration, secret string) error {
 	policy := loopbackPolicy()
-	fields, err := decodeObject(json.RawMessage(configuration))
+	stored, err := configurationObject(json.RawMessage(configuration))
 	if err != nil {
 		return err
 	}
-	if _, err := kindOf(typ).open(&policy, destination{Type: typ, URL: rawURL, Configuration: fields}, []byte(secret)); err != nil {
+	if _, err := kindOf(typ).open(&policy, destination{Type: typ, URL: rawURL, Configuration: stored}, []byte(secret)); err != nil {
 		return err
 	}
 	return nil
@@ -45,7 +45,7 @@ func sendDestination(ctx context.Context, t *testing.T, typ contract.Notificatio
 	if err != nil {
 		t.Fatal(err)
 	}
-	return sendErrorCode(NewSender(loopbackPolicy()).send(ctx, destination{Type: typ, URL: rawURL}, []byte(secret), m))
+	return sendErrorCode(NewSender(loopbackPolicy()).send(ctx, destination{Type: typ, URL: rawURL, Configuration: json.RawMessage(`{}`)}, []byte(secret), m))
 }
 
 type openCase struct {
@@ -164,6 +164,8 @@ func TestOpenEmailDestination(t *testing.T) {
 		{name: "starttls with credentials", url: "smtp+starttls://smtp.example.com:587", configuration: `{"from":"olp@example.com","to":["ops@example.com","oncall@example.com"],"subject_prefix":"[OLP]"}`, secret: credentials, ok: true},
 		{name: "empty credentials object", url: target, configuration: valid, secret: `{}`, ok: true},
 		{name: "allowed loopback host", url: "smtps://127.0.0.1:465", configuration: valid, ok: true},
+		{name: "null optional fields", url: target, configuration: `{"from":"olp@example.com","to":["ops@example.com"],"subject_prefix":null,"ca_certificate":null}`, ok: true},
+		{name: "configuration key case", url: target, configuration: `{"From":"olp@example.com","TO":["ops@example.com"],"Subject_Prefix":"[OLP]"}`, ok: true},
 		{name: "plain smtp", url: "smtp://smtp.example.com:25", configuration: valid},
 		{name: "https scheme", url: "https://smtp.example.com:465", configuration: valid},
 		{name: "missing port", url: "smtps://smtp.example.com", configuration: valid},

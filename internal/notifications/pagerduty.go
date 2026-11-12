@@ -12,7 +12,7 @@ import (
 const routingKeyLimit = 512
 
 func parsePagerDuty(policy *egress.Policy, d destination) (endpoint[credentialFields], error) {
-	if err := onlyFields(d.Configuration); err != nil {
+	if _, err := decodeKnownFields[struct{}](d.Configuration); err != nil {
 		return nil, err
 	}
 	if _, err := policy.ValidateEndpoint(d.URL); err != nil {

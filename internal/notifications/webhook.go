@@ -8,7 +8,7 @@ import (
 )
 
 func parseWebhook(policy *egress.Policy, d destination) (endpoint[signingKey], error) {
-	if err := onlyFields(d.Configuration); err != nil {
+	if _, err := decodeKnownFields[struct{}](d.Configuration); err != nil {
 		return nil, err
 	}
 	target, err := policy.ValidateEndpoint(d.URL)

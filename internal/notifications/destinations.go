@@ -29,7 +29,7 @@ type storedDestination struct {
 	Name             string                               `json:"name"`
 	URL              string                               `json:"url"`
 	Type             contract.NotificationDestinationType `json:"type"`
-	Configuration    map[string]json.RawMessage           `json:"configuration"`
+	Configuration    json.RawMessage                      `json:"configuration"`
 	Enabled          bool                                 `json:"enabled"`
 	SecretConfigured bool                                 `json:"secret_configured"`
 }
@@ -76,15 +76,17 @@ func destinationSecret(typ contract.NotificationDestinationType, raw json.RawMes
 	return newSecret{raw}, nil
 }
 
-func configurationObject(raw json.RawMessage) (map[string]json.RawMessage, error) {
+func configurationObject(raw json.RawMessage) (json.RawMessage, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return json.RawMessage(`{}`), nil
+	}
 	if len(raw) > configurationLimit {
 		return nil, access.Invalid("configuration", "Use a configuration object of at most 4096 bytes.")
 	}
-	fields, err := decodeObject(raw)
-	if err != nil {
+	if _, err := decodeObject(raw); err != nil {
 		return nil, access.Invalid("configuration", "Use a configuration object.")
 	}
-	return fields, nil
+	return raw, nil
 }
 
 func parseDestination(input destinationInput) (destinationTarget, error) {
@@ -238,7 +240,7 @@ func sameType(raw json.RawMessage, current contract.NotificationDestinationType)
 	return json.Unmarshal(raw, &typ) == nil && typ == current
 }
 
-func patchedConfiguration(patch, stored map[string]json.RawMessage) (map[string]json.RawMessage, error) {
+func patchedConfiguration(patch map[string]json.RawMessage, stored json.RawMessage) (json.RawMessage, error) {
 	raw, present := patch["configuration"]
 	if !present {
 		return stored, nil

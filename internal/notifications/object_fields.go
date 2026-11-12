@@ -1,6 +1,7 @@
 package notifications
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,14 @@ func decodeObject(raw json.RawMessage) (map[string]json.RawMessage, error) {
 		return nil, errors.New("must be a JSON object")
 	}
 	return fields, nil
+}
+
+func decodeKnownFields[T any](raw json.RawMessage) (T, error) {
+	var value T
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	err := decoder.Decode(&value)
+	return value, err
 }
 
 func onlyFields(fields map[string]json.RawMessage, allowed ...string) error {
