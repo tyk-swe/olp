@@ -94,8 +94,10 @@
     try {
       if (command.kind === 'update') {
         const keyName = command.key.name;
-        await updateApiKey(command.key, command.input);
+        const result = await updateApiKey(command.key, command.input);
         if (!isCurrent()) return false;
+        if (editing?.id === command.key.id)
+          editing = { ...editing, etag: result.etag };
         notify(
           services.gatewayAvailable
             ? `Saved ${keyName}. Gateways pick up the change within a few seconds.`
@@ -165,7 +167,7 @@
 
 {#if keyId && loaded.isPending}
   <div class="loading-state" role="status">Loading API key…</div>
-{:else if keyId && loaded.isError}
+{:else if keyId && loaded.isError && !loaded.data}
   <Callout tone="danger" title="API key didn’t load">
     {errorMessage(loaded.error)}
     {#snippet actions()}<a
@@ -182,7 +184,7 @@
     canManage={canChangeForm}
     onSubmit={submit}
     onSaved={() => {
-      if (keyId) void goto(resolve('keys'));
+      if (keyId && !submitError) void goto(resolve('keys'));
     }}
     onCancel={cancelEdit}
     onClearError={() => (submitError = '')}

@@ -71,6 +71,91 @@ test('a new API key serves the published route and its usage is reported', async
     await page.screenshot({ path: testInfo.outputPath('saved-key.png') });
   }
   await page.goto(`/keys/${keyID}`);
+  await page
+    .getByRole('textbox', { name: 'Key name' })
+    .fill(`${name}-submitted`);
+  let releaseSave!: () => void;
+  const release = new Promise<void>((resolve) => {
+    releaseSave = resolve;
+  });
+  await page.route(`**/api/v1/api-keys/${keyID}`, async (request) => {
+    if (request.request().method() === 'PATCH') {
+      const response = await request.fetch();
+      await release;
+      await request.fulfill({ response });
+    } else {
+      await request.continue();
+    }
+  });
+  const pending = page.waitForRequest(
+    (request) =>
+      request.url().endsWith(`/api/v1/api-keys/${keyID}`) &&
+      request.method() === 'PATCH'
+  );
+  const committed = page.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/api/v1/api-keys/${keyID}`) &&
+      response.request().method() === 'PATCH'
+  );
+  await page
+    .getByRole('button', { name: 'Save and publish', exact: true })
+    .click();
+  await pending;
+  await page
+    .getByRole('textbox', { name: 'Key name' })
+    .fill(`${name}-newer-edit`);
+  releaseSave();
+  expect((await committed).status()).toBe(200);
+  await expect(
+    page.getByRole('button', { name: 'Save and publish', exact: true })
+  ).toBeEnabled();
+  await expect(page.getByRole('textbox', { name: 'Key name' })).toHaveValue(
+    `${name}-newer-edit`
+  );
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  expect(confirmations).toHaveLength(1);
+  await expect(page).toHaveURL(new RegExp(`/keys/${keyID}$`));
+  await page.unroute(`**/api/v1/api-keys/${keyID}`);
+  const savedNewer = page.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/api/v1/api-keys/${keyID}`) &&
+      response.request().method() === 'PATCH'
+  );
+  await page
+    .getByRole('button', { name: 'Save and publish', exact: true })
+    .click();
+  expect((await savedNewer).status()).toBe(200);
+  await expect(page).toHaveURL(/\/keys$/);
+  expect(confirmations).toHaveLength(1);
+
+  await page.goto(`/keys/${keyID}`);
+  await page
+    .getByRole('textbox', { name: 'Key name' })
+    .fill(`${name}-refresh-failed`);
+  await page.route(`**/api/v1/api-keys/${keyID}`, async (request) => {
+    if (request.request().method() === 'GET') {
+      await request.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: '{"error":{"code":"unavailable","message":"Try again"}}'
+      });
+    } else {
+      await request.continue();
+    }
+  });
+  await page
+    .getByRole('button', { name: 'Save and publish', exact: true })
+    .click();
+  await expect(page.getByRole('alert')).toContainText(
+    'API key saved, but refreshing failed.'
+  );
+  await expect(page).toHaveURL(new RegExp(`/keys/${keyID}$`));
+  await page.unroute(`**/api/v1/api-keys/${keyID}`);
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(page).toHaveURL(/\/keys$/);
+  expect(confirmations).toHaveLength(1);
+
+  await page.goto(`/keys/${keyID}`);
   await page.getByRole('textbox', { name: 'Key name' }).fill(`${name}-unsaved`);
   await page.route(`**/api/v1/api-keys/${keyID}`, async (request) => {
     if (request.request().method() === 'PATCH') {
@@ -92,7 +177,7 @@ test('a new API key serves the published route and its usage is reported', async
     .getByRole('button', { name: 'Save and publish', exact: true })
     .click();
   expect((await failed).status()).toBe(503);
-  await page.getByRole('link', { name: 'All API keys', exact: true }).click();
-  expect(confirmations).toHaveLength(1);
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  expect(confirmations).toHaveLength(2);
   await expect(page).toHaveURL(new RegExp(`/keys/${keyID}$`));
 });
