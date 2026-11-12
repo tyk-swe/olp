@@ -26,7 +26,9 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -1130,6 +1132,99 @@ func TestStrictPreparationKeepsTargetsAndSourcesSeparate(t *testing.T) {
 				if !bytes.Contains(preparedBody, []byte(text)) {
 					t.Fatalf("prepared request does not contain current input %q: %s", text, preparedBody)
 				}
+			}
+		})
+	}
+}
+
+func TestRealtimeCallAdmissionHonorsRequestedPriority(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct{ name, defaultPriority, header, expected string }{
+		{"caller critical", "normal", `{"priority":"critical"}`, "critical"},
+		{"key critical", "critical", "", "critical"},
+		{"normal", "normal", "", "normal"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pool := admission.NewPool(1).Queue(2, 2*time.Second)
+			management := admission.NewPool(1)
+			outer := &admission.Public{Inference: pool, Management: management, InferenceEnabled: true, Reject: func(w http.ResponseWriter, _ *http.Request, _ string) { w.WriteHeader(503) }}
+			h := newHarnessWrapped(t, Config{}, outer.Wrap)
+			critical := "critical"
+			authority := h.rt.keys[fullKey]
+			authority.Policy.MaxPriority = &critical
+			authority.Policy.Priority = &test.defaultPriority
+			h.rt.keys[fullKey] = authority
+			registry := prometheus.NewRegistry()
+			registry.MustRegister(admission.Metrics(pool, management))
+			depth := func() map[string]float64 {
+				families, e := registry.Gather()
+				if e != nil {
+					t.Fatal(e)
+				}
+				out := map[string]float64{}
+				for _, f := range families {
+					if f.GetName() != "olp_admission_queue_depth" {
+						continue
+					}
+					for _, m := range f.Metric {
+						for _, label := range m.Label {
+							if label.GetName() == "class" {
+								out[label.GetValue()] = m.GetGauge().GetValue()
+							}
+						}
+					}
+				}
+				return out
+			}
+			holder := pool.Enter()
+			defer holder.Release()
+			req, e := http.NewRequest("POST", h.server.URL+"/v1/realtime/calls?model="+routeSlug, strings.NewReader("v=0\r\n"))
+			if e != nil {
+				t.Fatal(e)
+			}
+			req.Header.Set("Authorization", "Bearer "+fullKey)
+			req.Header.Set("Content-Type", "application/sdp")
+			if test.header != "" {
+				req.Header.Set("X-OLP-Routing", test.header)
+			}
+			_, resolved, controlErr := routingControls(req, authority.Policy)
+			if controlErr != nil || resolved != test.expected {
+				t.Fatalf("fixture priority=%s err=%v", resolved, controlErr)
+			}
+			done := make(chan error, 1)
+			go func() {
+				r, e := h.server.Client().Do(req)
+				if e == nil {
+					io.Copy(io.Discard, r.Body)
+					r.Body.Close()
+				}
+				done <- e
+			}()
+			var observed map[string]float64
+			deadline := time.Now().Add(time.Second)
+			for time.Now().Before(deadline) {
+				observed = depth()
+				if observed["normal"]+observed["critical"] > 0 {
+					break
+				}
+				time.Sleep(time.Millisecond)
+			}
+			holder.Release()
+			if e := <-done; e != nil {
+				t.Fatal(e)
+			}
+			t.Logf("priority=%s queued depths=%v", test.expected, observed)
+			if pool.Admitted() != 0 {
+				t.Fatalf("admission permit leaked: %d", pool.Admitted())
+			}
+			h.mock.mu.Lock()
+			calls := len(h.mock.calls)
+			h.mock.mu.Unlock()
+			if calls != 0 {
+				t.Fatal("unexpected provider dispatch")
+			}
+			if observed[test.expected] != 1 {
+				t.Fatalf("request entered wrong admission class: %v", observed)
 			}
 		})
 	}
