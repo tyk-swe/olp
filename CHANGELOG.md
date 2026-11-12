@@ -33,6 +33,11 @@ semantic versioning and take their source from root `package.json`. The
   backed had already gone stale, so activation failed with
   `slot_validation_required`.
 
+- Creating a provider network credential with a `credential_reference` member
+  now fails with `invalid_json`, as the contract declares. Before, the request
+  succeeded and the reference was silently dropped, so the stored credential
+  was only the pasted value.
+
 - Planning an unchanged configuration export no longer replaces a provider
   whose billing import has an AWS, Azure or Google scope.
 

@@ -53,8 +53,12 @@ func (s *Server) networkCredentials(r *http.Request, principal access.Principal)
 	return access.ListReply(items, page), nil
 }
 
+type networkCredentialRequest struct {
+	Credential string `json:"credential"`
+}
+
 func (s *Server) createNetworkCredential(r *http.Request, _ access.Principal) (access.Reply, error) {
-	var input rotateRequest
+	var input networkCredentialRequest
 	if err := access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
 	}

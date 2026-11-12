@@ -144,6 +144,9 @@ func TestProviderLifecycleJourney(t *testing.T) {
 		detail := s.want(owner, "GET", path, nil, nil, http.StatusOK)
 		created := s.want(owner, "POST", path+"/network-credentials", map[string]any{"credential": `{"proxy_username":"proxy","proxy_password":"secret"}`}, idempotent(etag(detail)), http.StatusCreated)
 		id := text(created, "credential_id")
+		reference := map[string]any{"store": "vault", "secret_id": "proxy", "version": "1"}
+		detail = s.want(owner, "GET", path, nil, nil, http.StatusOK)
+		s.want(owner, "POST", path+"/network-credentials", map[string]any{"credential": `{"proxy_username":"other","proxy_password":"secret"}`, "credential_reference": reference}, idempotent(etag(detail)), http.StatusBadRequest)
 		listed := items(s.want(owner, "GET", path+"/network-credentials", nil, nil, http.StatusOK)["items"])
 		if len(listed) != 1 || listed[0]["id"] != id || listed[0]["version"] != 1.0 || listed[0]["revoked_at"] != nil {
 			t.Fatalf("network credentials = %v, want version 1 of %s unrevoked", listed, id)
