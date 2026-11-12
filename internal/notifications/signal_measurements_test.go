@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -100,5 +101,78 @@ func TestProjectScopedLatencyKeepsRuleProject(t *testing.T) {
 	signal := latencySignal(rule, reports.RouteLatencyObservation{Route: "route", Samples: 20})
 	if signal.evidence["project_id"] != &project {
 		t.Fatal("global route measurement lost its project-scoped rule boundary")
+	}
+}
+
+type signalStep struct {
+	at                         time.Duration
+	value                      string
+	active, trigger, recovered bool
+	incident                   int64
+}
+
+func TestMeasuredSignalHysteresisAndCooldown(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		event contract.NotificationEvent
+		steps []signalStep
+	}{
+		{contract.NotificationEventProviderErrorRate, []signalStep{
+			{at: 0, value: "0.09"},
+			{at: time.Minute, value: "0.1", active: true, trigger: true, incident: 1},
+			{at: 2 * time.Minute, value: "0.06", active: true, incident: 1},
+			{at: 3 * time.Minute, value: "0.4", active: true, incident: 1},
+			{at: 16 * time.Minute, value: "0.4", active: true, trigger: true, incident: 1},
+			{at: 17 * time.Minute, value: "0.05", recovered: true, incident: 1},
+			{at: 18 * time.Minute, value: "0.07", incident: 1},
+			{at: 40 * time.Minute, value: "0.2", active: true, trigger: true, incident: 2},
+		}},
+		{contract.NotificationEventProviderCredentialFailing, []signalStep{
+			{at: 0, value: "2"},
+			{at: time.Minute, value: "3", active: true, trigger: true, incident: 1},
+			{at: 2 * time.Minute, value: "1", active: true, incident: 1},
+			{at: 3 * time.Minute, value: "0", recovered: true, incident: 1},
+		}},
+		{contract.NotificationEventRouteLatency, []signalStep{
+			{at: 0, value: "999.9"},
+			{at: time.Minute, value: "1000", active: true, trigger: true, incident: 1},
+			{at: 2 * time.Minute, value: "800.1", active: true, incident: 1},
+			{at: 3 * time.Minute, value: "800", recovered: true, incident: 1},
+			{at: 4 * time.Minute, value: "900", incident: 1},
+		}},
+	} {
+		t.Run(string(test.event), func(t *testing.T) {
+			t.Parallel()
+			configuration := defaults(t, test.event)
+			start := time.Date(2026, time.March, 1, 12, 0, 0, 0, time.UTC)
+			active, incident, lastTriggerAt := false, int64(0), (*time.Time)(nil)
+			for _, step := range test.steps {
+				desired, err := configuration.breached(step.value, active)
+				if err != nil {
+					t.Fatal(err)
+				}
+				next, err := transitionSignal(active, incident, lastTriggerAt, desired, start.Add(step.at), time.Duration(configuration.CooldownSeconds)*time.Second)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if next.active != step.active || next.trigger != step.trigger || next.recover != step.recovered || next.incident != step.incident {
+					t.Fatalf("at %s value %s: got active %t trigger %t recover %t incident %d, want %+v",
+						step.at, step.value, next.active, next.trigger, next.recover, next.incident, step)
+				}
+				active, incident, lastTriggerAt = next.active, next.incident, next.lastTriggerAt
+			}
+		})
+	}
+}
+
+func TestSignalMeasurementRejectsInvalidValues(t *testing.T) {
+	t.Parallel()
+	configuration := defaults(t, contract.NotificationEventRouteLatency)
+	for _, value := range []string{"", "-1", "fast", "1e400"} {
+		for _, active := range []bool{false, true} {
+			if _, err := configuration.breached(value, active); err == nil {
+				t.Errorf("breached(%q, %t) accepted an invalid measurement", value, active)
+			}
+		}
 	}
 }
