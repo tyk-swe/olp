@@ -97,7 +97,13 @@
         const result = await updateApiKey(command.key, command.input);
         if (!isCurrent()) return false;
         if (editing?.id === command.key.id)
-          editing = { ...editing, etag: result.etag };
+          editing = {
+            ...editing,
+            etag: result.etag,
+            ...(command.input.expires_at !== undefined
+              ? { expires_at: command.input.expires_at }
+              : {})
+          };
         notify(
           services.gatewayAvailable
             ? `Saved ${keyName}. Gateways pick up the change within a few seconds.`

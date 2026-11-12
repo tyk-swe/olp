@@ -7,8 +7,11 @@ test('a new API key serves the published route and its usage is reported', async
   vendor
 }, testInfo) => {
   const name = 'browser-key';
+  const expiryA = '2099-01-01T12:00';
+  const expiryB = '2099-02-01T12:00';
   await page.goto('/keys/new');
   await page.getByRole('textbox', { name: 'Key name' }).fill(name);
+  await page.getByLabel('Expires at (optional)', { exact: true }).fill(expiryA);
   await page.getByRole('button', { name: 'Create and show key' }).click();
   const issued = page.getByRole('dialog', { name: 'Copy this secret now.' });
   const secret = (await issued.locator('code').first().innerText()).trim();
@@ -74,6 +77,7 @@ test('a new API key serves the published route and its usage is reported', async
   await page
     .getByRole('textbox', { name: 'Key name' })
     .fill(`${name}-submitted`);
+  await page.getByLabel('Expires at (optional)', { exact: true }).fill(expiryB);
   let releaseSave!: () => void;
   const release = new Promise<void>((resolve) => {
     releaseSave = resolve;
@@ -104,6 +108,7 @@ test('a new API key serves the published route and its usage is reported', async
   await page
     .getByRole('textbox', { name: 'Key name' })
     .fill(`${name}-newer-edit`);
+  await page.getByLabel('Expires at (optional)', { exact: true }).fill(expiryA);
   releaseSave();
   expect((await committed).status()).toBe(200);
   await expect(
@@ -125,6 +130,9 @@ test('a new API key serves the published route and its usage is reported', async
     .getByRole('button', { name: 'Save and publish', exact: true })
     .click();
   expect((await savedNewer).status()).toBe(200);
+  const acknowledged = await page.request.get(`/api/v1/api-keys/${keyID}`);
+  expect(acknowledged.status()).toBe(200);
+  expect((await acknowledged.json()).expires_at).toBe(`${expiryA}:00Z`);
   await expect(page).toHaveURL(/\/keys$/);
   expect(confirmations).toHaveLength(1);
 
