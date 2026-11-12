@@ -451,7 +451,7 @@ func (s *Server) listBatches(w http.ResponseWriter, r *http.Request) {
 	// authorized or projected.
 	rows, err := s.deps.Resources.ListKinds(r.Context(), kinds, authority.ID, limit+1, after)
 	if err != nil {
-		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The batch list could not be read."), x.family)
+		s.stateFail(x, w, resourceListError(err, "The batch list could not be read."), x.family)
 		return
 	}
 	hasMore := len(rows) > limit

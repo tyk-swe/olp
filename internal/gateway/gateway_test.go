@@ -26,6 +26,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codeclient"
@@ -1220,5 +1221,52 @@ func TestRetainedResponseStreamClassifiesDeadlineAndProtocolFailures(t *testing.
 				t.Fatalf("route deadline did not expire: %v", ctx.Err())
 			}
 		})
+	}
+}
+
+func TestResourceListsRejectInvalidCursor(t *testing.T) {
+	t.Parallel()
+	pool, err := pgxpool.New(t.Context(), "postgres://unused@127.0.0.1:1/unused")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.Close()
+	spool, err := staging.NewSpool(t.TempDir(), staging.MinCapacityBytes, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = spool.Close() })
+	h := newHarness(t, Config{}, Dependencies{Resources: resources.New(pool), Staging: spool})
+	for _, list := range []struct{ kind, other, path string }{
+		{"batch", "file", "/v1/batches"},
+		{"file", "batch", "/v1/files"},
+	} {
+		for _, tc := range []struct {
+			name, cursor string
+			status       int
+			code, param  string
+		}{
+			{"missing separator", "not-an-id", 400, "invalid_value", "after"},
+			{"malformed UUID", list.kind + "_not-a-uuid", 400, "invalid_value", "after"},
+			{"wrong kind", resources.LocalID(list.other, uuid.New()), 400, "invalid_value", "after"},
+			{"database failure", resources.LocalID(list.kind, uuid.New()), 500, "internal_error", ""},
+		} {
+			t.Run(list.kind+"/"+tc.name, func(t *testing.T) {
+				response := h.do(t.Context(), http.MethodGet, list.path+"?after="+tc.cursor, fullKey, nil, nil)
+				defer response.Body.Close()
+				var body struct {
+					Error struct {
+						Code  string `json:"code"`
+						Param string `json:"param"`
+					} `json:"error"`
+				}
+				if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				if response.StatusCode != tc.status || body.Error.Code != tc.code || body.Error.Param != tc.param {
+					t.Errorf("cursor response = %d %#v, want %d %s at %s", response.StatusCode, body, tc.status, tc.code, tc.param)
+				}
+			})
+		}
 	}
 }
