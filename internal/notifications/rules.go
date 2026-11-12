@@ -108,7 +108,7 @@ func parseRule(input ruleInput, projectID *string) (ruleTarget, error) {
 	if spec.subject == noSubject && projectID != nil && !spec.projectScoped {
 		return ruleTarget{}, access.Invalid("project_id", "This notification event is installation-wide.")
 	}
-	configuration, err := spec.configure(input.Configuration)
+	configuration, err := spec.configuration.canonical(input.Configuration)
 	if err != nil {
 		return ruleTarget{}, access.Invalid("configuration", "The rule configuration is invalid for its event.")
 	}
@@ -118,7 +118,7 @@ func parseRule(input ruleInput, projectID *string) (ruleTarget, error) {
 	}
 	return ruleTarget{
 		name: strings.TrimSpace(input.Name), projectID: projectID, event: input.Event, subject: subject,
-		destinationID: destinationID, enabled: input.Enabled == nil || *input.Enabled, configuration: configuration.canonical,
+		destinationID: destinationID, enabled: input.Enabled == nil || *input.Enabled, configuration: configuration,
 	}, nil
 }
 

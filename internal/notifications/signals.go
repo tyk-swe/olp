@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"strconv"
 	"time"
@@ -99,24 +100,31 @@ func readEvaluatedRules(ctx context.Context, tx pgx.Tx) ([]evaluatedRule, error)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	rules := []evaluatedRule{}
-	for rows.Next() {
-		if len(rules) == evaluatedRuleLimit {
-			return nil, errSignalLimit
-		}
-		var rule signalRule
-		var raw json.RawMessage
-		if err := rows.Scan(&rule.id, &rule.event, &rule.name, &rule.project, &raw, &rule.createdAt); err != nil {
-			return nil, err
-		}
-		configuration, err := events[rule.event].configure(raw)
-		if err != nil {
-			return nil, err
-		}
-		rules = append(rules, evaluatedRule{rule: rule, evaluate: configuration.evaluate})
+	rules, err := pgx.CollectRows(rows, scanEvaluatedRule)
+	if err != nil {
+		return nil, err
 	}
-	return rules, rows.Err()
+	if len(rules) > evaluatedRuleLimit {
+		return nil, errSignalLimit
+	}
+	return rules, nil
+}
+
+func scanEvaluatedRule(row pgx.CollectableRow) (evaluatedRule, error) {
+	var rule signalRule
+	var raw json.RawMessage
+	if err := row.Scan(&rule.id, &rule.event, &rule.name, &rule.project, &raw, &rule.createdAt); err != nil {
+		return evaluatedRule{}, err
+	}
+	configuration, ok := events[rule.event].configuration.(evaluable)
+	if !ok {
+		return evaluatedRule{}, fmt.Errorf("notification event %q is not evaluated", rule.event)
+	}
+	evaluate, err := configuration.evaluator(raw)
+	if err != nil {
+		return evaluatedRule{}, err
+	}
+	return evaluatedRule{rule: rule, evaluate: evaluate}, nil
 }
 
 func signals(source signalSource, cooldownSeconds int) evaluator {

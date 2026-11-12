@@ -2,7 +2,6 @@ package notifications
 
 import (
 	"encoding/json"
-	"maps"
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/management/contract"
@@ -11,84 +10,106 @@ import (
 type eventSpec struct {
 	subject       subjectShape
 	projectScoped bool
-	configure     func(json.RawMessage) (configured, error)
+	configuration ruleConfiguration
 }
 
-type configured struct {
-	canonical json.RawMessage
-	evaluate  evaluator
+type ruleConfiguration interface {
+	canonical(raw json.RawMessage) (json.RawMessage, error)
 }
 
-func evaluated[C any](resolve func(json.RawMessage) (C, error), evaluate func(C) evaluator) func(json.RawMessage) (configured, error) {
-	return func(raw json.RawMessage) (configured, error) {
-		config, err := resolve(raw)
-		if err != nil {
-			return configured{}, err
-		}
-		canonical, err := json.Marshal(config)
-		return configured{canonical: canonical, evaluate: evaluate(config)}, err
+type evaluable interface {
+	ruleConfiguration
+	evaluator(raw json.RawMessage) (evaluator, error)
+}
+
+type configResolver[C any] struct {
+	resolve func(json.RawMessage) (C, error)
+}
+
+type evaluatedResolver[C any] struct {
+	configResolver[C]
+	evaluate func(C) evaluator
+}
+
+func stored[C any](resolve func(json.RawMessage) (C, error)) ruleConfiguration {
+	return configResolver[C]{resolve}
+}
+
+func evaluated[C any](resolve func(json.RawMessage) (C, error), evaluate func(C) evaluator) evaluable {
+	return evaluatedResolver[C]{configResolver[C]{resolve}, evaluate}
+}
+
+func (s configResolver[C]) canonical(raw json.RawMessage) (json.RawMessage, error) {
+	config, err := s.resolve(raw)
+	if err != nil {
+		return nil, err
 	}
+	return json.Marshal(config)
 }
 
-func stored[C any](resolve func(json.RawMessage) (C, error)) func(json.RawMessage) (configured, error) {
-	return evaluated(resolve, func(C) evaluator { return nil })
+func (e evaluatedResolver[C]) evaluator(raw json.RawMessage) (evaluator, error) {
+	config, err := e.resolve(raw)
+	if err != nil {
+		return nil, err
+	}
+	return e.evaluate(config), nil
 }
 
-func cooldownSignals(source signalSource) func(json.RawMessage) (configured, error) {
+func cooldownSignals(source signalSource) evaluable {
 	return evaluated(resolveCooldown, func(c cooldownConfig) evaluator { return signals(source, c.CooldownSeconds) })
 }
 
 var events = map[contract.NotificationEvent]eventSpec{
-	contract.NotificationEventBudgetThreshold:     {subject: budgetSubject, configure: stored(resolveNothing)},
-	contract.NotificationEventProviderGrantLapsed: {configure: stored(resolveNothing)},
-	contract.NotificationEventKeyExpiring:         {subject: keySubject, configure: stored(resolveLeadTime)},
+	contract.NotificationEventBudgetThreshold:     {subject: budgetSubject, configuration: stored(resolveNothing)},
+	contract.NotificationEventProviderGrantLapsed: {configuration: stored(resolveNothing)},
+	contract.NotificationEventKeyExpiring:         {subject: keySubject, configuration: stored(resolveLeadTime)},
 	contract.NotificationEventReportSpend: {
 		projectScoped: true,
-		configure:     evaluated(resolveSpendReport, func(c spendReportConfig) evaluator { return c.claim }),
+		configuration: evaluated(resolveSpendReport, func(c spendReportConfig) evaluator { return c.claim }),
 	},
 	contract.NotificationEventBudgetExhausted: {
 		projectScoped: true,
-		configure:     cooldownSignals(signalSource{read: budgetExhaustedSignals, recoversMissing: true, announce: triggersAndRecoveries{}}),
+		configuration: cooldownSignals(signalSource{read: budgetExhaustedSignals, recoversMissing: true, announce: triggersAndRecoveries{}}),
 	},
 	contract.NotificationEventProviderErrorRate: {
-		configure: evaluated(errorRateDefaults.resolve, func(c measuredConfig) evaluator {
+		configuration: evaluated(errorRateDefaults.resolve, func(c measuredConfig) evaluator {
 			return signals(signalSource{read: providerErrorSignals(c), recoversMissing: true, announce: triggersAndRecoveries{}}, c.CooldownSeconds)
 		}),
 	},
 	contract.NotificationEventProviderCredentialFailing: {
-		configure: evaluated(credentialDefaults.resolve, func(c measuredConfig) evaluator {
+		configuration: evaluated(credentialDefaults.resolve, func(c measuredConfig) evaluator {
 			return signals(signalSource{read: credentialFailureSignals(c), announce: triggersAndRecoveries{}}, c.CooldownSeconds)
 		}),
 	},
 	contract.NotificationEventRouteLatency: {
 		projectScoped: true,
-		configure: evaluated(resolveLatency, func(c latencyConfig) evaluator {
+		configuration: evaluated(resolveLatency, func(c latencyConfig) evaluator {
 			return signals(signalSource{read: routeLatencySignals(c), recoversMissing: true, announce: triggersAndRecoveries{}}, c.CooldownSeconds)
 		}),
 	},
 	contract.NotificationEventModelRetirement: {
 		projectScoped: true,
-		configure: evaluated(resolveRetirement, func(c retirementConfig) evaluator {
+		configuration: evaluated(resolveRetirement, func(c retirementConfig) evaluator {
 			return signals(signalSource{read: retirementSignals(c), recoversMissing: true, announce: triggersAndRecoveries{}}, c.CooldownSeconds)
 		}),
 	},
 	contract.NotificationEventProviderCircuitOpen: {
-		configure: cooldownSignals(signalSource{read: circuitSignals, recoversMissing: true, announce: recoveriesAs{recovery: contract.NotificationEventProviderCircuitClosed}}),
+		configuration: cooldownSignals(signalSource{read: circuitSignals, recoversMissing: true, announce: recoveriesAs{recovery: contract.NotificationEventProviderCircuitClosed}}),
 	},
 	contract.NotificationEventProviderCircuitClosed: {
-		configure: cooldownSignals(signalSource{read: circuitSignals, recoversMissing: true, announce: recoveriesOnly{}}),
+		configuration: cooldownSignals(signalSource{read: circuitSignals, recoversMissing: true, announce: recoveriesOnly{}}),
 	},
 	contract.NotificationEventRuntimeInstallFailed: {
-		configure: cooldownSignals(signalSource{read: runtimeInstallSignals, announce: triggersAndRecoveries{}}),
+		configuration: cooldownSignals(signalSource{read: runtimeInstallSignals, announce: triggersAndRecoveries{}}),
 	},
 	contract.NotificationEventWorkerStale: {
-		configure: cooldownSignals(signalSource{read: workerStaleSignals, announce: triggersAndRecoveries{}}),
+		configuration: cooldownSignals(signalSource{read: workerStaleSignals, announce: triggersAndRecoveries{}}),
 	},
 }
 
 var evaluatedEvents = slices.Sorted(func(yield func(string) bool) {
-	for event, spec := range maps.All(events) {
-		if defaults, err := spec.configure(nil); err == nil && defaults.evaluate != nil && !yield(string(event)) {
+	for event, spec := range events {
+		if _, ok := spec.configuration.(evaluable); ok && !yield(string(event)) {
 			return
 		}
 	}
