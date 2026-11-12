@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -1501,6 +1502,50 @@ func TestKeyExpiryReminderIsDelivered(t *testing.T) {
 	}
 	if err := json.Unmarshal(listed.body, &page); err != nil || len(page.Items) != 1 || page.Items[0].Event != "key.expiring" {
 		t.Errorf("deliveries API answered %d %s, want one key.expiring delivery", listed.status, listed.body)
+	}
+}
+
+func TestStoredDeliveryPayloadNumbersReachWebhookUnchanged(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	f := newUsageFixture(t, pool)
+	bodies := make(chan []byte, 16)
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		bodies <- body
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(receiver.Close)
+	destination, rule := uuid.NewString(), uuid.NewString()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_destinations(id,name,url,project_id,etag,created_by)
+ VALUES($1,'numbers',$2,$3,$1,$4)`, destination, receiver.URL, f.projectID, f.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_rules(id,name,project_id,event,subject_kind,subject_id,destination_id,etag,created_by)
+ VALUES($1,'numbers',$2,'key.expiring','api_key',$3,$4,$1,$5)`, rule, f.projectID, f.keyID, destination, f.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_deliveries(id,rule_id,event,dedup_key,resolved,payload,status)
+ VALUES($1,$2,'key.expiring','numbers',false,'{"event":"spoofed","total":12345678901234567890,"rate":0.1000000000000000055511151231257827}','pending')`,
+		uuid.NewString(), rule); err != nil {
+		t.Fatal(err)
+	}
+	deliverNotifications(t, pool, nil)
+	if len(bodies) != 1 {
+		t.Fatalf("receiver got %d deliveries, want 1", len(bodies))
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(<-bodies, &fields); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{"event": string(fields["event"]), "total": string(fields["total"]), "rate": string(fields["rate"])}
+	want := map[string]string{"event": `"key.expiring"`, "total": "12345678901234567890", "rate": "0.1000000000000000055511151231257827"}
+	if !maps.Equal(got, want) {
+		t.Errorf("delivered fields = %v, want %v", got, want)
 	}
 }
 

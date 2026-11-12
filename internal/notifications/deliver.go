@@ -155,13 +155,20 @@ func (d delivery) identity() deliveryIdentity {
 }
 
 func (d delivery) payloadMessage(payload []byte, dedupKey string, resolved bool) (message, error) {
-	var fields map[string]any
-	if err := json.Unmarshal(payload, &fields); err != nil {
+	var stored map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &stored); err != nil {
 		return message{}, err
 	}
-	overlay := map[string]any{"event": d.event, "rule_id": d.ruleID, "rule_name": d.ruleName, "delivery_id": d.id}
-	body, err := json.Marshal(maps.Collect(func(yield func(string, any) bool) {
-		for _, source := range []map[string]any{fields, overlay} {
+	identity, err := json.Marshal(d.identity())
+	if err != nil {
+		return message{}, err
+	}
+	overlay, err := decodeObject(identity)
+	if err != nil {
+		return message{}, err
+	}
+	body, err := json.Marshal(maps.Collect(func(yield func(string, json.RawMessage) bool) {
+		for _, source := range []map[string]json.RawMessage{stored, overlay} {
 			for key, value := range source {
 				if !yield(key, value) {
 					return
