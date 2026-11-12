@@ -167,8 +167,16 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 		if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.credential.rotate", "provider_credential", rotated.ID, "success"); err != nil {
 			return access.Reply{}, err
 		}
-		return access.Reply{Status: 201, ETag: rotated.ETag, Body: map[string]any{"provider_id": id, "etag": rotated.ETag, "credential_id": rotated.ID, "credential_version": rotated.Version, "runtime_generation": nil}}, nil
+		return access.Reply{Status: 201, ETag: rotated.ETag, Body: credentialChange{ProviderID: id, ETag: rotated.ETag, CredentialID: &rotated.ID, CredentialVersion: &rotated.Version}}, nil
 	})
+}
+
+type credentialChange struct {
+	ProviderID        string             `json:"provider_id"`
+	ETag              string             `json:"etag"`
+	CredentialID      *string            `json:"credential_id"`
+	CredentialVersion *int               `json:"credential_version"`
+	RuntimeGeneration *release.Published `json:"runtime_generation"`
 }
 
 // referencing locks a provider for a change that may store an external
@@ -196,7 +204,7 @@ func (s *Server) revoke(r *http.Request, _ access.Principal) (access.Reply, erro
 		if err != nil {
 			return access.Reply{}, err
 		}
-		return access.Detail(map[string]any{"provider_id": current.ID, "etag": revoked.ETag, "credential_id": credentialID, "credential_version": revoked.Version, "runtime_generation": revoked.Generation}, revoked.ETag), nil
+		return access.Detail(credentialChange{ProviderID: current.ID, ETag: revoked.ETag, CredentialID: &credentialID, CredentialVersion: &revoked.Version, RuntimeGeneration: new(release.Published(revoked.Generation))}, revoked.ETag), nil
 	})
 }
 
@@ -226,13 +234,32 @@ type slotWrite struct {
 	CredentialReference *secretstore.Reference `json:"credential_reference,omitempty"`
 }
 
-func slotJSON(row slotRow) map[string]any {
-	return map[string]any{
-		"id": row.ID, "name": row.Name, "enabled": row.Enabled, "priority": row.Priority, "weight": row.Weight,
-		"credential_version_id": row.CredentialID,
-		"allowed_api_keys":      orEmpty(row.Restrictions.AllowedAPIKeys), "allowed_models": orEmpty(row.Restrictions.AllowedModels), "allowed_routes": orEmpty(row.Restrictions.AllowedRoutes),
-		"max_concurrency": row.Limits.MaxConcurrency, "requests_per_minute": row.Limits.RequestsPerMinute, "tokens_per_minute": row.Limits.TokensPerMinute,
-		"daily_cost_limit": row.Limits.DailyCostLimit, "monthly_cost_limit": row.Limits.MonthlyCostLimit, "priority_shares": row.Limits.PriorityShares, "saturation_percent": row.Limits.SaturationPercent,
+type slotReply struct {
+	ID                  string          `json:"id"`
+	Name                string          `json:"name"`
+	Enabled             bool            `json:"enabled"`
+	Priority            int             `json:"priority"`
+	Weight              int64           `json:"weight"`
+	CredentialVersionID *string         `json:"credential_version_id"`
+	AllowedAPIKeys      []string        `json:"allowed_api_keys"`
+	AllowedModels       []string        `json:"allowed_models"`
+	AllowedRoutes       []string        `json:"allowed_routes"`
+	MaxConcurrency      *int64          `json:"max_concurrency"`
+	RequestsPerMinute   *int64          `json:"requests_per_minute"`
+	TokensPerMinute     *int64          `json:"tokens_per_minute"`
+	DailyCostLimit      *string         `json:"daily_cost_limit"`
+	MonthlyCostLimit    *string         `json:"monthly_cost_limit"`
+	PriorityShares      *routing.Shares `json:"priority_shares"`
+	SaturationPercent   *int64          `json:"saturation_percent"`
+}
+
+func (row slotRow) reply() slotReply {
+	return slotReply{
+		ID: row.ID, Name: row.Name, Enabled: row.Enabled, Priority: row.Priority, Weight: row.Weight,
+		CredentialVersionID: row.CredentialID,
+		AllowedAPIKeys:      orEmpty(row.Restrictions.AllowedAPIKeys), AllowedModels: orEmpty(row.Restrictions.AllowedModels), AllowedRoutes: orEmpty(row.Restrictions.AllowedRoutes),
+		MaxConcurrency: row.Limits.MaxConcurrency, RequestsPerMinute: row.Limits.RequestsPerMinute, TokensPerMinute: row.Limits.TokensPerMinute,
+		DailyCostLimit: row.Limits.DailyCostLimit, MonthlyCostLimit: row.Limits.MonthlyCostLimit, PriorityShares: row.Limits.PriorityShares, SaturationPercent: row.Limits.SaturationPercent,
 	}
 }
 
@@ -276,15 +303,34 @@ func (s *Server) slotList(ctx context.Context, q access.Queryer, current *record
 	if err != nil {
 		return access.Reply{}, err
 	}
-	items := make([]map[string]any, 0, len(slots))
-	health := map[string]any{}
-	for _, row := range slots {
-		items = append(items, slotJSON(row))
-		validated := row.validationTime(current.Connection.Document(), models)
-		health[row.ID] = map[string]any{"revoked": row.CredentialRevoked, "lapsed": row.CredentialLapsed, "active_credential_version_id": activeCredentials[row.ID], "cooling_down": nil, "validated_at": validated, "usage": nil}
+	live, connection := s.quotas(ctx, current.ID, slots, activeCredentials, generations)
+	items := make([]slotReply, len(slots))
+	health := make(map[string]slotHealth, len(slots))
+	for i, row := range slots {
+		items[i] = row.reply()
+		quota := live[row.ID]
+		health[row.ID] = slotHealth{
+			Revoked: row.CredentialRevoked, Lapsed: row.CredentialLapsed, ActiveCredentialVersionID: activeCredentials[row.ID],
+			CoolingDown: quota.coolingDown, ValidatedAt: row.validationTime(current.Connection.Document(), models), Usage: quota.usage,
+		}
 	}
-	connection := s.quotas(ctx, current.ID, slots, activeCredentials, generations, health)
-	return access.Detail(map[string]any{"items": items, "health": health, "etag": current.SlotsETag, "connection_usage": connection}, current.SlotsETag), nil
+	return access.Detail(slotList{Items: items, Health: health, ETag: current.SlotsETag, ConnectionUsage: connection}, current.SlotsETag), nil
+}
+
+type slotList struct {
+	Items           []slotReply           `json:"items"`
+	Health          map[string]slotHealth `json:"health"`
+	ETag            string                `json:"etag"`
+	ConnectionUsage *quotaUsage           `json:"connection_usage"`
+}
+
+type slotHealth struct {
+	Revoked                   bool        `json:"revoked"`
+	Lapsed                    bool        `json:"lapsed"`
+	ActiveCredentialVersionID *string     `json:"active_credential_version_id"`
+	CoolingDown               *bool       `json:"cooling_down"`
+	ValidatedAt               *time.Time  `json:"validated_at"`
+	Usage                     *quotaUsage `json:"usage"`
 }
 
 // quotaTimeout bounds one console read of shared quota state. Valkey holds no
@@ -292,33 +338,39 @@ func (s *Server) slotList(ctx context.Context, q access.Queryer, current *record
 // counters rather than the page itself.
 const quotaTimeout = 2 * time.Second
 
-// quotaUsage renders one shared usage snapshot as the management contract's
-// ProviderQuotaUsage.
-func quotaUsage(u fleet.Usage) map[string]any {
-	return map[string]any{"requests_this_minute": u.RequestsThisMinute, "tokens_this_minute": u.TokensThisMinute, "concurrent_requests": u.ConcurrentRequests}
+type quotaUsage struct {
+	RequestsThisMinute int64 `json:"requests_this_minute"`
+	TokensThisMinute   int64 `json:"tokens_this_minute"`
+	ConcurrentRequests int64 `json:"concurrent_requests"`
 }
 
-// quotas fills the live per-slot counters into health and returns the counters
-// of the shared provider connection. Every field it cannot read stays null:
-// the stored list is complete without them, so an unreachable or malformed
-// quota store is reported to the operator and shown to the console as unknown,
-// never as an idle zero and never as a failed request.
-func (s *Server) quotas(ctx context.Context, providerID string, slots []slotRow, published map[string]*string, generations map[string]int64, health map[string]any) any {
+func usageOf(u fleet.Usage) *quotaUsage {
+	return &quotaUsage{RequestsThisMinute: u.RequestsThisMinute, TokensThisMinute: u.TokensThisMinute, ConcurrentRequests: u.ConcurrentRequests}
+}
+
+type slotQuota struct {
+	usage       *quotaUsage
+	coolingDown *bool
+}
+
+// quotas reads the live per-slot counters and the counters of the shared
+// provider connection. Every value it cannot read stays nil: the stored list
+// is complete without them, so an unreachable or malformed quota store is
+// reported to the operator and shown to the console as unknown, never as an
+// idle zero and never as a failed request.
+func (s *Server) quotas(ctx context.Context, providerID string, slots []slotRow, published map[string]*string, generations map[string]int64) (map[string]slotQuota, *quotaUsage) {
 	if s.Quotas == nil {
-		return nil
+		return nil, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, quotaTimeout)
 	defer cancel()
 	connection, err := s.Quotas.Usage(ctx, limits.ConnectionLookup(providerID))
 	if err != nil {
 		s.quotaUnavailable(err)
-		return nil
+		return nil, nil
 	}
+	live := make(map[string]slotQuota, len(slots))
 	for _, row := range slots {
-		entry, ok := health[row.ID].(map[string]any)
-		if !ok {
-			continue
-		}
 		usage, err := s.Quotas.Usage(ctx, limits.SlotLookup(row.ID))
 		if err != nil {
 			s.quotaUnavailable(err)
@@ -336,9 +388,9 @@ func (s *Server) quotas(ctx context.Context, providerID string, slots []slotRow,
 			s.quotaUnavailable(err)
 			break
 		}
-		entry["usage"], entry["cooling_down"] = quotaUsage(usage), cooling
+		live[row.ID] = slotQuota{usage: usageOf(usage), coolingDown: &cooling}
 	}
-	return quotaUsage(connection)
+	return live, usageOf(connection)
 }
 
 // quotaUnavailable reports a quota read that failed without changing what the

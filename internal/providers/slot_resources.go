@@ -39,9 +39,12 @@ func (s *Server) getSlot(r *http.Request, p access.Principal) (access.Reply, err
 	if slot == nil {
 		return access.Reply{}, access.Fail(404, "slot_not_found", "The credential slot is unavailable.")
 	}
-	body := slotJSON(*slot)
-	body["provider_id"], body["is_default"], body["etag"] = providerID, slot.Default, slot.ETag
-	return access.Detail(body, slot.ETag), nil
+	return access.Detail(struct {
+		slotReply
+		ProviderID string `json:"provider_id"`
+		IsDefault  bool   `json:"is_default"`
+		ETag       string `json:"etag"`
+	}{slot.reply(), providerID, slot.Default, slot.ETag}, slot.ETag), nil
 }
 
 func (s *Server) deleteSlot(r *http.Request, _ access.Principal) (access.Reply, error) {

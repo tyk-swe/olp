@@ -14,15 +14,42 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/providers/probe"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
-func modelJSON(m storedModel) map[string]any {
-	capabilities := make([]map[string]any, 0, len(m.Capabilities))
-	for _, c := range m.Capabilities {
-		capabilities = append(capabilities, map[string]any{"operation": c.Operation, "surface": c.Surface, "mode": c.Mode, "source": c.Source, "certified_at": c.CertifiedAt, "tool_calls": c.ToolCalls})
-	}
-	return map[string]any{"id": m.ID, "upstream_model": m.UpstreamModel, "display_name": m.DisplayName, "enabled": m.Enabled, "capabilities": capabilities, "discovered_at": m.DiscoveredAt}
+type capabilityReply struct {
+	connection.Capability
+	Source      string     `json:"source"`
+	CertifiedAt *time.Time `json:"certified_at"`
+	ToolCalls   bool       `json:"tool_calls"`
 }
+
+type modelReply struct {
+	ID            string            `json:"id"`
+	UpstreamModel string            `json:"upstream_model"`
+	DisplayName   string            `json:"display_name"`
+	Enabled       bool              `json:"enabled"`
+	Capabilities  []capabilityReply `json:"capabilities"`
+	DiscoveredAt  *time.Time        `json:"discovered_at"`
+}
+
+func (m storedModel) reply() modelReply {
+	capabilities := make([]capabilityReply, len(m.Capabilities))
+	for i, c := range m.Capabilities {
+		capabilities[i] = capabilityReply{Capability: c.Capability, Source: c.Source, CertifiedAt: c.CertifiedAt, ToolCalls: c.ToolCalls}
+	}
+	return modelReply{ID: m.ID, UpstreamModel: m.UpstreamModel, DisplayName: m.DisplayName, Enabled: m.Enabled, Capabilities: capabilities, DiscoveredAt: m.DiscoveredAt}
+}
+
+func publishedModelReply(m routing.RevisionModel) modelReply {
+	capabilities := make([]capabilityReply, len(m.Capabilities))
+	for i, c := range m.Capabilities {
+		capabilities[i] = capabilityReply{Capability: connection.Capability{Operation: c.Operation, Surface: c.Surface, Mode: c.Mode}, Source: c.Source, CertifiedAt: c.CertifiedAt, ToolCalls: c.ToolCalls}
+	}
+	return modelReply{ID: m.ID, UpstreamModel: m.UpstreamModel, DisplayName: m.DisplayName, Enabled: true, Capabilities: capabilities}
+}
+
+func modelID(m modelReply) string { return m.ID }
 
 func ValidModelName(field, value string) error {
 	if len(value) == 0 || len(value) > 200 {
@@ -209,14 +236,14 @@ func (s *Server) models(r *http.Request, p access.Principal) (access.Reply, erro
 	if err != nil {
 		return access.Reply{}, err
 	}
-	items := make([]map[string]any, 0, len(models))
-	for _, m := range models {
-		items = append(items, modelJSON(m))
+	items := make([]modelReply, len(models))
+	for i, m := range models {
+		items[i] = m.reply()
 	}
-	reply := access.ListReply(items, page)
-	reply.Body.(map[string]any)["provider"] = d
-	reply.ETag = d.ETag
-	return reply, nil
+	return access.Detail(struct {
+		access.ListBody[modelReply]
+		Provider *detail `json:"provider"`
+	}{access.ListPage(items, page, modelID), d}, d.ETag), nil
 }
 
 type setModelRequest struct {
@@ -291,31 +318,17 @@ func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, err
 	defaultSlot := *selected
 
 	at := time.Now().UTC()
-	results := make([]map[string]any, 0, len(m.Capabilities))
-	certified := 0
 	// The route deadline gives each capability a probe budget; the last one
 	// stays reserved so the results are always recorded.
 	probeCtx, cancel := probe.Budget(r.Context())
 	defer cancel()
-	for i := range m.Capabilities {
-		c := &m.Capabilities[i]
-		err := s.prober.Certify(probeCtx, target, m.UpstreamModel, c.Capability, probe.BodyLimit)
-		item := map[string]any{"operation": c.Operation, "surface": c.Surface, "mode": c.Mode, "succeeded": err == nil, "detail": "Certified.", "error_code": nil}
-		if err == nil {
-			certified++
-			c.Source, c.CertifiedAt = "certified", &at
-			c.CredentialFingerprint = defaultSlot.credentialFingerprint(current.Connection.Document())
-			c.ToolCalls = c.Operation == "generation" && (c.Surface == "openai" || c.Surface == "anthropic" || c.Surface == "gemini") && (c.Mode == "unary" || c.Mode == "streaming") && s.prober.CertifyToolCalls(probeCtx, target, m.UpstreamModel, c.Mode == "streaming") == nil
-			item["tool_calls"] = c.ToolCalls
-		} else {
-			pe := probe.Classify(err)
-			item["detail"], item["error_code"] = pe.Detail, pe.Reason
-			c.Source, c.CertifiedAt = "declared", nil
-			c.CredentialFingerprint = ""
-			c.ToolCalls = false
-		}
-		results = append(results, item)
+	fingerprint := defaultSlot.credentialFingerprint(current.Connection.Document())
+	capabilities := make([]storedCapability, len(m.Capabilities))
+	results := make([]certifyResult, len(m.Capabilities))
+	for i, c := range m.Capabilities {
+		capabilities[i], results[i] = s.certifyCapability(probeCtx, target, m.UpstreamModel, c.Capability, fingerprint, at)
 	}
+	certified := countCertified(results)
 	status := "certified"
 	switch {
 	case certified == 0:
@@ -324,14 +337,14 @@ func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, err
 		status = "partial"
 	}
 	reply, err := access.Transact(s.Access, r, unchangedSince(r.Context(), current, "certification"), func(tx pgx.Tx, p access.Principal, _ *record) (access.Reply, error) {
-		etag, err := s.storeCertification(r.Context(), tx, current, m, defaultSlot, certified, at)
+		etag, err := s.storeCertification(r.Context(), tx, current, m.withCapabilities(capabilities), defaultSlot, certified, at)
 		if err != nil {
 			return access.Reply{}, err
 		}
 		if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.model.certify", "provider_model", modelID, auditOutcome(certified > 0)); err != nil {
 			return access.Reply{}, err
 		}
-		return access.Detail(map[string]any{"provider_id": id, "model_id": modelID, "status": status, "checked_at": at, "certified_count": certified, "attempted_count": len(m.Capabilities), "results": results}, etag), nil
+		return access.Detail(certifyReply{ProviderID: id, ModelID: modelID, Status: status, CheckedAt: at, CertifiedCount: certified, AttemptedCount: len(results), Results: results}, etag), nil
 	})
 	if err == nil && certified == len(m.Capabilities) {
 		s.clearValidatedCooldowns(r.Context(), id, defaultSlot)
@@ -406,6 +419,44 @@ func (s *Catalogue) storeDiscoveredModels(ctx context.Context, tx pgx.Tx, curren
 	}
 	_, err = touch(ctx, tx, current.ID)
 	return err
+}
+
+type certifyReply struct {
+	ProviderID     string          `json:"provider_id"`
+	ModelID        string          `json:"model_id"`
+	Status         string          `json:"status"`
+	CheckedAt      time.Time       `json:"checked_at"`
+	CertifiedCount int             `json:"certified_count"`
+	AttemptedCount int             `json:"attempted_count"`
+	Results        []certifyResult `json:"results"`
+}
+
+type certifyResult struct {
+	connection.Capability
+	Succeeded bool          `json:"succeeded"`
+	Detail    string        `json:"detail"`
+	ErrorCode *probe.Reason `json:"error_code"`
+	ToolCalls *bool         `json:"tool_calls,omitempty"`
+}
+
+func (s *Server) certifyCapability(ctx context.Context, target probe.Target, model string, c connection.Capability, fingerprint string, at time.Time) (storedCapability, certifyResult) {
+	if err := s.prober.Certify(ctx, target, model, c, probe.BodyLimit); err != nil {
+		failure := probe.Classify(err)
+		return storedCapability{Capability: c, Source: "declared"}, certifyResult{Capability: c, Detail: failure.Detail, ErrorCode: &failure.Reason}
+	}
+	toolCalls := c.Operation == "generation" && (c.Surface == "openai" || c.Surface == "anthropic" || c.Surface == "gemini") && (c.Mode == "unary" || c.Mode == "streaming") && s.prober.CertifyToolCalls(ctx, target, model, c.Mode == "streaming") == nil
+	return storedCapability{Capability: c, Source: "certified", CertifiedAt: &at, CredentialFingerprint: fingerprint, ToolCalls: toolCalls},
+		certifyResult{Capability: c, Succeeded: true, Detail: "Certified.", ToolCalls: &toolCalls}
+}
+
+func countCertified(results []certifyResult) int {
+	count := 0
+	for _, result := range results {
+		if result.Succeeded {
+			count++
+		}
+	}
+	return count
 }
 
 func (s *Catalogue) storeCertification(ctx context.Context, tx pgx.Tx, current *record, model storedModel, defaultSlot slotRow, certified int, at time.Time) (string, error) {

@@ -1,13 +1,16 @@
 package providers
 
 import (
+	"cmp"
 	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/plugins"
@@ -73,34 +76,39 @@ func (s *Server) inventory(r *http.Request, principal access.Principal) (access.
 		return access.Reply{}, err
 	}
 	defer rows.Close()
-	items := []map[string]any{}
-	for rows.Next() {
+	items, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (inventoryItem, error) {
 		var m storedModel
 		var capabilities, metadata []byte
-		var providerID, providerName, providerKind, vendorID string
-		var available bool
-		if err = rows.Scan(&m.ID, &m.UpstreamModel, &m.DisplayName, &m.Enabled, &capabilities, &m.DiscoveredAt, &providerID, &providerName, &providerKind, &available, &metadata, &vendorID); err != nil {
-			return access.Reply{}, err
+		var item inventoryItem
+		var vendorID string
+		if err := row.Scan(&m.ID, &m.UpstreamModel, &m.DisplayName, &m.Enabled, &capabilities, &m.DiscoveredAt, &item.ProviderID, &item.ProviderName, &item.ProviderKind, &item.Available, &metadata, &vendorID); err != nil {
+			return inventoryItem{}, err
 		}
-		if err = json.Unmarshal(capabilities, &m.Capabilities); err != nil {
-			return access.Reply{}, err
+		if err := json.Unmarshal(capabilities, &m.Capabilities); err != nil {
+			return inventoryItem{}, err
 		}
-		facts, metadataErr := connection.MetadataJSON(metadata)
-		if metadataErr != nil {
-			return access.Reply{}, metadataErr
+		facts, err := connection.MetadataJSON(metadata)
+		if err != nil {
+			return inventoryItem{}, err
 		}
-		if vendorID == "" {
-			vendorID = vendors.DefaultFor(providerKind)
-		}
-		items = append(items, map[string]any{"available": available, "metadata": facts, "provider_id": providerID, "provider_name": providerName, "provider_kind": providerKind, "model": modelJSON(m),
-			"lifecycle": s.Catalog.Lifecycle(vendorID, m.UpstreamModel, canonicalModel(metadata))})
-	}
-	if err = rows.Err(); err != nil {
+		item.Metadata, item.Model = facts, m.reply()
+		item.Lifecycle = s.Catalog.Lifecycle(cmp.Or(vendorID, vendors.DefaultFor(item.ProviderKind)), m.UpstreamModel, canonicalModel(metadata))
+		return item, nil
+	})
+	if err != nil {
 		return access.Reply{}, err
 	}
-	return access.ListReplyBy(items, page, func(item map[string]any) string {
-		return item["model"].(map[string]any)["id"].(string)
-	}), nil
+	return access.ListReplyBy(items, page, func(item inventoryItem) string { return item.Model.ID }), nil
+}
+
+type inventoryItem struct {
+	Available    bool                       `json:"available"`
+	Lifecycle    *catalog.LifecycleView     `json:"lifecycle"`
+	Metadata     map[string]json.RawMessage `json:"metadata"`
+	Model        modelReply                 `json:"model"`
+	ProviderID   string                     `json:"provider_id"`
+	ProviderKind string                     `json:"provider_kind"`
+	ProviderName string                     `json:"provider_name"`
 }
 
 // generations lists installation-wide runtime releases, which span every

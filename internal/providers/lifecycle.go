@@ -237,6 +237,11 @@ type storedCapability struct {
 	ToolCalls             bool       `json:"tool_calls,omitempty"`
 }
 
+func (m storedModel) withCapabilities(capabilities []storedCapability) storedModel {
+	m.Capabilities = capabilities
+	return m
+}
+
 type storedModel struct {
 	ID            string             `json:"id"`
 	UpstreamModel string             `json:"upstream_model"`
@@ -454,7 +459,7 @@ func (s *Server) disableProvider(r *http.Request, _ access.Principal) (access.Re
 		if err != nil {
 			return access.Reply{}, err
 		}
-		return access.Detail(map[string]any{"provider_id": current.ID, "etag": disabled.ETag, "credential_id": nil, "credential_version": nil, "runtime_generation": disabled.Generation}, disabled.ETag), nil
+		return access.Detail(credentialChange{ProviderID: current.ID, ETag: disabled.ETag, RuntimeGeneration: &disabled.Generation}, disabled.ETag), nil
 	})
 }
 
@@ -520,17 +525,35 @@ func (v *revisionRow) counts() (models, capabilities, certified int64) {
 	return models, capabilities, certified
 }
 
-func (v *revisionRow) summary() map[string]any {
-	models, capabilities, certified := v.counts()
-	return map[string]any{"id": v.ID, "provider_id": v.ProviderID, "revision": v.Revision, "name": v.Name, "kind": v.Configuration.Kind, "connector_ready": true, "activated_by": v.ActivatedBy, "activated_at": v.ActivatedAt, "model_count": models, "enabled_model_count": models, "capability_count": capabilities, "certified_capability_count": certified, "historical_credential_version": v.CredentialVersion}
+type revisionSummary struct {
+	ID                          string    `json:"id"`
+	ProviderID                  string    `json:"provider_id"`
+	Revision                    int       `json:"revision"`
+	Name                        string    `json:"name"`
+	ConnectorReady              bool      `json:"connector_ready"`
+	ActivatedBy                 string    `json:"activated_by"`
+	ActivatedAt                 time.Time `json:"activated_at"`
+	ModelCount                  int64     `json:"model_count"`
+	EnabledModelCount           int64     `json:"enabled_model_count"`
+	CapabilityCount             int64     `json:"capability_count"`
+	CertifiedCapabilityCount    int64     `json:"certified_capability_count"`
+	HistoricalCredentialVersion *int      `json:"historical_credential_version"`
 }
 
-func (v *revisionRow) detail() map[string]any {
-	m := v.summary()
-	delete(m, "kind")
-	m["configuration"] = v.Configuration
-	m["source_etag"] = v.SourceETag
-	return m
+type revisionListItem struct {
+	revisionSummary
+	Kind string `json:"kind"`
+}
+
+type revisionDetail struct {
+	revisionSummary
+	Configuration connection.Configuration `json:"configuration"`
+	SourceETag    string                   `json:"source_etag"`
+}
+
+func (v *revisionRow) summary() revisionSummary {
+	models, capabilities, certified := v.counts()
+	return revisionSummary{ID: v.ID, ProviderID: v.ProviderID, Revision: v.Revision, Name: v.Name, ConnectorReady: true, ActivatedBy: v.ActivatedBy, ActivatedAt: v.ActivatedAt, ModelCount: models, EnabledModelCount: models, CapabilityCount: capabilities, CertifiedCapabilityCount: certified, HistoricalCredentialVersion: v.CredentialVersion}
 }
 
 func (s *Server) revisions(r *http.Request, p access.Principal) (access.Reply, error) {
@@ -549,19 +572,17 @@ func (s *Server) revisions(r *http.Request, p access.Principal) (access.Reply, e
 	if err != nil {
 		return access.Reply{}, err
 	}
-	defer rows.Close()
-	items := []map[string]any{}
-	for rows.Next() {
-		v, err := scanRevision(rows)
+	items, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (revisionListItem, error) {
+		v, err := scanRevision(row)
 		if err != nil {
-			return access.Reply{}, err
+			return revisionListItem{}, err
 		}
-		items = append(items, v.summary())
-	}
-	if err = rows.Err(); err != nil {
+		return revisionListItem{revisionSummary: v.summary(), Kind: v.Configuration.Kind}, nil
+	})
+	if err != nil {
 		return access.Reply{}, err
 	}
-	return access.ListReply(items, page), nil
+	return access.ListReplyBy(items, page, func(item revisionListItem) string { return item.ID }), nil
 }
 
 func (s *Server) revision(r *http.Request, p access.Principal) (access.Reply, error) {
@@ -576,7 +597,7 @@ func (s *Server) revision(r *http.Request, p access.Principal) (access.Reply, er
 	if err != nil {
 		return access.Reply{}, err
 	}
-	return access.OK(v.detail()), nil
+	return access.OK(revisionDetail{revisionSummary: v.summary(), Configuration: v.Configuration, SourceETag: v.SourceETag}), nil
 }
 
 func (s *Server) revisionModels(r *http.Request, p access.Principal) (access.Reply, error) {
@@ -595,22 +616,14 @@ func (s *Server) revisionModels(r *http.Request, p access.Principal) (access.Rep
 	if err != nil {
 		return access.Reply{}, err
 	}
-	items := []map[string]any{}
+	items := []modelReply{}
 	for _, m := range v.Models {
-		if m.ID >= page.Before {
-			continue
+		if m.ID < page.Before {
+			items = append(items, publishedModelReply(m))
 		}
-		capabilities := []map[string]any{}
-		for _, c := range m.Capabilities {
-			capabilities = append(capabilities, map[string]any{"operation": c.Operation, "surface": c.Surface, "mode": c.Mode, "source": c.Source, "certified_at": c.CertifiedAt, "tool_calls": c.ToolCalls})
-		}
-		items = append(items, map[string]any{"id": m.ID, "upstream_model": m.UpstreamModel, "display_name": m.DisplayName, "enabled": true, "capabilities": capabilities, "discovered_at": nil})
 	}
-	slices.SortFunc(items, func(a, b map[string]any) int { return strings.Compare(b["id"].(string), a["id"].(string)) })
-	if len(items) > page.Limit+1 {
-		items = items[:page.Limit+1]
-	}
-	return access.ListReply(items, page), nil
+	slices.SortFunc(items, func(a, b modelReply) int { return strings.Compare(b.ID, a.ID) })
+	return access.ListReplyBy(items, page, modelID), nil
 }
 
 func capabilityKey(model string, c routing.RevisionCapability) string {
