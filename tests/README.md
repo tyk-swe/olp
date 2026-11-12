@@ -9,7 +9,7 @@ tier that can catch the failure it guards against.
 | `make test-unit-go` | Every Go test without a build tag | Go | 30s |
 | `make test-unit-console` | Vitest `unit` and `svelte` projects and the script contract tests | pnpm workspace | 30s |
 | `make test-integration` | `tests/integration` | Docker | 30s |
-| `make test-e2e-api` | `tests/e2e` | Docker | 45s |
+| `make test-e2e-api` | `tests/e2e` | Docker and Node.js | 45s |
 | `make test-e2e-browser` | `console/tests/e2e` | Docker and Chromium | 60s |
 
 `make test-unit` runs both unit suites side by side, `make test-e2e` runs both
