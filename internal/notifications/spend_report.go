@@ -10,7 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/usage/reports"
 )
 
-func (c spendReportConfig) claim(w *deliveryWorker, ctx context.Context, tx pgx.Tx, rule signalRule, _ signalEnv) (int, error) {
+func (c spendReportConfig) claim(ctx context.Context, tx pgx.Tx, rule signalRule, env signalEnv) (int, error) {
 	var end, start time.Time
 	if err := tx.QueryRow(ctx, reportPeriodSQL, c.Period.unit()).Scan(&end, &start); err != nil {
 		return 0, err
@@ -27,7 +27,7 @@ func (c spendReportConfig) claim(w *deliveryWorker, ctx context.Context, tx pgx.
 		return 0, nil
 	}
 	filters := reports.Filters{Start: start, End: end, Projects: projectScope(rule.project)}
-	summary, err := reports.ReadSummary(ctx, tx, filters, w.Now())
+	summary, err := reports.ReadSummary(ctx, tx, filters, env.workerClock())
 	if err != nil {
 		return 0, err
 	}
@@ -39,7 +39,7 @@ func (c spendReportConfig) claim(w *deliveryWorker, ctx context.Context, tx pgx.
 		}
 		breakdowns[string(dimension)] = breakdown
 	}
-	id := w.NewID()
+	id := env.newID()
 	payload, err := json.Marshal(spendReportPayload{
 		envelope: envelope{Version: 1, DeliveryID: id, Event: rule.event, RuleID: rule.id, RuleName: rule.name, DedupKey: dedupKey},
 		Period:   string(c.Period), Start: start.UTC().Format(time.RFC3339), End: end.UTC().Format(time.RFC3339),

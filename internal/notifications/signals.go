@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"strconv"
 	"time"
@@ -22,12 +23,15 @@ import (
 const evaluatedRuleLimit = 1000
 
 type signalEnv struct {
-	now       time.Time
-	fleet     *fleet.State
-	reference *catalog.Signed
+	now         time.Time
+	fleet       *fleet.State
+	reference   *catalog.Signed
+	log         *slog.Logger
+	newID       func() string
+	workerClock func() time.Time
 }
 
-type evaluator func(w *deliveryWorker, ctx context.Context, tx pgx.Tx, rule signalRule, env signalEnv) (int, error)
+type evaluator func(ctx context.Context, tx pgx.Tx, rule signalRule, env signalEnv) (int, error)
 
 type signalReader func(ctx context.Context, tx pgx.Tx, rule signalRule, env signalEnv) ([]notificationSignal, error)
 
@@ -83,10 +87,10 @@ func (w *deliveryWorker) claimSignals(ctx context.Context, tx pgx.Tx) (int, erro
 	if err := tx.QueryRow(ctx, signalClockSQL).Scan(&now); err != nil {
 		return 0, err
 	}
-	env := signalEnv{now: now, fleet: w.Fleet, reference: w.Catalog}
+	env := signalEnv{now: now, fleet: w.Fleet, reference: w.Catalog, log: w.Log, newID: w.NewID, workerClock: w.Now}
 	claimed := 0
 	for _, rule := range rules {
-		count, err := rule.evaluate(w, ctx, tx, rule.rule, env)
+		count, err := rule.evaluate(ctx, tx, rule.rule, env)
 		if err != nil {
 			return 0, err
 		}
@@ -129,10 +133,10 @@ func scanEvaluatedRule(row pgx.CollectableRow) (evaluatedRule, error) {
 
 func signals(source signalSource, cooldownSeconds int) evaluator {
 	cooldown := time.Duration(cooldownSeconds) * time.Second
-	return func(w *deliveryWorker, ctx context.Context, tx pgx.Tx, rule signalRule, env signalEnv) (int, error) {
+	return func(ctx context.Context, tx pgx.Tx, rule signalRule, env signalEnv) (int, error) {
 		readings, err := source.read(ctx, tx, rule, env)
 		if errors.Is(err, errSignalUnavailable) {
-			w.Log.Warn("notification signal evaluation unavailable", "event", rule.event, "code", "signal_source")
+			env.log.Warn("notification signal evaluation unavailable", "event", rule.event, "code", "signal_source")
 			return 0, nil
 		}
 		if err != nil {
@@ -142,7 +146,7 @@ func signals(source signalSource, cooldownSeconds int) evaluator {
 		claimed := 0
 		for _, signal := range readings {
 			seen[signal.subject] = true
-			count, err := w.claimSignal(ctx, tx, rule, source, cooldown, signal, env.now)
+			count, err := claimSignal(ctx, tx, rule, source, cooldown, signal, env)
 			if err != nil {
 				return 0, err
 			}
@@ -151,12 +155,12 @@ func signals(source signalSource, cooldownSeconds int) evaluator {
 		if !source.recoversMissing {
 			return claimed, nil
 		}
-		recovered, err := w.recoverMissingSignals(ctx, tx, rule, source, cooldown, seen, env.now)
+		recovered, err := recoverMissingSignals(ctx, tx, rule, source, cooldown, seen, env)
 		return claimed + recovered, err
 	}
 }
 
-func (w *deliveryWorker) recoverMissingSignals(ctx context.Context, tx pgx.Tx, rule signalRule, source signalSource, cooldown time.Duration, seen map[string]bool, now time.Time) (int, error) {
+func recoverMissingSignals(ctx context.Context, tx pgx.Tx, rule signalRule, source signalSource, cooldown time.Duration, seen map[string]bool, env signalEnv) (int, error) {
 	subjects, err := activeSignalSubjects(ctx, tx, rule.id)
 	if err != nil {
 		return 0, err
@@ -166,10 +170,10 @@ func (w *deliveryWorker) recoverMissingSignals(ctx context.Context, tx pgx.Tx, r
 		if seen[subject] {
 			continue
 		}
-		count, err := w.claimSignal(ctx, tx, rule, source, cooldown, notificationSignal{
+		count, err := claimSignal(ctx, tx, rule, source, cooldown, notificationSignal{
 			subject: subject, reading: observed{active: false},
 			evidence: map[string]any{"recovery_reason": "subject_no_longer_in_scope"},
-		}, now)
+		}, env)
 		if err != nil {
 			return 0, err
 		}
@@ -288,7 +292,7 @@ func observation(known, active bool) reading {
 	return observed{active: active}
 }
 
-func (w *deliveryWorker) claimSignal(ctx context.Context, tx pgx.Tx, rule signalRule, source signalSource, cooldown time.Duration, signal notificationSignal, now time.Time) (int, error) {
+func claimSignal(ctx context.Context, tx pgx.Tx, rule signalRule, source signalSource, cooldown time.Duration, signal notificationSignal, env signalEnv) (int, error) {
 	if _, skip := signal.reading.(unknown); skip {
 		return 0, nil
 	}
@@ -299,7 +303,7 @@ func (w *deliveryWorker) claimSignal(ctx context.Context, tx pgx.Tx, rule signal
 	if err := tx.QueryRow(ctx, lockSignalStateSQL, rule.id, signal.subject).Scan(&current.active, &current.incident, &current.lastTriggerAt); err != nil {
 		return 0, err
 	}
-	next, err := transitionSignal(current, signal.reading, source.announce, now, cooldown)
+	next, err := transitionSignal(current, signal.reading, source.announce, env.now, cooldown)
 	if err != nil {
 		return 0, err
 	}
@@ -311,17 +315,17 @@ func (w *deliveryWorker) claimSignal(ctx context.Context, tx pgx.Tx, rule signal
 	}
 	digest := sha256.Sum256([]byte(rule.id + ":" + signal.subject))
 	incidentKey := "olp:" + hex.EncodeToString(digest[:]) + ":" + strconv.FormatInt(next.state.incident, 10)
-	dedupKey := next.change.dedupKey(incidentKey, now)
+	dedupKey := next.change.dedupKey(incidentKey, env.now)
 	event := source.announce.event(rule.event, next.change)
 	resolved := next.change == recovered
-	id := w.NewID()
+	id := env.newID()
 	payload, err := json.Marshal(signalPayload{
 		envelope: envelope{
 			Version: 1, DeliveryID: id, Event: event, RuleID: rule.id, RuleName: rule.name,
 			DedupKey: dedupKey, Resolved: resolved,
 		},
 		IncidentKey: incidentKey, Subject: signal.subject, Incident: next.state.incident,
-		OccurredAt: now.UTC().Format(time.RFC3339Nano), Evidence: signal.evidence,
+		OccurredAt: env.now.UTC().Format(time.RFC3339Nano), Evidence: signal.evidence,
 	})
 	if err != nil {
 		return 0, err
