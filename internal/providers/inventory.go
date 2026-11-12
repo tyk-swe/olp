@@ -112,23 +112,6 @@ type inventoryItem struct {
 
 // generations lists installation-wide runtime releases, which span every
 // project and name their publishers, so it requires installation reach.
-func (s *Server) generations(r *http.Request, principal access.Principal) (access.Reply, error) {
-	var err error
-	page, err := access.Page(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	rows, err := s.access.Pool.Query(r.Context(), "SELECT jsonb_build_object('id',g.id,'sequence',g.sequence,'sha256',g.sha256,'created_by',g.created_by,'created_by_email',u.email,'created_at',g.created_at) FROM olp.runtime_releases g JOIN olp.users u ON u.id=g.created_by WHERE g.id<$1 ORDER BY g.id DESC LIMIT $2", page.Before, page.Limit+1)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	items, err := access.JSONRows(rows)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	return access.ListReply(items, page), nil
-}
-
 func (s *Server) profiles(r *http.Request, _ access.Principal) (access.Reply, error) {
 	pluginProfiles, err := plugins.Profiles(r.Context(), s.access.Pool, s.unconfined)
 	if err != nil {

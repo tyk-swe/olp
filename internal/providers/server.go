@@ -71,7 +71,6 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.access.Route(mux, "GET /api/v1/provider-kinds/{provider_kind}/capabilities", s.kindCapabilities)
 	s.access.Route(mux, "GET /api/v1/provider-vendors", s.listVendors)
 	s.access.Route(mux, "GET /api/v1/provider-models", s.inventory)
-	s.access.Route(mux, "GET /api/v1/runtime-generations", s.generations)
 	s.access.Route(mux, "GET /api/v1/providers", s.providers)
 	s.access.Route(mux, "POST /api/v1/providers", s.createProvider, access.MaxBody(1<<20))
 	s.access.Route(mux, "GET /api/v1/providers/{provider_id}", s.provider)

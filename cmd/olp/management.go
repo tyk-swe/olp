@@ -104,6 +104,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	notifications.NewManagement(m.Access, *m.Egress).Register(mux)
 	settings.New(m.Access, m.Access.RuntimePublisher).Register(mux)
 	(&release.DelegationManagement{Access: m.Access, Manager: m.Runtime}).Register(mux)
+	release.RegisterGenerations(m.Access, mux)
 	(&gateway.CacheManagement{Access: m.Access, Gateway: m.Gateway}).Register(mux)
 	(&branding.Server{Access: m.Access}).Register(mux)
 	publishGuardrails := func(ctx context.Context, tx pgx.Tx, actor string) error {
