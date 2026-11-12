@@ -83,39 +83,93 @@ func chatEvidence(m message, max int) string {
 	return mentionSafe.Replace(truncate(m.details(), max))
 }
 
+type slackPayload struct {
+	Text   string       `json:"text"`
+	Blocks []slackBlock `json:"blocks"`
+}
+
+type slackBlock struct {
+	Type string    `json:"type"`
+	Text slackText `json:"text"`
+}
+
+type slackText struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
 func slackMessage(m message) any {
-	return map[string]any{
-		"text": truncate(m.title, 150),
-		"blocks": []map[string]any{
-			{"type": "header", "text": map[string]any{"type": "plain_text", "text": truncate(m.title, 150)}},
-			{"type": "section", "text": map[string]any{"type": "mrkdwn", "text": "```" + chatEvidence(m, 2800) + "```"}},
+	return slackPayload{
+		Text: truncate(m.title, 150),
+		Blocks: []slackBlock{
+			{Type: "header", Text: slackText{Type: "plain_text", Text: truncate(m.title, 150)}},
+			{Type: "section", Text: slackText{Type: "mrkdwn", Text: "```" + chatEvidence(m, 2800) + "```"}},
 		},
 	}
+}
+
+type teamsPayload struct {
+	Type        string            `json:"type"`
+	Attachments []teamsAttachment `json:"attachments"`
+}
+
+type teamsAttachment struct {
+	ContentType string    `json:"contentType"`
+	ContentURL  *string   `json:"contentUrl"`
+	Content     teamsCard `json:"content"`
+}
+
+type teamsCard struct {
+	Schema  string           `json:"$schema"`
+	Type    string           `json:"type"`
+	Version string           `json:"version"`
+	Body    []teamsTextBlock `json:"body"`
+}
+
+type teamsTextBlock struct {
+	Type   string `json:"type"`
+	Text   string `json:"text"`
+	Weight string `json:"weight,omitempty"`
+	Wrap   bool   `json:"wrap,omitempty"`
 }
 
 func teamsMessage(m message) any {
-	return map[string]any{
-		"type": "message",
-		"attachments": []map[string]any{
-			{"contentType": "application/vnd.microsoft.card.adaptive", "contentUrl": nil,
-				"content": map[string]any{
-					"$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-					"type":    "AdaptiveCard", "version": "1.4",
-					"body": []map[string]any{
-						{"type": "TextBlock", "text": truncate(m.title, 256), "weight": "Bolder"},
-						{"type": "TextBlock", "text": chatEvidence(m, 3600), "wrap": true},
-					},
-				}},
-		},
+	return teamsPayload{
+		Type: "message",
+		Attachments: []teamsAttachment{{
+			ContentType: "application/vnd.microsoft.card.adaptive",
+			Content: teamsCard{
+				Schema:  "http://adaptivecards.io/schemas/adaptive-card.json",
+				Type:    "AdaptiveCard",
+				Version: "1.4",
+				Body: []teamsTextBlock{
+					{Type: "TextBlock", Text: truncate(m.title, 256), Weight: "Bolder"},
+					{Type: "TextBlock", Text: chatEvidence(m, 3600), Wrap: true},
+				},
+			},
+		}},
 	}
 }
 
+type discordPayload struct {
+	Content         string          `json:"content"`
+	AllowedMentions discordMentions `json:"allowed_mentions"`
+	Embeds          []discordEmbed  `json:"embeds"`
+}
+
+type discordMentions struct {
+	Parse []string `json:"parse"`
+}
+
+type discordEmbed struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+}
+
 func discordMessage(m message) any {
-	return map[string]any{
-		"content":          truncate(m.title, discordContentMax),
-		"allowed_mentions": map[string]any{"parse": []string{}},
-		"embeds": []map[string]any{
-			{"title": truncate(m.title, discordTitleMax), "description": chatEvidence(m, discordDescMax)},
-		},
+	return discordPayload{
+		Content:         truncate(m.title, discordContentMax),
+		AllowedMentions: discordMentions{Parse: []string{}},
+		Embeds:          []discordEmbed{{Title: truncate(m.title, discordTitleMax), Description: chatEvidence(m, discordDescMax)}},
 	}
 }

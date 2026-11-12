@@ -111,11 +111,11 @@ func (d delivery) lockKey() string {
 func (d delivery) message() (message, error) {
 	switch k := d.kind.(type) {
 	case budgetAlert:
-		body, err := json.Marshal(map[string]any{
-			"event": d.event, "rule_id": d.ruleID, "rule_name": d.ruleName,
-			"subject_kind": k.subjectKind, "subject_id": k.subjectID, "window_kind": k.windowKind,
-			"window_id": k.windowID, "threshold_percent": k.threshold, "accrued": k.accrued,
-			"limit": k.limit, "currency": k.currency, "delivery_id": d.id,
+		body, err := json.Marshal(budgetAlertBody{
+			deliveryIdentity: d.identity(),
+			SubjectKind:      k.subjectKind, SubjectID: k.subjectID, WindowKind: k.windowKind,
+			WindowID: k.windowID, ThresholdPercent: k.threshold, Accrued: k.accrued,
+			Limit: k.limit, Currency: k.currency,
 		})
 		if err != nil {
 			return message{}, err
@@ -129,6 +129,29 @@ func (d delivery) message() (message, error) {
 		return d.payloadMessage(k.payload, cmp.Or(k.key, d.id), k.resolved)
 	}
 	return message{}, errors.New("delivery has no kind")
+}
+
+type deliveryIdentity struct {
+	Event      contract.NotificationEvent `json:"event"`
+	RuleID     string                     `json:"rule_id"`
+	RuleName   string                     `json:"rule_name"`
+	DeliveryID string                     `json:"delivery_id"`
+}
+
+type budgetAlertBody struct {
+	deliveryIdentity
+	SubjectKind      string `json:"subject_kind"`
+	SubjectID        string `json:"subject_id"`
+	WindowKind       string `json:"window_kind"`
+	WindowID         int64  `json:"window_id"`
+	ThresholdPercent int32  `json:"threshold_percent"`
+	Accrued          string `json:"accrued"`
+	Limit            string `json:"limit"`
+	Currency         string `json:"currency"`
+}
+
+func (d delivery) identity() deliveryIdentity {
+	return deliveryIdentity{Event: d.event, RuleID: d.ruleID, RuleName: d.ruleName, DeliveryID: d.id}
 }
 
 func (d delivery) payloadMessage(payload []byte, dedupKey string, resolved bool) (message, error) {
