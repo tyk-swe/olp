@@ -5,6 +5,7 @@ package integration_test
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export/destination"
 	"github.com/tyk-swe/olp/internal/export/focus"
@@ -914,5 +916,79 @@ func TestBlockingStreamReadDoesNotStallOtherCommands(t *testing.T) {
 	}
 	if err := <-read; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestMCPManualSettlementPreservesPricingState(t *testing.T) {
+	for _, test := range []struct {
+		pricing, price string
+		expected       int64
+	}{{"unpriced", "NULL", 1}, {"free", "0", 0}} {
+		t.Run(test.pricing, func(t *testing.T) {
+			pricing, price, expected := test.pricing, test.price, test.expected
+			pool, _ := harness.Database(t)
+			f := newUsageFixture(t, pool)
+			ctx := t.Context()
+			var installation string
+			if err := pool.QueryRow(ctx, "SELECT id::text FROM olp.installation WHERE singleton").Scan(&installation); err != nil {
+				t.Fatal(err)
+			}
+			auth := secrets.NewAuthKey(make([]byte, 32), installation)
+			keys, err := secrets.ParseRing([]byte(`{"active_version":1,"keys":[{"version":1,"key":"` + strings.Repeat("01", 32) + `"}]}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := access.PrepareInstallation(ctx, pool, installation, auth, keys); err != nil {
+				t.Fatal(err)
+			}
+			token := "audit-session"
+			if _, err := pool.Exec(ctx, `INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint) VALUES($1,$2,$3,now()+interval '1 hour','test')`, uuid.NewString(), f.ownerID, auth.Digest(secrets.SessionDigest, token)); err != nil {
+				t.Fatal(err)
+			}
+			pub, rev, server, srev, dispatch, call := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+			sql := fmt.Sprintf(`
+ BEGIN;
+ INSERT INTO olp.agent_publications(id,project_id,kind,name,draft,etag,created_by) VALUES('%[1]s','%[2]s','toolset','audit','{}','%[1]s','%[3]s');
+ INSERT INTO olp.agent_publication_revisions(id,publication_id,project_id,kind,definition,digest,created_by) VALUES('%[4]s','%[1]s','%[2]s','toolset','{}',repeat('0',64),'%[3]s');
+ INSERT INTO olp.mcp_servers(id,project_id,name,transport,endpoint,enabled,latest_revision_id,etag,created_by) VALUES('%[5]s','%[2]s','audit','streamable_http','https://example.com/mcp',true,'%[6]s','%[5]s','%[3]s');
+ INSERT INTO olp.mcp_server_revisions(id,server_id,revision,endpoint,protocol_version,tools,digest,created_by) VALUES('%[6]s','%[5]s',1,'https://example.com/mcp','2025-03-26','[]',repeat('0',64),'%[3]s');
+ INSERT INTO olp.execution_debits(id,api_key_id,project_id,kind,affinity,intent_digest,claim_id,currency,cost_bound,charge_bound,state,prepared_until,dispatched_at) VALUES('%[7]s','%[8]s','%[2]s','tool','{}',decode(repeat('00',32),'hex'),'%[7]s','USD',0,0,'outcome_unknown',now(),now());
+ INSERT INTO olp.execution_debit_owners(dispatch_id,owner_id,owner_kind,basis,bound,daily_window_id,weekly_window_id,monthly_window_id) VALUES('%[7]s','%[8]s','key','cost',0,0,0,0);
+ INSERT INTO olp.mcp_tool_calls(id,dispatch_id,api_key_id,project_id,toolset_id,toolset_revision_id,server_id,server_revision_id,tool_alias,input_digest,status,started_at,pricing_state,currency,unit_price) VALUES('%[9]s','%[7]s','%[8]s','%[2]s','%[1]s','%[4]s','%[5]s','%[6]s','t_'||repeat('0',32)||'_'||repeat('0',32),repeat('0',64),'outcome_unknown',now(),'%[10]s','USD',%[11]s);
+ COMMIT;`, pub, f.projectID, f.ownerID, rev, server, srev, dispatch, f.keyID, call, pricing, price)
+			if _, err := pool.Exec(ctx, sql); err != nil {
+				t.Fatal(err)
+			}
+			a := access.New(access.Config{Pool: pool, Installation: installation, Origin: "https://test.example", Auth: auth, Keys: keys})
+			mux := http.NewServeMux()
+			accounting.NewManagement(a).Register(mux)
+			serverHTTP := httptest.NewServer(mux)
+			defer serverHTTP.Close()
+			for range 2 {
+				r, _ := http.NewRequest("POST", serverHTTP.URL+"/api/v1/mcp-tool-calls/"+call+"/resolve", strings.NewReader(`{"outcome":"settled","evidence_digest":"`+strings.Repeat("a", 64)+`","observed_cost":"0","observed_charge":"0"}`))
+				r.Header.Set("Content-Type", "application/json")
+				r.Header.Set("Origin", "https://test.example")
+				r.Header.Set("Idempotency-Key", "audit")
+				r.Header.Set("X-CSRF-Token", base64.RawURLEncoding.EncodeToString(auth.Digest(secrets.CSRFDigest, token)))
+				r.AddCookie(&http.Cookie{Name: "__Host-olp_session", Value: token})
+				w, err := serverHTTP.Client().Do(r)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer w.Body.Close()
+				body, _ := io.ReadAll(w.Body)
+				if w.StatusCode != 200 {
+					t.Fatalf("resolve HTTP %d: %s", w.StatusCode, body)
+				}
+			}
+			var attempts, uncharged int64
+			if err := pool.QueryRow(ctx, `SELECT unpriced_attempts,uncharged_attempts FROM olp.api_key_cost_windows WHERE api_key_id=$1 AND window_kind='month'`, f.keyID).Scan(&attempts, &uncharged); err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("two resolve requests returned HTTP 200; %s attempts=%d, uncharged=%d", pricing, attempts, uncharged)
+			if attempts != expected || uncharged != expected {
+				t.Fatalf("pricing=%s: unpriced=%d uncharged=%d, want %d", pricing, attempts, uncharged, expected)
+			}
+		})
 	}
 }
