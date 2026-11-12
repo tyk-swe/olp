@@ -125,7 +125,7 @@ func budgetBoundaryError(e *fault.Error, name, param string) *fault.Error {
 	return e
 }
 
-// budgetBoundary retains only a fixed hierarchy label, never a request label/value,
+// BudgetBoundary retains only a fixed hierarchy label, never a request label/value,
 // route name, owner identifier or provider error text.
 func BudgetBoundary(err *fault.Error) string {
 	if err == nil || err.Code != "budget_exhausted" {

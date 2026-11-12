@@ -22,7 +22,7 @@ func (a *Admission) ReserveCodeRate(ctx context.Context, authority keyauthority.
 	return a.ReserveKey(ctx, authority, "code", estimate, ttl, route...)
 }
 
-// withoutCostBudgets preserves rate, token, concurrency and identity controls.
+// WithoutCostBudgets preserves rate, token, concurrency and identity controls.
 func WithoutCostBudgets(authority keyauthority.Authority) keyauthority.Authority {
 	authority.Policy.WeeklyCostLimit = nil
 	authority.Policy.DailyCostLimit = nil

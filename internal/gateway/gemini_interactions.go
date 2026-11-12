@@ -39,7 +39,7 @@ func (s *Server) beginGeminiInteraction(w http.ResponseWriter, r *http.Request, 
 		if _, e := geminiClientKey(r, "stream", "last_event_id", "include_input"); e != nil {
 			return keyauthority.Authority{}, e
 		}
-		return s.authenticate(r, "inference")
+		return s.gate.Authenticate(r, "inference")
 	})
 	return x, authority, ok
 }
@@ -49,7 +49,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	status := http.StatusInternalServerError
 	var out *outcome
 	var p *pin
@@ -78,7 +78,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 		fail(fault.InvalidRequest("invalid_request", "Interaction create does not accept retrieval controls.", nil))
 		return
 	}
-	body, e := s.readBody(r)
+	body, e := s.gate.ReadBody(r)
 	if e != nil {
 		fail(e)
 		return
@@ -411,7 +411,7 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	status := http.StatusInternalServerError
 	var out *outcome
 	var p *pin

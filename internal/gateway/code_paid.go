@@ -25,6 +25,7 @@ import (
 	"github.com/tyk-swe/olp/internal/release"
 
 	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -62,7 +63,7 @@ func codeFamily(protocol codemode.Protocol) wire.Format {
 	}
 }
 
-func (s *Server) preparePaidCode(r *http.Request, release *release.Release, route codemode.Route, observation codemode.Request, operation codemode.Operation, ingress codeIngress, transport codeadapter.Transport, verified keyauthority.Authority, body []byte, recovery *codesessions.Recovery, fallback bool) (*codeAttempt, error) {
+func (s *Server) preparePaidCode(r *http.Request, release *release.Release, route codemode.Route, observation codemode.Request, operation codemode.Operation, inbound codeIngress, transport codeadapter.Transport, verified keyauthority.Authority, body []byte, recovery *codesessions.Recovery, fallback bool) (*codeAttempt, error) {
 	if !route.PaidParticipation {
 		return nil, codemode.Refuse(403, "code_paid_participation_disabled")
 	}
@@ -84,9 +85,9 @@ func (s *Server) preparePaidCode(r *http.Request, release *release.Release, rout
 		return nil, codemode.Refuse(403, "code_paid_target_denied")
 	}
 	connector := provider.Connector()
-	family := codeFamily(ingress.protocol)
+	family := codeFamily(inbound.protocol)
 	native, nativeOK := routing.CodePaidProtocol(provider, operation.Model)
-	if !nativeOK || native != ingress.protocol {
+	if !nativeOK || native != inbound.protocol {
 		return nil, codemode.Refuse(400, "code_paid_operation_unsupported")
 	}
 	parsed, parseErr := protocols.ParseForModel(family, body, operation.PublicModel())
@@ -128,15 +129,15 @@ func (s *Server) preparePaidCode(r *http.Request, release *release.Release, rout
 	if !chargePriced {
 		return nil, codemode.Refuse(503, "code_paid_pricing_unavailable")
 	}
-	labels, labelErr := s.parseAttribution(r, verified)
+	labels, labelErr := ingress.ParseAttribution(r, verified)
 	if labelErr != nil {
 		return nil, codemode.Refuse(labelErr.Status, "code_"+labelErr.Code)
 	}
-	permit, err := ledger.AdmitPaid(r.Context(), codesessions.PaidAdmission{Admission: codesessions.Admission{Route: route, APIKeyID: verified.ID, EndUserDigest: verified.EndUserDigest, Attribution: labels, Operation: operation, PreviousResponse: observation.PreviousResponse, InitialRecovery: observation.Recoverable, Recovery: recovery, ModelSource: release.Snapshot(), ModelPath: ingress.path, ModelTransport: transport}, Fallback: fallback, Authority: verified, Provider: provider, Slot: slot})
+	permit, err := ledger.AdmitPaid(r.Context(), codesessions.PaidAdmission{Admission: codesessions.Admission{Route: route, APIKeyID: verified.ID, EndUserDigest: verified.EndUserDigest, Attribution: labels, Operation: operation, PreviousResponse: observation.PreviousResponse, InitialRecovery: observation.Recoverable, Recovery: recovery, ModelSource: release.Snapshot(), ModelPath: inbound.path, ModelTransport: transport}, Fallback: fallback, Authority: verified, Provider: provider, Slot: slot})
 	if err != nil {
 		return nil, err
 	}
-	a := &codeAttempt{server: s, model: operation.Model, publicModel: operation.PublicModel(), permit: codesessions.Permit{Authority: permit.Authority, Attempt: permit.Attempt}, endpoint: codeadapter.Endpoint{Protocol: ingress.protocol, ClientPath: ingress.path}, observer: codeObserver(codeadapter.Endpoint{Protocol: ingress.protocol}), paid: &paidCodeAttempt{provider: provider, slot: slot, connector: connector, family: family, route: route, release: release, authority: permit.Authority, price: price, discount: discount, card: card, started: now, stream: parsed.Stream}, config: paidCodeConfiguration(provider)}
+	a := &codeAttempt{server: s, model: operation.Model, publicModel: operation.PublicModel(), permit: codesessions.Permit{Authority: permit.Authority, Attempt: permit.Attempt}, endpoint: codeadapter.Endpoint{Protocol: inbound.protocol, ClientPath: inbound.path}, observer: codeObserver(codeadapter.Endpoint{Protocol: inbound.protocol}), paid: &paidCodeAttempt{provider: provider, slot: slot, connector: connector, family: family, route: route, release: release, authority: permit.Authority, price: price, discount: discount, card: card, started: now, stream: parsed.Stream}, config: paidCodeConfiguration(provider)}
 	ready := false
 	defer func() {
 		if !ready {
@@ -146,10 +147,10 @@ func (s *Server) preparePaidCode(r *http.Request, release *release.Release, rout
 	if err := bindCodeWorkload(&a.paid.authority, verified); err != nil {
 		return nil, err
 	}
-	if failure := s.checkKeyAddress(r, a.paid.authority); failure != nil {
+	if failure := s.gate.CheckKeyAddress(r, a.paid.authority); failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_ip_not_allowed")
 	}
-	fresh, failure := s.identifyEndUser(r, a.paid.authority)
+	fresh, failure := s.gate.IdentifyEndUser(r, a.paid.authority)
 	if failure != nil || fresh.EndUserDigest != verified.EndUserDigest {
 		return nil, codemode.Refuse(403, "code_end_user_invalid")
 	}

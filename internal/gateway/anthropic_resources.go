@@ -47,7 +47,7 @@ func (s *Server) anthropicBegin(w http.ResponseWriter, r *http.Request, family w
 		return x, authority, true
 	}
 	if err := validateAnthropicFilesBeta(r.Header); err != nil {
-		s.release(r.Context())
+		s.gate.Release(r.Context())
 		s.refuse(x, w, err)
 		return x, authority, true
 	}
@@ -59,7 +59,7 @@ func (s *Server) anthropicUploadFile(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	route, err := s.nativeStateRoute(x, authority, r, "")
 	if err != nil {
 		s.refuse(x, w, err)
@@ -144,7 +144,7 @@ func (s *Server) anthropicFileCall(w http.ResponseWriter, r *http.Request, use r
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	res, err := s.deps.Resources.Get(r.Context(), resources.KindAnthropicFile, authority.ID, r.PathValue("id"))
 	if errors.Is(err, resources.ErrNotFound) {
 		s.refuse(x, w, fault.NotFoundError("not_found", "No file with this identifier exists for this key."))
@@ -317,7 +317,7 @@ func (s *Server) anthropicListResources(w http.ResponseWriter, r *http.Request, 
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	limit, before, cursor, err := anthropicListCursor(r.URL.Query(), kind)
 	if err != nil {
 		s.refuse(x, w, err)

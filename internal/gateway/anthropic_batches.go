@@ -36,7 +36,7 @@ func (s *Server) anthropicCreateBatch(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	body, err := s.readResourceBody(w, r)
 	if err != nil {
 		s.refuse(x, w, err)
@@ -222,7 +222,7 @@ func (s *Server) anthropicBatchCall(w http.ResponseWriter, r *http.Request, use 
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	res, err := s.deps.Resources.Get(r.Context(), resources.KindAnthropicBatch, authority.ID, r.PathValue("id"))
 	if errors.Is(err, resources.ErrNotFound) {
 		s.refuse(x, w, fault.NotFoundError("not_found", "No message batch with this identifier exists for this key."))

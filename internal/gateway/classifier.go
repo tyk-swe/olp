@@ -15,6 +15,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operationregistry"
@@ -176,7 +177,7 @@ func (s *Server) predict(ctx context.Context, x *call, slug, text string) (class
 	codec, _ := operationregistry.Lookup("tei-classification")
 	body, _ := json.Marshal(map[string]string{"inputs": text})
 	if x.snapshot().HasBodyLimits() {
-		x.request.body = &measuredBody{decoded: int64(len(body))}
+		x.request.body = &ingress.MeasuredBody{Decoded: int64(len(body))}
 	}
 	x.unary = &unaryCall{dialect: codec, route: slug, surface: "native"}
 	x.mode = "unary"
@@ -212,7 +213,7 @@ func (s *Server) generateLabel(ctx context.Context, x *call, slug, text string) 
 	failed := classification{failure: classifierFailed}
 	body, _ := json.Marshal(map[string]any{"model": slug, "messages": []map[string]string{{"role": "user", "content": text}}})
 	if x.snapshot().HasBodyLimits() {
-		x.request.body = &measuredBody{decoded: int64(len(body))}
+		x.request.body = &ingress.MeasuredBody{Decoded: int64(len(body))}
 	}
 	parsed, err := protocols.Parse(wire.Chat, body, "")
 	if err != nil {
@@ -243,7 +244,7 @@ func (s *Server) generateLabel(ctx context.Context, x *call, slug, text string) 
 // admission permit, awaiting it before any upstream work.
 // Keyless evaluations share the installation, organization and project budgets.
 func (s *Server) admitClassifier(ctx context.Context, x *call) *fault.Error {
-	if e := s.awaitAdmission(ctx, x); e != nil {
+	if e := s.gate.AwaitAdmission(ctx, x.priority); e != nil {
 		return e
 	}
 	x.estimate = requestEstimate(x)

@@ -20,7 +20,7 @@ type Error struct {
 	Param      *string
 	RetryAfter time.Duration
 	NoRetry    bool
-	// rate is the allowance of the key whose request limits refused the request,
+	// Rate is the allowance of the key whose request limits refused the request,
 	// as its reservation measured it, for the rate-limit headers of a 429. It is
 	// zero for every other error.
 	Rate limits.RateState

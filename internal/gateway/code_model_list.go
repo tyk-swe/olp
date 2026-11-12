@@ -6,21 +6,22 @@ import (
 	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 )
 
 func (s *Server) codeModels(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if !s.admit(r.Context()) {
+	if !s.gate.Admit(r.Context()) {
 		codeWriteError(w, r, codemode.Refuse(503, "code_overloaded"))
 		return
 	}
-	defer s.release(r.Context())
-	token, failure := presentedKey(r)
+	defer s.gate.Release(r.Context())
+	token, failure := ingress.PresentedKey(r)
 	if failure != nil {
 		codeWriteError(w, r, codemode.Refuse(failure.Status, "code_authentication_refused"))
 		return
 	}
-	authority, failure := s.authenticateKey(r, token, "inference")
+	authority, failure := s.gate.AuthenticateKey(r, token, "inference")
 	if failure != nil {
 		codeWriteError(w, r, codemode.Refuse(failure.Status, "code_authentication_refused"))
 		return

@@ -146,7 +146,7 @@ func (s *Server) geminiUploadStart(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	route, err := s.nativeStateRoute(x, authority, r, "")
 	if err != nil {
 		s.refuse(x, w, err)
@@ -506,7 +506,7 @@ func (s *Server) geminiUploadCommand(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	session, err := s.deps.Resources.Get(r.Context(), resources.KindGeminiUpload, authority.ID, r.PathValue("session"))
 	if errors.Is(err, resources.ErrNotFound) {
 		s.refuse(x, w, fault.NotFoundError("not_found", "No upload session with this identifier exists for this key."))
@@ -737,7 +737,7 @@ func (s *Server) geminiFileCall(w http.ResponseWriter, r *http.Request, use reta
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	localID := strings.TrimPrefix(r.PathValue("name"), "files/")
 	res, err := s.deps.Resources.Get(r.Context(), resources.KindGeminiFile, authority.ID, localID)
 	if errors.Is(err, resources.ErrNotFound) {
@@ -860,7 +860,7 @@ func (s *Server) geminiListFiles(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	pageSize, pageToken, cursorErr := geminiPageCursor(r.URL.Query())
 	if cursorErr != nil {
 		s.refuse(x, w, cursorErr)
@@ -923,7 +923,7 @@ func (s *Server) geminiDownloadFile(w http.ResponseWriter, r *http.Request) {
 	if !ok || action != "download" || localID == "" {
 		x, _, done := s.stateBegin(w, r, wire.GeminiFile)
 		if !done {
-			defer s.release(r.Context())
+			defer s.gate.Release(r.Context())
 			s.refuse(x, w, fault.NotFoundError("not_found", "Unknown Gemini file action."))
 		}
 		return

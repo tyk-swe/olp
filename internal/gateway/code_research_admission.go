@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/release"
@@ -54,16 +55,16 @@ func (s *Server) prepareResearch(r *http.Request, release *release.Release, rout
 	if !found || a.config.ProfileID != codeplans.ZAIProfile {
 		return nil, codemode.Refuse(503, "code_configuration_unsupported")
 	}
-	quota := a.config
-	if quota.Options.Limits != nil {
-		copy := *quota.Options.Limits
+	limited := a.config
+	if limited.Options.Limits != nil {
+		copy := *limited.Options.Limits
 		copy.TokensPerMinute = nil
 		if control {
 			copy.MaxConcurrency = nil
 		}
-		quota.Options.Limits = &copy
+		limited.Options.Limits = &copy
 	}
-	a.providerLease, failure = s.deps.Admission.ReserveCodeProvider(ctx, account.ProviderID, quota, 0, researchTimeout+time.Minute)
+	a.providerLease, failure = s.deps.Admission.ReserveCodeProvider(ctx, account.ProviderID, limited, 0, researchTimeout+time.Minute)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_provider_rate_limited")
 	}
@@ -130,9 +131,9 @@ func (s *Server) researchAuthority(r *http.Request, route codemode.Route, servic
 	if err = bindCodeWorkload(&fresh, authority); err != nil {
 		return fresh, account, err
 	}
-	failure := s.checkKeyAddress(r, fresh)
+	failure := s.gate.CheckKeyAddress(r, fresh)
 	if failure == nil {
-		fresh, failure = s.identifyEndUser(r, fresh)
+		fresh, failure = s.gate.IdentifyEndUser(r, fresh)
 	}
 	if failure != nil {
 		return fresh, account, codemode.Refuse(failure.Status, "code_permission_denied")
@@ -140,7 +141,7 @@ func (s *Server) researchAuthority(r *http.Request, route codemode.Route, servic
 	if !fresh.AllowsEndUser(fresh.EndUserDigest) {
 		return fresh, account, codemode.Refuse(403, "code_permission_denied")
 	}
-	if _, failure = s.parseAttribution(r, fresh); failure != nil {
+	if _, failure = ingress.ParseAttribution(r, fresh); failure != nil {
 		return fresh, account, codemode.Refuse(failure.Status, "code_invalid_attribution")
 	}
 	return fresh, account, nil

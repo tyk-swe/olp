@@ -12,6 +12,7 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/media/transport"
@@ -59,20 +60,20 @@ func (s *Server) mediaJSONHandler(decode func([]byte) (*media.Request, *media.Er
 		}
 		rc := http.NewResponseController(w)
 		if err := rc.SetReadDeadline(time.Now().Add(requestBodyTimeout)); err != nil {
-			s.release(r.Context())
+			s.gate.Release(r.Context())
 			s.refuse(x, w, fault.ServerError(http.StatusInternalServerError, "internal_error", "The request could not be read."))
 			return
 		}
-		body, e := s.readBody(r)
+		body, e := s.gate.ReadBody(r)
 		if e != nil {
-			s.release(r.Context())
+			s.gate.Release(r.Context())
 			s.refuse(x, w, e)
 			return
 		}
 		rc.SetReadDeadline(time.Time{})
 		request, failure := decode(body)
 		if failure != nil {
-			s.release(r.Context())
+			s.gate.Release(r.Context())
 			s.refuse(x, w, mediaError(failure))
 			return
 		}
@@ -91,14 +92,14 @@ func (s *Server) mediaFormHandler(maxFileBytes int64, maxFiles int, decode func(
 		}
 		form, e := s.parseMediaForm(w, r, authority.ID, maxFileBytes, maxFiles)
 		if e != nil {
-			s.release(r.Context())
+			s.gate.Release(r.Context())
 			s.refuse(x, w, e)
 			return
 		}
 		request, failure := decode(form)
 		if failure != nil {
 			form.Cleanup()
-			s.release(r.Context())
+			s.gate.Release(r.Context())
 			s.refuse(x, w, mediaError(failure))
 			return
 		}
@@ -111,7 +112,7 @@ func (s *Server) mediaFormHandler(maxFileBytes int64, maxFiles int, decode func(
 func (s *Server) parseMediaForm(w http.ResponseWriter, r *http.Request, keyID string, maxFileBytes int64, maxFiles int) (*staging.Form, *fault.Error) {
 	limit := s.cfg.MaxMediaBodyBytes
 	if r.ContentLength > limit {
-		return nil, bodyTooLarge()
+		return nil, ingress.BodyTooLarge()
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	rc := http.NewResponseController(w)
@@ -132,29 +133,29 @@ func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*call, keya
 	x.semanticHeaders = semanticHeaders(r.Header)
 	query, queryErr := url.ParseQuery(r.URL.RawQuery)
 	x.semanticQuery, x.semanticQueryInvalid = query, queryErr != nil
-	if !s.admitLater(r.Context()) {
+	if !s.gate.AdmitLater(r.Context()) {
 		s.refuse(x, w, fault.Overloaded)
 		return x, keyauthority.Authority{}, true
 	}
-	authority, e := s.authenticate(r, "inference")
+	authority, e := s.gate.Authenticate(r, "inference")
 	if e != nil {
-		s.release(r.Context())
+		s.gate.Release(r.Context())
 		s.refuse(x, w, e)
 		return x, keyauthority.Authority{}, true
 	}
 	if x.preferences, x.priority, e = routingControls(r, authority.Policy); e != nil {
-		s.release(r.Context())
+		s.gate.Release(r.Context())
 		s.refuse(x, w, e)
 		return x, keyauthority.Authority{}, true
 	}
-	if e = s.awaitAdmission(r.Context(), x); e != nil {
-		s.release(r.Context())
+	if e = s.gate.AwaitAdmission(r.Context(), x.priority); e != nil {
+		s.gate.Release(r.Context())
 		s.refuse(x, w, e)
 		return x, keyauthority.Authority{}, true
 	}
 	s.bindAuthority(x, authority)
-	if x.attribution, e = s.parseAttribution(r, authority); e != nil {
-		s.release(r.Context())
+	if x.attribution, e = ingress.ParseAttribution(r, authority); e != nil {
+		s.gate.Release(r.Context())
 		s.refuse(x, w, e)
 		return x, keyauthority.Authority{}, true
 	}
@@ -162,7 +163,7 @@ func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*call, keya
 }
 
 func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *call, authority keyauthority.Authority, request *media.Request) {
-	defer s.release(ctx)
+	defer s.gate.Release(ctx)
 	x.media = request
 	switch request.Op() {
 	case media.OpImageEdit, media.OpImageVariation:

@@ -74,11 +74,11 @@ func (s *Server) bedrockInvokeStream(w http.ResponseWriter, r *http.Request) {
 func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family wire.Format, operation, mode, upstreamOp string) {
 	x := &call{request: s.begin(w, r), family: family, actor: "api_key"}
 	x.mode = mode
-	authority, ok := s.enter(w, r, x, s.bedrockAuthenticate)
+	authority, ok := s.enter(w, r, x, s.gate.BedrockAuthenticate)
 	if !ok {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	fail := func(e *fault.Error) { s.refuse(x, w, e) }
 	slug := r.PathValue("model")
 	if !routeidentity.ValidSlug(slug) {
@@ -110,7 +110,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family wir
 		fail(e)
 		return
 	}
-	body, e := s.readBody(r)
+	body, e := s.gate.ReadBody(r)
 	if e != nil {
 		fail(e)
 		return

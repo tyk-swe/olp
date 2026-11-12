@@ -74,7 +74,7 @@ func (a *Admission) BudgetRejections(dimension limits.Dimension) int64 {
 	return 0
 }
 
-// recordRejection counts the windows Prometheus reports. Rate and concurrency
+// RecordRejection counts the windows Prometheus reports. Rate and concurrency
 // rejections are per-request churn; cost budget rejections are the durable
 // evidence that a budget stopped spend.
 func (a *Admission) RecordRejection(dimension limits.Dimension) {
@@ -89,7 +89,7 @@ func (a *Admission) RecordRejection(dimension limits.Dimension) {
 }
 
 const (
-	// reserveTimeout bounds one admission decision. A limiter that cannot
+	// ReserveTimeout bounds one admission decision. A limiter that cannot
 	// answer this quickly is an outage, not a slow allow.
 	ReserveTimeout = time.Second
 	// coordinationTimeout bounds the cooldown reads and writes that are
@@ -109,20 +109,20 @@ func (a *Admission) Logger() *slog.Logger {
 	return a.log
 }
 
-// limitsUnavailable is the terminal answer when a budget that must be enforced
+// LimitsUnavailable is the terminal answer when a budget that must be enforced
 // cannot be consulted.
 func LimitsUnavailable() *fault.Error {
 	return fault.ServerError(http.StatusServiceUnavailable, "distributed_limits_unavailable", "Request limits cannot be enforced right now; retry shortly.")
 }
 
-// rateLimited renders the rejection a shared budget produced. estimate says a
+// RateLimited renders the rejection a shared budget produced. estimate says a
 // cost budget refused the request although it is not spent: the request's own
 // estimated cost does not fit beside what is accrued and in flight.
 func RateLimited(dimension limits.Dimension, retryAfter time.Duration, estimate bool) *fault.Error {
 	return RateLimitedBasis(dimension, retryAfter, estimate, limits.BasisCost)
 }
 
-// rateLimitedBasis is rateLimited for a refusal under an owner's basis: a
+// RateLimitedBasis is RateLimited for a refusal under an owner's basis: a
 // charge-basis budget names its measure.
 func RateLimitedBasis(dimension limits.Dimension, retryAfter time.Duration, estimate bool, basis limits.Basis) *fault.Error {
 	code, message := "rate_limit_exceeded", "The API key rate limit was exceeded."
@@ -206,7 +206,7 @@ func groupRequest(authority *keyauthority.Authority, estimate int64, ttl time.Du
 	return &request
 }
 
-// reserveKey admits one request against the API key budgets. A nil lease with
+// ReserveKey admits one request against the API key budgets. A nil lease with
 // a nil error admits the request without one: either the key bounds nothing,
 // or the limiter is unreachable and the installation chose to fail open. The
 // surface is the one the caller speaks, whose headers report the key's allowance
@@ -215,7 +215,7 @@ func (a *Admission) ReserveKey(ctx context.Context, authority keyauthority.Autho
 	return a.ReserveKeyCosted(ctx, &authority, surface, estimate, ttl, CostReservation{}, route...)
 }
 
-// reserveKeyCosted applies all configured caller boundaries and attaches their
+// ReserveKeyCosted applies all configured caller boundaries and attaches their
 // leases for one settlement. Every refusal refunds earlier reservations. The
 // optional route identifies the ingress route for per-key route policy.
 func (a *Admission) ReserveKeyCosted(ctx context.Context, authority *keyauthority.Authority, surface string, estimate int64, ttl time.Duration, hold CostReservation, route ...string) (*admission.Lease, *fault.Error) {
@@ -447,7 +447,7 @@ func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *keyauthor
 	return group, nil
 }
 
-// outage decides what happens to a request whose budgets cannot be consulted.
+// Outage decides what happens to a request whose budgets cannot be consulted.
 // Spending against an unknown balance can never be undone, so a cost budget
 // always fails closed; rate and concurrency limits follow the policy the
 // installation configured.
@@ -461,7 +461,7 @@ func (a *Admission) Outage(keyID string, costBudget bool, cause error) *fault.Er
 	return nil
 }
 
-// settleKey finishes the key reservation. A request that never dispatched an
+// SettleKey finishes the key reservation. A request that never dispatched an
 // attempt consumed nothing and is refunded in full; any other request keeps
 // its request and local token allowance, increases tokens for higher reported
 // usage, and returns the concurrency slot. The cost
@@ -517,14 +517,14 @@ func (a *Admission) InstallSnapshots(ctx context.Context, snapshots []limits.Sna
 
 func (a *Admission) Fleet() *fleet.State { return a.fleet }
 
-// targetReservation holds what one attempt reserved on its provider.
+// TargetReservation holds what one attempt reserved on its provider.
 type TargetReservation struct {
 	connection *admission.Lease
 	slot       *admission.Lease
 	log        *slog.Logger
 }
 
-// settle reconciles and releases both leases once the attempt has ended.
+// Settle reconciles and releases both leases once the attempt has ended.
 func (t *TargetReservation) Settle(ctx context.Context, dispatched bool, actual *int64) {
 	if t == nil {
 		return
@@ -554,7 +554,7 @@ func slotRequest(slot *routing.Slot, estimate int64, ttl time.Duration, priority
 	}, ttl)
 }
 
-// reserveTarget admits one attempt against the provider connection quota and
+// ReserveTarget admits one attempt against the provider connection quota and
 // then the credential slot quota. It returns the reservation the attempt must
 // settle, or a rejection to record as a failed attempt, or skip when a quota
 // is configured but cannot be consulted: an unmeterable target is passed over
@@ -613,7 +613,7 @@ func settleTargetRefund(ctx context.Context, reservation *TargetReservation) {
 	SettleKey(ctx, reservation.slot, false, nil, reservation.log)
 }
 
-// cooldown records a shared cooldown for the credential and for the slot, so
+// Cooldown records a shared cooldown for the credential and for the slot, so
 // every replica avoids a target the upstream just rejected instead of each
 // learning it alone.
 func (a *Admission) Cooldown(ctx context.Context, providerID string, slot *routing.Slot, generation int64, d time.Duration, credential bool) {
@@ -633,7 +633,7 @@ func (a *Admission) Cooldown(ctx context.Context, providerID string, slot *routi
 	}
 }
 
-// endCredentialCooldown ends a credential version's shared cooldown before it
+// EndCredentialCooldown ends a credential version's shared cooldown before it
 // runs out, for every replica.
 func (a *Admission) EndCredentialCooldown(ctx context.Context, providerID, credentialID string, generation int64) {
 	if !a.Ready() {
@@ -646,7 +646,7 @@ func (a *Admission) EndCredentialCooldown(ctx context.Context, providerID, crede
 	}
 }
 
-// cooling reports whether another replica put this credential or slot in a
+// Cooling reports whether another replica put this credential or slot in a
 // cooldown. A store that cannot answer must not take every slot out of
 // service, so an unreadable cooldown is treated as absent and logged.
 func (a *Admission) Cooling(ctx context.Context, providerID string, slot *routing.Slot, generation int64) bool {
@@ -666,7 +666,7 @@ func (a *Admission) Cooling(ctx context.Context, providerID string, slot *routin
 // maxEstimate is the largest integer the limiter can store.
 const maxEstimate = estimate.MaxTokens
 
-// keyReservationEstimate covers every upstream attempt the route may dispatch.
+// KeyReservationEstimate covers every upstream attempt the route may dispatch.
 // Settlement charges every attempt, including a conservative estimate when an
 // upstream may have billed work without reporting usage, so admission must hold
 // the same worst-case capacity before any provider is called.
@@ -674,7 +674,7 @@ func KeyReservationEstimate(perAttempt int64, attempts int) int64 {
 	return multiplyBounded(perAttempt, int64(max(attempts, 1)))
 }
 
-// settledAttemptTokens preserves a reservation's estimate when native counters
+// SettledAttemptTokens preserves a reservation's estimate when native counters
 // are partial. nil leaves an undisclosed target's existing estimate standing.
 func SettledAttemptTokens(fact *events.AttemptFact, estimate int64) *int64 {
 	if fact == nil {
@@ -687,7 +687,7 @@ func SettledAttemptTokens(fact *events.AttemptFact, estimate int64) *int64 {
 	return actual
 }
 
-// multiplyBounded and addBounded saturate at the largest integer the limiter
+// multiplyBounded and AddBounded saturate at the largest integer the limiter
 // accepts, so an absurd request is rejected as too large for the key's window
 // rather than failing the reservation as malformed.
 func multiplyBounded(a, b int64) int64 {
@@ -704,7 +704,7 @@ func AddBounded(a, b int64) int64 {
 	return a + b
 }
 
-// totalTokens is the usage an attempt disclosed, as one number to reconcile a
+// TotalTokens is the usage an attempt disclosed, as one number to reconcile a
 // token reservation against. Providers that report only the two halves are
 // summed; a provider that reported nothing leaves the estimate standing.
 func TotalTokens(usage *wire.Usage) *int64 {

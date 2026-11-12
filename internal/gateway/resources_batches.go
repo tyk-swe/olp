@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/batches/upstream"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -48,7 +49,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	request, e := s.batchCreateRequest(w, r)
 	if e != nil {
 		s.refuse(x, w, e)
@@ -102,7 +103,7 @@ func (s *Server) batchCreateRequest(w http.ResponseWriter, r *http.Request) (bat
 	if e != nil {
 		return batchCreateRequest{}, e
 	}
-	source, err := parseObjectRequest(body, oif.Limits{MaxBytes: int(s.cfg.MaxBodyBytes)})
+	source, err := ingress.ParseObjectRequest(body, oif.Limits{MaxBytes: int(s.cfg.MaxBodyBytes)})
 	if err != nil || source.Root().Kind() != oif.Object {
 		return batchCreateRequest{}, fault.InvalidRequest("invalid_json", "The request body must be one JSON object.", nil)
 	}
@@ -400,7 +401,7 @@ func (s *Server) batchCall(w http.ResponseWriter, r *http.Request, use retainedU
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	kind := durableKind(resources.KindBatch, r.PathValue("id"))
 	if kind == resources.KindStrictBatch && !authority.Policy.AllowProviderState {
 		s.refuse(x, w, providerStateForbidden())
@@ -438,7 +439,7 @@ func (s *Server) listBatches(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	limit, after, e := listArgs(r)
 	if e != nil {
 		s.refuse(x, w, e)

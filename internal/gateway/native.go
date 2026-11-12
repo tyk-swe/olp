@@ -100,7 +100,7 @@ func (s *Server) nativeModel(ctx context.Context, release *release.Release, auth
 func (s *Server) nativeModels(w http.ResponseWriter, r *http.Request) {
 	req := s.begin(w, r)
 	surface := fault.RequestSurface(r)
-	authority, e := s.authenticate(r, "models_read")
+	authority, e := s.gate.Authenticate(r, "models_read")
 	if e != nil {
 		fault.WriteSurfaceError(w, e, surface)
 		return

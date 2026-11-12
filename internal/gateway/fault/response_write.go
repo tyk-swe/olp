@@ -18,13 +18,13 @@ func WriteJSON(w http.ResponseWriter, body any) {
 	w.Write(data)
 }
 
-// streamWriter commits the client response on the first upstream frame and
+// StreamWriter commits the client response on the first upstream frame and
 // applies a per-frame write deadline so slow readers cannot pin upstream
 // work forever.
 type StreamWriter struct {
 	W      http.ResponseWriter
 	Family wire.Format
-	// headers adds the streamed request's own headers, once as the stream is
+	// Headers adds the streamed request's own headers, once as the stream is
 	// committed and once as it finishes. A writer that only reports an error
 	// has none.
 	Headers   StreamHeaders
@@ -36,10 +36,10 @@ type StreamHeaders interface {
 	Closing(h http.Header, committed bool)
 }
 
-// responseWriteTimeout bounds unary delivery and each streamed frame.
+// ResponseWriteTimeout bounds unary delivery and each streamed frame.
 const ResponseWriteTimeout = 30 * time.Second
 
-// errClientWrite marks a frame the client could not or would not read; the
+// ErrClientWrite marks a frame the client could not or would not read; the
 // executor classifies it as client cancellation rather than provider failure.
 var ErrClientWrite = errors.New("client write failed")
 
@@ -68,7 +68,7 @@ func (sw *StreamWriter) Emit(frame []byte) error {
 	return nil
 }
 
-// finish completes the client response and returns the status it carried.
+// Finish completes the client response and returns the status it carried.
 func (sw *StreamWriter) Finish(failure *Error, cancelled bool) int {
 	if sw.Headers != nil {
 		sw.Headers.Closing(sw.W.Header(), sw.Committed)

@@ -18,7 +18,7 @@ func (s *Server) readResourceBody(w http.ResponseWriter, r *http.Request) ([]byt
 	if err := controller.SetReadDeadline(deadline); err != nil {
 		return nil, fault.ServerError(http.StatusInternalServerError, "internal_error", "The request body could not be bounded.")
 	}
-	body, failure := s.readBody(r)
+	body, failure := s.gate.ReadBody(r)
 	if failure == nil {
 		_ = controller.SetReadDeadline(time.Time{})
 	}

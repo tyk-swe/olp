@@ -53,7 +53,7 @@ type PersistingSink struct {
 	Log     *slog.Logger
 }
 
-// persistTimeout bounds writing one directly persisted record.
+// PersistTimeout bounds writing one directly persisted record.
 const PersistTimeout = 10 * time.Second
 
 // Terminal records one finished request.
@@ -266,13 +266,13 @@ func UsageAttempt(e Envelope, index int) (usage.Attempt, error) {
 	return attempt, nil
 }
 
-// attemptSuccessful reports whether the attempt completed successfully, which
+// AttemptSuccessful reports whether the attempt completed successfully, which
 // is when a per-request price component applies.
 func AttemptSuccessful(fact *AttemptFact) bool {
 	return (fact.Class == ClassSuccess || fact.Class == ClassCacheHit) && (fact.Status >= 200 && fact.Status <= 299 || fact.Status == 304)
 }
 
-// attemptUsage is the billing evidence an attempt carries into its usage event.
+// AttemptUsage is the billing evidence an attempt carries into its usage event.
 // It is also what the gateway prices an attempt by when it settles the request's
 // cost, so what the budget holds for a request and what accounting later records
 // for it are one reading of the same attempt.
@@ -308,7 +308,7 @@ func streamedTokens(fact *AttemptFact) *int64 {
 	return &streamed
 }
 
-// optionalText omits an empty string rather than storing one.
+// OptionalText omits an empty string rather than storing one.
 func OptionalText(value string) *string {
 	if value == "" {
 		return nil
@@ -316,7 +316,7 @@ func OptionalText(value string) *string {
 	return &value
 }
 
-// optionalStatus keeps only a status that was actually sent.
+// OptionalStatus keeps only a status that was actually sent.
 func OptionalStatus(status int) *int {
 	if status < 100 || status > 599 {
 		return nil
@@ -324,7 +324,7 @@ func OptionalStatus(status int) *int {
 	return &status
 }
 
-// milliseconds renders a duration for storage. Time never runs backwards in a
+// Milliseconds renders a duration for storage. Time never runs backwards in a
 // record, so a negative measurement is reported as none elapsed.
 func Milliseconds(d time.Duration) int64 {
 	return max(d.Milliseconds(), 0)

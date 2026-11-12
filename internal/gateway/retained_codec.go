@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
@@ -44,13 +45,13 @@ func (s *Server) readRetainedBody(r *http.Request, e retainedapi.Endpoint) ([]by
 		}
 		body, err := readBounded(r.Body, s.cfg.MaxBodyBytes)
 		if errors.Is(err, errResponseTooLarge) {
-			return nil, source, "", bodyTooLarge()
+			return nil, source, "", ingress.BodyTooLarge()
 		}
 		if err != nil {
-			return nil, source, "", bodyReadError(err)
+			return nil, source, "", ingress.BodyReadError(err)
 		}
-		if measured, ok := r.Body.(*measuredBody); ok {
-			measured.decoded = int64(len(body))
+		if measured, ok := r.Body.(*ingress.MeasuredBody); ok {
+			measured.Decoded = int64(len(body))
 		}
 		reader := multipart.NewReader(bytes.NewReader(body), params["boundary"])
 		parts := 0
@@ -90,7 +91,7 @@ func (s *Server) readRetainedBody(r *http.Request, e retainedapi.Endpoint) ([]by
 		}
 		return body, source, r.Header.Get("Content-Type"), nil
 	}
-	body, failure := s.readBody(r)
+	body, failure := s.gate.ReadBody(r)
 	if failure != nil {
 		return nil, source, "", failure
 	}
@@ -152,7 +153,7 @@ func (s *Server) retainedBodyDigest(e retainedapi.Endpoint, slug string, body []
 		}
 		data, err := io.ReadAll(part)
 		if err != nil {
-			return nil, bodyReadError(err)
+			return nil, ingress.BodyReadError(err)
 		}
 		parts = append(parts, partContent{Header: part.Header, Body: data})
 	}

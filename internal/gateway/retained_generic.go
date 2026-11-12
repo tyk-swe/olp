@@ -90,7 +90,7 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	x.operationOverride = e.Operation
 	x.mode = "unary"
 	x.actor = "api_key_resource"
@@ -977,7 +977,7 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	x.operationOverride = operation
 	x.mode = "unary"
 	x.actor = "api_key_resource"
@@ -994,7 +994,7 @@ func (s *Server) retainedProxy(w http.ResponseWriter, r *http.Request, operation
 		fail(providerStateForbidden())
 		return
 	}
-	body, err := s.readBody(r)
+	body, err := s.gate.ReadBody(r)
 	if err != nil {
 		fail(err)
 		return

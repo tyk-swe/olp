@@ -61,7 +61,7 @@ func rateHeadersOf(surface string) *rateHeaders {
 	return nil
 }
 
-// headerList collects the headers one response adds, so that they cost two
+// HeaderList collects the headers one response adds, so that they cost two
 // allocations however many there are: their values are written one after the
 // other into a single buffer that becomes one string, and the lists the header
 // map holds are slices of one array. A response that adds nothing allocates
@@ -78,7 +78,7 @@ type HeaderList struct {
 // key limited on both dimensions, and the four of metadata.
 const maxResponseHeaders = 10
 
-// headerBuffer is the room a response's header values are written in.
+// HeaderBuffer is the room a response's header values are written in.
 type HeaderBuffer [320]byte
 
 // add names the value that ends the text.
@@ -99,7 +99,7 @@ func (l *HeaderList) Str(text []byte, name, value string) []byte {
 	return text
 }
 
-// apply stores every collected value in h, replacing any the header already held.
+// Apply stores every collected value in h, replacing any the header already held.
 func (l *HeaderList) Apply(h http.Header, text []byte) {
 	if l.count == 0 {
 		return
@@ -114,7 +114,7 @@ func (l *HeaderList) Apply(h http.Header, text []byte) {
 	}
 }
 
-// rate collects the allowance a surface reports, for the dimensions the key
+// Rate collects the allowance a surface reports, for the dimensions the key
 // limits and no others. resetAfter is the time left in the window, which a
 // surface that states an instant does not use.
 func (l *HeaderList) Rate(text []byte, surface string, state limits.RateState, resetAfter time.Duration) []byte {

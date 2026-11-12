@@ -286,7 +286,7 @@ func (s *Server) recoverContinuation(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	if values := r.Header.Values(continuationHeader); len(values) != 1 || values[0] != interaction.ContinuationV1 {
 		s.refuse(x, w, fault.InvalidRequest("state_carrier", "Recovery requires the tested chat-anthropic-tools-v1 client contract.", nil))
 		return

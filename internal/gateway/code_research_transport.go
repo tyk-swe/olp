@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/coderesearch"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 )
 
@@ -25,7 +26,7 @@ func researchOriginAllowed(r *http.Request) bool {
 	if len(values) == 0 {
 		return true
 	}
-	return len(values) == 1 && sameOrigin(r, values[0])
+	return len(values) == 1 && ingress.SameOrigin(r, values[0])
 }
 
 // copyResearchResponse reports whether a valid InitializeResult reached the

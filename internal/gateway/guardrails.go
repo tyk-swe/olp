@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/oif"
@@ -406,12 +407,12 @@ func nilIfParallel(p *parallelGuardrail) error {
 func (s *Server) applyGuardrails(w http.ResponseWriter, r *http.Request) {
 	req := s.begin(w, r)
 	s.cors(w, r)
-	if !s.admit(r.Context()) {
+	if !s.gate.Admit(r.Context()) {
 		fault.WriteError(w, fault.Overloaded)
 		return
 	}
-	defer s.release(r.Context())
-	authority, e := s.authenticate(r, "guardrails")
+	defer s.gate.Release(r.Context())
+	authority, e := s.gate.Authenticate(r, "guardrails")
 	if e != nil {
 		fault.WriteError(w, e)
 		return
@@ -461,10 +462,10 @@ func (s *Server) EvaluateGuardrails(r *http.Request, p access.Principal, pinned 
 	if s == nil || s.deps.Runtime == nil {
 		return guardrails.Result{}, access.Fail(503, "guardrails_unavailable", "The evaluator is unavailable.")
 	}
-	if !s.admit(r.Context()) {
+	if !s.gate.Admit(r.Context()) {
 		return guardrails.Result{}, access.Fail(fault.Overloaded.Status, fault.Overloaded.Code, fault.Overloaded.Message)
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	x := &call{request: request{id: uuid.Must(uuid.NewV7()).String(), minted: true, startedAt: s.now(), release: s.deps.Runtime.Release()}, actor: "playground", origin: usage.OriginPlayground, userID: p.UserID(), family: wire.Chat, operationOverride: "guardrail"}
 	x.authorize = func(route *routing.Route) *fault.Error {
 		if err := p.Authorize(access.Playground); err != nil {
@@ -603,7 +604,7 @@ func (s *Server) modelGuardrail(ctx context.Context, parent *call, d guardrails.
 	var out *outcome
 	if semantic {
 		body, _ := json.Marshal(map[string]any{"model": route.Slug, "input": embeddingInputs, "encoding_format": "float"})
-		x.request.body = &measuredBody{decoded: int64(len(body))}
+		x.request.body = &ingress.MeasuredBody{Decoded: int64(len(body))}
 		x.family, x.mode = wire.Embeddings, "unary"
 		if route.Fidelity.Strict() {
 			codec, _ := operationregistry.Lookup("openai-embeddings")

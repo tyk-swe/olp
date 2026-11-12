@@ -337,7 +337,7 @@ func (s *Server) responseCall(w http.ResponseWriter, r *http.Request, use retain
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	if !authority.Policy.AllowProviderState {
 		s.refuse(x, w, providerStateForbidden())
 		return

@@ -17,6 +17,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -25,12 +26,12 @@ import (
 func (s *Server) passthrough(w http.ResponseWriter, r *http.Request) {
 	x := &call{request: s.begin(w, r), family: wire.Passthrough, actor: "api_key", mode: "unary"}
 	fail := func(e *fault.Error) { s.refuseOn(x, w, e, "openai") }
-	if !s.admit(r.Context()) {
+	if !s.gate.Admit(r.Context()) {
 		fail(fault.Overloaded)
 		return
 	}
-	defer s.release(r.Context())
-	authority, e := s.authenticate(r, "inference")
+	defer s.gate.Release(r.Context())
+	authority, e := s.gate.Authenticate(r, "inference")
 	if e != nil {
 		fail(e)
 		return
@@ -40,7 +41,7 @@ func (s *Server) passthrough(w http.ResponseWriter, r *http.Request) {
 		fail(e)
 		return
 	}
-	if x.attribution, e = s.parseAttribution(r, authority); e != nil {
+	if x.attribution, e = ingress.ParseAttribution(r, authority); e != nil {
 		fail(e)
 		return
 	}
@@ -172,7 +173,7 @@ func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *cal
 			return
 		}
 		if int64(len(body)) > limit {
-			fail(bodyTooLarge())
+			fail(ingress.BodyTooLarge())
 			return
 		}
 	}

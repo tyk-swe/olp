@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/interaction"
@@ -318,5 +319,5 @@ func requestMetadataForPruning(parent *call, body []byte) request {
 	return request{id: parent.request.id, durableID: parent.request.durableID, minted: parent.request.minted,
 		clientIP: parent.request.clientIP, startedAt: parent.request.startedAt, release: parent.request.release,
 		delegationAssertion: parent.request.delegationAssertion, callerCredential: parent.request.callerCredential,
-		body: &measuredBody{decoded: int64(len(body))}}
+		body: &ingress.MeasuredBody{Decoded: int64(len(body))}}
 }

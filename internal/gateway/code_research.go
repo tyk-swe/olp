@@ -20,11 +20,11 @@ const researchTimeout = 2 * time.Minute
 // selection and conversation pinning. Every HTTP request rechecks live authority.
 func (s *Server) serveCodeResearch(w http.ResponseWriter, r *http.Request) {
 	refuse := func(err error) { codeWriteError(w, r, err) }
-	if !s.admit(r.Context()) {
+	if !s.gate.Admit(r.Context()) {
 		refuse(codemode.Refuse(503, "code_overloaded"))
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	if !researchOriginAllowed(r) || r.URL.RawPath != "" || r.URL.RawQuery != "" {
 		refuse(codemode.Refuse(403, "code_research_origin_denied"))
 		return
@@ -34,7 +34,7 @@ func (s *Server) serveCodeResearch(w http.ResponseWriter, r *http.Request) {
 		refuse(codemode.Refuse(405, "code_research_method_denied"))
 		return
 	}
-	authority, failure := s.authenticate(r, "inference")
+	authority, failure := s.gate.Authenticate(r, "inference")
 	if failure != nil {
 		refuse(codemode.Refuse(failure.Status, "code_authentication_refused"))
 		return

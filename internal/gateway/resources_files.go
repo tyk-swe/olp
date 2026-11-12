@@ -31,7 +31,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	slug := strings.TrimSpace(r.Header.Get(stateRouteHeader))
 	if slug == "" {
 		s.refuse(x, w, fault.InvalidRequest("missing_required_parameter", "X-OLP-Route is required for file uploads.", nil))
@@ -411,7 +411,7 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	limit, after, e := listArgs(r)
 	if e != nil {
 		s.refuse(x, w, e)
@@ -684,7 +684,7 @@ func (s *Server) fileCall(w http.ResponseWriter, r *http.Request, use retainedUs
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	kind := durableKind(resources.KindFile, r.PathValue("id"))
 	if kind == resources.KindStrictFile && !authority.Policy.AllowProviderState {
 		s.refuse(x, w, providerStateForbidden())

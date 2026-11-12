@@ -17,6 +17,7 @@ import (
 	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/duplexcontract"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -53,12 +54,12 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 		fault.WriteSurfaceError(w, e, surface)
 		return
 	}
-	if !s.admit(r.Context()) {
+	if !s.gate.Admit(r.Context()) {
 		x.failure, status = fault.Overloaded, fault.Overloaded.Status
 		fault.WriteSurfaceError(w, fault.Overloaded, surface)
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	if !s.browserOriginAllowed(r) {
 		e := fault.PermissionError("origin_forbidden", "This origin is not allowed to open duplex sessions.")
 		x.failure, status = e, e.Status
@@ -71,17 +72,17 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 		fault.WriteSurfaceError(w, e, surface)
 		return
 	}
-	token := bearerToken(r)
+	token := ingress.BearerToken(r)
 	var authority keyauthority.Authority
 	var e *fault.Error
 	if len(r.Header.Values("Authorization")) != 1 || token == "" {
 		e = fault.AuthenticationError("invalid_api_key", "Provide one API key.")
 	} else {
-		authority, e = s.authenticateRequest(r, token, "inference")
+		authority, e = s.gate.AuthenticateRequest(r, token, "inference")
 	}
 	if e == nil {
 		s.bindAuthority(x, authority)
-		x.attribution, e = s.parseAttribution(r, authority)
+		x.attribution, e = ingress.ParseAttribution(r, authority)
 	}
 	if e != nil {
 		x.failure, status = e, e.Status
@@ -148,7 +149,7 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 	}
 	if route.MaxBodyBytes != nil && int64(len(initial)) > *route.MaxBodyBytes {
 		client.Close(websocket.StatusMessageTooBig, "request body limit exceeded")
-		x.failure, status = bodyTooLarge(), http.StatusRequestEntityTooLarge
+		x.failure, status = ingress.BodyTooLarge(), http.StatusRequestEntityTooLarge
 		return
 	}
 	client.SetReadLimit(bodylimit.Lower(limit, route.MaxBodyBytes))

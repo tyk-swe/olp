@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/batches/upstream"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -32,7 +33,7 @@ type cloudBatchRequest struct {
 }
 
 func validateCloudBatchRequest(raw []byte, adapter connectors.BatchAdapter, storage *connectors.BatchStorage) (cloudBatchRequest, *fault.Error) {
-	doc, err := parseObjectRequest(raw, oif.Limits{MaxBytes: 1 << 20})
+	doc, err := ingress.ParseObjectRequest(raw, oif.Limits{MaxBytes: 1 << 20})
 	if err != nil || doc.Root().Kind() != oif.Object {
 		return cloudBatchRequest{}, fault.InvalidRequest("invalid_json", "The batch-job body must be one JSON object.", nil)
 	}
@@ -141,7 +142,7 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	dialect := r.PathValue("dialect")
 	slug := strings.TrimSpace(r.Header.Get(stateRouteHeader))
 	if slug == "" {
@@ -206,7 +207,7 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 		s.cloudBatchFail(x, w, err)
 		return
 	}
-	source, err := parseObjectRequest(body, oif.Limits{MaxBytes: int(s.cfg.MaxBodyBytes)})
+	source, err := ingress.ParseObjectRequest(body, oif.Limits{MaxBytes: int(s.cfg.MaxBodyBytes)})
 	if err != nil {
 		s.cloudBatchFail(x, w, fault.InvalidRequest("invalid_json", "The request body must be one JSON object.", nil))
 		return
@@ -359,7 +360,7 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	id := r.PathValue("id")
 	res, err := s.deps.Resources.Get(r.Context(), resources.KindCloudBatch, authority.ID, id)
 	if errors.Is(err, resources.ErrNotFound) {
@@ -494,7 +495,7 @@ func (s *Server) listCloudBatches(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	limit, after, err := listArgs(r)
 	if err != nil {
 		s.cloudBatchFail(x, w, err)

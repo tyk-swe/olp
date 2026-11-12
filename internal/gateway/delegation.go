@@ -12,6 +12,7 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/release"
 )
 
@@ -45,17 +46,17 @@ func (s *Server) reauthenticateSession(ctx context.Context, x *call, token strin
 
 func (s *Server) createDelegation(w http.ResponseWriter, r *http.Request) {
 	s.begin(w, r)
-	if !s.admit(r.Context()) {
+	if !s.gate.Admit(r.Context()) {
 		fault.WriteError(w, fault.Overloaded)
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	delegate, ok := s.deps.Runtime.(delegationRuntime)
 	if !ok {
 		fault.WriteError(w, fault.ServerError(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable."))
 		return
 	}
-	assertion, ok := bearer(r.Header.Get("Authorization"))
+	assertion, ok := consumerauth.Bearer(r.Header.Get("Authorization"))
 	if !ok {
 		fault.WriteError(w, fault.AuthenticationError("invalid_api_key", "Provide a workload identity."))
 		return
@@ -67,7 +68,7 @@ func (s *Server) createDelegation(w http.ResponseWriter, r *http.Request) {
 	}
 	agent, failure := consumerauth.Authenticate(s.deps.Runtime, r, assertion, delegationScope(bounds), s.cfg.TrustedProxies, s.now())
 	if failure != nil {
-		fault.WriteError(w, consumerFailure(failure))
+		fault.WriteError(w, ingress.ConsumerFailure(failure))
 		return
 	}
 	if consent := strings.TrimSpace(r.Header.Get("X-OLP-Delegation-Consent")); consent != "" {
@@ -86,7 +87,7 @@ func (s *Server) createDelegation(w http.ResponseWriter, r *http.Request) {
 	}
 	key, failure := consumerauth.Authenticate(s.deps.Runtime, r, strings.TrimSpace(r.Header.Get("X-OLP-Delegating-Key")), "delegate", s.cfg.TrustedProxies, s.now())
 	if failure != nil {
-		fault.WriteError(w, consumerFailure(failure))
+		fault.WriteError(w, ingress.ConsumerFailure(failure))
 		return
 	}
 	grant, err := delegate.CreateDelegation(r.Context(), agent, key, bounds)

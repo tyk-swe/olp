@@ -29,21 +29,21 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	form, parseError := s.parseMediaForm(w, r, authority.ID, media.DefaultVideoReferenceLimit, 1)
 	if parseError != nil {
-		s.release(r.Context())
+		s.gate.Release(r.Context())
 		s.refuse(x, w, parseError)
 		return
 	}
 	request, failure := media.DecodeVideoCreate(form)
 	if failure != nil {
 		form.Cleanup()
-		s.release(r.Context())
+		s.gate.Release(r.Context())
 		s.refuse(x, w, mediaError(failure))
 		return
 	}
 	x.family = wire.Format(request.Op())
 	x.media = request
 	x.estimate = mediaMultipartTokens
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	defer s.cleanupUploads(request)
 
 	jobID, err := uuid.NewV7()

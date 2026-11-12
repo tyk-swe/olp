@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/prompts"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -386,7 +387,7 @@ func (s *Server) expandPrompt(x *call, family wire.Format, doc oif.Document, pat
 		}
 		rendered, err := revision.Definition.Prompt.RenderMessages(selection.Variables, promptInputLimit(route.MaxBodyBytes, s.cfg.MaxBodyBytes))
 		if errors.Is(err, prompts.ErrRenderTooLarge) {
-			return oif.Document{}, nil, bodyTooLarge()
+			return oif.Document{}, nil, ingress.BodyTooLarge()
 		}
 		if err != nil {
 			return oif.Document{}, nil, fault.InvalidRequest("invalid_prompt", "Prompt variables do not match the published definition.", &param)
@@ -411,7 +412,7 @@ func (s *Server) expandPrompt(x *call, family wire.Format, doc oif.Document, pat
 			return oif.Document{}, nil, fault.ServerError(http.StatusInternalServerError, "internal_error", "The prompt could not be prepared.")
 		}
 		if int64(expanded.Len()) > s.cfg.MaxBodyBytes {
-			return oif.Document{}, nil, bodyTooLarge()
+			return oif.Document{}, nil, ingress.BodyTooLarge()
 		}
 		return expanded, &usage.PromptReference{ID: revision.PublicationID, RevisionID: revision.ID}, nil
 	}

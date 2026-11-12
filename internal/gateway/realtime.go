@@ -29,6 +29,7 @@ import (
 	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
@@ -100,7 +101,7 @@ func (s *realtimeResponseState) add(id string, strict bool) {
 // controls, without materializing a second JSON tree for the few observed
 // response fields. OIF rejects duplicate keys and invalid Unicode throughout.
 func realtimeObject(data []byte) (oif.Value, bool) {
-	doc, err := parseObjectRequest(data, oif.Limits{MaxBytes: maxRealtimeTrackedFrameBytes})
+	doc, err := ingress.ParseObjectRequest(data, oif.Limits{MaxBytes: maxRealtimeTrackedFrameBytes})
 	if err != nil || doc.Root().Kind() != oif.Object {
 		return oif.Value{}, false
 	}
@@ -570,11 +571,11 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	x := &call{request: s.begin(w, r), family: wire.Realtime, actor: "api_key"}
 	x.mode = "realtime"
 	fail := func(e *fault.Error) { s.refuse(x, w, e) }
-	if !s.admit(r.Context()) {
+	if !s.gate.Admit(r.Context()) {
 		fail(fault.Overloaded)
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 
 	if !s.browserOriginAllowed(r) {
 		fail(fault.PermissionError("origin_forbidden", "This origin is not allowed to open realtime sessions."))
@@ -585,12 +586,12 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		fail(fault.InvalidRequest("websocket_upgrade_required", "This endpoint requires a WebSocket upgrade request.", nil))
 		return
 	}
-	token := bearerToken(r)
+	token := ingress.BearerToken(r)
 	if token == "" {
 		fail(fault.AuthenticationError("missing_authorization", "Provide an Authorization bearer API key."))
 		return
 	}
-	authority, e := s.authenticateRequest(r, token, "inference")
+	authority, e := s.gate.AuthenticateRequest(r, token, "inference")
 	if e != nil {
 		fail(e)
 		return
@@ -600,7 +601,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	if len(attributionValues) == 0 {
 		attributionValues = r.URL.Query()["attribution"]
 	}
-	if x.attribution, e = parseAttributionValues(attributionValues, authority); e != nil {
+	if x.attribution, e = ingress.ParseAttributionValues(attributionValues, authority); e != nil {
 		fail(e)
 		return
 	}

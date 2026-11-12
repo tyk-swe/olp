@@ -188,3 +188,35 @@ type modelStepAccounting struct {
 	factEnd  int
 	estimate int64
 }
+
+// dropIngressQuery removes the query parameters a client surface sends that
+// are not native semantics.
+func (x *call) dropIngressQuery() *fault.Error {
+	switch x.clientSurface() {
+	case "gemini":
+		return x.dropQueryKey()
+	case "anthropic":
+		// The Anthropic SDKs add beta=true when they call the beta namespace.
+		// It selects no API behavior: betas are the Anthropic-Beta header.
+		if values := x.semanticQuery["beta"]; len(values) == 1 && values[0] == "true" {
+			delete(x.semanticQuery, "beta")
+		}
+	}
+	return nil
+}
+
+// dropQueryKey removes the Gemini key query parameter from a request's
+// native semantics: authentication already consumed it, and it is neither
+// native semantics nor anything an upstream may receive.
+func (x *call) dropQueryKey() *fault.Error {
+	keys, present := x.semanticQuery["key"]
+	if !present {
+		return nil
+	}
+	if len(keys) != 1 || keys[0] == "" {
+		param := "key"
+		return fault.InvalidRequest("invalid_request", "Provide one non-empty API key query parameter.", &param)
+	}
+	delete(x.semanticQuery, "key")
+	return nil
+}

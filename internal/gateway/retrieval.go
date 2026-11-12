@@ -25,7 +25,7 @@ func (s *Server) queryRetrieval(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	x.operationOverride = "retrieval"
 	x.mode = "unary"
 	x.actor = "api_key_resource"
@@ -89,7 +89,7 @@ func (s *Server) queryRetrieval(w http.ResponseWriter, r *http.Request) {
 		fail(gateErr)
 		return
 	}
-	body, bodyErr := s.readBody(r)
+	body, bodyErr := s.gate.ReadBody(r)
 	if bodyErr != nil {
 		fail(bodyErr)
 		return

@@ -37,7 +37,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	x.operationOverride = e.Operation
 	x.mode = "unary"
 	x.actor = "api_key_resource"
@@ -73,7 +73,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 	var source oif.Document
 	if e.Method == http.MethodPost || e.Method == http.MethodPatch {
 		var err *fault.Error
-		body, err = s.readBody(r)
+		body, err = s.gate.ReadBody(r)
 		if err != nil {
 			fail(err)
 			return

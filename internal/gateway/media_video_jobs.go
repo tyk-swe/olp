@@ -17,7 +17,7 @@ func (s *Server) videoList(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	x.family = wire.VideoList
 	x.mode = "unary"
 	ctx, complete, admissionError := s.admitVideoRequest(r.Context(), x, authority)
@@ -126,7 +126,7 @@ func (s *Server) videoGet(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	x.family = wire.VideoGet
 	x.mode = "unary"
 	record, e := s.ownedJob(r.Context(), authority, r.PathValue("video_id"), media.OpVideoGet)
@@ -189,7 +189,7 @@ func (s *Server) videoContent(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	x.family = wire.VideoContent
 	x.mode = "unary"
 	record, e := s.ownedJob(r.Context(), authority, r.PathValue("video_id"), media.OpVideoContent)
@@ -241,7 +241,7 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	x.family = wire.VideoDelete
 	x.mode = "unary"
 	loaded, e := s.ownedJob(r.Context(), authority, r.PathValue("video_id"), media.OpVideoDelete)

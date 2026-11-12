@@ -79,13 +79,13 @@ func (a *Admission) ReadSupply(ctx context.Context, query routing.SupplyQuery) *
 	return state
 }
 
-// cappedOwner is one spend cap an attempt is subject to.
+// CappedOwner is one spend cap an attempt is subject to.
 type CappedOwner struct {
 	ID, lookup, Quota string
 	Limits            *routing.CostLimits
 }
 
-// attemptCaps lists the caps one attempt spends against: its route's, its
+// AttemptCaps lists the caps one attempt spends against: its route's, its
 // connection's and its credential slot's, in that order.
 func AttemptCaps(route *routing.Route, provider *routing.Provider, slot *routing.Slot) [3]CappedOwner {
 	owners := [3]CappedOwner{

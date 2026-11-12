@@ -1,13 +1,10 @@
 package gateway
 
 import (
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
-	"mime"
 	"net"
 	"net/http"
 	"net/netip"
@@ -19,6 +16,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/batches"
@@ -29,6 +27,7 @@ import (
 	"github.com/tyk-swe/olp/internal/export/capture"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -140,7 +139,7 @@ type Server struct {
 	client      *http.Client
 	connections *egress.ConnectionClientCache
 	auth        *connectors.Auth
-	admission   *admission.Pool
+	gate        *ingress.Gate
 	health      *healthTracker
 	fleet       *fleetHealth
 	// unhealthy is fleet.unhealthy bound once, so selection never allocates
@@ -172,27 +171,26 @@ func New(deps Dependencies, cfg Config) *Server {
 	health := newHealthTracker(time.Now)
 	health.changes = make(chan circuitChange, 64)
 	fleet := &fleetHealth{now: time.Now}
-	server := &Server{
-
+	normalized := normalizedDependencies(deps)
+	return &Server{
 		log:         log,
 		cfg:         config,
 		egress:      policy,
 		client:      policy.Client(UpstreamHeaderTimeout),
 		connections: egress.NewConnectionClientCache(128),
 		auth:        auth,
-		admission:   pool,
+		gate:        ingress.NewGate(normalized.Runtime, pool, config.TrustedProxies, config.MaxBodyBytes, time.Now),
 		health:      health,
 		fleet:       fleet,
 		unhealthy:   fleet.unhealthy,
 		shadows:     newShadowing(config.MaxShadowInFlight),
-		now:         time.Now, deps: normalizedDependencies(deps),
+		now:         time.Now, deps: normalized,
 	}
-	return server
 }
 
 // AdmissionPool exposes the process-local inference admission pool the
 // metrics endpoint renders.
-func (s *Server) AdmissionPool() *admission.Pool { return s.admission }
+func (s *Server) AdmissionPool() *admission.Pool { return s.gate.Pool() }
 
 // OpenCircuits counts provider circuits currently open or half-open.
 func (s *Server) OpenCircuits() int64 { return s.health.openCircuits() }
@@ -228,7 +226,7 @@ type request struct {
 	guardrailMetadata   bool
 	cacheDirectives     string
 	callerCredential    *callerCredential
-	body                *measuredBody
+	body                *ingress.MeasuredBody
 	id                  string
 	durableID           string
 	// minted records that this gateway chose the request id. A caller may name
@@ -273,17 +271,12 @@ func (s *Server) begin(w http.ResponseWriter, r *http.Request) request {
 	h.Set("Cache-Control", "no-store")
 	s.cors(w, r)
 	release := s.deps.Runtime.Release()
-	var measured *measuredBody
+	var measured *ingress.MeasuredBody
 	if release != nil && release.Snapshot().HasBodyLimits() && r.Body != nil && r.Body != http.NoBody {
-		measured = &measuredBody{ReadCloser: r.Body, declared: r.ContentLength}
+		measured = &ingress.MeasuredBody{ReadCloser: r.Body, Declared: r.ContentLength}
 		r.Body = measured
 	}
-	return request{delegationAssertion: strings.TrimSpace(r.Header.Get("X-OLP-Agent-Identity")), cacheDirectives: strings.Join(r.Header.Values("X-OLP-Cache"), ","), guardrailMetadata: r.Header.Get("X-OLP-Guardrails") == "true", callerCredential: readCallerCredential(r.Header), body: measured, id: id, minted: minted, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: release, trace: telemetry.RequestFromContext(r.Context()), counted: s.counted}
-}
-
-func sameOrigin(r *http.Request, origin string) bool {
-	u, err := url.Parse(origin)
-	return err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Host == r.Host && u.User == nil && u.Path == "" && u.RawQuery == "" && u.Fragment == ""
+	return request{delegationAssertion: strings.TrimSpace(r.Header.Get("X-OLP-Agent-Identity")), cacheDirectives: strings.Join(r.Header.Values("X-OLP-Cache"), ","), guardrailMetadata: r.Header.Get("X-OLP-Guardrails") == "true", callerCredential: readCallerCredential(r.Header), body: measured, id: id, minted: minted, clientIP: consumerauth.ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: release, trace: telemetry.RequestFromContext(r.Context()), counted: s.counted}
 }
 
 func (s *Server) browserOriginAllowed(r *http.Request) bool {
@@ -294,7 +287,7 @@ func (s *Server) browserOriginAllowed(r *http.Request) bool {
 	if len(values) != 1 {
 		return false
 	}
-	return slices.Contains(s.cfg.CORSAllowedOrigins, values[0]) || sameOrigin(r, values[0]) && values[0] == s.gatewayOrigin(r)
+	return slices.Contains(s.cfg.CORSAllowedOrigins, values[0]) || ingress.SameOrigin(r, values[0]) && values[0] == s.gatewayOrigin(r)
 }
 
 // cors permits browser SDK clients only from explicitly configured origins.
@@ -326,10 +319,6 @@ func (s *Server) unknown(w http.ResponseWriter, r *http.Request) {
 	fault.WriteError(w, fault.NotFoundError("not_found", "Unknown endpoint "+r.Method+" "+r.URL.Path+"."))
 }
 
-func ClientIP(r *http.Request, trusted []netip.Prefix) string {
-	return consumerauth.ClientIP(r, trusted)
-}
-
 func (s *Server) gatewayOrigin(r *http.Request) string {
 	scheme := "http"
 	if r.TLS != nil {
@@ -351,112 +340,6 @@ func (s *Server) gatewayOrigin(r *http.Request) string {
 		}
 	}
 	return scheme + "://" + r.Host
-}
-
-// admit takes an inference slot. When the public admission middleware already
-// charged this request the context carries its permit and no second slot is
-// taken; a permit the middleware only queued waits here in the normal class.
-// Otherwise the server's own pool bounds the call, so direct handler use (and
-// any composition that skips the middleware) stays bounded.
-func (s *Server) admit(ctx context.Context) bool {
-	return s.acquirePermit(ctx) != nil
-}
-
-func (s *Server) acquirePermit(ctx context.Context) *admission.Permit {
-	if permit := admission.PermitFromContext(ctx); permit != nil {
-		if permit.Await(ctx, admission.Normal, time.Time{}) {
-			return permit
-		}
-		return nil
-	}
-	return s.admission.AcquirePermit()
-}
-
-// admitLater is admit for requests that resolve their key and priority
-// first: a queued permit the middleware only reserved waits for awaitAdmission.
-// Otherwise the server's own pool bounds the call.
-func (s *Server) admitLater(ctx context.Context) bool {
-	if admission.PermitFromContext(ctx) != nil {
-		return true
-	}
-	return s.admission.AcquirePermit() != nil
-}
-
-// awaitAdmission waits for the slot a queued request reserved, in its
-// priority class and never past ctx's deadline, then answers the same 503 a
-// full pool does. A request admitted outright returns at once.
-func (s *Server) awaitAdmission(ctx context.Context, x *call) *fault.Error {
-	permit := admission.PermitFromContext(ctx)
-	if !permit.Queued() {
-		return nil
-	}
-	deadline, _ := ctx.Deadline()
-	if permit.Await(ctx, admission.ClassOf(x.priority), deadline) {
-		return nil
-	}
-	return fault.Overloaded
-}
-
-// release returns the slot admit took, whether that was the outer permit or
-// the local pool. Release is idempotent on the permit: media handlers hand
-// their slot back once uploads finish staging, before the upstream call.
-func (s *Server) release(ctx context.Context) {
-	if permit := admission.PermitFromContext(ctx); permit != nil {
-		permit.Release()
-		return
-	}
-	s.admission.Release()
-}
-
-// readBody bounds both the encoded and decoded body before parsing.
-func (s *Server) readBody(r *http.Request) ([]byte, *fault.Error) {
-	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || mediaType != "application/json" {
-		return nil, &fault.Error{Status: http.StatusUnsupportedMediaType, Type: "invalid_request_error", Code: "unsupported_media_type", Message: "Request bodies must be application/json."}
-	}
-	limit := s.cfg.MaxBodyBytes
-	encoded := &io.LimitedReader{R: r.Body, N: limit + 1}
-	var reader io.Reader = encoded
-	switch strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Encoding"))) {
-	case "", "identity":
-	case "gzip":
-		gz, err := gzip.NewReader(reader)
-		if encoded.N == 0 {
-			return nil, bodyTooLarge()
-		}
-		if err != nil {
-			return nil, bodyReadError(err)
-		}
-		defer gz.Close()
-		reader = io.LimitReader(gz, limit+1)
-	default:
-		return nil, &fault.Error{Status: http.StatusUnsupportedMediaType, Type: "invalid_request_error", Code: "unsupported_content_encoding", Message: "Only identity and gzip request encodings are supported."}
-	}
-	data, err := io.ReadAll(reader)
-	// Check the wire cap even when gzip has decoded a smaller body or reports
-	// truncation after reaching the encoded limit.
-	if encoded.N == 0 || int64(len(data)) > limit {
-		return nil, bodyTooLarge()
-	}
-	if err != nil {
-		return nil, bodyReadError(err)
-	}
-	if measured, ok := r.Body.(*measuredBody); ok {
-		measured.decoded = int64(len(data))
-	}
-	return data, nil
-}
-
-func bodyTooLarge() *fault.Error {
-	return &fault.Error{Status: http.StatusRequestEntityTooLarge, Type: "invalid_request_error", Code: "request_too_large", Message: "The request body exceeds the configured limit."}
-}
-
-func bodyReadError(err error) *fault.Error {
-	var timeout net.Error
-	if errors.As(err, &timeout) && timeout.Timeout() {
-		return &fault.Error{Status: http.StatusRequestTimeout, Type: "invalid_request_error", Code: "request_timeout", Message: "The request body was not received within the deadline."}
-	}
-	return fault.InvalidRequest("invalid_request", "The request body could not be read.", nil)
 }
 
 // routingHeader carries per-request routing preferences and the admission
@@ -609,19 +492,19 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			writeError(w, e)
 			return
 		}
-		if !s.admitLater(r.Context()) {
+		if !s.gate.AdmitLater(r.Context()) {
 			x.failure, status = fault.Overloaded, fault.Overloaded.Status
 			writeError(w, fault.Overloaded)
 			return
 		}
-		defer s.release(r.Context())
-		token, e := presentedKey(r)
+		defer s.gate.Release(r.Context())
+		token, e := ingress.PresentedKey(r)
 		if e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
 			return
 		}
-		authority, e := s.authenticateRequest(r, token, "inference")
+		authority, e := s.gate.AuthenticateRequest(r, token, "inference")
 		if e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
@@ -629,12 +512,12 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 		}
 		s.bindAuthority(x, authority)
 		x.mirrors = true
-		if x.attribution, e = s.parseAttribution(r, authority); e != nil {
+		if x.attribution, e = ingress.ParseAttribution(r, authority); e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
 			return
 		}
-		body, e := s.readBody(r)
+		body, e := s.gate.ReadBody(r)
 		if e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
@@ -660,7 +543,7 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			prompt, e = s.parsePrompt(x, family, body, r.PathValue("model"), s.keyAuthorizer(x.authority))
 			parsed, x.prompt = prompt.request, prompt.reference
 			if x.request.body != nil {
-				x.request.body.decoded = max(x.request.body.decoded, prompt.decoded)
+				x.request.body.Decoded = max(x.request.body.Decoded, prompt.decoded)
 			}
 		} else if family == wire.Bedrock {
 			parsed, err = protocols.ParseBedrockRequest(body, r.PathValue("model"), strings.HasSuffix(r.URL.Path, "/converse-stream"))
@@ -755,7 +638,7 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 		// full deadline afterwards could outlive the concurrency reservation.
 		ctx, cancel := x.routeContext(r.Context())
 		defer cancel()
-		if e = s.awaitAdmission(ctx, x); e != nil {
+		if e = s.gate.AwaitAdmission(ctx, x.priority); e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
 			return
@@ -1072,7 +955,7 @@ func (s *Server) modelCapabilities(ctx context.Context, release *release.Release
 
 func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 	req := s.begin(w, r)
-	authority, e := s.authenticate(r, "models_read")
+	authority, e := s.gate.Authenticate(r, "models_read")
 	if e != nil {
 		fault.WriteError(w, e)
 		return
@@ -1090,7 +973,7 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) model(w http.ResponseWriter, r *http.Request) {
 	req := s.begin(w, r)
-	authority, e := s.authenticate(r, "models_read")
+	authority, e := s.gate.Authenticate(r, "models_read")
 	if e != nil {
 		fault.WriteError(w, e)
 		return
@@ -1205,4 +1088,14 @@ func configuredSink(sink events.Sink, log *slog.Logger) events.Sink {
 		return sink
 	}
 	return events.LogSink{Log: log}
+}
+
+// CatalogAuthority shares the gateway's pinned authority, revocation, scope
+// and client-address checks with the management catalog's consumer-key reads.
+func (s *Server) CatalogAuthority(r *http.Request) (keyauthority.Authority, error) {
+	authority, failure := s.gate.Authenticate(r, "models_read")
+	if failure != nil {
+		return keyauthority.Authority{}, access.Fail(failure.Status, failure.Code, failure.Message)
+	}
+	return authority, nil
 }

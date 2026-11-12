@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/staging"
 
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -57,7 +58,7 @@ func (s *Server) validateBatchInput(part *staging.Part, model string, provider *
 		if len(line) == 0 || len(seen) >= 10000 {
 			return "", 0, resources.ErrContract
 		}
-		doc, err := parseObjectRequest(line, oif.Limits{MaxBytes: 1 << 20})
+		doc, err := ingress.ParseObjectRequest(line, oif.Limits{MaxBytes: 1 << 20})
 		if err != nil || doc.Root().Kind() != oif.Object {
 			return "", 0, resources.ErrContract
 		}

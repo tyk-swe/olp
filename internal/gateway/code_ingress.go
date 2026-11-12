@@ -25,13 +25,13 @@ func codeIngressFor(path string) (codeIngress, bool) {
 	return codeIngress{path: path, protocol: endpoint.Protocol, operation: endpoint.Operation, identity: endpoint.Identity}, true
 }
 
-func classifyCode(ingress codeIngress, body []byte, headers http.Header, websocket bool) (codemode.Request, error) {
-	switch ingress.protocol {
+func classifyCode(inbound codeIngress, body []byte, headers http.Header, websocket bool) (codemode.Request, error) {
+	switch inbound.protocol {
 	case codemode.ProtocolResponses:
-		if ingress.identity == codeadapter.IdentityCodex {
-			return codexwire.Classify(body, headers, ingress.operation, websocket)
+		if inbound.identity == codeadapter.IdentityCodex {
+			return codexwire.Classify(body, headers, inbound.operation, websocket)
 		}
-		return codexwire.ClassifyWith(body, ingress.operation, websocket, func(root oif.Value) (codemode.Identity, error) { return codewire.RequestIdentity(headers, root) }, headers)
+		return codexwire.ClassifyWith(body, inbound.operation, websocket, func(root oif.Value) (codemode.Identity, error) { return codewire.RequestIdentity(headers, root) }, headers)
 	case codemode.ProtocolMessages:
 		return codewire.ClassifyMessages(body, headers)
 	case codemode.ProtocolChat:
@@ -40,9 +40,9 @@ func classifyCode(ingress codeIngress, body []byte, headers http.Header, websock
 	return codemode.Request{}, codemode.Refuse(400, "code_operation_unsupported")
 }
 
-func codeConnectionIdentity(ingress codeIngress, headers http.Header) (codemode.Identity, error) {
+func codeConnectionIdentity(inbound codeIngress, headers http.Header) (codemode.Identity, error) {
 	identity, err := func() (codemode.Identity, error) {
-		if ingress.identity == codeadapter.IdentityCodex {
+		if inbound.identity == codeadapter.IdentityCodex {
 			return codexwire.ConnectionIdentity(headers)
 		}
 		return codewire.ClientIdentity(headers)

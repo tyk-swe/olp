@@ -271,7 +271,7 @@ func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *call, bod
 	overall := time.Duration(x.primary.OverallTimeout) * time.Millisecond
 	ctx, cancel := x.routeContext(r.Context())
 	defer cancel()
-	if e = s.awaitAdmission(ctx, x); e != nil {
+	if e = s.gate.AwaitAdmission(ctx, x.priority); e != nil {
 		return fail(e)
 	}
 	admitted := x.admissionAuthority(x.authority)

@@ -24,6 +24,7 @@ import (
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routeidentity"
@@ -177,7 +178,7 @@ func parseWebRTCCallRequest(r *http.Request) (*webrtcCallRequest, *fault.Error) 
 		return invalid("The realtime call body could not be read.", nil)
 	}
 	if body.N == 0 {
-		return nil, bodyTooLarge()
+		return nil, ingress.BodyTooLarge()
 	}
 	out.bodyBytes = bodylimit.Maximum + 1 - body.N
 	return out, nil
@@ -317,7 +318,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 	fail := func(e *fault.Error) { s.refuse(x, w, e) }
 	permit := admission.PermitFromContext(r.Context())
 	if permit == nil {
-		permit = s.admission.AcquirePermit()
+		permit = s.gate.Pool().AcquirePermit()
 	}
 	if permit == nil {
 		fail(fault.Overloaded)
@@ -328,12 +329,12 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		fail(fault.PermissionError("origin_forbidden", "This origin is not allowed to open realtime sessions."))
 		return
 	}
-	token := bearerToken(r)
+	token := ingress.BearerToken(r)
 	if token == "" {
 		fail(fault.AuthenticationError("missing_authorization", "Provide an Authorization Bearer [REDACTED] key."))
 		return
 	}
-	authority, e := s.authenticateRequest(r, token, "inference")
+	authority, e := s.gate.AuthenticateRequest(r, token, "inference")
 	if e != nil {
 		fail(e)
 		return
@@ -347,7 +348,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		fail(fault.Overloaded)
 		return
 	}
-	if x.attribution, e = parseAttributionValues(r.Header.Values(attribution.Header), authority); e != nil {
+	if x.attribution, e = ingress.ParseAttributionValues(r.Header.Values(attribution.Header), authority); e != nil {
 		fail(e)
 		return
 	}
@@ -382,7 +383,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if route.MaxBodyBytes != nil && callReq.bodyBytes > *route.MaxBodyBytes {
-		fail(bodyTooLarge())
+		fail(ingress.BodyTooLarge())
 		return
 	}
 	if !slices.Contains(route.Operations, "realtime") {

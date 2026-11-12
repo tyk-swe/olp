@@ -454,7 +454,7 @@ func (s *Server) geminiCreateBatch(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	slug := r.PathValue("model")
 	if header := strings.TrimSpace(r.Header.Get(stateRouteHeader)); header != "" && header != slug {
 		s.refuse(x, w, fault.InvalidRequest("invalid_request", "The Gemini batch model path must match X-OLP-Route.", nil))
@@ -691,7 +691,7 @@ func (s *Server) geminiBatchCall(w http.ResponseWriter, r *http.Request, use ret
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	localID := strings.TrimPrefix(r.PathValue("name"), "batches/")
 	resource, err := s.deps.Resources.Get(r.Context(), resources.KindGeminiBatch, authority.ID, localID)
 	if errors.Is(err, resources.ErrNotFound) {
@@ -764,7 +764,7 @@ func (s *Server) geminiListBatches(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	pageSize, pageToken, cursorErr := geminiBatchPageCursor(r.URL.Query())
 	if cursorErr != nil {
 		s.refuse(x, w, cursorErr)
@@ -872,7 +872,7 @@ func (s *Server) geminiBatchCancel(w http.ResponseWriter, r *http.Request) {
 	if !ok || action != "cancel" || localID == "" {
 		x, _, done := s.stateBegin(w, r, wire.GeminiBatch)
 		if !done {
-			defer s.release(r.Context())
+			defer s.gate.Release(r.Context())
 			s.refuse(x, w, fault.NotFoundError("not_found", "Unknown Gemini batch action."))
 		}
 		return

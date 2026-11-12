@@ -112,7 +112,7 @@ type AttemptFact struct {
 	// null included; unpinned attempts resolve the card themselves.
 	CardPinned     bool
 	CardRevisionID *string
-	// cardRev retains the terms resolved when this attempt started, even if
+	// CardRev retains the terms resolved when this attempt started, even if
 	// later routing inputs no longer contain that revision. Nil means no card.
 	CardRev            *rates.RoutingCardRevision
 	Ordinal            int
@@ -167,7 +167,7 @@ type AttemptFact struct {
 	ModelFamily          string
 }
 
-// observeUsage retains counters without promoting intermediate stream evidence
+// ObserveUsage retains counters without promoting intermediate stream evidence
 // to proof that no further work was billed.
 func (a *AttemptFact) ObserveUsage(observed *wire.Usage, complete bool) {
 	a.Usage = observed
@@ -175,7 +175,7 @@ func (a *AttemptFact) ObserveUsage(observed *wire.Usage, complete bool) {
 	a.TokenlessUsage = false
 }
 
-// recordEvidence records what the attempt proves about upstream billing. The
+// RecordEvidence records what the attempt proves about upstream billing. The
 // caller's fallback matters when counters are absent; native partial counters
 // retain their explicit uncertainty even when the transport has ended.
 func (a *AttemptFact) RecordEvidence(uncertain bool) {

@@ -30,6 +30,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/console"
+	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
@@ -479,7 +480,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 					_, err := release.Publish(ctx, tx, actor)
 					return err
 				},
-				ClientIP:           func(r *http.Request) string { return gateway.ClientIP(r, c.TrustedProxyCIDRs) },
+				ClientIP:           func(r *http.Request) string { return consumerauth.ClientIP(r, c.TrustedProxyCIDRs) },
 				LocalLoginDisabled: !c.LocalLoginEnabled, ManagementNetworkRestricted: len(c.ManagementAllowedCIDRs) != 0,
 				LimitsEnforced: limiter != nil, ResponseCacheConfigured: responseCache != nil, RetentionEnforced: limiter != nil, NotificationsActive: true,
 			})

@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/geminilifecycle"
 	"github.com/tyk-swe/olp/internal/oif"
@@ -70,7 +71,7 @@ func geminiClientKey(r *http.Request, allowedQuery ...string) (string, *fault.Er
 		if len(values) != 1 {
 			return "", fault.InvalidRequest("invalid_request", "Provide one Gemini API key.", nil)
 		}
-		token = bearerToken(r)
+		token = ingress.BearerToken(r)
 	}
 	if values := r.Header.Values("X-Goog-Api-Key"); len(values) > 0 {
 		forms++
@@ -97,12 +98,12 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 	status := http.StatusInternalServerError
 	var out *outcome
 	defer func() { s.finish(x, out, status) }()
-	if !s.admit(r.Context()) {
+	if !s.gate.Admit(r.Context()) {
 		x.failure, status = fault.Overloaded, fault.Overloaded.Status
 		fault.WriteSurfaceError(w, fault.Overloaded, "gemini")
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	if !s.browserOriginAllowed(r) {
 		e := fault.PermissionError("origin_forbidden", "This origin is not allowed to open Live sessions.")
 		x.failure, status = e, e.Status
@@ -118,10 +119,10 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 	token, e := geminiClientKey(r)
 	if e == nil {
 		var authority keyauthority.Authority
-		authority, e = s.authenticateRequest(r, token, "inference")
+		authority, e = s.gate.AuthenticateRequest(r, token, "inference")
 		if e == nil {
 			s.bindAuthority(x, authority)
-			x.attribution, e = s.parseAttribution(r, authority)
+			x.attribution, e = ingress.ParseAttribution(r, authority)
 		}
 	}
 	if e != nil {
@@ -168,7 +169,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 	x.route = &route
 	if route.MaxBodyBytes != nil && int64(len(initial)) > *route.MaxBodyBytes {
 		client.Close(websocket.StatusMessageTooBig, "request body limit exceeded")
-		x.failure, status = bodyTooLarge(), http.StatusRequestEntityTooLarge
+		x.failure, status = ingress.BodyTooLarge(), http.StatusRequestEntityTooLarge
 		return
 	}
 	client.SetReadLimit(bodylimit.Lower(limit, route.MaxBodyBytes))

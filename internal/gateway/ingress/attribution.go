@@ -1,4 +1,4 @@
-package gateway
+package ingress
 
 import (
 	"bytes"
@@ -12,11 +12,11 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 )
 
-func (s *Server) parseAttribution(r *http.Request, authority keyauthority.Authority) (map[string]string, *fault.Error) {
-	return parseAttributionValues(r.Header.Values(attribution.Header), authority)
+func ParseAttribution(r *http.Request, authority keyauthority.Authority) (map[string]string, *fault.Error) {
+	return ParseAttributionValues(r.Header.Values(attribution.Header), authority)
 }
 
-func parseAttributionValues(values []string, authority keyauthority.Authority) (map[string]string, *fault.Error) {
+func ParseAttributionValues(values []string, authority keyauthority.Authority) (map[string]string, *fault.Error) {
 	labels, err := parseCallerAttribution(values, authority)
 	if err != nil {
 		return nil, err

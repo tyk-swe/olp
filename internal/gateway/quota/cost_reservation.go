@@ -5,16 +5,16 @@ import (
 	"github.com/tyk-swe/olp/internal/limits/admission"
 )
 
-// costReservation is what a request asks to hold against the cost budgets of its
+// CostReservation is what a request asks to hold against the cost budgets of its
 // applicable caller and aggregate boundaries while it is in flight. The zero value holds nothing:
 // the request is judged on the spend accrued so far, which is how a request that
 // nobody can price is treated.
 type CostReservation struct {
-	// amount is the cost estimate as canonical decimal text, empty for none;
+	// Amount is the cost estimate as canonical decimal text, empty for none;
 	// charge is the estimate a charge-basis budget enforces, which equals the
 	// cost estimate when the consumer holds no rate card.
 	Amount, Charge string
-	// requestID is the identifier accounting will record the request's spend
+	// RequestID is the identifier accounting will record the request's spend
 	// under, which is how that spend later replaces the reservation.
 	RequestID string
 }

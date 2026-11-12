@@ -6,7 +6,7 @@ import (
 	"github.com/tyk-swe/olp/internal/surface"
 )
 
-// requestSurface names the inference API a gateway request speaks.
+// RequestSurface names the inference API a gateway request speaks.
 func RequestSurface(r *http.Request) string {
 	if classified := surface.Of(r.URL.Path); classified.Inference {
 		return classified.Name
