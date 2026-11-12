@@ -62,7 +62,7 @@ func (w *deliveryWorker) claimSignal(ctx context.Context, tx pgx.Tx, rule signal
 	if err := tx.QueryRow(ctx, lockSignalStateSQL, rule.id, signal.subject).Scan(&current.active, &current.incident, &current.lastTriggerAt); err != nil {
 		return 0, err
 	}
-	next, err := transitionSignal(current, signal.reading, now, cooldown)
+	next, err := transitionSignal(current, signal.reading, source.announce, now, cooldown)
 	if err != nil {
 		return 0, err
 	}

@@ -207,28 +207,33 @@ type signalTransition struct {
 	change signalChange
 }
 
-func transitionSignal(current signalState, r reading, now time.Time, cooldown time.Duration) (signalTransition, error) {
+func transitionSignal(current signalState, r reading, a announce, now time.Time, cooldown time.Duration) (signalTransition, error) {
+	paced := pacing(a, cooldown)
 	switch r := r.(type) {
 	case observed:
-		return current.toward(r.active, now, cooldown)
+		return current.toward(r.active, now, paced)
 	case measured:
-		return current.toward(r.band.breached(r.value, current.active), now, cooldown)
+		return current.toward(r.band.breached(r.value, current.active), now, paced)
 	default:
 		return signalTransition{state: current}, nil
 	}
 }
 
+func pacing(a announce, cooldown time.Duration) time.Duration {
+	if a.announces(triggered) {
+		return cooldown
+	}
+	return 0
+}
+
 func (s signalState) toward(breaching bool, now time.Time, cooldown time.Duration) (signalTransition, error) {
-	cooling := s.lastTriggerAt != nil && now.Before(s.lastTriggerAt.Add(cooldown))
 	switch {
 	case !breaching && s.active:
 		return signalTransition{state: signalState{incident: s.incident, lastTriggerAt: s.lastTriggerAt}, change: recovered}, nil
-	case !breaching:
+	case !breaching, s.lastTriggerAt != nil && now.Before(s.lastTriggerAt.Add(cooldown)):
 		return signalTransition{state: s}, nil
 	case !s.active && s.incident == math.MaxInt64:
 		return signalTransition{}, errors.New("notification incident counter exhausted")
-	case cooling:
-		return signalTransition{state: signalState{active: true, incident: s.breachIncident(), lastTriggerAt: s.lastTriggerAt}}, nil
 	default:
 		return signalTransition{state: signalState{active: true, incident: s.breachIncident(), lastTriggerAt: &now}, change: triggered}, nil
 	}
