@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export/destination"
 	"github.com/tyk-swe/olp/internal/export/focus"
+	exportstream "github.com/tyk-swe/olp/internal/export/stream"
 	limitdebits "github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/notifications"
@@ -1305,5 +1307,95 @@ func TestKeyReminderRestoredScheduleRetries(t *testing.T) {
 	assertDelivery("delivered", 2)
 	if len(requests) != 2 {
 		t.Fatalf("sent %d attempts, want one failure and one successful delivery", len(requests))
+	}
+}
+
+func TestStreamExportSuccessClearsFailureEvidence(t *testing.T) {
+	for _, retry := range []bool{false, true} {
+		t.Run(fmt.Sprintf("retry=%t", retry), func(t *testing.T) {
+			t.Parallel()
+			pool, _ := harness.Database(t)
+			f := newUsageFixture(t, pool)
+			var calls atomic.Int32
+			receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				if calls.Add(1) == 1 && retry {
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer receiver.Close()
+			sink := uuid.NewString()
+			if _, err := pool.Exec(t.Context(), `INSERT INTO olp.export_sinks(id,name,type,destination,streams,format,etag,created_by) VALUES($1,'success-proof','https',$2,ARRAY['requests'],'json',$1,$3)`, sink, receiver.URL, f.ownerID); err != nil {
+				t.Fatal(err)
+			}
+			event, err := usage.NewAccountingEvent(f.event(f.attempt(1)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if outcome, err := ingest.PersistEvent(t.Context(), pool, event); err != nil || outcome.Outcome != ingest.PersistOutcomePersisted {
+				t.Fatalf("persist result=%+v error=%v", outcome, err)
+			}
+			policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+			run := func() {
+				var before int64
+				if err := pool.QueryRow(t.Context(), `SELECT COALESCE((SELECT successes_total FROM olp.worker_task_health WHERE task='export_delivery'),0)`).Scan(&before); err != nil {
+					t.Fatal(err)
+				}
+				ctx, cancel := context.WithCancel(t.Context())
+				done := make(chan struct{})
+				worker := exportstream.Worker{Pool: pool, Sender: destination.NewSender(policy, func(string) string { return "" }, "synthetic-installation"), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+				go func() { defer close(done); worker.Run(ctx) }()
+				defer func() { cancel(); <-done }()
+				deadline := time.Now().Add(5 * time.Second)
+				for {
+					var finished bool
+					if err := pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp.worker_task_health WHERE task='export_delivery' AND successes_total>$1)`, before).Scan(&finished); err != nil {
+						t.Fatal(err)
+					}
+					if finished {
+						return
+					}
+					if time.Now().After(deadline) {
+						t.Fatal("export worker did not checkpoint")
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+			}
+			run()
+			if retry {
+				var code *string
+				var delivered bool
+				if err := pool.QueryRow(t.Context(), `SELECT last_error_code,delivered_at IS NOT NULL FROM olp.export_pending WHERE sink_id=$1`, sink).Scan(&code, &delivered); err != nil {
+					t.Fatal(err)
+				}
+				if delivered || code == nil || *code != "status" {
+					t.Fatalf("failed HTTP attempt evidence: delivered=%t code=%v", delivered, code)
+				}
+				if _, err := pool.Exec(t.Context(), `UPDATE olp.export_pending SET next_attempt_at=now()-interval '1 second' WHERE sink_id=$1`, sink); err != nil {
+					t.Fatal(err)
+				}
+				run()
+			}
+			var code *string
+			var delivered bool
+			var successes, failures int64
+			if err := pool.QueryRow(t.Context(), `SELECT p.last_error_code,p.delivered_at IS NOT NULL,c.delivered_total,c.failed_total FROM olp.export_pending p JOIN olp.export_cursors c ON c.sink_id=p.sink_id AND c.stream='requests' WHERE p.sink_id=$1`, sink).Scan(&code, &delivered, &successes, &failures); err != nil {
+				t.Fatal(err)
+			}
+			errorCode := "<null>"
+			if code != nil {
+				errorCode = *code
+			}
+			t.Logf("HTTP calls=%d delivered=%t successes=%d failures=%d last_error_code=%s", calls.Load(), delivered, successes, failures, errorCode)
+			expectedFailures := int64(0)
+			if retry {
+				expectedFailures = 1
+			}
+			if !delivered || successes != 1 || failures != expectedFailures || code != nil {
+				t.Fatalf("successful delivery retained false error evidence: delivered=%t successes=%d failures=%d last_error_code=%s", delivered, successes, failures, errorCode)
+			}
+		})
 	}
 }
