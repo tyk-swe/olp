@@ -1,4 +1,4 @@
-package gateway
+package codeforward
 
 import (
 	"context"
@@ -31,7 +31,7 @@ type codeAttempt struct {
 	identityOriginator string
 	adapter            codemode.Adapter
 	paid               *paidCodeAttempt
-	server             *Server
+	forwarder          *Forwarder
 	permit             codesessions.Permit
 	config             routing.Configuration
 	auth               codemode.Authorization
@@ -52,12 +52,12 @@ type codeAttempt struct {
 	pendingHealth      *codemode.HealthObservation
 }
 
-func (s *Server) prepareCode(r *http.Request, release *release.Release, route codemode.Route, observation codemode.Request, inbound codeIngress, transport codeadapter.Transport, recovery *codesessions.Recovery, body []byte) (*codeAttempt, error) {
-	authority, failure := s.gate.Authenticate(r, "inference")
+func (f *Forwarder) prepareCode(r *http.Request, release *release.Release, route codemode.Route, observation codemode.Request, inbound codeIngress, transport codeadapter.Transport, recovery *codesessions.Recovery, body []byte) (*codeAttempt, error) {
+	authority, failure := f.gate.Authenticate(r, "inference")
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_authentication_refused")
 	}
-	if !authority.Allows("inference", route.Slug, &route.ProjectID, s.now()) {
+	if !authority.Allows("inference", route.Slug, &route.ProjectID, f.now()) {
 		return nil, codemode.Refuse(403, "code_permission_denied")
 	}
 	resolved, err := route.ResolveModel(observation.Operation)
@@ -68,7 +68,7 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 		if recovery != nil || len(route.PaidTargets) == 0 || resolved.PublicModel() == resolved.Model {
 			return resolved, nil
 		}
-		ledger, supported := s.deps.CodeLedger.(PaidCodeLedger)
+		ledger, supported := f.ledger.(PaidLedger)
 		if !supported {
 			return codemode.Operation{}, codemode.Refuse(503, "code_paid_authority_unavailable")
 		}
@@ -78,16 +78,16 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 		return nil, err
 	}
 	if _, paid := route.PaidTargets[operation.Model]; paid && recovery == nil {
-		return s.preparePaidCode(r, release, route, observation, operation, inbound, transport, authority, body, nil, false)
+		return f.preparePaidCode(r, release, route, observation, operation, inbound, transport, authority, body, nil, false)
 	}
 	if recovery == nil && len(route.PaidFallbackTargets) > 0 {
-		if ledger, ok := s.deps.CodeLedger.(PaidCodeLedger); ok {
+		if ledger, ok := f.ledger.(PaidLedger); ok {
 			selected, err := ledger.ResolvePaidFallback(r.Context(), codesessions.Admission{Route: route, APIKeyID: authority.ID, Operation: operation, PreviousResponse: observation.PreviousResponse}, authority)
 			if err != nil {
 				return nil, err
 			}
 			if selected != nil {
-				return s.preparePaidCode(r, release, route, observation, *selected, inbound, transport, authority, body, nil, true)
+				return f.preparePaidCode(r, release, route, observation, *selected, inbound, transport, authority, body, nil, true)
 			}
 		}
 	}
@@ -100,18 +100,18 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_"+failure.Code)
 	}
-	lease, failure := s.deps.Admission.ReserveCodeRate(r.Context(), authority, observation.Estimate, codeGenerationTimeout+time.Minute, route.Slug)
+	lease, failure := f.admission.ReserveCodeRate(r.Context(), authority, observation.Estimate, codeGenerationTimeout+time.Minute, route.Slug)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_rate_limited")
 	}
-	permit, err := s.deps.CodeLedger.Admit(r.Context(), codesessions.Admission{
+	permit, err := f.ledger.Admit(r.Context(), codesessions.Admission{
 		Attribution: labels, Route: route, APIKeyID: authority.ID, EndUserDigest: authority.EndUserDigest,
 		InitialRecovery: observation.Recoverable, Recovery: recovery, Operation: operation, Providers: providers, ModelSource: release.Snapshot(), ModelPath: inbound.path, ModelTransport: transport, PreviousResponse: observation.PreviousResponse,
 	})
 	if err != nil {
-		quota.SettleKey(r.Context(), lease, false, nil, s.log)
+		quota.SettleKey(r.Context(), lease, false, nil, f.log)
 		if refusal, ok := errors.AsType[*codemode.Refusal](err); ok && refusal.Code == "code_account_unavailable" && (recovery == nil || recovery.AccountID == "") && transport == codeadapter.HTTP && observation.Recoverable && len(route.PaidFallbackTargets) > 0 {
-			ledger, supported := s.deps.CodeLedger.(PaidCodeLedger)
+			ledger, supported := f.ledger.(PaidLedger)
 			if !supported {
 				return nil, codemode.Refuse(503, "code_paid_authority_unavailable")
 			}
@@ -120,7 +120,7 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 				return nil, selectionErr
 			}
 			if selected != nil {
-				return s.preparePaidCode(r, release, route, observation, *selected, inbound, transport, authority, body, recovery, true)
+				return f.preparePaidCode(r, release, route, observation, *selected, inbound, transport, authority, body, recovery, true)
 			}
 		}
 		return nil, err
@@ -131,7 +131,7 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 		}
 		return operation.Model
 	}()
-	a := &codeAttempt{model: model, publicModel: operation.PublicModel(), server: s, permit: permit, lease: lease, prewarm: observation.Operation.Name == "prewarm"}
+	a := &codeAttempt{model: model, publicModel: operation.PublicModel(), forwarder: f, permit: permit, lease: lease, prewarm: observation.Operation.Name == "prewarm"}
 	ok := false
 	defer func() {
 		if !ok {
@@ -146,20 +146,20 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 		return nil, codemode.Refuse(409, "code_attribution_changed")
 	}
 	if !reflect.DeepEqual(authority.Policy, permit.Authority.Policy) || !reflect.DeepEqual(authority.ProjectEndUserPolicy, permit.Authority.ProjectEndUserPolicy) || !reflect.DeepEqual(authority.BudgetGroupID, permit.Authority.BudgetGroupID) || !reflect.DeepEqual(authority.GroupLimits(), permit.Authority.GroupLimits()) {
-		quota.SettleKey(r.Context(), a.lease, false, nil, s.log)
+		quota.SettleKey(r.Context(), a.lease, false, nil, f.log)
 		a.lease = nil
 		fresh := permit.Authority
-		if failure = s.gate.CheckKeyAddress(r, fresh); failure != nil {
+		if failure = f.gate.CheckKeyAddress(r, fresh); failure != nil {
 			return nil, codemode.Refuse(failure.Status, "code_ip_not_allowed")
 		}
-		fresh, failure = s.gate.IdentifyEndUser(r, fresh)
+		fresh, failure = f.gate.IdentifyEndUser(r, fresh)
 		if failure != nil {
 			return nil, codemode.Refuse(failure.Status, "code_end_user_invalid")
 		}
 		if fresh.EndUserDigest != authority.EndUserDigest {
 			return nil, codemode.Refuse(409, "code_end_user_changed")
 		}
-		a.lease, failure = s.deps.Admission.ReserveCodeRate(r.Context(), fresh, observation.Estimate, codeGenerationTimeout+time.Minute, route.Slug)
+		a.lease, failure = f.admission.ReserveCodeRate(r.Context(), fresh, observation.Estimate, codeGenerationTimeout+time.Minute, route.Slug)
 		if failure != nil {
 			return nil, codemode.Refuse(failure.Status, "code_rate_limited")
 		}
@@ -177,11 +177,11 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 	a.config, a.endpoint, a.observer = target.config, target.endpoint, codeObserver(target.endpoint)
 	a.adapter = target.adapter.Adapter
 	a.identityOriginator = target.adapter.CompatibilityOriginator(route)
-	a.providerLease, failure = s.deps.Admission.ReserveCodeProvider(r.Context(), permit.Account.ProviderID, target.config, observation.Estimate, codeGenerationTimeout+time.Minute)
+	a.providerLease, failure = f.admission.ReserveCodeProvider(r.Context(), permit.Account.ProviderID, target.config, observation.Estimate, codeGenerationTimeout+time.Minute)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_provider_rate_limited")
 	}
-	a.auth, err = s.deps.CodeAuthorizer.AuthorizeCode(r.Context(), target.config, permit.Account, target.dispatchDescriptor())
+	a.auth, err = f.authorizer.AuthorizeCode(r.Context(), target.config, permit.Account, target.dispatchDescriptor())
 	if err != nil {
 		return nil, codemode.Refuse(503, "code_account_unavailable")
 	}
@@ -196,7 +196,7 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 }
 
 func (a *codeAttempt) dispatch(ctx context.Context) error {
-	if err := a.server.deps.CodeLedger.MarkDispatched(ctx, a.permit.Attempt.ID); err != nil {
+	if err := a.forwarder.ledger.MarkDispatched(ctx, a.permit.Attempt.ID); err != nil {
 		return codemode.Refuse(503, "code_dispatch_unavailable")
 	}
 	a.dispatched = true
@@ -224,7 +224,7 @@ func (a *codeAttempt) observeEncodedUnary(body []byte, encoding string) {
 func (a *codeAttempt) observe(o codemode.Observation) {
 	if o.ResponseID != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		_ = a.server.deps.CodeLedger.ObserveReference(ctx, a.permit.Attempt.ID, o.ResponseID)
+		_ = a.forwarder.ledger.ObserveReference(ctx, a.permit.Attempt.ID, o.ResponseID)
 		cancel()
 	}
 	classification, classified := a.observeCooldownClass(o)
@@ -282,21 +282,21 @@ func (a *codeAttempt) finish(ctx context.Context) {
 	defer cancel()
 	var err error
 	if a.dispatched {
-		err = a.server.deps.CodeLedger.Settle(ctx, a.permit.Attempt.ID, a.usage)
+		err = a.forwarder.ledger.Settle(ctx, a.permit.Attempt.ID, a.usage)
 	} else {
-		err = a.server.deps.CodeLedger.Abort(ctx, a.permit.Attempt.ID)
+		err = a.forwarder.ledger.Abort(ctx, a.permit.Attempt.ID)
 		if err != nil {
-			err = a.server.deps.CodeLedger.Settle(ctx, a.permit.Attempt.ID, codemode.Usage{})
+			err = a.forwarder.ledger.Settle(ctx, a.permit.Attempt.ID, codemode.Usage{})
 		}
 	}
 	if err != nil {
-		a.server.log.Warn("code accounting unavailable", "attempt_id", a.permit.Attempt.ID)
+		a.forwarder.log.Warn("code accounting unavailable", "attempt_id", a.permit.Attempt.ID)
 	}
 	if a.paid != nil {
 		a.finishPaid(ctx)
 	}
-	quota.SettleKey(ctx, a.lease, a.dispatched, a.usage.Total, a.server.log)
-	quota.SettleKey(ctx, a.providerLease, a.dispatched, a.usage.Total, a.server.log)
+	quota.SettleKey(ctx, a.lease, a.dispatched, a.usage.Total, a.forwarder.log)
+	quota.SettleKey(ctx, a.providerLease, a.dispatched, a.usage.Total, a.forwarder.log)
 }
 
 func (a *codeAttempt) outcome(ctx context.Context, outcome codemode.Outcome) {
@@ -304,12 +304,12 @@ func (a *codeAttempt) outcome(ctx context.Context, outcome codemode.Outcome) {
 		return
 	}
 	if outcome.ObservedAt.IsZero() {
-		outcome.ObservedAt = a.server.now().UTC()
+		outcome.ObservedAt = a.forwarder.now().UTC()
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	if err := a.server.deps.CodeLedger.ObserveOutcome(ctx, a.permit.Attempt.ID, outcome); err != nil {
-		a.server.log.Warn("code outcome unavailable", "attempt_id", a.permit.Attempt.ID)
+	if err := a.forwarder.ledger.ObserveOutcome(ctx, a.permit.Attempt.ID, outcome); err != nil {
+		a.forwarder.log.Warn("code outcome unavailable", "attempt_id", a.permit.Attempt.ID)
 	}
 }
 
@@ -341,7 +341,7 @@ func (a *codeAttempt) observeAllowanceCharge(ctx context.Context, charge json.Ra
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	_ = a.server.deps.CodeLedger.ObserveAllowanceCharge(ctx, a.permit.Attempt.ID, charge)
+	_ = a.forwarder.ledger.ObserveAllowanceCharge(ctx, a.permit.Attempt.ID, charge)
 }
 
 func (a *codeAttempt) observeAllowance(ctx context.Context, allowance codemode.Allowance) {
@@ -350,11 +350,11 @@ func (a *codeAttempt) observeAllowance(ctx context.Context, allowance codemode.A
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	_ = a.server.deps.CodeLedger.ObserveAllowance(ctx, a.permit.Account.ID, allowance)
+	_ = a.forwarder.ledger.ObserveAllowance(ctx, a.permit.Account.ID, allowance)
 }
 
 func (a *codeAttempt) health(ctx context.Context, status string) {
-	a.observeHealth(ctx, codemode.HealthObservation{Status: status, ObservedAt: a.server.now().UTC()})
+	a.observeHealth(ctx, codemode.HealthObservation{Status: status, ObservedAt: a.forwarder.now().UTC()})
 }
 
 func (a *codeAttempt) observeHealth(ctx context.Context, observation codemode.HealthObservation) {
@@ -363,7 +363,7 @@ func (a *codeAttempt) observeHealth(ctx context.Context, observation codemode.He
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	_ = a.server.deps.CodeLedger.ObserveHealth(ctx, a.permit.Account.ID, observation)
+	_ = a.forwarder.ledger.ObserveHealth(ctx, a.permit.Account.ID, observation)
 }
 
 func (a *codeAttempt) flushPendingHealth(ctx context.Context) {
@@ -391,7 +391,7 @@ func (a *codeAttempt) observeCooldownClass(o codemode.Observation) (codeadapter.
 	if len(o.RetryAfter) == 0 && a.responseHeaders != nil {
 		headers = a.responseHeaders
 	}
-	now := a.server.now().UTC()
+	now := a.forwarder.now().UTC()
 	classification, ok := adapter.Classify(a.endpoint, status, o.RejectionBody, headers, now)
 	if !ok {
 		return codeadapter.Classification{}, false
@@ -403,7 +403,7 @@ func (a *codeAttempt) observeCooldownClass(o codemode.Observation) (codeadapter.
 	classification = codeadapter.WithCycleReset(classification, a.permit.Account.CycleAnchor, now)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	err := a.server.deps.CodeLedger.ObserveCooldownClass(ctx, a.permit.Account.ID, a.model, classification, now)
+	err := a.forwarder.ledger.ObserveCooldownClass(ctx, a.permit.Account.ID, a.model, classification, now)
 	return classification, err == nil
 }
 
@@ -421,7 +421,7 @@ func (a *codeAttempt) response(ctx context.Context, status int, headers http.Hea
 	}
 	a.outcome(ctx, outcome)
 	if status == http.StatusUnauthorized {
-		a.server.deps.Runtime.CredentialRefused(a.auth.CredentialID, a.auth.GrantGeneration)
+		a.forwarder.runtime.CredentialRefused(a.auth.CredentialID, a.auth.GrantGeneration)
 	}
 	if status == 429 || status == 401 || status == 403 || status >= 500 {
 		health := func() string {
@@ -430,7 +430,7 @@ func (a *codeAttempt) response(ctx context.Context, status int, headers http.Hea
 			}
 			return "unavailable"
 		}()
-		now := a.server.now().UTC()
+		now := a.forwarder.now().UTC()
 		retryAt := func() *time.Time {
 			values := headers.Values("Retry-After")
 			if len(values) != 1 {
@@ -449,7 +449,7 @@ func (a *codeAttempt) response(ctx context.Context, status int, headers http.Hea
 	if a.endpoint.Observation != codeadapter.ObserveCodex {
 		return
 	}
-	if allowance := codexwire.Allowance(headers, a.server.now()); allowance != nil {
+	if allowance := codexwire.Allowance(headers, a.forwarder.now()); allowance != nil {
 		a.observeAllowance(ctx, *allowance)
 	}
 }

@@ -41,6 +41,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
+	"github.com/tyk-swe/olp/internal/gateway/traceingest"
 	"github.com/tyk-swe/olp/internal/grants/personal"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	limitadmission "github.com/tyk-swe/olp/internal/limits/admission"
@@ -327,7 +328,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 				Carrier:            pluginHost,
 				UnconfinedPlugins:  unconfined != nil,
 			}
-			gatewayDeps.Traces = &gateway.TraceDeps{Pool: pool, Limiter: limiter, Auth: auth}
+			gatewayDeps.Traces = &traceingest.Store{Pool: pool, Limiter: limiter, Auth: auth}
 			gatewayDeps.Batches = batches.NewStore(pool)
 			gatewayDeps.Cache = responseCache
 			gatewayDeps.Business = business

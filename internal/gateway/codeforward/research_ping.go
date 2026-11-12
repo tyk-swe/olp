@@ -1,4 +1,4 @@
-package gateway
+package codeforward
 
 import (
 	"context"
@@ -13,27 +13,27 @@ import (
 // answerResearchPing answers only a validated upstream liveness request, under
 // the stream's existing admission. Reauthorization fences revocations and
 // generation changes without reserving another concurrency slot for the stream.
-func (s *Server) answerResearchPing(r *http.Request, release *release.Release, route codemode.Route, service string, authority keyauthority.Authority, attempt *researchAttempt, session string, reply []byte) error {
+func (f *Forwarder) answerResearchPing(r *http.Request, release *release.Release, route codemode.Route, service string, authority keyauthority.Authority, attempt *researchAttempt, session string, reply []byte) error {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	fresh, account, err := s.researchAuthority(r.WithContext(ctx), route, service, authority)
+	fresh, account, err := f.researchAuthority(r.WithContext(ctx), route, service, authority)
 	if err != nil {
 		return err
 	}
-	auth, err := s.researchAuthorization(ctx, attempt.config, account, service)
+	auth, err := f.researchAuthorization(ctx, attempt.config, account, service)
 	if err != nil {
 		return err
 	}
 	if researchBinding(fresh.ID, route, service, account, auth) != attempt.binding {
 		return codemode.Refuse(409, "code_research_session_invalid")
 	}
-	upstream, err := s.deps.CodeResearch.ResearchSession(ctx, session, attempt.binding)
+	upstream, err := f.research.ResearchSession(ctx, session, attempt.binding)
 	if err != nil {
 		return err
 	}
 	// A separate raw connection avoids waiting behind the SSE connection when
-	// the provider's per-client connection limit is one. This POST is never replayed.
-	client, err := s.codeClient(ctx, release, attempt.config, account.ProviderID)
+	// the provider'f per-client connection limit is one. This POST is never replayed.
+	client, err := f.codeClient(ctx, release, attempt.config, account.ProviderID)
 	if err != nil {
 		return err
 	}

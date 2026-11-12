@@ -1,4 +1,4 @@
-package gateway
+package traceingest
 
 import (
 	"compress/gzip"
@@ -10,6 +10,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/netip"
 	"slices"
 	"strings"
 	"time"
@@ -34,7 +35,7 @@ const traceBodyLimit = 1 << 20
 const traceSpanLimit = 256
 const traceAttributeLimit = 32
 
-type TraceDeps struct {
+type Store struct {
 	Pool    *pgxpool.Pool
 	Limiter *admission.Limiter
 	Auth    *secrets.AuthKey
@@ -59,9 +60,19 @@ type traceRecord struct {
 	Attributes traceAttributes `json:"attributes"`
 }
 
-func (s *Server) ingestTraces(w http.ResponseWriter, r *http.Request) {
+type Ingester struct {
+	keys    consumerauth.Authenticator
+	trusted []netip.Prefix
+	store   *Store
+}
+
+func New(keys consumerauth.Authenticator, trusted []netip.Prefix, store *Store) *Ingester {
+	return &Ingester{keys: keys, trusted: trusted, store: store}
+}
+
+func (i *Ingester) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	token, _ := consumerauth.Bearer(r.Header.Get("Authorization"))
-	authority, failure := consumerauth.Authenticate(s.deps.Runtime, r, token, "traces_write", s.cfg.TrustedProxies, time.Now())
+	authority, failure := consumerauth.Authenticate(i.keys, r, token, "traces_write", i.trusted, time.Now())
 	if failure != nil {
 		writeTraceError(w, failure.Status, failure.Message)
 		return
@@ -70,11 +81,11 @@ func (s *Server) ingestTraces(w http.ResponseWriter, r *http.Request) {
 		writeTraceError(w, http.StatusForbidden, "This API key cannot write traces for a project.")
 		return
 	}
-	if s.deps.Traces == nil || s.deps.Traces.Pool == nil || s.deps.Traces.Limiter == nil || s.deps.Traces.Auth == nil {
+	if i.store == nil || i.store.Pool == nil || i.store.Limiter == nil || i.store.Auth == nil {
 		writeTraceError(w, http.StatusServiceUnavailable, "Trace ingestion is unavailable.")
 		return
 	}
-	leases, err := s.deps.Traces.reserve(r.Context(), authority)
+	leases, err := i.store.reserve(r.Context(), authority)
 	if err != nil {
 		var exceeded *limits.ExceededError
 		if errors.As(err, &exceeded) {
@@ -119,7 +130,7 @@ func (s *Server) ingestTraces(w http.ResponseWriter, r *http.Request) {
 		}
 	})
 	if len(records) > 0 {
-		if err := s.deps.Traces.persist(r.Context(), authority, records); err != nil {
+		if err := i.store.persist(r.Context(), authority, records); err != nil {
 			writeTraceError(w, http.StatusServiceUnavailable, "Trace ingestion is unavailable.")
 			return
 		}
@@ -177,7 +188,7 @@ func readTraceBytes(reader io.Reader) ([]byte, int) {
 	return body, 0
 }
 
-func (d *TraceDeps) reserve(ctx context.Context, authority keyauthority.Authority) ([]*admission.Lease, error) {
+func (d *Store) reserve(ctx context.Context, authority keyauthority.Authority) ([]*admission.Lease, error) {
 	limit := int64(60)
 	hash := sha256.Sum256([]byte(authority.ID))
 	traceLease, err := d.Limiter.Reserve(ctx, rateRequest("tr_"+hex.EncodeToString(hash[:16]), &limit, nil))
@@ -198,14 +209,14 @@ func (d *TraceDeps) reserve(ctx context.Context, authority keyauthority.Authorit
 	return []*admission.Lease{traceLease, keyLease, groupLease}, nil
 }
 
-func (d *TraceDeps) reserveTraceKey(ctx context.Context, authority keyauthority.Authority) (*admission.Lease, error) {
+func (d *Store) reserveTraceKey(ctx context.Context, authority keyauthority.Authority) (*admission.Lease, error) {
 	if authority.Policy.RequestsPerMinute == nil && authority.Policy.MaxConcurrency == nil {
 		return nil, nil
 	}
 	return d.Limiter.Reserve(ctx, rateRequest(authority.LimitsLookup(), authority.Policy.RequestsPerMinute, authority.Policy.MaxConcurrency))
 }
 
-func (d *TraceDeps) reserveTraceGroup(ctx context.Context, authority keyauthority.Authority) (*admission.Lease, error) {
+func (d *Store) reserveTraceGroup(ctx context.Context, authority keyauthority.Authority) (*admission.Lease, error) {
 	if authority.BudgetGroupID == nil || authority.BudgetGroupRPM == nil && authority.BudgetGroupConcurrency == nil {
 		return nil, nil
 	}
@@ -333,7 +344,7 @@ LEFT JOIN olp.agent_steps s ON s.dispatch_id=NULLIF(v.attempt_id,'')::uuid
 LEFT JOIN olp.agent_runs sr ON sr.id=s.run_id AND sr.project_id=$1 AND sr.api_key_id=$2 AND sr.principal_digest=$3
 ON CONFLICT(project_id,api_key_id,principal_digest,trace_id,span_id) DO NOTHING`
 
-func (d *TraceDeps) persist(ctx context.Context, authority keyauthority.Authority, records []traceRecord) error {
+func (d *Store) persist(ctx context.Context, authority keyauthority.Authority, records []traceRecord) error {
 	payload, err := json.Marshal(records)
 	if err != nil {
 		return err

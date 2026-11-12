@@ -1,4 +1,4 @@
-package gateway
+package codeforward
 
 import (
 	"context"
@@ -19,25 +19,26 @@ import (
 	"github.com/tyk-swe/olp/internal/release"
 )
 
-func (s *Server) RegisterCode(mux *http.ServeMux) {
-	mux.HandleFunc("GET /code/{slug}/models", s.codeModels)
-	mux.HandleFunc("GET /code/{slug}/v1/models", s.codeModels)
-	mux.HandleFunc("/code/{slug}/mcp/{service}", s.serveCodeResearch)
-	mux.HandleFunc("/code/{slug}/{operation...}", s.serveCode)
+// Register mounts the code mode routes on the public mux.
+func (f *Forwarder) Register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /code/{slug}/models", f.codeModels)
+	mux.HandleFunc("GET /code/{slug}/v1/models", f.codeModels)
+	mux.HandleFunc("/code/{slug}/mcp/{service}", f.serveCodeResearch)
+	mux.HandleFunc("/code/{slug}/{operation...}", f.serveCode)
 }
 
-func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
-	if !s.gate.Admit(r.Context()) {
+func (f *Forwarder) serveCode(w http.ResponseWriter, r *http.Request) {
+	if !f.gate.Admit(r.Context()) {
 		codeWriteError(w, r, codemode.Refuse(503, "code_overloaded"))
 		return
 	}
-	defer s.gate.Release(r.Context())
-	authority, failure := s.gate.Authenticate(r, "inference")
+	defer f.gate.Release(r.Context())
+	authority, failure := f.gate.Authenticate(r, "inference")
 	if failure != nil {
 		codeWriteError(w, r, codemode.Refuse(failure.Status, "code_authentication_refused"))
 		return
 	}
-	release := s.deps.Runtime.Release()
+	release := f.runtime.Release()
 	if release == nil || release.Snapshot() == nil {
 		codeWriteError(w, r, codemode.Refuse(503, "code_runtime_unavailable"))
 		return
@@ -47,8 +48,8 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		codeWriteError(w, r, codemode.Refuse(404, "code_route_unavailable"))
 		return
 	}
-	refuse := func(err error) { s.codeRefuse(w, r, route, authority.ID, authority.EndUserDigest, err) }
-	if !route.Enabled || !authority.Allows("inference", route.Slug, &route.ProjectID, s.now()) {
+	refuse := func(err error) { f.codeRefuse(w, r, route, authority.ID, authority.EndUserDigest, err) }
+	if !route.Enabled || !authority.Allows("inference", route.Slug, &route.ProjectID, f.now()) {
 		refuse(codemode.Refuse(404, "code_route_unavailable"))
 		return
 	}
@@ -67,7 +68,7 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 	}
 	inbound, ok := codeIngressFor(path)
 	if ok && r.Method == http.MethodGet && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") && release.Snapshot().HasCodeProviders(route, path, codeadapter.WebSocket) {
-		s.codeWebSocket(w, r, release, route, authority, inbound)
+		f.codeWebSocket(w, r, release, route, authority, inbound)
 		return
 	}
 	if r.Method != http.MethodPost || !ok || !release.Snapshot().HasCodeProviders(route, path, codeadapter.HTTP) && len(route.PaidTargets)+len(route.PaidFallbackTargets) == 0 {
@@ -78,7 +79,7 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		refuse(codemode.Refuse(400, "code_operation_unsupported"))
 		return
 	}
-	limit := bodylimit.Lower(s.codeBodyLimit(), route.MaxBodyBytes)
+	limit := bodylimit.Lower(f.codeBodyLimit(), route.MaxBodyBytes)
 	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(30 * time.Second))
 	raw, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
 	if err != nil {
@@ -103,12 +104,12 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), codeGenerationTimeout)
 	defer cancel()
 	observation.Recoverable = route.InitialRecoveryAttempts > 0 && codewire.PortableInitialRequest(body, r.Header, observation)
-	s.forwardCode(w, r.WithContext(ctx), release, route, observation, inbound, raw, body, nil, refuse)
+	f.forwardCode(w, r.WithContext(ctx), release, route, observation, inbound, raw, body, nil, refuse)
 }
 
-func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *release.Release, route codemode.Route, observation codemode.Request, inbound codeIngress, raw, body []byte, recovery *codesessions.Recovery, refuse func(error)) {
+func (f *Forwarder) forwardCode(w http.ResponseWriter, r *http.Request, release *release.Release, route codemode.Route, observation codemode.Request, inbound codeIngress, raw, body []byte, recovery *codesessions.Recovery, refuse func(error)) {
 	ctx := r.Context()
-	attempt, err := s.prepareCode(r, release, route, observation, inbound, codeadapter.HTTP, recovery, body)
+	attempt, err := f.prepareCode(r, release, route, observation, inbound, codeadapter.HTTP, recovery, body)
 	if err != nil {
 		refuse(err)
 		return
@@ -143,7 +144,7 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *re
 		return
 	}
 
-	client, err := s.codeClient(r.Context(), release, attempt.config, attempt.providerID())
+	client, err := f.codeClient(r.Context(), release, attempt.config, attempt.providerID())
 	if err != nil {
 		refuse(err)
 		return
@@ -211,7 +212,7 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *re
 		return
 	}
 	if next != nil {
-		s.forwardCode(w, r, release, route, observation, inbound, raw, body, next, refuse)
+		f.forwardCode(w, r, release, route, observation, inbound, raw, body, next, refuse)
 		return
 	}
 	if payload.target == codeadapter.TargetAntigravity {
@@ -239,9 +240,9 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *re
 	}
 }
 
-func (s *Server) codeBodyLimit() int64 {
-	if s.cfg.MaxBodyBytes > 0 {
-		return min(codewire.MaxBody, s.cfg.MaxBodyBytes)
+func (f *Forwarder) codeBodyLimit() int64 {
+	if f.maxBody > 0 {
+		return min(codewire.MaxBody, f.maxBody)
 	}
 	return codewire.MaxBody
 }

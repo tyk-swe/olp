@@ -1,4 +1,4 @@
-package gateway
+package codeforward
 
 import (
 	"context"
@@ -18,13 +18,13 @@ const researchTimeout = 2 * time.Minute
 
 // serveCodeResearch is deliberately independent of inference admission, model
 // selection and conversation pinning. Every HTTP request rechecks live authority.
-func (s *Server) serveCodeResearch(w http.ResponseWriter, r *http.Request) {
+func (f *Forwarder) serveCodeResearch(w http.ResponseWriter, r *http.Request) {
 	refuse := func(err error) { codeWriteError(w, r, err) }
-	if !s.gate.Admit(r.Context()) {
+	if !f.gate.Admit(r.Context()) {
 		refuse(codemode.Refuse(503, "code_overloaded"))
 		return
 	}
-	defer s.gate.Release(r.Context())
+	defer f.gate.Release(r.Context())
 	if !researchOriginAllowed(r) || r.URL.RawPath != "" || r.URL.RawQuery != "" {
 		refuse(codemode.Refuse(403, "code_research_origin_denied"))
 		return
@@ -34,23 +34,23 @@ func (s *Server) serveCodeResearch(w http.ResponseWriter, r *http.Request) {
 		refuse(codemode.Refuse(405, "code_research_method_denied"))
 		return
 	}
-	authority, failure := s.gate.Authenticate(r, "inference")
+	authority, failure := f.gate.Authenticate(r, "inference")
 	if failure != nil {
 		refuse(codemode.Refuse(failure.Status, "code_authentication_refused"))
 		return
 	}
-	release := s.deps.Runtime.Release()
+	release := f.runtime.Release()
 	if release == nil || release.Snapshot() == nil {
 		refuse(codemode.Refuse(503, "code_research_unavailable"))
 		return
 	}
 	route, found := release.Snapshot().FindCodeRoute(r.PathValue("slug"))
 	service := r.PathValue("service")
-	if !found || !route.Enabled || !route.Tools.Enables(service) || !authority.Allows("inference", route.Slug, &route.ProjectID, s.now()) {
+	if !found || !route.Enabled || !route.Tools.Enables(service) || !authority.Allows("inference", route.Slug, &route.ProjectID, f.now()) {
 		refuse(codemode.Refuse(404, "code_research_disabled"))
 		return
 	}
-	if s.deps.CodeResearch == nil || s.deps.ResearchAuth == nil {
+	if f.research == nil || f.researchAuth == nil {
 		refuse(codemode.Refuse(503, "code_research_unavailable"))
 		return
 	}
@@ -73,7 +73,7 @@ func (s *Server) serveCodeResearch(w http.ResponseWriter, r *http.Request) {
 			refuse(codemode.Refuse(415, "code_research_content_type_invalid"))
 			return
 		}
-		limit := bodylimit.Lower(min(s.codeBodyLimit(), coderesearch.MaxRequest), route.MaxBodyBytes)
+		limit := bodylimit.Lower(min(f.codeBodyLimit(), coderesearch.MaxRequest), route.MaxBodyBytes)
 		_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(30 * time.Second))
 		body, err = io.ReadAll(io.LimitReader(r.Body, limit+1))
 		_ = http.NewResponseController(w).SetReadDeadline(time.Time{})
@@ -96,7 +96,7 @@ func (s *Server) serveCodeResearch(w http.ResponseWriter, r *http.Request) {
 	}
 	// Request has already restricted notifications to the supported lifecycle
 	// and progress methods. They cannot start tool work.
-	attempt, err := s.prepareResearch(r, release, route, service, authority, strings.HasPrefix(method, "notifications/"))
+	attempt, err := f.prepareResearch(r, release, route, service, authority, strings.HasPrefix(method, "notifications/"))
 	if err != nil {
 		refuse(err)
 		return
@@ -120,7 +120,7 @@ func (s *Server) serveCodeResearch(w http.ResponseWriter, r *http.Request) {
 	}
 	upstreamSession := ""
 	if session != "" {
-		upstreamSession, err = s.deps.CodeResearch.ResearchSession(ctx, session, attempt.binding)
+		upstreamSession, err = f.research.ResearchSession(ctx, session, attempt.binding)
 		if err != nil {
 			refuse(err)
 			return
@@ -129,7 +129,7 @@ func (s *Server) serveCodeResearch(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodDelete && upstreamSession == "" {
 		// Stateless vendors have no session to terminate. Retire the local
 		// authorization state without requiring an upstream DELETE capability.
-		if err = s.deps.CodeResearch.DeleteResearchSession(ctx, session, attempt.binding.APIKeyID); err != nil {
+		if err = f.research.DeleteResearchSession(ctx, session, attempt.binding.APIKeyID); err != nil {
 			refuse(err)
 			return
 		}
@@ -138,11 +138,11 @@ func (s *Server) serveCodeResearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	target := codemode.ResearchEndpoint(service)
-	if _, err = s.egress.ValidateEndpoint(target); err != nil {
+	if _, err = f.egress.ValidateEndpoint(target); err != nil {
 		refuse(codemode.Refuse(502, "code_egress_refused"))
 		return
 	}
-	client, err := s.codeClient(ctx, release, attempt.config, attempt.account.ProviderID)
+	client, err := f.codeClient(ctx, release, attempt.config, attempt.account.ProviderID)
 	if err != nil {
 		refuse(err)
 		return
@@ -181,7 +181,7 @@ func (s *Server) serveCodeResearch(w http.ResponseWriter, r *http.Request) {
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusNotFound || r.Method == http.MethodDelete && response.StatusCode >= 200 && response.StatusCode < 300 {
 		if session != "" {
-			if err = s.deps.CodeResearch.DeleteResearchSession(ctx, session, attempt.binding.APIKeyID); err != nil {
+			if err = f.research.DeleteResearchSession(ctx, session, attempt.binding.APIKeyID); err != nil {
 				refuse(codemode.Refuse(503, "code_research_session_unavailable"))
 				return
 			}
@@ -198,7 +198,7 @@ func (s *Server) serveCodeResearch(w http.ResponseWriter, r *http.Request) {
 	if method == "initialize" && response.StatusCode == http.StatusOK {
 		// An OLP session also fences stateless upstreams: event IDs and stream
 		// resumes must not cross caller keys sharing one subscription bearer.
-		session, err = s.deps.CodeResearch.CreateResearchSession(ctx, attempt.binding, upstreamID)
+		session, err = f.research.CreateResearchSession(ctx, attempt.binding, upstreamID)
 		if err != nil {
 			refuse(err)
 			return
@@ -212,11 +212,11 @@ func (s *Server) serveCodeResearch(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if !initialized {
 				// Client cancellation and transport failure must not strand a
-				// tentative handshake in the key's bounded session allowance.
+				// tentative handshake in the key'f bounded session allowance.
 				cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 				defer cancel()
-				if err := s.deps.CodeResearch.DeleteResearchSession(cleanup, session, attempt.binding.APIKeyID); err != nil {
-					s.log.Warn("research session cleanup unavailable", "session_id", session)
+				if err := f.research.DeleteResearchSession(cleanup, session, attempt.binding.APIKeyID); err != nil {
+					f.log.Warn("research session cleanup unavailable", "session_id", session)
 				}
 			}
 		}()
@@ -224,8 +224,8 @@ func (s *Server) serveCodeResearch(w http.ResponseWriter, r *http.Request) {
 	forwarding := researchResponse{
 		method: method, service: service, resumeKey: attempt.auth.Headers.Get("Authorization"), requestID: coderesearch.MessageID(body),
 		answerPing: func(reply []byte) error {
-			return s.answerResearchPing(r, release, route, service, authority, attempt, session, reply)
+			return f.answerResearchPing(r, release, route, service, authority, attempt, session, reply)
 		},
 	}
-	initialized = s.copyResearchResponse(w, r, response, forwarding)
+	initialized = f.copyResearchResponse(w, r, response, forwarding)
 }

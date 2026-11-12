@@ -411,7 +411,7 @@ func (s *Server) relayNativeDuplex(ctx context.Context, x *call, p *pin, client,
 	done := make(chan relayEnd, 2)
 	go func() { done <- forward(upstream, client, false) }()
 	go func() { done <- forward(client, upstream, true) }()
-	reauth := time.NewTicker(realtimeReauth)
+	reauth := time.NewTicker(ingress.ReauthInterval)
 	defer reauth.Stop()
 	heartbeat := time.NewTicker(realtimePing)
 	defer heartbeat.Stop()
@@ -440,7 +440,7 @@ loop:
 				break loop
 			}
 		case <-heartbeat.C:
-			pingCtx, pingCancel := context.WithTimeout(ctx, realtimeReauth)
+			pingCtx, pingCancel := context.WithTimeout(ctx, ingress.ReauthInterval)
 			first.err = upstream.Ping(pingCtx)
 			if first.err == nil {
 				first.err = client.Ping(pingCtx)

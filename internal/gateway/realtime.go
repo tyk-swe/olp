@@ -40,8 +40,6 @@ import (
 
 const realtimeSession = time.Hour
 
-const realtimeReauth = 5 * time.Second
-
 const realtimePing = 30 * time.Second
 
 var errRealtimeAuthorityRevoked = errors.New("realtime authority revoked")
@@ -1060,7 +1058,7 @@ func (s *Server) relayRealtime(ctx context.Context, x *call, p *pin, client, con
 	remaining := 2
 	go func() { done <- forward(conn, client, false) }()
 	go func() { done <- forward(client, conn, true) }()
-	reauth := time.NewTicker(realtimeReauth)
+	reauth := time.NewTicker(ingress.ReauthInterval)
 	defer reauth.Stop()
 	heartbeat := time.NewTicker(realtimePing)
 	defer heartbeat.Stop()
@@ -1090,7 +1088,7 @@ loop:
 				break loop
 			}
 		case <-heartbeat.C:
-			pingCtx, pingCancel := context.WithTimeout(ctx, realtimeReauth)
+			pingCtx, pingCancel := context.WithTimeout(ctx, ingress.ReauthInterval)
 			err := conn.Ping(pingCtx)
 			if err == nil {
 				err = client.Ping(pingCtx)

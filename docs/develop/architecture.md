@@ -15,7 +15,7 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Users, keys and identity | `internal/access/`, `internal/access/authority/`; console `access/` |
 | Projects, installation settings and policy | `internal/projects/`, `internal/settings/`, `internal/limits/`; console `access/` |
 | Notifications | `internal/notifications/`; console `access/notifications/` |
-| Admission, execution and retained resources | `internal/gateway/`, `internal/resources/`, `internal/media/`; console inference/media |
+| Admission, execution and retained resources | `internal/gateway/` (execution kernel, with `fault/`, `events/`, `quota/`, `ingress/`, `health/`, `codeforward/` and `traceingest/` beneath it), `internal/resources/`, `internal/media/`; console inference/media |
 | Code mode | `internal/codemode/`, `internal/codeadapter/`, `internal/codeclient/`, `internal/coderesearch/`, `internal/codesessions/`; console code mode |
 | Source and operation contracts | `internal/oif/`, `internal/operations/`, `internal/interaction/`, `internal/operationplan/`, `internal/operationregistry/` |
 | Protocol and lifecycle contracts | `internal/protocols/`, `internal/mediacontract/`, `internal/durablecontract/`, `internal/realtimecontract/`, `internal/geminilifecycle/` |
@@ -145,6 +145,28 @@ immutable views. Protocol owners
 validate bounded native events and terminal proof. Local projection cannot invent
 provider completion.
 
+## Gateway packages
+
+`internal/gateway` is the execution kernel. It owns the `call`, the route leg,
+the attempt loop, settlement and every inference surface that runs through them.
+The packages beneath it hold what the kernel uses and never import it back.
+
+| Package | Owns | May import |
+| --- | --- | --- |
+| `gateway/fault` | client-visible error values, per-surface error bodies, rate-limit headers and committed stream writing | none |
+| `gateway/events` | the terminal request envelope, attempt facts and the log and accounting sinks | none |
+| `gateway/quota` | limiter admission, typed key, route, target and aggregate reservations, cost reservations and supply | `events`, `fault` |
+| `gateway/ingress` | concurrency slots, API key authentication, attribution, end-user identity and bounded body reading | `fault` |
+| `gateway/health` | circuit state, credential cooldowns and fleet health | `events` |
+| `gateway/codeforward` | `/code/{slug}` forwarding and the research proxy | `events`, `fault`, `ingress`, `quota` |
+| `gateway/traceingest` | OTLP trace ingest on `POST /v1/traces` | none |
+
+`scripts/check-lint.sh` enforces the last column and fails on a package it has
+no entry for, so a new gateway package declares its imports when it is added.
+Put new code in the kernel only when it needs a `call`. A handler that can be
+built from its own collaborators belongs in its own package, as
+`codeforward.Forwarder` and `traceingest.Ingester` are.
+
 ## Ordinary execution
 
 `routing.Select(..., routing.Options)` owns selection policy, constraints, stable
@@ -158,7 +180,8 @@ Strict contracts are per-target and operation-owned; transformed preparation own
 declared defaults/translation. A gateway `call` owns authority, deadlines, financial
 state and the shared attempt loop. Its `routeLeg` owns selection and preparation;
 `generationCall` and `unaryCall` own their respective source and operation state.
-Media and code-mode lifetimes remain with their existing owners. A planning
+Media lifetimes remain with their existing owner, and code mode runs outside the
+call in `gateway/codeforward`. A planning
 session owns selection, delegation and plan adoption across operation adapters.
 The admitted-attempt lease owns final authority checks, reservations and typed
 completion. The attempt loop owns retries and fallback.
@@ -199,13 +222,13 @@ account, and the native first dispatch remains unchanged.
 | `codeadapter`, fed by `codeplans` and `codexauth` | subscription profiles, client/upstream paths, operations, transports, conversation identity, credentials and observation rules | families sharing a client path agree on semantics, checked by `codeadapter.Validate` during snapshot validation |
 | `routing`, installed by `release` | endpoint and model eligibility compiled from the frozen revision | a failed compile leaves the previous release serving |
 | `codewire`, `codexwire` | native request classification and response observation on copies | parsing never reserializes the forwarded payload |
-| `gateway/code_attempt.go`, `codesessions.Store`, `limits` | dispatch, durable conversation pinning, admission and settlement, hard token budgets | one `MarkDispatched` per attributed attempt, atomic initial rebinding only after proven nonexecution, no replay of accepted or ambiguous work |
+| `gateway/codeforward`, `codesessions.Store`, `limits` | dispatch, durable conversation pinning, admission and settlement, hard token budgets | one `MarkDispatched` per attributed attempt, atomic initial rebinding only after proven nonexecution, no replay of accepted or ambiguous work |
 | `codeclient`, `routes`, `codeaccounts.Authorizer` | generated client configuration, project authority, upstream credential construction | generated configuration never contains an OLP or vendor key |
 
-`gateway/code_attempt.go` shares dispatch, observations, settlement and workload
+`codeforward/attempt.go` shares dispatch, observations, settlement and workload
 binding across HTTP/SSE and WebSockets. Transport files own copying/handshakes;
-`code_transport.go` shares endpoint credentials, and `code_refusal.go` records
-refusals. `CodeAuthorizer` checks frozen plugin plus current grant/credential
+`transport.go` shares endpoint credentials, and `refusal.go` records
+refusals. `codeforward.Authorizer` checks frozen plugin plus current grant/credential
 eligibility, then delegates credential construction to the adapter. Validate
 principal, credential header and extra single-valued headers before dispatch.
 Upgrade alone does not admit a generation: reauthorize each generation and retain

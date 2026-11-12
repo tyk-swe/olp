@@ -1,4 +1,4 @@
-package gateway
+package codeforward
 
 import (
 	"context"
@@ -15,9 +15,9 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
-// CodeLedger is the durable authority and admission boundary used before each
+// Ledger is the durable authority and admission boundary used before each
 // coding generation, including each generation on an upgraded connection.
-type CodeLedger interface {
+type Ledger interface {
 	Models(context.Context, codemode.Route, string) (codeclient.Offers, error)
 	Admit(context.Context, codesessions.Admission) (codesessions.Permit, error)
 	BindConnection(context.Context, codemode.Route, string, codemode.Identity, string, []string) (codesessions.Permit, error)
@@ -35,10 +35,10 @@ type CodeLedger interface {
 	RecordRefusal(context.Context, codemode.Route, string, string, string) error
 }
 
-// CodeAuthorizer returns the upstream authorization of one request: its
+// Authorizer returns the upstream authorization of one request: its
 // adapter and protocol, on an account whose provider connection the route
 // revision froze.
-type CodeAuthorizer interface {
+type Authorizer interface {
 	AuthorizeCode(context.Context, routing.Configuration, codemode.Account, codemode.Dispatch) (codemode.Authorization, error)
 }
 
@@ -55,7 +55,7 @@ type ResearchLedger interface {
 	DeleteResearchSession(context.Context, string, string) error
 }
 
-type PaidCodeLedger interface {
+type PaidLedger interface {
 	ResolvePaidFallback(context.Context, codesessions.Admission, keyauthority.Authority) (*codemode.Operation, error)
 	ResolvePaidModel(context.Context, codesessions.Admission, keyauthority.Authority) (codemode.Operation, error)
 	AdmitPaid(context.Context, codesessions.PaidAdmission) (codesessions.PaidPermit, error)

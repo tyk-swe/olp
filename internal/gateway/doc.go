@@ -1,5 +1,7 @@
-// Package gateway serves the native OpenAI inference surface (/v1) and the
-// console playground on top of a pinned runtime release: bounded ingress,
-// API key authentication, route selection, attempt failover, streaming
-// commitment, circuit health, and the terminal request envelope.
+// Package gateway is the execution kernel behind every inference surface: it
+// owns the call, route selection, the attempt loop, streaming commitment and
+// settlement on top of a pinned runtime release. The packages beneath it hold
+// what the kernel uses and never import it back: fault, events, quota, ingress
+// and health are its building blocks, while codeforward and traceingest are
+// handlers that need no call.
 package gateway
