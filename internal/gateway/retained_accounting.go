@@ -7,6 +7,8 @@ import (
 	"time"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -53,10 +55,10 @@ func retainedOperationForAction(action string) retainedOperation {
 
 func (p retainedAdmissionPlan) authority(authority keyauthority.Authority, costExempt bool) keyauthority.Authority {
 	if p.billing == retainedFree {
-		return researchRateAuthority(authority, false)
+		return quota.RequestRateAuthority(authority, false)
 	}
 	if costExempt {
-		return withoutCostBudgets(authority)
+		return quota.WithoutCostBudgets(authority)
 	}
 	return authority
 }
@@ -89,11 +91,11 @@ func retainedPageFreeControl(entries []retainedListEntry, limit int) bool {
 
 // An initially free page may need paid reads after provider tombstones are
 // removed. Add cost leases without reserving its request rates a second time.
-func (s *Server) admitRetainedPageCost(ctx context.Context, x *call, authority keyauthority.Authority, ttl time.Duration) *Error {
+func (s *Server) admitRetainedPageCost(ctx context.Context, x *call, authority keyauthority.Authority, ttl time.Duration) *fault.Error {
 	authority = retainedCostAuthority(authority)
 	authority.Attribution = x.attribution
 	authority.Policy.RouteLimits = nil // each route has its own page lease
-	lease, failure := s.deps.Admission.reserveKey(ctx, authority, x.clientSurface(), resourceEstimate, ttl)
+	lease, failure := s.deps.Admission.ReserveKey(ctx, authority, x.clientSurface(), resourceEstimate, ttl)
 	if failure != nil {
 		return failure
 	}
@@ -131,7 +133,7 @@ func retainedCostAuthority(authority keyauthority.Authority) keyauthority.Author
 	return authority
 }
 
-func (s *Server) admitRetainedRequest(ctx context.Context, x *call, a keyauthority.Authority, p *pin, route *routing.Route, deferred bool) *Error {
+func (s *Server) admitRetainedRequest(ctx context.Context, x *call, a keyauthority.Authority, p *pin, route *routing.Route, deferred bool) *fault.Error {
 	admission, err := s.prepareRetainedAdmission(x, p, deferred)
 	if err != nil {
 		return err
@@ -147,17 +149,17 @@ func (s *Server) admitRetainedRequest(ctx context.Context, x *call, a keyauthori
 	return s.gateRetainedSlot(ctx, x, p, route)
 }
 
-func (s *Server) reserveRetainedPage(ctx context.Context, x *call, authority keyauthority.Authority, entries []retainedListEntry, limit int, ttl time.Duration) *Error {
+func (s *Server) reserveRetainedPage(ctx context.Context, x *call, authority keyauthority.Authority, entries []retainedListEntry, limit int, ttl time.Duration) *fault.Error {
 	authority.Attribution = x.attribution
 	if retainedPageFreeControl(entries, limit) {
-		authority = researchRateAuthority(authority, false)
+		authority = quota.RequestRateAuthority(authority, false)
 	}
-	lease, failure := s.deps.Admission.reserveKey(ctx, authority, x.clientSurface(), max(resourceEstimate, x.estimate), ttl)
+	lease, failure := s.deps.Admission.ReserveKey(ctx, authority, x.clientSurface(), max(resourceEstimate, x.estimate), ttl)
 	x.lease = lease
 	return failure
 }
 
-func (s *Server) prepareRetainedAdmission(x *call, p *pin, deferred bool) (retainedAdmissionPlan, *Error) {
+func (s *Server) prepareRetainedAdmission(x *call, p *pin, deferred bool) (retainedAdmissionPlan, *fault.Error) {
 	if p.provider.CredentialSource == "caller" {
 		return retainedAdmissionPlan{}, policyUnavailable("unsupported_provider_credentials", "Retained resources require managed provider credentials.")
 	}
@@ -170,7 +172,7 @@ func (s *Server) prepareRetainedAdmission(x *call, p *pin, deferred bool) (retai
 		x.routingInputs = s.deps.Runtime.RoutingInputs()
 	}
 	if x.routingInputs == nil || x.request.startedAt.Sub(x.routingInputs.RefreshedAt) > routinginputs.PerformanceMaxAge {
-		return retainedAdmissionPlan{}, serverError(http.StatusServiceUnavailable, "pricing_unavailable", "Current resource pricing is unavailable; retry shortly.")
+		return retainedAdmissionPlan{}, fault.ServerError(http.StatusServiceUnavailable, "pricing_unavailable", "Current resource pricing is unavailable; retry shortly.")
 	}
 	attempt := p.attempt
 	attempt.Price = x.routingInputs.Price(p.provider.Kind, p.provider.ID, p.provider.VendorID, p.model, x.operationName(), x.request.startedAt)
@@ -200,7 +202,7 @@ func observeRetainedUsage(x *call, source oif.Document, generation bool) error {
 	if !generation {
 		// A completed control/search request has no generated tokens. Its
 		// per-request price still applies through observed request usage.
-		fact.observeUsage(&wire.Usage{}, true)
+		fact.ObserveUsage(&wire.Usage{}, true)
 		fact.TokenlessUsage = true
 		return nil
 	}
@@ -209,11 +211,11 @@ func observeRetainedUsage(x *call, source oif.Document, generation bool) error {
 		return err
 	}
 	// Compaction is a terminal unary result and has no response status field.
-	fact.observeUsage(observation.Usage, observation.Usage != nil)
+	fact.ObserveUsage(observation.Usage, observation.Usage != nil)
 	return nil
 }
 
-func (s *Server) reserveRetainedCost(ctx context.Context, x *call, p *pin, route *routing.Route) *Error {
+func (s *Server) reserveRetainedCost(ctx context.Context, x *call, p *pin, route *routing.Route) *fault.Error {
 	if s.deps.Runtime != nil {
 		if release := s.deps.Runtime.Release(); release != nil {
 			x.currentCommitments = release.Snapshot()

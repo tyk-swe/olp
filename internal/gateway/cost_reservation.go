@@ -7,6 +7,9 @@ import (
 	"time"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/media"
@@ -17,25 +20,6 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
-
-// costReservation is what a request asks to hold against the cost budgets of its
-// applicable caller and aggregate boundaries while it is in flight. The zero value holds nothing:
-// the request is judged on the spend accrued so far, which is how a request that
-// nobody can price is treated.
-type costReservation struct {
-	// amount is the cost estimate as canonical decimal text, empty for none;
-	// charge is the estimate a charge-basis budget enforces, which equals the
-	// cost estimate when the consumer holds no rate card.
-	amount, charge string
-	// requestID is the identifier accounting will record the request's spend
-	// under, which is how that spend later replaces the reservation.
-	requestID string
-}
-
-// amountFor is the estimate one owner's basis enforces.
-func (r costReservation) amountFor(basis limits.Basis) string {
-	return basis.Pick(r.amount, r.charge)
-}
 
 // costBudgeted reports whether this request spends against a caller budget.
 // Estimation and growth use the same named-route boundary as admission, even
@@ -48,16 +32,16 @@ func (x *call) costBudgeted(authority keyauthority.Authority) bool {
 // attemptCostReservation holds the price of the one attempt a request runs on,
 // such as a video create, which never fails over because a second target would
 // mint a second job.
-func (x *call) attemptCostReservation(authority keyauthority.Authority, attempt routing.Attempt) costReservation {
+func (x *call) attemptCostReservation(authority keyauthority.Authority, attempt routing.Attempt) quota.CostReservation {
 	if !x.costBudgeted(authority) {
-		return costReservation{}
+		return quota.CostReservation{}
 	}
 	bound := x.attemptCostBound(attempt)
 	charge := x.attemptChargeBound(attempt, bound)
 	if bound.IsZero() && charge.IsZero() {
-		return costReservation{}
+		return quota.CostReservation{}
 	}
-	return costReservation{amount: bound.String(), charge: charge.String(), requestID: x.request.accountingID()}
+	return quota.CostReservation{Amount: bound.String(), Charge: charge.String(), RequestID: x.request.accountingID()}
 }
 
 // costReservation prices the request for admission: the most it could cost
@@ -66,9 +50,9 @@ func (x *call) attemptCostReservation(authority keyauthority.Authority, attempt 
 // attempt that reported usage, a retry through another credential slot
 // included, so the bound is their sum; it is replaced by the cost of what was
 // actually dispatched.
-func (s *Server) costReservation(x *call, authority keyauthority.Authority) costReservation {
+func (s *Server) costReservation(x *call, authority keyauthority.Authority) quota.CostReservation {
 	if x.workflow != nil {
-		return costReservation{}
+		return quota.CostReservation{}
 	}
 	if s.deps.Runtime != nil {
 		if release := s.deps.Runtime.Release(); release != nil {
@@ -76,7 +60,7 @@ func (s *Server) costReservation(x *call, authority keyauthority.Authority) cost
 		}
 	}
 	if !x.costBudgeted(authority) {
-		return costReservation{}
+		return quota.CostReservation{}
 	}
 	if x.routingInputs == nil && s.deps.Runtime != nil {
 		x.routingInputs = s.deps.Runtime.RoutingInputs()
@@ -84,9 +68,9 @@ func (s *Server) costReservation(x *call, authority keyauthority.Authority) cost
 	bound := s.routeCostBound(x)
 	charge := s.routeChargeBound(x)
 	if bound.IsZero() && charge.IsZero() {
-		return costReservation{}
+		return quota.CostReservation{}
 	}
-	return costReservation{amount: bound.String(), charge: charge.String(), requestID: x.request.accountingID()}
+	return quota.CostReservation{Amount: bound.String(), Charge: charge.String(), RequestID: x.request.accountingID()}
 }
 
 // routeChargeBound is the reservation's charge-side total over the same
@@ -124,7 +108,7 @@ func (s *Server) routeBound(x *call, boundOf func(routing.Attempt) rates.Cost) r
 
 // reserveFallbackCost covers the remaining route's work alongside the bound
 // already dispatched, even when an earlier attempt could not report its usage.
-func (s *Server) reserveFallbackCost(ctx context.Context, x *call) *Error {
+func (s *Server) reserveFallbackCost(ctx context.Context, x *call) *fault.Error {
 	if x.workflow != nil {
 		return nil
 	}
@@ -148,7 +132,7 @@ func (s *Server) reserveFallbackCost(ctx context.Context, x *call) *Error {
 // reserveSessionCost holds the price of a realtime session's selected attempt.
 // A session admits apart from choosing its target, so the hold follows the
 // selection, before the provider is dialled.
-func (s *Server) reserveSessionCost(ctx context.Context, x *call, authority keyauthority.Authority, attempt routing.Attempt, ttl time.Duration) *Error {
+func (s *Server) reserveSessionCost(ctx context.Context, x *call, authority keyauthority.Authority, attempt routing.Attempt, ttl time.Duration) *fault.Error {
 	if s.deps.Runtime != nil {
 		if release := s.deps.Runtime.Release(); release != nil {
 			x.currentCommitments = release.Snapshot()
@@ -158,32 +142,32 @@ func (s *Server) reserveSessionCost(ctx context.Context, x *call, authority keya
 		x.routingInputs = s.deps.Runtime.RoutingInputs()
 	}
 	hold := x.attemptCostReservation(authority, attempt)
-	if x.lease == nil || hold.amount == "" || x.sessionDebit != nil {
+	if x.lease == nil || hold.Amount == "" || x.sessionDebit != nil {
 		return nil
 	}
-	return s.growCost(ctx, x.lease, hold.amount, hold.charge, hold.requestID, ttl)
+	return s.growCost(ctx, x.lease, hold.Amount, hold.Charge, hold.RequestID, ttl)
 }
 
-func (s *Server) growCost(ctx context.Context, lease *admission.Lease, cost, charge, requestID string, ttl time.Duration) *Error {
-	if e := s.deps.Admission.checkCostAccounting(ctx); e != nil {
+func (s *Server) growCost(ctx context.Context, lease *admission.Lease, cost, charge, requestID string, ttl time.Duration) *fault.Error {
+	if e := s.deps.Admission.CheckCostAccounting(ctx); e != nil {
 		return e
 	}
 	if s.deps.Admission != nil && s.deps.Admission.PendingCostAccountingReady != nil {
 		for _, owner := range lease.CostOwnerIDs() {
-			if e := s.deps.Admission.checkPendingCostAccounting(ctx, owner); e != nil {
+			if e := s.deps.Admission.CheckPendingCostAccounting(ctx, owner); e != nil {
 				return e
 			}
 		}
 	}
-	decision, cancel := context.WithTimeout(ctx, reserveTimeout)
+	decision, cancel := context.WithTimeout(ctx, quota.ReserveTimeout)
 	defer cancel()
 	err := lease.GrowCost(decision, cost, charge, requestID, ttl)
 	if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
-		s.deps.Admission.recordRejection(exceeded.Dimension)
-		return rateLimitedBasis(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate, exceeded.Basis)
+		s.deps.Admission.RecordRejection(exceeded.Dimension)
+		return quota.RateLimitedBasis(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate, exceeded.Basis)
 	}
 	if err != nil {
-		return limitsUnavailable()
+		return quota.LimitsUnavailable()
 	}
 	return nil
 }
@@ -353,7 +337,7 @@ func (x *call) costOf(owner string) rates.Cost {
 		if fact.BudgetExempt || !fact.UsageObserved || fact.Price == nil || owner != "" && !slices.Contains(fact.Budgets, owner) {
 			continue
 		}
-		if cost, ok := fact.Price.Cost(attemptUsage(fact, operation), fact.StartedAt, attemptSuccessful(fact), fact.Discount); ok {
+		if cost, ok := fact.Price.Cost(events.AttemptUsage(fact, operation), fact.StartedAt, events.AttemptSuccessful(fact), fact.Discount); ok {
 			if !x.factCommitted(fact) {
 				total = total.Add(cost)
 			}
@@ -390,7 +374,7 @@ func (x *call) responseCost() (rates.Cost, bool) {
 		if !fact.UsageObserved {
 			continue
 		}
-		cost, ok := fact.Price.Cost(attemptUsage(fact, operation), fact.StartedAt, attemptSuccessful(fact), fact.Discount)
+		cost, ok := fact.Price.Cost(events.AttemptUsage(fact, operation), fact.StartedAt, events.AttemptSuccessful(fact), fact.Discount)
 		if !ok {
 			return rates.Cost{}, false
 		}
@@ -413,7 +397,7 @@ func (s *Server) settleAdmission(ctx context.Context, x *call) {
 		// A cache embedding uses this shared request reservation even when the
 		// parent's subsequent token or cost admission fails.
 		consumed := x.dispatched || x.cacheHit() || x.cache != nil && x.cache.embeddingDispatched
-		settleKey(ctx, x.cacheRateLease, consumed, &zero, s.log)
+		quota.SettleKey(ctx, x.cacheRateLease, consumed, &zero, s.log)
 	}
 	if x.lease == nil {
 		// A request that reserved nothing has nothing to settle, and is not made to
@@ -423,14 +407,14 @@ func (s *Server) settleAdmission(ctx context.Context, x *call) {
 	s.recordCost(x)
 	if x.operationOverride == "guardrail" {
 		actual := x.estimate
-		settleKey(ctx, x.lease, x.dispatched, &actual, s.log)
+		quota.SettleKey(ctx, x.lease, x.dispatched, &actual, s.log)
 		return
 	}
 	if first := x.generation.firstStep; first != nil {
-		settleKey(ctx, x.lease, x.dispatched || x.cacheHit(), x.settledTokensFor(x.facts[:first.factEnd], first.estimate), s.log)
+		quota.SettleKey(ctx, x.lease, x.dispatched || x.cacheHit(), x.settledTokensFor(x.facts[:first.factEnd], first.estimate), s.log)
 		return
 	}
-	settleKey(ctx, x.lease, x.dispatched || x.cacheHit(), x.settledTokens(), s.log)
+	quota.SettleKey(ctx, x.lease, x.dispatched || x.cacheHit(), x.settledTokens(), s.log)
 }
 
 // settledCharge is what the request's consumers owe from the attempts that
@@ -450,7 +434,7 @@ func (s *Server) settledCharge(x *call) rates.Cost {
 		var cost rates.Cost
 		var costPtr *rates.Cost
 		if fact.Price != nil {
-			if priced, ok := fact.Price.Cost(attemptUsage(fact, operation), fact.StartedAt, attemptSuccessful(fact), fact.Discount); ok {
+			if priced, ok := fact.Price.Cost(events.AttemptUsage(fact, operation), fact.StartedAt, events.AttemptSuccessful(fact), fact.Discount); ok {
 				cost = priced
 				if x.factCommitted(fact) {
 					cost = rates.Cost{}
@@ -458,14 +442,14 @@ func (s *Server) settledCharge(x *call) rates.Cost {
 				costPtr = &cost
 			}
 		}
-		rev := fact.cardRev
+		rev := fact.CardRev
 		if rev == nil {
 			// No card: the charge is the cost itself.
 			total = total.Add(cost)
 			continue
 		}
 		provider := x.snapshot().Provider(fact.ProviderID)
-		if charge, ok := rev.Charge(attemptUsage(fact, operation), fact.StartedAt, attemptSuccessful(fact), costPtr,
+		if charge, ok := rev.Charge(events.AttemptUsage(fact, operation), fact.StartedAt, events.AttemptSuccessful(fact), costPtr,
 			provider.Kind, provider.VendorID, fact.UpstreamModel, operation); ok {
 			total = total.Add(charge)
 		}
@@ -518,7 +502,7 @@ func (s *Server) recordCost(x *call) {
 	}
 }
 
-func (x *call) factCommitted(fact *AttemptFact) bool {
+func (x *call) factCommitted(fact *events.AttemptFact) bool {
 	if fact.CommitmentPinned {
 		return fact.Commitment != nil
 	}
@@ -528,21 +512,4 @@ func (x *call) factCommitted(fact *AttemptFact) bool {
 	}
 	p, ok := snapshot.FindProvider(fact.ProviderID)
 	return ok && p.CommitmentAt(fact.StartedAt) != nil
-}
-
-func (r costReservation) on(request admission.Request) admission.Request {
-	if request.Cost == nil {
-		return request
-	}
-	return admission.Request{
-		Lookup: request.Lookup, LeaseTTL: request.LeaseTTL, Rate: request.Rate,
-		Cost: request.Cost.Holding(r.amountFor(request.Cost.Owner.Basis), r.requestID),
-	}
-}
-
-func reporting(rate admission.RateLimits, report bool) admission.RateLimits {
-	return admission.RateLimits{
-		RequestsPerMinute: rate.RequestsPerMinute, TokensPerMinute: rate.TokensPerMinute, MaxConcurrency: rate.MaxConcurrency,
-		TrackConcurrency: rate.TrackConcurrency, Tokens: rate.Tokens, Report: report, Share: rate.Share,
-	}
 }

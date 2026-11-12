@@ -5,18 +5,20 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 )
 
-func (s *Server) readResourceBody(w http.ResponseWriter, r *http.Request) ([]byte, *Error) {
+func (s *Server) readResourceBody(w http.ResponseWriter, r *http.Request) ([]byte, *fault.Error) {
 	deadline := time.Now().Add(requestBodyTimeout)
 	if parent, ok := r.Context().Deadline(); ok && parent.Before(deadline) {
 		deadline = parent
 	}
 	controller := http.NewResponseController(w)
 	if err := controller.SetReadDeadline(deadline); err != nil {
-		return nil, serverError(http.StatusInternalServerError, "internal_error", "The request body could not be bounded.")
+		return nil, fault.ServerError(http.StatusInternalServerError, "internal_error", "The request body could not be bounded.")
 	}
-	body, failure := s.readBody(r)
+	body, failure := s.gate.ReadBody(r)
 	if failure == nil {
 		_ = controller.SetReadDeadline(time.Time{})
 	}

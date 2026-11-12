@@ -19,6 +19,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
@@ -29,10 +30,10 @@ import (
 // A retrieved stream is a read of one authorized response, never another
 // inference submission. Only the documented cursor and delivery selector may
 // reach the historical provider; all other query controls fail before dispatch.
-func responseRetrievalQuery(raw string) (url.Values, bool, *Error) {
+func responseRetrievalQuery(raw string) (url.Values, bool, *fault.Error) {
 	query, err := url.ParseQuery(raw)
 	if err != nil {
-		return nil, false, invalidRequest("invalid_request", "The response retrieval query is malformed.", nil)
+		return nil, false, fault.InvalidRequest("invalid_request", "The response retrieval query is malformed.", nil)
 	}
 	stream := false
 	includes := []string{
@@ -42,37 +43,37 @@ func responseRetrievalQuery(raw string) (url.Values, bool, *Error) {
 	}
 	for name, values := range query {
 		if len(values) == 0 || len(values) > 16 || name != "include" && name != "include[]" && len(values) != 1 {
-			return nil, false, invalidRequest("invalid_request", "Response retrieval query controls must occur once.", nil)
+			return nil, false, fault.InvalidRequest("invalid_request", "Response retrieval query controls must occur once.", nil)
 		}
 		switch name {
 		case "stream":
 			if values[0] != "true" && values[0] != "false" {
-				return nil, false, invalidRequest("invalid_request", "stream must be true or false.", nil)
+				return nil, false, fault.InvalidRequest("invalid_request", "stream must be true or false.", nil)
 			}
 			stream = values[0] == "true"
 		case "starting_after":
 			if _, err := strconv.ParseUint(values[0], 10, 63); err != nil {
-				return nil, false, invalidRequest("invalid_request", "starting_after must be a non-negative event sequence.", nil)
+				return nil, false, fault.InvalidRequest("invalid_request", "starting_after must be a non-negative event sequence.", nil)
 			}
 		case "include_obfuscation":
 			if values[0] != "true" && values[0] != "false" {
-				return nil, false, invalidRequest("invalid_request", "include_obfuscation must be true or false.", nil)
+				return nil, false, fault.InvalidRequest("invalid_request", "include_obfuscation must be true or false.", nil)
 			}
 		case "include", "include[]":
 			for _, value := range values {
 				if !slices.Contains(includes, value) {
-					return nil, false, invalidRequest("invalid_request", "The response include selector is not qualified.", nil)
+					return nil, false, fault.InvalidRequest("invalid_request", "The response include selector is not qualified.", nil)
 				}
 			}
 		default:
-			return nil, false, invalidRequest("invalid_request", "The response retrieval query has an unsupported control.", nil)
+			return nil, false, fault.InvalidRequest("invalid_request", "The response retrieval query has an unsupported control.", nil)
 		}
 	}
 	if query.Has("include") && query.Has("include[]") {
-		return nil, false, invalidRequest("invalid_request", "Use one include selector spelling for response retrieval.", nil)
+		return nil, false, fault.InvalidRequest("invalid_request", "Use one include selector spelling for response retrieval.", nil)
 	}
 	if !stream && query.Has("starting_after") {
-		return nil, false, invalidRequest("invalid_request", "starting_after requires stream=true.", nil)
+		return nil, false, fault.InvalidRequest("invalid_request", "starting_after requires stream=true.", nil)
 	}
 	if !stream {
 		return query, false, nil
@@ -153,51 +154,6 @@ func projectStoredResponseFrame(frame []byte, projection responseProjection, str
 	return out, &observation, nil
 }
 
-// A provider error can echo authentication with arbitrary JSON escape
-// spelling. Redact decoded strings while OIF keeps every unrelated member and
-// number byte-for-byte. A credential-bearing member name cannot be renamed
-// without changing the native grammar, so refuse it.
-func redactNativeFailureDocument(doc oif.Document, credentials egress.Sensitive) (oif.Document, error) {
-	changes := []oif.Change{}
-	var inspect func(oif.Value, string) error
-	inspect = func(value oif.Value, pointer string) error {
-		switch value.Kind() {
-		case oif.Object:
-			for _, member := range value.Members() {
-				if credentials.Contains(member.Name) {
-					return errors.New("failed response event has a credential-bearing member name")
-				}
-				if err := inspect(member.Value, oif.Pointer(pointer, member.Name)); err != nil {
-					return err
-				}
-			}
-		case oif.Array:
-			for index, item := range value.Elements() {
-				if err := inspect(item, oif.Pointer(pointer, strconv.Itoa(index))); err != nil {
-					return err
-				}
-			}
-		case oif.String:
-			text, ok := value.Text()
-			if !ok {
-				return errors.New("failed response event has invalid text")
-			}
-			if safe := credentials.Redact(text); safe != text {
-				encoded, _ := json.Marshal(safe)
-				changes = append(changes, oif.Change{Pointer: pointer, Value: string(encoded), Origin: oif.ExplicitTransform, Reason: "provider error credential redaction"})
-			}
-		}
-		return nil
-	}
-	if err := inspect(doc.Root(), ""); err != nil {
-		return oif.Document{}, err
-	}
-	if len(changes) == 0 {
-		return doc, nil
-	}
-	return oif.Apply(doc, changes)
-}
-
 func redactFailedResponseFrame(frame []byte, credentials egress.Sensitive) ([]byte, error) {
 	i := bytes.Index(frame, []byte("\ndata: "))
 	if i < 0 || credentials.Contains(string(frame[:i])) {
@@ -208,7 +164,7 @@ func redactFailedResponseFrame(frame []byte, credentials egress.Sensitive) ([]by
 	if err != nil || doc.Root().Kind() != oif.Object {
 		return nil, errors.New("failed response event is malformed")
 	}
-	redacted, err := redactNativeFailureDocument(doc, credentials)
+	redacted, err := fault.RedactNativeFailureDocument(doc, credentials)
 	if err != nil {
 		return nil, err
 	}
@@ -219,28 +175,28 @@ func redactFailedResponseFrame(frame []byte, credentials egress.Sensitive) ([]by
 	return out, nil
 }
 
-func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter, x *call, res *resources.Resource, p *pin, query url.Values) *Error {
+func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter, x *call, res *resources.Resource, p *pin, query url.Values) *fault.Error {
 	if res.Kind == resources.KindStrictResponse &&
 		(!p.provider.Supports(p.model, "generation", "openai", "streaming") || !p.provider.Connector().Supports("generation", "openai", "streaming")) {
-		return invalidRequest("target_capability", "The retained provider has no qualified Responses stream contract.", nil)
+		return fault.InvalidRequest("target_capability", "The retained provider has no qualified Responses stream contract.", nil)
 	}
 	projection := responseProjection{upstreamID: res.UpstreamID, localID: res.ID, route: res.RouteSlug}
 	if res.Kind == resources.KindStrictResponse {
 		var parentErr error
 		projection.previousUpstream, projection.previousLocal, parentErr = responseParentProjection(res, x.generation.responseContract)
 		if parentErr != nil {
-			return serverError(http.StatusConflict, "provider_resource_unavailable", "The retained parent response cannot be reconstructed.")
+			return fault.ServerError(http.StatusConflict, "provider_resource_unavailable", "The retained parent response cannot be reconstructed.")
 		}
 	}
 	endpoint, err := resourceURL(p.provider.Connector(), p.model, responsePath(p.provider.Connector(), "/"+url.PathEscape(res.UpstreamID)), query)
 	if err != nil {
-		return serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
+		return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 	}
 	x.mode = "streaming"
 	resp, failure := s.pinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
 	if failure != nil {
 		if failure.status == http.StatusNotFound {
-			return notFoundError("not_found", "No stored response with this identifier exists for this key.")
+			return fault.NotFoundError("not_found", "No stored response with this identifier exists for this key.")
 		}
 		return upstreamError(failure)
 	}
@@ -248,7 +204,7 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 	x.dispatched = true
 	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil || mediaType != "text/event-stream" {
-		return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider did not return a Responses event stream.")
+		return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider did not return a Responses event stream.")
 	}
 	limit := int(s.cfg.MaxEventBytes)
 	if limit <= 0 {
@@ -319,15 +275,15 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 			w.WriteHeader(http.StatusOK)
 			committed = true
 		}
-		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout))
 		if n, err := w.Write(projected); err != nil || n != len(projected) {
 			if err == nil {
 				err = io.ErrShortWrite
 			}
-			return fmt.Errorf("%w: %v", errClientWrite, err)
+			return fmt.Errorf("%w: %v", fault.ErrClientWrite, err)
 		}
 		if err := http.NewResponseController(w).Flush(); err != nil {
-			return fmt.Errorf("%w: %v", errClientWrite, err)
+			return fmt.Errorf("%w: %v", fault.ErrClientWrite, err)
 		}
 		x.delivered(s.now())
 		if fact.Interaction != nil {
@@ -337,7 +293,7 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 	}
 	_, streamErr := protocols.StreamWithEvents(wire.Responses, wire.Responses,
 		p.provider.Connector().StreamPayload(resp.Body, limit), limit, x.route.Slug, true, emit, observe)
-	if streamErr != nil && (errors.Is(streamErr, errClientWrite) || errors.Is(ctx.Err(), context.Canceled)) {
+	if streamErr != nil && (errors.Is(streamErr, fault.ErrClientWrite) || errors.Is(ctx.Err(), context.Canceled)) {
 		// The client left; the provider is not at fault.
 		x.failure = (&attemptFailure{class: classCancelled}).toError()
 		fact.Class = classCancelled
@@ -359,10 +315,10 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 	if streamErr != nil {
 		var upstream *wire.UpstreamError
 		if errors.As(streamErr, &upstream) && nativeTerminalFailure {
-			x.failure = serverError(http.StatusBadGateway, "upstream_response_failed", "The retained provider reported a failed response.")
+			x.failure = fault.ServerError(http.StatusBadGateway, "upstream_response_failed", "The retained provider reported a failed response.")
 			fact.Class = classUpstreamServer
 		} else {
-			x.failure = serverError(http.StatusBadGateway, "response_stream_incomplete", "The retained response stream ended before its terminal contract.")
+			x.failure = fault.ServerError(http.StatusBadGateway, "response_stream_incomplete", "The retained response stream ended before its terminal contract.")
 			fact.Class = classProtocol
 		}
 		if fact.Interaction != nil {
@@ -378,7 +334,7 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 		return nil
 	}
 	if nativeIncomplete && res.Kind == resources.KindStrictResponse {
-		x.failure = serverError(http.StatusBadGateway, "response_incomplete", "The retained provider response ended incomplete.")
+		x.failure = fault.ServerError(http.StatusBadGateway, "response_incomplete", "The retained provider response ended incomplete.")
 		fact.Class = classProtocol
 		if fact.Interaction != nil {
 			fact.Interaction.UpstreamState, fact.Interaction.ClientState = acceptance.Terminal, usage.ClientTerminal

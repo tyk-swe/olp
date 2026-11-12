@@ -14,6 +14,9 @@ import (
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/cache"
+	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operationregistry"
@@ -64,7 +67,7 @@ func (x *call) cacheHeaders(h http.Header) {
 	}
 }
 
-func (s *Server) initializeCache(x *call) *Error {
+func (s *Server) initializeCache(x *call) *fault.Error {
 	if x.workflow != nil {
 		return nil
 	}
@@ -77,7 +80,7 @@ func (s *Server) initializeCache(x *call) *Error {
 	}
 	c, err := cache.ParseControls(x.request.cacheDirectives)
 	if err != nil {
-		return invalidRequest("invalid_cache_control", err.Error(), nil)
+		return fault.InvalidRequest("invalid_cache_control", err.Error(), nil)
 	}
 	x.cache = &responseCacheCall{controls: c, result: "bypass"}
 	if x.route.Cache == nil || s.deps.Cache == nil || x.origin != "" || x.authority.Policy.ForbidResponseCache || x.authority.TaskCapability != nil || x.request.callerCredential != nil || x.providerState || x.generation.resources != nil || x.generation.continuation != nil {
@@ -161,18 +164,18 @@ func containsCacheReference(v oif.Value) bool {
 
 // admitCacheAware takes only request/concurrency reservations before lookup.
 // Misses then reserve the remaining dimensions; both leases settle once.
-func (s *Server) admitCacheAware(ctx context.Context, x *call, authority *keyauthority.Authority, estimate int64, ttl time.Duration, hold costReservation) *Error {
+func (s *Server) admitCacheAware(ctx context.Context, x *call, authority *keyauthority.Authority, estimate int64, ttl time.Duration, hold quota.CostReservation) *fault.Error {
 	if e := s.initializeCache(x); e != nil {
 		return e
 	}
 	if x.cache == nil || x.cache.result == "bypass" {
-		var e *Error
-		x.lease, e = s.deps.Admission.reserveKeyCosted(ctx, authority, x.clientSurface(), estimate, ttl, hold, x.limitRoute())
+		var e *fault.Error
+		x.lease, e = s.deps.Admission.ReserveKeyCosted(ctx, authority, x.clientSurface(), estimate, ttl, hold, x.limitRoute())
 		return e
 	}
 	rates := cacheAuthority(*authority, true, false, false)
-	var e *Error
-	x.cacheRateLease, e = s.deps.Admission.reserveKeyCosted(ctx, &rates, x.clientSurface(), 0, ttl, costReservation{}, x.limitRoute())
+	var e *fault.Error
+	x.cacheRateLease, e = s.deps.Admission.ReserveKeyCosted(ctx, &rates, x.clientSurface(), 0, ttl, quota.CostReservation{}, x.limitRoute())
 	if e != nil {
 		return e
 	}
@@ -185,17 +188,17 @@ func (s *Server) admitCacheAware(ctx context.Context, x *call, authority *keyaut
 		budgets = slices.Contains(x.cache.policy.CountHitsAgainst, "budgets")
 		estimate = 0
 		if tokens {
-			if actual := totalTokens(x.cache.metadata.Usage); actual != nil {
+			if actual := quota.TotalTokens(x.cache.metadata.Usage); actual != nil {
 				estimate = *actual
 			}
 			// Final zero-token usage needs no token reservation. The limiter
 			// requires a positive allowance and cannot reconcile it downward.
 			tokens = estimate > 0
 		}
-		hold = costReservation{amount: x.cache.budgetCost, charge: x.cache.budgetCharge, requestID: x.request.accountingID()}
+		hold = quota.CostReservation{Amount: x.cache.budgetCost, Charge: x.cache.budgetCharge, RequestID: x.request.accountingID()}
 	}
 	remainder := cacheAuthority(*authority, false, tokens, budgets)
-	x.lease, e = s.deps.Admission.reserveKeyCosted(ctx, &remainder, x.clientSurface(), estimate, ttl, hold, x.limitRoute())
+	x.lease, e = s.deps.Admission.ReserveKeyCosted(ctx, &remainder, x.clientSurface(), estimate, ttl, hold, x.limitRoute())
 	if e == nil && x.cache.entry != nil {
 		x.cache.admitted = true
 		x.cache.result = "hit"
@@ -271,7 +274,7 @@ func cacheAuthority(a keyauthority.Authority, rates, tokens, budgets bool) keyau
 	return a
 }
 
-func (s *Server) lookupCache(ctx context.Context, x *call) *Error {
+func (s *Server) lookupCache(ctx context.Context, x *call) *fault.Error {
 	c := x.cache
 	a := x.attempts[0]
 	p := x.snapshot().Provider(a.ProviderID)
@@ -433,8 +436,8 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *Error {
 	c.entry = entry
 	c.age = int64(max(s.now().Sub(entry.CreatedAt)/time.Second, 0))
 	c.budgetCost, c.budgetCharge = "0", "0"
-	fact := AttemptFact{Class: classSuccess, Status: 200, Usage: c.metadata.Usage, UsageObserved: c.metadata.Usage != nil, UsageComplete: c.metadata.UsageComplete}
-	u := attemptUsage(&fact, x.operationName())
+	fact := events.AttemptFact{Class: classSuccess, Status: 200, Usage: c.metadata.Usage, UsageObserved: c.metadata.Usage != nil, UsageComplete: c.metadata.UsageComplete}
+	u := events.AttemptUsage(&fact, x.operationName())
 	var costPtr *rates.Cost
 	at := s.now()
 	if a.Price != nil {
@@ -468,7 +471,7 @@ func (s *Server) recordCacheHit(x *call) {
 		e.BudgetCost = c.budgetCost
 		e.BudgetCharge = c.budgetCharge
 	}
-	f := AttemptFact{Cache: e, Class: "cache_hit", Status: 200, StartedAt: s.now(), ProviderID: a.ProviderID, ProviderRevisionID: a.ProviderRevisionID, TargetID: a.TargetID, UpstreamModel: a.UpstreamModel, Usage: c.metadata.Usage, UsageObserved: c.metadata.Usage != nil, UsageComplete: c.metadata.UsageComplete, Mode: x.mode}
+	f := events.AttemptFact{Cache: e, Class: events.ClassCacheHit, Status: 200, StartedAt: s.now(), ProviderID: a.ProviderID, ProviderRevisionID: a.ProviderRevisionID, TargetID: a.TargetID, UpstreamModel: a.UpstreamModel, Usage: c.metadata.Usage, UsageObserved: c.metadata.Usage != nil, UsageComplete: c.metadata.UsageComplete, Mode: x.mode}
 	x.facts = append(x.facts, f)
 	x.mirrors = false
 }

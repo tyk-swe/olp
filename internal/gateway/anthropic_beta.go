@@ -11,6 +11,7 @@ import (
 	"golang.org/x/net/http/httpguts"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 )
 
 // maxAnthropicBeta is the longest Anthropic-Beta list a request may carry, as
@@ -89,14 +90,14 @@ func anthropicBetaFor(cfg connectors.Config, caller string) (beta string, ok boo
 // a provider publishes. Dropping it would send the beta fields of the body
 // without their header, which the upstream refuses. A strict route validates the
 // header when its profile binds it.
-func (x *call) checkAnthropicBeta() *Error {
+func (x *call) checkAnthropicBeta() *fault.Error {
 	if x.strict() || !carriesAnthropicSource(x) || !x.sendsAnthropicBeta() || !x.servesAnthropicBeta() {
 		return nil
 	}
 	caller, ok := anthropicBeta(x.semanticHeaders)
 	if !ok {
 		param := "anthropic-beta"
-		return invalidRequest("invalid_request", "The Anthropic-Beta header must be a valid header value of at most 2048 bytes.", &param)
+		return fault.InvalidRequest("invalid_request", "The Anthropic-Beta header must be a valid header value of at most 2048 bytes.", &param)
 	}
 	snapshot := x.snapshot()
 	for _, target := range x.route.Targets {
@@ -107,7 +108,7 @@ func (x *call) checkAnthropicBeta() *Error {
 		}
 		if _, ok := anthropicBetaFor(cfg, caller); !ok {
 			param := "anthropic-beta"
-			return invalidRequest("invalid_request", "The Anthropic-Beta header, with the betas a provider of the route publishes, must be at most 2048 bytes.", &param)
+			return fault.InvalidRequest("invalid_request", "The Anthropic-Beta header, with the betas a provider of the route publishes, must be at most 2048 bytes.", &param)
 		}
 	}
 	return nil

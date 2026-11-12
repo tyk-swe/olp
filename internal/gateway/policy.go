@@ -7,14 +7,15 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/protocols"
 )
 
-func policyUnavailable(code, message string) *Error {
-	return &Error{Status: http.StatusUnprocessableEntity, Type: "invalid_request_error", Code: code, Message: message}
+func policyUnavailable(code, message string) *fault.Error {
+	return &fault.Error{Status: http.StatusUnprocessableEntity, Type: "invalid_request_error", Code: code, Message: message}
 }
 
-func compiledPolicy(route *routing.Route) (*contentpolicy.Compiled, *Error) {
+func compiledPolicy(route *routing.Route) (*contentpolicy.Compiled, *fault.Error) {
 	if route == nil || route.LegacyExecutionPolicy() == nil {
 		return nil, nil
 	}
@@ -23,12 +24,12 @@ func compiledPolicy(route *routing.Route) (*contentpolicy.Compiled, *Error) {
 	}
 	c, err := contentpolicy.Compile(route.ContentPolicy)
 	if err != nil {
-		return nil, serverError(http.StatusInternalServerError, "internal_error", "The route content policy could not be evaluated.")
+		return nil, fault.ServerError(http.StatusInternalServerError, "internal_error", "The route content policy could not be evaluated.")
 	}
 	return c, nil
 }
 
-func policySurfaceGate(route *routing.Route) *Error {
+func policySurfaceGate(route *routing.Route) *fault.Error {
 	if route != nil && route.ContentPolicy != nil && len(route.ContentPolicy.Rules) > 0 {
 		return policyUnavailable("content_policy_surface_unavailable", "The model `"+route.Slug+"` has a content policy this surface cannot enforce; use a canonical request surface.")
 	}
@@ -44,7 +45,7 @@ func recordDecision(x *call, d contentpolicy.Decision) {
 	x.policyDecisions = append(x.policyDecisions, d)
 }
 
-func (s *Server) enforceContentPolicy(x *call) *Error {
+func (s *Server) enforceContentPolicy(x *call) *fault.Error {
 	compiled, e := compiledPolicy(x.route)
 	if compiled == nil || e != nil {
 		return e
@@ -83,7 +84,7 @@ func (s *Server) enforceContentPolicy(x *call) *Error {
 		switch {
 		case blocked:
 			recordDecision(x, contentpolicy.Decision{RuleID: rule.ID, Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionBlock, Outcome: contentpolicy.OutcomeBlocked})
-			return invalidRequest("content_policy_blocked", "The request was blocked by the route's content policy.", nil)
+			return fault.InvalidRequest("content_policy_blocked", "The request was blocked by the route's content policy.", nil)
 		case matched:
 			x.generation.parsed = transformed
 			recordDecision(x, contentpolicy.Decision{RuleID: rule.ID, Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionRedact, Outcome: contentpolicy.OutcomeRedacted})
@@ -111,20 +112,20 @@ func applySlotRules(x *call, rules []contentpolicy.CompiledRule, phase string, v
 	return false
 }
 
-func (s *Server) enforceCompletionOutput(x *call, completion *wire.Completion) *Error {
+func (s *Server) enforceCompletionOutput(x *call, completion *wire.Completion) *fault.Error {
 	compiled, e := compiledPolicy(x.route)
 	if compiled == nil || e != nil {
 		return e
 	}
 	for _, slot := range []*string{&completion.OutputText, &completion.Refusal} {
 		if applySlotRules(x, compiled.Output, contentpolicy.PhaseOutput, slot) {
-			return invalidRequest("content_policy_blocked", "The response was blocked by the route's content policy.", nil)
+			return fault.InvalidRequest("content_policy_blocked", "The response was blocked by the route's content policy.", nil)
 		}
 	}
 	return nil
 }
 
-func (s *Server) enforceContentOutput(x *call, body []byte) ([]byte, *Error) {
+func (s *Server) enforceContentOutput(x *call, body []byte) ([]byte, *fault.Error) {
 	compiled, e := compiledPolicy(x.route)
 	if compiled == nil || e != nil {
 		return body, e
@@ -145,12 +146,12 @@ func (s *Server) enforceContentOutput(x *call, body []byte) ([]byte, *Error) {
 			return rule.Re.ReplaceAllLiteralString(text, rule.Replacement), false
 		})
 		if err != nil {
-			return body, serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be inspected.")
+			return body, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be inspected.")
 		}
 		switch {
 		case blocked:
 			recordDecision(x, contentpolicy.Decision{RuleID: rule.ID, Phase: contentpolicy.PhaseOutput, Action: contentpolicy.ActionBlock, Outcome: contentpolicy.OutcomeBlocked})
-			return body, invalidRequest("content_policy_blocked", "The response was blocked by the route's content policy.", nil)
+			return body, fault.InvalidRequest("content_policy_blocked", "The response was blocked by the route's content policy.", nil)
 		case matched:
 			current = rewritten
 			recordDecision(x, contentpolicy.Decision{RuleID: rule.ID, Phase: contentpolicy.PhaseOutput, Action: contentpolicy.ActionRedact, Outcome: contentpolicy.OutcomeRedacted})

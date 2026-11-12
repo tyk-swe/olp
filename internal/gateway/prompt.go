@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/prompts"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -31,7 +33,7 @@ type parsedRequest struct {
 	decoded   int64
 }
 
-func (s *Server) parsePrompt(x *call, family wire.Format, body []byte, pathModel string, authorize func(*routing.Route) *Error) (parsedRequest, *Error) {
+func (s *Server) parsePrompt(x *call, family wire.Format, body []byte, pathModel string, authorize func(*routing.Route) *fault.Error) (parsedRequest, *fault.Error) {
 	doc, err := protocols.ParseSource(family, body)
 	if err != nil {
 		return parsedRequest{}, requestError(err)
@@ -39,14 +41,14 @@ func (s *Server) parsePrompt(x *call, family wire.Format, body []byte, pathModel
 	return s.parsePromptDocument(x, family, doc, pathModel, authorize, nil)
 }
 
-func (s *Server) parsePromptDocument(x *call, family wire.Format, doc oif.Document, pathModel string, authorize func(*routing.Route) *Error, bindings []oif.Change) (parsedRequest, *Error) {
+func (s *Server) parsePromptDocument(x *call, family wire.Format, doc oif.Document, pathModel string, authorize func(*routing.Route) *fault.Error, bindings []oif.Change) (parsedRequest, *fault.Error) {
 	expanded, prompt, promptErr := s.expandPrompt(x, family, doc, pathModel, authorize)
 	if promptErr != nil {
 		return parsedRequest{}, promptErr
 	}
 	bound, err := oif.Apply(expanded, bindings)
 	if err != nil {
-		return parsedRequest{}, serverError(http.StatusInternalServerError, "internal_error", "The prompt could not be prepared.")
+		return parsedRequest{}, fault.ServerError(http.StatusInternalServerError, "internal_error", "The prompt could not be prepared.")
 	}
 	parsed, err := protocols.ParseDocument(family, bound, pathModel)
 	if err != nil {
@@ -76,17 +78,17 @@ func promptReference(doc oif.Document, family wire.Format) (oif.Value, string, s
 	return ref, "olp_prompt", "messages", ok
 }
 
-func promptRoute(doc oif.Document, family wire.Format, pathModel string) (string, *Error) {
+func promptRoute(doc oif.Document, family wire.Format, pathModel string) (string, *fault.Error) {
 	if pathModel != "" || geminiPromptFamily(family) {
 		return pathModel, nil
 	}
 	model, ok := doc.Root().Lookup("model")
 	if !ok {
-		return "", invalidRequest("missing_required_parameter", "model is required.", nil)
+		return "", fault.InvalidRequest("missing_required_parameter", "model is required.", nil)
 	}
 	slug, valid := model.Chars()
 	if !valid {
-		return "", invalidRequest("invalid_model", "model must be a string.", nil)
+		return "", fault.InvalidRequest("invalid_model", "model must be a string.", nil)
 	}
 	return slug, nil
 }
@@ -327,14 +329,14 @@ func promptInputLimit(routeLimit *int64, installationLimit int64) int64 {
 	return min(*routeLimit, installationLimit)
 }
 
-func (s *Server) expandPrompt(x *call, family wire.Format, doc oif.Document, pathModel string, authorize func(*routing.Route) *Error) (oif.Document, *usage.PromptReference, *Error) {
+func (s *Server) expandPrompt(x *call, family wire.Format, doc oif.Document, pathModel string, authorize func(*routing.Route) *fault.Error) (oif.Document, *usage.PromptReference, *fault.Error) {
 	ref, param, input, ok := promptReference(doc, family)
 	if !ok {
 		return doc, nil, nil
 	}
 	for _, field := range promptInputFields(family, input) {
 		if _, ok := doc.Root().Lookup(field); ok {
-			return oif.Document{}, nil, invalidRequest("invalid_prompt", "A published prompt cannot be combined with messages.", &param)
+			return oif.Document{}, nil, fault.InvalidRequest("invalid_prompt", "A published prompt cannot be combined with messages.", &param)
 		}
 	}
 	_, hasLabel := ref.Lookup("label")
@@ -343,16 +345,16 @@ func (s *Server) expandPrompt(x *call, family wire.Format, doc oif.Document, pat
 	dec := json.NewDecoder(bytes.NewBufferString(ref.Raw()))
 	dec.DisallowUnknownFields()
 	if dec.Decode(&selection) != nil || dec.Decode(new(any)) != io.EOF || selection.ID == "" || hasLabel == hasRevision || (selection.Label == "") == (selection.RevisionID == "") {
-		return oif.Document{}, nil, invalidRequest("invalid_prompt", "Specify a prompt ID, exactly one label or revision ID, and string variables.", &param)
+		return oif.Document{}, nil, fault.InvalidRequest("invalid_prompt", "Specify a prompt ID, exactly one label or revision ID, and string variables.", &param)
 	}
 	variables, ok := ref.Lookup("variables")
 	var rawVariables map[string]json.RawMessage
 	if !ok || json.Unmarshal([]byte(variables.Raw()), &rawVariables) != nil || rawVariables == nil {
-		return oif.Document{}, nil, invalidRequest("invalid_prompt", "Prompt variables must be an object of strings.", &param)
+		return oif.Document{}, nil, fault.InvalidRequest("invalid_prompt", "Prompt variables must be an object of strings.", &param)
 	}
 	for _, value := range rawVariables {
 		if len(value) == 0 || value[0] != '"' {
-			return oif.Document{}, nil, invalidRequest("invalid_prompt", "Prompt variables must be an object of strings.", &param)
+			return oif.Document{}, nil, fault.InvalidRequest("invalid_prompt", "Prompt variables must be an object of strings.", &param)
 		}
 	}
 	slug, routeErr := promptRoute(doc, family, pathModel)
@@ -360,11 +362,11 @@ func (s *Server) expandPrompt(x *call, family wire.Format, doc oif.Document, pat
 		return oif.Document{}, nil, routeErr
 	}
 	if x.snapshot() == nil {
-		return oif.Document{}, nil, serverError(http.StatusServiceUnavailable, "runtime_unavailable", "No runtime release is available.")
+		return oif.Document{}, nil, fault.ServerError(http.StatusServiceUnavailable, "runtime_unavailable", "No runtime release is available.")
 	}
 	route, ok := x.snapshot().FindRoute(slug)
 	if !ok {
-		return oif.Document{}, nil, modelNotFound(slug)
+		return oif.Document{}, nil, fault.ModelNotFound(slug)
 	}
 	if e := authorize(&route); e != nil {
 		return oif.Document{}, nil, e
@@ -373,7 +375,7 @@ func (s *Server) expandPrompt(x *call, family wire.Format, doc oif.Document, pat
 		return oif.Document{}, nil, e
 	}
 	if route.Fidelity.Strict() {
-		return oif.Document{}, nil, invalidRequest("invalid_prompt", "Published prompts require a transformed route.", &param)
+		return oif.Document{}, nil, fault.InvalidRequest("invalid_prompt", "Published prompts require a transformed route.", &param)
 	}
 	publicationID := promptPublicationID(family, selection.ID)
 	for _, revision := range x.snapshot().AgentPublications() {
@@ -385,34 +387,34 @@ func (s *Server) expandPrompt(x *call, family wire.Format, doc oif.Document, pat
 		}
 		rendered, err := revision.Definition.Prompt.RenderMessages(selection.Variables, promptInputLimit(route.MaxBodyBytes, s.cfg.MaxBodyBytes))
 		if errors.Is(err, prompts.ErrRenderTooLarge) {
-			return oif.Document{}, nil, bodyTooLarge()
+			return oif.Document{}, nil, ingress.BodyTooLarge()
 		}
 		if err != nil {
-			return oif.Document{}, nil, invalidRequest("invalid_prompt", "Prompt variables do not match the published definition.", &param)
+			return oif.Document{}, nil, fault.InvalidRequest("invalid_prompt", "Prompt variables do not match the published definition.", &param)
 		}
 		promptDoc, err := applyPromptDefaults(doc, family, revision.Definition.Prompt.DefaultParameters)
 		if err != nil {
-			return oif.Document{}, nil, serverError(http.StatusInternalServerError, "internal_error", "The prompt could not be prepared.")
+			return oif.Document{}, nil, fault.ServerError(http.StatusInternalServerError, "internal_error", "The prompt could not be prepared.")
 		}
 		userMessages, system, err := promptSystemMessage(family, rendered)
 		if err != nil {
-			return oif.Document{}, nil, serverError(http.StatusInternalServerError, "internal_error", "The prompt could not be prepared.")
+			return oif.Document{}, nil, fault.ServerError(http.StatusInternalServerError, "internal_error", "The prompt could not be prepared.")
 		}
 		messages, err := promptMessages(family, userMessages)
 		if err != nil {
-			return oif.Document{}, nil, serverError(http.StatusInternalServerError, "internal_error", "The prompt could not be prepared.")
+			return oif.Document{}, nil, fault.ServerError(http.StatusInternalServerError, "internal_error", "The prompt could not be prepared.")
 		}
 		expanded, err := oif.Apply(promptDoc, slices.Concat([]oif.Change{
 			{Pointer: "/" + param, Remove: true, Origin: oif.ResourceBinding, Reason: "prompt reference consumed"},
 			{Pointer: "/" + input, Value: string(messages), Origin: oif.ResourceBinding, Reason: "published prompt rendered"},
 		}, system))
 		if err != nil {
-			return oif.Document{}, nil, serverError(http.StatusInternalServerError, "internal_error", "The prompt could not be prepared.")
+			return oif.Document{}, nil, fault.ServerError(http.StatusInternalServerError, "internal_error", "The prompt could not be prepared.")
 		}
 		if int64(expanded.Len()) > s.cfg.MaxBodyBytes {
-			return oif.Document{}, nil, bodyTooLarge()
+			return oif.Document{}, nil, ingress.BodyTooLarge()
 		}
 		return expanded, &usage.PromptReference{ID: revision.PublicationID, RevisionID: revision.ID}, nil
 	}
-	return oif.Document{}, nil, invalidRequest("invalid_prompt", "The published prompt revision was not found for this project.", &param)
+	return oif.Document{}, nil, fault.InvalidRequest("invalid_prompt", "The published prompt revision was not found for this project.", &param)
 }

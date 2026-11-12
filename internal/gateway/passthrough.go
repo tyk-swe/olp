@@ -15,23 +15,23 @@ import (
 
 	"github.com/tyk-swe/olp/internal/codewire"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
 func (s *Server) passthrough(w http.ResponseWriter, r *http.Request) {
 	x := &call{request: s.begin(w, r), family: wire.Passthrough, actor: "api_key", mode: "unary"}
-	fail := func(e *Error) {
-		x.failure = e
-		s.finish(x, nil, e.Status)
-		writeSurfaceError(w, e, "openai")
-	}
-	if !s.admit(r.Context()) {
-		fail(overloaded)
+	fail := func(e *fault.Error) { s.refuseOn(x, w, e, "openai") }
+	if !s.gate.Admit(r.Context()) {
+		fail(fault.Overloaded)
 		return
 	}
-	defer s.release(r.Context())
-	authority, e := s.authenticate(r, "inference")
+	defer s.gate.Release(r.Context())
+	authority, e := s.gate.Authenticate(r, "inference")
 	if e != nil {
 		fail(e)
 		return
@@ -41,19 +41,19 @@ func (s *Server) passthrough(w http.ResponseWriter, r *http.Request) {
 		fail(e)
 		return
 	}
-	if x.attribution, e = s.parseAttribution(r, authority); e != nil {
+	if x.attribution, e = ingress.ParseAttribution(r, authority); e != nil {
 		fail(e)
 		return
 	}
 	if x.request.release == nil || x.request.release.Snapshot() == nil {
-		fail(serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No serving release is installed."))
+		fail(fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "No serving release is installed."))
 		return
 	}
 	snapshot := x.request.release.Snapshot()
 	slug := r.PathValue("route")
 	route, ok := snapshot.FindRoute(slug)
 	if !ok || !route.IsPassthrough() || route.Passthrough.Dialect != r.PathValue("dialect") || !authority.Allows("inference", slug, route.ProjectID, s.now()) || !slices.Contains(authority.Policy.AllowedRoutes, slug) {
-		fail(modelNotFound(slug))
+		fail(fault.ModelNotFound(slug))
 		return
 	}
 	x.route = &route
@@ -63,36 +63,36 @@ func (s *Server) passthrough(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.settleAdmission(r.Context(), x)
 	if isWebSocketUpgrade(r) {
-		fail(invalidRequest("passthrough_websocket_refused", "Pass-through routes do not accept WebSocket upgrades.", nil))
+		fail(fault.InvalidRequest("passthrough_websocket_refused", "Pass-through routes do not accept WebSocket upgrades.", nil))
 		return
 	}
 	if r.URL.IsAbs() || r.URL.Host != "" || r.URL.Fragment != "" {
-		fail(invalidRequest("passthrough_path_refused", "The pass-through path is not an anchored slash path.", nil))
+		fail(fault.InvalidRequest("passthrough_path_refused", "The pass-through path is not an anchored slash path.", nil))
 		return
 	}
 	escaped, ok := passthroughSuffix(r)
 	if !ok {
-		fail(notFoundError("route_not_found", "The pass-through path does not match this route."))
+		fail(fault.NotFoundError("route_not_found", "The pass-through path does not match this route."))
 		return
 	}
 	matched, err := route.Passthrough.Match(r.Method, escaped)
 	if err != nil {
-		fail(invalidRequest("passthrough_path_refused", "The pass-through path is not an anchored slash path.", nil))
+		fail(fault.InvalidRequest("passthrough_path_refused", "The pass-through path is not an anchored slash path.", nil))
 		return
 	}
 	if !matched {
-		fail(notFoundError("route_not_found", "The pass-through path does not match this route."))
+		fail(fault.NotFoundError("route_not_found", "The pass-through path does not match this route."))
 		return
 	}
 	normalized, _ := routing.NormalizePassthroughPath(escaped)
 	query, qerr := url.ParseQuery(r.URL.RawQuery)
 	if qerr != nil {
-		fail(invalidRequest("passthrough_query_refused", "The pass-through query is malformed.", nil))
+		fail(fault.InvalidRequest("passthrough_query_refused", "The pass-through query is malformed.", nil))
 		return
 	}
 	for name := range query {
 		if !slices.Contains(route.Passthrough.Query, name) {
-			fail(invalidRequest("passthrough_query_refused", "Query name `"+name+"` is not allowed on this pass-through route.", nil))
+			fail(fault.InvalidRequest("passthrough_query_refused", "Query name `"+name+"` is not allowed on this pass-through route.", nil))
 			return
 		}
 	}
@@ -111,11 +111,11 @@ func passthroughSuffix(r *http.Request) (string, bool) {
 	return "/" + strings.Join(parts[5:], "/"), true
 }
 
-func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *call, route *routing.Route, normalized string, query url.Values, fail func(*Error)) {
+func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *call, route *routing.Route, normalized string, query url.Values, fail func(*fault.Error)) {
 	target := route.Targets[0]
 	provider, ok := x.snapshot().FindProvider(target.ProviderID)
 	if !ok || !provider.Enabled {
-		fail(serverError(http.StatusServiceUnavailable, "upstream_unavailable", "The bound connection is unavailable."))
+		fail(fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "The bound connection is unavailable."))
 		return
 	}
 	options := s.selectionOptions(r.Context(), x)
@@ -156,7 +156,7 @@ func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *cal
 	if r.Body != nil && r.Body != http.NoBody {
 		controller := http.NewResponseController(w)
 		if err := controller.SetReadDeadline(deadline); err != nil {
-			fail(serverError(http.StatusInternalServerError, "internal_error", "The request body could not be bounded."))
+			fail(fault.ServerError(http.StatusInternalServerError, "internal_error", "The request body could not be bounded."))
 			return
 		}
 		var err error
@@ -169,17 +169,17 @@ func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *cal
 				fail((&attemptFailure{class: classTimeout}).toError())
 				return
 			}
-			fail(invalidRequest("invalid_request", "The request body could not be read.", nil))
+			fail(fault.InvalidRequest("invalid_request", "The request body could not be read.", nil))
 			return
 		}
 		if int64(len(body)) > limit {
-			fail(bodyTooLarge())
+			fail(ingress.BodyTooLarge())
 			return
 		}
 	}
 	base, err := s.egress.ValidateEndpoint(provider.Endpoint)
 	if err != nil {
-		fail(serverError(http.StatusServiceUnavailable, "upstream_unavailable", "The bound connection endpoint is unavailable."))
+		fail(fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "The bound connection endpoint is unavailable."))
 		return
 	}
 	upstream := *base
@@ -192,7 +192,7 @@ func (s *Server) servePassthrough(w http.ResponseWriter, r *http.Request, x *cal
 	estimate := max(resourceEstimate, x.estimate)
 	var slot routing.Slot
 	var hold *dispatchHold
-	var factP *AttemptFact
+	var factP *events.AttemptFact
 	found := false
 	unmeterable := false
 slots:
@@ -217,11 +217,11 @@ slots:
 	}
 	if !found {
 		if unmeterable {
-			fail(limitsUnavailable())
+			fail(quota.LimitsUnavailable())
 			return
 		}
 		if len(provider.Slots) > 0 {
-			fail(serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No credential slot is currently able to serve `"+route.Slug+"`."))
+			fail(fault.ServerError(http.StatusServiceUnavailable, "upstream_unavailable", "No credential slot is currently able to serve `"+route.Slug+"`."))
 			return
 		}
 	}
@@ -229,7 +229,7 @@ slots:
 		if x.dispatched && hold != nil {
 			x.spendCaps(hold.budgets, attempt)
 		}
-		s.settlePinHold(r.Context(), x, hold, settledAttemptTokens(factP, estimate))
+		s.settlePinHold(r.Context(), x, hold, quota.SettledAttemptTokens(factP, estimate))
 	}()
 	if e := s.reserveSessionCost(ctx, x, x.authority, attempt, time.Until(deadline)); e != nil {
 		fail(e)
@@ -237,7 +237,7 @@ slots:
 	}
 	req, err := http.NewRequestWithContext(ctx, r.Method, upstream.String(), bytes.NewReader(body))
 	if err != nil {
-		fail(serverError(http.StatusBadGateway, "upstream_error", "The provider request could not be built."))
+		fail(fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider request could not be built."))
 		return
 	}
 	headers := codewire.ForwardHeaders(r.Header, true)
@@ -259,15 +259,15 @@ slots:
 	factP = &x.facts[len(x.facts)-1]
 	if err := s.applySlotCredential(ctx, x, req, provider.Connector(), slot, body, &provider, target.ProviderModel); err != nil {
 		factP.Class, factP.Duration = classCredential, s.now().Sub(factP.StartedAt)
-		factP.recordEvidence(false)
-		fail(serverError(http.StatusBadGateway, "upstream_error", "The bound credential could not be applied."))
+		factP.RecordEvidence(false)
+		fail(fault.ServerError(http.StatusBadGateway, "upstream_error", "The bound credential could not be applied."))
 		return
 	}
 	client, err := s.providerClient(ctx, x.request.release, &provider, slot)
 	if err != nil {
 		factP.Class, factP.Duration = classCredential, s.now().Sub(factP.StartedAt)
-		factP.recordEvidence(false)
-		fail(serverError(http.StatusBadGateway, "upstream_error", "The bound connection could not be reached."))
+		factP.RecordEvidence(false)
+		fail(fault.ServerError(http.StatusBadGateway, "upstream_error", "The bound connection could not be reached."))
 		return
 	}
 	x.dispatched = true
@@ -279,16 +279,16 @@ slots:
 				factP.Status = resp.StatusCode
 			}
 			factP.Class = classProtocol
-			factP.recordEvidence(true)
-			fail(serverError(http.StatusBadGateway, "passthrough_redirect_refused", "The provider redirect was refused."))
+			factP.RecordEvidence(true)
+			fail(fault.ServerError(http.StatusBadGateway, "passthrough_redirect_refused", "The provider redirect was refused."))
 			return
 		}
 		factP.Class = classConnect
 		if ctx.Err() != nil {
 			factP.Class = classTimeout
 		}
-		factP.recordEvidence(true)
-		fail(serverError(http.StatusBadGateway, "upstream_error", "The provider could not complete the request."))
+		factP.RecordEvidence(true)
+		fail(fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider could not complete the request."))
 		return
 	}
 	defer resp.Body.Close()
@@ -297,8 +297,8 @@ slots:
 	switch resp.StatusCode {
 	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
 		factP.Class, factP.Duration = classProtocol, s.now().Sub(factP.StartedAt)
-		factP.recordEvidence(true)
-		fail(serverError(http.StatusBadGateway, "passthrough_redirect_refused", "The provider redirect was refused."))
+		factP.RecordEvidence(true)
+		fail(fault.ServerError(http.StatusBadGateway, "passthrough_redirect_refused", "The provider redirect was refused."))
 		return
 	}
 	responseLimit := s.cfg.MaxResponseBytes
@@ -307,8 +307,8 @@ slots:
 	}
 	if r.Method != http.MethodHead && resp.ContentLength > responseLimit {
 		factP.Class, factP.Duration = classProtocol, s.now().Sub(factP.StartedAt)
-		factP.recordEvidence(true)
-		fail(serverError(http.StatusBadGateway, "upstream_error", "The provider response exceeded the gateway limit."))
+		factP.RecordEvidence(true)
+		fail(fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response exceeded the gateway limit."))
 		return
 	}
 	responseBody, responseError := passthroughResponseBody(resp, x.sensitive, responseLimit)
@@ -317,7 +317,7 @@ slots:
 		if ctx.Err() != nil {
 			factP.Class = classTimeout
 		}
-		factP.recordEvidence(true)
+		factP.RecordEvidence(true)
 		fail(responseError)
 		return
 	}
@@ -347,26 +347,26 @@ slots:
 		if ctx.Err() != nil {
 			factP.Class = classTimeout
 		}
-		factP.recordEvidence(true)
+		factP.RecordEvidence(true)
 	case providerSuccess:
 		factP.Class = classSuccess
-		factP.observeUsage(&wire.Usage{}, true)
+		factP.ObserveUsage(&wire.Usage{}, true)
 		factP.TokenlessUsage = true
-		factP.recordEvidence(false)
+		factP.RecordEvidence(false)
 	case resp.StatusCode >= 500:
 		factP.Class = classUpstreamServer
-		factP.recordEvidence(true)
+		factP.RecordEvidence(true)
 	case resp.StatusCode >= 400:
 		factP.Class = classUpstreamClient
-		factP.recordEvidence(true)
+		factP.RecordEvidence(true)
 	default:
 		factP.Class = classProtocol
-		factP.recordEvidence(true)
+		factP.RecordEvidence(true)
 	}
 	out := &outcome{committed: providerSuccess && copyErr == nil}
 	switch {
 	case readErr != nil || copyErr != nil:
-		out.err = serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be delivered.")
+		out.err = fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be delivered.")
 	case !providerSuccess:
 		out.err = upstreamError(&attemptFailure{status: resp.StatusCode})
 	}
@@ -376,21 +376,21 @@ slots:
 	}
 }
 
-func passthroughResponseBody(response *http.Response, sensitive egress.Sensitive, limit int64) (io.Reader, *Error) {
+func passthroughResponseBody(response *http.Response, sensitive egress.Sensitive, limit int64) (io.Reader, *fault.Error) {
 	if response.StatusCode < 400 || response.Request != nil && response.Request.Method == http.MethodHead {
 		return response.Body, nil
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
 	if err != nil {
-		return nil, serverError(http.StatusBadGateway, "upstream_error", "The provider error response could not be read.")
+		return nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider error response could not be read.")
 	}
 	decoded, err := codewire.Decode(raw, response.Header.Get("Content-Encoding"), limit)
 	if err != nil {
-		return nil, serverError(http.StatusBadGateway, "upstream_error", "The provider error response could not be decoded within the gateway limit.")
+		return nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider error response could not be decoded within the gateway limit.")
 	}
 	redacted := sensitive.Redact(string(decoded))
 	if int64(len(redacted)) > limit {
-		return nil, serverError(http.StatusBadGateway, "upstream_error", "The provider error response exceeded the gateway limit.")
+		return nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider error response exceeded the gateway limit.")
 	}
 	return strings.NewReader(redacted), nil
 }

@@ -16,6 +16,9 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/oif"
@@ -62,19 +65,19 @@ func (s *Server) boundGuardrails(x *call, engine *guardrails.Engine) *guardrails
 
 const errContentPolicyBlocked guardrails.Failure = "content_policy_blocked"
 
-func guardrailError(err error) *Error {
+func guardrailError(err error) *fault.Error {
 	if err == nil {
 		return nil
 	}
-	var existing *Error
+	var existing *fault.Error
 	if errors.As(err, &existing) {
 		return existing
 	}
 	var failure guardrails.Failure
 	if errors.As(err, &failure) {
-		return &Error{Status: guardrailStatus(failure), Type: "invalid_request_error", Code: string(failure), Message: "The request could not satisfy the configured guardrails."}
+		return &fault.Error{Status: guardrailStatus(failure), Type: "invalid_request_error", Code: string(failure), Message: "The request could not satisfy the configured guardrails."}
 	}
-	return serverError(500, "guardrail_unavailable", "The guardrail could not be evaluated.")
+	return fault.ServerError(500, "guardrail_unavailable", "The guardrail could not be evaluated.")
 }
 
 func guardrailStatus(failure guardrails.Failure) int {
@@ -84,7 +87,7 @@ func guardrailStatus(failure guardrails.Failure) int {
 	return http.StatusBadRequest
 }
 
-func (s *Server) bindGuardrails(ctx context.Context, x *call) *Error {
+func (s *Server) bindGuardrails(ctx context.Context, x *call) *fault.Error {
 	x.guardrailMetadata = x.request.guardrailMetadata
 	x.guardrailEngine = s.boundGuardrails(x, x.snapshot().GuardrailEngine(x.route.Slug, x.keyID))
 	if x.internalGuardrail {
@@ -404,19 +407,19 @@ func nilIfParallel(p *parallelGuardrail) error {
 func (s *Server) applyGuardrails(w http.ResponseWriter, r *http.Request) {
 	req := s.begin(w, r)
 	s.cors(w, r)
-	if !s.admit(r.Context()) {
-		writeError(w, overloaded)
+	if !s.gate.Admit(r.Context()) {
+		fault.WriteError(w, fault.Overloaded)
 		return
 	}
-	defer s.release(r.Context())
-	authority, e := s.authenticate(r, "guardrails")
+	defer s.gate.Release(r.Context())
+	authority, e := s.gate.Authenticate(r, "guardrails")
 	if e != nil {
-		writeError(w, e)
+		fault.WriteError(w, e)
 		return
 	}
 	var in guardrails.Application
 	if err := access.DecodeUnique(r, &in, guardrails.MaxContentBytes); err != nil {
-		writeError(w, invalidRequest("invalid_request", "Supply a policy revision, phase and bounded text segments.", nil))
+		fault.WriteError(w, fault.InvalidRequest("invalid_request", "Supply a policy revision, phase and bounded text segments.", nil))
 		return
 	}
 	x := &call{request: req, actor: "api_key", keyID: authority.ID, authority: authority, budgetGroupID: authority.BudgetGroupID, attribution: authority.Attribution, family: wire.Chat, operationOverride: "guardrail"}
@@ -428,11 +431,11 @@ func (s *Server) applyGuardrails(w http.ResponseWriter, r *http.Request) {
 	if err != nil && !errors.Is(err, guardrails.ErrBlocked) {
 		out.err = guardrailError(err)
 		status = out.err.Status
-		writeError(w, out.err)
+		fault.WriteError(w, out.err)
 	} else {
 		x.guardrailMetadata = req.guardrailMetadata
 		x.guardrailHeaders(w.Header(), false, false)
-		writeJSON(w, guardrails.Applied(result, err))
+		fault.WriteJSON(w, guardrails.Applied(result, err))
 	}
 	s.settleAdmission(context.WithoutCancel(r.Context()), x)
 	s.finish(x, out, status)
@@ -459,17 +462,17 @@ func (s *Server) EvaluateGuardrails(r *http.Request, p access.Principal, pinned 
 	if s == nil || s.deps.Runtime == nil {
 		return guardrails.Result{}, access.Fail(503, "guardrails_unavailable", "The evaluator is unavailable.")
 	}
-	if !s.admit(r.Context()) {
-		return guardrails.Result{}, access.Fail(overloaded.Status, overloaded.Code, overloaded.Message)
+	if !s.gate.Admit(r.Context()) {
+		return guardrails.Result{}, access.Fail(fault.Overloaded.Status, fault.Overloaded.Code, fault.Overloaded.Message)
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	x := &call{request: request{id: uuid.Must(uuid.NewV7()).String(), minted: true, startedAt: s.now(), release: s.deps.Runtime.Release()}, actor: "playground", origin: usage.OriginPlayground, userID: p.UserID(), family: wire.Chat, operationOverride: "guardrail"}
-	x.authorize = func(route *routing.Route) *Error {
+	x.authorize = func(route *routing.Route) *fault.Error {
 		if err := p.Authorize(access.Playground); err != nil {
-			return permissionError("guardrail_forbidden", "Playground access is required.")
+			return fault.PermissionError("guardrail_forbidden", "Playground access is required.")
 		}
 		if err := p.Project(route.ProjectID, access.View); err != nil {
-			return modelNotFound(route.Slug)
+			return fault.ModelNotFound(route.Slug)
 		}
 		return nil
 	}
@@ -509,7 +512,7 @@ func (s *Server) evaluateGuardrails(ctx context.Context, x *call, in guardrails.
 			n += int64(len(segment.Text))
 		}
 		x.estimate = max(1, (n+3)/4)
-		lease, e := s.deps.Admission.reserveKey(ctx, x.authority, "openai", x.estimate, 30*time.Second, "guardrails")
+		lease, e := s.deps.Admission.ReserveKey(ctx, x.authority, "openai", x.estimate, 30*time.Second, "guardrails")
 		if e != nil {
 			return guardrails.Result{}, e
 		}
@@ -601,7 +604,7 @@ func (s *Server) modelGuardrail(ctx context.Context, parent *call, d guardrails.
 	var out *outcome
 	if semantic {
 		body, _ := json.Marshal(map[string]any{"model": route.Slug, "input": embeddingInputs, "encoding_format": "float"})
-		x.request.body = &measuredBody{decoded: int64(len(body))}
+		x.request.body = &ingress.MeasuredBody{Decoded: int64(len(body))}
 		x.family, x.mode = wire.Embeddings, "unary"
 		if route.Fidelity.Strict() {
 			codec, _ := operationregistry.Lookup("openai-embeddings")
@@ -618,7 +621,7 @@ func (s *Server) modelGuardrail(ctx context.Context, parent *call, d guardrails.
 				if admissionErr := s.admitClassifier(embeddingCtx, x); admissionErr != nil {
 					out = &outcome{err: admissionErr}
 				} else {
-					result := runAttempts(embeddingCtx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(attemptCtx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, operationplan.Result, *attemptFailure) {
+					result := runAttempts(embeddingCtx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(attemptCtx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *attemptFailure) {
 						return s.unaryAttempt(attemptCtx, x, a, p, slot, fact)
 					}})
 					raw = result.result.Body
@@ -661,7 +664,7 @@ func (s *Server) modelGuardrail(ctx context.Context, parent *call, d guardrails.
 		} else if e := s.admitClassifier(ctx, x); e != nil {
 			out = &outcome{err: e}
 		} else {
-			result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, operationplan.Result, *attemptFailure) {
+			result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *attemptFailure) {
 				return s.unaryAttempt(ctx, x, a, p, slot, fact)
 			}})
 			raw = result.result.Body
@@ -751,7 +754,7 @@ func (x *call) guardrailHeaders(h http.Header, streamed, trailers bool) {
 	}
 }
 
-func (x *call) guardrailSurfaceGate(route *routing.Route) *Error {
+func (x *call) guardrailSurfaceGate(route *routing.Route) *fault.Error {
 	if engine := x.snapshot().GuardrailEngine(route.Slug, x.keyID); engine != nil {
 		x.guardrailEngine = engine
 		x.guardrailMetadata = x.request.guardrailMetadata
@@ -789,7 +792,7 @@ func (x *call) legacyGuardrailError(result guardrails.Result, err error) error {
 	return err
 }
 
-func guardrailAuthorizer(s *Server, x *call) func(*routing.Route) *Error {
+func guardrailAuthorizer(s *Server, x *call) func(*routing.Route) *fault.Error {
 	if x.authorize != nil {
 		return x.authorize
 	}

@@ -13,6 +13,10 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -173,7 +177,7 @@ func (s *Server) predict(ctx context.Context, x *call, slug, text string) (class
 	codec, _ := operationregistry.Lookup("tei-classification")
 	body, _ := json.Marshal(map[string]string{"inputs": text})
 	if x.snapshot().HasBodyLimits() {
-		x.request.body = &measuredBody{decoded: int64(len(body))}
+		x.request.body = &ingress.MeasuredBody{Decoded: int64(len(body))}
 	}
 	x.unary = &unaryCall{dialect: codec, route: slug, surface: "native"}
 	x.mode = "unary"
@@ -188,7 +192,7 @@ func (s *Server) predict(ctx context.Context, x *call, slug, text string) (class
 	if e := s.admitClassifier(ctx, x); e != nil {
 		return failed, &outcome{err: e}
 	}
-	result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, operationplan.Result, *attemptFailure) {
+	result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *attemptFailure) {
 		return s.unaryAttempt(ctx, x, a, p, slot, fact)
 	}})
 	if result.err != nil {
@@ -209,7 +213,7 @@ func (s *Server) generateLabel(ctx context.Context, x *call, slug, text string) 
 	failed := classification{failure: classifierFailed}
 	body, _ := json.Marshal(map[string]any{"model": slug, "messages": []map[string]string{{"role": "user", "content": text}}})
 	if x.snapshot().HasBodyLimits() {
-		x.request.body = &measuredBody{decoded: int64(len(body))}
+		x.request.body = &ingress.MeasuredBody{Decoded: int64(len(body))}
 	}
 	parsed, err := protocols.Parse(wire.Chat, body, "")
 	if err != nil {
@@ -239,8 +243,8 @@ func (s *Server) generateLabel(ctx context.Context, x *call, slug, text string) 
 // cannot finish planning until the label is known. It shares the caller's
 // admission permit, awaiting it before any upstream work.
 // Keyless evaluations share the installation, organization and project budgets.
-func (s *Server) admitClassifier(ctx context.Context, x *call) *Error {
-	if e := s.awaitAdmission(ctx, x); e != nil {
+func (s *Server) admitClassifier(ctx context.Context, x *call) *fault.Error {
+	if e := s.gate.AwaitAdmission(ctx, x.priority); e != nil {
 		return e
 	}
 	x.estimate = requestEstimate(x)
@@ -248,8 +252,8 @@ func (s *Server) admitClassifier(ctx context.Context, x *call) *Error {
 		return s.reserveSystemBudgets(ctx, x)
 	}
 	ttl := time.Duration(x.named().OverallTimeout) * time.Millisecond
-	var e *Error
+	var e *fault.Error
 	admitted := x.admissionAuthority(x.authority)
-	x.lease, e = s.deps.Admission.reserveKeyCosted(ctx, &admitted, x.clientSurface(), keyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), ttl, s.costReservation(x, x.authority), x.limitRoute())
+	x.lease, e = s.deps.Admission.ReserveKeyCosted(ctx, &admitted, x.clientSurface(), quota.KeyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), ttl, s.costReservation(x, x.authority), x.limitRoute())
 	return e
 }

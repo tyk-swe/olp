@@ -8,6 +8,10 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/operationplan"
@@ -42,14 +46,14 @@ type pruningResponse struct {
 	} `json:"answers"`
 }
 
-func (s *Server) pruneWorkflow(ctx context.Context, x *call, request *wire.Request) (*wire.Request, *Error) {
+func (s *Server) pruneWorkflow(ctx context.Context, x *call, request *wire.Request) (*wire.Request, *fault.Error) {
 	if x.guardrailEngine == nil || x.workflow == nil {
 		return request, nil
 	}
 	return s.pruneWorkflowPolicies(ctx, x, request, x.guardrailEngine.TypeSafePolicies())
 }
 
-func (s *Server) pruneWorkflowPolicies(ctx context.Context, x *call, request *wire.Request, policies []guardrails.TypeSafePolicy) (*wire.Request, *Error) {
+func (s *Server) pruneWorkflowPolicies(ctx context.Context, x *call, request *wire.Request, policies []guardrails.TypeSafePolicy) (*wire.Request, *fault.Error) {
 	if len(policies) == 0 {
 		return request, nil
 	}
@@ -121,7 +125,7 @@ func (s *Server) pruneWorkflowPolicies(ctx context.Context, x *call, request *wi
 	return s.pruneWorkflowPolicies(ctx, x, pruned, policies[1:])
 }
 
-func (x *call) pruningInput(ctx context.Context, request *wire.Request) (*wire.Request, []string, *Error) {
+func (x *call) pruningInput(ctx context.Context, request *wire.Request) (*wire.Request, []string, *fault.Error) {
 	document := request.OIF().Document()
 	if interaction.CheckGuardrailCoverage(request.Family, document) != nil && !x.guardrailEngine.OnlyTypeSafe() {
 		result, err := x.guardrailEngine.Unavailable()
@@ -154,7 +158,7 @@ func (x *call) pruningInput(ctx context.Context, request *wire.Request) (*wire.R
 				matched = true
 				if rule.Action == contentpolicy.ActionBlock {
 					recordDecision(x, contentpolicy.Decision{RuleID: rule.ID, Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionBlock, Outcome: contentpolicy.OutcomeBlocked})
-					return nil, nil, invalidRequest("content_policy_blocked", "The request was blocked by the route's content policy.", nil)
+					return nil, nil, fault.InvalidRequest("content_policy_blocked", "The request was blocked by the route's content policy.", nil)
 				}
 				segments[index].Text = rule.Re.ReplaceAllLiteralString(segment.Text, rule.Replacement)
 			}
@@ -185,7 +189,7 @@ func (x *call) pruningInput(ctx context.Context, request *wire.Request) (*wire.R
 	return processed, system, nil
 }
 
-func (s *Server) typeSafeRelevance(ctx context.Context, parent *call, policy guardrails.TypeSafePolicy, request *wire.Request, system []string, candidates []workflowRelevanceExchange) ([]int, *Error) {
+func (s *Server) typeSafeRelevance(ctx context.Context, parent *call, policy guardrails.TypeSafePolicy, request *wire.Request, system []string, candidates []workflowRelevanceExchange) ([]int, *fault.Error) {
 	route, ok := parent.request.release.Snapshot().FindRoute(policy.Config.Route)
 	if !ok || !slices.Contains(route.Operations, "decision") {
 		if policy.Revision.OnError == guardrails.FailOpen {
@@ -270,14 +274,14 @@ func (s *Server) typeSafeRelevance(ctx context.Context, parent *call, policy gua
 	defer cancel()
 	x.estimate = requestEstimate(x)
 	authority := cacheAuthority(x.admissionAuthority(x.authority), false, true, false)
-	lease, problem := s.deps.Admission.reserveKeyCosted(stepCtx, &authority, x.clientSurface(), keyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), time.Duration(x.named().OverallTimeout)*time.Millisecond, costReservation{}, x.limitRoute())
+	lease, problem := s.deps.Admission.ReserveKeyCosted(stepCtx, &authority, x.clientSurface(), quota.KeyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), time.Duration(x.named().OverallTimeout)*time.Millisecond, quota.CostReservation{}, x.limitRoute())
 	if problem != nil {
 		return nil, problem
 	}
-	result := runAttempts(stepCtx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(attemptCtx context.Context, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, operationplan.Result, *attemptFailure) {
+	result := runAttempts(stepCtx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(attemptCtx context.Context, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *attemptFailure) {
 		return s.unaryAttempt(attemptCtx, x, attempt, provider, slot, fact)
 	}})
-	settleKey(ctx, lease, x.stepDispatched, x.settledTokensFor(x.facts[priorFacts:], x.estimate), s.log)
+	quota.SettleKey(ctx, lease, x.stepDispatched, x.settledTokensFor(x.facts[priorFacts:], x.estimate), s.log)
 	// Later steps must include this independently routed attempt in the same run.
 	parent.facts, parent.spent = x.facts, x.spent
 	if result.err != nil {
@@ -315,5 +319,5 @@ func requestMetadataForPruning(parent *call, body []byte) request {
 	return request{id: parent.request.id, durableID: parent.request.durableID, minted: parent.request.minted,
 		clientIP: parent.request.clientIP, startedAt: parent.request.startedAt, release: parent.request.release,
 		delegationAssertion: parent.request.delegationAssertion, callerCredential: parent.request.callerCredential,
-		body: &measuredBody{decoded: int64(len(body))}}
+		body: &ingress.MeasuredBody{Decoded: int64(len(body))}}
 }
