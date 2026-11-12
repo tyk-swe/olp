@@ -11,6 +11,10 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/health"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 )
 
 // gateVerdict is the shared pre-dispatch decision for one candidate slot.
@@ -49,7 +53,7 @@ type gateResult struct {
 // recovering, the exclusive half-open probe.
 type dispatchHold struct {
 	provider    string
-	reservation *targetReservation
+	reservation *quota.TargetReservation
 	probed      bool
 	settled     bool
 	budgets     []string
@@ -61,9 +65,9 @@ func (s *Server) gateAttempt(ctx context.Context, x *call, attempt routing.Attem
 	if x.workflow != nil {
 		gate := s.gateSlot(ctx, provider, slot, estimate, deadline, x.priority)
 		if gate.hold != nil && !(x.callerCostExempt() && provider.CredentialSource == "caller") {
-			for _, owner := range attemptCaps(x.route, provider, slot) {
-				if owner.limits != nil {
-					gate.hold.budgets = append(gate.hold.budgets, owner.id)
+			for _, owner := range quota.AttemptCaps(x.route, provider, slot) {
+				if owner.Limits != nil {
+					gate.hold.budgets = append(gate.hold.budgets, owner.ID)
 				}
 			}
 		}
@@ -90,7 +94,7 @@ func (h *dispatchHold) settle(ctx context.Context, dispatched bool, actual *int6
 		return
 	}
 	h.settled = true
-	h.reservation.settle(ctx, dispatched, actual)
+	h.reservation.Settle(ctx, dispatched, actual)
 }
 
 // releaseHold abandons an admitted slot before its dispatch: the quota
@@ -103,8 +107,33 @@ func (s *Server) releaseHold(ctx context.Context, hold *dispatchHold) {
 	hold.settle(ctx, false, nil)
 	if hold.probed {
 		hold.probed = false
-		s.health.releaseProbe(hold.provider)
+		s.health.ReleaseProbe(hold.provider)
 	}
+}
+
+func (s *Server) settleSession(ctx context.Context, x *call, p *pin) {
+	s.finishSessionDebit(ctx, x, x.failure != nil)
+	settled := sessionSettlement(x)
+	if p != nil {
+		s.settlePinHold(ctx, x, p.hold, settled)
+	}
+	s.settleCaps(ctx, x)
+	s.recordCost(x)
+	quota.SettleKey(ctx, x.lease, x.dispatched, settled, s.log)
+}
+
+func sessionSettlement(x *call) *int64 {
+	if !x.dispatched {
+		return new(int64(0))
+	}
+	actual := quota.TotalTokens(x.usage())
+	if len(x.facts) == 0 || !x.facts[len(x.facts)-1].BillingUncertain {
+		return actual
+	}
+	if actual == nil {
+		return new(x.estimate)
+	}
+	return new(max(x.estimate, *actual))
 }
 
 // settlePinHold settles a pinned hold that never passed through the attempt
@@ -121,22 +150,22 @@ func (s *Server) settlePinHold(ctx context.Context, x *call, hold *dispatchHold,
 	}
 	hold.probed = false
 	if x.dispatched && len(x.facts) > 0 {
-		s.health.record(hold.provider, x.facts[len(x.facts)-1], true)
+		s.health.Record(hold.provider, x.facts[len(x.facts)-1], true)
 		return
 	}
-	s.health.releaseProbe(hold.provider)
+	s.health.ReleaseProbe(hold.provider)
 }
 
 type attemptCompletion struct {
-	fact        AttemptFact
+	fact        events.AttemptFact
 	failure     *attemptFailure
-	authority   *Error
+	authority   *fault.Error
 	attempt     routing.Attempt
 	estimate    int64
-	finishLease func() *Error
+	finishLease func() *fault.Error
 }
 
-func (h *dispatchHold) begin(ctx context.Context, s *Server, x *call, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot) (bool, *Error) {
+func (h *dispatchHold) begin(ctx context.Context, s *Server, x *call, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot) (bool, *fault.Error) {
 	if !x.servingAllowed(provider, attempt.TargetID, attempt.UpstreamModel, slot, true) {
 		s.releaseHold(ctx, h)
 		return false, nil
@@ -150,9 +179,9 @@ func (h *dispatchHold) begin(ctx context.Context, s *Server, x *call, attempt ro
 		return false, err
 	}
 	x.sessionDebit = nil
-	caps := attemptCaps(x.route, provider, &slot)
+	caps := quota.AttemptCaps(x.route, provider, &slot)
 	if x.callerCostExempt() && provider.CredentialSource == "caller" {
-		caps = [3]cappedOwner{}
+		caps = [3]quota.CappedOwner{}
 	}
 	if err := s.reserveSessionDebit(ctx, x, *authority, attempt, caps[:]); err != nil {
 		s.releaseHold(ctx, h)
@@ -161,7 +190,7 @@ func (h *dispatchHold) begin(ctx context.Context, s *Server, x *call, attempt ro
 	return true, nil
 }
 
-func (h *dispatchHold) authorize(ctx context.Context, s *Server, x *call) (context.Context, func() *Error, *Error) {
+func (h *dispatchHold) authorize(ctx context.Context, s *Server, x *call) (context.Context, func() *fault.Error, *fault.Error) {
 	if x.authority.TaskCapability != nil {
 		admitter, ok := s.deps.Runtime.(interface {
 			AdmitTaskCapabilityAttempt(context.Context, keyauthority.Authority, string, string, string, *string, string) error
@@ -172,35 +201,35 @@ func (h *dispatchHold) authorize(ctx context.Context, s *Server, x *call) (conte
 		}
 		if !ok || err != nil {
 			if errors.Is(err, release.ErrTaskAttemptLimit) {
-				return ctx, nil, &Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "task_limit_exceeded", Message: "The task attempt limit was exceeded."}
+				return ctx, nil, &fault.Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "task_limit_exceeded", Message: "The task attempt limit was exceeded."}
 			}
-			return ctx, nil, permissionError("permission_denied", "The task capability is no longer authorized.")
+			return ctx, nil, fault.PermissionError("permission_denied", "The task capability is no longer authorized.")
 		}
 	}
 	if x.workflow == nil {
-		return ctx, func() *Error { return nil }, nil
+		return ctx, func() *fault.Error { return nil }, nil
 	}
 	dispatchCtx, finish := s.monitorWorkflowAuthority(ctx, x, "")
 	return dispatchCtx, finish, nil
 }
 
-func (h *dispatchHold) dispatchContext(ctx context.Context, s *Server, x *call) (context.Context, func() *Error) {
+func (h *dispatchHold) dispatchContext(ctx context.Context, s *Server, x *call) (context.Context, func() *fault.Error) {
 	if x.workflow == nil {
-		return ctx, func() *Error { return nil }
+		return ctx, func() *fault.Error { return nil }
 	}
 	return s.monitorWorkflowModelLease(ctx, x.sessionDebit)
 }
 
-func (h *dispatchHold) complete(ctx context.Context, s *Server, x *call, completion attemptCompletion) (*Error, bool) {
+func (h *dispatchHold) complete(ctx context.Context, s *Server, x *call, completion attemptCompletion) (*fault.Error, bool) {
 	dispatched := completion.failure == nil || completion.failure.dispatched
 	x.dispatched = x.dispatched || dispatched
 	x.stepDispatched = x.stepDispatched || dispatched
-	h.settle(ctx, dispatched, settledAttemptTokens(&completion.fact, completion.estimate))
+	h.settle(ctx, dispatched, quota.SettledAttemptTokens(&completion.fact, completion.estimate))
 	if dispatched {
 		x.spendCaps(h.budgets, completion.attempt)
 	}
 	x.facts = append(x.facts, completion.fact)
-	s.health.record(h.provider, completion.fact, h.probed)
+	s.health.Record(h.provider, completion.fact, h.probed)
 	h.probed = false
 	if x.workflow == nil {
 		return completion.authority, false
@@ -216,7 +245,7 @@ func (h *dispatchHold) complete(ctx context.Context, s *Server, x *call, complet
 		}
 		return completion.authority, false
 	}
-	var releaseErr *Error
+	var releaseErr *fault.Error
 	if completion.failure.dispatched {
 		s.markSessionUnknown(ctx, x)
 	} else {
@@ -243,11 +272,11 @@ func (h *dispatchHold) complete(ctx context.Context, s *Server, x *call, complet
 // replica's local cooldown when it is not.
 func (s *Server) cooling(ctx context.Context, providerID string, slot *routing.Slot) bool {
 	generation := s.slotGrantGeneration(slot)
-	if s.deps.Admission.ready() {
-		return s.deps.Admission.cooling(ctx, providerID, slot, generation)
+	if s.deps.Admission.Ready() {
+		return s.deps.Admission.Cooling(ctx, providerID, slot, generation)
 	}
-	return s.health.coolingDown(providerID, slot.ID) ||
-		s.health.coolingDown(providerID, credentialHealthKey(slot, generation))
+	return s.health.CoolingDown(providerID, slot.ID) ||
+		s.health.CoolingDown(providerID, credentialHealthKey(slot, generation))
 }
 
 func (s *Server) slotGrantGeneration(slot *routing.Slot) int64 {
@@ -291,16 +320,16 @@ func (s *Server) gateSlot(ctx context.Context, provider *routing.Provider, slot 
 }
 
 func acquireDispatchHold(ctx context.Context, s *Server, provider *routing.Provider, slot *routing.Slot, estimate int64, ttl time.Duration, priority string) gateResult {
-	reservation, rejection, skip := s.deps.Admission.reserveTarget(ctx, provider, slot, estimate, ttl, priority)
+	reservation, rejection, skip := s.deps.Admission.ReserveTarget(ctx, provider, slot, estimate, ttl, priority)
 	if skip {
 		return gateResult{verdict: gateUnmeterable}
 	}
 	if rejection != nil {
-		return gateResult{verdict: gateRejected, rejection: rejection}
+		return gateResult{verdict: gateRejected, rejection: rateLimitedTarget(rejection)}
 	}
-	probed, granted := s.health.claim(provider.ID)
+	probed, granted := s.health.Claim(provider.ID)
 	if !granted {
-		reservation.settle(ctx, false, nil)
+		reservation.Settle(ctx, false, nil)
 		return gateResult{verdict: gateDenied}
 	}
 	return gateResult{verdict: gateAdmitted, hold: &dispatchHold{provider: provider.ID, reservation: reservation, probed: probed}}
@@ -329,11 +358,11 @@ func (s *Server) cooldownFailure(ctx context.Context, providerID string, slot *r
 		// The poll may install a replacement while the shared store is
 		// recording this cooldown. Its generation keeps that write scoped
 		// to the refused token, including across gateway replicas.
-		s.health.cooldown(providerID, credentialHealthKey(slot, generation), credentialCooldown)
-		s.deps.Admission.cooldown(ctx, providerID, slot, generation, credentialCooldown, true)
+		s.health.Cooldown(providerID, credentialHealthKey(slot, generation), health.CredentialCooldown)
+		s.deps.Admission.Cooldown(ctx, providerID, slot, generation, health.CredentialCooldown, true)
 	case classRateLimit:
-		s.health.cooldown(providerID, slot.ID, failure.retryAfter)
-		s.deps.Admission.cooldown(ctx, providerID, slot, generation, cooldownDuration(failure.retryAfter), false)
+		s.health.Cooldown(providerID, slot.ID, failure.retryAfter)
+		s.deps.Admission.Cooldown(ctx, providerID, slot, generation, health.CooldownDuration(failure.retryAfter), false)
 	default:
 		return true
 	}
@@ -348,6 +377,10 @@ func (s *Server) GrantRefreshed(providerID, credentialID string) {
 	// their cooldowns expire. A delayed notifier must never clear a refusal
 	// of the newly served token.
 	generation := max(0, s.deps.Runtime.GrantGeneration(credentialID)-1)
-	s.health.endCooldown(providerID, credentialHealthKey(&routing.Slot{CredentialID: &credentialID}, generation))
-	s.deps.Admission.endCredentialCooldown(context.Background(), providerID, credentialID, generation)
+	s.health.EndCooldown(providerID, credentialHealthKey(&routing.Slot{CredentialID: &credentialID}, generation))
+	s.deps.Admission.EndCredentialCooldown(context.Background(), providerID, credentialID, generation)
+}
+
+func rateLimitedTarget(refusal *quota.TargetRefusal) *attemptFailure {
+	return &attemptFailure{class: classRateLimit, quota: refusal.Quota, retryAfter: refusal.RetryAfter}
 }

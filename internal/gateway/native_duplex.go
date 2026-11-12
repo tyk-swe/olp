@@ -16,6 +16,8 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/duplexcontract"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -44,79 +46,79 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 	status := http.StatusInternalServerError
 	var out *outcome
 	defer func() { s.finish(x, out, status) }()
-	surface := requestSurface(r)
+	surface := fault.RequestSurface(r)
 	descriptor, known := duplexcontract.Lookup(dialect)
 	if !known {
-		e := notFoundError("not_found", "Unknown native duplex dialect.")
+		e := fault.NotFoundError("not_found", "Unknown native duplex dialect.")
 		x.failure, status = e, e.Status
-		writeSurfaceError(w, e, surface)
+		fault.WriteSurfaceError(w, e, surface)
 		return
 	}
-	if !s.admit(r.Context()) {
-		x.failure, status = overloaded, overloaded.Status
-		writeSurfaceError(w, overloaded, surface)
+	if !s.gate.Admit(r.Context()) {
+		x.failure, status = fault.Overloaded, fault.Overloaded.Status
+		fault.WriteSurfaceError(w, fault.Overloaded, surface)
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	if !s.browserOriginAllowed(r) {
-		e := permissionError("origin_forbidden", "This origin is not allowed to open duplex sessions.")
+		e := fault.PermissionError("origin_forbidden", "This origin is not allowed to open duplex sessions.")
 		x.failure, status = e, e.Status
-		writeSurfaceError(w, e, surface)
+		fault.WriteSurfaceError(w, e, surface)
 		return
 	}
 	if !realtimeUpgrade(r) {
-		e := invalidRequest("websocket_upgrade_required", "Native duplex sessions require a WebSocket upgrade.", nil)
+		e := fault.InvalidRequest("websocket_upgrade_required", "Native duplex sessions require a WebSocket upgrade.", nil)
 		x.failure, status = e, e.Status
-		writeSurfaceError(w, e, surface)
+		fault.WriteSurfaceError(w, e, surface)
 		return
 	}
-	token := bearerToken(r)
+	token := ingress.BearerToken(r)
 	var authority keyauthority.Authority
-	var e *Error
+	var e *fault.Error
 	if len(r.Header.Values("Authorization")) != 1 || token == "" {
-		e = authenticationError("invalid_api_key", "Provide one API key.")
+		e = fault.AuthenticationError("invalid_api_key", "Provide one API key.")
 	} else {
-		authority, e = s.authenticateRequest(r, token, "inference")
+		authority, e = s.gate.AuthenticateRequest(r, token, "inference")
 	}
 	if e == nil {
 		s.bindAuthority(x, authority)
-		x.attribution, e = s.parseAttribution(r, authority)
+		x.attribution, e = ingress.ParseAttribution(r, authority)
 	}
 	if e != nil {
 		x.failure, status = e, e.Status
-		writeSurfaceError(w, e, surface)
+		fault.WriteSurfaceError(w, e, surface)
 		return
 	}
 	route, ok := x.request.release.Snapshot().FindRoute(routeSlug)
 	if !ok || !x.authority.Allows("inference", route.Slug, route.ProjectID, s.now()) || !slices.Contains(route.Operations, "realtime") {
-		e := modelNotFound(routeSlug)
+		e := fault.ModelNotFound(routeSlug)
 		x.failure, status = e, e.Status
-		writeSurfaceError(w, e, surface)
+		fault.WriteSurfaceError(w, e, surface)
 		return
 	}
 	x.route = &route
 	if e := x.guardrailSurfaceGate(&route); e != nil {
 		x.failure, status = e, e.Status
-		writeSurfaceError(w, e, surface)
+		fault.WriteSurfaceError(w, e, surface)
 		return
 	}
 	if x.preferences, x.priority, e = routingControls(r, x.authority.Policy); e != nil {
 		x.failure, status = e, e.Status
-		writeSurfaceError(w, e, surface)
+		fault.WriteSurfaceError(w, e, surface)
 		return
 	}
 	if e := unboundedWorkLimits(x.admissionAuthority(x.authority), nil, nil, &route); e != nil {
 		x.failure, status = e, e.Status
-		writeSurfaceError(w, e, surface)
+		fault.WriteSurfaceError(w, e, surface)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), nativeDuplexSession)
 	defer cancel()
 	client, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 	if err != nil {
-		e := serverError(http.StatusBadRequest, "websocket_upgrade_failed", "The duplex WebSocket upgrade failed.")
+		e := fault.ServerError(http.StatusBadRequest, "websocket_upgrade_failed", "The duplex WebSocket upgrade failed.")
 		x.failure, status = e, e.Status
-		writeSurfaceError(w, e, surface)
+		fault.WriteSurfaceError(w, e, surface)
 		return
 	}
 	defer client.Close(websocket.StatusNormalClosure, "")
@@ -130,7 +132,7 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 	stopSetup()
 	if err != nil || messageType != websocket.MessageText {
 		client.Close(websocket.StatusPolicyViolation, "setup required")
-		x.failure, status = invalidRequest("invalid_duplex_setup", "A native duplex session requires a setup frame first.", nil), http.StatusBadRequest
+		x.failure, status = fault.InvalidRequest("invalid_duplex_setup", "A native duplex session requires a setup frame first.", nil), http.StatusBadRequest
 		return
 	}
 	setup, inspectErr := duplexcontract.InspectProfileSetup(descriptor, initial, int(limit))
@@ -142,12 +144,12 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 	}
 	if inspectErr != nil {
 		client.Close(websocket.StatusPolicyViolation, "setup refused")
-		x.failure, status = invalidRequest("invalid_duplex_setup", "The native duplex setup is not admitted by the compiled profile.", nil), http.StatusBadRequest
+		x.failure, status = fault.InvalidRequest("invalid_duplex_setup", "The native duplex setup is not admitted by the compiled profile.", nil), http.StatusBadRequest
 		return
 	}
 	if route.MaxBodyBytes != nil && int64(len(initial)) > *route.MaxBodyBytes {
 		client.Close(websocket.StatusMessageTooBig, "request body limit exceeded")
-		x.failure, status = bodyTooLarge(), http.StatusRequestEntityTooLarge
+		x.failure, status = ingress.BodyTooLarge(), http.StatusRequestEntityTooLarge
 		return
 	}
 	client.SetReadLimit(bodylimit.Lower(limit, route.MaxBodyBytes))
@@ -156,7 +158,7 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 		x.failure, status = exposureErr, exposureErr.Status
 		return
 	} else if held {
-		heldErr := serverError(http.StatusConflict, "session_exposure_unresolved", "An earlier session for this key is still billing-uncertain; new sessions are refused until that exposure resolves.")
+		heldErr := fault.ServerError(http.StatusConflict, "session_exposure_unresolved", "An earlier session for this key is still billing-uncertain; new sessions are refused until that exposure resolves.")
 		client.Close(websocket.StatusPolicyViolation, "unresolved session exposure")
 		x.failure, status = heldErr, heldErr.Status
 		return
@@ -168,16 +170,7 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var p *pin
-	defer func() {
-		s.finishSessionDebit(r.Context(), x, x.failure != nil)
-		settled := geminiLiveSettlement(x)
-		if p != nil {
-			s.settlePinHold(r.Context(), x, p.hold, settled)
-		}
-		s.settleCaps(r.Context(), x)
-		s.recordCost(x)
-		settleKey(r.Context(), x.lease, x.dispatched, settled, s.log)
-	}()
+	defer func() { s.settleSession(r.Context(), x, p) }()
 	p, e = s.selectPinSurface(ctx, x, &route, "realtime", "native", "realtime", func(provider *routing.Provider, model string) bool {
 		return provider.ProfileID == descriptor.ProfileID && provider.Connector().Supports("realtime", "native", "realtime") && provider.Supports(model, "realtime", "native", "realtime")
 	})
@@ -189,7 +182,7 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 	template, compiled := x.request.release.Snapshot().DuplexTemplate(route.Slug, p.target.ID)
 	if !compiled || template.Dialect() != descriptor.Dialect {
 		client.Close(websocket.StatusPolicyViolation, "profile unavailable")
-		x.failure, status = serverError(http.StatusBadGateway, "upstream_error", "The selected target has no compiled native duplex contract."), http.StatusBadGateway
+		x.failure, status = fault.ServerError(http.StatusBadGateway, "upstream_error", "The selected target has no compiled native duplex contract."), http.StatusBadGateway
 		return
 	}
 	if e := s.unboundedPinLimits(x.admissionAuthority(x.authority), p, &route); e != nil {
@@ -226,19 +219,19 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 	}
 	if bindErr != nil || int64(len(bound)) > limit {
 		client.Close(websocket.StatusPolicyViolation, "invalid setup")
-		x.failure, status = invalidRequest("invalid_duplex_setup", "The native duplex setup could not be bound.", nil), http.StatusBadRequest
+		x.failure, status = fault.InvalidRequest("invalid_duplex_setup", "The native duplex setup could not be bound.", nil), http.StatusBadRequest
 		return
 	}
 	observer := template.Observer(int(limit))
 	if err := template.ObserveSetupFrame(observer, bound); err != nil {
 		client.Close(websocket.StatusPolicyViolation, "invalid setup")
-		x.failure, status = invalidRequest("invalid_duplex_setup", "The native duplex setup could not be bound.", nil), http.StatusBadRequest
+		x.failure, status = fault.InvalidRequest("invalid_duplex_setup", "The native duplex setup could not be bound.", nil), http.StatusBadRequest
 		return
 	}
 	x.dispatched = true
 	if err := writeGeminiLiveFrame(ctx, upstream, websocket.MessageText, bound); err != nil {
 		client.Close(websocket.StatusInternalError, "setup uncertain")
-		x.failure, status = serverError(http.StatusBadGateway, "upstream_outcome_unknown", "The duplex setup outcome is unknown."), http.StatusBadGateway
+		x.failure, status = fault.ServerError(http.StatusBadGateway, "upstream_outcome_unknown", "The duplex setup outcome is unknown."), http.StatusBadGateway
 		markDuplexFactUncertain(x, classAmbiguous)
 		return
 	}
@@ -246,10 +239,10 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 		if ackErr := awaitDuplexSetupAck(ctx, upstream, client, observer, p.attempt.Timeout); ackErr != nil {
 			client.Close(websocket.StatusInternalError, "setup uncertain")
 			if errors.Is(ackErr, errDuplexProtocol) {
-				x.failure, status = serverError(http.StatusBadGateway, "provider_protocol_error", "The duplex provider sent an invalid setup acknowledgement."), http.StatusBadGateway
+				x.failure, status = fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The duplex provider sent an invalid setup acknowledgement."), http.StatusBadGateway
 				markDuplexFactUncertain(x, classProtocol)
 			} else {
-				x.failure, status = serverError(http.StatusBadGateway, "upstream_outcome_unknown", "The duplex provider did not acknowledge setup."), http.StatusBadGateway
+				x.failure, status = fault.ServerError(http.StatusBadGateway, "upstream_outcome_unknown", "The duplex provider did not acknowledge setup."), http.StatusBadGateway
 				markDuplexFactUncertain(x, classAmbiguous)
 			}
 			return
@@ -300,17 +293,17 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if relayErr != nil {
-		x.failure, status = serverError(http.StatusBadGateway, "duplex_incomplete", "The duplex session ended without a complete transport contract."), http.StatusBadGateway
+		x.failure, status = fault.ServerError(http.StatusBadGateway, "duplex_incomplete", "The duplex session ended without a complete transport contract."), http.StatusBadGateway
 		if x.strict() {
 			switch {
 			case errors.Is(relayErr, errDuplexProviderError):
-				x.failure = serverError(http.StatusBadGateway, "duplex_provider_error", "The duplex provider reported an error.")
+				x.failure = fault.ServerError(http.StatusBadGateway, "duplex_provider_error", "The duplex provider reported an error.")
 			case errors.Is(relayErr, errDuplexProtocol):
-				x.failure = serverError(http.StatusBadGateway, "provider_protocol_error", "The duplex provider sent an invalid frame.")
+				x.failure = fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The duplex provider sent an invalid frame.")
 			case errors.Is(relayErr, errDuplexClientProtocol):
-				x.failure = invalidRequest("invalid_duplex_frame", "The duplex client sent an invalid frame.", nil)
+				x.failure = fault.InvalidRequest("invalid_duplex_frame", "The duplex client sent an invalid frame.", nil)
 			case errors.Is(relayErr, errDuplexAuthority):
-				x.failure = permissionError("key_revoked", "The duplex session no longer has route authority.")
+				x.failure = fault.PermissionError("key_revoked", "The duplex session no longer has route authority.")
 			case class == classCancelled:
 				x.failure = (&attemptFailure{class: classCancelled}).toError()
 			case class == classTimeout:
@@ -327,14 +320,14 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) duplexDial(ctx context.Context, x *call, p *pin, template *duplexcontract.Template) (duplexPeer, *Error) {
+func (s *Server) duplexDial(ctx context.Context, x *call, p *pin, template *duplexcontract.Template) (duplexPeer, *fault.Error) {
 	switch template.Transport() {
 	case duplexcontract.TransportBedrockBidi:
 		return s.bedrockDuplexDial(ctx, x, p)
 	case duplexcontract.TransportWebSocket:
 		endpoint, err := p.provider.Connector().DuplexURL(p.model)
 		if err != nil {
-			return nil, serverError(http.StatusBadGateway, "upstream_error", "The duplex profile cannot address this model.")
+			return nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The duplex profile cannot address this model.")
 		}
 		check := strings.Replace(strings.Replace(endpoint, "wss://", "https://", 1), "ws://", "http://", 1)
 		if parsed, parseErr := url.Parse(check); parseErr == nil {
@@ -342,7 +335,7 @@ func (s *Server) duplexDial(ctx context.Context, x *call, p *pin, template *dupl
 			check = parsed.String()
 		}
 		if _, err := s.egress.ValidateEndpoint(check); err != nil {
-			return nil, serverError(http.StatusBadGateway, "upstream_error", "The duplex provider address is not permitted.")
+			return nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The duplex provider address is not permitted.")
 		}
 		dialCtx, cancel := context.WithCancel(ctx)
 		dialTimer := time.AfterFunc(p.attempt.Timeout, cancel)
@@ -359,7 +352,7 @@ func (s *Server) duplexDial(ctx context.Context, x *call, p *pin, template *dupl
 		conn.SetReadLimit(limit)
 		return conn, nil
 	}
-	return nil, serverError(http.StatusBadGateway, "upstream_error", "The duplex transport is unavailable.")
+	return nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The duplex transport is unavailable.")
 }
 
 func (s *Server) relayNativeDuplex(ctx context.Context, x *call, p *pin, client, upstream duplexPeer, token string, observer *duplexcontract.Observer, transport duplexcontract.Transport, maxBytes int) (*wire.Usage, bool, error) {
@@ -395,7 +388,7 @@ func (s *Server) relayNativeDuplex(ctx context.Context, x *call, p *pin, client,
 					if parseErr != nil {
 						return end(fmt.Errorf("%w: provider error could not be parsed", errDuplexProtocol))
 					}
-					scrubbed, redactErr := redactNativeFailureDocument(doc, x.sensitive)
+					scrubbed, redactErr := fault.RedactNativeFailureDocument(doc, x.sensitive)
 					if redactErr != nil {
 						return end(fmt.Errorf("%w: provider error could not be redacted", errDuplexProtocol))
 					}
@@ -418,7 +411,7 @@ func (s *Server) relayNativeDuplex(ctx context.Context, x *call, p *pin, client,
 	done := make(chan relayEnd, 2)
 	go func() { done <- forward(upstream, client, false) }()
 	go func() { done <- forward(client, upstream, true) }()
-	reauth := time.NewTicker(realtimeReauth)
+	reauth := time.NewTicker(ingress.ReauthInterval)
 	defer reauth.Stop()
 	heartbeat := time.NewTicker(realtimePing)
 	defer heartbeat.Stop()
@@ -447,7 +440,7 @@ loop:
 				break loop
 			}
 		case <-heartbeat.C:
-			pingCtx, pingCancel := context.WithTimeout(ctx, realtimeReauth)
+			pingCtx, pingCancel := context.WithTimeout(ctx, ingress.ReauthInterval)
 			first.err = upstream.Ping(pingCtx)
 			if first.err == nil {
 				first.err = client.Ping(pingCtx)

@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/cache"
+	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -39,7 +41,7 @@ func (s *Server) cacheEmbedding(ctx context.Context, parent *call, text string) 
 		s.settleAdmission(context.WithoutCancel(ctx), x)
 	}()
 	body, _ := json.Marshal(map[string]any{"model": route.Slug, "input": text, "encoding_format": "float"})
-	x.request.body = &measuredBody{decoded: int64(len(body))}
+	x.request.body = &ingress.MeasuredBody{Decoded: int64(len(body))}
 	var raw []byte
 	if route.Fidelity.Strict() {
 		codec, _ := operationregistry.Lookup("openai-embeddings")
@@ -58,7 +60,7 @@ func (s *Server) cacheEmbedding(ctx context.Context, parent *call, text string) 
 			out = &outcome{err: e}
 			return nil, "", e
 		}
-		result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, operationplan.Result, *attemptFailure) {
+		result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *attemptFailure) {
 			return s.unaryAttempt(ctx, x, a, p, slot, fact)
 		}})
 		out = &outcome{err: result.err, committed: result.committed, cancelled: result.cancelled}

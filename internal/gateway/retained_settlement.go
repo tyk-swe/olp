@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
@@ -15,7 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
-func (s *Server) prepareRetainedAccounting(x *call, p *pin, route *routing.Route, r *resources.Resource, e retainedapi.Endpoint, source oif.Document) *Error {
+func (s *Server) prepareRetainedAccounting(x *call, p *pin, route *routing.Route, r *resources.Resource, e retainedapi.Endpoint, source oif.Document) *fault.Error {
 	if !e.Metered {
 		return nil
 	}
@@ -39,14 +40,14 @@ func (s *Server) prepareRetainedAccounting(x *call, p *pin, route *routing.Route
 		}
 		price := x.routingInputs.Price(p.provider.Kind, p.provider.ID, p.provider.VendorID, model, operation, s.now())
 		if price == nil || !retainedPriceCovers(price, e.Operation, r.Metadata) {
-			return serverError(503, "pricing_unavailable", "Every retained billing component and model needs a published price before acceptance.")
+			return fault.ServerError(503, "pricing_unavailable", "Every retained billing component and model needs a published price before acceptance.")
 		}
 		if e.Operation == "eval" && !retainedEvalPricingSupported(price, x.attemptCardRevisionForRoute(p.provider.ID, route, x.request.startedAt), p.provider.Kind, p.provider.VendorID, model) {
 			return policyUnavailable("unsupported_metered_operation", "Evaluation totals cannot establish per-invocation input tiers; publish prices and rate cards without those tiers.")
 		}
 		template, err := s.settlementTemplate(x, &cp, e.Surface, operation, s.now())
 		if err != nil {
-			return serverError(503, "pricing_unavailable", "Retained accounting could not be pinned.")
+			return fault.ServerError(503, "pricing_unavailable", "Retained accounting could not be pinned.")
 		}
 		template.Origin = usage.OriginRetainedSettlement
 		template.Attempts[0].Routing.Budgets = append(template.Attempts[0].Routing.Budgets, p.provider.ID, p.slot.ID, route.ID)
@@ -72,29 +73,29 @@ func (s *Server) observeRetainedSettlement(ctx context.Context, r *resources.Res
 	return s.deps.Resources.RecordRetainedObservation(ctx, r, observation, nil)
 }
 
-func (s *Server) fenceRetainedMutation(ctx context.Context, r *http.Request, x *call, e retainedapi.Endpoint, resource *resources.Resource, body []byte) (*resources.Lifecycle, *Error) {
+func (s *Server) fenceRetainedMutation(ctx context.Context, r *http.Request, x *call, e retainedapi.Endpoint, resource *resources.Resource, body []byte) (*resources.Lifecycle, *fault.Error) {
 	if !e.Metered || (e.Action != "update" && e.Action != "patch") {
 		return nil, nil
 	}
 	key := r.Header.Get("Idempotency-Key")
 	if key == "" || len(key) > 128 {
-		return nil, invalidRequest("invalid_idempotency_key", "Idempotency-Key of at most 128 bytes is required for a paid mutation.", nil)
+		return nil, fault.InvalidRequest("invalid_idempotency_key", "Idempotency-Key of at most 128 bytes is required for a paid mutation.", nil)
 	}
 	payload := append([]byte(e.Method+":"+e.Pattern+":"+resource.ID+":"+r.URL.RawQuery+":"), body...)
 	digest := sha256.Sum256(payload)
 	lifecycle, err := s.deps.Resources.BeginMutation(ctx, resource, resources.Submission{Operation: e.Operation + ":" + e.Action, Key: key, Digest: digest[:]})
 	if err != nil {
 		if errors.Is(err, resources.ErrSubmissionConflict) {
-			return nil, serverError(409, "idempotency_conflict", "This mutation identity already exists or conflicts with its original request.")
+			return nil, fault.ServerError(409, "idempotency_conflict", "This mutation identity already exists or conflicts with its original request.")
 		}
-		return nil, serverError(503, "provider_state_unavailable", "The paid mutation could not be fenced.")
+		return nil, fault.ServerError(503, "provider_state_unavailable", "The paid mutation could not be fenced.")
 	}
 	return lifecycle, nil
 }
 
-func (s *Server) retainedUnboundedLimits(x *call, p *pin) *Error {
+func (s *Server) retainedUnboundedLimits(x *call, p *pin) *fault.Error {
 	if x.route == nil {
-		return serverError(503, "provider_state_unavailable", "A retained operation requires a pinned route.")
+		return fault.ServerError(503, "provider_state_unavailable", "A retained operation requires a pinned route.")
 	}
 	authority := x.authority
 	authority.Attribution = x.attribution
@@ -126,7 +127,7 @@ func (s *Server) retainedUnboundedLimits(x *call, p *pin) *Error {
 		}
 	}
 	if capped {
-		return invalidRequest("unbounded_work_budget", "This retained operation cannot bound future monetary usage under an applicable budget.", nil)
+		return fault.InvalidRequest("unbounded_work_budget", "This retained operation cannot bound future monetary usage under an applicable budget.", nil)
 	}
 	return nil
 }

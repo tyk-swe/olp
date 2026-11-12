@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/export/capture"
+	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/telemetry"
@@ -19,7 +21,7 @@ func (s *Server) finish(x *call, out *outcome, status int) {
 		s.storeCache(x, out, status)
 		completedAt := s.now()
 		x.finalizePinned(out, completedAt)
-		env := Envelope{
+		env := events.Envelope{
 			RequestID:            x.request.id,
 			AccountingID:         x.request.accountingID(),
 			ClientIP:             x.request.clientIP,
@@ -72,10 +74,10 @@ func (s *Server) finish(x *call, out *outcome, status int) {
 		switch {
 		case out != nil && out.err != nil:
 			env.ErrorClass = out.err.Code
-			env.BudgetBoundary = budgetBoundary(out.err)
+			env.BudgetBoundary = quota.BudgetBoundary(out.err)
 		case out == nil && x.failure != nil:
 			env.ErrorClass = x.failure.Code
-			env.BudgetBoundary = budgetBoundary(x.failure)
+			env.BudgetBoundary = quota.BudgetBoundary(x.failure)
 		}
 		if out != nil {
 			env.Committed = out.committed
@@ -170,7 +172,7 @@ func (x *call) captureProject() string {
 	return ""
 }
 
-func (s *Server) recordBusiness(env Envelope, x *call) {
+func (s *Server) recordBusiness(env events.Envelope, x *call) {
 	if s.deps.Business == nil {
 		return
 	}
@@ -207,7 +209,7 @@ func (s *Server) recordBusiness(env Envelope, x *call) {
 		if u := fact.Usage; u != nil && fact.UsageObserved {
 			s.deps.Business.Tokens(labels, &u.InputTokens, &u.OutputTokens)
 			if fact.Price != nil {
-				if cost, ok := fact.Price.Cost(attemptUsage(fact, env.Operation), fact.StartedAt, attemptSuccessful(fact), fact.Discount); ok {
+				if cost, ok := fact.Price.Cost(events.AttemptUsage(fact, env.Operation), fact.StartedAt, events.AttemptSuccessful(fact), fact.Discount); ok {
 					// A committed attempt prices but owes nothing: record its
 					// zero marginal cost rather than skipping the metric.
 					if amount, err := strconv.ParseFloat(cost.String(), 64); err == nil {

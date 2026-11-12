@@ -12,6 +12,7 @@ import (
 	"slices"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -48,12 +49,12 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *c
 	status := http.StatusInternalServerError
 	var p *pin
 	defer func() { s.finish(x, nil, status); s.retainedSettle(r.Context(), x, p) }()
-	fail := func(err *Error) {
+	fail := func(err *fault.Error) {
 		copy := *err
 		copy.NoRetry = true
 		x.failure = &copy
 		status = err.Status
-		writeSurfaceError(w, &copy, "openai")
+		fault.WriteSurfaceError(w, &copy, "openai")
 	}
 	operation := retainedFilePurposeOperation(purpose)
 	if !a.Policy.AllowProviderState {
@@ -61,16 +62,16 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *c
 		return
 	}
 	if operation == "" || !slices.Contains(route.Operations, operation) {
-		fail(invalidRequest("unsupported_parameter", "This file purpose requires a route which permits the corresponding native operation.", nil))
+		fail(fault.InvalidRequest("unsupported_parameter", "This file purpose requires a route which permits the corresponding native operation.", nil))
 		return
 	}
 	if len(extra) > 0 || file.Size > s.cfg.MaxBodyBytes {
-		fail(invalidRequest("unsupported_parameter", "Native retained uploads require one bounded file and a supported purpose.", nil))
+		fail(fault.InvalidRequest("unsupported_parameter", "Native retained uploads require one bounded file and a supported purpose.", nil))
 		return
 	}
 	idempotency := r.Header.Get("Idempotency-Key")
 	if idempotency == "" || len(idempotency) > 128 {
-		fail(invalidRequest("missing_required_parameter", "Idempotency-Key is required for native file uploads.", nil))
+		fail(fault.InvalidRequest("missing_required_parameter", "Idempotency-Key is required for native file uploads.", nil))
 		return
 	}
 	x.operationOverride, x.mode, x.actor = operation, "unary", "api_key_resource"
@@ -79,7 +80,7 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *c
 	defer cancel()
 	body, contentType, encodeErr := s.retainedUploadBody(file, purpose)
 	if encodeErr != nil {
-		fail(invalidRequest("invalid_request", "The bounded native upload could not be read.", nil))
+		fail(fault.InvalidRequest("invalid_request", "The bounded native upload could not be read.", nil))
 		return
 	}
 	e := retainedapi.Endpoint{Family: retainedapi.Family{Operation: operation, Surface: "openai", Kind: resources.KindFile, Identity: "id", Collection: "data", Path: "/v1/files"}, Action: "create", Method: http.MethodPost, Pattern: "/v1/files"}
@@ -90,19 +91,19 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *c
 	}
 	prior, lookupErr := s.deps.Resources.LookupLifecycle(ctx, x.keyID, operation+":file", idempotency, digest)
 	if errors.Is(lookupErr, resources.ErrSubmissionConflict) {
-		fail(serverError(409, "idempotency_conflict", "This submission identity is already bound to another upload."))
+		fail(fault.ServerError(409, "idempotency_conflict", "This submission identity is already bound to another upload."))
 		return
 	}
 	if lookupErr == nil {
 		w.Header().Set("X-OLP-Resource-ID", prior.ID)
-		fail(serverError(409, "submission_exists", "This upload already exists; inspect X-OLP-Resource-ID instead of recreating it."))
+		fail(fault.ServerError(409, "submission_exists", "This upload already exists; inspect X-OLP-Resource-ID instead of recreating it."))
 		return
 	}
 	if !errors.Is(lookupErr, resources.ErrNotFound) {
-		fail(serverError(503, "provider_state_unavailable", "The file submission could not be read."))
+		fail(fault.ServerError(503, "provider_state_unavailable", "The file submission could not be read."))
 		return
 	}
-	var err *Error
+	var err *fault.Error
 	p, err = s.selectPinSurface(ctx, x, route, operation, "openai", "unary", func(provider *routing.Provider, model string) bool {
 		return (provider.Kind == "openai" || provider.Kind == "azure_openai") && provider.CredentialSource != "caller" && provider.Supports(model, operation, "openai", "unary") && provider.Connector().Supports(operation, "openai", "unary")
 	})
@@ -119,17 +120,17 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *c
 	candidate := &resources.Resource{Kind: resources.KindFile, APIKeyID: x.keyID, RouteSlug: route.Slug, RouteRevisionID: route.RevisionID, ProviderID: p.provider.ID, ProviderRevisionID: p.provider.RevisionID, TargetID: p.target.ID, SlotID: p.slot.ID, CredentialID: p.slot.CredentialID, ContractVersion: &version, Metadata: meta}
 	lifecycle, prepareErr := s.deps.Resources.BeginCreate(ctx, candidate, resources.Submission{Operation: operation + ":file", Key: idempotency, Digest: digest})
 	if errors.Is(prepareErr, resources.ErrSubmissionConflict) {
-		fail(serverError(409, "idempotency_conflict", "This submission identity is already bound to another upload."))
+		fail(fault.ServerError(409, "idempotency_conflict", "This submission identity is already bound to another upload."))
 		return
 	}
 	if prepareErr != nil {
-		fail(serverError(503, "provider_state_unavailable", "The file submission could not be committed."))
+		fail(fault.ServerError(503, "provider_state_unavailable", "The file submission could not be committed."))
 		return
 	}
 	resource := lifecycle.Resource()
 	w.Header().Set("X-OLP-Resource-ID", resource.ID)
 	if lifecycle.Existing() {
-		fail(serverError(409, "submission_exists", "This upload already exists; inspect X-OLP-Resource-ID instead of recreating it."))
+		fail(fault.ServerError(409, "submission_exists", "This upload already exists; inspect X-OLP-Resource-ID instead of recreating it."))
 		return
 	}
 	endpoint, endpointErr := p.provider.Connector().ResourceURL(p.model, "files", nil)
@@ -138,7 +139,7 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *c
 		return
 	}
 	if err := lifecycle.Dispatch(ctx); err != nil {
-		fail(serverError(503, "provider_state_unavailable", "The file submission could not be fenced."))
+		fail(fault.ServerError(503, "provider_state_unavailable", "The file submission could not be fenced."))
 		return
 	}
 	defer func() {

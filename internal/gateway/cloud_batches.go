@@ -15,6 +15,8 @@ import (
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/batches/upstream"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -30,15 +32,15 @@ type cloudBatchRequest struct {
 	TimeoutHours    int
 }
 
-func validateCloudBatchRequest(raw []byte, adapter connectors.BatchAdapter, storage *connectors.BatchStorage) (cloudBatchRequest, *Error) {
-	doc, err := parseObjectRequest(raw, oif.Limits{MaxBytes: 1 << 20})
+func validateCloudBatchRequest(raw []byte, adapter connectors.BatchAdapter, storage *connectors.BatchStorage) (cloudBatchRequest, *fault.Error) {
+	doc, err := ingress.ParseObjectRequest(raw, oif.Limits{MaxBytes: 1 << 20})
 	if err != nil || doc.Root().Kind() != oif.Object {
-		return cloudBatchRequest{}, invalidRequest("invalid_json", "The batch-job body must be one JSON object.", nil)
+		return cloudBatchRequest{}, fault.InvalidRequest("invalid_json", "The batch-job body must be one JSON object.", nil)
 	}
 	allowed := map[string]bool{"input_uri": true, "output_uri_prefix": true, "display_name": true, "timeout_hours": true}
 	for _, field := range doc.Root().Members() {
 		if !allowed[field.Name] {
-			return cloudBatchRequest{}, invalidRequest("unsupported_parameter", "This batch-job parameter is not supported.", strPtr(field.Name))
+			return cloudBatchRequest{}, fault.InvalidRequest("unsupported_parameter", "This batch-job parameter is not supported.", new(field.Name))
 		}
 	}
 	var input cloudBatchRequest
@@ -47,34 +49,34 @@ func validateCloudBatchRequest(raw []byte, adapter connectors.BatchAdapter, stor
 		input.InputURI, present = value.Text()
 	}
 	if !present || input.InputURI == "" {
-		return cloudBatchRequest{}, invalidRequest("missing_required_parameter", "input_uri is required.", strPtr("input_uri"))
+		return cloudBatchRequest{}, fault.InvalidRequest("missing_required_parameter", "input_uri is required.", new("input_uri"))
 	}
 	if value, ok := doc.Root().Lookup("output_uri_prefix"); ok {
 		input.OutputURIPrefix, present = value.Text()
 	}
 	if !present || input.OutputURIPrefix == "" {
-		return cloudBatchRequest{}, invalidRequest("missing_required_parameter", "output_uri_prefix is required.", strPtr("output_uri_prefix"))
+		return cloudBatchRequest{}, fault.InvalidRequest("missing_required_parameter", "output_uri_prefix is required.", new("output_uri_prefix"))
 	}
 	if storage == nil || !storage.Contains(storage.InputURIPrefix, input.InputURI) ||
 		!storage.ContainsPrefix(storage.OutputURIPrefix, input.OutputURIPrefix) {
-		return cloudBatchRequest{}, invalidRequest("storage_scope", "The input or output URI is outside the configured batch storage prefixes.", nil)
+		return cloudBatchRequest{}, fault.InvalidRequest("storage_scope", "The input or output URI is outside the configured batch storage prefixes.", nil)
 	}
 	if value, ok := doc.Root().Lookup("display_name"); ok {
 		input.DisplayName, present = value.Text()
 		if !present || !cloudBatchDisplayName.MatchString(input.DisplayName) {
-			return cloudBatchRequest{}, invalidRequest("invalid_value", "display_name must use 1–128 letters, digits, underscores, or hyphens.", strPtr("display_name"))
+			return cloudBatchRequest{}, fault.InvalidRequest("invalid_value", "display_name must use 1–128 letters, digits, underscores, or hyphens.", new("display_name"))
 		}
 	}
 	if value, ok := doc.Root().Lookup("timeout_hours"); ok {
 		if adapter != connectors.BatchBedrock {
-			return cloudBatchRequest{}, invalidRequest("unsupported_parameter", "timeout_hours is only supported by Bedrock batch inference.", strPtr("timeout_hours"))
+			return cloudBatchRequest{}, fault.InvalidRequest("unsupported_parameter", "timeout_hours is only supported by Bedrock batch inference.", new("timeout_hours"))
 		}
 		if value.Kind() != oif.Number {
-			return cloudBatchRequest{}, invalidRequest("invalid_value", "timeout_hours must be an integer from 24 to 168.", strPtr("timeout_hours"))
+			return cloudBatchRequest{}, fault.InvalidRequest("invalid_value", "timeout_hours must be an integer from 24 to 168.", new("timeout_hours"))
 		}
 		parsed, parseErr := strconv.Atoi(value.Raw())
 		if parseErr != nil || parsed < 24 || parsed > 168 {
-			return cloudBatchRequest{}, invalidRequest("invalid_value", "timeout_hours must be an integer from 24 to 168.", strPtr("timeout_hours"))
+			return cloudBatchRequest{}, fault.InvalidRequest("invalid_value", "timeout_hours must be an integer from 24 to 168.", new("timeout_hours"))
 		}
 		input.TimeoutHours = parsed
 	}
@@ -131,10 +133,8 @@ func (s *Server) registerCloudBatchState(mux *http.ServeMux) {
 	mux.HandleFunc("POST /native/{dialect}/batch-jobs/{id}/cancel", s.cancelCloudBatch)
 }
 
-func (s *Server) cloudBatchFail(x *call, w http.ResponseWriter, e *Error) {
-	x.failure = e
-	s.finish(x, nil, e.Status)
-	writeSurfaceError(w, e, "openai")
+func (s *Server) cloudBatchFail(x *call, w http.ResponseWriter, e *fault.Error) {
+	s.refuseOn(x, w, e, "openai")
 }
 
 func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
@@ -142,21 +142,21 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	dialect := r.PathValue("dialect")
 	slug := strings.TrimSpace(r.Header.Get(stateRouteHeader))
 	if slug == "" {
-		s.cloudBatchFail(x, w, invalidRequest("missing_required_parameter", "X-OLP-Route must name a batch-enabled route.", nil))
+		s.cloudBatchFail(x, w, fault.InvalidRequest("missing_required_parameter", "X-OLP-Route must name a batch-enabled route.", nil))
 		return
 	}
 	snapshot := x.request.release.Snapshot()
 	route, ok := snapshot.FindRoute(slug)
 	if !ok || !slices.Contains(route.Operations, "batch") {
-		s.cloudBatchFail(x, w, notFoundError("not_found", "No matching batch route exists."))
+		s.cloudBatchFail(x, w, fault.NotFoundError("not_found", "No matching batch route exists."))
 		return
 	}
 	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
-		s.cloudBatchFail(x, w, permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`."))
+		s.cloudBatchFail(x, w, fault.PermissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`."))
 		return
 	}
 	x.route = &route
@@ -178,7 +178,7 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 	adapter, cloud := connectors.CloudBatchAdapter(dialect)
 	if p.provider.ProfileID != dialect || !cloud {
 		s.releaseHold(r.Context(), p.hold)
-		s.cloudBatchFail(x, w, notFoundError("not_found", "No matching cloud batch dialect is available."))
+		s.cloudBatchFail(x, w, fault.NotFoundError("not_found", "No matching cloud batch dialect is available."))
 		return
 	}
 	if x.strict() {
@@ -203,26 +203,18 @@ func (s *Server) createCloudBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.resourceSettle(ctx, x, p)
-	if err := s.reserveState(ctx, x, authority, time.Duration(route.OverallTimeout)*time.Millisecond); err != nil {
+	if err := s.reserveStateAndSlot(ctx, x, authority, p, &route); err != nil {
 		s.cloudBatchFail(x, w, err)
 		return
 	}
-	if p.hold == nil {
-		gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond), "")
-		if gate.verdict != gateAdmitted {
-			s.cloudBatchFail(x, w, gateError(gate))
-			return
-		}
-		p.hold = gate.hold
-	}
-	source, err := parseObjectRequest(body, oif.Limits{MaxBytes: int(s.cfg.MaxBodyBytes)})
+	source, err := ingress.ParseObjectRequest(body, oif.Limits{MaxBytes: int(s.cfg.MaxBodyBytes)})
 	if err != nil {
-		s.cloudBatchFail(x, w, invalidRequest("invalid_json", "The request body must be one JSON object.", nil))
+		s.cloudBatchFail(x, w, fault.InvalidRequest("invalid_json", "The request body must be one JSON object.", nil))
 		return
 	}
 	plan, err := planCloudBatch(p, adapter, input)
 	if err != nil {
-		s.cloudBatchFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The cloud batch control-plane URL could not be resolved."))
+		s.cloudBatchFail(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The cloud batch control-plane URL could not be resolved."))
 		return
 	}
 	submission, e := s.beginBatch(ctx, x, authority.ID, p, batchIntent{
@@ -368,32 +360,32 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	id := r.PathValue("id")
 	res, err := s.deps.Resources.Get(r.Context(), resources.KindCloudBatch, authority.ID, id)
 	if errors.Is(err, resources.ErrNotFound) {
-		s.cloudBatchFail(x, w, notFoundError("not_found", "No cloud batch job with this ID exists for this key."))
+		s.cloudBatchFail(x, w, fault.NotFoundError("not_found", "No cloud batch job with this ID exists for this key."))
 		return
 	}
 	if err != nil {
-		s.cloudBatchFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The cloud batch mapping could not be read."))
+		s.cloudBatchFail(x, w, fault.ServerError(http.StatusInternalServerError, "internal_error", "The cloud batch mapping could not be read."))
 		return
 	}
 	record, recordErr := upstream.DecodeCloudRecord(res.Metadata)
 	adapter, cloud := connectors.CloudBatchAdapter(record.Dialect)
 	if recordErr != nil || !cloud {
-		s.cloudBatchFail(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The stored cloud batch mapping is malformed."))
+		s.cloudBatchFail(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The stored cloud batch mapping is malformed."))
 		return
 	}
 	dialect := record.Dialect
 	if dialect != r.PathValue("dialect") {
-		s.cloudBatchFail(x, w, notFoundError("not_found", "No cloud batch job with this ID exists for this dialect."))
+		s.cloudBatchFail(x, w, fault.NotFoundError("not_found", "No cloud batch job with this ID exists for this dialect."))
 		return
 	}
 	if !cancel {
 		candidate, exists := x.request.release.Snapshot().FindRoute(res.RouteSlug)
 		if !exists {
-			s.cloudBatchFail(x, w, notFoundError("not_found", "The cloud batch route is unavailable."))
+			s.cloudBatchFail(x, w, fault.NotFoundError("not_found", "The cloud batch route is unavailable."))
 			return
 		}
 		x.route = &candidate
@@ -409,7 +401,7 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 	}
 	if p.provider.ProfileID != dialect {
 		s.releaseHold(r.Context(), p.hold)
-		s.cloudBatchFail(x, w, notFoundError("not_found", "No cloud batch job with this ID exists for this dialect."))
+		s.cloudBatchFail(x, w, fault.NotFoundError("not_found", "No cloud batch job with this ID exists for this dialect."))
 		return
 	}
 	x.route = route
@@ -428,7 +420,7 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 	ctx, stop := s.stateDeadline(r.Context(), route)
 	defer stop()
 	defer s.resourceSettle(ctx, x, p)
-	if err := s.reserveStateAndSlot(ctx, x, authority, p); err != nil {
+	if err := s.reserveStateAndSlot(ctx, x, authority, p, route); err != nil {
 		s.cloudBatchFail(x, w, err)
 		return
 	}
@@ -436,7 +428,7 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 	if cancel {
 		endpoint, urlErr := cloudBatchControlURL(cfg, adapter, res.UpstreamID, cloudBatchCancelAction(adapter))
 		if urlErr != nil {
-			s.cloudBatchFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The cloud control-plane URL could not be resolved."))
+			s.cloudBatchFail(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The cloud control-plane URL could not be resolved."))
 			return
 		}
 		response, attemptErr := s.pinnedDo(ctx, x, p, http.MethodPost, endpoint, []byte(`{}`), "application/json")
@@ -449,7 +441,7 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 	}
 	endpoint, urlErr := cloudBatchControlURL(cfg, adapter, res.UpstreamID, "")
 	if urlErr != nil {
-		s.cloudBatchFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The cloud control-plane URL could not be resolved."))
+		s.cloudBatchFail(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The cloud control-plane URL could not be resolved."))
 		return
 	}
 	response, attemptErr := s.pinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
@@ -460,23 +452,23 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 	defer response.Body.Close()
 	body, err := readBounded(response.Body, s.cfg.MaxResponseBytes)
 	if err != nil {
-		s.cloudBatchFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The cloud job response could not be read."))
+		s.cloudBatchFail(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The cloud job response could not be read."))
 		return
 	}
 	job, err := upstream.DecodeCloudJob(adapter, body)
 	if errors.Is(err, upstream.ErrProviderConflict) {
-		s.cloudBatchFail(x, w, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The cloud provider returned an unknown job status."))
+		s.cloudBatchFail(x, w, fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The cloud provider returned an unknown job status."))
 		return
 	}
 	if err != nil || job.ID != res.UpstreamID {
-		s.cloudBatchFail(x, w, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The cloud provider returned a mismatched job identity."))
+		s.cloudBatchFail(x, w, fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The cloud provider returned a mismatched job identity."))
 		return
 	}
 	refreshed := record.WithJob(body)
 	commit, release := resourceCommitContext(ctx)
 	defer release()
 	if err := s.deps.Resources.Update(commit, res.ID, string(job.Status), mustJSON(refreshed), nil); err != nil {
-		s.cloudBatchFail(x, w, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The cloud job refresh could not be committed."))
+		s.cloudBatchFail(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The cloud job refresh could not be committed."))
 		return
 	}
 	x.completePinned()
@@ -503,7 +495,7 @@ func (s *Server) listCloudBatches(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	limit, after, err := listArgs(r)
 	if err != nil {
 		s.cloudBatchFail(x, w, err)
@@ -511,16 +503,16 @@ func (s *Server) listCloudBatches(w http.ResponseWriter, r *http.Request) {
 	}
 	dialect := r.PathValue("dialect")
 	if _, cloud := connectors.CloudBatchAdapter(dialect); !cloud {
-		s.cloudBatchFail(x, w, notFoundError("not_found", "Unknown cloud batch dialect."))
+		s.cloudBatchFail(x, w, fault.NotFoundError("not_found", "Unknown cloud batch dialect."))
 		return
 	}
 	filtered, listErr := s.deps.Resources.ListCloudBatches(r.Context(), authority.ID, dialect, limit+1, after)
 	if listErr != nil {
 		if errors.Is(listErr, resources.ErrNotFound) {
-			s.cloudBatchFail(x, w, invalidRequest("invalid_cursor", "after must identify a local cloud batch job.", strPtr("after")))
+			s.cloudBatchFail(x, w, fault.InvalidRequest("invalid_cursor", "after must identify a local cloud batch job.", new("after")))
 			return
 		}
-		s.cloudBatchFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "Cloud batches could not be listed."))
+		s.cloudBatchFail(x, w, fault.ServerError(http.StatusInternalServerError, "internal_error", "Cloud batches could not be listed."))
 		return
 	}
 	hasMore := len(filtered) > limit
@@ -547,15 +539,15 @@ func (s *Server) listCloudBatches(w http.ResponseWriter, r *http.Request) {
 	s.writeStateJSON(w, x, mustJSON(map[string]any{"object": "list", "data": data, "has_more": hasMore, "first_id": first, "last_id": last}))
 }
 
-func listedCloudBatch(row *resources.Resource) (json.RawMessage, *Error) {
+func listedCloudBatch(row *resources.Resource) (json.RawMessage, *fault.Error) {
 	record, err := upstream.DecodeCloudRecord(row.Metadata)
 	adapter, cloud := connectors.CloudBatchAdapter(record.Dialect)
 	if err != nil || !cloud {
-		return nil, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A cloud batch could not be projected.")
+		return nil, fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A cloud batch could not be projected.")
 	}
 	job, err := upstream.DecodeCloudJob(adapter, record.ProviderJob)
 	if err != nil || job.ID != row.UpstreamID {
-		return nil, serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A stored cloud batch has a mismatched job identity.")
+		return nil, fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A stored cloud batch has a mismatched job identity.")
 	}
 	return projectCloudBatchJob(job, row.ID, record), nil
 }

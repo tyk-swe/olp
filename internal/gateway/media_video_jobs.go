@@ -5,6 +5,8 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -15,19 +17,19 @@ func (s *Server) videoList(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	x.family = wire.VideoList
 	x.mode = "unary"
 	ctx, complete, admissionError := s.admitVideoRequest(r.Context(), x, authority)
 	if admissionError != nil {
-		s.mediaFail(x, w, admissionError)
+		s.refuse(x, w, admissionError)
 		return
 	}
 	defer complete()
 	r = r.WithContext(ctx)
 	query, failure := media.ValidateVideoListQuery(r.URL.Query())
 	if failure != nil {
-		s.mediaFail(x, w, mediaError(failure))
+		s.refuse(x, w, mediaError(failure))
 		return
 	}
 	routes := jobs.Everything
@@ -41,17 +43,17 @@ func (s *Server) videoList(w http.ResponseWriter, r *http.Request) {
 	}
 	after, err := s.deps.Media.Store.Position(r.Context(), cursorUUID(query.After), listing)
 	if err != nil {
-		s.mediaFail(x, w, jobError(err))
+		s.refuse(x, w, jobError(err))
 		return
 	}
 	listing.After = after
 	page, err := s.deps.Media.Store.List(r.Context(), listing)
 	if err != nil {
-		s.mediaFail(x, w, jobError(err))
+		s.refuse(x, w, jobError(err))
 		return
 	}
 	refreshed := make([]jobs.Record, 0, len(page.Items))
-	var refreshError *Error
+	var refreshError *fault.Error
 	for _, record := range page.Items {
 		updated, fact, dispatched, e := s.refreshListRecord(r.Context(), x, record)
 		refreshed = append(refreshed, updated)
@@ -66,7 +68,7 @@ func (s *Server) videoList(w http.ResponseWriter, r *http.Request) {
 	}
 	x.notePolls()
 	if refreshError != nil {
-		s.mediaFail(x, w, refreshError)
+		s.refuse(x, w, refreshError)
 		return
 	}
 	results := make([]media.VideoJobResult, 0, len(refreshed))
@@ -82,7 +84,7 @@ func (s *Server) videoList(w http.ResponseWriter, r *http.Request) {
 	list := &media.VideoListResult{Jobs: results, FirstID: firstID, LastID: lastID, HasMore: page.More}
 	body, failure := media.EncodeVideoListResponse(list, "video")
 	if failure != nil {
-		s.mediaFail(x, w, serverError(http.StatusBadGateway, failure.Code, failure.Message))
+		s.refuse(x, w, fault.ServerError(http.StatusBadGateway, failure.Code, failure.Message))
 		return
 	}
 	x.dispatched = true
@@ -91,7 +93,7 @@ func (s *Server) videoList(w http.ResponseWriter, r *http.Request) {
 	s.finishMedia(x, out, out.status)
 }
 
-func (s *Server) refreshListRecord(ctx context.Context, x *call, record jobs.Record) (jobs.Record, *AttemptFact, bool, *Error) {
+func (s *Server) refreshListRecord(ctx context.Context, x *call, record jobs.Record) (jobs.Record, *events.AttemptFact, bool, *fault.Error) {
 	upstream, ok := record.Upstream()
 	if !record.State.Polling() || !ok {
 		return record, nil, false, nil
@@ -124,29 +126,29 @@ func (s *Server) videoGet(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	x.family = wire.VideoGet
 	x.mode = "unary"
 	record, e := s.ownedJob(r.Context(), authority, r.PathValue("video_id"), media.OpVideoGet)
 	if e != nil {
-		s.mediaFail(x, w, e)
+		s.refuse(x, w, e)
 		return
 	}
 	if e = strictVideoResourceContext(x, record, false); e != nil {
-		s.mediaFail(x, w, e)
+		s.refuse(x, w, e)
 		return
 	}
 	x.route = videoJobRoute(record)
 	ctx, complete, admissionError := s.admitVideoRequest(r.Context(), x, authority)
 	if admissionError != nil {
-		s.mediaFail(x, w, admissionError)
+		s.refuse(x, w, admissionError)
 		return
 	}
 	defer complete()
 	r = r.WithContext(ctx)
 	upstream, ok := record.Upstream()
 	if !ok {
-		s.mediaFail(x, w, serverError(http.StatusServiceUnavailable, "media_job_upstream_id_unavailable", "The video job's upstream identity is unavailable."))
+		s.refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "media_job_upstream_id_unavailable", "The video job's upstream identity is unavailable."))
 		return
 	}
 	result, transportFailure, fact := s.videoJobCall(r.Context(), x, record, media.VideoGet{ID: upstream})
@@ -187,34 +189,34 @@ func (s *Server) videoContent(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	x.family = wire.VideoContent
 	x.mode = "unary"
 	record, e := s.ownedJob(r.Context(), authority, r.PathValue("video_id"), media.OpVideoContent)
 	if e != nil {
-		s.mediaFail(x, w, e)
+		s.refuse(x, w, e)
 		return
 	}
 	if e = strictVideoResourceContext(x, record, true); e != nil {
-		s.mediaFail(x, w, e)
+		s.refuse(x, w, e)
 		return
 	}
 	x.route = videoJobRoute(record)
 	ctx, complete, admissionError := s.admitVideoRequest(r.Context(), x, authority)
 	if admissionError != nil {
-		s.mediaFail(x, w, admissionError)
+		s.refuse(x, w, admissionError)
 		return
 	}
 	defer complete()
 	r = r.WithContext(ctx)
 	variant, failure := media.ValidateVideoContentQuery(r.URL.Query())
 	if failure != nil {
-		s.mediaFail(x, w, mediaError(failure))
+		s.refuse(x, w, mediaError(failure))
 		return
 	}
 	upstream, ok := record.Upstream()
 	if !ok {
-		s.mediaFail(x, w, serverError(http.StatusServiceUnavailable, "media_job_upstream_id_unavailable", "The video job's upstream identity is unavailable."))
+		s.refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "media_job_upstream_id_unavailable", "The video job's upstream identity is unavailable."))
 		return
 	}
 	result, transportFailure, fact := s.videoJobCall(r.Context(), x, record, media.VideoContent{ID: upstream, Variant: variant})
@@ -239,22 +241,22 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.release(r.Context())
+	defer s.gate.Release(r.Context())
 	x.family = wire.VideoDelete
 	x.mode = "unary"
 	loaded, e := s.ownedJob(r.Context(), authority, r.PathValue("video_id"), media.OpVideoDelete)
 	if e != nil {
-		s.mediaFail(x, w, e)
+		s.refuse(x, w, e)
 		return
 	}
 	if e = strictVideoResourceContext(x, loaded, false); e != nil {
-		s.mediaFail(x, w, e)
+		s.refuse(x, w, e)
 		return
 	}
 	x.route = videoJobRoute(loaded)
 	ctx, complete, admissionError := s.admitVideoRequest(r.Context(), x, authority)
 	if admissionError != nil {
-		s.mediaFail(x, w, admissionError)
+		s.refuse(x, w, admissionError)
 		return
 	}
 	defer complete()
@@ -262,12 +264,12 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 	record := *loaded
 	if record.Lifecycle == jobs.Deleted {
 		if record.StrictContract {
-			s.mediaFail(x, w, notFoundError("video_not_found", "The video job does not exist."))
+			s.refuse(x, w, fault.NotFoundError("video_not_found", "The video job does not exist."))
 			return
 		}
 		body, failure := media.EncodeVideoDeleteResponse(&media.VideoDeleteResult{ID: record.ID, Deleted: true}, record.ID)
 		if failure != nil {
-			s.mediaFail(x, w, mediaError(failure))
+			s.refuse(x, w, mediaError(failure))
 			return
 		}
 		out := &mediaOutcome{committed: true, status: http.StatusOK}
@@ -278,7 +280,7 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	upstream, ok := record.Upstream()
 	if !ok {
-		s.mediaFail(x, w, serverError(http.StatusServiceUnavailable, "media_job_upstream_id_unavailable", "The video job's upstream identity is unavailable."))
+		s.refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "media_job_upstream_id_unavailable", "The video job's upstream identity is unavailable."))
 		return
 	}
 	result, transportFailure, fact := s.videoJobCall(r.Context(), x, &record, media.VideoDelete{ID: upstream})
@@ -305,7 +307,7 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	finalized, err := s.deps.Media.Store.Finalize(r.Context(), record.ID, jobs.Unfenced)
 	if err != nil {
-		s.mediaFail(x, w, jobError(err))
+		s.refuse(x, w, jobError(err))
 		return
 	}
 	if finalized.Lifecycle != jobs.Deleted {
@@ -341,7 +343,7 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 func (s *Server) mediaFailOutcome(x *call, w http.ResponseWriter, failure *attemptFailure) {
 	e := failure.toError()
 	s.finishMedia(x, &mediaOutcome{err: e, committed: failure.committed}, e.Status)
-	writeSurfaceError(w, e, "openai")
+	fault.WriteSurfaceError(w, e, "openai")
 }
 
 func mediaJobResult(record *jobs.Record) media.VideoJobResult {

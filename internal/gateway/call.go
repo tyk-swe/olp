@@ -12,6 +12,8 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export/capture"
+	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
@@ -73,7 +75,7 @@ type call struct {
 	primary     *routing.Route
 	deadline    time.Time
 	planner     planner
-	authorize   func(*routing.Route) *Error
+	authorize   func(*routing.Route) *fault.Error
 	fixed       bool
 	spent       int
 	allowance   int
@@ -119,9 +121,9 @@ type call struct {
 	providerState bool
 
 	once              sync.Once
-	facts             []AttemptFact
+	facts             []events.AttemptFact
 	exchange          *pinnedExchange
-	failure           *Error           // terminal error decided before the attempt loop ran
+	failure           *fault.Error     // terminal error decided before the attempt loop ran
 	firstByte         *time.Duration   // request start to the first payload byte the client received
 	lease             *admission.Lease // the API key reservation, settled once the request ends
 	dispatched        bool             // at least one attempt was handed to a provider
@@ -185,4 +187,36 @@ type generationCall struct {
 type modelStepAccounting struct {
 	factEnd  int
 	estimate int64
+}
+
+// dropIngressQuery removes the query parameters a client surface sends that
+// are not native semantics.
+func (x *call) dropIngressQuery() *fault.Error {
+	switch x.clientSurface() {
+	case "gemini":
+		return x.dropQueryKey()
+	case "anthropic":
+		// The Anthropic SDKs add beta=true when they call the beta namespace.
+		// It selects no API behavior: betas are the Anthropic-Beta header.
+		if values := x.semanticQuery["beta"]; len(values) == 1 && values[0] == "true" {
+			delete(x.semanticQuery, "beta")
+		}
+	}
+	return nil
+}
+
+// dropQueryKey removes the Gemini key query parameter from a request's
+// native semantics: authentication already consumed it, and it is neither
+// native semantics nor anything an upstream may receive.
+func (x *call) dropQueryKey() *fault.Error {
+	keys, present := x.semanticQuery["key"]
+	if !present {
+		return nil
+	}
+	if len(keys) != 1 || keys[0] == "" {
+		param := "key"
+		return fault.InvalidRequest("invalid_request", "Provide one non-empty API key query parameter.", &param)
+	}
+	delete(x.semanticQuery, "key")
+	return nil
 }

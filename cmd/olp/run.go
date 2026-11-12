@@ -30,6 +30,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/console"
+	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
@@ -38,6 +39,9 @@ import (
 	"github.com/tyk-swe/olp/internal/export/focus"
 	"github.com/tyk-swe/olp/internal/export/stream"
 	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
+	"github.com/tyk-swe/olp/internal/gateway/traceingest"
 	"github.com/tyk-swe/olp/internal/grants/personal"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	limitadmission "github.com/tyk-swe/olp/internal/limits/admission"
@@ -304,7 +308,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		})
 		defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "plugin host", func(ctx context.Context) error { pluginHost.Close(ctx); return nil })
 		var gatewayConfig, probeConfig gateway.Config
-		gatewayDeps := gateway.Dependencies{Runtime: rt, Egress: &policy, Log: log, Sink: gateway.LogSink{Log: log}}
+		gatewayDeps := gateway.Dependencies{Runtime: rt, Egress: &policy, Log: log, Sink: events.LogSink{Log: log}}
 		probeDeps := gatewayDeps
 		if c.Mode.Management() || c.Mode.Inference() {
 			gatewayConfig = gateway.Config{
@@ -324,7 +328,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 				Carrier:            pluginHost,
 				UnconfinedPlugins:  unconfined != nil,
 			}
-			gatewayDeps.Traces = &gateway.TraceDeps{Pool: pool, Limiter: limiter, Auth: auth}
+			gatewayDeps.Traces = &traceingest.Store{Pool: pool, Limiter: limiter, Auth: auth}
 			gatewayDeps.Batches = batches.NewStore(pool)
 			gatewayDeps.Cache = responseCache
 			gatewayDeps.Business = business
@@ -334,7 +338,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 					policy = outage.Policy
 				}
 				// Control-only processes also execute playground requests.
-				gatewayDeps.Admission = gateway.NewAdmission(limiter, shared.Fleet, policy, log)
+				gatewayDeps.Admission = quota.NewAdmission(limiter, shared.Fleet, policy, log)
 			}
 		}
 		if limiter != nil && (c.Mode == Worker || c.Mode == All) {
@@ -350,7 +354,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 				UnconfinedPlugins: unconfined != nil,
 			}
 			probeDeps.Business = business
-			probeDeps.Admission = gateway.NewAdmission(limiter, shared.Fleet, nil, log)
+			probeDeps.Admission = quota.NewAdmission(limiter, shared.Fleet, nil, log)
 		}
 		if c.Mode.Management() || c.Mode.Inference() || c.Mode == Worker {
 			spool, err := staging.NewSpool(c.spoolDirectory(), c.MediaSpoolCapacityBytes, log)
@@ -453,7 +457,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 				server.Admission.PendingCostAccountingReady = shared.Syncer.CheckOwnerAccounting
 				server.Admission.PendingTokenAccountingReady = resources.New(pool).CheckPendingTokenOwner
 				server.Admission.CostAccountingReady = accounting.Check
-				server.Sink = &gateway.AccountingSink{Delivery: accounting, Next: server.Sink}
+				server.Sink = &events.AccountingSink{Delivery: accounting, Next: server.Sink}
 			}
 		}
 		if c.Mode.Management() || c.Mode.Inference() {
@@ -477,7 +481,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 					_, err := release.Publish(ctx, tx, actor)
 					return err
 				},
-				ClientIP:           func(r *http.Request) string { return gateway.ClientIP(r, c.TrustedProxyCIDRs) },
+				ClientIP:           func(r *http.Request) string { return consumerauth.ClientIP(r, c.TrustedProxyCIDRs) },
 				LocalLoginDisabled: !c.LocalLoginEnabled, ManagementNetworkRestricted: len(c.ManagementAllowedCIDRs) != 0,
 				LimitsEnforced: limiter != nil, ResponseCacheConfigured: responseCache != nil, RetentionEnforced: limiter != nil, NotificationsActive: true,
 			})
@@ -488,7 +492,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 				return err
 			}
 			defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "management plugin runtime", pluginRuntime.Close)
-			Management{AgentTasks: agentTasks, AgentPeers: agentPeers, AgentGrants: grantStore, Getenv: os.Getenv, Access: control, IdentityClient: identityClient, Egress: &policy, Limits: shared, Runtime: rt, Gateway: gw, Media: mediaService, Spool: mediaSpool, Health: obsCache, Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog, CatalogKeys: catalogKeys, PluginIndex: pluginIndex}.Register(public)
+			Management{AgentTasks: agentTasks, AgentPeers: agentPeers, AgentGrants: grantStore, Getenv: os.Getenv, Access: control, IdentityClient: identityClient, Egress: &policy, Limits: shared, Runtime: rt, Gateway: gw, ResponseCache: responseCache, Media: mediaService, Spool: mediaSpool, Health: obsCache, Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog, CatalogKeys: catalogKeys, PluginIndex: pluginIndex}.Register(public)
 		}
 	}
 	if err := startup.Err(); err != nil {
