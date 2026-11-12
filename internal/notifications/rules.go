@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -15,16 +16,16 @@ import (
 )
 
 type ruleInput struct {
-	Name             string          `json:"name"`
-	ProjectID        *string         `json:"project_id"`
-	Event            string          `json:"event"`
-	SubjectKind      *string         `json:"subject_kind"`
-	SubjectID        *string         `json:"subject_id"`
-	WindowKind       *string         `json:"window_kind"`
-	ThresholdPercent *int            `json:"threshold_percent"`
-	DestinationID    string          `json:"destination_id"`
-	Enabled          *bool           `json:"enabled"`
-	Configuration    json.RawMessage `json:"configuration"`
+	Name             string                      `json:"name"`
+	ProjectID        *string                     `json:"project_id"`
+	Event            contract.NotificationEvent  `json:"event"`
+	SubjectKind      *contract.BudgetSubjectKind `json:"subject_kind"`
+	SubjectID        *string                     `json:"subject_id"`
+	WindowKind       *contract.BudgetWindowKind  `json:"window_kind"`
+	ThresholdPercent *int                        `json:"threshold_percent"`
+	DestinationID    string                      `json:"destination_id"`
+	Enabled          *bool                       `json:"enabled"`
+	Configuration    json.RawMessage             `json:"configuration"`
 }
 
 var rulePatchFields = map[string]string{
@@ -96,8 +97,7 @@ func parseRule(input ruleInput, projectID *string) (ruleTarget, error) {
 	if err := access.ValidText("name", input.Name, nameLimit); err != nil {
 		return ruleTarget{}, err
 	}
-	event := contract.NotificationEvent(input.Event)
-	spec, ok := events[event]
+	spec, ok := events[input.Event]
 	if !ok {
 		return ruleTarget{}, access.Invalid("event", "Use a supported notification event.")
 	}
@@ -117,7 +117,7 @@ func parseRule(input ruleInput, projectID *string) (ruleTarget, error) {
 		return ruleTarget{}, access.Invalid("destination_id", "Use a valid destination identifier.")
 	}
 	return ruleTarget{
-		name: strings.TrimSpace(input.Name), projectID: projectID, event: event, subject: subject,
+		name: strings.TrimSpace(input.Name), projectID: projectID, event: input.Event, subject: subject,
 		destinationID: destinationID, enabled: input.Enabled == nil || *input.Enabled, configuration: configuration.canonical,
 	}, nil
 }
@@ -127,7 +127,7 @@ func parseSubject(shape subjectShape, input ruleInput) (ruleSubject, error) {
 	case budgetSubject:
 		return parseBudgetWatch(input)
 	case keySubject:
-		if input.SubjectKind == nil || *input.SubjectKind != string(contract.BudgetSubjectKindApiKey) ||
+		if input.SubjectKind == nil || *input.SubjectKind != contract.BudgetSubjectKindApiKey ||
 			input.SubjectID == nil || input.WindowKind != nil || input.ThresholdPercent != nil {
 			return nil, access.Invalid("subject_id", "Key reminders require an API key and no budget window or threshold.")
 		}
@@ -152,10 +152,10 @@ func parseSubject(shape subjectShape, input ruleInput) (ruleSubject, error) {
 }
 
 func parseBudgetWatch(input ruleInput) (ruleSubject, error) {
-	if input.SubjectKind == nil || !contract.BudgetSubjectKind(*input.SubjectKind).Valid() {
+	if input.SubjectKind == nil || !input.SubjectKind.Valid() {
 		return nil, access.Invalid("subject_kind", "Use api_key or budget_group.")
 	}
-	if input.WindowKind == nil || !contract.BudgetWindowKind(*input.WindowKind).Valid() {
+	if input.WindowKind == nil || !input.WindowKind.Valid() {
 		return nil, access.Invalid("window_kind", "Use day, week or month.")
 	}
 	if input.ThresholdPercent == nil || *input.ThresholdPercent < 1 || *input.ThresholdPercent > 100 {
@@ -164,11 +164,11 @@ func parseBudgetWatch(input ruleInput) (ruleSubject, error) {
 	if input.SubjectID == nil {
 		return nil, access.Invalid("subject_id", "Use a valid subject identifier.")
 	}
-	subject, err := parseWatched(contract.BudgetSubjectKind(*input.SubjectKind), *input.SubjectID)
+	subject, err := parseWatched(*input.SubjectKind, *input.SubjectID)
 	if err != nil {
 		return nil, err
 	}
-	return budgetWatch{watchedSubject: subject, window: contract.BudgetWindowKind(*input.WindowKind), percent: *input.ThresholdPercent}, nil
+	return budgetWatch{watchedSubject: subject, window: *input.WindowKind, percent: *input.ThresholdPercent}, nil
 }
 
 func parseWatched(kind contract.BudgetSubjectKind, raw string) (watchedSubject, error) {
@@ -227,7 +227,7 @@ func enforceRuleCap(ctx context.Context, tx pgx.Tx, event contract.NotificationE
 		return err
 	}
 	if count >= evaluatedRuleLimit {
-		return access.Invalid("event", "The installation already has 1000 generic notification rules.")
+		return access.Invalid("event", fmt.Sprintf("The installation already has %d generic notification rules.", evaluatedRuleLimit))
 	}
 	return nil
 }
@@ -254,17 +254,9 @@ func (s *Server) createNotificationRule(r *http.Request, _ access.Principal) (ac
 }
 
 func (s *Server) updateNotificationRule(r *http.Request, _ access.Principal) (access.Reply, error) {
-	var patch map[string]json.RawMessage
-	if err := access.Decode(r, &patch); err != nil {
+	patch, err := decodePatch(r, "rule", "Unknown notification rule field.", rulePatchFields)
+	if err != nil {
 		return access.Reply{}, err
-	}
-	if len(patch) == 0 {
-		return access.Reply{}, access.Invalid("rule", "Send at least one field to update.")
-	}
-	for field := range patch {
-		if _, ok := rulePatchFields[field]; !ok {
-			return access.Reply{}, access.Invalid(field, "Unknown notification rule field.")
-		}
 	}
 	return s.update(r, rules, func(tx pgx.Tx, row document, etag string) error {
 		input, err := patchRule(row.body, patch)

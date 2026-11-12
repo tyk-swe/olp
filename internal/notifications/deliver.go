@@ -244,10 +244,13 @@ func (w *deliveryWorker) attempt(ctx context.Context, db database, d delivery) b
 	defer tx.Rollback(ctx)
 	current, err := d.current(ctx, tx)
 	if err != nil {
+		w.Log.Warn("notification delivery check failed", "delivery", d.id, "error", err)
 		return false
 	}
 	if !current {
-		w.cancelSuperseded(ctx, tx, d.id)
+		if err := cancelSuperseded(ctx, tx, d.id); err != nil {
+			w.Log.Warn("notification cancellation failed", "delivery", d.id, "error", err)
+		}
 		return false
 	}
 	claimed, err := tx.Exec(ctx, claimAttemptSQL, d.id, d.attempts, maxDeliveryAttempts)
@@ -293,13 +296,11 @@ func (w *deliveryWorker) send(ctx context.Context, d delivery, target destinatio
 	return sendErrorCode(w.Sender.send(ctx, target, secret, m))
 }
 
-func (w *deliveryWorker) cancelSuperseded(ctx context.Context, tx pgx.Tx, id string) {
+func cancelSuperseded(ctx context.Context, tx pgx.Tx, id string) error {
 	if _, err := tx.Exec(ctx, cancelSupersededSQL, id); err != nil {
-		return
+		return err
 	}
-	if err := tx.Commit(ctx); err != nil {
-		w.Log.Warn("notification cancellation failed", "delivery", id, "error", err)
-	}
+	return tx.Commit(ctx)
 }
 
 func (w *deliveryWorker) notificationDestination(ctx context.Context, tx pgx.Tx, ruleID string) (destination, []byte, error) {

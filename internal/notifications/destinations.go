@@ -155,17 +155,9 @@ func (s *Server) createNotificationDestination(r *http.Request, _ access.Princip
 }
 
 func (s *Server) updateNotificationDestination(r *http.Request, _ access.Principal) (access.Reply, error) {
-	var patch map[string]json.RawMessage
-	if err := access.Decode(r, &patch); err != nil {
+	patch, err := decodePatch(r, "destination", "Unknown destination field.", destinationPatchFields)
+	if err != nil {
 		return access.Reply{}, err
-	}
-	if len(patch) == 0 {
-		return access.Reply{}, access.Invalid("destination", "Send at least one field to update.")
-	}
-	for field := range patch {
-		if !destinationPatchFields[field] {
-			return access.Reply{}, access.Invalid(field, "Unknown destination field.")
-		}
 	}
 	return s.update(r, destinations, func(tx pgx.Tx, row document, etag string) error {
 		var current storedDestination

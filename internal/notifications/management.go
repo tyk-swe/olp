@@ -209,10 +209,26 @@ func (s *Server) delete(res resource) access.Handler {
 	}
 }
 
+func decodePatch[V any](r *http.Request, subject, unknownField string, known map[string]V) (map[string]json.RawMessage, error) {
+	var patch map[string]json.RawMessage
+	if err := access.Decode(r, &patch); err != nil {
+		return nil, err
+	}
+	if len(patch) == 0 {
+		return nil, access.Invalid(subject, "Send at least one field to update.")
+	}
+	for field := range patch {
+		if _, ok := known[field]; !ok {
+			return nil, access.Invalid(field, unknownField)
+		}
+	}
+	return patch, nil
+}
+
 func removalError(kind string, err error) error {
 	var constraint *pgconn.PgError
 	if errors.As(err, &constraint) && constraint.Code == "23503" {
-		return access.Fail(409, kind+"_in_use", "The resource still has dependent resources or retained history.")
+		return access.Fail(http.StatusConflict, kind+"_in_use", "The resource still has dependent resources or retained history.")
 	}
 	return err
 }

@@ -57,7 +57,7 @@ func RunDelivery(ctx context.Context, config DeliveryConfig) {
 	}
 }
 
-var errLockNotHeld = errors.New("another replica holds the budget alert lock")
+var errLockNotHeld = errors.New("another replica holds the notification claim lock")
 
 func (w *deliveryWorker) pass(ctx context.Context) (workerhealth.Outcome, bool) {
 	passCtx, cancel := context.WithTimeout(ctx, notificationTimeout)
@@ -67,7 +67,7 @@ func (w *deliveryWorker) pass(ctx context.Context) (workerhealth.Outcome, bool) 
 		return workerhealth.OutcomeSkipped, false
 	}
 	if err != nil {
-		w.Log.Warn("budget alert evaluation failed", "error", err)
+		w.Log.Warn("notification claim failed", "error", err)
 		return workerhealth.OutcomeFailure, false
 	}
 	deliveries, err := w.pending(passCtx)
@@ -94,7 +94,7 @@ func (w *deliveryWorker) claimDue(ctx context.Context) (int, error) {
 	}
 	defer tx.Rollback(ctx)
 	var held bool
-	if err := tx.QueryRow(ctx, tryBudgetAlertLockSQL, budgetAlertLockKey).Scan(&held); err != nil {
+	if err := tx.QueryRow(ctx, tryClaimLockSQL, claimLockKey).Scan(&held); err != nil {
 		return 0, err
 	}
 	if !held {
@@ -116,12 +116,12 @@ func (w *deliveryWorker) claimDue(ctx context.Context) (int, error) {
 }
 
 const (
-	budgetAlertLockKey   = int64(0x4f4c505f414c5254)
+	claimLockKey         = int64(0x4f4c505f414c5254)
 	incidentLockSeed     = int64(502)
 	ruleCreationLockName = "olp.notification_rule_creation"
 
-	tryBudgetAlertLockSQL = `SELECT pg_try_advisory_xact_lock($1)`
-	tryIncidentLockSQL    = `SELECT pg_try_advisory_lock(hashtextextended($1,$2))`
-	unlockIncidentSQL     = `SELECT pg_advisory_unlock(hashtextextended($1,$2))`
-	ruleCreationLockSQL   = `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`
+	tryClaimLockSQL     = `SELECT pg_try_advisory_xact_lock($1)`
+	tryIncidentLockSQL  = `SELECT pg_try_advisory_lock(hashtextextended($1,$2))`
+	unlockIncidentSQL   = `SELECT pg_advisory_unlock(hashtextextended($1,$2))`
+	ruleCreationLockSQL = `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`
 )

@@ -9,8 +9,9 @@ import (
 )
 
 func storedConfiguration(event contract.NotificationEvent, configuration string) (map[string]any, error) {
-	keyKind, keyID, day, percent := "api_key", "7f0b6d0e-4b2a-4c55-9d43-0c3c8d6c1a10", "day", 75
-	input := ruleInput{Name: "rule", Event: string(event), DestinationID: "0d2f5f4e-2b8a-4a51-8f3c-5c7a3e9b1d20"}
+	keyKind, day := contract.BudgetSubjectKindApiKey, contract.BudgetWindowKindDay
+	keyID, percent := "7f0b6d0e-4b2a-4c55-9d43-0c3c8d6c1a10", 75
+	input := ruleInput{Name: "rule", Event: event, DestinationID: "0d2f5f4e-2b8a-4a51-8f3c-5c7a3e9b1d20"}
 	if configuration != "" {
 		input.Configuration = json.RawMessage(configuration)
 	}
