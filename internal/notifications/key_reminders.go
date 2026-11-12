@@ -13,8 +13,6 @@ const (
 	rotationActiveSQL = `k.policy->>'rotation_interval_days' IS NOT NULL AND (k.expires_at IS NULL OR k.expires_at>now())`
 )
 
-// The event timestamp identifies a schedule, not an attempt to rotate. Reminders
-// have no secret material and never create a replacement credential.
 const keyDueSQL = `SELECT k.id,k.name,k.project_id,'expiry'::text AS reason,k.expires_at AS due_at
  FROM olp.api_keys k WHERE k.revoked_at IS NULL AND k.expires_at IS NOT NULL
  UNION ALL
@@ -38,8 +36,6 @@ const insertDueRemindersSQL = `WITH due AS (` + keyDueSQL + `)
  DO UPDATE SET status='pending',last_error_code=NULL,payload=excluded.payload
  WHERE olp.notification_deliveries.status='cancelled'`
 
-// FOR SHARE holds the key and rule until the attempt commits, so later edits
-// cannot cancel an in-flight send.
 const keyReminderCurrentSQL = `SELECT COALESCE(k.revoked_at IS NULL AND r.event=$2 AND r.subject_id=k.id AND r.project_id IS NOT DISTINCT FROM k.project_id AND CASE v.reason
  WHEN 'expiry' THEN k.expires_at=v.due_at
  ELSE ` + rotationActiveSQL + ` AND ` + rotationDueSQL + `=v.due_at END,false)

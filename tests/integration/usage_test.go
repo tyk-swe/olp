@@ -11,9 +11,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -28,6 +30,7 @@ import (
 	"github.com/tyk-swe/olp/internal/export/focus"
 	exportstream "github.com/tyk-swe/olp/internal/export/stream"
 	limitdebits "github.com/tyk-swe/olp/internal/limits/debits"
+	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/notifications"
 	"github.com/tyk-swe/olp/internal/observability/workerhealth"
@@ -702,15 +705,15 @@ func TestBudgetThresholdNotificationsUseBudgetBasis(t *testing.T) {
 		t.Fatal(err)
 	}
 	type expectation struct {
-		name, rule string
-		amount     int
+		name, rule, window string
+		amount, limit      int
 	}
 	var expected []expectation
 	for _, kind := range []string{"api_key", "budget_group"} {
 		for _, budget := range []struct {
-			basis                  string
-			cost, charge, expected int
-		}{{"", 80, 40, 80}, {"cost", 80, 40, 80}, {"charge", 40, 80, 80}, {"charge", 80, 40, 0}} {
+			basis                            string
+			cost, charge, increase, expected int
+		}{{"", 80, 40, 0, 80}, {"cost", 80, 40, 5, 80}, {"cost", 80, 40, 20, 0}, {"charge", 40, 80, 0, 80}, {"charge", 80, 40, 0, 0}} {
 			basis := budget.basis
 			subject := uuid.NewString()
 			policy := map[string]string{"daily_cost_limit": "100", "weekly_cost_limit": "100", "monthly_cost_limit": "100"}
@@ -737,49 +740,40 @@ func TestBudgetThresholdNotificationsUseBudgetBasis(t *testing.T) {
 					table, owner = "olp.budget_group_cost_windows", "budget_group_id"
 				}
 				if _, err := pool.Exec(t.Context(), `INSERT INTO `+table+`(`+owner+`,window_kind,window_id,accrued,charged,unpriced_attempts,weekly_complete)
-     SELECT $1,$2,window_id,$3,$4,0,true FROM olp.budget_window($2,now())`, subject, window, budget.cost, budget.charge); err != nil {
+     SELECT $1::uuid,$2::text,current.window_id,$3::numeric,$4::numeric,0,true FROM olp.budget_window($2,now()) current
+     UNION ALL SELECT $1::uuid,$2::text,prior.window_id,95,95,0,true FROM olp.budget_window($2,now()-$5::interval) prior`,
+					subject, window, budget.cost, budget.charge, "1 "+window); err != nil {
 					t.Fatal(err)
+				}
+				if budget.increase > 0 {
+					increase := uuid.NewString()
+					if _, err := pool.Exec(t.Context(), `INSERT INTO olp.budget_increases(id,owner_id,project_id,target,window_kind,window_id,amount,reason,starts_at,expires_at,window_ends_at,created_by,etag)
+     SELECT $1::uuid,$2::uuid,$3,'{}'::jsonb,$4::text,current.window_id,$5,'budget basis',now()-interval '1 minute',current.end_at,current.end_at,$6,$1::uuid
+     FROM olp.budget_window($4,now()) current`, increase, subject, fixture.projectID, window, budget.increase, fixture.ownerID); err != nil {
+						t.Fatal(err)
+					}
 				}
 				rule := uuid.NewString()
 				if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_rules(id,name,project_id,event,subject_kind,subject_id,window_kind,threshold_percent,destination_id,etag,created_by)
      VALUES($1,'budget basis',$2,'budget.threshold',$3,$4,$5,75,$6,$1,$7)`, rule, fixture.projectID, kind, subject, window, destination, fixture.ownerID); err != nil {
 					t.Fatal(err)
 				}
-				expected = append(expected, expectation{name: fmt.Sprintf("%s/%s/%s/cost%d/charge%d", kind, basis, window, budget.cost, budget.charge), rule: rule, amount: budget.expected})
+				expected = append(expected, expectation{name: fmt.Sprintf("%s/%s/%s/cost%d/charge%d/increase%d", kind, basis, window, budget.cost, budget.charge, budget.increase),
+					rule: rule, window: window, amount: budget.expected, limit: 100 + budget.increase})
 			}
 		}
 	}
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		notifications.RunDelivery(ctx, notifications.DeliveryConfig{Pool: pool, NewID: uuid.NewString, Now: time.Now,
-			Log:    slog.New(slog.NewTextHandler(io.Discard, nil)),
-			Sender: notifications.NewSender(egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}})})
-	}()
-	defer func() { cancel(); <-done }()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		var success bool
-		if err := pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp.worker_task_health WHERE task='notification_delivery' AND successes_total>0)`).Scan(&success); err != nil {
-			t.Fatal(err)
-		}
-		if success {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("notification worker did not finish its first pass")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	deliverNotifications(t, pool, nil)
 	for _, want := range expected {
-		var amount int
+		var amount, deliveries int
 		var delivered bool
-		if err := pool.QueryRow(t.Context(), `SELECT COALESCE(sum(accrued),0)::int,COALESCE(bool_and(status='delivered'),false) FROM olp.notification_deliveries WHERE rule_id=$1`, want.rule).Scan(&amount, &delivered); err != nil {
+		if err := pool.QueryRow(t.Context(), `SELECT COALESCE(sum(d.accrued),0)::int,count(*)::int,
+ COALESCE(bool_and(d.status='delivered' AND d.limit_amount=$3 AND d.window_id=(SELECT window_id FROM olp.budget_window($2,now()))),false)
+ FROM olp.notification_deliveries d WHERE d.rule_id=$1`, want.rule, want.window, want.limit).Scan(&amount, &deliveries, &delivered); err != nil {
 			t.Fatal(err)
 		}
-		if amount != want.amount || delivered != (want.amount != 0) {
-			t.Errorf("%s amount=%d delivered=%t, want amount=%d", want.name, amount, delivered, want.amount)
+		if amount != want.amount || deliveries != min(want.amount, 1) || delivered != (want.amount != 0) {
+			t.Errorf("%s amount=%d deliveries=%d delivered in current window with limit %d=%t, want amount=%d", want.name, amount, deliveries, want.limit, delivered, want.amount)
 		}
 	}
 }
@@ -1398,4 +1392,406 @@ func TestStreamExportSuccessClearsFailureEvidence(t *testing.T) {
 			}
 		})
 	}
+}
+
+func deliverNotifications(t *testing.T, pool *pgxpool.Pool, circuits *fleet.State) {
+	t.Helper()
+	const progressSQL = `SELECT COALESCE(max(successes_total),0),COALESCE(max(failures_total),0) FROM olp.worker_task_health WHERE task='notification_delivery'`
+	var before, failures int64
+	if err := pool.QueryRow(t.Context(), progressSQL).Scan(&before, &failures); err != nil {
+		t.Fatal(err)
+	}
+	keys, installation := notificationKeys(t, pool)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		notifications.RunDelivery(ctx, notifications.DeliveryConfig{Pool: pool, NewID: uuid.NewString, Now: time.Now, Fleet: circuits, Keys: keys, Installation: installation,
+			Log:    slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelWarn})),
+			Sender: notifications.NewSender(egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}})})
+	}()
+	defer func() { cancel(); <-done }()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var successes, failed int64
+		if err := pool.QueryRow(t.Context(), progressSQL).Scan(&successes, &failed); err != nil {
+			t.Fatal(err)
+		}
+		if failed > failures {
+			t.Fatal("notification worker pass failed")
+		}
+		if successes > before {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("notification worker did not finish a pass")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+type notificationBody struct {
+	Event    string `json:"event"`
+	Resolved bool   `json:"resolved"`
+	APIKeyID string `json:"api_key_id"`
+}
+
+func notificationReceiver(t *testing.T) (*httptest.Server, <-chan notificationBody) {
+	t.Helper()
+	bodies := make(chan notificationBody, 16)
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body notificationBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		bodies <- body
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(receiver.Close)
+	return receiver, bodies
+}
+
+func received(bodies <-chan notificationBody) []string {
+	return slices.Sorted(func(yield func(string) bool) {
+		for range len(bodies) {
+			body := <-bodies
+			if !yield(fmt.Sprintf("%s resolved=%t", body.Event, body.Resolved)) {
+				return
+			}
+		}
+	})
+}
+
+func TestKeyExpiryReminderIsDelivered(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	f := newUsageFixture(t, pool)
+	receiver, bodies := notificationReceiver(t)
+	destination, rule := uuid.NewString(), uuid.NewString()
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.api_keys SET expires_at=now()+interval '1 hour' WHERE id=$1`, f.keyID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_destinations(id,name,url,project_id,etag,created_by)
+ VALUES($1,'key expiry',$2,$3,$1,$4)`, destination, receiver.URL, f.projectID, f.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_rules(id,name,project_id,event,subject_kind,subject_id,destination_id,etag,created_by)
+ VALUES($1,'key expiry',$2,'key.expiring','api_key',$3,$4,$1,$5)`, rule, f.projectID, f.keyID, destination, f.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	deliverNotifications(t, pool, nil)
+	if len(bodies) != 1 {
+		t.Fatalf("receiver got %d deliveries, want 1", len(bodies))
+	}
+	if body := <-bodies; body.Event != "key.expiring" || body.APIKeyID != f.keyID {
+		t.Errorf("delivered body = %+v, want key.expiring for key %s", body, f.keyID)
+	}
+	var status, reason string
+	if err := pool.QueryRow(t.Context(), `SELECT status,reason FROM olp.notification_deliveries WHERE rule_id=$1 AND api_key_id=$2`, rule, f.keyID).Scan(&status, &reason); err != nil {
+		t.Fatal(err)
+	}
+	if status != "delivered" || reason != "expiry" {
+		t.Errorf("delivery status=%s reason=%s, want delivered expiry", status, reason)
+	}
+	listed := notificationManagement(t, pool, f)("GET", "/api/v1/notifications/deliveries?rule_id="+rule, "", "")
+	var page struct {
+		Items []struct {
+			Event string `json:"event"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(listed.body, &page); err != nil || len(page.Items) != 1 || page.Items[0].Event != "key.expiring" {
+		t.Errorf("deliveries API answered %d %s, want one key.expiring delivery", listed.status, listed.body)
+	}
+}
+
+func TestStoredDeliveryPayloadNumbersReachWebhookUnchanged(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	f := newUsageFixture(t, pool)
+	bodies := make(chan []byte, 16)
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		bodies <- body
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(receiver.Close)
+	destination, rule := uuid.NewString(), uuid.NewString()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_destinations(id,name,url,project_id,etag,created_by)
+ VALUES($1,'numbers',$2,$3,$1,$4)`, destination, receiver.URL, f.projectID, f.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_rules(id,name,project_id,event,subject_kind,subject_id,destination_id,etag,created_by)
+ VALUES($1,'numbers',$2,'key.expiring','api_key',$3,$4,$1,$5)`, rule, f.projectID, f.keyID, destination, f.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_deliveries(id,rule_id,event,dedup_key,resolved,payload,status)
+ VALUES($1,$2,'key.expiring','numbers',false,'{"event":"spoofed","total":12345678901234567890,"rate":0.1000000000000000055511151231257827}','pending')`,
+		uuid.NewString(), rule); err != nil {
+		t.Fatal(err)
+	}
+	deliverNotifications(t, pool, nil)
+	if len(bodies) != 1 {
+		t.Fatalf("receiver got %d deliveries, want 1", len(bodies))
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(<-bodies, &fields); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{"event": string(fields["event"]), "total": string(fields["total"]), "rate": string(fields["rate"])}
+	want := map[string]string{"event": `"key.expiring"`, "total": "12345678901234567890", "rate": "0.1000000000000000055511151231257827"}
+	if !maps.Equal(got, want) {
+		t.Errorf("delivered fields = %v, want %v", got, want)
+	}
+}
+
+func TestSignalNotificationsAnnounceTriggersAndRecoveries(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	f := newUsageFixture(t, pool)
+	circuits := fleet.New(newRunner(t))
+	receiver, bodies := notificationReceiver(t)
+	destination := uuid.NewString()
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.providers SET state='active' WHERE id=$1`, f.providerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.runtime_install_status(gateway_instance,desired_generation,installed_generation,failed) VALUES('gateway-1',2,1,true)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := circuits.PublishCircuit(t.Context(), f.providerID, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_destinations(id,name,url,etag,created_by) VALUES($1,'signals',$2,$1,$3)`, destination, receiver.URL, f.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range []string{"runtime.install_failed", "provider.circuit.open", "provider.circuit.closed"} {
+		if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_rules(id,name,event,destination_id,etag,created_by) VALUES($1,$2,$2,$3,$1,$4)`, uuid.NewString(), event, destination, f.ownerID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_deliveries(id,rule_id,event,dedup_key,resolved,payload,status)
+ SELECT $1,id,event,'malformed',false,'{"incident":"x","incident_key":"malformed"}','pending' FROM olp.notification_rules WHERE event='provider.circuit.open'`, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	pages := pagerDutyReceiver(t, pool, f, "runtime.install_failed")
+	deliverNotifications(t, pool, circuits)
+	if got, want := received(bodies), []string{"provider.circuit.open resolved=false", "provider.circuit.open resolved=false", "runtime.install_failed resolved=false"}; !slices.Equal(got, want) {
+		t.Errorf("triggers delivered %v, want %v", got, want)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.runtime_install_status SET installed_generation=2,failed=false,checked_at=now()`); err != nil {
+		t.Fatal(err)
+	}
+	if err := circuits.PublishCircuit(t.Context(), f.providerID, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	deliverNotifications(t, pool, circuits)
+	if got, want := received(bodies), []string{"provider.circuit.closed resolved=true", "provider.circuit.closed resolved=true", "runtime.install_failed resolved=true"}; !slices.Equal(got, want) {
+		t.Errorf("recoveries delivered %v, want %v", got, want)
+	}
+	if len(pages) != 2 {
+		t.Fatalf("PagerDuty got %d events, want a trigger and a resolve", len(pages))
+	}
+	if trigger, resolve := <-pages, <-pages; trigger.action != "trigger" || resolve.action != "resolve" || trigger.dedupKey != resolve.dedupKey {
+		t.Errorf("PagerDuty got %+v then %+v, want a trigger and a resolve sharing one dedup key", trigger, resolve)
+	}
+	var undelivered int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FILTER (WHERE status<>'delivered') FROM olp.notification_deliveries`).Scan(&undelivered); err != nil {
+		t.Fatal(err)
+	}
+	if undelivered != 0 {
+		t.Errorf("%d signal deliveries were not delivered", undelivered)
+	}
+}
+
+type pagerDutyEvent struct {
+	action   string
+	dedupKey string
+}
+
+func pagerDutyReceiver(t *testing.T, pool *pgxpool.Pool, f usageFixture, event string) <-chan pagerDutyEvent {
+	t.Helper()
+	pages := make(chan pagerDutyEvent, 4)
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var page struct {
+			Action   string `json:"event_action"`
+			DedupKey string `json:"dedup_key"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&page); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		pages <- pagerDutyEvent{action: page.Action, dedupKey: page.DedupKey}
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "success", "dedup_key": page.DedupKey})
+	}))
+	t.Cleanup(receiver.Close)
+	keys, installation := notificationKeys(t, pool)
+	secret, destination := uuid.NewString(), uuid.NewString()
+	sealed, err := keys.Seal(installation, secrets.NotificationSecret, secret, []byte(`{"routing_key":"R0UT1NG"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.secrets(id,purpose,key_version,ciphertext) VALUES($1,$2,$3,$4)`, secret, secrets.NotificationSecret, keys.Active, sealed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_destinations(id,name,type,url,secret_id,etag,created_by) VALUES($1,'pager','pagerduty',$2,$3,$1,$4)`, destination, receiver.URL+"/v2/enqueue", secret, f.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_rules(id,name,event,destination_id,etag,created_by) VALUES($1,'paged',$2,$3,$1,$4)`, uuid.NewString(), event, destination, f.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	return pages
+}
+
+type apiResult struct {
+	status int
+	etag   string
+	body   []byte
+}
+
+func notificationKeys(t *testing.T, pool *pgxpool.Pool) (*secrets.KeyRing, string) {
+	t.Helper()
+	var installation string
+	if err := pool.QueryRow(t.Context(), "SELECT id::text FROM olp.installation WHERE singleton").Scan(&installation); err != nil {
+		t.Fatal(err)
+	}
+	keys, err := secrets.ParseRing([]byte(`{"active_version":1,"keys":[{"version":1,"key":"` + strings.Repeat("01", 32) + `"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return keys, installation
+}
+
+func notificationManagement(t *testing.T, pool *pgxpool.Pool, f usageFixture) func(method, path, ifMatch, body string) apiResult {
+	t.Helper()
+	ctx := t.Context()
+	keys, installation := notificationKeys(t, pool)
+	auth := secrets.NewAuthKey(make([]byte, 32), installation)
+	if err := access.PrepareInstallation(ctx, pool, installation, auth, keys); err != nil {
+		t.Fatal(err)
+	}
+	token := "notification-session"
+	if _, err := pool.Exec(ctx, `INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint) VALUES($1,$2,$3,now()+interval '1 hour','test')`, uuid.NewString(), f.ownerID, auth.Digest(secrets.SessionDigest, token)); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	notifications.NewManagement(access.New(access.Config{Pool: pool, Installation: installation, Origin: "https://test.example", Auth: auth, Keys: keys}), egress.Policy{}).Register(mux)
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	csrf := base64.RawURLEncoding.EncodeToString(auth.Digest(secrets.CSRFDigest, token))
+	return func(method, path, ifMatch, body string) apiResult {
+		t.Helper()
+		r, err := http.NewRequestWithContext(ctx, method, server.URL+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Origin", "https://test.example")
+		r.Header.Set("Idempotency-Key", uuid.NewString())
+		r.Header.Set("X-CSRF-Token", csrf)
+		if ifMatch != "" {
+			r.Header.Set("If-Match", ifMatch)
+		}
+		r.AddCookie(&http.Cookie{Name: "__Host-olp_session", Value: token})
+		response, err := server.Client().Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		raw, err := io.ReadAll(response.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return apiResult{status: response.StatusCode, etag: response.Header.Get("ETag"), body: raw}
+	}
+}
+
+func TestNotificationDestinationAndRuleLifecycle(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	call := notificationManagement(t, pool, newUsageFixture(t, pool))
+	expect := func(step string, got apiResult, status int) apiResult {
+		t.Helper()
+		if got.status != status {
+			t.Fatalf("%s: HTTP %d, want %d: %s", step, got.status, status, got.body)
+		}
+		return got
+	}
+	type resource struct {
+		ID               string          `json:"id"`
+		Name             string          `json:"name"`
+		SecretConfigured bool            `json:"secret_configured"`
+		Configuration    json.RawMessage `json:"configuration"`
+	}
+	decode := func(result apiResult) resource {
+		t.Helper()
+		var r resource
+		if err := json.Unmarshal(result.body, &r); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	created := expect("create destination", call("POST", "/api/v1/notifications/destinations", "", `{"name":"ops","url":"https://hooks.example.com/olp","secret":"signing-key"}`), http.StatusCreated)
+	destination := decode(created)
+	path := "/api/v1/notifications/destinations/" + destination.ID
+	fetched := expect("get destination", call("GET", path, "", ""), http.StatusOK)
+	if fetched.etag == "" || fetched.etag != created.etag || !decode(fetched).SecretConfigured || strings.Contains(string(fetched.body), "signing-key") {
+		t.Fatalf("get destination etag=%q created etag=%q body=%s", fetched.etag, created.etag, fetched.body)
+	}
+	expect("patch without If-Match", call("PATCH", path, "", `{"name":"renamed"}`), http.StatusPreconditionRequired)
+	expect("patch with stale If-Match", call("PATCH", path, `"stale"`, `{"name":"renamed"}`), http.StatusPreconditionFailed)
+	moved := expect("move signed destination without its secret", call("PATCH", path, fetched.etag, `{"url":"https://other.example.com/olp"}`), http.StatusUnprocessableEntity)
+	var problem struct {
+		Errors map[string]json.RawMessage `json:"errors"`
+	}
+	if err := json.Unmarshal(moved.body, &problem); err != nil || problem.Errors["secret"] == nil {
+		t.Fatalf("move without secret problem = %s (%v)", moved.body, err)
+	}
+	slack := decode(expect("create disabled slack destination", call("POST", "/api/v1/notifications/destinations", "", `{"name":"chat","type":"slack","url":"https://hooks.slack.com","enabled":false}`), http.StatusCreated))
+	slackPath := "/api/v1/notifications/destinations/" + slack.ID
+	slackETag := expect("get slack destination", call("GET", slackPath, "", ""), http.StatusOK).etag
+	unsigned := decode(expect("create unsigned webhook destination", call("POST", "/api/v1/notifications/destinations", "", `{"name":"plain","url":"https://hooks.example.com/plain"}`), http.StatusCreated))
+	unsignedPath := "/api/v1/notifications/destinations/" + unsigned.ID
+	unsignedETag := expect("get unsigned destination", call("GET", unsignedPath, "", ""), http.StatusOK).etag
+	for _, rejected := range []struct {
+		step, method, path, ifMatch, body, field, message string
+	}{
+		{"create with non-object configuration", "POST", "/api/v1/notifications/destinations", "", `{"name":"bad","url":"nope","configuration":"x"}`, "configuration", "Use a configuration object."},
+		{"create with non-object credential", "POST", "/api/v1/notifications/destinations", "", `{"name":"bad","type":"slack","url":"nope","secret":"s"}`, "secret", "Use the channel credential object or null."},
+		{"patch with non-object configuration", "PATCH", path, fetched.etag, `{"configuration":[]}`, "configuration", "Use a configuration object."},
+		{"patch with non-object credential", "PATCH", slackPath, slackETag, `{"url":"nope","secret":"s"}`, "secret", "Use the channel credential object or null."},
+		{"patch blank name before malformed url", "PATCH", path, fetched.etag, `{"name":" ","url":5}`, "name", "Use 1–100 characters."},
+		{"patch configuration before malformed enabled", "PATCH", path, fetched.etag, `{"enabled":"x","configuration":"y"}`, "configuration", "Use a configuration object."},
+		{"patch null type", "PATCH", path, fetched.etag, `{"type":null}`, "type", "The destination type cannot be changed."},
+		{"patch unsigned webhook to a malformed url", "PATCH", unsignedPath, unsignedETag, `{"url":"nope"}`, "destination", "The destination, configuration or secret is invalid."},
+	} {
+		got := expect(rejected.step, call(rejected.method, rejected.path, rejected.ifMatch, rejected.body), http.StatusUnprocessableEntity)
+		var rejection struct {
+			Errors map[string][]struct {
+				Message string `json:"message"`
+			} `json:"errors"`
+		}
+		err := json.Unmarshal(got.body, &rejection)
+		if err != nil || len(rejection.Errors) != 1 || len(rejection.Errors[rejected.field]) != 1 || rejection.Errors[rejected.field][0].Message != rejected.message {
+			t.Errorf("%s: problem = %s, want %s: %s (%v)", rejected.step, got.body, rejected.field, rejected.message, err)
+		}
+	}
+	renamed := expect("rename destination", call("PATCH", path, fetched.etag, `{"name":"renamed"}`), http.StatusOK)
+	if got := decode(expect("get renamed destination", call("GET", path, "", ""), http.StatusOK)); renamed.etag == fetched.etag || got.Name != "renamed" || !got.SecretConfigured {
+		t.Fatalf("renamed destination etag=%q (was %q) body=%+v", renamed.etag, fetched.etag, got)
+	}
+	rule := expect("create rule", call("POST", "/api/v1/notifications/rules", "",
+		`{"name":"stale workers","event":"worker.stale","destination_id":"`+destination.ID+`","configuration":{"cooldown_seconds":600}}`), http.StatusCreated)
+	var configuration map[string]any
+	if err := json.Unmarshal(decode(rule).Configuration, &configuration); err != nil || configuration["cooldown_seconds"] != float64(600) {
+		t.Fatalf("rule configuration = %s (%v)", rule.body, err)
+	}
+	expect("delete destination in use", call("DELETE", path, renamed.etag, ""), http.StatusConflict)
+	expect("delete rule", call("DELETE", "/api/v1/notifications/rules/"+decode(rule).ID, rule.etag, ""), http.StatusNoContent)
+	expect("delete destination", call("DELETE", path, renamed.etag, ""), http.StatusNoContent)
+	expect("get deleted destination", call("GET", path, "", ""), http.StatusNotFound)
 }
