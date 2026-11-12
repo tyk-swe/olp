@@ -3,6 +3,12 @@ set -euo pipefail
 : "${OLP_RESTORE_DATABASE_URL:?set OLP_RESTORE_DATABASE_URL to an empty destination database}"
 : "${OLP_RESTORE_VALKEY_ISOLATED:?use a separate Valkey service and set OLP_RESTORE_VALKEY_ISOLATED=true}"
 [[ $OLP_RESTORE_VALKEY_ISOLATED == true ]] || exit 2
+python3 - <<'PYURL'
+import os, sys, urllib.parse
+url = urllib.parse.urlsplit(os.environ['OLP_RESTORE_DATABASE_URL'])
+if any(name == 'dbname' for name, _ in urllib.parse.parse_qsl(url.query, keep_blank_values=True)):
+    sys.exit('Set the restore destination database in the URL path, not a dbname query option.')
+PYURL
 repo_dir=$(cd "$(dirname "$0")/.." && pwd)
 backup=${1:?usage: scripts/restore.sh BACKUP}
 manifest="$backup.manifest.json"

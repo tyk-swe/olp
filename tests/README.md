@@ -9,7 +9,7 @@ tier that can catch the failure it guards against.
 | `make test-unit-go` | Every Go test without a build tag | Go | 30s |
 | `make test-unit-console` | Vitest `unit` and `svelte` projects and the script contract tests | pnpm workspace | 30s |
 | `make test-integration` | `tests/integration` | Docker | 30s |
-| `make test-e2e-api` | `tests/e2e` | Docker | 45s |
+| `make test-e2e-api` | `tests/e2e` | Docker and Node.js | 45s |
 | `make test-e2e-browser` | `console/tests/e2e` | Docker and Chromium | 60s |
 
 `make test-unit` runs both unit suites side by side, `make test-e2e` runs both
@@ -91,7 +91,8 @@ answering without a server error, cross-project isolation of those reads, one
 guardrail definition, policy, attachment and credential lifecycle with its
 audit trail, one promotion round trip, one request travelling from route
 publication to durable usage, the code account endpoints, and a SCIM directory
-provisioning, searching and removing users.
+provisioning, searching and removing users. The restore preflight regression
+runs the operator script with Bash and Python 3 and requires no database client.
 
 `make test-e2e-browser` builds the console, starts one `olp all` that serves
 it, and runs the Playwright journeys in `console/tests/e2e` in Chromium. The

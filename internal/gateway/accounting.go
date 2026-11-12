@@ -220,7 +220,7 @@ func accountingAttempt(e Envelope, index int) (usage.Attempt, error) {
 	}
 	attempt.Routing.Budgets = fact.Budgets
 	pricingPinned := fact.PolicyDigest != "" || fact.PricingPinned
-	if pricingPinned || fact.CommitmentPinned {
+	if pricingPinned || fact.CommitmentPinned || fact.CardPinned {
 		var discountID *string
 		if fact.Discount != nil {
 			discountID = &fact.Discount.ID
@@ -236,7 +236,7 @@ func accountingAttempt(e Envelope, index int) (usage.Attempt, error) {
 			rawPolicy := json.RawMessage(policy)
 			attempt.Routing.Policy = &rawPolicy
 		}
-		if fact.Price != nil {
+		if fact.Price != nil && (pricingPinned || fact.CommitmentPinned) {
 			attempt.Routing.PricingRevisionID = &fact.Price.RevisionID
 		}
 	}
