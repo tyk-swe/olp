@@ -76,8 +76,7 @@ const exhaustedBudgetSignalsSQL = `WITH end_users AS (
  UNION ALL SELECT CASE WHEN s.policy->>'cost_basis'='charge' THEN charged ELSE accrued END,weekly_complete FROM olp.aggregate_cost_windows WHERE s.kind IN ('organization','project','installation') AND account_id=s.owner_id AND window_kind=k.window_kind AND window_id=b.window_id
  ) w ON true WHERE ($1::uuid IS NULL OR s.project_id=$1)
  ) SELECT c.kind,c.id::text,c.project_id::text,c.name,c.window_kind,c.window_id,c.accrued::text,
- (c.base_limit::numeric+COALESCE((SELECT sum(amount) FROM olp.budget_increases bi WHERE bi.owner_id=c.owner_id
- AND bi.window_kind=c.window_kind AND bi.window_id=c.window_id AND bi.revoked_at IS NULL AND bi.starts_at<=now() AND bi.expires_at>now()),0))::text,c.known
+ (c.base_limit::numeric+olp.active_budget_increase(c.owner_id,c.window_kind,c.window_id,now()))::text,c.known
  FROM current c WHERE c.base_limit IS NOT NULL AND c.base_limit::numeric>0 ORDER BY c.kind,c.id,c.window_kind LIMIT 10001`
 
 const reportPeriodSQL = `SELECT date_trunc($1,now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS end_at,

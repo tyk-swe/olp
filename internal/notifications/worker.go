@@ -13,9 +13,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/catalog"
-	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
-	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/observability/workerhealth"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -31,55 +29,33 @@ const (
 	deliveriesPerPass = 200
 )
 
-func windowColumn(column string) string {
-	return `CASE r.window_kind WHEN 'day' THEN COALESCE(kwd.` + column + `,gwd.` + column + `)
-      WHEN 'week' THEN COALESCE(kww.` + column + `,gww.` + column + `) ELSE COALESCE(kwm.` + column + `,gwm.` + column + `) END`
-}
-
-var dueAlertSQL = `SELECT r.id::text,r.threshold_percent,r.window_kind,
- CASE r.subject_kind WHEN 'api_key' THEN k.id ELSE g.id END::text AS subject_id,
- ` + windowColumn("window_id") + ` AS window_id,
- COALESCE(CASE WHEN COALESCE(k.effective_limits,g.effective_limits)->>'cost_basis'='charge' THEN ` + windowColumn("charged") + `
- ELSE ` + windowColumn("accrued") + ` END,0)::text AS accrued,
- COALESCE(k.effective_limits,g.effective_limits)->>(CASE r.window_kind WHEN 'day' THEN 'daily' WHEN 'week' THEN 'weekly' ELSE 'monthly' END||'_cost_limit') AS limit
+const dueAlertSQL = `WITH current_windows(window_kind,window_id) AS (
+ SELECT v.* FROM olp.budget_windows($2) b,LATERAL (VALUES('day',b.daily_id),('week',b.weekly_id),('month',b.monthly_id)) v
+) SELECT r.id::text,r.threshold_percent,cw.window_id,
+ CASE WHEN COALESCE(k.effective_limits,g.effective_limits)->>'cost_basis'='charge' THEN COALESCE(kw.charged,gw.charged)
+ ELSE COALESCE(kw.accrued,gw.accrued) END::text AS accrued,
+ ((COALESCE(k.effective_limits,g.effective_limits)->>(CASE r.window_kind WHEN 'day' THEN 'daily' WHEN 'week' THEN 'weekly' ELSE 'monthly' END||'_cost_limit'))::numeric
+ +olp.active_budget_increase(r.subject_id,r.window_kind,cw.window_id,$2))::text AS limit
 FROM olp.notification_rules r
+JOIN olp.notification_destinations d ON d.id=r.destination_id
+JOIN current_windows cw ON cw.window_kind=r.window_kind
 LEFT JOIN olp.api_keys_with_limits k ON r.subject_kind='api_key' AND k.id=r.subject_id
 LEFT JOIN olp.budget_groups_with_limits g ON r.subject_kind='budget_group' AND g.id=r.subject_id
-LEFT JOIN olp.api_key_cost_windows kww ON kww.api_key_id=k.id AND kww.window_kind='week' AND kww.weekly_complete
-LEFT JOIN olp.budget_group_cost_windows gww ON gww.budget_group_id=g.id AND gww.window_kind='week' AND gww.weekly_complete
-LEFT JOIN olp.api_key_cost_windows kwd ON kwd.api_key_id=k.id AND kwd.window_kind='day'
-LEFT JOIN olp.api_key_cost_windows kwm ON kwm.api_key_id=k.id AND kwm.window_kind='month'
-LEFT JOIN olp.budget_group_cost_windows gwd ON gwd.budget_group_id=g.id AND gwd.window_kind='day'
-LEFT JOIN olp.budget_group_cost_windows gwm ON gwm.budget_group_id=g.id AND gwm.window_kind='month'
-JOIN olp.notification_destinations d ON d.id=r.destination_id
-WHERE r.event=$1 AND r.enabled AND d.enabled`
+LEFT JOIN olp.api_key_cost_windows kw ON kw.api_key_id=k.id AND kw.window_kind=cw.window_kind AND kw.window_id=cw.window_id
+ AND (cw.window_kind<>'week' OR kw.weekly_complete)
+LEFT JOIN olp.budget_group_cost_windows gw ON gw.budget_group_id=g.id AND gw.window_kind=cw.window_kind AND gw.window_id=cw.window_id
+ AND (cw.window_kind<>'week' OR gw.weekly_complete)
+WHERE r.event=$1 AND r.enabled AND d.enabled AND (kw.window_id IS NOT NULL OR gw.window_id IS NOT NULL)`
 
 const insertBudgetDeliverySQL = `INSERT INTO olp.notification_deliveries (id, rule_id, window_id, threshold_percent, accrued, limit_amount, currency, status)
  VALUES ($1, $2, $3, $4, $5::numeric, $6::numeric, $7, 'pending') ON CONFLICT DO NOTHING`
 
 type dueAlert struct {
-	ruleID     string
-	threshold  int
-	windowKind contract.BudgetWindowKind
-	subjectID  *string
-	windowID   *int64
-	accrued    string
-	limit      *string
-}
-
-func (a dueAlert) inCurrentWindow(windows limits.Windows) bool {
-	if a.windowID == nil {
-		return false
-	}
-	switch a.windowKind {
-	case contract.BudgetWindowKindDay:
-		return *a.windowID == windows.DailyID
-	case contract.BudgetWindowKindWeek:
-		return *a.windowID == windows.WeeklyID
-	case contract.BudgetWindowKindMonth:
-		return *a.windowID == windows.MonthlyID
-	}
-	return false
+	ruleID    string
+	threshold int
+	windowID  int64
+	accrued   string
+	limit     *string
 }
 
 func thresholdEvidence(accrued string, limit *string, threshold int) (decimal.Decimal, decimal.Decimal, bool) {
@@ -191,34 +167,27 @@ func (w *deliveryWorker) claimDue(ctx context.Context) (int, error) {
 }
 
 func (w *deliveryWorker) claimBudgetAlerts(ctx context.Context, tx pgx.Tx) (int, error) {
-	rows, err := tx.Query(ctx, dueAlertSQL, contract.NotificationEventBudgetThreshold)
+	rows, err := tx.Query(ctx, dueAlertSQL, contract.NotificationEventBudgetThreshold, w.Now())
 	if err != nil {
 		return 0, err
 	}
 	alerts, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (dueAlert, error) {
 		var a dueAlert
-		err := row.Scan(&a.ruleID, &a.threshold, &a.windowKind, &a.subjectID, &a.windowID, &a.accrued, &a.limit)
+		err := row.Scan(&a.ruleID, &a.threshold, &a.windowID, &a.accrued, &a.limit)
 		return a, err
 	})
-	if err != nil {
-		return 0, err
-	}
-	windows, err := ledger.CurrentBudgetWindows(ctx, tx, w.Now())
 	if err != nil {
 		return 0, err
 	}
 	currency := w.currency(ctx, tx)
 	claimed := 0
 	for _, a := range alerts {
-		if !a.inCurrentWindow(windows) {
-			continue
-		}
 		accrued, limit, met := thresholdEvidence(a.accrued, a.limit, a.threshold)
 		if !met {
 			continue
 		}
 		tag, err := tx.Exec(ctx, insertBudgetDeliverySQL,
-			w.NewID(), a.ruleID, *a.windowID, a.threshold, accrued.String(), limit.String(), currency)
+			w.NewID(), a.ruleID, a.windowID, a.threshold, accrued.String(), limit.String(), currency)
 		if err != nil {
 			return 0, err
 		}

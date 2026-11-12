@@ -705,14 +705,14 @@ func TestBudgetThresholdNotificationsUseBudgetBasis(t *testing.T) {
 	}
 	type expectation struct {
 		name, rule, window string
-		amount             int
+		amount, limit      int
 	}
 	var expected []expectation
 	for _, kind := range []string{"api_key", "budget_group"} {
 		for _, budget := range []struct {
-			basis                  string
-			cost, charge, expected int
-		}{{"", 80, 40, 80}, {"cost", 80, 40, 80}, {"charge", 40, 80, 80}, {"charge", 80, 40, 0}} {
+			basis                            string
+			cost, charge, increase, expected int
+		}{{"", 80, 40, 0, 80}, {"cost", 80, 40, 5, 80}, {"cost", 80, 40, 20, 0}, {"charge", 40, 80, 0, 80}, {"charge", 80, 40, 0, 0}} {
 			basis := budget.basis
 			subject := uuid.NewString()
 			policy := map[string]string{"daily_cost_limit": "100", "weekly_cost_limit": "100", "monthly_cost_limit": "100"}
@@ -744,12 +744,21 @@ func TestBudgetThresholdNotificationsUseBudgetBasis(t *testing.T) {
 					subject, window, budget.cost, budget.charge, "1 "+window); err != nil {
 					t.Fatal(err)
 				}
+				if budget.increase > 0 {
+					increase := uuid.NewString()
+					if _, err := pool.Exec(t.Context(), `INSERT INTO olp.budget_increases(id,owner_id,project_id,target,window_kind,window_id,amount,reason,starts_at,expires_at,window_ends_at,created_by,etag)
+     SELECT $1::uuid,$2::uuid,$3,'{}'::jsonb,$4::text,current.window_id,$5,'budget basis',now()-interval '1 minute',current.end_at,current.end_at,$6,$1::uuid
+     FROM olp.budget_window($4,now()) current`, increase, subject, fixture.projectID, window, budget.increase, fixture.ownerID); err != nil {
+						t.Fatal(err)
+					}
+				}
 				rule := uuid.NewString()
 				if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_rules(id,name,project_id,event,subject_kind,subject_id,window_kind,threshold_percent,destination_id,etag,created_by)
      VALUES($1,'budget basis',$2,'budget.threshold',$3,$4,$5,75,$6,$1,$7)`, rule, fixture.projectID, kind, subject, window, destination, fixture.ownerID); err != nil {
 					t.Fatal(err)
 				}
-				expected = append(expected, expectation{name: fmt.Sprintf("%s/%s/%s/cost%d/charge%d", kind, basis, window, budget.cost, budget.charge), rule: rule, window: window, amount: budget.expected})
+				expected = append(expected, expectation{name: fmt.Sprintf("%s/%s/%s/cost%d/charge%d/increase%d", kind, basis, window, budget.cost, budget.charge, budget.increase),
+					rule: rule, window: window, amount: budget.expected, limit: 100 + budget.increase})
 			}
 		}
 	}
@@ -758,12 +767,12 @@ func TestBudgetThresholdNotificationsUseBudgetBasis(t *testing.T) {
 		var amount, deliveries int
 		var delivered bool
 		if err := pool.QueryRow(t.Context(), `SELECT COALESCE(sum(d.accrued),0)::int,count(*)::int,
- COALESCE(bool_and(d.status='delivered' AND d.limit_amount=100 AND d.window_id=(SELECT window_id FROM olp.budget_window($2,now()))),false)
- FROM olp.notification_deliveries d WHERE d.rule_id=$1`, want.rule, want.window).Scan(&amount, &deliveries, &delivered); err != nil {
+ COALESCE(bool_and(d.status='delivered' AND d.limit_amount=$3 AND d.window_id=(SELECT window_id FROM olp.budget_window($2,now()))),false)
+ FROM olp.notification_deliveries d WHERE d.rule_id=$1`, want.rule, want.window, want.limit).Scan(&amount, &deliveries, &delivered); err != nil {
 			t.Fatal(err)
 		}
 		if amount != want.amount || deliveries != min(want.amount, 1) || delivered != (want.amount != 0) {
-			t.Errorf("%s amount=%d deliveries=%d delivered in current window=%t, want amount=%d", want.name, amount, deliveries, delivered, want.amount)
+			t.Errorf("%s amount=%d deliveries=%d delivered in current window with limit %d=%t, want amount=%d", want.name, amount, deliveries, want.limit, delivered, want.amount)
 		}
 	}
 }
