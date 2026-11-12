@@ -16,7 +16,6 @@ import (
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/providers/probe"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
@@ -486,9 +485,7 @@ func (s *Server) StageDraftInventory(ctx context.Context, tx pgx.Tx, providerID 
 	for _, slot := range slots {
 		retained = append(retained, slot.ID)
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM olp.secrets WHERE purpose=$3 AND id IN (
-  SELECT e.id FROM olp.grant_enrollments e JOIN olp.provider_slots s ON s.id=e.slot_id
-  WHERE s.provider_id=$1 AND NOT (s.id=ANY($2::uuid[])))`, providerID, retained, secrets.GrantEnrollment); err != nil {
+	if err := grants.DiscardEnrollmentsOutside(ctx, tx, providerID, retained); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, "DELETE FROM olp.provider_slots WHERE provider_id=$1 AND NOT (id=ANY($2::uuid[]))", providerID, retained); err != nil {

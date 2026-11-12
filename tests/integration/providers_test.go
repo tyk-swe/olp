@@ -83,6 +83,21 @@ func TestProviderDraftConfigurationWritesKeepEvidenceOnlyWhileItStillApplies(t *
 			t.Fatalf("moving a stored credential to another endpoint = %v, want credential_destination_changed", err)
 		}
 	})
+	t.Run("restaged inventory", func(t *testing.T) {
+		t.Parallel()
+		p := f.certifiedDraft(t)
+		extra := p
+		extra.slot = uuid.NewString()
+		p.stage(t, p.defaultSlot(), providers.DraftSlot{ID: extra.slot, Position: 1, Name: "extra", Enabled: true, Weight: 1})
+		removed, kept := extra.enroll(t, false), p.enroll(t, false)
+		p.stage(t, p.defaultSlot())
+		if p.enrolled(t, removed) {
+			t.Fatal("restaging without a slot kept its pending enrollment")
+		}
+		if !p.enrolled(t, kept) {
+			t.Fatal("restaging without one slot cancelled another slot's pending enrollment")
+		}
+	})
 	t.Run("unchanged configuration", func(t *testing.T) {
 		t.Parallel()
 		p := f.certifiedDraft(t)
@@ -120,10 +135,7 @@ func (f providerFixture) certifiedDraft(t *testing.T) storedProvider {
 			return err
 		}
 		p.id = created.ID
-		models := []providers.DraftModel{{UpstreamModel: "fixture-model", Enabled: true, Capabilities: []connection.Capability{
-			{Operation: "generation", Surface: "openai", Mode: "unary"}, {Operation: "generation", Surface: "openai", Mode: "streaming"}}}}
-		slots := []providers.DraftSlot{{ID: p.slot, Default: true, Name: "default", Enabled: true, Weight: 1}}
-		if err := f.server.StageDraftInventory(t.Context(), tx, p.id, models, slots); err != nil {
+		if err := f.server.StageDraftInventory(t.Context(), tx, p.id, fixtureModels, []providers.DraftSlot{p.defaultSlot()}); err != nil {
 			return err
 		}
 		_, err = tx.Exec(t.Context(), `UPDATE olp.provider_models SET capabilities=(SELECT jsonb_agg(c || jsonb_build_object('source','certified','certified_at',now(),'credential_fingerprint','fixture'))
@@ -134,6 +146,22 @@ func (f providerFixture) certifiedDraft(t *testing.T) storedProvider {
 	}
 	p.wantEvidence(t, "certified")
 	return p
+}
+
+var fixtureModels = []providers.DraftModel{{UpstreamModel: "fixture-model", Enabled: true, Capabilities: []connection.Capability{
+	{Operation: "generation", Surface: "openai", Mode: "unary"}, {Operation: "generation", Surface: "openai", Mode: "streaming"}}}}
+
+func (p storedProvider) defaultSlot() providers.DraftSlot {
+	return providers.DraftSlot{ID: p.slot, Default: true, Name: "default", Enabled: true, Weight: 1}
+}
+
+func (p storedProvider) stage(t *testing.T, slots ...providers.DraftSlot) {
+	t.Helper()
+	if err := p.transact(t, func(tx pgx.Tx) error {
+		return p.server.StageDraftInventory(t.Context(), tx, p.id, fixtureModels, slots)
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func providerConfiguration(t *testing.T, raw string) connection.Configuration {

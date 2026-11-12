@@ -11,8 +11,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/providers/probe"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -36,9 +38,7 @@ type record struct {
 	ProjectID        *string
 }
 
-const recordColumns = "p.id::text,p.name,p.kind,p.state,p.configuration,p.etag::text,p.slots_etag::text,p.draft_dirty,p.active_revision,p.active_revision_id::text,p.last_probe_at,p.last_probe_status,p.last_probe_detail,p.created_by::text,p.created_at,p.updated_at,p.project_id::text," + pluginColumn
-
-const pluginColumn = "(SELECT jsonb_build_object('manifest', pl.manifest, 'unconfined', pl.executable IS NOT NULL) FROM olp.plugins pl WHERE p.kind='plugin' AND pl.digest=p.configuration->>'profile_revision')"
+var recordColumns = "p.id::text,p.name,p.kind,p.state,p.configuration,p.etag::text,p.slots_etag::text,p.draft_dirty,p.active_revision,p.active_revision_id::text,p.last_probe_at,p.last_probe_status,p.last_probe_detail,p.created_by::text,p.created_at,p.updated_at,p.project_id::text," + release.PluginColumn("p")
 
 func scanRecord(row pgx.Row) (*record, error) {
 	var p record
@@ -54,7 +54,7 @@ func scanRecord(row pgx.Row) (*record, error) {
 	return &p, nil
 }
 
-const recordQuery = "SELECT " + recordColumns + " FROM olp.providers p WHERE p.id=$1"
+var recordQuery = "SELECT " + recordColumns + " FROM olp.providers p WHERE p.id=$1"
 
 func readProvider(ctx context.Context, q access.Queryer, id string) (*record, error) {
 	return scanRecord(q.QueryRow(ctx, recordQuery, id))
@@ -131,7 +131,7 @@ type detail struct {
 	LastProbeDetail          *string                  `json:"last_probe_detail"`
 }
 
-const detailQuery = "SELECT " + recordColumns + ",pr.name,u.email," +
+var detailQuery = "SELECT " + recordColumns + ",pr.name,u.email," +
 	"(SELECT count(*) FROM olp.provider_models m WHERE m.provider_id=p.id)," +
 	"(SELECT count(*) FROM olp.provider_models m WHERE m.provider_id=p.id AND m.enabled)," +
 	"(SELECT coalesce(sum(jsonb_array_length(m.capabilities)),0) FROM olp.provider_models m WHERE m.provider_id=p.id)," +
@@ -332,10 +332,11 @@ func (s *Server) deleteProvider(r *http.Request, _ access.Principal) (access.Rep
 		if current.State != "draft" || used {
 			return access.Reply{}, access.Fail(409, "provider_in_use", "Disable published providers; deletion requires an unused draft without retained history.")
 		}
+		if err := grants.DiscardProvider(r.Context(), tx, id); err != nil {
+			return access.Reply{}, err
+		}
 		rows, err := tx.Query(r.Context(), `SELECT id::text FROM olp.provider_credentials WHERE provider_id=$1
- UNION SELECT id::text FROM olp.provider_network_credentials WHERE provider_id=$1
- UNION SELECT g.refresh_token_id::text FROM olp.provider_grants g JOIN olp.provider_credentials c ON c.id=g.credential_id WHERE c.provider_id=$1 AND g.refresh_token_id IS NOT NULL
- UNION SELECT id::text FROM olp.grant_enrollments WHERE provider_id=$1`, id)
+ UNION SELECT id::text FROM olp.provider_network_credentials WHERE provider_id=$1`, id)
 		if err != nil {
 			return access.Reply{}, err
 		}
@@ -350,7 +351,7 @@ func (s *Server) deleteProvider(r *http.Request, _ access.Principal) (access.Rep
 			}
 			return access.Reply{}, err
 		}
-		if _, err = tx.Exec(r.Context(), `DELETE FROM olp.secrets WHERE id=ANY($1::uuid[]) AND purpose IN ($2,$3,$4)`, secretIDs, secrets.ProviderCredential, secrets.ProviderGrantRefresh, secrets.GrantEnrollment); err != nil {
+		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE id=ANY($1::uuid[]) AND purpose=$2", secretIDs, secrets.ProviderCredential); err != nil {
 			return access.Reply{}, err
 		}
 		if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {

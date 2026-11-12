@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/providers/connection"
@@ -19,7 +20,6 @@ import (
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
@@ -660,9 +660,7 @@ func (s *Server) deleteDraftSlot(ctx context.Context, tx pgx.Tx, providerID, slo
 	if slot.Default {
 		return "", access.Fail(409, "default_slot_required", "The default credential slot cannot be deleted.")
 	}
-	// Immutable credential versions and published revision slots survive draft
-	// removal. Only pending enrollment state belongs exclusively to this slot.
-	if _, err = tx.Exec(ctx, `DELETE FROM olp.secrets WHERE purpose=$3 AND id IN (SELECT id FROM olp.grant_enrollments WHERE slot_id=$1 AND provider_id=$2)`, slotID, providerID, secrets.GrantEnrollment); err != nil {
+	if err = grants.DiscardSlotEnrollments(ctx, tx, providerID, slotID); err != nil {
 		return "", err
 	}
 	if _, err = tx.Exec(ctx, "DELETE FROM olp.provider_slots WHERE id=$1 AND provider_id=$2", slotID, providerID); err != nil {

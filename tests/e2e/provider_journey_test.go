@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/tests/harness/vendor"
 )
 
@@ -194,6 +195,7 @@ func TestProviderLifecycleJourney(t *testing.T) {
 			"name": uniqueName("draft"), "configuration": configuration(nil), "credential": vendor.Secret, "model": vendor.Model, "project_id": project,
 		}, idempotent(), http.StatusCreated)
 		draftPath := "/api/v1/providers/" + text(draft, "id")
+		secrets := s.grantSecrets(text(draft, "id"))
 		deletion := idempotent(etag(draft))
 		for range 2 {
 			if status, raw := s.do(owner, "DELETE", draftPath, nil, deletion); status != http.StatusNoContent || len(raw) != 0 {
@@ -201,7 +203,38 @@ func TestProviderLifecycleJourney(t *testing.T) {
 			}
 		}
 		s.want(owner, "GET", draftPath, nil, nil, http.StatusNotFound)
+		var left int
+		if err := s.pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.secrets WHERE id=ANY($1::uuid[])", secrets).Scan(&left); err != nil || left != 0 {
+			t.Fatalf("deleting a draft provider left %d of its credential, refresh and enrollment secrets (%v)", left, err)
+		}
 	})
+}
+
+func (s *service) grantSecrets(provider string) []string {
+	s.t.Helper()
+	refresh, enrollment := uuid.NewString(), uuid.NewString()
+	for _, statement := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO olp.secrets(id,purpose,key_version,ciphertext,expires_at) VALUES($1,'provider_grant_refresh',1,'\x00',now()+interval '1 hour'),($2,'grant_enrollment',1,'\x00',now()+interval '1 hour')`, []any{refresh, enrollment}},
+		{`INSERT INTO olp.provider_grants(credential_id,refresh_token_id,expires_at,refresh_at) SELECT id,$2,now()+interval '1 hour',now()+interval '1 hour' FROM olp.provider_credentials WHERE provider_id=$1`, []any{provider, refresh}},
+		{`INSERT INTO olp.grant_enrollments(id,provider_id,slot_id,plugin_digest,profile_id,started_by,expires_at)
+			SELECT $2,p.id,s.id,repeat('0',64),'fixture-profile',p.created_by,now()+interval '1 hour' FROM olp.providers p JOIN olp.provider_slots s ON s.provider_id=p.id AND s.is_default WHERE p.id=$1`, []any{provider, enrollment}},
+	} {
+		if _, err := s.pool.Exec(s.t.Context(), statement.sql, statement.args...); err != nil {
+			s.t.Fatal(err)
+		}
+	}
+	rows, err := s.pool.Query(s.t.Context(), "SELECT id::text FROM olp.provider_credentials WHERE provider_id=$1", provider)
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	credentials, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil || len(credentials) == 0 {
+		s.t.Fatalf("draft provider credentials = %v (%v), want its pasted credential", credentials, err)
+	}
+	return append(credentials, refresh, enrollment)
 }
 
 func validatedAt(t *testing.T, slots map[string]any, id string) any {

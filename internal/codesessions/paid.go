@@ -11,6 +11,7 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -292,7 +293,7 @@ func paidCodeTarget(ctx context.Context, db access.Queryer, in PaidAdmission, lo
  LEFT JOIN olp.provider_grants g ON g.credential_id=c.id
  WHERE p.id=$1 AND p.project_id=$2 AND p.state='active' AND p.active_revision_id=$3
  AND s.id=$4 AND s.enabled AND s.credential_id=$5 AND c.revoked_at IS NULL AND c.version=$6
- AND (g.credential_id IS NULL OR (g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())))
+ AND (g.credential_id IS NULL OR (`+grants.LiveCondition+`))
  AND EXISTS(SELECT 1 FROM olp.provider_models m WHERE m.provider_id=p.id AND m.upstream_model=$7 AND m.enabled)
  `+locking, in.Provider.ID, in.Route.ProjectID, in.Provider.RevisionID, in.Slot.ID, *in.Slot.CredentialID, *in.Slot.CredentialVersion, in.Operation.Model).Scan(&liveRestrictions, &liveConfiguration, &liveLimits)
 	if errors.Is(err, pgx.ErrNoRows) {

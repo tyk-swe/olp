@@ -169,6 +169,23 @@ func CancelProviderPending(ctx context.Context, tx pgx.Tx, providerID string) er
 	return err
 }
 
+func DiscardSlotEnrollments(ctx context.Context, tx pgx.Tx, providerID, slotID string) error {
+	_, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE purpose=$3 AND id IN (SELECT id FROM olp.grant_enrollments WHERE slot_id=$1 AND provider_id=$2)", slotID, providerID, secrets.GrantEnrollment)
+	return err
+}
+
+func DiscardEnrollmentsOutside(ctx context.Context, tx pgx.Tx, providerID string, retainedSlots []string) error {
+	_, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE purpose=$3 AND id IN (SELECT id FROM olp.grant_enrollments WHERE provider_id=$1 AND NOT (slot_id=ANY($2::uuid[])))", providerID, retainedSlots, secrets.GrantEnrollment)
+	return err
+}
+
+func DiscardProvider(ctx context.Context, tx pgx.Tx, providerID string) error {
+	_, err := tx.Exec(ctx, `WITH removed AS (DELETE FROM olp.provider_grants g USING olp.provider_credentials c WHERE c.id=g.credential_id AND c.provider_id=$1 RETURNING g.refresh_token_id)
+DELETE FROM olp.secrets WHERE (purpose=$2 AND id IN (SELECT id FROM olp.grant_enrollments WHERE provider_id=$1))
+ OR (purpose=$3 AND id IN (SELECT refresh_token_id FROM removed))`, providerID, secrets.GrantEnrollment, secrets.ProviderGrantRefresh)
+	return err
+}
+
 // unavailable explains why an enrollment can no longer be continued or
 // cancelled. Another principal's enrollment is not found, like one purged
 // after it expired, and so is a device authorization still pending, which is

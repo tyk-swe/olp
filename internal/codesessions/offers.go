@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -37,7 +38,7 @@ func Offers(ctx context.Context, db access.Queryer, revision string, keys ...str
  AND a.project_id=(v.document->>'project_id')::uuid AND a.enabled AND olp.code_account_available(a)
  AND p.state<>'disabled' AND p.project_id=a.project_id
  AND c.plugin_digest=v.connections->(a.provider_id::text)->>'profile_revision' AND c.profile_id=v.connections->(a.provider_id::text)->>'profile_id'
- AND c.provider_id=a.provider_id AND c.principal=a.principal AND c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())
+ AND c.provider_id=a.provider_id AND c.principal=a.principal AND c.revoked_at IS NULL AND `+grants.LiveCondition+`
  )a ON true WHERE v.id=$1`, revision)
 	if err != nil {
 		return nil, err

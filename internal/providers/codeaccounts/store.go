@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
+	"github.com/tyk-swe/olp/internal/grants"
 )
 
 type Settings struct {
@@ -88,7 +89,7 @@ func ReadInput(ctx context.Context, q access.Queryer, id string) (Input, error) 
 
 func ReadGranted(ctx context.Context, q access.Queryer, providerName, projectID, credentialID string) (Granted, bool, error) {
 	var granted Granted
-	err := q.QueryRow(ctx, `SELECT p.id::text,c.principal FROM olp.providers p JOIN olp.provider_credentials c ON c.provider_id=p.id JOIN olp.provider_grants g ON g.credential_id=c.id WHERE lower(p.name)=lower($1) AND p.project_id=$2 AND c.id=$3 AND c.principal<>'' AND c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())`, providerName, projectID, credentialID).Scan(&granted.ProviderID, &granted.Principal)
+	err := q.QueryRow(ctx, `SELECT p.id::text,c.principal FROM olp.providers p JOIN olp.provider_credentials c ON c.provider_id=p.id JOIN olp.provider_grants g ON g.credential_id=c.id WHERE lower(p.name)=lower($1) AND p.project_id=$2 AND c.id=$3 AND c.principal<>'' AND c.revoked_at IS NULL AND `+grants.LiveCondition+``, providerName, projectID, credentialID).Scan(&granted.ProviderID, &granted.Principal)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Granted{}, false, nil
 	}
@@ -105,7 +106,7 @@ var accountJSON = `SELECT jsonb_build_object('id',x.id,'project_id',x.project_id
 		AND c.provider_id=x.provider_id AND c.principal=x.principal AND c.profile_id='` + codeplans.ZAIProfile + `'
 		AND c.revoked_at IS NULL AND g.lapsed_at IS NULL AND g.expires_at IS NULL AND g.refresh_token_id IS NULL
 		AND p.configuration->>'kind'='plugin' AND p.configuration->>'auth_mode'='grant' AND p.configuration->>'profile_id'=c.profile_id,false),
-	'allowance',x.allowance,'allowance_read_requested_at',x.allowance_read_requested_at,'allowance_read_at',x.allowance_read_at,'eligible',coalesce(x.enabled AND p.state<>'disabled' AND olp.code_account_available(x) AND c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())
+	'allowance',x.allowance,'allowance_read_requested_at',x.allowance_read_requested_at,'allowance_read_at',x.allowance_read_at,'eligible',coalesce(x.enabled AND p.state<>'disabled' AND olp.code_account_available(x) AND c.revoked_at IS NULL AND ` + grants.LiveCondition + `
 		AND EXISTS(SELECT 1 FROM jsonb_array_elements_text(x.models) m(model) WHERE NOT EXISTS(SELECT 1 FROM olp.code_account_cooldowns cd WHERE cd.account_id=x.id AND cd.retry_at>now() AND (cd.model IS NULL OR cd.model=m.model))),false),
 	'grant_state',CASE WHEN c.revoked_at IS NOT NULL THEN 'revoked' WHEN g.lapsed_at IS NOT NULL THEN 'lapsed' WHEN g.expires_at<=now() THEN 'expired' ELSE 'current' END)
 	FROM olp.code_accounts x JOIN olp.providers p ON p.id=x.provider_id JOIN olp.provider_credentials c ON c.id=x.credential_id JOIN olp.provider_grants g ON g.credential_id=c.id`
@@ -126,7 +127,7 @@ func save(ctx context.Context, tx pgx.Tx, p access.Principal, id, etag string, i
 	var adapter *string
 	var profileID *string
 	err := tx.QueryRow(ctx, `SELECT c.principal,`+codeadapter.SQL("p.configuration")+`,p.configuration->>'profile_id' FROM olp.provider_credentials c JOIN olp.providers p ON p.id=c.provider_id JOIN olp.provider_grants g ON g.credential_id=c.id
-			WHERE p.id=$1 AND p.project_id=$2 AND c.id=$3 AND (NOT $4 OR (c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())))`, in.ProviderID, in.ProjectID, in.CredentialID, in.Enabled).Scan(&principal, &adapter, &profileID)
+			WHERE p.id=$1 AND p.project_id=$2 AND c.id=$3 AND (NOT $4 OR (c.revoked_at IS NULL AND `+grants.LiveCondition+`))`, in.ProviderID, in.ProjectID, in.CredentialID, in.Enabled).Scan(&principal, &adapter, &profileID)
 	if err != nil {
 		return nil, err
 	}
