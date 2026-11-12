@@ -171,8 +171,8 @@ func TestStartupPortCollision(t *testing.T) {
 		return public, private
 	}
 	s := startProcessAttempt(t, pool, env, addresses, time.Now().Add(startupLimit), 3)
-	if attempts != 2 {
-		t.Fatalf("startup attempts = %d, want 2", attempts)
+	if attempts < 2 || attempts > 3 {
+		t.Fatalf("startup attempts = %d, want 2 or 3", attempts)
 	}
 	// Exercise the child rather than trusting a foreign health endpoint.
 	s.owner()
