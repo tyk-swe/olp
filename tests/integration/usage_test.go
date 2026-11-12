@@ -1209,3 +1209,101 @@ func TestMCPLateSettlementAfterOrphanRecovery(t *testing.T) {
 		})
 	}
 }
+
+func TestKeyReminderRestoredScheduleRetries(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	fixture := newUsageFixture(t, pool)
+	requests := make(chan struct{}, 8)
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- struct{}{}
+		if len(requests) == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer receiver.Close()
+	destinationID, ruleID := uuid.NewString(), uuid.NewString()
+	due := time.Now().UTC().Truncate(time.Second).Add(time.Hour)
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.api_keys SET expires_at=$2 WHERE id=$1`, fixture.keyID, due); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_destinations(id,name,url,project_id,etag,created_by) VALUES($1,'restored schedule',$2,$3,$1,$4)`, destinationID, receiver.URL, fixture.projectID, fixture.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_rules(id,name,project_id,event,subject_kind,subject_id,destination_id,etag,created_by) VALUES($1,'restored schedule',$2,'key.expiring','api_key',$3,$4,$1,$5)`, ruleID, fixture.projectID, fixture.keyID, destinationID, fixture.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	pass := func() {
+		t.Helper()
+		var before int64
+		if err := pool.QueryRow(t.Context(), `SELECT COALESCE((SELECT successes_total FROM olp.worker_task_health WHERE task='notification_delivery'),0)`).Scan(&before); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			notifications.RunDelivery(ctx, notifications.DeliveryConfig{Pool: pool, NewID: uuid.NewString, Now: time.Now, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Sender: notifications.NewSender(egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}})})
+		}()
+		defer func() { cancel(); <-done }()
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			var successes int64
+			if err := pool.QueryRow(t.Context(), `SELECT COALESCE((SELECT successes_total FROM olp.worker_task_health WHERE task='notification_delivery'),0)`).Scan(&successes); err != nil {
+				t.Fatal(err)
+			}
+			if successes > before {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("reminder pass did not complete")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	assertDelivery := func(want string, attempts int) (string, time.Time) {
+		t.Helper()
+		var id, status string
+		var got int
+		var at time.Time
+		if err := pool.QueryRow(t.Context(), `SELECT id::text,status,attempts,last_attempt_at FROM olp.notification_deliveries WHERE rule_id=$1 AND due_at=$2`, ruleID, due).Scan(&id, &status, &got, &at); err != nil {
+			t.Fatal(err)
+		}
+		if status != want || got != attempts {
+			t.Fatalf("restored reminder status=%s attempts=%d, want %s/%d", status, got, want, attempts)
+		}
+		return id, at
+	}
+	setDue := func(at time.Time) {
+		t.Helper()
+		if _, err := pool.Exec(t.Context(), `UPDATE olp.api_keys SET expires_at=$2 WHERE id=$1`, fixture.keyID, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pass()
+	id, attemptAt := assertDelivery("failed", 1)
+	setDue(due.Add(48 * time.Hour))
+	pass()
+	assertDelivery("cancelled", 1)
+	setDue(due)
+	pass()
+	restoredID, restoredAt := assertDelivery("pending", 1)
+	if restoredID != id || !restoredAt.Equal(attemptAt) || len(requests) != 1 {
+		t.Fatal("restoring the schedule reset identity, retry history or backoff")
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.notification_deliveries SET last_attempt_at=now()-interval '2 minutes' WHERE id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+	pass()
+	assertDelivery("delivered", 2)
+	setDue(due.Add(48 * time.Hour))
+	pass()
+	setDue(due)
+	pass()
+	assertDelivery("delivered", 2)
+	if len(requests) != 2 {
+		t.Fatalf("sent %d attempts, want one failure and one successful delivery", len(requests))
+	}
+}
