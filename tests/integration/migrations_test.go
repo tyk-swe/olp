@@ -454,3 +454,43 @@ func equalJSON(t *testing.T, got, want any) bool {
 	}
 	return reflect.DeepEqual(decode(got), decode(want))
 }
+
+func TestCommitmentObservedDayMigrationRestatesExistingOutliers(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	if _, err := pool.Exec(t.Context(), `DROP FUNCTION olp.dirty_commitment_observed_days() CASCADE`); err != nil {
+		t.Fatal(err)
+	}
+	fixture := newUsageFixture(t, pool)
+	day := fixture.observedAt.UTC().Truncate(24 * time.Hour).Add(-72 * time.Hour)
+	schedule, period := uuid.NewString(), uuid.NewString()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.commitment_schedules(id,provider_id,provider_revision_id,provider_name,provider_kind,amount,currency,period,effective_at) VALUES($1,$2,$3,'fixture','openai_compatible',10,'USD','day',$4)`, schedule, fixture.providerID, uuid.NewString(), day); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.commitment_periods(id,schedule_id,bucket_start,bucket_end,amount) VALUES($1,$2,$3::timestamptz,$3::timestamptz+interval '24 hours',10)`, period, schedule, day); err != nil {
+		t.Fatal(err)
+	}
+	for _, observed := range []time.Time{day.Add(time.Hour), day.Add(25 * time.Hour), day.Add(26 * time.Hour)} {
+		if _, err := pool.Exec(t.Context(), `INSERT INTO olp.commitment_usage(attempt_id,period_id,observed_at,weight,eligible,complete,payload) VALUES($1,$2,$3,1,true,true,'{}')`, uuid.NewString(), period, observed); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var bucketBefore int64
+	if err := pool.QueryRow(t.Context(), `SELECT version FROM olp.focus_dirty_days WHERE day=$1`, day).Scan(&bucketBefore); err != nil {
+		t.Fatal(err)
+	}
+	migration, err := os.ReadFile("../../internal/database/migrations/0144_focus_observed_commitment_days.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), string(migration)); err != nil {
+		t.Fatal(err)
+	}
+	var bucketAfter, observedVersion int64
+	if err := pool.QueryRow(t.Context(), `SELECT (SELECT version FROM olp.focus_dirty_days WHERE day=$1),(SELECT version FROM olp.focus_dirty_days WHERE day=$1::date+1)`, day).Scan(&bucketAfter, &observedVersion); err != nil {
+		t.Fatal(err)
+	}
+	if bucketAfter != bucketBefore || observedVersion <= bucketBefore {
+		t.Fatalf("migration bucket version %d -> %d, outlier version %d", bucketBefore, bucketAfter, observedVersion)
+	}
+}
