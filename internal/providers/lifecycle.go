@@ -864,10 +864,10 @@ func (s *Server) createDraft(ctx context.Context, tx pgx.Tx, p access.Principal,
 	}
 	displayName := cmp.Or(deref(input.DisplayName), deref(input.Model))
 	if input.Model != nil {
-		if err = ValidModelName("model", *input.Model); err != nil {
+		if err = connection.ValidModelName("model", *input.Model); err != nil {
 			return createdProvider{}, err
 		}
-		if err = ValidModelName("display_name", displayName); err != nil {
+		if err = connection.ValidModelName("display_name", displayName); err != nil {
 			return createdProvider{}, err
 		}
 	}

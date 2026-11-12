@@ -437,7 +437,7 @@ func (in slotInput) normalized(slotID string) (slotInput, error) {
 		}
 	}
 	for _, model := range in.AllowedModels {
-		if err := ValidModelName("slot.allowed_models", model); err != nil {
+		if err := connection.ValidModelName("slot.allowed_models", model); err != nil {
 			return slotInput{}, err
 		}
 	}

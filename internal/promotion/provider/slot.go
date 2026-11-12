@@ -142,7 +142,7 @@ func validRestrictions(restrictions contract.ConfigurationSlotRestrictions, fiel
 		return access.Invalid(field.field("allowed_routes"), "Use route slugs.")
 	}
 	for _, model := range restrictions.AllowedModels {
-		if err := providers.ValidModelName(field.field("allowed_models"), model); err != nil {
+		if err := connection.ValidModelName(field.field("allowed_models"), model); err != nil {
 			return err
 		}
 	}

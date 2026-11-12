@@ -86,7 +86,7 @@ func LoadMounted(path string, policy *egress.Policy) (map[string]release.Mounted
 			}
 		}
 		if entry.Model != nil {
-			if err = ValidModelName("model", *entry.Model); err != nil {
+			if err = connection.ValidModelName("model", *entry.Model); err != nil {
 				return nil, err
 			}
 		}

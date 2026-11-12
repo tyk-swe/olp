@@ -141,14 +141,14 @@ func parseModels(models []contract.ConfigurationModelEntry, at path) ([]provider
 	first := promotion.FirstIndex(models, func(model contract.ConfigurationModelEntry) string { return model.UpstreamModel })
 	return promotion.TryMapIndex(models, func(j int, model contract.ConfigurationModelEntry) (providers.DraftModel, error) {
 		field := at.at("models", j)
-		if err := providers.ValidModelName(field.field("upstream_model"), model.UpstreamModel); err != nil {
+		if err := connection.ValidModelName(field.field("upstream_model"), model.UpstreamModel); err != nil {
 			return providers.DraftModel{}, err
 		}
 		if first[model.UpstreamModel] != j {
 			return providers.DraftModel{}, access.Invalid(field.field("upstream_model"), "Model names must be unique per provider.")
 		}
 		display := cmp.Or(model.DisplayName, model.UpstreamModel)
-		if err := providers.ValidModelName(field.field("display_name"), display); err != nil {
+		if err := connection.ValidModelName(field.field("display_name"), display); err != nil {
 			return providers.DraftModel{}, err
 		}
 		capabilities, err := promotion.Convert[[]connection.Capability](model.Capabilities)

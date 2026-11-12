@@ -7,7 +7,6 @@ import (
 	"maps"
 	"net/http"
 	"time"
-	"unicode"
 
 	"github.com/jackc/pgx/v5"
 
@@ -50,18 +49,6 @@ func publishedModelReply(m routing.RevisionModel) modelReply {
 }
 
 func modelID(m modelReply) string { return m.ID }
-
-func ValidModelName(field, value string) error {
-	if len(value) == 0 || len(value) > 200 {
-		return access.Invalid(field, "Use 1–200 characters.")
-	}
-	for _, r := range value {
-		if unicode.IsControl(r) {
-			return access.Invalid(field, "Control characters are not allowed.")
-		}
-	}
-	return nil
-}
 
 // prepare reads what an upstream call needs without holding the installation
 // lock: the provider, its etag precondition, and the enabled probe credential.
@@ -174,13 +161,13 @@ func (s *Server) discover(r *http.Request, p access.Principal) (access.Reply, er
 	var models []probe.DiscoveredModel
 	seen := map[string]bool{}
 	for _, m := range input.Models {
-		if err = ValidModelName("models.upstream_model", m.UpstreamModel); err != nil {
+		if err = connection.ValidModelName("models.upstream_model", m.UpstreamModel); err != nil {
 			return access.Reply{}, err
 		}
 		if m.DisplayName == "" {
 			m.DisplayName = m.UpstreamModel
 		}
-		if err = ValidModelName("models.display_name", m.DisplayName); err != nil {
+		if err = connection.ValidModelName("models.display_name", m.DisplayName); err != nil {
 			return access.Reply{}, err
 		}
 		if !seen[m.UpstreamModel] {
