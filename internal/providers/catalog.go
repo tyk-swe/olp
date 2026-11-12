@@ -6,6 +6,7 @@ import (
 	"maps"
 	"net/http"
 	"reflect"
+	"slices"
 
 	"github.com/tyk-swe/olp/internal/providerconfig"
 	"github.com/tyk-swe/olp/internal/providers/connection"
@@ -48,13 +49,10 @@ type catalogSuggestion struct {
 	Conflict *string `json:"conflict"`
 }
 
-// catalogFactNames are the facts the catalog states. Deployment, region,
-// quantization and privacy declarations describe the operator's account and
-// are never taken from it.
-var catalogFactNames = []string{"canonical_model", "context_length", "max_output_tokens", "input_modalities", "output_modalities", "supported_parameters"}
-
 // catalogFacts are the operator facts a catalog model supports, tagged with
 // the catalog's digest and the time the vendor's page was observed.
+// Deployment, region, quantization and privacy declarations describe the
+// operator's account and are never taken from the catalog.
 func catalogFacts(signed *catalog.Signed, m *catalog.Model) routing.ModelMetadata {
 	facts := routing.ModelMetadata{InputModalities: m.InputModalities, OutputModalities: m.OutputModalities, ContextLength: m.ContextLength, MaxOutputTokens: m.MaxOutputTokens, SupportedParameters: m.SupportedParameters,
 		Source: new(signed.Source()), ObservedAt: new(m.Provenance.ObservedAt)}
@@ -80,17 +78,16 @@ func applyCatalogFacts(stored json.RawMessage, facts routing.ModelMetadata) (jso
 		return nil, nil, err
 	}
 	changes := []string{}
-	for _, name := range catalogFactNames {
+	for _, name := range slices.Sorted(maps.Keys(proposed)) {
 		value := proposed[name]
 		if string(value) == "null" {
 			continue
 		}
-		if !sameFact(current[name], value) {
+		if name != "source" && name != "observed_at" && !sameFact(current[name], value) {
 			changes = append(changes, name)
 		}
 		current[name] = value
 	}
-	current["source"], current["observed_at"] = proposed["source"], proposed["observed_at"]
 	merged, err := json.Marshal(current)
 	if err != nil {
 		return nil, nil, err
