@@ -9,6 +9,10 @@ semantic versioning and take their source from root `package.json`. The
 
 ### Changed
 
+- Removed the in-repo FOCUS conformance checker. Daily FOCUS datasets and
+  revisioned restatement remain available. See the current
+  [validation guidance](docs/operate/finops.md).
+
 - Google BigQuery billing imports share the month walker that AWS and Azure
   use. A pass reads at most three months, newest first, and an unfinished
   backfill resumes a minute later. A closed month is not read again once its
