@@ -6,6 +6,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/codexauth"
+	"github.com/tyk-swe/olp/internal/connectors"
 )
 
 type AllowanceSignal string
@@ -52,7 +53,7 @@ func QualifiedProfileIDs() []string {
 
 func SQLAllowanceSignal(config string) string {
 	var b strings.Builder
-	b.WriteString("CASE WHEN " + config + "->>'kind'='" + kindPlugin + "' AND " + config + "->>'auth_mode'='" + authGrant + "' THEN CASE " + config + "->>'profile_id'")
+	b.WriteString("CASE WHEN " + config + "->>'kind'='" + string(connectors.KindPlugin) + "' AND " + config + "->>'auth_mode'='" + string(connectors.AuthGrant) + "' THEN CASE " + config + "->>'profile_id'")
 	for _, vendor := range vendors {
 		for _, profile := range vendor.profiles {
 			if info, ok := allowanceSignals[profile]; ok {
@@ -76,10 +77,10 @@ func SQLAllowanceSignalReason(config string) string {
 	if len(clauses) == 0 {
 		return "NULL::text"
 	}
-	return "CASE WHEN " + config + "->>'kind'='" + kindPlugin + "' AND " + config + "->>'auth_mode'='" + authGrant + "' THEN CASE " + config + "->>'profile_id' " + strings.Join(clauses, " ") + " END END"
+	return "CASE WHEN " + config + "->>'kind'='" + string(connectors.KindPlugin) + "' AND " + config + "->>'auth_mode'='" + string(connectors.AuthGrant) + "' THEN CASE " + config + "->>'profile_id' " + strings.Join(clauses, " ") + " END END"
 }
 
-func AllowanceSignalForProfile(kind, authMode, profileID string) (AllowanceSignalInfo, bool) {
+func AllowanceSignalForProfile(kind connectors.Kind, authMode connectors.AuthMode, profileID string) (AllowanceSignalInfo, bool) {
 	vendor, ok := ForConnection(kind, authMode, profileID)
 	if !ok {
 		return AllowanceSignalInfo{}, false

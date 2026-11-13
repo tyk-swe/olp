@@ -14,16 +14,16 @@ func (c Config) RetrievalBackend() string {
 	}
 	switch c.ProfileID {
 	case "bedrock-knowledge-bases":
-		if c.Kind == "bedrock" {
+		if c.Kind == KindBedrock {
 			return identity.Bedrock
 		}
 	case "vertex-rag-engine":
-		if c.Kind == "vertex_ai" {
+		if c.Kind == KindVertexAI {
 			return identity.Vertex
 		}
 	case "azure-ai-search":
 		if c.Kind == KindAzureAISearch {
-			return KindAzureAISearch
+			return identity.Azure
 		}
 	}
 	return ""
@@ -47,7 +47,7 @@ func (c Config) RetrievalURL(resource string) (string, error) {
 		return base + "/knowledgebases/" + url.PathEscape(resource) + "/retrieve", nil
 	case identity.Vertex:
 		return base + ":retrieveContexts", nil
-	case KindAzureAISearch:
+	case identity.Azure:
 		return base + "/indexes/" + url.PathEscape(resource) + "/docs/search?api-version=" + url.QueryEscape(c.APIVersion), nil
 	}
 	return "", errors.New("no retrieval profile")
@@ -67,7 +67,7 @@ func (c Config) RetrievalProbeURL(resource string) (string, error) {
 		return strings.Replace(base, "://bedrock-agent-runtime.", "://bedrock-agent.", 1) + "/knowledgebases/" + url.PathEscape(resource), nil
 	case identity.Vertex:
 		return base + "/ragCorpora/" + url.PathEscape(resource[strings.LastIndex(resource, "/")+1:]), nil
-	case KindAzureAISearch:
+	case identity.Azure:
 		return base + "/indexes/" + url.PathEscape(resource) + "?api-version=" + url.QueryEscape(c.APIVersion), nil
 	}
 	return "", errors.New("no retrieval profile")

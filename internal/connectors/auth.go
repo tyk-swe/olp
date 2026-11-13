@@ -35,7 +35,7 @@ func newAuth(dependencies cloudidentity.Dependencies) *Auth {
 }
 
 func (a *Auth) Apply(ctx context.Context, req *http.Request, c Config, secret, body []byte) (egress.Sensitive, error) {
-	if c.Kind == "vertex_ai" && !c.vertexDestination(req.URL) {
+	if c.Kind == KindVertexAI && !c.vertexDestination(req.URL) {
 		return egress.Sensitive{}, ErrAuthentication
 	}
 	if c.CredentialSource == "caller" {
@@ -85,22 +85,24 @@ type authorization struct {
 	sign      func(ctx context.Context, req *http.Request, body []byte) ([]string, error)
 }
 
+type AuthMode string
+
 const (
-	AuthNone              = "none"
-	AuthAPIKey            = "api_key"
-	AuthHeaders           = "headers"
-	AuthADC               = "adc"
-	AuthServiceAccount    = "service_account"
-	AuthAzureDefault      = "azure_default"
-	AuthAzureClientSecret = "azure_client_secret"
-	AuthDefaultChain      = "default_chain"
-	AuthStatic            = "static"
-	AuthIBMIAM            = "ibm_iam"
-	AuthStaticCredential  = "static_credential"
-	AuthGrant             = "grant"
+	AuthNone              AuthMode = "none"
+	AuthAPIKey            AuthMode = "api_key"
+	AuthHeaders           AuthMode = "headers"
+	AuthADC               AuthMode = "adc"
+	AuthServiceAccount    AuthMode = "service_account"
+	AuthAzureDefault      AuthMode = "azure_default"
+	AuthAzureClientSecret AuthMode = "azure_client_secret"
+	AuthDefaultChain      AuthMode = "default_chain"
+	AuthStatic            AuthMode = "static"
+	AuthIBMIAM            AuthMode = "ibm_iam"
+	AuthStaticCredential  AuthMode = "static_credential"
+	AuthGrant             AuthMode = "grant"
 )
 
-var authenticators = map[string]authenticator{
+var authenticators = map[AuthMode]authenticator{
 	AuthNone:              {authenticate: (*Auth).authenticateNone},
 	AuthAPIKey:            {credential: true, authenticate: (*Auth).authenticateAPIKey},
 	AuthHeaders:           {credential: true, authenticate: (*Auth).authenticateHeaders},
@@ -115,7 +117,7 @@ var authenticators = map[string]authenticator{
 	AuthGrant:             {credential: true, authenticate: (*Auth).authenticatePlaced},
 }
 
-func SecretRequired(mode string) bool {
+func SecretRequired(mode AuthMode) bool {
 	authenticator, ok := authenticators[mode]
 	return !ok || authenticator.credential
 }
@@ -216,7 +218,7 @@ func (a *Auth) authenticateAWS(ctx context.Context, req *http.Request, c Config,
 
 const azureStorageScope = "https://storage.azure.com/.default"
 
-func (a *Auth) ApplyAzureStorage(ctx context.Context, req *http.Request, mode string, secret []byte) (egress.Sensitive, error) {
+func (a *Auth) ApplyAzureStorage(ctx context.Context, req *http.Request, mode AuthMode, secret []byte) (egress.Sensitive, error) {
 	if !storageDestination(req.URL, "azure_blob") {
 		return egress.Sensitive{}, ErrAuthentication
 	}
@@ -243,10 +245,10 @@ func sigV4Signature(authorization string) string {
 }
 
 func cacheKey(c Config, secret []byte) cloudidentity.Key {
-	return sha256.Sum256(append([]byte(c.Kind+"\x00"+c.AuthMode+"\x00"+c.CloudRegion+"\x00"+c.CloudProject+"\x00"+c.ProfileID+"\x00"+c.ProfileRevision+"\x00"+c.azureScope()+"\x00"), secret...))
+	return sha256.Sum256(append([]byte(string(c.Kind)+"\x00"+string(c.AuthMode)+"\x00"+c.CloudRegion+"\x00"+c.CloudProject+"\x00"+c.ProfileID+"\x00"+c.ProfileRevision+"\x00"+c.azureScope()+"\x00"), secret...))
 }
 
-func identityOf(c Config, storedMode string, secret []byte) cloudidentity.Credential {
+func identityOf(c Config, storedMode AuthMode, secret []byte) cloudidentity.Credential {
 	if c.AuthMode == storedMode {
 		return cloudidentity.Stored(secret)
 	}

@@ -24,9 +24,9 @@ func ValidS3Bucket(bucket string) bool {
 	return s3BucketPattern.MatchString(bucket) && !strings.Contains(bucket, "..") && net.ParseIP(bucket) == nil
 }
 
-func NormalizeBatchStorage(kind, profile string, storage *BatchStorage) (*BatchStorage, error) {
-	vertex := kind == "vertex_ai" && profile == "vertex-batch-prediction"
-	bedrock := kind == "bedrock" && profile == "bedrock-batch-inference"
+func NormalizeBatchStorage(kind Kind, profile string, storage *BatchStorage) (*BatchStorage, error) {
+	vertex := kind == KindVertexAI && profile == "vertex-batch-prediction"
+	bedrock := kind == KindBedrock && profile == "bedrock-batch-inference"
 	if !vertex && !bedrock {
 		if storage != nil {
 			return nil, errors.New("batch_storage applies only to the Vertex batch prediction and Bedrock batch inference profiles")

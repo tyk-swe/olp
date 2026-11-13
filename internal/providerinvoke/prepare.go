@@ -29,7 +29,7 @@ type Invocation struct {
 // hosting wrapper in the prepared document. A plugin profile's envelope stays
 // outside it: see connectors.Config.WrapRequest.
 func Prepare(request *wire.Request, config connectors.Config, model string, parameterDefaults protocols.Object) (Invocation, error) {
-	encodedWire := protocols.WireFamily(config.Kind, config.VendorID, request.Family)
+	encodedWire := protocols.WireFamily(string(config.Kind), config.VendorID, request.Family)
 	defaults := parameterDefaults
 	var origins []connectors.DefaultProvenance
 	if config.ProfileID != "" {
@@ -58,7 +58,7 @@ func Prepare(request *wire.Request, config connectors.Config, model string, para
 		// Bedrock Rerank names its model by ARN in the request body.
 		target = config.BedrockModelARN(target)
 	}
-	prepared, encodedWire, err := protocols.PrepareTarget(request, encodedWire, config.Kind, config.VendorID, target, defaults)
+	prepared, encodedWire, err := protocols.PrepareTarget(request, encodedWire, string(config.Kind), config.VendorID, target, defaults)
 	if err != nil {
 		return Invocation{}, err
 	}

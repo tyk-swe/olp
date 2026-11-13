@@ -204,7 +204,7 @@ func (p *Prober) cancelOperationPoll(ctx context.Context, t Target, plan *operat
 
 // Kind options include tuples available through an explicit profile, even
 // when the kind's Automatic connector cannot serve them.
-func OptionsForKind(kind string) []connection.Capability {
+func OptionsForKind(kind connectors.Kind) []connection.Capability {
 	var profiles []connectors.Config
 	for _, profile := range connectors.Profiles() {
 		if profile.Kind == kind {
@@ -217,7 +217,7 @@ func OptionsForKind(kind string) []connection.Capability {
 		profiled := slices.ContainsFunc(profiles, func(transport connectors.Config) bool {
 			return Probeable(transport, tuple)
 		})
-		if certifiable(kind, vendors.DefaultFor(kind), tuple) || profiled {
+		if certifiable(kind, vendors.DefaultFor(string(kind)), tuple) || profiled {
 			out = append(out, tuple)
 		}
 	}
@@ -227,15 +227,15 @@ func OptionsForKind(kind string) []connection.Capability {
 // Custom endpoints need a safe live probe. A reviewed vendor's media certifies
 // costlessly through its own connector's model listing or account probe, and
 // no reviewed vendor streams media.
-func reviewedMedia(kind, vendor, operation string) bool {
+func reviewedMedia(kind connectors.Kind, vendor, operation string) bool {
 	contract, ok := vendors.Lookup(vendor)
-	if !ok || contract.Connector != kind || !contract.Serves(operation) {
+	if !ok || contract.Connector != string(kind) || !contract.Serves(operation) {
 		return false
 	}
 	return contract.AccountProbe != "" || contract.Discovery && vendors.MediaWire(vendor, operation) != ""
 }
 
-func certifiable(kind, vendor string, c connection.Capability) bool {
+func certifiable(kind connectors.Kind, vendor string, c connection.Capability) bool {
 	if c.Operation == "retrieval" && (kind == connectors.KindBedrock || kind == connectors.KindVertexAI || kind == connectors.KindAzureAISearch) {
 		return false
 	}
@@ -244,7 +244,7 @@ func certifiable(kind, vendor string, c connection.Capability) bool {
 	}
 	switch c.Operation {
 	case "batch":
-		officialVendor := vendor == vendors.DefaultFor(kind)
+		officialVendor := vendor == vendors.DefaultFor(string(kind))
 		return c.Surface != "anthropic" && c.Surface != "gemini" || officialVendor
 	case "generation", "token_count", "embeddings", "moderation", "rerank", "ocr", "search", "realtime", "bedrock_invoke":
 		return true

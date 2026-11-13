@@ -340,8 +340,8 @@ func (s *Server) settlementTemplate(x *call, p *pin, surface, lineOperation stri
 	if p.hold != nil {
 		fact.Budgets = append([]string(nil), p.hold.budgets...)
 	}
-	fact.Price = inputs.Price(p.provider.Kind, p.provider.ID, p.provider.VendorID, p.model, lineOperation, now)
-	fact.Discount = inputs.Discount(p.provider.Kind, p.provider.ID, p.provider.VendorID, now)
+	fact.Price = inputs.Price(string(p.provider.Kind), p.provider.ID, p.provider.VendorID, p.model, lineOperation, now)
+	fact.Discount = inputs.Discount(string(p.provider.Kind), p.provider.ID, p.provider.VendorID, now)
 	fact.PricingPinned = true
 	fact.CardPinned = true
 	fact.CardRevisionID = nil
@@ -366,7 +366,7 @@ func (s *Server) settlementTemplate(x *call, p *pin, surface, lineOperation stri
 	}
 	if p.provider.ProfileID == connectors.BedrockBatchProfile {
 		uncertain := aggregateTariffNeedsPerRecordUsage(fact.Price) ||
-			aggregateTariffNeedsPerRecordUsage(fact.CardRev.Explicit(p.provider.Kind, p.provider.VendorID, p.model, lineOperation))
+			aggregateTariffNeedsPerRecordUsage(fact.CardRev.Explicit(string(p.provider.Kind), p.provider.VendorID, p.model, lineOperation))
 		policy, err := withPolicyFlag(*event.Attempts[0].Routing.Policy, "batch_aggregate_pricing_uncertain", uncertain)
 		if err != nil {
 			return nil, err

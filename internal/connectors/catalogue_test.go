@@ -10,7 +10,7 @@ import (
 func providersOf(p Profile) []Config {
 	candidates := []string{""}
 	for _, contract := range vendors.All() {
-		if kind, _ := vendors.Kind(contract.ID); kind == p.Kind {
+		if kind, _ := vendors.Kind(contract.ID); Kind(kind) == p.Kind {
 			candidates = append(candidates, contract.ID)
 		}
 	}

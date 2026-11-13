@@ -208,7 +208,7 @@ func TestResponseCacheClientSurfaces(t *testing.T) {
 				t.Run(mode, func(t *testing.T) {
 					h, _ := enableTestCache(t, strictHarness(t, func(snapshot *routing.Snapshot) {
 						for id, provider := range snapshot.Providers {
-							provider.Kind, provider.ProfileID = tc.kind, tc.profile
+							provider.Kind, provider.ProfileID = connectors.Kind(tc.kind), tc.profile
 							provider.ProfileRevision = connectors.ProfileRevision
 							provider.VendorID = ""
 							if tc.kind == "bedrock" {

@@ -15,7 +15,7 @@ const (
 	CredentialGrant     CredentialPolicy = "grant"
 )
 
-func credentialPolicy(mode string) CredentialPolicy {
+func credentialPolicy(mode connectors.AuthMode) CredentialPolicy {
 	switch {
 	case mode == connectors.AuthGrant:
 		return CredentialGrant
@@ -27,12 +27,12 @@ func credentialPolicy(mode string) CredentialPolicy {
 }
 
 type AuthOption struct {
-	Mode       string           `json:"mode"`
-	Label      string           `json:"label"`
-	Credential CredentialPolicy `json:"credential"`
+	Mode       connectors.AuthMode `json:"mode"`
+	Label      string              `json:"label"`
+	Credential CredentialPolicy    `json:"credential"`
 }
 
-func auth(mode, label string) AuthOption {
+func auth(mode connectors.AuthMode, label string) AuthOption {
 	return AuthOption{Mode: mode, Label: label, Credential: credentialPolicy(mode)}
 }
 
@@ -43,15 +43,15 @@ type Field struct {
 }
 
 type Kind struct {
-	Name            string       `json:"kind"`
-	Label           string       `json:"label"`
-	Description     string       `json:"description"`
-	DefaultAuthMode string       `json:"default_auth_mode"`
-	AuthModes       []AuthOption `json:"auth_modes"`
-	Fields          []Field      `json:"fields"`
+	Name            connectors.Kind     `json:"kind"`
+	Label           string              `json:"label"`
+	Description     string              `json:"description"`
+	DefaultAuthMode connectors.AuthMode `json:"default_auth_mode"`
+	AuthModes       []AuthOption        `json:"auth_modes"`
+	Fields          []Field             `json:"fields"`
 }
 
-func (k Kind) Offers(mode string) bool {
+func (k Kind) Offers(mode connectors.AuthMode) bool {
 	return slices.ContainsFunc(k.AuthModes, func(option AuthOption) bool { return option.Mode == mode })
 }
 
@@ -80,15 +80,15 @@ type Preset struct {
 }
 
 type Vendor struct {
-	ID               string   `json:"id"`
-	Name             string   `json:"name"`
-	Connector        string   `json:"connector"`
-	Discovery        bool     `json:"discovery"`
-	Operations       []string `json:"operations"`
-	Authentication   []string `json:"authentication"`
-	Parameters       []string `json:"parameters"`
-	DocumentationURL string   `json:"documentation_url"`
-	Endpoint         *string  `json:"endpoint"`
+	ID               string                `json:"id"`
+	Name             string                `json:"name"`
+	Connector        string                `json:"connector"`
+	Discovery        bool                  `json:"discovery"`
+	Operations       []string              `json:"operations"`
+	Authentication   []connectors.AuthMode `json:"authentication"`
+	Parameters       []string              `json:"parameters"`
+	DocumentationURL string                `json:"documentation_url"`
+	Endpoint         *string               `json:"endpoint"`
 	// Dialects are the generation dialects the vendor documents; profiles in
 	// other generation dialects are refused for it.
 	Dialects              []string `json:"dialects"`
@@ -150,7 +150,7 @@ func Kinds() []ListedKind {
 	return out
 }
 
-func LookupKind(name string) (Kind, bool) {
+func LookupKind(name connectors.Kind) (Kind, bool) {
 	i := slices.IndexFunc(kinds, func(k Kind) bool { return k.Name == name })
 	if i < 0 {
 		return Kind{}, false
@@ -158,10 +158,10 @@ func LookupKind(name string) (Kind, bool) {
 	return kinds[i], true
 }
 
-func presetsOf(kind string) []Preset {
+func presetsOf(kind connectors.Kind) []Preset {
 	out := []Preset{}
 	for _, c := range vendors.All() {
-		if c.Connector != kind || c.Preset == nil {
+		if connectors.Kind(c.Connector) != kind || c.Preset == nil {
 			continue
 		}
 		entry := Preset{ID: c.ID, Label: c.Name, Description: c.Description, Endpoint: c.Endpoint, AuthMode: c.Preset.AuthMode,
@@ -178,8 +178,8 @@ func presetsOf(kind string) []Preset {
 func Vendors() []Vendor {
 	out := make([]Vendor, 0, len(vendors.All()))
 	for _, c := range vendors.All() {
-		kind, _ := LookupKind(c.Connector)
-		auth := make([]string, 0, len(kind.AuthModes))
+		kind, _ := LookupKind(connectors.Kind(c.Connector))
+		auth := make([]connectors.AuthMode, 0, len(kind.AuthModes))
 		for _, mode := range kind.AuthModes {
 			auth = append(auth, mode.Mode)
 		}

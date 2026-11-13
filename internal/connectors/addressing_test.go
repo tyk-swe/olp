@@ -18,7 +18,7 @@ const (
 	bedrockRuntime = "https://bedrock-runtime.us-east-1.amazonaws.com"
 )
 
-func direct(kind, profile, endpoint string) Config {
+func direct(kind Kind, profile, endpoint string) Config {
 	return Config{Kind: kind, ProfileID: profile, ProfileRevision: ProfileRevision, AuthMode: AuthAPIKey, Endpoint: endpoint}
 }
 
@@ -38,7 +38,7 @@ func vertex(profile string) Config {
 	}
 }
 
-func amazon(kind, profile string) Config {
+func amazon(kind Kind, profile string) Config {
 	return Config{
 		Kind: kind, ProfileID: profile, ProfileRevision: ProfileRevision, AuthMode: AuthStatic,
 		CloudRegion: awsRegion, Endpoint: DefaultProfileEndpoint(kind, profile, awsRegion, ""),
@@ -228,7 +228,10 @@ func TestConfigRefusesAnAddressItsProfileDoesNotServe(t *testing.T) {
 
 func TestDefaultEndpointPlacesACloudProviderOnItsRegionalHost(t *testing.T) {
 	t.Parallel()
-	cases := map[string]struct{ kind, profile, region, want string }{
+	cases := map[string]struct {
+		kind                  Kind
+		profile, region, want string
+	}{
 		"vertex region":              {KindVertexAI, "vertex-gemini", "us-central1", vertexLocation + "/publishers/google"},
 		"vertex global":              {KindVertexAI, "vertex-gemini", "global", "https://aiplatform.googleapis.com/v1/projects/fixture-project/locations/global/publishers/google"},
 		"vertex us multi-region":     {KindVertexAI, "vertex-gemini", "us", "https://aiplatform.us.rep.googleapis.com/v1/projects/fixture-project/locations/us/publishers/google"},

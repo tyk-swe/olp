@@ -107,7 +107,7 @@ func (s *Server) finish(x *call, out *outcome, status int) {
 				}
 				if snapshot != nil {
 					if provider, ok := snapshot.FindProvider(serving.ProviderID); ok {
-						providerKind = provider.Kind
+						providerKind = string(provider.Kind)
 					}
 				}
 				var inputTokens, outputTokens *int64
@@ -203,7 +203,7 @@ func (s *Server) recordBusiness(env events.Envelope, x *call) {
 		labels := telemetry.BusinessLabels{Route: route, Project: project, Key: env.KeyID, EndUser: env.EndUserDigest}
 		if snapshot != nil {
 			if provider, ok := snapshot.FindProvider(fact.ProviderID); ok {
-				labels.ProviderKind = provider.Kind
+				labels.ProviderKind = string(provider.Kind)
 			}
 		}
 		if u := fact.Usage; u != nil && fact.UsageObserved {

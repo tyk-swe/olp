@@ -44,7 +44,7 @@ func (c Config) host(req *http.Request, credential []byte) ([]string, error) {
 	if err := c.ApplySemantic(req); err != nil {
 		return nil, err
 	}
-	if c.Kind == "anthropic" && c.ProfileID == "" {
+	if c.Kind == KindAnthropic && c.ProfileID == "" {
 		req.Header.Set("Anthropic-Version", anthropicMessagesRevision)
 	}
 	for name, value := range vendors.HeadersFor(c.VendorID) {

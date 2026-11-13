@@ -12,7 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
-func DefaultProfileEndpoint(kind, profileID, region, project string) string {
+func DefaultProfileEndpoint(kind Kind, profileID, region, project string) string {
 	hosting := profileHosting(profileID)
 	traits := hostings[hosting]
 	switch {
@@ -29,7 +29,7 @@ func DefaultProfileEndpoint(kind, profileID, region, project string) string {
 	return DefaultEndpoint(kind, region, project)
 }
 
-func DefaultEndpoint(kind, region, project string) string {
+func DefaultEndpoint(kind Kind, region, project string) string {
 	switch kind {
 	case KindVertexAI:
 		return googleLocation(vertexAI, region, project) + hostings["vertex-google"].vertexPath
@@ -45,7 +45,7 @@ func DefaultEndpoint(kind, region, project string) string {
 		}
 		return "https://" + region + ".ml.cloud.ibm.com"
 	}
-	contract, _ := vendors.Lookup(vendors.DefaultFor(kind))
+	contract, _ := vendors.Lookup(vendors.DefaultFor(string(kind)))
 	return contract.Endpoint
 }
 

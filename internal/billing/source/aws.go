@@ -19,6 +19,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/shopspring/decimal"
+
+	"github.com/tyk-swe/olp/internal/connectors"
 )
 
 const (
@@ -33,7 +35,7 @@ const (
 
 var awsCUR = vendor[awsScope, awsCredential, Cloud]{
 	family:       "aws",
-	providerKind: "bedrock",
+	providerKind: connectors.KindBedrock,
 	scope:        parseAWSScope,
 	input:        document,
 	credential:   parseAWSCredential,

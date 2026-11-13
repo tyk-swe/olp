@@ -18,11 +18,11 @@ const (
 )
 
 var (
-	keyHeadersOrNone = []string{AuthAPIKey, AuthHeaders, AuthNone}
-	keyOnly          = []string{AuthAPIKey}
-	azureIdentities  = []string{AuthAPIKey, AuthAzureDefault, AuthAzureClientSecret}
-	googleIdentities = []string{AuthADC, AuthServiceAccount}
-	awsIdentities    = []string{AuthStatic, AuthDefaultChain}
+	keyHeadersOrNone = []AuthMode{AuthAPIKey, AuthHeaders, AuthNone}
+	keyOnly          = []AuthMode{AuthAPIKey}
+	azureIdentities  = []AuthMode{AuthAPIKey, AuthAzureDefault, AuthAzureClientSecret}
+	googleIdentities = []AuthMode{AuthADC, AuthServiceAccount}
+	awsIdentities    = []AuthMode{AuthStatic, AuthDefaultChain}
 
 	openAIFamilyOperations = []string{
 		"generation", "token_count", "embeddings", "moderation", "image_generation", "image_edit", "image_variation",
@@ -273,7 +273,7 @@ var cohereV2 = Profile{
 	Documentation:     "https://docs.cohere.com/reference/embed", Strict: true,
 }
 
-func completionProfile(vendor, kind, hosting string) Profile {
+func completionProfile(vendor string, kind Kind, hosting string) Profile {
 	return Profile{
 		ID: vendor + "-completions", Label: vendor + " text completions", Kind: kind,
 		Dialect: "openai-completions", DialectRevision: "m9-baseline-1", Hosting: hosting,

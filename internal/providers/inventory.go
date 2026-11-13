@@ -23,7 +23,7 @@ func (s *Server) kinds(r *http.Request, _ access.Principal) (access.Reply, error
 }
 
 func (s *Server) kindCapabilities(r *http.Request, _ access.Principal) (access.Reply, error) {
-	kind := r.PathValue("provider_kind")
+	kind := connectors.Kind(r.PathValue("provider_kind"))
 	if _, ok := connection.LookupKind(kind); !ok {
 		return access.Reply{}, access.Fail(400, "invalid_provider_kind", "This provider kind is not available.")
 	}

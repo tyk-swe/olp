@@ -47,7 +47,7 @@ var hostings = map[string]hostingTraits{
 		model: regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}/[A-Za-z0-9][A-Za-z0-9._@:-]{0,127}$`)},
 }
 
-var automaticHostings = map[string]string{
+var automaticHostings = map[Kind]string{
 	KindAzureOpenAI: "azure-deployment",
 	KindBedrock:     "bedrock-invoke",
 	KindSageMaker:   "sagemaker-openai",

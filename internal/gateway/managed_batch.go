@@ -355,10 +355,10 @@ func (t managedLineTarget) lineDefaults(operation wire.LineOperation) (protocols
 func (t managedLineTarget) encodeRequest(request *wire.Request, upstreamModel string, defaults protocols.Object) ([]byte, error) {
 	provider := t.pin.provider
 	if t.adapter == connectors.BatchGeminiManaged {
-		encoded, _, err := protocols.EncodeTarget(request, wire.Gemini, provider.Kind, provider.VendorID, upstreamModel, defaults)
+		encoded, _, err := protocols.EncodeTarget(request, wire.Gemini, string(provider.Kind), provider.VendorID, upstreamModel, defaults)
 		return encoded, err
 	}
-	encoded, _, err := protocols.Encode(request, provider.Kind, provider.VendorID, upstreamModel, defaults)
+	encoded, _, err := protocols.Encode(request, string(provider.Kind), provider.VendorID, upstreamModel, defaults)
 	return encoded, err
 }
 

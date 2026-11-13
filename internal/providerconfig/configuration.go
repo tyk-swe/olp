@@ -11,8 +11,8 @@ type Identity[T string | *string] struct {
 	CredentialSource string                   `json:"credential_source,omitempty"`
 	ProfileID        string                   `json:"profile_id,omitempty"`
 	ProfileRevision  string                   `json:"profile_revision,omitempty"`
-	Kind             string                   `json:"kind"`
-	AuthMode         string                   `json:"auth_mode"`
+	Kind             connectors.Kind          `json:"kind"`
+	AuthMode         connectors.AuthMode      `json:"auth_mode"`
 	Endpoint         T                        `json:"endpoint"`
 	CloudRegion      T                        `json:"cloud_region"`
 	CloudProject     T                        `json:"cloud_project"`

@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strconv"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/connectors"
 )
 
 var anthropicWorkspace = regexp.MustCompile(`^(?:wrkspc_[A-Za-z0-9]{1,64}|default)$`)
@@ -21,7 +23,7 @@ type anthropicScope struct {
 
 var anthropic = vendor[anthropicScope, apiKey, Polling]{
 	family:       "api_key",
-	providerKind: "anthropic",
+	providerKind: connectors.KindAnthropic,
 	scope: func(raw json.RawMessage) (anthropicScope, error) {
 		scope, err := parseIDScope[anthropicScope](raw)
 		if err != nil {

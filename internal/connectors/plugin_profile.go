@@ -111,7 +111,7 @@ func newPluginProfile(plugin Plugin, origins []string, declared abi.Profile) (*P
 	p := Profile{
 		ID: declared.ID, Revision: plugin.Digest, Label: declared.Label, Kind: KindPlugin,
 		Dialect: declared.Dialect, DialectRevision: base.DialectRevision, Hosting: pluginHosting,
-		Authentication: []string{authentication}, Transport: transport, Operations: []string{"generation"},
+		Authentication: []AuthMode{authentication}, Transport: transport, Operations: []string{"generation"},
 		SemanticHeaders: slices.Clone(base.SemanticHeaders), QuerySettings: slices.Clone(base.QuerySettings),
 		Plugin: &plugin, ModelDiscovery: declared.Hosting.Discovery != nil, OptionsSchema: optionsSchema(declared.Options),
 		Strict: placed.envelope == nil && len(placed.rewrites) == 0 && !placed.forceStreaming && !declared.CarriesTraffic,

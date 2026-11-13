@@ -9,18 +9,20 @@ import (
 	"github.com/tyk-swe/olp/internal/retrieval/identity"
 )
 
+type Kind string
+
 const (
-	KindOpenAI           = "openai"
-	KindOpenAICompatible = "openai_compatible"
-	KindAnthropic        = "anthropic"
-	KindGemini           = "gemini"
-	KindAzureOpenAI      = "azure_openai"
-	KindVertexAI         = "vertex_ai"
-	KindBedrock          = "bedrock"
-	KindSageMaker        = "sagemaker"
-	KindWatsonx          = "watsonx"
-	KindAzureAISearch    = identity.Azure
-	KindPlugin           = "plugin"
+	KindOpenAI           Kind = "openai"
+	KindOpenAICompatible Kind = "openai_compatible"
+	KindAnthropic        Kind = "anthropic"
+	KindGemini           Kind = "gemini"
+	KindAzureOpenAI      Kind = "azure_openai"
+	KindVertexAI         Kind = "vertex_ai"
+	KindBedrock          Kind = "bedrock"
+	KindSageMaker        Kind = "sagemaker"
+	KindWatsonx          Kind = "watsonx"
+	KindAzureAISearch    Kind = Kind(identity.Azure)
+	KindPlugin           Kind = "plugin"
 )
 
 type Config struct {
@@ -34,8 +36,8 @@ type Config struct {
 	QuerySettings            map[string]string
 	OperationDefaults        map[string]DefaultSet
 	Bindings                 map[string]Binding
-	Kind                     string
-	AuthMode                 string
+	Kind                     Kind
+	AuthMode                 AuthMode
 	Endpoint                 string
 	CloudRegion              string
 	CloudProject             string
@@ -55,17 +57,17 @@ var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 var cloudIdentifier = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,127}$`)
 var bedrockModel = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]*$`)
 
-func ModelValid(kind, model string) bool {
+func ModelValid(kind Kind, model string) bool {
 	if kind == KindSageMaker {
 		return sagemakerModelValid(model)
 	}
 	if kind == KindWatsonx {
 		return watsonxModelValid(model)
 	}
-	if kind == "bedrock" {
+	if kind == KindBedrock {
 		return len(model) <= 2048 && bedrockModel.MatchString(model) && !strings.Contains(model, "..")
 	}
-	if kind == "azure_openai" || kind == "gemini" || kind == "vertex_ai" {
+	if kind == KindAzureOpenAI || kind == KindGemini || kind == KindVertexAI {
 		return identifier.MatchString(strings.TrimPrefix(model, "models/")) && !strings.HasSuffix(model, ".")
 	}
 	return model != "" && !strings.ContainsAny(model, "\x00\r\n")

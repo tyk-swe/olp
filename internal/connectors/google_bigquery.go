@@ -12,12 +12,12 @@ func NewBillingAuth(policy *egress.Policy, client *http.Client, getenv func(stri
 	return newAuth(cloudidentity.Billing(policy, client.Transport, getenv))
 }
 
-func (a *Auth) ApplyGoogleBigQuery(ctx context.Context, req *http.Request, mode string, secret []byte) (egress.Sensitive, error) {
+func (a *Auth) ApplyGoogleBigQuery(ctx context.Context, req *http.Request, mode AuthMode, secret []byte) (egress.Sensitive, error) {
 	if req.URL == nil || req.URL.Scheme != "https" || req.URL.Hostname() != "bigquery.googleapis.com" ||
 		req.URL.User != nil || req.URL.Opaque != "" || (req.URL.Port() != "" && req.URL.Port() != "443") {
 		return egress.Sensitive{}, ErrAuthentication
 	}
-	if mode != "adc" && mode != "service_account" {
+	if mode != AuthADC && mode != AuthServiceAccount {
 		return egress.Sensitive{}, ErrCredentialRejected
 	}
 	token, err := a.googleToken(ctx, Config{Kind: KindVertexAI, AuthMode: mode}, secret)

@@ -12,7 +12,7 @@ import (
 type offer struct {
 	surface    string
 	modes      []string
-	kinds      []string
+	kinds      []Kind
 	vendors    []string
 	vendorKind bool
 }
@@ -22,22 +22,22 @@ var (
 	modes       = []string{"unary", "streaming", "async", "realtime", "webrtc"}
 	unary       = []string{"unary"}
 	generating  = []string{"unary", "streaming"}
-	reviewed    = []string{KindOpenAI, KindOpenAICompatible, KindAnthropic, KindGemini, KindVertexAI, KindAzureOpenAI, KindBedrock}
-	openAIKinds = []string{KindOpenAI, KindAzureOpenAI, KindOpenAICompatible}
+	reviewed    = []Kind{KindOpenAI, KindOpenAICompatible, KindAnthropic, KindGemini, KindVertexAI, KindAzureOpenAI, KindBedrock}
+	openAIKinds = []Kind{KindOpenAI, KindAzureOpenAI, KindOpenAICompatible}
 
 	openAIUnary      = []offer{{surface: "openai", modes: unary, kinds: openAIKinds}}
 	openAIGenerating = []offer{{surface: "openai", modes: generating, kinds: openAIKinds}}
 	vendorUnary      = []offer{{surface: "openai", modes: unary, vendorKind: true}}
 
-	nativeCloudVendors = map[string]string{KindVertexAI: "google-vertex", KindBedrock: "amazon-bedrock"}
+	nativeCloudVendors = map[Kind]string{KindVertexAI: "google-vertex", KindBedrock: "amazon-bedrock"}
 )
 
 var offers = map[string][]offer{
 	"generation":      {{modes: generating}},
 	"token_count":     {{modes: unary}},
-	"bedrock_invoke":  {{surface: "bedrock", modes: generating, kinds: []string{KindBedrock}}},
-	"embeddings":      {{surface: "openai", modes: unary, kinds: slices.Concat(openAIKinds, []string{KindGemini, KindVertexAI, KindBedrock})}},
-	"rerank":          {{surface: "openai", modes: unary, kinds: []string{KindOpenAICompatible, KindBedrock}, vendorKind: true}},
+	"bedrock_invoke":  {{surface: "bedrock", modes: generating, kinds: []Kind{KindBedrock}}},
+	"embeddings":      {{surface: "openai", modes: unary, kinds: slices.Concat(openAIKinds, []Kind{KindGemini, KindVertexAI, KindBedrock})}},
+	"rerank":          {{surface: "openai", modes: unary, kinds: []Kind{KindOpenAICompatible, KindBedrock}, vendorKind: true}},
 	"ocr":             vendorUnary,
 	"search":          vendorUnary,
 	"moderation":      openAIUnary,
@@ -45,7 +45,7 @@ var offers = map[string][]offer{
 	"translation":     openAIUnary,
 	"image_generation": {
 		{surface: "openai", modes: generating, kinds: openAIKinds},
-		{surface: "openai", modes: unary, kinds: []string{KindVertexAI, KindBedrock}},
+		{surface: "openai", modes: unary, kinds: []Kind{KindVertexAI, KindBedrock}},
 	},
 	"image_edit":    openAIGenerating,
 	"speech":        openAIGenerating,
@@ -56,19 +56,19 @@ var offers = map[string][]offer{
 	"video_content": openAIUnary,
 	"video_delete":  openAIUnary,
 	"realtime": {
-		{surface: "openai", modes: []string{"webrtc"}, kinds: []string{KindOpenAI}},
-		{surface: "openai", modes: []string{"realtime"}, kinds: []string{KindOpenAI, KindAzureOpenAI}},
+		{surface: "openai", modes: []string{"webrtc"}, kinds: []Kind{KindOpenAI}},
+		{surface: "openai", modes: []string{"realtime"}, kinds: []Kind{KindOpenAI, KindAzureOpenAI}},
 	},
 	"batch": {
-		{surface: "anthropic", modes: unary, kinds: []string{KindAnthropic}},
-		{surface: "gemini", modes: unary, kinds: []string{KindGemini}},
-		{surface: "openai", modes: unary, kinds: []string{KindGemini}, vendors: []string{"google"}},
-		{surface: "openai", modes: unary, kinds: []string{KindOpenAI, KindAzureOpenAI}},
-		{surface: "openai", modes: unary, kinds: []string{KindOpenAICompatible}, vendors: filesBatchesVendors()},
+		{surface: "anthropic", modes: unary, kinds: []Kind{KindAnthropic}},
+		{surface: "gemini", modes: unary, kinds: []Kind{KindGemini}},
+		{surface: "openai", modes: unary, kinds: []Kind{KindGemini}, vendors: []string{"google"}},
+		{surface: "openai", modes: unary, kinds: []Kind{KindOpenAI, KindAzureOpenAI}},
+		{surface: "openai", modes: unary, kinds: []Kind{KindOpenAICompatible}, vendors: filesBatchesVendors()},
 	},
 }
 
-func (o offer) serves(kind, vendor, surface, mode string) bool {
+func (o offer) serves(kind Kind, vendor, surface, mode string) bool {
 	if o.surface != "" && o.surface != surface || !slices.Contains(o.modes, mode) {
 		return false
 	}
@@ -79,12 +79,12 @@ func (o offer) serves(kind, vendor, surface, mode string) bool {
 		return true
 	}
 	connector, known := vendors.Kind(vendor)
-	return known && connector == kind
+	return known && Kind(connector) == kind
 }
 
-func Supports(kind, vendor, operation, surface, mode string) bool {
+func Supports(kind Kind, vendor, operation, surface, mode string) bool {
 	if retainedapi.Operation(operation) {
-		return (operation != "agent_resource" || vendor == "google") && retainedapi.Supports(kind, operation, surface, mode)
+		return (operation != "agent_resource" || vendor == "google") && retainedapi.Supports(string(kind), operation, surface, mode)
 	}
 	if !slices.Contains(surfaces, surface) {
 		return false
@@ -130,7 +130,7 @@ func Supports(kind, vendor, operation, surface, mode string) bool {
 	if vendors.MediaWire(vendor, operation) != "" {
 		connector, _ := vendors.Kind(vendor)
 		creates := operation == "video_create" && mode == "async"
-		return connector == kind && surface == "openai" && (mode == "unary" || creates)
+		return Kind(connector) == kind && surface == "openai" && (mode == "unary" || creates)
 	}
 	return slices.ContainsFunc(offers[operation], func(o offer) bool { return o.serves(kind, vendor, surface, mode) })
 }
@@ -144,13 +144,13 @@ func (c Config) Supports(operation, surface, mode string) bool {
 	}
 	if retainedapi.Operation(operation) {
 		if operation == "agent_resource" {
-			return retainedapi.Supports(c.Kind, operation, surface, mode) && c.ProfileID == "gemini-agents" && c.ProfileRevision == ProfileRevision
+			return retainedapi.Supports(string(c.Kind), operation, surface, mode) && c.ProfileID == "gemini-agents" && c.ProfileRevision == ProfileRevision
 		}
 		switch c.ProfileID {
 		case "gemini-live", "gemini-interactions", "vertex-batch-prediction", "bedrock-batch-inference", "mistral-fim", "xai-realtime", "vertex-realtime", "bedrock-realtime":
 			return false
 		}
-		return retainedapi.Supports(c.Kind, operation, surface, mode)
+		return retainedapi.Supports(string(c.Kind), operation, surface, mode)
 	}
 	if operation == "batch" {
 		if surface == "native" {

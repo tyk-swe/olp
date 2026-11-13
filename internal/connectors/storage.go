@@ -9,7 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 )
 
-func storageDestination(endpoint *url.URL, kind string) bool {
+func storageDestination(endpoint *url.URL, kind Kind) bool {
 	if endpoint == nil {
 		return false
 	}
@@ -37,11 +37,11 @@ func storageDestination(endpoint *url.URL, kind string) bool {
 	return false
 }
 
-func (a *Auth) ApplyGoogleStorage(ctx context.Context, req *http.Request, mode string, secret []byte) (egress.Sensitive, error) {
+func (a *Auth) ApplyGoogleStorage(ctx context.Context, req *http.Request, mode AuthMode, secret []byte) (egress.Sensitive, error) {
 	if !storageDestination(req.URL, "gcs") {
 		return egress.Sensitive{}, ErrAuthentication
 	}
-	if mode != "adc" && mode != "service_account" {
+	if mode != AuthADC && mode != AuthServiceAccount {
 		return egress.Sensitive{}, ErrCredentialRejected
 	}
 	token, err := a.googleToken(ctx, Config{Kind: "gcs", AuthMode: mode}, secret)

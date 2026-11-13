@@ -11,11 +11,11 @@ type Profile struct {
 	ID                string                     `json:"id"`
 	Revision          string                     `json:"revision"`
 	Label             string                     `json:"label"`
-	Kind              string                     `json:"kind"`
+	Kind              Kind                       `json:"kind"`
 	Dialect           string                     `json:"dialect"`
 	DialectRevision   string                     `json:"dialect_revision"`
 	Hosting           string                     `json:"hosting"`
-	Authentication    []string                   `json:"authentication"`
+	Authentication    []AuthMode                 `json:"authentication"`
 	Transport         string                     `json:"transport"`
 	Operations        []string                   `json:"operations"`
 	SemanticHeaders   []string                   `json:"semantic_headers"`
@@ -88,7 +88,7 @@ func (p Profile) OperationDialect(operation string) string {
 	case "bedrock_invoke":
 		return "bedrock-invoke"
 	case "realtime":
-		if (p.Kind == "openai" && p.Hosting == "direct-openai") || (p.Kind == "azure_openai" && p.Hosting == "azure-v1") {
+		if (p.Kind == KindOpenAI && p.Hosting == "direct-openai") || (p.Kind == KindAzureOpenAI && p.Hosting == "azure-v1") {
 			return "openai-realtime"
 		}
 		switch p.Dialect {

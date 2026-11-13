@@ -270,7 +270,7 @@ func (c Config) validateDefaultsAndBindings(p Profile) error {
 		if binding.Model != "" && binding.Deployment != "" {
 			return errors.New("a binding cannot provide both model and deployment")
 		}
-		if binding.Deployment != "" && c.Kind != "azure_openai" {
+		if binding.Deployment != "" && c.Kind != KindAzureOpenAI {
 			return errors.New("deployment bindings belong to Azure hosting")
 		}
 		if binding.Region != "" && binding.Region != c.CloudRegion {

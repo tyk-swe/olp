@@ -2,12 +2,12 @@ package connectors
 
 import "errors"
 
-func ValidateCredentialSource(source, kind, mode string) error {
+func ValidateCredentialSource(source string, kind Kind, mode AuthMode) error {
 	switch source {
 	case "", "operator":
 		return nil
 	case "caller":
-		if kind != KindPlugin && (mode == "api_key" || mode == "headers" || mode == "static") {
+		if kind != KindPlugin && (mode == AuthAPIKey || mode == AuthHeaders || mode == AuthStatic) {
 			return nil
 		}
 		return errors.New("Caller credentials require API-key, declared-header, or static AWS authentication on a built-in connector.")

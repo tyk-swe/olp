@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -95,7 +97,7 @@ type revisionSummary struct {
 
 type revisionListItem struct {
 	revisionSummary
-	Kind string `json:"kind"`
+	Kind connectors.Kind `json:"kind"`
 }
 
 type revisionDetail struct {

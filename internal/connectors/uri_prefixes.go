@@ -5,15 +5,15 @@ import (
 	"slices"
 )
 
-func NormalizeTuningDatasetPrefixes(kind string, prefixes []string) ([]string, error) {
+func NormalizeTuningDatasetPrefixes(kind Kind, prefixes []string) ([]string, error) {
 	return normalizeVertexPrefixes(kind, prefixes, "dataset")
 }
 
-func NormalizeDocumentURIPrefixes(kind string, prefixes []string) ([]string, error) {
+func NormalizeDocumentURIPrefixes(kind Kind, prefixes []string) ([]string, error) {
 	return normalizeVertexPrefixes(kind, prefixes, "document")
 }
 
-func normalizeVertexPrefixes(kind string, prefixes []string, subject string) ([]string, error) {
+func normalizeVertexPrefixes(kind Kind, prefixes []string, subject string) ([]string, error) {
 	if len(prefixes) == 0 {
 		return nil, nil
 	}

@@ -323,7 +323,7 @@ func runMediaCase(t *testing.T, tc mediaCase) mediaRecord {
 	return record
 }
 
-func vendor(kind, vendorID string) func(*routing.Provider) {
+func vendor(kind connectors.Kind, vendorID string) func(*routing.Provider) {
 	return func(p *routing.Provider) { p.Kind, p.VendorID = kind, vendorID }
 }
 

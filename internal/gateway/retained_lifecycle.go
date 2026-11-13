@@ -700,7 +700,7 @@ func (s *Server) retainedControlPolicy(x *call, p *pin, route *routing.Route) *f
 		return fault.ServerError(http.StatusServiceUnavailable, "pricing_unavailable", "Current resource pricing is unavailable; retry shortly.")
 	}
 	if p.attempt.Price == nil {
-		p.attempt.Price = x.routingInputs.Price(p.provider.Kind, p.provider.ID, p.provider.VendorID, p.model, x.operationName(), x.request.startedAt)
+		p.attempt.Price = x.routingInputs.Price(string(p.provider.Kind), p.provider.ID, p.provider.VendorID, p.model, x.operationName(), x.request.startedAt)
 	}
 	if p.attempt.Price != nil || x.attemptCardRevisionForRoute(p.provider.ID, route, x.request.startedAt) != nil {
 		return policyUnavailable("unsupported_pricing", "Agent resource control does not support priced execution. Use an unpriced resource route.")
