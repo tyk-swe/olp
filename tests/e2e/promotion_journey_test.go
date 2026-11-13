@@ -3,7 +3,12 @@
 package e2e_test
 
 import (
+	"context"
 	"encoding/json"
+	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/admission"
+	"github.com/tyk-swe/olp/internal/limits/scripts"
+	"github.com/tyk-swe/olp/internal/promotion/project"
 	"maps"
 	"net/http"
 	"os"
@@ -335,5 +340,37 @@ func testPromotionCLIReview(t *testing.T, s *service, operator *caller, document
 		if output, err := command.CombinedOutput(); err != nil {
 			t.Fatalf("review current CLI plan: %v\n%s", err, output)
 		}
+	}
+}
+
+type promotionSnapshotCommands struct{ installed int }
+
+func (c *promotionSnapshotCommands) Do(context.Context, ...string) (any, error) {
+	c.installed++
+	return []any{int64(1), int64(1), "ok", int64(1), int64(1)}, nil
+}
+
+func TestPromotionStopsSnapshotInstallationOnFailure(t *testing.T) {
+	commands := &promotionSnapshotCommands{}
+	runner, err := scripts.NewRunner(commands, "olp:promotion:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	costs := project.CostsOf(admission.New(runner))
+	snapshots := []limits.Snapshot{
+		{OwnerID: "invalid", Basis: limits.BasisCost, DailyAccrued: "1", MonthlyAccrued: "1"},
+		{OwnerID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607", Basis: limits.BasisCharge, DailyAccrued: "1", MonthlyAccrued: "1"},
+	}
+	if err := costs.Install(t.Context(), snapshots); err == nil {
+		t.Fatal("accepted failed cost install")
+	}
+	if commands.installed != 0 {
+		t.Fatal("published charge snapshot after failed cost install")
+	}
+	if err := costs.Install(t.Context(), snapshots[1:]); err != nil {
+		t.Fatal(err)
+	}
+	if commands.installed != 1 {
+		t.Fatal("did not install valid snapshot")
 	}
 }
