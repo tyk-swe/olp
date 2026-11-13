@@ -135,77 +135,80 @@ func Supports(kind Kind, vendor, operation, surface, mode string) bool {
 	return slices.ContainsFunc(offers[operation], func(o offer) bool { return o.serves(kind, vendor, surface, mode) })
 }
 
+var (
+	retrievalKinds          = []Kind{KindBedrock, KindVertexAI, KindAzureAISearch}
+	withoutRetainedFamilies = []string{
+		"gemini-live", "gemini-interactions", vertexBatchProfile, BedrockBatchProfile,
+		"mistral-fim", "xai-realtime", "vertex-realtime", "bedrock-realtime",
+	}
+)
+
 func (c Config) Supports(operation, surface, mode string) bool {
-	if c.RetrievalBackend() != "" {
+	switch {
+	case c.RetrievalBackend() != "":
 		return operation == "retrieval" && surface == "openai" && mode == "unary"
-	}
-	if operation == "retrieval" && (c.Kind == KindBedrock || c.Kind == KindVertexAI || c.Kind == KindAzureAISearch) {
+	case operation == "retrieval" && slices.Contains(retrievalKinds, c.Kind):
 		return false
+	case operation == "agent_resource":
+		return c.selects("gemini-agents") && retainedapi.Supports(string(c.Kind), operation, surface, mode)
+	case retainedapi.Operation(operation):
+		return !slices.Contains(withoutRetainedFamilies, c.ProfileID) && retainedapi.Supports(string(c.Kind), operation, surface, mode)
+	case operation == "batch":
+		return mode == "unary" && c.servesBatches(surface)
+	case c.ProfileID == "" && c.Kind != KindPlugin:
+		return Supports(c.Kind, c.VendorID, operation, surface, mode)
 	}
-	if retainedapi.Operation(operation) {
-		if operation == "agent_resource" {
-			return retainedapi.Supports(string(c.Kind), operation, surface, mode) && c.ProfileID == "gemini-agents" && c.ProfileRevision == ProfileRevision
-		}
-		switch c.ProfileID {
-		case "gemini-live", "gemini-interactions", "vertex-batch-prediction", "bedrock-batch-inference", "mistral-fim", "xai-realtime", "vertex-realtime", "bedrock-realtime":
-			return false
-		}
-		return retainedapi.Supports(string(c.Kind), operation, surface, mode)
-	}
-	if operation == "batch" {
-		if surface == "native" {
-			return mode == "unary" && (c.Kind == KindVertexAI && c.ProfileID == vertexBatchProfile && c.ProfileRevision == ProfileRevision && c.Hosting() == "vertex-google" ||
-				c.Kind == KindBedrock && c.ProfileID == BedrockBatchProfile && c.ProfileRevision == ProfileRevision && c.Hosting() == "bedrock-batch-inference")
-		}
-		switch surface {
-		case "openai":
-			return c.SupportsFilesBatches() && mode == "unary"
-		case "anthropic":
-			return c.Kind == KindAnthropic && mode == "unary" &&
-				(c.ProfileID == "" || c.ProfileID == "anthropic-messages" && c.Hosting() == "direct-anthropic")
-		case "gemini":
-			return c.Kind == KindGemini && mode == "unary" &&
-				(c.ProfileID == "" || c.ProfileID == "gemini-generation" && c.Hosting() == "direct-gemini")
-		}
+	p, err := c.profile()
+	if err != nil || !slices.Contains(p.Operations, operation) {
 		return false
 	}
 	if c.Kind == KindPlugin {
-		p, err := c.profile()
-		return err == nil && slices.Contains(p.Operations, operation) && Supports(c.Kind, c.VendorID, operation, surface, mode)
+		return Supports(c.Kind, c.VendorID, operation, surface, mode)
 	}
-	if c.ProfileID != "" {
-		if p, err := c.profile(); err == nil {
-			if family, ok := generationFamily(p.OperationDialect("generation")); ok && family.Surface() == "native" && operation == "generation" {
-				return surface == "native" && (mode == "unary" || mode == "streaming") && slices.Contains(p.Operations, operation) && vendors.Serves(c.VendorID, operation)
-			}
-			switch p.Dialect {
-			case "gemini-interactions":
-				return operation == "generation" && surface == "gemini" && (mode == "unary" || mode == "streaming")
-			case "gemini-live":
-				return operation == "realtime" && surface == "gemini" && mode == "realtime"
-			case "xai-realtime", "vertex-realtime", "bedrock-realtime":
-				return operation == "realtime" && surface == "native" && mode == "realtime"
-			}
-			if codec, ok := operationregistry.Lookup(p.OperationDialect(operation)); ok && codec.Operation.ID == operation && slices.Contains(p.Operations, operation) {
-				if operationregistry.Catalog().SupportsTarget(codec.Identity, surface, mode) {
-					return true
-				}
-				if _, dedicated := operationregistry.Lookup(p.Dialect); dedicated {
-					return false
-				}
-				return Supports(c.Kind, c.VendorID, operation, surface, mode)
-			}
+	return c.servesThrough(p, operation, surface, mode)
+}
+
+func (c Config) selects(profileID string) bool {
+	p, err := c.profile()
+	return err == nil && p.ID == profileID
+}
+
+func (c Config) servesBatches(surface string) bool {
+	switch surface {
+	case "native":
+		return c.Kind == KindVertexAI && c.selects(vertexBatchProfile) || c.Kind == KindBedrock && c.selects(BedrockBatchProfile)
+	case "openai":
+		return c.SupportsFilesBatches()
+	case "anthropic":
+		return c.Kind == KindAnthropic && (c.ProfileID == "" || c.selects("anthropic-messages"))
+	case "gemini":
+		return c.Kind == KindGemini && (c.ProfileID == "" || c.selects("gemini-generation"))
+	}
+	return false
+}
+
+func (c Config) servesThrough(p Profile, operation, surface, mode string) bool {
+	if family, ok := generationFamily(p.OperationDialect("generation")); ok && family.Surface() == "native" && operation == "generation" {
+		return surface == "native" && (mode == "unary" || mode == "streaming") && vendors.Serves(c.VendorID, operation)
+	}
+	switch p.Dialect {
+	case "gemini-interactions":
+		return operation == "generation" && surface == "gemini" && (mode == "unary" || mode == "streaming")
+	case "gemini-live":
+		return operation == "realtime" && surface == "gemini" && mode == "realtime"
+	case "xai-realtime", "vertex-realtime", "bedrock-realtime":
+		return operation == "realtime" && surface == "native" && mode == "realtime"
+	}
+	codec, ok := operationregistry.Lookup(p.OperationDialect(operation))
+	if ok && codec.Operation.ID == operation {
+		if operationregistry.Catalog().SupportsTarget(codec.Identity, surface, mode) {
+			return true
+		}
+		if _, dedicated := operationregistry.Lookup(p.Dialect); dedicated {
+			return false
 		}
 	}
-
-	if !Supports(c.Kind, c.VendorID, operation, surface, mode) {
-		return false
-	}
-	if c.ProfileID == "" {
-		return true
-	}
-	p, err := c.profile()
-	return err == nil && slices.Contains(p.Operations, operation)
+	return Supports(c.Kind, c.VendorID, operation, surface, mode)
 }
 
 func (c Config) SupportsRetainedResponses() bool {
@@ -229,10 +232,7 @@ func (c Config) SupportsFilesBatches() bool {
 		_, ok := c.filesBatchesService()
 		return ok
 	case KindGemini:
-		if c.ProfileID == "" {
-			return c.ProfileRevision == "" && c.Hosting() == ""
-		}
-		return c.ProfileID == "gemini-generation" && c.ProfileRevision == ProfileRevision && c.Hosting() == "direct-gemini"
+		return c.ProfileID == "" && c.ProfileRevision == "" || c.selects("gemini-generation")
 	}
 	return false
 }
