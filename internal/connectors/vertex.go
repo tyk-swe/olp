@@ -12,9 +12,6 @@ func (c Config) vertexDestination(u *url.URL) bool {
 	if u == nil {
 		return false
 	}
-	if cloudTestDestination(u) {
-		return true
-	}
 	expectedRaw := DefaultEndpoint("vertex_ai", c.CloudRegion, c.CloudProject)
 	if c.Hosting() == "google-document-ai" {
 		expectedRaw = DefaultProfileEndpoint("vertex_ai", "vertex-document-processing-ocr", c.CloudRegion, c.CloudProject)

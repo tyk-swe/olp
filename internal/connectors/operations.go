@@ -3,7 +3,6 @@ package connectors
 import (
 	"errors"
 	"net/url"
-	"slices"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -40,57 +39,6 @@ func registerUnaryProfiles() {
 		SemanticHeaders: []string{}, QuerySettings: []string{}, Documentation: "https://docs.cohere.com/reference/embed", Strict: true}
 	completeProfileMetadata(&cohere)
 	profileRegistry = append(profileRegistry, cohere)
-}
-
-// RegisterOperationProfile composes a trusted registered unary codec with an
-// existing hosting/authentication contract. No generation operation is implied.
-func RegisterOperationProfile(p Profile) error {
-	profileMu.Lock()
-	defer profileMu.Unlock()
-	if p.ID == "" || len(p.ID) > 128 || p.Revision == "" || p.Label == "" || p.Transport != "http" || len(p.Operations) == 0 || len(profileRegistry) >= 4096 {
-		return errors.New("operation profile requires bounded identity and HTTP contracts")
-	}
-	var host *Profile
-	for i := range profileRegistry {
-		prior := &profileRegistry[i]
-		if prior.ID == p.ID && prior.Revision == p.Revision {
-			return errors.New("profile revision already registered")
-		}
-		if prior.Kind == p.Kind && prior.Hosting == p.Hosting {
-			host = prior
-		}
-	}
-	if host == nil || len(p.Authentication) == 0 {
-		return errors.New("hosting component is not registered")
-	}
-	for _, a := range p.Authentication {
-		if !slices.Contains(host.Authentication, a) {
-			return errors.New("authentication component is incompatible")
-		}
-	}
-	for _, op := range p.Operations {
-		d, ok := operationregistry.Lookup(p.OperationDialects[op])
-		if !ok || d.Operation.ID != op {
-			return errors.New("operation codec is not registered")
-		}
-		if d.Address.RelativePath != "" && p.Hosting != "direct-compatible" {
-			return errors.New("relative operation addressing requires compatible direct hosting")
-		}
-	}
-	for _, h := range p.SemanticHeaders {
-		if !slices.Contains(host.SemanticHeaders, h) {
-			return errors.New("semantic header is outside hosting contract")
-		}
-	}
-	for _, q := range p.QuerySettings {
-		if !slices.Contains(host.QuerySettings, q) {
-			return errors.New("semantic query is outside hosting contract")
-		}
-	}
-	p.Plugin, p.Strict = nil, host.Strict
-	completeProfileMetadata(&p)
-	profileRegistry = append(profileRegistry, cloneProfile(p))
-	return nil
 }
 
 // OperationURL uses only a registered native addressing contract. Its family

@@ -176,28 +176,6 @@ func VertexBatchJobsURL(project, location, jobID, action string) (string, error)
 }
 
 func (c Config) VertexBatchJobsURL(jobID, action string) (string, error) {
-	if endpoint, err := url.Parse(c.Endpoint); err == nil && cloudTestDestination(endpoint) {
-		root := strings.TrimSuffix(endpoint.Path, "/publishers/google")
-		if root == endpoint.Path {
-			return "", errors.New("Vertex endpoint does not have a publisher suffix")
-		}
-		path := root + "/batchPredictionJobs"
-		if jobID != "" {
-			path += "/" + url.PathEscape(jobID)
-		}
-		if action == "cancel" {
-			if jobID == "" {
-				return "", errors.New("Vertex cancellation requires a job ID")
-			}
-			path += ":cancel"
-		} else if action != "" {
-			return "", errors.New("unknown Vertex batch action")
-		}
-		if err := setEscapedPath(endpoint, path); err != nil {
-			return "", err
-		}
-		return endpoint.String(), nil
-	}
 	return VertexBatchJobsURL(c.CloudProject, c.CloudRegion, jobID, action)
 }
 
@@ -237,27 +215,6 @@ func BedrockBatchJobsURL(region, jobID, action string) (string, error) {
 }
 
 func (c Config) BedrockBatchJobsURL(jobID, action string) (string, error) {
-	if endpoint, err := url.Parse(c.Endpoint); err == nil && cloudTestDestination(endpoint) {
-		path := "/model-invocation-job"
-		if jobID == "" {
-			if action == "" {
-				path = "/model-invocation-jobs"
-			} else if action != "create" {
-				return "", errors.New("Bedrock batch action requires a job ID")
-			}
-		} else {
-			path += "/" + url.PathEscape(jobID)
-			if action == "stop" {
-				path += "/stop"
-			} else if action != "" {
-				return "", errors.New("unknown Bedrock batch action")
-			}
-		}
-		if err := setEscapedPath(endpoint, path); err != nil {
-			return "", err
-		}
-		return endpoint.String(), nil
-	}
 	return BedrockBatchJobsURL(c.CloudRegion, jobID, action)
 }
 

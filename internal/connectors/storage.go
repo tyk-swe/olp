@@ -16,9 +16,6 @@ func storageDestination(endpoint *url.URL, kind string) bool {
 	if endpoint == nil {
 		return false
 	}
-	if cloudTestDestination(endpoint) {
-		return true
-	}
 	if endpoint.Scheme != "https" || endpoint.User != nil || endpoint.Opaque != "" ||
 		(endpoint.Port() != "" && endpoint.Port() != "443") {
 		return false

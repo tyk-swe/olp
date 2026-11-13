@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -63,8 +62,6 @@ type Profile struct {
 
 const ProfileRevision = "1"
 const anthropicMessagesRevision = "2023-06-01"
-
-var profileMu sync.RWMutex
 
 var profileRegistry = []Profile{
 	{ID: "bedrock-knowledge-bases", Label: "Bedrock Knowledge Bases retrieval", Kind: "bedrock", Dialect: "bedrock-knowledge-bases", DialectRevision: "2023-09-30", Hosting: "bedrock-knowledge-bases"},
@@ -273,8 +270,6 @@ func init() {
 // Profiles returns detached catalogue metadata; registering a new hosting profile
 // using these components does not require a generation-kernel provider switch.
 func Profiles() []Profile {
-	profileMu.RLock()
-	defer profileMu.RUnlock()
 	out := make([]Profile, len(profileRegistry))
 	for i, p := range profileRegistry {
 		out[i] = cloneProfile(p)
@@ -305,8 +300,6 @@ func cloneProfile(p Profile) Profile {
 // only read it. Registration detaches caller-owned maps and slices before
 // publication; registered entries are never modified after publication.
 func profileView(id, revision string) (Profile, error) {
-	profileMu.RLock()
-	defer profileMu.RUnlock()
 	for _, p := range profileRegistry {
 		if p.ID == id && p.Revision == revision {
 			return p, nil
@@ -318,8 +311,6 @@ func profileView(id, revision string) (Profile, error) {
 // profileHosting is the hosting of the built-in profile with an identifier,
 // or "" for an unknown one.
 func profileHosting(id string) string {
-	profileMu.RLock()
-	defer profileMu.RUnlock()
 	for _, p := range profileRegistry {
 		if p.ID == id {
 			return p.Hosting
@@ -895,73 +886,6 @@ func completeProfileMetadata(p *Profile) {
 			"dialect": map[string]any{"const": dialect}, "values": map[string]any{"type": "object", "additionalProperties": false, "properties": fields}, "native_options": map[string]any{"type": "object", "description": "Operation payload extensions; routing, credentials and resource references are reserved."},
 		}})
 	}
-}
-
-// RegisterProfile extends an existing trusted component composition at startup.
-// A new provider using an existing dialect needs a profile, bindings and fixtures,
-// not a provider case in the operation kernel. This is not a runtime plugin API.
-func RegisterProfile(p Profile) error {
-	if p.ID == "" || len(p.ID) > 128 || p.Revision == "" || p.Label == "" {
-		return errors.New("profile identity, revision and label are required")
-	}
-	profileMu.Lock()
-	defer profileMu.Unlock()
-	var template *Profile
-	for i := range profileRegistry {
-		existing := &profileRegistry[i]
-		if existing.ID == p.ID && existing.Revision == p.Revision {
-			return errors.New("profile revision already registered")
-		}
-	}
-	template = profileTemplateForRegistration(p)
-	if template == nil || len(profileRegistry) >= 4096 {
-		return errors.New("profile components do not form an existing registered composition")
-	}
-	for _, auth := range p.Authentication {
-		if !slices.Contains(template.Authentication, auth) {
-			return errors.New("profile authentication is incompatible")
-		}
-	}
-	for _, operation := range p.Operations {
-		if !slices.Contains(template.Operations, operation) {
-			return errors.New("profile operation is incompatible")
-		}
-	}
-	for _, header := range p.SemanticHeaders {
-		if !slices.Contains(template.SemanticHeaders, header) {
-			return errors.New("profile semantic header is incompatible")
-		}
-	}
-	for _, query := range p.QuerySettings {
-		if !slices.Contains(template.QuerySettings, query) {
-			return errors.New("profile query setting is incompatible")
-		}
-	}
-	if p.Transport != template.Transport || len(p.Authentication) == 0 || len(p.Operations) == 0 {
-		return errors.New("profile transport and capabilities are required")
-	}
-	p.Plugin, p.ModelDiscovery, p.Strict = nil, false, template.Strict
-	completeProfileMetadata(&p)
-	profileRegistry = append(profileRegistry, cloneProfile(p))
-	return nil
-}
-
-func profileTemplateForRegistration(p Profile) *Profile {
-	var template *Profile
-	for i := range profileRegistry {
-		existing := &profileRegistry[i]
-		if existing.Kind == p.Kind && existing.Dialect == p.Dialect && existing.Hosting == p.Hosting && existing.DialectRevision == p.DialectRevision {
-			if vendorBatchProfile(*existing) {
-				continue
-			}
-			template = existing
-		}
-	}
-	return template
-}
-
-func vendorBatchProfile(profile Profile) bool {
-	return profile.Kind == "openai_compatible" && slices.Contains(profile.Operations, "batch") && profile.vendor != ""
 }
 
 func defaultControlSchema(dialect, operation, name string) map[string]any {

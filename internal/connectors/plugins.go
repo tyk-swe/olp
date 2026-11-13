@@ -202,8 +202,6 @@ func newPluginProfile(plugin Plugin, origins []string, declared abi.Profile) (*P
 // builtInProfile reports whether id identifies a built-in profile, which no
 // plugin profile may share.
 func builtInProfile(id string) bool {
-	profileMu.RLock()
-	defer profileMu.RUnlock()
 	return slices.ContainsFunc(profileRegistry, func(p Profile) bool { return p.ID == id })
 }
 
@@ -214,8 +212,6 @@ func dialectProfile(dialect string) (Profile, bool) {
 	if !slices.Contains(pluginDialects, dialect) {
 		return Profile{}, false
 	}
-	profileMu.RLock()
-	defer profileMu.RUnlock()
 	for _, p := range profileRegistry {
 		if p.Dialect == dialect {
 			return p, true
