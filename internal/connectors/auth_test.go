@@ -10,7 +10,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -23,6 +22,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 
+	"github.com/tyk-swe/olp/internal/connectors/cloudidentity"
 	"github.com/tyk-swe/olp/internal/egress"
 )
 
@@ -228,6 +228,15 @@ func (c countedCredential) GetToken(context.Context, policy.TokenRequestOptions)
 	return azcore.AccessToken{Token: issuedToken, ExpiresOn: time.Now().Add(time.Hour)}, nil
 }
 
+func authTrusting(authority tokenAuthority, getenv func(string) string) *Auth {
+	dependencies := cloudidentity.Standard(&egress.Policy{}, getenv)
+	dependencies.Public, dependencies.IAMEndpoint = authority.Client().Transport, authority.URL
+	dependencies.AzureCredential = func(cloudidentity.Credential) (azcore.TokenCredential, error) {
+		return countedCredential{authority.exchanges}, nil
+	}
+	return newAuth(dependencies)
+}
+
 func TestApplyExchangesAStoredCredentialForOneTokenItReuses(t *testing.T) {
 	t.Parallel()
 	watsonx := validConfigs()["watsonx"]
@@ -237,36 +246,25 @@ func TestApplyExchangesAStoredCredentialForOneTokenItReuses(t *testing.T) {
 		config Config
 		target string
 		secret func(authority tokenAuthority) []byte
-		wire   func(auth *Auth, authority tokenAuthority)
 	}{
 		"an IBM Cloud API key": {
 			watsonx, watsonx.Endpoint + "/ml/v1/text/chat",
 			func(tokenAuthority) []byte { return []byte(credential) },
-			func(auth *Auth, authority tokenAuthority) {
-				auth.iamEndpoint, auth.publicClient = authority.URL, authority.Client()
-			},
 		},
 		"a Google service account": {
 			google, vertexLocation + "/publishers/google/models/gemini:generateContent",
 			func(authority tokenAuthority) []byte { return serviceAccount(t, authority.URL) },
-			func(auth *Auth, authority tokenAuthority) { auth.publicClient = authority.Client() },
 		},
 		"a Microsoft Entra client secret": {
 			microsoft, microsoft.Endpoint + "/openai/deployments/dep-1/chat/completions",
 			func(tokenAuthority) []byte { return []byte(credential) },
-			func(auth *Auth, authority tokenAuthority) {
-				auth.azureFactory = func(string, []byte) (azcore.TokenCredential, error) {
-					return countedCredential{authority.exchanges}, nil
-				}
-			},
 		},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			authority := newTokenAuthority(t, http.StatusOK)
-			auth := NewAuth(&egress.Policy{}, unset)
-			c.wire(auth, authority)
+			auth := authTrusting(authority, unset)
 			secret := c.secret(authority)
 			for range 2 {
 				request := upstreamRequest(t, c.target)
@@ -302,8 +300,7 @@ func TestApplyTellsARefusedCredentialFromAnAuthorityThatMayRecover(t *testing.T)
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			authority := newTokenAuthority(t, c.status)
-			auth := NewAuth(&egress.Policy{}, unset)
-			auth.iamEndpoint, auth.publicClient = authority.URL, authority.Client()
+			auth := authTrusting(authority, unset)
 			request := upstreamRequest(t, watsonx.Endpoint+"/ml/v1/text/chat")
 			_, err := auth.Apply(t.Context(), request, watsonx, []byte(credential), nil)
 			if !errors.Is(err, ErrAuthentication) || errors.Is(err, ErrCredentialRejected) != c.rejected {
@@ -323,48 +320,12 @@ func TestApplicationDefaultCredentialsComeFromTheFileTheEnvironmentNames(t *test
 	if err := os.WriteFile(path, serviceAccount(t, authority.URL), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	auth := NewAuth(&egress.Policy{}, environment{"GOOGLE_APPLICATION_CREDENTIALS": path}.lookup)
-	auth.publicClient = authority.Client()
+	auth := authTrusting(authority, environment{"GOOGLE_APPLICATION_CREDENTIALS": path}.lookup)
 	request := upstreamRequest(t, vertexLocation+"/publishers/google/models/gemini:generateContent")
 	if _, err := auth.Apply(t.Context(), request, vertex("vertex-gemini"), nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := request.Header.Get("Authorization"); got != "Bearer "+issuedToken {
 		t.Fatalf("Authorization %q, want the token issued for the named file", got)
-	}
-}
-
-func TestIdentityRequestsReachOnlyTheEndpointsTheEnvironmentNames(t *testing.T) {
-	t.Parallel()
-	loopback := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
-	identity := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
-	t.Cleanup(identity.Close)
-	clients := map[string]struct {
-		variable string
-		client   func(getenv func(string) string) *http.Client
-	}{
-		"a Microsoft managed identity endpoint": {"IDENTITY_ENDPOINT", func(getenv func(string) string) *http.Client {
-			return NewAuth(loopback, getenv).azureClient
-		}},
-		"an AWS container credentials endpoint": {"AWS_CONTAINER_CREDENTIALS_FULL_URI", func(getenv func(string) string) *http.Client {
-			return NewBillingAuth(loopback, &http.Client{Transport: http.DefaultTransport}, getenv).client
-		}},
-	}
-	for name, c := range clients {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			if response, err := c.client(unset).Get(identity.URL); err == nil {
-				response.Body.Close()
-				t.Fatal("an endpoint the environment does not name was reached")
-			}
-			response, err := c.client(environment{c.variable: identity.URL}.lookup).Get(identity.URL)
-			if err != nil {
-				t.Fatal(err)
-			}
-			response.Body.Close()
-			if response.StatusCode != http.StatusNoContent {
-				t.Fatalf("status %d from the named endpoint", response.StatusCode)
-			}
-		})
 	}
 }

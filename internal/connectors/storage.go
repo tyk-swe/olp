@@ -53,8 +53,8 @@ func (a *Auth) ApplyGoogleStorage(ctx context.Context, req *http.Request, mode s
 	if err != nil {
 		return egress.Sensitive{}, err
 	}
-	req.Header.Set("Authorization", "Bearer "+token.Value)
+	req.Header.Set("Authorization", "Bearer "+token)
 	var sensitive egress.Sensitive
-	sensitive.Add(string(secret), token.Value)
+	sensitive.Add(string(secret), token)
 	return sensitive, nil
 }

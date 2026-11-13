@@ -4,15 +4,12 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/tyk-swe/olp/internal/connectors/cloudidentity"
 	"github.com/tyk-swe/olp/internal/egress"
 )
 
 func NewBillingAuth(policy *egress.Policy, client *http.Client, getenv func(string) string) *Auth {
-	public := boundedAuthTransport{base: client.Transport, policy: &egress.Policy{}}
-	return newAuth(getenv,
-		awsIdentityTransport{metadata: bounded(awsIdentityPolicy(policy)), public: public, getenv: getenv},
-		public,
-		azureIdentityTransport{base: bounded(azureIdentityPolicy(policy, getenv)), public: public, getenv: getenv})
+	return newAuth(cloudidentity.Billing(policy, client.Transport, getenv))
 }
 
 func (a *Auth) ApplyGoogleBigQuery(ctx context.Context, req *http.Request, mode string, secret []byte) (egress.Sensitive, error) {
@@ -27,8 +24,8 @@ func (a *Auth) ApplyGoogleBigQuery(ctx context.Context, req *http.Request, mode 
 	if err != nil {
 		return egress.Sensitive{}, err
 	}
-	req.Header.Set("Authorization", "Bearer "+token.Value)
+	req.Header.Set("Authorization", "Bearer "+token)
 	var sensitive egress.Sensitive
-	sensitive.Add(string(secret), token.Value)
+	sensitive.Add(string(secret), token)
 	return sensitive, nil
 }
