@@ -341,3 +341,56 @@ func cacheBedrockStream(t *testing.T) []byte {
 	}
 	return body.Bytes()
 }
+
+func TestCachedTransformedBedrockRejectsInvalidUsage(t *testing.T) {
+	for _, mode := range []string{"none", "exact", "prompt"} {
+		for _, valid := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/valid=%t", mode, valid), func(t *testing.T) {
+				h := strictHarness(t, func(snapshot *routing.Snapshot) {
+					for id, provider := range snapshot.Providers {
+						provider.Kind, provider.ProfileID, provider.ProfileRevision, provider.VendorID = "bedrock", "bedrock-converse", connectors.ProfileRevision, ""
+						provider.CloudRegion, provider.AuthMode = "us-east-1", "static"
+						provider.Capabilities = []routing.Capability{{Model: provider.Capabilities[0].Model, Operation: "generation", Surface: "bedrock", Mode: "unary"}}
+						snapshot.Providers[id] = provider
+					}
+					route := snapshot.Routes[routeSlug]
+					route.Fidelity.Mode = routing.FidelityTransformed
+					if mode == "prompt" {
+						route.PromptCache = &cache.PromptPolicy{}
+					}
+					snapshot.Routes[routeSlug] = route
+				})
+				if mode == "exact" {
+					enableTestCache(t, h)
+				}
+				serveBedrock(t, h)
+				usage := `{"inputTokens":2}`
+				if valid {
+					usage = `{"inputTokens":2,"outputTokens":3,"totalTokens":5}`
+				}
+				h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					fmt.Fprintf(w, `{"output":{"message":{"role":"assistant","content":[{"text":"hello"}]}},"stopReason":"end_turn","usage":%s}`, usage)
+				})
+				response := h.do(t.Context(), "POST", "/bedrock/model/team-chat/converse", fullKey, []byte(`{"messages":[{"role":"user","content":[{"text":"hello"}]}],"inferenceConfig":{"maxTokens":16}}`), nil)
+				body, _ := io.ReadAll(response.Body)
+				response.Body.Close()
+				want := http.StatusBadGateway
+				if valid {
+					want = http.StatusOK
+				}
+				if response.StatusCode != want {
+					t.Fatalf("status=%d body=%s, want %d", response.StatusCode, body, want)
+				}
+				evidence := h.sink.last(t)
+				if valid {
+					if evidence.Outcome != "success" || len(evidence.Attempts) != 1 || evidence.Attempts[0].Usage == nil {
+						t.Fatalf("successful usage missing: %+v", evidence)
+					}
+				} else if evidence.Outcome != "failure" || len(evidence.Attempts) != 1 || evidence.Attempts[0].Class != "protocol" {
+					t.Fatalf("malformed usage recorded as success: %+v", evidence)
+				}
+			})
+		}
+	}
+}

@@ -756,6 +756,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 		}
 		if err == nil {
 			native, nativeErr := responseCodec.Native(raw)
+			err = nativeErr
 			if native != nil {
 				if encodedWire == wire.Responses {
 					fact.ObserveUsage(native.Usage, native.UsageComplete)
@@ -764,7 +765,6 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 				}
 			}
 			if contract != nil {
-				err = nativeErr
 				if err == nil {
 					st.settled = true
 					err = contract.ValidateResult(native.Native)
