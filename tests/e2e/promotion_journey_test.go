@@ -342,11 +342,17 @@ func testPromotionCLIReview(t *testing.T, s *service, operator *caller, document
 func testPromotionPolicyMembers(t *testing.T, s *service, operator *caller, document map[string]any) {
 	t.Helper()
 	for _, section := range []string{"routes", "templates"} {
-		for _, policy := range []string{
-			`{"constraints":{"max_costt":"1.00"}}`,
-			`{"constraints":{"Require_zero_data_retention":true}}`,
-			`{"defaults":{"allow_fallbackss":false}}`,
-			`{"defaults":{"strategy":"weighted","Strategy":"price"}}`,
+		for _, tc := range []struct {
+			policy string
+			valid  bool
+		}{
+			{`{"constraints":{"max_cost":"1.00"},"defaults":{"allow_fallbacks":false}}`, true},
+			{`{"constraints":null,"defaults":null}`, true},
+			{`{"constraints":{"max_cost":null},"defaults":{"strategy":null}}`, true},
+			{`{"constraints":{"max_costt":"1.00"}}`, false},
+			{`{"constraints":{"Require_zero_data_retention":true}}`, false},
+			{`{"defaults":{"allow_fallbackss":false}}`, false},
+			{`{"defaults":{"strategy":"weighted","Strategy":"price"}}`, false},
 		} {
 			encoded, err := json.Marshal(document)
 			if err != nil {
@@ -360,9 +366,16 @@ func testPromotionPolicyMembers(t *testing.T, s *service, operator *caller, docu
 			if len(entries) == 0 {
 				t.Fatalf("no %s fixture", section)
 			}
-			entries[0]["routing_policy"] = json.RawMessage(policy)
+			entries[0]["routing_policy"] = json.RawMessage(tc.policy)
+			if tc.valid {
+				s.want(operator, "POST", "/api/v1/configuration/plan", map[string]any{"document": changed}, nil, http.StatusOK)
+				continue
+			}
 			for _, operation := range []string{"plan", "apply"} {
-				s.want(operator, "POST", "/api/v1/configuration/"+operation, map[string]any{"document": changed}, idempotent(), http.StatusBadRequest)
+				response := s.want(operator, "POST", "/api/v1/configuration/"+operation, map[string]any{"document": changed}, idempotent(), http.StatusBadRequest)
+				if response["type"] != "https://openllmproxy.dev/problems/invalid_json" {
+					t.Fatalf("%s %s: %v", section, operation, response)
+				}
 			}
 		}
 	}
