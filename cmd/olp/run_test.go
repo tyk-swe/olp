@@ -3,11 +3,12 @@ package main
 import (
 	"errors"
 	"flag"
-	"github.com/tyk-swe/olp/internal/admission"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"testing"
+
+	"github.com/tyk-swe/olp/internal/admission"
 )
 
 func TestControlNeverAnswersConsumerProtocolPathsWithTheConsole(t *testing.T) {
@@ -50,13 +51,22 @@ func TestA2AUsesInferenceAdmissionAndPerimeter(t *testing.T) {
 	inference := admission.NewPool(1)
 	public := &admission.Public{Inference: inference, Management: management, InferenceEnabled: true, Reject: rejectPublic}
 	handler := Perimeter("https://example.invalid", public.Wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })))
-	for _, path := range []string{"/a2a/agent", "/a2a/agent/.well-known/agent-card.json"} {
+	for path, method := range map[string]string{"/a2a/agent": http.MethodPost, "/a2a/agent/.well-known/agent-card.json": http.MethodGet} {
 		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, path, nil))
+		handler.ServeHTTP(recorder, httptest.NewRequest(method, path, nil))
 		if recorder.Code != http.StatusOK || recorder.Header().Get("Cross-Origin-Resource-Policy") != "" || recorder.Header().Get("Cache-Control") != "no-store" {
 			t.Fatalf("A2A %s status=%d headers=%v", path, recorder.Code, recorder.Header())
 		}
 	}
+	publicGateway := http.NewServeMux()
+	publicGateway.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("console")) })
+	reservePublicPaths(publicGateway, Gateway)
+	unknown := httptest.NewRecorder()
+	publicGateway.ServeHTTP(unknown, httptest.NewRequest(http.MethodGet, "/a2a/missing", nil))
+	if unknown.Code != http.StatusNotFound || unknown.Body.String() == "console" {
+		t.Fatal("unknown A2A endpoint reached the console")
+	}
+
 	managementResponse := httptest.NewRecorder()
 	handler.ServeHTTP(managementResponse, httptest.NewRequest(http.MethodGet, "/api/v1/a2a-tasks", nil))
 	if managementResponse.Code != http.StatusServiceUnavailable {
