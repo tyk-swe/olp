@@ -7,17 +7,12 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 )
 
-func NewBillingAuth(policy *egress.Policy, client *http.Client) *Auth {
-	auth := NewAuth(policy)
-	public := &egress.Policy{}
-	auth.publicClient = &http.Client{
-		Transport:     boundedAuthTransport{base: client.Transport, policy: public},
-		Timeout:       authTimeout,
-		CheckRedirect: func(*http.Request, []*http.Request) error { return egress.ErrRedirect },
-	}
-	auth.client.Transport = awsIdentityTransport{metadata: auth.client.Transport, public: auth.publicClient.Transport}
-	auth.azureClient.Transport = azureIdentityTransport{base: auth.azureClient.Transport, public: auth.publicClient.Transport}
-	return auth
+func NewBillingAuth(policy *egress.Policy, client *http.Client, getenv func(string) string) *Auth {
+	public := boundedAuthTransport{base: client.Transport, policy: &egress.Policy{}}
+	return newAuth(getenv,
+		awsIdentityTransport{metadata: bounded(awsIdentityPolicy(policy)), public: public, getenv: getenv},
+		public,
+		azureIdentityTransport{base: bounded(azureIdentityPolicy(policy, getenv)), public: public, getenv: getenv})
 }
 
 func (a *Auth) ApplyGoogleBigQuery(ctx context.Context, req *http.Request, mode string, secret []byte) (egress.Sensitive, error) {

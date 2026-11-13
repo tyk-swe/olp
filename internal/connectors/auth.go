@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -74,79 +75,100 @@ type Auth struct {
 	azureClient  *http.Client
 	adc          chan credentialResult
 	azureFactory func(mode string, secret []byte) (azcore.TokenCredential, error)
+	getenv       func(string) string
 }
 
-func NewAuth(policy *egress.Policy) *Auth {
-	// The maintained AWS chain owns metadata credential discovery. Permit its
-	// fixed link-local endpoints only on this authentication transport.
-	awsPolicy := *policy
-	awsPolicy.AllowedNetworks = append([]netip.Prefix{}, policy.AllowedNetworks...)
-	awsPolicy.PlainHTTPHosts = append([]string{}, policy.PlainHTTPHosts...)
-	for _, host := range awsMetadataHosts() {
-		address := netip.MustParseAddr(host)
-		awsPolicy.AllowedNetworks = append(awsPolicy.AllowedNetworks, netip.PrefixFrom(address, address.BitLen()))
-		awsPolicy.PlainHTTPHosts = append(awsPolicy.PlainHTTPHosts, host)
-	}
-	client := awsPolicy.Client(authTimeout)
-	client.Timeout = authTimeout
-	client.Transport = boundedAuthTransport{base: client.Transport, policy: &awsPolicy}
-	public := &egress.Policy{}
-	publicClient := public.Client(authTimeout)
-	publicClient.Timeout = authTimeout
-	publicClient.Transport = boundedAuthTransport{base: publicClient.Transport, policy: public}
+func NewAuth(policy *egress.Policy, getenv func(string) string) *Auth {
+	return newAuth(getenv,
+		bounded(awsIdentityPolicy(policy)),
+		bounded(&egress.Policy{}),
+		azureIdentityTransport{base: bounded(azureIdentityPolicy(policy, getenv)), getenv: getenv})
+}
 
-	azurePolicy := *policy
-	azurePolicy.AllowedNetworks = append([]netip.Prefix{}, policy.AllowedNetworks...)
-	azurePolicy.PlainHTTPHosts = append([]string{}, policy.PlainHTTPHosts...)
-	imds := netip.MustParseAddr("169.254.169.254")
-	azurePolicy.AllowedNetworks = append(azurePolicy.AllowedNetworks, netip.PrefixFrom(imds, imds.BitLen()))
-	azurePolicy.PlainHTTPHosts = append(azurePolicy.PlainHTTPHosts, "169.254.169.254")
-	for _, name := range []string{"IDENTITY_ENDPOINT", "MSI_ENDPOINT", "IMDS_ENDPOINT"} {
-		raw := os.Getenv(name)
-		if raw == "" {
-			continue
-		}
-		endpoint, err := url.Parse(raw)
-		if err != nil || endpoint.Hostname() == "" {
-			continue
-		}
-		host := strings.ToLower(endpoint.Hostname())
-		if endpoint.Scheme == "http" {
-			azurePolicy.PlainHTTPHosts = append(azurePolicy.PlainHTTPHosts, host)
-		}
-		if address, err := netip.ParseAddr(strings.Trim(host, "[]")); err == nil {
-			azurePolicy.AllowedNetworks = append(azurePolicy.AllowedNetworks, netip.PrefixFrom(address.Unmap(), address.Unmap().BitLen()))
+func newAuth(getenv func(string) string, metadata, public, azure http.RoundTripper) *Auth {
+	client := func(transport http.RoundTripper) *http.Client {
+		return &http.Client{
+			Transport:     transport,
+			Timeout:       authTimeout,
+			CheckRedirect: func(*http.Request, []*http.Request) error { return egress.ErrRedirect },
 		}
 	}
-	azureClient := azurePolicy.Client(authTimeout)
-	azureClient.Timeout = authTimeout
-	azureClient.Transport = azureIdentityTransport{base: boundedAuthTransport{base: azureClient.Transport, policy: &azurePolicy}}
 	return &Auth{tokens: map[[32]byte]*cloudauth.Token{}, aws: map[[32]byte]aws.CredentialsProvider{},
 		azure: map[[32]byte]azcore.TokenCredential{}, azureTokens: map[[32]byte]azcore.AccessToken{}, ibmTokens: map[[32]byte]ibmToken{},
-		client: client, publicClient: publicClient, azureClient: azureClient, iamEndpoint: ibmIAMEndpoint}
+		client: client(metadata), publicClient: client(public), azureClient: client(azure), iamEndpoint: ibmIAMEndpoint, getenv: getenv}
 }
 
-func awsMetadataHosts() []string {
-	return []string{"169.254.169.254", "169.254.170.2", "169.254.170.23", "fd00:ec2::254", "fd00:ec2::23"}
+func bounded(policy *egress.Policy) http.RoundTripper {
+	return boundedAuthTransport{base: policy.Transport(authTimeout), policy: policy}
+}
+
+var (
+	awsMetadataHosts       = []string{"169.254.169.254", "169.254.170.2", "169.254.170.23", "fd00:ec2::254", "fd00:ec2::23"}
+	awsIdentityEndpoints   = []string{"AWS_CONTAINER_CREDENTIALS_FULL_URI", "AWS_EC2_METADATA_SERVICE_ENDPOINT"}
+	azureIdentityEndpoints = []string{"IDENTITY_ENDPOINT", "MSI_ENDPOINT", "IMDS_ENDPOINT"}
+	azureIdentityHosts     = slices.Concat(azureIdentityEndpoints, []string{"AZURE_AUTHORITY_HOST"})
+)
+
+const azureMetadataHost = "169.254.169.254"
+
+func namedEndpoints(getenv func(string) string, variables []string) []*url.URL {
+	var endpoints []*url.URL
+	for _, variable := range variables {
+		if endpoint, err := url.Parse(getenv(variable)); err == nil && endpoint.Hostname() != "" {
+			endpoints = append(endpoints, endpoint)
+		}
+	}
+	return endpoints
+}
+
+func anyHost(endpoints []*url.URL, host string) bool {
+	return slices.ContainsFunc(endpoints, func(endpoint *url.URL) bool { return strings.EqualFold(endpoint.Hostname(), host) })
+}
+
+func reaching(policy *egress.Policy, addresses []netip.Addr, plainHosts []string) *egress.Policy {
+	widened := *policy
+	widened.AllowedNetworks = slices.Clone(policy.AllowedNetworks)
+	for _, address := range addresses {
+		widened.AllowedNetworks = append(widened.AllowedNetworks, netip.PrefixFrom(address, address.BitLen()))
+	}
+	widened.PlainHTTPHosts = slices.Concat(policy.PlainHTTPHosts, plainHosts)
+	return &widened
+}
+
+// The maintained AWS chain owns metadata credential discovery, so its fixed
+// link-local endpoints are reachable on the authentication transport only.
+func awsIdentityPolicy(policy *egress.Policy) *egress.Policy {
+	addresses := make([]netip.Addr, len(awsMetadataHosts))
+	for i, host := range awsMetadataHosts {
+		addresses[i] = netip.MustParseAddr(host)
+	}
+	return reaching(policy, addresses, awsMetadataHosts)
+}
+
+func azureIdentityPolicy(policy *egress.Policy, getenv func(string) string) *egress.Policy {
+	addresses, plainHosts := []netip.Addr{netip.MustParseAddr(azureMetadataHost)}, []string{azureMetadataHost}
+	for _, endpoint := range namedEndpoints(getenv, azureIdentityEndpoints) {
+		host := strings.ToLower(endpoint.Hostname())
+		if endpoint.Scheme == "http" {
+			plainHosts = append(plainHosts, host)
+		}
+		if address, err := netip.ParseAddr(strings.Trim(host, "[]")); err == nil {
+			addresses = append(addresses, address.Unmap())
+		}
+	}
+	return reaching(policy, addresses, plainHosts)
 }
 
 type awsIdentityTransport struct {
 	metadata http.RoundTripper
 	public   http.RoundTripper
+	getenv   func(string) string
 }
 
 func (t awsIdentityTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	host := r.URL.Hostname()
-	for _, address := range awsMetadataHosts() {
-		if host == address {
-			return t.metadata.RoundTrip(r)
-		}
-	}
-	for _, name := range []string{"AWS_CONTAINER_CREDENTIALS_FULL_URI", "AWS_EC2_METADATA_SERVICE_ENDPOINT"} {
-		endpoint, err := url.Parse(os.Getenv(name))
-		if err == nil && strings.EqualFold(endpoint.Hostname(), host) {
-			return t.metadata.RoundTrip(r)
-		}
+	if slices.Contains(awsMetadataHosts, host) || anyHost(namedEndpoints(t.getenv, awsIdentityEndpoints), host) {
+		return t.metadata.RoundTrip(r)
 	}
 	return t.public.RoundTrip(r)
 }
@@ -163,33 +185,19 @@ var azureAuthorityHosts = map[string]bool{
 type azureIdentityTransport struct {
 	base   http.RoundTripper
 	public http.RoundTripper
+	getenv func(string) string
 }
 
 func (t azureIdentityTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	host := strings.ToLower(strings.TrimSuffix(r.URL.Hostname(), "."))
-	if !azureIdentityHost(host) {
+	authority := azureAuthorityHosts[host]
+	if !authority && host != azureMetadataHost && !anyHost(namedEndpoints(t.getenv, azureIdentityHosts), host) {
 		return nil, ErrAuthentication
 	}
-	if t.public != nil && azureAuthorityHosts[host] {
+	if t.public != nil && authority {
 		return t.public.RoundTrip(r)
 	}
 	return t.base.RoundTrip(r)
-}
-
-func azureIdentityHost(host string) bool {
-	if azureAuthorityHosts[host] || host == "169.254.169.254" {
-		return true
-	}
-	for _, name := range []string{"IDENTITY_ENDPOINT", "MSI_ENDPOINT", "IMDS_ENDPOINT", "AZURE_AUTHORITY_HOST"} {
-		raw := os.Getenv(name)
-		if raw == "" {
-			continue
-		}
-		if endpoint, err := url.Parse(raw); err == nil && strings.EqualFold(endpoint.Hostname(), host) {
-			return true
-		}
-	}
-	return false
 }
 
 type boundedAuthTransport struct {
@@ -581,7 +589,7 @@ func (a *Auth) googleToken(ctx context.Context, c Config, secret []byte) (*cloud
 // order, but reads metadata through the authentication client instead of the
 // library's unrestricted default, so GCE_METADATA_HOST must pass egress policy.
 func (a *Auth) googleDefaultCredentials(opts *googlecredentials.DetectOptions) (*cloudauth.Credentials, error) {
-	if path := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"); path != "" {
+	if path := a.getenv("GOOGLE_APPLICATION_CREDENTIALS"); path != "" {
 		file, err := os.ReadFile(path)
 		if err != nil {
 			return nil, err

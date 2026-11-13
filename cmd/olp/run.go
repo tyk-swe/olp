@@ -273,7 +273,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		exporter = &stream.Worker{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Log: log}
 		focusWorker = &focus.Worker{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Version: Version, Log: log, Now: time.Now}
 		capturer = capture.NewManager(pool, keys, installation, sender, log)
-		importer = imports.NewWorker(imports.Deps{Pool: pool, Keys: keys, Installation: installation, Egress: policy, Log: log, Now: time.Now})
+		importer = imports.NewWorker(imports.Deps{Pool: pool, Keys: keys, Installation: installation, Egress: policy, Getenv: os.Getenv, Log: log, Now: time.Now})
 		var mounted map[string]release.MountedProvider
 		if c.ConnectorConfigFile != "" {
 			mounted, err = providers.LoadMounted(c.ConnectorConfigFile, &policy)
@@ -308,7 +308,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		})
 		defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "plugin host", func(ctx context.Context) error { pluginHost.Close(ctx); return nil })
 		var gatewayConfig, probeConfig gateway.Config
-		gatewayDeps := gateway.Dependencies{Runtime: rt, Egress: &policy, Log: log, Sink: events.LogSink{Log: log}}
+		gatewayDeps := gateway.Dependencies{Runtime: rt, Egress: &policy, Getenv: os.Getenv, Log: log, Sink: events.LogSink{Log: log}}
 		probeDeps := gatewayDeps
 		if c.Mode.Management() || c.Mode.Inference() {
 			gatewayConfig = gateway.Config{
@@ -365,7 +365,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "media spool", func(context.Context) error { return spool.Close() })
 			mediaTransport = transport.New(transport.Deps{
 				Client:           policy.Client(gateway.UpstreamHeaderTimeout),
-				Auth:             connectors.NewAuth(&policy),
+				Auth:             connectors.NewAuth(&policy, os.Getenv),
 				Egress:           &policy,
 				Spool:            spool,
 				MaxResponseBytes: c.ProviderMaxResponseBytes,

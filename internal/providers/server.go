@@ -33,6 +33,7 @@ type QuotaSource interface {
 type Deps struct {
 	Access          *access.Server
 	Egress          *egress.Policy
+	Getenv          func(string) string
 	Signer          connectors.Signer
 	ExternalSecrets release.ExternalSecrets
 	Unconfined      *plugins.Unconfined
@@ -60,7 +61,7 @@ func New(deps Deps) *Server {
 	return &Server{
 		access: deps.Access, egress: deps.Egress, external: deps.ExternalSecrets, unconfined: deps.Unconfined,
 		quota: deps.Quotas, plugins: deps.Plugins, catalog: deps.Catalog, activated: deps.Activated, log: deps.Log,
-		prober: probe.New(deps.Egress, deps.Signer, deps.Plugins, networkSecrets{server: deps.Access}),
+		prober: probe.New(deps.Egress, deps.Getenv, deps.Signer, deps.Plugins, networkSecrets{server: deps.Access}),
 	}
 }
 

@@ -26,6 +26,12 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 )
 
+type environment map[string]string
+
+func (e environment) lookup(name string) string { return e[name] }
+
+func unset(string) string { return "" }
+
 const credential = "sk-fixture-credential-0123456789"
 
 func upstreamRequest(t *testing.T, target string) *http.Request {
@@ -43,7 +49,7 @@ func sent(r *http.Request) string {
 }
 
 func TestApplySendsTheCredentialInOneHeaderAndReportsItForRedaction(t *testing.T) {
-	auth := NewAuth(&egress.Policy{})
+	auth := NewAuth(&egress.Policy{}, unset)
 	cases := map[string]struct {
 		config Config
 		secret string
@@ -95,7 +101,7 @@ func TestApplySendsTheCredentialInOneHeaderAndReportsItForRedaction(t *testing.T
 }
 
 func TestApplyRefusesCredentialsItCannotSendSafely(t *testing.T) {
-	auth := NewAuth(&egress.Policy{})
+	auth := NewAuth(&egress.Policy{}, unset)
 	aws := Config{Kind: "bedrock", AuthMode: "static", CloudRegion: "us-east-1"}
 	cases := map[string]struct {
 		config Config
@@ -130,7 +136,7 @@ func TestApplyRefusesCredentialsItCannotSendSafely(t *testing.T) {
 }
 
 func TestApplyKeepsVertexCredentialsOnTheConfiguredGoogleEndpoint(t *testing.T) {
-	auth := NewAuth(&egress.Policy{})
+	auth := NewAuth(&egress.Policy{}, unset)
 	config := Config{Kind: "vertex_ai", AuthMode: "service_account", CloudRegion: "us-central1", CloudProject: "fixture-project"}
 	google, err := url.Parse(DefaultEndpoint(config.Kind, config.CloudRegion, config.CloudProject))
 	if err != nil {
@@ -259,7 +265,7 @@ func TestApplyExchangesAStoredCredentialForOneTokenItReuses(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			authority := newTokenAuthority(t, http.StatusOK)
-			auth := NewAuth(&egress.Policy{})
+			auth := NewAuth(&egress.Policy{}, unset)
 			c.wire(auth, authority)
 			secret := c.secret(authority)
 			for range 2 {
@@ -296,7 +302,7 @@ func TestApplyTellsARefusedCredentialFromAnAuthorityThatMayRecover(t *testing.T)
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			authority := newTokenAuthority(t, c.status)
-			auth := NewAuth(&egress.Policy{})
+			auth := NewAuth(&egress.Policy{}, unset)
 			auth.iamEndpoint, auth.publicClient = authority.URL, authority.Client()
 			request := upstreamRequest(t, watsonx.Endpoint+"/ml/v1/text/chat")
 			_, err := auth.Apply(t.Context(), request, watsonx, []byte(credential), nil)
@@ -311,13 +317,13 @@ func TestApplyTellsARefusedCredentialFromAnAuthorityThatMayRecover(t *testing.T)
 }
 
 func TestApplicationDefaultCredentialsComeFromTheFileTheEnvironmentNames(t *testing.T) {
+	t.Parallel()
 	authority := newTokenAuthority(t, http.StatusOK)
 	path := filepath.Join(t.TempDir(), "credentials.json")
 	if err := os.WriteFile(path, serviceAccount(t, authority.URL), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", path)
-	auth := NewAuth(&egress.Policy{})
+	auth := NewAuth(&egress.Policy{}, environment{"GOOGLE_APPLICATION_CREDENTIALS": path}.lookup)
 	auth.publicClient = authority.Client()
 	request := upstreamRequest(t, vertexLocation+"/publishers/google/models/gemini:generateContent")
 	if _, err := auth.Apply(t.Context(), request, vertex("vertex-gemini"), nil, nil); err != nil {
@@ -329,26 +335,29 @@ func TestApplicationDefaultCredentialsComeFromTheFileTheEnvironmentNames(t *test
 }
 
 func TestIdentityRequestsReachOnlyTheEndpointsTheEnvironmentNames(t *testing.T) {
+	t.Parallel()
 	loopback := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
 	identity := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 	t.Cleanup(identity.Close)
 	clients := map[string]struct {
 		variable string
-		client   func() *http.Client
+		client   func(getenv func(string) string) *http.Client
 	}{
-		"a Microsoft managed identity endpoint": {"IDENTITY_ENDPOINT", func() *http.Client { return NewAuth(loopback).azureClient }},
-		"an AWS container credentials endpoint": {"AWS_CONTAINER_CREDENTIALS_FULL_URI", func() *http.Client {
-			return NewBillingAuth(loopback, &http.Client{Transport: http.DefaultTransport}).client
+		"a Microsoft managed identity endpoint": {"IDENTITY_ENDPOINT", func(getenv func(string) string) *http.Client {
+			return NewAuth(loopback, getenv).azureClient
+		}},
+		"an AWS container credentials endpoint": {"AWS_CONTAINER_CREDENTIALS_FULL_URI", func(getenv func(string) string) *http.Client {
+			return NewBillingAuth(loopback, &http.Client{Transport: http.DefaultTransport}, getenv).client
 		}},
 	}
 	for name, c := range clients {
 		t.Run(name, func(t *testing.T) {
-			if response, err := c.client().Get(identity.URL); err == nil {
+			t.Parallel()
+			if response, err := c.client(unset).Get(identity.URL); err == nil {
 				response.Body.Close()
 				t.Fatal("an endpoint the environment does not name was reached")
 			}
-			t.Setenv(c.variable, identity.URL)
-			response, err := c.client().Get(identity.URL)
+			response, err := c.client(environment{c.variable: identity.URL}.lookup).Get(identity.URL)
 			if err != nil {
 				t.Fatal(err)
 			}

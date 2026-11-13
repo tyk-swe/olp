@@ -52,7 +52,7 @@ func TestAPluginProfilePlacesItsDialectAtTheAddressItsOptionsFill(t *testing.T) 
 	}
 
 	req := upstreamRequest(t, got)
-	if _, err := NewAuth(&egress.Policy{}).Apply(t.Context(), req, c, []byte("secret"), nil); err != nil {
+	if _, err := NewAuth(&egress.Policy{}, unset).Apply(t.Context(), req, c, []byte("secret"), nil); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := req.Header.Get("Authorization"), "Bearer secret"; got != want {

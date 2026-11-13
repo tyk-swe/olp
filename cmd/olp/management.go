@@ -153,7 +153,7 @@ func (m Management) Register(mux *http.ServeMux) {
 		routeServer.Fleet = m.Limits.Fleet
 	}
 	providerServer := providers.New(providers.Deps{
-		Access: m.Access, Egress: m.Egress, Signer: m.PluginHost, ExternalSecrets: secretstore.New(*m.Egress, m.Getenv),
+		Access: m.Access, Egress: m.Egress, Getenv: m.Getenv, Signer: m.PluginHost, ExternalSecrets: secretstore.New(*m.Egress, m.Getenv),
 		Unconfined: m.Unconfined, Log: m.Log, Plugins: m.PluginHost, Catalog: m.Catalog,
 		Activated: routeServer.Activated,
 		Quotas: func() providers.QuotaSource {

@@ -22,7 +22,7 @@ import (
 var loopback = egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
 
 func prober(policy egress.Policy) *Prober {
-	return New(&policy, nil, nil, nil)
+	return New(&policy, func(string) string { return "" }, nil, nil, nil)
 }
 
 func upstreamConnection(t *testing.T, kind, endpoint string) Target {

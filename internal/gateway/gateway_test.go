@@ -295,6 +295,7 @@ func newHarnessWrapped(t *testing.T, cfg Config, wrap func(http.Handler) http.Ha
 		dependencies = extra[0]
 	}
 	dependencies.Runtime, dependencies.Egress, dependencies.Log, dependencies.Sink = rt, &policy, slog.New(slog.NewTextHandler(io.Discard, nil)), sink
+	dependencies.Getenv = func(string) string { return "" }
 	gw := New(dependencies, cfg)
 	mux := http.NewServeMux()
 	gw.Register(mux)
