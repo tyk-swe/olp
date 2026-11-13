@@ -29,6 +29,7 @@ func testPromotionRoundTrip(t *testing.T, parent *service, owner *caller, fixtur
 	exported := s.want(operator, "GET", "/api/v1/configuration/export", nil, nil, http.StatusOK)
 	document := exported["document"].(map[string]any)
 	assertCanonicalDocument(t, document)
+	testPromotionPolicyMembers(t, s, operator, document)
 	assertExportedBillingImport(t, document)
 	request := map[string]any{"document": document, "expected_digest": exported["digest"]}
 
@@ -334,6 +335,35 @@ func testPromotionCLIReview(t *testing.T, s *service, operator *caller, document
 		command := exec.CommandContext(t.Context(), "node", arguments...)
 		if output, err := command.CombinedOutput(); err != nil {
 			t.Fatalf("review current CLI plan: %v\n%s", err, output)
+		}
+	}
+}
+
+func testPromotionPolicyMembers(t *testing.T, s *service, operator *caller, document map[string]any) {
+	t.Helper()
+	for _, section := range []string{"routes", "templates"} {
+		for _, policy := range []string{
+			`{"constraints":{"max_costt":"1.00"}}`,
+			`{"constraints":{"Require_zero_data_retention":true}}`,
+			`{"defaults":{"allow_fallbackss":false}}`,
+			`{"defaults":{"strategy":"weighted","Strategy":"price"}}`,
+		} {
+			encoded, err := json.Marshal(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var changed map[string]any
+			if err := json.Unmarshal(encoded, &changed); err != nil {
+				t.Fatal(err)
+			}
+			entries := items(changed[section])
+			if len(entries) == 0 {
+				t.Fatalf("no %s fixture", section)
+			}
+			entries[0]["routing_policy"] = json.RawMessage(policy)
+			for _, operation := range []string{"plan", "apply"} {
+				s.want(operator, "POST", "/api/v1/configuration/"+operation, map[string]any{"document": changed}, idempotent(), http.StatusBadRequest)
+			}
 		}
 	}
 }
