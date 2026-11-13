@@ -154,7 +154,7 @@ func (c Config) Supports(operation, surface, mode string) bool {
 	}
 	if operation == "batch" {
 		if surface == "native" {
-			return mode == "unary" && (c.Kind == KindVertexAI && c.ProfileID == VertexBatchProfile && c.ProfileRevision == ProfileRevision && c.Hosting() == "vertex-google" ||
+			return mode == "unary" && (c.Kind == KindVertexAI && c.ProfileID == vertexBatchProfile && c.ProfileRevision == ProfileRevision && c.Hosting() == "vertex-google" ||
 				c.Kind == KindBedrock && c.ProfileID == BedrockBatchProfile && c.ProfileRevision == ProfileRevision && c.Hosting() == "bedrock-batch-inference")
 		}
 		switch surface {

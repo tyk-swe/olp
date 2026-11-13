@@ -11,9 +11,6 @@ import (
 
 var tgiCompletionFields = strings.Fields("model prompt max_tokens temperature top_p stream seed repetition_penalty frequency_penalty stop stream_options")
 
-// ValidateCompletionRequest qualifies the narrower TGI endpoint after defaults
-// and transport options are applied. Its per-prompt streaming usage is not an
-// aggregate request counter, so only single-prompt streams are admitted.
 func (c Config) ValidateCompletionRequest(document oif.Document) error {
 	if c.ProfileID != "tgi-completions" {
 		return nil

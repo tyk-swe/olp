@@ -16,16 +16,12 @@ import (
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
-// Every authentication failure matches ErrAuthentication. One that also
-// matches ErrCredentialRejected blames the credential, and any other may pass
-// on a later attempt.
 var (
 	ErrAuthentication     = cloudidentity.ErrUnavailable
 	ErrCredentialRejected = cloudidentity.ErrRejected
 )
 
 type Auth struct {
-	// Without a Signer, a request of a plugin profile that declares signing fails authentication.
 	Signer Signer
 	cloud  *cloudidentity.Source
 }
@@ -38,19 +34,6 @@ func newAuth(dependencies cloudidentity.Dependencies) *Auth {
 	return &Auth{cloud: cloudidentity.NewSource(dependencies)}
 }
 
-// Apply prepares an upstream request in three stages, which every upstream
-// call path runs in this order:
-//
-//  1. Hosting places the request. The caller addressed it from the connector;
-//     hosting adds its semantic headers, query settings and version headers,
-//     and a plugin profile's declared headers and query parameters, which may
-//     carry the credential.
-//  2. Authentication authorizes it, using the authenticator registered for
-//     the connector's auth mode.
-//  3. Signing runs last, over the finished request and its body: the auth
-//     mode's signature, such as SigV4, then a plugin profile's signing hook.
-//
-// It returns the values to redact wherever upstream text is recorded.
 func (a *Auth) Apply(ctx context.Context, req *http.Request, c Config, secret, body []byte) (egress.Sensitive, error) {
 	if c.Kind == "vertex_ai" && !c.vertexDestination(req.URL) {
 		return egress.Sensitive{}, ErrAuthentication
@@ -92,23 +75,14 @@ func (a *Auth) Apply(ctx context.Context, req *http.Request, c Config, secret, b
 	return applied, nil
 }
 
-// An authenticator authorizes upstream requests for one auth mode.
 type authenticator struct {
-	// credential reports whether the mode authorizes with a stored credential
-	// secret rather than ambient credentials or none.
-	credential bool
-	// authenticate adds the mode's authorization to a placed request.
+	credential   bool
 	authenticate func(a *Auth, ctx context.Context, req *http.Request, c Config, secret []byte) (authorization, error)
 }
 
-// An authorization is what authentication leaves for the rest of the request's
-// preparation.
 type authorization struct {
-	// sensitive holds the values authentication added that must be redacted.
 	sensitive []string
-	// sign, when set, runs over the finished request and returns the values it
-	// added that must be redacted.
-	sign func(ctx context.Context, req *http.Request, body []byte) ([]string, error)
+	sign      func(ctx context.Context, req *http.Request, body []byte) ([]string, error)
 }
 
 const (
@@ -122,11 +96,10 @@ const (
 	AuthDefaultChain      = "default_chain"
 	AuthStatic            = "static"
 	AuthIBMIAM            = "ibm_iam"
+	AuthStaticCredential  = "static_credential"
+	AuthGrant             = "grant"
 )
 
-// authenticators registers the authenticator for each auth mode. A provider
-// kind lists the modes its validation admits; a mode without an authenticator
-// never authorizes a request.
 var authenticators = map[string]authenticator{
 	AuthNone:              {authenticate: (*Auth).authenticateNone},
 	AuthAPIKey:            {credential: true, authenticate: (*Auth).authenticateAPIKey},
@@ -142,35 +115,29 @@ var authenticators = map[string]authenticator{
 	AuthGrant:             {credential: true, authenticate: (*Auth).authenticatePlaced},
 }
 
-// SecretRequired reports whether an auth mode authorizes with a stored
-// credential secret. An unregistered mode requires one.
 func SecretRequired(mode string) bool {
 	authenticator, ok := authenticators[mode]
 	return !ok || authenticator.credential
 }
 
-// authenticateNone sends no authorization.
 func (*Auth) authenticateNone(context.Context, *http.Request, Config, []byte) (authorization, error) {
 	return authorization{}, nil
 }
 
-// authenticatePlaced adds no authorization of its own: the plugin profile's
-// hosting adaptation placed the static credential or the grant's access token.
 func (*Auth) authenticatePlaced(context.Context, *http.Request, Config, []byte) (authorization, error) {
 	return authorization{}, nil
 }
 
-// authenticateAPIKey sends the key in the header the provider kind expects.
 func (*Auth) authenticateAPIKey(_ context.Context, req *http.Request, c Config, secret []byte) (authorization, error) {
 	if len(secret) == 0 || strings.ContainsAny(string(secret), "\r\n\x00") {
 		return authorization{}, ErrCredentialRejected
 	}
 	switch c.Kind {
-	case "anthropic":
+	case KindAnthropic:
 		req.Header.Set("X-Api-Key", string(secret))
-	case "gemini":
+	case KindGemini:
 		req.Header.Set("X-Goog-Api-Key", string(secret))
-	case "azure_openai", KindAzureAISearch:
+	case KindAzureOpenAI, KindAzureAISearch:
 		req.Header.Set("Api-Key", string(secret))
 	default:
 		if placement, ok := vendors.CredentialFor(c.VendorID); ok {
@@ -182,7 +149,6 @@ func (*Auth) authenticateAPIKey(_ context.Context, req *http.Request, c Config, 
 	return authorization{}, nil
 }
 
-// authenticateHeaders sends the encrypted header values the connector names.
 func (*Auth) authenticateHeaders(_ context.Context, req *http.Request, c Config, secret []byte) (authorization, error) {
 	if err := egress.ApplyCredentialHeaders(req.Header, c.CredentialHeaders, secret); err != nil {
 		return authorization{}, ErrCredentialRejected
@@ -204,7 +170,7 @@ func (a *Auth) authenticateGoogle(ctx context.Context, req *http.Request, c Conf
 }
 
 func (a *Auth) authenticateAzure(ctx context.Context, req *http.Request, c Config, secret []byte) (authorization, error) {
-	token, err := a.azureToken(ctx, c, secret, c.AzureScope())
+	token, err := a.azureToken(ctx, c, secret, c.azureScope())
 	if err != nil {
 		return authorization{}, err
 	}
@@ -221,8 +187,6 @@ func (a *Auth) authenticateIBM(ctx context.Context, req *http.Request, c Config,
 	return authorization{sensitive: []string{token}}, nil
 }
 
-// authenticateAWS resolves AWS credentials, which sign the finished request
-// with SigV4, or sign the bearer token a hosting accepts instead.
 func (a *Auth) authenticateAWS(ctx context.Context, req *http.Request, c Config, secret []byte) (authorization, error) {
 	creds, err := a.awsCredentials(ctx, c, secret)
 	if err != nil {
@@ -279,7 +243,7 @@ func sigV4Signature(authorization string) string {
 }
 
 func cacheKey(c Config, secret []byte) cloudidentity.Key {
-	return sha256.Sum256(append([]byte(c.Kind+"\x00"+c.AuthMode+"\x00"+c.CloudRegion+"\x00"+c.CloudProject+"\x00"+c.ProfileID+"\x00"+c.ProfileRevision+"\x00"+c.AzureScope()+"\x00"), secret...))
+	return sha256.Sum256(append([]byte(c.Kind+"\x00"+c.AuthMode+"\x00"+c.CloudRegion+"\x00"+c.CloudProject+"\x00"+c.ProfileID+"\x00"+c.ProfileRevision+"\x00"+c.azureScope()+"\x00"), secret...))
 }
 
 func identityOf(c Config, storedMode string, secret []byte) cloudidentity.Credential {

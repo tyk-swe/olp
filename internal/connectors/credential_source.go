@@ -2,9 +2,6 @@ package connectors
 
 import "errors"
 
-// ValidateCredentialSource restricts caller secrets to direct, stateless
-// authentication. Ambient identity, credential exchange and plugin hooks keep
-// their operator-held authority; they cannot receive request credentials.
 func ValidateCredentialSource(source, kind, mode string) error {
 	switch source {
 	case "", "operator":

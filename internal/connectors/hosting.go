@@ -70,7 +70,7 @@ func (c Config) ValidModel(model string) bool {
 	return ModelValid(c.Kind, model)
 }
 
-func (c Config) AzureScope() string {
+func (c Config) azureScope() string {
 	if scope := c.traits().azureScope; scope != "" {
 		return scope
 	}

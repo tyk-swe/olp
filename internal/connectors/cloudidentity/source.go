@@ -99,8 +99,6 @@ func (c *cache[V]) put(key Key, value V) {
 	c.entries[key] = value
 }
 
-// A refusal from the credential authority rejects the credential. Any other
-// failure, such as an unreachable authority, may pass on a later attempt.
 func exchangeFailure(err error) error {
 	status := 0
 	if e, ok := errors.AsType[*cloudauth.Error](err); ok && e.Response != nil {

@@ -28,9 +28,6 @@ func googleLocation(service, region, project string) string {
 	return "https://" + googleHost(service, region) + "/v1/" + vertexResource(project, region)
 }
 
-// Native Vertex credentials authorize only the Google endpoint for their
-// configured location, using system trust. Check before acquiring tokens or
-// placing any authentication material, including service-account tokens.
 func (c Config) vertexDestination(u *url.URL) bool {
 	if u == nil {
 		return false

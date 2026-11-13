@@ -42,13 +42,13 @@ func (c Config) FilesBatchesAdapter() (BatchAdapter, bool) {
 }
 
 const (
-	VertexBatchProfile  = "vertex-batch-prediction"
+	vertexBatchProfile  = "vertex-batch-prediction"
 	BedrockBatchProfile = "bedrock-batch-inference"
 )
 
 func CloudBatchAdapter(profileID string) (BatchAdapter, bool) {
 	switch profileID {
-	case VertexBatchProfile:
+	case vertexBatchProfile:
 		return BatchVertex, true
 	case BedrockBatchProfile:
 		return BatchBedrock, true
@@ -60,7 +60,7 @@ func CloudBatchAdapter(profileID string) (BatchAdapter, bool) {
 func (a BatchAdapter) CloudDialect() string {
 	switch a {
 	case BatchVertex:
-		return VertexBatchProfile
+		return vertexBatchProfile
 	case BatchBedrock:
 		return BedrockBatchProfile
 	default:

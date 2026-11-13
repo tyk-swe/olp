@@ -11,8 +11,6 @@ import (
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
-// declaredClasses maps the failure classes a plugin profile declares to the
-// classes that govern failover and cooldown.
 var declaredClasses = map[string]upstream.Class{
 	abi.ClassCredential:    upstream.Credential,
 	abi.ClassRateLimited:   upstream.RateLimit,
@@ -21,7 +19,6 @@ var declaredClasses = map[string]upstream.Class{
 	abi.ClassContentFilter: upstream.ContentFilter,
 }
 
-// parseClassification reads a hosting adaptation's failure classification.
 func parseClassification(declared []abi.FailureRule) ([]upstream.Rule, error) {
 	if len(declared) > 32 {
 		return nil, &ProfileError{Field: "hosting.classification", Message: "Declare at most 32 rules."}
@@ -51,15 +48,11 @@ func errorValue(text string) bool {
 	return len(text) <= 256 && !strings.ContainsFunc(text, unicode.IsControl)
 }
 
-// Classification is the failure classification the connector's profile
-// declares, which the upstream classifier consults ahead of its built-in
-// rules. Only plugin profiles declare one.
 func (c Config) Classification() []upstream.Rule {
 	var rules []upstream.Rule
 	if c.Plugin != nil {
 		rules = slices.Clone(c.Plugin.hosting.classification)
 	}
-	// A reviewed vendor classifies its own misleading statuses.
 	for _, rule := range vendors.ErrorClassesFor(c.VendorID) {
 		rules = append(rules, upstream.Rule{Status: rule.Status, Type: rule.Type, Class: upstream.Class(rule.Class)})
 	}

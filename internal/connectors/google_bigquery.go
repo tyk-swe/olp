@@ -20,7 +20,7 @@ func (a *Auth) ApplyGoogleBigQuery(ctx context.Context, req *http.Request, mode 
 	if mode != "adc" && mode != "service_account" {
 		return egress.Sensitive{}, ErrCredentialRejected
 	}
-	token, err := a.googleToken(ctx, Config{Kind: "vertex_ai", AuthMode: mode}, secret)
+	token, err := a.googleToken(ctx, Config{Kind: KindVertexAI, AuthMode: mode}, secret)
 	if err != nil {
 		return egress.Sensitive{}, err
 	}

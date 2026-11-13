@@ -8,8 +8,6 @@ import (
 	"github.com/tyk-swe/olp/internal/retrieval/identity"
 )
 
-const KindAzureAISearch = identity.Azure
-
 func (c Config) RetrievalBackend() string {
 	if c.ProfileRevision != ProfileRevision {
 		return ""
@@ -30,6 +28,7 @@ func (c Config) RetrievalBackend() string {
 	}
 	return ""
 }
+
 func (c Config) retrievalModelValid(model string) bool {
 	backend := c.RetrievalBackend()
 	if !identity.ValidResource(backend, model) {
@@ -54,8 +53,6 @@ func (c Config) RetrievalURL(resource string) (string, error) {
 	return "", errors.New("no retrieval profile")
 }
 
-// RetrievalProbeURL names a cost-free metadata read for the resource used as
-// this target's model. Search permissions still require live qualification.
 func (c Config) RetrievalProbeURL(resource string) (string, error) {
 	if !c.retrievalModelValid(resource) {
 		return "", errors.New("invalid retrieval resource")

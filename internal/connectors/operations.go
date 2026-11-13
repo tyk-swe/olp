@@ -11,8 +11,6 @@ import (
 	"github.com/tyk-swe/olp/internal/operations"
 )
 
-// OperationURL uses only a registered native addressing contract. Its family
-// endpoint adapter is bounded to explicit paths; unknown operations never choose Chat.
 func (c Config) OperationURL(d operations.Dialect, model string) (string, error) {
 	p, err := c.profile()
 	if err != nil {

@@ -124,7 +124,6 @@ func (b BatchStorage) Contains(prefixURI, candidate string) bool {
 	return b.contains(prefixURI, candidate, false)
 }
 
-// ContainsPrefix also permits a bucket root as an output destination.
 func (b BatchStorage) ContainsPrefix(prefixURI, candidate string) bool {
 	return b.contains(prefixURI, candidate, true)
 }

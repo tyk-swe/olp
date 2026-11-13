@@ -16,8 +16,6 @@ type ibmToken struct {
 	refresh time.Time
 }
 
-// IBMToken reuses a token until four fifths of its lifetime have passed, as
-// IBM's SDKs do.
 func (s *Source) IBMToken(ctx context.Context, key Key, apiKey []byte) (string, error) {
 	if !printable(string(apiKey), 16, 1024) {
 		return "", ErrRejected

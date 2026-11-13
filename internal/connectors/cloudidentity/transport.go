@@ -26,9 +26,6 @@ var (
 
 const azureMetadataHost = "169.254.169.254"
 
-// Standard reaches token endpoints on the public internet under a policy that
-// provider exceptions never relax, and identity endpoints under the provider
-// policy widened to the fixed metadata addresses.
 func Standard(policy *egress.Policy, getenv func(string) string) Dependencies {
 	return Dependencies{
 		Getenv: getenv, IAMEndpoint: IBMIAMEndpoint,
@@ -38,8 +35,6 @@ func Standard(policy *egress.Policy, getenv func(string) string) Dependencies {
 	}
 }
 
-// Billing sends public requests through the billing client's transport and
-// keeps identity endpoints on the bounded metadata transport.
 func Billing(policy *egress.Policy, billing http.RoundTripper, getenv func(string) string) Dependencies {
 	public := boundedTransport{base: billing, policy: &egress.Policy{}}
 	return Dependencies{
@@ -86,8 +81,6 @@ func reaching(policy *egress.Policy, addresses []netip.Addr, plainHosts []string
 	return &widened
 }
 
-// The maintained AWS chain owns metadata credential discovery, so its fixed
-// link-local endpoints are reachable on the identity transport only.
 func awsIdentityPolicy(policy *egress.Policy) *egress.Policy {
 	addresses := make([]netip.Addr, len(awsMetadataHosts))
 	for i, host := range awsMetadataHosts {

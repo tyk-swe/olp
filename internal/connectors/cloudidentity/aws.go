@@ -23,8 +23,6 @@ func (s *Source) AWSCredentials(ctx context.Context, key Key, credential Credent
 	return s.chainedAWSCredentials(ctx, key, region)
 }
 
-// AWSWorkloadCredentials exchanges a web identity through the bounded client,
-// which the default chain would otherwise bypass.
 func (s *Source) AWSWorkloadCredentials(ctx context.Context, key Key, region string) (aws.Credentials, error) {
 	exchange := sts.New(sts.Options{Region: region, HTTPClient: s.metadata, RetryMaxAttempts: 1})
 	return s.chainedAWSCredentials(ctx, key, region,

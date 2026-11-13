@@ -37,7 +37,7 @@ func DefaultEndpoint(kind, region, project string) string {
 		endpoint, _ := BedrockEndpoint(region, false)
 		return endpoint
 	case KindSageMaker:
-		endpoint, _ := SageMakerEndpoint(region)
+		endpoint, _ := sageMakerEndpoint(region)
 		return endpoint
 	case KindWatsonx:
 		if !cloudIdentifier.MatchString(region) {

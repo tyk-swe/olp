@@ -75,9 +75,6 @@ func (s *Source) googleCredentials(ctx context.Context, credential Credential) (
 	}
 }
 
-// applicationDefault follows the Application Default Credentials search
-// order, but reads metadata through the bounded client instead of the
-// library's unrestricted default, so GCE_METADATA_HOST must pass egress policy.
 func (s *Source) applicationDefault(options *googlecredentials.DetectOptions) (*cloudauth.Credentials, error) {
 	if path := s.getenv("GOOGLE_APPLICATION_CREDENTIALS"); path != "" {
 		file, err := os.ReadFile(path)

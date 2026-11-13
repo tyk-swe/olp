@@ -15,22 +15,8 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 )
 
-// IBM watsonx.ai serves foundation models through its chat API, a variant of
-// Chat Completions: a request names its model as model_id and the project it
-// runs in, streams from a separate address, and a stream ends with its usage
-// chunk rather than [DONE]. OLP adapts OpenAI chat bodies to the API and its
-// results back, so watsonx providers serve transformed routes.
-//
-// https://dataplatform.cloud.ibm.com/docs/content/wsj/analyze-data/fm-api-chat.html
-
-// KindWatsonx is the IBM watsonx.ai connector.
-const KindWatsonx = "watsonx"
-
-// watsonxVersion is the API version date a provider that names none sends.
 const watsonxVersion = "2025-10-25"
 
-// watsonxModel is the syntax of foundation model IDs, such as
-// ibm/granite-3-8b-instruct or meta-llama/llama-3-3-70b-instruct.
 var watsonxModel = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]*(/[A-Za-z0-9][A-Za-z0-9._:-]*)*$`)
 
 func watsonxModelValid(model string) bool {
@@ -48,8 +34,6 @@ func (c Config) watsonxURL(base string, encodedWire wire.Format, stream bool) (s
 	return base + path + "?version=" + url.QueryEscape(WatsonxVersion(c.APIVersion)), nil
 }
 
-// WatsonxVersion is the API version date a watsonx provider sends: its own,
-// or the date OLP was reviewed against.
 func WatsonxVersion(configured string) string {
 	if configured == "" {
 		return watsonxVersion
@@ -57,7 +41,6 @@ func WatsonxVersion(configured string) string {
 	return configured
 }
 
-// watsonxBody adapts an OpenAI chat body to the watsonx chat API.
 func (c Config) watsonxBody(body []byte) []byte {
 	return rewriteObject(body, func(fields map[string]json.RawMessage) {
 		if model, named := fields["model"]; named {
@@ -77,10 +60,6 @@ func (c Config) watsonxBody(body []byte) []byte {
 	})
 }
 
-// watsonxResult reads a watsonx chat result or chunk as its Chat Completions
-// object: named by its model, without the model_id, timestamp and system
-// notices watsonx adds, which no OpenAI client reads. It reports whether the
-// object carries usage.
 func watsonxResult(body []byte, object string) (result []byte, usage bool) {
 	result = rewriteObject(body, func(fields map[string]json.RawMessage) {
 		if model, named := fields["model_id"]; named {
@@ -99,10 +78,6 @@ func watsonxResult(body []byte, object string) (result []byte, usage bool) {
 	return result, usage
 }
 
-// watsonxStream reads a watsonx chat stream as a Chat Completions stream. The
-// usage chunk is the stream's terminal event: [DONE] follows the stream's end
-// only after it, so a stream that ends before its usage is truncated, and the
-// chat decoder still requires every choice to have finished.
 type watsonxStream struct {
 	events   *sse.Decoder
 	pending  []byte
