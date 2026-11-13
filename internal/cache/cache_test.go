@@ -158,3 +158,44 @@ func TestValidateVectorRefusesVectorsWithoutADirection(t *testing.T) {
 		}
 	}
 }
+
+func TestSearchCandidatesAcceptsRESP3AndLegacyReplies(t *testing.T) {
+	t.Parallel()
+	store := Store{Installation: "fixture"}
+	key := store.prefix() + "entry:match"
+	fields := map[string]any{"__vector_score": "0.1"}
+	for name, reply := range map[string]any{
+		"RESP3":  map[string]any{"total_results": int64(1), "results": []any{map[string]any{"id": key, "extra_attributes": fields}}},
+		"flat":   []any{int64(1), key, fields},
+		"mapped": []any{int64(1), map[string]any{key: fields}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := store.searchCandidates(reply, Policy{SimilarityThreshold: 0.8})
+			if err != nil || len(got) != 1 || got[0].key != key || math.Abs(got[0].score-0.9) > 1e-9 {
+				t.Fatalf("matching search result = %v, %v", got, err)
+			}
+			got, err = store.searchCandidates(reply, Policy{SimilarityThreshold: 0.95})
+			if err != nil || len(got) != 0 {
+				t.Fatalf("below-threshold search result = %v, %v", got, err)
+			}
+		})
+	}
+	for name, reply := range map[string]any{
+		"empty":         map[string]any{"total_results": int64(0), "results": []any{}},
+		"wrong results": map[string]any{"results": "invalid"},
+		"wrong row":     map[string]any{"results": []any{"invalid"}},
+		"foreign key":   map[string]any{"results": []any{map[string]any{"id": "another:entry", "extra_attributes": fields}}},
+		"missing score": map[string]any{"results": []any{map[string]any{"id": key, "extra_attributes": map[string]any{}}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := store.searchCandidates(reply, Policy{})
+			if name == "empty" {
+				if err != nil || len(got) != 0 {
+					t.Fatalf("empty result = %v, %v", got, err)
+				}
+			} else if err == nil {
+				t.Fatalf("malformed result accepted: %v", got)
+			}
+		})
+	}
+}

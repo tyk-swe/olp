@@ -85,11 +85,23 @@ func (s *Store) Nearest(ctx context.Context, ticket Ticket, vector []float32, po
 	return nil, 0, nil
 }
 
-// searchCandidates parses an FT.SEARCH reply, which arrives either as a flat
-// [count, key, fields, ...] list or as a list of key→fields maps, into
-// similarity-thresholded candidates ordered best first.
 func (s *Store) searchCandidates(value any, p Policy) ([]candidate, error) {
 	list, ok := value.([]any)
+	if reply, mapped := value.(map[string]any); mapped {
+		results, valid := reply["results"].([]any)
+		if !valid {
+			return nil, ErrUnavailable
+		}
+		list = []any{reply["total_results"]}
+		for _, result := range results {
+			row, valid := result.(map[string]any)
+			if !valid {
+				return nil, ErrUnavailable
+			}
+			list = append(list, row["id"], row["extra_attributes"])
+		}
+		ok = true
+	}
 	if !ok || len(list) < 1 {
 		return nil, ErrUnavailable
 	}
