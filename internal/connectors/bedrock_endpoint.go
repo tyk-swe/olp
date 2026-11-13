@@ -35,7 +35,11 @@ func (c Config) bedrockAgentRuntime(base string) (string, error) {
 	if err != nil || base != runtime {
 		return "", errors.New("Bedrock rerank needs the region's default Bedrock Runtime endpoint")
 	}
-	return strings.Replace(runtime, "://bedrock-runtime.", "://bedrock-agent-runtime.", 1) + "/rerank", nil
+	return bedrockAgentRuntimeOrigin(runtime) + "/rerank", nil
+}
+
+func bedrockAgentRuntimeOrigin(runtime string) string {
+	return strings.Replace(runtime, "://bedrock-runtime.", "://bedrock-agent-runtime.", 1)
 }
 
 // BedrockModelARN is the ARN of a Bedrock foundation model in the

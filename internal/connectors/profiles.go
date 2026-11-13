@@ -464,17 +464,13 @@ func (c Config) validateProfileEndpoint(u *url.URL) error {
 		strings.EqualFold(u.Hostname(), "api.cohere.ai") && strings.TrimRight(u.Path, "/") != "/v2" {
 		return errors.New("Cohere native v2 requires the /v2 endpoint; the compatibility/v1 preset is a separate API")
 	}
+	if traits := c.traits(); c.ProfileID != "" && traits.googleService != "" {
+		if u.Path != "/v1/"+vertexResource(c.CloudProject, c.CloudRegion)+traits.vertexPath {
+			return errors.New(traits.misplaced)
+		}
+		return nil
+	}
 	switch c.Hosting() {
-	case "google-document-ai":
-		if u.Path != "/v1/projects/"+c.CloudProject+"/locations/"+c.CloudRegion {
-			return errors.New("Document AI endpoint must match its configured project and location")
-		}
-		return nil
-	case "vertex-rag-engine":
-		if u.Path != "/v1/projects/"+c.CloudProject+"/locations/"+c.CloudRegion {
-			return errors.New("Vertex RAG endpoint must match its configured project and location")
-		}
-		return nil
 	case "bedrock-knowledge-bases":
 		if u.Path != "" {
 			return errors.New("Knowledge Bases endpoint must be a service origin")
@@ -509,11 +505,6 @@ func (c Config) validateProfileEndpoint(u *url.URL) error {
 			return errors.New("legacy Azure Responses requires a dated API version")
 		}
 		return nil
-	case "vertex-google", "vertex-anthropic", "vertex-openai":
-		want := "/v1/projects/" + c.CloudProject + "/locations/" + c.CloudRegion + c.traits().vertexPath
-		if u.Path != want {
-			return errors.New("Vertex endpoint path must match the profile's publisher or endpoint, project and location")
-		}
 	}
 	return nil
 }

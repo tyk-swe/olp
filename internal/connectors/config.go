@@ -6,16 +6,11 @@ package connectors
 import (
 	"encoding/json"
 	"errors"
-	"net/url"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/protocols/wire"
-
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 const (
@@ -54,63 +49,6 @@ type Config struct {
 	// observed for every credential slot of a provider authenticated by a
 	// grant, or empty.
 	ObservedPrincipal string
-}
-
-// DefaultProfileEndpoint is the endpoint a provider of kind using profileID
-// gets when it names none: its kind's, or the address the profile's hosting
-// is served at.
-func DefaultProfileEndpoint(kind, profileID, region, project string) string {
-	if profileID == "vertex-document-processing-ocr" {
-		host := region + "-documentai.googleapis.com"
-		if region == "global" {
-			host = "documentai.googleapis.com"
-		}
-		if !cloudIdentifier.MatchString(region) || !cloudIdentifier.MatchString(project) {
-			return ""
-		}
-		return "https://" + host + "/v1/projects/" + project + "/locations/" + region
-	}
-	endpoint := DefaultEndpoint(kind, region, project)
-	if profileID == "bedrock-knowledge-bases" {
-		return strings.Replace(endpoint, "://bedrock-runtime.", "://bedrock-agent-runtime.", 1)
-	}
-	if profileID == "vertex-rag-engine" {
-		return strings.TrimSuffix(endpoint, "/publishers/google")
-	}
-	if path := hostings[profileHosting(profileID)].vertexPath; kind == "vertex_ai" && path != "" {
-		return strings.TrimSuffix(endpoint, hostings["vertex-google"].vertexPath) + path
-	}
-	return endpoint
-}
-
-// DefaultEndpoint is the endpoint a provider of kind gets when it names none:
-// the address its cloud fields resolve to, or its default vendor's reviewed
-// endpoint.
-func DefaultEndpoint(kind, region, project string) string {
-	switch kind {
-	case "vertex_ai":
-		host := region + "-aiplatform.googleapis.com"
-		if region == "global" {
-			host = "aiplatform.googleapis.com"
-		}
-		if region == "us" || region == "eu" {
-			host = "aiplatform." + region + ".rep.googleapis.com"
-		}
-		return "https://" + host + "/v1/projects/" + project + "/locations/" + region + "/publishers/google"
-	case "bedrock":
-		endpoint, _ := BedrockEndpoint(region, false)
-		return endpoint
-	case KindSageMaker:
-		endpoint, _ := SageMakerEndpoint(region)
-		return endpoint
-	case KindWatsonx:
-		if !cloudIdentifier.MatchString(region) {
-			return ""
-		}
-		return "https://" + region + ".ml.cloud.ibm.com"
-	}
-	contract, _ := vendors.Lookup(vendors.DefaultFor(kind))
-	return contract.Endpoint
 }
 
 var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
@@ -217,7 +155,7 @@ func (c Config) Validate(policy *egress.Policy) error {
 // validation recognizes that resource syntax.
 func (c Config) Model(model string) string {
 	model = c.boundModel(model)
-	if c.Kind == "gemini" || c.Kind == "vertex_ai" || c.Kind == "azure_openai" {
+	if c.Kind == KindGemini || c.Kind == KindVertexAI || c.Kind == KindAzureOpenAI {
 		return strings.TrimPrefix(model, "models/")
 	}
 	return model
@@ -232,18 +170,21 @@ func (c Config) boundModel(model string) string {
 			return binding.Model
 		}
 	}
-	var metadata struct {
-		Deployment string `json:"deployment"`
-	}
-	// A model with no metadata is not decoded: the error that would build is
-	// discarded, for every attempt.
-	if raw := c.Models[model]; len(raw) > 0 {
-		_ = json.Unmarshal(raw, &metadata)
-	}
-	if metadata.Deployment != "" {
-		return metadata.Deployment
+	if deployment := modelDeployment(c.Models[model]); deployment != "" {
+		return deployment
 	}
 	return model
+}
+
+func modelDeployment(metadata json.RawMessage) string {
+	if len(metadata) == 0 {
+		return ""
+	}
+	var declared struct {
+		Deployment string `json:"deployment"`
+	}
+	_ = json.Unmarshal(metadata, &declared)
+	return declared.Deployment
 }
 
 // ServingPrincipal is the upstream principal that serves a model, part of its
@@ -255,308 +196,4 @@ func (c Config) ServingPrincipal(model string) string {
 		return c.ObservedPrincipal
 	}
 	return c.Bindings[model].PrincipalID
-}
-func (c Config) URL(encodedWire wire.Format, model string, stream bool) (string, error) {
-	if c.ProfileID != "" {
-		if err := c.ValidateProfile(); err != nil {
-			return "", err
-		}
-		expected, err := c.TargetFamily(encodedWire)
-		batch := encodedWire == wire.GeminiEmbeddingsBatch && expected == wire.GeminiEmbeddings
-		if err != nil || encodedWire != expected && !batch {
-			return "", errors.New("wire dialect does not match the selected provider profile")
-		}
-	}
-	model = c.Model(model)
-	base := c.profileBase()
-	if !c.ValidModel(model) {
-		return "", errors.New("invalid upstream model identifier")
-	}
-	switch c.Kind {
-	case KindSageMaker:
-		return sagemakerURL(base, encodedWire, model)
-	case KindWatsonx:
-		return c.watsonxURL(base, encodedWire, stream)
-	}
-	path := "/chat/completions"
-	switch encodedWire {
-	case wire.Decisions:
-		path = "/decisions"
-	case wire.SystemOne:
-		path = "/systemone"
-	case wire.Completions:
-		path = "/completions"
-	case wire.Responses:
-		path = "/responses"
-	case wire.InputTokens:
-		path = "/responses/input_tokens"
-	case wire.Embeddings:
-		path = "/embeddings"
-	case wire.Moderation:
-		path = "/moderations"
-	case wire.Anthropic:
-		path = "/messages"
-	case wire.AnthropicCount:
-		path = "/messages/count_tokens"
-	case wire.Gemini, wire.GeminiCount:
-		operation := "generateContent"
-		if stream {
-			operation = "streamGenerateContent"
-		}
-		if encodedWire == wire.GeminiCount {
-			operation = "countTokens"
-		}
-		path = "/models/" + url.PathEscape(model) + ":" + operation
-		if stream {
-			path += "?alt=sse"
-		}
-	case "bedrock":
-		operation := "converse"
-		if stream {
-			operation = "converse-stream"
-		}
-		path = "/model/" + url.PathEscape(model) + "/" + operation
-	case "bedrock_count":
-		path = "/model/" + url.PathEscape(model) + "/count-tokens"
-	case wire.GeminiEmbeddings:
-		path = "/models/" + url.PathEscape(model) + ":embedContent"
-	case wire.GeminiEmbeddingsBatch:
-		path = "/models/" + url.PathEscape(model) + ":batchEmbedContents"
-	case wire.VertexEmbeddings:
-		path = "/models/" + url.PathEscape(model) + ":predict"
-	case wire.DocumentAIProcess:
-		path = "/processors/" + url.PathEscape(model) + ":process"
-	case wire.BedrockInvoke:
-		operation := "invoke"
-		if stream {
-			operation = "invoke-with-response-stream"
-		}
-		path = "/model/" + url.PathEscape(model) + "/" + operation
-	case wire.BedrockEmbeddings:
-		path = "/model/" + url.PathEscape(model) + "/invoke"
-	case wire.BedrockRerank:
-		return c.bedrockAgentRuntime(base)
-	case wire.MistralFIM:
-		path = "/fim/completions"
-	case wire.CohereChat:
-		path = "/chat"
-	case wire.Rerank:
-		if endpoint, ok := c.operationEndpoint("rerank", base); ok {
-			return endpoint, nil
-		}
-		path = "/rerank"
-	}
-	hosting, traits := c.Hosting(), c.traits()
-	if hosting == "vertex-anthropic" && encodedWire == wire.Anthropic {
-		action := "rawPredict"
-		if stream {
-			action = "streamRawPredict"
-		}
-		return base + "/models/" + url.PathEscape(model) + ":" + action, nil
-	}
-	if hosting == "bedrock-anthropic-invoke" && encodedWire == wire.Anthropic {
-		action := "invoke"
-		if stream {
-			action = "invoke-with-response-stream"
-		}
-		return base + "/model/" + url.PathEscape(model) + "/" + action, nil
-	}
-	if hosting == "azure-responses-legacy" && (encodedWire == wire.Responses || encodedWire == wire.InputTokens) {
-		return base + "/openai" + path + "?api-version=" + url.QueryEscape(c.APIVersion), nil
-	}
-	if traits.deployment {
-		if model != c.Deployment && !c.hasDeployment(model) {
-			var metadata struct {
-				Deployment string `json:"deployment"`
-			}
-			for _, v := range c.Models {
-				_ = json.Unmarshal(v, &metadata)
-				if metadata.Deployment == model {
-					break
-				}
-			}
-			if metadata.Deployment != model {
-				return "", errors.New("model has no configured Azure deployment")
-			}
-		}
-		base += "/openai/deployments/" + url.PathEscape(model)
-	}
-	if traits.apiVersion {
-		path += "?api-version=" + url.QueryEscape(c.APIVersion)
-	}
-	return base + path, nil
-}
-
-// operationEndpoint is the address the vendor's contract documents for an
-// operation it serves outside its reviewed endpoint, while the provider still
-// uses that endpoint.
-func (c Config) operationEndpoint(operation, base string) (string, bool) {
-	contract, ok := vendors.Lookup(c.VendorID)
-	if !ok || base != strings.TrimRight(contract.Endpoint, "/") {
-		return "", false
-	}
-	endpoint, ok := contract.OperationEndpoints[operation]
-	return endpoint, ok
-}
-
-// MediaURL resolves an OpenAI-family media resource path — images, audio, and
-// videos — against the connector endpoint. Azure deployments keep their
-// address prefix and fixed api-version query exactly as generation URLs do.
-// The path is a fixed relative resource from the media dispatch table; job
-// identifiers are validated by the caller before reaching it.
-func (c Config) MediaURL(path, model string, query url.Values) (string, error) {
-	if strings.HasPrefix(path, "/") || strings.Contains(path, "..") || strings.ContainsAny(path, "\\?#") {
-		return "", errors.New("invalid upstream resource path")
-	}
-	base, traits := c.profileBase(), c.traits()
-	if traits.deployment {
-		deployment := c.Model(model)
-		if deployment != c.Deployment && !c.hasDeployment(deployment) {
-			var metadata struct {
-				Deployment string `json:"deployment"`
-			}
-			found := false
-			for _, v := range c.Models {
-				metadata.Deployment = ""
-				_ = json.Unmarshal(v, &metadata)
-				if metadata.Deployment == deployment {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return "", errors.New("model has no configured Azure deployment")
-			}
-		}
-		base += "/openai/deployments/" + url.PathEscape(deployment)
-	}
-	u := base + "/" + path
-	merged := url.Values{}
-	if traits.apiVersion {
-		merged.Set("api-version", c.APIVersion)
-	}
-	for name, values := range query {
-		merged[name] = append([]string{}, values...)
-	}
-	if len(merged) > 0 {
-		u += "?" + merged.Encode()
-	}
-	return u, nil
-}
-
-func (c Config) hasDeployment(model string) bool {
-	for _, binding := range c.Bindings {
-		if binding.Deployment == model {
-			return true
-		}
-	}
-	return false
-}
-
-// ResourceURL resolves resources independently from generation endpoint choice.
-func (c Config) ResourceURL(model, path string, query url.Values) (string, error) {
-	if strings.Contains(path, "..") || strings.ContainsAny(path, "\\?#") {
-		return "", errors.New("invalid upstream resource path")
-	}
-	base, traits := c.profileBase(), c.traits()
-	// Tuning is a project/location API, outside the publisher model API.
-	if c.Kind == "vertex_ai" && (path == "tuningJobs" || strings.HasPrefix(path, "tuningJobs/")) {
-		u, err := url.Parse(base)
-		if err != nil {
-			return "", err
-		}
-		if i := strings.Index(u.Path, "/publishers/"); i >= 0 {
-			u.Path = u.Path[:i]
-		}
-		base = strings.TrimRight(u.String(), "/")
-	}
-	if traits.deployment {
-		if strings.HasPrefix(path, "deployments/") {
-			deployment := c.Model(model)
-			if deployment == "" {
-				return "", errors.New("model has no configured Azure deployment")
-			}
-			base += "/openai/deployments/" + url.PathEscape(deployment)
-			path = strings.TrimPrefix(path, "deployments/")
-		} else {
-			base += "/openai"
-		}
-	}
-	merged := url.Values{}
-	if traits.apiVersion {
-		merged.Set("api-version", c.APIVersion)
-	}
-	for name, values := range query {
-		if existing, ok := merged[name]; ok && !slices.Equal(existing, values) {
-			return "", errors.New("query collides with hosting API revision")
-		}
-		merged[name] = append([]string(nil), values...)
-	}
-	endpoint := base + "/" + strings.TrimPrefix(path, "/")
-	if len(merged) > 0 {
-		endpoint += "?" + merged.Encode()
-	}
-	return endpoint, nil
-}
-
-func (c Config) RealtimeURL(model string) (string, error) {
-	if c.ProfileID != "" && !c.Supports("realtime", "openai", "realtime") {
-		return "", errors.New("profile does not support realtime")
-	}
-	query := url.Values{}
-	if c.traits().deployment {
-		query.Set("deployment", c.Model(model))
-	} else {
-		query.Set("model", c.Model(model))
-	}
-	endpoint, err := c.ResourceURL(model, "realtime", query)
-	if err != nil {
-		return "", err
-	}
-	if strings.HasPrefix(endpoint, "https://") {
-		return "wss://" + strings.TrimPrefix(endpoint, "https://"), nil
-	}
-	if strings.HasPrefix(endpoint, "http://") {
-		return "ws://" + strings.TrimPrefix(endpoint, "http://"), nil
-	}
-	return "", errors.New("realtime endpoint requires HTTP(S) hosting")
-}
-
-var realtimeCallID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
-
-func (c Config) RealtimeCallsURL(model string) (string, error) {
-	if c.ProfileID != "" && !c.Supports("realtime", "openai", "webrtc") {
-		return "", errors.New("profile does not support webrtc")
-	}
-	return c.ResourceURL(model, "realtime/calls", nil)
-}
-
-func (c Config) RealtimeControlURL(model, callID string) (string, error) {
-	if !realtimeCallID.MatchString(callID) {
-		return "", errors.New("invalid realtime call id")
-	}
-	if c.ProfileID != "" && !c.Supports("realtime", "openai", "webrtc") {
-		return "", errors.New("profile does not support webrtc")
-	}
-	endpoint, err := c.ResourceURL(model, "realtime", url.Values{"call_id": {callID}})
-	if err != nil {
-		return "", err
-	}
-	if strings.HasPrefix(endpoint, "https://") {
-		return "wss://" + strings.TrimPrefix(endpoint, "https://"), nil
-	}
-	if strings.HasPrefix(endpoint, "http://") {
-		return "ws://" + strings.TrimPrefix(endpoint, "http://"), nil
-	}
-	return "", errors.New("realtime endpoint requires HTTP(S) hosting")
-}
-
-func (c Config) RealtimeHangupURL(model, callID string) (string, error) {
-	if !realtimeCallID.MatchString(callID) {
-		return "", errors.New("invalid realtime call id")
-	}
-	if c.ProfileID != "" && !c.Supports("realtime", "openai", "webrtc") {
-		return "", errors.New("profile does not support webrtc")
-	}
-	return c.ResourceURL(model, "realtime/calls/"+url.PathEscape(callID)+"/hangup", nil)
 }

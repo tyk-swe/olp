@@ -63,9 +63,8 @@ func (c Config) RetrievalProbeURL(resource string) (string, error) {
 	base := strings.TrimRight(c.Endpoint, "/")
 	switch c.RetrievalBackend() {
 	case identity.Bedrock:
-		want, _ := BedrockEndpoint(c.CloudRegion, false)
-		want = strings.Replace(want, "://bedrock-runtime.", "://bedrock-agent-runtime.", 1)
-		if base != want {
+		runtime, _ := BedrockEndpoint(c.CloudRegion, false)
+		if base != bedrockAgentRuntimeOrigin(runtime) {
 			return "", errors.New("metadata certification requires the default regional Knowledge Bases endpoint")
 		}
 		return strings.Replace(base, "://bedrock-agent-runtime.", "://bedrock-agent.", 1) + "/knowledgebases/" + url.PathEscape(resource), nil

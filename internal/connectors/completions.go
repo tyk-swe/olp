@@ -71,6 +71,3 @@ func (c Config) ValidateCompletionRequest(document oif.Document) error {
 	}
 	return nil
 }
-
-// Each native text-completion endpoint has an explicit profile. Generic
-// OpenAI-compatible hosting alone never qualifies the legacy dialect.
