@@ -154,7 +154,7 @@ func (e *ProfileError) Error() string { return e.Field + ": " + e.Message }
 func newPluginProfile(plugin Plugin, origins []string, declared abi.Profile) (*PluginProfile, error) {
 	// OLP keys some behaviour on built-in profile IDs, such as Gemini
 	// Interactions' own contract, which must never reach a plugin's profile.
-	if builtInProfile(declared.ID) {
+	if slices.ContainsFunc(builtIns, func(p Profile) bool { return p.ID == declared.ID }) {
 		return nil, &ProfileError{Field: "id", Message: fmt.Sprintf("Identify the profile with an ID of its own: %s is a built-in profile's.", declared.ID)}
 	}
 	base, ok := dialectProfile(declared.Dialect)
@@ -195,14 +195,7 @@ func newPluginProfile(plugin Plugin, origins []string, declared abi.Profile) (*P
 		// change all of it, so the profile serves transformed routes only.
 		Strict: placed.envelope == nil && len(placed.rewrites) == 0 && !placed.forceStreaming && !declared.CarriesTraffic,
 	}
-	completeProfileMetadata(&p)
-	return &PluginProfile{profile: p, hosting: placed, declared: declared, origins: slices.Clone(origins), patterns: patterns}, nil
-}
-
-// builtInProfile reports whether id identifies a built-in profile, which no
-// plugin profile may share.
-func builtInProfile(id string) bool {
-	return slices.ContainsFunc(profileRegistry, func(p Profile) bool { return p.ID == id })
+	return &PluginProfile{profile: withOperationMetadata(p), hosting: placed, declared: declared, origins: slices.Clone(origins), patterns: patterns}, nil
 }
 
 // dialectProfile returns the built-in profile that hosts a plugin dialect
@@ -212,7 +205,7 @@ func dialectProfile(dialect string) (Profile, bool) {
 	if !slices.Contains(pluginDialects, dialect) {
 		return Profile{}, false
 	}
-	for _, p := range profileRegistry {
+	for _, p := range builtIns {
 		if p.Dialect == dialect {
 			return p, true
 		}

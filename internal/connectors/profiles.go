@@ -1,11 +1,9 @@
 package connectors
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"net/http"
 	"net/textproto"
 	"net/url"
@@ -60,278 +58,11 @@ type Profile struct {
 	vendor string
 }
 
-const ProfileRevision = "1"
-const anthropicMessagesRevision = "2023-06-01"
-
-var profileRegistry = []Profile{
-	{ID: "bedrock-knowledge-bases", Label: "Bedrock Knowledge Bases retrieval", Kind: "bedrock", Dialect: "bedrock-knowledge-bases", DialectRevision: "2023-09-30", Hosting: "bedrock-knowledge-bases"},
-	{ID: "vertex-rag-engine", Label: "Vertex RAG Engine retrieval", Kind: "vertex_ai", Dialect: "vertex-rag-engine", DialectRevision: "v1", Hosting: "vertex-rag-engine"},
-	{ID: "azure-ai-search", Label: "Azure AI Search retrieval", Kind: KindAzureAISearch, Dialect: "azure-ai-search", DialectRevision: "2025-09-01", Hosting: "azure-ai-search"},
-	{ID: "openai-chat", Label: "OpenAI Chat Completions", Kind: "openai", Dialect: "openai-chat", Hosting: "direct-openai"},
-	{ID: "openai-responses", Label: "OpenAI Responses", Kind: "openai", Dialect: "openai-responses", Hosting: "direct-openai"},
-	{ID: "compatible-chat", Label: "Compatible Chat Completions", Kind: "openai_compatible", Dialect: "openai-chat", Hosting: "direct-compatible"},
-	{ID: "compatible-responses", Label: "Compatible Responses", Kind: "openai_compatible", Dialect: "openai-responses", Hosting: "direct-compatible"},
-	{ID: "anthropic-messages", Label: "Anthropic Messages", Kind: "anthropic", Dialect: "anthropic-messages", DialectRevision: anthropicMessagesRevision, Hosting: "direct-anthropic"},
-	{ID: "gemini-generation", Label: "Gemini GenerateContent", Kind: "gemini", Dialect: "gemini-generate-content", DialectRevision: "v1beta", Hosting: "direct-gemini"},
-	{ID: "gemini-interactions", Label: "Gemini Interactions", Kind: "gemini", Dialect: "gemini-interactions", DialectRevision: "v1beta", Hosting: "direct-gemini-interactions"},
-	{ID: "gemini-agents", Label: "Gemini managed agents", Kind: "gemini", Dialect: "gemini-agents", DialectRevision: "v1beta", Hosting: "direct-gemini-interactions"},
-	{ID: "gemini-live", Label: "Gemini Live", Kind: "gemini", Dialect: "gemini-live", DialectRevision: "v1beta", Hosting: "direct-gemini-live"},
-	{ID: "xai-realtime", Label: "xAI Realtime", Kind: "openai_compatible", Dialect: "xai-realtime", DialectRevision: "1", Hosting: "xai-realtime"},
-	{ID: "vertex-realtime", Label: "Vertex AI Live", Kind: "vertex_ai", Dialect: "vertex-realtime", DialectRevision: "v1", Hosting: "vertex-live"},
-	{ID: "bedrock-realtime", Label: "Bedrock Nova Sonic", Kind: "bedrock", Dialect: "bedrock-realtime", DialectRevision: "v1", Hosting: "bedrock-nova-sonic"},
-	{ID: "azure-legacy-chat", Label: "Azure deployment Chat Completions", Kind: "azure_openai", Dialect: "openai-chat", Hosting: "azure-deployment"},
-	{ID: "azure-legacy-responses", Label: "Azure legacy Responses", Kind: "azure_openai", Dialect: "openai-responses", Hosting: "azure-responses-legacy"},
-	{ID: "azure-v1-chat", Label: "Azure v1 Chat Completions", Kind: "azure_openai", Dialect: "openai-chat", DialectRevision: "v1", Hosting: "azure-v1"},
-	{ID: "azure-v1-responses", Label: "Azure v1 Responses", Kind: "azure_openai", Dialect: "openai-responses", DialectRevision: "v1", Hosting: "azure-v1"},
-	{ID: "vertex-gemini", Label: "Vertex Google publisher", Kind: "vertex_ai", Dialect: "gemini-generate-content", DialectRevision: "v1", Hosting: "vertex-google"},
-	{ID: "vertex-batch-prediction", Label: "Vertex batch prediction", Kind: "vertex_ai", Dialect: "vertex-batch-prediction", DialectRevision: "v1", Hosting: "vertex-google"},
-	{ID: "vertex-document-processing-ocr", Label: "Google Cloud Document AI document processing", Kind: "vertex_ai", Dialect: "vertex-document-processing-ocr", DialectRevision: "v1", Hosting: "google-document-ai"},
-	{ID: "bedrock-batch-inference", Label: "Bedrock batch inference", Kind: "bedrock", Dialect: "bedrock-batch-inference", DialectRevision: "v1", Hosting: "bedrock-batch-inference"},
-	{ID: "vertex-anthropic", Label: "Vertex Anthropic publisher", Kind: "vertex_ai", Dialect: "anthropic-messages", DialectRevision: "vertex-2023-10-16", Hosting: "vertex-anthropic"},
-	{ID: "vertex-openai", Label: "Vertex OpenAI-compatible Chat Completions", Kind: "vertex_ai", Dialect: "openai-chat", DialectRevision: "v1", Hosting: "vertex-openai"},
-	{ID: "bedrock-converse", Label: "Bedrock Converse", Kind: "bedrock", Dialect: "bedrock-converse", Hosting: "bedrock-converse"},
-	{ID: "bedrock-anthropic-invoke", Label: "Bedrock Anthropic Invoke", Kind: "bedrock", Dialect: "anthropic-messages", DialectRevision: "bedrock-2023-05-31", Hosting: "bedrock-anthropic-invoke"},
-	{ID: "bedrock-invoke", Label: "Bedrock model-specific Invoke", Kind: "bedrock", Dialect: "bedrock-invoke", Hosting: "bedrock-invoke"},
-	{ID: "mistral-fim", Label: "Mistral fill-in-the-middle", Kind: "openai_compatible", Dialect: "mistral-fim", DialectRevision: "v1", Hosting: "direct-compatible"},
-	{ID: "sagemaker-openai-chat", Label: "SageMaker OpenAI-compatible Chat Completions", Kind: KindSageMaker, Dialect: "openai-chat", DialectRevision: "v1", Hosting: "sagemaker-openai"},
-}
-
-func init() {
-	for i := range profileRegistry {
-		p := &profileRegistry[i]
-		p.Revision, p.Transport, p.Strict = ProfileRevision, "http", true
-		p.Authentication = []string{"api_key", "headers", "none"}
-		p.Operations = []string{"generation", "token_count"}
-		p.SemanticHeaders, p.QuerySettings = []string{}, []string{}
-		if p.DialectRevision == "" {
-			p.DialectRevision = "unversioned-2026-09-22"
-		}
-		switch p.Kind {
-		case "openai", "openai_compatible", "azure_openai":
-			p.OperationDialects = map[string]string{"moderation": "openai-moderation"}
-			p.Operations = []string{"generation", "token_count", "embeddings", "moderation", "image_generation", "image_edit", "image_variation", "speech", "transcription", "translation", "video_create", "video_list", "video_get", "video_content", "video_delete"}
-			p.SemanticHeaders = []string{"Openai-Beta"}
-			p.Documentation = "https://developers.openai.com/api/docs/guides/migrate-to-responses"
-			if p.Kind == "openai_compatible" {
-				p.Operations = append(p.Operations, "rerank")
-			}
-			if p.Kind != "openai_compatible" {
-				p.Operations = append(p.Operations, "batch", "realtime")
-			}
-			if p.Kind == "openai" {
-				p.Operations = append(p.Operations, "fine_tuning", "vector_store", "retrieval", "conversation", "container", "eval")
-			}
-			if p.Kind == "azure_openai" {
-				p.Operations = append(p.Operations, "fine_tuning", "vector_store", "retrieval", "container")
-			}
-			if p.Kind == "azure_openai" {
-				p.Authentication = []string{"api_key", "azure_default", "azure_client_secret"}
-				if p.Hosting != "azure-v1" {
-					p.QuerySettings = []string{"api-version"}
-				}
-				p.Documentation = "https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle"
-			}
-		case "anthropic":
-			p.Operations = append(p.Operations, "skill")
-			p.SemanticHeaders = []string{"Anthropic-Version", "Anthropic-Beta"}
-			p.Documentation = "https://platform.claude.com/docs/en/api/versioning"
-			if p.Hosting == "direct-anthropic" {
-				p.Operations = append(p.Operations, "batch")
-			}
-		case "gemini", "vertex_ai":
-			p.Documentation = "https://ai.google.dev/api/generate-content"
-			p.QuerySettings = []string{"$xgafv"}
-			p.Operations = []string{"generation", "token_count", "embeddings"}
-			if p.Kind == "gemini" {
-				p.Operations = append(p.Operations, "context_cache")
-			}
-			if p.Kind == "vertex_ai" {
-				p.Operations = append(p.Operations, "fine_tuning")
-			}
-			if p.Kind == "gemini" && p.Hosting == "direct-gemini" {
-				p.Operations = append(p.Operations, "batch")
-			}
-			if p.Kind == "vertex_ai" {
-				p.Authentication = []string{"adc", "service_account"}
-				p.Operations = append(p.Operations, "image_generation")
-			}
-			if p.Hosting == "vertex-openai" {
-				p.Operations = []string{"generation"}
-				p.QuerySettings = []string{}
-				p.Documentation = "https://cloud.google.com/vertex-ai/generative-ai/docs/migrate/openai/overview"
-			}
-			if p.Hosting == "vertex-anthropic" {
-				p.Operations = []string{"generation"}
-				p.SemanticHeaders = []string{"Anthropic-Beta"}
-				p.Documentation = "https://platform.claude.com/docs/en/build-with-claude/claude-on-vertex-ai"
-			}
-		case KindSageMaker:
-			p.Authentication = []string{"static", "default_chain"}
-			p.Operations = []string{"generation"}
-			p.Documentation = "https://docs.aws.amazon.com/sagemaker/latest/dg/realtime-endpoints-openai-compatible.html"
-		case "bedrock":
-			p.Authentication = []string{"static", "default_chain"}
-			p.Documentation = "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html"
-			p.Operations = []string{"generation", "token_count", "embeddings", "image_generation"}
-			if p.Hosting == "bedrock-anthropic-invoke" || p.Hosting == "bedrock-invoke" {
-				p.Operations = []string{"bedrock_invoke"}
-				if p.Hosting == "bedrock-anthropic-invoke" {
-					p.Operations = append(p.Operations, "generation")
-				}
-				p.Documentation = "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModel.html"
-			}
-		}
-		switch p.ID {
-		case "bedrock-knowledge-bases", "vertex-rag-engine", "azure-ai-search":
-			p.Operations = []string{"retrieval"}
-			p.SemanticHeaders = []string{}
-			p.QuerySettings = []string{}
-			p.Strict = false
-			switch p.ID {
-			case "bedrock-knowledge-bases":
-				p.Authentication = []string{"static", "default_chain"}
-				p.Documentation = "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_Retrieve.html"
-			case "vertex-rag-engine":
-				p.Authentication = []string{"adc", "service_account"}
-				p.Documentation = "https://cloud.google.com/vertex-ai/generative-ai/docs/reference/rest/v1/projects.locations/retrieveContexts"
-			case "azure-ai-search":
-				p.Authentication = []string{"api_key", "azure_default", "azure_client_secret"}
-				p.Documentation = "https://learn.microsoft.com/en-us/rest/api/searchservice/documents/search-post?view=rest-searchservice-2025-09-01"
-			}
-		case "vertex-batch-prediction":
-			p.Authentication = []string{"adc", "service_account"}
-			p.Operations = []string{"batch"}
-			p.Documentation = "https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/batch-prediction"
-		case "vertex-document-processing-ocr":
-			p.Authentication = []string{"adc", "service_account"}
-			p.Operations = []string{"ocr"}
-			p.OperationDialects = map[string]string{"ocr": "vertex-document-processing-ocr"}
-			p.SemanticHeaders = []string{}
-			p.QuerySettings = []string{}
-			p.Documentation = "https://docs.cloud.google.com/document-ai/docs/reference/rest/v1/projects.locations.processors/process"
-		case "bedrock-batch-inference":
-			p.Authentication = []string{"static", "default_chain"}
-			p.Operations = []string{"batch"}
-			p.Documentation = "https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference.html"
-		}
-		// Interactions and Live have independent request and event grammars.
-		// Their profile tuples cannot fall through GenerateContent's codec.
-		switch p.Dialect {
-		case "gemini-agents":
-			p.Operations = []string{"agent_resource"}
-			p.Authentication = []string{"api_key"}
-			p.Documentation = "https://pkg.go.dev/google.golang.org/genai/interactions#Agents"
-		case "mistral-fim":
-			p.Operations = []string{"generation"}
-			p.Authentication = []string{"api_key"}
-			p.SemanticHeaders = []string{}
-			p.Documentation = "https://docs.mistral.ai/api/endpoint/fim"
-		case "gemini-interactions":
-			p.Operations = []string{"generation"}
-			p.Authentication = []string{"api_key"}
-			p.Documentation = "https://ai.google.dev/gemini-api/docs/interactions-overview"
-		case "gemini-live":
-			p.Operations = []string{"realtime"}
-			p.Authentication = []string{"api_key"}
-			p.Transport = "websocket"
-			p.Documentation = "https://ai.google.dev/api/live"
-		case "xai-realtime":
-			p.Operations = []string{"realtime"}
-			p.Authentication = []string{"api_key"}
-			p.Transport = "websocket"
-			p.SemanticHeaders = []string{}
-			p.QuerySettings = []string{}
-			p.OperationDialects = map[string]string{}
-			p.Documentation = "https://docs.x.ai/developers/model-capabilities/voice"
-		case "vertex-realtime":
-			p.Operations = []string{"realtime"}
-			p.Authentication = []string{"adc", "service_account"}
-			p.Transport = "websocket"
-			p.SemanticHeaders = []string{}
-			p.QuerySettings = []string{}
-			p.OperationDialects = map[string]string{}
-			p.Documentation = "https://docs.cloud.google.com/vertex-ai/generative-ai/docs/live-api/start-manage-session"
-		case "bedrock-realtime":
-			p.Operations = []string{"realtime"}
-			p.Authentication = []string{"static", "default_chain"}
-			p.Transport = "bedrock-bidi"
-			p.SemanticHeaders = []string{}
-			p.QuerySettings = []string{}
-			p.OperationDialects = map[string]string{}
-			p.Documentation = "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModelWithBidirectionalStream.html"
-		}
-		completeProfileMetadata(p)
-	}
-	registerUnaryProfiles()
-	registerCompletionProfiles()
-	registerFilesBatchesProfiles()
-}
-
-// Profiles returns detached catalogue metadata; registering a new hosting profile
-// using these components does not require a generation-kernel provider switch.
-func Profiles() []Profile {
-	out := make([]Profile, len(profileRegistry))
-	for i, p := range profileRegistry {
-		out[i] = cloneProfile(p)
-	}
-	return out
-}
-
-func cloneProfile(p Profile) Profile {
-	p.OperationDialects = maps.Clone(p.OperationDialects)
-	schemas := make(map[string]json.RawMessage, len(p.DefaultSchemas))
-	for name, schema := range p.DefaultSchemas {
-		schemas[name] = bytes.Clone(schema)
-	}
-	p.DefaultSchemas = schemas
-	p.OptionsSchema = bytes.Clone(p.OptionsSchema)
-	p.Authentication = slices.Clone(p.Authentication)
-	p.Operations = slices.Clone(p.Operations)
-	p.SemanticHeaders = slices.Clone(p.SemanticHeaders)
-	p.QuerySettings = slices.Clone(p.QuerySettings)
-	if p.Plugin != nil {
-		plugin := *p.Plugin
-		p.Plugin = &plugin
-	}
-	return p
-}
-
-// profileView borrows immutable catalogue metadata for connector methods that
-// only read it. Registration detaches caller-owned maps and slices before
-// publication; registered entries are never modified after publication.
-func profileView(id, revision string) (Profile, error) {
-	for _, p := range profileRegistry {
-		if p.ID == id && p.Revision == revision {
-			return p, nil
-		}
-	}
-	return Profile{}, errors.New("unknown provider profile or unsupported profile revision")
-}
-
-// profileHosting is the hosting of the built-in profile with an identifier,
-// or "" for an unknown one.
-func profileHosting(id string) string {
-	for _, p := range profileRegistry {
-		if p.ID == id {
-			return p.Hosting
-		}
-	}
-	return ""
-}
-
-func LookupProfile(id, revision string) (Profile, error) {
-	p, err := profileView(id, revision)
-	if err != nil {
-		return Profile{}, err
-	}
-	return cloneProfile(p), nil
-}
-
 // profile borrows the catalogue metadata of the connector's profile: its
 // plugin profile's, or a built-in profile's.
 func (c Config) profile() (Profile, error) {
 	if c.Plugin == nil {
-		return profileView(c.ProfileID, c.ProfileRevision)
+		return builtInProfile(c.ProfileID, c.ProfileRevision)
 	}
 	if p := c.Plugin.profile; p.ID == c.ProfileID && p.Revision == c.ProfileRevision {
 		return p, nil
@@ -862,30 +593,22 @@ func (p Profile) OperationDialect(operation string) string {
 	return p.Hosting + "/" + operation
 }
 
-func completeProfileMetadata(p *Profile) {
-	if p.OperationDialects == nil {
-		p.OperationDialects = map[string]string{}
-	}
-	p.DefaultSchemas = map[string]json.RawMessage{}
-	for _, operation := range p.Operations {
-		dialect := p.OperationDialect(operation)
-		p.OperationDialects[operation] = dialect
-		fields := map[string]any{}
-		for _, name := range defaultFields(dialect, operation) {
-			if p.ID == "tgi-completions" && !slices.Contains(tgiCompletionFields, name) {
-				continue
-			}
-			fields[name] = defaultControlSchema(dialect, operation, name)
-			if codec, ok := operationregistry.Lookup(dialect); ok {
-				if field, found := codec.Defaults[name]; found {
-					fields[name] = field.Schema
-				}
-			}
+func defaultSchema(profileID, dialect, operation string) json.RawMessage {
+	codec, registered := operationregistry.Lookup(dialect)
+	fields := map[string]any{}
+	for _, name := range defaultFields(dialect, operation) {
+		if profileID == "tgi-completions" && !slices.Contains(tgiCompletionFields, name) {
+			continue
 		}
-		p.DefaultSchemas[operation], _ = json.Marshal(map[string]any{"type": "object", "additionalProperties": false, "required": []string{"dialect"}, "properties": map[string]any{
-			"dialect": map[string]any{"const": dialect}, "values": map[string]any{"type": "object", "additionalProperties": false, "properties": fields}, "native_options": map[string]any{"type": "object", "description": "Operation payload extensions; routing, credentials and resource references are reserved."},
-		}})
+		fields[name] = defaultControlSchema(dialect, operation, name)
+		if field, found := codec.Defaults[name]; registered && found {
+			fields[name] = field.Schema
+		}
 	}
+	schema, _ := json.Marshal(map[string]any{"type": "object", "additionalProperties": false, "required": []string{"dialect"}, "properties": map[string]any{
+		"dialect": map[string]any{"const": dialect}, "values": map[string]any{"type": "object", "additionalProperties": false, "properties": fields}, "native_options": map[string]any{"type": "object", "description": "Operation payload extensions; routing, credentials and resource references are reserved."},
+	}})
+	return schema
 }
 
 func defaultControlSchema(dialect, operation, name string) map[string]any {
