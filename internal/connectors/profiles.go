@@ -16,7 +16,6 @@ import (
 	"golang.org/x/net/http/httpguts"
 
 	"github.com/tyk-swe/olp/internal/operationregistry"
-	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
@@ -314,85 +313,6 @@ func generationFamily(dialect string) (wire.Format, bool) {
 		return wire.CohereChat, true
 	}
 	return "", false
-}
-
-func (c Config) Supports(operation, surface, mode string) bool {
-	if c.RetrievalBackend() != "" {
-		return operation == "retrieval" && surface == "openai" && mode == "unary"
-	}
-	if operation == "retrieval" && (c.Kind == "bedrock" || c.Kind == "vertex_ai" || c.Kind == KindAzureAISearch) {
-		return false
-	}
-	if retainedapi.Operation(operation) {
-		if operation == "agent_resource" {
-			return retainedapi.Supports(c.Kind, operation, surface, mode) && c.ProfileID == "gemini-agents" && c.ProfileRevision == ProfileRevision
-		}
-		// Dedicated single-purpose profiles never gain retained families.
-		switch c.ProfileID {
-		case "gemini-live", "gemini-interactions", "vertex-batch-prediction", "bedrock-batch-inference", "mistral-fim", "xai-realtime", "vertex-realtime", "bedrock-realtime":
-			return false
-		}
-		return retainedapi.Supports(c.Kind, operation, surface, mode)
-	}
-	if operation == "batch" {
-		if surface == "native" {
-			return mode == "unary" && (c.Kind == "vertex_ai" && c.ProfileID == "vertex-batch-prediction" && c.ProfileRevision == ProfileRevision && c.Hosting() == "vertex-google" ||
-				c.Kind == "bedrock" && c.ProfileID == "bedrock-batch-inference" && c.ProfileRevision == ProfileRevision && c.Hosting() == "bedrock-batch-inference")
-		}
-		if surface == "openai" {
-			return c.SupportsFilesBatches() && mode == "unary"
-		}
-		switch surface {
-		case "anthropic":
-			return c.Kind == "anthropic" && mode == "unary" &&
-				(c.ProfileID == "" || c.ProfileID == "anthropic-messages" && c.Hosting() == "direct-anthropic")
-		case "gemini":
-			return c.Kind == "gemini" && mode == "unary" &&
-				(c.ProfileID == "" || c.ProfileID == "gemini-generation" && c.Hosting() == "direct-gemini")
-		}
-		return false
-	}
-	if c.Kind == KindPlugin {
-		p, err := c.profile()
-		return err == nil && slices.Contains(p.Operations, operation) && Supports(c.Kind, c.VendorID, operation, surface, mode)
-	}
-	if c.ProfileID != "" {
-		if p, err := c.profile(); err == nil {
-			// A native generation dialect serves its own clients on the
-			// native surface, and is never translated to or from another.
-			if family, ok := generationFamily(p.OperationDialect("generation")); ok && family.Surface() == "native" && operation == "generation" {
-				return surface == "native" && (mode == "unary" || mode == "streaming") && slices.Contains(p.Operations, operation) && vendors.Serves(c.VendorID, operation)
-			}
-			switch p.Dialect {
-			case "gemini-interactions":
-				return operation == "generation" && surface == "gemini" && (mode == "unary" || mode == "streaming")
-			case "gemini-live":
-				return operation == "realtime" && surface == "gemini" && mode == "realtime"
-			case "xai-realtime", "vertex-realtime", "bedrock-realtime":
-				return operation == "realtime" && surface == "native" && mode == "realtime"
-			}
-			// An operation outside the profile has no dialect of its own; the
-			// default dialect OperationDialect names for it does not apply.
-			if codec, ok := operationregistry.Lookup(p.OperationDialect(operation)); ok && codec.Operation.ID == operation && slices.Contains(p.Operations, operation) {
-				if operationregistry.Catalog().SupportsTarget(codec.Identity, surface, mode) {
-					return true
-				}
-				if _, dedicated := operationregistry.Lookup(p.Dialect); dedicated {
-					return false
-				}
-				return Supports(c.Kind, c.VendorID, operation, surface, mode)
-			}
-		}
-	}
-
-	if !Supports(c.Kind, c.VendorID, operation, surface, mode) {
-		return false
-	}
-	if c.ProfileID == "" {
-		return true
-	}
-	p, err := c.profile()
-	return err == nil && slices.Contains(p.Operations, operation)
 }
 
 // host is the hosting stage of Apply. It places a request the caller addressed

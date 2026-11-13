@@ -291,21 +291,43 @@ var completionProfiles = []Profile{
 	completionProfile("together", KindOpenAICompatible, "direct-compatible"),
 }
 
-func filesBatchesProfile(vendor, documentation string, operations ...string) Profile {
-	return Profile{
-		ID: vendor + "-files-batches", Label: vendor + " OpenAI-compatible files and batches", Kind: KindOpenAICompatible,
-		Dialect: "openai-chat", Hosting: "direct-compatible", Authentication: keyOnly, Operations: operations,
-		Documentation: documentation, vendor: vendor,
+type filesBatchesService struct {
+	vendor, documentation string
+	adapter               BatchAdapter
+	operations            []string
+}
+
+var filesBatchesServices = []filesBatchesService{
+	{vendor: "groq", documentation: "https://console.groq.com/docs/api-reference", adapter: BatchOpenAI, operations: []string{"generation", "batch"}},
+	{vendor: "together", documentation: "https://docs.together.ai/reference/batch-create", adapter: BatchTogether, operations: []string{"generation", "batch"}},
+	{vendor: "mistral", documentation: "https://docs.mistral.ai/api/endpoint/batch", adapter: BatchMistral, operations: []string{"generation", "embeddings", "batch"}},
+}
+
+func (s filesBatchesService) profile() string {
+	return s.vendor + "-files-batches"
+}
+
+func filesBatchesVendors() []string {
+	out := make([]string, len(filesBatchesServices))
+	for i, service := range filesBatchesServices {
+		out[i] = service.vendor
 	}
+	return out
 }
 
-var filesBatchesProfiles = []Profile{
-	filesBatchesProfile("groq", "https://console.groq.com/docs/api-reference", "generation", "batch"),
-	filesBatchesProfile("together", "https://docs.together.ai/reference/batch-create", "generation", "batch"),
-	filesBatchesProfile("mistral", "https://docs.mistral.ai/api/endpoint/batch", "generation", "embeddings", "batch"),
+func filesBatchesProfiles() []Profile {
+	out := make([]Profile, len(filesBatchesServices))
+	for i, service := range filesBatchesServices {
+		out[i] = Profile{
+			ID: service.profile(), Label: service.vendor + " OpenAI-compatible files and batches", Kind: KindOpenAICompatible,
+			Dialect: "openai-chat", Hosting: "direct-compatible", Authentication: keyOnly, Operations: service.operations,
+			Documentation: service.documentation, vendor: service.vendor,
+		}
+	}
+	return out
 }
 
-var builtIns = builtIn(slices.Concat(hostedProfiles, operationProfiles(), []Profile{cohereV2}, completionProfiles, filesBatchesProfiles))
+var builtIns = builtIn(slices.Concat(hostedProfiles, operationProfiles(), []Profile{cohereV2}, completionProfiles, filesBatchesProfiles()))
 
 func builtIn(declared []Profile) []Profile {
 	out := make([]Profile, len(declared))
