@@ -114,7 +114,7 @@ func decodeSettings(format Format, raw json.RawMessage, into any, accepted ...st
 		return access.Invalid("settings", "settings must be a single JSON object")
 	}
 	for _, field := range slices.Sorted(maps.Keys(fields)) {
-		if string(fields[field]) != "null" && !slices.Contains(accepted, field) {
+		if !slices.Contains(accepted, field) {
 			return access.Invalid("settings", fmt.Sprintf("%s sinks do not accept settings.%s", format, field))
 		}
 	}
