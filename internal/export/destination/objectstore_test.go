@@ -1,6 +1,7 @@
 package destination
 
 import (
+	"encoding/json"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -48,5 +49,28 @@ func TestObjectStoreSigningRegion(t *testing.T) {
 				t.Errorf("signed region %q, want %q", fields[2], tc.want)
 			}
 		})
+	}
+}
+
+func TestSinkValidation(t *testing.T) {
+	for _, raw := range []string{`{"typo":null}`, `{"typo":1}`} {
+		if _, err := ParseSpec("https", "json", json.RawMessage(raw)); err == nil {
+			t.Errorf("accepted unknown setting %s", raw)
+		}
+	}
+	if _, err := ParseSpec("https", "cloudevents", json.RawMessage(`{"source":null}`)); err != nil {
+		t.Fatalf("known null setting: %v", err)
+	}
+	for _, tc := range []struct {
+		raw   string
+		valid bool
+	}{
+		{`{"outcome":"<nil>"}`, false}, {`{"outcome":"bogus"}`, false},
+		{`{"outcome":"success"}`, true}, {`{"outcome":"failure"}`, true}, {`{"outcome":null}`, true}, {`{}`, true},
+	} {
+		_, err := (&API{}).filter(t.Context(), nil, json.RawMessage(tc.raw), nil)
+		if (err == nil) != tc.valid {
+			t.Errorf("filter %s: %v", tc.raw, err)
+		}
 	}
 }
