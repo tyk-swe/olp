@@ -173,7 +173,7 @@ func (s *Server) resolveResource(ctx context.Context, x *call, authority keyauth
 		TargetID:           target.ID,
 		ProviderID:         provider.ID,
 		ProviderRevisionID: provider.RevisionID,
-		ProviderKind:       provider.Kind,
+		ProviderKind:       string(provider.Kind),
 		UpstreamModel:      target.ProviderModel,
 		Timeout:            time.Duration(target.Timeout) * time.Millisecond,
 		VendorID:           provider.VendorID,

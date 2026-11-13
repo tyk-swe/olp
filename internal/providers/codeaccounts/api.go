@@ -5,8 +5,10 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codeadapter"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/providerconfig"
 )
 
@@ -42,7 +44,9 @@ func (a API) write(r *http.Request, _ access.Principal) (access.Reply, error) {
 }
 
 type connectionProfile struct {
-	kind, authMode, id string
+	kind     connectors.Kind
+	authMode connectors.AuthMode
+	id       string
 }
 
 func (a API) requestAllowanceRead(r *http.Request, _ access.Principal) (access.Reply, error) {
@@ -56,7 +60,7 @@ func (a API) requestAllowanceRead(r *http.Request, _ access.Principal) (access.R
 		if err := tx.QueryRow(r.Context(), `SELECT a.project_id::text,p.configuration->>'kind',p.configuration->>'auth_mode',p.configuration->>'profile_id' FROM olp.code_accounts a JOIN olp.providers p ON p.id=a.provider_id WHERE a.id=$1`, id).Scan(&project, &kind, &authMode, &profileID); err != nil {
 			return connectionProfile{}, err
 		}
-		return connectionProfile{kind: providerconfig.Value(kind), authMode: providerconfig.Value(authMode), id: providerconfig.Value(profileID)}, p.Project(&project, access.Change)
+		return connectionProfile{kind: connectors.Kind(providerconfig.Value(kind)), authMode: connectors.AuthMode(providerconfig.Value(authMode)), id: providerconfig.Value(profileID)}, p.Project(&project, access.Change)
 	}, func(tx pgx.Tx, p access.Principal, profile connectionProfile) (access.Reply, error) {
 		signal, known := codeadapter.AllowanceSignalForProfile(profile.kind, profile.authMode, profile.id)
 		if !known || !signal.ActiveQualified {

@@ -373,8 +373,8 @@ func TestRetainedPageOnlyAdmitsCostsForEntriesBeingRead(t *testing.T) {
 		request:            request{startedAt: now},
 		historicalSnapshot: (&routing.Snapshot{Providers: map[string]routing.Provider{provider.ID: provider}}).ReadOnly(),
 		routingInputs: &routinginputs.Inputs{RefreshedAt: now, Prices: []rates.RoutingPrice{
-			*rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{ProviderKind: provider.Kind, Model: "free", Operation: "fine_tuning", PerRequest: new("0")}}),
-			*rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{ProviderKind: provider.Kind, Model: "paid", Operation: "fine_tuning", PerRequest: new("1")}}),
+			*rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{ProviderKind: string(provider.Kind), Model: "free", Operation: "fine_tuning", PerRequest: new("0")}}),
+			*rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{ProviderKind: string(provider.Kind), Model: "paid", Operation: "fine_tuning", PerRequest: new("1")}}),
 		}},
 	}
 	s := &Server{now: func() time.Time { return now }, deps: Dependencies{Admission: &quota.Admission{

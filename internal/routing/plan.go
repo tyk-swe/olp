@@ -360,8 +360,8 @@ func evaluateCandidates(s selectionSource, route Route, operation, surface, mode
 			row.decision.EstimatedInputTokens = &input
 			row.decision.RequestedOutputTokens = demand.MaxOutputTokens
 		}
-		row.decision.Price = options.Inputs.Price(provider.Kind, provider.ID, provider.VendorID, target.ProviderModel, operation, now)
-		row.attempt.Discount = options.Inputs.Discount(provider.Kind, provider.ID, provider.VendorID, now)
+		row.decision.Price = options.Inputs.Price(string(provider.Kind), provider.ID, provider.VendorID, target.ProviderModel, operation, now)
+		row.attempt.Discount = options.Inputs.Discount(string(provider.Kind), provider.ID, provider.VendorID, now)
 		if options.EstimateCost && options.WorstCost != nil {
 			row.decision.EstimatedCost = estimatedCost(provider, row.decision.Price, row.attempt.Discount, demand, now, options.WorstCost, target)
 		}
@@ -453,7 +453,7 @@ func evaluateCandidates(s selectionSource, route Route, operation, surface, mode
 		} else {
 			row.decision.Eligible = true
 		}
-		row.attempt = Attempt{TargetID: target.ID, ProviderID: target.ProviderID, ProviderRevisionID: provider.RevisionID, ProviderKind: provider.Kind, UpstreamModel: target.ProviderModel, Timeout: time.Duration(target.Timeout) * time.Millisecond, Priority: target.Priority, Score: Score(routeID, targetID, target.Weight, operation, surface, mode, affinity), Strategy: policy.Strategy, PolicyDigest: policy.Digest, Price: row.decision.Price, Discount: row.attempt.Discount, Performance: row.decision.Performance, VendorID: provider.VendorID}
+		row.attempt = Attempt{TargetID: target.ID, ProviderID: target.ProviderID, ProviderRevisionID: provider.RevisionID, ProviderKind: string(provider.Kind), UpstreamModel: target.ProviderModel, Timeout: time.Duration(target.Timeout) * time.Millisecond, Priority: target.Priority, Score: Score(routeID, targetID, target.Weight, operation, surface, mode, affinity), Strategy: policy.Strategy, PolicyDigest: policy.Digest, Price: row.decision.Price, Discount: row.attempt.Discount, Performance: row.decision.Performance, VendorID: provider.VendorID}
 		perf := row.decision.Performance
 		if policy.Strategy == strategyLatency && policy.Preferences.PreferredMaxLatencyMS != nil && (perf == nil || perf.LatencyMS > float64(*policy.Preferences.PreferredMaxLatencyMS)) {
 			row.preference = 1

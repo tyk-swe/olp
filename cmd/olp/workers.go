@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
@@ -66,7 +67,7 @@ func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Clie
 	managedExporter := &sinks.Worker{Pool: pool, Keys: keys, Installation: installation, Egress: policy}
 	wg.Go(func() { managedExporter.Run(ctx, log) })
 	wg.Go(func() { mediaService.Run(ctx) })
-	batchAuth := connectors.NewAuth(policy)
+	batchAuth := connectors.NewAuth(policy, os.Getenv)
 	batchAuth.Signer = pluginHost
 	batchWorker := reconcile.New(reconcile.Deps{
 		Pool: pool, Store: batches.NewStore(pool),

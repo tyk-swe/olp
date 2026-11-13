@@ -399,8 +399,8 @@ func workflowModelInspectionCost(m *simulation, provider routing.Provider, targe
 		return workflowUnboundedInspection()
 	}
 	now := time.Now()
-	price := m.inputs.Price(provider.Kind, provider.ID, provider.VendorID, target.ProviderModel, "generation", now)
-	discount := m.inputs.Discount(provider.Kind, provider.ID, provider.VendorID, now)
+	price := m.inputs.Price(string(provider.Kind), provider.ID, provider.VendorID, target.ProviderModel, "generation", now)
+	discount := m.inputs.Discount(string(provider.Kind), provider.ID, provider.VendorID, now)
 	bound, priced := price.WorkflowModelCostBound(*metadata.ContextLength, *output, discount)
 	if !priced {
 		return workflowUnboundedInspection()

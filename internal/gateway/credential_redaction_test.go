@@ -8,11 +8,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
 func TestUpstreamClientErrorsRedactAttemptedCredentials(t *testing.T) {
-	for _, authMode := range []string{"api_key", "headers"} {
+	for _, authMode := range []connectors.AuthMode{connectors.AuthAPIKey, connectors.AuthHeaders} {
 		for _, path := range []string{"/v1/chat/completions", "/v1/responses"} {
 			for _, stream := range []bool{false, true} {
 				for _, status := range []int{http.StatusBadRequest, http.StatusUnprocessableEntity, http.StatusTeapot} {
@@ -22,7 +23,7 @@ func TestUpstreamClientErrorsRedactAttemptedCredentials(t *testing.T) {
 						// diagnostics may embed a JSON serialization of the headers.
 						values := map[string]string{"x-api-key": " \t" + `secret-"\<&` + "\t ", "X-Tenant": `secret-"\<&-long` + " ", "X-Empty": ""}
 						credential := []byte(secretA + " \t")
-						if authMode == "headers" {
+						if authMode == connectors.AuthHeaders {
 							credential, _ = json.Marshal(values)
 						}
 						h.reissue(func(provider *routing.Provider) {
@@ -31,7 +32,7 @@ func TestUpstreamClientErrorsRedactAttemptedCredentials(t *testing.T) {
 						}, credential)
 						h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 							echo := r.Header.Get("Authorization") + " token=" + strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-							if authMode == "headers" {
+							if authMode == connectors.AuthHeaders {
 								for name, value := range values {
 									if r.Header.Get(name) != strings.TrimSpace(value) {
 										t.Errorf("incorrect %s credential", name)

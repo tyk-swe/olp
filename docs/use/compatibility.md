@@ -719,7 +719,7 @@ explicit detail level, or an input audio, input file, or refusal content part. A
 missing maximum output token count is also refused, because Anthropic requires
 one. These checks live in the
 [Anthropic encoder](../../internal/protocols/canonical_anthropic.go). The
-[connector capability rules](../../internal/connectors/capabilities.go) keep token
+[connector capability rules](../../internal/connectors/capability.go) keep token
 counting unary and bind the selected transport mode.
 
 ### Gemini providers
@@ -731,7 +731,7 @@ text and, as with Anthropic, input audio, input file and refusal parts, or
 an image with an explicit detail level. An image without a MIME type is refused
 rather than guessed. These checks live in the
 [Gemini encoder](../../internal/protocols/canonical_gemini.go); the
-[connector capability rules](../../internal/connectors/capabilities.go) enforce
+[connector capability rules](../../internal/connectors/capability.go) enforce
 unary token counting and refuse asynchronous generation. Preserved counting
 requests are validated after model rewriting as well.
 
@@ -806,9 +806,9 @@ of punctuation other than `_` and `-`; a named tool choice must exist in the
 tool list, and a tool choice of "none" cannot be combined with a non-empty tool
 list. Non-finite temperature or `top_p` values and non-finite JSON numbers
 inside tool arguments are refused too. The
-[capability rules](../../internal/connectors/capabilities.go) keep token counting
+[capability rules](../../internal/connectors/capability.go) keep token counting
 unary and refuse asynchronous generation; the
-[request builder](../../internal/connectors/config.go) validates the model ID or
+[request builder](../../internal/connectors/addressing.go) validates the model ID or
 ARN.
 
 See the [Bedrock connector guide](providers/bedrock.md) for authentication, SDK

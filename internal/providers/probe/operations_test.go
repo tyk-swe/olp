@@ -24,9 +24,10 @@ var (
 func TestCertifiableFollowsTheVendorRules(t *testing.T) {
 	t.Parallel()
 	cases := map[string]struct {
-		kind, vendor string
-		tuple        connection.Capability
-		want         bool
+		kind   connectors.Kind
+		vendor string
+		tuple  connection.Capability
+		want   bool
 	}{
 		"openai batches": {connectors.KindOpenAI, "openai", openAIBatch, true},
 		"azure batches":  {connectors.KindAzureOpenAI, "azure", openAIBatch, true},
@@ -66,7 +67,7 @@ func TestCertifiableFollowsTheVendorRules(t *testing.T) {
 func TestCapabilityOptionsForKindOfferWhatAProfileCanCertify(t *testing.T) {
 	t.Parallel()
 	cases := map[string]struct {
-		kind  string
+		kind  connectors.Kind
 		tuple connection.Capability
 		want  bool
 	}{

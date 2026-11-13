@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/billing/imports"
 	"github.com/tyk-swe/olp/internal/billing/source"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 )
@@ -21,7 +22,7 @@ type Billing struct {
 
 func billingRef(provider string) promotion.Ref { return promotion.Ref(provider + "/billing") }
 
-func parseBilling(entry contract.ConfigurationProviderEntry, kind string, at path) (*Billing, error) {
+func parseBilling(entry contract.ConfigurationProviderEntry, kind connectors.Kind, at path) (*Billing, error) {
 	if entry.BillingImport == nil {
 		return nil, nil
 	}

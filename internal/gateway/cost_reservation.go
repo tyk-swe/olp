@@ -233,7 +233,7 @@ func (x *call) attemptChargeBound(attempt routing.Attempt, costBound rates.Cost)
 			}
 		}
 		bound, _ := rev.Charge(u, x.request.startedAt, true, priced,
-			provider.Kind, provider.VendorID, attempt.UpstreamModel, x.operationName())
+			string(provider.Kind), provider.VendorID, attempt.UpstreamModel, x.operationName())
 		return bound
 	}
 	var input, reply int64
@@ -253,7 +253,7 @@ func (x *call) attemptChargeBound(attempt routing.Attempt, costBound rates.Cost)
 		generation = reply > 0
 	}
 	bound, _ := rev.ChargeBound(input, reply, generation, x.request.startedAt, costBound,
-		provider.Kind, provider.VendorID, attempt.UpstreamModel, x.operationName())
+		string(provider.Kind), provider.VendorID, attempt.UpstreamModel, x.operationName())
 	return bound
 }
 
@@ -450,7 +450,7 @@ func (s *Server) settledCharge(x *call) rates.Cost {
 		}
 		provider := x.snapshot().Provider(fact.ProviderID)
 		if charge, ok := rev.Charge(events.AttemptUsage(fact, operation), fact.StartedAt, events.AttemptSuccessful(fact), costPtr,
-			provider.Kind, provider.VendorID, fact.UpstreamModel, operation); ok {
+			string(provider.Kind), provider.VendorID, fact.UpstreamModel, operation); ok {
 			total = total.Add(charge)
 		}
 	}

@@ -451,7 +451,7 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *fault.Error {
 		}
 	}
 	if rev := x.attemptCardRevision(a.ProviderID, at); rev != nil {
-		if charge, ok := rev.Charge(u, at, true, costPtr, p.Kind, p.VendorID, a.UpstreamModel, x.operationName()); ok {
+		if charge, ok := rev.Charge(u, at, true, costPtr, string(p.Kind), p.VendorID, a.UpstreamModel, x.operationName()); ok {
 			c.budgetCharge = charge.String()
 		}
 	}

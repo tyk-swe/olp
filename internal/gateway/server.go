@@ -107,6 +107,7 @@ type Runtime interface {
 
 type Dependencies struct {
 	Egress         *egress.Policy
+	Getenv         func(string) string
 	Log            *slog.Logger
 	Cache          *cache.Store
 	Guardrails     func(guardrails.Caller) guardrails.Evaluator
@@ -164,7 +165,7 @@ func New(deps Dependencies, cfg Config) *Server {
 	config := normalizedConfig(cfg)
 	pool := inferencePool(config)
 
-	auth := connectors.NewAuth(policy)
+	auth := connectors.NewAuth(policy, deps.Getenv)
 	auth.Signer = config.Signer
 	// The tokenizers parse their rank tables on first use, which would land on
 	// the first request that needs one. A table that cannot be read leaves its

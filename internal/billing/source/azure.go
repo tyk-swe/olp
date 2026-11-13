@@ -20,6 +20,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
 	"github.com/shopspring/decimal"
+
 	"github.com/tyk-swe/olp/internal/connectors"
 )
 
@@ -35,7 +36,7 @@ const (
 
 var azureCostManagement = vendor[azureScope, azureCredential, Cloud]{
 	family:       "azure",
-	providerKind: "azure_openai",
+	providerKind: connectors.KindAzureOpenAI,
 	scope:        parseAzureScope,
 	input:        document,
 	credential:   parseAzureCredential,
@@ -98,7 +99,7 @@ type azureExport struct {
 type azureTransport struct {
 	client *http.Client
 	auth   *connectors.Auth
-	mode   string
+	mode   connectors.AuthMode
 	secret []byte
 }
 

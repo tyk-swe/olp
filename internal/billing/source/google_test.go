@@ -31,7 +31,7 @@ func TestGoogleADCRefusesMetadataHostOutsideEgressPolicy(t *testing.T) {
 		base: roundTripFunc(func(*http.Request) (*http.Response, error) {
 			return nil, errors.New("BigQuery request sent with a metadata token")
 		}),
-		auth:       connectors.NewBillingAuth(&egress.Policy{}, &http.Client{Transport: http.DefaultTransport}),
+		auth:       connectors.NewBillingAuth(&egress.Policy{}, &http.Client{Transport: http.DefaultTransport}, func(string) string { return "" }),
 		credential: googleADC{},
 	}
 	request := httptest.NewRequest(http.MethodPost, googleBigQueryEndpoint+"/bigquery/v2/projects/p/queries", nil)

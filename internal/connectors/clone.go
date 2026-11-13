@@ -42,6 +42,7 @@ func (config Config) Clone() Config {
 	}
 	return out
 }
+
 func copyValues(values map[string]json.RawMessage) map[string]json.RawMessage {
 	if values == nil {
 		return nil
@@ -52,6 +53,7 @@ func copyValues(values map[string]json.RawMessage) map[string]json.RawMessage {
 	}
 	return out
 }
+
 func copyDefaults(values map[string]DefaultSet) map[string]DefaultSet {
 	if values == nil {
 		return nil
@@ -64,6 +66,7 @@ func copyDefaults(values map[string]DefaultSet) map[string]DefaultSet {
 	}
 	return out
 }
+
 func copyPointer[T any](value *T) *T {
 	if value == nil {
 		return nil

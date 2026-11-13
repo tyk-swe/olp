@@ -9,10 +9,12 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/codesessions"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 
 	"github.com/jackc/pgx/v5"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/codeadapter"
@@ -178,9 +180,9 @@ func codePublication(ctx context.Context, tx pgx.Tx, poolID string) ([]byte, []c
 			return nil, nil, err
 		}
 		var c struct {
-			Kind      string `json:"kind"`
-			AuthMode  string `json:"auth_mode"`
-			ProfileID string `json:"profile_id"`
+			Kind      connectors.Kind     `json:"kind"`
+			AuthMode  connectors.AuthMode `json:"auth_mode"`
+			ProfileID string              `json:"profile_id"`
 		}
 		if err = json.Unmarshal(configuration, &c); err != nil {
 			return nil, nil, err

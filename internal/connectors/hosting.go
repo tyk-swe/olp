@@ -5,68 +5,58 @@ import (
 	"strings"
 )
 
-// hostingTraits are the addressing, authentication and framing facts of a
-// hosting. Connector methods read them instead of naming hostings, so a new
-// hosting is one entry here rather than a branch in each method.
 type hostingTraits struct {
-	// baseSuffix is appended to the endpoint unless it already ends with it.
-	baseSuffix string
-	// deployment addresses calls through an Azure deployment: the
-	// /openai/deployments/{deployment} prefix.
-	deployment bool
-	// apiVersion carries the configured API version as the api-version
-	// query of every call.
-	apiVersion bool
-	// azureScope is the Microsoft Entra scope of the hosting's tokens.
-	azureScope string
-	// awsService is the SigV4 signing name of the hosting's requests.
-	awsService string
-	// eventStream reports AWS event-stream framed streaming responses.
-	eventStream bool
-	// awsBearer authenticates with a bearer token the AWS credentials sign,
-	// instead of signing each request.
-	awsBearer bool
-	// model is the syntax of the hosting's upstream model names, where it
-	// differs from its kind's.
-	model *regexp.Regexp
-	// vertexPath is the path a Vertex hosting's endpoint ends with after
-	// its project and location.
-	vertexPath string
+	baseSuffix        string
+	deployment        bool
+	apiVersion        bool
+	resourceResponses bool
+	azureScope        string
+	awsService        string
+	eventStream       bool
+	awsBearer         bool
+	model             *regexp.Regexp
+	googleService     string
+	vertexPath        string
+	misplaced         string
+	messages          upstreamPath
 }
 
-const cognitiveServicesScope = "https://cognitiveservices.azure.com/.default"
+const (
+	cognitiveServicesScope = "https://cognitiveservices.azure.com/.default"
+	vertexMisplaced        = "Vertex endpoint path must match the profile's publisher or endpoint, project and location"
+)
 
 var hostings = map[string]hostingTraits{
 	"azure-ai-search":          {azureScope: "https://search.azure.com/.default"},
-	"vertex-rag-engine":        {},
-	"google-document-ai":       {},
+	"vertex-rag-engine":        {googleService: vertexAI, misplaced: "Vertex RAG endpoint must match its configured project and location"},
+	"google-document-ai":       {googleService: documentAI, misplaced: "Document AI endpoint must match its configured project and location"},
 	"bedrock-knowledge-bases":  {awsService: "bedrock"},
 	"azure-deployment":         {deployment: true, apiVersion: true, azureScope: cognitiveServicesScope},
-	"azure-responses-legacy":   {deployment: true, apiVersion: true, azureScope: cognitiveServicesScope},
+	"azure-responses-legacy":   {deployment: true, apiVersion: true, resourceResponses: true, azureScope: cognitiveServicesScope},
 	"azure-v1":                 {baseSuffix: "/openai/v1", azureScope: "https://ai.azure.com/.default"},
 	"bedrock-converse":         {awsService: "bedrock", eventStream: true},
-	"bedrock-anthropic-invoke": {awsService: "bedrock", eventStream: true},
+	"bedrock-anthropic-invoke": {awsService: "bedrock", eventStream: true, messages: bedrockInvokePath},
 	"bedrock-invoke":           {awsService: "bedrock"},
 	"bedrock-batch-inference":  {awsService: "bedrock"},
 	"bedrock-nova-sonic":       {awsService: "bedrock", eventStream: true},
 	"sagemaker-openai":         {awsService: "sagemaker", awsBearer: true},
-	"vertex-google":            {vertexPath: "/publishers/google"},
-	"vertex-anthropic":         {vertexPath: "/publishers/anthropic"},
-	// Vertex's OpenAI-compatible endpoint serves Google, partner and open
-	// models by publisher/model name.
-	"vertex-openai": {vertexPath: "/endpoints/openapi",
+	"vertex-google":            {googleService: vertexAI, vertexPath: "/publishers/google", misplaced: vertexMisplaced},
+	"vertex-anthropic": {googleService: vertexAI, vertexPath: "/publishers/anthropic", misplaced: vertexMisplaced,
+		messages: upstreamPath{unary: "/models/{model}:rawPredict", streaming: "/models/{model}:streamRawPredict"}},
+	"vertex-openai": {googleService: vertexAI, vertexPath: "/endpoints/openapi", misplaced: vertexMisplaced,
 		model: regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}/[A-Za-z0-9][A-Za-z0-9._@:-]{0,127}$`)},
 }
 
-// automaticHostings are the hostings of a provider without a profile, by kind.
-var automaticHostings = map[string]string{
-	"azure_openai": "azure-deployment",
-	"bedrock":      "bedrock-invoke",
-	KindSageMaker:  "sagemaker-openai",
+var automaticHostings = map[Kind]string{
+	KindAzureOpenAI: "azure-deployment",
+	KindBedrock:     "bedrock-invoke",
+	KindSageMaker:   "sagemaker-openai",
 }
 
-// traits are the hosting traits of the connector: its profile's hosting, or
-// its kind's automatic hosting.
+func envelopsMessages(hosting string) bool {
+	return hostings[hosting].messages != upstreamPath{}
+}
+
 func (c Config) traits() hostingTraits {
 	if c.ProfileID == "" {
 		return hostings[automaticHostings[c.Kind]]
@@ -74,8 +64,6 @@ func (c Config) traits() hostingTraits {
 	return hostings[c.Hosting()]
 }
 
-// ValidModel reports whether model is an upstream model name the connector's
-// hosting addresses.
 func (c Config) ValidModel(model string) bool {
 	if c.RetrievalBackend() != "" {
 		return c.retrievalModelValid(model)
@@ -86,15 +74,13 @@ func (c Config) ValidModel(model string) bool {
 	return ModelValid(c.Kind, model)
 }
 
-// AzureScope is the Microsoft Entra scope of the connector's tokens.
-func (c Config) AzureScope() string {
+func (c Config) azureScope() string {
 	if scope := c.traits().azureScope; scope != "" {
 		return scope
 	}
 	return cognitiveServicesScope
 }
 
-// awsService is the SigV4 signing name of the connector's requests.
 func (c Config) awsService() string {
 	if c.SigningService != "" {
 		return c.SigningService

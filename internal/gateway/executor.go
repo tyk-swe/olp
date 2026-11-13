@@ -404,7 +404,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 	st := &attemptState{parent: ctx, classifier: upstream.Classifier{ContextWindow: true, AtMostOnce: fact.Interaction != nil || fact.Carried || retainedResponse, Declared: cfg.Classification()}}
 	var parallel *parallelGuardrail
 	nativeDeliveryClass := ""
-	attemptCtx, atr := x.request.trace.Attempt(ctx, provider.Kind, a.ProviderRevisionID, a.UpstreamModel)
+	attemptCtx, atr := x.request.trace.Attempt(ctx, string(provider.Kind), a.ProviderRevisionID, a.UpstreamModel)
 	finishTrace := func() {
 		if atr == nil {
 			return

@@ -12,19 +12,15 @@ import (
 	"github.com/tyk-swe/olp/internal/oif"
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
+
 	"github.com/tyk-swe/olp/internal/protocols/awsframe"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 )
 
-// EventStream reports the hosting framing independently from the payload dialect.
 func (c Config) EventStream() bool {
 	return c.traits().eventStream
 }
 
-// StreamPayload removes only the qualified hosting envelope, retaining the native
-// Anthropic event document verbatim, or the envelope a plugin profile declares
-// around each event. Every event is bounded before allocating it; there are no
-// goroutines, unbounded queues, fabricated terminal events or retries.
 func (c Config) StreamPayload(reader io.Reader, maxEventBytes int) io.Reader {
 	if c.Plugin != nil {
 		return c.unwrapStream(reader, maxEventBytes)

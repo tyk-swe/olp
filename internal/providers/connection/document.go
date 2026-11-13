@@ -79,7 +79,7 @@ func (c Configuration) defaultedEndpoint() *string {
 	return new(endpoint)
 }
 
-func (o Options) normalized(kind string) Options {
+func (o Options) normalized(kind connectors.Kind) Options {
 	normalized := o
 	normalized.CredentialHeaders = canonicalHeaders(o.CredentialHeaders)
 	normalized.Models = orEmpty(o.Models)
@@ -124,14 +124,14 @@ func setOptions(options map[string]string) map[string]string {
 }
 
 // No vendor list price applies to a plugin provider.
-func defaultVendor(kind string, vendorID *string) *string {
+func defaultVendor(kind connectors.Kind, vendorID *string) *string {
 	switch {
 	case !vendorMissing(vendorID):
 		return vendorID
 	case kind == connectors.KindPlugin:
 		return nil
 	default:
-		return new(vendors.DefaultFor(kind))
+		return new(vendors.DefaultFor(string(kind)))
 	}
 }
 

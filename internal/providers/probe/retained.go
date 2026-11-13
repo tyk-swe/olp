@@ -52,7 +52,7 @@ func (p *Prober) certifyRetained(ctx context.Context, t Target, model string, tu
 	default:
 		return &Failure{Reason: CapabilityUnavailable, Detail: "This connector cannot certify the requested tuple."}
 	}
-	if !retainedapi.Supports(t.Connection.Document().Kind, tuple.Operation, tuple.Surface, tuple.Mode) {
+	if !retainedapi.Supports(string(t.Connection.Document().Kind), tuple.Operation, tuple.Surface, tuple.Mode) {
 		return &Failure{Reason: CapabilityUnavailable, Detail: "This connector cannot certify the requested tuple."}
 	}
 	endpoint, err := t.Connection.Transport().ResourceURL(model, path, query)
