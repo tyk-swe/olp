@@ -494,3 +494,44 @@ func TestCommitmentObservedDayMigrationRestatesExistingOutliers(t *testing.T) {
 		t.Fatalf("migration bucket version %d -> %d, outlier version %d", bucketBefore, bucketAfter, observedVersion)
 	}
 }
+
+func TestNotificationBudgetEvidenceUpgradeFreezesLegacySubject(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.EmptyDatabase(t)
+	migrateBefore(t, pool, "0147")
+	user, key, nextKey, destination, rule := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	for _, s := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO olp.users(id,email,display_name,role,etag) VALUES($1,'snapshot@example.invalid','Snapshot','owner',$1)`, []any{user}},
+		{`INSERT INTO olp.api_keys(id,lookup_id,digest,name,created_by,policy,etag) VALUES($1::uuid,$1::text,decode('00','hex'),'first',$3,'{}',$1::uuid),($2::uuid,$2::text,decode('01','hex'),'second',$3,'{}',$2::uuid)`, []any{key, nextKey, user}},
+		{`INSERT INTO olp.notification_destinations(id,name,url,etag,created_by) VALUES($1,'snapshot','https://example.invalid/notify',$1,$2)`, []any{destination, user}},
+		{`INSERT INTO olp.notification_rules(id,name,event,subject_kind,subject_id,window_kind,threshold_percent,destination_id,etag,created_by) VALUES($1,'snapshot','budget.threshold','api_key',$2,'day',75,$3,$1,$4)`, []any{rule, key, destination, user}},
+		{`INSERT INTO olp.notification_deliveries(id,rule_id,window_id,threshold_percent,accrued,limit_amount,status) VALUES($1,$2,1,75,80,100,'failed')`, []any{uuid.NewString(), rule}},
+	} {
+		if _, err := pool.Exec(t.Context(), s.sql, s.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := database.Migrate(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_deliveries(id,rule_id,window_id,threshold_percent,accrued,limit_amount,status) VALUES($1,$2,2,75,80,100,'pending')`, uuid.NewString(), rule); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.notification_rules SET subject_id=$2,window_kind='month' WHERE id=$1`, rule, nextKey); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	var preserved bool
+	if err := pool.QueryRow(t.Context(), `SELECT count(*),bool_and(budget_subject_kind='api_key' AND budget_subject_id=$2 AND budget_window_kind='day' AND accrued=80 AND limit_amount=100) FROM olp.notification_deliveries WHERE rule_id=$1`, rule, key).Scan(&count, &preserved); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.notification_deliveries(id,rule_id,window_id,threshold_percent,accrued,limit_amount,status,budget_subject_kind) VALUES($1,$2,3,75,80,100,'pending','api_key')`, uuid.NewString(), rule); err == nil {
+		t.Fatal("partial budget identity snapshot accepted")
+	}
+	if count != 2 || !preserved {
+		t.Fatalf("legacy and old-writer evidence changed after retarget: rows=%d preserved=%t", count, preserved)
+	}
+}

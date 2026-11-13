@@ -347,7 +347,7 @@ func (w *deliveryWorker) notificationDestination(ctx context.Context, tx pgx.Tx,
 }
 
 const pendingChannelDeliverySQL = `SELECT v.id::text,v.rule_id::text,COALESCE(v.event,r.event),v.attempts,
- r.name,r.subject_kind,r.subject_id::text,r.window_kind,v.window_id,v.threshold_percent,
+ r.name,v.budget_subject_kind,v.budget_subject_id::text,v.budget_window_kind,v.window_id,v.threshold_percent,
  v.accrued::text,v.limit_amount::text,COALESCE(v.currency::text,''),v.payload,v.api_key_id IS NOT NULL,
  k.incident_key,v.payload->>'subject',CASE WHEN jsonb_typeof(v.payload->'incident')='number' THEN (v.payload->'incident')::bigint END,v.resolved
  FROM olp.notification_deliveries v JOIN olp.notification_rules r ON r.id=v.rule_id

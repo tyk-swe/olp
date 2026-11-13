@@ -311,8 +311,14 @@ stale workers and spend reports. [OpenAPI](../../management/management.json) own
 schemas and defaults. Project events require matching project subject/destination
 and manager authority; installation events require settings authority. Missing
 fresh measurement is UNKNOWN, not recovery. Thresholds fire once per calendar
-window; key reminders deduplicate reason/date and cancel superseded pending sends;
-retired unused grants do not emit lapse.
+window. Budget delivery evidence keeps the subject and window measured when the
+alert was queued, so changing a rule cannot relabel its retries. Existing rows
+are frozen using their current rule identity during upgrade, which cannot
+reconstruct rule changes made before the upgrade. Older producers that omit
+the snapshot receive the current rule identity at insertion, so their earlier
+sampling races are not covered. New producers capture identity and amounts in
+one evaluation snapshot. Key reminders deduplicate reason/date and cancel
+superseded pending sends. Retired unused grants do not emit lapse.
 
 HMAC-SHA256 webhook signatures cover exact bodies in
 `X-OLP-Signature: sha256=<hex>`. Payloads are metadata-only; failures retain safe
