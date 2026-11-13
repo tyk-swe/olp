@@ -27,8 +27,10 @@ func (noCosts) Install(context.Context, []limits.Snapshot) error { return nil }
 type limiterCosts struct{ limiter *admission.Limiter }
 
 func (c limiterCosts) Install(ctx context.Context, snapshots []limits.Snapshot) error {
-	if err := c.limiter.InstallSnapshots(ctx, snapshots); err != nil {
-		return access.Fail(http.StatusServiceUnavailable, "limits_unavailable", "Budget state is unavailable; retry the apply.")
+	for _, snapshot := range snapshots {
+		if _, err := c.limiter.InstallSnapshot(ctx, snapshot); err != nil {
+			return access.Fail(http.StatusServiceUnavailable, "limits_unavailable", "Budget state is unavailable; retry the apply.")
+		}
 	}
 	return nil
 }
