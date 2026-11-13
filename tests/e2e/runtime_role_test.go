@@ -83,6 +83,9 @@ func TestRestoreRejectsQueryDatabaseBeforeAccess(t *testing.T) {
 		{"query", "postgresql://127.0.0.1/?dbname=replacement&sslmode=require", "Set the restore destination database in the URL path"},
 		{"path_and_query", "postgresql://127.0.0.1/replacement?dbname=replacement", "Set the restore destination database in the URL path"},
 		{"encoded_query", "postgresql://127.0.0.1/?%64bname=replacement", "Set the restore destination database in the URL path"},
+		{"leading_space", "postgresql://127.0.0.1/replacement? dbname=replacement", "Set the restore destination database in the URL path"},
+		{"trailing_space", "postgresql://127.0.0.1/replacement?dbname =replacement", "Set the restore destination database in the URL path"},
+		{"surrounding_spaces", "postgresql://127.0.0.1/replacement?sslmode=require& dbname =replacement", "Set the restore destination database in the URL path"},
 		{"duplicate_query", "postgresql://127.0.0.1/?dbname=&dbname=replacement", "Set the restore destination database in the URL path"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

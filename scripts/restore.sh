@@ -6,7 +6,7 @@ set -euo pipefail
 python3 - <<'PYURL'
 import os, sys, urllib.parse
 url = urllib.parse.urlsplit(os.environ['OLP_RESTORE_DATABASE_URL'])
-if any(name == 'dbname' for name, _ in urllib.parse.parse_qsl(url.query, keep_blank_values=True)):
+if any(name.strip(' ') == 'dbname' for name, _ in urllib.parse.parse_qsl(url.query, keep_blank_values=True)):
     sys.exit('Set the restore destination database in the URL path, not a dbname query option.')
 PYURL
 repo_dir=$(cd "$(dirname "$0")/.." && pwd)
