@@ -34,7 +34,7 @@ type Prefix struct {
 var prefixes = []Prefix{
 	{Path: "/mcp", Surface: Surface{Name: "openai", Inference: true}},
 	{Path: "/mcp/", Surface: Surface{Name: "openai", Inference: true}},
-	{Path: "/a2a/", Surface: managementSurface()},
+	{Path: "/a2a/", Surface: Surface{Name: "management", Inference: true}},
 	{Path: "/code/", Surface: Surface{Name: "openai", Inference: true}},
 	{Path: "/v1/", Surface: Surface{Name: "openai", Inference: true}, GatewayCatchAll: true},
 	{Path: "/native/", Surface: Surface{Name: "openai", Inference: true}},
