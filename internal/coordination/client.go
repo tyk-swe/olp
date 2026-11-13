@@ -38,6 +38,7 @@ func Configuration(rawURL, caFile string, timeout time.Duration) (Config, error)
 	option.ForceSingleClient = true
 	option.DisableCache = true
 	option.Dialer.Timeout = timeout
+	option.ConnWriteTimeout = timeout
 	if caFile == "" {
 		return Config{option: option, timeout: timeout}, nil
 	}
