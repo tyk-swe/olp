@@ -1,4 +1,5 @@
 import type { MediaJob } from './api';
+import { timeOrder } from '#lib/listing/filters.js';
 
 export type MediaMilestone = {
   label: string;
@@ -45,6 +46,10 @@ export function mediaTimeline(job: MediaJob): {
       at: job.deleted_at,
       detail: 'Content is no longer available through this resource.'
     });
-  recorded.sort((a, b) => a.at.localeCompare(b.at));
-  return { recorded, expiry: job.expires_at ?? null };
+  return {
+    recorded: recorded.toSorted((a, b) =>
+      timeOrder(a.at).localeCompare(timeOrder(b.at))
+    ),
+    expiry: job.expires_at ?? null
+  };
 }
