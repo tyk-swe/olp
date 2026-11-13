@@ -60,30 +60,10 @@ func (c Config) ValidateProfile() error {
 			}
 		}
 	}
-	if p.Dialect == "xai-realtime" && c.VendorID != "xai" ||
-		p.Dialect == "vertex-realtime" && c.VendorID != "google-vertex" ||
-		p.Dialect == "bedrock-realtime" && c.VendorID != "amazon-bedrock" {
-		return errors.New("native duplex profile requires its reviewed vendor")
+	if required, pinned := p.reviewedVendor(); pinned && c.VendorID != required.id {
+		return errors.New(required.family + " profile requires its reviewed vendor")
 	}
-	if p.Dialect == "openai-decisions" && c.VendorID != "openai" || p.Dialect == "systemone" && c.VendorID != "typesafe-jev" {
-		return errors.New("decision profile requires its reviewed vendor")
-	}
-	if p.Dialect == "mistral-ocr" && c.VendorID != "mistral" ||
-		p.Dialect == "azure-document-intelligence-ocr" && c.VendorID != "azure-document-intelligence" ||
-		p.Dialect == "vertex-document-processing-ocr" && c.VendorID != "google-vertex" ||
-		p.vendor != "" && c.VendorID != p.vendor ||
-		p.Dialect == "perplexity-search" && c.VendorID != "perplexity" ||
-		p.Dialect == "tavily-search" && c.VendorID != "tavily" ||
-		p.Dialect == "exa-search" && c.VendorID != "exa" ||
-		p.Dialect == "parallel-search" && c.VendorID != "parallel" ||
-		p.Dialect == "brave-search" && c.VendorID != "brave" {
-		return errors.New("operation profile requires its reviewed vendor")
-	}
-	if p.Dialect == "openai-completions" {
-		if c.VendorID != strings.TrimSuffix(p.ID, "-completions") {
-			return errors.New("completions profile requires its reviewed vendor")
-		}
-	} else if _, generation := generationFamily(p.Dialect); generation && !vendors.Speaks(c.VendorID, p.Dialect) {
+	if _, generation := generationFamily(p.Dialect); p.Dialect != "openai-completions" && generation && !vendors.Speaks(c.VendorID, p.Dialect) {
 		return errors.New("the vendor's reviewed contract does not include the profile's dialect")
 	}
 	if len(c.SemanticHeaders) > 16 || len(c.QuerySettings) > 16 {

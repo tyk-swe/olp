@@ -236,6 +236,34 @@ var (
 	cohereDialects = []string{"cohere-embed-v2", "cohere-rerank-v2"}
 )
 
+type reviewedVendor struct {
+	id, family string
+}
+
+var dialectVendors = map[string]reviewedVendor{
+	"xai-realtime":                    {id: "xai", family: "native duplex"},
+	"vertex-realtime":                 {id: "google-vertex", family: "native duplex"},
+	"bedrock-realtime":                {id: "amazon-bedrock", family: "native duplex"},
+	"openai-decisions":                {id: "openai", family: "decision"},
+	"systemone":                       {id: "typesafe-jev", family: "decision"},
+	"mistral-ocr":                     {id: "mistral", family: "operation"},
+	"azure-document-intelligence-ocr": {id: "azure-document-intelligence", family: "operation"},
+	"vertex-document-processing-ocr":  {id: "google-vertex", family: "operation"},
+	"perplexity-search":               {id: "perplexity", family: "operation"},
+	"tavily-search":                   {id: "tavily", family: "operation"},
+	"exa-search":                      {id: "exa", family: "operation"},
+	"parallel-search":                 {id: "parallel", family: "operation"},
+	"brave-search":                    {id: "brave", family: "operation"},
+}
+
+func (p Profile) reviewedVendor() (reviewedVendor, bool) {
+	if p.vendor.id != "" {
+		return p.vendor, true
+	}
+	required, pinned := dialectVendors[p.Dialect]
+	return required, pinned
+}
+
 func operationProfile(d operations.Dialect) Profile {
 	p := Profile{
 		ID: d.Identity.ID, Label: d.Label, Kind: KindOpenAICompatible, Dialect: d.Identity.ID, DialectRevision: d.Identity.Revision,
@@ -280,6 +308,7 @@ func completionProfile(vendor string, kind Kind, hosting string) Profile {
 		Authentication: keyHeadersOrNone, Operations: []string{"generation"},
 		OperationDialects: map[string]string{"generation": "openai-completions"},
 		Documentation:     "https://platform.openai.com/docs/api-reference/completions", Strict: true,
+		vendor: reviewedVendor{id: vendor, family: "completions"},
 	}
 }
 
@@ -321,7 +350,7 @@ func filesBatchesProfiles() []Profile {
 		out[i] = Profile{
 			ID: service.profile(), Label: service.vendor + " OpenAI-compatible files and batches", Kind: KindOpenAICompatible,
 			Dialect: "openai-chat", Hosting: "direct-compatible", Authentication: keyOnly, Operations: service.operations,
-			Documentation: service.documentation, vendor: service.vendor,
+			Documentation: service.documentation, vendor: reviewedVendor{id: service.vendor, family: "operation"},
 		}
 	}
 	return out
