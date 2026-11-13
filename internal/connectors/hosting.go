@@ -53,6 +53,10 @@ var automaticHostings = map[Kind]string{
 	KindSageMaker:   "sagemaker-openai",
 }
 
+func envelopsMessages(hosting string) bool {
+	return hostings[hosting].messages != upstreamPath{}
+}
+
 func (c Config) traits() hostingTraits {
 	if c.ProfileID == "" {
 		return hostings[automaticHostings[c.Kind]]

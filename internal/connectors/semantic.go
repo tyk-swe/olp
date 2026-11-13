@@ -82,7 +82,7 @@ func (c Config) ApplySemantic(req *http.Request) error {
 }
 
 func (p Profile) BindIngressSemanticHeader(name, value string) (bool, error) {
-	if !strings.EqualFold(name, "Anthropic-Version") || (p.Hosting != "vertex-anthropic" && p.Hosting != "bedrock-anthropic-invoke") {
+	if !strings.EqualFold(name, "Anthropic-Version") || !envelopsMessages(p.Hosting) {
 		return false, nil
 	}
 	if value != anthropicMessagesRevision {

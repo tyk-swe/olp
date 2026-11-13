@@ -93,7 +93,7 @@ func generationFamily(dialect string) (wire.Format, bool) {
 
 func (c Config) WrapBody(body []byte, encodedWire wire.Format) ([]byte, error) {
 	hosting := c.Hosting()
-	if hosting != "vertex-anthropic" && hosting != "bedrock-anthropic-invoke" {
+	if !envelopsMessages(hosting) {
 		return body, nil
 	}
 	if encodedWire != wire.Anthropic {
