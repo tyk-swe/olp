@@ -66,3 +66,14 @@ func TestProfilesHandsOutACatalogueCallersCannotChange(t *testing.T) {
 		t.Error("a caller's change to its copy reached the catalogue")
 	}
 }
+
+func TestNoCatalogueProfilePublishesADialectForAnOperationItDoesNotServe(t *testing.T) {
+	t.Parallel()
+	for _, p := range Profiles() {
+		for operation := range p.OperationDialects {
+			if !slices.Contains(p.Operations, operation) {
+				t.Errorf("%s publishes a %s dialect and serves only %v", p.ID, operation, p.Operations)
+			}
+		}
+	}
+}

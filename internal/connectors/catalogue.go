@@ -212,7 +212,7 @@ var hostedProfiles = []Profile{
 	{
 		ID: "mistral-fim", Label: "Mistral fill-in-the-middle", Kind: KindOpenAICompatible,
 		Dialect: "mistral-fim", DialectRevision: "v1", Hosting: "direct-compatible",
-		Authentication: keyOnly, Operations: []string{"generation"}, OperationDialects: openAIModeration,
+		Authentication: keyOnly, Operations: []string{"generation"},
 		Documentation: "https://docs.mistral.ai/api/endpoint/fim", Strict: true,
 	},
 	{
