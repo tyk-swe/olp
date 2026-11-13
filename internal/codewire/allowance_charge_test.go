@@ -24,7 +24,7 @@ func decodedCharge(t *testing.T, raw json.RawMessage) map[string]any {
 }
 
 func TestChatUnaryReportsOpenCodeAllowanceCharge(t *testing.T) {
-	chat := codewire.NewChat()
+	chat := codewire.NewChat(1)
 	observation := chat.Unary([]byte(`{"choices":[{"finish_reason":"stop"}],` + openCodeUsage + `}`))
 	if !observation.Terminal || !observation.Successful {
 		t.Fatalf("observation = %+v", observation)
@@ -40,7 +40,7 @@ func TestChatUnaryReportsOpenCodeAllowanceCharge(t *testing.T) {
 }
 
 func TestChatChargeDoesNotRetainResponseContent(t *testing.T) {
-	chat := codewire.NewChat()
+	chat := codewire.NewChat(1)
 	observation := chat.Unary([]byte(`{"choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5,"cost":0.004,"opencode":{"billing_source":"go","list_cost":0.005,"allowance":0.003,"prompt":"private prompt","output":"private output","tool":{"arguments":"secret"},"tokens":{"input":3,"output":2,"reasoning":"credential","extra":"private"}}}}`))
 	charge := decodedCharge(t, observation.AllowanceCharge)
 	if charge["billing_source"] != "go" || charge["cost"] != 0.004 || charge["allowance"] != 0.003 || charge["list_cost"] != 0.005 {
@@ -53,7 +53,7 @@ func TestChatChargeDoesNotRetainResponseContent(t *testing.T) {
 }
 
 func TestChatChargeRejectsUnrecognizedBillingAndInvalidNumbers(t *testing.T) {
-	chat := codewire.NewChat()
+	chat := codewire.NewChat(1)
 	observation := chat.Unary([]byte(`{"choices":[{"finish_reason":"stop"}],"usage":{"cost":0.5,"opencode":{"billing_source":"secret credential","list_cost":-1e-9999,"allowance":"private","tokens":{"input":-1,"output":2}}}}`))
 	charge := decodedCharge(t, observation.AllowanceCharge)
 	tokens, ok := charge["tokens"].(map[string]any)
@@ -63,7 +63,7 @@ func TestChatChargeRejectsUnrecognizedBillingAndInvalidNumbers(t *testing.T) {
 }
 
 func TestChatStreamReportsChargeFromFinalUsageChunk(t *testing.T) {
-	chat := codewire.NewChat()
+	chat := codewire.NewChat(1)
 	if charge := chat.Event([]byte(`{"choices":[{"delta":{}}]}`)).AllowanceCharge; charge != nil {
 		t.Fatalf("charge before final usage chunk = %s, want nil", charge)
 	}
@@ -76,7 +76,7 @@ func TestChatStreamReportsChargeFromFinalUsageChunk(t *testing.T) {
 }
 
 func TestChatWithoutOpenCodeObjectKeepsChargeUnknown(t *testing.T) {
-	chat := codewire.NewChat()
+	chat := codewire.NewChat(1)
 	observation := chat.Unary([]byte(`{"choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`))
 	if observation.AllowanceCharge != nil {
 		t.Fatalf("charge = %s, want nil (unknown, never zero)", observation.AllowanceCharge)
@@ -119,7 +119,7 @@ func TestMessagesWithoutOpenCodeObjectKeepsChargeUnknown(t *testing.T) {
 }
 
 func TestNonObjectOpenCodeValueIsIgnored(t *testing.T) {
-	chat := codewire.NewChat()
+	chat := codewire.NewChat(1)
 	observation := chat.Unary([]byte(`{"choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5,"opencode":"go"}}`))
 	if observation.AllowanceCharge != nil {
 		t.Fatalf("charge = %s, want nil for a non-object opencode value", observation.AllowanceCharge)
@@ -129,7 +129,7 @@ func TestNonObjectOpenCodeValueIsIgnored(t *testing.T) {
 func TestChatChargeKeepsDocumentedBillingSources(t *testing.T) {
 	for _, source := range []string{"free", "balance", "go", "go-plus", "byok"} {
 		body := `{"choices":[{"finish_reason":"stop"}],"usage":{"opencode":{"billing_source":"` + source + `"}}}`
-		charge := decodedCharge(t, codewire.NewChat().Unary([]byte(body)).AllowanceCharge)
+		charge := decodedCharge(t, codewire.NewChat(1).Unary([]byte(body)).AllowanceCharge)
 		if charge["billing_source"] != source {
 			t.Fatalf("billing source %q: charge = %v", source, charge)
 		}
@@ -138,7 +138,7 @@ func TestChatChargeKeepsDocumentedBillingSources(t *testing.T) {
 
 func TestChatChargePreservesReportedAmountPrecision(t *testing.T) {
 	body := `{"choices":[{"finish_reason":"stop"}],"usage":{"cost":0.1234567890123456789012345,"opencode":{"billing_source":"go","allowance":0.9876543210987654321098765}}}`
-	charge := codewire.NewChat().Unary([]byte(body)).AllowanceCharge
+	charge := codewire.NewChat(1).Unary([]byte(body)).AllowanceCharge
 	if !strings.Contains(string(charge), `"cost":0.1234567890123456789012345`) || !strings.Contains(string(charge), `"allowance":0.9876543210987654321098765`) {
 		t.Fatalf("reported amounts changed: %s", charge)
 	}

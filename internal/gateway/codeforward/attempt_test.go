@@ -408,6 +408,100 @@ type fakeCodeLedger struct {
 	cooldownErr      error
 }
 
+func TestCodeAttemptChatTracksEveryChoice(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		count      int64
+		choices    []string
+		stream     bool
+		done       bool
+		incomplete bool
+		unknown    bool
+	}{
+		{name: "single choice at EOF", count: 1, choices: []string{`{"index":0,"finish_reason":"stop"}`}, stream: true},
+		{name: "single choice without index", count: 1, choices: []string{`{"finish_reason":"stop"}`}, stream: true},
+		{name: "interleaved completion at EOF", choices: []string{`{"index":0,"finish_reason":null},{"index":1,"finish_reason":null}`, `{"index":1,"finish_reason":"stop"}`, `{"index":0,"finish_reason":"tool_calls"}`}, stream: true},
+		{name: "unfinished second choice at EOF", choices: []string{`{"index":1,"finish_reason":null}`, `{"index":0,"finish_reason":"stop"}`}, stream: true, incomplete: true},
+		{name: "unfinished choice with DONE", choices: []string{`{"index":0,"finish_reason":"stop"},{"index":1,"finish_reason":null}`}, stream: true, done: true, incomplete: true},
+		{name: "stream length before stop", choices: []string{`{"index":0,"finish_reason":"length"}`, `{"index":1,"finish_reason":"stop"}`}, stream: true, done: true, incomplete: true},
+		{name: "stream length after stop", choices: []string{`{"index":1,"finish_reason":"stop"}`, `{"index":0,"finish_reason":"length"}`}, stream: true, incomplete: true},
+		{name: "unary length before stop", choices: []string{`{"index":0,"finish_reason":"length"},{"index":1,"finish_reason":"stop"}`}, incomplete: true},
+		{name: "unary length after stop", choices: []string{`{"index":1,"finish_reason":"stop"},{"index":0,"finish_reason":"length"}`}, incomplete: true},
+		{name: "unseen second choice at EOF", choices: []string{`{"index":0,"finish_reason":"stop"}`}, stream: true, incomplete: true},
+		{name: "unseen second choice with DONE", choices: []string{`{"index":0,"finish_reason":"stop"}`}, stream: true, done: true, incomplete: true},
+		{name: "unseen second choice in unary", choices: []string{`{"index":0,"finish_reason":"stop"}`}, incomplete: true},
+		{name: "conflicting length then stop", count: 1, choices: []string{`{"index":0,"finish_reason":"length"}`, `{"index":0,"finish_reason":"stop"}`}, stream: true, incomplete: true},
+		{name: "conflicting stop then length", count: 1, choices: []string{`{"index":0,"finish_reason":"stop"}`, `{"index":0,"finish_reason":"length"}`}, stream: true, incomplete: true},
+		{name: "wrong second index", choices: []string{`{"index":1,"finish_reason":"stop"},{"index":2,"finish_reason":"stop"}`}, incomplete: true},
+		{name: "negative index", count: 1, choices: []string{`{"index":-1,"finish_reason":"stop"}`}, incomplete: true},
+		{name: "fractional index", count: 1, choices: []string{`{"index":0.5,"finish_reason":"stop"}`}, incomplete: true},
+		{name: "missing multi-choice indices", choices: []string{`{"finish_reason":"stop"},{"finish_reason":"stop"}`}, incomplete: true},
+		{name: "missing multi-choice stream indices", choices: []string{`{"finish_reason":"stop"}`, `{"finish_reason":"stop"}`}, stream: true, done: true, incomplete: true},
+		{name: "usage only at EOF", count: 1, stream: true, incomplete: true},
+		{name: "empty stream at EOF", count: 1, stream: true, incomplete: true, unknown: true},
+		{name: "no choices with DONE", count: 1, stream: true, done: true, incomplete: true},
+		{name: "unary complete", choices: []string{`{"index":1,"finish_reason":"stop"},{"index":0,"finish_reason":"stop"}`}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ledger := &fakeCodeLedger{}
+			attempt := glmAttempt(t, ledger, time.Now(), "v1/chat/completions")
+			choices := int64(2)
+			if tc.count != 0 {
+				choices = tc.count
+			}
+			request, err := codewire.ClassifyChat(fmt.Appendf(nil, `{"model":"glm-model","n":%d,"messages":[{"role":"user","content":"fixture"}]}`, choices), http.Header{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			attempt.observer = codeObserver(attempt.endpoint, request.ChatChoices)
+			attempt.dispatched = true
+			body := func() string {
+				if !tc.stream {
+					return `{"choices":[` + tc.choices[0] + `],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`
+				}
+				var stream strings.Builder
+				for _, choices := range tc.choices {
+					fmt.Fprintf(&stream, "data: {\"choices\":[%s]}\n\n", choices)
+				}
+				if !tc.unknown {
+					stream.WriteString("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":3,\"total_tokens\":5}}\n\n")
+				}
+				if tc.done {
+					stream.WriteString("data: [DONE]\n\n")
+				}
+				return stream.String()
+			}()
+			header := http.Header{}
+			if tc.stream {
+				header.Set("Content-Type", "text/event-stream")
+			}
+			attempt.response(t.Context(), http.StatusOK, header)
+			writer := httptest.NewRecorder()
+			attempt.copyResponse(t.Context(), writer, &http.Response{Header: header, Body: io.NopCloser(strings.NewReader(body))})
+			attempt.finish(t.Context())
+			if writer.Body.String() != body {
+				t.Fatalf("forwarded response = %q, want %q", writer.Body.String(), body)
+			}
+			want := "completed"
+			if tc.incomplete {
+				want = "incomplete"
+			}
+			if len(ledger.outcomes) != 2 || ledger.outcomes[1].Origin != "upstream" || ledger.outcomes[1].Kind != want {
+				t.Fatalf("outcomes = %+v, want upstream %s", ledger.outcomes, want)
+			}
+			if tc.incomplete && len(ledger.health) != 0 || !tc.incomplete && (len(ledger.health) != 1 || ledger.health[0].Status != "healthy") {
+				t.Fatalf("health = %+v, incomplete = %t", ledger.health, tc.incomplete)
+			}
+			if len(ledger.settlements) != 1 {
+				t.Fatalf("settlements = %+v", ledger.settlements)
+			}
+			if total := ledger.settlements[0].Total; tc.unknown && total != nil || !tc.unknown && (total == nil || *total != 5) {
+				t.Fatalf("reported usage lost, settlements = %+v", ledger.settlements)
+			}
+		})
+	}
+}
+
 func (f *fakeCodeLedger) Models(context.Context, codemode.Route, string) (codeclient.Offers, error) {
 	return codeclient.Offers{}, nil
 }
@@ -473,7 +567,7 @@ func codexAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time) *codeAtte
 		permit:      codesessions.Permit{Account: codemode.Account{ID: "account"}, Attempt: codemode.Attempt{ID: "attempt"}},
 		config:      routing.Configuration{Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID}},
 		endpoint:    endpoint,
-		observer:    codeObserver(endpoint),
+		observer:    codeObserver(endpoint, 1),
 		model:       "gpt-model",
 		publicModel: "public-model",
 	}
@@ -678,7 +772,7 @@ func glmAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time, path string
 		permit:      codesessions.Permit{InitialRecovery: true, Account: codemode.Account{ID: "account"}, Attempt: codemode.Attempt{ID: "attempt"}},
 		config:      routing.Configuration{Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.ZAIProfile}},
 		endpoint:    endpoint,
-		observer:    codeObserver(endpoint),
+		observer:    codeObserver(endpoint, 1),
 		model:       "glm-model",
 		publicModel: "glm-model",
 	}
@@ -753,7 +847,7 @@ func qwenAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time, anchor *st
 		permit:      codesessions.Permit{InitialRecovery: true, Account: codemode.Account{ID: "account", CycleAnchor: anchor}, Attempt: codemode.Attempt{ID: "attempt"}},
 		config:      routing.Configuration{Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.QwenTokenPlanProfile}},
 		endpoint:    endpoint,
-		observer:    codeObserver(endpoint),
+		observer:    codeObserver(endpoint, 1),
 		model:       "qwen-model",
 		publicModel: "qwen-model",
 	}
@@ -830,7 +924,7 @@ func minimaxAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time, path st
 		permit:      codesessions.Permit{InitialRecovery: true, Account: codemode.Account{ID: "account"}, Attempt: codemode.Attempt{ID: "attempt"}},
 		config:      routing.Configuration{Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.MiniMaxProfile}},
 		endpoint:    endpoint,
-		observer:    codeObserver(endpoint),
+		observer:    codeObserver(endpoint, 1),
 		model:       "MiniMax-M3",
 		publicModel: "MiniMax-M3",
 	}
@@ -930,7 +1024,7 @@ func kimiAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time, path strin
 		permit:      codesessions.Permit{InitialRecovery: true, Account: codemode.Account{ID: "account"}, Attempt: codemode.Attempt{ID: "attempt"}},
 		config:      routing.Configuration{Identity: providerconfig.Identity[string]{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.KimiProfile}},
 		endpoint:    endpoint,
-		observer:    codeObserver(endpoint),
+		observer:    codeObserver(endpoint, 1),
 		model:       "kimi-model",
 		publicModel: "kimi-model",
 	}
