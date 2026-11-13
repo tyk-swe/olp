@@ -238,9 +238,9 @@ func modalityShares(details []geminilifecycle.LiveUsageDetail) (audio, image *in
 		case "AUDIO":
 			v := detail.TokenCount
 			audio = &v
-		case "IMAGE":
+		case "IMAGE", "VIDEO":
 			v := detail.TokenCount
-			image = &v
+			mergeShare(&image, &v)
 		}
 	}
 	return audio, image

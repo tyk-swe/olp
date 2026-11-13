@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -12,7 +13,10 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/duplexcontract"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
 const sessionGolden = "testdata/sessions.golden.json"
@@ -204,4 +208,55 @@ func TestSessionsGolden(t *testing.T) {
 		}
 	}
 	checkGolden(t, sessionGolden, cases)
+}
+
+func TestVertexNativeVideoUsage(t *testing.T) {
+	t.Parallel()
+	config := connectors.Config{
+		Kind: "vertex_ai", VendorID: "google-vertex", ProfileID: "vertex-realtime", ProfileRevision: connectors.ProfileRevision,
+		Endpoint:    "https://us-central1-aiplatform.googleapis.com/v1/projects/audit-project/locations/us-central1/publishers/google",
+		CloudRegion: "us-central1", CloudProject: "audit-project", AuthMode: "service_account",
+	}
+	template, err := duplexcontract.Compile(duplexcontract.Config{Provider: config, Model: "audit-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rate := func(s string) *string { return &s }
+	price := rates.Price{InputPerMillion: rate("1"), CachedInputPerMillion: rate("0.5"), ImageInputPerMillion: rate("5"), CachedImageInputPerMillion: rate("2"), OutputPerMillion: rate("1")}
+	reference := usage.AttemptUsage{
+		Evidence: usage.EvidenceObservedComplete,
+		UsageQuantities: usage.UsageQuantities{
+			InputTokens: new(int64(10)), OutputTokens: new(int64(2)), CachedInputTokens: new(int64(3)),
+			ImageInputTokens: new(int64(7)), CachedImageInputTokens: new(int64(3)),
+		},
+	}
+	expectedCost, priced := price.Cost(reference, time.Time{}, true)
+	if !priced {
+		t.Fatal("reference usage is unpriced")
+	}
+	for _, test := range []struct{ name, prompt, cached string }{
+		{"image", `{"modality":"IMAGE","tokenCount":7}`, `{"modality":"IMAGE","tokenCount":3}`},
+		{"video", `{"modality":"VIDEO","tokenCount":7}`, `{"modality":"VIDEO","tokenCount":3}`},
+		{"mixed", `{"modality":"IMAGE","tokenCount":2},{"modality":"VIDEO","tokenCount":5}`, `{"modality":"IMAGE","tokenCount":1},{"modality":"VIDEO","tokenCount":2}`},
+	} {
+		o := template.Observer(1 << 20)
+		frame := fmt.Sprintf(`{"serverContent":{"turnComplete":true},"usageMetadata":{"promptTokenCount":10,"responseTokenCount":2,"totalTokenCount":12,"cachedContentTokenCount":3,"promptTokensDetails":[{"modality":"TEXT","tokenCount":3},%s],"cacheTokensDetails":[%s]}}`, test.prompt, test.cached)
+		if _, err := o.ServerFrame([]byte(frame)); err != nil {
+			t.Fatal(err)
+		}
+		if !o.Complete() {
+			t.Fatalf("%s usage is incomplete", test.name)
+		}
+		got := o.Usage()
+		if got.ImageInputTokens == nil || *got.ImageInputTokens != 7 || got.CachedImageInputTokens == nil || *got.CachedImageInputTokens != 3 {
+			t.Errorf("%s visual usage = image %v, cached image %v, want 7 and 3", test.name, got.ImageInputTokens, got.CachedImageInputTokens)
+		}
+		cost, ok := price.Cost(usage.ObservedAttemptUsage(got, o.Complete(), "realtime"), time.Time{}, true)
+		if !ok {
+			t.Fatalf("%s usage is unpriced", test.name)
+		}
+		if cost.String() != expectedCost.String() {
+			t.Errorf("%s cost = %s, want image-equivalent cost %s", test.name, cost.String(), expectedCost.String())
+		}
+	}
 }
