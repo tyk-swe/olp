@@ -55,6 +55,15 @@ func normalized(t Template) (Template, error) {
 }
 
 func parseTemplates(entries *[]contract.ConfigurationTemplateEntry) ([]Template, error) {
+	if entries != nil {
+		for _, entry := range *entries {
+			if policy, ok := promotion.Present(entry.RoutingPolicy); ok {
+				if err := validatePolicyMembers(policy); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
 	declared, err := promotion.Convert[[]Template](entries)
 	if err != nil {
 		return nil, err
