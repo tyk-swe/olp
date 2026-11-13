@@ -14,7 +14,6 @@ import {
 
 export type PersonalGrantPhase =
   | { readonly kind: 'idle' }
-  | { readonly kind: 'invited'; readonly url: string }
   | { readonly kind: 'handoff'; readonly id: string; readonly token: string }
   | {
       readonly kind: 'callback';
@@ -37,6 +36,7 @@ export type PersonalGrantTarget = {
 
 export class PersonalGrantEnrollment {
   private phase = $state<PersonalGrantPhase>({ kind: 'idle' });
+  private invitationURL = $state('');
   private working = $state(false);
   private failure = $state('');
   private message = $state('');
@@ -57,14 +57,20 @@ export class PersonalGrantEnrollment {
         this.phase.kind === 'authorization'
           ? this.phase.authorization
           : undefined,
-      enrollmentURL: this.phase.kind === 'invited' ? this.phase.url : ''
+      enrollmentURL: this.invitationURL
     } as const;
   }
 
   reset = () => {
     this.epoch += 1;
     this.phase = { kind: 'idle' };
+    this.invitationURL = '';
     this.working = false;
+    this.failure = this.message = '';
+  };
+
+  clearInvitation = () => {
+    this.invitationURL = '';
     this.failure = this.message = '';
   };
 
@@ -118,14 +124,13 @@ export class PersonalGrantEnrollment {
 
   begin = async (target: PersonalGrantTarget) => {
     if (this.working || !target.id || !target.keyId.trim()) return;
-    this.reset();
+    this.clearInvitation();
     await this.run(async (isCurrent) => {
       const result =
         target.kind === 'server'
           ? await startMCPGrant(target.id, target.keyId.trim())
           : await startAgentGrant(target.id, target.keyId.trim());
-      if (isCurrent())
-        this.phase = { kind: 'invited', url: result.enrollment_url };
+      if (isCurrent()) this.invitationURL = result.enrollment_url;
     });
   };
 

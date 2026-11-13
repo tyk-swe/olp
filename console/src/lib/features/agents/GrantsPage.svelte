@@ -531,7 +531,7 @@
           value={$state.agentID}
           disabled={working}
           onchange={(event) => {
-            enrollment.reset();
+            enrollment.clearInvitation();
             patch({ agentID: event.currentTarget.value });
           }}
           required
