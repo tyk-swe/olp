@@ -46,10 +46,10 @@ func TestOpenStopsAtCallerDeadline(t *testing.T) {
 
 func TestConfigurationDatabasePaths(t *testing.T) {
 	t.Parallel()
-	for _, path := range []string{"", "/", "/0", "/3"} {
+	for path, want := range map[string]int{"": 0, "/": 0, "/0": 0, "/3": 3} {
 		t.Run("accepted"+path, func(t *testing.T) {
-			if _, err := Configuration("redis://localhost:6379"+path, "", time.Second); err != nil {
-				t.Fatalf("Configuration(%q): %v", path, err)
+			if config, err := Configuration("redis://localhost:6379"+path, "", time.Second); err != nil || config.option.SelectDB != want {
+				t.Fatalf("Configuration(%q): database %d, error %v, want %d", path, config.option.SelectDB, err, want)
 			}
 		})
 	}
