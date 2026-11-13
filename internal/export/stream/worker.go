@@ -157,7 +157,8 @@ func (w *Worker) claim(ctx context.Context, p pair) (step, claim, error) {
 	}
 	var c claim
 	var sourceID, projectID *string
-	err = tx.QueryRow(claimCtx, nextRecordSQL, p.sink, p.stream).Scan(&c.record.ID, &c.record.At, &c.record.Data, &c.attempts, &sourceID, &projectID)
+	var deliverySettings json.RawMessage
+	err = tx.QueryRow(claimCtx, nextRecordSQL, p.sink, p.stream, settings).Scan(&c.record.ID, &c.record.At, &c.record.Data, &c.attempts, &sourceID, &projectID, &deliverySettings)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return idle, claim{}, nil
 	}
@@ -174,7 +175,7 @@ func (w *Worker) claim(ctx context.Context, p pair) (step, claim, error) {
 		}
 		return rejected, claim{}, tx.Commit(claimCtx)
 	}
-	spec, err := destination.ParseSpec(sinkType, format, settings)
+	spec, err := destination.ParseSpec(sinkType, format, deliverySettings)
 	if err != nil {
 		return idle, claim{}, err
 	}
@@ -182,7 +183,7 @@ func (w *Worker) claim(ctx context.Context, p pair) (step, claim, error) {
 	if err != nil {
 		return idle, claim{}, err
 	}
-	tag, err := tx.Exec(claimCtx, claimRecordSQL, p.sink, c.record.ID, c.attempts)
+	tag, err := tx.Exec(claimCtx, claimRecordSQL, p.sink, c.record.ID, c.attempts, deliverySettings, format)
 	if err != nil || tag.RowsAffected() != 1 {
 		return idle, claim{}, err
 	}

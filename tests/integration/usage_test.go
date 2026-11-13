@@ -3,6 +3,7 @@
 package integration_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -1301,6 +1302,165 @@ func TestKeyReminderRestoredScheduleRetries(t *testing.T) {
 	assertDelivery("delivered", 2)
 	if len(requests) != 2 {
 		t.Fatalf("sent %d attempts, want one failure and one successful delivery", len(requests))
+	}
+}
+
+func TestCloudEventsRetryPreservesSettings(t *testing.T) {
+	t.Parallel()
+	for _, change := range []string{"source", "default_source", "name"} {
+		t.Run(change, func(t *testing.T) {
+			t.Parallel()
+			pool, _ := harness.Database(t)
+			f := newUsageFixture(t, pool)
+			var calls atomic.Int32
+			bodies := make(chan []byte, 4)
+			receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				bodies <- body
+				if calls.Add(1) == 1 {
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer receiver.Close()
+			sink := uuid.NewString()
+			settings := `{ "source":"/original" }`
+			if change == "default_source" {
+				settings = `{}`
+			}
+			if _, err := pool.Exec(t.Context(), `INSERT INTO olp.export_sinks(id,name,type,destination,streams,format,settings,etag,created_by) VALUES($1,'retry-settings','https',$2,ARRAY['metering'],'cloudevents',$4,$1,$3)`, sink, receiver.URL, f.ownerID, settings); err != nil {
+				t.Fatal(err)
+			}
+			event, err := usage.NewAccountingEvent(f.event(f.attempt(1)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if outcome, err := ingest.PersistEvent(t.Context(), pool, event); err != nil || outcome.Outcome != ingest.PersistOutcomePersisted {
+				t.Fatalf("persist result=%+v error=%v", outcome, err)
+			}
+			policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+			run := func() {
+				var before int64
+				if err := pool.QueryRow(t.Context(), `SELECT COALESCE((SELECT successes_total FROM olp.worker_task_health WHERE task='export_delivery'),0)`).Scan(&before); err != nil {
+					t.Fatal(err)
+				}
+				ctx, cancel := context.WithCancel(t.Context())
+				done := make(chan struct{})
+				worker := exportstream.Worker{Pool: pool, Sender: destination.NewSender(policy, func(string) string { return "" }, "synthetic-installation"), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+				go func() { defer close(done); worker.Run(ctx) }()
+				defer func() { cancel(); <-done }()
+				deadline := time.Now().Add(5 * time.Second)
+				for {
+					var finished bool
+					if err := pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp.worker_task_health WHERE task='export_delivery' AND successes_total>$1)`, before).Scan(&finished); err != nil {
+						t.Fatal(err)
+					}
+					if finished {
+						return
+					}
+					if time.Now().After(deadline) {
+						t.Fatal("export worker did not checkpoint")
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+			}
+			run()
+			{
+				var installation string
+				if err := pool.QueryRow(t.Context(), `SELECT id::text FROM olp.installation WHERE singleton`).Scan(&installation); err != nil {
+					t.Fatal(err)
+				}
+				auth := secrets.NewAuthKey(make([]byte, 32), installation)
+				keys, err := secrets.ParseRing([]byte(`{"active_version":1,"keys":[{"version":1,"key":"` + strings.Repeat("01", 32) + `"}]}`))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := access.PrepareInstallation(t.Context(), pool, installation, auth, keys); err != nil {
+					t.Fatal(err)
+				}
+				token := "export-fixture-session"
+				if _, err := pool.Exec(t.Context(), `INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint) VALUES($1,$2,$3,now()+interval '1 hour','test')`, uuid.NewString(), f.ownerID, auth.Digest(secrets.SessionDigest, token)); err != nil {
+					t.Fatal(err)
+				}
+				mux := http.NewServeMux()
+				destination.NewAPI(access.New(access.Config{Pool: pool, Installation: installation, Origin: "https://test.example", Auth: auth, Keys: keys}), policy).Register(mux)
+				api := httptest.NewServer(mux)
+				defer api.Close()
+				patch := `{"settings":{"source":"/changed"}}`
+				if change == "name" {
+					patch = `{"name":"renamed"}`
+				}
+				req, err := http.NewRequest(http.MethodPatch, api.URL+"/api/v1/observability/sinks/"+sink, strings.NewReader(patch))
+				if err != nil {
+					t.Fatal(err)
+				}
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("Origin", "https://test.example")
+				req.Header.Set("If-Match", `"`+sink+`"`)
+				req.Header.Set("X-CSRF-Token", base64.RawURLEncoding.EncodeToString(auth.Digest(secrets.CSRFDigest, token)))
+				req.AddCookie(&http.Cookie{Name: "__Host-olp_session", Value: token})
+				response, err := api.Client().Do(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer response.Body.Close()
+				body, _ := io.ReadAll(response.Body)
+				if response.StatusCode != http.StatusOK {
+					t.Fatalf("PATCH status=%d body=%s", response.StatusCode, body)
+				}
+
+				var code *string
+				var delivered bool
+				if err := pool.QueryRow(t.Context(), `SELECT last_error_code,delivered_at IS NOT NULL FROM olp.export_pending WHERE sink_id=$1`, sink).Scan(&code, &delivered); err != nil {
+					t.Fatal(err)
+				}
+				if delivered || code == nil || *code != "status" {
+					t.Fatalf("failed HTTP attempt evidence: delivered=%t code=%v", delivered, code)
+				}
+				if _, err := pool.Exec(t.Context(), `UPDATE olp.export_pending SET next_attempt_at=now()-interval '1 second' WHERE sink_id=$1`, sink); err != nil {
+					t.Fatal(err)
+				}
+				run()
+			}
+			if len(bodies) != 2 {
+				t.Fatalf("deliveries=%d, want2", len(bodies))
+			}
+			first, second := <-bodies, <-bodies
+			if !bytes.Equal(first, second) {
+				t.Fatalf("retry changed event bytes: first=%s retry=%s", first, second)
+			}
+			nextAttempt := f.attempt(1)
+			next, err := usage.NewAccountingEvent(f.event(nextAttempt))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if outcome, err := ingest.PersistEvent(t.Context(), pool, next); err != nil || outcome.Outcome != ingest.PersistOutcomePersisted {
+				t.Fatalf("next persist=%+v err=%v", outcome, err)
+			}
+			run()
+			if len(bodies) != 1 {
+				t.Fatalf("new deliveries=%d, want1", len(bodies))
+			}
+			third := <-bodies
+			var body struct {
+				Source string `json:"source"`
+				ID     string `json:"id"`
+			}
+			if err := json.Unmarshal(third, &body); err != nil {
+				t.Fatal(err)
+			}
+			want := "/original"
+			if change != "name" {
+				want = "/changed"
+			}
+			if body.Source != want || body.ID != nextAttempt.ID {
+				t.Fatalf("new event uses wrong settings: %s", third)
+			}
+			if calls.Load() != 3 {
+				t.Fatalf("calls=%d", calls.Load())
+			}
+		})
 	}
 }
 

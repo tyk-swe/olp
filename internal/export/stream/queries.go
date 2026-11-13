@@ -9,12 +9,12 @@ const (
  FROM olp.export_sinks WHERE id=$1 AND enabled AND $2=ANY(streams) FOR SHARE`
 	nextRecordSQL = `SELECT r.id::text,r.occurred_at,
  jsonb_build_object('version',1,'event_id',r.id,'stream',r.stream,'source_id',r.source_id,'project_id',r.project_id,
- 'route',r.route,'outcome',r.outcome,'occurred_at',r.occurred_at,'data',r.payload),p.attempts,r.source_id::text,r.project_id::text
+ 'route',r.route,'outcome',r.outcome,'occurred_at',r.occurred_at,'data',r.payload),p.attempts,r.source_id::text,r.project_id::text,COALESCE(p.delivery_settings,$3::jsonb)
  FROM olp.export_pending p JOIN olp.export_records r ON r.id=p.record_id
  WHERE p.sink_id=$1 AND r.stream=$2 AND p.delivered_at IS NULL AND p.rejected_at IS NULL AND p.next_attempt_at<=now()
  ORDER BY r.queued_at,r.id LIMIT 1`
 	claimRecordSQL = `UPDATE olp.export_pending SET attempts=LEAST(attempts+1,2147483647),
- last_attempt_at=now(),next_attempt_at=now()+interval '2 minutes' WHERE sink_id=$1 AND record_id=$2 AND delivered_at IS NULL AND rejected_at IS NULL AND attempts=$3`
+ last_attempt_at=now(),next_attempt_at=now()+interval '2 minutes',delivery_settings=CASE WHEN $5='cloudevents' THEN COALESCE(delivery_settings,$4::jsonb) ELSE delivery_settings END WHERE sink_id=$1 AND record_id=$2 AND delivered_at IS NULL AND rejected_at IS NULL AND attempts=$3`
 	rejectEvidenceSQL = `UPDATE olp.export_pending SET rejected_at=now(),last_error_code='evidence_unavailable' WHERE sink_id=$1 AND record_id=$2 AND delivered_at IS NULL AND rejected_at IS NULL`
 	finishRecordSQL   = `UPDATE olp.export_pending SET delivered_at=CASE WHEN $3 THEN now() ELSE NULL END,
  rejected_at=CASE WHEN $6 THEN now() ELSE NULL END,
