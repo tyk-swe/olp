@@ -43,3 +43,21 @@ func TestOpenStopsAtCallerDeadline(t *testing.T) {
 		t.Fatalf("Open took %s, past the caller's 50ms deadline", elapsed)
 	}
 }
+
+func TestConfigurationDatabasePaths(t *testing.T) {
+	t.Parallel()
+	for _, path := range []string{"", "/", "/0", "/3"} {
+		t.Run("accepted"+path, func(t *testing.T) {
+			if _, err := Configuration("redis://localhost:6379"+path, "", time.Second); err != nil {
+				t.Fatalf("Configuration(%q): %v", path, err)
+			}
+		})
+	}
+	for _, path := range []string{"/abc", "/-1", "/3/", "//"} {
+		t.Run("rejected"+path, func(t *testing.T) {
+			if _, err := Configuration("redis://localhost:6379"+path, "", time.Second); err == nil {
+				t.Fatalf("Configuration(%q) accepted an invalid database", path)
+			}
+		})
+	}
+}
