@@ -151,7 +151,7 @@ jobs:
       - run: make check-console
   test-unit-go:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.code == 'true' || needs.changes.outputs.scripts == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
