@@ -19,15 +19,15 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/duplexcontract"
-	"github.com/tyk-swe/olp/internal/durablecontract"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/mediacontract"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/providerconfig"
-	"github.com/tyk-swe/olp/internal/realtimecontract"
 	"github.com/tyk-swe/olp/internal/routeidentity"
+	"github.com/tyk-swe/olp/internal/routing/durablecontract"
+	"github.com/tyk-swe/olp/internal/routing/realtimecontract"
 )
 
 // Generation identifies one published runtime configuration.

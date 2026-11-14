@@ -10,13 +10,13 @@ import (
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/duplexcontract"
-	"github.com/tyk-swe/olp/internal/durablecontract"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/mediacontract"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operationregistry"
-	"github.com/tyk-swe/olp/internal/realtimecontract"
 	"github.com/tyk-swe/olp/internal/retainedapi"
+	"github.com/tyk-swe/olp/internal/routing/durablecontract"
+	"github.com/tyk-swe/olp/internal/routing/realtimecontract"
 )
 
 // ValidateRouteContracts validates the complete configured links of a route.
