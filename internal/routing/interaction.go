@@ -11,7 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/duplexcontract"
 	"github.com/tyk-swe/olp/internal/interaction"
-	"github.com/tyk-swe/olp/internal/mediacontract"
+	"github.com/tyk-swe/olp/internal/media/mediacontract"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/retainedapi"
