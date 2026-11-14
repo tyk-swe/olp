@@ -15,10 +15,10 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Users, keys and identity | `internal/access/`, `internal/access/authority/`; console `access/` |
 | Projects, installation settings and policy | `internal/projects/`, `internal/settings/`, `internal/limits/`; console `access/` |
 | Notifications | `internal/notifications/`; console `access/notifications/` |
-| Admission, execution and retained resources | `internal/gateway/` (execution kernel, with `fault/`, `events/`, `quota/`, `ingress/`, `health/`, `codeforward/`, `traceingest/` and `delegation/` beneath it), `internal/resources/`, `internal/media/`; console inference/media |
+| Admission, execution and retained resources | `internal/gateway/` (execution kernel, with `fault/`, `events/`, `quota/`, `ingress/`, `health/`, `codeforward/`, `traceingest/` and `delegation/` beneath it), `internal/resources/`, `internal/media/` (with `mediacontract/` beneath it); console inference/media |
 | Code mode | `internal/codemode/`, `internal/codeadapter/`, `internal/codeclient/`, `internal/coderesearch/`, `internal/codesessions/`; console code mode |
 | Source and operation contracts | `internal/oif/`, `internal/operations/`, `internal/interaction/`, `internal/operationplan/`, `internal/operationregistry/` |
-| Protocol and lifecycle contracts | `internal/protocols/`, `internal/mediacontract/`, `internal/geminilifecycle/` |
+| Protocol and lifecycle contracts | `internal/protocols/`, `internal/geminilifecycle/` |
 | Preparation and failure evidence | `internal/providerinvoke/`, `internal/upstream/` |
 | Accounting, pricing, billing and exports | `internal/usage/` (event contract, with `rates/`, `routinginputs/`, `pricebook/`, `completeness/`, `delivery/`, `ingest/`, `reports/` and `retention/` beneath it), `internal/billing/`, `internal/export/`; console usage/observability |
 | Plugins and guardrails | `internal/plugins/`, `plugin/`, `internal/guardrails/`, `internal/contentpolicy/`; matching console features |
