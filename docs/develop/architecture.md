@@ -15,7 +15,7 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Users, keys and identity | `internal/access/`, `internal/access/authority/`; console `access/` |
 | Projects, installation settings and policy | `internal/projects/`, `internal/settings/`, `internal/limits/`; console `access/` |
 | Notifications | `internal/notifications/`; console `access/notifications/` |
-| Admission, execution and retained resources | `internal/gateway/` (execution kernel, with `fault/`, `events/`, `quota/`, `ingress/`, `health/`, `codeforward/` and `traceingest/` beneath it), `internal/resources/`, `internal/media/`; console inference/media |
+| Admission, execution and retained resources | `internal/gateway/` (execution kernel, with `fault/`, `events/`, `quota/`, `ingress/`, `health/`, `codeforward/`, `traceingest/` and `delegation/` beneath it), `internal/resources/`, `internal/media/`; console inference/media |
 | Code mode | `internal/codemode/`, `internal/codeadapter/`, `internal/codeclient/`, `internal/coderesearch/`, `internal/codesessions/`; console code mode |
 | Source and operation contracts | `internal/oif/`, `internal/operations/`, `internal/interaction/`, `internal/operationplan/`, `internal/operationregistry/` |
 | Protocol and lifecycle contracts | `internal/protocols/`, `internal/mediacontract/`, `internal/durablecontract/`, `internal/realtimecontract/`, `internal/geminilifecycle/` |
@@ -160,12 +160,18 @@ The packages beneath it hold what the kernel uses and never import it back.
 | `gateway/health` | circuit state, credential cooldowns and fleet health | `events` |
 | `gateway/codeforward` | `/code/{slug}` forwarding and the research proxy | `events`, `fault`, `ingress`, `quota` |
 | `gateway/traceingest` | OTLP trace ingest on `POST /v1/traces` | none |
+| `gateway/delegation` | delegation grant creation on `POST /v1/delegations` | `fault`, `ingress` |
 
 `scripts/check-lint.sh` enforces the last column and fails on a package it has
 no entry for, so a new gateway package declares its imports when it is added.
 Put new code in the kernel only when it needs a `call`. A handler that can be
 built from its own collaborators belongs in its own package, as
-`codeforward.Forwarder` and `traceingest.Ingester` are.
+`codeforward.Forwarder`, `traceingest.Ingester` and `delegation.Handler` are. The
+delegation handler takes the ingress gate, the key authority and the kernel
+header preamble through its constructor, so it tests without a `Server` while
+its responses keep the request identity and CORS headers every inference
+response carries. Session reauthentication for delegated calls stays in the
+kernel, because it reads the `call` it reauthenticates.
 
 ## Ordinary execution
 

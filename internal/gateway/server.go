@@ -26,6 +26,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export/capture"
 	"github.com/tyk-swe/olp/internal/gateway/codeforward"
+	"github.com/tyk-swe/olp/internal/gateway/delegation"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/health"
@@ -216,7 +217,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 		s.code.Register(mux)
 	}
 	mux.HandleFunc("POST /v1/guardrails/apply", s.applyGuardrails)
-	mux.HandleFunc("POST /v1/delegations", s.createDelegation)
+	mux.Handle("POST /v1/delegations", delegation.New(delegation.Dependencies{Gate: s.gate, Keys: s.deps.Runtime, Begin: func(w http.ResponseWriter, r *http.Request) { s.begin(w, r) }}))
 	mux.Handle("POST /v1/traces", traceingest.New(s.deps.Runtime, s.cfg.TrustedProxies, s.deps.Traces))
 	s.registerNative(mux)
 	s.registerGeminiLifecycle(mux)

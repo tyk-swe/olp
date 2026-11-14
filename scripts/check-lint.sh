@@ -9,7 +9,7 @@ gateway=github.com/tyk-swe/olp/internal/gateway
 declare -A gateway_imports=(
   [fault]="" [events]="" [traceingest]=""
   [health]="events" [ingress]="fault" [quota]="events fault"
-  [codeforward]="events fault ingress quota"
+  [codeforward]="events fault ingress quota" [delegation]="fault ingress"
 )
 while read -r package imports; do
   [[ $package == "$gateway" ]] && continue

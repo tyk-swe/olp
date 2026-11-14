@@ -1,4 +1,4 @@
-package gateway
+package delegation
 
 import (
 	"context"
@@ -16,42 +16,42 @@ import (
 	"github.com/tyk-swe/olp/internal/release"
 )
 
-type delegationRuntime interface {
+type creator interface {
 	CreateDelegation(context.Context, keyauthority.Authority, keyauthority.Authority, release.DelegationBounds) (release.DelegationGrant, error)
-	AuthenticateDelegation(context.Context, string, string) (*keyauthority.Authority, error)
-	ReauthenticateDelegation(context.Context, string, string) (*keyauthority.Authority, error)
 }
 
-type memberConsentRuntime interface {
+type consenter interface {
 	ExchangeMemberConsent(context.Context, keyauthority.Authority, string, release.DelegationBounds) (release.DelegationGrant, error)
 }
 
-func (s *Server) reauthenticateSession(ctx context.Context, x *call, token string) (*keyauthority.Authority, error) {
-	if x.authority.TaskCapability != nil {
-		auth, ok := s.deps.Runtime.(consumerauth.TaskCapabilityAuthenticator)
-		if !ok {
-			return nil, release.ErrInvalidKey
-		}
-		return auth.AuthenticateTaskCapability(ctx, token)
-	}
-	if x.authority.DelegationAgentID == "" {
-		return s.deps.Runtime.Authenticate(token)
-	}
-	delegate, ok := s.deps.Runtime.(delegationRuntime)
-	if !ok {
-		return nil, release.ErrInvalidKey
-	}
-	return delegate.ReauthenticateDelegation(ctx, token, x.request.delegationAssertion)
+// Dependencies are the collaborators delegation creation serves through.
+type Dependencies struct {
+	Gate  *ingress.Gate
+	Keys  consumerauth.Authenticator
+	Begin func(http.ResponseWriter, *http.Request)
 }
 
-func (s *Server) createDelegation(w http.ResponseWriter, r *http.Request) {
-	s.begin(w, r)
-	if !s.gate.Admit(r.Context()) {
+// Handler serves POST /v1/delegations.
+type Handler struct {
+	gate  *ingress.Gate
+	keys  consumerauth.Authenticator
+	begin func(http.ResponseWriter, *http.Request)
+}
+
+func New(deps Dependencies) *Handler {
+	return &Handler{gate: deps.Gate, keys: deps.Keys, begin: deps.Begin}
+}
+
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if h.begin != nil {
+		h.begin(w, r)
+	}
+	if !h.gate.Admit(r.Context()) {
 		fault.WriteError(w, fault.Overloaded)
 		return
 	}
-	defer s.gate.Release(r.Context())
-	delegate, ok := s.deps.Runtime.(delegationRuntime)
+	defer h.gate.Release(r.Context())
+	delegate, ok := h.keys.(creator)
 	if !ok {
 		fault.WriteError(w, fault.ServerError(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable."))
 		return
@@ -66,9 +66,9 @@ func (s *Server) createDelegation(w http.ResponseWriter, r *http.Request) {
 		fault.WriteError(w, fault.InvalidRequest("invalid_request", "Provide bounded delegation scopes and resources.", nil))
 		return
 	}
-	agent, failure := consumerauth.Authenticate(s.deps.Runtime, r, assertion, delegationScope(bounds), s.cfg.TrustedProxies, s.now())
+	agent, failure := h.gate.AuthenticateKey(r, assertion, scope(bounds))
 	if failure != nil {
-		fault.WriteError(w, ingress.ConsumerFailure(failure))
+		fault.WriteError(w, failure)
 		return
 	}
 	if consent := strings.TrimSpace(r.Header.Get("X-OLP-Delegation-Consent")); consent != "" {
@@ -76,25 +76,25 @@ func (s *Server) createDelegation(w http.ResponseWriter, r *http.Request) {
 			fault.WriteError(w, fault.InvalidRequest("invalid_request", "Provide either a delegating key or member consent.", nil))
 			return
 		}
-		member, ok := s.deps.Runtime.(memberConsentRuntime)
+		member, ok := h.keys.(consenter)
 		if !ok {
 			fault.WriteError(w, fault.ServerError(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable."))
 			return
 		}
 		grant, err := member.ExchangeMemberConsent(r.Context(), agent, consent, bounds)
-		writeDelegationGrant(w, grant, err)
+		writeGrant(w, grant, err)
 		return
 	}
-	key, failure := consumerauth.Authenticate(s.deps.Runtime, r, strings.TrimSpace(r.Header.Get("X-OLP-Delegating-Key")), "delegate", s.cfg.TrustedProxies, s.now())
+	key, failure := h.gate.AuthenticateKey(r, strings.TrimSpace(r.Header.Get("X-OLP-Delegating-Key")), "delegate")
 	if failure != nil {
-		fault.WriteError(w, ingress.ConsumerFailure(failure))
+		fault.WriteError(w, failure)
 		return
 	}
 	grant, err := delegate.CreateDelegation(r.Context(), agent, key, bounds)
-	writeDelegationGrant(w, grant, err)
+	writeGrant(w, grant, err)
 }
 
-func delegationScope(bounds release.DelegationBounds) string {
+func scope(bounds release.DelegationBounds) string {
 	if slices.Contains(bounds.Scopes, "tools") {
 		return "tools"
 	}
@@ -104,7 +104,7 @@ func delegationScope(bounds release.DelegationBounds) string {
 	return "inference"
 }
 
-func writeDelegationGrant(w http.ResponseWriter, grant release.DelegationGrant, err error) {
+func writeGrant(w http.ResponseWriter, grant release.DelegationGrant, err error) {
 	if errors.Is(err, release.ErrDelegationBounds) {
 		fault.WriteError(w, fault.InvalidRequest("invalid_request", "Provide bounded delegation scopes and resources.", nil))
 		return
