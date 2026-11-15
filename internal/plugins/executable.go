@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/panics"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
@@ -452,6 +453,7 @@ func (p *process) failure() error {
 // standard output, or until reap stops waiting for them.
 func (p *process) read(frames *bufio.Reader, hello chan<- error) {
 	defer p.reading.Done()
+	defer panics.Recover(p.log, "plugin reader", func(error) { p.stop("OLP could not process what it wrote") })
 	frame, err := readFrame(frames)
 	switch {
 	case err != nil:
@@ -518,6 +520,9 @@ func (p *process) receive(frames *bufio.Reader) string {
 		case frame.Request != nil:
 			ctx := p.grants(frame.Call)
 			go func() {
+				defer panics.Recover(p.log, "plugin capability", func(error) {
+					_ = p.send(abi.Frame{ID: frame.ID, Response: &abi.Response{Error: &abi.Error{Code: abi.CodeInternal, Message: "OLP could not serve the request."}}})
+				})
 				response := capability(ctx, *frame.Request)
 				_ = p.send(abi.Frame{ID: frame.ID, Response: &response})
 			}()

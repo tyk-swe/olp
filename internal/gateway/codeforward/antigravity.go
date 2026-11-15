@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codewire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/panics"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -76,7 +78,7 @@ func (a *codeAttempt) antigravityResponse(ctx context.Context, w http.ResponseWr
 			if !strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
 				return nil, codemode.Refuse(502, "code_upstream_invalid")
 			}
-			reader := antigravityStream(response.Body, model)
+			reader := antigravityStream(a.forwarder.log, response.Body, model)
 			defer reader.Close()
 			return protocols.StreamWithEvents(wire.Gemini, wire.Chat, reader, codewire.MaxBody, model, payload.includeUsage, writer.Emit, nil, 1)
 		}
@@ -119,9 +121,10 @@ type antigravityStateError struct {
 
 func (e *antigravityStateError) Unwrap() error { return e.Refusal }
 
-func antigravityStream(source io.Reader, model string) io.ReadCloser {
+func antigravityStream(log *slog.Logger, source io.Reader, model string) io.ReadCloser {
 	reader, writer := io.Pipe()
 	go func() {
+		defer panics.Recover(log, "antigravity stream", func(err error) { _ = writer.CloseWithError(err) })
 		err := sse.Decode(source, codewire.MaxBody, func(frame sse.Frame) error {
 			if frame.Control {
 				_, err := writer.Write(frame.Encode())

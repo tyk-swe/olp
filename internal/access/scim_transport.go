@@ -3,8 +3,6 @@ package access
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
-	"log/slog"
 	"mime"
 	"net/http"
 	"strconv"
@@ -57,7 +55,7 @@ func (s *Server) scimRoute(mux *http.ServeMux, pattern string, h Handler) {
 			}
 		}
 		if err != nil {
-			WriteSCIMError(w, err)
+			s.writeSCIMError(w, err)
 			return
 		}
 		w.Header().Set("Content-Type", "application/scim+json")
@@ -77,29 +75,48 @@ func (s *Server) scimRoute(mux *http.ServeMux, pattern string, h Handler) {
 	})
 }
 
-func WriteSCIMError(w http.ResponseWriter, err error) {
-	status, typ, detail := 503, "", "The SCIM operation is temporarily unavailable."
-	if e, ok := errors.AsType[*scim.Error](err); ok {
-		status, typ, detail = e.Status, e.Type, e.Detail
-	} else if e, ok := errors.AsType[*Problem](err); ok {
-		status, detail = e.Status, e.Detail
-		if status == 422 {
-			status, typ = 400, "invalidValue"
-		}
-		if status == 412 {
-			typ = "invalidVers"
-		}
-	} else if errors.Is(err, pgx.ErrNoRows) {
-		status, detail = 404, "The resource was not found."
-	} else if e, ok := errors.AsType[*pgconn.PgError](err); ok && e.Code == "23505" {
-		status, typ, detail = 409, "uniqueness", "An identity or group already uses this value."
-	} else {
-		code := ""
-		if pg, ok := errors.AsType[*pgconn.PgError](err); ok {
-			code = pg.Code
-		}
-		slog.Error("SCIM request failed", "error_type", fmt.Sprintf("%T", err), "sqlstate", code)
+type scimFailure struct {
+	status      int
+	typ, detail string
+}
+
+func (s *Server) writeSCIMError(w http.ResponseWriter, err error) {
+	f, known := scimFailureFor(err)
+	if !known {
+		s.log.Error("SCIM request failed", failure(err)...)
 	}
+	renderSCIMError(w, f)
+}
+
+func WriteSCIMError(w http.ResponseWriter, err error) {
+	f, _ := scimFailureFor(err)
+	renderSCIMError(w, f)
+}
+
+func scimFailureFor(err error) (scimFailure, bool) {
+	if e, ok := errors.AsType[*scim.Error](err); ok {
+		return scimFailure{e.Status, e.Type, e.Detail}, true
+	}
+	if e, ok := errors.AsType[*Problem](err); ok {
+		switch e.Status {
+		case 422:
+			return scimFailure{400, "invalidValue", e.Detail}, true
+		case 412:
+			return scimFailure{412, "invalidVers", e.Detail}, true
+		}
+		return scimFailure{e.Status, "", e.Detail}, true
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return scimFailure{404, "", "The resource was not found."}, true
+	}
+	if e, ok := errors.AsType[*pgconn.PgError](err); ok && e.Code == "23505" {
+		return scimFailure{409, "uniqueness", "An identity or group already uses this value."}, true
+	}
+	return scimFailure{503, "", "The SCIM operation is temporarily unavailable."}, false
+}
+
+func renderSCIMError(w http.ResponseWriter, f scimFailure) {
+	status, typ, detail := f.status, f.typ, f.detail
 	body := map[string]any{"schemas": []string{scim.ErrorSchema}, "status": strconv.Itoa(status), "detail": detail}
 	if typ != "" {
 		body["scimType"] = typ

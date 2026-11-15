@@ -81,7 +81,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 	if err != nil {
 		return fail(classCredential, nil)
 	}
-	parallel = x.startParallel(actx, cancel)
+	parallel = s.startParallel(actx, x, cancel)
 	if parallel != nil {
 		defer parallel.cancel()
 	}

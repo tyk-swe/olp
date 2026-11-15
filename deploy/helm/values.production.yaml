@@ -3,6 +3,7 @@ gateway:
   httpMaxInFlightInferenceRequests: 32
   topologySpread:
     whenUnsatisfiable: DoNotSchedule
+    zone: { enabled: true }
   resources:
     requests: { cpu: '1', memory: 1Gi, ephemeral-storage: 2Gi }
     limits: { cpu: '4', memory: 2Gi, ephemeral-storage: 3Gi }
@@ -14,12 +15,14 @@ control:
   topologySpread:
     enabled: true
     whenUnsatisfiable: DoNotSchedule
+    zone: { enabled: true }
 worker:
   replicas: 3
   podDisruptionBudget:
     minAvailable: 2
   topologySpread:
     whenUnsatisfiable: DoNotSchedule
+    zone: { enabled: true }
 config:
   databaseMaxConnections: 10
   publicOrigin: https://olp.example.com

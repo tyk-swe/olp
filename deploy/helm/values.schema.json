@@ -433,12 +433,22 @@
         "resources": { "type": "object" },
         "topologySpread": {
           "type": "object",
-          "required": ["enabled", "maxSkew", "topologyKey", "whenUnsatisfiable"],
+          "required": ["enabled", "maxSkew", "topologyKey", "whenUnsatisfiable", "zone"],
           "properties": {
             "enabled": { "type": "boolean" },
             "maxSkew": { "type": "integer", "minimum": 1 },
             "topologyKey": { "type": "string", "minLength": 1 },
-            "whenUnsatisfiable": { "enum": ["DoNotSchedule", "ScheduleAnyway"] }
+            "whenUnsatisfiable": { "enum": ["DoNotSchedule", "ScheduleAnyway"] },
+            "zone": {
+              "type": "object",
+              "required": ["enabled", "maxSkew", "whenUnsatisfiable"],
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "maxSkew": { "type": "integer", "minimum": 1 },
+                "whenUnsatisfiable": { "enum": ["DoNotSchedule", "ScheduleAnyway"] }
+              },
+              "additionalProperties": false
+            }
           }
         },
         "service": {

@@ -70,6 +70,7 @@ type fakeRuntime struct {
 	// refused records the credential versions the upstream refused.
 	refused            []string
 	refusedGenerations []int64
+	onSecret           func(id string)
 }
 
 func (f *fakeRuntime) Release() *release.Release { f.mu.Lock(); defer f.mu.Unlock(); return f.release }
@@ -110,6 +111,12 @@ func (f *fakeRuntime) Eligibility(id string) routing.Eligibility {
 // Secret serves eligible credentials the pinned release installed. The fake's
 // secret authority, for callers that pin no release, is its current release.
 func (f *fakeRuntime) Secret(_ context.Context, pinned *release.Release, id string) ([]byte, int64, error) {
+	f.mu.Lock()
+	onSecret := f.onSecret
+	f.mu.Unlock()
+	if onSecret != nil {
+		onSecret(id)
+	}
 	if f.Eligibility(id) != routing.Eligible {
 		return nil, 0, release.ErrCredentialUnavailable
 	}
@@ -666,7 +673,7 @@ func TestEmbeddingsRejectInvalidResultIndices(t *testing.T) {
 
 func TestTransformedMediaPreservesUsage(t *testing.T) {
 	h := newHarness(t, Config{MaxMediaBodyBytes: 1 << 20})
-	spool, err := staging.NewSpool(t.TempDir(), staging.MinCapacityBytes, nil)
+	spool, err := staging.NewSpool(t.TempDir(), staging.MinCapacityBytes, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}

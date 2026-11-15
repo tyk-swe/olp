@@ -1,10 +1,8 @@
 package events
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"strconv"
 	"time"
 
@@ -45,44 +43,7 @@ func (a *AccountingSink) Terminal(e Envelope) {
 	_ = a.Delivery.Emit(*event)
 }
 
-// PersistingSink records terminal events directly for explicit persistence
-// integrations. Production request producers use AccountingSink so failures
-// remain visible through the metadata stream and durable producer epoch.
-type PersistingSink struct {
-	Persist func(ctx context.Context, event *usage.Event, payload []byte) error
-	Log     *slog.Logger
-}
-
-// PersistTimeout bounds writing one directly persisted record.
 const PersistTimeout = 10 * time.Second
-
-// Terminal records one finished request.
-func (p *PersistingSink) Terminal(e Envelope) {
-	event, err := UsageEvent(e)
-	if err != nil {
-		p.logger().Warn("usage event not recorded", "request_id", e.RequestID, "error", err.Error())
-		return
-	}
-	if event == nil {
-		return
-	}
-	payload, err := json.Marshal(event)
-	if err == nil {
-		ctx, cancel := context.WithTimeout(context.Background(), PersistTimeout)
-		err = p.Persist(ctx, event, payload)
-		cancel()
-	}
-	if err != nil {
-		p.logger().Warn("usage event not recorded", "request_id", e.RequestID, "error", err.Error())
-	}
-}
-
-func (p *PersistingSink) logger() *slog.Logger {
-	if p.Log == nil {
-		return slog.Default()
-	}
-	return p.Log
-}
 
 // accountingEvent renders one envelope as a usage event, or nil when there is
 // nothing to account for: no API key owns a caller request, or it ended before

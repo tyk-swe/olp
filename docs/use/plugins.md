@@ -305,7 +305,7 @@ directory contains executable regular files with bounded safe names. Release
 images contain none; add static Linux binaries to the distroless image:
 
 ```dockerfile
-FROM ghcr.io/tyk-swe/olp:0.1.0
+FROM ghcr.io/tyk-swe/olp:0.2.0
 COPY --chmod=0555 acme /opt/olp/plugins/acme
 ```
 

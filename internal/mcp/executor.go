@@ -58,12 +58,6 @@ type Executor struct {
 }
 
 func NewExecutor(options ExecutorOptions) *Executor {
-	logger := func() *slog.Logger {
-		if options.Log != nil {
-			return options.Log
-		}
-		return slog.Default()
-	}()
 	now := func() func() time.Time {
 		if options.Now != nil {
 			return options.Now
@@ -72,7 +66,7 @@ func NewExecutor(options ExecutorOptions) *Executor {
 	}()
 	return &Executor{
 		authority: options.Authority, grants: options.Grants, connect: options.Connect,
-		ledger: options.Ledger, limiter: options.Limiter, auth: options.Auth, log: logger,
+		ledger: options.Ledger, limiter: options.Limiter, auth: options.Auth, log: options.Log,
 		credentials: options.Credentials, guardrails: options.Guardrails, now: now,
 		results: &resultCache{entries: make(map[string]retainedResult)},
 	}

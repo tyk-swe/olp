@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codewire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/panics"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -37,6 +38,7 @@ func (a *codeAttempt) meterPaidResponse(response *http.Response) (*http.Response
 	encoding := response.Header.Get("Content-Encoding")
 	go func() {
 		defer reader.Close()
+		defer panics.Recover(a.forwarder.log, "paid usage meter", func(error) { observed <- paidUsageObservation{} })
 		observed <- readPaidUsage(reader, a.paid.family, streaming, encoding, a.paid.route.Slug)
 	}()
 	forwarded := *response
@@ -86,7 +88,10 @@ func (a *codeAttempt) safePaidResponse(response *http.Response) (*http.Response,
 	}
 	if streaming && response.StatusCode < 400 {
 		reader, writer := io.Pipe()
-		go func() { _ = writer.CloseWithError(a.scrubPaidStream(response.Body, writer)) }()
+		go func() {
+			defer panics.Recover(a.forwarder.log, "paid stream scrub", func(err error) { _ = writer.CloseWithError(err) })
+			_ = writer.CloseWithError(a.scrubPaidStream(response.Body, writer))
+		}()
 		safe := *response
 		safe.Header = response.Header.Clone()
 		safe.Header.Del("Content-Length")

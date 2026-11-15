@@ -88,9 +88,11 @@ whose client binary is unavailable or whose journey fails reports
 
 The fixture gate needs Linux, Python 3, Bubblewrap, Docker, and native
 Codex, Claude Code, and OpenCode executables on `PATH`. Bubblewrap must be
-able to create network and PID namespaces. npm installs wrapper scripts,
-so expose the platform package binaries on `PATH` when using npm. The
-release workflow sets up these prerequisites on Linux amd64. Each version
+able to create network and PID namespaces.
+`scripts/qualification-clients.sh <directory>` installs the client versions
+pinned in `tests/qualification/clients/pnpm-lock.yaml` and links their
+native Linux amd64 binaries into that directory, which then goes on `PATH`.
+The release workflow sets up these prerequisites on Linux amd64. Each version
 probe and journey runs in an isolated network namespace with a temporary
 home and a cleared environment. A Unix socket connects the namespace only
 to the local OLP server, and the upstream proxy serves scripted responses.
@@ -101,8 +103,8 @@ the OpenAI SDK for [output item events](https://github.com/openai/openai-python/
 [text delta events](https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_text_delta_event.py),
 and [output messages](https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_output_message.py).
 
-The release workflow installs the latest Codex, Claude Code, and
-OpenCode clients from npm and runs `make qualify-code` as a gate on
+The release workflow installs the pinned Codex, Claude Code, and
+OpenCode clients with that script and runs `make qualify-code` as a gate on
 promotion. Fleet process suites still do not run. Generated client
 configuration and protocol translation keep partial signal through the
 unit tests. Behavior against real subscription services is

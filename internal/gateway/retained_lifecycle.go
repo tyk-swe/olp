@@ -273,11 +273,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 			fail(fault.ServerError(503, "provider_state_unavailable", "The submission could not be fenced."))
 			return
 		}
-		defer func() {
-			commitCtx, cancel := resourceCommitContext(r.Context())
-			defer cancel()
-			_ = lifecycle.Close(commitCtx)
-		}()
+		defer s.settleFence(r.Context(), lifecycle.Close)
 	}
 	native, failure := s.pinnedDo(ctx, x, p, e.Method, endpoint, body, "application/json")
 	if failure != nil {

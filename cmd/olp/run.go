@@ -55,6 +55,7 @@ import (
 	"github.com/tyk-swe/olp/internal/media/transport"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/operationregistry"
+	"github.com/tyk-swe/olp/internal/panics"
 	"github.com/tyk-swe/olp/internal/pluginindex"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -83,8 +84,9 @@ const metadataBuffer = 8192
 var Version = "dev"
 
 func Run(ctx context.Context, c Config, log *slog.Logger) error {
-	ctx, stop := context.WithCancel(ctx)
-	defer stop()
+	ctx, stop := context.WithCancelCause(ctx)
+	defer stop(nil)
+	supervise := supervisor(log, stop)
 	if err := operationregistry.Validate(); err != nil {
 		return fmt.Errorf("operation catalog: %w", err)
 	}
@@ -386,7 +388,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			if shared != nil {
 				taskLimits = tasks.Limits{Debits: debitStore, Syncer: shared.Syncer, Limiter: limiter}
 			}
-			agentTasks = tasks.New(pool, taskLimits, auth)
+			agentTasks = tasks.New(pool, taskLimits, auth, log)
 			agentPeers = a2a.NewPeers(&policy, func(ctx context.Context, id string) ([]byte, error) {
 				return keys.Read(ctx, pool, installation, id, secrets.AgentCredential)
 			})
@@ -475,7 +477,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			}
 			identityClient := access.IdentityHTTPClient()
 			control := access.New(access.Config{
-				Pool: pool, Installation: installation, Origin: c.PublicOrigin, Auth: auth, Keys: keys, Bootstrap: bootstrap, Egress: &policy,
+				Pool: pool, Installation: installation, Origin: c.PublicOrigin, Auth: auth, Keys: keys, Bootstrap: bootstrap, Egress: &policy, Log: log,
 				OIDCClient: identityClient,
 				RuntimePublisher: func(ctx context.Context, tx pgx.Tx, actor string) error {
 					_, err := release.Publish(ctx, tx, actor)
@@ -522,7 +524,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 	var workersStopped func()
 	var listeners []boundListener
 	defer func() {
-		stop()
+		stop(nil)
 		shutdownDeadline = time.Now().Add(c.ShutdownTimeout)
 		shutdown, cancel := context.WithDeadline(context.Background(), shutdownDeadline)
 		defer cancel()
@@ -564,11 +566,11 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		log.Info("process stopped", "mode", c.Mode)
 	}()
 	if pluginHost != nil {
-		background.Go(func() {
+		background.Go(supervise(func() {
 			if err := pluginHost.PreparePinned(auxiliary); err != nil && auxiliary.Err() == nil {
 				log.Warn("plugins could not be prepared", "error", err)
 			}
-		})
+		}))
 	}
 	if rt != nil {
 		// Authority must stay fresh while accepted requests drain, so
@@ -580,7 +582,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		rt.Start(context.WithoutCancel(ctx), grantRefreshed)
 	}
 	if agentMonitor != nil {
-		background.Go(func() { agentMonitor.Run(auxiliary) })
+		background.Go(supervise(func() { agentMonitor.Run(auxiliary) }))
 	}
 	// The observability collectors probe only what this process composes: an
 	// unconfigured dependency is reported as absent, never as failed.
@@ -605,7 +607,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			return slices.Concat(exporter.Metrics(ctx), focusWorker.Metrics(ctx), capturer.Metrics(), importer.Metrics(), captureRates)
 		},
 	})
-	background.Go(func() { obsCache.Run(auxiliary, obsSources, log) })
+	background.Go(supervise(func() { obsCache.Run(auxiliary, obsSources, log) }))
 	// The delivery plane outlives the listeners: it is cancelled only once the
 	// producers have drained, so every emitted event is written and this
 	// process's epoch is closed against what it actually delivered.
@@ -615,14 +617,14 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			return err
 		}
 	}
-	delivered.Go(func() { capturer.Run(deliveryState) })
+	delivered.Go(supervise(func() { capturer.Run(deliveryState) }))
 	if outage != nil {
-		background.Go(func() { outage.run(auxiliary) })
+		background.Go(supervise(func() { outage.run(auxiliary) }))
 	}
 	if gw != nil {
 		// Circuits are shared with the fleet only through Valkey; without it
 		// this returns at once and local circuits alone decide.
-		background.Go(func() { gw.RunFleetHealth(auxiliary) })
+		background.Go(supervise(func() { gw.RunFleetHealth(auxiliary) }))
 	}
 	// The worker plane is cancelled last of all, because the consumer it runs
 	// is what turns the events the delivery plane just flushed into accounting.
@@ -635,16 +637,16 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		// provider egress client, so the plane runs even when no shared state
 		// backend is configured. It is started exactly once, inside the single
 		// worker plane.
-		workersStopped = startWorkers(workers, pool, reader, debitStore, shared, workerStream, mediaService, rt, pluginHost, keys, auth, installation, c.Region, c.Hostname, &policy, log, exporter, focusWorker, importer, referenceCatalog)
+		workersStopped = startWorkers(workers, supervise, pool, reader, debitStore, shared, workerStream, mediaService, rt, pluginHost, keys, auth, installation, c.Region, c.Hostname, &policy, log, exporter, focusWorker, importer, referenceCatalog)
 	}
 	// Probes produce accounting events, so they stop before delivery closes;
 	// the consumer and recovery workers remain alive until delivery drains.
 	if prober != nil {
 		probesStopped = make(chan struct{})
-		go func() {
+		go supervise(func() {
 			defer close(probesStopped)
 			prober.RunHealthProbes(probes, probeCheckpoint(pool, log, c.Region))
-		}()
+		})()
 	}
 	live := []prometheus.Collector{runtimeMetrics(rt), admission.Metrics(inferencePool, managementPool), traces.Metrics()}
 	if business != nil {
@@ -668,15 +670,27 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		}
 		listenerConfigs = append(listenerConfigs, listenerConfig{name: "public", address: c.ListenAddr, handler: Perimeter(c.PublicOrigin, managementNetwork(c.ManagementAllowedCIDRs, c.TrustedProxyCIDRs, publicAdmission.Wrap(traces.Middleware(installation)(public))))})
 	}
-	listeners, err = bindListeners(startup, listenerConfigs, c, requestContext)
+	listeners, err = bindListeners(startup, listenerConfigs, c, requestContext, log)
 	if err != nil {
 		return err
 	}
 	serveErr := serveListeners(ctx, listeners, c.Mode, log)
+	if crash, ok := errors.AsType[*panics.Error](context.Cause(ctx)); ok {
+		return crash
+	}
 	if errors.Is(serveErr, http.ErrServerClosed) {
 		return nil
 	}
 	return serveErr
+}
+
+func supervisor(log *slog.Logger, stop context.CancelCauseFunc) func(func()) func() {
+	return func(task func()) func() {
+		return func() {
+			defer panics.Recover(log, "background task", stop)
+			task()
+		}
+	}
 }
 
 // reservePublicPaths keeps reserved prefixes from falling through to the SPA,
