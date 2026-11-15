@@ -51,7 +51,28 @@ jobs:
     if: vars.OLP_LIVE_QUALIFICATION == 'required'
     needs: qualification
     uses: ./.github/workflows/qualify-code-live.yml
-    secrets: inherit
+    secrets:
+      OLP_LIVE_CODEX_AUTH_JSON: ${{ secrets.OLP_LIVE_CODEX_AUTH_JSON }}
+      OLP_LIVE_CODEX_AUTH_JSON_2: ${{ secrets.OLP_LIVE_CODEX_AUTH_JSON_2 }}
+      OLP_LIVE_CODEX_MODEL: ${{ secrets.OLP_LIVE_CODEX_MODEL }}
+      OLP_LIVE_GLM_GLOBAL_KEY: ${{ secrets.OLP_LIVE_GLM_GLOBAL_KEY }}
+      OLP_LIVE_GLM_GLOBAL_MODEL: ${{ secrets.OLP_LIVE_GLM_GLOBAL_MODEL }}
+      OLP_LIVE_GLM_CN_KEY: ${{ secrets.OLP_LIVE_GLM_CN_KEY }}
+      OLP_LIVE_GLM_CN_MODEL: ${{ secrets.OLP_LIVE_GLM_CN_MODEL }}
+      OLP_LIVE_MINIMAX_GLOBAL_KEY: ${{ secrets.OLP_LIVE_MINIMAX_GLOBAL_KEY }}
+      OLP_LIVE_MINIMAX_GLOBAL_MODEL: ${{ secrets.OLP_LIVE_MINIMAX_GLOBAL_MODEL }}
+      OLP_LIVE_MINIMAX_CN_KEY: ${{ secrets.OLP_LIVE_MINIMAX_CN_KEY }}
+      OLP_LIVE_MINIMAX_CN_MODEL: ${{ secrets.OLP_LIVE_MINIMAX_CN_MODEL }}
+      OLP_LIVE_KIMI_GLOBAL_KEY: ${{ secrets.OLP_LIVE_KIMI_GLOBAL_KEY }}
+      OLP_LIVE_KIMI_GLOBAL_MODEL: ${{ secrets.OLP_LIVE_KIMI_GLOBAL_MODEL }}
+      OLP_LIVE_KIMI_CN_KEY: ${{ secrets.OLP_LIVE_KIMI_CN_KEY }}
+      OLP_LIVE_KIMI_CN_MODEL: ${{ secrets.OLP_LIVE_KIMI_CN_MODEL }}
+      OLP_LIVE_QWEN_GLOBAL_KEY: ${{ secrets.OLP_LIVE_QWEN_GLOBAL_KEY }}
+      OLP_LIVE_QWEN_GLOBAL_MODEL: ${{ secrets.OLP_LIVE_QWEN_GLOBAL_MODEL }}
+      OLP_LIVE_QWEN_CN_KEY: ${{ secrets.OLP_LIVE_QWEN_CN_KEY }}
+      OLP_LIVE_QWEN_CN_MODEL: ${{ secrets.OLP_LIVE_QWEN_CN_MODEL }}
+      OLP_LIVE_OPENCODE_GO_KEY: ${{ secrets.OLP_LIVE_OPENCODE_GO_KEY }}
+      OLP_LIVE_OPENCODE_GO_MODEL: ${{ secrets.OLP_LIVE_OPENCODE_GO_MODEL }}
     permissions:
       contents: read
   candidate-build:

@@ -2,6 +2,49 @@ name: Qualify code live
 on:
   workflow_dispatch:
   workflow_call:
+    secrets:
+      OLP_LIVE_CODEX_AUTH_JSON:
+        required: false
+      OLP_LIVE_CODEX_AUTH_JSON_2:
+        required: false
+      OLP_LIVE_CODEX_MODEL:
+        required: false
+      OLP_LIVE_GLM_GLOBAL_KEY:
+        required: false
+      OLP_LIVE_GLM_GLOBAL_MODEL:
+        required: false
+      OLP_LIVE_GLM_CN_KEY:
+        required: false
+      OLP_LIVE_GLM_CN_MODEL:
+        required: false
+      OLP_LIVE_MINIMAX_GLOBAL_KEY:
+        required: false
+      OLP_LIVE_MINIMAX_GLOBAL_MODEL:
+        required: false
+      OLP_LIVE_MINIMAX_CN_KEY:
+        required: false
+      OLP_LIVE_MINIMAX_CN_MODEL:
+        required: false
+      OLP_LIVE_KIMI_GLOBAL_KEY:
+        required: false
+      OLP_LIVE_KIMI_GLOBAL_MODEL:
+        required: false
+      OLP_LIVE_KIMI_CN_KEY:
+        required: false
+      OLP_LIVE_KIMI_CN_MODEL:
+        required: false
+      OLP_LIVE_QWEN_GLOBAL_KEY:
+        required: false
+      OLP_LIVE_QWEN_GLOBAL_MODEL:
+        required: false
+      OLP_LIVE_QWEN_CN_KEY:
+        required: false
+      OLP_LIVE_QWEN_CN_MODEL:
+        required: false
+      OLP_LIVE_OPENCODE_GO_KEY:
+        required: false
+      OLP_LIVE_OPENCODE_GO_MODEL:
+        required: false
 permissions:
   contents: read
 defaults:
