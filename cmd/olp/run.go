@@ -386,7 +386,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			if shared != nil {
 				taskLimits = tasks.Limits{Debits: debitStore, Syncer: shared.Syncer, Limiter: limiter}
 			}
-			agentTasks = tasks.New(pool, taskLimits, auth)
+			agentTasks = tasks.New(pool, taskLimits, auth, log)
 			agentPeers = a2a.NewPeers(&policy, func(ctx context.Context, id string) ([]byte, error) {
 				return keys.Read(ctx, pool, installation, id, secrets.AgentCredential)
 			})
