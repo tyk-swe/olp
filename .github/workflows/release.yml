@@ -25,6 +25,9 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: stable
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: '>=10.26.0'
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
@@ -37,14 +40,9 @@ jobs:
             sudo apparmor_parser -r "$RUNNER_TEMP/olp-qualification-bwrap"
           fi
           bwrap --unshare-net --unshare-pid --ro-bind / / /usr/bin/true
-      - name: Install latest coding clients
+      - name: Install pinned coding clients
         run: |
-          npm install --global --ignore-scripts @openai/codex@latest @anthropic-ai/claude-code@latest opencode-ai@latest
-          npm_root=$(npm root --global)
-          mkdir -p "$RUNNER_TEMP/qualification-clients"
-          ln -s "$npm_root/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex" "$RUNNER_TEMP/qualification-clients/codex"
-          ln -s "$npm_root/@anthropic-ai/claude-code/node_modules/@anthropic-ai/claude-code-linux-x64/claude" "$RUNNER_TEMP/qualification-clients/claude"
-          ln -s "$npm_root/opencode-ai/node_modules/opencode-linux-x64/bin/opencode" "$RUNNER_TEMP/qualification-clients/opencode"
+          scripts/qualification-clients.sh "$RUNNER_TEMP/qualification-clients"
           printf '%s\n' "$RUNNER_TEMP/qualification-clients" >> "$GITHUB_PATH"
       - run: make qualify-code
   qualify-code-live:
