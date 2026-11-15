@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/tyk-swe/olp/internal/panics"
 )
 
 func TestControlNeverAnswersConsumerProtocolPathsWithTheConsole(t *testing.T) {
@@ -85,4 +88,21 @@ func TestListenerLogsHandlerPanicsAsStructuredErrors(t *testing.T) {
 		}
 	}
 	t.Fatalf("no structured error record for the handler panic in %q", output.String())
+}
+
+func TestPanickingWorkerCancelsTheProcessWithItsCause(t *testing.T) {
+	ctx, stop := context.WithCancelCause(t.Context())
+	defer stop(nil)
+	var logs syncBuffer
+	var workers sync.WaitGroup
+	workers.Go(supervisor(slog.New(slog.NewJSONHandler(&logs, nil)), stop)(func() { panic("ledger corrupted") }))
+	workers.Wait()
+	<-ctx.Done()
+	crash, ok := errors.AsType[*panics.Error](context.Cause(ctx))
+	if !ok {
+		t.Fatalf("cause = %v, want the worker panic", context.Cause(ctx))
+	}
+	if crash.Value != "ledger corrupted" || !strings.Contains(logs.String(), `"panic":"ledger corrupted"`) {
+		t.Fatalf("panic %v was not reported, logs: %s", crash.Value, logs.String())
+	}
 }
