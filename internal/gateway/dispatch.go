@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"time"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 
@@ -192,9 +191,8 @@ func (h *dispatchHold) begin(ctx context.Context, s *Server, x *call, attempt ro
 
 func (h *dispatchHold) authorize(ctx context.Context, s *Server, x *call) (context.Context, func() *fault.Error, *fault.Error) {
 	if x.authority.TaskCapability != nil {
-		admitter, ok := s.deps.Runtime.(interface {
-			AdmitTaskCapabilityAttempt(context.Context, keyauthority.Authority, string, string, string, *string, string) error
-		})
+		admitter := s.deps.TaskAttemptAdmitter
+		ok := admitter != nil
 		var err error
 		if ok {
 			err = admitter.AdmitTaskCapabilityAttempt(ctx, x.authority, "inference", x.route.Slug, x.route.RevisionID, x.route.ProjectID, x.request.accountingID())

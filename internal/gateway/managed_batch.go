@@ -411,10 +411,8 @@ func managedBatchEndpoint(adapter connectors.BatchAdapter, endpoint string) (wir
 }
 
 func (s *Server) batchLineDigest(customID string) ([]byte, bool) {
-	digester, ok := s.deps.Runtime.(interface {
-		Digest(secrets.DigestPurpose, string) []byte
-	})
-	if !ok {
+	digester := s.deps.Digester
+	if digester == nil {
 		return nil, false
 	}
 	return digester.Digest(secrets.BatchLineDigest, customID), true

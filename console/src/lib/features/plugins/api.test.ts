@@ -88,7 +88,7 @@ describe('plugin HTTP contracts', () => {
 
   it('approves exactly the declared origins and deletes the selected build conditionally', async () => {
     serve(async (request) => {
-      expect(request.headers.get('If-Match')).toBe(plugin.etag);
+      expect(request.headers.get('If-Match')).toBe(`"${plugin.etag}"`);
       if (request.method === 'POST') {
         route(request, 'POST', `/api/v1/plugins/${plugin.digest}/approve`);
         expect(await request.json()).toEqual({

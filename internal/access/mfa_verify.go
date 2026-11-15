@@ -1,6 +1,7 @@
 package access
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -10,9 +11,34 @@ import (
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/mfa"
+	"github.com/pquerna/otp"
+	"github.com/pquerna/otp/hotp"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
+
+// totpCounter returns a fresh RFC 6238 counter within one 30-second step of
+// the server clock. A caller atomically persists it to prevent cross-gateway replay.
+func totpCounter(secret, code string, now time.Time, last int64) (int64, bool) {
+	if len(code) != 6 {
+		return 0, false
+	}
+	for _, c := range code {
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+	}
+	current := now.Unix() / 30
+	for counter := current - 1; counter <= current+1; counter++ {
+		if counter < 0 || counter <= last {
+			continue
+		}
+		expected, err := hotp.GenerateCodeCustom(secret, uint64(counter), hotp.ValidateOpts{Digits: otp.DigitsSix, Algorithm: otp.AlgorithmSHA1})
+		if err == nil && subtle.ConstantTimeCompare([]byte(expected), []byte(code)) == 1 {
+			return counter, true
+		}
+	}
+	return 0, false
+}
 
 type mfaProof struct {
 	Challenge  string          `json:"challenge"`
@@ -37,7 +63,7 @@ func (s *Server) verifyMFAProof(r *http.Request, tx pgx.Tx, f mfaFlow, input mfa
 		if err != nil {
 			return false, err
 		}
-		counter, valid := mfa.Counter(string(secret), input.Code, time.Now(), last)
+		counter, valid := totpCounter(string(secret), input.Code, time.Now(), last)
 		clear(secret)
 		if !valid {
 			return false, nil
@@ -130,7 +156,7 @@ func (s *Server) mfaVerify(r *http.Request) (Reply, error) {
 			var secret []byte
 			secret, err = s.Keys.Read(r.Context(), tx, s.Installation, *f.SecretID, secrets.MFATOTP)
 			if err == nil {
-				counter, valid = mfa.Counter(string(secret), input.Code, time.Now(), -1)
+				counter, valid = totpCounter(string(secret), input.Code, time.Now(), -1)
 				clear(secret)
 			}
 		}

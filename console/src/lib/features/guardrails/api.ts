@@ -1,6 +1,12 @@
 import { apiClient } from '#lib/management/client.js';
 import type { components } from '#lib/management/schema.js';
-import { ensureOk, unwrap, unwrapPage } from '#lib/management/http.js';
+import {
+  createHeaders,
+  ensureOk,
+  mutationHeaders,
+  unwrap,
+  unwrapPage
+} from '#lib/management/http.js';
 import { collectCursorPages } from '#lib/management/pagination.js';
 
 export type Definition = components['schemas']['GuardrailResponse'];
@@ -48,17 +54,14 @@ export async function saveDefinition(
         await apiClient.PUT('/api/v1/guardrails/{guardrail_id}', {
           params: {
             path: { guardrail_id: current.id },
-            header: {
-              'If-Match': `"${current.etag}"`,
-              'Idempotency-Key': requestId
-            }
+            header: mutationHeaders(current.etag, requestId)
           },
           body
         })
       )
     : unwrap(
         await apiClient.POST('/api/v1/guardrails', {
-          params: { header: { 'Idempotency-Key': requestId } },
+          params: { header: createHeaders(requestId) },
           body: { ...body, project_id: project, type }
         })
       );
@@ -73,17 +76,14 @@ export async function savePolicy(
         await apiClient.PUT('/api/v1/guardrail-policies/{policy_id}', {
           params: {
             path: { policy_id: current.policy_id },
-            header: {
-              'If-Match': `"${current.etag}"`,
-              'Idempotency-Key': crypto.randomUUID()
-            }
+            header: mutationHeaders(current.etag, crypto.randomUUID())
           },
           body
         })
       )
     : unwrap(
         await apiClient.POST('/api/v1/guardrail-policies', {
-          params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+          params: { header: createHeaders(crypto.randomUUID()) },
           body: { ...body, project_id: project }
         })
       );
@@ -93,10 +93,7 @@ export async function activateDefinition(current: Definition) {
     await apiClient.POST('/api/v1/guardrails/{guardrail_id}/activate', {
       params: {
         path: { guardrail_id: current.id },
-        header: {
-          'If-Match': `"${current.etag}"`,
-          'Idempotency-Key': crypto.randomUUID()
-        }
+        header: mutationHeaders(current.etag, crypto.randomUUID())
       },
       body: { revision_id: current.revision_id }
     })
@@ -107,10 +104,7 @@ export async function activatePolicy(current: Policy) {
     await apiClient.POST('/api/v1/guardrail-policies/{policy_id}/activate', {
       params: {
         path: { policy_id: current.policy_id },
-        header: {
-          'If-Match': `"${current.etag}"`,
-          'Idempotency-Key': crypto.randomUUID()
-        }
+        header: mutationHeaders(current.etag, crypto.randomUUID())
       },
       body: { revision_id: current.revision_id }
     })
@@ -121,7 +115,7 @@ export async function attachPolicy(
 ) {
   ensureOk(
     await apiClient.POST('/api/v1/guardrail-attachments', {
-      params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+      params: { header: createHeaders(crypto.randomUUID()) },
       body
     })
   );
@@ -149,7 +143,7 @@ export const createCredential = async (
   unwrap(
     await apiClient.POST('/api/v1/guardrail-credentials', {
       body,
-      params: { header: { 'Idempotency-Key': requestId } }
+      params: { header: createHeaders(requestId) }
     })
   );
 export const deleteCredential = async (
@@ -160,10 +154,7 @@ export const deleteCredential = async (
     await apiClient.DELETE('/api/v1/guardrail-credentials/{credential_id}', {
       params: {
         path: { credential_id: credential.id },
-        header: {
-          'If-Match': `"${credential.id}"`,
-          'Idempotency-Key': requestId
-        }
+        header: mutationHeaders(credential.id, requestId)
       }
     })
   );
@@ -172,7 +163,7 @@ export const retireDefinition = async (value: Definition, requestId: string) =>
     await apiClient.DELETE('/api/v1/guardrails/{guardrail_id}', {
       params: {
         path: { guardrail_id: value.id },
-        header: { 'If-Match': `"${value.etag}"`, 'Idempotency-Key': requestId }
+        header: mutationHeaders(value.etag, requestId)
       }
     })
   );
@@ -181,7 +172,7 @@ export const retirePolicy = async (value: Policy, requestId: string) =>
     await apiClient.DELETE('/api/v1/guardrail-policies/{policy_id}', {
       params: {
         path: { policy_id: value.policy_id },
-        header: { 'If-Match': `"${value.etag}"`, 'Idempotency-Key': requestId }
+        header: mutationHeaders(value.etag, requestId)
       }
     })
   );
@@ -193,7 +184,7 @@ export const detachPolicy = async (
     await apiClient.DELETE('/api/v1/guardrail-attachments/{attachment_id}', {
       params: {
         path: { attachment_id: value.id },
-        header: { 'If-Match': `"${value.etag}"`, 'Idempotency-Key': requestId }
+        header: mutationHeaders(value.etag, requestId)
       }
     })
   );
@@ -207,7 +198,7 @@ export const replaceAttachment = async (
       body: { policy_revision_id: revision },
       params: {
         path: { attachment_id: value.id },
-        header: { 'If-Match': `"${value.etag}"`, 'Idempotency-Key': requestId }
+        header: mutationHeaders(value.etag, requestId)
       }
     })
   );

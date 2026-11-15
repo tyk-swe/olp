@@ -194,7 +194,7 @@ it('creates, updates and deletes a sink using the request identity and revision'
       return json(sink);
     }
     route(request, request.method, '/api/v1/observability/sinks/sink-1');
-    expect(request.headers.get('If-Match')).toBe(sink.etag);
+    expect(request.headers.get('If-Match')).toBe(`"${sink.etag}"`);
     if (request.method === 'PATCH') {
       expect(await request.json()).toEqual({ enabled: false });
       return json({ ...sink, enabled: false });
@@ -243,7 +243,7 @@ it('creates, updates and deletes a capture policy using its revision', async () 
       request.method,
       '/api/v1/observability/capture-policies/policy-1'
     );
-    expect(request.headers.get('If-Match')).toBe(policy.etag);
+    expect(request.headers.get('If-Match')).toBe(`"${policy.etag}"`);
     if (request.method === 'PATCH') {
       expect(await request.json()).toEqual({ enabled: false });
       return json({ ...policy, enabled: false });
@@ -272,7 +272,7 @@ it('loads and updates the capture switch using its current revision', async () =
     route(request, request.method, '/api/v1/observability/capture');
     if (request.method === 'GET') return json(configuration);
     expect(request.method).toBe('PATCH');
-    expect(request.headers.get('If-Match')).toBe(configuration.etag);
+    expect(request.headers.get('If-Match')).toBe(`"${configuration.etag}"`);
     expect(await request.json()).toEqual({ enabled: true });
     return json({ ...configuration, enabled: true });
   });

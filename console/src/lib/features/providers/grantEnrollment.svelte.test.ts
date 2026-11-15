@@ -66,7 +66,7 @@ describe('provider grant enrollment', () => {
         return new Response(null, { status: 204 });
       }
       route(request, 'POST', basePath);
-      expect(request.headers.get('If-Match')).toBe(provider.etag);
+      expect(request.headers.get('If-Match')).toBe(`"${provider.etag}"`);
       expect(await request.json()).toEqual({ slot_id: enrollment.slot_id });
       return json(enrollment);
     });

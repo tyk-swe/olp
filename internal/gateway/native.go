@@ -1,20 +1,17 @@
 package gateway
 
 import (
-	"context"
 	"net/http"
-	"slices"
 	"strings"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/models"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
-	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
-func (s *Server) registerNative(mux *http.ServeMux) {
+func (s *Server) registerNative(mux *http.ServeMux, catalog *models.Handler) {
 	mux.HandleFunc("POST /native/{dialect}/models/{model}", func(w http.ResponseWriter, r *http.Request) {
 		// A native generation dialect is generation on the native surface;
 		// every other native dialect is a registered unary operation.
@@ -41,8 +38,8 @@ func (s *Server) registerNative(mux *http.ServeMux) {
 	mux.HandleFunc("POST /anthropic/v1/messages", s.inference(wire.Anthropic))
 	mux.HandleFunc("POST /anthropic/v1/messages/count_tokens", s.inference(wire.AnthropicCount))
 	for _, prefix := range []string{"/anthropic/v1", "/gemini/v1", "/gemini/v1beta"} {
-		mux.HandleFunc("GET "+prefix+"/models", s.nativeModels)
-		mux.HandleFunc("GET "+prefix+"/models/{model}", s.nativeModels)
+		mux.HandleFunc("GET "+prefix+"/models", catalog.Native)
+		mux.HandleFunc("GET "+prefix+"/models/{model}", catalog.Native)
 		mux.HandleFunc("OPTIONS "+prefix+"/", s.preflight)
 		mux.HandleFunc(prefix+"/", func(w http.ResponseWriter, r *http.Request) {
 			s.begin(w, r)
@@ -81,53 +78,5 @@ func (s *Server) registerNative(mux *http.ServeMux) {
 				s.inference(family)(w, r)
 			})
 		}
-	}
-}
-func (s *Server) nativeModel(ctx context.Context, release *release.Release, authority keyauthority.Authority, route routing.Route, surface string) map[string]any {
-	capabilities := s.modelCapabilities(ctx, release, authority, route, surface)
-	if surface == "anthropic" {
-		return map[string]any{"id": route.Slug, "type": "model", "display_name": route.Slug, "created_at": route.PublishedAt.UTC().Format("2006-01-02T15:04:05Z"), "capabilities": capabilities}
-	}
-	methods := []string{}
-	if slices.Contains(route.Operations, "generation") {
-		methods = append(methods, "generateContent", "streamGenerateContent")
-	}
-	if slices.Contains(route.Operations, "token_count") {
-		methods = append(methods, "countTokens")
-	}
-	return map[string]any{"name": "models/" + route.Slug, "displayName": route.Slug, "supportedGenerationMethods": methods, "capabilities": capabilities}
-}
-func (s *Server) nativeModels(w http.ResponseWriter, r *http.Request) {
-	req := s.begin(w, r)
-	surface := fault.RequestSurface(r)
-	authority, e := s.gate.Authenticate(r, "models_read")
-	if e != nil {
-		fault.WriteSurfaceError(w, e, surface)
-		return
-	}
-	if slug := r.PathValue("model"); slug != "" {
-		route, ok := req.release.Snapshot().FindRoute(slug)
-		if !ok || !authority.Allows("models_read", slug, route.ProjectID, s.now()) {
-			fault.WriteSurfaceError(w, fault.ModelNotFound(slug), surface)
-			return
-		}
-		fault.WriteJSON(w, s.nativeModel(r.Context(), req.release, authority, route, surface))
-		return
-	}
-	rows := []map[string]any{}
-	for _, slug := range req.release.Snapshot().RouteSlugs() {
-		if authority.Allows("models_read", slug, req.release.Snapshot().Route(slug).ProjectID, s.now()) {
-			rows = append(rows, s.nativeModel(r.Context(), req.release, authority, req.release.Snapshot().Route(slug), surface))
-		}
-	}
-	if surface == "anthropic" {
-		var first, last any
-		if len(rows) > 0 {
-			first = rows[0]["id"]
-			last = rows[len(rows)-1]["id"]
-		}
-		fault.WriteJSON(w, map[string]any{"data": rows, "has_more": false, "first_id": first, "last_id": last})
-	} else {
-		fault.WriteJSON(w, map[string]any{"models": rows})
 	}
 }

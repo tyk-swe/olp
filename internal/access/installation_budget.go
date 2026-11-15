@@ -1,17 +1,30 @@
-package settings
+package access
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
+	"strings"
+	"time"
+	_ "time/tzdata"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 )
 
-func ApplyInstallationBudget(ctx context.Context, tx pgx.Tx, p access.Principal, desired *authority.BudgetPolicy) (bool, error) {
+func ValidateBudgetTimeZone(name string) error {
+	if name == "" || name == "Local" || strings.HasPrefix(name, "/") || strings.Contains(name, "..") {
+		return fmt.Errorf("use an IANA time zone")
+	}
+	if _, err := time.LoadLocation(name); err != nil {
+		return fmt.Errorf("unknown IANA time zone %q", name)
+	}
+	return nil
+}
+
+func ApplyInstallationBudget(ctx context.Context, tx pgx.Tx, p Principal, desired *authority.BudgetPolicy) (bool, error) {
 	if desired == nil {
 		return false, nil
 	}
@@ -24,7 +37,7 @@ func ApplyInstallationBudget(ctx context.Context, tx pgx.Tx, p access.Principal,
 	if reflect.DeepEqual(authority.NormalizedBudget(current), normalized) {
 		return false, nil
 	}
-	if err := p.Authorize(access.Settings); err != nil {
+	if err := p.Authorize(Settings); err != nil {
 		return false, err
 	}
 	if _, err := SetInstallationBudget(ctx, tx, id, normalized); err != nil {
@@ -43,14 +56,14 @@ func SetInstallationBudget(ctx context.Context, tx pgx.Tx, id string, policy *au
 	if err != nil {
 		return "", err
 	}
-	etag := access.NewID()
+	etag := NewID()
 	if _, err := tx.Exec(ctx, "UPDATE olp.installation SET budget_policy=NULLIF($2::jsonb,'null'::jsonb),budget_etag=$3 WHERE id=$1", id, encoded, etag); err != nil {
 		return "", err
 	}
 	return etag, nil
 }
 
-func ApplyBudgetTimeZone(ctx context.Context, tx pgx.Tx, p access.Principal, desired *string) error {
+func ApplyBudgetTimeZone(ctx context.Context, tx pgx.Tx, p Principal, desired *string) error {
 	if desired == nil {
 		return nil
 	}
@@ -61,23 +74,23 @@ func ApplyBudgetTimeZone(ctx context.Context, tx pgx.Tx, p access.Principal, des
 	if current == *desired {
 		return nil
 	}
-	if err := p.Authorize(access.Settings); err != nil {
+	if err := p.Authorize(Settings); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, "SELECT olp.schedule_budget_zone($1,now())", *desired); err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, "UPDATE olp.settings SET value=$1,etag=$2,updated_by=$3,updated_at=now() WHERE key='budgets.time_zone'", *desired, access.NewID(), p.UserID())
+	_, err := tx.Exec(ctx, "UPDATE olp.settings SET value=$1,etag=$2,updated_by=$3,updated_at=now() WHERE key='budgets.time_zone'", *desired, NewID(), p.UserID())
 	return err
 }
 
-func ReadBudgetTimeZone(ctx context.Context, q access.Queryer) (string, error) {
+func ReadBudgetTimeZone(ctx context.Context, q Queryer) (string, error) {
 	var zone string
 	err := q.QueryRow(ctx, "SELECT COALESCE((SELECT value FROM olp.settings WHERE key='budgets.time_zone'),'UTC')").Scan(&zone)
 	return zone, err
 }
 
-func ReadInstallationBudget(ctx context.Context, q access.Queryer) (*authority.BudgetPolicy, error) {
+func ReadInstallationBudget(ctx context.Context, q Queryer) (*authority.BudgetPolicy, error) {
 	var policy *authority.BudgetPolicy
 	err := q.QueryRow(ctx, "SELECT budget_policy FROM olp.installation WHERE singleton").Scan(&policy)
 	return policy, err

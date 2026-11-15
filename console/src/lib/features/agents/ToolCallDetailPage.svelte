@@ -3,8 +3,7 @@
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
   import { useRole } from '#lib/features/access/session/useRole.svelte.js';
-  import { useAction } from '#lib/editing/action.svelte.js';
-  import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
+  import { useMutation } from '#lib/editing/action.svelte.js';
   import { stateLabel } from '#lib/format.js';
   import { errorMessage } from '#lib/management/http.js';
   import { getToolCall, resolveToolCall } from './api';
@@ -12,8 +11,7 @@
   let { callID }: { callID: string } = $props();
   const access = useRole();
   const client = useQueryClient();
-  const action = useAction();
-  const intent = useMutationIntent();
+  const action = useMutation();
   const call = createQuery(() => ({
     queryKey: agentKeys.call(callID),
     queryFn: () => getToolCall(callID),
@@ -33,11 +31,9 @@
         ? { observed_cost: cost, observed_charge: charge }
         : {})
     };
-    await action.run(
-      () =>
-        intent.submit({ id: callID, body }, (input, requestId) =>
-          resolveToolCall(input.id, input.body, requestId)
-        ),
+    await action.submit(
+      { id: callID, body },
+      (input, requestId) => resolveToolCall(input.id, input.body, requestId),
       async () => {
         saved = true;
         await client.invalidateQueries({ queryKey: agentKeys.call(callID) });
