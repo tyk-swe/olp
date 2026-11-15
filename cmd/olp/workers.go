@@ -56,7 +56,34 @@ import (
 // returned function waits for all of them to have stopped.
 // vk is the consumer's own Valkey client: its blocking stream reads would
 // otherwise stall every command the gateway sends on a shared connection.
-func startWorkers(ctx context.Context, supervise func(func()) func(), pool *pgxpool.Pool, vk *coordination.Client, store *debits.Store, shared *sharedLimits, stream string, mediaService *jobs.Service, credentials release.Credentials, pluginHost *plugins.Host, keys *secrets.KeyRing, auth *secrets.AuthKey, installation, region, hostname string, policy *egress.Policy, log *slog.Logger, exporter *stream.Worker, focusWorker *focus.Worker, importer *imports.Worker, reference *catalog.Signed) func() {
+type workerDeps struct {
+	pool         *pgxpool.Pool
+	vk           *coordination.Client
+	store        *debits.Store
+	shared       *sharedLimits
+	stream       string
+	mediaService *jobs.Service
+	credentials  release.Credentials
+	pluginHost   *plugins.Host
+	keys         *secrets.KeyRing
+	auth         *secrets.AuthKey
+	installation string
+	region       string
+	hostname     string
+	policy       *egress.Policy
+	log          *slog.Logger
+	exporter     *stream.Worker
+	focusWorker  *focus.Worker
+	importer     *imports.Worker
+	reference    *catalog.Signed
+}
+
+func startWorkers(ctx context.Context, supervise func(func()) func(), d workerDeps) func() {
+	pool, vk, store, shared, streamName := d.pool, d.vk, d.store, d.shared, d.stream
+	mediaService, credentials, pluginHost := d.mediaService, d.credentials, d.pluginHost
+	keys, auth, policy, log := d.keys, d.auth, d.policy, d.log
+	installation, region, hostname := d.installation, d.region, d.hostname
+	exporter, focusWorker, importer, reference := d.exporter, d.focusWorker, d.importer, d.reference
 	var wg sync.WaitGroup
 	var limiter *admission.Limiter
 	var syncer *debits.Syncer
@@ -113,7 +140,7 @@ func startWorkers(ctx context.Context, supervise func(func()) func(), pool *pgxp
 	wg.Go(supervise(func() {
 		// The consumer identity is stable for this process and unique among
 		// live ones, so a restart reclaims exactly its own deliveries.
-		if err := (ingest.Consumer{Pool: pool, Client: vk, Stream: stream, Name: ingest.ConsumerName(hostname), Region: region, Limiter: limiter, Log: log}).Run(ctx); err != nil {
+		if err := (ingest.Consumer{Pool: pool, Client: vk, Stream: streamName, Name: ingest.ConsumerName(hostname), Region: region, Limiter: limiter, Log: log}).Run(ctx); err != nil {
 			log.Error("request metadata consumer stopped", "error", err)
 		}
 	}))

@@ -13,7 +13,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tyk-swe/olp/internal/access"
@@ -22,30 +21,20 @@ import (
 	"github.com/tyk-swe/olp/internal/agents/a2a"
 	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/agents/tasks"
-	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/billing/imports"
 	"github.com/tyk-swe/olp/internal/billing/reconciliation"
-	"github.com/tyk-swe/olp/internal/cache"
-	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/codesessions"
-	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/console"
-	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export/capture"
-	"github.com/tyk-swe/olp/internal/export/destination"
 	"github.com/tyk-swe/olp/internal/export/focus"
 	"github.com/tyk-swe/olp/internal/export/stream"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/gateway/events"
-	"github.com/tyk-swe/olp/internal/gateway/quota"
-	"github.com/tyk-swe/olp/internal/gateway/traceingest"
 	"github.com/tyk-swe/olp/internal/grants/personal"
 	"github.com/tyk-swe/olp/internal/guardrails"
-	limitadmission "github.com/tyk-swe/olp/internal/limits/admission"
-	limitdebits "github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/mcp"
 	mcpaccounting "github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/mcp/registration"
@@ -56,16 +45,12 @@ import (
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/panics"
-	"github.com/tyk-swe/olp/internal/pluginindex"
 	"github.com/tyk-swe/olp/internal/plugins"
-	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/secretstore"
-	"github.com/tyk-swe/olp/internal/signing"
 	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/surface"
 	"github.com/tyk-swe/olp/internal/telemetry"
@@ -93,23 +78,11 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
-	// The signed documents a release ships verify before anything starts: a
-	// tampered reference catalog must never feed discovery, prices or token
-	// estimates.
-	catalogKeys, err := signing.Trusted()
+	documents, err := loadSignedDocuments(log)
 	if err != nil {
 		return err
 	}
-	referenceCatalog, err := catalog.Embedded()
-	if err != nil {
-		return err
-	}
-	log.Info("reference catalog verified", "sha256", referenceCatalog.SHA256, "key_id", referenceCatalog.KeyID, "published_at", referenceCatalog.Catalog.PublishedAt)
-	pluginIndex, err := pluginindex.Embedded()
-	if err != nil {
-		return err
-	}
-	log.Info("plugin index verified", "sha256", pluginIndex.SHA256, "key_id", pluginIndex.KeyID, "published_at", pluginIndex.Index.PublishedAt)
+	catalogKeys, referenceCatalog, pluginIndex := documents.catalogKeys, documents.catalog, documents.pluginIndex
 	warnEgressExceptions(log, c)
 	// Tracing is installed before any listener binds: an invalid endpoint or
 	// header file must stop startup rather than trace half a process.
@@ -162,60 +135,16 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 	reservePublicPaths(public, c.Mode)
 	startup, cancelStartup := context.WithTimeout(ctx, c.StartupTimeout)
 	defer cancelStartup()
-	pool, err := database.Open(startup, pgConfig)
+	stores, err := openDatastores(startup, c, pgConfig, openValkey, &shutdownDeadline, log)
 	if err != nil {
 		return err
 	}
-	defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "PostgreSQL", func(context.Context) error { pool.Close(); return nil })
-	var readPool *pgxpool.Pool
-	if c.DatabaseReadURL != "" && (c.Mode.Inference() || c.Mode == Worker) {
-		readConfig, err := database.Configuration(c.DatabaseReadURL, c.DatabaseMaxConnections, c.RequestTimeout)
-		if err != nil {
-			return errors.New("invalid OLP_DATABASE_READ_URL")
-		}
-		readPool, err = database.Open(startup, readConfig)
-		if err != nil {
-			return errors.New("runtime read database connection failed")
-		}
-		defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "runtime read PostgreSQL", func(context.Context) error { readPool.Close(); return nil })
+	for _, closer := range stores.closers {
+		defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, closer.name, closer.close)
 	}
-	installation, err := database.Installation(startup, pool)
-	if err != nil {
-		return err
-	}
-	if readPool != nil {
-		readInstallation, err := database.Installation(startup, readPool)
-		if err != nil {
-			return errors.New("runtime read database is not initialized at the current schema")
-		}
-		if readInstallation != installation {
-			return errors.New("runtime read database belongs to another installation")
-		}
-	}
-	// Shared state comes up before anything that admits or accounts for
-	// traffic, because both the gateway and the console are told at
-	// composition time whether this installation has a limiter at all.
-	prefix := database.ValkeyNamespace(installation)
-	debitStore := limitdebits.NewStore(pool)
-	var shared *sharedLimits
-	var limiter *limitadmission.Limiter
-	var outage *outagePolicy
-	if openValkey != nil {
-		vk, err = openValkey(startup)
-		if err != nil {
-			return err
-		}
-		defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "Valkey", func(context.Context) error { vk.Close(); return nil })
-		if shared, err = newSharedLimits(vk, prefix+"limits", debitStore); err != nil {
-			return err
-		}
-		limiter = shared.Limiter
-		if c.Mode.Inference() {
-			if outage, err = newOutagePolicy(startup, pool, log); err != nil {
-				return err
-			}
-		}
-	}
+	pool, readPool, vk := stores.pool, stores.readPool, stores.vk
+	installation, prefix := stores.installation, stores.prefix
+	debitStore, shared, limiter, outage := stores.debitStore, stores.shared, stores.limiter, stores.outage
 	var accounting *delivery.Delivery
 	var rt *release.Manager
 	var gw *gateway.Server
@@ -227,7 +156,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 	var mediaTransport *transport.Transport
 	var mediaSpool *staging.Spool
 	var pluginHost *plugins.Host
-	var policy egress.Policy
+	policy := &egress.Policy{}
 	var auth *secrets.AuthKey
 	var business *telemetry.BusinessMetrics
 	var exporter *stream.Worker
@@ -249,147 +178,36 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 	var keys *secrets.KeyRing
 	var prober *gateway.Server
 	if c.Mode.Management() || c.Mode.Inference() || c.Mode == Worker {
-		var bootstrap string
-		var err error
-		auth, keys, bootstrap, err = loadSecrets(startup, pool, c, installation)
+		core, err := newRuntimeCore(startup, c, pool, readPool, installation, vk, &shutdownDeadline, log)
 		if err != nil {
 			return err
 		}
-		policy = egress.Policy{AllowedNetworks: c.ProviderEgressAllowCIDRs, PlainHTTPHosts: c.ProviderEgressAllowHTTPHosts}
-		business = telemetry.NewBusinessMetrics(c.MetricsSeriesCap, c.MetricsTenantLabels)
-		var responseCache *cache.Store
-		if c.CacheValkeyURL != "" {
-			var main cache.Commander
-			if vk != nil {
-				main = vk
-			}
-			remote, err := cache.NewRemote(c.CacheValkeyURL, c.CacheValkeyCAFile, main)
-			if err != nil {
-				return err
-			}
-			defer remote.Close()
-			responseCache = &cache.Store{Client: remote, Keys: keys, Auth: auth, Installation: installation}
+		for _, closer := range core.closers {
+			defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, closer.name, closer.close)
 		}
-
-		sender := destination.NewSender(&policy, os.Getenv, installation)
-		exporter = &stream.Worker{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Log: log}
-		focusWorker = &focus.Worker{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Version: Version, Log: log, Now: time.Now}
-		capturer = capture.NewManager(pool, keys, installation, sender, log)
-		importer = imports.NewWorker(imports.Deps{Pool: pool, Keys: keys, Installation: installation, Egress: policy, Getenv: os.Getenv, Log: log, Now: time.Now})
-		var mounted map[string]release.MountedProvider
-		if c.ConnectorConfigFile != "" {
-			mounted, err = providers.LoadMounted(c.ConnectorConfigFile, &policy)
-			if err != nil {
-				return err
-			}
-		}
-		var unconfined *plugins.Unconfined
-		if c.UnconfinedPluginDir != "" {
-			unconfined = plugins.NewUnconfined(c.UnconfinedPluginDir, plugins.DefaultLimits(), log)
-		}
-		// Gateways and control's probes run signing hooks per upstream
-		// request, and unconfined plugins may carry the requests themselves,
-		// so their host compiles the modules it keeps. A worker runs a grant's
-		// refresh once per access token, which the interpreter is ready for
-		// sooner than the compiler.
-		engine := plugins.Compiled
-		if c.Mode == Worker {
-			engine = plugins.Interpreted
-		}
-		hostRuntime, err := plugins.NewRuntime(startup, engine, plugins.DefaultLimits(), log)
-		if err != nil {
-			return err
-		}
-		defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "plugin runtime", hostRuntime.Close)
-		pluginHost = plugins.NewHost(hostRuntime, unconfined, pool)
-		rt = release.NewManager(release.ManagerConfig{
-			Pool: pool, ReadPool: readPool, Installation: installation,
-			Auth: auth, Keys: keys, Log: log, Hostname: c.Hostname, Region: c.Region,
-			ExternalSecrets: secretstore.New(policy, os.Getenv), Mounted: mounted,
-			PrepareGuardrailPlugin: pluginHost.PinGuardrail,
-		})
-		defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "plugin host", func(ctx context.Context) error { pluginHost.Close(ctx); return nil })
-		var gatewayConfig, probeConfig gateway.Config
-		gatewayDeps := gateway.Dependencies{Runtime: rt, Egress: &policy, Getenv: os.Getenv, Log: log, Sink: events.LogSink{Log: log}}
-		probeDeps := gatewayDeps
-		if c.Mode.Management() || c.Mode.Inference() {
-			gatewayConfig = gateway.Config{
-				Region:             c.Region,
-				MaxInFlight:        c.MaxInFlightInference,
-				MaxShadowInFlight:  c.MaxInFlightShadow,
-				CORSAllowedOrigins: c.GatewayCORSAllowedOrigins,
-				InlineMedia:        protocols.InlineMediaLimits{Items: c.MaxInlineMediaItems, ItemBytes: c.MaxInlineMediaItemBytes, TotalBytes: c.MaxInlineMediaTotalBytes},
-				MaxBodyBytes:       c.MaxJSONBodyBytes,
-				MaxMediaBodyBytes:  c.MaxMediaBodyBytes,
-				MaxResponseBytes:   c.ProviderMaxResponseBytes,
-				MaxEventBytes:      c.ProviderMaxEventBytes,
-				TrustedProxies:     c.TrustedProxyCIDRs,
-				AdmissionPool:      inferencePool,
-				Signer:             pluginHost,
-				Predicates:         pluginHost,
-				Carrier:            pluginHost,
-				UnconfinedPlugins:  unconfined != nil,
-			}
-			gatewayDeps.Traces = &traceingest.Store{Pool: pool, Limiter: limiter, Auth: auth}
-			gatewayDeps.Batches = batches.NewStore(pool)
-			gatewayDeps.Cache = responseCache
-			gatewayDeps.Business = business
-			if limiter != nil {
-				var policy func() limitadmission.OutagePolicy
-				if outage != nil {
-					policy = outage.Policy
-				}
-				// Control-only processes also execute playground requests.
-				gatewayDeps.Admission = quota.NewAdmission(limiter, shared.Fleet, policy, log)
-			}
-		}
-		if limiter != nil && (c.Mode == Worker || c.Mode == All) {
-			// The worker plane's health probes run through a gateway of their
-			// own: planned, gated, priced and emitted like any request.
-			probeConfig = gateway.Config{
-				Region:            c.Region,
-				MaxInFlight:       1,
-				MaxResponseBytes:  c.ProviderMaxResponseBytes,
-				MaxEventBytes:     c.ProviderMaxEventBytes,
-				Signer:            pluginHost,
-				Carrier:           pluginHost,
-				UnconfinedPlugins: unconfined != nil,
-			}
-			probeDeps.Business = business
-			probeDeps.Admission = quota.NewAdmission(limiter, shared.Fleet, nil, log)
-		}
+		auth, keys, policy = core.auth, core.keys, core.policy
+		business, exporter, focusWorker = core.business, core.exporter, core.focusWorker
+		capturer, importer, pluginHost, rt = core.capturer, core.importer, core.pluginHost, core.rt
+		unconfined := core.unconfined
+		assembly := gatewayTemplates(gatewayInputs{config: c, pool: pool, core: core, inferencePool: inferencePool, limiter: limiter, shared: shared, outage: outage, log: log})
+		gatewayDeps, probeDeps := assembly.deps, assembly.probeDeps
+		gatewayConfig, probeConfig := assembly.config, assembly.probeConfig
 		if c.Mode.Management() || c.Mode.Inference() || c.Mode == Worker {
-			spool, err := staging.NewSpool(c.spoolDirectory(), c.MediaSpoolCapacityBytes, log)
+			media, err := newMediaPlane(c, pool, policy, rt, &mediaGapsTotal, log)
 			if err != nil {
 				return err
 			}
-			mediaSpool = spool
-			defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "media spool", func(context.Context) error { return spool.Close() })
-			mediaTransport = transport.New(transport.Deps{
-				Client:           policy.Client(gateway.UpstreamHeaderTimeout),
-				Auth:             connectors.NewAuth(&policy, os.Getenv),
-				Egress:           &policy,
-				Spool:            spool,
-				MaxResponseBytes: c.ProviderMaxResponseBytes,
-				Log:              log,
-			})
-			mediaService = jobs.New(jobs.Deps{
-				Store:       jobs.NewStore(pool),
-				Transport:   mediaTransport,
-				Credentials: rt,
-				Gaps:        &mediaGapsTotal,
-				Log:         log,
-				Now:         time.Now,
-			})
+			defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, media.closer.name, media.closer.close)
+			mediaSpool, mediaTransport, mediaService = media.spool, media.transport, media.service
 		}
 		if c.Mode.Management() || c.Mode.Inference() {
-			grantStore = personal.NewStore(pool, installation, auth, keys, &policy)
+			grantStore = personal.NewStore(pool, installation, auth, keys, policy)
 			taskLimits := tasks.Limits{Debits: debitStore}
 			if shared != nil {
 				taskLimits = tasks.Limits{Debits: debitStore, Syncer: shared.Syncer, Limiter: limiter}
 			}
 			agentTasks = tasks.New(pool, taskLimits, auth, log)
-			agentPeers = a2a.NewPeers(&policy, func(ctx context.Context, id string) ([]byte, error) {
+			agentPeers = a2a.NewPeers(policy, func(ctx context.Context, id string) ([]byte, error) {
 				return keys.Read(ctx, pool, installation, id, secrets.AgentCredential)
 			})
 		}
@@ -429,7 +247,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 				return limiter
 			}()
 			toolExecutor := mcp.NewExecutor(mcp.ExecutorOptions{
-				Authority: rt, Grants: grantStore, Connect: upstream.NewDialer(&policy, registration.NewExecutables(unconfined, pool)),
+				Authority: rt, Grants: grantStore, Connect: upstream.NewDialer(policy, registration.NewExecutables(unconfined, pool)),
 				Ledger: toolLedger, Auth: auth, Limiter: toolLimiter, Log: log,
 				Credentials: func(ctx context.Context, credentialID string) ([]byte, error) {
 					return keys.Read(ctx, pool, installation, credentialID, secrets.MCPCredential)
@@ -472,29 +290,18 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			gw.Register(public)
 		}
 		if c.Mode.Management() {
-			if err := access.PrepareInstallation(startup, pool, installation, auth, keys); err != nil {
-				return err
-			}
-			identityClient := access.IdentityHTTPClient()
-			control := access.New(access.Config{
-				Pool: pool, Installation: installation, Origin: c.PublicOrigin, Auth: auth, Keys: keys, Bootstrap: bootstrap, Egress: &policy, Log: log,
-				OIDCClient: identityClient,
-				RuntimePublisher: func(ctx context.Context, tx pgx.Tx, actor string) error {
-					_, err := release.Publish(ctx, tx, actor)
-					return err
-				},
-				ClientIP:           func(r *http.Request) string { return consumerauth.ClientIP(r, c.TrustedProxyCIDRs) },
-				LocalLoginDisabled: !c.LocalLoginEnabled, ManagementNetworkRestricted: len(c.ManagementAllowedCIDRs) != 0,
-				LimitsEnforced: limiter != nil, ResponseCacheConfigured: responseCache != nil, RetentionEnforced: limiter != nil, NotificationsActive: true,
+			mgmt, err := newManagement(startup, managementInputs{
+				config: c, pool: pool, installation: installation, core: core,
+				limiter: limiter, shared: shared, gateway: gw,
+				agentTasks: agentTasks, agentPeers: agentPeers, agentGrants: grantStore,
+				media: mediaService, spool: mediaSpool, health: obsCache,
+				catalog: referenceCatalog, catalogKeys: catalogKeys, pluginIndex: pluginIndex, log: log,
 			})
-			// Installing reads a module's manifest once, which the
-			// interpreter is ready to do several times sooner.
-			pluginRuntime, err := plugins.NewRuntime(startup, plugins.Interpreted, plugins.DefaultLimits(), log)
 			if err != nil {
 				return err
 			}
-			defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "management plugin runtime", pluginRuntime.Close)
-			Management{AgentTasks: agentTasks, AgentPeers: agentPeers, AgentGrants: grantStore, Getenv: os.Getenv, Access: control, IdentityClient: identityClient, Egress: &policy, Limits: shared, Runtime: rt, Gateway: gw, ResponseCache: responseCache, Media: mediaService, Spool: mediaSpool, Health: obsCache, Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog, CatalogKeys: catalogKeys, PluginIndex: pluginIndex}.Register(public)
+			defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "management plugin runtime", mgmt.PluginRuntime.Close)
+			mgmt.Register(public)
 		}
 	}
 	if err := startup.Err(); err != nil {
@@ -592,7 +399,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		pool:          pool,
 		limiter:       vk,
 		runtime:       rt,
-		policy:        &policy,
+		policy:        policy,
 		gateway:       gw,
 		accounting:    accounting,
 		spool:         mediaSpool,
@@ -637,7 +444,13 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		// provider egress client, so the plane runs even when no shared state
 		// backend is configured. It is started exactly once, inside the single
 		// worker plane.
-		workersStopped = startWorkers(workers, supervise, pool, reader, debitStore, shared, workerStream, mediaService, rt, pluginHost, keys, auth, installation, c.Region, c.Hostname, &policy, log, exporter, focusWorker, importer, referenceCatalog)
+		workersStopped = startWorkers(workers, supervise, workerDeps{
+			pool: pool, vk: reader, store: debitStore, shared: shared, stream: workerStream,
+			mediaService: mediaService, credentials: rt, pluginHost: pluginHost,
+			keys: keys, auth: auth, installation: installation, region: c.Region, hostname: c.Hostname,
+			policy: policy, log: log, exporter: exporter, focusWorker: focusWorker,
+			importer: importer, reference: referenceCatalog,
+		})
 	}
 	// Probes produce accounting events, so they stop before delivery closes;
 	// the consumer and recovery workers remain alive until delivery drains.
