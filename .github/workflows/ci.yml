@@ -51,6 +51,8 @@ jobs:
             go:
               - 'Makefile'
               - 'scripts/check-lint.sh'
+              - 'scripts/check-imports.sh'
+              - 'scripts/project-imports.txt'
               - 'staticcheck.conf'
               - '**/*.go'
               - 'go.mod'
