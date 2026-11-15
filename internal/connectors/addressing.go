@@ -85,7 +85,7 @@ var wirePaths = map[wire.Format]upstreamPath{
 	wire.VertexEmbeddings:      {unary: "/models/{model}:predict"},
 	wire.DocumentAIProcess:     {unary: "/processors/{model}:process"},
 	wire.Bedrock:               {unary: "/model/{model}/converse", streaming: "/model/{model}/converse-stream"},
-	"bedrock_count":            {unary: "/model/{model}/count-tokens"},
+	wire.BedrockCount:          {unary: "/model/{model}/count-tokens"},
 	wire.BedrockInvoke:         bedrockInvokePath,
 	wire.BedrockEmbeddings:     {unary: bedrockInvokePath.unary},
 }

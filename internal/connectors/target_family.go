@@ -14,7 +14,7 @@ func (c Config) TargetFamily(source wire.Format) (wire.Format, error) {
 		return "", err
 	}
 	operation := source.Operation()
-	if source == wire.Format("bedrock_count") {
+	if source == wire.BedrockCount {
 		operation = "token_count"
 	}
 	if !slices.Contains(p.Operations, operation) {
@@ -37,7 +37,7 @@ func (c Config) TargetFamily(source wire.Format) (wire.Format, error) {
 		case "gemini-generate-content":
 			return wire.GeminiCount, nil
 		case "bedrock-converse":
-			return wire.Format("bedrock_count"), nil
+			return wire.BedrockCount, nil
 		default:
 			return wire.InputTokens, nil
 		}

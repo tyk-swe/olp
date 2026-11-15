@@ -73,6 +73,7 @@ const (
 	NativeDuplex   Format = "native_duplex"
 	Bedrock        Format = "bedrock"
 	BedrockInvoke  Format = "bedrock_invoke"
+	BedrockCount   Format = "bedrock_count"
 
 	// Native generation families are vendor dialects a client speaks as
 	// they are, at /native/{dialect}/models/{route}: OLP binds the route's
