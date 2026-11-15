@@ -143,7 +143,7 @@ migration:
   # reapplies grants for tables it creates.
   runtimeRole: ""
   backoffLimit: 3
-  activeDeadlineSeconds: 600
+  activeDeadlineSeconds: 2100
   ttlSecondsAfterFinished: 300
   resources:
     requests: { cpu: 50m, memory: 128Mi }
