@@ -127,9 +127,6 @@ func NewSpool(baseDir string, capacity int64, log *slog.Logger) (*Spool, error) 
 	if err != nil {
 		return nil, err
 	}
-	if log == nil {
-		log = slog.Default()
-	}
 	s := &Spool{
 		root:       root,
 		owner:      owner,

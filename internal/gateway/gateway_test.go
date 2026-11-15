@@ -666,7 +666,7 @@ func TestEmbeddingsRejectInvalidResultIndices(t *testing.T) {
 
 func TestTransformedMediaPreservesUsage(t *testing.T) {
 	h := newHarness(t, Config{MaxMediaBodyBytes: 1 << 20})
-	spool, err := staging.NewSpool(t.TempDir(), staging.MinCapacityBytes, nil)
+	spool, err := staging.NewSpool(t.TempDir(), staging.MinCapacityBytes, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}

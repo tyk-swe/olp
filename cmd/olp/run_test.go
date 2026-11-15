@@ -1,10 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"flag"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 )
 
@@ -39,4 +44,45 @@ func TestReencryptDryRunAcceptsConfigurationFlagsBeforeIt(t *testing.T) {
 			t.Errorf("reencrypt %v: %v, want help after accepted flags", options, err)
 		}
 	}
+}
+
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func TestListenerLogsHandlerPanicsAsStructuredErrors(t *testing.T) {
+	var output syncBuffer
+	log := slog.New(slog.NewJSONHandler(&output, nil))
+	handler := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("handler exploded") })
+	listeners, err := bindListeners(t.Context(), []listenerConfig{{name: "public", address: "127.0.0.1:0", handler: handler}}, Config{MaxConnections: 4, ConnectionMaxAgeSeconds: 60, ConnectionDrainTimeoutSeconds: 1}, t.Context(), log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener := listeners[0]
+	go listener.server.Serve(listener.socket)
+	t.Cleanup(func() { _ = listener.server.Shutdown(t.Context()) })
+	if response, err := http.Get("http://" + listener.socket.Addr().String()); err == nil {
+		response.Body.Close()
+		t.Fatalf("a panicking handler answered %d", response.StatusCode)
+	}
+	for line := range strings.Lines(output.String()) {
+		var record struct{ Level, Msg string }
+		if json.Unmarshal([]byte(line), &record) == nil && record.Level == "ERROR" && strings.Contains(record.Msg, "handler exploded") {
+			return
+		}
+	}
+	t.Fatalf("no structured error record for the handler panic in %q", output.String())
 }

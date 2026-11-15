@@ -475,7 +475,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			}
 			identityClient := access.IdentityHTTPClient()
 			control := access.New(access.Config{
-				Pool: pool, Installation: installation, Origin: c.PublicOrigin, Auth: auth, Keys: keys, Bootstrap: bootstrap, Egress: &policy,
+				Pool: pool, Installation: installation, Origin: c.PublicOrigin, Auth: auth, Keys: keys, Bootstrap: bootstrap, Egress: &policy, Log: log,
 				OIDCClient: identityClient,
 				RuntimePublisher: func(ctx context.Context, tx pgx.Tx, actor string) error {
 					_, err := release.Publish(ctx, tx, actor)
@@ -668,7 +668,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		}
 		listenerConfigs = append(listenerConfigs, listenerConfig{name: "public", address: c.ListenAddr, handler: Perimeter(c.PublicOrigin, managementNetwork(c.ManagementAllowedCIDRs, c.TrustedProxyCIDRs, publicAdmission.Wrap(traces.Middleware(installation)(public))))})
 	}
-	listeners, err = bindListeners(startup, listenerConfigs, c, requestContext)
+	listeners, err = bindListeners(startup, listenerConfigs, c, requestContext, log)
 	if err != nil {
 		return err
 	}
