@@ -96,8 +96,11 @@ Valkey service for rehearsals; never let source and replacement share streams or
 leases. A writable independent clone is unsupported.
 
 The chart defaults to one worker for a small footprint. Production should use
-three replicas, a PodDisruptionBudget, and failure-domain spreading. Workers
-consume work concurrently; PostgreSQL advisory locks serialize maintenance and
+three replicas, a PodDisruptionBudget, and failure-domain spreading.
+`values.production.yaml` requires each component to spread over nodes and
+prefers spreading it over zones, so a cluster without zone labels still
+schedules every replica. Workers consume work concurrently; PostgreSQL
+advisory locks serialize maintenance and
 cost reconciliation, and Valkey consumer groups reclaim metadata ownership.
 Runtime releases publish transactionally with their activating mutation, not
 through a worker outbox. The worker Deployment uses `Recreate`, so two worker
