@@ -26,7 +26,7 @@ runs:
     - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       id: go
       with:
-        go-version: stable
+        go-version-file: go.mod
         cache: false
     - id: go-cache
       shell: bash
@@ -64,8 +64,6 @@ runs:
         fi
     - if: inputs.node-modules == 'true'
       uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      with:
-        version: '>=10.26.0'
     - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version-file: .nvmrc

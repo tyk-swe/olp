@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+toolchain=$(sed -n 's/^toolchain go//p' go.mod)
+grep -q "^FROM golang:$toolchain-trixie@sha256:" deploy/Dockerfile || { echo "deploy/Dockerfile must build with the go.mod toolchain go$toolchain." >&2; exit 1; }
+package_manager=$(node -p "require('./package.json').packageManager")
+grep -qxF "RUN npm install --global $package_manager" deploy/Dockerfile || { echo "deploy/Dockerfile must install the package.json $package_manager." >&2; exit 1; }
 # Tools are pinned independently of runtime dependencies.
 go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 # nullable v1.2.0 carries the standard Apache-2.0 notice, rather than the
