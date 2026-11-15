@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/debits"
+	"github.com/tyk-swe/olp/internal/panics"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -97,6 +98,10 @@ func (s *Server) monitorWorkflowModelLease(ctx context.Context, debit *sessionDe
 	}
 	go func() {
 		defer close(done)
+		defer panics.Recover(s.log, "workflow model lease renewal", func(error) {
+			result <- fault.ServerError(http.StatusServiceUnavailable, "workflow_owner_lost", "The workflow step owner could not be verified.")
+			cancel()
+		})
 		select {
 		case <-callCtx.Done():
 			return

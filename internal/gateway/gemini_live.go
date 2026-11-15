@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/panics"
 	acceptance "github.com/tyk-swe/olp/internal/upstream"
 
 	"github.com/coder/websocket"
@@ -521,8 +522,12 @@ func (s *Server) relayGeminiLive(ctx context.Context, x *call, p *pin, client, u
 	}
 	done := make(chan relayEnd, 2)
 	remaining := 2
-	go func() { done <- forward(upstream, client, false) }()
-	go func() { done <- forward(client, upstream, true) }()
+	relay := func(dst, src duplexPeer, fromProvider bool) {
+		defer panics.Recover(s.log, "gemini live relay", func(err error) { done <- relayEnd{err: err} })
+		done <- forward(dst, src, fromProvider)
+	}
+	go relay(upstream, client, false)
+	go relay(client, upstream, true)
 	reauth := time.NewTicker(ingress.ReauthInterval)
 	defer reauth.Stop()
 	heartbeat := time.NewTicker(realtimePing)

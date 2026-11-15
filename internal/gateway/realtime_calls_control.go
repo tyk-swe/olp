@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/panics"
 	"github.com/tyk-swe/olp/internal/upstream"
 
 	"github.com/coder/websocket"
@@ -44,20 +45,23 @@ func (sess *webrtcSession) accumulateUsage(u *wire.Usage) {
 func (s *Server) runWebRTCControl(sess *webrtcSession) {
 	readErr := make(chan error, 1)
 	go func() {
+		defer panics.Recover(s.log, "webrtc control reader", func(err error) { readErr <- err })
 		for {
 			typ, data, err := sess.conn.Read(sess.ctx)
 			if err != nil {
 				readErr <- err
 				return
 			}
-			sess.usageMu.Lock()
-			if typ == websocket.MessageText && bytes.Contains(data, []byte("input_audio_transcription")) {
-				sess.responses.unknown = true
-			}
-			if u := sess.responses.providerFrame(typ, data, true); u != nil {
-				sess.accumulateUsage(u)
-			}
-			sess.usageMu.Unlock()
+			func() {
+				sess.usageMu.Lock()
+				defer sess.usageMu.Unlock()
+				if typ == websocket.MessageText && bytes.Contains(data, []byte("input_audio_transcription")) {
+					sess.responses.unknown = true
+				}
+				if u := sess.responses.providerFrame(typ, data, true); u != nil {
+					sess.accumulateUsage(u)
+				}
+			}()
 		}
 	}()
 	reauth := time.NewTicker(s.cfg.WebRTCReauth)

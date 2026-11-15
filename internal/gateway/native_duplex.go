@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/panics"
 	acceptance "github.com/tyk-swe/olp/internal/upstream"
 
 	"github.com/coder/websocket"
@@ -409,8 +410,12 @@ func (s *Server) relayNativeDuplex(ctx context.Context, x *call, p *pin, client,
 		}
 	}
 	done := make(chan relayEnd, 2)
-	go func() { done <- forward(upstream, client, false) }()
-	go func() { done <- forward(client, upstream, true) }()
+	relay := func(dst, src duplexPeer, fromProvider bool) {
+		defer panics.Recover(s.log, "duplex relay", func(err error) { done <- relayEnd{err: err} })
+		done <- forward(dst, src, fromProvider)
+	}
+	go relay(upstream, client, false)
+	go relay(client, upstream, true)
 	reauth := time.NewTicker(ingress.ReauthInterval)
 	defer reauth.Stop()
 	heartbeat := time.NewTicker(realtimePing)

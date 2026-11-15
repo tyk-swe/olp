@@ -21,6 +21,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/panics"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -173,6 +174,10 @@ func (s *Server) translateManagedBatchInput(ctx context.Context, p *pin, route *
 	reader, writer := io.Pipe()
 	done := make(chan translatedBatch, 1)
 	go func() {
+		defer panics.Recover(s.log, "managed batch translation", func(err error) {
+			_ = writer.CloseWithError(err)
+			done <- translatedBatch{err: fault.ServerError(http.StatusInternalServerError, "internal_error", "The batch file could not be translated.")}
+		})
 		manifest, err := translateManagedBatchLines(writer, opened.File, s.batchLineDigest, managedLineTarget{pin: p, route: route, adapter: adapter})
 		done <- translatedBatch{manifest: manifest, err: err}
 	}()

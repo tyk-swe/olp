@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/batches/upstream"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/panics"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -296,6 +297,10 @@ func (s *Server) translateGeminiManagedContent(ctx context.Context, routeSlug st
 	limit := min(s.cfg.MaxResponseBytes, source.Limit, batches.MaxBatchBytes)
 	done := make(chan error, 1)
 	go func() {
+		defer panics.Recover(s.log, "gemini batch results", func(err error) {
+			done <- err
+			_ = writer.CloseWithError(err)
+		})
 		scanner := bufio.NewScanner(opened.File)
 		scanner.Buffer(make([]byte, 64<<10), managedBatchLineLimit+2)
 		for scanner.Scan() {
