@@ -10,7 +10,7 @@ defaults:
     shell: bash
 jobs:
   qualification:
-    uses: ./.github/workflows/ci.yml
+    uses: $/.github/workflows/ci.yml
     permissions:
       contents: read
       pull-requests: read
@@ -22,13 +22,17 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
+          package-manager-cache: false
       - name: Install fixture sandbox
         run: |
           sudo apt-get update -qq
@@ -46,7 +50,7 @@ jobs:
   qualify-code-live:
     if: vars.OLP_LIVE_QUALIFICATION == 'required'
     needs: qualification
-    uses: ./.github/workflows/qualify-code-live.yml
+    uses: $/.github/workflows/qualify-code-live.yml
     secrets:
       OLP_LIVE_CODEX_AUTH_JSON: ${{ secrets.OLP_LIVE_CODEX_AUTH_JSON }}
       OLP_LIVE_CODEX_AUTH_JSON_2: ${{ secrets.OLP_LIVE_CODEX_AUTH_JSON_2 }}
@@ -90,9 +94,12 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
+          package-manager-cache: false
       - name: Check version
         run: |
           if [[ $GITHUB_REF == refs/tags/* ]]; then
@@ -111,6 +118,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false
       # The release key only CI holds signs the documents the binary embeds,
       # and a release build trusts only release keys. Ed25519 signatures are
       # deterministic, so every platform build embeds the same bytes.
@@ -224,7 +232,11 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/setup
+        with:
+          persist-credentials: false
+      - uses: $/.github/actions/setup
+        with:
+          go-cache: false
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
@@ -255,6 +267,8 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
@@ -305,6 +319,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false
       # Every plugin the reviewed index lists is rebuilt reproducibly from
       # this commit, and the release fails unless each digest is the one the
       # index lists, so the modules published here are the reviewed ones.
