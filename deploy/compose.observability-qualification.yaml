@@ -61,7 +61,7 @@ services:
     security_opt:
       - no-new-privileges:true
   phoenix:
-    image: arizephoenix/phoenix:version-15.10.0
+    image: arizephoenix/phoenix:version-21.0.0
     ports:
       - '127.0.0.1:6009:6006'
     environment:
