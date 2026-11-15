@@ -1,5 +1,11 @@
 import { apiClient } from '#lib/management/client.js';
-import { ensureOk, unwrap, unwrapPage } from '#lib/management/http.js';
+import {
+  createHeaders,
+  ensureOk,
+  mutationHeaders,
+  unwrap,
+  unwrapPage
+} from '#lib/management/http.js';
 import { collectCursorPages } from '#lib/management/pagination.js';
 import type { components } from '#lib/management/schema.js';
 export type Sink = components['schemas']['SinkResponse'];
@@ -19,7 +25,7 @@ export async function saveSink(
     return unwrap(
       await apiClient.POST('/api/v1/sinks', {
         body,
-        params: { header: { 'Idempotency-Key': requestId } }
+        params: { header: createHeaders(requestId) }
       })
     );
   const { project_id, type, ...update } = body;
@@ -30,10 +36,7 @@ export async function saveSink(
       body: update,
       params: {
         path: { sink_id: current.id },
-        header: {
-          'If-Match': `"${current.etag}"`,
-          'Idempotency-Key': requestId
-        }
+        header: mutationHeaders(current.etag, requestId)
       }
     })
   );
@@ -43,7 +46,7 @@ export const retireSink = async (value: Sink, requestId: string) =>
     await apiClient.DELETE('/api/v1/sinks/{sink_id}', {
       params: {
         path: { sink_id: value.id },
-        header: { 'If-Match': `"${value.etag}"`, 'Idempotency-Key': requestId }
+        header: mutationHeaders(value.etag, requestId)
       }
     })
   );
