@@ -127,10 +127,8 @@ func (s *Server) retainedBodyDigest(e retainedapi.Endpoint, slug string, body []
 	if !strings.HasPrefix(contentType, "multipart/") {
 		return s.retainedSubmissionDigest(e, slug, body)
 	}
-	digester, ok := s.deps.Runtime.(interface {
-		Digest(secrets.DigestPurpose, string) []byte
-	})
-	if !ok {
+	digester := s.deps.Digester
+	if digester == nil {
 		return nil, fault.ServerError(503, "authority_unavailable", "Resource submission identity is unavailable.")
 	}
 	_, params, err := mime.ParseMediaType(contentType)

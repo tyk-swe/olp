@@ -132,10 +132,8 @@ func (s *Server) beginBatch(ctx context.Context, x *call, authorityID string, p 
 	if p.provider.CredentialSource == "caller" {
 		return batchSubmission{}, policyUnavailable("target_capability", "Batch submissions require gateway-managed credentials so settlement can run after the request ends.")
 	}
-	digester, ok := s.deps.Runtime.(interface {
-		Digest(secrets.DigestPurpose, string) []byte
-	})
-	if !ok {
+	digester := s.deps.Digester
+	if digester == nil {
 		return batchSubmission{}, fault.ServerError(http.StatusServiceUnavailable, "authority_unavailable", "Batch submission identity is unavailable.")
 	}
 	now := s.now()

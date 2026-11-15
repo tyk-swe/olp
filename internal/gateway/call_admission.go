@@ -13,10 +13,8 @@ import (
 
 // System work has no key/group/end-user spend but shares aggregate invoice caps.
 func (s *Server) reserveSystemBudgets(ctx context.Context, x *call) *fault.Error {
-	source, ok := s.deps.Runtime.(interface {
-		BudgetAuthority(*string) (keyauthority.Authority, error)
-	})
-	if !ok {
+	source := s.deps.BudgetAuthority
+	if source == nil {
 		return nil
 	}
 	authority, err := source.BudgetAuthority(x.route.ProjectID)
