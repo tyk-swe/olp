@@ -11,6 +11,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -227,6 +228,10 @@ func Verify(sp *saml.ServiceProvider, metadata Metadata, raw []byte, requestID s
 		if len(child(assertion, ns, name)) != 1 {
 			return nil, ErrDocument
 		}
+	}
+	nameIDs := slices.DeleteFunc(child(assertion, assertionNS, "Subject")[0].ChildElements(), func(e *etree.Element) bool { return e.Tag != "NameID" })
+	if len(nameIDs) != 1 || nameIDs[0].NamespaceURI() != assertionNS {
+		return nil, ErrDocument
 	}
 	roots := currentCertificates(metadata.Certificates, now)
 	if len(roots) == 0 {
