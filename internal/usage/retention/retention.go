@@ -9,9 +9,12 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/usage"
 )
+
+type Querier interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
 
 // maintenanceLockID is the session advisory lock one maintenance pass holds
 // ("OLP_MT"). Replicas run the same schedule; only one may purge at a time.
@@ -332,7 +335,7 @@ func purgeExpiringRecords(ctx context.Context, conn *pgx.Conn, now time.Time, wi
 // keep receipt expiry from becoming one hourly delete spike.
 const MaintenanceInterval = 60 * time.Second
 
-func RetentionDays(ctx context.Context, q access.Queryer) (int, error) {
+func RetentionDays(ctx context.Context, q Querier) (int, error) {
 	var value string
 	err := q.QueryRow(ctx, `SELECT value FROM olp.settings WHERE key='retention.usage_days'`).Scan(&value)
 	if errors.Is(err, pgx.ErrNoRows) {
