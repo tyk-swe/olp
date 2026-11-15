@@ -57,6 +57,8 @@ func envelopsMessages(hosting string) bool {
 	return hostings[hosting].messages != upstreamPath{}
 }
 
+func (c Config) EnvelopsMessages() bool { return envelopsMessages(c.Hosting()) }
+
 func (c Config) traits() hostingTraits {
 	if c.ProfileID == "" {
 		return hostings[automaticHostings[c.Kind]]
