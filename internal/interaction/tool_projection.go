@@ -136,7 +136,7 @@ func (p *ToolProjection) Observe(event oif.Event) ([][]byte, error) {
 	var frame []byte
 	var err error
 	switch kind {
-	case "ping":
+	case "ping", "error":
 		return nil, nil
 	case "message_start":
 		message := member(root, "message")
