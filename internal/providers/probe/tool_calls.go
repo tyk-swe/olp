@@ -72,7 +72,7 @@ func toolCallProbeCompletion(body []byte, stream bool, invocation providerinvoke
 		return openai.DecodeResponse(completion.Body, "certification")
 	}
 	var frames bytes.Buffer
-	_, err := protocols.Stream(invocation.Wire, wire.Chat, transport.StreamPayload(bytes.NewReader(body), BodyLimit), BodyLimit, "certification", true, func(frame []byte) error {
+	_, err := protocols.Stream(invocation.Wire, wire.Chat, transport.StreamPayload(bytes.NewReader(body), BodyLimit), BodyLimit, "certification", func(frame []byte) error {
 		if frames.Len()+len(frame) > BodyLimit {
 			return wire.ErrEventTooLarge
 		}
@@ -82,5 +82,5 @@ func toolCallProbeCompletion(body []byte, stream bool, invocation providerinvoke
 	if err != nil {
 		return nil, err
 	}
-	return openai.Stream(wire.Chat, bytes.NewReader(frames.Bytes()), BodyLimit, "certification", true, func([]byte) error { return nil })
+	return openai.Stream(wire.Chat, bytes.NewReader(frames.Bytes()), BodyLimit, "certification")
 }

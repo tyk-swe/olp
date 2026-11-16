@@ -9,7 +9,11 @@ import (
 )
 
 func TestTransformationsReturnErrorsWithoutChangingSource(t *testing.T) {
-	source, err := FromFields(Chat, "route", false, map[string]json.RawMessage{"model": json.RawMessage(`"route"`), "messages": json.RawMessage(`[{"role":"user","content":"hello"}]`)})
+	document, err := oif.ParseJSON([]byte(`{"model":"route","messages":[{"role":"user","content":"hello"}]}`), oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := NewRequest(Chat, "route", false, document)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -17,7 +21,7 @@ func TestTransformationsReturnErrorsWithoutChangingSource(t *testing.T) {
 	for _, transform := range []func() (*Request, error){
 		func() (*Request, error) { return source.WithField("messages", json.RawMessage(`[`)) },
 		func() (*Request, error) {
-			return source.WithFields(map[string]json.RawMessage{"model": json.RawMessage(`"route"`), "input": json.RawMessage(`{"key":1,"key":2}`)}, oif.ExplicitTransform)
+			return source.WithFields(map[string]json.RawMessage{"model": json.RawMessage(`"route"`), "input": json.RawMessage(`{"key":1,"key":2}`)})
 		},
 	} {
 		next, err := transform()
@@ -34,9 +38,6 @@ func TestTransformationsReturnErrorsWithoutChangingSource(t *testing.T) {
 	}
 	if source.Field("user") != nil || !bytes.Equal(next.Field("user"), []byte(`"reader"`)) {
 		t.Fatal("successful transformation changed its input")
-	}
-	if _, err := FromFields(Chat, "route", false, map[string]json.RawMessage{"input": json.RawMessage(`[`)}); err == nil {
-		t.Fatal("invalid fields were deferred")
 	}
 	if _, err := NewRequest(Chat, "route", false, oif.Document{}); err == nil {
 		t.Fatal("invalid source was deferred")
@@ -62,9 +63,9 @@ func TestValidatedStreamingRequestsRetainNativeBytesAndDelivery(t *testing.T) {
 				t.Fatal(err)
 			}
 			request.Stream = true
-			validated := request.WithValidation("fixture-codec")
-			if !validated.ValidatedBy("fixture-codec") || validated.ValidatedBy("another-codec") || request.ValidatedBy("fixture-codec") {
-				t.Fatal("validation did not remain specific to the returned request and codec")
+			validated := request.Validated()
+			if !validated.IsValidated() || request.IsValidated() {
+				t.Fatal("validation did not remain specific to the returned request")
 			}
 			prepared, err := oif.PrepareIdentity(validated.OIF(), Descriptor(validated.Family, validated.Stream), nil)
 			if err != nil {
@@ -93,16 +94,16 @@ func TestModelTransformsInvalidateValidationWithoutBlessingNativeIdentity(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	validated := request.WithValidation("fixture-codec")
+	validated := request.Validated()
 	rewritten, err := validated.WithFields(map[string]json.RawMessage{
 		"model":     json.RawMessage(`"native-model"`),
 		"input":     validated.Field("input"),
 		"extension": validated.Field("extension"),
-	}, oif.ExplicitTransform)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rewritten.ValidatedBy("fixture-codec") || !validated.ValidatedBy("fixture-codec") {
+	if rewritten.IsValidated() || !validated.IsValidated() {
 		t.Fatal("model transformation reused or damaged validation of the original document")
 	}
 	if !bytes.Equal(validated.Field("model"), []byte(`"team-code"`)) || !bytes.Equal(rewritten.Document()["model"], []byte(`"native-model"`)) || !bytes.Equal(rewritten.Field("extension"), validated.Field("extension")) {
@@ -111,8 +112,8 @@ func TestModelTransformsInvalidateValidationWithoutBlessingNativeIdentity(t *tes
 	if !bytes.Equal(rewritten.OIF().Source().Bytes(), body) || !bytes.Equal(validated.OIF().Document().Bytes(), body) {
 		t.Fatal("transformation discarded or changed the native source")
 	}
-	revalidated := rewritten.WithValidation("fixture-codec")
-	if !revalidated.ValidatedBy("fixture-codec") {
+	revalidated := rewritten.Validated()
+	if !revalidated.IsValidated() {
 		t.Fatal("derived document could not receive its own validation")
 	}
 	if _, err := oif.PrepareIdentity(revalidated.OIF(), Descriptor(revalidated.Family, revalidated.Stream), nil); err == nil {

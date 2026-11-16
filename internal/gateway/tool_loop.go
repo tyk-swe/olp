@@ -392,7 +392,7 @@ func workflowStreamCompletion(family wire.Format, frames *bytes.Reader, maxEvent
 		return openai.DecodeResponse(completion.Body, route)
 	}
 	if family == wire.Chat {
-		return openai.Stream(wire.Chat, frames, maxEvent, route, true, func([]byte) error { return nil })
+		return openai.Stream(wire.Chat, frames, maxEvent, route)
 	}
 	source := family
 	if family.Surface() == "gemini" {
@@ -406,7 +406,7 @@ func workflowStreamCompletion(family wire.Format, frames *bytes.Reader, maxEvent
 	if err != nil {
 		return nil, err
 	}
-	return openai.Stream(wire.Chat, &translated, maxEvent, route, true, func([]byte) error { return nil })
+	return openai.Stream(wire.Chat, &translated, maxEvent, route)
 }
 
 func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire.Completion, identityStart int) (*wire.Request, *fault.Error) {

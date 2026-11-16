@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
@@ -27,7 +28,11 @@ func TestInspectInputTextDestinationWireFamilies(t *testing.T) {
 			if !InputInspectable(tc.family) {
 				t.Fatalf("InputInspectable(%s) = false", tc.family)
 			}
-			r, err := wire.FromFields(tc.family, "route", false, decodeFields(t, tc.body))
+			document, err := oif.ParseJSON([]byte(tc.body), oif.Limits{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			r, err := wire.NewRequest(tc.family, "route", false, document)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -53,13 +58,4 @@ func TestInspectInputTextDestinationWireFamilies(t *testing.T) {
 	if InputInspectable(wire.BedrockInvoke) {
 		t.Fatal("bedrock_invoke must not claim input inspection coverage")
 	}
-}
-
-func decodeFields(t *testing.T, body string) map[string]json.RawMessage {
-	t.Helper()
-	fields := map[string]json.RawMessage{}
-	if err := json.Unmarshal([]byte(body), &fields); err != nil {
-		t.Fatal(err)
-	}
-	return fields
 }

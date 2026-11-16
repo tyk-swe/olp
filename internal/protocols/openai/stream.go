@@ -38,17 +38,9 @@ func IsResponseProjectionError(err error) bool {
 
 // Stream decodes an upstream event stream for the family, validates each event,
 // rewrites model names, forwards frames, and reports the completion summary.
-// includeUsage controls client-visible chat usage; accounting always retains it.
 // On failure, the partial summary preserves usage observed before the error.
-func Stream(family wire.Format, r io.Reader, maxEventBytes int, route string, includeUsage bool, emit wire.Emit) (*wire.Completion, error) {
-	return stream(family, family, r, maxEventBytes, route, includeUsage, true, emit, nil)
-}
-
-// StreamMetadata forwards the same validated frames as Stream, but retains only
-// completion metadata. The gateway must not accumulate output or tool arguments
-// for the lifetime of a stream; the unary response cap does not bound streams.
-func StreamMetadata(family wire.Format, r io.Reader, maxEventBytes int, route string, includeUsage bool, emit wire.Emit) (*wire.Completion, error) {
-	return stream(family, family, r, maxEventBytes, route, includeUsage, false, emit, nil)
+func Stream(family wire.Format, r io.Reader, maxEventBytes int, route string) (*wire.Completion, error) {
+	return stream(family, family, r, maxEventBytes, route, true, true, func([]byte) error { return nil }, nil)
 }
 
 func StreamMetadataEvents(family, target wire.Format, r io.Reader, maxEventBytes int, route string, includeUsage bool, emit wire.Emit, observe func(oif.Event) error) (*wire.Completion, error) {

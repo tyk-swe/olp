@@ -8,27 +8,10 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 
 	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols"
 )
 
 func guardFailure(field, requirement string) error {
 	return incompatible("fidelity_protocol_violation", field, requirement, "The provider result does not satisfy the admitted interaction contract.")
-}
-
-// ValidateUnary runs before projection. Native codecs retain source extensions;
-// the qualified text result contract rejects anything its client cannot observe.
-func (p *Plan) ValidateUnary(body []byte) error {
-	document, err := oif.ParseJSON(body, oif.Limits{MaxBytes: p.receipt.Obligations.MaxBodyBytes})
-	if err != nil || document.Root().Kind() != oif.Object {
-		return guardFailure("/result", "result_grammar")
-	}
-	// This invokes the actual native grammar, never a translator. The executor
-	// then uses the admitted client projector once the guard succeeds.
-	completion, err := protocols.DecodeRequest(p.Wire(), p.Wire(), body, "strict-result", "", p.EffectiveRequest())
-	if err != nil {
-		return guardFailure("/result", "native_result_grammar")
-	}
-	return p.ValidateResult(completion.Native)
 }
 
 // ValidateResult consumes a result already checked by its native dialect codec.

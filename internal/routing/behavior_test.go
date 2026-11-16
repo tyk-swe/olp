@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/pluginindex"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -239,9 +240,11 @@ func TestBehaviorValidationRefusesMalformedDeclarations(t *testing.T) {
 }
 
 func TestModalitySelectorsAcceptAndMatchRequestFeatures(t *testing.T) {
-	request, err := wire.FromFields(wire.Gemini, "route", false, map[string]json.RawMessage{
-		"contents": json.RawMessage(`[{"role":"user","parts":[{"text":"hello"},{"inlineData":{"mimeType":"image/png","data":"YQ=="}},{"inlineData":{"mimeType":"audio/wav","data":"YQ=="}},{"inlineData":{"mimeType":"video/mp4","data":"YQ=="}},{"inlineData":{"mimeType":"application/pdf","data":"YQ=="}}]}]`),
-	})
+	document, err := oif.ParseJSON([]byte(`{"contents":[{"role":"user","parts":[{"text":"hello"},{"inlineData":{"mimeType":"image/png","data":"YQ=="}},{"inlineData":{"mimeType":"audio/wav","data":"YQ=="}},{"inlineData":{"mimeType":"video/mp4","data":"YQ=="}},{"inlineData":{"mimeType":"application/pdf","data":"YQ=="}}]}]}`), oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := wire.NewRequest(wire.Gemini, "route", false, document)
 	if err != nil {
 		t.Fatal(err)
 	}

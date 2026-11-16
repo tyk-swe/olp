@@ -33,7 +33,7 @@ func TestParseSourceAndDocumentValidateOpenAIRequests(t *testing.T) {
 			if parseErr != nil {
 				t.Fatal(parseErr)
 			}
-			parsed, validationErr := ParseDocument(tc.family, doc)
+			parsed, validationErr := ParseDocumentForModel(tc.family, doc, "")
 			if validationErr != nil {
 				t.Fatal(validationErr)
 			}
@@ -47,7 +47,7 @@ func TestParseSourceAndDocumentValidateOpenAIRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ParseDocument(wire.Chat, doc); err == nil {
+	if _, err := ParseDocumentForModel(wire.Chat, doc, ""); err == nil {
 		t.Fatal("chat request without messages was accepted")
 	}
 }
@@ -73,7 +73,7 @@ func legacyParseDocument(family wire.Format, doc oif.Document) (*wire.Request, e
 	if err := validateFields(r, fields, oif.Value{}, ""); err != nil {
 		return nil, err
 	}
-	r = r.WithValidation("openai")
+	r = r.Validated()
 	return r, nil
 }
 
@@ -86,7 +86,7 @@ func sameValidation(t testing.TB, family wire.Format, doc oif.Document) bool {
 	if !reflect.DeepEqual(gotErr, wantErr) || (got == nil) != (want == nil) {
 		t.Fatalf("%s\nrequest %.1500s\ndocument: %v\nfields:   %v", family, doc.Raw(), gotErr, wantErr)
 	}
-	if got != nil && (got.Family != want.Family || got.Route != want.Route || got.Stream != want.Stream || got.IncludeUsage != want.IncludeUsage || !got.ValidatedBy("openai")) {
+	if got != nil && (got.Family != want.Family || got.Route != want.Route || got.Stream != want.Stream || got.IncludeUsage != want.IncludeUsage || !got.IsValidated()) {
 		t.Fatalf("%s\nrequest %.1500s\ndocument: %+v\nfields:   %+v", family, doc.Raw(), got, want)
 	}
 	return got != nil

@@ -14,18 +14,9 @@ import (
 
 const maxAggregateItems = 4096
 
-// wire.ErrAggregateTooLarge marks a stream whose non-streaming result exceeds the
-// bound it is aggregated within.
-
-// aggregators reduce each family's event stream to its non-streaming result.
-var aggregators = map[wire.Format]func(r io.Reader, maxEventBytes, maxBytes int, observe func(oif.Event) error) (*wire.Completion, error){
-	wire.Responses: aggregateResponses,
-}
-
 // Aggregates reports whether Aggregate reduces the family's streams.
 func Aggregates(family wire.Format) bool {
-	_, ok := aggregators[family]
-	return ok
+	return family == wire.Responses
 }
 
 // Aggregate reads an upstream's event stream to its end for a caller that did
@@ -36,31 +27,21 @@ func Aggregates(family wire.Format) bool {
 // completion summarizes what the stream reported, also on failure; a stream
 // that fails or ends before its terminal event has no Body.
 func Aggregate(family wire.Format, r io.Reader, maxEventBytes, maxBytes int) (*wire.Completion, error) {
-	return AggregateEvents(family, r, maxEventBytes, maxBytes, nil)
-}
-
-func AggregateEvents(family wire.Format, r io.Reader, maxEventBytes, maxBytes int, observe func(oif.Event) error) (*wire.Completion, error) {
-	aggregate, ok := aggregators[family]
-	if !ok {
+	if !Aggregates(family) {
 		return nil, errors.New("no reducer aggregates this family's streams")
 	}
-	return aggregate(r, maxEventBytes, maxBytes, observe)
+	return aggregateResponses(r, maxEventBytes, maxBytes)
 }
 
 // aggregateResponses reduces a Responses stream to the response its terminal
 // event carries. An upstream may leave that response's output empty and
 // deliver each item only in response.output_item.done, so an empty output
 // becomes the items the stream completed, in output order.
-func aggregateResponses(r io.Reader, maxEventBytes, maxBytes int, observe func(oif.Event) error) (*wire.Completion, error) {
+func aggregateResponses(r io.Reader, maxEventBytes, maxBytes int) (*wire.Completion, error) {
 	var terminal json.RawMessage
 	items := map[int64]json.RawMessage{}
 	retained := 0
 	c, err := StreamMetadataEvents(wire.Responses, wire.Responses, r, maxEventBytes, "", true, func([]byte) error { return nil }, func(event oif.Event) error {
-		if observe != nil {
-			if err := observe(event); err != nil {
-				return err
-			}
-		}
 		kind, _ := event.Source().Root().Lookup("type")
 		switch text, _ := kind.Text(); text {
 		case "response.output_item.done":
