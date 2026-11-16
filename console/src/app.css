@@ -824,7 +824,7 @@ button:not(:disabled),
 }
 
 .button-primary {
-  --hatch: rgb(255 255 255 / 20%);
+  --hatch: rgb(255 255 255 / 10%);
   border-color: var(--button-fill);
   background: var(--button-fill);
   color: var(--button-fill-text);
@@ -851,13 +851,24 @@ button:not(:disabled),
   color: var(--foreground-hover);
 }
 
-.button-danger,
-.button-danger:hover:not(:disabled) {
+.button-danger {
   color: var(--danger);
 }
 
 .button-danger:hover:not(:disabled) {
   border-color: var(--danger);
+  color: var(--danger);
+}
+
+.button-quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--foreground-muted);
+}
+
+.button-quiet:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--foreground-hover);
 }
 
 /* Rows driven by the `slidingIndicator` action: one signal bar glides to the

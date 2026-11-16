@@ -3,10 +3,18 @@
   import { onMount } from 'svelte';
   import { errorMessage } from '#lib/management/http.js';
   import { formatDate } from '#lib/format.js';
+  import { confirmAction } from '#lib/components/confirm.js';
   import { profileKeys } from '#lib/features/access/profile/profileKeys.js';
   import { beginIdentityReauthentication } from '#lib/features/access/profile/api.js';
   import { reauthenticateWithPassword } from '#lib/features/access/profile/reauthentication.js';
-  import { getMFA, enrollMFA, manageMFA, removeMFA, recoveryMFA } from './api';
+  import {
+    getMFA,
+    enrollMFA,
+    manageMFA,
+    removeMFA,
+    recoveryMFA,
+    type MFAFactor
+  } from './api';
   import { confirmMFA } from './prompt.svelte';
   let {
     hasLocalPassword = false,
@@ -98,17 +106,35 @@
       notice = 'Authenticator enrolled. Other sessions have ended.';
     });
   }
-  async function remove(id: string) {
+  async function remove(factor: MFAFactor) {
     if (!status.data) return;
     const etag = status.data.etag;
+    if (
+      !(await confirmAction({
+        title: `Remove ${factor.name}?`,
+        body: 'You can no longer sign in with this authenticator.',
+        confirmLabel: 'Remove authenticator',
+        danger: true
+      }))
+    )
+      return;
     await action(async () => {
-      await removeMFA(id, etag);
+      await removeMFA(factor.id, etag);
       notice = 'Authenticator removed.';
     });
   }
   async function regenerate() {
     if (!status.data) return;
     const etag = status.data.etag;
+    if (
+      !(await confirmAction({
+        title: 'Replace recovery codes?',
+        body: 'Your current recovery codes stop working immediately.',
+        confirmLabel: 'Replace codes',
+        danger: true
+      }))
+    )
+      return;
     await action(async () => {
       codes = (await recoveryMFA(etag)).recovery_codes;
       notice = 'Previous recovery codes no longer work.';
@@ -160,7 +186,7 @@
               class="button button-secondary"
               disabled={busy ||
                 (status.data.required && status.data.factors.length === 1)}
-              onclick={() => remove(factor.id)}>Remove {factor.name}</button
+              onclick={() => remove(factor)}>Remove {factor.name}</button
             >
           </li>{/each}
       </ul>

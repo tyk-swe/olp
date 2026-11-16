@@ -2,6 +2,7 @@
   import EmptyState from '#lib/components/EmptyState.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
+  import { confirmAction } from '#lib/components/confirm.js';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
@@ -279,6 +280,15 @@
 
   async function removePolicy(policy: CapturePolicy) {
     if (!canMutate(policy.project_id)) return;
+    if (
+      !(await confirmAction({
+        title: 'Delete capture policy?',
+        body: 'Matching prompts and responses stop being captured to this sink.',
+        confirmLabel: 'Delete policy',
+        danger: true
+      }))
+    )
+      return;
     const isCurrent = captureOwner();
     error = notice = '';
     try {

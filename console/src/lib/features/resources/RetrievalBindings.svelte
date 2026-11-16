@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
+  import { confirmAction } from '#lib/components/confirm.js';
   import { useRole } from '#lib/features/access/session/useRole.svelte.js';
   import {
     useMutationIntent,
@@ -106,6 +107,18 @@
       fields: parsed as RetrievalBindingInput['fields'],
       key_grants: keys
     };
+  }
+  async function retire() {
+    if (!current) return;
+    if (
+      await confirmAction({
+        title: `Retire ${current.name}?`,
+        body: 'Retrieval through this binding stops on the route.',
+        confirmLabel: 'Retire binding',
+        danger: true
+      })
+    )
+      await write('retire');
   }
   async function write(action: 'save' | 'retire') {
     if (busy || !canManage || conflict) return;
@@ -298,7 +311,7 @@
           {#if current}<button
               class="button button-secondary"
               type="button"
-              onclick={() => write('retire')}
+              onclick={retire}
               disabled={conflict}>Retire binding</button
             >{/if}
         </div>

@@ -21,6 +21,7 @@
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import StatusBadge from '#lib/components/StatusBadge.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
+  import { confirmAction } from '#lib/components/confirm.js';
   const access = useRole();
   const client = useQueryClient();
   let before = $state<string | undefined>();
@@ -137,6 +138,15 @@
   }
   async function revoke(item: BudgetIncrease) {
     if (busy) return;
+    if (
+      !(await confirmAction({
+        title: 'Revoke this increase?',
+        body: 'The raised limit ends now instead of at its expiry.',
+        confirmLabel: 'Revoke increase',
+        danger: true
+      }))
+    )
+      return;
     const isCurrent = captureOwner();
     let committed = false;
     busy = true;

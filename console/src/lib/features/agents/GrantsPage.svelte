@@ -1,6 +1,7 @@
 <script lang="ts">
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { formatDate } from '#lib/format.js';
+  import { confirmAction } from '#lib/components/confirm.js';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { onMount } from 'svelte';
   import { writable } from 'svelte/store';
@@ -263,6 +264,15 @@
   }
 
   async function revoke(grantID: string) {
+    if (
+      !(await confirmAction({
+        title: 'Revoke this grant?',
+        body: 'The agent can no longer act through this connection.',
+        confirmLabel: 'Revoke grant',
+        danger: true
+      }))
+    )
+      return;
     const owner = captureOwner();
     patch({ busy: true, error: '' });
     try {

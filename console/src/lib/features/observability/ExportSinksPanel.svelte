@@ -3,6 +3,7 @@
   import EmptyState from '#lib/components/EmptyState.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
+  import { confirmAction } from '#lib/components/confirm.js';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
@@ -278,6 +279,15 @@
 
   async function removeSink(sink: ExportSink) {
     if (!canMutate(sink.project_id)) return;
+    if (
+      !(await confirmAction({
+        title: `Delete ${sink.name}?`,
+        body: 'Records stop exporting to this destination.',
+        confirmLabel: 'Delete sink',
+        danger: true
+      }))
+    )
+      return;
     const isCurrent = captureOwner();
     error = notice = '';
     try {

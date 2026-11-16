@@ -4,6 +4,7 @@
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
+  import { confirmAction } from '#lib/components/confirm.js';
   import { useRole } from '../session/useRole.svelte';
   import { projectKeys } from '../projects/projectKeys';
   import { organizationKeys } from './organizationKeys';
@@ -70,6 +71,22 @@
     if (projects.data && !projects.data.some((p) => p.id === projectId))
       projectId = projects.data[0]?.id ?? '';
   });
+  async function removeMember(
+    email: string,
+    scope: string,
+    action: () => Promise<unknown>
+  ) {
+    if (
+      !(await confirmAction({
+        title: `Remove ${email}?`,
+        body: `They lose access granted through this ${scope}.`,
+        confirmLabel: 'Remove member',
+        danger: true
+      }))
+    )
+      return;
+    await run(action);
+  }
   async function run(action: () => Promise<unknown>) {
     if (busy) return;
     busy = true;
@@ -208,7 +225,7 @@
             class="button button-secondary"
             disabled={busy}
             onclick={() =>
-              run(() =>
+              removeMember(m.email, 'organization', () =>
                 api.removeOrganizationMember(
                   selected,
                   m.user_id,
@@ -342,7 +359,7 @@
               class="button button-secondary"
               disabled={busy}
               onclick={() =>
-                run(() =>
+                removeMember(m.email, 'project', () =>
                   api.removeProjectMember(
                     selected,
                     projectId,
