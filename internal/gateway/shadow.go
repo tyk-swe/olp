@@ -45,9 +45,6 @@ func (s *Server) ShadowCounts() (mirrored, dropped int64) {
 	return s.shadows.mirrored.Load(), s.shadows.dropped.Load()
 }
 
-// WaitShadows blocks until every running shadow request has finished.
-func (s *Server) WaitShadows() { s.shadows.running.Wait() }
-
 // DrainShadows stops mirror intake and waits for accounting and cap settlement.
 // Mirrors still running at the shutdown deadline are cancelled.
 func (s *Server) DrainShadows(ctx context.Context) error {
@@ -57,7 +54,7 @@ func (s *Server) DrainShadows(ctx context.Context) error {
 	defer s.shadows.cancel()
 	done := make(chan struct{})
 	go func() {
-		s.WaitShadows()
+		s.shadows.running.Wait()
 		close(done)
 	}()
 	select {

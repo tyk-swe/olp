@@ -108,10 +108,9 @@ type AttemptFact struct {
 	PricingPinned bool
 	// Discount is the multiplier the plan pinned on the attempt.
 	Discount *rates.RoutingDiscount
-	// CardPinned records that accounting must use CardRevisionID exactly,
-	// null included; unpinned attempts resolve the card themselves.
-	CardPinned     bool
-	CardRevisionID *string
+	// CardPinned records that accounting must use CardRev's ID exactly,
+	// nil included; unpinned attempts resolve the card themselves.
+	CardPinned bool
 	// CardRev retains the terms resolved when this attempt started, even if
 	// later routing inputs no longer contain that revision. Nil means no card.
 	CardRev            *rates.RoutingCardRevision

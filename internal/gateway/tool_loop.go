@@ -29,24 +29,18 @@ import (
 type WorkflowRunStore interface {
 	Start(context.Context, keyauthority.Authority, string, string) (string, error)
 	Prepare(context.Context, keyauthority.Authority, debits.Intent, int, []limits.Owner) (debits.State, error)
+	Pause(context.Context, keyauthority.Authority, runs.WorkflowApprovalRequest, int) (string, error)
+	Continue(context.Context, keyauthority.Authority, string, json.RawMessage, map[string]json.RawMessage, int) (runs.WorkflowContinuation, error)
 }
 
 type WorkflowTool = mcp.WorkflowTool
 
 const recoveryToolName = "olp_recover_context"
 
-type WorkflowApprovalStore interface {
-	Pause(context.Context, keyauthority.Authority, runs.WorkflowApprovalRequest, int) (string, error)
-	Continue(context.Context, keyauthority.Authority, string, json.RawMessage, map[string]json.RawMessage, int) (runs.WorkflowContinuation, error)
-}
-
 type WorkflowToolRunner interface {
 	Resolve(context.Context, keyauthority.Authority, *release.Release, []string) ([]WorkflowTool, error)
 	AuthorizeWorkflowTool(keyauthority.Authority, WorkflowTool) error
 	Call(context.Context, keyauthority.Authority, *release.Release, WorkflowTool, string, int, string, json.RawMessage) (json.RawMessage, error)
-}
-
-type WorkflowApprovedToolRunner interface {
 	CallApproved(context.Context, keyauthority.Authority, *release.Release, WorkflowTool, string, int, string, json.RawMessage, runs.WorkflowApproval) (json.RawMessage, error)
 }
 
@@ -246,13 +240,7 @@ func (s *Server) abandonWorkflowDebit(ctx context.Context, x *call) *fault.Error
 		if !x.sessionDebit.dispatched {
 			return s.deps.Debits.ReleaseUndispatched(releaseCtx, x.sessionDebit.id, x.sessionDebit.claim)
 		}
-		ledger, ok := s.deps.Debits.(interface {
-			MarkNotSent(context.Context, string, string) error
-		})
-		if !ok {
-			return errors.New("workflow ledger cannot release a proven unsent dispatch")
-		}
-		return ledger.MarkNotSent(releaseCtx, x.sessionDebit.id, x.sessionDebit.claim)
+		return s.deps.Debits.MarkNotSent(releaseCtx, x.sessionDebit.id, x.sessionDebit.claim)
 	}()
 	if err != nil {
 		if s.log != nil {

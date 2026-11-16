@@ -68,11 +68,7 @@ func (f *Forwarder) prepareCode(r *http.Request, release *release.Release, route
 		if recovery != nil || len(route.PaidTargets) == 0 || resolved.PublicModel() == resolved.Model {
 			return resolved, nil
 		}
-		ledger, supported := f.ledger.(PaidLedger)
-		if !supported {
-			return codemode.Operation{}, codemode.Refuse(503, "code_paid_authority_unavailable")
-		}
-		return ledger.ResolvePaidModel(r.Context(), codesessions.Admission{Route: route, APIKeyID: authority.ID, Operation: resolved, EndUserDigest: authority.EndUserDigest, PreviousResponse: observation.PreviousResponse}, authority)
+		return f.ledger.ResolvePaidModel(r.Context(), codesessions.Admission{Route: route, APIKeyID: authority.ID, Operation: resolved, EndUserDigest: authority.EndUserDigest, PreviousResponse: observation.PreviousResponse}, authority)
 	}()
 	if err != nil {
 		return nil, err
@@ -81,14 +77,12 @@ func (f *Forwarder) prepareCode(r *http.Request, release *release.Release, route
 		return f.preparePaidCode(r, release, route, observation, operation, inbound, transport, authority, body, nil, false)
 	}
 	if recovery == nil && len(route.PaidFallbackTargets) > 0 {
-		if ledger, ok := f.ledger.(PaidLedger); ok {
-			selected, err := ledger.ResolvePaidFallback(r.Context(), codesessions.Admission{Route: route, APIKeyID: authority.ID, Operation: operation, PreviousResponse: observation.PreviousResponse}, authority)
-			if err != nil {
-				return nil, err
-			}
-			if selected != nil {
-				return f.preparePaidCode(r, release, route, observation, *selected, inbound, transport, authority, body, nil, true)
-			}
+		selected, err := f.ledger.ResolvePaidFallback(r.Context(), codesessions.Admission{Route: route, APIKeyID: authority.ID, Operation: operation, PreviousResponse: observation.PreviousResponse}, authority)
+		if err != nil {
+			return nil, err
+		}
+		if selected != nil {
+			return f.preparePaidCode(r, release, route, observation, *selected, inbound, transport, authority, body, nil, true)
 		}
 	}
 	providers := release.Snapshot().CodeModelProviders(route, inbound.path, operation.Model, transport)
@@ -111,11 +105,7 @@ func (f *Forwarder) prepareCode(r *http.Request, release *release.Release, route
 	if err != nil {
 		quota.SettleKey(r.Context(), lease, false, nil, f.log)
 		if refusal, ok := errors.AsType[*codemode.Refusal](err); ok && refusal.Code == "code_account_unavailable" && (recovery == nil || recovery.AccountID == "") && transport == codeadapter.HTTP && observation.Recoverable && len(route.PaidFallbackTargets) > 0 {
-			ledger, supported := f.ledger.(PaidLedger)
-			if !supported {
-				return nil, codemode.Refuse(503, "code_paid_authority_unavailable")
-			}
-			selected, selectionErr := ledger.ResolvePaidFallback(r.Context(), codesessions.Admission{Route: route, APIKeyID: authority.ID, Operation: operation, InitialRecovery: observation.Recoverable, Recovery: recovery, PreviousResponse: observation.PreviousResponse}, authority)
+			selected, selectionErr := f.ledger.ResolvePaidFallback(r.Context(), codesessions.Admission{Route: route, APIKeyID: authority.ID, Operation: operation, InitialRecovery: observation.Recoverable, Recovery: recovery, PreviousResponse: observation.PreviousResponse}, authority)
 			if selectionErr != nil {
 				return nil, selectionErr
 			}

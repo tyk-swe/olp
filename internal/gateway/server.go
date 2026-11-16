@@ -84,9 +84,6 @@ type Config struct {
 	// MaxShadowInFlight bounds the mirrored requests in flight on this
 	// gateway; mirrors beyond it are dropped. Zero means the default.
 	MaxShadowInFlight int
-	WebRTCBound       time.Duration
-	WebRTCReauth      time.Duration
-	WebRTCHeartbeat   time.Duration
 }
 
 type ReleaseSource interface {
@@ -137,18 +134,16 @@ type TaskAttemptAdmitter interface {
 }
 
 type Dependencies struct {
-	Egress         *egress.Policy
-	Getenv         func(string) string
-	Log            *slog.Logger
-	Cache          *cache.Store
-	Guardrails     func(guardrails.Caller) guardrails.Evaluator
-	CodeLedger     codeforward.Ledger
-	CodeAuthorizer codeforward.Authorizer
-	CodeResearch   codeforward.ResearchLedger
-	ResearchAuth   codeforward.ResearchAuthorizer
-	Runtime        Runtime
-	// The five fields below are optional runtime capabilities. Leave any of
-	// them unset and it is taken from Runtime when Runtime provides it.
+	Egress                      *egress.Policy
+	Getenv                      func(string) string
+	Log                         *slog.Logger
+	Cache                       *cache.Store
+	Guardrails                  func(guardrails.Caller) guardrails.Evaluator
+	CodeLedger                  codeforward.Ledger
+	CodeAuthorizer              codeforward.Authorizer
+	CodeResearch                codeforward.ResearchLedger
+	ResearchAuth                codeforward.ResearchAuthorizer
+	Runtime                     Runtime
 	Digester                    Digester
 	BudgetAuthority             BudgetAuthority
 	TaskAttemptAdmitter         TaskAttemptAdmitter
@@ -1054,7 +1049,6 @@ func normalizedConfig(cfg Config) Config {
 		TrustedProxies: slices.Clone(cfg.TrustedProxies), CORSAllowedOrigins: slices.Clone(cfg.CORSAllowedOrigins),
 		InlineMedia: normalizedInlineMedia(cfg.InlineMedia), AdmissionPool: cfg.AdmissionPool, Predicates: cfg.Predicates, Signer: cfg.Signer, Carrier: cfg.Carrier,
 		UnconfinedPlugins: cfg.UnconfinedPlugins, MaxShadowInFlight: cfg.MaxShadowInFlight,
-		WebRTCBound: positiveOrDefault(cfg.WebRTCBound, time.Hour), WebRTCReauth: positiveOrDefault(cfg.WebRTCReauth, ingress.ReauthInterval), WebRTCHeartbeat: positiveOrDefault(cfg.WebRTCHeartbeat, realtimePing),
 	}
 }
 
@@ -1091,31 +1085,11 @@ func codeForwarder(deps Dependencies, cfg Config, gate *ingress.Gate, auth *conn
 }
 
 func normalizedDependencies(deps Dependencies) Dependencies {
-	digester := deps.Digester
-	if digester == nil {
-		digester, _ = deps.Runtime.(Digester)
-	}
-	budgetAuthority := deps.BudgetAuthority
-	if budgetAuthority == nil {
-		budgetAuthority, _ = deps.Runtime.(BudgetAuthority)
-	}
-	taskAttempts := deps.TaskAttemptAdmitter
-	if taskAttempts == nil {
-		taskAttempts, _ = deps.Runtime.(TaskAttemptAdmitter)
-	}
-	taskAuth := deps.TaskCapabilityAuthenticator
-	if taskAuth == nil {
-		taskAuth, _ = deps.Runtime.(consumerauth.TaskCapabilityAuthenticator)
-	}
-	delegationAuth := deps.DelegationReauthenticator
-	if delegationAuth == nil {
-		delegationAuth, _ = deps.Runtime.(DelegationReauthenticator)
-	}
 	return Dependencies{
 		Egress: deps.Egress, Log: deps.Log, Cache: deps.Cache, Guardrails: guardrailRunner(deps),
 		CodeLedger: deps.CodeLedger, CodeAuthorizer: deps.CodeAuthorizer, CodeResearch: deps.CodeResearch, ResearchAuth: deps.ResearchAuth,
-		Runtime: deps.Runtime, Digester: digester, BudgetAuthority: budgetAuthority, TaskAttemptAdmitter: taskAttempts,
-		TaskCapabilityAuthenticator: taskAuth, DelegationReauthenticator: delegationAuth,
+		Runtime: deps.Runtime, Digester: deps.Digester, BudgetAuthority: deps.BudgetAuthority, TaskAttemptAdmitter: deps.TaskAttemptAdmitter,
+		TaskCapabilityAuthenticator: deps.TaskCapabilityAuthenticator, DelegationReauthenticator: deps.DelegationReauthenticator,
 		Sink: configuredSink(deps.Sink, deps.Log), Admission: deps.Admission, Debits: deps.Debits, WorkflowRuns: deps.WorkflowRuns, WorkflowTools: deps.WorkflowTools,
 		Traces: deps.Traces, Media: deps.Media, Staging: deps.Staging, Uploads: deps.Uploads, Capture: deps.Capture, Business: deps.Business, Resources: deps.Resources, Batches: deps.Batches, Resolver: deps.Resolver,
 	}

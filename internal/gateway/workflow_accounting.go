@@ -12,19 +12,11 @@ import (
 	"github.com/tyk-swe/olp/internal/usage/ingest"
 )
 
-type workflowDebitSettler interface {
-	SettleWorkflow(context.Context, *usage.Event, int) ([]limits.Snapshot, error)
-}
-
 func (d durableSessionDebits) SettleWorkflow(ctx context.Context, event *usage.Event, attempt int) ([]limits.Snapshot, error) {
 	return ingest.PersistWorkflowAttempt(ctx, d.pool, event, attempt)
 }
 
 func (s *Server) settleWorkflowModelAttempt(ctx context.Context, x *call, fact events.AttemptFact) *fault.Error {
-	settler, ok := s.deps.Debits.(workflowDebitSettler)
-	if !ok {
-		return s.workflowSettlementFailure(ctx, x, fmt.Errorf("workflow settlement is unavailable"))
-	}
 	if x.request.release == nil || x.request.release.Snapshot() == nil {
 		return s.workflowSettlementFailure(ctx, x, fmt.Errorf("workflow release is unavailable"))
 	}
@@ -48,7 +40,7 @@ func (s *Server) settleWorkflowModelAttempt(ctx context.Context, x *call, fact e
 	}
 	settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), events.PersistTimeout)
 	defer cancel()
-	snapshots, settleErr := settler.SettleWorkflow(settleCtx, event, len(event.Attempts)-1)
+	snapshots, settleErr := s.deps.Debits.SettleWorkflow(settleCtx, event, len(event.Attempts)-1)
 	if err := s.deps.Admission.InstallSnapshots(settleCtx, snapshots); err != nil {
 		return s.workflowSettlementFailure(ctx, x, err)
 	}

@@ -32,11 +32,7 @@ type Handler struct {
 }
 
 func New(deps Dependencies) *Handler {
-	now := deps.Now
-	if now == nil {
-		now = time.Now
-	}
-	return &Handler{gate: deps.Gate, begin: deps.Begin, now: now, workflow: deps.Workflow}
+	return &Handler{gate: deps.Gate, begin: deps.Begin, now: deps.Now, workflow: deps.Workflow}
 }
 
 type capabilities struct {
@@ -45,13 +41,9 @@ type capabilities struct {
 }
 
 func (h *Handler) capabilities(ctx context.Context, rel *release.Release, authority keyauthority.Authority, route routing.Route, surface string) capabilities {
-	var execution *routing.WorkflowCapability
-	if h.workflow != nil {
-		execution = h.workflow(ctx, rel, authority, route, surface)
-	}
 	return capabilities{
 		RouteCapabilities: routing.EffectiveCapabilities(rel.Snapshot(), route),
-		GatewayExecution:  execution,
+		GatewayExecution:  h.workflow(ctx, rel, authority, route, surface),
 	}
 }
 

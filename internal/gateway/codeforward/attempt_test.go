@@ -550,6 +550,15 @@ func (f *fakeCodeLedger) ObserveOutcome(_ context.Context, _ string, outcome cod
 func (f *fakeCodeLedger) RecordRefusal(context.Context, codemode.Route, string, string, string) error {
 	return nil
 }
+func (f *fakeCodeLedger) ResolvePaidFallback(context.Context, codesessions.Admission, keyauthority.Authority) (*codemode.Operation, error) {
+	return nil, nil
+}
+func (f *fakeCodeLedger) ResolvePaidModel(context.Context, codesessions.Admission, keyauthority.Authority) (codemode.Operation, error) {
+	return codemode.Operation{}, nil
+}
+func (f *fakeCodeLedger) AdmitPaid(context.Context, codesessions.PaidAdmission) (codesessions.PaidPermit, error) {
+	return codesessions.PaidPermit{}, nil
+}
 
 func codexAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time) *codeAttempt {
 	t.Helper()
@@ -1073,6 +1082,16 @@ func TestCodeAttemptMiniMaxUsageAndAmbiguousDoNotRecover(t *testing.T) {
 type chargeLedger struct {
 	charge  json.RawMessage
 	attempt string
+}
+
+func (l *chargeLedger) ResolvePaidFallback(context.Context, codesessions.Admission, keyauthority.Authority) (*codemode.Operation, error) {
+	return nil, nil
+}
+func (l *chargeLedger) ResolvePaidModel(context.Context, codesessions.Admission, keyauthority.Authority) (codemode.Operation, error) {
+	return codemode.Operation{}, nil
+}
+func (l *chargeLedger) AdmitPaid(context.Context, codesessions.PaidAdmission) (codesessions.PaidPermit, error) {
+	return codesessions.PaidPermit{}, nil
 }
 
 func (l *chargeLedger) Models(context.Context, codemode.Route, string) (codeclient.Offers, error) {

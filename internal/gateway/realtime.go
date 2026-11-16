@@ -43,6 +43,8 @@ const realtimeSession = time.Hour
 
 const realtimePing = 30 * time.Second
 
+const webRTCBound = time.Hour
+
 var errRealtimeAuthorityRevoked = errors.New("realtime authority revoked")
 var errRealtimeClientClosed = errors.New("realtime client disconnected")
 var errRealtimeResponseIncomplete = errors.New("realtime response ended before its terminal event")
