@@ -713,7 +713,7 @@ input[type='file']::file-selector-button:hover {
 
 @media (forced-colors: active) {
   .badge,
-  .inline-problem {
+  .inline-problem.inline-problem {
     border: 1px solid CanvasText;
   }
 }
