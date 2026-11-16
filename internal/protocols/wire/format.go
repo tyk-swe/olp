@@ -87,7 +87,7 @@ func (f Format) Operation() string {
 	switch f {
 	case Decisions, SystemOne:
 		return "decision"
-	case InputTokens, AnthropicCount, GeminiCount:
+	case InputTokens, AnthropicCount, GeminiCount, BedrockCount:
 		return "token_count"
 	case Embeddings, GeminiEmbeddings, GeminiEmbeddingsBatch,
 		VertexEmbeddings, BedrockEmbeddings:

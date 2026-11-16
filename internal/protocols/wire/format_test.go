@@ -17,6 +17,22 @@ func TestRM6FormatsShareTheirAccountingOperation(t *testing.T) {
 	}
 }
 
+func TestCountFormatsShareOneAccountingOperation(t *testing.T) {
+	for _, format := range []Format{AnthropicCount, GeminiCount, BedrockCount} {
+		if format.Operation() != InputTokens.Operation() {
+			t.Fatalf("%s must be accounted as a token count, got %q next to %q", format, format.Operation(), InputTokens.Operation())
+		}
+		if format.Operation() == OperationGeneration {
+			t.Fatalf("%s fell through to generation accounting", format)
+		}
+	}
+	for _, format := range []Format{InputTokens, AnthropicCount, GeminiCount, BedrockCount} {
+		if got := Descriptor(format, false).Operation.ID; got != format.Operation() {
+			t.Fatalf("%s descriptor operation %q disagrees with its accounting operation %q", format, got, format.Operation())
+		}
+	}
+}
+
 func TestWorkflowTranscriptFieldFollowsTheDialectFamily(t *testing.T) {
 	for _, format := range []Format{GeminiStream, GeminiCount, GeminiInteractions, GeminiLive, GeminiFile, GeminiBatch} {
 		if format.WorkflowTranscriptField() != Gemini.WorkflowTranscriptField() {

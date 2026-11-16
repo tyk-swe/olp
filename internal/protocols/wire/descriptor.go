@@ -30,9 +30,5 @@ func Descriptor(family Format, stream bool) oif.Descriptor {
 	if stream {
 		delivery = "incremental"
 	}
-	operation := family.Operation()
-	if family == BedrockCount {
-		operation = "token_count"
-	}
-	return oif.Descriptor{Operation: oif.Identity{ID: operation, Revision: "1"}, Dialect: oif.Identity{ID: Dialect(family), Revision: "wire-v1"}, Profile: oif.Identity{ID: "transformed", Revision: "1"}, Execution: oif.Execution{Delivery: delivery, Lifetime: "request", Submission: "immediate", Effects: []string{"inference"}}}
+	return oif.Descriptor{Operation: oif.Identity{ID: family.Operation(), Revision: "1"}, Dialect: oif.Identity{ID: Dialect(family), Revision: "wire-v1"}, Profile: oif.Identity{ID: "transformed", Revision: "1"}, Execution: oif.Execution{Delivery: delivery, Lifetime: "request", Submission: "immediate", Effects: []string{"inference"}}}
 }

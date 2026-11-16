@@ -14,9 +14,6 @@ func (c Config) TargetFamily(source wire.Format) (wire.Format, error) {
 		return "", err
 	}
 	operation := source.Operation()
-	if source == wire.BedrockCount {
-		operation = "token_count"
-	}
 	if !slices.Contains(p.Operations, operation) {
 		return "", errors.New("operation is outside the selected provider profile")
 	}
