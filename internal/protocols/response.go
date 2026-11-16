@@ -87,7 +87,7 @@ func decodeTransformed(encodedWire, target wire.Format, body []byte, route, enco
 		c, err = decodeAnthropic(body, route)
 	case wire.Gemini:
 		c, err = decodeGemini(body, route, false)
-	case wire.InputTokens, wire.AnthropicCount, wire.GeminiCount, "bedrock_count":
+	case wire.InputTokens, wire.AnthropicCount, wire.GeminiCount, wire.BedrockCount:
 		f, e := object(body)
 		if e != nil {
 			return nil, protocolError("invalid count result")
@@ -96,7 +96,7 @@ func decodeTransformed(encodedWire, target wire.Format, body []byte, route, enco
 		if encodedWire == wire.GeminiCount {
 			key = "totalTokens"
 		}
-		if encodedWire == "bedrock_count" {
+		if encodedWire == wire.BedrockCount {
 			key = "inputTokens"
 		}
 		n, ok := count(f[key])

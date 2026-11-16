@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
@@ -73,7 +72,7 @@ func (g *Gate) IdentifyEndUser(r *http.Request, authority keyauthority.Authority
 			identifier = nativeEndUser(body, surface)
 		}
 	}
-	if !access.ValidEndUserIdentifier(identifier) {
+	if !keyauthority.ValidEndUserIdentifier(identifier) {
 		return keyauthority.Authority{}, fault.InvalidRequest("invalid_end_user", "Provide an end-user machine token of 1–128 characters in the key's configured source.", nil)
 	}
 	digester, ok := g.auth.(interface{ EndUserDigest(*string, string) string })

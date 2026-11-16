@@ -6,10 +6,8 @@ import (
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/budgetcalendar"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
-	"github.com/tyk-swe/olp/internal/settings"
 )
 
 type Settings struct {
@@ -37,11 +35,11 @@ func Parse(document contract.ConfigurationDocument) (Settings, error) {
 }
 
 func Read(ctx context.Context, q access.Queryer) (Settings, error) {
-	zone, err := settings.ReadBudgetTimeZone(ctx, q)
+	zone, err := access.ReadBudgetTimeZone(ctx, q)
 	if err != nil {
 		return Settings{}, err
 	}
-	budget, err := settings.ReadInstallationBudget(ctx, q)
+	budget, err := access.ReadInstallationBudget(ctx, q)
 	if err != nil {
 		return Settings{}, err
 	}
@@ -69,7 +67,7 @@ func parseTimeZone(value nullable.Nullable[string]) (*string, error) {
 	if zone == nil {
 		return nil, nil
 	}
-	if _, err := budgetcalendar.New(*zone); err != nil {
+	if err := access.ValidateBudgetTimeZone(*zone); err != nil {
 		return nil, access.Invalid("budget_time_zone", "Use a supported IANA time zone.")
 	}
 	return zone, nil

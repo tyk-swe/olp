@@ -13,9 +13,9 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Connections, certification and grants | `internal/providers/`, `internal/connectors/`, `internal/grants/`; console `providers/` |
 | Routes, publication and selection | `internal/routes/`, `internal/routing/` (with `durablecontract/` and `realtimecontract/` beneath it), `internal/release/`; console `routes/` |
 | Users, keys and identity | `internal/access/`, `internal/access/authority/`; console `access/` |
-| Projects, installation settings and policy | `internal/projects/`, `internal/settings/`, `internal/limits/`; console `access/` |
+| Projects, installation settings and policy | `internal/projects/`, `internal/access/` (settings, branding and installation budgets), `internal/limits/`; console `access/` |
 | Notifications | `internal/notifications/`; console `access/notifications/` |
-| Admission, execution and retained resources | `internal/gateway/` (execution kernel, with `fault/`, `events/`, `quota/`, `ingress/`, `health/`, `codeforward/`, `traceingest/` and `delegation/` beneath it), `internal/resources/`, `internal/media/` (with `mediacontract/` beneath it); console inference/media |
+| Admission, execution and retained resources | `internal/gateway/` (execution kernel, with `fault/`, `events/`, `quota/`, `ingress/`, `health/`, `codeforward/`, `traceingest/`, `delegation/` and `models/` beneath it), `internal/resources/`, `internal/media/` (with `mediacontract/` beneath it); console inference/media |
 | Code mode | `internal/codemode/`, `internal/codeadapter/`, `internal/codeclient/`, `internal/coderesearch/`, `internal/codesessions/`; console code mode |
 | Source and operation contracts | `internal/oif/`, `internal/operations/`, `internal/interaction/`, `internal/operationplan/`, `internal/operationregistry/` |
 | Protocol and lifecycle contracts | `internal/protocols/`, `internal/geminilifecycle/` |
@@ -161,17 +161,40 @@ The packages beneath it hold what the kernel uses and never import it back.
 | `gateway/codeforward` | `/code/{slug}` forwarding and the research proxy | `events`, `fault`, `ingress`, `quota` |
 | `gateway/traceingest` | OTLP trace ingest on `POST /v1/traces` | none |
 | `gateway/delegation` | delegation grant creation on `POST /v1/delegations` | `fault`, `ingress` |
+| `gateway/models` | the model catalog on the OpenAI, Anthropic and Gemini surfaces | `fault`, `ingress` |
 
 `scripts/check-lint.sh` enforces the last column and fails on a package it has
 no entry for, so a new gateway package declares its imports when it is added.
-Put new code in the kernel only when it needs a `call`. A handler that can be
+The same gate compares every production import edge between project packages against
+`scripts/project-imports.txt`, so a new dependency anywhere is a reviewed
+change to that file rather than an accident. Run
+`./scripts/check-imports.sh update` after deliberately adding or removing an
+edge. Put new code in the kernel only when it needs a `call`. A handler that can be
 built from its own collaborators belongs in its own package, as
-`codeforward.Forwarder`, `traceingest.Ingester` and `delegation.Handler` are. The
+`codeforward.Forwarder`, `traceingest.Ingester`, `delegation.Handler` and
+`models.Handler` are. The
 delegation handler takes the ingress gate, the key authority and the kernel
 header preamble through its constructor, so it tests without a `Server` while
 its responses keep the request identity and CORS headers every inference
 response carries. Session reauthentication for delegated calls stays in the
 kernel, because it reads the `call` it reauthenticates.
+
+## Where new code goes
+
+Start from the owner in the table at the top of this guide. Feature behavior
+lives in the feature package with its SQL, transactions, validation and audit
+provenance, and the console screen for it lives in the matching feature under
+`console/src/lib/features/`. Gateway work that needs a `call` belongs in the
+kernel, and a gateway handler that can be built from its own collaborators
+belongs in its own package under `internal/gateway/` with its allowed imports
+declared in `scripts/check-lint.sh`. Process wiring belongs in `cmd/olp`,
+where each plane is assembled by one constructor and `Run` owns mode
+selection, listeners and shutdown ordering. A new small package is justified
+only when it owns behavior of its own or breaks an import cycle with stable
+vocabulary, as `internal/routeidentity` and `internal/access/authority` do. A
+wrapper whose only job is forwarding to another package belongs in that
+package instead. The baseline measurements and the reasoning behind the
+current layout are recorded in [Codebase structure](codebase-structure.md).
 
 ## Ordinary execution
 

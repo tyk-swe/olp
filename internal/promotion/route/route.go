@@ -66,6 +66,13 @@ func Parse(document contract.ConfigurationDocument) (Desired, error) {
 	if len(document.Routes) > maxRoutes {
 		return Desired{}, access.Invalid("routes", "Declare at most "+strconv.Itoa(maxRoutes)+" routes.")
 	}
+	for _, entry := range document.Routes {
+		if policy, ok := promotion.Present(entry.RoutingPolicy); ok {
+			if err := validatePolicyMembers(policy); err != nil {
+				return Desired{}, err
+			}
+		}
+	}
 	declared, err := promotion.Convert[[]Route](document.Routes)
 	if err != nil {
 		return Desired{}, err
@@ -211,3 +218,11 @@ func withoutContentPolicy(r Route) Route {
 }
 
 func slugOf(r Route) string { return r.Slug }
+
+func validatePolicyMembers(policy contract.RoutingPolicy) error {
+	if _, err := promotion.ConvertUnique[*routing.Preferences](policy.Constraints); err != nil {
+		return err
+	}
+	_, err := promotion.ConvertUnique[*routing.Preferences](policy.Defaults)
+	return err
+}

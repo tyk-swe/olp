@@ -96,8 +96,11 @@ Valkey service for rehearsals; never let source and replacement share streams or
 leases. A writable independent clone is unsupported.
 
 The chart defaults to one worker for a small footprint. Production should use
-three replicas, a PodDisruptionBudget, and failure-domain spreading. Workers
-consume work concurrently; PostgreSQL advisory locks serialize maintenance and
+three replicas, a PodDisruptionBudget, and failure-domain spreading.
+`values.production.yaml` requires each component to spread over nodes and
+prefers spreading it over zones, so a cluster without zone labels still
+schedules every replica. Workers consume work concurrently; PostgreSQL
+advisory locks serialize maintenance and
 cost reconciliation, and Valkey consumer groups reclaim metadata ownership.
 Runtime releases publish transactionally with their activating mutation, not
 through a worker outbox. The worker Deployment uses `Recreate`, so two worker
@@ -130,9 +133,6 @@ disconnects:
 Example values:
 
 ```yaml
-image:
-  repository: ghcr.io/tyk-swe/olp
-  tag: "0.1.0"
 config:
   publicOrigin: https://olp.example.com
   localLoginEnabled: false
@@ -321,26 +321,29 @@ boundaries.
 
 ## Install and verify
 
-Render the exact configuration before applying it:
+Pull the release chart, verify that the release workflow built it, and render
+the exact configuration before applying it. `production-values.yaml` should
+pin `image.digest` as described in the
+[production example](#production-example-and-connection-budget).
 
 ```console
-helm lint --strict deploy/helm
-helm template olp deploy/helm --namespace olp \
-  --set-string image.tag=0.1.0 \
-  --set ingress.enabled=true --set ingress.className=nginx \
-  --set ingress.host=olp.example.com \
-  --set-string config.trustedProxyCidrs=10.0.0.0/8 \
-  --set config.publicOrigin=https://olp.example.com
+VERSION=0.2.0
+helm pull oci://ghcr.io/tyk-swe/charts/openllmproxy --version "$VERSION"
+gh attestation verify "openllmproxy-$VERSION.tgz" --repo tyk-swe/olp \
+  --signer-workflow tyk-swe/olp/.github/workflows/release.yml
+helm lint --strict "openllmproxy-$VERSION.tgz" --values production-values.yaml
+helm template olp "openllmproxy-$VERSION.tgz" --namespace olp \
+  --values production-values.yaml
 ```
 
-Install with approved values and at least a 20-minute timeout:
+Install the verified archive with the approved values. The timeout must outlast
+the migration Job, whose `migration.activeDeadlineSeconds` defaults to 35
+minutes.
 
 ```console
-helm upgrade --install olp \
-  oci://ghcr.io/tyk-swe/charts/openllmproxy --version 0.1.0 \
+helm upgrade --install olp "openllmproxy-$VERSION.tgz" \
   --namespace olp --create-namespace \
-  --set-string image.tag=0.1.0 \
-  --values production-values.yaml --timeout 20m --wait
+  --values production-values.yaml --timeout 40m --wait
 ```
 
 ## Readiness checks

@@ -369,7 +369,7 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *fault.Error {
 		space.Fingerprint = space.Fingerprint + ":" + hexDigest(canonical)
 		canonical = append(canonical, []byte(query)...)
 	}
-	parallel := x.startParallel(ctx, func() {})
+	parallel := s.startParallel(ctx, x, func() {})
 	if parallel != nil {
 		defer parallel.cancel()
 	}

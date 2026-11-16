@@ -1,5 +1,8 @@
 import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
-import { usePrincipalLifetime } from './mutationIntent.svelte';
+import {
+  useMutationIntent,
+  usePrincipalLifetime
+} from './mutationIntent.svelte';
 
 export function useAction(refreshOnConflict?: () => Promise<void>) {
   let busy = $state(false);
@@ -37,6 +40,29 @@ export function useAction(refreshOnConflict?: () => Promise<void>) {
       } finally {
         if (current()) busy = false;
       }
+    }
+  };
+}
+
+export function useMutation(refreshOnConflict?: () => Promise<void>) {
+  const action = useAction(refreshOnConflict);
+  const intent = useMutationIntent();
+  return {
+    get busy() {
+      return action.busy;
+    },
+    get error() {
+      return action.error;
+    },
+    set error(value: string) {
+      action.error = value;
+    },
+    submit<I, R>(
+      input: I,
+      send: (input: I, requestId: string) => Promise<R>,
+      accept: (value: R) => void | Promise<void>
+    ) {
+      return action.run(() => intent.submit(input, send), accept);
     }
   };
 }

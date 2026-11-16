@@ -2,13 +2,10 @@
   import { untrack } from 'svelte';
   import { useQueryClient } from '@tanstack/svelte-query';
   import type { components } from '#lib/management/schema.js';
-  import { useAction } from '#lib/editing/action.svelte.js';
+  import { useMutation } from '#lib/editing/action.svelte.js';
   import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
   import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
-  import {
-    useMutationIntent,
-    usePrincipalLifetime
-  } from '#lib/editing/mutationIntent.svelte.js';
+  import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { createServer, saveServer, type MCPServer } from './api';
   import { agentKeys } from './agentKeys';
   import {
@@ -70,10 +67,9 @@
         }
   );
   const client = useQueryClient();
-  const action = useAction(() =>
+  const action = useMutation(() =>
     client.invalidateQueries({ queryKey: agentKeys.servers() })
   );
-  const intent = useMutationIntent();
   const clearSecrets = () => {
     credential = '';
     entraSecret = '';
@@ -126,15 +122,12 @@
       transport,
       ...(transport === 'stdio' ? { stdio: { executable, digest } } : {})
     };
-    await action.run(
-      () =>
-        intent.submit(
-          { current: baseline, create, update },
-          (input, requestId) =>
-            input.current
-              ? saveServer(input.current, input.update, requestId)
-              : createServer(input.create, requestId)
-        ),
+    await action.submit(
+      { current: baseline, create, update },
+      (input, requestId) =>
+        input.current
+          ? saveServer(input.current, input.update, requestId)
+          : createServer(input.create, requestId),
       async (server) => {
         baseline = server;
         removeCredential = false;

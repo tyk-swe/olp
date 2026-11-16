@@ -42,6 +42,7 @@ type Config struct {
 	Keys                 *secrets.KeyRing
 	Bootstrap            string
 	Egress               *egress.Policy
+	Log                  *slog.Logger
 
 	OIDCClient                  *http.Client
 	ClientIP                    func(*http.Request) string
@@ -62,6 +63,7 @@ type Server struct {
 	Bootstrap            string
 	Egress               *egress.Policy
 
+	log                         *slog.Logger
 	oidcClient                  *http.Client
 	resolveClientIP             func(*http.Request) string
 	limitsEnforced              bool
@@ -78,7 +80,7 @@ func New(cfg Config) *Server {
 	return &Server{
 		RuntimePublisher: cfg.RuntimePublisher, Pool: cfg.Pool, Installation: cfg.Installation,
 		Origin: strings.TrimSuffix(cfg.Origin, "/"), Auth: cfg.Auth, Keys: cfg.Keys, Bootstrap: cfg.Bootstrap,
-		Egress: cfg.Egress, oidcClient: oidcHTTPClient(cfg.OIDCClient), resolveClientIP: cfg.ClientIP,
+		Egress: cfg.Egress, log: cfg.Log, oidcClient: oidcHTTPClient(cfg.OIDCClient), resolveClientIP: cfg.ClientIP,
 		limitsEnforced: cfg.LimitsEnforced, localLoginDisabled: cfg.LocalLoginDisabled,
 		managementNetworkRestricted: cfg.ManagementNetworkRestricted, retentionEnforced: cfg.RetentionEnforced,
 		notificationsActive: cfg.NotificationsActive, responseCacheConfigured: cfg.ResponseCacheConfigured,
@@ -202,7 +204,7 @@ func (s *Server) serve(maxBody int64, timeout time.Duration, fn func(*http.Reque
 			result, err = fn(r)
 		}
 		if err != nil {
-			WriteProblem(w, err)
+			s.writeProblem(w, err)
 			return
 		}
 		if result.ETag != "" {
@@ -245,7 +247,7 @@ func (s *Server) serveStream(maxBody int64, timeout time.Duration, fn func(http.
 			err = fn(tracker, r)
 		}
 		if err != nil && !tracker.committed {
-			WriteProblem(w, err)
+			s.writeProblem(w, err)
 		}
 	}
 }
@@ -269,40 +271,62 @@ func (w *streamWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
 }
 
+func (s *Server) writeProblem(w http.ResponseWriter, err error) {
+	p, known := problemFor(err)
+	if !known {
+		s.log.Error("management request failed", failure(err)...)
+	}
+	renderProblem(w, p)
+}
+
 func WriteProblem(w http.ResponseWriter, err error) {
-	p := &Problem{Status: 503, Code: "service_unavailable", Detail: "The operation could not be completed. Retry shortly."}
-	var pg *pgconn.PgError
+	p, _ := problemFor(err)
+	renderProblem(w, p)
+}
+
+func problemFor(err error) (*Problem, bool) {
 	if known, ok := errors.AsType[*Problem](err); ok {
-		p = known
-	} else if validation, ok := errors.AsType[*authority.ValidationError](err); ok {
-		p = &Problem{Status: 422, Code: "validation_failed", Detail: validation.Detail, Field: validation.Field}
-	} else if contract := ContractProblem(err); contract != nil {
-		p = contract
-	} else if refusal, ok := errors.AsType[interface {
+		return known, true
+	}
+	if validation, ok := errors.AsType[*authority.ValidationError](err); ok {
+		return &Problem{Status: 422, Code: "validation_failed", Detail: validation.Detail, Field: validation.Field}, true
+	}
+	if contract := ContractProblem(err); contract != nil {
+		return contract, true
+	}
+	if refusal, ok := errors.AsType[interface {
 		error
 		RoutingRefusal() (string, string)
 	}](err); ok {
 		code, message := refusal.RoutingRefusal()
-		p = &Problem{Status: 422, Code: code, Detail: message}
-	} else if validation, ok := errors.AsType[interface {
+		return &Problem{Status: 422, Code: code, Detail: message}, true
+	}
+	if validation, ok := errors.AsType[interface {
 		error
 		RoutingValidation() (string, string)
 	}](err); ok {
 		field, message := validation.RoutingValidation()
-		p = &Problem{Status: 422, Code: "validation_failed", Detail: message, Field: field}
-	} else if errors.Is(err, pgx.ErrNoRows) {
-		p = &Problem{Status: 404, Code: "not_found", Detail: "The resource was not found."}
-	} else if errors.As(err, &pg) && pg.Code == "23505" {
-		p = &Problem{Status: 409, Code: "already_exists", Detail: "This record already exists."}
-	} else {
-		// Driver and wrapped errors can contain SQL values or credentials.
-		// Log the category, never the error text.
-		args := []any{"error_type", fmt.Sprintf("%T", err)}
-		if pg != nil {
-			args = append(args, "sqlstate", pg.Code)
-		}
-		slog.Error("management request failed", args...)
+		return &Problem{Status: 422, Code: "validation_failed", Detail: message, Field: field}, true
 	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return &Problem{Status: 404, Code: "not_found", Detail: "The resource was not found."}, true
+	}
+	if pg, ok := errors.AsType[*pgconn.PgError](err); ok && pg.Code == "23505" {
+		return &Problem{Status: 409, Code: "already_exists", Detail: "This record already exists."}, true
+	}
+	return &Problem{Status: 503, Code: "service_unavailable", Detail: "The operation could not be completed. Retry shortly."}, false
+}
+
+// failure describes an unexpected error by category only, because driver and
+// wrapped errors can contain SQL values or credentials.
+func failure(err error) []any {
+	if pg, ok := errors.AsType[*pgconn.PgError](err); ok {
+		return []any{"error_type", fmt.Sprintf("%T", err), "sqlstate", pg.Code}
+	}
+	return []any{"error_type", fmt.Sprintf("%T", err)}
+}
+
+func renderProblem(w http.ResponseWriter, p *Problem) {
 	body := map[string]any{"type": "https://openllmproxy.dev/problems/" + p.Code, "title": http.StatusText(p.Status), "status": p.Status, "detail": p.Detail}
 	if p.Field != "" {
 		body["errors"] = map[string]any{p.Field: []any{map[string]string{"code": p.Code, "message": p.Detail}}}

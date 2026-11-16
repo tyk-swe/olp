@@ -26,6 +26,11 @@ if [ "$unconfined" != 3 ] || helm template olp deploy/helm | grep -q OLP_UNCONFI
   echo "Expected OLP_UNCONFINED_PLUGIN_DIR on every component only when config.unconfinedPluginDir is set" >&2
   exit 1
 fi
+zones=$(helm template olp deploy/helm -f deploy/helm/values.production.yaml | grep -c 'topologyKey: topology.kubernetes.io/zone' || true)
+if [ "$zones" != 3 ] || helm template olp deploy/helm | grep -q 'topology.kubernetes.io/zone'; then
+  echo "Expected a zone spread on every production component only when topologySpread.zone is enabled" >&2
+  exit 1
+fi
 management_network=$(helm template olp deploy/helm --set config.managementAllowedCidrs=192.0.2.0/24 | grep -c 'OLP_MANAGEMENT_ALLOWED_CIDRS' || true)
 if [ "$management_network" != 1 ] || helm template olp deploy/helm | grep -q OLP_MANAGEMENT_ALLOWED_CIDRS; then
   echo "Expected OLP_MANAGEMENT_ALLOWED_CIDRS on control only when configured" >&2

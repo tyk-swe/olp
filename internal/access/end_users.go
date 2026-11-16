@@ -4,18 +4,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
-	"regexp"
 
+	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
-
-var endUserIdentifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
-
-// ValidEndUserIdentifier bounds identifiers before hashing or forwarding.
-// Whitespace, email addresses and arbitrary text are not machine tokens.
-func ValidEndUserIdentifier(identifier string) bool {
-	return endUserIdentifier.MatchString(identifier)
-}
 
 // DigestEndUser separates both the installation and project boundaries. A nil
 // project names the installation's unassigned boundary, never a wildcard.
@@ -42,7 +34,7 @@ func (s *Server) lookupEndUser(r *http.Request, p Principal) (Reply, error) {
 	if err = Decode(r, &input); err != nil {
 		return Reply{}, err
 	}
-	if !ValidEndUserIdentifier(input.Identifier) {
+	if !authority.ValidEndUserIdentifier(input.Identifier) {
 		return Reply{}, Invalid("identifier", "Provide an end-user machine token of 1–128 characters.")
 	}
 	// Deliberately no mutation replay, audit payload, or raw-identifier query.

@@ -48,6 +48,7 @@ remaining guides cover the implementation contracts behind a change.
 | Task | Guide |
 | --- | --- |
 | Find feature owners and understand gateway execution | [Architecture](develop/architecture.md) |
+| Review codebase structure, depth targets and the untangle decision log | [Codebase structure](develop/codebase-structure.md) |
 | Review trust, authorization, secret and data boundaries | [Security](develop/security.md) |
 | Author a provider or guardrail plugin | [Plugin authoring](develop/plugin-authoring.md) |
 | Maintain signed model facts, prices and calibration data | [Catalog maintenance](develop/catalog.md) |

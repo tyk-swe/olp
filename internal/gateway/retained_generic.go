@@ -341,11 +341,7 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 			fail(fault.ServerError(503, "provider_state_unavailable", "The submission could not be fenced."))
 			return
 		}
-		defer func() {
-			commitCtx, cancel := resourceCommitContext(r.Context())
-			defer cancel()
-			_ = lifecycle.Close(commitCtx)
-		}()
+		defer s.settleFence(r.Context(), lifecycle.Close)
 		status = s.retainedDispatch(w, r.WithContext(ctx), x, p, e, resource, endpoint, body, contentType, lifecycle, fail)
 		return
 	}
@@ -451,11 +447,7 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 		fail(fenceErr)
 		return
 	}
-	defer func() {
-		commit, cancel := resourceCommitContext(ctx)
-		defer cancel()
-		_ = mutation.Close(commit)
-	}()
+	defer s.settleFence(ctx, mutation.Close)
 	status = s.retainedDispatch(w, r.WithContext(ctx), x, p, e, resource, endpoint, body, contentType, mutation, fail)
 }
 
@@ -467,17 +459,11 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *cal
 		deletionLifecycle, err := s.deps.Resources.BeginDeletion(r.Context(), resource)
 		lifecycle = deletionLifecycle
 		if err != nil {
-			commit, cancel := resourceCommitContext(r.Context())
-			_ = lifecycle.Reject(commit)
-			cancel()
+			s.settleFence(r.Context(), lifecycle.Reject)
 			fail(fault.ServerError(503, "provider_state_unavailable", "The deletion intent could not be committed."))
 			return 503
 		}
-		defer func() {
-			commit, cancel := resourceCommitContext(r.Context())
-			defer cancel()
-			_ = lifecycle.Close(commit)
-		}()
+		defer s.settleFence(r.Context(), lifecycle.Close)
 	}
 
 	native, failure := s.pinnedDo(r.Context(), x, p, e.Method, endpoint, body, contentType)
